@@ -8,10 +8,23 @@
 
 /* Begin PBXBuildFile section */
 		4E6668F81FC7815900C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6668F71FC7815900C39ED2 /* main.cpp */; };
+		4E6669031FC7851300C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669021FC7851300C39ED2 /* main.cpp */; };
+		4E66690A1FC7863B00C39ED2 /* vu_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669091FC7863B00C39ED2 /* vu_tests.cpp */; };
+		4E66690D1FC7875300C39ED2 /* vu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66690B1FC7875300C39ED2 /* vu.cpp */; };
+		4E66690E1FC7876A00C39ED2 /* vu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66690B1FC7875300C39ED2 /* vu.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		4E6668EB1FC77DB100C39ED2 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		4E6668FE1FC7851300C39ED2 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = /usr/share/man/man1/;
@@ -25,10 +38,23 @@
 /* Begin PBXFileReference section */
 		4E6668ED1FC77DB100C39ED2 /* neko */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E6668F71FC7815900C39ED2 /* main.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
+		4E6669001FC7851300C39ED2 /* neko_tests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko_tests; sourceTree = BUILT_PRODUCTS_DIR; };
+		4E6669021FC7851300C39ED2 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
+		4E6669071FC7854200C39ED2 /* catch.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = catch.hpp; sourceTree = "<group>"; };
+		4E6669091FC7863B00C39ED2 /* vu_tests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vu_tests.cpp; sourceTree = "<group>"; };
+		4E66690B1FC7875300C39ED2 /* vu.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vu.cpp; sourceTree = "<group>"; };
+		4E66690C1FC7875300C39ED2 /* vu.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = vu.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		4E6668EA1FC77DB100C39ED2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4E6668FD1FC7851300C39ED2 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -42,6 +68,7 @@
 			isa = PBXGroup;
 			children = (
 				4E6668EF1FC77DB100C39ED2 /* neko */,
+				4E6669011FC7851300C39ED2 /* neko_tests */,
 				4E6668EE1FC77DB100C39ED2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -50,6 +77,7 @@
 			isa = PBXGroup;
 			children = (
 				4E6668ED1FC77DB100C39ED2 /* neko */,
+				4E6669001FC7851300C39ED2 /* neko_tests */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -58,8 +86,20 @@
 			isa = PBXGroup;
 			children = (
 				4E6668F71FC7815900C39ED2 /* main.cpp */,
+				4E66690B1FC7875300C39ED2 /* vu.cpp */,
+				4E66690C1FC7875300C39ED2 /* vu.hpp */,
 			);
 			path = neko;
+			sourceTree = "<group>";
+		};
+		4E6669011FC7851300C39ED2 /* neko_tests */ = {
+			isa = PBXGroup;
+			children = (
+				4E6669071FC7854200C39ED2 /* catch.hpp */,
+				4E6669021FC7851300C39ED2 /* main.cpp */,
+				4E6669091FC7863B00C39ED2 /* vu_tests.cpp */,
+			);
+			path = neko_tests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -82,6 +122,23 @@
 			productReference = 4E6668ED1FC77DB100C39ED2 /* neko */;
 			productType = "com.apple.product-type.tool";
 		};
+		4E6668FF1FC7851300C39ED2 /* neko_tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4E6669041FC7851300C39ED2 /* Build configuration list for PBXNativeTarget "neko_tests" */;
+			buildPhases = (
+				4E6668FC1FC7851300C39ED2 /* Sources */,
+				4E6668FD1FC7851300C39ED2 /* Frameworks */,
+				4E6668FE1FC7851300C39ED2 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = neko_tests;
+			productName = neko_tests;
+			productReference = 4E6669001FC7851300C39ED2 /* neko_tests */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -92,6 +149,10 @@
 				ORGANIZATIONNAME = SFN;
 				TargetAttributes = {
 					4E6668EC1FC77DB100C39ED2 = {
+						CreatedOnToolsVersion = 9.1;
+						ProvisioningStyle = Automatic;
+					};
+					4E6668FF1FC7851300C39ED2 = {
 						CreatedOnToolsVersion = 9.1;
 						ProvisioningStyle = Automatic;
 					};
@@ -110,6 +171,7 @@
 			projectRoot = "";
 			targets = (
 				4E6668EC1FC77DB100C39ED2 /* neko */,
+				4E6668FF1FC7851300C39ED2 /* neko_tests */,
 			);
 		};
 /* End PBXProject section */
@@ -119,7 +181,18 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4E66690D1FC7875300C39ED2 /* vu.cpp in Sources */,
 				4E6668F81FC7815900C39ED2 /* main.cpp in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4E6668FC1FC7851300C39ED2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4E66690A1FC7863B00C39ED2 /* vu_tests.cpp in Sources */,
+				4E6669031FC7851300C39ED2 /* main.cpp in Sources */,
+				4E66690E1FC7876A00C39ED2 /* vu.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -245,6 +318,22 @@
 			};
 			name = Release;
 		};
+		4E6669051FC7851300C39ED2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		4E6669061FC7851300C39ED2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -262,6 +351,15 @@
 			buildConfigurations = (
 				4E6668F51FC77DB100C39ED2 /* Debug */,
 				4E6668F61FC77DB100C39ED2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4E6669041FC7851300C39ED2 /* Build configuration list for PBXNativeTarget "neko_tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4E6669051FC7851300C39ED2 /* Debug */,
+				4E6669061FC7851300C39ED2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
