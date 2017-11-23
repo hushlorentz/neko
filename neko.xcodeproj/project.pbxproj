@@ -9,9 +9,9 @@
 /* Begin PBXBuildFile section */
 		4E6668F81FC7815900C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6668F71FC7815900C39ED2 /* main.cpp */; };
 		4E6669031FC7851300C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669021FC7851300C39ED2 /* main.cpp */; };
-		4E66690A1FC7863B00C39ED2 /* vu_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669091FC7863B00C39ED2 /* vu_tests.cpp */; };
-		4E66690D1FC7875300C39ED2 /* vu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66690B1FC7875300C39ED2 /* vu.cpp */; };
-		4E66690E1FC7876A00C39ED2 /* vu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66690B1FC7875300C39ED2 /* vu.cpp */; };
+		4E66690A1FC7863B00C39ED2 /* vpu_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669091FC7863B00C39ED2 /* vpu_tests.cpp */; };
+		4E66690D1FC7875300C39ED2 /* vpu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66690B1FC7875300C39ED2 /* vpu.cpp */; };
+		4E66690E1FC7876A00C39ED2 /* vpu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66690B1FC7875300C39ED2 /* vpu.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -41,9 +41,9 @@
 		4E6669001FC7851300C39ED2 /* neko_tests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko_tests; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E6669021FC7851300C39ED2 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		4E6669071FC7854200C39ED2 /* catch.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = catch.hpp; sourceTree = "<group>"; };
-		4E6669091FC7863B00C39ED2 /* vu_tests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vu_tests.cpp; sourceTree = "<group>"; };
-		4E66690B1FC7875300C39ED2 /* vu.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vu.cpp; sourceTree = "<group>"; };
-		4E66690C1FC7875300C39ED2 /* vu.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = vu.hpp; sourceTree = "<group>"; };
+		4E6669091FC7863B00C39ED2 /* vpu_tests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_tests.cpp; sourceTree = "<group>"; };
+		4E66690B1FC7875300C39ED2 /* vpu.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vpu.cpp; sourceTree = "<group>"; };
+		4E66690C1FC7875300C39ED2 /* vpu.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = vpu.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -86,8 +86,8 @@
 			isa = PBXGroup;
 			children = (
 				4E6668F71FC7815900C39ED2 /* main.cpp */,
-				4E66690B1FC7875300C39ED2 /* vu.cpp */,
-				4E66690C1FC7875300C39ED2 /* vu.hpp */,
+				4E66690B1FC7875300C39ED2 /* vpu.cpp */,
+				4E66690C1FC7875300C39ED2 /* vpu.hpp */,
 			);
 			path = neko;
 			sourceTree = "<group>";
@@ -97,7 +97,7 @@
 			children = (
 				4E6669071FC7854200C39ED2 /* catch.hpp */,
 				4E6669021FC7851300C39ED2 /* main.cpp */,
-				4E6669091FC7863B00C39ED2 /* vu_tests.cpp */,
+				4E6669091FC7863B00C39ED2 /* vpu_tests.cpp */,
 			);
 			path = neko_tests;
 			sourceTree = "<group>";
@@ -181,7 +181,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4E66690D1FC7875300C39ED2 /* vu.cpp in Sources */,
+				4E66690D1FC7875300C39ED2 /* vpu.cpp in Sources */,
 				4E6668F81FC7815900C39ED2 /* main.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -190,9 +190,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4E66690A1FC7863B00C39ED2 /* vu_tests.cpp in Sources */,
+				4E66690A1FC7863B00C39ED2 /* vpu_tests.cpp in Sources */,
 				4E6669031FC7851300C39ED2 /* main.cpp in Sources */,
-				4E66690E1FC7876A00C39ED2 /* vu.cpp in Sources */,
+				4E66690E1FC7876A00C39ED2 /* vpu.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

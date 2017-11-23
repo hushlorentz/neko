@@ -1,9 +1,9 @@
 #include "catch.hpp"
-#include "vu.hpp"
+#include "vpu.hpp"
 
 TEST_CASE("VU Tests")
 {
-    VU vu;
+    VPU vpu;
     
     SECTION("Hello Test")
     {
