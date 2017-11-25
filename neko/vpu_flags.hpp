@@ -1,0 +1,32 @@
+#define VPU_FLAG_ZW 0x0001
+#define VPU_FLAG_ZZ 0x0002
+#define VPU_FLAG_ZY 0x0004
+#define VPU_FLAG_ZX 0x0008
+#define VPU_FLAG_SW 0x0010
+#define VPU_FLAG_SZ 0x0020
+#define VPU_FLAG_SY 0x0040
+#define VPU_FLAG_SX 0x0080
+#define VPU_FLAG_UW 0x0100
+#define VPU_FLAG_UZ 0x0200
+#define VPU_FLAG_UY 0x0400
+#define VPU_FLAG_UX 0x0800
+#define VPU_FLAG_OW 0x1000
+#define VPU_FLAG_OZ 0x2000
+#define VPU_FLAG_OY 0x4000
+#define VPU_FLAG_OX 0x8000
+
+#define VPU_FLAG_Z 0x001
+#define VPU_FLAG_S 0x002
+#define VPU_FLAG_U 0x004
+#define VPU_FLAG_O 0x008
+#define VPU_FLAG_I 0x010
+#define VPU_FLAG_D 0x020
+#define VPU_FLAG_ZS 0x040
+#define VPU_FLAG_SS 0x080
+#define VPU_FLAG_US 0x100
+#define VPU_FLAG_OS 0x200
+#define VPU_FLAG_IS 0x400
+#define VPU_FLAG_DS 0x800
+
+#define VPU_CLIPPING_FLAG_SHIFT 6
+#define VPU_CLIPPING_FLAG_MASK 0xFFFFFF
