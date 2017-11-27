@@ -1,7 +1,7 @@
 #include "catch.hpp"
 #include "vpu.hpp"
 
-TEST_CASE("VPU Microinstruction Tests")
+TEST_CASE("VPU FP Calculation Tests")
 {
     VPU vpu;
 

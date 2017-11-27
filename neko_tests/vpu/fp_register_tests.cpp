@@ -2,7 +2,7 @@
 #include "vpu.hpp"
 #include "vpu_register_ids.hpp"
 
-TEST_CASE("VPU Register Tests")
+TEST_CASE("VPU FP Register Tests")
 {
     VPU vpu;
 
