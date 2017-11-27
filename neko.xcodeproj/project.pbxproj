@@ -20,6 +20,10 @@
 		4E6669291FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669281FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp */; };
 		4E66692D1FCBDCF200C39ED2 /* vpu_flag_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66692C1FCBDCF200C39ED2 /* vpu_flag_tests.cpp */; };
 		4E66692F1FCBDD0B00C39ED2 /* vpu_fp_calculation_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66692E1FCBDD0B00C39ED2 /* vpu_fp_calculation_tests.cpp */; };
+		4E6669331FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669321FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp */; };
+		4E6669341FCBE15100C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669321FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp */; };
+		4E6669381FCBE5E500C39ED2 /* vpu_pipeline.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669361FCBE5E500C39ED2 /* vpu_pipeline.cpp */; };
+		4E66693A1FCBE5F000C39ED2 /* vpu_pipeline.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669361FCBE5E500C39ED2 /* vpu_pipeline.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -64,9 +68,11 @@
 		4E6669261FCA804800C39ED2 /* vpu_opcodes.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = vpu_opcodes.hpp; sourceTree = "<group>"; };
 		4E6669281FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_pipeline_tests.cpp; sourceTree = "<group>"; };
 		4E66692A1FCBDB5600C39ED2 /* vpu_pipeline_orchestrator.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = vpu_pipeline_orchestrator.hpp; sourceTree = "<group>"; };
-		4E66692B1FCBDBB700C39ED2 /* vpu_fmac_pipeline.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = vpu_fmac_pipeline.hpp; sourceTree = "<group>"; };
 		4E66692C1FCBDCF200C39ED2 /* vpu_flag_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_flag_tests.cpp; sourceTree = "<group>"; };
 		4E66692E1FCBDD0B00C39ED2 /* vpu_fp_calculation_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_fp_calculation_tests.cpp; sourceTree = "<group>"; };
+		4E6669311FCBDFE500C39ED2 /* vpu_pipeline.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = vpu_pipeline.hpp; sourceTree = "<group>"; };
+		4E6669321FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_pipeline_orchestrator.cpp; sourceTree = "<group>"; };
+		4E6669361FCBE5E500C39ED2 /* vpu_pipeline.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_pipeline.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,8 +160,7 @@
 		4E6669191FC94F1600C39ED2 /* vpu */ = {
 			isa = PBXGroup;
 			children = (
-				4E66692B1FCBDBB700C39ED2 /* vpu_fmac_pipeline.hpp */,
-				4E66692A1FCBDB5600C39ED2 /* vpu_pipeline_orchestrator.hpp */,
+				4E6669301FCBDF3400C39ED2 /* pipelines */,
 				4E6669261FCA804800C39ED2 /* vpu_opcodes.hpp */,
 				4E66691B1FC94F7B00C39ED2 /* vpu_flags.hpp */,
 				4E66690B1FC7875300C39ED2 /* vpu.cpp */,
@@ -186,6 +191,17 @@
 			children = (
 			);
 			path = vif;
+			sourceTree = "<group>";
+		};
+		4E6669301FCBDF3400C39ED2 /* pipelines */ = {
+			isa = PBXGroup;
+			children = (
+				4E6669361FCBE5E500C39ED2 /* vpu_pipeline.cpp */,
+				4E6669321FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp */,
+				4E6669311FCBDFE500C39ED2 /* vpu_pipeline.hpp */,
+				4E66692A1FCBDB5600C39ED2 /* vpu_pipeline_orchestrator.hpp */,
+			);
+			path = pipelines;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -268,6 +284,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				4E66690D1FC7875300C39ED2 /* vpu.cpp in Sources */,
+				4E6669331FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */,
+				4E6669381FCBE5E500C39ED2 /* vpu_pipeline.cpp in Sources */,
 				4E6669161FC8E97F00C39ED2 /* fp_register.cpp in Sources */,
 				4E6668F81FC7815900C39ED2 /* main.cpp in Sources */,
 			);
@@ -286,7 +304,9 @@
 				4E6669291FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp in Sources */,
 				4E66692D1FCBDCF200C39ED2 /* vpu_flag_tests.cpp in Sources */,
 				4E6669031FC7851300C39ED2 /* main.cpp in Sources */,
+				4E6669341FCBE15100C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */,
 				4E66690E1FC7876A00C39ED2 /* vpu.cpp in Sources */,
+				4E66693A1FCBE5F000C39ED2 /* vpu_pipeline.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

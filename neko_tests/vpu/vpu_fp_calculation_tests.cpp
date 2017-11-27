@@ -18,7 +18,7 @@ TEST_CASE("VPU FP Calculation Tests")
     SECTION("Processing x/0 returns +MAX/-MAX and sets both the D and DS flags")
     {
       WARN("Add this test");
-    }
+    };
 
     SECTION("If an operation results in exponent overflow, the return is +MAX/-MAX and Ox, Oy, Oz, Ow, O, and OS flags are set")
     {
