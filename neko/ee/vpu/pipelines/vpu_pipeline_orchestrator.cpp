@@ -15,18 +15,17 @@ void PipelineOrchestrator::update()
 
 bool PipelineOrchestrator::hasNext()
 {
-  bool hasNext = false;
   for (vector<Pipeline *>::iterator it = pipelines.begin(); it < pipelines.end(); ++it)
   {
     Pipeline *p = *it;
 
     if (p->isExecuting)
     {
-      hasNext = true;
+      return true;
     }
   }
 
-  return hasNext;
+  return false;
 }
 
 void PipelineOrchestrator::addPipeline(Pipeline * pipeline)

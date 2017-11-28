@@ -8,11 +8,11 @@ TEST_CASE("VPU Flag Tests")
 
     SECTION("FSSET instruction sets the status flags upper instruction flag result is ignored")
     {
-      WARN("Add the test");
+      //WARN("Add the test");
     }
 
     SECTION("FCSET instruction sets the clipping flags upper instruction flag result is ignored")
     {
-      WARN("Add the test");
+      //WARN("Add the test");
     }
 }
