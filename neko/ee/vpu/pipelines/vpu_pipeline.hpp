@@ -11,12 +11,13 @@
 class Pipeline
 {
   public: 
-    Pipeline(uint8_t maxStage);
+    Pipeline();
+    void setAttributes(uint8_t newEndStage);
     void execute();
-    bool isExecuting;
+    bool isComplete();
   private:
     uint8_t currentStage;
-    uint8_t maxStage;
+    uint8_t endStage;
 };
 
 #endif

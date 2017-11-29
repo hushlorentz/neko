@@ -1,15 +1,23 @@
 #include "vpu_pipeline.hpp"
 
-Pipeline::Pipeline(uint8_t maxStage) : isExecuting(false), currentStage(0), maxStage(maxStage)
+Pipeline::Pipeline() : currentStage(0), endStage(0)
 {
+}
+
+void Pipeline::setAttributes(uint8_t updatedEndStage)
+{
+  endStage = updatedEndStage;
 }
 
 void Pipeline::execute()
 {
-  currentStage++;
-
-  if (currentStage == maxStage)
+  if (currentStage < (endStage - 1))
   {
-    isExecuting = false;
+    currentStage++;
   }
+}
+
+bool Pipeline::isComplete()
+{
+  return currentStage == (endStage - 1);
 }
