@@ -24,6 +24,11 @@
 		4E6669341FCBE15100C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669321FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp */; };
 		4E6669381FCBE5E500C39ED2 /* vpu_pipeline.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669361FCBE5E500C39ED2 /* vpu_pipeline.cpp */; };
 		4E66693A1FCBE5F000C39ED2 /* vpu_pipeline.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669361FCBE5E500C39ED2 /* vpu_pipeline.cpp */; };
+		4E6669421FCFB49600C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669411FCFB49600C39ED2 /* main.cpp */; };
+		4E6669461FCFB51600C39ED2 /* vpu.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66690B1FC7875300C39ED2 /* vpu.cpp */; };
+		4E6669471FCFB59500C39ED2 /* fp_register.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669151FC8E97F00C39ED2 /* fp_register.cpp */; };
+		4E6669481FCFBB5F00C39ED2 /* fp_register.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669151FC8E97F00C39ED2 /* fp_register.cpp */; };
+		4E66694C1FCFC0F500C39ED2 /* stop_watch.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694A1FCFC0F500C39ED2 /* stop_watch.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -37,6 +42,15 @@
 			runOnlyForDeploymentPostprocessing = 1;
 		};
 		4E6668FE1FC7851300C39ED2 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		4E66693D1FCFB49500C39ED2 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = /usr/share/man/man1/;
@@ -73,6 +87,10 @@
 		4E6669311FCBDFE500C39ED2 /* vpu_pipeline.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = vpu_pipeline.hpp; sourceTree = "<group>"; };
 		4E6669321FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_pipeline_orchestrator.cpp; sourceTree = "<group>"; };
 		4E6669361FCBE5E500C39ED2 /* vpu_pipeline.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_pipeline.cpp; sourceTree = "<group>"; };
+		4E66693F1FCFB49500C39ED2 /* neko_perf */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko_perf; sourceTree = BUILT_PRODUCTS_DIR; };
+		4E6669411FCFB49600C39ED2 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
+		4E66694A1FCFC0F500C39ED2 /* stop_watch.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stop_watch.cpp; sourceTree = "<group>"; };
+		4E66694B1FCFC0F500C39ED2 /* stop_watch.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stop_watch.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +108,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4E66693C1FCFB49500C39ED2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -98,6 +123,7 @@
 			children = (
 				4E6668EF1FC77DB100C39ED2 /* neko */,
 				4E6669011FC7851300C39ED2 /* neko_tests */,
+				4E6669401FCFB49600C39ED2 /* neko_perf */,
 				4E6668EE1FC77DB100C39ED2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -107,6 +133,7 @@
 			children = (
 				4E6668ED1FC77DB100C39ED2 /* neko */,
 				4E6669001FC7851300C39ED2 /* neko_tests */,
+				4E66693F1FCFB49500C39ED2 /* neko_perf */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -204,6 +231,24 @@
 			path = pipelines;
 			sourceTree = "<group>";
 		};
+		4E6669401FCFB49600C39ED2 /* neko_perf */ = {
+			isa = PBXGroup;
+			children = (
+				4E6669491FCFC0DF00C39ED2 /* clock */,
+				4E6669411FCFB49600C39ED2 /* main.cpp */,
+			);
+			path = neko_perf;
+			sourceTree = "<group>";
+		};
+		4E6669491FCFC0DF00C39ED2 /* clock */ = {
+			isa = PBXGroup;
+			children = (
+				4E66694A1FCFC0F500C39ED2 /* stop_watch.cpp */,
+				4E66694B1FCFC0F500C39ED2 /* stop_watch.hpp */,
+			);
+			path = clock;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -241,6 +286,23 @@
 			productReference = 4E6669001FC7851300C39ED2 /* neko_tests */;
 			productType = "com.apple.product-type.tool";
 		};
+		4E66693E1FCFB49500C39ED2 /* neko_perf */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4E6669431FCFB49600C39ED2 /* Build configuration list for PBXNativeTarget "neko_perf" */;
+			buildPhases = (
+				4E66693B1FCFB49500C39ED2 /* Sources */,
+				4E66693C1FCFB49500C39ED2 /* Frameworks */,
+				4E66693D1FCFB49500C39ED2 /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = neko_perf;
+			productName = neko_perf;
+			productReference = 4E66693F1FCFB49500C39ED2 /* neko_perf */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -255,6 +317,10 @@
 						ProvisioningStyle = Automatic;
 					};
 					4E6668FF1FC7851300C39ED2 = {
+						CreatedOnToolsVersion = 9.1;
+						ProvisioningStyle = Automatic;
+					};
+					4E66693E1FCFB49500C39ED2 = {
 						CreatedOnToolsVersion = 9.1;
 						ProvisioningStyle = Automatic;
 					};
@@ -274,6 +340,7 @@
 			targets = (
 				4E6668EC1FC77DB100C39ED2 /* neko */,
 				4E6668FF1FC7851300C39ED2 /* neko_tests */,
+				4E66693E1FCFB49500C39ED2 /* neko_perf */,
 			);
 		};
 /* End PBXProject section */
@@ -299,6 +366,7 @@
 				4E6669131FC8E4EB00C39ED2 /* fp_register_tests.cpp in Sources */,
 				4E6669251FCA432500C39ED2 /* floating_point_tests.cpp in Sources */,
 				4E66692F1FCBDD0B00C39ED2 /* vpu_fp_calculation_tests.cpp in Sources */,
+				4E6669481FCFBB5F00C39ED2 /* fp_register.cpp in Sources */,
 				4E6669101FC8D10000C39ED2 /* vpu_state_tests.cpp in Sources */,
 				4E66691D1FC9500900C39ED2 /* vpu_micro_ops_tests.cpp in Sources */,
 				4E6669291FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp in Sources */,
@@ -307,6 +375,17 @@
 				4E6669341FCBE15100C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */,
 				4E66690E1FC7876A00C39ED2 /* vpu.cpp in Sources */,
 				4E66693A1FCBE5F000C39ED2 /* vpu_pipeline.cpp in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4E66693B1FCFB49500C39ED2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4E6669421FCFB49600C39ED2 /* main.cpp in Sources */,
+				4E6669471FCFB59500C39ED2 /* fp_register.cpp in Sources */,
+				4E6669461FCFB51600C39ED2 /* vpu.cpp in Sources */,
+				4E66694C1FCFC0F500C39ED2 /* stop_watch.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -448,6 +527,22 @@
 			};
 			name = Release;
 		};
+		4E6669441FCFB49600C39ED2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		4E6669451FCFB49600C39ED2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -474,6 +569,15 @@
 			buildConfigurations = (
 				4E6669051FC7851300C39ED2 /* Debug */,
 				4E6669061FC7851300C39ED2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4E6669431FCFB49600C39ED2 /* Build configuration list for PBXNativeTarget "neko_perf" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4E6669441FCFB49600C39ED2 /* Debug */,
+				4E6669451FCFB49600C39ED2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
