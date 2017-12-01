@@ -21,9 +21,9 @@ class FPRegister
 };
 
 void addFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask);
-void subFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3);
-void mulFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3);
-void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3);
+void subFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask);
+void mulFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask);
+void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask);
 void absFPRegisters(FPRegister * dest, FPRegister * source);
 
 #endif
