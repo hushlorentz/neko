@@ -1,5 +1,8 @@
+#ifndef VPU_OPCODES_H
+#define VPU_OPCODES_H
+
 #define VPU_I_BIT_MASK 0x3f
-#define VPU_E_BIT_MASK 0x3e
+#define VPU_E_BIT_MASK 0x40000000
 #define VPU_M_BIT_MASK 0x3d
 #define VPU_D_BIT_MASK 0x3c
 #define VPU_T_BIT_MASK 0x3b
@@ -10,9 +13,14 @@
 #define VPU_FT_REG_SHIFT 16 
 #define VPU_FS_REG_SHIFT 11
 #define VPU_FD_REG_SHIFT 6
+#define VPU_REG_MASK 0x1f
 #define VPU_BC_W_MASK 0x3
 #define VPU_BC_Z_MASK 0x2
 #define VPU_BC_Y_MASK 0x1
 #define VPU_BC_X_MASK 0
 
+#define VPU_TYPE3_MASK 0x7ff
+
 #define VPU_ABS 0x1fd
+
+#endif

@@ -1,5 +1,8 @@
 #include <thread>
+#include "bit_ops.hpp"
+#include "floating_point_ops.hpp"
 #include "vpu.hpp"
+#include "vpu_opcodes.hpp"
 
 #define MEMORY_SIZE 0x3fff
 #define NUM_FP_REGISTERS 32
@@ -12,6 +15,7 @@ VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_
   initMemory();
   initFPRegisters();
   initIntRegisters();
+  initOpCodeSets();
 }
 
 void VPU::initMemory()
@@ -29,6 +33,11 @@ void VPU::initFPRegisters()
 void VPU::initIntRegisters()
 {
   intRegisters.resize(NUM_INT_REGISTERS);
+}
+
+void VPU::initOpCodeSets()
+{
+  type3OpCodes.insert(VPU_ABS);
 }
 
 uint8_t VPU::getState()
@@ -97,9 +106,83 @@ void VPU::initMicroMode()
 
 void VPU::executeMicroInstructions()
 {
-  //get next instruction
-  //load into pipeline
-  //advance pipeline
-  //increase cycle count
-  cycles++;
+  bool sawStopBit = false;
+
+  while (state == VPU_STATE_RUN)
+  {
+    if (sawStopBit)
+    {
+      state = VPU_STATE_STOP;
+    }
+
+    uint32_t upperInstruction = nextUpperInstruction();
+    uint32_t lowerInstruction = nextUpperInstruction();
+
+    processUpperInstruction(upperInstruction);
+    microMemPC = processLowerInstruction(lowerInstruction);
+
+    if (stopBitSet(upperInstruction))
+    {
+      sawStopBit = true;
+    }
+  }
+}
+
+uint32_t VPU::nextUpperInstruction()
+{
+  uint32_t instruction = 0;
+  uint8_t shift = 24;
+
+  for (vector<uint8_t>::iterator it = microMem.begin() + microMemPC; it < microMem.begin() + (microMemPC + 4); ++it)
+  {
+    instruction |= *it << shift;
+    shift -= 8;
+  }
+
+  return instruction;
+}
+
+uint32_t VPU::nextLowerInstruction()
+{
+  return 0;
+}
+
+void VPU::processUpperInstruction(uint32_t upperInstruction)
+{
+  if (type3OpCodes.find(upperInstruction & VPU_TYPE3_MASK) != type3OpCodes.end())
+  {
+    processUpperType3Instruction(upperInstruction);
+  }
+}
+
+void VPU::processUpperType3Instruction(uint32_t upperInstruction)
+{
+  uint16_t opCode = upperInstruction & VPU_TYPE3_MASK;
+  uint8_t ftReg = regFromInstruction(upperInstruction, VPU_FT_REG_SHIFT);
+  uint8_t fsReg = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
+
+  switch (opCode)
+  {
+    case VPU_ABS:
+      absFPRegisters(&fpRegisters[ftReg], &fpRegisters[fsReg]);
+      cycles += 4;
+      break;
+  }
+}
+
+uint8_t VPU::regFromInstruction(uint32_t instruction, uint8_t shift)
+{
+  return (instruction >> shift) & VPU_REG_MASK;
+}
+
+uint16_t VPU::processLowerInstruction(uint32_t lowerInstruction)
+{
+  return 8;
+}
+
+bool VPU::stopBitSet(uint32_t instruction)
+{
+  return hasFlag(instruction, VPU_E_BIT_MASK) ||
+          hasFlag(instruction, VPU_D_BIT_MASK) || 
+          hasFlag(instruction, VPU_T_BIT_MASK);
 }

@@ -19,43 +19,42 @@ void addInstructionToVector(vector<uint8_t> * instructions, uint32_t bitFlags, u
   instructions->push_back(instruction & 0xff);
 }
 
-void addNOPLowerInstructionToVector(vector<uint8_t> * instructions)
+void addNOPHalfInstructionToVector(vector<uint8_t> * instructions)
 {
-  uint32_t instruction = 0;
-  instructions->push_back(instruction);
+  for (int i = 0; i < 4; i++)
+  {
+    instructions->push_back(0);
+  }
 }
 
-void addTerminationInstructionToVector(vector<uint8_t> * instructions)
+void addNOPFullInstructionToVector(vector<uint8_t> * instructions)
 {
-  uint32_t instruction = VPU_E_BIT_MASK;
-  instructions->push_back(instruction);
-
-  addNOPLowerInstructionToVector(instructions);
+  addNOPHalfInstructionToVector(instructions);
+  addNOPHalfInstructionToVector(instructions);
 }
 
 TEST_CASE("VPU Microinstruction Operation Tests")
 {
     VPU vpu;
     vpu.useThreads = false;
-    vpu.setMode(VPU_MODE_MICRO);
     vector<uint8_t> instructions;
     
     SECTION("ABS stores the absolute value of src vector in dest vector")
     {
       vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.4f, -1.0f, 4.5f);
 
-      addInstructionToVector(&instructions, 0, 0, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS, 0);
-      addNOPLowerInstructionToVector(&instructions);
-      addTerminationInstructionToVector(&instructions);
+      addInstructionToVector(&instructions, VPU_E_BIT_MASK, 0, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS, 0);
+      addNOPHalfInstructionToVector(&instructions);
+      addNOPFullInstructionToVector(&instructions);
 
       vpu.uploadMicroInstructions(&instructions);
       vpu.initMicroMode();
 
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->x == 5.0f);
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->y == 2.4f);
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->z == 1.0f);
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->w == 4.5f);
-      //REQUIRE(vpu.elapsedCycles() == 4);
-      //REQUIRE(vpu.getState() == VPU_STATE_STOP);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->x == 5.0f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->y == 2.4f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 1.0f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 4.5f);
+      REQUIRE(vpu.elapsedCycles() == 4);
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 }

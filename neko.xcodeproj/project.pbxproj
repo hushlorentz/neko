@@ -29,6 +29,10 @@
 		4E6669471FCFB59500C39ED2 /* fp_register.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669151FC8E97F00C39ED2 /* fp_register.cpp */; };
 		4E6669481FCFBB5F00C39ED2 /* fp_register.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669151FC8E97F00C39ED2 /* fp_register.cpp */; };
 		4E66694C1FCFC0F500C39ED2 /* stop_watch.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694A1FCFC0F500C39ED2 /* stop_watch.cpp */; };
+		4E66694F1FD11B1D00C39ED2 /* floating_point_ops.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */; };
+		4E6669501FD11B6900C39ED2 /* floating_point_ops.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */; };
+		4E6669521FD1291C00C39ED2 /* bit_ops.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669511FD1291C00C39ED2 /* bit_ops.cpp */; };
+		4E6669531FD1293B00C39ED2 /* bit_ops.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669511FD1291C00C39ED2 /* bit_ops.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -91,6 +95,9 @@
 		4E6669411FCFB49600C39ED2 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		4E66694A1FCFC0F500C39ED2 /* stop_watch.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stop_watch.cpp; sourceTree = "<group>"; };
 		4E66694B1FCFC0F500C39ED2 /* stop_watch.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stop_watch.hpp; sourceTree = "<group>"; };
+		4E66694D1FD106C700C39ED2 /* bit_ops.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = bit_ops.hpp; path = neko/math/bit_ops.hpp; sourceTree = SOURCE_ROOT; };
+		4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = floating_point_ops.cpp; sourceTree = "<group>"; };
+		4E6669511FD1291C00C39ED2 /* bit_ops.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = bit_ops.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -156,6 +163,7 @@
 				4E6669231FCA425600C39ED2 /* math */,
 				4E6669171FC94EC600C39ED2 /* vpu */,
 				4E6669071FC7854200C39ED2 /* catch.hpp */,
+				4E6669121FC8E4EB00C39ED2 /* fp_register_tests.cpp */,
 				4E6669021FC7851300C39ED2 /* main.cpp */,
 			);
 			path = neko_tests;
@@ -169,7 +177,6 @@
 				4E6669281FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp */,
 				4E6669091FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp */,
 				4E66690F1FC8D10000C39ED2 /* vpu_state_tests.cpp */,
-				4E6669121FC8E4EB00C39ED2 /* fp_register_tests.cpp */,
 				4E66691C1FC9500900C39ED2 /* vpu_micro_ops_tests.cpp */,
 			);
 			path = vpu;
@@ -201,6 +208,9 @@
 			isa = PBXGroup;
 			children = (
 				4E6669201FCA421E00C39ED2 /* floating_point_ops.hpp */,
+				4E66694D1FD106C700C39ED2 /* bit_ops.hpp */,
+				4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */,
+				4E6669511FD1291C00C39ED2 /* bit_ops.cpp */,
 			);
 			path = math;
 			sourceTree = "<group>";
@@ -353,8 +363,10 @@
 				4E66690D1FC7875300C39ED2 /* vpu.cpp in Sources */,
 				4E6669331FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */,
 				4E6669381FCBE5E500C39ED2 /* vpu_pipeline.cpp in Sources */,
+				4E6669521FD1291C00C39ED2 /* bit_ops.cpp in Sources */,
 				4E6669161FC8E97F00C39ED2 /* fp_register.cpp in Sources */,
 				4E6668F81FC7815900C39ED2 /* main.cpp in Sources */,
+				4E66694F1FD11B1D00C39ED2 /* floating_point_ops.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -367,6 +379,8 @@
 				4E6669251FCA432500C39ED2 /* floating_point_tests.cpp in Sources */,
 				4E66692F1FCBDD0B00C39ED2 /* vpu_fp_calculation_tests.cpp in Sources */,
 				4E6669481FCFBB5F00C39ED2 /* fp_register.cpp in Sources */,
+				4E6669501FD11B6900C39ED2 /* floating_point_ops.cpp in Sources */,
+				4E6669531FD1293B00C39ED2 /* bit_ops.cpp in Sources */,
 				4E6669101FC8D10000C39ED2 /* vpu_state_tests.cpp in Sources */,
 				4E66691D1FC9500900C39ED2 /* vpu_micro_ops_tests.cpp in Sources */,
 				4E6669291FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp in Sources */,
