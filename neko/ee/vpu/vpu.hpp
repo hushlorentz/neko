@@ -51,6 +51,8 @@ class VPU
     set<uint16_t> type1OpCodes;
     set<uint16_t> type2OpCodes;
     set<uint16_t> type3OpCodes;
+    uint8_t previousUpperInstructionType;
+    uint8_t previousLowerInstructionType;
 
     void initMemory();
     void initFPRegisters();
@@ -66,6 +68,7 @@ class VPU
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
     uint8_t destBitsFromInstruction(uint32_t instruction);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
+    void incrementCyclesCount(uint8_t upperInstruction, uint8_t lowerInstruction);
 };
 
 #endif

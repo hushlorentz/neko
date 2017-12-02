@@ -57,7 +57,7 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->y == 2.4f);
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 1.0f);
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 4.5f);
-      REQUIRE(vpu.elapsedCycles() == 4);
+      REQUIRE(vpu.elapsedCycles() == 7);
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 }
