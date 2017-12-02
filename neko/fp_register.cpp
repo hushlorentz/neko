@@ -90,10 +90,22 @@ void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t f
   }
 }
 
-void absFPRegisters(FPRegister * dest, FPRegister * source)
+void absFPRegisters(FPRegister * dest, FPRegister * source, uint8_t fieldMask)
 {
+  if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+  {
     dest->x = abs(source->x);
+  }
+  if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+  {
     dest->y = abs(source->y);
+  }
+  if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+  {
     dest->z = abs(source->z);
+  }
+  if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+  {
     dest->w = abs(source->w);
+  }
 }

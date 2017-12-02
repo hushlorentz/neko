@@ -160,11 +160,12 @@ void VPU::processUpperType3Instruction(uint32_t upperInstruction)
   uint16_t opCode = upperInstruction & VPU_TYPE3_MASK;
   uint8_t ftReg = regFromInstruction(upperInstruction, VPU_FT_REG_SHIFT);
   uint8_t fsReg = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
+  uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
 
   switch (opCode)
   {
     case VPU_ABS:
-      absFPRegisters(&fpRegisters[ftReg], &fpRegisters[fsReg]);
+      absFPRegisters(&fpRegisters[ftReg], &fpRegisters[fsReg], fieldMask);
       cycles += 4;
       break;
   }

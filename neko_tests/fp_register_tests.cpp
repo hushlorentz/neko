@@ -7,6 +7,7 @@ TEST_CASE("FP Register Tests")
   FPRegister reg1(1.0f, 3.5f, -3.0f, 5.0f);
   FPRegister reg2(-2.0f, 3.5f, -5.0f, 10.0f);
   FPRegister reg3(0, 10, 1, 2);
+  FPRegister reg4(-4, -3.5f, 2.75f, -1);
 
   SECTION("Subtracting the x field leaves the other fields unchanged")
   {
@@ -210,4 +211,53 @@ TEST_CASE("FP Register Tests")
     REQUIRE(reg3.w == 15);
   }
 
+  SECTION("Taking the absolute value of the x field leaves the other fields unchanged")
+  {
+    absFPRegisters(&reg3, &reg4, FP_REGISTER_X_FIELD);
+
+    REQUIRE(reg3.x == 4);
+    REQUIRE(reg3.y == 10);
+    REQUIRE(reg3.z == 1);
+    REQUIRE(reg3.w == 2);
+  }
+
+  SECTION("Taking the absolute value of the y field leaves the other fields unchanged")
+  {
+    absFPRegisters(&reg3, &reg4, FP_REGISTER_Y_FIELD);
+
+    REQUIRE(reg3.x == 0);
+    REQUIRE(reg3.y == 3.5);
+    REQUIRE(reg3.z == 1);
+    REQUIRE(reg3.w == 2);
+  }
+
+  SECTION("Taking the absolute value of the z field leaves the other fields unchanged")
+  {
+    absFPRegisters(&reg3, &reg4, FP_REGISTER_Z_FIELD);
+
+    REQUIRE(reg3.x == 0);
+    REQUIRE(reg3.y == 10);
+    REQUIRE(reg3.z == 2.75f);
+    REQUIRE(reg3.w == 2);
+  }
+
+  SECTION("Taking the absolute value of the w field leaves the other fields unchanged")
+  {
+    absFPRegisters(&reg3, &reg4, FP_REGISTER_W_FIELD);
+
+    REQUIRE(reg3.x == 0);
+    REQUIRE(reg3.y == 10);
+    REQUIRE(reg3.z == 1);
+    REQUIRE(reg3.w == 1);
+  }
+
+  SECTION("We can take the absolute value of all fields of an FP Register")
+  {
+    absFPRegisters(&reg3, &reg4, FP_REGISTER_ALL_FIELDS);
+
+    REQUIRE(reg3.x == 4);
+    REQUIRE(reg3.y == 3.5);
+    REQUIRE(reg3.z == 2.75);
+    REQUIRE(reg3.w == 1);
+  }
 }
