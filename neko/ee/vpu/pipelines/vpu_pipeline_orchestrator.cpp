@@ -31,20 +31,19 @@ void PipelineOrchestrator::update()
 
 void PipelineOrchestrator::updateWaitingPipelines()
 {
-  list<Pipeline *>::iterator iter = waiting.begin();
-
-  while (iter != waiting.end())
+  if (waiting.size() == 0)
   {
-    Pipeline * p = (Pipeline *)*iter;
-
-    if (stallDetected(p))
-    {
-      break;
-    }
-
-    iter = waiting.erase(iter);
-    executing.push_back(p);
+    return;
   }
+
+  Pipeline * p = waiting.front();
+  if (stallDetected(p))
+  {
+    return;
+  }
+
+  waiting.erase(waiting.begin());
+  executing.push_back(p);
 }
 
 bool PipelineOrchestrator::stallDetected(Pipeline * pipeline)
@@ -57,7 +56,7 @@ bool PipelineOrchestrator::stallDetected(Pipeline * pipeline)
     {
       return true;
     }
-    if (pipeline->sourceReg2 == checkPipeline->destReg && (pipeline->destFieldMask & checkPipeline->destFieldMask))
+    if (pipeline->sourceReg2 == checkPipeline->destReg && (pipeline->source2FieldMask & checkPipeline->destFieldMask))
     {
       return true;
     }
@@ -97,7 +96,7 @@ bool PipelineOrchestrator::hasNext()
   return executing.size() > 0 || waiting.size() > 0;
 }
 
-void PipelineOrchestrator::initPipeline(uint8_t pipelineType, int i, float x, float y, float z, float w, uint8_t s1, uint8_t s2, uint8_t d, uint8_t bc, uint8_t fieldMask)
+void PipelineOrchestrator::initPipeline(uint8_t pipelineType, int i, float x, float y, float z, float w, uint8_t s1, uint8_t s2, uint8_t d, uint8_t fieldMask, uint8_t s2FieldMask)
 {
   if (pool.size() == 0)
   {
@@ -107,7 +106,7 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, int i, float x, fl
   Pipeline * pipeline = pool.front();
   pool.pop_front();
 
-  pipeline->configure(pipelineType, i, x, y, z, w, s1, s2, d, bc, fieldMask);
+  pipeline->configure(pipelineType, i, x, y, z, w, s1, s2, d, fieldMask, s2FieldMask);
 
   waiting.push_back(pipeline);
 }
