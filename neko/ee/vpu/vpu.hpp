@@ -51,8 +51,6 @@ class VPU
     set<uint16_t> type1OpCodes;
     set<uint16_t> type2OpCodes;
     set<uint16_t> type3OpCodes;
-    uint8_t previousUpperInstructionType;
-    uint8_t previousLowerInstructionType;
 
     void initMemory();
     void initFPRegisters();

@@ -33,10 +33,15 @@ void addNOPFullInstructionToVector(vector<uint8_t> * instructions)
   addNOPHalfInstructionToVector(instructions);
 }
 
+void addSingleUpperInstruction(vector<uint8_t> * instructions, uint32_t bitFlags, uint32_t destFlags, uint8_t ftRegID, uint8_t fsRegID, uint8_t fdRegID, uint16_t opCode, uint8_t bcFlags)
+{
+  addInstructionToVector(instructions, bitFlags, destFlags, ftRegID, fsRegID, fdRegID, opCode, bcFlags);
+  addNOPHalfInstructionToVector(instructions);
+}
+
 void executeSingleUpperInstruction(VPU * vpu, vector<uint8_t> * instructions, uint32_t bitFlags, uint32_t destFlags, uint8_t ftRegID, uint8_t fsRegID, uint8_t fdRegID, uint16_t opCode, uint8_t bcFlags)
 {
-  addInstructionToVector(instructions, VPU_E_BIT_MASK | bitFlags, destFlags, ftRegID, fsRegID, fdRegID, opCode, bcFlags);
-  addNOPHalfInstructionToVector(instructions);
+  addSingleUpperInstruction(instructions, VPU_E_BIT | bitFlags, destFlags, ftRegID, fsRegID, fdRegID, opCode, bcFlags);
   addNOPFullInstructionToVector(instructions);
   vpu->uploadMicroInstructions(instructions);
   vpu->initMicroMode();
@@ -49,15 +54,24 @@ TEST_CASE("VPU Microinstruction Operation Tests")
     vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.4f, -1.0f, 4.5f);
     vector<uint8_t> instructions;
     
-    SECTION("ABS stores the absolute value of src vector in dest vector")
-    {
-      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS, 0);
+    //SECTION("ABS stores the absolute value of src vector in dest vector")
+    //{
+      //executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS, 0);
 
-      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->x == 5.0f);
-      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->y == 2.4f);
-      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 1.0f);
-      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 4.5f);
-      REQUIRE(vpu.elapsedCycles() == 7);
-      REQUIRE(vpu.getState() == VPU_STATE_STOP);
-    }
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->x == 5.0f);
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->y == 2.4f);
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 1.0f);
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 4.5f);
+      //REQUIRE(vpu.elapsedCycles() == 7);
+      //REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    //}
+
+    //SECTION("When an ABS reads from the destination of the previous instruction, a stall occurs")
+    //{
+      //addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS, 0);
+      //executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS, 0);
+
+      //REQUIRE(vpu.elapsedCycles() == 7);
+      //REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    //}
 }

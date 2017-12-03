@@ -1,26 +1,27 @@
 #ifndef VPU_OPCODES_H
 #define VPU_OPCODES_H
 
-#define VPU_I_BIT_MASK 0x3f
-#define VPU_E_BIT_MASK 0x40000000
-#define VPU_M_BIT_MASK 0x3d
-#define VPU_D_BIT_MASK 0x3c
-#define VPU_T_BIT_MASK 0x3b
-#define VPU_DEST_X_BIT_MASK 0x38
-#define VPU_DEST_Y_BIT_MASK 0x37
-#define VPU_DEST_Z_BIT_MASK 0x36
-#define VPU_DEST_W_BIT_MASK 0x35
+#define VPU_I_BIT 0x80000000
+#define VPU_E_BIT 0x40000000
+#define VPU_M_BIT 0x20000000
+#define VPU_D_BIT 0x10000000
+#define VPU_T_BIT 0x8000000
 #define VPU_DEST_SHIFT 21
+#define VPU_DEST_X_BIT 0x200000
+#define VPU_DEST_Y_BIT 0x400000
+#define VPU_DEST_Z_BIT 0x800000
+#define VPU_DEST_W_BIT 0x1000000
 #define VPU_DEST_ALL_FIELDS 0x1e00000
 #define VPU_DEST_MASK 15
 #define VPU_FT_REG_SHIFT 16 
 #define VPU_FS_REG_SHIFT 11
 #define VPU_FD_REG_SHIFT 6
 #define VPU_REG_MASK 0x1f
-#define VPU_BC_W_MASK 0x3
-#define VPU_BC_Z_MASK 0x2
-#define VPU_BC_Y_MASK 0x1
-#define VPU_BC_X_MASK 0
+#define VPU_BC_W 0x3
+#define VPU_BC_Z 0x2
+#define VPU_BC_Y 0x1
+#define VPU_BC_X 0
+#define VPU_BC_NONE -1
 
 #define VPU_TYPE3_MASK 0x7ff
 

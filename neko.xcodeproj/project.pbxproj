@@ -98,6 +98,7 @@
 		4E66694D1FD106C700C39ED2 /* bit_ops.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = bit_ops.hpp; path = neko/math/bit_ops.hpp; sourceTree = SOURCE_ROOT; };
 		4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = floating_point_ops.cpp; sourceTree = "<group>"; };
 		4E6669511FD1291C00C39ED2 /* bit_ops.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = bit_ops.cpp; sourceTree = "<group>"; };
+		4E6669581FD3BDB600C39ED2 /* vpu_completed_pipeline_handler.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = vpu_completed_pipeline_handler.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -237,6 +238,7 @@
 				4E6669321FCBE14200C39ED2 /* vpu_pipeline_orchestrator.cpp */,
 				4E6669311FCBDFE500C39ED2 /* vpu_pipeline.hpp */,
 				4E66692A1FCBDB5600C39ED2 /* vpu_pipeline_orchestrator.hpp */,
+				4E6669581FD3BDB600C39ED2 /* vpu_completed_pipeline_handler.hpp */,
 			);
 			path = pipelines;
 			sourceTree = "<group>";

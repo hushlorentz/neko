@@ -8,18 +8,9 @@
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
-#define VPU_PIPELINE_TYPE_NONE 0
-#define VPU_PIPELINE_TYPE_FMAC 1
-#define VPU_PIPELINE_FMAC_LATENCY 6
-#define VPU_PIPELINE_FMAC_STALL 3
-#define VPU_PIPELINE_FDIV 2
-#define VPU_PIPELINE_EFU 3
-#define VPU_PIPELINE_IALU 4
-#define VPU_PIPELINE_XGKICK 5
-
 using namespace std;
 
-VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), macFlags(0), statusFlags(0), clippingFlags(0), previousUpperInstructionType(VPU_PIPELINE_TYPE_NONE), previousLowerInstructionType(VPU_PIPELINE_TYPE_NONE)
+VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), macFlags(0), statusFlags(0), clippingFlags(0)
 {
   initMemory();
   initFPRegisters();
@@ -193,21 +184,11 @@ uint16_t VPU::processLowerInstruction(uint32_t lowerInstruction)
 
 bool VPU::stopBitSet(uint32_t instruction)
 {
-  return hasFlag(instruction, VPU_E_BIT_MASK) ||
-          hasFlag(instruction, VPU_D_BIT_MASK) || 
-          hasFlag(instruction, VPU_T_BIT_MASK);
+  return hasFlag(instruction, VPU_E_BIT) ||
+          hasFlag(instruction, VPU_D_BIT) ||
+          hasFlag(instruction, VPU_T_BIT);
 }
 
 void VPU::incrementCyclesCount(uint8_t upperInstruction, uint8_t lowerInstruction)
 {
-  if (previousUpperInstructionType == VPU_PIPELINE_TYPE_NONE)
-  {
-    cycles += VPU_PIPELINE_FMAC_LATENCY;
-  }
-  else
-  {
-    cycles++;
-  }
-
-  previousUpperInstructionType = VPU_PIPELINE_TYPE_FMAC;
 }
