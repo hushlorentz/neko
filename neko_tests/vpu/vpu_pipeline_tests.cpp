@@ -1,7 +1,7 @@
 #include "catch.hpp"
 #include "fp_register.hpp"
 #include "vpu.hpp"
-#include "vpu_completed_pipeline_handler.hpp"
+#include "vpu_pipeline_handler.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_pipeline.hpp"
 #include "vpu_pipeline_orchestrator.hpp"
@@ -9,14 +9,20 @@
 
 using namespace Catch;
 
-class PipelineHandler : public CompletedPipelineHandler
+class TestPipelineHandler : public PipelineHandler
 {
   public:
-    Pipeline * handledPipeline;
+    Pipeline * startedPipeline;
+    Pipeline * finishedPipeline;
 
-    virtual void pipelineComplete(Pipeline * pipeline)
+    virtual void pipelineStarted(Pipeline * pipeline)
     {
-      handledPipeline = pipeline;
+      startedPipeline = pipeline;
+    }
+
+    virtual void pipelineFinished(Pipeline * pipeline)
+    {
+      finishedPipeline = pipeline;
     }
 };
 
@@ -46,7 +52,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("When a pipeline finishes, we can retrieve the correct information")
   {
-    PipelineHandler handler;
+    TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 10, 20, 30, 40, 50, VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
 
@@ -55,16 +61,27 @@ TEST_CASE("VPU Pipeline Tests")
       orchestrator.update();
     }
 
-    Pipeline * pipeline = handler.handledPipeline;
-    REQUIRE(pipeline->type == VPU_PIPELINE_TYPE_FMAC);
-    REQUIRE(pipeline->intResult == 10);
-    REQUIRE(pipeline->xResult == 20);
-    REQUIRE(pipeline->yResult == 30);
-    REQUIRE(pipeline->zResult == 40);
-    REQUIRE(pipeline->wResult == 50);
-    REQUIRE(pipeline->sourceReg1 == VPU_REGISTER_VF02);
-    REQUIRE(pipeline->sourceReg2 == VPU_REGISTER_VF03);
-    REQUIRE(pipeline->destReg == VPU_REGISTER_VF01);
+    Pipeline * startedPipeline = handler.startedPipeline;
+    REQUIRE(startedPipeline->type == VPU_PIPELINE_TYPE_FMAC);
+    REQUIRE(startedPipeline->intResult == 10);
+    REQUIRE(startedPipeline->xResult == 20);
+    REQUIRE(startedPipeline->yResult == 30);
+    REQUIRE(startedPipeline->zResult == 40);
+    REQUIRE(startedPipeline->wResult == 50);
+    REQUIRE(startedPipeline->sourceReg1 == VPU_REGISTER_VF02);
+    REQUIRE(startedPipeline->sourceReg2 == VPU_REGISTER_VF03);
+    REQUIRE(startedPipeline->destReg == VPU_REGISTER_VF01);
+
+    Pipeline * finishedPipeline = handler.finishedPipeline;
+    REQUIRE(finishedPipeline->type == VPU_PIPELINE_TYPE_FMAC);
+    REQUIRE(finishedPipeline->intResult == 10);
+    REQUIRE(finishedPipeline->xResult == 20);
+    REQUIRE(finishedPipeline->yResult == 30);
+    REQUIRE(finishedPipeline->zResult == 40);
+    REQUIRE(finishedPipeline->wResult == 50);
+    REQUIRE(finishedPipeline->sourceReg1 == VPU_REGISTER_VF02);
+    REQUIRE(finishedPipeline->sourceReg2 == VPU_REGISTER_VF03);
+    REQUIRE(finishedPipeline->destReg == VPU_REGISTER_VF01);
   }
 
   SECTION("Two FMAC Pipelines execute in 5 cycles with no stall")

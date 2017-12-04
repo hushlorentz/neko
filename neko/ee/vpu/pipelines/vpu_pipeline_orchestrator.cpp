@@ -44,6 +44,11 @@ void PipelineOrchestrator::updateWaitingPipelines()
 
   waiting.erase(waiting.begin());
   executing.push_back(p);
+
+  if (pipelineHandler)
+  {
+    pipelineHandler->pipelineStarted(p);
+  }
 }
 
 bool PipelineOrchestrator::stallDetected(Pipeline * pipeline)
@@ -77,7 +82,7 @@ void PipelineOrchestrator::updateExecutingPipelines()
     {
       if (pipelineHandler)
       {
-        pipelineHandler->pipelineComplete(p);
+        pipelineHandler->pipelineFinished(p);
       }
 
       iter = executing.erase(iter);
@@ -111,7 +116,7 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, int i, float x, fl
   waiting.push_back(pipeline);
 }
 
-void PipelineOrchestrator::setPipelineHandler(CompletedPipelineHandler * handler)
+void PipelineOrchestrator::setPipelineHandler(PipelineHandler * handler)
 {
   pipelineHandler = handler;
 }
