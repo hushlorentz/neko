@@ -7,7 +7,7 @@
 		<key>neko.xcscheme</key>
 		<dict>
 			<key>orderHint</key>
-			<integer>0</integer>
+			<integer>1</integer>
 		</dict>
 		<key>neko_perf.xcscheme</key>
 		<dict>
@@ -17,7 +17,7 @@
 		<key>neko_tests.xcscheme</key>
 		<dict>
 			<key>orderHint</key>
-			<integer>1</integer>
+			<integer>0</integer>
 		</dict>
 	</dict>
 	<key>SuppressBuildableAutocreation</key>

@@ -200,17 +200,28 @@ void VPU::pipelineStarted(Pipeline * p)
 {
   uint16_t opCode = p->opCode;
   uint8_t s1 = p->sourceReg1;
-  uint8_t d = p->destReg;
   uint8_t fieldMask = p->destFieldMask;
+  FPRegister dest;
 
   switch (opCode)
   {
     case VPU_ABS:
-      absFPRegisters(&fpRegisters[d], &fpRegisters[s1], fieldMask);
+      absFPRegisters(&dest, &fpRegisters[s1], fieldMask);
       break;
   }
+
+  p->setFloatResult(dest.x, dest.y, dest.z, dest.w);
 }
 
 void VPU::pipelineFinished(Pipeline * p)
 {
+  switch (p->opCode)
+  {
+    case VPU_ABS:
+      fpRegisters[p->destReg].x = p->xResult;
+      fpRegisters[p->destReg].y = p->yResult;
+      fpRegisters[p->destReg].z = p->zResult;
+      fpRegisters[p->destReg].w = p->wResult;
+      break;
+  }
 }

@@ -3,7 +3,7 @@
 #include "vpu_pipeline.hpp"
 #include "vpu_pipeline_orchestrator.hpp"
 
-PipelineOrchestrator::PipelineOrchestrator() : pipelineHandler(NULL)
+PipelineOrchestrator::PipelineOrchestrator() : pipelineHandler(NULL), stalling(false)
 {
   for (int i = 0; i < MAX_PIPELINES; i++)
   {
@@ -25,8 +25,8 @@ PipelineOrchestrator::~PipelineOrchestrator()
 
 void PipelineOrchestrator::update()
 {
-  updateWaitingPipelines();
   updateExecutingPipelines();
+  updateWaitingPipelines();
 }
 
 void PipelineOrchestrator::updateWaitingPipelines()
@@ -37,7 +37,9 @@ void PipelineOrchestrator::updateWaitingPipelines()
   }
 
   Pipeline * p = waiting.front();
-  if (stallDetected(p))
+  detectStalls(p);
+
+  if (stalling)
   {
     return;
   }
@@ -51,23 +53,28 @@ void PipelineOrchestrator::updateWaitingPipelines()
   }
 }
 
-bool PipelineOrchestrator::stallDetected(Pipeline * pipeline)
+void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
 {
+  stalling = false; 
+
   for (list<Pipeline *>::iterator iter = executing.begin(); iter != executing.end(); ++iter)
   {
     Pipeline * checkPipeline = *iter;
 
+    if (checkPipeline->isComplete())
+    {
+      continue;
+    }
+
     if (pipeline->sourceReg1 == checkPipeline->destReg && (pipeline->destFieldMask & checkPipeline->destFieldMask))
     {
-      return true;
+      stalling = true;
     }
     if (pipeline->sourceReg2 == checkPipeline->destReg && (pipeline->source2FieldMask & checkPipeline->destFieldMask))
     {
-      return true;
+      stalling = true;
     }
   }
-
-  return false;
 }
 
 void PipelineOrchestrator::updateExecutingPipelines()
@@ -112,7 +119,6 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, u
   pool.pop_front();
 
   pipeline->configure(pipelineType, opCode, s1, s2, d, fieldMask, s2FieldMask);
-
   waiting.push_back(pipeline);
 }
 

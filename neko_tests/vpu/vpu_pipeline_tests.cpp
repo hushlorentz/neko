@@ -47,7 +47,6 @@ TEST_CASE("VPU Pipeline Tests")
   SECTION("The FMAC Pipeline executes in 6 cycles")
   {
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
-    cycles++;
     REQUIRE(runOrchestrator(&orchestrator, cycles) == 6);
   }
 
@@ -82,6 +81,7 @@ TEST_CASE("VPU Pipeline Tests")
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     orchestrator.update();
     cycles++;
+
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF03, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
 
     REQUIRE(runOrchestrator(&orchestrator, cycles) == 7);
@@ -95,7 +95,8 @@ TEST_CASE("VPU Pipeline Tests")
 
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, 0);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 10);
+    cycles = runOrchestrator(&orchestrator, cycles);
+    REQUIRE(cycles == 10);
   }
 
   SECTION("Two FMAC Pipelines cause a stall if the second instruction reads from the first instruction's output vector-field pair with a non-stall in between")
@@ -138,9 +139,17 @@ TEST_CASE("VPU Pipeline Tests")
     orchestrator.update();
     cycles++;
 
+    while (orchestrator.stalling)
+    {
+      orchestrator.update();
+      cycles++;
+    }
+
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF05, 0, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, 0);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 11);
+    cycles = runOrchestrator(&orchestrator, cycles);
+
+    REQUIRE(cycles == 11);
   }
 
   SECTION("BCField Two FMAC Pipelines execute in 7 cycles with no stall")
@@ -175,7 +184,7 @@ TEST_CASE("VPU Pipeline Tests")
 
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF02, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Y_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 11);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 10);
   }
 
   SECTION("BCField Three FMAC Pipelines all stall if they all read from the same vector fields")
@@ -202,6 +211,12 @@ TEST_CASE("VPU Pipeline Tests")
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF20, VPU_REGISTER_VF02, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Z_FIELD);
     orchestrator.update();
     cycles++;
+
+    while (orchestrator.stalling)
+    {
+      orchestrator.update();
+      cycles++;
+    }
 
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF01, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, FP_REGISTER_W_FIELD);
 

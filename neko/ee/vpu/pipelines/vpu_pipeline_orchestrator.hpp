@@ -13,6 +13,8 @@ using namespace std;
 class PipelineOrchestrator
 {
   public:
+    bool stalling;
+
     PipelineOrchestrator();
     ~PipelineOrchestrator();
     void update();
@@ -26,7 +28,7 @@ class PipelineOrchestrator
     PipelineHandler * pipelineHandler;
     void updateExecutingPipelines();
     void updateWaitingPipelines();
-    bool stallDetected(Pipeline * pipeline);
+    void detectStalls(Pipeline * pipeline);
 };
 
 #endif

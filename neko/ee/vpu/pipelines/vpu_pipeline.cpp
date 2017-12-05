@@ -1,8 +1,8 @@
 #include "vpu_pipeline.hpp"
 
-#define FMAC_STAGES 5
+#define FMAC_STAGES 6
 
-Pipeline::Pipeline() : type(0), opCode(0), intResult(0), xResult(0), yResult(0), zResult(0), wResult(0), sourceReg1(0), sourceReg2(0), destReg(0), destFieldMask(0), source2FieldMask(0), currentStage(0), endStage(0)
+Pipeline::Pipeline() : type(0), opCode(0), intResult(0), xResult(0), yResult(0), zResult(0), wResult(0), sourceReg1(0), sourceReg2(0), destReg(0), destFieldMask(0), source2FieldMask(0), currentStage(1), endStage(0)
 {
 }
 
@@ -15,6 +15,7 @@ void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t 
   destReg = d;
   destFieldMask = fieldMask;
   source2FieldMask = s2FieldMask;
+  currentStage = 1;
 
   switch (type)
   {
@@ -49,4 +50,3 @@ bool Pipeline::isComplete()
 {
   return currentStage == (endStage - 1);
 }
-
