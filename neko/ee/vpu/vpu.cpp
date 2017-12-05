@@ -123,7 +123,7 @@ void VPU::executeMicroInstructions()
         state = VPU_STATE_STOP;
       }
     }
-    else
+    else if (!orchestrator.stalling)
     {
       uint32_t upperInstruction = nextUpperInstruction();
       uint32_t lowerInstruction = nextUpperInstruction();
@@ -186,7 +186,7 @@ uint8_t VPU::regFromInstruction(uint32_t instruction, uint8_t shift)
 
 uint16_t VPU::processLowerInstruction(uint32_t lowerInstruction)
 {
-  return 8;
+  return microMemPC + 8;
 }
 
 bool VPU::stopBitSet(uint32_t instruction)

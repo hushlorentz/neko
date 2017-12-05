@@ -74,4 +74,15 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(vpu.elapsedCycles() == 11);
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
+
+    SECTION("ABS three stalls")
+    {
+      addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS, 0);
+      addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF05, VPU_REGISTER_VF04, 0, VPU_ABS, 0);
+      addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, 0, VPU_ABS, 0);
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, 0, VPU_ABS, 0);
+
+      REQUIRE(vpu.elapsedCycles() == 19);
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    }
 }
