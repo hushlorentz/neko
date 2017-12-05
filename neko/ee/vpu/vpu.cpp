@@ -16,6 +16,7 @@ VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_
   initFPRegisters();
   initIntRegisters();
   initOpCodeSets();
+  initPipelineOrchestrator();
 }
 
 void VPU::initMemory()
@@ -38,6 +39,11 @@ void VPU::initIntRegisters()
 void VPU::initOpCodeSets()
 {
   type3OpCodes.insert(VPU_ABS);
+}
+
+void VPU::initPipelineOrchestrator()
+{
+  orchestrator.setPipelineHandler(this);
 }
 
 uint8_t VPU::getState()
@@ -112,21 +118,27 @@ void VPU::executeMicroInstructions()
   {
     if (sawStopBit)
     {
-      state = VPU_STATE_STOP;
+      if (!orchestrator.hasNext())
+      {
+        state = VPU_STATE_STOP;
+      }
     }
-
-    uint32_t upperInstruction = nextUpperInstruction();
-    uint32_t lowerInstruction = nextUpperInstruction();
-
-    processUpperInstruction(upperInstruction);
-    microMemPC = processLowerInstruction(lowerInstruction);
-
-    if (stopBitSet(upperInstruction))
+    else
     {
-      sawStopBit = true;
+      uint32_t upperInstruction = nextUpperInstruction();
+      uint32_t lowerInstruction = nextUpperInstruction();
+
+      processUpperInstruction(upperInstruction);
+      microMemPC = processLowerInstruction(lowerInstruction);
+
+      if (stopBitSet(upperInstruction))
+      {
+        sawStopBit = true;
+      }
     }
 
-    incrementCyclesCount(upperInstruction, lowerInstruction);
+    orchestrator.update();
+    cycles++;
   }
 }
 
@@ -164,12 +176,7 @@ void VPU::processUpperType3Instruction(uint32_t upperInstruction)
   uint8_t fsReg = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
   uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
 
-  switch (opCode)
-  {
-    case VPU_ABS:
-      absFPRegisters(&fpRegisters[ftReg], &fpRegisters[fsReg], fieldMask);
-      break;
-  }
+  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, fsReg, 0, ftReg, fieldMask, 0); 
 }
 
 uint8_t VPU::regFromInstruction(uint32_t instruction, uint8_t shift)
@@ -189,6 +196,21 @@ bool VPU::stopBitSet(uint32_t instruction)
           hasFlag(instruction, VPU_T_BIT);
 }
 
-void VPU::incrementCyclesCount(uint8_t upperInstruction, uint8_t lowerInstruction)
+void VPU::pipelineStarted(Pipeline * p)
+{
+  uint16_t opCode = p->opCode;
+  uint8_t s1 = p->sourceReg1;
+  uint8_t d = p->destReg;
+  uint8_t fieldMask = p->destFieldMask;
+
+  switch (opCode)
+  {
+    case VPU_ABS:
+      absFPRegisters(&fpRegisters[d], &fpRegisters[s1], fieldMask);
+      break;
+  }
+}
+
+void VPU::pipelineFinished(Pipeline * p)
 {
 }

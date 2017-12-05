@@ -5,7 +5,6 @@
 
 #define VPU_PIPELINE_TYPE_NONE 0
 #define VPU_PIPELINE_TYPE_FMAC 1
-#define VPU_PIPELINE_FMAC_STALL 3
 #define VPU_PIPELINE_FDIV 2
 #define VPU_PIPELINE_EFU 3
 #define VPU_PIPELINE_IALU 4
@@ -15,6 +14,7 @@ class Pipeline
 {
   public: 
     uint8_t type;
+    uint16_t opCode;
     int intResult;
     float xResult;
     float yResult;
@@ -27,7 +27,9 @@ class Pipeline
     uint8_t source2FieldMask;
 
     Pipeline();
-    void configure(uint8_t pipelineType, int i, float x, float y, float z, float w, uint8_t s1, uint8_t s2, uint8_t d, uint8_t fieldMask, uint8_t s2FieldMask);
+    void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t fieldMask, uint8_t s2FieldMask);
+    void setFloatResult(float x, float y, float z, float w);
+    void setIntResult(int i);
     void execute();
     bool isComplete();
   private:

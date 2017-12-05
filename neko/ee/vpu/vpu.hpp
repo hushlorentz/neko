@@ -3,7 +3,10 @@
 
 #include <set>
 #include <vector>
+
 #include "fp_register.hpp"
+#include "vpu_pipeline_handler.hpp"
+#include "vpu_pipeline_orchestrator.hpp"
 
 #define VPU_STATE_READY 1
 #define VPU_STATE_RUN 2
@@ -13,7 +16,7 @@
 
 using namespace std;
 
-class VPU
+class VPU : public PipelineHandler
 {
   public:
     VPU();
@@ -31,6 +34,8 @@ class VPU
     void setMode(uint8_t newMode);
     void initMicroMode();
     void uploadMicroInstructions(vector<uint8_t> * instructions);
+    virtual void pipelineStarted(Pipeline * p);
+    virtual void pipelineFinished(Pipeline * p);
   private:
     uint8_t state;
     uint32_t cycles;
@@ -51,11 +56,13 @@ class VPU
     set<uint16_t> type1OpCodes;
     set<uint16_t> type2OpCodes;
     set<uint16_t> type3OpCodes;
+    PipelineOrchestrator orchestrator;
 
     void initMemory();
     void initFPRegisters();
     void initIntRegisters();
     void initOpCodeSets();
+    void initPipelineOrchestrator();
     void executeMicroInstructions();
     void updateMicroInstructions();
     bool stopBitSet(uint32_t instruction);
@@ -66,7 +73,6 @@ class VPU
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
     uint8_t destBitsFromInstruction(uint32_t instruction);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
-    void incrementCyclesCount(uint8_t upperInstruction, uint8_t lowerInstruction);
 };
 
 #endif

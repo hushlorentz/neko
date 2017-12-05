@@ -44,17 +44,18 @@ TEST_CASE("VPU Pipeline Tests")
   PipelineOrchestrator orchestrator;
   int cycles = 0;
 
-  SECTION("The FMAC Pipeline executes in 4 cycles")
+  SECTION("The FMAC Pipeline executes in 6 cycles")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
-    REQUIRE(runOrchestrator(&orchestrator, 0) == 4);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
+    cycles++;
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 6);
   }
 
   SECTION("When a pipeline finishes, we can retrieve the correct information")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 10, 20, 30, 40, 50, VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, VPU_ABS, VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
 
     while (orchestrator.hasNext())
     {
@@ -63,164 +64,157 @@ TEST_CASE("VPU Pipeline Tests")
 
     Pipeline * startedPipeline = handler.startedPipeline;
     REQUIRE(startedPipeline->type == VPU_PIPELINE_TYPE_FMAC);
-    REQUIRE(startedPipeline->intResult == 10);
-    REQUIRE(startedPipeline->xResult == 20);
-    REQUIRE(startedPipeline->yResult == 30);
-    REQUIRE(startedPipeline->zResult == 40);
-    REQUIRE(startedPipeline->wResult == 50);
+    REQUIRE(startedPipeline->opCode == VPU_ABS);
     REQUIRE(startedPipeline->sourceReg1 == VPU_REGISTER_VF02);
     REQUIRE(startedPipeline->sourceReg2 == VPU_REGISTER_VF03);
     REQUIRE(startedPipeline->destReg == VPU_REGISTER_VF01);
 
     Pipeline * finishedPipeline = handler.finishedPipeline;
     REQUIRE(finishedPipeline->type == VPU_PIPELINE_TYPE_FMAC);
-    REQUIRE(finishedPipeline->intResult == 10);
-    REQUIRE(finishedPipeline->xResult == 20);
-    REQUIRE(finishedPipeline->yResult == 30);
-    REQUIRE(finishedPipeline->zResult == 40);
-    REQUIRE(finishedPipeline->wResult == 50);
+    REQUIRE(startedPipeline->opCode == VPU_ABS);
     REQUIRE(finishedPipeline->sourceReg1 == VPU_REGISTER_VF02);
     REQUIRE(finishedPipeline->sourceReg2 == VPU_REGISTER_VF03);
     REQUIRE(finishedPipeline->destReg == VPU_REGISTER_VF01);
   }
 
-  SECTION("Two FMAC Pipelines execute in 5 cycles with no stall")
+  SECTION("Two FMAC Pipelines execute in 7 cycles with no stall")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     orchestrator.update();
     cycles++;
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF03, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF03, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 5);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 7);
   }
 
   SECTION("Two FMAC Pipelines cause a stall if the second instruction reads from the first instruction's output vector-field pair")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, 0);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 8);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, 0);
+
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 10);
   }
 
   SECTION("Two FMAC Pipelines cause a stall if the second instruction reads from the first instruction's output vector-field pair with a non-stall in between")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF10, 0, VPU_REGISTER_VF12, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF10, 0, VPU_REGISTER_VF12, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Y_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Y_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 8);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 10);
   }
 
   SECTION("Three FMAC Pipelines all stall if they all read from the same vector fields")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF03, 0, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF03, 0, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, 0);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 12);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 14);
   }
 
   SECTION("Three FMAC Pipelines middle one stalls")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF05, 0, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF05, 0, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, 0);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 9);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 11);
   }
 
-  SECTION("BCField Two FMAC Pipelines execute in 5 cycles with no stall")
+  SECTION("BCField Two FMAC Pipelines execute in 7 cycles with no stall")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF01, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     orchestrator.update();
     cycles++;
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Z_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Z_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 5);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 7);
   }
 
   SECTION("BCField: Two FMAC Pipelines cause a stall if the second instruction reads from the first instruction's output vector-field pair")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_REGISTER_VF04, 0, FP_REGISTER_Y_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_REGISTER_VF04, 0, FP_REGISTER_Y_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 8);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 10);
   }
 
   SECTION("BCField Two FMAC Pipelines cause a stall if the third instruction reads from the first instruction's output vector-field pair with a non-stall in between")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF10, VPU_REGISTER_VF02, VPU_REGISTER_VF12, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, FP_REGISTER_W_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF10, VPU_REGISTER_VF02, VPU_REGISTER_VF12, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, FP_REGISTER_W_FIELD);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF02, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Y_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF02, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Y_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 8);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 11);
   }
 
   SECTION("BCField Three FMAC Pipelines all stall if they all read from the same vector fields")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_ALL_FIELDS, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_ALL_FIELDS, 0);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF20, VPU_REGISTER_VF02, VPU_REGISTER_VF05, FP_REGISTER_Z_FIELD, FP_REGISTER_W_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF20, VPU_REGISTER_VF02, VPU_REGISTER_VF05, FP_REGISTER_Z_FIELD, FP_REGISTER_W_FIELD);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, FP_REGISTER_Z_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, FP_REGISTER_Z_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 12);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 14);
   }
 
   SECTION("BCField Three FMAC Pipelines middle one stalls")
   {
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD, 0);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD, 0);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF20, VPU_REGISTER_VF02, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Z_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF20, VPU_REGISTER_VF02, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, FP_REGISTER_Z_FIELD);
     orchestrator.update();
     cycles++;
 
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF01, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, FP_REGISTER_W_FIELD);
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF01, VPU_REGISTER_VF04, FP_REGISTER_Y_FIELD, FP_REGISTER_W_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, cycles) == 9);
+    REQUIRE(runOrchestrator(&orchestrator, cycles) == 11);
   }
 
   SECTION("The PipelineOrchestrator throws an exception if we try to add more pipelines than the maximum allowed")
   {
     for (int i = 0; i < MAX_PIPELINES; i++)
     {
-      orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01, 0, 0);
+      orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01, 0, 0);
     }
 
-    REQUIRE_THROWS_WITH(orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, 0, 0, 0, VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01, 0, 0), Contains("Trying to add a pipeline to the PipelineOrchestrator when the max number of pipelines is already in use!"));
+    REQUIRE_THROWS_WITH(orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01, 0, 0), Contains("Trying to add a pipeline to the PipelineOrchestrator when the max number of pipelines is already in use!"));
   }
 }
