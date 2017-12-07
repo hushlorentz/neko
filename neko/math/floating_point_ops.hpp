@@ -3,6 +3,11 @@
 
 #define FP_FLAG_OVERFLOW 0x1
 #define FP_FLAG_UNDERFLOW 0x2
+#define FP_FLAG_I_BIT 0x4
+#define FP_FLAG_D_BIT 0x8
+
+#define FP_MAX_MANTISSA 0x2
+#define FP_MAX_EXPONENT 0x80
 
 #include <cmath>
 
@@ -21,7 +26,5 @@ float addFP(float f1, float f2, uint8_t * resultFlags);
 float mulFP(float f1, float f2, uint8_t * resultFlags);
 float divFP(float f1, float f2, uint8_t * resultFlags);
 float subFP(float f1, float f2, uint8_t * resultFlags);
-float adjustForOverflow(double value, uint8_t * resultFlags);
-float adjustForUnderflow(double value, uint8_t * resultFlags);
 
 #endif
