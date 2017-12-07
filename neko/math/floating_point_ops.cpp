@@ -3,6 +3,7 @@
 
 float convertFromIEEE(float f, uint8_t * resultFlags)
 {
+  //deal with sign bit for returns
   float_cast fu;
   fu.f = f;
 
@@ -35,6 +36,7 @@ float mulFP(float f1, float f2, uint8_t * resultFlags)
 
 float divFP(float f1, float f2, uint8_t * resultFlags)
 {
+  //deal with 0/0 and x/0 | x != 0
   return convertFromIEEE(f1 / f2, resultFlags);
 }
 
