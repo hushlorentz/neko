@@ -22,8 +22,10 @@
 #define VPU_BC_Y 0x1
 #define VPU_BC_X 0
 
+#define VPU_TYPE1_MASK 0x3f
 #define VPU_TYPE3_MASK 0x7ff
 
 #define VPU_ABS 0x1fd
+#define VPU_ADD 0x28
 
 #endif

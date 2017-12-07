@@ -52,6 +52,7 @@ TEST_CASE("VPU Microinstruction Operation Tests")
     VPU vpu;
     vpu.useThreads = false;
     vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.4f, -1.0f, 4.5f);
+    vpu.loadFPRegister(VPU_REGISTER_VF10, -2.5f, 2.4f, 10.0f, 9.0f);
     vector<uint8_t> instructions;
     
     SECTION("ABS stores the absolute value of src vector in dest vector")
@@ -83,6 +84,18 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, 0, VPU_ABS, 0);
 
       REQUIRE(vpu.elapsedCycles() == 19);
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    }
+
+    SECTION("ADD stores the addition of the two src vectors in dest vector")
+    {
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF10, VPU_REGISTER_VF03, VPU_REGISTER_VF04, VPU_ADD, 0);
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->x == -7.5f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->y == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 9);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 13.5f);
+      REQUIRE(vpu.elapsedCycles() == 7);
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 }

@@ -39,6 +39,7 @@ void VPU::initIntRegisters()
 void VPU::initOpCodeSets()
 {
   type3OpCodes.insert(VPU_ABS);
+  type1OpCodes.insert(VPU_ADD);
 }
 
 void VPU::initPipelineOrchestrator()
@@ -163,10 +164,25 @@ uint32_t VPU::nextLowerInstruction()
 
 void VPU::processUpperInstruction(uint32_t upperInstruction)
 {
-  if (type3OpCodes.find(upperInstruction & VPU_TYPE3_MASK) != type3OpCodes.end())
+  if (type1OpCodes.find(upperInstruction & VPU_TYPE1_MASK) != type1OpCodes.end())
+  {
+    processUpperType1Instruction(upperInstruction);
+  }
+  else if (type3OpCodes.find(upperInstruction & VPU_TYPE3_MASK) != type3OpCodes.end())
   {
     processUpperType3Instruction(upperInstruction);
   }
+}
+
+void VPU::processUpperType1Instruction(uint32_t upperInstruction)
+{
+  uint16_t opCode = upperInstruction & VPU_TYPE1_MASK;
+  uint8_t ftReg = regFromInstruction(upperInstruction, VPU_FT_REG_SHIFT);
+  uint8_t fsReg = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
+  uint8_t fdReg = regFromInstruction(upperInstruction, VPU_FD_REG_SHIFT);
+  uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
+
+  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, fsReg, ftReg, fdReg, fieldMask, 0); 
 }
 
 void VPU::processUpperType3Instruction(uint32_t upperInstruction)
@@ -200,13 +216,17 @@ void VPU::pipelineStarted(Pipeline * p)
 {
   uint16_t opCode = p->opCode;
   uint8_t s1 = p->sourceReg1;
+  uint8_t s2 = p->sourceReg2;
   uint8_t fieldMask = p->destFieldMask;
   FPRegister dest;
 
   switch (opCode)
   {
     case VPU_ABS:
-      absFPRegisters(&dest, &fpRegisters[s1], fieldMask);
+      absFPRegisters(&fpRegisters[s1], &dest, fieldMask);
+      break;
+    case VPU_ADD:
+      addFPRegisters(&fpRegisters[s1], &fpRegisters[s2], &dest, fieldMask);
       break;
   }
 
@@ -218,6 +238,7 @@ void VPU::pipelineFinished(Pipeline * p)
   switch (p->opCode)
   {
     case VPU_ABS:
+    case VPU_ADD:
       fpRegisters[p->destReg].x = p->xResult;
       fpRegisters[p->destReg].y = p->yResult;
       fpRegisters[p->destReg].z = p->zResult;
