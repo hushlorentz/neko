@@ -8,10 +8,11 @@ TEST_CASE("FP Register Tests")
   FPRegister reg2(-2.0f, 3.5f, -5.0f, 10.0f);
   FPRegister reg3(0, 10, 1, 2);
   FPRegister reg4(-4, -3.5f, 2.75f, -1);
+  uint16_t resultFlags = 0;
 
   SECTION("Subtracting the x field leaves the other fields unchanged")
   {
-    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD);
+    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 3.0f);
     REQUIRE(reg3.y == 10);
@@ -21,7 +22,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Subtracting the y field leaves the other fields unchanged")
   {
-    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD);
+    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 0);
@@ -31,7 +32,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Subtracting the z field leaves the other fields unchanged")
   {
-    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD);
+    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -41,7 +42,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Subtracting the w field leaves the other fields unchanged")
   {
-    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD);
+    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -51,7 +52,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("All fields of two FP Registers can be subtracted")
   {
-    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS);
+    subFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS, &resultFlags);
 
     REQUIRE(reg3.x == 3.0f);
     REQUIRE(reg3.y == 0);
@@ -61,7 +62,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Multiplying the x field leaves the other fields unchanged")
   {
-    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD);
+    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == -2.0f);
     REQUIRE(reg3.y == 10);
@@ -71,7 +72,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Multiplying the y field leaves the other fields unchanged")
   {
-    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD);
+    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 12.25f);
@@ -81,7 +82,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Multiplying the z field leaves the other fields unchanged")
   {
-    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD);
+    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -91,7 +92,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Multiplying the w field leaves the other fields unchanged")
   {
-    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD);
+    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -103,7 +104,7 @@ TEST_CASE("FP Register Tests")
   {
     FPRegister reg3;
 
-    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS);
+    mulFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS, &resultFlags);
 
     REQUIRE(reg3.x == -2.0f);
     REQUIRE(reg3.y == 12.25f);
@@ -113,7 +114,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Dividing the x field leaves the other fields unchanged")
   {
-    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD);
+    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == -0.5f);
     REQUIRE(reg3.y == 10);
@@ -123,7 +124,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Dividing the y field leaves the other fields unchanged")
   {
-    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD);
+    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 1.0f);
@@ -133,7 +134,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Dividing the z field leaves the other fields unchanged")
   {
-    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD);
+    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -143,7 +144,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Dividing the w field leaves the other fields unchanged")
   {
-    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD);
+    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -153,7 +154,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("All fields of two FP Registers can be divided")
   {
-    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS);
+    divFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS, &resultFlags);
 
     REQUIRE(reg3.x == -0.5f);
     REQUIRE(reg3.y == 1.0f);
@@ -163,7 +164,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Adding the x field leaves the other fields unchanged")
   {
-    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD);
+    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_X_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == -1);
     REQUIRE(reg3.y == 10);
@@ -173,7 +174,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Adding the y field leaves the other fields unchanged")
   {
-    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD);
+    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Y_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 7);
@@ -183,7 +184,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Adding the z field leaves the other fields unchanged")
   {
-    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD);
+    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_Z_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -193,7 +194,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("Adding the w field leaves the other fields unchanged")
   {
-    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD);
+    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_W_FIELD, &resultFlags);
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
@@ -203,7 +204,7 @@ TEST_CASE("FP Register Tests")
 
   SECTION("All fields of two FP Registers can be added")
   {
-    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS);
+    addFPRegisters(&reg1, &reg2, &reg3, FP_REGISTER_ALL_FIELDS, &resultFlags);
 
     REQUIRE(reg3.x == -1);
     REQUIRE(reg3.y == 7);

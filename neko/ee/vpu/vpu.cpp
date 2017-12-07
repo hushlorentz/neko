@@ -226,7 +226,7 @@ void VPU::pipelineStarted(Pipeline * p)
       absFPRegisters(&fpRegisters[s1], &dest, fieldMask);
       break;
     case VPU_ADD:
-      addFPRegisters(&fpRegisters[s1], &fpRegisters[s2], &dest, fieldMask);
+      addFPRegisters(&fpRegisters[s1], &fpRegisters[s2], &dest, fieldMask, &macFlags);
       break;
   }
 
