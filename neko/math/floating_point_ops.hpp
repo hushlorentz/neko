@@ -9,13 +9,13 @@
 #include "fp_register.hpp"
 
 typedef union {
-  float f;
+  float float_representation;
   struct {
     unsigned int mantissa : 23;
     unsigned int exponent : 8;
     unsigned int sign : 1;
-  } parts;
-} float_cast;
+  } components;
+} num_32bits;
 
 float addFP(float f1, float f2, uint8_t * resultFlags);
 float mulFP(float f1, float f2, uint8_t * resultFlags);

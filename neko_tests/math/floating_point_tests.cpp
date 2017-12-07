@@ -45,12 +45,12 @@ TEST_CASE("Testing the floating point conventions")
     {
       float a1 = std::numeric_limits<float>::infinity();
       float a2 = 7.0f;
-      float_cast fu;
+      num_32bits num;
 
-      fu.f = mulFP(a1, a2, &resultFlags);
+      num.float_representation = mulFP(a1, a2, &resultFlags);
 
-      REQUIRE(fu.parts.mantissa == 2);
-      REQUIRE(fu.parts.exponent == 0x80);
+      REQUIRE(num.components.mantissa == 2);
+      REQUIRE(num.components.exponent == 0x80);
       REQUIRE(hasFlag(resultFlags, FP_FLAG_OVERFLOW));
     }
 
@@ -58,12 +58,12 @@ TEST_CASE("Testing the floating point conventions")
     {
       float a1 = 0;
       float a2 = 0;
-      float_cast fu;
+      num_32bits num;
 
-      fu.f = divFP(a1, a2, &resultFlags);
+      num.float_representation = divFP(a1, a2, &resultFlags);
 
-      REQUIRE(fu.parts.mantissa == 2);
-      REQUIRE(fu.parts.exponent == 0x80);
+      REQUIRE(num.components.mantissa == 2);
+      REQUIRE(num.components.exponent == 0x80);
     }
 
     SECTION("Dividing the smallest normalized value by 5 causes an underflow and returns 0 and sets the underflow flag")

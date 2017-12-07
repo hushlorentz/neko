@@ -1,27 +1,27 @@
 #include "floating_point_ops.hpp"
 #include <cfloat>
 
-float convertFromIEEE(float f, uint8_t * resultFlags)
+float convertFromIEEE(float value, uint8_t * resultFlags)
 {
   //deal with sign bit for returns
-  float_cast fu;
-  fu.f = f;
+  num_32bits num;
+  num.float_representation = value;
 
-  if (fu.parts.exponent == 0xff)
+  if (num.components.exponent == 0xff)
   {
-    fu.parts.exponent = 0x80;
-    fu.parts.mantissa = 0x2;
+    num.components.exponent = 0x80;
+    num.components.mantissa = 0x2;
     *resultFlags |= FP_FLAG_OVERFLOW;
 
-    return fu.f;
+    return num.float_representation;
   }
-  if (fu.parts.exponent == 0 && fu.parts.mantissa > 0)
+  if (num.components.exponent == 0 && num.components.mantissa > 0)
   {
     *resultFlags |= FP_FLAG_UNDERFLOW;
     return 0;
   }
 
-  return f;
+  return value;
 }
 
 float addFP(float f1, float f2, uint8_t * resultFlags)
