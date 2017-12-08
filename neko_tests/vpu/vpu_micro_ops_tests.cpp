@@ -120,4 +120,24 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZZ));
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZW));
     }
+
+    SECTION("ADDing vectors sets the sign flags")
+    {
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF03, VPU_REGISTER_VF06, VPU_ADD, 0);
+      REQUIRE(vpu.hasMACFlag(VPU_FLAG_SX));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SY));
+      REQUIRE(vpu.hasMACFlag(VPU_FLAG_SZ));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SW));
+    }
+
+    SECTION("ADDing vectors resets the sign flags")
+    {
+      addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF06, VPU_REGISTER_VF03, VPU_ADD, 0);
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF15, VPU_ADD, 0);
+
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SX));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SY));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SZ));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SW));
+    }
 }

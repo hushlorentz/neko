@@ -14,10 +14,14 @@
 #define VPU_MODE_MICRO 1
 #define VPU_MODE_MACRO 2
 
-#define VPU_FLAG_ZX 0x1
-#define VPU_FLAG_ZY 0x2
-#define VPU_FLAG_ZZ 0x4
-#define VPU_FLAG_ZW 0x8
+#define VPU_FLAG_ZW 0x1
+#define VPU_FLAG_ZZ 0x2
+#define VPU_FLAG_ZY 0x4
+#define VPU_FLAG_ZX 0x8
+#define VPU_FLAG_SW 0x10
+#define VPU_FLAG_SZ 0x20
+#define VPU_FLAG_SY 0x40
+#define VPU_FLAG_SX 0x80
 
 using namespace std;
 

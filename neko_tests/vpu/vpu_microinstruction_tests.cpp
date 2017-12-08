@@ -5,11 +5,6 @@ TEST_CASE("VPU Microinstruction Tests")
 {
     VPU vpu;
     
-    SECTION("Implement tests for section 2.3 in VU manual")
-    {
-        //WARN("Add these tests");
-    }
-
     SECTION("Microinstruction programs can be started by specifying the execution address in the VIFcode MSCAL")
     {
       //WARN("Add this test");
