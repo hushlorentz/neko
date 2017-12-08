@@ -53,6 +53,8 @@ TEST_CASE("VPU Microinstruction Operation Tests")
     vpu.useThreads = false;
     vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.4f, -1.0f, 4.5f);
     vpu.loadFPRegister(VPU_REGISTER_VF10, -2.5f, 2.4f, 10.0f, 9.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF05, 5.0f, -6.4f, 10.0f, -9.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, -5.0f, 6.4f, -10.0f, 9.0f);
     vector<uint8_t> instructions;
     
     SECTION("ABS stores the absolute value of src vector in dest vector")
@@ -97,5 +99,25 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 13.5f);
       REQUIRE(vpu.elapsedCycles() == 7);
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    }
+
+    SECTION("ADDing vectors of opposite direction, but equal magnitude sets the zero flags.")
+    {
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF15, VPU_ADD, 0);
+      REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZX));
+      REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZY));
+      REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZZ));
+      REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZW));
+    }
+
+    SECTION("ADDing vectors of opposite direction, but equal magnitude and then doing a second addition unsets the zero flags.")
+    {
+      addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF15, VPU_ADD, 0);
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF03, VPU_REGISTER_VF06, VPU_REGISTER_VF04, VPU_ADD, 0);
+
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZX));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZY));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZZ));
+      REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZW));
     }
 }

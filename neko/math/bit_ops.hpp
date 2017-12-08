@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
-bool hasFlag(uint64_t value, uint64_t flag);
+#define setFlag(value, flag) (value |= flag)
+#define unsetFlag(value, flag) (value &= ~flag)
+#define hasFlag(value, flag) ((value & flag) == flag)
 
 #endif

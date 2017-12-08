@@ -10,7 +10,7 @@
 
 using namespace std;
 
-VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), macFlags(0), statusFlags(0), clippingFlags(0)
+VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0), clippingFlags(0)
 {
   initMemory();
   initFPRegisters();
@@ -226,7 +226,7 @@ void VPU::pipelineStarted(Pipeline * p)
       absFPRegisters(&fpRegisters[s1], &dest, fieldMask);
       break;
     case VPU_ADD:
-      addFPRegisters(&fpRegisters[s1], &fpRegisters[s2], &dest, fieldMask, &macFlags);
+      addFPRegisters(&fpRegisters[s1], &fpRegisters[s2], &dest, fieldMask, &MACFlags);
       break;
   }
 
@@ -235,14 +235,31 @@ void VPU::pipelineStarted(Pipeline * p)
 
 void VPU::pipelineFinished(Pipeline * p)
 {
+  FPRegister *destReg = &fpRegisters[p->destReg];
+
   switch (p->opCode)
   {
     case VPU_ABS:
     case VPU_ADD:
-      fpRegisters[p->destReg].x = p->xResult;
-      fpRegisters[p->destReg].y = p->yResult;
-      fpRegisters[p->destReg].z = p->zResult;
-      fpRegisters[p->destReg].w = p->wResult;
+      destReg->x = p->xResult;
+      destReg->y = p->yResult;
+      destReg->z = p->zResult;
+      destReg->w = p->wResult;
       break;
   }
+
+  setMACFlagsFromRegister(destReg);
+}
+
+bool VPU::hasMACFlag(uint16_t flag)
+{
+  return hasFlag(MACFlags, flag);
+}
+
+void VPU::setMACFlagsFromRegister(FPRegister * reg)
+{
+  (reg->x == 0) ? setFlag(MACFlags, VPU_FLAG_ZX) : unsetFlag(MACFlags, VPU_FLAG_ZX);
+  (reg->y == 0) ? setFlag(MACFlags, VPU_FLAG_ZY) : unsetFlag(MACFlags, VPU_FLAG_ZY);
+  (reg->z == 0) ? setFlag(MACFlags, VPU_FLAG_ZZ) : unsetFlag(MACFlags, VPU_FLAG_ZZ);
+  (reg->w == 0) ? setFlag(MACFlags, VPU_FLAG_ZW) : unsetFlag(MACFlags, VPU_FLAG_ZW);
 }

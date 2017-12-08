@@ -14,6 +14,11 @@
 #define VPU_MODE_MICRO 1
 #define VPU_MODE_MACRO 2
 
+#define VPU_FLAG_ZX 0x1
+#define VPU_FLAG_ZY 0x2
+#define VPU_FLAG_ZZ 0x4
+#define VPU_FLAG_ZW 0x8
+
 using namespace std;
 
 class VPU : public PipelineHandler
@@ -36,6 +41,7 @@ class VPU : public PipelineHandler
     void uploadMicroInstructions(vector<uint8_t> * instructions);
     virtual void pipelineStarted(Pipeline * p);
     virtual void pipelineFinished(Pipeline * p);
+    bool hasMACFlag(uint16_t flag);
   private:
     uint8_t state;
     uint32_t cycles;
@@ -49,7 +55,7 @@ class VPU : public PipelineHandler
     float qRegister;
     float pRegister;
     uint32_t rRegister;
-    uint16_t macFlags;
+    uint16_t MACFlags;
     uint16_t statusFlags;
     uint64_t clippingFlags;
     set<uint16_t> type0OpCodes;
@@ -74,6 +80,7 @@ class VPU : public PipelineHandler
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
     uint8_t destBitsFromInstruction(uint32_t instruction);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
+    void setMACFlagsFromRegister(FPRegister * reg);
 };
 
 #endif
