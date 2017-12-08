@@ -249,11 +249,18 @@ void VPU::pipelineFinished(Pipeline * p)
   }
 
   setMACFlagsFromRegister(destReg);
+  setStatusFlagsFromMACFlags();
+  setStickyFlagsFromStatusFlags();
 }
 
 bool VPU::hasMACFlag(uint16_t flag)
 {
   return hasFlag(MACFlags, flag);
+}
+
+bool VPU::hasStatusFlag(uint16_t flag)
+{
+  return hasFlag(statusFlags, flag);
 }
 
 void VPU::setMACFlagsFromRegister(FPRegister * reg)
@@ -266,4 +273,23 @@ void VPU::setMACFlagsFromRegister(FPRegister * reg)
   (reg->y < 0) ? setFlag(MACFlags, VPU_FLAG_SY) : unsetFlag(MACFlags, VPU_FLAG_SY);
   (reg->z < 0) ? setFlag(MACFlags, VPU_FLAG_SZ) : unsetFlag(MACFlags, VPU_FLAG_SZ);
   (reg->w < 0) ? setFlag(MACFlags, VPU_FLAG_SW) : unsetFlag(MACFlags, VPU_FLAG_SW);
+}
+
+void VPU::setStatusFlagsFromMACFlags()
+{
+  ((MACFlags & VPU_Z_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_Z) : unsetFlag(statusFlags, VPU_FLAG_Z);
+  ((MACFlags & VPU_S_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_S) : unsetFlag(statusFlags, VPU_FLAG_S);
+}
+
+void VPU::setStickyFlagsFromStatusFlags()
+{
+  if (hasFlag(statusFlags, VPU_FLAG_Z) || hasFlag(statusFlags, VPU_FLAG_Z_STICKY))
+  {
+    setFlag(statusFlags, VPU_FLAG_Z_STICKY);
+  }
+
+  if (hasFlag(statusFlags, VPU_FLAG_S) || hasFlag(statusFlags, VPU_FLAG_S_STICKY))
+  {
+    setFlag(statusFlags, VPU_FLAG_S_STICKY);
+  }
 }

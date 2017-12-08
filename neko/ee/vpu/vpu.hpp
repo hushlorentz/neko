@@ -23,6 +23,14 @@
 #define VPU_FLAG_SY 0x40
 #define VPU_FLAG_SX 0x80
 
+#define VPU_FLAG_Z 0x1
+#define VPU_FLAG_S 0x2
+#define VPU_FLAG_Z_STICKY 0x40
+#define VPU_FLAG_S_STICKY 0x80
+
+#define VPU_Z_BITS_MASK 0xf
+#define VPU_S_BITS_MASK 0xf0
+
 using namespace std;
 
 class VPU : public PipelineHandler
@@ -46,6 +54,7 @@ class VPU : public PipelineHandler
     virtual void pipelineStarted(Pipeline * p);
     virtual void pipelineFinished(Pipeline * p);
     bool hasMACFlag(uint16_t flag);
+    bool hasStatusFlag(uint16_t flag);
   private:
     uint8_t state;
     uint32_t cycles;
@@ -85,6 +94,8 @@ class VPU : public PipelineHandler
     uint8_t destBitsFromInstruction(uint32_t instruction);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
     void setMACFlagsFromRegister(FPRegister * reg);
+    void setStatusFlagsFromMACFlags();
+    void setStickyFlagsFromStatusFlags();
 };
 
 #endif

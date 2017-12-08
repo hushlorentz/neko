@@ -108,6 +108,8 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZY));
       REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZZ));
       REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZW));
+      REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z));
+      REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z_STICKY));
     }
 
     SECTION("ADDing vectors of opposite direction, but equal magnitude and then doing a second addition unsets the zero flags.")
@@ -119,6 +121,8 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZY));
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZZ));
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZW));
+      REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_Z));
+      REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z_STICKY));
     }
 
     SECTION("ADDing vectors sets the sign flags")
@@ -128,6 +132,8 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SY));
       REQUIRE(vpu.hasMACFlag(VPU_FLAG_SZ));
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SW));
+      REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S));
+      REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S_STICKY));
     }
 
     SECTION("ADDing vectors resets the sign flags")
@@ -139,5 +145,7 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SY));
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SZ));
       REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SW));
+      REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_S));
+      REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S_STICKY));
     }
 }
