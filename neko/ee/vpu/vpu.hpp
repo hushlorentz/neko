@@ -96,6 +96,7 @@ class VPU : public PipelineHandler
     void setMACFlagsFromRegister(FPRegister * reg);
     void setStatusFlagsFromMACFlags();
     void setStickyFlagsFromStatusFlags();
+    void updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p);
 };
 
 #endif

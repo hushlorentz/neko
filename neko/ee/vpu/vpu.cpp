@@ -240,17 +240,23 @@ void VPU::pipelineFinished(Pipeline * p)
   switch (p->opCode)
   {
     case VPU_ABS:
+      updateDestinationRegisterWithPipelineResult(destReg, p);
+      break;
     case VPU_ADD:
-      destReg->x = p->xResult;
-      destReg->y = p->yResult;
-      destReg->z = p->zResult;
-      destReg->w = p->wResult;
+      updateDestinationRegisterWithPipelineResult(destReg, p);
+      setMACFlagsFromRegister(destReg);
+      setStatusFlagsFromMACFlags();
+      setStickyFlagsFromStatusFlags();
       break;
   }
+}
 
-  setMACFlagsFromRegister(destReg);
-  setStatusFlagsFromMACFlags();
-  setStickyFlagsFromStatusFlags();
+void VPU::updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p)
+{
+  destReg->x = p->xResult;
+  destReg->y = p->yResult;
+  destReg->z = p->zResult;
+  destReg->w = p->wResult;
 }
 
 bool VPU::hasMACFlag(uint16_t flag)
