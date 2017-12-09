@@ -25,5 +25,6 @@ void subFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t f
 void mulFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
 void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
 void absFPRegisters(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void addFloatToRegister(FPRegister * r1, float value, FPRegister * dest, uint8_t fieldMask, uint16_t * resultFlags);
 
 #endif

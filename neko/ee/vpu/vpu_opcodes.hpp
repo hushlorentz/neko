@@ -27,5 +27,6 @@
 
 #define VPU_ABS 0x1fd
 #define VPU_ADD 0x28
+#define VPU_ADDi 0x22
 
 #endif

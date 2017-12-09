@@ -64,20 +64,21 @@ void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t f
 
 void absFPRegisters(FPRegister * source, FPRegister * dest, uint8_t fieldMask)
 {
-  if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
-  {
-    dest->x = abs(source->x);
-  }
-  if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
-  {
-    dest->y = abs(source->y);
-  }
-  if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
-  {
-    dest->z = abs(source->z);
-  }
-  if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
-  {
-    dest->w = abs(source->w);
-  }
+  dest->x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? abs(source->x) : dest->x;
+  dest->y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? abs(source->y) : dest->y;
+  dest->z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? abs(source->z) : dest->z;
+  dest->w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? abs(source->w) : dest->w;
+}
+
+void addFloatToRegister(FPRegister * r1, float value, FPRegister * dest, uint8_t fieldMask, uint16_t * resultFlags)
+{
+  uint8_t xResultFlags = 0;
+  uint8_t yResultFlags = 0;
+  uint8_t zResultFlags = 0;
+  uint8_t wResultFlags = 0;
+
+  dest->x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? addFP(r1->x, value, &xResultFlags) : dest->x;
+  dest->y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? addFP(r1->y, value, &yResultFlags) : dest->y;
+  dest->z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? addFP(r1->z, value, &zResultFlags) : dest->z;
+  dest->w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? addFP(r1->w, value, &wResultFlags) : dest->w;
 }

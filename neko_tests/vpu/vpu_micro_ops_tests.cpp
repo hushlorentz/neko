@@ -148,4 +148,16 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_S));
       REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S_STICKY));
     }
+
+    SECTION("ADDi stores the addition of the iRegister and the src vector in dest vector")
+    {
+      vpu.loadIRegister(-4.5f);
+
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, 0, VPU_REGISTER_VF03, VPU_REGISTER_VF20, VPU_ADDi, 0);
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF20)->x == -9.5f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF20)->y == -6.9f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF20)->z == -5.5f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF20)->w == 0);
+    }
 }

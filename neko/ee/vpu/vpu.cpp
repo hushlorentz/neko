@@ -40,6 +40,7 @@ void VPU::initOpCodeSets()
 {
   type3OpCodes.insert(VPU_ABS);
   type1OpCodes.insert(VPU_ADD);
+  type1OpCodes.insert(VPU_ADDi);
 }
 
 void VPU::initPipelineOrchestrator()
@@ -228,6 +229,9 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_ADD:
       addFPRegisters(&fpRegisters[s1], &fpRegisters[s2], &dest, fieldMask, &MACFlags);
       break;
+    case VPU_ADDi:
+      addFloatToRegister(&fpRegisters[s1], iRegister, &dest, fieldMask, &MACFlags);
+      break;
   }
 
   p->setFloatResult(dest.x, dest.y, dest.z, dest.w);
@@ -243,6 +247,7 @@ void VPU::pipelineFinished(Pipeline * p)
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     case VPU_ADD:
+    case VPU_ADDi:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       setMACFlagsFromRegister(destReg);
       setStatusFlagsFromMACFlags();
@@ -298,4 +303,9 @@ void VPU::setStickyFlagsFromStatusFlags()
   {
     setFlag(statusFlags, VPU_FLAG_S_STICKY);
   }
+}
+
+void VPU::loadIRegister(float value)
+{
+  iRegister = value;
 }
