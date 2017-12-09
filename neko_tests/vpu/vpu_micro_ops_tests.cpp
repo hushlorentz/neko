@@ -160,4 +160,16 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF20)->z == -5.5f);
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF20)->w == 0);
     }
+
+    SECTION("ADDq stores the addition of the qRegister and the src vector in dest vector")
+    {
+      vpu.loadQRegister(5.0f);
+
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Z_BIT | VPU_DEST_W_BIT, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF21, VPU_ADDq, 0);
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF21)->x == 10.0f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF21)->y == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF21)->z == 15.0f);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF21)->w == -4.0f);
+    }
 }

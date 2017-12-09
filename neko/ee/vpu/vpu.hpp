@@ -56,6 +56,7 @@ class VPU : public PipelineHandler
     bool hasMACFlag(uint16_t flag);
     bool hasStatusFlag(uint16_t flag);
     void loadIRegister(float value);
+    void loadQRegister(float value);
   private:
     uint8_t state;
     uint32_t cycles;
