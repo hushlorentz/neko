@@ -51,10 +51,13 @@ TEST_CASE("VPU Microinstruction Operation Tests")
     VPU vpu;
     vpu.useThreads = false;
     vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.4f, -1.0f, 4.5f);
-    vpu.loadFPRegister(VPU_REGISTER_VF10, -2.5f, 2.4f, 10.0f, 9.0f);
     vpu.loadFPRegister(VPU_REGISTER_VF05, 5.0f, -6.4f, 10.0f, -9.0f);
     vpu.loadFPRegister(VPU_REGISTER_VF06, -5.0f, 6.4f, -10.0f, 9.0f);
     vpu.loadFPRegister(VPU_REGISTER_VF07, 10, 10, 10, 10);
+    vpu.loadFPRegister(VPU_REGISTER_VF08, -4.5f, 5, -2.75f, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF09, 5.5f, -4, 3.75f, -3);
+    vpu.loadFPRegister(VPU_REGISTER_VF10, -2.5f, 2.4f, 10.0f, 9.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF11, -5, 2.4f, 10.0f, 12.5f);
     vector<uint8_t> instructions;
     
     SECTION("ABS stores the absolute value of src vector in dest vector")
@@ -205,11 +208,21 @@ TEST_CASE("VPU Microinstruction Operation Tests")
 
     SECTION("ADDw stores the addition of the w field of the first src vector to each field of the second src vector in the dest vector")
     {
-      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_W_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF07, VPU_ADDw);
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_W_BIT, VPU_REGISTER_VF11, VPU_REGISTER_VF05, VPU_REGISTER_VF07, VPU_ADDw);
 
-      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 10);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 17.5f);
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == 10);
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->z == 10);
-      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == 3.5f);
     }
+
+    //SECTION("ADDA stores the addition of the first src vector to the second src vector in the accumulator")
+    //{
+      //executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF08, VPU_REGISTER_VF09, 0, VPU_ADDA);
+
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 1);
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == 1);
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->z == 1);
+      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == 1);
+    //}
 }

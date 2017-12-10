@@ -8,6 +8,13 @@
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
+#define NUM_TYPE1_OPCODES 7
+uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw};
+
+#define NUM_TYPE3_OPCODES 2
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA};
+
+
 using namespace std;
 
 VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0), clippingFlags(0)
@@ -38,14 +45,15 @@ void VPU::initIntRegisters()
 
 void VPU::initOpCodeSets()
 {
-  type3OpCodes.insert(VPU_ABS);
-  type1OpCodes.insert(VPU_ADD);
-  type1OpCodes.insert(VPU_ADDi);
-  type1OpCodes.insert(VPU_ADDq);
-  type1OpCodes.insert(VPU_ADDx);
-  type1OpCodes.insert(VPU_ADDy);
-  type1OpCodes.insert(VPU_ADDz);
-  type1OpCodes.insert(VPU_ADDw);
+  for (int i = 0; i < NUM_TYPE1_OPCODES; i++)
+  {
+    type1OpCodes.insert(type1OpCodeList[i]);
+  }
+
+  for (int i = 0; i < NUM_TYPE3_OPCODES; i++)
+  {
+    type3OpCodes.insert(type3OpCodeList[i]);
+  }
 }
 
 void VPU::initPipelineOrchestrator()
@@ -70,10 +78,7 @@ uint16_t VPU::intRegisterValue(int registerID)
 
 void VPU::loadFPRegister(int registerID, float x, float y, float z, float w)
 {
-  fpRegisters[registerID].x = x;
-  fpRegisters[registerID].y = y;
-  fpRegisters[registerID].z = z;
-  fpRegisters[registerID].w = w;
+  fpRegisters[registerID].load(x, y, z, w);
 }
 
 void VPU::loadIntRegister(int registerID, int value)
@@ -188,7 +193,7 @@ void VPU::processUpperType1Instruction(uint32_t upperInstruction)
   uint8_t fdReg = regFromInstruction(upperInstruction, VPU_FD_REG_SHIFT);
   uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
 
-  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, fsReg, ftReg, fdReg, fieldMask, 0); 
+  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, ftReg, fsReg, fdReg, fieldMask, 0); 
 }
 
 void VPU::processUpperType3Instruction(uint32_t upperInstruction)
@@ -221,37 +226,40 @@ bool VPU::stopBitSet(uint32_t instruction)
 void VPU::pipelineStarted(Pipeline * p)
 {
   uint16_t opCode = p->opCode;
-  uint8_t s1 = p->sourceReg1;
-  uint8_t s2 = p->sourceReg2;
+  uint8_t ft = p->ftReg;
+  uint8_t fs = p->fsReg;
   uint8_t fieldMask = p->destFieldMask;
-  FPRegister *destReg = &fpRegisters[p->destReg];
+  FPRegister *destReg = &fpRegisters[p->fdReg];
   FPRegister dest(destReg->x, destReg->y, destReg->z, destReg->w);
 
   switch (opCode)
   {
     case VPU_ABS:
-      absFPRegisters(&fpRegisters[s1], &dest, fieldMask);
+      absFPRegisters(&fpRegisters[ft], &dest, fieldMask);
       break;
     case VPU_ADD:
-      addFPRegisters(&fpRegisters[s1], &fpRegisters[s2], &dest, fieldMask, &MACFlags);
+      addFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDi:
-      addFloatToRegister(&fpRegisters[s1], iRegister, &dest, fieldMask, &MACFlags);
+      addFloatToRegister(&fpRegisters[fs], iRegister, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDq:
-      addFloatToRegister(&fpRegisters[s1], qRegister, &dest, fieldMask, &MACFlags);
+      addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDx:
-      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].x, &dest, fieldMask, &MACFlags);
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].x, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDy:
-      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].y, &dest, fieldMask, &MACFlags);
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].y, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDz:
-      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].z, &dest, fieldMask, &MACFlags);
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].z, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDw:
-      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].w, &dest, fieldMask, &MACFlags);
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].w, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDA:
+      addFloatToRegister(&fpRegisters[ft], fpRegisters[fs].w, &dest, fieldMask, &MACFlags);
       break;
   }
 
@@ -260,7 +268,7 @@ void VPU::pipelineStarted(Pipeline * p)
 
 void VPU::pipelineFinished(Pipeline * p)
 {
-  FPRegister *destReg = &fpRegisters[p->destReg];
+  FPRegister *destReg = &fpRegisters[p->fdReg];
 
   switch (p->opCode)
   {
@@ -274,6 +282,7 @@ void VPU::pipelineFinished(Pipeline * p)
     case VPU_ADDy:
     case VPU_ADDz:
     case VPU_ADDw:
+    case VPU_ADDA:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       setMACFlagsFromRegister(destReg);
       setStatusFlagsFromMACFlags();

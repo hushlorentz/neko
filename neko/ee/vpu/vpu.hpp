@@ -40,6 +40,7 @@ class VPU : public PipelineHandler
     vector<uint8_t> microMem;
     vector<uint8_t> vuMem;
     bool useThreads;
+    FPRegister accumulator;
 
     uint8_t getState();
     FPRegister *fpRegisterValue(int registerID);
@@ -65,7 +66,6 @@ class VPU : public PipelineHandler
     uint16_t microMemPC;
     vector<FPRegister> fpRegisters;
     vector<uint16_t> intRegisters;
-    FPRegister accRegisters;
     float iRegister;
     float qRegister;
     float pRegister;
@@ -78,6 +78,7 @@ class VPU : public PipelineHandler
     set<uint16_t> type2OpCodes;
     set<uint16_t> type3OpCodes;
     PipelineOrchestrator orchestrator;
+    FPRegister virtualDestRegister;
 
     void initMemory();
     void initFPRegisters();

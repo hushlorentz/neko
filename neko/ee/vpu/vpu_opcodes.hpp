@@ -29,5 +29,6 @@
 #define VPU_ADDy 0x1
 #define VPU_ADDz 0x2
 #define VPU_ADDw 0x3
+#define VPU_ADDA 0x2bc
 
 #endif

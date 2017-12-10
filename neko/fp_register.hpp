@@ -14,6 +14,8 @@ class FPRegister
   public:
     FPRegister();
     FPRegister(float x, float y, float z, float w);
+    void load(float x, float y, float z, float w);
+    void copyFrom(FPRegister * srcReg);
     float x;
     float y;
     float z;

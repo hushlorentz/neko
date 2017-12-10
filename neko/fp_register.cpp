@@ -10,6 +10,22 @@ FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w
 {
 }
 
+void FPRegister::load(float newX, float newY, float newZ, float newW)
+{
+  x = newX;
+  y = newY;
+  z = newZ;
+  w = newW;
+}
+
+void FPRegister::copyFrom(FPRegister * srcReg)
+{
+  x = srcReg->x;
+  y = srcReg->y;
+  z = srcReg->z;
+  w = srcReg->w;
+}
+
 void addFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags)
 {
   uint8_t xResultFlags = 0;
