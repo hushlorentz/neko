@@ -42,6 +42,10 @@ void VPU::initOpCodeSets()
   type1OpCodes.insert(VPU_ADD);
   type1OpCodes.insert(VPU_ADDi);
   type1OpCodes.insert(VPU_ADDq);
+  type1OpCodes.insert(VPU_ADDx);
+  type1OpCodes.insert(VPU_ADDy);
+  type1OpCodes.insert(VPU_ADDz);
+  type1OpCodes.insert(VPU_ADDw);
 }
 
 void VPU::initPipelineOrchestrator()
@@ -220,7 +224,8 @@ void VPU::pipelineStarted(Pipeline * p)
   uint8_t s1 = p->sourceReg1;
   uint8_t s2 = p->sourceReg2;
   uint8_t fieldMask = p->destFieldMask;
-  FPRegister dest;
+  FPRegister *destReg = &fpRegisters[p->destReg];
+  FPRegister dest(destReg->x, destReg->y, destReg->z, destReg->w);
 
   switch (opCode)
   {
@@ -235,6 +240,18 @@ void VPU::pipelineStarted(Pipeline * p)
       break;
     case VPU_ADDq:
       addFloatToRegister(&fpRegisters[s1], qRegister, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDx:
+      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].x, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDy:
+      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].y, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDz:
+      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].z, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDw:
+      addFloatToRegister(&fpRegisters[s1], fpRegisters[s2].w, &dest, fieldMask, &MACFlags);
       break;
   }
 
@@ -253,6 +270,10 @@ void VPU::pipelineFinished(Pipeline * p)
     case VPU_ADD:
     case VPU_ADDi:
     case VPU_ADDq:
+    case VPU_ADDx:
+    case VPU_ADDy:
+    case VPU_ADDz:
+    case VPU_ADDw:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       setMACFlagsFromRegister(destReg);
       setStatusFlagsFromMACFlags();

@@ -17,10 +17,6 @@
 #define VPU_FS_REG_SHIFT 11
 #define VPU_FD_REG_SHIFT 6
 #define VPU_REG_MASK 0x1f
-#define VPU_BC_W 0x3
-#define VPU_BC_Z 0x2
-#define VPU_BC_Y 0x1
-#define VPU_BC_X 0
 
 #define VPU_TYPE1_MASK 0x3f
 #define VPU_TYPE3_MASK 0x7ff
@@ -29,5 +25,9 @@
 #define VPU_ADD 0x28
 #define VPU_ADDi 0x22
 #define VPU_ADDq 0x20
+#define VPU_ADDx 0
+#define VPU_ADDy 0x1
+#define VPU_ADDz 0x2
+#define VPU_ADDw 0x3
 
 #endif
