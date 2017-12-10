@@ -175,35 +175,22 @@ uint32_t VPU::nextLowerInstruction()
 
 void VPU::processUpperInstruction(uint32_t upperInstruction)
 {
-  if (type1OpCodes.find(upperInstruction & VPU_TYPE1_MASK) != type1OpCodes.end())
-  {
-    processUpperType1Instruction(upperInstruction);
-  }
-  else if (type3OpCodes.find(upperInstruction & VPU_TYPE3_MASK) != type3OpCodes.end())
-  {
-    processUpperType3Instruction(upperInstruction);
-  }
-}
-
-void VPU::processUpperType1Instruction(uint32_t upperInstruction)
-{
-  uint16_t opCode = upperInstruction & VPU_TYPE1_MASK;
+  uint16_t opCode = 0;
   uint8_t ftReg = regFromInstruction(upperInstruction, VPU_FT_REG_SHIFT);
   uint8_t fsReg = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
   uint8_t fdReg = regFromInstruction(upperInstruction, VPU_FD_REG_SHIFT);
   uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
 
-  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, ftReg, fsReg, fdReg, fieldMask, 0); 
-}
-
-void VPU::processUpperType3Instruction(uint32_t upperInstruction)
-{
-  uint16_t opCode = upperInstruction & VPU_TYPE3_MASK;
-  uint8_t ftReg = regFromInstruction(upperInstruction, VPU_FT_REG_SHIFT);
-  uint8_t fsReg = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
-  uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
-
-  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, fsReg, 0, ftReg, fieldMask, 0); 
+  if (type1OpCodes.find(upperInstruction & VPU_TYPE1_MASK) != type1OpCodes.end())
+  {
+    opCode = upperInstruction & VPU_TYPE1_MASK;
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, ftReg, fsReg, fdReg, fieldMask, 0); 
+  }
+  else if (type3OpCodes.find(upperInstruction & VPU_TYPE3_MASK) != type3OpCodes.end())
+  {
+    opCode = upperInstruction & VPU_TYPE3_MASK;
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, fsReg, 0, ftReg, fieldMask, 0); 
+  }
 }
 
 uint8_t VPU::regFromInstruction(uint32_t instruction, uint8_t shift)
