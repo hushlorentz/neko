@@ -91,8 +91,6 @@ class VPU : public PipelineHandler
     uint32_t nextUpperInstruction();
     uint32_t nextLowerInstruction();
     void processUpperInstruction(uint32_t upperInstruction);
-    void processUpperType1Instruction(uint32_t upperInstruction);
-    void processUpperType3Instruction(uint32_t upperInstruction);
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
     uint8_t destBitsFromInstruction(uint32_t instruction);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
