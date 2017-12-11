@@ -66,7 +66,7 @@ void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
       continue;
     }
 
-    if (pipeline->srcReg1 == checkPipeline->destReg && (pipeline->destFieldMask & checkPipeline->destFieldMask))
+    if ((pipeline->srcReg1 == checkPipeline->destReg || (pipeline->source2FieldMask == 0 && pipeline->srcReg2 == checkPipeline->destReg)) && (pipeline->destFieldMask & checkPipeline->destFieldMask))
     {
       stalling = true;
     }

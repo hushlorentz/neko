@@ -87,13 +87,25 @@ TEST_CASE("VPU Pipeline Tests")
     REQUIRE(runOrchestrator(&orchestrator, cycles) == 7);
   }
 
-  SECTION("Two FMAC Pipelines cause a stall if the second instruction reads from the first instruction's output vector-field pair")
+  SECTION("Two FMAC Pipelines cause a stall if the second instruction's first vector reads from the first instruction's output vector-field pair")
   {
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
     orchestrator.update();
     cycles++;
 
     orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF02, 0, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, 0);
+
+    cycles = runOrchestrator(&orchestrator, cycles);
+    REQUIRE(cycles == 10);
+  }
+
+  SECTION("Two FMAC Pipelines cause a stall if the second instruction's second vector reads from the first instruction's output vector-field pair")
+  {
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, VPU_REGISTER_VF01, 0, VPU_REGISTER_VF02, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD, 0);
+    orchestrator.update();
+    cycles++;
+
+    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, 0, 0, VPU_REGISTER_VF02, VPU_REGISTER_VF03, FP_REGISTER_Y_FIELD, 0);
 
     cycles = runOrchestrator(&orchestrator, cycles);
     REQUIRE(cycles == 10);

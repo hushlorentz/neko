@@ -186,8 +186,9 @@ void VPU::processUpperInstruction(uint32_t upperInstruction)
   uint8_t srcReg2 = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
   uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
   uint8_t destReg = destRegFromOpCodeAndInstruction(opCode, upperInstruction);
+  uint8_t src2Mask = src2MaskFromOpCodeAndInstruction(opCode, upperInstruction);
 
-  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, 0); 
+  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, src2Mask); 
 }
 
 uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
@@ -228,6 +229,23 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
       return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
     default:
       return regFromInstruction(instruction, VPU_FD_REG_SHIFT);
+  }
+}
+
+uint8_t VPU::src2MaskFromOpCodeAndInstruction(uint16_t opCode, uint32_t upperInstruction)
+{
+  switch (opCode)
+  {
+    case VPU_ADDx:
+      return FP_REGISTER_X_FIELD;
+    case VPU_ADDy:
+      return FP_REGISTER_Y_FIELD;
+    case VPU_ADDz:
+      return FP_REGISTER_Z_FIELD;
+    case VPU_ADDw:
+      return FP_REGISTER_W_FIELD;
+    default:
+      return 0;
   }
 }
 

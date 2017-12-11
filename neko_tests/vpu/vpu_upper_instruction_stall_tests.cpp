@@ -29,6 +29,19 @@ TEST_CASE("VPU Upper Microinstruction Stall Tests")
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, 0, VPU_ABS);
 
     REQUIRE(vpu.elapsedCycles() == 19);
-    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+  }
+
+  SECTION("ADD after ABS causes a stall")
+  {
+    addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, 0, VPU_ABS);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF09, VPU_REGISTER_VF06, VPU_REGISTER_VF04, VPU_ADD);
+    REQUIRE(vpu.elapsedCycles() == 11);
+  }
+
+  SECTION("ADDx after ADD causes a stall")
+  {
+    addSingleUpperInstruction(&instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF07, VPU_ADD);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF08, VPU_REGISTER_VF07, VPU_REGISTER_VF04, VPU_ADDx);
+    REQUIRE(vpu.elapsedCycles() == 11);
   }
 }
