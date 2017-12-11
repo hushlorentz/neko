@@ -216,13 +216,14 @@ TEST_CASE("VPU Microinstruction Operation Tests")
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == 3.5f);
     }
 
-    //SECTION("ADDA stores the addition of the first src vector to the second src vector in the accumulator")
-    //{
-      //executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF08, VPU_REGISTER_VF09, 0, VPU_ADDA);
+    SECTION("ADDA stores the addition of the first src vector to the second src vector in the accumulator")
+    {
+      vpu.loadAccumulator(100, 100, 100, 100);
+      executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Y_BIT, VPU_REGISTER_VF08, VPU_REGISTER_VF09, 0, VPU_ADDA);
 
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 1);
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == 1);
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->z == 1);
-      //REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == 1);
-    //}
+      REQUIRE(vpu.accumulator.x == 1);
+      REQUIRE(vpu.accumulator.y == 1);
+      REQUIRE(vpu.accumulator.z == 100);
+      REQUIRE(vpu.accumulator.w == 100);
+    }
 }

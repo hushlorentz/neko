@@ -3,6 +3,7 @@
 #include "floating_point_ops.hpp"
 #include "vpu.hpp"
 #include "vpu_opcodes.hpp"
+#include "vpu_register_ids.hpp"
 
 #define MEMORY_SIZE 0x3fff
 #define NUM_FP_REGISTERS 32
@@ -84,6 +85,11 @@ void VPU::loadFPRegister(int registerID, float x, float y, float z, float w)
 void VPU::loadIntRegister(int registerID, int value)
 {
   intRegisters[registerID] = value;
+}
+
+void VPU::loadAccumulator(float x, float y, float z, float w)
+{
+  accumulator.load(x, y, z, w);
 }
 
 void VPU::resetCycles()
@@ -175,27 +181,54 @@ uint32_t VPU::nextLowerInstruction()
 
 void VPU::processUpperInstruction(uint32_t upperInstruction)
 {
-  uint16_t opCode = 0;
-  uint8_t ftReg = regFromInstruction(upperInstruction, VPU_FT_REG_SHIFT);
-  uint8_t fsReg = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
-  uint8_t fdReg = regFromInstruction(upperInstruction, VPU_FD_REG_SHIFT);
+  uint16_t opCode = opCodeFromInstruction(upperInstruction);
+  uint8_t srcReg1 = src1RegFromOpCodeAndInstruction(opCode, upperInstruction);
+  uint8_t srcReg2 = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
   uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
+  uint8_t destReg = destRegFromOpCodeAndInstruction(opCode, upperInstruction);
 
-  if (type1OpCodes.find(upperInstruction & VPU_TYPE1_MASK) != type1OpCodes.end())
+  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, 0); 
+}
+
+uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
+{
+  switch (opCode)
   {
-    opCode = upperInstruction & VPU_TYPE1_MASK;
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, ftReg, fsReg, fdReg, fieldMask, 0); 
+    case VPU_ABS:
+      return regFromInstruction(instruction, VPU_FS_REG_SHIFT);
+    default:
+      return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
   }
-  else if (type3OpCodes.find(upperInstruction & VPU_TYPE3_MASK) != type3OpCodes.end())
+}
+
+uint16_t VPU::opCodeFromInstruction(uint32_t instruction)
+{
+  if (type1OpCodes.find(instruction & VPU_TYPE1_MASK) != type1OpCodes.end())
   {
-    opCode = upperInstruction & VPU_TYPE3_MASK;
-    orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, fsReg, 0, ftReg, fieldMask, 0); 
+    return instruction & VPU_TYPE1_MASK;
+  }
+  else //if (type3OpCodes.find(instruction & VPU_TYPE3_MASK) != type3OpCodes.end())
+  {
+    return instruction & VPU_TYPE3_MASK;
   }
 }
 
 uint8_t VPU::regFromInstruction(uint32_t instruction, uint8_t shift)
 {
   return (instruction >> shift) & VPU_REG_MASK;
+}
+
+uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
+{
+  switch (opCode)
+  {
+    case VPU_ADDA:
+      return VPU_REGISTER_ACCUMULATOR;
+    case VPU_ABS:
+      return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
+    default:
+      return regFromInstruction(instruction, VPU_FD_REG_SHIFT);
+  }
 }
 
 uint16_t VPU::processLowerInstruction(uint32_t lowerInstruction)
@@ -208,74 +241,6 @@ bool VPU::stopBitSet(uint32_t instruction)
   return hasFlag(instruction, VPU_E_BIT) ||
           hasFlag(instruction, VPU_D_BIT) ||
           hasFlag(instruction, VPU_T_BIT);
-}
-
-void VPU::pipelineStarted(Pipeline * p)
-{
-  uint16_t opCode = p->opCode;
-  uint8_t ft = p->ftReg;
-  uint8_t fs = p->fsReg;
-  uint8_t fieldMask = p->destFieldMask;
-  FPRegister *destReg = &fpRegisters[p->fdReg];
-  FPRegister dest(destReg->x, destReg->y, destReg->z, destReg->w);
-
-  switch (opCode)
-  {
-    case VPU_ABS:
-      absFPRegisters(&fpRegisters[ft], &dest, fieldMask);
-      break;
-    case VPU_ADD:
-      addFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
-      break;
-    case VPU_ADDi:
-      addFloatToRegister(&fpRegisters[fs], iRegister, &dest, fieldMask, &MACFlags);
-      break;
-    case VPU_ADDq:
-      addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
-      break;
-    case VPU_ADDx:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].x, &dest, fieldMask, &MACFlags);
-      break;
-    case VPU_ADDy:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].y, &dest, fieldMask, &MACFlags);
-      break;
-    case VPU_ADDz:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].z, &dest, fieldMask, &MACFlags);
-      break;
-    case VPU_ADDw:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].w, &dest, fieldMask, &MACFlags);
-      break;
-    case VPU_ADDA:
-      addFloatToRegister(&fpRegisters[ft], fpRegisters[fs].w, &dest, fieldMask, &MACFlags);
-      break;
-  }
-
-  p->setFloatResult(dest.x, dest.y, dest.z, dest.w);
-}
-
-void VPU::pipelineFinished(Pipeline * p)
-{
-  FPRegister *destReg = &fpRegisters[p->fdReg];
-
-  switch (p->opCode)
-  {
-    case VPU_ABS:
-      updateDestinationRegisterWithPipelineResult(destReg, p);
-      break;
-    case VPU_ADD:
-    case VPU_ADDi:
-    case VPU_ADDq:
-    case VPU_ADDx:
-    case VPU_ADDy:
-    case VPU_ADDz:
-    case VPU_ADDw:
-    case VPU_ADDA:
-      updateDestinationRegisterWithPipelineResult(destReg, p);
-      setMACFlagsFromRegister(destReg);
-      setStatusFlagsFromMACFlags();
-      setStickyFlagsFromStatusFlags();
-      break;
-  }
 }
 
 void VPU::updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p)
@@ -335,4 +300,82 @@ void VPU::loadIRegister(float value)
 void VPU::loadQRegister(float value)
 {
   qRegister = value;
+}
+
+void VPU::pipelineStarted(Pipeline * p)
+{
+  uint16_t opCode = p->opCode;
+  uint8_t ft = p->srcReg1;
+  uint8_t fs = p->srcReg2;
+  uint8_t fieldMask = p->destFieldMask;
+  FPRegister *destReg = destinationRegisterFromPipeline(p);
+  FPRegister dest(destReg->x, destReg->y, destReg->z, destReg->w);
+
+  switch (opCode)
+  {
+    case VPU_ABS:
+      absFPRegisters(&fpRegisters[fs], &dest, fieldMask);
+      break;
+    case VPU_ADD:
+      addFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDi:
+      addFloatToRegister(&fpRegisters[fs], iRegister, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDq:
+      addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDx:
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].x, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDy:
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].y, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDz:
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].z, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDw:
+      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].w, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDA:
+      addFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
+      break;
+  }
+
+  p->setFloatResult(dest.x, dest.y, dest.z, dest.w);
+}
+
+FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
+{
+  FPRegister *destReg;
+
+  switch (p->opCode)
+  {
+    case VPU_ADDA:
+      destReg =  &accumulator;
+      break;
+    default:
+      destReg = &fpRegisters[p->destReg];
+      break;
+  }
+
+  return destReg;
+}
+
+void VPU::pipelineFinished(Pipeline * p)
+{
+  FPRegister *destReg = destinationRegisterFromPipeline(p);
+
+  switch (p->opCode)
+  {
+    case VPU_ABS:
+      updateDestinationRegisterWithPipelineResult(destReg, p);
+      break;
+    default:
+      updateDestinationRegisterWithPipelineResult(destReg, p);
+      setMACFlagsFromRegister(destReg);
+      setStatusFlagsFromMACFlags();
+      setStickyFlagsFromStatusFlags();
+      break;
+  }
 }

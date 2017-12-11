@@ -64,16 +64,16 @@ TEST_CASE("VPU Pipeline Tests")
     Pipeline * startedPipeline = handler.startedPipeline;
     REQUIRE(startedPipeline->type == VPU_PIPELINE_TYPE_FMAC);
     REQUIRE(startedPipeline->opCode == VPU_ABS);
-    REQUIRE(startedPipeline->ftReg == VPU_REGISTER_VF02);
-    REQUIRE(startedPipeline->fsReg == VPU_REGISTER_VF03);
-    REQUIRE(startedPipeline->fdReg == VPU_REGISTER_VF01);
+    REQUIRE(startedPipeline->srcReg1 == VPU_REGISTER_VF02);
+    REQUIRE(startedPipeline->srcReg2 == VPU_REGISTER_VF03);
+    REQUIRE(startedPipeline->destReg == VPU_REGISTER_VF01);
 
     Pipeline * finishedPipeline = handler.finishedPipeline;
     REQUIRE(finishedPipeline->type == VPU_PIPELINE_TYPE_FMAC);
     REQUIRE(startedPipeline->opCode == VPU_ABS);
-    REQUIRE(finishedPipeline->ftReg == VPU_REGISTER_VF02);
-    REQUIRE(finishedPipeline->fsReg == VPU_REGISTER_VF03);
-    REQUIRE(finishedPipeline->fdReg == VPU_REGISTER_VF01);
+    REQUIRE(finishedPipeline->srcReg1 == VPU_REGISTER_VF02);
+    REQUIRE(finishedPipeline->srcReg2 == VPU_REGISTER_VF03);
+    REQUIRE(finishedPipeline->destReg == VPU_REGISTER_VF01);
   }
 
   SECTION("Two FMAC Pipelines execute in 7 cycles with no stall")

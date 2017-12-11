@@ -58,6 +58,7 @@ class VPU : public PipelineHandler
     bool hasStatusFlag(uint16_t flag);
     void loadIRegister(float value);
     void loadQRegister(float value);
+    void loadAccumulator(float x, float y, float z, float w);
   private:
     uint8_t state;
     uint32_t cycles;
@@ -91,13 +92,17 @@ class VPU : public PipelineHandler
     uint32_t nextUpperInstruction();
     uint32_t nextLowerInstruction();
     void processUpperInstruction(uint32_t upperInstruction);
+    uint16_t opCodeFromInstruction(uint32_t instruction);
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
+    uint8_t src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
+    uint8_t destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
     uint8_t destBitsFromInstruction(uint32_t instruction);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
     void setMACFlagsFromRegister(FPRegister * reg);
     void setStatusFlagsFromMACFlags();
     void setStickyFlagsFromStatusFlags();
     void updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p);
+    FPRegister * destinationRegisterFromPipeline(Pipeline * p);
 };
 
 #endif

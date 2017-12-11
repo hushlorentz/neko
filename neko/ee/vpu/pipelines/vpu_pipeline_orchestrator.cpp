@@ -66,11 +66,11 @@ void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
       continue;
     }
 
-    if (pipeline->ftReg == checkPipeline->fdReg && (pipeline->destFieldMask & checkPipeline->destFieldMask))
+    if (pipeline->srcReg1 == checkPipeline->destReg && (pipeline->destFieldMask & checkPipeline->destFieldMask))
     {
       stalling = true;
     }
-    if (pipeline->fsReg == checkPipeline->fdReg && (pipeline->source2FieldMask & checkPipeline->destFieldMask))
+    if (pipeline->srcReg2 == checkPipeline->destReg && (pipeline->source2FieldMask & checkPipeline->destFieldMask))
     {
       stalling = true;
     }
@@ -108,7 +108,7 @@ bool PipelineOrchestrator::hasNext()
   return executing.size() > 0 || waiting.size() > 0;
 }
 
-void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t ft, uint8_t fs, uint8_t fd, uint8_t fieldMask, uint8_t s2FieldMask)
+void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t fieldMask, uint8_t s2FieldMask)
 {
   if (pool.size() == 0)
   {
@@ -118,7 +118,7 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, u
   Pipeline * pipeline = pool.front();
   pool.pop_front();
 
-  pipeline->configure(pipelineType, opCode, ft, fs, fd, fieldMask, s2FieldMask);
+  pipeline->configure(pipelineType, opCode, srcReg1, srcReg2, destReg, fieldMask, s2FieldMask);
   waiting.push_back(pipeline);
 }
 

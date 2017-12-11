@@ -20,14 +20,14 @@ class Pipeline
     float yResult;
     float zResult;
     float wResult;
-    uint8_t ftReg;
-    uint8_t fsReg;
-    uint8_t fdReg;
+    uint8_t srcReg1;
+    uint8_t srcReg2;
+    uint8_t destReg;
     uint8_t destFieldMask;
     uint8_t source2FieldMask;
 
     Pipeline();
-    void configure(uint8_t pipelineType, uint16_t oc, uint8_t ft, uint8_t fs, uint8_t fd, uint8_t fieldMask, uint8_t s2FieldMask);
+    void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t fieldMask, uint8_t s2FieldMask);
     void setFloatResult(float x, float y, float z, float w);
     void setIntResult(int i);
     void execute();

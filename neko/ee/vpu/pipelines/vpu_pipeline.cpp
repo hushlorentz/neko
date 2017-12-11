@@ -2,17 +2,17 @@
 
 #define FMAC_STAGES 6
 
-Pipeline::Pipeline() : type(0), opCode(0), intResult(0), xResult(0), yResult(0), zResult(0), wResult(0), ftReg(0), fsReg(0), fdReg(0), destFieldMask(0), source2FieldMask(0), currentStage(1), endStage(0)
+Pipeline::Pipeline() : type(0), opCode(0), intResult(0), xResult(0), yResult(0), zResult(0), wResult(0), srcReg1(0), srcReg2(0), destReg(0), destFieldMask(0), source2FieldMask(0), currentStage(1), endStage(0)
 {
 }
 
-void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t ft, uint8_t fs, uint8_t fd, uint8_t fieldMask, uint8_t s2FieldMask)
+void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t fieldMask, uint8_t s2FieldMask)
 {
   type = pipelineType;
   opCode = oc;
-  ftReg = ft;
-  fsReg = fs;
-  fdReg = fd;
+  srcReg1 = s1;
+  srcReg2 = s2;
+  destReg = d;
   destFieldMask = fieldMask;
   source2FieldMask = s2FieldMask;
   currentStage = 1;

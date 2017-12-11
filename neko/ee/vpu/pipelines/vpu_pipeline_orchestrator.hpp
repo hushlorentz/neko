@@ -19,7 +19,7 @@ class PipelineOrchestrator
     ~PipelineOrchestrator();
     void update();
     bool hasNext();
-    void initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t ft, uint8_t fs, uint8_t fd, uint8_t fieldMask, uint8_t s2FieldMask);
+    void initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t fieldMask, uint8_t s2FieldMask);
     void setPipelineHandler(PipelineHandler * handler);
   private:
     list<Pipeline *> executing;
