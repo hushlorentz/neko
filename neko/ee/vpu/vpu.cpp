@@ -9,12 +9,11 @@
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
-#define NUM_TYPE1_OPCODES 7
-uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw};
+#define NUM_TYPE1_OPCODES 11
+uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw};
 
-#define NUM_TYPE3_OPCODES 2
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA};
-
+#define NUM_TYPE3_OPCODES 4
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq};
 
 using namespace std;
 
@@ -204,13 +203,13 @@ uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
 
 uint16_t VPU::opCodeFromInstruction(uint32_t instruction)
 {
-  if (type1OpCodes.find(instruction & VPU_TYPE1_MASK) != type1OpCodes.end())
-  {
-    return instruction & VPU_TYPE1_MASK;
-  }
-  else //if (type3OpCodes.find(instruction & VPU_TYPE3_MASK) != type3OpCodes.end())
+  if (type3OpCodes.find(instruction & VPU_TYPE3_MASK) != type3OpCodes.end())
   {
     return instruction & VPU_TYPE3_MASK;
+  }
+  else // if (type1OpCodes.find(instruction & VPU_TYPE1_MASK) != type1OpCodes.end())
+  {
+    return instruction & VPU_TYPE1_MASK;
   }
 }
 
@@ -224,6 +223,8 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
   switch (opCode)
   {
     case VPU_ADDA:
+    case VPU_ADDAi:
+    case VPU_ADDAq:
       return VPU_REGISTER_ACCUMULATOR;
     case VPU_ABS:
       return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
@@ -237,12 +238,16 @@ uint8_t VPU::src2MaskFromOpCodeAndInstruction(uint16_t opCode, uint32_t upperIns
   switch (opCode)
   {
     case VPU_ADDx:
+    case VPU_ADDAx:
       return FP_REGISTER_X_FIELD;
     case VPU_ADDy:
+    case VPU_ADDAy:
       return FP_REGISTER_Y_FIELD;
     case VPU_ADDz:
+    case VPU_ADDAz:
       return FP_REGISTER_Z_FIELD;
     case VPU_ADDw:
+    case VPU_ADDAw:
       return FP_REGISTER_W_FIELD;
     default:
       return 0;
@@ -344,19 +349,29 @@ void VPU::pipelineStarted(Pipeline * p)
       addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDx:
+    case VPU_ADDAx:
       addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].x, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDy:
+    case VPU_ADDAy:
       addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].y, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDz:
+    case VPU_ADDAz:
       addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].z, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDw:
+    case VPU_ADDAw:
       addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].w, &dest, fieldMask, &MACFlags);
       break;
     case VPU_ADDA:
       addFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDAi:
+      addFloatToRegister(&fpRegisters[fs], iRegister, &dest, fieldMask, &MACFlags);
+      break;
+    case VPU_ADDAq:
+      addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
       break;
   }
 
@@ -370,6 +385,12 @@ FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
   switch (p->opCode)
   {
     case VPU_ADDA:
+    case VPU_ADDAi:
+    case VPU_ADDAq:
+    case VPU_ADDAx:
+    case VPU_ADDAy:
+    case VPU_ADDAz:
+    case VPU_ADDAw:
       destReg =  &accumulator;
       break;
     default:

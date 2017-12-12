@@ -30,5 +30,11 @@
 #define VPU_ADDz 0x2
 #define VPU_ADDw 0x3
 #define VPU_ADDA 0x2bc
+#define VPU_ADDAi 0x23e
+#define VPU_ADDAq 0x23c
+#define VPU_ADDAx 0x3c
+#define VPU_ADDAy 0x3d
+#define VPU_ADDAz 0x3e
+#define VPU_ADDAw 0x3f
 
 #endif
