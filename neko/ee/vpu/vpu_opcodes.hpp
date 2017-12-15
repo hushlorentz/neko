@@ -36,5 +36,6 @@
 #define VPU_ADDAy 0x3d
 #define VPU_ADDAz 0x3e
 #define VPU_ADDAw 0x3f
+#define VPU_CLIP 0x1ff
 
 #endif

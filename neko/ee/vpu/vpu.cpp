@@ -12,12 +12,12 @@
 #define NUM_TYPE1_OPCODES 11
 uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw};
 
-#define NUM_TYPE3_OPCODES 4
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq};
+#define NUM_TYPE3_OPCODES 5
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP};
 
 using namespace std;
 
-VPU::VPU() : useThreads(true), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0), clippingFlags(0)
+VPU::VPU() : useThreads(true), clippingFlags(0), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
 {
   initMemory();
   initFPRegisters();
@@ -325,6 +325,43 @@ void VPU::loadQRegister(float value)
   qRegister = value;
 }
 
+void VPU::updateClippingFlags(uint32_t clip)
+{
+  clippingFlags <<= 6;
+  clippingFlags |= (clip & VPU_CLIP_MASK);
+}
+
+int VPU::calculateNewClippingFlags(FPRegister * fsReg, FPRegister * ftReg)
+{
+  int newClipFlags = 0;
+  if (fsReg->x > abs(ftReg->w))
+  {
+    newClipFlags |= VPU_CLIP_FLAG_POS_X;
+  }
+  else if (fsReg->x < -abs(ftReg->w))
+  {
+    newClipFlags |= VPU_CLIP_FLAG_NEG_X;
+  }
+  if (fsReg->y > abs(ftReg->w))
+  {
+    newClipFlags |= VPU_CLIP_FLAG_POS_Y;
+  }
+  else if (fsReg->y < -abs(ftReg->w))
+  {
+    newClipFlags |= VPU_CLIP_FLAG_NEG_Y;
+  }
+  if (fsReg->z > abs(ftReg->w))
+  {
+    newClipFlags |= VPU_CLIP_FLAG_POS_Z;
+  }
+  else if (fsReg->z < -abs(ftReg->w))
+  {
+    newClipFlags |= VPU_CLIP_FLAG_NEG_Z;
+  }
+
+  return newClipFlags;
+}
+
 void VPU::pipelineStarted(Pipeline * p)
 {
   uint16_t opCode = p->opCode;
@@ -373,6 +410,9 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_ADDAq:
       addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
       break;
+    case VPU_CLIP:
+      p->setIntResult(calculateNewClippingFlags(&fpRegisters[ft], &fpRegisters[fs]));
+      break;
   }
 
   p->setFloatResult(dest.x, dest.y, dest.z, dest.w);
@@ -407,6 +447,9 @@ void VPU::pipelineFinished(Pipeline * p)
 
   switch (p->opCode)
   {
+    case VPU_CLIP:
+      updateClippingFlags(p->intResult);
+      break;
     case VPU_ABS:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;

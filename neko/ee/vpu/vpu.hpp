@@ -23,6 +23,14 @@
 #define VPU_FLAG_SY 0x40
 #define VPU_FLAG_SX 0x80
 
+#define VPU_CLIP_FLAG_POS_X 0x1
+#define VPU_CLIP_FLAG_NEG_X 0x2
+#define VPU_CLIP_FLAG_POS_Y 0x4
+#define VPU_CLIP_FLAG_NEG_Y 0x8
+#define VPU_CLIP_FLAG_POS_Z 0x10
+#define VPU_CLIP_FLAG_NEG_Z 0x20
+#define VPU_CLIP_MASK 0x3f
+
 #define VPU_FLAG_Z 0x1
 #define VPU_FLAG_S 0x2
 #define VPU_FLAG_Z_STICKY 0x40
@@ -41,6 +49,7 @@ class VPU : public PipelineHandler
     vector<uint8_t> vuMem;
     bool useThreads;
     FPRegister accumulator;
+    uint64_t clippingFlags;
 
     uint8_t getState();
     FPRegister *fpRegisterValue(int registerID);
@@ -73,7 +82,6 @@ class VPU : public PipelineHandler
     uint32_t rRegister;
     uint16_t MACFlags;
     uint16_t statusFlags;
-    uint64_t clippingFlags;
     set<uint16_t> type0OpCodes;
     set<uint16_t> type1OpCodes;
     set<uint16_t> type2OpCodes;
@@ -102,6 +110,8 @@ class VPU : public PipelineHandler
     void setStatusFlagsFromMACFlags();
     void setStickyFlagsFromStatusFlags();
     void updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p);
+    void updateClippingFlags(uint32_t clip);
+    int calculateNewClippingFlags(FPRegister * fsReg, FPRegister * ftReg);
     FPRegister * destinationRegisterFromPipeline(Pipeline * p);
 };
 
