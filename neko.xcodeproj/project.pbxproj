@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		15ECC4991FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 15ECC4981FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp */; };
 		15ECC49C1FDF2EA300F290A1 /* vpu_upper_instruction_utils.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 15ECC49A1FDF2EA300F290A1 /* vpu_upper_instruction_utils.cpp */; };
+		15ECC49F1FE1A57B00F290A1 /* vpu_upper_clip_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 15ECC49E1FE1A57B00F290A1 /* vpu_upper_clip_tests.cpp */; };
 		4E6668F81FC7815900C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6668F71FC7815900C39ED2 /* main.cpp */; };
 		4E6669031FC7851300C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669021FC7851300C39ED2 /* main.cpp */; };
 		4E66690A1FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669091FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp */; };
@@ -70,6 +71,7 @@
 		15ECC4981FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_instruction_stall_tests.cpp; sourceTree = "<group>"; };
 		15ECC49A1FDF2EA300F290A1 /* vpu_upper_instruction_utils.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_instruction_utils.cpp; sourceTree = "<group>"; };
 		15ECC49B1FDF2EA300F290A1 /* vpu_upper_instruction_utils.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = vpu_upper_instruction_utils.hpp; sourceTree = "<group>"; };
+		15ECC49E1FE1A57B00F290A1 /* vpu_upper_clip_tests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_clip_tests.cpp; sourceTree = "<group>"; };
 		4E6668ED1FC77DB100C39ED2 /* neko */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E6668F71FC7815900C39ED2 /* main.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		4E6669001FC7851300C39ED2 /* neko_tests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko_tests; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -128,6 +130,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		15ECC49D1FE1A55400F290A1 /* opcode_tests */ = {
+			isa = PBXGroup;
+			children = (
+				4E66691C1FC9500900C39ED2 /* vpu_upper_add_tests.cpp */,
+				15ECC4981FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp */,
+				15ECC49A1FDF2EA300F290A1 /* vpu_upper_instruction_utils.cpp */,
+				15ECC49B1FDF2EA300F290A1 /* vpu_upper_instruction_utils.hpp */,
+				15ECC49E1FE1A57B00F290A1 /* vpu_upper_clip_tests.cpp */,
+			);
+			path = opcode_tests;
+			sourceTree = "<group>";
+		};
 		4E6668E41FC77DB100C39ED2 = {
 			isa = PBXGroup;
 			children = (
@@ -175,15 +189,12 @@
 		4E6669171FC94EC600C39ED2 /* vpu */ = {
 			isa = PBXGroup;
 			children = (
+				15ECC49D1FE1A55400F290A1 /* opcode_tests */,
 				4E66692E1FCBDD0B00C39ED2 /* vpu_fp_calculation_tests.cpp */,
 				4E66692C1FCBDCF200C39ED2 /* vpu_flag_tests.cpp */,
 				4E6669281FCBDB4000C39ED2 /* vpu_pipeline_tests.cpp */,
 				4E6669091FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp */,
 				4E66690F1FC8D10000C39ED2 /* vpu_state_tests.cpp */,
-				4E66691C1FC9500900C39ED2 /* vpu_upper_add_tests.cpp */,
-				15ECC4981FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp */,
-				15ECC49A1FDF2EA300F290A1 /* vpu_upper_instruction_utils.cpp */,
-				15ECC49B1FDF2EA300F290A1 /* vpu_upper_instruction_utils.hpp */,
 			);
 			path = vpu;
 			sourceTree = "<group>";
@@ -380,6 +391,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4E66690A1FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp in Sources */,
+				15ECC49F1FE1A57B00F290A1 /* vpu_upper_clip_tests.cpp in Sources */,
 				4E6669131FC8E4EB00C39ED2 /* fp_register_tests.cpp in Sources */,
 				4E6669251FCA432500C39ED2 /* floating_point_tests.cpp in Sources */,
 				15ECC4991FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp in Sources */,
