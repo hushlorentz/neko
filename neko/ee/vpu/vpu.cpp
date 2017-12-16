@@ -12,8 +12,8 @@
 #define NUM_TYPE1_OPCODES 11
 uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw};
 
-#define NUM_TYPE3_OPCODES 5
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP};
+#define NUM_TYPE3_OPCODES 6
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0};
 
 using namespace std;
 
@@ -195,6 +195,7 @@ uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
   switch (opCode)
   {
     case VPU_ABS:
+    case VPU_FTOI0:
       return regFromInstruction(instruction, VPU_FS_REG_SHIFT);
     default:
       return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
@@ -227,6 +228,7 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_ADDAq:
       return VPU_REGISTER_ACCUMULATOR;
     case VPU_ABS:
+    case VPU_FTOI0:
       return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
     default:
       return regFromInstruction(instruction, VPU_FD_REG_SHIFT);
@@ -268,10 +270,7 @@ bool VPU::stopBitSet(uint32_t instruction)
 
 void VPU::updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p)
 {
-  destReg->x = p->xResult;
-  destReg->y = p->yResult;
-  destReg->z = p->zResult;
-  destReg->w = p->wResult;
+  destReg->copyFrom(&(p->fpResult));
 }
 
 bool VPU::hasMACFlag(uint16_t flag)
@@ -413,9 +412,12 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_CLIP:
       p->setIntResult(calculateNewClippingFlags(&fpRegisters[ft], &fpRegisters[fs]));
       break;
+    case VPU_FTOI0:
+      convertFPRegisterToInt0(&fpRegisters[fs], &dest, fieldMask);
+      break;
   }
 
-  p->setFloatResult(dest.x, dest.y, dest.z, dest.w);
+  p->setFPRegisterResult(&dest);
 }
 
 FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
@@ -451,6 +453,7 @@ void VPU::pipelineFinished(Pipeline * p)
       updateClippingFlags(p->intResult);
       break;
     case VPU_ABS:
+    case VPU_FTOI0:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     default:

@@ -37,5 +37,6 @@
 #define VPU_ADDAz 0x3e
 #define VPU_ADDAw 0x3f
 #define VPU_CLIP 0x1ff
+#define VPU_FTOI0 0x17c
 
 #endif

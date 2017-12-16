@@ -2,11 +2,11 @@
 #include "floating_point_ops.hpp"
 #include "fp_register.hpp"
 
-FPRegister::FPRegister() : x(0), y(0), z(0), w(0)
+FPRegister::FPRegister() : x(0), y(0), z(0), w(0), xInt(0), yInt(0), zInt(0), wInt(0)
 {
 }
 
-FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w(w)
+FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w(w), xInt(0), yInt(0), zInt(0), wInt(0)
 {
 }
 
@@ -24,6 +24,10 @@ void FPRegister::copyFrom(FPRegister * srcReg)
   y = srcReg->y;
   z = srcReg->z;
   w = srcReg->w;
+  xInt = srcReg->xInt;
+  yInt = srcReg->yInt;
+  zInt = srcReg->zInt;
+  wInt = srcReg->wInt;
 }
 
 void addFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags)
@@ -97,4 +101,12 @@ void addFloatToRegister(FPRegister * r1, float value, FPRegister * dest, uint8_t
   dest->y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? addFP(r1->y, value, &yResultFlags) : dest->y;
   dest->z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? addFP(r1->z, value, &zResultFlags) : dest->z;
   dest->w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? addFP(r1->w, value, &wResultFlags) : dest->w;
+}
+
+void convertFPRegisterToInt0(FPRegister * source, FPRegister * dest, uint8_t fieldMask)
+{
+  dest->xInt = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? floatToInteger0(source->x) : dest->xInt;
+  dest->yInt = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? floatToInteger0(source->y) : dest->yInt;
+  dest->zInt = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? floatToInteger0(source->z) : dest->zInt;
+  dest->wInt = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? floatToInteger0(source->w) : dest->wInt;
 }

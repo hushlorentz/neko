@@ -20,6 +20,10 @@ class FPRegister
     float y;
     float z;
     float w;
+    int xInt;
+    int yInt;
+    int zInt;
+    int wInt;
 };
 
 void addFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
@@ -28,5 +32,6 @@ void mulFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t f
 void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
 void absFPRegisters(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
 void addFloatToRegister(FPRegister * r1, float value, FPRegister * dest, uint8_t fieldMask, uint16_t * resultFlags);
+void convertFPRegisterToInt0(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
 
 #endif

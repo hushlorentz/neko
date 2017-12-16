@@ -2,7 +2,7 @@
 
 #define FMAC_STAGES 6
 
-Pipeline::Pipeline() : type(0), opCode(0), intResult(0), xResult(0), yResult(0), zResult(0), wResult(0), srcReg1(0), srcReg2(0), destReg(0), destFieldMask(0), source2FieldMask(0), currentStage(1), endStage(0)
+Pipeline::Pipeline() : type(0), opCode(0), intResult(0), srcReg1(0), srcReg2(0), destReg(0), destFieldMask(0), source2FieldMask(0), currentStage(1), endStage(0)
 {
 }
 
@@ -25,12 +25,9 @@ void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t 
   }
 }
 
-void Pipeline::setFloatResult(float x, float y, float z, float w)
+void Pipeline::setFPRegisterResult(FPRegister * reg)
 {
-  xResult = x;
-  yResult = y;
-  zResult = z;
-  wResult = w;
+  fpResult.copyFrom(reg);
 }
 
 void Pipeline::setIntResult(int i)

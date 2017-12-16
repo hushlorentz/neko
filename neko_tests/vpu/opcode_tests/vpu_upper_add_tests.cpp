@@ -4,7 +4,7 @@
 #include "vpu_register_ids.hpp"
 #include "vpu_upper_instruction_utils.hpp"
 
-TEST_CASE("VPU Microinstruction Operation Tests")
+TEST_CASE("VPU Microinstruction ADD and ABS Tests")
 {
   VPU vpu;
   vpu.useThreads = false;
