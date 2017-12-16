@@ -105,8 +105,28 @@ void addFloatToRegister(FPRegister * r1, float value, FPRegister * dest, uint8_t
 
 void convertFPRegisterToInt0(FPRegister * source, FPRegister * dest, uint8_t fieldMask)
 {
-  dest->xInt = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? floatToInteger0(source->x) : dest->xInt;
-  dest->yInt = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? floatToInteger0(source->y) : dest->yInt;
-  dest->zInt = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? floatToInteger0(source->z) : dest->zInt;
-  dest->wInt = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? floatToInteger0(source->w) : dest->wInt;
+  convertFPRegisterToInt(source, dest, fieldMask, &floatToInteger0);
+}
+
+void convertFPRegisterToInt4(FPRegister * source, FPRegister * dest, uint8_t fieldMask)
+{
+  convertFPRegisterToInt(source, dest, fieldMask, &floatToInteger4);
+}
+
+void convertFPRegisterToInt12(FPRegister * source, FPRegister * dest, uint8_t fieldMask)
+{
+  convertFPRegisterToInt(source, dest, fieldMask, &floatToInteger12);
+}
+
+void convertFPRegisterToInt15(FPRegister * source, FPRegister * dest, uint8_t fieldMask)
+{
+  convertFPRegisterToInt(source, dest, fieldMask, &floatToInteger15);
+}
+
+void convertFPRegisterToInt(FPRegister * source, FPRegister * dest, uint8_t fieldMask, int (*convertFunc)(float))
+{
+  dest->xInt = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->x) : dest->xInt;
+  dest->yInt = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->y) : dest->yInt;
+  dest->zInt = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? (*convertFunc)(source->z) : dest->zInt;
+  dest->wInt = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->w) : dest->wInt;
 }

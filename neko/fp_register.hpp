@@ -33,5 +33,9 @@ void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t f
 void absFPRegisters(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
 void addFloatToRegister(FPRegister * r1, float value, FPRegister * dest, uint8_t fieldMask, uint16_t * resultFlags);
 void convertFPRegisterToInt0(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToInt4(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToInt12(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToInt15(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToInt(FPRegister * source, FPRegister * dest, uint8_t fieldMask, int (*convertFunc)(float));
 
 #endif

@@ -38,5 +38,8 @@
 #define VPU_ADDAw 0x3f
 #define VPU_CLIP 0x1ff
 #define VPU_FTOI0 0x17c
+#define VPU_FTOI4 0x17d
+#define VPU_FTOI12 0x17e
+#define VPU_FTOI15 0x17f
 
 #endif
