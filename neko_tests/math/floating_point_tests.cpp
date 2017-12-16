@@ -9,6 +9,13 @@ TEST_CASE("Testing the floating point conventions")
 {
   uint8_t resultFlags = 0;
 
+  SECTION("We can use floatEquals to check for float equivalence when calculations can be stored differently from literals")
+  {
+    //float testFloat = 1 / 61.0;
+    //REQUIRE(testFloat != 0.016393442622f);
+    //REQUIRE(floatEquals(0.016393442622f, testFloat));
+  }
+
   SECTION("Two floating point numbers can be added together")
   {
     float a1 = 3.5f;
@@ -251,5 +258,85 @@ TEST_CASE("Testing the floating point conventions")
   SECTION("Converting 123.45f to a fixed point 15 precision number returns 4045209")
   {
     REQUIRE(floatToInteger15(123.45f) == 4045209);
+  }
+
+  SECTION("Converting a 0 precision fixed point number -12 to a floating point number returns -12.0f")
+  {
+    REQUIRE(integer0ToFloat(-12) == -12.0f);
+  }
+
+  SECTION("Converting a 0 precision fixed point number 1 to a floating point number returns 1.0f")
+  {
+    REQUIRE(integer0ToFloat(1) == 1.0f);
+  }
+
+  SECTION("Converting a 0 precision fixed point number 123 to a floating point number returns 123.0f")
+  {
+    REQUIRE(integer0ToFloat(123) == 123.0f);
+  }
+
+  SECTION("Converting a 0 precision fixed point number 1843 to a floating point number returns 1843.0f")
+  {
+    REQUIRE(integer0ToFloat(1843) == 1843.0f);
+  }
+
+  SECTION("Converting a 4 precision fixed point number -12 to a floating point number returns -0.75f")
+  {
+    REQUIRE(integer4ToFloat(-12) == -0.75f);
+  }
+
+  SECTION("Converting a 4 precision fixed point number 1 to a floating point number returns 0.0625f")
+  {
+    REQUIRE(integer4ToFloat(1) == 0.0625f);
+  }
+
+  SECTION("Converting a 4 precision fixed point number 123 to a floating point number returns 7.6875f")
+  {
+    REQUIRE(integer4ToFloat(123) == 7.6875f);
+  }
+
+  SECTION("Converting a 4 precision fixed point number 1843 to a floating point number returns 115.1875f")
+  {
+    REQUIRE(integer4ToFloat(1843) == 115.1875f);
+  }
+
+  SECTION("Converting a 12 precision fixed point number -12 to a floating point number returns -0.00293f")
+  {
+    REQUIRE(integer12ToFloat(-12) == -0.0029296875f);
+  }
+
+  SECTION("Converting a 12 precision fixed point number 1 to a floating point number returns 0.000244f")
+  {
+    REQUIRE(integer12ToFloat(1) == 0.000244140625f);
+  }
+
+  SECTION("Converting a 12 precision fixed point number 123 to a floating point number returns 0.030029")
+  {
+    REQUIRE(integer12ToFloat(123) == 0.030029296875f);
+  }
+
+  SECTION("Converting a 12 precision fixed point number 1843 to a floating point number returns 0.44995")
+  {
+    REQUIRE(integer12ToFloat(1843) == 0.449951171875f);
+  }
+
+  SECTION("Converting a 15 precision fixed point number -12 to a floating point number returns 0.000366")
+  {
+    REQUIRE(integer15ToFloat(-12) == -0.0003662109375f);
+  }
+
+  SECTION("Converting a 15 precision fixed point number 1 to a floating point number returns 0.000031")
+  {
+    REQUIRE(integer15ToFloat(1) == 0.000030517578125f);
+  }
+
+  SECTION("Converting a 15 precision fixed point number 123 to a floating point number returns 0.003754")
+  {
+    REQUIRE(integer15ToFloat(123) == 0.003753662109375f);
+  }
+
+  SECTION("Converting a 15 precision fixed point number 1843 to a floating point number returns 0.056244")
+  {
+    REQUIRE(integer15ToFloat(1843) == 0.056243896484375f);
   }
 }

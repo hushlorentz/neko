@@ -1,6 +1,11 @@
 #include "floating_point_ops.hpp"
 #include <cfloat>
 
+bool floatEquals(float a, float b)
+{
+  return abs(a - b) < std::numeric_limits<float>::epsilon();
+}
+
 float convertFromIEEE(float value, uint8_t * resultFlags)
 {
   num_32bits num;
@@ -92,22 +97,42 @@ float subFP(float f1, float f2, uint8_t * resultFlags)
   return convertFromIEEE(f1 - f2, resultFlags);
 }
 
-uint32_t floatToInteger0(float f)
+int floatToInteger0(float f)
 {
-  return (uint32_t)f;
+  return (int)f;
 }
 
-uint32_t floatToInteger4(float f)
+int floatToInteger4(float f)
 {
-  return (uint32_t)(f * 16);
+  return (int)(f * 16);
 }
 
-uint32_t floatToInteger12(float f)
+int floatToInteger12(float f)
 {
-  return (uint32_t)(f * 4096);
+  return (int)(f * 4096);
 }
 
-uint32_t floatToInteger15(float f)
+int floatToInteger15(float f)
 {
-  return (uint32_t)(f * 32768);
+  return (int)(f * 32768);
+}
+
+float integer0ToFloat(int i)
+{
+  return (float)i;
+}
+
+float integer4ToFloat(int i)
+{
+  return i / 16.0f;
+}
+
+float integer12ToFloat(int i)
+{
+  return i / 4096.0f;
+}
+
+float integer15ToFloat(int i)
+{
+  return i / 32768.0f;
 }

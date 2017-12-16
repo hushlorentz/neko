@@ -22,13 +22,18 @@ typedef union {
   } components;
 } num_32bits;
 
+bool floatEquals(float a, float b);
 float addFP(float f1, float f2, uint8_t * resultFlags);
 float mulFP(float f1, float f2, uint8_t * resultFlags);
 float divFP(float f1, float f2, uint8_t * resultFlags);
 float subFP(float f1, float f2, uint8_t * resultFlags);
-uint32_t floatToInteger0(float f);
-uint32_t floatToInteger4(float f);
-uint32_t floatToInteger12(float f);
-uint32_t floatToInteger15(float f);
+int floatToInteger0(float f);
+int floatToInteger4(float f);
+int floatToInteger12(float f);
+int floatToInteger15(float f);
+float integer0ToFloat(int i);
+float integer4ToFloat(int i);
+float integer12ToFloat(int i);
+float integer15ToFloat(int i);
 
 #endif
