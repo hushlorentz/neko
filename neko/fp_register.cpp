@@ -24,10 +24,6 @@ void FPRegister::copyFrom(FPRegister * srcReg)
   y = srcReg->y;
   z = srcReg->z;
   w = srcReg->w;
-  xInt = srcReg->xInt;
-  yInt = srcReg->yInt;
-  zInt = srcReg->zInt;
-  wInt = srcReg->wInt;
 }
 
 void addFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags)
