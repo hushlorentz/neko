@@ -11,6 +11,7 @@ TEST_CASE("VPU Microinstruction Fixed Point Tests")
   vpu.loadFPRegister(VPU_REGISTER_VF02, -5.2f, 1.2535f, 0.0042f, -10.10f);
   vpu.loadFPRegister(VPU_REGISTER_VF03, 5.0f, -6.4f, 10.0f, -9.0f);
   vpu.loadFPRegister(VPU_REGISTER_VF04, -0.45f, 0.45f, 0.55f, 123.45f);
+  vpu.loadFPRegister(VPU_REGISTER_VF05, 10, 0.45f, 0.55f, 3);
   vector<uint8_t> instructions;
 
   SECTION("FTOI0 converts floating point fields of the second source vector to fixed point and stores the result in the fields of the first vector")
@@ -45,11 +46,11 @@ TEST_CASE("VPU Microinstruction Fixed Point Tests")
 
   SECTION("FTOI15 converts floating point fields of the second source vector to fixed point and stores the result in the fields of the first vector")
   {
-    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF03, VPU_REGISTER_VF04, 0, VPU_FTOI15);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT | VPU_DEST_Z_BIT, VPU_REGISTER_VF05, VPU_REGISTER_VF04, 0, VPU_FTOI15);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->xInt == -14745);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->yInt == 14745);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->zInt == 18022);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->wInt == 4045209);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->xInt == 1092616192);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->yInt == 14745);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->zInt == 18022);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->wInt == 1077936128);
   }
 }

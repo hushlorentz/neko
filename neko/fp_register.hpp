@@ -16,14 +16,26 @@ class FPRegister
     FPRegister(float x, float y, float z, float w);
     void load(float x, float y, float z, float w);
     void copyFrom(FPRegister * srcReg);
-    float x;
-    float y;
-    float z;
-    float w;
-    int xInt;
-    int yInt;
-    int zInt;
-    int wInt;
+    union
+    {
+      float x;
+      int xInt;
+    };
+    union
+    {
+      float y;
+      int yInt;
+    };
+    union
+    {
+      float z;
+      int zInt;
+    };
+    union
+    {
+      float w;
+      int wInt;
+    };
 };
 
 void addFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);

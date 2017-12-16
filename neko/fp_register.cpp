@@ -2,11 +2,11 @@
 #include "floating_point_ops.hpp"
 #include "fp_register.hpp"
 
-FPRegister::FPRegister() : x(0), y(0), z(0), w(0), xInt(0), yInt(0), zInt(0), wInt(0)
+FPRegister::FPRegister() : x(0), y(0), z(0), w(0)
 {
 }
 
-FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w(w), xInt(0), yInt(0), zInt(0), wInt(0)
+FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w(w)
 {
 }
 
