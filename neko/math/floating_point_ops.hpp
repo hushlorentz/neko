@@ -26,5 +26,9 @@ float addFP(float f1, float f2, uint8_t * resultFlags);
 float mulFP(float f1, float f2, uint8_t * resultFlags);
 float divFP(float f1, float f2, uint8_t * resultFlags);
 float subFP(float f1, float f2, uint8_t * resultFlags);
+uint32_t floatToInteger0(float f);
+uint32_t floatToInteger4(float f);
+uint32_t floatToInteger12(float f);
+uint32_t floatToInteger15(float f);
 
 #endif

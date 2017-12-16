@@ -91,3 +91,23 @@ float subFP(float f1, float f2, uint8_t * resultFlags)
 {
   return convertFromIEEE(f1 - f2, resultFlags);
 }
+
+uint32_t floatToInteger0(float f)
+{
+  return (uint32_t)f;
+}
+
+uint32_t floatToInteger4(float f)
+{
+  return (uint32_t)(f * 16);
+}
+
+uint32_t floatToInteger12(float f)
+{
+  return (uint32_t)(f * 4096);
+}
+
+uint32_t floatToInteger15(float f)
+{
+  return (uint32_t)(f * 32768);
+}

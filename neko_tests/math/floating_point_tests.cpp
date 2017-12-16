@@ -172,4 +172,84 @@ TEST_CASE("Testing the floating point conventions")
     REQUIRE(num.components.sign == 1);
     REQUIRE(resultFlags == FP_FLAG_UNDERFLOW);
   }
+
+  SECTION("Converting 0.45f to a fixed point 0 precision number returns 0")
+  {
+    REQUIRE(floatToInteger0(0.45f) == 0);
+  }
+
+  SECTION("Converting -0.45f to a fixed point 0 precision number returns 0")
+  {
+    REQUIRE(floatToInteger0(-0.45f) == 0);
+  }
+
+  SECTION("Converting 123.45f to a fixed point 0 precision number returns 123")
+  {
+    REQUIRE(floatToInteger0(123.45f) == 123);
+  }
+
+  SECTION("Converting -123.45f to a fixed point 0 precision number returns -123")
+  {
+    REQUIRE(floatToInteger0(-123.45f) == -123);
+  }
+
+  SECTION("Converting -0.45f to a fixed point 4 precision number returns -7")
+  {
+    REQUIRE(floatToInteger4(-0.45f) == -7);
+  }
+
+  SECTION("Converting 0.45f to a fixed point 4 precision number returns 7")
+  {
+    REQUIRE(floatToInteger4(0.45f) == 7);
+  }
+
+  SECTION("Converting 0.55f to a fixed point 4 precision number returns 8")
+  {
+    REQUIRE(floatToInteger4(0.55f) == 8);
+  }
+
+  SECTION("Converting 123.45f to a fixed point 4 precision number returns 1975")
+  {
+    REQUIRE(floatToInteger4(123.45f) == 1975);
+  }
+
+  SECTION("Converting -0.45f to a fixed point 12 precision number returns -1843")
+  {
+    REQUIRE(floatToInteger12(-0.45f) == -1843);
+  }
+
+  SECTION("Converting 0.45f to a fixed point 12 precision number returns 1843")
+  {
+    REQUIRE(floatToInteger12(0.45f) == 1843);
+  }
+
+  SECTION("Converting 0.55f to a fixed point 12 precision number returns 2252")
+  {
+    REQUIRE(floatToInteger12(0.55f) == 2252);
+  }
+
+  SECTION("Converting 123.45f to a fixed point 12 precision number returns 505651")
+  {
+    REQUIRE(floatToInteger12(123.45f) == 505651);
+  }
+
+  SECTION("Converting -0.45f to a fixed point 15 precision number returns -14745")
+  {
+    REQUIRE(floatToInteger15(-0.45f) == -14745);
+  }
+
+  SECTION("Converting 0.45f to a fixed point 15 precision number returns 14745")
+  {
+    REQUIRE(floatToInteger15(0.45f) == 14745);
+  }
+
+  SECTION("Converting 0.55f to a fixed point 15 precision number returns 18022")
+  {
+    REQUIRE(floatToInteger15(0.55f) == 18022);
+  }
+
+  SECTION("Converting 123.45f to a fixed point 15 precision number returns 4045209")
+  {
+    REQUIRE(floatToInteger15(123.45f) == 4045209);
+  }
 }
