@@ -48,6 +48,11 @@ void convertFPRegisterToInt0(FPRegister * source, FPRegister * dest, uint8_t fie
 void convertFPRegisterToInt4(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
 void convertFPRegisterToInt12(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
 void convertFPRegisterToInt15(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToFloat0(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToFloat4(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToFloat12(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
+void convertFPRegisterToFloat15(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
 void convertFPRegisterToInt(FPRegister * source, FPRegister * dest, uint8_t fieldMask, int (*convertFunc)(float));
+void convertFPRegisterToFloat(FPRegister * source, FPRegister * dest, uint8_t fieldMask, float (*convertFunc)(int));
 
 #endif

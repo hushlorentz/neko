@@ -41,5 +41,9 @@
 #define VPU_FTOI4 0x17d
 #define VPU_FTOI12 0x17e
 #define VPU_FTOI15 0x17f
+#define VPU_ITOF0 0x13c
+#define VPU_ITOF4 0x13d
+#define VPU_ITOF12 0x13e
+#define VPU_ITOF15 0x13f
 
 #endif

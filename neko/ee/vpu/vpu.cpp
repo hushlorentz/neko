@@ -12,8 +12,8 @@
 #define NUM_TYPE1_OPCODES 11
 uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw};
 
-#define NUM_TYPE3_OPCODES 9
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15};
+#define NUM_TYPE3_OPCODES 13
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15};
 
 using namespace std;
 
@@ -199,6 +199,10 @@ uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_FTOI4:
     case VPU_FTOI12:
     case VPU_FTOI15:
+    case VPU_ITOF0:
+    case VPU_ITOF4:
+    case VPU_ITOF12:
+    case VPU_ITOF15:
       return regFromInstruction(instruction, VPU_FS_REG_SHIFT);
     default:
       return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
@@ -235,6 +239,10 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_FTOI4:
     case VPU_FTOI12:
     case VPU_FTOI15:
+    case VPU_ITOF0:
+    case VPU_ITOF4:
+    case VPU_ITOF12:
+    case VPU_ITOF15:
       return regFromInstruction(instruction, VPU_FT_REG_SHIFT);
     default:
       return regFromInstruction(instruction, VPU_FD_REG_SHIFT);
@@ -430,6 +438,18 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_FTOI15:
       convertFPRegisterToInt15(&fpRegisters[fs], &dest, fieldMask);
       break;
+    case VPU_ITOF0:
+      convertFPRegisterToFloat0(&fpRegisters[fs], &dest, fieldMask);
+      break;
+    case VPU_ITOF4:
+      convertFPRegisterToFloat4(&fpRegisters[fs], &dest, fieldMask);
+      break;
+    case VPU_ITOF12:
+      convertFPRegisterToFloat12(&fpRegisters[fs], &dest, fieldMask);
+      break;
+    case VPU_ITOF15:
+      convertFPRegisterToFloat15(&fpRegisters[fs], &dest, fieldMask);
+      break;
   }
 
   p->setFPRegisterResult(&dest);
@@ -472,6 +492,10 @@ void VPU::pipelineFinished(Pipeline * p)
     case VPU_FTOI4:
     case VPU_FTOI12:
     case VPU_FTOI15:
+    case VPU_ITOF0:
+    case VPU_ITOF4:
+    case VPU_ITOF12:
+    case VPU_ITOF15:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     default:
