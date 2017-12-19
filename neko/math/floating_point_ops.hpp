@@ -6,8 +6,8 @@
 #define FP_FLAG_I_BIT 0x4
 #define FP_FLAG_D_BIT 0x8
 
-#define FP_MAX_MANTISSA 0
-#define FP_MAX_EXPONENT 0xff
+#define FP_MAX_MANTISSA 0x7fffff
+#define FP_MAX_EXPONENT 0xfe
 
 #include <cmath>
 
