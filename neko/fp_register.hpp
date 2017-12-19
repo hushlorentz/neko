@@ -36,23 +36,25 @@ class FPRegister
       float w;
       int wInt;
     };
-};
 
-void addFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
-void subFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
-void mulFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
-void divFPRegisters(FPRegister * r1, FPRegister * r2, FPRegister * r3, uint8_t fieldMask, uint16_t * resultFlags);
-void absFPRegisters(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void addFloatToRegister(FPRegister * r1, float value, FPRegister * dest, uint8_t fieldMask, uint16_t * resultFlags);
-void convertFPRegisterToInt0(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToInt4(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToInt12(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToInt15(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToFloat0(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToFloat4(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToFloat12(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToFloat15(FPRegister * source, FPRegister * dest, uint8_t fieldMask);
-void convertFPRegisterToInt(FPRegister * source, FPRegister * dest, uint8_t fieldMask, int (*convertFunc)(float));
-void convertFPRegisterToFloat(FPRegister * source, FPRegister * dest, uint8_t fieldMask, float (*convertFunc)(int));
+    void storeAbs(FPRegister * source, uint8_t fieldMask);
+    void storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
+    void storeSub(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
+    void storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
+    void storeDiv(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
+    void storeAddFloat(FPRegister * r1, float value, uint8_t fieldMask, uint16_t * resultFlags);
+    void toInt0(FPRegister * source, uint8_t fieldMask);
+    void toInt4(FPRegister * source, uint8_t fieldMask);
+    void toInt12(FPRegister * source, uint8_t fieldMask);
+    void toInt15(FPRegister * source, uint8_t fieldMask);
+    void toFloat0(FPRegister * source, uint8_t fieldMask);
+    void toFloat4(FPRegister * source, uint8_t fieldMask);
+    void toFloat12(FPRegister * source, uint8_t fieldMask);
+    void toFloat15(FPRegister * source, uint8_t fieldMask);
+
+  private:
+    void toInt(FPRegister * source, uint8_t fieldMask, int (*convertFunc)(float));
+    void toFloat(FPRegister * source, uint8_t fieldMask, float (*convertFunc)(int));
+};
 
 #endif

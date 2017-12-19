@@ -2,6 +2,7 @@
 #include "bit_ops.hpp"
 #include "floating_point_ops.hpp"
 #include "vpu.hpp"
+#include "vpu_flags.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
@@ -347,7 +348,7 @@ void VPU::loadQRegister(float value)
 
 void VPU::updateClippingFlags(uint32_t clip)
 {
-  clippingFlags <<= 6;
+  clippingFlags <<= VPU_CLIPPING_FLAG_SHIFT;
   clippingFlags |= (clip & VPU_CLIP_MASK);
 }
 
@@ -394,71 +395,71 @@ void VPU::pipelineStarted(Pipeline * p)
   switch (opCode)
   {
     case VPU_ABS:
-      absFPRegisters(&fpRegisters[fs], &dest, fieldMask);
+      dest.storeAbs(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ADD:
-      addFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
+      dest.storeAdd(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);
       break;
     case VPU_ADDi:
-      addFloatToRegister(&fpRegisters[fs], iRegister, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
       break;
     case VPU_ADDq:
-      addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
       break;
     case VPU_ADDx:
     case VPU_ADDAx:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].x, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].x, fieldMask, &MACFlags);
       break;
     case VPU_ADDy:
     case VPU_ADDAy:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].y, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].y, fieldMask, &MACFlags);
       break;
     case VPU_ADDz:
     case VPU_ADDAz:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].z, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].z, fieldMask, &MACFlags);
       break;
     case VPU_ADDw:
     case VPU_ADDAw:
-      addFloatToRegister(&fpRegisters[fs], fpRegisters[ft].w, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].w, fieldMask, &MACFlags);
       break;
     case VPU_ADDA:
-      addFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
+      dest.storeAdd(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);
       break;
     case VPU_ADDAi:
-      addFloatToRegister(&fpRegisters[fs], iRegister, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
       break;
     case VPU_ADDAq:
-      addFloatToRegister(&fpRegisters[fs], qRegister, &dest, fieldMask, &MACFlags);
+      dest.storeAddFloat(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
       break;
     case VPU_CLIP:
       p->setIntResult(calculateNewClippingFlags(&fpRegisters[ft], &fpRegisters[fs]));
       break;
     case VPU_FTOI0:
-      convertFPRegisterToInt0(&fpRegisters[fs], &dest, fieldMask);
+      dest.toInt0(&fpRegisters[fs], fieldMask);
       break;
     case VPU_FTOI4:
-      convertFPRegisterToInt4(&fpRegisters[fs], &dest, fieldMask);
+      dest.toInt4(&fpRegisters[fs], fieldMask);
       break;
     case VPU_FTOI12:
-      convertFPRegisterToInt12(&fpRegisters[fs], &dest, fieldMask);
+      dest.toInt12(&fpRegisters[fs], fieldMask);
       break;
     case VPU_FTOI15:
-      convertFPRegisterToInt15(&fpRegisters[fs], &dest, fieldMask);
+      dest.toInt15(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF0:
-      convertFPRegisterToFloat0(&fpRegisters[fs], &dest, fieldMask);
+      dest.toFloat0(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF4:
-      convertFPRegisterToFloat4(&fpRegisters[fs], &dest, fieldMask);
+      dest.toFloat4(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF12:
-      convertFPRegisterToFloat12(&fpRegisters[fs], &dest, fieldMask);
+      dest.toFloat12(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF15:
-      convertFPRegisterToFloat15(&fpRegisters[fs], &dest, fieldMask);
+      dest.toFloat15(&fpRegisters[fs], fieldMask);
       break;
     case VPU_MADD:
-      mulFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
+      dest.storeMul(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);
       break;
   }
 
@@ -509,7 +510,7 @@ void VPU::pipelineFinished(Pipeline * p)
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     case VPU_MADD:
-      addFPRegisters(&(p->fpResult), &accumulator, destReg, p->destFieldMask, &MACFlags);
+      destReg->storeAdd(&(p->fpResult), &accumulator, p->destFieldMask, &MACFlags);
       setFlags(destReg);
       break;
     default:

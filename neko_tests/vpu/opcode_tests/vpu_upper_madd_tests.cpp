@@ -1,5 +1,7 @@
 #include "catch.hpp"
+#include "floating_point_ops.hpp"
 #include "vpu.hpp"
+#include "vpu_flags.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 #include "vpu_upper_instruction_utils.hpp"
@@ -37,12 +39,17 @@ TEST_CASE("VPU Microinstruction MADD Tests")
 
   SECTION("MADD sets the correct flags if accumulator contains 0 or a normalized value and there is an overflow exception during the multiplication")
   {
-    vpu.loadAccumulator(100.0f, 75.5f, 0, 25.0f);
-    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF05, VPU_REGISTER_VF02, VPU_MADD);
+    num_32bits infinity;
+    infinity.float_representation = std::numeric_limits<float>::infinity();
+    vpu.loadFPRegister(VPU_REGISTER_VF06, infinity.float_representation, -2.5f, -1.0f, 4.5f);
 
-    REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZZ));
-    REQUIRE(vpu.hasMACFlag(VPU_FLAG_SW));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S));
+    vpu.loadAccumulator(100.0f, 75.5f, 0, 25.0f);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
+
+    //REQUIRE(vpu.hasMACFlag(VPU_FLAG_OX));
+    //REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OY));
+    //REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OZ));
+    //REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OW));
+    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
   }
 }

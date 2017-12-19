@@ -1,6 +1,7 @@
 #include "catch.hpp"
 #include "bit_ops.hpp"
 #include "vpu.hpp"
+#include "vpu_flags.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 #include "vpu_upper_instruction_utils.hpp"

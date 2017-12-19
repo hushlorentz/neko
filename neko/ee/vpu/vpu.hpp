@@ -14,31 +14,6 @@
 #define VPU_MODE_MICRO 1
 #define VPU_MODE_MACRO 2
 
-#define VPU_FLAG_ZW 0x1
-#define VPU_FLAG_ZZ 0x2
-#define VPU_FLAG_ZY 0x4
-#define VPU_FLAG_ZX 0x8
-#define VPU_FLAG_SW 0x10
-#define VPU_FLAG_SZ 0x20
-#define VPU_FLAG_SY 0x40
-#define VPU_FLAG_SX 0x80
-
-#define VPU_CLIP_FLAG_POS_X 0x1
-#define VPU_CLIP_FLAG_NEG_X 0x2
-#define VPU_CLIP_FLAG_POS_Y 0x4
-#define VPU_CLIP_FLAG_NEG_Y 0x8
-#define VPU_CLIP_FLAG_POS_Z 0x10
-#define VPU_CLIP_FLAG_NEG_Z 0x20
-#define VPU_CLIP_MASK 0x3f
-
-#define VPU_FLAG_Z 0x1
-#define VPU_FLAG_S 0x2
-#define VPU_FLAG_Z_STICKY 0x40
-#define VPU_FLAG_S_STICKY 0x80
-
-#define VPU_Z_BITS_MASK 0xf
-#define VPU_S_BITS_MASK 0xf0
-
 using namespace std;
 
 class VPU : public PipelineHandler
