@@ -1,11 +1,6 @@
 #include "floating_point_ops.hpp"
 #include <cfloat>
 
-bool floatEquals(float a, float b)
-{
-  return abs(a - b) < std::numeric_limits<float>::epsilon();
-}
-
 float convertFromIEEE(float value, uint8_t * resultFlags)
 {
   num_32bits num;
@@ -65,6 +60,7 @@ float processNumDivZero(float f1, float f2)
 
 float addFP(float f1, float f2, uint8_t * resultFlags)
 {
+  float result = f1 + f2;
   return convertFromIEEE(f1 + f2, resultFlags);
 }
 

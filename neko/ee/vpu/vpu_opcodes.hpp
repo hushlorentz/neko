@@ -45,5 +45,6 @@
 #define VPU_ITOF4 0x13d
 #define VPU_ITOF12 0x13e
 #define VPU_ITOF15 0x13f
+#define VPU_MADD 0x29
 
 #endif

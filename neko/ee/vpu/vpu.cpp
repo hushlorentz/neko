@@ -9,8 +9,8 @@
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
-#define NUM_TYPE1_OPCODES 11
-uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw};
+#define NUM_TYPE1_OPCODES 12
+uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD};
 
 #define NUM_TYPE3_OPCODES 13
 uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15};
@@ -297,6 +297,13 @@ bool VPU::hasStatusFlag(uint16_t flag)
   return hasFlag(statusFlags, flag);
 }
 
+void VPU::setFlags(FPRegister * reg)
+{
+  setMACFlagsFromRegister(reg);
+  setStatusFlagsFromMACFlags();
+  setStickyFlagsFromStatusFlags();
+}
+
 void VPU::setMACFlagsFromRegister(FPRegister * reg)
 {
   (reg->x == 0) ? setFlag(MACFlags, VPU_FLAG_ZX) : unsetFlag(MACFlags, VPU_FLAG_ZX);
@@ -450,6 +457,9 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_ITOF15:
       convertFPRegisterToFloat15(&fpRegisters[fs], &dest, fieldMask);
       break;
+    case VPU_MADD:
+      mulFPRegisters(&fpRegisters[ft], &fpRegisters[fs], &dest, fieldMask, &MACFlags);
+      break;
   }
 
   p->setFPRegisterResult(&dest);
@@ -498,11 +508,13 @@ void VPU::pipelineFinished(Pipeline * p)
     case VPU_ITOF15:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
+    case VPU_MADD:
+      addFPRegisters(&(p->fpResult), &accumulator, destReg, p->destFieldMask, &MACFlags);
+      setFlags(destReg);
+      break;
     default:
       updateDestinationRegisterWithPipelineResult(destReg, p);
-      setMACFlagsFromRegister(destReg);
-      setStatusFlagsFromMACFlags();
-      setStickyFlagsFromStatusFlags();
+      setFlags(destReg);
       break;
   }
 }

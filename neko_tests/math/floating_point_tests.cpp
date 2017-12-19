@@ -9,13 +9,6 @@ TEST_CASE("Testing the floating point conventions")
 {
   uint8_t resultFlags = 0;
 
-  SECTION("We can use floatEquals to check for float equivalence when calculations can be stored differently from literals")
-  {
-    //float testFloat = 1 / 61.0;
-    //REQUIRE(testFloat != 0.016393442622f);
-    //REQUIRE(floatEquals(0.016393442622f, testFloat));
-  }
-
   SECTION("Two floating point numbers can be added together")
   {
     float a1 = 3.5f;
@@ -48,18 +41,41 @@ TEST_CASE("Testing the floating point conventions")
     REQUIRE(divFP(a1, a2, &resultFlags) == a1 / a2);
   }
 
-  SECTION("Multiplying two positive floating point numbers that result in INF returns 2^(128), with a 0 sign bit, and sets the overflow flag.")
+  SECTION("Multiplying two positive floating point numbers that result in INF returns INF, with a 0 sign bit, and sets the overflow flag.")
   {
     float a1 = std::numeric_limits<float>::infinity();
     float a2 = 7.0f;
     num_32bits num;
 
     num.float_representation = mulFP(a1, a2, &resultFlags);
+    num.float_representation = std::numeric_limits<float>::infinity();
+    num.float_representation = std::numeric_limits<float>::max();
+    num.float_representation += 1;
 
+    double d = std::numeric_limits<float>::infinity();
+    double e = std::numeric_limits<float>::infinity();
+    double f = d / e;
+
+    REQUIRE(num.float_representation != std::numeric_limits<float>::infinity());
     REQUIRE(num.components.mantissa == FP_MAX_MANTISSA);
     REQUIRE(num.components.exponent == FP_MAX_EXPONENT);
     REQUIRE(num.components.sign == 0);
     REQUIRE(resultFlags == FP_FLAG_OVERFLOW);
+  }
+
+  SECTION("Dividing two overflow results should result in 1")
+  {
+    float a1 = std::numeric_limits<float>::infinity();
+    float a2 = std::numeric_limits<float>::infinity();
+
+    num_32bits a1Converted;
+    num_32bits a2Converted;
+
+    a1Converted.float_representation = mulFP(1, a1, &resultFlags);
+    a2Converted.float_representation = mulFP(1, a2, &resultFlags);
+
+    REQUIRE(divFP(a1Converted.float_representation, a2Converted.float_representation, &resultFlags) == 1);
+    REQUIRE(a1 / a2 != 1);
   }
 
   SECTION("Multiplying a positive floating point number and negative floating point number that result in INF returns 2^(128), with a 1 sign bit, and sets the overflow flag.")

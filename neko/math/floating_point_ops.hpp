@@ -6,8 +6,8 @@
 #define FP_FLAG_I_BIT 0x4
 #define FP_FLAG_D_BIT 0x8
 
-#define FP_MAX_MANTISSA 0x2
-#define FP_MAX_EXPONENT 0x80
+#define FP_MAX_MANTISSA 0
+#define FP_MAX_EXPONENT 0xff
 
 #include <cmath>
 
@@ -22,7 +22,6 @@ typedef union {
   } components;
 } num_32bits;
 
-bool floatEquals(float a, float b);
 float addFP(float f1, float f2, uint8_t * resultFlags);
 float mulFP(float f1, float f2, uint8_t * resultFlags);
 float divFP(float f1, float f2, uint8_t * resultFlags);
