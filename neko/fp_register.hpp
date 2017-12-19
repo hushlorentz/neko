@@ -36,6 +36,10 @@ class FPRegister
       float w;
       int wInt;
     };
+    uint8_t xResultFlags;
+    uint8_t yResultFlags;
+    uint8_t zResultFlags;
+    uint8_t wResultFlags;
 
     void storeAbs(FPRegister * source, uint8_t fieldMask);
     void storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);

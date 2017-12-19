@@ -46,10 +46,10 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     vpu.loadAccumulator(100.0f, 75.5f, 0, 25.0f);
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
 
-    //REQUIRE(vpu.hasMACFlag(VPU_FLAG_OX));
-    //REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OY));
-    //REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OZ));
-    //REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OW));
-    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
+    REQUIRE(vpu.hasMACFlag(VPU_FLAG_OX));
+    REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OY));
+    REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OZ));
+    REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OW));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
   }
 }

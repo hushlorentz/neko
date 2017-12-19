@@ -2,11 +2,11 @@
 #include "floating_point_ops.hpp"
 #include "fp_register.hpp"
 
-FPRegister::FPRegister() : x(0), y(0), z(0), w(0)
+FPRegister::FPRegister() : x(0), y(0), z(0), w(0), xResultFlags(0), yResultFlags(0), zResultFlags(0), wResultFlags(0)
 {
 }
 
-FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w(w)
+FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w(w), xResultFlags(0), yResultFlags(0), zResultFlags(0), wResultFlags(0)
 {
 }
 
@@ -24,15 +24,14 @@ void FPRegister::copyFrom(FPRegister * srcReg)
   y = srcReg->y;
   z = srcReg->z;
   w = srcReg->w;
+  xResultFlags = srcReg->xResultFlags;
+  yResultFlags = srcReg->yResultFlags;
+  zResultFlags = srcReg->zResultFlags;
+  wResultFlags = srcReg->wResultFlags;
 }
 
 void FPRegister::storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags)
 {
-  uint8_t xResultFlags = 0;
-  uint8_t yResultFlags = 0;
-  uint8_t zResultFlags = 0;
-  uint8_t wResultFlags = 0;
-
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? addFP(r1->x, r2->x, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? addFP(r1->y, r2->y, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? addFP(r1->z, r2->z, &zResultFlags) : z;
@@ -54,11 +53,6 @@ void FPRegister::storeSub(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, u
 
 void FPRegister::storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags)
 {
-  uint8_t xResultFlags = 0;
-  uint8_t yResultFlags = 0;
-  uint8_t zResultFlags = 0;
-  uint8_t wResultFlags = 0;
-
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? mulFP(r1->x, r2->x, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? mulFP(r1->y, r2->y, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? mulFP(r1->z, r2->z, &zResultFlags) : z;
@@ -67,11 +61,6 @@ void FPRegister::storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, u
 
 void FPRegister::storeDiv(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags)
 {
-  uint8_t xResultFlags = 0;
-  uint8_t yResultFlags = 0;
-  uint8_t zResultFlags = 0;
-  uint8_t wResultFlags = 0;
-
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? divFP(r1->x, r2->x, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? divFP(r1->y, r2->y, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? divFP(r1->z, r2->z, &zResultFlags) : z;
@@ -88,11 +77,6 @@ void FPRegister::storeAbs(FPRegister * source, uint8_t fieldMask)
 
 void FPRegister::storeAddFloat(FPRegister * r1, float value, uint8_t fieldMask, uint16_t * resultFlags)
 {
-  uint8_t xResultFlags = 0;
-  uint8_t yResultFlags = 0;
-  uint8_t zResultFlags = 0;
-  uint8_t wResultFlags = 0;
-
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? addFP(r1->x, value, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? addFP(r1->y, value, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? addFP(r1->z, value, &zResultFlags) : z;

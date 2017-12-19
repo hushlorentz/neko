@@ -315,12 +315,17 @@ void VPU::setMACFlagsFromRegister(FPRegister * reg)
   (reg->y < 0) ? setFlag(MACFlags, VPU_FLAG_SY) : unsetFlag(MACFlags, VPU_FLAG_SY);
   (reg->z < 0) ? setFlag(MACFlags, VPU_FLAG_SZ) : unsetFlag(MACFlags, VPU_FLAG_SZ);
   (reg->w < 0) ? setFlag(MACFlags, VPU_FLAG_SW) : unsetFlag(MACFlags, VPU_FLAG_SW);
+  hasFlag(reg->xResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OX) : unsetFlag(MACFlags, VPU_FLAG_OX);
+  hasFlag(reg->yResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OY) : unsetFlag(MACFlags, VPU_FLAG_OY);
+  hasFlag(reg->zResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OZ) : unsetFlag(MACFlags, VPU_FLAG_OZ);
+  hasFlag(reg->wResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OW) : unsetFlag(MACFlags, VPU_FLAG_OW);
 }
 
 void VPU::setStatusFlagsFromMACFlags()
 {
   ((MACFlags & VPU_Z_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_Z) : unsetFlag(statusFlags, VPU_FLAG_Z);
   ((MACFlags & VPU_S_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_S) : unsetFlag(statusFlags, VPU_FLAG_S);
+  ((MACFlags & VPU_O_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_O) : unsetFlag(statusFlags, VPU_FLAG_O);
 }
 
 void VPU::setStickyFlagsFromStatusFlags()
@@ -510,6 +515,8 @@ void VPU::pipelineFinished(Pipeline * p)
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     case VPU_MADD:
+      updateDestinationRegisterWithPipelineResult(destReg, p);
+      setFlags(destReg);
       destReg->storeAdd(&(p->fpResult), &accumulator, p->destFieldMask, &MACFlags);
       setFlags(destReg);
       break;
