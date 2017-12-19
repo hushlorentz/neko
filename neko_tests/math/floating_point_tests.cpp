@@ -48,13 +48,6 @@ TEST_CASE("Testing the floating point conventions")
     num_32bits num;
 
     num.float_representation = mulFP(a1, a2, &resultFlags);
-    num.float_representation = std::numeric_limits<float>::infinity();
-    num.float_representation = std::numeric_limits<float>::max();
-    num.float_representation += 1;
-
-    double d = std::numeric_limits<float>::infinity();
-    double e = std::numeric_limits<float>::infinity();
-    double f = d / e;
 
     REQUIRE(num.float_representation != std::numeric_limits<float>::infinity());
     REQUIRE(num.components.mantissa == FP_MAX_MANTISSA);
