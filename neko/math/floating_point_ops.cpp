@@ -60,7 +60,6 @@ float processNumDivZero(float f1, float f2)
 
 float addFP(float f1, float f2, uint8_t * resultFlags)
 {
-  float result = f1 + f2;
   return convertFromIEEE(f1 + f2, resultFlags);
 }
 
