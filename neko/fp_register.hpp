@@ -9,6 +9,8 @@
 #define FP_REGISTER_W_FIELD 8
 #define FP_REGISTER_ALL_FIELDS 15
 
+#define FP_REGISTER_FIELD_IS_NEGATIVE(x) (x & (1 << 31))
+
 class FPRegister
 {
   public:
@@ -59,6 +61,7 @@ class FPRegister
   private:
     void toInt(FPRegister * source, uint8_t fieldMask, int (*convertFunc)(float));
     void toFloat(FPRegister * source, uint8_t fieldMask, float (*convertFunc)(int));
+    void clearFlags();
 };
 
 #endif

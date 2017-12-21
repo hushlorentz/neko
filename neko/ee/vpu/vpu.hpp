@@ -89,6 +89,7 @@ class VPU : public PipelineHandler
     void updateClippingFlags(uint32_t clip);
     int calculateNewClippingFlags(FPRegister * fsReg, FPRegister * ftReg);
     FPRegister * destinationRegisterFromPipeline(Pipeline * p);
+    void handleMADDInstruction(FPRegister * destReg, Pipeline * p);
 };
 
 #endif

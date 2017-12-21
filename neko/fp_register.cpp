@@ -32,6 +32,7 @@ void FPRegister::copyFrom(FPRegister * srcReg)
 
 void FPRegister::storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags)
 {
+  clearFlags();
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? addFP(r1->x, r2->x, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? addFP(r1->y, r2->y, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? addFP(r1->z, r2->z, &zResultFlags) : z;
@@ -40,11 +41,7 @@ void FPRegister::storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, u
 
 void FPRegister::storeSub(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags)
 {
-  uint8_t xResultFlags = 0;
-  uint8_t yResultFlags = 0;
-  uint8_t zResultFlags = 0;
-  uint8_t wResultFlags = 0;
-
+  clearFlags();
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? subFP(r1->x, r2->x, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? subFP(r1->y, r2->y, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? subFP(r1->z, r2->z, &zResultFlags) : z;
@@ -53,6 +50,7 @@ void FPRegister::storeSub(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, u
 
 void FPRegister::storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags)
 {
+  clearFlags();
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? mulFP(r1->x, r2->x, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? mulFP(r1->y, r2->y, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? mulFP(r1->z, r2->z, &zResultFlags) : z;
@@ -61,6 +59,7 @@ void FPRegister::storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, u
 
 void FPRegister::storeDiv(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags)
 {
+  clearFlags();
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? divFP(r1->x, r2->x, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? divFP(r1->y, r2->y, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? divFP(r1->z, r2->z, &zResultFlags) : z;
@@ -77,6 +76,7 @@ void FPRegister::storeAbs(FPRegister * source, uint8_t fieldMask)
 
 void FPRegister::storeAddFloat(FPRegister * r1, float value, uint8_t fieldMask, uint16_t * resultFlags)
 {
+  clearFlags();
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? addFP(r1->x, value, &xResultFlags) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? addFP(r1->y, value, &yResultFlags) : y;
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? addFP(r1->z, value, &zResultFlags) : z;
@@ -138,3 +138,11 @@ void FPRegister::toFloat(FPRegister * source, uint8_t fieldMask, float (*convert
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? (*convertFunc)(source->zInt) : z;
   w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->wInt) : w;
 }
+
+void FPRegister::clearFlags()
+{
+  xResultFlags = 0;
+  yResultFlags = 0;
+  zResultFlags = 0;
+  wResultFlags = 0;
+};

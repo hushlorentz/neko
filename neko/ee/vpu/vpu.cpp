@@ -311,14 +311,18 @@ void VPU::setMACFlagsFromRegister(FPRegister * reg)
   (reg->y == 0) ? setFlag(MACFlags, VPU_FLAG_ZY) : unsetFlag(MACFlags, VPU_FLAG_ZY);
   (reg->z == 0) ? setFlag(MACFlags, VPU_FLAG_ZZ) : unsetFlag(MACFlags, VPU_FLAG_ZZ);
   (reg->w == 0) ? setFlag(MACFlags, VPU_FLAG_ZW) : unsetFlag(MACFlags, VPU_FLAG_ZW);
-  (reg->x < 0) ? setFlag(MACFlags, VPU_FLAG_SX) : unsetFlag(MACFlags, VPU_FLAG_SX);
-  (reg->y < 0) ? setFlag(MACFlags, VPU_FLAG_SY) : unsetFlag(MACFlags, VPU_FLAG_SY);
-  (reg->z < 0) ? setFlag(MACFlags, VPU_FLAG_SZ) : unsetFlag(MACFlags, VPU_FLAG_SZ);
-  (reg->w < 0) ? setFlag(MACFlags, VPU_FLAG_SW) : unsetFlag(MACFlags, VPU_FLAG_SW);
+  FP_REGISTER_FIELD_IS_NEGATIVE(reg->xInt) ? setFlag(MACFlags, VPU_FLAG_SX) : unsetFlag(MACFlags, VPU_FLAG_SX);
+  FP_REGISTER_FIELD_IS_NEGATIVE(reg->yInt) ? setFlag(MACFlags, VPU_FLAG_SY) : unsetFlag(MACFlags, VPU_FLAG_SY);
+  FP_REGISTER_FIELD_IS_NEGATIVE(reg->zInt) ? setFlag(MACFlags, VPU_FLAG_SZ) : unsetFlag(MACFlags, VPU_FLAG_SZ);
+  FP_REGISTER_FIELD_IS_NEGATIVE(reg->wInt) ? setFlag(MACFlags, VPU_FLAG_SW) : unsetFlag(MACFlags, VPU_FLAG_SW);
   hasFlag(reg->xResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OX) : unsetFlag(MACFlags, VPU_FLAG_OX);
   hasFlag(reg->yResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OY) : unsetFlag(MACFlags, VPU_FLAG_OY);
   hasFlag(reg->zResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OZ) : unsetFlag(MACFlags, VPU_FLAG_OZ);
   hasFlag(reg->wResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OW) : unsetFlag(MACFlags, VPU_FLAG_OW);
+  hasFlag(reg->xResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UX) : unsetFlag(MACFlags, VPU_FLAG_UX);
+  hasFlag(reg->yResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UY) : unsetFlag(MACFlags, VPU_FLAG_UY);
+  hasFlag(reg->zResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UZ) : unsetFlag(MACFlags, VPU_FLAG_UZ);
+  hasFlag(reg->wResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UW) : unsetFlag(MACFlags, VPU_FLAG_UW);
 }
 
 void VPU::setStatusFlagsFromMACFlags()
@@ -326,18 +330,29 @@ void VPU::setStatusFlagsFromMACFlags()
   ((MACFlags & VPU_Z_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_Z) : unsetFlag(statusFlags, VPU_FLAG_Z);
   ((MACFlags & VPU_S_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_S) : unsetFlag(statusFlags, VPU_FLAG_S);
   ((MACFlags & VPU_O_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_O) : unsetFlag(statusFlags, VPU_FLAG_O);
+  ((MACFlags & VPU_U_BITS_MASK) > 0) ? setFlag(statusFlags, VPU_FLAG_U) : unsetFlag(statusFlags, VPU_FLAG_U);
 }
 
 void VPU::setStickyFlagsFromStatusFlags()
 {
-  if (hasFlag(statusFlags, VPU_FLAG_Z) || hasFlag(statusFlags, VPU_FLAG_Z_STICKY))
+  if (hasStatusFlag(VPU_FLAG_Z) || hasStatusFlag(VPU_FLAG_ZS))
   {
-    setFlag(statusFlags, VPU_FLAG_Z_STICKY);
+    setFlag(statusFlags, VPU_FLAG_ZS);
   }
 
-  if (hasFlag(statusFlags, VPU_FLAG_S) || hasFlag(statusFlags, VPU_FLAG_S_STICKY))
+  if (hasStatusFlag(VPU_FLAG_S) || hasStatusFlag(VPU_FLAG_SS))
   {
-    setFlag(statusFlags, VPU_FLAG_S_STICKY);
+    setFlag(statusFlags, VPU_FLAG_SS);
+  }
+
+  if (hasStatusFlag(VPU_FLAG_O) || hasStatusFlag(VPU_FLAG_OS))
+  {
+    setFlag(statusFlags, VPU_FLAG_OS);
+  }
+
+  if (hasStatusFlag(VPU_FLAG_U) || hasStatusFlag(VPU_FLAG_US))
+  {
+    setFlag(statusFlags, VPU_FLAG_US);
   }
 }
 
@@ -515,14 +530,25 @@ void VPU::pipelineFinished(Pipeline * p)
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     case VPU_MADD:
-      updateDestinationRegisterWithPipelineResult(destReg, p);
-      setFlags(destReg);
-      destReg->storeAdd(&(p->fpResult), &accumulator, p->destFieldMask, &MACFlags);
-      setFlags(destReg);
+      handleMADDInstruction(destReg, p);
       break;
     default:
       updateDestinationRegisterWithPipelineResult(destReg, p);
       setFlags(destReg);
       break;
   }
+}
+
+void VPU::handleMADDInstruction(FPRegister * destReg, Pipeline * p)
+{
+  updateDestinationRegisterWithPipelineResult(destReg, p);
+  setFlags(destReg);
+
+  if (hasStatusFlag(VPU_FLAG_O))
+  {
+    return;
+  }
+
+  destReg->storeAdd(&(p->fpResult), &accumulator, p->destFieldMask, &MACFlags);
+  setFlags(destReg);
 }

@@ -52,7 +52,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZZ));
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZW));
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z_STICKY));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_ZS));
   }
 
   SECTION("ADDing vectors of opposite direction, but equal magnitude and then doing a second addition unsets the zero flags.")
@@ -65,7 +65,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZZ));
     REQUIRE(!vpu.hasMACFlag(VPU_FLAG_ZW));
     REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_Z));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z_STICKY));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_ZS));
   }
 
   SECTION("ADDing vectors sets the sign flags")
@@ -76,7 +76,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_SZ));
     REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SW));
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S_STICKY));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_SS));
   }
 
   SECTION("ADDing vectors resets the sign flags")
@@ -89,7 +89,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SZ));
     REQUIRE(!vpu.hasMACFlag(VPU_FLAG_SW));
     REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_S));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S_STICKY));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_SS));
   }
 
   SECTION("ADDi stores the addition of the iRegister and the src vector in dest vector")
