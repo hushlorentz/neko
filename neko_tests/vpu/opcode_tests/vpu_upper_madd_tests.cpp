@@ -76,4 +76,21 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_U));
     REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_O));
   }
+
+  SECTION("MADD sets the correct flags if accumulator contains MAX and the multiplication does not throw an exception.")
+  {
+    num_32bits maxFloat;
+    maxFloat.float_representation = std::numeric_limits<float>::max();
+
+    vpu.loadFPRegister(VPU_REGISTER_VF07, 2, 0.5f, 1.0f, 9.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, -2.9f, 1.0f, -1.0f);
+    vpu.loadAccumulator(100.0f, 5, maxFloat.float_representation, 25.0f);
+
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == maxFloat.float_representation);
+    //REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_U));
+    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OZ));
+    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
+  }
 }
