@@ -6,11 +6,11 @@ FPRegister::FPRegister() : x(0), y(0), z(0), w(0), xResultFlags(0), yResultFlags
 {
 }
 
-FPRegister::FPRegister(float x, float y, float z, float w) : x(x), y(y), z(z), w(w), xResultFlags(0), yResultFlags(0), zResultFlags(0), wResultFlags(0)
+FPRegister::FPRegister(double x, double y, double z, double w) : x(x), y(y), z(z), w(w), xResultFlags(0), yResultFlags(0), zResultFlags(0), wResultFlags(0)
 {
 }
 
-void FPRegister::load(float newX, float newY, float newZ, float newW)
+void FPRegister::load(double newX, double newY, double newZ, double newW)
 {
   x = newX;
   y = newY;
@@ -74,7 +74,7 @@ void FPRegister::storeAbs(FPRegister * source, uint8_t fieldMask)
   w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? abs(source->w) : w;
 }
 
-void FPRegister::storeAddFloat(FPRegister * r1, float value, uint8_t fieldMask, uint16_t * resultFlags)
+void FPRegister::storeAddDouble(FPRegister * r1, double value, uint8_t fieldMask, uint16_t * resultFlags)
 {
   clearFlags();
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? addFP(r1->x, value, &xResultFlags) : x;
@@ -85,45 +85,45 @@ void FPRegister::storeAddFloat(FPRegister * r1, float value, uint8_t fieldMask, 
 
 void FPRegister::toInt0(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &floatToInteger0);
+  toInt(source, fieldMask, &doubleToInteger0);
 }
 
 void FPRegister::toInt4(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &floatToInteger4);
+  toInt(source, fieldMask, &doubleToInteger4);
 }
 
 void FPRegister::toInt12(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &floatToInteger12);
+  toInt(source, fieldMask, &doubleToInteger12);
 }
 
 void FPRegister::toInt15(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &floatToInteger15);
+  toInt(source, fieldMask, &doubleToInteger15);
 }
 
-void FPRegister::toFloat0(FPRegister * source, uint8_t fieldMask)
+void FPRegister::toDouble0(FPRegister * source, uint8_t fieldMask)
 {
-  toFloat(source, fieldMask, &integer0ToFloat);
+  toDouble(source, fieldMask, &integer0ToDouble);
 }
 
-void FPRegister::toFloat4(FPRegister * source, uint8_t fieldMask)
+void FPRegister::toDouble4(FPRegister * source, uint8_t fieldMask)
 {
-  toFloat(source, fieldMask, &integer4ToFloat);
+  toDouble(source, fieldMask, &integer4ToDouble);
 }
 
-void FPRegister::toFloat12(FPRegister * source, uint8_t fieldMask)
+void FPRegister::toDouble12(FPRegister * source, uint8_t fieldMask)
 {
-  toFloat(source, fieldMask, &integer12ToFloat);
+  toDouble(source, fieldMask, &integer12ToDouble);
 }
 
-void FPRegister::toFloat15(FPRegister * source, uint8_t fieldMask)
+void FPRegister::toDouble15(FPRegister * source, uint8_t fieldMask)
 {
-  toFloat(source, fieldMask, &integer15ToFloat);
+  toDouble(source, fieldMask, &integer15ToDouble);
 }
 
-void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, int (*convertFunc)(float))
+void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, long (*convertFunc)(double))
 {
   xInt = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->x) : xInt;
   yInt = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->y) : yInt;
@@ -131,7 +131,7 @@ void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, int (*convertFunc
   wInt = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->w) : wInt;
 }
 
-void FPRegister::toFloat(FPRegister * source, uint8_t fieldMask, float (*convertFunc)(int))
+void FPRegister::toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(long))
 {
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->xInt) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->yInt) : y;

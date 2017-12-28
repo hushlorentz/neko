@@ -9,34 +9,34 @@
 #define FP_REGISTER_W_FIELD 8
 #define FP_REGISTER_ALL_FIELDS 15
 
-#define FP_REGISTER_FIELD_IS_NEGATIVE(x) (x & (1 << 31))
+#define FP_REGISTER_FIELD_IS_NEGATIVE(x) (x & (1l << 63))
 
 class FPRegister
 {
   public:
     FPRegister();
-    FPRegister(float x, float y, float z, float w);
-    void load(float x, float y, float z, float w);
+    FPRegister(double x, double y, double z, double w);
+    void load(double x, double y, double z, double w);
     void copyFrom(FPRegister * srcReg);
     union
     {
-      float x;
-      int xInt;
+      double x;
+      long xInt;
     };
     union
     {
-      float y;
-      int yInt;
+      double y;
+      long yInt;
     };
     union
     {
-      float z;
-      int zInt;
+      double z;
+      long zInt;
     };
     union
     {
-      float w;
-      int wInt;
+      double w;
+      long wInt;
     };
     uint8_t xResultFlags;
     uint8_t yResultFlags;
@@ -48,19 +48,19 @@ class FPRegister
     void storeSub(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
     void storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
     void storeDiv(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
-    void storeAddFloat(FPRegister * r1, float value, uint8_t fieldMask, uint16_t * resultFlags);
+    void storeAddDouble(FPRegister * r1, double value, uint8_t fieldMask, uint16_t * resultFlags);
     void toInt0(FPRegister * source, uint8_t fieldMask);
     void toInt4(FPRegister * source, uint8_t fieldMask);
     void toInt12(FPRegister * source, uint8_t fieldMask);
     void toInt15(FPRegister * source, uint8_t fieldMask);
-    void toFloat0(FPRegister * source, uint8_t fieldMask);
-    void toFloat4(FPRegister * source, uint8_t fieldMask);
-    void toFloat12(FPRegister * source, uint8_t fieldMask);
-    void toFloat15(FPRegister * source, uint8_t fieldMask);
+    void toDouble0(FPRegister * source, uint8_t fieldMask);
+    void toDouble4(FPRegister * source, uint8_t fieldMask);
+    void toDouble12(FPRegister * source, uint8_t fieldMask);
+    void toDouble15(FPRegister * source, uint8_t fieldMask);
 
   private:
-    void toInt(FPRegister * source, uint8_t fieldMask, int (*convertFunc)(float));
-    void toFloat(FPRegister * source, uint8_t fieldMask, float (*convertFunc)(int));
+    void toInt(FPRegister * source, uint8_t fieldMask, long (*convertFunc)(double));
+    void toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(long));
     void clearFlags();
 };
 

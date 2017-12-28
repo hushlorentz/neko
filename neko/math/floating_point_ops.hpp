@@ -7,32 +7,34 @@
 #define FP_FLAG_D_BIT 0x8
 
 #define FP_MAX_MANTISSA 0x7fffff
-#define FP_MAX_EXPONENT 0xfe
+#define FP_MAX_EXPONENT 128
+#define FP_EXP_BIAS 1023
+#define FP_MAX_EXPONENT_WITH_BIAS FP_EXP_BIAS + FP_MAX_EXPONENT
 
 #include <cmath>
 
 #include "fp_register.hpp"
 
 typedef union {
-  float float_representation;
+  double d;
   struct {
-    unsigned int mantissa : 23;
-    unsigned int exponent : 8;
-    unsigned int sign : 1;
-  } components;
-} num_32bits;
+    unsigned long mantissa : 52;
+    unsigned long exponent : 11; 
+    unsigned long sign : 1;
+  };
+} Double;
 
-float addFP(float f1, float f2, uint8_t * resultFlags);
-float mulFP(float f1, float f2, uint8_t * resultFlags);
-float divFP(float f1, float f2, uint8_t * resultFlags);
-float subFP(float f1, float f2, uint8_t * resultFlags);
-int floatToInteger0(float f);
-int floatToInteger4(float f);
-int floatToInteger12(float f);
-int floatToInteger15(float f);
-float integer0ToFloat(int i);
-float integer4ToFloat(int i);
-float integer12ToFloat(int i);
-float integer15ToFloat(int i);
+double addFP(double d1, double d2, uint8_t * resultFlags);
+double mulFP(double d1, double d2, uint8_t * resultFlags);
+double divFP(double d1, double d2, uint8_t * resultFlags);
+double subFP(double d1, double d2, uint8_t * resultFlags);
+long doubleToInteger0(double d);
+long doubleToInteger4(double d);
+long doubleToInteger12(double d);
+long doubleToInteger15(double d);
+double integer0ToDouble(long i);
+double integer4ToDouble(long i);
+double integer12ToDouble(long i);
+double integer15ToDouble(long i);
 
 #endif

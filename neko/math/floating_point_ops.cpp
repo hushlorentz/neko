@@ -1,133 +1,133 @@
 #include "floating_point_ops.hpp"
 #include <cfloat>
 
-float convertFromIEEE(float value, uint8_t * resultFlags)
+double convertFromIEEE(double value, uint8_t * resultFlags)
 {
-  num_32bits num;
-  num.float_representation = value;
+  Double num;
+  num.d = value;
 
-  if (num.components.exponent == 0xff)
+  if (num.exponent - FP_EXP_BIAS > FP_MAX_EXPONENT)
   {
-    num.components.exponent = FP_MAX_EXPONENT;
-    num.components.mantissa = FP_MAX_MANTISSA;
+    num.exponent = FP_EXP_BIAS + FP_MAX_EXPONENT;
+    num.mantissa = FP_MAX_MANTISSA;
     *resultFlags |= FP_FLAG_OVERFLOW;
 
-    return num.float_representation;
+    return num.d;
   }
-  if (num.components.exponent == 0 && num.components.mantissa > 0)
+  if (num.exponent == 0 && num.mantissa > 0)
   {
-    num.components.exponent = 0;
-    num.components.mantissa = 0;
+    num.exponent = 0;
+    num.mantissa = 0;
     *resultFlags |= FP_FLAG_UNDERFLOW;
 
-    return num.float_representation;
+    return num.d;
   }
 
   return value;
 }
 
-uint8_t getSignFromNumXORNum(float f1, float f2)
+uint8_t getSignFromNumXORNum(double d1, double d2)
 {
-  num_32bits f1Num;
-  num_32bits f2Num;
+  Double f1Num;
+  Double f2Num;
 
-  f1Num.float_representation = f1;
-  f2Num.float_representation = f2;
+  f1Num.d = d1;
+  f2Num.d = d2;
 
-  return f1Num.components.sign ^ f2Num.components.sign;
+  return f1Num.sign ^ f2Num.sign;
 }
 
-float processZeroDivZero(float f1, float f2)
+double processZeroDivZero(double d1, double d2)
 {
-  num_32bits result;
+  Double result;
 
-  result.float_representation = 0;
-  result.components.sign = getSignFromNumXORNum(f1, f2);
+  result.d = 0;
+  result.sign = getSignFromNumXORNum(d1, d2);
 
-  return result.float_representation;
+  return result.d;
 }
 
-float processNumDivZero(float f1, float f2)
+double processNumDivZero(double d1, double d2)
 {
-  num_32bits result;
+  Double result;
 
-  result.components.exponent = FP_MAX_EXPONENT;
-  result.components.mantissa = FP_MAX_MANTISSA;
-  result.components.sign = getSignFromNumXORNum(f1, f2);
+  result.mantissa = FP_MAX_MANTISSA;
+  result.exponent = FP_EXP_BIAS + FP_MAX_EXPONENT;
+  result.sign = getSignFromNumXORNum(d1, d2);
 
-  return result.float_representation;
+  return result.d;
 }
 
-float addFP(float f1, float f2, uint8_t * resultFlags)
+double addFP(double d1, double d2, uint8_t * resultFlags)
 {
-  return convertFromIEEE(f1 + f2, resultFlags);
+  return convertFromIEEE(d1 + d2, resultFlags);
 }
 
-float mulFP(float f1, float f2, uint8_t * resultFlags)
+double mulFP(double d1, double d2, uint8_t * resultFlags)
 {
-  return convertFromIEEE(f1 * f2, resultFlags);
+  return convertFromIEEE(d1 * d2, resultFlags);
 }
 
-float divFP(float f1, float f2, uint8_t * resultFlags)
+double divFP(double d1, double d2, uint8_t * resultFlags)
 {
-  if (f2 == 0.0f)
+  if (d2 == 0.0f)
   {
-    if (f1 == 0.0f)
+    if (d1 == 0.0f)
     {
       *resultFlags |= FP_FLAG_I_BIT;
-      return processZeroDivZero(f1, f2);
+      return processZeroDivZero(d1, d2);
     }
     else
     {
       *resultFlags |= FP_FLAG_D_BIT;
-      return processNumDivZero(f1, f2);
+      return processNumDivZero(d1, d2);
     }
   }
 
-  return convertFromIEEE(f1 / f2, resultFlags);
+  return convertFromIEEE(d1 / d2, resultFlags);
 }
 
-float subFP(float f1, float f2, uint8_t * resultFlags)
+double subFP(double d1, double d2, uint8_t * resultFlags)
 {
-  return convertFromIEEE(f1 - f2, resultFlags);
+  return convertFromIEEE(d1 - d2, resultFlags);
 }
 
-int floatToInteger0(float f)
+long doubleToInteger0(double d)
 {
-  return (int)f;
+  return (long)d;
 }
 
-int floatToInteger4(float f)
+long doubleToInteger4(double d)
 {
-  return (int)(f * 16);
+  return (long)(d * 16);
 }
 
-int floatToInteger12(float f)
+long doubleToInteger12(double d)
 {
-  return (int)(f * 4096);
+  return (long)(d * 4096);
 }
 
-int floatToInteger15(float f)
+long doubleToInteger15(double d)
 {
-  return (int)(f * 32768);
+  return (long)(d * 32768);
 }
 
-float integer0ToFloat(int i)
+double integer0ToDouble(long i)
 {
-  return (float)i;
+  return (double)i;
 }
 
-float integer4ToFloat(int i)
+double integer4ToDouble(long i)
 {
   return i / 16.0f;
 }
 
-float integer12ToFloat(int i)
+double integer12ToDouble(long i)
 {
   return i / 4096.0f;
 }
 
-float integer15ToFloat(int i)
+double integer15ToDouble(long i)
 {
   return i / 32768.0f;
 }

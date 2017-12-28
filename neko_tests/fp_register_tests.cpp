@@ -136,7 +136,7 @@ TEST_CASE("FP Register Tests")
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
-    REQUIRE(reg3.z == 0.6f);
+    REQUIRE(reg3.z == 0.6);
     REQUIRE(reg3.w == 2);
   }
 
@@ -147,17 +147,17 @@ TEST_CASE("FP Register Tests")
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
     REQUIRE(reg3.z == 1);
-    REQUIRE(reg3.w == 0.5f);
+    REQUIRE(reg3.w == 0.5);
   }
 
   SECTION("All fields of two FP Registers can be divided")
   {
     reg3.storeDiv(&reg1, &reg2, FP_REGISTER_ALL_FIELDS, &resultFlags);
 
-    REQUIRE(reg3.x == -0.5f);
-    REQUIRE(reg3.y == 1.0f);
-    REQUIRE(reg3.z == 0.6f);
-    REQUIRE(reg3.w == 0.5f);
+    REQUIRE(reg3.x == -0.5);
+    REQUIRE(reg3.y == 1.0);
+    REQUIRE(reg3.z == 0.6);
+    REQUIRE(reg3.w == 0.5);
   }
 
   SECTION("Adding the x field leaves the other fields unchanged")

@@ -121,7 +121,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT | VPU_DEST_W_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF07, VPU_ADDx);
 
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 10);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == -11.4f);
+    REQUIRE((float)vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == -11.4f);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->z == 10);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == -14);
   }
@@ -130,9 +130,9 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Z_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF07, VPU_ADDy);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 11.4f);
+    REQUIRE((float)vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 11.4f);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == 10);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->z == 16.4f);
+    REQUIRE((float)vpu.fpRegisterValue(VPU_REGISTER_VF07)->z == 16.4f);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == 10);
   }
 
@@ -141,7 +141,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT | VPU_DEST_Z_BIT | VPU_DEST_W_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF07, VPU_ADDz);
 
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->x == 10);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == -16.4f);
+    REQUIRE((float)vpu.fpRegisterValue(VPU_REGISTER_VF07)->y == -16.4f);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->z == 0);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF07)->w == -19);
   }

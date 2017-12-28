@@ -421,35 +421,35 @@ void VPU::pipelineStarted(Pipeline * p)
       dest.storeAdd(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);
       break;
     case VPU_ADDi:
-      dest.storeAddFloat(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
       break;
     case VPU_ADDq:
-      dest.storeAddFloat(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
       break;
     case VPU_ADDx:
     case VPU_ADDAx:
-      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].x, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask, &MACFlags);
       break;
     case VPU_ADDy:
     case VPU_ADDAy:
-      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].y, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask, &MACFlags);
       break;
     case VPU_ADDz:
     case VPU_ADDAz:
-      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].z, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask, &MACFlags);
       break;
     case VPU_ADDw:
     case VPU_ADDAw:
-      dest.storeAddFloat(&fpRegisters[fs], fpRegisters[ft].w, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask, &MACFlags);
       break;
     case VPU_ADDA:
       dest.storeAdd(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);
       break;
     case VPU_ADDAi:
-      dest.storeAddFloat(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
       break;
     case VPU_ADDAq:
-      dest.storeAddFloat(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
+      dest.storeAddDouble(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
       break;
     case VPU_CLIP:
       p->setIntResult(calculateNewClippingFlags(&fpRegisters[ft], &fpRegisters[fs]));
@@ -467,16 +467,16 @@ void VPU::pipelineStarted(Pipeline * p)
       dest.toInt15(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF0:
-      dest.toFloat0(&fpRegisters[fs], fieldMask);
+      dest.toDouble0(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF4:
-      dest.toFloat4(&fpRegisters[fs], fieldMask);
+      dest.toDouble4(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF12:
-      dest.toFloat12(&fpRegisters[fs], fieldMask);
+      dest.toDouble12(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ITOF15:
-      dest.toFloat15(&fpRegisters[fs], fieldMask);
+      dest.toDouble15(&fpRegisters[fs], fieldMask);
       break;
     case VPU_MADD:
       dest.storeMul(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);

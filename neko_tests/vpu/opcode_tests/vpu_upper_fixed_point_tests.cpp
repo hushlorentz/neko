@@ -4,6 +4,8 @@
 #include "vpu_register_ids.hpp"
 #include "vpu_upper_instruction_utils.hpp"
 
+#include "floating_point_ops.hpp"
+
 TEST_CASE("VPU Microinstruction Fixed Point Tests")
 {
   VPU vpu;
@@ -53,10 +55,10 @@ TEST_CASE("VPU Microinstruction Fixed Point Tests")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT | VPU_DEST_Z_BIT, VPU_REGISTER_VF05, VPU_REGISTER_VF04, 0, VPU_FTOI15);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->xInt == 1092616192);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->xInt == 0x4024000000000000);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->yInt == 14745);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->zInt == 18022);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->wInt == 1077936128);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->wInt == 0x4008000000000000);
   }
 
   SECTION("ITOF0 converts fixed point fields of the second source vector to floating point and stores the result in the fields of the first vector")
