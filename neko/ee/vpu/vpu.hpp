@@ -29,7 +29,7 @@ class VPU : public PipelineHandler
     uint8_t getState();
     FPRegister *fpRegisterValue(int registerID);
     uint16_t intRegisterValue(int registerID);
-    void loadFPRegister(int registerID, float x, float y, float z, float w);
+    void loadFPRegister(int registerID, double x, double y, double z, double w);
     void loadIntRegister(int registerID, int value);
     uint32_t elapsedCycles();
     void resetCycles();
@@ -40,9 +40,9 @@ class VPU : public PipelineHandler
     virtual void pipelineFinished(Pipeline * p);
     bool hasMACFlag(uint16_t flag);
     bool hasStatusFlag(uint16_t flag);
-    void loadIRegister(float value);
-    void loadQRegister(float value);
-    void loadAccumulator(float x, float y, float z, float w);
+    void loadIRegister(double value);
+    void loadQRegister(double value);
+    void loadAccumulator(double x, double y, double z, double w);
   private:
     uint8_t state;
     uint32_t cycles;
@@ -51,9 +51,9 @@ class VPU : public PipelineHandler
     uint16_t microMemPC;
     vector<FPRegister> fpRegisters;
     vector<uint16_t> intRegisters;
-    float iRegister;
-    float qRegister;
-    float pRegister;
+    double iRegister;
+    double qRegister;
+    double pRegister;
     uint32_t rRegister;
     uint16_t MACFlags;
     uint16_t statusFlags;

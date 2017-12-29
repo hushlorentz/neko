@@ -77,7 +77,7 @@ uint16_t VPU::intRegisterValue(int registerID)
   return intRegisters[registerID];
 }
 
-void VPU::loadFPRegister(int registerID, float x, float y, float z, float w)
+void VPU::loadFPRegister(int registerID, double x, double y, double z, double w)
 {
   fpRegisters[registerID].load(x, y, z, w);
 }
@@ -87,7 +87,7 @@ void VPU::loadIntRegister(int registerID, int value)
   intRegisters[registerID] = value;
 }
 
-void VPU::loadAccumulator(float x, float y, float z, float w)
+void VPU::loadAccumulator(double x, double y, double z, double w)
 {
   accumulator.load(x, y, z, w);
 }
@@ -356,12 +356,12 @@ void VPU::setStickyFlagsFromStatusFlags()
   }
 }
 
-void VPU::loadIRegister(float value)
+void VPU::loadIRegister(double value)
 {
   iRegister = value;
 }
 
-void VPU::loadQRegister(float value)
+void VPU::loadQRegister(double value)
 {
   qRegister = value;
 }

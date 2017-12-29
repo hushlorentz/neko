@@ -59,38 +59,38 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     REQUIRE(num.exponent == FP_MAX_EXPONENT_WITH_BIAS);
   }
 
-  //SECTION("MADD sets the correct flags if accumulator contains 0 or a normalized value and there is an underflow exception during the multiplication")
-  //{
-    //Double nonNormalized;
-    //nonNormalized.d = std::numeric_limits<double>::min();
+  SECTION("MADD sets the correct flags if accumulator contains 0 or a normalized value and there is an underflow exception during the multiplication")
+  {
+    Double nonNormalized;
+    nonNormalized.d = std::numeric_limits<double>::min();
 
-    //vpu.loadFPRegister(VPU_REGISTER_VF07, 2, 0.005, 3.4f, 9.0f);
-    //vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, nonNormalized.d, -2.5f, -1.0f);
-    //vpu.loadAccumulator(100.0f, 5, 0, 25.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF07, 2, 0.5, 3.4f, 9.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, nonNormalized.d, -2.5f, -1.0f);
+    vpu.loadAccumulator(100.0f, 5, 0, 25.0f);
 
-    //executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
 
-    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_US));
-    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_ZS));
-    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_SS));
-    //REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_U));
-    //REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_O));
-  //}
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_US));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_ZS));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_SS));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_U));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_O));
+  }
 
-  //SECTION("MADD sets the correct flags if accumulator contains MAX and the multiplication does not throw an exception.")
-  //{
-    //Double maxFloat;
-    //maxFloat.d = std::numeric_limits<float>::max();
+  SECTION("MADD sets the correct flags if accumulator contains MAX and the multiplication does not throw an exception.")
+  {
+    Double max;
+    max.exponent = FP_MAX_EXPONENT_WITH_BIAS;
+    max.mantissa = FP_MAX_MANTISSA;
 
-    //vpu.loadFPRegister(VPU_REGISTER_VF07, 2, 0.5f, maxFloat.d, 9.0f);
-    //vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, -2.9f, 1.0f, -1.0f);
-    //vpu.loadAccumulator(100.0f, 5, maxFloat.d, 25.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF07, 2, 0.5f, max.d, 9.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, -2.9f, 1.0f, -1.0f);
+    vpu.loadAccumulator(100.0f, 5, max.d, 25.0f);
 
-    //executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
 
-    //REQUIRE(isMaxFP(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z));
-    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OZ));
-    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
-    //REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
-  //}
+    REQUIRE(vpu.hasMACFlag(VPU_FLAG_OZ));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
+  }
 }
