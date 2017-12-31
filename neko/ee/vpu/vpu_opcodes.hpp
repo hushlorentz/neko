@@ -65,5 +65,11 @@
 #define VPU_MAXy 0x11
 #define VPU_MAXz 0x12
 #define VPU_MAXw 0x13
+#define VPU_MINI 0x2f
+#define VPU_MINIi 0x1f
+#define VPU_MINIx 0x14
+#define VPU_MINIy 0x15
+#define VPU_MINIz 0x16
+#define VPU_MINIw 0x17
 
 #endif

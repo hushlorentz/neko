@@ -114,6 +114,22 @@ void FPRegister::storeMaxDouble(FPRegister * r1, double d, uint8_t fieldMask)
   w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? max(r1->w, d) : w;
 }
 
+void FPRegister::storeMin(FPRegister * r1, FPRegister * r2, uint8_t fieldMask)
+{
+  clearFlags();
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? min(r1->x, r2->x) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? min(r1->y, r2->y) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? min(r1->z, r2->z) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? min(r1->w, r2->w) : w;
+}
+void FPRegister::storeMinDouble(FPRegister * r1, double d, uint8_t fieldMask)
+{
+  clearFlags();
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? min(r1->x, d) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? min(r1->y, d) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? min(r1->z, d) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? min(r1->w, d) : w;
+}
 
 void FPRegister::toInt0(FPRegister * source, uint8_t fieldMask)
 {

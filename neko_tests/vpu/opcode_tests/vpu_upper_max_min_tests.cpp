@@ -78,4 +78,67 @@ TEST_CASE("VPU Microinstruction MAX and MIN Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == 59);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 149);
   }
+
+  SECTION("MINI stores the min value between the fields of the fs and ft vectors in the fd vector")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Z_BIT, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF08, VPU_MINI);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->x == -5.0f);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->y == 25);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == 10.0f);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 25);
+  }
+
+  SECTION("MINIi stores the min value between the fields of the fs vector and the I register in the fd vector")
+  {
+    vpu.loadIRegister(50);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT | VPU_DEST_Z_BIT | VPU_DEST_W_BIT, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF08, VPU_MINIi);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->x == 25);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->y == 50);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == -1);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 50);
+  }
+
+  SECTION("MINx stores the min value between the fields of the fs vector and the x field of the ft register in the fd vector")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Z_BIT | VPU_DEST_W_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF08, VPU_MINIx);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->x == 99);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->y == 25);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == -1);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 99);
+  }
+
+  SECTION("MINIy stores the min value between the fields of the fs vector and the y field of the ft register in the fd vector")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Y_BIT | VPU_DEST_Z_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF08, VPU_MINIy);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->x == 51);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->y == 51);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == -1);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 25);
+  }
+
+  SECTION("MINIz stores the min value between the fields of the fs vector and the z field of the ft register in the fd vector")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF08, VPU_MINIz);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->x == 0);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->y == 0);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == -1);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 0);
+  }
+
+  SECTION("MINIw stores the min value between the fields of the fs vector and the w field of the ft register in the fd vector")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF08, VPU_MINIw);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->x == 59);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->y == 51);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == -1);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 59);
+  }
+
+
 }

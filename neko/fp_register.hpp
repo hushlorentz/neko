@@ -52,6 +52,8 @@ class FPRegister
     void storeMulDouble(FPRegister * r1, double value, uint8_t fieldMask, uint16_t * resultFlags);
     void storeMax(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
     void storeMaxDouble(FPRegister * r1, double d, uint8_t fieldMask);
+    void storeMin(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
+    void storeMinDouble(FPRegister * r1, double d, uint8_t fieldMask);
     void toInt0(FPRegister * source, uint8_t fieldMask);
     void toInt4(FPRegister * source, uint8_t fieldMask);
     void toInt12(FPRegister * source, uint8_t fieldMask);
