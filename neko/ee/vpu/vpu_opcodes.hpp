@@ -46,5 +46,11 @@
 #define VPU_ITOF12 0x13e
 #define VPU_ITOF15 0x13f
 #define VPU_MADD 0x29
+#define VPU_MADDi 0x23
+#define VPU_MADDq 0x21
+#define VPU_MADDx 0x8
+#define VPU_MADDy 0x9
+#define VPU_MADDz 0xa
+#define VPU_MADDw 0xb
 
 #endif

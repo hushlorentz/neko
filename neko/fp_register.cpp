@@ -83,6 +83,15 @@ void FPRegister::storeAddDouble(FPRegister * r1, double value, uint8_t fieldMask
   w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? addFP(r1->w, value, &wResultFlags) : w;
 }
 
+void FPRegister::storeMulDouble(FPRegister * r1, double value, uint8_t fieldMask, uint16_t * resultFlags)
+{
+  clearFlags();
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? mulFP(r1->x, value, &xResultFlags) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? mulFP(r1->y, value, &yResultFlags) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? mulFP(r1->z, value, &zResultFlags) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? mulFP(r1->w, value, &wResultFlags) : w;
+}
+
 void FPRegister::toInt0(FPRegister * source, uint8_t fieldMask)
 {
   toInt(source, fieldMask, &doubleToInteger0);

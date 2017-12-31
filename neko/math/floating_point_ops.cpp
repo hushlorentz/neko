@@ -6,7 +6,7 @@ double convertFromIEEE(double value, uint8_t * resultFlags)
   Double num;
   num.d = value;
 
-  if (num.exponent - FP_EXP_BIAS > FP_MAX_EXPONENT)
+  if (num.exponent - FP_EXP_BIAS >= FP_MAX_EXPONENT)
   {
     num.exponent = FP_EXP_BIAS + FP_MAX_EXPONENT;
     num.mantissa = FP_MAX_MANTISSA;
