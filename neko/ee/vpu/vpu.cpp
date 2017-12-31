@@ -13,8 +13,8 @@
 #define NUM_TYPE1_OPCODES 18
 uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD, VPU_MADDi, VPU_MADDq, VPU_MADDx, VPU_MADDy, VPU_MADDz, VPU_MADDw};
 
-#define NUM_TYPE3_OPCODES 13
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15};
+#define NUM_TYPE3_OPCODES 20
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15, VPU_MADDA, VPU_MADDAi, VPU_MADDAq, VPU_MADDAx, VPU_MADDAy, VPU_MADDAz, VPU_MADDAw};
 
 using namespace std;
 
@@ -234,6 +234,13 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_ADDA:
     case VPU_ADDAi:
     case VPU_ADDAq:
+    case VPU_MADDA:
+    case VPU_MADDAi:
+    case VPU_MADDAq:
+    case VPU_MADDAx:
+    case VPU_MADDAy:
+    case VPU_MADDAz:
+    case VPU_MADDAw:
       return VPU_REGISTER_ACCUMULATOR;
     case VPU_ABS:
     case VPU_FTOI0:
@@ -499,6 +506,27 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_MADDw:
       dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask, &MACFlags);
       break;
+    case VPU_MADDA:
+      dest.storeMul(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);
+      break;
+    case VPU_MADDAi:
+      dest.storeMulDouble(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
+      break;
+    case VPU_MADDAq:
+      dest.storeMulDouble(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
+      break;
+    case VPU_MADDAx:
+      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask, &MACFlags);
+      break;
+    case VPU_MADDAy:
+      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask, &MACFlags);
+      break;
+    case VPU_MADDAz:
+      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask, &MACFlags);
+      break;
+    case VPU_MADDAw:
+      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask, &MACFlags);
+      break;
   }
 
   p->setFPRegisterResult(&dest);
@@ -517,6 +545,13 @@ FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
     case VPU_ADDAy:
     case VPU_ADDAz:
     case VPU_ADDAw:
+    case VPU_MADDA:
+    case VPU_MADDAi:
+    case VPU_MADDAq:
+    case VPU_MADDAx:
+    case VPU_MADDAy:
+    case VPU_MADDAz:
+    case VPU_MADDAw:
       destReg =  &accumulator;
       break;
     default:
@@ -554,7 +589,14 @@ void VPU::pipelineFinished(Pipeline * p)
     case VPU_MADDy:
     case VPU_MADDz:
     case VPU_MADDw:
-      handleMADDInstruction(destReg, p);
+    case VPU_MADDA:
+    case VPU_MADDAi:
+    case VPU_MADDAq:
+    case VPU_MADDAx:
+    case VPU_MADDAy:
+    case VPU_MADDAz:
+    case VPU_MADDAw:
+      handleMADDInstruction(p);
       break;
     default:
       updateDestinationRegisterWithPipelineResult(destReg, p);
@@ -563,13 +605,17 @@ void VPU::pipelineFinished(Pipeline * p)
   }
 }
 
-void VPU::handleMADDInstruction(FPRegister * destReg, Pipeline * p)
+void VPU::handleMADDInstruction(Pipeline * p)
 {
-  updateDestinationRegisterWithPipelineResult(destReg, p);
-  setFlags(destReg);
+  FPRegister tempReg;
+  FPRegister *destReg = destinationRegisterFromPipeline(p);
+
+  updateDestinationRegisterWithPipelineResult(&tempReg, p);
+  setFlags(&tempReg);
 
   if (hasStatusFlag(VPU_FLAG_O))
   {
+    destReg->copyFrom(&tempReg);
     return;
   }
 

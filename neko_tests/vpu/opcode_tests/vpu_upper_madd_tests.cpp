@@ -10,6 +10,7 @@ TEST_CASE("VPU Microinstruction MADD Tests")
 {
   VPU vpu;
   vpu.useThreads = false;
+  vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 1, 1, 1);
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.5f, -1.0f, 4.5f);
   vpu.loadFPRegister(VPU_REGISTER_VF04, 5.0f, -6.5f, 10.0f, -9.0f);
   vpu.loadFPRegister(VPU_REGISTER_VF05, 2, -6.5f, 0, 9.0f);
@@ -44,7 +45,7 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     vpu.loadFPRegister(VPU_REGISTER_VF06, max.d, -2.5f, -1.0f, 4.5f);
 
     vpu.loadAccumulator(100.0f, 75.5f, 0, 25.0f);
-    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Y_BIT | VPU_DEST_Z_BIT, VPU_REGISTER_VF04, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
 
     Double result;
     result.d = vpu.fpRegisterValue(VPU_REGISTER_VF02)->x;
@@ -57,6 +58,7 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
     REQUIRE(result.mantissa == FP_MAX_MANTISSA);
     REQUIRE(result.exponent == FP_MAX_EXPONENT_WITH_BIAS);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == 1);
   }
 
   SECTION("MADD sets the correct flags if accumulator contains 0 or a normalized value and there is an underflow exception during the multiplication")
@@ -221,5 +223,84 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == 98);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == 59.25);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == -15.5);
+  }
+
+  SECTION("MADDA stores the result of the addition of the accumulator with the product of the fs register and the ft register in the accumulator.")
+  {
+    vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MADDA);
+
+    REQUIRE(vpu.accumulator.x == 75.0f);
+    REQUIRE(vpu.accumulator.y == 91.75f);
+    REQUIRE(vpu.accumulator.z == 40.25f);
+    REQUIRE(vpu.accumulator.w == -15.5f);
+  }
+
+  SECTION("MADDAi stores the result of the addition of the accumulator with the product of the fs register and the I register in the accumulator.")
+  {
+    vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
+    vpu.loadIRegister(0.25);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, 0, VPU_REGISTER_VF03, 0, VPU_MADDAi);
+
+    REQUIRE(vpu.accumulator.x == 98.75f);
+    REQUIRE(vpu.accumulator.y == 74.875f);
+    REQUIRE(vpu.accumulator.z == 50);
+    REQUIRE(vpu.accumulator.w == 26.125f);
+  }
+
+  SECTION("MADDAq stores the result of the addition of the accumulator with the product of the fs register and the Q register in the accumulator.")
+  {
+    vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
+    vpu.loadQRegister(0.25);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, 0, VPU_REGISTER_VF03, 0, VPU_MADDAq);
+
+    REQUIRE(vpu.accumulator.x == 98.75f);
+    REQUIRE(vpu.accumulator.y == 74.875f);
+    REQUIRE(vpu.accumulator.z == 50);
+    REQUIRE(vpu.accumulator.w == 26.125f);
+  }
+
+  SECTION("MADDAx stores the result of the addition of the accumulator with the product of the fs register and the x field of the ft register in the accumulator.")
+  {
+    vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_MADDAx);
+
+    REQUIRE(vpu.accumulator.x == 75);
+    REQUIRE(vpu.accumulator.y == 63);
+    REQUIRE(vpu.accumulator.z == 45.25);
+    REQUIRE(vpu.accumulator.w == 47.5);
+  }
+
+  SECTION("MADDAy stores the result of the addition of the accumulator with the product of the fs register and the y field of the ft register in the accumulator.")
+  {
+    vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_MADDAy);
+
+    REQUIRE(vpu.accumulator.x == 132.5);
+    REQUIRE(vpu.accumulator.y == 91.75);
+    REQUIRE(vpu.accumulator.z == 56.75);
+    REQUIRE(vpu.accumulator.w == -4.25);
+  }
+
+  SECTION("MADDAz stores the result of the addition of the accumulator with the product of the fs register and the z field of the ft register in the accumulator.")
+  {
+    vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MADDAz);
+
+    REQUIRE(vpu.accumulator.x == 50);
+    REQUIRE(vpu.accumulator.y == 50.5);
+    REQUIRE(vpu.accumulator.z == 40.25);
+    REQUIRE(vpu.accumulator.w == 70);
+  }
+
+  SECTION("MADDAw stores the result of the addition of the accumulator with the product of the fs register and the w field of the ft register in the accumulator.")
+  {
+    vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MADDAw);
+
+    REQUIRE(vpu.accumulator.x == 145);
+    REQUIRE(vpu.accumulator.y == 98);
+    REQUIRE(vpu.accumulator.z == 59.25);
+    REQUIRE(vpu.accumulator.w == -15.5);
   }
 }

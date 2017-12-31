@@ -52,5 +52,12 @@
 #define VPU_MADDy 0x9
 #define VPU_MADDz 0xa
 #define VPU_MADDw 0xb
+#define VPU_MADDA 0x2bd
+#define VPU_MADDAi 0x23f
+#define VPU_MADDAq 0x23d
+#define VPU_MADDAx 0xbc
+#define VPU_MADDAy 0xbd
+#define VPU_MADDAz 0xbe
+#define VPU_MADDAw 0xbf
 
 #endif
