@@ -1,6 +1,10 @@
+#include <algorithm>
+
 #include "bit_ops.hpp"
 #include "floating_point_ops.hpp"
 #include "fp_register.hpp"
+
+using namespace std;
 
 FPRegister::FPRegister() : x(0), y(0), z(0), w(0), xResultFlags(0), yResultFlags(0), zResultFlags(0), wResultFlags(0)
 {
@@ -91,6 +95,25 @@ void FPRegister::storeMulDouble(FPRegister * r1, double value, uint8_t fieldMask
   z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? mulFP(r1->z, value, &zResultFlags) : z;
   w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? mulFP(r1->w, value, &wResultFlags) : w;
 }
+
+void FPRegister::storeMax(FPRegister * r1, FPRegister * r2, uint8_t fieldMask)
+{
+  clearFlags();
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? max(r1->x, r2->x) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? max(r1->y, r2->y) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? max(r1->z, r2->z) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? max(r1->w, r2->w) : w;
+}
+
+void FPRegister::storeMaxDouble(FPRegister * r1, double d, uint8_t fieldMask)
+{
+  clearFlags();
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? max(r1->x, d) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? max(r1->y, d) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? max(r1->z, d) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? max(r1->w, d) : w;
+}
+
 
 void FPRegister::toInt0(FPRegister * source, uint8_t fieldMask)
 {

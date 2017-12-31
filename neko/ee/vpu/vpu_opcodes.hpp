@@ -59,5 +59,11 @@
 #define VPU_MADDAy 0xbd
 #define VPU_MADDAz 0xbe
 #define VPU_MADDAw 0xbf
+#define VPU_MAX 0x2b
+#define VPU_MAXi 0x1d
+#define VPU_MAXx 0x10
+#define VPU_MAXy 0x11
+#define VPU_MAXz 0x12
+#define VPU_MAXw 0x13
 
 #endif
