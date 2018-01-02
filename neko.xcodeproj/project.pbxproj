@@ -15,6 +15,7 @@
 		15F43F8E1FE97DD9007C9AC8 /* float.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 156981CF1FE8831D0075D26E /* float.cpp */; };
 		4E3533A21FE4E4A3001C6403 /* vpu_upper_fixed_point_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E3533A11FE4E4A3001C6403 /* vpu_upper_fixed_point_tests.cpp */; };
 		4E5FF30F1FF98B5400BD6109 /* vpu_upper_max_min_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E5FF30E1FF98B5400BD6109 /* vpu_upper_max_min_tests.cpp */; };
+		4E5FF3111FFAF82A00BD6109 /* vpu_upper_msub_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E5FF3101FFAF82A00BD6109 /* vpu_upper_msub_tests.cpp */; };
 		4E6668F81FC7815900C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6668F71FC7815900C39ED2 /* main.cpp */; };
 		4E6669031FC7851300C39ED2 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669021FC7851300C39ED2 /* main.cpp */; };
 		4E66690A1FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6669091FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp */; };
@@ -82,6 +83,7 @@
 		15ECC49E1FE1A57B00F290A1 /* vpu_upper_clip_tests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_clip_tests.cpp; sourceTree = "<group>"; };
 		4E3533A11FE4E4A3001C6403 /* vpu_upper_fixed_point_tests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_fixed_point_tests.cpp; sourceTree = "<group>"; };
 		4E5FF30E1FF98B5400BD6109 /* vpu_upper_max_min_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_max_min_tests.cpp; sourceTree = "<group>"; };
+		4E5FF3101FFAF82A00BD6109 /* vpu_upper_msub_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_msub_tests.cpp; sourceTree = "<group>"; };
 		4E6668ED1FC77DB100C39ED2 /* neko */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E6668F71FC7815900C39ED2 /* main.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		4E6669001FC7851300C39ED2 /* neko_tests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = neko_tests; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -143,6 +145,7 @@
 		15ECC49D1FE1A55400F290A1 /* opcode_tests */ = {
 			isa = PBXGroup;
 			children = (
+				4E5FF3101FFAF82A00BD6109 /* vpu_upper_msub_tests.cpp */,
 				4E5FF30E1FF98B5400BD6109 /* vpu_upper_max_min_tests.cpp */,
 				4E66691C1FC9500900C39ED2 /* vpu_upper_add_tests.cpp */,
 				15ECC4981FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp */,
@@ -409,6 +412,7 @@
 				4E66690A1FC7863B00C39ED2 /* vpu_microinstruction_tests.cpp in Sources */,
 				15ECC49F1FE1A57B00F290A1 /* vpu_upper_clip_tests.cpp in Sources */,
 				4E6669131FC8E4EB00C39ED2 /* fp_register_tests.cpp in Sources */,
+				4E5FF3111FFAF82A00BD6109 /* vpu_upper_msub_tests.cpp in Sources */,
 				4E6669251FCA432500C39ED2 /* floating_point_tests.cpp in Sources */,
 				156981D11FE8831D0075D26E /* float.cpp in Sources */,
 				15ECC4991FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp in Sources */,

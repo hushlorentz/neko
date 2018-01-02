@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#define FP_REGISTER_NO_FIELDS 0
 #define FP_REGISTER_X_FIELD 1
 #define FP_REGISTER_Y_FIELD 2
 #define FP_REGISTER_Z_FIELD 4

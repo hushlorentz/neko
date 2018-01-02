@@ -81,8 +81,8 @@ class VPU : public PipelineHandler
     uint8_t destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
     uint8_t src2MaskFromOpCodeAndInstruction(uint16_t opCode, uint32_t upperInstruction);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
-    void setFlags(FPRegister * reg);
-    void setMACFlagsFromRegister(FPRegister * reg);
+    void setFlags(FPRegister * reg, uint8_t ignoredFields);
+    void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);
     void setStatusFlagsFromMACFlags();
     void setStickyFlagsFromStatusFlags();
     void updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p);
@@ -90,6 +90,7 @@ class VPU : public PipelineHandler
     int calculateNewClippingFlags(FPRegister * fsReg, FPRegister * ftReg);
     FPRegister * destinationRegisterFromPipeline(Pipeline * p);
     void handleMADDInstruction(Pipeline * p);
+    void handleMSUBInstruction(Pipeline * p);
 };
 
 #endif

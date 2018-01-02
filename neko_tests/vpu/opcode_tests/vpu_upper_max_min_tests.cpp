@@ -139,6 +139,4 @@ TEST_CASE("VPU Microinstruction MAX and MIN Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->z == -1);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF08)->w == 59);
   }
-
-
 }

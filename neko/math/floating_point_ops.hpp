@@ -12,6 +12,7 @@
 #define FP_MAX_EXPONENT_WITH_BIAS FP_EXP_BIAS + FP_MAX_EXPONENT
 #define FP_SIGN_POS 0
 #define FP_SIGN_NEG 1
+#define FP_SIGN_BIT 0x8000000000000000
 
 #include <cmath>
 

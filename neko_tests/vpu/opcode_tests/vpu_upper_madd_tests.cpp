@@ -16,7 +16,7 @@ TEST_CASE("VPU Microinstruction MADD Tests")
   vpu.loadFPRegister(VPU_REGISTER_VF05, 2, -6.5f, 0, 9.0f);
   vector<uint8_t> instructions;
 
-  SECTION("MSUB multiplies two vectors and subtracts the result from the accumulator and stores the result in the third vector parameter")
+  SECTION("MADD adds two vectors and subtracts the result from the accumulator and stores the result in the third vector parameter")
   {
     vpu.loadAccumulator(100.0f, 75.5f, 50.25f, 25.0f);
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MADD);
@@ -107,11 +107,12 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     vpu.loadFPRegister(VPU_REGISTER_VF06, 100, -2.5f, -1.0f, 4.5f);
     vpu.loadAccumulator(100.0f, 5, max.d, 25.0f);
 
-    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT | VPU_DEST_Y_BIT, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
 
     Double result;
     result.d = vpu.fpRegisterValue(VPU_REGISTER_VF02)->x;
 
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == 3.75);
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_OX));
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_SX));
     REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OY));

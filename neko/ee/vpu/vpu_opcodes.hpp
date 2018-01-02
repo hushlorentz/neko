@@ -71,5 +71,19 @@
 #define VPU_MINIy 0x15
 #define VPU_MINIz 0x16
 #define VPU_MINIw 0x17
+#define VPU_MSUB 0x2d
+#define VPU_MSUBi 0x27
+#define VPU_MSUBq 0x25
+#define VPU_MSUBx 0xc
+#define VPU_MSUBy 0xd
+#define VPU_MSUBz 0xe
+#define VPU_MSUBw 0xf
+#define VPU_MSUBA 0x2fd
+#define VPU_MSUBAi 0x27f
+#define VPU_MSUBAq 0x27d
+#define VPU_MSUBAx 0xfc
+#define VPU_MSUBAy 0xfd
+#define VPU_MSUBAz 0xfe
+#define VPU_MSUBAw 0xff
 
 #endif
