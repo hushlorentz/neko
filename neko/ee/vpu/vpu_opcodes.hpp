@@ -85,5 +85,8 @@
 #define VPU_MSUBAy 0xfd
 #define VPU_MSUBAz 0xfe
 #define VPU_MSUBAw 0xff
+#define VPU_MUL 0x2a
+#define VPU_MULi 0x1e
+#define VPU_MULq 0x1c
 
 #endif

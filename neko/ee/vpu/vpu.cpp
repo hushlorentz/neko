@@ -10,8 +10,8 @@
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
-#define NUM_TYPE1_OPCODES 37
-uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD, VPU_MADDi, VPU_MADDq, VPU_MADDx, VPU_MADDy, VPU_MADDz, VPU_MADDw, VPU_MAX, VPU_MAXi, VPU_MAXx, VPU_MAXy, VPU_MAXz, VPU_MAXw, VPU_MINI, VPU_MINIi, VPU_MINIx, VPU_MINIy, VPU_MINIz, VPU_MINIw, VPU_MSUB, VPU_MSUBi, VPU_MSUBq, VPU_MSUBx, VPU_MSUBy, VPU_MSUBz, VPU_MSUBw};
+#define NUM_TYPE1_OPCODES 40
+uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD, VPU_MADDi, VPU_MADDq, VPU_MADDx, VPU_MADDy, VPU_MADDz, VPU_MADDw, VPU_MAX, VPU_MAXi, VPU_MAXx, VPU_MAXy, VPU_MAXz, VPU_MAXw, VPU_MINI, VPU_MINIi, VPU_MINIx, VPU_MINIy, VPU_MINIz, VPU_MINIw, VPU_MSUB, VPU_MSUBi, VPU_MSUBq, VPU_MSUBx, VPU_MSUBy, VPU_MSUBz, VPU_MSUBw, VPU_MUL, VPU_MULi, VPU_MULq};
 
 #define NUM_TYPE3_OPCODES 27
 uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15, VPU_MADDA, VPU_MADDAi, VPU_MADDAq, VPU_MADDAx, VPU_MADDAy, VPU_MADDAz, VPU_MADDAw, VPU_MSUBA, VPU_MSUBAi, VPU_MSUBAq, VPU_MSUBAx, VPU_MSUBAy, VPU_MSUBAz, VPU_MSUBAw};
@@ -506,14 +506,17 @@ void VPU::pipelineStarted(Pipeline * p)
       break;
     case VPU_MADD:
     case VPU_MSUB:
+    case VPU_MUL:
       dest.storeMul(&fpRegisters[ft], &fpRegisters[fs], fieldMask, &MACFlags);
       break;
     case VPU_MADDi:
     case VPU_MSUBi:
+    case VPU_MULi:
       dest.storeMulDouble(&fpRegisters[fs], iRegister, fieldMask, &MACFlags);
       break;
     case VPU_MADDq:
     case VPU_MSUBq:
+    case VPU_MULq:
       dest.storeMulDouble(&fpRegisters[fs], qRegister, fieldMask, &MACFlags);
       break;
     case VPU_MADDx:

@@ -40,6 +40,7 @@
 		4E66694C1FCFC0F500C39ED2 /* stop_watch.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694A1FCFC0F500C39ED2 /* stop_watch.cpp */; };
 		4E66694F1FD11B1D00C39ED2 /* floating_point_ops.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */; };
 		4E6669501FD11B6900C39ED2 /* floating_point_ops.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */; };
+		4E6D5B9B1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6D5B9A1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -115,6 +116,7 @@
 		4E66694B1FCFC0F500C39ED2 /* stop_watch.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stop_watch.hpp; sourceTree = "<group>"; };
 		4E66694D1FD106C700C39ED2 /* bit_ops.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = bit_ops.hpp; path = neko/math/bit_ops.hpp; sourceTree = SOURCE_ROOT; };
 		4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = floating_point_ops.cpp; sourceTree = "<group>"; };
+		4E6D5B9A1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_mul_tests.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -145,6 +147,7 @@
 		15ECC49D1FE1A55400F290A1 /* opcode_tests */ = {
 			isa = PBXGroup;
 			children = (
+				4E6D5B9A1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp */,
 				4E5FF3101FFAF82A00BD6109 /* vpu_upper_msub_tests.cpp */,
 				4E5FF30E1FF98B5400BD6109 /* vpu_upper_max_min_tests.cpp */,
 				4E66691C1FC9500900C39ED2 /* vpu_upper_add_tests.cpp */,
@@ -430,6 +433,7 @@
 				4E6669031FC7851300C39ED2 /* main.cpp in Sources */,
 				4E6669341FCBE15100C39ED2 /* vpu_pipeline_orchestrator.cpp in Sources */,
 				4E66690E1FC7876A00C39ED2 /* vpu.cpp in Sources */,
+				4E6D5B9B1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp in Sources */,
 				4E66693A1FCBE5F000C39ED2 /* vpu_pipeline.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
