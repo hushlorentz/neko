@@ -88,5 +88,17 @@
 #define VPU_MUL 0x2a
 #define VPU_MULi 0x1e
 #define VPU_MULq 0x1c
+#define VPU_MULx 0x18
+#define VPU_MULy 0x19
+#define VPU_MULz 0x1a
+#define VPU_MULw 0x1b
+#define VPU_MULA 0x2be
+#define VPU_MULAi 0x1fe
+#define VPU_MULAq 0x1fc
+#define VPU_MULAx 0x1bc
+#define VPU_MULAy 0x1bd
+#define VPU_MULAz 0x1be
+#define VPU_MULAw 0x1bf
+#define VPU_NOP 0x2ff
 
 #endif

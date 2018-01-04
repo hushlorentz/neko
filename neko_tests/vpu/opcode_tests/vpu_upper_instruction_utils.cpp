@@ -20,10 +20,7 @@ void addInstructionToVector(vector<uint8_t> * instructions, uint32_t bitFlags, u
 
 void addNOPHalfInstructionToVector(vector<uint8_t> * instructions)
 {
-  for (int i = 0; i < 4; i++)
-  {
-    instructions->push_back(0);
-  }
+  addInstructionToVector(instructions, 0, 0, 0, 0, 0, VPU_NOP);
 }
 
 void addNOPFullInstructionToVector(vector<uint8_t> * instructions)

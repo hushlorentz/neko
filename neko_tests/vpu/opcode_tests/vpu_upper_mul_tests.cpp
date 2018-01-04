@@ -91,4 +91,118 @@ TEST_CASE("VPU Microinstruction MUL Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == 15);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == 20);
   }
+
+  SECTION("MULx multiplies the x field of the ft vector with every field of the fs vector and stores the result in the fd vector.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MULx);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x == -25);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == -12.5);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == -5);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == 22.5);
+  }
+
+  SECTION("MULy multiplies the y field of the ft vector with every field of the fs vector and stores the result in the fd vector.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MULy);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x == 32.5);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == 16.25);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == 6.5);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == -29.25);
+  }
+
+  SECTION("MULz multiplies the z field of the ft vector with every field of the fs vector and stores the result in the fd vector.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MULz);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x == -50);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == -25);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == -10);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == 45);
+  }
+
+  SECTION("MULw multiplies the w field of the ft vector with every field of the fs vector and stores the result in the fd vector.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_MULw);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x == 45);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == 22.5);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == 9);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == -40.5);
+  }
+
+  SECTION("MULA multiplies two vectors and stores the result in the accumulator")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_MULA);
+
+    REQUIRE(vpu.accumulator.x == -25);
+    REQUIRE(vpu.accumulator.y == 16.25);
+    REQUIRE(vpu.accumulator.z == -10);
+    REQUIRE(vpu.accumulator.w == -40.5);
+  }
+
+  SECTION("MULAi multiplies the fields of the fs vector with the I register and stores the result in the fd register")
+  {
+    vpu.loadIRegister(0.25);
+
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, 0, VPU_REGISTER_VF10, 0, VPU_MULAi);
+
+    REQUIRE(vpu.accumulator.x == 2.5);
+    REQUIRE(vpu.accumulator.y == 5);
+    REQUIRE(vpu.accumulator.z == 7.5);
+    REQUIRE(vpu.accumulator.w == 10);
+  }
+
+  SECTION("MULAq multiplies the fields of the fs vector with the Q register and stores the result in the accumulator")
+  {
+    vpu.loadQRegister(0.5);
+
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, 0, VPU_REGISTER_VF10, 0, VPU_MULAq);
+
+    REQUIRE(vpu.accumulator.x == 5);
+    REQUIRE(vpu.accumulator.y == 10);
+    REQUIRE(vpu.accumulator.z == 15);
+    REQUIRE(vpu.accumulator.w == 20);
+  }
+
+  SECTION("MULAx multiplies the x field of the ft vector with every field of the fs vector and stores the result in the accumulator.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_MULAx);
+
+    REQUIRE(vpu.accumulator.x == -25);
+    REQUIRE(vpu.accumulator.y == -12.5);
+    REQUIRE(vpu.accumulator.z == -5);
+    REQUIRE(vpu.accumulator.w == 22.5);
+  }
+
+  SECTION("MULAy multiplies the y field of the ft vector with every field of the fs vector and stores the result in the accumulator.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_MULAy);
+
+    REQUIRE(vpu.accumulator.x == 32.5);
+    REQUIRE(vpu.accumulator.y == 16.25);
+    REQUIRE(vpu.accumulator.z == 6.5);
+    REQUIRE(vpu.accumulator.w == -29.25);
+  }
+
+  SECTION("MULAz multiplies the z field of the ft vector with every field of the fs vector and stores the result in the accumulator.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_MULAz);
+
+    REQUIRE(vpu.accumulator.x == -50);
+    REQUIRE(vpu.accumulator.y == -25);
+    REQUIRE(vpu.accumulator.z == -10);
+    REQUIRE(vpu.accumulator.w == 45);
+  }
+
+  SECTION("MULAw multiplies the w field of the ft vector with every field of the fs vector and stores the result in the accumulator.")
+  {
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_MULAw);
+
+    REQUIRE(vpu.accumulator.x == 45);
+    REQUIRE(vpu.accumulator.y == 22.5);
+    REQUIRE(vpu.accumulator.z == 9);
+    REQUIRE(vpu.accumulator.w == -40.5);
+  }
 }
