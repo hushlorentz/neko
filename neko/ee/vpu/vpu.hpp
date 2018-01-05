@@ -91,6 +91,7 @@ class VPU : public PipelineHandler
     FPRegister * destinationRegisterFromPipeline(Pipeline * p);
     void handleMADDInstruction(Pipeline * p);
     void handleMSUBInstruction(Pipeline * p);
+    void handleOPMSUBInstruction(Pipeline * p);
 };
 
 #endif

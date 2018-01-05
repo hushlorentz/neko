@@ -45,16 +45,17 @@ class FPRegister
     uint8_t wResultFlags;
 
     void storeAbs(FPRegister * source, uint8_t fieldMask);
-    void storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
-    void storeSub(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
-    void storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
-    void storeDiv(FPRegister * r1, FPRegister * r2, uint8_t fieldMask, uint16_t * resultFlags);
-    void storeAddDouble(FPRegister * r1, double value, uint8_t fieldMask, uint16_t * resultFlags);
-    void storeMulDouble(FPRegister * r1, double value, uint8_t fieldMask, uint16_t * resultFlags);
+    void storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
+    void storeSub(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
+    void storeMul(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
+    void storeDiv(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
+    void storeAddDouble(FPRegister * r1, double value, uint8_t fieldMask);
+    void storeMulDouble(FPRegister * r1, double value, uint8_t fieldMask);
     void storeMax(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
     void storeMaxDouble(FPRegister * r1, double d, uint8_t fieldMask);
     void storeMin(FPRegister * r1, FPRegister * r2, uint8_t fieldMask);
     void storeMinDouble(FPRegister * r1, double d, uint8_t fieldMask);
+    void storeOuterProduct(FPRegister * r1, FPRegister * f2);
     void toInt0(FPRegister * source, uint8_t fieldMask);
     void toInt4(FPRegister * source, uint8_t fieldMask);
     void toInt12(FPRegister * source, uint8_t fieldMask);
