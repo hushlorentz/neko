@@ -10,11 +10,11 @@
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
-#define NUM_TYPE1_OPCODES 45
-uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD, VPU_MADDi, VPU_MADDq, VPU_MADDx, VPU_MADDy, VPU_MADDz, VPU_MADDw, VPU_MAX, VPU_MAXi, VPU_MAXx, VPU_MAXy, VPU_MAXz, VPU_MAXw, VPU_MINI, VPU_MINIi, VPU_MINIx, VPU_MINIy, VPU_MINIz, VPU_MINIw, VPU_MSUB, VPU_MSUBi, VPU_MSUBq, VPU_MSUBx, VPU_MSUBy, VPU_MSUBz, VPU_MSUBw, VPU_MUL, VPU_MULi, VPU_MULq, VPU_MULx, VPU_MULy, VPU_MULz, VPU_MULw, VPU_OPMSUB};
+#define NUM_TYPE1_OPCODES 52
+uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD, VPU_MADDi, VPU_MADDq, VPU_MADDx, VPU_MADDy, VPU_MADDz, VPU_MADDw, VPU_MAX, VPU_MAXi, VPU_MAXx, VPU_MAXy, VPU_MAXz, VPU_MAXw, VPU_MINI, VPU_MINIi, VPU_MINIx, VPU_MINIy, VPU_MINIz, VPU_MINIw, VPU_MSUB, VPU_MSUBi, VPU_MSUBq, VPU_MSUBx, VPU_MSUBy, VPU_MSUBz, VPU_MSUBw, VPU_MUL, VPU_MULi, VPU_MULq, VPU_MULx, VPU_MULy, VPU_MULz, VPU_MULw, VPU_OPMSUB, VPU_SUB, VPU_SUBi, VPU_SUBq, VPU_SUBx, VPU_SUBy, VPU_SUBz, VPU_SUBw};
 
-#define NUM_TYPE3_OPCODES 35
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15, VPU_MADDA, VPU_MADDAi, VPU_MADDAq, VPU_MADDAx, VPU_MADDAy, VPU_MADDAz, VPU_MADDAw, VPU_MSUBA, VPU_MSUBAi, VPU_MSUBAq, VPU_MSUBAx, VPU_MSUBAy, VPU_MSUBAz, VPU_MSUBAw, VPU_MULA, VPU_MULAi, VPU_MULAq, VPU_MULAx, VPU_MULAy, VPU_MULAz, VPU_MULAw, VPU_OPMULA};
+#define NUM_TYPE3_OPCODES 42
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15, VPU_MADDA, VPU_MADDAi, VPU_MADDAq, VPU_MADDAx, VPU_MADDAy, VPU_MADDAz, VPU_MADDAw, VPU_MSUBA, VPU_MSUBAi, VPU_MSUBAq, VPU_MSUBAx, VPU_MSUBAy, VPU_MSUBAz, VPU_MSUBAw, VPU_MULA, VPU_MULAi, VPU_MULAq, VPU_MULAx, VPU_MULAy, VPU_MULAz, VPU_MULAw, VPU_OPMULA, VPU_SUBA, VPU_SUBAi, VPU_SUBAq, VPU_SUBAx, VPU_SUBAy, VPU_SUBAz, VPU_SUBAw};
 
 using namespace std;
 
@@ -248,6 +248,13 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_MSUBAy:
     case VPU_MSUBAz:
     case VPU_MSUBAw:
+    case VPU_SUBA:
+    case VPU_SUBAi:
+    case VPU_SUBAq:
+    case VPU_SUBAx:
+    case VPU_SUBAy:
+    case VPU_SUBAz:
+    case VPU_SUBAw:
       return VPU_REGISTER_ACCUMULATOR;
     case VPU_ABS:
     case VPU_FTOI0:
@@ -444,12 +451,15 @@ void VPU::pipelineStarted(Pipeline * p)
       dest.storeAbs(&fpRegisters[fs], fieldMask);
       break;
     case VPU_ADD:
+    case VPU_ADDA:
       dest.storeAdd(&fpRegisters[ft], &fpRegisters[fs], fieldMask);
       break;
     case VPU_ADDi:
+    case VPU_ADDAi:
       dest.storeAddDouble(&fpRegisters[fs], iRegister, fieldMask);
       break;
     case VPU_ADDq:
+    case VPU_ADDAq:
       dest.storeAddDouble(&fpRegisters[fs], qRegister, fieldMask);
       break;
     case VPU_ADDx:
@@ -467,15 +477,6 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_ADDw:
     case VPU_ADDAw:
       dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
-      break;
-    case VPU_ADDA:
-      dest.storeAdd(&fpRegisters[ft], &fpRegisters[fs], fieldMask);
-      break;
-    case VPU_ADDAi:
-      dest.storeAddDouble(&fpRegisters[fs], iRegister, fieldMask);
-      break;
-    case VPU_ADDAq:
-      dest.storeAddDouble(&fpRegisters[fs], qRegister, fieldMask);
       break;
     case VPU_CLIP:
       p->setIntResult(calculateNewClippingFlags(&fpRegisters[ft], &fpRegisters[fs]));
@@ -616,6 +617,34 @@ void VPU::pipelineStarted(Pipeline * p)
     case VPU_OPMSUB:
       dest.storeOuterProduct(&fpRegisters[fs], &fpRegisters[ft]);
       break;
+    case VPU_SUB:
+    case VPU_SUBA:
+      dest.storeSub(&fpRegisters[fs], &fpRegisters[ft], fieldMask);
+      break;
+    case VPU_SUBi:
+    case VPU_SUBAi:
+      dest.storeSubDouble(&fpRegisters[fs], iRegister, fieldMask);
+      break;
+    case VPU_SUBq:
+    case VPU_SUBAq:
+      dest.storeSubDouble(&fpRegisters[fs], qRegister, fieldMask);
+      break;
+    case VPU_SUBx:
+    case VPU_SUBAx:
+      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask);
+      break;
+    case VPU_SUBy:
+    case VPU_SUBAy:
+      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask);
+      break;
+    case VPU_SUBz:
+    case VPU_SUBAz:
+      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask);
+      break;
+    case VPU_SUBw:
+    case VPU_SUBAw:
+      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
+      break;
   }
 
   p->setFPRegisterResult(&dest);
@@ -656,6 +685,13 @@ FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
     case VPU_MULAz:
     case VPU_MULAw:
     case VPU_OPMULA:
+    case VPU_SUBA:
+    case VPU_SUBAi:
+    case VPU_SUBAq:
+    case VPU_SUBAx:
+    case VPU_SUBAy:
+    case VPU_SUBAz:
+    case VPU_SUBAw:
       destReg =  &accumulator;
       break;
     default:

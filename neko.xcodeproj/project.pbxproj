@@ -42,6 +42,7 @@
 		4E6669501FD11B6900C39ED2 /* floating_point_ops.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */; };
 		4E6D5B9B1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6D5B9A1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp */; };
 		4E6D5B9D1FFF4C8B000CAAD1 /* vpu_upper_vector_outer_product_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6D5B9C1FFF4C8B000CAAD1 /* vpu_upper_vector_outer_product_tests.cpp */; };
+		4E6D5B9F20034666000CAAD1 /* vpu_upper_sub_tests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 4E6D5B9E20034666000CAAD1 /* vpu_upper_sub_tests.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -119,6 +120,7 @@
 		4E66694E1FD11B1D00C39ED2 /* floating_point_ops.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = floating_point_ops.cpp; sourceTree = "<group>"; };
 		4E6D5B9A1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_mul_tests.cpp; sourceTree = "<group>"; };
 		4E6D5B9C1FFF4C8B000CAAD1 /* vpu_upper_vector_outer_product_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_vector_outer_product_tests.cpp; sourceTree = "<group>"; };
+		4E6D5B9E20034666000CAAD1 /* vpu_upper_sub_tests.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = vpu_upper_sub_tests.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -149,6 +151,7 @@
 		15ECC49D1FE1A55400F290A1 /* opcode_tests */ = {
 			isa = PBXGroup;
 			children = (
+				4E6D5B9E20034666000CAAD1 /* vpu_upper_sub_tests.cpp */,
 				4E6D5B9C1FFF4C8B000CAAD1 /* vpu_upper_vector_outer_product_tests.cpp */,
 				4E6D5B9A1FFCB42A000CAAD1 /* vpu_upper_mul_tests.cpp */,
 				4E5FF3101FFAF82A00BD6109 /* vpu_upper_msub_tests.cpp */,
@@ -422,6 +425,7 @@
 				4E6669251FCA432500C39ED2 /* floating_point_tests.cpp in Sources */,
 				156981D11FE8831D0075D26E /* float.cpp in Sources */,
 				15ECC4991FDF2DC700F290A1 /* vpu_upper_instruction_stall_tests.cpp in Sources */,
+				4E6D5B9F20034666000CAAD1 /* vpu_upper_sub_tests.cpp in Sources */,
 				4E66692F1FCBDD0B00C39ED2 /* vpu_fp_calculation_tests.cpp in Sources */,
 				4E6669481FCFBB5F00C39ED2 /* fp_register.cpp in Sources */,
 				4E6669501FD11B6900C39ED2 /* floating_point_ops.cpp in Sources */,

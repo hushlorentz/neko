@@ -96,6 +96,15 @@ void FPRegister::storeMulDouble(FPRegister * r1, double value, uint8_t fieldMask
   w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? mulFP(r1->w, value, &wResultFlags) : w;
 }
 
+void FPRegister::storeSubDouble(FPRegister * r1, double value, uint8_t fieldMask)
+{
+  clearFlags();
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? subFP(r1->x, value, &xResultFlags) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? subFP(r1->y, value, &yResultFlags) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? subFP(r1->z, value, &zResultFlags) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? subFP(r1->w, value, &wResultFlags) : w;
+}
+
 void FPRegister::storeMax(FPRegister * r1, FPRegister * r2, uint8_t fieldMask)
 {
   clearFlags();

@@ -102,5 +102,19 @@
 #define VPU_NOP 0x2ff
 #define VPU_OPMULA 0x2fe
 #define VPU_OPMSUB 0x2e
+#define VPU_SUB 0x2c
+#define VPU_SUBi 0x26
+#define VPU_SUBq 0x24
+#define VPU_SUBx 0x4
+#define VPU_SUBy 0x5
+#define VPU_SUBz 0x6
+#define VPU_SUBw 0x7
+#define VPU_SUBA 0x2cf
+#define VPU_SUBAi 0x27e
+#define VPU_SUBAq 0x27c
+#define VPU_SUBAx 0x7c
+#define VPU_SUBAy 0x7d
+#define VPU_SUBAz 0x7e
+#define VPU_SUBAw 0x7f
 
 #endif
