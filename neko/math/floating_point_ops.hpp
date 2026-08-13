@@ -14,30 +14,32 @@
 #define FP_SIGN_NEG 1
 #define FP_SIGN_BIT 0x8000000000000000
 
+#include <cstdint>
 #include <cmath>
 
 #include "fp_register.hpp"
 
-typedef union {
+union Double {
   double d;
   struct {
-    unsigned long mantissa : 52;
-    unsigned long exponent : 11; 
-    unsigned long sign : 1;
+    std::uint64_t mantissa : 52;
+    std::uint64_t exponent : 11;
+    std::uint64_t sign : 1;
   };
-} Double;
+  Double() : d(0.0) {}
+};
 
 double addFP(double d1, double d2, uint8_t * resultFlags);
 double mulFP(double d1, double d2, uint8_t * resultFlags);
 double divFP(double d1, double d2, uint8_t * resultFlags);
 double subFP(double d1, double d2, uint8_t * resultFlags);
-long doubleToInteger0(double d);
-long doubleToInteger4(double d);
-long doubleToInteger12(double d);
-long doubleToInteger15(double d);
-double integer0ToDouble(long i);
-double integer4ToDouble(long i);
-double integer12ToDouble(long i);
-double integer15ToDouble(long i);
+std::int64_t doubleToInteger0(double d);
+std::int64_t doubleToInteger4(double d);
+std::int64_t doubleToInteger12(double d);
+std::int64_t doubleToInteger15(double d);
+double integer0ToDouble(std::int64_t i);
+double integer4ToDouble(std::int64_t i);
+double integer12ToDouble(std::int64_t i);
+double integer15ToDouble(std::int64_t i);
 
 #endif

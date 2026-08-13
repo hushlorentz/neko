@@ -188,7 +188,7 @@ void FPRegister::toDouble15(FPRegister * source, uint8_t fieldMask)
   toDouble(source, fieldMask, &integer15ToDouble);
 }
 
-void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, long (*convertFunc)(double))
+void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, std::int64_t (*convertFunc)(double))
 {
   xInt = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->x) : xInt;
   yInt = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->y) : yInt;
@@ -196,7 +196,7 @@ void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, long (*convertFun
   wInt = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->w) : wInt;
 }
 
-void FPRegister::toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(long))
+void FPRegister::toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int64_t))
 {
   x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->xInt) : x;
   y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->yInt) : y;

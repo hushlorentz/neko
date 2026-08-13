@@ -4,12 +4,12 @@
 
 void StopWatch::start()
 {
-  startTime = chrono::high_resolution_clock::now();
+  startTime = std::chrono::high_resolution_clock::now();
 }
 
 double StopWatch::elapsedCycles()
 {
-  double elapsedTime = chrono::nanoseconds(chrono::high_resolution_clock::now() - startTime).count();
+  double elapsedTime = std::chrono::nanoseconds(std::chrono::high_resolution_clock::now() - startTime).count();
   double cyclesPerNanosecond = 0.294;
 
   return elapsedTime * cyclesPerNanosecond;

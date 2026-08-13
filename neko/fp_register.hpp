@@ -10,7 +10,7 @@
 #define FP_REGISTER_W_FIELD 8
 #define FP_REGISTER_ALL_FIELDS 15
 
-#define FP_REGISTER_FIELD_IS_NEGATIVE(x) (x & (1l << 63))
+#define FP_REGISTER_FIELD_IS_NEGATIVE(x) (x & (std::int64_t(1) << 63))
 
 class FPRegister
 {
@@ -22,22 +22,22 @@ class FPRegister
     union
     {
       double x;
-      long xInt;
+      std::int64_t xInt;
     };
     union
     {
       double y;
-      long yInt;
+      std::int64_t yInt;
     };
     union
     {
       double z;
-      long zInt;
+      std::int64_t zInt;
     };
     union
     {
       double w;
-      long wInt;
+      std::int64_t wInt;
     };
     uint8_t xResultFlags;
     uint8_t yResultFlags;
@@ -67,8 +67,8 @@ class FPRegister
     void toDouble15(FPRegister * source, uint8_t fieldMask);
 
   private:
-    void toInt(FPRegister * source, uint8_t fieldMask, long (*convertFunc)(double));
-    void toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(long));
+    void toInt(FPRegister * source, uint8_t fieldMask, std::int64_t (*convertFunc)(double));
+    void toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int64_t));
     void clearFlags();
 };
 

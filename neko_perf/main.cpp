@@ -39,7 +39,7 @@ void runFPAddPerf()
 
   for (int i = 0; i < 10000; i++)
   {
-    addFPRegisters(&reg1, &reg2, &reg3);
+    reg3.storeAdd(&reg1, &reg2, FP_REGISTER_ALL_FIELDS);
   }
 
   printf("It took %f cycles to add two FP Registers\n", watch.elapsedCycles() / 10000);
@@ -56,7 +56,7 @@ void runFPSubPerf()
 
   for (int i = 0; i < 10000; i++)
   {
-    subFPRegisters(&reg1, &reg2, &reg3);
+    reg3.storeSub(&reg1, &reg2, FP_REGISTER_ALL_FIELDS);
   }
 
   printf("It took %f cycles to subtract two FP Registers\n", watch.elapsedCycles() / 10000);
@@ -73,7 +73,7 @@ void runFPMulPerf()
 
   for (int i = 0; i < 10000; i++)
   {
-    addFPRegisters(&reg1, &reg2, &reg3);
+    reg3.storeMul(&reg1, &reg2, FP_REGISTER_ALL_FIELDS);
   }
 
   printf("It took %f cycles to multiply two FP Registers\n", watch.elapsedCycles() / 10000);
@@ -90,7 +90,7 @@ void runFPDivPerf()
 
   for (int i = 0; i < 10000; i++)
   {
-    addFPRegisters(&reg1, &reg2, &reg3);
+    reg3.storeDiv(&reg1, &reg2, FP_REGISTER_ALL_FIELDS);
   }
 
   printf("It took %f cycles to divide two FP Registers\n", watch.elapsedCycles() / 10000);

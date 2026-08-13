@@ -1,4 +1,4 @@
-#include <exception>
+#include <stdexcept>
 
 #include "vpu_pipeline.hpp"
 #include "vpu_pipeline_orchestrator.hpp"

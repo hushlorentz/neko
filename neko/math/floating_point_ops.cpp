@@ -6,7 +6,7 @@ double convertFromIEEE(double value, uint8_t * resultFlags)
   Double num;
   num.d = value;
 
-  if (num.exponent - FP_EXP_BIAS >= FP_MAX_EXPONENT)
+  if (static_cast<int>(num.exponent) - FP_EXP_BIAS >= FP_MAX_EXPONENT)
   {
     num.exponent = FP_EXP_BIAS + FP_MAX_EXPONENT;
     num.mantissa = FP_MAX_MANTISSA;
@@ -92,42 +92,42 @@ double subFP(double d1, double d2, uint8_t * resultFlags)
   return convertFromIEEE(d1 - d2, resultFlags);
 }
 
-long doubleToInteger0(double d)
+std::int64_t doubleToInteger0(double d)
 {
-  return (long)d;
+  return static_cast<std::int64_t>(d);
 }
 
-long doubleToInteger4(double d)
+std::int64_t doubleToInteger4(double d)
 {
-  return (long)(d * 16);
+  return static_cast<std::int64_t>(d * 16);
 }
 
-long doubleToInteger12(double d)
+std::int64_t doubleToInteger12(double d)
 {
-  return (long)(d * 4096);
+  return static_cast<std::int64_t>(d * 4096);
 }
 
-long doubleToInteger15(double d)
+std::int64_t doubleToInteger15(double d)
 {
-  return (long)(d * 32768);
+  return static_cast<std::int64_t>(d * 32768);
 }
 
-double integer0ToDouble(long i)
+double integer0ToDouble(std::int64_t i)
 {
   return (double)i;
 }
 
-double integer4ToDouble(long i)
+double integer4ToDouble(std::int64_t i)
 {
   return i / 16.0f;
 }
 
-double integer12ToDouble(long i)
+double integer12ToDouble(std::int64_t i)
 {
   return i / 4096.0f;
 }
 
-double integer15ToDouble(long i)
+double integer15ToDouble(std::int64_t i)
 {
   return i / 32768.0f;
 }

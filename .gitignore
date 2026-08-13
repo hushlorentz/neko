@@ -2,3 +2,5 @@
 data
 DerivedData
 xcuserdata
+/.vs/
+/out/
