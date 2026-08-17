@@ -1,3 +1,4 @@
+#include <stdexcept>
 #include <thread>
 #include "bit_ops.hpp"
 #include "floating_point_ops.hpp"
@@ -13,8 +14,8 @@
 #define NUM_TYPE1_OPCODES 52
 uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD, VPU_MADDi, VPU_MADDq, VPU_MADDx, VPU_MADDy, VPU_MADDz, VPU_MADDw, VPU_MAX, VPU_MAXi, VPU_MAXx, VPU_MAXy, VPU_MAXz, VPU_MAXw, VPU_MINI, VPU_MINIi, VPU_MINIx, VPU_MINIy, VPU_MINIz, VPU_MINIw, VPU_MSUB, VPU_MSUBi, VPU_MSUBq, VPU_MSUBx, VPU_MSUBy, VPU_MSUBz, VPU_MSUBw, VPU_MUL, VPU_MULi, VPU_MULq, VPU_MULx, VPU_MULy, VPU_MULz, VPU_MULw, VPU_OPMSUB, VPU_SUB, VPU_SUBi, VPU_SUBq, VPU_SUBx, VPU_SUBy, VPU_SUBz, VPU_SUBw};
 
-#define NUM_TYPE3_OPCODES 42
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15, VPU_MADDA, VPU_MADDAi, VPU_MADDAq, VPU_MADDAx, VPU_MADDAy, VPU_MADDAz, VPU_MADDAw, VPU_MSUBA, VPU_MSUBAi, VPU_MSUBAq, VPU_MSUBAx, VPU_MSUBAy, VPU_MSUBAz, VPU_MSUBAw, VPU_MULA, VPU_MULAi, VPU_MULAq, VPU_MULAx, VPU_MULAy, VPU_MULAz, VPU_MULAw, VPU_OPMULA, VPU_SUBA, VPU_SUBAi, VPU_SUBAq, VPU_SUBAx, VPU_SUBAy, VPU_SUBAz, VPU_SUBAw};
+#define NUM_TYPE3_OPCODES 43
+uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15, VPU_MADDA, VPU_MADDAi, VPU_MADDAq, VPU_MADDAx, VPU_MADDAy, VPU_MADDAz, VPU_MADDAw, VPU_MSUBA, VPU_MSUBAi, VPU_MSUBAq, VPU_MSUBAx, VPU_MSUBAy, VPU_MSUBAz, VPU_MSUBAw, VPU_MULA, VPU_MULAi, VPU_MULAq, VPU_MULAx, VPU_MULAy, VPU_MULAz, VPU_MULAw, VPU_NOP, VPU_OPMULA, VPU_SUBA, VPU_SUBAi, VPU_SUBAq, VPU_SUBAx, VPU_SUBAy, VPU_SUBAz, VPU_SUBAw};
 
 using namespace std;
 
@@ -144,7 +145,7 @@ void VPU::executeMicroInstructions()
     else if (!orchestrator.stalling)
     {
       uint32_t upperInstruction = nextUpperInstruction();
-      uint32_t lowerInstruction = nextUpperInstruction();
+      uint32_t lowerInstruction = nextLowerInstruction();
 
       processUpperInstruction(upperInstruction);
       microMemPC = processLowerInstruction(lowerInstruction);
@@ -162,6 +163,11 @@ void VPU::executeMicroInstructions()
 
 uint32_t VPU::nextUpperInstruction()
 {
+  if (microMemPC + 7 >= microMem.size())
+  {
+    throw runtime_error("Microinstruction fetch is outside micro memory.");
+  }
+
   uint32_t instruction = 0;
   uint8_t shift = 24;
 
@@ -176,12 +182,27 @@ uint32_t VPU::nextUpperInstruction()
 
 uint32_t VPU::nextLowerInstruction()
 {
-  return 0;
+  uint32_t instruction = 0;
+  uint8_t shift = 24;
+
+  for (vector<uint8_t>::iterator it = microMem.begin() + microMemPC + 4; it < microMem.begin() + (microMemPC + 8); ++it)
+  {
+    instruction |= *it << shift;
+    shift -= 8;
+  }
+
+  return instruction;
 }
 
 void VPU::processUpperInstruction(uint32_t upperInstruction)
 {
   uint16_t opCode = opCodeFromInstruction(upperInstruction);
+
+  if (opCode == VPU_NOP)
+  {
+    return;
+  }
+
   uint8_t srcReg1 = src1RegFromOpCodeAndInstruction(opCode, upperInstruction);
   uint8_t srcReg2 = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
   uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
@@ -294,6 +315,14 @@ uint8_t VPU::src2MaskFromOpCodeAndInstruction(uint16_t opCode, uint32_t upperIns
 
 uint16_t VPU::processLowerInstruction(uint32_t lowerInstruction)
 {
+  // The lower unit has no NOP encoding.  VU programs conventionally use
+  // MOVE VF00, VF00 (0x8000033c), which is harmless because VF00 is constant.
+  // Rejecting any other lower instruction is safer than silently ignoring it.
+  if (lowerInstruction != VPU_LOWER_NOP)
+  {
+    throw runtime_error("Unsupported VU lower instruction.");
+  }
+
   return microMemPC + 8;
 }
 

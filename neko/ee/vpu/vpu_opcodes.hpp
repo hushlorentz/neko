@@ -100,6 +100,7 @@
 #define VPU_MULAz 0x1be
 #define VPU_MULAw 0x1bf
 #define VPU_NOP 0x2ff
+#define VPU_LOWER_NOP 0x8000033c
 #define VPU_OPMULA 0x2fe
 #define VPU_OPMSUB 0x2e
 #define VPU_SUB 0x2c

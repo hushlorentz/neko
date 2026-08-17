@@ -1,5 +1,17 @@
 #include "catch.hpp"
 #include "vpu.hpp"
+#include "vpu_opcodes.hpp"
+
+namespace
+{
+  void appendInstruction(std::vector<uint8_t> * instructions, uint32_t instruction)
+  {
+    instructions->push_back((instruction >> 24) & 0xff);
+    instructions->push_back((instruction >> 16) & 0xff);
+    instructions->push_back((instruction >> 8) & 0xff);
+    instructions->push_back(instruction & 0xff);
+  }
+}
 
 TEST_CASE("VPU Microinstruction Tests")
 {
@@ -28,5 +40,27 @@ TEST_CASE("VPU Microinstruction Tests")
     SECTION("VPU0 Microinstruction programs can be started by executing the VCALLMSR instruction")
     {
       //WARN("Add this test");
+    }
+
+    SECTION("The lower half of an instruction pair is fetched independently of the upper half")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_E_BIT | VPU_ADD);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+
+      vpu.useThreads = false;
+      vpu.uploadMicroInstructions(&instructions);
+      REQUIRE_NOTHROW(vpu.initMicroMode());
+    }
+
+    SECTION("Unsupported lower instructions are rejected rather than silently ignored")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, 0);
+
+      vpu.useThreads = false;
+      vpu.uploadMicroInstructions(&instructions);
+      REQUIRE_THROWS_WITH(vpu.initMicroMode(), "Unsupported VU lower instruction.");
     }
 }

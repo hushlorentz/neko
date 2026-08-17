@@ -3,7 +3,7 @@
 #include "vpu_register_ids.hpp"
 #include "vpu_upper_instruction_utils.hpp"
 
-void addInstructionToVector(vector<uint8_t> * instructions, uint32_t bitFlags, uint32_t destFlags, uint8_t ftRegID, uint8_t fsRegID, uint8_t fdRegID, uint16_t opCode)
+void addInstructionToVector(vector<uint8_t> * instructions, uint32_t bitFlags, uint32_t destFlags, uint8_t ftRegID, uint8_t fsRegID, uint8_t fdRegID, uint32_t opCode)
 {
   uint32_t instruction = bitFlags;
   instruction |= destFlags;
@@ -26,13 +26,13 @@ void addNOPHalfInstructionToVector(vector<uint8_t> * instructions)
 void addNOPFullInstructionToVector(vector<uint8_t> * instructions)
 {
   addNOPHalfInstructionToVector(instructions);
-  addNOPHalfInstructionToVector(instructions);
+  addInstructionToVector(instructions, 0, 0, 0, 0, 0, VPU_LOWER_NOP);
 }
 
 void addSingleUpperInstruction(vector<uint8_t> * instructions, uint32_t bitFlags, uint32_t destFlags, uint8_t ftRegID, uint8_t fsRegID, uint8_t fdRegID, uint16_t opCode)
 {
   addInstructionToVector(instructions, bitFlags, destFlags, ftRegID, fsRegID, fdRegID, opCode);
-  addNOPHalfInstructionToVector(instructions);
+  addInstructionToVector(instructions, 0, 0, 0, 0, 0, VPU_LOWER_NOP);
 }
 
 void executeSingleUpperInstruction(VPU * vpu, vector<uint8_t> * instructions, uint32_t bitFlags, uint32_t destFlags, uint8_t ftRegID, uint8_t fsRegID, uint8_t fdRegID, uint16_t opCode)
