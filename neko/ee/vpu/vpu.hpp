@@ -22,14 +22,14 @@ class VPU : public PipelineHandler
     VPU();
     vector<uint8_t> microMem;
     vector<uint8_t> vuMem;
-    bool useThreads;
     FPRegister accumulator;
     uint64_t clippingFlags;
 
     uint8_t getState();
-    FPRegister *fpRegisterValue(int registerID);
+    const FPRegister *fpRegisterValue(int registerID) const;
     uint16_t intRegisterValue(int registerID);
     void loadFPRegister(int registerID, double x, double y, double z, double w);
+    void loadIntFPRegister(int registerID, int32_t x, int32_t y, int32_t z, int32_t w);
     void loadIntRegister(int registerID, int value);
     uint32_t elapsedCycles();
     void resetCycles();
@@ -71,7 +71,8 @@ class VPU : public PipelineHandler
     void initPipelineOrchestrator();
     void executeMicroInstructions();
     void updateMicroInstructions();
-    bool stopBitSet(uint32_t instruction);
+    bool endBitSet(uint32_t instruction);
+    bool haltBitSet(uint32_t instruction);
     uint32_t nextUpperInstruction();
     uint32_t nextLowerInstruction();
     void processUpperInstruction(uint32_t upperInstruction);
@@ -79,7 +80,9 @@ class VPU : public PipelineHandler
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
     uint8_t src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
     uint8_t destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
-    uint8_t src2MaskFromOpCodeAndInstruction(uint16_t opCode, uint32_t upperInstruction);
+    uint8_t destinationMaskFromOpCode(uint16_t opCode, uint8_t encodedMask);
+    uint8_t srcReg1MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
+    uint8_t srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
     uint16_t processLowerInstruction(uint32_t lowerInstruction);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);
     void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);

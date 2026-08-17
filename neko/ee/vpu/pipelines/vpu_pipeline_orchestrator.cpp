@@ -66,13 +66,19 @@ void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
       continue;
     }
 
-    if ((pipeline->srcReg1 == checkPipeline->destReg || (pipeline->source2FieldMask == 0 && pipeline->srcReg2 == checkPipeline->destReg)) && (pipeline->destFieldMask & checkPipeline->destFieldMask))
+    const bool srcReg1Hazard =
+      pipeline->srcReg1FieldMask != 0 &&
+      pipeline->srcReg1 == checkPipeline->destReg &&
+      (pipeline->srcReg1FieldMask & checkPipeline->destFieldMask) != 0;
+    const bool srcReg2Hazard =
+      pipeline->srcReg2FieldMask != 0 &&
+      pipeline->srcReg2 == checkPipeline->destReg &&
+      (pipeline->srcReg2FieldMask & checkPipeline->destFieldMask) != 0;
+
+    if (srcReg1Hazard || srcReg2Hazard)
     {
       stalling = true;
-    }
-    if (pipeline->srcReg2 == checkPipeline->destReg && (pipeline->source2FieldMask & checkPipeline->destFieldMask))
-    {
-      stalling = true;
+      return;
     }
   }
 }
@@ -108,7 +114,7 @@ bool PipelineOrchestrator::hasNext()
   return executing.size() > 0 || waiting.size() > 0;
 }
 
-void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t fieldMask, uint8_t s2FieldMask)
+void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask)
 {
   if (pool.size() == 0)
   {
@@ -118,7 +124,7 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, u
   Pipeline * pipeline = pool.front();
   pool.pop_front();
 
-  pipeline->configure(pipelineType, opCode, srcReg1, srcReg2, destReg, fieldMask, s2FieldMask);
+  pipeline->configure(pipelineType, opCode, srcReg1, srcReg2, destReg, destFieldMask, srcReg1FieldMask, srcReg2FieldMask);
   waiting.push_back(pipeline);
 }
 

@@ -10,7 +10,27 @@
 #define FP_REGISTER_W_FIELD 8
 #define FP_REGISTER_ALL_FIELDS 15
 
-#define FP_REGISTER_FIELD_IS_NEGATIVE(x) (x & (std::int64_t(1) << 63))
+class VUFloat
+{
+  public:
+    VUFloat();
+    explicit VUFloat(double value);
+
+    VUFloat &operator=(double value);
+    operator double() const;
+
+    std::uint32_t bits() const;
+    void setBits(std::uint32_t value);
+    std::int32_t signedValue() const;
+    void setSignedValue(std::int32_t value);
+    bool isNegative() const;
+    void toggleSign();
+
+  private:
+    std::uint32_t rawBits;
+};
+
+static_assert(sizeof(VUFloat) == sizeof(std::uint32_t), "VU floating-point lanes must be 32 bits");
 
 class FPRegister
 {
@@ -19,26 +39,11 @@ class FPRegister
     FPRegister(double x, double y, double z, double w);
     void load(double x, double y, double z, double w);
     void copyFrom(FPRegister * srcReg);
-    union
-    {
-      double x;
-      std::int64_t xInt;
-    };
-    union
-    {
-      double y;
-      std::int64_t yInt;
-    };
-    union
-    {
-      double z;
-      std::int64_t zInt;
-    };
-    union
-    {
-      double w;
-      std::int64_t wInt;
-    };
+    void copyFieldsFrom(FPRegister * srcReg, uint8_t fieldMask);
+    VUFloat x;
+    VUFloat y;
+    VUFloat z;
+    VUFloat w;
     uint8_t xResultFlags;
     uint8_t yResultFlags;
     uint8_t zResultFlags;
@@ -67,8 +72,8 @@ class FPRegister
     void toDouble15(FPRegister * source, uint8_t fieldMask);
 
   private:
-    void toInt(FPRegister * source, uint8_t fieldMask, std::int64_t (*convertFunc)(double));
-    void toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int64_t));
+    void toInt(FPRegister * source, uint8_t fieldMask, std::int32_t (*convertFunc)(double));
+    void toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int32_t));
     void clearFlags();
 };
 

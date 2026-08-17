@@ -8,7 +8,6 @@
 TEST_CASE("VPU Microinstruction ADD and ABS Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.4f, -1.0f, 4.5f);
   vpu.loadFPRegister(VPU_REGISTER_VF05, 5.0f, -6.4f, 10.0f, -9.0f);
   vpu.loadFPRegister(VPU_REGISTER_VF06, -5.0f, 6.4f, -10.0f, 9.0f);
@@ -29,7 +28,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 1.0f);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 4.5f);
     REQUIRE(vpu.elapsedCycles() == 7);
-    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    REQUIRE(vpu.getState() == VPU_STATE_READY);
   }
 
   SECTION("ADD stores the addition of the two src vectors in dest vector")
@@ -41,7 +40,7 @@ TEST_CASE("VPU Microinstruction ADD and ABS Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 9);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 13.5f);
     REQUIRE(vpu.elapsedCycles() == 7);
-    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    REQUIRE(vpu.getState() == VPU_STATE_READY);
   }
 
   SECTION("ADDing vectors of opposite direction, but equal magnitude sets the zero flags.")

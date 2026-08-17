@@ -9,18 +9,15 @@
 TEST_CASE("VPU Microinstruction OPMULA Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
-  Double max;
-  max.exponent = FP_MAX_EXPONENT_WITH_BIAS;
-  max.mantissa = FP_MAX_MANTISSA;
+  VUFloat max;
+  max.setBits(0x7fffffffu);
 
-  Double min;
-  min.d = std::numeric_limits<double>::min();
+  double min = std::numeric_limits<double>::min();
 
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0, -2.5, -1.0, 4.5);
   vpu.loadFPRegister(VPU_REGISTER_VF04, 5.0, -6.5, 10.0, -9.0);
   vpu.loadFPRegister(VPU_REGISTER_VF05, 0.25, 0.25, 50, 0.25);
-  vpu.loadFPRegister(VPU_REGISTER_VF06, 0, max.d, min.d, 30);
+  vpu.loadFPRegister(VPU_REGISTER_VF06, 0, max, min, 30);
   vector<uint8_t> instructions;
 
   SECTION("OPMULA calculates the second part of the vector outer product of the xyz fields of the ft and fs vectors and stores the result in the accumulator")
@@ -42,7 +39,7 @@ TEST_CASE("VPU Microinstruction OPMULA Tests")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF06, 0, VPU_OPMULA);
 
-    REQUIRE(vpu.accumulator.x == max.d);
+    REQUIRE(vpu.accumulator.x.bits() == 0x7fffffffu);
     REQUIRE(vpu.accumulator.y == 0);
     REQUIRE(vpu.accumulator.z == 0);
 
@@ -67,7 +64,7 @@ TEST_CASE("VPU Microinstruction OPMULA Tests")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_OPMSUB);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x == -max.d);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x.bits() == 0xffffffffu);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == 0);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == 0);
 

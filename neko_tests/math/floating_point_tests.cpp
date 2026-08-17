@@ -9,33 +9,47 @@ TEST_CASE("Testing the floating point conventions")
 {
   uint8_t resultFlags = 0;
 
-  SECTION("The double union holds the correct values in its struct for 1.0")
+  SECTION("A VU float stores the IEEE single-precision bits for 1.0")
   {
-    double num = 1.0;
-    Double du;
-    du.d = num;
+    VUFloat value(1.0);
 
-    REQUIRE(du.mantissa == 0);
-    REQUIRE(du.exponent == FP_EXP_BIAS);
-    REQUIRE(du.sign == 0);
+    REQUIRE(value.bits() == 0x3f800000u);
   }
 
-  SECTION("The double union holds the correct exponent for FLT_MAX")
+  SECTION("A VU float stores FLT_MAX as the largest exponent-254 value")
   {
-    double num = FLT_MAX;
-    Double du;
-    du.d = num;
+    VUFloat value(FLT_MAX);
 
-    REQUIRE(du.exponent == 127 + FP_EXP_BIAS);
-    REQUIRE(du.sign == 0);
+    REQUIRE(value.bits() == 0x7f7fffffu);
   }
   
-  SECTION("The double union can hold an exponent of 128")
+  SECTION("A VU float can represent exponent 128 without treating it as infinity")
   {
-    Double du;
-    du.exponent = FP_EXP_BIAS + 128;
+    VUFloat value;
+    value.setBits(0x7f800000u);
 
-    REQUIRE(du.d > FLT_MAX);
+    REQUIRE(static_cast<double>(value) > FLT_MAX);
+  }
+
+  SECTION("VU maximum round trips through its host conversion")
+  {
+    VUFloat maximum;
+    maximum.setBits(0x7fffffffu);
+
+    VUFloat roundTripped(static_cast<double>(maximum));
+
+    REQUIRE(roundTripped.bits() == maximum.bits());
+  }
+
+  SECTION("Adding two VU maximum values overflows to VU maximum")
+  {
+    VUFloat maximum;
+    maximum.setBits(0x7fffffffu);
+
+    VUFloat result(addFP(maximum, maximum, &resultFlags));
+
+    REQUIRE(result.bits() == 0x7fffffffu);
+    REQUIRE(resultFlags == FP_FLAG_OVERFLOW);
   }
 
   SECTION("Two floating point numbers can be added together")
@@ -74,13 +88,9 @@ TEST_CASE("Testing the floating point conventions")
   {
     double d1 = FLT_MAX;
     double d2 = 7.0;
-    Double num;
+    VUFloat result(mulFP(d1, d2, &resultFlags));
 
-    num.d = mulFP(d1, d2, &resultFlags);
-
-    REQUIRE(num.mantissa == FP_MAX_MANTISSA);
-    REQUIRE(num.exponent == FP_MAX_EXPONENT_WITH_BIAS);
-    REQUIRE(num.sign == 0);
+    REQUIRE(result.bits() == 0x7fffffffu);
     REQUIRE(resultFlags == FP_FLAG_OVERFLOW);
   }
 
@@ -89,26 +99,19 @@ TEST_CASE("Testing the floating point conventions")
     double d1 = FLT_MAX;
     double d2 = 7.0;
 
-    Double d1Converted;
-    Double d2Converted;
+    double d1Converted = mulFP(d1, d2, &resultFlags);
+    double d2Converted = mulFP(d1, d2, &resultFlags);
 
-    d1Converted.d = mulFP(d1, d2, &resultFlags);
-    d2Converted.d = mulFP(d1, d2, &resultFlags);
-
-    REQUIRE(divFP(d1Converted.d, d2Converted.d, &resultFlags) == 1);
+    REQUIRE(divFP(d1Converted, d2Converted, &resultFlags) == 1);
   }
 
   SECTION("Multiplying a positive floating point number and negative floating point number that result in an overflow returns -MAX and sets the overflow flag.")
   {
     double d1 = FLT_MAX;
     double d2 = -7.0f;
-    Double num;
+    VUFloat result(mulFP(d1, d2, &resultFlags));
 
-    num.d = mulFP(d1, d2, &resultFlags);
-
-    REQUIRE(num.mantissa == FP_MAX_MANTISSA);
-    REQUIRE(num.exponent == FP_MAX_EXPONENT_WITH_BIAS);
-    REQUIRE(num.sign == 1);
+    REQUIRE(result.bits() == 0xffffffffu);
     REQUIRE(resultFlags == FP_FLAG_OVERFLOW);
   }
 
@@ -116,49 +119,29 @@ TEST_CASE("Testing the floating point conventions")
   {
     double d1 = 0;
     double d2 = 0;
-    Double num;
+    VUFloat result(divFP(d1, d2, &resultFlags));
 
-    num.d = divFP(d1, d2, &resultFlags);
-
-    REQUIRE(num.mantissa == 0);
-    REQUIRE(num.exponent == 0);
-    REQUIRE(num.sign == 0);
+    REQUIRE(result.bits() == 0);
     REQUIRE(resultFlags == FP_FLAG_I_BIT);
   }
   
   SECTION("Dividing -0 by -0 returns 0 with the I bit flag set")
   {
-    Double d1;
-    Double d2;
-    Double num;
+    double d1 = std::copysign(0.0, -1.0);
+    double d2 = std::copysign(0.0, -1.0);
+    VUFloat result(divFP(d1, d2, &resultFlags));
 
-    d1.d = 0;
-    d1.sign = 1;
-    d2.d = 0;
-    d2.sign = 1;
-
-    num.d = divFP(d1.d, d2.d, &resultFlags);
-
-    REQUIRE(num.mantissa == 0);
-    REQUIRE(num.exponent == 0);
-    REQUIRE(num.sign == 0);
+    REQUIRE(result.bits() == 0);
     REQUIRE(resultFlags == FP_FLAG_I_BIT);
   }
 
   SECTION("Dividing 0 by -0 returns -0 with the I bit flag set")
   {
     double d1 = 0;
-    Double d2;
-    Double num;
+    double d2 = std::copysign(0.0, -1.0);
+    VUFloat result(divFP(d1, d2, &resultFlags));
 
-    d2.d = 0;
-    d2.sign = 1;
-
-    num.d = divFP(d1, d2.d, &resultFlags);
-
-    REQUIRE(num.mantissa == 0);
-    REQUIRE(num.exponent == 0);
-    REQUIRE(num.sign == 1);
+    REQUIRE(result.bits() == FP_SIGN_BIT);
     REQUIRE(resultFlags == FP_FLAG_I_BIT);
   }
 
@@ -166,13 +149,9 @@ TEST_CASE("Testing the floating point conventions")
   {
     double d1 = 5;
     double d2 = 0;
-    Double result;
+    VUFloat result(divFP(d1, d2, &resultFlags));
 
-    result.d = divFP(d1, d2, &resultFlags);
-
-    REQUIRE(result.mantissa == FP_MAX_MANTISSA);
-    REQUIRE(result.exponent == FP_MAX_EXPONENT_WITH_BIAS);
-    REQUIRE(result.sign == 0);
+    REQUIRE(result.bits() == 0x7fffffffu);
     REQUIRE(resultFlags == FP_FLAG_D_BIT);
   }
 
@@ -180,13 +159,9 @@ TEST_CASE("Testing the floating point conventions")
   {
     double d1 = -5;
     double d2 = 0;
-    Double result;
+    VUFloat result(divFP(d1, d2, &resultFlags));
 
-    result.d = divFP(d1, d2, &resultFlags);
-
-    REQUIRE(result.mantissa == FP_MAX_MANTISSA);
-    REQUIRE(result.exponent == FP_MAX_EXPONENT_WITH_BIAS);
-    REQUIRE(result.sign == 1);
+    REQUIRE(result.bits() == 0xffffffffu);
     REQUIRE(resultFlags == FP_FLAG_D_BIT);
   }
 
@@ -194,12 +169,9 @@ TEST_CASE("Testing the floating point conventions")
   {
     double d1 = std::numeric_limits<double>::min();
     double d2 = 5;
-    Double num;
+    VUFloat result(divFP(d1, d2, &resultFlags));
 
-    num.d = divFP(d1, d2, &resultFlags);
-
-    REQUIRE(num.d == 0);
-    REQUIRE(num.sign == 0);
+    REQUIRE(result.bits() == 0);
     REQUIRE(resultFlags == FP_FLAG_UNDERFLOW);
   }
 
@@ -207,12 +179,9 @@ TEST_CASE("Testing the floating point conventions")
   {
     double d1 = std::numeric_limits<double>::min();
     double d2 = -5;
-    Double num;
+    VUFloat result(divFP(d1, d2, &resultFlags));
 
-    num.d = divFP(d1, d2, &resultFlags);
-
-    REQUIRE(num.d == 0.0f);
-    REQUIRE(num.sign == 1);
+    REQUIRE(result.bits() == FP_SIGN_BIT);
     REQUIRE(resultFlags == FP_FLAG_UNDERFLOW);
   }
 

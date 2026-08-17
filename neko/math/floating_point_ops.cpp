@@ -1,26 +1,27 @@
 #include "floating_point_ops.hpp"
 #include <cfloat>
 
+namespace
+{
+  double maxVUValue()
+  {
+    return std::ldexp(2.0 - std::ldexp(1.0, -23), FP_MAX_EXPONENT);
+  }
+}
+
 double convertFromIEEE(double value, uint8_t * resultFlags)
 {
-  Double num;
-  num.d = value;
-
-  if (static_cast<int>(num.exponent) - FP_EXP_BIAS >= FP_MAX_EXPONENT)
+  if (std::abs(value) >= std::ldexp(1.0, FP_MAX_EXPONENT))
   {
-    num.exponent = FP_EXP_BIAS + FP_MAX_EXPONENT;
-    num.mantissa = FP_MAX_MANTISSA;
     *resultFlags |= FP_FLAG_OVERFLOW;
 
-    return num.d;
+    return std::copysign(maxVUValue(), value);
   }
-  if (num.exponent == 0 && num.mantissa > 0)
+  if (value != 0 && std::abs(value) < std::ldexp(1.0, -126))
   {
-    num.exponent = 0;
-    num.mantissa = 0;
     *resultFlags |= FP_FLAG_UNDERFLOW;
 
-    return num.d;
+    return std::copysign(0.0, value);
   }
 
   return value;
@@ -28,34 +29,17 @@ double convertFromIEEE(double value, uint8_t * resultFlags)
 
 uint8_t getSignFromNumXORNum(double d1, double d2)
 {
-  Double f1Num;
-  Double f2Num;
-
-  f1Num.d = d1;
-  f2Num.d = d2;
-
-  return f1Num.sign ^ f2Num.sign;
+  return std::signbit(d1) ^ std::signbit(d2);
 }
 
 double processZeroDivZero(double d1, double d2)
 {
-  Double result;
-
-  result.d = 0;
-  result.sign = getSignFromNumXORNum(d1, d2);
-
-  return result.d;
+  return std::copysign(0.0, getSignFromNumXORNum(d1, d2) ? -1.0 : 1.0);
 }
 
 double processNumDivZero(double d1, double d2)
 {
-  Double result;
-
-  result.mantissa = FP_MAX_MANTISSA;
-  result.exponent = FP_EXP_BIAS + FP_MAX_EXPONENT;
-  result.sign = getSignFromNumXORNum(d1, d2);
-
-  return result.d;
+  return std::copysign(maxVUValue(), getSignFromNumXORNum(d1, d2) ? -1.0 : 1.0);
 }
 
 double addFP(double d1, double d2, uint8_t * resultFlags)
@@ -92,42 +76,42 @@ double subFP(double d1, double d2, uint8_t * resultFlags)
   return convertFromIEEE(d1 - d2, resultFlags);
 }
 
-std::int64_t doubleToInteger0(double d)
+std::int32_t doubleToInteger0(double d)
 {
-  return static_cast<std::int64_t>(d);
+  return static_cast<std::int32_t>(d);
 }
 
-std::int64_t doubleToInteger4(double d)
+std::int32_t doubleToInteger4(double d)
 {
-  return static_cast<std::int64_t>(d * 16);
+  return static_cast<std::int32_t>(d * 16);
 }
 
-std::int64_t doubleToInteger12(double d)
+std::int32_t doubleToInteger12(double d)
 {
-  return static_cast<std::int64_t>(d * 4096);
+  return static_cast<std::int32_t>(d * 4096);
 }
 
-std::int64_t doubleToInteger15(double d)
+std::int32_t doubleToInteger15(double d)
 {
-  return static_cast<std::int64_t>(d * 32768);
+  return static_cast<std::int32_t>(d * 32768);
 }
 
-double integer0ToDouble(std::int64_t i)
+double integer0ToDouble(std::int32_t i)
 {
   return (double)i;
 }
 
-double integer4ToDouble(std::int64_t i)
+double integer4ToDouble(std::int32_t i)
 {
   return i / 16.0f;
 }
 
-double integer12ToDouble(std::int64_t i)
+double integer12ToDouble(std::int32_t i)
 {
   return i / 4096.0f;
 }
 
-double integer15ToDouble(std::int64_t i)
+double integer15ToDouble(std::int32_t i)
 {
   return i / 32768.0f;
 }

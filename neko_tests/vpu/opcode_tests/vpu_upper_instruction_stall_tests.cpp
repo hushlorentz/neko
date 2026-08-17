@@ -7,7 +7,6 @@
 TEST_CASE("VPU Upper Microinstruction Stall Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.4f, -1.0f, 4.5f);
   vpu.loadFPRegister(VPU_REGISTER_VF05, 5.0f, -6.4f, 10.0f, -9.0f);
   vector<uint8_t> instructions;
@@ -18,7 +17,7 @@ TEST_CASE("VPU Upper Microinstruction Stall Tests")
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF05, VPU_REGISTER_VF04, 0, VPU_ABS);
 
     REQUIRE(vpu.elapsedCycles() == 11);
-    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    REQUIRE(vpu.getState() == VPU_STATE_READY);
   }
 
   SECTION("If ABS stalls three times in a row, the process takes 19 cycles.")
@@ -40,8 +39,23 @@ TEST_CASE("VPU Upper Microinstruction Stall Tests")
 
   SECTION("ADDx after ADD causes a stall if the source vector's broadcast field is in use by the ADD instruction's output.")
   {
-    addSingleUpperInstruction(&instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF07, VPU_ADD);
-    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF08, VPU_REGISTER_VF07, VPU_REGISTER_VF04, VPU_ADDx);
+    addSingleUpperInstruction(&instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF08, VPU_ADD);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF08, VPU_REGISTER_VF03, VPU_REGISTER_VF04, VPU_ADDx);
     REQUIRE(vpu.elapsedCycles() == 11);
+  }
+
+  SECTION("Overlapping pipelines preserve writes to different destination lanes")
+  {
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 3, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, 10, 20, 30, 40);
+    vpu.loadFPRegister(VPU_REGISTER_VF07, 5, 6, 7, 8);
+
+    addSingleUpperInstruction(&instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF01, VPU_ADD);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF07, VPU_REGISTER_VF01, VPU_ADD);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == 0);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->y == 26);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->z == 3);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->w == 4);
   }
 }

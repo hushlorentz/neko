@@ -9,7 +9,6 @@
 TEST_CASE("VPU Microinstruction MAX and MIN Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
   vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 1, 1, 1);
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, -2.5f, 11.0f, 4.5f);
   vpu.loadFPRegister(VPU_REGISTER_VF04, 5.0f, -6.5f, 10.0f, -9.0f);

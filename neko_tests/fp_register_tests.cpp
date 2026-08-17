@@ -10,6 +10,21 @@ TEST_CASE("FP Register Tests")
   FPRegister reg4(-4, -3.5f, 2.75f, -1);
   uint16_t resultFlags = 0;
 
+  SECTION("Floating point fields are stored as raw 32-bit values")
+  {
+    REQUIRE(sizeof(reg1.x) == sizeof(uint32_t));
+    REQUIRE(reg1.x.bits() == 0x3f800000);
+    REQUIRE(reg1.z.bits() == 0xc0400000);
+  }
+
+  SECTION("A field can be viewed as a signed 32-bit fixed point value")
+  {
+    reg3.x.setSignedValue(-12);
+
+    REQUIRE(reg3.x.bits() == 0xfffffff4);
+    REQUIRE(reg3.x.signedValue() == -12);
+  }
+
   SECTION("Subtracting the x field leaves the other fields unchanged")
   {
     reg3.storeSub(&reg1, &reg2, FP_REGISTER_X_FIELD);
@@ -136,7 +151,7 @@ TEST_CASE("FP Register Tests")
 
     REQUIRE(reg3.x == 0);
     REQUIRE(reg3.y == 10);
-    REQUIRE(reg3.z == 0.6);
+    REQUIRE(reg3.z == 0.6f);
     REQUIRE(reg3.w == 2);
   }
 
@@ -156,7 +171,7 @@ TEST_CASE("FP Register Tests")
 
     REQUIRE(reg3.x == -0.5);
     REQUIRE(reg3.y == 1.0);
-    REQUIRE(reg3.z == 0.6);
+    REQUIRE(reg3.z == 0.6f);
     REQUIRE(reg3.w == 0.5);
   }
 

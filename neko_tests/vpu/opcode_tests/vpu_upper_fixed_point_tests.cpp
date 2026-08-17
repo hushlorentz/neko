@@ -9,56 +9,52 @@
 TEST_CASE("VPU Microinstruction Fixed Point Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
   vpu.loadFPRegister(VPU_REGISTER_VF02, -5.2f, 1.2535f, 0.0042f, -10.10f);
   vpu.loadFPRegister(VPU_REGISTER_VF03, 5.0f, -6.4f, 10.0f, -9.0f);
   vpu.loadFPRegister(VPU_REGISTER_VF04, -0.45f, 0.45f, 0.55f, 123.45f);
   vpu.loadFPRegister(VPU_REGISTER_VF05, 10, 0.45f, 0.55f, 3);
   vpu.loadFPRegister(VPU_REGISTER_VF06, 10, 5.5f, 10, -6.6f);
-  vpu.fpRegisterValue(VPU_REGISTER_VF07)->xInt = -12;
-  vpu.fpRegisterValue(VPU_REGISTER_VF07)->yInt = 1;
-  vpu.fpRegisterValue(VPU_REGISTER_VF07)->zInt = 123;
-  vpu.fpRegisterValue(VPU_REGISTER_VF07)->wInt = 1843;
+  vpu.loadIntFPRegister(VPU_REGISTER_VF07, -12, 1, 123, 1843);
   vector<uint8_t> instructions;
 
   SECTION("FTOI0 converts floating point fields of the second source vector to fixed point and stores the result in the fields of the first vector")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF03, VPU_REGISTER_VF02, 0, VPU_FTOI0);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->xInt == -5);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->yInt == 1);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->zInt == 0);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->wInt == -10);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->x.signedValue() == -5);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->y.signedValue() == 1);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->z.signedValue() == 0);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->w.signedValue() == -10);
   }
 
   SECTION("FTOI4 converts floating point fields of the second source vector to fixed point and stores the result in the fields of the first vector")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF03, VPU_REGISTER_VF04, 0, VPU_FTOI4);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->xInt == -7);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->yInt == 7);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->zInt == 8);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->wInt == 1975);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->x.signedValue() == -7);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->y.signedValue() == 7);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->z.signedValue() == 8);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->w.signedValue() == 1975);
   }
 
   SECTION("FTOI12 converts floating point fields of the second source vector to fixed point and stores the result in the fields of the first vector")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF03, VPU_REGISTER_VF04, 0, VPU_FTOI12);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->xInt == -1843);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->yInt == 1843);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->zInt == 2252);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->wInt == 505651);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->x.signedValue() == -1843);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->y.signedValue() == 1843);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->z.signedValue() == 2252);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->w.signedValue() == 505651);
   }
 
   SECTION("FTOI15 converts floating point fields of the second source vector to fixed point and stores the result in the fields of the first vector")
   {
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT | VPU_DEST_Z_BIT, VPU_REGISTER_VF05, VPU_REGISTER_VF04, 0, VPU_FTOI15);
 
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->xInt == 0x4024000000000000);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->yInt == 14745);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->zInt == 18022);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->wInt == 0x4008000000000000);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->x.bits() == 0x41200000);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->y.signedValue() == 14745);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->z.signedValue() == 18022);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->w.bits() == 0x40400000);
   }
 
   SECTION("ITOF0 converts fixed point fields of the second source vector to floating point and stores the result in the fields of the first vector")

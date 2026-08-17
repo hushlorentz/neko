@@ -48,9 +48,21 @@ TEST_CASE("VPU Microinstruction Tests")
       appendInstruction(&instructions, VPU_E_BIT | VPU_ADD);
       appendInstruction(&instructions, VPU_LOWER_NOP);
 
-      vpu.useThreads = false;
       vpu.uploadMicroInstructions(&instructions);
       REQUIRE_NOTHROW(vpu.initMicroMode());
+    }
+
+    SECTION("Microinstruction programs execute synchronously by default")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+
+      vpu.uploadMicroInstructions(&instructions);
+      vpu.initMicroMode();
+
+      REQUIRE(vpu.getState() != VPU_STATE_RUN);
+      REQUIRE(vpu.elapsedCycles() > 0);
     }
 
     SECTION("Unsupported lower instructions are rejected rather than silently ignored")
@@ -59,7 +71,6 @@ TEST_CASE("VPU Microinstruction Tests")
       appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
       appendInstruction(&instructions, 0);
 
-      vpu.useThreads = false;
       vpu.uploadMicroInstructions(&instructions);
       REQUIRE_THROWS_WITH(vpu.initMicroMode(), "Unsupported VU lower instruction.");
     }

@@ -1,6 +1,44 @@
 #include "catch.hpp"
 #include "vpu.hpp"
+#include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
+
+namespace
+{
+  void appendInstruction(std::vector<uint8_t> *instructions, uint32_t instruction)
+  {
+    instructions->push_back((instruction >> 24) & 0xff);
+    instructions->push_back((instruction >> 16) & 0xff);
+    instructions->push_back((instruction >> 8) & 0xff);
+    instructions->push_back(instruction & 0xff);
+  }
+
+  void runTerminatingInstruction(VPU *vpu, uint32_t terminationBit)
+  {
+    std::vector<uint8_t> instructions;
+    appendInstruction(&instructions, terminationBit | VPU_NOP);
+    appendInstruction(&instructions, VPU_LOWER_NOP);
+    vpu->uploadMicroInstructions(&instructions);
+    vpu->initMicroMode();
+  }
+
+  void runUpperInstruction(VPU *vpu, uint32_t destinationMask, uint8_t ft, uint8_t fs, uint8_t fd, uint16_t opCode)
+  {
+    uint32_t instruction =
+      VPU_E_BIT |
+      destinationMask |
+      (ft << VPU_FT_REG_SHIFT) |
+      (fs << VPU_FS_REG_SHIFT) |
+      (fd << VPU_FD_REG_SHIFT) |
+      opCode;
+
+    std::vector<uint8_t> instructions;
+    appendInstruction(&instructions, instruction);
+    appendInstruction(&instructions, VPU_LOWER_NOP);
+    vpu->uploadMicroInstructions(&instructions);
+    vpu->initMicroMode();
+  }
+}
 
 TEST_CASE("VPU State Tests")
 {
@@ -16,6 +54,43 @@ TEST_CASE("VPU State Tests")
 
     SECTION("VI00 always returns 0")
     {
+      REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI00) == 0);
+    }
+
+    SECTION("Host loads cannot modify VF00")
+    {
+      vpu.loadFPRegister(VPU_REGISTER_VF00, 1, 2, 3, 4);
+      vpu.loadIntFPRegister(VPU_REGISTER_VF00, 1, 2, 3, 4);
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->x == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->y == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->z == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->w == 1);
+    }
+
+    SECTION("Instruction writeback cannot modify VF00")
+    {
+      vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 3, 4);
+      vpu.loadFPRegister(VPU_REGISTER_VF02, 10, 20, 30, 40);
+
+      runUpperInstruction(
+        &vpu,
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF00,
+        VPU_ADD);
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->x == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->y == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->z == 0);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF00)->w == 1);
+    }
+
+    SECTION("Host loads cannot modify VI00")
+    {
+      vpu.loadIntRegister(VPU_REGISTER_VI00, 123);
+
       REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI00) == 0);
     }
     
@@ -61,7 +136,9 @@ TEST_CASE("VPU State Tests")
 
     SECTION("VPU transitions from Run to Ready at micro subroutine E bit termination")
     {
-      //WARN("Add this test");
+      runTerminatingInstruction(&vpu, VPU_E_BIT);
+
+      REQUIRE(vpu.getState() == VPU_STATE_READY);
     }
 
     SECTION("VPU transitions from Run to Ready at macro instruction execution termination")
@@ -71,12 +148,23 @@ TEST_CASE("VPU State Tests")
 
     SECTION("VPU transitions from Run to Stop when a D bit halt occurs")
     {
-      //WARN("Add this test");
+      runTerminatingInstruction(&vpu, VPU_D_BIT);
+
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 
     SECTION("VPU transitions from Run to Stop when a T bit halt occurs")
     {
-      //WARN("Add this test");
+      runTerminatingInstruction(&vpu, VPU_T_BIT);
+
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    }
+
+    SECTION("A halt bit takes priority when E and D are set together")
+    {
+      runTerminatingInstruction(&vpu, VPU_E_BIT | VPU_D_BIT);
+
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 
     SECTION("VPU transitions from Run to Stop when a ForceBreak occurs")

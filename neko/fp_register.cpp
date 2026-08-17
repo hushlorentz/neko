@@ -1,10 +1,131 @@
 #include <algorithm>
+#include <cfloat>
+#include <cmath>
+#include <cstring>
+#include <limits>
 
 #include "bit_ops.hpp"
 #include "floating_point_ops.hpp"
 #include "fp_register.hpp"
 
 using namespace std;
+
+namespace
+{
+  std::uint32_t floatBits(float value)
+  {
+    std::uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return bits;
+  }
+
+  double hostValue(std::uint32_t bits)
+  {
+    const bool negative = (bits & FP_SIGN_BIT) != 0;
+    const std::uint32_t exponent = (bits >> 23) & 0xff;
+    const std::uint32_t mantissa = bits & FP_MAX_MANTISSA;
+
+    if (exponent == 0)
+    {
+      if (mantissa == 0)
+      {
+        return std::copysign(0.0, negative ? -1.0 : 1.0);
+      }
+
+      return std::copysign(std::numeric_limits<double>::min(), negative ? -1.0 : 1.0);
+    }
+
+    const double significand = 1.0 + static_cast<double>(mantissa) / (1u << 23);
+    return std::copysign(std::ldexp(significand, static_cast<int>(exponent) - 127), negative ? -1.0 : 1.0);
+  }
+
+  std::uint32_t vuBits(double value)
+  {
+    const std::uint32_t sign = std::signbit(value) ? FP_SIGN_BIT : 0;
+    const double magnitude = std::abs(value);
+
+    if (!std::isfinite(value))
+    {
+      return floatBits(static_cast<float>(value));
+    }
+
+    if (magnitude == 0)
+    {
+      return sign;
+    }
+
+    if (magnitude <= FLT_MAX)
+    {
+      const std::uint32_t bits = floatBits(static_cast<float>(value));
+      return (bits & ~FP_SIGN_BIT) == 0 ? sign | 1u : bits;
+    }
+
+    int exponent;
+    const double fraction = std::frexp(magnitude, &exponent) * 2.0;
+    const int biasedExponent = exponent - 1 + 127;
+    if (biasedExponent > 255)
+    {
+      return sign | 0x7fffffffu;
+    }
+
+    const double scaledMantissa = (fraction - 1.0) * (1u << 23);
+    const std::uint32_t mantissa = std::min<std::uint32_t>(
+      static_cast<std::uint32_t>(scaledMantissa),
+      FP_MAX_MANTISSA);
+    return sign | (static_cast<std::uint32_t>(biasedExponent) << 23) | mantissa;
+  }
+}
+
+VUFloat::VUFloat() : rawBits(0)
+{
+}
+
+VUFloat::VUFloat(double value) : rawBits(vuBits(value))
+{
+}
+
+VUFloat &VUFloat::operator=(double value)
+{
+  rawBits = vuBits(value);
+  return *this;
+}
+
+VUFloat::operator double() const
+{
+  return hostValue(rawBits);
+}
+
+std::uint32_t VUFloat::bits() const
+{
+  return rawBits;
+}
+
+void VUFloat::setBits(std::uint32_t value)
+{
+  rawBits = value;
+}
+
+std::int32_t VUFloat::signedValue() const
+{
+  std::int32_t value;
+  std::memcpy(&value, &rawBits, sizeof(value));
+  return value;
+}
+
+void VUFloat::setSignedValue(std::int32_t value)
+{
+  std::memcpy(&rawBits, &value, sizeof(rawBits));
+}
+
+bool VUFloat::isNegative() const
+{
+  return (rawBits & FP_SIGN_BIT) != 0;
+}
+
+void VUFloat::toggleSign()
+{
+  rawBits ^= FP_SIGN_BIT;
+}
 
 FPRegister::FPRegister() : x(0), y(0), z(0), w(0), xResultFlags(0), yResultFlags(0), zResultFlags(0), wResultFlags(0)
 {
@@ -32,6 +153,30 @@ void FPRegister::copyFrom(FPRegister * srcReg)
   yResultFlags = srcReg->yResultFlags;
   zResultFlags = srcReg->zResultFlags;
   wResultFlags = srcReg->wResultFlags;
+}
+
+void FPRegister::copyFieldsFrom(FPRegister * srcReg, uint8_t fieldMask)
+{
+  if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+  {
+    x = srcReg->x;
+    xResultFlags = srcReg->xResultFlags;
+  }
+  if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+  {
+    y = srcReg->y;
+    yResultFlags = srcReg->yResultFlags;
+  }
+  if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+  {
+    z = srcReg->z;
+    zResultFlags = srcReg->zResultFlags;
+  }
+  if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+  {
+    w = srcReg->w;
+    wResultFlags = srcReg->wResultFlags;
+  }
 }
 
 void FPRegister::storeAdd(FPRegister * r1, FPRegister * r2, uint8_t fieldMask)
@@ -117,10 +262,10 @@ void FPRegister::storeMax(FPRegister * r1, FPRegister * r2, uint8_t fieldMask)
 void FPRegister::storeMaxDouble(FPRegister * r1, double d, uint8_t fieldMask)
 {
   clearFlags();
-  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? max(r1->x, d) : x;
-  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? max(r1->y, d) : y;
-  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? max(r1->z, d) : z;
-  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? max(r1->w, d) : w;
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? max(static_cast<double>(r1->x), d) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? max(static_cast<double>(r1->y), d) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? max(static_cast<double>(r1->z), d) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? max(static_cast<double>(r1->w), d) : w;
 }
 
 void FPRegister::storeMin(FPRegister * r1, FPRegister * r2, uint8_t fieldMask)
@@ -134,10 +279,10 @@ void FPRegister::storeMin(FPRegister * r1, FPRegister * r2, uint8_t fieldMask)
 void FPRegister::storeMinDouble(FPRegister * r1, double d, uint8_t fieldMask)
 {
   clearFlags();
-  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? min(r1->x, d) : x;
-  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? min(r1->y, d) : y;
-  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? min(r1->z, d) : z;
-  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? min(r1->w, d) : w;
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? min(static_cast<double>(r1->x), d) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? min(static_cast<double>(r1->y), d) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? min(static_cast<double>(r1->z), d) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? min(static_cast<double>(r1->w), d) : w;
 }
 
 void FPRegister::storeOuterProduct(FPRegister * r1, FPRegister * r2)
@@ -188,20 +333,20 @@ void FPRegister::toDouble15(FPRegister * source, uint8_t fieldMask)
   toDouble(source, fieldMask, &integer15ToDouble);
 }
 
-void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, std::int64_t (*convertFunc)(double))
+void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, std::int32_t (*convertFunc)(double))
 {
-  xInt = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->x) : xInt;
-  yInt = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->y) : yInt;
-  zInt = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? (*convertFunc)(source->z) : zInt;
-  wInt = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->w) : wInt;
+  if (hasFlag(fieldMask, FP_REGISTER_X_FIELD)) x.setSignedValue((*convertFunc)(source->x));
+  if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD)) y.setSignedValue((*convertFunc)(source->y));
+  if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD)) z.setSignedValue((*convertFunc)(source->z));
+  if (hasFlag(fieldMask, FP_REGISTER_W_FIELD)) w.setSignedValue((*convertFunc)(source->w));
 }
 
-void FPRegister::toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int64_t))
+void FPRegister::toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int32_t))
 {
-  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->xInt) : x;
-  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->yInt) : y;
-  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? (*convertFunc)(source->zInt) : z;
-  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->wInt) : w;
+  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->x.signedValue()) : x;
+  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->y.signedValue()) : y;
+  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? (*convertFunc)(source->z.signedValue()) : z;
+  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->w.signedValue()) : w;
 }
 
 void FPRegister::clearFlags()

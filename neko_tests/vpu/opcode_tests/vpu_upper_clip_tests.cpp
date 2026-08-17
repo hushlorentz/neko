@@ -9,7 +9,6 @@
 TEST_CASE("VPU Clipping Microinstruction Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
   vpu.loadFPRegister(VPU_REGISTER_VF02, 15.0f, 2.4f, 3.0f, 14.5f);
   vpu.loadFPRegister(VPU_REGISTER_VF03, -25.0f, -16.4f, -100.0f, -2.0f);
   vector<uint8_t> instructions;

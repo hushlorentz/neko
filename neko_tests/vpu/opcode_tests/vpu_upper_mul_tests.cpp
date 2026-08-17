@@ -9,7 +9,6 @@
 TEST_CASE("VPU Microinstruction MUL Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
   vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 1, 1, 1);
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0, -2.5, -1.0, 4.5);
   vpu.loadFPRegister(VPU_REGISTER_VF04, 5.0, -6.5, 10.0, -9.0);
@@ -29,19 +28,18 @@ TEST_CASE("VPU Microinstruction MUL Tests")
 
   SECTION("MUL sets the correct flags if there is an overflow")
   {
-    Double num;
-    num.mantissa = FP_MAX_MANTISSA;
-    num.exponent = FP_MAX_EXPONENT_WITH_BIAS;
+    VUFloat num;
+    num.setBits(0x7fffffffu);
 
-    vpu.loadFPRegister(VPU_REGISTER_VF06, 0, num.d, 0, num.d);
-    vpu.loadFPRegister(VPU_REGISTER_VF07, 0, num.d, 0, num.d);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, 0, num, 0, num);
+    vpu.loadFPRegister(VPU_REGISTER_VF07, 0, num, 0, num);
 
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF07, VPU_REGISTER_VF02, VPU_MUL);
     
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x == 0);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == num.d);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y.bits() == 0x7fffffffu);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z == 0);
-    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w == num.d);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->w.bits() == 0x7fffffffu);
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_OY));
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_OW));
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
@@ -50,11 +48,10 @@ TEST_CASE("VPU Microinstruction MUL Tests")
 
   SECTION("MUL sets the correct flags if there is an underflow")
   {
-    Double num;
-    num.d = std::numeric_limits<double>::min();
+    double num = std::numeric_limits<double>::min();
 
-    vpu.loadFPRegister(VPU_REGISTER_VF06, num.d, 0, 0.5, 0);
-    vpu.loadFPRegister(VPU_REGISTER_VF07, 0.5, 0, num.d, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, num, 0, 0.5, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF07, 0.5, 0, num, 0);
 
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF07, VPU_REGISTER_VF02, VPU_MUL);
     

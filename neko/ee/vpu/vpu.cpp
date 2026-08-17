@@ -1,5 +1,4 @@
 #include <stdexcept>
-#include <thread>
 #include "bit_ops.hpp"
 #include "floating_point_ops.hpp"
 #include "vpu.hpp"
@@ -19,7 +18,7 @@ uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU
 
 using namespace std;
 
-VPU::VPU() : useThreads(true), clippingFlags(0), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
+VPU::VPU() : clippingFlags(0), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
 {
   initMemory();
   initFPRegisters();
@@ -68,7 +67,7 @@ uint8_t VPU::getState()
   return state;
 }
 
-FPRegister * VPU::fpRegisterValue(int registerID)
+const FPRegister * VPU::fpRegisterValue(int registerID) const
 {
   return &fpRegisters[registerID];
 }
@@ -80,11 +79,34 @@ uint16_t VPU::intRegisterValue(int registerID)
 
 void VPU::loadFPRegister(int registerID, double x, double y, double z, double w)
 {
+  if (registerID == VPU_REGISTER_VF00)
+  {
+    return;
+  }
+
   fpRegisters[registerID].load(x, y, z, w);
+}
+
+void VPU::loadIntFPRegister(int registerID, int32_t x, int32_t y, int32_t z, int32_t w)
+{
+  if (registerID == VPU_REGISTER_VF00)
+  {
+    return;
+  }
+
+  fpRegisters[registerID].x.setSignedValue(x);
+  fpRegisters[registerID].y.setSignedValue(y);
+  fpRegisters[registerID].z.setSignedValue(z);
+  fpRegisters[registerID].w.setSignedValue(w);
 }
 
 void VPU::loadIntRegister(int registerID, int value)
 {
+  if (registerID == VPU_REGISTER_VI00)
+  {
+    return;
+  }
+
   intRegisters[registerID] = value;
 }
 
@@ -118,28 +140,21 @@ void VPU::initMicroMode()
 {
   mode = VPU_MODE_MICRO;
   state = VPU_STATE_RUN;
-
-  if (useThreads)
-  {
-    thread t;
-  }
-  else
-  {
-    executeMicroInstructions();
-  }
+  executeMicroInstructions();
 }
 
 void VPU::executeMicroInstructions()
 {
-  bool sawStopBit = false;
+  bool sawTerminationBit = false;
+  bool haltAfterDrain = false;
 
   while (state == VPU_STATE_RUN)
   {
-    if (sawStopBit)
+    if (sawTerminationBit)
     {
       if (!orchestrator.hasNext())
       {
-        state = VPU_STATE_STOP;
+        state = haltAfterDrain ? VPU_STATE_STOP : VPU_STATE_READY;
       }
     }
     else if (!orchestrator.stalling)
@@ -150,9 +165,10 @@ void VPU::executeMicroInstructions()
       processUpperInstruction(upperInstruction);
       microMemPC = processLowerInstruction(lowerInstruction);
 
-      if (stopBitSet(upperInstruction))
+      if (endBitSet(upperInstruction) || haltBitSet(upperInstruction))
       {
-        sawStopBit = true;
+        sawTerminationBit = true;
+        haltAfterDrain = haltBitSet(upperInstruction);
       }
     }
 
@@ -205,11 +221,13 @@ void VPU::processUpperInstruction(uint32_t upperInstruction)
 
   uint8_t srcReg1 = src1RegFromOpCodeAndInstruction(opCode, upperInstruction);
   uint8_t srcReg2 = regFromInstruction(upperInstruction, VPU_FS_REG_SHIFT);
-  uint8_t fieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
+  uint8_t encodedFieldMask = (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK;
+  uint8_t fieldMask = destinationMaskFromOpCode(opCode, encodedFieldMask);
   uint8_t destReg = destRegFromOpCodeAndInstruction(opCode, upperInstruction);
-  uint8_t src2Mask = src2MaskFromOpCodeAndInstruction(opCode, upperInstruction);
+  uint8_t srcReg1Mask = srcReg1MaskFromOpCode(opCode, fieldMask);
+  uint8_t srcReg2Mask = srcReg2MaskFromOpCode(opCode, fieldMask);
 
-  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, src2Mask); 
+  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, srcReg1Mask, srcReg2Mask);
 }
 
 uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
@@ -292,24 +310,139 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
   }
 }
 
-uint8_t VPU::src2MaskFromOpCodeAndInstruction(uint16_t opCode, uint32_t upperInstruction)
+uint8_t VPU::destinationMaskFromOpCode(uint16_t opCode, uint8_t encodedMask)
 {
   switch (opCode)
   {
+    case VPU_CLIP:
+      return FP_REGISTER_NO_FIELDS;
+    case VPU_OPMULA:
+    case VPU_OPMSUB:
+      return FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD | FP_REGISTER_Z_FIELD;
+    default:
+      return encodedMask;
+  }
+}
+
+uint8_t VPU::srcReg1MaskFromOpCode(uint16_t opCode, uint8_t destinationMask)
+{
+  switch (opCode)
+  {
+    case VPU_ABS:
+    case VPU_FTOI0:
+    case VPU_FTOI4:
+    case VPU_FTOI12:
+    case VPU_FTOI15:
+    case VPU_ITOF0:
+    case VPU_ITOF4:
+    case VPU_ITOF12:
+    case VPU_ITOF15:
+      return destinationMask;
+    case VPU_ADDi:
+    case VPU_ADDAi:
+    case VPU_ADDq:
+    case VPU_ADDAq:
+    case VPU_MADDi:
+    case VPU_MADDAi:
+    case VPU_MADDq:
+    case VPU_MADDAq:
+    case VPU_MAXi:
+    case VPU_MINIi:
+    case VPU_MSUBi:
+    case VPU_MSUBAi:
+    case VPU_MSUBq:
+    case VPU_MSUBAq:
+    case VPU_MULi:
+    case VPU_MULAi:
+    case VPU_MULq:
+    case VPU_MULAq:
+    case VPU_SUBi:
+    case VPU_SUBAi:
+    case VPU_SUBq:
+    case VPU_SUBAq:
+      return FP_REGISTER_NO_FIELDS;
     case VPU_ADDx:
     case VPU_ADDAx:
+    case VPU_MADDx:
+    case VPU_MADDAx:
+    case VPU_MAXx:
+    case VPU_MINIx:
+    case VPU_MSUBx:
+    case VPU_MSUBAx:
+    case VPU_MULx:
+    case VPU_MULAx:
+    case VPU_SUBx:
+    case VPU_SUBAx:
       return FP_REGISTER_X_FIELD;
     case VPU_ADDy:
     case VPU_ADDAy:
+    case VPU_MADDy:
+    case VPU_MADDAy:
+    case VPU_MAXy:
+    case VPU_MINIy:
+    case VPU_MSUBy:
+    case VPU_MSUBAy:
+    case VPU_MULy:
+    case VPU_MULAy:
+    case VPU_SUBy:
+    case VPU_SUBAy:
       return FP_REGISTER_Y_FIELD;
     case VPU_ADDz:
     case VPU_ADDAz:
+    case VPU_MADDz:
+    case VPU_MADDAz:
+    case VPU_MAXz:
+    case VPU_MINIz:
+    case VPU_MSUBz:
+    case VPU_MSUBAz:
+    case VPU_MULz:
+    case VPU_MULAz:
+    case VPU_SUBz:
+    case VPU_SUBAz:
       return FP_REGISTER_Z_FIELD;
     case VPU_ADDw:
     case VPU_ADDAw:
+    case VPU_MADDw:
+    case VPU_MADDAw:
+    case VPU_MAXw:
+    case VPU_MINIw:
+    case VPU_MSUBw:
+    case VPU_MSUBAw:
+    case VPU_MULw:
+    case VPU_MULAw:
+    case VPU_SUBw:
+    case VPU_SUBAw:
       return FP_REGISTER_W_FIELD;
+    case VPU_CLIP:
+    case VPU_OPMULA:
+    case VPU_OPMSUB:
+      return FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD | FP_REGISTER_Z_FIELD;
     default:
-      return 0;
+      return destinationMask;
+  }
+}
+
+uint8_t VPU::srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask)
+{
+  switch (opCode)
+  {
+    case VPU_ABS:
+    case VPU_FTOI0:
+    case VPU_FTOI4:
+    case VPU_FTOI12:
+    case VPU_FTOI15:
+    case VPU_ITOF0:
+    case VPU_ITOF4:
+    case VPU_ITOF12:
+    case VPU_ITOF15:
+      return FP_REGISTER_NO_FIELDS;
+    case VPU_CLIP:
+      return FP_REGISTER_W_FIELD;
+    case VPU_OPMULA:
+    case VPU_OPMSUB:
+      return FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD | FP_REGISTER_Z_FIELD;
+    default:
+      return destinationMask;
   }
 }
 
@@ -326,16 +459,22 @@ uint16_t VPU::processLowerInstruction(uint32_t lowerInstruction)
   return microMemPC + 8;
 }
 
-bool VPU::stopBitSet(uint32_t instruction)
+bool VPU::endBitSet(uint32_t instruction)
 {
-  return hasFlag(instruction, VPU_E_BIT) ||
-          hasFlag(instruction, VPU_D_BIT) ||
-          hasFlag(instruction, VPU_T_BIT);
+  return hasFlag(instruction, VPU_E_BIT);
+}
+
+bool VPU::haltBitSet(uint32_t instruction)
+{
+  return hasFlag(instruction, VPU_D_BIT) || hasFlag(instruction, VPU_T_BIT);
 }
 
 void VPU::updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p)
 {
-  destReg->copyFrom(&(p->fpResult));
+  if (destReg != &fpRegisters[VPU_REGISTER_VF00])
+  {
+    destReg->copyFieldsFrom(&(p->fpResult), p->destFieldMask);
+  }
 }
 
 bool VPU::hasMACFlag(uint16_t flag)
@@ -360,28 +499,28 @@ void VPU::setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields)
   if (!hasFlag(ignoredFields, FP_REGISTER_X_FIELD))
   {
     (reg->x == 0) ? setFlag(MACFlags, VPU_FLAG_ZX) : unsetFlag(MACFlags, VPU_FLAG_ZX);
-    FP_REGISTER_FIELD_IS_NEGATIVE(reg->xInt) ? setFlag(MACFlags, VPU_FLAG_SX) : unsetFlag(MACFlags, VPU_FLAG_SX);
+    reg->x.isNegative() ? setFlag(MACFlags, VPU_FLAG_SX) : unsetFlag(MACFlags, VPU_FLAG_SX);
     hasFlag(reg->xResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OX) : unsetFlag(MACFlags, VPU_FLAG_OX);
     hasFlag(reg->xResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UX) : unsetFlag(MACFlags, VPU_FLAG_UX);
   }
   if (!hasFlag(ignoredFields, FP_REGISTER_Y_FIELD))
   {
     (reg->y == 0) ? setFlag(MACFlags, VPU_FLAG_ZY) : unsetFlag(MACFlags, VPU_FLAG_ZY);
-    FP_REGISTER_FIELD_IS_NEGATIVE(reg->yInt) ? setFlag(MACFlags, VPU_FLAG_SY) : unsetFlag(MACFlags, VPU_FLAG_SY);
+    reg->y.isNegative() ? setFlag(MACFlags, VPU_FLAG_SY) : unsetFlag(MACFlags, VPU_FLAG_SY);
     hasFlag(reg->yResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OY) : unsetFlag(MACFlags, VPU_FLAG_OY);
     hasFlag(reg->yResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UY) : unsetFlag(MACFlags, VPU_FLAG_UY);
   }
   if (!hasFlag(ignoredFields, FP_REGISTER_Z_FIELD))
   {
     (reg->z == 0) ? setFlag(MACFlags, VPU_FLAG_ZZ) : unsetFlag(MACFlags, VPU_FLAG_ZZ);
-    FP_REGISTER_FIELD_IS_NEGATIVE(reg->zInt) ? setFlag(MACFlags, VPU_FLAG_SZ) : unsetFlag(MACFlags, VPU_FLAG_SZ);
+    reg->z.isNegative() ? setFlag(MACFlags, VPU_FLAG_SZ) : unsetFlag(MACFlags, VPU_FLAG_SZ);
     hasFlag(reg->zResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OZ) : unsetFlag(MACFlags, VPU_FLAG_OZ);
     hasFlag(reg->zResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UZ) : unsetFlag(MACFlags, VPU_FLAG_UZ);
   }
   if (!hasFlag(ignoredFields, FP_REGISTER_W_FIELD))
   {
     (reg->w == 0) ? setFlag(MACFlags, VPU_FLAG_ZW) : unsetFlag(MACFlags, VPU_FLAG_ZW);
-    FP_REGISTER_FIELD_IS_NEGATIVE(reg->wInt) ? setFlag(MACFlags, VPU_FLAG_SW) : unsetFlag(MACFlags, VPU_FLAG_SW);
+    reg->w.isNegative() ? setFlag(MACFlags, VPU_FLAG_SW) : unsetFlag(MACFlags, VPU_FLAG_SW);
     hasFlag(reg->wResultFlags, FP_FLAG_OVERFLOW) ? setFlag(MACFlags, VPU_FLAG_OW) : unsetFlag(MACFlags, VPU_FLAG_OW);
     hasFlag(reg->wResultFlags, FP_FLAG_UNDERFLOW) ? setFlag(MACFlags, VPU_FLAG_UW) : unsetFlag(MACFlags, VPU_FLAG_UW);
   }
@@ -826,7 +965,10 @@ void VPU::handleMADDInstruction(Pipeline * p)
 
   setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
   tempReg.storeAdd(&tempReg, &accumulator, fieldMask);
-  destReg->copyFrom(&tempReg);
+  if (destReg != &fpRegisters[VPU_REGISTER_VF00])
+  {
+    destReg->copyFieldsFrom(&tempReg, p->destFieldMask);
+  }
   setFlags(destReg, ignoredFields);
 }
 
@@ -842,32 +984,35 @@ void VPU::handleMSUBInstruction(Pipeline * p)
 
   if (hasMACFlag(VPU_FLAG_OX))
   {
-    tempReg.xInt ^= FP_SIGN_BIT;
+    tempReg.x.toggleSign();
     unsetFlag(fieldMask, FP_REGISTER_X_FIELD);
     setFlag(ignoredFields, FP_REGISTER_X_FIELD);
   }
   if (hasMACFlag(VPU_FLAG_OY))
   {
-    tempReg.yInt ^= FP_SIGN_BIT;
+    tempReg.y.toggleSign();
     unsetFlag(fieldMask, FP_REGISTER_Y_FIELD);
     setFlag(ignoredFields, FP_REGISTER_Y_FIELD);
   }
   if (hasMACFlag(VPU_FLAG_OZ))
   {
-    tempReg.zInt ^= FP_SIGN_BIT;
+    tempReg.z.toggleSign();
     unsetFlag(fieldMask, FP_REGISTER_Z_FIELD);
     setFlag(ignoredFields, FP_REGISTER_Z_FIELD);
   }
   if (hasMACFlag(VPU_FLAG_OW))
   {
-    tempReg.wInt ^= FP_SIGN_BIT;
+    tempReg.w.toggleSign();
     unsetFlag(fieldMask, FP_REGISTER_W_FIELD);
     setFlag(ignoredFields, FP_REGISTER_W_FIELD);
   }
 
   setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
-  tempReg.storeSub(&tempReg, &accumulator, fieldMask);
-  destReg->copyFrom(&tempReg);
+  tempReg.storeSub(&accumulator, &tempReg, fieldMask);
+  if (destReg != &fpRegisters[VPU_REGISTER_VF00])
+  {
+    destReg->copyFieldsFrom(&tempReg, p->destFieldMask);
+  }
   setFlags(destReg, ignoredFields);
 }
 
@@ -880,6 +1025,9 @@ void VPU::handleOPMSUBInstruction(Pipeline * p)
   setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
 
   tempReg.storeSub(&accumulator, &tempReg, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD | FP_REGISTER_Z_FIELD);
-  destReg->copyFrom(&tempReg);
+  if (destReg != &fpRegisters[VPU_REGISTER_VF00])
+  {
+    destReg->copyFieldsFrom(&tempReg, p->destFieldMask);
+  }
   setFlags(destReg, FP_REGISTER_NO_FIELDS);
 }

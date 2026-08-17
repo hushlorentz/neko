@@ -8,7 +8,6 @@
 TEST_CASE("VPU Microinstruction SUB Tests")
 {
   VPU vpu;
-  vpu.useThreads = false;
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0f, 49, -1.0f, 4.5f);
   vpu.loadFPRegister(VPU_REGISTER_VF05, 5.0f, -6.5f, 10.0f, -9.0f);
   vpu.loadFPRegister(VPU_REGISTER_VF06, -5.0f, 6.5f, -10.0f, 9.0f);
