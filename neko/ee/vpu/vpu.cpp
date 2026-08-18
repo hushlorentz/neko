@@ -19,7 +19,7 @@ uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU
 
 using namespace std;
 
-VPU::VPU(VPUType type) : clippingFlags(0), type(type), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), microMemPC(0), terminationRequested(false), haltAfterDrain(false), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
+VPU::VPU(VPUType type) : clippingFlags(0), type(type), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), microMemPC(0), endDelaySlotPending(false), terminationRequested(false), haltAfterDrain(false), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
 {
   initMemory();
   initFPRegisters();
@@ -224,6 +224,7 @@ void VPU::startMicroMode(uint16_t startAddress)
   orchestrator.reset();
   mode = VPU_MODE_MICRO;
   microMemPC = startAddress;
+  endDelaySlotPending = false;
   terminationRequested = false;
   haltAfterDrain = false;
   state = VPU_STATE_RUN;
@@ -249,9 +250,15 @@ bool VPU::tick()
     }
     else if (!orchestrator.stalling)
     {
+      bool executingEndDelaySlot = endDelaySlotPending;
       uint16_t instructionAddress = microMemPC;
       uint32_t upperInstruction = nextUpperInstruction();
       uint32_t lowerInstruction = nextLowerInstruction();
+
+      if (executingEndDelaySlot && endBitSet(upperInstruction))
+      {
+        throw runtime_error("E bit cannot be set in an E-bit delay slot.");
+      }
 
       processUpperInstruction(upperInstruction);
       microMemPC = processLowerInstruction(lowerInstruction);
@@ -268,10 +275,21 @@ bool VPU::tick()
         0
       });
 
-      if (endBitSet(upperInstruction) || haltBitSet(upperInstruction))
+      if (haltBitSet(upperInstruction))
       {
+        endDelaySlotPending = false;
         terminationRequested = true;
-        haltAfterDrain = haltBitSet(upperInstruction);
+        haltAfterDrain = true;
+      }
+      else if (executingEndDelaySlot)
+      {
+        endDelaySlotPending = false;
+        terminationRequested = true;
+      }
+      else if (endBitSet(upperInstruction))
+      {
+        endDelaySlotPending = true;
+        haltAfterDrain = false;
       }
     }
     else

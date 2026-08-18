@@ -99,6 +99,7 @@ TEST_CASE("VPU Debug Execution Tests")
     std::vector<uint8_t> instructions;
     appendInstructionPair(&instructions, 0x30);
     appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
     vpu.uploadMicroInstructions(instructions);
 
     vpu.startMicroMode(8);
@@ -132,6 +133,7 @@ TEST_CASE("VPU Debug Execution Tests")
       &instructions,
       addInstruction(VPU_REGISTER_VF01, VPU_REGISTER_VF03, VPU_REGISTER_VF04));
     appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
     vpu.uploadMicroInstructions(instructions);
     vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
       events.push_back(event);
@@ -174,6 +176,7 @@ TEST_CASE("VPU Debug Execution Tests")
       addInstruction(VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01),
       0);
     appendInstructionPair(&terminatingProgram, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&terminatingProgram, VPU_NOP);
     vpu.uploadMicroInstructions(invalidProgram);
     vpu.startMicroMode();
 

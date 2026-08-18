@@ -43,7 +43,7 @@ It fills a requested number of data-memory qwords with a supplied 32-bit value.
 
 ### Control Timing
 
-- [ ] Implement the one-instruction E-bit delay slot
+- [x] Implement the one-instruction E-bit delay slot
 - [ ] Verify D/T and Force Break timing independently
 - [ ] Implement branch target and delay-slot handling
 - [ ] Record the termination PC

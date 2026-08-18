@@ -47,6 +47,8 @@ TEST_CASE("VPU Microinstruction Tests")
       std::vector<uint8_t> instructions;
       appendInstruction(&instructions, VPU_E_BIT | VPU_ADD);
       appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
 
       vpu.uploadMicroInstructions(instructions);
       REQUIRE_NOTHROW(vpu.initMicroMode());
@@ -56,6 +58,8 @@ TEST_CASE("VPU Microinstruction Tests")
     {
       std::vector<uint8_t> instructions;
       appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_NOP);
       appendInstruction(&instructions, VPU_LOWER_NOP);
 
       vpu.uploadMicroInstructions(instructions);

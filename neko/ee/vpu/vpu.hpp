@@ -90,6 +90,7 @@ class VPU : public PipelineHandler
     uint32_t cycles;
     uint8_t mode;
     uint16_t microMemPC;
+    bool endDelaySlotPending;
     bool terminationRequested;
     bool haltAfterDrain;
     VPUTraceCallback traceCallback;

@@ -16,32 +16,32 @@ TEST_CASE("VPU Upper Microinstruction Stall Tests")
     addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS);
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF05, VPU_REGISTER_VF04, 0, VPU_ABS);
 
-    REQUIRE(vpu.elapsedCycles() == 11);
+    REQUIRE(vpu.elapsedCycles() == 12);
     REQUIRE(vpu.getState() == VPU_STATE_READY);
   }
 
-  SECTION("If ABS stalls three times in a row, the process takes 19 cycles.")
+  SECTION("If ABS stalls three times in a row, the process takes 22 cycles.")
   {
     addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_ABS);
     addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF05, VPU_REGISTER_VF04, 0, VPU_ABS);
     addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, 0, VPU_ABS);
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, 0, VPU_ABS);
 
-    REQUIRE(vpu.elapsedCycles() == 19);
+    REQUIRE(vpu.elapsedCycles() == 22);
   }
 
   SECTION("An ADD after ABS causes a stall if the second ADD source vector is the output vector of the ABS instruction.")
   {
     addSingleUpperInstruction(&instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF06, VPU_REGISTER_VF05, 0, VPU_ABS);
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF09, VPU_REGISTER_VF06, VPU_REGISTER_VF04, VPU_ADD);
-    REQUIRE(vpu.elapsedCycles() == 11);
+    REQUIRE(vpu.elapsedCycles() == 12);
   }
 
   SECTION("ADDx after ADD causes a stall if the source vector's broadcast field is in use by the ADD instruction's output.")
   {
     addSingleUpperInstruction(&instructions, 0, VPU_DEST_X_BIT, VPU_REGISTER_VF06, VPU_REGISTER_VF05, VPU_REGISTER_VF08, VPU_ADD);
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF08, VPU_REGISTER_VF03, VPU_REGISTER_VF04, VPU_ADDx);
-    REQUIRE(vpu.elapsedCycles() == 11);
+    REQUIRE(vpu.elapsedCycles() == 12);
   }
 
   SECTION("Overlapping pipelines preserve writes to different destination lanes")

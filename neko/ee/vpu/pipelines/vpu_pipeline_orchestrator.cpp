@@ -70,11 +70,6 @@ void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
   {
     Pipeline * checkPipeline = *iter;
 
-    if (checkPipeline->isComplete())
-    {
-      continue;
-    }
-
     const bool srcReg1Hazard =
       pipeline->srcReg1FieldMask != 0 &&
       pipeline->srcReg1 == checkPipeline->destReg &&

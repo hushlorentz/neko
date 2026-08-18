@@ -18,6 +18,8 @@ namespace
     std::vector<uint8_t> instructions;
     appendInstruction(&instructions, terminationBit | VPU_NOP);
     appendInstruction(&instructions, VPU_LOWER_NOP);
+    appendInstruction(&instructions, VPU_NOP);
+    appendInstruction(&instructions, VPU_LOWER_NOP);
     vpu->uploadMicroInstructions(instructions);
     vpu->initMicroMode();
   }
@@ -34,6 +36,8 @@ namespace
 
     std::vector<uint8_t> instructions;
     appendInstruction(&instructions, instruction);
+    appendInstruction(&instructions, VPU_LOWER_NOP);
+    appendInstruction(&instructions, VPU_NOP);
     appendInstruction(&instructions, VPU_LOWER_NOP);
     vpu->uploadMicroInstructions(instructions);
     vpu->initMicroMode();
@@ -141,6 +145,98 @@ TEST_CASE("VPU State Tests")
       REQUIRE(vpu.getState() == VPU_STATE_READY);
     }
 
+    SECTION("The instruction pair after E executes before termination")
+    {
+      std::vector<uint8_t> instructions;
+      uint32_t delayInstruction =
+        VPU_DEST_ALL_FIELDS |
+        (VPU_REGISTER_VF01 << VPU_FT_REG_SHIFT) |
+        (VPU_REGISTER_VF02 << VPU_FS_REG_SHIFT) |
+        (VPU_REGISTER_VF03 << VPU_FD_REG_SHIFT) |
+        VPU_ADD;
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, delayInstruction);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 3, 4);
+      vpu.loadFPRegister(VPU_REGISTER_VF02, 10, 20, 30, 40);
+      vpu.uploadMicroInstructions(instructions);
+
+      vpu.initMicroMode();
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->x == 11);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->y == 22);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->z == 33);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->w == 44);
+      REQUIRE(vpu.programCounter() == 16);
+      REQUIRE(vpu.getState() == VPU_STATE_READY);
+    }
+
+    SECTION("Instructions after the E delay slot are not fetched")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, 0x30);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.uploadMicroInstructions(instructions);
+
+      REQUIRE_NOTHROW(vpu.initMicroMode());
+      REQUIRE(vpu.programCounter() == 16);
+      REQUIRE(vpu.getState() == VPU_STATE_READY);
+    }
+
+    SECTION("A dependent E delay-slot instruction completes after its stall")
+    {
+      std::vector<uint8_t> instructions;
+      uint32_t terminatingInstruction =
+        VPU_E_BIT |
+        VPU_DEST_ALL_FIELDS |
+        (VPU_REGISTER_VF01 << VPU_FT_REG_SHIFT) |
+        (VPU_REGISTER_VF02 << VPU_FS_REG_SHIFT) |
+        (VPU_REGISTER_VF03 << VPU_FD_REG_SHIFT) |
+        VPU_ADD;
+      uint32_t delayInstruction =
+        VPU_DEST_ALL_FIELDS |
+        (VPU_REGISTER_VF03 << VPU_FT_REG_SHIFT) |
+        (VPU_REGISTER_VF04 << VPU_FS_REG_SHIFT) |
+        (VPU_REGISTER_VF05 << VPU_FD_REG_SHIFT) |
+        VPU_ADD;
+      appendInstruction(&instructions, terminatingInstruction);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, delayInstruction);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 3, 4);
+      vpu.loadFPRegister(VPU_REGISTER_VF02, 10, 20, 30, 40);
+      vpu.loadFPRegister(VPU_REGISTER_VF04, 100, 200, 300, 400);
+      vpu.uploadMicroInstructions(instructions);
+
+      vpu.initMicroMode();
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->x == 111);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->y == 222);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->z == 333);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->w == 444);
+      REQUIRE(vpu.getState() == VPU_STATE_READY);
+    }
+
+    SECTION("E cannot be set again in the E delay slot")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.uploadMicroInstructions(instructions);
+
+      REQUIRE_THROWS_WITH(
+        vpu.initMicroMode(),
+        "E bit cannot be set in an E-bit delay slot.");
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    }
+
     SECTION("VPU transitions from Run to Ready at macro instruction execution termination")
     {
       //WARN("Add this test");
@@ -150,6 +246,20 @@ TEST_CASE("VPU State Tests")
     {
       runTerminatingInstruction(&vpu, VPU_D_BIT);
 
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    }
+
+    SECTION("D-bit termination does not execute an E-style delay slot")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_D_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, 0x30);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.uploadMicroInstructions(instructions);
+
+      REQUIRE_NOTHROW(vpu.initMicroMode());
+      REQUIRE(vpu.programCounter() == 8);
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 
