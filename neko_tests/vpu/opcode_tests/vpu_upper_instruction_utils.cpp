@@ -39,6 +39,6 @@ void executeSingleUpperInstruction(VPU * vpu, vector<uint8_t> * instructions, ui
 {
   addSingleUpperInstruction(instructions, VPU_E_BIT | bitFlags, destFlags, ftRegID, fsRegID, fdRegID, opCode);
   addNOPFullInstructionToVector(instructions);
-  vpu->uploadMicroInstructions(instructions);
+  vpu->uploadMicroInstructions(*instructions);
   vpu->initMicroMode();
 }

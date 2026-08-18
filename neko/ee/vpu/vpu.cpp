@@ -6,7 +6,8 @@
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
-#define MEMORY_SIZE 0x3fff
+#define VU0_MEMORY_SIZE 0x1000
+#define VU1_MEMORY_SIZE 0x4000
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
@@ -18,7 +19,7 @@ uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU
 
 using namespace std;
 
-VPU::VPU() : clippingFlags(0), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
+VPU::VPU(VPUType type) : clippingFlags(0), type(type), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
 {
   initMemory();
   initFPRegisters();
@@ -29,8 +30,22 @@ VPU::VPU() : clippingFlags(0), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_
 
 void VPU::initMemory()
 {
-  microMem.resize(MEMORY_SIZE);
-  vuMem.resize(MEMORY_SIZE);
+  size_t memorySize;
+
+  switch (type)
+  {
+    case VPUType::VU0:
+      memorySize = VU0_MEMORY_SIZE;
+      break;
+    case VPUType::VU1:
+      memorySize = VU1_MEMORY_SIZE;
+      break;
+    default:
+      throw invalid_argument("Unknown VU type.");
+  }
+
+  microMem.resize(memorySize);
+  vuMem.resize(memorySize);
 }
 
 void VPU::initFPRegisters()
@@ -65,6 +80,21 @@ void VPU::initPipelineOrchestrator()
 uint8_t VPU::getState()
 {
   return state;
+}
+
+VPUType VPU::unitType() const
+{
+  return type;
+}
+
+size_t VPU::microMemorySize() const
+{
+  return microMem.size();
+}
+
+size_t VPU::dataMemorySize() const
+{
+  return vuMem.size();
 }
 
 const FPRegister * VPU::fpRegisterValue(int registerID) const
@@ -130,17 +160,55 @@ void VPU::setMode(uint8_t newMode)
   mode = newMode;
 }
 
-void VPU::uploadMicroInstructions(vector<uint8_t> * instructions)
+void VPU::uploadMicroInstructions(const vector<uint8_t> &instructions)
 {
-  copy(instructions->begin(), instructions->end(), microMem.begin());
+  if (instructions.size() % 8 != 0)
+  {
+    throw invalid_argument("Microprogram size must be a multiple of 8 bytes.");
+  }
+  if (instructions.size() > microMem.size())
+  {
+    throw out_of_range("Microprogram exceeds VU micro memory.");
+  }
+
+  copy(instructions.begin(), instructions.end(), microMem.begin());
   microMemPC = 0;
+}
+
+void VPU::writeDataMemory(size_t address, const vector<uint8_t> &data)
+{
+  if (address > vuMem.size() || data.size() > vuMem.size() - address)
+  {
+    throw out_of_range("VU data-memory write is outside memory.");
+  }
+
+  copy(data.begin(), data.end(), vuMem.begin() + address);
+}
+
+vector<uint8_t> VPU::readDataMemory(size_t address, size_t byteCount) const
+{
+  if (address > vuMem.size() || byteCount > vuMem.size() - address)
+  {
+    throw out_of_range("VU data-memory read is outside memory.");
+  }
+
+  return vector<uint8_t>(vuMem.begin() + address, vuMem.begin() + address + byteCount);
 }
 
 void VPU::initMicroMode()
 {
   mode = VPU_MODE_MICRO;
   state = VPU_STATE_RUN;
-  executeMicroInstructions();
+
+  try
+  {
+    executeMicroInstructions();
+  }
+  catch (...)
+  {
+    state = VPU_STATE_STOP;
+    throw;
+  }
 }
 
 void VPU::executeMicroInstructions()
@@ -251,14 +319,19 @@ uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
 
 uint16_t VPU::opCodeFromInstruction(uint32_t instruction)
 {
-  if (type3OpCodes.find(instruction & VPU_TYPE3_MASK) != type3OpCodes.end())
+  uint16_t type3OpCode = instruction & VPU_TYPE3_MASK;
+  if (type3OpCodes.find(type3OpCode) != type3OpCodes.end())
   {
-    return instruction & VPU_TYPE3_MASK;
+    return type3OpCode;
   }
-  else // if (type1OpCodes.find(instruction & VPU_TYPE1_MASK) != type1OpCodes.end())
+
+  uint16_t type1OpCode = instruction & VPU_TYPE1_MASK;
+  if (type1OpCodes.find(type1OpCode) != type1OpCodes.end())
   {
-    return instruction & VPU_TYPE1_MASK;
+    return type1OpCode;
   }
+
+  throw runtime_error("Unsupported VU upper instruction.");
 }
 
 uint8_t VPU::regFromInstruction(uint32_t instruction, uint8_t shift)

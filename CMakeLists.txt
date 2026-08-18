@@ -39,6 +39,7 @@ add_executable(neko_tests
     neko_tests/math/floating_point_tests.cpp
     neko_tests/vpu/vpu_flag_tests.cpp
     neko_tests/vpu/vpu_fp_calculation_tests.cpp
+    neko_tests/vpu/vpu_memory_tests.cpp
     neko_tests/vpu/vpu_microinstruction_tests.cpp
     neko_tests/vpu/vpu_pipeline_tests.cpp
     neko_tests/vpu/vpu_state_tests.cpp

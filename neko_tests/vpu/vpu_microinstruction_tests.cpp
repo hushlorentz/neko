@@ -48,7 +48,7 @@ TEST_CASE("VPU Microinstruction Tests")
       appendInstruction(&instructions, VPU_E_BIT | VPU_ADD);
       appendInstruction(&instructions, VPU_LOWER_NOP);
 
-      vpu.uploadMicroInstructions(&instructions);
+      vpu.uploadMicroInstructions(instructions);
       REQUIRE_NOTHROW(vpu.initMicroMode());
     }
 
@@ -58,7 +58,7 @@ TEST_CASE("VPU Microinstruction Tests")
       appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
       appendInstruction(&instructions, VPU_LOWER_NOP);
 
-      vpu.uploadMicroInstructions(&instructions);
+      vpu.uploadMicroInstructions(instructions);
       vpu.initMicroMode();
 
       REQUIRE(vpu.getState() != VPU_STATE_RUN);
@@ -71,7 +71,19 @@ TEST_CASE("VPU Microinstruction Tests")
       appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
       appendInstruction(&instructions, 0);
 
-      vpu.uploadMicroInstructions(&instructions);
+      vpu.uploadMicroInstructions(instructions);
       REQUIRE_THROWS_WITH(vpu.initMicroMode(), "Unsupported VU lower instruction.");
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    }
+
+    SECTION("Unsupported upper instructions are rejected rather than entering the pipeline")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_E_BIT | 0x30);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+
+      vpu.uploadMicroInstructions(instructions);
+      REQUIRE_THROWS_WITH(vpu.initMicroMode(), "Unsupported VU upper instruction.");
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 }

@@ -1,6 +1,8 @@
 #ifndef VPU_HPP
 #define VPU_HPP
 
+#include <cstddef>
+#include <cstdint>
 #include <set>
 #include <vector>
 
@@ -16,15 +18,22 @@
 
 using namespace std;
 
+enum class VPUType : uint8_t
+{
+  VU0,
+  VU1
+};
+
 class VPU : public PipelineHandler
 {
   public:
-    VPU();
-    vector<uint8_t> microMem;
-    vector<uint8_t> vuMem;
+    explicit VPU(VPUType type = VPUType::VU0);
     FPRegister accumulator;
     uint64_t clippingFlags;
 
+    VPUType unitType() const;
+    size_t microMemorySize() const;
+    size_t dataMemorySize() const;
     uint8_t getState();
     const FPRegister *fpRegisterValue(int registerID) const;
     uint16_t intRegisterValue(int registerID);
@@ -35,7 +44,9 @@ class VPU : public PipelineHandler
     void resetCycles();
     void setMode(uint8_t newMode);
     void initMicroMode();
-    void uploadMicroInstructions(vector<uint8_t> * instructions);
+    void uploadMicroInstructions(const vector<uint8_t> &instructions);
+    void writeDataMemory(size_t address, const vector<uint8_t> &data);
+    vector<uint8_t> readDataMemory(size_t address, size_t byteCount) const;
     virtual void pipelineStarted(Pipeline * p);
     virtual void pipelineFinished(Pipeline * p);
     bool hasMACFlag(uint16_t flag);
@@ -44,6 +55,9 @@ class VPU : public PipelineHandler
     void loadQRegister(double value);
     void loadAccumulator(double x, double y, double z, double w);
   private:
+    VPUType type;
+    vector<uint8_t> microMem;
+    vector<uint8_t> vuMem;
     uint8_t state;
     uint32_t cycles;
     uint8_t mode;

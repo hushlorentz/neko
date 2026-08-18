@@ -18,7 +18,7 @@ namespace
     std::vector<uint8_t> instructions;
     appendInstruction(&instructions, terminationBit | VPU_NOP);
     appendInstruction(&instructions, VPU_LOWER_NOP);
-    vpu->uploadMicroInstructions(&instructions);
+    vpu->uploadMicroInstructions(instructions);
     vpu->initMicroMode();
   }
 
@@ -35,7 +35,7 @@ namespace
     std::vector<uint8_t> instructions;
     appendInstruction(&instructions, instruction);
     appendInstruction(&instructions, VPU_LOWER_NOP);
-    vpu->uploadMicroInstructions(&instructions);
+    vpu->uploadMicroInstructions(instructions);
     vpu->initMicroMode();
   }
 }
