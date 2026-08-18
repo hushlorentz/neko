@@ -19,7 +19,7 @@ uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU
 
 using namespace std;
 
-VPU::VPU(VPUType type) : clippingFlags(0), type(type), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), stepThrough(true), microMemPC(0), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
+VPU::VPU(VPUType type) : clippingFlags(0), type(type), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), microMemPC(0), terminationRequested(false), haltAfterDrain(false), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
 {
   initMemory();
   initFPRegisters();
@@ -77,9 +77,14 @@ void VPU::initPipelineOrchestrator()
   orchestrator.setPipelineHandler(this);
 }
 
-uint8_t VPU::getState()
+uint8_t VPU::getState() const
 {
   return state;
+}
+
+uint16_t VPU::programCounter() const
+{
+  return microMemPC;
 }
 
 VPUType VPU::unitType() const
@@ -102,7 +107,7 @@ const FPRegister * VPU::fpRegisterValue(int registerID) const
   return &fpRegisters[registerID];
 }
 
-uint16_t VPU::intRegisterValue(int registerID)
+uint16_t VPU::intRegisterValue(int registerID) const
 {
   return intRegisters[registerID];
 }
@@ -150,7 +155,7 @@ void VPU::resetCycles()
   cycles = 0;
 }
 
-uint32_t VPU::elapsedCycles()
+uint32_t VPU::elapsedCycles() const
 {
   return cycles;
 }
@@ -197,28 +202,45 @@ vector<uint8_t> VPU::readDataMemory(size_t address, size_t byteCount) const
 
 void VPU::initMicroMode()
 {
+  startMicroMode();
+  executeMicroInstructions();
+}
+
+void VPU::startMicroMode(uint16_t startAddress)
+{
+  if (state == VPU_STATE_RUN)
+  {
+    throw logic_error("VPU is already running.");
+  }
+  if (startAddress % 8 != 0)
+  {
+    throw invalid_argument("VU start address must be 8-byte aligned.");
+  }
+  if (startAddress > microMem.size() - 8)
+  {
+    throw out_of_range("VU start address is outside micro memory.");
+  }
+
+  orchestrator.reset();
   mode = VPU_MODE_MICRO;
+  microMemPC = startAddress;
+  terminationRequested = false;
+  haltAfterDrain = false;
   state = VPU_STATE_RUN;
+}
+
+bool VPU::tick()
+{
+  if (state != VPU_STATE_RUN)
+  {
+    throw logic_error("VPU must be running before it can tick.");
+  }
+
+  bool instructionIssued = false;
 
   try
   {
-    executeMicroInstructions();
-  }
-  catch (...)
-  {
-    state = VPU_STATE_STOP;
-    throw;
-  }
-}
-
-void VPU::executeMicroInstructions()
-{
-  bool sawTerminationBit = false;
-  bool haltAfterDrain = false;
-
-  while (state == VPU_STATE_RUN)
-  {
-    if (sawTerminationBit)
+    if (terminationRequested)
     {
       if (!orchestrator.hasNext())
       {
@@ -227,21 +249,106 @@ void VPU::executeMicroInstructions()
     }
     else if (!orchestrator.stalling)
     {
+      uint16_t instructionAddress = microMemPC;
       uint32_t upperInstruction = nextUpperInstruction();
       uint32_t lowerInstruction = nextLowerInstruction();
 
       processUpperInstruction(upperInstruction);
       microMemPC = processLowerInstruction(lowerInstruction);
+      instructionIssued = true;
+
+      emitTrace({
+        VPUTraceEventType::InstructionIssued,
+        cycles,
+        instructionAddress,
+        upperInstruction,
+        lowerInstruction,
+        0,
+        0,
+        0
+      });
 
       if (endBitSet(upperInstruction) || haltBitSet(upperInstruction))
       {
-        sawTerminationBit = true;
+        terminationRequested = true;
         haltAfterDrain = haltBitSet(upperInstruction);
       }
+    }
+    else
+    {
+      emitTrace({
+        VPUTraceEventType::PipelineStall,
+        cycles,
+        microMemPC,
+        0,
+        0,
+        0,
+        0,
+        0
+      });
     }
 
     orchestrator.update();
     cycles++;
+  }
+  catch (...)
+  {
+    state = VPU_STATE_STOP;
+    throw;
+  }
+
+  return instructionIssued;
+}
+
+bool VPU::stepInstruction()
+{
+  if (state != VPU_STATE_RUN)
+  {
+    throw logic_error("VPU must be running before it can step.");
+  }
+
+  while (state == VPU_STATE_RUN)
+  {
+    if (tick())
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+uint32_t VPU::run(uint32_t maxCycles)
+{
+  uint32_t executedCycles = 0;
+
+  while (state == VPU_STATE_RUN && executedCycles < maxCycles)
+  {
+    tick();
+    executedCycles++;
+  }
+
+  return executedCycles;
+}
+
+void VPU::executeMicroInstructions()
+{
+  while (state == VPU_STATE_RUN)
+  {
+    tick();
+  }
+}
+
+void VPU::setTraceCallback(VPUTraceCallback callback)
+{
+  traceCallback = callback;
+}
+
+void VPU::emitTrace(const VPUTraceEvent &event) const
+{
+  if (traceCallback)
+  {
+    traceCallback(event);
   }
 }
 
@@ -295,7 +402,7 @@ void VPU::processUpperInstruction(uint32_t upperInstruction)
   uint8_t srcReg1Mask = srcReg1MaskFromOpCode(opCode, fieldMask);
   uint8_t srcReg2Mask = srcReg2MaskFromOpCode(opCode, fieldMask);
 
-  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, srcReg1Mask, srcReg2Mask);
+  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, srcReg1Mask, srcReg2Mask, microMemPC);
 }
 
 uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
@@ -1003,6 +1110,17 @@ void VPU::pipelineFinished(Pipeline * p)
       setFlags(destReg, FP_REGISTER_NO_FIELDS);
       break;
   }
+
+  emitTrace({
+    VPUTraceEventType::PipelineWriteback,
+    cycles,
+    p->instructionAddress,
+    0,
+    0,
+    p->opCode,
+    p->destReg,
+    p->destFieldMask
+  });
 }
 
 void VPU::handleMADDInstruction(Pipeline * p)

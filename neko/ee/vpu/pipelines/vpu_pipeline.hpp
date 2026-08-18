@@ -25,9 +25,10 @@ class Pipeline
     uint8_t destFieldMask;
     uint8_t srcReg1FieldMask;
     uint8_t srcReg2FieldMask;
+    uint16_t instructionAddress;
 
     Pipeline();
-    void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t destMask, uint8_t s1Mask, uint8_t s2Mask);
+    void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t destMask, uint8_t s1Mask, uint8_t s2Mask, uint16_t address);
     void setFPRegisterResult(FPRegister * reg);
     void setIntResult(int i);
     void execute();

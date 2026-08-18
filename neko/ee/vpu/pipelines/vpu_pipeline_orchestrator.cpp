@@ -14,6 +14,8 @@ PipelineOrchestrator::PipelineOrchestrator() : pipelineHandler(NULL), stalling(f
 
 PipelineOrchestrator::~PipelineOrchestrator()
 {
+  reset();
+
   while (!pool.empty())
   {
     Pipeline *pipeline = pool.front();
@@ -21,6 +23,13 @@ PipelineOrchestrator::~PipelineOrchestrator()
 
     pool.pop_front();
   }
+}
+
+void PipelineOrchestrator::reset()
+{
+  pool.splice(pool.end(), executing);
+  pool.splice(pool.end(), waiting);
+  stalling = false;
 }
 
 void PipelineOrchestrator::update()
@@ -114,7 +123,7 @@ bool PipelineOrchestrator::hasNext()
   return executing.size() > 0 || waiting.size() > 0;
 }
 
-void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask)
+void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress)
 {
   if (pool.size() == 0)
   {
@@ -124,7 +133,7 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, u
   Pipeline * pipeline = pool.front();
   pool.pop_front();
 
-  pipeline->configure(pipelineType, opCode, srcReg1, srcReg2, destReg, destFieldMask, srcReg1FieldMask, srcReg2FieldMask);
+  pipeline->configure(pipelineType, opCode, srcReg1, srcReg2, destReg, destFieldMask, srcReg1FieldMask, srcReg2FieldMask, instructionAddress);
   waiting.push_back(pipeline);
 }
 

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <set>
 #include <vector>
 
@@ -24,6 +25,27 @@ enum class VPUType : uint8_t
   VU1
 };
 
+enum class VPUTraceEventType : uint8_t
+{
+  InstructionIssued,
+  PipelineStall,
+  PipelineWriteback
+};
+
+struct VPUTraceEvent
+{
+  VPUTraceEventType type;
+  uint32_t cycle;
+  uint16_t instructionAddress;
+  uint32_t upperInstruction;
+  uint32_t lowerInstruction;
+  uint16_t opCode;
+  uint8_t destinationRegister;
+  uint8_t destinationFieldMask;
+};
+
+using VPUTraceCallback = function<void(const VPUTraceEvent &)>;
+
 class VPU : public PipelineHandler
 {
   public:
@@ -34,16 +56,22 @@ class VPU : public PipelineHandler
     VPUType unitType() const;
     size_t microMemorySize() const;
     size_t dataMemorySize() const;
-    uint8_t getState();
+    uint8_t getState() const;
+    uint16_t programCounter() const;
     const FPRegister *fpRegisterValue(int registerID) const;
-    uint16_t intRegisterValue(int registerID);
+    uint16_t intRegisterValue(int registerID) const;
     void loadFPRegister(int registerID, double x, double y, double z, double w);
     void loadIntFPRegister(int registerID, int32_t x, int32_t y, int32_t z, int32_t w);
     void loadIntRegister(int registerID, int value);
-    uint32_t elapsedCycles();
+    uint32_t elapsedCycles() const;
     void resetCycles();
     void setMode(uint8_t newMode);
     void initMicroMode();
+    void startMicroMode(uint16_t startAddress = 0);
+    bool tick();
+    bool stepInstruction();
+    uint32_t run(uint32_t maxCycles);
+    void setTraceCallback(VPUTraceCallback callback);
     void uploadMicroInstructions(const vector<uint8_t> &instructions);
     void writeDataMemory(size_t address, const vector<uint8_t> &data);
     vector<uint8_t> readDataMemory(size_t address, size_t byteCount) const;
@@ -61,8 +89,10 @@ class VPU : public PipelineHandler
     uint8_t state;
     uint32_t cycles;
     uint8_t mode;
-    bool stepThrough;
     uint16_t microMemPC;
+    bool terminationRequested;
+    bool haltAfterDrain;
+    VPUTraceCallback traceCallback;
     vector<FPRegister> fpRegisters;
     vector<uint16_t> intRegisters;
     double iRegister;
@@ -84,7 +114,7 @@ class VPU : public PipelineHandler
     void initOpCodeSets();
     void initPipelineOrchestrator();
     void executeMicroInstructions();
-    void updateMicroInstructions();
+    void emitTrace(const VPUTraceEvent &event) const;
     bool endBitSet(uint32_t instruction);
     bool haltBitSet(uint32_t instruction);
     uint32_t nextUpperInstruction();

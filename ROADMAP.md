@@ -34,12 +34,12 @@ It fills a requested number of data-memory qwords with a supplied 32-bit value.
 
 ### Execution Control
 
-- [ ] Refactor the run loop around one-cycle `tick()`
-- [ ] Add instruction-pair stepping
-- [ ] Add bounded execution to detect infinite programs
-- [ ] Expose the current PC and configurable start address
-- [ ] Add optional trace events for issue, stalls, and writeback
-- [ ] Keep debugging interfaces read-only unless mutation is explicit
+- [x] Refactor the run loop around one-cycle `tick()`
+- [x] Add instruction-pair stepping
+- [x] Add bounded execution to detect infinite programs
+- [x] Expose the current PC and configurable start address
+- [x] Add optional trace events for issue, stalls, and writeback
+- [x] Keep debugging interfaces read-only unless mutation is explicit
 
 ### Control Timing
 
