@@ -29,7 +29,8 @@ enum class VPUTraceEventType : uint8_t
 {
   InstructionIssued,
   PipelineStall,
-  PipelineWriteback
+  PipelineWriteback,
+  ForceBreak
 };
 
 struct VPUTraceEvent
@@ -60,6 +61,11 @@ class VPU : public PipelineHandler
     uint16_t programCounter() const;
     bool hasTerminationPosition() const;
     uint16_t terminationPosition() const;
+    bool dBitEnabled() const;
+    bool tBitEnabled() const;
+    void setDBitEnabled(bool enabled);
+    void setTBitEnabled(bool enabled);
+    void forceBreak();
     const FPRegister *fpRegisterValue(int registerID) const;
     uint16_t intRegisterValue(int registerID) const;
     void loadFPRegister(int registerID, double x, double y, double z, double w);
@@ -97,6 +103,8 @@ class VPU : public PipelineHandler
     bool endDelaySlotPending = false;
     bool terminationRequested = false;
     bool haltAfterDrain = false;
+    bool dEnabled = false;
+    bool tEnabled = false;
     VPUTraceCallback traceCallback;
     vector<FPRegister> fpRegisters;
     vector<uint16_t> intRegisters;

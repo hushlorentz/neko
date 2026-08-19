@@ -45,8 +45,8 @@ It fills a requested number of data-memory qwords with a supplied 32-bit value.
 
 - [x] Implement the one-instruction E-bit delay slot
 - [x] Record the termination PC
-- [ ] Verify D/T timing and enable behavior
-- [ ] Implement Force Break and verify its state and pipeline behavior
+- [x] Verify D/T timing and enable behavior
+- [x] Implement Force Break and verify its state and pipeline behavior
 
 ### Manual Timing Conformance Pass
 

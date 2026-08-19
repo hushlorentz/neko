@@ -102,6 +102,52 @@ uint16_t VPU::terminationPosition() const
   return terminationPositionCounter;
 }
 
+bool VPU::dBitEnabled() const
+{
+  return dEnabled;
+}
+
+bool VPU::tBitEnabled() const
+{
+  return tEnabled;
+}
+
+void VPU::setDBitEnabled(bool enabled)
+{
+  dEnabled = enabled;
+}
+
+void VPU::setTBitEnabled(bool enabled)
+{
+  tEnabled = enabled;
+}
+
+void VPU::forceBreak()
+{
+  if (state == VPU_STATE_STOP)
+  {
+    return;
+  }
+
+  orchestrator.reset();
+  endDelaySlotPending = false;
+  terminationRequested = false;
+  haltAfterDrain = false;
+  terminationPositionValid = false;
+  state = VPU_STATE_STOP;
+
+  emitTrace({
+    VPUTraceEventType::ForceBreak,
+    cycles,
+    microMemPC,
+    0,
+    0,
+    0,
+    0,
+    0
+  });
+}
+
 VPUType VPU::unitType() const
 {
   return type;
@@ -681,7 +727,9 @@ bool VPU::endBitSet(uint32_t instruction)
 
 bool VPU::haltBitSet(uint32_t instruction)
 {
-  return hasFlag(instruction, VPU_D_BIT) || hasFlag(instruction, VPU_T_BIT);
+  return
+    (dEnabled && hasFlag(instruction, VPU_D_BIT)) ||
+    (tEnabled && hasFlag(instruction, VPU_T_BIT));
 }
 
 void VPU::updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p)

@@ -103,6 +103,12 @@ TEST_CASE("VPU State Tests")
       REQUIRE(vpu.getState() == VPU_STATE_READY);
     }
 
+    SECTION("D and T halts are disabled initially")
+    {
+      REQUIRE_FALSE(vpu.dBitEnabled());
+      REQUIRE_FALSE(vpu.tBitEnabled());
+    }
+
     SECTION("TPC is indeterminate before the first termination")
     {
       REQUIRE_FALSE(vpu.hasTerminationPosition());
@@ -133,7 +139,10 @@ TEST_CASE("VPU State Tests")
 
     SECTION("VPU transitions from Ready to Stop when a ForceBreak occurs")
     {
-      //WARN("Add this test");
+      vpu.forceBreak();
+
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+      REQUIRE_FALSE(vpu.hasTerminationPosition());
     }
 
     SECTION("VPU cannot receive micro subroutine startup from the EE core while in Ready state")
@@ -255,10 +264,28 @@ TEST_CASE("VPU State Tests")
 
     SECTION("VPU transitions from Run to Stop when a D bit halt occurs")
     {
+      vpu.setDBitEnabled(true);
       runTerminatingInstruction(&vpu, VPU_D_BIT);
 
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
       REQUIRE(vpu.terminationPosition() == 1);
+    }
+
+    SECTION("A disabled D bit does not halt execution")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_D_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.uploadMicroInstructions(instructions);
+
+      vpu.initMicroMode();
+
+      REQUIRE(vpu.getState() == VPU_STATE_READY);
+      REQUIRE(vpu.terminationPosition() == 3);
     }
 
     SECTION("D-bit termination does not execute an E-style delay slot")
@@ -269,6 +296,7 @@ TEST_CASE("VPU State Tests")
       appendInstruction(&instructions, 0x30);
       appendInstruction(&instructions, VPU_LOWER_NOP);
       vpu.uploadMicroInstructions(instructions);
+      vpu.setDBitEnabled(true);
 
       REQUIRE_NOTHROW(vpu.initMicroMode());
       REQUIRE(vpu.programCounter() == 8);
@@ -278,23 +306,63 @@ TEST_CASE("VPU State Tests")
 
     SECTION("VPU transitions from Run to Stop when a T bit halt occurs")
     {
+      vpu.setTBitEnabled(true);
       runTerminatingInstruction(&vpu, VPU_T_BIT);
 
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
       REQUIRE(vpu.terminationPosition() == 1);
     }
 
+    SECTION("A disabled T bit does not halt execution")
+    {
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_T_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.uploadMicroInstructions(instructions);
+
+      vpu.initMicroMode();
+
+      REQUIRE(vpu.getState() == VPU_STATE_READY);
+      REQUIRE(vpu.terminationPosition() == 3);
+    }
+
     SECTION("A halt bit takes priority when E and D are set together")
     {
+      vpu.setDBitEnabled(true);
       runTerminatingInstruction(&vpu, VPU_E_BIT | VPU_D_BIT);
 
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
       REQUIRE(vpu.terminationPosition() == 1);
     }
 
+    SECTION("A disabled D bit does not override E termination")
+    {
+      runTerminatingInstruction(&vpu, VPU_E_BIT | VPU_D_BIT);
+
+      REQUIRE(vpu.getState() == VPU_STATE_READY);
+      REQUIRE(vpu.terminationPosition() == 2);
+    }
+
     SECTION("VPU transitions from Run to Stop when a ForceBreak occurs")
     {
-      //WARN("Add this test");
+      std::vector<uint8_t> instructions;
+      appendInstruction(&instructions, VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstruction(&instructions, VPU_NOP);
+      appendInstruction(&instructions, VPU_LOWER_NOP);
+      vpu.uploadMicroInstructions(instructions);
+      vpu.startMicroMode();
+      vpu.tick();
+
+      vpu.forceBreak();
+
+      REQUIRE(vpu.getState() == VPU_STATE_STOP);
+      REQUIRE(vpu.programCounter() == 8);
+      REQUIRE_FALSE(vpu.hasTerminationPosition());
     }
 
     SECTION("VPU cannot receive micro program startup from the VIF while in Stop state")

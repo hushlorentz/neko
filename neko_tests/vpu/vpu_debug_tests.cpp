@@ -220,4 +220,77 @@ TEST_CASE("VPU Debug Execution Tests")
     }
     REQUIRE(vpu.getState() == VPU_STATE_READY);
   }
+
+  SECTION("Force Break cancels in-flight pipelines and emits a trace event")
+  {
+    VPU vpu;
+    std::vector<uint8_t> runningProgram;
+    std::vector<uint8_t> terminatingProgram;
+    std::vector<VPUTraceEvent> events;
+    appendInstructionPair(
+      &runningProgram,
+      addInstruction(VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01));
+    appendInstructionPair(&runningProgram, VPU_NOP);
+    appendInstructionPair(&terminatingProgram, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&terminatingProgram, VPU_NOP);
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 100, 100, 100, 100);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 2, 3, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 10, 20, 30, 40);
+    vpu.uploadMicroInstructions(runningProgram);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.startMicroMode();
+    vpu.tick();
+
+    vpu.forceBreak();
+
+    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == 100);
+    REQUIRE_FALSE(vpu.hasTerminationPosition());
+
+    vpu.uploadMicroInstructions(terminatingProgram);
+    vpu.startMicroMode();
+    vpu.run(10);
+
+    bool sawForceBreak = false;
+    bool sawCancelledWriteback = false;
+    for (const VPUTraceEvent &event : events)
+    {
+      sawForceBreak = sawForceBreak || event.type == VPUTraceEventType::ForceBreak;
+      sawCancelledWriteback =
+        sawCancelledWriteback ||
+        (event.type == VPUTraceEventType::PipelineWriteback &&
+         event.opCode == VPU_ADD);
+    }
+
+    REQUIRE(sawForceBreak);
+    REQUIRE_FALSE(sawCancelledWriteback);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == 100);
+  }
+
+  SECTION("Force Break invalidates an existing TPC")
+  {
+    VPU vpu;
+    std::vector<uint8_t> terminatingProgram;
+    std::vector<uint8_t> runningProgram;
+    appendInstructionPair(&terminatingProgram, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&terminatingProgram, VPU_NOP);
+    appendInstructionPair(&runningProgram, VPU_NOP);
+    appendInstructionPair(&runningProgram, VPU_NOP);
+    vpu.uploadMicroInstructions(terminatingProgram);
+    vpu.initMicroMode();
+    REQUIRE(vpu.terminationPosition() == 2);
+
+    vpu.uploadMicroInstructions(runningProgram);
+    vpu.startMicroMode();
+    vpu.tick();
+    vpu.forceBreak();
+
+    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    REQUIRE_FALSE(vpu.hasTerminationPosition());
+    REQUIRE_THROWS_WITH(
+      vpu.terminationPosition(),
+      "TPC is indeterminate before termination.");
+  }
 }
