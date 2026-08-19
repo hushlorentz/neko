@@ -68,6 +68,29 @@ TEST_CASE("VPU Debug Execution Tests")
     REQUIRE(vpu.elapsedCycles() == 3);
     REQUIRE(vpu.programCounter() == 24);
     REQUIRE(vpu.getState() == VPU_STATE_RUN);
+    REQUIRE_FALSE(vpu.hasTerminationPosition());
+  }
+
+  SECTION("A paused run preserves the previous termination position")
+  {
+    VPU vpu;
+    std::vector<uint8_t> terminatingProgram;
+    std::vector<uint8_t> runningProgram;
+    appendInstructionPair(&terminatingProgram, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&terminatingProgram, VPU_NOP);
+    appendInstructionPair(&runningProgram, VPU_NOP);
+    appendInstructionPair(&runningProgram, VPU_NOP);
+    appendInstructionPair(&runningProgram, VPU_NOP);
+    vpu.uploadMicroInstructions(terminatingProgram);
+    vpu.initMicroMode();
+    REQUIRE(vpu.terminationPosition() == 2);
+
+    vpu.uploadMicroInstructions(runningProgram);
+    vpu.startMicroMode();
+    REQUIRE(vpu.run(2) == 2);
+
+    REQUIRE(vpu.getState() == VPU_STATE_RUN);
+    REQUIRE(vpu.terminationPosition() == 2);
   }
 
   SECTION("Instruction stepping waits through pipeline stalls")
@@ -107,6 +130,7 @@ TEST_CASE("VPU Debug Execution Tests")
     REQUIRE(vpu.programCounter() == 8);
     REQUIRE(vpu.run(10) < 10);
     REQUIRE(vpu.getState() == VPU_STATE_READY);
+    REQUIRE(vpu.terminationPosition() == 3);
   }
 
   SECTION("Invalid execution start addresses are rejected")

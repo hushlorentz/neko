@@ -103,6 +103,14 @@ TEST_CASE("VPU State Tests")
       REQUIRE(vpu.getState() == VPU_STATE_READY);
     }
 
+    SECTION("TPC is indeterminate before the first termination")
+    {
+      REQUIRE_FALSE(vpu.hasTerminationPosition());
+      REQUIRE_THROWS_WITH(
+        vpu.terminationPosition(),
+        "TPC is indeterminate before termination.");
+    }
+
     SECTION("VPU transitions to Ready state on reset")
     {
       //WARN("Add this test");
@@ -143,6 +151,8 @@ TEST_CASE("VPU State Tests")
       runTerminatingInstruction(&vpu, VPU_E_BIT);
 
       REQUIRE(vpu.getState() == VPU_STATE_READY);
+      REQUIRE(vpu.hasTerminationPosition());
+      REQUIRE(vpu.terminationPosition() == 2);
     }
 
     SECTION("The instruction pair after E executes before termination")
@@ -169,6 +179,7 @@ TEST_CASE("VPU State Tests")
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->z == 33);
       REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->w == 44);
       REQUIRE(vpu.programCounter() == 16);
+      REQUIRE(vpu.terminationPosition() == 2);
       REQUIRE(vpu.getState() == VPU_STATE_READY);
     }
 
@@ -247,6 +258,7 @@ TEST_CASE("VPU State Tests")
       runTerminatingInstruction(&vpu, VPU_D_BIT);
 
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
+      REQUIRE(vpu.terminationPosition() == 1);
     }
 
     SECTION("D-bit termination does not execute an E-style delay slot")
@@ -260,6 +272,7 @@ TEST_CASE("VPU State Tests")
 
       REQUIRE_NOTHROW(vpu.initMicroMode());
       REQUIRE(vpu.programCounter() == 8);
+      REQUIRE(vpu.terminationPosition() == 1);
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
 
@@ -268,6 +281,7 @@ TEST_CASE("VPU State Tests")
       runTerminatingInstruction(&vpu, VPU_T_BIT);
 
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
+      REQUIRE(vpu.terminationPosition() == 1);
     }
 
     SECTION("A halt bit takes priority when E and D are set together")
@@ -275,6 +289,7 @@ TEST_CASE("VPU State Tests")
       runTerminatingInstruction(&vpu, VPU_E_BIT | VPU_D_BIT);
 
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
+      REQUIRE(vpu.terminationPosition() == 1);
     }
 
     SECTION("VPU transitions from Run to Stop when a ForceBreak occurs")

@@ -19,7 +19,7 @@ uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU
 
 using namespace std;
 
-VPU::VPU(VPUType type) : clippingFlags(0), type(type), state(VPU_STATE_READY), cycles(0), mode(VPU_MODE_MACRO), microMemPC(0), endDelaySlotPending(false), terminationRequested(false), haltAfterDrain(false), iRegister(0), qRegister(0), rRegister(0), pRegister(0), MACFlags(0), statusFlags(0)
+VPU::VPU(VPUType type) : type(type)
 {
   initMemory();
   initFPRegisters();
@@ -85,6 +85,21 @@ uint8_t VPU::getState() const
 uint16_t VPU::programCounter() const
 {
   return microMemPC;
+}
+
+bool VPU::hasTerminationPosition() const
+{
+  return terminationPositionValid;
+}
+
+uint16_t VPU::terminationPosition() const
+{
+  if (!terminationPositionValid)
+  {
+    throw logic_error("TPC is indeterminate before termination.");
+  }
+
+  return terminationPositionCounter;
 }
 
 VPUType VPU::unitType() const
@@ -245,6 +260,8 @@ bool VPU::tick()
     {
       if (!orchestrator.hasNext())
       {
+        terminationPositionCounter = microMemPC / 8;
+        terminationPositionValid = true;
         state = haltAfterDrain ? VPU_STATE_STOP : VPU_STATE_READY;
       }
     }

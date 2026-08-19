@@ -41,12 +41,27 @@ It fills a requested number of data-memory qwords with a supplied 32-bit value.
 - [x] Add optional trace events for issue, stalls, and writeback
 - [x] Keep debugging interfaces read-only unless mutation is explicit
 
-### Control Timing
+### Termination Control
 
 - [x] Implement the one-instruction E-bit delay slot
-- [ ] Verify D/T and Force Break timing independently
-- [ ] Implement branch target and delay-slot handling
-- [ ] Record the termination PC
+- [x] Record the termination PC
+- [ ] Verify D/T timing and enable behavior
+- [ ] Implement Force Break and verify its state and pipeline behavior
+
+### Manual Timing Conformance Pass
+
+Complete this focused pass before expanding the lower execution unit. Derive
+cycle expectations from the VU manual and assert observable issue, writeback,
+PC, register, flag, and trace behavior rather than internal container or stage
+implementation details.
+
+- [ ] Verify independent FMAC instructions issue every cycle without stalls
+- [ ] Verify dependent instructions wait through S-stage writeback
+- [ ] Verify hazards are independent across x/y/z/w fields
+- [ ] Verify `VF00` never generates a data hazard
+- [ ] Verify issue and writeback trace ordering for overlapping pipelines
+- [ ] Verify flags become visible at the documented writeback stage
+- [ ] Verify E delay-slot behavior with multiple active pipelines
 
 ### Lower Execution Unit
 
@@ -54,6 +69,13 @@ It fills a requested number of data-memory qwords with a supplied 32-bit value.
 - [ ] Model IALU, LSU, and branch execution separately
 - [ ] Enforce upper/lower dual-issue restrictions
 - [ ] Add integer-register hazard timing
+
+### Branch Control
+
+- [ ] Implement relative and register-based branch targets
+- [ ] Implement the one-instruction branch delay slot
+- [ ] Reuse deferred-control timing where E termination and branches overlap
+- [ ] Verify branch timing alongside integer-register hazards
 
 ### Instructions Required by `test_vu0`
 
