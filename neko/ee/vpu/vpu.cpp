@@ -130,6 +130,7 @@ void VPU::forceBreak()
   }
 
   orchestrator.reset();
+  lowerInstructionPending = false;
   endDelaySlotPending = false;
   terminationRequested = false;
   haltAfterDrain = false;
@@ -283,6 +284,7 @@ void VPU::startMicroMode(uint16_t startAddress)
   }
 
   orchestrator.reset();
+  lowerInstructionPending = false;
   mode = VPU_MODE_MICRO;
   microMemPC = startAddress;
   endDelaySlotPending = false;
@@ -317,14 +319,21 @@ bool VPU::tick()
       uint16_t instructionAddress = microMemPC;
       uint32_t upperInstruction = nextUpperInstruction();
       uint32_t lowerInstruction = nextLowerInstruction();
+      LowerInstruction decodedLowerInstruction =
+        decodeLowerInstruction(lowerInstruction);
 
       if (executingEndDelaySlot && endBitSet(upperInstruction))
       {
         throw runtime_error("E bit cannot be set in an E-bit delay slot.");
       }
 
-      processUpperInstruction(upperInstruction);
-      microMemPC = processLowerInstruction(lowerInstruction);
+      uint16_t upperOpCode = processUpperInstruction(upperInstruction);
+      queueLowerInstruction(
+        decodedLowerInstruction,
+        upperOpCode,
+        upperInstruction,
+        instructionAddress);
+      microMemPC += 8;
       instructionIssued = true;
 
       emitTrace({
@@ -370,10 +379,12 @@ bool VPU::tick()
     }
 
     orchestrator.update();
+    executePendingLowerInstruction();
     cycles++;
   }
   catch (...)
   {
+    lowerInstructionPending = false;
     state = VPU_STATE_STOP;
     throw;
   }
@@ -466,13 +477,13 @@ uint32_t VPU::nextLowerInstruction()
   return instruction;
 }
 
-void VPU::processUpperInstruction(uint32_t upperInstruction)
+uint16_t VPU::processUpperInstruction(uint32_t upperInstruction)
 {
   uint16_t opCode = opCodeFromInstruction(upperInstruction);
 
   if (opCode == VPU_NOP)
   {
-    return;
+    return opCode;
   }
 
   uint8_t srcReg1 = src1RegFromOpCodeAndInstruction(opCode, upperInstruction);
@@ -484,6 +495,7 @@ void VPU::processUpperInstruction(uint32_t upperInstruction)
   uint8_t srcReg2Mask = srcReg2MaskFromOpCode(opCode, fieldMask);
 
   orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, srcReg1Mask, srcReg2Mask, microMemPC);
+  return opCode;
 }
 
 uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
@@ -534,6 +546,10 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_ADDA:
     case VPU_ADDAi:
     case VPU_ADDAq:
+    case VPU_ADDAx:
+    case VPU_ADDAy:
+    case VPU_ADDAz:
+    case VPU_ADDAw:
     case VPU_MADDA:
     case VPU_MADDAi:
     case VPU_MADDAq:
@@ -548,6 +564,13 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_MSUBAy:
     case VPU_MSUBAz:
     case VPU_MSUBAw:
+    case VPU_MULA:
+    case VPU_MULAi:
+    case VPU_MULAq:
+    case VPU_MULAx:
+    case VPU_MULAy:
+    case VPU_MULAz:
+    case VPU_MULAw:
     case VPU_SUBA:
     case VPU_SUBAi:
     case VPU_SUBAq:
@@ -707,17 +730,97 @@ uint8_t VPU::srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask)
   }
 }
 
-uint16_t VPU::processLowerInstruction(uint32_t lowerInstruction)
+void VPU::queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress)
 {
-  // The lower unit has no NOP encoding.  VU programs conventionally use
-  // MOVE VF00, VF00 (0x8000033c), which is harmless because VF00 is constant.
-  // Rejecting any other lower instruction is safer than silently ignoring it.
-  if (lowerInstruction != VPU_LOWER_NOP)
+  if (lowerInstruction.unit == LowerExecutionUnit::None)
   {
-    throw runtime_error("Unsupported VU lower instruction.");
+    return;
   }
 
-  return microMemPC + 8;
+  pendingLowerInstruction = lowerInstruction;
+  pendingLowerInstructionAddress = instructionAddress;
+  lowerInstructionPending = true;
+  pendingLowerInstructionReady = upperOpCode == VPU_NOP;
+  pendingLowerWritebackDiscarded = false;
+
+  if (lowerInstruction.opCode == VPU_MFIR && upperOpCode != VPU_NOP)
+  {
+    uint8_t upperDestination =
+      destRegFromOpCodeAndInstruction(upperOpCode, upperInstruction);
+    uint8_t upperFieldMask = destinationMaskFromOpCode(
+      upperOpCode,
+      (upperInstruction >> VPU_DEST_SHIFT) & VPU_DEST_MASK);
+
+    pendingLowerWritebackDiscarded =
+      upperDestination < NUM_FP_REGISTERS &&
+      upperFieldMask != FP_REGISTER_NO_FIELDS &&
+      upperDestination == lowerInstruction.destinationRegister;
+  }
+}
+
+void VPU::executePendingLowerInstruction()
+{
+  if (!lowerInstructionPending || !pendingLowerInstructionReady)
+  {
+    return;
+  }
+
+  LowerInstruction instruction = pendingLowerInstruction;
+  lowerInstructionPending = false;
+  pendingLowerInstructionReady = false;
+
+  switch (instruction.unit)
+  {
+    case LowerExecutionUnit::IALU:
+      executeIALUInstruction(instruction);
+      break;
+    case LowerExecutionUnit::FMAC:
+      startLowerFMACInstruction(instruction);
+      break;
+    case LowerExecutionUnit::None:
+      break;
+  }
+}
+
+void VPU::executeIALUInstruction(const LowerInstruction &instruction)
+{
+  uint16_t result;
+
+  switch (instruction.opCode)
+  {
+    case VPU_IADD:
+      result =
+        intRegisters[instruction.sourceRegister1] +
+        intRegisters[instruction.sourceRegister2];
+      break;
+    case VPU_ISUBIU:
+      result =
+        intRegisters[instruction.sourceRegister1] -
+        instruction.immediate;
+      break;
+    default:
+      throw runtime_error("Unsupported VU IALU instruction.");
+  }
+
+  if (instruction.destinationRegister != VPU_REGISTER_VI00)
+  {
+    intRegisters[instruction.destinationRegister] = result;
+  }
+}
+
+void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
+{
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_FMAC,
+    instruction.opCode,
+    instruction.sourceRegister1,
+    0,
+    instruction.destinationRegister,
+    instruction.destinationFieldMask,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress,
+    pendingLowerWritebackDiscarded);
 }
 
 bool VPU::endBitSet(uint32_t instruction)
@@ -869,12 +972,44 @@ int VPU::calculateNewClippingFlags(FPRegister * fsReg, FPRegister * ftReg)
 
 void VPU::pipelineStarted(Pipeline * p)
 {
+  if (lowerInstructionPending &&
+      pendingLowerInstructionAddress == p->instructionAddress)
+  {
+    pendingLowerInstructionReady = true;
+  }
+
   uint16_t opCode = p->opCode;
   uint8_t ft = p->srcReg1;
   uint8_t fs = p->srcReg2;
   uint8_t fieldMask = p->destFieldMask;
   FPRegister *destReg = destinationRegisterFromPipeline(p);
   FPRegister dest(destReg->x, destReg->y, destReg->z, destReg->w);
+
+  if (opCode == VPU_MFIR)
+  {
+    int32_t value =
+      static_cast<int16_t>(intRegisters[p->srcReg1]);
+
+    if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+    {
+      dest.x.setSignedValue(value);
+    }
+    if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+    {
+      dest.y.setSignedValue(value);
+    }
+    if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+    {
+      dest.z.setSignedValue(value);
+    }
+    if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+    {
+      dest.w.setSignedValue(value);
+    }
+
+    p->setFPRegisterResult(&dest);
+    return;
+  }
 
   switch (opCode)
   {
@@ -1152,6 +1287,12 @@ void VPU::pipelineFinished(Pipeline * p)
     case VPU_ITOF12:
     case VPU_ITOF15:
       updateDestinationRegisterWithPipelineResult(destReg, p);
+      break;
+    case VPU_MFIR:
+      if (!p->discardWriteback)
+      {
+        updateDestinationRegisterWithPipelineResult(destReg, p);
+      }
       break;
     case VPU_MADD:
     case VPU_MADDi:

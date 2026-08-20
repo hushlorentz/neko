@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(neko_core
     neko/fp_register.cpp
     neko/ee/vpu/vpu.cpp
+    neko/ee/vpu/vpu_lower_instruction.cpp
     neko/ee/vpu/pipelines/vpu_pipeline.cpp
     neko/ee/vpu/pipelines/vpu_pipeline_orchestrator.cpp
     neko/math/float.cpp
@@ -42,8 +43,10 @@ add_executable(neko_tests
     neko_tests/vpu/vpu_debug_tests.cpp
     neko_tests/vpu/vpu_memory_tests.cpp
     neko_tests/vpu/vpu_microinstruction_tests.cpp
+    neko_tests/vpu/vpu_lower_instruction_tests.cpp
     neko_tests/vpu/vpu_pipeline_tests.cpp
     neko_tests/vpu/vpu_state_tests.cpp
+    neko_tests/vpu/vpu_timing_conformance_tests.cpp
     neko_tests/vpu/opcode_tests/vpu_upper_add_tests.cpp
     neko_tests/vpu/opcode_tests/vpu_upper_clip_tests.cpp
     neko_tests/vpu/opcode_tests/vpu_upper_fixed_point_tests.cpp

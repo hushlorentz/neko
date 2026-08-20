@@ -55,17 +55,17 @@ cycle expectations from the VU manual and assert observable issue, writeback,
 PC, register, flag, and trace behavior rather than internal container or stage
 implementation details.
 
-- [ ] Verify independent FMAC instructions issue every cycle without stalls
-- [ ] Verify dependent instructions wait through S-stage writeback
-- [ ] Verify hazards are independent across x/y/z/w fields
-- [ ] Verify `VF00` never generates a data hazard
-- [ ] Verify issue and writeback trace ordering for overlapping pipelines
-- [ ] Verify flags become visible at the documented writeback stage
-- [ ] Verify E delay-slot behavior with multiple active pipelines
+- [x] Verify independent FMAC instructions issue every cycle without stalls
+- [x] Verify dependent instructions wait through S-stage writeback
+- [x] Verify hazards are independent across x/y/z/w fields
+- [x] Verify `VF00` never generates a data hazard
+- [x] Verify issue and writeback trace ordering for overlapping pipelines
+- [x] Verify flags become visible at the documented writeback stage
+- [x] Verify E delay-slot behavior with multiple active pipelines
 
 ### Lower Execution Unit
 
-- [ ] Add lower-instruction decoding and dispatch
+- [x] Add lower-instruction decoding and dispatch
 - [ ] Model IALU, LSU, and branch execution separately
 - [ ] Enforce upper/lower dual-issue restrictions
 - [ ] Add integer-register hazard timing
@@ -79,9 +79,9 @@ implementation details.
 
 ### Instructions Required by `test_vu0`
 
-- [ ] `IADD`
-- [ ] `ISUBIU`
-- [ ] `MFIR`
+- [x] `IADD`
+- [x] `ISUBIU`
+- [x] `MFIR`
 - [ ] `ILW`
 - [ ] `LQ`
 - [ ] `SQI`

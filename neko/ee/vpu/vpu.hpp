@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "fp_register.hpp"
+#include "vpu_lower_instruction.hpp"
 #include "vpu_pipeline_handler.hpp"
 #include "vpu_pipeline_orchestrator.hpp"
 
@@ -120,6 +121,11 @@ class VPU : public PipelineHandler
     set<uint16_t> type3OpCodes;
     PipelineOrchestrator orchestrator;
     FPRegister virtualDestRegister;
+    LowerInstruction pendingLowerInstruction;
+    uint16_t pendingLowerInstructionAddress = 0;
+    bool lowerInstructionPending = false;
+    bool pendingLowerInstructionReady = false;
+    bool pendingLowerWritebackDiscarded = false;
 
     void initMemory();
     void initFPRegisters();
@@ -132,7 +138,7 @@ class VPU : public PipelineHandler
     bool haltBitSet(uint32_t instruction);
     uint32_t nextUpperInstruction();
     uint32_t nextLowerInstruction();
-    void processUpperInstruction(uint32_t upperInstruction);
+    uint16_t processUpperInstruction(uint32_t upperInstruction);
     uint16_t opCodeFromInstruction(uint32_t instruction);
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
     uint8_t src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
@@ -140,7 +146,10 @@ class VPU : public PipelineHandler
     uint8_t destinationMaskFromOpCode(uint16_t opCode, uint8_t encodedMask);
     uint8_t srcReg1MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
     uint8_t srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
-    uint16_t processLowerInstruction(uint32_t lowerInstruction);
+    void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
+    void executePendingLowerInstruction();
+    void executeIALUInstruction(const LowerInstruction &instruction);
+    void startLowerFMACInstruction(const LowerInstruction &instruction);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);
     void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);
     void setStatusFlagsFromMACFlags();

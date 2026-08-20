@@ -20,6 +20,9 @@
 
 #define VPU_TYPE1_MASK 0x3f
 #define VPU_TYPE3_MASK 0x7ff
+#define VPU_LOWER_TYPE1_MASK 0xffe0003f
+#define VPU_LOWER_TYPE3_MASK 0xfe0007ff
+#define VPU_LOWER_TYPE8_MASK 0xfe000000
 
 #define VPU_ABS 0x1fd
 #define VPU_ADD 0x28
@@ -101,6 +104,12 @@
 #define VPU_MULAw 0x1bf
 #define VPU_NOP 0x2ff
 #define VPU_LOWER_NOP 0x8000033c
+#define VPU_IADD 0x30
+#define VPU_ISUBIU 0x409
+#define VPU_MFIR 0x3fd
+#define VPU_IADD_ENCODING 0x80000030
+#define VPU_ISUBIU_ENCODING 0x12000000
+#define VPU_MFIR_ENCODING 0x800003fd
 #define VPU_OPMULA 0x2fe
 #define VPU_OPMSUB 0x2e
 #define VPU_SUB 0x2c
