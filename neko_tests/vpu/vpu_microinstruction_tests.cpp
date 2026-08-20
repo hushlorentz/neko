@@ -73,7 +73,7 @@ TEST_CASE("VPU Microinstruction Tests")
     {
       std::vector<uint8_t> instructions;
       appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
-      appendInstruction(&instructions, 0);
+      appendInstruction(&instructions, 0x04000000);
 
       vpu.uploadMicroInstructions(instructions);
       REQUIRE_THROWS_WITH(vpu.initMicroMode(), "Unsupported VU lower instruction.");

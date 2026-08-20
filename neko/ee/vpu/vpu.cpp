@@ -131,6 +131,7 @@ void VPU::forceBreak()
 
   orchestrator.reset();
   lowerInstructionPending = false;
+  pendingIntegerWrites.fill(0);
   endDelaySlotPending = false;
   terminationRequested = false;
   haltAfterDrain = false;
@@ -285,6 +286,7 @@ void VPU::startMicroMode(uint16_t startAddress)
 
   orchestrator.reset();
   lowerInstructionPending = false;
+  pendingIntegerWrites.fill(0);
   mode = VPU_MODE_MICRO;
   microMemPC = startAddress;
   endDelaySlotPending = false;
@@ -313,58 +315,7 @@ bool VPU::tick()
         state = haltAfterDrain ? VPU_STATE_STOP : VPU_STATE_READY;
       }
     }
-    else if (!orchestrator.stalling)
-    {
-      bool executingEndDelaySlot = endDelaySlotPending;
-      uint16_t instructionAddress = microMemPC;
-      uint32_t upperInstruction = nextUpperInstruction();
-      uint32_t lowerInstruction = nextLowerInstruction();
-      LowerInstruction decodedLowerInstruction =
-        decodeLowerInstruction(lowerInstruction);
-
-      if (executingEndDelaySlot && endBitSet(upperInstruction))
-      {
-        throw runtime_error("E bit cannot be set in an E-bit delay slot.");
-      }
-
-      uint16_t upperOpCode = processUpperInstruction(upperInstruction);
-      queueLowerInstruction(
-        decodedLowerInstruction,
-        upperOpCode,
-        upperInstruction,
-        instructionAddress);
-      microMemPC += 8;
-      instructionIssued = true;
-
-      emitTrace({
-        VPUTraceEventType::InstructionIssued,
-        cycles,
-        instructionAddress,
-        upperInstruction,
-        lowerInstruction,
-        0,
-        0,
-        0
-      });
-
-      if (haltBitSet(upperInstruction))
-      {
-        endDelaySlotPending = false;
-        terminationRequested = true;
-        haltAfterDrain = true;
-      }
-      else if (executingEndDelaySlot)
-      {
-        endDelaySlotPending = false;
-        terminationRequested = true;
-      }
-      else if (endBitSet(upperInstruction))
-      {
-        endDelaySlotPending = true;
-        haltAfterDrain = false;
-      }
-    }
-    else
+    else if (orchestrator.stalling)
     {
       emitTrace({
         VPUTraceEventType::PipelineStall,
@@ -377,6 +328,87 @@ bool VPU::tick()
         0
       });
     }
+    else
+    {
+      bool executingEndDelaySlot = endDelaySlotPending;
+      uint16_t instructionAddress = microMemPC;
+      uint32_t upperInstruction = nextUpperInstruction();
+      uint32_t lowerInstruction = nextLowerInstruction();
+      LowerInstruction decodedLowerInstruction;
+
+      if (hasFlag(upperInstruction, VPU_I_BIT))
+      {
+        decodedLowerInstruction.unit = LowerExecutionUnit::Immediate;
+        decodedLowerInstruction.immediateBits = lowerInstruction;
+      }
+      else
+      {
+        decodedLowerInstruction = decodeLowerInstruction(lowerInstruction);
+      }
+
+      if (executingEndDelaySlot && endBitSet(upperInstruction))
+      {
+        throw runtime_error("E bit cannot be set in an E-bit delay slot.");
+      }
+      if (executingEndDelaySlot &&
+          lowerInstructionForbiddenInEndDelaySlot(decodedLowerInstruction))
+      {
+        throw runtime_error("VU lower instruction cannot execute in an E-bit delay slot.");
+      }
+
+      if (lowerInstructionStalls(decodedLowerInstruction))
+      {
+        emitTrace({
+          VPUTraceEventType::PipelineStall,
+          cycles,
+          microMemPC,
+          0,
+          0,
+          0,
+          0,
+          0
+        });
+      }
+      else
+      {
+        uint16_t upperOpCode = processUpperInstruction(upperInstruction);
+        queueLowerInstruction(
+          decodedLowerInstruction,
+          upperOpCode,
+          upperInstruction,
+          instructionAddress);
+        microMemPC += 8;
+        instructionIssued = true;
+
+        emitTrace({
+          VPUTraceEventType::InstructionIssued,
+          cycles,
+          instructionAddress,
+          upperInstruction,
+          lowerInstruction,
+          0,
+          0,
+          0
+        });
+
+        if (haltBitSet(upperInstruction))
+        {
+          endDelaySlotPending = false;
+          terminationRequested = true;
+          haltAfterDrain = true;
+        }
+        else if (executingEndDelaySlot)
+        {
+          endDelaySlotPending = false;
+          terminationRequested = true;
+        }
+        else if (endBitSet(upperInstruction))
+        {
+          endDelaySlotPending = true;
+          haltAfterDrain = false;
+        }
+      }
+    }
 
     orchestrator.update();
     executePendingLowerInstruction();
@@ -385,6 +417,7 @@ bool VPU::tick()
   catch (...)
   {
     lowerInstructionPending = false;
+    pendingIntegerWrites.fill(0);
     state = VPU_STATE_STOP;
     throw;
   }
@@ -743,7 +776,9 @@ void VPU::queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16
   pendingLowerInstructionReady = upperOpCode == VPU_NOP;
   pendingLowerWritebackDiscarded = false;
 
-  if (lowerInstruction.opCode == VPU_MFIR && upperOpCode != VPU_NOP)
+  if ((lowerInstruction.opCode == VPU_MFIR ||
+       lowerInstruction.opCode == VPU_LQ) &&
+      upperOpCode != VPU_NOP)
   {
     uint8_t upperDestination =
       destRegFromOpCodeAndInstruction(upperOpCode, upperInstruction);
@@ -771,12 +806,20 @@ void VPU::executePendingLowerInstruction()
 
   switch (instruction.unit)
   {
+    case LowerExecutionUnit::Immediate:
+      iRegister.setBits(instruction.immediateBits);
+      break;
     case LowerExecutionUnit::IALU:
       executeIALUInstruction(instruction);
+      break;
+    case LowerExecutionUnit::LSU:
+      startLSUInstruction(instruction);
       break;
     case LowerExecutionUnit::FMAC:
       startLowerFMACInstruction(instruction);
       break;
+    case LowerExecutionUnit::Branch:
+      throw runtime_error("VU branch execution is not implemented.");
     case LowerExecutionUnit::None:
       break;
   }
@@ -821,6 +864,96 @@ void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
     FP_REGISTER_NO_FIELDS,
     pendingLowerInstructionAddress,
     pendingLowerWritebackDiscarded);
+}
+
+void VPU::startLSUInstruction(const LowerInstruction &instruction)
+{
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_LSU,
+    instruction.opCode,
+    instruction.sourceRegister1,
+    instruction.sourceRegister2,
+    instruction.destinationRegister,
+    instruction.destinationFieldMask,
+    instruction.destinationFieldMask,
+    0,
+    pendingLowerInstructionAddress,
+    pendingLowerWritebackDiscarded);
+
+  uint8_t integerDestination = VPU_REGISTER_VI00;
+  if (instruction.opCode == VPU_ILW ||
+      instruction.opCode == VPU_SQI)
+  {
+    integerDestination = instruction.destinationRegister;
+  }
+
+  if (integerDestination != VPU_REGISTER_VI00)
+  {
+    pendingIntegerWrites[integerDestination]++;
+  }
+}
+
+bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
+{
+  const auto integerRegisterPending = [this](uint8_t registerID) {
+    return
+      registerID != VPU_REGISTER_VI00 &&
+      pendingIntegerWrites[registerID] != 0;
+  };
+
+  switch (instruction.opCode)
+  {
+    case VPU_IADD:
+      return
+        integerRegisterPending(instruction.sourceRegister1) ||
+        integerRegisterPending(instruction.sourceRegister2);
+    case VPU_ISUBIU:
+    case VPU_MFIR:
+    case VPU_ILW:
+    case VPU_LQ:
+      return integerRegisterPending(instruction.sourceRegister1);
+    case VPU_SQI:
+      return
+        integerRegisterPending(instruction.sourceRegister2) ||
+        orchestrator.hasRegisterHazard(
+          instruction.sourceRegister1,
+          instruction.destinationFieldMask,
+          VPU_REGISTER_VF00,
+          FP_REGISTER_NO_FIELDS);
+    default:
+      return false;
+  }
+}
+
+bool VPU::lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instruction) const
+{
+  return
+    instruction.unit == LowerExecutionUnit::LSU ||
+    instruction.unit == LowerExecutionUnit::Branch;
+}
+
+uint16_t VPU::qwordAddress(uint16_t base, int16_t offset) const
+{
+  int32_t qwordIndex = static_cast<int32_t>(base) + offset;
+  uint32_t qwordMask = static_cast<uint32_t>(vuMem.size() / 16) - 1;
+  return (static_cast<uint32_t>(qwordIndex) & qwordMask) * 16;
+}
+
+uint32_t VPU::readDataWord(uint16_t address) const
+{
+  return
+    static_cast<uint32_t>(vuMem[address]) |
+    (static_cast<uint32_t>(vuMem[address + 1]) << 8) |
+    (static_cast<uint32_t>(vuMem[address + 2]) << 16) |
+    (static_cast<uint32_t>(vuMem[address + 3]) << 24);
+}
+
+void VPU::writeDataWord(uint16_t address, uint32_t value)
+{
+  vuMem[address] = value & 0xff;
+  vuMem[address + 1] = (value >> 8) & 0xff;
+  vuMem[address + 2] = (value >> 16) & 0xff;
+  vuMem[address + 3] = (value >> 24) & 0xff;
 }
 
 bool VPU::endBitSet(uint32_t instruction)
@@ -976,6 +1109,12 @@ void VPU::pipelineStarted(Pipeline * p)
       pendingLowerInstructionAddress == p->instructionAddress)
   {
     pendingLowerInstructionReady = true;
+  }
+
+  if (p->type == VPU_PIPELINE_TYPE_LSU)
+  {
+    startLSUPipeline(p);
+    return;
   }
 
   uint16_t opCode = p->opCode;
@@ -1216,6 +1355,75 @@ void VPU::pipelineStarted(Pipeline * p)
   p->setFPRegisterResult(&dest);
 }
 
+void VPU::startLSUPipeline(Pipeline *pipeline)
+{
+  switch (pipeline->opCode)
+  {
+    case VPU_ILW:
+    {
+      uint16_t address = qwordAddress(
+        intRegisters[pipeline->srcReg1],
+        pendingLowerInstruction.immediate);
+      uint8_t fieldOffset;
+
+      switch (pipeline->destFieldMask)
+      {
+        case FP_REGISTER_X_FIELD:
+          fieldOffset = 0;
+          break;
+        case FP_REGISTER_Y_FIELD:
+          fieldOffset = 4;
+          break;
+        case FP_REGISTER_Z_FIELD:
+          fieldOffset = 8;
+          break;
+        case FP_REGISTER_W_FIELD:
+          fieldOffset = 12;
+          break;
+        default:
+          throw runtime_error("ILW requires exactly one destination field.");
+      }
+
+      pipeline->memoryAddress = address + fieldOffset;
+      pipeline->setIntResult(readDataWord(pipeline->memoryAddress) & 0xffff);
+      break;
+    }
+    case VPU_LQ:
+    {
+      pipeline->memoryAddress = qwordAddress(
+        intRegisters[pipeline->srcReg1],
+        pendingLowerInstruction.immediate);
+      FPRegister result = fpRegisters[pipeline->destReg];
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_X_FIELD))
+      {
+        result.x.setBits(readDataWord(pipeline->memoryAddress));
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Y_FIELD))
+      {
+        result.y.setBits(readDataWord(pipeline->memoryAddress + 4));
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Z_FIELD))
+      {
+        result.z.setBits(readDataWord(pipeline->memoryAddress + 8));
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_W_FIELD))
+      {
+        result.w.setBits(readDataWord(pipeline->memoryAddress + 12));
+      }
+      pipeline->setFPRegisterResult(&result);
+      break;
+    }
+    case VPU_SQI:
+      pipeline->memoryAddress =
+        qwordAddress(intRegisters[pipeline->srcReg2]);
+      pipeline->setFPRegisterResult(&fpRegisters[pipeline->srcReg1]);
+      pipeline->setIntResult(intRegisters[pipeline->srcReg2] + 1);
+      break;
+    default:
+      throw runtime_error("Unsupported VU LSU instruction.");
+  }
+}
+
 FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
 {
   FPRegister *destReg;
@@ -1270,6 +1478,22 @@ FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
 
 void VPU::pipelineFinished(Pipeline * p)
 {
+  if (p->type == VPU_PIPELINE_TYPE_LSU)
+  {
+    finishLSUPipeline(p);
+    emitTrace({
+      VPUTraceEventType::PipelineWriteback,
+      cycles,
+      p->instructionAddress,
+      0,
+      0,
+      p->opCode,
+      p->destReg,
+      p->destFieldMask
+    });
+    return;
+  }
+
   FPRegister *destReg = destinationRegisterFromPipeline(p);
 
   switch (p->opCode)
@@ -1345,6 +1569,51 @@ void VPU::pipelineFinished(Pipeline * p)
     p->destReg,
     p->destFieldMask
   });
+}
+
+void VPU::finishLSUPipeline(Pipeline *pipeline)
+{
+  switch (pipeline->opCode)
+  {
+    case VPU_ILW:
+      if (pipeline->destReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->destReg] = pipeline->intResult;
+        pendingIntegerWrites[pipeline->destReg]--;
+      }
+      break;
+    case VPU_LQ:
+      if (!pipeline->discardWriteback)
+      {
+        updateDestinationRegisterWithPipelineResult(
+          &fpRegisters[pipeline->destReg],
+          pipeline);
+      }
+      break;
+    case VPU_SQI:
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_X_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress, pipeline->fpResult.x.bits());
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Y_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress + 4, pipeline->fpResult.y.bits());
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Z_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress + 8, pipeline->fpResult.z.bits());
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_W_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress + 12, pipeline->fpResult.w.bits());
+      }
+      if (pipeline->destReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->destReg] = pipeline->intResult;
+        pendingIntegerWrites[pipeline->destReg]--;
+      }
+      break;
+  }
 }
 
 void VPU::handleMADDInstruction(Pipeline * p)

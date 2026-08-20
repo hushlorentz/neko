@@ -44,6 +44,7 @@ add_executable(neko_tests
     neko_tests/vpu/vpu_memory_tests.cpp
     neko_tests/vpu/vpu_microinstruction_tests.cpp
     neko_tests/vpu/vpu_lower_instruction_tests.cpp
+    neko_tests/vpu/vpu_lower_timing_conformance_tests.cpp
     neko_tests/vpu/vpu_pipeline_tests.cpp
     neko_tests/vpu/vpu_state_tests.cpp
     neko_tests/vpu/vpu_timing_conformance_tests.cpp

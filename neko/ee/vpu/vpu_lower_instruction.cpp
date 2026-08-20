@@ -17,6 +17,16 @@ namespace
   {
     return (instruction >> shift) & LOWER_REGISTER_MASK;
   }
+
+  std::int16_t signedImmediate11(std::uint32_t instruction)
+  {
+    std::uint16_t immediate = instruction & LOWER_IMMEDIATE_LOW_MASK;
+    if ((immediate & 0x400) != 0)
+    {
+      immediate |= 0xf800;
+    }
+    return static_cast<std::int16_t>(immediate);
+  }
 }
 
 LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
@@ -44,9 +54,33 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.opCode = VPU_ISUBIU;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
-    decoded.immediate =
+    decoded.immediate = static_cast<std::int16_t>(
       (((instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK) << 11) |
-      (instruction & LOWER_IMMEDIATE_LOW_MASK);
+      (instruction & LOWER_IMMEDIATE_LOW_MASK));
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE8_MASK) == VPU_ILW_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::LSU;
+    decoded.opCode = VPU_ILW;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.destinationFieldMask =
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
+    decoded.immediate = signedImmediate11(instruction);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE8_MASK) == VPU_LQ_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::LSU;
+    decoded.opCode = VPU_LQ;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.destinationFieldMask =
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
+    decoded.immediate = signedImmediate11(instruction);
     return decoded;
   }
 
@@ -56,6 +90,18 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.opCode = VPU_MFIR;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.destinationFieldMask =
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQI_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::LSU;
+    decoded.opCode = VPU_SQI;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.sourceRegister2 = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.destinationRegister = decoded.sourceRegister2;
     decoded.destinationFieldMask =
       (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
     return decoded;

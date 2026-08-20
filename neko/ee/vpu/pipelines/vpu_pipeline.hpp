@@ -7,10 +7,11 @@
 
 #define VPU_PIPELINE_TYPE_NONE 0
 #define VPU_PIPELINE_TYPE_FMAC 1
-#define VPU_PIPELINE_FDIV 2
-#define VPU_PIPELINE_EFU 3
-#define VPU_PIPELINE_IALU 4
-#define VPU_PIPELINE_XGKICK 5
+#define VPU_PIPELINE_TYPE_FDIV 2
+#define VPU_PIPELINE_TYPE_EFU 3
+#define VPU_PIPELINE_TYPE_IALU 4
+#define VPU_PIPELINE_TYPE_XGKICK 5
+#define VPU_PIPELINE_TYPE_LSU 6
 
 class Pipeline
 {
@@ -26,6 +27,7 @@ class Pipeline
     uint8_t srcReg1FieldMask;
     uint8_t srcReg2FieldMask;
     uint16_t instructionAddress;
+    uint16_t memoryAddress;
     bool discardWriteback;
 
     Pipeline();

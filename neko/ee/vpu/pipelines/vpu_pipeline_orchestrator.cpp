@@ -2,6 +2,7 @@
 
 #include "vpu_pipeline.hpp"
 #include "vpu_pipeline_orchestrator.hpp"
+#include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
 PipelineOrchestrator::PipelineOrchestrator() : pipelineHandler(NULL), stalling(false)
@@ -71,7 +72,9 @@ void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
   {
     Pipeline * checkPipeline = *iter;
 
-    if (checkPipeline->discardWriteback ||
+    if ((checkPipeline->type == VPU_PIPELINE_TYPE_LSU &&
+         checkPipeline->opCode != VPU_LQ) ||
+        checkPipeline->discardWriteback ||
         checkPipeline->destReg == VPU_REGISTER_VF00)
     {
       continue;
@@ -125,6 +128,40 @@ void PipelineOrchestrator::updateExecutingPipelines()
 bool PipelineOrchestrator::hasNext()
 {
   return executing.size() > 0 || waiting.size() > 0;
+}
+
+bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1FieldMask, uint8_t srcReg2, uint8_t srcReg2FieldMask) const
+{
+  for (list<Pipeline *>::const_iterator iter = executing.begin(); iter != executing.end(); ++iter)
+  {
+    Pipeline *pipeline = *iter;
+    if ((pipeline->type == VPU_PIPELINE_TYPE_LSU &&
+         pipeline->opCode != VPU_LQ) ||
+        pipeline->discardWriteback ||
+        pipeline->destFieldMask == 0 ||
+        pipeline->destReg == VPU_REGISTER_VF00)
+    {
+      continue;
+    }
+
+    const bool srcReg1Hazard =
+      srcReg1FieldMask != 0 &&
+      srcReg1 != VPU_REGISTER_VF00 &&
+      srcReg1 == pipeline->destReg &&
+      (srcReg1FieldMask & pipeline->destFieldMask) != 0;
+    const bool srcReg2Hazard =
+      srcReg2FieldMask != 0 &&
+      srcReg2 != VPU_REGISTER_VF00 &&
+      srcReg2 == pipeline->destReg &&
+      (srcReg2FieldMask & pipeline->destFieldMask) != 0;
+
+    if (srcReg1Hazard || srcReg2Hazard)
+    {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress)

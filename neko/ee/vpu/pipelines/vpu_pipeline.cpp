@@ -2,7 +2,7 @@
 
 #define FMAC_STAGES 6
 
-Pipeline::Pipeline() : type(0), opCode(0), intResult(0), srcReg1(0), srcReg2(0), destReg(0), destFieldMask(0), srcReg1FieldMask(0), srcReg2FieldMask(0), instructionAddress(0), discardWriteback(false), currentStage(1), endStage(0)
+Pipeline::Pipeline() : type(0), opCode(0), intResult(0), srcReg1(0), srcReg2(0), destReg(0), destFieldMask(0), srcReg1FieldMask(0), srcReg2FieldMask(0), instructionAddress(0), memoryAddress(0), discardWriteback(false), currentStage(1), endStage(0)
 {
 }
 
@@ -23,6 +23,7 @@ void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t 
   switch (type)
   {
     case VPU_PIPELINE_TYPE_FMAC:
+    case VPU_PIPELINE_TYPE_LSU:
       endStage = FMAC_STAGES;
       break;
   }

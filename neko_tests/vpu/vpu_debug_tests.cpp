@@ -198,7 +198,7 @@ TEST_CASE("VPU Debug Execution Tests")
     appendInstructionPair(
       &invalidProgram,
       addInstruction(VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01),
-      0);
+      0x04000000);
     appendInstructionPair(&terminatingProgram, VPU_E_BIT | VPU_NOP);
     appendInstructionPair(&terminatingProgram, VPU_NOP);
     vpu.uploadMicroInstructions(invalidProgram);

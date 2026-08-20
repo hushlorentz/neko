@@ -6,8 +6,11 @@
 enum class LowerExecutionUnit : std::uint8_t
 {
   None,
+  Immediate,
   IALU,
-  FMAC
+  LSU,
+  FMAC,
+  Branch
 };
 
 struct LowerInstruction
@@ -18,7 +21,8 @@ struct LowerInstruction
   std::uint8_t sourceRegister2 = 0;
   std::uint8_t destinationRegister = 0;
   std::uint8_t destinationFieldMask = 0;
-  std::uint16_t immediate = 0;
+  std::int16_t immediate = 0;
+  std::uint32_t immediateBits = 0;
 };
 
 LowerInstruction decodeLowerInstruction(std::uint32_t instruction);

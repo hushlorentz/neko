@@ -66,9 +66,20 @@ implementation details.
 ### Lower Execution Unit
 
 - [x] Add lower-instruction decoding and dispatch
-- [ ] Model IALU, LSU, and branch execution separately
-- [ ] Enforce upper/lower dual-issue restrictions
-- [ ] Add integer-register hazard timing
+- [x] Model IALU and LSU separately and reserve branch dispatch
+- [x] Enforce upper/lower dual-issue restrictions
+- [x] Add integer-register hazard timing
+
+### Lower Timing Conformance Pass
+
+- [x] Verify LSU S-stage writeback and exact integer stall cycles
+- [x] Verify Force Break cancels LSU writes and hazards
+- [x] Verify VU0/VU1 qword address wrapping
+- [x] Verify `VI00` remains constant and hazard-free
+- [x] Verify lane-specific `LQ` and `SQI` hazards
+- [x] Verify overlapping LSU writeback ordering
+- [x] Verify invalid `ILW` masks are rejected
+- [x] Verify `I`-bit data waits for paired upper issue
 
 ### Branch Control
 
@@ -82,9 +93,9 @@ implementation details.
 - [x] `IADD`
 - [x] `ISUBIU`
 - [x] `MFIR`
-- [ ] `ILW`
-- [ ] `LQ`
-- [ ] `SQI`
+- [x] `ILW`
+- [x] `LQ`
+- [x] `SQI`
 - [ ] `IBNE`
 
 ### Integration Test

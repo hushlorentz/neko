@@ -1,6 +1,7 @@
 #ifndef VPU_HPP
 #define VPU_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -109,7 +110,7 @@ class VPU : public PipelineHandler
     VPUTraceCallback traceCallback;
     vector<FPRegister> fpRegisters;
     vector<uint16_t> intRegisters;
-    double iRegister = 0;
+    VUFloat iRegister;
     double qRegister = 0;
     double pRegister = 0;
     uint32_t rRegister = 0;
@@ -126,6 +127,7 @@ class VPU : public PipelineHandler
     bool lowerInstructionPending = false;
     bool pendingLowerInstructionReady = false;
     bool pendingLowerWritebackDiscarded = false;
+    array<uint8_t, 16> pendingIntegerWrites = {};
 
     void initMemory();
     void initFPRegisters();
@@ -149,7 +151,15 @@ class VPU : public PipelineHandler
     void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
     void executePendingLowerInstruction();
     void executeIALUInstruction(const LowerInstruction &instruction);
+    void startLSUInstruction(const LowerInstruction &instruction);
     void startLowerFMACInstruction(const LowerInstruction &instruction);
+    bool lowerInstructionStalls(const LowerInstruction &instruction) const;
+    bool lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instruction) const;
+    uint16_t qwordAddress(uint16_t base, int16_t offset = 0) const;
+    uint32_t readDataWord(uint16_t address) const;
+    void writeDataWord(uint16_t address, uint32_t value);
+    void startLSUPipeline(Pipeline *pipeline);
+    void finishLSUPipeline(Pipeline *pipeline);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);
     void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);
     void setStatusFlagsFromMACFlags();
