@@ -128,6 +128,8 @@ class VPU : public PipelineHandler
     bool pendingLowerInstructionReady = false;
     bool pendingLowerWritebackDiscarded = false;
     array<uint8_t, 16> pendingIntegerWrites = {};
+    array<uint8_t, 16> pendingIALUWrites = {};
+    array<uint16_t, 16> bypassedIntegerValues = {};
 
     void initMemory();
     void initFPRegisters();
@@ -150,15 +152,18 @@ class VPU : public PipelineHandler
     uint8_t srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
     void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
     void executePendingLowerInstruction();
-    void executeIALUInstruction(const LowerInstruction &instruction);
+    void startIALUInstruction(const LowerInstruction &instruction);
     void startLSUInstruction(const LowerInstruction &instruction);
     void startLowerFMACInstruction(const LowerInstruction &instruction);
+    uint16_t integerValueForExecution(uint8_t registerID) const;
     bool hasPendingIntegerWrite(uint8_t registerID) const;
     bool lowerInstructionStalls(const LowerInstruction &instruction) const;
     bool lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instruction) const;
     uint16_t qwordAddress(uint16_t base, int16_t offset = 0) const;
     uint32_t readDataWord(uint16_t address) const;
     void writeDataWord(uint16_t address, uint32_t value);
+    void startIALUPipeline(Pipeline *pipeline);
+    void finishIALUPipeline(Pipeline *pipeline);
     void startLSUPipeline(Pipeline *pipeline);
     void finishLSUPipeline(Pipeline *pipeline);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);

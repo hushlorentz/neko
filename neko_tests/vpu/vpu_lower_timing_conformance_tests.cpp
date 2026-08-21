@@ -34,6 +34,16 @@ namespace
       (static_cast<uint32_t>(id) << 6);
   }
 
+  uint32_t isubiu(uint8_t it, uint8_t is, uint16_t immediate)
+  {
+    return
+      VPU_ISUBIU_ENCODING |
+      (static_cast<uint32_t>((immediate >> 11) & 0xf) << 21) |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      (immediate & 0x7ff);
+  }
+
   uint32_t ilw(
     uint8_t fieldMask,
     uint8_t it,
@@ -60,6 +70,15 @@ namespace
       (static_cast<uint32_t>(ft) << 16) |
       (static_cast<uint32_t>(is) << 11) |
       (static_cast<uint16_t>(immediate) & 0x7ff);
+  }
+
+  uint32_t mfir(uint8_t fieldMask, uint8_t ft, uint8_t is)
+  {
+    return
+      VPU_MFIR_ENCODING |
+      (static_cast<uint32_t>(fieldMask) << 21) |
+      (static_cast<uint32_t>(ft) << 16) |
+      (static_cast<uint32_t>(is) << 11);
   }
 
   uint32_t sqi(uint8_t fieldMask, uint8_t fs, uint8_t it)
@@ -125,6 +144,401 @@ namespace
 
 TEST_CASE("VU Lower Timing Conformance Tests")
 {
+  SECTION("IALU results bypass immediately but write registers at S-stage")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 4);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 5);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0);
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 0);
+
+    vpu.tick();
+    vpu.tick();
+    vpu.tick();
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 0);
+
+    vpu.tick();
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 9);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 0);
+
+    vpu.tick();
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 13);
+
+    std::vector<VPUTraceEvent> writebacks =
+      eventsOfType(events, VPUTraceEventType::PipelineWriteback);
+    REQUIRE(writebacks.size() == 2);
+    REQUIRE(writebacks[0].cycle == 5);
+    REQUIRE(writebacks[0].instructionAddress == 0);
+    REQUIRE(writebacks[0].opCode == VPU_IADD);
+    REQUIRE(writebacks[0].destinationRegister == VPU_REGISTER_VI04);
+    REQUIRE(writebacks[0].destinationFieldMask == FP_REGISTER_NO_FIELDS);
+    REQUIRE(writebacks[1].cycle == 6);
+    REQUIRE(writebacks[1].instructionAddress == 8);
+    REQUIRE(writebacks[1].opCode == VPU_IADD);
+    REQUIRE(writebacks[1].destinationRegister == VPU_REGISTER_VI05);
+    REQUIRE(writebacks[1].destinationFieldMask == FP_REGISTER_NO_FIELDS);
+  }
+
+  SECTION("ISUBIU results bypass to the next IALU instruction")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 0x1234);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      isubiu(VPU_REGISTER_VI04, VPU_REGISTER_VI01, 0x1001));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0x0233);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 0x0235);
+  }
+
+  SECTION("A younger IALU write retires after an older ILW to the same register")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.writeDataMemory(0, wordBytes(7));
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 6);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 7);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ilw(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI00,
+        0));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 13);
+  }
+
+  SECTION("A younger ILW retires after an older IALU write to the same register")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.writeDataMemory(0, wordBytes(0x1234));
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 6);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 7);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ilw(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI00,
+        0));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0x1234);
+  }
+
+  SECTION("The newest overlapping IALU result is used for bypass")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 5);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 6);
+  }
+
+  SECTION("A pending IALU result bypasses to MFIR")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 4);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 5);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      mfir(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VI04));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x.bits() == 9);
+  }
+
+  SECTION("A pending IALU result bypasses to an LSU address")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.writeDataMemory(0, wordBytes(0x11111111));
+    vpu.writeDataMemory(16, wordBytes(0x22222222));
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI00,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      lq(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VI04,
+        0));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(
+      vpu.fpRegisterValue(VPU_REGISTER_VF01)->x.bits() ==
+      0x22222222);
+  }
+
+  SECTION("A pending IALU result bypasses to SQI address and post-increment")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntFPRegister(VPU_REGISTER_VF01, 0x12345678, 0, 0, 0);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI00,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      sqi(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VI04));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.readDataMemory(0, 4) == wordBytes(0));
+    REQUIRE(vpu.readDataMemory(16, 4) == wordBytes(0x12345678));
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 2);
+  }
+
+  SECTION("Force Break discards pending IALU writes and bypass state")
+  {
+    VPU vpu;
+    std::vector<uint8_t> interruptedProgram;
+    std::vector<uint8_t> recoveryProgram;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 4);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 5);
+
+    appendInstructionPair(
+      &interruptedProgram,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    vpu.uploadMicroInstructions(interruptedProgram);
+    vpu.startMicroMode();
+    REQUIRE(vpu.tick());
+    vpu.forceBreak();
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0);
+
+    appendInstructionPair(
+      &recoveryProgram,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&recoveryProgram, VPU_NOP);
+    vpu.uploadMicroInstructions(recoveryProgram);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 4);
+  }
+
+  SECTION("VI00 never retains an IALU bypass or writeback")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 4);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 5);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI00,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI00,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI00) == 0);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 4);
+  }
+
+  SECTION("Upper and IALU instructions sustain dual issue every cycle")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadFPRegister(VPU_REGISTER_VF20, 1, 0, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF21, 2, 0, 0, 0);
+    vpu.loadIntRegister(VPU_REGISTER_VI13, 4);
+    vpu.loadIntRegister(VPU_REGISTER_VI14, 5);
+
+    for (uint8_t index = 1; index <= 7; index++)
+    {
+      uint32_t upper = add(
+        VPU_DEST_X_BIT,
+        VPU_REGISTER_VF20,
+        VPU_REGISTER_VF21,
+        index);
+      if (index == 7)
+      {
+        upper |= VPU_E_BIT;
+      }
+      appendInstructionPair(
+        &instructions,
+        upper,
+        iadd(index, VPU_REGISTER_VI13, VPU_REGISTER_VI14));
+    }
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    REQUIRE(issues.size() == 8);
+    for (uint8_t index = 0; index < 7; index++)
+    {
+      REQUIRE(issues[index].cycle == index);
+      REQUIRE(vpu.fpRegisterValue(index + 1)->x == 3);
+      REQUIRE(vpu.intRegisterValue(index + 1) == 9);
+    }
+    REQUIRE(eventsOfType(events, VPUTraceEventType::PipelineStall).empty());
+  }
+
   SECTION("ILW writes at S-stage and stalls an integer consumer until the following cycle")
   {
     VPU vpu;

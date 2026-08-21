@@ -87,7 +87,7 @@ Complete the branch-sensitive timing and hazard work before adding `IBNE`.
 
 - [x] Make lower-instruction hazard handling exhaustive
 - [x] Make integer hazard state reusable by branch control
-- [ ] Separate IALU bypass availability from S-stage writeback
+- [x] Separate IALU bypass availability from S-stage writeback
 
 ### Branch Control
 

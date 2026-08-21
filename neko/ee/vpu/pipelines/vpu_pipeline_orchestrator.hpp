@@ -6,7 +6,7 @@
 #include "vpu_pipeline_handler.hpp"
 #include "vpu_pipeline.hpp"
 
-#define MAX_PIPELINES 10
+#define MAX_PIPELINES 12
 
 using namespace std;
 
