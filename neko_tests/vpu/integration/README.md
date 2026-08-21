@@ -96,5 +96,20 @@ Expected SHA-256:
 70acf8379442ac7f545d3273bbb5c34cdcf9cdceff74aed87efc3dd2b9cb5bb9
 ```
 
+Regenerate `termination.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/termination.bin \
+  neko_tests/vpu/integration/termination.asm
+```
+
+Expected SHA-256:
+
+```text
+3618324b61cedc436579ec6a9de2f29be3440185fc2cbdf99e780c4bfdfbbb21
+```
+
 The C++ test computes expected memory independently rather than reproducing the
 assembly implementation.

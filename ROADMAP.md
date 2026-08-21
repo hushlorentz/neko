@@ -159,7 +159,7 @@ capstone program that proves the components work together:
       accumulator behavior, and exact expected vectors
 - [x] `dual_issue.asm`: sustain simultaneous upper/lower execution and verify
       both output and exact cycle count
-- [ ] `termination.asm`: cover E-bit delay behavior, branch/E overlap, final
+- [x] `termination.asm`: cover E-bit delay behavior, branch/E overlap, final
       memory markers, and the stopping PC
 - [ ] Add a capstone vector kernel that loads input vectors, applies a scale and
       bias, clamps the results, and stores them while overlapping memory,
