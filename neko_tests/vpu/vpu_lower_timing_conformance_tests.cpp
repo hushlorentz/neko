@@ -44,6 +44,15 @@ namespace
       (immediate & 0x7ff);
   }
 
+  uint32_t ibne(uint8_t it, uint8_t is, int16_t immediate)
+  {
+    return
+      VPU_IBNE_ENCODING |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      (static_cast<uint16_t>(immediate) & 0x7ff);
+  }
+
   uint32_t ilw(
     uint8_t fieldMask,
     uint8_t it,
@@ -144,6 +153,173 @@ namespace
 
 TEST_CASE("VU Lower Timing Conformance Tests")
 {
+  SECTION("Taken IBNE executes its delay slot and branches relative to it")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI02, 2));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    REQUIRE(issues.size() == 4);
+    REQUIRE(issues[0].instructionAddress == 0);
+    REQUIRE(issues[1].instructionAddress == 8);
+    REQUIRE(issues[2].instructionAddress == 24);
+    REQUIRE(issues[3].instructionAddress == 32);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 3);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 3);
+  }
+
+  SECTION("Untaken IBNE continues after its delay slot")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI01, 2));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 2);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 2);
+  }
+
+  SECTION("IBNE sign extends its relative offset")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI02, -3));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode(16);
+
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.programCounter() == 24);
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.programCounter() == 0);
+    vpu.forceBreak();
+  }
+
+  SECTION("IBNE stalls for a pending LSU write to either compared register")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.writeDataMemory(0, wordBytes(1));
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ilw(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI00,
+        0));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI00, 1));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    std::vector<VPUTraceEvent> stalls =
+      eventsOfType(events, VPUTraceEventType::PipelineStall);
+    REQUIRE(issues[0].cycle == 0);
+    REQUIRE(issues[1].cycle == 6);
+    REQUIRE(stalls.size() == 5);
+  }
+
+  SECTION("IBNE is rejected in an E-bit delay slot")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI02, 1));
+
+    vpu.uploadMicroInstructions(instructions);
+
+    REQUIRE_THROWS_WITH(
+      vpu.initMicroMode(),
+      "VU lower instruction cannot execute in an E-bit delay slot.");
+  }
+
   SECTION("IALU results bypass immediately but write registers at S-stage")
   {
     VPU vpu;

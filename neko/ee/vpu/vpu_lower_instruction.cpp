@@ -60,6 +60,16 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_TYPE7_MASK) == VPU_IBNE_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Branch;
+    decoded.opCode = VPU_IBNE;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.sourceRegister2 = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.immediate = signedImmediate11(instruction);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE8_MASK) == VPU_ILW_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::LSU;

@@ -8,6 +8,8 @@ dependency rather than estimated completion date.
 
 - Keep a cycle-oriented interpreter as the reference implementation.
 - Prefer documented hardware behavior and independently verified test vectors.
+- Add functionality with red-green TDD: first demonstrate the missing behavior
+  with a failing test, then implement it and run the full regression suite.
 - Keep emulated hardware deterministic and separate from user interfaces.
 - Preserve raw guest data and avoid relying on host floating-point behavior.
 - Add optimization only after profiling demonstrates a need.
@@ -91,10 +93,11 @@ Complete the branch-sensitive timing and hazard work before adding `IBNE`.
 
 ### Branch Control
 
-- [ ] Implement relative and register-based branch targets
-- [ ] Implement the one-instruction branch delay slot
+- [x] Implement signed relative branch targets
+- [ ] Implement register-based branch targets
+- [x] Implement the one-instruction branch delay slot
 - [ ] Reuse deferred-control timing where E termination and branches overlap
-- [ ] Verify branch timing alongside integer-register hazards
+- [x] Verify branch timing alongside integer-register hazards
 
 ### Instructions Required by `test_vu0`
 
@@ -104,7 +107,7 @@ Complete the branch-sensitive timing and hazard work before adding `IBNE`.
 - [x] `ILW`
 - [x] `LQ`
 - [x] `SQI`
-- [ ] `IBNE`
+- [x] `IBNE`
 
 ### Integration Test
 
