@@ -81,5 +81,20 @@ Expected SHA-256:
 2cf3f043920d723f82d3b8157abe4f6909e3e4566baff3d533c2a491a97b28d0
 ```
 
+Regenerate `dual_issue.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/dual_issue.bin \
+  neko_tests/vpu/integration/dual_issue.asm
+```
+
+Expected SHA-256:
+
+```text
+70acf8379442ac7f545d3273bbb5c34cdcf9cdceff74aed87efc3dd2b9cb5bb9
+```
+
 The C++ test computes expected memory independently rather than reproducing the
 assembly implementation.

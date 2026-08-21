@@ -157,7 +157,7 @@ capstone program that proves the components work together:
       visibility, and call/return signatures
 - [x] `vector_math.asm`: exercise upper FMAC operations, dependencies,
       accumulator behavior, and exact expected vectors
-- [ ] `dual_issue.asm`: sustain simultaneous upper/lower execution and verify
+- [x] `dual_issue.asm`: sustain simultaneous upper/lower execution and verify
       both output and exact cycle count
 - [ ] `termination.asm`: cover E-bit delay behavior, branch/E overlap, final
       memory markers, and the stopping PC
