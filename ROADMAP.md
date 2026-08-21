@@ -155,7 +155,7 @@ capstone program that proves the components work together:
       delay-slot effects, and path-signature output
 - [x] `indirect_calls.asm`: cover `JR`, `JALR`, delayed control transfer, link
       visibility, and call/return signatures
-- [ ] `vector_math.asm`: exercise upper FMAC operations, dependencies,
+- [x] `vector_math.asm`: exercise upper FMAC operations, dependencies,
       accumulator behavior, and exact expected vectors
 - [ ] `dual_issue.asm`: sustain simultaneous upper/lower execution and verify
       both output and exact cycle count
