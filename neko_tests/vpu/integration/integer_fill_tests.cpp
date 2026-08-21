@@ -1,39 +1,13 @@
 #include <cstdint>
-#include <fstream>
-#include <iterator>
-#include <stdexcept>
-#include <string>
 #include <vector>
 
 #include "catch.hpp"
+#include "vpu_integration_test_utils.hpp"
 #include "vpu_program_runner.hpp"
 #include "vpu_register_ids.hpp"
 
 namespace
 {
-  std::vector<std::uint8_t> readBinary(const std::string &path)
-  {
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-    {
-      throw std::runtime_error("Could not open integration fixture: " + path);
-    }
-
-    return std::vector<std::uint8_t>(
-      std::istreambuf_iterator<char>(input),
-      std::istreambuf_iterator<char>());
-  }
-
-  void appendWord(
-    std::vector<std::uint8_t> *bytes,
-    std::uint32_t value)
-  {
-    bytes->push_back(value & 0xff);
-    bytes->push_back((value >> 8) & 0xff);
-    bytes->push_back((value >> 16) & 0xff);
-    bytes->push_back((value >> 24) & 0xff);
-  }
-
   std::vector<std::uint8_t> expectedFill(
     std::uint16_t count,
     std::uint16_t firstValue,
@@ -46,7 +20,7 @@ namespace
         static_cast<std::uint16_t>(firstValue + index * increment);
       for (std::uint8_t lane = 0; lane < 4; lane++)
       {
-        appendWord(&expected, value);
+        vpu_integration::appendWord(&expected, value);
       }
     }
     return expected;
@@ -61,15 +35,14 @@ TEST_CASE("VU0 integer fill integration program")
 
   VPU vpu;
   std::vector<std::uint8_t> parameters;
-  appendWord(&parameters, count);
-  appendWord(&parameters, firstValue);
-  appendWord(&parameters, increment);
-  appendWord(&parameters, 0);
+  vpu_integration::appendWord(&parameters, count);
+  vpu_integration::appendWord(&parameters, firstValue);
+  vpu_integration::appendWord(&parameters, increment);
+  vpu_integration::appendWord(&parameters, 0);
   vpu.writeDataMemory(0, parameters);
 
   VPUProgramRunConfig config;
-  config.microProgram = readBinary(
-    std::string(NEKO_TEST_FIXTURE_DIR) + "/integer_fill.bin");
+  config.microProgram = vpu_integration::readBinary("integer_fill.bin");
   config.cycleBudget = 200;
   config.outputSize = count * 16;
 

@@ -50,6 +50,8 @@ add_executable(neko_tests
     neko_tests/vpu/vpu_flag_tests.cpp
     neko_tests/vpu/vpu_fp_calculation_tests.cpp
     neko_tests/vpu/integration/integer_fill_tests.cpp
+    neko_tests/vpu/integration/lane_masks_tests.cpp
+    neko_tests/vpu/integration/vpu_integration_test_utils.cpp
     neko_tests/vpu/vpu_debug_tests.cpp
     neko_tests/vpu/vpu_memory_tests.cpp
     neko_tests/vpu/vpu_microinstruction_tests.cpp

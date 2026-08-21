@@ -149,7 +149,7 @@ capstone program that proves the components work together:
 - [x] `integer_fill.asm`: exercise `ILW`, `IADD`, `ISUBIU`, `MFIR`, `SQI`,
       backward `IBNE`, and a meaningful branch delay slot while generating
       distinct qword values
-- [ ] `lane_masks.asm`: verify `.x`, `.y`, `.z`, `.w`, and mixed destination
+- [x] `lane_masks.asm`: verify `.x`, `.y`, `.z`, `.w`, and mixed destination
       masks using distinct sentinel values in every lane
 - [ ] `branch_paths.asm`: cover taken and untaken forward and backward branches,
       delay-slot effects, and path-signature output
