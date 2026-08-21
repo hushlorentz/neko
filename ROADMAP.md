@@ -123,6 +123,61 @@ committed. The expected output should be defined independently of the emulator.
 The external program has passed locally; the committed integration fixture will
 use independently authored source and expected output.
 
+### Integration Harness and Diagnostics
+
+Build a thin reusable diagnostic layer before the integration programs become
+complex, without making a full debugger a prerequisite:
+
+- [ ] Add a reusable program runner with a cycle budget and final checks for
+      execution state, PC, termination position, cycle count, and data memory
+- [ ] Capture the existing issue, stall, writeback, and Force Break trace events
+- [ ] Add optional newline-delimited JSON trace output in the runner/frontend,
+      keeping serialization, files, and streams outside the VPU core
+- [ ] Allow traces to be restricted to a cycle range for focused deterministic
+      reruns
+- [ ] Keep tracing disabled during normal passing runs and make diagnostic
+      output available on demand or after a failure
+- [ ] Add richer events such as branch decisions, stall reasons, memory
+      accesses, and pipeline-stage transitions only when a failing integration
+      test demonstrates a specific observability gap
+
+### Original Integration Suite
+
+Prefer several focused programs with attributable failures, followed by one
+capstone program that proves the components work together:
+
+- [ ] `integer_fill.asm`: exercise `ILW`, `IADD`, `ISUBIU`, `MFIR`, `SQI`,
+      backward `IBNE`, and a meaningful branch delay slot while generating
+      distinct qword values
+- [ ] `lane_masks.asm`: verify `.x`, `.y`, `.z`, `.w`, and mixed destination
+      masks using distinct sentinel values in every lane
+- [ ] `branch_paths.asm`: cover taken and untaken forward and backward branches,
+      delay-slot effects, and path-signature output
+- [ ] `indirect_calls.asm`: cover `JR`, `JALR`, delayed control transfer, link
+      visibility, and call/return signatures
+- [ ] `vector_math.asm`: exercise upper FMAC operations, dependencies,
+      accumulator behavior, and exact expected vectors
+- [ ] `dual_issue.asm`: sustain simultaneous upper/lower execution and verify
+      both output and exact cycle count
+- [ ] `termination.asm`: cover E-bit delay behavior, branch/E overlap, final
+      memory markers, and the stopping PC
+- [ ] Add a capstone vector kernel that loads input vectors, applies a scale and
+      bias, clamps the results, and stores them while overlapping memory,
+      integer, branch, and upper-pipeline work
+
+Build these in the order: integer fill, lane masks, branch paths, vector math,
+then the dual-issue capstone. Initially use exactly representable floating-point
+inputs such as integers, halves, and powers of two.
+
+Each committed fixture should include:
+
+- Independently authored assembly source
+- Its generated raw microprogram binary
+- The assembler version and exact regeneration command
+- A host-side oracle written independently from the assembly
+- Expected output memory and termination PC
+- An exact expected cycle count where timing is stable
+
 ## Milestone 2: VU Execution Accuracy
 
 ### Pipeline Model
