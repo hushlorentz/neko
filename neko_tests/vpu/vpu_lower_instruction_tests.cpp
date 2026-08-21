@@ -3,6 +3,7 @@
 
 #include "catch.hpp"
 #include "vpu.hpp"
+#include "vpu_field_mask.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
@@ -10,10 +11,10 @@ namespace
 {
   void appendWord(std::vector<uint8_t> *instructions, uint32_t word)
   {
-    instructions->push_back((word >> 24) & 0xff);
-    instructions->push_back((word >> 16) & 0xff);
-    instructions->push_back((word >> 8) & 0xff);
     instructions->push_back(word & 0xff);
+    instructions->push_back((word >> 8) & 0xff);
+    instructions->push_back((word >> 16) & 0xff);
+    instructions->push_back((word >> 24) & 0xff);
   }
 
   void appendInstructionPair(
@@ -21,8 +22,8 @@ namespace
     uint32_t upper,
     uint32_t lower)
   {
-    appendWord(instructions, upper);
     appendWord(instructions, lower);
+    appendWord(instructions, upper);
   }
 
   uint32_t iadd(uint8_t id, uint8_t is, uint8_t it)
@@ -48,7 +49,7 @@ namespace
   {
     return
       VPU_MFIR_ENCODING |
-      (static_cast<uint32_t>(fieldMask) << 21) |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
       (static_cast<uint32_t>(ft) << 16) |
       (static_cast<uint32_t>(is) << 11);
   }
@@ -61,7 +62,7 @@ namespace
   {
     return
       VPU_ILW_ENCODING |
-      (static_cast<uint32_t>(fieldMask) << 21) |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
       (static_cast<uint32_t>(it) << 16) |
       (static_cast<uint32_t>(is) << 11) |
       (static_cast<uint16_t>(immediate) & 0x7ff);
@@ -75,7 +76,7 @@ namespace
   {
     return
       VPU_LQ_ENCODING |
-      (static_cast<uint32_t>(fieldMask) << 21) |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
       (static_cast<uint32_t>(ft) << 16) |
       (static_cast<uint32_t>(is) << 11) |
       (static_cast<uint16_t>(immediate) & 0x7ff);
@@ -85,7 +86,7 @@ namespace
   {
     return
       VPU_SQI_ENCODING |
-      (static_cast<uint32_t>(fieldMask) << 21) |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
       (static_cast<uint32_t>(it) << 16) |
       (static_cast<uint32_t>(fs) << 11);
   }

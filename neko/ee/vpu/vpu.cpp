@@ -2,6 +2,7 @@
 #include "bit_ops.hpp"
 #include "floating_point_ops.hpp"
 #include "vpu.hpp"
+#include "vpu_field_mask.hpp"
 #include "vpu_flags.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
@@ -510,30 +511,20 @@ uint32_t VPU::nextUpperInstruction()
     throw runtime_error("Microinstruction fetch is outside micro memory.");
   }
 
-  uint32_t instruction = 0;
-  uint8_t shift = 24;
-
-  for (vector<uint8_t>::iterator it = microMem.begin() + microMemPC; it < microMem.begin() + (microMemPC + 4); ++it)
-  {
-    instruction |= *it << shift;
-    shift -= 8;
-  }
-
-  return instruction;
+  return
+    static_cast<uint32_t>(microMem[microMemPC + 4]) |
+    (static_cast<uint32_t>(microMem[microMemPC + 5]) << 8) |
+    (static_cast<uint32_t>(microMem[microMemPC + 6]) << 16) |
+    (static_cast<uint32_t>(microMem[microMemPC + 7]) << 24);
 }
 
 uint32_t VPU::nextLowerInstruction()
 {
-  uint32_t instruction = 0;
-  uint8_t shift = 24;
-
-  for (vector<uint8_t>::iterator it = microMem.begin() + microMemPC + 4; it < microMem.begin() + (microMemPC + 8); ++it)
-  {
-    instruction |= *it << shift;
-    shift -= 8;
-  }
-
-  return instruction;
+  return
+    static_cast<uint32_t>(microMem[microMemPC]) |
+    (static_cast<uint32_t>(microMem[microMemPC + 1]) << 8) |
+    (static_cast<uint32_t>(microMem[microMemPC + 2]) << 16) |
+    (static_cast<uint32_t>(microMem[microMemPC + 3]) << 24);
 }
 
 uint16_t VPU::processUpperInstruction(uint32_t upperInstruction)
@@ -663,7 +654,7 @@ uint8_t VPU::destinationMaskFromOpCode(uint16_t opCode, uint8_t encodedMask)
     case VPU_OPMSUB:
       return FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD | FP_REGISTER_Z_FIELD;
     default:
-      return encodedMask;
+      return vpuFieldMaskFromEncoding(encodedMask);
   }
 }
 

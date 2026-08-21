@@ -1,17 +1,18 @@
 #include "catch.hpp"
 #include "vpu.hpp"
 #include "vpu_opcodes.hpp"
+#include "vpu_register_ids.hpp"
 
 namespace
 {
   void appendInstruction(std::vector<uint8_t> *instructions, uint32_t upper, uint32_t lower)
   {
-    for (uint32_t instruction : {upper, lower})
+    for (uint32_t instruction : {lower, upper})
     {
-      instructions->push_back((instruction >> 24) & 0xff);
-      instructions->push_back((instruction >> 16) & 0xff);
-      instructions->push_back((instruction >> 8) & 0xff);
       instructions->push_back(instruction & 0xff);
+      instructions->push_back((instruction >> 8) & 0xff);
+      instructions->push_back((instruction >> 16) & 0xff);
+      instructions->push_back((instruction >> 24) & 0xff);
     }
   }
 }
@@ -56,6 +57,45 @@ TEST_CASE("VPU Memory Tests")
     REQUIRE_THROWS_WITH(
       vpu.uploadMicroInstructions(incompletePair),
       "Microprogram size must be a multiple of 8 bytes.");
+  }
+
+  SECTION("Microprogram uploads use raw PS2 little-endian lower-upper layout")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions = {
+      0x3c, 0x03, 0x00, 0x80,
+      0xff, 0x02, 0x00, 0x40,
+      0x3c, 0x03, 0x00, 0x80,
+      0xff, 0x02, 0x00, 0x00
+    };
+
+    vpu.uploadMicroInstructions(instructions);
+
+    REQUIRE_NOTHROW(vpu.initMicroMode());
+    REQUIRE(vpu.terminationPosition() == 2);
+  }
+
+  SECTION("Raw lower destination masks map encoded x to the internal x lane")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions = {
+      0x00, 0x00, 0x01, 0x09,
+      0xff, 0x02, 0x00, 0x40,
+      0x3c, 0x03, 0x00, 0x80,
+      0xff, 0x02, 0x00, 0x00
+    };
+    std::vector<uint8_t> data = {
+      0x11, 0x11, 0x00, 0x00,
+      0x22, 0x22, 0x00, 0x00,
+      0x33, 0x33, 0x00, 0x00,
+      0x44, 0x44, 0x00, 0x00
+    };
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.writeDataMemory(0, data);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 0x1111);
   }
 
   SECTION("Instruction fetch rejects execution beyond micro memory")

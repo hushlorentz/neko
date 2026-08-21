@@ -7,19 +7,26 @@ namespace
 {
   void appendInstruction(std::vector<uint8_t> *instructions, uint32_t instruction)
   {
-    instructions->push_back((instruction >> 24) & 0xff);
-    instructions->push_back((instruction >> 16) & 0xff);
-    instructions->push_back((instruction >> 8) & 0xff);
     instructions->push_back(instruction & 0xff);
+    instructions->push_back((instruction >> 8) & 0xff);
+    instructions->push_back((instruction >> 16) & 0xff);
+    instructions->push_back((instruction >> 24) & 0xff);
+  }
+
+  void appendInstructionPair(
+    std::vector<uint8_t> *instructions,
+    uint32_t upper,
+    uint32_t lower = VPU_LOWER_NOP)
+  {
+    appendInstruction(instructions, lower);
+    appendInstruction(instructions, upper);
   }
 
   void runTerminatingInstruction(VPU *vpu, uint32_t terminationBit)
   {
     std::vector<uint8_t> instructions;
-    appendInstruction(&instructions, terminationBit | VPU_NOP);
-    appendInstruction(&instructions, VPU_LOWER_NOP);
-    appendInstruction(&instructions, VPU_NOP);
-    appendInstruction(&instructions, VPU_LOWER_NOP);
+    appendInstructionPair(&instructions, terminationBit | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
     vpu->uploadMicroInstructions(instructions);
     vpu->initMicroMode();
   }
@@ -35,10 +42,8 @@ namespace
       opCode;
 
     std::vector<uint8_t> instructions;
-    appendInstruction(&instructions, instruction);
-    appendInstruction(&instructions, VPU_LOWER_NOP);
-    appendInstruction(&instructions, VPU_NOP);
-    appendInstruction(&instructions, VPU_LOWER_NOP);
+    appendInstructionPair(&instructions, instruction);
+    appendInstructionPair(&instructions, VPU_NOP);
     vpu->uploadMicroInstructions(instructions);
     vpu->initMicroMode();
   }
@@ -173,10 +178,8 @@ TEST_CASE("VPU State Tests")
         (VPU_REGISTER_VF02 << VPU_FS_REG_SHIFT) |
         (VPU_REGISTER_VF03 << VPU_FD_REG_SHIFT) |
         VPU_ADD;
-      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, delayInstruction);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, delayInstruction);
       vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 3, 4);
       vpu.loadFPRegister(VPU_REGISTER_VF02, 10, 20, 30, 40);
       vpu.uploadMicroInstructions(instructions);
@@ -195,12 +198,9 @@ TEST_CASE("VPU State Tests")
     SECTION("Instructions after the E delay slot are not fetched")
     {
       std::vector<uint8_t> instructions;
-      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, 0x30);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, VPU_NOP);
+      appendInstructionPair(&instructions, 0x30);
       vpu.uploadMicroInstructions(instructions);
 
       REQUIRE_NOTHROW(vpu.initMicroMode());
@@ -224,10 +224,8 @@ TEST_CASE("VPU State Tests")
         (VPU_REGISTER_VF04 << VPU_FS_REG_SHIFT) |
         (VPU_REGISTER_VF05 << VPU_FD_REG_SHIFT) |
         VPU_ADD;
-      appendInstruction(&instructions, terminatingInstruction);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, delayInstruction);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, terminatingInstruction);
+      appendInstructionPair(&instructions, delayInstruction);
       vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 3, 4);
       vpu.loadFPRegister(VPU_REGISTER_VF02, 10, 20, 30, 40);
       vpu.loadFPRegister(VPU_REGISTER_VF04, 100, 200, 300, 400);
@@ -245,10 +243,8 @@ TEST_CASE("VPU State Tests")
     SECTION("E cannot be set again in the E delay slot")
     {
       std::vector<uint8_t> instructions;
-      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
       vpu.uploadMicroInstructions(instructions);
 
       REQUIRE_THROWS_WITH(
@@ -274,12 +270,9 @@ TEST_CASE("VPU State Tests")
     SECTION("A disabled D bit does not halt execution")
     {
       std::vector<uint8_t> instructions;
-      appendInstruction(&instructions, VPU_D_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, VPU_D_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, VPU_NOP);
       vpu.uploadMicroInstructions(instructions);
 
       vpu.initMicroMode();
@@ -291,10 +284,8 @@ TEST_CASE("VPU State Tests")
     SECTION("D-bit termination does not execute an E-style delay slot")
     {
       std::vector<uint8_t> instructions;
-      appendInstruction(&instructions, VPU_D_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, 0x30);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, VPU_D_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, 0x30);
       vpu.uploadMicroInstructions(instructions);
       vpu.setDBitEnabled(true);
 
@@ -316,12 +307,9 @@ TEST_CASE("VPU State Tests")
     SECTION("A disabled T bit does not halt execution")
     {
       std::vector<uint8_t> instructions;
-      appendInstruction(&instructions, VPU_T_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, VPU_E_BIT | VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, VPU_T_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+      appendInstructionPair(&instructions, VPU_NOP);
       vpu.uploadMicroInstructions(instructions);
 
       vpu.initMicroMode();
@@ -350,10 +338,8 @@ TEST_CASE("VPU State Tests")
     SECTION("VPU transitions from Run to Stop when a ForceBreak occurs")
     {
       std::vector<uint8_t> instructions;
-      appendInstruction(&instructions, VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
-      appendInstruction(&instructions, VPU_NOP);
-      appendInstruction(&instructions, VPU_LOWER_NOP);
+      appendInstructionPair(&instructions, VPU_NOP);
+      appendInstructionPair(&instructions, VPU_NOP);
       vpu.uploadMicroInstructions(instructions);
       vpu.startMicroMode();
       vpu.tick();

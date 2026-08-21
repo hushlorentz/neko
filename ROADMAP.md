@@ -111,15 +111,17 @@ Complete the branch-sensitive timing and hazard work before adding `IBNE`.
 
 ### Integration Test
 
-- [ ] Assemble the source into a raw binary with `naken_asm`
-- [ ] Verify instruction byte order and pair layout
-- [ ] Load input parameters through the checked data-memory API
-- [ ] Execute from address zero with a cycle budget
-- [ ] Compare the final VU memory with hand-defined expected qwords
+- [x] Assemble the source into a raw binary with `naken_asm`
+- [x] Verify instruction byte order and pair layout
+- [x] Load input parameters through the checked data-memory API
+- [x] Execute from address zero with a cycle budget
+- [x] Compare the final VU memory with hand-defined expected qwords
 - [ ] Optionally compare a trace with PCSX2 or real hardware
 
 External source and generated fixtures require a license review before being
 committed. The expected output should be defined independently of the emulator.
+The external program has passed locally; the committed integration fixture will
+use independently authored source and expected output.
 
 ## Milestone 2: VU Execution Accuracy
 

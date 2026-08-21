@@ -1,5 +1,6 @@
 #include <stdexcept>
 
+#include "vpu_field_mask.hpp"
 #include "vpu_lower_instruction.hpp"
 #include "vpu_opcodes.hpp"
 
@@ -93,8 +94,8 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.opCode = VPU_ILW;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
-    decoded.destinationFieldMask =
-      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
+    decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
     decoded.immediate = signedImmediate11(instruction);
     return decoded;
   }
@@ -105,8 +106,8 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.opCode = VPU_LQ;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
-    decoded.destinationFieldMask =
-      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
+    decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
     decoded.immediate = signedImmediate11(instruction);
     return decoded;
   }
@@ -117,8 +118,8 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.opCode = VPU_MFIR;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
-    decoded.destinationFieldMask =
-      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
+    decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
     return decoded;
   }
 
@@ -129,8 +130,8 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.sourceRegister2 = registerField(instruction, LOWER_IT_SHIFT);
     decoded.destinationRegister = decoded.sourceRegister2;
-    decoded.destinationFieldMask =
-      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK;
+    decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
     return decoded;
   }
 

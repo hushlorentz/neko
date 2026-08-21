@@ -10,10 +10,10 @@ namespace
 {
   void appendWord(std::vector<uint8_t> *instructions, uint32_t word)
   {
-    instructions->push_back((word >> 24) & 0xff);
-    instructions->push_back((word >> 16) & 0xff);
-    instructions->push_back((word >> 8) & 0xff);
     instructions->push_back(word & 0xff);
+    instructions->push_back((word >> 8) & 0xff);
+    instructions->push_back((word >> 16) & 0xff);
+    instructions->push_back((word >> 24) & 0xff);
   }
 
   void appendInstructionPair(
@@ -21,8 +21,8 @@ namespace
     uint32_t upper,
     uint32_t lower = VPU_LOWER_NOP)
   {
-    appendWord(instructions, upper);
     appendWord(instructions, lower);
+    appendWord(instructions, upper);
   }
 
   uint32_t addInstruction(
