@@ -49,6 +49,7 @@ add_executable(neko_tests
     neko_tests/math/floating_point_tests.cpp
     neko_tests/vpu/vpu_flag_tests.cpp
     neko_tests/vpu/vpu_fp_calculation_tests.cpp
+    neko_tests/vpu/integration/integer_fill_tests.cpp
     neko_tests/vpu/vpu_debug_tests.cpp
     neko_tests/vpu/vpu_memory_tests.cpp
     neko_tests/vpu/vpu_microinstruction_tests.cpp
@@ -73,6 +74,9 @@ add_executable(neko_tests
 target_include_directories(neko_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/neko_tests
     ${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/vpu/opcode_tests
+)
+target_compile_definitions(neko_tests PRIVATE
+    NEKO_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/vpu/integration"
 )
 target_link_libraries(neko_tests PRIVATE neko_diagnostics)
 

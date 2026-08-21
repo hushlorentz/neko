@@ -146,7 +146,7 @@ complex, without making a full debugger a prerequisite:
 Prefer several focused programs with attributable failures, followed by one
 capstone program that proves the components work together:
 
-- [ ] `integer_fill.asm`: exercise `ILW`, `IADD`, `ISUBIU`, `MFIR`, `SQI`,
+- [x] `integer_fill.asm`: exercise `ILW`, `IADD`, `ISUBIU`, `MFIR`, `SQI`,
       backward `IBNE`, and a meaningful branch delay slot while generating
       distinct qword values
 - [ ] `lane_masks.asm`: verify `.x`, `.y`, `.z`, `.w`, and mixed destination
