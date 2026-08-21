@@ -51,5 +51,20 @@ Expected SHA-256:
 ee4643e517cb599fc0d654e74bd126bf0e980434ac545333b81ce6f34b992c45
 ```
 
+Regenerate `indirect_calls.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/indirect_calls.bin \
+  neko_tests/vpu/integration/indirect_calls.asm
+```
+
+Expected SHA-256:
+
+```text
+dbde6ab0815c053b766f3aa57a84fe47c45ec89a20c32833c05a9fad130828df
+```
+
 The C++ test computes expected memory independently rather than reproducing the
 assembly implementation.

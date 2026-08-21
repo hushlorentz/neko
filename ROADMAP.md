@@ -153,7 +153,7 @@ capstone program that proves the components work together:
       masks using distinct sentinel values in every lane
 - [x] `branch_paths.asm`: cover taken and untaken forward and backward branches,
       delay-slot effects, and path-signature output
-- [ ] `indirect_calls.asm`: cover `JR`, `JALR`, delayed control transfer, link
+- [x] `indirect_calls.asm`: cover `JR`, `JALR`, delayed control transfer, link
       visibility, and call/return signatures
 - [ ] `vector_math.asm`: exercise upper FMAC operations, dependencies,
       accumulator behavior, and exact expected vectors
