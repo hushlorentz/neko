@@ -81,6 +81,14 @@ implementation details.
 - [x] Verify invalid `ILW` masks are rejected
 - [x] Verify `I`-bit data waits for paired upper issue
 
+### Correctness Hardening
+
+Complete the branch-sensitive timing and hazard work before adding `IBNE`.
+
+- [x] Make lower-instruction hazard handling exhaustive
+- [x] Make integer hazard state reusable by branch control
+- [ ] Separate IALU bypass availability from S-stage writeback
+
 ### Branch Control
 
 - [ ] Implement relative and register-based branch targets
@@ -117,6 +125,8 @@ committed. The expected output should be defined independently of the emulator.
 - [ ] Replace the monolithic run loop with a system-schedulable clock interface
 - [ ] Give FMAC stages explicit timing behavior
 - [ ] Add IALU, LSU, branch, FDIV, EFU, and XGKICK pipelines
+- [ ] Reject pipeline types without defined stage timing
+- [ ] Carry operation-specific state on pipelines instead of pending decode state
 - [ ] Model register, flag, and special-register availability timing
 - [ ] Validate stalls and forwarding behavior from manual examples
 - [ ] Add structural hazards and pipeline-specific synchronization
@@ -133,7 +143,7 @@ bit-accurate VU arithmetic.
 - [ ] Implement VU 24-bit truncating add, subtract, and multiply
 - [ ] Implement division and square-root exception behavior
 - [ ] Correct `0 / 0` to return signed `MAX` with the I flag
-- [ ] Implement truncating fixed-point conversions
+- [ ] Implement truncating fixed-point conversions with defined out-of-range behavior
 - [ ] Validate edge cases against the VU manual and hardware-derived vectors
 - [ ] Keep the interpreter implementation as an oracle for any future fast path
 

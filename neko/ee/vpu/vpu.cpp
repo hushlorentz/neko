@@ -893,36 +893,60 @@ void VPU::startLSUInstruction(const LowerInstruction &instruction)
   }
 }
 
+bool VPU::hasPendingIntegerWrite(uint8_t registerID) const
+{
+  return
+    registerID != VPU_REGISTER_VI00 &&
+    pendingIntegerWrites[registerID] != 0;
+}
+
 bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
 {
-  const auto integerRegisterPending = [this](uint8_t registerID) {
-    return
-      registerID != VPU_REGISTER_VI00 &&
-      pendingIntegerWrites[registerID] != 0;
-  };
-
-  switch (instruction.opCode)
+  switch (instruction.unit)
   {
-    case VPU_IADD:
-      return
-        integerRegisterPending(instruction.sourceRegister1) ||
-        integerRegisterPending(instruction.sourceRegister2);
-    case VPU_ISUBIU:
-    case VPU_MFIR:
-    case VPU_ILW:
-    case VPU_LQ:
-      return integerRegisterPending(instruction.sourceRegister1);
-    case VPU_SQI:
-      return
-        integerRegisterPending(instruction.sourceRegister2) ||
-        orchestrator.hasRegisterHazard(
-          instruction.sourceRegister1,
-          instruction.destinationFieldMask,
-          VPU_REGISTER_VF00,
-          FP_REGISTER_NO_FIELDS);
-    default:
+    case LowerExecutionUnit::None:
+    case LowerExecutionUnit::Immediate:
       return false;
+    case LowerExecutionUnit::IALU:
+      switch (instruction.opCode)
+      {
+        case VPU_IADD:
+          return
+            hasPendingIntegerWrite(instruction.sourceRegister1) ||
+            hasPendingIntegerWrite(instruction.sourceRegister2);
+        case VPU_ISUBIU:
+          return hasPendingIntegerWrite(instruction.sourceRegister1);
+        default:
+          throw runtime_error("Unsupported VU IALU hazard check.");
+      }
+    case LowerExecutionUnit::LSU:
+      switch (instruction.opCode)
+      {
+        case VPU_ILW:
+        case VPU_LQ:
+          return hasPendingIntegerWrite(instruction.sourceRegister1);
+        case VPU_SQI:
+          return
+            hasPendingIntegerWrite(instruction.sourceRegister2) ||
+            orchestrator.hasRegisterHazard(
+              instruction.sourceRegister1,
+              instruction.destinationFieldMask,
+              VPU_REGISTER_VF00,
+              FP_REGISTER_NO_FIELDS);
+        default:
+          throw runtime_error("Unsupported VU LSU hazard check.");
+      }
+    case LowerExecutionUnit::FMAC:
+      if (instruction.opCode == VPU_MFIR)
+      {
+        return hasPendingIntegerWrite(instruction.sourceRegister1);
+      }
+      throw runtime_error("Unsupported VU lower FMAC hazard check.");
+    case LowerExecutionUnit::Branch:
+      throw runtime_error("VU branch hazard checks are not implemented.");
   }
+
+  throw runtime_error("Unsupported VU lower execution unit.");
 }
 
 bool VPU::lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instruction) const

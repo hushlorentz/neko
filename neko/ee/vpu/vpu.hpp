@@ -153,6 +153,7 @@ class VPU : public PipelineHandler
     void executeIALUInstruction(const LowerInstruction &instruction);
     void startLSUInstruction(const LowerInstruction &instruction);
     void startLowerFMACInstruction(const LowerInstruction &instruction);
+    bool hasPendingIntegerWrite(uint8_t registerID) const;
     bool lowerInstructionStalls(const LowerInstruction &instruction) const;
     bool lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instruction) const;
     uint16_t qwordAddress(uint16_t base, int16_t offset = 0) const;
