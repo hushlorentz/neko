@@ -128,14 +128,14 @@ use independently authored source and expected output.
 Build a thin reusable diagnostic layer before the integration programs become
 complex, without making a full debugger a prerequisite:
 
-- [ ] Add a reusable program runner with a cycle budget and final checks for
+- [x] Add a reusable program runner with a cycle budget and final checks for
       execution state, PC, termination position, cycle count, and data memory
-- [ ] Capture the existing issue, stall, writeback, and Force Break trace events
-- [ ] Add optional newline-delimited JSON trace output in the runner/frontend,
+- [x] Capture the existing issue, stall, writeback, and Force Break trace events
+- [x] Add optional newline-delimited JSON trace output in the runner/frontend,
       keeping serialization, files, and streams outside the VPU core
-- [ ] Allow traces to be restricted to a cycle range for focused deterministic
+- [x] Allow traces to be restricted to a cycle range for focused deterministic
       reruns
-- [ ] Keep tracing disabled during normal passing runs and make diagnostic
+- [x] Keep tracing disabled during normal passing runs and make diagnostic
       output available on demand or after a failure
 - [ ] Add richer events such as branch decisions, stall reasons, memory
       accesses, and pipeline-stage transitions only when a failing integration

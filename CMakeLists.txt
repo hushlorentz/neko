@@ -34,6 +34,15 @@ add_executable(neko_perf
 target_include_directories(neko_perf PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/neko_perf/clock)
 target_link_libraries(neko_perf PRIVATE neko_core)
 
+add_library(neko_diagnostics
+    neko_diagnostics/vpu_program_runner.cpp
+)
+target_include_directories(neko_diagnostics
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko_diagnostics
+)
+target_link_libraries(neko_diagnostics PUBLIC neko_core)
+
 add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/fp_register_tests.cpp
@@ -46,6 +55,7 @@ add_executable(neko_tests
     neko_tests/vpu/vpu_lower_instruction_tests.cpp
     neko_tests/vpu/vpu_lower_timing_conformance_tests.cpp
     neko_tests/vpu/vpu_pipeline_tests.cpp
+    neko_tests/vpu/vpu_program_runner_tests.cpp
     neko_tests/vpu/vpu_state_tests.cpp
     neko_tests/vpu/vpu_timing_conformance_tests.cpp
     neko_tests/vpu/opcode_tests/vpu_upper_add_tests.cpp
@@ -64,7 +74,7 @@ target_include_directories(neko_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/neko_tests
     ${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/vpu/opcode_tests
 )
-target_link_libraries(neko_tests PRIVATE neko_core)
+target_link_libraries(neko_tests PRIVATE neko_diagnostics)
 
 enable_testing()
 add_test(NAME neko_tests COMMAND neko_tests)
