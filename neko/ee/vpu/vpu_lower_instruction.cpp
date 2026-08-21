@@ -70,6 +70,23 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_JALR_MASK) == VPU_JALR_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Branch;
+    decoded.opCode = VPU_JALR;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_JR_MASK) == VPU_JR_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Branch;
+    decoded.opCode = VPU_JR;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE8_MASK) == VPU_ILW_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::LSU;

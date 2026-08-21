@@ -137,6 +137,7 @@ void VPU::forceBreak()
   endDelaySlotPending = false;
   branchDelaySlotPending = false;
   pendingBranchTaken = false;
+  pendingBranchLinkValid = false;
   terminationRequested = false;
   haltAfterDrain = false;
   terminationPositionValid = false;
@@ -298,6 +299,7 @@ void VPU::startMicroMode(uint16_t startAddress)
   endDelaySlotPending = false;
   branchDelaySlotPending = false;
   pendingBranchTaken = false;
+  pendingBranchLinkValid = false;
   terminationRequested = false;
   haltAfterDrain = false;
   state = VPU_STATE_RUN;
@@ -311,6 +313,7 @@ bool VPU::tick()
   }
 
   bool instructionIssued = false;
+  bool branchDelaySlotIssued = false;
 
   try
   {
@@ -419,18 +422,17 @@ bool VPU::tick()
 
         if (executingBranchDelaySlot)
         {
-          if (pendingBranchTaken)
-          {
-            microMemPC = pendingBranchTarget;
-          }
-          branchDelaySlotPending = false;
-          pendingBranchTaken = false;
+          branchDelaySlotIssued = true;
         }
       }
     }
 
     orchestrator.update();
     executePendingLowerInstruction();
+    if (branchDelaySlotIssued)
+    {
+      completeBranchDelaySlot();
+    }
     cycles++;
   }
   catch (...)
@@ -441,6 +443,7 @@ bool VPU::tick()
     bypassedIntegerValues.fill(0);
     branchDelaySlotPending = false;
     pendingBranchTaken = false;
+    pendingBranchLinkValid = false;
     state = VPU_STATE_STOP;
     throw;
   }
@@ -865,24 +868,59 @@ void VPU::startIALUInstruction(const LowerInstruction &instruction)
 
 void VPU::executeBranchInstruction(const LowerInstruction &instruction)
 {
+  pendingBranchLinkValid = false;
+
   switch (instruction.opCode)
   {
     case VPU_IBNE:
       pendingBranchTaken =
         integerValueForExecution(instruction.sourceRegister1) !=
         integerValueForExecution(instruction.sourceRegister2);
+      pendingBranchTarget =
+        static_cast<uint16_t>(
+          (static_cast<uint32_t>(pendingLowerInstructionAddress + 8) +
+           static_cast<int32_t>(instruction.immediate) * 8) &
+          (microMem.size() - 1));
+      break;
+    case VPU_JALR:
+      pendingBranchTaken = true;
+      pendingBranchTarget =
+        integerValueForExecution(instruction.sourceRegister1) &
+        (microMem.size() - 1);
+      if (instruction.destinationRegister != VPU_REGISTER_VI00)
+      {
+        pendingBranchLinkValid = true;
+        pendingBranchLinkRegister = instruction.destinationRegister;
+        pendingBranchLinkValue = pendingLowerInstructionAddress + 16;
+      }
+      break;
+    case VPU_JR:
+      pendingBranchTaken = true;
+      pendingBranchTarget =
+        integerValueForExecution(instruction.sourceRegister1) &
+        (microMem.size() - 1);
       break;
     default:
       throw runtime_error("Unsupported VU branch instruction.");
   }
 
-  int32_t target =
-    static_cast<int32_t>(pendingLowerInstructionAddress) + 8 +
-    static_cast<int32_t>(instruction.immediate) * 8;
-  pendingBranchTarget =
-    static_cast<uint16_t>(
-      static_cast<uint32_t>(target) & (microMem.size() - 1));
   branchDelaySlotPending = true;
+}
+
+void VPU::completeBranchDelaySlot()
+{
+  if (pendingBranchTaken)
+  {
+    microMemPC = pendingBranchTarget;
+  }
+  if (pendingBranchLinkValid)
+  {
+    intRegisters[pendingBranchLinkRegister] = pendingBranchLinkValue;
+  }
+
+  branchDelaySlotPending = false;
+  pendingBranchTaken = false;
+  pendingBranchLinkValid = false;
 }
 
 void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
@@ -990,13 +1028,18 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
       }
       throw runtime_error("Unsupported VU lower FMAC hazard check.");
     case LowerExecutionUnit::Branch:
-      if (instruction.opCode == VPU_IBNE)
+      switch (instruction.opCode)
       {
-        return
-          hasPendingIntegerWrite(instruction.sourceRegister1) ||
-          hasPendingIntegerWrite(instruction.sourceRegister2);
+        case VPU_IBNE:
+          return
+            hasPendingIntegerWrite(instruction.sourceRegister1) ||
+            hasPendingIntegerWrite(instruction.sourceRegister2);
+        case VPU_JALR:
+        case VPU_JR:
+          return hasPendingIntegerWrite(instruction.sourceRegister1);
+        default:
+          throw runtime_error("Unsupported VU branch hazard check.");
       }
-      throw runtime_error("Unsupported VU branch hazard check.");
   }
 
   throw runtime_error("Unsupported VU lower execution unit.");

@@ -53,6 +53,21 @@ namespace
       (static_cast<uint16_t>(immediate) & 0x7ff);
   }
 
+  uint32_t jr(uint8_t is)
+  {
+    return
+      VPU_JR_ENCODING |
+      (static_cast<uint32_t>(is) << 11);
+  }
+
+  uint32_t jalr(uint8_t it, uint8_t is)
+  {
+    return
+      VPU_JALR_ENCODING |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11);
+  }
+
   uint32_t ilw(
     uint8_t fieldMask,
     uint8_t it,
@@ -318,6 +333,182 @@ TEST_CASE("VU Lower Timing Conformance Tests")
     REQUIRE_THROWS_WITH(
       vpu.initMicroMode(),
       "VU lower instruction cannot execute in an E-bit delay slot.");
+  }
+
+  SECTION("JR redirects to the integer-register target after its delay slot")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 24);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      jr(VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    REQUIRE(issues[0].instructionAddress == 0);
+    REQUIRE(issues[1].instructionAddress == 8);
+    REQUIRE(issues[2].instructionAddress == 24);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 4);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0);
+  }
+
+  SECTION("JALR writes the post-delay address when it redirects")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 24);
+    vpu.loadIntRegister(VPU_REGISTER_VI15, 7);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      jalr(VPU_REGISTER_VI15, VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI15,
+        VPU_REGISTER_VI00));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI15) == 7);
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.programCounter() == 24);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI15) == 16);
+
+    vpu.run(20);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 7);
+  }
+
+  SECTION("A branch target becomes the delay slot of an E bit on the branch delay slot")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI02, 2));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    REQUIRE(issues.size() == 3);
+    REQUIRE(issues[0].instructionAddress == 0);
+    REQUIRE(issues[1].instructionAddress == 8);
+    REQUIRE(issues[2].instructionAddress == 24);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 0);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 3);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 0);
+    REQUIRE(vpu.terminationPosition() == 4);
+  }
+
+  SECTION("An E bit on a branch stops after the shared delay slot at the branch target")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI02, 2));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    REQUIRE(issues.size() == 2);
+    REQUIRE(issues[0].instructionAddress == 0);
+    REQUIRE(issues[1].instructionAddress == 8);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 3);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0);
+    REQUIRE(vpu.terminationPosition() == 3);
   }
 
   SECTION("IALU results bypass immediately but write registers at S-stage")

@@ -106,6 +106,9 @@ class VPU : public PipelineHandler
     bool branchDelaySlotPending = false;
     bool pendingBranchTaken = false;
     uint16_t pendingBranchTarget = 0;
+    bool pendingBranchLinkValid = false;
+    uint8_t pendingBranchLinkRegister = 0;
+    uint16_t pendingBranchLinkValue = 0;
     bool terminationRequested = false;
     bool haltAfterDrain = false;
     bool dEnabled = false;
@@ -155,6 +158,7 @@ class VPU : public PipelineHandler
     uint8_t srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
     void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
     void executePendingLowerInstruction();
+    void completeBranchDelaySlot();
     void startIALUInstruction(const LowerInstruction &instruction);
     void executeBranchInstruction(const LowerInstruction &instruction);
     void startLSUInstruction(const LowerInstruction &instruction);

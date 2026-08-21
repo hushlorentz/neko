@@ -94,9 +94,9 @@ Complete the branch-sensitive timing and hazard work before adding `IBNE`.
 ### Branch Control
 
 - [x] Implement signed relative branch targets
-- [ ] Implement register-based branch targets
+- [x] Implement register-based branch targets
 - [x] Implement the one-instruction branch delay slot
-- [ ] Reuse deferred-control timing where E termination and branches overlap
+- [x] Reuse deferred-control timing where E termination and branches overlap
 - [x] Verify branch timing alongside integer-register hazards
 
 ### Instructions Required by `test_vu0`
