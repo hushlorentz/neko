@@ -111,5 +111,20 @@ Expected SHA-256:
 3618324b61cedc436579ec6a9de2f29be3440185fc2cbdf99e780c4bfdfbbb21
 ```
 
+Regenerate `vector_kernel.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/vector_kernel.bin \
+  neko_tests/vpu/integration/vector_kernel.asm
+```
+
+Expected SHA-256:
+
+```text
+e5294f1866952531f320fa7306a4a772a80500bb6020d18f822656da295cb971
+```
+
 The C++ test computes expected memory independently rather than reproducing the
 assembly implementation.
