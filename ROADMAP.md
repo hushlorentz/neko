@@ -151,7 +151,7 @@ capstone program that proves the components work together:
       distinct qword values
 - [x] `lane_masks.asm`: verify `.x`, `.y`, `.z`, `.w`, and mixed destination
       masks using distinct sentinel values in every lane
-- [ ] `branch_paths.asm`: cover taken and untaken forward and backward branches,
+- [x] `branch_paths.asm`: cover taken and untaken forward and backward branches,
       delay-slot effects, and path-signature output
 - [ ] `indirect_calls.asm`: cover `JR`, `JALR`, delayed control transfer, link
       visibility, and call/return signatures

@@ -36,5 +36,20 @@ Expected SHA-256:
 41e29c6379fbbd55747539b13b467cb8e6248b45ae712de9968965a471b9c23a
 ```
 
+Regenerate `branch_paths.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/branch_paths.bin \
+  neko_tests/vpu/integration/branch_paths.asm
+```
+
+Expected SHA-256:
+
+```text
+ee4643e517cb599fc0d654e74bd126bf0e980434ac545333b81ce6f34b992c45
+```
+
 The C++ test computes expected memory independently rather than reproducing the
 assembly implementation.
