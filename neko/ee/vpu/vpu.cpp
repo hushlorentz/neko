@@ -1,6 +1,7 @@
 #include <stdexcept>
 #include "bit_ops.hpp"
 #include "floating_point_ops.hpp"
+#include "clock_scheduler.hpp"
 #include "vpu.hpp"
 #include "vpu_field_mask.hpp"
 #include "vpu_flags.hpp"
@@ -306,6 +307,16 @@ void VPU::startMicroMode(uint16_t startAddress)
   state = VPU_STATE_RUN;
 }
 
+bool VPU::clockActive() const
+{
+  return state == VPU_STATE_RUN;
+}
+
+void VPU::clock()
+{
+  tick();
+}
+
 bool VPU::tick()
 {
   if (state != VPU_STATE_RUN)
@@ -472,23 +483,12 @@ bool VPU::stepInstruction()
 
 uint32_t VPU::run(uint32_t maxCycles)
 {
-  uint32_t executedCycles = 0;
-
-  while (state == VPU_STATE_RUN && executedCycles < maxCycles)
-  {
-    tick();
-    executedCycles++;
-  }
-
-  return executedCycles;
+  return ClockScheduler().run(*this, maxCycles);
 }
 
 void VPU::executeMicroInstructions()
 {
-  while (state == VPU_STATE_RUN)
-  {
-    tick();
-  }
+  ClockScheduler().runUntilInactive(*this);
 }
 
 void VPU::setTraceCallback(VPUTraceCallback callback)

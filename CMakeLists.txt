@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(neko_core
+    neko/clock/clock_scheduler.cpp
     neko/fp_register.cpp
     neko/ee/vpu/vpu.cpp
     neko/ee/vpu/vpu_lower_instruction.cpp
@@ -19,6 +20,7 @@ add_library(neko_core
 target_include_directories(neko_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/neko
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko/clock
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vpu
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vpu/pipelines
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/math

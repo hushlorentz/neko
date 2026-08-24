@@ -1,3 +1,4 @@
+#include "clock_scheduler.hpp"
 #include "vpu_program_runner.hpp"
 
 #include <ostream>
@@ -85,7 +86,7 @@ VPUProgramRunResult runVPUProgram(
   vpu->uploadMicroInstructions(config.microProgram);
   vpu->resetCycles();
   vpu->startMicroMode(config.startAddress);
-  vpu->run(config.cycleBudget);
+  ClockScheduler().run(*vpu, config.cycleBudget);
 
   result.state = vpu->getState();
   result.programCounter = vpu->programCounter();

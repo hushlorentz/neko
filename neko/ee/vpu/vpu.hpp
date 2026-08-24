@@ -8,6 +8,7 @@
 #include <set>
 #include <vector>
 
+#include "clocked_component.hpp"
 #include "fp_register.hpp"
 #include "vpu_lower_instruction.hpp"
 #include "vpu_pipeline_handler.hpp"
@@ -49,7 +50,7 @@ struct VPUTraceEvent
 
 using VPUTraceCallback = function<void(const VPUTraceEvent &)>;
 
-class VPU : public PipelineHandler
+class VPU : public ClockedComponent, public PipelineHandler
 {
   public:
     explicit VPU(VPUType type = VPUType::VU0);
@@ -78,6 +79,8 @@ class VPU : public PipelineHandler
     void setMode(uint8_t newMode);
     void initMicroMode();
     void startMicroMode(uint16_t startAddress = 0);
+    bool clockActive() const override;
+    void clock() override;
     bool tick();
     bool stepInstruction();
     uint32_t run(uint32_t maxCycles);

@@ -182,7 +182,7 @@ Each committed fixture should include:
 
 ### Pipeline Model
 
-- [ ] Replace the monolithic run loop with a system-schedulable clock interface
+- [x] Replace the monolithic run loop with a system-schedulable clock interface
 - [ ] Give FMAC stages explicit timing behavior
 - [ ] Add IALU, LSU, branch, FDIV, EFU, and XGKICK pipelines
 - [ ] Reject pipeline types without defined stage timing

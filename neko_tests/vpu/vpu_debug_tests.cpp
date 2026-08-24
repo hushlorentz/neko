@@ -1,6 +1,7 @@
 #include <vector>
 
 #include "catch.hpp"
+#include "clock_scheduler.hpp"
 #include "vpu.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
@@ -37,6 +38,24 @@ namespace
 
 TEST_CASE("VPU Debug Execution Tests")
 {
+  SECTION("The external clock scheduler advances a VPU through its clock interface")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    ClockedComponent &component = vpu;
+    ClockScheduler scheduler;
+
+    REQUIRE(scheduler.run(component, 1) == 1);
+    REQUIRE(vpu.programCounter() == 8);
+    REQUIRE(vpu.elapsedCycles() == 1);
+    REQUIRE(vpu.getState() == VPU_STATE_RUN);
+  }
+
   SECTION("A tick advances exactly one VU cycle")
   {
     VPU vpu;
