@@ -164,10 +164,13 @@ class VPU : public ClockedComponent, public PipelineHandler
     void executePendingLowerInstruction();
     void completeBranchDelaySlot();
     void startIALUInstruction(const LowerInstruction &instruction);
-    void executeBranchInstruction(const LowerInstruction &instruction);
+    void startBranchInstruction(const LowerInstruction &instruction);
     void startLSUInstruction(const LowerInstruction &instruction);
     void startLowerFMACInstruction(const LowerInstruction &instruction);
     uint16_t integerValueForExecution(uint8_t registerID) const;
+    uint16_t integerSourceValueForPipeline(
+      const Pipeline *pipeline,
+      uint8_t registerID) const;
     bool hasPendingIntegerWrite(uint8_t registerID) const;
     bool lowerInstructionStalls(const LowerInstruction &instruction) const;
     bool lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instruction) const;
@@ -175,10 +178,12 @@ class VPU : public ClockedComponent, public PipelineHandler
     uint32_t readDataWord(uint16_t address) const;
     void writeDataWord(uint16_t address, uint32_t value);
     void startIALUPipeline(Pipeline *pipeline);
+    void executeIALUPipeline(Pipeline *pipeline);
     void finishIALUPipeline(Pipeline *pipeline);
     void startLSUPipeline(Pipeline *pipeline);
     void finishLSUPipeline(Pipeline *pipeline);
     void startFMACPipeline(Pipeline *pipeline);
+    void evaluateBranchPipeline(Pipeline *pipeline);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);
     void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);
     void setStatusFlagsFromMACFlags();

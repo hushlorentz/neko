@@ -12,6 +12,7 @@
 #define VPU_PIPELINE_TYPE_IALU 4
 #define VPU_PIPELINE_TYPE_XGKICK 5
 #define VPU_PIPELINE_TYPE_LSU 6
+#define VPU_PIPELINE_TYPE_BRANCH 7
 
 enum class VUPipelineStage : uint8_t
 {
@@ -20,7 +21,13 @@ enum class VUPipelineStage : uint8_t
   X,
   Y,
   Z,
-  S
+  S,
+  IY,
+  IZ,
+  D,
+  F,
+  N,
+  P
 };
 
 class Pipeline
@@ -38,17 +45,31 @@ class Pipeline
     uint8_t srcReg2FieldMask;
     uint16_t instructionAddress;
     uint16_t memoryAddress;
+    int16_t immediate;
+    uint16_t intSourceValue1;
+    uint16_t intSourceValue2;
+    bool intSource1Sampled;
+    bool intSource2Sampled;
     bool discardWriteback;
 
     Pipeline();
-    void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t destMask, uint8_t s1Mask, uint8_t s2Mask, uint16_t address, bool discard = false);
+    void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t destMask, uint8_t s1Mask, uint8_t s2Mask, uint16_t address, bool discard = false, int16_t immediateValue = 0);
     void setFPRegisterResult(FPRegister * reg);
     void setIntResult(int i);
     void advanceStage();
     bool isComplete() const;
     VUPipelineStage stage() const;
+    uint8_t stageIndex() const;
   private:
     VUPipelineStage currentStage;
+    uint8_t currentStageIndex;
+    uint8_t executionStageCount;
+    bool complete;
+    void configureTiming();
+    void advanceSixStagePipeline();
+    void advanceIALUPipeline();
+    void advanceFDIVPipeline();
+    void advanceEFUPipeline();
 };
 
 #endif

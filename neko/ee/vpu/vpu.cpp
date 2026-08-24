@@ -836,7 +836,7 @@ void VPU::executePendingLowerInstruction()
       startLowerFMACInstruction(instruction);
       break;
     case LowerExecutionUnit::Branch:
-      executeBranchInstruction(instruction);
+      startBranchInstruction(instruction);
       break;
     case LowerExecutionUnit::None:
       break;
@@ -845,7 +845,7 @@ void VPU::executePendingLowerInstruction()
 
 void VPU::startIALUInstruction(const LowerInstruction &instruction)
 {
-  orchestrator.startPipeline(
+  Pipeline *pipeline = orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_IALU,
     instruction.opCode,
     instruction.sourceRegister1,
@@ -854,48 +854,88 @@ void VPU::startIALUInstruction(const LowerInstruction &instruction)
     FP_REGISTER_NO_FIELDS,
     FP_REGISTER_NO_FIELDS,
     FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+    pendingLowerInstructionAddress,
+    false,
+    instruction.immediate);
+
+  if (branchDelaySlotPending && pendingBranchLinkValid)
+  {
+    // Delay-slot reads occur before JALR makes its link write visible.
+    if (instruction.sourceRegister1 == pendingBranchLinkRegister)
+    {
+      pipeline->intSourceValue1 =
+        integerValueForExecution(instruction.sourceRegister1);
+      pipeline->intSource1Sampled = true;
+    }
+    if (instruction.sourceRegister2 == pendingBranchLinkRegister)
+    {
+      pipeline->intSourceValue2 =
+        integerValueForExecution(instruction.sourceRegister2);
+      pipeline->intSource2Sampled = true;
+    }
+  }
+
+  if (instruction.destinationRegister != VPU_REGISTER_VI00)
+  {
+    pendingIALUWrites[instruction.destinationRegister]++;
+  }
 }
 
-void VPU::executeBranchInstruction(const LowerInstruction &instruction)
+void VPU::startBranchInstruction(const LowerInstruction &instruction)
+{
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_BRANCH,
+    instruction.opCode,
+    instruction.sourceRegister1,
+    instruction.sourceRegister2,
+    instruction.destinationRegister,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress,
+    false,
+    instruction.immediate);
+
+  branchDelaySlotPending = true;
+}
+
+void VPU::evaluateBranchPipeline(Pipeline *pipeline)
 {
   pendingBranchLinkValid = false;
 
-  switch (instruction.opCode)
+  switch (pipeline->opCode)
   {
     case VPU_IBNE:
       pendingBranchTaken =
-        integerValueForExecution(instruction.sourceRegister1) !=
-        integerValueForExecution(instruction.sourceRegister2);
+        integerValueForExecution(pipeline->srcReg1) !=
+        integerValueForExecution(pipeline->srcReg2);
       pendingBranchTarget =
         static_cast<uint16_t>(
-          (static_cast<uint32_t>(pendingLowerInstructionAddress + 8) +
-           static_cast<int32_t>(instruction.immediate) * 8) &
+          (static_cast<uint32_t>(pipeline->instructionAddress + 8) +
+           static_cast<int32_t>(pipeline->immediate) * 8) &
           (microMem.size() - 1));
       break;
     case VPU_JALR:
       pendingBranchTaken = true;
       pendingBranchTarget =
-        integerValueForExecution(instruction.sourceRegister1) &
+        integerValueForExecution(pipeline->srcReg1) &
         (microMem.size() - 1);
-      if (instruction.destinationRegister != VPU_REGISTER_VI00)
+      if (pipeline->destReg != VPU_REGISTER_VI00)
       {
         pendingBranchLinkValid = true;
-        pendingBranchLinkRegister = instruction.destinationRegister;
-        pendingBranchLinkValue = pendingLowerInstructionAddress + 16;
+        pendingBranchLinkRegister = pipeline->destReg;
+        pendingBranchLinkValue = pipeline->instructionAddress + 16;
       }
       break;
     case VPU_JR:
       pendingBranchTaken = true;
       pendingBranchTarget =
-        integerValueForExecution(instruction.sourceRegister1) &
+        integerValueForExecution(pipeline->srcReg1) &
         (microMem.size() - 1);
       break;
     default:
       throw runtime_error("Unsupported VU branch instruction.");
   }
-
-  branchDelaySlotPending = true;
 }
 
 void VPU::completeBranchDelaySlot()
@@ -926,7 +966,8 @@ void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
     FP_REGISTER_NO_FIELDS,
     FP_REGISTER_NO_FIELDS,
     pendingLowerInstructionAddress,
-    pendingLowerWritebackDiscarded);
+    pendingLowerWritebackDiscarded,
+    instruction.immediate);
 }
 
 void VPU::startLSUInstruction(const LowerInstruction &instruction)
@@ -941,7 +982,8 @@ void VPU::startLSUInstruction(const LowerInstruction &instruction)
     instruction.destinationFieldMask,
     0,
     pendingLowerInstructionAddress,
-    pendingLowerWritebackDiscarded);
+    pendingLowerWritebackDiscarded,
+    instruction.immediate);
 
   uint8_t integerDestination = VPU_REGISTER_VI00;
   if (instruction.opCode == VPU_ILW ||
@@ -970,6 +1012,30 @@ uint16_t VPU::integerValueForExecution(uint8_t registerID) const
     return 0;
   }
   if (pendingIALUWrites[registerID] != 0)
+  {
+    return bypassedIntegerValues[registerID];
+  }
+  return intRegisters[registerID];
+}
+
+uint16_t VPU::integerSourceValueForPipeline(
+  const Pipeline *pipeline,
+  uint8_t registerID) const
+{
+  if (registerID == VPU_REGISTER_VI00)
+  {
+    return 0;
+  }
+
+  uint8_t olderPendingWrites = pendingIALUWrites[registerID];
+  if (pipeline->type == VPU_PIPELINE_TYPE_IALU &&
+      pipeline->destReg == registerID &&
+      olderPendingWrites != 0)
+  {
+    olderPendingWrites--;
+  }
+
+  if (olderPendingWrites != 0)
   {
     return bypassedIntegerValues[registerID];
   }
@@ -1221,25 +1287,32 @@ void VPU::pipelineStarted(Pipeline * p)
   {
     pendingLowerInstructionReady = true;
   }
-
-  if (p->type == VPU_PIPELINE_TYPE_LSU)
-  {
-    startLSUPipeline(p);
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_IALU)
-  {
-    startIALUPipeline(p);
-    return;
-  }
 }
 
 void VPU::pipelineAdvanced(Pipeline *p)
 {
-  if (p->type == VPU_PIPELINE_TYPE_FMAC &&
-      p->stage() == VUPipelineStage::T)
+  if (p->stage() == VUPipelineStage::T)
   {
-    startFMACPipeline(p);
+    switch (p->type)
+    {
+      case VPU_PIPELINE_TYPE_FMAC:
+        startFMACPipeline(p);
+        break;
+      case VPU_PIPELINE_TYPE_IALU:
+        startIALUPipeline(p);
+        break;
+      case VPU_PIPELINE_TYPE_LSU:
+        startLSUPipeline(p);
+        break;
+      case VPU_PIPELINE_TYPE_BRANCH:
+        evaluateBranchPipeline(p);
+        break;
+    }
+  }
+  else if (p->type == VPU_PIPELINE_TYPE_IALU &&
+           p->stage() == VUPipelineStage::X)
+  {
+    executeIALUPipeline(p);
   }
 }
 
@@ -1491,7 +1564,7 @@ void VPU::startLSUPipeline(Pipeline *pipeline)
     {
       uint16_t address = qwordAddress(
         integerValueForExecution(pipeline->srcReg1),
-        pendingLowerInstruction.immediate);
+        pipeline->immediate);
       uint8_t fieldOffset;
 
       switch (pipeline->destFieldMask)
@@ -1520,7 +1593,7 @@ void VPU::startLSUPipeline(Pipeline *pipeline)
     {
       pipeline->memoryAddress = qwordAddress(
         integerValueForExecution(pipeline->srcReg1),
-        pendingLowerInstruction.immediate);
+        pipeline->immediate);
       FPRegister result = fpRegisters[pipeline->destReg];
       if (hasFlag(pipeline->destFieldMask, FP_REGISTER_X_FIELD))
       {
@@ -1639,6 +1712,10 @@ void VPU::pipelineFinished(Pipeline * p)
     });
     return;
   }
+  if (p->type == VPU_PIPELINE_TYPE_BRANCH)
+  {
+    return;
+  }
 
   FPRegister *destReg = destinationRegisterFromPipeline(p);
 
@@ -1719,19 +1796,35 @@ void VPU::pipelineFinished(Pipeline * p)
 
 void VPU::startIALUPipeline(Pipeline *pipeline)
 {
+  if (!pipeline->intSource1Sampled)
+  {
+    pipeline->intSourceValue1 =
+      integerSourceValueForPipeline(pipeline, pipeline->srcReg1);
+    pipeline->intSource1Sampled = true;
+  }
+  if (!pipeline->intSource2Sampled)
+  {
+    pipeline->intSourceValue2 =
+      integerSourceValueForPipeline(pipeline, pipeline->srcReg2);
+    pipeline->intSource2Sampled = true;
+  }
+}
+
+void VPU::executeIALUPipeline(Pipeline *pipeline)
+{
   uint16_t result;
 
   switch (pipeline->opCode)
   {
     case VPU_IADD:
       result =
-        integerValueForExecution(pipeline->srcReg1) +
-        integerValueForExecution(pipeline->srcReg2);
+        pipeline->intSourceValue1 +
+        pipeline->intSourceValue2;
       break;
     case VPU_ISUBIU:
       result =
-        integerValueForExecution(pipeline->srcReg1) -
-        pendingLowerInstruction.immediate;
+        pipeline->intSourceValue1 -
+        pipeline->immediate;
       break;
     default:
       throw runtime_error("Unsupported VU IALU instruction.");
@@ -1741,7 +1834,6 @@ void VPU::startIALUPipeline(Pipeline *pipeline)
   if (pipeline->destReg != VPU_REGISTER_VI00)
   {
     bypassedIntegerValues[pipeline->destReg] = result;
-    pendingIALUWrites[pipeline->destReg]++;
   }
 }
 

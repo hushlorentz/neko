@@ -13,14 +13,18 @@ class TestPipelineHandler : public PipelineHandler
   public:
     Pipeline *startedPipeline = nullptr;
     Pipeline *finishedPipeline = nullptr;
+    std::vector<VUPipelineStage> advancedStages;
+    std::vector<uint8_t> advancedStageIndices;
 
     void pipelineStarted(Pipeline *pipeline) override
     {
       startedPipeline = pipeline;
     }
 
-    void pipelineAdvanced(Pipeline *) override
+    void pipelineAdvanced(Pipeline *pipeline) override
     {
+      advancedStages.push_back(pipeline->stage());
+      advancedStageIndices.push_back(pipeline->stageIndex());
     }
 
     void pipelineFinished(Pipeline *pipeline) override
@@ -88,6 +92,187 @@ TEST_CASE("VPU Pipeline Tests")
     REQUIRE(handler.startedPipeline->stage() == VUPipelineStage::Z);
     orchestrator.update();
     REQUIRE(handler.finishedPipeline->stage() == VUPipelineStage::S);
+  }
+
+  SECTION("IALU uses explicit X, y, and z execution stages")
+  {
+    TestPipelineHandler handler;
+    orchestrator.setPipelineHandler(&handler);
+    orchestrator.initPipeline(
+      VPU_PIPELINE_TYPE_IALU,
+      VPU_IADD,
+      VPU_REGISTER_VI01,
+      VPU_REGISTER_VI02,
+      VPU_REGISTER_VI03,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+
+    REQUIRE(runOrchestrator(&orchestrator) == 6);
+    REQUIRE(handler.advancedStages == std::vector<VUPipelineStage>{
+      VUPipelineStage::T,
+      VUPipelineStage::X,
+      VUPipelineStage::IY,
+      VUPipelineStage::IZ,
+      VUPipelineStage::S
+    });
+  }
+
+  SECTION("LSU uses the FMAC-shaped six-stage pipeline")
+  {
+    TestPipelineHandler handler;
+    orchestrator.setPipelineHandler(&handler);
+    orchestrator.initPipeline(
+      VPU_PIPELINE_TYPE_LSU,
+      VPU_LQ,
+      VPU_REGISTER_VI01,
+      VPU_REGISTER_VI02,
+      VPU_REGISTER_VI03,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+
+    REQUIRE(runOrchestrator(&orchestrator) == 6);
+    REQUIRE(handler.advancedStages == std::vector<VUPipelineStage>{
+      VUPipelineStage::T,
+      VUPipelineStage::X,
+      VUPipelineStage::Y,
+      VUPipelineStage::Z,
+      VUPipelineStage::S
+    });
+  }
+
+  SECTION("The branch pipeline completes at T in two cycles")
+  {
+    TestPipelineHandler handler;
+    orchestrator.setPipelineHandler(&handler);
+    orchestrator.initPipeline(
+      VPU_PIPELINE_TYPE_BRANCH,
+      VPU_IBNE,
+      VPU_REGISTER_VI01,
+      VPU_REGISTER_VI02,
+      VPU_REGISTER_VI00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+
+    REQUIRE(runOrchestrator(&orchestrator) == 2);
+    REQUIRE(handler.advancedStages ==
+            std::vector<VUPipelineStage>{VUPipelineStage::T});
+    REQUIRE(handler.finishedPipeline->stage() == VUPipelineStage::T);
+  }
+
+  SECTION("DIV and SQRT use six FDIV execution stages")
+  {
+    for (uint16_t opCode : {VPU_DIV, VPU_SQRT})
+    {
+      PipelineOrchestrator typedOrchestrator;
+      TestPipelineHandler handler;
+      typedOrchestrator.setPipelineHandler(&handler);
+      typedOrchestrator.initPipeline(
+        VPU_PIPELINE_TYPE_FDIV,
+        opCode,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF00,
+        FP_REGISTER_NO_FIELDS,
+        FP_REGISTER_X_FIELD,
+        FP_REGISTER_X_FIELD);
+
+      REQUIRE(runOrchestrator(&typedOrchestrator) == 9);
+      REQUIRE(handler.advancedStages.front() == VUPipelineStage::T);
+      REQUIRE(handler.advancedStages[1] == VUPipelineStage::D);
+      REQUIRE(handler.advancedStageIndices[1] == 1);
+      REQUIRE(handler.advancedStages[6] == VUPipelineStage::D);
+      REQUIRE(handler.advancedStageIndices[6] == 6);
+      REQUIRE(handler.advancedStages.back() == VUPipelineStage::F);
+    }
+  }
+
+  SECTION("RSQRT uses twelve FDIV execution stages")
+  {
+    TestPipelineHandler handler;
+    orchestrator.setPipelineHandler(&handler);
+    orchestrator.initPipeline(
+      VPU_PIPELINE_TYPE_FDIV,
+      VPU_RSQRT,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD);
+
+    REQUIRE(runOrchestrator(&orchestrator) == 15);
+    REQUIRE(handler.advancedStages[12] == VUPipelineStage::D);
+    REQUIRE(handler.advancedStageIndices[12] == 12);
+    REQUIRE(handler.advancedStages.back() == VUPipelineStage::F);
+  }
+
+  SECTION("EFU timing follows each instruction's documented latency")
+  {
+    struct EFUTiming
+    {
+      uint16_t opCode;
+      uint8_t latency;
+    };
+    const EFUTiming timings[] = {
+      {VPU_EATAN, 54}, {VPU_EATANxy, 54}, {VPU_EATANxz, 54},
+      {VPU_EEXP, 44}, {VPU_ELENG, 18}, {VPU_ERCPR, 12},
+      {VPU_ERLENG, 24}, {VPU_ERSADD, 18}, {VPU_ERSQRT, 18},
+      {VPU_ESADD, 11}, {VPU_ESIN, 29}, {VPU_ESQRT, 12},
+      {VPU_ESUM, 12}
+    };
+
+    for (const EFUTiming &timing : timings)
+    {
+      PipelineOrchestrator typedOrchestrator;
+      TestPipelineHandler handler;
+      typedOrchestrator.setPipelineHandler(&handler);
+      typedOrchestrator.initPipeline(
+        VPU_PIPELINE_TYPE_EFU,
+        timing.opCode,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VF00,
+        VPU_REGISTER_VF00,
+        FP_REGISTER_NO_FIELDS,
+        FP_REGISTER_X_FIELD,
+        FP_REGISTER_NO_FIELDS);
+
+      REQUIRE(runOrchestrator(&typedOrchestrator) == timing.latency + 2);
+      REQUIRE(handler.advancedStages.front() == VUPipelineStage::T);
+      REQUIRE(handler.advancedStages[1] == VUPipelineStage::N);
+      REQUIRE(handler.advancedStageIndices[1] == 1);
+      REQUIRE(handler.advancedStages[timing.latency - 1] ==
+              VUPipelineStage::N);
+      REQUIRE(handler.advancedStageIndices[timing.latency - 1] ==
+              timing.latency - 1);
+      REQUIRE(handler.advancedStages.back() == VUPipelineStage::P);
+    }
+  }
+
+  SECTION("XGKICK uses the FMAC-shaped base pipeline")
+  {
+    TestPipelineHandler handler;
+    orchestrator.setPipelineHandler(&handler);
+    orchestrator.initPipeline(
+      VPU_PIPELINE_TYPE_XGKICK,
+      VPU_XGKICK,
+      VPU_REGISTER_VI01,
+      VPU_REGISTER_VI00,
+      VPU_REGISTER_VI00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+
+    REQUIRE(runOrchestrator(&orchestrator) == 6);
+    REQUIRE(handler.advancedStages == std::vector<VUPipelineStage>{
+      VUPipelineStage::T,
+      VUPipelineStage::X,
+      VUPipelineStage::Y,
+      VUPipelineStage::Z,
+      VUPipelineStage::S
+    });
   }
 
   SECTION("A pipeline retains explicit source and destination lane masks")
@@ -214,9 +399,25 @@ TEST_CASE("VPU Pipeline Tests")
   {
     REQUIRE_THROWS_WITH(
       orchestrator.initPipeline(
-        VPU_PIPELINE_TYPE_FDIV, VPU_ADD,
+        VPU_PIPELINE_TYPE_NONE, VPU_ADD,
         VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
         FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
       "VU pipeline type does not have defined stage timing.");
+  }
+
+  SECTION("Variable pipelines reject operations without timing definitions")
+  {
+    REQUIRE_THROWS_WITH(
+      orchestrator.initPipeline(
+        VPU_PIPELINE_TYPE_FDIV, VPU_ADD,
+        VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
+        FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
+      "VU FDIV operation does not have defined stage timing.");
+    REQUIRE_THROWS_WITH(
+      orchestrator.initPipeline(
+        VPU_PIPELINE_TYPE_EFU, VPU_ADD,
+        VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
+        FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
+      "VU EFU operation does not have defined stage timing.");
   }
 }

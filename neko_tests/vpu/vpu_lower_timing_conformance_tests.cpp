@@ -169,6 +169,131 @@ namespace
 
 TEST_CASE("VU Lower Timing Conformance Tests")
 {
+  SECTION("IALU operands are sampled at T and are not read early at M")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.tick());
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 10);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 20);
+    REQUIRE(vpu.tick());
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 100);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 200);
+    vpu.run(20);
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 30);
+  }
+
+  SECTION("LSU memory is sampled when the pipeline reaches T")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.writeDataMemory(0, wordBytes(1));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ilw(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI00,
+        0));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.tick());
+    vpu.writeDataMemory(0, wordBytes(42));
+    vpu.run(20);
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 42);
+  }
+
+  SECTION("Branch operands are sampled at T before the delay slot completes")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 1);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI02, 2));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.tick());
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+    vpu.run(20);
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    REQUIRE(issues[2].instructionAddress == 24);
+  }
+
+  SECTION("IBNE consumes the preceding IALU result through the X-to-T bypass")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      isubiu(VPU_REGISTER_VI01, VPU_REGISTER_VI01, 1));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ibne(VPU_REGISTER_VI01, VPU_REGISTER_VI00, -2));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.getState() == VPU_STATE_READY);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 0);
+  }
+
+  SECTION("A self-referential IALU operation does not bypass from itself")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 3);
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      isubiu(VPU_REGISTER_VI01, VPU_REGISTER_VI01, 1));
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 2);
+  }
+
   SECTION("Taken IBNE executes its delay slot and branches relative to it")
   {
     VPU vpu;

@@ -169,7 +169,7 @@ bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1Fie
   return false;
 }
 
-void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress)
+void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, int16_t immediate)
 {
   waiting.push_back(configurePipeline(
     pipelineType,
@@ -181,10 +181,11 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, u
     srcReg1FieldMask,
     srcReg2FieldMask,
     instructionAddress,
-    false));
+    false,
+    immediate));
 }
 
-void PipelineOrchestrator::startPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, bool discardWriteback)
+Pipeline *PipelineOrchestrator::startPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, bool discardWriteback, int16_t immediate)
 {
   Pipeline *pipeline = configurePipeline(
     pipelineType,
@@ -196,20 +197,27 @@ void PipelineOrchestrator::startPipeline(uint8_t pipelineType, uint16_t opCode, 
     srcReg1FieldMask,
     srcReg2FieldMask,
     instructionAddress,
-    discardWriteback);
+    discardWriteback,
+    immediate);
   executing.push_back(pipeline);
 
   if (pipelineHandler)
   {
     pipelineHandler->pipelineStarted(pipeline);
   }
+
+  return pipeline;
 }
 
-Pipeline *PipelineOrchestrator::configurePipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, bool discardWriteback)
+Pipeline *PipelineOrchestrator::configurePipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, bool discardWriteback, int16_t immediate)
 {
   if (pipelineType != VPU_PIPELINE_TYPE_FMAC &&
+      pipelineType != VPU_PIPELINE_TYPE_FDIV &&
+      pipelineType != VPU_PIPELINE_TYPE_EFU &&
       pipelineType != VPU_PIPELINE_TYPE_IALU &&
-      pipelineType != VPU_PIPELINE_TYPE_LSU)
+      pipelineType != VPU_PIPELINE_TYPE_XGKICK &&
+      pipelineType != VPU_PIPELINE_TYPE_LSU &&
+      pipelineType != VPU_PIPELINE_TYPE_BRANCH)
   {
     throw std::runtime_error(
       "VU pipeline type does not have defined stage timing.");
@@ -219,11 +227,9 @@ Pipeline *PipelineOrchestrator::configurePipeline(uint8_t pipelineType, uint16_t
   {
     throw std::runtime_error("Trying to add a pipeline to the PipelineOrchestrator when the max number of pipelines is already in use!");
   }
-
   Pipeline * pipeline = pool.front();
+  pipeline->configure(pipelineType, opCode, srcReg1, srcReg2, destReg, destFieldMask, srcReg1FieldMask, srcReg2FieldMask, instructionAddress, discardWriteback, immediate);
   pool.pop_front();
-
-  pipeline->configure(pipelineType, opCode, srcReg1, srcReg2, destReg, destFieldMask, srcReg1FieldMask, srcReg2FieldMask, instructionAddress, discardWriteback);
   return pipeline;
 }
 
