@@ -165,6 +165,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     uint8_t srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
     void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
     void executePendingLowerInstruction();
+    void startIRegisterInstruction(const LowerInstruction &instruction);
     void completeBranchDelaySlot();
     void startIALUInstruction(const LowerInstruction &instruction);
     void startBranchInstruction(const LowerInstruction &instruction);

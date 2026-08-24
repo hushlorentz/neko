@@ -1425,4 +1425,35 @@ TEST_CASE("VU Lower Timing Conformance Tests")
     vpu.run(30);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF06)->x == 3);
   }
+
+  SECTION("I-bit data becomes visible at T for the following instruction")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIRegister(1);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 2, 0, 0, 0);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_I_BIT |
+        addi(
+          VPU_DEST_X_BIT,
+          VPU_REGISTER_VF02,
+          VPU_REGISTER_VF01),
+      0x41200000);
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT |
+        addi(
+          VPU_DEST_X_BIT,
+          VPU_REGISTER_VF02,
+          VPU_REGISTER_VF03));
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == 3);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->x == 12);
+  }
 }

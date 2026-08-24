@@ -13,6 +13,7 @@
 #define VPU_PIPELINE_TYPE_XGKICK 5
 #define VPU_PIPELINE_TYPE_LSU 6
 #define VPU_PIPELINE_TYPE_BRANCH 7
+#define VPU_PIPELINE_TYPE_I_REGISTER 8
 
 enum class VUPipelineStage : uint8_t
 {
@@ -50,6 +51,7 @@ class Pipeline
     uint16_t instructionAddress;
     uint16_t memoryAddress;
     int16_t immediate;
+    uint32_t immediateBits;
     uint16_t intSourceValue1;
     uint16_t intSourceValue2;
     bool intSource1Sampled;
@@ -71,6 +73,7 @@ class Pipeline
     bool complete;
     void configureTiming();
     void advanceSixStagePipeline();
+    void advanceTwoStagePipeline();
     void advanceIALUPipeline();
     void advanceFDIVPipeline();
     void advanceEFUPipeline();

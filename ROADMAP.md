@@ -187,7 +187,7 @@ Each committed fixture should include:
 - [x] Add IALU, LSU, branch, FDIV, EFU, and XGKICK pipelines
 - [x] Reject pipeline types without defined stage timing
 - [x] Carry operation-specific state on pipelines instead of pending decode state
-- [ ] Model register, flag, and special-register availability timing
+- [x] Model register, flag, and special-register availability timing
 - [ ] Validate stalls and forwarding behavior from manual examples
 - [ ] Add structural hazards and pipeline-specific synchronization
 

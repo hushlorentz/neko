@@ -162,6 +162,26 @@ TEST_CASE("VPU Pipeline Tests")
     REQUIRE(handler.finishedPipeline->stage() == VUPipelineStage::T);
   }
 
+  SECTION("I-register writes become available at T in two cycles")
+  {
+    TestPipelineHandler handler;
+    orchestrator.setPipelineHandler(&handler);
+    orchestrator.initPipeline(
+      VPU_PIPELINE_TYPE_I_REGISTER,
+      0,
+      0,
+      0,
+      0,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+
+    REQUIRE(runOrchestrator(&orchestrator) == 2);
+    REQUIRE(handler.advancedStages ==
+            std::vector<VUPipelineStage>{VUPipelineStage::T});
+    REQUIRE(handler.finishedPipeline->stage() == VUPipelineStage::T);
+  }
+
   SECTION("DIV and SQRT use six FDIV execution stages")
   {
     for (uint16_t opCode : {VPU_DIV, VPU_SQRT})

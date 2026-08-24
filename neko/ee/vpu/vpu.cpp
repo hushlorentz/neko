@@ -835,7 +835,7 @@ void VPU::executePendingLowerInstruction()
   switch (instruction.unit)
   {
     case LowerExecutionUnit::Immediate:
-      iRegister.setBits(instruction.immediateBits);
+      startIRegisterInstruction(instruction);
       break;
     case LowerExecutionUnit::IALU:
       startIALUInstruction(instruction);
@@ -852,6 +852,21 @@ void VPU::executePendingLowerInstruction()
     case LowerExecutionUnit::None:
       break;
   }
+}
+
+void VPU::startIRegisterInstruction(const LowerInstruction &instruction)
+{
+  Pipeline *pipeline = orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_I_REGISTER,
+    0,
+    0,
+    0,
+    0,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress);
+  pipeline->immediateBits = instruction.immediateBits;
 }
 
 void VPU::startIALUInstruction(const LowerInstruction &instruction)
@@ -1317,6 +1332,9 @@ void VPU::pipelineAdvanced(Pipeline *p)
         break;
       case VPU_PIPELINE_TYPE_BRANCH:
         evaluateBranchPipeline(p);
+        break;
+      case VPU_PIPELINE_TYPE_I_REGISTER:
+        iRegister.setBits(p->immediateBits);
         break;
     }
   }
@@ -1843,7 +1861,8 @@ void VPU::pipelineFinished(Pipeline * p)
     });
     return;
   }
-  if (p->type == VPU_PIPELINE_TYPE_BRANCH)
+  if (p->type == VPU_PIPELINE_TYPE_BRANCH ||
+      p->type == VPU_PIPELINE_TYPE_I_REGISTER)
   {
     return;
   }

@@ -484,6 +484,67 @@ TEST_CASE("VU Manual Timing Conformance Tests")
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z));
   }
 
+  SECTION("ACC becomes architecturally visible at S while forwarding from T")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadAccumulator(100, 100, 100, 100);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 2, 0, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 3, 0, 0, 0);
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_MULA,
+        VPU_DEST_X_BIT,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF00));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.run(5) == 5);
+    REQUIRE(vpu.accumulator.x == 100);
+
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.accumulator.x == 6);
+  }
+
+  SECTION("Clipping flags become visible at FMAC S-stage writeback")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 2, 0, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 0, 0, 0, 1);
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_CLIP,
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF00));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.run(5) == 5);
+    REQUIRE(vpu.clippingFlags == 0);
+
+    REQUIRE(vpu.tick());
+    REQUIRE(vpu.clippingFlags == VPU_CLIP_FLAG_POS_X);
+  }
+
   SECTION("E delay-slot execution drains every active FMAC pipeline")
   {
     VPU vpu;
