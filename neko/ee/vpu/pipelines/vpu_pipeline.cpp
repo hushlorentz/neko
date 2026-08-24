@@ -120,6 +120,8 @@ void Pipeline::advanceStage()
       break;
     case VPU_PIPELINE_TYPE_BRANCH:
     case VPU_PIPELINE_TYPE_I_REGISTER:
+    case VPU_PIPELINE_TYPE_WAITQ:
+    case VPU_PIPELINE_TYPE_WAITP:
       advanceTwoStagePipeline();
       break;
     case VPU_PIPELINE_TYPE_FDIV:
@@ -260,6 +262,27 @@ bool Pipeline::destinationAvailableForNextTStage() const
     (type == VPU_PIPELINE_TYPE_FMAC ||
      type == VPU_PIPELINE_TYPE_LSU) &&
     currentStage == VUPipelineStage::Z;
+}
+
+bool Pipeline::blocksStructuralHazardFor(uint8_t requestedType) const
+{
+  if (requestedType == VPU_PIPELINE_TYPE_FDIV ||
+      requestedType == VPU_PIPELINE_TYPE_WAITQ)
+  {
+    return type == VPU_PIPELINE_TYPE_FDIV;
+  }
+
+  if (requestedType == VPU_PIPELINE_TYPE_EFU ||
+      requestedType == VPU_PIPELINE_TYPE_WAITP)
+  {
+    // EFU throughput releases the shared unit on Nn, one stage before P.
+    return
+      type == VPU_PIPELINE_TYPE_EFU &&
+      !(currentStage == VUPipelineStage::N &&
+        currentStageIndex == executionStageCount);
+  }
+
+  return false;
 }
 
 VUPipelineStage Pipeline::stage() const

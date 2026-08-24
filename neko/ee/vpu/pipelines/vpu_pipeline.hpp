@@ -14,6 +14,8 @@
 #define VPU_PIPELINE_TYPE_LSU 6
 #define VPU_PIPELINE_TYPE_BRANCH 7
 #define VPU_PIPELINE_TYPE_I_REGISTER 8
+#define VPU_PIPELINE_TYPE_WAITQ 9
+#define VPU_PIPELINE_TYPE_WAITP 10
 
 enum class VUPipelineStage : uint8_t
 {
@@ -65,6 +67,7 @@ class Pipeline
     void advanceStage();
     bool isComplete() const;
     bool destinationAvailableForNextTStage() const;
+    bool blocksStructuralHazardFor(uint8_t requestedType) const;
     VUPipelineStage stage() const;
     uint8_t stageIndex() const;
   private:

@@ -229,6 +229,46 @@ TEST_CASE("VPU Pipeline Tests")
     REQUIRE(handler.advancedStages.back() == VUPipelineStage::F);
   }
 
+  SECTION("A second FDIV operation stalls at M until the first reaches F")
+  {
+    Pipeline *first = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_FDIV,
+      VPU_DIV,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD);
+    orchestrator.update();
+    REQUIRE(first->stage() == VUPipelineStage::T);
+
+    Pipeline *second = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_FDIV,
+      VPU_DIV,
+      VPU_REGISTER_VF03,
+      VPU_REGISTER_VF04,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD);
+    REQUIRE(orchestrator.stalling);
+
+    for (uint8_t stage = 1; stage <= 6; stage++)
+    {
+      orchestrator.update();
+      REQUIRE(first->stage() == VUPipelineStage::D);
+      REQUIRE(first->stageIndex() == stage);
+      REQUIRE(second->stage() == VUPipelineStage::M);
+      REQUIRE(orchestrator.stalling);
+    }
+
+    orchestrator.update();
+    REQUIRE(first->stage() == VUPipelineStage::F);
+    REQUIRE(second->stage() == VUPipelineStage::T);
+    REQUIRE_FALSE(orchestrator.stalling);
+  }
+
   SECTION("EFU timing follows each instruction's documented latency")
   {
     struct EFUTiming
@@ -269,6 +309,181 @@ TEST_CASE("VPU Pipeline Tests")
               timing.latency - 1);
       REQUIRE(handler.advancedStages.back() == VUPipelineStage::P);
     }
+  }
+
+  SECTION("A second EFU operation starts when the first reaches its final N stage")
+  {
+    Pipeline *first = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_EFU,
+      VPU_ESADD,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF00,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_NO_FIELDS);
+    orchestrator.update();
+    REQUIRE(first->stage() == VUPipelineStage::T);
+
+    Pipeline *second = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_EFU,
+      VPU_ESADD,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF00,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_NO_FIELDS);
+    REQUIRE(orchestrator.stalling);
+
+    for (uint8_t stage = 1; stage < 10; stage++)
+    {
+      orchestrator.update();
+      REQUIRE(first->stage() == VUPipelineStage::N);
+      REQUIRE(first->stageIndex() == stage);
+      REQUIRE(second->stage() == VUPipelineStage::M);
+      REQUIRE(orchestrator.stalling);
+    }
+
+    orchestrator.update();
+    REQUIRE(first->stage() == VUPipelineStage::N);
+    REQUIRE(first->stageIndex() == 10);
+    REQUIRE(second->stage() == VUPipelineStage::T);
+    REQUIRE_FALSE(orchestrator.stalling);
+  }
+
+  SECTION("WAITQ completes at T when the active FDIV operation reaches F")
+  {
+    Pipeline *producer = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_FDIV,
+      VPU_DIV,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD);
+    orchestrator.update();
+
+    Pipeline *wait = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_WAITQ,
+      VPU_WAITQ,
+      0,
+      0,
+      0,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+    REQUIRE(orchestrator.stalling);
+
+    for (uint8_t stage = 1; stage <= 6; stage++)
+    {
+      orchestrator.update();
+      REQUIRE(producer->stage() == VUPipelineStage::D);
+      REQUIRE(wait->stage() == VUPipelineStage::M);
+    }
+
+    orchestrator.update();
+    REQUIRE(producer->stage() == VUPipelineStage::F);
+    REQUIRE(wait->stage() == VUPipelineStage::T);
+    REQUIRE(wait->isComplete());
+    REQUIRE_FALSE(orchestrator.stalling);
+  }
+
+  SECTION("WAITP completes at T when the active EFU reaches its final N stage")
+  {
+    Pipeline *producer = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_EFU,
+      VPU_ESADD,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF00,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_NO_FIELDS);
+    orchestrator.update();
+
+    Pipeline *wait = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_WAITP,
+      VPU_WAITP,
+      0,
+      0,
+      0,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+    REQUIRE(orchestrator.stalling);
+
+    for (uint8_t stage = 1; stage < 10; stage++)
+    {
+      orchestrator.update();
+      REQUIRE(producer->stage() == VUPipelineStage::N);
+      REQUIRE(producer->stageIndex() == stage);
+      REQUIRE(wait->stage() == VUPipelineStage::M);
+    }
+
+    orchestrator.update();
+    REQUIRE(producer->stage() == VUPipelineStage::N);
+    REQUIRE(producer->stageIndex() == 10);
+    REQUIRE(wait->stage() == VUPipelineStage::T);
+    REQUIRE(wait->isComplete());
+    REQUIRE_FALSE(orchestrator.stalling);
+  }
+
+  SECTION("FDIV and EFU resources operate independently")
+  {
+    Pipeline *fdiv = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_FDIV,
+      VPU_DIV,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD);
+    Pipeline *efu = orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_EFU,
+      VPU_ESADD,
+      VPU_REGISTER_VF03,
+      VPU_REGISTER_VF00,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_NO_FIELDS);
+
+    REQUIRE_FALSE(orchestrator.stalling);
+    orchestrator.update();
+    REQUIRE(fdiv->stage() == VUPipelineStage::T);
+    REQUIRE(efu->stage() == VUPipelineStage::T);
+    REQUIRE_FALSE(orchestrator.stalling);
+  }
+
+  SECTION("Reset clears structural stalls and pending synchronization")
+  {
+    orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_FDIV,
+      VPU_DIV,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD);
+    orchestrator.startPipeline(
+      VPU_PIPELINE_TYPE_WAITQ,
+      VPU_WAITQ,
+      0,
+      0,
+      0,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS,
+      FP_REGISTER_NO_FIELDS);
+    REQUIRE(orchestrator.stalling);
+
+    orchestrator.reset();
+
+    REQUIRE_FALSE(orchestrator.stalling);
+    REQUIRE_FALSE(orchestrator.hasNext());
   }
 
   SECTION("XGKICK uses the FMAC-shaped base pipeline")

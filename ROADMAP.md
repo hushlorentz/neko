@@ -189,7 +189,7 @@ Each committed fixture should include:
 - [x] Carry operation-specific state on pipelines instead of pending decode state
 - [x] Model register, flag, and special-register availability timing
 - [x] Validate stalls and forwarding behavior from manual examples
-- [ ] Add structural hazards and pipeline-specific synchronization
+- [x] Add FDIV/EFU structural hazards and Q/P synchronization
 
 ### Pipeline Integration Programs
 

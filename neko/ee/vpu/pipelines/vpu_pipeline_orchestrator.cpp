@@ -36,13 +36,14 @@ void PipelineOrchestrator::reset()
 
 void PipelineOrchestrator::update()
 {
+  stalling = false;
   updateExecutingPipelines();
   updateWaitingPipelines();
 }
 
 void PipelineOrchestrator::updateWaitingPipelines()
 {
-  if (waiting.size() == 0)
+  if (waiting.size() == 0 || stalling)
   {
     return;
   }
@@ -66,8 +67,6 @@ void PipelineOrchestrator::updateWaitingPipelines()
 
 void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
 {
-  stalling = false; 
-
   for (list<Pipeline *>::iterator iter = executing.begin(); iter != executing.end(); ++iter)
   {
     Pipeline * checkPipeline = *iter;
@@ -107,6 +106,14 @@ void PipelineOrchestrator::updateExecutingPipelines()
   while (iter != executing.end())
   {
     Pipeline * p = (Pipeline *)*iter;
+    if (p->stage() == VUPipelineStage::M &&
+        hasStructuralHazard(p))
+    {
+      stalling = true;
+      ++iter;
+      continue;
+    }
+
     p->advanceStage();
 
     if (pipelineHandler)
@@ -129,6 +136,24 @@ void PipelineOrchestrator::updateExecutingPipelines()
       ++iter;
     }
   }
+}
+
+bool PipelineOrchestrator::hasStructuralHazard(
+  const Pipeline *pipeline) const
+{
+  for (Pipeline *olderPipeline : executing)
+  {
+    if (olderPipeline == pipeline)
+    {
+      break;
+    }
+    if (olderPipeline->blocksStructuralHazardFor(pipeline->type))
+    {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool PipelineOrchestrator::hasNext()
@@ -202,6 +227,7 @@ Pipeline *PipelineOrchestrator::startPipeline(uint8_t pipelineType, uint16_t opC
     discardWriteback,
     immediate);
   executing.push_back(pipeline);
+  stalling = stalling || hasStructuralHazard(pipeline);
 
   if (pipelineHandler)
   {
@@ -220,7 +246,9 @@ Pipeline *PipelineOrchestrator::configurePipeline(uint8_t pipelineType, uint16_t
       pipelineType != VPU_PIPELINE_TYPE_XGKICK &&
       pipelineType != VPU_PIPELINE_TYPE_LSU &&
       pipelineType != VPU_PIPELINE_TYPE_BRANCH &&
-      pipelineType != VPU_PIPELINE_TYPE_I_REGISTER)
+      pipelineType != VPU_PIPELINE_TYPE_I_REGISTER &&
+      pipelineType != VPU_PIPELINE_TYPE_WAITQ &&
+      pipelineType != VPU_PIPELINE_TYPE_WAITP)
   {
     throw std::runtime_error(
       "VU pipeline type does not have defined stage timing.");

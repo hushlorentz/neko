@@ -132,6 +132,8 @@
 #define VPU_SQI 0x37d
 #define VPU_SQRT 0x3bd
 #define VPU_RSQRT 0x3be
+#define VPU_WAITP 0x7bf
+#define VPU_WAITQ 0x3bf
 #define VPU_XGKICK 0x6fc
 #define VPU_IADD_ENCODING 0x80000030
 #define VPU_IBNE_ENCODING 0x52000000
