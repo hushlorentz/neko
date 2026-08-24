@@ -64,6 +64,7 @@ class Pipeline
     void setIntResult(int i);
     void advanceStage();
     bool isComplete() const;
+    bool destinationAvailableForNextTStage() const;
     VUPipelineStage stage() const;
     uint8_t stageIndex() const;
   private:

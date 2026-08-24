@@ -63,7 +63,7 @@ TEST_CASE("VU0 vector math integration program")
     0x42200000);
 
   REQUIRE(result.state == VPU_STATE_READY);
-  REQUIRE(result.elapsedCycles == 44);
+  REQUIRE(result.elapsedCycles == 41);
   REQUIRE(result.programCounter == 15 * 8);
   REQUIRE(result.hasTerminationPosition);
   REQUIRE(result.terminationPosition == 15);

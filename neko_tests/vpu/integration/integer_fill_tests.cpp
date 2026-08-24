@@ -49,7 +49,7 @@ TEST_CASE("VU0 integer fill integration program")
   VPUProgramRunResult result = runVPUProgram(&vpu, config);
 
   REQUIRE(result.state == VPU_STATE_READY);
-  REQUIRE(result.elapsedCycles == 52);
+  REQUIRE(result.elapsedCycles == 49);
   REQUIRE(result.programCounter == 96);
   REQUIRE(result.hasTerminationPosition);
   REQUIRE(result.terminationPosition == 12);

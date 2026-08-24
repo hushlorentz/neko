@@ -74,6 +74,7 @@ void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
 
     if ((checkPipeline->type == VPU_PIPELINE_TYPE_LSU &&
          checkPipeline->opCode != VPU_LQ) ||
+        checkPipeline->destinationAvailableForNextTStage() ||
         checkPipeline->discardWriteback ||
         checkPipeline->destReg == VPU_REGISTER_VF00)
     {
@@ -142,6 +143,7 @@ bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1Fie
     Pipeline *pipeline = *iter;
     if ((pipeline->type == VPU_PIPELINE_TYPE_LSU &&
          pipeline->opCode != VPU_LQ) ||
+        pipeline->destinationAvailableForNextTStage() ||
         pipeline->discardWriteback ||
         pipeline->destFieldMask == 0 ||
         pipeline->destReg == VPU_REGISTER_VF00)

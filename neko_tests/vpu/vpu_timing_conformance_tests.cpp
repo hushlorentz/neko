@@ -370,19 +370,82 @@ TEST_CASE("VU Manual Timing Conformance Tests")
 
     REQUIRE(issues[0].cycle == 0);
     REQUIRE(issues[1].cycle == 1);
-    REQUIRE(stalls.size() == 4);
+    REQUIRE(stalls.size() == 3);
     REQUIRE(stalls.front().cycle == 2);
-    REQUIRE(stalls.back().cycle == 5);
+    REQUIRE(stalls.back().cycle == 4);
     REQUIRE(writebacks[0].instructionAddress == 0);
     REQUIRE(writebacks[0].cycle == 5);
     REQUIRE(issues[2].instructionAddress == 16);
-    REQUIRE(issues[2].cycle == 6);
+    REQUIRE(issues[2].cycle == 5);
     REQUIRE(writebacks[1].instructionAddress == 8);
-    REQUIRE(writebacks[1].cycle == 10);
+    REQUIRE(writebacks[1].cycle == 9);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->x == 111);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->y == 222);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->z == 333);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->w == 444);
+  }
+
+  SECTION("Manual FMAC spacing reaches producer S without a stall")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 2, 3, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 10, 20, 30, 40);
+    vpu.loadFPRegister(VPU_REGISTER_VF04, 100, 200, 300, 400);
+    appendInstructionPair(
+      &instructions,
+      addInstruction(
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(
+      &instructions,
+      addInstruction(
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF10));
+    appendInstructionPair(
+      &instructions,
+      addInstruction(
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF11));
+    appendInstructionPair(
+      &instructions,
+      addInstruction(
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF12));
+    appendInstructionPair(
+      &instructions,
+      addInstruction(
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VF04,
+        VPU_REGISTER_VF05,
+        VPU_E_BIT));
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> writebacks =
+      eventsOfType(events, VPUTraceEventType::PipelineWriteback);
+    REQUIRE(eventsOfType(events, VPUTraceEventType::PipelineStall).empty());
+    REQUIRE(writebacks.back().instructionAddress == 32);
+    REQUIRE(writebacks.back().cycle == 9);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->x == 111);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->y == 222);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->z == 333);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->w == 444);
   }
 
   SECTION("Different fields of the same register do not create a hazard")

@@ -188,8 +188,18 @@ Each committed fixture should include:
 - [x] Reject pipeline types without defined stage timing
 - [x] Carry operation-specific state on pipelines instead of pending decode state
 - [x] Model register, flag, and special-register availability timing
-- [ ] Validate stalls and forwarding behavior from manual examples
+- [x] Validate stalls and forwarding behavior from manual examples
 - [ ] Add structural hazards and pipeline-specific synchronization
+
+### Pipeline Integration Programs
+
+- [ ] Add compact assembly programs with exact results and cycle counts
+- [ ] Cover chained FMAC and ACC operations with overlapping independent work
+- [ ] Cover IALU bypass into LSU addresses and branch decisions
+- [ ] Cover LOI timing across paired and subsequent upper instructions
+- [ ] Cover mixed-lane VF hazards without stalling independent lanes
+- [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
+- [ ] Cover termination and branching with multiple active pipeline families
 
 ### VU Floating Point
 

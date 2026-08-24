@@ -254,6 +254,14 @@ bool Pipeline::isComplete() const
   return complete;
 }
 
+bool Pipeline::destinationAvailableForNextTStage() const
+{
+  return
+    (type == VPU_PIPELINE_TYPE_FMAC ||
+     type == VPU_PIPELINE_TYPE_LSU) &&
+    currentStage == VUPipelineStage::Z;
+}
+
 VUPipelineStage Pipeline::stage() const
 {
   return currentStage;

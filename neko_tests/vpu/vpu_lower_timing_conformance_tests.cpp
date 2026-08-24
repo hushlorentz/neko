@@ -727,6 +727,65 @@ TEST_CASE("VU Lower Timing Conformance Tests")
     REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 0x0235);
   }
 
+  SECTION("Manual IALU sequence bypasses results from X, y, and z")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 2);
+    vpu.loadIntRegister(VPU_REGISTER_VI03, 4);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI03));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI06,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI05));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI07,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI06));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> writebacks =
+      eventsOfType(events, VPUTraceEventType::PipelineWriteback);
+    REQUIRE(eventsOfType(events, VPUTraceEventType::PipelineStall).empty());
+    REQUIRE(writebacks.size() == 4);
+    REQUIRE(writebacks[0].cycle == 5);
+    REQUIRE(writebacks[1].cycle == 6);
+    REQUIRE(writebacks[2].cycle == 7);
+    REQUIRE(writebacks[3].cycle == 8);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 3);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 6);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI06) == 9);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI07) == 12);
+  }
+
   SECTION("A younger IALU write retires after an older ILW to the same register")
   {
     VPU vpu;

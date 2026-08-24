@@ -55,7 +55,7 @@ TEST_CASE("VU0 lane mask integration program")
     &expected, sourceX, 0xe1, 0xe2, sourceW);
 
   REQUIRE(result.state == VPU_STATE_READY);
-  REQUIRE(result.elapsedCycles == 48);
+  REQUIRE(result.elapsedCycles == 47);
   REQUIRE(result.programCounter == 17 * 8);
   REQUIRE(result.hasTerminationPosition);
   REQUIRE(result.terminationPosition == 17);

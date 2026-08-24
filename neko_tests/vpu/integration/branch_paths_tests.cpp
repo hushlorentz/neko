@@ -31,7 +31,7 @@ TEST_CASE("VU0 branch paths integration program")
   vpu_integration::appendQword(&expected, 3, 1, 2, 1);
 
   REQUIRE(result.state == VPU_STATE_READY);
-  REQUIRE(result.elapsedCycles == 37);
+  REQUIRE(result.elapsedCycles == 36);
   REQUIRE(result.programCounter == 27 * 8);
   REQUIRE(result.hasTerminationPosition);
   REQUIRE(result.terminationPosition == 27);

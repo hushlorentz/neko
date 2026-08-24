@@ -50,7 +50,7 @@ TEST_CASE("VU0 termination integration program")
     std::vector<std::uint8_t> expected;
     vpu_integration::appendQword(&expected, 1, 1, 1, 1);
     REQUIRE(result.state == VPU_STATE_READY);
-    REQUIRE(result.elapsedCycles == 21);
+    REQUIRE(result.elapsedCycles == 20);
     REQUIRE(result.programCounter == 8 * 8);
     REQUIRE(result.hasTerminationPosition);
     REQUIRE(result.terminationPosition == 8);
@@ -88,7 +88,7 @@ TEST_CASE("VU0 termination integration program")
     std::vector<std::uint8_t> expected;
     vpu_integration::appendQword(&expected, 2, 2, 2, 2);
     REQUIRE(result.state == VPU_STATE_READY);
-    REQUIRE(result.elapsedCycles == 23);
+    REQUIRE(result.elapsedCycles == 22);
     REQUIRE(result.programCounter == 20 * 8);
     REQUIRE(result.hasTerminationPosition);
     REQUIRE(result.terminationPosition == 20);

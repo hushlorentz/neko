@@ -41,7 +41,7 @@ TEST_CASE("VU0 indirect calls integration program")
   vpu_integration::appendQword(&expected, 3, 1, 1, returnAddress);
 
   REQUIRE(result.state == VPU_STATE_READY);
-  REQUIRE(result.elapsedCycles == 32);
+  REQUIRE(result.elapsedCycles == 31);
   REQUIRE(result.programCounter == 24 * 8);
   REQUIRE(result.hasTerminationPosition);
   REQUIRE(result.terminationPosition == 24);

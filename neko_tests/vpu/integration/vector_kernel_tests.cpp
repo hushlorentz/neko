@@ -89,7 +89,7 @@ TEST_CASE("VU0 vector kernel capstone integration program")
   }
 
   REQUIRE(result.state == VPU_STATE_READY);
-  REQUIRE(result.elapsedCycles == 100);
+  REQUIRE(result.elapsedCycles == 85);
   REQUIRE(result.programCounter == 19 * 8);
   REQUIRE(result.hasTerminationPosition);
   REQUIRE(result.terminationPosition == 19);

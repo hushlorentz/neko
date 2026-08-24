@@ -346,7 +346,7 @@ TEST_CASE("VPU Pipeline Tests")
       VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF06,
       FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_Y_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, 1) == 11);
+    REQUIRE(runOrchestrator(&orchestrator, 1) == 10);
   }
 
   SECTION("A source does not stall when it reads another lane of the same register")
@@ -378,7 +378,7 @@ TEST_CASE("VPU Pipeline Tests")
       VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF06,
       FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_Z_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, 1) == 11);
+    REQUIRE(runOrchestrator(&orchestrator, 1) == 10);
   }
 
   SECTION("Broadcast dependencies use the broadcast lane rather than the destination lane")
@@ -394,7 +394,7 @@ TEST_CASE("VPU Pipeline Tests")
       VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF06,
       FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_Y_FIELD);
 
-    REQUIRE(runOrchestrator(&orchestrator, 1) == 11);
+    REQUIRE(runOrchestrator(&orchestrator, 1) == 10);
   }
 
   SECTION("The orchestrator rejects more than the maximum number of pipelines")
