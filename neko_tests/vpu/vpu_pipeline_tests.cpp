@@ -19,6 +19,10 @@ class TestPipelineHandler : public PipelineHandler
       startedPipeline = pipeline;
     }
 
+    void pipelineAdvanced(Pipeline *) override
+    {
+    }
+
     void pipelineFinished(Pipeline *pipeline) override
     {
       finishedPipeline = pipeline;
@@ -56,6 +60,34 @@ TEST_CASE("VPU Pipeline Tests")
       FP_REGISTER_X_FIELD);
 
     REQUIRE(runOrchestrator(&orchestrator) == 6);
+  }
+
+  SECTION("The FMAC pipeline advances through explicit hardware stages")
+  {
+    TestPipelineHandler handler;
+    orchestrator.setPipelineHandler(&handler);
+    orchestrator.initPipeline(
+      VPU_PIPELINE_TYPE_FMAC,
+      VPU_ADD,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF03,
+      VPU_REGISTER_VF01,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_X_FIELD);
+
+    orchestrator.update();
+    REQUIRE(handler.startedPipeline->stage() == VUPipelineStage::M);
+    orchestrator.update();
+    REQUIRE(handler.startedPipeline->stage() == VUPipelineStage::T);
+    orchestrator.update();
+    REQUIRE(handler.startedPipeline->stage() == VUPipelineStage::X);
+    orchestrator.update();
+    REQUIRE(handler.startedPipeline->stage() == VUPipelineStage::Y);
+    orchestrator.update();
+    REQUIRE(handler.startedPipeline->stage() == VUPipelineStage::Z);
+    orchestrator.update();
+    REQUIRE(handler.finishedPipeline->stage() == VUPipelineStage::S);
   }
 
   SECTION("A pipeline retains explicit source and destination lane masks")
@@ -176,5 +208,15 @@ TEST_CASE("VPU Pipeline Tests")
         VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
         FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
       Contains("Trying to add a pipeline to the PipelineOrchestrator when the max number of pipelines is already in use!"));
+  }
+
+  SECTION("Pipeline types without explicit stage timing are rejected")
+  {
+    REQUIRE_THROWS_WITH(
+      orchestrator.initPipeline(
+        VPU_PIPELINE_TYPE_FDIV, VPU_ADD,
+        VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
+        FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
+      "VU pipeline type does not have defined stage timing.");
   }
 }

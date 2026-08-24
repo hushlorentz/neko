@@ -7,6 +7,7 @@ class PipelineHandler
 {
   public:
     virtual void pipelineStarted(Pipeline * pipeline) = 0;
+    virtual void pipelineAdvanced(Pipeline * pipeline) = 0;
     virtual void pipelineFinished(Pipeline * pipeline) = 0;
 };
 

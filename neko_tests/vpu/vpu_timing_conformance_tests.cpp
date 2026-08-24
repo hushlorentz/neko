@@ -116,6 +116,35 @@ TEST_CASE("VU Manual Timing Conformance Tests")
     REQUIRE(writebacks[2].cycle == 7);
   }
 
+  SECTION("FMAC operands are sampled when the pipeline reaches T stage")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 2, 3, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 10, 20, 30, 40);
+    appendInstructionPair(
+      &instructions,
+      addInstruction(
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.tick());
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 100, 200, 300, 400);
+    REQUIRE(vpu.tick());
+    vpu.run(20);
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == 110);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->y == 220);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->z == 330);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->w == 440);
+  }
+
   SECTION("A dependent FMAC instruction waits through producer S-stage writeback")
   {
     VPU vpu;

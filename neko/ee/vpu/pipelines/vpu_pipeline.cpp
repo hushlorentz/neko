@@ -1,8 +1,6 @@
 #include "vpu_pipeline.hpp"
 
-#define VU_PIPELINE_STAGES 6
-
-Pipeline::Pipeline() : type(0), opCode(0), intResult(0), srcReg1(0), srcReg2(0), destReg(0), destFieldMask(0), srcReg1FieldMask(0), srcReg2FieldMask(0), instructionAddress(0), memoryAddress(0), discardWriteback(false), currentStage(1), endStage(0)
+Pipeline::Pipeline() : type(0), opCode(0), intResult(0), srcReg1(0), srcReg2(0), destReg(0), destFieldMask(0), srcReg1FieldMask(0), srcReg2FieldMask(0), instructionAddress(0), memoryAddress(0), discardWriteback(false), currentStage(VUPipelineStage::M)
 {
 }
 
@@ -18,16 +16,7 @@ void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t 
   srcReg2FieldMask = s2Mask;
   instructionAddress = address;
   discardWriteback = discard;
-  currentStage = 1;
-
-  switch (type)
-  {
-    case VPU_PIPELINE_TYPE_FMAC:
-    case VPU_PIPELINE_TYPE_IALU:
-    case VPU_PIPELINE_TYPE_LSU:
-      endStage = VU_PIPELINE_STAGES;
-      break;
-  }
+  currentStage = VUPipelineStage::M;
 }
 
 void Pipeline::setFPRegisterResult(FPRegister * reg)
@@ -40,15 +29,36 @@ void Pipeline::setIntResult(int i)
   intResult = i;
 }
 
-void Pipeline::execute()
+void Pipeline::advanceStage()
 {
-  if (currentStage < (endStage - 1))
+  switch (currentStage)
   {
-    currentStage++;
+    case VUPipelineStage::M:
+      currentStage = VUPipelineStage::T;
+      break;
+    case VUPipelineStage::T:
+      currentStage = VUPipelineStage::X;
+      break;
+    case VUPipelineStage::X:
+      currentStage = VUPipelineStage::Y;
+      break;
+    case VUPipelineStage::Y:
+      currentStage = VUPipelineStage::Z;
+      break;
+    case VUPipelineStage::Z:
+      currentStage = VUPipelineStage::S;
+      break;
+    case VUPipelineStage::S:
+      break;
   }
 }
 
-bool Pipeline::isComplete()
+bool Pipeline::isComplete() const
 {
-  return currentStage == (endStage - 1);
+  return currentStage == VUPipelineStage::S;
+}
+
+VUPipelineStage Pipeline::stage() const
+{
+  return currentStage;
 }

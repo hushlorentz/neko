@@ -1232,7 +1232,19 @@ void VPU::pipelineStarted(Pipeline * p)
     startIALUPipeline(p);
     return;
   }
+}
 
+void VPU::pipelineAdvanced(Pipeline *p)
+{
+  if (p->type == VPU_PIPELINE_TYPE_FMAC &&
+      p->stage() == VUPipelineStage::T)
+  {
+    startFMACPipeline(p);
+  }
+}
+
+void VPU::startFMACPipeline(Pipeline *p)
+{
   uint16_t opCode = p->opCode;
   uint8_t ft = p->srcReg1;
   uint8_t fs = p->srcReg2;

@@ -106,6 +106,12 @@ void PipelineOrchestrator::updateExecutingPipelines()
   while (iter != executing.end())
   {
     Pipeline * p = (Pipeline *)*iter;
+    p->advanceStage();
+
+    if (pipelineHandler)
+    {
+      pipelineHandler->pipelineAdvanced(p);
+    }
 
     if (p->isComplete())
     {
@@ -119,7 +125,6 @@ void PipelineOrchestrator::updateExecutingPipelines()
     }
     else
     {
-      p->execute();
       ++iter;
     }
   }
@@ -202,6 +207,14 @@ void PipelineOrchestrator::startPipeline(uint8_t pipelineType, uint16_t opCode, 
 
 Pipeline *PipelineOrchestrator::configurePipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, bool discardWriteback)
 {
+  if (pipelineType != VPU_PIPELINE_TYPE_FMAC &&
+      pipelineType != VPU_PIPELINE_TYPE_IALU &&
+      pipelineType != VPU_PIPELINE_TYPE_LSU)
+  {
+    throw std::runtime_error(
+      "VU pipeline type does not have defined stage timing.");
+  }
+
   if (pool.size() == 0)
   {
     throw std::runtime_error("Trying to add a pipeline to the PipelineOrchestrator when the max number of pipelines is already in use!");

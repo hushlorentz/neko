@@ -88,8 +88,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     void uploadMicroInstructions(const vector<uint8_t> &instructions);
     void writeDataMemory(size_t address, const vector<uint8_t> &data);
     vector<uint8_t> readDataMemory(size_t address, size_t byteCount) const;
-    virtual void pipelineStarted(Pipeline * p);
-    virtual void pipelineFinished(Pipeline * p);
+    void pipelineStarted(Pipeline *p) override;
+    void pipelineAdvanced(Pipeline *p) override;
+    void pipelineFinished(Pipeline *p) override;
     bool hasMACFlag(uint16_t flag);
     bool hasStatusFlag(uint16_t flag);
     void loadIRegister(double value);
@@ -177,6 +178,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void finishIALUPipeline(Pipeline *pipeline);
     void startLSUPipeline(Pipeline *pipeline);
     void finishLSUPipeline(Pipeline *pipeline);
+    void startFMACPipeline(Pipeline *pipeline);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);
     void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);
     void setStatusFlagsFromMACFlags();

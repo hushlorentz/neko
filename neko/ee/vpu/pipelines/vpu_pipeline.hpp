@@ -13,6 +13,16 @@
 #define VPU_PIPELINE_TYPE_XGKICK 5
 #define VPU_PIPELINE_TYPE_LSU 6
 
+enum class VUPipelineStage : uint8_t
+{
+  M,
+  T,
+  X,
+  Y,
+  Z,
+  S
+};
+
 class Pipeline
 {
   public: 
@@ -34,11 +44,11 @@ class Pipeline
     void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t destMask, uint8_t s1Mask, uint8_t s2Mask, uint16_t address, bool discard = false);
     void setFPRegisterResult(FPRegister * reg);
     void setIntResult(int i);
-    void execute();
-    bool isComplete();
+    void advanceStage();
+    bool isComplete() const;
+    VUPipelineStage stage() const;
   private:
-    uint8_t currentStage;
-    uint8_t endStage;
+    VUPipelineStage currentStage;
 };
 
 #endif

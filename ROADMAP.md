@@ -183,9 +183,9 @@ Each committed fixture should include:
 ### Pipeline Model
 
 - [x] Replace the monolithic run loop with a system-schedulable clock interface
-- [ ] Give FMAC stages explicit timing behavior
+- [x] Give FMAC stages explicit timing behavior
 - [ ] Add IALU, LSU, branch, FDIV, EFU, and XGKICK pipelines
-- [ ] Reject pipeline types without defined stage timing
+- [x] Reject pipeline types without defined stage timing
 - [ ] Carry operation-specific state on pipelines instead of pending decode state
 - [ ] Model register, flag, and special-register availability timing
 - [ ] Validate stalls and forwarding behavior from manual examples
