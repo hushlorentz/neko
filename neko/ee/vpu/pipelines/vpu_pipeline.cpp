@@ -22,6 +22,10 @@ void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t 
   immediate = immediateValue;
   intSourceValue1 = 0;
   intSourceValue2 = 0;
+  flagResult = FPRegister();
+  operationResult = FPRegister();
+  accumulatorValue = FPRegister();
+  ignoredResultFields = FP_REGISTER_NO_FIELDS;
   intSource1Sampled = false;
   intSource2Sampled = false;
   currentStage = VUPipelineStage::M;
@@ -91,6 +95,9 @@ void Pipeline::configureTiming()
 void Pipeline::setFPRegisterResult(FPRegister * reg)
 {
   fpResult.copyFrom(reg);
+  flagResult.copyFrom(reg);
+  operationResult.copyFrom(reg);
+  ignoredResultFields = FP_REGISTER_NO_FIELDS;
 }
 
 void Pipeline::setIntResult(int i)

@@ -37,6 +37,10 @@ class Pipeline
     uint16_t opCode;
     int intResult;
     FPRegister fpResult;
+    FPRegister flagResult;
+    FPRegister operationResult;
+    FPRegister accumulatorValue;
+    uint8_t ignoredResultFields;
     uint8_t srcReg1;
     uint8_t srcReg2;
     uint8_t destReg;

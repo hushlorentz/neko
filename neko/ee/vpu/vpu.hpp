@@ -132,6 +132,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     set<uint16_t> type3OpCodes;
     PipelineOrchestrator orchestrator;
     FPRegister virtualDestRegister;
+    FPRegister accumulatorForwardValue;
+    uint8_t pendingAccumulatorWrites = 0;
+    bool accumulatorForwardValid = false;
     LowerInstruction pendingLowerInstruction;
     uint16_t pendingLowerInstructionAddress = 0;
     bool lowerInstructionPending = false;
@@ -183,6 +186,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startLSUPipeline(Pipeline *pipeline);
     void finishLSUPipeline(Pipeline *pipeline);
     void startFMACPipeline(Pipeline *pipeline);
+    void prepareAccumulatorOperation(Pipeline *pipeline);
+    uint8_t multiplicationOverflowFields(
+      const Pipeline *pipeline) const;
     void evaluateBranchPipeline(Pipeline *pipeline);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);
     void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);
@@ -195,6 +201,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void handleMADDInstruction(Pipeline * p);
     void handleMSUBInstruction(Pipeline * p);
     void handleOPMSUBInstruction(Pipeline * p);
+    void finishAccumulatorWrite(Pipeline *pipeline);
 };
 
 #endif

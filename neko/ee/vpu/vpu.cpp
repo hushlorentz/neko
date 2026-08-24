@@ -136,6 +136,8 @@ void VPU::forceBreak()
   pendingIntegerWrites.fill(0);
   pendingIALUWrites.fill(0);
   bypassedIntegerValues.fill(0);
+  pendingAccumulatorWrites = 0;
+  accumulatorForwardValid = false;
   endDelaySlotPending = false;
   branchDelaySlotPending = false;
   pendingBranchTaken = false;
@@ -296,6 +298,8 @@ void VPU::startMicroMode(uint16_t startAddress)
   pendingIntegerWrites.fill(0);
   pendingIALUWrites.fill(0);
   bypassedIntegerValues.fill(0);
+  pendingAccumulatorWrites = 0;
+  accumulatorForwardValid = false;
   mode = VPU_MODE_MICRO;
   microMemPC = startAddress;
   endDelaySlotPending = false;
@@ -453,6 +457,8 @@ bool VPU::tick()
     pendingIntegerWrites.fill(0);
     pendingIALUWrites.fill(0);
     bypassedIntegerValues.fill(0);
+    pendingAccumulatorWrites = 0;
+    accumulatorForwardValid = false;
     branchDelaySlotPending = false;
     pendingBranchTaken = false;
     pendingBranchLinkValid = false;
@@ -545,6 +551,10 @@ uint16_t VPU::processUpperInstruction(uint32_t upperInstruction)
   uint8_t srcReg2Mask = srcReg2MaskFromOpCode(opCode, fieldMask);
 
   orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, srcReg1Mask, srcReg2Mask, microMemPC);
+  if (destReg == VPU_REGISTER_ACCUMULATOR)
+  {
+    pendingAccumulatorWrites++;
+  }
   return opCode;
 }
 
@@ -621,6 +631,7 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
     case VPU_MULAy:
     case VPU_MULAz:
     case VPU_MULAw:
+    case VPU_OPMULA:
     case VPU_SUBA:
     case VPU_SUBAi:
     case VPU_SUBAq:
@@ -1323,7 +1334,13 @@ void VPU::startFMACPipeline(Pipeline *p)
   uint8_t fs = p->srcReg2;
   uint8_t fieldMask = p->destFieldMask;
   FPRegister *destReg = destinationRegisterFromPipeline(p);
-  FPRegister dest(destReg->x, destReg->y, destReg->z, destReg->w);
+  FPRegister *accumulatorInput =
+    accumulatorForwardValid ? &accumulatorForwardValue : &accumulator;
+  p->accumulatorValue.copyFrom(accumulatorInput);
+  FPRegister dest =
+    destReg == &accumulator
+      ? p->accumulatorValue
+      : FPRegister(destReg->x, destReg->y, destReg->z, destReg->w);
 
   if (opCode == VPU_MFIR)
   {
@@ -1554,6 +1571,120 @@ void VPU::startFMACPipeline(Pipeline *p)
   }
 
   p->setFPRegisterResult(&dest);
+  prepareAccumulatorOperation(p);
+  if (p->destReg == VPU_REGISTER_ACCUMULATOR)
+  {
+    accumulatorForwardValue.copyFrom(&p->operationResult);
+    accumulatorForwardValid = true;
+  }
+}
+
+uint8_t VPU::multiplicationOverflowFields(
+  const Pipeline *pipeline) const
+{
+  uint8_t fields = FP_REGISTER_NO_FIELDS;
+  if (hasFlag(pipeline->fpResult.xResultFlags, FP_FLAG_OVERFLOW))
+  {
+    setFlag(fields, FP_REGISTER_X_FIELD);
+  }
+  if (hasFlag(pipeline->fpResult.yResultFlags, FP_FLAG_OVERFLOW))
+  {
+    setFlag(fields, FP_REGISTER_Y_FIELD);
+  }
+  if (hasFlag(pipeline->fpResult.zResultFlags, FP_FLAG_OVERFLOW))
+  {
+    setFlag(fields, FP_REGISTER_Z_FIELD);
+  }
+  if (hasFlag(pipeline->fpResult.wResultFlags, FP_FLAG_OVERFLOW))
+  {
+    setFlag(fields, FP_REGISTER_W_FIELD);
+  }
+  return fields;
+}
+
+void VPU::prepareAccumulatorOperation(Pipeline *pipeline)
+{
+  switch (pipeline->opCode)
+  {
+    case VPU_MADD:
+    case VPU_MADDi:
+    case VPU_MADDq:
+    case VPU_MADDx:
+    case VPU_MADDy:
+    case VPU_MADDz:
+    case VPU_MADDw:
+    case VPU_MADDA:
+    case VPU_MADDAi:
+    case VPU_MADDAq:
+    case VPU_MADDAx:
+    case VPU_MADDAy:
+    case VPU_MADDAz:
+    case VPU_MADDAw:
+    {
+      pipeline->ignoredResultFields =
+        multiplicationOverflowFields(pipeline);
+      uint8_t calculatedFields =
+        pipeline->destFieldMask & ~pipeline->ignoredResultFields;
+      pipeline->operationResult.storeAdd(
+        &pipeline->operationResult,
+        &pipeline->accumulatorValue,
+        calculatedFields);
+      break;
+    }
+    case VPU_MSUB:
+    case VPU_MSUBi:
+    case VPU_MSUBq:
+    case VPU_MSUBx:
+    case VPU_MSUBy:
+    case VPU_MSUBz:
+    case VPU_MSUBw:
+    case VPU_MSUBA:
+    case VPU_MSUBAi:
+    case VPU_MSUBAq:
+    case VPU_MSUBAx:
+    case VPU_MSUBAy:
+    case VPU_MSUBAz:
+    case VPU_MSUBAw:
+    {
+      pipeline->ignoredResultFields =
+        multiplicationOverflowFields(pipeline);
+      if (hasFlag(pipeline->ignoredResultFields, FP_REGISTER_X_FIELD))
+      {
+        pipeline->flagResult.x.toggleSign();
+        pipeline->operationResult.x.toggleSign();
+      }
+      if (hasFlag(pipeline->ignoredResultFields, FP_REGISTER_Y_FIELD))
+      {
+        pipeline->flagResult.y.toggleSign();
+        pipeline->operationResult.y.toggleSign();
+      }
+      if (hasFlag(pipeline->ignoredResultFields, FP_REGISTER_Z_FIELD))
+      {
+        pipeline->flagResult.z.toggleSign();
+        pipeline->operationResult.z.toggleSign();
+      }
+      if (hasFlag(pipeline->ignoredResultFields, FP_REGISTER_W_FIELD))
+      {
+        pipeline->flagResult.w.toggleSign();
+        pipeline->operationResult.w.toggleSign();
+      }
+      uint8_t calculatedFields =
+        pipeline->destFieldMask & ~pipeline->ignoredResultFields;
+      pipeline->operationResult.storeSub(
+        &pipeline->accumulatorValue,
+        &pipeline->operationResult,
+        calculatedFields);
+      break;
+    }
+    case VPU_OPMSUB:
+      pipeline->operationResult.storeSub(
+        &pipeline->accumulatorValue,
+        &pipeline->operationResult,
+        FP_REGISTER_X_FIELD |
+          FP_REGISTER_Y_FIELD |
+          FP_REGISTER_Z_FIELD);
+      break;
+  }
 }
 
 void VPU::startLSUPipeline(Pipeline *pipeline)
@@ -1782,6 +1913,7 @@ void VPU::pipelineFinished(Pipeline * p)
       break;
   }
 
+  finishAccumulatorWrite(p);
   emitTrace({
     VPUTraceEventType::PipelineWriteback,
     cycles,
@@ -1899,100 +2031,48 @@ void VPU::finishLSUPipeline(Pipeline *pipeline)
 
 void VPU::handleMADDInstruction(Pipeline * p)
 {
-  FPRegister tempReg;
   FPRegister *destReg = destinationRegisterFromPipeline(p);
-  uint8_t fieldMask = p->destFieldMask;
-  uint8_t ignoredFields = FP_REGISTER_NO_FIELDS;
-
-  updateDestinationRegisterWithPipelineResult(&tempReg, p);
-  setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
-
-  if (hasMACFlag(VPU_FLAG_OX))
-  {
-    unsetFlag(fieldMask, FP_REGISTER_X_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_X_FIELD);
-  }
-  if (hasMACFlag(VPU_FLAG_OY))
-  {
-    unsetFlag(fieldMask, FP_REGISTER_Y_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_Y_FIELD);
-  }
-  if (hasMACFlag(VPU_FLAG_OZ))
-  {
-    unsetFlag(fieldMask, FP_REGISTER_Z_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_Z_FIELD);
-  }
-  if (hasMACFlag(VPU_FLAG_OW))
-  {
-    unsetFlag(fieldMask, FP_REGISTER_W_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_W_FIELD);
-  }
-
-  setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
-  tempReg.storeAdd(&tempReg, &accumulator, fieldMask);
+  setFlags(&p->flagResult, FP_REGISTER_NO_FIELDS);
   if (destReg != &fpRegisters[VPU_REGISTER_VF00])
   {
-    destReg->copyFieldsFrom(&tempReg, p->destFieldMask);
+    destReg->copyFieldsFrom(&p->operationResult, p->destFieldMask);
   }
-  setFlags(destReg, ignoredFields);
+  setFlags(destReg, p->ignoredResultFields);
 }
 
 void VPU::handleMSUBInstruction(Pipeline * p)
 {
-  FPRegister tempReg;
   FPRegister *destReg = destinationRegisterFromPipeline(p);
-  uint8_t fieldMask = p->destFieldMask;
-  uint8_t ignoredFields = FP_REGISTER_NO_FIELDS;
-
-  updateDestinationRegisterWithPipelineResult(&tempReg, p);
-  setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
-
-  if (hasMACFlag(VPU_FLAG_OX))
-  {
-    tempReg.x.toggleSign();
-    unsetFlag(fieldMask, FP_REGISTER_X_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_X_FIELD);
-  }
-  if (hasMACFlag(VPU_FLAG_OY))
-  {
-    tempReg.y.toggleSign();
-    unsetFlag(fieldMask, FP_REGISTER_Y_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_Y_FIELD);
-  }
-  if (hasMACFlag(VPU_FLAG_OZ))
-  {
-    tempReg.z.toggleSign();
-    unsetFlag(fieldMask, FP_REGISTER_Z_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_Z_FIELD);
-  }
-  if (hasMACFlag(VPU_FLAG_OW))
-  {
-    tempReg.w.toggleSign();
-    unsetFlag(fieldMask, FP_REGISTER_W_FIELD);
-    setFlag(ignoredFields, FP_REGISTER_W_FIELD);
-  }
-
-  setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
-  tempReg.storeSub(&accumulator, &tempReg, fieldMask);
+  setFlags(&p->flagResult, FP_REGISTER_NO_FIELDS);
   if (destReg != &fpRegisters[VPU_REGISTER_VF00])
   {
-    destReg->copyFieldsFrom(&tempReg, p->destFieldMask);
+    destReg->copyFieldsFrom(&p->operationResult, p->destFieldMask);
   }
-  setFlags(destReg, ignoredFields);
+  setFlags(destReg, p->ignoredResultFields);
 }
 
 void VPU::handleOPMSUBInstruction(Pipeline * p)
 {
-  FPRegister tempReg;
   FPRegister *destReg = destinationRegisterFromPipeline(p);
 
-  updateDestinationRegisterWithPipelineResult(&tempReg, p);
-  setFlags(&tempReg, FP_REGISTER_NO_FIELDS);
-
-  tempReg.storeSub(&accumulator, &tempReg, FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD | FP_REGISTER_Z_FIELD);
+  setFlags(&p->flagResult, FP_REGISTER_NO_FIELDS);
   if (destReg != &fpRegisters[VPU_REGISTER_VF00])
   {
-    destReg->copyFieldsFrom(&tempReg, p->destFieldMask);
+    destReg->copyFieldsFrom(&p->operationResult, p->destFieldMask);
   }
   setFlags(destReg, FP_REGISTER_NO_FIELDS);
+}
+
+void VPU::finishAccumulatorWrite(Pipeline *pipeline)
+{
+  if (pipeline->destReg != VPU_REGISTER_ACCUMULATOR)
+  {
+    return;
+  }
+
+  pendingAccumulatorWrites--;
+  if (pendingAccumulatorWrites == 0)
+  {
+    accumulatorForwardValid = false;
+  }
 }

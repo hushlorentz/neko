@@ -41,6 +41,23 @@ namespace
       VPU_ADD;
   }
 
+  uint32_t upperInstruction(
+    uint16_t opCode,
+    uint32_t fieldMask,
+    uint8_t ft,
+    uint8_t fs,
+    uint8_t fd,
+    uint32_t flags = 0)
+  {
+    return
+      flags |
+      fieldMask |
+      (ft << VPU_FT_REG_SHIFT) |
+      (fs << VPU_FS_REG_SHIFT) |
+      (fd << VPU_FD_REG_SHIFT) |
+      opCode;
+  }
+
   std::vector<VPUTraceEvent> eventsOfType(
     const std::vector<VPUTraceEvent> &events,
     VPUTraceEventType type)
@@ -143,6 +160,174 @@ TEST_CASE("VU Manual Timing Conformance Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->y == 220);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->z == 330);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->w == 440);
+  }
+
+  SECTION("MADD forwards a preceding in-flight accumulator result")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadAccumulator(100, 100, 100, 100);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 2, 2, 2, 2);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 3, 3, 3, 3);
+    vpu.loadFPRegister(VPU_REGISTER_VF04, 4, 4, 4, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF05, 5, 5, 5, 5);
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_MULA,
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF00));
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_MADD,
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF04,
+        VPU_REGISTER_VF05,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.accumulator.x == 6);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == 26);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->y == 26);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->z == 26);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->w == 26);
+  }
+
+  SECTION("MSUB forwards a preceding in-flight accumulator result")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadAccumulator(100, 100, 100, 100);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 2, 2, 2, 2);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 3, 3, 3, 3);
+    vpu.loadFPRegister(VPU_REGISTER_VF04, 4, 4, 4, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF05, 5, 5, 5, 5);
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_MULA,
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF00));
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_MSUB,
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF04,
+        VPU_REGISTER_VF05,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.accumulator.x == 6);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == -14);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->y == -14);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->z == -14);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->w == -14);
+  }
+
+  SECTION("OPMSUB forwards a preceding in-flight accumulator result")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadAccumulator(100, 100, 100, 100);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 2, 2, 2, 2);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 3, 3, 3, 3);
+    vpu.loadFPRegister(VPU_REGISTER_VF04, 1, 2, 3, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF05, 5, 6, 7, 8);
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_MULA,
+        VPU_DEST_ALL_FIELDS,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF00));
+    appendInstructionPair(
+      &instructions,
+      upperInstruction(
+        VPU_OPMSUB,
+        0,
+        VPU_REGISTER_VF05,
+        VPU_REGISTER_VF04,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.accumulator.x == 6);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x == -8);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->y == -9);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->z == 0);
+  }
+
+  SECTION("Accumulator consumers retain their pipeline-local T-stage input")
+  {
+    struct AccumulatorOperation
+    {
+      uint16_t opCode;
+      double expectedX;
+      double expectedY;
+      double expectedZ;
+      double expectedW;
+    };
+    const AccumulatorOperation operations[] = {
+      {VPU_MADD, 105, 112, 121, 132},
+      {VPU_MSUB, 95, 88, 79, 68},
+      {VPU_OPMSUB, 86, 85, 94, 0}
+    };
+
+    for (const AccumulatorOperation &operation : operations)
+    {
+      VPU vpu;
+      std::vector<uint8_t> instructions;
+      vpu.loadAccumulator(100, 100, 100, 100);
+      vpu.loadFPRegister(VPU_REGISTER_VF04, 1, 2, 3, 4);
+      vpu.loadFPRegister(VPU_REGISTER_VF05, 5, 6, 7, 8);
+      appendInstructionPair(
+        &instructions,
+        upperInstruction(
+          operation.opCode,
+          operation.opCode == VPU_OPMSUB ? 0 : VPU_DEST_ALL_FIELDS,
+          VPU_REGISTER_VF05,
+          VPU_REGISTER_VF04,
+          VPU_REGISTER_VF01,
+          VPU_E_BIT));
+      appendInstructionPair(&instructions, VPU_NOP);
+      vpu.uploadMicroInstructions(instructions);
+      vpu.startMicroMode();
+
+      REQUIRE(vpu.tick());
+      REQUIRE(vpu.tick());
+      vpu.loadAccumulator(200, 200, 200, 200);
+      vpu.run(20);
+
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x ==
+              operation.expectedX);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->y ==
+              operation.expectedY);
+      REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->z ==
+              operation.expectedZ);
+      if (operation.opCode != VPU_OPMSUB)
+      {
+        REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->w ==
+                operation.expectedW);
+      }
+    }
   }
 
   SECTION("A dependent FMAC instruction waits through producer S-stage writeback")
