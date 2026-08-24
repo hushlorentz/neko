@@ -194,12 +194,14 @@ Each committed fixture should include:
 ### Pipeline Integration Programs
 
 - [ ] Add compact assembly programs with exact results and cycle counts
+- [ ] Assert final registers, output memory, and issued instruction addresses
 - [ ] Cover chained FMAC and ACC operations with overlapping independent work
+- [ ] Distinguish forwarded ACC values from architectural S-stage visibility
 - [ ] Cover IALU bypass into LSU addresses and branch decisions
 - [ ] Cover LOI timing across paired and subsequent upper instructions
 - [ ] Cover mixed-lane VF hazards without stalling independent lanes
-- [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
-- [ ] Cover termination and branching with multiple active pipeline families
+- [ ] Cover branch and termination drain with FMAC, IALU, LSU, and LOI active
+- [ ] Cover Q/P producers and `WAITQ`/`WAITP` after FDIV/EFU execution exists
 
 ### VU Floating Point
 
