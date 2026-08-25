@@ -345,3 +345,53 @@ TEST_CASE("Testing the floating point conventions")
     REQUIRE(integer15ToDouble(1843) == 0.056243896484375);
   }
 }
+
+TEST_CASE("Raw VU floating-point operation results")
+{
+  SECTION("Addition returns result bits and no exception flags")
+  {
+    VUFloatResult result = addFPRaw(0x3fc00000u, 0x40100000u);
+
+    REQUIRE(result.bits == 0x40700000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Multiplication preserves the raw result sign")
+  {
+    VUFloatResult result = mulFPRaw(0xc0000000u, 0x40400000u);
+
+    REQUIRE(result.bits == 0xc0c00000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Subtraction returns raw single-precision bits")
+  {
+    VUFloatResult result = subFPRaw(0x40b00000u, 0x3fc00000u);
+
+    REQUIRE(result.bits == 0x40800000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Division returns raw single-precision bits")
+  {
+    VUFloatResult result = divFPRaw(0x40c00000u, 0x40000000u);
+
+    REQUIRE(result.bits == 0x40400000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Overflow is returned alongside the saturated result")
+  {
+    VUFloatResult result = mulFPRaw(0x7fffffffu, 0x40000000u);
+
+    REQUIRE(result.bits == 0x7fffffffu);
+    REQUIRE(result.flags == FP_FLAG_OVERFLOW);
+  }
+
+  SECTION("Every operation starts with a fresh flag state")
+  {
+    REQUIRE(mulFPRaw(0x7fffffffu, 0x40000000u).flags ==
+            FP_FLAG_OVERFLOW);
+    REQUIRE(addFPRaw(0x3f800000u, 0x3f800000u).flags == 0);
+  }
+}

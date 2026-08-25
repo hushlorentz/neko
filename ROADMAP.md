@@ -201,14 +201,13 @@ Each committed fixture should include:
 - [x] Cover LOI timing across paired and subsequent upper instructions
 - [x] Cover mixed-lane VF hazards without stalling independent lanes
 - [x] Cover branch and termination drain with FMAC, IALU, LSU, and LOI active
-- [ ] Cover Q/P producers and `WAITQ`/`WAITP` after FDIV/EFU execution exists
 
 ### VU Floating Point
 
 The current host-`double` compatibility layer is useful scaffolding but is not
 bit-accurate VU arithmetic.
 
-- [ ] Build raw-bit operation APIs returning result bits and exception flags
+- [x] Build raw-bit operation APIs returning result bits and exception flags
 - [ ] Treat exponent-zero inputs as signed zero during calculations
 - [ ] Treat exponent-255 encodings as finite VU values
 - [ ] Correct exponent overflow and underflow detection
@@ -219,6 +218,14 @@ bit-accurate VU arithmetic.
 - [ ] Validate edge cases against the VU manual and hardware-derived vectors
 - [ ] Keep the interpreter implementation as an oracle for any future fast path
 
+### Floating-Point Integration Programs
+
+- [ ] Add chained arithmetic programs with exact raw results and flag states
+- [ ] Cover VU zero, denormal, maximum, overflow, and underflow behavior
+- [ ] Cover multiply-add/subtract sequences where intermediate precision matters
+- [ ] Cover fixed-point conversion boundaries and out-of-range inputs
+- [ ] Compare optimized execution paths against the interpreter oracle
+
 ### Instruction Coverage
 
 - [ ] Complete commonly used lower integer instructions
@@ -227,6 +234,14 @@ bit-accurate VU arithmetic.
 - [ ] Add Q pipeline division and square-root operations
 - [ ] Add the VU1 P pipeline and EFU instructions
 - [ ] Add VU1 `XGKICK`
+
+### Instruction Integration Programs
+
+- [ ] Cover mixed integer, memory, branch, and special-register instruction streams
+- [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
+- [ ] Cover FDIV/EFU resource hazards through decoded instructions
+- [ ] Cover VU1 `XGKICK` packet initiation and completion behavior
+- [ ] Run progressively larger fragments of naken_asm's `rotation_vu1.asm`
 
 ## Milestone 3: VIF and Graphics Path
 
@@ -240,6 +255,14 @@ bit-accurate VU arithmetic.
 - [ ] Render basic points, lines, and triangles into a software framebuffer
 - [ ] Expand toward textures, blending, depth, and display timing
 
+### Graphics Path Integration Programs
+
+- [ ] Upload and execute a VU1 program through VIF `MPG` and `MSCAL`
+- [ ] Transfer vertex data through VIF `UNPACK`
+- [ ] Route a VU1 `XGKICK` packet through GIF into GS registers
+- [ ] Render a synthetic triangle and assert its framebuffer hash
+- [ ] Add textured, blended, and depth-tested scenes as GS support expands
+
 ## Milestone 4: System-Level Core
 
 - [ ] Add a `NekoSystem` owner for hardware components and global state
@@ -250,6 +273,14 @@ bit-accurate VU arithmetic.
 - [ ] Define reset, frame execution, input, video, and audio interfaces
 - [ ] Add deterministic save-state serialization
 - [ ] Add frame hashes and subsystem traces for regression testing
+
+### System Integration Programs
+
+- [ ] Exercise EE, DMA, VIF, VU1, GIF, and GS in one deterministic workload
+- [ ] Cover cross-component clock ratios, interrupts, and DMA completion ordering
+- [ ] Cover reset and restart while multiple hardware components are active
+- [ ] Round-trip save states during representative workloads
+- [ ] Assert stable frame hashes and subsystem traces across repeated runs
 
 The emulation core must not open windows, poll host controllers, sleep, or print
 directly. Frontends provide those services through callbacks and buffers.
@@ -263,6 +294,13 @@ directly. Frontends provide those services through callbacks and buffers.
 - [ ] Map `retro_run()` to deterministic frame execution
 - [ ] Connect RetroArch input, video, audio, logging, and save-state callbacks
 - [ ] Add core options without placing frontend policy inside `neko_core`
+
+### Frontend Integration Tests
+
+- [ ] Run the same deterministic workload through CLI and libretro adapters
+- [ ] Verify input, video, audio, and logging callback boundaries
+- [ ] Verify save-state compatibility through the public frontend interfaces
+- [ ] Keep frontend output hashes identical for equivalent core configuration
 
 ## Performance Strategy
 

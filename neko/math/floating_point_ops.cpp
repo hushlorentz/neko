@@ -3,10 +3,47 @@
 
 namespace
 {
+  using CompatibilityOperation = double (*)(double, double, std::uint8_t *);
+
   double maxVUValue()
   {
     return std::ldexp(2.0 - std::ldexp(1.0, -23), FP_MAX_EXPONENT);
   }
+
+  VUFloatResult runRawOperation(std::uint32_t d1Bits,
+                                std::uint32_t d2Bits,
+                                CompatibilityOperation operation)
+  {
+    VUFloat d1;
+    VUFloat d2;
+    d1.setBits(d1Bits);
+    d2.setBits(d2Bits);
+
+    std::uint8_t flags = 0;
+    VUFloat result(operation(d1, d2, &flags));
+
+    return {result.bits(), flags};
+  }
+}
+
+VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
+{
+  return runRawOperation(d1Bits, d2Bits, addFP);
+}
+
+VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
+{
+  return runRawOperation(d1Bits, d2Bits, mulFP);
+}
+
+VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
+{
+  return runRawOperation(d1Bits, d2Bits, divFP);
+}
+
+VUFloatResult subFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
+{
+  return runRawOperation(d1Bits, d2Bits, subFP);
 }
 
 double convertFromIEEE(double value, uint8_t * resultFlags)

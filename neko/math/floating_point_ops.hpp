@@ -15,6 +15,17 @@
 
 #include "fp_register.hpp"
 
+struct VUFloatResult
+{
+  std::uint32_t bits;
+  std::uint8_t flags;
+};
+
+VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
+VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
+VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
+VUFloatResult subFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
+
 double addFP(double d1, double d2, uint8_t * resultFlags);
 double mulFP(double d1, double d2, uint8_t * resultFlags);
 double divFP(double d1, double d2, uint8_t * resultFlags);
