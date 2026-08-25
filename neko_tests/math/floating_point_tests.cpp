@@ -662,3 +662,40 @@ TEST_CASE("VU raw arithmetic regression corpus")
     REQUIRE(result.flags == vector.resultFlags);
   }
 }
+
+TEST_CASE("VU raw values expose their arithmetic classification")
+{
+  SECTION("Exponent-zero encodings are classified as signed zero")
+  {
+    VUFloatDecomposition value = decomposeVUFloat(0x807fffffu);
+
+    REQUIRE(value.negative);
+    REQUIRE(value.encodedExponent == 0);
+    REQUIRE(value.unbiasedExponent == -127);
+    REQUIRE(value.mantissa == 0x7fffffu);
+    REQUIRE(value.classification == VUFloatClassification::Zero);
+  }
+
+  SECTION("Ordinary finite values expose their raw components")
+  {
+    VUFloatDecomposition value = decomposeVUFloat(0x3fc12345u);
+
+    REQUIRE_FALSE(value.negative);
+    REQUIRE(value.encodedExponent == 127);
+    REQUIRE(value.unbiasedExponent == 0);
+    REQUIRE(value.mantissa == 0x412345u);
+    REQUIRE(value.classification == VUFloatClassification::Finite);
+  }
+
+  SECTION("Exponent-255 encodings are extended finite VU values")
+  {
+    VUFloatDecomposition value = decomposeVUFloat(0xffc00000u);
+
+    REQUIRE(value.negative);
+    REQUIRE(value.encodedExponent == 255);
+    REQUIRE(value.unbiasedExponent == 128);
+    REQUIRE(value.mantissa == 0x400000u);
+    REQUIRE(value.classification ==
+            VUFloatClassification::ExtendedFinite);
+  }
+}

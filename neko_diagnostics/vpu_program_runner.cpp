@@ -115,6 +115,35 @@ void writeVPUTraceEventJsonLine(
     << ",\"destination_register\":"
     << static_cast<unsigned int>(event.destinationRegister)
     << ",\"destination_field_mask\":"
-    << static_cast<unsigned int>(event.destinationFieldMask)
-    << "}\n";
+    << static_cast<unsigned int>(event.destinationFieldMask);
+
+  if (event.arithmetic.present)
+  {
+    output
+      << ",\"arithmetic\":{\"ignored_result_fields\":"
+      << static_cast<unsigned int>(
+           event.arithmetic.ignoredResultFields)
+      << ",\"lanes\":[";
+    for (std::size_t lane = 0; lane < event.arithmetic.lanes.size(); lane++)
+    {
+      if (lane != 0)
+      {
+        output << ",";
+      }
+      const VPUArithmeticLaneTrace &details =
+        event.arithmetic.lanes[lane];
+      output
+        << "{\"multiply_bits\":" << details.multiplyBits
+        << ",\"multiply_flags\":"
+        << static_cast<unsigned int>(details.multiplyFlags)
+        << ",\"accumulator_bits\":" << details.accumulatorBits
+        << ",\"result_bits\":" << details.resultBits
+        << ",\"result_flags\":"
+        << static_cast<unsigned int>(details.resultFlags)
+        << "}";
+    }
+    output << "]}";
+  }
+
+  output << "}\n";
 }

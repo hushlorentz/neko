@@ -285,6 +285,30 @@ namespace
   }
 }
 
+VUFloatDecomposition decomposeVUFloat(std::uint32_t bits)
+{
+  const std::uint8_t encodedExponent =
+    static_cast<std::uint8_t>((bits >> 23) & 0xff);
+  VUFloatClassification classification = VUFloatClassification::Finite;
+  if (encodedExponent == 0)
+  {
+    classification = VUFloatClassification::Zero;
+  }
+  else if (encodedExponent == 0xff)
+  {
+    classification = VUFloatClassification::ExtendedFinite;
+  }
+
+  return {
+    (bits & FP_SIGN_BIT) != 0,
+    encodedExponent,
+    static_cast<std::int16_t>(
+      static_cast<std::int32_t>(encodedExponent) - 127),
+    bits & FP_MAX_MANTISSA,
+    classification
+  };
+}
+
 VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 {
   return addRaw(d1Bits, d2Bits);

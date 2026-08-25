@@ -223,14 +223,14 @@ bit-accurate VU arithmetic.
 Add arithmetic observability after the operation model is stable and before
 floating-point assembly integration:
 
-- [ ] Add optional structured FMAC trace data through the existing callback,
+- [x] Add optional structured FMAC trace data through the existing callback,
       including per-lane raw multiply results, accumulator inputs, final
       results, exception flags, and ignored-result fields
-- [ ] Add a reusable raw VU value decomposition helper exposing sign, exponent,
+- [x] Add a reusable raw VU value decomposition helper exposing sign, exponent,
       mantissa, and VU classification without formatting inside the core
-- [ ] Add trace contract tests for distinct multiplication and accumulator
+- [x] Add trace contract tests for distinct multiplication and accumulator
       exceptions in MADD, MSUB, and OPMSUB
-- [ ] Include arithmetic details in the runner's on-demand NDJSON trace output
+- [x] Include arithmetic details in the runner's on-demand NDJSON trace output
       while keeping tracing disabled during normal execution
 
 ### Floating-Point Integration Programs

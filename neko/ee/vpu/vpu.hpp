@@ -36,6 +36,22 @@ enum class VPUTraceEventType : uint8_t
   ForceBreak
 };
 
+struct VPUArithmeticLaneTrace
+{
+  uint32_t multiplyBits = 0;
+  uint8_t multiplyFlags = 0;
+  uint32_t accumulatorBits = 0;
+  uint32_t resultBits = 0;
+  uint8_t resultFlags = 0;
+};
+
+struct VPUArithmeticTrace
+{
+  bool present = false;
+  array<VPUArithmeticLaneTrace, 4> lanes = {};
+  uint8_t ignoredResultFields = FP_REGISTER_NO_FIELDS;
+};
+
 struct VPUTraceEvent
 {
   VPUTraceEventType type;
@@ -46,6 +62,7 @@ struct VPUTraceEvent
   uint16_t opCode;
   uint8_t destinationRegister;
   uint8_t destinationFieldMask;
+  VPUArithmeticTrace arithmetic;
 };
 
 using VPUTraceCallback = function<void(const VPUTraceEvent &)>;

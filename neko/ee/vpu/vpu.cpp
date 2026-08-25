@@ -21,6 +21,111 @@ uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU
 
 using namespace std;
 
+namespace
+{
+  bool isCompoundFMACOperation(uint16_t opCode)
+  {
+    switch (opCode)
+    {
+      case VPU_MADD:
+      case VPU_MADDi:
+      case VPU_MADDq:
+      case VPU_MADDx:
+      case VPU_MADDy:
+      case VPU_MADDz:
+      case VPU_MADDw:
+      case VPU_MADDA:
+      case VPU_MADDAi:
+      case VPU_MADDAq:
+      case VPU_MADDAx:
+      case VPU_MADDAy:
+      case VPU_MADDAz:
+      case VPU_MADDAw:
+      case VPU_MSUB:
+      case VPU_MSUBi:
+      case VPU_MSUBq:
+      case VPU_MSUBx:
+      case VPU_MSUBy:
+      case VPU_MSUBz:
+      case VPU_MSUBw:
+      case VPU_MSUBA:
+      case VPU_MSUBAi:
+      case VPU_MSUBAq:
+      case VPU_MSUBAx:
+      case VPU_MSUBAy:
+      case VPU_MSUBAz:
+      case VPU_MSUBAw:
+      case VPU_OPMSUB:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  const VUFloat &laneValue(const FPRegister &reg, size_t lane)
+  {
+    switch (lane)
+    {
+      case 0:
+        return reg.x;
+      case 1:
+        return reg.y;
+      case 2:
+        return reg.z;
+      default:
+        return reg.w;
+    }
+  }
+
+  uint8_t laneFlags(const FPRegister &reg, size_t lane)
+  {
+    switch (lane)
+    {
+      case 0:
+        return reg.xResultFlags;
+      case 1:
+        return reg.yResultFlags;
+      case 2:
+        return reg.zResultFlags;
+      default:
+        return reg.wResultFlags;
+    }
+  }
+
+  VPUArithmeticTrace arithmeticTraceForPipeline(const Pipeline &pipeline)
+  {
+    VPUArithmeticTrace trace;
+    if (!isCompoundFMACOperation(pipeline.opCode))
+    {
+      return trace;
+    }
+
+    trace.present = true;
+    trace.ignoredResultFields = pipeline.ignoredResultFields;
+    const uint8_t laneMasks[] = {
+      FP_REGISTER_X_FIELD,
+      FP_REGISTER_Y_FIELD,
+      FP_REGISTER_Z_FIELD,
+      FP_REGISTER_W_FIELD
+    };
+    for (size_t lane = 0; lane < trace.lanes.size(); lane++)
+    {
+      const bool multiplicationResultUsed =
+        hasFlag(pipeline.ignoredResultFields, laneMasks[lane]);
+      trace.lanes[lane] = {
+        laneValue(pipeline.fpResult, lane).bits(),
+        laneFlags(pipeline.fpResult, lane),
+        laneValue(pipeline.accumulatorValue, lane).bits(),
+        laneValue(pipeline.operationResult, lane).bits(),
+        multiplicationResultUsed ?
+          laneFlags(pipeline.fpResult, lane) :
+          laneFlags(pipeline.operationResult, lane)
+      };
+    }
+    return trace;
+  }
+}
+
 VPU::VPU(VPUType type) : type(type)
 {
   initMemory();
@@ -1926,7 +2031,7 @@ void VPU::pipelineFinished(Pipeline * p)
   }
 
   finishAccumulatorWrite(p);
-  emitTrace({
+  VPUTraceEvent event{
     VPUTraceEventType::PipelineWriteback,
     cycles,
     p->instructionAddress,
@@ -1935,7 +2040,12 @@ void VPU::pipelineFinished(Pipeline * p)
     p->opCode,
     p->destReg,
     p->destFieldMask
-  });
+  };
+  if (traceCallback)
+  {
+    event.arithmetic = arithmeticTraceForPipeline(*p);
+  }
+  emitTrace(event);
 }
 
 void VPU::startIALUPipeline(Pipeline *pipeline)
