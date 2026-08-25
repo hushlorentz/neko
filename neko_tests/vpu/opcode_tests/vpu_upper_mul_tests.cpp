@@ -48,7 +48,7 @@ TEST_CASE("VPU Microinstruction MUL Tests")
 
   SECTION("MUL sets the correct flags if there is an underflow")
   {
-    double num = std::numeric_limits<double>::min();
+    double num = std::ldexp(1.0, -126);
 
     vpu.loadFPRegister(VPU_REGISTER_VF06, num, 0, 0.5, 0);
     vpu.loadFPRegister(VPU_REGISTER_VF07, 0.5, 0, num, 0);

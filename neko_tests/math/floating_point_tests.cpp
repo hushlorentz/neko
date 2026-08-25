@@ -540,3 +540,125 @@ TEST_CASE("VU exponent overflow and underflow boundaries")
     REQUIRE(result.flags == 0);
   }
 }
+
+TEST_CASE("VU add subtract and multiply truncate to 24 bits")
+{
+  SECTION("Addition discards bits below the result significand")
+  {
+    VUFloatResult result = addFPRaw(0x3f800000u, 0x33c00000u);
+
+    REQUIRE(result.bits == 0x3f800000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Subtraction truncates toward zero across an exponent boundary")
+  {
+    VUFloatResult result = subFPRaw(0x3f800000u, 0x33000000u);
+
+    REQUIRE(result.bits == 0x3f7fffffu);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("A distant subtraction still contributes a borrow")
+  {
+    VUFloatResult result = subFPRaw(0x3f800000u, 0x00800000u);
+
+    REQUIRE(result.bits == 0x3f7fffffu);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Negative results also truncate toward zero")
+  {
+    VUFloatResult result = addFPRaw(0xbf800000u, 0x00800000u);
+
+    REQUIRE(result.bits == 0xbf7fffffu);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Multiplication truncates rather than rounding to nearest")
+  {
+    VUFloatResult result = mulFPRaw(0x3f800001u, 0x3fc00000u);
+
+    REQUIRE(result.bits == 0x3fc00001u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Multiplication preserves the truncated result sign")
+  {
+    VUFloatResult result = mulFPRaw(0xbf800001u, 0x3fc00000u);
+
+    REQUIRE(result.bits == 0xbfc00001u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Cancellation below the minimum exponent underflows")
+  {
+    VUFloatResult result = subFPRaw(0x00800001u, 0x00800000u);
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == FP_FLAG_UNDERFLOW);
+  }
+}
+
+TEST_CASE("VU raw arithmetic regression corpus")
+{
+  using RawOperation = VUFloatResult (*)(std::uint32_t, std::uint32_t);
+  struct ArithmeticVector
+  {
+    const char *name;
+    RawOperation operation;
+    std::uint32_t d1Bits;
+    std::uint32_t d2Bits;
+    std::uint32_t resultBits;
+    std::uint8_t resultFlags;
+  };
+
+  const ArithmeticVector vectors[] = {
+    {"add carry at encoded exponent 65", addFPRaw, 0x20ffffffu, 0x20ffffffu, 0x217fffffu, 0x0},
+    {"add carry at encoded exponent 129", addFPRaw, 0x40ffffffu, 0x40ffffffu, 0x417fffffu, 0x0},
+    {"add carry at encoded exponent 193", addFPRaw, 0x60ffffffu, 0x60ffffffu, 0x617fffffu, 0x0},
+    {"add opposite signs across 64-bit alignment", addFPRaw, 0x20923456u, 0x80ffffffu, 0x20923455u, 0x0},
+    {"add opposite signs across 65-bit alignment", addFPRaw, 0x40e54321u, 0xa0222222u, 0x40e54320u, 0x0},
+    {"add opposite signs across 129-bit alignment", addFPRaw, 0x60b45678u, 0xa0765432u, 0x60b45677u, 0x0},
+    {"add opposite signs across 191-bit alignment", addFPRaw, 0x7fa22222u, 0xa0111111u, 0x7fa22221u, 0x0},
+    {"add adjacent significands renormalizes", addFPRaw, 0x20923457u, 0xa0923456u, 0x15000000u, 0x0},
+    {"add adjacent exponent-129 significands", addFPRaw, 0x40ffffffu, 0xc0fffffeu, 0x35000000u, 0x0},
+    {"add minimum adjacent values underflow", addFPRaw, 0x00800001u, 0x80800000u, 0x00000000u, 0x2},
+    {"add negative exponent-zero operands", addFPRaw, 0x80000001u, 0x807fffffu, 0x80000000u, 0x0},
+    {"add exponent-255 values overflow", addFPRaw, 0x7f800000u, 0x7f800000u, 0x7fffffffu, 0x1},
+    {"sub borrow across 64-bit alignment", subFPRaw, 0x20a34567u, 0x00f65432u, 0x20a34566u, 0x0},
+    {"sub borrow across 128-bit alignment", subFPRaw, 0x40c56789u, 0x00923456u, 0x40c56788u, 0x0},
+    {"sub borrow across 192-bit alignment", subFPRaw, 0x60d6789au, 0x00a34567u, 0x60d67899u, 0x0},
+    {"sub borrow from exponent 255", subFPRaw, 0x7fb45678u, 0x00b45678u, 0x7fb45677u, 0x0},
+    {"sub adjacent exponent-65 significands", subFPRaw, 0x20923457u, 0x20923456u, 0x15000000u, 0x0},
+    {"sub adjacent exponent-129 significands", subFPRaw, 0x40f00001u, 0x40f00000u, 0x35000000u, 0x0},
+    {"sub exact exponent-255 cancellation", subFPRaw, 0x7fffffffu, 0x7fffffffu, 0x00000000u, 0x0},
+    {"sub negative zero from positive zero", subFPRaw, 0x80000001u, 0x00000001u, 0x80000000u, 0x0},
+    {"sub negative operand becomes addition", subFPRaw, 0x3f923456u, 0xbf654321u, 0x40026af3u, 0x0},
+    {"sub larger value produces negative result", subFPRaw, 0x3f111111u, 0x3fa22222u, 0xbf333333u, 0x0},
+    {"sub adjacent minimum values underflow", subFPRaw, 0x80800001u, 0x80800000u, 0x80000000u, 0x2},
+    {"sub negative maximum overflows", subFPRaw, 0xff800000u, 0x7f800000u, 0xffffffffu, 0x1},
+    {"mul low-half truncation", mulFPRaw, 0x3f800001u, 0x3fc00000u, 0x3fc00001u, 0x0},
+    {"mul high product normalization", mulFPRaw, 0x3fffffffu, 0x3ffffffeu, 0x407ffffdu, 0x0},
+    {"mul negative truncation", mulFPRaw, 0xbf923457u, 0x40654321u, 0xc082ef28u, 0x0},
+    {"mul exponent-255 by small finite", mulFPRaw, 0x7fc00000u, 0x00a00000u, 0x40f00000u, 0x0},
+    {"mul exponent-255 remains finite", mulFPRaw, 0x7f923456u, 0x3f800000u, 0x7f923456u, 0x0},
+    {"mul maximum by one", mulFPRaw, 0x7fffffffu, 0x3f800000u, 0x7fffffffu, 0x0},
+    {"mul maximum overflow", mulFPRaw, 0x7fffffffu, 0x40000000u, 0x7fffffffu, 0x1},
+    {"mul negative overflow", mulFPRaw, 0xffc00000u, 0x40400000u, 0xffffffffu, 0x1},
+    {"mul minimum normalized by one", mulFPRaw, 0x00800000u, 0x3f800000u, 0x00800000u, 0x0},
+    {"mul minimum normalized underflows", mulFPRaw, 0x00800000u, 0x3f000000u, 0x00000000u, 0x2},
+    {"mul negative underflow", mulFPRaw, 0x80c00000u, 0x3f000000u, 0x80000000u, 0x2},
+    {"mul exponent-zero uses signed zero", mulFPRaw, 0x807fffffu, 0xffffffffu, 0x00000000u, 0x0}
+  };
+
+  for (const ArithmeticVector &vector : vectors)
+  {
+    CAPTURE(vector.name);
+    const VUFloatResult result =
+      vector.operation(vector.d1Bits, vector.d2Bits);
+
+    REQUIRE(result.bits == vector.resultBits);
+    REQUIRE(result.flags == vector.resultFlags);
+  }
+}

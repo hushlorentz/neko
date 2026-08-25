@@ -274,4 +274,16 @@ TEST_CASE("FP Register Tests")
     REQUIRE(reg3.z == 2.75);
     REQUIRE(reg3.w == 1);
   }
+
+  SECTION("Register arithmetic uses VU truncation")
+  {
+    FPRegister small;
+    reg1.x.setBits(0x3f800000u);
+    small.x.setBits(0x33c00000u);
+
+    reg3.storeAdd(&reg1, &small, FP_REGISTER_X_FIELD);
+
+    REQUIRE(reg3.x.bits() == 0x3f800000u);
+    REQUIRE(reg3.xResultFlags == 0);
+  }
 }

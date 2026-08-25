@@ -58,10 +58,10 @@ TEST_CASE("VPU Microinstruction MSUB Tests")
 
   SECTION("MSUB sets the correct flags if accumulator contains 0 or a normalized value and there is an underflow exception during the multiplication")
   {
-    double nonNormalized = std::numeric_limits<double>::min();
+    double minimumNormalized = std::ldexp(1.0, -126);
 
     vpu.loadFPRegister(VPU_REGISTER_VF07, 2, 0.5, 3.4f, 9.0f);
-    vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, nonNormalized, -2.5f, -1.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, minimumNormalized, -2.5f, -1.0f);
     vpu.loadAccumulator(100.0f, 5, 0, 25.0f);
 
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MSUB);
@@ -146,10 +146,10 @@ TEST_CASE("VPU Microinstruction MSUB Tests")
     VUFloat max;
     max.setBits(0xffffffffu);
 
-    double nonNormalized = std::numeric_limits<double>::min();
+    double minimumNormalized = std::ldexp(1.0, -126);
 
     vpu.loadFPRegister(VPU_REGISTER_VF07, 2, 0.5, 3.4f, 9.0f);
-    vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, nonNormalized, -2.5f, -1.0f);
+    vpu.loadFPRegister(VPU_REGISTER_VF06, 25.5f, minimumNormalized, -2.5f, -1.0f);
     vpu.loadAccumulator(100.0f, max, 80, 25.0f);
 
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MSUB);

@@ -12,7 +12,7 @@ TEST_CASE("VPU Microinstruction OPMULA Tests")
   VUFloat max;
   max.setBits(0x7fffffffu);
 
-  double min = std::numeric_limits<double>::min();
+  double min = std::ldexp(1.0, -126);
 
   vpu.loadFPRegister(VPU_REGISTER_VF03, -5.0, -2.5, -1.0, 4.5);
   vpu.loadFPRegister(VPU_REGISTER_VF04, 5.0, -6.5, 10.0, -9.0);

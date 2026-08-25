@@ -211,7 +211,7 @@ bit-accurate VU arithmetic.
 - [x] Treat exponent-zero inputs as signed zero during calculations
 - [x] Treat exponent-255 encodings as finite VU values
 - [x] Correct exponent overflow and underflow detection
-- [ ] Implement VU 24-bit truncating add, subtract, and multiply
+- [x] Implement VU 24-bit truncating add, subtract, and multiply
 - [ ] Implement division and square-root exception behavior
 - [ ] Correct `0 / 0` to return signed `MAX` with the I flag
 - [ ] Implement truncating fixed-point conversions with defined out-of-range behavior
