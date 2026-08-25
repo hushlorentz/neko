@@ -210,7 +210,7 @@ bit-accurate VU arithmetic.
 - [x] Build raw-bit operation APIs returning result bits and exception flags
 - [x] Treat exponent-zero inputs as signed zero during calculations
 - [x] Treat exponent-255 encodings as finite VU values
-- [ ] Correct exponent overflow and underflow detection
+- [x] Correct exponent overflow and underflow detection
 - [ ] Implement VU 24-bit truncating add, subtract, and multiply
 - [ ] Implement division and square-root exception behavior
 - [ ] Correct `0 / 0` to return signed `MAX` with the I flag

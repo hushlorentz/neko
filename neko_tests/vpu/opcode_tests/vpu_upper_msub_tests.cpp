@@ -73,7 +73,7 @@ TEST_CASE("VPU Microinstruction MSUB Tests")
     REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_O));
   }
 
-  SECTION("MSUB sets the correct flags if accumulator contains MAX and the multiplication does not throw an exception.")
+  SECTION("MSUB cancels equal MAX values without overflow.")
   {
     VUFloat max;
     max.setBits(0x7fffffffu);
@@ -84,9 +84,13 @@ TEST_CASE("VPU Microinstruction MSUB Tests")
 
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_ALL_FIELDS, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MSUB);
 
-    REQUIRE(vpu.hasMACFlag(VPU_FLAG_OZ));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z.bits() == 0);
+    REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OZ));
+    REQUIRE(vpu.hasMACFlag(VPU_FLAG_ZZ));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_O));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_OS));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_Z));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_ZS));
   }
 
   SECTION("MSUB returns the result from the multiplication if there is an overflow and ignores the result of the subtraction. The sign of the result is opposite from the sign of the overflow. Positive Result.")
@@ -137,7 +141,7 @@ TEST_CASE("VPU Microinstruction MSUB Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x.bits() == 0xffffffffu);
   }
 
-  SECTION("MSUB returns the result from the subtraction if there is an underflow in multiplication.")
+  SECTION("MSUB preserves MAX without overflow when multiplication underflows.")
   {
     VUFloat max;
     max.setBits(0xffffffffu);
@@ -150,9 +154,9 @@ TEST_CASE("VPU Microinstruction MSUB Tests")
 
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MSUB);
 
-    REQUIRE(vpu.hasMACFlag(VPU_FLAG_OY));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
+    REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OY));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_O));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_OS));
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_US));
     REQUIRE((vpu.fpRegisterValue(VPU_REGISTER_VF02)->y.bits() & 0x7fffffffu) == 0x7fffffffu);
   }

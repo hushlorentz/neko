@@ -57,7 +57,7 @@ VUFloatResult subFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 
 double convertFromIEEE(double value, uint8_t * resultFlags)
 {
-  if (std::abs(value) >= std::ldexp(1.0, FP_MAX_EXPONENT))
+  if (std::abs(value) >= std::ldexp(1.0, FP_MAX_EXPONENT + 1))
   {
     *resultFlags |= FP_FLAG_OVERFLOW;
 

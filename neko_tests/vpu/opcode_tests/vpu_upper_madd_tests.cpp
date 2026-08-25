@@ -113,7 +113,7 @@ TEST_CASE("VPU Microinstruction MADD Tests")
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x.bits() == 0xffffffffu);
   }
 
-  SECTION("MADD returns the result from the addition if there is an underflow in multiplication.")
+  SECTION("MADD preserves MAX without overflow when multiplication underflows.")
   {
     VUFloat max;
     max.setBits(0xffffffffu);
@@ -126,11 +126,11 @@ TEST_CASE("VPU Microinstruction MADD Tests")
 
     executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_Y_BIT, VPU_REGISTER_VF07, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_MADD);
 
-    REQUIRE(vpu.hasMACFlag(VPU_FLAG_OY));
+    REQUIRE(!vpu.hasMACFlag(VPU_FLAG_OY));
     REQUIRE(vpu.hasMACFlag(VPU_FLAG_SY));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_O));
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_S));
-    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
+    REQUIRE(!vpu.hasStatusFlag(VPU_FLAG_OS));
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_SS));
     REQUIRE(vpu.hasStatusFlag(VPU_FLAG_US));
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y.bits() == 0xffffffffu);

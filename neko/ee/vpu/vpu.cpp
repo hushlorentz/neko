@@ -1663,6 +1663,7 @@ void VPU::prepareAccumulatorOperation(Pipeline *pipeline)
     case VPU_MSUBAy:
     case VPU_MSUBAz:
     case VPU_MSUBAw:
+    case VPU_OPMSUB:
     {
       pipeline->ignoredResultFields =
         multiplicationOverflowFields(pipeline);
@@ -1694,14 +1695,6 @@ void VPU::prepareAccumulatorOperation(Pipeline *pipeline)
         calculatedFields);
       break;
     }
-    case VPU_OPMSUB:
-      pipeline->operationResult.storeSub(
-        &pipeline->accumulatorValue,
-        &pipeline->operationResult,
-        FP_REGISTER_X_FIELD |
-          FP_REGISTER_Y_FIELD |
-          FP_REGISTER_Z_FIELD);
-      break;
   }
 }
 
@@ -2079,7 +2072,7 @@ void VPU::handleOPMSUBInstruction(Pipeline * p)
   {
     destReg->copyFieldsFrom(&p->operationResult, p->destFieldMask);
   }
-  setFlags(destReg, FP_REGISTER_NO_FIELDS);
+  setFlags(destReg, p->ignoredResultFields);
 }
 
 void VPU::finishAccumulatorWrite(Pipeline *pipeline)

@@ -473,3 +473,70 @@ TEST_CASE("Exponent-255 encodings are finite VU operands")
     REQUIRE(result.flags == 0);
   }
 }
+
+TEST_CASE("VU exponent overflow and underflow boundaries")
+{
+  SECTION("The maximum VU value remains representable")
+  {
+    VUFloatResult result = mulFPRaw(0x7fffffffu, 0x3f800000u);
+
+    REQUIRE(result.bits == 0x7fffffffu);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Values within exponent 255 do not overflow")
+  {
+    VUFloatResult result = mulFPRaw(0x7fc00000u, 0x3f800000u);
+
+    REQUIRE(result.bits == 0x7fc00000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Requiring exponent 256 overflows to maximum")
+  {
+    VUFloatResult result = mulFPRaw(0x7f800000u, 0x40000000u);
+
+    REQUIRE(result.bits == 0x7fffffffu);
+    REQUIRE(result.flags == FP_FLAG_OVERFLOW);
+  }
+
+  SECTION("Overflow preserves the result sign")
+  {
+    VUFloatResult result = mulFPRaw(0xff800000u, 0x40000000u);
+
+    REQUIRE(result.bits == 0xffffffffu);
+    REQUIRE(result.flags == FP_FLAG_OVERFLOW);
+  }
+
+  SECTION("The minimum normalized VU value remains representable")
+  {
+    VUFloatResult result = mulFPRaw(0x00800000u, 0x3f800000u);
+
+    REQUIRE(result.bits == 0x00800000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Requiring exponent negative 127 underflows to zero")
+  {
+    VUFloatResult result = mulFPRaw(0x00800000u, 0x3f000000u);
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == FP_FLAG_UNDERFLOW);
+  }
+
+  SECTION("Underflow preserves the result sign")
+  {
+    VUFloatResult result = mulFPRaw(0x80800000u, 0x3f000000u);
+
+    REQUIRE(result.bits == FP_SIGN_BIT);
+    REQUIRE(result.flags == FP_FLAG_UNDERFLOW);
+  }
+
+  SECTION("Exact cancellation does not underflow")
+  {
+    VUFloatResult result = subFPRaw(0x00800000u, 0x00800000u);
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == 0);
+  }
+}
