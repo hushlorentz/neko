@@ -438,3 +438,38 @@ TEST_CASE("Exponent-zero VU operands are signed zero during calculations")
     REQUIRE(result.flags == 0);
   }
 }
+
+TEST_CASE("Exponent-255 encodings are finite VU operands")
+{
+  SECTION("Opposite exponent-255 powers cancel instead of producing NaN")
+  {
+    VUFloatResult result = addFPRaw(0x7f800000u, 0xff800000u);
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("An IEEE NaN bit pattern participates in VU multiplication")
+  {
+    VUFloatResult result = mulFPRaw(0x7fc00000u, 0x3f000000u);
+
+    REQUIRE(result.bits == 0x7f400000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("The sign of an exponent-255 operand is preserved")
+  {
+    VUFloatResult result = mulFPRaw(0xffc00000u, 0x3f000000u);
+
+    REQUIRE(result.bits == 0xff400000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Equal maximum VU values divide to one")
+  {
+    VUFloatResult result = divFPRaw(0x7fffffffu, 0x7fffffffu);
+
+    REQUIRE(result.bits == 0x3f800000u);
+    REQUIRE(result.flags == 0);
+  }
+}
