@@ -128,3 +128,28 @@ e5294f1866952531f320fa7306a4a772a80500bb6020d18f822656da295cb971
 
 The C++ test computes expected memory independently rather than reproducing the
 assembly implementation.
+
+Regenerate the pipeline integration fixtures with:
+
+```sh
+for fixture in \
+  pipeline_acc_overlap \
+  pipeline_integer_control \
+  pipeline_loi_timing \
+  pipeline_termination_drain
+do
+  local_integration/tools/naken_asm/naken_asm \
+    -b \
+    -o "neko_tests/vpu/integration/${fixture}.bin" \
+    "neko_tests/vpu/integration/${fixture}.asm"
+done
+```
+
+Expected SHA-256 values:
+
+```text
+pipeline_acc_overlap.bin       e1eca2dab10db0aa967f4e2c8044e0dd3508acfd9ac688838f852ff2ff300a27
+pipeline_integer_control.bin   7321275edc8c4cfd331d7350f06b0e0ad2c781d783534b5f849ce65be4a5b216
+pipeline_loi_timing.bin        01a78ff81e6dea8e2d8993c87d7105d002a085235c6d67082add9a3fa7223227
+pipeline_termination_drain.bin f0b165309aaab04653ba8dbedd9a3d8360500eb46d3e130342bbf7ea2d949466
+```
