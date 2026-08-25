@@ -5,6 +5,18 @@ namespace
 {
   using CompatibilityOperation = double (*)(double, double, std::uint8_t *);
 
+  double compatibilityOperand(std::uint32_t bits)
+  {
+    if ((bits & 0x7f800000u) == 0)
+    {
+      return std::copysign(0.0, (bits & FP_SIGN_BIT) != 0 ? -1.0 : 1.0);
+    }
+
+    VUFloat value;
+    value.setBits(bits);
+    return value;
+  }
+
   double maxVUValue()
   {
     return std::ldexp(2.0 - std::ldexp(1.0, -23), FP_MAX_EXPONENT);
@@ -14,13 +26,10 @@ namespace
                                 std::uint32_t d2Bits,
                                 CompatibilityOperation operation)
   {
-    VUFloat d1;
-    VUFloat d2;
-    d1.setBits(d1Bits);
-    d2.setBits(d2Bits);
-
     std::uint8_t flags = 0;
-    VUFloat result(operation(d1, d2, &flags));
+    VUFloat result(operation(compatibilityOperand(d1Bits),
+                             compatibilityOperand(d2Bits),
+                             &flags));
 
     return {result.bits(), flags};
   }

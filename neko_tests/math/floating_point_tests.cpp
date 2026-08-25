@@ -395,3 +395,46 @@ TEST_CASE("Raw VU floating-point operation results")
     REQUIRE(addFPRaw(0x3f800000u, 0x3f800000u).flags == 0);
   }
 }
+
+TEST_CASE("Exponent-zero VU operands are signed zero during calculations")
+{
+  SECTION("Multiplication preserves the flushed operand sign")
+  {
+    VUFloatResult result = mulFPRaw(0x00000001u, 0xc0000000u);
+
+    REQUIRE(result.bits == FP_SIGN_BIT);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Two negative operands produce positive zero")
+  {
+    VUFloatResult result = mulFPRaw(0x807fffffu, 0xc0000000u);
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Flushing an input does not report result underflow")
+  {
+    VUFloatResult result = divFPRaw(0x80000001u, 0x40000000u);
+
+    REQUIRE(result.bits == FP_SIGN_BIT);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("An exponent-zero divisor is division by signed zero")
+  {
+    VUFloatResult result = divFPRaw(0x3f800000u, 0x80000001u);
+
+    REQUIRE(result.bits == 0xffffffffu);
+    REQUIRE(result.flags == FP_FLAG_D_BIT);
+  }
+
+  SECTION("Adding two negative exponent-zero operands returns negative zero")
+  {
+    VUFloatResult result = addFPRaw(0x80000001u, 0x807fffffu);
+
+    REQUIRE(result.bits == FP_SIGN_BIT);
+    REQUIRE(result.flags == 0);
+  }
+}
