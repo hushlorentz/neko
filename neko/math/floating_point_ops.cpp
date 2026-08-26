@@ -5,8 +5,6 @@
 
 namespace
 {
-  using CompatibilityOperation = double (*)(double, double, std::uint8_t *);
-
   constexpr int VU_MIN_EXPONENT = -126;
   constexpr int VU_VALUE_SCALE_EXPONENT = -149;
   constexpr std::size_t WIDE_WORD_COUNT = 5;
@@ -255,34 +253,111 @@ namespace
     return encodeResult(negative, exponent, significand);
   }
 
-  double compatibilityOperand(std::uint32_t bits)
+  VUFloatResult divideRaw(
+    std::uint32_t numeratorBits,
+    std::uint32_t denominatorBits)
   {
-    if ((bits & 0x7f800000u) == 0)
+    const DecodedOperand numerator = decodeOperand(numeratorBits);
+    const DecodedOperand denominator = decodeOperand(denominatorBits);
+    const bool negative = numerator.negative != denominator.negative;
+
+    if (denominator.zero)
     {
-      return std::copysign(0.0, (bits & FP_SIGN_BIT) != 0 ? -1.0 : 1.0);
+      return {
+        (negative ? FP_SIGN_BIT : 0) | 0x7fffffffu,
+        static_cast<std::uint8_t>(
+          numerator.zero ? FP_FLAG_I_BIT : FP_FLAG_D_BIT)
+      };
+    }
+    if (numerator.zero)
+    {
+      return signedZero(negative);
     }
 
-    VUFloat value;
-    value.setBits(bits);
-    return value;
+    int exponent = numerator.exponent - denominator.exponent;
+    std::uint64_t scaledNumerator;
+    if (numerator.significand < denominator.significand)
+    {
+      exponent--;
+      scaledNumerator =
+        static_cast<std::uint64_t>(numerator.significand) << 24;
+    }
+    else
+    {
+      scaledNumerator =
+        static_cast<std::uint64_t>(numerator.significand) << 23;
+    }
+
+    if (exponent > FP_MAX_EXPONENT)
+    {
+      return {
+        (negative ? FP_SIGN_BIT : 0) | 0x7fffffffu,
+        0
+      };
+    }
+    if (exponent < VU_MIN_EXPONENT)
+    {
+      return signedZero(negative);
+    }
+
+    const std::uint32_t significand = static_cast<std::uint32_t>(
+      scaledNumerator / denominator.significand);
+    return encodeResult(negative, exponent, significand);
+  }
+
+  std::uint32_t integerSquareRoot(std::uint64_t value)
+  {
+    std::uint64_t result = 0;
+    std::uint64_t bit = std::uint64_t{1} << 62;
+    while (bit > value)
+    {
+      bit >>= 2;
+    }
+    while (bit != 0)
+    {
+      if (value >= result + bit)
+      {
+        value -= result + bit;
+        result = (result >> 1) + bit;
+      }
+      else
+      {
+        result >>= 1;
+      }
+      bit >>= 2;
+    }
+    return static_cast<std::uint32_t>(result);
+  }
+
+  VUFloatResult squareRootRaw(std::uint32_t bits)
+  {
+    const DecodedOperand operand = decodeOperand(bits);
+    if (operand.zero)
+    {
+      return signedZero(false);
+    }
+
+    int exponent = operand.exponent / 2;
+    if (operand.exponent < 0 && (operand.exponent % 2) != 0)
+    {
+      exponent--;
+    }
+    const int exponentRemainder = operand.exponent - exponent * 2;
+    const std::uint64_t radicand =
+      static_cast<std::uint64_t>(operand.significand) <<
+      (23 + exponentRemainder);
+    const std::uint32_t significand = integerSquareRoot(radicand);
+    VUFloatResult result = encodeResult(false, exponent, significand);
+    if (operand.negative)
+    {
+      result.flags = FP_FLAG_I_BIT;
+    }
+    return result;
   }
 
   double maxVUValue()
   {
     return std::ldexp(2.0 - std::ldexp(1.0, -23), FP_MAX_EXPONENT);
-  }
-
-  VUFloatResult runCompatibilityOperation(
-    std::uint32_t d1Bits,
-    std::uint32_t d2Bits,
-    CompatibilityOperation operation)
-  {
-    std::uint8_t flags = 0;
-    VUFloat result(operation(compatibilityOperand(d1Bits),
-                             compatibilityOperand(d2Bits),
-                             &flags));
-
-    return {result.bits(), flags};
   }
 }
 
@@ -322,7 +397,26 @@ VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 {
-  return runCompatibilityOperation(d1Bits, d2Bits, divFP);
+  return divideRaw(d1Bits, d2Bits);
+}
+
+VUFloatResult sqrtFPRaw(std::uint32_t bits)
+{
+  return squareRootRaw(bits);
+}
+
+VUFloatResult rsqrtFPRaw(
+  std::uint32_t numeratorBits,
+  std::uint32_t radicandBits)
+{
+  const VUFloatResult root = squareRootRaw(radicandBits);
+  const std::uint32_t rootBits =
+    (root.bits & ~FP_SIGN_BIT) == 0
+      ? root.bits | (radicandBits & FP_SIGN_BIT)
+      : root.bits;
+  VUFloatResult result = divideRaw(numeratorBits, rootBits);
+  result.flags |= root.flags;
+  return result;
 }
 
 VUFloatResult subFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)

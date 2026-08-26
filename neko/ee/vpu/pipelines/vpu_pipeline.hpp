@@ -54,6 +54,8 @@ class Pipeline
     uint16_t memoryAddress;
     int16_t immediate;
     uint32_t immediateBits;
+    uint32_t scalarResultBits;
+    uint8_t scalarResultFlags;
     uint16_t intSourceValue1;
     uint16_t intSourceValue2;
     bool intSource1Sampled;

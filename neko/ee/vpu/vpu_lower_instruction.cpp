@@ -10,6 +10,8 @@ namespace
   constexpr std::uint8_t LOWER_IT_SHIFT = 16;
   constexpr std::uint8_t LOWER_IS_SHIFT = 11;
   constexpr std::uint8_t LOWER_ID_SHIFT = 6;
+  constexpr std::uint8_t LOWER_FSF_SHIFT = 21;
+  constexpr std::uint8_t LOWER_FTF_SHIFT = 23;
   constexpr std::uint32_t LOWER_REGISTER_MASK = 0x1f;
   constexpr std::uint32_t LOWER_DEST_MASK = 0xf;
   constexpr std::uint32_t LOWER_IMMEDIATE_LOW_MASK = 0x7ff;
@@ -27,6 +29,14 @@ namespace
       immediate |= 0xf800;
     }
     return static_cast<std::int16_t>(immediate);
+  }
+
+  std::uint8_t selectedField(
+    std::uint32_t instruction,
+    std::uint8_t shift)
+  {
+    return static_cast<std::uint8_t>(
+      1u << ((instruction >> shift) & 0x3));
   }
 }
 
@@ -109,6 +119,34 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
       (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
     decoded.immediate = signedImmediate11(instruction);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_DIV_ENCODING ||
+      (instruction & VPU_LOWER_TYPE3_MASK) == VPU_RSQRT_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::FDIV;
+    decoded.opCode = instruction & VPU_TYPE3_MASK;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.sourceRegister2 = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.sourceFieldMask1 = selectedField(instruction, LOWER_FSF_SHIFT);
+    decoded.sourceFieldMask2 = selectedField(instruction, LOWER_FTF_SHIFT);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQRT_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::FDIV;
+    decoded.opCode = VPU_SQRT;
+    decoded.sourceRegister2 = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.sourceFieldMask2 = selectedField(instruction, LOWER_FTF_SHIFT);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_WAITQ_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::WaitQ;
+    decoded.opCode = VPU_WAITQ;
     return decoded;
   }
 

@@ -951,6 +951,12 @@ void VPU::executePendingLowerInstruction()
     case LowerExecutionUnit::FMAC:
       startLowerFMACInstruction(instruction);
       break;
+    case LowerExecutionUnit::FDIV:
+      startFDIVInstruction(instruction);
+      break;
+    case LowerExecutionUnit::WaitQ:
+      startWaitQInstruction(instruction);
+      break;
     case LowerExecutionUnit::Branch:
       startBranchInstruction(instruction);
       break;
@@ -1101,6 +1107,34 @@ void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
     instruction.immediate);
 }
 
+void VPU::startFDIVInstruction(const LowerInstruction &instruction)
+{
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_FDIV,
+    instruction.opCode,
+    instruction.sourceRegister1,
+    instruction.sourceRegister2,
+    VPU_REGISTER_VF00,
+    FP_REGISTER_NO_FIELDS,
+    instruction.sourceFieldMask1,
+    instruction.sourceFieldMask2,
+    pendingLowerInstructionAddress);
+}
+
+void VPU::startWaitQInstruction(const LowerInstruction &instruction)
+{
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_WAITQ,
+    instruction.opCode,
+    0,
+    0,
+    VPU_REGISTER_VF00,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress);
+}
+
 void VPU::startLSUInstruction(const LowerInstruction &instruction)
 {
   orchestrator.startPipeline(
@@ -1215,6 +1249,14 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
         return hasPendingIntegerWrite(instruction.sourceRegister1);
       }
       throw runtime_error("Unsupported VU lower FMAC hazard check.");
+    case LowerExecutionUnit::FDIV:
+      return orchestrator.hasRegisterHazard(
+        instruction.sourceRegister1,
+        instruction.sourceFieldMask1,
+        instruction.sourceRegister2,
+        instruction.sourceFieldMask2);
+    case LowerExecutionUnit::WaitQ:
+      return false;
     case LowerExecutionUnit::Branch:
       switch (instruction.opCode)
       {
@@ -1292,6 +1334,11 @@ bool VPU::hasMACFlag(uint16_t flag)
 bool VPU::hasStatusFlag(uint16_t flag)
 {
   return hasFlag(statusFlags, flag);
+}
+
+uint32_t VPU::qRegisterBits() const
+{
+  return qRegister.bits();
 }
 
 void VPU::setFlags(FPRegister * reg, uint8_t ignoredFields)
@@ -1441,12 +1488,86 @@ void VPU::pipelineAdvanced(Pipeline *p)
       case VPU_PIPELINE_TYPE_I_REGISTER:
         iRegister.setBits(p->immediateBits);
         break;
+      case VPU_PIPELINE_TYPE_FDIV:
+        executeFDIVPipeline(p);
+        break;
     }
   }
   else if (p->type == VPU_PIPELINE_TYPE_IALU &&
            p->stage() == VUPipelineStage::X)
   {
     executeIALUPipeline(p);
+  }
+}
+
+void VPU::executeFDIVPipeline(Pipeline *pipeline)
+{
+  auto selectedBits = [](const FPRegister &reg, uint8_t fieldMask) {
+    switch (fieldMask)
+    {
+      case FP_REGISTER_X_FIELD:
+        return reg.x.bits();
+      case FP_REGISTER_Y_FIELD:
+        return reg.y.bits();
+      case FP_REGISTER_Z_FIELD:
+        return reg.z.bits();
+      case FP_REGISTER_W_FIELD:
+        return reg.w.bits();
+      default:
+        throw runtime_error("VU FDIV source must select exactly one field.");
+    }
+  };
+
+  VUFloatResult result;
+  switch (pipeline->opCode)
+  {
+    case VPU_DIV:
+      result = divFPRaw(
+        selectedBits(
+          fpRegisters[pipeline->srcReg1],
+          pipeline->srcReg1FieldMask),
+        selectedBits(
+          fpRegisters[pipeline->srcReg2],
+          pipeline->srcReg2FieldMask));
+      break;
+    case VPU_SQRT:
+      result = sqrtFPRaw(
+        selectedBits(
+          fpRegisters[pipeline->srcReg2],
+          pipeline->srcReg2FieldMask));
+      break;
+    case VPU_RSQRT:
+      result = rsqrtFPRaw(
+        selectedBits(
+          fpRegisters[pipeline->srcReg1],
+          pipeline->srcReg1FieldMask),
+        selectedBits(
+          fpRegisters[pipeline->srcReg2],
+          pipeline->srcReg2FieldMask));
+      break;
+    default:
+      throw runtime_error("Unsupported VU FDIV instruction.");
+  }
+
+  pipeline->scalarResultBits = result.bits;
+  pipeline->scalarResultFlags = result.flags;
+}
+
+void VPU::finishFDIVPipeline(Pipeline *pipeline)
+{
+  qRegister.setBits(pipeline->scalarResultBits);
+
+  unsetFlag(statusFlags, VPU_FLAG_I);
+  unsetFlag(statusFlags, VPU_FLAG_D);
+  if (hasFlag(pipeline->scalarResultFlags, FP_FLAG_I_BIT))
+  {
+    setFlag(statusFlags, VPU_FLAG_I);
+    setFlag(statusFlags, VPU_FLAG_IS);
+  }
+  if (hasFlag(pipeline->scalarResultFlags, FP_FLAG_D_BIT))
+  {
+    setFlag(statusFlags, VPU_FLAG_D);
+    setFlag(statusFlags, VPU_FLAG_DS);
   }
 }
 
@@ -1929,6 +2050,25 @@ FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
 
 void VPU::pipelineFinished(Pipeline * p)
 {
+  if (p->type == VPU_PIPELINE_TYPE_FDIV)
+  {
+    finishFDIVPipeline(p);
+    emitTrace({
+      VPUTraceEventType::PipelineWriteback,
+      cycles,
+      p->instructionAddress,
+      0,
+      0,
+      p->opCode,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS
+    });
+    return;
+  }
+  if (p->type == VPU_PIPELINE_TYPE_WAITQ)
+  {
+    return;
+  }
   if (p->type == VPU_PIPELINE_TYPE_LSU)
   {
     finishLSUPipeline(p);

@@ -41,6 +41,10 @@ VUFloatDecomposition decomposeVUFloat(std::uint32_t bits);
 VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
+VUFloatResult sqrtFPRaw(std::uint32_t bits);
+VUFloatResult rsqrtFPRaw(
+  std::uint32_t numeratorBits,
+  std::uint32_t radicandBits);
 VUFloatResult subFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 std::uint32_t floatToFixedRaw(
   std::uint32_t bits,

@@ -204,17 +204,16 @@ Each committed fixture should include:
 
 ### VU Floating Point
 
-Raw add, subtract, multiply, and fixed-point conversions are bit-oriented.
-Division and square root still require their final VU-specific implementations.
+Raw arithmetic and fixed-point conversions are bit-oriented.
 
 - [x] Build raw-bit operation APIs returning result bits and exception flags
 - [x] Treat exponent-zero inputs as signed zero during calculations
 - [x] Treat exponent-255 encodings as finite VU values
 - [x] Correct exponent overflow and underflow detection
 - [x] Implement VU 24-bit truncating add, subtract, and multiply
-- [ ] Implement raw VU division results and exception behavior, including
+- [x] Implement raw VU division results and exception behavior, including
       signed `MAX` for `0 / 0` with the I flag
-- [ ] Implement raw VU square-root and reciprocal-square-root results and
+- [x] Implement raw VU square-root and reciprocal-square-root results and
       exception behavior
 - [x] Implement truncating fixed-point conversions with defined out-of-range behavior
 - [x] Validate edge cases against the VU manual and independent reference
@@ -241,13 +240,14 @@ floating-point assembly integration:
 - [x] Cover VU zero, denormal, maximum, overflow, and underflow behavior
 - [x] Cover multiply-add/subtract sequences where intermediate precision matters
 - [x] Cover fixed-point conversion boundaries and out-of-range inputs
+- [x] Cover DIV, SQRT, RSQRT, WAITQ, raw Q results, and I/D flag state
 
 ### Instruction Coverage
 
 - [ ] Complete commonly used lower integer instructions
 - [ ] Complete VU memory load/store variants and lane masks
 - [ ] Complete branches, jumps, and special-register transfers
-- [ ] Add Q pipeline division and square-root operations
+- [x] Add Q pipeline division and square-root operations
 - [ ] Add the VU1 P pipeline and EFU instructions
 - [ ] Add VU1 `XGKICK`
 

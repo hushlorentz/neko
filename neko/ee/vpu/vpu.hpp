@@ -110,6 +110,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void pipelineFinished(Pipeline *p) override;
     bool hasMACFlag(uint16_t flag);
     bool hasStatusFlag(uint16_t flag);
+    uint32_t qRegisterBits() const;
     void loadIRegister(double value);
     void loadQRegister(double value);
     void loadAccumulator(double x, double y, double z, double w);
@@ -138,7 +139,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     vector<FPRegister> fpRegisters;
     vector<uint16_t> intRegisters;
     VUFloat iRegister;
-    double qRegister = 0;
+    VUFloat qRegister;
     double pRegister = 0;
     uint32_t rRegister = 0;
     uint16_t MACFlags = 0;
@@ -188,6 +189,8 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startBranchInstruction(const LowerInstruction &instruction);
     void startLSUInstruction(const LowerInstruction &instruction);
     void startLowerFMACInstruction(const LowerInstruction &instruction);
+    void startFDIVInstruction(const LowerInstruction &instruction);
+    void startWaitQInstruction(const LowerInstruction &instruction);
     uint16_t integerValueForExecution(uint8_t registerID) const;
     uint16_t integerSourceValueForPipeline(
       const Pipeline *pipeline,
@@ -204,6 +207,8 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startLSUPipeline(Pipeline *pipeline);
     void finishLSUPipeline(Pipeline *pipeline);
     void startFMACPipeline(Pipeline *pipeline);
+    void executeFDIVPipeline(Pipeline *pipeline);
+    void finishFDIVPipeline(Pipeline *pipeline);
     void prepareAccumulatorOperation(Pipeline *pipeline);
     uint8_t multiplicationOverflowFields(
       const Pipeline *pipeline) const;

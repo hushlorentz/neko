@@ -600,6 +600,117 @@ TEST_CASE("VU add subtract and multiply truncate to 24 bits")
   }
 }
 
+TEST_CASE("VU division uses raw truncation and Q exception behavior")
+{
+  SECTION("Division truncates instead of rounding to nearest")
+  {
+    VUFloatResult result = divFPRaw(0x3f800000u, 0x40400000u);
+
+    REQUIRE(result.bits == 0x3eaaaaaau);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Zero divided by zero returns signed maximum with I")
+  {
+    VUFloatResult positive = divFPRaw(0x00000000u, 0x00000000u);
+    VUFloatResult negative = divFPRaw(0x00000000u, 0x80000000u);
+
+    REQUIRE(positive.bits == 0x7fffffffu);
+    REQUIRE(negative.bits == 0xffffffffu);
+    REQUIRE(positive.flags == FP_FLAG_I_BIT);
+    REQUIRE(negative.flags == FP_FLAG_I_BIT);
+  }
+
+  SECTION("A nonzero numerator divided by zero returns signed maximum with D")
+  {
+    VUFloatResult result = divFPRaw(0xbf800000u, 0x00000000u);
+
+    REQUIRE(result.bits == 0xffffffffu);
+    REQUIRE(result.flags == FP_FLAG_D_BIT);
+  }
+
+  SECTION("A zero numerator preserves the quotient sign")
+  {
+    VUFloatResult result = divFPRaw(0x00000000u, 0xc0000000u);
+
+    REQUIRE(result.bits == FP_SIGN_BIT);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Quotient range saturation does not set FMAC overflow or underflow")
+  {
+    VUFloatResult overflow = divFPRaw(0x7fffffffu, 0x00800000u);
+    VUFloatResult underflow = divFPRaw(0x00800000u, 0x7fffffffu);
+
+    REQUIRE(overflow.bits == 0x7fffffffu);
+    REQUIRE(underflow.bits == 0x00000000u);
+    REQUIRE(overflow.flags == 0);
+    REQUIRE(underflow.flags == 0);
+  }
+}
+
+TEST_CASE("VU square root and reciprocal square root use raw Q behavior")
+{
+  SECTION("Square root returns exact roots")
+  {
+    VUFloatResult result = sqrtFPRaw(0x41100000u);
+
+    REQUIRE(result.bits == 0x40400000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Square root truncates irrational results")
+  {
+    VUFloatResult result = sqrtFPRaw(0x41200000u);
+
+    REQUIRE(result.bits == 0x404a62c1u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Square root uses the absolute value and reports negative input")
+  {
+    VUFloatResult result = sqrtFPRaw(0xc1100000u);
+
+    REQUIRE(result.bits == 0x40400000u);
+    REQUIRE(result.flags == FP_FLAG_I_BIT);
+  }
+
+  SECTION("Negative exponent-zero inputs are zero without I")
+  {
+    VUFloatResult result = sqrtFPRaw(0x807fffffu);
+
+    REQUIRE(result.bits == 0x00000000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Reciprocal square root divides by the truncated root")
+  {
+    VUFloatResult result = rsqrtFPRaw(0x40c00000u, 0x40800000u);
+
+    REQUIRE(result.bits == 0x40400000u);
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Reciprocal square root reports a negative nonzero radicand")
+  {
+    VUFloatResult result = rsqrtFPRaw(0x40c00000u, 0xc1100000u);
+
+    REQUIRE(result.bits == 0x40000000u);
+    REQUIRE(result.flags == FP_FLAG_I_BIT);
+  }
+
+  SECTION("Reciprocal square root preserves signed zero exception behavior")
+  {
+    VUFloatResult invalid = rsqrtFPRaw(0x00000000u, 0x80000000u);
+    VUFloatResult division = rsqrtFPRaw(0x3f800000u, 0x80000000u);
+
+    REQUIRE(invalid.bits == 0xffffffffu);
+    REQUIRE(invalid.flags == FP_FLAG_I_BIT);
+    REQUIRE(division.bits == 0xffffffffu);
+    REQUIRE(division.flags == FP_FLAG_D_BIT);
+  }
+}
+
 TEST_CASE("VU fixed-point conversions use raw saturation and truncation")
 {
   SECTION("FTOI flushes exponent-zero encodings without preserving sign")

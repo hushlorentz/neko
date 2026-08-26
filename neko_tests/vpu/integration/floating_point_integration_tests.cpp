@@ -333,3 +333,90 @@ TEST_CASE("VU0 decoded fixed-point conversions cover signed boundaries")
   REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
   REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
 }
+
+TEST_CASE("VU0 decoded Q pipeline preserves raw results and synchronization")
+{
+  VPU vpu;
+  std::vector<std::uint8_t> memory;
+  vpu_integration::appendQword(&memory, 1, 6, 0, 0);
+  vpu_integration::appendQword(
+    &memory, 0x3f800000, 0x40400000, 0x40c00000, 0);
+  vpu_integration::appendQword(
+    &memory, 0x00000000, 0x80000000, 0x41200000, 0xc1100000);
+  vpu_integration::appendQword(
+    &memory, 0x3f800000, 0x00000000, 0, 0);
+  vpu_integration::appendQword(
+    &memory, 0x40800000, 0xc1100000, 0xc0400000, 0);
+  vpu_integration::appendQword(
+    &memory, 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000);
+  for (std::uint8_t index = 0; index < 8; index++)
+  {
+    vpu_integration::appendQword(
+      &memory, 0xdead0001, 0xdead0002, 0xdead0003, 0xdead0004);
+  }
+  vpu.writeDataMemory(0, memory);
+
+  VPUProgramRunConfig config;
+  config.microProgram =
+    vpu_integration::readBinary("q_pipeline.bin");
+  config.cycleBudget = 500;
+  config.outputAddress = 6 * 16;
+  config.outputSize = 8 * 16;
+  config.captureTrace = true;
+
+  const VPUProgramRunResult result = runVPUProgram(&vpu, config);
+
+  std::vector<std::uint8_t> expected;
+  vpu_integration::appendQword(
+    &expected, 0x3eaaaaaa, 0x00000000, 0x00000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0xffffffff, 0x00000000, 0x00000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0x7fffffff, 0x00000000, 0x00000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0x404a62c1, 0x00000000, 0x00000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0x40400000, 0x00000000, 0x00000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0x40400000, 0x00000000, 0x00000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0x40000000, 0x00000000, 0x00000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0x80000000, 0x00000000, 0x00000000, 0x00000000);
+
+  std::vector<std::uint16_t> expectedAddresses;
+  for (std::uint16_t address = 0; address < 41 * 8; address += 8)
+  {
+    expectedAddresses.push_back(address);
+  }
+
+  REQUIRE(result.state == VPU_STATE_READY);
+  REQUIRE(result.elapsedCycles == 152);
+  REQUIRE(result.programCounter == 41 * 8);
+  REQUIRE(result.hasTerminationPosition);
+  REQUIRE(result.terminationPosition == 41);
+  REQUIRE(result.outputMemory == expected);
+  REQUIRE(issuedAddresses(result.traceEvents) == expectedAddresses);
+  REQUIRE(vpu.qRegisterBits() == 0x80000000u);
+
+  REQUIRE_FALSE(vpu.hasStatusFlag(VPU_FLAG_I));
+  REQUIRE_FALSE(vpu.hasStatusFlag(VPU_FLAG_D));
+  REQUIRE(vpu.hasStatusFlag(VPU_FLAG_IS));
+  REQUIRE(vpu.hasStatusFlag(VPU_FLAG_DS));
+
+  std::vector<std::uint16_t> qWritebacks;
+  for (const VPUTraceEvent &event : result.traceEvents)
+  {
+    if (event.type == VPUTraceEventType::PipelineWriteback &&
+        (event.opCode == VPU_DIV ||
+         event.opCode == VPU_SQRT ||
+         event.opCode == VPU_RSQRT))
+    {
+      qWritebacks.push_back(event.instructionAddress);
+    }
+  }
+  REQUIRE(qWritebacks ==
+    std::vector<std::uint16_t>({
+      56, 80, 104, 128, 152, 176, 200, 224
+    }));
+}

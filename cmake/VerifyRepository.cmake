@@ -106,5 +106,9 @@ verify_fixture(
   fixed_point_conversions.bin
   3c1594daf9c09d02701979295ccee63c7c06caa722bf6ca88410ab403261ec6f
 )
+verify_fixture(
+  q_pipeline.bin
+  6421afcad9ae775630c93af16320369c6984dae51286ca89027ee404bf2d73d6
+)
 
 message(STATUS "Repository checks passed")

@@ -4,6 +4,7 @@
 #include "catch.hpp"
 #include "vpu.hpp"
 #include "vpu_field_mask.hpp"
+#include "vpu_flags.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
@@ -91,6 +92,29 @@ namespace
       (static_cast<uint32_t>(fs) << 11);
   }
 
+  uint32_t fdiv(
+    uint32_t encoding,
+    uint8_t fs,
+    uint8_t fsf,
+    uint8_t ft,
+    uint8_t ftf)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(ftf) << 23) |
+      (static_cast<uint32_t>(fsf) << 21) |
+      (static_cast<uint32_t>(ft) << 16) |
+      (static_cast<uint32_t>(fs) << 11);
+  }
+
+  uint32_t sqrt(uint8_t ft, uint8_t ftf)
+  {
+    return
+      VPU_SQRT_ENCODING |
+      (static_cast<uint32_t>(ftf) << 23) |
+      (static_cast<uint32_t>(ft) << 16);
+  }
+
   uint32_t add(
     uint32_t destinationMask,
     uint8_t ft,
@@ -129,6 +153,231 @@ namespace
 
 TEST_CASE("VU Lower Instruction Tests")
 {
+  SECTION("DIV and RSQRT decode both selected source fields")
+  {
+    for (uint32_t encoding : {VPU_DIV_ENCODING, VPU_RSQRT_ENCODING})
+    {
+      LowerInstruction instruction =
+        decodeLowerInstruction(fdiv(encoding, 3, 1, 7, 3));
+
+      REQUIRE(instruction.unit == LowerExecutionUnit::FDIV);
+      REQUIRE(instruction.opCode == (encoding & VPU_TYPE3_MASK));
+      REQUIRE(instruction.sourceRegister1 == VPU_REGISTER_VF03);
+      REQUIRE(instruction.sourceRegister2 == VPU_REGISTER_VF07);
+      REQUIRE(instruction.sourceFieldMask1 == FP_REGISTER_Y_FIELD);
+      REQUIRE(instruction.sourceFieldMask2 == FP_REGISTER_W_FIELD);
+    }
+  }
+
+  SECTION("SQRT decodes its selected ft field")
+  {
+    LowerInstruction instruction =
+      decodeLowerInstruction(sqrt(VPU_REGISTER_VF05, 2));
+
+    REQUIRE(instruction.unit == LowerExecutionUnit::FDIV);
+    REQUIRE(instruction.opCode == VPU_SQRT);
+    REQUIRE(instruction.sourceRegister1 == VPU_REGISTER_VF00);
+    REQUIRE(instruction.sourceRegister2 == VPU_REGISTER_VF05);
+    REQUIRE(instruction.sourceFieldMask1 == FP_REGISTER_NO_FIELDS);
+    REQUIRE(instruction.sourceFieldMask2 == FP_REGISTER_Z_FIELD);
+  }
+
+  SECTION("WAITQ decodes without register operands")
+  {
+    LowerInstruction instruction =
+      decodeLowerInstruction(VPU_WAITQ_ENCODING);
+
+    REQUIRE(instruction.unit == LowerExecutionUnit::WaitQ);
+    REQUIRE(instruction.opCode == VPU_WAITQ);
+    REQUIRE(instruction.sourceRegister1 == VPU_REGISTER_VF00);
+    REQUIRE(instruction.sourceRegister2 == VPU_REGISTER_VF00);
+  }
+
+  SECTION("DIV samples the selected fields and writes raw Q at F")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 99, 6, 99, 99);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 99, 99, 99, 2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      fdiv(
+        VPU_DIV_ENCODING,
+        VPU_REGISTER_VF02,
+        1,
+        VPU_REGISTER_VF03,
+        3));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      VPU_WAITQ_ENCODING);
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.qRegisterBits() == 0x40400000u);
+    REQUIRE(vpu.elapsedCycles() == 11);
+
+    uint32_t writebackCycle = 0;
+    for (const VPUTraceEvent &event : events)
+    {
+      if (event.type == VPUTraceEventType::PipelineWriteback &&
+          event.opCode == VPU_DIV)
+      {
+        writebackCycle = event.cycle;
+      }
+    }
+    REQUIRE(writebackCycle == 8);
+  }
+
+  SECTION("SQRT and RSQRT write their exact raw results")
+  {
+    VPU sqrtVPU;
+    std::vector<uint8_t> sqrtInstructions;
+    sqrtVPU.loadFPRegister(VPU_REGISTER_VF02, 0, 0, 10, 0);
+    appendInstructionPair(
+      &sqrtInstructions,
+      VPU_NOP,
+      sqrt(VPU_REGISTER_VF02, 2));
+    appendInstructionPair(
+      &sqrtInstructions,
+      VPU_E_BIT | VPU_NOP,
+      VPU_WAITQ_ENCODING);
+    appendInstructionPair(
+      &sqrtInstructions,
+      VPU_NOP,
+      VPU_LOWER_NOP);
+    sqrtVPU.uploadMicroInstructions(sqrtInstructions);
+    sqrtVPU.initMicroMode();
+
+    VPU rsqrtVPU;
+    std::vector<uint8_t> rsqrtInstructions;
+    rsqrtVPU.loadFPRegister(VPU_REGISTER_VF02, 6, 0, 0, 0);
+    rsqrtVPU.loadFPRegister(VPU_REGISTER_VF03, 0, 4, 0, 0);
+    appendInstructionPair(
+      &rsqrtInstructions,
+      VPU_NOP,
+      fdiv(
+        VPU_RSQRT_ENCODING,
+        VPU_REGISTER_VF02,
+        0,
+        VPU_REGISTER_VF03,
+        1));
+    appendInstructionPair(
+      &rsqrtInstructions,
+      VPU_E_BIT | VPU_NOP,
+      VPU_WAITQ_ENCODING);
+    appendInstructionPair(
+      &rsqrtInstructions,
+      VPU_NOP,
+      VPU_LOWER_NOP);
+    rsqrtVPU.uploadMicroInstructions(rsqrtInstructions);
+    rsqrtVPU.initMicroMode();
+
+    REQUIRE(sqrtVPU.qRegisterBits() == 0x404a62c1u);
+    REQUIRE(rsqrtVPU.qRegisterBits() == 0x40400000u);
+    REQUIRE(rsqrtVPU.elapsedCycles() == 17);
+  }
+
+  SECTION("Q operations replace current I and D while preserving sticky flags")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 0, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 0, 0, 0, 0);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      fdiv(
+        VPU_DIV_ENCODING,
+        VPU_REGISTER_VF02,
+        0,
+        VPU_REGISTER_VF03,
+        0));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      VPU_WAITQ_ENCODING);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      fdiv(
+        VPU_DIV_ENCODING,
+        VPU_REGISTER_VF03,
+        0,
+        VPU_REGISTER_VF03,
+        0));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      VPU_WAITQ_ENCODING);
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.qRegisterBits() == 0x7fffffffu);
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_I));
+    REQUIRE_FALSE(vpu.hasStatusFlag(VPU_FLAG_D));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_IS));
+    REQUIRE(vpu.hasStatusFlag(VPU_FLAG_DS));
+  }
+
+  SECTION("A pending upper write stalls a selected DIV source lane")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 6, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 2, 2, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF04, 2, 2, 0, 0);
+
+    appendInstructionPair(
+      &instructions,
+      add(
+        VPU_DEST_Y_BIT,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF04,
+        VPU_REGISTER_VF02),
+      VPU_LOWER_NOP);
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      fdiv(
+        VPU_DIV_ENCODING,
+        VPU_REGISTER_VF02,
+        1,
+        VPU_REGISTER_VF03,
+        0));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      VPU_WAITQ_ENCODING);
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    bool stalled = false;
+    for (const VPUTraceEvent &event : events)
+    {
+      stalled = stalled || event.type == VPUTraceEventType::PipelineStall;
+    }
+    REQUIRE(stalled);
+    REQUIRE(vpu.qRegisterBits() == 0x40000000u);
+  }
+
   SECTION("IADD bypasses its 16-bit result to the next instruction")
   {
     VPU vpu;
