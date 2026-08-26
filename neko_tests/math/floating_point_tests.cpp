@@ -600,6 +600,57 @@ TEST_CASE("VU add subtract and multiply truncate to 24 bits")
   }
 }
 
+TEST_CASE("VU fixed-point conversions use raw saturation and truncation")
+{
+  SECTION("FTOI flushes exponent-zero encodings without preserving sign")
+  {
+    REQUIRE(floatToFixedRaw(0x00000001u, 15) == 0x00000000u);
+    REQUIRE(floatToFixedRaw(0x807fffffu, 15) == 0x00000000u);
+  }
+
+  SECTION("FTOI truncates toward zero")
+  {
+    REQUIRE(floatToFixedRaw(0x3ee66666u, 4) == 0x00000007u);
+    REQUIRE(floatToFixedRaw(0xbee66666u, 4) == 0xfffffff9u);
+  }
+
+  SECTION("FTOI0 preserves its largest in-range VU values")
+  {
+    REQUIRE(floatToFixedRaw(0x4effffffu, 0) == 0x7fffff80u);
+    REQUIRE(floatToFixedRaw(0xcf000000u, 0) == 0x80000000u);
+  }
+
+  SECTION("FTOI0 saturates positive and negative overflow without flags")
+  {
+    REQUIRE(floatToFixedRaw(0x4f000000u, 0) == 0x7fffffffu);
+    REQUIRE(floatToFixedRaw(0xcf000001u, 0) == 0x80000000u);
+    REQUIRE(floatToFixedRaw(0x7fffffffu, 0) == 0x7fffffffu);
+    REQUIRE(floatToFixedRaw(0xffffffffu, 0) == 0x80000000u);
+  }
+
+  SECTION("FTOI15 applies scaling before saturation")
+  {
+    REQUIRE(floatToFixedRaw(0x477fffffu, 15) == 0x7fffff80u);
+    REQUIRE(floatToFixedRaw(0x47800000u, 15) == 0x7fffffffu);
+    REQUIRE(floatToFixedRaw(0xc7800000u, 15) == 0x80000000u);
+  }
+
+  SECTION("ITOF0 truncates integers wider than 24 significant bits")
+  {
+    REQUIRE(fixedToFloatRaw(0x01000001u, 0) == 0x4b800000u);
+    REQUIRE(fixedToFloatRaw(0xfeffffffu, 0) == 0xcb800000u);
+    REQUIRE(fixedToFloatRaw(0x7fffffffu, 0) == 0x4effffffu);
+    REQUIRE(fixedToFloatRaw(0x80000000u, 0) == 0xcf000000u);
+  }
+
+  SECTION("ITOF15 handles the complete signed fixed-point range")
+  {
+    REQUIRE(fixedToFloatRaw(0x00000001u, 15) == 0x38000000u);
+    REQUIRE(fixedToFloatRaw(0x7fffffffu, 15) == 0x477fffffu);
+    REQUIRE(fixedToFloatRaw(0x80000000u, 15) == 0xc7800000u);
+  }
+}
+
 TEST_CASE("VU raw arithmetic regression corpus")
 {
   using RawOperation = VUFloatResult (*)(std::uint32_t, std::uint32_t);

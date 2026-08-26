@@ -160,7 +160,8 @@ Regenerate the floating-point integration fixtures with:
 for fixture in \
   floating_point_truncation \
   floating_point_exceptions \
-  floating_point_compound
+  floating_point_compound \
+  fixed_point_conversions
 do
   local_integration/tools/naken_asm/naken_asm \
     -b \
@@ -175,4 +176,5 @@ Expected SHA-256 values:
 floating_point_truncation.bin b5e0ab57cda49059f30205cd4cd001aeb55dff820424e898f6031304ecb59940
 floating_point_exceptions.bin dad420fa5f4c134fbfe12308be2a79dbadfc9e72b810754c97cde7b8a27d79c2
 floating_point_compound.bin   d8fdaf73e48383eb5a857ce6159420871591ed884ae9d78971f4d5059abab2f4
+fixed_point_conversions.bin   3c1594daf9c09d02701979295ccee63c7c06caa722bf6ca88410ab403261ec6f
 ```

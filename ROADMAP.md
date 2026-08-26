@@ -238,7 +238,7 @@ floating-point assembly integration:
 - [x] Add chained arithmetic programs with exact raw results and flag states
 - [x] Cover VU zero, denormal, maximum, overflow, and underflow behavior
 - [x] Cover multiply-add/subtract sequences where intermediate precision matters
-- [ ] Cover fixed-point conversion boundaries and out-of-range inputs
+- [x] Cover fixed-point conversion boundaries and out-of-range inputs
 - [ ] Compare optimized execution paths against the interpreter oracle
 
 ### Instruction Coverage

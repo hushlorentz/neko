@@ -1,6 +1,7 @@
 #include "floating_point_ops.hpp"
 #include <array>
 #include <cfloat>
+#include <cstring>
 
 namespace
 {
@@ -396,42 +397,144 @@ double subFP(double d1, double d2, uint8_t * resultFlags)
   return convertFromIEEE(d1 - d2, resultFlags);
 }
 
+std::uint32_t floatToFixedRaw(
+  std::uint32_t bits,
+  std::uint8_t fractionalBits)
+{
+  const bool negative = (bits & FP_SIGN_BIT) != 0;
+  const std::uint32_t encodedExponent = (bits >> 23) & 0xff;
+  if (encodedExponent == 0)
+  {
+    return 0;
+  }
+
+  const std::uint32_t significand =
+    0x800000u | (bits & FP_MAX_MANTISSA);
+  const int shift =
+    static_cast<int>(encodedExponent) - 127 - 23 + fractionalBits;
+  const std::uint64_t limit =
+    negative ? 0x80000000ull : 0x7fffffffull;
+  std::uint64_t magnitude;
+
+  if (shift > 8)
+  {
+    magnitude = limit + 1;
+  }
+  else if (shift >= 0)
+  {
+    magnitude = static_cast<std::uint64_t>(significand) << shift;
+  }
+  else if (shift <= -24)
+  {
+    magnitude = 0;
+  }
+  else
+  {
+    magnitude = significand >> -shift;
+  }
+
+  if (magnitude > limit)
+  {
+    return negative ? 0x80000000u : 0x7fffffffu;
+  }
+  if (negative && magnitude != 0)
+  {
+    return 0u - static_cast<std::uint32_t>(magnitude);
+  }
+  return static_cast<std::uint32_t>(magnitude);
+}
+
+std::uint32_t fixedToFloatRaw(
+  std::uint32_t bits,
+  std::uint8_t fractionalBits)
+{
+  if (bits == 0)
+  {
+    return 0;
+  }
+
+  const bool negative = (bits & FP_SIGN_BIT) != 0;
+  const std::uint32_t magnitude = negative ? 0u - bits : bits;
+  int highestBit = 0;
+  for (std::uint32_t remaining = magnitude; (remaining >>= 1) != 0;)
+  {
+    highestBit++;
+  }
+
+  std::uint32_t significand;
+  if (highestBit > 23)
+  {
+    significand = magnitude >> (highestBit - 23);
+  }
+  else
+  {
+    significand = magnitude << (23 - highestBit);
+  }
+
+  const int exponent = highestBit - fractionalBits;
+  return (negative ? FP_SIGN_BIT : 0) |
+    (static_cast<std::uint32_t>(exponent + 127) << 23) |
+    (significand & FP_MAX_MANTISSA);
+}
+
+namespace
+{
+  std::int32_t doubleToInteger(double value, std::uint8_t fractionalBits)
+  {
+    const VUFloat source(value);
+    const std::uint32_t resultBits =
+      floatToFixedRaw(source.bits(), fractionalBits);
+    std::int32_t result;
+    std::memcpy(&result, &resultBits, sizeof(result));
+    return result;
+  }
+
+  double integerToDouble(std::int32_t value, std::uint8_t fractionalBits)
+  {
+    std::uint32_t sourceBits;
+    std::memcpy(&sourceBits, &value, sizeof(sourceBits));
+    VUFloat result;
+    result.setBits(fixedToFloatRaw(sourceBits, fractionalBits));
+    return result;
+  }
+}
+
 std::int32_t doubleToInteger0(double d)
 {
-  return static_cast<std::int32_t>(d);
+  return doubleToInteger(d, 0);
 }
 
 std::int32_t doubleToInteger4(double d)
 {
-  return static_cast<std::int32_t>(d * 16);
+  return doubleToInteger(d, 4);
 }
 
 std::int32_t doubleToInteger12(double d)
 {
-  return static_cast<std::int32_t>(d * 4096);
+  return doubleToInteger(d, 12);
 }
 
 std::int32_t doubleToInteger15(double d)
 {
-  return static_cast<std::int32_t>(d * 32768);
+  return doubleToInteger(d, 15);
 }
 
 double integer0ToDouble(std::int32_t i)
 {
-  return (double)i;
+  return integerToDouble(i, 0);
 }
 
 double integer4ToDouble(std::int32_t i)
 {
-  return i / 16.0f;
+  return integerToDouble(i, 4);
 }
 
 double integer12ToDouble(std::int32_t i)
 {
-  return i / 4096.0f;
+  return integerToDouble(i, 12);
 }
 
 double integer15ToDouble(std::int32_t i)
 {
-  return i / 32768.0f;
+  return integerToDouble(i, 15);
 }

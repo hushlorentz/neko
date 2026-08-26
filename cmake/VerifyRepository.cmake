@@ -102,5 +102,9 @@ verify_fixture(
   floating_point_compound.bin
   d8fdaf73e48383eb5a857ce6159420871591ed884ae9d78971f4d5059abab2f4
 )
+verify_fixture(
+  fixed_point_conversions.bin
+  3c1594daf9c09d02701979295ccee63c7c06caa722bf6ca88410ab403261ec6f
+)
 
 message(STATUS "Repository checks passed")

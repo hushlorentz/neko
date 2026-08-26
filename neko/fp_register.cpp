@@ -383,58 +383,72 @@ void FPRegister::storeOuterProduct(FPRegister * r1, FPRegister * r2)
 
 void FPRegister::toInt0(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &doubleToInteger0);
+  toInt(source, fieldMask, 0);
 }
 
 void FPRegister::toInt4(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &doubleToInteger4);
+  toInt(source, fieldMask, 4);
 }
 
 void FPRegister::toInt12(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &doubleToInteger12);
+  toInt(source, fieldMask, 12);
 }
 
 void FPRegister::toInt15(FPRegister * source, uint8_t fieldMask)
 {
-  toInt(source, fieldMask, &doubleToInteger15);
+  toInt(source, fieldMask, 15);
 }
 
 void FPRegister::toDouble0(FPRegister * source, uint8_t fieldMask)
 {
-  toDouble(source, fieldMask, &integer0ToDouble);
+  toDouble(source, fieldMask, 0);
 }
 
 void FPRegister::toDouble4(FPRegister * source, uint8_t fieldMask)
 {
-  toDouble(source, fieldMask, &integer4ToDouble);
+  toDouble(source, fieldMask, 4);
 }
 
 void FPRegister::toDouble12(FPRegister * source, uint8_t fieldMask)
 {
-  toDouble(source, fieldMask, &integer12ToDouble);
+  toDouble(source, fieldMask, 12);
 }
 
 void FPRegister::toDouble15(FPRegister * source, uint8_t fieldMask)
 {
-  toDouble(source, fieldMask, &integer15ToDouble);
+  toDouble(source, fieldMask, 15);
 }
 
-void FPRegister::toInt(FPRegister * source, uint8_t fieldMask, std::int32_t (*convertFunc)(double))
+void FPRegister::toInt(
+  FPRegister *source,
+  uint8_t fieldMask,
+  uint8_t fractionalBits)
 {
-  if (hasFlag(fieldMask, FP_REGISTER_X_FIELD)) x.setSignedValue((*convertFunc)(source->x));
-  if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD)) y.setSignedValue((*convertFunc)(source->y));
-  if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD)) z.setSignedValue((*convertFunc)(source->z));
-  if (hasFlag(fieldMask, FP_REGISTER_W_FIELD)) w.setSignedValue((*convertFunc)(source->w));
+  if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+    x.setBits(floatToFixedRaw(source->x.bits(), fractionalBits));
+  if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+    y.setBits(floatToFixedRaw(source->y.bits(), fractionalBits));
+  if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+    z.setBits(floatToFixedRaw(source->z.bits(), fractionalBits));
+  if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+    w.setBits(floatToFixedRaw(source->w.bits(), fractionalBits));
 }
 
-void FPRegister::toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int32_t))
+void FPRegister::toDouble(
+  FPRegister *source,
+  uint8_t fieldMask,
+  uint8_t fractionalBits)
 {
-  x = hasFlag(fieldMask, FP_REGISTER_X_FIELD) ? (*convertFunc)(source->x.signedValue()) : x;
-  y = hasFlag(fieldMask, FP_REGISTER_Y_FIELD) ? (*convertFunc)(source->y.signedValue()) : y;
-  z = hasFlag(fieldMask, FP_REGISTER_Z_FIELD) ? (*convertFunc)(source->z.signedValue()) : z;
-  w = hasFlag(fieldMask, FP_REGISTER_W_FIELD) ? (*convertFunc)(source->w.signedValue()) : w;
+  if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+    x.setBits(fixedToFloatRaw(source->x.bits(), fractionalBits));
+  if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+    y.setBits(fixedToFloatRaw(source->y.bits(), fractionalBits));
+  if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+    z.setBits(fixedToFloatRaw(source->z.bits(), fractionalBits));
+  if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+    w.setBits(fixedToFloatRaw(source->w.bits(), fractionalBits));
 }
 
 void FPRegister::clearFlags()

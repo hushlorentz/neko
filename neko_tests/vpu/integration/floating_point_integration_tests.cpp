@@ -261,3 +261,75 @@ TEST_CASE("VU0 decoded compound FMAC preserves intermediate truncation")
   REQUIRE(msub.arithmetic.lanes[3].resultBits == 0x00000000);
   REQUIRE(msub.arithmetic.lanes[3].resultFlags == 0);
 }
+
+TEST_CASE("VU0 decoded fixed-point conversions cover signed boundaries")
+{
+  VPU vpu;
+  std::vector<std::uint8_t> memory;
+  vpu_integration::appendQword(&memory, 1, 5, 6, 0);
+  vpu_integration::appendQword(
+    &memory, 0x4effffff, 0x7fffffff, 0xffffffff, 0xbee66666);
+  vpu_integration::appendQword(
+    &memory, 0x4cffffff, 0x4d000000, 0xcd000000, 0xbee66666);
+  vpu_integration::appendQword(
+    &memory, 0x48ffffff, 0x49000000, 0xc9000000, 0xbee66666);
+  vpu_integration::appendQword(
+    &memory, 0x477fffff, 0x47800000, 0xc7800000, 0xbee66666);
+  vpu_integration::appendQword(
+    &memory, 0x01000001, 0xfeffffff, 0x7fffffff, 0x80000000);
+  for (std::uint8_t index = 0; index < 8; index++)
+  {
+    vpu_integration::appendQword(
+      &memory, 0xdead0001, 0xdead0002, 0xdead0003, 0xdead0004);
+  }
+  vpu.writeDataMemory(0, memory);
+
+  VPUProgramRunConfig config;
+  config.microProgram =
+    vpu_integration::readBinary("fixed_point_conversions.bin");
+  config.cycleBudget = 200;
+  config.outputAddress = 6 * 16;
+  config.outputSize = 8 * 16;
+  config.captureTrace = true;
+
+  const VPUProgramRunResult result = runVPUProgram(&vpu, config);
+
+  std::vector<std::uint8_t> expected;
+  vpu_integration::appendQword(
+    &expected, 0x7fffff80, 0x7fffffff, 0x80000000, 0x00000000);
+  vpu_integration::appendQword(
+    &expected, 0x7fffff80, 0x7fffffff, 0x80000000, 0xfffffff9);
+  vpu_integration::appendQword(
+    &expected, 0x7fffff80, 0x7fffffff, 0x80000000, 0xfffff8cd);
+  vpu_integration::appendQword(
+    &expected, 0x7fffff80, 0x7fffffff, 0x80000000, 0xffffc667);
+  vpu_integration::appendQword(
+    &expected, 0x4b800000, 0xcb800000, 0x4effffff, 0xcf000000);
+  vpu_integration::appendQword(
+    &expected, 0x49800000, 0xc9800000, 0x4cffffff, 0xcd000000);
+  vpu_integration::appendQword(
+    &expected, 0x45800000, 0xc5800000, 0x48ffffff, 0xc9000000);
+  vpu_integration::appendQword(
+    &expected, 0x44000000, 0xc4000000, 0x477fffff, 0xc7800000);
+
+  std::vector<std::uint16_t> expectedAddresses;
+  for (std::uint16_t address = 0; address < 27 * 8; address += 8)
+  {
+    expectedAddresses.push_back(address);
+  }
+
+  REQUIRE(result.state == VPU_STATE_READY);
+  REQUIRE(result.elapsedCycles == 69);
+  REQUIRE(result.programCounter == 27 * 8);
+  REQUIRE(result.hasTerminationPosition);
+  REQUIRE(result.terminationPosition == 27);
+  REQUIRE(result.outputMemory == expected);
+  REQUIRE(issuedAddresses(result.traceEvents) == expectedAddresses);
+
+  REQUIRE_FALSE(vpu.hasMACFlag(VPU_FLAG_OX));
+  REQUIRE(vpu.hasMACFlag(VPU_FLAG_OY));
+  REQUIRE(vpu.hasMACFlag(VPU_FLAG_OZ));
+  REQUIRE_FALSE(vpu.hasMACFlag(VPU_FLAG_OW));
+  REQUIRE(vpu.hasStatusFlag(VPU_FLAG_O));
+  REQUIRE(vpu.hasStatusFlag(VPU_FLAG_OS));
+}

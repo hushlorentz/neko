@@ -72,8 +72,14 @@ class FPRegister
     void toDouble15(FPRegister * source, uint8_t fieldMask);
 
   private:
-    void toInt(FPRegister * source, uint8_t fieldMask, std::int32_t (*convertFunc)(double));
-    void toDouble(FPRegister * source, uint8_t fieldMask, double (*convertFunc)(std::int32_t));
+    void toInt(
+      FPRegister *source,
+      uint8_t fieldMask,
+      uint8_t fractionalBits);
+    void toDouble(
+      FPRegister *source,
+      uint8_t fieldMask,
+      uint8_t fractionalBits);
     void clearFlags();
 };
 
