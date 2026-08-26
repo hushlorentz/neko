@@ -153,3 +153,26 @@ pipeline_integer_control.bin   7321275edc8c4cfd331d7350f06b0e0ad2c781d783534b5f8
 pipeline_loi_timing.bin        01a78ff81e6dea8e2d8993c87d7105d002a085235c6d67082add9a3fa7223227
 pipeline_termination_drain.bin f0b165309aaab04653ba8dbedd9a3d8360500eb46d3e130342bbf7ea2d949466
 ```
+
+Regenerate the floating-point integration fixtures with:
+
+```sh
+for fixture in \
+  floating_point_truncation \
+  floating_point_exceptions \
+  floating_point_compound
+do
+  local_integration/tools/naken_asm/naken_asm \
+    -b \
+    -o "neko_tests/vpu/integration/${fixture}.bin" \
+    "neko_tests/vpu/integration/${fixture}.asm"
+done
+```
+
+Expected SHA-256 values:
+
+```text
+floating_point_truncation.bin b5e0ab57cda49059f30205cd4cd001aeb55dff820424e898f6031304ecb59940
+floating_point_exceptions.bin dad420fa5f4c134fbfe12308be2a79dbadfc9e72b810754c97cde7b8a27d79c2
+floating_point_compound.bin   d8fdaf73e48383eb5a857ce6159420871591ed884ae9d78971f4d5059abab2f4
+```
