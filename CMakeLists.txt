@@ -95,3 +95,13 @@ target_link_libraries(neko_tests PRIVATE neko_diagnostics)
 
 enable_testing()
 add_test(NAME neko_tests COMMAND neko_tests)
+
+add_custom_target(check
+    COMMAND $<TARGET_FILE:neko_tests>
+    COMMAND
+        ${CMAKE_COMMAND}
+        -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyRepository.cmake
+    DEPENDS neko_tests
+    USES_TERMINAL
+)
