@@ -116,7 +116,6 @@ Complete the branch-sensitive timing and hazard work before adding `IBNE`.
 - [x] Load input parameters through the checked data-memory API
 - [x] Execute from address zero with a cycle budget
 - [x] Compare the final VU memory with hand-defined expected qwords
-- [ ] Optionally compare a trace with PCSX2 or real hardware
 
 External source and generated fixtures require a license review before being
 committed. The expected output should be defined independently of the emulator.
@@ -137,9 +136,10 @@ complex, without making a full debugger a prerequisite:
       reruns
 - [x] Keep tracing disabled during normal passing runs and make diagnostic
       output available on demand or after a failure
-- [ ] Add richer events such as branch decisions, stall reasons, memory
-      accesses, and pipeline-stage transitions only when a failing integration
-      test demonstrates a specific observability gap
+
+Add richer events such as branch decisions, stall reasons, memory accesses, and
+pipeline-stage transitions only when a failing integration test demonstrates a
+specific observability gap.
 
 ### Original Integration Suite
 
@@ -204,19 +204,21 @@ Each committed fixture should include:
 
 ### VU Floating Point
 
-The current host-`double` compatibility layer is useful scaffolding but is not
-bit-accurate VU arithmetic.
+Raw add, subtract, multiply, and fixed-point conversions are bit-oriented.
+Division and square root still require their final VU-specific implementations.
 
 - [x] Build raw-bit operation APIs returning result bits and exception flags
 - [x] Treat exponent-zero inputs as signed zero during calculations
 - [x] Treat exponent-255 encodings as finite VU values
 - [x] Correct exponent overflow and underflow detection
 - [x] Implement VU 24-bit truncating add, subtract, and multiply
-- [ ] Implement division and square-root exception behavior
-- [ ] Correct `0 / 0` to return signed `MAX` with the I flag
-- [ ] Implement truncating fixed-point conversions with defined out-of-range behavior
-- [ ] Validate edge cases against the VU manual and hardware-derived vectors
-- [ ] Keep the interpreter implementation as an oracle for any future fast path
+- [ ] Implement raw VU division results and exception behavior, including
+      signed `MAX` for `0 / 0` with the I flag
+- [ ] Implement raw VU square-root and reciprocal-square-root results and
+      exception behavior
+- [x] Implement truncating fixed-point conversions with defined out-of-range behavior
+- [x] Validate edge cases against the VU manual and independent reference
+      vectors; incorporate hardware-derived vectors when available
 
 ### Floating-Point Diagnostics
 
@@ -239,7 +241,6 @@ floating-point assembly integration:
 - [x] Cover VU zero, denormal, maximum, overflow, and underflow behavior
 - [x] Cover multiply-add/subtract sequences where intermediate precision matters
 - [x] Cover fixed-point conversion boundaries and out-of-range inputs
-- [ ] Compare optimized execution paths against the interpreter oracle
 
 ### Instruction Coverage
 
@@ -326,8 +327,9 @@ directly. Frontends provide those services through callbacks and buffers.
 5. Consider an optional recompiler only if the reference interpreter cannot
    meet the required performance.
 
-Any optimized execution path must be continuously compared against the
-cycle-oriented interpreter.
+- [ ] Compare every optimized execution path continuously against the
+      cycle-oriented interpreter, including the floating-point integration
+      corpus
 
 ## Maintaining This File
 
