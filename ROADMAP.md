@@ -278,8 +278,31 @@ milestones rather than grouping every non-arithmetic operation as a
 - [x] Complete status-flag access with `FSAND`, `FSEQ`, `FSOR`, and `FSSET`
 - [x] Complete R-register operations with `RGET`, `RINIT`, `RNEXT`, and
       `RXOR`
-- [ ] Add the VU1 P pipeline and EFU instructions together with `MFP` and
-      `WAITP`
+
+### VU1 P Pipeline and Elementary Function Unit
+
+Implement this as a sequence of independently reviewable blocks. Preserve the
+documented absence of automatic P-register data-dependency stalls: software
+must use `WAITP` when it needs a pending EFU result.
+
+- [ ] Audit all EFU encodings, source-field rules, VU1-only restrictions,
+      throughput/latency values, and exceptional-result behavior against the
+      official instruction reference
+- [ ] Add the architectural P register and complete `MFP`, including four-cycle
+      masked VF writeback, VF00 behavior, source visibility, and simultaneous
+      upper-write priority
+- [ ] Add the shared EFU pipeline and `WAITP`, including instruction-specific
+      execution lengths, throughput stalls, delayed P writeback, pipeline
+      drain, Force Break, and deterministic VU0 rejection
+- [ ] Implement the reduction operations `ESUM` and `ESADD`
+- [ ] Implement the root, length, and reciprocal operations `ESQRT`, `ELENG`,
+      `ERCPR`, `ERSADD`, `ERSQRT`, and `ERLENG`
+- [ ] Implement the transcendental operations `ESIN`, `EATAN`, `EATANxy`,
+      `EATANxz`, and `EEXP` using the documented VU approximation algorithms
+      rather than host-library substitutes
+- [ ] Lock down each EFU operation with fixed bit-level vectors, boundary
+      cases, source hazards, throughput/latency checks, and repeated-operation
+      sequences
 
 ### Instruction Integration Programs
 
@@ -293,8 +316,10 @@ milestones rather than grouping every non-arithmetic operation as a
 - [x] Cover MAC flag tests
 - [x] Cover status flag tests and setters
 - [x] Cover deterministic R-register initialization, advancement, and transfer
-- [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
-- [ ] Cover FDIV/EFU resource hazards through decoded instructions
+- [ ] Cover `MFP`, P visibility, and `WAITP` synchronization through a decoded
+      VU1 program
+- [ ] Cover every EFU producer and shared-unit throughput hazard through
+      decoded VU1 instructions
 - [x] Cover VU1 `XGKICK` packet initiation, completion stalls, address
       wrapping, and pipeline drain behavior
 - [ ] Run progressively larger fragments of naken_asm's `rotation_vu1.asm`
