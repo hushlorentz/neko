@@ -81,6 +81,21 @@ Expected SHA-256:
 ee4643e517cb599fc0d654e74bd126bf0e980434ac545333b81ce6f34b992c45
 ```
 
+Regenerate `branch_family.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/branch_family.bin \
+  neko_tests/vpu/integration/branch_family.asm
+```
+
+Expected SHA-256:
+
+```text
+bada7ef8bea9dc2e3d2a363b2906f64ad5d539cc0a3afa9780d6510de6aa1964
+```
+
 Regenerate `indirect_calls.bin` with:
 
 ```sh

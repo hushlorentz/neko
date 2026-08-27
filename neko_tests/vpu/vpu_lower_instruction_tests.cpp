@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "catch.hpp"
@@ -76,6 +77,19 @@ namespace
       (static_cast<uint32_t>(it) << 16) |
       (static_cast<uint32_t>(is) << 11) |
       (immediate & 0x7ff);
+  }
+
+  uint32_t branch(
+    uint32_t encoding,
+    uint8_t it,
+    uint8_t is,
+    int16_t immediate)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      (static_cast<uint16_t>(immediate) & 0x7ff);
   }
 
   uint32_t mfir(uint8_t fieldMask, uint8_t ft, uint8_t is)
@@ -213,6 +227,56 @@ namespace
 
 TEST_CASE("VU Lower Instruction Tests")
 {
+  SECTION("The complete relative branch family decodes its operand layouts")
+  {
+    LowerInstruction b =
+      decodeLowerInstruction(branch(VPU_B_ENCODING, 0, 0, -1024));
+    LowerInstruction bal =
+      decodeLowerInstruction(branch(
+        VPU_BAL_ENCODING, VPU_REGISTER_VI15, 0, 1023));
+    LowerInstruction ibeq =
+      decodeLowerInstruction(branch(
+        VPU_IBEQ_ENCODING,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI03,
+        -7));
+    LowerInstruction ibne =
+      decodeLowerInstruction(branch(
+        VPU_IBNE_ENCODING,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI05,
+        9));
+
+    REQUIRE(b.unit == LowerExecutionUnit::Branch);
+    REQUIRE(b.opCode == VPU_B);
+    REQUIRE(b.immediate == -1024);
+    REQUIRE(bal.opCode == VPU_BAL);
+    REQUIRE(bal.destinationRegister == VPU_REGISTER_VI15);
+    REQUIRE(bal.immediate == 1023);
+    REQUIRE(ibeq.opCode == VPU_IBEQ);
+    REQUIRE(ibeq.sourceRegister1 == VPU_REGISTER_VI03);
+    REQUIRE(ibeq.sourceRegister2 == VPU_REGISTER_VI02);
+    REQUIRE(ibeq.immediate == -7);
+    REQUIRE(ibne.opCode == VPU_IBNE);
+    REQUIRE(ibne.sourceRegister1 == VPU_REGISTER_VI05);
+    REQUIRE(ibne.sourceRegister2 == VPU_REGISTER_VI04);
+    REQUIRE(ibne.immediate == 9);
+
+    for (const auto &contract : {
+      std::make_pair(VPU_IBGEZ_ENCODING, VPU_IBGEZ),
+      std::make_pair(VPU_IBGTZ_ENCODING, VPU_IBGTZ),
+      std::make_pair(VPU_IBLEZ_ENCODING, VPU_IBLEZ),
+      std::make_pair(VPU_IBLTZ_ENCODING, VPU_IBLTZ)})
+    {
+      LowerInstruction decoded = decodeLowerInstruction(branch(
+        contract.first, 0, VPU_REGISTER_VI06, -1));
+      REQUIRE(decoded.opCode == contract.second);
+      REQUIRE(decoded.sourceRegister1 == VPU_REGISTER_VI06);
+      REQUIRE(decoded.sourceRegister2 == VPU_REGISTER_VI00);
+      REQUIRE(decoded.immediate == -1);
+    }
+  }
+
   SECTION("Remaining IALU encodings decode their register fields")
   {
     for (uint32_t encoding : {

@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "catch.hpp"
@@ -49,6 +50,19 @@ namespace
   {
     return
       VPU_IBNE_ENCODING |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      (static_cast<uint16_t>(immediate) & 0x7ff);
+  }
+
+  uint32_t branch(
+    uint32_t encoding,
+    uint8_t it,
+    uint8_t is,
+    int16_t immediate)
+  {
+    return
+      encoding |
       (static_cast<uint32_t>(it) << 16) |
       (static_cast<uint32_t>(is) << 11) |
       (static_cast<uint16_t>(immediate) & 0x7ff);
@@ -176,6 +190,56 @@ namespace
       static_cast<uint8_t>((value >> 8) & 0xff),
       static_cast<uint8_t>((value >> 16) & 0xff),
       static_cast<uint8_t>((value >> 24) & 0xff)
+    };
+  }
+
+  std::pair<uint16_t, uint16_t> runRelativeBranch(
+    uint32_t encoding,
+    uint8_t it,
+    uint16_t isValue,
+    uint16_t itValue)
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, isValue);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, itValue);
+    vpu.loadIntRegister(VPU_REGISTER_VI04, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI05, 2);
+    vpu.loadIntRegister(VPU_REGISTER_VI06, 4);
+    vpu.loadIntRegister(VPU_REGISTER_VI15, 0xeeee);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      branch(encoding, it, VPU_REGISTER_VI01, 2));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI04));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI05));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI06));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+    return {
+      vpu.intRegisterValue(VPU_REGISTER_VI03),
+      vpu.intRegisterValue(VPU_REGISTER_VI15)
     };
   }
 }
@@ -416,6 +480,125 @@ TEST_CASE("VU Lower Timing Conformance Tests")
     REQUIRE(vpu.tick());
     REQUIRE(vpu.programCounter() == 0);
     vpu.forceBreak();
+  }
+
+  SECTION("The complete relative branch family uses signed VI conditions")
+  {
+    REQUIRE(runRelativeBranch(
+      VPU_B_ENCODING, VPU_REGISTER_VI00, 0, 0).first == 5);
+    REQUIRE(runRelativeBranch(
+      VPU_IBEQ_ENCODING, VPU_REGISTER_VI02, 7, 7).first == 5);
+    REQUIRE(runRelativeBranch(
+      VPU_IBEQ_ENCODING, VPU_REGISTER_VI02, 7, 8).first == 7);
+    REQUIRE(runRelativeBranch(
+      VPU_IBNE_ENCODING, VPU_REGISTER_VI02, 7, 8).first == 5);
+    REQUIRE(runRelativeBranch(
+      VPU_IBNE_ENCODING, VPU_REGISTER_VI02, 7, 7).first == 7);
+    REQUIRE(runRelativeBranch(
+      VPU_IBGEZ_ENCODING, VPU_REGISTER_VI00, 0, 0).first == 5);
+    REQUIRE(runRelativeBranch(
+      VPU_IBGEZ_ENCODING, VPU_REGISTER_VI00, 0xffff, 0).first == 7);
+    REQUIRE(runRelativeBranch(
+      VPU_IBGTZ_ENCODING, VPU_REGISTER_VI00, 1, 0).first == 5);
+    REQUIRE(runRelativeBranch(
+      VPU_IBGTZ_ENCODING, VPU_REGISTER_VI00, 0, 0).first == 7);
+    REQUIRE(runRelativeBranch(
+      VPU_IBLEZ_ENCODING, VPU_REGISTER_VI00, 0, 0).first == 5);
+    REQUIRE(runRelativeBranch(
+      VPU_IBLEZ_ENCODING, VPU_REGISTER_VI00, 1, 0).first == 7);
+    REQUIRE(runRelativeBranch(
+      VPU_IBLTZ_ENCODING, VPU_REGISTER_VI00, 0xffff, 0).first == 5);
+    REQUIRE(runRelativeBranch(
+      VPU_IBLTZ_ENCODING, VPU_REGISTER_VI00, 0, 0).first == 7);
+  }
+
+  SECTION("BAL saves the instruction after its delay slot")
+  {
+    std::pair<uint16_t, uint16_t> result = runRelativeBranch(
+      VPU_BAL_ENCODING, VPU_REGISTER_VI15, 0, 0);
+    REQUIRE(result.first == 5);
+    REQUIRE(result.second == 16);
+
+    result = runRelativeBranch(
+      VPU_BAL_ENCODING, VPU_REGISTER_VI00, 0, 0);
+    REQUIRE(result.first == 5);
+    REQUIRE(result.second == 0xeeee);
+  }
+
+  SECTION("BAL delay-slot reads see the old link value")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI15, 7);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      branch(VPU_BAL_ENCODING, VPU_REGISTER_VI15, 0, 2));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI15,
+        VPU_REGISTER_VI00));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI15,
+        VPU_REGISTER_VI00));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 7);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 16);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI15) == 16);
+  }
+
+  SECTION("Signed conditional branches stall for pending LSU operands")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.writeDataMemory(0, wordBytes(1));
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      ilw(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI00,
+        0));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      branch(
+        VPU_IBGTZ_ENCODING,
+        VPU_REGISTER_VI00,
+        VPU_REGISTER_VI01,
+        1));
+    appendInstructionPair(&instructions, VPU_NOP);
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    REQUIRE(issues[0].cycle == 0);
+    REQUIRE(issues[1].cycle == 6);
+    REQUIRE(eventsOfType(
+      events, VPUTraceEventType::PipelineStall).size() == 5);
   }
 
   SECTION("IBNE stalls for a pending LSU write to either compared register")

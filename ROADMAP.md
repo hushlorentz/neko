@@ -247,7 +247,8 @@ floating-point assembly integration:
 - [x] Complete commonly used lower integer instructions (`IADD`, `IADDI`,
       `IADDIU`, `IAND`, `IOR`, `ISUB`, and `ISUBIU`)
 - [x] Complete VU memory load/store variants and lane masks
-- [ ] Complete branches, jumps, and special-register transfers
+- [x] Complete branches and jumps
+- [ ] Complete special-register transfers
 - [x] Add Q pipeline division and square-root operations
 - [ ] Add the VU1 P pipeline and EFU instructions
 - [ ] Add VU1 `XGKICK`
@@ -261,7 +262,7 @@ floating-point assembly integration:
       special-register instruction streams
 - [x] Cover VU load/store addressing variants and masked lane behavior through
       a decoded memory integration program
-- [ ] Cover mixed integer, memory, branch, and special-register instruction streams
+- [x] Cover mixed integer, memory, branch, and special-register instruction streams
 - [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
 - [ ] Cover FDIV/EFU resource hazards through decoded instructions
 - [ ] Cover VU1 `XGKICK` packet initiation and completion behavior

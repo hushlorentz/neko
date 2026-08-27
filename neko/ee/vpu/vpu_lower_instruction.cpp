@@ -110,12 +110,62 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_TYPE7_MASK) == VPU_IBNE_ENCODING)
+  const std::uint32_t type7Encoding =
+    instruction & VPU_LOWER_TYPE7_MASK;
+  if (type7Encoding == VPU_IBEQ_ENCODING ||
+      type7Encoding == VPU_IBNE_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::Branch;
-    decoded.opCode = VPU_IBNE;
+    decoded.opCode = type7Encoding == VPU_IBEQ_ENCODING
+      ? VPU_IBEQ
+      : VPU_IBNE;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.sourceRegister2 = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.immediate = signedImmediate11(instruction);
+    return decoded;
+  }
+
+  if (type7Encoding == VPU_IBGEZ_ENCODING ||
+      type7Encoding == VPU_IBGTZ_ENCODING ||
+      type7Encoding == VPU_IBLEZ_ENCODING ||
+      type7Encoding == VPU_IBLTZ_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Branch;
+    if (type7Encoding == VPU_IBGEZ_ENCODING)
+    {
+      decoded.opCode = VPU_IBGEZ;
+    }
+    else if (type7Encoding == VPU_IBGTZ_ENCODING)
+    {
+      decoded.opCode = VPU_IBGTZ;
+    }
+    else if (type7Encoding == VPU_IBLEZ_ENCODING)
+    {
+      decoded.opCode = VPU_IBLEZ;
+    }
+    else
+    {
+      decoded.opCode = VPU_IBLTZ;
+    }
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.immediate = signedImmediate11(instruction);
+    return decoded;
+  }
+
+  if (type7Encoding == VPU_B_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Branch;
+    decoded.opCode = VPU_B;
+    decoded.immediate = signedImmediate11(instruction);
+    return decoded;
+  }
+
+  if (type7Encoding == VPU_BAL_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Branch;
+    decoded.opCode = VPU_BAL;
+    decoded.destinationRegister =
+      registerField(instruction, LOWER_IT_SHIFT);
     decoded.immediate = signedImmediate11(instruction);
     return decoded;
   }

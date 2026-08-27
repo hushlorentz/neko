@@ -63,6 +63,10 @@ verify_fixture(
   ee4643e517cb599fc0d654e74bd126bf0e980434ac545333b81ce6f34b992c45
 )
 verify_fixture(
+  branch_family.bin
+  bada7ef8bea9dc2e3d2a363b2906f64ad5d539cc0a3afa9780d6510de6aa1964
+)
+verify_fixture(
   indirect_calls.bin
   dbde6ab0815c053b766f3aa57a84fe47c45ec89a20c32833c05a9fad130828df
 )

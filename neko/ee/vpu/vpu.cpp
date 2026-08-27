@@ -1041,18 +1041,55 @@ void VPU::startBranchInstruction(const LowerInstruction &instruction)
 void VPU::evaluateBranchPipeline(Pipeline *pipeline)
 {
   pendingBranchLinkValid = false;
+  pendingBranchTarget =
+    static_cast<uint16_t>(
+      (static_cast<uint32_t>(pipeline->instructionAddress + 8) +
+       static_cast<int32_t>(pipeline->immediate) * 8) &
+      (microMem.size() - 1));
 
   switch (pipeline->opCode)
   {
+    case VPU_B:
+      pendingBranchTaken = true;
+      break;
+    case VPU_BAL:
+      pendingBranchTaken = true;
+      if (pipeline->destReg != VPU_REGISTER_VI00)
+      {
+        pendingBranchLinkValid = true;
+        pendingBranchLinkRegister = pipeline->destReg;
+        pendingBranchLinkValue = pipeline->instructionAddress + 16;
+      }
+      break;
+    case VPU_IBEQ:
+      pendingBranchTaken =
+        integerValueForExecution(pipeline->srcReg1) ==
+        integerValueForExecution(pipeline->srcReg2);
+      break;
     case VPU_IBNE:
       pendingBranchTaken =
         integerValueForExecution(pipeline->srcReg1) !=
         integerValueForExecution(pipeline->srcReg2);
-      pendingBranchTarget =
-        static_cast<uint16_t>(
-          (static_cast<uint32_t>(pipeline->instructionAddress + 8) +
-           static_cast<int32_t>(pipeline->immediate) * 8) &
-          (microMem.size() - 1));
+      break;
+    case VPU_IBGEZ:
+      pendingBranchTaken =
+        static_cast<int16_t>(
+          integerValueForExecution(pipeline->srcReg1)) >= 0;
+      break;
+    case VPU_IBGTZ:
+      pendingBranchTaken =
+        static_cast<int16_t>(
+          integerValueForExecution(pipeline->srcReg1)) > 0;
+      break;
+    case VPU_IBLEZ:
+      pendingBranchTaken =
+        static_cast<int16_t>(
+          integerValueForExecution(pipeline->srcReg1)) <= 0;
+      break;
+    case VPU_IBLTZ:
+      pendingBranchTaken =
+        static_cast<int16_t>(
+          integerValueForExecution(pipeline->srcReg1)) < 0;
       break;
     case VPU_JALR:
       pendingBranchTaken = true;
@@ -1278,12 +1315,20 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
       switch (instruction.opCode)
       {
         case VPU_IBNE:
+        case VPU_IBEQ:
           return
             hasPendingIntegerWrite(instruction.sourceRegister1) ||
             hasPendingIntegerWrite(instruction.sourceRegister2);
+        case VPU_IBGEZ:
+        case VPU_IBGTZ:
+        case VPU_IBLEZ:
+        case VPU_IBLTZ:
         case VPU_JALR:
         case VPU_JR:
           return hasPendingIntegerWrite(instruction.sourceRegister1);
+        case VPU_B:
+        case VPU_BAL:
+          return false;
         default:
           throw runtime_error("Unsupported VU branch hazard check.");
       }
