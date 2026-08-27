@@ -36,6 +36,38 @@ namespace
       (static_cast<uint32_t>(id) << 6);
   }
 
+  uint32_t type1IALU(
+    uint32_t encoding,
+    uint8_t id,
+    uint8_t is,
+    uint8_t it)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      (static_cast<uint32_t>(id) << 6);
+  }
+
+  uint32_t iaddi(uint8_t it, uint8_t is, int8_t immediate)
+  {
+    return
+      VPU_IADDI_ENCODING |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      ((static_cast<uint8_t>(immediate) & 0x1f) << 6);
+  }
+
+  uint32_t iaddiu(uint8_t it, uint8_t is, uint16_t immediate)
+  {
+    return
+      VPU_IADDIU_ENCODING |
+      (static_cast<uint32_t>((immediate >> 11) & 0xf) << 21) |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      (immediate & 0x7ff);
+  }
+
   uint32_t isubiu(uint8_t it, uint8_t is, uint16_t immediate)
   {
     return
@@ -153,6 +185,105 @@ namespace
 
 TEST_CASE("VU Lower Instruction Tests")
 {
+  SECTION("Remaining IALU encodings decode their register fields")
+  {
+    for (uint32_t encoding : {
+           VPU_IAND_ENCODING,
+           VPU_IOR_ENCODING,
+           VPU_ISUB_ENCODING})
+    {
+      LowerInstruction instruction = decodeLowerInstruction(
+        type1IALU(
+          encoding,
+          VPU_REGISTER_VI03,
+          VPU_REGISTER_VI01,
+          VPU_REGISTER_VI02));
+
+      REQUIRE(instruction.unit == LowerExecutionUnit::IALU);
+      REQUIRE(instruction.opCode == (encoding & VPU_TYPE1_MASK));
+      REQUIRE(instruction.sourceRegister1 == VPU_REGISTER_VI01);
+      REQUIRE(instruction.sourceRegister2 == VPU_REGISTER_VI02);
+      REQUIRE(instruction.destinationRegister == VPU_REGISTER_VI03);
+    }
+  }
+
+  SECTION("IADDI decodes signed five-bit boundary values")
+  {
+    LowerInstruction negative = decodeLowerInstruction(
+      iaddi(VPU_REGISTER_VI03, VPU_REGISTER_VI02, -16));
+    LowerInstruction positive = decodeLowerInstruction(
+      iaddi(VPU_REGISTER_VI05, VPU_REGISTER_VI04, 15));
+
+    REQUIRE(negative.opCode == VPU_IADDI);
+    REQUIRE(negative.sourceRegister1 == VPU_REGISTER_VI02);
+    REQUIRE(negative.destinationRegister == VPU_REGISTER_VI03);
+    REQUIRE(negative.immediate == -16);
+    REQUIRE(positive.immediate == 15);
+  }
+
+  SECTION("IADDIU decodes all fifteen unsigned immediate bits")
+  {
+    LowerInstruction instruction = decodeLowerInstruction(
+      iaddiu(VPU_REGISTER_VI03, VPU_REGISTER_VI02, 0x7fff));
+
+    REQUIRE(instruction.unit == LowerExecutionUnit::IALU);
+    REQUIRE(instruction.opCode == VPU_IADDIU);
+    REQUIRE(instruction.sourceRegister1 == VPU_REGISTER_VI02);
+    REQUIRE(instruction.destinationRegister == VPU_REGISTER_VI03);
+    REQUIRE(instruction.immediate == 0x7fff);
+  }
+
+  SECTION("Common IALU operations wrap to sixteen bits and bypass")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 0xfff8);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 0x0ff0);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iaddi(VPU_REGISTER_VI03, VPU_REGISTER_VI01, -16));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      iaddiu(VPU_REGISTER_VI04, VPU_REGISTER_VI03, 0x7fff));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      type1IALU(
+        VPU_IAND_ENCODING,
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI04,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      type1IALU(
+        VPU_IOR_ENCODING,
+        VPU_REGISTER_VI06,
+        VPU_REGISTER_VI05,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      type1IALU(
+        VPU_ISUB_ENCODING,
+        VPU_REGISTER_VI07,
+        VPU_REGISTER_VI06,
+        VPU_REGISTER_VI02));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 0xffe8);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0x7fe7);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI05) == 0x0fe0);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI06) == 0xfff8);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI07) == 0xf008);
+  }
+
   SECTION("DIV and RSQRT decode both selected source fields")
   {
     for (uint32_t encoding : {VPU_DIV_ENCODING, VPU_RSQRT_ENCODING})

@@ -244,7 +244,8 @@ floating-point assembly integration:
 
 ### Instruction Coverage
 
-- [ ] Complete commonly used lower integer instructions
+- [x] Complete commonly used lower integer instructions (`IADD`, `IADDI`,
+      `IADDIU`, `IAND`, `IOR`, `ISUB`, and `ISUBIU`)
 - [ ] Complete VU memory load/store variants and lane masks
 - [ ] Complete branches, jumps, and special-register transfers
 - [x] Add Q pipeline division and square-root operations
@@ -253,6 +254,8 @@ floating-point assembly integration:
 
 ### Instruction Integration Programs
 
+- [x] Cover the common IALU family through decoded integer, memory, and
+      special-register instruction streams
 - [ ] Cover mixed integer, memory, branch, and special-register instruction streams
 - [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
 - [ ] Cover FDIV/EFU resource hazards through decoded instructions

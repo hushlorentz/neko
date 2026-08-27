@@ -21,6 +21,21 @@ Expected SHA-256:
 45d00e599bdcfe54128bc58cba4d565c851bb523e0ba3a637c1a6782550fae52
 ```
 
+Regenerate `common_integer.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/common_integer.bin \
+  neko_tests/vpu/integration/common_integer.asm
+```
+
+Expected SHA-256:
+
+```text
+4c5f247ab39053142ca9be9652caffd98d38a5417e8655856fea1d52073fb46d
+```
+
 Regenerate `lane_masks.bin` with:
 
 ```sh

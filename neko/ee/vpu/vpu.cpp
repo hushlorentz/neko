@@ -1218,9 +1218,14 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
       switch (instruction.opCode)
       {
         case VPU_IADD:
+        case VPU_IAND:
+        case VPU_IOR:
+        case VPU_ISUB:
           return
             hasPendingIntegerWrite(instruction.sourceRegister1) ||
             hasPendingIntegerWrite(instruction.sourceRegister2);
+        case VPU_IADDI:
+        case VPU_IADDIU:
         case VPU_ISUBIU:
           return hasPendingIntegerWrite(instruction.sourceRegister1);
         default:
@@ -2213,6 +2218,27 @@ void VPU::executeIALUPipeline(Pipeline *pipeline)
     case VPU_IADD:
       result =
         pipeline->intSourceValue1 +
+        pipeline->intSourceValue2;
+      break;
+    case VPU_IADDI:
+    case VPU_IADDIU:
+      result =
+        pipeline->intSourceValue1 +
+        pipeline->immediate;
+      break;
+    case VPU_IAND:
+      result =
+        pipeline->intSourceValue1 &
+        pipeline->intSourceValue2;
+      break;
+    case VPU_IOR:
+      result =
+        pipeline->intSourceValue1 |
+        pipeline->intSourceValue2;
+      break;
+    case VPU_ISUB:
+      result =
+        pipeline->intSourceValue1 -
         pipeline->intSourceValue2;
       break;
     case VPU_ISUBIU:

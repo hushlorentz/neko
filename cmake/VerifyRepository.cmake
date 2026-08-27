@@ -47,6 +47,10 @@ verify_fixture(
   45d00e599bdcfe54128bc58cba4d565c851bb523e0ba3a637c1a6782550fae52
 )
 verify_fixture(
+  common_integer.bin
+  4c5f247ab39053142ca9be9652caffd98d38a5417e8655856fea1d52073fb46d
+)
+verify_fixture(
   lane_masks.bin
   41e29c6379fbbd55747539b13b467cb8e6248b45ae712de9968965a471b9c23a
 )

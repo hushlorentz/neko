@@ -31,6 +31,23 @@ namespace
     return static_cast<std::int16_t>(immediate);
   }
 
+  std::int16_t signedImmediate5(std::uint32_t instruction)
+  {
+    std::uint8_t immediate = (instruction >> LOWER_ID_SHIFT) & 0x1f;
+    if ((immediate & 0x10) != 0)
+    {
+      immediate |= 0xe0;
+    }
+    return static_cast<std::int8_t>(immediate);
+  }
+
+  std::int16_t unsignedImmediate15(std::uint32_t instruction)
+  {
+    return static_cast<std::int16_t>(
+      (((instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK) << 11) |
+      (instruction & LOWER_IMMEDIATE_LOW_MASK));
+  }
+
   std::uint8_t selectedField(
     std::uint32_t instruction,
     std::uint8_t shift)
@@ -49,13 +66,37 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_TYPE1_MASK) == VPU_IADD_ENCODING)
+  const std::uint32_t type1Encoding = instruction & VPU_LOWER_TYPE1_MASK;
+  if (type1Encoding == VPU_IADD_ENCODING ||
+      type1Encoding == VPU_IAND_ENCODING ||
+      type1Encoding == VPU_IOR_ENCODING ||
+      type1Encoding == VPU_ISUB_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::IALU;
-    decoded.opCode = VPU_IADD;
+    decoded.opCode = instruction & VPU_TYPE1_MASK;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.sourceRegister2 = registerField(instruction, LOWER_IT_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_ID_SHIFT);
+    return decoded;
+  }
+
+  if (type1Encoding == VPU_IADDI_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::IALU;
+    decoded.opCode = VPU_IADDI;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.immediate = signedImmediate5(instruction);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE8_MASK) == VPU_IADDIU_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::IALU;
+    decoded.opCode = VPU_IADDIU;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.immediate = unsignedImmediate15(instruction);
     return decoded;
   }
 
@@ -65,9 +106,7 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.opCode = VPU_ISUBIU;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
-    decoded.immediate = static_cast<std::int16_t>(
-      (((instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK) << 11) |
-      (instruction & LOWER_IMMEDIATE_LOW_MASK));
+    decoded.immediate = unsignedImmediate15(instruction);
     return decoded;
   }
 
