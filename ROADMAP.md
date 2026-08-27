@@ -274,7 +274,7 @@ milestones rather than grouping every non-arithmetic operation as a
 - [x] Complete basic register movement with `MTIR`, `MOVE`, and `MR32`
 - [x] Complete clipping-flag access with `FCAND`, `FCEQ`, `FCGET`, `FCOR`,
       and `FCSET`
-- [ ] Complete MAC-flag access with `FMAND`, `FMEQ`, and `FMOR`
+- [x] Complete MAC-flag access with `FMAND`, `FMEQ`, and `FMOR`
 - [ ] Complete status-flag access with `FSAND`, `FSEQ`, `FSOR`, and `FSSET`
 - [ ] Complete R-register operations with `RGET`, `RINIT`, `RNEXT`, and
       `RXOR`
@@ -290,7 +290,8 @@ milestones rather than grouping every non-arithmetic operation as a
 - [x] Cover mixed integer, memory, branch, and `MFIR` instruction streams
 - [x] Cover `MTIR`, `MOVE`, and `MR32` dependencies and lane behavior
 - [x] Cover clipping flag tests, reads, and setters
-- [ ] Cover MAC and status flag tests and setters
+- [x] Cover MAC flag tests
+- [ ] Cover status flag tests and setters
 - [ ] Cover deterministic R-register initialization, advancement, and transfer
 - [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
 - [ ] Cover FDIV/EFU resource hazards through decoded instructions

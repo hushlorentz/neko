@@ -270,3 +270,18 @@ Expected SHA-256:
 ```text
 4831d97f4321d506997ded681c5e5cf176444397836e7602efbfd104f202eccb
 ```
+
+Regenerate `mac_flags.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/mac_flags.bin \
+  neko_tests/vpu/integration/mac_flags.asm
+```
+
+Expected SHA-256:
+
+```text
+35c3bb50455eb2f96fc17cd6bc3be09e4788730988d2bd2f53c79b498218fea0
+```

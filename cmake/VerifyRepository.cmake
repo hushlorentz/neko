@@ -134,5 +134,9 @@ verify_fixture(
   clipping_flags.bin
   4831d97f4321d506997ded681c5e5cf176444397836e7602efbfd104f202eccb
 )
+verify_fixture(
+  mac_flags.bin
+  35c3bb50455eb2f96fc17cd6bc3be09e4788730988d2bd2f53c79b498218fea0
+)
 
 message(STATUS "Repository checks passed")

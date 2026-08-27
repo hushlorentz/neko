@@ -1204,7 +1204,7 @@ void VPU::startFlagInstruction(const LowerInstruction &instruction)
   Pipeline *pipeline = orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_FLAG,
     instruction.opCode,
-    0,
+    instruction.sourceRegister1,
     0,
     0,
     FP_REGISTER_NO_FIELDS,
@@ -1430,8 +1430,17 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
         instruction.sourceRegister2,
         instruction.sourceFieldMask2);
     case LowerExecutionUnit::WaitQ:
-    case LowerExecutionUnit::Flag:
       return false;
+    case LowerExecutionUnit::Flag:
+      switch (instruction.opCode)
+      {
+        case VPU_FMAND:
+        case VPU_FMEQ:
+        case VPU_FMOR:
+          return hasPendingIntegerWrite(instruction.sourceRegister1);
+        default:
+          return false;
+      }
     case LowerExecutionUnit::XGKICK:
       return hasPendingIntegerWrite(instruction.sourceRegister1);
     case LowerExecutionUnit::Branch:
@@ -2401,6 +2410,27 @@ void VPU::pipelineFinished(Pipeline * p)
         break;
       case VPU_FCSET:
         clippingFlags = p->immediateBits;
+        break;
+      case VPU_FMAND:
+        if (p->integerDestReg != VPU_REGISTER_VI00)
+        {
+          intRegisters[p->integerDestReg] =
+            MACFlags & integerValueForExecution(p->srcReg1);
+        }
+        break;
+      case VPU_FMEQ:
+        if (p->integerDestReg != VPU_REGISTER_VI00)
+        {
+          intRegisters[p->integerDestReg] =
+            MACFlags == integerValueForExecution(p->srcReg1);
+        }
+        break;
+      case VPU_FMOR:
+        if (p->integerDestReg != VPU_REGISTER_VI00)
+        {
+          intRegisters[p->integerDestReg] =
+            MACFlags | integerValueForExecution(p->srcReg1);
+        }
         break;
       default:
         throw runtime_error("Unsupported VU clipping flag instruction.");
