@@ -13,6 +13,7 @@ enum class LowerExecutionUnit : std::uint8_t
   FDIV,
   WaitQ,
   Flag,
+  Random,
   XGKICK,
   Branch
 };

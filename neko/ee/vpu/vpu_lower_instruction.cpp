@@ -451,6 +451,27 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_RANDOM_DEST_MASK) == VPU_RGET_ENCODING ||
+      (instruction & VPU_LOWER_RANDOM_DEST_MASK) == VPU_RNEXT_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Random;
+    decoded.opCode = instruction & VPU_TYPE3_MASK;
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_RANDOM_SOURCE_MASK) == VPU_RINIT_ENCODING ||
+      (instruction & VPU_LOWER_RANDOM_SOURCE_MASK) == VPU_RXOR_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Random;
+    decoded.opCode = instruction & VPU_TYPE3_MASK;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.sourceFieldMask1 = selectedField(instruction, LOWER_FSF_SHIFT);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQD_ENCODING ||
       (instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQI_ENCODING)
   {

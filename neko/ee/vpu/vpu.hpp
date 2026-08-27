@@ -114,6 +114,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool hasMACFlag(uint16_t flag);
     bool hasStatusFlag(uint16_t flag);
     uint32_t qRegisterBits() const;
+    uint32_t rRegisterBits() const;
     void loadIRegister(double value);
     void loadQRegister(double value);
     void loadAccumulator(double x, double y, double z, double w);
@@ -198,6 +199,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startFDIVInstruction(const LowerInstruction &instruction);
     void startWaitQInstruction(const LowerInstruction &instruction);
     void startFlagInstruction(const LowerInstruction &instruction);
+    void startRandomInstruction(const LowerInstruction &instruction);
     void startXGKICKInstruction(const LowerInstruction &instruction);
     bool startXGKICKTransfer(Pipeline *pipeline);
     bool xgkickStallsIssue();
@@ -217,6 +219,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startLSUPipeline(Pipeline *pipeline);
     void finishLSUPipeline(Pipeline *pipeline);
     void startFMACPipeline(Pipeline *pipeline);
+    void executeRandomPipeline(Pipeline *pipeline);
     void executeFDIVPipeline(Pipeline *pipeline);
     void finishFDIVPipeline(Pipeline *pipeline);
     void prepareAccumulatorOperation(Pipeline *pipeline);

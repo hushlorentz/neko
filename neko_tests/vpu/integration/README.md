@@ -300,3 +300,18 @@ Expected SHA-256:
 ```text
 3f0d941e7881a05fda7471cfbbe539f5db31e99c0aba2734fbce1d9a87aae514
 ```
+
+Regenerate `random_register.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/random_register.bin \
+  neko_tests/vpu/integration/random_register.asm
+```
+
+Expected SHA-256:
+
+```text
+369710e5643e28d6f56ef45ab28e7d102c2fabb2a33d0f167f01fb5947841a8b
+```

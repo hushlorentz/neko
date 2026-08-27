@@ -92,6 +92,23 @@ namespace
     }
   }
 
+  uint32_t selectedLaneBits(const FPRegister &reg, uint8_t fieldMask)
+  {
+    switch (fieldMask)
+    {
+      case FP_REGISTER_X_FIELD:
+        return reg.x.bits();
+      case FP_REGISTER_Y_FIELD:
+        return reg.y.bits();
+      case FP_REGISTER_Z_FIELD:
+        return reg.z.bits();
+      case FP_REGISTER_W_FIELD:
+        return reg.w.bits();
+      default:
+        throw runtime_error("VU source must select exactly one field.");
+    }
+  }
+
   VPUArithmeticTrace arithmeticTraceForPipeline(const Pipeline &pipeline)
   {
     VPUArithmeticTrace trace;
@@ -923,6 +940,8 @@ void VPU::queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16
   if ((lowerInstruction.opCode == VPU_MFIR ||
        lowerInstruction.opCode == VPU_MOVE ||
        lowerInstruction.opCode == VPU_MR32 ||
+       lowerInstruction.opCode == VPU_RGET ||
+       lowerInstruction.opCode == VPU_RNEXT ||
        lowerInstruction.opCode == VPU_LQ ||
        lowerInstruction.opCode == VPU_LQD ||
        lowerInstruction.opCode == VPU_LQI) &&
@@ -974,6 +993,9 @@ void VPU::executePendingLowerInstruction()
       break;
     case LowerExecutionUnit::Flag:
       startFlagInstruction(instruction);
+      break;
+    case LowerExecutionUnit::Random:
+      startRandomInstruction(instruction);
       break;
     case LowerExecutionUnit::XGKICK:
       startXGKICKInstruction(instruction);
@@ -1215,6 +1237,21 @@ void VPU::startFlagInstruction(const LowerInstruction &instruction)
   pipeline->immediateBits = instruction.immediateBits;
 }
 
+void VPU::startRandomInstruction(const LowerInstruction &instruction)
+{
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_RANDOM,
+    instruction.opCode,
+    instruction.sourceRegister1,
+    0,
+    instruction.destinationRegister,
+    instruction.destinationFieldMask,
+    instruction.sourceFieldMask1,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress,
+    pendingLowerWritebackDiscarded);
+}
+
 void VPU::startXGKICKInstruction(const LowerInstruction &instruction)
 {
   if (type != VPUType::VU1)
@@ -1441,6 +1478,17 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
         default:
           return false;
       }
+    case LowerExecutionUnit::Random:
+      if (instruction.opCode == VPU_RINIT ||
+          instruction.opCode == VPU_RXOR)
+      {
+        return orchestrator.hasRegisterHazard(
+          instruction.sourceRegister1,
+          instruction.sourceFieldMask1,
+          VPU_REGISTER_VF00,
+          FP_REGISTER_NO_FIELDS);
+      }
+      return false;
     case LowerExecutionUnit::XGKICK:
       return hasPendingIntegerWrite(instruction.sourceRegister1);
     case LowerExecutionUnit::Branch:
@@ -1534,6 +1582,11 @@ bool VPU::hasStatusFlag(uint16_t flag)
 uint32_t VPU::qRegisterBits() const
 {
   return qRegister.bits();
+}
+
+uint32_t VPU::rRegisterBits() const
+{
+  return 0x3f800000 | (rRegister & 0x007fffff);
 }
 
 void VPU::setFlags(FPRegister * reg, uint8_t ignoredFields)
@@ -1699,6 +1752,9 @@ void VPU::pipelineAdvanced(Pipeline *p)
       case VPU_PIPELINE_TYPE_FDIV:
         executeFDIVPipeline(p);
         break;
+      case VPU_PIPELINE_TYPE_RANDOM:
+        executeRandomPipeline(p);
+        break;
     }
   }
   else if (p->type == VPU_PIPELINE_TYPE_IALU &&
@@ -1759,6 +1815,62 @@ void VPU::executeFDIVPipeline(Pipeline *pipeline)
 
   pipeline->scalarResultBits = result.bits;
   pipeline->scalarResultFlags = result.flags;
+}
+
+void VPU::executeRandomPipeline(Pipeline *pipeline)
+{
+  constexpr uint32_t RANDOM_MANTISSA_MASK = 0x007fffff;
+
+  if (pipeline->opCode == VPU_RINIT ||
+      pipeline->opCode == VPU_RXOR)
+  {
+    const uint32_t source =
+      selectedLaneBits(
+        fpRegisters[pipeline->srcReg1],
+        pipeline->srcReg1FieldMask) &
+      RANDOM_MANTISSA_MASK;
+    if (pipeline->opCode == VPU_RINIT)
+    {
+      rRegister = source;
+    }
+    else
+    {
+      rRegister = (rRegister ^ source) & RANDOM_MANTISSA_MASK;
+    }
+    return;
+  }
+
+  if (pipeline->opCode == VPU_RNEXT)
+  {
+    const uint32_t feedback =
+      ((rRegister >> 4) ^ (rRegister >> 22)) & 1;
+    rRegister =
+      ((rRegister << 1) | feedback) & RANDOM_MANTISSA_MASK;
+  }
+  else if (pipeline->opCode != VPU_RGET)
+  {
+    throw runtime_error("Unsupported VU random instruction.");
+  }
+
+  FPRegister result(fpRegisters[pipeline->destReg]);
+  const uint32_t randomBits = rRegisterBits();
+  if (hasFlag(pipeline->destFieldMask, FP_REGISTER_X_FIELD))
+  {
+    result.x.setBits(randomBits);
+  }
+  if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Y_FIELD))
+  {
+    result.y.setBits(randomBits);
+  }
+  if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Z_FIELD))
+  {
+    result.z.setBits(randomBits);
+  }
+  if (hasFlag(pipeline->destFieldMask, FP_REGISTER_W_FIELD))
+  {
+    result.w.setBits(randomBits);
+  }
+  pipeline->setFPRegisterResult(&result);
 }
 
 void VPU::finishFDIVPipeline(Pipeline *pipeline)
@@ -2470,6 +2582,27 @@ void VPU::pipelineFinished(Pipeline * p)
       p->opCode,
       p->integerDestReg,
       FP_REGISTER_NO_FIELDS
+    });
+    return;
+  }
+  if (p->type == VPU_PIPELINE_TYPE_RANDOM)
+  {
+    if ((p->opCode == VPU_RGET || p->opCode == VPU_RNEXT) &&
+        !p->discardWriteback)
+    {
+      updateDestinationRegisterWithPipelineResult(
+        &fpRegisters[p->destReg],
+        p);
+    }
+    emitTrace({
+      VPUTraceEventType::PipelineWriteback,
+      cycles,
+      p->instructionAddress,
+      0,
+      0,
+      p->opCode,
+      p->destReg,
+      p->destFieldMask
     });
     return;
   }

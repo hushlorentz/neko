@@ -91,6 +91,7 @@ add_executable(neko_tests
     neko_tests/vpu/integration/mac_flags_tests.cpp
     neko_tests/vpu/integration/memory_variants_tests.cpp
     neko_tests/vpu/integration/pipeline_integration_tests.cpp
+    neko_tests/vpu/integration/random_register_tests.cpp
     neko_tests/vpu/integration/register_movement_tests.cpp
     neko_tests/vpu/integration/status_flags_tests.cpp
     neko_tests/vpu/integration/termination_tests.cpp
@@ -107,6 +108,7 @@ add_executable(neko_tests
     neko_tests/vpu/vpu_mac_flag_tests.cpp
     neko_tests/vpu/vpu_pipeline_tests.cpp
     neko_tests/vpu/vpu_program_runner_tests.cpp
+    neko_tests/vpu/vpu_random_register_tests.cpp
     neko_tests/vpu/vpu_state_tests.cpp
     neko_tests/vpu/vpu_status_flag_tests.cpp
     neko_tests/vpu/vpu_timing_conformance_tests.cpp

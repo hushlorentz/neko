@@ -129,6 +129,16 @@ void Pipeline::advanceStage()
         advanceTwoStagePipeline();
       }
       break;
+    case VPU_PIPELINE_TYPE_RANDOM:
+      if (opCode == VPU_RGET || opCode == VPU_RNEXT)
+      {
+        advanceSixStagePipeline();
+      }
+      else
+      {
+        advanceTwoStagePipeline();
+      }
+      break;
     case VPU_PIPELINE_TYPE_IALU:
       advanceIALUPipeline();
       break;
@@ -274,7 +284,8 @@ bool Pipeline::destinationAvailableForNextTStage() const
 {
   return
     (type == VPU_PIPELINE_TYPE_FMAC ||
-     type == VPU_PIPELINE_TYPE_LSU) &&
+     type == VPU_PIPELINE_TYPE_LSU ||
+     type == VPU_PIPELINE_TYPE_RANDOM) &&
     currentStage == VUPipelineStage::Z;
 }
 

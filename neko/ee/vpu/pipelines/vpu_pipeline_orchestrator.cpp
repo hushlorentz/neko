@@ -253,7 +253,8 @@ Pipeline *PipelineOrchestrator::configurePipeline(uint8_t pipelineType, uint16_t
       pipelineType != VPU_PIPELINE_TYPE_I_REGISTER &&
       pipelineType != VPU_PIPELINE_TYPE_WAITQ &&
       pipelineType != VPU_PIPELINE_TYPE_WAITP &&
-      pipelineType != VPU_PIPELINE_TYPE_FLAG)
+      pipelineType != VPU_PIPELINE_TYPE_FLAG &&
+      pipelineType != VPU_PIPELINE_TYPE_RANDOM)
   {
     throw std::runtime_error(
       "VU pipeline type does not have defined stage timing.");
