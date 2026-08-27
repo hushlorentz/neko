@@ -22,6 +22,7 @@ struct LowerInstruction
   std::uint8_t sourceRegister1 = 0;
   std::uint8_t sourceRegister2 = 0;
   std::uint8_t destinationRegister = 0;
+  std::uint8_t integerDestinationRegister = 0;
   std::uint8_t destinationFieldMask = 0;
   std::uint8_t sourceFieldMask1 = 0;
   std::uint8_t sourceFieldMask2 = 0;

@@ -124,6 +124,34 @@ namespace
       (static_cast<uint32_t>(fs) << 11);
   }
 
+  uint32_t type3Memory(
+    uint32_t encoding,
+    uint8_t fieldMask,
+    uint8_t it,
+    uint8_t is)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11);
+  }
+
+  uint32_t offsetMemory(
+    uint32_t encoding,
+    uint8_t fieldMask,
+    uint8_t it,
+    uint8_t is,
+    int16_t immediate)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11) |
+      (static_cast<uint16_t>(immediate) & 0x7ff);
+  }
+
   uint32_t fdiv(
     uint32_t encoding,
     uint8_t fs,
@@ -799,6 +827,239 @@ TEST_CASE("VU Lower Instruction Tests")
     REQUIRE(stalled);
     REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI02) == 0x1234);
     REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0x1235);
+  }
+
+  SECTION("Remaining memory variants decode registers masks and offsets")
+  {
+    LowerInstruction ilwr = decodeLowerInstruction(type3Memory(
+      VPU_ILWR_ENCODING,
+      FP_REGISTER_Z_FIELD,
+      VPU_REGISTER_VI02,
+      VPU_REGISTER_VI01));
+    LowerInstruction isw = decodeLowerInstruction(offsetMemory(
+      VPU_ISW_ENCODING,
+      FP_REGISTER_X_FIELD | FP_REGISTER_W_FIELD,
+      VPU_REGISTER_VI02,
+      VPU_REGISTER_VI01,
+      -7));
+    LowerInstruction iswr = decodeLowerInstruction(type3Memory(
+      VPU_ISWR_ENCODING,
+      FP_REGISTER_Y_FIELD,
+      VPU_REGISTER_VI02,
+      VPU_REGISTER_VI01));
+    LowerInstruction lqd = decodeLowerInstruction(type3Memory(
+      VPU_LQD_ENCODING,
+      FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VI01));
+    LowerInstruction lqi = decodeLowerInstruction(type3Memory(
+      VPU_LQI_ENCODING,
+      FP_REGISTER_Y_FIELD | FP_REGISTER_W_FIELD,
+      VPU_REGISTER_VF03,
+      VPU_REGISTER_VI04));
+    LowerInstruction sq = decodeLowerInstruction(offsetMemory(
+      VPU_SQ_ENCODING,
+      FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD,
+      VPU_REGISTER_VI05,
+      VPU_REGISTER_VF04,
+      9));
+    LowerInstruction sqd = decodeLowerInstruction(type3Memory(
+      VPU_SQD_ENCODING,
+      FP_REGISTER_Z_FIELD | FP_REGISTER_W_FIELD,
+      VPU_REGISTER_VI06,
+      VPU_REGISTER_VF05));
+
+    REQUIRE(ilwr.opCode == VPU_ILWR);
+    REQUIRE(ilwr.sourceRegister1 == VPU_REGISTER_VI01);
+    REQUIRE(ilwr.destinationRegister == VPU_REGISTER_VI02);
+    REQUIRE(ilwr.destinationFieldMask == FP_REGISTER_Z_FIELD);
+    REQUIRE(isw.opCode == VPU_ISW);
+    REQUIRE(isw.sourceRegister1 == VPU_REGISTER_VI01);
+    REQUIRE(isw.sourceRegister2 == VPU_REGISTER_VI02);
+    REQUIRE(isw.immediate == -7);
+    REQUIRE(iswr.opCode == VPU_ISWR);
+    REQUIRE(iswr.destinationFieldMask == FP_REGISTER_Y_FIELD);
+    REQUIRE(lqd.opCode == VPU_LQD);
+    REQUIRE(lqd.sourceRegister1 == VPU_REGISTER_VI01);
+    REQUIRE(lqd.destinationRegister == VPU_REGISTER_VF02);
+    REQUIRE(lqi.opCode == VPU_LQI);
+    REQUIRE(lqi.sourceRegister1 == VPU_REGISTER_VI04);
+    REQUIRE(lqi.destinationRegister == VPU_REGISTER_VF03);
+    REQUIRE(sq.opCode == VPU_SQ);
+    REQUIRE(sq.sourceRegister1 == VPU_REGISTER_VF04);
+    REQUIRE(sq.sourceRegister2 == VPU_REGISTER_VI05);
+    REQUIRE(sq.immediate == 9);
+    REQUIRE(sqd.opCode == VPU_SQD);
+    REQUIRE(sqd.sourceRegister1 == VPU_REGISTER_VF05);
+    REQUIRE(sqd.sourceRegister2 == VPU_REGISTER_VI06);
+    REQUIRE(sqd.integerDestinationRegister == VPU_REGISTER_VI06);
+  }
+
+  SECTION("ILWR loads the selected lower halfword")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<uint8_t> data(32, 0);
+    data[24] = 0xcd;
+    data[25] = 0xab;
+    data[26] = 0x78;
+    data[27] = 0x56;
+    vpu.writeDataMemory(0, data);
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      type3Memory(
+        VPU_ILWR_ENCODING,
+        FP_REGISTER_Z_FIELD,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI02) == 0xabcd);
+  }
+
+  SECTION("ISW and ISWR zero-extend integer stores into selected words")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<uint8_t> data(48, 0xff);
+    vpu.writeDataMemory(0, data);
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntRegister(VPU_REGISTER_VI02, 0xabcd);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      offsetMemory(
+        VPU_ISW_ENCODING,
+        FP_REGISTER_X_FIELD | FP_REGISTER_W_FIELD,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI01,
+        1));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      type3Memory(
+        VPU_ISWR_ENCODING,
+        FP_REGISTER_Y_FIELD,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.readDataMemory(20, 4) ==
+      std::vector<uint8_t>({0xcd, 0xab, 0x00, 0x00}));
+    REQUIRE(vpu.readDataMemory(32, 4) ==
+      std::vector<uint8_t>({0xcd, 0xab, 0x00, 0x00}));
+    REQUIRE(vpu.readDataMemory(44, 4) ==
+      std::vector<uint8_t>({0xcd, 0xab, 0x00, 0x00}));
+  }
+
+  SECTION("LQD and LQI update addresses around masked loads")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<uint8_t> data({
+      0x11, 0x11, 0x11, 0x11,
+      0x22, 0x22, 0x22, 0x22,
+      0x33, 0x33, 0x33, 0x33,
+      0x44, 0x44, 0x44, 0x44,
+      0xaa, 0xaa, 0xaa, 0xaa,
+      0xbb, 0xbb, 0xbb, 0xbb,
+      0xcc, 0xcc, 0xcc, 0xcc,
+      0xdd, 0xdd, 0xdd, 0xdd
+    });
+    vpu.writeDataMemory(0, data);
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadIntFPRegister(VPU_REGISTER_VF02, 1, 2, 3, 4);
+    vpu.loadIntFPRegister(VPU_REGISTER_VF03, 5, 6, 7, 8);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      type3Memory(
+        VPU_LQD_ENCODING,
+        FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      type3Memory(
+        VPU_LQI_ENCODING,
+        FP_REGISTER_Y_FIELD | FP_REGISTER_W_FIELD,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 1);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x.bits() == 0x11111111);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y.signedValue() == 2);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->z.bits() == 0x33333333);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->x.signedValue() == 5);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->y.bits() == 0x22222222);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF03)->w.bits() == 0x44444444);
+  }
+
+  SECTION("SQ and SQD store masked fields and pre-decrement addresses")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 2);
+    vpu.loadIntFPRegister(
+      VPU_REGISTER_VF02,
+      0x11223344,
+      0x55667788,
+      0x12345678,
+      -2);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      offsetMemory(
+        VPU_SQ_ENCODING,
+        FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VF02,
+        -2));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      type3Memory(
+        VPU_SQD_ENCODING,
+        FP_REGISTER_Y_FIELD | FP_REGISTER_W_FIELD,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VF02));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 1);
+    REQUIRE(vpu.readDataMemory(0, 16) ==
+      std::vector<uint8_t>({
+        0x44, 0x33, 0x22, 0x11,
+        0x00, 0x00, 0x00, 0x00,
+        0x78, 0x56, 0x34, 0x12,
+        0x00, 0x00, 0x00, 0x00
+      }));
+    REQUIRE(vpu.readDataMemory(16, 16) ==
+      std::vector<uint8_t>({
+        0x00, 0x00, 0x00, 0x00,
+        0x88, 0x77, 0x66, 0x55,
+        0x00, 0x00, 0x00, 0x00,
+        0xfe, 0xff, 0xff, 0xff
+      }));
   }
 
   SECTION("LQ loads masked raw lane values with signed qword offsets")

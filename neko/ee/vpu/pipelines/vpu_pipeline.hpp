@@ -47,6 +47,7 @@ class Pipeline
     uint8_t srcReg1;
     uint8_t srcReg2;
     uint8_t destReg;
+    uint8_t integerDestReg;
     uint8_t destFieldMask;
     uint8_t srcReg1FieldMask;
     uint8_t srcReg2FieldMask;

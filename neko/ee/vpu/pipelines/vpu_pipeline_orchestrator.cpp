@@ -5,6 +5,18 @@
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
+namespace
+{
+  bool isVectorLoad(const Pipeline *pipeline)
+  {
+    return
+      pipeline->type != VPU_PIPELINE_TYPE_LSU ||
+      pipeline->opCode == VPU_LQ ||
+      pipeline->opCode == VPU_LQD ||
+      pipeline->opCode == VPU_LQI;
+  }
+}
+
 PipelineOrchestrator::PipelineOrchestrator() : pipelineHandler(NULL), stalling(false)
 {
   for (int i = 0; i < MAX_PIPELINES; i++)
@@ -71,8 +83,7 @@ void PipelineOrchestrator::detectStalls(Pipeline * pipeline)
   {
     Pipeline * checkPipeline = *iter;
 
-    if ((checkPipeline->type == VPU_PIPELINE_TYPE_LSU &&
-         checkPipeline->opCode != VPU_LQ) ||
+    if (!isVectorLoad(checkPipeline) ||
         checkPipeline->destinationAvailableForNextTStage() ||
         checkPipeline->discardWriteback ||
         checkPipeline->destReg == VPU_REGISTER_VF00)
@@ -166,8 +177,7 @@ bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1Fie
   for (list<Pipeline *>::const_iterator iter = executing.begin(); iter != executing.end(); ++iter)
   {
     Pipeline *pipeline = *iter;
-    if ((pipeline->type == VPU_PIPELINE_TYPE_LSU &&
-         pipeline->opCode != VPU_LQ) ||
+    if (!isVectorLoad(pipeline) ||
         pipeline->destinationAvailableForNextTStage() ||
         pipeline->discardWriteback ||
         pipeline->destFieldMask == 0 ||

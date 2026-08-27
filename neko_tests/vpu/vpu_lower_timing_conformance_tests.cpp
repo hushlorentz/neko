@@ -115,6 +115,19 @@ namespace
       (static_cast<uint32_t>(fs) << 11);
   }
 
+  uint32_t type3Memory(
+    uint32_t encoding,
+    uint8_t fieldMask,
+    uint8_t it,
+    uint8_t is)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(is) << 11);
+  }
+
   uint32_t add(
     uint32_t destinationMask,
     uint8_t ft,
@@ -1138,6 +1151,129 @@ TEST_CASE("VU Lower Timing Conformance Tests")
     REQUIRE(writebacks[0].opCode == VPU_ILW);
     REQUIRE(writebacks[0].cycle == 5);
     REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0x1235);
+  }
+
+  SECTION("LQI writes its vector and address destinations at S-stage")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.writeDataMemory(0, wordBytes(0x3f800000));
+    vpu.loadIntRegister(VPU_REGISTER_VI04, 2);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 2, 0, 0, 0);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      type3Memory(
+        VPU_LQI_ENCODING,
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT |
+        add(
+          VPU_DEST_X_BIT,
+          VPU_REGISTER_VF02,
+          VPU_REGISTER_VF03,
+          VPU_REGISTER_VF05),
+      iadd(
+        VPU_REGISTER_VI06,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VI04));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    std::vector<VPUTraceEvent> issues =
+      eventsOfType(events, VPUTraceEventType::InstructionIssued);
+    std::vector<VPUTraceEvent> stalls =
+      eventsOfType(events, VPUTraceEventType::PipelineStall);
+    std::vector<VPUTraceEvent> writebacks =
+      eventsOfType(events, VPUTraceEventType::PipelineWriteback);
+
+    REQUIRE(issues[1].cycle == 6);
+    REQUIRE(stalls.size() == 5);
+    REQUIRE(writebacks[0].opCode == VPU_LQI);
+    REQUIRE(writebacks[0].cycle == 5);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 1);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI06) == 3);
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF05)->x == 3);
+  }
+
+  SECTION("SQD waits for selected vector source lanes and pre-decrements at S-stage")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 0, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 2, 0, 0, 0);
+
+    appendInstructionPair(
+      &instructions,
+      add(
+        VPU_DEST_X_BIT,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF04));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      type3Memory(
+        VPU_SQD_ENCODING,
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VI01,
+        VPU_REGISTER_VF04));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    REQUIRE_FALSE(
+      eventsOfType(events, VPUTraceEventType::PipelineStall).empty());
+    REQUIRE(vpu.readDataMemory(0, 4) == wordBytes(0x40400000));
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 0);
+  }
+
+  SECTION("An upper write discards a paired LQD write to the same register")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.writeDataMemory(0, wordBytes(0x11111111));
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 1);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 0, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 2, 0, 0, 0);
+    vpu.loadIntFPRegister(VPU_REGISTER_VF04, 0x22222222, 0, 0, 0);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT |
+        add(
+          VPU_DEST_X_BIT,
+          VPU_REGISTER_VF02,
+          VPU_REGISTER_VF03,
+          VPU_REGISTER_VF04),
+      type3Memory(
+        VPU_LQD_ENCODING,
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VF04,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF04)->x == 3);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 0);
   }
 
   SECTION("Force Break cancels LSU loads, stores, post-increments, and hazards")

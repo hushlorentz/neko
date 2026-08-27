@@ -51,6 +51,10 @@ verify_fixture(
   4c5f247ab39053142ca9be9652caffd98d38a5417e8655856fea1d52073fb46d
 )
 verify_fixture(
+  memory_variants.bin
+  d0be0bcc8129c3e592282807c242468b9daa5afda9a919d7e31edf84ea0ad786
+)
+verify_fixture(
   lane_masks.bin
   41e29c6379fbbd55747539b13b467cb8e6248b45ae712de9968965a471b9c23a
 )

@@ -36,6 +36,21 @@ Expected SHA-256:
 4c5f247ab39053142ca9be9652caffd98d38a5417e8655856fea1d52073fb46d
 ```
 
+Regenerate `memory_variants.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/memory_variants.bin \
+  neko_tests/vpu/integration/memory_variants.asm
+```
+
+Expected SHA-256:
+
+```text
+d0be0bcc8129c3e592282807c242468b9daa5afda9a919d7e31edf84ea0ad786
+```
+
 Regenerate `lane_masks.bin` with:
 
 ```sh

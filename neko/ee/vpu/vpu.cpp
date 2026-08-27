@@ -910,7 +910,9 @@ void VPU::queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16
   pendingLowerWritebackDiscarded = false;
 
   if ((lowerInstruction.opCode == VPU_MFIR ||
-       lowerInstruction.opCode == VPU_LQ) &&
+       lowerInstruction.opCode == VPU_LQ ||
+       lowerInstruction.opCode == VPU_LQD ||
+       lowerInstruction.opCode == VPU_LQI) &&
       upperOpCode != VPU_NOP)
   {
     uint8_t upperDestination =
@@ -1137,29 +1139,29 @@ void VPU::startWaitQInstruction(const LowerInstruction &instruction)
 
 void VPU::startLSUInstruction(const LowerInstruction &instruction)
 {
-  orchestrator.startPipeline(
+  const bool readsVectorRegister =
+    instruction.opCode == VPU_SQ ||
+    instruction.opCode == VPU_SQD ||
+    instruction.opCode == VPU_SQI;
+  Pipeline *pipeline = orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_LSU,
     instruction.opCode,
     instruction.sourceRegister1,
     instruction.sourceRegister2,
     instruction.destinationRegister,
     instruction.destinationFieldMask,
-    instruction.destinationFieldMask,
+    readsVectorRegister
+      ? instruction.destinationFieldMask
+      : FP_REGISTER_NO_FIELDS,
     0,
     pendingLowerInstructionAddress,
     pendingLowerWritebackDiscarded,
     instruction.immediate);
+  pipeline->integerDestReg = instruction.integerDestinationRegister;
 
-  uint8_t integerDestination = VPU_REGISTER_VI00;
-  if (instruction.opCode == VPU_ILW ||
-      instruction.opCode == VPU_SQI)
+  if (pipeline->integerDestReg != VPU_REGISTER_VI00)
   {
-    integerDestination = instruction.destinationRegister;
-  }
-
-  if (integerDestination != VPU_REGISTER_VI00)
-  {
-    pendingIntegerWrites[integerDestination]++;
+    pendingIntegerWrites[pipeline->integerDestReg]++;
   }
 }
 
@@ -1235,8 +1237,18 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
       switch (instruction.opCode)
       {
         case VPU_ILW:
+        case VPU_ILWR:
         case VPU_LQ:
+        case VPU_LQD:
+        case VPU_LQI:
           return hasPendingIntegerWrite(instruction.sourceRegister1);
+        case VPU_ISW:
+        case VPU_ISWR:
+          return
+            hasPendingIntegerWrite(instruction.sourceRegister1) ||
+            hasPendingIntegerWrite(instruction.sourceRegister2);
+        case VPU_SQ:
+        case VPU_SQD:
         case VPU_SQI:
           return
             hasPendingIntegerWrite(instruction.sourceRegister2) ||
@@ -1934,10 +1946,11 @@ void VPU::startLSUPipeline(Pipeline *pipeline)
   switch (pipeline->opCode)
   {
     case VPU_ILW:
+    case VPU_ILWR:
     {
       uint16_t address = qwordAddress(
         integerValueForExecution(pipeline->srcReg1),
-        pipeline->immediate);
+        pipeline->opCode == VPU_ILW ? pipeline->immediate : 0);
       uint8_t fieldOffset;
 
       switch (pipeline->destFieldMask)
@@ -1962,11 +1975,26 @@ void VPU::startLSUPipeline(Pipeline *pipeline)
       pipeline->setIntResult(readDataWord(pipeline->memoryAddress) & 0xffff);
       break;
     }
-    case VPU_LQ:
-    {
+    case VPU_ISW:
+    case VPU_ISWR:
       pipeline->memoryAddress = qwordAddress(
         integerValueForExecution(pipeline->srcReg1),
-        pipeline->immediate);
+        pipeline->opCode == VPU_ISW ? pipeline->immediate : 0);
+      pipeline->setIntResult(integerValueForExecution(pipeline->srcReg2));
+      break;
+    case VPU_LQ:
+    case VPU_LQD:
+    case VPU_LQI:
+    {
+      uint16_t base = integerValueForExecution(pipeline->srcReg1);
+      if (pipeline->opCode == VPU_LQD &&
+          pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        base--;
+      }
+      pipeline->memoryAddress = qwordAddress(
+        base,
+        pipeline->opCode == VPU_LQ ? pipeline->immediate : 0);
       FPRegister result = fpRegisters[pipeline->destReg];
       if (hasFlag(pipeline->destFieldMask, FP_REGISTER_X_FIELD))
       {
@@ -1985,15 +2013,39 @@ void VPU::startLSUPipeline(Pipeline *pipeline)
         result.w.setBits(readDataWord(pipeline->memoryAddress + 12));
       }
       pipeline->setFPRegisterResult(&result);
+      if (pipeline->opCode == VPU_LQD)
+      {
+        pipeline->setIntResult(base);
+      }
+      else if (pipeline->opCode == VPU_LQI)
+      {
+        pipeline->setIntResult(base + 1);
+      }
       break;
     }
+    case VPU_SQ:
+    case VPU_SQD:
     case VPU_SQI:
     {
       uint16_t base = integerValueForExecution(pipeline->srcReg2);
+      if (pipeline->opCode == VPU_SQD &&
+          pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        base--;
+      }
       pipeline->memoryAddress =
-        qwordAddress(base);
+        qwordAddress(base, pipeline->opCode == VPU_SQ
+          ? pipeline->immediate
+          : 0);
       pipeline->setFPRegisterResult(&fpRegisters[pipeline->srcReg1]);
-      pipeline->setIntResult(base + 1);
+      if (pipeline->opCode == VPU_SQD)
+      {
+        pipeline->setIntResult(base);
+      }
+      else if (pipeline->opCode == VPU_SQI)
+      {
+        pipeline->setIntResult(base + 1);
+      }
       break;
     }
     default:
@@ -2277,20 +2329,49 @@ void VPU::finishLSUPipeline(Pipeline *pipeline)
   switch (pipeline->opCode)
   {
     case VPU_ILW:
-      if (pipeline->destReg != VPU_REGISTER_VI00)
+    case VPU_ILWR:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
       {
-        intRegisters[pipeline->destReg] = pipeline->intResult;
-        pendingIntegerWrites[pipeline->destReg]--;
+        intRegisters[pipeline->integerDestReg] = pipeline->intResult;
+        pendingIntegerWrites[pipeline->integerDestReg]--;
       }
       break;
     case VPU_LQ:
+    case VPU_LQD:
+    case VPU_LQI:
       if (!pipeline->discardWriteback)
       {
         updateDestinationRegisterWithPipelineResult(
           &fpRegisters[pipeline->destReg],
           pipeline);
       }
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] = pipeline->intResult;
+        pendingIntegerWrites[pipeline->integerDestReg]--;
+      }
       break;
+    case VPU_ISW:
+    case VPU_ISWR:
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_X_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress, pipeline->intResult);
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Y_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress + 4, pipeline->intResult);
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_Z_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress + 8, pipeline->intResult);
+      }
+      if (hasFlag(pipeline->destFieldMask, FP_REGISTER_W_FIELD))
+      {
+        writeDataWord(pipeline->memoryAddress + 12, pipeline->intResult);
+      }
+      break;
+    case VPU_SQ:
+    case VPU_SQD:
     case VPU_SQI:
       if (hasFlag(pipeline->destFieldMask, FP_REGISTER_X_FIELD))
       {
@@ -2308,10 +2389,10 @@ void VPU::finishLSUPipeline(Pipeline *pipeline)
       {
         writeDataWord(pipeline->memoryAddress + 12, pipeline->fpResult.w.bits());
       }
-      if (pipeline->destReg != VPU_REGISTER_VI00)
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
       {
-        intRegisters[pipeline->destReg] = pipeline->intResult;
-        pendingIntegerWrites[pipeline->destReg]--;
+        intRegisters[pipeline->integerDestReg] = pipeline->intResult;
+        pendingIntegerWrites[pipeline->integerDestReg]--;
       }
       break;
   }
