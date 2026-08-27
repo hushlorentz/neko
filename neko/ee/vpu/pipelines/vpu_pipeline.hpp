@@ -16,6 +16,7 @@
 #define VPU_PIPELINE_TYPE_I_REGISTER 8
 #define VPU_PIPELINE_TYPE_WAITQ 9
 #define VPU_PIPELINE_TYPE_WAITP 10
+#define VPU_PIPELINE_TYPE_FLAG 11
 
 enum class VUPipelineStage : uint8_t
 {

@@ -119,6 +119,16 @@ void Pipeline::advanceStage()
     case VPU_PIPELINE_TYPE_XGKICK:
       advanceSixStagePipeline();
       break;
+    case VPU_PIPELINE_TYPE_FLAG:
+      if (opCode == VPU_FCSET)
+      {
+        advanceSixStagePipeline();
+      }
+      else
+      {
+        advanceTwoStagePipeline();
+      }
+      break;
     case VPU_PIPELINE_TYPE_IALU:
       advanceIALUPipeline();
       break;

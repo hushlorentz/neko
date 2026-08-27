@@ -130,5 +130,9 @@ verify_fixture(
   register_movement.bin
   b6883b705a935dfd8461cf7317211eced1a9fc61ef076d72cf033bd34a7c1fbc
 )
+verify_fixture(
+  clipping_flags.bin
+  4831d97f4321d506997ded681c5e5cf176444397836e7602efbfd104f202eccb
+)
 
 message(STATUS "Repository checks passed")

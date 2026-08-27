@@ -3,6 +3,7 @@
 #include "vpu_field_mask.hpp"
 #include "vpu_lower_instruction.hpp"
 #include "vpu_opcodes.hpp"
+#include "vpu_register_ids.hpp"
 
 namespace
 {
@@ -107,6 +108,46 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
     decoded.immediate = unsignedImmediate15(instruction);
+    return decoded;
+  }
+
+  const std::uint32_t type9Encoding = instruction & 0xff000000;
+  if (type9Encoding == VPU_FCEQ_ENCODING ||
+      type9Encoding == VPU_FCSET_ENCODING ||
+      type9Encoding == VPU_FCAND_ENCODING ||
+      type9Encoding == VPU_FCOR_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Flag;
+    if (type9Encoding == VPU_FCEQ_ENCODING)
+    {
+      decoded.opCode = VPU_FCEQ;
+    }
+    else if (type9Encoding == VPU_FCSET_ENCODING)
+    {
+      decoded.opCode = VPU_FCSET;
+    }
+    else if (type9Encoding == VPU_FCAND_ENCODING)
+    {
+      decoded.opCode = VPU_FCAND;
+    }
+    else
+    {
+      decoded.opCode = VPU_FCOR;
+    }
+    decoded.integerDestinationRegister =
+      decoded.opCode == VPU_FCSET
+        ? VPU_REGISTER_VI00
+        : VPU_REGISTER_VI01;
+    decoded.immediateBits = instruction & 0x00ffffff;
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE8_MASK) == VPU_FCGET_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Flag;
+    decoded.opCode = VPU_FCGET;
+    decoded.integerDestinationRegister =
+      registerField(instruction, LOWER_IT_SHIFT);
     return decoded;
   }
 

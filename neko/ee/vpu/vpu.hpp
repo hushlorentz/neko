@@ -197,6 +197,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startLowerFMACInstruction(const LowerInstruction &instruction);
     void startFDIVInstruction(const LowerInstruction &instruction);
     void startWaitQInstruction(const LowerInstruction &instruction);
+    void startFlagInstruction(const LowerInstruction &instruction);
     void startXGKICKInstruction(const LowerInstruction &instruction);
     bool startXGKICKTransfer(Pipeline *pipeline);
     bool xgkickStallsIssue();

@@ -972,6 +972,9 @@ void VPU::executePendingLowerInstruction()
     case LowerExecutionUnit::WaitQ:
       startWaitQInstruction(instruction);
       break;
+    case LowerExecutionUnit::Flag:
+      startFlagInstruction(instruction);
+      break;
     case LowerExecutionUnit::XGKICK:
       startXGKICKInstruction(instruction);
       break;
@@ -1196,6 +1199,22 @@ void VPU::startWaitQInstruction(const LowerInstruction &instruction)
     pendingLowerInstructionAddress);
 }
 
+void VPU::startFlagInstruction(const LowerInstruction &instruction)
+{
+  Pipeline *pipeline = orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_FLAG,
+    instruction.opCode,
+    0,
+    0,
+    0,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress);
+  pipeline->integerDestReg = instruction.integerDestinationRegister;
+  pipeline->immediateBits = instruction.immediateBits;
+}
+
 void VPU::startXGKICKInstruction(const LowerInstruction &instruction)
 {
   if (type != VPUType::VU1)
@@ -1411,6 +1430,7 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
         instruction.sourceRegister2,
         instruction.sourceFieldMask2);
     case LowerExecutionUnit::WaitQ:
+    case LowerExecutionUnit::Flag:
       return false;
     case LowerExecutionUnit::XGKICK:
       return hasPendingIntegerWrite(instruction.sourceRegister1);
@@ -2354,6 +2374,47 @@ void VPU::pipelineFinished(Pipeline * p)
   }
   if (p->type == VPU_PIPELINE_TYPE_WAITQ)
   {
+    return;
+  }
+  if (p->type == VPU_PIPELINE_TYPE_FLAG)
+  {
+    switch (p->opCode)
+    {
+      case VPU_FCAND:
+        intRegisters[VPU_REGISTER_VI01] =
+          (clippingFlags & p->immediateBits) != 0;
+        break;
+      case VPU_FCEQ:
+        intRegisters[VPU_REGISTER_VI01] =
+          (clippingFlags & 0x00ffffff) == p->immediateBits;
+        break;
+      case VPU_FCGET:
+        if (p->integerDestReg != VPU_REGISTER_VI00)
+        {
+          intRegisters[p->integerDestReg] = clippingFlags & 0x0fff;
+        }
+        break;
+      case VPU_FCOR:
+        intRegisters[VPU_REGISTER_VI01] =
+          ((clippingFlags | p->immediateBits) & 0x00ffffff) ==
+          0x00ffffff;
+        break;
+      case VPU_FCSET:
+        clippingFlags = p->immediateBits;
+        break;
+      default:
+        throw runtime_error("Unsupported VU clipping flag instruction.");
+    }
+    emitTrace({
+      VPUTraceEventType::PipelineWriteback,
+      cycles,
+      p->instructionAddress,
+      0,
+      0,
+      p->opCode,
+      p->integerDestReg,
+      FP_REGISTER_NO_FIELDS
+    });
     return;
   }
   if (p->type == VPU_PIPELINE_TYPE_LSU)

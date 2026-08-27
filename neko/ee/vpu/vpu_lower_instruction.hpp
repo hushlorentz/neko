@@ -12,6 +12,7 @@ enum class LowerExecutionUnit : std::uint8_t
   FMAC,
   FDIV,
   WaitQ,
+  Flag,
   XGKICK,
   Branch
 };

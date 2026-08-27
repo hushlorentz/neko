@@ -272,7 +272,7 @@ milestones rather than grouping every non-arithmetic operation as a
 
 - [x] Implement `MFIR`
 - [x] Complete basic register movement with `MTIR`, `MOVE`, and `MR32`
-- [ ] Complete clipping-flag access with `FCAND`, `FCEQ`, `FCGET`, `FCOR`,
+- [x] Complete clipping-flag access with `FCAND`, `FCEQ`, `FCGET`, `FCOR`,
       and `FCSET`
 - [ ] Complete MAC-flag access with `FMAND`, `FMEQ`, and `FMOR`
 - [ ] Complete status-flag access with `FSAND`, `FSEQ`, `FSOR`, and `FSSET`
@@ -289,7 +289,8 @@ milestones rather than grouping every non-arithmetic operation as a
       a decoded memory integration program
 - [x] Cover mixed integer, memory, branch, and `MFIR` instruction streams
 - [x] Cover `MTIR`, `MOVE`, and `MR32` dependencies and lane behavior
-- [ ] Cover clipping, MAC, and status flag tests and setters
+- [x] Cover clipping flag tests, reads, and setters
+- [ ] Cover MAC and status flag tests and setters
 - [ ] Cover deterministic R-register initialization, advancement, and transfer
 - [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
 - [ ] Cover FDIV/EFU resource hazards through decoded instructions

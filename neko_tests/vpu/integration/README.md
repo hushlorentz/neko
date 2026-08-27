@@ -255,3 +255,18 @@ Expected SHA-256:
 ```text
 b6883b705a935dfd8461cf7317211eced1a9fc61ef076d72cf033bd34a7c1fbc
 ```
+
+Regenerate `clipping_flags.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/clipping_flags.bin \
+  neko_tests/vpu/integration/clipping_flags.asm
+```
+
+Expected SHA-256:
+
+```text
+4831d97f4321d506997ded681c5e5cf176444397836e7602efbfd104f202eccb
+```
