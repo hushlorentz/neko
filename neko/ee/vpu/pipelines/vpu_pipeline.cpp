@@ -3,7 +3,7 @@
 
 #include <stdexcept>
 
-Pipeline::Pipeline() : type(0), opCode(0), intResult(0), srcReg1(0), srcReg2(0), destReg(0), integerDestReg(0), destFieldMask(0), srcReg1FieldMask(0), srcReg2FieldMask(0), instructionAddress(0), memoryAddress(0), immediate(0), immediateBits(0), scalarResultBits(0), scalarResultFlags(0), intSourceValue1(0), intSourceValue2(0), intSource1Sampled(false), intSource2Sampled(false), discardWriteback(false), currentStage(VUPipelineStage::M), currentStageIndex(0), executionStageCount(0), complete(false)
+Pipeline::Pipeline() : type(0), opCode(0), intResult(0), srcReg1(0), srcReg2(0), destReg(0), integerDestReg(0), destFieldMask(0), srcReg1FieldMask(0), srcReg2FieldMask(0), instructionAddress(0), memoryAddress(0), immediate(0), immediateBits(0), scalarResultBits(0), scalarResultFlags(0), intSourceValue1(0), intSourceValue2(0), intSource1Sampled(false), intSource2Sampled(false), xgkickStarted(false), discardWriteback(false), currentStage(VUPipelineStage::M), currentStageIndex(0), executionStageCount(0), complete(false)
 {
 }
 
@@ -32,6 +32,7 @@ void Pipeline::configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t 
   ignoredResultFields = FP_REGISTER_NO_FIELDS;
   intSource1Sampled = false;
   intSource2Sampled = false;
+  xgkickStarted = false;
   currentStage = VUPipelineStage::M;
   currentStageIndex = 0;
   executionStageCount = 0;

@@ -61,6 +61,7 @@ class Pipeline
     uint16_t intSourceValue2;
     bool intSource1Sampled;
     bool intSource2Sampled;
+    bool xgkickStarted;
     bool discardWriteback;
 
     Pipeline();

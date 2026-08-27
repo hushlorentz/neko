@@ -225,3 +225,18 @@ floating_point_compound.bin   d8fdaf73e48383eb5a857ce6159420871591ed884ae9d78971
 fixed_point_conversions.bin   3c1594daf9c09d02701979295ccee63c7c06caa722bf6ca88410ab403261ec6f
 q_pipeline.bin                6421afcad9ae775630c93af16320369c6984dae51286ca89027ee404bf2d73d6
 ```
+
+Regenerate `xgkick.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/xgkick.bin \
+  neko_tests/vpu/integration/xgkick.asm
+```
+
+Expected SHA-256:
+
+```text
+af1e1b8aa5346bd5d772d027601d376172fab436fadf088cd20e51f61201d628
+```

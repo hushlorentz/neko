@@ -243,6 +243,8 @@ void VPU::forceBreak()
   bypassedIntegerValues.fill(0);
   pendingAccumulatorWrites = 0;
   accumulatorForwardValid = false;
+  xgkickWaiting = false;
+  xgkickTransferStarted = false;
   endDelaySlotPending = false;
   branchDelaySlotPending = false;
   pendingBranchTaken = false;
@@ -342,6 +344,11 @@ void VPU::setMode(uint8_t newMode)
   mode = newMode;
 }
 
+void VPU::setXGKICKHandler(VUXGKICKHandler *handler)
+{
+  xgkickHandler = handler;
+}
+
 void VPU::uploadMicroInstructions(const vector<uint8_t> &instructions)
 {
   if (instructions.size() % 8 != 0)
@@ -405,6 +412,8 @@ void VPU::startMicroMode(uint16_t startAddress)
   bypassedIntegerValues.fill(0);
   pendingAccumulatorWrites = 0;
   accumulatorForwardValid = false;
+  xgkickWaiting = false;
+  xgkickTransferStarted = false;
   mode = VPU_MODE_MICRO;
   microMemPC = startAddress;
   endDelaySlotPending = false;
@@ -447,7 +456,7 @@ bool VPU::tick()
         state = haltAfterDrain ? VPU_STATE_STOP : VPU_STATE_READY;
       }
     }
-    else if (orchestrator.stalling)
+    else if (orchestrator.stalling || xgkickStallsIssue())
     {
       emitTrace({
         VPUTraceEventType::PipelineStall,
@@ -564,6 +573,8 @@ bool VPU::tick()
     bypassedIntegerValues.fill(0);
     pendingAccumulatorWrites = 0;
     accumulatorForwardValid = false;
+    xgkickWaiting = false;
+    xgkickTransferStarted = false;
     branchDelaySlotPending = false;
     pendingBranchTaken = false;
     pendingBranchLinkValid = false;
@@ -959,6 +970,9 @@ void VPU::executePendingLowerInstruction()
     case LowerExecutionUnit::WaitQ:
       startWaitQInstruction(instruction);
       break;
+    case LowerExecutionUnit::XGKICK:
+      startXGKICKInstruction(instruction);
+      break;
     case LowerExecutionUnit::Branch:
       startBranchInstruction(instruction);
       break;
@@ -1174,6 +1188,75 @@ void VPU::startWaitQInstruction(const LowerInstruction &instruction)
     pendingLowerInstructionAddress);
 }
 
+void VPU::startXGKICKInstruction(const LowerInstruction &instruction)
+{
+  if (type != VPUType::VU1)
+  {
+    throw runtime_error("XGKICK is only supported on VU1.");
+  }
+
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_XGKICK,
+    instruction.opCode,
+    instruction.sourceRegister1,
+    VPU_REGISTER_VI00,
+    VPU_REGISTER_VI00,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress);
+}
+
+bool VPU::startXGKICKTransfer(Pipeline *pipeline)
+{
+  if (!pipeline->intSource1Sampled)
+  {
+    pipeline->intSourceValue1 =
+      integerSourceValueForPipeline(pipeline, pipeline->srcReg1);
+    pipeline->intSource1Sampled = true;
+  }
+  if (pipeline->xgkickStarted)
+  {
+    return true;
+  }
+  if (xgkickHandler && xgkickHandler->path1TransferActive())
+  {
+    xgkickWaiting = true;
+    return false;
+  }
+
+  if (xgkickHandler)
+  {
+    const uint16_t qwordMask =
+      static_cast<uint16_t>(vuMem.size() / 16 - 1);
+    xgkickHandler->startPath1Transfer(
+      pipeline->intSourceValue1 & qwordMask);
+    xgkickTransferStarted = true;
+  }
+  pipeline->xgkickStarted = true;
+  xgkickWaiting = false;
+  return true;
+}
+
+bool VPU::xgkickStallsIssue()
+{
+  if (xgkickWaiting)
+  {
+    return true;
+  }
+  if (!xgkickTransferStarted || !xgkickHandler)
+  {
+    return false;
+  }
+  if (xgkickHandler->path1TransferActive())
+  {
+    return true;
+  }
+
+  xgkickTransferStarted = false;
+  return false;
+}
+
 void VPU::startLSUInstruction(const LowerInstruction &instruction)
 {
   const bool readsVectorRegister =
@@ -1311,6 +1394,8 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
         instruction.sourceFieldMask2);
     case LowerExecutionUnit::WaitQ:
       return false;
+    case LowerExecutionUnit::XGKICK:
+      return hasPendingIntegerWrite(instruction.sourceRegister1);
     case LowerExecutionUnit::Branch:
       switch (instruction.opCode)
       {
@@ -1341,6 +1426,7 @@ bool VPU::lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instru
 {
   return
     instruction.unit == LowerExecutionUnit::LSU ||
+    instruction.unit == LowerExecutionUnit::XGKICK ||
     instruction.unit == LowerExecutionUnit::Branch;
 }
 
@@ -1529,6 +1615,16 @@ void VPU::pipelineStarted(Pipeline * p)
   }
 }
 
+bool VPU::pipelineCanAdvance(Pipeline *pipeline)
+{
+  if (pipeline->type == VPU_PIPELINE_TYPE_XGKICK &&
+      pipeline->stage() == VUPipelineStage::T)
+  {
+    return startXGKICKTransfer(pipeline);
+  }
+  return true;
+}
+
 void VPU::pipelineAdvanced(Pipeline *p)
 {
   if (p->stage() == VUPipelineStage::T)
@@ -1543,6 +1639,9 @@ void VPU::pipelineAdvanced(Pipeline *p)
         break;
       case VPU_PIPELINE_TYPE_LSU:
         startLSUPipeline(p);
+        break;
+      case VPU_PIPELINE_TYPE_XGKICK:
+        startXGKICKTransfer(p);
         break;
       case VPU_PIPELINE_TYPE_BRANCH:
         evaluateBranchPipeline(p);

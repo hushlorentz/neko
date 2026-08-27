@@ -92,6 +92,7 @@ add_executable(neko_tests
     neko_tests/vpu/integration/vector_math_tests.cpp
     neko_tests/vpu/integration/vector_kernel_tests.cpp
     neko_tests/vpu/integration/vpu_integration_test_utils.cpp
+    neko_tests/vpu/integration/xgkick_tests.cpp
     neko_tests/vpu/vpu_debug_tests.cpp
     neko_tests/vpu/vpu_floating_point_diagnostics_tests.cpp
     neko_tests/vpu/vpu_memory_tests.cpp
@@ -102,6 +103,7 @@ add_executable(neko_tests
     neko_tests/vpu/vpu_program_runner_tests.cpp
     neko_tests/vpu/vpu_state_tests.cpp
     neko_tests/vpu/vpu_timing_conformance_tests.cpp
+    neko_tests/vpu/vpu_xgkick_tests.cpp
     neko_tests/vpu/opcode_tests/vpu_upper_add_tests.cpp
     neko_tests/vpu/opcode_tests/vpu_upper_clip_tests.cpp
     neko_tests/vpu/opcode_tests/vpu_upper_fixed_point_tests.cpp

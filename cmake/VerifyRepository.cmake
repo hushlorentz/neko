@@ -122,5 +122,9 @@ verify_fixture(
   q_pipeline.bin
   6421afcad9ae775630c93af16320369c6984dae51286ca89027ee404bf2d73d6
 )
+verify_fixture(
+  xgkick.bin
+  af1e1b8aa5346bd5d772d027601d376172fab436fadf088cd20e51f61201d628
+)
 
 message(STATUS "Repository checks passed")

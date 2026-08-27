@@ -300,6 +300,14 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_XGKICK_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::XGKICK;
+    decoded.opCode = VPU_XGKICK;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_MFIR_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::FMAC;

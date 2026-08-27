@@ -13,6 +13,7 @@
 #include "vpu_lower_instruction.hpp"
 #include "vpu_pipeline_handler.hpp"
 #include "vpu_pipeline_orchestrator.hpp"
+#include "vpu_xgkick_handler.hpp"
 
 #define VPU_STATE_READY 1
 #define VPU_STATE_RUN 2
@@ -102,10 +103,12 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool stepInstruction();
     uint32_t run(uint32_t maxCycles);
     void setTraceCallback(VPUTraceCallback callback);
+    void setXGKICKHandler(VUXGKICKHandler *handler);
     void uploadMicroInstructions(const vector<uint8_t> &instructions);
     void writeDataMemory(size_t address, const vector<uint8_t> &data);
     vector<uint8_t> readDataMemory(size_t address, size_t byteCount) const;
     void pipelineStarted(Pipeline *p) override;
+    bool pipelineCanAdvance(Pipeline *pipeline) override;
     void pipelineAdvanced(Pipeline *p) override;
     void pipelineFinished(Pipeline *p) override;
     bool hasMACFlag(uint16_t flag);
@@ -136,6 +139,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool dEnabled = false;
     bool tEnabled = false;
     VPUTraceCallback traceCallback;
+    VUXGKICKHandler *xgkickHandler = nullptr;
+    bool xgkickWaiting = false;
+    bool xgkickTransferStarted = false;
     vector<FPRegister> fpRegisters;
     vector<uint16_t> intRegisters;
     VUFloat iRegister;
@@ -191,6 +197,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startLowerFMACInstruction(const LowerInstruction &instruction);
     void startFDIVInstruction(const LowerInstruction &instruction);
     void startWaitQInstruction(const LowerInstruction &instruction);
+    void startXGKICKInstruction(const LowerInstruction &instruction);
+    bool startXGKICKTransfer(Pipeline *pipeline);
+    bool xgkickStallsIssue();
     uint16_t integerValueForExecution(uint8_t registerID) const;
     uint16_t integerSourceValueForPipeline(
       const Pipeline *pipeline,

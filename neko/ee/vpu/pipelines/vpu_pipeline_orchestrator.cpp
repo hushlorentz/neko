@@ -105,6 +105,12 @@ void PipelineOrchestrator::updateExecutingPipelines()
   while (iter != executing.end())
   {
     Pipeline * p = (Pipeline *)*iter;
+    if (pipelineHandler && !pipelineHandler->pipelineCanAdvance(p))
+    {
+      stalling = true;
+      ++iter;
+      continue;
+    }
     if (p->stage() == VUPipelineStage::M &&
         hasStructuralHazard(p))
     {

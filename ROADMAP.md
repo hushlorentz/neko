@@ -248,24 +248,53 @@ floating-point assembly integration:
       `IADDIU`, `IAND`, `IOR`, `ISUB`, and `ISUBIU`)
 - [x] Complete VU memory load/store variants and lane masks
 - [x] Complete branches and jumps
-- [ ] Complete special-register transfers
 - [x] Add Q pipeline division and square-root operations
-- [ ] Add the VU1 P pipeline and EFU instructions
-- [ ] Add VU1 `XGKICK`
-- [ ] Complete an opcode-table audit after milestone-driven coverage, implement
-      every architecturally meaningful VU0/VU1 instruction, and define
-      deterministic handling for reserved encodings
+- [x] Add VU1 `XGKICK` initiation, PATH1 busy timing, and a non-owning GIF
+      handoff boundary
+
+### Official Microinstruction Audit
+
+- [x] Reconcile all 59 upper and 69 lower microinstructions in the VU User's
+      Manual with implemented or dependency-aligned roadmap families
+- [x] Keep EE COP2 macro-mode encodings in the system-level milestone rather
+      than conflating them with VU microprogram decoding
+- [ ] After the milestone-driven instruction families are complete, perform
+      the final implementation audit: verify decoding, execution, timing,
+      hazards, and integration coverage for every architecturally meaningful
+      VU0/VU1 microinstruction and deterministic rejection of every reserved
+      encoding
+
+### Lower Data Movement and Special State
+
+Keep instructions with external subsystem dependencies in their owning
+milestones rather than grouping every non-arithmetic operation as a
+"special-register transfer."
+
+- [x] Implement `MFIR`
+- [ ] Complete basic register movement with `MTIR`, `MOVE`, and `MR32`
+- [ ] Complete clipping-flag access with `FCAND`, `FCEQ`, `FCGET`, `FCOR`,
+      and `FCSET`
+- [ ] Complete MAC-flag access with `FMAND`, `FMEQ`, and `FMOR`
+- [ ] Complete status-flag access with `FSAND`, `FSEQ`, `FSOR`, and `FSSET`
+- [ ] Complete R-register operations with `RGET`, `RINIT`, `RNEXT`, and
+      `RXOR`
+- [ ] Add the VU1 P pipeline and EFU instructions together with `MFP` and
+      `WAITP`
 
 ### Instruction Integration Programs
 
 - [x] Cover the common IALU family through decoded integer, memory, and
-      special-register instruction streams
+      `MFIR` instruction streams
 - [x] Cover VU load/store addressing variants and masked lane behavior through
       a decoded memory integration program
-- [x] Cover mixed integer, memory, branch, and special-register instruction streams
+- [x] Cover mixed integer, memory, branch, and `MFIR` instruction streams
+- [ ] Cover `MTIR`, `MOVE`, and `MR32` dependencies and lane behavior
+- [ ] Cover clipping, MAC, and status flag tests and setters
+- [ ] Cover deterministic R-register initialization, advancement, and transfer
 - [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
 - [ ] Cover FDIV/EFU resource hazards through decoded instructions
-- [ ] Cover VU1 `XGKICK` packet initiation and completion behavior
+- [x] Cover VU1 `XGKICK` packet initiation, completion stalls, address
+      wrapping, and pipeline drain behavior
 - [ ] Run progressively larger fragments of naken_asm's `rotation_vu1.asm`
 
 ## Milestone 3: VIF and Graphics Path
@@ -274,6 +303,7 @@ floating-point assembly integration:
 - [ ] Support MPG microprogram upload
 - [ ] Support UNPACK data transfer into VU memory
 - [ ] Support MSCAL/MSCALF execution control
+- [ ] Model VIF TOP/ITOP state and implement VU `XTOP`/`XITOP`
 - [ ] Decode GIF tags and packed/reglist/image data
 - [ ] Route VU1 `XGKICK` output into the GIF path
 - [ ] Implement a minimal GS register model
@@ -283,6 +313,7 @@ floating-point assembly integration:
 ### Graphics Path Integration Programs
 
 - [ ] Upload and execute a VU1 program through VIF `MPG` and `MSCAL`
+- [ ] Verify VIF TOP/ITOP values through decoded `XTOP`/`XITOP` instructions
 - [ ] Transfer vertex data through VIF `UNPACK`
 - [ ] Route a VU1 `XGKICK` packet through GIF into GS registers
 - [ ] Render a synthetic triangle and assert its framebuffer hash
@@ -298,6 +329,18 @@ floating-point assembly integration:
 - [ ] Define reset, frame execution, input, video, and audio interfaces
 - [ ] Add deterministic save-state serialization
 - [ ] Add frame hashes and subsystem traces for regression testing
+
+### EE COP2 and VU Macro Mode
+
+- [ ] Implement EE COP2 branches and transfers: `BC2F`, `BC2FL`, `BC2T`,
+      `BC2TL`, `CFC2`, `CTC2`, `LQC2`, `QMFC2`, `QMTC2`, and `SQC2`
+- [ ] Implement `VCALLMS` and `VCALLMSR` microprogram initiation
+- [ ] Decode the VU macro arithmetic, conversion, memory, transfer, random,
+      and synchronization instruction families and reuse the corresponding
+      microinstruction execution semantics where their architectural behavior
+      agrees
+- [ ] Audit every macro-mode opcode in the official table and reject reserved
+      COP2 encodings deterministically
 
 ### System Integration Programs
 
