@@ -1,3 +1,5 @@
+#include <type_traits>
+
 #include "catch.hpp"
 #include "fp_register.hpp"
 #include "vpu_opcodes.hpp"
@@ -49,6 +51,13 @@ namespace
 
 TEST_CASE("VPU Pipeline Tests")
 {
+  static_assert(
+    !std::is_copy_constructible<PipelineOrchestrator>::value,
+    "PipelineOrchestrator owns internal pipeline storage");
+  static_assert(
+    !std::is_move_constructible<PipelineOrchestrator>::value,
+    "PipelineOrchestrator pointers must remain bound to internal storage");
+
   PipelineOrchestrator orchestrator;
 
   SECTION("The FMAC pipeline executes in 6 cycles")

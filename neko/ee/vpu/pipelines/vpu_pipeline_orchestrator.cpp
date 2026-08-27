@@ -19,25 +19,13 @@ namespace
 
 PipelineOrchestrator::PipelineOrchestrator() : pipelineHandler(NULL), stalling(false)
 {
-  for (int i = 0; i < MAX_PIPELINES; i++)
+  for (Pipeline &pipeline : pipelines)
   {
-    Pipeline *pipeline = new Pipeline();
-    pool.push_back(pipeline);
+    pool.push_back(&pipeline);
   }
 }
 
-PipelineOrchestrator::~PipelineOrchestrator()
-{
-  reset();
-
-  while (!pool.empty())
-  {
-    Pipeline *pipeline = pool.front();
-    delete pipeline;
-
-    pool.pop_front();
-  }
-}
+PipelineOrchestrator::~PipelineOrchestrator() = default;
 
 void PipelineOrchestrator::reset()
 {

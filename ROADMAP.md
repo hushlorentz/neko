@@ -342,6 +342,10 @@ directly. Frontends provide those services through callbacks and buffers.
 ## Maintaining This File
 
 - Check off work only after tests demonstrate the expected behavior.
+- After completing each roadmap subsection or substantial implementation
+  block, run `cmake -P cmake/Sanitize.cmake` before moving to the next block.
+- Run the sanitizer workflow immediately after changes to ownership, lifetime,
+  allocation, or container invalidation behavior.
 - Add newly discovered prerequisites to the milestone they block.
 - Record major architectural decisions in the relevant section.
 - Keep immediate work near the top and long-term ideas intentionally broad.

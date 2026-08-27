@@ -6,6 +6,32 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(
+    NEKO_ENABLE_SANITIZERS
+    "Build Neko with AddressSanitizer"
+    OFF
+)
+
+add_library(neko_sanitizers INTERFACE)
+if(NEKO_ENABLE_SANITIZERS)
+    if(MSVC)
+        target_compile_options(neko_sanitizers INTERFACE /fsanitize=address)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(
+            neko_sanitizers
+            INTERFACE
+                -fsanitize=address
+                -fno-omit-frame-pointer
+        )
+        target_link_options(neko_sanitizers INTERFACE -fsanitize=address)
+    else()
+        message(
+            FATAL_ERROR
+            "NEKO_ENABLE_SANITIZERS is unsupported by this compiler"
+        )
+    endif()
+endif()
+
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/fp_register.cpp
@@ -16,6 +42,7 @@ add_library(neko_core
     neko/math/float.cpp
     neko/math/floating_point_ops.cpp
 )
+target_link_libraries(neko_core PUBLIC neko_sanitizers)
 
 target_include_directories(neko_core
     PUBLIC
