@@ -271,7 +271,7 @@ milestones rather than grouping every non-arithmetic operation as a
 "special-register transfer."
 
 - [x] Implement `MFIR`
-- [ ] Complete basic register movement with `MTIR`, `MOVE`, and `MR32`
+- [x] Complete basic register movement with `MTIR`, `MOVE`, and `MR32`
 - [ ] Complete clipping-flag access with `FCAND`, `FCEQ`, `FCGET`, `FCOR`,
       and `FCSET`
 - [ ] Complete MAC-flag access with `FMAND`, `FMEQ`, and `FMOR`
@@ -288,7 +288,7 @@ milestones rather than grouping every non-arithmetic operation as a
 - [x] Cover VU load/store addressing variants and masked lane behavior through
       a decoded memory integration program
 - [x] Cover mixed integer, memory, branch, and `MFIR` instruction streams
-- [ ] Cover `MTIR`, `MOVE`, and `MR32` dependencies and lane behavior
+- [x] Cover `MTIR`, `MOVE`, and `MR32` dependencies and lane behavior
 - [ ] Cover clipping, MAC, and status flag tests and setters
 - [ ] Cover deterministic R-register initialization, advancement, and transfer
 - [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization

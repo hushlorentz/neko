@@ -126,5 +126,9 @@ verify_fixture(
   xgkick.bin
   af1e1b8aa5346bd5d772d027601d376172fab436fadf088cd20e51f61201d628
 )
+verify_fixture(
+  register_movement.bin
+  b6883b705a935dfd8461cf7317211eced1a9fc61ef076d72cf033bd34a7c1fbc
+)
 
 message(STATUS "Repository checks passed")

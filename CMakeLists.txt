@@ -88,6 +88,7 @@ add_executable(neko_tests
     neko_tests/vpu/integration/lane_masks_tests.cpp
     neko_tests/vpu/integration/memory_variants_tests.cpp
     neko_tests/vpu/integration/pipeline_integration_tests.cpp
+    neko_tests/vpu/integration/register_movement_tests.cpp
     neko_tests/vpu/integration/termination_tests.cpp
     neko_tests/vpu/integration/vector_math_tests.cpp
     neko_tests/vpu/integration/vector_kernel_tests.cpp

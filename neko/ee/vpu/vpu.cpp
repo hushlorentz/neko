@@ -921,6 +921,8 @@ void VPU::queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16
   pendingLowerWritebackDiscarded = false;
 
   if ((lowerInstruction.opCode == VPU_MFIR ||
+       lowerInstruction.opCode == VPU_MOVE ||
+       lowerInstruction.opCode == VPU_MR32 ||
        lowerInstruction.opCode == VPU_LQ ||
        lowerInstruction.opCode == VPU_LQD ||
        lowerInstruction.opCode == VPU_LQI) &&
@@ -1146,18 +1148,24 @@ void VPU::completeBranchDelaySlot()
 
 void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
 {
-  orchestrator.startPipeline(
+  Pipeline *pipeline = orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_FMAC,
     instruction.opCode,
     instruction.sourceRegister1,
     0,
     instruction.destinationRegister,
     instruction.destinationFieldMask,
-    FP_REGISTER_NO_FIELDS,
+    instruction.sourceFieldMask1,
     FP_REGISTER_NO_FIELDS,
     pendingLowerInstructionAddress,
     pendingLowerWritebackDiscarded,
     instruction.immediate);
+  pipeline->integerDestReg = instruction.integerDestinationRegister;
+  if (instruction.opCode == VPU_MTIR &&
+      pipeline->integerDestReg != VPU_REGISTER_VI00)
+  {
+    pendingIntegerWrites[pipeline->integerDestReg]++;
+  }
 }
 
 void VPU::startFDIVInstruction(const LowerInstruction &instruction)
@@ -1384,6 +1392,16 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
       if (instruction.opCode == VPU_MFIR)
       {
         return hasPendingIntegerWrite(instruction.sourceRegister1);
+      }
+      if (instruction.opCode == VPU_MOVE ||
+          instruction.opCode == VPU_MR32 ||
+          instruction.opCode == VPU_MTIR)
+      {
+        return orchestrator.hasRegisterHazard(
+          instruction.sourceRegister1,
+          instruction.sourceFieldMask1,
+          VPU_REGISTER_VF00,
+          FP_REGISTER_NO_FIELDS);
       }
       throw runtime_error("Unsupported VU lower FMAC hazard check.");
     case LowerExecutionUnit::FDIV:
@@ -1770,6 +1788,74 @@ void VPU::startFMACPipeline(Pipeline *p)
     }
 
     p->setFPRegisterResult(&dest);
+    return;
+  }
+
+  if (opCode == VPU_MOVE || opCode == VPU_MR32)
+  {
+    const FPRegister &source = fpRegisters[p->srcReg1];
+    if (opCode == VPU_MOVE)
+    {
+      if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+      {
+        dest.x = source.x;
+      }
+      if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+      {
+        dest.y = source.y;
+      }
+      if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+      {
+        dest.z = source.z;
+      }
+      if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+      {
+        dest.w = source.w;
+      }
+    }
+    else
+    {
+      if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+      {
+        dest.x = source.y;
+      }
+      if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+      {
+        dest.y = source.z;
+      }
+      if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+      {
+        dest.z = source.w;
+      }
+      if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+      {
+        dest.w = source.x;
+      }
+    }
+    p->setFPRegisterResult(&dest);
+    return;
+  }
+
+  if (opCode == VPU_MTIR)
+  {
+    const FPRegister &source = fpRegisters[p->srcReg1];
+    switch (p->srcReg1FieldMask)
+    {
+      case FP_REGISTER_X_FIELD:
+        p->setIntResult(source.x.bits() & 0xffff);
+        break;
+      case FP_REGISTER_Y_FIELD:
+        p->setIntResult(source.y.bits() & 0xffff);
+        break;
+      case FP_REGISTER_Z_FIELD:
+        p->setIntResult(source.z.bits() & 0xffff);
+        break;
+      case FP_REGISTER_W_FIELD:
+        p->setIntResult(source.w.bits() & 0xffff);
+        break;
+      default:
+        throw runtime_error("MTIR source must select exactly one field.");
+    }
     return;
   }
 
@@ -2306,6 +2392,26 @@ void VPU::pipelineFinished(Pipeline * p)
     return;
   }
 
+  if (p->opCode == VPU_MTIR)
+  {
+    if (p->integerDestReg != VPU_REGISTER_VI00)
+    {
+      intRegisters[p->integerDestReg] = p->intResult;
+      pendingIntegerWrites[p->integerDestReg]--;
+    }
+    emitTrace({
+      VPUTraceEventType::PipelineWriteback,
+      cycles,
+      p->instructionAddress,
+      0,
+      0,
+      p->opCode,
+      p->integerDestReg,
+      FP_REGISTER_NO_FIELDS
+    });
+    return;
+  }
+
   FPRegister *destReg = destinationRegisterFromPipeline(p);
 
   switch (p->opCode)
@@ -2325,6 +2431,8 @@ void VPU::pipelineFinished(Pipeline * p)
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     case VPU_MFIR:
+    case VPU_MOVE:
+    case VPU_MR32:
       if (!p->discardWriteback)
       {
         updateDestinationRegisterWithPipelineResult(destReg, p);

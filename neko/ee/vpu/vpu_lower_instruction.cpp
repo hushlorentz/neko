@@ -319,6 +319,40 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_MOVE_ENCODING ||
+      (instruction & VPU_LOWER_TYPE3_MASK) == VPU_MR32_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::FMAC;
+    decoded.opCode = instruction & VPU_TYPE3_MASK;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
+    if (decoded.opCode == VPU_MOVE)
+    {
+      decoded.sourceFieldMask1 = decoded.destinationFieldMask;
+    }
+    else
+    {
+      decoded.sourceFieldMask1 =
+        ((decoded.destinationFieldMask << 1) |
+         (decoded.destinationFieldMask >> 3)) &
+        LOWER_DEST_MASK;
+    }
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_MTIR_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::FMAC;
+    decoded.opCode = VPU_MTIR;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.integerDestinationRegister =
+      registerField(instruction, LOWER_IT_SHIFT);
+    decoded.sourceFieldMask1 = selectedField(instruction, LOWER_FSF_SHIFT);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQD_ENCODING ||
       (instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQI_ENCODING)
   {

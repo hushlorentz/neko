@@ -101,6 +101,28 @@ namespace
       (static_cast<uint32_t>(is) << 11);
   }
 
+  uint32_t movement(
+    uint32_t encoding,
+    uint8_t fieldMask,
+    uint8_t ft,
+    uint8_t fs)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
+      (static_cast<uint32_t>(ft) << 16) |
+      (static_cast<uint32_t>(fs) << 11);
+  }
+
+  uint32_t mtir(uint8_t it, uint8_t fs, uint8_t field)
+  {
+    return
+      VPU_MTIR_ENCODING |
+      (static_cast<uint32_t>(field) << 21) |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(fs) << 11);
+  }
+
   uint32_t ilw(
     uint8_t fieldMask,
     uint8_t it,
@@ -686,6 +708,143 @@ TEST_CASE("VU Lower Instruction Tests")
     REQUIRE(result->y.signedValue() == 20);
     REQUIRE(result->z.signedValue() == -2);
     REQUIRE(result->w.signedValue() == 40);
+  }
+
+  SECTION("MOVE and MR32 decode destination and required source lanes")
+  {
+    LowerInstruction move = decodeLowerInstruction(movement(
+      VPU_MOVE_ENCODING,
+      FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF01));
+    LowerInstruction mr32 = decodeLowerInstruction(movement(
+      VPU_MR32_ENCODING,
+      FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD,
+      VPU_REGISTER_VF04,
+      VPU_REGISTER_VF03));
+
+    REQUIRE(move.unit == LowerExecutionUnit::FMAC);
+    REQUIRE(move.opCode == VPU_MOVE);
+    REQUIRE(move.sourceRegister1 == VPU_REGISTER_VF01);
+    REQUIRE(move.destinationRegister == VPU_REGISTER_VF02);
+    REQUIRE(move.destinationFieldMask ==
+      (FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD));
+    REQUIRE(move.sourceFieldMask1 ==
+      (FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD));
+
+    REQUIRE(mr32.unit == LowerExecutionUnit::FMAC);
+    REQUIRE(mr32.opCode == VPU_MR32);
+    REQUIRE(mr32.sourceRegister1 == VPU_REGISTER_VF03);
+    REQUIRE(mr32.destinationRegister == VPU_REGISTER_VF04);
+    REQUIRE(mr32.destinationFieldMask ==
+      (FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD));
+    REQUIRE(mr32.sourceFieldMask1 ==
+      (FP_REGISTER_Y_FIELD | FP_REGISTER_W_FIELD));
+  }
+
+  SECTION("MTIR decodes its selected source lane and integer destination")
+  {
+    LowerInstruction instruction = decodeLowerInstruction(mtir(
+      VPU_REGISTER_VI02,
+      VPU_REGISTER_VF03,
+      2));
+
+    REQUIRE(instruction.unit == LowerExecutionUnit::FMAC);
+    REQUIRE(instruction.opCode == VPU_MTIR);
+    REQUIRE(instruction.sourceRegister1 == VPU_REGISTER_VF03);
+    REQUIRE(instruction.integerDestinationRegister == VPU_REGISTER_VI02);
+    REQUIRE(instruction.sourceFieldMask1 == FP_REGISTER_Z_FIELD);
+  }
+
+  SECTION("MOVE updates selected lanes without changing their bits")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntFPRegister(VPU_REGISTER_VF01, 10, 20, 30, 40);
+    vpu.loadIntFPRegister(VPU_REGISTER_VF02, 1, 2, 3, 4);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      movement(
+        VPU_MOVE_ENCODING,
+        FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    const FPRegister *result = vpu.fpRegisterValue(VPU_REGISTER_VF02);
+    REQUIRE(result->x.signedValue() == 10);
+    REQUIRE(result->y.signedValue() == 2);
+    REQUIRE(result->z.signedValue() == 30);
+    REQUIRE(result->w.signedValue() == 4);
+  }
+
+  SECTION("MR32 rotates lanes from one source snapshot")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntFPRegister(VPU_REGISTER_VF01, 10, 20, 30, 40);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      movement(
+        VPU_MR32_ENCODING,
+        FP_REGISTER_ALL_FIELDS,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    const FPRegister *result = vpu.fpRegisterValue(VPU_REGISTER_VF01);
+    REQUIRE(result->x.signedValue() == 20);
+    REQUIRE(result->y.signedValue() == 30);
+    REQUIRE(result->z.signedValue() == 40);
+    REQUIRE(result->w.signedValue() == 10);
+  }
+
+  SECTION("MTIR transfers only the selected lane's low sixteen bits")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    vpu.loadIntFPRegister(
+      VPU_REGISTER_VF01,
+      0x12345678,
+      static_cast<int32_t>(0x89abcdef),
+      0x76543210,
+      static_cast<int32_t>(0xfedcba98));
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      mtir(VPU_REGISTER_VI01, VPU_REGISTER_VF01, 0));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      mtir(VPU_REGISTER_VI02, VPU_REGISTER_VF01, 1));
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      mtir(VPU_REGISTER_VI03, VPU_REGISTER_VF01, 2));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      mtir(VPU_REGISTER_VI04, VPU_REGISTER_VF01, 3));
+    appendInstructionPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI01) == 0x5678);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI02) == 0xcdef);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 0x3210);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI04) == 0xba98);
   }
 
   SECTION("MFIR becomes visible only at pipeline writeback")

@@ -240,3 +240,18 @@ Expected SHA-256:
 ```text
 af1e1b8aa5346bd5d772d027601d376172fab436fadf088cd20e51f61201d628
 ```
+
+Regenerate `register_movement.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/register_movement.bin \
+  neko_tests/vpu/integration/register_movement.asm
+```
+
+Expected SHA-256:
+
+```text
+b6883b705a935dfd8461cf7317211eced1a9fc61ef076d72cf033bd34a7c1fbc
+```

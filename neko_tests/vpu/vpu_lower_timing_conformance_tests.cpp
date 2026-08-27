@@ -120,6 +120,28 @@ namespace
       (static_cast<uint32_t>(is) << 11);
   }
 
+  uint32_t movement(
+    uint32_t encoding,
+    uint8_t fieldMask,
+    uint8_t ft,
+    uint8_t fs)
+  {
+    return
+      encoding |
+      (static_cast<uint32_t>(vpuFieldMaskToEncoding(fieldMask)) << 21) |
+      (static_cast<uint32_t>(ft) << 16) |
+      (static_cast<uint32_t>(fs) << 11);
+  }
+
+  uint32_t mtir(uint8_t it, uint8_t fs, uint8_t field)
+  {
+    return
+      VPU_MTIR_ENCODING |
+      (static_cast<uint32_t>(field) << 21) |
+      (static_cast<uint32_t>(it) << 16) |
+      (static_cast<uint32_t>(fs) << 11);
+  }
+
   uint32_t sqi(uint8_t fieldMask, uint8_t fs, uint8_t it)
   {
     return
@@ -1110,6 +1132,77 @@ TEST_CASE("VU Lower Timing Conformance Tests")
     vpu.initMicroMode();
 
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF01)->x.bits() == 9);
+  }
+
+  SECTION("MOVE waits for a pending vector producer")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.writeDataMemory(0, wordBytes(0x12345678));
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      lq(
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VF01,
+        VPU_REGISTER_VI00,
+        0));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      movement(
+        VPU_MOVE_ENCODING,
+        FP_REGISTER_X_FIELD,
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF01));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x.bits() == 0x12345678);
+    REQUIRE_FALSE(eventsOfType(
+      events,
+      VPUTraceEventType::PipelineStall).empty());
+  }
+
+  SECTION("MTIR blocks integer consumers until its writeback")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadIntFPRegister(VPU_REGISTER_VF01, 0x12340009, 0, 0, 0);
+    vpu.loadIntRegister(VPU_REGISTER_VI01, 3);
+
+    appendInstructionPair(
+      &instructions,
+      VPU_NOP,
+      mtir(VPU_REGISTER_VI02, VPU_REGISTER_VF01, 0));
+    appendInstructionPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      iadd(
+        VPU_REGISTER_VI03,
+        VPU_REGISTER_VI02,
+        VPU_REGISTER_VI01));
+    appendInstructionPair(&instructions, VPU_NOP);
+
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI02) == 9);
+    REQUIRE(vpu.intRegisterValue(VPU_REGISTER_VI03) == 12);
+    REQUIRE_FALSE(eventsOfType(
+      events,
+      VPUTraceEventType::PipelineStall).empty());
   }
 
   SECTION("A pending IALU result bypasses to an LSU address")
