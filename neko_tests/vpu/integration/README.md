@@ -285,3 +285,18 @@ Expected SHA-256:
 ```text
 35c3bb50455eb2f96fc17cd6bc3be09e4788730988d2bd2f53c79b498218fea0
 ```
+
+Regenerate `status_flags.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/status_flags.bin \
+  neko_tests/vpu/integration/status_flags.asm
+```
+
+Expected SHA-256:
+
+```text
+3f0d941e7881a05fda7471cfbbe539f5db31e99c0aba2734fbce1d9a87aae514
+```

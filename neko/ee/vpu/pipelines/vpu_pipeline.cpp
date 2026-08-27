@@ -120,7 +120,7 @@ void Pipeline::advanceStage()
       advanceSixStagePipeline();
       break;
     case VPU_PIPELINE_TYPE_FLAG:
-      if (opCode == VPU_FCSET)
+      if (opCode == VPU_FCSET || opCode == VPU_FSSET)
       {
         advanceSixStagePipeline();
       }

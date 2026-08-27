@@ -138,5 +138,9 @@ verify_fixture(
   mac_flags.bin
   35c3bb50455eb2f96fc17cd6bc3be09e4788730988d2bd2f53c79b498218fea0
 )
+verify_fixture(
+  status_flags.bin
+  3f0d941e7881a05fda7471cfbbe539f5db31e99c0aba2734fbce1d9a87aae514
+)
 
 message(STATUS "Repository checks passed")

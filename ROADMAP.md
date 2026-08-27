@@ -275,7 +275,7 @@ milestones rather than grouping every non-arithmetic operation as a
 - [x] Complete clipping-flag access with `FCAND`, `FCEQ`, `FCGET`, `FCOR`,
       and `FCSET`
 - [x] Complete MAC-flag access with `FMAND`, `FMEQ`, and `FMOR`
-- [ ] Complete status-flag access with `FSAND`, `FSEQ`, `FSOR`, and `FSSET`
+- [x] Complete status-flag access with `FSAND`, `FSEQ`, `FSOR`, and `FSSET`
 - [ ] Complete R-register operations with `RGET`, `RINIT`, `RNEXT`, and
       `RXOR`
 - [ ] Add the VU1 P pipeline and EFU instructions together with `MFP` and
@@ -291,7 +291,7 @@ milestones rather than grouping every non-arithmetic operation as a
 - [x] Cover `MTIR`, `MOVE`, and `MR32` dependencies and lane behavior
 - [x] Cover clipping flag tests, reads, and setters
 - [x] Cover MAC flag tests
-- [ ] Cover status flag tests and setters
+- [x] Cover status flag tests and setters
 - [ ] Cover deterministic R-register initialization, advancement, and transfer
 - [ ] Cover Q/P producers and `WAITQ`/`WAITP` synchronization
 - [ ] Cover FDIV/EFU resource hazards through decoded instructions

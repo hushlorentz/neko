@@ -2411,6 +2411,32 @@ void VPU::pipelineFinished(Pipeline * p)
       case VPU_FCSET:
         clippingFlags = p->immediateBits;
         break;
+      case VPU_FSAND:
+        if (p->integerDestReg != VPU_REGISTER_VI00)
+        {
+          intRegisters[p->integerDestReg] =
+            statusFlags & p->immediateBits;
+        }
+        break;
+      case VPU_FSEQ:
+        if (p->integerDestReg != VPU_REGISTER_VI00)
+        {
+          intRegisters[p->integerDestReg] =
+            statusFlags == p->immediateBits;
+        }
+        break;
+      case VPU_FSOR:
+        if (p->integerDestReg != VPU_REGISTER_VI00)
+        {
+          intRegisters[p->integerDestReg] =
+            statusFlags | p->immediateBits;
+        }
+        break;
+      case VPU_FSSET:
+        statusFlags =
+          (statusFlags & 0x003f) |
+          (p->immediateBits & 0x0fc0);
+        break;
       case VPU_FMAND:
         if (p->integerDestReg != VPU_REGISTER_VI00)
         {

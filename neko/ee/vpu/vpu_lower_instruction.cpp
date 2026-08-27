@@ -153,6 +153,38 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
 
   const std::uint32_t type8Encoding =
     instruction & VPU_LOWER_TYPE8_MASK;
+  if (type8Encoding == VPU_FSEQ_ENCODING ||
+      type8Encoding == VPU_FSSET_ENCODING ||
+      type8Encoding == VPU_FSAND_ENCODING ||
+      type8Encoding == VPU_FSOR_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Flag;
+    if (type8Encoding == VPU_FSEQ_ENCODING)
+    {
+      decoded.opCode = VPU_FSEQ;
+    }
+    else if (type8Encoding == VPU_FSSET_ENCODING)
+    {
+      decoded.opCode = VPU_FSSET;
+    }
+    else if (type8Encoding == VPU_FSAND_ENCODING)
+    {
+      decoded.opCode = VPU_FSAND;
+    }
+    else
+    {
+      decoded.opCode = VPU_FSOR;
+    }
+    decoded.integerDestinationRegister =
+      decoded.opCode == VPU_FSSET
+        ? VPU_REGISTER_VI00
+        : registerField(instruction, LOWER_IT_SHIFT);
+    decoded.immediateBits =
+      (((instruction >> LOWER_DEST_SHIFT) & 1) << 11) |
+      (instruction & LOWER_IMMEDIATE_LOW_MASK);
+    return decoded;
+  }
+
   if (type8Encoding == VPU_FMEQ_ENCODING ||
       type8Encoding == VPU_FMAND_ENCODING ||
       type8Encoding == VPU_FMOR_ENCODING)
