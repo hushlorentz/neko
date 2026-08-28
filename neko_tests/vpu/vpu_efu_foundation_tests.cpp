@@ -138,6 +138,20 @@ TEST_CASE("VU1 EFU synchronization foundation")
     REQUIRE(reciprocal.sourceRegister1 == VPU_REGISTER_VF12);
     REQUIRE(reciprocal.sourceFieldMask1 == FP_REGISTER_Y_FIELD);
 
+    for (const auto &operation : {
+      std::pair<std::uint32_t, std::uint16_t>{
+        VPU_ESIN_ENCODING,
+        VPU_ESIN},
+      {VPU_EEXP_ENCODING, VPU_EEXP}})
+    {
+      const LowerInstruction decoded = decodeLowerInstruction(
+        scalarEFU(operation.first, VPU_REGISTER_VF13, 2));
+      REQUIRE(decoded.unit == LowerExecutionUnit::EFU);
+      REQUIRE(decoded.opCode == operation.second);
+      REQUIRE(decoded.sourceRegister1 == VPU_REGISTER_VF13);
+      REQUIRE(decoded.sourceFieldMask1 == FP_REGISTER_Z_FIELD);
+    }
+
     const LowerInstruction wait =
       decodeLowerInstruction(VPU_WAITP_ENCODING);
     REQUIRE(wait.unit == LowerExecutionUnit::WaitP);
@@ -366,6 +380,8 @@ TEST_CASE("VU1 EFU synchronization foundation")
   SECTION("EFU operations and WAITP are rejected on VU0")
   {
     for (const std::uint32_t lower : {
+      scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 0),
+      scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
       vectorEFU(VPU_ELENG_ENCODING, VPU_REGISTER_VF01),
       scalarEFU(VPU_ERCPR_ENCODING, VPU_REGISTER_VF01, 0),
       vectorEFU(VPU_ERLENG_ENCODING, VPU_REGISTER_VF01),

@@ -427,6 +427,8 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
   }
 
   if ((instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ERCPR_ENCODING ||
+      (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_EEXP_ENCODING ||
+      (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ESIN_ENCODING ||
       (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ESQRT_ENCODING ||
       (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ERSQRT_ENCODING)
   {

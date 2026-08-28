@@ -298,9 +298,11 @@ must use `WAITP` when it needs a pending EFU result.
 - [x] Implement the scalar root operations `ESQRT` and `ERSQRT`
 - [x] Implement the length and reciprocal operations `ELENG`, `ERCPR`,
       `ERSADD`, and `ERLENG`
-- [ ] Implement the transcendental operations `ESIN`, `EATAN`, `EATANxy`,
-      `EATANxz`, and `EEXP` using the documented VU approximation algorithms
-      rather than host-library substitutes
+- [x] Implement the polynomial transcendental operations `ESIN` and `EEXP`
+      using the documented VU approximation algorithms rather than
+      host-library substitutes
+- [ ] Implement the arctangent operations `EATAN`, `EATANxy`, and `EATANxz`
+      using the documented VU approximation algorithm
 - [ ] Lock down each EFU operation with fixed bit-level vectors, boundary
       cases, source hazards, throughput/latency checks, and repeated-operation
       sequences

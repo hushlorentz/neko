@@ -162,5 +162,9 @@ verify_fixture(
   efu_lengths.bin
   5866e9f679748ab55215207f5e0f3cc49bb1a1ab7906accdf193ee1d33ff27ce
 )
+verify_fixture(
+  efu_polynomials.bin
+  135b172913b0d4f4e7cca758911cfd9576514a7bab03793523a78b9bc73561ae
+)
 
 message(STATUS "Repository checks passed")

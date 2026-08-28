@@ -375,3 +375,18 @@ Expected SHA-256:
 ```text
 5866e9f679748ab55215207f5e0f3cc49bb1a1ab7906accdf193ee1d33ff27ce
 ```
+
+Regenerate `efu_polynomials.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/efu_polynomials.bin \
+  neko_tests/vpu/integration/efu_polynomials.asm
+```
+
+Expected SHA-256:
+
+```text
+135b172913b0d4f4e7cca758911cfd9576514a7bab03793523a78b9bc73561ae
+```

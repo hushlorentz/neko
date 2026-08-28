@@ -109,6 +109,79 @@ namespace
     }
   }
 
+  constexpr uint32_t ESIN_S2_BITS = 0xbe2aaaa4;
+  constexpr uint32_t ESIN_S3_BITS = 0x3c08873e;
+  constexpr uint32_t ESIN_S4_BITS = 0xb94fb21f;
+  constexpr uint32_t ESIN_S5_BITS = 0x362e9c14;
+
+  constexpr uint32_t EEXP_E1_BITS = 0x3e7fffa8;
+  constexpr uint32_t EEXP_E2_BITS = 0x3d0007f4;
+  constexpr uint32_t EEXP_E3_BITS = 0x3b29d3ff;
+  constexpr uint32_t EEXP_E4_BITS = 0x3933e553;
+  constexpr uint32_t EEXP_E5_BITS = 0x36b63510;
+  constexpr uint32_t EEXP_E6_BITS = 0x353961ac;
+
+  uint32_t multiplyVUFloatBits(uint32_t left, uint32_t right)
+  {
+    return mulFPRaw(left, right).bits;
+  }
+
+  uint32_t addVUFloatBits(uint32_t left, uint32_t right)
+  {
+    return addFPRaw(left, right).bits;
+  }
+
+  uint32_t calculateESIN(uint32_t x)
+  {
+    const uint32_t x2 = multiplyVUFloatBits(x, x);
+    uint32_t accumulator = multiplyVUFloatBits(x, VU_FLOAT_ONE_BITS);
+    const uint32_t x3 = multiplyVUFloatBits(x2, x);
+    const uint32_t x5 = multiplyVUFloatBits(x3, x2);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x3, ESIN_S2_BITS));
+    const uint32_t x7 = multiplyVUFloatBits(x5, x2);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x5, ESIN_S3_BITS));
+    const uint32_t x9 = multiplyVUFloatBits(x7, x2);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x7, ESIN_S4_BITS));
+    return addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x9, ESIN_S5_BITS));
+  }
+
+  uint32_t calculateEEXP(uint32_t x)
+  {
+    const uint32_t x2 = multiplyVUFloatBits(x, x);
+    uint32_t accumulator = multiplyVUFloatBits(x, EEXP_E1_BITS);
+    const uint32_t x3 = multiplyVUFloatBits(x2, x);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x2, EEXP_E2_BITS));
+    const uint32_t x4 = multiplyVUFloatBits(x3, x);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x3, EEXP_E3_BITS));
+    const uint32_t x5 = multiplyVUFloatBits(x4, x);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x4, EEXP_E4_BITS));
+    const uint32_t x6 = multiplyVUFloatBits(x5, x);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x5, EEXP_E5_BITS));
+    accumulator = addVUFloatBits(accumulator, VU_FLOAT_ONE_BITS);
+    uint32_t result = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(x6, EEXP_E6_BITS));
+    result = multiplyVUFloatBits(result, result);
+    result = multiplyVUFloatBits(result, result);
+    return divFPRaw(VU_FLOAT_ONE_BITS, result).bits;
+  }
+
   VPUArithmeticTrace arithmeticTraceForPipeline(const Pipeline &pipeline)
   {
     VPUArithmeticTrace trace;
@@ -2027,6 +2100,16 @@ void VPU::executeEFUPipeline(Pipeline *pipeline)
   {
     pipeline->scalarResultBits =
       divFPRaw(VU_FLOAT_ONE_BITS, sourceBits).bits;
+    return;
+  }
+  if (pipeline->opCode == VPU_ESIN)
+  {
+    pipeline->scalarResultBits = calculateESIN(sourceBits);
+    return;
+  }
+  if (pipeline->opCode == VPU_EEXP)
+  {
+    pipeline->scalarResultBits = calculateEEXP(sourceBits);
     return;
   }
   throw runtime_error("Unsupported VU EFU instruction.");
