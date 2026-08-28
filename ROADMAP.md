@@ -291,7 +291,7 @@ must use `WAITP` when it needs a pending EFU result.
 - [x] Add the architectural P register and complete `MFP`, including four-cycle
       masked VF writeback, VF00 behavior, source visibility, and simultaneous
       upper-write priority
-- [ ] Add the shared EFU pipeline and `WAITP`, including instruction-specific
+- [x] Add the shared EFU pipeline and `WAITP`, including instruction-specific
       execution lengths, throughput stalls, delayed P writeback, pipeline
       drain, Force Break, and deterministic VU0 rejection
 - [ ] Implement the reduction operations `ESUM` and `ESADD`
@@ -316,7 +316,7 @@ must use `WAITP` when it needs a pending EFU result.
 - [x] Cover MAC flag tests
 - [x] Cover status flag tests and setters
 - [x] Cover deterministic R-register initialization, advancement, and transfer
-- [ ] Cover `MFP`, P visibility, and `WAITP` synchronization through a decoded
+- [x] Cover `MFP`, P visibility, and `WAITP` synchronization through a decoded
       VU1 program
 - [ ] Cover every EFU producer and shared-unit throughput hazard through
       decoded VU1 instructions

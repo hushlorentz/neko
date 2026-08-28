@@ -199,7 +199,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startLSUInstruction(const LowerInstruction &instruction);
     void startLowerFMACInstruction(const LowerInstruction &instruction);
     void startFDIVInstruction(const LowerInstruction &instruction);
+    void startEFUInstruction(const LowerInstruction &instruction);
     void startWaitQInstruction(const LowerInstruction &instruction);
+    void startWaitPInstruction(const LowerInstruction &instruction);
     void startFlagInstruction(const LowerInstruction &instruction);
     void startRandomInstruction(const LowerInstruction &instruction);
     void startXGKICKInstruction(const LowerInstruction &instruction);
@@ -224,6 +226,8 @@ class VPU : public ClockedComponent, public PipelineHandler
     void executeRandomPipeline(Pipeline *pipeline);
     void executeFDIVPipeline(Pipeline *pipeline);
     void finishFDIVPipeline(Pipeline *pipeline);
+    void executeEFUPipeline(Pipeline *pipeline);
+    void finishEFUPipeline(Pipeline *pipeline);
     void prepareAccumulatorOperation(Pipeline *pipeline);
     uint8_t multiplicationOverflowFields(
       const Pipeline *pipeline) const;

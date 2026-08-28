@@ -989,8 +989,14 @@ void VPU::executePendingLowerInstruction()
     case LowerExecutionUnit::FDIV:
       startFDIVInstruction(instruction);
       break;
+    case LowerExecutionUnit::EFU:
+      startEFUInstruction(instruction);
+      break;
     case LowerExecutionUnit::WaitQ:
       startWaitQInstruction(instruction);
+      break;
+    case LowerExecutionUnit::WaitP:
+      startWaitPInstruction(instruction);
       break;
     case LowerExecutionUnit::Flag:
       startFlagInstruction(instruction);
@@ -1213,10 +1219,48 @@ void VPU::startFDIVInstruction(const LowerInstruction &instruction)
     pendingLowerInstructionAddress);
 }
 
+void VPU::startEFUInstruction(const LowerInstruction &instruction)
+{
+  if (type != VPUType::VU1)
+  {
+    throw runtime_error("EFU instructions are only supported on VU1.");
+  }
+
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_EFU,
+    instruction.opCode,
+    instruction.sourceRegister1,
+    0,
+    VPU_REGISTER_VF00,
+    FP_REGISTER_NO_FIELDS,
+    instruction.sourceFieldMask1,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress);
+}
+
 void VPU::startWaitQInstruction(const LowerInstruction &instruction)
 {
   orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_WAITQ,
+    instruction.opCode,
+    0,
+    0,
+    VPU_REGISTER_VF00,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress);
+}
+
+void VPU::startWaitPInstruction(const LowerInstruction &instruction)
+{
+  if (type != VPUType::VU1)
+  {
+    throw runtime_error("WAITP is only supported on VU1.");
+  }
+
+  orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_WAITP,
     instruction.opCode,
     0,
     0,
@@ -1476,7 +1520,14 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
         instruction.sourceFieldMask1,
         instruction.sourceRegister2,
         instruction.sourceFieldMask2);
+    case LowerExecutionUnit::EFU:
+      return orchestrator.hasRegisterHazard(
+        instruction.sourceRegister1,
+        instruction.sourceFieldMask1,
+        VPU_REGISTER_VF00,
+        FP_REGISTER_NO_FIELDS);
     case LowerExecutionUnit::WaitQ:
+    case LowerExecutionUnit::WaitP:
       return false;
     case LowerExecutionUnit::Flag:
       switch (instruction.opCode)
@@ -1772,6 +1823,9 @@ void VPU::pipelineAdvanced(Pipeline *p)
       case VPU_PIPELINE_TYPE_FDIV:
         executeFDIVPipeline(p);
         break;
+      case VPU_PIPELINE_TYPE_EFU:
+        executeEFUPipeline(p);
+        break;
       case VPU_PIPELINE_TYPE_RANDOM:
         executeRandomPipeline(p);
         break;
@@ -1909,6 +1963,25 @@ void VPU::finishFDIVPipeline(Pipeline *pipeline)
     setFlag(statusFlags, VPU_FLAG_D);
     setFlag(statusFlags, VPU_FLAG_DS);
   }
+}
+
+void VPU::executeEFUPipeline(Pipeline *pipeline)
+{
+  if (pipeline->opCode != VPU_ESUM)
+  {
+    throw runtime_error("Unsupported VU EFU instruction.");
+  }
+
+  const FPRegister &source = fpRegisters[pipeline->srcReg1];
+  VUFloatResult sum = addFPRaw(source.x.bits(), source.y.bits());
+  sum = addFPRaw(sum.bits, source.z.bits());
+  sum = addFPRaw(sum.bits, source.w.bits());
+  pipeline->scalarResultBits = sum.bits;
+}
+
+void VPU::finishEFUPipeline(Pipeline *pipeline)
+{
+  pRegister.setBits(pipeline->scalarResultBits);
 }
 
 void VPU::startFMACPipeline(Pipeline *p)
@@ -2536,7 +2609,26 @@ void VPU::pipelineFinished(Pipeline * p)
     });
     return;
   }
+  if (p->type == VPU_PIPELINE_TYPE_EFU)
+  {
+    finishEFUPipeline(p);
+    emitTrace({
+      VPUTraceEventType::PipelineWriteback,
+      cycles,
+      p->instructionAddress,
+      0,
+      0,
+      p->opCode,
+      VPU_REGISTER_VF00,
+      FP_REGISTER_NO_FIELDS
+    });
+    return;
+  }
   if (p->type == VPU_PIPELINE_TYPE_WAITQ)
+  {
+    return;
+  }
+  if (p->type == VPU_PIPELINE_TYPE_WAITP)
   {
     return;
   }

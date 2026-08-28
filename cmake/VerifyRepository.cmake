@@ -150,5 +150,9 @@ verify_fixture(
   p_register.bin
   0b636881cb77022fb153548770f67f83cd2e9de5561a5b6fee3ef0ed15fa9514
 )
+verify_fixture(
+  efu_waitp.bin
+  c676e326e9882ce58ccabfdd8271e071cf575d1f8fea392b2a2272439551301f
+)
 
 message(STATUS "Repository checks passed")

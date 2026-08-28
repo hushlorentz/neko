@@ -398,6 +398,22 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if (instruction == VPU_WAITP_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::WaitP;
+    decoded.opCode = VPU_WAITP;
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ESUM_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::EFU;
+    decoded.opCode = VPU_ESUM;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.sourceFieldMask1 = VPU_DEST_MASK;
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_XGKICK_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::XGKICK;

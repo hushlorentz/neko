@@ -330,3 +330,18 @@ Expected SHA-256:
 ```text
 0b636881cb77022fb153548770f67f83cd2e9de5561a5b6fee3ef0ed15fa9514
 ```
+
+Regenerate `efu_waitp.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/efu_waitp.bin \
+  neko_tests/vpu/integration/efu_waitp.asm
+```
+
+Expected SHA-256:
+
+```text
+c676e326e9882ce58ccabfdd8271e071cf575d1f8fea392b2a2272439551301f
+```
