@@ -40,6 +40,17 @@ namespace
       (static_cast<std::uint32_t>(source) << VPU_FS_REG_SHIFT);
   }
 
+  std::uint32_t scalarEFU(
+    std::uint32_t encoding,
+    std::uint8_t source,
+    std::uint8_t field)
+  {
+    return
+      encoding |
+      (static_cast<std::uint32_t>(field) << 21) |
+      (static_cast<std::uint32_t>(source) << VPU_FS_REG_SHIFT);
+  }
+
   std::uint32_t mfp(
     std::uint8_t destination,
     std::uint32_t fieldMask)
@@ -79,6 +90,20 @@ TEST_CASE("VU1 EFU synchronization foundation")
        FP_REGISTER_Y_FIELD |
        FP_REGISTER_Z_FIELD));
 
+    const LowerInstruction squareRoot = decodeLowerInstruction(
+      scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF09, 2));
+    REQUIRE(squareRoot.unit == LowerExecutionUnit::EFU);
+    REQUIRE(squareRoot.opCode == VPU_ESQRT);
+    REQUIRE(squareRoot.sourceRegister1 == VPU_REGISTER_VF09);
+    REQUIRE(squareRoot.sourceFieldMask1 == FP_REGISTER_Z_FIELD);
+
+    const LowerInstruction reciprocalSquareRoot = decodeLowerInstruction(
+      scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF10, 3));
+    REQUIRE(reciprocalSquareRoot.unit == LowerExecutionUnit::EFU);
+    REQUIRE(reciprocalSquareRoot.opCode == VPU_ERSQRT);
+    REQUIRE(reciprocalSquareRoot.sourceRegister1 == VPU_REGISTER_VF10);
+    REQUIRE(reciprocalSquareRoot.sourceFieldMask1 == FP_REGISTER_W_FIELD);
+
     const LowerInstruction wait =
       decodeLowerInstruction(VPU_WAITP_ENCODING);
     REQUIRE(wait.unit == LowerExecutionUnit::WaitP);
@@ -97,8 +122,53 @@ TEST_CASE("VU1 EFU synchronization foundation")
       "Unsupported VU lower instruction.");
     REQUIRE_THROWS_WITH(
       decodeLowerInstruction(
+        scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF07, 0) |
+        (1u << VPU_FT_REG_SHIFT)),
+      "Unsupported VU lower instruction.");
+    REQUIRE_THROWS_WITH(
+      decodeLowerInstruction(
         VPU_WAITP_ENCODING ^ (1u << VPU_FS_REG_SHIFT)),
       "Unsupported VU lower instruction.");
+  }
+
+  SECTION("ESQRT reads the selected lane and uses absolute magnitude")
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    vpu.loadPRegister(-1);
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 4, -9, 16, 25);
+    appendPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF01, 1));
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.run(13) == 13);
+    REQUIRE(vpu.pRegisterBits() == 0xbf800000);
+    vpu.tick();
+    REQUIRE(vpu.pRegisterBits() == 0x40400000);
+  }
+
+  SECTION("ERSQRT reads the selected lane and uses absolute magnitude")
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    vpu.loadPRegister(-1);
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 4, 9, -16, 25);
+    appendPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 2));
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.run(19) == 19);
+    REQUIRE(vpu.pRegisterBits() == 0xbf800000);
+    vpu.tick();
+    REQUIRE(vpu.pRegisterBits() == 0x3e800000);
   }
 
   SECTION("ESADD squares XYZ in order, ignores W, and observes its latency")
@@ -262,6 +332,8 @@ TEST_CASE("VU1 EFU synchronization foundation")
   SECTION("EFU operations and WAITP are rejected on VU0")
   {
     for (const std::uint32_t lower : {
+      scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF01, 0),
+      scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 0),
       esadd(VPU_REGISTER_VF01),
       esum(VPU_REGISTER_VF01),
       static_cast<std::uint32_t>(VPU_WAITP_ENCODING)})

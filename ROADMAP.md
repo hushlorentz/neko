@@ -295,8 +295,9 @@ must use `WAITP` when it needs a pending EFU result.
       execution lengths, throughput stalls, delayed P writeback, pipeline
       drain, Force Break, and deterministic VU0 rejection
 - [x] Implement the reduction operations `ESUM` and `ESADD`
-- [ ] Implement the root, length, and reciprocal operations `ESQRT`, `ELENG`,
-      `ERCPR`, `ERSADD`, `ERSQRT`, and `ERLENG`
+- [x] Implement the scalar root operations `ESQRT` and `ERSQRT`
+- [ ] Implement the length and reciprocal operations `ELENG`, `ERCPR`,
+      `ERSADD`, and `ERLENG`
 - [ ] Implement the transcendental operations `ESIN`, `EATAN`, `EATANxy`,
       `EATANxz`, and `EEXP` using the documented VU approximation algorithms
       rather than host-library substitutes

@@ -154,5 +154,9 @@ verify_fixture(
   efu_waitp.bin
   922cff5dbb2bfb3567b9ec991e2ef786b91036473d038ce51faa78124df55a21
 )
+verify_fixture(
+  efu_roots.bin
+  2acdd16304c3e8da72871d7ebe481b9ca2675d3d791c955e78b0ed9940ab9b3e
+)
 
 message(STATUS "Repository checks passed")

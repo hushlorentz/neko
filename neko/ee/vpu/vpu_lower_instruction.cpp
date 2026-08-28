@@ -423,6 +423,18 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ESQRT_ENCODING ||
+      (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ERSQRT_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::EFU;
+    decoded.opCode = instruction & VPU_TYPE3_MASK;
+    decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
+    decoded.sourceFieldMask1 = selectedField(
+      instruction,
+      LOWER_FSF_SHIFT);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_XGKICK_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::XGKICK;

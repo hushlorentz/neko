@@ -1989,6 +1989,20 @@ void VPU::executeEFUPipeline(Pipeline *pipeline)
     pipeline->scalarResultBits = sum.bits;
     return;
   }
+  const uint32_t sourceBits = selectedLaneBits(
+    source,
+    pipeline->srcReg1FieldMask);
+  if (pipeline->opCode == VPU_ESQRT)
+  {
+    pipeline->scalarResultBits = sqrtFPRaw(sourceBits).bits;
+    return;
+  }
+  if (pipeline->opCode == VPU_ERSQRT)
+  {
+    pipeline->scalarResultBits =
+      rsqrtFPRaw(0x3f800000, sourceBits).bits;
+    return;
+  }
   throw runtime_error("Unsupported VU EFU instruction.");
 }
 

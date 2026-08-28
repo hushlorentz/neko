@@ -345,3 +345,18 @@ Expected SHA-256:
 ```text
 922cff5dbb2bfb3567b9ec991e2ef786b91036473d038ce51faa78124df55a21
 ```
+
+Regenerate `efu_roots.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/efu_roots.bin \
+  neko_tests/vpu/integration/efu_roots.asm
+```
+
+Expected SHA-256:
+
+```text
+2acdd16304c3e8da72871d7ebe481b9ca2675d3d791c955e78b0ed9940ab9b3e
+```
