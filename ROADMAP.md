@@ -303,9 +303,23 @@ must use `WAITP` when it needs a pending EFU result.
       host-library substitutes
 - [x] Implement the arctangent operations `EATAN`, `EATANxy`, and `EATANxz`
       using the documented VU approximation algorithm
-- [ ] Lock down each EFU operation with fixed bit-level vectors, boundary
-      cases, source hazards, throughput/latency checks, and repeated-operation
-      sequences
+
+### VU1 Elementary Function Unit Conformance
+
+Lock down the completed EFU implementation against the official instruction
+reference with deterministic raw-bit expectations. Keep each group independently
+reviewable and avoid host-library values as the source of truth.
+
+- [ ] Add fixed bit-level reference vectors for every EFU operation across
+      representative valid-domain inputs
+- [ ] Cover valid-domain boundaries, signed zero, denormals, saturation,
+      divide-by-zero, and exceptional inputs
+- [ ] Verify scalar lane selection, vector source masks, and source hazards for
+      every EFU instruction form
+- [ ] Verify exact P write cycles, `WAITP` release timing, and shared-unit
+      throughput overlap for every instruction latency class
+- [ ] Cover repeated and mixed EFU operation sequences, including normal
+      pipeline drain and Force Break cancellation
 
 ### Instruction Integration Programs
 
