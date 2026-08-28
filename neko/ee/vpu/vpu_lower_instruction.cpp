@@ -414,16 +414,20 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ESADD_ENCODING)
+  if ((instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ESADD_ENCODING ||
+      (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ELENG_ENCODING ||
+      (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ERLENG_ENCODING ||
+      (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ERSADD_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::EFU;
-    decoded.opCode = VPU_ESADD;
+    decoded.opCode = instruction & VPU_TYPE3_MASK;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
     decoded.sourceFieldMask1 = vpuFieldMaskFromEncoding(0xe);
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ESQRT_ENCODING ||
+  if ((instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ERCPR_ENCODING ||
+      (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ESQRT_ENCODING ||
       (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ERSQRT_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::EFU;

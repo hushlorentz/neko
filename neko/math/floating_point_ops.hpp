@@ -9,6 +9,7 @@
 #define FP_MAX_MANTISSA 0x7fffff
 #define FP_MAX_EXPONENT 128
 #define FP_SIGN_BIT 0x80000000u
+#define VU_FLOAT_ONE_BITS 0x3f800000u
 
 #include <cstdint>
 #include <cmath>

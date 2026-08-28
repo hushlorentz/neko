@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "catch.hpp"
@@ -33,11 +34,18 @@ namespace
       (static_cast<std::uint32_t>(source) << VPU_FS_REG_SHIFT);
   }
 
-  std::uint32_t esadd(std::uint8_t source)
+  std::uint32_t vectorEFU(
+    std::uint32_t encoding,
+    std::uint8_t source)
   {
     return
-      VPU_ESADD_ENCODING |
+      encoding |
       (static_cast<std::uint32_t>(source) << VPU_FS_REG_SHIFT);
+  }
+
+  std::uint32_t esadd(std::uint8_t source)
+  {
+    return vectorEFU(VPU_ESADD_ENCODING, source);
   }
 
   std::uint32_t scalarEFU(
@@ -103,6 +111,32 @@ TEST_CASE("VU1 EFU synchronization foundation")
     REQUIRE(reciprocalSquareRoot.opCode == VPU_ERSQRT);
     REQUIRE(reciprocalSquareRoot.sourceRegister1 == VPU_REGISTER_VF10);
     REQUIRE(reciprocalSquareRoot.sourceFieldMask1 == FP_REGISTER_W_FIELD);
+
+    for (const auto &operation : {
+      std::pair<std::uint32_t, std::uint16_t>{
+        VPU_ELENG_ENCODING,
+        VPU_ELENG},
+      {VPU_ERLENG_ENCODING, VPU_ERLENG},
+      {VPU_ERSADD_ENCODING, VPU_ERSADD}})
+    {
+      const LowerInstruction decoded = decodeLowerInstruction(
+        vectorEFU(operation.first, VPU_REGISTER_VF11));
+      REQUIRE(decoded.unit == LowerExecutionUnit::EFU);
+      REQUIRE(decoded.opCode == operation.second);
+      REQUIRE(decoded.sourceRegister1 == VPU_REGISTER_VF11);
+      REQUIRE(
+        decoded.sourceFieldMask1 ==
+        (FP_REGISTER_X_FIELD |
+         FP_REGISTER_Y_FIELD |
+         FP_REGISTER_Z_FIELD));
+    }
+
+    const LowerInstruction reciprocal = decodeLowerInstruction(
+      scalarEFU(VPU_ERCPR_ENCODING, VPU_REGISTER_VF12, 1));
+    REQUIRE(reciprocal.unit == LowerExecutionUnit::EFU);
+    REQUIRE(reciprocal.opCode == VPU_ERCPR);
+    REQUIRE(reciprocal.sourceRegister1 == VPU_REGISTER_VF12);
+    REQUIRE(reciprocal.sourceFieldMask1 == FP_REGISTER_Y_FIELD);
 
     const LowerInstruction wait =
       decodeLowerInstruction(VPU_WAITP_ENCODING);
@@ -332,6 +366,10 @@ TEST_CASE("VU1 EFU synchronization foundation")
   SECTION("EFU operations and WAITP are rejected on VU0")
   {
     for (const std::uint32_t lower : {
+      vectorEFU(VPU_ELENG_ENCODING, VPU_REGISTER_VF01),
+      scalarEFU(VPU_ERCPR_ENCODING, VPU_REGISTER_VF01, 0),
+      vectorEFU(VPU_ERLENG_ENCODING, VPU_REGISTER_VF01),
+      vectorEFU(VPU_ERSADD_ENCODING, VPU_REGISTER_VF01),
       scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF01, 0),
       scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 0),
       esadd(VPU_REGISTER_VF01),

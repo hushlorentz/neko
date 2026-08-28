@@ -1652,7 +1652,7 @@ uint32_t VPU::pRegisterBits() const
 
 uint32_t VPU::rRegisterBits() const
 {
-  return 0x3f800000 | (rRegister & 0x007fffff);
+  return VU_FLOAT_ONE_BITS | (rRegister & FP_MAX_MANTISSA);
 }
 
 void VPU::setFlags(FPRegister * reg, uint8_t ignoredFields)
@@ -1893,7 +1893,7 @@ void VPU::executeFDIVPipeline(Pipeline *pipeline)
 
 void VPU::executeRandomPipeline(Pipeline *pipeline)
 {
-  constexpr uint32_t RANDOM_MANTISSA_MASK = 0x007fffff;
+  constexpr uint32_t RANDOM_MANTISSA_MASK = FP_MAX_MANTISSA;
 
   if (pipeline->opCode == VPU_RINIT ||
       pipeline->opCode == VPU_RXOR)
@@ -1976,7 +1976,10 @@ void VPU::executeEFUPipeline(Pipeline *pipeline)
     pipeline->scalarResultBits = sum.bits;
     return;
   }
-  if (pipeline->opCode == VPU_ESADD)
+  if (pipeline->opCode == VPU_ESADD ||
+      pipeline->opCode == VPU_ELENG ||
+      pipeline->opCode == VPU_ERLENG ||
+      pipeline->opCode == VPU_ERSADD)
   {
     const VUFloatResult xSquared =
       mulFPRaw(source.x.bits(), source.x.bits());
@@ -1986,7 +1989,24 @@ void VPU::executeEFUPipeline(Pipeline *pipeline)
       mulFPRaw(source.z.bits(), source.z.bits());
     VUFloatResult sum = addFPRaw(xSquared.bits, ySquared.bits);
     sum = addFPRaw(sum.bits, zSquared.bits);
-    pipeline->scalarResultBits = sum.bits;
+    if (pipeline->opCode == VPU_ESADD)
+    {
+      pipeline->scalarResultBits = sum.bits;
+    }
+    else if (pipeline->opCode == VPU_ELENG)
+    {
+      pipeline->scalarResultBits = sqrtFPRaw(sum.bits).bits;
+    }
+    else if (pipeline->opCode == VPU_ERLENG)
+    {
+      pipeline->scalarResultBits =
+        rsqrtFPRaw(VU_FLOAT_ONE_BITS, sum.bits).bits;
+    }
+    else
+    {
+      pipeline->scalarResultBits =
+        divFPRaw(VU_FLOAT_ONE_BITS, sum.bits).bits;
+    }
     return;
   }
   const uint32_t sourceBits = selectedLaneBits(
@@ -2000,7 +2020,13 @@ void VPU::executeEFUPipeline(Pipeline *pipeline)
   if (pipeline->opCode == VPU_ERSQRT)
   {
     pipeline->scalarResultBits =
-      rsqrtFPRaw(0x3f800000, sourceBits).bits;
+      rsqrtFPRaw(VU_FLOAT_ONE_BITS, sourceBits).bits;
+    return;
+  }
+  if (pipeline->opCode == VPU_ERCPR)
+  {
+    pipeline->scalarResultBits =
+      divFPRaw(VU_FLOAT_ONE_BITS, sourceBits).bits;
     return;
   }
   throw runtime_error("Unsupported VU EFU instruction.");

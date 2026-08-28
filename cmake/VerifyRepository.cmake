@@ -158,5 +158,9 @@ verify_fixture(
   efu_roots.bin
   2acdd16304c3e8da72871d7ebe481b9ca2675d3d791c955e78b0ed9940ab9b3e
 )
+verify_fixture(
+  efu_lengths.bin
+  5866e9f679748ab55215207f5e0f3cc49bb1a1ab7906accdf193ee1d33ff27ce
+)
 
 message(STATUS "Repository checks passed")
