@@ -294,7 +294,7 @@ must use `WAITP` when it needs a pending EFU result.
 - [x] Add the shared EFU pipeline and `WAITP`, including instruction-specific
       execution lengths, throughput stalls, delayed P writeback, pipeline
       drain, Force Break, and deterministic VU0 rejection
-- [ ] Implement the reduction operations `ESUM` and `ESADD`
+- [x] Implement the reduction operations `ESUM` and `ESADD`
 - [ ] Implement the root, length, and reciprocal operations `ESQRT`, `ELENG`,
       `ERCPR`, `ERSADD`, `ERSQRT`, and `ERLENG`
 - [ ] Implement the transcendental operations `ESIN`, `EATAN`, `EATANxy`,

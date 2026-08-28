@@ -1967,16 +1967,29 @@ void VPU::finishFDIVPipeline(Pipeline *pipeline)
 
 void VPU::executeEFUPipeline(Pipeline *pipeline)
 {
-  if (pipeline->opCode != VPU_ESUM)
-  {
-    throw runtime_error("Unsupported VU EFU instruction.");
-  }
-
   const FPRegister &source = fpRegisters[pipeline->srcReg1];
-  VUFloatResult sum = addFPRaw(source.x.bits(), source.y.bits());
-  sum = addFPRaw(sum.bits, source.z.bits());
-  sum = addFPRaw(sum.bits, source.w.bits());
-  pipeline->scalarResultBits = sum.bits;
+  if (pipeline->opCode == VPU_ESUM)
+  {
+    VUFloatResult sum = addFPRaw(source.x.bits(), source.y.bits());
+    sum = addFPRaw(sum.bits, source.z.bits());
+    sum = addFPRaw(sum.bits, source.w.bits());
+    pipeline->scalarResultBits = sum.bits;
+    return;
+  }
+  if (pipeline->opCode == VPU_ESADD)
+  {
+    const VUFloatResult xSquared =
+      mulFPRaw(source.x.bits(), source.x.bits());
+    const VUFloatResult ySquared =
+      mulFPRaw(source.y.bits(), source.y.bits());
+    const VUFloatResult zSquared =
+      mulFPRaw(source.z.bits(), source.z.bits());
+    VUFloatResult sum = addFPRaw(xSquared.bits, ySquared.bits);
+    sum = addFPRaw(sum.bits, zSquared.bits);
+    pipeline->scalarResultBits = sum.bits;
+    return;
+  }
+  throw runtime_error("Unsupported VU EFU instruction.");
 }
 
 void VPU::finishEFUPipeline(Pipeline *pipeline)

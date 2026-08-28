@@ -27,7 +27,7 @@ TEST_CASE("VU1 EFU and WAITP integration program")
     vpu_integration::readBinary("efu_waitp.bin");
   config.cycleBudget = 100;
   config.outputAddress = 32;
-  config.outputSize = 16;
+  config.outputSize = 32;
   config.captureTrace = true;
 
   const VPUProgramRunResult result = runVPUProgram(&vpu, config);
@@ -37,6 +37,12 @@ TEST_CASE("VU1 EFU and WAITP integration program")
     &expected,
     0xbf800000,
     0x41200000,
+    0,
+    0);
+  vpu_integration::appendQword(
+    &expected,
+    0x41600000,
+    0,
     0,
     0);
 
@@ -49,13 +55,23 @@ TEST_CASE("VU1 EFU and WAITP integration program")
         event.type == VPUTraceEventType::PipelineWriteback &&
         event.opCode == VPU_ESUM;
     });
+  const auto esaddWritebacks = std::count_if(
+    result.traceEvents.begin(),
+    result.traceEvents.end(),
+    [](const VPUTraceEvent &event)
+    {
+      return
+        event.type == VPUTraceEventType::PipelineWriteback &&
+        event.opCode == VPU_ESADD;
+    });
 
   REQUIRE(result.state == VPU_STATE_READY);
-  REQUIRE(result.elapsedCycles == 30);
-  REQUIRE(result.programCounter == 9 * 8);
+  REQUIRE(result.elapsedCycles == 48);
+  REQUIRE(result.programCounter == 13 * 8);
   REQUIRE(result.hasTerminationPosition);
-  REQUIRE(result.terminationPosition == 9);
-  REQUIRE(vpu.pRegisterBits() == 0x41200000);
+  REQUIRE(result.terminationPosition == 13);
+  REQUIRE(vpu.pRegisterBits() == 0x41600000);
   REQUIRE(result.outputMemory == expected);
   REQUIRE(efuWritebacks == 1);
+  REQUIRE(esaddWritebacks == 1);
 }

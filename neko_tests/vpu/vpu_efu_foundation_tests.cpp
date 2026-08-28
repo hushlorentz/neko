@@ -33,6 +33,13 @@ namespace
       (static_cast<std::uint32_t>(source) << VPU_FS_REG_SHIFT);
   }
 
+  std::uint32_t esadd(std::uint8_t source)
+  {
+    return
+      VPU_ESADD_ENCODING |
+      (static_cast<std::uint32_t>(source) << VPU_FS_REG_SHIFT);
+  }
+
   std::uint32_t mfp(
     std::uint8_t destination,
     std::uint32_t fieldMask)
@@ -52,7 +59,7 @@ namespace
 
 TEST_CASE("VU1 EFU synchronization foundation")
 {
-  SECTION("ESUM and WAITP decode their fixed fields")
+  SECTION("Reduction operations and WAITP decode their fixed fields")
   {
     const LowerInstruction sum =
       decodeLowerInstruction(esum(VPU_REGISTER_VF07));
@@ -61,13 +68,24 @@ TEST_CASE("VU1 EFU synchronization foundation")
     REQUIRE(sum.sourceRegister1 == VPU_REGISTER_VF07);
     REQUIRE(sum.sourceFieldMask1 == FP_REGISTER_ALL_FIELDS);
 
+    const LowerInstruction squareSum =
+      decodeLowerInstruction(esadd(VPU_REGISTER_VF08));
+    REQUIRE(squareSum.unit == LowerExecutionUnit::EFU);
+    REQUIRE(squareSum.opCode == VPU_ESADD);
+    REQUIRE(squareSum.sourceRegister1 == VPU_REGISTER_VF08);
+    REQUIRE(
+      squareSum.sourceFieldMask1 ==
+      (FP_REGISTER_X_FIELD |
+       FP_REGISTER_Y_FIELD |
+       FP_REGISTER_Z_FIELD));
+
     const LowerInstruction wait =
       decodeLowerInstruction(VPU_WAITP_ENCODING);
     REQUIRE(wait.unit == LowerExecutionUnit::WaitP);
     REQUIRE(wait.opCode == VPU_WAITP);
   }
 
-  SECTION("Reserved ESUM and WAITP encodings are rejected")
+  SECTION("Reserved reduction and WAITP encodings are rejected")
   {
     REQUIRE_THROWS_WITH(
       decodeLowerInstruction(
@@ -75,8 +93,32 @@ TEST_CASE("VU1 EFU synchronization foundation")
       "Unsupported VU lower instruction.");
     REQUIRE_THROWS_WITH(
       decodeLowerInstruction(
+        esadd(VPU_REGISTER_VF07) ^ VPU_DEST_X_BIT),
+      "Unsupported VU lower instruction.");
+    REQUIRE_THROWS_WITH(
+      decodeLowerInstruction(
         VPU_WAITP_ENCODING ^ (1u << VPU_FS_REG_SHIFT)),
       "Unsupported VU lower instruction.");
+  }
+
+  SECTION("ESADD squares XYZ in order, ignores W, and observes its latency")
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    vpu.loadPRegister(-1);
+    vpu.loadFPRegister(VPU_REGISTER_VF01, -3, 4, -12, 999);
+    appendPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      esadd(VPU_REGISTER_VF01));
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.run(12) == 12);
+    REQUIRE(vpu.pRegisterBits() == 0xbf800000);
+    vpu.tick();
+    REQUIRE(vpu.pRegisterBits() == 0x43290000);
   }
 
   SECTION("ESUM writes P only after its documented latency")
@@ -220,6 +262,7 @@ TEST_CASE("VU1 EFU synchronization foundation")
   SECTION("EFU operations and WAITP are rejected on VU0")
   {
     for (const std::uint32_t lower : {
+      esadd(VPU_REGISTER_VF01),
       esum(VPU_REGISTER_VF01),
       static_cast<std::uint32_t>(VPU_WAITP_ENCODING)})
     {
