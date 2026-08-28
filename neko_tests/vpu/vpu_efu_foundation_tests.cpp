@@ -152,6 +152,31 @@ TEST_CASE("VU1 EFU synchronization foundation")
       REQUIRE(decoded.sourceFieldMask1 == FP_REGISTER_Z_FIELD);
     }
 
+    const LowerInstruction arctangent = decodeLowerInstruction(
+      scalarEFU(VPU_EATAN_ENCODING, VPU_REGISTER_VF14, 3));
+    REQUIRE(arctangent.unit == LowerExecutionUnit::EFU);
+    REQUIRE(arctangent.opCode == VPU_EATAN);
+    REQUIRE(arctangent.sourceRegister1 == VPU_REGISTER_VF14);
+    REQUIRE(arctangent.sourceFieldMask1 == FP_REGISTER_W_FIELD);
+
+    const LowerInstruction arctangentXY = decodeLowerInstruction(
+      vectorEFU(VPU_EATANXY_ENCODING, VPU_REGISTER_VF15));
+    REQUIRE(arctangentXY.unit == LowerExecutionUnit::EFU);
+    REQUIRE(arctangentXY.opCode == VPU_EATANxy);
+    REQUIRE(arctangentXY.sourceRegister1 == VPU_REGISTER_VF15);
+    REQUIRE(
+      arctangentXY.sourceFieldMask1 ==
+      (FP_REGISTER_X_FIELD | FP_REGISTER_Y_FIELD));
+
+    const LowerInstruction arctangentXZ = decodeLowerInstruction(
+      vectorEFU(VPU_EATANXZ_ENCODING, VPU_REGISTER_VF16));
+    REQUIRE(arctangentXZ.unit == LowerExecutionUnit::EFU);
+    REQUIRE(arctangentXZ.opCode == VPU_EATANxz);
+    REQUIRE(arctangentXZ.sourceRegister1 == VPU_REGISTER_VF16);
+    REQUIRE(
+      arctangentXZ.sourceFieldMask1 ==
+      (FP_REGISTER_X_FIELD | FP_REGISTER_Z_FIELD));
+
     const LowerInstruction wait =
       decodeLowerInstruction(VPU_WAITP_ENCODING);
     REQUIRE(wait.unit == LowerExecutionUnit::WaitP);
@@ -380,6 +405,9 @@ TEST_CASE("VU1 EFU synchronization foundation")
   SECTION("EFU operations and WAITP are rejected on VU0")
   {
     for (const std::uint32_t lower : {
+      scalarEFU(VPU_EATAN_ENCODING, VPU_REGISTER_VF01, 0),
+      vectorEFU(VPU_EATANXY_ENCODING, VPU_REGISTER_VF01),
+      vectorEFU(VPU_EATANXZ_ENCODING, VPU_REGISTER_VF01),
       scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 0),
       scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
       vectorEFU(VPU_ELENG_ENCODING, VPU_REGISTER_VF01),

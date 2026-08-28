@@ -285,7 +285,7 @@ Implement this as a sequence of independently reviewable blocks. Preserve the
 documented absence of automatic P-register data-dependency stalls: software
 must use `WAITP` when it needs a pending EFU result.
 
-- [ ] Audit all EFU encodings, source-field rules, VU1-only restrictions,
+- [x] Audit all EFU encodings, source-field rules, VU1-only restrictions,
       throughput/latency values, and exceptional-result behavior against the
       official instruction reference
 - [x] Add the architectural P register and complete `MFP`, including four-cycle
@@ -301,7 +301,7 @@ must use `WAITP` when it needs a pending EFU result.
 - [x] Implement the polynomial transcendental operations `ESIN` and `EEXP`
       using the documented VU approximation algorithms rather than
       host-library substitutes
-- [ ] Implement the arctangent operations `EATAN`, `EATANxy`, and `EATANxz`
+- [x] Implement the arctangent operations `EATAN`, `EATANxy`, and `EATANxz`
       using the documented VU approximation algorithm
 - [ ] Lock down each EFU operation with fixed bit-level vectors, boundary
       cases, source hazards, throughput/latency checks, and repeated-operation
@@ -321,7 +321,7 @@ must use `WAITP` when it needs a pending EFU result.
 - [x] Cover deterministic R-register initialization, advancement, and transfer
 - [x] Cover `MFP`, P visibility, and `WAITP` synchronization through a decoded
       VU1 program
-- [ ] Cover every EFU producer and shared-unit throughput hazard through
+- [x] Cover every EFU producer and shared-unit throughput hazard through
       decoded VU1 instructions
 - [x] Cover VU1 `XGKICK` packet initiation, completion stalls, address
       wrapping, and pipeline drain behavior

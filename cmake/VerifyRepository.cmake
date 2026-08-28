@@ -166,5 +166,9 @@ verify_fixture(
   efu_polynomials.bin
   135b172913b0d4f4e7cca758911cfd9576514a7bab03793523a78b9bc73561ae
 )
+verify_fixture(
+  efu_arctangent.bin
+  b8a7d142ff8ec6af384fdabfff349d1ed336d0f541943b94036f33d37982035a
+)
 
 message(STATUS "Repository checks passed")

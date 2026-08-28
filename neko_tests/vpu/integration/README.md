@@ -390,3 +390,18 @@ Expected SHA-256:
 ```text
 135b172913b0d4f4e7cca758911cfd9576514a7bab03793523a78b9bc73561ae
 ```
+
+Regenerate `efu_arctangent.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/efu_arctangent.bin \
+  neko_tests/vpu/integration/efu_arctangent.asm
+```
+
+Expected SHA-256:
+
+```text
+b8a7d142ff8ec6af384fdabfff349d1ed336d0f541943b94036f33d37982035a
+```

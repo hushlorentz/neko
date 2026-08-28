@@ -88,6 +88,7 @@ add_executable(neko_tests
     neko_tests/vpu/integration/efu_roots_tests.cpp
     neko_tests/vpu/integration/efu_lengths_tests.cpp
     neko_tests/vpu/integration/efu_polynomials_tests.cpp
+    neko_tests/vpu/integration/efu_arctangent_tests.cpp
     neko_tests/vpu/integration/floating_point_integration_tests.cpp
     neko_tests/vpu/integration/indirect_calls_tests.cpp
     neko_tests/vpu/integration/integer_fill_tests.cpp

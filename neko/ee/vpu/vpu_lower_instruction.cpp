@@ -415,6 +415,8 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
   }
 
   if ((instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ESADD_ENCODING ||
+      (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_EATANXY_ENCODING ||
+      (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_EATANXZ_ENCODING ||
       (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ELENG_ENCODING ||
       (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ERLENG_ENCODING ||
       (instruction & VPU_LOWER_EFU_VECTOR_MASK) == VPU_ERSADD_ENCODING)
@@ -422,11 +424,17 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     decoded.unit = LowerExecutionUnit::EFU;
     decoded.opCode = instruction & VPU_TYPE3_MASK;
     decoded.sourceRegister1 = registerField(instruction, LOWER_IS_SHIFT);
-    decoded.sourceFieldMask1 = vpuFieldMaskFromEncoding(0xe);
+    decoded.sourceFieldMask1 =
+      decoded.opCode == VPU_EATANxy ||
+      decoded.opCode == VPU_EATANxz
+        ? vpuFieldMaskFromEncoding(
+            (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK)
+        : vpuFieldMaskFromEncoding(0xe);
     return decoded;
   }
 
   if ((instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ERCPR_ENCODING ||
+      (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_EATAN_ENCODING ||
       (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_EEXP_ENCODING ||
       (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ESIN_ENCODING ||
       (instruction & VPU_LOWER_EFU_SCALAR_MASK) == VPU_ESQRT_ENCODING ||

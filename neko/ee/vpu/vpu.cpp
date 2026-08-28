@@ -121,6 +121,16 @@ namespace
   constexpr uint32_t EEXP_E5_BITS = 0x36b63510;
   constexpr uint32_t EEXP_E6_BITS = 0x353961ac;
 
+  constexpr uint32_t EATAN_T1_BITS = 0x3f7ffff5;
+  constexpr uint32_t EATAN_T2_BITS = 0xbeaaa61c;
+  constexpr uint32_t EATAN_T3_BITS = 0x3e4c40a6;
+  constexpr uint32_t EATAN_T4_BITS = 0xbe0e6c63;
+  constexpr uint32_t EATAN_T5_BITS = 0x3dc577df;
+  constexpr uint32_t EATAN_T6_BITS = 0xbd6501c4;
+  constexpr uint32_t EATAN_T7_BITS = 0x3cb31652;
+  constexpr uint32_t EATAN_T8_BITS = 0xbb84d7e7;
+  constexpr uint32_t PI_OVER_FOUR_BITS = 0x3f490fdb;
+
   uint32_t multiplyVUFloatBits(uint32_t left, uint32_t right)
   {
     return mulFPRaw(left, right).bits;
@@ -129,6 +139,16 @@ namespace
   uint32_t addVUFloatBits(uint32_t left, uint32_t right)
   {
     return addFPRaw(left, right).bits;
+  }
+
+  uint32_t subtractVUFloatBits(uint32_t left, uint32_t right)
+  {
+    return subFPRaw(left, right).bits;
+  }
+
+  uint32_t divideVUFloatBits(uint32_t numerator, uint32_t denominator)
+  {
+    return divFPRaw(numerator, denominator).bits;
   }
 
   uint32_t calculateESIN(uint32_t x)
@@ -180,6 +200,61 @@ namespace
     result = multiplyVUFloatBits(result, result);
     result = multiplyVUFloatBits(result, result);
     return divFPRaw(VU_FLOAT_ONE_BITS, result).bits;
+  }
+
+  uint32_t calculateEATAN(uint32_t transformedInput)
+  {
+    const uint32_t inputSquared = multiplyVUFloatBits(
+      transformedInput,
+      transformedInput);
+    uint32_t accumulator = multiplyVUFloatBits(
+      EATAN_T1_BITS,
+      transformedInput);
+    const uint32_t inputCubed = multiplyVUFloatBits(
+      inputSquared,
+      transformedInput);
+    const uint32_t inputToFifth = multiplyVUFloatBits(
+      inputCubed,
+      inputSquared);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(inputCubed, EATAN_T2_BITS));
+    const uint32_t inputToSeventh = multiplyVUFloatBits(
+      inputToFifth,
+      inputSquared);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(inputToFifth, EATAN_T3_BITS));
+    const uint32_t inputToNinth = multiplyVUFloatBits(
+      inputToSeventh,
+      inputSquared);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(inputToSeventh, EATAN_T4_BITS));
+    const uint32_t inputToEleventh = multiplyVUFloatBits(
+      inputToNinth,
+      inputSquared);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(inputToNinth, EATAN_T5_BITS));
+    const uint32_t inputToThirteenth = multiplyVUFloatBits(
+      inputToEleventh,
+      inputSquared);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(inputToEleventh, EATAN_T6_BITS));
+    const uint32_t inputToFifteenth = multiplyVUFloatBits(
+      inputToThirteenth,
+      inputSquared);
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(inputToThirteenth, EATAN_T7_BITS));
+    accumulator = addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(VU_FLOAT_ONE_BITS, PI_OVER_FOUR_BITS));
+    return addVUFloatBits(
+      accumulator,
+      multiplyVUFloatBits(inputToFifteenth, EATAN_T8_BITS));
   }
 
   VPUArithmeticTrace arithmeticTraceForPipeline(const Pipeline &pipeline)
@@ -2082,6 +2157,23 @@ void VPU::executeEFUPipeline(Pipeline *pipeline)
     }
     return;
   }
+  if (pipeline->opCode == VPU_EATANxy ||
+      pipeline->opCode == VPU_EATANxz)
+  {
+    const uint32_t coordinateBits =
+      pipeline->opCode == VPU_EATANxy
+        ? source.y.bits()
+        : source.z.bits();
+    const uint32_t numeratorBits = subtractVUFloatBits(
+      coordinateBits,
+      source.x.bits());
+    const uint32_t denominatorBits = addVUFloatBits(
+      coordinateBits,
+      source.x.bits());
+    pipeline->scalarResultBits = calculateEATAN(
+      divideVUFloatBits(numeratorBits, denominatorBits));
+    return;
+  }
   const uint32_t sourceBits = selectedLaneBits(
     source,
     pipeline->srcReg1FieldMask);
@@ -2110,6 +2202,18 @@ void VPU::executeEFUPipeline(Pipeline *pipeline)
   if (pipeline->opCode == VPU_EEXP)
   {
     pipeline->scalarResultBits = calculateEEXP(sourceBits);
+    return;
+  }
+  if (pipeline->opCode == VPU_EATAN)
+  {
+    const uint32_t numeratorBits = subtractVUFloatBits(
+      sourceBits,
+      VU_FLOAT_ONE_BITS);
+    const uint32_t denominatorBits = addVUFloatBits(
+      sourceBits,
+      VU_FLOAT_ONE_BITS);
+    pipeline->scalarResultBits = calculateEATAN(
+      divideVUFloatBits(numeratorBits, denominatorBits));
     return;
   }
   throw runtime_error("Unsupported VU EFU instruction.");
