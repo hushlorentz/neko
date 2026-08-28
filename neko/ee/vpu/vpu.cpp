@@ -938,6 +938,7 @@ void VPU::queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16
   pendingLowerWritebackDiscarded = false;
 
   if ((lowerInstruction.opCode == VPU_MFIR ||
+       lowerInstruction.opCode == VPU_MFP ||
        lowerInstruction.opCode == VPU_MOVE ||
        lowerInstruction.opCode == VPU_MR32 ||
        lowerInstruction.opCode == VPU_RGET ||
@@ -1173,6 +1174,11 @@ void VPU::completeBranchDelaySlot()
 
 void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
 {
+  if (instruction.opCode == VPU_MFP && type != VPUType::VU1)
+  {
+    throw runtime_error("MFP is only supported on VU1.");
+  }
+
   Pipeline *pipeline = orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_FMAC,
     instruction.opCode,
@@ -1449,6 +1455,10 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
       {
         return hasPendingIntegerWrite(instruction.sourceRegister1);
       }
+      if (instruction.opCode == VPU_MFP)
+      {
+        return false;
+      }
       if (instruction.opCode == VPU_MOVE ||
           instruction.opCode == VPU_MR32 ||
           instruction.opCode == VPU_MTIR)
@@ -1584,6 +1594,11 @@ uint32_t VPU::qRegisterBits() const
   return qRegister.bits();
 }
 
+uint32_t VPU::pRegisterBits() const
+{
+  return pRegister.bits();
+}
+
 uint32_t VPU::rRegisterBits() const
 {
   return 0x3f800000 | (rRegister & 0x007fffff);
@@ -1667,6 +1682,11 @@ void VPU::loadIRegister(double value)
 void VPU::loadQRegister(double value)
 {
   qRegister = value;
+}
+
+void VPU::loadPRegister(double value)
+{
+  pRegister = value;
 }
 
 void VPU::updateClippingFlags(uint32_t clip)
@@ -1926,6 +1946,29 @@ void VPU::startFMACPipeline(Pipeline *p)
     if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
     {
       dest.w.setSignedValue(value);
+    }
+
+    p->setFPRegisterResult(&dest);
+    return;
+  }
+
+  if (opCode == VPU_MFP)
+  {
+    if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
+    {
+      dest.x = pRegister;
+    }
+    if (hasFlag(fieldMask, FP_REGISTER_Y_FIELD))
+    {
+      dest.y = pRegister;
+    }
+    if (hasFlag(fieldMask, FP_REGISTER_Z_FIELD))
+    {
+      dest.z = pRegister;
+    }
+    if (hasFlag(fieldMask, FP_REGISTER_W_FIELD))
+    {
+      dest.w = pRegister;
     }
 
     p->setFPRegisterResult(&dest);
@@ -2681,6 +2724,7 @@ void VPU::pipelineFinished(Pipeline * p)
       updateDestinationRegisterWithPipelineResult(destReg, p);
       break;
     case VPU_MFIR:
+    case VPU_MFP:
     case VPU_MOVE:
     case VPU_MR32:
       if (!p->discardWriteback)

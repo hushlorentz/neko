@@ -114,9 +114,11 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool hasMACFlag(uint16_t flag);
     bool hasStatusFlag(uint16_t flag);
     uint32_t qRegisterBits() const;
+    uint32_t pRegisterBits() const;
     uint32_t rRegisterBits() const;
     void loadIRegister(double value);
     void loadQRegister(double value);
+    void loadPRegister(double value);
     void loadAccumulator(double x, double y, double z, double w);
   private:
     VPUType type;
@@ -147,7 +149,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     vector<uint16_t> intRegisters;
     VUFloat iRegister;
     VUFloat qRegister;
-    double pRegister = 0;
+    VUFloat pRegister;
     uint32_t rRegister = 0;
     uint16_t MACFlags = 0;
     uint16_t statusFlags = 0;

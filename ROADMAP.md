@@ -288,7 +288,7 @@ must use `WAITP` when it needs a pending EFU result.
 - [ ] Audit all EFU encodings, source-field rules, VU1-only restrictions,
       throughput/latency values, and exceptional-result behavior against the
       official instruction reference
-- [ ] Add the architectural P register and complete `MFP`, including four-cycle
+- [x] Add the architectural P register and complete `MFP`, including four-cycle
       masked VF writeback, VF00 behavior, source visibility, and simultaneous
       upper-write priority
 - [ ] Add the shared EFU pipeline and `WAITP`, including instruction-specific

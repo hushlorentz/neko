@@ -417,6 +417,16 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_RANDOM_DEST_MASK) == VPU_MFP_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::FMAC;
+    decoded.opCode = VPU_MFP;
+    decoded.destinationRegister = registerField(instruction, LOWER_IT_SHIFT);
+    decoded.destinationFieldMask = vpuFieldMaskFromEncoding(
+      (instruction >> LOWER_DEST_SHIFT) & LOWER_DEST_MASK);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_MOVE_ENCODING ||
       (instruction & VPU_LOWER_TYPE3_MASK) == VPU_MR32_ENCODING)
   {

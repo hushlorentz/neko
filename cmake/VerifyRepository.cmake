@@ -146,5 +146,9 @@ verify_fixture(
   random_register.bin
   369710e5643e28d6f56ef45ab28e7d102c2fabb2a33d0f167f01fb5947841a8b
 )
+verify_fixture(
+  p_register.bin
+  0b636881cb77022fb153548770f67f83cd2e9de5561a5b6fee3ef0ed15fa9514
+)
 
 message(STATUS "Repository checks passed")
