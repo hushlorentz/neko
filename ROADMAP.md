@@ -322,7 +322,7 @@ reviewable and avoid host-library values as the source of truth.
       every EFU instruction form
 - [x] Verify exact P write cycles, `WAITP` release timing, and shared-unit
       throughput overlap for every instruction latency class
-- [ ] Cover repeated and mixed EFU operation sequences, including normal
+- [x] Cover repeated and mixed EFU operation sequences, including normal
       pipeline drain and Force Break cancellation
 
 ### Instruction Integration Programs

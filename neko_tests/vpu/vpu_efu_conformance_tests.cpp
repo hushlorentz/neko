@@ -16,6 +16,7 @@ namespace
   constexpr std::uint32_t VU_FLOAT_NEGATIVE_DENORMAL_BITS = 0x807fffff;
   constexpr std::uint32_t VU_FLOAT_MAX_BITS = 0x7fffffff;
   constexpr std::uint32_t VU_FLOAT_NEGATIVE_MAX_BITS = 0xffffffff;
+  constexpr std::uint32_t VU_FLOAT_NEGATIVE_ONE_BITS = 0xbf800000;
   constexpr std::uint32_t PI_OVER_TWO_BITS = 0x3fc90fdb;
   constexpr std::uint32_t NEGATIVE_PI_OVER_TWO_BITS = 0xbfc90fdb;
 
@@ -258,6 +259,148 @@ namespace
       }
     }
     return UINT32_MAX;
+  }
+
+  std::vector<std::uint16_t> efuWritebackOpCodes(
+    const std::vector<VPUTraceEvent> &events)
+  {
+    std::vector<std::uint16_t> opCodes;
+    for (const VPUTraceEvent &event : events)
+    {
+      if (event.type != VPUTraceEventType::PipelineWriteback)
+      {
+        continue;
+      }
+      if (event.opCode == VPU_ESADD ||
+          event.opCode == VPU_EEXP ||
+          event.opCode == VPU_ESQRT)
+      {
+        opCodes.push_back(event.opCode);
+      }
+    }
+    return opCodes;
+  }
+}
+
+TEST_CASE("VU1 EFU sequence lifecycle conformance")
+{
+  constexpr std::uint32_t ESADD_NINE_BITS = 0x41100000;
+  constexpr std::uint32_t ESQRT_SIXTEEN_BITS = 0x40800000;
+
+  SECTION("Mixed queued operations drain in issue order")
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 2, 999);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 0, 0, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 16, 0, 0, 0);
+    appendPair(
+      &instructions,
+      VPU_NOP,
+      vectorEFU(VPU_ESADD_ENCODING, VPU_REGISTER_VF01));
+    appendPair(
+      &instructions,
+      VPU_NOP,
+      scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF02, 0));
+    appendPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF03, 0));
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    const std::vector<std::uint16_t> writebacks =
+      efuWritebackOpCodes(events);
+    REQUIRE(vpu.getState() == VPU_STATE_READY);
+    REQUIRE(writebacks.size() == 3);
+    REQUIRE(writebacks[0] == VPU_ESADD);
+    REQUIRE(writebacks[1] == VPU_EEXP);
+    REQUIRE(writebacks[2] == VPU_ESQRT);
+    REQUIRE(vpu.pRegisterBits() == ESQRT_SIXTEEN_BITS);
+  }
+
+  SECTION("Force Break cancels active and queued EFU work")
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadPRegister(-1);
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 2, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 0, 0, 0);
+    appendPair(
+      &instructions,
+      VPU_NOP,
+      vectorEFU(VPU_ESADD_ENCODING, VPU_REGISTER_VF01));
+    appendPair(
+      &instructions,
+      VPU_NOP,
+      scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF02, 0));
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    appendPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      VPU_LOWER_NOP);
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.run(3) == 3);
+    vpu.forceBreak();
+    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    REQUIRE(vpu.pRegisterBits() == VU_FLOAT_NEGATIVE_ONE_BITS);
+    REQUIRE(efuWritebackOpCodes(events).empty());
+    REQUIRE(vpu.run(100) == 0);
+    REQUIRE(vpu.pRegisterBits() == VU_FLOAT_NEGATIVE_ONE_BITS);
+  }
+
+  SECTION("Force Break preserves committed P and cancels younger work")
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadPRegister(-1);
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 1, 2, 2, 0);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 0, 0, 0);
+    appendPair(
+      &instructions,
+      VPU_NOP,
+      vectorEFU(VPU_ESADD_ENCODING, VPU_REGISTER_VF01));
+    appendPair(
+      &instructions,
+      VPU_NOP,
+      scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF02, 0));
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    appendPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      VPU_LOWER_NOP);
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.startMicroMode();
+
+    REQUIRE(vpu.run(13) == 13);
+    REQUIRE(vpu.pRegisterBits() == ESADD_NINE_BITS);
+    REQUIRE(
+      efuWritebackOpCodes(events) ==
+      std::vector<std::uint16_t>{VPU_ESADD});
+    vpu.forceBreak();
+    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+    REQUIRE(vpu.run(100) == 0);
+    REQUIRE(vpu.pRegisterBits() == ESADD_NINE_BITS);
+    REQUIRE(
+      efuWritebackOpCodes(events) ==
+      std::vector<std::uint16_t>{VPU_ESADD});
   }
 }
 
