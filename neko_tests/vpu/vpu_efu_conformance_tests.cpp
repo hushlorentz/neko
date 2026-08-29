@@ -3,12 +3,22 @@
 #include <vector>
 
 #include "catch.hpp"
+#include "floating_point_ops.hpp"
 #include "vpu.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
 namespace
 {
+  constexpr std::uint32_t VU_FLOAT_POSITIVE_ZERO_BITS = 0x00000000;
+  constexpr std::uint32_t VU_FLOAT_NEGATIVE_ZERO_BITS = 0x80000000;
+  constexpr std::uint32_t VU_FLOAT_POSITIVE_DENORMAL_BITS = 0x007fffff;
+  constexpr std::uint32_t VU_FLOAT_NEGATIVE_DENORMAL_BITS = 0x807fffff;
+  constexpr std::uint32_t VU_FLOAT_MAX_BITS = 0x7fffffff;
+  constexpr std::uint32_t VU_FLOAT_NEGATIVE_MAX_BITS = 0xffffffff;
+  constexpr std::uint32_t PI_OVER_TWO_BITS = 0x3fc90fdb;
+  constexpr std::uint32_t NEGATIVE_PI_OVER_TWO_BITS = 0xbfc90fdb;
+
   struct EFUVector
   {
     const char *name;
@@ -75,6 +85,245 @@ namespace
     vpu.uploadMicroInstructions(instructions);
     vpu.initMicroMode();
     return vpu.pRegisterBits();
+  }
+}
+
+TEST_CASE("VU1 EFU boundary and exceptional conformance")
+{
+  SECTION("Polynomial operations preserve their documented domain endpoints")
+  {
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 0),
+        {PI_OVER_TWO_BITS, 0, 0, 0}) ==
+      VU_FLOAT_ONE_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 0),
+        {NEGATIVE_PI_OVER_TWO_BITS, 0, 0, 0}) ==
+      (FP_SIGN_BIT | VU_FLOAT_ONE_BITS));
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_POSITIVE_ZERO_BITS, 0, 0, 0}) ==
+      VU_FLOAT_ONE_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_MAX_BITS, 0, 0, 0}) ==
+      VU_FLOAT_POSITIVE_ZERO_BITS);
+  }
+
+  SECTION("Arctangent operations preserve their documented domain endpoints")
+  {
+    constexpr std::uint32_t EATAN_ZERO_APPROXIMATION_BITS = 0x34738000;
+    constexpr std::uint32_t PI_OVER_FOUR_BITS = 0x3f490fdb;
+
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_EATAN_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_POSITIVE_ZERO_BITS, 0, 0, 0}) ==
+      EATAN_ZERO_APPROXIMATION_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_EATAN_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_ONE_BITS, 0, 0, 0}) ==
+      PI_OVER_FOUR_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_EATANXY_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_ONE_BITS, VU_FLOAT_POSITIVE_ZERO_BITS, 0, 0}) ==
+      EATAN_ZERO_APPROXIMATION_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_EATANXY_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_ONE_BITS, VU_FLOAT_ONE_BITS, 0, 0}) ==
+      PI_OVER_FOUR_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_EATANXZ_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_ONE_BITS, 0, VU_FLOAT_POSITIVE_ZERO_BITS, 0}) ==
+      EATAN_ZERO_APPROXIMATION_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_EATANXZ_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_ONE_BITS, 0, VU_FLOAT_ONE_BITS, 0}) ==
+      PI_OVER_FOUR_BITS);
+  }
+
+  SECTION("Signed zero and denormals follow VU zero semantics")
+  {
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ESUM_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_NEGATIVE_ZERO_BITS
+        }) ==
+      VU_FLOAT_NEGATIVE_ZERO_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ESUM_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_POSITIVE_ZERO_BITS,
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_POSITIVE_DENORMAL_BITS,
+          VU_FLOAT_NEGATIVE_DENORMAL_BITS
+        }) ==
+      VU_FLOAT_POSITIVE_ZERO_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ESADD_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_NEGATIVE_DENORMAL_BITS,
+          VU_FLOAT_POSITIVE_DENORMAL_BITS,
+          VU_FLOAT_MAX_BITS
+        }) ==
+      VU_FLOAT_POSITIVE_ZERO_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ELENG_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_POSITIVE_DENORMAL_BITS,
+          VU_FLOAT_NEGATIVE_DENORMAL_BITS,
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_MAX_BITS
+        }) ==
+      VU_FLOAT_POSITIVE_ZERO_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_NEGATIVE_DENORMAL_BITS, 0, 0, 0}) ==
+      VU_FLOAT_POSITIVE_ZERO_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_NEGATIVE_DENORMAL_BITS, 0, 0, 0}) ==
+      VU_FLOAT_POSITIVE_ZERO_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_NEGATIVE_DENORMAL_BITS, 0, 0, 0}) ==
+      VU_FLOAT_ONE_BITS);
+  }
+
+  SECTION("Reciprocal operations preserve signed divide-by-zero results")
+  {
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ERCPR_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_POSITIVE_ZERO_BITS, 0, 0, 0}) ==
+      VU_FLOAT_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ERCPR_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_NEGATIVE_DENORMAL_BITS, 0, 0, 0}) ==
+      VU_FLOAT_NEGATIVE_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_POSITIVE_DENORMAL_BITS, 0, 0, 0}) ==
+      VU_FLOAT_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 0),
+        {VU_FLOAT_NEGATIVE_ZERO_BITS, 0, 0, 0}) ==
+      VU_FLOAT_NEGATIVE_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ERSADD_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_POSITIVE_DENORMAL_BITS,
+          VU_FLOAT_NEGATIVE_DENORMAL_BITS,
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_ONE_BITS
+        }) ==
+      VU_FLOAT_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ERLENG_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_POSITIVE_DENORMAL_BITS,
+          VU_FLOAT_NEGATIVE_DENORMAL_BITS,
+          VU_FLOAT_NEGATIVE_ZERO_BITS,
+          VU_FLOAT_ONE_BITS
+        }) ==
+      VU_FLOAT_MAX_BITS);
+  }
+
+  SECTION("Intermediate overflow saturates before later EFU operations")
+  {
+    constexpr std::uint32_t SQUARE_ROOT_OF_VU_MAX_BITS = 0x5fb504f2;
+    constexpr std::uint32_t RECIPROCAL_SQUARE_ROOT_OF_VU_MAX_BITS =
+      0x1f3504f4;
+
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ESUM_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_MAX_BITS, VU_FLOAT_MAX_BITS, 0, 0}) ==
+      VU_FLOAT_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ESADD_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_MAX_BITS, 0, 0, 0}) ==
+      VU_FLOAT_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ELENG_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_MAX_BITS, 0, 0, 0}) ==
+      SQUARE_ROOT_OF_VU_MAX_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ERSADD_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_MAX_BITS, 0, 0, 0}) ==
+      VU_FLOAT_POSITIVE_ZERO_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_ERLENG_ENCODING, VPU_REGISTER_VF01),
+        {VU_FLOAT_MAX_BITS, 0, 0, 0}) ==
+      RECIPROCAL_SQUARE_ROOT_OF_VU_MAX_BITS);
+  }
+
+  SECTION("Negative roots and excluded arctangent inputs are deterministic")
+  {
+    constexpr std::uint32_t NEGATIVE_NINE_BITS = 0xc1100000;
+    constexpr std::uint32_t POSITIVE_THREE_BITS = 0x40400000;
+    constexpr std::uint32_t RECIPROCAL_THREE_BITS = 0x3eaaaaaa;
+    constexpr std::uint32_t EATAN_INDETERMINATE_BITS = 0x7fc90fd6;
+
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF01, 0),
+        {NEGATIVE_NINE_BITS, 0, 0, 0}) ==
+      POSITIVE_THREE_BITS);
+    REQUIRE(
+      runEFU(
+        scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 0),
+        {NEGATIVE_NINE_BITS, 0, 0, 0}) ==
+      RECIPROCAL_THREE_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_EATANXY_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_POSITIVE_ZERO_BITS,
+          VU_FLOAT_POSITIVE_ZERO_BITS,
+          0,
+          0
+        }) ==
+      EATAN_INDETERMINATE_BITS);
+    REQUIRE(
+      runEFU(
+        vectorEFU(VPU_EATANXZ_ENCODING, VPU_REGISTER_VF01),
+        {
+          VU_FLOAT_POSITIVE_ZERO_BITS,
+          0,
+          VU_FLOAT_POSITIVE_ZERO_BITS,
+          0
+        }) ==
+      EATAN_INDETERMINATE_BITS);
   }
 }
 

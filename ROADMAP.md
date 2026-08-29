@@ -316,7 +316,7 @@ reviewable and avoid host-library values as the source of truth.
       and `ERLENG` across representative valid-domain inputs
 - [x] Add fixed bit-level reference vectors for `ESIN`, `EEXP`, `EATAN`,
       `EATANxy`, and `EATANxz` across representative valid-domain inputs
-- [ ] Cover valid-domain boundaries, signed zero, denormals, saturation,
+- [x] Cover valid-domain boundaries, signed zero, denormals, saturation,
       divide-by-zero, and exceptional inputs
 - [ ] Verify scalar lane selection, vector source masks, and source hazards for
       every EFU instruction form
