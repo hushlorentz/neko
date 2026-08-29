@@ -170,5 +170,9 @@ verify_fixture(
   efu_arctangent.bin
   b8a7d142ff8ec6af384fdabfff349d1ed336d0f541943b94036f33d37982035a
 )
+verify_fixture(
+  rotation_vu1_capstone.bin
+  97025d110afe6b9c61b3094f81da514a7f064b44b60ba1c202c647973e196ad0
+)
 
 message(STATUS "Repository checks passed")

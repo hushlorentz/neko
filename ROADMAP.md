@@ -343,7 +343,7 @@ reviewable and avoid host-library values as the source of truth.
       decoded VU1 instructions
 - [x] Cover VU1 `XGKICK` packet initiation, completion stalls, address
       wrapping, and pipeline drain behavior
-- [ ] Run progressively larger fragments of naken_asm's `rotation_vu1.asm`
+- [x] Run progressively larger fragments of naken_asm's `rotation_vu1.asm`
 
 ## Milestone 3: VIF and Graphics Path
 

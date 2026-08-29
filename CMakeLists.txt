@@ -99,6 +99,7 @@ add_executable(neko_tests
     neko_tests/vpu/integration/pipeline_integration_tests.cpp
     neko_tests/vpu/integration/random_register_tests.cpp
     neko_tests/vpu/integration/register_movement_tests.cpp
+    neko_tests/vpu/integration/rotation_vu1_capstone_tests.cpp
     neko_tests/vpu/integration/status_flags_tests.cpp
     neko_tests/vpu/integration/termination_tests.cpp
     neko_tests/vpu/integration/vector_math_tests.cpp

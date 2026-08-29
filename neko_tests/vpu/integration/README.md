@@ -405,3 +405,29 @@ Expected SHA-256:
 ```text
 b8a7d142ff8ec6af384fdabfff349d1ed336d0f541943b94036f33d37982035a
 ```
+
+Regenerate `rotation_vu1_capstone.bin` with:
+
+```sh
+local_integration/tools/naken_asm/naken_asm \
+  -b \
+  -o neko_tests/vpu/integration/rotation_vu1_capstone.bin \
+  neko_tests/vpu/integration/rotation_vu1_capstone.asm
+```
+
+Expected SHA-256:
+
+```text
+97025d110afe6b9c61b3094f81da514a7f064b44b60ba1c202c647973e196ad0
+```
+
+This original Neko fixture follows the execution shape of naken_asm's
+`rotation_vu1.asm`: matrix dot products through the P/EFU pipeline, reciprocal
+projection, GS fixed-point conversion, a multi-point branch loop, and XGKICK.
+The upstream GPLv3 source and binary are not redistributed here.
+
+As an external milestone check, the unmodified 101-instruction upstream sample
+from naken_asm commit `247c23706909f09bac77c587780b8a826bbda27c` was
+assembled to SHA-256
+`f9abea58bd38fad744454208c195da17004a76c25259626fb5f1b63cea4823e8`
+and completed under VU1 with all rotation paths enabled.
