@@ -310,8 +310,12 @@ Lock down the completed EFU implementation against the official instruction
 reference with deterministic raw-bit expectations. Keep each group independently
 reviewable and avoid host-library values as the source of truth.
 
-- [ ] Add fixed bit-level reference vectors for every EFU operation across
-      representative valid-domain inputs
+- [x] Add fixed bit-level reference vectors for `ESUM`, `ESADD`, `ESQRT`, and
+      `ERSQRT` across representative valid-domain inputs
+- [ ] Add fixed bit-level reference vectors for `ELENG`, `ERCPR`, `ERSADD`,
+      and `ERLENG` across representative valid-domain inputs
+- [ ] Add fixed bit-level reference vectors for `ESIN`, `EEXP`, `EATAN`,
+      `EATANxy`, and `EATANxz` across representative valid-domain inputs
 - [ ] Cover valid-domain boundaries, signed zero, denormals, saturation,
       divide-by-zero, and exceptional inputs
 - [ ] Verify scalar lane selection, vector source masks, and source hazards for

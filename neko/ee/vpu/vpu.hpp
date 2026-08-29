@@ -90,6 +90,12 @@ class VPU : public ClockedComponent, public PipelineHandler
     const FPRegister *fpRegisterValue(int registerID) const;
     uint16_t intRegisterValue(int registerID) const;
     void loadFPRegister(int registerID, double x, double y, double z, double w);
+    void loadFPRegisterBits(
+      int registerID,
+      uint32_t x,
+      uint32_t y,
+      uint32_t z,
+      uint32_t w);
     void loadIntFPRegister(int registerID, int32_t x, int32_t y, int32_t z, int32_t w);
     void loadIntRegister(int registerID, int value);
     uint32_t elapsedCycles() const;

@@ -466,6 +466,24 @@ void VPU::loadFPRegister(int registerID, double x, double y, double z, double w)
   fpRegisters[registerID].load(x, y, z, w);
 }
 
+void VPU::loadFPRegisterBits(
+  int registerID,
+  uint32_t x,
+  uint32_t y,
+  uint32_t z,
+  uint32_t w)
+{
+  if (registerID == VPU_REGISTER_VF00)
+  {
+    return;
+  }
+
+  fpRegisters[registerID].x.setBits(x);
+  fpRegisters[registerID].y.setBits(y);
+  fpRegisters[registerID].z.setBits(z);
+  fpRegisters[registerID].w.setBits(w);
+}
+
 void VPU::loadIntFPRegister(int registerID, int32_t x, int32_t y, int32_t z, int32_t w)
 {
   if (registerID == VPU_REGISTER_VF00)
