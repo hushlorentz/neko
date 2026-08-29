@@ -311,4 +311,127 @@ TEST_CASE("VU1 EFU fixed bit-level conformance")
         vector.expected);
     }
   }
+
+  SECTION("ESIN follows the documented odd polynomial")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {"positive one quarter", {0x3e800000, 0, 0, 0}, 0x3e7d5776},
+      {"negative three quarters", {0xbf400000, 0, 0, 0}, 0xbf2e7fdf},
+      {"positive five quarters", {0x3fa00000, 0, 0, 0}, 0x3f72f0a7}
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 0),
+          vector.source) ==
+        vector.expected);
+    }
+  }
+
+  SECTION("EEXP follows the documented exp negative x approximation")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {"positive one quarter", {0x3e800000, 0, 0, 0}, 0x3f475f84},
+      {"positive one and one half", {0x3fc00000, 0, 0, 0}, 0x3e647c55},
+      {"positive four", {0x40800000, 0, 0, 0}, 0x3c960b33}
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
+          vector.source) ==
+        vector.expected);
+    }
+  }
+
+  SECTION("EATAN transforms its scalar input before the odd polynomial")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {"arctangent of one quarter", {0x3e800000, 0, 0, 0}, 0x3e7adbbf},
+      {"arctangent of one half", {0x3f000000, 0, 0, 0}, 0x3eed633c},
+      {
+        "arctangent of three quarters",
+        {0x3f400000, 0, 0, 0},
+        0x3f24bc7e
+      }
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          scalarEFU(VPU_EATAN_ENCODING, VPU_REGISTER_VF01, 0),
+          vector.source) ==
+        vector.expected);
+    }
+  }
+
+  SECTION("EATANxy transforms the Y to X ratio and ignores ZW")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {
+        "one over three with populated ZW",
+        {0x40400000, 0x3f800000, 0x4479c000, 0xc479c000},
+        0x3ea4bc82
+      },
+      {
+        "two and one quarter over five and one half",
+        {0x40b00000, 0x40100000, 0xc2c80000, 0x42c80000},
+        0x3ec6d1bb
+      },
+      {
+        "seven over ten",
+        {0x41200000, 0x40e00000, 0x3e800000, 0xbe800000},
+        0x3f1c588a
+      }
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          vectorEFU(VPU_EATANXY_ENCODING, VPU_REGISTER_VF01),
+          vector.source) ==
+        vector.expected);
+    }
+  }
+
+  SECTION("EATANxz transforms the Z to X ratio and ignores YW")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {
+        "one over three with populated YW",
+        {0x40400000, 0x4479c000, 0x3f800000, 0xc479c000},
+        0x3ea4bc82
+      },
+      {
+        "two and one quarter over five and one half",
+        {0x40b00000, 0xc2c80000, 0x40100000, 0x42c80000},
+        0x3ec6d1bb
+      },
+      {
+        "seven over ten",
+        {0x41200000, 0x3e800000, 0x40e00000, 0xbe800000},
+        0x3f1c588a
+      }
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          vectorEFU(VPU_EATANXZ_ENCODING, VPU_REGISTER_VF01),
+          vector.source) ==
+        vector.expected);
+    }
+  }
 }
