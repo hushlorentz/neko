@@ -318,7 +318,7 @@ reviewable and avoid host-library values as the source of truth.
       `EATANxy`, and `EATANxz` across representative valid-domain inputs
 - [x] Cover valid-domain boundaries, signed zero, denormals, saturation,
       divide-by-zero, and exceptional inputs
-- [ ] Verify scalar lane selection, vector source masks, and source hazards for
+- [x] Verify scalar lane selection, vector source masks, and source hazards for
       every EFU instruction form
 - [ ] Verify exact P write cycles, `WAITP` release timing, and shared-unit
       throughput overlap for every instruction latency class

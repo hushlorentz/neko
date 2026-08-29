@@ -26,6 +26,22 @@ namespace
     std::uint32_t expected;
   };
 
+  struct ScalarEFUSelection
+  {
+    const char *name;
+    std::uint32_t encoding;
+    std::array<std::uint32_t, 4> source;
+    std::array<std::uint32_t, 4> expected;
+  };
+
+  struct EFUSourceHazard
+  {
+    const char *name;
+    std::uint32_t instruction;
+    std::uint32_t usedLane;
+    std::uint32_t unusedLane;
+  };
+
   void appendWord(
     std::vector<std::uint8_t> *bytes,
     std::uint32_t word)
@@ -85,6 +101,216 @@ namespace
     vpu.uploadMicroInstructions(instructions);
     vpu.initMicroMode();
     return vpu.pRegisterBits();
+  }
+
+  std::uint32_t upperAddToVF01(std::uint32_t destinationLane)
+  {
+    return
+      destinationLane |
+      (static_cast<std::uint32_t>(VPU_REGISTER_VF02) <<
+       VPU_FT_REG_SHIFT) |
+      (static_cast<std::uint32_t>(VPU_REGISTER_VF03) <<
+       VPU_FS_REG_SHIFT) |
+      (static_cast<std::uint32_t>(VPU_REGISTER_VF01) <<
+       VPU_FD_REG_SHIFT) |
+      VPU_ADD;
+  }
+
+  bool sourceWriteStallsEFU(
+    std::uint32_t instruction,
+    std::uint32_t destinationLane)
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 0.5, 0.5, 0.5, 0.5);
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 0.25, 0.25, 0.25, 0.25);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 0.25, 0.25, 0.25, 0.25);
+    appendPair(
+      &instructions,
+      upperAddToVF01(destinationLane),
+      VPU_LOWER_NOP);
+    appendPair(
+      &instructions,
+      VPU_E_BIT | VPU_NOP,
+      instruction);
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+
+    for (const VPUTraceEvent &event : events)
+    {
+      if (event.type == VPUTraceEventType::PipelineStall)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+TEST_CASE("VU1 EFU source selection and hazard conformance")
+{
+  SECTION("Every scalar operation reads each encoded source lane")
+  {
+    const std::array<ScalarEFUSelection, 6> operations{{
+      {
+        "ESQRT",
+        VPU_ESQRT_ENCODING,
+        {0x40000000, 0x41200000, 0x3f000001, 0x41100000},
+        {0x3fb504f3, 0x404a62c1, 0x3f3504f3, 0x40400000}
+      },
+      {
+        "ERSQRT",
+        VPU_ERSQRT_ENCODING,
+        {0x40000000, 0x41200000, 0x3f000001, 0x41800000},
+        {0x3f3504f3, 0x3ea1e89b, 0x3fb504f3, 0x3e800000}
+      },
+      {
+        "ERCPR",
+        VPU_ERCPR_ENCODING,
+        {0x40400000, 0xc1200000, 0x3f000001, 0x40000000},
+        {0x3eaaaaaa, 0xbdcccccc, 0x3ffffffe, 0x3f000000}
+      },
+      {
+        "ESIN",
+        VPU_ESIN_ENCODING,
+        {0x3e800000, 0xbf400000, 0x3fa00000, 0x3f000000},
+        {0x3e7d5776, 0xbf2e7fdf, 0x3f72f0a7, 0x3ef57742}
+      },
+      {
+        "EEXP",
+        VPU_EEXP_ENCODING,
+        {0x3e800000, 0x3fc00000, 0x40800000, 0x3f800000},
+        {0x3f475f84, 0x3e647c55, 0x3c960b33, 0x3ebc5abf}
+      },
+      {
+        "EATAN",
+        VPU_EATAN_ENCODING,
+        {0x3e800000, 0x3f000000, 0x3f400000, 0x3f800000},
+        {0x3e7adbbf, 0x3eed633c, 0x3f24bc7e, 0x3f490fdb}
+      }
+    }};
+
+    for (const ScalarEFUSelection &operation : operations)
+    {
+      for (std::uint8_t field = 0; field < 4; field++)
+      {
+        CAPTURE(operation.name);
+        CAPTURE(field);
+        REQUIRE(
+          runEFU(
+            scalarEFU(
+              operation.encoding,
+              VPU_REGISTER_VF01,
+              field),
+            operation.source) ==
+          operation.expected[field]);
+      }
+    }
+  }
+
+  SECTION("Every operation stalls only for lanes in its source mask")
+  {
+    const std::array<EFUSourceHazard, 13> operations{{
+      {
+        "ESUM",
+        vectorEFU(VPU_ESUM_ENCODING, VPU_REGISTER_VF01),
+        VPU_DEST_W_BIT,
+        0
+      },
+      {
+        "ESADD",
+        vectorEFU(VPU_ESADD_ENCODING, VPU_REGISTER_VF01),
+        VPU_DEST_X_BIT,
+        VPU_DEST_W_BIT
+      },
+      {
+        "ELENG",
+        vectorEFU(VPU_ELENG_ENCODING, VPU_REGISTER_VF01),
+        VPU_DEST_Y_BIT,
+        VPU_DEST_W_BIT
+      },
+      {
+        "ERSADD",
+        vectorEFU(VPU_ERSADD_ENCODING, VPU_REGISTER_VF01),
+        VPU_DEST_Z_BIT,
+        VPU_DEST_W_BIT
+      },
+      {
+        "ERLENG",
+        vectorEFU(VPU_ERLENG_ENCODING, VPU_REGISTER_VF01),
+        VPU_DEST_X_BIT,
+        VPU_DEST_W_BIT
+      },
+      {
+        "EATANxy",
+        vectorEFU(VPU_EATANXY_ENCODING, VPU_REGISTER_VF01),
+        VPU_DEST_Y_BIT,
+        VPU_DEST_Z_BIT
+      },
+      {
+        "EATANxz",
+        vectorEFU(VPU_EATANXZ_ENCODING, VPU_REGISTER_VF01),
+        VPU_DEST_Z_BIT,
+        VPU_DEST_Y_BIT
+      },
+      {
+        "ESQRT",
+        scalarEFU(VPU_ESQRT_ENCODING, VPU_REGISTER_VF01, 0),
+        VPU_DEST_X_BIT,
+        VPU_DEST_Y_BIT
+      },
+      {
+        "ERSQRT",
+        scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 1),
+        VPU_DEST_Y_BIT,
+        VPU_DEST_X_BIT
+      },
+      {
+        "ERCPR",
+        scalarEFU(VPU_ERCPR_ENCODING, VPU_REGISTER_VF01, 2),
+        VPU_DEST_Z_BIT,
+        VPU_DEST_W_BIT
+      },
+      {
+        "ESIN",
+        scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 3),
+        VPU_DEST_W_BIT,
+        VPU_DEST_X_BIT
+      },
+      {
+        "EEXP",
+        scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
+        VPU_DEST_X_BIT,
+        VPU_DEST_Y_BIT
+      },
+      {
+        "EATAN",
+        scalarEFU(VPU_EATAN_ENCODING, VPU_REGISTER_VF01, 1),
+        VPU_DEST_Y_BIT,
+        VPU_DEST_Z_BIT
+      }
+    }};
+
+    for (const EFUSourceHazard &operation : operations)
+    {
+      CAPTURE(operation.name);
+      REQUIRE(
+        sourceWriteStallsEFU(
+          operation.instruction,
+          operation.usedLane));
+      if (operation.unusedLane != 0)
+      {
+        REQUIRE_FALSE(
+          sourceWriteStallsEFU(
+            operation.instruction,
+            operation.unusedLane));
+      }
+    }
   }
 }
 
