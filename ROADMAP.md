@@ -312,7 +312,7 @@ reviewable and avoid host-library values as the source of truth.
 
 - [x] Add fixed bit-level reference vectors for `ESUM`, `ESADD`, `ESQRT`, and
       `ERSQRT` across representative valid-domain inputs
-- [ ] Add fixed bit-level reference vectors for `ELENG`, `ERCPR`, `ERSADD`,
+- [x] Add fixed bit-level reference vectors for `ELENG`, `ERCPR`, `ERSADD`,
       and `ERLENG` across representative valid-domain inputs
 - [ ] Add fixed bit-level reference vectors for `ESIN`, `EEXP`, `EATAN`,
       `EATANxy`, and `EATANxz` across representative valid-domain inputs

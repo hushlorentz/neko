@@ -195,4 +195,120 @@ TEST_CASE("VU1 EFU fixed bit-level conformance")
         vector.expected);
     }
   }
+
+  SECTION("ELENG takes the root of the ordered XYZ square sum")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {
+        "fractional mixed signs and ignored W",
+        {0x3f8ccccd, 0xc0133333, 0x3f400000, 0x4479c000},
+        0x402a1513
+      },
+      {
+        "non-exact squared operands",
+        {0x3f000001, 0xbeaaaaab, 0x40000001, 0x00000000},
+        0x4005a728
+      },
+      {
+        "mixed magnitudes",
+        {0x41200000, 0xc0a00000, 0x3e800000, 0xbf800000},
+        0x4132ee1e
+      }
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          vectorEFU(VPU_ELENG_ENCODING, VPU_REGISTER_VF01),
+          vector.source) ==
+        vector.expected);
+    }
+  }
+
+  SECTION("ERCPR divides one by the selected lane")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {"reciprocal of three", {0x40400000, 0, 0, 0}, 0x3eaaaaaa},
+      {"reciprocal of negative ten", {0xc1200000, 0, 0, 0}, 0xbdcccccc},
+      {
+        "reciprocal just above one half",
+        {0x3f000001, 0, 0, 0},
+        0x3ffffffe
+      }
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          scalarEFU(VPU_ERCPR_ENCODING, VPU_REGISTER_VF01, 0),
+          vector.source) ==
+        vector.expected);
+    }
+  }
+
+  SECTION("ERSADD reciprocates the ordered XYZ square sum")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {
+        "fractional mixed signs and ignored W",
+        {0x3f8ccccd, 0xc0133333, 0x3f400000, 0x4479c000},
+        0x3e10fdbc
+      },
+      {
+        "non-exact squared operands",
+        {0x3f000001, 0xbeaaaaab, 0x40000001, 0x00000000},
+        0x3e6acd70
+      },
+      {
+        "mixed magnitudes",
+        {0x41200000, 0xc0a00000, 0x3e800000, 0xbf800000},
+        0x3c0301a9
+      }
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          vectorEFU(VPU_ERSADD_ENCODING, VPU_REGISTER_VF01),
+          vector.source) ==
+        vector.expected);
+    }
+  }
+
+  SECTION("ERLENG reciprocates the truncated XYZ length")
+  {
+    const std::array<EFUVector, 3> vectors{{
+      {
+        "fractional mixed signs and ignored W",
+        {0x3f8ccccd, 0xc0133333, 0x3f400000, 0x4479c000},
+        0x3ec0a8de
+      },
+      {
+        "non-exact squared operands",
+        {0x3f000001, 0xbeaaaaab, 0x40000001, 0x00000000},
+        0x3ef52c1a
+      },
+      {
+        "mixed magnitudes",
+        {0x41200000, 0xc0a00000, 0x3e800000, 0xbf800000},
+        0x3db72207
+      }
+    }};
+
+    for (const EFUVector &vector : vectors)
+    {
+      CAPTURE(vector.name);
+      REQUIRE(
+        runEFU(
+          vectorEFU(VPU_ERLENG_ENCODING, VPU_REGISTER_VF01),
+          vector.source) ==
+        vector.expected);
+    }
+  }
 }
