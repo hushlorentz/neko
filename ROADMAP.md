@@ -320,7 +320,7 @@ reviewable and avoid host-library values as the source of truth.
       divide-by-zero, and exceptional inputs
 - [x] Verify scalar lane selection, vector source masks, and source hazards for
       every EFU instruction form
-- [ ] Verify exact P write cycles, `WAITP` release timing, and shared-unit
+- [x] Verify exact P write cycles, `WAITP` release timing, and shared-unit
       throughput overlap for every instruction latency class
 - [ ] Cover repeated and mixed EFU operation sequences, including normal
       pipeline drain and Force Break cancellation

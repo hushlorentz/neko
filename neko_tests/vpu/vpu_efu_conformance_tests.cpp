@@ -42,6 +42,29 @@ namespace
     std::uint32_t unusedLane;
   };
 
+  struct EFUTimingClass
+  {
+    const char *name;
+    std::uint16_t opCode;
+    std::uint32_t instruction;
+    std::uint8_t throughput;
+    std::uint8_t latency;
+  };
+
+  enum class EFUTimingScenario
+  {
+    Single,
+    Repeated,
+    WaitP
+  };
+
+  struct TimedEFUResult
+  {
+    std::vector<VPUTraceEvent> events;
+    std::uint32_t pBits;
+    std::uint32_t mfpBits;
+  };
+
   void appendWord(
     std::vector<std::uint8_t> *bytes,
     std::uint32_t word)
@@ -79,6 +102,16 @@ namespace
       encoding |
       (static_cast<std::uint32_t>(field) << 21) |
       (static_cast<std::uint32_t>(source) << VPU_FS_REG_SHIFT);
+  }
+
+  std::uint32_t mfp(
+    std::uint8_t destination,
+    std::uint32_t fieldMask)
+  {
+    return
+      VPU_MFP_ENCODING |
+      fieldMask |
+      (static_cast<std::uint32_t>(destination) << VPU_FT_REG_SHIFT);
   }
 
   std::uint32_t runEFU(
@@ -149,6 +182,194 @@ namespace
       }
     }
     return false;
+  }
+
+  TimedEFUResult runTimedEFU(
+    std::uint32_t instruction,
+    EFUTimingScenario scenario)
+  {
+    VPU vpu(VPUType::VU1);
+    std::vector<std::uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    vpu.loadPRegister(-1);
+    vpu.loadFPRegister(VPU_REGISTER_VF01, 0.5, 0.5, 0.5, 0.5);
+    appendPair(&instructions, VPU_NOP, instruction);
+    if (scenario == EFUTimingScenario::Single)
+    {
+      appendPair(
+        &instructions,
+        VPU_E_BIT | VPU_NOP,
+        VPU_LOWER_NOP);
+    }
+    else if (scenario == EFUTimingScenario::Repeated)
+    {
+      appendPair(
+        &instructions,
+        VPU_E_BIT | VPU_NOP,
+        instruction);
+    }
+    else
+    {
+      appendPair(&instructions, VPU_NOP, VPU_WAITP_ENCODING);
+      appendPair(
+        &instructions,
+        VPU_E_BIT | VPU_NOP,
+        mfp(VPU_REGISTER_VF02, VPU_DEST_X_BIT));
+    }
+    appendPair(&instructions, VPU_NOP, VPU_LOWER_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+    vpu.initMicroMode();
+    return {
+      events,
+      vpu.pRegisterBits(),
+      vpu.fpRegisterValue(VPU_REGISTER_VF02)->x.bits()
+    };
+  }
+
+  std::vector<std::uint32_t> writebackCycles(
+    const std::vector<VPUTraceEvent> &events,
+    std::uint16_t opCode)
+  {
+    std::vector<std::uint32_t> cycles;
+    for (const VPUTraceEvent &event : events)
+    {
+      if (event.type == VPUTraceEventType::PipelineWriteback &&
+          event.opCode == opCode)
+      {
+        cycles.push_back(event.cycle);
+      }
+    }
+    return cycles;
+  }
+
+  std::uint32_t issueCycle(
+    const std::vector<VPUTraceEvent> &events,
+    std::uint16_t instructionAddress)
+  {
+    for (const VPUTraceEvent &event : events)
+    {
+      if (event.type == VPUTraceEventType::InstructionIssued &&
+          event.instructionAddress == instructionAddress)
+      {
+        return event.cycle;
+      }
+    }
+    return UINT32_MAX;
+  }
+}
+
+TEST_CASE("VU1 EFU decoded timing conformance")
+{
+  const std::array<EFUTimingClass, 7> timings{{
+    {
+      "ESADD 10/11",
+      VPU_ESADD,
+      vectorEFU(VPU_ESADD_ENCODING, VPU_REGISTER_VF01),
+      10,
+      11
+    },
+    {
+      "ESUM 11/12",
+      VPU_ESUM,
+      vectorEFU(VPU_ESUM_ENCODING, VPU_REGISTER_VF01),
+      11,
+      12
+    },
+    {
+      "ERSQRT 17/18",
+      VPU_ERSQRT,
+      scalarEFU(VPU_ERSQRT_ENCODING, VPU_REGISTER_VF01, 0),
+      17,
+      18
+    },
+    {
+      "ERLENG 23/24",
+      VPU_ERLENG,
+      vectorEFU(VPU_ERLENG_ENCODING, VPU_REGISTER_VF01),
+      23,
+      24
+    },
+    {
+      "ESIN 28/29",
+      VPU_ESIN,
+      scalarEFU(VPU_ESIN_ENCODING, VPU_REGISTER_VF01, 0),
+      28,
+      29
+    },
+    {
+      "EEXP 43/44",
+      VPU_EEXP,
+      scalarEFU(VPU_EEXP_ENCODING, VPU_REGISTER_VF01, 0),
+      43,
+      44
+    },
+    {
+      "EATAN 53/54",
+      VPU_EATAN,
+      scalarEFU(VPU_EATAN_ENCODING, VPU_REGISTER_VF01, 0),
+      53,
+      54
+    }
+  }};
+
+  SECTION("P writes on the exact decoded instruction cycle")
+  {
+    for (const EFUTimingClass &timing : timings)
+    {
+      CAPTURE(timing.name);
+      const TimedEFUResult result = runTimedEFU(
+        timing.instruction,
+        EFUTimingScenario::Single);
+      const std::vector<std::uint32_t> writes = writebackCycles(
+        result.events,
+        timing.opCode);
+
+      REQUIRE(writes.size() == 1);
+      REQUIRE(writes[0] == timing.latency + 1);
+    }
+  }
+
+  SECTION("Repeated operations write P exactly one throughput apart")
+  {
+    for (const EFUTimingClass &timing : timings)
+    {
+      CAPTURE(timing.name);
+      const TimedEFUResult result = runTimedEFU(
+        timing.instruction,
+        EFUTimingScenario::Repeated);
+      const std::vector<std::uint32_t> writes = writebackCycles(
+        result.events,
+        timing.opCode);
+
+      REQUIRE(writes.size() == 2);
+      REQUIRE(writes[0] == timing.latency + 1);
+      REQUIRE(writes[1] == writes[0] + timing.throughput);
+    }
+  }
+
+  SECTION("WAITP releases its consumer on the P write cycle")
+  {
+    constexpr std::uint16_t MFP_INSTRUCTION_ADDRESS = 16;
+
+    for (const EFUTimingClass &timing : timings)
+    {
+      CAPTURE(timing.name);
+      const TimedEFUResult result = runTimedEFU(
+        timing.instruction,
+        EFUTimingScenario::WaitP);
+      const std::vector<std::uint32_t> writes = writebackCycles(
+        result.events,
+        timing.opCode);
+
+      REQUIRE(writes.size() == 1);
+      REQUIRE(
+        issueCycle(result.events, MFP_INSTRUCTION_ADDRESS) ==
+        writes[0]);
+      REQUIRE(result.mfpBits == result.pBits);
+    }
   }
 }
 
