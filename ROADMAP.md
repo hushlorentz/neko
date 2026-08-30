@@ -356,23 +356,39 @@ reviewable and avoid host-library values as the source of truth.
 ## Milestone 3: VIF and Graphics Path
 
 - [x] Implement VIF0/VIF1 configuration state and strict command decoding
+- [ ] Add streaming VIF packet ingestion with partial-payload and alignment
+      tracking
 - [ ] Support MPG microprogram upload
-- [ ] Support UNPACK data transfer into VU memory
-- [ ] Support MSCAL/MSCALF execution control
-- [ ] Model VIF TOP/ITOP state and implement VU `XTOP`/`XITOP`
-- [ ] Decode GIF tags and packed/reglist/image data
-- [ ] Route VU1 `XGKICK` output into the GIF path
-- [ ] Implement a minimal GS register model
-- [ ] Render basic points, lines, and triangles into a software framebuffer
-- [ ] Expand toward textures, blending, depth, and display timing
+- [ ] Support `STMASK`, `STROW`, and `STCOL` payloads and complete `UNPACK`
+      transfer semantics, including CYCLE, MASK, MODE, TOPS, and wrapping
+- [ ] Support `MSCAL`, `MSCALF`, and `MSCNT` execution control together with
+      TOP/TOPS/DBF transitions and VU `XTOP`/`XITOP`
+- [ ] Decode stateful GIF packets, including PACKED, REGLIST, IMAGE, register
+      descriptors, A+D writes, and packet termination
+- [ ] Route VIF1 `DIRECT` and `DIRECTHL` payloads into GIF PATH2
+- [ ] Implement minimal GS drawing registers, local memory, and PSMCT32
+      framebuffer addressing
+- [ ] Render a flat untextured triangle with GS fixed-point coordinates,
+      scissoring, and top-left coverage rules
+- [ ] Route VU1 `XGKICK` output into GIF PATH1
+- [ ] Model GIF path arbitration and VIF synchronization, stalls, and
+      interrupts
+- [ ] Expand toward additional primitives, image transfer, textures, blending,
+      depth, display timing, and framebuffer presentation
 
 ### Graphics Path Integration Programs
 
+- [ ] Stream fragmented VIF packets and verify payload length and alignment
+      handling
 - [ ] Upload and execute a VU1 program through VIF `MPG` and `MSCAL`
 - [ ] Verify VIF TOP/ITOP values through decoded `XTOP`/`XITOP` instructions
-- [ ] Transfer vertex data through VIF `UNPACK`
-- [ ] Route a VU1 `XGKICK` packet through GIF into GS registers
-- [ ] Render a synthetic triangle and assert its framebuffer hash
+- [ ] Transfer masked, cycled, and TOPS-relative vertex data through VIF
+      `UNPACK`
+- [ ] Route a synthetic GIF packet through VIF `DIRECT` into GS registers
+- [ ] Render a PATH2 synthetic triangle and assert its GS framebuffer hash
+- [ ] Route a VU1 `XGKICK` packet through GIF PATH1 into the same GS path
+- [ ] Render a complete `MPG` -> `UNPACK` -> `MSCAL` -> `XGKICK` triangle and
+      assert its framebuffer hash
 - [ ] Add textured, blended, and depth-tested scenes as GS support expands
 
 ## Milestone 4: System-Level Core
