@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <stdexcept>
 
 #include "gs.hpp"
@@ -20,6 +21,18 @@ namespace
   constexpr std::size_t GS_BLOCK_WORDS = 64;
   constexpr std::size_t GS_COLUMN_WORDS = 16;
   constexpr std::uint8_t GS_FRAME_WIDTH_LIMIT = 32;
+  constexpr std::int32_t GS_FIXED_POINT_ONE = 16;
+  constexpr std::uint8_t GS_RED_SHIFT = 0;
+  constexpr std::uint8_t GS_GREEN_SHIFT = 8;
+  constexpr std::uint8_t GS_BLUE_SHIFT = 16;
+  constexpr std::uint8_t GS_ALPHA_SHIFT = 24;
+  constexpr std::uint64_t GS_FNV_OFFSET_BASIS =
+    UINT64_C(14695981039346656037);
+  constexpr std::uint64_t GS_FNV_PRIME =
+    UINT64_C(1099511628211);
+  constexpr std::uint8_t GS_BYTES_PER_PIXEL = 4;
+  constexpr std::uint8_t GS_BITS_PER_BYTE = 8;
+  constexpr std::uint32_t GS_BYTE_MASK = 0xff;
 
   constexpr std::uint64_t GS_PRIMITIVE_TYPE_MASK = 0x07;
   constexpr std::uint8_t GS_PRIMITIVE_GOURAUD_BIT = 3;
@@ -81,6 +94,67 @@ namespace
   {
     return ((data >> index) & 1) != 0;
   }
+
+  struct FixedPoint
+  {
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+  };
+
+  std::int64_t edge(
+    const FixedPoint &start,
+    const FixedPoint &end,
+    const FixedPoint &point)
+  {
+    return
+      static_cast<std::int64_t>(end.x - start.x) *
+        (point.y - start.y) -
+      static_cast<std::int64_t>(end.y - start.y) *
+        (point.x - start.x);
+  }
+
+  bool isTopOrLeftEdge(
+    const FixedPoint &start,
+    const FixedPoint &end)
+  {
+    const std::int32_t dx = end.x - start.x;
+    const std::int32_t dy = end.y - start.y;
+    return dy < 0 || (dy == 0 && dx > 0);
+  }
+
+  bool passesEdge(
+    const FixedPoint &start,
+    const FixedPoint &end,
+    const FixedPoint &point)
+  {
+    const std::int64_t value = edge(start, end, point);
+    return value > 0 ||
+      (value == 0 && isTopOrLeftEdge(start, end));
+  }
+
+  std::int32_t floorDivide(
+    std::int32_t value,
+    std::int32_t divisor)
+  {
+    std::int32_t quotient = value / divisor;
+    if (value % divisor < 0)
+    {
+      --quotient;
+    }
+    return quotient;
+  }
+
+  std::int32_t ceilDivide(
+    std::int32_t value,
+    std::int32_t divisor)
+  {
+    std::int32_t quotient = value / divisor;
+    if (value % divisor > 0)
+    {
+      ++quotient;
+    }
+    return quotient;
+  }
 }
 
 GS::GS() : localMemory(GS_LOCAL_MEMORY_WORDS, 0)
@@ -101,8 +175,10 @@ void GS::writeRegister(
       decodeColor(data);
       break;
     case GSRegisterAddress::XYZ2:
+      decodeVertex(data, true);
+      break;
     case GSRegisterAddress::XYZ3:
-      decodeVertex(data);
+      decodeVertex(data, false);
       break;
     case GSRegisterAddress::XYOFFSET_1:
       decodeOffset(0, data);
@@ -140,6 +216,7 @@ std::uint64_t GS::registerValue(std::uint8_t address) const
 
 void GS::decodePrimitive(std::uint64_t data)
 {
+  triangleVertexCount = 0;
   primitiveRegister.type = static_cast<GSPrimitiveType>(
     data & GS_PRIMITIVE_TYPE_MASK);
   primitiveRegister.gouraudShading =
@@ -172,12 +249,147 @@ void GS::decodeColor(std::uint64_t data)
   colorRegister.q = data >> GS_COLOR_Q_SHIFT;
 }
 
-void GS::decodeVertex(std::uint64_t data)
+void GS::decodeVertex(
+  std::uint64_t data,
+  bool drawingKick)
 {
   vertexRegister.x = data & GS_VERTEX_XY_MASK;
   vertexRegister.y =
     (data >> GS_VERTEX_Y_SHIFT) & GS_VERTEX_XY_MASK;
   vertexRegister.z = data >> GS_VERTEX_Z_SHIFT;
+  submitVertex(drawingKick);
+}
+
+void GS::submitVertex(bool drawingKick)
+{
+  if (primitiveRegister.type != GSPrimitiveType::Triangle)
+  {
+    triangleVertexCount = 0;
+    return;
+  }
+
+  triangleVertices[triangleVertexCount] = vertexRegister;
+  ++triangleVertexCount;
+  if (triangleVertexCount != TRIANGLE_VERTEX_COUNT)
+  {
+    return;
+  }
+
+  triangleVertexCount = 0;
+  if (drawingKick)
+  {
+    rasterizeTriangle();
+  }
+}
+
+void GS::rasterizeTriangle()
+{
+  if (primitiveRegister.gouraudShading ||
+      primitiveRegister.textureMapping ||
+      primitiveRegister.fogging ||
+      primitiveRegister.alphaBlending ||
+      primitiveRegister.antialiasing)
+  {
+    throw std::runtime_error(
+      "GS triangle uses unsupported drawing attributes.");
+  }
+
+  const std::size_t contextIndex = primitiveRegister.context;
+  const GSContext &drawingContext = checkedContext(contextIndex);
+  if (drawingContext.test.alphaTestEnabled ||
+      drawingContext.test.destinationAlphaTestEnabled ||
+      drawingContext.test.depthTestEnabled)
+  {
+    throw std::runtime_error(
+      "GS triangle uses unsupported pixel tests.");
+  }
+
+  std::array<FixedPoint, TRIANGLE_VERTEX_COUNT> vertices;
+  for (std::size_t index = 0;
+       index < vertices.size();
+       ++index)
+  {
+    vertices[index].x =
+      static_cast<std::int32_t>(triangleVertices[index].x) -
+      drawingContext.offset.x;
+    vertices[index].y =
+      static_cast<std::int32_t>(triangleVertices[index].y) -
+      drawingContext.offset.y;
+  }
+
+  std::int64_t area = edge(
+    vertices[0],
+    vertices[1],
+    vertices[2]);
+  if (area == 0)
+  {
+    return;
+  }
+  if (area < 0)
+  {
+    std::swap(vertices[1], vertices[2]);
+  }
+  psmct32WordAddress(contextIndex, 0, 0);
+  ++renderedTriangles;
+
+  const std::int32_t minimumFixedX = std::min(
+    vertices[0].x,
+    std::min(vertices[1].x, vertices[2].x));
+  const std::int32_t maximumFixedX = std::max(
+    vertices[0].x,
+    std::max(vertices[1].x, vertices[2].x));
+  const std::int32_t minimumFixedY = std::min(
+    vertices[0].y,
+    std::min(vertices[1].y, vertices[2].y));
+  const std::int32_t maximumFixedY = std::max(
+    vertices[0].y,
+    std::max(vertices[1].y, vertices[2].y));
+  const std::int32_t minimumX = std::max<std::int32_t>(
+    ceilDivide(minimumFixedX, GS_FIXED_POINT_ONE),
+    drawingContext.scissor.x0);
+  const std::int32_t maximumX = std::min<std::int32_t>(
+    floorDivide(maximumFixedX, GS_FIXED_POINT_ONE),
+    drawingContext.scissor.x1);
+  const std::int32_t minimumY = std::max<std::int32_t>(
+    ceilDivide(minimumFixedY, GS_FIXED_POINT_ONE),
+    drawingContext.scissor.y0);
+  const std::int32_t maximumY = std::min<std::int32_t>(
+    floorDivide(maximumFixedY, GS_FIXED_POINT_ONE),
+    drawingContext.scissor.y1);
+
+  const std::uint32_t color =
+    (static_cast<std::uint32_t>(colorRegister.red) <<
+     GS_RED_SHIFT) |
+    (static_cast<std::uint32_t>(colorRegister.green) <<
+     GS_GREEN_SHIFT) |
+    (static_cast<std::uint32_t>(colorRegister.blue) <<
+     GS_BLUE_SHIFT) |
+    (static_cast<std::uint32_t>(colorRegister.alpha) <<
+     GS_ALPHA_SHIFT);
+
+  for (std::int32_t y = minimumY; y <= maximumY; ++y)
+  {
+    for (std::int32_t x = minimumX; x <= maximumX; ++x)
+    {
+      const FixedPoint pixel = {
+        x * GS_FIXED_POINT_ONE,
+        y * GS_FIXED_POINT_ONE
+      };
+      if (!passesEdge(vertices[0], vertices[1], pixel) ||
+          !passesEdge(vertices[1], vertices[2], pixel) ||
+          !passesEdge(vertices[2], vertices[0], pixel))
+      {
+        continue;
+      }
+
+      writePSMCT32(
+        contextIndex,
+        static_cast<std::uint16_t>(x),
+        static_cast<std::uint16_t>(y),
+        color);
+      ++writtenPixels;
+    }
+  }
 }
 
 void GS::decodeFrame(std::size_t index, std::uint64_t data)
@@ -359,4 +571,44 @@ std::uint32_t GS::localMemoryWord(std::size_t address) const
 std::size_t GS::localMemoryWordCount() const
 {
   return localMemory.size();
+}
+
+std::uint64_t GS::framebufferHash(
+  std::size_t contextIndex,
+  std::uint16_t width,
+  std::uint16_t height) const
+{
+  std::uint64_t hash = GS_FNV_OFFSET_BASIS;
+  for (std::uint16_t y = 0; y < height; ++y)
+  {
+    for (std::uint16_t x = 0; x < width; ++x)
+    {
+      const std::uint32_t pixel =
+        readPSMCT32(contextIndex, x, y);
+      for (std::uint8_t byte = 0;
+           byte < GS_BYTES_PER_PIXEL;
+           ++byte)
+      {
+        hash ^=
+          (pixel >> (byte * GS_BITS_PER_BYTE)) & GS_BYTE_MASK;
+        hash *= GS_FNV_PRIME;
+      }
+    }
+  }
+  return hash;
+}
+
+std::size_t GS::queuedVertexCount() const
+{
+  return triangleVertexCount;
+}
+
+std::uint64_t GS::triangleCount() const
+{
+  return renderedTriangles;
+}
+
+std::uint64_t GS::pixelWriteCount() const
+{
+  return writtenPixels;
 }

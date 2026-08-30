@@ -368,7 +368,7 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Route VIF1 `DIRECT` and `DIRECTHL` payloads into GIF PATH2
 - [x] Implement minimal GS drawing registers, local memory, and PSMCT32
       framebuffer addressing
-- [ ] Render a flat untextured triangle with GS fixed-point coordinates,
+- [x] Render a flat untextured triangle with GS fixed-point coordinates,
       scissoring, and top-left coverage rules
 - [ ] Route VU1 `XGKICK` output into GIF PATH1
 - [ ] Model GIF path arbitration and VIF synchronization, stalls, and
@@ -385,7 +385,7 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Transfer masked, cycled, and TOPS-relative vertex data through VIF
       `UNPACK`
 - [x] Route a synthetic GIF packet through VIF `DIRECT` into GS registers
-- [ ] Render a PATH2 synthetic triangle and assert its GS framebuffer hash
+- [x] Render a PATH2 synthetic triangle and assert its GS framebuffer hash
 - [ ] Route a VU1 `XGKICK` packet through GIF PATH1 into the same GS path
 - [ ] Render a complete `MPG` -> `UNPACK` -> `MSCAL` -> `XGKICK` triangle and
       assert its framebuffer hash

@@ -141,25 +141,42 @@ class GS : public GIFRegisterWriteHandler
       std::uint32_t value);
     std::uint32_t localMemoryWord(std::size_t address) const;
     std::size_t localMemoryWordCount() const;
+    std::uint64_t framebufferHash(
+      std::size_t contextIndex,
+      std::uint16_t width,
+      std::uint16_t height) const;
+    std::size_t queuedVertexCount() const;
+    std::uint64_t triangleCount() const;
+    std::uint64_t pixelWriteCount() const;
 
   private:
     static constexpr std::size_t REGISTER_COUNT = 256;
     static constexpr std::size_t CONTEXT_COUNT = 2;
+    static constexpr std::size_t TRIANGLE_VERTEX_COUNT = 3;
 
     GSContext &mutableContext(std::size_t index);
     const GSContext &checkedContext(std::size_t index) const;
     void decodePrimitive(std::uint64_t data);
     void decodeColor(std::uint64_t data);
-    void decodeVertex(std::uint64_t data);
+    void decodeVertex(
+      std::uint64_t data,
+      bool drawingKick);
     void decodeFrame(std::size_t index, std::uint64_t data);
     void decodeScissor(std::size_t index, std::uint64_t data);
     void decodeOffset(std::size_t index, std::uint64_t data);
     void decodeTest(std::size_t index, std::uint64_t data);
+    void submitVertex(bool drawingKick);
+    void rasterizeTriangle();
 
     std::array<std::uint64_t, REGISTER_COUNT> registers = {};
     GSPrimitive primitiveRegister;
     GSColor colorRegister;
     GSVertexCoordinate vertexRegister;
+    std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
+      triangleVertices = {};
+    std::size_t triangleVertexCount = 0;
+    std::uint64_t renderedTriangles = 0;
+    std::uint64_t writtenPixels = 0;
     std::array<GSContext, CONTEXT_COUNT> contexts = {};
     std::vector<std::uint32_t> localMemory;
 };

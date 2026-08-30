@@ -1,0 +1,614 @@
+#include <cstdint>
+
+#include "catch.hpp"
+#include "gif.hpp"
+#include "gs.hpp"
+#include "vif.hpp"
+
+namespace
+{
+  constexpr std::uint32_t WORDS_PER_QUADWORD = 4;
+  constexpr std::uint32_t FIXED_POINT_ONE = 16;
+  constexpr std::uint32_t TRIANGLE_PRIMITIVE = 3;
+
+  std::uint64_t frameValue(
+    std::uint16_t basePointer,
+    std::uint8_t width)
+  {
+    return
+      basePointer |
+      (static_cast<std::uint64_t>(width) << 16) |
+      (static_cast<std::uint64_t>(
+        GSPixelStorageMode::PSMCT32) << 24);
+  }
+
+  std::uint64_t scissorValue(
+    std::uint16_t x0,
+    std::uint16_t x1,
+    std::uint16_t y0,
+    std::uint16_t y1)
+  {
+    return
+      x0 |
+      (static_cast<std::uint64_t>(x1) << 16) |
+      (static_cast<std::uint64_t>(y0) << 32) |
+      (static_cast<std::uint64_t>(y1) << 48);
+  }
+
+  std::uint64_t offsetValue(
+    std::uint16_t x,
+    std::uint16_t y)
+  {
+    return
+      x |
+      (static_cast<std::uint64_t>(y) << 32);
+  }
+
+  std::uint64_t colorValue(
+    std::uint8_t red,
+    std::uint8_t green,
+    std::uint8_t blue,
+    std::uint8_t alpha)
+  {
+    return
+      red |
+      (static_cast<std::uint64_t>(green) << 8) |
+      (static_cast<std::uint64_t>(blue) << 16) |
+      (static_cast<std::uint64_t>(alpha) << 24);
+  }
+
+  std::uint32_t packedColor(
+    std::uint8_t red,
+    std::uint8_t green,
+    std::uint8_t blue,
+    std::uint8_t alpha)
+  {
+    return static_cast<std::uint32_t>(
+      colorValue(red, green, blue, alpha));
+  }
+
+  std::uint64_t vertexValue(
+    std::uint16_t x,
+    std::uint16_t y,
+    std::uint32_t z = 0)
+  {
+    return
+      x |
+      (static_cast<std::uint64_t>(y) << 16) |
+      (static_cast<std::uint64_t>(z) << 32);
+  }
+
+  void configureContext(
+    GS *gs,
+    std::size_t context,
+    std::uint16_t x0 = 0,
+    std::uint16_t x1 = 63,
+    std::uint16_t y0 = 0,
+    std::uint16_t y1 = 31,
+    std::uint16_t offsetX = 0,
+    std::uint16_t offsetY = 0)
+  {
+    const std::uint8_t frameAddress =
+      context == 0
+        ? GSRegisterAddress::FRAME_1
+        : GSRegisterAddress::FRAME_2;
+    const std::uint8_t scissorAddress =
+      context == 0
+        ? GSRegisterAddress::SCISSOR_1
+        : GSRegisterAddress::SCISSOR_2;
+    const std::uint8_t offsetAddress =
+      context == 0
+        ? GSRegisterAddress::XYOFFSET_1
+        : GSRegisterAddress::XYOFFSET_2;
+    gs->writeRegister(frameAddress, frameValue(context, 1));
+    gs->writeRegister(
+      scissorAddress,
+      scissorValue(x0, x1, y0, y1));
+    gs->writeRegister(
+      offsetAddress,
+      offsetValue(offsetX, offsetY));
+  }
+
+  void submitVertex(
+    GS *gs,
+    std::uint16_t x,
+    std::uint16_t y,
+    std::uint64_t color,
+    bool drawingKick = true)
+  {
+    gs->writeRegister(GSRegisterAddress::RGBAQ, color);
+    gs->writeRegister(
+      drawingKick
+        ? GSRegisterAddress::XYZ2
+        : GSRegisterAddress::XYZ3,
+      vertexValue(x, y));
+  }
+
+  GIFQuadword gifTag(
+    std::uint16_t loopCount,
+    bool endOfPacket,
+    std::uint8_t registerCount,
+    std::uint64_t registers,
+    bool primitiveEnabled = false,
+    std::uint16_t primitive = 0)
+  {
+    const std::uint64_t low =
+      loopCount |
+      (static_cast<std::uint64_t>(endOfPacket) << 15) |
+      (static_cast<std::uint64_t>(primitiveEnabled) << 46) |
+      (static_cast<std::uint64_t>(primitive) << 47) |
+      (static_cast<std::uint64_t>(GIFDataFormat::Packed) << 58) |
+      (static_cast<std::uint64_t>(registerCount) << 60);
+    return GIFQuadword{{
+      static_cast<std::uint32_t>(low),
+      static_cast<std::uint32_t>(low >> 32),
+      static_cast<std::uint32_t>(registers),
+      static_cast<std::uint32_t>(registers >> 32)
+    }};
+  }
+
+  GIFQuadword adWrite(
+    std::uint8_t address,
+    std::uint64_t data)
+  {
+    return GIFQuadword{{
+      static_cast<std::uint32_t>(data),
+      static_cast<std::uint32_t>(data >> 32),
+      address,
+      0
+    }};
+  }
+
+  GIFQuadword packedRGBA(
+    std::uint8_t red,
+    std::uint8_t green,
+    std::uint8_t blue,
+    std::uint8_t alpha)
+  {
+    return GIFQuadword{{red, green, blue, alpha}};
+  }
+
+  GIFQuadword packedXYZ(
+    std::uint16_t x,
+    std::uint16_t y)
+  {
+    return GIFQuadword{{x, y, 0, 0}};
+  }
+
+  std::uint32_t vifCode(
+    std::uint8_t command,
+    std::uint16_t immediate = 0)
+  {
+    return
+      (static_cast<std::uint32_t>(command) << 24) |
+      immediate;
+  }
+
+  void ingestQuadword(
+    VIF *vif,
+    const GIFQuadword &quadword)
+  {
+    for (const std::uint32_t word : quadword)
+    {
+      vif->ingestWord(word);
+    }
+  }
+}
+
+TEST_CASE("GS Flat Triangle Rasterizer Tests")
+{
+  SECTION("The third XYZ2 kick draws a flat triangle")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      colorValue(1, 2, 3, 4));
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      colorValue(5, 6, 7, 8));
+
+    REQUIRE(gs.queuedVertexCount() == 2);
+    REQUIRE(gs.triangleCount() == 0);
+    REQUIRE(gs.pixelWriteCount() == 0);
+
+    const std::uint64_t finalColor =
+      colorValue(0x10, 0x20, 0x40, 0x80);
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      finalColor);
+
+    const std::uint32_t expected =
+      packedColor(0x10, 0x20, 0x40, 0x80);
+    REQUIRE(gs.queuedVertexCount() == 0);
+    REQUIRE(gs.triangleCount() == 1);
+    REQUIRE(gs.pixelWriteCount() == 6);
+    REQUIRE(gs.readPSMCT32(0, 1, 1) == expected);
+    REQUIRE(gs.readPSMCT32(0, 2, 1) == expected);
+    REQUIRE(gs.readPSMCT32(0, 3, 1) == expected);
+    REQUIRE(gs.readPSMCT32(0, 1, 2) == expected);
+    REQUIRE(gs.readPSMCT32(0, 2, 2) == expected);
+    REQUIRE(gs.readPSMCT32(0, 1, 3) == expected);
+    REQUIRE(gs.readPSMCT32(0, 3, 2) == 0);
+    REQUIRE(gs.readPSMCT32(0, 4, 1) == 0);
+    REQUIRE(gs.readPSMCT32(0, 1, 4) == 0);
+  }
+
+  SECTION("Clockwise and counterclockwise vertices cover the same pixels")
+  {
+    GS clockwise;
+    GS counterclockwise;
+    configureContext(&clockwise, 0);
+    configureContext(&counterclockwise, 0);
+    clockwise.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    counterclockwise.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(
+      &clockwise,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      color);
+    submitVertex(
+      &clockwise,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      color);
+    submitVertex(
+      &clockwise,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      color);
+
+    submitVertex(
+      &counterclockwise,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      color);
+    submitVertex(
+      &counterclockwise,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      color);
+    submitVertex(
+      &counterclockwise,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      color);
+
+    REQUIRE(
+      clockwise.framebufferHash(0, 8, 8) ==
+      counterclockwise.framebufferHash(0, 8, 8));
+    REQUIRE(clockwise.pixelWriteCount() == 6);
+    REQUIRE(counterclockwise.pixelWriteCount() == 6);
+  }
+
+  SECTION("Pixel centers use integer window coordinates")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    constexpr std::uint16_t HALF_PIXEL = FIXED_POINT_ONE / 2;
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE + HALF_PIXEL,
+      1 * FIXED_POINT_ONE + HALF_PIXEL,
+      color);
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE + HALF_PIXEL,
+      1 * FIXED_POINT_ONE + HALF_PIXEL,
+      color);
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE + HALF_PIXEL,
+      4 * FIXED_POINT_ONE + HALF_PIXEL,
+      color);
+
+    const std::uint32_t expected = packedColor(1, 2, 3, 4);
+    REQUIRE(gs.pixelWriteCount() == 3);
+    REQUIRE(gs.readPSMCT32(0, 2, 2) == expected);
+    REQUIRE(gs.readPSMCT32(0, 3, 2) == expected);
+    REQUIRE(gs.readPSMCT32(0, 2, 3) == expected);
+    REQUIRE(gs.readPSMCT32(0, 1, 1) == 0);
+    REQUIRE(gs.readPSMCT32(0, 4, 2) == 0);
+  }
+
+  SECTION("XYOFFSET conversion precedes inclusive scissoring")
+  {
+    GS gs;
+    configureContext(
+      &gs,
+      0,
+      2,
+      3,
+      1,
+      2,
+      8 * FIXED_POINT_ONE,
+      9 * FIXED_POINT_ONE);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(
+      &gs,
+      9 * FIXED_POINT_ONE,
+      10 * FIXED_POINT_ONE,
+      color);
+    submitVertex(
+      &gs,
+      12 * FIXED_POINT_ONE,
+      10 * FIXED_POINT_ONE,
+      color);
+    submitVertex(
+      &gs,
+      9 * FIXED_POINT_ONE,
+      13 * FIXED_POINT_ONE,
+      color);
+
+    const std::uint32_t expected = packedColor(1, 2, 3, 4);
+    REQUIRE(gs.pixelWriteCount() == 3);
+    REQUIRE(gs.readPSMCT32(0, 2, 1) == expected);
+    REQUIRE(gs.readPSMCT32(0, 3, 1) == expected);
+    REQUIRE(gs.readPSMCT32(0, 2, 2) == expected);
+    REQUIRE(gs.readPSMCT32(0, 1, 1) == 0);
+    REQUIRE(gs.readPSMCT32(0, 1, 2) == 0);
+  }
+
+  SECTION("Scissoring safely clips negative window coordinates")
+  {
+    GS gs;
+    configureContext(
+      &gs,
+      0,
+      0,
+      7,
+      0,
+      7,
+      2 * FIXED_POINT_ONE,
+      2 * FIXED_POINT_ONE);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(&gs, 1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(&gs, 4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(&gs, 1 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+
+    REQUIRE(gs.pixelWriteCount() == 1);
+    REQUIRE(
+      gs.readPSMCT32(0, 0, 0) ==
+      packedColor(1, 2, 3, 4));
+    REQUIRE(gs.readPSMCT32(0, 1, 0) == 0);
+    REQUIRE(gs.readPSMCT32(0, 0, 1) == 0);
+  }
+
+  SECTION("Shared top-left edges have neither gaps nor double writes")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    const std::uint64_t firstColor =
+      colorValue(0x10, 0, 0, 0xff);
+    const std::uint64_t secondColor =
+      colorValue(0x20, 0, 0, 0xff);
+
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      firstColor);
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      firstColor);
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      firstColor);
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      secondColor);
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      secondColor);
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      secondColor);
+
+    REQUIRE(gs.triangleCount() == 2);
+    REQUIRE(gs.pixelWriteCount() == 9);
+    REQUIRE(
+      gs.readPSMCT32(0, 2, 2) ==
+      packedColor(0x10, 0, 0, 0xff));
+    REQUIRE(
+      gs.readPSMCT32(0, 3, 2) ==
+      packedColor(0x20, 0, 0, 0xff));
+    for (std::uint16_t y = 1; y < 4; ++y)
+    {
+      for (std::uint16_t x = 1; x < 4; ++x)
+      {
+        REQUIRE(gs.readPSMCT32(0, x, y) != 0);
+      }
+    }
+  }
+
+  SECTION("XYZ3 advances the queue without drawing")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(&gs, 16, 16, color);
+    submitVertex(&gs, 64, 16, color);
+    submitVertex(&gs, 16, 64, color, false);
+
+    REQUIRE(gs.queuedVertexCount() == 0);
+    REQUIRE(gs.triangleCount() == 0);
+    REQUIRE(gs.pixelWriteCount() == 0);
+  }
+
+  SECTION("Degenerate triangles produce no pixels")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE);
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(&gs, 16, 16, color);
+    submitVertex(&gs, 32, 32, color);
+    submitVertex(&gs, 48, 48, color);
+
+    REQUIRE(gs.triangleCount() == 0);
+    REQUIRE(gs.pixelWriteCount() == 0);
+  }
+
+  SECTION("The PRIM context selects drawing environment and framebuffer")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    configureContext(&gs, 1);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE | (UINT64_C(1) << 9));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(&gs, 16, 16, color);
+    submitVertex(&gs, 64, 16, color);
+    submitVertex(&gs, 16, 64, color);
+
+    REQUIRE(gs.readPSMCT32(0, 1, 1) == 0);
+    REQUIRE(
+      gs.readPSMCT32(1, 1, 1) ==
+      packedColor(1, 2, 3, 4));
+  }
+
+  SECTION("Unsupported triangle features fail explicitly")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE | (UINT64_C(1) << 4));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(&gs, 16, 16, color);
+    submitVertex(&gs, 64, 16, color);
+    REQUIRE_THROWS_WITH(
+      submitVertex(&gs, 16, 64, color),
+      "GS triangle uses unsupported drawing attributes.");
+    REQUIRE(gs.queuedVertexCount() == 0);
+  }
+}
+
+TEST_CASE("PATH2 Flat Triangle Integration Tests")
+{
+  SECTION("A VIF DIRECT packet produces a deterministic framebuffer")
+  {
+    GS gs;
+    GIFDecoder decoder;
+    decoder.attachRegisterWriteHandler(&gs);
+    VIF vif(VIFType::VIF1);
+    vif.attachGIFDecoder(&decoder);
+    for (std::uint32_t index = 0;
+         index < WORDS_PER_QUADWORD - 1;
+         ++index)
+    {
+      vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    }
+
+    constexpr std::uint16_t DIRECT_QUADWORDS = 11;
+    vif.ingestWord(vifCode(
+      VIFCommandEncoding::DIRECT,
+      DIRECT_QUADWORDS));
+    ingestQuadword(
+      &vif,
+      gifTag(
+        3,
+        false,
+        1,
+        GIFRegisterDescriptor::AD));
+    ingestQuadword(
+      &vif,
+      adWrite(
+        GSRegisterAddress::FRAME_1,
+        frameValue(0, 1)));
+    ingestQuadword(
+      &vif,
+      adWrite(
+        GSRegisterAddress::SCISSOR_1,
+        scissorValue(0, 7, 0, 7)));
+    ingestQuadword(
+      &vif,
+      adWrite(
+        GSRegisterAddress::XYOFFSET_1,
+        offsetValue(0, 0)));
+
+    const std::uint64_t vertexDescriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    ingestQuadword(
+      &vif,
+      gifTag(
+        3,
+        true,
+        2,
+        vertexDescriptors,
+        true,
+        TRIANGLE_PRIMITIVE));
+    ingestQuadword(
+      &vif,
+      packedRGBA(0x10, 0x20, 0x40, 0x80));
+    ingestQuadword(
+      &vif,
+      packedXYZ(1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE));
+    ingestQuadword(
+      &vif,
+      packedRGBA(0x10, 0x20, 0x40, 0x80));
+    ingestQuadword(
+      &vif,
+      packedXYZ(4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE));
+    ingestQuadword(
+      &vif,
+      packedRGBA(0x10, 0x20, 0x40, 0x80));
+    ingestQuadword(
+      &vif,
+      packedXYZ(1 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE));
+
+    REQUIRE(!vif.awaitingPayload());
+    REQUIRE(!decoder.packetInProgress());
+    REQUIRE(gs.triangleCount() == 1);
+    REQUIRE(gs.pixelWriteCount() == 6);
+    REQUIRE(
+      gs.framebufferHash(0, 8, 8) ==
+      UINT64_C(0x108089dcd964d365));
+  }
+}

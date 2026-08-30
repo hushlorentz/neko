@@ -84,6 +84,7 @@ add_executable(neko_tests
     neko_tests/fp_register_tests.cpp
     neko_tests/gif/gif_tests.cpp
     neko_tests/gs/gs_tests.cpp
+    neko_tests/gs/gs_rasterizer_tests.cpp
     neko_tests/math/floating_point_tests.cpp
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
