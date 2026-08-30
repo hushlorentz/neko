@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <stdexcept>
 
 #include "vif.hpp"
@@ -5,6 +6,33 @@
 namespace
 {
   constexpr std::uint16_t VIF_STMOD_MASK = 0x0003;
+  constexpr std::uint32_t VIF_BITS_PER_WORD = 32;
+  constexpr std::uint32_t VIF_MPG_WORDS_PER_INSTRUCTION = 2;
+  constexpr std::uint32_t VIF_DIRECT_WORDS_PER_QUADWORD = 4;
+  constexpr std::uint32_t VIF_STMASK_PAYLOAD_WORDS = 1;
+  constexpr std::uint32_t VIF_VECTOR_REGISTER_WORDS = 4;
+  constexpr std::uint32_t VIF_ZERO_DIRECT_COUNT = 65536;
+  constexpr std::uint8_t VIF_UNPACK_VN_SHIFT = 2;
+  constexpr std::uint8_t VIF_UNPACK_FIELD_MASK = 0x03;
+  constexpr std::uint64_t VIF_MPG_ALIGNMENT_WORDS = 2;
+  constexpr std::uint64_t VIF_DIRECT_ALIGNMENT_WORDS = 4;
+
+  bool ownsPayload(VIFCommandKind kind)
+  {
+    switch (kind)
+    {
+      case VIFCommandKind::STMASK:
+      case VIFCommandKind::STROW:
+      case VIFCommandKind::STCOL:
+      case VIFCommandKind::MPG:
+      case VIFCommandKind::DIRECT:
+      case VIFCommandKind::DIRECTHL:
+      case VIFCommandKind::UNPACK:
+        return true;
+      default:
+        return false;
+    }
+  }
 }
 
 VIF::VIF(VIFType type) : type(type)
@@ -18,6 +46,12 @@ VIFType VIF::unitType() const
 
 VIFCommand VIF::processCode(std::uint32_t code)
 {
+  if (awaitingPayload())
+  {
+    throw std::runtime_error(
+      "Cannot process a VIFcode while a payload is in progress.");
+  }
+
   const VIFCommand command = decodeVIFCommand(code, type);
   codeRegister = code;
 
@@ -59,6 +93,125 @@ VIFCommand VIF::processCode(std::uint32_t code)
   }
 
   return command;
+}
+
+VIFStreamWord VIF::ingestWord(std::uint32_t word)
+{
+  VIFStreamWord streamWord;
+  streamWord.raw = word;
+
+  if (awaitingPayload())
+  {
+    streamWord.kind = VIFStreamWordKind::Payload;
+    streamWord.command = streamCommand;
+    streamWord.payloadWordCount = streamPayloadWordCount;
+    streamWord.payloadIndex =
+      streamPayloadWordCount - streamPayloadWordsRemaining;
+
+    --streamPayloadWordsRemaining;
+    ++streamWordsIngested;
+    streamWord.packetComplete = !awaitingPayload();
+    return streamWord;
+  }
+
+  const VIFCommand command = decodeVIFCommand(word, type);
+  validatePayloadAlignment(command);
+
+  const std::uint32_t commandPayloadWordCount =
+    payloadWordCount(command);
+
+  if (!ownsPayload(command.kind))
+  {
+    processCode(word);
+  }
+
+  streamCommand = command;
+  streamPayloadWordCount = commandPayloadWordCount;
+  streamPayloadWordsRemaining = streamPayloadWordCount;
+  ++streamWordsIngested;
+
+  streamWord.kind = VIFStreamWordKind::Command;
+  streamWord.command = streamCommand;
+  streamWord.payloadWordCount = streamPayloadWordCount;
+  streamWord.packetComplete = !awaitingPayload();
+
+  if (ownsPayload(command.kind))
+  {
+    codeRegister = word;
+  }
+
+  return streamWord;
+}
+
+std::uint32_t VIF::payloadWordCount(const VIFCommand &command) const
+{
+  switch (command.kind)
+  {
+    case VIFCommandKind::STMASK:
+      return VIF_STMASK_PAYLOAD_WORDS;
+    case VIFCommandKind::STROW:
+    case VIFCommandKind::STCOL:
+      return VIF_VECTOR_REGISTER_WORDS;
+    case VIFCommandKind::MPG:
+      return command.count * VIF_MPG_WORDS_PER_INSTRUCTION;
+    case VIFCommandKind::DIRECT:
+    case VIFCommandKind::DIRECTHL:
+    {
+      const std::uint32_t quadwordCount =
+        command.immediate == 0
+          ? VIF_ZERO_DIRECT_COUNT
+          : command.immediate;
+      return quadwordCount * VIF_DIRECT_WORDS_PER_QUADWORD;
+    }
+    case VIFCommandKind::UNPACK:
+    {
+      const std::uint8_t format = command.command &
+        VIF_UNPACK_FIELD_MASK;
+      const std::uint32_t componentCount =
+        ((command.command >> VIF_UNPACK_VN_SHIFT) &
+          VIF_UNPACK_FIELD_MASK) + 1;
+      const std::uint32_t componentBits =
+        VIF_BITS_PER_WORD >> format;
+
+      std::uint32_t inputVectorCount = command.count;
+      if (writeLength() > cycleLength())
+      {
+        const std::uint32_t completeBlocks =
+          command.count / writeLength();
+        const std::uint32_t partialBlock =
+          command.count % writeLength();
+        inputVectorCount =
+          cycleLength() * completeBlocks +
+          std::min<std::uint32_t>(partialBlock, cycleLength());
+      }
+
+      const std::uint32_t payloadBits =
+        inputVectorCount * componentCount * componentBits;
+      return
+        (payloadBits + VIF_BITS_PER_WORD - 1) /
+        VIF_BITS_PER_WORD;
+    }
+    default:
+      return 0;
+  }
+}
+
+void VIF::validatePayloadAlignment(const VIFCommand &command) const
+{
+  if (command.kind == VIFCommandKind::MPG &&
+      (streamWordsIngested + 1) % VIF_MPG_ALIGNMENT_WORDS != 0)
+  {
+    throw std::runtime_error(
+      "VIF MPG payload is not 64-bit aligned.");
+  }
+
+  if ((command.kind == VIFCommandKind::DIRECT ||
+       command.kind == VIFCommandKind::DIRECTHL) &&
+      (streamWordsIngested + 1) % VIF_DIRECT_ALIGNMENT_WORDS != 0)
+  {
+    throw std::runtime_error(
+      "VIF DIRECT payload is not 128-bit aligned.");
+  }
 }
 
 std::uint16_t VIF::cycle() const
@@ -124,4 +277,19 @@ bool VIF::markDetected() const
 std::uint32_t VIF::lastCode() const
 {
   return codeRegister;
+}
+
+bool VIF::awaitingPayload() const
+{
+  return streamPayloadWordsRemaining != 0;
+}
+
+std::uint32_t VIF::payloadWordsRemaining() const
+{
+  return streamPayloadWordsRemaining;
+}
+
+std::uint64_t VIF::wordsIngested() const
+{
+  return streamWordsIngested;
 }

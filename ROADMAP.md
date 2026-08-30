@@ -356,7 +356,7 @@ reviewable and avoid host-library values as the source of truth.
 ## Milestone 3: VIF and Graphics Path
 
 - [x] Implement VIF0/VIF1 configuration state and strict command decoding
-- [ ] Add streaming VIF packet ingestion with partial-payload and alignment
+- [x] Add streaming VIF packet ingestion with partial-payload and alignment
       tracking
 - [ ] Support MPG microprogram upload
 - [ ] Support `STMASK`, `STROW`, and `STCOL` payloads and complete `UNPACK`
@@ -378,7 +378,7 @@ reviewable and avoid host-library values as the source of truth.
 
 ### Graphics Path Integration Programs
 
-- [ ] Stream fragmented VIF packets and verify payload length and alignment
+- [x] Stream fragmented VIF packets and verify payload length and alignment
       handling
 - [ ] Upload and execute a VU1 program through VIF `MPG` and `MSCAL`
 - [ ] Verify VIF TOP/ITOP values through decoded `XTOP`/`XITOP` instructions

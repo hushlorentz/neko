@@ -5,6 +5,22 @@
 
 #include "vif_command.hpp"
 
+enum class VIFStreamWordKind : std::uint8_t
+{
+  Command,
+  Payload
+};
+
+struct VIFStreamWord
+{
+  VIFStreamWordKind kind = VIFStreamWordKind::Command;
+  VIFCommand command;
+  std::uint32_t raw = 0;
+  std::uint32_t payloadIndex = 0;
+  std::uint32_t payloadWordCount = 0;
+  bool packetComplete = false;
+};
+
 class VIF
 {
   public:
@@ -12,6 +28,7 @@ class VIF
 
     VIFType unitType() const;
     VIFCommand processCode(std::uint32_t code);
+    VIFStreamWord ingestWord(std::uint32_t word);
 
     std::uint16_t cycle() const;
     std::uint8_t cycleLength() const;
@@ -26,8 +43,14 @@ class VIF
     bool path3Masked() const;
     bool markDetected() const;
     std::uint32_t lastCode() const;
+    bool awaitingPayload() const;
+    std::uint32_t payloadWordsRemaining() const;
+    std::uint64_t wordsIngested() const;
 
   private:
+    std::uint32_t payloadWordCount(const VIFCommand &command) const;
+    void validatePayloadAlignment(const VIFCommand &command) const;
+
     VIFType type;
     std::uint16_t cycleRegister = 0;
     std::uint8_t modeRegister = 0;
@@ -40,6 +63,10 @@ class VIF
     bool path3Mask = false;
     bool markFlag = false;
     std::uint32_t codeRegister = 0;
+    VIFCommand streamCommand;
+    std::uint32_t streamPayloadWordCount = 0;
+    std::uint32_t streamPayloadWordsRemaining = 0;
+    std::uint64_t streamWordsIngested = 0;
 };
 
 #endif

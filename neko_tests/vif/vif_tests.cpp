@@ -7,6 +7,8 @@
 namespace
 {
   constexpr std::uint16_t MAX_ENCODED_COUNT = 256;
+  constexpr std::uint32_t DIRECT_ZERO_QUADWORD_COUNT = 65536;
+  constexpr std::uint32_t WORDS_PER_QUADWORD = 4;
   constexpr std::uint8_t UNDEFINED_COMMAND = 0x08;
 
   std::uint32_t vifCode(
@@ -258,5 +260,187 @@ TEST_CASE("VIF State Tests")
     REQUIRE(
       vif.lastCode() ==
       vifCode(VIFCommandEncoding::MPG, 1, 0));
+  }
+}
+
+TEST_CASE("VIF Packet Stream Tests")
+{
+  SECTION("Single-word commands remain packed in one continuous stream")
+  {
+    VIF vif(VIFType::VIF1);
+
+    const VIFStreamWord cycle = vif.ingestWord(
+      vifCode(VIFCommandEncoding::STCYCL, 0, 0x0402));
+    const VIFStreamWord base = vif.ingestWord(
+      vifCode(VIFCommandEncoding::BASE, 0, 0x0123));
+
+    REQUIRE(cycle.kind == VIFStreamWordKind::Command);
+    REQUIRE(cycle.command.kind == VIFCommandKind::STCYCL);
+    REQUIRE(cycle.payloadWordCount == 0);
+    REQUIRE(cycle.packetComplete);
+    REQUIRE(base.kind == VIFStreamWordKind::Command);
+    REQUIRE(base.command.kind == VIFCommandKind::BASE);
+    REQUIRE(base.packetComplete);
+    REQUIRE(vif.cycle() == 0x0402);
+    REQUIRE(vif.base() == 0x0123);
+    REQUIRE(vif.wordsIngested() == 2);
+  }
+
+  SECTION("Payload words are not decoded as commands across fragments")
+  {
+    VIF vif(VIFType::VIF1);
+    const std::uint32_t rowCode =
+      vifCode(VIFCommandEncoding::STROW);
+
+    const VIFStreamWord command = vif.ingestWord(rowCode);
+
+    REQUIRE(command.kind == VIFStreamWordKind::Command);
+    REQUIRE(command.command.kind == VIFCommandKind::STROW);
+    REQUIRE(command.payloadWordCount == 4);
+    REQUIRE(!command.packetComplete);
+    REQUIRE(vif.awaitingPayload());
+    REQUIRE(vif.payloadWordsRemaining() == 4);
+    REQUIRE(vif.lastCode() == rowCode);
+
+    for (std::uint32_t index = 0; index < 3; ++index)
+    {
+      const VIFStreamWord payload = vif.ingestWord(0x80000000 | index);
+      REQUIRE(payload.kind == VIFStreamWordKind::Payload);
+      REQUIRE(payload.command.kind == VIFCommandKind::STROW);
+      REQUIRE(payload.payloadIndex == index);
+      REQUIRE(payload.payloadWordCount == 4);
+      REQUIRE(!payload.packetComplete);
+    }
+
+    REQUIRE(vif.awaitingPayload());
+    REQUIRE(vif.payloadWordsRemaining() == 1);
+
+    const VIFStreamWord finalPayload = vif.ingestWord(
+      vifCode(UNDEFINED_COMMAND));
+    REQUIRE(finalPayload.kind == VIFStreamWordKind::Payload);
+    REQUIRE(finalPayload.payloadIndex == 3);
+    REQUIRE(finalPayload.packetComplete);
+    REQUIRE(!vif.awaitingPayload());
+
+    const VIFStreamWord nextCommand = vif.ingestWord(
+      vifCode(VIFCommandEncoding::NOP));
+    REQUIRE(nextCommand.kind == VIFStreamWordKind::Command);
+    REQUIRE(nextCommand.command.kind == VIFCommandKind::NOP);
+  }
+
+  SECTION("MPG payloads require 64-bit alignment and track partial input")
+  {
+    VIF misaligned(VIFType::VIF0);
+    REQUIRE_THROWS_WITH(
+      misaligned.ingestWord(vifCode(VIFCommandEncoding::MPG, 2)),
+      "VIF MPG payload is not 64-bit aligned.");
+    REQUIRE(misaligned.wordsIngested() == 0);
+    REQUIRE(!misaligned.awaitingPayload());
+
+    VIF aligned(VIFType::VIF0);
+    aligned.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    const VIFStreamWord mpg = aligned.ingestWord(
+      vifCode(VIFCommandEncoding::MPG, 2, 7));
+
+    REQUIRE(mpg.payloadWordCount == 4);
+    REQUIRE(aligned.payloadWordsRemaining() == 4);
+
+    aligned.ingestWord(0x11111111);
+    aligned.ingestWord(0x22222222);
+    REQUIRE(aligned.payloadWordsRemaining() == 2);
+
+    aligned.ingestWord(0x33333333);
+    const VIFStreamWord finalPayload =
+      aligned.ingestWord(0x44444444);
+    REQUIRE(finalPayload.packetComplete);
+    REQUIRE(aligned.wordsIngested() == 6);
+  }
+
+  SECTION("DIRECT payloads require 128-bit alignment")
+  {
+    VIF vif(VIFType::VIF1);
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+
+    REQUIRE_THROWS_WITH(
+      vif.ingestWord(vifCode(VIFCommandEncoding::DIRECT, 0, 1)),
+      "VIF DIRECT payload is not 128-bit aligned.");
+    REQUIRE(vif.wordsIngested() == 1);
+
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    const VIFStreamWord direct = vif.ingestWord(
+      vifCode(VIFCommandEncoding::DIRECT, 0, 1));
+
+    REQUIRE(direct.payloadWordCount == 4);
+    REQUIRE(vif.payloadWordsRemaining() == 4);
+  }
+
+  SECTION("Zero DIRECT size represents 65536 quadwords")
+  {
+    VIF vif(VIFType::VIF1);
+    for (int index = 0; index < 3; ++index)
+    {
+      vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    }
+
+    const VIFStreamWord direct = vif.ingestWord(
+      vifCode(VIFCommandEncoding::DIRECT));
+
+    REQUIRE(
+      direct.payloadWordCount ==
+      DIRECT_ZERO_QUADWORD_COUNT * WORDS_PER_QUADWORD);
+    REQUIRE(
+      vif.payloadWordsRemaining() ==
+      DIRECT_ZERO_QUADWORD_COUNT * WORDS_PER_QUADWORD);
+  }
+
+  SECTION("UNPACK payload size follows format and skipping mode")
+  {
+    VIF vif(VIFType::VIF1);
+    vif.ingestWord(vifCode(VIFCommandEncoding::STCYCL, 0, 0x0204));
+
+    const VIFStreamWord unpack = vif.ingestWord(vifCode(
+      VIFCommandEncoding::UNPACK | VIFUnpackEncoding::V2_16,
+      3));
+
+    REQUIRE(unpack.payloadWordCount == 3);
+    REQUIRE(vif.payloadWordsRemaining() == 3);
+  }
+
+  SECTION("UNPACK payload size follows filling mode and word padding")
+  {
+    VIF vif(VIFType::VIF1);
+    vif.ingestWord(vifCode(VIFCommandEncoding::STCYCL, 0, 0x0402));
+
+    const VIFStreamWord unpack = vif.ingestWord(vifCode(
+      VIFCommandEncoding::UNPACK | VIFUnpackEncoding::V3_16,
+      9));
+
+    REQUIRE(unpack.payloadWordCount == 8);
+    REQUIRE(vif.payloadWordsRemaining() == 8);
+  }
+
+  SECTION("Filling mode can produce output without consuming payload")
+  {
+    VIF vif(VIFType::VIF1);
+    vif.ingestWord(vifCode(VIFCommandEncoding::STCYCL, 0, 0x0400));
+
+    const VIFStreamWord unpack = vif.ingestWord(vifCode(
+      VIFCommandEncoding::UNPACK | VIFUnpackEncoding::V4_32,
+      8));
+
+    REQUIRE(unpack.payloadWordCount == 0);
+    REQUIRE(unpack.packetComplete);
+    REQUIRE(!vif.awaitingPayload());
+  }
+
+  SECTION("Direct code processing cannot bypass an active payload")
+  {
+    VIF vif(VIFType::VIF1);
+    vif.ingestWord(vifCode(VIFCommandEncoding::STMASK));
+
+    REQUIRE_THROWS_WITH(
+      vif.processCode(vifCode(VIFCommandEncoding::NOP)),
+      "Cannot process a VIFcode while a payload is in progress.");
   }
 }
