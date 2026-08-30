@@ -363,7 +363,7 @@ reviewable and avoid host-library values as the source of truth.
       transfer semantics, including CYCLE, MASK, MODE, TOPS, and wrapping
 - [x] Support `MSCAL`, `MSCALF`, and `MSCNT` execution control together with
       TOP/TOPS/DBF transitions and VU `XTOP`/`XITOP`
-- [ ] Decode stateful GIF packets, including PACKED, REGLIST, IMAGE, register
+- [x] Decode stateful GIF packets, including PACKED, REGLIST, IMAGE, register
       descriptors, A+D writes, and packet termination
 - [ ] Route VIF1 `DIRECT` and `DIRECTHL` payloads into GIF PATH2
 - [ ] Implement minimal GS drawing registers, local memory, and PSMCT32
