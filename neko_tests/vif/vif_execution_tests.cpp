@@ -176,9 +176,11 @@ TEST_CASE("VIF Microprogram Execution Tests")
     const std::uint16_t topBeforeRejectedStart = vif.top();
     const std::uint16_t topsBeforeRejectedStart = vif.tops();
     const bool dbfBeforeRejectedStart = vif.doubleBufferFlag();
-    REQUIRE_THROWS_WITH(
-      vif.ingestWord(vifCode(VIFCommandEncoding::MSCAL)),
-      "VIF microprogram execution is waiting for the VPU.");
+    const std::uint64_t wordsBeforeStall = vif.wordsIngested();
+    const VIFStreamWord stalled =
+      vif.ingestWord(vifCode(VIFCommandEncoding::MSCAL));
+    REQUIRE(stalled.stalled);
+    REQUIRE(vif.wordsIngested() == wordsBeforeStall);
     REQUIRE(vif.top() == topBeforeRejectedStart);
     REQUIRE(vif.tops() == topsBeforeRejectedStart);
     REQUIRE(vif.doubleBufferFlag() == dbfBeforeRejectedStart);

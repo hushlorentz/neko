@@ -244,6 +244,50 @@ TEST_CASE("GIF PATH1 Transfer Tests")
     REQUIRE(!decoder.packetInProgress());
   }
 
+  SECTION("PATH1 queues behind an active PATH2 packet")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    VPU vpu(VPUType::VU1);
+    GIFPath1Transfer path1(arbiter);
+    path1.attachVPU(&vpu);
+    arbiter.transferQuadword(
+      GIFPath::Path2,
+      gifTag(
+        0,
+        false,
+        GIFDataFormat::Packed,
+        0,
+        0));
+    vpu.writeDataQuadword(
+      7,
+      gifTag(
+        0,
+        true,
+        GIFDataFormat::Packed,
+        0,
+        0));
+
+    path1.startPath1Transfer(7);
+    path1.advancePath1Transfer();
+    REQUIRE(path1.path1TransferActive());
+    REQUIRE(path1.currentQwordAddress() == 7);
+    REQUIRE(path1.transferredQuadwordCount() == 0);
+
+    arbiter.transferQuadword(
+      GIFPath::Path2,
+      gifTag(
+        0,
+        true,
+        GIFDataFormat::Packed,
+        0,
+        0));
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+    path1.advancePath1Transfer();
+    REQUIRE(!path1.path1TransferActive());
+    REQUIRE(path1.transferredQuadwordCount() == 1);
+  }
+
   SECTION("PATH1 cannot start inside an existing GIF packet")
   {
     GIFDecoder decoder;

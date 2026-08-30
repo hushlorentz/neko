@@ -36,6 +36,7 @@ add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/fp_register.cpp
     neko/ee/gif/gif.cpp
+    neko/ee/gif/gif_path_arbiter.cpp
     neko/ee/gif/gif_path1.cpp
     neko/ee/gs/gs.cpp
     neko/ee/vif/vif.cpp
@@ -84,6 +85,7 @@ add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/gif/gif_tests.cpp
+    neko_tests/gif/gif_path_arbiter_tests.cpp
     neko_tests/gif/gif_path1_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp
@@ -91,6 +93,7 @@ add_executable(neko_tests
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
     neko_tests/vif/vif_path2_tests.cpp
+    neko_tests/vif/vif_synchronization_tests.cpp
     neko_tests/vif/vif_unpack_tests.cpp
     neko_tests/vpu/vpu_flag_tests.cpp
     neko_tests/vpu/vpu_clipping_flag_tests.cpp

@@ -9,13 +9,22 @@ namespace
 }
 
 GIFPath1Transfer::GIFPath1Transfer(GIFDecoder *decoder) :
-  gifDecoder(decoder)
+  ownedArbiter(
+    decoder == nullptr
+      ? nullptr
+      : new GIFPathArbiter(decoder)),
+  gifPathArbiter(ownedArbiter.get())
 {
-  if (gifDecoder == nullptr)
+  if (gifPathArbiter == nullptr)
   {
     throw std::invalid_argument(
       "GIF PATH1 requires a non-null decoder.");
   }
+}
+
+GIFPath1Transfer::GIFPath1Transfer(GIFPathArbiter &arbiter) :
+  gifPathArbiter(&arbiter)
+{
 }
 
 void GIFPath1Transfer::attachVPU(VPU *attachedVPU)
@@ -63,8 +72,9 @@ void GIFPath1Transfer::startPath1Transfer(
     throw std::runtime_error(
       "GIF PATH1 transfer is already active.");
   }
-  if (!gifDecoder->awaitingTag() ||
-      gifDecoder->packetInProgress())
+  if (gifPathArbiter->activePath() == GIFPath::Idle &&
+      (!gifPathArbiter->decoderAwaitingTag() ||
+       gifPathArbiter->decoderPacketInProgress()))
   {
     throw std::runtime_error(
       "GIF PATH1 must start at a GIF packet boundary.");
@@ -75,6 +85,7 @@ void GIFPath1Transfer::startPath1Transfer(
   qwordAddress = startQwordAddress % qwordCount;
   transferredQuadwords = 0;
   active = true;
+  gifPathArbiter->requestPath(GIFPath::Path1);
 }
 
 void GIFPath1Transfer::advancePath1Transfer()
@@ -84,14 +95,20 @@ void GIFPath1Transfer::advancePath1Transfer()
     return;
   }
 
-  const GIFDecodeResult result =
-    gifDecoder->ingestQuadword(
+  const GIFPathTransferResult transfer =
+    gifPathArbiter->transferQuadword(
+      GIFPath::Path1,
       vpu->readDataQuadword(qwordAddress));
+  if (!transfer.accepted)
+  {
+    return;
+  }
+
   const std::size_t qwordCount =
     vpu->dataMemorySize() / GIF_QUADWORD_BYTES;
   qwordAddress = (qwordAddress + 1) % qwordCount;
   ++transferredQuadwords;
-  if (result.packetComplete)
+  if (transfer.decodeResult.packetComplete)
   {
     active = false;
   }

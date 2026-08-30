@@ -4,9 +4,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
-#include "gif.hpp"
+#include "gif_path_arbiter.hpp"
 #include "vif_command.hpp"
 #include "vpu_vif_register_source.hpp"
 
@@ -26,6 +27,7 @@ struct VIFStreamWord
   std::uint32_t payloadIndex = 0;
   std::uint32_t payloadWordCount = 0;
   bool packetComplete = false;
+  bool stalled = false;
   bool gifQuadwordDecoded = false;
   GIFDecodeResult gifResult;
 };
@@ -38,6 +40,7 @@ class VIF : public VUVIFRegisterSource
     VIFType unitType() const;
     void attachVPU(VPU *attachedVPU);
     void attachGIFDecoder(GIFDecoder *attachedGIFDecoder);
+    void attachGIFPathArbiter(GIFPathArbiter *attachedArbiter);
     VIFCommand processCode(std::uint32_t code);
     VIFStreamWord ingestWord(std::uint32_t word);
 
@@ -60,6 +63,8 @@ class VIF : public VUVIFRegisterSource
     bool markDetected() const;
     std::uint32_t lastCode() const;
     bool awaitingPayload() const;
+    bool interruptPending() const;
+    void clearInterrupt();
     std::uint32_t payloadWordsRemaining() const;
     std::uint64_t wordsIngested() const;
 
@@ -67,9 +72,11 @@ class VIF : public VUVIFRegisterSource
     std::uint32_t payloadWordCount(const VIFCommand &command) const;
     void validatePayloadAlignment(const VIFCommand &command) const;
     void preparePayload(const VIFCommand &command);
-    void consumePayloadWord(
+    bool consumePayloadWord(
       std::uint32_t word,
       VIFStreamWord *streamWord);
+    bool commandReady(const VIFCommand &command) const;
+    void completePayloadCommand();
     void startMicroProgram(const VIFCommand &command);
     void updateProgramStartRegisters();
     void executeUNPACK();
@@ -81,7 +88,8 @@ class VIF : public VUVIFRegisterSource
 
     VIFType type;
     VPU *vpu = nullptr;
-    GIFDecoder *gifDecoder = nullptr;
+    std::unique_ptr<GIFPathArbiter> ownedGIFPathArbiter;
+    GIFPathArbiter *gifPathArbiter = nullptr;
     std::uint16_t cycleRegister = 0;
     std::uint8_t modeRegister = 0;
     std::uint32_t maskRegister = 0;
@@ -97,6 +105,7 @@ class VIF : public VUVIFRegisterSource
     bool dbf = false;
     bool path3Mask = false;
     bool markFlag = false;
+    bool interruptFlag = false;
     std::uint32_t codeRegister = 0;
     VIFCommand streamCommand;
     std::uint32_t streamPayloadWordCount = 0;

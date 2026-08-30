@@ -105,8 +105,47 @@ void VIF::attachGIFDecoder(GIFDecoder *attachedGIFDecoder)
     throw std::runtime_error(
       "Only VIF1 can attach to GIF PATH2.");
   }
+  if (gifPathArbiter != nullptr &&
+      !gifPathArbiter->pathsIdle())
+  {
+    throw std::runtime_error(
+      "Cannot replace GIF routing during a transfer.");
+  }
 
-  gifDecoder = attachedGIFDecoder;
+  ownedGIFPathArbiter.reset(
+    new GIFPathArbiter(attachedGIFDecoder));
+  gifPathArbiter = ownedGIFPathArbiter.get();
+  gifPathArbiter->setPath3MaskedByVIF(path3Mask);
+}
+
+void VIF::attachGIFPathArbiter(
+  GIFPathArbiter *attachedArbiter)
+{
+  if (awaitingPayload())
+  {
+    throw std::runtime_error(
+      "Cannot attach a GIF path arbiter while a VIF payload is in progress.");
+  }
+  if (attachedArbiter == nullptr)
+  {
+    throw std::invalid_argument(
+      "Cannot attach a null GIF path arbiter.");
+  }
+  if (type != VIFType::VIF1)
+  {
+    throw std::runtime_error(
+      "Only VIF1 can attach to GIF PATH2.");
+  }
+  if (gifPathArbiter != nullptr &&
+      !gifPathArbiter->pathsIdle())
+  {
+    throw std::runtime_error(
+      "Cannot replace GIF routing during a transfer.");
+  }
+
+  ownedGIFPathArbiter.reset();
+  gifPathArbiter = attachedArbiter;
+  gifPathArbiter->setPath3MaskedByVIF(path3Mask);
 }
 
 VIFCommand VIF::processCode(std::uint32_t code)
@@ -118,6 +157,17 @@ VIFCommand VIF::processCode(std::uint32_t code)
   }
 
   const VIFCommand command = decodeVIFCommand(code, type);
+  if (interruptFlag &&
+      command.kind != VIFCommandKind::MARK)
+  {
+    throw std::runtime_error(
+      "VIF command processing is stalled by an interrupt.");
+  }
+  if (!commandReady(command))
+  {
+    throw std::runtime_error(
+      "VIF command is waiting for synchronization.");
+  }
   codeRegister = code;
 
   switch (command.kind)
@@ -147,10 +197,23 @@ VIFCommand VIF::processCode(std::uint32_t code)
     case VIFCommandKind::MSKPATH3:
       path3Mask =
         (command.immediate & VIFImmediateEncoding::MSKPATH3Mask) != 0;
+      if (gifPathArbiter != nullptr)
+      {
+        gifPathArbiter->setPath3MaskedByVIF(path3Mask);
+      }
       break;
     case VIFCommandKind::MARK:
       markRegister = command.immediate;
       markFlag = true;
+      break;
+    case VIFCommandKind::FLUSHE:
+    case VIFCommandKind::FLUSH:
+    case VIFCommandKind::FLUSHA:
+      if (vpu == nullptr)
+      {
+        throw std::runtime_error(
+          "VIF synchronization requires an attached VPU.");
+      }
       break;
     case VIFCommandKind::MSCAL:
     case VIFCommandKind::MSCALF:
@@ -162,6 +225,10 @@ VIFCommand VIF::processCode(std::uint32_t code)
         "VIF command execution requires its owning subsystem.");
   }
 
+  if (command.interrupt)
+  {
+    interruptFlag = true;
+  }
   return command;
 }
 
@@ -233,15 +300,33 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
     streamWord.payloadWordCount = streamPayloadWordCount;
     streamWord.payloadIndex =
       streamPayloadWordCount - streamPayloadWordsRemaining;
-    consumePayloadWord(word, &streamWord);
+    if (!consumePayloadWord(word, &streamWord))
+    {
+      streamWord.stalled = true;
+      return streamWord;
+    }
 
     --streamPayloadWordsRemaining;
     ++streamWordsIngested;
     streamWord.packetComplete = !awaitingPayload();
+    if (streamWord.packetComplete)
+    {
+      completePayloadCommand();
+    }
     return streamWord;
   }
 
   const VIFCommand command = decodeVIFCommand(word, type);
+  streamWord.kind = VIFStreamWordKind::Command;
+  streamWord.command = command;
+  if ((interruptFlag &&
+       command.kind != VIFCommandKind::MARK) ||
+      !commandReady(command))
+  {
+    streamWord.stalled = true;
+    return streamWord;
+  }
+
   validatePayloadAlignment(command);
   preparePayload(command);
 
@@ -258,7 +343,6 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
   streamPayloadWordsRemaining = streamPayloadWordCount;
   ++streamWordsIngested;
 
-  streamWord.kind = VIFStreamWordKind::Command;
   streamWord.command = streamCommand;
   streamWord.payloadWordCount = streamPayloadWordCount;
   streamWord.packetComplete = !awaitingPayload();
@@ -271,6 +355,7 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
       commandPayloadWordCount == 0)
   {
     executeUNPACK();
+    completePayloadCommand();
   }
 
   return streamWord;
@@ -281,7 +366,7 @@ void VIF::preparePayload(const VIFCommand &command)
   if (command.kind == VIFCommandKind::DIRECT ||
       command.kind == VIFCommandKind::DIRECTHL)
   {
-    if (gifDecoder == nullptr)
+    if (gifPathArbiter == nullptr)
     {
       throw std::runtime_error(
         "VIF DIRECT requires an attached GIF decoder.");
@@ -336,7 +421,7 @@ void VIF::preparePayload(const VIFCommand &command)
   mpgLowerInstructionPending = false;
 }
 
-void VIF::consumePayloadWord(
+bool VIF::consumePayloadWord(
   std::uint32_t word,
   VIFStreamWord *streamWord)
 {
@@ -347,20 +432,20 @@ void VIF::consumePayloadWord(
   {
     case VIFCommandKind::STMASK:
       maskRegister = word;
-      return;
+      return true;
     case VIFCommandKind::STROW:
       rowRegisters[payloadWordIndex] = word;
-      return;
+      return true;
     case VIFCommandKind::STCOL:
       columnRegisters[payloadWordIndex] = word;
-      return;
+      return true;
     case VIFCommandKind::UNPACK:
       unpackPayload.push_back(word);
       if (streamPayloadWordsRemaining == 1)
       {
         executeUNPACK();
       }
-      return;
+      return true;
     case VIFCommandKind::MPG:
       break;
     case VIFCommandKind::DIRECT:
@@ -372,21 +457,28 @@ void VIF::consumePayloadWord(
       if (quadwordWordIndex ==
           VIF_DIRECT_WORDS_PER_QUADWORD - 1)
       {
-        streamWord->gifResult =
-          gifDecoder->ingestQuadword(directQuadword);
+        const GIFPathTransferResult transfer =
+          gifPathArbiter->transferQuadword(
+            GIFPath::Path2,
+            directQuadword);
+        if (!transfer.accepted)
+        {
+          return false;
+        }
+        streamWord->gifResult = transfer.decodeResult;
         streamWord->gifQuadwordDecoded = true;
       }
-      return;
+      return true;
     }
     default:
-      return;
+      return true;
   }
 
   if (!mpgLowerInstructionPending)
   {
     mpgLowerInstruction = word;
     mpgLowerInstructionPending = true;
-    return;
+    return true;
   }
 
   constexpr std::uint32_t MPG_WORDS_PER_INSTRUCTION = 2;
@@ -397,6 +489,43 @@ void VIF::consumePayloadWord(
     mpgLowerInstruction,
     word);
   mpgLowerInstructionPending = false;
+  return true;
+}
+
+bool VIF::commandReady(const VIFCommand &command) const
+{
+  const bool microprogramEnded =
+    vpu == nullptr || vpu->getState() != VPU_STATE_RUN;
+  const bool path1And2Ended =
+    gifPathArbiter == nullptr ||
+    gifPathArbiter->pathsIdle(false);
+  const bool allPathsEnded =
+    gifPathArbiter == nullptr ||
+    gifPathArbiter->pathsIdle(true);
+
+  switch (command.kind)
+  {
+    case VIFCommandKind::FLUSHE:
+    case VIFCommandKind::MSCAL:
+    case VIFCommandKind::MSCNT:
+    case VIFCommandKind::MPG:
+      return microprogramEnded;
+    case VIFCommandKind::FLUSH:
+    case VIFCommandKind::MSCALF:
+      return microprogramEnded && path1And2Ended;
+    case VIFCommandKind::FLUSHA:
+      return microprogramEnded && allPathsEnded;
+    default:
+      return true;
+  }
+}
+
+void VIF::completePayloadCommand()
+{
+  if (streamCommand.interrupt)
+  {
+    interruptFlag = true;
+  }
 }
 
 void VIF::executeUNPACK()
@@ -753,6 +882,16 @@ std::uint32_t VIF::lastCode() const
 bool VIF::awaitingPayload() const
 {
   return streamPayloadWordsRemaining != 0;
+}
+
+bool VIF::interruptPending() const
+{
+  return interruptFlag;
+}
+
+void VIF::clearInterrupt()
+{
+  interruptFlag = false;
 }
 
 std::uint32_t VIF::payloadWordsRemaining() const

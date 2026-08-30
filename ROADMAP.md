@@ -371,8 +371,10 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Render a flat untextured triangle with GS fixed-point coordinates,
       scissoring, and top-left coverage rules
 - [x] Route VU1 `XGKICK` output into GIF PATH1
-- [ ] Model GIF path arbitration and VIF synchronization, stalls, and
-      interrupts
+- [x] Add packet-boundary GIF path arbitration, PATH2 retry stalls, VIF
+      synchronization commands, `MSKPATH3`, and command interrupts
+- [ ] Add PATH3 DMA transport, IMAGE slicing and interruption, `DIRECTHL`
+      non-preemption, and exact GIF arbitration idle-cycle timing
 - [ ] Expand toward additional primitives, image transfer, textures, blending,
       depth, display timing, and framebuffer presentation
 
