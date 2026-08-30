@@ -124,7 +124,7 @@ TEST_CASE("VU compound FMAC trace diagnostics")
     const VPUTraceEvent event = executeTracedInstruction(
       &vpu,
       &instructions,
-      0,
+      VPU_DEST_XYZ_FIELDS,
       VPU_REGISTER_VF05,
       VPU_REGISTER_VF06,
       VPU_REGISTER_VF02,

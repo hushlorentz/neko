@@ -299,6 +299,40 @@ TEST_CASE("VU Lower Instruction Tests")
     }
   }
 
+  SECTION("Reserved branch fields are rejected")
+  {
+    const std::uint32_t nonCanonicalBranches[] = {
+      branch(VPU_B_ENCODING, VPU_REGISTER_VI01, 0, 0),
+      branch(VPU_B_ENCODING, 0, VPU_REGISTER_VI01, 0),
+      branch(VPU_BAL_ENCODING, VPU_REGISTER_VI01, VPU_REGISTER_VI02, 0),
+      branch(VPU_IBGEZ_ENCODING, VPU_REGISTER_VI01, VPU_REGISTER_VI02, 0)
+    };
+
+    for (const std::uint32_t instruction : nonCanonicalBranches)
+    {
+      REQUIRE_THROWS_WITH(
+        decodeLowerInstruction(instruction),
+        "Unsupported VU lower instruction.");
+    }
+  }
+
+  SECTION("Reserved flag fields are rejected")
+  {
+    const std::uint32_t nonCanonicalFlags[] = {
+      VPU_FCGET_ENCODING | (1u << VPU_FS_REG_SHIFT),
+      VPU_FMEQ_ENCODING | 1u,
+      VPU_FSEQ_ENCODING | (1u << VPU_FS_REG_SHIFT),
+      VPU_FSSET_ENCODING | (1u << VPU_FT_REG_SHIFT)
+    };
+
+    for (const std::uint32_t instruction : nonCanonicalFlags)
+    {
+      REQUIRE_THROWS_WITH(
+        decodeLowerInstruction(instruction),
+        "Unsupported VU lower instruction.");
+    }
+  }
+
   SECTION("Remaining IALU encodings decode their register fields")
   {
     for (uint32_t encoding : {

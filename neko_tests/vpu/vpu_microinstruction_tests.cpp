@@ -105,4 +105,54 @@ TEST_CASE("VPU Microinstruction Tests")
       REQUIRE_THROWS_WITH(vpu.initMicroMode(), "Unsupported VU upper instruction.");
       REQUIRE(vpu.getState() == VPU_STATE_STOP);
     }
+
+    SECTION("Reserved upper fields are rejected for every fixed-field family")
+    {
+      const std::uint32_t nonCanonicalInstructions[] = {
+        VPU_NOP | VPU_DEST_X_BIT,
+        VPU_ADD | VPU_UPPER_RESERVED_BITS_MASK,
+        VPU_ADDi | (1u << VPU_FT_REG_SHIFT),
+        VPU_ADDq | (1u << VPU_FT_REG_SHIFT),
+        VPU_ADDAi | (1u << VPU_FT_REG_SHIFT),
+        VPU_ADDAq | (1u << VPU_FT_REG_SHIFT),
+        VPU_MADDi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MADDq | (1u << VPU_FT_REG_SHIFT),
+        VPU_MADDAi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MADDAq | (1u << VPU_FT_REG_SHIFT),
+        VPU_MAXi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MINIi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MSUBi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MSUBq | (1u << VPU_FT_REG_SHIFT),
+        VPU_MSUBAi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MSUBAq | (1u << VPU_FT_REG_SHIFT),
+        VPU_MULi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MULq | (1u << VPU_FT_REG_SHIFT),
+        VPU_MULAi | (1u << VPU_FT_REG_SHIFT),
+        VPU_MULAq | (1u << VPU_FT_REG_SHIFT),
+        VPU_SUBi | (1u << VPU_FT_REG_SHIFT),
+        VPU_SUBq | (1u << VPU_FT_REG_SHIFT),
+        VPU_SUBAi | (1u << VPU_FT_REG_SHIFT),
+        VPU_SUBAq | (1u << VPU_FT_REG_SHIFT),
+        VPU_CLIP | VPU_DEST_ALL_FIELDS,
+        VPU_OPMULA | VPU_DEST_ALL_FIELDS,
+        VPU_OPMSUB | VPU_DEST_ALL_FIELDS
+      };
+
+      for (const std::uint32_t upper : nonCanonicalInstructions)
+      {
+        CAPTURE(upper);
+        VPU rejected;
+        std::vector<uint8_t> instructions;
+        appendInstructionPair(
+          &instructions,
+          VPU_E_BIT | upper,
+          VPU_LOWER_NOP);
+        rejected.uploadMicroInstructions(instructions);
+
+        REQUIRE_THROWS_WITH(
+          rejected.initMicroMode(),
+          "Unsupported VU upper instruction.");
+        REQUIRE(rejected.getState() == VPU_STATE_STOP);
+      }
+    }
 }

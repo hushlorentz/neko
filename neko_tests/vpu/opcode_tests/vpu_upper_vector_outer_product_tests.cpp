@@ -23,7 +23,7 @@ TEST_CASE("VPU Microinstruction OPMULA Tests")
   SECTION("OPMULA calculates the second part of the vector outer product of the xyz fields of the ft and fs vectors and stores the result in the accumulator")
   {
     vpu.loadAccumulator(100, 100, 100, 100);
-    executeSingleUpperInstruction(&vpu, &instructions, 0, 0, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_OPMULA);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_XYZ_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, 0, VPU_OPMULA);
 
     REQUIRE(vpu.accumulator.x == -25);
     REQUIRE(vpu.accumulator.y == -5);
@@ -37,7 +37,7 @@ TEST_CASE("VPU Microinstruction OPMULA Tests")
 
   SECTION("OPMULA sets the correct flags for overflow, zero and underflow")
   {
-    executeSingleUpperInstruction(&vpu, &instructions, 0, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF06, 0, VPU_OPMULA);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_XYZ_FIELDS, VPU_REGISTER_VF05, VPU_REGISTER_VF06, 0, VPU_OPMULA);
 
     REQUIRE(vpu.accumulator.x.bits() == 0x7fffffffu);
     REQUIRE(vpu.accumulator.y == 0);
@@ -51,7 +51,7 @@ TEST_CASE("VPU Microinstruction OPMULA Tests")
   SECTION("OPMSUB calculates the first part of the vector outer product of the xyz fields of the ft and fs vectors and stores the result in the fd vector")
   {
     vpu.loadAccumulator(100, 100, 100, 100);
-    executeSingleUpperInstruction(&vpu, &instructions, 0, 0, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_OPMSUB);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_XYZ_FIELDS, VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF02, VPU_OPMSUB);
 
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x == 125);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y  == 105);
@@ -62,7 +62,7 @@ TEST_CASE("VPU Microinstruction OPMULA Tests")
 
   SECTION("OPMSUB sets the correct flags for overflow, zero and underflow")
   {
-    executeSingleUpperInstruction(&vpu, &instructions, 0, 0, VPU_REGISTER_VF05, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_OPMSUB);
+    executeSingleUpperInstruction(&vpu, &instructions, 0, VPU_DEST_XYZ_FIELDS, VPU_REGISTER_VF05, VPU_REGISTER_VF06, VPU_REGISTER_VF02, VPU_OPMSUB);
 
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->x.bits() == 0xffffffffu);
     REQUIRE(vpu.fpRegisterValue(VPU_REGISTER_VF02)->y == 0);

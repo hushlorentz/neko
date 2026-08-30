@@ -233,7 +233,14 @@ namespace
     appendInstructionPair(
       &instructions,
       VPU_NOP,
-      branch(encoding, it, VPU_REGISTER_VI01, 2));
+      branch(
+        encoding,
+        it,
+        encoding == VPU_B_ENCODING ||
+        encoding == VPU_BAL_ENCODING
+          ? VPU_REGISTER_VI00
+          : VPU_REGISTER_VI01,
+        2));
     appendInstructionPair(
       &instructions,
       VPU_NOP,

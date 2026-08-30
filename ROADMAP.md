@@ -258,11 +258,19 @@ floating-point assembly integration:
       Manual with implemented or dependency-aligned roadmap families
 - [x] Keep EE COP2 macro-mode encodings in the system-level milestone rather
       than conflating them with VU microprogram decoding
-- [ ] After the milestone-driven instruction families are complete, perform
+- [x] After the milestone-driven instruction families are complete, perform
       the final implementation audit: verify decoding, execution, timing,
       hazards, and integration coverage for every architecturally meaningful
       VU0/VU1 microinstruction and deterministic rejection of every reserved
       encoding
+  - All 59 upper mnemonics are covered by 95 concrete opcodes after expanding
+    the twelve `bc` families.
+  - All 67 lower instructions without VIF state dependencies are implemented;
+    `LOI` uses the upper I-bit path, while `XTOP` and `XITOP` remain assigned to
+    the Milestone 3 VIF TOP/ITOP work.
+  - Fixed-zero and fixed-destination fields are validated for upper scalar,
+    `NOP`, `CLIP`, and outer-product encodings and for lower branch, flag,
+    synchronization, transfer, square-root, and external-control encodings.
 
 ### Lower Data Movement and Special State
 

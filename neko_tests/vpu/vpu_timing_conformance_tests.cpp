@@ -259,7 +259,7 @@ TEST_CASE("VU Manual Timing Conformance Tests")
       &instructions,
       upperInstruction(
         VPU_OPMSUB,
-        0,
+        VPU_DEST_XYZ_FIELDS,
         VPU_REGISTER_VF05,
         VPU_REGISTER_VF04,
         VPU_REGISTER_VF01));
@@ -302,7 +302,9 @@ TEST_CASE("VU Manual Timing Conformance Tests")
         &instructions,
         upperInstruction(
           operation.opCode,
-          operation.opCode == VPU_OPMSUB ? 0 : VPU_DEST_ALL_FIELDS,
+          operation.opCode == VPU_OPMSUB ?
+            VPU_DEST_XYZ_FIELDS :
+            VPU_DEST_ALL_FIELDS,
           VPU_REGISTER_VF05,
           VPU_REGISTER_VF04,
           VPU_REGISTER_VF01,
@@ -588,7 +590,7 @@ TEST_CASE("VU Manual Timing Conformance Tests")
       &instructions,
       upperInstruction(
         VPU_CLIP,
-        VPU_DEST_ALL_FIELDS,
+        VPU_DEST_XYZ_FIELDS,
         VPU_REGISTER_VF02,
         VPU_REGISTER_VF03,
         VPU_REGISTER_VF00));

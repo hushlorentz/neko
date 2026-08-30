@@ -23,6 +23,66 @@ using namespace std;
 
 namespace
 {
+  bool upperInstructionUsesScalarRegister(uint16_t opCode)
+  {
+    switch (opCode)
+    {
+      case VPU_ADDi:
+      case VPU_ADDAi:
+      case VPU_ADDq:
+      case VPU_ADDAq:
+      case VPU_MADDi:
+      case VPU_MADDAi:
+      case VPU_MADDq:
+      case VPU_MADDAq:
+      case VPU_MAXi:
+      case VPU_MINIi:
+      case VPU_MSUBi:
+      case VPU_MSUBAi:
+      case VPU_MSUBq:
+      case VPU_MSUBAq:
+      case VPU_MULi:
+      case VPU_MULAi:
+      case VPU_MULq:
+      case VPU_MULAq:
+      case VPU_SUBi:
+      case VPU_SUBAi:
+      case VPU_SUBq:
+      case VPU_SUBAq:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool isCanonicalUpperEncoding(uint16_t opCode, uint32_t instruction)
+  {
+    if ((instruction & VPU_UPPER_RESERVED_BITS_MASK) != 0)
+    {
+      return false;
+    }
+
+    if (upperInstructionUsesScalarRegister(opCode) &&
+        (instruction & VPU_UPPER_FT_REGISTER_MASK) != 0)
+    {
+      return false;
+    }
+
+    switch (opCode)
+    {
+      case VPU_NOP:
+        return (instruction & VPU_UPPER_OPERAND_FIELDS_MASK) == 0;
+      case VPU_CLIP:
+      case VPU_OPMULA:
+      case VPU_OPMSUB:
+        return
+          (instruction & VPU_DEST_ALL_FIELDS) ==
+          VPU_DEST_XYZ_FIELDS;
+      default:
+        return true;
+    }
+  }
+
   bool isCompoundFMACOperation(uint16_t opCode)
   {
     switch (opCode)
@@ -881,13 +941,21 @@ uint16_t VPU::opCodeFromInstruction(uint32_t instruction)
   uint16_t type3OpCode = instruction & VPU_TYPE3_MASK;
   if (type3OpCodes.find(type3OpCode) != type3OpCodes.end())
   {
-    return type3OpCode;
+    if (isCanonicalUpperEncoding(type3OpCode, instruction))
+    {
+      return type3OpCode;
+    }
+    throw runtime_error("Unsupported VU upper instruction.");
   }
 
   uint16_t type1OpCode = instruction & VPU_TYPE1_MASK;
   if (type1OpCodes.find(type1OpCode) != type1OpCodes.end())
   {
-    return type1OpCode;
+    if (isCanonicalUpperEncoding(type1OpCode, instruction))
+    {
+      return type1OpCode;
+    }
+    throw runtime_error("Unsupported VU upper instruction.");
   }
 
   throw runtime_error("Unsupported VU upper instruction.");

@@ -142,7 +142,7 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_TYPE8_MASK) == VPU_FCGET_ENCODING)
+  if ((instruction & VPU_LOWER_FCGET_MASK) == VPU_FCGET_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::Flag;
     decoded.opCode = VPU_FCGET;
@@ -154,18 +154,17 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
   const std::uint32_t type8Encoding =
     instruction & VPU_LOWER_TYPE8_MASK;
   if (type8Encoding == VPU_FSEQ_ENCODING ||
-      type8Encoding == VPU_FSSET_ENCODING ||
       type8Encoding == VPU_FSAND_ENCODING ||
       type8Encoding == VPU_FSOR_ENCODING)
   {
+    if ((instruction & VPU_LOWER_FS_FLAG_MASK) != type8Encoding)
+    {
+      throw std::runtime_error("Unsupported VU lower instruction.");
+    }
     decoded.unit = LowerExecutionUnit::Flag;
     if (type8Encoding == VPU_FSEQ_ENCODING)
     {
       decoded.opCode = VPU_FSEQ;
-    }
-    else if (type8Encoding == VPU_FSSET_ENCODING)
-    {
-      decoded.opCode = VPU_FSSET;
     }
     else if (type8Encoding == VPU_FSAND_ENCODING)
     {
@@ -176,9 +175,18 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
       decoded.opCode = VPU_FSOR;
     }
     decoded.integerDestinationRegister =
-      decoded.opCode == VPU_FSSET
-        ? VPU_REGISTER_VI00
-        : registerField(instruction, LOWER_IT_SHIFT);
+      registerField(instruction, LOWER_IT_SHIFT);
+    decoded.immediateBits =
+      (((instruction >> LOWER_DEST_SHIFT) & 1) << 11) |
+      (instruction & LOWER_IMMEDIATE_LOW_MASK);
+    return decoded;
+  }
+
+  if ((instruction & VPU_LOWER_FSSET_MASK) == VPU_FSSET_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::Flag;
+    decoded.opCode = VPU_FSSET;
+    decoded.integerDestinationRegister = VPU_REGISTER_VI00;
     decoded.immediateBits =
       (((instruction >> LOWER_DEST_SHIFT) & 1) << 11) |
       (instruction & LOWER_IMMEDIATE_LOW_MASK);
@@ -189,6 +197,10 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
       type8Encoding == VPU_FMAND_ENCODING ||
       type8Encoding == VPU_FMOR_ENCODING)
   {
+    if ((instruction & VPU_LOWER_FM_FLAG_MASK) != type8Encoding)
+    {
+      throw std::runtime_error("Unsupported VU lower instruction.");
+    }
     decoded.unit = LowerExecutionUnit::Flag;
     if (type8Encoding == VPU_FMEQ_ENCODING)
     {
@@ -228,6 +240,10 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
       type7Encoding == VPU_IBLEZ_ENCODING ||
       type7Encoding == VPU_IBLTZ_ENCODING)
   {
+    if ((instruction & VPU_LOWER_UNARY_BRANCH_MASK) != type7Encoding)
+    {
+      throw std::runtime_error("Unsupported VU lower instruction.");
+    }
     decoded.unit = LowerExecutionUnit::Branch;
     if (type7Encoding == VPU_IBGEZ_ENCODING)
     {
@@ -252,6 +268,11 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
 
   if (type7Encoding == VPU_B_ENCODING)
   {
+    if ((instruction & VPU_LOWER_UNCONDITIONAL_BRANCH_MASK) !=
+        VPU_B_ENCODING)
+    {
+      throw std::runtime_error("Unsupported VU lower instruction.");
+    }
     decoded.unit = LowerExecutionUnit::Branch;
     decoded.opCode = VPU_B;
     decoded.immediate = signedImmediate11(instruction);
@@ -260,6 +281,10 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
 
   if (type7Encoding == VPU_BAL_ENCODING)
   {
+    if ((instruction & VPU_LOWER_LINK_BRANCH_MASK) != VPU_BAL_ENCODING)
+    {
+      throw std::runtime_error("Unsupported VU lower instruction.");
+    }
     decoded.unit = LowerExecutionUnit::Branch;
     decoded.opCode = VPU_BAL;
     decoded.destinationRegister =
@@ -382,7 +407,7 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_SQRT_ENCODING)
+  if ((instruction & VPU_LOWER_SQRT_MASK) == VPU_SQRT_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::FDIV;
     decoded.opCode = VPU_SQRT;
@@ -391,7 +416,7 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_WAITQ_ENCODING)
+  if (instruction == VPU_WAITQ_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::WaitQ;
     decoded.opCode = VPU_WAITQ;
@@ -449,7 +474,7 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_XGKICK_ENCODING)
+  if ((instruction & VPU_LOWER_XGKICK_MASK) == VPU_XGKICK_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::XGKICK;
     decoded.opCode = VPU_XGKICK;
@@ -501,7 +526,7 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
-  if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_MTIR_ENCODING)
+  if ((instruction & VPU_LOWER_MTIR_MASK) == VPU_MTIR_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::FMAC;
     decoded.opCode = VPU_MTIR;

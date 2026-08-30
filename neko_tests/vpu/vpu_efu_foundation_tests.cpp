@@ -204,6 +204,24 @@ TEST_CASE("VU1 EFU synchronization foundation")
       "Unsupported VU lower instruction.");
   }
 
+  SECTION("Reserved lower control and scalar fields are rejected")
+  {
+    const std::uint32_t nonCanonicalInstructions[] = {
+      VPU_WAITQ_ENCODING | (1u << VPU_FS_REG_SHIFT),
+      VPU_SQRT_ENCODING | (1u << VPU_FS_REG_SHIFT),
+      VPU_SQRT_ENCODING | VPU_DEST_W_BIT,
+      VPU_XGKICK_ENCODING | (1u << VPU_FT_REG_SHIFT),
+      VPU_MTIR_ENCODING | VPU_DEST_X_BIT
+    };
+
+    for (const std::uint32_t instruction : nonCanonicalInstructions)
+    {
+      REQUIRE_THROWS_WITH(
+        decodeLowerInstruction(instruction),
+        "Unsupported VU lower instruction.");
+    }
+  }
+
   SECTION("ESQRT reads the selected lane and uses absolute magnitude")
   {
     VPU vpu(VPUType::VU1);
