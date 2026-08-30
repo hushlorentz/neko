@@ -76,12 +76,23 @@ struct GIFDecodeResult
   bool packetComplete = false;
 };
 
+class GIFRegisterWriteHandler
+{
+  public:
+    virtual ~GIFRegisterWriteHandler() = default;
+    virtual void writeRegister(
+      std::uint8_t address,
+      std::uint64_t data) = 0;
+};
+
 GIFTag decodeGIFTag(const GIFQuadword &quadword);
 
 class GIFDecoder
 {
   public:
     GIFDecodeResult ingestQuadword(const GIFQuadword &quadword);
+    void attachRegisterWriteHandler(
+      GIFRegisterWriteHandler *attachedHandler);
 
     bool awaitingTag() const;
     bool packetInProgress() const;
@@ -108,9 +119,11 @@ class GIFDecoder
       GIFDecodeResult *result);
     void advanceDescriptor();
     void completePrimitive(GIFDecodeResult *result);
+    void dispatchWrites(const GIFDecodeResult &result);
     std::uint8_t descriptor() const;
 
     GIFTag tag;
+    GIFRegisterWriteHandler *writeHandler = nullptr;
     bool waitingForTag = true;
     bool activePacket = false;
     std::uint32_t remainingQuadwords = 0;

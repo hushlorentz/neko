@@ -366,7 +366,7 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Decode stateful GIF packets, including PACKED, REGLIST, IMAGE, register
       descriptors, A+D writes, and packet termination
 - [x] Route VIF1 `DIRECT` and `DIRECTHL` payloads into GIF PATH2
-- [ ] Implement minimal GS drawing registers, local memory, and PSMCT32
+- [x] Implement minimal GS drawing registers, local memory, and PSMCT32
       framebuffer addressing
 - [ ] Render a flat untextured triangle with GS fixed-point coordinates,
       scissoring, and top-left coverage rules
@@ -384,7 +384,7 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Verify VIF TOP/ITOP values through decoded `XTOP`/`XITOP` instructions
 - [x] Transfer masked, cycled, and TOPS-relative vertex data through VIF
       `UNPACK`
-- [ ] Route a synthetic GIF packet through VIF `DIRECT` into GS registers
+- [x] Route a synthetic GIF packet through VIF `DIRECT` into GS registers
 - [ ] Render a PATH2 synthetic triangle and assert its GS framebuffer hash
 - [ ] Route a VU1 `XGKICK` packet through GIF PATH1 into the same GS path
 - [ ] Render a complete `MPG` -> `UNPACK` -> `MSCAL` -> `XGKICK` triangle and

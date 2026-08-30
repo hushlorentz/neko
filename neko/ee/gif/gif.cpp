@@ -111,6 +111,7 @@ GIFDecodeResult GIFDecoder::ingestQuadword(
   if (waitingForTag)
   {
     beginPrimitive(decodeGIFTag(quadword), &result);
+    dispatchWrites(result);
     return result;
   }
 
@@ -133,7 +134,25 @@ GIFDecodeResult GIFDecoder::ingestQuadword(
   {
     completePrimitive(&result);
   }
+  dispatchWrites(result);
   return result;
+}
+
+void GIFDecoder::attachRegisterWriteHandler(
+  GIFRegisterWriteHandler *attachedHandler)
+{
+  if (attachedHandler == nullptr)
+  {
+    throw std::invalid_argument(
+      "Cannot attach a null GIF register-write handler.");
+  }
+  if (packetInProgress())
+  {
+    throw std::runtime_error(
+      "Cannot attach a GIF register-write handler during a packet.");
+  }
+
+  writeHandler = attachedHandler;
 }
 
 void GIFDecoder::beginPrimitive(
@@ -353,6 +372,19 @@ void GIFDecoder::completePrimitive(GIFDecodeResult *result)
   if (tag.endOfPacket)
   {
     activePacket = false;
+  }
+}
+
+void GIFDecoder::dispatchWrites(const GIFDecodeResult &result)
+{
+  if (writeHandler == nullptr)
+  {
+    return;
+  }
+
+  for (const GIFRegisterWrite &write : result.writes)
+  {
+    writeHandler->writeRegister(write.address, write.data);
   }
 }
 
