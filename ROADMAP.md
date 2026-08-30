@@ -355,7 +355,7 @@ reviewable and avoid host-library values as the source of truth.
 
 ## Milestone 3: VIF and Graphics Path
 
-- [ ] Implement VIF0/VIF1 state and command decoding
+- [x] Implement VIF0/VIF1 configuration state and strict command decoding
 - [ ] Support MPG microprogram upload
 - [ ] Support UNPACK data transfer into VU memory
 - [ ] Support MSCAL/MSCALF execution control

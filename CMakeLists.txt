@@ -35,6 +35,8 @@ endif()
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/fp_register.cpp
+    neko/ee/vif/vif.cpp
+    neko/ee/vif/vif_command.cpp
     neko/ee/vpu/vpu.cpp
     neko/ee/vpu/vpu_lower_instruction.cpp
     neko/ee/vpu/pipelines/vpu_pipeline.cpp
@@ -48,6 +50,7 @@ target_include_directories(neko_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/neko
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/clock
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vif
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vpu
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vpu/pipelines
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/math
@@ -76,6 +79,7 @@ add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/math/floating_point_tests.cpp
+    neko_tests/vif/vif_tests.cpp
     neko_tests/vpu/vpu_flag_tests.cpp
     neko_tests/vpu/vpu_clipping_flag_tests.cpp
     neko_tests/vpu/vpu_fp_calculation_tests.cpp
