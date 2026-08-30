@@ -3,11 +3,13 @@
 
 #include "catch.hpp"
 #include "vif.hpp"
+#include "vpu.hpp"
 
 namespace
 {
   constexpr std::uint16_t MAX_ENCODED_COUNT = 256;
   constexpr std::uint32_t DIRECT_ZERO_QUADWORD_COUNT = 65536;
+  constexpr std::size_t MICRO_INSTRUCTION_SIZE_BYTES = 8;
   constexpr std::uint32_t WORDS_PER_QUADWORD = 4;
   constexpr std::uint8_t UNDEFINED_COMMAND = 0x08;
 
@@ -338,6 +340,8 @@ TEST_CASE("VIF Packet Stream Tests")
     REQUIRE(!misaligned.awaitingPayload());
 
     VIF aligned(VIFType::VIF0);
+    VPU vpu;
+    aligned.attachVPU(&vpu);
     aligned.ingestWord(vifCode(VIFCommandEncoding::NOP));
     const VIFStreamWord mpg = aligned.ingestWord(
       vifCode(VIFCommandEncoding::MPG, 2, 7));
@@ -442,5 +446,130 @@ TEST_CASE("VIF Packet Stream Tests")
     REQUIRE_THROWS_WITH(
       vif.processCode(vifCode(VIFCommandEncoding::NOP)),
       "Cannot process a VIFcode while a payload is in progress.");
+  }
+}
+
+TEST_CASE("VIF MPG Upload Tests")
+{
+  SECTION("VIF0 uploads fragmented lower-upper instruction pairs")
+  {
+    VPU vpu(VPUType::VU0);
+    VIF vif(VIFType::VIF0);
+    vif.attachVPU(&vpu);
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    vif.ingestWord(vifCode(VIFCommandEncoding::MPG, 2, 7));
+
+    vif.ingestWord(0x11223344);
+    REQUIRE(vpu.readMicroInstruction(7) == 0);
+    REQUIRE(vif.payloadWordsRemaining() == 3);
+
+    vif.ingestWord(0xaabbccdd);
+    REQUIRE(
+      vpu.readMicroInstruction(7) ==
+      UINT64_C(0xaabbccdd11223344));
+
+    vif.ingestWord(0x55667788);
+    const VIFStreamWord finalWord = vif.ingestWord(0x12345678);
+
+    REQUIRE(
+      vpu.readMicroInstruction(8) ==
+      UINT64_C(0x1234567855667788));
+    REQUIRE(finalWord.packetComplete);
+    REQUIRE(!vif.awaitingPayload());
+  }
+
+  SECTION("VIF1 uploads to its larger MicroMem")
+  {
+    VPU vpu(VPUType::VU1);
+    VIF vif(VIFType::VIF1);
+    vif.attachVPU(&vpu);
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    vif.ingestWord(vifCode(VIFCommandEncoding::MPG, 1, 1024));
+    vif.ingestWord(0x89abcdef);
+    vif.ingestWord(0x01234567);
+
+    REQUIRE(
+      vpu.readMicroInstruction(1024) ==
+      UINT64_C(0x0123456789abcdef));
+  }
+
+  SECTION("MPG validates attachment and unit correspondence")
+  {
+    VIF vif0(VIFType::VIF0);
+    VPU vu0(VPUType::VU0);
+    VPU vu1(VPUType::VU1);
+
+    REQUIRE_THROWS_WITH(
+      vif0.attachVPU(nullptr),
+      "Cannot attach a null VPU.");
+    REQUIRE_THROWS_WITH(
+      vif0.attachVPU(&vu1),
+      "VIF and VPU unit types must match.");
+
+    vif0.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    REQUIRE_THROWS_WITH(
+      vif0.ingestWord(vifCode(VIFCommandEncoding::MPG, 1)),
+      "VIF MPG requires an attached VPU.");
+    REQUIRE(vif0.wordsIngested() == 1);
+
+    REQUIRE_NOTHROW(vif0.attachVPU(&vu0));
+  }
+
+  SECTION("MPG rejects the complete transfer before an overflow write")
+  {
+    VPU vpu(VPUType::VU0);
+    VIF vif(VIFType::VIF0);
+    vif.attachVPU(&vpu);
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+
+    const std::uint16_t finalInstruction =
+      vpu.microMemorySize() / MICRO_INSTRUCTION_SIZE_BYTES - 1;
+
+    vif.ingestWord(vifCode(
+      VIFCommandEncoding::MPG,
+      1,
+      finalInstruction));
+    vif.ingestWord(0x01234567);
+    vif.ingestWord(0x89abcdef);
+    REQUIRE(
+      vpu.readMicroInstruction(finalInstruction) ==
+      UINT64_C(0x89abcdef01234567));
+
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    REQUIRE_THROWS_WITH(
+      vif.ingestWord(vifCode(
+        VIFCommandEncoding::MPG,
+        2,
+        finalInstruction)),
+      "VIF MPG transfer exceeds VU micro memory.");
+    REQUIRE(
+      vpu.readMicroInstruction(finalInstruction) ==
+      UINT64_C(0x89abcdef01234567));
+    REQUIRE(!vif.awaitingPayload());
+  }
+
+  SECTION("MPG zero NUM uploads 256 instructions")
+  {
+    VPU vpu(VPUType::VU1);
+    VIF vif(VIFType::VIF1);
+    vif.attachVPU(&vpu);
+    vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    vif.ingestWord(vifCode(VIFCommandEncoding::MPG, 0, 32));
+
+    for (std::uint32_t instruction = 0;
+         instruction < MAX_ENCODED_COUNT;
+         ++instruction)
+    {
+      vif.ingestWord(instruction);
+      vif.ingestWord(0x80000000 | instruction);
+    }
+
+    REQUIRE(
+      vpu.readMicroInstruction(32) ==
+      UINT64_C(0x8000000000000000));
+    REQUIRE(
+      vpu.readMicroInstruction(32 + MAX_ENCODED_COUNT - 1) ==
+      UINT64_C(0x800000ff000000ff));
+    REQUIRE(!vif.awaitingPayload());
   }
 }

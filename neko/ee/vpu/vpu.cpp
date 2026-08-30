@@ -607,6 +607,61 @@ void VPU::uploadMicroInstructions(const vector<uint8_t> &instructions)
   microMemPC = 0;
 }
 
+void VPU::writeMicroInstruction(
+  size_t instructionIndex,
+  uint32_t lower,
+  uint32_t upper)
+{
+  constexpr size_t MICRO_INSTRUCTION_SIZE = 8;
+  constexpr size_t UPPER_INSTRUCTION_OFFSET = 4;
+  constexpr size_t BITS_PER_BYTE = 8;
+  constexpr uint32_t BYTE_MASK = 0xff;
+
+  if (instructionIndex >= microMem.size() / MICRO_INSTRUCTION_SIZE)
+  {
+    throw out_of_range(
+      "Microinstruction write is outside VU micro memory.");
+  }
+
+  const size_t byteAddress =
+    instructionIndex * MICRO_INSTRUCTION_SIZE;
+  for (size_t byte = 0; byte < UPPER_INSTRUCTION_OFFSET; ++byte)
+  {
+    microMem[byteAddress + byte] =
+      (lower >> (byte * BITS_PER_BYTE)) & BYTE_MASK;
+    microMem[byteAddress + UPPER_INSTRUCTION_OFFSET + byte] =
+      (upper >> (byte * BITS_PER_BYTE)) & BYTE_MASK;
+  }
+}
+
+uint64_t VPU::readMicroInstruction(size_t instructionIndex) const
+{
+  constexpr size_t MICRO_INSTRUCTION_SIZE = 8;
+  constexpr size_t UPPER_INSTRUCTION_OFFSET = 4;
+  constexpr size_t BITS_PER_BYTE = 8;
+
+  if (instructionIndex >= microMem.size() / MICRO_INSTRUCTION_SIZE)
+  {
+    throw out_of_range(
+      "Microinstruction read is outside VU micro memory.");
+  }
+
+  const size_t byteAddress =
+    instructionIndex * MICRO_INSTRUCTION_SIZE;
+  uint64_t instruction = 0;
+  for (size_t byte = 0; byte < UPPER_INSTRUCTION_OFFSET; ++byte)
+  {
+    instruction |=
+      static_cast<uint64_t>(microMem[byteAddress + byte]) <<
+      (byte * BITS_PER_BYTE);
+    instruction |=
+      static_cast<uint64_t>(
+        microMem[byteAddress + UPPER_INSTRUCTION_OFFSET + byte]) <<
+      ((UPPER_INSTRUCTION_OFFSET + byte) * BITS_PER_BYTE);
+  }
+  return instruction;
+}
+
 void VPU::writeDataMemory(size_t address, const vector<uint8_t> &data)
 {
   if (address > vuMem.size() || data.size() > vuMem.size() - address)

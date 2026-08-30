@@ -358,7 +358,7 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Implement VIF0/VIF1 configuration state and strict command decoding
 - [x] Add streaming VIF packet ingestion with partial-payload and alignment
       tracking
-- [ ] Support MPG microprogram upload
+- [x] Support MPG microprogram upload
 - [ ] Support `STMASK`, `STROW`, and `STCOL` payloads and complete `UNPACK`
       transfer semantics, including CYCLE, MASK, MODE, TOPS, and wrapping
 - [ ] Support `MSCAL`, `MSCALF`, and `MSCNT` execution control together with

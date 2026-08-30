@@ -1,3 +1,5 @@
+#include <limits>
+
 #include "catch.hpp"
 #include "vpu.hpp"
 #include "vpu_opcodes.hpp"
@@ -5,6 +7,8 @@
 
 namespace
 {
+  constexpr std::size_t MICRO_INSTRUCTION_SIZE_BYTES = 8;
+
   void appendInstruction(std::vector<uint8_t> *instructions, uint32_t upper, uint32_t lower)
   {
     for (uint32_t instruction : {lower, upper})
@@ -73,6 +77,33 @@ TEST_CASE("VPU Memory Tests")
 
     REQUIRE_NOTHROW(vpu.initMicroMode());
     REQUIRE(vpu.terminationPosition() == 2);
+  }
+
+  SECTION("Individual microinstructions preserve lower-upper word order")
+  {
+    VPU vpu;
+
+    vpu.writeMicroInstruction(7, 0x11223344, 0xaabbccdd);
+
+    REQUIRE(
+      vpu.readMicroInstruction(7) ==
+      UINT64_C(0xaabbccdd11223344));
+    REQUIRE_THROWS_WITH(
+      vpu.writeMicroInstruction(
+        vpu.microMemorySize() / MICRO_INSTRUCTION_SIZE_BYTES,
+        0,
+        0),
+      "Microinstruction write is outside VU micro memory.");
+    REQUIRE_THROWS_WITH(
+      vpu.readMicroInstruction(
+        vpu.microMemorySize() / MICRO_INSTRUCTION_SIZE_BYTES),
+      "Microinstruction read is outside VU micro memory.");
+    REQUIRE_THROWS_WITH(
+      vpu.writeMicroInstruction(
+        std::numeric_limits<std::size_t>::max(),
+        0,
+        0),
+      "Microinstruction write is outside VU micro memory.");
   }
 
   SECTION("Raw lower destination masks map encoded x to the internal x lane")

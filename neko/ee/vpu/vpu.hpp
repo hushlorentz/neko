@@ -111,6 +111,11 @@ class VPU : public ClockedComponent, public PipelineHandler
     void setTraceCallback(VPUTraceCallback callback);
     void setXGKICKHandler(VUXGKICKHandler *handler);
     void uploadMicroInstructions(const vector<uint8_t> &instructions);
+    void writeMicroInstruction(
+      size_t instructionIndex,
+      uint32_t lower,
+      uint32_t upper);
+    uint64_t readMicroInstruction(size_t instructionIndex) const;
     void writeDataMemory(size_t address, const vector<uint8_t> &data);
     vector<uint8_t> readDataMemory(size_t address, size_t byteCount) const;
     void pipelineStarted(Pipeline *p) override;

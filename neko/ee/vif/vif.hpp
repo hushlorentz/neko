@@ -5,6 +5,8 @@
 
 #include "vif_command.hpp"
 
+class VPU;
+
 enum class VIFStreamWordKind : std::uint8_t
 {
   Command,
@@ -27,6 +29,7 @@ class VIF
     explicit VIF(VIFType type);
 
     VIFType unitType() const;
+    void attachVPU(VPU *attachedVPU);
     VIFCommand processCode(std::uint32_t code);
     VIFStreamWord ingestWord(std::uint32_t word);
 
@@ -50,8 +53,11 @@ class VIF
   private:
     std::uint32_t payloadWordCount(const VIFCommand &command) const;
     void validatePayloadAlignment(const VIFCommand &command) const;
+    void preparePayload(const VIFCommand &command);
+    void consumePayloadWord(std::uint32_t word);
 
     VIFType type;
+    VPU *vpu = nullptr;
     std::uint16_t cycleRegister = 0;
     std::uint8_t modeRegister = 0;
     std::uint16_t itopsRegister = 0;
@@ -67,6 +73,8 @@ class VIF
     std::uint32_t streamPayloadWordCount = 0;
     std::uint32_t streamPayloadWordsRemaining = 0;
     std::uint64_t streamWordsIngested = 0;
+    std::uint32_t mpgLowerInstruction = 0;
+    bool mpgLowerInstructionPending = false;
 };
 
 #endif

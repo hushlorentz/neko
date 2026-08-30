@@ -2,6 +2,7 @@
 #include <stdexcept>
 
 #include "vif.hpp"
+#include "vpu.hpp"
 
 namespace
 {
@@ -42,6 +43,33 @@ VIF::VIF(VIFType type) : type(type)
 VIFType VIF::unitType() const
 {
   return type;
+}
+
+void VIF::attachVPU(VPU *attachedVPU)
+{
+  if (awaitingPayload())
+  {
+    throw std::runtime_error(
+      "Cannot attach a VPU while a VIF payload is in progress.");
+  }
+
+  if (attachedVPU == nullptr)
+  {
+    throw std::invalid_argument("Cannot attach a null VPU.");
+  }
+
+  const bool unitMatches =
+    (type == VIFType::VIF0 &&
+     attachedVPU->unitType() == VPUType::VU0) ||
+    (type == VIFType::VIF1 &&
+     attachedVPU->unitType() == VPUType::VU1);
+  if (!unitMatches)
+  {
+    throw std::invalid_argument(
+      "VIF and VPU unit types must match.");
+  }
+
+  vpu = attachedVPU;
 }
 
 VIFCommand VIF::processCode(std::uint32_t code)
@@ -102,6 +130,8 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
 
   if (awaitingPayload())
   {
+    consumePayloadWord(word);
+
     streamWord.kind = VIFStreamWordKind::Payload;
     streamWord.command = streamCommand;
     streamWord.payloadWordCount = streamPayloadWordCount;
@@ -119,6 +149,7 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
 
   const std::uint32_t commandPayloadWordCount =
     payloadWordCount(command);
+  preparePayload(command);
 
   if (!ownsPayload(command.kind))
   {
@@ -141,6 +172,64 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
   }
 
   return streamWord;
+}
+
+void VIF::preparePayload(const VIFCommand &command)
+{
+  if (command.kind != VIFCommandKind::MPG)
+  {
+    return;
+  }
+
+  constexpr std::size_t MICRO_INSTRUCTION_SIZE = 8;
+
+  if (vpu == nullptr)
+  {
+    throw std::runtime_error(
+      "VIF MPG requires an attached VPU.");
+  }
+  if (vpu->getState() == VPU_STATE_RUN)
+  {
+    throw std::runtime_error(
+      "VIF MPG cannot upload while the VPU is running.");
+  }
+
+  const std::size_t instructionCapacity =
+    vpu->microMemorySize() / MICRO_INSTRUCTION_SIZE;
+  if (command.immediate > instructionCapacity ||
+      command.count > instructionCapacity - command.immediate)
+  {
+    throw std::out_of_range(
+      "VIF MPG transfer exceeds VU micro memory.");
+  }
+
+  mpgLowerInstructionPending = false;
+}
+
+void VIF::consumePayloadWord(std::uint32_t word)
+{
+  if (streamCommand.kind != VIFCommandKind::MPG)
+  {
+    return;
+  }
+
+  if (!mpgLowerInstructionPending)
+  {
+    mpgLowerInstruction = word;
+    mpgLowerInstructionPending = true;
+    return;
+  }
+
+  constexpr std::uint32_t MPG_WORDS_PER_INSTRUCTION = 2;
+  const std::uint32_t payloadWordIndex =
+    streamPayloadWordCount - streamPayloadWordsRemaining;
+  const std::uint32_t instructionIndex =
+    payloadWordIndex / MPG_WORDS_PER_INSTRUCTION;
+  vpu->writeMicroInstruction(
+    streamCommand.immediate + instructionIndex,
+    mpgLowerInstruction,
+    word);
+  mpgLowerInstructionPending = false;
 }
 
 std::uint32_t VIF::payloadWordCount(const VIFCommand &command) const
