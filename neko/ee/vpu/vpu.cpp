@@ -803,6 +803,12 @@ bool VPU::tick()
 
   try
   {
+    if (xgkickHandler &&
+        xgkickHandler->path1TransferActive())
+    {
+      xgkickHandler->advancePath1Transfer();
+    }
+
     if (terminationRequested)
     {
       if (!orchestrator.hasNext())

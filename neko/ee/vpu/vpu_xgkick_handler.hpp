@@ -9,6 +9,9 @@ class VUXGKICKHandler
     virtual ~VUXGKICKHandler() = default;
     virtual bool path1TransferActive() const = 0;
     virtual void startPath1Transfer(std::uint16_t qwordAddress) = 0;
+    virtual void advancePath1Transfer()
+    {
+    }
 };
 
 #endif

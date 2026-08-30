@@ -36,6 +36,7 @@ add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/fp_register.cpp
     neko/ee/gif/gif.cpp
+    neko/ee/gif/gif_path1.cpp
     neko/ee/gs/gs.cpp
     neko/ee/vif/vif.cpp
     neko/ee/vif/vif_command.cpp
@@ -83,6 +84,7 @@ add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/gif/gif_tests.cpp
+    neko_tests/gif/gif_path1_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp
     neko_tests/math/floating_point_tests.cpp

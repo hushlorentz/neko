@@ -370,7 +370,7 @@ reviewable and avoid host-library values as the source of truth.
       framebuffer addressing
 - [x] Render a flat untextured triangle with GS fixed-point coordinates,
       scissoring, and top-left coverage rules
-- [ ] Route VU1 `XGKICK` output into GIF PATH1
+- [x] Route VU1 `XGKICK` output into GIF PATH1
 - [ ] Model GIF path arbitration and VIF synchronization, stalls, and
       interrupts
 - [ ] Expand toward additional primitives, image transfer, textures, blending,
@@ -386,7 +386,7 @@ reviewable and avoid host-library values as the source of truth.
       `UNPACK`
 - [x] Route a synthetic GIF packet through VIF `DIRECT` into GS registers
 - [x] Render a PATH2 synthetic triangle and assert its GS framebuffer hash
-- [ ] Route a VU1 `XGKICK` packet through GIF PATH1 into the same GS path
+- [x] Route a VU1 `XGKICK` packet through GIF PATH1 into the same GS path
 - [ ] Render a complete `MPG` -> `UNPACK` -> `MSCAL` -> `XGKICK` triangle and
       assert its framebuffer hash
 - [ ] Add textured, blended, and depth-tested scenes as GS support expands
