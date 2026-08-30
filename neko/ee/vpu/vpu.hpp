@@ -116,6 +116,10 @@ class VPU : public ClockedComponent, public PipelineHandler
       uint32_t lower,
       uint32_t upper);
     uint64_t readMicroInstruction(size_t instructionIndex) const;
+    void writeDataQuadword(
+      size_t quadwordIndex,
+      const array<uint32_t, 4> &words);
+    array<uint32_t, 4> readDataQuadword(size_t quadwordIndex) const;
     void writeDataMemory(size_t address, const vector<uint8_t> &data);
     vector<uint8_t> readDataMemory(size_t address, size_t byteCount) const;
     void pipelineStarted(Pipeline *p) override;

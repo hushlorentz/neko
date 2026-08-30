@@ -662,6 +662,59 @@ uint64_t VPU::readMicroInstruction(size_t instructionIndex) const
   return instruction;
 }
 
+void VPU::writeDataQuadword(
+  size_t quadwordIndex,
+  const array<uint32_t, 4> &words)
+{
+  constexpr size_t QUADWORD_SIZE = 16;
+  constexpr size_t WORD_SIZE = 4;
+  constexpr size_t BITS_PER_BYTE = 8;
+  constexpr uint32_t BYTE_MASK = 0xff;
+
+  if (quadwordIndex >= vuMem.size() / QUADWORD_SIZE)
+  {
+    throw out_of_range(
+      "Quadword write is outside VU data memory.");
+  }
+
+  const size_t byteAddress = quadwordIndex * QUADWORD_SIZE;
+  for (size_t word = 0; word < words.size(); ++word)
+  {
+    for (size_t byte = 0; byte < WORD_SIZE; ++byte)
+    {
+      vuMem[byteAddress + word * WORD_SIZE + byte] =
+        (words[word] >> (byte * BITS_PER_BYTE)) & BYTE_MASK;
+    }
+  }
+}
+
+array<uint32_t, 4> VPU::readDataQuadword(size_t quadwordIndex) const
+{
+  constexpr size_t QUADWORD_SIZE = 16;
+  constexpr size_t WORD_SIZE = 4;
+  constexpr size_t BITS_PER_BYTE = 8;
+
+  if (quadwordIndex >= vuMem.size() / QUADWORD_SIZE)
+  {
+    throw out_of_range(
+      "Quadword read is outside VU data memory.");
+  }
+
+  const size_t byteAddress = quadwordIndex * QUADWORD_SIZE;
+  array<uint32_t, 4> words = {};
+  for (size_t word = 0; word < words.size(); ++word)
+  {
+    for (size_t byte = 0; byte < WORD_SIZE; ++byte)
+    {
+      words[word] |=
+        static_cast<uint32_t>(
+          vuMem[byteAddress + word * WORD_SIZE + byte]) <<
+        (byte * BITS_PER_BYTE);
+    }
+  }
+  return words;
+}
+
 void VPU::writeDataMemory(size_t address, const vector<uint8_t> &data)
 {
   if (address > vuMem.size() || data.size() > vuMem.size() - address)

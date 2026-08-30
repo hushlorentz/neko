@@ -1,7 +1,10 @@
 #ifndef VIF_H
 #define VIF_H
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "vif_command.hpp"
 
@@ -37,6 +40,9 @@ class VIF
     std::uint8_t cycleLength() const;
     std::uint8_t writeLength() const;
     std::uint8_t mode() const;
+    std::uint32_t mask() const;
+    std::uint32_t row(std::size_t index) const;
+    std::uint32_t column(std::size_t index) const;
     std::uint16_t itops() const;
     std::uint16_t base() const;
     std::uint16_t offset() const;
@@ -55,11 +61,20 @@ class VIF
     void validatePayloadAlignment(const VIFCommand &command) const;
     void preparePayload(const VIFCommand &command);
     void consumePayloadWord(std::uint32_t word);
+    void executeUNPACK();
+    std::uint32_t unpackElement(
+      std::uint32_t bitOffset,
+      std::uint8_t bitCount) const;
+    std::array<std::uint32_t, 4> unpackInputVector(
+      std::uint32_t inputVectorIndex) const;
 
     VIFType type;
     VPU *vpu = nullptr;
     std::uint16_t cycleRegister = 0;
     std::uint8_t modeRegister = 0;
+    std::uint32_t maskRegister = 0;
+    std::array<std::uint32_t, 4> rowRegisters = {};
+    std::array<std::uint32_t, 4> columnRegisters = {};
     std::uint16_t itopsRegister = 0;
     std::uint16_t baseRegister = 0;
     std::uint16_t offsetRegister = 0;
@@ -75,6 +90,7 @@ class VIF
     std::uint64_t streamWordsIngested = 0;
     std::uint32_t mpgLowerInstruction = 0;
     bool mpgLowerInstructionPending = false;
+    std::vector<std::uint32_t> unpackPayload;
 };
 
 #endif

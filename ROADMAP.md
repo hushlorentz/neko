@@ -359,7 +359,7 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Add streaming VIF packet ingestion with partial-payload and alignment
       tracking
 - [x] Support MPG microprogram upload
-- [ ] Support `STMASK`, `STROW`, and `STCOL` payloads and complete `UNPACK`
+- [x] Support `STMASK`, `STROW`, and `STCOL` payloads and complete `UNPACK`
       transfer semantics, including CYCLE, MASK, MODE, TOPS, and wrapping
 - [ ] Support `MSCAL`, `MSCALF`, and `MSCNT` execution control together with
       TOP/TOPS/DBF transitions and VU `XTOP`/`XITOP`
@@ -382,7 +382,7 @@ reviewable and avoid host-library values as the source of truth.
       handling
 - [ ] Upload and execute a VU1 program through VIF `MPG` and `MSCAL`
 - [ ] Verify VIF TOP/ITOP values through decoded `XTOP`/`XITOP` instructions
-- [ ] Transfer masked, cycled, and TOPS-relative vertex data through VIF
+- [x] Transfer masked, cycled, and TOPS-relative vertex data through VIF
       `UNPACK`
 - [ ] Route a synthetic GIF packet through VIF `DIRECT` into GS registers
 - [ ] Render a PATH2 synthetic triangle and assert its GS framebuffer hash

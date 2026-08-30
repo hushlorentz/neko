@@ -400,7 +400,9 @@ TEST_CASE("VIF Packet Stream Tests")
 
   SECTION("UNPACK payload size follows format and skipping mode")
   {
+    VPU vpu(VPUType::VU1);
     VIF vif(VIFType::VIF1);
+    vif.attachVPU(&vpu);
     vif.ingestWord(vifCode(VIFCommandEncoding::STCYCL, 0, 0x0204));
 
     const VIFStreamWord unpack = vif.ingestWord(vifCode(
@@ -413,7 +415,9 @@ TEST_CASE("VIF Packet Stream Tests")
 
   SECTION("UNPACK payload size follows filling mode and word padding")
   {
+    VPU vpu(VPUType::VU1);
     VIF vif(VIFType::VIF1);
+    vif.attachVPU(&vpu);
     vif.ingestWord(vifCode(VIFCommandEncoding::STCYCL, 0, 0x0402));
 
     const VIFStreamWord unpack = vif.ingestWord(vifCode(
@@ -426,7 +430,9 @@ TEST_CASE("VIF Packet Stream Tests")
 
   SECTION("Filling mode can produce output without consuming payload")
   {
+    VPU vpu(VPUType::VU1);
     VIF vif(VIFType::VIF1);
+    vif.attachVPU(&vpu);
     vif.ingestWord(vifCode(VIFCommandEncoding::STCYCL, 0, 0x0400));
 
     const VIFStreamWord unpack = vif.ingestWord(vifCode(

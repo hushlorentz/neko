@@ -15,6 +15,22 @@ namespace
   constexpr std::uint32_t VIF_ZERO_DIRECT_COUNT = 65536;
   constexpr std::uint8_t VIF_UNPACK_VN_SHIFT = 2;
   constexpr std::uint8_t VIF_UNPACK_FIELD_MASK = 0x03;
+  constexpr std::uint8_t VIF_UNPACK_V4_5_ELEMENT_BITS = 16;
+  constexpr std::uint8_t VIF_UNPACK_V4_5_RGB_BITS = 5;
+  constexpr std::uint8_t VIF_UNPACK_V4_5_ALPHA_BITS = 1;
+  constexpr std::uint8_t VIF_UNPACK_V4_5_RGB_SHIFT = 3;
+  constexpr std::uint8_t VIF_UNPACK_V4_5_ALPHA_SHIFT = 7;
+  constexpr std::uint32_t VIF_QUADWORD_BYTES = 16;
+  constexpr std::uint32_t VIF_MASK_BITS_PER_LANE = 2;
+  constexpr std::uint32_t VIF_MASK_LANES_PER_CYCLE = 4;
+  constexpr std::uint32_t VIF_MASK_CYCLE_LIMIT = 3;
+  constexpr std::uint32_t VIF_MASK_INPUT = 0;
+  constexpr std::uint32_t VIF_MASK_ROW = 1;
+  constexpr std::uint32_t VIF_MASK_COLUMN = 2;
+  constexpr std::uint32_t VIF_MASK_PROTECT = 3;
+  constexpr std::uint8_t VIF_MODE_NORMAL = 0;
+  constexpr std::uint8_t VIF_MODE_OFFSET = 1;
+  constexpr std::uint8_t VIF_MODE_DIFFERENCE = 2;
   constexpr std::uint64_t VIF_MPG_ALIGNMENT_WORDS = 2;
   constexpr std::uint64_t VIF_DIRECT_ALIGNMENT_WORDS = 4;
 
@@ -146,10 +162,10 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
 
   const VIFCommand command = decodeVIFCommand(word, type);
   validatePayloadAlignment(command);
+  preparePayload(command);
 
   const std::uint32_t commandPayloadWordCount =
     payloadWordCount(command);
-  preparePayload(command);
 
   if (!ownsPayload(command.kind))
   {
@@ -170,12 +186,33 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
   {
     codeRegister = word;
   }
+  if (command.kind == VIFCommandKind::UNPACK &&
+      commandPayloadWordCount == 0)
+  {
+    executeUNPACK();
+  }
 
   return streamWord;
 }
 
 void VIF::preparePayload(const VIFCommand &command)
 {
+  if (command.kind == VIFCommandKind::UNPACK)
+  {
+    if (vpu == nullptr)
+    {
+      throw std::runtime_error(
+        "VIF UNPACK requires an attached VPU.");
+    }
+    if (writeLength() == 0)
+    {
+      throw std::runtime_error(
+        "VIF UNPACK requires a nonzero write length.");
+    }
+    unpackPayload.clear();
+    return;
+  }
+
   if (command.kind != VIFCommandKind::MPG)
   {
     return;
@@ -208,9 +245,31 @@ void VIF::preparePayload(const VIFCommand &command)
 
 void VIF::consumePayloadWord(std::uint32_t word)
 {
-  if (streamCommand.kind != VIFCommandKind::MPG)
+  const std::uint32_t payloadWordIndex =
+    streamPayloadWordCount - streamPayloadWordsRemaining;
+
+  switch (streamCommand.kind)
   {
-    return;
+    case VIFCommandKind::STMASK:
+      maskRegister = word;
+      return;
+    case VIFCommandKind::STROW:
+      rowRegisters[payloadWordIndex] = word;
+      return;
+    case VIFCommandKind::STCOL:
+      columnRegisters[payloadWordIndex] = word;
+      return;
+    case VIFCommandKind::UNPACK:
+      unpackPayload.push_back(word);
+      if (streamPayloadWordsRemaining == 1)
+      {
+        executeUNPACK();
+      }
+      return;
+    case VIFCommandKind::MPG:
+      break;
+    default:
+      return;
   }
 
   if (!mpgLowerInstructionPending)
@@ -221,8 +280,6 @@ void VIF::consumePayloadWord(std::uint32_t word)
   }
 
   constexpr std::uint32_t MPG_WORDS_PER_INSTRUCTION = 2;
-  const std::uint32_t payloadWordIndex =
-    streamPayloadWordCount - streamPayloadWordsRemaining;
   const std::uint32_t instructionIndex =
     payloadWordIndex / MPG_WORDS_PER_INSTRUCTION;
   vpu->writeMicroInstruction(
@@ -230,6 +287,187 @@ void VIF::consumePayloadWord(std::uint32_t word)
     mpgLowerInstruction,
     word);
   mpgLowerInstructionPending = false;
+}
+
+void VIF::executeUNPACK()
+{
+  const std::uint32_t componentCount =
+    ((streamCommand.command >> VIF_UNPACK_VN_SHIFT) &
+      VIF_UNPACK_FIELD_MASK) + 1;
+  const std::uint32_t definedLaneCount =
+    componentCount == 1
+      ? VIF_MASK_LANES_PER_CYCLE
+      : componentCount;
+  const bool filling = writeLength() > cycleLength();
+  const std::uint32_t memoryQuadwords =
+    vpu->dataMemorySize() / VIF_QUADWORD_BYTES;
+  const std::uint32_t baseAddress =
+    streamCommand.address +
+    (streamCommand.addTops ? topsRegister : 0);
+  std::uint32_t inputVector = 0;
+
+  for (std::uint32_t outputVector = 0;
+       outputVector < streamCommand.count;
+       ++outputVector)
+  {
+    const std::uint32_t cycleIndex =
+      outputVector % writeLength();
+    const bool consumesInput =
+      !filling || cycleIndex < cycleLength();
+    std::array<std::uint32_t, 4> input = {};
+    if (consumesInput)
+    {
+      input = unpackInputVector(inputVector);
+      ++inputVector;
+    }
+
+    std::uint32_t destinationOffset = outputVector;
+    if (!filling)
+    {
+      destinationOffset =
+        cycleLength() * (outputVector / writeLength()) +
+        cycleIndex;
+    }
+    const std::uint32_t destination =
+      (baseAddress + destinationOffset) % memoryQuadwords;
+    std::array<std::uint32_t, 4> result =
+      vpu->readDataQuadword(destination);
+    const std::uint32_t maskCycle =
+      std::min(cycleIndex, VIF_MASK_CYCLE_LIMIT);
+
+    for (std::uint32_t lane = 0;
+         lane < VIF_MASK_LANES_PER_CYCLE;
+         ++lane)
+    {
+      std::uint32_t mask = VIF_MASK_INPUT;
+      if (streamCommand.masked)
+      {
+        const std::uint32_t maskIndex =
+          maskCycle * VIF_MASK_LANES_PER_CYCLE + lane;
+        mask =
+          (maskRegister >>
+           (maskIndex * VIF_MASK_BITS_PER_LANE)) &
+          VIF_UNPACK_FIELD_MASK;
+      }
+
+      switch (mask)
+      {
+        case VIF_MASK_INPUT:
+        {
+          std::uint32_t value =
+            lane < definedLaneCount ? input[lane] : 0;
+          if (modeRegister == VIF_MODE_OFFSET ||
+              modeRegister == VIF_MODE_DIFFERENCE)
+          {
+            value += rowRegisters[lane];
+          }
+          result[lane] = value;
+          if (modeRegister == VIF_MODE_DIFFERENCE)
+          {
+            rowRegisters[lane] = value;
+          }
+          break;
+        }
+        case VIF_MASK_ROW:
+          result[lane] = rowRegisters[lane];
+          break;
+        case VIF_MASK_COLUMN:
+          result[lane] = columnRegisters[maskCycle];
+          break;
+        case VIF_MASK_PROTECT:
+          break;
+      }
+    }
+
+    vpu->writeDataQuadword(destination, result);
+  }
+}
+
+std::uint32_t VIF::unpackElement(
+  std::uint32_t bitOffset,
+  std::uint8_t bitCount) const
+{
+  const std::uint32_t wordIndex = bitOffset / VIF_BITS_PER_WORD;
+  const std::uint32_t wordBit = bitOffset % VIF_BITS_PER_WORD;
+  std::uint64_t packed = unpackPayload[wordIndex];
+  if (wordBit + bitCount > VIF_BITS_PER_WORD)
+  {
+    packed |=
+      static_cast<std::uint64_t>(unpackPayload[wordIndex + 1]) <<
+      VIF_BITS_PER_WORD;
+  }
+  packed >>= wordBit;
+
+  if (bitCount == VIF_BITS_PER_WORD)
+  {
+    return static_cast<std::uint32_t>(packed);
+  }
+
+  const std::uint32_t mask =
+    (UINT32_C(1) << bitCount) - 1;
+  const std::uint32_t value = packed & mask;
+  if (streamCommand.unpackFormat == VIFUnpackFormat::V4_5 ||
+      streamCommand.unsignedData ||
+      (value & (UINT32_C(1) << (bitCount - 1))) == 0)
+  {
+    return value;
+  }
+  return value | ~mask;
+}
+
+std::array<std::uint32_t, 4> VIF::unpackInputVector(
+  std::uint32_t inputVectorIndex) const
+{
+  const std::uint8_t format =
+    streamCommand.command & VIF_UNPACK_FIELD_MASK;
+  const std::uint32_t componentCount =
+    ((streamCommand.command >> VIF_UNPACK_VN_SHIFT) &
+      VIF_UNPACK_FIELD_MASK) + 1;
+  std::array<std::uint32_t, 4> input = {};
+
+  if (streamCommand.unpackFormat == VIFUnpackFormat::V4_5)
+  {
+    const std::uint32_t vectorBit =
+      inputVectorIndex * VIF_UNPACK_V4_5_ELEMENT_BITS;
+    input[0] =
+      unpackElement(vectorBit, VIF_UNPACK_V4_5_RGB_BITS) <<
+      VIF_UNPACK_V4_5_RGB_SHIFT;
+    input[1] =
+      unpackElement(
+        vectorBit + VIF_UNPACK_V4_5_RGB_BITS,
+        VIF_UNPACK_V4_5_RGB_BITS) <<
+      VIF_UNPACK_V4_5_RGB_SHIFT;
+    input[2] =
+      unpackElement(
+        vectorBit + VIF_UNPACK_V4_5_RGB_BITS * 2,
+        VIF_UNPACK_V4_5_RGB_BITS) <<
+      VIF_UNPACK_V4_5_RGB_SHIFT;
+    input[3] =
+      unpackElement(
+        vectorBit + VIF_UNPACK_V4_5_RGB_BITS * 3,
+        VIF_UNPACK_V4_5_ALPHA_BITS) <<
+      VIF_UNPACK_V4_5_ALPHA_SHIFT;
+    return input;
+  }
+
+  const std::uint8_t componentBits =
+    VIF_BITS_PER_WORD >> format;
+  const std::uint32_t vectorBit =
+    inputVectorIndex * componentCount * componentBits;
+  for (std::uint32_t component = 0;
+       component < componentCount;
+       ++component)
+  {
+    input[component] = unpackElement(
+      vectorBit + component * componentBits,
+      componentBits);
+  }
+
+  if (componentCount == 1)
+  {
+    input.fill(input[0]);
+  }
+  return input;
 }
 
 std::uint32_t VIF::payloadWordCount(const VIFCommand &command) const
@@ -321,6 +559,30 @@ std::uint8_t VIF::writeLength() const
 std::uint8_t VIF::mode() const
 {
   return modeRegister;
+}
+
+std::uint32_t VIF::mask() const
+{
+  return maskRegister;
+}
+
+std::uint32_t VIF::row(std::size_t index) const
+{
+  if (index >= rowRegisters.size())
+  {
+    throw std::out_of_range("VIF row register index is outside range.");
+  }
+  return rowRegisters[index];
+}
+
+std::uint32_t VIF::column(std::size_t index) const
+{
+  if (index >= columnRegisters.size())
+  {
+    throw std::out_of_range(
+      "VIF column register index is outside range.");
+  }
+  return columnRegisters[index];
 }
 
 std::uint16_t VIF::itops() const
