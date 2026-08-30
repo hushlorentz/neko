@@ -365,7 +365,7 @@ reviewable and avoid host-library values as the source of truth.
       TOP/TOPS/DBF transitions and VU `XTOP`/`XITOP`
 - [x] Decode stateful GIF packets, including PACKED, REGLIST, IMAGE, register
       descriptors, A+D writes, and packet termination
-- [ ] Route VIF1 `DIRECT` and `DIRECTHL` payloads into GIF PATH2
+- [x] Route VIF1 `DIRECT` and `DIRECTHL` payloads into GIF PATH2
 - [ ] Implement minimal GS drawing registers, local memory, and PSMCT32
       framebuffer addressing
 - [ ] Render a flat untextured triangle with GS fixed-point coordinates,

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "gif.hpp"
 #include "vif_command.hpp"
 #include "vpu_vif_register_source.hpp"
 
@@ -25,6 +26,8 @@ struct VIFStreamWord
   std::uint32_t payloadIndex = 0;
   std::uint32_t payloadWordCount = 0;
   bool packetComplete = false;
+  bool gifQuadwordDecoded = false;
+  GIFDecodeResult gifResult;
 };
 
 class VIF : public VUVIFRegisterSource
@@ -34,6 +37,7 @@ class VIF : public VUVIFRegisterSource
 
     VIFType unitType() const;
     void attachVPU(VPU *attachedVPU);
+    void attachGIFDecoder(GIFDecoder *attachedGIFDecoder);
     VIFCommand processCode(std::uint32_t code);
     VIFStreamWord ingestWord(std::uint32_t word);
 
@@ -63,7 +67,9 @@ class VIF : public VUVIFRegisterSource
     std::uint32_t payloadWordCount(const VIFCommand &command) const;
     void validatePayloadAlignment(const VIFCommand &command) const;
     void preparePayload(const VIFCommand &command);
-    void consumePayloadWord(std::uint32_t word);
+    void consumePayloadWord(
+      std::uint32_t word,
+      VIFStreamWord *streamWord);
     void startMicroProgram(const VIFCommand &command);
     void updateProgramStartRegisters();
     void executeUNPACK();
@@ -75,6 +81,7 @@ class VIF : public VUVIFRegisterSource
 
     VIFType type;
     VPU *vpu = nullptr;
+    GIFDecoder *gifDecoder = nullptr;
     std::uint16_t cycleRegister = 0;
     std::uint8_t modeRegister = 0;
     std::uint32_t maskRegister = 0;
@@ -97,6 +104,7 @@ class VIF : public VUVIFRegisterSource
     std::uint64_t streamWordsIngested = 0;
     std::uint32_t mpgLowerInstruction = 0;
     bool mpgLowerInstructionPending = false;
+    GIFQuadword directQuadword = {};
     std::vector<std::uint32_t> unpackPayload;
 };
 

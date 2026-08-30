@@ -372,6 +372,8 @@ TEST_CASE("VIF Packet Stream Tests")
 
     vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
     vif.ingestWord(vifCode(VIFCommandEncoding::NOP));
+    GIFDecoder decoder;
+    vif.attachGIFDecoder(&decoder);
     const VIFStreamWord direct = vif.ingestWord(
       vifCode(VIFCommandEncoding::DIRECT, 0, 1));
 
@@ -382,6 +384,8 @@ TEST_CASE("VIF Packet Stream Tests")
   SECTION("Zero DIRECT size represents 65536 quadwords")
   {
     VIF vif(VIFType::VIF1);
+    GIFDecoder decoder;
+    vif.attachGIFDecoder(&decoder);
     for (int index = 0; index < 3; ++index)
     {
       vif.ingestWord(vifCode(VIFCommandEncoding::NOP));

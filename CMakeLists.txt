@@ -84,6 +84,7 @@ add_executable(neko_tests
     neko_tests/math/floating_point_tests.cpp
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
+    neko_tests/vif/vif_path2_tests.cpp
     neko_tests/vif/vif_unpack_tests.cpp
     neko_tests/vpu/vpu_flag_tests.cpp
     neko_tests/vpu/vpu_clipping_flag_tests.cpp

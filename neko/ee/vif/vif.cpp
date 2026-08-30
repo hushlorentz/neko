@@ -89,6 +89,26 @@ void VIF::attachVPU(VPU *attachedVPU)
   vpu->setVIFRegisterSource(this);
 }
 
+void VIF::attachGIFDecoder(GIFDecoder *attachedGIFDecoder)
+{
+  if (awaitingPayload())
+  {
+    throw std::runtime_error(
+      "Cannot attach a GIF decoder while a VIF payload is in progress.");
+  }
+  if (attachedGIFDecoder == nullptr)
+  {
+    throw std::invalid_argument("Cannot attach a null GIF decoder.");
+  }
+  if (type != VIFType::VIF1)
+  {
+    throw std::runtime_error(
+      "Only VIF1 can attach to GIF PATH2.");
+  }
+
+  gifDecoder = attachedGIFDecoder;
+}
+
 VIFCommand VIF::processCode(std::uint32_t code)
 {
   if (awaitingPayload())
@@ -208,13 +228,12 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
 
   if (awaitingPayload())
   {
-    consumePayloadWord(word);
-
     streamWord.kind = VIFStreamWordKind::Payload;
     streamWord.command = streamCommand;
     streamWord.payloadWordCount = streamPayloadWordCount;
     streamWord.payloadIndex =
       streamPayloadWordCount - streamPayloadWordsRemaining;
+    consumePayloadWord(word, &streamWord);
 
     --streamPayloadWordsRemaining;
     ++streamWordsIngested;
@@ -259,6 +278,18 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
 
 void VIF::preparePayload(const VIFCommand &command)
 {
+  if (command.kind == VIFCommandKind::DIRECT ||
+      command.kind == VIFCommandKind::DIRECTHL)
+  {
+    if (gifDecoder == nullptr)
+    {
+      throw std::runtime_error(
+        "VIF DIRECT requires an attached GIF decoder.");
+    }
+    directQuadword.fill(0);
+    return;
+  }
+
   if (command.kind == VIFCommandKind::UNPACK)
   {
     if (vpu == nullptr)
@@ -305,7 +336,9 @@ void VIF::preparePayload(const VIFCommand &command)
   mpgLowerInstructionPending = false;
 }
 
-void VIF::consumePayloadWord(std::uint32_t word)
+void VIF::consumePayloadWord(
+  std::uint32_t word,
+  VIFStreamWord *streamWord)
 {
   const std::uint32_t payloadWordIndex =
     streamPayloadWordCount - streamPayloadWordsRemaining;
@@ -330,6 +363,21 @@ void VIF::consumePayloadWord(std::uint32_t word)
       return;
     case VIFCommandKind::MPG:
       break;
+    case VIFCommandKind::DIRECT:
+    case VIFCommandKind::DIRECTHL:
+    {
+      const std::uint32_t quadwordWordIndex =
+        payloadWordIndex % VIF_DIRECT_WORDS_PER_QUADWORD;
+      directQuadword[quadwordWordIndex] = word;
+      if (quadwordWordIndex ==
+          VIF_DIRECT_WORDS_PER_QUADWORD - 1)
+      {
+        streamWord->gifResult =
+          gifDecoder->ingestQuadword(directQuadword);
+        streamWord->gifQuadwordDecoded = true;
+      }
+      return;
+    }
     default:
       return;
   }
