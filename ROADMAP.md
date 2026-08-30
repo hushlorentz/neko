@@ -389,7 +389,7 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Route a synthetic GIF packet through VIF `DIRECT` into GS registers
 - [x] Render a PATH2 synthetic triangle and assert its GS framebuffer hash
 - [x] Route a VU1 `XGKICK` packet through GIF PATH1 into the same GS path
-- [ ] Render a complete `MPG` -> `UNPACK` -> `MSCAL` -> `XGKICK` triangle and
+- [x] Render a complete `MPG` -> `UNPACK` -> `MSCAL` -> `XGKICK` triangle and
       assert its framebuffer hash
 - [ ] Add textured, blended, and depth-tested scenes as GS support expands
 
