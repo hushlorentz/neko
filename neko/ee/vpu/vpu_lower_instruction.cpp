@@ -482,6 +482,16 @@ LowerInstruction decodeLowerInstruction(std::uint32_t instruction)
     return decoded;
   }
 
+  if ((instruction & VPU_LOWER_VIF_CONTROL_MASK) == VPU_XTOP_ENCODING ||
+      (instruction & VPU_LOWER_VIF_CONTROL_MASK) == VPU_XITOP_ENCODING)
+  {
+    decoded.unit = LowerExecutionUnit::VIFControl;
+    decoded.opCode = instruction & VPU_TYPE3_MASK;
+    decoded.integerDestinationRegister =
+      registerField(instruction, LOWER_IT_SHIFT);
+    return decoded;
+  }
+
   if ((instruction & VPU_LOWER_TYPE3_MASK) == VPU_MFIR_ENCODING)
   {
     decoded.unit = LowerExecutionUnit::FMAC;

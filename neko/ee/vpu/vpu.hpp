@@ -13,6 +13,7 @@
 #include "vpu_lower_instruction.hpp"
 #include "vpu_pipeline_handler.hpp"
 #include "vpu_pipeline_orchestrator.hpp"
+#include "vpu_vif_register_source.hpp"
 #include "vpu_xgkick_handler.hpp"
 
 #define VPU_STATE_READY 1
@@ -109,6 +110,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool stepInstruction();
     uint32_t run(uint32_t maxCycles);
     void setTraceCallback(VPUTraceCallback callback);
+    void setVIFRegisterSource(VUVIFRegisterSource *source);
     void setXGKICKHandler(VUXGKICKHandler *handler);
     void uploadMicroInstructions(const vector<uint8_t> &instructions);
     void writeMicroInstruction(
@@ -157,6 +159,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool dEnabled = false;
     bool tEnabled = false;
     VPUTraceCallback traceCallback;
+    VUVIFRegisterSource *vifRegisterSource = nullptr;
     VUXGKICKHandler *xgkickHandler = nullptr;
     bool xgkickWaiting = false;
     bool xgkickTransferStarted = false;
@@ -219,6 +222,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startWaitPInstruction(const LowerInstruction &instruction);
     void startFlagInstruction(const LowerInstruction &instruction);
     void startRandomInstruction(const LowerInstruction &instruction);
+    void startVIFControlInstruction(const LowerInstruction &instruction);
     void startXGKICKInstruction(const LowerInstruction &instruction);
     bool startXGKICKTransfer(Pipeline *pipeline);
     bool xgkickStallsIssue();

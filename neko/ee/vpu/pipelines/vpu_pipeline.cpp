@@ -146,6 +146,7 @@ void Pipeline::advanceStage()
     case VPU_PIPELINE_TYPE_I_REGISTER:
     case VPU_PIPELINE_TYPE_WAITQ:
     case VPU_PIPELINE_TYPE_WAITP:
+    case VPU_PIPELINE_TYPE_VIF_CONTROL:
       advanceTwoStagePipeline();
       break;
     case VPU_PIPELINE_TYPE_FDIV:

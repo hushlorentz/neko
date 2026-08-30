@@ -16,6 +16,7 @@ enum class LowerExecutionUnit : std::uint8_t
   WaitP,
   Flag,
   Random,
+  VIFControl,
   XGKICK,
   Branch
 };

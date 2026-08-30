@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "vif_command.hpp"
+#include "vpu_vif_register_source.hpp"
 
 class VPU;
 
@@ -26,7 +27,7 @@ struct VIFStreamWord
   bool packetComplete = false;
 };
 
-class VIF
+class VIF : public VUVIFRegisterSource
 {
   public:
     explicit VIF(VIFType type);
@@ -43,6 +44,8 @@ class VIF
     std::uint32_t mask() const;
     std::uint32_t row(std::size_t index) const;
     std::uint32_t column(std::size_t index) const;
+    std::uint16_t top() const override;
+    std::uint16_t itop() const override;
     std::uint16_t itops() const;
     std::uint16_t base() const;
     std::uint16_t offset() const;
@@ -61,6 +64,8 @@ class VIF
     void validatePayloadAlignment(const VIFCommand &command) const;
     void preparePayload(const VIFCommand &command);
     void consumePayloadWord(std::uint32_t word);
+    void startMicroProgram(const VIFCommand &command);
+    void updateProgramStartRegisters();
     void executeUNPACK();
     std::uint32_t unpackElement(
       std::uint32_t bitOffset,
@@ -75,6 +80,8 @@ class VIF
     std::uint32_t maskRegister = 0;
     std::array<std::uint32_t, 4> rowRegisters = {};
     std::array<std::uint32_t, 4> columnRegisters = {};
+    std::uint16_t topRegister = 0;
+    std::uint16_t itopRegister = 0;
     std::uint16_t itopsRegister = 0;
     std::uint16_t baseRegister = 0;
     std::uint16_t offsetRegister = 0;

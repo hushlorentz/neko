@@ -592,6 +592,11 @@ void VPU::setXGKICKHandler(VUXGKICKHandler *handler)
   xgkickHandler = handler;
 }
 
+void VPU::setVIFRegisterSource(VUVIFRegisterSource *source)
+{
+  vifRegisterSource = source;
+}
+
 void VPU::uploadMicroInstructions(const vector<uint8_t> &instructions)
 {
   if (instructions.size() % 8 != 0)
@@ -1346,6 +1351,9 @@ void VPU::executePendingLowerInstruction()
     case LowerExecutionUnit::Random:
       startRandomInstruction(instruction);
       break;
+    case LowerExecutionUnit::VIFControl:
+      startVIFControlInstruction(instruction);
+      break;
     case LowerExecutionUnit::XGKICK:
       startXGKICKInstruction(instruction);
       break;
@@ -1355,6 +1363,31 @@ void VPU::executePendingLowerInstruction()
     case LowerExecutionUnit::None:
       break;
   }
+}
+
+void VPU::startVIFControlInstruction(const LowerInstruction &instruction)
+{
+  if (vifRegisterSource == nullptr)
+  {
+    throw runtime_error(
+      "VU VIF control instruction requires an attached VIF.");
+  }
+  if (instruction.opCode == VPU_XTOP && type != VPUType::VU1)
+  {
+    throw runtime_error("XTOP is only supported on VU1.");
+  }
+
+  Pipeline *pipeline = orchestrator.startPipeline(
+    VPU_PIPELINE_TYPE_VIF_CONTROL,
+    instruction.opCode,
+    0,
+    0,
+    0,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    FP_REGISTER_NO_FIELDS,
+    pendingLowerInstructionAddress);
+  pipeline->integerDestReg = instruction.integerDestinationRegister;
 }
 
 void VPU::startIRegisterInstruction(const LowerInstruction &instruction)
@@ -1892,6 +1925,8 @@ bool VPU::lowerInstructionStalls(const LowerInstruction &instruction) const
           FP_REGISTER_NO_FIELDS);
       }
       return false;
+    case LowerExecutionUnit::VIFControl:
+      return false;
     case LowerExecutionUnit::XGKICK:
       return hasPendingIntegerWrite(instruction.sourceRegister1);
     case LowerExecutionUnit::Branch:
@@ -1924,6 +1959,7 @@ bool VPU::lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instru
 {
   return
     instruction.unit == LowerExecutionUnit::LSU ||
+    instruction.unit == LowerExecutionUnit::VIFControl ||
     instruction.unit == LowerExecutionUnit::XGKICK ||
     instruction.unit == LowerExecutionUnit::Branch;
 }
@@ -2170,6 +2206,12 @@ void VPU::pipelineAdvanced(Pipeline *p)
         break;
       case VPU_PIPELINE_TYPE_RANDOM:
         executeRandomPipeline(p);
+        break;
+      case VPU_PIPELINE_TYPE_VIF_CONTROL:
+        p->setIntResult(
+          p->opCode == VPU_XTOP
+            ? vifRegisterSource->top()
+            : vifRegisterSource->itop());
         break;
     }
   }
@@ -3201,6 +3243,24 @@ void VPU::pipelineFinished(Pipeline * p)
       0,
       p->opCode,
       p->destReg,
+      FP_REGISTER_NO_FIELDS
+    });
+    return;
+  }
+  if (p->type == VPU_PIPELINE_TYPE_VIF_CONTROL)
+  {
+    if (p->integerDestReg != VPU_REGISTER_VI00)
+    {
+      intRegisters[p->integerDestReg] = p->intResult;
+    }
+    emitTrace({
+      VPUTraceEventType::PipelineWriteback,
+      cycles,
+      p->instructionAddress,
+      0,
+      0,
+      p->opCode,
+      p->integerDestReg,
       FP_REGISTER_NO_FIELDS
     });
     return;

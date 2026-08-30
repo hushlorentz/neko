@@ -86,6 +86,7 @@ void VIF::attachVPU(VPU *attachedVPU)
   }
 
   vpu = attachedVPU;
+  vpu->setVIFRegisterSource(this);
 }
 
 VIFCommand VIF::processCode(std::uint32_t code)
@@ -131,12 +132,73 @@ VIFCommand VIF::processCode(std::uint32_t code)
       markRegister = command.immediate;
       markFlag = true;
       break;
+    case VIFCommandKind::MSCAL:
+    case VIFCommandKind::MSCALF:
+    case VIFCommandKind::MSCNT:
+      startMicroProgram(command);
+      break;
     default:
       throw std::runtime_error(
         "VIF command execution requires its owning subsystem.");
   }
 
   return command;
+}
+
+void VIF::startMicroProgram(const VIFCommand &command)
+{
+  constexpr std::uint16_t MICRO_INSTRUCTION_SIZE = 8;
+
+  if (vpu == nullptr)
+  {
+    throw std::runtime_error(
+      "VIF microprogram execution requires an attached VPU.");
+  }
+  if (vpu->getState() == VPU_STATE_RUN)
+  {
+    throw std::runtime_error(
+      "VIF microprogram execution is waiting for the VPU.");
+  }
+
+  std::uint16_t startAddress = 0;
+  if (command.kind == VIFCommandKind::MSCNT)
+  {
+    if (!vpu->hasTerminationPosition())
+    {
+      throw std::runtime_error(
+        "VIF MSCNT requires a previously completed microprogram.");
+    }
+    startAddress = vpu->programCounter();
+  }
+  else
+  {
+    const std::size_t instructionCapacity =
+      vpu->microMemorySize() / MICRO_INSTRUCTION_SIZE;
+    if (command.immediate >= instructionCapacity)
+    {
+      throw std::out_of_range(
+        "VIF microprogram start is outside VU micro memory.");
+    }
+    startAddress = command.immediate * MICRO_INSTRUCTION_SIZE;
+  }
+
+  vpu->startMicroMode(startAddress);
+  updateProgramStartRegisters();
+}
+
+void VIF::updateProgramStartRegisters()
+{
+  itopRegister = itopsRegister;
+  if (type != VIFType::VIF1)
+  {
+    return;
+  }
+
+  topRegister = topsRegister;
+  dbf = !dbf;
+  topsRegister =
+    (baseRegister + (dbf ? offsetRegister : 0)) &
+    VIFImmediateEncoding::AddressMask;
 }
 
 VIFStreamWord VIF::ingestWord(std::uint32_t word)
@@ -583,6 +645,16 @@ std::uint32_t VIF::column(std::size_t index) const
       "VIF column register index is outside range.");
   }
   return columnRegisters[index];
+}
+
+std::uint16_t VIF::top() const
+{
+  return topRegister;
+}
+
+std::uint16_t VIF::itop() const
+{
+  return itopRegister;
 }
 
 std::uint16_t VIF::itops() const
