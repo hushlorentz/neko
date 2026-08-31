@@ -76,6 +76,18 @@ struct GIFDecodeResult
   bool packetComplete = false;
 };
 
+struct GIFDecoderState
+{
+  GIFTag tag;
+  bool waitingForTag = true;
+  bool activePacket = false;
+  std::uint32_t remainingQuadwords = 0;
+  std::uint32_t remainingRegisterValues = 0;
+  std::uint16_t currentLoop = 0;
+  std::uint8_t currentRegister = 0;
+  std::uint32_t qValue = 0;
+};
+
 class GIFRegisterWriteHandler
 {
   public:
@@ -100,6 +112,8 @@ class GIFDecoder
     std::uint16_t loopIndex() const;
     std::uint8_t registerIndex() const;
     const GIFTag &currentTag() const;
+    GIFDecoderState suspendPacket();
+    void resumePacket(const GIFDecoderState &state);
 
   private:
     void beginPrimitive(

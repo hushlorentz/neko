@@ -32,7 +32,9 @@ enum class GIFTraceEventType : std::uint8_t
   PrimitiveComplete,
   PacketComplete,
   PathReleased,
-  Path3MaskChanged
+  Path3MaskChanged,
+  Path3Interrupted,
+  Path3Resumed
 };
 
 struct GIFTraceEvent
@@ -53,16 +55,22 @@ class GIFPathArbiter
   public:
     explicit GIFPathArbiter(GIFDecoder *decoder);
 
-    bool requestPath(GIFPath path);
+    bool requestPath(
+      GIFPath path,
+      bool canInterruptPath3 = true);
     void setPath3MaskedByVIF(bool masked);
+    void setPath3IntermittentMode(bool intermittent);
     GIFPathTransferResult transferQuadword(
       GIFPath path,
-      const GIFQuadword &quadword);
+      const GIFQuadword &quadword,
+      bool canInterruptPath3 = true);
 
     GIFPath activePath() const;
     bool pathPending(GIFPath path) const;
     bool pathsIdle(bool includePath3 = true) const;
     bool path3MaskedByVIF() const;
+    bool path3IntermittentMode() const;
+    bool path3Interrupted() const;
     bool decoderAwaitingTag() const;
     bool decoderPacketInProgress() const;
     void setTraceCallback(GIFTraceCallback callback);
@@ -76,11 +84,17 @@ class GIFPathArbiter
     void emitDecodeEvents(
       GIFPath path,
       const GIFDecodeResult &result);
+    void interruptPath3();
 
     GIFDecoder *gifDecoder;
     GIFPath currentPath = GIFPath::Idle;
     std::array<bool, 3> queuedPaths = {};
     bool vifPath3Mask = false;
+    bool intermittentPath3 = false;
+    bool interruptedPath3 = false;
+    bool queuedPath2CanInterruptPath3 = false;
+    std::uint8_t path3ImageSliceQuadwords = 0;
+    GIFDecoderState suspendedPath3State;
     GIFTraceCallback traceCallback;
 };
 

@@ -425,3 +425,58 @@ const GIFTag &GIFDecoder::currentTag() const
 {
   return tag;
 }
+
+GIFDecoderState GIFDecoder::suspendPacket()
+{
+  if (!activePacket ||
+      tag.format != GIFDataFormat::Image)
+  {
+    throw std::runtime_error(
+      "Only an active GIF IMAGE packet can be suspended.");
+  }
+
+  GIFDecoderState state;
+  state.tag = tag;
+  state.waitingForTag = waitingForTag;
+  state.activePacket = activePacket;
+  state.remainingQuadwords = remainingQuadwords;
+  state.remainingRegisterValues = remainingRegisterValues;
+  state.currentLoop = currentLoop;
+  state.currentRegister = currentRegister;
+  state.qValue = qValue;
+
+  tag = GIFTag();
+  waitingForTag = true;
+  activePacket = false;
+  remainingQuadwords = 0;
+  remainingRegisterValues = 0;
+  currentLoop = 0;
+  currentRegister = 0;
+  qValue = 0;
+  return state;
+}
+
+void GIFDecoder::resumePacket(
+  const GIFDecoderState &state)
+{
+  if (activePacket || !waitingForTag)
+  {
+    throw std::runtime_error(
+      "Cannot resume a GIF packet while another packet is active.");
+  }
+  if (!state.activePacket ||
+      state.tag.format != GIFDataFormat::Image)
+  {
+    throw std::invalid_argument(
+      "GIF resume state must contain an active IMAGE packet.");
+  }
+
+  tag = state.tag;
+  waitingForTag = state.waitingForTag;
+  activePacket = state.activePacket;
+  remainingQuadwords = state.remainingQuadwords;
+  remainingRegisterValues = state.remainingRegisterValues;
+  currentLoop = state.currentLoop;
+  currentRegister = state.currentRegister;
+  qValue = state.qValue;
+}

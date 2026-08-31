@@ -20,6 +20,8 @@ struct GIFTransferSummary
   std::uint64_t completedPackets = 0;
   std::uint64_t pathReleases = 0;
   std::uint64_t path3MaskChanges = 0;
+  std::uint64_t path3Interruptions = 0;
+  std::uint64_t path3Resumptions = 0;
 };
 
 class GIFDiagnosticsRecorder

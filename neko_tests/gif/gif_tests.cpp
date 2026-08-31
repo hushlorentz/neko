@@ -84,6 +84,44 @@ TEST_CASE("GIF Tag Decoder Tests")
   }
 }
 
+TEST_CASE("GIF Decoder Packet Suspension Tests")
+{
+  GIFDecoder decoder;
+  decoder.ingestQuadword(gifTag(
+    10,
+    true,
+    GIFDataFormat::Image,
+    0,
+    0));
+  for (std::uint32_t index = 0; index < 8; ++index)
+  {
+    decoder.ingestQuadword(
+      quadword(index, 0, 0, 0));
+  }
+  REQUIRE(decoder.quadwordsRemaining() == 2);
+
+  const GIFDecoderState suspended = decoder.suspendPacket();
+  REQUIRE(decoder.awaitingTag());
+  REQUIRE(!decoder.packetInProgress());
+
+  const GIFDecodeResult intervening = decoder.ingestQuadword(gifTag(
+    0,
+    true,
+    GIFDataFormat::Packed,
+    0,
+    0));
+  REQUIRE(intervening.packetComplete);
+  decoder.resumePacket(suspended);
+  REQUIRE(decoder.packetInProgress());
+  REQUIRE(decoder.quadwordsRemaining() == 2);
+
+  REQUIRE(!decoder.ingestQuadword(
+    quadword(8, 0, 0, 0)).packetComplete);
+  REQUIRE(decoder.ingestQuadword(
+    quadword(9, 0, 0, 0)).packetComplete);
+  REQUIRE(decoder.awaitingTag());
+}
+
 TEST_CASE("GIF PACKED Decoder Tests")
 {
   SECTION("Descriptor order repeats for each loop across fragmented calls")

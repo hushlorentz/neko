@@ -123,7 +123,8 @@ TEST_CASE("GIF Diagnostics Tests")
       "\"path2\":0,\"path3\":0},\"decoded_tags\":1,"
       "\"register_writes\":1,\"completed_primitives\":1,"
       "\"completed_packets\":1,\"path_releases\":1,"
-      "\"path3_mask_changes\":0}\n");
+      "\"path3_mask_changes\":0,\"path3_interruptions\":0,"
+      "\"path3_resumptions\":0}\n");
   }
 
   SECTION("Stalls and PATH3 mask transitions identify their paths")

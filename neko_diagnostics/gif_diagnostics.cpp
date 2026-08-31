@@ -56,6 +56,10 @@ namespace
         return "path_released";
       case GIFTraceEventType::Path3MaskChanged:
         return "path3_mask_changed";
+      case GIFTraceEventType::Path3Interrupted:
+        return "path3_interrupted";
+      case GIFTraceEventType::Path3Resumed:
+        return "path3_resumed";
     }
     throw std::invalid_argument("Unknown GIF trace event type.");
   }
@@ -135,6 +139,12 @@ void GIFDiagnosticsRecorder::observe(
       break;
     case GIFTraceEventType::Path3MaskChanged:
       ++transferSummary.path3MaskChanges;
+      break;
+    case GIFTraceEventType::Path3Interrupted:
+      ++transferSummary.path3Interruptions;
+      break;
+    case GIFTraceEventType::Path3Resumed:
+      ++transferSummary.path3Resumptions;
       break;
   }
 }
@@ -222,5 +232,9 @@ void writeGIFTransferSummaryJsonLine(
     << ",\"path_releases\":" << summary.pathReleases
     << ",\"path3_mask_changes\":"
     << summary.path3MaskChanges
+    << ",\"path3_interruptions\":"
+    << summary.path3Interruptions
+    << ",\"path3_resumptions\":"
+    << summary.path3Resumptions
     << "}\n";
 }

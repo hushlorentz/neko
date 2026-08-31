@@ -71,6 +71,46 @@ namespace
     }
   }
 
+  VIFStreamWord queuePath2Packet(
+    VIF *vif,
+    std::uint8_t command,
+    const GIFQuadword &packet)
+  {
+    alignDirectCommand(vif);
+    REQUIRE(!vif->ingestWord(vifCode(command, 1)).stalled);
+    for (std::size_t index = 0;
+         index < WORDS_PER_QUADWORD - 1;
+         ++index)
+    {
+      REQUIRE(!vif->ingestWord(packet[index]).stalled);
+    }
+    return vif->ingestWord(packet[WORDS_PER_QUADWORD - 1]);
+  }
+
+  std::vector<GIFQuadword> imagePacket(
+    std::size_t payloadQuadwords)
+  {
+    std::vector<GIFQuadword> packet;
+    packet.push_back(gifTag(
+      static_cast<std::uint16_t>(payloadQuadwords),
+      true,
+      GIFDataFormat::Image,
+      0,
+      0));
+    for (std::uint32_t index = 0;
+         index < payloadQuadwords;
+         ++index)
+    {
+      packet.push_back(GIFQuadword{{
+        index * 4,
+        index * 4 + 1,
+        index * 4 + 2,
+        index * 4 + 3
+      }});
+    }
+    return packet;
+  }
+
   std::vector<GIFQuadword> transferredOnPath(
     const std::vector<GIFTraceEvent> &events,
     GIFPath path)
@@ -704,4 +744,356 @@ TEST_CASE("GIF PATH1 PATH2 PATH3 Producer Integration Tests")
     std::vector<GIFQuadword>(
       path3Packet.begin(),
       path3Packet.end()));
+}
+
+TEST_CASE("GIF PATH3 IMAGE Transfer Mode Tests")
+{
+  SECTION("Continuous mode retains PATH3 for the complete IMAGE packet")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    GIFPath3Transfer path3(arbiter);
+    const std::vector<GIFQuadword> packet = imagePacket(10);
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 1)
+        .transferredQuadwords == 1);
+    REQUIRE(!arbiter.requestPath(GIFPath::Path2));
+    REQUIRE(!arbiter.requestPath(GIFPath::Path1));
+
+    const GIFPath3SubmissionResult firstSlice =
+      path3.submitQuadwords(&packet[1], 8);
+    REQUIRE(firstSlice.transferredQuadwords == 8);
+    REQUIRE(!firstSlice.stalled);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+
+    const GIFPath3SubmissionResult remainder =
+      path3.submitQuadwords(&packet[9], 2);
+    REQUIRE(remainder.transferredQuadwords == 2);
+    REQUIRE(remainder.packetComplete);
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+  }
+
+  SECTION("Intermittent mode yields to PATH1 after eight IMAGE qwords")
+  {
+    GIFDecoder decoder;
+    RecordingRegisterWriteHandler writes;
+    decoder.attachRegisterWriteHandler(&writes);
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    VPU vpu(VPUType::VU1);
+    GIFPath1Transfer path1(arbiter);
+    path1.attachVPU(&vpu);
+    const std::vector<GIFQuadword> packet = imagePacket(10);
+    const GIFQuadword path1Packet =
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+    vpu.writeDataQuadword(0, path1Packet);
+    GIFDiagnosticsRecorder diagnostics;
+    arbiter.setTraceCallback(
+      [&diagnostics](const GIFTraceEvent &event) {
+        diagnostics.observe(event);
+      });
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 1)
+        .transferredQuadwords == 1);
+    path1.startPath1Transfer(0);
+    const GIFPath3SubmissionResult sliced =
+      path3.submitQuadwords(&packet[1], 8);
+
+    REQUIRE(sliced.transferredQuadwords == 8);
+    REQUIRE(!sliced.packetComplete);
+    REQUIRE(arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+    REQUIRE(decoder.awaitingTag());
+    REQUIRE(!decoder.packetInProgress());
+    REQUIRE(path3.submitQuadwords(&packet[9], 2).stalled);
+
+    path1.advancePath1Transfer();
+    REQUIRE(!path1.path1TransferActive());
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+    REQUIRE(decoder.packetInProgress());
+    REQUIRE(decoder.quadwordsRemaining() == 2);
+
+    const GIFPath3SubmissionResult resumed =
+      path3.submitQuadwords(&packet[9], 2);
+    REQUIRE(resumed.transferredQuadwords == 2);
+    REQUIRE(resumed.packetComplete);
+    REQUIRE(writes.writes.size() == 20);
+    REQUIRE(
+      transferredOnPath(
+        diagnostics.events(),
+        GIFPath::Path3) == packet);
+    REQUIRE(diagnostics.summary().path3Interruptions == 1);
+    REQUIRE(diagnostics.summary().path3Resumptions == 1);
+  }
+
+  SECTION("Intermittent mode checks every IMAGE slice")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    const std::vector<GIFQuadword> packet = imagePacket(18);
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 9)
+        .transferredQuadwords == 9);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+
+    REQUIRE(!arbiter.requestPath(GIFPath::Path1));
+    REQUIRE(
+      path3.submitQuadwords(&packet[9], 7)
+        .transferredQuadwords == 7);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+
+    REQUIRE(
+      path3.submitQuadwords(&packet[16], 1)
+        .transferredQuadwords == 1);
+    REQUIRE(arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+    REQUIRE(decoder.awaitingTag());
+  }
+
+  SECTION("Each IMAGE tag starts a new slice count")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    const std::vector<GIFQuadword> firstTag = imagePacket(5);
+    const std::vector<GIFQuadword> secondTag = imagePacket(10);
+    std::vector<GIFQuadword> packet = firstTag;
+    packet[0] = gifTag(
+      5,
+      false,
+      GIFDataFormat::Image,
+      0,
+      0);
+    packet.insert(
+      packet.end(),
+      secondTag.begin(),
+      secondTag.end());
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 7)
+        .transferredQuadwords == 7);
+    REQUIRE(!arbiter.requestPath(GIFPath::Path1));
+
+    REQUIRE(
+      path3.submitQuadwords(&packet[7], 7)
+        .transferredQuadwords == 7);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+
+    REQUIRE(
+      path3.submitQuadwords(&packet[14], 1)
+        .transferredQuadwords == 1);
+    REQUIRE(arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+  }
+
+  SECTION("An IMAGE tag boundary can be suspended and resumed")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    std::vector<GIFQuadword> packet = imagePacket(8);
+    packet[0] = gifTag(
+      8,
+      false,
+      GIFDataFormat::Image,
+      0,
+      0);
+    const GIFQuadword finalTag =
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 1)
+        .transferredQuadwords == 1);
+    REQUIRE(!arbiter.requestPath(GIFPath::Path1));
+    REQUIRE(
+      path3.submitQuadwords(&packet[1], 8)
+        .transferredQuadwords == 8);
+    REQUIRE(arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path1,
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0)).accepted);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+    REQUIRE(decoder.awaitingTag());
+    REQUIRE(decoder.packetInProgress());
+
+    const GIFPath3SubmissionResult completed =
+      path3.submitQuadwords(&finalTag, 1);
+    REQUIRE(completed.packetComplete);
+    REQUIRE(arbiter.pathsIdle());
+  }
+
+  SECTION("Intermittent mode does not slice PACKED data")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    std::vector<GIFQuadword> packet;
+    packet.push_back(gifTag(
+      9,
+      true,
+      GIFDataFormat::Packed,
+      1,
+      GIFRegisterDescriptor::NOP));
+    for (std::uint32_t index = 0; index < 9; ++index)
+    {
+      packet.push_back(GIFQuadword{{index, 0, 0, 0}});
+    }
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 1)
+        .transferredQuadwords == 1);
+    REQUIRE(!arbiter.requestPath(GIFPath::Path1));
+    REQUIRE(
+      path3.submitQuadwords(&packet[1], 8)
+        .transferredQuadwords == 8);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+
+    const GIFPath3SubmissionResult completed =
+      path3.submitQuadwords(&packet[9], 1);
+    REQUIRE(completed.packetComplete);
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+  }
+
+  SECTION("DIRECT interrupts a PATH3 IMAGE slice")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    VIF vif(VIFType::VIF1);
+    vif.attachGIFPathArbiter(&arbiter);
+    const std::vector<GIFQuadword> packet = imagePacket(10);
+    const GIFQuadword path2Packet =
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 1)
+        .transferredQuadwords == 1);
+    const VIFStreamWord queued = queuePath2Packet(
+      &vif,
+      VIFCommandEncoding::DIRECT,
+      path2Packet);
+    REQUIRE(queued.stalled);
+
+    REQUIRE(
+      path3.submitQuadwords(&packet[1], 8)
+        .transferredQuadwords == 8);
+    REQUIRE(arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path2);
+
+    const VIFStreamWord completed =
+      vif.ingestWord(path2Packet[WORDS_PER_QUADWORD - 1]);
+    REQUIRE(!completed.stalled);
+    REQUIRE(completed.gifResult.packetComplete);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+    REQUIRE(
+      path3.submitQuadwords(&packet[9], 2)
+        .packetComplete);
+  }
+
+  SECTION("DIRECTHL waits for the complete PATH3 IMAGE packet")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    VIF vif(VIFType::VIF1);
+    vif.attachGIFPathArbiter(&arbiter);
+    const std::vector<GIFQuadword> packet = imagePacket(10);
+    const GIFQuadword path2Packet =
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 1)
+        .transferredQuadwords == 1);
+    const VIFStreamWord queued = queuePath2Packet(
+      &vif,
+      VIFCommandEncoding::DIRECTHL,
+      path2Packet);
+    REQUIRE(queued.stalled);
+
+    const GIFPath3SubmissionResult firstSlice =
+      path3.submitQuadwords(&packet[1], 8);
+    REQUIRE(firstSlice.transferredQuadwords == 8);
+    REQUIRE(!arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+
+    const GIFPath3SubmissionResult remainder =
+      path3.submitQuadwords(&packet[9], 2);
+    REQUIRE(remainder.packetComplete);
+    REQUIRE(arbiter.activePath() == GIFPath::Path2);
+
+    const VIFStreamWord completed =
+      vif.ingestWord(path2Packet[WORDS_PER_QUADWORD - 1]);
+    REQUIRE(!completed.stalled);
+    REQUIRE(completed.gifResult.packetComplete);
+    REQUIRE(arbiter.pathsIdle());
+  }
+
+  SECTION("DIRECTHL stays behind PATH3 when PATH1 causes an interruption")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    GIFPath3Transfer path3(arbiter);
+    VIF vif(VIFType::VIF1);
+    vif.attachGIFPathArbiter(&arbiter);
+    VPU vpu(VPUType::VU1);
+    GIFPath1Transfer path1(arbiter);
+    path1.attachVPU(&vpu);
+    const std::vector<GIFQuadword> packet = imagePacket(10);
+    const GIFQuadword higherPathPacket =
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+    vpu.writeDataQuadword(0, higherPathPacket);
+
+    REQUIRE(
+      path3.submitQuadwords(packet.data(), 1)
+        .transferredQuadwords == 1);
+    REQUIRE(queuePath2Packet(
+      &vif,
+      VIFCommandEncoding::DIRECTHL,
+      higherPathPacket).stalled);
+    path1.startPath1Transfer(0);
+
+    REQUIRE(
+      path3.submitQuadwords(&packet[1], 8)
+        .transferredQuadwords == 8);
+    REQUIRE(arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+
+    path1.advancePath1Transfer();
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(!arbiter.path3Interrupted());
+    REQUIRE(arbiter.pathPending(GIFPath::Path2));
+
+    REQUIRE(
+      path3.submitQuadwords(&packet[9], 2)
+        .packetComplete);
+    REQUIRE(arbiter.activePath() == GIFPath::Path2);
+    const VIFStreamWord directHLCompleted =
+      vif.ingestWord(
+        higherPathPacket[WORDS_PER_QUADWORD - 1]);
+    REQUIRE(!directHLCompleted.stalled);
+    REQUIRE(directHLCompleted.gifResult.packetComplete);
+    REQUIRE(arbiter.pathsIdle());
+  }
 }

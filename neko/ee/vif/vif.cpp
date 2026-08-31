@@ -460,7 +460,8 @@ bool VIF::consumePayloadWord(
         const GIFPathTransferResult transfer =
           gifPathArbiter->transferQuadword(
             GIFPath::Path2,
-            directQuadword);
+            directQuadword,
+            streamCommand.kind != VIFCommandKind::DIRECTHL);
         if (!transfer.accepted)
         {
           return false;

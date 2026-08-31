@@ -12,7 +12,9 @@ GIFPathArbiter::GIFPathArbiter(GIFDecoder *decoder) :
   }
 }
 
-bool GIFPathArbiter::requestPath(GIFPath path)
+bool GIFPathArbiter::requestPath(
+  GIFPath path,
+  bool canInterruptPath3)
 {
   if (path == GIFPath::Idle)
   {
@@ -26,7 +28,21 @@ bool GIFPathArbiter::requestPath(GIFPath path)
     return true;
   }
 
-  queuedPaths[pathIndex(path)] = true;
+  const std::size_t requestedIndex = pathIndex(path);
+  if (path == GIFPath::Path2)
+  {
+    if (!queuedPaths[requestedIndex])
+    {
+      queuedPath2CanInterruptPath3 = canInterruptPath3;
+    }
+    else
+    {
+      queuedPath2CanInterruptPath3 =
+        queuedPath2CanInterruptPath3 ||
+        canInterruptPath3;
+    }
+  }
+  queuedPaths[requestedIndex] = true;
   if (currentPath == GIFPath::Idle)
   {
     selectQueuedPath();
@@ -56,17 +72,28 @@ void GIFPathArbiter::setPath3MaskedByVIF(bool masked)
   }
 }
 
+void GIFPathArbiter::setPath3IntermittentMode(
+  bool intermittent)
+{
+  intermittentPath3 = intermittent;
+}
+
 GIFPathTransferResult GIFPathArbiter::transferQuadword(
   GIFPath path,
-  const GIFQuadword &quadword)
+  const GIFQuadword &quadword,
+  bool canInterruptPath3)
 {
   GIFPathTransferResult result;
-  if (!requestPath(path))
+  if (!requestPath(path, canInterruptPath3))
   {
     emitEvent(GIFTraceEventType::TransferStalled, path);
     return result;
   }
 
+  const bool path3ImagePayload =
+    path == GIFPath::Path3 &&
+    !gifDecoder->awaitingTag() &&
+    gifDecoder->currentTag().format == GIFDataFormat::Image;
   result.decodeResult = gifDecoder->ingestQuadword(quadword);
   result.accepted = true;
   if (traceCallback)
@@ -78,11 +105,38 @@ GIFPathTransferResult GIFPathArbiter::transferQuadword(
     traceCallback(event);
   }
   emitDecodeEvents(path, result.decodeResult);
+  if (path == GIFPath::Path3 &&
+      result.decodeResult.tagDecoded &&
+      result.decodeResult.tag.format == GIFDataFormat::Image)
+  {
+    path3ImageSliceQuadwords = 0;
+  }
   if (result.decodeResult.packetComplete)
   {
+    if (path == GIFPath::Path3)
+    {
+      path3ImageSliceQuadwords = 0;
+    }
     emitEvent(GIFTraceEventType::PathReleased, path);
     currentPath = GIFPath::Idle;
     selectQueuedPath();
+  }
+  else if (path3ImagePayload && intermittentPath3)
+  {
+    ++path3ImageSliceQuadwords;
+    if (path3ImageSliceQuadwords == 8)
+    {
+      path3ImageSliceQuadwords = 0;
+      const bool path1Waiting =
+        queuedPaths[pathIndex(GIFPath::Path1)];
+      const bool interruptiblePath2Waiting =
+        queuedPaths[pathIndex(GIFPath::Path2)] &&
+        queuedPath2CanInterruptPath3;
+      if (path1Waiting || interruptiblePath2Waiting)
+      {
+        interruptPath3();
+      }
+    }
   }
   return result;
 }
@@ -124,6 +178,16 @@ bool GIFPathArbiter::pathsIdle(bool includePath3) const
 bool GIFPathArbiter::path3MaskedByVIF() const
 {
   return vifPath3Mask;
+}
+
+bool GIFPathArbiter::path3IntermittentMode() const
+{
+  return intermittentPath3;
+}
+
+bool GIFPathArbiter::path3Interrupted() const
+{
+  return interruptedPath3;
 }
 
 bool GIFPathArbiter::decoderAwaitingTag() const
@@ -168,13 +232,44 @@ void GIFPathArbiter::selectQueuedPath()
     {
       continue;
     }
+    if (interruptedPath3 &&
+        index == pathIndex(GIFPath::Path2) &&
+        !queuedPath2CanInterruptPath3)
+    {
+      continue;
+    }
 
     queuedPaths[index] = false;
     currentPath =
       static_cast<GIFPath>(index + 1);
-    emitEvent(GIFTraceEventType::PathSelected, currentPath);
+    if (currentPath == GIFPath::Path2)
+    {
+      queuedPath2CanInterruptPath3 = false;
+    }
+    if (currentPath == GIFPath::Path3 &&
+        interruptedPath3)
+    {
+      gifDecoder->resumePacket(suspendedPath3State);
+      interruptedPath3 = false;
+      emitEvent(GIFTraceEventType::PathSelected, currentPath);
+      emitEvent(GIFTraceEventType::Path3Resumed, currentPath);
+    }
+    else
+    {
+      emitEvent(GIFTraceEventType::PathSelected, currentPath);
+    }
     return;
   }
+}
+
+void GIFPathArbiter::interruptPath3()
+{
+  suspendedPath3State = gifDecoder->suspendPacket();
+  interruptedPath3 = true;
+  queuedPaths[pathIndex(GIFPath::Path3)] = true;
+  emitEvent(GIFTraceEventType::Path3Interrupted, GIFPath::Path3);
+  currentPath = GIFPath::Idle;
+  selectQueuedPath();
 }
 
 void GIFPathArbiter::emitEvent(
