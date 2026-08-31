@@ -32,6 +32,7 @@ namespace
   {
     Rotation,
     PointsAndSprites,
+    PointsLinesAndSprites,
     Primitives
   };
 
@@ -69,6 +70,10 @@ namespace
         }
         else if (scene == "points-lines-sprites")
         {
+          options.scene = DesktopScene::PointsLinesAndSprites;
+        }
+        else if (scene == "points-lines-sprites-strips-fans")
+        {
           options.scene = DesktopScene::Primitives;
         }
         else if (scene == "primitives")
@@ -79,14 +84,16 @@ namespace
         {
           throw std::invalid_argument(
             "Desktop scene must be rotation, points-sprites, "
-            "points-lines-sprites, or primitives.");
+            "points-lines-sprites, "
+            "points-lines-sprites-strips-fans, or primitives.");
         }
       }
       else
       {
         throw std::invalid_argument(
           "Usage: neko_desktop [--scene rotation|points-sprites|"
-          "points-lines-sprites|primitives] "
+          "points-lines-sprites|points-lines-sprites-strips-fans|"
+          "primitives] "
           "[--frames count]");
       }
     }
@@ -153,7 +160,9 @@ namespace
           ? "Neko - rotation_vu1.asm"
           : options.scene == DesktopScene::PointsAndSprites
             ? "Neko - POINT and SPRITE"
-            : "Neko - POINT, LINE, and SPRITE",
+            : options.scene == DesktopScene::PointsLinesAndSprites
+              ? "Neko - POINT, LINE, and SPRITE"
+              : "Neko - GS Primitive Showcase",
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0,
@@ -234,12 +243,23 @@ namespace
       }
       else
       {
-        neko_demo::PrimitiveSceneResult scene =
-          options.scene == DesktopScene::PointsAndSprites
-            ? neko_demo::renderPointSpriteScene(
-                static_cast<std::uint32_t>(renderedFrames))
-            : neko_demo::renderPrimitiveScene(
-                static_cast<std::uint32_t>(renderedFrames));
+        neko_demo::PrimitiveSceneResult scene;
+        if (options.scene == DesktopScene::PointsAndSprites)
+        {
+          scene = neko_demo::renderPointSpriteScene(
+            static_cast<std::uint32_t>(renderedFrames));
+        }
+        else if (
+          options.scene == DesktopScene::PointsLinesAndSprites)
+        {
+          scene = neko_demo::renderPointLineSpriteScene(
+            static_cast<std::uint32_t>(renderedFrames));
+        }
+        else
+        {
+          scene = neko_demo::renderPrimitiveScene(
+            static_cast<std::uint32_t>(renderedFrames));
+        }
         rgbaPixels = std::move(scene.rgbaPixels);
         framebufferHash = scene.framebufferHash;
       }
@@ -293,7 +313,10 @@ namespace
               ? "rotation_vu1"
               : options.scene == DesktopScene::PointsAndSprites
                 ? "points_sprites"
-                : "points_lines_sprites")
+                : options.scene ==
+                    DesktopScene::PointsLinesAndSprites
+                  ? "points_lines_sprites"
+                  : "points_lines_sprites_strips_fans")
         << ": frames=" << renderedFrames
         << " first_hash=0x" << std::hex
         << firstFramebufferHash

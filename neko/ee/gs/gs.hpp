@@ -13,7 +13,13 @@ namespace GSRegisterAddress
   constexpr std::uint8_t PRIM = 0x00;
   constexpr std::uint8_t RGBAQ = 0x01;
   constexpr std::uint8_t XYZ2 = 0x05;
+  constexpr std::uint8_t TEX0_1 = 0x06;
+  constexpr std::uint8_t TEX0_2 = 0x07;
+  constexpr std::uint8_t CLAMP_1 = 0x08;
+  constexpr std::uint8_t CLAMP_2 = 0x09;
   constexpr std::uint8_t XYZ3 = 0x0d;
+  constexpr std::uint8_t TEX1_1 = 0x14;
+  constexpr std::uint8_t TEX1_2 = 0x15;
   constexpr std::uint8_t XYOFFSET_1 = 0x18;
   constexpr std::uint8_t XYOFFSET_2 = 0x19;
   constexpr std::uint8_t SCISSOR_1 = 0x40;
@@ -121,12 +127,46 @@ struct GSTest
   std::uint8_t depthTest = 0;
 };
 
+enum class GSTextureWrapMode : std::uint8_t
+{
+  Repeat = 0,
+  Clamp = 1,
+  RegionClamp = 2,
+  RegionRepeat = 3
+};
+
+struct GSTexture
+{
+  std::uint16_t basePointer = 0;
+  std::uint8_t bufferWidth = 0;
+  std::uint8_t pixelStorageMode = 0;
+  std::uint8_t widthExponent = 0;
+  std::uint8_t heightExponent = 0;
+  bool rgba = false;
+  std::uint8_t function = 0;
+  std::uint8_t maximumMipLevel = 0;
+  bool magnificationLinear = false;
+  std::uint8_t minificationFilter = 0;
+};
+
+struct GSTextureClamp
+{
+  GSTextureWrapMode horizontal = GSTextureWrapMode::Repeat;
+  GSTextureWrapMode vertical = GSTextureWrapMode::Repeat;
+  std::uint16_t minimumU = 0;
+  std::uint16_t maximumU = 0;
+  std::uint16_t minimumV = 0;
+  std::uint16_t maximumV = 0;
+};
+
 struct GSContext
 {
   GSFrame frame;
   GSScissor scissor;
   GSXYOffset offset;
   GSTest test;
+  GSTexture texture;
+  GSTextureClamp textureClamp;
 };
 
 struct GSImageTransfer
@@ -167,6 +207,7 @@ class GS : public GIFRegisterWriteHandler
     const GSColor &color() const;
     const GSVertexCoordinate &vertex() const;
     const GSContext &context(std::size_t index) const;
+    const GSTexture &texture(std::size_t contextIndex) const;
     const GSImageTransfer &imageTransfer() const;
     bool hostInterfaceReversed() const;
 
@@ -185,6 +226,10 @@ class GS : public GIFRegisterWriteHandler
       std::uint32_t value);
     std::uint32_t localMemoryWord(std::size_t address) const;
     std::size_t localMemoryWordCount() const;
+    std::uint32_t sampleTextureNearest(
+      std::size_t contextIndex,
+      std::int32_t fixedU,
+      std::int32_t fixedV) const;
     std::uint64_t framebufferHash(
       std::size_t contextIndex,
       std::uint16_t width,
@@ -216,6 +261,13 @@ class GS : public GIFRegisterWriteHandler
     void decodeScissor(std::size_t index, std::uint64_t data);
     void decodeOffset(std::size_t index, std::uint64_t data);
     void decodeTest(std::size_t index, std::uint64_t data);
+    void decodeTexture(std::size_t index, std::uint64_t data);
+    void decodeTextureSampling(
+      std::size_t index,
+      std::uint64_t data);
+    void decodeTextureClamp(
+      std::size_t index,
+      std::uint64_t data);
     void decodeTransferBuffer(std::uint64_t data);
     void decodeTransferPosition(std::uint64_t data);
     void decodeTransferRegion(std::uint64_t data);
@@ -236,7 +288,11 @@ class GS : public GIFRegisterWriteHandler
       const GSColor &firstColor,
       const GSColor &secondColor);
     void rasterizeSprite();
-    void rasterizeTriangle();
+    void rasterizeTriangle(
+      const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
+        &vertices,
+      const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
+        &colors);
     void validateBasicDrawing(
       const char *primitiveName,
       bool antialiasingUnsupported) const;

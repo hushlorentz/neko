@@ -622,6 +622,184 @@ TEST_CASE("GS Flat Triangle Rasterizer Tests")
   }
 }
 
+TEST_CASE("GS Triangle Strip Rasterizer Tests")
+{
+  SECTION("Each new vertex reuses the previous edge")
+  {
+    GS strip;
+    GS independent;
+    configureContext(&strip, 0);
+    configureContext(&independent, 0);
+    strip.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::TriangleStrip) |
+      GOURAUD_SHADING);
+    independent.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Triangle) |
+      GOURAUD_SHADING);
+    const std::uint16_t coordinates[][2] = {
+      {1, 1}, {1, 4}, {4, 1}, {4, 4}
+    };
+    const std::uint64_t colors[] = {
+      colorValue(20, 40, 60, 80),
+      colorValue(60, 80, 100, 120),
+      colorValue(100, 120, 140, 160),
+      colorValue(140, 160, 180, 200)
+    };
+
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      submitVertex(
+        &strip,
+        coordinates[index][0] * FIXED_POINT_ONE,
+        coordinates[index][1] * FIXED_POINT_ONE,
+        colors[index]);
+    }
+    const std::size_t independentIndices[] = {
+      0, 1, 2, 1, 2, 3
+    };
+    for (const std::size_t index : independentIndices)
+    {
+      submitVertex(
+        &independent,
+        coordinates[index][0] * FIXED_POINT_ONE,
+        coordinates[index][1] * FIXED_POINT_ONE,
+        colors[index]);
+    }
+
+    REQUIRE(strip.queuedVertexCount() == 2);
+    REQUIRE(strip.triangleCount() == 2);
+    REQUIRE(strip.pixelWriteCount() == 9);
+    REQUIRE(
+      strip.framebufferHash(0, 8, 8) ==
+      independent.framebufferHash(0, 8, 8));
+  }
+
+  SECTION("XYZ3 skips one triangle while advancing the strip")
+  {
+    GS strip;
+    GS expected;
+    configureContext(&strip, 0);
+    configureContext(&expected, 0);
+    strip.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::TriangleStrip));
+    expected.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Triangle));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(&strip, 1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(&strip, 1 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+    submitVertex(
+      &strip, 4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color, false);
+    submitVertex(&strip, 4 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+
+    submitVertex(
+      &expected, 1 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+    submitVertex(
+      &expected, 4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(
+      &expected, 4 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+
+    REQUIRE(strip.queuedVertexCount() == 2);
+    REQUIRE(strip.triangleCount() == 1);
+    REQUIRE(
+      strip.framebufferHash(0, 8, 8) ==
+      expected.framebufferHash(0, 8, 8));
+  }
+}
+
+TEST_CASE("GS Triangle Fan Rasterizer Tests")
+{
+  SECTION("Each new vertex reuses the center and previous edge")
+  {
+    GS fan;
+    GS independent;
+    configureContext(&fan, 0);
+    configureContext(&independent, 0);
+    fan.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::TriangleFan) |
+      GOURAUD_SHADING);
+    independent.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Triangle) |
+      GOURAUD_SHADING);
+    const std::uint16_t coordinates[][2] = {
+      {1, 1}, {4, 1}, {4, 4}, {1, 4}
+    };
+    const std::uint64_t colors[] = {
+      colorValue(20, 40, 60, 80),
+      colorValue(60, 80, 100, 120),
+      colorValue(100, 120, 140, 160),
+      colorValue(140, 160, 180, 200)
+    };
+
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      submitVertex(
+        &fan,
+        coordinates[index][0] * FIXED_POINT_ONE,
+        coordinates[index][1] * FIXED_POINT_ONE,
+        colors[index]);
+    }
+    const std::size_t independentIndices[] = {
+      0, 1, 2, 0, 2, 3
+    };
+    for (const std::size_t index : independentIndices)
+    {
+      submitVertex(
+        &independent,
+        coordinates[index][0] * FIXED_POINT_ONE,
+        coordinates[index][1] * FIXED_POINT_ONE,
+        colors[index]);
+    }
+
+    REQUIRE(fan.queuedVertexCount() == 2);
+    REQUIRE(fan.triangleCount() == 2);
+    REQUIRE(fan.pixelWriteCount() == 9);
+    REQUIRE(
+      fan.framebufferHash(0, 8, 8) ==
+      independent.framebufferHash(0, 8, 8));
+  }
+
+  SECTION("XYZ3 skips one triangle while advancing the fan")
+  {
+    GS fan;
+    GS expected;
+    configureContext(&fan, 0);
+    configureContext(&expected, 0);
+    fan.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::TriangleFan));
+    expected.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Triangle));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(&fan, 1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(&fan, 4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(
+      &fan, 4 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color, false);
+    submitVertex(&fan, 1 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+
+    submitVertex(
+      &expected, 1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(
+      &expected, 4 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+    submitVertex(
+      &expected, 1 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+
+    REQUIRE(fan.queuedVertexCount() == 2);
+    REQUIRE(fan.triangleCount() == 1);
+    REQUIRE(
+      fan.framebufferHash(0, 8, 8) ==
+      expected.framebufferHash(0, 8, 8));
+  }
+}
+
 TEST_CASE("GS Point Rasterizer Tests")
 {
   SECTION("Each drawing kick selects the closest pixel")
@@ -1227,6 +1405,68 @@ TEST_CASE("GIF Line Integration Tests")
     REQUIRE(
       gs.readPSMCT32(0, 6, 4) ==
       packedColor(17, 18, 19, 20));
+  }
+}
+
+TEST_CASE("GIF Triangle Strip and Fan Integration Tests")
+{
+  SECTION("PACKED drawing kicks render strips and fans")
+  {
+    GS gs;
+    GIFDecoder decoder;
+    decoder.attachRegisterWriteHandler(&gs);
+    configureContext(&gs, 0);
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    const std::uint16_t stripCoordinates[][2] = {
+      {1, 1}, {1, 4}, {4, 1}, {4, 4}
+    };
+    const std::uint16_t fanCoordinates[][2] = {
+      {6, 1}, {9, 1}, {9, 4}, {6, 4}
+    };
+
+    decoder.ingestQuadword(gifTag(
+      4,
+      true,
+      2,
+      descriptors,
+      true,
+      static_cast<std::uint16_t>(
+        GSPrimitiveType::TriangleStrip)));
+    for (const auto &coordinate : stripCoordinates)
+    {
+      decoder.ingestQuadword(packedRGBA(1, 2, 3, 4));
+      decoder.ingestQuadword(packedXYZ(
+        coordinate[0] * FIXED_POINT_ONE,
+        coordinate[1] * FIXED_POINT_ONE));
+    }
+
+    decoder.ingestQuadword(gifTag(
+      4,
+      true,
+      2,
+      descriptors,
+      true,
+      static_cast<std::uint16_t>(
+        GSPrimitiveType::TriangleFan)));
+    for (const auto &coordinate : fanCoordinates)
+    {
+      decoder.ingestQuadword(packedRGBA(5, 6, 7, 8));
+      decoder.ingestQuadword(packedXYZ(
+        coordinate[0] * FIXED_POINT_ONE,
+        coordinate[1] * FIXED_POINT_ONE));
+    }
+
+    REQUIRE(gs.triangleCount() == 4);
+    REQUIRE(gs.pixelWriteCount() == 18);
+    REQUIRE(
+      gs.readPSMCT32(0, 2, 2) ==
+      packedColor(1, 2, 3, 4));
+    REQUIRE(
+      gs.readPSMCT32(0, 7, 2) ==
+      packedColor(5, 6, 7, 8));
   }
 }
 

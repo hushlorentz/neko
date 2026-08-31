@@ -145,6 +145,7 @@ add_executable(neko_tests
     neko_tests/gs/gs_primitive_scene_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp
+    neko_tests/gs/gs_texture_tests.cpp
     neko_tests/gs/gs_vif_vu1_integration_tests.cpp
     neko_tests/math/floating_point_tests.cpp
     neko_tests/vif/vif_tests.cpp

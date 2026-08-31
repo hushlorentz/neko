@@ -17,6 +17,7 @@ namespace neko_demo
     std::uint64_t pointCount = 0;
     std::uint64_t lineCount = 0;
     std::uint64_t spriteCount = 0;
+    std::uint64_t triangleCount = 0;
     std::uint64_t pixelWriteCount = 0;
     std::uint64_t transferredQuadwords = 0;
   };
@@ -24,6 +25,8 @@ namespace neko_demo
   PrimitiveSceneResult renderPrimitiveScene(
     std::uint32_t phase);
   PrimitiveSceneResult renderPointSpriteScene(
+    std::uint32_t phase);
+  PrimitiveSceneResult renderPointLineSpriteScene(
     std::uint32_t phase);
 }
 

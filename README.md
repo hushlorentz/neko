@@ -57,6 +57,7 @@ rasterization. Content-specific scene names preserve earlier versions:
 ```sh
 ./out/desktop/neko_desktop --scene points-sprites
 ./out/desktop/neko_desktop --scene points-lines-sprites
+./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans
 ```
 
 The `primitives` name tracks the newest graphics showcase as more primitive

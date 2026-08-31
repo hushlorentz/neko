@@ -45,6 +45,33 @@ namespace
   constexpr std::uint8_t GS_PRIMITIVE_CONTEXT_BIT = 9;
   constexpr std::uint8_t GS_PRIMITIVE_FIXED_FRAGMENT_BIT = 10;
 
+  constexpr std::uint64_t GS_TEXTURE_BASE_MASK = 0x3fff;
+  constexpr std::uint64_t GS_TEXTURE_WIDTH_MASK = 0x3f;
+  constexpr std::uint8_t GS_TEXTURE_WIDTH_SHIFT = 14;
+  constexpr std::uint64_t GS_TEXTURE_PSM_MASK = 0x3f;
+  constexpr std::uint8_t GS_TEXTURE_PSM_SHIFT = 20;
+  constexpr std::uint64_t GS_TEXTURE_SIZE_MASK = 0x0f;
+  constexpr std::uint8_t GS_TEXTURE_WIDTH_EXPONENT_SHIFT = 26;
+  constexpr std::uint8_t GS_TEXTURE_HEIGHT_EXPONENT_SHIFT = 30;
+  constexpr std::uint8_t GS_TEXTURE_RGBA_BIT = 34;
+  constexpr std::uint64_t GS_TEXTURE_FUNCTION_MASK = 0x03;
+  constexpr std::uint8_t GS_TEXTURE_FUNCTION_SHIFT = 35;
+  constexpr std::uint64_t GS_TEXTURE_MIP_LEVEL_MASK = 0x07;
+  constexpr std::uint8_t GS_TEXTURE_MIP_LEVEL_SHIFT = 2;
+  constexpr std::uint8_t GS_TEXTURE_MAGNIFICATION_BIT = 5;
+  constexpr std::uint64_t GS_TEXTURE_MINIFICATION_MASK = 0x07;
+  constexpr std::uint8_t GS_TEXTURE_MINIFICATION_SHIFT = 6;
+  constexpr std::uint8_t GS_TEXTURE_MAXIMUM_EXPONENT = 10;
+  constexpr std::int32_t GS_TEXTURE_COORDINATE_ONE = 16;
+
+  constexpr std::uint64_t GS_CLAMP_MODE_MASK = 0x03;
+  constexpr std::uint8_t GS_CLAMP_VERTICAL_SHIFT = 2;
+  constexpr std::uint64_t GS_CLAMP_REGION_MASK = 0x03ff;
+  constexpr std::uint8_t GS_CLAMP_MINIMUM_U_SHIFT = 4;
+  constexpr std::uint8_t GS_CLAMP_MAXIMUM_U_SHIFT = 14;
+  constexpr std::uint8_t GS_CLAMP_MINIMUM_V_SHIFT = 24;
+  constexpr std::uint8_t GS_CLAMP_MAXIMUM_V_SHIFT = 34;
+
   constexpr std::uint64_t GS_COLOR_MASK = 0xff;
   constexpr std::uint8_t GS_COLOR_GREEN_SHIFT = 8;
   constexpr std::uint8_t GS_COLOR_BLUE_SHIFT = 16;
@@ -214,6 +241,24 @@ void GS::writeRegister(
       break;
     case GSRegisterAddress::XYZ3:
       decodeVertex(data, false);
+      break;
+    case GSRegisterAddress::TEX0_1:
+      decodeTexture(0, data);
+      break;
+    case GSRegisterAddress::TEX0_2:
+      decodeTexture(1, data);
+      break;
+    case GSRegisterAddress::CLAMP_1:
+      decodeTextureClamp(0, data);
+      break;
+    case GSRegisterAddress::CLAMP_2:
+      decodeTextureClamp(1, data);
+      break;
+    case GSRegisterAddress::TEX1_1:
+      decodeTextureSampling(0, data);
+      break;
+    case GSRegisterAddress::TEX1_2:
+      decodeTextureSampling(1, data);
       break;
     case GSRegisterAddress::XYOFFSET_1:
       decodeOffset(0, data);
@@ -402,6 +447,8 @@ void GS::submitVertex(bool drawingKick)
       }
       return;
     case GSPrimitiveType::Triangle:
+    case GSPrimitiveType::TriangleStrip:
+    case GSPrimitiveType::TriangleFan:
       break;
     default:
       primitiveVertexCount = 0;
@@ -416,10 +463,31 @@ void GS::submitVertex(bool drawingKick)
     return;
   }
 
-  primitiveVertexCount = 0;
+  const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
+    vertices = primitiveVertices;
+  const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
+    colors = primitiveColors;
+  if (primitiveRegister.type == GSPrimitiveType::TriangleStrip)
+  {
+    primitiveVertices[0] = primitiveVertices[1];
+    primitiveVertices[1] = primitiveVertices[2];
+    primitiveColors[0] = primitiveColors[1];
+    primitiveColors[1] = primitiveColors[2];
+    primitiveVertexCount = 2;
+  }
+  else if (primitiveRegister.type == GSPrimitiveType::TriangleFan)
+  {
+    primitiveVertices[1] = primitiveVertices[2];
+    primitiveColors[1] = primitiveColors[2];
+    primitiveVertexCount = 2;
+  }
+  else
+  {
+    primitiveVertexCount = 0;
+  }
   if (drawingKick)
   {
-    rasterizeTriangle();
+    rasterizeTriangle(vertices, colors);
   }
 }
 
@@ -730,7 +798,11 @@ void GS::rasterizeSprite()
   }
 }
 
-void GS::rasterizeTriangle()
+void GS::rasterizeTriangle(
+  const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
+    &sourceVertices,
+  const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
+    &sourceColors)
 {
   if (primitiveRegister.textureMapping ||
       primitiveRegister.fogging ||
@@ -752,16 +824,16 @@ void GS::rasterizeTriangle()
   }
 
   std::array<FixedPoint, TRIANGLE_VERTEX_COUNT> vertices;
-  std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = primitiveColors;
+  std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = sourceColors;
   for (std::size_t index = 0;
        index < vertices.size();
        ++index)
   {
     vertices[index].x =
-      static_cast<std::int32_t>(primitiveVertices[index].x) -
+      static_cast<std::int32_t>(sourceVertices[index].x) -
       drawingContext.offset.x;
     vertices[index].y =
-      static_cast<std::int32_t>(primitiveVertices[index].y) -
+      static_cast<std::int32_t>(sourceVertices[index].y) -
       drawingContext.offset.y;
   }
 
@@ -932,6 +1004,68 @@ void GS::decodeTest(std::size_t index, std::uint64_t data)
     GS_TEST_DEPTH_METHOD_MASK;
 }
 
+void GS::decodeTexture(std::size_t index, std::uint64_t data)
+{
+  GSTexture &texture = mutableContext(index).texture;
+  texture.basePointer = data & GS_TEXTURE_BASE_MASK;
+  texture.bufferWidth =
+    (data >> GS_TEXTURE_WIDTH_SHIFT) &
+    GS_TEXTURE_WIDTH_MASK;
+  texture.pixelStorageMode =
+    (data >> GS_TEXTURE_PSM_SHIFT) &
+    GS_TEXTURE_PSM_MASK;
+  texture.widthExponent =
+    (data >> GS_TEXTURE_WIDTH_EXPONENT_SHIFT) &
+    GS_TEXTURE_SIZE_MASK;
+  texture.heightExponent =
+    (data >> GS_TEXTURE_HEIGHT_EXPONENT_SHIFT) &
+    GS_TEXTURE_SIZE_MASK;
+  texture.rgba = bit(data, GS_TEXTURE_RGBA_BIT);
+  texture.function =
+    (data >> GS_TEXTURE_FUNCTION_SHIFT) &
+    GS_TEXTURE_FUNCTION_MASK;
+}
+
+void GS::decodeTextureSampling(
+  std::size_t index,
+  std::uint64_t data)
+{
+  GSTexture &texture = mutableContext(index).texture;
+  texture.maximumMipLevel =
+    (data >> GS_TEXTURE_MIP_LEVEL_SHIFT) &
+    GS_TEXTURE_MIP_LEVEL_MASK;
+  texture.magnificationLinear =
+    bit(data, GS_TEXTURE_MAGNIFICATION_BIT);
+  texture.minificationFilter =
+    (data >> GS_TEXTURE_MINIFICATION_SHIFT) &
+    GS_TEXTURE_MINIFICATION_MASK;
+}
+
+void GS::decodeTextureClamp(
+  std::size_t index,
+  std::uint64_t data)
+{
+  GSTextureClamp &clamp =
+    mutableContext(index).textureClamp;
+  clamp.horizontal = static_cast<GSTextureWrapMode>(
+    data & GS_CLAMP_MODE_MASK);
+  clamp.vertical = static_cast<GSTextureWrapMode>(
+    (data >> GS_CLAMP_VERTICAL_SHIFT) &
+    GS_CLAMP_MODE_MASK);
+  clamp.minimumU =
+    (data >> GS_CLAMP_MINIMUM_U_SHIFT) &
+    GS_CLAMP_REGION_MASK;
+  clamp.maximumU =
+    (data >> GS_CLAMP_MAXIMUM_U_SHIFT) &
+    GS_CLAMP_REGION_MASK;
+  clamp.minimumV =
+    (data >> GS_CLAMP_MINIMUM_V_SHIFT) &
+    GS_CLAMP_REGION_MASK;
+  clamp.maximumV =
+    (data >> GS_CLAMP_MAXIMUM_V_SHIFT) &
+    GS_CLAMP_REGION_MASK;
+}
+
 const GSPrimitive &GS::primitive() const
 {
   return primitiveRegister;
@@ -952,6 +1086,11 @@ const GSContext &GS::context(std::size_t index) const
   return checkedContext(index);
 }
 
+const GSTexture &GS::texture(std::size_t contextIndex) const
+{
+  return checkedContext(contextIndex).texture;
+}
+
 const GSImageTransfer &GS::imageTransfer() const
 {
   return transfer;
@@ -960,6 +1099,102 @@ const GSImageTransfer &GS::imageTransfer() const
 bool GS::hostInterfaceReversed() const
 {
   return reverseHostInterface;
+}
+
+std::uint32_t GS::sampleTextureNearest(
+  std::size_t contextIndex,
+  std::int32_t fixedU,
+  std::int32_t fixedV) const
+{
+  const GSContext &samplingContext =
+    checkedContext(contextIndex);
+  const GSTexture &texture = samplingContext.texture;
+  if (texture.bufferWidth == 0)
+  {
+    throw std::runtime_error(
+      "GS texture sampling requires a valid buffer width.");
+  }
+  if (texture.pixelStorageMode != GSPixelStorageMode::PSMCT32)
+  {
+    throw std::runtime_error(
+      "GS texture sampling requires PSMCT32.");
+  }
+  if (texture.widthExponent > GS_TEXTURE_MAXIMUM_EXPONENT ||
+      texture.heightExponent > GS_TEXTURE_MAXIMUM_EXPONENT)
+  {
+    throw std::runtime_error(
+      "GS texture dimensions exceed the supported range.");
+  }
+  if (texture.magnificationLinear ||
+      texture.minificationFilter != 0)
+  {
+    throw std::runtime_error(
+      "GS texture sampling requires nearest filtering.");
+  }
+  if (texture.maximumMipLevel != 0)
+  {
+    throw std::runtime_error(
+      "GS texture mipmapping is not implemented.");
+  }
+
+  const std::int32_t width =
+    1 << texture.widthExponent;
+  const std::int32_t height =
+    1 << texture.heightExponent;
+  const auto wrap =
+    [](std::int32_t coordinate,
+       std::int32_t size,
+       GSTextureWrapMode mode,
+       std::uint16_t minimum,
+       std::uint16_t maximum)
+    {
+      switch (mode)
+      {
+        case GSTextureWrapMode::Repeat:
+        {
+          const std::int32_t remainder = coordinate % size;
+          return remainder < 0 ? remainder + size : remainder;
+        }
+        case GSTextureWrapMode::Clamp:
+          return std::min(
+            std::max(coordinate, 0),
+            size - 1);
+        case GSTextureWrapMode::RegionClamp:
+          return std::min(
+            std::max(
+              coordinate,
+              static_cast<std::int32_t>(minimum)),
+            static_cast<std::int32_t>(maximum));
+        case GSTextureWrapMode::RegionRepeat:
+          return static_cast<std::int32_t>(
+            (static_cast<std::uint32_t>(coordinate) &
+             minimum) |
+            maximum);
+      }
+      return 0;
+    };
+
+  const std::int32_t integerU =
+    floorDivide(fixedU, GS_TEXTURE_COORDINATE_ONE);
+  const std::int32_t integerV =
+    floorDivide(fixedV, GS_TEXTURE_COORDINATE_ONE);
+  const std::int32_t u = wrap(
+    integerU,
+    width,
+    samplingContext.textureClamp.horizontal,
+    samplingContext.textureClamp.minimumU,
+    samplingContext.textureClamp.maximumU);
+  const std::int32_t v = wrap(
+    integerV,
+    height,
+    samplingContext.textureClamp.vertical,
+    samplingContext.textureClamp.minimumV,
+    samplingContext.textureClamp.maximumV);
+  return localMemory[psmct32WordAddress(
+    texture.basePointer,
+    texture.bufferWidth,
+    static_cast<std::uint16_t>(u),
+    static_cast<std::uint16_t>(v))];
 }
 
 GSContext &GS::mutableContext(std::size_t index)

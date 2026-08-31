@@ -407,13 +407,13 @@ GIF DMA channel wiring belongs to Milestone 4.
 - [x] Implement host-to-local and local-to-host GS image transfers
   - [x] Implement PSMCT32 host-to-local transfer registers and `HWREG` uploads
   - [x] Implement PSMCT32 local-to-host readback and bus-direction integration
-- [ ] Render points, lines, sprites, strips, and fans with the applicable
+- [x] Render points, lines, sprites, strips, and fans with the applicable
       fixed-point coverage and vertex-reuse rules
   - [x] Render points and sprites and expose them in `neko_desktop`
   - [x] Render independent lines and line strips and expose them in
         `neko_desktop`
-  - [ ] Render triangle strips and fans
-- [ ] Upload and sample a PSMCT32 texture with nearest-neighbor filtering
+  - [x] Render triangle strips and fans and expose them in `neko_desktop`
+- [x] Upload and sample a PSMCT32 texture with nearest-neighbor filtering
 - [ ] Handle fixed `UV` and perspective-correct `STQ` texture coordinates
 - [ ] Implement destination-alpha testing and configurable alpha blending
 - [ ] Add Z-buffer storage, depth testing, and depth writes

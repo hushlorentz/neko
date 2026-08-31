@@ -84,7 +84,7 @@ namespace
         !result.packetComplete)
     {
       throw std::runtime_error(
-        "Point and sprite PATH3 packet did not complete.");
+          "Primitive-scene PATH3 packet did not complete.");
     }
     *transferredQuadwords += result.transferredQuadwords;
   }
@@ -218,6 +218,95 @@ namespace
     return packet;
   }
 
+  std::vector<GIFQuadword> triangleStripPacket(
+    std::uint32_t phase)
+  {
+    constexpr std::uint16_t COLUMN_COUNT = 6;
+    constexpr std::uint16_t VERTEX_COUNT = COLUMN_COUNT * 2;
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    std::vector<GIFQuadword> packet;
+    packet.reserve(1 + VERTEX_COUNT * 2);
+    packet.push_back(gifTag(
+      VERTEX_COUNT,
+      2,
+      descriptors,
+      static_cast<std::uint16_t>(
+        GSPrimitiveType::TriangleStrip) |
+        (UINT64_C(1) << 3)));
+    for (std::uint16_t column = 0;
+         column < COLUMN_COUNT;
+         ++column)
+    {
+      std::uint16_t wave =
+        (column * 19 + phase) % 48;
+      if (wave > 24)
+      {
+        wave = 48 - wave;
+      }
+      const std::uint16_t x = 120 + column * 80;
+      packet.push_back(packedColor(
+        static_cast<std::uint8_t>(25 + column * 12),
+        static_cast<std::uint8_t>(35 + wave * 2),
+        static_cast<std::uint8_t>(100 + column * 18)));
+      packet.push_back(packedVertex(x, 142 + wave));
+      packet.push_back(packedColor(
+        static_cast<std::uint8_t>(90 + column * 15),
+        static_cast<std::uint8_t>(25 + column * 8),
+        static_cast<std::uint8_t>(120 + wave * 3)));
+      packet.push_back(packedVertex(x, 306 - wave));
+    }
+    return packet;
+  }
+
+  std::vector<GIFQuadword> triangleFanPacket(
+    std::uint32_t phase)
+  {
+    constexpr std::uint16_t VERTEX_COUNT = 10;
+    constexpr std::uint16_t PERIMETER[][2] = {
+      {320, 126},
+      {390, 154},
+      {418, 224},
+      {390, 294},
+      {320, 322},
+      {250, 294},
+      {222, 224},
+      {250, 154},
+      {320, 126}
+    };
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    std::vector<GIFQuadword> packet;
+    packet.reserve(1 + VERTEX_COUNT * 2);
+    packet.push_back(gifTag(
+      VERTEX_COUNT,
+      2,
+      descriptors,
+      static_cast<std::uint16_t>(
+        GSPrimitiveType::TriangleFan) |
+        (UINT64_C(1) << 3)));
+
+    const std::uint16_t centerX =
+      288 + (phase < 64 ? phase : 127 - phase);
+    packet.push_back(packedColor(65, 35, 115));
+    packet.push_back(packedVertex(centerX, 224));
+    for (std::uint16_t index = 0; index < 9; ++index)
+    {
+      packet.push_back(packedColor(
+        static_cast<std::uint8_t>(20 + index * 12),
+        static_cast<std::uint8_t>(30 + (index % 3) * 20),
+        static_cast<std::uint8_t>(75 + index * 8)));
+      packet.push_back(packedVertex(
+        PERIMETER[index][0],
+        PERIMETER[index][1]));
+    }
+    return packet;
+  }
+
   void appendSprite(
     std::vector<GIFQuadword> *packet,
     std::uint16_t x0,
@@ -286,9 +375,16 @@ namespace
 
 namespace
 {
+  enum class SceneVersion
+  {
+    PointsAndSprites,
+    PointsLinesAndSprites,
+    AllPrimitives
+  };
+
   neko_demo::PrimitiveSceneResult renderScene(
     std::uint32_t phase,
-    bool includeLines)
+    SceneVersion version)
   {
     GS gs;
     GIFDecoder decoder;
@@ -301,11 +397,22 @@ namespace
       &path3,
       setupPacket(),
       &transferredQuadwords);
+    if (version == SceneVersion::AllPrimitives)
+    {
+      submitPacket(
+        &path3,
+        triangleStripPacket(phase),
+        &transferredQuadwords);
+      submitPacket(
+        &path3,
+        triangleFanPacket(phase),
+        &transferredQuadwords);
+    }
     submitPacket(
       &path3,
       pointPacket(phase),
       &transferredQuadwords);
-    if (includeLines)
+    if (version != SceneVersion::PointsAndSprites)
     {
       submitPacket(
         &path3,
@@ -333,6 +440,7 @@ namespace
     result.pointCount = gs.pointCount();
     result.lineCount = gs.lineCount();
     result.spriteCount = gs.spriteCount();
+    result.triangleCount = gs.triangleCount();
     result.pixelWriteCount = gs.pixelWriteCount();
     result.transferredQuadwords = transferredQuadwords;
     return result;
@@ -342,11 +450,19 @@ namespace
 neko_demo::PrimitiveSceneResult
 neko_demo::renderPrimitiveScene(std::uint32_t phase)
 {
-  return renderScene(phase, true);
+  return renderScene(phase, SceneVersion::AllPrimitives);
 }
 
 neko_demo::PrimitiveSceneResult
 neko_demo::renderPointSpriteScene(std::uint32_t phase)
 {
-  return renderScene(phase, false);
+  return renderScene(phase, SceneVersion::PointsAndSprites);
+}
+
+neko_demo::PrimitiveSceneResult
+neko_demo::renderPointLineSpriteScene(std::uint32_t phase)
+{
+  return renderScene(
+    phase,
+    SceneVersion::PointsLinesAndSprites);
 }
