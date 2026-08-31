@@ -390,7 +390,7 @@ GIF DMA channel wiring belongs to Milestone 4.
       decoder without consuming source data while arbitration blocks progress
 - [x] Apply `MSKPATH3` at the transport boundary and resume a masked transfer
       without losing packet, descriptor, or payload position
-- [ ] Verify packet-boundary arbitration under simultaneous PATH1, PATH2, and
+- [x] Verify packet-boundary arbitration under simultaneous PATH1, PATH2, and
       PATH3 demand, including the established PATH1 > PATH2 > PATH3 priority
 - [ ] Implement PATH3 IMAGE slicing and interruption at documented boundaries,
       preserving decoder state across preemption and resumption

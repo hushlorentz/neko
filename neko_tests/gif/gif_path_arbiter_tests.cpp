@@ -112,3 +112,86 @@ TEST_CASE("GIF Path Arbitration Tests")
     REQUIRE(!arbiter.path3MaskedByVIF());
   }
 }
+
+TEST_CASE("GIF Three-Path Priority Matrix Tests")
+{
+  struct PriorityContract
+  {
+    GIFPath initial;
+    GIFPath firstRequest;
+    GIFPath secondRequest;
+    GIFPath expectedNext;
+    GIFPath expectedLast;
+  };
+  const std::array<PriorityContract, 6> contracts = {{
+    {
+      GIFPath::Path1,
+      GIFPath::Path2,
+      GIFPath::Path3,
+      GIFPath::Path2,
+      GIFPath::Path3
+    },
+    {
+      GIFPath::Path1,
+      GIFPath::Path3,
+      GIFPath::Path2,
+      GIFPath::Path2,
+      GIFPath::Path3
+    },
+    {
+      GIFPath::Path2,
+      GIFPath::Path1,
+      GIFPath::Path3,
+      GIFPath::Path1,
+      GIFPath::Path3
+    },
+    {
+      GIFPath::Path2,
+      GIFPath::Path3,
+      GIFPath::Path1,
+      GIFPath::Path1,
+      GIFPath::Path3
+    },
+    {
+      GIFPath::Path3,
+      GIFPath::Path1,
+      GIFPath::Path2,
+      GIFPath::Path1,
+      GIFPath::Path2
+    },
+    {
+      GIFPath::Path3,
+      GIFPath::Path2,
+      GIFPath::Path1,
+      GIFPath::Path1,
+      GIFPath::Path2
+    }
+  }};
+
+  for (const PriorityContract &contract : contracts)
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    REQUIRE(arbiter.transferQuadword(
+      contract.initial,
+      gifTag(false)).accepted);
+    REQUIRE(!arbiter.requestPath(contract.firstRequest));
+    REQUIRE(!arbiter.requestPath(contract.secondRequest));
+    REQUIRE(arbiter.activePath() == contract.initial);
+
+    REQUIRE(arbiter.transferQuadword(
+      contract.initial,
+      gifTag(true)).accepted);
+    REQUIRE(arbiter.activePath() == contract.expectedNext);
+
+    REQUIRE(arbiter.transferQuadword(
+      contract.expectedNext,
+      gifTag(true)).accepted);
+    REQUIRE(arbiter.activePath() == contract.expectedLast);
+
+    REQUIRE(arbiter.transferQuadword(
+      contract.expectedLast,
+      gifTag(true)).accepted);
+    REQUIRE(arbiter.pathsIdle());
+  }
+}

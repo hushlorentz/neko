@@ -4,12 +4,16 @@
 
 #include "catch.hpp"
 #include "gif_diagnostics.hpp"
+#include "gif_path1.hpp"
 #include "gif_path3.hpp"
 #include "gs.hpp"
 #include "vif.hpp"
+#include "vpu.hpp"
 
 namespace
 {
+  constexpr std::uint32_t WORDS_PER_QUADWORD = 4;
+
   class RecordingRegisterWriteHandler :
     public GIFRegisterWriteHandler
   {
@@ -56,6 +60,17 @@ namespace
       immediate;
   }
 
+  void alignDirectCommand(VIF *vif)
+  {
+    while ((vif->wordsIngested() + 1) %
+           WORDS_PER_QUADWORD != 0)
+    {
+      const VIFStreamWord padding =
+        vif->ingestWord(vifCode(VIFCommandEncoding::NOP));
+      REQUIRE(!padding.stalled);
+    }
+  }
+
   std::vector<GIFQuadword> transferredOnPath(
     const std::vector<GIFTraceEvent> &events,
     GIFPath path)
@@ -70,6 +85,20 @@ namespace
       }
     }
     return quadwords;
+  }
+
+  std::vector<GIFPath> selectedPaths(
+    const std::vector<GIFTraceEvent> &events)
+  {
+    std::vector<GIFPath> paths;
+    for (const GIFTraceEvent &event : events)
+    {
+      if (event.type == GIFTraceEventType::PathSelected)
+      {
+        paths.push_back(event.path);
+      }
+    }
+    return paths;
   }
 }
 
@@ -566,4 +595,113 @@ TEST_CASE("GIF PATH3 VIF Mask Integration Tests")
     REQUIRE(resumed.packetComplete);
     REQUIRE(arbiter.pathsIdle());
   }
+}
+
+TEST_CASE("GIF PATH1 PATH2 PATH3 Producer Integration Tests")
+{
+  GIFDecoder decoder;
+  GIFPathArbiter arbiter(&decoder);
+  VPU vpu(VPUType::VU1);
+  GIFPath1Transfer path1(arbiter);
+  GIFPath3Transfer path3(arbiter);
+  VIF vif(VIFType::VIF1);
+  path1.attachVPU(&vpu);
+  vif.attachGIFPathArbiter(&arbiter);
+  GIFDiagnosticsRecorder diagnostics;
+  arbiter.setTraceCallback(
+    [&diagnostics](const GIFTraceEvent &event) {
+      diagnostics.observe(event);
+    });
+
+  const std::array<GIFQuadword, 2> path3Packet = {{
+    gifTag(
+      1,
+      true,
+      GIFDataFormat::Packed,
+      1,
+      GIFRegisterDescriptor::NOP),
+    GIFQuadword{{1, 2, 3, 4}}
+  }};
+  const GIFQuadword path1Packet =
+    gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+  const GIFQuadword path2Packet =
+    gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+  vpu.writeDataQuadword(0, path1Packet);
+
+  REQUIRE(
+    path3.submitQuadwords(path3Packet.data(), 1)
+      .transferredQuadwords == 1);
+  path1.startPath1Transfer(0);
+  REQUIRE(path1.path1TransferActive());
+  REQUIRE(arbiter.pathPending(GIFPath::Path1));
+
+  alignDirectCommand(&vif);
+  REQUIRE(!vif.ingestWord(vifCode(
+    VIFCommandEncoding::DIRECT,
+    1)).stalled);
+  for (std::size_t index = 0;
+       index < WORDS_PER_QUADWORD - 1;
+       ++index)
+  {
+    REQUIRE(!vif.ingestWord(path2Packet[index]).stalled);
+  }
+  const std::uint64_t wordsBeforeStall = vif.wordsIngested();
+  const VIFStreamWord path2Stalled =
+    vif.ingestWord(path2Packet[WORDS_PER_QUADWORD - 1]);
+  REQUIRE(path2Stalled.stalled);
+  REQUIRE(vif.wordsIngested() == wordsBeforeStall);
+  REQUIRE(vif.payloadWordsRemaining() == 1);
+  REQUIRE(arbiter.pathPending(GIFPath::Path2));
+
+  const GIFPath3SubmissionResult path3Completed =
+    path3.submitQuadwords(&path3Packet[1], 1);
+  REQUIRE(path3Completed.packetComplete);
+  REQUIRE(arbiter.activePath() == GIFPath::Path1);
+
+  path1.advancePath1Transfer();
+  REQUIRE(!path1.path1TransferActive());
+  REQUIRE(path1.transferredQuadwordCount() == 1);
+  REQUIRE(arbiter.activePath() == GIFPath::Path2);
+
+  const VIFStreamWord path2Completed =
+    vif.ingestWord(path2Packet[WORDS_PER_QUADWORD - 1]);
+  REQUIRE(!path2Completed.stalled);
+  REQUIRE(path2Completed.gifQuadwordDecoded);
+  REQUIRE(path2Completed.gifResult.packetComplete);
+  REQUIRE(!vif.awaitingPayload());
+  REQUIRE(arbiter.pathsIdle());
+
+  const GIFTransferSummary &summary = diagnostics.summary();
+  REQUIRE(summary.pathSelections[0] == 1);
+  REQUIRE(summary.pathSelections[1] == 1);
+  REQUIRE(summary.pathSelections[2] == 1);
+  REQUIRE(summary.transferredQuadwords[0] == 1);
+  REQUIRE(summary.transferredQuadwords[1] == 1);
+  REQUIRE(summary.transferredQuadwords[2] == 2);
+  REQUIRE(summary.stalledTransfers[1] == 1);
+  REQUIRE(summary.completedPackets == 3);
+  REQUIRE(
+    selectedPaths(diagnostics.events()) ==
+    std::vector<GIFPath>({
+      GIFPath::Path3,
+      GIFPath::Path1,
+      GIFPath::Path2
+    }));
+  REQUIRE(
+    transferredOnPath(
+      diagnostics.events(),
+      GIFPath::Path1) ==
+    std::vector<GIFQuadword>({path1Packet}));
+  REQUIRE(
+    transferredOnPath(
+      diagnostics.events(),
+      GIFPath::Path2) ==
+    std::vector<GIFQuadword>({path2Packet}));
+  REQUIRE(
+    transferredOnPath(
+      diagnostics.events(),
+      GIFPath::Path3) ==
+    std::vector<GIFQuadword>(
+      path3Packet.begin(),
+      path3Packet.end()));
 }
