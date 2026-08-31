@@ -284,50 +284,69 @@ namespace
   }
 }
 
+namespace
+{
+  neko_demo::PrimitiveSceneResult renderScene(
+    std::uint32_t phase,
+    bool includeLines)
+  {
+    GS gs;
+    GIFDecoder decoder;
+    decoder.attachRegisterWriteHandler(&gs);
+    GIFPath3Transfer path3(&decoder);
+    std::uint64_t transferredQuadwords = 0;
+    phase %= neko_demo::PRIMITIVE_PHASE_COUNT;
+
+    submitPacket(
+      &path3,
+      setupPacket(),
+      &transferredQuadwords);
+    submitPacket(
+      &path3,
+      pointPacket(phase),
+      &transferredQuadwords);
+    if (includeLines)
+    {
+      submitPacket(
+        &path3,
+        linePacket(phase),
+        &transferredQuadwords);
+      submitPacket(
+        &path3,
+        lineStripPacket(phase),
+        &transferredQuadwords);
+    }
+    submitPacket(
+      &path3,
+      spritePacket(phase),
+      &transferredQuadwords);
+
+    neko_demo::PrimitiveSceneResult result;
+    result.rgbaPixels = gs.framebufferRGBA8(
+      0,
+      neko_demo::PRIMITIVE_FRAME_WIDTH,
+      neko_demo::PRIMITIVE_FRAME_HEIGHT);
+    result.framebufferHash = gs.framebufferHash(
+      0,
+      neko_demo::PRIMITIVE_FRAME_WIDTH,
+      neko_demo::PRIMITIVE_FRAME_HEIGHT);
+    result.pointCount = gs.pointCount();
+    result.lineCount = gs.lineCount();
+    result.spriteCount = gs.spriteCount();
+    result.pixelWriteCount = gs.pixelWriteCount();
+    result.transferredQuadwords = transferredQuadwords;
+    return result;
+  }
+}
+
 neko_demo::PrimitiveSceneResult
 neko_demo::renderPrimitiveScene(std::uint32_t phase)
 {
-  GS gs;
-  GIFDecoder decoder;
-  decoder.attachRegisterWriteHandler(&gs);
-  GIFPath3Transfer path3(&decoder);
-  std::uint64_t transferredQuadwords = 0;
-  phase %= PRIMITIVE_PHASE_COUNT;
+  return renderScene(phase, true);
+}
 
-  submitPacket(
-    &path3,
-    setupPacket(),
-    &transferredQuadwords);
-  submitPacket(
-    &path3,
-    pointPacket(phase),
-    &transferredQuadwords);
-  submitPacket(
-    &path3,
-    linePacket(phase),
-    &transferredQuadwords);
-  submitPacket(
-    &path3,
-    lineStripPacket(phase),
-    &transferredQuadwords);
-  submitPacket(
-    &path3,
-    spritePacket(phase),
-    &transferredQuadwords);
-
-  PrimitiveSceneResult result;
-  result.rgbaPixels = gs.framebufferRGBA8(
-    0,
-    PRIMITIVE_FRAME_WIDTH,
-    PRIMITIVE_FRAME_HEIGHT);
-  result.framebufferHash = gs.framebufferHash(
-    0,
-    PRIMITIVE_FRAME_WIDTH,
-    PRIMITIVE_FRAME_HEIGHT);
-  result.pointCount = gs.pointCount();
-  result.lineCount = gs.lineCount();
-  result.spriteCount = gs.spriteCount();
-  result.pixelWriteCount = gs.pixelWriteCount();
-  result.transferredQuadwords = transferredQuadwords;
-  return result;
+neko_demo::PrimitiveSceneResult
+neko_demo::renderPointSpriteScene(std::uint32_t phase)
+{
+  return renderScene(phase, false);
 }

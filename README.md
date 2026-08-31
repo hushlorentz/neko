@@ -52,5 +52,12 @@ The external sample and assembler remain outside the committed source tree.
 The default desktop scene supplies deterministic sine/cosine inputs and reruns
 the VU1 workload for every animation frame. The `primitives` scene submits
 deterministic host-fed PATH3 packets for POINT, LINE, LINESTRIP, and SPRITE
-rasterization. The original `points-sprites` scene name remains accepted as an
-alias. Normal builds and `neko_core` do not depend on SDL.
+rasterization. Content-specific scene names preserve earlier versions:
+
+```sh
+./out/desktop/neko_desktop --scene points-sprites
+./out/desktop/neko_desktop --scene points-lines-sprites
+```
+
+The `primitives` name tracks the newest graphics showcase as more primitive
+families are added. Normal builds and `neko_core` do not depend on SDL.

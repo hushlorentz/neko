@@ -19,3 +19,15 @@ TEST_CASE("Primitive Desktop Scene Tests")
     neko_demo::PRIMITIVE_FRAME_HEIGHT * 4);
   REQUIRE(first.framebufferHash != second.framebufferHash);
 }
+
+TEST_CASE("Point and Sprite Desktop Scene Compatibility Tests")
+{
+  const neko_demo::PrimitiveSceneResult scene =
+    neko_demo::renderPointSpriteScene(0);
+
+  REQUIRE(scene.pointCount == 96);
+  REQUIRE(scene.lineCount == 0);
+  REQUIRE(scene.spriteCount == 7);
+  REQUIRE(scene.transferredQuadwords == 226);
+  REQUIRE(scene.framebufferHash == UINT64_C(0xc1adcf6554c82b99));
+}

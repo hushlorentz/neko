@@ -31,6 +31,7 @@ namespace
   enum class DesktopScene
   {
     Rotation,
+    PointsAndSprites,
     Primitives
   };
 
@@ -64,6 +65,10 @@ namespace
         }
         else if (scene == "points-sprites")
         {
+          options.scene = DesktopScene::PointsAndSprites;
+        }
+        else if (scene == "points-lines-sprites")
+        {
           options.scene = DesktopScene::Primitives;
         }
         else if (scene == "primitives")
@@ -73,13 +78,15 @@ namespace
         else
         {
           throw std::invalid_argument(
-            "Desktop scene must be rotation or primitives.");
+            "Desktop scene must be rotation, points-sprites, "
+            "points-lines-sprites, or primitives.");
         }
       }
       else
       {
         throw std::invalid_argument(
-          "Usage: neko_desktop [--scene rotation|primitives] "
+          "Usage: neko_desktop [--scene rotation|points-sprites|"
+          "points-lines-sprites|primitives] "
           "[--frames count]");
       }
     }
@@ -144,7 +151,9 @@ namespace
       SDL_CreateWindowAndRenderer(
         options.scene == DesktopScene::Rotation
           ? "Neko - rotation_vu1.asm"
-          : "Neko - POINT, LINE, and SPRITE",
+          : options.scene == DesktopScene::PointsAndSprites
+            ? "Neko - POINT and SPRITE"
+            : "Neko - POINT, LINE, and SPRITE",
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0,
@@ -226,8 +235,11 @@ namespace
       else
       {
         neko_demo::PrimitiveSceneResult scene =
-          neko_demo::renderPrimitiveScene(
-            static_cast<std::uint32_t>(renderedFrames));
+          options.scene == DesktopScene::PointsAndSprites
+            ? neko_demo::renderPointSpriteScene(
+                static_cast<std::uint32_t>(renderedFrames))
+            : neko_demo::renderPrimitiveScene(
+                static_cast<std::uint32_t>(renderedFrames));
         rgbaPixels = std::move(scene.rgbaPixels);
         framebufferHash = scene.framebufferHash;
       }
@@ -279,7 +291,9 @@ namespace
       std::cout
         << (options.scene == DesktopScene::Rotation
               ? "rotation_vu1"
-              : "primitives")
+              : options.scene == DesktopScene::PointsAndSprites
+                ? "points_sprites"
+                : "points_lines_sprites")
         << ": frames=" << renderedFrames
         << " first_hash=0x" << std::hex
         << firstFramebufferHash
