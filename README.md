@@ -25,10 +25,15 @@ also runs the test suite under the native `leaks` tool. Keep the normal check
 as the fast development loop and run the sanitizer workflow before merging
 memory-management changes and in continuous integration.
 
-Build and show the synthetic VIF/VU1/GIF/GS triangle in the optional SDL3
-desktop frontend with:
+Assemble the external rotation sample, then build and show its
+VU1/XGKICK/GIF/GS output in the optional SDL3 desktop frontend with:
 
 ```sh
+(
+  cd local_integration/tools/naken_asm/samples/playstation2
+  ../../naken_asm -b -I../../include \
+    -o rotation_vu1.bin rotation_vu1.asm
+)
 cmake -S . -B out/desktop \
   -DCMAKE_BUILD_TYPE=Release \
   -DNEKO_BUILD_DESKTOP=ON
@@ -37,4 +42,7 @@ cmake --build out/desktop --target neko_desktop
 ```
 
 SDL3 is fetched at a pinned release only when the desktop option is enabled.
-Normal builds and `neko_core` do not depend on SDL.
+The external sample and assembler remain outside the committed source tree.
+The desktop supplies deterministic sine/cosine inputs and reruns the VU1
+workload for every animation frame. Normal builds and `neko_core` do not
+depend on SDL.

@@ -396,6 +396,10 @@ reviewable and avoid host-library values as the source of truth.
       assert its framebuffer hash
 - [x] Present the synthetic framebuffer through an optional SDL3 desktop
       frontend without adding a window-system dependency to `neko_core`
+- [x] Present the external `rotation_vu1.asm` Gouraud triangle through the
+      desktop frontend using a rotation-specific host setup
+- [x] Animate the rotation demo with deterministic sine/cosine inputs while
+      rerunning the authentic VU1 transform for every displayed frame
 - [ ] Add textured, blended, and depth-tested scenes as GS support expands
 
 ### Graphics Path Diagnostics

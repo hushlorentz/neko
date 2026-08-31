@@ -1,20 +1,23 @@
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
 #include <SDL3/SDL.h>
 
-#include "synthetic_triangle.hpp"
+#include "rotation_vu1.hpp"
 
 namespace
 {
-  constexpr int WINDOW_WIDTH = 512;
-  constexpr int WINDOW_HEIGHT = 512;
+  constexpr int WINDOW_WIDTH = neko_demo::ROTATION_FRAME_WIDTH;
+  constexpr int WINDOW_HEIGHT = neko_demo::ROTATION_FRAME_HEIGHT;
   constexpr int RGBA_COMPONENT_COUNT = 4;
   constexpr std::uint32_t FRAME_DELAY_MILLISECONDS = 16;
+  constexpr std::uint32_t FRAMES_PER_ROTATION_PHASE = 2;
 
   int requestedFrameCount(int argc, char **argv)
   {
@@ -36,6 +39,23 @@ namespace
         "Desktop frame count must be positive.");
     }
     return count;
+  }
+
+  std::vector<std::uint8_t> readMicroprogram()
+  {
+    std::ifstream input(
+      NEKO_ROTATION_VU1_BINARY,
+      std::ios::binary);
+    if (!input)
+    {
+      throw std::runtime_error(
+        "Could not open the assembled rotation VU1 program at " +
+        std::string(NEKO_ROTATION_VU1_BINARY) +
+        ". Assemble rotation_vu1.asm before running neko_desktop.");
+    }
+    return std::vector<std::uint8_t>(
+      std::istreambuf_iterator<char>(input),
+      std::istreambuf_iterator<char>());
   }
 
   void requireSDL(bool succeeded, const char *operation)
@@ -66,14 +86,8 @@ namespace
   int runDesktop(int argc, char **argv)
   {
     const int frameLimit = requestedFrameCount(argc, argv);
-    const neko_demo::SyntheticTriangleResult triangle =
-      neko_demo::renderSyntheticTriangle();
-    if (!triangle.vpuCompleted ||
-        !triangle.path1Completed)
-    {
-      throw std::runtime_error(
-        "The synthetic graphics workload did not complete.");
-    }
+    const std::vector<std::uint8_t> microprogram =
+      readMicroprogram();
 
     SDLVideoSession video;
 
@@ -81,7 +95,7 @@ namespace
     SDL_Renderer *rawRenderer = nullptr;
     const bool windowCreated =
       SDL_CreateWindowAndRenderer(
-        "Neko - VIF/VU1/GIF/GS Triangle",
+        "Neko - rotation_vu1.asm",
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0,
@@ -103,9 +117,9 @@ namespace
         SDL_CreateTexture(
           renderer.get(),
           SDL_PIXELFORMAT_RGBA32,
-          SDL_TEXTUREACCESS_STATIC,
-          neko_demo::SYNTHETIC_FRAME_WIDTH,
-          neko_demo::SYNTHETIC_FRAME_HEIGHT),
+          SDL_TEXTUREACCESS_STREAMING,
+          neko_demo::ROTATION_FRAME_WIDTH,
+          neko_demo::ROTATION_FRAME_HEIGHT),
         SDL_DestroyTexture);
     if (texture == nullptr)
     {
@@ -124,17 +138,10 @@ namespace
         texture.get(),
         SDL_BLENDMODE_NONE),
       "SDL texture blend-mode selection failed");
-    requireSDL(
-      SDL_UpdateTexture(
-        texture.get(),
-        nullptr,
-        triangle.rgbaPixels.data(),
-        neko_demo::SYNTHETIC_FRAME_WIDTH *
-          RGBA_COMPONENT_COUNT),
-      "SDL texture upload failed");
-
     bool running = true;
     int renderedFrames = 0;
+    std::uint64_t firstFramebufferHash = 0;
+    std::uint64_t lastFramebufferHash = 0;
     while (running)
     {
       SDL_Event event;
@@ -145,6 +152,34 @@ namespace
           running = false;
         }
       }
+
+      const std::uint32_t rotationPhase =
+        (static_cast<std::uint32_t>(renderedFrames) /
+         FRAMES_PER_ROTATION_PHASE) %
+        neko_demo::ROTATION_PHASE_COUNT;
+      const neko_demo::RotationVU1Result rotation =
+        neko_demo::renderRotationVU1(
+          microprogram,
+          rotationPhase);
+      if (!rotation.vpuCompleted ||
+          !rotation.path1Completed)
+      {
+        throw std::runtime_error(
+          "The rotation graphics workload did not complete.");
+      }
+      if (renderedFrames == 0)
+      {
+        firstFramebufferHash = rotation.framebufferHash;
+      }
+      lastFramebufferHash = rotation.framebufferHash;
+      requireSDL(
+        SDL_UpdateTexture(
+          texture.get(),
+          nullptr,
+          rotation.rgbaPixels.data(),
+          neko_demo::ROTATION_FRAME_WIDTH *
+            RGBA_COMPONENT_COUNT),
+        "SDL texture upload failed");
 
       requireSDL(
         SDL_SetRenderDrawColor(
@@ -175,6 +210,15 @@ namespace
         running = false;
       }
       SDL_Delay(FRAME_DELAY_MILLISECONDS);
+    }
+    if (frameLimit != 0)
+    {
+      std::cout
+        << "rotation_vu1: frames=" << renderedFrames
+        << " first_hash=0x" << std::hex
+        << firstFramebufferHash
+        << " last_hash=0x" << lastFramebufferHash
+        << std::dec << '\n';
     }
     return EXIT_SUCCESS;
   }

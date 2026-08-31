@@ -71,6 +71,7 @@ add_executable(neko neko/main.cpp)
 target_link_libraries(neko PRIVATE neko_core)
 
 add_library(neko_demo_support
+    neko_demo/rotation_vu1.cpp
     neko_demo/synthetic_triangle.cpp
 )
 target_include_directories(neko_demo_support
@@ -103,6 +104,11 @@ if(NEKO_BUILD_DESKTOP)
         PRIVATE
             neko_demo_support
             SDL3::SDL3
+    )
+    target_compile_definitions(
+        neko_desktop
+        PRIVATE
+            NEKO_ROTATION_VU1_BINARY="${CMAKE_CURRENT_SOURCE_DIR}/local_integration/tools/naken_asm/samples/playstation2/rotation_vu1.bin"
     )
 endif()
 
