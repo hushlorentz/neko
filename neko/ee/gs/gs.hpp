@@ -145,6 +145,10 @@ class GS : public GIFRegisterWriteHandler
       std::size_t contextIndex,
       std::uint16_t width,
       std::uint16_t height) const;
+    std::vector<std::uint8_t> framebufferRGBA8(
+      std::size_t contextIndex,
+      std::uint16_t width,
+      std::uint16_t height) const;
     std::size_t queuedVertexCount() const;
     std::uint64_t triangleCount() const;
     std::uint64_t pixelWriteCount() const;

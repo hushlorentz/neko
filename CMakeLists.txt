@@ -11,6 +11,11 @@ option(
     "Build Neko with AddressSanitizer"
     OFF
 )
+option(
+    NEKO_BUILD_DESKTOP
+    "Build the SDL3 desktop presentation frontend"
+    OFF
+)
 
 add_library(neko_sanitizers INTERFACE)
 if(NEKO_ENABLE_SANITIZERS)
@@ -64,6 +69,42 @@ target_include_directories(neko_core
 
 add_executable(neko neko/main.cpp)
 target_link_libraries(neko PRIVATE neko_core)
+
+add_library(neko_demo_support
+    neko_demo/synthetic_triangle.cpp
+)
+target_include_directories(neko_demo_support
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko_demo
+)
+target_link_libraries(neko_demo_support PUBLIC neko_core)
+
+if(NEKO_BUILD_DESKTOP)
+    include(FetchContent)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-3.2.10
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(SDL3)
+
+    add_executable(neko_desktop
+        neko_desktop/main.cpp
+    )
+    target_link_libraries(
+        neko_desktop
+        PRIVATE
+            neko_demo_support
+            SDL3::SDL3
+    )
+endif()
 
 add_executable(neko_perf
     neko_perf/main.cpp
@@ -162,7 +203,12 @@ target_include_directories(neko_tests PRIVATE
 target_compile_definitions(neko_tests PRIVATE
     NEKO_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/vpu/integration"
 )
-target_link_libraries(neko_tests PRIVATE neko_diagnostics)
+target_link_libraries(
+    neko_tests
+    PRIVATE
+        neko_demo_support
+        neko_diagnostics
+)
 
 enable_testing()
 add_test(NAME neko_tests COMMAND neko_tests)

@@ -598,6 +598,40 @@ std::uint64_t GS::framebufferHash(
   return hash;
 }
 
+std::vector<std::uint8_t> GS::framebufferRGBA8(
+  std::size_t contextIndex,
+  std::uint16_t width,
+  std::uint16_t height) const
+{
+  constexpr std::size_t COMPONENTS_PER_PIXEL = 4;
+  constexpr std::uint32_t COMPONENT_MASK = 0xff;
+  constexpr std::uint8_t GREEN_SHIFT = 8;
+  constexpr std::uint8_t BLUE_SHIFT = 16;
+  constexpr std::uint8_t ALPHA_SHIFT = 24;
+
+  std::vector<std::uint8_t> pixels;
+  pixels.reserve(
+    static_cast<std::size_t>(width) *
+    height *
+    COMPONENTS_PER_PIXEL);
+  for (std::uint16_t y = 0; y < height; ++y)
+  {
+    for (std::uint16_t x = 0; x < width; ++x)
+    {
+      const std::uint32_t pixel =
+        readPSMCT32(contextIndex, x, y);
+      pixels.push_back(pixel & COMPONENT_MASK);
+      pixels.push_back(
+        (pixel >> GREEN_SHIFT) & COMPONENT_MASK);
+      pixels.push_back(
+        (pixel >> BLUE_SHIFT) & COMPONENT_MASK);
+      pixels.push_back(
+        (pixel >> ALPHA_SHIFT) & COMPONENT_MASK);
+    }
+  }
+  return pixels;
+}
+
 std::size_t GS::queuedVertexCount() const
 {
   return triangleVertexCount;

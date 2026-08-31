@@ -391,6 +391,8 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Route a VU1 `XGKICK` packet through GIF PATH1 into the same GS path
 - [x] Render a complete `MPG` -> `UNPACK` -> `MSCAL` -> `XGKICK` triangle and
       assert its framebuffer hash
+- [x] Present the synthetic framebuffer through an optional SDL3 desktop
+      frontend without adding a window-system dependency to `neko_core`
 - [ ] Add textured, blended, and depth-tested scenes as GS support expands
 
 ## Milestone 4: System-Level Core
