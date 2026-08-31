@@ -43,6 +43,7 @@ add_library(neko_core
     neko/ee/gif/gif.cpp
     neko/ee/gif/gif_path_arbiter.cpp
     neko/ee/gif/gif_path1.cpp
+    neko/ee/gif/gif_path3.cpp
     neko/ee/gs/gs.cpp
     neko/ee/vif/vif.cpp
     neko/ee/vif/vif_command.cpp
@@ -135,6 +136,7 @@ add_executable(neko_tests
     neko_tests/gif/gif_tests.cpp
     neko_tests/gif/gif_path_arbiter_tests.cpp
     neko_tests/gif/gif_path1_tests.cpp
+    neko_tests/gif/gif_path3_tests.cpp
     neko_tests/gif/gif_diagnostics_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp

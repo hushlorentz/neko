@@ -383,8 +383,8 @@ Build and verify the GIF-side PATH3 boundary before introducing the EE DMAC.
 The transport in this milestone is driven by a host-side qword producer; real
 GIF DMA channel wiring belongs to Milestone 4.
 
-- [ ] Add a host-fed PATH3 qword transport with explicit ready/stall results,
-      partial submission support, and counters for accepted and transferred
+- [x] Add a host-fed PATH3 qword transport with explicit ready/stall results,
+      partial submission support, and counters for attempted and transferred
       qwords
 - [ ] Route PATH3 PACKED, REGLIST, and IMAGE packets through the shared GIF
       decoder without consuming source data while arbitration blocks progress
