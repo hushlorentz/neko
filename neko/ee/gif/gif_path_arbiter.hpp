@@ -59,6 +59,7 @@ class GIFPathArbiter
       GIFPath path,
       bool canInterruptPath3 = true);
     void setPath3MaskedByVIF(bool masked);
+    void setPath3MaskedByMode(bool masked);
     void setPath3IntermittentMode(bool intermittent);
     GIFPathTransferResult transferQuadword(
       GIFPath path,
@@ -69,8 +70,13 @@ class GIFPathArbiter
     bool pathPending(GIFPath path) const;
     bool pathsIdle(bool includePath3 = true) const;
     bool path3MaskedByVIF() const;
+    bool path3MaskedByMode() const;
+    bool path3Masked() const;
     bool path3IntermittentMode() const;
     bool path3Interrupted() const;
+    bool pathQueued(GIFPath path) const;
+    std::uint16_t interruptedPath3Count() const;
+    std::uint16_t interruptedPath3Tag() const;
     bool decoderAwaitingTag() const;
     bool decoderPacketInProgress() const;
     void setTraceCallback(GIFTraceCallback callback);
@@ -90,10 +96,13 @@ class GIFPathArbiter
     GIFPath currentPath = GIFPath::Idle;
     std::array<bool, 3> queuedPaths = {};
     bool vifPath3Mask = false;
+    bool modePath3Mask = false;
     bool intermittentPath3 = false;
     bool interruptedPath3 = false;
     bool queuedPath2CanInterruptPath3 = false;
     std::uint8_t path3ImageSliceQuadwords = 0;
+    std::uint16_t path3Count = 0;
+    std::uint16_t path3Tag = 0;
     GIFDecoderState suspendedPath3State;
     GIFTraceCallback traceCallback;
 };

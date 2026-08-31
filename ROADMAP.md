@@ -395,7 +395,7 @@ GIF DMA channel wiring belongs to Milestone 4.
 - [x] Implement PATH3 IMAGE slicing and interruption at documented boundaries,
       preserving decoder state across preemption and resumption
 - [x] Enforce `DIRECTHL` non-preemption while its PATH2 packet owns the GIF
-- [ ] Expose `GIF_MODE` IMT/M3R control, `GIF_STAT` PATH3 status, and
+- [x] Expose `GIF_MODE` IMT/M3R control, `GIF_STAT` PATH3 status, and
       interrupted `GIF_P3CNT`/`GIF_P3TAG` state through a privileged-register
       boundary
 - [ ] Model and test documented GIF arbitration transition and idle-cycle

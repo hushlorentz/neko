@@ -65,7 +65,29 @@ void GIFPathArbiter::setPath3MaskedByVIF(bool masked)
   {
     traceCallback(event);
   }
-  if (!vifPath3Mask &&
+  if (!path3Masked() &&
+      currentPath == GIFPath::Idle)
+  {
+    selectQueuedPath();
+  }
+}
+
+void GIFPathArbiter::setPath3MaskedByMode(bool masked)
+{
+  if (modePath3Mask == masked)
+  {
+    return;
+  }
+  modePath3Mask = masked;
+  GIFTraceEvent event;
+  event.type = GIFTraceEventType::Path3MaskChanged;
+  event.path = GIFPath::Path3;
+  event.path3Masked = masked;
+  if (traceCallback)
+  {
+    traceCallback(event);
+  }
+  if (!path3Masked() &&
       currentPath == GIFPath::Idle)
   {
     selectQueuedPath();
@@ -180,6 +202,16 @@ bool GIFPathArbiter::path3MaskedByVIF() const
   return vifPath3Mask;
 }
 
+bool GIFPathArbiter::path3MaskedByMode() const
+{
+  return modePath3Mask;
+}
+
+bool GIFPathArbiter::path3Masked() const
+{
+  return vifPath3Mask || modePath3Mask;
+}
+
 bool GIFPathArbiter::path3IntermittentMode() const
 {
   return intermittentPath3;
@@ -188,6 +220,21 @@ bool GIFPathArbiter::path3IntermittentMode() const
 bool GIFPathArbiter::path3Interrupted() const
 {
   return interruptedPath3;
+}
+
+bool GIFPathArbiter::pathQueued(GIFPath path) const
+{
+  return queuedPaths[pathIndex(path)];
+}
+
+std::uint16_t GIFPathArbiter::interruptedPath3Count() const
+{
+  return path3Count;
+}
+
+std::uint16_t GIFPathArbiter::interruptedPath3Tag() const
+{
+  return path3Tag;
 }
 
 bool GIFPathArbiter::decoderAwaitingTag() const
@@ -228,7 +275,7 @@ void GIFPathArbiter::selectQueuedPath()
       continue;
     }
     if (index == pathIndex(GIFPath::Path3) &&
-        vifPath3Mask)
+        path3Masked())
     {
       continue;
     }
@@ -265,6 +312,12 @@ void GIFPathArbiter::selectQueuedPath()
 void GIFPathArbiter::interruptPath3()
 {
   suspendedPath3State = gifDecoder->suspendPacket();
+  path3Count =
+    suspendedPath3State.remainingQuadwords & 0x7fff;
+  path3Tag =
+    suspendedPath3State.tag.loopCount |
+    (static_cast<std::uint16_t>(
+      suspendedPath3State.tag.endOfPacket) << 15);
   interruptedPath3 = true;
   queuedPaths[pathIndex(GIFPath::Path3)] = true;
   emitEvent(GIFTraceEventType::Path3Interrupted, GIFPath::Path3);
