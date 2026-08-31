@@ -6,6 +6,7 @@
 #include "gif_diagnostics.hpp"
 #include "gif_path3.hpp"
 #include "gs.hpp"
+#include "vif.hpp"
 
 namespace
 {
@@ -44,6 +45,15 @@ namespace
       static_cast<std::uint32_t>(registers),
       static_cast<std::uint32_t>(registers >> 32)
     }};
+  }
+
+  std::uint32_t vifCode(
+    std::uint8_t command,
+    std::uint16_t immediate = 0)
+  {
+    return
+      (static_cast<std::uint32_t>(command) << 24) |
+      immediate;
   }
 
   std::vector<GIFQuadword> transferredOnPath(
@@ -436,5 +446,124 @@ TEST_CASE("GIF PATH3 Fragmentation and Contention Tests")
     REQUIRE(path3.transferredQuadwordCount() == path3Input.size());
     REQUIRE(path3.completedPacketCount() == 2);
     REQUIRE(diagnostics.summary().stalledTransfers[2] == 2);
+  }
+}
+
+TEST_CASE("GIF PATH3 VIF Mask Integration Tests")
+{
+  SECTION("A mask finishes the active packet and suppresses the next one")
+  {
+    GIFDecoder decoder;
+    RecordingRegisterWriteHandler writes;
+    decoder.attachRegisterWriteHandler(&writes);
+    GIFPathArbiter arbiter(&decoder);
+    GIFPath3Transfer path3(arbiter);
+    VIF vif(VIFType::VIF1);
+    vif.attachGIFPathArbiter(&arbiter);
+    GIFDiagnosticsRecorder diagnostics;
+    arbiter.setTraceCallback(
+      [&diagnostics](const GIFTraceEvent &event) {
+        diagnostics.observe(event);
+      });
+    const std::array<GIFQuadword, 3> firstPacket = {{
+      gifTag(
+        1,
+        true,
+        GIFDataFormat::Packed,
+        2,
+        GIFRegisterDescriptor::RGBAQ |
+          (static_cast<std::uint64_t>(
+            GIFRegisterDescriptor::AD) << 4)),
+      GIFQuadword{{1, 2, 3, 4}},
+      GIFQuadword{{0x11111111, 0x22222222, 0x42, 0}}
+    }};
+    const GIFQuadword secondPacket =
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+
+    REQUIRE(
+      path3.submitQuadwords(firstPacket.data(), 2)
+        .transferredQuadwords == 2);
+    REQUIRE(decoder.registerIndex() == 1);
+    REQUIRE(decoder.quadwordsRemaining() == 1);
+
+    const VIFStreamWord mask = vif.ingestWord(vifCode(
+      VIFCommandEncoding::MSKPATH3,
+      VIFImmediateEncoding::MSKPATH3Mask));
+    REQUIRE(!mask.stalled);
+    REQUIRE(vif.path3Masked());
+    REQUIRE(arbiter.path3MaskedByVIF());
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+
+    const GIFPath3SubmissionResult completed =
+      path3.submitQuadwords(&firstPacket[2], 1);
+    REQUIRE(completed.transferredQuadwords == 1);
+    REQUIRE(completed.packetComplete);
+    REQUIRE(writes.writes.size() == 2);
+    REQUIRE(writes.writes[0].address == GIFRegisterAddress::RGBAQ);
+    REQUIRE(writes.writes[1].address == 0x42);
+    REQUIRE(
+      writes.writes[1].data ==
+      UINT64_C(0x2222222211111111));
+    REQUIRE(arbiter.activePath() == GIFPath::Idle);
+
+    const GIFPath3SubmissionResult suppressed =
+      path3.submitQuadwords(&secondPacket, 1);
+    REQUIRE(suppressed.stalled);
+    REQUIRE(suppressed.transferredQuadwords == 0);
+    REQUIRE(arbiter.pathPending(GIFPath::Path3));
+    REQUIRE(decoder.awaitingTag());
+
+    const VIFStreamWord unmask =
+      vif.ingestWord(vifCode(VIFCommandEncoding::MSKPATH3));
+    REQUIRE(!unmask.stalled);
+    REQUIRE(!vif.path3Masked());
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+
+    const GIFPath3SubmissionResult resumed =
+      path3.submitQuadwords(&secondPacket, 1);
+    REQUIRE(!resumed.stalled);
+    REQUIRE(resumed.packetComplete);
+    REQUIRE(path3.transferredQuadwordCount() == 4);
+    REQUIRE(path3.completedPacketCount() == 2);
+    REQUIRE(diagnostics.summary().path3MaskChanges == 2);
+    REQUIRE(diagnostics.summary().stalledTransfers[2] == 1);
+  }
+
+  SECTION("Unmasking does not bypass an active higher-priority packet")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    GIFPath3Transfer path3(arbiter);
+    VIF vif(VIFType::VIF1);
+    vif.attachGIFPathArbiter(&arbiter);
+    const GIFQuadword packet =
+      gifTag(0, true, GIFDataFormat::Packed, 0, 0);
+    vif.ingestWord(vifCode(
+      VIFCommandEncoding::MSKPATH3,
+      VIFImmediateEncoding::MSKPATH3Mask));
+
+    REQUIRE(path3.submitQuadwords(&packet, 1).stalled);
+    REQUIRE(arbiter.requestPath(GIFPath::Path2));
+    REQUIRE(!arbiter.requestPath(GIFPath::Path1));
+
+    vif.ingestWord(vifCode(VIFCommandEncoding::MSKPATH3));
+    REQUIRE(arbiter.activePath() == GIFPath::Path2);
+    REQUIRE(arbiter.pathPending(GIFPath::Path1));
+    REQUIRE(arbiter.pathPending(GIFPath::Path3));
+
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path2,
+      packet).accepted);
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path1,
+      packet).accepted);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+
+    const GIFPath3SubmissionResult resumed =
+      path3.submitQuadwords(&packet, 1);
+    REQUIRE(resumed.transferredQuadwords == 1);
+    REQUIRE(resumed.packetComplete);
+    REQUIRE(arbiter.pathsIdle());
   }
 }

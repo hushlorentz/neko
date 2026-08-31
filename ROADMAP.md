@@ -388,7 +388,7 @@ GIF DMA channel wiring belongs to Milestone 4.
       qwords
 - [x] Route PATH3 PACKED, REGLIST, and IMAGE packets through the shared GIF
       decoder without consuming source data while arbitration blocks progress
-- [ ] Apply `MSKPATH3` at the transport boundary and resume a masked transfer
+- [x] Apply `MSKPATH3` at the transport boundary and resume a masked transfer
       without losing packet, descriptor, or payload position
 - [ ] Verify packet-boundary arbitration under simultaneous PATH1, PATH2, and
       PATH3 demand, including the established PATH1 > PATH2 > PATH3 priority
