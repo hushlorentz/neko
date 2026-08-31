@@ -3,7 +3,7 @@
 
 #include "gif_path3.hpp"
 #include "gs.hpp"
-#include "point_sprite_scene.hpp"
+#include "primitive_scene.hpp"
 
 namespace
 {
@@ -125,10 +125,10 @@ namespace
     {
       const std::uint16_t x =
         (index * 83 + phase * (1 + index % 3)) %
-        neko_demo::POINT_SPRITE_FRAME_WIDTH;
+        neko_demo::PRIMITIVE_FRAME_WIDTH;
       const std::uint16_t y =
         (index * 47 + index * index * 3) %
-        neko_demo::POINT_SPRITE_FRAME_HEIGHT;
+        neko_demo::PRIMITIVE_FRAME_HEIGHT;
       const std::uint8_t intensity =
         static_cast<std::uint8_t>(
           96 + ((index * 29 + phase * 5) % 160));
@@ -138,6 +138,82 @@ namespace
         static_cast<std::uint8_t>(
           160 + intensity / 3)));
       packet.push_back(packedVertex(x, y));
+    }
+    return packet;
+  }
+
+  std::vector<GIFQuadword> linePacket(std::uint32_t phase)
+  {
+    constexpr std::uint16_t LINE_COUNT = 4;
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    std::vector<GIFQuadword> packet;
+    packet.reserve(1 + LINE_COUNT * 4);
+    packet.push_back(gifTag(
+      LINE_COUNT * 2,
+      2,
+      descriptors,
+      static_cast<std::uint16_t>(GSPrimitiveType::Line) |
+        (UINT64_C(1) << 3)));
+
+    packet.push_back(packedColor(40, 80, 180));
+    packet.push_back(packedVertex(104, 112));
+    packet.push_back(packedColor(240, 80, 160));
+    packet.push_back(packedVertex(536, 336));
+    packet.push_back(packedColor(80, 220, 240));
+    packet.push_back(packedVertex(536, 112));
+    packet.push_back(packedColor(250, 190, 50));
+    packet.push_back(packedVertex(104, 336));
+
+    const std::uint16_t movingX =
+      112 + (phase * 3) % 416;
+    packet.push_back(packedColor(120, 60, 255));
+    packet.push_back(packedVertex(movingX, 112));
+    packet.push_back(packedColor(60, 255, 180));
+    packet.push_back(packedVertex(movingX, 336));
+    const std::uint16_t movingY =
+      120 + (phase * 2) % 208;
+    packet.push_back(packedColor(255, 90, 60));
+    packet.push_back(packedVertex(112, movingY));
+    packet.push_back(packedColor(70, 130, 255));
+    packet.push_back(packedVertex(528, movingY));
+    return packet;
+  }
+
+  std::vector<GIFQuadword> lineStripPacket(std::uint32_t phase)
+  {
+    constexpr std::uint16_t VERTEX_COUNT = 9;
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    std::vector<GIFQuadword> packet;
+    packet.reserve(1 + VERTEX_COUNT * 2);
+    packet.push_back(gifTag(
+      VERTEX_COUNT,
+      2,
+      descriptors,
+      static_cast<std::uint16_t>(GSPrimitiveType::LineStrip) |
+        (UINT64_C(1) << 3)));
+    for (std::uint16_t index = 0;
+         index < VERTEX_COUNT;
+         ++index)
+    {
+      std::uint16_t wave =
+        (index * 23 + phase * 2) % 96;
+      if (wave > 48)
+      {
+        wave = 96 - wave;
+      }
+      packet.push_back(packedColor(
+        static_cast<std::uint8_t>(70 + index * 20),
+        static_cast<std::uint8_t>(230 - index * 12),
+        static_cast<std::uint8_t>(120 + index * 14)));
+      packet.push_back(packedVertex(
+        112 + index * 52,
+        176 + wave * 2));
     }
     return packet;
   }
@@ -208,15 +284,15 @@ namespace
   }
 }
 
-neko_demo::PointSpriteSceneResult
-neko_demo::renderPointSpriteScene(std::uint32_t phase)
+neko_demo::PrimitiveSceneResult
+neko_demo::renderPrimitiveScene(std::uint32_t phase)
 {
   GS gs;
   GIFDecoder decoder;
   decoder.attachRegisterWriteHandler(&gs);
   GIFPath3Transfer path3(&decoder);
   std::uint64_t transferredQuadwords = 0;
-  phase %= POINT_SPRITE_PHASE_COUNT;
+  phase %= PRIMITIVE_PHASE_COUNT;
 
   submitPacket(
     &path3,
@@ -228,19 +304,28 @@ neko_demo::renderPointSpriteScene(std::uint32_t phase)
     &transferredQuadwords);
   submitPacket(
     &path3,
+    linePacket(phase),
+    &transferredQuadwords);
+  submitPacket(
+    &path3,
+    lineStripPacket(phase),
+    &transferredQuadwords);
+  submitPacket(
+    &path3,
     spritePacket(phase),
     &transferredQuadwords);
 
-  PointSpriteSceneResult result;
+  PrimitiveSceneResult result;
   result.rgbaPixels = gs.framebufferRGBA8(
     0,
-    POINT_SPRITE_FRAME_WIDTH,
-    POINT_SPRITE_FRAME_HEIGHT);
+    PRIMITIVE_FRAME_WIDTH,
+    PRIMITIVE_FRAME_HEIGHT);
   result.framebufferHash = gs.framebufferHash(
     0,
-    POINT_SPRITE_FRAME_WIDTH,
-    POINT_SPRITE_FRAME_HEIGHT);
+    PRIMITIVE_FRAME_WIDTH,
+    PRIMITIVE_FRAME_HEIGHT);
   result.pointCount = gs.pointCount();
+  result.lineCount = gs.lineCount();
   result.spriteCount = gs.spriteCount();
   result.pixelWriteCount = gs.pixelWriteCount();
   result.transferredQuadwords = transferredQuadwords;

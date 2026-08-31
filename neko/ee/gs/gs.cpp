@@ -173,6 +173,18 @@ namespace
     }
     return quotient;
   }
+
+  std::int64_t floorDivide64(
+    std::int64_t value,
+    std::int64_t divisor)
+  {
+    std::int64_t quotient = value / divisor;
+    if (value % divisor < 0)
+    {
+      --quotient;
+    }
+    return quotient;
+  }
 }
 
 GS::GS() : localMemory(GS_LOCAL_MEMORY_WORDS, 0)
@@ -286,7 +298,7 @@ std::uint64_t GS::registerValue(std::uint8_t address) const
 
 void GS::decodePrimitive(std::uint64_t data)
 {
-  triangleVertexCount = 0;
+  primitiveVertexCount = 0;
   primitiveRegister.type = static_cast<GSPrimitiveType>(
     data & GS_PRIMITIVE_TYPE_MASK);
   primitiveRegister.gouraudShading =
@@ -335,21 +347,55 @@ void GS::submitVertex(bool drawingKick)
   switch (primitiveRegister.type)
   {
     case GSPrimitiveType::Point:
-      triangleVertexCount = 0;
+      primitiveVertexCount = 0;
       if (drawingKick)
       {
         rasterizePoint();
       }
       return;
-    case GSPrimitiveType::Sprite:
-      triangleVertices[triangleVertexCount] = vertexRegister;
-      triangleColors[triangleVertexCount] = colorRegister;
-      ++triangleVertexCount;
-      if (triangleVertexCount != 2)
+    case GSPrimitiveType::Line:
+    case GSPrimitiveType::LineStrip:
+    {
+      primitiveVertices[primitiveVertexCount] = vertexRegister;
+      primitiveColors[primitiveVertexCount] = colorRegister;
+      ++primitiveVertexCount;
+      if (primitiveVertexCount != 2)
       {
         return;
       }
-      triangleVertexCount = 0;
+      const GSVertexCoordinate firstVertex = primitiveVertices[0];
+      const GSVertexCoordinate secondVertex = primitiveVertices[1];
+      const GSColor firstColor = primitiveColors[0];
+      const GSColor secondColor = primitiveColors[1];
+      if (primitiveRegister.type == GSPrimitiveType::LineStrip)
+      {
+        primitiveVertices[0] = secondVertex;
+        primitiveColors[0] = secondColor;
+        primitiveVertexCount = 1;
+      }
+      else
+      {
+        primitiveVertexCount = 0;
+      }
+      if (drawingKick)
+      {
+        rasterizeLine(
+          firstVertex,
+          secondVertex,
+          firstColor,
+          secondColor);
+      }
+      return;
+    }
+    case GSPrimitiveType::Sprite:
+      primitiveVertices[primitiveVertexCount] = vertexRegister;
+      primitiveColors[primitiveVertexCount] = colorRegister;
+      ++primitiveVertexCount;
+      if (primitiveVertexCount != 2)
+      {
+        return;
+      }
+      primitiveVertexCount = 0;
       if (drawingKick)
       {
         rasterizeSprite();
@@ -358,19 +404,19 @@ void GS::submitVertex(bool drawingKick)
     case GSPrimitiveType::Triangle:
       break;
     default:
-      triangleVertexCount = 0;
+      primitiveVertexCount = 0;
       return;
   }
 
-  triangleVertices[triangleVertexCount] = vertexRegister;
-  triangleColors[triangleVertexCount] = colorRegister;
-  ++triangleVertexCount;
-  if (triangleVertexCount != TRIANGLE_VERTEX_COUNT)
+  primitiveVertices[primitiveVertexCount] = vertexRegister;
+  primitiveColors[primitiveVertexCount] = colorRegister;
+  ++primitiveVertexCount;
+  if (primitiveVertexCount != TRIANGLE_VERTEX_COUNT)
   {
     return;
   }
 
-  triangleVertexCount = 0;
+  primitiveVertexCount = 0;
   if (drawingKick)
   {
     rasterizeTriangle();
@@ -452,22 +498,208 @@ void GS::rasterizePoint()
   ++writtenPixels;
 }
 
+void GS::rasterizeLine(
+  const GSVertexCoordinate &firstVertex,
+  const GSVertexCoordinate &secondVertex,
+  const GSColor &firstColor,
+  const GSColor &secondColor)
+{
+  validateBasicDrawing("line", true);
+  const std::size_t contextIndex = primitiveRegister.context;
+  const GSContext &drawingContext = checkedContext(contextIndex);
+  const FixedPoint first = {
+    static_cast<std::int32_t>(firstVertex.x) -
+      drawingContext.offset.x,
+    static_cast<std::int32_t>(firstVertex.y) -
+      drawingContext.offset.y
+  };
+  const FixedPoint second = {
+    static_cast<std::int32_t>(secondVertex.x) -
+      drawingContext.offset.x,
+    static_cast<std::int32_t>(secondVertex.y) -
+      drawingContext.offset.y
+  };
+  const std::int32_t deltaX = second.x - first.x;
+  const std::int32_t deltaY = second.y - first.y;
+  ++renderedLines;
+  if (deltaX == 0 && deltaY == 0)
+  {
+    return;
+  }
+
+  const bool stepX =
+    std::abs(deltaX) >= std::abs(deltaY);
+  const bool positiveX = deltaX >= 0;
+  const bool positiveY = deltaY >= 0;
+  const std::int32_t roundedFirstX =
+    floorDivide(first.x + GS_FIXED_POINT_ONE / 2,
+                GS_FIXED_POINT_ONE);
+  const std::int32_t roundedFirstY =
+    floorDivide(first.y + GS_FIXED_POINT_ONE / 2,
+                GS_FIXED_POINT_ONE);
+  const std::int32_t roundedSecondX =
+    floorDivide(second.x + GS_FIXED_POINT_ONE / 2,
+                GS_FIXED_POINT_ONE);
+  const std::int32_t roundedSecondY =
+    floorDivide(second.y + GS_FIXED_POINT_ONE / 2,
+                GS_FIXED_POINT_ONE);
+  const auto exitsDiamond =
+    [stepX, positiveX, positiveY](
+      std::int32_t deltaToCenterX,
+      std::int32_t deltaToCenterY)
+    {
+      const std::int32_t distance =
+        std::abs(deltaToCenterX) +
+        std::abs(deltaToCenterY);
+      if (distance < GS_FIXED_POINT_ONE / 2)
+      {
+        return false;
+      }
+      if (stepX)
+      {
+        const bool exitsInDirection =
+          positiveX
+            ? deltaToCenterX > 0
+            : deltaToCenterX < 0;
+        return exitsInDirection &&
+          (distance > GS_FIXED_POINT_ONE / 2 ||
+           deltaToCenterY >= 0);
+      }
+      const bool exitsInDirection =
+        positiveY
+          ? deltaToCenterY > 0
+          : deltaToCenterY < 0;
+      return exitsInDirection &&
+        (distance > GS_FIXED_POINT_ONE / 2 ||
+         deltaToCenterX >= 0);
+    };
+
+  const bool drawFirst = !exitsDiamond(
+    first.x - roundedFirstX * GS_FIXED_POINT_ONE,
+    first.y - roundedFirstY * GS_FIXED_POINT_ONE);
+  const bool drawLast = exitsDiamond(
+    second.x - roundedSecondX * GS_FIXED_POINT_ONE,
+    second.y - roundedSecondY * GS_FIXED_POINT_ONE);
+  const std::int32_t drivingStep =
+    stepX
+      ? (positiveX ? 1 : -1)
+      : (positiveY ? 1 : -1);
+  std::int32_t firstDriving =
+    stepX ? roundedFirstX : roundedFirstY;
+  std::int32_t lastDriving =
+    stepX ? roundedSecondX : roundedSecondY;
+  if (!drawFirst)
+  {
+    firstDriving += drivingStep;
+  }
+  if (!drawLast)
+  {
+    lastDriving -= drivingStep;
+  }
+  if ((lastDriving - firstDriving) * drivingStep < 0)
+  {
+    return;
+  }
+
+  const std::int32_t drivingExtent =
+    std::abs(stepX ? deltaX : deltaY);
+  const std::int32_t dependentDelta =
+    stepX ? deltaY : deltaX;
+  const std::int32_t firstDrivingFixed =
+    stepX ? first.x : first.y;
+  const std::int32_t firstDependentFixed =
+    stepX ? first.y : first.x;
+  const auto interpolate =
+    [drivingExtent](
+      std::uint8_t start,
+      std::uint8_t end,
+      std::int32_t progress)
+    {
+      const std::int64_t interpolated =
+        (static_cast<std::int64_t>(start) * drivingExtent +
+         static_cast<std::int64_t>(
+           static_cast<std::int32_t>(end) - start) *
+           progress) /
+        drivingExtent;
+      return static_cast<std::uint32_t>(
+        std::min<std::int64_t>(
+          std::max<std::int64_t>(interpolated, 0),
+          GS_BYTE_MASK));
+    };
+
+  for (std::int32_t driving = firstDriving;
+       ;
+       driving += drivingStep)
+  {
+    const std::int32_t drivingFixed =
+      driving * GS_FIXED_POINT_ONE;
+    const std::int32_t progress =
+      drivingStep * (drivingFixed - firstDrivingFixed);
+    const std::int64_t dependentNumerator =
+      static_cast<std::int64_t>(firstDependentFixed) *
+        drivingExtent +
+      static_cast<std::int64_t>(dependentDelta) * progress;
+    const std::int32_t dependent =
+      static_cast<std::int32_t>(floorDivide64(
+        dependentNumerator +
+          static_cast<std::int64_t>(
+            GS_FIXED_POINT_ONE / 2) * drivingExtent,
+        static_cast<std::int64_t>(
+          GS_FIXED_POINT_ONE) * drivingExtent));
+    const std::int32_t x = stepX ? driving : dependent;
+    const std::int32_t y = stepX ? dependent : driving;
+    if (x >= drawingContext.scissor.x0 &&
+        x <= drawingContext.scissor.x1 &&
+        y >= drawingContext.scissor.y0 &&
+        y <= drawingContext.scissor.y1)
+    {
+      std::uint32_t color = packedColor();
+      if (primitiveRegister.gouraudShading)
+      {
+        color =
+          interpolate(
+            firstColor.red, secondColor.red, progress) <<
+            GS_RED_SHIFT |
+          interpolate(
+            firstColor.green, secondColor.green, progress) <<
+            GS_GREEN_SHIFT |
+          interpolate(
+            firstColor.blue, secondColor.blue, progress) <<
+            GS_BLUE_SHIFT |
+          interpolate(
+            firstColor.alpha, secondColor.alpha, progress) <<
+            GS_ALPHA_SHIFT;
+      }
+      writePSMCT32(
+        contextIndex,
+        static_cast<std::uint16_t>(x),
+        static_cast<std::uint16_t>(y),
+        color);
+      ++writtenPixels;
+    }
+    if (driving == lastDriving)
+    {
+      break;
+    }
+  }
+}
+
 void GS::rasterizeSprite()
 {
   validateBasicDrawing("sprite", false);
   const GSContext &drawingContext =
     checkedContext(primitiveRegister.context);
   const std::int32_t firstX =
-    static_cast<std::int32_t>(triangleVertices[0].x) -
+    static_cast<std::int32_t>(primitiveVertices[0].x) -
     drawingContext.offset.x;
   const std::int32_t firstY =
-    static_cast<std::int32_t>(triangleVertices[0].y) -
+    static_cast<std::int32_t>(primitiveVertices[0].y) -
     drawingContext.offset.y;
   const std::int32_t secondX =
-    static_cast<std::int32_t>(triangleVertices[1].x) -
+    static_cast<std::int32_t>(primitiveVertices[1].x) -
     drawingContext.offset.x;
   const std::int32_t secondY =
-    static_cast<std::int32_t>(triangleVertices[1].y) -
+    static_cast<std::int32_t>(primitiveVertices[1].y) -
     drawingContext.offset.y;
   const std::int32_t minimumX = std::max<std::int32_t>(
     ceilDivide(std::min(firstX, secondX), GS_FIXED_POINT_ONE),
@@ -520,16 +752,16 @@ void GS::rasterizeTriangle()
   }
 
   std::array<FixedPoint, TRIANGLE_VERTEX_COUNT> vertices;
-  std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = triangleColors;
+  std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = primitiveColors;
   for (std::size_t index = 0;
        index < vertices.size();
        ++index)
   {
     vertices[index].x =
-      static_cast<std::int32_t>(triangleVertices[index].x) -
+      static_cast<std::int32_t>(primitiveVertices[index].x) -
       drawingContext.offset.x;
     vertices[index].y =
-      static_cast<std::int32_t>(triangleVertices[index].y) -
+      static_cast<std::int32_t>(primitiveVertices[index].y) -
       drawingContext.offset.y;
   }
 
@@ -1079,12 +1311,17 @@ std::vector<std::uint8_t> GS::framebufferRGBA8(
 
 std::size_t GS::queuedVertexCount() const
 {
-  return triangleVertexCount;
+  return primitiveVertexCount;
 }
 
 std::uint64_t GS::pointCount() const
 {
   return renderedPoints;
+}
+
+std::uint64_t GS::lineCount() const
+{
+  return renderedLines;
 }
 
 std::uint64_t GS::spriteCount() const

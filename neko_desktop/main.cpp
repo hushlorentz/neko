@@ -11,13 +11,19 @@
 
 #include <SDL3/SDL.h>
 
-#include "point_sprite_scene.hpp"
+#include "primitive_scene.hpp"
 #include "rotation_vu1.hpp"
 
 namespace
 {
   constexpr int WINDOW_WIDTH = neko_demo::ROTATION_FRAME_WIDTH;
   constexpr int WINDOW_HEIGHT = neko_demo::ROTATION_FRAME_HEIGHT;
+  static_assert(
+    neko_demo::PRIMITIVE_FRAME_WIDTH ==
+      neko_demo::ROTATION_FRAME_WIDTH &&
+    neko_demo::PRIMITIVE_FRAME_HEIGHT ==
+      neko_demo::ROTATION_FRAME_HEIGHT,
+    "Desktop scenes must use the configured presentation size.");
   constexpr int RGBA_COMPONENT_COUNT = 4;
   constexpr std::uint32_t FRAME_DELAY_MILLISECONDS = 16;
   constexpr std::uint32_t FRAMES_PER_ROTATION_PHASE = 2;
@@ -25,7 +31,7 @@ namespace
   enum class DesktopScene
   {
     Rotation,
-    PointsAndSprites
+    Primitives
   };
 
   struct DesktopOptions
@@ -58,18 +64,22 @@ namespace
         }
         else if (scene == "points-sprites")
         {
-          options.scene = DesktopScene::PointsAndSprites;
+          options.scene = DesktopScene::Primitives;
+        }
+        else if (scene == "primitives")
+        {
+          options.scene = DesktopScene::Primitives;
         }
         else
         {
           throw std::invalid_argument(
-            "Desktop scene must be rotation or points-sprites.");
+            "Desktop scene must be rotation or primitives.");
         }
       }
       else
       {
         throw std::invalid_argument(
-          "Usage: neko_desktop [--scene rotation|points-sprites] "
+          "Usage: neko_desktop [--scene rotation|primitives] "
           "[--frames count]");
       }
     }
@@ -134,7 +144,7 @@ namespace
       SDL_CreateWindowAndRenderer(
         options.scene == DesktopScene::Rotation
           ? "Neko - rotation_vu1.asm"
-          : "Neko - POINT and SPRITE",
+          : "Neko - POINT, LINE, and SPRITE",
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0,
@@ -157,8 +167,8 @@ namespace
           renderer.get(),
           SDL_PIXELFORMAT_RGBA32,
           SDL_TEXTUREACCESS_STREAMING,
-          neko_demo::ROTATION_FRAME_WIDTH,
-          neko_demo::ROTATION_FRAME_HEIGHT),
+          WINDOW_WIDTH,
+          WINDOW_HEIGHT),
         SDL_DestroyTexture);
     if (texture == nullptr)
     {
@@ -215,8 +225,8 @@ namespace
       }
       else
       {
-        neko_demo::PointSpriteSceneResult scene =
-          neko_demo::renderPointSpriteScene(
+        neko_demo::PrimitiveSceneResult scene =
+          neko_demo::renderPrimitiveScene(
             static_cast<std::uint32_t>(renderedFrames));
         rgbaPixels = std::move(scene.rgbaPixels);
         framebufferHash = scene.framebufferHash;
@@ -231,8 +241,7 @@ namespace
           texture.get(),
           nullptr,
           rgbaPixels.data(),
-          neko_demo::ROTATION_FRAME_WIDTH *
-            RGBA_COMPONENT_COUNT),
+          WINDOW_WIDTH * RGBA_COMPONENT_COUNT),
         "SDL texture upload failed");
 
       requireSDL(
@@ -270,7 +279,7 @@ namespace
       std::cout
         << (options.scene == DesktopScene::Rotation
               ? "rotation_vu1"
-              : "points_sprites")
+              : "primitives")
         << ": frames=" << renderedFrames
         << " first_hash=0x" << std::hex
         << firstFramebufferHash

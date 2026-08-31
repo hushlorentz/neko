@@ -195,6 +195,7 @@ class GS : public GIFRegisterWriteHandler
       std::uint16_t height) const;
     std::size_t queuedVertexCount() const;
     std::uint64_t pointCount() const;
+    std::uint64_t lineCount() const;
     std::uint64_t spriteCount() const;
     std::uint64_t triangleCount() const;
     std::uint64_t pixelWriteCount() const;
@@ -229,6 +230,11 @@ class GS : public GIFRegisterWriteHandler
       std::uint16_t y) const;
     void submitVertex(bool drawingKick);
     void rasterizePoint();
+    void rasterizeLine(
+      const GSVertexCoordinate &firstVertex,
+      const GSVertexCoordinate &secondVertex,
+      const GSColor &firstColor,
+      const GSColor &secondColor);
     void rasterizeSprite();
     void rasterizeTriangle();
     void validateBasicDrawing(
@@ -241,11 +247,12 @@ class GS : public GIFRegisterWriteHandler
     GSColor colorRegister;
     GSVertexCoordinate vertexRegister;
     std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
-      triangleVertices = {};
+      primitiveVertices = {};
     std::array<GSColor, TRIANGLE_VERTEX_COUNT>
-      triangleColors = {};
-    std::size_t triangleVertexCount = 0;
+      primitiveColors = {};
+    std::size_t primitiveVertexCount = 0;
     std::uint64_t renderedPoints = 0;
+    std::uint64_t renderedLines = 0;
     std::uint64_t renderedSprites = 0;
     std::uint64_t renderedTriangles = 0;
     std::uint64_t writtenPixels = 0;

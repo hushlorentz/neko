@@ -854,6 +854,271 @@ TEST_CASE("GS Sprite Rasterizer Tests")
   }
 }
 
+TEST_CASE("GS Line Rasterizer Tests")
+{
+  SECTION("Horizontal lines include the start and exclude the endpoint")
+  {
+    GS forward;
+    GS reverse;
+    configureContext(&forward, 0);
+    configureContext(&reverse, 0);
+    forward.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    reverse.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(&forward, 1 * FIXED_POINT_ONE, 2 * FIXED_POINT_ONE, color);
+    submitVertex(&forward, 5 * FIXED_POINT_ONE, 2 * FIXED_POINT_ONE, color);
+    submitVertex(&reverse, 5 * FIXED_POINT_ONE, 3 * FIXED_POINT_ONE, color);
+    submitVertex(&reverse, 1 * FIXED_POINT_ONE, 3 * FIXED_POINT_ONE, color);
+
+    REQUIRE(forward.lineCount() == 1);
+    REQUIRE(reverse.lineCount() == 1);
+    REQUIRE(forward.pixelWriteCount() == 4);
+    REQUIRE(reverse.pixelWriteCount() == 4);
+    for (std::uint16_t x = 1; x < 5; ++x)
+    {
+      REQUIRE(forward.readPSMCT32(0, x, 2) != 0);
+    }
+    REQUIRE(forward.readPSMCT32(0, 5, 2) == 0);
+    REQUIRE(reverse.readPSMCT32(0, 5, 3) != 0);
+    REQUIRE(reverse.readPSMCT32(0, 1, 3) == 0);
+  }
+
+  SECTION("Lines follow the closest diamond across the driving axis")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      colorValue(9, 8, 7, 6));
+    submitVertex(
+      &gs,
+      5 * FIXED_POINT_ONE,
+      3 * FIXED_POINT_ONE,
+      colorValue(9, 8, 7, 6));
+
+    REQUIRE(gs.pixelWriteCount() == 4);
+    REQUIRE(gs.readPSMCT32(0, 1, 1) != 0);
+    REQUIRE(gs.readPSMCT32(0, 2, 2) != 0);
+    REQUIRE(gs.readPSMCT32(0, 3, 2) != 0);
+    REQUIRE(gs.readPSMCT32(0, 4, 3) != 0);
+    REQUIRE(gs.readPSMCT32(0, 5, 3) == 0);
+  }
+
+  SECTION("Diamond exit ties select the documented starting pixel")
+  {
+    GS exiting;
+    GS entering;
+    configureContext(&exiting, 0);
+    configureContext(&entering, 0);
+    exiting.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    entering.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(&exiting, 1 * FIXED_POINT_ONE + 4,
+                 1 * FIXED_POINT_ONE + 4, color);
+    submitVertex(&exiting, 4 * FIXED_POINT_ONE,
+                 1 * FIXED_POINT_ONE + 4, color);
+    submitVertex(&entering, 1 * FIXED_POINT_ONE + 4,
+                 2 * FIXED_POINT_ONE - 4, color);
+    submitVertex(&entering, 4 * FIXED_POINT_ONE,
+                 2 * FIXED_POINT_ONE - 4, color);
+
+    REQUIRE(exiting.pixelWriteCount() == 2);
+    REQUIRE(exiting.readPSMCT32(0, 1, 1) == 0);
+    REQUIRE(exiting.readPSMCT32(0, 2, 1) != 0);
+    REQUIRE(entering.pixelWriteCount() == 3);
+    REQUIRE(entering.readPSMCT32(0, 1, 2) != 0);
+  }
+
+  SECTION("Flat and Gouraud colors use drawing-kick ordering")
+  {
+    GS flat;
+    GS gouraud;
+    configureContext(&flat, 0);
+    configureContext(&gouraud, 0);
+    flat.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    gouraud.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line) |
+      GOURAUD_SHADING);
+
+    submitVertex(
+      &flat, 1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE,
+      colorValue(10, 20, 30, 40));
+    submitVertex(
+      &flat, 5 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE,
+      colorValue(110, 120, 130, 140));
+    submitVertex(
+      &gouraud, 1 * FIXED_POINT_ONE, 2 * FIXED_POINT_ONE,
+      colorValue(0, 20, 40, 60));
+    submitVertex(
+      &gouraud, 5 * FIXED_POINT_ONE, 2 * FIXED_POINT_ONE,
+      colorValue(100, 120, 140, 160));
+
+    REQUIRE(
+      flat.readPSMCT32(0, 1, 1) ==
+      packedColor(110, 120, 130, 140));
+    REQUIRE(
+      gouraud.readPSMCT32(0, 1, 2) ==
+      packedColor(0, 20, 40, 60));
+    REQUIRE(
+      gouraud.readPSMCT32(0, 3, 2) ==
+      packedColor(50, 70, 90, 110));
+  }
+
+  SECTION("Gouraud values are prestepped to the first covered pixel")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line) |
+      GOURAUD_SHADING);
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE + 4,
+      1 * FIXED_POINT_ONE,
+      colorValue(20, 40, 60, 80));
+    submitVertex(
+      &gs,
+      5 * FIXED_POINT_ONE + 4,
+      1 * FIXED_POINT_ONE,
+      colorValue(100, 120, 140, 160));
+
+    REQUIRE(
+      gs.readPSMCT32(0, 1, 1) ==
+      packedColor(15, 35, 55, 75));
+  }
+
+  SECTION("Offset and scissor clip generated line pixels")
+  {
+    GS gs;
+    configureContext(
+      &gs,
+      0,
+      2,
+      3,
+      1,
+      1,
+      4 * FIXED_POINT_ONE,
+      5 * FIXED_POINT_ONE);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    submitVertex(
+      &gs, 4 * FIXED_POINT_ONE, 6 * FIXED_POINT_ONE,
+      colorValue(1, 2, 3, 4));
+    submitVertex(
+      &gs, 9 * FIXED_POINT_ONE, 6 * FIXED_POINT_ONE,
+      colorValue(5, 6, 7, 8));
+
+    REQUIRE(gs.lineCount() == 1);
+    REQUIRE(gs.pixelWriteCount() == 2);
+    REQUIRE(gs.readPSMCT32(0, 2, 1) != 0);
+    REQUIRE(gs.readPSMCT32(0, 3, 1) != 0);
+  }
+
+  SECTION("XYZ3 completes an independent line without drawing")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(&gs, 16, 16, color);
+    submitVertex(&gs, 64, 64, color, false);
+
+    REQUIRE(gs.queuedVertexCount() == 0);
+    REQUIRE(gs.lineCount() == 0);
+    REQUIRE(gs.pixelWriteCount() == 0);
+  }
+
+  SECTION("Unsupported line antialiasing is rejected explicitly")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Line) |
+      (UINT64_C(1) << 7));
+    submitVertex(
+      &gs, 16, 16, colorValue(1, 2, 3, 4));
+
+    REQUIRE_THROWS(
+      submitVertex(
+        &gs, 64, 64, colorValue(5, 6, 7, 8)));
+    REQUIRE(gs.queuedVertexCount() == 0);
+  }
+}
+
+TEST_CASE("GS Line Strip Rasterizer Tests")
+{
+  SECTION("Each new vertex reuses the previous endpoint")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::LineStrip));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(&gs, 1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(&gs, 5 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(&gs, 5 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+
+    REQUIRE(gs.queuedVertexCount() == 1);
+    REQUIRE(gs.lineCount() == 2);
+    REQUIRE(gs.pixelWriteCount() == 7);
+    for (std::uint16_t x = 1; x < 5; ++x)
+    {
+      REQUIRE(gs.readPSMCT32(0, x, 1) != 0);
+    }
+    for (std::uint16_t y = 1; y < 4; ++y)
+    {
+      REQUIRE(gs.readPSMCT32(0, 5, y) != 0);
+    }
+  }
+
+  SECTION("XYZ3 advances the strip and its endpoint is reused")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::LineStrip));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(&gs, 1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color);
+    submitVertex(
+      &gs, 4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE, color, false);
+    submitVertex(&gs, 4 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE, color);
+
+    REQUIRE(gs.queuedVertexCount() == 1);
+    REQUIRE(gs.lineCount() == 1);
+    REQUIRE(gs.pixelWriteCount() == 3);
+    REQUIRE(gs.readPSMCT32(0, 4, 1) != 0);
+    REQUIRE(gs.readPSMCT32(0, 4, 3) != 0);
+    REQUIRE(gs.readPSMCT32(0, 1, 1) == 0);
+  }
+}
+
 TEST_CASE("GIF Point and Sprite Integration Tests")
 {
   SECTION("PACKED drawing kicks render both primitive types")
@@ -904,6 +1169,64 @@ TEST_CASE("GIF Point and Sprite Integration Tests")
     REQUIRE(
       gs.readPSMCT32(0, 5, 2) ==
       packedColor(9, 10, 11, 12));
+  }
+}
+
+TEST_CASE("GIF Line Integration Tests")
+{
+  SECTION("PACKED drawing kicks render lines and line strips")
+  {
+    GS gs;
+    GIFDecoder decoder;
+    decoder.attachRegisterWriteHandler(&gs);
+    configureContext(&gs, 0);
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+
+    decoder.ingestQuadword(gifTag(
+      2,
+      true,
+      2,
+      descriptors,
+      true,
+      static_cast<std::uint16_t>(GSPrimitiveType::Line)));
+    decoder.ingestQuadword(packedRGBA(1, 2, 3, 4));
+    decoder.ingestQuadword(
+      packedXYZ(1 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE));
+    decoder.ingestQuadword(packedRGBA(5, 6, 7, 8));
+    decoder.ingestQuadword(
+      packedXYZ(4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE));
+
+    decoder.ingestQuadword(gifTag(
+      3,
+      true,
+      2,
+      descriptors,
+      true,
+      static_cast<std::uint16_t>(GSPrimitiveType::LineStrip)));
+    decoder.ingestQuadword(packedRGBA(9, 10, 11, 12));
+    decoder.ingestQuadword(
+      packedXYZ(5 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE));
+    decoder.ingestQuadword(packedRGBA(13, 14, 15, 16));
+    decoder.ingestQuadword(
+      packedXYZ(5 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE));
+    decoder.ingestQuadword(packedRGBA(17, 18, 19, 20));
+    decoder.ingestQuadword(
+      packedXYZ(7 * FIXED_POINT_ONE, 4 * FIXED_POINT_ONE));
+
+    REQUIRE(gs.lineCount() == 3);
+    REQUIRE(gs.pixelWriteCount() == 8);
+    REQUIRE(
+      gs.readPSMCT32(0, 1, 1) ==
+      packedColor(5, 6, 7, 8));
+    REQUIRE(
+      gs.readPSMCT32(0, 5, 1) ==
+      packedColor(13, 14, 15, 16));
+    REQUIRE(
+      gs.readPSMCT32(0, 6, 4) ==
+      packedColor(17, 18, 19, 20));
   }
 }
 
