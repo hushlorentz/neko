@@ -120,6 +120,7 @@ target_include_directories(neko_perf PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/neko_pe
 target_link_libraries(neko_perf PRIVATE neko_core)
 
 add_library(neko_diagnostics
+    neko_diagnostics/gif_diagnostics.cpp
     neko_diagnostics/vpu_program_runner.cpp
 )
 target_include_directories(neko_diagnostics
@@ -134,6 +135,7 @@ add_executable(neko_tests
     neko_tests/gif/gif_tests.cpp
     neko_tests/gif/gif_path_arbiter_tests.cpp
     neko_tests/gif/gif_path1_tests.cpp
+    neko_tests/gif/gif_diagnostics_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp
     neko_tests/gs/gs_vif_vu1_integration_tests.cpp

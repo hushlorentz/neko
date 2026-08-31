@@ -376,8 +376,31 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Route VU1 `XGKICK` output into GIF PATH1
 - [x] Add packet-boundary GIF path arbitration, PATH2 retry stalls, VIF
       synchronization commands, `MSKPATH3`, and command interrupts
-- [ ] Add PATH3 DMA transport, IMAGE slicing and interruption, `DIRECTHL`
-      non-preemption, and exact GIF arbitration idle-cycle timing
+
+### PATH3 Transport and Arbitration
+
+Build and verify the GIF-side PATH3 boundary before introducing the EE DMAC.
+The transport in this milestone is driven by a host-side qword producer; real
+GIF DMA channel wiring belongs to Milestone 4.
+
+- [ ] Add a host-fed PATH3 qword transport with explicit ready/stall results,
+      partial submission support, and counters for accepted and transferred
+      qwords
+- [ ] Route PATH3 PACKED, REGLIST, and IMAGE packets through the shared GIF
+      decoder without consuming source data while arbitration blocks progress
+- [ ] Apply `MSKPATH3` at the transport boundary and resume a masked transfer
+      without losing packet, descriptor, or payload position
+- [ ] Verify packet-boundary arbitration under simultaneous PATH1, PATH2, and
+      PATH3 demand, including the established PATH1 > PATH2 > PATH3 priority
+- [ ] Implement PATH3 IMAGE slicing and interruption at documented boundaries,
+      preserving decoder state across preemption and resumption
+- [ ] Enforce `DIRECTHL` non-preemption while its PATH2 packet owns the GIF
+- [ ] Model and test documented GIF arbitration transition and idle-cycle
+      timing rather than treating ownership changes as instantaneous
+- [ ] Add deterministic contention tests covering fragmented input, masking,
+      backpressure, preemption, EOP completion, and zero qword duplication or
+      loss
+
 - [ ] Implement host-to-local and local-to-host GS image transfers
 - [ ] Render points, lines, sprites, strips, and fans with the applicable
       fixed-point coverage and vertex-reuse rules
@@ -412,7 +435,7 @@ reviewable and avoid host-library values as the source of truth.
 Keep graphics diagnostics opt-in and outside `neko_core`, building on the
 existing event and runner infrastructure:
 
-- [ ] Add a structured GIF/GS trace in `neko_diagnostics` that decodes GIFtags
+- [x] Add a structured GIF/GS trace in `neko_diagnostics` that decodes GIFtags
       (`NLOOP`, `EOP`, `FLG`, `NREG`, and descriptors), path ownership, and GS
       register writes instead of requiring raw qword inspection
 - [ ] Capture a draw-kick snapshot containing the primitive and shading modes,
@@ -420,12 +443,14 @@ existing event and runner infrastructure:
       submitted vertex with its `RGBAQ` value
 - [ ] Report unsupported draw features by their decoded register fields and
       values, while preserving strict failure behavior in the core
-- [ ] Add a compact completion summary covering transferred qwords, decoded
-      packets and register writes, primitives, pixel writes, draw bounds, and
-      framebuffer hashes
+- [x] Add a compact GIF transfer summary covering path requests, selections,
+      stalls, transferred qwords, decoded tags and register writes, primitive
+      and packet completion, and PATH3 mask transitions
+- [ ] Extend completion summaries with GS primitive counts, pixel writes, draw
+      bounds, and framebuffer hashes
 - [ ] Export selected GS framebuffer regions to a dependency-free portable
       image format for inspecting external programs without frontend changes
-- [ ] Add deterministic trace contract tests and keep formatting, streams, and
+- [x] Add deterministic trace contract tests and keep formatting, streams, and
       file output out of hardware classes
 
 ## Milestone 4: System-Level Core
@@ -434,6 +459,8 @@ existing event and runner infrastructure:
 - [ ] Establish an integer master-clock scheduler
 - [ ] Run VUs at 147.456 MHz relative to the 294.912 MHz EE clock
 - [ ] Add EE, memory-map, DMA, GIF, GS, and interrupt coordination
+- [ ] Connect GIF DMAC channel 2 to the proven PATH3 transport, including
+      normal and chain-mode progress, backpressure, completion, and interrupts
 - [ ] Model GS display circuits, vertical-blank timing, and presentation
       boundaries
 - [ ] Add IOP and SPU2 only when required by selected software

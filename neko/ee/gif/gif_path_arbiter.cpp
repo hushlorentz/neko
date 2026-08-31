@@ -19,6 +19,7 @@ bool GIFPathArbiter::requestPath(GIFPath path)
     throw std::invalid_argument(
       "The idle GIF path cannot request a transfer.");
   }
+  emitEvent(GIFTraceEventType::PathRequested, path);
 
   if (currentPath == path)
   {
@@ -35,7 +36,19 @@ bool GIFPathArbiter::requestPath(GIFPath path)
 
 void GIFPathArbiter::setPath3MaskedByVIF(bool masked)
 {
+  if (vifPath3Mask == masked)
+  {
+    return;
+  }
   vifPath3Mask = masked;
+  GIFTraceEvent event;
+  event.type = GIFTraceEventType::Path3MaskChanged;
+  event.path = GIFPath::Path3;
+  event.path3Masked = masked;
+  if (traceCallback)
+  {
+    traceCallback(event);
+  }
   if (!vifPath3Mask &&
       currentPath == GIFPath::Idle)
   {
@@ -50,13 +63,24 @@ GIFPathTransferResult GIFPathArbiter::transferQuadword(
   GIFPathTransferResult result;
   if (!requestPath(path))
   {
+    emitEvent(GIFTraceEventType::TransferStalled, path);
     return result;
   }
 
   result.decodeResult = gifDecoder->ingestQuadword(quadword);
   result.accepted = true;
+  if (traceCallback)
+  {
+    GIFTraceEvent event;
+    event.type = GIFTraceEventType::QuadwordTransferred;
+    event.path = path;
+    event.quadword = quadword;
+    traceCallback(event);
+  }
+  emitDecodeEvents(path, result.decodeResult);
   if (result.decodeResult.packetComplete)
   {
+    emitEvent(GIFTraceEventType::PathReleased, path);
     currentPath = GIFPath::Idle;
     selectQueuedPath();
   }
@@ -112,6 +136,12 @@ bool GIFPathArbiter::decoderPacketInProgress() const
   return gifDecoder->packetInProgress();
 }
 
+void GIFPathArbiter::setTraceCallback(
+  GIFTraceCallback callback)
+{
+  traceCallback = callback;
+}
+
 std::size_t GIFPathArbiter::pathIndex(GIFPath path)
 {
   if (path < GIFPath::Path1 ||
@@ -142,6 +172,55 @@ void GIFPathArbiter::selectQueuedPath()
     queuedPaths[index] = false;
     currentPath =
       static_cast<GIFPath>(index + 1);
+    emitEvent(GIFTraceEventType::PathSelected, currentPath);
     return;
+  }
+}
+
+void GIFPathArbiter::emitEvent(
+  GIFTraceEventType type,
+  GIFPath path)
+{
+  if (!traceCallback)
+  {
+    return;
+  }
+  GIFTraceEvent event;
+  event.type = type;
+  event.path = path;
+  traceCallback(event);
+}
+
+void GIFPathArbiter::emitDecodeEvents(
+  GIFPath path,
+  const GIFDecodeResult &result)
+{
+  if (!traceCallback)
+  {
+    return;
+  }
+  if (result.tagDecoded)
+  {
+    GIFTraceEvent event;
+    event.type = GIFTraceEventType::TagDecoded;
+    event.path = path;
+    event.tag = result.tag;
+    traceCallback(event);
+  }
+  for (const GIFRegisterWrite &write : result.writes)
+  {
+    GIFTraceEvent event;
+    event.type = GIFTraceEventType::RegisterWrite;
+    event.path = path;
+    event.registerWrite = write;
+    traceCallback(event);
+  }
+  if (result.primitiveComplete)
+  {
+    emitEvent(GIFTraceEventType::PrimitiveComplete, path);
+  }
+  if (result.packetComplete)
+  {
+    emitEvent(GIFTraceEventType::PacketComplete, path);
   }
 }

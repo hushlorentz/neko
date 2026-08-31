@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 
 #include "gif.hpp"
 
@@ -19,6 +20,33 @@ struct GIFPathTransferResult
   bool accepted = false;
   GIFDecodeResult decodeResult;
 };
+
+enum class GIFTraceEventType : std::uint8_t
+{
+  PathRequested,
+  PathSelected,
+  TransferStalled,
+  QuadwordTransferred,
+  TagDecoded,
+  RegisterWrite,
+  PrimitiveComplete,
+  PacketComplete,
+  PathReleased,
+  Path3MaskChanged
+};
+
+struct GIFTraceEvent
+{
+  GIFTraceEventType type = GIFTraceEventType::PathRequested;
+  GIFPath path = GIFPath::Idle;
+  GIFQuadword quadword = {};
+  GIFTag tag;
+  GIFRegisterWrite registerWrite;
+  bool path3Masked = false;
+};
+
+using GIFTraceCallback =
+  std::function<void(const GIFTraceEvent &)>;
 
 class GIFPathArbiter
 {
@@ -37,15 +65,23 @@ class GIFPathArbiter
     bool path3MaskedByVIF() const;
     bool decoderAwaitingTag() const;
     bool decoderPacketInProgress() const;
+    void setTraceCallback(GIFTraceCallback callback);
 
   private:
     static std::size_t pathIndex(GIFPath path);
     void selectQueuedPath();
+    void emitEvent(
+      GIFTraceEventType type,
+      GIFPath path);
+    void emitDecodeEvents(
+      GIFPath path,
+      const GIFDecodeResult &result);
 
     GIFDecoder *gifDecoder;
     GIFPath currentPath = GIFPath::Idle;
     std::array<bool, 3> queuedPaths = {};
     bool vifPath3Mask = false;
+    GIFTraceCallback traceCallback;
 };
 
 #endif
