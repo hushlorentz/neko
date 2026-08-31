@@ -611,7 +611,7 @@ TEST_CASE("GS Flat Triangle Rasterizer Tests")
     configureContext(&gs, 0);
     gs.writeRegister(
       GSRegisterAddress::PRIM,
-      TRIANGLE_PRIMITIVE | (UINT64_C(1) << 4));
+      TRIANGLE_PRIMITIVE | (UINT64_C(1) << 5));
     const std::uint64_t color = colorValue(1, 2, 3, 4);
     submitVertex(&gs, 16, 16, color);
     submitVertex(&gs, 64, 16, color);

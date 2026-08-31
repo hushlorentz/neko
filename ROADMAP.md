@@ -414,7 +414,8 @@ GIF DMA channel wiring belongs to Milestone 4.
         `neko_desktop`
   - [x] Render triangle strips and fans and expose them in `neko_desktop`
 - [x] Upload and sample a PSMCT32 texture with nearest-neighbor filtering
-- [ ] Handle fixed `UV` and perspective-correct `STQ` texture coordinates
+- [x] Handle fixed `UV` and perspective-correct `STQ` texture coordinates
+  and expose PATH3-uploaded textured drawing in `neko_desktop`
 - [ ] Implement destination-alpha testing and configurable alpha blending
 - [ ] Add Z-buffer storage, depth testing, and depth writes
 

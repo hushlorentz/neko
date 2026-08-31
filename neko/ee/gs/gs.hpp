@@ -12,6 +12,8 @@ namespace GSRegisterAddress
 {
   constexpr std::uint8_t PRIM = 0x00;
   constexpr std::uint8_t RGBAQ = 0x01;
+  constexpr std::uint8_t ST = 0x02;
+  constexpr std::uint8_t UV = 0x03;
   constexpr std::uint8_t XYZ2 = 0x05;
   constexpr std::uint8_t TEX0_1 = 0x06;
   constexpr std::uint8_t TEX0_2 = 0x07;
@@ -91,6 +93,14 @@ struct GSVertexCoordinate
   std::uint16_t x = 0;
   std::uint16_t y = 0;
   std::uint32_t z = 0;
+};
+
+struct GSTextureCoordinate
+{
+  std::uint32_t s = 0;
+  std::uint32_t t = 0;
+  std::uint16_t u = 0;
+  std::uint16_t v = 0;
 };
 
 struct GSFrame
@@ -254,6 +264,8 @@ class GS : public GIFRegisterWriteHandler
     const GSContext &checkedContext(std::size_t index) const;
     void decodePrimitive(std::uint64_t data);
     void decodeColor(std::uint64_t data);
+    void decodeST(std::uint64_t data);
+    void decodeUV(std::uint64_t data);
     void decodeVertex(
       std::uint64_t data,
       bool drawingKick);
@@ -286,26 +298,42 @@ class GS : public GIFRegisterWriteHandler
       const GSVertexCoordinate &firstVertex,
       const GSVertexCoordinate &secondVertex,
       const GSColor &firstColor,
-      const GSColor &secondColor);
+      const GSColor &secondColor,
+      const GSTextureCoordinate &firstTextureCoordinate,
+      const GSTextureCoordinate &secondTextureCoordinate);
     void rasterizeSprite();
     void rasterizeTriangle(
       const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
         &vertices,
       const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
-        &colors);
+        &colors,
+      const std::array<GSTextureCoordinate,
+                       TRIANGLE_VERTEX_COUNT>
+        &textureCoordinates);
     void validateBasicDrawing(
       const char *primitiveName,
       bool antialiasingUnsupported) const;
     std::uint32_t packedColor() const;
+    std::uint32_t shadeTexturedFragment(
+      std::size_t contextIndex,
+      std::uint32_t fragmentColor,
+      double fixedU,
+      double fixedV,
+      double s,
+      double t,
+      double q) const;
 
     std::array<std::uint64_t, REGISTER_COUNT> registers = {};
     GSPrimitive primitiveRegister;
     GSColor colorRegister;
     GSVertexCoordinate vertexRegister;
+    GSTextureCoordinate textureCoordinateRegister;
     std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
       primitiveVertices = {};
     std::array<GSColor, TRIANGLE_VERTEX_COUNT>
       primitiveColors = {};
+    std::array<GSTextureCoordinate, TRIANGLE_VERTEX_COUNT>
+      primitiveTextureCoordinates = {};
     std::size_t primitiveVertexCount = 0;
     std::uint64_t renderedPoints = 0;
     std::uint64_t renderedLines = 0;

@@ -52,13 +52,17 @@ The external sample and assembler remain outside the committed source tree.
 The default desktop scene supplies deterministic sine/cosine inputs and reruns
 the VU1 workload for every animation frame. The `primitives` scene submits
 deterministic host-fed PATH3 packets for POINT, LINE, LINESTRIP, and SPRITE
-rasterization. Content-specific scene names preserve earlier versions:
+rasterization, plus strips, fans, and a PATH3 IMAGE-uploaded PSMCT32 texture.
+Content-specific scene names preserve earlier versions:
 
 ```sh
 ./out/desktop/neko_desktop --scene points-sprites
 ./out/desktop/neko_desktop --scene points-lines-sprites
 ./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans
+./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans-textures
 ```
 
 The `primitives` name tracks the newest graphics showcase as more primitive
-families are added. Normal builds and `neko_core` do not depend on SDL.
+families are added. The latest version draws the uploaded neon texture with
+fixed UV coordinates behind the animated primitives. Normal builds and
+`neko_core` do not depend on SDL.

@@ -39,6 +39,20 @@ namespace
       0);
   }
 
+  GIFQuadword imageTag(std::uint16_t loopCount)
+  {
+    const std::uint64_t low =
+      loopCount |
+      (UINT64_C(1) << 15) |
+      (static_cast<std::uint64_t>(GIFDataFormat::Image) << 58);
+    return GIFQuadword{{
+      static_cast<std::uint32_t>(low),
+      static_cast<std::uint32_t>(low >> 32),
+      0,
+      0
+    }};
+  }
+
   GIFQuadword adWrite(
     std::uint8_t address,
     std::uint64_t data)
@@ -70,6 +84,13 @@ namespace
       0,
       0
     }};
+  }
+
+  GIFQuadword packedUV(
+    std::uint16_t u,
+    std::uint16_t v)
+  {
+    return GIFQuadword{{u, v, 0, 0}};
   }
 
   void submitPacket(
@@ -104,6 +125,103 @@ namespace
       adWrite(GSRegisterAddress::SCISSOR_1, scissor),
       adWrite(GSRegisterAddress::XYOFFSET_1, 0)
     };
+  }
+
+  std::vector<GIFQuadword> textureUploadPacket()
+  {
+    constexpr std::uint16_t TEXTURE_SIZE = 64;
+    constexpr std::uint16_t TEXTURE_BASE = 8192;
+    constexpr std::uint16_t PIXELS_PER_QUADWORD = 4;
+    constexpr std::uint16_t IMAGE_QUADWORDS =
+      TEXTURE_SIZE * TEXTURE_SIZE / PIXELS_PER_QUADWORD;
+    const std::uint64_t transferBuffer =
+      static_cast<std::uint64_t>(TEXTURE_BASE) << 32 |
+      UINT64_C(1) << 48;
+    const std::uint64_t transferRegion =
+      TEXTURE_SIZE |
+      (static_cast<std::uint64_t>(TEXTURE_SIZE) << 32);
+    const std::uint64_t texture =
+      TEXTURE_BASE |
+      (UINT64_C(1) << 14) |
+      (UINT64_C(6) << 26) |
+      (UINT64_C(6) << 30) |
+      (UINT64_C(1) << 34) |
+      (UINT64_C(1) << 35);
+
+    std::vector<GIFQuadword> packet;
+    packet.reserve(6 + IMAGE_QUADWORDS);
+    packet.push_back(adTag(4));
+    packet.push_back(adWrite(
+      GSRegisterAddress::BITBLTBUF,
+      transferBuffer));
+    packet.push_back(adWrite(
+      GSRegisterAddress::TRXREG,
+      transferRegion));
+    packet.push_back(adWrite(GSRegisterAddress::TRXDIR, 0));
+    packet.push_back(adWrite(GSRegisterAddress::TEX0_1, texture));
+    packet.push_back(imageTag(IMAGE_QUADWORDS));
+    for (std::uint16_t y = 0; y < TEXTURE_SIZE; ++y)
+    {
+      for (std::uint16_t x = 0;
+           x < TEXTURE_SIZE;
+           x += PIXELS_PER_QUADWORD)
+      {
+        GIFQuadword pixels = {};
+        for (std::uint16_t index = 0;
+             index < PIXELS_PER_QUADWORD;
+             ++index)
+        {
+          const std::uint16_t textureX = x + index;
+          const bool alternate =
+            ((textureX / 8) + (y / 8)) % 2 != 0;
+          const bool grid =
+            textureX % 8 == 0 || y % 8 == 0;
+          const std::uint8_t red = grid
+            ? 255
+            : alternate ? 20 : 105;
+          const std::uint8_t green = grid
+            ? 75
+            : alternate ? 190 : 25;
+          const std::uint8_t blue = grid
+            ? 220
+            : alternate ? 230 : 170;
+          pixels[index] =
+            red |
+            (static_cast<std::uint32_t>(green) << 8) |
+            (static_cast<std::uint32_t>(blue) << 16) |
+            UINT32_C(0xff000000);
+        }
+        packet.push_back(pixels);
+      }
+    }
+    return packet;
+  }
+
+  std::vector<GIFQuadword> texturedSpritePacket()
+  {
+    constexpr std::uint16_t TEXTURE_EDGE = 64 * FIXED_POINT_ONE;
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::UV) << 4) |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 8);
+    std::vector<GIFQuadword> packet;
+    packet.reserve(7);
+    packet.push_back(gifTag(
+      2,
+      3,
+      descriptors,
+      static_cast<std::uint16_t>(GSPrimitiveType::Sprite) |
+        (UINT64_C(1) << 4) |
+        (UINT64_C(1) << 8)));
+    packet.push_back(packedColor(0x80, 0x80, 0x80, 0x80));
+    packet.push_back(packedUV(0, 0));
+    packet.push_back(packedVertex(96, 96));
+    packet.push_back(packedColor(0x80, 0x80, 0x80, 0x80));
+    packet.push_back(packedUV(TEXTURE_EDGE, TEXTURE_EDGE));
+    packet.push_back(packedVertex(544, 352));
+    return packet;
   }
 
   std::vector<GIFQuadword> pointPacket(std::uint32_t phase)
@@ -379,7 +497,8 @@ namespace
   {
     PointsAndSprites,
     PointsLinesAndSprites,
-    AllPrimitives
+    AllPrimitives,
+    TexturedPrimitives
   };
 
   neko_demo::PrimitiveSceneResult renderScene(
@@ -397,7 +516,19 @@ namespace
       &path3,
       setupPacket(),
       &transferredQuadwords);
-    if (version == SceneVersion::AllPrimitives)
+    if (version == SceneVersion::TexturedPrimitives)
+    {
+      submitPacket(
+        &path3,
+        textureUploadPacket(),
+        &transferredQuadwords);
+      submitPacket(
+        &path3,
+        texturedSpritePacket(),
+        &transferredQuadwords);
+    }
+    if (version == SceneVersion::AllPrimitives ||
+        version == SceneVersion::TexturedPrimitives)
     {
       submitPacket(
         &path3,
@@ -449,6 +580,12 @@ namespace
 
 neko_demo::PrimitiveSceneResult
 neko_demo::renderPrimitiveScene(std::uint32_t phase)
+{
+  return renderScene(phase, SceneVersion::TexturedPrimitives);
+}
+
+neko_demo::PrimitiveSceneResult
+neko_demo::renderUntexturedPrimitiveScene(std::uint32_t phase)
 {
   return renderScene(phase, SceneVersion::AllPrimitives);
 }

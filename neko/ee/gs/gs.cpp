@@ -1,4 +1,7 @@
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -77,6 +80,8 @@ namespace
   constexpr std::uint8_t GS_COLOR_BLUE_SHIFT = 16;
   constexpr std::uint8_t GS_COLOR_ALPHA_SHIFT = 24;
   constexpr std::uint8_t GS_COLOR_Q_SHIFT = 32;
+  constexpr std::uint64_t GS_UV_MASK = 0x7fff;
+  constexpr std::uint8_t GS_UV_V_SHIFT = 16;
 
   constexpr std::uint64_t GS_VERTEX_XY_MASK = 0xffff;
   constexpr std::uint8_t GS_VERTEX_Y_SHIFT = 16;
@@ -212,6 +217,34 @@ namespace
     }
     return quotient;
   }
+
+  double floatValue(std::uint32_t bits)
+  {
+    float value;
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+  }
+
+  std::uint8_t colorChannel(
+    std::uint32_t color,
+    std::uint8_t shift)
+  {
+    return (color >> shift) & GS_BYTE_MASK;
+  }
+
+  std::uint8_t clampedColor(std::uint32_t value)
+  {
+    return static_cast<std::uint8_t>(
+      std::min(value, GS_BYTE_MASK));
+  }
+
+  std::uint8_t modulatedColor(
+    std::uint8_t texture,
+    std::uint8_t fragment)
+  {
+    return clampedColor(
+      (static_cast<std::uint32_t>(texture) * fragment) >> 7);
+  }
 }
 
 GS::GS() : localMemory(GS_LOCAL_MEMORY_WORDS, 0)
@@ -235,6 +268,12 @@ void GS::writeRegister(
       break;
     case GSRegisterAddress::RGBAQ:
       decodeColor(data);
+      break;
+    case GSRegisterAddress::ST:
+      decodeST(data);
+      break;
+    case GSRegisterAddress::UV:
+      decodeUV(data);
       break;
     case GSRegisterAddress::XYZ2:
       decodeVertex(data, true);
@@ -376,6 +415,21 @@ void GS::decodeColor(std::uint64_t data)
   colorRegister.q = data >> GS_COLOR_Q_SHIFT;
 }
 
+void GS::decodeST(std::uint64_t data)
+{
+  textureCoordinateRegister.s =
+    static_cast<std::uint32_t>(data);
+  textureCoordinateRegister.t =
+    static_cast<std::uint32_t>(data >> 32);
+}
+
+void GS::decodeUV(std::uint64_t data)
+{
+  textureCoordinateRegister.u = data & GS_UV_MASK;
+  textureCoordinateRegister.v =
+    (data >> GS_UV_V_SHIFT) & GS_UV_MASK;
+}
+
 void GS::decodeVertex(
   std::uint64_t data,
   bool drawingKick)
@@ -403,6 +457,8 @@ void GS::submitVertex(bool drawingKick)
     {
       primitiveVertices[primitiveVertexCount] = vertexRegister;
       primitiveColors[primitiveVertexCount] = colorRegister;
+      primitiveTextureCoordinates[primitiveVertexCount] =
+        textureCoordinateRegister;
       ++primitiveVertexCount;
       if (primitiveVertexCount != 2)
       {
@@ -412,10 +468,16 @@ void GS::submitVertex(bool drawingKick)
       const GSVertexCoordinate secondVertex = primitiveVertices[1];
       const GSColor firstColor = primitiveColors[0];
       const GSColor secondColor = primitiveColors[1];
+      const GSTextureCoordinate firstTextureCoordinate =
+        primitiveTextureCoordinates[0];
+      const GSTextureCoordinate secondTextureCoordinate =
+        primitiveTextureCoordinates[1];
       if (primitiveRegister.type == GSPrimitiveType::LineStrip)
       {
         primitiveVertices[0] = secondVertex;
         primitiveColors[0] = secondColor;
+        primitiveTextureCoordinates[0] =
+          secondTextureCoordinate;
         primitiveVertexCount = 1;
       }
       else
@@ -428,13 +490,17 @@ void GS::submitVertex(bool drawingKick)
           firstVertex,
           secondVertex,
           firstColor,
-          secondColor);
+          secondColor,
+          firstTextureCoordinate,
+          secondTextureCoordinate);
       }
       return;
     }
     case GSPrimitiveType::Sprite:
       primitiveVertices[primitiveVertexCount] = vertexRegister;
       primitiveColors[primitiveVertexCount] = colorRegister;
+      primitiveTextureCoordinates[primitiveVertexCount] =
+        textureCoordinateRegister;
       ++primitiveVertexCount;
       if (primitiveVertexCount != 2)
       {
@@ -457,6 +523,8 @@ void GS::submitVertex(bool drawingKick)
 
   primitiveVertices[primitiveVertexCount] = vertexRegister;
   primitiveColors[primitiveVertexCount] = colorRegister;
+  primitiveTextureCoordinates[primitiveVertexCount] =
+    textureCoordinateRegister;
   ++primitiveVertexCount;
   if (primitiveVertexCount != TRIANGLE_VERTEX_COUNT)
   {
@@ -467,18 +535,26 @@ void GS::submitVertex(bool drawingKick)
     vertices = primitiveVertices;
   const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
     colors = primitiveColors;
+  const std::array<GSTextureCoordinate, TRIANGLE_VERTEX_COUNT>
+    textureCoordinates = primitiveTextureCoordinates;
   if (primitiveRegister.type == GSPrimitiveType::TriangleStrip)
   {
     primitiveVertices[0] = primitiveVertices[1];
     primitiveVertices[1] = primitiveVertices[2];
     primitiveColors[0] = primitiveColors[1];
     primitiveColors[1] = primitiveColors[2];
+    primitiveTextureCoordinates[0] =
+      primitiveTextureCoordinates[1];
+    primitiveTextureCoordinates[1] =
+      primitiveTextureCoordinates[2];
     primitiveVertexCount = 2;
   }
   else if (primitiveRegister.type == GSPrimitiveType::TriangleFan)
   {
     primitiveVertices[1] = primitiveVertices[2];
     primitiveColors[1] = primitiveColors[2];
+    primitiveTextureCoordinates[1] =
+      primitiveTextureCoordinates[2];
     primitiveVertexCount = 2;
   }
   else
@@ -487,7 +563,7 @@ void GS::submitVertex(bool drawingKick)
   }
   if (drawingKick)
   {
-    rasterizeTriangle(vertices, colors);
+    rasterizeTriangle(vertices, colors, textureCoordinates);
   }
 }
 
@@ -495,8 +571,7 @@ void GS::validateBasicDrawing(
   const char *primitiveName,
   bool antialiasingUnsupported) const
 {
-  if (primitiveRegister.textureMapping ||
-      primitiveRegister.fogging ||
+  if (primitiveRegister.fogging ||
       primitiveRegister.alphaBlending ||
       (antialiasingUnsupported &&
        primitiveRegister.antialiasing))
@@ -532,6 +607,124 @@ std::uint32_t GS::packedColor() const
      GS_ALPHA_SHIFT);
 }
 
+std::uint32_t GS::shadeTexturedFragment(
+  std::size_t contextIndex,
+  std::uint32_t fragmentColor,
+  double fixedU,
+  double fixedV,
+  double s,
+  double t,
+  double q) const
+{
+  const GSTexture &textureState =
+    checkedContext(contextIndex).texture;
+  if (!primitiveRegister.fixedTextureCoordinates)
+  {
+    if (!std::isfinite(s) ||
+        !std::isfinite(t) ||
+        !std::isfinite(q) ||
+        q == 0.0)
+    {
+      throw std::runtime_error(
+        "GS STQ texture coordinates must be finite with non-zero Q.");
+    }
+    const double width =
+      static_cast<double>(UINT64_C(1) <<
+                          textureState.widthExponent);
+    const double height =
+      static_cast<double>(UINT64_C(1) <<
+                          textureState.heightExponent);
+    fixedU = (s / q) * width * GS_TEXTURE_COORDINATE_ONE;
+    fixedV = (t / q) * height * GS_TEXTURE_COORDINATE_ONE;
+  }
+  if (!std::isfinite(fixedU) ||
+      !std::isfinite(fixedV) ||
+      fixedU < std::numeric_limits<std::int32_t>::min() ||
+      fixedU > std::numeric_limits<std::int32_t>::max() ||
+      fixedV < std::numeric_limits<std::int32_t>::min() ||
+      fixedV > std::numeric_limits<std::int32_t>::max())
+  {
+    throw std::runtime_error(
+      "GS texture coordinates are outside the supported range.");
+  }
+
+  const std::uint32_t texel = sampleTextureNearest(
+    contextIndex,
+    static_cast<std::int32_t>(std::floor(fixedU)),
+    static_cast<std::int32_t>(std::floor(fixedV)));
+  const std::uint8_t textureRed =
+    colorChannel(texel, GS_RED_SHIFT);
+  const std::uint8_t textureGreen =
+    colorChannel(texel, GS_GREEN_SHIFT);
+  const std::uint8_t textureBlue =
+    colorChannel(texel, GS_BLUE_SHIFT);
+  const std::uint8_t textureAlpha =
+    colorChannel(texel, GS_ALPHA_SHIFT);
+  const std::uint8_t fragmentRed =
+    colorChannel(fragmentColor, GS_RED_SHIFT);
+  const std::uint8_t fragmentGreen =
+    colorChannel(fragmentColor, GS_GREEN_SHIFT);
+  const std::uint8_t fragmentBlue =
+    colorChannel(fragmentColor, GS_BLUE_SHIFT);
+  const std::uint8_t fragmentAlpha =
+    colorChannel(fragmentColor, GS_ALPHA_SHIFT);
+
+  std::uint8_t red = textureRed;
+  std::uint8_t green = textureGreen;
+  std::uint8_t blue = textureBlue;
+  std::uint8_t alpha = textureAlpha;
+  switch (textureState.function)
+  {
+    case 0:
+      red = modulatedColor(textureRed, fragmentRed);
+      green = modulatedColor(textureGreen, fragmentGreen);
+      blue = modulatedColor(textureBlue, fragmentBlue);
+      alpha = textureState.rgba
+        ? modulatedColor(textureAlpha, fragmentAlpha)
+        : fragmentAlpha;
+      break;
+    case 1:
+      break;
+    case 2:
+      red = clampedColor(
+        modulatedColor(textureRed, fragmentRed) +
+        fragmentAlpha);
+      green = clampedColor(
+        modulatedColor(textureGreen, fragmentGreen) +
+        fragmentAlpha);
+      blue = clampedColor(
+        modulatedColor(textureBlue, fragmentBlue) +
+        fragmentAlpha);
+      alpha = textureState.rgba
+        ? clampedColor(textureAlpha + fragmentAlpha)
+        : fragmentAlpha;
+      break;
+    case 3:
+      red = clampedColor(
+        modulatedColor(textureRed, fragmentRed) +
+        fragmentAlpha);
+      green = clampedColor(
+        modulatedColor(textureGreen, fragmentGreen) +
+        fragmentAlpha);
+      blue = clampedColor(
+        modulatedColor(textureBlue, fragmentBlue) +
+        fragmentAlpha);
+      alpha = textureState.rgba
+        ? textureAlpha
+        : fragmentAlpha;
+      break;
+    default:
+      throw std::runtime_error(
+        "GS texture function is invalid.");
+  }
+
+  return
+    (static_cast<std::uint32_t>(red) << GS_RED_SHIFT) |
+    (static_cast<std::uint32_t>(green) << GS_GREEN_SHIFT) |
+    (static_cast<std::uint32_t>(blue) << GS_BLUE_SHIFT) |
+    (static_cast<std::uint32_t>(alpha) << GS_ALPHA_SHIFT);
+}
+
 void GS::rasterizePoint()
 {
   validateBasicDrawing("point", false);
@@ -558,11 +751,23 @@ void GS::rasterizePoint()
     return;
   }
 
+  std::uint32_t color = packedColor();
+  if (primitiveRegister.textureMapping)
+  {
+    color = shadeTexturedFragment(
+      primitiveRegister.context,
+      color,
+      textureCoordinateRegister.u,
+      textureCoordinateRegister.v,
+      floatValue(textureCoordinateRegister.s),
+      floatValue(textureCoordinateRegister.t),
+      floatValue(colorRegister.q));
+  }
   writePSMCT32(
     primitiveRegister.context,
     static_cast<std::uint16_t>(x),
     static_cast<std::uint16_t>(y),
-    packedColor());
+    color);
   ++writtenPixels;
 }
 
@@ -570,7 +775,9 @@ void GS::rasterizeLine(
   const GSVertexCoordinate &firstVertex,
   const GSVertexCoordinate &secondVertex,
   const GSColor &firstColor,
-  const GSColor &secondColor)
+  const GSColor &secondColor,
+  const GSTextureCoordinate &firstTextureCoordinate,
+  const GSTextureCoordinate &secondTextureCoordinate)
 {
   validateBasicDrawing("line", true);
   const std::size_t contextIndex = primitiveRegister.context;
@@ -738,6 +945,34 @@ void GS::rasterizeLine(
             firstColor.alpha, secondColor.alpha, progress) <<
             GS_ALPHA_SHIFT;
       }
+      if (primitiveRegister.textureMapping)
+      {
+        const double weight =
+          static_cast<double>(progress) / drivingExtent;
+        const auto interpolateTexture =
+          [weight](double first, double second)
+          {
+            return first + (second - first) * weight;
+          };
+        color = shadeTexturedFragment(
+          contextIndex,
+          color,
+          interpolateTexture(
+            firstTextureCoordinate.u,
+            secondTextureCoordinate.u),
+          interpolateTexture(
+            firstTextureCoordinate.v,
+            secondTextureCoordinate.v),
+          interpolateTexture(
+            floatValue(firstTextureCoordinate.s),
+            floatValue(secondTextureCoordinate.s)),
+          interpolateTexture(
+            floatValue(firstTextureCoordinate.t),
+            floatValue(secondTextureCoordinate.t)),
+          interpolateTexture(
+            floatValue(firstColor.q),
+            floatValue(secondColor.q)));
+      }
       writePSMCT32(
         contextIndex,
         static_cast<std::uint16_t>(x),
@@ -783,11 +1018,53 @@ void GS::rasterizeSprite()
     drawingContext.scissor.y1);
 
   ++renderedSprites;
-  const std::uint32_t color = packedColor();
+  const std::uint32_t fragmentColor = packedColor();
   for (std::int32_t y = minimumY; y <= maximumY; ++y)
   {
     for (std::int32_t x = minimumX; x <= maximumX; ++x)
     {
+      std::uint32_t color = fragmentColor;
+      if (primitiveRegister.textureMapping)
+      {
+        const double horizontalWeight =
+          static_cast<double>(
+            x * GS_FIXED_POINT_ONE - firstX) /
+          (secondX - firstX);
+        const double verticalWeight =
+          static_cast<double>(
+            y * GS_FIXED_POINT_ONE - firstY) /
+          (secondY - firstY);
+        const auto interpolateHorizontal =
+          [horizontalWeight](double first, double second)
+          {
+            return first +
+              (second - first) * horizontalWeight;
+          };
+        const auto interpolateVertical =
+          [verticalWeight](double first, double second)
+          {
+            return first +
+              (second - first) * verticalWeight;
+          };
+        color = shadeTexturedFragment(
+          primitiveRegister.context,
+          color,
+          interpolateHorizontal(
+            primitiveTextureCoordinates[0].u,
+            primitiveTextureCoordinates[1].u),
+          interpolateVertical(
+            primitiveTextureCoordinates[0].v,
+            primitiveTextureCoordinates[1].v),
+          interpolateHorizontal(
+            floatValue(primitiveTextureCoordinates[0].s),
+            floatValue(primitiveTextureCoordinates[1].s)),
+          interpolateVertical(
+            floatValue(primitiveTextureCoordinates[0].t),
+            floatValue(primitiveTextureCoordinates[1].t)),
+          interpolateHorizontal(
+            floatValue(primitiveColors[0].q),
+            floatValue(primitiveColors[1].q)));
+      }
       writePSMCT32(
         primitiveRegister.context,
         static_cast<std::uint16_t>(x),
@@ -802,10 +1079,12 @@ void GS::rasterizeTriangle(
   const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
     &sourceVertices,
   const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
-    &sourceColors)
+    &sourceColors,
+  const std::array<GSTextureCoordinate,
+                   TRIANGLE_VERTEX_COUNT>
+    &sourceTextureCoordinates)
 {
-  if (primitiveRegister.textureMapping ||
-      primitiveRegister.fogging ||
+  if (primitiveRegister.fogging ||
       primitiveRegister.alphaBlending ||
       primitiveRegister.antialiasing)
   {
@@ -825,6 +1104,8 @@ void GS::rasterizeTriangle(
 
   std::array<FixedPoint, TRIANGLE_VERTEX_COUNT> vertices;
   std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = sourceColors;
+  std::array<GSTextureCoordinate, TRIANGLE_VERTEX_COUNT>
+    textureCoordinates = sourceTextureCoordinates;
   for (std::size_t index = 0;
        index < vertices.size();
        ++index)
@@ -849,6 +1130,7 @@ void GS::rasterizeTriangle(
   {
     std::swap(vertices[1], vertices[2]);
     std::swap(colors[1], colors[2]);
+    std::swap(textureCoordinates[1], textureCoordinates[2]);
     area = -area;
   }
   psmct32WordAddress(contextIndex, 0, 0);
@@ -894,17 +1176,17 @@ void GS::rasterizeTriangle(
         continue;
       }
 
+      const std::int64_t weights[] = {
+        edge(vertices[1], vertices[2], pixel),
+        edge(vertices[2], vertices[0], pixel),
+        edge(vertices[0], vertices[1], pixel)
+      };
       std::uint32_t red = colorRegister.red;
       std::uint32_t green = colorRegister.green;
       std::uint32_t blue = colorRegister.blue;
       std::uint32_t alpha = colorRegister.alpha;
       if (primitiveRegister.gouraudShading)
       {
-        const std::int64_t weights[] = {
-          edge(vertices[1], vertices[2], pixel),
-          edge(vertices[2], vertices[0], pixel),
-          edge(vertices[0], vertices[1], pixel)
-        };
         const auto interpolate =
           [&weights, area](
             std::uint8_t first,
@@ -934,11 +1216,49 @@ void GS::rasterizeTriangle(
           colors[1].alpha,
           colors[2].alpha);
       }
-      const std::uint32_t color =
+      std::uint32_t color =
         (red << GS_RED_SHIFT) |
         (green << GS_GREEN_SHIFT) |
         (blue << GS_BLUE_SHIFT) |
         (alpha << GS_ALPHA_SHIFT);
+      if (primitiveRegister.textureMapping)
+      {
+        const auto interpolateTexture =
+          [&weights, area](
+            double first,
+            double second,
+            double third)
+          {
+            return
+              (first * weights[0] +
+               second * weights[1] +
+               third * weights[2]) /
+              area;
+          };
+        color = shadeTexturedFragment(
+          contextIndex,
+          color,
+          interpolateTexture(
+            textureCoordinates[0].u,
+            textureCoordinates[1].u,
+            textureCoordinates[2].u),
+          interpolateTexture(
+            textureCoordinates[0].v,
+            textureCoordinates[1].v,
+            textureCoordinates[2].v),
+          interpolateTexture(
+            floatValue(textureCoordinates[0].s),
+            floatValue(textureCoordinates[1].s),
+            floatValue(textureCoordinates[2].s)),
+          interpolateTexture(
+            floatValue(textureCoordinates[0].t),
+            floatValue(textureCoordinates[1].t),
+            floatValue(textureCoordinates[2].t)),
+          interpolateTexture(
+            floatValue(colors[0].q),
+            floatValue(colors[1].q),
+            floatValue(colors[2].q)));
+      }
       writePSMCT32(
         contextIndex,
         static_cast<std::uint16_t>(x),
