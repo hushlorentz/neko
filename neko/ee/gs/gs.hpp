@@ -34,6 +34,19 @@ namespace GSPixelStorageMode
   constexpr std::uint8_t PSMCT32 = 0x00;
 }
 
+namespace GSPrivilegedRegisterAddress
+{
+  constexpr std::uint8_t BUSDIR = 0x44;
+}
+
+enum class GSImageTransferDirection : std::uint8_t
+{
+  HostToLocal = 0,
+  LocalToHost = 1,
+  LocalToLocal = 2,
+  Deactivated = 3
+};
+
 enum class GSPrimitiveType : std::uint8_t
 {
   Point = 0,
@@ -118,14 +131,21 @@ struct GSContext
 
 struct GSImageTransfer
 {
+  std::uint16_t sourceBasePointer = 0;
+  std::uint8_t sourceBufferWidth = 0;
+  std::uint8_t sourcePixelStorageMode = 0;
   std::uint16_t destinationBasePointer = 0;
   std::uint8_t destinationBufferWidth = 0;
   std::uint8_t destinationPixelStorageMode = 0;
+  std::uint16_t sourceX = 0;
+  std::uint16_t sourceY = 0;
   std::uint16_t destinationX = 0;
   std::uint16_t destinationY = 0;
   std::uint16_t width = 0;
   std::uint16_t height = 0;
   std::uint32_t transferredPixels = 0;
+  GSImageTransferDirection direction =
+    GSImageTransferDirection::Deactivated;
   bool active = false;
 };
 
@@ -137,6 +157,10 @@ class GS : public GIFRegisterWriteHandler
     void writeRegister(
       std::uint8_t address,
       std::uint64_t data) override;
+    void writePrivilegedRegister(
+      std::uint8_t address,
+      std::uint64_t data);
+    std::uint64_t readHostInterface();
     std::uint64_t registerValue(std::uint8_t address) const;
 
     const GSPrimitive &primitive() const;
@@ -144,6 +168,7 @@ class GS : public GIFRegisterWriteHandler
     const GSVertexCoordinate &vertex() const;
     const GSContext &context(std::size_t index) const;
     const GSImageTransfer &imageTransfer() const;
+    bool hostInterfaceReversed() const;
 
     std::size_t psmct32WordAddress(
       std::size_t contextIndex,
@@ -194,6 +219,7 @@ class GS : public GIFRegisterWriteHandler
     void startImageTransfer(std::uint64_t data);
     void writeTransferData(std::uint64_t data);
     void writeTransferPixel(std::uint32_t value);
+    std::uint32_t readTransferPixel();
     std::size_t psmct32WordAddress(
       std::uint16_t basePointer,
       std::uint8_t bufferWidth,
@@ -215,6 +241,7 @@ class GS : public GIFRegisterWriteHandler
     std::uint64_t writtenPixels = 0;
     std::array<GSContext, CONTEXT_COUNT> contexts = {};
     GSImageTransfer transfer;
+    bool reverseHostInterface = false;
     std::vector<std::uint32_t> localMemory;
 };
 

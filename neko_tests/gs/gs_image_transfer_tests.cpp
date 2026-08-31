@@ -30,6 +30,26 @@ namespace
       (static_cast<std::uint64_t>(destinationY) << 48);
   }
 
+  std::uint64_t sourceTransferBuffer(
+    std::uint16_t sourceBasePointer,
+    std::uint8_t sourceWidth,
+    std::uint8_t sourceFormat)
+  {
+    return
+      sourceBasePointer |
+      (static_cast<std::uint64_t>(sourceWidth) << 16) |
+      (static_cast<std::uint64_t>(sourceFormat) << 24);
+  }
+
+  std::uint64_t sourceTransferPosition(
+    std::uint16_t sourceX,
+    std::uint16_t sourceY)
+  {
+    return
+      sourceX |
+      (static_cast<std::uint64_t>(sourceY) << 16);
+  }
+
   std::uint64_t transferRegion(
     std::uint16_t width,
     std::uint16_t height)
@@ -254,11 +274,182 @@ TEST_CASE("GS Host-to-Local Image Transfer Tests")
       gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
       "GS host-to-local transfer requires PSMCT32.");
     REQUIRE_THROWS_WITH(
-      gs.writeRegister(GSRegisterAddress::TRXDIR, 1),
+      gs.writeRegister(GSRegisterAddress::TRXDIR, 2),
       "GS image transfer direction is not implemented.");
 
     gs.writeRegister(GSRegisterAddress::TRXDIR, 3);
     REQUIRE(!gs.imageTransfer().active);
+  }
+}
+
+TEST_CASE("GS PSMCT32 Local-to-Host Transfer Tests")
+{
+  SECTION("BUSDIR gates packed local-memory readback")
+  {
+    GS gs;
+    gs.writeRegister(
+      GSRegisterAddress::FRAME_1,
+      1 | (UINT64_C(2) << 16));
+    const std::uint32_t pixels[] = {
+      0x11111111,
+      0x22222222,
+      0x33333333,
+      0x44444444,
+      0x55555555,
+      0x66666666
+    };
+    for (std::uint16_t index = 0; index < 6; ++index)
+    {
+      gs.writePSMCT32(
+        0,
+        3 + (index % 3),
+        4 + (index / 3),
+        pixels[index]);
+    }
+
+    gs.writeRegister(
+      GSRegisterAddress::BITBLTBUF,
+      sourceTransferBuffer(
+        32,
+        2,
+        GSPixelStorageMode::PSMCT32));
+    gs.writeRegister(
+      GSRegisterAddress::TRXPOS,
+      sourceTransferPosition(3, 4));
+    gs.writeRegister(
+      GSRegisterAddress::TRXREG,
+      transferRegion(3, 2));
+    gs.writeRegister(GSRegisterAddress::TRXDIR, 1);
+
+    REQUIRE(
+      gs.imageTransfer().direction ==
+      GSImageTransferDirection::LocalToHost);
+    REQUIRE(gs.imageTransfer().active);
+    REQUIRE_THROWS_WITH(
+      gs.readHostInterface(),
+      "GS host-interface reads require BUSDIR local-to-host.");
+
+    gs.writePrivilegedRegister(
+      GSPrivilegedRegisterAddress::BUSDIR,
+      1);
+    REQUIRE(gs.hostInterfaceReversed());
+    REQUIRE_THROWS_WITH(
+      gs.writeRegister(GSRegisterAddress::PRIM, 0),
+      "GS general registers are unavailable while BUSDIR is reversed.");
+    REQUIRE(
+      gs.readHostInterface() ==
+      UINT64_C(0x2222222211111111));
+    REQUIRE(
+      gs.readHostInterface() ==
+      UINT64_C(0x4444444433333333));
+    REQUIRE(
+      gs.readHostInterface() ==
+      UINT64_C(0x6666666655555555));
+    REQUIRE(!gs.imageTransfer().active);
+    REQUIRE(gs.imageTransfer().transferredPixels == 6);
+    REQUIRE_THROWS_WITH(
+      gs.readHostInterface(),
+      "GS local-to-host transfer is not active.");
+
+    gs.writePrivilegedRegister(
+      GSPrivilegedRegisterAddress::BUSDIR,
+      0);
+    REQUIRE(!gs.hostInterfaceReversed());
+    gs.writeRegister(GSRegisterAddress::PRIM, 3);
+    REQUIRE(gs.primitive().type == GSPrimitiveType::Triangle);
+  }
+
+  SECTION("Odd readback pads the unused upper word with zero")
+  {
+    GS gs;
+    gs.writeRegister(
+      GSRegisterAddress::FRAME_1,
+      UINT64_C(1) << 16);
+    gs.writePSMCT32(0, 0, 0, 0x11111111);
+    gs.writePSMCT32(0, 1, 0, 0x22222222);
+    gs.writePSMCT32(0, 2, 0, 0x33333333);
+    gs.writeRegister(
+      GSRegisterAddress::BITBLTBUF,
+      sourceTransferBuffer(
+        0,
+        1,
+        GSPixelStorageMode::PSMCT32));
+    gs.writeRegister(
+      GSRegisterAddress::TRXREG,
+      transferRegion(3, 1));
+    gs.writeRegister(GSRegisterAddress::TRXDIR, 1);
+    gs.writePrivilegedRegister(
+      GSPrivilegedRegisterAddress::BUSDIR,
+      1);
+
+    REQUIRE(
+      gs.readHostInterface() ==
+      UINT64_C(0x2222222211111111));
+    REQUIRE(gs.readHostInterface() == UINT64_C(0x33333333));
+    REQUIRE(!gs.imageTransfer().active);
+  }
+
+  SECTION("A PSMCT32 upload can be read back exactly")
+  {
+    GS gs;
+    gs.writeRegister(
+      GSRegisterAddress::BITBLTBUF,
+      transferBuffer(0, 1, GSPixelStorageMode::PSMCT32));
+    gs.writeRegister(
+      GSRegisterAddress::TRXPOS,
+      transferPosition(5, 6));
+    gs.writeRegister(
+      GSRegisterAddress::TRXREG,
+      transferRegion(2, 2));
+    gs.writeRegister(GSRegisterAddress::TRXDIR, 0);
+    gs.writeRegister(
+      GSRegisterAddress::HWREG,
+      UINT64_C(0x0123456789abcdef));
+    gs.writeRegister(
+      GSRegisterAddress::HWREG,
+      UINT64_C(0xfedcba9876543210));
+
+    gs.writeRegister(
+      GSRegisterAddress::BITBLTBUF,
+      sourceTransferBuffer(
+        0,
+        1,
+        GSPixelStorageMode::PSMCT32));
+    gs.writeRegister(
+      GSRegisterAddress::TRXPOS,
+      sourceTransferPosition(5, 6));
+    gs.writeRegister(GSRegisterAddress::TRXDIR, 1);
+    gs.writePrivilegedRegister(
+      GSPrivilegedRegisterAddress::BUSDIR,
+      1);
+
+    REQUIRE(
+      gs.readHostInterface() ==
+      UINT64_C(0x0123456789abcdef));
+    REQUIRE(
+      gs.readHostInterface() ==
+      UINT64_C(0xfedcba9876543210));
+  }
+
+  SECTION("Readback validates source configuration and privileged ports")
+  {
+    GS gs;
+    gs.writeRegister(
+      GSRegisterAddress::TRXREG,
+      transferRegion(1, 1));
+    REQUIRE_THROWS_WITH(
+      gs.writeRegister(GSRegisterAddress::TRXDIR, 1),
+      "GS image transfer requires a valid source width.");
+
+    gs.writeRegister(
+      GSRegisterAddress::BITBLTBUF,
+      sourceTransferBuffer(0, 1, 1));
+    REQUIRE_THROWS_WITH(
+      gs.writeRegister(GSRegisterAddress::TRXDIR, 1),
+      "GS local-to-host transfer requires PSMCT32.");
+    REQUIRE_THROWS_WITH(
+      gs.writePrivilegedRegister(0, 0),
+      "GS privileged register is not implemented.");
   }
 }
 

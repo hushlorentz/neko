@@ -84,18 +84,19 @@ namespace
 
   constexpr std::uint64_t GS_TRANSFER_BASE_MASK = 0x3fff;
   constexpr std::uint64_t GS_TRANSFER_WIDTH_MASK = 0x3f;
+  constexpr std::uint8_t GS_TRANSFER_SOURCE_WIDTH_SHIFT = 16;
+  constexpr std::uint8_t GS_TRANSFER_SOURCE_PSM_SHIFT = 24;
   constexpr std::uint8_t GS_TRANSFER_DESTINATION_BASE_SHIFT = 32;
   constexpr std::uint8_t GS_TRANSFER_DESTINATION_WIDTH_SHIFT = 48;
   constexpr std::uint8_t GS_TRANSFER_DESTINATION_PSM_SHIFT = 56;
   constexpr std::uint64_t GS_TRANSFER_PSM_MASK = 0x3f;
   constexpr std::uint64_t GS_TRANSFER_COORDINATE_MASK = 0x07ff;
+  constexpr std::uint8_t GS_TRANSFER_SOURCE_Y_SHIFT = 16;
   constexpr std::uint8_t GS_TRANSFER_DESTINATION_X_SHIFT = 32;
   constexpr std::uint8_t GS_TRANSFER_DESTINATION_Y_SHIFT = 48;
   constexpr std::uint64_t GS_TRANSFER_REGION_MASK = 0x0fff;
   constexpr std::uint8_t GS_TRANSFER_HEIGHT_SHIFT = 32;
   constexpr std::uint64_t GS_TRANSFER_DIRECTION_MASK = 0x03;
-  constexpr std::uint8_t GS_TRANSFER_HOST_TO_LOCAL = 0;
-  constexpr std::uint8_t GS_TRANSFER_DEACTIVATED = 3;
   constexpr std::size_t GS_TRANSFER_BASE_WORDS = 64;
 
   constexpr std::array<std::array<std::uint8_t, 8>, 4>
@@ -181,6 +182,11 @@ void GS::writeRegister(
   std::uint8_t address,
   std::uint64_t data)
 {
+  if (reverseHostInterface)
+  {
+    throw std::runtime_error(
+      "GS general registers are unavailable while BUSDIR is reversed.");
+  }
   registers[address] = data;
   switch (address)
   {
@@ -238,6 +244,38 @@ void GS::writeRegister(
     default:
       break;
   }
+}
+
+void GS::writePrivilegedRegister(
+  std::uint8_t address,
+  std::uint64_t data)
+{
+  if (address != GSPrivilegedRegisterAddress::BUSDIR)
+  {
+    throw std::invalid_argument(
+      "GS privileged register is not implemented.");
+  }
+  reverseHostInterface = (data & 1) != 0;
+}
+
+std::uint64_t GS::readHostInterface()
+{
+  if (!reverseHostInterface)
+  {
+    throw std::runtime_error(
+      "GS host-interface reads require BUSDIR local-to-host.");
+  }
+  if (!transfer.active ||
+      transfer.direction != GSImageTransferDirection::LocalToHost)
+  {
+    throw std::runtime_error(
+      "GS local-to-host transfer is not active.");
+  }
+
+  const std::uint64_t low = readTransferPixel();
+  const std::uint64_t high =
+    transfer.active ? readTransferPixel() : 0;
+  return low | (high << 32);
 }
 
 std::uint64_t GS::registerValue(std::uint8_t address) const
@@ -541,6 +579,11 @@ const GSImageTransfer &GS::imageTransfer() const
   return transfer;
 }
 
+bool GS::hostInterfaceReversed() const
+{
+  return reverseHostInterface;
+}
+
 GSContext &GS::mutableContext(std::size_t index)
 {
   if (index >= contexts.size())
@@ -624,6 +667,14 @@ std::size_t GS::psmct32WordAddress(
 
 void GS::decodeTransferBuffer(std::uint64_t data)
 {
+  transfer.sourceBasePointer =
+    data & GS_TRANSFER_BASE_MASK;
+  transfer.sourceBufferWidth =
+    (data >> GS_TRANSFER_SOURCE_WIDTH_SHIFT) &
+    GS_TRANSFER_WIDTH_MASK;
+  transfer.sourcePixelStorageMode =
+    (data >> GS_TRANSFER_SOURCE_PSM_SHIFT) &
+    GS_TRANSFER_PSM_MASK;
   transfer.destinationBasePointer =
     (data >> GS_TRANSFER_DESTINATION_BASE_SHIFT) &
     GS_TRANSFER_BASE_MASK;
@@ -637,6 +688,11 @@ void GS::decodeTransferBuffer(std::uint64_t data)
 
 void GS::decodeTransferPosition(std::uint64_t data)
 {
+  transfer.sourceX =
+    data & GS_TRANSFER_COORDINATE_MASK;
+  transfer.sourceY =
+    (data >> GS_TRANSFER_SOURCE_Y_SHIFT) &
+    GS_TRANSFER_COORDINATE_MASK;
   transfer.destinationX =
     (data >> GS_TRANSFER_DESTINATION_X_SHIFT) &
     GS_TRANSFER_COORDINATE_MASK;
@@ -657,28 +713,50 @@ void GS::startImageTransfer(std::uint64_t data)
 {
   transfer.active = false;
   transfer.transferredPixels = 0;
-  const std::uint8_t direction =
-    data & GS_TRANSFER_DIRECTION_MASK;
-  if (direction == GS_TRANSFER_DEACTIVATED)
+  transfer.direction = static_cast<GSImageTransferDirection>(
+    data & GS_TRANSFER_DIRECTION_MASK);
+  if (transfer.direction ==
+      GSImageTransferDirection::Deactivated)
   {
     return;
   }
-  if (direction != GS_TRANSFER_HOST_TO_LOCAL)
+
+  if (transfer.direction ==
+      GSImageTransferDirection::HostToLocal)
+  {
+    if (transfer.destinationPixelStorageMode !=
+        GSPixelStorageMode::PSMCT32)
+    {
+      throw std::runtime_error(
+        "GS host-to-local transfer requires PSMCT32.");
+    }
+    if (transfer.destinationBufferWidth == 0)
+    {
+      throw std::runtime_error(
+        "GS image transfer requires a valid destination width.");
+    }
+  }
+  else if (transfer.direction ==
+           GSImageTransferDirection::LocalToHost)
+  {
+    if (transfer.sourcePixelStorageMode !=
+        GSPixelStorageMode::PSMCT32)
+    {
+      throw std::runtime_error(
+        "GS local-to-host transfer requires PSMCT32.");
+    }
+    if (transfer.sourceBufferWidth == 0)
+    {
+      throw std::runtime_error(
+        "GS image transfer requires a valid source width.");
+    }
+  }
+  else
   {
     throw std::runtime_error(
       "GS image transfer direction is not implemented.");
   }
-  if (transfer.destinationPixelStorageMode !=
-      GSPixelStorageMode::PSMCT32)
-  {
-    throw std::runtime_error(
-      "GS host-to-local transfer requires PSMCT32.");
-  }
-  if (transfer.destinationBufferWidth == 0)
-  {
-    throw std::runtime_error(
-      "GS image transfer requires a valid destination width.");
-  }
+
   if (transfer.width == 0 || transfer.height == 0)
   {
     return;
@@ -688,7 +766,8 @@ void GS::startImageTransfer(std::uint64_t data)
 
 void GS::writeTransferData(std::uint64_t data)
 {
-  if (!transfer.active)
+  if (!transfer.active ||
+      transfer.direction != GSImageTransferDirection::HostToLocal)
   {
     return;
   }
@@ -697,6 +776,35 @@ void GS::writeTransferData(std::uint64_t data)
   {
     writeTransferPixel(static_cast<std::uint32_t>(data >> 32));
   }
+}
+
+std::uint32_t GS::readTransferPixel()
+{
+  const std::uint32_t pixelIndex = transfer.transferredPixels;
+  const std::uint16_t x =
+    (transfer.sourceX +
+     (pixelIndex % transfer.width)) &
+    GS_TRANSFER_COORDINATE_MASK;
+  const std::uint16_t y =
+    (transfer.sourceY +
+     (pixelIndex / transfer.width)) &
+    GS_TRANSFER_COORDINATE_MASK;
+  const std::uint32_t value =
+    localMemory[psmct32WordAddress(
+      transfer.sourceBasePointer,
+      transfer.sourceBufferWidth,
+      x,
+      y)];
+
+  ++transfer.transferredPixels;
+  const std::uint32_t totalPixels =
+    static_cast<std::uint32_t>(transfer.width) *
+    transfer.height;
+  if (transfer.transferredPixels == totalPixels)
+  {
+    transfer.active = false;
+  }
+  return value;
 }
 
 void GS::writeTransferPixel(std::uint32_t value)
