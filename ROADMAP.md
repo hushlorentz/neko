@@ -378,8 +378,13 @@ reviewable and avoid host-library values as the source of truth.
       synchronization commands, `MSKPATH3`, and command interrupts
 - [ ] Add PATH3 DMA transport, IMAGE slicing and interruption, `DIRECTHL`
       non-preemption, and exact GIF arbitration idle-cycle timing
-- [ ] Expand toward additional primitives, image transfer, textures, blending,
-      depth, display timing, and framebuffer presentation
+- [ ] Implement host-to-local and local-to-host GS image transfers
+- [ ] Render points, lines, sprites, strips, and fans with the applicable
+      fixed-point coverage and vertex-reuse rules
+- [ ] Upload and sample a PSMCT32 texture with nearest-neighbor filtering
+- [ ] Handle fixed `UV` and perspective-correct `STQ` texture coordinates
+- [ ] Implement destination-alpha testing and configurable alpha blending
+- [ ] Add Z-buffer storage, depth testing, and depth writes
 
 ### Graphics Path Integration Programs
 
@@ -429,6 +434,8 @@ existing event and runner infrastructure:
 - [ ] Establish an integer master-clock scheduler
 - [ ] Run VUs at 147.456 MHz relative to the 294.912 MHz EE clock
 - [ ] Add EE, memory-map, DMA, GIF, GS, and interrupt coordination
+- [ ] Model GS display circuits, vertical-blank timing, and presentation
+      boundaries
 - [ ] Add IOP and SPU2 only when required by selected software
 - [ ] Define reset, frame execution, input, video, and audio interfaces
 - [ ] Add deterministic save-state serialization
