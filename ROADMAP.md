@@ -386,7 +386,7 @@ GIF DMA channel wiring belongs to Milestone 4.
 - [x] Add a host-fed PATH3 qword transport with explicit ready/stall results,
       partial submission support, and counters for attempted and transferred
       qwords
-- [ ] Route PATH3 PACKED, REGLIST, and IMAGE packets through the shared GIF
+- [x] Route PATH3 PACKED, REGLIST, and IMAGE packets through the shared GIF
       decoder without consuming source data while arbitration blocks progress
 - [ ] Apply `MSKPATH3` at the transport boundary and resume a masked transfer
       without losing packet, descriptor, or payload position
