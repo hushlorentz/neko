@@ -398,7 +398,7 @@ GIF DMA channel wiring belongs to Milestone 4.
 - [x] Expose `GIF_MODE` IMT/M3R control, `GIF_STAT` PATH3 status, and
       interrupted `GIF_P3CNT`/`GIF_P3TAG` state through a privileged-register
       boundary
-- [ ] Model and test documented GIF arbitration transition and idle-cycle
+- [x] Model and test documented GIF arbitration transition and idle-cycle
       timing rather than treating ownership changes as instantaneous
 - [x] Add deterministic contention tests covering fragmented input, masking,
       backpressure, preemption, EOP completion, and zero qword duplication or

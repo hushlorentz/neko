@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 
+#include "clocked_component.hpp"
 #include "gif.hpp"
 
 enum class GIFPath : std::uint8_t
@@ -50,7 +51,7 @@ struct GIFTraceEvent
 using GIFTraceCallback =
   std::function<void(const GIFTraceEvent &)>;
 
-class GIFPathArbiter
+class GIFPathArbiter : public ClockedComponent
 {
   public:
     explicit GIFPathArbiter(GIFDecoder *decoder);
@@ -61,11 +62,14 @@ class GIFPathArbiter
     void setPath3MaskedByVIF(bool masked);
     void setPath3MaskedByMode(bool masked);
     void setPath3IntermittentMode(bool intermittent);
+    void setCycleTimingEnabled(bool enabled);
     GIFPathTransferResult transferQuadword(
       GIFPath path,
       const GIFQuadword &quadword,
       bool canInterruptPath3 = true);
 
+    bool clockActive() const override;
+    void clock() override;
     GIFPath activePath() const;
     bool pathPending(GIFPath path) const;
     bool pathsIdle(bool includePath3 = true) const;
@@ -74,6 +78,8 @@ class GIFPathArbiter
     bool path3Masked() const;
     bool path3IntermittentMode() const;
     bool path3Interrupted() const;
+    bool cycleTimingEnabled() const;
+    std::uint8_t idleCyclesRemaining() const;
     bool pathQueued(GIFPath path) const;
     std::uint16_t interruptedPath3Count() const;
     std::uint16_t interruptedPath3Tag() const;
@@ -91,6 +97,7 @@ class GIFPathArbiter
       GIFPath path,
       const GIFDecodeResult &result);
     void interruptPath3();
+    void addIdleCycle();
 
     GIFDecoder *gifDecoder;
     GIFPath currentPath = GIFPath::Idle;
@@ -98,11 +105,13 @@ class GIFPathArbiter
     bool vifPath3Mask = false;
     bool modePath3Mask = false;
     bool intermittentPath3 = false;
+    bool timedTransfers = false;
     bool interruptedPath3 = false;
     bool queuedPath2CanInterruptPath3 = false;
     std::uint8_t path3ImageSliceQuadwords = 0;
     std::uint16_t path3Count = 0;
     std::uint16_t path3Tag = 0;
+    std::uint8_t remainingIdleCycles = 0;
     GIFDecoderState suspendedPath3State;
     GIFTraceCallback traceCallback;
 };

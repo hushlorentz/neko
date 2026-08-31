@@ -1,6 +1,7 @@
 #include <cstdint>
 
 #include "catch.hpp"
+#include "clock_scheduler.hpp"
 #include "gif_path_arbiter.hpp"
 
 namespace
@@ -13,6 +14,26 @@ namespace
       static_cast<std::uint32_t>(low),
       static_cast<std::uint32_t>(low >> 32),
       0,
+      0
+    }};
+  }
+
+  GIFQuadword timedGIFTag(
+    std::uint16_t loopCount,
+    bool endOfPacket,
+    bool primitiveEnabled,
+    GIFDataFormat format)
+  {
+    const std::uint64_t low =
+      loopCount |
+      (static_cast<std::uint64_t>(endOfPacket) << 15) |
+      (static_cast<std::uint64_t>(primitiveEnabled) << 46) |
+      (static_cast<std::uint64_t>(format) << 58) |
+      (1ull << 60);
+    return GIFQuadword{{
+      static_cast<std::uint32_t>(low),
+      static_cast<std::uint32_t>(low >> 32),
+      GIFRegisterDescriptor::NOP,
       0
     }};
   }
@@ -110,6 +131,119 @@ TEST_CASE("GIF Path Arbitration Tests")
     arbiter.setPath3MaskedByVIF(false);
     REQUIRE(arbiter.activePath() == GIFPath::Path3);
     REQUIRE(!arbiter.path3MaskedByVIF());
+  }
+}
+
+TEST_CASE("GIF Cycle Timing Tests")
+{
+  SECTION("Selecting a path incurs one arbitration cycle")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setCycleTimingEnabled(true);
+    ClockScheduler scheduler;
+
+    REQUIRE(!arbiter.transferQuadword(
+      GIFPath::Path3,
+      gifTag(true)).accepted);
+    REQUIRE(arbiter.activePath() == GIFPath::Path3);
+    REQUIRE(arbiter.idleCyclesRemaining() == 1);
+    REQUIRE(scheduler.run(arbiter, 1) == 1);
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path3,
+      gifTag(true)).accepted);
+  }
+
+  SECTION("A GIFtag without a PRIM output incurs one idle cycle")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setCycleTimingEnabled(true);
+    ClockScheduler scheduler;
+    const GIFQuadword tag = timedGIFTag(
+      1,
+      true,
+      false,
+      GIFDataFormat::Packed);
+    const GIFQuadword payload = {{0, 0, 0, 0}};
+
+    REQUIRE(!arbiter.transferQuadword(
+      GIFPath::Path3,
+      tag).accepted);
+    scheduler.runUntilInactive(arbiter);
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path3,
+      tag).accepted);
+    REQUIRE(arbiter.idleCyclesRemaining() == 1);
+    REQUIRE(!arbiter.transferQuadword(
+      GIFPath::Path3,
+      payload).accepted);
+    scheduler.runUntilInactive(arbiter);
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path3,
+      payload).accepted);
+  }
+
+  SECTION("A PACKED GIFtag with PRE outputs PRIM without a tag idle cycle")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setCycleTimingEnabled(true);
+    ClockScheduler scheduler;
+    const GIFQuadword tag = timedGIFTag(
+      1,
+      true,
+      true,
+      GIFDataFormat::Packed);
+    const GIFQuadword payload = {{0, 0, 0, 0}};
+
+    REQUIRE(!arbiter.transferQuadword(
+      GIFPath::Path3,
+      tag).accepted);
+    scheduler.runUntilInactive(arbiter);
+    const GIFPathTransferResult decodedTag =
+      arbiter.transferQuadword(GIFPath::Path3, tag);
+    REQUIRE(decodedTag.accepted);
+    REQUIRE(decodedTag.decodeResult.writes.size() == 1);
+    REQUIRE(
+      decodedTag.decodeResult.writes[0].address ==
+      GIFRegisterAddress::PRIM);
+    REQUIRE(arbiter.idleCyclesRemaining() == 0);
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path3,
+      payload).accepted);
+  }
+
+  SECTION("A packet handoff incurs one arbitration cycle")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setCycleTimingEnabled(true);
+    ClockScheduler scheduler;
+
+    REQUIRE(arbiter.requestPath(GIFPath::Path3));
+    scheduler.runUntilInactive(arbiter);
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path3,
+      timedGIFTag(
+        1,
+        true,
+        true,
+        GIFDataFormat::Packed)).accepted);
+    REQUIRE(!arbiter.requestPath(GIFPath::Path1));
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path3,
+      GIFQuadword{{0, 0, 0, 0}}).accepted);
+    REQUIRE(arbiter.activePath() == GIFPath::Path1);
+    REQUIRE(arbiter.idleCyclesRemaining() == 1);
+
+    REQUIRE(!arbiter.transferQuadword(
+      GIFPath::Path1,
+      gifTag(true)).accepted);
+    REQUIRE(scheduler.run(arbiter, 1) == 1);
+    REQUIRE(arbiter.transferQuadword(
+      GIFPath::Path1,
+      gifTag(true)).accepted);
   }
 }
 

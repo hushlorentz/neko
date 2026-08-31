@@ -100,6 +100,15 @@ void GIFPathArbiter::setPath3IntermittentMode(
   intermittentPath3 = intermittent;
 }
 
+void GIFPathArbiter::setCycleTimingEnabled(bool enabled)
+{
+  timedTransfers = enabled;
+  if (!timedTransfers)
+  {
+    remainingIdleCycles = 0;
+  }
+}
+
 GIFPathTransferResult GIFPathArbiter::transferQuadword(
   GIFPath path,
   const GIFQuadword &quadword,
@@ -107,6 +116,11 @@ GIFPathTransferResult GIFPathArbiter::transferQuadword(
 {
   GIFPathTransferResult result;
   if (!requestPath(path, canInterruptPath3))
+  {
+    emitEvent(GIFTraceEventType::TransferStalled, path);
+    return result;
+  }
+  if (remainingIdleCycles != 0)
   {
     emitEvent(GIFTraceEventType::TransferStalled, path);
     return result;
@@ -127,6 +141,23 @@ GIFPathTransferResult GIFPathArbiter::transferQuadword(
     traceCallback(event);
   }
   emitDecodeEvents(path, result.decodeResult);
+  if (result.decodeResult.tagDecoded)
+  {
+    bool primWritten = false;
+    for (const GIFRegisterWrite &write :
+         result.decodeResult.writes)
+    {
+      if (write.address == GIFRegisterAddress::PRIM)
+      {
+        primWritten = true;
+        break;
+      }
+    }
+    if (!primWritten)
+    {
+      addIdleCycle();
+    }
+  }
   if (path == GIFPath::Path3 &&
       result.decodeResult.tagDecoded &&
       result.decodeResult.tag.format == GIFDataFormat::Image)
@@ -161,6 +192,19 @@ GIFPathTransferResult GIFPathArbiter::transferQuadword(
     }
   }
   return result;
+}
+
+bool GIFPathArbiter::clockActive() const
+{
+  return remainingIdleCycles != 0;
+}
+
+void GIFPathArbiter::clock()
+{
+  if (remainingIdleCycles != 0)
+  {
+    --remainingIdleCycles;
+  }
 }
 
 GIFPath GIFPathArbiter::activePath() const
@@ -220,6 +264,16 @@ bool GIFPathArbiter::path3IntermittentMode() const
 bool GIFPathArbiter::path3Interrupted() const
 {
   return interruptedPath3;
+}
+
+bool GIFPathArbiter::cycleTimingEnabled() const
+{
+  return timedTransfers;
+}
+
+std::uint8_t GIFPathArbiter::idleCyclesRemaining() const
+{
+  return remainingIdleCycles;
 }
 
 bool GIFPathArbiter::pathQueued(GIFPath path) const
@@ -305,6 +359,7 @@ void GIFPathArbiter::selectQueuedPath()
     {
       emitEvent(GIFTraceEventType::PathSelected, currentPath);
     }
+    addIdleCycle();
     return;
   }
 }
@@ -323,6 +378,14 @@ void GIFPathArbiter::interruptPath3()
   emitEvent(GIFTraceEventType::Path3Interrupted, GIFPath::Path3);
   currentPath = GIFPath::Idle;
   selectQueuedPath();
+}
+
+void GIFPathArbiter::addIdleCycle()
+{
+  if (timedTransfers)
+  {
+    ++remainingIdleCycles;
+  }
 }
 
 void GIFPathArbiter::emitEvent(
