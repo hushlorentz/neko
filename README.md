@@ -41,8 +41,15 @@ cmake --build out/desktop --target neko_desktop
 ./out/desktop/neko_desktop
 ```
 
+Run the animated POINT and SPRITE scene without the external VU binary:
+
+```sh
+./out/desktop/neko_desktop --scene points-sprites
+```
+
 SDL3 is fetched at a pinned release only when the desktop option is enabled.
 The external sample and assembler remain outside the committed source tree.
-The desktop supplies deterministic sine/cosine inputs and reruns the VU1
-workload for every animation frame. Normal builds and `neko_core` do not
-depend on SDL.
+The default desktop scene supplies deterministic sine/cosine inputs and reruns
+the VU1 workload for every animation frame. The `points-sprites` scene submits
+deterministic host-fed PATH3 packets and exercises GS primitive rasterization.
+Normal builds and `neko_core` do not depend on SDL.

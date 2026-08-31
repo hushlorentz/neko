@@ -622,6 +622,291 @@ TEST_CASE("GS Flat Triangle Rasterizer Tests")
   }
 }
 
+TEST_CASE("GS Point Rasterizer Tests")
+{
+  SECTION("Each drawing kick selects the closest pixel")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Point));
+
+    submitVertex(
+      &gs,
+      2 * FIXED_POINT_ONE + 7,
+      3 * FIXED_POINT_ONE + 7,
+      colorValue(1, 2, 3, 4));
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE + 8,
+      5 * FIXED_POINT_ONE + 8,
+      colorValue(5, 6, 7, 8));
+
+    REQUIRE(gs.pointCount() == 2);
+    REQUIRE(gs.pixelWriteCount() == 2);
+    REQUIRE(
+      gs.readPSMCT32(0, 2, 3) ==
+      packedColor(1, 2, 3, 4));
+    REQUIRE(
+      gs.readPSMCT32(0, 5, 6) ==
+      packedColor(5, 6, 7, 8));
+    REQUIRE(gs.readPSMCT32(0, 4, 5) == 0);
+  }
+
+  SECTION("Offset and scissor are applied before point coverage")
+  {
+    GS gs;
+    configureContext(
+      &gs,
+      0,
+      1,
+      2,
+      1,
+      2,
+      4 * FIXED_POINT_ONE,
+      5 * FIXED_POINT_ONE);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Point));
+
+    submitVertex(
+      &gs,
+      5 * FIXED_POINT_ONE,
+      6 * FIXED_POINT_ONE,
+      colorValue(1, 2, 3, 4));
+    submitVertex(
+      &gs,
+      8 * FIXED_POINT_ONE,
+      9 * FIXED_POINT_ONE,
+      colorValue(5, 6, 7, 8));
+
+    REQUIRE(gs.pointCount() == 2);
+    REQUIRE(gs.pixelWriteCount() == 1);
+    REQUIRE(
+      gs.readPSMCT32(0, 1, 1) ==
+      packedColor(1, 2, 3, 4));
+  }
+
+  SECTION("Point shading and antialias attributes are fixed")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Point) |
+      GOURAUD_SHADING |
+      (UINT64_C(1) << 7));
+
+    submitVertex(
+      &gs,
+      FIXED_POINT_ONE,
+      FIXED_POINT_ONE,
+      colorValue(9, 8, 7, 6));
+
+    REQUIRE(gs.pointCount() == 1);
+    REQUIRE(
+      gs.readPSMCT32(0, 1, 1) ==
+      packedColor(9, 8, 7, 6));
+  }
+
+  SECTION("XYZ3 advances a point without drawing")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Point));
+    submitVertex(
+      &gs,
+      FIXED_POINT_ONE,
+      FIXED_POINT_ONE,
+      colorValue(1, 2, 3, 4),
+      false);
+
+    REQUIRE(gs.pointCount() == 0);
+    REQUIRE(gs.pixelWriteCount() == 0);
+    REQUIRE(gs.queuedVertexCount() == 0);
+  }
+}
+
+TEST_CASE("GS Sprite Rasterizer Tests")
+{
+  SECTION("Two diagonal vertices draw a top-left rectangle")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Sprite));
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      2 * FIXED_POINT_ONE,
+      colorValue(1, 2, 3, 4));
+
+    REQUIRE(gs.queuedVertexCount() == 1);
+    REQUIRE(gs.spriteCount() == 0);
+
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE,
+      5 * FIXED_POINT_ONE,
+      colorValue(0x10, 0x20, 0x40, 0x80));
+
+    const std::uint32_t expected =
+      packedColor(0x10, 0x20, 0x40, 0x80);
+    REQUIRE(gs.queuedVertexCount() == 0);
+    REQUIRE(gs.spriteCount() == 1);
+    REQUIRE(gs.pixelWriteCount() == 9);
+    for (std::uint16_t y = 2; y < 5; ++y)
+    {
+      for (std::uint16_t x = 1; x < 4; ++x)
+      {
+        REQUIRE(gs.readPSMCT32(0, x, y) == expected);
+      }
+    }
+    REQUIRE(gs.readPSMCT32(0, 4, 4) == 0);
+    REQUIRE(gs.readPSMCT32(0, 3, 5) == 0);
+  }
+
+  SECTION("Reversed diagonal vertices cover the same rectangle")
+  {
+    GS forward;
+    GS reverse;
+    configureContext(&forward, 0);
+    configureContext(&reverse, 0);
+    forward.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Sprite));
+    reverse.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Sprite));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+
+    submitVertex(&forward, 16, 32, color);
+    submitVertex(&forward, 64, 80, color);
+    submitVertex(&reverse, 64, 80, color);
+    submitVertex(&reverse, 16, 32, color);
+
+    REQUIRE(
+      forward.framebufferHash(0, 8, 8) ==
+      reverse.framebufferHash(0, 8, 8));
+    REQUIRE(forward.pixelWriteCount() == 9);
+    REQUIRE(reverse.pixelWriteCount() == 9);
+  }
+
+  SECTION("Sprite coverage applies offset, scissor, and second-vertex color")
+  {
+    GS gs;
+    configureContext(
+      &gs,
+      0,
+      2,
+      3,
+      2,
+      3,
+      4 * FIXED_POINT_ONE,
+      5 * FIXED_POINT_ONE);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Sprite) |
+      GOURAUD_SHADING |
+      (UINT64_C(1) << 7));
+    submitVertex(
+      &gs,
+      5 * FIXED_POINT_ONE,
+      6 * FIXED_POINT_ONE,
+      colorValue(1, 2, 3, 4));
+    submitVertex(
+      &gs,
+      8 * FIXED_POINT_ONE,
+      9 * FIXED_POINT_ONE,
+      colorValue(5, 6, 7, 8));
+
+    REQUIRE(gs.spriteCount() == 1);
+    REQUIRE(gs.pixelWriteCount() == 4);
+    for (std::uint16_t y = 2; y <= 3; ++y)
+    {
+      for (std::uint16_t x = 2; x <= 3; ++x)
+      {
+        REQUIRE(
+          gs.readPSMCT32(0, x, y) ==
+          packedColor(5, 6, 7, 8));
+      }
+    }
+  }
+
+  SECTION("XYZ3 completes the pair without drawing")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      static_cast<std::uint64_t>(GSPrimitiveType::Sprite));
+    const std::uint64_t color = colorValue(1, 2, 3, 4);
+    submitVertex(&gs, 16, 16, color);
+    submitVertex(&gs, 64, 64, color, false);
+
+    REQUIRE(gs.queuedVertexCount() == 0);
+    REQUIRE(gs.spriteCount() == 0);
+    REQUIRE(gs.pixelWriteCount() == 0);
+  }
+}
+
+TEST_CASE("GIF Point and Sprite Integration Tests")
+{
+  SECTION("PACKED drawing kicks render both primitive types")
+  {
+    GS gs;
+    GIFDecoder decoder;
+    decoder.attachRegisterWriteHandler(&gs);
+    configureContext(&gs, 0);
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+
+    decoder.ingestQuadword(gifTag(
+      1,
+      true,
+      2,
+      descriptors,
+      true,
+      static_cast<std::uint16_t>(GSPrimitiveType::Point)));
+    decoder.ingestQuadword(packedRGBA(1, 2, 3, 4));
+    decoder.ingestQuadword(
+      packedXYZ(2 * FIXED_POINT_ONE, 3 * FIXED_POINT_ONE));
+
+    decoder.ingestQuadword(gifTag(
+      2,
+      true,
+      2,
+      descriptors,
+      true,
+      static_cast<std::uint16_t>(GSPrimitiveType::Sprite)));
+    decoder.ingestQuadword(packedRGBA(5, 6, 7, 8));
+    decoder.ingestQuadword(
+      packedXYZ(4 * FIXED_POINT_ONE, 1 * FIXED_POINT_ONE));
+    decoder.ingestQuadword(packedRGBA(9, 10, 11, 12));
+    decoder.ingestQuadword(
+      packedXYZ(6 * FIXED_POINT_ONE, 3 * FIXED_POINT_ONE));
+
+    REQUIRE(gs.pointCount() == 1);
+    REQUIRE(gs.spriteCount() == 1);
+    REQUIRE(gs.pixelWriteCount() == 5);
+    REQUIRE(
+      gs.readPSMCT32(0, 2, 3) ==
+      packedColor(1, 2, 3, 4));
+    REQUIRE(
+      gs.readPSMCT32(0, 4, 1) ==
+      packedColor(9, 10, 11, 12));
+    REQUIRE(
+      gs.readPSMCT32(0, 5, 2) ==
+      packedColor(9, 10, 11, 12));
+  }
+}
+
 TEST_CASE("PATH2 Flat Triangle Integration Tests")
 {
   SECTION("A VIF DIRECT packet produces a deterministic framebuffer")

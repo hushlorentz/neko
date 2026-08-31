@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 
 #include "gs.hpp"
 
@@ -331,10 +332,34 @@ void GS::decodeVertex(
 
 void GS::submitVertex(bool drawingKick)
 {
-  if (primitiveRegister.type != GSPrimitiveType::Triangle)
+  switch (primitiveRegister.type)
   {
-    triangleVertexCount = 0;
-    return;
+    case GSPrimitiveType::Point:
+      triangleVertexCount = 0;
+      if (drawingKick)
+      {
+        rasterizePoint();
+      }
+      return;
+    case GSPrimitiveType::Sprite:
+      triangleVertices[triangleVertexCount] = vertexRegister;
+      triangleColors[triangleVertexCount] = colorRegister;
+      ++triangleVertexCount;
+      if (triangleVertexCount != 2)
+      {
+        return;
+      }
+      triangleVertexCount = 0;
+      if (drawingKick)
+      {
+        rasterizeSprite();
+      }
+      return;
+    case GSPrimitiveType::Triangle:
+      break;
+    default:
+      triangleVertexCount = 0;
+      return;
   }
 
   triangleVertices[triangleVertexCount] = vertexRegister;
@@ -349,6 +374,127 @@ void GS::submitVertex(bool drawingKick)
   if (drawingKick)
   {
     rasterizeTriangle();
+  }
+}
+
+void GS::validateBasicDrawing(
+  const char *primitiveName,
+  bool antialiasingUnsupported) const
+{
+  if (primitiveRegister.textureMapping ||
+      primitiveRegister.fogging ||
+      primitiveRegister.alphaBlending ||
+      (antialiasingUnsupported &&
+       primitiveRegister.antialiasing))
+  {
+    throw std::runtime_error(
+      std::string("GS ") + primitiveName +
+      " uses unsupported drawing attributes.");
+  }
+
+  const GSContext &drawingContext =
+    checkedContext(primitiveRegister.context);
+  if (drawingContext.test.alphaTestEnabled ||
+      drawingContext.test.destinationAlphaTestEnabled ||
+      drawingContext.test.depthTestEnabled)
+  {
+    throw std::runtime_error(
+      std::string("GS ") + primitiveName +
+      " uses unsupported pixel tests.");
+  }
+  psmct32WordAddress(primitiveRegister.context, 0, 0);
+}
+
+std::uint32_t GS::packedColor() const
+{
+  return
+    (static_cast<std::uint32_t>(colorRegister.red) <<
+     GS_RED_SHIFT) |
+    (static_cast<std::uint32_t>(colorRegister.green) <<
+     GS_GREEN_SHIFT) |
+    (static_cast<std::uint32_t>(colorRegister.blue) <<
+     GS_BLUE_SHIFT) |
+    (static_cast<std::uint32_t>(colorRegister.alpha) <<
+     GS_ALPHA_SHIFT);
+}
+
+void GS::rasterizePoint()
+{
+  validateBasicDrawing("point", false);
+  const GSContext &drawingContext =
+    checkedContext(primitiveRegister.context);
+  const std::int32_t fixedX =
+    static_cast<std::int32_t>(vertexRegister.x) -
+    drawingContext.offset.x;
+  const std::int32_t fixedY =
+    static_cast<std::int32_t>(vertexRegister.y) -
+    drawingContext.offset.y;
+  const std::int32_t x =
+    floorDivide(fixedX + GS_FIXED_POINT_ONE / 2,
+                GS_FIXED_POINT_ONE);
+  const std::int32_t y =
+    floorDivide(fixedY + GS_FIXED_POINT_ONE / 2,
+                GS_FIXED_POINT_ONE);
+  ++renderedPoints;
+  if (x < drawingContext.scissor.x0 ||
+      x > drawingContext.scissor.x1 ||
+      y < drawingContext.scissor.y0 ||
+      y > drawingContext.scissor.y1)
+  {
+    return;
+  }
+
+  writePSMCT32(
+    primitiveRegister.context,
+    static_cast<std::uint16_t>(x),
+    static_cast<std::uint16_t>(y),
+    packedColor());
+  ++writtenPixels;
+}
+
+void GS::rasterizeSprite()
+{
+  validateBasicDrawing("sprite", false);
+  const GSContext &drawingContext =
+    checkedContext(primitiveRegister.context);
+  const std::int32_t firstX =
+    static_cast<std::int32_t>(triangleVertices[0].x) -
+    drawingContext.offset.x;
+  const std::int32_t firstY =
+    static_cast<std::int32_t>(triangleVertices[0].y) -
+    drawingContext.offset.y;
+  const std::int32_t secondX =
+    static_cast<std::int32_t>(triangleVertices[1].x) -
+    drawingContext.offset.x;
+  const std::int32_t secondY =
+    static_cast<std::int32_t>(triangleVertices[1].y) -
+    drawingContext.offset.y;
+  const std::int32_t minimumX = std::max<std::int32_t>(
+    ceilDivide(std::min(firstX, secondX), GS_FIXED_POINT_ONE),
+    drawingContext.scissor.x0);
+  const std::int32_t maximumX = std::min<std::int32_t>(
+    ceilDivide(std::max(firstX, secondX), GS_FIXED_POINT_ONE) - 1,
+    drawingContext.scissor.x1);
+  const std::int32_t minimumY = std::max<std::int32_t>(
+    ceilDivide(std::min(firstY, secondY), GS_FIXED_POINT_ONE),
+    drawingContext.scissor.y0);
+  const std::int32_t maximumY = std::min<std::int32_t>(
+    ceilDivide(std::max(firstY, secondY), GS_FIXED_POINT_ONE) - 1,
+    drawingContext.scissor.y1);
+
+  ++renderedSprites;
+  const std::uint32_t color = packedColor();
+  for (std::int32_t y = minimumY; y <= maximumY; ++y)
+  {
+    for (std::int32_t x = minimumX; x <= maximumX; ++x)
+    {
+      writePSMCT32(
+        primitiveRegister.context,
+        static_cast<std::uint16_t>(x),
+        static_cast<std::uint16_t>(y),
+        color);
+      ++writtenPixels;
+    }
   }
 }
 
@@ -934,6 +1080,16 @@ std::vector<std::uint8_t> GS::framebufferRGBA8(
 std::size_t GS::queuedVertexCount() const
 {
   return triangleVertexCount;
+}
+
+std::uint64_t GS::pointCount() const
+{
+  return renderedPoints;
+}
+
+std::uint64_t GS::spriteCount() const
+{
+  return renderedSprites;
 }
 
 std::uint64_t GS::triangleCount() const

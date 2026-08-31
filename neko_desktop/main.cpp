@@ -6,9 +6,12 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <SDL3/SDL.h>
 
+#include "point_sprite_scene.hpp"
 #include "rotation_vu1.hpp"
 
 namespace
@@ -19,26 +22,58 @@ namespace
   constexpr std::uint32_t FRAME_DELAY_MILLISECONDS = 16;
   constexpr std::uint32_t FRAMES_PER_ROTATION_PHASE = 2;
 
-  int requestedFrameCount(int argc, char **argv)
+  enum class DesktopScene
   {
-    if (argc == 1)
-    {
-      return 0;
-    }
-    if (argc != 3 ||
-        std::string(argv[1]) != "--frames")
-    {
-      throw std::invalid_argument(
-        "Usage: neko_desktop [--frames count]");
-    }
+    Rotation,
+    PointsAndSprites
+  };
 
-    const int count = std::stoi(argv[2]);
-    if (count <= 0)
+  struct DesktopOptions
+  {
+    DesktopScene scene = DesktopScene::Rotation;
+    int frameLimit = 0;
+  };
+
+  DesktopOptions parseOptions(int argc, char **argv)
+  {
+    DesktopOptions options;
+    for (int index = 1; index < argc; ++index)
     {
-      throw std::invalid_argument(
-        "Desktop frame count must be positive.");
+      const std::string argument = argv[index];
+      if (argument == "--frames" && index + 1 < argc)
+      {
+        options.frameLimit = std::stoi(argv[++index]);
+        if (options.frameLimit <= 0)
+        {
+          throw std::invalid_argument(
+            "Desktop frame count must be positive.");
+        }
+      }
+      else if (argument == "--scene" && index + 1 < argc)
+      {
+        const std::string scene = argv[++index];
+        if (scene == "rotation")
+        {
+          options.scene = DesktopScene::Rotation;
+        }
+        else if (scene == "points-sprites")
+        {
+          options.scene = DesktopScene::PointsAndSprites;
+        }
+        else
+        {
+          throw std::invalid_argument(
+            "Desktop scene must be rotation or points-sprites.");
+        }
+      }
+      else
+      {
+        throw std::invalid_argument(
+          "Usage: neko_desktop [--scene rotation|points-sprites] "
+          "[--frames count]");
+      }
     }
-    return count;
+    return options;
   }
 
   std::vector<std::uint8_t> readMicroprogram()
@@ -85,9 +120,11 @@ namespace
 
   int runDesktop(int argc, char **argv)
   {
-    const int frameLimit = requestedFrameCount(argc, argv);
+    const DesktopOptions options = parseOptions(argc, argv);
     const std::vector<std::uint8_t> microprogram =
-      readMicroprogram();
+      options.scene == DesktopScene::Rotation
+        ? readMicroprogram()
+        : std::vector<std::uint8_t>();
 
     SDLVideoSession video;
 
@@ -95,7 +132,9 @@ namespace
     SDL_Renderer *rawRenderer = nullptr;
     const bool windowCreated =
       SDL_CreateWindowAndRenderer(
-        "Neko - rotation_vu1.asm",
+        options.scene == DesktopScene::Rotation
+          ? "Neko - rotation_vu1.asm"
+          : "Neko - POINT and SPRITE",
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         0,
@@ -153,30 +192,45 @@ namespace
         }
       }
 
-      const std::uint32_t rotationPhase =
-        (static_cast<std::uint32_t>(renderedFrames) /
-         FRAMES_PER_ROTATION_PHASE) %
-        neko_demo::ROTATION_PHASE_COUNT;
-      const neko_demo::RotationVU1Result rotation =
-        neko_demo::renderRotationVU1(
-          microprogram,
-          rotationPhase);
-      if (!rotation.vpuCompleted ||
-          !rotation.path1Completed)
+      std::vector<std::uint8_t> rgbaPixels;
+      std::uint64_t framebufferHash = 0;
+      if (options.scene == DesktopScene::Rotation)
       {
-        throw std::runtime_error(
-          "The rotation graphics workload did not complete.");
+        const std::uint32_t rotationPhase =
+          (static_cast<std::uint32_t>(renderedFrames) /
+           FRAMES_PER_ROTATION_PHASE) %
+          neko_demo::ROTATION_PHASE_COUNT;
+        neko_demo::RotationVU1Result rotation =
+          neko_demo::renderRotationVU1(
+            microprogram,
+            rotationPhase);
+        if (!rotation.vpuCompleted ||
+            !rotation.path1Completed)
+        {
+          throw std::runtime_error(
+            "The rotation graphics workload did not complete.");
+        }
+        rgbaPixels = std::move(rotation.rgbaPixels);
+        framebufferHash = rotation.framebufferHash;
+      }
+      else
+      {
+        neko_demo::PointSpriteSceneResult scene =
+          neko_demo::renderPointSpriteScene(
+            static_cast<std::uint32_t>(renderedFrames));
+        rgbaPixels = std::move(scene.rgbaPixels);
+        framebufferHash = scene.framebufferHash;
       }
       if (renderedFrames == 0)
       {
-        firstFramebufferHash = rotation.framebufferHash;
+        firstFramebufferHash = framebufferHash;
       }
-      lastFramebufferHash = rotation.framebufferHash;
+      lastFramebufferHash = framebufferHash;
       requireSDL(
         SDL_UpdateTexture(
           texture.get(),
           nullptr,
-          rotation.rgbaPixels.data(),
+          rgbaPixels.data(),
           neko_demo::ROTATION_FRAME_WIDTH *
             RGBA_COMPONENT_COUNT),
         "SDL texture upload failed");
@@ -204,17 +258,20 @@ namespace
         "SDL presentation failed");
 
       ++renderedFrames;
-      if (frameLimit != 0 &&
-          renderedFrames >= frameLimit)
+      if (options.frameLimit != 0 &&
+          renderedFrames >= options.frameLimit)
       {
         running = false;
       }
       SDL_Delay(FRAME_DELAY_MILLISECONDS);
     }
-    if (frameLimit != 0)
+    if (options.frameLimit != 0)
     {
       std::cout
-        << "rotation_vu1: frames=" << renderedFrames
+        << (options.scene == DesktopScene::Rotation
+              ? "rotation_vu1"
+              : "points_sprites")
+        << ": frames=" << renderedFrames
         << " first_hash=0x" << std::hex
         << firstFramebufferHash
         << " last_hash=0x" << lastFramebufferHash

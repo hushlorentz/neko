@@ -73,6 +73,7 @@ add_executable(neko neko/main.cpp)
 target_link_libraries(neko PRIVATE neko_core)
 
 add_library(neko_demo_support
+    neko_demo/point_sprite_scene.cpp
     neko_demo/rotation_vu1.cpp
     neko_demo/synthetic_triangle.cpp
 )
@@ -141,6 +142,7 @@ add_executable(neko_tests
     neko_tests/gif/gif_register_tests.cpp
     neko_tests/gif/gif_diagnostics_tests.cpp
     neko_tests/gs/gs_image_transfer_tests.cpp
+    neko_tests/gs/gs_point_sprite_scene_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp
     neko_tests/gs/gs_vif_vu1_integration_tests.cpp
