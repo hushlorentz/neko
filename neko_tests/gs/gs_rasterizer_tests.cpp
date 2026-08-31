@@ -10,6 +10,7 @@ namespace
   constexpr std::uint32_t WORDS_PER_QUADWORD = 4;
   constexpr std::uint32_t FIXED_POINT_ONE = 16;
   constexpr std::uint32_t TRIANGLE_PRIMITIVE = 3;
+  constexpr std::uint64_t GOURAUD_SHADING = UINT64_C(1) << 3;
 
   std::uint64_t frameValue(
     std::uint16_t basePointer,
@@ -294,6 +295,99 @@ TEST_CASE("GS Flat Triangle Rasterizer Tests")
       counterclockwise.framebufferHash(0, 8, 8));
     REQUIRE(clockwise.pixelWriteCount() == 6);
     REQUIRE(counterclockwise.pixelWriteCount() == 6);
+  }
+
+  SECTION("Gouraud shading interpolates each vertex color")
+  {
+    GS gs;
+    configureContext(&gs, 0);
+    gs.writeRegister(
+      GSRegisterAddress::PRIM,
+      TRIANGLE_PRIMITIVE | GOURAUD_SHADING);
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      colorValue(255, 0, 0, 128));
+    submitVertex(
+      &gs,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      colorValue(0, 255, 0, 128));
+    submitVertex(
+      &gs,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      colorValue(0, 0, 255, 128));
+
+    REQUIRE(gs.pixelWriteCount() == 6);
+    REQUIRE(
+      gs.readPSMCT32(0, 1, 1) ==
+      packedColor(255, 0, 0, 128));
+    REQUIRE(
+      gs.readPSMCT32(0, 2, 1) ==
+      packedColor(170, 85, 0, 128));
+    REQUIRE(
+      gs.readPSMCT32(0, 1, 2) ==
+      packedColor(170, 0, 85, 128));
+    REQUIRE(
+      gs.readPSMCT32(0, 2, 2) ==
+      packedColor(85, 85, 85, 128));
+  }
+
+  SECTION("Gouraud colors remain attached to clockwise vertices")
+  {
+    GS clockwise;
+    GS counterclockwise;
+    configureContext(&clockwise, 0);
+    configureContext(&counterclockwise, 0);
+    const std::uint64_t gouraudTriangle =
+      TRIANGLE_PRIMITIVE | GOURAUD_SHADING;
+    clockwise.writeRegister(
+      GSRegisterAddress::PRIM,
+      gouraudTriangle);
+    counterclockwise.writeRegister(
+      GSRegisterAddress::PRIM,
+      gouraudTriangle);
+    const std::uint64_t red = colorValue(255, 0, 0, 128);
+    const std::uint64_t green = colorValue(0, 255, 0, 128);
+    const std::uint64_t blue = colorValue(0, 0, 255, 128);
+
+    submitVertex(
+      &clockwise,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      red);
+    submitVertex(
+      &clockwise,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      green);
+    submitVertex(
+      &clockwise,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      blue);
+
+    submitVertex(
+      &counterclockwise,
+      1 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      red);
+    submitVertex(
+      &counterclockwise,
+      1 * FIXED_POINT_ONE,
+      4 * FIXED_POINT_ONE,
+      blue);
+    submitVertex(
+      &counterclockwise,
+      4 * FIXED_POINT_ONE,
+      1 * FIXED_POINT_ONE,
+      green);
+
+    REQUIRE(
+      clockwise.framebufferHash(0, 8, 8) ==
+      counterclockwise.framebufferHash(0, 8, 8));
   }
 
   SECTION("Pixel centers use integer window coordinates")

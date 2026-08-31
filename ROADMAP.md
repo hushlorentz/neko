@@ -352,6 +352,8 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Cover VU1 `XGKICK` packet initiation, completion stalls, address
       wrapping, and pipeline drain behavior
 - [x] Run progressively larger fragments of naken_asm's `rotation_vu1.asm`
+- [x] Route the unmodified `rotation_vu1.asm` through concrete PATH1 and
+      render its Gouraud triangle in GS local memory
 
 ## Milestone 3: VIF and Graphics Path
 
@@ -370,6 +372,7 @@ reviewable and avoid host-library values as the source of truth.
       framebuffer addressing
 - [x] Render a flat untextured triangle with GS fixed-point coordinates,
       scissoring, and top-left coverage rules
+- [x] Interpolate per-vertex RGBA values for Gouraud-shaded triangles
 - [x] Route VU1 `XGKICK` output into GIF PATH1
 - [x] Add packet-boundary GIF path arbitration, PATH2 retry stalls, VIF
       synchronization commands, `MSKPATH3`, and command interrupts
@@ -394,6 +397,27 @@ reviewable and avoid host-library values as the source of truth.
 - [x] Present the synthetic framebuffer through an optional SDL3 desktop
       frontend without adding a window-system dependency to `neko_core`
 - [ ] Add textured, blended, and depth-tested scenes as GS support expands
+
+### Graphics Path Diagnostics
+
+Keep graphics diagnostics opt-in and outside `neko_core`, building on the
+existing event and runner infrastructure:
+
+- [ ] Add a structured GIF/GS trace in `neko_diagnostics` that decodes GIFtags
+      (`NLOOP`, `EOP`, `FLG`, `NREG`, and descriptors), path ownership, and GS
+      register writes instead of requiring raw qword inspection
+- [ ] Capture a draw-kick snapshot containing the primitive and shading modes,
+      active context, framebuffer format, scissor and offset state, and each
+      submitted vertex with its `RGBAQ` value
+- [ ] Report unsupported draw features by their decoded register fields and
+      values, while preserving strict failure behavior in the core
+- [ ] Add a compact completion summary covering transferred qwords, decoded
+      packets and register writes, primitives, pixel writes, draw bounds, and
+      framebuffer hashes
+- [ ] Export selected GS framebuffer regions to a dependency-free portable
+      image format for inspecting external programs without frontend changes
+- [ ] Add deterministic trace contract tests and keep formatting, streams, and
+      file output out of hardware classes
 
 ## Milestone 4: System-Level Core
 

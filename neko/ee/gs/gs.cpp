@@ -269,6 +269,7 @@ void GS::submitVertex(bool drawingKick)
   }
 
   triangleVertices[triangleVertexCount] = vertexRegister;
+  triangleColors[triangleVertexCount] = colorRegister;
   ++triangleVertexCount;
   if (triangleVertexCount != TRIANGLE_VERTEX_COUNT)
   {
@@ -284,8 +285,7 @@ void GS::submitVertex(bool drawingKick)
 
 void GS::rasterizeTriangle()
 {
-  if (primitiveRegister.gouraudShading ||
-      primitiveRegister.textureMapping ||
+  if (primitiveRegister.textureMapping ||
       primitiveRegister.fogging ||
       primitiveRegister.alphaBlending ||
       primitiveRegister.antialiasing)
@@ -305,6 +305,7 @@ void GS::rasterizeTriangle()
   }
 
   std::array<FixedPoint, TRIANGLE_VERTEX_COUNT> vertices;
+  std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = triangleColors;
   for (std::size_t index = 0;
        index < vertices.size();
        ++index)
@@ -328,6 +329,8 @@ void GS::rasterizeTriangle()
   if (area < 0)
   {
     std::swap(vertices[1], vertices[2]);
+    std::swap(colors[1], colors[2]);
+    area = -area;
   }
   psmct32WordAddress(contextIndex, 0, 0);
   ++renderedTriangles;
@@ -357,16 +360,6 @@ void GS::rasterizeTriangle()
     floorDivide(maximumFixedY, GS_FIXED_POINT_ONE),
     drawingContext.scissor.y1);
 
-  const std::uint32_t color =
-    (static_cast<std::uint32_t>(colorRegister.red) <<
-     GS_RED_SHIFT) |
-    (static_cast<std::uint32_t>(colorRegister.green) <<
-     GS_GREEN_SHIFT) |
-    (static_cast<std::uint32_t>(colorRegister.blue) <<
-     GS_BLUE_SHIFT) |
-    (static_cast<std::uint32_t>(colorRegister.alpha) <<
-     GS_ALPHA_SHIFT);
-
   for (std::int32_t y = minimumY; y <= maximumY; ++y)
   {
     for (std::int32_t x = minimumX; x <= maximumX; ++x)
@@ -382,6 +375,51 @@ void GS::rasterizeTriangle()
         continue;
       }
 
+      std::uint32_t red = colorRegister.red;
+      std::uint32_t green = colorRegister.green;
+      std::uint32_t blue = colorRegister.blue;
+      std::uint32_t alpha = colorRegister.alpha;
+      if (primitiveRegister.gouraudShading)
+      {
+        const std::int64_t weights[] = {
+          edge(vertices[1], vertices[2], pixel),
+          edge(vertices[2], vertices[0], pixel),
+          edge(vertices[0], vertices[1], pixel)
+        };
+        const auto interpolate =
+          [&weights, area](
+            std::uint8_t first,
+            std::uint8_t second,
+            std::uint8_t third)
+          {
+            return static_cast<std::uint32_t>(
+              (static_cast<std::int64_t>(first) * weights[0] +
+               static_cast<std::int64_t>(second) * weights[1] +
+               static_cast<std::int64_t>(third) * weights[2]) /
+              area);
+          };
+        red = interpolate(
+          colors[0].red,
+          colors[1].red,
+          colors[2].red);
+        green = interpolate(
+          colors[0].green,
+          colors[1].green,
+          colors[2].green);
+        blue = interpolate(
+          colors[0].blue,
+          colors[1].blue,
+          colors[2].blue);
+        alpha = interpolate(
+          colors[0].alpha,
+          colors[1].alpha,
+          colors[2].alpha);
+      }
+      const std::uint32_t color =
+        (red << GS_RED_SHIFT) |
+        (green << GS_GREEN_SHIFT) |
+        (blue << GS_BLUE_SHIFT) |
+        (alpha << GS_ALPHA_SHIFT);
       writePSMCT32(
         contextIndex,
         static_cast<std::uint16_t>(x),

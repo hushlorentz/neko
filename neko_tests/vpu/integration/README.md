@@ -431,3 +431,10 @@ from naken_asm commit `247c23706909f09bac77c587780b8a826bbda27c` was
 assembled to SHA-256
 `f9abea58bd38fad744454208c195da17004a76c25259626fb5f1b63cea4823e8`
 and completed under VU1 with all rotation paths enabled.
+
+The same unmodified binary has also completed through the concrete
+VU1 XGKICK -> GIF PATH1 -> GS path using the companion sample's untextured
+Gouraud triangle packet. With a PSMCT32 framebuffer standing in for the
+sample's unsupported PSMCT24 display setup, it transferred 9 qwords, drew
+10,550 pixels, and produced framebuffer hash
+`0x2ce6330d73699d62`.

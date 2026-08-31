@@ -178,6 +178,8 @@ class GS : public GIFRegisterWriteHandler
     GSVertexCoordinate vertexRegister;
     std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
       triangleVertices = {};
+    std::array<GSColor, TRIANGLE_VERTEX_COUNT>
+      triangleColors = {};
     std::size_t triangleVertexCount = 0;
     std::uint64_t renderedTriangles = 0;
     std::uint64_t writtenPixels = 0;
