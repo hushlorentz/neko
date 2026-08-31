@@ -405,6 +405,8 @@ GIF DMA channel wiring belongs to Milestone 4.
       loss
 
 - [ ] Implement host-to-local and local-to-host GS image transfers
+  - [x] Implement PSMCT32 host-to-local transfer registers and `HWREG` uploads
+  - [ ] Implement PSMCT32 local-to-host readback and bus-direction integration
 - [ ] Render points, lines, sprites, strips, and fans with the applicable
       fixed-point coverage and vertex-reuse rules
 - [ ] Upload and sample a PSMCT32 texture with nearest-neighbor filtering

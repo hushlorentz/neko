@@ -140,6 +140,7 @@ add_executable(neko_tests
     neko_tests/gif/gif_path3_tests.cpp
     neko_tests/gif/gif_register_tests.cpp
     neko_tests/gif/gif_diagnostics_tests.cpp
+    neko_tests/gs/gs_image_transfer_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp
     neko_tests/gs/gs_vif_vu1_integration_tests.cpp

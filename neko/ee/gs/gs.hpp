@@ -22,6 +22,11 @@ namespace GSRegisterAddress
   constexpr std::uint8_t TEST_2 = 0x48;
   constexpr std::uint8_t FRAME_1 = 0x4c;
   constexpr std::uint8_t FRAME_2 = 0x4d;
+  constexpr std::uint8_t BITBLTBUF = 0x50;
+  constexpr std::uint8_t TRXPOS = 0x51;
+  constexpr std::uint8_t TRXREG = 0x52;
+  constexpr std::uint8_t TRXDIR = 0x53;
+  constexpr std::uint8_t HWREG = 0x54;
 }
 
 namespace GSPixelStorageMode
@@ -111,6 +116,19 @@ struct GSContext
   GSTest test;
 };
 
+struct GSImageTransfer
+{
+  std::uint16_t destinationBasePointer = 0;
+  std::uint8_t destinationBufferWidth = 0;
+  std::uint8_t destinationPixelStorageMode = 0;
+  std::uint16_t destinationX = 0;
+  std::uint16_t destinationY = 0;
+  std::uint16_t width = 0;
+  std::uint16_t height = 0;
+  std::uint32_t transferredPixels = 0;
+  bool active = false;
+};
+
 class GS : public GIFRegisterWriteHandler
 {
   public:
@@ -125,6 +143,7 @@ class GS : public GIFRegisterWriteHandler
     const GSColor &color() const;
     const GSVertexCoordinate &vertex() const;
     const GSContext &context(std::size_t index) const;
+    const GSImageTransfer &imageTransfer() const;
 
     std::size_t psmct32WordAddress(
       std::size_t contextIndex,
@@ -169,6 +188,17 @@ class GS : public GIFRegisterWriteHandler
     void decodeScissor(std::size_t index, std::uint64_t data);
     void decodeOffset(std::size_t index, std::uint64_t data);
     void decodeTest(std::size_t index, std::uint64_t data);
+    void decodeTransferBuffer(std::uint64_t data);
+    void decodeTransferPosition(std::uint64_t data);
+    void decodeTransferRegion(std::uint64_t data);
+    void startImageTransfer(std::uint64_t data);
+    void writeTransferData(std::uint64_t data);
+    void writeTransferPixel(std::uint32_t value);
+    std::size_t psmct32WordAddress(
+      std::uint16_t basePointer,
+      std::uint8_t bufferWidth,
+      std::uint16_t x,
+      std::uint16_t y) const;
     void submitVertex(bool drawingKick);
     void rasterizeTriangle();
 
@@ -184,6 +214,7 @@ class GS : public GIFRegisterWriteHandler
     std::uint64_t renderedTriangles = 0;
     std::uint64_t writtenPixels = 0;
     std::array<GSContext, CONTEXT_COUNT> contexts = {};
+    GSImageTransfer transfer;
     std::vector<std::uint32_t> localMemory;
 };
 
