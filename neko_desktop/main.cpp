@@ -34,6 +34,7 @@ namespace
     PointsAndSprites,
     PointsLinesAndSprites,
     UntexturedPrimitives,
+    TexturedPrimitives,
     Primitives
   };
 
@@ -81,6 +82,12 @@ namespace
           scene ==
           "points-lines-sprites-strips-fans-textures")
         {
+          options.scene = DesktopScene::TexturedPrimitives;
+        }
+        else if (
+          scene ==
+          "points-lines-sprites-strips-fans-textures-alpha")
+        {
           options.scene = DesktopScene::Primitives;
         }
         else if (scene == "primitives")
@@ -94,6 +101,7 @@ namespace
             "points-lines-sprites, "
             "points-lines-sprites-strips-fans, "
             "points-lines-sprites-strips-fans-textures, "
+            "points-lines-sprites-strips-fans-textures-alpha, "
             "or primitives.");
         }
       }
@@ -102,7 +110,9 @@ namespace
         throw std::invalid_argument(
           "Usage: neko_desktop [--scene rotation|points-sprites|"
           "points-lines-sprites|points-lines-sprites-strips-fans|"
-          "points-lines-sprites-strips-fans-textures|primitives] "
+          "points-lines-sprites-strips-fans-textures-alpha|"
+          "points-lines-sprites-strips-fans-textures|"
+          "primitives] "
           "[--frames count]");
       }
     }
@@ -270,6 +280,9 @@ namespace
             options.scene == DesktopScene::UntexturedPrimitives
               ? neko_demo::renderUntexturedPrimitiveScene(
                   static_cast<std::uint32_t>(renderedFrames))
+              : options.scene == DesktopScene::TexturedPrimitives
+                ? neko_demo::renderTexturedPrimitiveScene(
+                    static_cast<std::uint32_t>(renderedFrames))
               : neko_demo::renderPrimitiveScene(
                   static_cast<std::uint32_t>(renderedFrames));
         }
@@ -332,7 +345,10 @@ namespace
                   : options.scene ==
                       DesktopScene::UntexturedPrimitives
                     ? "points_lines_sprites_strips_fans"
-                    : "points_lines_sprites_strips_fans_textures")
+                    : options.scene ==
+                        DesktopScene::TexturedPrimitives
+                      ? "points_lines_sprites_strips_fans_textures"
+                      : "points_lines_sprites_strips_fans_textures_alpha")
         << ": frames=" << renderedFrames
         << " first_hash=0x" << std::hex
         << firstFramebufferHash

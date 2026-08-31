@@ -142,6 +142,7 @@ add_executable(neko_tests
     neko_tests/gif/gif_register_tests.cpp
     neko_tests/gif/gif_diagnostics_tests.cpp
     neko_tests/gs/gs_image_transfer_tests.cpp
+    neko_tests/gs/gs_alpha_tests.cpp
     neko_tests/gs/gs_primitive_scene_tests.cpp
     neko_tests/gs/gs_tests.cpp
     neko_tests/gs/gs_rasterizer_tests.cpp

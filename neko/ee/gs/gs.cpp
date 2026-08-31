@@ -114,6 +114,11 @@ namespace
   constexpr std::uint8_t GS_TEST_DEPTH_ENABLE_BIT = 16;
   constexpr std::uint64_t GS_TEST_DEPTH_METHOD_MASK = 0x03;
   constexpr std::uint8_t GS_TEST_DEPTH_METHOD_SHIFT = 17;
+  constexpr std::uint64_t GS_ALPHA_SELECT_MASK = 0x03;
+  constexpr std::uint8_t GS_ALPHA_DESTINATION_SHIFT = 2;
+  constexpr std::uint8_t GS_ALPHA_VALUE_SHIFT = 4;
+  constexpr std::uint8_t GS_ALPHA_RESULT_SHIFT = 6;
+  constexpr std::uint8_t GS_ALPHA_FIXED_SHIFT = 32;
 
   constexpr std::uint64_t GS_TRANSFER_BASE_MASK = 0x3fff;
   constexpr std::uint64_t GS_TRANSFER_WIDTH_MASK = 0x3f;
@@ -311,11 +316,26 @@ void GS::writeRegister(
     case GSRegisterAddress::SCISSOR_2:
       decodeScissor(1, data);
       break;
+    case GSRegisterAddress::ALPHA_1:
+      decodeAlpha(0, data);
+      break;
+    case GSRegisterAddress::ALPHA_2:
+      decodeAlpha(1, data);
+      break;
     case GSRegisterAddress::TEST_1:
       decodeTest(0, data);
       break;
     case GSRegisterAddress::TEST_2:
       decodeTest(1, data);
+      break;
+    case GSRegisterAddress::PABE:
+      perPixelAlphaBlending = bit(data, 0);
+      break;
+    case GSRegisterAddress::FBA_1:
+      mutableContext(0).forceAlphaBit = bit(data, 0);
+      break;
+    case GSRegisterAddress::FBA_2:
+      mutableContext(1).forceAlphaBit = bit(data, 0);
       break;
     case GSRegisterAddress::FRAME_1:
       decodeFrame(0, data);
@@ -572,7 +592,6 @@ void GS::validateBasicDrawing(
   bool antialiasingUnsupported) const
 {
   if (primitiveRegister.fogging ||
-      primitiveRegister.alphaBlending ||
       (antialiasingUnsupported &&
        primitiveRegister.antialiasing))
   {
@@ -584,7 +603,6 @@ void GS::validateBasicDrawing(
   const GSContext &drawingContext =
     checkedContext(primitiveRegister.context);
   if (drawingContext.test.alphaTestEnabled ||
-      drawingContext.test.destinationAlphaTestEnabled ||
       drawingContext.test.depthTestEnabled)
   {
     throw std::runtime_error(
@@ -725,6 +743,105 @@ std::uint32_t GS::shadeTexturedFragment(
     (static_cast<std::uint32_t>(alpha) << GS_ALPHA_SHIFT);
 }
 
+bool GS::writeFragment(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y,
+  std::uint32_t sourceColor)
+{
+  const GSContext &drawingContext =
+    checkedContext(contextIndex);
+  const std::uint32_t destinationColor =
+    readPSMCT32(contextIndex, x, y);
+  if (drawingContext.test.destinationAlphaTestEnabled)
+  {
+    const bool destinationAlphaBit =
+      (destinationColor & UINT32_C(0x80000000)) != 0;
+    if (destinationAlphaBit !=
+        drawingContext.test.destinationAlphaMode)
+    {
+      return false;
+    }
+  }
+
+  std::uint32_t outputColor = sourceColor;
+  const std::uint8_t sourceAlpha =
+    colorChannel(sourceColor, GS_ALPHA_SHIFT);
+  const bool blend =
+    primitiveRegister.alphaBlending &&
+    (!perPixelAlphaBlending ||
+     (sourceAlpha & 0x80) != 0);
+  if (blend)
+  {
+    const GSAlpha &alpha = drawingContext.alpha;
+    const auto selectedColor =
+      [sourceColor, destinationColor](
+        std::uint8_t selection)
+      {
+        switch (selection)
+        {
+          case 0:
+            return sourceColor;
+          case 1:
+            return destinationColor;
+          case 2:
+            return UINT32_C(0);
+          default:
+            throw std::runtime_error(
+              "GS alpha color selection is reserved.");
+        }
+      };
+    const std::uint32_t a = selectedColor(alpha.source);
+    const std::uint32_t b =
+      selectedColor(alpha.destination);
+    const std::uint32_t d = selectedColor(alpha.result);
+    std::uint8_t blendAlpha = 0;
+    switch (alpha.alpha)
+    {
+      case 0:
+        blendAlpha = sourceAlpha;
+        break;
+      case 1:
+        blendAlpha =
+          colorChannel(destinationColor, GS_ALPHA_SHIFT);
+        break;
+      case 2:
+        blendAlpha = alpha.fixedAlpha;
+        break;
+      default:
+        throw std::runtime_error(
+          "GS alpha value selection is reserved.");
+    }
+
+    outputColor =
+      static_cast<std::uint32_t>(sourceAlpha) <<
+        GS_ALPHA_SHIFT;
+    for (const std::uint8_t shift : {
+           GS_RED_SHIFT, GS_GREEN_SHIFT, GS_BLUE_SHIFT})
+    {
+      const std::int32_t value =
+        floorDivide(
+          (static_cast<std::int32_t>(
+             colorChannel(a, shift)) -
+           static_cast<std::int32_t>(
+             colorChannel(b, shift))) *
+            blendAlpha,
+          128) +
+        colorChannel(d, shift);
+      outputColor |=
+        static_cast<std::uint32_t>(
+          std::min(std::max(value, 0), 255)) << shift;
+    }
+  }
+  if (drawingContext.forceAlphaBit)
+  {
+    outputColor |= UINT32_C(0x80000000);
+  }
+  writePSMCT32(contextIndex, x, y, outputColor);
+  ++writtenPixels;
+  return true;
+}
+
 void GS::rasterizePoint()
 {
   validateBasicDrawing("point", false);
@@ -763,12 +880,11 @@ void GS::rasterizePoint()
       floatValue(textureCoordinateRegister.t),
       floatValue(colorRegister.q));
   }
-  writePSMCT32(
+  writeFragment(
     primitiveRegister.context,
     static_cast<std::uint16_t>(x),
     static_cast<std::uint16_t>(y),
     color);
-  ++writtenPixels;
 }
 
 void GS::rasterizeLine(
@@ -973,12 +1089,11 @@ void GS::rasterizeLine(
             floatValue(firstColor.q),
             floatValue(secondColor.q)));
       }
-      writePSMCT32(
+      writeFragment(
         contextIndex,
         static_cast<std::uint16_t>(x),
         static_cast<std::uint16_t>(y),
         color);
-      ++writtenPixels;
     }
     if (driving == lastDriving)
     {
@@ -1065,12 +1180,11 @@ void GS::rasterizeSprite()
             floatValue(primitiveColors[0].q),
             floatValue(primitiveColors[1].q)));
       }
-      writePSMCT32(
+      writeFragment(
         primitiveRegister.context,
         static_cast<std::uint16_t>(x),
         static_cast<std::uint16_t>(y),
         color);
-      ++writtenPixels;
     }
   }
 }
@@ -1085,7 +1199,6 @@ void GS::rasterizeTriangle(
     &sourceTextureCoordinates)
 {
   if (primitiveRegister.fogging ||
-      primitiveRegister.alphaBlending ||
       primitiveRegister.antialiasing)
   {
     throw std::runtime_error(
@@ -1095,7 +1208,6 @@ void GS::rasterizeTriangle(
   const std::size_t contextIndex = primitiveRegister.context;
   const GSContext &drawingContext = checkedContext(contextIndex);
   if (drawingContext.test.alphaTestEnabled ||
-      drawingContext.test.destinationAlphaTestEnabled ||
       drawingContext.test.depthTestEnabled)
   {
     throw std::runtime_error(
@@ -1259,12 +1371,11 @@ void GS::rasterizeTriangle(
             floatValue(colors[1].q),
             floatValue(colors[2].q)));
       }
-      writePSMCT32(
+      writeFragment(
         contextIndex,
         static_cast<std::uint16_t>(x),
         static_cast<std::uint16_t>(y),
         color);
-      ++writtenPixels;
     }
   }
 }
@@ -1322,6 +1433,23 @@ void GS::decodeTest(std::size_t index, std::uint64_t data)
   test.depthTest =
     (data >> GS_TEST_DEPTH_METHOD_SHIFT) &
     GS_TEST_DEPTH_METHOD_MASK;
+}
+
+void GS::decodeAlpha(std::size_t index, std::uint64_t data)
+{
+  GSAlpha &alpha = mutableContext(index).alpha;
+  alpha.source = data & GS_ALPHA_SELECT_MASK;
+  alpha.destination =
+    (data >> GS_ALPHA_DESTINATION_SHIFT) &
+    GS_ALPHA_SELECT_MASK;
+  alpha.alpha =
+    (data >> GS_ALPHA_VALUE_SHIFT) &
+    GS_ALPHA_SELECT_MASK;
+  alpha.result =
+    (data >> GS_ALPHA_RESULT_SHIFT) &
+    GS_ALPHA_SELECT_MASK;
+  alpha.fixedAlpha =
+    static_cast<std::uint8_t>(data >> GS_ALPHA_FIXED_SHIFT);
 }
 
 void GS::decodeTexture(std::size_t index, std::uint64_t data)

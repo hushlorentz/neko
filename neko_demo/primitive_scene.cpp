@@ -224,6 +224,65 @@ namespace
     return packet;
   }
 
+  std::vector<GIFQuadword> alphaSetupPacket()
+  {
+    return {
+      adTag(1),
+      adWrite(GSRegisterAddress::ALPHA_1, UINT64_C(0x44))
+    };
+  }
+
+  void appendSprite(
+    std::vector<GIFQuadword> *packet,
+    std::uint16_t x0,
+    std::uint16_t y0,
+    std::uint16_t x1,
+    std::uint16_t y1,
+    const GIFQuadword &color);
+
+  std::vector<GIFQuadword> alphaGlowPacket(
+    std::uint32_t phase)
+  {
+    constexpr std::uint16_t GLOW_COUNT = 6;
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    std::vector<GIFQuadword> packet;
+    packet.reserve(1 + GLOW_COUNT * 4);
+    packet.push_back(gifTag(
+      GLOW_COUNT * 2,
+      2,
+      descriptors,
+      static_cast<std::uint16_t>(GSPrimitiveType::Sprite) |
+        (UINT64_C(1) << 6)));
+
+    const std::uint16_t drift =
+      static_cast<std::uint16_t>(
+        phase < 64 ? phase : 127 - phase);
+    for (std::uint16_t index = 0;
+         index < GLOW_COUNT;
+         ++index)
+    {
+      const std::uint16_t inset = 24 + index * 18;
+      const std::uint16_t offset =
+        (index % 2 == 0 ? drift : 64 - drift) / 2;
+      const GIFQuadword color = packedColor(
+        static_cast<std::uint8_t>(40 + index * 34),
+        static_cast<std::uint8_t>(210 - index * 22),
+        static_cast<std::uint8_t>(245 - index * 13),
+        static_cast<std::uint8_t>(24 + index * 8));
+      appendSprite(
+        &packet,
+        static_cast<std::uint16_t>(inset + offset),
+        static_cast<std::uint16_t>(112 + index * 24),
+        static_cast<std::uint16_t>(640 - inset + offset / 2),
+        static_cast<std::uint16_t>(336 - index * 16),
+        color);
+    }
+    return packet;
+  }
+
   std::vector<GIFQuadword> pointPacket(std::uint32_t phase)
   {
     const std::uint64_t descriptors =
@@ -498,7 +557,8 @@ namespace
     PointsAndSprites,
     PointsLinesAndSprites,
     AllPrimitives,
-    TexturedPrimitives
+    TexturedPrimitives,
+    AlphaPrimitives
   };
 
   neko_demo::PrimitiveSceneResult renderScene(
@@ -516,7 +576,8 @@ namespace
       &path3,
       setupPacket(),
       &transferredQuadwords);
-    if (version == SceneVersion::TexturedPrimitives)
+    if (version == SceneVersion::TexturedPrimitives ||
+        version == SceneVersion::AlphaPrimitives)
     {
       submitPacket(
         &path3,
@@ -527,8 +588,20 @@ namespace
         texturedSpritePacket(),
         &transferredQuadwords);
     }
+    if (version == SceneVersion::AlphaPrimitives)
+    {
+      submitPacket(
+        &path3,
+        alphaSetupPacket(),
+        &transferredQuadwords);
+      submitPacket(
+        &path3,
+        alphaGlowPacket(phase),
+        &transferredQuadwords);
+    }
     if (version == SceneVersion::AllPrimitives ||
-        version == SceneVersion::TexturedPrimitives)
+        version == SceneVersion::TexturedPrimitives ||
+        version == SceneVersion::AlphaPrimitives)
     {
       submitPacket(
         &path3,
@@ -581,13 +654,19 @@ namespace
 neko_demo::PrimitiveSceneResult
 neko_demo::renderPrimitiveScene(std::uint32_t phase)
 {
-  return renderScene(phase, SceneVersion::TexturedPrimitives);
+  return renderScene(phase, SceneVersion::AlphaPrimitives);
 }
 
 neko_demo::PrimitiveSceneResult
 neko_demo::renderUntexturedPrimitiveScene(std::uint32_t phase)
 {
   return renderScene(phase, SceneVersion::AllPrimitives);
+}
+
+neko_demo::PrimitiveSceneResult
+neko_demo::renderTexturedPrimitiveScene(std::uint32_t phase)
+{
+  return renderScene(phase, SceneVersion::TexturedPrimitives);
 }
 
 neko_demo::PrimitiveSceneResult

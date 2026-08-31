@@ -26,8 +26,13 @@ namespace GSRegisterAddress
   constexpr std::uint8_t XYOFFSET_2 = 0x19;
   constexpr std::uint8_t SCISSOR_1 = 0x40;
   constexpr std::uint8_t SCISSOR_2 = 0x41;
+  constexpr std::uint8_t ALPHA_1 = 0x42;
+  constexpr std::uint8_t ALPHA_2 = 0x43;
   constexpr std::uint8_t TEST_1 = 0x47;
   constexpr std::uint8_t TEST_2 = 0x48;
+  constexpr std::uint8_t PABE = 0x49;
+  constexpr std::uint8_t FBA_1 = 0x4a;
+  constexpr std::uint8_t FBA_2 = 0x4b;
   constexpr std::uint8_t FRAME_1 = 0x4c;
   constexpr std::uint8_t FRAME_2 = 0x4d;
   constexpr std::uint8_t BITBLTBUF = 0x50;
@@ -137,6 +142,15 @@ struct GSTest
   std::uint8_t depthTest = 0;
 };
 
+struct GSAlpha
+{
+  std::uint8_t source = 0;
+  std::uint8_t destination = 0;
+  std::uint8_t alpha = 0;
+  std::uint8_t result = 0;
+  std::uint8_t fixedAlpha = 0;
+};
+
 enum class GSTextureWrapMode : std::uint8_t
 {
   Repeat = 0,
@@ -175,6 +189,8 @@ struct GSContext
   GSScissor scissor;
   GSXYOffset offset;
   GSTest test;
+  GSAlpha alpha;
+  bool forceAlphaBit = false;
   GSTexture texture;
   GSTextureClamp textureClamp;
 };
@@ -273,6 +289,7 @@ class GS : public GIFRegisterWriteHandler
     void decodeScissor(std::size_t index, std::uint64_t data);
     void decodeOffset(std::size_t index, std::uint64_t data);
     void decodeTest(std::size_t index, std::uint64_t data);
+    void decodeAlpha(std::size_t index, std::uint64_t data);
     void decodeTexture(std::size_t index, std::uint64_t data);
     void decodeTextureSampling(
       std::size_t index,
@@ -322,6 +339,11 @@ class GS : public GIFRegisterWriteHandler
       double s,
       double t,
       double q) const;
+    bool writeFragment(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y,
+      std::uint32_t sourceColor);
 
     std::array<std::uint64_t, REGISTER_COUNT> registers = {};
     GSPrimitive primitiveRegister;
@@ -343,6 +365,7 @@ class GS : public GIFRegisterWriteHandler
     std::array<GSContext, CONTEXT_COUNT> contexts = {};
     GSImageTransfer transfer;
     bool reverseHostInterface = false;
+    bool perPixelAlphaBlending = false;
     std::vector<std::uint32_t> localMemory;
 };
 

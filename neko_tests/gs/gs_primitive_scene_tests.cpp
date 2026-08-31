@@ -10,16 +10,29 @@ TEST_CASE("Primitive Desktop Scene Tests")
 
   REQUIRE(first.pointCount == 96);
   REQUIRE(first.lineCount == 12);
-  REQUIRE(first.spriteCount == 8);
+  REQUIRE(first.spriteCount == 14);
   REQUIRE(first.triangleCount == 18);
   REQUIRE(first.pixelWriteCount > 10000);
-  REQUIRE(first.transferredQuadwords == 1345);
-  REQUIRE(first.framebufferHash == UINT64_C(0xb3cd754e485c5305));
+  REQUIRE(first.transferredQuadwords == 1372);
+  REQUIRE(first.framebufferHash == UINT64_C(0xe997218cd72c6cde));
   REQUIRE(
     first.rgbaPixels.size() ==
     neko_demo::PRIMITIVE_FRAME_WIDTH *
     neko_demo::PRIMITIVE_FRAME_HEIGHT * 4);
   REQUIRE(first.framebufferHash != second.framebufferHash);
+}
+
+TEST_CASE("Textured Primitive Desktop Scene Compatibility Tests")
+{
+  const neko_demo::PrimitiveSceneResult scene =
+    neko_demo::renderTexturedPrimitiveScene(0);
+
+  REQUIRE(scene.pointCount == 96);
+  REQUIRE(scene.lineCount == 12);
+  REQUIRE(scene.spriteCount == 8);
+  REQUIRE(scene.triangleCount == 18);
+  REQUIRE(scene.transferredQuadwords == 1345);
+  REQUIRE(scene.framebufferHash == UINT64_C(0xb3cd754e485c5305));
 }
 
 TEST_CASE("Untextured Primitive Desktop Scene Compatibility Tests")
