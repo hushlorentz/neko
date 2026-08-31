@@ -488,6 +488,24 @@ existing event and runner infrastructure:
 - [ ] Audit every macro-mode opcode in the official table and reject reserved
       COP2 encodings deterministically
 
+### Guest Program Loading and Demo Migration
+
+- [ ] Load PS2 ELF program segments into EE memory with validated addresses,
+      sizes, permissions, and entry-point initialization
+- [ ] Add a generic `--elf <path>` desktop argument that executes the loaded
+      program through `NekoSystem`
+- [ ] Keep executable loading, emulation, and presentation separate so the
+      desktop does not contain guest-specific drawing or setup behavior
+- [ ] Convert the rotating-triangle demo into an independently authored guest
+      program that drives its VU1, VIF, GIF, and GS work through emulated
+      hardware
+- [ ] Convert the POINT/SPRITE demo into an independently authored guest
+      program that submits its drawing work through emulated hardware
+- [ ] Retain the host-authored demo harnesses as fast deterministic component
+      and integration tests after guest-program migration
+- [ ] Make guest executable loading the primary desktop execution path while
+      retaining explicit diagnostic scene selection for development
+
 ### System Integration Programs
 
 - [ ] Exercise EE, DMA, VIF, VU1, GIF, and GS in one deterministic workload
