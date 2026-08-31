@@ -86,6 +86,19 @@ namespace
     }};
   }
 
+  GIFQuadword packedDepthVertex(
+    std::uint16_t x,
+    std::uint16_t y,
+    std::uint32_t z)
+  {
+    return GIFQuadword{{
+      static_cast<std::uint32_t>(x) * FIXED_POINT_ONE,
+      static_cast<std::uint32_t>(y) * FIXED_POINT_ONE,
+      z,
+      0
+    }};
+  }
+
   GIFQuadword packedUV(
     std::uint16_t u,
     std::uint16_t v)
@@ -281,6 +294,65 @@ namespace
         color);
     }
     return packet;
+  }
+
+  std::vector<GIFQuadword> depthSetupPacket()
+  {
+    constexpr std::uint16_t DEPTH_BASE_PAGE = 160;
+    const std::uint64_t depthTest =
+      (UINT64_C(1) << 16) |
+      (UINT64_C(2) << 17);
+    return {
+      adTag(2),
+      adWrite(
+        GSRegisterAddress::ZBUF_1,
+        DEPTH_BASE_PAGE),
+      adWrite(GSRegisterAddress::TEST_1, depthTest)
+    };
+  }
+
+  std::vector<GIFQuadword> depthRibbonPacket()
+  {
+    const std::uint64_t descriptors =
+      GIFRegisterDescriptor::RGBAQ |
+      (static_cast<std::uint64_t>(
+        GIFRegisterDescriptor::XYZ2) << 4);
+    std::vector<GIFQuadword> packet;
+    packet.reserve(18);
+    const std::uint16_t primitive =
+      static_cast<std::uint16_t>(
+        GSPrimitiveType::TriangleStrip) |
+      (UINT64_C(1) << 3) |
+      (UINT64_C(1) << 6);
+
+    packet.push_back(gifTag(4, 2, descriptors, primitive));
+    packet.push_back(packedColor(255, 40, 180, 72));
+    packet.push_back(packedDepthVertex(90, 170, 20));
+    packet.push_back(packedColor(110, 30, 255, 72));
+    packet.push_back(packedDepthVertex(90, 250, 20));
+    packet.push_back(packedColor(255, 210, 40, 72));
+    packet.push_back(packedDepthVertex(550, 200, 220));
+    packet.push_back(packedColor(255, 70, 80, 72));
+    packet.push_back(packedDepthVertex(550, 280, 220));
+
+    packet.push_back(gifTag(4, 2, descriptors, primitive));
+    packet.push_back(packedColor(40, 255, 210, 72));
+    packet.push_back(packedDepthVertex(120, 300, 220));
+    packet.push_back(packedColor(30, 120, 255, 72));
+    packet.push_back(packedDepthVertex(80, 230, 220));
+    packet.push_back(packedColor(180, 70, 255, 72));
+    packet.push_back(packedDepthVertex(560, 150, 20));
+    packet.push_back(packedColor(50, 230, 255, 72));
+    packet.push_back(packedDepthVertex(520, 80, 20));
+    return packet;
+  }
+
+  std::vector<GIFQuadword> depthResetPacket()
+  {
+    return {
+      adTag(1),
+      adWrite(GSRegisterAddress::TEST_1, 0)
+    };
   }
 
   std::vector<GIFQuadword> pointPacket(std::uint32_t phase)
@@ -558,7 +630,8 @@ namespace
     PointsLinesAndSprites,
     AllPrimitives,
     TexturedPrimitives,
-    AlphaPrimitives
+    AlphaPrimitives,
+    DepthPrimitives
   };
 
   neko_demo::PrimitiveSceneResult renderScene(
@@ -577,7 +650,8 @@ namespace
       setupPacket(),
       &transferredQuadwords);
     if (version == SceneVersion::TexturedPrimitives ||
-        version == SceneVersion::AlphaPrimitives)
+        version == SceneVersion::AlphaPrimitives ||
+        version == SceneVersion::DepthPrimitives)
     {
       submitPacket(
         &path3,
@@ -588,7 +662,8 @@ namespace
         texturedSpritePacket(),
         &transferredQuadwords);
     }
-    if (version == SceneVersion::AlphaPrimitives)
+    if (version == SceneVersion::AlphaPrimitives ||
+        version == SceneVersion::DepthPrimitives)
     {
       submitPacket(
         &path3,
@@ -601,7 +676,8 @@ namespace
     }
     if (version == SceneVersion::AllPrimitives ||
         version == SceneVersion::TexturedPrimitives ||
-        version == SceneVersion::AlphaPrimitives)
+        version == SceneVersion::AlphaPrimitives ||
+        version == SceneVersion::DepthPrimitives)
     {
       submitPacket(
         &path3,
@@ -631,6 +707,21 @@ namespace
       &path3,
       spritePacket(phase),
       &transferredQuadwords);
+    if (version == SceneVersion::DepthPrimitives)
+    {
+      submitPacket(
+        &path3,
+        depthSetupPacket(),
+        &transferredQuadwords);
+      submitPacket(
+        &path3,
+        depthRibbonPacket(),
+        &transferredQuadwords);
+      submitPacket(
+        &path3,
+        depthResetPacket(),
+        &transferredQuadwords);
+    }
 
     neko_demo::PrimitiveSceneResult result;
     result.rgbaPixels = gs.framebufferRGBA8(
@@ -654,7 +745,7 @@ namespace
 neko_demo::PrimitiveSceneResult
 neko_demo::renderPrimitiveScene(std::uint32_t phase)
 {
-  return renderScene(phase, SceneVersion::AlphaPrimitives);
+  return renderScene(phase, SceneVersion::DepthPrimitives);
 }
 
 neko_demo::PrimitiveSceneResult
@@ -667,6 +758,12 @@ neko_demo::PrimitiveSceneResult
 neko_demo::renderTexturedPrimitiveScene(std::uint32_t phase)
 {
   return renderScene(phase, SceneVersion::TexturedPrimitives);
+}
+
+neko_demo::PrimitiveSceneResult
+neko_demo::renderAlphaPrimitiveScene(std::uint32_t phase)
+{
+  return renderScene(phase, SceneVersion::AlphaPrimitives);
 }
 
 neko_demo::PrimitiveSceneResult

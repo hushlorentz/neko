@@ -61,9 +61,10 @@ Content-specific scene names preserve earlier versions:
 ./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans
 ./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans-textures
 ./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans-textures-alpha
+./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans-textures-alpha-depth
 ```
 
 The `primitives` name tracks the newest graphics showcase as more primitive
-families are added. The latest version draws translucent, overlapping neon
-layers with GS alpha blending over the uploaded texture. Normal builds and
-`neko_core` do not depend on SDL.
+families are added. The latest version adds crossing translucent ribbons whose
+interpolated Z values determine which surface appears in front. Normal builds
+and `neko_core` do not depend on SDL.

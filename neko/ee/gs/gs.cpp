@@ -119,6 +119,10 @@ namespace
   constexpr std::uint8_t GS_ALPHA_VALUE_SHIFT = 4;
   constexpr std::uint8_t GS_ALPHA_RESULT_SHIFT = 6;
   constexpr std::uint8_t GS_ALPHA_FIXED_SHIFT = 32;
+  constexpr std::uint64_t GS_DEPTH_BASE_MASK = 0x01ff;
+  constexpr std::uint64_t GS_DEPTH_PSM_MASK = 0x0f;
+  constexpr std::uint8_t GS_DEPTH_PSM_SHIFT = 24;
+  constexpr std::uint8_t GS_DEPTH_MASK_BIT = 32;
 
   constexpr std::uint64_t GS_TRANSFER_BASE_MASK = 0x3fff;
   constexpr std::uint64_t GS_TRANSFER_WIDTH_MASK = 0x3f;
@@ -143,6 +147,13 @@ namespace
       {{2, 3, 6, 7, 18, 19, 22, 23}},
       {{8, 9, 12, 13, 24, 25, 28, 29}},
       {{10, 11, 14, 15, 26, 27, 30, 31}}
+    }};
+  constexpr std::array<std::array<std::uint8_t, 8>, 4>
+    GS_PSMZ32_BLOCKS = {{
+      {{24, 25, 28, 29, 8, 9, 12, 13}},
+      {{26, 27, 30, 31, 10, 11, 14, 15}},
+      {{16, 17, 20, 21, 0, 1, 4, 5}},
+      {{18, 19, 22, 23, 2, 3, 6, 7}}
     }};
 
   bool bit(std::uint64_t data, std::uint8_t index)
@@ -342,6 +353,12 @@ void GS::writeRegister(
       break;
     case GSRegisterAddress::FRAME_2:
       decodeFrame(1, data);
+      break;
+    case GSRegisterAddress::ZBUF_1:
+      decodeDepthBuffer(0, data);
+      break;
+    case GSRegisterAddress::ZBUF_2:
+      decodeDepthBuffer(1, data);
       break;
     case GSRegisterAddress::BITBLTBUF:
       decodeTransferBuffer(data);
@@ -602,14 +619,17 @@ void GS::validateBasicDrawing(
 
   const GSContext &drawingContext =
     checkedContext(primitiveRegister.context);
-  if (drawingContext.test.alphaTestEnabled ||
-      drawingContext.test.depthTestEnabled)
+  if (drawingContext.test.alphaTestEnabled)
   {
     throw std::runtime_error(
       std::string("GS ") + primitiveName +
       " uses unsupported pixel tests.");
   }
   psmct32WordAddress(primitiveRegister.context, 0, 0);
+  if (drawingContext.test.depthTestEnabled)
+  {
+    psmz32WordAddress(primitiveRegister.context, 0, 0);
+  }
 }
 
 std::uint32_t GS::packedColor() const
@@ -747,7 +767,8 @@ bool GS::writeFragment(
   std::size_t contextIndex,
   std::uint16_t x,
   std::uint16_t y,
-  std::uint32_t sourceColor)
+  std::uint32_t sourceColor,
+  std::uint32_t sourceDepth)
 {
   const GSContext &drawingContext =
     checkedContext(contextIndex);
@@ -759,6 +780,30 @@ bool GS::writeFragment(
       (destinationColor & UINT32_C(0x80000000)) != 0;
     if (destinationAlphaBit !=
         drawingContext.test.destinationAlphaMode)
+    {
+      return false;
+    }
+  }
+  if (drawingContext.test.depthTestEnabled)
+  {
+    const std::uint32_t destinationDepth =
+      readPSMZ32(contextIndex, x, y);
+    bool passes = false;
+    switch (drawingContext.test.depthTest)
+    {
+      case 0:
+        break;
+      case 1:
+        passes = true;
+        break;
+      case 2:
+        passes = sourceDepth >= destinationDepth;
+        break;
+      case 3:
+        passes = sourceDepth > destinationDepth;
+        break;
+    }
+    if (!passes)
     {
       return false;
     }
@@ -838,6 +883,11 @@ bool GS::writeFragment(
     outputColor |= UINT32_C(0x80000000);
   }
   writePSMCT32(contextIndex, x, y, outputColor);
+  if (drawingContext.test.depthTestEnabled &&
+      !drawingContext.depthBuffer.drawingMasked)
+  {
+    writePSMZ32(contextIndex, x, y, sourceDepth);
+  }
   ++writtenPixels;
   return true;
 }
@@ -884,7 +934,8 @@ void GS::rasterizePoint()
     primitiveRegister.context,
     static_cast<std::uint16_t>(x),
     static_cast<std::uint16_t>(y),
-    color);
+    color,
+    vertexRegister.z);
 }
 
 void GS::rasterizeLine(
@@ -1093,7 +1144,14 @@ void GS::rasterizeLine(
         contextIndex,
         static_cast<std::uint16_t>(x),
         static_cast<std::uint16_t>(y),
-        color);
+        color,
+        static_cast<std::uint32_t>(
+          (static_cast<std::int64_t>(firstVertex.z) *
+             drivingExtent +
+           (static_cast<std::int64_t>(secondVertex.z) -
+            firstVertex.z) *
+             progress) /
+          drivingExtent));
     }
     if (driving == lastDriving)
     {
@@ -1184,7 +1242,8 @@ void GS::rasterizeSprite()
         primitiveRegister.context,
         static_cast<std::uint16_t>(x),
         static_cast<std::uint16_t>(y),
-        color);
+        color,
+        primitiveVertices[1].z);
     }
   }
 }
@@ -1207,15 +1266,23 @@ void GS::rasterizeTriangle(
 
   const std::size_t contextIndex = primitiveRegister.context;
   const GSContext &drawingContext = checkedContext(contextIndex);
-  if (drawingContext.test.alphaTestEnabled ||
-      drawingContext.test.depthTestEnabled)
+  if (drawingContext.test.alphaTestEnabled)
   {
     throw std::runtime_error(
       "GS triangle uses unsupported pixel tests.");
   }
+  if (drawingContext.test.depthTestEnabled)
+  {
+    psmz32WordAddress(contextIndex, 0, 0);
+  }
 
   std::array<FixedPoint, TRIANGLE_VERTEX_COUNT> vertices;
   std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = sourceColors;
+  std::array<std::uint32_t, TRIANGLE_VERTEX_COUNT> depths = {{
+    sourceVertices[0].z,
+    sourceVertices[1].z,
+    sourceVertices[2].z
+  }};
   std::array<GSTextureCoordinate, TRIANGLE_VERTEX_COUNT>
     textureCoordinates = sourceTextureCoordinates;
   for (std::size_t index = 0;
@@ -1242,6 +1309,7 @@ void GS::rasterizeTriangle(
   {
     std::swap(vertices[1], vertices[2]);
     std::swap(colors[1], colors[2]);
+    std::swap(depths[1], depths[2]);
     std::swap(textureCoordinates[1], textureCoordinates[2]);
     area = -area;
   }
@@ -1375,7 +1443,15 @@ void GS::rasterizeTriangle(
         contextIndex,
         static_cast<std::uint16_t>(x),
         static_cast<std::uint16_t>(y),
-        color);
+        color,
+        static_cast<std::uint32_t>(
+          (static_cast<long double>(depths[0]) *
+             weights[0] +
+           static_cast<long double>(depths[1]) *
+             weights[1] +
+           static_cast<long double>(depths[2]) *
+             weights[2]) /
+          area));
     }
   }
 }
@@ -1450,6 +1526,18 @@ void GS::decodeAlpha(std::size_t index, std::uint64_t data)
     GS_ALPHA_SELECT_MASK;
   alpha.fixedAlpha =
     static_cast<std::uint8_t>(data >> GS_ALPHA_FIXED_SHIFT);
+}
+
+void GS::decodeDepthBuffer(
+  std::size_t index,
+  std::uint64_t data)
+{
+  GSDepthBuffer &depthBuffer =
+    mutableContext(index).depthBuffer;
+  depthBuffer.basePointer = data & GS_DEPTH_BASE_MASK;
+  depthBuffer.pixelStorageMode =
+    (data >> GS_DEPTH_PSM_SHIFT) & GS_DEPTH_PSM_MASK;
+  depthBuffer.drawingMasked = bit(data, GS_DEPTH_MASK_BIT);
 }
 
 void GS::decodeTexture(std::size_t index, std::uint64_t data)
@@ -1724,6 +1812,76 @@ std::size_t GS::psmct32WordAddress(
     column * GS_COLUMN_WORDS +
     word;
   return address % localMemory.size();
+}
+
+std::size_t GS::psmz32WordAddress(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y) const
+{
+  const GSContext &drawingContext =
+    checkedContext(contextIndex);
+  if (drawingContext.frame.width == 0 ||
+      drawingContext.frame.width > GS_FRAME_WIDTH_LIMIT)
+  {
+    throw std::runtime_error(
+      "GS PSMZ32 access requires a valid frame-buffer width.");
+  }
+  if (drawingContext.depthBuffer.pixelStorageMode !=
+      GSPixelStorageMode::PSMZ32)
+  {
+    throw std::runtime_error(
+      "GS depth buffer is not configured for PSMZ32.");
+  }
+
+  const std::size_t pageX = x / GS_PSMCT32_PAGE_WIDTH;
+  const std::size_t pageY = y / GS_PSMCT32_PAGE_HEIGHT;
+  const std::size_t page =
+    pageY * drawingContext.frame.width + pageX;
+  const std::uint16_t pageLocalX =
+    x % GS_PSMCT32_PAGE_WIDTH;
+  const std::uint16_t pageLocalY =
+    y % GS_PSMCT32_PAGE_HEIGHT;
+  const std::uint8_t block =
+    GS_PSMZ32_BLOCKS[
+      pageLocalY / GS_PSMCT32_BLOCK_HEIGHT][
+      pageLocalX / GS_PSMCT32_BLOCK_WIDTH];
+  const std::size_t column =
+    (pageLocalY % GS_PSMCT32_BLOCK_HEIGHT) /
+    GS_PSMCT32_COLUMN_HEIGHT;
+  const std::uint16_t blockX =
+    pageLocalX % GS_PSMCT32_BLOCK_WIDTH;
+  const std::uint16_t blockY =
+    pageLocalY % GS_PSMCT32_COLUMN_HEIGHT;
+  const std::size_t word =
+    (blockX / GS_PSMCT32_WORD_PAIR_WIDTH) *
+      GS_PSMCT32_WORD_PAIR_STRIDE +
+    blockY * GS_PSMCT32_SECOND_ROW_OFFSET +
+    (blockX % GS_PSMCT32_WORD_PAIR_WIDTH);
+  const std::size_t address =
+    drawingContext.depthBuffer.basePointer * GS_PAGE_WORDS +
+    page * GS_PAGE_WORDS +
+    block * GS_BLOCK_WORDS +
+    column * GS_COLUMN_WORDS +
+    word;
+  return address % localMemory.size();
+}
+
+std::uint32_t GS::readPSMZ32(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y) const
+{
+  return localMemory[psmz32WordAddress(contextIndex, x, y)];
+}
+
+void GS::writePSMZ32(
+  std::size_t contextIndex,
+  std::uint16_t x,
+  std::uint16_t y,
+  std::uint32_t value)
+{
+  localMemory[psmz32WordAddress(contextIndex, x, y)] = value;
 }
 
 void GS::decodeTransferBuffer(std::uint64_t data)

@@ -28,6 +28,8 @@ namespace neko_demo
     std::uint32_t phase);
   PrimitiveSceneResult renderTexturedPrimitiveScene(
     std::uint32_t phase);
+  PrimitiveSceneResult renderAlphaPrimitiveScene(
+    std::uint32_t phase);
   PrimitiveSceneResult renderPointSpriteScene(
     std::uint32_t phase);
   PrimitiveSceneResult renderPointLineSpriteScene(

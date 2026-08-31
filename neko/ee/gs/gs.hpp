@@ -35,6 +35,8 @@ namespace GSRegisterAddress
   constexpr std::uint8_t FBA_2 = 0x4b;
   constexpr std::uint8_t FRAME_1 = 0x4c;
   constexpr std::uint8_t FRAME_2 = 0x4d;
+  constexpr std::uint8_t ZBUF_1 = 0x4e;
+  constexpr std::uint8_t ZBUF_2 = 0x4f;
   constexpr std::uint8_t BITBLTBUF = 0x50;
   constexpr std::uint8_t TRXPOS = 0x51;
   constexpr std::uint8_t TRXREG = 0x52;
@@ -45,6 +47,7 @@ namespace GSRegisterAddress
 namespace GSPixelStorageMode
 {
   constexpr std::uint8_t PSMCT32 = 0x00;
+  constexpr std::uint8_t PSMZ32 = 0x00;
 }
 
 namespace GSPrivilegedRegisterAddress
@@ -151,6 +154,13 @@ struct GSAlpha
   std::uint8_t fixedAlpha = 0;
 };
 
+struct GSDepthBuffer
+{
+  std::uint16_t basePointer = 0;
+  std::uint8_t pixelStorageMode = 0;
+  bool drawingMasked = false;
+};
+
 enum class GSTextureWrapMode : std::uint8_t
 {
   Repeat = 0,
@@ -191,6 +201,7 @@ struct GSContext
   GSTest test;
   GSAlpha alpha;
   bool forceAlphaBit = false;
+  GSDepthBuffer depthBuffer;
   GSTexture texture;
   GSTextureClamp textureClamp;
 };
@@ -250,6 +261,19 @@ class GS : public GIFRegisterWriteHandler
       std::uint16_t x,
       std::uint16_t y,
       std::uint32_t value);
+    std::size_t psmz32WordAddress(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y) const;
+    std::uint32_t readPSMZ32(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y) const;
+    void writePSMZ32(
+      std::size_t contextIndex,
+      std::uint16_t x,
+      std::uint16_t y,
+      std::uint32_t value);
     std::uint32_t localMemoryWord(std::size_t address) const;
     std::size_t localMemoryWordCount() const;
     std::uint32_t sampleTextureNearest(
@@ -290,6 +314,9 @@ class GS : public GIFRegisterWriteHandler
     void decodeOffset(std::size_t index, std::uint64_t data);
     void decodeTest(std::size_t index, std::uint64_t data);
     void decodeAlpha(std::size_t index, std::uint64_t data);
+    void decodeDepthBuffer(
+      std::size_t index,
+      std::uint64_t data);
     void decodeTexture(std::size_t index, std::uint64_t data);
     void decodeTextureSampling(
       std::size_t index,
@@ -343,7 +370,8 @@ class GS : public GIFRegisterWriteHandler
       std::size_t contextIndex,
       std::uint16_t x,
       std::uint16_t y,
-      std::uint32_t sourceColor);
+      std::uint32_t sourceColor,
+      std::uint32_t sourceDepth);
 
     std::array<std::uint64_t, REGISTER_COUNT> registers = {};
     GSPrimitive primitiveRegister;

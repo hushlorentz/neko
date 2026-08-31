@@ -418,7 +418,8 @@ GIF DMA channel wiring belongs to Milestone 4.
   and expose PATH3-uploaded textured drawing in `neko_desktop`
 - [x] Implement destination-alpha testing and configurable alpha blending
   and expose translucent layered drawing in `neko_desktop`
-- [ ] Add Z-buffer storage, depth testing, and depth writes
+- [x] Add PSMZ32 Z-buffer storage, depth testing, and depth writes,
+  with visibly depth-ordered geometry in `neko_desktop`
 
 ### Graphics Path Integration Programs
 
