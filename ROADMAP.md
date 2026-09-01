@@ -440,7 +440,7 @@ GIF DMA channel wiring belongs to Milestone 4.
       desktop frontend using a rotation-specific host setup
 - [x] Animate the rotation demo with deterministic sine/cosine inputs while
       rerunning the authentic VU1 transform for every displayed frame
-- [ ] Add textured, blended, and depth-tested scenes as GS support expands
+- [x] Add textured, blended, and depth-tested scenes as GS support expands
 
 ### Graphics Path Diagnostics
 
