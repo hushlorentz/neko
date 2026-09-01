@@ -560,6 +560,20 @@ existing event and runner infrastructure:
 - [ ] Make guest executable loading the primary desktop execution path while
       retaining explicit diagnostic scene selection for development
 
+### Long-Term Guest Execution Progression
+
+Keep each target incremental and expand it only when the preceding guest exposes
+the next concrete hardware or software dependency:
+
+- [ ] Run focused EE conformance programs and independently authored homebrew
+      ELFs as the first real guests
+- [ ] Advance through deterministic BIOS startup as the first large system
+      workload, adding IOP and other hardware only when execution requires it
+- [ ] Use directly loaded game executables for targeted bring-up experiments
+      without treating them as a substitute for the normal startup path
+- [ ] Boot a selected game through the BIOS as the long-term system-integration
+      target
+
 ### Demand-Driven Graphics Diagnostics
 
 Add these when independently authored guest programs produce graphics failures
