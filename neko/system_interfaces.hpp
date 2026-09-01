@@ -49,6 +49,7 @@ struct NekoFrameResult
 {
   std::uint64_t masterCycles = 0;
   std::uint64_t presentationBoundary = 0;
+  std::uint64_t videoHash = 0;
   GSPresentation video;
   NekoAudioFrame audio;
 };

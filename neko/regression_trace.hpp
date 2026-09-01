@@ -1,0 +1,46 @@
+#ifndef REGRESSION_TRACE_HPP
+#define REGRESSION_TRACE_HPP
+
+#include <cstdint>
+#include <vector>
+
+#include "gs_display.hpp"
+
+enum class NekoTraceSubsystem : std::uint8_t
+{
+  VU0,
+  VU1,
+  VIF0,
+  VIF1,
+  GIF,
+  GIFDMAC,
+  GS,
+  InterruptController,
+  Display,
+  Input
+};
+
+enum class NekoTraceEventType : std::uint8_t
+{
+  Progress,
+  StateChanged,
+  TransferCompleted,
+  InterruptChanged,
+  PresentationBoundary
+};
+
+struct NekoTraceEvent
+{
+  std::uint64_t masterCycle = 0;
+  NekoTraceSubsystem subsystem = NekoTraceSubsystem::VU0;
+  NekoTraceEventType type = NekoTraceEventType::Progress;
+  std::uint64_t value0 = 0;
+  std::uint64_t value1 = 0;
+  std::uint64_t value2 = 0;
+};
+
+std::uint64_t nekoFrameHash(const GSPresentation &presentation);
+std::uint64_t nekoTraceHash(
+  const std::vector<NekoTraceEvent> &events);
+
+#endif

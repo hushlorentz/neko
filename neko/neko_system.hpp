@@ -15,6 +15,7 @@
 #include "gs.hpp"
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
+#include "regression_trace.hpp"
 #include "system_interfaces.hpp"
 #include "vif.hpp"
 #include "vpu.hpp"
@@ -42,6 +43,12 @@ class NekoSystem
     NekoAudioFrame audioOutput() const;
     std::vector<std::uint8_t> saveState() const;
     void loadState(const std::vector<std::uint8_t> &state);
+    void startTrace();
+    void stopTrace();
+    void clearTrace();
+    bool traceEnabled() const;
+    const std::vector<NekoTraceEvent> &trace() const;
+    std::uint64_t traceHash() const;
 
     VPU &vu0();
     const VPU &vu0() const;
@@ -96,8 +103,29 @@ class NekoSystem
     GIFDMACChannel gifDMACComponent;
     GSDisplay gsDisplayComponent;
     NekoInputState inputState;
+    bool collectingTrace = false;
+    std::vector<NekoTraceEvent> traceEvents;
 
     void synchronizeInterrupts();
+    void recordCycleTrace(
+      std::uint64_t cycle,
+      std::uint64_t vu0Cycles,
+      std::uint64_t vu1Cycles,
+      std::uint64_t vif0Words,
+      std::uint64_t vif1Words,
+      std::uint64_t gifQuadwords,
+      std::uint64_t dmacQuadwords,
+      std::uint32_t dmacControl,
+      std::uint32_t interruptStatus,
+      std::uint64_t pixels,
+      std::uint64_t presentationBoundary);
+    void appendTrace(
+      std::uint64_t cycle,
+      NekoTraceSubsystem subsystem,
+      NekoTraceEventType type,
+      std::uint64_t value0,
+      std::uint64_t value1 = 0,
+      std::uint64_t value2 = 0);
 };
 
 #endif

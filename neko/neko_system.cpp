@@ -48,6 +48,18 @@ void NekoSystem::reset()
 void NekoSystem::setInput(const NekoInputState &input)
 {
   inputState = input;
+  if (collectingTrace)
+  {
+    appendTrace(
+      masterClock.currentCycle(),
+      NekoTraceSubsystem::Input,
+      NekoTraceEventType::StateChanged,
+      input.buttons,
+      static_cast<std::uint64_t>(input.leftStickX) |
+        (static_cast<std::uint64_t>(input.leftStickY) << 8),
+      static_cast<std::uint64_t>(input.rightStickX) |
+        (static_cast<std::uint64_t>(input.rightStickY) << 8));
+  }
 }
 
 const NekoInputState &NekoSystem::input() const
@@ -72,6 +84,7 @@ NekoFrameResult NekoSystem::runFrame()
   result.presentationBoundary =
     gsDisplayComponent.presentationBoundaryCount();
   result.video = videoOutput();
+  result.videoHash = nekoFrameHash(result.video);
   result.audio = audioOutput();
   return result;
 }
@@ -84,6 +97,37 @@ GSPresentation NekoSystem::videoOutput() const
 NekoAudioFrame NekoSystem::audioOutput() const
 {
   return {};
+}
+
+void NekoSystem::startTrace()
+{
+  traceEvents.clear();
+  collectingTrace = true;
+}
+
+void NekoSystem::stopTrace()
+{
+  collectingTrace = false;
+}
+
+void NekoSystem::clearTrace()
+{
+  traceEvents.clear();
+}
+
+bool NekoSystem::traceEnabled() const
+{
+  return collectingTrace;
+}
+
+const std::vector<NekoTraceEvent> &NekoSystem::trace() const
+{
+  return traceEvents;
+}
+
+std::uint64_t NekoSystem::traceHash() const
+{
+  return nekoTraceHash(traceEvents);
 }
 
 VPU &NekoSystem::vu0()
@@ -263,8 +307,39 @@ void NekoSystem::synchronizeInterrupts()
 
 void NekoSystem::clockMasterCycle()
 {
+  const std::uint64_t vu0Cycles = vu0Component.elapsedCycles();
+  const std::uint64_t vu1Cycles = vu1Component.elapsedCycles();
+  const std::uint64_t vif0Words = vif0Component.wordsIngested();
+  const std::uint64_t vif1Words = vif1Component.wordsIngested();
+  const std::uint64_t gifQuadwords =
+    gifPath1Component.transferredQuadwordCount() +
+    gifPath3Component.transferredQuadwordCount();
+  const std::uint64_t dmacQuadwords =
+    gifDMACComponent.transferredQuadwordCount();
+  const std::uint32_t dmacControl =
+    gifDMACComponent.channelControl();
+  const std::uint32_t interruptStatus =
+    interruptControllerComponent.status();
+  const std::uint64_t pixels = gsComponent.pixelWriteCount();
+  const std::uint64_t presentationBoundary =
+    gsDisplayComponent.presentationBoundaryCount();
   masterClock.clock();
   synchronizeInterrupts();
+  if (collectingTrace)
+  {
+    recordCycleTrace(
+      masterClock.currentCycle(),
+      vu0Cycles,
+      vu1Cycles,
+      vif0Words,
+      vif1Words,
+      gifQuadwords,
+      dmacQuadwords,
+      dmacControl,
+      interruptStatus,
+      pixels,
+      presentationBoundary);
+  }
 }
 
 std::uint64_t NekoSystem::runMasterCycles(std::uint64_t cycles)
@@ -281,6 +356,141 @@ bool NekoSystem::interruptPending() const
   return
     interruptControllerComponent.interruptPending() ||
     gifDMACComponent.interruptPending();
+}
+
+void NekoSystem::recordCycleTrace(
+  std::uint64_t cycle,
+  std::uint64_t vu0Cycles,
+  std::uint64_t vu1Cycles,
+  std::uint64_t vif0Words,
+  std::uint64_t vif1Words,
+  std::uint64_t gifQuadwords,
+  std::uint64_t dmacQuadwords,
+  std::uint32_t dmacControl,
+  std::uint32_t interruptStatus,
+  std::uint64_t pixels,
+  std::uint64_t presentationBoundary)
+{
+  if (vu0Component.elapsedCycles() != vu0Cycles)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::VU0,
+      NekoTraceEventType::Progress,
+      vu0Component.elapsedCycles(),
+      vu0Component.programCounter(),
+      vu0Component.getState());
+  }
+  if (vu1Component.elapsedCycles() != vu1Cycles)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::VU1,
+      NekoTraceEventType::Progress,
+      vu1Component.elapsedCycles(),
+      vu1Component.programCounter(),
+      vu1Component.getState());
+  }
+  if (vif0Component.wordsIngested() != vif0Words)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::VIF0,
+      NekoTraceEventType::Progress,
+      vif0Component.wordsIngested(),
+      vif0Component.payloadWordsRemaining(),
+      vif0Component.interruptPending());
+  }
+  if (vif1Component.wordsIngested() != vif1Words)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::VIF1,
+      NekoTraceEventType::Progress,
+      vif1Component.wordsIngested(),
+      vif1Component.payloadWordsRemaining(),
+      vif1Component.interruptPending());
+  }
+  const std::uint64_t currentGIFQuadwords =
+    gifPath1Component.transferredQuadwordCount() +
+    gifPath3Component.transferredQuadwordCount();
+  if (currentGIFQuadwords != gifQuadwords)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::GIF,
+      NekoTraceEventType::Progress,
+      currentGIFQuadwords,
+      static_cast<std::uint8_t>(
+        gifPathArbiterComponent.activePath()),
+      gifDecoderComponent.quadwordsRemaining());
+  }
+  if (gifDMACComponent.transferredQuadwordCount() !=
+      dmacQuadwords)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::GIFDMAC,
+      NekoTraceEventType::Progress,
+      gifDMACComponent.transferredQuadwordCount(),
+      gifDMACComponent.memoryAddress(),
+      gifDMACComponent.quadwordCount());
+  }
+  if ((dmacControl & GIFDMACChannelControl::START) != 0 &&
+      (gifDMACComponent.channelControl() &
+       GIFDMACChannelControl::START) == 0)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::GIFDMAC,
+      NekoTraceEventType::TransferCompleted,
+      gifDMACComponent.globalStatus());
+  }
+  if (gsComponent.pixelWriteCount() != pixels)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::GS,
+      NekoTraceEventType::Progress,
+      gsComponent.pixelWriteCount());
+  }
+  if (interruptControllerComponent.status() != interruptStatus)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::InterruptController,
+      NekoTraceEventType::InterruptChanged,
+      interruptControllerComponent.status(),
+      interruptControllerComponent.mask());
+  }
+  if (gsDisplayComponent.presentationBoundaryCount() !=
+      presentationBoundary)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::Display,
+      NekoTraceEventType::PresentationBoundary,
+      gsDisplayComponent.presentationBoundaryCount(),
+      nekoFrameHash(videoOutput()));
+  }
+}
+
+void NekoSystem::appendTrace(
+  std::uint64_t cycle,
+  NekoTraceSubsystem subsystem,
+  NekoTraceEventType type,
+  std::uint64_t value0,
+  std::uint64_t value1,
+  std::uint64_t value2)
+{
+  traceEvents.push_back({
+    cycle,
+    subsystem,
+    type,
+    value0,
+    value1,
+    value2
+  });
 }
 
 MasterClockScheduler &NekoSystem::masterClockScheduler()

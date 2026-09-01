@@ -9,6 +9,11 @@ controller state, executes to the next GS presentation boundary with
 hardware and internal wiring together with `reset()`. Audio remains empty
 until SPU2 is required and implemented.
 
+Each `runFrame()` result includes a canonical video hash. Optional
+`NekoSystem` regression tracing records ordered, master-cycle-stamped input,
+VU, VIF, GIF, DMA, GS, interrupt, and presentation transitions; trace hashes
+can compare repeated runs or save-state continuations without frontend state.
+
 `NekoSystem::saveState()` returns a canonical, versioned byte vector containing
 the complete deterministic machine state, and `loadState()` restores one
 transactionally. The checksummed format is explicit little-endian data rather

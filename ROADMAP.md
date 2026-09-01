@@ -477,7 +477,7 @@ existing event and runner infrastructure:
       boundaries
 - [x] Define reset, frame execution, input, video, and audio interfaces
 - [x] Add deterministic save-state serialization
-- [ ] Add frame hashes and subsystem traces for regression testing
+- [x] Add frame hashes and subsystem traces for regression testing
 
 ### EE COP2 and VU Macro Mode
 
@@ -526,9 +526,31 @@ directly. Frontends provide those services through callbacks and buffers.
 
 ## Milestone 5: Frontends and libretro
 
+### Command-Line Debugger
+
 - [ ] Keep the command-line debugger as a separate core consumer
 - [ ] Add breakpoints, watchpoints, register views, and memory inspection
+- [ ] Add named checkpoints and a bounded automatic checkpoint ring
+- [ ] Record and replay deterministic input from a selected checkpoint
+- [ ] Implement reverse-step and reverse-continue by restoring the nearest
+      checkpoint and replaying to the target master cycle
+- [ ] Break on interrupts, DMA completion and stalls, GIF tags, presentation
+      boundaries, and selected subsystem trace events
+- [ ] Add conditional register, memory, and MMIO watchpoints
+- [ ] Diff registers, memory ranges, pipelines, and subsystem state between
+      two checkpoints
 - [ ] Add trace export without coupling presentation to hardware classes
+- [ ] Filter trace inspection and export by subsystem, event type, and master
+      cycle range
+- [ ] Compare trace hashes and bisect the first divergent master cycle between
+      two deterministic executions
+- [ ] Export reproducible bug bundles containing a save state, subsequent
+      inputs, expected hashes, and focused trace excerpts
+- [ ] Add a timeline view for VU execution, DMA transfers, GIF arbitration,
+      interrupts, and presentation boundaries
+
+### Libretro Adapter
+
 - [ ] Create a thin `neko_libretro` C ABI adapter
 - [ ] Map `retro_run()` to deterministic frame execution
 - [ ] Connect RetroArch input, video, audio, logging, and save-state callbacks
