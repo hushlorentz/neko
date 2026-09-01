@@ -2,6 +2,7 @@
 
 #include "ee_bus.hpp"
 #include "gif_registers.hpp"
+#include "gif_dmac_channel.hpp"
 #include "gif_path3.hpp"
 #include "gs.hpp"
 #include "interrupt_controller.hpp"
@@ -77,6 +78,21 @@ bool EEBus::mainMemoryAddress(
   return true;
 }
 
+void EEBus::attachGIFDMACChannel(GIFDMACChannel *gifDMAC)
+{
+  if (gifDMAC == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires a non-null GIF DMAC channel.");
+  }
+  if (gifDMACChannel != nullptr)
+  {
+    throw std::logic_error(
+      "EE bus GIF DMAC channel is already attached.");
+  }
+  gifDMACChannel = gifDMAC;
+}
+
 std::uint32_t EEBus::vifStatus(const VIF &vif) const
 {
   std::uint32_t status = 0;
@@ -99,6 +115,16 @@ std::uint32_t EEBus::vifStatus(const VIF &vif) const
       EEVIFStatus::INTERRUPT;
   }
   return status;
+}
+
+GIFDMACChannel &EEBus::attachedGIFDMAC() const
+{
+  if (gifDMACChannel == nullptr)
+  {
+    throw std::logic_error(
+      "EE bus GIF DMAC channel is not attached.");
+  }
+  return *gifDMACChannel;
 }
 
 std::uint32_t EEBus::read32(std::uint32_t address) const
@@ -136,6 +162,22 @@ std::uint32_t EEBus::read32(std::uint32_t address) const
       return gifRegisterFile->readPath3Count();
     case EEMemoryMap::GIF_P3TAG:
       return gifRegisterFile->readPath3Tag();
+    case EEMemoryMap::D2_CHCR:
+      return attachedGIFDMAC().channelControl();
+    case EEMemoryMap::D2_MADR:
+      return attachedGIFDMAC().memoryAddress();
+    case EEMemoryMap::D2_QWC:
+      return attachedGIFDMAC().quadwordCount();
+    case EEMemoryMap::D2_TADR:
+      return attachedGIFDMAC().tagAddress();
+    case EEMemoryMap::D2_ASR0:
+      return attachedGIFDMAC().addressStack(0);
+    case EEMemoryMap::D2_ASR1:
+      return attachedGIFDMAC().addressStack(1);
+    case EEMemoryMap::D_CTRL:
+      return attachedGIFDMAC().globalControl();
+    case EEMemoryMap::D_STAT:
+      return attachedGIFDMAC().globalStatus();
     case EEMemoryMap::INTC_STAT:
       return interruptController->status();
     case EEMemoryMap::INTC_MASK:
@@ -191,6 +233,30 @@ void EEBus::write32(
       return;
     case EEMemoryMap::GIF_MODE:
       gifRegisterFile->writeMode(value);
+      return;
+    case EEMemoryMap::D2_CHCR:
+      attachedGIFDMAC().writeChannelControl(value);
+      return;
+    case EEMemoryMap::D2_MADR:
+      attachedGIFDMAC().writeMemoryAddress(value);
+      return;
+    case EEMemoryMap::D2_QWC:
+      attachedGIFDMAC().writeQuadwordCount(value);
+      return;
+    case EEMemoryMap::D2_TADR:
+      attachedGIFDMAC().writeTagAddress(value);
+      return;
+    case EEMemoryMap::D2_ASR0:
+      attachedGIFDMAC().writeAddressStack(0, value);
+      return;
+    case EEMemoryMap::D2_ASR1:
+      attachedGIFDMAC().writeAddressStack(1, value);
+      return;
+    case EEMemoryMap::D_CTRL:
+      attachedGIFDMAC().writeGlobalControl(value);
+      return;
+    case EEMemoryMap::D_STAT:
+      attachedGIFDMAC().writeGlobalStatus(value);
       return;
     case EEMemoryMap::INTC_STAT:
       interruptController->acknowledge(value);

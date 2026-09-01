@@ -6,6 +6,7 @@
 #include "clock_scheduler.hpp"
 #include "ee_bus.hpp"
 #include "gif.hpp"
+#include "gif_dmac_channel.hpp"
 #include "gif_path1.hpp"
 #include "gif_path3.hpp"
 #include "gif_path_arbiter.hpp"
@@ -50,6 +51,8 @@ class NekoSystem
     const GS &gs() const;
     GIFRegisters &gifRegisters();
     const GIFRegisters &gifRegisters() const;
+    GIFDMACChannel &gifDMAC();
+    const GIFDMACChannel &gifDMAC() const;
     EEBus &eeBus();
     const EEBus &eeBus() const;
     EEInterruptController &interruptController();
@@ -74,6 +77,7 @@ class NekoSystem
     EEInterruptController interruptControllerComponent;
     MasterClockScheduler masterClock;
     EEBus eeBusComponent;
+    GIFDMACChannel gifDMACComponent;
 
     void synchronizeInterrupts();
 };

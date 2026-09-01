@@ -81,6 +81,7 @@ TEST_CASE("Neko System Tests")
     REQUIRE(
       &constSystem.gifRegisters() ==
       &system.gifRegisters());
+    REQUIRE(&constSystem.gifDMAC() == &system.gifDMAC());
     REQUIRE(&constSystem.eeBus() == &system.eeBus());
     REQUIRE(
       &constSystem.interruptController() ==

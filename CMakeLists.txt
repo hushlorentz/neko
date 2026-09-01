@@ -40,6 +40,7 @@ endif()
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/ee/ee_bus.cpp
+    neko/ee/gif_dmac_channel.cpp
     neko/ee/interrupt_controller.cpp
     neko/fp_register.cpp
     neko/neko_system.cpp
@@ -140,6 +141,7 @@ add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp
+    neko_tests/ee/gif_dmac_channel_tests.cpp
     neko_tests/ee/interrupt_controller_tests.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp

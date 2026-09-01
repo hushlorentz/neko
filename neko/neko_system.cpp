@@ -15,7 +15,8 @@ NekoSystem::NekoSystem() :
     &gifRegisterFile,
     &gifPath3Component,
     &gsComponent,
-    &interruptControllerComponent)
+    &interruptControllerComponent),
+  gifDMACComponent(&eeBusComponent)
 {
   vif0Component.attachVPU(&vu0Component);
   vif1Component.attachVPU(&vu1Component);
@@ -28,6 +29,8 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(
     vu1Component,
     VU_CLOCK_PERIOD);
+  eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
+  masterClock.registerComponent(gifDMACComponent, 1);
 }
 
 VPU &NekoSystem::vu0()
@@ -130,6 +133,16 @@ const GIFRegisters &NekoSystem::gifRegisters() const
   return gifRegisterFile;
 }
 
+GIFDMACChannel &NekoSystem::gifDMAC()
+{
+  return gifDMACComponent;
+}
+
+const GIFDMACChannel &NekoSystem::gifDMAC() const
+{
+  return gifDMACComponent;
+}
+
 EEBus &NekoSystem::eeBus()
 {
   return eeBusComponent;
@@ -184,7 +197,9 @@ std::uint64_t NekoSystem::runMasterCycles(std::uint64_t cycles)
 
 bool NekoSystem::interruptPending() const
 {
-  return interruptControllerComponent.interruptPending();
+  return
+    interruptControllerComponent.interruptPending() ||
+    gifDMACComponent.interruptPending();
 }
 
 MasterClockScheduler &NekoSystem::masterClockScheduler()
