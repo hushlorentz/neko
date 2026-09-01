@@ -105,6 +105,12 @@ class EEBus
     bool writeData32(
       std::uint32_t address,
       std::uint32_t value);
+    bool readData64(
+      std::uint32_t address,
+      std::uint64_t *value) const;
+    bool writeData64(
+      std::uint32_t address,
+      std::uint64_t value);
     std::uint32_t read32(std::uint32_t address) const;
     void write32(
       std::uint32_t address,

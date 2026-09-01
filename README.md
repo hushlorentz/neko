@@ -67,6 +67,11 @@ effective-address offsets. `LWL` sign-extends the merged word, while `LWR`
 preserves GPR bits 63..32 unless it loads the word's sign bit. Paired merge
 instructions can transfer an arbitrary unaligned word, and save states preserve
 the intermediate destination between the pair.
+Aligned doubleword access adds `LD` and `SD` through checked little-endian
+64-bit RAM operations. Eight-byte alignment and RAM bounds are validated
+before access; loads replace GPR bits 63..0 while preserving bits 127..64, and
+stores use only the source's low doubleword. Address and data-bus faults remain
+restartable without changing the version 7 save-state layout.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

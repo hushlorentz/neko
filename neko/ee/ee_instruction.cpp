@@ -117,6 +117,8 @@ namespace
     direct(&table, 0x2a, EEOperation::StoreWordLeft);
     direct(&table, 0x2b, EEOperation::StoreWord);
     direct(&table, 0x2e, EEOperation::StoreWordRight);
+    direct(&table, 0x37, EEOperation::LoadDoubleword);
+    direct(&table, 0x3f, EEOperation::StoreDoubleword);
     direct(&table, 0x14, EEOperation::BranchEqualLikely);
     direct(&table, 0x15, EEOperation::BranchNotEqualLikely);
     direct(

@@ -74,6 +74,20 @@ TEST_CASE("EE Main Memory Map Tests")
     "EE word store must be naturally aligned.");
   REQUIRE_FALSE(
     bus.writeData32(EEMemoryMap::MAIN_MEMORY_SIZE, 0));
+  std::uint64_t doubleword = 0;
+  REQUIRE(
+    bus.writeData64(
+      0x30000110,
+      UINT64_C(0x0123456789abcdef)));
+  REQUIRE(bus.readData64(0x80000110, &doubleword));
+  REQUIRE(doubleword == UINT64_C(0x0123456789abcdef));
+  REQUIRE_THROWS_WITH(
+    bus.readData64(0x114, &doubleword),
+    "EE doubleword load must be naturally aligned.");
+  REQUIRE_FALSE(
+    bus.readData64(
+      EEMemoryMap::MAIN_MEMORY_SIZE,
+      &doubleword));
 
   const GIFQuadword quadword = {{
     UINT32_C(0x01020304),

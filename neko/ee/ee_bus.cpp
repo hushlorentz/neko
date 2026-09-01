@@ -310,6 +310,56 @@ bool EEBus::writeData32(
   return true;
 }
 
+bool EEBus::readData64(
+  std::uint32_t address,
+  std::uint64_t *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE doubleword load requires an output value.");
+  }
+  requireAlignment(
+    address,
+    8,
+    "EE doubleword load must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 8, &physicalAddress))
+  {
+    return false;
+  }
+  *value = 0;
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    *value |=
+      static_cast<std::uint64_t>(
+        mainMemory[physicalAddress + index]) <<
+      (index * 8);
+  }
+  return true;
+}
+
+bool EEBus::writeData64(
+  std::uint32_t address,
+  std::uint64_t value)
+{
+  requireAlignment(
+    address,
+    8,
+    "EE doubleword store must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 8, &physicalAddress))
+  {
+    return false;
+  }
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    mainMemory[physicalAddress + index] =
+      static_cast<std::uint8_t>(value >> (index * 8));
+  }
+  return true;
+}
+
 std::uint32_t EEBus::read32(std::uint32_t address) const
 {
   requireAlignment(
