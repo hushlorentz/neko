@@ -14,7 +14,10 @@ registers, the 32-bit program counter, both `HI`/`LO` pairs, and the `SA`
 register. Register zero is immutable, and the complete architectural state
 participates in reset and save-state restoration. Instruction fetches use
 little-endian EE RAM and its aliases; misaligned and unmapped fetches become
-typed pending EE exceptions rather than host errors.
+typed pending EE exceptions rather than host errors. A table-driven decoder
+currently recognizes the base integer arithmetic, comparison, logic, and shift
+families and distinguishes reserved encodings from deferred instruction
+families.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

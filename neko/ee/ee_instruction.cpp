@@ -1,0 +1,327 @@
+#include "ee_instruction.hpp"
+
+#include <array>
+#include <stdexcept>
+
+namespace
+{
+  constexpr std::uint32_t REGISTER_SOURCE_MASK =
+    UINT32_C(0x03e00000);
+  constexpr std::uint32_t REGISTER_SHIFT_MASK =
+    UINT32_C(0x000007c0);
+
+  enum class DecodeKind : std::uint8_t
+  {
+    Reserved,
+    Unsupported,
+    Direct,
+    Special
+  };
+
+  struct DecodeEntry
+  {
+    DecodeKind kind = DecodeKind::Unsupported;
+    EEOperation operation = EEOperation::Nop;
+    std::uint32_t requiredZeroMask = 0;
+  };
+
+  using DecodeTable = std::array<DecodeEntry, 64>;
+
+  void direct(
+    DecodeTable *table,
+    std::uint8_t encoding,
+    EEOperation operation,
+    std::uint32_t requiredZeroMask = 0)
+  {
+    (*table)[encoding] = {
+      DecodeKind::Direct,
+      operation,
+      requiredZeroMask
+    };
+  }
+
+  DecodeTable makePrimaryTable()
+  {
+    DecodeTable table = {};
+    table.fill({
+      DecodeKind::Unsupported,
+      EEOperation::Nop,
+      0
+    });
+    table[0x00].kind = DecodeKind::Special;
+    table[0x13].kind = DecodeKind::Reserved;
+    table[0x1d].kind = DecodeKind::Reserved;
+    table[0x3b].kind = DecodeKind::Reserved;
+
+    direct(&table, 0x08, EEOperation::AddImmediateWord);
+    direct(
+      &table,
+      0x09,
+      EEOperation::AddImmediateUnsignedWord);
+    direct(
+      &table,
+      0x0a,
+      EEOperation::SetLessThanImmediate);
+    direct(
+      &table,
+      0x0b,
+      EEOperation::SetLessThanImmediateUnsigned);
+    direct(&table, 0x0c, EEOperation::AndImmediate);
+    direct(&table, 0x0d, EEOperation::OrImmediate);
+    direct(&table, 0x0e, EEOperation::XorImmediate);
+    direct(
+      &table,
+      0x0f,
+      EEOperation::LoadUpperImmediate,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x18,
+      EEOperation::AddImmediateDoubleword);
+    direct(
+      &table,
+      0x19,
+      EEOperation::AddImmediateUnsignedDoubleword);
+    return table;
+  }
+
+  DecodeTable makeSpecialTable()
+  {
+    DecodeTable table = {};
+    table.fill({
+      DecodeKind::Unsupported,
+      EEOperation::Nop,
+      0
+    });
+    const std::uint8_t reservedFunctions[] = {
+      0x01, 0x05, 0x0e, 0x15, 0x35, 0x37, 0x39, 0x3d
+    };
+    for (std::uint8_t function : reservedFunctions)
+    {
+      table[function].kind = DecodeKind::Reserved;
+    }
+
+    direct(
+      &table,
+      0x00,
+      EEOperation::ShiftLeftLogicalWord,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x02,
+      EEOperation::ShiftRightLogicalWord,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x03,
+      EEOperation::ShiftRightArithmeticWord,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x04,
+      EEOperation::ShiftLeftLogicalVariableWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x06,
+      EEOperation::ShiftRightLogicalVariableWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x07,
+      EEOperation::ShiftRightArithmeticVariableWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x14,
+      EEOperation::ShiftLeftLogicalVariableDoubleword,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x16,
+      EEOperation::ShiftRightLogicalVariableDoubleword,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x17,
+      EEOperation::ShiftRightArithmeticVariableDoubleword,
+      REGISTER_SHIFT_MASK);
+
+    direct(
+      &table,
+      0x20,
+      EEOperation::AddWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x21,
+      EEOperation::AddUnsignedWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x22,
+      EEOperation::SubtractWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x23,
+      EEOperation::SubtractUnsignedWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x24,
+      EEOperation::And,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x25,
+      EEOperation::Or,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x26,
+      EEOperation::Xor,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x27,
+      EEOperation::Nor,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x2a,
+      EEOperation::SetLessThan,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x2b,
+      EEOperation::SetLessThanUnsigned,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x2c,
+      EEOperation::AddDoubleword,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x2d,
+      EEOperation::AddUnsignedDoubleword,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x2e,
+      EEOperation::SubtractDoubleword,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x2f,
+      EEOperation::SubtractUnsignedDoubleword,
+      REGISTER_SHIFT_MASK);
+
+    direct(
+      &table,
+      0x38,
+      EEOperation::ShiftLeftLogicalDoubleword,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x3a,
+      EEOperation::ShiftRightLogicalDoubleword,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x3b,
+      EEOperation::ShiftRightArithmeticDoubleword,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x3c,
+      EEOperation::ShiftLeftLogicalDoubleword32,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x3e,
+      EEOperation::ShiftRightLogicalDoubleword32,
+      REGISTER_SOURCE_MASK);
+    direct(
+      &table,
+      0x3f,
+      EEOperation::ShiftRightArithmeticDoubleword32,
+      REGISTER_SOURCE_MASK);
+    return table;
+  }
+
+  const DecodeTable &primaryTable()
+  {
+    static const DecodeTable table = makePrimaryTable();
+    return table;
+  }
+
+  const DecodeTable &specialTable()
+  {
+    static const DecodeTable table = makeSpecialTable();
+    return table;
+  }
+
+  [[noreturn]] void reject(DecodeKind kind)
+  {
+    if (kind == DecodeKind::Reserved)
+    {
+      throw std::runtime_error(
+        "Reserved EE instruction encoding.");
+    }
+    throw std::runtime_error(
+      "Unsupported EE instruction encoding.");
+  }
+
+  EEInstruction fields(std::uint32_t raw)
+  {
+    EEInstruction instruction;
+    instruction.raw = raw;
+    instruction.opcode = (raw >> 26) & 0x3f;
+    instruction.sourceRegister = (raw >> 21) & 0x1f;
+    instruction.targetRegister = (raw >> 16) & 0x1f;
+    instruction.destinationRegister = (raw >> 11) & 0x1f;
+    instruction.shiftAmount = (raw >> 6) & 0x1f;
+    instruction.function = raw & 0x3f;
+    instruction.immediate = raw & 0xffff;
+    instruction.target = raw & 0x03ffffff;
+    return instruction;
+  }
+
+  void applyEntry(
+    const DecodeEntry &entry,
+    EEInstruction *instruction)
+  {
+    if (entry.kind != DecodeKind::Direct)
+    {
+      reject(entry.kind);
+    }
+    if ((instruction->raw & entry.requiredZeroMask) != 0)
+    {
+      reject(DecodeKind::Reserved);
+    }
+    instruction->operation = entry.operation;
+  }
+}
+
+EEInstruction decodeEEInstruction(std::uint32_t raw)
+{
+  EEInstruction instruction = fields(raw);
+  const DecodeEntry &primary =
+    primaryTable()[instruction.opcode];
+  if (primary.kind == DecodeKind::Special)
+  {
+    const DecodeEntry &special =
+      specialTable()[instruction.function];
+    applyEntry(special, &instruction);
+    if (raw == 0)
+    {
+      instruction.operation = EEOperation::Nop;
+    }
+    return instruction;
+  }
+
+  applyEntry(primary, &instruction);
+  return instruction;
+}

@@ -477,7 +477,7 @@ existing event and runner infrastructure:
 - [x] Fetch aligned 32-bit instructions through the EE memory map and reject
       unmapped or misaligned instruction accesses through architectural
       exceptions
-- [ ] Add table-driven EE instruction decoding with explicit rejection of
+- [x] Add table-driven EE instruction decoding with explicit rejection of
       reserved and unsupported encodings
 - [ ] Register the EE with the master scheduler at one instruction cycle per
       294.912 MHz master cycle
