@@ -442,7 +442,7 @@ GIF DMA channel wiring belongs to Milestone 4.
       rerunning the authentic VU1 transform for every displayed frame
 - [x] Add textured, blended, and depth-tested scenes as GS support expands
 
-### Graphics Path Diagnostics
+### Graphics Path Diagnostics Foundation
 
 Keep graphics diagnostics opt-in and outside `neko_core`, building on the
 existing event and runner infrastructure:
@@ -450,18 +450,9 @@ existing event and runner infrastructure:
 - [x] Add a structured GIF/GS trace in `neko_diagnostics` that decodes GIFtags
       (`NLOOP`, `EOP`, `FLG`, `NREG`, and descriptors), path ownership, and GS
       register writes instead of requiring raw qword inspection
-- [ ] Capture a draw-kick snapshot containing the primitive and shading modes,
-      active context, framebuffer format, scissor and offset state, and each
-      submitted vertex with its `RGBAQ` value
-- [ ] Report unsupported draw features by their decoded register fields and
-      values, while preserving strict failure behavior in the core
 - [x] Add a compact GIF transfer summary covering path requests, selections,
       stalls, transferred qwords, decoded tags and register writes, primitive
       and packet completion, and PATH3 mask transitions
-- [ ] Extend completion summaries with GS primitive counts, pixel writes, draw
-      bounds, and framebuffer hashes
-- [ ] Export selected GS framebuffer regions to a dependency-free portable
-      image format for inspecting external programs without frontend changes
 - [x] Add deterministic trace contract tests and keep formatting, streams, and
       file output out of hardware classes
 
@@ -479,6 +470,55 @@ existing event and runner infrastructure:
 - [x] Add deterministic save-state serialization
 - [x] Add frame hashes and subsystem traces for regression testing
 
+### EE Core Foundation
+
+- [ ] Add the R5900 architectural state: 32 128-bit general-purpose registers,
+      `PC`, `HI`, `LO`, `HI1`, `LO1`, and `SA`, with immutable register zero
+- [ ] Fetch aligned 32-bit instructions through the EE memory map and reject
+      unmapped or misaligned instruction accesses through architectural
+      exceptions
+- [ ] Add table-driven EE instruction decoding with explicit rejection of
+      reserved and unsupported encodings
+- [ ] Register the EE with the master scheduler at one instruction cycle per
+      294.912 MHz master cycle
+- [ ] Implement integer arithmetic, comparison, logic, and shift instructions
+      with the documented 32-bit sign-extension and 64-bit result rules
+- [ ] Implement multiply, divide, `HI`/`LO`, `HI1`/`LO1`, and shift-amount
+      register behavior with instruction-accurate latency where observable
+- [ ] Implement jumps, branches, likely branches, link behavior, and the
+      architectural branch delay slot
+- [ ] Implement signed and unsigned byte, halfword, word, and doubleword loads
+      and stores, including alignment and merge operations
+- [ ] Implement 128-bit `LQ`/`SQ` transfers and preserve full-width GPR values
+      across integer, memory, and coprocessor operations
+- [ ] Add bounded EE stepping and execution APIs that report stop reason,
+      current `PC`, cycle count, and pending exception state
+
+### EE COP0, Exceptions, and Interrupts
+
+- [ ] Add the initial COP0 register set, including `Status`, `Cause`, `EPC`,
+      `ErrorEPC`, `BadVAddr`, `Count`, and `Compare`
+- [ ] Implement reset, interrupt, address-error, arithmetic-overflow,
+      reserved-instruction, syscall, and breakpoint exceptions
+- [ ] Preserve branch-delay exception state through `Cause.BD` and the
+      documented `EPC` value
+- [ ] Deliver INTC and DMAC interrupt lines at EE instruction boundaries and
+      implement `ERET`
+- [ ] Add the direct-mapped kernel segments needed by initial guest programs;
+      defer TLB, cache, and scratchpad timing until selected software requires
+      them
+
+### EE Determinism and Conformance
+
+- [ ] Add structured EE issue, branch, memory, exception, and interrupt traces
+      stamped with the master cycle
+- [ ] Include all EE and COP0 architectural and in-flight state in reset,
+      save-state, frame-hash, and subsystem-trace contracts
+- [ ] Add focused hand-encoded conformance programs for arithmetic, delay
+      slots, memory access, exceptions, and interrupt entry/return
+- [ ] Compare repeated and save-state-resumed EE executions for identical
+      registers, memory, stop reasons, and trace hashes
+
 ### EE COP2 and VU Macro Mode
 
 - [ ] Implement EE COP2 branches and transfers: `BC2F`, `BC2FL`, `BC2T`,
@@ -490,6 +530,17 @@ existing event and runner infrastructure:
       agrees
 - [ ] Audit every macro-mode opcode in the official table and reject reserved
       COP2 encodings deterministically
+
+### EE COP1 and Multimedia Extensions
+
+- [ ] Implement the EE COP1 register file, control registers, transfers,
+      branches, and scalar single-precision instruction families
+- [ ] Match documented EE floating-point edge behavior with raw-bit reference
+      operations rather than host floating-point defaults
+- [ ] Implement the MMI packed-integer instruction families incrementally from
+      the requirements of selected guest programs
+- [ ] Add COP1 and MMI state to exception, trace, reset, and save-state
+      contracts as each family is introduced
 
 ### Guest Program Loading and Demo Migration
 
@@ -508,6 +559,21 @@ existing event and runner infrastructure:
       and integration tests after guest-program migration
 - [ ] Make guest executable loading the primary desktop execution path while
       retaining explicit diagnostic scene selection for development
+
+### Demand-Driven Graphics Diagnostics
+
+Add these when independently authored guest programs produce graphics failures
+that need more detail than the existing structured GIF/GS traces:
+
+- [ ] Report unsupported draw features by their decoded register fields and
+      values, while preserving strict failure behavior in the core
+- [ ] Capture a draw-kick snapshot containing the primitive and shading modes,
+      active context, framebuffer format, scissor and offset state, and each
+      submitted vertex with its `RGBAQ` value
+- [ ] Extend completion summaries with GS primitive counts, pixel writes, draw
+      bounds, and framebuffer hashes
+- [ ] Export selected GS framebuffer regions to a dependency-free portable
+      image format for inspecting external programs without frontend changes
 
 ### Demand-Driven Hardware Expansion
 
