@@ -56,6 +56,11 @@ write only the least-significant 16 bits. Odd effective addresses stop before
 the bus access with the appropriate load or store address-error state, so
 faulting stores cannot partially modify memory. Save-state format version 7
 includes the new store-address exception.
+Aligned word access adds `LW`, `LWU`, and `SW` through the same checked RAM
+data boundary. Loads assemble little-endian words and apply the documented
+sign or zero extension; stores write only GPR bits 31..0. Four-byte alignment,
+RAM-end boundaries, delay-slot execution, and fault continuation are covered
+without changing the version 7 save-state layout.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

@@ -284,7 +284,7 @@ TEST_CASE("EE Core scheduled execution")
 
   SECTION("Deferred instruction families stop explicitly")
   {
-    bus.write32(0, UINT32_C(0x8c000000));
+    bus.write32(0, UINT32_C(0xdc000000));
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -294,7 +294,7 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(
       core.stopReason() ==
       EEStopReason::UnsupportedInstruction);
-    REQUIRE(core.rejectedInstruction() == 0x8c000000);
+    REQUIRE(core.rejectedInstruction() == 0xdc000000);
   }
 
   SECTION("Host halt and restart preserve accumulated cycles")

@@ -771,6 +771,59 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::LoadWord:
+    case EEOperation::LoadWordUnsigned:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      if ((dataAddress & 3) != 0)
+      {
+        return raiseDataAccessException(
+          EEException::AddressErrorLoadOrFetch,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      std::uint32_t value = 0;
+      if (!attachedBus().readData32(dataAddress, &value))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      writeLowDoubleword(
+        immediateDestination,
+        instruction.operation == EEOperation::LoadWord
+          ? signExtendWord(value)
+          : value);
+      return true;
+    }
+    case EEOperation::StoreWord:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      if ((dataAddress & 3) != 0)
+      {
+        return raiseDataAccessException(
+          EEException::AddressErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      if (!attachedBus().writeData32(
+            dataAddress,
+            static_cast<std::uint32_t>(target)))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return true;
+    }
     case EEOperation::Jump:
       scheduleBranch(
         true,

@@ -653,6 +653,33 @@ TEST_CASE("EE halfword address faults survive save states")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("EE aligned word bus faults survive save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(
+    1,
+    {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+  original.eeBus().write32(
+    0,
+    (UINT32_C(0x27) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16));
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(
+    restored.eeCore().pendingException() ==
+    EEException::DataBusErrorLoad);
+  REQUIRE(
+    restored.eeCore().exceptionAddress() ==
+    EEMemoryMap::MAIN_MEMORY_SIZE);
+  REQUIRE(restored.eeCore().programCounter() == 0);
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;

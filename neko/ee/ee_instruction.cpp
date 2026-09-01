@@ -106,10 +106,13 @@ namespace
       EEOperation::AddImmediateUnsignedDoubleword);
     direct(&table, 0x20, EEOperation::LoadByte);
     direct(&table, 0x21, EEOperation::LoadHalfword);
+    direct(&table, 0x23, EEOperation::LoadWord);
     direct(&table, 0x24, EEOperation::LoadByteUnsigned);
     direct(&table, 0x25, EEOperation::LoadHalfwordUnsigned);
+    direct(&table, 0x27, EEOperation::LoadWordUnsigned);
     direct(&table, 0x28, EEOperation::StoreByte);
     direct(&table, 0x29, EEOperation::StoreHalfword);
+    direct(&table, 0x2b, EEOperation::StoreWord);
     direct(&table, 0x14, EEOperation::BranchEqualLikely);
     direct(&table, 0x15, EEOperation::BranchNotEqualLikely);
     direct(

@@ -95,7 +95,10 @@ enum class EEOperation : std::uint8_t
   StoreByte,
   LoadHalfword,
   LoadHalfwordUnsigned,
-  StoreHalfword
+  StoreHalfword,
+  LoadWord,
+  LoadWordUnsigned,
+  StoreWord
 };
 
 struct EEInstruction

@@ -260,6 +260,56 @@ bool EEBus::writeData16(
   return true;
 }
 
+bool EEBus::readData32(
+  std::uint32_t address,
+  std::uint32_t *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE word load requires an output value.");
+  }
+  requireAlignment(
+    address,
+    4,
+    "EE word load must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 4, &physicalAddress))
+  {
+    return false;
+  }
+  *value =
+    mainMemory[physicalAddress] |
+    (static_cast<std::uint32_t>(
+      mainMemory[physicalAddress + 1]) << 8) |
+    (static_cast<std::uint32_t>(
+      mainMemory[physicalAddress + 2]) << 16) |
+    (static_cast<std::uint32_t>(
+      mainMemory[physicalAddress + 3]) << 24);
+  return true;
+}
+
+bool EEBus::writeData32(
+  std::uint32_t address,
+  std::uint32_t value)
+{
+  requireAlignment(
+    address,
+    4,
+    "EE word store must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 4, &physicalAddress))
+  {
+    return false;
+  }
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    mainMemory[physicalAddress + index] =
+      static_cast<std::uint8_t>(value >> (index * 8));
+  }
+  return true;
+}
+
 std::uint32_t EEBus::read32(std::uint32_t address) const
 {
   requireAlignment(
