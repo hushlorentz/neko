@@ -36,7 +36,8 @@ enum class EEException : std::uint8_t
 {
   None,
   AddressErrorLoadOrFetch,
-  InstructionBusError
+  InstructionBusError,
+  ArithmeticOverflow
 };
 
 struct EEInstructionFetchResult
@@ -58,7 +59,9 @@ enum class EEStopReason : std::uint8_t
   HostHalt,
   FetchException,
   ReservedInstruction,
-  UnsupportedInstruction
+  UnsupportedInstruction,
+  ExecutionException,
+  UndefinedOperation
 };
 
 class EECore : public ClockedComponent
@@ -135,6 +138,25 @@ class EECore : public ClockedComponent
     EEInstructionFetchResult raiseFetchException(
       EEException type,
       std::uint32_t address);
+    bool executeInstruction(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    bool requireWordValue(
+      std::uint8_t registerIndex,
+      std::uint32_t address,
+      std::uint32_t instruction);
+    void writeLowDoubleword(
+      std::uint8_t registerIndex,
+      std::uint64_t value);
+    void writeWord(
+      std::uint8_t registerIndex,
+      std::uint32_t value);
+    bool raiseArithmeticOverflow(
+      std::uint32_t address,
+      std::uint32_t instruction);
+    bool stopUndefinedOperation(
+      std::uint32_t address,
+      std::uint32_t instruction);
 };
 
 #endif

@@ -491,6 +491,38 @@ TEST_CASE("Running EE scheduler state survives save states")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("EE integer execution exceptions survive save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(1, {0x7fffffff, 0});
+  original.eeCore().setGeneralRegister(2, {1, 0});
+  original.eeCore().setGeneralRegister(3, {0x1234, 0x5678});
+  original.eeBus().write32(
+    0,
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16) |
+    (UINT32_C(3) << 11) |
+    0x20);
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE_FALSE(restored.eeCore().clockActive());
+  REQUIRE(
+    restored.eeCore().stopReason() ==
+    EEStopReason::ExecutionException);
+  REQUIRE(
+    restored.eeCore().pendingException() ==
+    EEException::ArithmeticOverflow);
+  REQUIRE(restored.eeCore().rejectedInstruction() != 0);
+  REQUIRE(
+    restored.eeCore().generalRegister(3) ==
+    EERegister128{0x1234, 0x5678});
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;

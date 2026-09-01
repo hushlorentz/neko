@@ -481,7 +481,7 @@ existing event and runner infrastructure:
       reserved and unsupported encodings
 - [x] Register the EE with the master scheduler at one instruction cycle per
       294.912 MHz master cycle
-- [ ] Implement integer arithmetic, comparison, logic, and shift instructions
+- [x] Implement integer arithmetic, comparison, logic, and shift instructions
       with the documented 32-bit sign-extension and 64-bit result rules
 - [ ] Implement multiply, divide, `HI`/`LO`, `HI1`/`LO1`, and shift-amount
       register behavior with instruction-accurate latency where observable

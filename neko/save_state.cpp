@@ -1558,7 +1558,7 @@ void NekoSaveStateCodec::readEECore(
   core->exception = readEnum<EEException>(
     reader,
     static_cast<std::uint8_t>(
-      EEException::InstructionBusError),
+      EEException::ArithmeticOverflow),
     "EE exception");
   core->faultAddress = reader->readU32();
   core->state = readEnum<EEExecutionState>(
@@ -1569,7 +1569,7 @@ void NekoSaveStateCodec::readEECore(
   core->haltReason = readEnum<EEStopReason>(
     reader,
     static_cast<std::uint8_t>(
-      EEStopReason::UnsupportedInstruction),
+      EEStopReason::UndefinedOperation),
     "EE stop reason");
   core->cycles = reader->readU64();
   core->lastInstructionValid =

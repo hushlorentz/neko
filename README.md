@@ -19,7 +19,10 @@ currently recognizes the base integer arithmetic, comparison, logic, and shift
 families and distinguishes reserved encodings from deferred instruction
 families. The EE is a halted-by-default master-clock component; while running,
 each 294.912 MHz master cycle performs one fetch/decode step and records an
-explicit stop reason if fetching or decoding cannot continue.
+explicit stop reason if execution cannot continue. The first execution family
+implements integer arithmetic, comparisons, logic, and 32/64-bit shifts while
+preserving the upper 64 bits of each 128-bit GPR. Trapping overflow and
+manual-defined undefined word operands stop without writing the destination.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,
