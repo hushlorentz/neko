@@ -40,6 +40,7 @@ endif()
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/fp_register.cpp
+    neko/neko_system.cpp
     neko/ee/gif/gif.cpp
     neko/ee/gif/gif_path_arbiter.cpp
     neko/ee/gif/gif_path1.cpp
@@ -135,6 +136,7 @@ target_link_libraries(neko_diagnostics PUBLIC neko_core)
 add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/fp_register_tests.cpp
+    neko_tests/neko_system_tests.cpp
     neko_tests/gif/gif_tests.cpp
     neko_tests/gif/gif_path_arbiter_tests.cpp
     neko_tests/gif/gif_path1_tests.cpp

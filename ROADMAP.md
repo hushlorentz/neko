@@ -467,7 +467,7 @@ existing event and runner infrastructure:
 
 ## Milestone 4: System-Level Core
 
-- [ ] Add a `NekoSystem` owner for hardware components and global state
+- [x] Add a `NekoSystem` owner for hardware components and global state
 - [ ] Establish an integer master-clock scheduler
 - [ ] Run VUs at 147.456 MHz relative to the 294.912 MHz EE clock
 - [ ] Add EE, memory-map, DMA, GIF, GS, and interrupt coordination
