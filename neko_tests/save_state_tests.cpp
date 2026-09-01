@@ -680,6 +680,45 @@ TEST_CASE("EE aligned word bus faults survive save states")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("EE paired word merge continuation survives save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(1, {0x101, 0});
+  original.eeCore().setGeneralRegister(
+    2,
+    {UINT64_C(0x5566778899aabbcc), UINT64_MAX});
+  original.eeBus().writeData32(
+    0x100,
+    UINT32_C(0x33221100));
+  original.eeBus().writeData32(
+    0x104,
+    UINT32_C(0x88776684));
+  original.eeBus().write32(
+    0,
+    (UINT32_C(0x22) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16) |
+    3);
+  original.eeBus().write32(
+    4,
+    (UINT32_C(0x26) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16));
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    restored.eeCore().generalRegister(2).low ==
+    UINT64_C(0xffffffff84332211));
+  REQUIRE(restored.eeCore().generalRegister(2).high == UINT64_MAX);
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;

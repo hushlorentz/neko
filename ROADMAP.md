@@ -490,8 +490,8 @@ existing event and runner infrastructure:
 - [x] Implement signed and unsigned byte loads and byte stores
 - [x] Implement signed and unsigned halfword loads and halfword stores
 - [x] Implement signed and unsigned aligned word loads and word stores
-- [ ] Implement unaligned word merge operations and aligned and unaligned
-      doubleword loads and stores
+- [x] Implement unaligned word merge operations
+- [ ] Implement aligned and unaligned doubleword loads and stores
 - [ ] Implement 128-bit `LQ`/`SQ` transfers and preserve full-width GPR values
       across integer, memory, and coprocessor operations
 - [ ] Add bounded EE stepping and execution APIs that report stop reason,

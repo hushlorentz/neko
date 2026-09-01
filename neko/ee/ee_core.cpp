@@ -824,6 +824,135 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::LoadWordLeft:
+    case EEOperation::LoadWordRight:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      const std::uint32_t alignedAddress =
+        dataAddress & ~UINT32_C(3);
+      std::uint32_t memory = 0;
+      if (!attachedBus().readData32(
+            alignedAddress,
+            &memory))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      const std::uint8_t byteOffset = dataAddress & 3;
+      std::uint32_t result =
+        static_cast<std::uint32_t>(target);
+      if (instruction.operation == EEOperation::LoadWordLeft)
+      {
+        for (std::uint8_t memoryByte = 0;
+             memoryByte <= byteOffset;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            3 - byteOffset + memoryByte;
+          const std::uint32_t mask =
+            UINT32_C(0xff) << (registerByte * 8);
+          result =
+            (result & ~mask) |
+            (((memory >> (memoryByte * 8)) & 0xff) <<
+             (registerByte * 8));
+        }
+        writeLowDoubleword(
+          immediateDestination,
+          signExtendWord(result));
+      }
+      else
+      {
+        for (std::uint8_t memoryByte = byteOffset;
+             memoryByte < 4;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            memoryByte - byteOffset;
+          const std::uint32_t mask =
+            UINT32_C(0xff) << (registerByte * 8);
+          result =
+            (result & ~mask) |
+            (((memory >> (memoryByte * 8)) & 0xff) <<
+             (registerByte * 8));
+        }
+        writeLowDoubleword(
+          immediateDestination,
+          byteOffset == 0
+            ? signExtendWord(result)
+            : (target & UINT64_C(0xffffffff00000000)) |
+              result);
+      }
+      return true;
+    }
+    case EEOperation::StoreWordLeft:
+    case EEOperation::StoreWordRight:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      const std::uint32_t alignedAddress =
+        dataAddress & ~UINT32_C(3);
+      std::uint32_t memory = 0;
+      if (!attachedBus().readData32(
+            alignedAddress,
+            &memory))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      const std::uint8_t byteOffset = dataAddress & 3;
+      const std::uint32_t registerValue =
+        static_cast<std::uint32_t>(target);
+      if (instruction.operation == EEOperation::StoreWordLeft)
+      {
+        for (std::uint8_t memoryByte = 0;
+             memoryByte <= byteOffset;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            3 - byteOffset + memoryByte;
+          const std::uint32_t mask =
+            UINT32_C(0xff) << (memoryByte * 8);
+          memory =
+            (memory & ~mask) |
+            (((registerValue >> (registerByte * 8)) & 0xff) <<
+             (memoryByte * 8));
+        }
+      }
+      else
+      {
+        for (std::uint8_t memoryByte = byteOffset;
+             memoryByte < 4;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            memoryByte - byteOffset;
+          const std::uint32_t mask =
+            UINT32_C(0xff) << (memoryByte * 8);
+          memory =
+            (memory & ~mask) |
+            (((registerValue >> (registerByte * 8)) & 0xff) <<
+             (memoryByte * 8));
+        }
+      }
+      if (!attachedBus().writeData32(
+            alignedAddress,
+            memory))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return true;
+    }
     case EEOperation::Jump:
       scheduleBranch(
         true,

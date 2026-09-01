@@ -61,6 +61,12 @@ data boundary. Loads assemble little-endian words and apply the documented
 sign or zero extension; stores write only GPR bits 31..0. Four-byte alignment,
 RAM-end boundaries, delay-slot execution, and fault continuation are covered
 without changing the version 7 save-state layout.
+Unaligned 32-bit transfers add `LWL`, `LWR`, `SWL`, and `SWR`. Their merge
+behavior follows the manual's little-endian byte-position tables for all four
+effective-address offsets. `LWL` sign-extends the merged word, while `LWR`
+preserves GPR bits 63..32 unless it loads the word's sign bit. Paired merge
+instructions can transfer an arbitrary unaligned word, and save states preserve
+the intermediate destination between the pair.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

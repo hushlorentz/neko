@@ -98,7 +98,11 @@ enum class EEOperation : std::uint8_t
   StoreHalfword,
   LoadWord,
   LoadWordUnsigned,
-  StoreWord
+  StoreWord,
+  LoadWordLeft,
+  LoadWordRight,
+  StoreWordLeft,
+  StoreWordRight
 };
 
 struct EEInstruction

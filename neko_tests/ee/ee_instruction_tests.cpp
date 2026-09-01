@@ -341,4 +341,20 @@ TEST_CASE("EE byte memory instruction decoding")
     decodeEEInstruction(
       immediateInstruction(0x2b, 1, 2, 3)).operation ==
     EEOperation::StoreWord);
+  REQUIRE(
+    decodeEEInstruction(
+      immediateInstruction(0x22, 1, 2, 3)).operation ==
+    EEOperation::LoadWordLeft);
+  REQUIRE(
+    decodeEEInstruction(
+      immediateInstruction(0x26, 1, 2, 3)).operation ==
+    EEOperation::LoadWordRight);
+  REQUIRE(
+    decodeEEInstruction(
+      immediateInstruction(0x2a, 1, 2, 3)).operation ==
+    EEOperation::StoreWordLeft);
+  REQUIRE(
+    decodeEEInstruction(
+      immediateInstruction(0x2e, 1, 2, 3)).operation ==
+    EEOperation::StoreWordRight);
 }
