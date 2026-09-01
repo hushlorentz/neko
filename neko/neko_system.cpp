@@ -1,3 +1,5 @@
+#include <new>
+
 #include "neko_system.hpp"
 
 NekoSystem::NekoSystem() :
@@ -34,6 +36,54 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
   masterClock.registerComponent(gifDMACComponent, 1);
   masterClock.registerComponent(gsDisplayComponent, 1);
+}
+
+void NekoSystem::reset()
+{
+  // Reset all pointer-linked hardware as one coherent machine.
+  this->~NekoSystem();
+  new (this) NekoSystem();
+}
+
+void NekoSystem::setInput(const NekoInputState &input)
+{
+  inputState = input;
+}
+
+const NekoInputState &NekoSystem::input() const
+{
+  return inputState;
+}
+
+NekoFrameResult NekoSystem::runFrame()
+{
+  const std::uint64_t startingBoundary =
+    gsDisplayComponent.presentationBoundaryCount();
+  std::uint64_t elapsedCycles = 0;
+  while (gsDisplayComponent.presentationBoundaryCount() ==
+         startingBoundary)
+  {
+    clockMasterCycle();
+    ++elapsedCycles;
+  }
+
+  NekoFrameResult result;
+  result.masterCycles = elapsedCycles;
+  result.presentationBoundary =
+    gsDisplayComponent.presentationBoundaryCount();
+  result.video = videoOutput();
+  result.audio = audioOutput();
+  return result;
+}
+
+GSPresentation NekoSystem::videoOutput() const
+{
+  return gsDisplayComponent.presentation();
+}
+
+NekoAudioFrame NekoSystem::audioOutput() const
+{
+  return {};
 }
 
 VPU &NekoSystem::vu0()

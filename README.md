@@ -3,6 +3,12 @@ Just a fun project to work on
 
 See [ROADMAP.md](ROADMAP.md) for the current implementation plan.
 
+`NekoSystem` is the host-facing machine boundary. It accepts a latched
+controller state, executes to the next GS presentation boundary with
+`runFrame()`, returns video and 48 kHz stereo audio payloads, and resets all
+hardware and internal wiring together with `reset()`. Audio remains empty
+until SPU2 is required and implemented.
+
 Configure, build, and run the complete developer validation workflow with:
 
 ```sh

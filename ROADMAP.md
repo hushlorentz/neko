@@ -476,7 +476,7 @@ existing event and runner infrastructure:
 - [x] Model GS display circuits, vertical-blank timing, and presentation
       boundaries
 - [ ] Add IOP and SPU2 only when required by selected software
-- [ ] Define reset, frame execution, input, video, and audio interfaces
+- [x] Define reset, frame execution, input, video, and audio interfaces
 - [ ] Add deterministic save-state serialization
 - [ ] Add frame hashes and subsystem traces for regression testing
 

@@ -146,6 +146,7 @@ add_executable(neko_tests
     neko_tests/ee/interrupt_controller_tests.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp
+    neko_tests/system_interface_tests.cpp
     neko_tests/gif/gif_tests.cpp
     neko_tests/gif/gif_path_arbiter_tests.cpp
     neko_tests/gif/gif_path1_tests.cpp

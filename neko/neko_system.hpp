@@ -14,6 +14,7 @@
 #include "gs.hpp"
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
+#include "system_interfaces.hpp"
 #include "vif.hpp"
 #include "vpu.hpp"
 
@@ -31,6 +32,13 @@ class NekoSystem
     NekoSystem &operator=(const NekoSystem &) = delete;
     NekoSystem(NekoSystem &&) = delete;
     NekoSystem &operator=(NekoSystem &&) = delete;
+
+    void reset();
+    void setInput(const NekoInputState &input);
+    const NekoInputState &input() const;
+    NekoFrameResult runFrame();
+    GSPresentation videoOutput() const;
+    NekoAudioFrame audioOutput() const;
 
     VPU &vu0();
     const VPU &vu0() const;
@@ -82,6 +90,7 @@ class NekoSystem
     EEBus eeBusComponent;
     GIFDMACChannel gifDMACComponent;
     GSDisplay gsDisplayComponent;
+    NekoInputState inputState;
 
     void synchronizeInterrupts();
 };
