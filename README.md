@@ -77,6 +77,11 @@ instruction merges the documented portion of an aligned little-endian
 doubleword without an alignment exception. Paired left/right instructions
 transfer arbitrary unaligned eight-byte values, including across an aligned
 doubleword boundary, while preserving unaffected register or memory bytes.
+Full-width EE transfers add `LQ` and `SQ`. They load or store all 128 GPR bits
+through checked little-endian RAM access. As specified by the EE manual, these
+instructions round the effective address down to a 16-byte boundary instead
+of raising an alignment exception. Scalar integer and memory instructions
+continue to preserve the unrelated upper half of each GPR.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

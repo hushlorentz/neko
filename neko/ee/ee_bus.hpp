@@ -71,6 +71,12 @@ namespace EEVIFStatus
   constexpr std::uint32_t INTERRUPT = 1u << 11;
 }
 
+struct EEQuadword
+{
+  std::uint64_t low = 0;
+  std::uint64_t high = 0;
+};
+
 class EEBus
 {
   public:
@@ -111,6 +117,12 @@ class EEBus
     bool writeData64(
       std::uint32_t address,
       std::uint64_t value);
+    bool readData128(
+      std::uint32_t address,
+      EEQuadword *value) const;
+    bool writeData128(
+      std::uint32_t address,
+      const EEQuadword &value);
     std::uint32_t read32(std::uint32_t address) const;
     void write32(
       std::uint32_t address,

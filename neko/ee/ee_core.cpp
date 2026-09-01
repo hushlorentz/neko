@@ -1113,6 +1113,48 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::LoadQuadword:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate) &
+        ~UINT32_C(0x0f);
+      EEQuadword value;
+      if (!attachedBus().readData128(dataAddress, &value))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      if (immediateDestination != 0)
+      {
+        generalRegisters[immediateDestination] = {
+          value.low,
+          value.high
+        };
+      }
+      return true;
+    }
+    case EEOperation::StoreQuadword:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate) &
+        ~UINT32_C(0x0f);
+      const EERegister128 &value =
+        generalRegisters[immediateDestination];
+      if (!attachedBus().writeData128(
+            dataAddress,
+            {value.low, value.high}))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return true;
+    }
     case EEOperation::Jump:
       scheduleBranch(
         true,

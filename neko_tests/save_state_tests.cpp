@@ -789,6 +789,43 @@ TEST_CASE("EE paired doubleword merge continuation survives save states")
   REQUIRE(restored.eeCore().generalRegister(2).high == UINT64_MAX);
 }
 
+TEST_CASE("EE quadword continuation survives save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(1, {0x100, 0});
+  original.eeCore().setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x0123456789abcdef),
+      UINT64_C(0xfedcba9876543210)
+    });
+  original.eeBus().write32(
+    0,
+    (UINT32_C(0x1f) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16));
+  original.eeBus().write32(
+    4,
+    (UINT32_C(0x1e) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(3) << 16));
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE((
+    restored.eeCore().generalRegister(3) ==
+    EERegister128{
+      UINT64_C(0x0123456789abcdef),
+      UINT64_C(0xfedcba9876543210)
+    }));
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;

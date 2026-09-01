@@ -151,6 +151,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_instruction_tests.cpp
     neko_tests/ee/ee_integer_tests.cpp
     neko_tests/ee/ee_multiply_divide_tests.cpp
+    neko_tests/ee/ee_quadword_memory_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp
     neko_tests/ee/ee_byte_memory_tests.cpp
     neko_tests/ee/ee_halfword_memory_tests.cpp

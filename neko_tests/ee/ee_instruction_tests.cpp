@@ -151,6 +151,8 @@ TEST_CASE("EE base integer decoder tables")
     {0x19, EEOperation::AddImmediateUnsignedDoubleword},
     {0x1a, EEOperation::LoadDoublewordLeft},
     {0x1b, EEOperation::LoadDoublewordRight},
+    {0x1e, EEOperation::LoadQuadword},
+    {0x1f, EEOperation::StoreQuadword},
     {0x2c, EEOperation::StoreDoublewordLeft},
     {0x2d, EEOperation::StoreDoublewordRight}
   };

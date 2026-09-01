@@ -88,6 +88,22 @@ TEST_CASE("EE Main Memory Map Tests")
     bus.readData64(
       EEMemoryMap::MAIN_MEMORY_SIZE,
       &doubleword));
+  const EEQuadword storedQuadword = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  REQUIRE(bus.writeData128(0x20000120, storedQuadword));
+  EEQuadword loadedQuadword;
+  REQUIRE(bus.readData128(0xa0000120, &loadedQuadword));
+  REQUIRE(loadedQuadword.low == storedQuadword.low);
+  REQUIRE(loadedQuadword.high == storedQuadword.high);
+  REQUIRE_THROWS_WITH(
+    bus.writeData128(0x128, storedQuadword),
+    "EE quadword store must be naturally aligned.");
+  REQUIRE_FALSE(
+    bus.readData128(
+      EEMemoryMap::MAIN_MEMORY_SIZE,
+      &loadedQuadword));
 
   const GIFQuadword quadword = {{
     UINT32_C(0x01020304),

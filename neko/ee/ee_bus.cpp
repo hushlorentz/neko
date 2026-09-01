@@ -360,6 +360,63 @@ bool EEBus::writeData64(
   return true;
 }
 
+bool EEBus::readData128(
+  std::uint32_t address,
+  EEQuadword *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE quadword load requires an output value.");
+  }
+  requireAlignment(
+    address,
+    16,
+    "EE quadword load must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 16, &physicalAddress))
+  {
+    return false;
+  }
+  value->low = 0;
+  value->high = 0;
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    value->low |=
+      static_cast<std::uint64_t>(
+        mainMemory[physicalAddress + index]) <<
+      (index * 8);
+    value->high |=
+      static_cast<std::uint64_t>(
+        mainMemory[physicalAddress + 8 + index]) <<
+      (index * 8);
+  }
+  return true;
+}
+
+bool EEBus::writeData128(
+  std::uint32_t address,
+  const EEQuadword &value)
+{
+  requireAlignment(
+    address,
+    16,
+    "EE quadword store must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 16, &physicalAddress))
+  {
+    return false;
+  }
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    mainMemory[physicalAddress + index] =
+      static_cast<std::uint8_t>(value.low >> (index * 8));
+    mainMemory[physicalAddress + 8 + index] =
+      static_cast<std::uint8_t>(value.high >> (index * 8));
+  }
+  return true;
+}
+
 std::uint32_t EEBus::read32(std::uint32_t address) const
 {
   requireAlignment(
