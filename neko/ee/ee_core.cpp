@@ -1,5 +1,6 @@
 #include "ee_core.hpp"
 
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
@@ -13,6 +14,8 @@ namespace
     UINT64_C(0x80000000);
   constexpr std::uint64_t DOUBLEWORD_SIGN_BIT =
     UINT64_C(0x8000000000000000);
+  constexpr std::uint8_t MULTIPLY_LATENCY = 4;
+  constexpr std::uint8_t DIVIDE_LATENCY = 37;
 
   std::uint64_t signExtend16(std::uint16_t value)
   {
@@ -30,6 +33,41 @@ namespace
       return UINT64_C(0xffffffff00000000) | value;
     }
     return value;
+  }
+
+  std::int32_t signedWord(std::uint32_t value)
+  {
+    std::int32_t result = 0;
+    static_assert(sizeof(result) == sizeof(value), "");
+    std::memcpy(&result, &value, sizeof(result));
+    return result;
+  }
+
+  std::uint64_t multiplyWords(
+    std::uint32_t left,
+    std::uint32_t right,
+    bool signedOperands)
+  {
+    if (!signedOperands)
+    {
+      return
+        static_cast<std::uint64_t>(left) *
+        static_cast<std::uint64_t>(right);
+    }
+    const std::int64_t product =
+      static_cast<std::int64_t>(signedWord(left)) *
+      static_cast<std::int64_t>(signedWord(right));
+    return static_cast<std::uint64_t>(product);
+  }
+
+  std::uint64_t accumulatorValue(
+    std::uint64_t hi,
+    std::uint64_t lo)
+  {
+    return
+      (static_cast<std::uint64_t>(
+        static_cast<std::uint32_t>(hi)) << 32) |
+      static_cast<std::uint32_t>(lo);
   }
 
   bool isWordValue(std::uint64_t value)
@@ -138,6 +176,10 @@ void EECore::reset()
   lastAddress = 0;
   lastDecodedInstruction = {};
   rejectedInstructionValue = 0;
+  pendingMac0 = {};
+  pendingMac1 = {};
+  recentShiftAmountAccesses = 0;
+  recentShiftAmountReads = 0;
 }
 
 void EECore::attachBus(EEBus *newBus)
@@ -214,6 +256,15 @@ void EECore::clock()
   }
 
   ++cycles;
+  const bool hadPendingOperation =
+    pendingMultiplyDivideActive();
+  advancePendingMultiplyDivide(&pendingMac0, false);
+  advancePendingMultiplyDivide(&pendingMac1, true);
+  if (hadPendingOperation && pendingMultiplyDivideActive())
+  {
+    return;
+  }
+
   const EEInstructionFetchResult fetched =
     fetchInstruction();
   if (!fetched.succeeded)
@@ -245,6 +296,7 @@ void EECore::clock()
     return;
   }
 
+  recordShiftAmountAccess(decoded);
   lastDecodedInstruction = decoded;
   lastAddress = fetched.address;
   lastInstructionValid = true;
@@ -254,6 +306,12 @@ bool EECore::executeInstruction(
   const EEInstruction &instruction,
   std::uint32_t address)
 {
+  if (!validateShiftAmountOrdering(instruction, address))
+  {
+    rejectedInstructionValue = instruction.raw;
+    return false;
+  }
+
   const std::uint64_t source =
     generalRegisters[instruction.sourceRegister].low;
   const std::uint64_t target =
@@ -531,6 +589,169 @@ bool EECore::executeInstruction(
           static_cast<std::uint32_t>(
             instruction.immediate) << 16));
       return true;
+    case EEOperation::MoveFromHI:
+      writeLowDoubleword(destination, hiRegister);
+      return true;
+    case EEOperation::MoveToHI:
+      hiRegister = source;
+      return true;
+    case EEOperation::MoveFromLO:
+      writeLowDoubleword(destination, loRegister);
+      return true;
+    case EEOperation::MoveToLO:
+      loRegister = source;
+      return true;
+    case EEOperation::MoveFromHI1:
+      writeLowDoubleword(destination, hi1Register);
+      return true;
+    case EEOperation::MoveToHI1:
+      hi1Register = source;
+      return true;
+    case EEOperation::MoveFromLO1:
+      writeLowDoubleword(destination, lo1Register);
+      return true;
+    case EEOperation::MoveToLO1:
+      lo1Register = source;
+      return true;
+    case EEOperation::MoveFromShiftAmount:
+      writeLowDoubleword(destination, saRegister);
+      return true;
+    case EEOperation::MoveToShiftAmount:
+      saRegister = static_cast<std::uint32_t>(source);
+      return true;
+    case EEOperation::MoveByteCountToShiftAmount:
+      saRegister =
+        ((static_cast<std::uint32_t>(source) ^
+          instruction.immediate) & 0x0f) * 8;
+      return true;
+    case EEOperation::MoveHalfwordCountToShiftAmount:
+      saRegister =
+        ((static_cast<std::uint32_t>(source) ^
+          instruction.immediate) & 0x07) * 16;
+      return true;
+    case EEOperation::MultiplyWord:
+    case EEOperation::MultiplyUnsignedWord:
+    case EEOperation::MultiplyWord1:
+    case EEOperation::MultiplyUnsignedWord1:
+    case EEOperation::MultiplyAddWord:
+    case EEOperation::MultiplyAddUnsignedWord:
+    case EEOperation::MultiplyAddWord1:
+    case EEOperation::MultiplyAddUnsignedWord1:
+    {
+      if (!requireWordValue(
+            instruction.sourceRegister,
+            address,
+            instruction.raw) ||
+          !requireWordValue(
+            instruction.targetRegister,
+            address,
+            instruction.raw))
+      {
+        return false;
+      }
+      const bool pipeline1 =
+        instruction.operation == EEOperation::MultiplyWord1 ||
+        instruction.operation ==
+          EEOperation::MultiplyUnsignedWord1 ||
+        instruction.operation == EEOperation::MultiplyAddWord1 ||
+        instruction.operation ==
+          EEOperation::MultiplyAddUnsignedWord1;
+      const bool signedOperands =
+        instruction.operation == EEOperation::MultiplyWord ||
+        instruction.operation == EEOperation::MultiplyWord1 ||
+        instruction.operation == EEOperation::MultiplyAddWord ||
+        instruction.operation == EEOperation::MultiplyAddWord1;
+      const bool accumulate =
+        instruction.operation == EEOperation::MultiplyAddWord ||
+        instruction.operation ==
+          EEOperation::MultiplyAddUnsignedWord ||
+        instruction.operation == EEOperation::MultiplyAddWord1 ||
+        instruction.operation ==
+          EEOperation::MultiplyAddUnsignedWord1;
+      std::uint64_t result = multiplyWords(
+        static_cast<std::uint32_t>(source),
+        static_cast<std::uint32_t>(target),
+        signedOperands);
+      if (accumulate)
+      {
+        result += pipeline1
+          ? accumulatorValue(hi1Register, lo1Register)
+          : accumulatorValue(hiRegister, loRegister);
+      }
+      startPendingMultiplyDivide(
+        pipeline1,
+        MULTIPLY_LATENCY,
+        signExtendWord(static_cast<std::uint32_t>(result >> 32)),
+        signExtendWord(static_cast<std::uint32_t>(result)),
+        destination,
+        true);
+      return true;
+    }
+    case EEOperation::DivideWord:
+    case EEOperation::DivideUnsignedWord:
+    case EEOperation::DivideWord1:
+    case EEOperation::DivideUnsignedWord1:
+    {
+      if (!requireWordValue(
+            instruction.sourceRegister,
+            address,
+            instruction.raw) ||
+          !requireWordValue(
+            instruction.targetRegister,
+            address,
+            instruction.raw))
+      {
+        return false;
+      }
+      const std::uint32_t dividend =
+        static_cast<std::uint32_t>(source);
+      const std::uint32_t divisor =
+        static_cast<std::uint32_t>(target);
+      if (divisor == 0)
+      {
+        return stopUndefinedOperation(
+          address,
+          instruction.raw);
+      }
+      const bool pipeline1 =
+        instruction.operation == EEOperation::DivideWord1 ||
+        instruction.operation == EEOperation::DivideUnsignedWord1;
+      const bool signedOperands =
+        instruction.operation == EEOperation::DivideWord ||
+        instruction.operation == EEOperation::DivideWord1;
+      std::uint32_t quotient = 0;
+      std::uint32_t remainder = 0;
+      if (signedOperands &&
+          dividend == UINT32_C(0x80000000) &&
+          divisor == UINT32_MAX)
+      {
+        quotient = dividend;
+      }
+      else if (signedOperands)
+      {
+        const std::int64_t signedDividend =
+          signedWord(dividend);
+        const std::int64_t signedDivisor =
+          signedWord(divisor);
+        quotient = static_cast<std::uint32_t>(
+          signedDividend / signedDivisor);
+        remainder = static_cast<std::uint32_t>(
+          signedDividend % signedDivisor);
+      }
+      else
+      {
+        quotient = dividend / divisor;
+        remainder = dividend % divisor;
+      }
+      startPendingMultiplyDivide(
+        pipeline1,
+        DIVIDE_LATENCY,
+        signExtendWord(remainder),
+        signExtendWord(quotient),
+        0,
+        false);
+      return true;
+    }
   }
 
   return stopUndefinedOperation(
@@ -589,6 +810,103 @@ bool EECore::stopUndefinedOperation(
   haltReason = EEStopReason::UndefinedOperation;
   rejectedInstructionValue = instruction;
   return false;
+}
+
+bool EECore::pendingMultiplyDivideActive() const
+{
+  return pendingMac0.active || pendingMac1.active;
+}
+
+void EECore::advancePendingMultiplyDivide(
+  PendingMultiplyDivide *operation,
+  bool pipeline1)
+{
+  if (!operation->active)
+  {
+    return;
+  }
+  --operation->remainingCycles;
+  if (operation->remainingCycles != 0)
+  {
+    return;
+  }
+
+  if (pipeline1)
+  {
+    hi1Register = operation->hiResult;
+    lo1Register = operation->loResult;
+  }
+  else
+  {
+    hiRegister = operation->hiResult;
+    loRegister = operation->loResult;
+  }
+  if (operation->writeGeneralRegister)
+  {
+    writeLowDoubleword(
+      operation->generalRegister,
+      operation->generalRegisterResult);
+  }
+  *operation = {};
+}
+
+void EECore::startPendingMultiplyDivide(
+  bool pipeline1,
+  std::uint8_t latency,
+  std::uint64_t hiResult,
+  std::uint64_t loResult,
+  std::uint8_t generalRegister,
+  bool writeGeneralRegister)
+{
+  PendingMultiplyDivide &operation =
+    pipeline1 ? pendingMac1 : pendingMac0;
+  operation.active = true;
+  operation.remainingCycles = latency;
+  operation.hiResult = hiResult;
+  operation.loResult = loResult;
+  operation.writeGeneralRegister = writeGeneralRegister;
+  operation.generalRegister = generalRegister;
+  operation.generalRegisterResult = loResult;
+}
+
+bool EECore::validateShiftAmountOrdering(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  const bool restore =
+    instruction.operation == EEOperation::MoveToShiftAmount;
+  const bool calculate =
+    instruction.operation ==
+      EEOperation::MoveByteCountToShiftAmount ||
+    instruction.operation ==
+      EEOperation::MoveHalfwordCountToShiftAmount;
+  if ((restore && (recentShiftAmountAccesses & 0x07) != 0) ||
+      (calculate && (recentShiftAmountReads & 0x07) != 0))
+  {
+    return stopUndefinedOperation(address, instruction.raw);
+  }
+  return true;
+}
+
+void EECore::recordShiftAmountAccess(
+  const EEInstruction &instruction)
+{
+  const bool reads =
+    instruction.operation == EEOperation::MoveFromShiftAmount;
+  const bool accesses =
+    reads ||
+    instruction.operation ==
+      EEOperation::MoveByteCountToShiftAmount ||
+    instruction.operation ==
+      EEOperation::MoveHalfwordCountToShiftAmount;
+  recentShiftAmountAccesses =
+    static_cast<std::uint8_t>(
+      ((recentShiftAmountAccesses << 1) |
+       (accesses ? 1 : 0)) & 0x07);
+  recentShiftAmountReads =
+    static_cast<std::uint8_t>(
+      ((recentShiftAmountReads << 1) |
+       (reads ? 1 : 0)) & 0x07);
 }
 
 EEExecutionState EECore::executionState() const

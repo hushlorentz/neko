@@ -113,6 +113,17 @@ class EECore : public ClockedComponent
   private:
     friend class NekoSaveStateCodec;
 
+    struct PendingMultiplyDivide
+    {
+      bool active = false;
+      std::uint8_t remainingCycles = 0;
+      std::uint64_t hiResult = 0;
+      std::uint64_t loResult = 0;
+      bool writeGeneralRegister = false;
+      std::uint8_t generalRegister = 0;
+      std::uint64_t generalRegisterResult = 0;
+    };
+
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
     std::uint32_t pc = 0;
@@ -131,6 +142,10 @@ class EECore : public ClockedComponent
     std::uint32_t lastAddress = 0;
     EEInstruction lastDecodedInstruction;
     std::uint32_t rejectedInstructionValue = 0;
+    PendingMultiplyDivide pendingMac0;
+    PendingMultiplyDivide pendingMac1;
+    std::uint8_t recentShiftAmountAccesses = 0;
+    std::uint8_t recentShiftAmountReads = 0;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);
@@ -157,6 +172,22 @@ class EECore : public ClockedComponent
     bool stopUndefinedOperation(
       std::uint32_t address,
       std::uint32_t instruction);
+    bool pendingMultiplyDivideActive() const;
+    void advancePendingMultiplyDivide(
+      PendingMultiplyDivide *operation,
+      bool pipeline1);
+    void startPendingMultiplyDivide(
+      bool pipeline1,
+      std::uint8_t latency,
+      std::uint64_t hiResult,
+      std::uint64_t loResult,
+      std::uint8_t generalRegister,
+      bool writeGeneralRegister);
+    bool validateShiftAmountOrdering(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    void recordShiftAmountAccess(
+      const EEInstruction &instruction);
 };
 
 #endif

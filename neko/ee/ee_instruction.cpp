@@ -9,13 +9,19 @@ namespace
     UINT32_C(0x03e00000);
   constexpr std::uint32_t REGISTER_SHIFT_MASK =
     UINT32_C(0x000007c0);
+  constexpr std::uint32_t REGISTER_TARGET_MASK =
+    UINT32_C(0x001f0000);
+  constexpr std::uint32_t REGISTER_DESTINATION_MASK =
+    UINT32_C(0x0000f800);
 
   enum class DecodeKind : std::uint8_t
   {
     Reserved,
     Unsupported,
     Direct,
-    Special
+    Special,
+    Regimm,
+    Mmi
   };
 
   struct DecodeEntry
@@ -49,6 +55,8 @@ namespace
       0
     });
     table[0x00].kind = DecodeKind::Special;
+    table[0x01].kind = DecodeKind::Regimm;
+    table[0x1c].kind = DecodeKind::Mmi;
     table[0x13].kind = DecodeKind::Reserved;
     table[0x1d].kind = DecodeKind::Reserved;
     table[0x3b].kind = DecodeKind::Reserved;
@@ -146,6 +154,56 @@ namespace
       0x17,
       EEOperation::ShiftRightArithmeticVariableDoubleword,
       REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x10,
+      EEOperation::MoveFromHI,
+      REGISTER_SOURCE_MASK |
+        REGISTER_TARGET_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x11,
+      EEOperation::MoveToHI,
+      REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x12,
+      EEOperation::MoveFromLO,
+      REGISTER_SOURCE_MASK |
+        REGISTER_TARGET_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x13,
+      EEOperation::MoveToLO,
+      REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x18,
+      EEOperation::MultiplyWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x19,
+      EEOperation::MultiplyUnsignedWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x1a,
+      EEOperation::DivideWord,
+      REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x1b,
+      EEOperation::DivideUnsignedWord,
+      REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
 
     direct(
       &table,
@@ -217,6 +275,20 @@ namespace
       0x2f,
       EEOperation::SubtractUnsignedDoubleword,
       REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x28,
+      EEOperation::MoveFromShiftAmount,
+      REGISTER_SOURCE_MASK |
+        REGISTER_TARGET_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x29,
+      EEOperation::MoveToShiftAmount,
+      REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
 
     direct(
       &table,
@@ -251,6 +323,106 @@ namespace
     return table;
   }
 
+  DecodeTable makeRegimmTable()
+  {
+    DecodeTable table = {};
+    table.fill({
+      DecodeKind::Unsupported,
+      EEOperation::Nop,
+      0
+    });
+    direct(
+      &table,
+      0x18,
+      EEOperation::MoveByteCountToShiftAmount);
+    direct(
+      &table,
+      0x19,
+      EEOperation::MoveHalfwordCountToShiftAmount);
+    return table;
+  }
+
+  DecodeTable makeMmiTable()
+  {
+    DecodeTable table = {};
+    table.fill({
+      DecodeKind::Unsupported,
+      EEOperation::Nop,
+      0
+    });
+    direct(
+      &table,
+      0x00,
+      EEOperation::MultiplyAddWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x01,
+      EEOperation::MultiplyAddUnsignedWord,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x10,
+      EEOperation::MoveFromHI1,
+      REGISTER_SOURCE_MASK |
+        REGISTER_TARGET_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x11,
+      EEOperation::MoveToHI1,
+      REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x12,
+      EEOperation::MoveFromLO1,
+      REGISTER_SOURCE_MASK |
+        REGISTER_TARGET_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x13,
+      EEOperation::MoveToLO1,
+      REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x18,
+      EEOperation::MultiplyWord1,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x19,
+      EEOperation::MultiplyUnsignedWord1,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x1a,
+      EEOperation::DivideWord1,
+      REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x1b,
+      EEOperation::DivideUnsignedWord1,
+      REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x20,
+      EEOperation::MultiplyAddWord1,
+      REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x21,
+      EEOperation::MultiplyAddUnsignedWord1,
+      REGISTER_SHIFT_MASK);
+    return table;
+  }
+
   const DecodeTable &primaryTable()
   {
     static const DecodeTable table = makePrimaryTable();
@@ -260,6 +432,18 @@ namespace
   const DecodeTable &specialTable()
   {
     static const DecodeTable table = makeSpecialTable();
+    return table;
+  }
+
+  const DecodeTable &regimmTable()
+  {
+    static const DecodeTable table = makeRegimmTable();
+    return table;
+  }
+
+  const DecodeTable &mmiTable()
+  {
+    static const DecodeTable table = makeMmiTable();
     return table;
   }
 
@@ -335,6 +519,20 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
     {
       instruction.operation = EEOperation::Nop;
     }
+    return instruction;
+  }
+  if (primary.kind == DecodeKind::Regimm)
+  {
+    applyEntry(
+      regimmTable()[instruction.targetRegister],
+      &instruction);
+    return instruction;
+  }
+  if (primary.kind == DecodeKind::Mmi)
+  {
+    applyEntry(
+      mmiTable()[instruction.function],
+      &instruction);
     return instruction;
   }
 

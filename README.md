@@ -23,6 +23,15 @@ explicit stop reason if execution cannot continue. The first execution family
 implements integer arithmetic, comparisons, logic, and 32/64-bit shifts while
 preserving the upper 64 bits of each 128-bit GPR. Trapping overflow and
 manual-defined undefined word operands stop without writing the destination.
+The integer MAC slice implements signed and unsigned `MULT`, `MADD`, and
+`DIV` families on both `HI`/`LO` pipelines, three-operand low-product
+writeback, register transfers, and `SA` moves/count calculations. Multiply
+results become visible after the documented 4 cycles and divide results after
+37 cycles, including the signed-minimum divide case. The current single-issue
+reference model conservatively blocks later issue during those cycles;
+independent instruction overlap and throughput belong to the future
+superscalar timing model. In-flight results and their remaining latency are
+part of save states.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

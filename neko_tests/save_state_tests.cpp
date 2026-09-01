@@ -15,7 +15,7 @@ namespace
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 156;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 736;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 794;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -523,6 +523,39 @@ TEST_CASE("EE integer execution exceptions survive save states")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("In-flight EE multiply latency survives save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(1, {6, 0});
+  original.eeCore().setGeneralRegister(2, {7, 0});
+  original.eeBus().write32(
+    0,
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16) |
+    (UINT32_C(3) << 11) |
+    0x18);
+  original.eeCore().startExecution(0);
+  original.runMasterCycles(2);
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(restored.eeCore().lo() == 0);
+  REQUIRE(restored.eeCore().generalRegister(3).low == 0);
+
+  original.runMasterCycles(2);
+  restored.runMasterCycles(2);
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(restored.eeCore().lo() == 0);
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(restored.eeCore().lo() == 42);
+  REQUIRE(restored.eeCore().generalRegister(3).low == 42);
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;
@@ -536,7 +569,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 4;
+  invalid[8] = 5;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 

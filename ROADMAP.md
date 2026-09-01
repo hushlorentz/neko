@@ -483,7 +483,7 @@ existing event and runner infrastructure:
       294.912 MHz master cycle
 - [x] Implement integer arithmetic, comparison, logic, and shift instructions
       with the documented 32-bit sign-extension and 64-bit result rules
-- [ ] Implement multiply, divide, `HI`/`LO`, `HI1`/`LO1`, and shift-amount
+- [x] Implement multiply, divide, `HI`/`LO`, `HI1`/`LO1`, and shift-amount
       register behavior with instruction-accurate latency where observable
 - [ ] Implement jumps, branches, likely branches, link behavior, and the
       architectural branch delay slot

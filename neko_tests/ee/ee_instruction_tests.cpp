@@ -188,9 +188,6 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
     REQUIRE_THROWS_WITH(
       decodeEEInstruction(UINT32_C(0x40000000)),
       "Unsupported EE instruction encoding.");
-    REQUIRE_THROWS_WITH(
-      decodeEEInstruction(UINT32_C(0x70000000)),
-      "Unsupported EE instruction encoding.");
   }
 
   SECTION("Reserved SPECIAL functions are distinguished")
@@ -214,5 +211,47 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
       decodeEEInstruction(
         immediateInstruction(0x0f, 1, 2, 3)),
       "Reserved EE instruction encoding.");
+  }
+}
+
+TEST_CASE("EE multiply divide and SA decoder tables")
+{
+  struct Contract
+  {
+    std::uint32_t instruction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {registerInstruction(0x10, 0, 0, 3), EEOperation::MoveFromHI},
+    {registerInstruction(0x11, 1, 0, 0), EEOperation::MoveToHI},
+    {registerInstruction(0x12, 0, 0, 3), EEOperation::MoveFromLO},
+    {registerInstruction(0x13, 1, 0, 0), EEOperation::MoveToLO},
+    {registerInstruction(0x18, 1, 2, 3), EEOperation::MultiplyWord},
+    {registerInstruction(0x19, 1, 2, 3), EEOperation::MultiplyUnsignedWord},
+    {registerInstruction(0x1a, 1, 2, 0), EEOperation::DivideWord},
+    {registerInstruction(0x1b, 1, 2, 0), EEOperation::DivideUnsignedWord},
+    {registerInstruction(0x28, 0, 0, 3), EEOperation::MoveFromShiftAmount},
+    {registerInstruction(0x29, 1, 0, 0), EEOperation::MoveToShiftAmount},
+    {UINT32_C(0x70000000) | registerInstruction(0x00, 1, 2, 3), EEOperation::MultiplyAddWord},
+    {UINT32_C(0x70000000) | registerInstruction(0x01, 1, 2, 3), EEOperation::MultiplyAddUnsignedWord},
+    {UINT32_C(0x70000000) | registerInstruction(0x10, 0, 0, 3), EEOperation::MoveFromHI1},
+    {UINT32_C(0x70000000) | registerInstruction(0x11, 1, 0, 0), EEOperation::MoveToHI1},
+    {UINT32_C(0x70000000) | registerInstruction(0x12, 0, 0, 3), EEOperation::MoveFromLO1},
+    {UINT32_C(0x70000000) | registerInstruction(0x13, 1, 0, 0), EEOperation::MoveToLO1},
+    {UINT32_C(0x70000000) | registerInstruction(0x18, 1, 2, 3), EEOperation::MultiplyWord1},
+    {UINT32_C(0x70000000) | registerInstruction(0x19, 1, 2, 3), EEOperation::MultiplyUnsignedWord1},
+    {UINT32_C(0x70000000) | registerInstruction(0x1a, 1, 2, 0), EEOperation::DivideWord1},
+    {UINT32_C(0x70000000) | registerInstruction(0x1b, 1, 2, 0), EEOperation::DivideUnsignedWord1},
+    {UINT32_C(0x70000000) | registerInstruction(0x20, 1, 2, 3), EEOperation::MultiplyAddWord1},
+    {UINT32_C(0x70000000) | registerInstruction(0x21, 1, 2, 3), EEOperation::MultiplyAddUnsignedWord1},
+    {immediateInstruction(0x01, 1, 0x18, 5), EEOperation::MoveByteCountToShiftAmount},
+    {immediateInstruction(0x01, 1, 0x19, 5), EEOperation::MoveHalfwordCountToShiftAmount}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    REQUIRE(
+      decodeEEInstruction(contract.instruction).operation ==
+      contract.operation);
   }
 }

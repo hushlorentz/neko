@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 3;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 4;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1286,6 +1286,14 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.lastDecodedInstruction;
   destination->eeCoreComponent.rejectedInstructionValue =
     source->eeCoreComponent.rejectedInstructionValue;
+  destination->eeCoreComponent.pendingMac0 =
+    source->eeCoreComponent.pendingMac0;
+  destination->eeCoreComponent.pendingMac1 =
+    source->eeCoreComponent.pendingMac1;
+  destination->eeCoreComponent.recentShiftAmountAccesses =
+    source->eeCoreComponent.recentShiftAmountAccesses;
+  destination->eeCoreComponent.recentShiftAmountReads =
+    source->eeCoreComponent.recentShiftAmountReads;
   destination->interruptControllerComponent.statusRegister =
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
@@ -1538,6 +1546,21 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeU32(core.lastAddress);
   writer->writeU32(core.lastDecodedInstruction.raw);
   writer->writeU32(core.rejectedInstructionValue);
+  const auto writePending =
+    [writer](const EECore::PendingMultiplyDivide &operation)
+    {
+      writer->writeBool(operation.active);
+      writer->writeU8(operation.remainingCycles);
+      writer->writeU64(operation.hiResult);
+      writer->writeU64(operation.loResult);
+      writer->writeBool(operation.writeGeneralRegister);
+      writer->writeU8(operation.generalRegister);
+      writer->writeU64(operation.generalRegisterResult);
+    };
+  writePending(core.pendingMac0);
+  writePending(core.pendingMac1);
+  writer->writeU8(core.recentShiftAmountAccesses);
+  writer->writeU8(core.recentShiftAmountReads);
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1577,6 +1600,49 @@ void NekoSaveStateCodec::readEECore(
   core->lastAddress = reader->readU32();
   const std::uint32_t lastInstruction = reader->readU32();
   core->rejectedInstructionValue = reader->readU32();
+  const auto readPending =
+    [reader](
+      EECore::PendingMultiplyDivide *operation,
+      const char *label)
+    {
+      operation->active = reader->readBool(label);
+      operation->remainingCycles = reader->readU8();
+      operation->hiResult = reader->readU64();
+      operation->loResult = reader->readU64();
+      operation->writeGeneralRegister =
+        reader->readBool(label);
+      operation->generalRegister = reader->readU8();
+      operation->generalRegisterResult = reader->readU64();
+      require(
+        !operation->active ||
+          (operation->remainingCycles >= 1 &&
+           operation->remainingCycles <= 37),
+        "EE pending multiply/divide latency is invalid");
+      require(
+        operation->generalRegister <
+          EECore::GENERAL_REGISTER_COUNT,
+        "EE pending multiply/divide register is invalid");
+      require(
+        operation->writeGeneralRegister ||
+          operation->generalRegister == 0,
+        "EE pending divide contains a destination register");
+    };
+  readPending(
+    &core->pendingMac0,
+    "EE MAC0 pending flag");
+  readPending(
+    &core->pendingMac1,
+    "EE MAC1 pending flag");
+  core->recentShiftAmountAccesses = reader->readU8();
+  core->recentShiftAmountReads = reader->readU8();
+  require(
+    (core->recentShiftAmountAccesses & 0xf8) == 0 &&
+      (core->recentShiftAmountReads & 0xf8) == 0,
+    "EE shift-amount ordering history is invalid");
+  require(
+    (core->recentShiftAmountReads &
+      ~core->recentShiftAmountAccesses) == 0,
+    "EE shift-amount read history is inconsistent");
   core->lastDecodedInstruction = {};
   if (core->lastInstructionValid)
   {
@@ -1604,6 +1670,9 @@ void NekoSaveStateCodec::readEECore(
     core->lastInstructionValid ||
       (core->lastAddress == 0 && lastInstruction == 0),
     "EE invalid last instruction contains state");
+  require(
+    !(core->pendingMac0.active && core->pendingMac1.active),
+    "EE reference core has concurrent multiply/divide state");
 }
 
 void NekoSaveStateCodec::writeVPU(

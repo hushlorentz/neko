@@ -45,7 +45,31 @@ enum class EEOperation : std::uint8_t
   XorImmediate,
   LoadUpperImmediate,
   AddImmediateDoubleword,
-  AddImmediateUnsignedDoubleword
+  AddImmediateUnsignedDoubleword,
+  MoveFromHI,
+  MoveToHI,
+  MoveFromLO,
+  MoveToLO,
+  MultiplyWord,
+  MultiplyUnsignedWord,
+  DivideWord,
+  DivideUnsignedWord,
+  MultiplyAddWord,
+  MultiplyAddUnsignedWord,
+  MoveFromHI1,
+  MoveToHI1,
+  MoveFromLO1,
+  MoveToLO1,
+  MultiplyWord1,
+  MultiplyUnsignedWord1,
+  DivideWord1,
+  DivideUnsignedWord1,
+  MultiplyAddWord1,
+  MultiplyAddUnsignedWord1,
+  MoveFromShiftAmount,
+  MoveToShiftAmount,
+  MoveByteCountToShiftAmount,
+  MoveHalfwordCountToShiftAmount
 };
 
 struct EEInstruction
