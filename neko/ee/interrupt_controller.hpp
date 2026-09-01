@@ -6,6 +6,8 @@
 namespace EEInterruptSource
 {
   constexpr std::uint8_t GS = 0;
+  constexpr std::uint8_t VBLANK_START = 2;
+  constexpr std::uint8_t VBLANK_END = 3;
   constexpr std::uint8_t VIF0 = 4;
   constexpr std::uint8_t VIF1 = 5;
   constexpr std::uint8_t VU0 = 6;

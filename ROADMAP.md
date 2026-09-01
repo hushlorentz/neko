@@ -473,7 +473,7 @@ existing event and runner infrastructure:
 - [x] Add EE, memory-map, DMA, GIF, GS, and interrupt coordination
 - [x] Connect GIF DMAC channel 2 to the proven PATH3 transport, including
       normal and chain-mode progress, backpressure, completion, and interrupts
-- [ ] Model GS display circuits, vertical-blank timing, and presentation
+- [x] Model GS display circuits, vertical-blank timing, and presentation
       boundaries
 - [ ] Add IOP and SPU2 only when required by selected software
 - [ ] Define reset, frame execution, input, video, and audio interfaces

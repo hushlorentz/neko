@@ -11,6 +11,7 @@ class GIFRegisters;
 class GIFDMACChannel;
 class GIFPath3Transfer;
 class GS;
+class GSDisplay;
 class VIF;
 
 namespace EEMemoryMap
@@ -50,6 +51,15 @@ namespace EEMemoryMap
   constexpr std::uint32_t INTC_MASK = 0x1000f010;
 
   constexpr std::uint32_t GS_BUSDIR = 0x12001040;
+  constexpr std::uint32_t GS_PMODE = 0x12000000;
+  constexpr std::uint32_t GS_SMODE2 = 0x12000020;
+  constexpr std::uint32_t GS_DISPFB1 = 0x12000070;
+  constexpr std::uint32_t GS_DISPLAY1 = 0x12000080;
+  constexpr std::uint32_t GS_DISPFB2 = 0x12000090;
+  constexpr std::uint32_t GS_DISPLAY2 = 0x120000a0;
+  constexpr std::uint32_t GS_BGCOLOR = 0x120000e0;
+  constexpr std::uint32_t GS_CSR = 0x12001000;
+  constexpr std::uint32_t GS_IMR = 0x12001010;
 }
 
 namespace EEVIFStatus
@@ -72,6 +82,7 @@ class EEBus
       GS *gs,
       EEInterruptController *interrupts);
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
+    void attachGSDisplay(GSDisplay *gsDisplay);
 
     std::uint32_t read32(std::uint32_t address) const;
     void write32(
@@ -93,6 +104,7 @@ class EEBus
       std::uint32_t *physicalAddress) const;
     std::uint32_t vifStatus(const VIF &vif) const;
     GIFDMACChannel &attachedGIFDMAC() const;
+    GSDisplay &attachedGSDisplay() const;
 
     VIF *vif0Component;
     VIF *vif1Component;
@@ -101,6 +113,7 @@ class EEBus
     GS *gsComponent;
     EEInterruptController *interruptController;
     GIFDMACChannel *gifDMACChannel = nullptr;
+    GSDisplay *gsDisplayCircuit = nullptr;
     std::vector<std::uint8_t> mainMemory;
 };
 

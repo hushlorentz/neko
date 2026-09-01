@@ -5,6 +5,7 @@
 #include "gif_dmac_channel.hpp"
 #include "gif_path3.hpp"
 #include "gs.hpp"
+#include "gs_display.hpp"
 #include "interrupt_controller.hpp"
 #include "vif.hpp"
 
@@ -93,6 +94,21 @@ void EEBus::attachGIFDMACChannel(GIFDMACChannel *gifDMAC)
   gifDMACChannel = gifDMAC;
 }
 
+void EEBus::attachGSDisplay(GSDisplay *gsDisplay)
+{
+  if (gsDisplay == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires a non-null GS display.");
+  }
+  if (gsDisplayCircuit != nullptr)
+  {
+    throw std::logic_error(
+      "EE bus GS display is already attached.");
+  }
+  gsDisplayCircuit = gsDisplay;
+}
+
 std::uint32_t EEBus::vifStatus(const VIF &vif) const
 {
   std::uint32_t status = 0;
@@ -125,6 +141,16 @@ GIFDMACChannel &EEBus::attachedGIFDMAC() const
       "EE bus GIF DMAC channel is not attached.");
   }
   return *gifDMACChannel;
+}
+
+GSDisplay &EEBus::attachedGSDisplay() const
+{
+  if (gsDisplayCircuit == nullptr)
+  {
+    throw std::logic_error(
+      "EE bus GS display is not attached.");
+  }
+  return *gsDisplayCircuit;
 }
 
 std::uint32_t EEBus::read32(std::uint32_t address) const
@@ -280,6 +306,16 @@ std::uint64_t EEBus::read64(std::uint32_t address)
   {
     return gsComponent->hostInterfaceReversed() ? 1 : 0;
   }
+  if (address == EEMemoryMap::GS_CSR)
+  {
+    return attachedGSDisplay().readPrivilegedRegister(
+      GSDisplayPrivilegedRegister::CSR);
+  }
+  if (address == EEMemoryMap::GS_IMR)
+  {
+    return attachedGSDisplay().readPrivilegedRegister(
+      GSDisplayPrivilegedRegister::IMR);
+  }
   return
     read32(address) |
     (static_cast<std::uint64_t>(read32(address + 4)) << 32);
@@ -299,6 +335,56 @@ void EEBus::write64(
       GSPrivilegedRegisterAddress::BUSDIR,
       value);
     return;
+  }
+  switch (address)
+  {
+    case EEMemoryMap::GS_PMODE:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::PMODE,
+        value);
+      return;
+    case EEMemoryMap::GS_SMODE2:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::SMODE2,
+        value);
+      return;
+    case EEMemoryMap::GS_DISPFB1:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::DISPFB1,
+        value);
+      return;
+    case EEMemoryMap::GS_DISPLAY1:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::DISPLAY1,
+        value);
+      return;
+    case EEMemoryMap::GS_DISPFB2:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::DISPFB2,
+        value);
+      return;
+    case EEMemoryMap::GS_DISPLAY2:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::DISPLAY2,
+        value);
+      return;
+    case EEMemoryMap::GS_BGCOLOR:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::BGCOLOR,
+        value);
+      return;
+    case EEMemoryMap::GS_CSR:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::CSR,
+        value);
+      return;
+    case EEMemoryMap::GS_IMR:
+      attachedGSDisplay().writePrivilegedRegister(
+        GSDisplayPrivilegedRegister::IMR,
+        value);
+      return;
+    default:
+      break;
   }
   write32(address, static_cast<std::uint32_t>(value));
   write32(address + 4, static_cast<std::uint32_t>(value >> 32));

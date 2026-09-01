@@ -261,6 +261,17 @@ class GS : public GIFRegisterWriteHandler
       std::uint16_t x,
       std::uint16_t y,
       std::uint32_t value);
+    std::uint32_t readDisplayPSMCT32(
+      std::uint16_t basePointer,
+      std::uint8_t bufferWidth,
+      std::uint16_t x,
+      std::uint16_t y) const;
+    void writeDisplayPSMCT32(
+      std::uint16_t basePointer,
+      std::uint8_t bufferWidth,
+      std::uint16_t x,
+      std::uint16_t y,
+      std::uint32_t value);
     std::size_t psmz32WordAddress(
       std::size_t contextIndex,
       std::uint16_t x,

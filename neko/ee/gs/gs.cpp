@@ -2076,6 +2076,27 @@ void GS::writePSMCT32(
     (value & ~frame.drawingMask);
 }
 
+std::uint32_t GS::readDisplayPSMCT32(
+  std::uint16_t basePointer,
+  std::uint8_t bufferWidth,
+  std::uint16_t x,
+  std::uint16_t y) const
+{
+  return localMemory[
+    psmct32WordAddress(basePointer, bufferWidth, x, y)];
+}
+
+void GS::writeDisplayPSMCT32(
+  std::uint16_t basePointer,
+  std::uint8_t bufferWidth,
+  std::uint16_t x,
+  std::uint16_t y,
+  std::uint32_t value)
+{
+  localMemory[
+    psmct32WordAddress(basePointer, bufferWidth, x, y)] = value;
+}
+
 std::uint32_t GS::localMemoryWord(std::size_t address) const
 {
   if (address >= localMemory.size())

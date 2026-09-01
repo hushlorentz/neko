@@ -16,7 +16,8 @@ NekoSystem::NekoSystem() :
     &gifPath3Component,
     &gsComponent,
     &interruptControllerComponent),
-  gifDMACComponent(&eeBusComponent)
+  gifDMACComponent(&eeBusComponent),
+  gsDisplayComponent(&gsComponent)
 {
   vif0Component.attachVPU(&vu0Component);
   vif1Component.attachVPU(&vu1Component);
@@ -30,7 +31,9 @@ NekoSystem::NekoSystem() :
     vu1Component,
     VU_CLOCK_PERIOD);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
+  eeBusComponent.attachGSDisplay(&gsDisplayComponent);
   masterClock.registerComponent(gifDMACComponent, 1);
+  masterClock.registerComponent(gsDisplayComponent, 1);
 }
 
 VPU &NekoSystem::vu0()
@@ -143,6 +146,16 @@ const GIFDMACChannel &NekoSystem::gifDMAC() const
   return gifDMACComponent;
 }
 
+GSDisplay &NekoSystem::gsDisplay()
+{
+  return gsDisplayComponent;
+}
+
+const GSDisplay &NekoSystem::gsDisplay() const
+{
+  return gsDisplayComponent;
+}
+
 EEBus &NekoSystem::eeBus()
 {
   return eeBusComponent;
@@ -176,6 +189,24 @@ void NekoSystem::synchronizeInterrupts()
   {
     interruptControllerComponent.setSource(
       EEInterruptSource::VIF1,
+      true);
+  }
+  if (gsDisplayComponent.interruptPending())
+  {
+    interruptControllerComponent.setSource(
+      EEInterruptSource::GS,
+      true);
+  }
+  if (gsDisplayComponent.takeVerticalBlankStart())
+  {
+    interruptControllerComponent.setSource(
+      EEInterruptSource::VBLANK_START,
+      true);
+  }
+  if (gsDisplayComponent.takeVerticalBlankEnd())
+  {
+    interruptControllerComponent.setSource(
+      EEInterruptSource::VBLANK_END,
       true);
   }
 }

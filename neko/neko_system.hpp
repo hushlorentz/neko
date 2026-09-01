@@ -12,6 +12,7 @@
 #include "gif_path_arbiter.hpp"
 #include "gif_registers.hpp"
 #include "gs.hpp"
+#include "gs_display.hpp"
 #include "interrupt_controller.hpp"
 #include "vif.hpp"
 #include "vpu.hpp"
@@ -53,6 +54,8 @@ class NekoSystem
     const GIFRegisters &gifRegisters() const;
     GIFDMACChannel &gifDMAC();
     const GIFDMACChannel &gifDMAC() const;
+    GSDisplay &gsDisplay();
+    const GSDisplay &gsDisplay() const;
     EEBus &eeBus();
     const EEBus &eeBus() const;
     EEInterruptController &interruptController();
@@ -78,6 +81,7 @@ class NekoSystem
     MasterClockScheduler masterClock;
     EEBus eeBusComponent;
     GIFDMACChannel gifDMACComponent;
+    GSDisplay gsDisplayComponent;
 
     void synchronizeInterrupts();
 };
