@@ -69,7 +69,27 @@ enum class EEOperation : std::uint8_t
   MoveFromShiftAmount,
   MoveToShiftAmount,
   MoveByteCountToShiftAmount,
-  MoveHalfwordCountToShiftAmount
+  MoveHalfwordCountToShiftAmount,
+  Jump,
+  JumpAndLink,
+  JumpRegister,
+  JumpAndLinkRegister,
+  BranchEqual,
+  BranchNotEqual,
+  BranchLessThanOrEqualZero,
+  BranchGreaterThanZero,
+  BranchLessThanZero,
+  BranchGreaterThanOrEqualZero,
+  BranchEqualLikely,
+  BranchNotEqualLikely,
+  BranchLessThanOrEqualZeroLikely,
+  BranchGreaterThanZeroLikely,
+  BranchLessThanZeroLikely,
+  BranchGreaterThanOrEqualZeroLikely,
+  BranchLessThanZeroAndLink,
+  BranchGreaterThanOrEqualZeroAndLink,
+  BranchLessThanZeroAndLinkLikely,
+  BranchGreaterThanOrEqualZeroAndLinkLikely
 };
 
 struct EEInstruction
@@ -105,5 +125,7 @@ class EEInstructionDecodeError : public std::runtime_error
 };
 
 EEInstruction decodeEEInstruction(std::uint32_t instruction);
+bool isEEBranchOperation(EEOperation operation);
+bool isEEBranchLikelyOperation(EEOperation operation);
 
 #endif

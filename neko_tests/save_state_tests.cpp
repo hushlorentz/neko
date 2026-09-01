@@ -15,7 +15,8 @@ namespace
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 156;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 794;
+  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 794;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 804;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -556,6 +557,48 @@ TEST_CASE("In-flight EE multiply latency survives save states")
   REQUIRE(restored.eeCore().generalRegister(3).low == 42);
 }
 
+TEST_CASE("Pending EE branch delay slots survive save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(1, {7, 0});
+  original.eeCore().setGeneralRegister(2, {7, 0});
+  original.eeBus().write32(
+    0,
+    (UINT32_C(0x04) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16) |
+    2);
+  original.eeBus().write32(
+    4,
+    (UINT32_C(0x0d) << 26) |
+    (UINT32_C(3) << 16) |
+    1);
+  original.eeBus().write32(
+    12,
+    (UINT32_C(0x0d) << 26) |
+    (UINT32_C(4) << 16) |
+    2);
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(restored.eeCore().generalRegister(3).low == 0);
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(restored.eeCore().programCounter() == 12);
+  REQUIRE(restored.eeCore().generalRegister(3).low == 1);
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(restored.eeCore().generalRegister(4).low == 2);
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;
@@ -569,7 +612,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 5;
+  invalid[8] = 6;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 
@@ -596,6 +639,12 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[PREPARED_EE_GPR_ZERO_HIGH_OFFSET] ^= 1;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET] = 1;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

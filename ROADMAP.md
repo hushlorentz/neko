@@ -485,7 +485,7 @@ existing event and runner infrastructure:
       with the documented 32-bit sign-extension and 64-bit result rules
 - [x] Implement multiply, divide, `HI`/`LO`, `HI1`/`LO1`, and shift-amount
       register behavior with instruction-accurate latency where observable
-- [ ] Implement jumps, branches, likely branches, link behavior, and the
+- [x] Implement jumps, branches, likely branches, link behavior, and the
       architectural branch delay slot
 - [ ] Implement signed and unsigned byte, halfword, word, and doubleword loads
       and stores, including alignment and merge operations

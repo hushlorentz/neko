@@ -70,6 +70,14 @@ namespace
       static_cast<std::uint32_t>(lo);
   }
 
+  bool writesShiftAmount(EEOperation operation)
+  {
+    return
+      operation == EEOperation::MoveToShiftAmount ||
+      operation == EEOperation::MoveByteCountToShiftAmount ||
+      operation == EEOperation::MoveHalfwordCountToShiftAmount;
+  }
+
   bool isWordValue(std::uint64_t value)
   {
     return value == signExtendWord(
@@ -180,6 +188,10 @@ void EECore::reset()
   pendingMac1 = {};
   recentShiftAmountAccesses = 0;
   recentShiftAmountReads = 0;
+  branchDelayPending = false;
+  branchDelayTarget = 0;
+  branchInstructionAddress = 0;
+  branchDelayFromLikely = false;
 }
 
 void EECore::attachBus(EEBus *newBus)
@@ -227,13 +239,35 @@ EEInstructionFetchResult EECore::fetchInstruction()
 
 void EECore::startExecution(std::uint32_t startAddress)
 {
+  const bool resumePendingBranch =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    branchDelayPending &&
+    startAddress == pc;
+  const bool resumePendingMultiplyDivide =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    pendingMultiplyDivideActive() &&
+    startAddress == pc;
   pc = startAddress;
   clearPendingException();
   state = EEExecutionState::Running;
   haltReason = EEStopReason::None;
-  lastInstructionValid = false;
-  lastAddress = 0;
-  lastDecodedInstruction = {};
+  if (!resumePendingBranch)
+  {
+    lastInstructionValid = false;
+    lastAddress = 0;
+    lastDecodedInstruction = {};
+    branchDelayPending = false;
+    branchDelayTarget = 0;
+    branchInstructionAddress = 0;
+    branchDelayFromLikely = false;
+  }
+  if (!resumePendingMultiplyDivide)
+  {
+    pendingMac0 = {};
+    pendingMac1 = {};
+  }
   rejectedInstructionValue = 0;
 }
 
@@ -291,11 +325,22 @@ void EECore::clock()
     return;
   }
 
+  const bool wasDelaySlot = branchDelayPending;
+  const std::uint32_t completedBranchTarget =
+    branchDelayTarget;
   if (!executeInstruction(decoded, fetched.address))
   {
     return;
   }
 
+  if (wasDelaySlot)
+  {
+    pc = completedBranchTarget;
+    branchDelayPending = false;
+    branchDelayTarget = 0;
+    branchInstructionAddress = 0;
+    branchDelayFromLikely = false;
+  }
   recordShiftAmountAccess(decoded);
   lastDecodedInstruction = decoded;
   lastAddress = fetched.address;
@@ -307,6 +352,11 @@ bool EECore::executeInstruction(
   std::uint32_t address)
 {
   if (!validateShiftAmountOrdering(instruction, address))
+  {
+    rejectedInstructionValue = instruction.raw;
+    return false;
+  }
+  if (!validateDelaySlotInstruction(instruction, address))
   {
     rejectedInstructionValue = instruction.raw;
     return false;
@@ -629,6 +679,137 @@ bool EECore::executeInstruction(
         ((static_cast<std::uint32_t>(source) ^
           instruction.immediate) & 0x07) * 16;
       return true;
+    case EEOperation::Jump:
+      scheduleBranch(
+        true,
+        false,
+        ((address + 4) & UINT32_C(0xf0000000)) |
+          (instruction.target << 2),
+        address);
+      return true;
+    case EEOperation::JumpAndLink:
+      writeLowDoubleword(31, address + 8);
+      scheduleBranch(
+        true,
+        false,
+        ((address + 4) & UINT32_C(0xf0000000)) |
+          (instruction.target << 2),
+        address);
+      return true;
+    case EEOperation::JumpRegister:
+      scheduleBranch(
+        true,
+        false,
+        static_cast<std::uint32_t>(source),
+        address);
+      return true;
+    case EEOperation::JumpAndLinkRegister:
+      if (instruction.sourceRegister == destination)
+      {
+        return stopUndefinedOperation(
+          address,
+          instruction.raw);
+      }
+      writeLowDoubleword(destination, address + 8);
+      scheduleBranch(
+        true,
+        false,
+        static_cast<std::uint32_t>(source),
+        address);
+      return true;
+    case EEOperation::BranchEqual:
+    case EEOperation::BranchNotEqual:
+    case EEOperation::BranchLessThanOrEqualZero:
+    case EEOperation::BranchGreaterThanZero:
+    case EEOperation::BranchLessThanZero:
+    case EEOperation::BranchGreaterThanOrEqualZero:
+    case EEOperation::BranchEqualLikely:
+    case EEOperation::BranchNotEqualLikely:
+    case EEOperation::BranchLessThanOrEqualZeroLikely:
+    case EEOperation::BranchGreaterThanZeroLikely:
+    case EEOperation::BranchLessThanZeroLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroLikely:
+    case EEOperation::BranchLessThanZeroAndLink:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
+    case EEOperation::BranchLessThanZeroAndLinkLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+    {
+      const bool negative =
+        (source & DOUBLEWORD_SIGN_BIT) != 0;
+      bool condition = false;
+      switch (instruction.operation)
+      {
+        case EEOperation::BranchEqual:
+        case EEOperation::BranchEqualLikely:
+          condition = source == target;
+          break;
+        case EEOperation::BranchNotEqual:
+        case EEOperation::BranchNotEqualLikely:
+          condition = source != target;
+          break;
+        case EEOperation::BranchLessThanOrEqualZero:
+        case EEOperation::BranchLessThanOrEqualZeroLikely:
+          condition = negative || source == 0;
+          break;
+        case EEOperation::BranchGreaterThanZero:
+        case EEOperation::BranchGreaterThanZeroLikely:
+          condition = !negative && source != 0;
+          break;
+        case EEOperation::BranchLessThanZero:
+        case EEOperation::BranchLessThanZeroLikely:
+        case EEOperation::BranchLessThanZeroAndLink:
+        case EEOperation::BranchLessThanZeroAndLinkLikely:
+          condition = negative;
+          break;
+        default:
+          condition = !negative;
+          break;
+      }
+      const bool likely =
+        instruction.operation == EEOperation::BranchEqualLikely ||
+        instruction.operation == EEOperation::BranchNotEqualLikely ||
+        instruction.operation ==
+          EEOperation::BranchLessThanOrEqualZeroLikely ||
+        instruction.operation ==
+          EEOperation::BranchGreaterThanZeroLikely ||
+        instruction.operation ==
+          EEOperation::BranchLessThanZeroLikely ||
+        instruction.operation ==
+          EEOperation::BranchGreaterThanOrEqualZeroLikely ||
+        instruction.operation ==
+          EEOperation::BranchLessThanZeroAndLinkLikely ||
+        instruction.operation ==
+          EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
+      const bool link =
+        instruction.operation ==
+          EEOperation::BranchLessThanZeroAndLink ||
+        instruction.operation ==
+          EEOperation::BranchGreaterThanOrEqualZeroAndLink ||
+        instruction.operation ==
+          EEOperation::BranchLessThanZeroAndLinkLikely ||
+        instruction.operation ==
+          EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
+      if (link && instruction.sourceRegister == 31)
+      {
+        return stopUndefinedOperation(
+          address,
+          instruction.raw);
+      }
+      if (link)
+      {
+        writeLowDoubleword(31, address + 8);
+      }
+      const std::uint32_t branchTarget =
+        address + 4 +
+        static_cast<std::uint32_t>(
+          signExtend16(instruction.immediate) << 2);
+      scheduleBranch(
+        condition,
+        likely,
+        branchTarget,
+        address);
+      return true;
+    }
     case EEOperation::MultiplyWord:
     case EEOperation::MultiplyUnsignedWord:
     case EEOperation::MultiplyWord1:
@@ -907,6 +1088,40 @@ void EECore::recordShiftAmountAccess(
     static_cast<std::uint8_t>(
       ((recentShiftAmountReads << 1) |
        (reads ? 1 : 0)) & 0x07);
+}
+
+bool EECore::validateDelaySlotInstruction(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  if (!branchDelayPending)
+  {
+    return true;
+  }
+  if (isEEBranchOperation(instruction.operation) ||
+       (branchDelayFromLikely &&
+        writesShiftAmount(instruction.operation)))
+  {
+    return stopUndefinedOperation(address, instruction.raw);
+  }
+  return true;
+}
+
+void EECore::scheduleBranch(
+  bool condition,
+  bool likely,
+  std::uint32_t target,
+  std::uint32_t address)
+{
+  if (likely && !condition)
+  {
+    pc = address + 8;
+    return;
+  }
+  branchDelayPending = true;
+  branchDelayTarget = condition ? target : address + 8;
+  branchInstructionAddress = address;
+  branchDelayFromLikely = likely;
 }
 
 EEExecutionState EECore::executionState() const

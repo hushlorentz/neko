@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 4;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 5;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1294,6 +1294,14 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.recentShiftAmountAccesses;
   destination->eeCoreComponent.recentShiftAmountReads =
     source->eeCoreComponent.recentShiftAmountReads;
+  destination->eeCoreComponent.branchDelayPending =
+    source->eeCoreComponent.branchDelayPending;
+  destination->eeCoreComponent.branchDelayTarget =
+    source->eeCoreComponent.branchDelayTarget;
+  destination->eeCoreComponent.branchInstructionAddress =
+    source->eeCoreComponent.branchInstructionAddress;
+  destination->eeCoreComponent.branchDelayFromLikely =
+    source->eeCoreComponent.branchDelayFromLikely;
   destination->interruptControllerComponent.statusRegister =
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
@@ -1561,6 +1569,10 @@ void NekoSaveStateCodec::writeEECore(
   writePending(core.pendingMac1);
   writer->writeU8(core.recentShiftAmountAccesses);
   writer->writeU8(core.recentShiftAmountReads);
+  writer->writeBool(core.branchDelayPending);
+  writer->writeU32(core.branchDelayTarget);
+  writer->writeU32(core.branchInstructionAddress);
+  writer->writeBool(core.branchDelayFromLikely);
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1643,6 +1655,12 @@ void NekoSaveStateCodec::readEECore(
     (core->recentShiftAmountReads &
       ~core->recentShiftAmountAccesses) == 0,
     "EE shift-amount read history is inconsistent");
+  core->branchDelayPending =
+    reader->readBool("EE branch delay flag");
+  core->branchDelayTarget = reader->readU32();
+  core->branchInstructionAddress = reader->readU32();
+  core->branchDelayFromLikely =
+    reader->readBool("EE branch-likely delay flag");
   core->lastDecodedInstruction = {};
   if (core->lastInstructionValid)
   {
@@ -1673,6 +1691,24 @@ void NekoSaveStateCodec::readEECore(
   require(
     !(core->pendingMac0.active && core->pendingMac1.active),
     "EE reference core has concurrent multiply/divide state");
+  require(
+    core->branchDelayPending ||
+      (core->branchDelayTarget == 0 &&
+       core->branchInstructionAddress == 0 &&
+       !core->branchDelayFromLikely),
+    "EE inactive branch delay contains state");
+  require(
+    !core->branchDelayPending ||
+      ((core->branchInstructionAddress & 3) == 0 &&
+       core->pc == core->branchInstructionAddress + 4 &&
+       core->lastInstructionValid &&
+       core->lastAddress == core->branchInstructionAddress &&
+       isEEBranchOperation(
+         core->lastDecodedInstruction.operation) &&
+       core->branchDelayFromLikely ==
+         isEEBranchLikelyOperation(
+           core->lastDecodedInstruction.operation)),
+    "EE pending branch delay state is inconsistent");
 }
 
 void NekoSaveStateCodec::writeVPU(

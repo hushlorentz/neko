@@ -146,6 +146,10 @@ class EECore : public ClockedComponent
     PendingMultiplyDivide pendingMac1;
     std::uint8_t recentShiftAmountAccesses = 0;
     std::uint8_t recentShiftAmountReads = 0;
+    bool branchDelayPending = false;
+    std::uint32_t branchDelayTarget = 0;
+    std::uint32_t branchInstructionAddress = 0;
+    bool branchDelayFromLikely = false;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);
@@ -188,6 +192,14 @@ class EECore : public ClockedComponent
       std::uint32_t address);
     void recordShiftAmountAccess(
       const EEInstruction &instruction);
+    bool validateDelaySlotInstruction(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    void scheduleBranch(
+      bool condition,
+      bool likely,
+      std::uint32_t target,
+      std::uint32_t address);
 };
 
 #endif

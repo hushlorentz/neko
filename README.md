@@ -32,6 +32,14 @@ reference model conservatively blocks later issue during those cycles;
 independent instruction overlap and throughput belong to the future
 superscalar timing model. In-flight results and their remaining latency are
 part of save states.
+Base EE control flow now includes PC-relative conditional branches, branch-
+likely annulment, region-relative jumps, register jumps, and all corresponding
+link forms. Every taken branch and every non-likely fallthrough executes one
+architectural delay-slot instruction before changing control flow. Forbidden
+branch-in-delay-slot and branch-likely/`SA` combinations stop explicitly, while
+misaligned register targets raise the fetch exception only when target fetch
+begins. Pending delay-slot state is serialized so save-state continuation
+cannot skip or repeat the slot.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

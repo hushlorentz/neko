@@ -183,7 +183,7 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
   SECTION("Deferred valid instruction families are rejected explicitly")
   {
     REQUIRE_THROWS_WITH(
-      decodeEEInstruction(UINT32_C(0x10000000)),
+      decodeEEInstruction(UINT32_C(0x80000000)),
       "Unsupported EE instruction encoding.");
     REQUIRE_THROWS_WITH(
       decodeEEInstruction(UINT32_C(0x40000000)),
@@ -254,4 +254,51 @@ TEST_CASE("EE multiply divide and SA decoder tables")
       decodeEEInstruction(contract.instruction).operation ==
       contract.operation);
   }
+}
+
+TEST_CASE("EE branch and jump decoder tables")
+{
+  struct Contract
+  {
+    std::uint32_t instruction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {UINT32_C(0x08012345), EEOperation::Jump},
+    {UINT32_C(0x0c012345), EEOperation::JumpAndLink},
+    {registerInstruction(0x08, 1, 0, 0), EEOperation::JumpRegister},
+    {registerInstruction(0x09, 1, 0, 31), EEOperation::JumpAndLinkRegister},
+    {immediateInstruction(0x04, 1, 2, 3), EEOperation::BranchEqual},
+    {immediateInstruction(0x05, 1, 2, 3), EEOperation::BranchNotEqual},
+    {immediateInstruction(0x06, 1, 0, 3), EEOperation::BranchLessThanOrEqualZero},
+    {immediateInstruction(0x07, 1, 0, 3), EEOperation::BranchGreaterThanZero},
+    {immediateInstruction(0x14, 1, 2, 3), EEOperation::BranchEqualLikely},
+    {immediateInstruction(0x15, 1, 2, 3), EEOperation::BranchNotEqualLikely},
+    {immediateInstruction(0x16, 1, 0, 3), EEOperation::BranchLessThanOrEqualZeroLikely},
+    {immediateInstruction(0x17, 1, 0, 3), EEOperation::BranchGreaterThanZeroLikely},
+    {immediateInstruction(0x01, 1, 0x00, 3), EEOperation::BranchLessThanZero},
+    {immediateInstruction(0x01, 1, 0x01, 3), EEOperation::BranchGreaterThanOrEqualZero},
+    {immediateInstruction(0x01, 1, 0x02, 3), EEOperation::BranchLessThanZeroLikely},
+    {immediateInstruction(0x01, 1, 0x03, 3), EEOperation::BranchGreaterThanOrEqualZeroLikely},
+    {immediateInstruction(0x01, 1, 0x10, 3), EEOperation::BranchLessThanZeroAndLink},
+    {immediateInstruction(0x01, 1, 0x11, 3), EEOperation::BranchGreaterThanOrEqualZeroAndLink},
+    {immediateInstruction(0x01, 1, 0x12, 3), EEOperation::BranchLessThanZeroAndLinkLikely},
+    {immediateInstruction(0x01, 1, 0x13, 3), EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    REQUIRE(
+      decodeEEInstruction(contract.instruction).operation ==
+      contract.operation);
+  }
+
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      registerInstruction(0x08, 1, 0, 1)),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      immediateInstruction(0x06, 1, 1, 3)),
+    "Reserved EE instruction encoding.");
 }

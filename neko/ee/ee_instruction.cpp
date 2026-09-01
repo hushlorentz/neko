@@ -61,6 +61,20 @@ namespace
     table[0x1d].kind = DecodeKind::Reserved;
     table[0x3b].kind = DecodeKind::Reserved;
 
+    direct(&table, 0x02, EEOperation::Jump);
+    direct(&table, 0x03, EEOperation::JumpAndLink);
+    direct(&table, 0x04, EEOperation::BranchEqual);
+    direct(&table, 0x05, EEOperation::BranchNotEqual);
+    direct(
+      &table,
+      0x06,
+      EEOperation::BranchLessThanOrEqualZero,
+      REGISTER_TARGET_MASK);
+    direct(
+      &table,
+      0x07,
+      EEOperation::BranchGreaterThanZero,
+      REGISTER_TARGET_MASK);
     direct(&table, 0x08, EEOperation::AddImmediateWord);
     direct(
       &table,
@@ -90,6 +104,18 @@ namespace
       &table,
       0x19,
       EEOperation::AddImmediateUnsignedDoubleword);
+    direct(&table, 0x14, EEOperation::BranchEqualLikely);
+    direct(&table, 0x15, EEOperation::BranchNotEqualLikely);
+    direct(
+      &table,
+      0x16,
+      EEOperation::BranchLessThanOrEqualZeroLikely,
+      REGISTER_TARGET_MASK);
+    direct(
+      &table,
+      0x17,
+      EEOperation::BranchGreaterThanZeroLikely,
+      REGISTER_TARGET_MASK);
     return table;
   }
 
@@ -139,6 +165,19 @@ namespace
       0x07,
       EEOperation::ShiftRightArithmeticVariableWord,
       REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x08,
+      EEOperation::JumpRegister,
+      REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    direct(
+      &table,
+      0x09,
+      EEOperation::JumpAndLinkRegister,
+      REGISTER_TARGET_MASK |
+        REGISTER_SHIFT_MASK);
     direct(
       &table,
       0x14,
@@ -331,6 +370,35 @@ namespace
       EEOperation::Nop,
       0
     });
+    direct(&table, 0x00, EEOperation::BranchLessThanZero);
+    direct(
+      &table,
+      0x01,
+      EEOperation::BranchGreaterThanOrEqualZero);
+    direct(
+      &table,
+      0x02,
+      EEOperation::BranchLessThanZeroLikely);
+    direct(
+      &table,
+      0x03,
+      EEOperation::BranchGreaterThanOrEqualZeroLikely);
+    direct(
+      &table,
+      0x10,
+      EEOperation::BranchLessThanZeroAndLink);
+    direct(
+      &table,
+      0x11,
+      EEOperation::BranchGreaterThanOrEqualZeroAndLink);
+    direct(
+      &table,
+      0x12,
+      EEOperation::BranchLessThanZeroAndLinkLikely);
+    direct(
+      &table,
+      0x13,
+      EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely);
     direct(
       &table,
       0x18,
@@ -503,6 +571,49 @@ EEInstructionDecodeFailure
 EEInstructionDecodeError::failure() const
 {
   return failureType;
+}
+
+bool isEEBranchOperation(EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::Jump:
+    case EEOperation::JumpAndLink:
+    case EEOperation::JumpRegister:
+    case EEOperation::JumpAndLinkRegister:
+    case EEOperation::BranchEqual:
+    case EEOperation::BranchNotEqual:
+    case EEOperation::BranchLessThanOrEqualZero:
+    case EEOperation::BranchGreaterThanZero:
+    case EEOperation::BranchLessThanZero:
+    case EEOperation::BranchGreaterThanOrEqualZero:
+    case EEOperation::BranchEqualLikely:
+    case EEOperation::BranchNotEqualLikely:
+    case EEOperation::BranchLessThanOrEqualZeroLikely:
+    case EEOperation::BranchGreaterThanZeroLikely:
+    case EEOperation::BranchLessThanZeroLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroLikely:
+    case EEOperation::BranchLessThanZeroAndLink:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
+    case EEOperation::BranchLessThanZeroAndLinkLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool isEEBranchLikelyOperation(EEOperation operation)
+{
+  return
+    operation == EEOperation::BranchEqualLikely ||
+    operation == EEOperation::BranchNotEqualLikely ||
+    operation == EEOperation::BranchLessThanOrEqualZeroLikely ||
+    operation == EEOperation::BranchGreaterThanZeroLikely ||
+    operation == EEOperation::BranchLessThanZeroLikely ||
+    operation == EEOperation::BranchGreaterThanOrEqualZeroLikely ||
+    operation == EEOperation::BranchLessThanZeroAndLinkLikely ||
+    operation == EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
 }
 
 EEInstruction decodeEEInstruction(std::uint32_t raw)
