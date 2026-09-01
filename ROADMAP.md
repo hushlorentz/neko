@@ -523,6 +523,40 @@ existing event and runner infrastructure:
 - [ ] Compare repeated and save-state-resumed EE executions for identical
       registers, memory, stop reasons, and trace hashes
 
+### Guest ELF Loading Foundation
+
+Load small freestanding scalar programs before expanding the remaining EE
+coprocessor and multimedia families. Let real guest requirements drive that
+work instead of implementing every deferred instruction speculatively:
+
+- [ ] Load PS2 ELF program segments into EE memory with validated addresses,
+      sizes, permissions, BSS initialization, and entry-point setup
+- [ ] Define the initial bare-metal guest runtime contract, including reset
+      state, stack placement, bounded execution, and how completion or failure
+      is reported to the host
+- [ ] Add a generic `--elf <path>` desktop argument that executes the loaded
+      program through `NekoSystem`
+- [ ] Keep executable loading, emulation, and presentation separate so the
+      desktop does not contain guest-specific drawing or setup behavior
+- [ ] Run focused EE conformance programs and independently authored scalar
+      homebrew ELFs as the first real guests
+
+### Guest MMIO and DMA Foundation
+
+Allow loaded guests to drive the existing hardware through EE instructions
+rather than host-side setup:
+
+- [ ] Extend checked EE data accesses from RAM into mapped device registers
+      with explicit access-width, alignment, read/write, and side-effect
+      contracts
+- [ ] Support guest writes to the VIF and GIF FIFO boundaries without routing
+      ordinary RAM accesses through host-only bus helpers
+- [ ] Implement VIF1 DMAC channel 1, including normal and source-chain modes,
+      backpressure, completion, and interrupt state
+- [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
+- [ ] Add a deterministic guest-driven transfer program that configures DMA,
+      feeds VIF1, and observes completion and interrupt behavior
+
 ### EE COP2 and VU Macro Mode
 
 - [ ] Implement EE COP2 branches and transfers: `BC2F`, `BC2FL`, `BC2T`,
@@ -546,14 +580,8 @@ existing event and runner infrastructure:
 - [ ] Add COP1 and MMI state to exception, trace, reset, and save-state
       contracts as each family is introduced
 
-### Guest Program Loading and Demo Migration
+### Guest Demo Migration
 
-- [ ] Load PS2 ELF program segments into EE memory with validated addresses,
-      sizes, permissions, and entry-point initialization
-- [ ] Add a generic `--elf <path>` desktop argument that executes the loaded
-      program through `NekoSystem`
-- [ ] Keep executable loading, emulation, and presentation separate so the
-      desktop does not contain guest-specific drawing or setup behavior
 - [ ] Convert the rotating-triangle demo into an independently authored guest
       program that drives its VU1, VIF, GIF, and GS work through emulated
       hardware
@@ -569,8 +597,6 @@ existing event and runner infrastructure:
 Keep each target incremental and expand it only when the preceding guest exposes
 the next concrete hardware or software dependency:
 
-- [ ] Run focused EE conformance programs and independently authored homebrew
-      ELFs as the first real guests
 - [ ] Advance through deterministic BIOS startup as the first large system
       workload, adding IOP and other hardware only when execution requires it
 - [ ] Use directly loaded game executables for targeted bring-up experiments
