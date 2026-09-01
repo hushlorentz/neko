@@ -14,6 +14,12 @@ NekoSystem::NekoSystem() :
   vif1Component.attachGIFPathArbiter(&gifPathArbiterComponent);
   gifPath1Component.attachVPU(&vu1Component);
   gifDecoderComponent.attachRegisterWriteHandler(&gsComponent);
+  masterClock.registerComponent(
+    vu0Component,
+    VU_CLOCK_PERIOD);
+  masterClock.registerComponent(
+    vu1Component,
+    VU_CLOCK_PERIOD);
 }
 
 VPU &NekoSystem::vu0()
@@ -104,4 +110,15 @@ GS &NekoSystem::gs()
 const GS &NekoSystem::gs() const
 {
   return gsComponent;
+}
+
+MasterClockScheduler &NekoSystem::masterClockScheduler()
+{
+  return masterClock;
+}
+
+const MasterClockScheduler &
+NekoSystem::masterClockScheduler() const
+{
+  return masterClock;
 }

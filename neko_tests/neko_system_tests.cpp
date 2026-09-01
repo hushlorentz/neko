@@ -3,6 +3,7 @@
 
 #include "catch.hpp"
 #include "neko_system.hpp"
+#include "vpu_opcodes.hpp"
 
 namespace
 {
@@ -33,6 +34,18 @@ namespace
       address,
       0
     }};
+  }
+
+  void writeTerminatingProgram(VPU *vpu)
+  {
+    vpu->writeMicroInstruction(
+      0,
+      VPU_LOWER_NOP,
+      VPU_E_BIT | VPU_NOP);
+    vpu->writeMicroInstruction(
+      1,
+      VPU_LOWER_NOP,
+      VPU_NOP);
   }
 }
 
@@ -65,6 +78,9 @@ TEST_CASE("Neko System Tests")
     REQUIRE(&constSystem.gifPath1() == &system.gifPath1());
     REQUIRE(&constSystem.gifPath3() == &system.gifPath3());
     REQUIRE(&constSystem.gs() == &system.gs());
+    REQUIRE(
+      &constSystem.masterClockScheduler() ==
+      &system.masterClockScheduler());
   }
 
   SECTION("PATH1 is wired from VU1 through GIF to GS")
@@ -103,5 +119,26 @@ TEST_CASE("Neko System Tests")
     REQUIRE(
       system.gs().primitive().type ==
       GSPrimitiveType::Sprite);
+  }
+
+  SECTION("The master clock advances both VUs at half the EE rate")
+  {
+    static_assert(
+      NekoSystem::EE_CLOCK_HZ ==
+        NekoSystem::VU_CLOCK_HZ * 2,
+      "The EE clock must be twice the VU clock.");
+
+    NekoSystem system;
+    writeTerminatingProgram(&system.vu0());
+    writeTerminatingProgram(&system.vu1());
+    system.vu0().startMicroMode();
+    system.vu1().startMicroMode();
+
+    system.masterClockScheduler().run(4);
+
+    REQUIRE(system.vu0().elapsedCycles() == 2);
+    REQUIRE(system.vu1().elapsedCycles() == 2);
+    REQUIRE(
+      system.masterClockScheduler().currentCycle() == 4);
   }
 }

@@ -135,6 +135,7 @@ target_link_libraries(neko_diagnostics PUBLIC neko_core)
 
 add_executable(neko_tests
     neko_tests/main.cpp
+    neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp
     neko_tests/gif/gif_tests.cpp

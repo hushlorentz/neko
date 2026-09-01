@@ -1,6 +1,9 @@
 #ifndef NEKO_SYSTEM_HPP
 #define NEKO_SYSTEM_HPP
 
+#include <cstdint>
+
+#include "clock_scheduler.hpp"
 #include "gif.hpp"
 #include "gif_path1.hpp"
 #include "gif_path3.hpp"
@@ -12,6 +15,11 @@
 class NekoSystem
 {
   public:
+    static constexpr std::uint64_t EE_CLOCK_HZ = 294912000;
+    static constexpr std::uint64_t VU_CLOCK_HZ = 147456000;
+    static constexpr std::uint64_t VU_CLOCK_PERIOD =
+      EE_CLOCK_HZ / VU_CLOCK_HZ;
+
     NekoSystem();
 
     NekoSystem(const NekoSystem &) = delete;
@@ -37,6 +45,8 @@ class NekoSystem
     const GIFPath3Transfer &gifPath3() const;
     GS &gs();
     const GS &gs() const;
+    MasterClockScheduler &masterClockScheduler();
+    const MasterClockScheduler &masterClockScheduler() const;
 
   private:
     VPU vu0Component;
@@ -48,6 +58,7 @@ class NekoSystem
     GIFPathArbiter gifPathArbiterComponent;
     GIFPath1Transfer gifPath1Component;
     GIFPath3Transfer gifPath3Component;
+    MasterClockScheduler masterClock;
 };
 
 #endif
