@@ -148,7 +148,11 @@ TEST_CASE("EE base integer decoder tables")
     {0x0e, EEOperation::XorImmediate},
     {0x0f, EEOperation::LoadUpperImmediate},
     {0x18, EEOperation::AddImmediateDoubleword},
-    {0x19, EEOperation::AddImmediateUnsignedDoubleword}
+    {0x19, EEOperation::AddImmediateUnsignedDoubleword},
+    {0x1a, EEOperation::LoadDoublewordLeft},
+    {0x1b, EEOperation::LoadDoublewordRight},
+    {0x2c, EEOperation::StoreDoublewordLeft},
+    {0x2d, EEOperation::StoreDoublewordRight}
   };
 
   for (const ImmediateContract &contract : immediateContracts)

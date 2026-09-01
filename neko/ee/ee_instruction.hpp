@@ -104,7 +104,11 @@ enum class EEOperation : std::uint8_t
   StoreWordLeft,
   StoreWordRight,
   LoadDoubleword,
-  StoreDoubleword
+  StoreDoubleword,
+  LoadDoublewordLeft,
+  LoadDoublewordRight,
+  StoreDoublewordLeft,
+  StoreDoublewordRight
 };
 
 struct EEInstruction

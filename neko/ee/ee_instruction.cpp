@@ -104,6 +104,8 @@ namespace
       &table,
       0x19,
       EEOperation::AddImmediateUnsignedDoubleword);
+    direct(&table, 0x1a, EEOperation::LoadDoublewordLeft);
+    direct(&table, 0x1b, EEOperation::LoadDoublewordRight);
     direct(&table, 0x20, EEOperation::LoadByte);
     direct(&table, 0x21, EEOperation::LoadHalfword);
     direct(&table, 0x22, EEOperation::LoadWordLeft);
@@ -116,6 +118,8 @@ namespace
     direct(&table, 0x29, EEOperation::StoreHalfword);
     direct(&table, 0x2a, EEOperation::StoreWordLeft);
     direct(&table, 0x2b, EEOperation::StoreWord);
+    direct(&table, 0x2c, EEOperation::StoreDoublewordLeft);
+    direct(&table, 0x2d, EEOperation::StoreDoublewordRight);
     direct(&table, 0x2e, EEOperation::StoreWordRight);
     direct(&table, 0x37, EEOperation::LoadDoubleword);
     direct(&table, 0x3f, EEOperation::StoreDoubleword);

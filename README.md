@@ -72,6 +72,11 @@ Aligned doubleword access adds `LD` and `SD` through checked little-endian
 before access; loads replace GPR bits 63..0 while preserving bits 127..64, and
 stores use only the source's low doubleword. Address and data-bus faults remain
 restartable without changing the version 7 save-state layout.
+Unaligned doubleword transfers add `LDL`, `LDR`, `SDL`, and `SDR`. Each
+instruction merges the documented portion of an aligned little-endian
+doubleword without an alignment exception. Paired left/right instructions
+transfer arbitrary unaligned eight-byte values, including across an aligned
+doubleword boundary, while preserving unaffected register or memory bytes.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

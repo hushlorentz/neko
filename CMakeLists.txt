@@ -147,6 +147,7 @@ add_executable(neko_tests
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_doubleword_memory_tests.cpp
+    neko_tests/ee/ee_doubleword_merge_tests.cpp
     neko_tests/ee/ee_instruction_tests.cpp
     neko_tests/ee/ee_integer_tests.cpp
     neko_tests/ee/ee_multiply_divide_tests.cpp

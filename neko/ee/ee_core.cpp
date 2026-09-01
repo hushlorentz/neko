@@ -999,6 +999,120 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::LoadDoublewordLeft:
+    case EEOperation::LoadDoublewordRight:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      const std::uint32_t alignedAddress =
+        dataAddress & ~UINT32_C(7);
+      std::uint64_t memory = 0;
+      if (!attachedBus().readData64(alignedAddress, &memory))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      const std::uint8_t byteOffset = dataAddress & 7;
+      std::uint64_t result = target;
+      if (instruction.operation ==
+          EEOperation::LoadDoublewordLeft)
+      {
+        for (std::uint8_t memoryByte = 0;
+             memoryByte <= byteOffset;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            7 - byteOffset + memoryByte;
+          const std::uint64_t mask =
+            UINT64_C(0xff) << (registerByte * 8);
+          result =
+            (result & ~mask) |
+            (((memory >> (memoryByte * 8)) & 0xff) <<
+             (registerByte * 8));
+        }
+      }
+      else
+      {
+        for (std::uint8_t memoryByte = byteOffset;
+             memoryByte < 8;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            memoryByte - byteOffset;
+          const std::uint64_t mask =
+            UINT64_C(0xff) << (registerByte * 8);
+          result =
+            (result & ~mask) |
+            (((memory >> (memoryByte * 8)) & 0xff) <<
+             (registerByte * 8));
+        }
+      }
+      writeLowDoubleword(immediateDestination, result);
+      return true;
+    }
+    case EEOperation::StoreDoublewordLeft:
+    case EEOperation::StoreDoublewordRight:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      const std::uint32_t alignedAddress =
+        dataAddress & ~UINT32_C(7);
+      std::uint64_t memory = 0;
+      if (!attachedBus().readData64(alignedAddress, &memory))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      const std::uint8_t byteOffset = dataAddress & 7;
+      if (instruction.operation ==
+          EEOperation::StoreDoublewordLeft)
+      {
+        for (std::uint8_t memoryByte = 0;
+             memoryByte <= byteOffset;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            7 - byteOffset + memoryByte;
+          const std::uint64_t mask =
+            UINT64_C(0xff) << (memoryByte * 8);
+          memory =
+            (memory & ~mask) |
+            (((target >> (registerByte * 8)) & 0xff) <<
+             (memoryByte * 8));
+        }
+      }
+      else
+      {
+        for (std::uint8_t memoryByte = byteOffset;
+             memoryByte < 8;
+             ++memoryByte)
+        {
+          const std::uint8_t registerByte =
+            memoryByte - byteOffset;
+          const std::uint64_t mask =
+            UINT64_C(0xff) << (memoryByte * 8);
+          memory =
+            (memory & ~mask) |
+            (((target >> (registerByte * 8)) & 0xff) <<
+             (memoryByte * 8));
+        }
+      }
+      if (!attachedBus().writeData64(alignedAddress, memory))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return true;
+    }
     case EEOperation::Jump:
       scheduleBranch(
         true,
