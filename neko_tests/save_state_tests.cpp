@@ -14,6 +14,8 @@ namespace
 {
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
+  constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 139;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 691;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -101,6 +103,18 @@ namespace
   void prepareInFlightSystem(NekoSystem *system)
   {
     system->setInput({0xa55a, 1, 2, 3, 4});
+    system->eeCore().setGeneralRegister(
+      1,
+      {
+        UINT64_C(0x0123456789abcdef),
+        UINT64_C(0xfedcba9876543210)
+      });
+    system->eeCore().setProgramCounter(0x80001000);
+    system->eeCore().setHI(UINT64_C(0x1111111122222222));
+    system->eeCore().setLO(UINT64_C(0x3333333344444444));
+    system->eeCore().setHI1(UINT64_C(0x5555555566666666));
+    system->eeCore().setLO1(UINT64_C(0x7777777788888888));
+    system->eeCore().setShiftAmount(0x99);
     system->gsDisplay().configureTiming({3, 7});
     system->masterClockScheduler().registerComponent(
       system->gifPathArbiter(),
@@ -320,6 +334,26 @@ TEST_CASE("Active system save states round trip and continue identically")
   NekoSystem restored;
   restored.loadState(state);
   REQUIRE(restored.saveState() == state);
+  REQUIRE(
+    restored.eeCore().generalRegister(1) ==
+    EERegister128{
+      UINT64_C(0x0123456789abcdef),
+      UINT64_C(0xfedcba9876543210)
+    });
+  REQUIRE(restored.eeCore().programCounter() == 0x80001000);
+  REQUIRE(
+    restored.eeCore().hi() ==
+    UINT64_C(0x1111111122222222));
+  REQUIRE(
+    restored.eeCore().lo() ==
+    UINT64_C(0x3333333344444444));
+  REQUIRE(
+    restored.eeCore().hi1() ==
+    UINT64_C(0x5555555566666666));
+  REQUIRE(
+    restored.eeCore().lo1() ==
+    UINT64_C(0x7777777788888888));
+  REQUIRE(restored.eeCore().shiftAmount() == 0x99);
 
   original.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
   restored.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
@@ -424,7 +458,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 2;
+  invalid[8] = 3;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 
@@ -450,7 +484,13 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[139] ^= 1;
+  invalid[PREPARED_EE_GPR_ZERO_HIGH_OFFSET] ^= 1;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[PREPARED_MAIN_MEMORY_SIZE_OFFSET] ^= 1;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

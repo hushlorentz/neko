@@ -6,6 +6,7 @@
 
 #include "clock_scheduler.hpp"
 #include "ee_bus.hpp"
+#include "ee_core.hpp"
 #include "gif.hpp"
 #include "gif_dmac_channel.hpp"
 #include "gif_path1.hpp"
@@ -50,6 +51,8 @@ class NekoSystem
     const std::vector<NekoTraceEvent> &trace() const;
     std::uint64_t traceHash() const;
 
+    EECore &eeCore();
+    const EECore &eeCore() const;
     VPU &vu0();
     const VPU &vu0() const;
     VPU &vu1();
@@ -87,6 +90,7 @@ class NekoSystem
   private:
     friend class NekoSaveStateCodec;
 
+    EECore eeCoreComponent;
     VPU vu0Component;
     VPU vu1Component;
     VIF vif0Component;

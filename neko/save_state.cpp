@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 1;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 2;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -975,6 +975,13 @@ class NekoSaveStateCodec
       NekoSystem *system,
       std::uint8_t id);
 
+    static void writeEECore(
+      SaveStateWriter *writer,
+      const EECore &core);
+    static void readEECore(
+      SaveStateReader *reader,
+      EECore *core);
+
     static void writeVPU(
       SaveStateWriter *writer,
       const VPU &vpu);
@@ -1153,6 +1160,7 @@ void NekoSaveStateCodec::writeSystem(
   writer->writeU8(system.inputState.rightStickY);
 
   writeMasterClock(writer, system);
+  writeEECore(writer, system.eeCoreComponent);
   writer->writeU32(
     system.interruptControllerComponent.statusRegister);
   writer->writeU32(
@@ -1182,6 +1190,7 @@ void NekoSaveStateCodec::readSystem(
   system->inputState.rightStickY = reader->readU8();
 
   readMasterClock(reader, system);
+  readEECore(reader, &system->eeCoreComponent);
   system->interruptControllerComponent.statusRegister =
     reader->readU32();
   system->interruptControllerComponent.maskRegister =
@@ -1245,6 +1254,7 @@ void NekoSaveStateCodec::commitSystem(
   destination->masterClock.masterCycle =
     source->masterClock.masterCycle;
   destination->masterClock.components.swap(*schedule);
+  destination->eeCoreComponent = source->eeCoreComponent;
   destination->interruptControllerComponent.statusRegister =
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
@@ -1462,6 +1472,44 @@ ClockedComponent *NekoSaveStateCodec::componentForID(
       SaveStateReader::invalid("clock component ID is invalid");
   }
   return nullptr;
+}
+
+void NekoSaveStateCodec::writeEECore(
+  SaveStateWriter *writer,
+  const EECore &core)
+{
+  for (const EERegister128 &value : core.generalRegisters)
+  {
+    writer->writeU64(value.low);
+    writer->writeU64(value.high);
+  }
+  writer->writeU32(core.pc);
+  writer->writeU64(core.hiRegister);
+  writer->writeU64(core.loRegister);
+  writer->writeU64(core.hi1Register);
+  writer->writeU64(core.lo1Register);
+  writer->writeU32(core.saRegister);
+}
+
+void NekoSaveStateCodec::readEECore(
+  SaveStateReader *reader,
+  EECore *core)
+{
+  for (EERegister128 &value : core->generalRegisters)
+  {
+    value.low = reader->readU64();
+    value.high = reader->readU64();
+  }
+  core->pc = reader->readU32();
+  core->hiRegister = reader->readU64();
+  core->loRegister = reader->readU64();
+  core->hi1Register = reader->readU64();
+  core->lo1Register = reader->readU64();
+  core->saRegister = reader->readU32();
+
+  require(
+    core->generalRegisters[0] == EERegister128{},
+    "EE general-purpose register zero is not immutable");
 }
 
 void NekoSaveStateCodec::writeVPU(

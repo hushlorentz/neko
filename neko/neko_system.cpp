@@ -130,6 +130,16 @@ std::uint64_t NekoSystem::traceHash() const
   return nekoTraceHash(traceEvents);
 }
 
+EECore &NekoSystem::eeCore()
+{
+  return eeCoreComponent;
+}
+
+const EECore &NekoSystem::eeCore() const
+{
+  return eeCoreComponent;
+}
+
 VPU &NekoSystem::vu0()
 {
   return vu0Component;

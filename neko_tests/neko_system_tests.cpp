@@ -63,6 +63,7 @@ TEST_CASE("Neko System Tests")
     NekoSystem system;
     const NekoSystem &constSystem = system;
 
+    REQUIRE(&constSystem.eeCore() == &system.eeCore());
     REQUIRE(system.vu0().unitType() == VPUType::VU0);
     REQUIRE(system.vu1().unitType() == VPUType::VU1);
     REQUIRE(system.vif0().unitType() == VIFType::VIF0);
