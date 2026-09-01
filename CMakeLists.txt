@@ -44,6 +44,7 @@ add_library(neko_core
     neko/ee/interrupt_controller.cpp
     neko/fp_register.cpp
     neko/neko_system.cpp
+    neko/save_state.cpp
     neko/ee/gif/gif.cpp
     neko/ee/gif/gif_path_arbiter.cpp
     neko/ee/gif/gif_path1.cpp
@@ -146,6 +147,7 @@ add_executable(neko_tests
     neko_tests/ee/interrupt_controller_tests.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp
+    neko_tests/save_state_tests.cpp
     neko_tests/system_interface_tests.cpp
     neko_tests/gif/gif_tests.cpp
     neko_tests/gif/gif_path_arbiter_tests.cpp

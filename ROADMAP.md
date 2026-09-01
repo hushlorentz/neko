@@ -475,9 +475,8 @@ existing event and runner infrastructure:
       normal and chain-mode progress, backpressure, completion, and interrupts
 - [x] Model GS display circuits, vertical-blank timing, and presentation
       boundaries
-- [ ] Add IOP and SPU2 only when required by selected software
 - [x] Define reset, frame execution, input, video, and audio interfaces
-- [ ] Add deterministic save-state serialization
+- [x] Add deterministic save-state serialization
 - [ ] Add frame hashes and subsystem traces for regression testing
 
 ### EE COP2 and VU Macro Mode
@@ -510,12 +509,16 @@ existing event and runner infrastructure:
 - [ ] Make guest executable loading the primary desktop execution path while
       retaining explicit diagnostic scene selection for development
 
+### Demand-Driven Hardware Expansion
+
+- [ ] Add IOP and SPU2 only when required by selected software
+
 ### System Integration Programs
 
 - [ ] Exercise EE, DMA, VIF, VU1, GIF, and GS in one deterministic workload
 - [ ] Cover cross-component clock ratios, interrupts, and DMA completion ordering
 - [ ] Cover reset and restart while multiple hardware components are active
-- [ ] Round-trip save states during representative workloads
+- [x] Round-trip save states during representative workloads
 - [ ] Assert stable frame hashes and subsystem traces across repeated runs
 
 The emulation core must not open windows, poll host controllers, sleep, or print

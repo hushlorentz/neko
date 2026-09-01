@@ -116,6 +116,8 @@ class GIFDecoder
     void resumePacket(const GIFDecoderState &state);
 
   private:
+    friend class NekoSaveStateCodec;
+
     void beginPrimitive(
       const GIFTag &tag,
       GIFDecodeResult *result);

@@ -307,6 +307,8 @@ class GS : public GIFRegisterWriteHandler
     std::uint64_t pixelWriteCount() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     static constexpr std::size_t REGISTER_COUNT = 256;
     static constexpr std::size_t CONTEXT_COUNT = 2;
     static constexpr std::size_t TRIANGLE_VERTEX_COUNT = 3;

@@ -78,6 +78,8 @@ class Pipeline
     VUPipelineStage stage() const;
     uint8_t stageIndex() const;
   private:
+    friend class NekoSaveStateCodec;
+
     VUPipelineStage currentStage;
     uint8_t currentStageIndex;
     uint8_t executionStageCount;

@@ -87,6 +87,8 @@ class GSDisplay : public ClockedComponent
     std::uint64_t presentationBoundaryCount() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     struct Circuit
     {
       std::uint16_t basePointer = 0;

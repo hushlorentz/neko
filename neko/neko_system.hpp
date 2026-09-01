@@ -2,6 +2,7 @@
 #define NEKO_SYSTEM_HPP
 
 #include <cstdint>
+#include <vector>
 
 #include "clock_scheduler.hpp"
 #include "ee_bus.hpp"
@@ -39,6 +40,8 @@ class NekoSystem
     NekoFrameResult runFrame();
     GSPresentation videoOutput() const;
     NekoAudioFrame audioOutput() const;
+    std::vector<std::uint8_t> saveState() const;
+    void loadState(const std::vector<std::uint8_t> &state);
 
     VPU &vu0();
     const VPU &vu0() const;
@@ -75,6 +78,8 @@ class NekoSystem
     const MasterClockScheduler &masterClockScheduler() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     VPU vu0Component;
     VPU vu1Component;
     VIF vif0Component;

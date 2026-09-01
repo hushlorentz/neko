@@ -9,6 +9,13 @@ controller state, executes to the next GS presentation boundary with
 hardware and internal wiring together with `reset()`. Audio remains empty
 until SPU2 is required and implemented.
 
+`NekoSystem::saveState()` returns a canonical, versioned byte vector containing
+the complete deterministic machine state, and `loadState()` restores one
+transactionally. The checksummed format is explicit little-endian data rather
+than an object-memory dump; internal pointers and diagnostic callbacks are
+never serialized. Invalid, corrupted, truncated, trailing, or incompatible
+input throws without changing the live machine.
+
 Configure, build, and run the complete developer validation workflow with:
 
 ```sh

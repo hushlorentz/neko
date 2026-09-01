@@ -74,6 +74,8 @@ class GIFDMACChannel : public ClockedComponent
     std::uint64_t transferredQuadwordCount() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     void requireStopped() const;
     std::uint32_t decodeAddress(
       std::uint32_t value,

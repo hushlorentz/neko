@@ -98,6 +98,8 @@ class EEBus
       const GIFQuadword &value);
 
   private:
+    friend class NekoSaveStateCodec;
+
     bool mainMemoryAddress(
       std::uint32_t address,
       std::size_t width,

@@ -30,6 +30,8 @@ class EEInterruptController
     bool interruptPending() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     std::uint32_t statusRegister = 0;
     std::uint32_t maskRegister = 0;
 };

@@ -30,6 +30,8 @@ class GIFPath3Transfer
     std::uint64_t completedPacketCount() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     std::unique_ptr<GIFPathArbiter> ownedArbiter;
     GIFPathArbiter *gifPathArbiter;
     std::uint64_t submissionAttempts = 0;

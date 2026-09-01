@@ -138,6 +138,8 @@ class VPU : public ClockedComponent, public PipelineHandler
     void loadPRegister(double value);
     void loadAccumulator(double x, double y, double z, double w);
   private:
+    friend class NekoSaveStateCodec;
+
     VPUType type;
     vector<uint8_t> microMem;
     vector<uint8_t> vuMem;

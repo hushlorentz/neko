@@ -24,6 +24,8 @@ class GIFPath1Transfer : public VUXGKICKHandler
     std::uint64_t transferredQuadwordCount() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     std::unique_ptr<GIFPathArbiter> ownedArbiter;
     GIFPathArbiter *gifPathArbiter;
     VPU *vpu = nullptr;

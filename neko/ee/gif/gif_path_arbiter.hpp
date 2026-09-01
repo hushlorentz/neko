@@ -88,6 +88,8 @@ class GIFPathArbiter : public ClockedComponent
     void setTraceCallback(GIFTraceCallback callback);
 
   private:
+    friend class NekoSaveStateCodec;
+
     static std::size_t pathIndex(GIFPath path);
     void selectQueuedPath();
     void emitEvent(

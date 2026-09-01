@@ -69,6 +69,8 @@ class VIF : public VUVIFRegisterSource
     std::uint64_t wordsIngested() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     std::uint32_t payloadWordCount(const VIFCommand &command) const;
     void validatePayloadAlignment(const VIFCommand &command) const;
     void preparePayload(const VIFCommand &command);

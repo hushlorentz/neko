@@ -27,6 +27,8 @@ class MasterClockScheduler
     std::uint64_t currentCycle() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
     struct ScheduledComponent
     {
       ClockedComponent *component = nullptr;
