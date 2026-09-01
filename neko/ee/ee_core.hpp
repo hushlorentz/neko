@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+class EEBus;
+
 struct EERegister128
 {
   std::uint64_t low = 0;
@@ -27,12 +29,28 @@ constexpr bool operator!=(
   return !(left == right);
 }
 
+enum class EEException : std::uint8_t
+{
+  None,
+  AddressErrorLoadOrFetch,
+  InstructionBusError
+};
+
+struct EEInstructionFetchResult
+{
+  bool succeeded = false;
+  std::uint32_t address = 0;
+  std::uint32_t instruction = 0;
+};
+
 class EECore
 {
   public:
     static constexpr std::size_t GENERAL_REGISTER_COUNT = 32;
 
     void reset();
+    void attachBus(EEBus *bus);
+    EEInstructionFetchResult fetchInstruction();
 
     const EERegister128 &generalRegister(
       std::size_t index) const;
@@ -55,6 +73,11 @@ class EECore
     std::uint32_t shiftAmount() const;
     void setShiftAmount(std::uint32_t value);
 
+    bool exceptionPending() const;
+    EEException pendingException() const;
+    std::uint32_t exceptionAddress() const;
+    void clearPendingException();
+
   private:
     friend class NekoSaveStateCodec;
 
@@ -66,9 +89,16 @@ class EECore
     std::uint64_t hi1Register = 0;
     std::uint64_t lo1Register = 0;
     std::uint32_t saRegister = 0;
+    EEBus *bus = nullptr;
+    EEException exception = EEException::None;
+    std::uint32_t faultAddress = 0;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);
+    EEBus &attachedBus() const;
+    EEInstructionFetchResult raiseFetchException(
+      EEException type,
+      std::uint32_t address);
 };
 
 #endif

@@ -153,6 +153,37 @@ GSDisplay &EEBus::attachedGSDisplay() const
   return *gsDisplayCircuit;
 }
 
+bool EEBus::readInstruction32(
+  std::uint32_t address,
+  std::uint32_t *instruction) const
+{
+  if (instruction == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE instruction fetch requires an output value.");
+  }
+  requireAlignment(
+    address,
+    4,
+    "EE instruction fetch must be word-aligned.");
+
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 4, &physicalAddress))
+  {
+    return false;
+  }
+
+  *instruction =
+    mainMemory[physicalAddress] |
+    (static_cast<std::uint32_t>(
+      mainMemory[physicalAddress + 1]) << 8) |
+    (static_cast<std::uint32_t>(
+      mainMemory[physicalAddress + 2]) << 16) |
+    (static_cast<std::uint32_t>(
+      mainMemory[physicalAddress + 3]) << 24);
+  return true;
+}
+
 std::uint32_t EEBus::read32(std::uint32_t address) const
 {
   requireAlignment(

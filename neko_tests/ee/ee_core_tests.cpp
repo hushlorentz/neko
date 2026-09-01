@@ -2,7 +2,9 @@
 #include <cstdint>
 
 #include "catch.hpp"
+#include "ee_bus.hpp"
 #include "ee_core.hpp"
+#include "neko_system.hpp"
 
 TEST_CASE("EE Core architectural state")
 {
@@ -98,5 +100,107 @@ TEST_CASE("EE Core architectural state")
     REQUIRE(core.hi1() == 0);
     REQUIRE(core.lo1() == 0);
     REQUIRE(core.shiftAmount() == 0);
+  }
+}
+
+TEST_CASE("EE Core instruction fetching")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  EEBus &bus = system.eeBus();
+
+  SECTION("Instructions are fetched little-endian through RAM aliases")
+  {
+    bus.write32(0x100, UINT32_C(0x01234567));
+    core.setProgramCounter(0x80000100);
+
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE(result.succeeded);
+    REQUIRE(result.address == 0x80000100);
+    REQUIRE(result.instruction == 0x01234567);
+    REQUIRE(core.programCounter() == 0x80000104);
+    REQUIRE_FALSE(core.exceptionPending());
+  }
+
+  SECTION("Misaligned instruction addresses raise AdEL")
+  {
+    core.setProgramCounter(0x102);
+
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE_FALSE(result.succeeded);
+    REQUIRE(result.address == 0x102);
+    REQUIRE(result.instruction == 0);
+    REQUIRE(core.programCounter() == 0x102);
+    REQUIRE(core.exceptionPending());
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == 0x102);
+  }
+
+  SECTION("Unmapped instruction addresses raise an instruction bus error")
+  {
+    core.setProgramCounter(0xa2000000);
+
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE_FALSE(result.succeeded);
+    REQUIRE(core.programCounter() == 0xa2000000);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::InstructionBusError);
+    REQUIRE(core.exceptionAddress() == 0xa2000000);
+  }
+
+  SECTION("MMIO registers are not executable memory")
+  {
+    core.setProgramCounter(EEMemoryMap::GIF_STAT);
+
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE_FALSE(result.succeeded);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::InstructionBusError);
+  }
+
+  SECTION("A pending fetch exception blocks later fetches until cleared")
+  {
+    core.setProgramCounter(2);
+    REQUIRE_FALSE(core.fetchInstruction().succeeded);
+
+    bus.write32(0x100, UINT32_C(0x89abcdef));
+    core.setProgramCounter(0x100);
+    REQUIRE_FALSE(core.fetchInstruction().succeeded);
+    REQUIRE(core.programCounter() == 0x100);
+
+    core.clearPendingException();
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE(result.succeeded);
+    REQUIRE(result.instruction == 0x89abcdef);
+    REQUIRE_FALSE(core.exceptionPending());
+  }
+
+  SECTION("Reset clears a pending fetch exception")
+  {
+    core.setProgramCounter(2);
+    REQUIRE_FALSE(core.fetchInstruction().succeeded);
+
+    core.reset();
+
+    REQUIRE_FALSE(core.exceptionPending());
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.exceptionAddress() == 0);
+
+    bus.write32(0, UINT32_C(0x12345678));
+    REQUIRE(core.fetchInstruction().succeeded);
   }
 }

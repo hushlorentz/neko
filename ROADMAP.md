@@ -474,7 +474,7 @@ existing event and runner infrastructure:
 
 - [x] Add the R5900 architectural state: 32 128-bit general-purpose registers,
       `PC`, `HI`, `LO`, `HI1`, `LO1`, and `SA`, with immutable register zero
-- [ ] Fetch aligned 32-bit instructions through the EE memory map and reject
+- [x] Fetch aligned 32-bit instructions through the EE memory map and reject
       unmapped or misaligned instruction accesses through architectural
       exceptions
 - [ ] Add table-driven EE instruction decoding with explicit rejection of

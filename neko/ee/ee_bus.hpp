@@ -84,6 +84,9 @@ class EEBus
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
     void attachGSDisplay(GSDisplay *gsDisplay);
 
+    bool readInstruction32(
+      std::uint32_t address,
+      std::uint32_t *instruction) const;
     std::uint32_t read32(std::uint32_t address) const;
     void write32(
       std::uint32_t address,

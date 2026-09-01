@@ -1254,7 +1254,24 @@ void NekoSaveStateCodec::commitSystem(
   destination->masterClock.masterCycle =
     source->masterClock.masterCycle;
   destination->masterClock.components.swap(*schedule);
-  destination->eeCoreComponent = source->eeCoreComponent;
+  destination->eeCoreComponent.generalRegisters =
+    source->eeCoreComponent.generalRegisters;
+  destination->eeCoreComponent.pc =
+    source->eeCoreComponent.pc;
+  destination->eeCoreComponent.hiRegister =
+    source->eeCoreComponent.hiRegister;
+  destination->eeCoreComponent.loRegister =
+    source->eeCoreComponent.loRegister;
+  destination->eeCoreComponent.hi1Register =
+    source->eeCoreComponent.hi1Register;
+  destination->eeCoreComponent.lo1Register =
+    source->eeCoreComponent.lo1Register;
+  destination->eeCoreComponent.saRegister =
+    source->eeCoreComponent.saRegister;
+  destination->eeCoreComponent.exception =
+    source->eeCoreComponent.exception;
+  destination->eeCoreComponent.faultAddress =
+    source->eeCoreComponent.faultAddress;
   destination->interruptControllerComponent.statusRegister =
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
@@ -1489,6 +1506,9 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeU64(core.hi1Register);
   writer->writeU64(core.lo1Register);
   writer->writeU32(core.saRegister);
+  writer->writeU8(
+    static_cast<std::uint8_t>(core.exception));
+  writer->writeU32(core.faultAddress);
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1506,10 +1526,20 @@ void NekoSaveStateCodec::readEECore(
   core->hi1Register = reader->readU64();
   core->lo1Register = reader->readU64();
   core->saRegister = reader->readU32();
+  core->exception = readEnum<EEException>(
+    reader,
+    static_cast<std::uint8_t>(
+      EEException::InstructionBusError),
+    "EE exception");
+  core->faultAddress = reader->readU32();
 
   require(
     core->generalRegisters[0] == EERegister128{},
     "EE general-purpose register zero is not immutable");
+  require(
+    core->exception != EEException::None ||
+      core->faultAddress == 0,
+    "EE exception address is present without an exception");
 }
 
 void NekoSaveStateCodec::writeVPU(

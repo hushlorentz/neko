@@ -15,7 +15,7 @@ namespace
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 139;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 691;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 696;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -443,6 +443,28 @@ TEST_CASE("Reset machines can load prior save states")
 
   system.loadState(state);
   REQUIRE(system.saveState() == state);
+}
+
+TEST_CASE("EE fetch exceptions survive save states")
+{
+  NekoSystem original;
+  original.eeCore().setProgramCounter(0x80000102);
+  REQUIRE_FALSE(original.eeCore().fetchInstruction().succeeded);
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(restored.eeCore().exceptionPending());
+  REQUIRE(
+    restored.eeCore().pendingException() ==
+    EEException::AddressErrorLoadOrFetch);
+  REQUIRE(restored.eeCore().exceptionAddress() == 0x80000102);
+  REQUIRE(restored.eeCore().programCounter() == 0x80000102);
+
+  restored.eeCore().clearPendingException();
+  restored.eeCore().setProgramCounter(0);
+  restored.eeBus().write32(0, UINT32_C(0x12345678));
+  REQUIRE(restored.eeCore().fetchInstruction().succeeded);
 }
 
 TEST_CASE("Invalid save states are rejected transactionally")

@@ -34,6 +34,7 @@ NekoSystem::NekoSystem() :
     VU_CLOCK_PERIOD);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
+  eeCoreComponent.attachBus(&eeBusComponent);
   masterClock.registerComponent(gifDMACComponent, 1);
   masterClock.registerComponent(gsDisplayComponent, 1);
 }

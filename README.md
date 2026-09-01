@@ -12,7 +12,9 @@ until SPU2 is required and implemented.
 The initial EE Core foundation models all 32 128-bit R5900 general-purpose
 registers, the 32-bit program counter, both `HI`/`LO` pairs, and the `SA`
 register. Register zero is immutable, and the complete architectural state
-participates in reset and save-state restoration.
+participates in reset and save-state restoration. Instruction fetches use
+little-endian EE RAM and its aliases; misaligned and unmapped fetches become
+typed pending EE exceptions rather than host errors.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,
