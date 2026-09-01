@@ -495,7 +495,7 @@ existing event and runner infrastructure:
 - [x] Implement unaligned doubleword merge loads and stores
 - [x] Implement 128-bit `LQ`/`SQ` transfers and preserve full-width GPR values
       across the current integer and memory operations
-- [ ] Add bounded EE stepping and execution APIs that report stop reason,
+- [x] Add bounded EE stepping and execution APIs that report stop reason,
       current `PC`, cycle count, and pending exception state
 
 ### EE COP0, Exceptions, and Interrupts

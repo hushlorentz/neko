@@ -363,11 +363,84 @@ std::uint64_t NekoSystem::runMasterCycles(std::uint64_t cycles)
   return cycles;
 }
 
+EEExecutionResult NekoSystem::stepEEInstruction(
+  std::uint64_t maxMasterCycles)
+{
+  const std::uint64_t startingEECycles =
+    eeCoreComponent.elapsedCycles();
+  std::uint64_t masterCycles = 0;
+  std::uint64_t instructions = 0;
+  while (eeCoreComponent.clockActive() &&
+         masterCycles < maxMasterCycles &&
+         instructions == 0)
+  {
+    clockMasterCycle();
+    ++masterCycles;
+    if (eeCoreComponent.instructionRetiredThisCycle)
+    {
+      ++instructions;
+    }
+  }
+
+  return makeEEExecutionResult(
+    masterCycles,
+    startingEECycles,
+    instructions,
+    eeCoreComponent.clockActive() &&
+      instructions == 0 &&
+      masterCycles == maxMasterCycles);
+}
+
+EEExecutionResult NekoSystem::runEE(
+  std::uint64_t maxMasterCycles)
+{
+  const std::uint64_t startingEECycles =
+    eeCoreComponent.elapsedCycles();
+  std::uint64_t masterCycles = 0;
+  std::uint64_t instructions = 0;
+  while (eeCoreComponent.clockActive() &&
+         masterCycles < maxMasterCycles)
+  {
+    clockMasterCycle();
+    ++masterCycles;
+    if (eeCoreComponent.instructionRetiredThisCycle)
+    {
+      ++instructions;
+    }
+  }
+
+  return makeEEExecutionResult(
+    masterCycles,
+    startingEECycles,
+    instructions,
+    eeCoreComponent.clockActive() &&
+      masterCycles == maxMasterCycles);
+}
+
 bool NekoSystem::interruptPending() const
 {
   return
     interruptControllerComponent.interruptPending() ||
     gifDMACComponent.interruptPending();
+}
+
+EEExecutionResult NekoSystem::makeEEExecutionResult(
+  std::uint64_t masterCycles,
+  std::uint64_t startingEECycles,
+  std::uint64_t instructions,
+  bool cycleLimitReached) const
+{
+  return {
+    masterCycles,
+    eeCoreComponent.elapsedCycles() - startingEECycles,
+    instructions,
+    cycleLimitReached,
+    eeCoreComponent.executionState(),
+    eeCoreComponent.stopReason(),
+    eeCoreComponent.programCounter(),
+    eeCoreComponent.pendingException(),
+    eeCoreComponent.exceptionAddress()
+  };
 }
 
 void NekoSystem::recordCycleTrace(

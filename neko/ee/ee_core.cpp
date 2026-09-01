@@ -192,6 +192,7 @@ void EECore::reset()
   branchDelayTarget = 0;
   branchInstructionAddress = 0;
   branchDelayFromLikely = false;
+  instructionRetiredThisCycle = false;
 }
 
 void EECore::attachBus(EEBus *newBus)
@@ -284,6 +285,7 @@ bool EECore::clockActive() const
 
 void EECore::clock()
 {
+  instructionRetiredThisCycle = false;
   if (!clockActive())
   {
     return;
@@ -346,6 +348,7 @@ void EECore::clock()
   lastDecodedInstruction = decoded;
   lastAddress = fetched.address;
   lastInstructionValid = true;
+  instructionRetiredThisCycle = true;
 }
 
 bool EECore::executeInstruction(

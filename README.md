@@ -82,6 +82,12 @@ through checked little-endian RAM access. As specified by the EE manual, these
 instructions round the effective address down to a 16-byte boundary instead
 of raising an alignment exception. Scalar integer and memory instructions
 continue to preserve the unrelated upper half of each GPR.
+Scheduler-driven EE execution can now either step to the next retired
+instruction or run for a bounded number of master cycles. Both APIs return a
+structured result containing consumed master and EE cycles, retired instruction
+count, cycle-limit status, execution and stop state, current `PC`, and pending
+exception details. Stepping waits through modeled instruction latency while
+the rest of the system continues advancing on the master scheduler.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

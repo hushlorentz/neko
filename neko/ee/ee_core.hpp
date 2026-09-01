@@ -114,6 +114,7 @@ class EECore : public ClockedComponent
     void clearPendingException();
 
   private:
+    friend class NekoSystem;
     friend class NekoSaveStateCodec;
 
     struct PendingMultiplyDivide
@@ -153,6 +154,7 @@ class EECore : public ClockedComponent
     std::uint32_t branchDelayTarget = 0;
     std::uint32_t branchInstructionAddress = 0;
     bool branchDelayFromLikely = false;
+    bool instructionRetiredThisCycle = false;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);

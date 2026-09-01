@@ -21,6 +21,19 @@
 #include "vif.hpp"
 #include "vpu.hpp"
 
+struct EEExecutionResult
+{
+  std::uint64_t masterCycles = 0;
+  std::uint64_t eeCycles = 0;
+  std::uint64_t instructions = 0;
+  bool cycleLimitReached = false;
+  EEExecutionState state = EEExecutionState::Halted;
+  EEStopReason stopReason = EEStopReason::None;
+  std::uint32_t programCounter = 0;
+  EEException pendingException = EEException::None;
+  std::uint32_t exceptionAddress = 0;
+};
+
 class NekoSystem
 {
   public:
@@ -83,6 +96,10 @@ class NekoSystem
     const EEInterruptController &interruptController() const;
     void clockMasterCycle();
     std::uint64_t runMasterCycles(std::uint64_t cycles);
+    EEExecutionResult stepEEInstruction(
+      std::uint64_t maxMasterCycles);
+    EEExecutionResult runEE(
+      std::uint64_t maxMasterCycles);
     bool interruptPending() const;
     MasterClockScheduler &masterClockScheduler();
     const MasterClockScheduler &masterClockScheduler() const;
@@ -111,6 +128,11 @@ class NekoSystem
     std::vector<NekoTraceEvent> traceEvents;
 
     void synchronizeInterrupts();
+    EEExecutionResult makeEEExecutionResult(
+      std::uint64_t masterCycles,
+      std::uint64_t startingEECycles,
+      std::uint64_t instructions,
+      bool cycleLimitReached) const;
     void recordCycleTrace(
       std::uint64_t cycle,
       std::uint64_t vu0Cycles,
