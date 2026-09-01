@@ -46,6 +46,17 @@ TEST_CASE("EE Main Memory Map Tests")
   REQUIRE(bus.read32(0x80000100) == 0x12345678);
   REQUIRE(bus.read32(0xa0000100) == 0x12345678);
 
+  std::uint8_t byte = 0;
+  REQUIRE(bus.readData8(0x20000101, &byte));
+  REQUIRE(byte == 0x56);
+  REQUIRE(bus.writeData8(0xa0000102, 0xab));
+  REQUIRE(bus.readData8(0x00000102, &byte));
+  REQUIRE(byte == 0xab);
+  REQUIRE_FALSE(
+    bus.readData8(EEMemoryMap::MAIN_MEMORY_SIZE, &byte));
+  REQUIRE_FALSE(
+    bus.writeData8(EEMemoryMap::MAIN_MEMORY_SIZE, 0));
+
   const GIFQuadword quadword = {{
     UINT32_C(0x01020304),
     UINT32_C(0x11121314),

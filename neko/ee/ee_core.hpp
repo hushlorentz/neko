@@ -37,7 +37,9 @@ enum class EEException : std::uint8_t
   None,
   AddressErrorLoadOrFetch,
   InstructionBusError,
-  ArithmeticOverflow
+  ArithmeticOverflow,
+  DataBusErrorLoad,
+  DataBusErrorStore
 };
 
 struct EEInstructionFetchResult
@@ -200,6 +202,13 @@ class EECore : public ClockedComponent
       bool likely,
       std::uint32_t target,
       std::uint32_t address);
+    bool raiseDataAccessException(
+      EEException type,
+      std::uint32_t instructionAddress,
+      std::uint32_t dataAddress,
+      std::uint32_t instruction);
+    void setExceptionRestartAddress(
+      std::uint32_t instructionAddress);
 };
 
 #endif

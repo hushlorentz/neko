@@ -184,6 +184,37 @@ bool EEBus::readInstruction32(
   return true;
 }
 
+bool EEBus::readData8(
+  std::uint32_t address,
+  std::uint8_t *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE byte load requires an output value.");
+  }
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 1, &physicalAddress))
+  {
+    return false;
+  }
+  *value = mainMemory[physicalAddress];
+  return true;
+}
+
+bool EEBus::writeData8(
+  std::uint32_t address,
+  std::uint8_t value)
+{
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 1, &physicalAddress))
+  {
+    return false;
+  }
+  mainMemory[physicalAddress] = value;
+  return true;
+}
+
 std::uint32_t EEBus::read32(std::uint32_t address) const
 {
   requireAlignment(

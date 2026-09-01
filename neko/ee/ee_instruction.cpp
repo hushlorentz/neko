@@ -104,6 +104,9 @@ namespace
       &table,
       0x19,
       EEOperation::AddImmediateUnsignedDoubleword);
+    direct(&table, 0x20, EEOperation::LoadByte);
+    direct(&table, 0x24, EEOperation::LoadByteUnsigned);
+    direct(&table, 0x28, EEOperation::StoreByte);
     direct(&table, 0x14, EEOperation::BranchEqualLikely);
     direct(&table, 0x15, EEOperation::BranchNotEqualLikely);
     direct(

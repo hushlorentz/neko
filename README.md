@@ -40,6 +40,16 @@ branch-in-delay-slot and branch-likely/`SA` combinations stop explicitly, while
 misaligned register targets raise the fetch exception only when target fetch
 begins. Pending delay-slot state is serialized so save-state continuation
 cannot skip or repeat the slot.
+The first EE data-memory instructions implement `LB`, `LBU`, and `SB`.
+Effective addresses use the low 32 bits of the base-plus-signed-offset result,
+matching the EE's 32-bit virtual address implementation. Byte loads sign- or
+zero-extend into GPR bits 63..0, byte stores use the source's least-significant
+byte, and all preserve unrelated register bits. RAM aliases participate in
+data access, while unmapped loads and stores stop with distinct typed data-bus
+exceptions and preserve faulting architectural state. Save-state format
+version 6 includes those exception values. A fault in a branch delay slot
+rewinds execution to the preceding restartable branch while retaining the
+faulting data address.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

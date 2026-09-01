@@ -599,6 +599,36 @@ TEST_CASE("Pending EE branch delay slots survive save states")
   REQUIRE(restored.eeCore().generalRegister(4).low == 2);
 }
 
+TEST_CASE("EE byte data faults survive save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(
+    1,
+    {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+  original.eeCore().setGeneralRegister(2, {0x1234, 0x5678});
+  original.eeBus().write32(
+    0,
+    (UINT32_C(0x20) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16));
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(
+    restored.eeCore().pendingException() ==
+    EEException::DataBusErrorLoad);
+  REQUIRE(
+    restored.eeCore().exceptionAddress() ==
+    EEMemoryMap::MAIN_MEMORY_SIZE);
+  REQUIRE(
+    restored.eeCore().generalRegister(2) ==
+    EERegister128{0x1234, 0x5678});
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;
@@ -612,7 +642,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 6;
+  invalid[8] = 7;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 

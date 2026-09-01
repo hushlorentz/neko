@@ -303,6 +303,7 @@ void EECore::clock()
     fetchInstruction();
   if (!fetched.succeeded)
   {
+    setExceptionRestartAddress(fetched.address);
     state = EEExecutionState::Halted;
     haltReason = EEStopReason::FetchException;
     return;
@@ -315,7 +316,7 @@ void EECore::clock()
   }
   catch (const EEInstructionDecodeError &error)
   {
-    pc = fetched.address;
+    setExceptionRestartAddress(fetched.address);
     state = EEExecutionState::Halted;
     haltReason =
       error.failure() == EEInstructionDecodeFailure::Reserved
@@ -679,6 +680,44 @@ bool EECore::executeInstruction(
         ((static_cast<std::uint32_t>(source) ^
           instruction.immediate) & 0x07) * 16;
       return true;
+    case EEOperation::LoadByte:
+    case EEOperation::LoadByteUnsigned:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      std::uint8_t value = 0;
+      if (!attachedBus().readData8(dataAddress, &value))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      writeLowDoubleword(
+        immediateDestination,
+        instruction.operation == EEOperation::LoadByte &&
+          (value & 0x80) != 0
+          ? UINT64_C(0xffffffffffffff00) | value
+          : value);
+      return true;
+    }
+    case EEOperation::StoreByte:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      if (!attachedBus().writeData8(
+            dataAddress,
+            static_cast<std::uint8_t>(target)))
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return true;
+    }
     case EEOperation::Jump:
       scheduleBranch(
         true,
@@ -973,7 +1012,7 @@ bool EECore::raiseArithmeticOverflow(
   std::uint32_t address,
   std::uint32_t instruction)
 {
-  pc = address;
+  setExceptionRestartAddress(address);
   exception = EEException::ArithmeticOverflow;
   faultAddress = address;
   state = EEExecutionState::Halted;
@@ -1122,6 +1161,36 @@ void EECore::scheduleBranch(
   branchDelayTarget = condition ? target : address + 8;
   branchInstructionAddress = address;
   branchDelayFromLikely = likely;
+}
+
+bool EECore::raiseDataAccessException(
+  EEException type,
+  std::uint32_t instructionAddress,
+  std::uint32_t dataAddress,
+  std::uint32_t instruction)
+{
+  setExceptionRestartAddress(instructionAddress);
+  exception = type;
+  faultAddress = dataAddress;
+  state = EEExecutionState::Halted;
+  haltReason = EEStopReason::ExecutionException;
+  rejectedInstructionValue = instruction;
+  return false;
+}
+
+void EECore::setExceptionRestartAddress(
+  std::uint32_t instructionAddress)
+{
+  if (branchDelayPending)
+  {
+    pc = branchInstructionAddress;
+    branchDelayPending = false;
+    branchDelayTarget = 0;
+    branchInstructionAddress = 0;
+    branchDelayFromLikely = false;
+    return;
+  }
+  pc = instructionAddress;
 }
 
 EEExecutionState EECore::executionState() const
