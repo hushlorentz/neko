@@ -39,7 +39,8 @@ enum class EEException : std::uint8_t
   InstructionBusError,
   ArithmeticOverflow,
   DataBusErrorLoad,
-  DataBusErrorStore
+  DataBusErrorStore,
+  AddressErrorStore
 };
 
 struct EEInstructionFetchResult

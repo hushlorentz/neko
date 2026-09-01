@@ -183,7 +183,7 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
   SECTION("Deferred valid instruction families are rejected explicitly")
   {
     REQUIRE_THROWS_WITH(
-      decodeEEInstruction(UINT32_C(0x84000000)),
+      decodeEEInstruction(UINT32_C(0x8c000000)),
       "Unsupported EE instruction encoding.");
     REQUIRE_THROWS_WITH(
       decodeEEInstruction(UINT32_C(0x40000000)),
@@ -317,4 +317,16 @@ TEST_CASE("EE byte memory instruction decoding")
     decodeEEInstruction(
       immediateInstruction(0x28, 1, 2, 3)).operation ==
     EEOperation::StoreByte);
+  REQUIRE(
+    decodeEEInstruction(
+      immediateInstruction(0x21, 1, 2, 3)).operation ==
+    EEOperation::LoadHalfword);
+  REQUIRE(
+    decodeEEInstruction(
+      immediateInstruction(0x25, 1, 2, 3)).operation ==
+    EEOperation::LoadHalfwordUnsigned);
+  REQUIRE(
+    decodeEEInstruction(
+      immediateInstruction(0x29, 1, 2, 3)).operation ==
+    EEOperation::StoreHalfword);
 }

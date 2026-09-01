@@ -629,6 +629,30 @@ TEST_CASE("EE byte data faults survive save states")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("EE halfword address faults survive save states")
+{
+  NekoSystem original;
+  original.eeCore().setGeneralRegister(1, {0x101, 0});
+  original.eeCore().setGeneralRegister(2, {0xabcd, 0});
+  original.eeBus().write32(
+    0,
+    (UINT32_C(0x29) << 26) |
+    (UINT32_C(1) << 21) |
+    (UINT32_C(2) << 16));
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(
+    restored.eeCore().pendingException() ==
+    EEException::AddressErrorStore);
+  REQUIRE(restored.eeCore().exceptionAddress() == 0x101);
+  REQUIRE(restored.eeCore().programCounter() == 0);
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;
@@ -642,7 +666,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 7;
+  invalid[8] = 8;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 

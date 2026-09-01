@@ -50,6 +50,12 @@ exceptions and preserve faulting architectural state. Save-state format
 version 6 includes those exception values. A fault in a branch delay slot
 rewinds execution to the preceding restartable branch while retaining the
 faulting data address.
+Aligned halfword access adds `LH`, `LHU`, and `SH`. Halfword loads assemble
+little-endian data and sign- or zero-extend it through GPR bits 63..0; stores
+write only the least-significant 16 bits. Odd effective addresses stop before
+the bus access with the appropriate load or store address-error state, so
+faulting stores cannot partially modify memory. Save-state format version 7
+includes the new store-address exception.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

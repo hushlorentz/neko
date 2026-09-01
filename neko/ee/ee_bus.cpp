@@ -215,6 +215,51 @@ bool EEBus::writeData8(
   return true;
 }
 
+bool EEBus::readData16(
+  std::uint32_t address,
+  std::uint16_t *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE halfword load requires an output value.");
+  }
+  requireAlignment(
+    address,
+    2,
+    "EE halfword load must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 2, &physicalAddress))
+  {
+    return false;
+  }
+  *value =
+    mainMemory[physicalAddress] |
+    (static_cast<std::uint16_t>(
+      mainMemory[physicalAddress + 1]) << 8);
+  return true;
+}
+
+bool EEBus::writeData16(
+  std::uint32_t address,
+  std::uint16_t value)
+{
+  requireAlignment(
+    address,
+    2,
+    "EE halfword store must be naturally aligned.");
+  std::uint32_t physicalAddress = 0;
+  if (!mainMemoryAddress(address, 2, &physicalAddress))
+  {
+    return false;
+  }
+  mainMemory[physicalAddress] =
+    static_cast<std::uint8_t>(value);
+  mainMemory[physicalAddress + 1] =
+    static_cast<std::uint8_t>(value >> 8);
+  return true;
+}
+
 std::uint32_t EEBus::read32(std::uint32_t address) const
 {
   requireAlignment(

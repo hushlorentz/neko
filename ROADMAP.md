@@ -488,8 +488,9 @@ existing event and runner infrastructure:
 - [x] Implement jumps, branches, likely branches, link behavior, and the
       architectural branch delay slot
 - [x] Implement signed and unsigned byte loads and byte stores
-- [ ] Implement signed and unsigned halfword, word, and doubleword loads and
-      stores, including alignment and merge operations
+- [x] Implement signed and unsigned halfword loads and halfword stores
+- [ ] Implement signed and unsigned word and doubleword loads and stores,
+      including alignment and merge operations
 - [ ] Implement 128-bit `LQ`/`SQ` transfers and preserve full-width GPR values
       across integer, memory, and coprocessor operations
 - [ ] Add bounded EE stepping and execution APIs that report stop reason,

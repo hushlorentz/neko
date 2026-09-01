@@ -93,6 +93,12 @@ class EEBus
     bool writeData8(
       std::uint32_t address,
       std::uint8_t value);
+    bool readData16(
+      std::uint32_t address,
+      std::uint16_t *value) const;
+    bool writeData16(
+      std::uint32_t address,
+      std::uint16_t value);
     std::uint32_t read32(std::uint32_t address) const;
     void write32(
       std::uint32_t address,

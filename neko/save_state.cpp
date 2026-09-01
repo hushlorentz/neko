@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 6;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 7;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1593,7 +1593,7 @@ void NekoSaveStateCodec::readEECore(
   core->exception = readEnum<EEException>(
     reader,
     static_cast<std::uint8_t>(
-      EEException::DataBusErrorStore),
+      EEException::AddressErrorStore),
     "EE exception");
   core->faultAddress = reader->readU32();
   core->state = readEnum<EEExecutionState>(

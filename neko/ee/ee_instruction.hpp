@@ -92,7 +92,10 @@ enum class EEOperation : std::uint8_t
   BranchGreaterThanOrEqualZeroAndLinkLikely,
   LoadByte,
   LoadByteUnsigned,
-  StoreByte
+  StoreByte,
+  LoadHalfword,
+  LoadHalfwordUnsigned,
+  StoreHalfword
 };
 
 struct EEInstruction
