@@ -1,0 +1,94 @@
+#ifndef EE_BUS_HPP
+#define EE_BUS_HPP
+
+#include <cstdint>
+#include <vector>
+
+#include "gif.hpp"
+
+class EEInterruptController;
+class GIFRegisters;
+class GIFPath3Transfer;
+class GS;
+class VIF;
+
+namespace EEMemoryMap
+{
+  constexpr std::uint32_t MAIN_MEMORY_SIZE =
+    32 * 1024 * 1024;
+
+  constexpr std::uint32_t GIF_BASE = 0x10003000;
+  constexpr std::uint32_t GIF_MODE = GIF_BASE + 0x10;
+  constexpr std::uint32_t GIF_STAT = GIF_BASE + 0x20;
+  constexpr std::uint32_t GIF_P3CNT = GIF_BASE + 0x90;
+  constexpr std::uint32_t GIF_P3TAG = GIF_BASE + 0xa0;
+
+  constexpr std::uint32_t VIF0_BASE = 0x10003800;
+  constexpr std::uint32_t VIF1_BASE = 0x10003c00;
+  constexpr std::uint32_t VIF0_STAT = VIF0_BASE;
+  constexpr std::uint32_t VIF0_FBRST = VIF0_BASE + 0x10;
+  constexpr std::uint32_t VIF0_CODE = VIF0_BASE + 0x80;
+  constexpr std::uint32_t VIF1_STAT = VIF1_BASE;
+  constexpr std::uint32_t VIF1_FBRST = VIF1_BASE + 0x10;
+  constexpr std::uint32_t VIF1_CODE = VIF1_BASE + 0x80;
+
+  constexpr std::uint32_t VIF0_FIFO = 0x10004000;
+  constexpr std::uint32_t VIF1_FIFO = 0x10005000;
+  constexpr std::uint32_t GIF_FIFO = 0x10006000;
+
+  constexpr std::uint32_t INTC_STAT = 0x1000f000;
+  constexpr std::uint32_t INTC_MASK = 0x1000f010;
+
+  constexpr std::uint32_t GS_BUSDIR = 0x12001040;
+}
+
+namespace EEVIFStatus
+{
+  constexpr std::uint32_t WAITING_FOR_PAYLOAD = 1u;
+  constexpr std::uint32_t MARK = 1u << 6;
+  constexpr std::uint32_t DOUBLE_BUFFER = 1u << 7;
+  constexpr std::uint32_t INTERRUPT_STALL = 1u << 10;
+  constexpr std::uint32_t INTERRUPT = 1u << 11;
+}
+
+class EEBus
+{
+  public:
+    EEBus(
+      VIF *vif0,
+      VIF *vif1,
+      GIFRegisters *gifRegisters,
+      GIFPath3Transfer *gifPath3,
+      GS *gs,
+      EEInterruptController *interrupts);
+
+    std::uint32_t read32(std::uint32_t address) const;
+    void write32(
+      std::uint32_t address,
+      std::uint32_t value);
+    std::uint64_t read64(std::uint32_t address);
+    void write64(
+      std::uint32_t address,
+      std::uint64_t value);
+    GIFQuadword readQuadword(std::uint32_t address) const;
+    bool writeQuadword(
+      std::uint32_t address,
+      const GIFQuadword &value);
+
+  private:
+    bool mainMemoryAddress(
+      std::uint32_t address,
+      std::size_t width,
+      std::uint32_t *physicalAddress) const;
+    std::uint32_t vifStatus(const VIF &vif) const;
+
+    VIF *vif0Component;
+    VIF *vif1Component;
+    GIFRegisters *gifRegisterFile;
+    GIFPath3Transfer *gifPath3Transfer;
+    GS *gsComponent;
+    EEInterruptController *interruptController;
+    std::vector<std::uint8_t> mainMemory;
+};
+
+#endif

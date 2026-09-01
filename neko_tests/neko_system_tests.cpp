@@ -79,6 +79,13 @@ TEST_CASE("Neko System Tests")
     REQUIRE(&constSystem.gifPath3() == &system.gifPath3());
     REQUIRE(&constSystem.gs() == &system.gs());
     REQUIRE(
+      &constSystem.gifRegisters() ==
+      &system.gifRegisters());
+    REQUIRE(&constSystem.eeBus() == &system.eeBus());
+    REQUIRE(
+      &constSystem.interruptController() ==
+      &system.interruptController());
+    REQUIRE(
       &constSystem.masterClockScheduler() ==
       &system.masterClockScheduler());
   }
@@ -134,7 +141,7 @@ TEST_CASE("Neko System Tests")
     system.vu0().startMicroMode();
     system.vu1().startMicroMode();
 
-    system.masterClockScheduler().run(4);
+    REQUIRE(system.runMasterCycles(4) == 4);
 
     REQUIRE(system.vu0().elapsedCycles() == 2);
     REQUIRE(system.vu1().elapsedCycles() == 2);

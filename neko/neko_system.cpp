@@ -7,7 +7,15 @@ NekoSystem::NekoSystem() :
   vif1Component(VIFType::VIF1),
   gifPathArbiterComponent(&gifDecoderComponent),
   gifPath1Component(gifPathArbiterComponent),
-  gifPath3Component(gifPathArbiterComponent)
+  gifPath3Component(gifPathArbiterComponent),
+  gifRegisterFile(&gifPathArbiterComponent),
+  eeBusComponent(
+    &vif0Component,
+    &vif1Component,
+    &gifRegisterFile,
+    &gifPath3Component,
+    &gsComponent,
+    &interruptControllerComponent)
 {
   vif0Component.attachVPU(&vu0Component);
   vif1Component.attachVPU(&vu1Component);
@@ -110,6 +118,73 @@ GS &NekoSystem::gs()
 const GS &NekoSystem::gs() const
 {
   return gsComponent;
+}
+
+GIFRegisters &NekoSystem::gifRegisters()
+{
+  return gifRegisterFile;
+}
+
+const GIFRegisters &NekoSystem::gifRegisters() const
+{
+  return gifRegisterFile;
+}
+
+EEBus &NekoSystem::eeBus()
+{
+  return eeBusComponent;
+}
+
+const EEBus &NekoSystem::eeBus() const
+{
+  return eeBusComponent;
+}
+
+EEInterruptController &NekoSystem::interruptController()
+{
+  return interruptControllerComponent;
+}
+
+const EEInterruptController &
+NekoSystem::interruptController() const
+{
+  return interruptControllerComponent;
+}
+
+void NekoSystem::synchronizeInterrupts()
+{
+  if (vif0Component.interruptPending())
+  {
+    interruptControllerComponent.setSource(
+      EEInterruptSource::VIF0,
+      true);
+  }
+  if (vif1Component.interruptPending())
+  {
+    interruptControllerComponent.setSource(
+      EEInterruptSource::VIF1,
+      true);
+  }
+}
+
+void NekoSystem::clockMasterCycle()
+{
+  masterClock.clock();
+  synchronizeInterrupts();
+}
+
+std::uint64_t NekoSystem::runMasterCycles(std::uint64_t cycles)
+{
+  for (std::uint64_t cycle = 0; cycle < cycles; ++cycle)
+  {
+    clockMasterCycle();
+  }
+  return cycles;
+}
+
+bool NekoSystem::interruptPending() const
+{
+  return interruptControllerComponent.interruptPending();
 }
 
 MasterClockScheduler &NekoSystem::masterClockScheduler()

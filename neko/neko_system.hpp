@@ -4,11 +4,14 @@
 #include <cstdint>
 
 #include "clock_scheduler.hpp"
+#include "ee_bus.hpp"
 #include "gif.hpp"
 #include "gif_path1.hpp"
 #include "gif_path3.hpp"
 #include "gif_path_arbiter.hpp"
+#include "gif_registers.hpp"
 #include "gs.hpp"
+#include "interrupt_controller.hpp"
 #include "vif.hpp"
 #include "vpu.hpp"
 
@@ -45,6 +48,15 @@ class NekoSystem
     const GIFPath3Transfer &gifPath3() const;
     GS &gs();
     const GS &gs() const;
+    GIFRegisters &gifRegisters();
+    const GIFRegisters &gifRegisters() const;
+    EEBus &eeBus();
+    const EEBus &eeBus() const;
+    EEInterruptController &interruptController();
+    const EEInterruptController &interruptController() const;
+    void clockMasterCycle();
+    std::uint64_t runMasterCycles(std::uint64_t cycles);
+    bool interruptPending() const;
     MasterClockScheduler &masterClockScheduler();
     const MasterClockScheduler &masterClockScheduler() const;
 
@@ -58,7 +70,12 @@ class NekoSystem
     GIFPathArbiter gifPathArbiterComponent;
     GIFPath1Transfer gifPath1Component;
     GIFPath3Transfer gifPath3Component;
+    GIFRegisters gifRegisterFile;
+    EEInterruptController interruptControllerComponent;
     MasterClockScheduler masterClock;
+    EEBus eeBusComponent;
+
+    void synchronizeInterrupts();
 };
 
 #endif

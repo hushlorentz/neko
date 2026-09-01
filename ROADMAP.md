@@ -470,7 +470,7 @@ existing event and runner infrastructure:
 - [x] Add a `NekoSystem` owner for hardware components and global state
 - [x] Establish an integer master-clock scheduler
 - [x] Run VUs at 147.456 MHz relative to the 294.912 MHz EE clock
-- [ ] Add EE, memory-map, DMA, GIF, GS, and interrupt coordination
+- [x] Add EE, memory-map, DMA, GIF, GS, and interrupt coordination
 - [ ] Connect GIF DMAC channel 2 to the proven PATH3 transport, including
       normal and chain-mode progress, backpressure, completion, and interrupts
 - [ ] Model GS display circuits, vertical-blank timing, and presentation

@@ -39,6 +39,8 @@ endif()
 
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
+    neko/ee/ee_bus.cpp
+    neko/ee/interrupt_controller.cpp
     neko/fp_register.cpp
     neko/neko_system.cpp
     neko/ee/gif/gif.cpp
@@ -62,6 +64,7 @@ target_include_directories(neko_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/neko
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/clock
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/gif
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/gs
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vif
@@ -136,6 +139,8 @@ target_link_libraries(neko_diagnostics PUBLIC neko_core)
 add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
+    neko_tests/ee/ee_bus_tests.cpp
+    neko_tests/ee/interrupt_controller_tests.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp
     neko_tests/gif/gif_tests.cpp
