@@ -4,6 +4,7 @@
 #include "catch.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
+#include "ee_instruction.hpp"
 #include "neko_system.hpp"
 
 TEST_CASE("EE Core architectural state")
@@ -202,5 +203,117 @@ TEST_CASE("EE Core instruction fetching")
 
     bus.write32(0, UINT32_C(0x12345678));
     REQUIRE(core.fetchInstruction().succeeded);
+  }
+}
+
+TEST_CASE("EE Core scheduled execution")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  EEBus &bus = system.eeBus();
+
+  SECTION("The EE is halted after reset")
+  {
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(
+      core.executionState() ==
+      EEExecutionState::Halted);
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(core.elapsedCycles() == 0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.elapsedCycles() == 0);
+  }
+
+  SECTION("Each master cycle fetches and decodes one instruction")
+  {
+    bus.write32(0, 0);
+    bus.write32(4, UINT32_C(0x00021900));
+    bus.write32(8, UINT32_C(0x24030001));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.clockActive());
+    REQUIRE(core.elapsedCycles() == 3);
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.hasLastInstruction());
+    REQUIRE(core.lastInstructionAddress() == 8);
+    REQUIRE(
+      core.lastInstruction().operation ==
+      EEOperation::AddImmediateUnsignedWord);
+    REQUIRE(core.lastInstruction().raw == 0x24030001);
+  }
+
+  SECTION("A fetch exception stops scheduled execution")
+  {
+    core.startExecution(2);
+
+    system.clockMasterCycle();
+
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.programCounter() == 2);
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::FetchException);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE_FALSE(core.hasLastInstruction());
+  }
+
+  SECTION("Reserved encodings stop without retiring")
+  {
+    bus.write32(0, UINT32_C(0x4c000000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::ReservedInstruction);
+    REQUIRE(core.rejectedInstruction() == 0x4c000000);
+    REQUIRE_FALSE(core.hasLastInstruction());
+  }
+
+  SECTION("Deferred instruction families stop explicitly")
+  {
+    bus.write32(0, UINT32_C(0x10000000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::UnsupportedInstruction);
+    REQUIRE(core.rejectedInstruction() == 0x10000000);
+  }
+
+  SECTION("Host halt and restart preserve accumulated cycles")
+  {
+    bus.write32(0, 0);
+    bus.write32(4, 0);
+    core.startExecution(0);
+    system.clockMasterCycle();
+
+    core.haltExecution();
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(core.stopReason() == EEStopReason::HostHalt);
+
+    core.startExecution(4);
+    system.clockMasterCycle();
+
+    REQUIRE(core.clockActive());
+    REQUIRE(core.elapsedCycles() == 2);
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.stopReason() == EEStopReason::None);
   }
 }

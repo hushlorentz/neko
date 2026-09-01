@@ -14,8 +14,8 @@ namespace
 {
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
-  constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 139;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 696;
+  constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 156;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 736;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -467,6 +467,30 @@ TEST_CASE("EE fetch exceptions survive save states")
   REQUIRE(restored.eeCore().fetchInstruction().succeeded);
 }
 
+TEST_CASE("Running EE scheduler state survives save states")
+{
+  NekoSystem original;
+  original.eeBus().write32(0, 0);
+  original.eeBus().write32(4, 0);
+  original.eeBus().write32(8, 0);
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(restored.eeCore().clockActive());
+  REQUIRE(restored.eeCore().elapsedCycles() == 1);
+  REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(restored.eeCore().hasLastInstruction());
+  REQUIRE(restored.eeCore().lastInstructionAddress() == 0);
+
+  original.runMasterCycles(2);
+  restored.runMasterCycles(2);
+
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("Invalid save states are rejected transactionally")
 {
   NekoSystem system;
@@ -480,7 +504,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 3;
+  invalid[8] = 4;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 

@@ -2,6 +2,7 @@
 #define EE_INSTRUCTION_HPP
 
 #include <cstdint>
+#include <stdexcept>
 
 enum class EEOperation : std::uint8_t
 {
@@ -59,6 +60,24 @@ struct EEInstruction
   std::uint8_t function = 0;
   std::uint16_t immediate = 0;
   std::uint32_t target = 0;
+};
+
+enum class EEInstructionDecodeFailure : std::uint8_t
+{
+  Reserved,
+  Unsupported
+};
+
+class EEInstructionDecodeError : public std::runtime_error
+{
+  public:
+    EEInstructionDecodeError(
+      EEInstructionDecodeFailure failure,
+      const char *message);
+    EEInstructionDecodeFailure failure() const;
+
+  private:
+    EEInstructionDecodeFailure failureType;
 };
 
 EEInstruction decodeEEInstruction(std::uint32_t instruction);

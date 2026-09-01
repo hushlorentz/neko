@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 2;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 3;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1272,6 +1272,20 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.exception;
   destination->eeCoreComponent.faultAddress =
     source->eeCoreComponent.faultAddress;
+  destination->eeCoreComponent.state =
+    source->eeCoreComponent.state;
+  destination->eeCoreComponent.haltReason =
+    source->eeCoreComponent.haltReason;
+  destination->eeCoreComponent.cycles =
+    source->eeCoreComponent.cycles;
+  destination->eeCoreComponent.lastInstructionValid =
+    source->eeCoreComponent.lastInstructionValid;
+  destination->eeCoreComponent.lastAddress =
+    source->eeCoreComponent.lastAddress;
+  destination->eeCoreComponent.lastDecodedInstruction =
+    source->eeCoreComponent.lastDecodedInstruction;
+  destination->eeCoreComponent.rejectedInstructionValue =
+    source->eeCoreComponent.rejectedInstructionValue;
   destination->interruptControllerComponent.statusRegister =
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
@@ -1417,15 +1431,15 @@ void NekoSaveStateCodec::readMasterClock(
 {
   system->masterClock.masterCycle = reader->readU64();
   const std::uint32_t count = reader->readU32();
-  require(count <= 5, "master-clock component count is invalid");
-  std::array<bool, 6> used = {};
+  require(count <= 6, "master-clock component count is invalid");
+  std::array<bool, 7> used = {};
   std::vector<MasterClockScheduler::ScheduledComponent>
     components;
   components.reserve(count);
   for (std::uint32_t index = 0; index < count; ++index)
   {
     const std::uint8_t id = reader->readU8();
-    require(id >= 1 && id <= 5, "clock component ID is invalid");
+    require(id >= 1 && id <= 6, "clock component ID is invalid");
     require(!used[id], "clock component ID is duplicated");
     used[id] = true;
     const std::uint64_t period = reader->readU64();
@@ -1465,6 +1479,10 @@ std::uint8_t NekoSaveStateCodec::componentID(
   {
     return 5;
   }
+  if (component == &system.eeCoreComponent)
+  {
+    return 6;
+  }
   throw std::runtime_error(
     "Cannot save a host-owned master-clock component.");
 }
@@ -1485,6 +1503,8 @@ ClockedComponent *NekoSaveStateCodec::componentForID(
       return &system->gifDMACComponent;
     case 5:
       return &system->gsDisplayComponent;
+    case 6:
+      return &system->eeCoreComponent;
     default:
       SaveStateReader::invalid("clock component ID is invalid");
   }
@@ -1509,6 +1529,15 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeU8(
     static_cast<std::uint8_t>(core.exception));
   writer->writeU32(core.faultAddress);
+  writer->writeU8(
+    static_cast<std::uint8_t>(core.state));
+  writer->writeU8(
+    static_cast<std::uint8_t>(core.haltReason));
+  writer->writeU64(core.cycles);
+  writer->writeBool(core.lastInstructionValid);
+  writer->writeU32(core.lastAddress);
+  writer->writeU32(core.lastDecodedInstruction.raw);
+  writer->writeU32(core.rejectedInstructionValue);
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1532,6 +1561,28 @@ void NekoSaveStateCodec::readEECore(
       EEException::InstructionBusError),
     "EE exception");
   core->faultAddress = reader->readU32();
+  core->state = readEnum<EEExecutionState>(
+    reader,
+    static_cast<std::uint8_t>(
+      EEExecutionState::Running),
+    "EE execution state");
+  core->haltReason = readEnum<EEStopReason>(
+    reader,
+    static_cast<std::uint8_t>(
+      EEStopReason::UnsupportedInstruction),
+    "EE stop reason");
+  core->cycles = reader->readU64();
+  core->lastInstructionValid =
+    reader->readBool("EE last instruction flag");
+  core->lastAddress = reader->readU32();
+  const std::uint32_t lastInstruction = reader->readU32();
+  core->rejectedInstructionValue = reader->readU32();
+  core->lastDecodedInstruction = {};
+  if (core->lastInstructionValid)
+  {
+    core->lastDecodedInstruction =
+      decodeEEInstruction(lastInstruction);
+  }
 
   require(
     core->generalRegisters[0] == EERegister128{},
@@ -1540,6 +1591,19 @@ void NekoSaveStateCodec::readEECore(
     core->exception != EEException::None ||
       core->faultAddress == 0,
     "EE exception address is present without an exception");
+  require(
+    core->state == EEExecutionState::Running ||
+      core->haltReason != EEStopReason::None ||
+      core->cycles == 0,
+    "halted EE state has no stop reason");
+  require(
+    core->state != EEExecutionState::Running ||
+      core->haltReason == EEStopReason::None,
+    "running EE state has a stop reason");
+  require(
+    core->lastInstructionValid ||
+      (core->lastAddress == 0 && lastInstruction == 0),
+    "EE invalid last instruction contains state");
 }
 
 void NekoSaveStateCodec::writeVPU(

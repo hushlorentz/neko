@@ -21,6 +21,7 @@ NekoSystem::NekoSystem() :
   gifDMACComponent(&eeBusComponent),
   gsDisplayComponent(&gsComponent)
 {
+  masterClock.registerComponent(eeCoreComponent, 1);
   vif0Component.attachVPU(&vu0Component);
   vif1Component.attachVPU(&vu1Component);
   vif1Component.attachGIFPathArbiter(&gifPathArbiterComponent);

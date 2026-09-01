@@ -151,4 +151,20 @@ TEST_CASE("Neko System Tests")
     REQUIRE(
       system.masterClockScheduler().currentCycle() == 4);
   }
+
+  SECTION("The master clock advances a running EE every cycle")
+  {
+    NekoSystem system;
+    system.eeBus().write32(0, 0);
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(8, 0);
+    system.eeCore().startExecution(0);
+
+    REQUIRE(system.runMasterCycles(3) == 3);
+
+    REQUIRE(system.eeCore().elapsedCycles() == 3);
+    REQUIRE(system.eeCore().programCounter() == 12);
+    REQUIRE(
+      system.masterClockScheduler().currentCycle() == 3);
+  }
 }

@@ -267,10 +267,12 @@ namespace
   {
     if (kind == DecodeKind::Reserved)
     {
-      throw std::runtime_error(
+      throw EEInstructionDecodeError(
+        EEInstructionDecodeFailure::Reserved,
         "Reserved EE instruction encoding.");
     }
-    throw std::runtime_error(
+    throw EEInstructionDecodeError(
+      EEInstructionDecodeFailure::Unsupported,
       "Unsupported EE instruction encoding.");
   }
 
@@ -303,6 +305,20 @@ namespace
     }
     instruction->operation = entry.operation;
   }
+}
+
+EEInstructionDecodeError::EEInstructionDecodeError(
+  EEInstructionDecodeFailure failure,
+  const char *message) :
+  std::runtime_error(message),
+  failureType(failure)
+{
+}
+
+EEInstructionDecodeFailure
+EEInstructionDecodeError::failure() const
+{
+  return failureType;
 }
 
 EEInstruction decodeEEInstruction(std::uint32_t raw)

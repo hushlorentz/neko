@@ -5,6 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "clocked_component.hpp"
+#include "ee_instruction.hpp"
+
 class EEBus;
 
 struct EERegister128
@@ -43,7 +46,22 @@ struct EEInstructionFetchResult
   std::uint32_t instruction = 0;
 };
 
-class EECore
+enum class EEExecutionState : std::uint8_t
+{
+  Halted,
+  Running
+};
+
+enum class EEStopReason : std::uint8_t
+{
+  None,
+  HostHalt,
+  FetchException,
+  ReservedInstruction,
+  UnsupportedInstruction
+};
+
+class EECore : public ClockedComponent
 {
   public:
     static constexpr std::size_t GENERAL_REGISTER_COUNT = 32;
@@ -51,6 +69,17 @@ class EECore
     void reset();
     void attachBus(EEBus *bus);
     EEInstructionFetchResult fetchInstruction();
+    void startExecution(std::uint32_t startAddress);
+    void haltExecution();
+    bool clockActive() const override;
+    void clock() override;
+    EEExecutionState executionState() const;
+    EEStopReason stopReason() const;
+    std::uint64_t elapsedCycles() const;
+    bool hasLastInstruction() const;
+    std::uint32_t lastInstructionAddress() const;
+    const EEInstruction &lastInstruction() const;
+    std::uint32_t rejectedInstruction() const;
 
     const EERegister128 &generalRegister(
       std::size_t index) const;
@@ -92,6 +121,13 @@ class EECore
     EEBus *bus = nullptr;
     EEException exception = EEException::None;
     std::uint32_t faultAddress = 0;
+    EEExecutionState state = EEExecutionState::Halted;
+    EEStopReason haltReason = EEStopReason::None;
+    std::uint64_t cycles = 0;
+    bool lastInstructionValid = false;
+    std::uint32_t lastAddress = 0;
+    EEInstruction lastDecodedInstruction;
+    std::uint32_t rejectedInstructionValue = 0;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);

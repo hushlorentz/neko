@@ -479,7 +479,7 @@ existing event and runner infrastructure:
       exceptions
 - [x] Add table-driven EE instruction decoding with explicit rejection of
       reserved and unsupported encodings
-- [ ] Register the EE with the master scheduler at one instruction cycle per
+- [x] Register the EE with the master scheduler at one instruction cycle per
       294.912 MHz master cycle
 - [ ] Implement integer arithmetic, comparison, logic, and shift instructions
       with the documented 32-bit sign-extension and 64-bit result rules

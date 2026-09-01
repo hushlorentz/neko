@@ -17,7 +17,9 @@ little-endian EE RAM and its aliases; misaligned and unmapped fetches become
 typed pending EE exceptions rather than host errors. A table-driven decoder
 currently recognizes the base integer arithmetic, comparison, logic, and shift
 families and distinguishes reserved encodings from deferred instruction
-families.
+families. The EE is a halted-by-default master-clock component; while running,
+each 294.912 MHz master cycle performs one fetch/decode step and records an
+explicit stop reason if fetching or decoding cannot continue.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

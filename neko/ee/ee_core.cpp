@@ -17,6 +17,13 @@ void EECore::reset()
   saRegister = 0;
   exception = EEException::None;
   faultAddress = 0;
+  state = EEExecutionState::Halted;
+  haltReason = EEStopReason::None;
+  cycles = 0;
+  lastInstructionValid = false;
+  lastAddress = 0;
+  lastDecodedInstruction = {};
+  rejectedInstructionValue = 0;
 }
 
 void EECore::attachBus(EEBus *newBus)
@@ -60,6 +67,113 @@ EEInstructionFetchResult EECore::fetchInstruction()
 
   pc += 4;
   return {true, address, instruction};
+}
+
+void EECore::startExecution(std::uint32_t startAddress)
+{
+  pc = startAddress;
+  clearPendingException();
+  state = EEExecutionState::Running;
+  haltReason = EEStopReason::None;
+  lastInstructionValid = false;
+  lastAddress = 0;
+  lastDecodedInstruction = {};
+  rejectedInstructionValue = 0;
+}
+
+void EECore::haltExecution()
+{
+  state = EEExecutionState::Halted;
+  haltReason = EEStopReason::HostHalt;
+}
+
+bool EECore::clockActive() const
+{
+  return state == EEExecutionState::Running;
+}
+
+void EECore::clock()
+{
+  if (!clockActive())
+  {
+    return;
+  }
+
+  ++cycles;
+  const EEInstructionFetchResult fetched =
+    fetchInstruction();
+  if (!fetched.succeeded)
+  {
+    state = EEExecutionState::Halted;
+    haltReason = EEStopReason::FetchException;
+    return;
+  }
+
+  try
+  {
+    lastDecodedInstruction =
+      decodeEEInstruction(fetched.instruction);
+  }
+  catch (const EEInstructionDecodeError &error)
+  {
+    pc = fetched.address;
+    state = EEExecutionState::Halted;
+    haltReason =
+      error.failure() == EEInstructionDecodeFailure::Reserved
+        ? EEStopReason::ReservedInstruction
+        : EEStopReason::UnsupportedInstruction;
+    rejectedInstructionValue = fetched.instruction;
+    lastInstructionValid = false;
+    return;
+  }
+
+  lastAddress = fetched.address;
+  lastInstructionValid = true;
+}
+
+EEExecutionState EECore::executionState() const
+{
+  return state;
+}
+
+EEStopReason EECore::stopReason() const
+{
+  return haltReason;
+}
+
+std::uint64_t EECore::elapsedCycles() const
+{
+  return cycles;
+}
+
+bool EECore::hasLastInstruction() const
+{
+  return lastInstructionValid;
+}
+
+std::uint32_t EECore::lastInstructionAddress() const
+{
+  if (!lastInstructionValid)
+  {
+    throw std::logic_error(
+      "EE Core has no decoded instruction.");
+  }
+  return lastAddress;
+}
+
+const EEInstruction &EECore::lastInstruction() const
+{
+  if (!lastInstructionValid)
+  {
+    throw std::logic_error(
+      "EE Core has no decoded instruction.");
+  }
+  return lastDecodedInstruction;
+}
+
+std::uint32_t EECore::rejectedInstruction() const
+{
+  return rejectedInstructionValue;
 }
 
 const EERegister128 &EECore::generalRegister(
