@@ -169,4 +169,7 @@ TEST_CASE("EE halfword alignment faults restart branch delay slots")
     core.programCounter() ==
     EEExceptionVector::BOOTSTRAP_GENERAL);
   REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) != 0);
 }

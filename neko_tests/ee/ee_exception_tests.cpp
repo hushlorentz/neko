@@ -24,6 +24,19 @@ namespace
       (static_cast<std::uint32_t>(destination) << 11) |
       function;
   }
+
+  std::uint32_t immediateInstruction(
+    std::uint8_t opcode,
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint16_t immediate)
+  {
+    return
+      (static_cast<std::uint32_t>(opcode) << 26) |
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      immediate;
+  }
 }
 
 TEST_CASE("EE exceptions enter the general vector through COP0")
@@ -57,9 +70,11 @@ TEST_CASE("EE exceptions enter the general vector through COP0")
     EEExceptionCode::ARITHMETIC_OVERFLOW);
   REQUIRE(
     (core.cop0Register(EECOP0Register::Cause) &
-      ~EECOP0Cause::EXCEPTION_CODE_MASK) ==
+      ~EECOP0Cause::EXCEPTION_CODE_MASK &
+      ~EECOP0Cause::BRANCH_DELAY) ==
     (UINT32_C(0xc000ff7c) &
-      ~EECOP0Cause::EXCEPTION_CODE_MASK));
+      ~EECOP0Cause::EXCEPTION_CODE_MASK &
+      ~EECOP0Cause::BRANCH_DELAY));
   REQUIRE(core.pendingException() == EEException::ArithmeticOverflow);
   REQUIRE_FALSE(core.hasLastInstruction());
 
@@ -138,6 +153,89 @@ TEST_CASE("Nested EE exceptions preserve EPC and use the general vector")
       EECOP0Cause::BRANCH_DELAY) != 0);
   REQUIRE(core.programCounter() == EEExceptionVector::GENERAL);
   REQUIRE(exceptionCode(core) == EEExceptionCode::INTERRUPT);
+}
+
+TEST_CASE("EE delay-slot exceptions identify the restartable branch")
+{
+  SECTION("A data fault sets BD and points EPC at the branch")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(1, {0x101, 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x04, 0, 0, 2));
+    system.eeBus().write32(
+      4,
+      immediateInstruction(0x21, 1, 2, 0));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+    REQUIRE(
+      (core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) != 0);
+    REQUIRE(core.programCounter() == EEExceptionVector::GENERAL);
+
+    NekoSystem restored;
+    restored.loadState(system.saveState());
+    REQUIRE(
+      restored.eeCore().cop0Register(EECOP0Register::EPC) == 0);
+    REQUIRE(
+      (restored.eeCore().cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) != 0);
+
+    system.eeBus().write32(EEExceptionVector::GENERAL, 0);
+    system.clockMasterCycle();
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::GENERAL + 4);
+  }
+
+  SECTION("A taken branch-likely delay slot sets BD")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x14, 0, 0, 2));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+    REQUIRE(
+      (core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) != 0);
+  }
+}
+
+TEST_CASE("First-level non-delay exceptions clear stale Cause BD")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setCOP0Register(
+    EECOP0Register::Cause,
+    EECOP0Cause::BRANCH_DELAY);
+  system.eeBus().write32(0x100, UINT32_C(0x0000000d));
+  core.startExecution(0x100);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.pendingException() == EEException::Breakpoint);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0x100);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) == 0);
 }
 
 TEST_CASE("EE address exceptions update BadVAddr")

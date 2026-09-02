@@ -505,7 +505,7 @@ existing event and runner infrastructure:
 - [x] Implement architectural Reset exception entry
 - [x] Implement interrupt, address-error, arithmetic-overflow,
       reserved-instruction, syscall, and breakpoint exception entry
-- [ ] Preserve branch-delay exception state through `Cause.BD` and the
+- [x] Preserve branch-delay exception state through `Cause.BD` and the
       documented `EPC` value
 - [ ] Deliver INTC and DMAC interrupt lines at EE instruction boundaries and
       implement `ERET`

@@ -301,6 +301,11 @@ TEST_CASE("EE branch link and target restrictions are deterministic")
     REQUIRE(
       system.eeCore().programCounter() ==
       EEExceptionVector::BOOTSTRAP_GENERAL);
+    REQUIRE(
+      system.eeCore().cop0Register(EECOP0Register::EPC) == 3);
+    REQUIRE(
+      (system.eeCore().cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) == 0);
   }
 }
 

@@ -188,6 +188,9 @@ TEST_CASE("EE byte faults restart from the preceding branch")
     core.programCounter() ==
     EEExceptionVector::BOOTSTRAP_GENERAL);
   REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) != 0);
 
   setRegister(&core, 1, 0x100);
   REQUIRE(system.eeBus().writeData8(0x100, 0x7f));

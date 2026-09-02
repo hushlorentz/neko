@@ -1659,9 +1659,18 @@ void EECore::enterException(
     (cop0Status & EECOP0Status::EXCEPTION_LEVEL) != 0;
   if (!alreadyExceptionLevel)
   {
-    cop0EPC = branchDelayPending
+    const bool delaySlot = branchDelayPending;
+    cop0EPC = delaySlot
       ? branchInstructionAddress
       : instructionAddress;
+    if (delaySlot)
+    {
+      cop0Cause |= EECOP0Cause::BRANCH_DELAY;
+    }
+    else
+    {
+      cop0Cause &= ~EECOP0Cause::BRANCH_DELAY;
+    }
   }
   cop0Cause =
     (cop0Cause & ~EECOP0Cause::EXCEPTION_CODE_MASK) |

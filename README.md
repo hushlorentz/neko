@@ -47,9 +47,10 @@ zero-extend into GPR bits 63..0, byte stores use the source's least-significant
 byte, and all preserve unrelated register bits. RAM aliases participate in
 data access, while unmapped loads and stores enter distinct typed data-bus exceptions and
 preserve faulting architectural state. Save-state format version 6 includes
-those exception values. For a fault in a branch delay slot, `EPC` identifies
-the preceding restartable branch while retaining the faulting data address;
-the corresponding `Cause.BD` contract is the next exception-handling slice.
+those exception values. For a fault in a branch delay slot, `Cause.BD` is set
+and `EPC` identifies the preceding restartable branch while retaining the
+faulting data address. First-level non-delay exceptions clear `Cause.BD`, and
+nested exceptions preserve the original branch restart state.
 Aligned halfword access adds `LH`, `LHU`, and `SH`. Halfword loads assemble
 little-endian data and sign- or zero-extend it through GPR bits 63..0; stores
 write only the least-significant 16 bits. Odd effective addresses stop before
