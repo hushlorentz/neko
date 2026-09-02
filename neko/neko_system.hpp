@@ -152,7 +152,8 @@ class NekoSystem
       NekoTraceEventType type,
       std::uint64_t value0,
       std::uint64_t value1 = 0,
-      std::uint64_t value2 = 0);
+      std::uint64_t value2 = 0,
+      std::uint64_t value3 = 0);
 };
 
 #endif

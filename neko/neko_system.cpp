@@ -104,17 +104,22 @@ NekoAudioFrame NekoSystem::audioOutput() const
 void NekoSystem::startTrace()
 {
   traceEvents.clear();
+  eeCoreComponent.cycleTraceEventCount = 0;
+  eeCoreComponent.cycleTraceEnabled = true;
   collectingTrace = true;
 }
 
 void NekoSystem::stopTrace()
 {
+  eeCoreComponent.cycleTraceEnabled = false;
+  eeCoreComponent.cycleTraceEventCount = 0;
   collectingTrace = false;
 }
 
 void NekoSystem::clearTrace()
 {
   traceEvents.clear();
+  eeCoreComponent.cycleTraceEventCount = 0;
 }
 
 bool NekoSystem::traceEnabled() const
@@ -355,7 +360,7 @@ void NekoSystem::clockMasterCycle()
       pixels,
       presentationBoundary);
   }
-
+  eeCoreComponent.cycleTraceEventCount = 0;
 }
 
 void NekoSystem::synchronizeEEInterruptLines()
@@ -473,6 +478,41 @@ void NekoSystem::recordCycleTrace(
   std::uint64_t pixels,
   std::uint64_t presentationBoundary)
 {
+  for (std::size_t index = 0;
+       index < eeCoreComponent.cycleTraceEventCount;
+       ++index)
+  {
+    const EECore::CycleTraceEvent &event =
+      eeCoreComponent.cycleTraceEvents[index];
+    NekoTraceEventType type =
+      NekoTraceEventType::InstructionIssued;
+    switch (event.kind)
+    {
+      case EECore::CycleTraceKind::InstructionIssued:
+        type = NekoTraceEventType::InstructionIssued;
+        break;
+      case EECore::CycleTraceKind::BranchScheduled:
+        type = NekoTraceEventType::BranchScheduled;
+        break;
+      case EECore::CycleTraceKind::MemoryAccess:
+        type = NekoTraceEventType::MemoryAccess;
+        break;
+      case EECore::CycleTraceKind::ExceptionEntered:
+        type = NekoTraceEventType::ExceptionEntered;
+        break;
+      case EECore::CycleTraceKind::InterruptDelivered:
+        type = NekoTraceEventType::InterruptDelivered;
+        break;
+    }
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::EE,
+      type,
+      event.value0,
+      event.value1,
+      event.value2,
+      event.value3);
+  }
   if (vu0Component.elapsedCycles() != vu0Cycles)
   {
     appendTrace(
@@ -583,7 +623,8 @@ void NekoSystem::appendTrace(
   NekoTraceEventType type,
   std::uint64_t value0,
   std::uint64_t value1,
-  std::uint64_t value2)
+  std::uint64_t value2,
+  std::uint64_t value3)
 {
   traceEvents.push_back({
     cycle,
@@ -591,7 +632,8 @@ void NekoSystem::appendTrace(
     type,
     value0,
     value1,
-    value2
+    value2,
+    value3
   });
 }
 

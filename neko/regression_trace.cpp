@@ -45,6 +45,7 @@ std::uint64_t nekoTraceHash(
     hashU64(&hash, event.value0);
     hashU64(&hash, event.value1);
     hashU64(&hash, event.value2);
+    hashU64(&hash, event.value3);
   }
   return hash;
 }

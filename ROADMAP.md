@@ -515,7 +515,7 @@ existing event and runner infrastructure:
 
 ### EE Determinism and Conformance
 
-- [ ] Add structured EE issue, branch, memory, exception, and interrupt traces
+- [x] Add structured EE issue, branch, memory, exception, and interrupt traces
       stamped with the master cycle
 - [ ] Include all EE and COP0 architectural and in-flight state in reset,
       save-state, frame-hash, and subsystem-trace contracts

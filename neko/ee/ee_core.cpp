@@ -201,6 +201,7 @@ void EECore::reset()
   branchDelayFromLikely = false;
   instructionRetiredThisCycle = false;
   exceptionEnteredThisCycle = false;
+  cycleTraceEventCount = 0;
 }
 
 void EECore::attachBus(EEBus *newBus)
@@ -297,6 +298,7 @@ void EECore::clock()
 {
   instructionRetiredThisCycle = false;
   exceptionEnteredThisCycle = false;
+  cycleTraceEventCount = 0;
   if (!clockActive())
   {
     return;
@@ -355,6 +357,12 @@ void EECore::clock()
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
+  recordCycleTrace(
+    CycleTraceKind::InstructionIssued,
+    fetched.address,
+    fetched.instruction,
+    static_cast<std::uint8_t>(decoded.operation),
+    wasDelaySlot);
   if (!executeInstruction(decoded, fetched.address))
   {
     return;
@@ -740,7 +748,15 @@ bool EECore::executeInstruction(
       const std::uint32_t dataAddress =
         static_cast<std::uint32_t>(source + immediate);
       std::uint8_t value = 0;
-      if (!attachedBus().readData8(dataAddress, &value))
+      const bool succeeded =
+        attachedBus().readData8(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        1,
+        false,
+        succeeded,
+        succeeded ? value : 0);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorLoad,
@@ -760,9 +776,17 @@ bool EECore::executeInstruction(
     {
       const std::uint32_t dataAddress =
         static_cast<std::uint32_t>(source + immediate);
-      if (!attachedBus().writeData8(
-            dataAddress,
-            static_cast<std::uint8_t>(target)))
+      const std::uint8_t value =
+        static_cast<std::uint8_t>(target);
+      const bool succeeded =
+        attachedBus().writeData8(dataAddress, value);
+      recordMemoryTrace(
+        dataAddress,
+        1,
+        true,
+        succeeded,
+        value);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -786,7 +810,15 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       std::uint16_t value = 0;
-      if (!attachedBus().readData16(dataAddress, &value))
+      const bool succeeded =
+        attachedBus().readData16(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        2,
+        false,
+        succeeded,
+        succeeded ? value : 0);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorLoad,
@@ -813,9 +845,17 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      if (!attachedBus().writeData16(
-            dataAddress,
-            static_cast<std::uint16_t>(target)))
+      const std::uint16_t value =
+        static_cast<std::uint16_t>(target);
+      const bool succeeded =
+        attachedBus().writeData16(dataAddress, value);
+      recordMemoryTrace(
+        dataAddress,
+        2,
+        true,
+        succeeded,
+        value);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -839,7 +879,15 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       std::uint32_t value = 0;
-      if (!attachedBus().readData32(dataAddress, &value))
+      const bool succeeded =
+        attachedBus().readData32(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        4,
+        false,
+        succeeded,
+        succeeded ? value : 0);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorLoad,
@@ -866,9 +914,17 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      if (!attachedBus().writeData32(
-            dataAddress,
-            static_cast<std::uint32_t>(target)))
+      const std::uint32_t value =
+        static_cast<std::uint32_t>(target);
+      const bool succeeded =
+        attachedBus().writeData32(dataAddress, value);
+      recordMemoryTrace(
+        dataAddress,
+        4,
+        true,
+        succeeded,
+        value);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -886,9 +942,15 @@ bool EECore::executeInstruction(
       const std::uint32_t alignedAddress =
         dataAddress & ~UINT32_C(3);
       std::uint32_t memory = 0;
-      if (!attachedBus().readData32(
-            alignedAddress,
-            &memory))
+      const bool succeeded =
+        attachedBus().readData32(alignedAddress, &memory);
+      recordMemoryTrace(
+        alignedAddress,
+        4,
+        false,
+        succeeded,
+        succeeded ? memory : 0);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorLoad,
@@ -950,9 +1012,15 @@ bool EECore::executeInstruction(
       const std::uint32_t alignedAddress =
         dataAddress & ~UINT32_C(3);
       std::uint32_t memory = 0;
-      if (!attachedBus().readData32(
-            alignedAddress,
-            &memory))
+      const bool readSucceeded =
+        attachedBus().readData32(alignedAddress, &memory);
+      recordMemoryTrace(
+        alignedAddress,
+        4,
+        false,
+        readSucceeded,
+        readSucceeded ? memory : 0);
+      if (!readSucceeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -995,9 +1063,15 @@ bool EECore::executeInstruction(
              (memoryByte * 8));
         }
       }
-      if (!attachedBus().writeData32(
-            alignedAddress,
-            memory))
+      const bool writeSucceeded =
+        attachedBus().writeData32(alignedAddress, memory);
+      recordMemoryTrace(
+        alignedAddress,
+        4,
+        true,
+        writeSucceeded,
+        memory);
+      if (!writeSucceeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -1020,7 +1094,15 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       std::uint64_t value = 0;
-      if (!attachedBus().readData64(dataAddress, &value))
+      const bool succeeded =
+        attachedBus().readData64(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        8,
+        false,
+        succeeded,
+        succeeded ? value : 0);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorLoad,
@@ -1043,7 +1125,15 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      if (!attachedBus().writeData64(dataAddress, target))
+      const bool succeeded =
+        attachedBus().writeData64(dataAddress, target);
+      recordMemoryTrace(
+        dataAddress,
+        8,
+        true,
+        succeeded,
+        target);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -1061,7 +1151,15 @@ bool EECore::executeInstruction(
       const std::uint32_t alignedAddress =
         dataAddress & ~UINT32_C(7);
       std::uint64_t memory = 0;
-      if (!attachedBus().readData64(alignedAddress, &memory))
+      const bool succeeded =
+        attachedBus().readData64(alignedAddress, &memory);
+      recordMemoryTrace(
+        alignedAddress,
+        8,
+        false,
+        succeeded,
+        succeeded ? memory : 0);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorLoad,
@@ -1115,7 +1213,15 @@ bool EECore::executeInstruction(
       const std::uint32_t alignedAddress =
         dataAddress & ~UINT32_C(7);
       std::uint64_t memory = 0;
-      if (!attachedBus().readData64(alignedAddress, &memory))
+      const bool readSucceeded =
+        attachedBus().readData64(alignedAddress, &memory);
+      recordMemoryTrace(
+        alignedAddress,
+        8,
+        false,
+        readSucceeded,
+        readSucceeded ? memory : 0);
+      if (!readSucceeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -1157,7 +1263,15 @@ bool EECore::executeInstruction(
              (memoryByte * 8));
         }
       }
-      if (!attachedBus().writeData64(alignedAddress, memory))
+      const bool writeSucceeded =
+        attachedBus().writeData64(alignedAddress, memory);
+      recordMemoryTrace(
+        alignedAddress,
+        8,
+        true,
+        writeSucceeded,
+        memory);
+      if (!writeSucceeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -1172,8 +1286,17 @@ bool EECore::executeInstruction(
       const std::uint32_t dataAddress =
         static_cast<std::uint32_t>(source + immediate) &
         ~UINT32_C(0x0f);
-      EEQuadword value;
-      if (!attachedBus().readData128(dataAddress, &value))
+      EEQuadword value = {};
+      const bool succeeded =
+        attachedBus().readData128(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        16,
+        false,
+        succeeded,
+        succeeded ? value.low : 0,
+        succeeded ? value.high : 0);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorLoad,
@@ -1197,9 +1320,18 @@ bool EECore::executeInstruction(
         ~UINT32_C(0x0f);
       const EERegister128 &value =
         generalRegisters[immediateDestination];
-      if (!attachedBus().writeData128(
-            dataAddress,
-            {value.low, value.high}))
+      const bool succeeded =
+        attachedBus().writeData128(
+          dataAddress,
+          {value.low, value.high});
+      recordMemoryTrace(
+        dataAddress,
+        16,
+        true,
+        succeeded,
+        value.low,
+        value.high);
+      if (!succeeded)
       {
         return raiseDataAccessException(
           EEException::DataBusErrorStore,
@@ -1643,6 +1775,12 @@ void EECore::scheduleBranch(
   std::uint32_t target,
   std::uint32_t address)
 {
+  recordCycleTrace(
+    CycleTraceKind::BranchScheduled,
+    address,
+    target,
+    (condition ? UINT64_C(1) : 0) |
+      (likely ? UINT64_C(2) : 0));
   if (likely && !condition)
   {
     pc = address + 8;
@@ -1652,6 +1790,49 @@ void EECore::scheduleBranch(
   branchDelayTarget = condition ? target : address + 8;
   branchInstructionAddress = address;
   branchDelayFromLikely = likely;
+}
+
+void EECore::recordCycleTrace(
+  CycleTraceKind kind,
+  std::uint64_t value0,
+  std::uint64_t value1,
+  std::uint64_t value2,
+  std::uint64_t value3)
+{
+  if (!cycleTraceEnabled)
+  {
+    return;
+  }
+  if (cycleTraceEventCount >= cycleTraceEvents.size())
+  {
+    throw std::logic_error(
+      "EE produced too many trace events in one cycle.");
+  }
+  cycleTraceEvents[cycleTraceEventCount++] = {
+    kind,
+    value0,
+    value1,
+    value2,
+    value3
+  };
+}
+
+void EECore::recordMemoryTrace(
+  std::uint32_t address,
+  std::uint8_t width,
+  bool write,
+  bool succeeded,
+  std::uint64_t low,
+  std::uint64_t high)
+{
+  recordCycleTrace(
+    CycleTraceKind::MemoryAccess,
+    address,
+    low,
+    high,
+    width |
+      (write ? UINT64_C(1) << 8 : 0) |
+      (succeeded ? UINT64_C(1) << 9 : 0));
 }
 
 bool EECore::raiseDataAccessException(
@@ -1708,6 +1889,21 @@ void EECore::enterException(
   haltReason = EEStopReason::None;
   rejectedInstructionValue = instruction;
   exceptionEnteredThisCycle = true;
+  if (type == EEException::Interrupt)
+  {
+    recordCycleTrace(
+      CycleTraceKind::InterruptDelivered,
+      instructionAddress,
+      cop0Status,
+      cop0Cause,
+      pc);
+  }
+  recordCycleTrace(
+    CycleTraceKind::ExceptionEntered,
+    static_cast<std::uint8_t>(type),
+    address,
+    pc,
+    cop0Cause);
   branchDelayPending = false;
   branchDelayTarget = 0;
   branchInstructionAddress = 0;

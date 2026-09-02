@@ -17,7 +17,8 @@ enum class NekoTraceSubsystem : std::uint8_t
   GS,
   InterruptController,
   Display,
-  Input
+  Input,
+  EE
 };
 
 enum class NekoTraceEventType : std::uint8_t
@@ -26,8 +27,26 @@ enum class NekoTraceEventType : std::uint8_t
   StateChanged,
   TransferCompleted,
   InterruptChanged,
-  PresentationBoundary
+  PresentationBoundary,
+  InstructionIssued,
+  BranchScheduled,
+  MemoryAccess,
+  ExceptionEntered,
+  InterruptDelivered
 };
+
+namespace NekoEETraceBranch
+{
+  constexpr std::uint64_t TAKEN = UINT64_C(1);
+  constexpr std::uint64_t LIKELY = UINT64_C(1) << 1;
+}
+
+namespace NekoEETraceMemory
+{
+  constexpr std::uint64_t WIDTH_MASK = UINT64_C(0xff);
+  constexpr std::uint64_t WRITE = UINT64_C(1) << 8;
+  constexpr std::uint64_t SUCCEEDED = UINT64_C(1) << 9;
+}
 
 struct NekoTraceEvent
 {
@@ -37,6 +56,7 @@ struct NekoTraceEvent
   std::uint64_t value0 = 0;
   std::uint64_t value1 = 0;
   std::uint64_t value2 = 0;
+  std::uint64_t value3 = 0;
 };
 
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);

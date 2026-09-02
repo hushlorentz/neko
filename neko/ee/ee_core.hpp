@@ -190,6 +190,24 @@ class EECore : public ClockedComponent
     friend class NekoSystem;
     friend class NekoSaveStateCodec;
 
+    enum class CycleTraceKind : std::uint8_t
+    {
+      InstructionIssued,
+      BranchScheduled,
+      MemoryAccess,
+      ExceptionEntered,
+      InterruptDelivered
+    };
+
+    struct CycleTraceEvent
+    {
+      CycleTraceKind kind = CycleTraceKind::InstructionIssued;
+      std::uint64_t value0 = 0;
+      std::uint64_t value1 = 0;
+      std::uint64_t value2 = 0;
+      std::uint64_t value3 = 0;
+    };
+
     struct PendingMultiplyDivide
     {
       bool active = false;
@@ -236,6 +254,9 @@ class EECore : public ClockedComponent
     bool branchDelayFromLikely = false;
     bool instructionRetiredThisCycle = false;
     bool exceptionEnteredThisCycle = false;
+    std::array<CycleTraceEvent, 8> cycleTraceEvents = {};
+    std::size_t cycleTraceEventCount = 0;
+    bool cycleTraceEnabled = false;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);
@@ -297,6 +318,19 @@ class EECore : public ClockedComponent
       bool likely,
       std::uint32_t target,
       std::uint32_t address);
+    void recordCycleTrace(
+      CycleTraceKind kind,
+      std::uint64_t value0,
+      std::uint64_t value1 = 0,
+      std::uint64_t value2 = 0,
+      std::uint64_t value3 = 0);
+    void recordMemoryTrace(
+      std::uint32_t address,
+      std::uint8_t width,
+      bool write,
+      bool succeeded,
+      std::uint64_t low,
+      std::uint64_t high = 0);
     bool raiseDataAccessException(
       EEException type,
       std::uint32_t instructionAddress,
