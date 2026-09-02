@@ -539,7 +539,7 @@ work instead of implementing every deferred instruction speculatively:
       program through `NekoSystem`
 - [x] Keep executable loading, emulation, and presentation separate so the
       desktop does not contain guest-specific drawing or setup behavior
-- [ ] Run focused EE conformance programs and independently authored scalar
+- [x] Run focused EE conformance programs and independently authored scalar
       homebrew ELFs as the first real guests
 
 ### Guest MMIO and DMA Foundation

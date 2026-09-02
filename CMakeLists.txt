@@ -188,6 +188,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp
     neko_tests/ee/ee_cop0_tests.cpp
+    neko_tests/ee/ee_elf_guest_tests.cpp
     neko_tests/ee/ee_elf_loader_tests.cpp
     neko_tests/ee/ee_doubleword_memory_tests.cpp
     neko_tests/ee/ee_doubleword_merge_tests.cpp
@@ -298,6 +299,7 @@ target_include_directories(neko_tests PRIVATE
 )
 target_compile_definitions(neko_tests PRIVATE
     NEKO_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/vpu/integration"
+    NEKO_EE_ELF_GUEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/ee/elf_guests"
 )
 target_link_libraries(
     neko_tests

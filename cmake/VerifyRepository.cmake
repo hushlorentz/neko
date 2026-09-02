@@ -39,8 +39,41 @@ function(verify_fixture file_name expected_hash)
   endif()
 endfunction()
 
+function(verify_ee_elf_fixture file_name expected_hash)
+  set(
+    fixture_path
+    "${REPOSITORY_ROOT}/neko_tests/ee/elf_guests/${file_name}"
+  )
+  if(NOT EXISTS "${fixture_path}")
+    message(FATAL_ERROR "Missing EE ELF fixture: ${file_name}")
+  endif()
+
+  file(SHA256 "${fixture_path}" actual_hash)
+  if(NOT actual_hash STREQUAL expected_hash)
+    message(
+      FATAL_ERROR
+      "${file_name} SHA-256 mismatch\n"
+      "  expected: ${expected_hash}\n"
+      "  actual:   ${actual_hash}"
+    )
+  endif()
+endfunction()
+
 check_git_diff()
 check_git_diff(--cached)
+
+verify_ee_elf_fixture(
+  arithmetic.elf
+  46c95fa1436048f03def12419bd264f5e60da6b4a27bd1c90fef248219f211ff
+)
+verify_ee_elf_fixture(
+  branches.elf
+  d1aaa13f446f6f04d0f16eb929ced8d5f74d39bc0bc099ee158158c386940d8f
+)
+verify_ee_elf_fixture(
+  memory.elf
+  459306d7cbfd0d4d52b8fc969e89b1be0e17f2b25ec616afe4e9440197aaeca8
+)
 
 verify_fixture(
   integer_fill.bin
