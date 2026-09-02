@@ -509,7 +509,7 @@ existing event and runner infrastructure:
       documented `EPC` value
 - [x] Deliver INTC and DMAC interrupt lines at EE instruction boundaries
 - [x] Implement `ERET`
-- [ ] Add the direct-mapped kernel segments needed by initial guest programs;
+- [x] Add the direct-mapped kernel segments needed by initial guest programs;
       defer TLB, cache, and scratchpad timing until selected software requires
       them
 

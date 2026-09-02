@@ -118,6 +118,10 @@ error, or returns through `EPC` and clears `Status.EXL` otherwise. It leaves
 the other exception level and `Cause` state intact, rejects execution from a
 branch delay slot, and exposes any still-pending interrupt at the next EE
 instruction boundary.
+Kernel segments KSEG0 and KSEG1 directly translate their complete 512 MB
+virtual windows onto the low physical system map. This applies consistently
+to RAM, instruction fetches, EE and GS registers, and mapped FIFOs; cache and
+TLB timing remain intentionally unmodeled.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

@@ -18,6 +18,9 @@ namespace EEMemoryMap
 {
   constexpr std::uint32_t MAIN_MEMORY_SIZE =
     32 * 1024 * 1024;
+  constexpr std::uint32_t KSEG0_BASE = UINT32_C(0x80000000);
+  constexpr std::uint32_t KSEG1_BASE = UINT32_C(0xa0000000);
+  constexpr std::uint32_t KSEG2_BASE = UINT32_C(0xc0000000);
 
   constexpr std::uint32_t GIF_BASE = 0x10003000;
   constexpr std::uint32_t GIF_MODE = GIF_BASE + 0x10;
@@ -143,6 +146,18 @@ class EEBus
       std::uint32_t address,
       std::size_t width,
       std::uint32_t *physicalAddress) const;
+    bool readMapped32(
+      std::uint32_t address,
+      std::uint32_t *value) const;
+    bool writeMapped32(
+      std::uint32_t address,
+      std::uint32_t value);
+    bool readMapped64(
+      std::uint32_t address,
+      std::uint64_t *value) const;
+    bool writeMapped64(
+      std::uint32_t address,
+      std::uint64_t value);
     std::uint32_t vifStatus(const VIF &vif) const;
     GIFDMACChannel &attachedGIFDMAC() const;
     GSDisplay &attachedGSDisplay() const;

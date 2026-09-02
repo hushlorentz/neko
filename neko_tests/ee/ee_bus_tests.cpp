@@ -122,6 +122,53 @@ TEST_CASE("EE Main Memory Map Tests")
     "EE bus read from an unmapped address.");
 }
 
+TEST_CASE("EE direct-mapped kernel segments cover the system map")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+
+  bus.write32(
+    EEMemoryMap::KSEG0_BASE + 0x100,
+    UINT32_C(0x12345678));
+  REQUIRE(
+    bus.read32(EEMemoryMap::KSEG1_BASE + 0x100) ==
+    UINT32_C(0x12345678));
+
+  REQUIRE(bus.writeData32(
+    EEMemoryMap::KSEG0_BASE + EEMemoryMap::INTC_MASK,
+    EEInterruptSource::mask(EEInterruptSource::VIF0)));
+  std::uint32_t interruptMask = 0;
+  REQUIRE(bus.readData32(
+    EEMemoryMap::KSEG1_BASE + EEMemoryMap::INTC_MASK,
+    &interruptMask));
+  REQUIRE(
+    interruptMask ==
+    EEInterruptSource::mask(EEInterruptSource::VIF0));
+
+  REQUIRE(bus.writeData64(
+    EEMemoryMap::KSEG1_BASE + EEMemoryMap::GS_BUSDIR,
+    1));
+  REQUIRE(system.gs().hostInterfaceReversed());
+  std::uint64_t busDirection = 0;
+  REQUIRE(bus.readData64(
+    EEMemoryMap::KSEG0_BASE + EEMemoryMap::GS_BUSDIR,
+    &busDirection));
+  REQUIRE(busDirection == 1);
+
+  REQUIRE(bus.writeData128(
+    EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
+    EEQuadword{}));
+
+  std::uint8_t byte = 0;
+  REQUIRE_FALSE(
+    bus.readData8(EEMemoryMap::KSEG2_BASE, &byte));
+  REQUIRE_FALSE(
+    bus.readData8(UINT32_C(0xe0000000), &byte));
+  REQUIRE_THROWS_WITH(
+    bus.read32(EEMemoryMap::KSEG2_BASE),
+    "EE bus read from an unmapped address.");
+}
+
 TEST_CASE("EE GIF Memory Map Tests")
 {
   NekoSystem system;
