@@ -1,200 +1,92 @@
-# neko
-Just a fun project to work on
+# Neko
 
-See [ROADMAP.md](ROADMAP.md) for the current implementation plan.
+Neko is an experimental, deterministic PlayStation 2 emulator written in
+C++14. It is under active development and currently focuses on independently
+tested EE, VU, VIF, GIF, GS, tracing, save-state, and ELF-loading foundations.
+It does not yet boot commercial games or a PlayStation 2 BIOS.
 
-`NekoSystem` is the host-facing machine boundary. It accepts a latched
-controller state, executes to the next GS presentation boundary with
-`runFrame()`, returns video and 48 kHz stereo audio payloads, and resets all
-hardware and internal wiring together with `reset()`. Audio remains empty
-until SPU2 is required and implemented.
+See [ROADMAP.md](ROADMAP.md) for implementation status and planned work.
 
-The initial EE Core foundation models all 32 128-bit R5900 general-purpose
-registers, the 32-bit program counter, both `HI`/`LO` pairs, and the `SA`
-register. Register zero is immutable, and the complete architectural state
-participates in reset and save-state restoration. Instruction fetches use
-little-endian EE RAM and its aliases; misaligned and unmapped fetches become
-typed pending EE exceptions rather than host errors. A table-driven decoder
-currently recognizes the base integer arithmetic, comparison, logic, and shift
-families and distinguishes reserved encodings from deferred instruction
-families. The EE is a halted-by-default master-clock component; while running,
-each 294.912 MHz master cycle performs one fetch/decode step and records an
-explicit stop reason if execution cannot continue. The first execution family
-implements integer arithmetic, comparisons, logic, and 32/64-bit shifts while
-preserving the upper 64 bits of each 128-bit GPR. Trapping overflow and
-manual-defined undefined word operands stop without writing the destination.
-The integer MAC slice implements signed and unsigned `MULT`, `MADD`, and
-`DIV` families on both `HI`/`LO` pipelines, three-operand low-product
-writeback, register transfers, and `SA` moves/count calculations. Multiply
-results become visible after the documented 4 cycles and divide results after
-37 cycles, including the signed-minimum divide case. The current single-issue
-reference model conservatively blocks later issue during those cycles;
-independent instruction overlap and throughput belong to the future
-superscalar timing model. In-flight results and their remaining latency are
-part of save states.
-Base EE control flow now includes PC-relative conditional branches, branch-
-likely annulment, region-relative jumps, register jumps, and all corresponding
-link forms. Every taken branch and every non-likely fallthrough executes one
-architectural delay-slot instruction before changing control flow. Forbidden
-branch-in-delay-slot and branch-likely/`SA` combinations stop explicitly, while
-misaligned register targets raise the fetch exception only when target fetch
-begins. Pending delay-slot state is serialized so save-state continuation
-cannot skip or repeat the slot.
-The first EE data-memory instructions implement `LB`, `LBU`, and `SB`.
-Effective addresses use the low 32 bits of the base-plus-signed-offset result,
-matching the EE's 32-bit virtual address implementation. Byte loads sign- or
-zero-extend into GPR bits 63..0, byte stores use the source's least-significant
-byte, and all preserve unrelated register bits. RAM aliases participate in
-data access, while unmapped loads and stores enter distinct typed data-bus exceptions and
-preserve faulting architectural state. Save-state format version 6 includes
-those exception values. For a fault in a branch delay slot, `Cause.BD` is set
-and `EPC` identifies the preceding restartable branch while retaining the
-faulting data address. First-level non-delay exceptions clear `Cause.BD`, and
-nested exceptions preserve the original branch restart state.
-Aligned halfword access adds `LH`, `LHU`, and `SH`. Halfword loads assemble
-little-endian data and sign- or zero-extend it through GPR bits 63..0; stores
-write only the least-significant 16 bits. Odd effective addresses stop before
-the bus access with the appropriate load or store address-error state, so
-faulting stores cannot partially modify memory. Save-state format version 7
-includes the new store-address exception.
-Aligned word access adds `LW`, `LWU`, and `SW` through the same checked RAM
-data boundary. Loads assemble little-endian words and apply the documented
-sign or zero extension; stores write only GPR bits 31..0. Four-byte alignment,
-RAM-end boundaries, delay-slot execution, and fault continuation are covered
-without changing the version 7 save-state layout.
-Unaligned 32-bit transfers add `LWL`, `LWR`, `SWL`, and `SWR`. Their merge
-behavior follows the manual's little-endian byte-position tables for all four
-effective-address offsets. `LWL` sign-extends the merged word, while `LWR`
-preserves GPR bits 63..32 unless it loads the word's sign bit. Paired merge
-instructions can transfer an arbitrary unaligned word, and save states preserve
-the intermediate destination between the pair.
-Aligned doubleword access adds `LD` and `SD` through checked little-endian
-64-bit RAM operations. Eight-byte alignment and RAM bounds are validated
-before access; loads replace GPR bits 63..0 while preserving bits 127..64, and
-stores use only the source's low doubleword. Address and data-bus faults remain
-restartable without changing the version 7 save-state layout.
-Unaligned doubleword transfers add `LDL`, `LDR`, `SDL`, and `SDR`. Each
-instruction merges the documented portion of an aligned little-endian
-doubleword without an alignment exception. Paired left/right instructions
-transfer arbitrary unaligned eight-byte values, including across an aligned
-doubleword boundary, while preserving unaffected register or memory bytes.
-Full-width EE transfers add `LQ` and `SQ`. They load or store all 128 GPR bits
-through checked little-endian RAM access. As specified by the EE manual, these
-instructions round the effective address down to a 16-byte boundary instead
-of raising an alignment exception. Scalar integer and memory instructions
-continue to preserve the unrelated upper half of each GPR.
-Scheduler-driven EE execution can now either step to the next retired
-instruction or run for a bounded number of master cycles. Both APIs return a
-structured result containing consumed master and EE cycles, retired instruction
-count, cycle-limit status, execution and stop state, current `PC`, and pending
-exception details. Stepping waits through modeled instruction latency while
-the rest of the system continues advancing on the master scheduler.
-The initial EE COP0 architectural state includes `BadVAddr`, `Count`,
-`Compare`, `Status`, `Cause`, `EPC`, and `ErrorEPC` under their documented
-register numbers. Reset uses the R5900 `Status` value `0x70400004` and a
-deterministic zero baseline for the remaining initial registers. Save-state
-format version 8 preserves this state transactionally; guest-visible COP0
-move instructions and register write masks follow with exception handling.
-Architectural Reset places the EE at bootstrap vector `0xBFC00000` with the
-reset COP0 state while retaining Neko's halted-by-default host contract.
-Execution begins only when a frontend or test explicitly starts the core;
-until BIOS mapping is added, fetching from the bootstrap vector enters the
-bootstrap general-exception vector with an instruction-bus fault.
-Regular EE exception entry now sets `Status.EXL`, writes `Cause.ExcCode`,
-captures `EPC`, updates `BadVAddr` for address errors, and selects the general
-or interrupt vector through `Status.BEV`. Address and bus faults, arithmetic
-overflow, reserved instructions, `SYSCALL`, and `BREAK` all use this common
-path. The bounded EE execution APIs return at exception entry while the core
-remains architecturally running at the selected handler vector.
-The existing INTC and GIF DMAC interrupt state now drives `Cause` interrupt
-pending bits 10 and 11. Delivery occurs at EE instruction boundaries only
-when `Status.IE`, `Status.EIE`, and the corresponding interrupt mask are set,
-with both `EXL` and `ERL` clear. Pending lines remain visible while CPU
-delivery is masked or the core is host-halted. A device interrupt generated
-later in a master cycle is therefore taken before the following EE
-instruction.
-`ERET` returns through `ErrorEPC` and clears `Status.ERL` for a level-two
-error, or returns through `EPC` and clears `Status.EXL` otherwise. It leaves
-the other exception level and `Cause` state intact, rejects execution from a
-branch delay slot, and exposes any still-pending interrupt at the next EE
-instruction boundary.
-Kernel segments KSEG0 and KSEG1 directly translate their complete 512 MB
-virtual windows onto the low physical system map. This applies consistently
-to RAM, instruction fetches, EE and GS registers, and mapped FIFOs; cache and
-TLB timing remain intentionally unmodeled.
+## Requirements
 
-Each `runFrame()` result includes a canonical video hash. Optional
-`NekoSystem` regression tracing records ordered, master-cycle-stamped input,
-VU, VIF, GIF, DMA, GS, interrupt, and presentation transitions; trace hashes
-can compare repeated runs or save-state continuations without frontend state.
-Frame results also include a canonical EE state hash covering every modeled
-general register, special register, COP0 register, execution state, exception,
-and pending branch, multiply/divide, and shift-ordering field.
-EE tracing adds structured instruction-issue, branch, memory, exception, and
-interrupt-delivery events. Their four values contain, respectively:
-instruction address/raw opcode/decoded operation/delay-slot state; branch
-address/target/taken-and-likely flags; memory address/low value/high
-value/width-write-success flags; exception kind/fault address/vector/Cause; or
-interrupted PC/Status/Cause/vector. Whenever that complete EE state changes,
-the subsystem trace also records its hash, cycle count, PC, Status, and Cause.
-Focused hand-encoded EE conformance programs exercise arithmetic sequences,
-taken and annulled delay slots, 32/64/128-bit memory transfers, exception
-entry, and interrupt-handler return without relying on an external assembler.
-The mixed arithmetic, multiply-latency, memory, and branch workload is also
-checked across repeated runs and save-state continuations for identical
-registers, RAM, execution results, machine state, trace hashes, and canonical
-save-state bytes.
-The initial guest loader accepts standard 32-bit little-endian MIPS executable
-ELFs. It validates the ELF and program-header layouts, segment file and memory
-sizes, permission bits, alignment, EE RAM ranges, and an instruction-aligned
-entry point inside an executable segment before changing the machine. Valid
-`PT_LOAD` contents are copied through EE RAM aliases, trailing BSS bytes are
-zeroed, and the halted EE is prepared at the ELF entry point without retaining
-a previous program's pending branch, multiply/divide, exception, or instruction
-state. Parsing and test fixtures are dependency-free; an external PS2
-toolchain is not yet required. The local SCEI EE documentation does not define
-an `e_flags` acceptance mask, so MIPS processor flags remain unfiltered until
-the loader can be checked against an ELF generated by the PS2DEV EE toolchain.
+- CMake 3.20 or newer
+- A C++14 compiler:
+  - Apple Clang on macOS
+  - Visual Studio 2022 on Windows
+  - Clang or GCC on Linux
+- Git
 
-`NekoSystem::runELF()` provides the initial bare-metal host contract. It resets
-the EE architectural state, places the stack pointer at the aligned top of
-32 MiB main memory, places an aligned unmapped host-return sentinel in `$ra`,
-and begins at the ELF entry point. A guest returns through `$ra` with its status
-in the low 32 bits of `$v0`: zero reports completion and a nonzero value reports
-guest failure. The host supplies a master-cycle budget, and cycle exhaustion,
-EE exceptions, and other execution stops are reported as distinct outcomes.
+The optional desktop frontend downloads a pinned SDL3 release during its first
+CMake configuration.
 
-`NekoSystem::saveState()` returns a canonical, versioned byte vector containing
-the complete deterministic machine state, and `loadState()` restores one
-transactionally. The checksummed format is explicit little-endian data rather
-than an object-memory dump; internal pointers and diagnostic callbacks are
-never serialized. Invalid, corrupted, truncated, trailing, or incompatible
-input throws without changing the live machine.
+## Build
 
-Configure, build, and run the complete developer validation workflow with:
+Configure and build the default targets:
+
+```sh
+cmake -S . -B out/build -DCMAKE_BUILD_TYPE=Release
+cmake --build out/build --config Release
+```
+
+The basic `neko` executable is located at:
+
+- macOS/Linux: `./out/build/neko`
+- Windows with Visual Studio: `.\out\build\Release\neko.exe`
+
+## Tests
+
+Run the complete optimized, assertion-enabled test and repository check:
 
 ```sh
 cmake -P cmake/Check.cmake
 ```
 
-The command uses the platform's default CMake generator and an isolated
-`out/check` directory. It builds and runs the test suite, checks staged and
-unstaged Git diffs for whitespace errors, and verifies the committed VU
-integration fixture hashes.
+The check uses an isolated `out/check` directory and works with single- and
+multi-configuration CMake generators.
 
-Run the memory-safety workflow with:
+Run the memory-safety workflow:
 
 ```sh
 cmake -P cmake/Sanitize.cmake
 ```
 
-This uses an isolated `out/sanitize` build with AddressSanitizer. On macOS it
-also runs the test suite under the native `leaks` tool. Keep the normal check
-as the fast development loop and run the sanitizer workflow before merging
-memory-management changes and in continuous integration.
+This uses AddressSanitizer. On macOS it also runs the tests with the native
+`leaks` tool.
 
-Assemble the external rotation sample, then build and show its
-VU1/XGKICK/GIF/GS output in the optional SDL3 desktop frontend with:
+## Desktop Demo
+
+Build the optional SDL3 frontend:
+
+```sh
+cmake -S . -B out/desktop \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DNEKO_BUILD_DESKTOP=ON
+cmake --build out/desktop --target neko_desktop --config Release
+```
+
+Run the self-contained graphics showcase:
+
+```sh
+# macOS/Linux
+./out/desktop/neko_desktop --scene primitives
+
+# Windows with Visual Studio
+.\out\desktop\Release\neko_desktop.exe --scene primitives
+```
+
+Use `--frames <count>` to stop automatically after a fixed number of frames:
+
+```sh
+./out/desktop/neko_desktop --scene primitives --frames 120
+```
+
+The `primitives` scene exercises points, lines, strips, fans, sprites, textures,
+alpha blending, and depth testing without an external guest binary.
+
+## Optional VU Rotation Sample
+
+The default `rotation` scene uses the external `naken_asm` integration checkout.
+If that checkout is available, assemble its VU1 sample first:
 
 ```sh
 (
@@ -202,37 +94,7 @@ VU1/XGKICK/GIF/GS output in the optional SDL3 desktop frontend with:
   ../../naken_asm -b -I../../include \
     -o rotation_vu1.bin rotation_vu1.asm
 )
-cmake -S . -B out/desktop \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DNEKO_BUILD_DESKTOP=ON
-cmake --build out/desktop --target neko_desktop
-./out/desktop/neko_desktop
+./out/desktop/neko_desktop --scene rotation
 ```
 
-Run the animated primitive scene without the external VU binary:
-
-```sh
-./out/desktop/neko_desktop --scene primitives
-```
-
-SDL3 is fetched at a pinned release only when the desktop option is enabled.
-The external sample and assembler remain outside the committed source tree.
-The default desktop scene supplies deterministic sine/cosine inputs and reruns
-the VU1 workload for every animation frame. The `primitives` scene submits
-deterministic host-fed PATH3 packets for POINT, LINE, LINESTRIP, and SPRITE
-rasterization, plus strips, fans, and a PATH3 IMAGE-uploaded PSMCT32 texture.
-Content-specific scene names preserve earlier versions:
-
-```sh
-./out/desktop/neko_desktop --scene points-sprites
-./out/desktop/neko_desktop --scene points-lines-sprites
-./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans
-./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans-textures
-./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans-textures-alpha
-./out/desktop/neko_desktop --scene points-lines-sprites-strips-fans-textures-alpha-depth
-```
-
-The `primitives` name tracks the newest graphics showcase as more primitive
-families are added. The latest version adds crossing translucent ribbons whose
-interpolated Z values determine which surface appears in front. Normal builds
-and `neko_core` do not depend on SDL.
+The external assembler and sample remain outside Neko's committed source tree.
