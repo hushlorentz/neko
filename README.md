@@ -106,6 +106,13 @@ or interrupt vector through `Status.BEV`. Address and bus faults, arithmetic
 overflow, reserved instructions, `SYSCALL`, and `BREAK` all use this common
 path. The bounded EE execution APIs return at exception entry while the core
 remains architecturally running at the selected handler vector.
+The existing INTC and GIF DMAC interrupt state now drives `Cause` interrupt
+pending bits 10 and 11. Delivery occurs at EE instruction boundaries only
+when `Status.IE`, `Status.EIE`, and the corresponding interrupt mask are set,
+with both `EXL` and `ERL` clear. Pending lines remain visible while CPU
+delivery is masked or the core is host-halted. A device interrupt generated
+later in a master cycle is therefore taken before the following EE
+instruction.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

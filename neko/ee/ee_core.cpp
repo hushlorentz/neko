@@ -303,6 +303,11 @@ void EECore::clock()
   }
 
   ++cycles;
+  if (interruptDeliverable())
+  {
+    enterInterruptException();
+    return;
+  }
   const bool hadPendingOperation =
     pendingMultiplyDivideActive();
   advancePendingMultiplyDivide(&pendingMac0, false);
@@ -1744,6 +1749,37 @@ std::uint32_t EECore::exceptionVector(
   return interrupt
     ? EEExceptionVector::INTERRUPT
     : EEExceptionVector::GENERAL;
+}
+
+void EECore::setInterruptLines(bool intc, bool dmac)
+{
+  cop0Cause &=
+    ~(EECOP0Cause::INTC_PENDING |
+      EECOP0Cause::DMAC_PENDING);
+  if (intc)
+  {
+    cop0Cause |= EECOP0Cause::INTC_PENDING;
+  }
+  if (dmac)
+  {
+    cop0Cause |= EECOP0Cause::DMAC_PENDING;
+  }
+}
+
+bool EECore::interruptDeliverable() const
+{
+  constexpr std::uint32_t interruptLines =
+    EECOP0Cause::INTC_PENDING |
+    EECOP0Cause::DMAC_PENDING;
+  constexpr std::uint32_t blockedLevels =
+    EECOP0Status::EXCEPTION_LEVEL |
+    EECOP0Status::ERROR_LEVEL;
+  return
+    (cop0Status & EECOP0Status::INTERRUPT_ENABLE) != 0 &&
+    (cop0Status &
+      EECOP0Status::MASTER_INTERRUPT_ENABLE) != 0 &&
+    (cop0Status & blockedLevels) == 0 &&
+    (cop0Cause & cop0Status & interruptLines) != 0;
 }
 
 EEExecutionState EECore::executionState() const

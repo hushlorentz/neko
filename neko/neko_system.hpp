@@ -128,6 +128,7 @@ class NekoSystem
     std::vector<NekoTraceEvent> traceEvents;
 
     void synchronizeInterrupts();
+    void synchronizeEEInterruptLines();
     EEExecutionResult makeEEExecutionResult(
       std::uint64_t masterCycles,
       std::uint64_t startingEECycles,

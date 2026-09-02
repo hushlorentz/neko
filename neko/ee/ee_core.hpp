@@ -85,7 +85,13 @@ enum class EECOP0Register : std::uint8_t
 namespace EECOP0Status
 {
   constexpr std::uint32_t RESET = UINT32_C(0x70400004);
+  constexpr std::uint32_t INTERRUPT_ENABLE = UINT32_C(1);
   constexpr std::uint32_t EXCEPTION_LEVEL = UINT32_C(1) << 1;
+  constexpr std::uint32_t ERROR_LEVEL = UINT32_C(1) << 2;
+  constexpr std::uint32_t INTC_MASK = UINT32_C(1) << 10;
+  constexpr std::uint32_t DMAC_MASK = UINT32_C(1) << 11;
+  constexpr std::uint32_t MASTER_INTERRUPT_ENABLE =
+    UINT32_C(1) << 16;
   constexpr std::uint32_t BOOTSTRAP_EXCEPTION_VECTOR =
     UINT32_C(1) << 22;
 }
@@ -94,6 +100,8 @@ namespace EECOP0Cause
 {
   constexpr std::uint32_t EXCEPTION_CODE_MASK =
     UINT32_C(0x1f) << 2;
+  constexpr std::uint32_t INTC_PENDING = UINT32_C(1) << 10;
+  constexpr std::uint32_t DMAC_PENDING = UINT32_C(1) << 11;
   constexpr std::uint32_t BRANCH_DELAY = UINT32_C(1) << 31;
 }
 
@@ -244,6 +252,8 @@ class EECore : public ClockedComponent
     std::uint32_t exceptionVector(
       EEException type,
       bool alreadyExceptionLevel) const;
+    void setInterruptLines(bool intc, bool dmac);
+    bool interruptDeliverable() const;
     bool executeInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);

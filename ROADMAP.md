@@ -507,8 +507,8 @@ existing event and runner infrastructure:
       reserved-instruction, syscall, and breakpoint exception entry
 - [x] Preserve branch-delay exception state through `Cause.BD` and the
       documented `EPC` value
-- [ ] Deliver INTC and DMAC interrupt lines at EE instruction boundaries and
-      implement `ERET`
+- [x] Deliver INTC and DMAC interrupt lines at EE instruction boundaries
+- [ ] Implement `ERET`
 - [ ] Add the direct-mapped kernel segments needed by initial guest programs;
       defer TLB, cache, and scratchpad timing until selected software requires
       them

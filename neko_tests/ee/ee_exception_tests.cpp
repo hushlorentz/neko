@@ -71,10 +71,14 @@ TEST_CASE("EE exceptions enter the general vector through COP0")
   REQUIRE(
     (core.cop0Register(EECOP0Register::Cause) &
       ~EECOP0Cause::EXCEPTION_CODE_MASK &
-      ~EECOP0Cause::BRANCH_DELAY) ==
+      ~EECOP0Cause::BRANCH_DELAY &
+      ~EECOP0Cause::INTC_PENDING &
+      ~EECOP0Cause::DMAC_PENDING) ==
     (UINT32_C(0xc000ff7c) &
       ~EECOP0Cause::EXCEPTION_CODE_MASK &
-      ~EECOP0Cause::BRANCH_DELAY));
+      ~EECOP0Cause::BRANCH_DELAY &
+      ~EECOP0Cause::INTC_PENDING &
+      ~EECOP0Cause::DMAC_PENDING));
   REQUIRE(core.pendingException() == EEException::ArithmeticOverflow);
   REQUIRE_FALSE(core.hasLastInstruction());
 

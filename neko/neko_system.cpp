@@ -319,6 +319,8 @@ void NekoSystem::synchronizeInterrupts()
 
 void NekoSystem::clockMasterCycle()
 {
+  synchronizeInterrupts();
+  synchronizeEEInterruptLines();
   const std::uint64_t vu0Cycles = vu0Component.elapsedCycles();
   const std::uint64_t vu1Cycles = vu1Component.elapsedCycles();
   const std::uint64_t vif0Words = vif0Component.wordsIngested();
@@ -337,6 +339,7 @@ void NekoSystem::clockMasterCycle()
     gsDisplayComponent.presentationBoundaryCount();
   masterClock.clock();
   synchronizeInterrupts();
+  synchronizeEEInterruptLines();
   if (collectingTrace)
   {
     recordCycleTrace(
@@ -352,6 +355,14 @@ void NekoSystem::clockMasterCycle()
       pixels,
       presentationBoundary);
   }
+
+}
+
+void NekoSystem::synchronizeEEInterruptLines()
+{
+  eeCoreComponent.setInterruptLines(
+    interruptControllerComponent.interruptPending(),
+    gifDMACComponent.interruptPending());
 }
 
 std::uint64_t NekoSystem::runMasterCycles(std::uint64_t cycles)
