@@ -18,6 +18,8 @@ TEST_CASE("EE COP0 registers have deterministic reset state")
   REQUIRE(core.cop0Register(EECOP0Register::BadVAddr) == 0);
   REQUIRE(core.cop0Register(EECOP0Register::Count) == 0);
   REQUIRE(core.cop0Register(EECOP0Register::Compare) == 0);
+  REQUIRE(core.programCounter() == EEReset::VECTOR);
+  REQUIRE(core.executionState() == EEExecutionState::Halted);
 }
 
 TEST_CASE("EE COP0 register state can be inspected and restored")
@@ -59,6 +61,58 @@ TEST_CASE("EE COP0 register state can be inspected and restored")
   REQUIRE(core.cop0Register(EECOP0Register::BadVAddr) == 0);
   REQUIRE(core.cop0Register(EECOP0Register::Count) == 0);
   REQUIRE(core.cop0Register(EECOP0Register::Compare) == 0);
+  REQUIRE(core.programCounter() == EEReset::VECTOR);
+}
+
+TEST_CASE("Neko system reset returns the EE to architectural Reset entry")
+{
+  NekoSystem system;
+  system.eeCore().setProgramCounter(0x80001000);
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  system.eeCore().setCOP0Register(
+    EECOP0Register::ErrorEPC,
+    UINT32_MAX);
+  system.eeCore().startExecution(0);
+  system.clockMasterCycle();
+
+  system.reset();
+
+  REQUIRE(system.eeCore().programCounter() == EEReset::VECTOR);
+  REQUIRE(
+    system.eeCore().cop0Register(EECOP0Register::Status) ==
+    EECOP0Status::RESET);
+  REQUIRE(
+    system.eeCore().cop0Register(EECOP0Register::ErrorEPC) == 0);
+  REQUIRE(
+    system.eeCore().executionState() ==
+    EEExecutionState::Halted);
+  REQUIRE(system.eeCore().stopReason() == EEStopReason::None);
+  REQUIRE(system.eeCore().elapsedCycles() == 0);
+}
+
+TEST_CASE("EE Reset entry faults precisely until bootstrap ROM is mapped")
+{
+  NekoSystem system;
+  system.eeCore().startExecution(
+    system.eeCore().programCounter());
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    system.eeCore().programCounter() == EEReset::VECTOR);
+  REQUIRE(
+    system.eeCore().executionState() ==
+    EEExecutionState::Halted);
+  REQUIRE(
+    system.eeCore().stopReason() ==
+    EEStopReason::FetchException);
+  REQUIRE(
+    system.eeCore().pendingException() ==
+    EEException::InstructionBusError);
+  REQUIRE(
+    system.eeCore().exceptionAddress() ==
+    EEReset::VECTOR);
+  REQUIRE_FALSE(system.eeCore().hasLastInstruction());
 }
 
 TEST_CASE("EE COP0 rejects unimplemented register identifiers")

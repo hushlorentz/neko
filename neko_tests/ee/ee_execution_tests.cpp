@@ -203,7 +203,7 @@ TEST_CASE("EE execution control reports an already halted core")
   REQUIRE_FALSE(step.cycleLimitReached);
   REQUIRE(step.state == EEExecutionState::Halted);
   REQUIRE(step.stopReason == EEStopReason::None);
-  REQUIRE(step.programCounter == 0);
+  REQUIRE(step.programCounter == EEReset::VECTOR);
   REQUIRE(run.masterCycles == 0);
   REQUIRE(run.eeCycles == 0);
   REQUIRE(run.instructions == 0);

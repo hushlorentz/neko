@@ -502,8 +502,9 @@ existing event and runner infrastructure:
 
 - [x] Add the initial COP0 register set, including `Status`, `Cause`, `EPC`,
       `ErrorEPC`, `BadVAddr`, `Count`, and `Compare`
-- [ ] Implement reset, interrupt, address-error, arithmetic-overflow,
-      reserved-instruction, syscall, and breakpoint exceptions
+- [x] Implement architectural Reset exception entry
+- [ ] Implement interrupt, address-error, arithmetic-overflow,
+      reserved-instruction, syscall, and breakpoint exception entry
 - [ ] Preserve branch-delay exception state through `Cause.BD` and the
       documented `EPC` value
 - [ ] Deliver INTC and DMAC interrupt lines at EE instruction boundaries and

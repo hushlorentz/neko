@@ -94,6 +94,11 @@ register numbers. Reset uses the R5900 `Status` value `0x70400004` and a
 deterministic zero baseline for the remaining initial registers. Save-state
 format version 8 preserves this state transactionally; guest-visible COP0
 move instructions and register write masks follow with exception handling.
+Architectural Reset places the EE at bootstrap vector `0xBFC00000` with the
+reset COP0 state while retaining Neko's halted-by-default host contract.
+Execution begins only when a frontend or test explicitly starts the core;
+until BIOS mapping is added, fetching from the bootstrap vector reports the
+existing instruction-bus fault.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

@@ -95,7 +95,7 @@ TEST_CASE("EE Core architectural state")
     {
       REQUIRE(core.generalRegister(index) == EERegister128{});
     }
-    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.programCounter() == EEReset::VECTOR);
     REQUIRE(core.hi() == 0);
     REQUIRE(core.lo() == 0);
     REQUIRE(core.hi1() == 0);
@@ -202,6 +202,7 @@ TEST_CASE("EE Core instruction fetching")
     REQUIRE(core.exceptionAddress() == 0);
 
     bus.write32(0, UINT32_C(0x12345678));
+    core.setProgramCounter(0);
     REQUIRE(core.fetchInstruction().succeeded);
   }
 }
@@ -223,7 +224,7 @@ TEST_CASE("EE Core scheduled execution")
 
     system.runMasterCycles(3);
 
-    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.programCounter() == EEReset::VECTOR);
     REQUIRE(core.elapsedCycles() == 0);
   }
 

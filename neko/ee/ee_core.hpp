@@ -83,6 +83,11 @@ namespace EECOP0Status
   constexpr std::uint32_t RESET = UINT32_C(0x70400004);
 }
 
+namespace EEReset
+{
+  constexpr std::uint32_t VECTOR = UINT32_C(0xbfc00000);
+}
+
 class EECore : public ClockedComponent
 {
   public:
@@ -152,7 +157,7 @@ class EECore : public ClockedComponent
 
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
-    std::uint32_t pc = 0;
+    std::uint32_t pc = EEReset::VECTOR;
     std::uint64_t hiRegister = 0;
     std::uint64_t loRegister = 0;
     std::uint64_t hi1Register = 0;

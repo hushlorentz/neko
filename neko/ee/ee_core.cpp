@@ -169,7 +169,7 @@ namespace
 void EECore::reset()
 {
   generalRegisters.fill({});
-  pc = 0;
+  pc = EEReset::VECTOR;
   hiRegister = 0;
   loRegister = 0;
   hi1Register = 0;
