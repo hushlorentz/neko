@@ -521,7 +521,7 @@ existing event and runner infrastructure:
       save-state, frame-hash, and subsystem-trace contracts
 - [x] Add focused hand-encoded conformance programs for arithmetic, delay
       slots, memory access, exceptions, and interrupt entry/return
-- [ ] Compare repeated and save-state-resumed EE executions for identical
+- [x] Compare repeated and save-state-resumed EE executions for identical
       registers, memory, stop reasons, and trace hashes
 
 ### Guest ELF Loading Foundation

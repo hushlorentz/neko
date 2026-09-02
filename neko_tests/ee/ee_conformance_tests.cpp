@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
@@ -54,6 +55,74 @@ namespace
     return
       (core.cop0Register(EECOP0Register::Cause) &
        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2;
+  }
+
+  void prepareDeterminismProgram(NekoSystem *system)
+  {
+    EECore &core = system->eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    const std::uint32_t program[] = {
+      immediateInstruction(0x19, 0, 1, 0x100),
+      immediateInstruction(0x0d, 0, 2, 7),
+      immediateInstruction(0x0d, 0, 3, 6),
+      registerInstruction(0x18, 2, 3, 4),
+      immediateInstruction(0x2b, 1, 4, 0),
+      immediateInstruction(0x04, 4, 4, 2),
+      immediateInstruction(0x2b, 1, 4, 4),
+      immediateInstruction(0x0d, 0, 5, 0xdead),
+      immediateInstruction(0x23, 1, 6, 4),
+      UINT32_C(0x0000000c)
+    };
+    writeProgram(system, 0, program, 10);
+    core.startExecution(0);
+  }
+
+  void requireEquivalentExecution(
+    const NekoSystem &first,
+    const NekoSystem &second,
+    const EEExecutionResult &firstResult,
+    const EEExecutionResult &secondResult)
+  {
+    for (std::size_t index = 0;
+         index < EECore::GENERAL_REGISTER_COUNT;
+         ++index)
+    {
+      REQUIRE(
+        first.eeCore().generalRegister(index) ==
+        second.eeCore().generalRegister(index));
+    }
+    for (std::uint32_t address = 0x100;
+         address < 0x108;
+         address += 4)
+    {
+      std::uint32_t firstValue = 0;
+      std::uint32_t secondValue = 0;
+      REQUIRE(first.eeBus().readData32(address, &firstValue));
+      REQUIRE(second.eeBus().readData32(address, &secondValue));
+      REQUIRE(firstValue == secondValue);
+    }
+    REQUIRE(firstResult.masterCycles == secondResult.masterCycles);
+    REQUIRE(firstResult.eeCycles == secondResult.eeCycles);
+    REQUIRE(firstResult.instructions == secondResult.instructions);
+    REQUIRE(
+      firstResult.cycleLimitReached ==
+      secondResult.cycleLimitReached);
+    REQUIRE(firstResult.state == secondResult.state);
+    REQUIRE(firstResult.stopReason == secondResult.stopReason);
+    REQUIRE(
+      firstResult.programCounter ==
+      secondResult.programCounter);
+    REQUIRE(
+      firstResult.pendingException ==
+      secondResult.pendingException);
+    REQUIRE(
+      firstResult.exceptionAddress ==
+      secondResult.exceptionAddress);
+    REQUIRE(
+      first.eeCore().stateHash() ==
+      second.eeCore().stateHash());
+    REQUIRE(first.traceHash() == second.traceHash());
+    REQUIRE(first.saveState() == second.saveState());
   }
 }
 
@@ -278,4 +347,98 @@ TEST_CASE("EE interrupt return conformance program")
   REQUIRE(core.programCounter() == 0);
   REQUIRE(system.stepEEInstruction(1).instructions == 1);
   REQUIRE(core.generalRegister(1).low == 1);
+}
+
+TEST_CASE("Repeated EE conformance executions are identical")
+{
+  NekoSystem first;
+  NekoSystem second;
+  prepareDeterminismProgram(&first);
+  prepareDeterminismProgram(&second);
+  first.startTrace();
+  second.startTrace();
+
+  const EEExecutionResult firstResult = first.runEE(64);
+  const EEExecutionResult secondResult = second.runEE(64);
+
+  requireEquivalentExecution(
+    first,
+    second,
+    firstResult,
+    secondResult);
+  REQUIRE(firstResult.instructions == 8);
+  REQUIRE_FALSE(firstResult.cycleLimitReached);
+  REQUIRE(
+    firstResult.pendingException ==
+    EEException::SystemCall);
+  REQUIRE(first.eeCore().generalRegister(4).low == 42);
+  REQUIRE(first.eeCore().generalRegister(5).low == 0);
+  REQUIRE(first.eeCore().generalRegister(6).low == 42);
+}
+
+TEST_CASE("In-flight EE save states resume identically")
+{
+  SECTION("Multiply latency")
+  {
+    NekoSystem original;
+    prepareDeterminismProgram(&original);
+    original.runMasterCycles(4);
+    REQUIRE(original.eeCore().programCounter() == 16);
+    const std::vector<std::uint8_t> state =
+      original.saveState();
+
+    NekoSystem restored;
+    restored.loadState(state);
+    REQUIRE(restored.saveState() == state);
+    original.startTrace();
+    restored.startTrace();
+
+    const EEExecutionResult originalResult =
+      original.runEE(64);
+    const EEExecutionResult restoredResult =
+      restored.runEE(64);
+
+    requireEquivalentExecution(
+      original,
+      restored,
+      originalResult,
+      restoredResult);
+    REQUIRE(original.eeCore().generalRegister(4).low == 42);
+  }
+
+  SECTION("Pending branch delay slot")
+  {
+    NekoSystem original;
+    prepareDeterminismProgram(&original);
+    for (std::uint8_t instruction = 0;
+         instruction < 6;
+         ++instruction)
+    {
+      REQUIRE(
+        original.stepEEInstruction(16).instructions == 1);
+    }
+    REQUIRE(original.eeCore().programCounter() == 24);
+    REQUIRE(original.eeCore().lastInstructionAddress() == 20);
+    const std::vector<std::uint8_t> state =
+      original.saveState();
+
+    NekoSystem restored;
+    restored.loadState(state);
+    REQUIRE(restored.saveState() == state);
+    original.startTrace();
+    restored.startTrace();
+
+    const EEExecutionResult originalResult =
+      original.runEE(32);
+    const EEExecutionResult restoredResult =
+      restored.runEE(32);
+
+    requireEquivalentExecution(
+      original,
+      restored,
+      originalResult,
+      restoredResult);
+    REQUIRE(original.eeCore().generalRegister(5).low == 0);
+    REQUIRE(original.eeCore().generalRegister(6).low == 42);
+  }
 }

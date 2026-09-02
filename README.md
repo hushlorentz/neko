@@ -140,6 +140,10 @@ the subsystem trace also records its hash, cycle count, PC, Status, and Cause.
 Focused hand-encoded EE conformance programs exercise arithmetic sequences,
 taken and annulled delay slots, 32/64/128-bit memory transfers, exception
 entry, and interrupt-handler return without relying on an external assembler.
+The mixed arithmetic, multiply-latency, memory, and branch workload is also
+checked across repeated runs and save-state continuations for identical
+registers, RAM, execution results, machine state, trace hashes, and canonical
+save-state bytes.
 
 `NekoSystem::saveState()` returns a canonical, versioned byte vector containing
 the complete deterministic machine state, and `loadState()` restores one
