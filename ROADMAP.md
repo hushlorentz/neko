@@ -535,7 +535,7 @@ work instead of implementing every deferred instruction speculatively:
 - [x] Define the initial bare-metal guest runtime contract, including reset
       state, stack placement, bounded execution, and how completion or failure
       is reported to the host
-- [ ] Add a generic `--elf <path>` desktop argument that executes the loaded
+- [x] Add a generic `--elf <path>` desktop argument that executes the loaded
       program through `NekoSystem`
 - [ ] Keep executable loading, emulation, and presentation separate so the
       desktop does not contain guest-specific drawing or setup behavior

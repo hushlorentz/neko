@@ -112,6 +112,14 @@ target_include_directories(neko_demo_support
 )
 target_link_libraries(neko_demo_support PUBLIC neko_core)
 
+add_library(neko_desktop_support
+    neko_desktop/desktop_options.cpp
+)
+target_include_directories(neko_desktop_support
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko_desktop
+)
+
 if(NEKO_BUILD_DESKTOP)
     include(FetchContent)
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
@@ -135,6 +143,7 @@ if(NEKO_BUILD_DESKTOP)
         neko_desktop
         PRIVATE
             neko_demo_support
+            neko_desktop_support
             SDL3::SDL3
     )
     target_compile_definitions(
@@ -163,6 +172,7 @@ target_link_libraries(neko_diagnostics PUBLIC neko_core)
 
 add_executable(neko_tests
     neko_tests/main.cpp
+    neko_tests/desktop_options_tests.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp
@@ -282,6 +292,7 @@ target_link_libraries(
     neko_tests
     PRIVATE
         neko_demo_support
+        neko_desktop_support
         neko_diagnostics
 )
 

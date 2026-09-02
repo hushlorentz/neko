@@ -11,6 +11,8 @@
 
 #include <SDL3/SDL.h>
 
+#include "desktop_options.hpp"
+#include "neko_system.hpp"
 #include "primitive_scene.hpp"
 #include "rotation_vu1.hpp"
 
@@ -28,121 +30,72 @@ namespace
   constexpr std::uint32_t FRAME_DELAY_MILLISECONDS = 16;
   constexpr std::uint32_t FRAMES_PER_ROTATION_PHASE = 2;
 
-  enum class DesktopScene
+  std::vector<std::string> commandLineArguments(
+    int argc,
+    char **argv)
   {
-    Rotation,
-    PointsAndSprites,
-    PointsLinesAndSprites,
-    UntexturedPrimitives,
-    TexturedPrimitives,
-    AlphaPrimitives,
-    Primitives
-  };
-
-  struct DesktopOptions
-  {
-    DesktopScene scene = DesktopScene::Rotation;
-    int frameLimit = 0;
-  };
-
-  DesktopOptions parseOptions(int argc, char **argv)
-  {
-    DesktopOptions options;
+    std::vector<std::string> arguments;
+    arguments.reserve(static_cast<std::size_t>(argc - 1));
     for (int index = 1; index < argc; ++index)
     {
-      const std::string argument = argv[index];
-      if (argument == "--frames" && index + 1 < argc)
-      {
-        options.frameLimit = std::stoi(argv[++index]);
-        if (options.frameLimit <= 0)
-        {
-          throw std::invalid_argument(
-            "Desktop frame count must be positive.");
-        }
-      }
-      else if (argument == "--scene" && index + 1 < argc)
-      {
-        const std::string scene = argv[++index];
-        if (scene == "rotation")
-        {
-          options.scene = DesktopScene::Rotation;
-        }
-        else if (scene == "points-sprites")
-        {
-          options.scene = DesktopScene::PointsAndSprites;
-        }
-        else if (scene == "points-lines-sprites")
-        {
-          options.scene = DesktopScene::PointsLinesAndSprites;
-        }
-        else if (scene == "points-lines-sprites-strips-fans")
-        {
-          options.scene = DesktopScene::UntexturedPrimitives;
-        }
-        else if (
-          scene ==
-          "points-lines-sprites-strips-fans-textures")
-        {
-          options.scene = DesktopScene::TexturedPrimitives;
-        }
-        else if (
-          scene ==
-          "points-lines-sprites-strips-fans-textures-alpha")
-        {
-          options.scene = DesktopScene::AlphaPrimitives;
-        }
-        else if (
-          scene ==
-          "points-lines-sprites-strips-fans-textures-alpha-depth")
-        {
-          options.scene = DesktopScene::Primitives;
-        }
-        else if (scene == "primitives")
-        {
-          options.scene = DesktopScene::Primitives;
-        }
-        else
-        {
-          throw std::invalid_argument(
-            "Desktop scene must be rotation, points-sprites, "
-            "points-lines-sprites, "
-            "points-lines-sprites-strips-fans, "
-            "points-lines-sprites-strips-fans-textures, "
-            "points-lines-sprites-strips-fans-textures-alpha, "
-            "points-lines-sprites-strips-fans-textures-alpha-depth, "
-            "or primitives.");
-        }
-      }
-      else
-      {
-        throw std::invalid_argument(
-          "Usage: neko_desktop [--scene rotation|points-sprites|"
-          "points-lines-sprites|points-lines-sprites-strips-fans|"
-          "points-lines-sprites-strips-fans-textures-alpha|"
-          "points-lines-sprites-strips-fans-textures-alpha-depth|"
-          "points-lines-sprites-strips-fans-textures|"
-          "primitives] "
-          "[--frames count]");
-      }
+      arguments.emplace_back(argv[index]);
     }
-    return options;
+    return arguments;
   }
 
-  std::vector<std::uint8_t> readMicroprogram()
+  std::vector<std::uint8_t> readBinaryFile(
+    const std::string &path,
+    const std::string &description)
   {
-    std::ifstream input(
-      NEKO_ROTATION_VU1_BINARY,
-      std::ios::binary);
+    std::ifstream input(path, std::ios::binary);
     if (!input)
     {
       throw std::runtime_error(
-        "Could not open the assembled rotation VU1 program at " +
-        std::string(NEKO_ROTATION_VU1_BINARY) +
-        ". Assemble rotation_vu1.asm before running neko_desktop.");
+        "Could not open " + description + " at " + path + ".");
     }
     return std::vector<std::uint8_t>(
       std::istreambuf_iterator<char>(input),
       std::istreambuf_iterator<char>());
+  }
+
+  const char *guestOutcomeName(EEGuestOutcome outcome)
+  {
+    switch (outcome)
+    {
+      case EEGuestOutcome::Completed:
+        return "completed";
+      case EEGuestOutcome::GuestReportedFailure:
+        return "guest_failure";
+      case EEGuestOutcome::CycleLimitReached:
+        return "cycle_limit";
+      case EEGuestOutcome::Exception:
+        return "exception";
+      case EEGuestOutcome::Stopped:
+        return "stopped";
+    }
+    throw std::logic_error("Unknown EE guest outcome.");
+  }
+
+  int runELF(
+    const neko_desktop::DesktopOptions &options)
+  {
+    const std::vector<std::uint8_t> image = readBinaryFile(
+      options.elfPath,
+      "ELF image");
+    NekoSystem system;
+    const EEGuestExecutionResult result =
+      system.runELF(image, options.elfCycleLimit);
+    std::cout
+      << "elf: outcome=" << guestOutcomeName(result.outcome)
+      << " exit_code=" << result.exitCode
+      << " master_cycles=" << result.execution.masterCycles
+      << " ee_cycles=" << result.execution.eeCycles
+      << " instructions=" << result.execution.instructions
+      << " pc=0x" << std::hex << result.execution.programCounter
+      << std::dec << '\n';
+    return result.outcome == EEGuestOutcome::Completed
+      ? EXIT_SUCCESS
+      : EXIT_FAILURE;
   }
 
   void requireSDL(bool succeeded, const char *operation)
@@ -172,10 +125,20 @@ namespace
 
   int runDesktop(int argc, char **argv)
   {
-    const DesktopOptions options = parseOptions(argc, argv);
+    using neko_desktop::DesktopOptions;
+    using neko_desktop::DesktopScene;
+    const DesktopOptions options =
+      neko_desktop::parseDesktopOptions(
+        commandLineArguments(argc, argv));
+    if (!options.elfPath.empty())
+    {
+      return runELF(options);
+    }
     const std::vector<std::uint8_t> microprogram =
       options.scene == DesktopScene::Rotation
-        ? readMicroprogram()
+        ? readBinaryFile(
+            NEKO_ROTATION_VU1_BINARY,
+            "assembled rotation VU1 program")
         : std::vector<std::uint8_t>();
 
     SDLVideoSession video;

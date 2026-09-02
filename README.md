@@ -83,6 +83,17 @@ Use `--frames <count>` to stop automatically after a fixed number of frames:
 The `primitives` scene exercises points, lines, strips, fans, sprites, textures,
 alpha blending, and depth testing without an external guest binary.
 
+Run a freestanding PS2 ELF without opening an SDL window:
+
+```sh
+./out/desktop/neko_desktop --elf path/to/guest.elf
+```
+
+The default execution budget is 1,000,000 EE master cycles. Override it with
+`--cycles <count>`. The command prints the guest outcome, exit code, cycle and
+instruction counts, and final program counter; only a completed guest returns a
+successful host exit status.
+
 ## Optional VU Rotation Sample
 
 The default `rotation` scene uses the external `naken_asm` integration checkout.
