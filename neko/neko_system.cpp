@@ -87,6 +87,7 @@ NekoFrameResult NekoSystem::runFrame()
     gsDisplayComponent.presentationBoundaryCount();
   result.video = videoOutput();
   result.videoHash = nekoFrameHash(result.video);
+  result.eeStateHash = eeCoreComponent.stateHash();
   result.audio = audioOutput();
   return result;
 }
@@ -106,6 +107,7 @@ void NekoSystem::startTrace()
   traceEvents.clear();
   eeCoreComponent.cycleTraceEventCount = 0;
   eeCoreComponent.cycleTraceEnabled = true;
+  lastTracedEEStateHash = eeCoreComponent.stateHash();
   collectingTrace = true;
 }
 
@@ -113,6 +115,7 @@ void NekoSystem::stopTrace()
 {
   eeCoreComponent.cycleTraceEnabled = false;
   eeCoreComponent.cycleTraceEventCount = 0;
+  lastTracedEEStateHash = 0;
   collectingTrace = false;
 }
 
@@ -120,6 +123,10 @@ void NekoSystem::clearTrace()
 {
   traceEvents.clear();
   eeCoreComponent.cycleTraceEventCount = 0;
+  if (collectingTrace)
+  {
+    lastTracedEEStateHash = eeCoreComponent.stateHash();
+  }
 }
 
 bool NekoSystem::traceEnabled() const
@@ -512,6 +519,24 @@ void NekoSystem::recordCycleTrace(
       event.value1,
       event.value2,
       event.value3);
+  }
+  const std::uint64_t currentEEStateHash =
+    eeCoreComponent.stateHash();
+  if (currentEEStateHash != lastTracedEEStateHash)
+  {
+    appendTrace(
+      cycle,
+      NekoTraceSubsystem::EE,
+      NekoTraceEventType::StateSnapshot,
+      currentEEStateHash,
+      eeCoreComponent.elapsedCycles(),
+      eeCoreComponent.programCounter(),
+      (static_cast<std::uint64_t>(
+        eeCoreComponent.cop0Register(
+          EECOP0Register::Status)) << 32) |
+        eeCoreComponent.cop0Register(
+          EECOP0Register::Cause));
+    lastTracedEEStateHash = currentEEStateHash;
   }
   if (vu0Component.elapsedCycles() != vu0Cycles)
   {

@@ -357,6 +357,9 @@ TEST_CASE("Active system save states round trip and continue identically")
   restored.loadState(state);
   REQUIRE(restored.saveState() == state);
   REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
+  REQUIRE(
     restored.eeCore().generalRegister(1) ==
     EERegister128{
       UINT64_C(0x0123456789abcdef),
@@ -594,12 +597,18 @@ TEST_CASE("In-flight EE multiply latency survives save states")
   restored.loadState(original.saveState());
 
   REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
   REQUIRE(restored.eeCore().lo() == 0);
   REQUIRE(restored.eeCore().generalRegister(3).low == 0);
 
   original.runMasterCycles(2);
   restored.runMasterCycles(2);
   REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
   REQUIRE(restored.eeCore().lo() == 0);
 
   original.clockMasterCycle();

@@ -20,6 +20,19 @@ namespace
       immediate;
   }
 
+  std::uint32_t registerInstruction(
+    std::uint8_t function,
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint8_t destination)
+  {
+    return
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(destination) << 11) |
+      function;
+  }
+
   std::vector<NekoTraceEvent> eeTrace(
     const NekoSystem &system)
   {
@@ -88,6 +101,15 @@ namespace
 
 TEST_CASE("Neko Frame Hash Tests")
 {
+  const NekoFrameResult aggregateCompatible = {
+    1,
+    2,
+    3,
+    GSPresentation{},
+    NekoAudioFrame{}
+  };
+  REQUIRE(aggregateCompatible.eeStateHash == 0);
+
   GSPresentation presentation;
   presentation.width = 1;
   presentation.height = 1;
@@ -123,6 +145,8 @@ TEST_CASE("Neko Subsystem Regression Trace Tests")
 
   REQUIRE(firstFrame.videoHash == secondFrame.videoHash);
   REQUIRE(firstFrame.videoHash == nekoFrameHash(firstFrame.video));
+  REQUIRE(firstFrame.eeStateHash == secondFrame.eeStateHash);
+  REQUIRE(firstFrame.eeStateHash == first.eeCore().stateHash());
   REQUIRE(first.traceHash() == second.traceHash());
   REQUIRE(first.trace().size() == second.trace().size());
   REQUIRE(first.trace().size() >= 6);
@@ -156,6 +180,7 @@ TEST_CASE("Save States Continue Identical Regression Traces")
   const NekoFrameResult restoredFrame = restored.runFrame();
 
   REQUIRE(originalFrame.videoHash == restoredFrame.videoHash);
+  REQUIRE(originalFrame.eeStateHash == restoredFrame.eeStateHash);
   REQUIRE(original.traceHash() == restored.traceHash());
 
   original.clearTrace();
@@ -189,7 +214,7 @@ TEST_CASE("EE regression traces describe issued work")
   system.runMasterCycles(4);
 
   const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 7);
+  REQUIRE(events.size() == 11);
 
   REQUIRE(events[0].masterCycle == 1);
   REQUIRE(
@@ -212,38 +237,43 @@ TEST_CASE("EE regression traces describe issued work")
      NekoEETraceMemory::WRITE |
      NekoEETraceMemory::SUCCEEDED));
 
-  REQUIRE(events[2].masterCycle == 2);
-  REQUIRE(
-    events[2].type ==
-    NekoTraceEventType::InstructionIssued);
-  REQUIRE(events[2].value0 == 4);
+  REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[2].masterCycle == 1);
+
+  REQUIRE(events[3].masterCycle == 2);
   REQUIRE(
     events[3].type ==
-    NekoTraceEventType::BranchScheduled);
+    NekoTraceEventType::InstructionIssued);
   REQUIRE(events[3].value0 == 4);
-  REQUIRE(events[3].value1 == 12);
-  REQUIRE(events[3].value2 == NekoEETraceBranch::TAKEN);
-
-  REQUIRE(events[4].masterCycle == 3);
   REQUIRE(
     events[4].type ==
-    NekoTraceEventType::InstructionIssued);
-  REQUIRE(events[4].value0 == 8);
-  REQUIRE(events[4].value3 == 1);
+    NekoTraceEventType::BranchScheduled);
+  REQUIRE(events[4].value0 == 4);
+  REQUIRE(events[4].value1 == 12);
+  REQUIRE(events[4].value2 == NekoEETraceBranch::TAKEN);
 
-  REQUIRE(events[5].masterCycle == 4);
-  REQUIRE(
-    events[5].type ==
-    NekoTraceEventType::InstructionIssued);
-  REQUIRE(events[5].value0 == 12);
+  REQUIRE(events[6].masterCycle == 3);
   REQUIRE(
     events[6].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[6].value0 == 8);
+  REQUIRE(events[6].value3 == 1);
+
+  REQUIRE(events[8].masterCycle == 4);
+  REQUIRE(
+    events[8].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[8].value0 == 12);
+  REQUIRE(
+    events[9].type ==
     NekoTraceEventType::ExceptionEntered);
   REQUIRE(
-    events[6].value0 ==
+    events[9].value0 ==
     static_cast<std::uint8_t>(EEException::SystemCall));
-  REQUIRE(events[6].value1 == 12);
-  REQUIRE(events[6].value2 == EEExceptionVector::GENERAL);
+  REQUIRE(events[9].value1 == 12);
+  REQUIRE(events[9].value2 == EEExceptionVector::GENERAL);
+  REQUIRE(events[10].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[10].value0 == core.stateHash());
 }
 
 TEST_CASE("EE regression traces identify interrupt delivery")
@@ -267,7 +297,7 @@ TEST_CASE("EE regression traces identify interrupt delivery")
   system.clockMasterCycle();
 
   const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 2);
+  REQUIRE(events.size() == 3);
   REQUIRE(events[0].masterCycle == 1);
   REQUIRE(
     events[0].type ==
@@ -281,6 +311,8 @@ TEST_CASE("EE regression traces identify interrupt delivery")
     events[1].value0 ==
     static_cast<std::uint8_t>(EEException::Interrupt));
   REQUIRE(events[1].value2 == EEExceptionVector::INTERRUPT);
+  REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[2].value0 == core.stateHash());
 }
 
 TEST_CASE("EE regression traces retain failed memory attempts")
@@ -300,7 +332,7 @@ TEST_CASE("EE regression traces retain failed memory attempts")
   system.clockMasterCycle();
 
   const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 3);
+  REQUIRE(events.size() == 4);
   REQUIRE(
     events[0].type ==
     NekoTraceEventType::InstructionIssued);
@@ -316,4 +348,61 @@ TEST_CASE("EE regression traces retain failed memory attempts")
   REQUIRE(
     events[2].value0 ==
     static_cast<std::uint8_t>(EEException::DataBusErrorLoad));
+  REQUIRE(events[3].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[3].value0 == core.stateHash());
+}
+
+TEST_CASE("EE state snapshots include in-flight execution")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {6, 0});
+  core.setGeneralRegister(2, {7, 0});
+  system.eeBus().write32(
+    0,
+    registerInstruction(0x18, 1, 2, 3));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.clockMasterCycle();
+  const std::uint64_t issuedStateHash = core.stateHash();
+  system.clockMasterCycle();
+
+  const std::vector<NekoTraceEvent> events = eeTrace(system);
+  REQUIRE(events.size() == 3);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[1].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[1].value0 == issuedStateHash);
+  REQUIRE(events[2].masterCycle == 2);
+  REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[2].value0 == core.stateHash());
+  REQUIRE(events[2].value0 != issuedStateHash);
+}
+
+TEST_CASE("EE state snapshots retain changes outside clock execution")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(0, 0);
+  core.startExecution(0);
+  system.startTrace();
+
+  core.haltExecution();
+  system.clockMasterCycle();
+
+  std::vector<NekoTraceEvent> events = eeTrace(system);
+  REQUIRE(events.size() == 1);
+  REQUIRE(events[0].masterCycle == 1);
+  REQUIRE(events[0].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[0].value0 == core.stateHash());
+  REQUIRE(
+    core.executionState() ==
+    EEExecutionState::Halted);
+
+  system.clearTrace();
+  system.clockMasterCycle();
+  events = eeTrace(system);
+  REQUIRE(events.empty());
 }

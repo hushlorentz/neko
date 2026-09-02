@@ -14,8 +14,23 @@ namespace
     UINT64_C(0x80000000);
   constexpr std::uint64_t DOUBLEWORD_SIGN_BIT =
     UINT64_C(0x8000000000000000);
+  constexpr std::uint64_t EE_STATE_FNV_OFFSET_BASIS =
+    UINT64_C(14695981039346656037);
+  constexpr std::uint64_t EE_STATE_FNV_PRIME =
+    UINT64_C(1099511628211);
   constexpr std::uint8_t MULTIPLY_LATENCY = 4;
   constexpr std::uint8_t DIVIDE_LATENCY = 37;
+
+  void hashEEStateValue(
+    std::uint64_t *hash,
+    std::uint64_t value)
+  {
+    for (std::uint8_t index = 0; index < 8; ++index)
+    {
+      *hash ^= static_cast<std::uint8_t>(value >> (index * 8));
+      *hash *= EE_STATE_FNV_PRIME;
+    }
+  }
 
   std::uint64_t signExtend16(std::uint16_t value)
   {
@@ -2005,6 +2020,66 @@ EEStopReason EECore::stopReason() const
 std::uint64_t EECore::elapsedCycles() const
 {
   return cycles;
+}
+
+std::uint64_t EECore::stateHash() const
+{
+  std::uint64_t hash = EE_STATE_FNV_OFFSET_BASIS;
+  for (const EERegister128 &value : generalRegisters)
+  {
+    hashEEStateValue(&hash, value.low);
+    hashEEStateValue(&hash, value.high);
+  }
+  hashEEStateValue(&hash, pc);
+  hashEEStateValue(&hash, hiRegister);
+  hashEEStateValue(&hash, loRegister);
+  hashEEStateValue(&hash, hi1Register);
+  hashEEStateValue(&hash, lo1Register);
+  hashEEStateValue(&hash, saRegister);
+  hashEEStateValue(&hash, cop0BadVAddr);
+  hashEEStateValue(&hash, cop0Count);
+  hashEEStateValue(&hash, cop0Compare);
+  hashEEStateValue(&hash, cop0Status);
+  hashEEStateValue(&hash, cop0Cause);
+  hashEEStateValue(&hash, cop0EPC);
+  hashEEStateValue(&hash, cop0ErrorEPC);
+  hashEEStateValue(
+    &hash,
+    static_cast<std::uint8_t>(exception));
+  hashEEStateValue(&hash, faultAddress);
+  hashEEStateValue(&hash, static_cast<std::uint8_t>(state));
+  hashEEStateValue(
+    &hash,
+    static_cast<std::uint8_t>(haltReason));
+  hashEEStateValue(&hash, cycles);
+  hashEEStateValue(&hash, lastInstructionValid);
+  hashEEStateValue(&hash, lastAddress);
+  hashEEStateValue(&hash, lastDecodedInstruction.raw);
+  hashEEStateValue(&hash, rejectedInstructionValue);
+  const auto hashPending =
+    [&hash](const PendingMultiplyDivide &operation)
+    {
+      hashEEStateValue(&hash, operation.active);
+      hashEEStateValue(&hash, operation.remainingCycles);
+      hashEEStateValue(&hash, operation.hiResult);
+      hashEEStateValue(&hash, operation.loResult);
+      hashEEStateValue(
+        &hash,
+        operation.writeGeneralRegister);
+      hashEEStateValue(&hash, operation.generalRegister);
+      hashEEStateValue(
+        &hash,
+        operation.generalRegisterResult);
+    };
+  hashPending(pendingMac0);
+  hashPending(pendingMac1);
+  hashEEStateValue(&hash, recentShiftAmountAccesses);
+  hashEEStateValue(&hash, recentShiftAmountReads);
+  hashEEStateValue(&hash, branchDelayPending);
+  hashEEStateValue(&hash, branchDelayTarget);
+  hashEEStateValue(&hash, branchInstructionAddress);
+  hashEEStateValue(&hash, branchDelayFromLikely);
+  return hash;
 }
 
 bool EECore::hasLastInstruction() const

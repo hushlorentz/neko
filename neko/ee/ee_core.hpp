@@ -149,6 +149,7 @@ class EECore : public ClockedComponent
     EEExecutionState executionState() const;
     EEStopReason stopReason() const;
     std::uint64_t elapsedCycles() const;
+    std::uint64_t stateHash() const;
     bool hasLastInstruction() const;
     std::uint32_t lastInstructionAddress() const;
     const EEInstruction &lastInstruction() const;

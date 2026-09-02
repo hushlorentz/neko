@@ -517,7 +517,7 @@ existing event and runner infrastructure:
 
 - [x] Add structured EE issue, branch, memory, exception, and interrupt traces
       stamped with the master cycle
-- [ ] Include all EE and COP0 architectural and in-flight state in reset,
+- [x] Include all EE and COP0 architectural and in-flight state in reset,
       save-state, frame-hash, and subsystem-trace contracts
 - [ ] Add focused hand-encoded conformance programs for arithmetic, delay
       slots, memory access, exceptions, and interrupt entry/return

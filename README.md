@@ -127,12 +127,16 @@ Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,
 VU, VIF, GIF, DMA, GS, interrupt, and presentation transitions; trace hashes
 can compare repeated runs or save-state continuations without frontend state.
+Frame results also include a canonical EE state hash covering every modeled
+general register, special register, COP0 register, execution state, exception,
+and pending branch, multiply/divide, and shift-ordering field.
 EE tracing adds structured instruction-issue, branch, memory, exception, and
 interrupt-delivery events. Their four values contain, respectively:
 instruction address/raw opcode/decoded operation/delay-slot state; branch
 address/target/taken-and-likely flags; memory address/low value/high
 value/width-write-success flags; exception kind/fault address/vector/Cause; or
-interrupted PC/Status/Cause/vector.
+interrupted PC/Status/Cause/vector. Whenever that complete EE state changes,
+the subsystem trace also records its hash, cycle count, PC, Status, and Cause.
 
 `NekoSystem::saveState()` returns a canonical, versioned byte vector containing
 the complete deterministic machine state, and `loadState()` restores one

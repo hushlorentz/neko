@@ -126,6 +126,7 @@ class NekoSystem
     NekoInputState inputState;
     bool collectingTrace = false;
     std::vector<NekoTraceEvent> traceEvents;
+    std::uint64_t lastTracedEEStateHash = 0;
 
     void synchronizeInterrupts();
     void synchronizeEEInterruptLines();

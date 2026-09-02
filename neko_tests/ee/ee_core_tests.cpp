@@ -76,6 +76,7 @@ TEST_CASE("EE Core architectural state")
 
   SECTION("Reset restores deterministic architectural state")
   {
+    const std::uint64_t resetHash = core.stateHash();
     core.setGeneralRegister(
       31,
       {UINT64_C(0xaaaaaaaaaaaaaaaa),
@@ -86,6 +87,7 @@ TEST_CASE("EE Core architectural state")
     core.setHI1(3);
     core.setLO1(4);
     core.setShiftAmount(5);
+    REQUIRE(core.stateHash() != resetHash);
 
     core.reset();
 
@@ -101,6 +103,7 @@ TEST_CASE("EE Core architectural state")
     REQUIRE(core.hi1() == 0);
     REQUIRE(core.lo1() == 0);
     REQUIRE(core.shiftAmount() == 0);
+    REQUIRE(core.stateHash() == resetHash);
   }
 }
 

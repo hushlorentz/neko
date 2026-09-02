@@ -32,7 +32,8 @@ enum class NekoTraceEventType : std::uint8_t
   BranchScheduled,
   MemoryAccess,
   ExceptionEntered,
-  InterruptDelivered
+  InterruptDelivered,
+  StateSnapshot
 };
 
 namespace NekoEETraceBranch

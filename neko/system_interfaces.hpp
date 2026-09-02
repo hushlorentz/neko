@@ -52,6 +52,7 @@ struct NekoFrameResult
   std::uint64_t videoHash = 0;
   GSPresentation video;
   NekoAudioFrame audio;
+  std::uint64_t eeStateHash = 0;
 };
 
 #endif
