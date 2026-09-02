@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 7;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 8;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1268,6 +1268,20 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.lo1Register;
   destination->eeCoreComponent.saRegister =
     source->eeCoreComponent.saRegister;
+  destination->eeCoreComponent.cop0BadVAddr =
+    source->eeCoreComponent.cop0BadVAddr;
+  destination->eeCoreComponent.cop0Count =
+    source->eeCoreComponent.cop0Count;
+  destination->eeCoreComponent.cop0Compare =
+    source->eeCoreComponent.cop0Compare;
+  destination->eeCoreComponent.cop0Status =
+    source->eeCoreComponent.cop0Status;
+  destination->eeCoreComponent.cop0Cause =
+    source->eeCoreComponent.cop0Cause;
+  destination->eeCoreComponent.cop0EPC =
+    source->eeCoreComponent.cop0EPC;
+  destination->eeCoreComponent.cop0ErrorEPC =
+    source->eeCoreComponent.cop0ErrorEPC;
   destination->eeCoreComponent.exception =
     source->eeCoreComponent.exception;
   destination->eeCoreComponent.faultAddress =
@@ -1542,6 +1556,13 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeU64(core.hi1Register);
   writer->writeU64(core.lo1Register);
   writer->writeU32(core.saRegister);
+  writer->writeU32(core.cop0BadVAddr);
+  writer->writeU32(core.cop0Count);
+  writer->writeU32(core.cop0Compare);
+  writer->writeU32(core.cop0Status);
+  writer->writeU32(core.cop0Cause);
+  writer->writeU32(core.cop0EPC);
+  writer->writeU32(core.cop0ErrorEPC);
   writer->writeU8(
     static_cast<std::uint8_t>(core.exception));
   writer->writeU32(core.faultAddress);
@@ -1590,6 +1611,13 @@ void NekoSaveStateCodec::readEECore(
   core->hi1Register = reader->readU64();
   core->lo1Register = reader->readU64();
   core->saRegister = reader->readU32();
+  core->cop0BadVAddr = reader->readU32();
+  core->cop0Count = reader->readU32();
+  core->cop0Compare = reader->readU32();
+  core->cop0Status = reader->readU32();
+  core->cop0Cause = reader->readU32();
+  core->cop0EPC = reader->readU32();
+  core->cop0ErrorEPC = reader->readU32();
   core->exception = readEnum<EEException>(
     reader,
     static_cast<std::uint8_t>(

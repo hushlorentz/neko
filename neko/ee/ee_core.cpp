@@ -175,6 +175,13 @@ void EECore::reset()
   hi1Register = 0;
   lo1Register = 0;
   saRegister = 0;
+  cop0BadVAddr = 0;
+  cop0Count = 0;
+  cop0Compare = 0;
+  cop0Status = EECOP0Status::RESET;
+  cop0Cause = 0;
+  cop0EPC = 0;
+  cop0ErrorEPC = 0;
   exception = EEException::None;
   faultAddress = 0;
   state = EEExecutionState::Halted;
@@ -1754,6 +1761,62 @@ std::uint32_t EECore::shiftAmount() const
 void EECore::setShiftAmount(std::uint32_t value)
 {
   saRegister = value;
+}
+
+std::uint32_t EECore::cop0Register(
+  EECOP0Register registerIndex) const
+{
+  switch (registerIndex)
+  {
+    case EECOP0Register::BadVAddr:
+      return cop0BadVAddr;
+    case EECOP0Register::Count:
+      return cop0Count;
+    case EECOP0Register::Compare:
+      return cop0Compare;
+    case EECOP0Register::Status:
+      return cop0Status;
+    case EECOP0Register::Cause:
+      return cop0Cause;
+    case EECOP0Register::EPC:
+      return cop0EPC;
+    case EECOP0Register::ErrorEPC:
+      return cop0ErrorEPC;
+  }
+  throw std::out_of_range(
+    "EE COP0 register is not implemented.");
+}
+
+void EECore::setCOP0Register(
+  EECOP0Register registerIndex,
+  std::uint32_t value)
+{
+  switch (registerIndex)
+  {
+    case EECOP0Register::BadVAddr:
+      cop0BadVAddr = value;
+      return;
+    case EECOP0Register::Count:
+      cop0Count = value;
+      return;
+    case EECOP0Register::Compare:
+      cop0Compare = value;
+      return;
+    case EECOP0Register::Status:
+      cop0Status = value;
+      return;
+    case EECOP0Register::Cause:
+      cop0Cause = value;
+      return;
+    case EECOP0Register::EPC:
+      cop0EPC = value;
+      return;
+    case EECOP0Register::ErrorEPC:
+      cop0ErrorEPC = value;
+      return;
+  }
+  throw std::out_of_range(
+    "EE COP0 register is not implemented.");
 }
 
 bool EECore::exceptionPending() const

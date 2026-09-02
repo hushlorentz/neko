@@ -500,7 +500,7 @@ existing event and runner infrastructure:
 
 ### EE COP0, Exceptions, and Interrupts
 
-- [ ] Add the initial COP0 register set, including `Status`, `Cause`, `EPC`,
+- [x] Add the initial COP0 register set, including `Status`, `Cause`, `EPC`,
       `ErrorEPC`, `BadVAddr`, `Count`, and `Compare`
 - [ ] Implement reset, interrupt, address-error, arithmetic-overflow,
       reserved-instruction, syscall, and breakpoint exceptions

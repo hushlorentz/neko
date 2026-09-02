@@ -15,8 +15,8 @@ namespace
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 156;
-  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 794;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 804;
+  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 822;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 832;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -116,6 +116,27 @@ namespace
     system->eeCore().setHI1(UINT64_C(0x5555555566666666));
     system->eeCore().setLO1(UINT64_C(0x7777777788888888));
     system->eeCore().setShiftAmount(0x99);
+    system->eeCore().setCOP0Register(
+      EECOP0Register::BadVAddr,
+      UINT32_C(0x81234567));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::Count,
+      UINT32_C(0x12345678));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::Compare,
+      UINT32_C(0x87654321));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::Status,
+      UINT32_C(0xf0c79c1f));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::Cause,
+      UINT32_C(0x80008030));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::EPC,
+      UINT32_C(0x80001000));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::ErrorEPC,
+      UINT32_C(0xbfc00000));
     system->gsDisplay().configureTiming({3, 7});
     system->masterClockScheduler().registerComponent(
       system->gifPathArbiter(),
@@ -355,6 +376,27 @@ TEST_CASE("Active system save states round trip and continue identically")
     restored.eeCore().lo1() ==
     UINT64_C(0x7777777788888888));
   REQUIRE(restored.eeCore().shiftAmount() == 0x99);
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::BadVAddr) ==
+    UINT32_C(0x81234567));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Count) ==
+    UINT32_C(0x12345678));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Compare) ==
+    UINT32_C(0x87654321));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Status) ==
+    UINT32_C(0xf0c79c1f));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Cause) ==
+    UINT32_C(0x80008030));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::EPC) ==
+    UINT32_C(0x80001000));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::ErrorEPC) ==
+    UINT32_C(0xbfc00000));
 
   original.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
   restored.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
@@ -839,7 +881,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 8;
+  invalid[8] = 9;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 

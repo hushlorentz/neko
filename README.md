@@ -88,6 +88,12 @@ structured result containing consumed master and EE cycles, retired instruction
 count, cycle-limit status, execution and stop state, current `PC`, and pending
 exception details. Stepping waits through modeled instruction latency while
 the rest of the system continues advancing on the master scheduler.
+The initial EE COP0 architectural state includes `BadVAddr`, `Count`,
+`Compare`, `Status`, `Cause`, `EPC`, and `ErrorEPC` under their documented
+register numbers. Reset uses the R5900 `Status` value `0x70400004` and a
+deterministic zero baseline for the remaining initial registers. Save-state
+format version 8 preserves this state transactionally; guest-visible COP0
+move instructions and register write masks follow with exception handling.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,

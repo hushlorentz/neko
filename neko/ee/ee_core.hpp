@@ -67,6 +67,22 @@ enum class EEStopReason : std::uint8_t
   UndefinedOperation
 };
 
+enum class EECOP0Register : std::uint8_t
+{
+  BadVAddr = 8,
+  Count = 9,
+  Compare = 11,
+  Status = 12,
+  Cause = 13,
+  EPC = 14,
+  ErrorEPC = 30
+};
+
+namespace EECOP0Status
+{
+  constexpr std::uint32_t RESET = UINT32_C(0x70400004);
+}
+
 class EECore : public ClockedComponent
 {
   public:
@@ -108,6 +124,12 @@ class EECore : public ClockedComponent
     std::uint32_t shiftAmount() const;
     void setShiftAmount(std::uint32_t value);
 
+    std::uint32_t cop0Register(
+      EECOP0Register registerIndex) const;
+    void setCOP0Register(
+      EECOP0Register registerIndex,
+      std::uint32_t value);
+
     bool exceptionPending() const;
     EEException pendingException() const;
     std::uint32_t exceptionAddress() const;
@@ -136,6 +158,13 @@ class EECore : public ClockedComponent
     std::uint64_t hi1Register = 0;
     std::uint64_t lo1Register = 0;
     std::uint32_t saRegister = 0;
+    std::uint32_t cop0BadVAddr = 0;
+    std::uint32_t cop0Count = 0;
+    std::uint32_t cop0Compare = 0;
+    std::uint32_t cop0Status = EECOP0Status::RESET;
+    std::uint32_t cop0Cause = 0;
+    std::uint32_t cop0EPC = 0;
+    std::uint32_t cop0ErrorEPC = 0;
     EEBus *bus = nullptr;
     EEException exception = EEException::None;
     std::uint32_t faultAddress = 0;
