@@ -94,6 +94,8 @@ TEST_CASE("EE base integer decoder tables")
     {0x04, EEOperation::ShiftLeftLogicalVariableWord, false},
     {0x06, EEOperation::ShiftRightLogicalVariableWord, false},
     {0x07, EEOperation::ShiftRightArithmeticVariableWord, false},
+    {0x0c, EEOperation::SystemCall, false},
+    {0x0d, EEOperation::Breakpoint, false},
     {0x14, EEOperation::ShiftLeftLogicalVariableDoubleword, false},
     {0x16, EEOperation::ShiftRightLogicalVariableDoubleword, false},
     {0x17, EEOperation::ShiftRightArithmeticVariableDoubleword, false},

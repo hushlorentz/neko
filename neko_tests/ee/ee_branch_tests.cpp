@@ -293,13 +293,14 @@ TEST_CASE("EE branch link and target restrictions are deterministic")
     system.eeCore().startExecution(0);
     system.runMasterCycles(3);
 
-    REQUIRE(
-      system.eeCore().stopReason() ==
-      EEStopReason::FetchException);
+    REQUIRE(system.eeCore().stopReason() == EEStopReason::None);
     REQUIRE(
       system.eeCore().pendingException() ==
       EEException::AddressErrorLoadOrFetch);
     REQUIRE(system.eeCore().exceptionAddress() == 3);
+    REQUIRE(
+      system.eeCore().programCounter() ==
+      EEExceptionVector::BOOTSTRAP_GENERAL);
   }
 }
 

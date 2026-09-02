@@ -200,6 +200,7 @@ void EECore::reset()
   branchInstructionAddress = 0;
   branchDelayFromLikely = false;
   instructionRetiredThisCycle = false;
+  exceptionEnteredThisCycle = false;
 }
 
 void EECore::attachBus(EEBus *newBus)
@@ -220,10 +221,6 @@ void EECore::attachBus(EEBus *newBus)
 EEInstructionFetchResult EECore::fetchInstruction()
 {
   const std::uint32_t address = pc;
-  if (exceptionPending())
-  {
-    return {false, address, 0};
-  }
   if ((address & 3) != 0)
   {
     return raiseFetchException(
@@ -277,12 +274,18 @@ void EECore::startExecution(std::uint32_t startAddress)
     pendingMac1 = {};
   }
   rejectedInstructionValue = 0;
+  exceptionEnteredThisCycle = false;
 }
 
 void EECore::haltExecution()
 {
   state = EEExecutionState::Halted;
   haltReason = EEStopReason::HostHalt;
+}
+
+void EECore::enterInterruptException()
+{
+  enterException(EEException::Interrupt, pc, pc, 0);
 }
 
 bool EECore::clockActive() const
@@ -293,6 +296,7 @@ bool EECore::clockActive() const
 void EECore::clock()
 {
   instructionRetiredThisCycle = false;
+  exceptionEnteredThisCycle = false;
   if (!clockActive())
   {
     return;
@@ -312,9 +316,11 @@ void EECore::clock()
     fetchInstruction();
   if (!fetched.succeeded)
   {
-    setExceptionRestartAddress(fetched.address);
-    state = EEExecutionState::Halted;
-    haltReason = EEStopReason::FetchException;
+    enterException(
+      exception,
+      fetched.address,
+      fetched.address,
+      0);
     return;
   }
 
@@ -325,13 +331,19 @@ void EECore::clock()
   }
   catch (const EEInstructionDecodeError &error)
   {
-    setExceptionRestartAddress(fetched.address);
-    state = EEExecutionState::Halted;
-    haltReason =
-      error.failure() == EEInstructionDecodeFailure::Reserved
-        ? EEStopReason::ReservedInstruction
-        : EEStopReason::UnsupportedInstruction;
     rejectedInstructionValue = fetched.instruction;
+    if (error.failure() == EEInstructionDecodeFailure::Reserved)
+    {
+      enterException(
+        EEException::ReservedInstruction,
+        fetched.address,
+        fetched.address,
+        fetched.instruction);
+      return;
+    }
+    pc = fetched.address;
+    state = EEExecutionState::Halted;
+    haltReason = EEStopReason::UnsupportedInstruction;
     return;
   }
 
@@ -388,6 +400,20 @@ bool EECore::executeInstruction(
   {
     case EEOperation::Nop:
       return true;
+    case EEOperation::SystemCall:
+      enterException(
+        EEException::SystemCall,
+        address,
+        address,
+        instruction.raw);
+      return false;
+    case EEOperation::Breakpoint:
+      enterException(
+        EEException::Breakpoint,
+        address,
+        address,
+        instruction.raw);
+      return false;
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
@@ -1459,12 +1485,11 @@ bool EECore::raiseArithmeticOverflow(
   std::uint32_t address,
   std::uint32_t instruction)
 {
-  setExceptionRestartAddress(address);
-  exception = EEException::ArithmeticOverflow;
-  faultAddress = address;
-  state = EEExecutionState::Halted;
-  haltReason = EEStopReason::ExecutionException;
-  rejectedInstructionValue = instruction;
+  enterException(
+    EEException::ArithmeticOverflow,
+    address,
+    address,
+    instruction);
   return false;
 }
 
@@ -1616,28 +1641,100 @@ bool EECore::raiseDataAccessException(
   std::uint32_t dataAddress,
   std::uint32_t instruction)
 {
-  setExceptionRestartAddress(instructionAddress);
-  exception = type;
-  faultAddress = dataAddress;
-  state = EEExecutionState::Halted;
-  haltReason = EEStopReason::ExecutionException;
-  rejectedInstructionValue = instruction;
+  enterException(
+    type,
+    instructionAddress,
+    dataAddress,
+    instruction);
   return false;
 }
 
-void EECore::setExceptionRestartAddress(
-  std::uint32_t instructionAddress)
+void EECore::enterException(
+  EEException type,
+  std::uint32_t instructionAddress,
+  std::uint32_t address,
+  std::uint32_t instruction)
 {
-  if (branchDelayPending)
+  const bool alreadyExceptionLevel =
+    (cop0Status & EECOP0Status::EXCEPTION_LEVEL) != 0;
+  if (!alreadyExceptionLevel)
   {
-    pc = branchInstructionAddress;
-    branchDelayPending = false;
-    branchDelayTarget = 0;
-    branchInstructionAddress = 0;
-    branchDelayFromLikely = false;
-    return;
+    cop0EPC = branchDelayPending
+      ? branchInstructionAddress
+      : instructionAddress;
   }
-  pc = instructionAddress;
+  cop0Cause =
+    (cop0Cause & ~EECOP0Cause::EXCEPTION_CODE_MASK) |
+    (static_cast<std::uint32_t>(exceptionCode(type)) << 2);
+  cop0Status |= EECOP0Status::EXCEPTION_LEVEL;
+  if (type == EEException::AddressErrorLoadOrFetch ||
+      type == EEException::AddressErrorStore)
+  {
+    cop0BadVAddr = address;
+  }
+
+  exception = type;
+  faultAddress = address;
+  pc = exceptionVector(type, alreadyExceptionLevel);
+  state = EEExecutionState::Running;
+  haltReason = EEStopReason::None;
+  rejectedInstructionValue = instruction;
+  exceptionEnteredThisCycle = true;
+  branchDelayPending = false;
+  branchDelayTarget = 0;
+  branchInstructionAddress = 0;
+  branchDelayFromLikely = false;
+}
+
+std::uint8_t EECore::exceptionCode(EEException type)
+{
+  switch (type)
+  {
+    case EEException::Interrupt:
+      return EEExceptionCode::INTERRUPT;
+    case EEException::AddressErrorLoadOrFetch:
+      return EEExceptionCode::ADDRESS_ERROR_LOAD_OR_FETCH;
+    case EEException::AddressErrorStore:
+      return EEExceptionCode::ADDRESS_ERROR_STORE;
+    case EEException::InstructionBusError:
+      return EEExceptionCode::INSTRUCTION_BUS_ERROR;
+    case EEException::DataBusErrorLoad:
+    case EEException::DataBusErrorStore:
+      return EEExceptionCode::DATA_BUS_ERROR;
+    case EEException::SystemCall:
+      return EEExceptionCode::SYSTEM_CALL;
+    case EEException::Breakpoint:
+      return EEExceptionCode::BREAKPOINT;
+    case EEException::ReservedInstruction:
+      return EEExceptionCode::RESERVED_INSTRUCTION;
+    case EEException::ArithmeticOverflow:
+      return EEExceptionCode::ARITHMETIC_OVERFLOW;
+    case EEException::None:
+      break;
+  }
+  throw std::invalid_argument(
+    "EE exception type has no architectural code.");
+}
+
+std::uint32_t EECore::exceptionVector(
+  EEException type,
+  bool alreadyExceptionLevel) const
+{
+  const bool bootstrap =
+    (cop0Status &
+      EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR) != 0;
+  const bool interrupt =
+    type == EEException::Interrupt &&
+    !alreadyExceptionLevel;
+  if (bootstrap)
+  {
+    return interrupt
+      ? EEExceptionVector::BOOTSTRAP_INTERRUPT
+      : EEExceptionVector::BOOTSTRAP_GENERAL;
+  }
+  return interrupt
+    ? EEExceptionVector::INTERRUPT
+    : EEExceptionVector::GENERAL;
 }
 
 EEExecutionState EECore::executionState() const

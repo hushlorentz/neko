@@ -90,7 +90,7 @@ TEST_CASE("Neko system reset returns the EE to architectural Reset entry")
   REQUIRE(system.eeCore().elapsedCycles() == 0);
 }
 
-TEST_CASE("EE Reset entry faults precisely until bootstrap ROM is mapped")
+TEST_CASE("EE Reset fetch faults enter the bootstrap exception vector")
 {
   NekoSystem system;
   system.eeCore().startExecution(
@@ -99,18 +99,20 @@ TEST_CASE("EE Reset entry faults precisely until bootstrap ROM is mapped")
   system.clockMasterCycle();
 
   REQUIRE(
-    system.eeCore().programCounter() == EEReset::VECTOR);
+    system.eeCore().programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
   REQUIRE(
     system.eeCore().executionState() ==
-    EEExecutionState::Halted);
-  REQUIRE(
-    system.eeCore().stopReason() ==
-    EEStopReason::FetchException);
+    EEExecutionState::Running);
+  REQUIRE(system.eeCore().stopReason() == EEStopReason::None);
   REQUIRE(
     system.eeCore().pendingException() ==
     EEException::InstructionBusError);
   REQUIRE(
     system.eeCore().exceptionAddress() ==
+    EEReset::VECTOR);
+  REQUIRE(
+    system.eeCore().cop0Register(EECOP0Register::EPC) ==
     EEReset::VECTOR);
   REQUIRE_FALSE(system.eeCore().hasLastInstruction());
 }

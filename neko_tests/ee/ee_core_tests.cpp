@@ -171,23 +171,22 @@ TEST_CASE("EE Core instruction fetching")
       EEException::InstructionBusError);
   }
 
-  SECTION("A pending fetch exception blocks later fetches until cleared")
+  SECTION("A recorded fetch exception does not block later fetches")
   {
     core.setProgramCounter(2);
     REQUIRE_FALSE(core.fetchInstruction().succeeded);
 
     bus.write32(0x100, UINT32_C(0x89abcdef));
     core.setProgramCounter(0x100);
-    REQUIRE_FALSE(core.fetchInstruction().succeeded);
-    REQUIRE(core.programCounter() == 0x100);
-
-    core.clearPendingException();
     const EEInstructionFetchResult result =
       core.fetchInstruction();
 
     REQUIRE(result.succeeded);
     REQUIRE(result.instruction == 0x89abcdef);
-    REQUIRE_FALSE(core.exceptionPending());
+    REQUIRE(core.exceptionPending());
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
   }
 
   SECTION("Reset clears a pending fetch exception")
@@ -248,37 +247,40 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.lastInstruction().raw == 0x24030001);
   }
 
-  SECTION("A fetch exception stops scheduled execution")
+  SECTION("A fetch exception enters the bootstrap handler")
   {
     core.startExecution(2);
 
     system.clockMasterCycle();
 
-    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(core.clockActive());
     REQUIRE(core.elapsedCycles() == 1);
-    REQUIRE(core.programCounter() == 2);
     REQUIRE(
-      core.stopReason() ==
-      EEStopReason::FetchException);
+      core.programCounter() ==
+      EEExceptionVector::BOOTSTRAP_GENERAL);
+    REQUIRE(core.stopReason() == EEStopReason::None);
     REQUIRE(
       core.pendingException() ==
       EEException::AddressErrorLoadOrFetch);
     REQUIRE_FALSE(core.hasLastInstruction());
   }
 
-  SECTION("Reserved encodings stop without retiring")
+  SECTION("Reserved encodings enter the bootstrap handler")
   {
     bus.write32(0, UINT32_C(0x4c000000));
     core.startExecution(0);
 
     system.clockMasterCycle();
 
-    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(core.clockActive());
     REQUIRE(core.elapsedCycles() == 1);
-    REQUIRE(core.programCounter() == 0);
     REQUIRE(
-      core.stopReason() ==
-      EEStopReason::ReservedInstruction);
+      core.programCounter() ==
+      EEExceptionVector::BOOTSTRAP_GENERAL);
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::ReservedInstruction);
     REQUIRE(core.rejectedInstruction() == 0x4c000000);
     REQUIRE_FALSE(core.hasLastInstruction());
   }

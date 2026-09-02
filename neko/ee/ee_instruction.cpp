@@ -199,6 +199,8 @@ namespace
       EEOperation::JumpAndLinkRegister,
       REGISTER_TARGET_MASK |
         REGISTER_SHIFT_MASK);
+    direct(&table, 0x0c, EEOperation::SystemCall);
+    direct(&table, 0x0d, EEOperation::Breakpoint);
     direct(
       &table,
       0x14,

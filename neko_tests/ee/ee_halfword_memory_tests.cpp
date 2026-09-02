@@ -116,7 +116,9 @@ TEST_CASE("EE halfword alignment faults have no data side effects")
       core.pendingException() ==
       EEException::AddressErrorLoadOrFetch);
     REQUIRE(core.exceptionAddress() == 0x101);
-    REQUIRE(core.programCounter() == 0);
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::BOOTSTRAP_GENERAL);
     REQUIRE(core.generalRegister(2).low == 0x1234);
   }
 
@@ -163,5 +165,8 @@ TEST_CASE("EE halfword alignment faults restart branch delay slots")
     core.pendingException() ==
     EEException::AddressErrorLoadOrFetch);
   REQUIRE(core.exceptionAddress() == 0x101);
-  REQUIRE(core.programCounter() == 0);
+  REQUIRE(
+    core.programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
 }

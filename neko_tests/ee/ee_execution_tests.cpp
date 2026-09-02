@@ -90,12 +90,15 @@ TEST_CASE("EE bounded execution reports pending exceptions")
   REQUIRE(result.eeCycles == 1);
   REQUIRE(result.instructions == 0);
   REQUIRE_FALSE(result.cycleLimitReached);
-  REQUIRE(result.stopReason == EEStopReason::FetchException);
+  REQUIRE(result.state == EEExecutionState::Running);
+  REQUIRE(result.stopReason == EEStopReason::None);
   REQUIRE(
     result.pendingException ==
     EEException::AddressErrorLoadOrFetch);
   REQUIRE(result.exceptionAddress == 2);
-  REQUIRE(result.programCounter == 2);
+  REQUIRE(
+    result.programCounter ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
 }
 
 TEST_CASE("EE instruction stepping follows repeated branch addresses")

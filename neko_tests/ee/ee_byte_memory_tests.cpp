@@ -109,15 +109,17 @@ TEST_CASE("EE byte memory faults preserve architectural results")
       &system,
       memoryInstruction(0x20, 1, 2, 0));
 
-    REQUIRE(core.executionState() == EEExecutionState::Halted);
-    REQUIRE(core.stopReason() == EEStopReason::ExecutionException);
+    REQUIRE(core.executionState() == EEExecutionState::Running);
+    REQUIRE(core.stopReason() == EEStopReason::None);
     REQUIRE(
       core.pendingException() ==
       EEException::DataBusErrorLoad);
     REQUIRE(
       core.exceptionAddress() ==
       EEMemoryMap::MAIN_MEMORY_SIZE);
-    REQUIRE(core.programCounter() == 0);
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::BOOTSTRAP_GENERAL);
     REQUIRE(core.generalRegister(2).low == 0x1234);
   }
 
@@ -180,14 +182,17 @@ TEST_CASE("EE byte faults restart from the preceding branch")
   core.startExecution(0);
   system.runMasterCycles(2);
 
-  REQUIRE(core.stopReason() == EEStopReason::ExecutionException);
+  REQUIRE(core.stopReason() == EEStopReason::None);
   REQUIRE(core.pendingException() == EEException::DataBusErrorLoad);
-  REQUIRE(core.programCounter() == 0);
+  REQUIRE(
+    core.programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
 
   setRegister(&core, 1, 0x100);
   REQUIRE(system.eeBus().writeData8(0x100, 0x7f));
   core.clearPendingException();
-  core.startExecution(core.programCounter());
+  core.startExecution(core.cop0Register(EECOP0Register::EPC));
   system.runMasterCycles(3);
 
   REQUIRE(core.generalRegister(2).low == 0x7f);

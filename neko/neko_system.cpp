@@ -368,11 +368,13 @@ EEExecutionResult NekoSystem::stepEEInstruction(
 {
   const std::uint64_t startingEECycles =
     eeCoreComponent.elapsedCycles();
+  eeCoreComponent.exceptionEnteredThisCycle = false;
   std::uint64_t masterCycles = 0;
   std::uint64_t instructions = 0;
   while (eeCoreComponent.clockActive() &&
          masterCycles < maxMasterCycles &&
-         instructions == 0)
+         instructions == 0 &&
+         !eeCoreComponent.exceptionEnteredThisCycle)
   {
     clockMasterCycle();
     ++masterCycles;
@@ -387,6 +389,7 @@ EEExecutionResult NekoSystem::stepEEInstruction(
     startingEECycles,
     instructions,
     eeCoreComponent.clockActive() &&
+      !eeCoreComponent.exceptionEnteredThisCycle &&
       instructions == 0 &&
       masterCycles == maxMasterCycles);
 }
@@ -396,10 +399,12 @@ EEExecutionResult NekoSystem::runEE(
 {
   const std::uint64_t startingEECycles =
     eeCoreComponent.elapsedCycles();
+  eeCoreComponent.exceptionEnteredThisCycle = false;
   std::uint64_t masterCycles = 0;
   std::uint64_t instructions = 0;
   while (eeCoreComponent.clockActive() &&
-         masterCycles < maxMasterCycles)
+         masterCycles < maxMasterCycles &&
+         !eeCoreComponent.exceptionEnteredThisCycle)
   {
     clockMasterCycle();
     ++masterCycles;
@@ -414,6 +419,7 @@ EEExecutionResult NekoSystem::runEE(
     startingEECycles,
     instructions,
     eeCoreComponent.clockActive() &&
+      !eeCoreComponent.exceptionEnteredThisCycle &&
       masterCycles == maxMasterCycles);
 }
 

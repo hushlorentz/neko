@@ -40,7 +40,11 @@ enum class EEException : std::uint8_t
   ArithmeticOverflow,
   DataBusErrorLoad,
   DataBusErrorStore,
-  AddressErrorStore
+  AddressErrorStore,
+  Interrupt,
+  ReservedInstruction,
+  SystemCall,
+  Breakpoint
 };
 
 struct EEInstructionFetchResult
@@ -81,6 +85,39 @@ enum class EECOP0Register : std::uint8_t
 namespace EECOP0Status
 {
   constexpr std::uint32_t RESET = UINT32_C(0x70400004);
+  constexpr std::uint32_t EXCEPTION_LEVEL = UINT32_C(1) << 1;
+  constexpr std::uint32_t BOOTSTRAP_EXCEPTION_VECTOR =
+    UINT32_C(1) << 22;
+}
+
+namespace EECOP0Cause
+{
+  constexpr std::uint32_t EXCEPTION_CODE_MASK =
+    UINT32_C(0x1f) << 2;
+  constexpr std::uint32_t BRANCH_DELAY = UINT32_C(1) << 31;
+}
+
+namespace EEExceptionCode
+{
+  constexpr std::uint8_t INTERRUPT = 0;
+  constexpr std::uint8_t ADDRESS_ERROR_LOAD_OR_FETCH = 4;
+  constexpr std::uint8_t ADDRESS_ERROR_STORE = 5;
+  constexpr std::uint8_t INSTRUCTION_BUS_ERROR = 6;
+  constexpr std::uint8_t DATA_BUS_ERROR = 7;
+  constexpr std::uint8_t SYSTEM_CALL = 8;
+  constexpr std::uint8_t BREAKPOINT = 9;
+  constexpr std::uint8_t RESERVED_INSTRUCTION = 10;
+  constexpr std::uint8_t ARITHMETIC_OVERFLOW = 12;
+}
+
+namespace EEExceptionVector
+{
+  constexpr std::uint32_t GENERAL = UINT32_C(0x80000180);
+  constexpr std::uint32_t INTERRUPT = UINT32_C(0x80000200);
+  constexpr std::uint32_t BOOTSTRAP_GENERAL =
+    UINT32_C(0xbfc00380);
+  constexpr std::uint32_t BOOTSTRAP_INTERRUPT =
+    UINT32_C(0xbfc00400);
 }
 
 namespace EEReset
@@ -98,6 +135,7 @@ class EECore : public ClockedComponent
     EEInstructionFetchResult fetchInstruction();
     void startExecution(std::uint32_t startAddress);
     void haltExecution();
+    void enterInterruptException();
     bool clockActive() const override;
     void clock() override;
     EEExecutionState executionState() const;
@@ -189,6 +227,7 @@ class EECore : public ClockedComponent
     std::uint32_t branchInstructionAddress = 0;
     bool branchDelayFromLikely = false;
     bool instructionRetiredThisCycle = false;
+    bool exceptionEnteredThisCycle = false;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);
@@ -196,6 +235,15 @@ class EECore : public ClockedComponent
     EEInstructionFetchResult raiseFetchException(
       EEException type,
       std::uint32_t address);
+    void enterException(
+      EEException type,
+      std::uint32_t instructionAddress,
+      std::uint32_t exceptionAddress,
+      std::uint32_t instruction);
+    static std::uint8_t exceptionCode(EEException type);
+    std::uint32_t exceptionVector(
+      EEException type,
+      bool alreadyExceptionLevel) const;
     bool executeInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);
@@ -244,8 +292,6 @@ class EECore : public ClockedComponent
       std::uint32_t instructionAddress,
       std::uint32_t dataAddress,
       std::uint32_t instruction);
-    void setExceptionRestartAddress(
-      std::uint32_t instructionAddress);
 };
 
 #endif

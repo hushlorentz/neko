@@ -1316,6 +1316,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.branchInstructionAddress;
   destination->eeCoreComponent.branchDelayFromLikely =
     source->eeCoreComponent.branchDelayFromLikely;
+  destination->eeCoreComponent.instructionRetiredThisCycle = false;
+  destination->eeCoreComponent.exceptionEnteredThisCycle = false;
   destination->interruptControllerComponent.statusRegister =
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
@@ -1621,7 +1623,7 @@ void NekoSaveStateCodec::readEECore(
   core->exception = readEnum<EEException>(
     reader,
     static_cast<std::uint8_t>(
-      EEException::AddressErrorStore),
+      EEException::Breakpoint),
     "EE exception");
   core->faultAddress = reader->readU32();
   core->state = readEnum<EEExecutionState>(

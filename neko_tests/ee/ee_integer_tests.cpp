@@ -323,7 +323,7 @@ TEST_CASE("EE trapping and undefined integer operations")
   NekoSystem system;
   EECore &core = system.eeCore();
 
-  SECTION("Word overflow preserves the destination and stops")
+  SECTION("Word overflow preserves the destination and enters COP0")
   {
     setRegister(&core, 1, 0x7fffffff);
     setRegister(&core, 2, 1);
@@ -336,15 +336,15 @@ TEST_CASE("EE trapping and undefined integer operations")
     REQUIRE(
       core.generalRegister(3) ==
       EERegister128{0x1234, 0x5678});
-    REQUIRE_FALSE(core.clockActive());
-    REQUIRE(
-      core.stopReason() ==
-      EEStopReason::ExecutionException);
+    REQUIRE(core.clockActive());
+    REQUIRE(core.stopReason() == EEStopReason::None);
     REQUIRE(
       core.pendingException() ==
       EEException::ArithmeticOverflow);
     REQUIRE(core.exceptionAddress() == 0);
-    REQUIRE(core.programCounter() == 0);
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::BOOTSTRAP_GENERAL);
     REQUIRE_FALSE(core.hasLastInstruction());
   }
 
@@ -463,9 +463,10 @@ TEST_CASE("A failing EE instruction preserves the last retired instruction")
   REQUIRE(
     system.eeCore().lastInstruction().operation ==
     EEOperation::Nop);
+  REQUIRE(system.eeCore().stopReason() == EEStopReason::None);
   REQUIRE(
-    system.eeCore().stopReason() ==
-    EEStopReason::ExecutionException);
+    system.eeCore().programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
   REQUIRE(
     system.eeCore().rejectedInstruction() ==
     registerInstruction(0x20, 1, 2, 3));

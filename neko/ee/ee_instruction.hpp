@@ -110,7 +110,9 @@ enum class EEOperation : std::uint8_t
   StoreDoublewordLeft,
   StoreDoublewordRight,
   LoadQuadword,
-  StoreQuadword
+  StoreQuadword,
+  SystemCall,
+  Breakpoint
 };
 
 struct EEInstruction

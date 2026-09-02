@@ -552,17 +552,27 @@ TEST_CASE("EE integer execution exceptions survive save states")
   NekoSystem restored;
   restored.loadState(original.saveState());
 
-  REQUIRE_FALSE(restored.eeCore().clockActive());
-  REQUIRE(
-    restored.eeCore().stopReason() ==
-    EEStopReason::ExecutionException);
+  REQUIRE(restored.eeCore().clockActive());
+  REQUIRE(restored.eeCore().stopReason() == EEStopReason::None);
   REQUIRE(
     restored.eeCore().pendingException() ==
     EEException::ArithmeticOverflow);
+  REQUIRE(
+    (restored.eeCore().cop0Register(EECOP0Register::Status) &
+      EECOP0Status::EXCEPTION_LEVEL) != 0);
+  REQUIRE(
+    (restored.eeCore().cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::EXCEPTION_CODE_MASK) ==
+    (static_cast<std::uint32_t>(
+      EEExceptionCode::ARITHMETIC_OVERFLOW) << 2));
+  REQUIRE(restored.eeCore().cop0Register(EECOP0Register::EPC) == 0);
   REQUIRE(restored.eeCore().rejectedInstruction() != 0);
   REQUIRE(
     restored.eeCore().generalRegister(3) ==
     EERegister128{0x1234, 0x5678});
+  REQUIRE(
+    restored.eeCore().programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
   REQUIRE(original.saveState() == restored.saveState());
 }
 
@@ -691,7 +701,9 @@ TEST_CASE("EE halfword address faults survive save states")
     restored.eeCore().pendingException() ==
     EEException::AddressErrorStore);
   REQUIRE(restored.eeCore().exceptionAddress() == 0x101);
-  REQUIRE(restored.eeCore().programCounter() == 0);
+  REQUIRE(
+    restored.eeCore().programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
   REQUIRE(original.saveState() == restored.saveState());
 }
 
@@ -718,7 +730,9 @@ TEST_CASE("EE aligned word bus faults survive save states")
   REQUIRE(
     restored.eeCore().exceptionAddress() ==
     EEMemoryMap::MAIN_MEMORY_SIZE);
-  REQUIRE(restored.eeCore().programCounter() == 0);
+  REQUIRE(
+    restored.eeCore().programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
   REQUIRE(original.saveState() == restored.saveState());
 }
 

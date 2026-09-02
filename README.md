@@ -45,11 +45,11 @@ Effective addresses use the low 32 bits of the base-plus-signed-offset result,
 matching the EE's 32-bit virtual address implementation. Byte loads sign- or
 zero-extend into GPR bits 63..0, byte stores use the source's least-significant
 byte, and all preserve unrelated register bits. RAM aliases participate in
-data access, while unmapped loads and stores stop with distinct typed data-bus
-exceptions and preserve faulting architectural state. Save-state format
-version 6 includes those exception values. A fault in a branch delay slot
-rewinds execution to the preceding restartable branch while retaining the
-faulting data address.
+data access, while unmapped loads and stores enter distinct typed data-bus exceptions and
+preserve faulting architectural state. Save-state format version 6 includes
+those exception values. For a fault in a branch delay slot, `EPC` identifies
+the preceding restartable branch while retaining the faulting data address;
+the corresponding `Cause.BD` contract is the next exception-handling slice.
 Aligned halfword access adds `LH`, `LHU`, and `SH`. Halfword loads assemble
 little-endian data and sign- or zero-extend it through GPR bits 63..0; stores
 write only the least-significant 16 bits. Odd effective addresses stop before
@@ -97,8 +97,14 @@ move instructions and register write masks follow with exception handling.
 Architectural Reset places the EE at bootstrap vector `0xBFC00000` with the
 reset COP0 state while retaining Neko's halted-by-default host contract.
 Execution begins only when a frontend or test explicitly starts the core;
-until BIOS mapping is added, fetching from the bootstrap vector reports the
-existing instruction-bus fault.
+until BIOS mapping is added, fetching from the bootstrap vector enters the
+bootstrap general-exception vector with an instruction-bus fault.
+Regular EE exception entry now sets `Status.EXL`, writes `Cause.ExcCode`,
+captures `EPC`, updates `BadVAddr` for address errors, and selects the general
+or interrupt vector through `Status.BEV`. Address and bus faults, arithmetic
+overflow, reserved instructions, `SYSCALL`, and `BREAK` all use this common
+path. The bounded EE execution APIs return at exception entry while the core
+remains architecturally running at the selected handler vector.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,
