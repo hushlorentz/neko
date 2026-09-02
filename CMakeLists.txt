@@ -16,6 +16,24 @@ option(
     "Build the SDL3 desktop presentation frontend"
     OFF
 )
+option(
+    NEKO_OPTIMIZE_CHECKS
+    "Optimize assertion-enabled repository check builds"
+    OFF
+)
+
+if(NEKO_OPTIMIZE_CHECKS)
+    if(MSVC)
+        add_compile_options(/O2)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        add_compile_options(-O2)
+    else()
+        message(
+            FATAL_ERROR
+            "NEKO_OPTIMIZE_CHECKS is unsupported by this compiler"
+        )
+    endif()
+endif()
 
 add_library(neko_sanitizers INTERFACE)
 if(NEKO_ENABLE_SANITIZERS)

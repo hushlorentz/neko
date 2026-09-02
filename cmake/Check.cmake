@@ -25,6 +25,8 @@ run_checked(
   "${BUILD_DIRECTORY}"
   -D
   CMAKE_BUILD_TYPE=Debug
+  -D
+  NEKO_OPTIMIZE_CHECKS=ON
 )
 run_checked(
   "${CMAKE_COMMAND}"
