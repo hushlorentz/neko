@@ -261,6 +261,10 @@ class EECore : public ClockedComponent
 
     static void requireGeneralRegisterIndex(
       std::size_t index);
+    void prepareFreshExecution(
+      std::uint32_t entryPoint,
+      std::uint32_t stackPointer,
+      std::uint32_t returnAddress);
     EEBus &attachedBus() const;
     EEInstructionFetchResult raiseFetchException(
       EEException type,

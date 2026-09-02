@@ -1,4 +1,5 @@
 #include <new>
+#include <stdexcept>
 
 #include "neko_system.hpp"
 
@@ -100,6 +101,100 @@ GSPresentation NekoSystem::videoOutput() const
 NekoAudioFrame NekoSystem::audioOutput() const
 {
   return {};
+}
+
+EEELFLoadResult NekoSystem::loadELF(
+  const std::vector<std::uint8_t> &image)
+{
+  if (eeCoreComponent.executionState() !=
+      EEExecutionState::Halted)
+  {
+    throw std::logic_error(
+      "An ELF cannot be loaded while the EE is running.");
+  }
+  const EEELFLoadResult result =
+    loadEEELF(image, &eeBusComponent);
+  eeCoreComponent.prepareFreshExecution(
+    result.entryPoint,
+    EEGuestRuntime::STACK_POINTER,
+    EEGuestRuntime::RETURN_ADDRESS);
+  return result;
+}
+
+EEGuestExecutionResult NekoSystem::runELF(
+  const std::vector<std::uint8_t> &image,
+  std::uint64_t maxMasterCycles)
+{
+  EEGuestExecutionResult result;
+  result.load = loadELF(image);
+  eeCoreComponent.startExecution(result.load.entryPoint);
+
+  const std::uint64_t startingEECycles =
+    eeCoreComponent.elapsedCycles();
+  eeCoreComponent.exceptionEnteredThisCycle = false;
+  std::uint64_t masterCycles = 0;
+  std::uint64_t instructions = 0;
+  bool returned = false;
+  while (eeCoreComponent.clockActive() &&
+         masterCycles < maxMasterCycles &&
+         !eeCoreComponent.exceptionEnteredThisCycle)
+  {
+    if (eeCoreComponent.programCounter() ==
+        EEGuestRuntime::RETURN_ADDRESS)
+    {
+      eeCoreComponent.haltExecution();
+      returned = true;
+      break;
+    }
+    clockMasterCycle();
+    ++masterCycles;
+    if (eeCoreComponent.instructionRetiredThisCycle)
+    {
+      ++instructions;
+    }
+  }
+
+  if (eeCoreComponent.clockActive() &&
+      !eeCoreComponent.exceptionEnteredThisCycle &&
+      eeCoreComponent.programCounter() ==
+        EEGuestRuntime::RETURN_ADDRESS)
+  {
+    eeCoreComponent.haltExecution();
+    returned = true;
+  }
+  const bool cycleLimitReached =
+    eeCoreComponent.clockActive() &&
+    !eeCoreComponent.exceptionEnteredThisCycle &&
+    masterCycles == maxMasterCycles;
+  result.execution = makeEEExecutionResult(
+    masterCycles,
+    startingEECycles,
+    instructions,
+    cycleLimitReached);
+  result.exitCode = static_cast<std::uint32_t>(
+    eeCoreComponent.generalRegister(
+      EEGuestRuntime::EXIT_CODE_REGISTER).low);
+
+  if (returned)
+  {
+    result.outcome =
+      result.exitCode == 0 ?
+        EEGuestOutcome::Completed :
+        EEGuestOutcome::GuestReportedFailure;
+  }
+  else if (cycleLimitReached)
+  {
+    result.outcome = EEGuestOutcome::CycleLimitReached;
+  }
+  else if (result.execution.pendingException != EEException::None)
+  {
+    result.outcome = EEGuestOutcome::Exception;
+  }
+  else
+  {
+    result.outcome = EEGuestOutcome::Stopped;
+  }
+  return result;
 }
 
 void NekoSystem::startTrace()

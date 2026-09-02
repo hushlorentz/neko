@@ -7,6 +7,7 @@
 #include "clock_scheduler.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
+#include "ee_elf_loader.hpp"
 #include "gif.hpp"
 #include "gif_dmac_channel.hpp"
 #include "gif_path1.hpp"
@@ -34,6 +35,32 @@ struct EEExecutionResult
   std::uint32_t exceptionAddress = 0;
 };
 
+namespace EEGuestRuntime
+{
+  constexpr std::uint32_t STACK_POINTER =
+    EEMemoryMap::MAIN_MEMORY_SIZE;
+  constexpr std::uint32_t RETURN_ADDRESS =
+    UINT32_C(0xfffffffc);
+  constexpr std::size_t EXIT_CODE_REGISTER = 2;
+}
+
+enum class EEGuestOutcome : std::uint8_t
+{
+  Completed,
+  GuestReportedFailure,
+  CycleLimitReached,
+  Exception,
+  Stopped
+};
+
+struct EEGuestExecutionResult
+{
+  EEELFLoadResult load;
+  EEExecutionResult execution;
+  EEGuestOutcome outcome = EEGuestOutcome::Stopped;
+  std::uint32_t exitCode = 0;
+};
+
 class NekoSystem
 {
   public:
@@ -57,6 +84,11 @@ class NekoSystem
     NekoAudioFrame audioOutput() const;
     std::vector<std::uint8_t> saveState() const;
     void loadState(const std::vector<std::uint8_t> &state);
+    EEELFLoadResult loadELF(
+      const std::vector<std::uint8_t> &image);
+    EEGuestExecutionResult runELF(
+      const std::vector<std::uint8_t> &image,
+      std::uint64_t maxMasterCycles);
     void startTrace();
     void stopTrace();
     void clearTrace();

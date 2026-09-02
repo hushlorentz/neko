@@ -293,6 +293,17 @@ void EECore::startExecution(std::uint32_t startAddress)
   exceptionEnteredThisCycle = false;
 }
 
+void EECore::prepareFreshExecution(
+  std::uint32_t entryPoint,
+  std::uint32_t stackPointer,
+  std::uint32_t returnAddress)
+{
+  reset();
+  pc = entryPoint;
+  generalRegisters[29].low = stackPointer;
+  generalRegisters[31].low = returnAddress;
+}
+
 void EECore::haltExecution()
 {
   state = EEExecutionState::Halted;

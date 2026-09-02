@@ -59,6 +59,7 @@ add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/ee/ee_bus.cpp
     neko/ee/ee_core.cpp
+    neko/ee/ee_elf_loader.cpp
     neko/ee/ee_instruction.cpp
     neko/ee/gif_dmac_channel.cpp
     neko/ee/interrupt_controller.cpp
@@ -166,6 +167,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp
     neko_tests/ee/ee_cop0_tests.cpp
+    neko_tests/ee/ee_elf_loader_tests.cpp
     neko_tests/ee/ee_doubleword_memory_tests.cpp
     neko_tests/ee/ee_doubleword_merge_tests.cpp
     neko_tests/ee/ee_execution_tests.cpp

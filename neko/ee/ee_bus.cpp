@@ -86,6 +86,14 @@ bool EEBus::mainMemoryAddress(
   return true;
 }
 
+bool EEBus::isMainMemoryRange(
+  std::uint32_t address,
+  std::size_t width) const
+{
+  std::uint32_t physicalAddress = 0;
+  return mainMemoryAddress(address, width, &physicalAddress);
+}
+
 void EEBus::attachGIFDMACChannel(GIFDMACChannel *gifDMAC)
 {
   if (gifDMAC == nullptr)

@@ -530,9 +530,9 @@ Load small freestanding scalar programs before expanding the remaining EE
 coprocessor and multimedia families. Let real guest requirements drive that
 work instead of implementing every deferred instruction speculatively:
 
-- [ ] Load PS2 ELF program segments into EE memory with validated addresses,
+- [x] Load PS2 ELF program segments into EE memory with validated addresses,
       sizes, permissions, BSS initialization, and entry-point setup
-- [ ] Define the initial bare-metal guest runtime contract, including reset
+- [x] Define the initial bare-metal guest runtime contract, including reset
       state, stack placement, bounded execution, and how completion or failure
       is reported to the host
 - [ ] Add a generic `--elf <path>` desktop argument that executes the loaded

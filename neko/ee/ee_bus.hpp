@@ -92,6 +92,9 @@ class EEBus
       EEInterruptController *interrupts);
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
     void attachGSDisplay(GSDisplay *gsDisplay);
+    bool isMainMemoryRange(
+      std::uint32_t address,
+      std::size_t width) const;
 
     bool readInstruction32(
       std::uint32_t address,
