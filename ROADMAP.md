@@ -519,7 +519,7 @@ existing event and runner infrastructure:
       stamped with the master cycle
 - [x] Include all EE and COP0 architectural and in-flight state in reset,
       save-state, frame-hash, and subsystem-trace contracts
-- [ ] Add focused hand-encoded conformance programs for arithmetic, delay
+- [x] Add focused hand-encoded conformance programs for arithmetic, delay
       slots, memory access, exceptions, and interrupt entry/return
 - [ ] Compare repeated and save-state-resumed EE executions for identical
       registers, memory, stop reasons, and trace hashes

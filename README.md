@@ -137,6 +137,9 @@ address/target/taken-and-likely flags; memory address/low value/high
 value/width-write-success flags; exception kind/fault address/vector/Cause; or
 interrupted PC/Status/Cause/vector. Whenever that complete EE state changes,
 the subsystem trace also records its hash, cycle count, PC, Status, and Cause.
+Focused hand-encoded EE conformance programs exercise arithmetic sequences,
+taken and annulled delay slots, 32/64/128-bit memory transfers, exception
+entry, and interrupt-handler return without relying on an external assembler.
 
 `NekoSystem::saveState()` returns a canonical, versioned byte vector containing
 the complete deterministic machine state, and `loadState()` restores one
