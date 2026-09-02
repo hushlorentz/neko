@@ -112,6 +112,36 @@ TEST_CASE("EE takes an enabled INTC line before the next instruction")
     EEExceptionVector::INTERRUPT + 4);
 }
 
+TEST_CASE("EE ERET exposes a pending interrupt at the next boundary")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  assertINTCLine(&system);
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    INTC_ENABLED_STATUS |
+      EECOP0Status::EXCEPTION_LEVEL);
+  core.setCOP0Register(EECOP0Register::EPC, 0x100);
+  system.eeBus().write32(
+    EEExceptionVector::GENERAL,
+    UINT32_C(0x42000018));
+  core.startExecution(EEExceptionVector::GENERAL);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 0x100);
+  REQUIRE(core.pendingException() == EEException::None);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::EXCEPTION_LEVEL) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.pendingException() == EEException::Interrupt);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0x100);
+  REQUIRE(core.programCounter() == EEExceptionVector::INTERRUPT);
+}
+
 TEST_CASE("EE interrupt delivery preserves a pending branch restart")
 {
   NekoSystem system;

@@ -405,6 +405,19 @@ bool EECore::executeInstruction(
   {
     case EEOperation::Nop:
       return true;
+    case EEOperation::ExceptionReturn:
+      if ((cop0Status & EECOP0Status::ERROR_LEVEL) != 0)
+      {
+        pc = cop0ErrorEPC;
+        cop0Status &= ~EECOP0Status::ERROR_LEVEL;
+      }
+      else
+      {
+        pc = cop0EPC;
+        cop0Status &= ~EECOP0Status::EXCEPTION_LEVEL;
+      }
+      clearPendingException();
+      return true;
     case EEOperation::SystemCall:
       enterException(
         EEException::SystemCall,
@@ -1615,6 +1628,7 @@ bool EECore::validateDelaySlotInstruction(
     return true;
   }
   if (isEEBranchOperation(instruction.operation) ||
+       instruction.operation == EEOperation::ExceptionReturn ||
        (branchDelayFromLikely &&
         writesShiftAmount(instruction.operation)))
   {

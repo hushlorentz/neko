@@ -222,6 +222,30 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
   }
 }
 
+TEST_CASE("EE ERET instruction decoding")
+{
+  const EEInstruction instruction =
+    decodeEEInstruction(UINT32_C(0x42000018));
+
+  REQUIRE(instruction.operation == EEOperation::ExceptionReturn);
+  REQUIRE(instruction.raw == UINT32_C(0x42000018));
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(UINT32_C(0x42000019)),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(UINT32_C(0x42000058)),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(UINT32_C(0x42000001)),
+    "Unsupported EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(UINT32_C(0x40000001)),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(UINT32_C(0x41040000)),
+    "Reserved EE instruction encoding.");
+}
+
 TEST_CASE("EE multiply divide and SA decoder tables")
 {
   struct Contract

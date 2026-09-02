@@ -159,6 +159,92 @@ TEST_CASE("Nested EE exceptions preserve EPC and use the general vector")
   REQUIRE(exceptionCode(core) == EEExceptionCode::INTERRUPT);
 }
 
+TEST_CASE("EE ERET returns through the active exception level")
+{
+  SECTION("Level-one return uses EPC and clears EXL")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const std::uint32_t preserved =
+      EECOP0Status::INTERRUPT_ENABLE |
+      EECOP0Status::MASTER_INTERRUPT_ENABLE |
+      EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR;
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      preserved | EECOP0Status::EXCEPTION_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setCOP0Register(
+      EECOP0Register::ErrorEPC,
+      UINT32_C(0x80002000));
+    core.setCOP0Register(
+      EECOP0Register::Cause,
+      EECOP0Cause::BRANCH_DELAY |
+        (EEExceptionCode::BREAKPOINT << 2));
+    system.eeBus().write32(0, UINT32_C(0x42000018));
+    core.startExecution(0);
+
+    const EEExecutionResult result = system.stepEEInstruction(1);
+
+    REQUIRE(result.instructions == 1);
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::Status) ==
+      preserved);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::Cause) ==
+      (EECOP0Cause::BRANCH_DELAY |
+        (EEExceptionCode::BREAKPOINT << 2)));
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.lastInstruction().operation == EEOperation::ExceptionReturn);
+  }
+
+  SECTION("Level-two return uses ErrorEPC and clears only ERL")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::EXCEPTION_LEVEL |
+        EECOP0Status::ERROR_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setCOP0Register(EECOP0Register::ErrorEPC, 0x200);
+    system.eeBus().write32(0, UINT32_C(0x42000018));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 0x200);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::Status) ==
+      EECOP0Status::EXCEPTION_LEVEL);
+  }
+}
+
+TEST_CASE("EE ERET is undefined in a branch delay slot")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::EXCEPTION_LEVEL);
+  core.setCOP0Register(EECOP0Register::EPC, 0x100);
+  system.eeBus().write32(
+    0,
+    immediateInstruction(0x04, 0, 0, 2));
+  system.eeBus().write32(4, UINT32_C(0x42000018));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.executionState() == EEExecutionState::Halted);
+  REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::EXCEPTION_LEVEL) != 0);
+  REQUIRE(core.rejectedInstruction() == UINT32_C(0x42000018));
+}
+
 TEST_CASE("EE delay-slot exceptions identify the restartable branch")
 {
   SECTION("A data fault sets BD and points EPC at the branch")
@@ -346,6 +432,9 @@ TEST_CASE("EE reserved, syscall, and breakpoint instructions enter exceptions")
     std::uint8_t code;
   } contracts[] = {
     {UINT32_C(0x4c000000),
+     EEException::ReservedInstruction,
+     EEExceptionCode::RESERVED_INSTRUCTION},
+    {UINT32_C(0x42000019),
      EEException::ReservedInstruction,
      EEExceptionCode::RESERVED_INSTRUCTION},
     {UINT32_C(0x0123454c),

@@ -112,7 +112,8 @@ enum class EEOperation : std::uint8_t
   LoadQuadword,
   StoreQuadword,
   SystemCall,
-  Breakpoint
+  Breakpoint,
+  ExceptionReturn
 };
 
 struct EEInstruction

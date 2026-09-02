@@ -21,7 +21,8 @@ namespace
     Direct,
     Special,
     Regimm,
-    Mmi
+    Mmi,
+    Cop0
   };
 
   struct DecodeEntry
@@ -56,6 +57,7 @@ namespace
     });
     table[0x00].kind = DecodeKind::Special;
     table[0x01].kind = DecodeKind::Regimm;
+    table[0x10].kind = DecodeKind::Cop0;
     table[0x1c].kind = DecodeKind::Mmi;
     table[0x13].kind = DecodeKind::Reserved;
     table[0x1d].kind = DecodeKind::Reserved;
@@ -580,6 +582,49 @@ namespace
     }
     instruction->operation = entry.operation;
   }
+
+  void applyCop0(EEInstruction *instruction)
+  {
+    if (instruction->raw == UINT32_C(0x42000018))
+    {
+      instruction->operation = EEOperation::ExceptionReturn;
+      return;
+    }
+
+    if (instruction->sourceRegister == 0x00 ||
+        instruction->sourceRegister == 0x04)
+    {
+      reject(
+        (instruction->raw & UINT32_C(0x000007ff)) == 0
+          ? DecodeKind::Unsupported
+          : DecodeKind::Reserved);
+    }
+    if (instruction->sourceRegister == 0x08)
+    {
+      reject(
+        instruction->targetRegister <= 0x03
+          ? DecodeKind::Unsupported
+          : DecodeKind::Reserved);
+    }
+    if (instruction->sourceRegister != 0x10)
+    {
+      reject(DecodeKind::Reserved);
+    }
+
+    const bool fixedFieldsAreZero =
+      (instruction->raw & UINT32_C(0x001fffc0)) == 0;
+    const bool deferredOperation =
+      instruction->function == 0x01 ||
+      instruction->function == 0x02 ||
+      instruction->function == 0x06 ||
+      instruction->function == 0x08 ||
+      instruction->function == 0x38 ||
+      instruction->function == 0x39;
+    reject(
+      fixedFieldsAreZero && deferredOperation
+        ? DecodeKind::Unsupported
+        : DecodeKind::Reserved);
+  }
 }
 
 EEInstructionDecodeError::EEInstructionDecodeError(
@@ -667,6 +712,11 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
     applyEntry(
       mmiTable()[instruction.function],
       &instruction);
+    return instruction;
+  }
+  if (primary.kind == DecodeKind::Cop0)
+  {
+    applyCop0(&instruction);
     return instruction;
   }
 

@@ -113,6 +113,11 @@ with both `EXL` and `ERL` clear. Pending lines remain visible while CPU
 delivery is masked or the core is host-halted. A device interrupt generated
 later in a master cycle is therefore taken before the following EE
 instruction.
+`ERET` returns through `ErrorEPC` and clears `Status.ERL` for a level-two
+error, or returns through `EPC` and clears `Status.EXL` otherwise. It leaves
+the other exception level and `Cause` state intact, rejects execution from a
+branch delay slot, and exposes any still-pending interrupt at the next EE
+instruction boundary.
 
 Each `runFrame()` result includes a canonical video hash. Optional
 `NekoSystem` regression tracing records ordered, master-cycle-stamped input,
