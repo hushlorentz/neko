@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 8;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 9;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1390,6 +1390,7 @@ void NekoSaveStateCodec::commitSystem(
     source->gifPath3Component.transferredQuadwords;
   path3.completedPackets =
     source->gifPath3Component.completedPackets;
+  path3.guestFIFO = source->gifPath3Component.guestFIFO;
 
   commitGS(
     &destination->gsComponent,
@@ -2300,6 +2301,11 @@ void NekoSaveStateCodec::writeVIF(
   {
     writer->writeU32(value);
   }
+  writer->writeSize(vif.fifoWords.size());
+  for (std::uint32_t value : vif.fifoWords)
+  {
+    writer->writeU32(value);
+  }
 }
 
 void NekoSaveStateCodec::readVIF(
@@ -2358,6 +2364,18 @@ void NekoSaveStateCodec::readVIF(
     unpackPayload.push_back(reader->readU32());
   }
   vif->unpackPayload.swap(unpackPayload);
+  const std::uint32_t fifoWordCount = reader->readU32();
+  require(
+    fifoWordCount <= vif->fifoCapacity() * 4,
+    "VIF FIFO size is invalid");
+  std::deque<std::uint32_t> fifoWords;
+  for (std::uint32_t index = 0;
+       index < fifoWordCount;
+       ++index)
+  {
+    fifoWords.push_back(reader->readU32());
+  }
+  vif->fifoWords.swap(fifoWords);
 
   require(vif->modeRegister <= 2, "VIF mode is invalid");
   require(
@@ -2401,6 +2419,7 @@ void NekoSaveStateCodec::commitVIF(
     source->mpgLowerInstructionPending;
   destination->directQuadword = source->directQuadword;
   destination->unpackPayload.swap(source->unpackPayload);
+  destination->fifoWords.swap(source->fifoWords);
 }
 
 void NekoSaveStateCodec::writeGIFDecoder(
@@ -2534,6 +2553,14 @@ void NekoSaveStateCodec::writeGIFPath3(
   writer->writeU64(path.submissionAttempts);
   writer->writeU64(path.transferredQuadwords);
   writer->writeU64(path.completedPackets);
+  writer->writeSize(path.guestFIFO.size());
+  for (const GIFQuadword &quadword : path.guestFIFO)
+  {
+    for (std::uint32_t word : quadword)
+    {
+      writer->writeU32(word);
+    }
+  }
 }
 
 void NekoSaveStateCodec::readGIFPath3(
@@ -2543,6 +2570,19 @@ void NekoSaveStateCodec::readGIFPath3(
   path->submissionAttempts = reader->readU64();
   path->transferredQuadwords = reader->readU64();
   path->completedPackets = reader->readU64();
+  const std::uint32_t fifoCount = reader->readU32();
+  require(fifoCount <= 16, "GIF FIFO size is invalid");
+  std::deque<GIFQuadword> guestFIFO;
+  for (std::uint32_t index = 0; index < fifoCount; ++index)
+  {
+    GIFQuadword quadword = {};
+    for (std::uint32_t &word : quadword)
+    {
+      word = reader->readU32();
+    }
+    guestFIFO.push_back(quadword);
+  }
+  path->guestFIFO.swap(guestFIFO);
   require(
     path->transferredQuadwords <= path->submissionAttempts,
     "GIF PATH3 transfer counters are invalid");

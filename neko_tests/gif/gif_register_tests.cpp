@@ -1,6 +1,7 @@
 #include <cstdint>
 
 #include "catch.hpp"
+#include "gif_path3.hpp"
 #include "gif_registers.hpp"
 
 namespace
@@ -28,15 +29,16 @@ TEST_CASE("GIF Privileged Register Tests")
   SECTION("The register boundary validates its arbiter")
   {
     REQUIRE_THROWS_WITH(
-      GIFRegisters(nullptr),
-      "GIF registers require a non-null path arbiter.");
+      GIFRegisters(nullptr, nullptr),
+      "GIF registers require non-null path components.");
   }
 
   SECTION("GIF_MODE controls independent PATH3 mode and register masks")
   {
     GIFDecoder decoder;
     GIFPathArbiter arbiter(&decoder);
-    GIFRegisters registers(&arbiter);
+    GIFPath3Transfer path3(arbiter);
+    GIFRegisters registers(&arbiter, &path3);
 
     registers.writeMode(GIFMode::M3R | GIFMode::IMT);
     REQUIRE(arbiter.path3MaskedByMode());
@@ -67,7 +69,8 @@ TEST_CASE("GIF Privileged Register Tests")
   {
     GIFDecoder decoder;
     GIFPathArbiter arbiter(&decoder);
-    GIFRegisters registers(&arbiter);
+    GIFPath3Transfer path3(arbiter);
+    GIFRegisters registers(&arbiter, &path3);
 
     REQUIRE(registers.readStatus() == 0);
     REQUIRE(arbiter.requestPath(GIFPath::Path3));
@@ -89,7 +92,8 @@ TEST_CASE("GIF Privileged Register Tests")
   {
     GIFDecoder decoder;
     GIFPathArbiter arbiter(&decoder);
-    GIFRegisters registers(&arbiter);
+    GIFPath3Transfer path3(arbiter);
+    GIFRegisters registers(&arbiter, &path3);
     registers.writeMode(GIFMode::IMT);
     const GIFQuadword tag =
       gifTag(10, true, GIFDataFormat::Image);

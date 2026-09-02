@@ -5,6 +5,8 @@
 
 #include "gif_path_arbiter.hpp"
 
+class GIFPath3Transfer;
+
 namespace GIFMode
 {
   constexpr std::uint32_t M3R = 1u << 0;
@@ -23,12 +25,16 @@ namespace GIFStatus
   constexpr std::uint32_t OPH = 1u << 9;
   constexpr std::uint8_t APATH_SHIFT = 10;
   constexpr std::uint32_t APATH_MASK = 0x03u << APATH_SHIFT;
+  constexpr std::uint8_t FQC_SHIFT = 24;
+  constexpr std::uint32_t FQC_MASK = 0x1fu << FQC_SHIFT;
 }
 
 class GIFRegisters
 {
   public:
-    explicit GIFRegisters(GIFPathArbiter *arbiter);
+    GIFRegisters(
+      GIFPathArbiter *arbiter,
+      GIFPath3Transfer *path3);
 
     void writeMode(std::uint32_t value);
     std::uint32_t readStatus() const;
@@ -37,6 +43,7 @@ class GIFRegisters
 
   private:
     GIFPathArbiter *gifPathArbiter;
+    GIFPath3Transfer *gifPath3Transfer;
 };
 
 #endif

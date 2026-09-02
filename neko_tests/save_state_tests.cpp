@@ -477,6 +477,54 @@ TEST_CASE("Stalled GIF DMA state resumes identically after load")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("Queued guest FIFO data survives save states")
+{
+  NekoSystem original;
+  const EEQuadword interruptedNops = {
+    UINT64_C(0x0000000080000000),
+    0
+  };
+  const EEQuadword gifTag = {
+    UINT64_C(1) << 15,
+    0
+  };
+
+  REQUIRE(
+    original.eeBus().writeGuestData128(
+      EEMemoryMap::VIF0_FIFO,
+      interruptedNops) ==
+    EEDataWriteResult::Completed);
+  original.eeBus().advanceGuestFIFOs();
+  REQUIRE(
+    original.eeBus().writeGuestData128(
+      EEMemoryMap::VIF0_FIFO,
+      {}) ==
+    EEDataWriteResult::Completed);
+  original.eeBus().write32(
+    EEMemoryMap::GIF_MODE,
+    GIFMode::M3R);
+  REQUIRE(
+    original.eeBus().writeGuestData128(
+      EEMemoryMap::GIF_FIFO,
+      gifTag) ==
+    EEDataWriteResult::Completed);
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(restored.vif0().fifoQuadwordCount() == 2);
+  REQUIRE(restored.gifPath3().guestFIFOQuadwordCount() == 1);
+  REQUIRE(restored.saveState() == original.saveState());
+
+  original.eeBus().write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
+  restored.eeBus().write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
+  original.eeBus().write32(EEMemoryMap::GIF_MODE, 0);
+  restored.eeBus().write32(EEMemoryMap::GIF_MODE, 0);
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+  REQUIRE(restored.saveState() == original.saveState());
+}
+
 TEST_CASE("Reset machines can load prior save states")
 {
   NekoSystem system;
@@ -904,7 +952,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 9;
+  invalid[8] = 10;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 

@@ -1,14 +1,19 @@
 #include <stdexcept>
 
+#include "gif_path3.hpp"
 #include "gif_registers.hpp"
 
-GIFRegisters::GIFRegisters(GIFPathArbiter *arbiter) :
-  gifPathArbiter(arbiter)
+GIFRegisters::GIFRegisters(
+  GIFPathArbiter *arbiter,
+  GIFPath3Transfer *path3) :
+  gifPathArbiter(arbiter),
+  gifPath3Transfer(path3)
 {
-  if (gifPathArbiter == nullptr)
+  if (gifPathArbiter == nullptr ||
+      gifPath3Transfer == nullptr)
   {
     throw std::invalid_argument(
-      "GIF registers require a non-null path arbiter.");
+      "GIF registers require non-null path components.");
   }
 }
 
@@ -60,6 +65,10 @@ std::uint32_t GIFRegisters::readStatus() const
       static_cast<std::uint32_t>(activePath) <<
       GIFStatus::APATH_SHIFT;
   }
+  status |=
+    static_cast<std::uint32_t>(
+      gifPath3Transfer->guestFIFOQuadwordCount()) <<
+    GIFStatus::FQC_SHIFT;
   return status;
 }
 

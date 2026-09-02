@@ -11,7 +11,9 @@ NekoSystem::NekoSystem() :
   gifPathArbiterComponent(&gifDecoderComponent),
   gifPath1Component(gifPathArbiterComponent),
   gifPath3Component(gifPathArbiterComponent),
-  gifRegisterFile(&gifPathArbiterComponent),
+  gifRegisterFile(
+    &gifPathArbiterComponent,
+    &gifPath3Component),
   eeBusComponent(
     &vif0Component,
     &vif1Component,
@@ -428,6 +430,7 @@ void NekoSystem::clockMasterCycle()
 {
   synchronizeInterrupts();
   synchronizeEEInterruptLines();
+  eeBusComponent.advanceGuestFIFOs();
   const std::uint64_t vu0Cycles = vu0Component.elapsedCycles();
   const std::uint64_t vu1Cycles = vu1Component.elapsedCycles();
   const std::uint64_t vif0Words = vif0Component.wordsIngested();

@@ -361,6 +361,43 @@ VIFStreamWord VIF::ingestWord(std::uint32_t word)
   return streamWord;
 }
 
+bool VIF::submitQuadword(const GIFQuadword &quadword)
+{
+  const std::size_t capacityWords = fifoCapacity() * 4;
+  if (fifoWords.size() > capacityWords - quadword.size())
+  {
+    return false;
+  }
+  fifoWords.insert(
+    fifoWords.end(),
+    quadword.begin(),
+    quadword.end());
+  return true;
+}
+
+void VIF::advanceFIFO()
+{
+  while (!fifoWords.empty())
+  {
+    const VIFStreamWord result = ingestWord(fifoWords.front());
+    if (result.stalled)
+    {
+      return;
+    }
+    fifoWords.pop_front();
+  }
+}
+
+std::size_t VIF::fifoQuadwordCount() const
+{
+  return (fifoWords.size() + 3) / 4;
+}
+
+std::size_t VIF::fifoCapacity() const
+{
+  return type == VIFType::VIF0 ? 8 : 16;
+}
+
 void VIF::preparePayload(const VIFCommand &command)
 {
   if (command.kind == VIFCommandKind::DIRECT ||

@@ -171,9 +171,10 @@ TEST_CASE("EE direct-mapped kernel segments cover the system map")
       EEMemoryMap::KSEG0_BASE + EEMemoryMap::GS_BUSDIR) ==
     1);
 
-  REQUIRE_FALSE(bus.writeData128(
+  REQUIRE(bus.writeData128(
     EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
     EEQuadword{}));
+  REQUIRE(system.vif0().fifoQuadwordCount() == 1);
   REQUIRE(bus.writeQuadword(
     EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
     GIFQuadword{}));
@@ -235,7 +236,7 @@ TEST_CASE("EE guest device accesses enforce register contracts")
 
   REQUIRE_FALSE(
     bus.readData128(EEMemoryMap::GIF_STAT, &quadword));
-  REQUIRE_FALSE(
+  REQUIRE(
     bus.writeData128(EEMemoryMap::GIF_FIFO, quadword));
 
   REQUIRE_FALSE(
@@ -244,6 +245,135 @@ TEST_CASE("EE guest device accesses enforce register contracts")
   REQUIRE_THROWS_WITH(
     bus.write32(EEMemoryMap::D_CTRL, 2),
     "Only D_CTRL.DMAE is implemented.");
+}
+
+TEST_CASE("EE guest VIF FIFO stores are atomic and backpressured")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  const EEQuadword interruptedNops = {
+    UINT64_C(0x0000000080000000),
+    0
+  };
+  const EEQuadword nops = {};
+
+  REQUIRE(
+    bus.writeGuestData128(
+      EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
+      interruptedNops) ==
+    EEDataWriteResult::Completed);
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.vif0().interruptPending());
+  REQUIRE(system.vif0().wordsIngested() == 1);
+  REQUIRE(system.vif0().fifoQuadwordCount() == 1);
+
+  for (std::size_t index = 0; index < 7; ++index)
+  {
+    REQUIRE(
+      bus.writeGuestData128(EEMemoryMap::VIF0_FIFO, nops) ==
+      EEDataWriteResult::Completed);
+  }
+  REQUIRE(system.vif0().fifoQuadwordCount() == 8);
+  REQUIRE(
+    bus.writeGuestData128(EEMemoryMap::VIF0_FIFO, nops) ==
+    EEDataWriteResult::Stalled);
+  REQUIRE(system.vif0().fifoQuadwordCount() == 8);
+  REQUIRE(system.vif0().wordsIngested() == 1);
+
+  bus.write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.vif0().fifoQuadwordCount() == 0);
+  REQUIRE(system.vif0().wordsIngested() == 32);
+}
+
+TEST_CASE("EE SQ retries a full guest FIFO without raising an exception")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  EECore &core = system.eeCore();
+  const EEQuadword interruptedNops = {
+    UINT64_C(0x0000000080000000),
+    0
+  };
+
+  REQUIRE(
+    bus.writeGuestData128(
+      EEMemoryMap::VIF0_FIFO,
+      interruptedNops) ==
+    EEDataWriteResult::Completed);
+  bus.advanceGuestFIFOs();
+  for (std::size_t index = 0; index < 7; ++index)
+  {
+    REQUIRE(
+      bus.writeGuestData128(EEMemoryMap::VIF0_FIFO, {}) ==
+      EEDataWriteResult::Completed);
+  }
+
+  core.setGeneralRegister(1, {EEMemoryMap::VIF0_FIFO, 0});
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x1111111122222222),
+      UINT64_C(0x3333333344444444)
+    });
+  bus.write32(
+    0,
+    immediateInstruction(0x1f, 1, 2));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 0);
+  REQUIRE(core.pendingException() == EEException::None);
+  REQUIRE(system.vif0().fifoQuadwordCount() == 8);
+
+  bus.write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.pendingException() == EEException::None);
+  REQUIRE(system.vif0().fifoQuadwordCount() == 1);
+}
+
+TEST_CASE("EE guest GIF FIFO retains refused PATH3 transfers")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  const GIFQuadword blockingTag = gifTag();
+  const EEQuadword guestTag = {
+    UINT64_C(1) << 15,
+    0
+  };
+
+  REQUIRE(system.gifPathArbiter().transferQuadword(
+    GIFPath::Path2,
+    blockingTag).accepted);
+  for (std::size_t index = 0; index < 16; ++index)
+  {
+    REQUIRE(
+      bus.writeGuestData128(
+        EEMemoryMap::GIF_FIFO,
+        guestTag) ==
+      EEDataWriteResult::Completed);
+  }
+  REQUIRE(
+    bus.writeGuestData128(
+      EEMemoryMap::GIF_FIFO,
+      guestTag) ==
+    EEDataWriteResult::Stalled);
+
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.gifPath3().guestFIFOQuadwordCount() == 16);
+  REQUIRE(system.gifPath3().transferredQuadwordCount() == 0);
+  REQUIRE(
+    ((bus.read32(EEMemoryMap::GIF_STAT) &
+      GIFStatus::FQC_MASK) >>
+      GIFStatus::FQC_SHIFT) == 16);
+
+  REQUIRE(system.gifPathArbiter().transferQuadword(
+    GIFPath::Path2,
+    adWrite(GSRegisterAddress::PRIM, 0)).accepted);
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.gifPath3().guestFIFOQuadwordCount() == 0);
+  REQUIRE(system.gifPath3().transferredQuadwordCount() == 16);
 }
 
 TEST_CASE("EE guest instructions reject invalid device access directions")

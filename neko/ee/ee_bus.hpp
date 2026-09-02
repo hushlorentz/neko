@@ -80,6 +80,13 @@ struct EEQuadword
   std::uint64_t high = 0;
 };
 
+enum class EEDataWriteResult : std::uint8_t
+{
+  Completed,
+  Stalled,
+  Failed
+};
+
 class EEBus
 {
   public:
@@ -129,6 +136,10 @@ class EEBus
     bool writeData128(
       std::uint32_t address,
       const EEQuadword &value);
+    EEDataWriteResult writeGuestData128(
+      std::uint32_t address,
+      const EEQuadword &value);
+    void advanceGuestFIFOs();
     std::uint32_t read32(std::uint32_t address) const;
     void write32(
       std::uint32_t address,

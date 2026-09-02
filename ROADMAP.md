@@ -550,7 +550,7 @@ rather than host-side setup:
 - [x] Extend checked EE data accesses from RAM into mapped device registers
       with explicit access-width, alignment, read/write, and side-effect
       contracts
-- [ ] Support guest writes to the VIF and GIF FIFO boundaries without routing
+- [x] Support guest writes to the VIF and GIF FIFO boundaries without routing
       ordinary RAM accesses through host-only bus helpers
 - [ ] Implement VIF1 DMAC channel 1, including normal and source-chain modes,
       backpressure, completion, and interrupt state

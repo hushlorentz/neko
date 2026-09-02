@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 
 #include "gif_path_arbiter.hpp"
@@ -24,6 +25,9 @@ class GIFPath3Transfer
     GIFPath3SubmissionResult submitQuadwords(
       const GIFQuadword *quadwords,
       std::size_t count);
+    bool submitGuestQuadword(const GIFQuadword &quadword);
+    void advanceGuestFIFO();
+    std::size_t guestFIFOQuadwordCount() const;
 
     std::uint64_t submissionAttemptCount() const;
     std::uint64_t transferredQuadwordCount() const;
@@ -37,6 +41,7 @@ class GIFPath3Transfer
     std::uint64_t submissionAttempts = 0;
     std::uint64_t transferredQuadwords = 0;
     std::uint64_t completedPackets = 0;
+    std::deque<GIFQuadword> guestFIFO;
 };
 
 #endif

@@ -42,7 +42,8 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
     {"arithmetic.elf", 16},
     {"branches.elf", 12},
     {"memory.elf", 23},
-    {"mmio.elf", 20}
+    {"mmio.elf", 20},
+    {"fifo.elf", 16}
   };
 
   for (const GuestExpectation &guest : guests)
@@ -62,6 +63,21 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
       result.execution.programCounter ==
       EEGuestRuntime::RETURN_ADDRESS);
   }
+}
+
+TEST_CASE("PS2DEV EE ELF guest writes VIF and GIF FIFOs")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("fifo.elf"), 128);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(system.vif0().wordsIngested() == 4);
+  REQUIRE(system.vif1().wordsIngested() == 4);
+  REQUIRE(system.vif0().fifoQuadwordCount() == 0);
+  REQUIRE(system.vif1().fifoQuadwordCount() == 0);
+  REQUIRE(system.gifPath3().guestFIFOQuadwordCount() == 0);
+  REQUIRE(system.gifPath3().transferredQuadwordCount() == 1);
 }
 
 TEST_CASE("PS2DEV EE ELF guest drives mapped device registers")

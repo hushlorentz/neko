@@ -151,7 +151,9 @@ void EEBus::attachGSDisplay(GSDisplay *gsDisplay)
 
 std::uint32_t EEBus::vifStatus(const VIF &vif) const
 {
-  std::uint32_t status = 0;
+  std::uint32_t status =
+    static_cast<std::uint32_t>(vif.fifoQuadwordCount()) <<
+    24;
   if (vif.awaitingPayload())
   {
     status |= EEVIFStatus::WAITING_FOR_PAYLOAD;
@@ -396,14 +398,50 @@ bool EEBus::writeData128(
   std::uint32_t address,
   const EEQuadword &value)
 {
+  return
+    writeGuestData128(address, value) ==
+    EEDataWriteResult::Completed;
+}
+
+EEDataWriteResult EEBus::writeGuestData128(
+  std::uint32_t address,
+  const EEQuadword &value)
+{
   requireAlignment(
     address,
     16,
     "EE quadword store must be naturally aligned.");
+  address = directMappedPhysicalAddress(address);
+
+  const GIFQuadword quadword = {{
+    static_cast<std::uint32_t>(value.low),
+    static_cast<std::uint32_t>(value.low >> 32),
+    static_cast<std::uint32_t>(value.high),
+    static_cast<std::uint32_t>(value.high >> 32)
+  }};
+  if (address == EEMemoryMap::VIF0_FIFO)
+  {
+    return vif0Component->submitQuadword(quadword)
+      ? EEDataWriteResult::Completed
+      : EEDataWriteResult::Stalled;
+  }
+  if (address == EEMemoryMap::VIF1_FIFO)
+  {
+    return vif1Component->submitQuadword(quadword)
+      ? EEDataWriteResult::Completed
+      : EEDataWriteResult::Stalled;
+  }
+  if (address == EEMemoryMap::GIF_FIFO)
+  {
+    return gifPath3Transfer->submitGuestQuadword(quadword)
+      ? EEDataWriteResult::Completed
+      : EEDataWriteResult::Stalled;
+  }
+
   std::uint32_t physicalAddress = 0;
   if (!mainMemoryAddress(address, 16, &physicalAddress))
   {
-    return false;
+    return EEDataWriteResult::Failed;
   }
   for (std::size_t index = 0; index < 8; ++index)
   {
@@ -412,7 +450,14 @@ bool EEBus::writeData128(
     mainMemory[physicalAddress + 8 + index] =
       static_cast<std::uint8_t>(value.high >> (index * 8));
   }
-  return true;
+  return EEDataWriteResult::Completed;
+}
+
+void EEBus::advanceGuestFIFOs()
+{
+  vif0Component->advanceFIFO();
+  vif1Component->advanceFIFO();
+  gifPath3Transfer->advanceGuestFIFO();
 }
 
 bool EEBus::readMapped32(

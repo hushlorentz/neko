@@ -1346,10 +1346,12 @@ bool EECore::executeInstruction(
         ~UINT32_C(0x0f);
       const EERegister128 &value =
         generalRegisters[immediateDestination];
-      const bool succeeded =
-        attachedBus().writeData128(
+      const EEDataWriteResult writeResult =
+        attachedBus().writeGuestData128(
           dataAddress,
           {value.low, value.high});
+      const bool succeeded =
+        writeResult == EEDataWriteResult::Completed;
       recordMemoryTrace(
         dataAddress,
         16,
@@ -1357,6 +1359,11 @@ bool EECore::executeInstruction(
         succeeded,
         value.low,
         value.high);
+      if (writeResult == EEDataWriteResult::Stalled)
+      {
+        pc = address;
+        return false;
+      }
       if (!succeeded)
       {
         return raiseDataAccessException(

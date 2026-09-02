@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <vector>
 
@@ -43,6 +44,10 @@ class VIF : public VUVIFRegisterSource
     void attachGIFPathArbiter(GIFPathArbiter *attachedArbiter);
     VIFCommand processCode(std::uint32_t code);
     VIFStreamWord ingestWord(std::uint32_t word);
+    bool submitQuadword(const GIFQuadword &quadword);
+    void advanceFIFO();
+    std::size_t fifoQuadwordCount() const;
+    std::size_t fifoCapacity() const;
 
     std::uint16_t cycle() const;
     std::uint8_t cycleLength() const;
@@ -117,6 +122,7 @@ class VIF : public VUVIFRegisterSource
     bool mpgLowerInstructionPending = false;
     GIFQuadword directQuadword = {};
     std::vector<std::uint32_t> unpackPayload;
+    std::deque<std::uint32_t> fifoWords;
 };
 
 #endif

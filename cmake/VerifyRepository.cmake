@@ -78,6 +78,10 @@ verify_ee_elf_fixture(
   mmio.elf
   6cee1dbb9db0d422882d981a351516d6ac8e170e88736a89ef26f9ff3ecd0488
 )
+verify_ee_elf_fixture(
+  fifo.elf
+  0649d2f7dd8dd396ff1f45d4fa962b1bed53044a9972dbc97f7e3fb846161fae
+)
 
 verify_fixture(
   integer_fill.bin
