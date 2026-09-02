@@ -7,6 +7,19 @@
 
 namespace
 {
+  std::uint32_t immediateInstruction(
+    std::uint8_t opcode,
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint16_t immediate = 0)
+  {
+    return
+      (static_cast<std::uint32_t>(opcode) << 26) |
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      immediate;
+  }
+
   GIFQuadword gifTag()
   {
     const std::uint64_t low =
@@ -150,14 +163,20 @@ TEST_CASE("EE direct-mapped kernel segments cover the system map")
     1));
   REQUIRE(system.gs().hostInterfaceReversed());
   std::uint64_t busDirection = 0;
-  REQUIRE(bus.readData64(
+  REQUIRE_FALSE(bus.readData64(
     EEMemoryMap::KSEG0_BASE + EEMemoryMap::GS_BUSDIR,
     &busDirection));
-  REQUIRE(busDirection == 1);
+  REQUIRE(
+    bus.read64(
+      EEMemoryMap::KSEG0_BASE + EEMemoryMap::GS_BUSDIR) ==
+    1);
 
-  REQUIRE(bus.writeData128(
+  REQUIRE_FALSE(bus.writeData128(
     EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
     EEQuadword{}));
+  REQUIRE(bus.writeQuadword(
+    EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
+    GIFQuadword{}));
 
   std::uint8_t byte = 0;
   REQUIRE_FALSE(
@@ -167,6 +186,150 @@ TEST_CASE("EE direct-mapped kernel segments cover the system map")
   REQUIRE_THROWS_WITH(
     bus.read32(EEMemoryMap::KSEG2_BASE),
     "EE bus read from an unmapped address.");
+}
+
+TEST_CASE("EE guest device accesses enforce register contracts")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+
+  std::uint8_t byte = 0;
+  std::uint16_t halfword = 0;
+  std::uint32_t word = 0;
+  std::uint64_t doubleword = 0;
+  EEQuadword quadword;
+
+  REQUIRE_FALSE(
+    bus.readData8(EEMemoryMap::VIF0_STAT, &byte));
+  REQUIRE_FALSE(
+    bus.writeData8(EEMemoryMap::VIF0_FBRST, 0));
+  REQUIRE_FALSE(
+    bus.readData16(EEMemoryMap::INTC_STAT, &halfword));
+  REQUIRE_FALSE(
+    bus.writeData16(EEMemoryMap::INTC_MASK, 0));
+
+  REQUIRE(bus.readData32(EEMemoryMap::VIF0_STAT, &word));
+  REQUIRE_FALSE(
+    bus.writeData32(EEMemoryMap::VIF0_STAT, 0));
+  REQUIRE_FALSE(
+    bus.readData32(EEMemoryMap::VIF0_FBRST, &word));
+  REQUIRE(bus.writeData32(EEMemoryMap::VIF0_FBRST, 0));
+  REQUIRE_FALSE(
+    bus.writeData32(EEMemoryMap::VIF0_FBRST, 1));
+  REQUIRE_FALSE(
+    bus.writeData32(EEMemoryMap::GS_BUSDIR, 1));
+
+  REQUIRE_FALSE(
+    bus.readData64(EEMemoryMap::GS_BUSDIR, &doubleword));
+  REQUIRE(bus.writeData64(EEMemoryMap::GS_BUSDIR, 1));
+  REQUIRE(system.gs().hostInterfaceReversed());
+  REQUIRE_FALSE(
+    bus.readData64(EEMemoryMap::GS_PMODE, &doubleword));
+  REQUIRE(bus.writeData64(EEMemoryMap::GS_PMODE, 0));
+  REQUIRE_FALSE(
+    bus.writeData64(
+      EEMemoryMap::GS_DISPFB1,
+      UINT64_C(1) << 15));
+  REQUIRE_FALSE(
+    bus.writeData64(EEMemoryMap::INTC_MASK, 0));
+
+  REQUIRE_FALSE(
+    bus.readData128(EEMemoryMap::GIF_STAT, &quadword));
+  REQUIRE_FALSE(
+    bus.writeData128(EEMemoryMap::GIF_FIFO, quadword));
+
+  REQUIRE_FALSE(
+    bus.writeData32(EEMemoryMap::D_CTRL, 2));
+  REQUIRE(system.gifDMAC().globalControl() == 0);
+  REQUIRE_THROWS_WITH(
+    bus.write32(EEMemoryMap::D_CTRL, 2),
+    "Only D_CTRL.DMAE is implemented.");
+}
+
+TEST_CASE("EE guest instructions reject invalid device access directions")
+{
+  SECTION("Write-only GS register cannot be loaded")
+  {
+    NekoSystem system;
+    system.eeCore().setGeneralRegister(
+      1,
+      {EEMemoryMap::GS_BUSDIR, 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x37, 1, 2));
+    system.eeCore().startExecution(0);
+
+    const EEExecutionResult result = system.runEE(1);
+
+    REQUIRE(
+      result.pendingException ==
+      EEException::DataBusErrorLoad);
+    REQUIRE(
+      result.exceptionAddress ==
+      EEMemoryMap::GS_BUSDIR);
+  }
+
+  SECTION("64-bit GS register rejects word stores")
+  {
+    NekoSystem system;
+    system.eeCore().setGeneralRegister(
+      1,
+      {EEMemoryMap::GS_BUSDIR, 0});
+    system.eeCore().setGeneralRegister(2, {1, 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x2b, 1, 2));
+    system.eeCore().startExecution(0);
+
+    const EEExecutionResult result = system.runEE(1);
+
+    REQUIRE(
+      result.pendingException ==
+      EEException::DataBusErrorStore);
+    REQUIRE_FALSE(system.gs().hostInterfaceReversed());
+  }
+
+  SECTION("32-bit EE register rejects doubleword stores")
+  {
+    NekoSystem system;
+    system.eeCore().setGeneralRegister(
+      1,
+      {EEMemoryMap::INTC_MASK, 0});
+    system.eeCore().setGeneralRegister(
+      2,
+      {EEInterruptSource::mask(EEInterruptSource::VIF0), 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x3f, 1, 2));
+    system.eeCore().startExecution(0);
+
+    const EEExecutionResult result = system.runEE(1);
+
+    REQUIRE(
+      result.pendingException ==
+      EEException::DataBusErrorStore);
+    REQUIRE(system.interruptController().mask() == 0);
+  }
+
+  SECTION("Invalid register values become store bus errors")
+  {
+    NekoSystem system;
+    system.eeCore().setGeneralRegister(
+      1,
+      {EEMemoryMap::D_CTRL, 0});
+    system.eeCore().setGeneralRegister(2, {2, 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x2b, 1, 2));
+    system.eeCore().startExecution(0);
+
+    const EEExecutionResult result = system.runEE(1);
+
+    REQUIRE(
+      result.pendingException ==
+      EEException::DataBusErrorStore);
+    REQUIRE(system.gifDMAC().globalControl() == 0);
+  }
 }
 
 TEST_CASE("EE GIF Memory Map Tests")

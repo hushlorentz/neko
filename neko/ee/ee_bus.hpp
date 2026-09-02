@@ -154,13 +154,15 @@ class EEBus
       std::uint32_t *value) const;
     bool writeMapped32(
       std::uint32_t address,
-      std::uint32_t value);
+      std::uint32_t value,
+      bool checkedGuestAccess);
     bool readMapped64(
       std::uint32_t address,
       std::uint64_t *value) const;
     bool writeMapped64(
       std::uint32_t address,
-      std::uint64_t value);
+      std::uint64_t value,
+      bool checkedGuestAccess);
     std::uint32_t vifStatus(const VIF &vif) const;
     GIFDMACChannel &attachedGIFDMAC() const;
     GSDisplay &attachedGSDisplay() const;

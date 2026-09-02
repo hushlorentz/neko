@@ -74,6 +74,10 @@ verify_ee_elf_fixture(
   memory.elf
   459306d7cbfd0d4d52b8fc969e89b1be0e17f2b25ec616afe4e9440197aaeca8
 )
+verify_ee_elf_fixture(
+  mmio.elf
+  6cee1dbb9db0d422882d981a351516d6ac8e170e88736a89ef26f9ff3ecd0488
+)
 
 verify_fixture(
   integer_fill.bin

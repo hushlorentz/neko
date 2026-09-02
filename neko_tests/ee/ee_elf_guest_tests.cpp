@@ -41,7 +41,8 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
   const GuestExpectation guests[] = {
     {"arithmetic.elf", 16},
     {"branches.elf", 12},
-    {"memory.elf", 23}
+    {"memory.elf", 23},
+    {"mmio.elf", 20}
   };
 
   for (const GuestExpectation &guest : guests)
@@ -61,6 +62,20 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
       result.execution.programCounter ==
       EEGuestRuntime::RETURN_ADDRESS);
   }
+}
+
+TEST_CASE("PS2DEV EE ELF guest drives mapped device registers")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("mmio.elf"), 128);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(
+    system.interruptController().mask() ==
+    EEInterruptSource::mask(EEInterruptSource::VIF0));
+  REQUIRE(system.gifDMAC().globalControl() == 1);
+  REQUIRE(system.gs().hostInterfaceReversed());
 }
 
 TEST_CASE("PS2DEV EE ELF guest runs through frontend support")

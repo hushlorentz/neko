@@ -547,7 +547,7 @@ work instead of implementing every deferred instruction speculatively:
 Allow loaded guests to drive the existing hardware through EE instructions
 rather than host-side setup:
 
-- [ ] Extend checked EE data accesses from RAM into mapped device registers
+- [x] Extend checked EE data accesses from RAM into mapped device registers
       with explicit access-width, alignment, read/write, and side-effect
       contracts
 - [ ] Support guest writes to the VIF and GIF FIFO boundaries without routing
