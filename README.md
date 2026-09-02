@@ -94,6 +94,19 @@ The default execution budget is 1,000,000 EE master cycles. Override it with
 instruction counts, and final program counter; only a completed guest returns a
 successful host exit status.
 
+Generate tiny synthetic guests for CLI diagnostics:
+
+```sh
+python3 tools/create_sample_elf.py return --exit-code 0
+python3 tools/create_sample_elf.py return --exit-code 7
+python3 tools/create_sample_elf.py loop
+python3 tools/create_sample_elf.py exception
+```
+
+Generated files are written under the ignored `out/sample_elves/` directory.
+They exercise Neko's host runtime contract and are not substitutes for
+PS2DEV-generated compatibility fixtures.
+
 ## Optional VU Rotation Sample
 
 The default `rotation` scene uses the external `naken_asm` integration checkout.
