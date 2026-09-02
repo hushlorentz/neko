@@ -12,7 +12,7 @@
 #include <SDL3/SDL.h>
 
 #include "desktop_options.hpp"
-#include "neko_system.hpp"
+#include "elf_runner.hpp"
 #include "primitive_scene.hpp"
 #include "rotation_vu1.hpp"
 
@@ -58,46 +58,6 @@ namespace
       std::istreambuf_iterator<char>());
   }
 
-  const char *guestOutcomeName(EEGuestOutcome outcome)
-  {
-    switch (outcome)
-    {
-      case EEGuestOutcome::Completed:
-        return "completed";
-      case EEGuestOutcome::GuestReportedFailure:
-        return "guest_failure";
-      case EEGuestOutcome::CycleLimitReached:
-        return "cycle_limit";
-      case EEGuestOutcome::Exception:
-        return "exception";
-      case EEGuestOutcome::Stopped:
-        return "stopped";
-    }
-    throw std::logic_error("Unknown EE guest outcome.");
-  }
-
-  int runELF(
-    const neko_desktop::DesktopOptions &options)
-  {
-    const std::vector<std::uint8_t> image = readBinaryFile(
-      options.elfPath,
-      "ELF image");
-    NekoSystem system;
-    const EEGuestExecutionResult result =
-      system.runELF(image, options.elfCycleLimit);
-    std::cout
-      << "elf: outcome=" << guestOutcomeName(result.outcome)
-      << " exit_code=" << result.exitCode
-      << " master_cycles=" << result.execution.masterCycles
-      << " ee_cycles=" << result.execution.eeCycles
-      << " instructions=" << result.execution.instructions
-      << " pc=0x" << std::hex << result.execution.programCounter
-      << std::dec << '\n';
-    return result.outcome == EEGuestOutcome::Completed
-      ? EXIT_SUCCESS
-      : EXIT_FAILURE;
-  }
-
   void requireSDL(bool succeeded, const char *operation)
   {
     if (!succeeded)
@@ -132,7 +92,12 @@ namespace
         commandLineArguments(argc, argv));
     if (!options.elfPath.empty())
     {
-      return runELF(options);
+      const neko_frontend::ELFRunReport report =
+        neko_frontend::runELFFile(
+          options.elfPath,
+          options.elfCycleLimit);
+      std::cout << report.diagnostic << '\n';
+      return report.hostExitCode;
     }
     const std::vector<std::uint8_t> microprogram =
       options.scene == DesktopScene::Rotation

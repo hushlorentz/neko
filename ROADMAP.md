@@ -537,7 +537,7 @@ work instead of implementing every deferred instruction speculatively:
       is reported to the host
 - [x] Add a generic `--elf <path>` desktop argument that executes the loaded
       program through `NekoSystem`
-- [ ] Keep executable loading, emulation, and presentation separate so the
+- [x] Keep executable loading, emulation, and presentation separate so the
       desktop does not contain guest-specific drawing or setup behavior
 - [ ] Run focused EE conformance programs and independently authored scalar
       homebrew ELFs as the first real guests
