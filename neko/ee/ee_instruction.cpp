@@ -569,6 +569,7 @@ namespace
     instruction.function = raw & 0x3f;
     instruction.immediate = raw & 0xffff;
     instruction.target = raw & 0x03ffffff;
+    instruction.cop2Immediate = (raw >> 6) & 0x7fff;
     return instruction;
   }
 
@@ -632,6 +633,25 @@ namespace
 
   void applyCop2(EEInstruction *instruction)
   {
+    if ((instruction->raw & UINT32_C(0xffe0003f)) ==
+        UINT32_C(0x4a000038))
+    {
+      instruction->operation =
+        EEOperation::VectorCallMicroSubroutine;
+      return;
+    }
+    if (instruction->raw == UINT32_C(0x4a00d839))
+    {
+      instruction->operation =
+        EEOperation::VectorCallMicroSubroutineRegister;
+      return;
+    }
+    if (instruction->sourceRegister >= 0x10 &&
+        (instruction->function == 0x38 ||
+         instruction->function == 0x39))
+    {
+      reject(DecodeKind::Reserved);
+    }
     if (instruction->sourceRegister == 0x01 ||
         instruction->sourceRegister == 0x02 ||
         instruction->sourceRegister == 0x05 ||

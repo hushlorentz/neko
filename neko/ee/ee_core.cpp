@@ -1608,6 +1608,32 @@ bool EECore::executeInstruction(
         address);
       return true;
     }
+    case EEOperation::VectorCallMicroSubroutine:
+    case EEOperation::VectorCallMicroSubroutineRegister:
+    {
+      VPU &vu0 = attachedVU0();
+      if (vu0.clockActive())
+      {
+        pc = address;
+        return false;
+      }
+      const std::size_t callAddress =
+        static_cast<std::size_t>(
+          instruction.operation ==
+            EEOperation::VectorCallMicroSubroutine
+            ? instruction.cop2Immediate
+            : vu0.callAddressRegister()) *
+        8;
+      if (callAddress > vu0.microMemorySize() - 8)
+      {
+        return stopUndefinedOperation(
+          address,
+          instruction.raw);
+      }
+      vu0.startMicroMode(
+        static_cast<std::uint16_t>(callAddress));
+      return true;
+    }
     case EEOperation::Jump:
       scheduleBranch(
         true,

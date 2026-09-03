@@ -6,6 +6,8 @@
 #include "catch.hpp"
 #include "elf_runner.hpp"
 #include "neko_system.hpp"
+#include "vpu_opcodes.hpp"
+#include "vpu_register_ids.hpp"
 
 namespace
 {
@@ -28,6 +30,23 @@ namespace
     return std::vector<std::uint8_t>(
       std::istreambuf_iterator<char>(input),
       std::istreambuf_iterator<char>());
+  }
+
+  void uploadVectorCopyProgram(VPU *vpu)
+  {
+    vpu->writeMicroInstruction(
+      0,
+      VPU_MOVE_ENCODING |
+        (UINT32_C(0xf) << 21) |
+        (static_cast<std::uint32_t>(
+          VPU_REGISTER_VF02) << 16) |
+        (static_cast<std::uint32_t>(
+          VPU_REGISTER_VF01) << 11),
+      VPU_E_BIT | VPU_NOP);
+    vpu->writeMicroInstruction(
+      1,
+      VPU_LOWER_NOP,
+      VPU_NOP);
   }
 }
 
@@ -99,6 +118,26 @@ TEST_CASE("PS2DEV EE ELF guest transfers vectors through VU0 COP2")
   REQUIRE(vf2->y.bits() == vf1->y.bits());
   REQUIRE(vf2->z.bits() == vf1->z.bits());
   REQUIRE(vf2->w.bits() == vf1->w.bits());
+}
+
+TEST_CASE("PS2DEV EE ELF guest calls VU0 microprograms through COP2")
+{
+  NekoSystem system;
+  uploadVectorCopyProgram(&system.vu0());
+
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("vcallms.elf"), 128);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 36);
+  const FPRegister *vf1 = system.vu0().fpRegisterValue(1);
+  const FPRegister *vf2 = system.vu0().fpRegisterValue(2);
+  REQUIRE(vf2->x.bits() == vf1->x.bits());
+  REQUIRE(vf2->y.bits() == vf1->y.bits());
+  REQUIRE(vf2->z.bits() == vf1->z.bits());
+  REQUIRE(vf2->w.bits() == vf1->w.bits());
+  REQUIRE_FALSE(system.vu0().clockActive());
 }
 
 TEST_CASE("PS2DEV EE ELF guest configures VIF1 DMA")

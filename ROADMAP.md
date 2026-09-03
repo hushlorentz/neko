@@ -564,7 +564,7 @@ rather than host-side setup:
       `SQC2`
 - [x] Implement EE COP2 control transfers and branches: `CFC2`, `CTC2`,
       `BC2F`, `BC2FL`, `BC2T`, and `BC2TL`
-- [ ] Implement `VCALLMS` and `VCALLMSR` microprogram initiation
+- [x] Implement `VCALLMS` and `VCALLMSR` microprogram initiation
 - [ ] Decode the VU macro arithmetic, conversion, memory, transfer, random,
       and synchronization instruction families and reuse the corresponding
       microinstruction execution semantics where their architectural behavior

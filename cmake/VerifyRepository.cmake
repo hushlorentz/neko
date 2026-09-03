@@ -94,6 +94,10 @@ verify_ee_elf_fixture(
   cop2_control.elf
   f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386
 )
+verify_ee_elf_fixture(
+  vcallms.elf
+  d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7
+)
 
 verify_fixture(
   integer_fill.bin

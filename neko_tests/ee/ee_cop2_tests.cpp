@@ -46,6 +46,17 @@ namespace
       offset;
   }
 
+  std::uint32_t vectorCallInstruction(
+    std::uint16_t instructionAddress)
+  {
+    return
+      UINT32_C(0x4a000038) |
+      (static_cast<std::uint32_t>(instructionAddress) << 6);
+  }
+
+  constexpr std::uint32_t VECTOR_CALL_REGISTER_INSTRUCTION =
+    UINT32_C(0x4a00d839);
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -111,6 +122,31 @@ TEST_CASE("EE COP2 control and branch instructions decode canonically")
   REQUIRE_THROWS_WITH(
     decodeEEInstruction(
       cop2TransferInstruction(0x02, 2, 3) | 2),
+    "Reserved EE instruction encoding.");
+}
+
+TEST_CASE("EE COP2 VCALLMS instructions decode canonically")
+{
+  const EEInstruction immediate =
+    decodeEEInstruction(vectorCallInstruction(0x1234));
+  REQUIRE(
+    immediate.operation ==
+    EEOperation::VectorCallMicroSubroutine);
+  REQUIRE(immediate.cop2Immediate == 0x1234);
+  REQUIRE(
+    decodeEEInstruction(
+      VECTOR_CALL_REGISTER_INSTRUCTION).operation ==
+    EEOperation::VectorCallMicroSubroutineRegister);
+
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      vectorCallInstruction(0) |
+      UINT32_C(1) << 21),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      VECTOR_CALL_REGISTER_INSTRUCTION ^
+      UINT32_C(1) << 11),
     "Reserved EE instruction encoding.");
 }
 
@@ -316,6 +352,92 @@ TEST_CASE("VU0 M bit releases interlocked COP2 writes during micro execution")
   REQUIRE(
     system.vu0().fpRegisterValue(3)->x.bits() ==
     UINT32_C(0x33221100));
+}
+
+TEST_CASE("EE VCALLMS starts VU0 at immediate and CMSAR0 addresses")
+{
+  SECTION("VCALLMS scales its immediate by eight")
+  {
+    NekoSystem system;
+    system.vu0().forceBreak();
+
+    runInstruction(&system, vectorCallInstruction(3));
+
+    REQUIRE(system.vu0().clockActive());
+    REQUIRE(system.vu0().getState() == VPU_STATE_RUN);
+    REQUIRE(system.vu0().programCounter() == 32);
+  }
+
+  SECTION("VCALLMSR scales CMSAR0 by eight")
+  {
+    NekoSystem system;
+    system.vu0().setCallAddressRegister(5);
+
+    runInstruction(
+      &system,
+      VECTOR_CALL_REGISTER_INSTRUCTION);
+
+    REQUIRE(system.vu0().clockActive());
+    REQUIRE(system.vu0().programCounter() == 48);
+  }
+}
+
+TEST_CASE("EE VCALLMS stalls while VU0 is running and retries")
+{
+  NekoSystem system;
+  system.vu0().startMicroMode();
+
+  runInstruction(&system, vectorCallInstruction(2));
+
+  REQUIRE(system.eeCore().programCounter() == 0);
+  REQUIRE_FALSE(system.eeCore().hasLastInstruction());
+
+  system.vu0().forceBreak();
+  system.clockMasterCycle();
+
+  REQUIRE(system.eeCore().programCounter() == 4);
+  REQUIRE(system.eeCore().hasLastInstruction());
+  REQUIRE(system.vu0().clockActive());
+  REQUIRE(system.vu0().programCounter() == 16);
+}
+
+TEST_CASE("EE VCALLMS rejects addresses outside VU0 micro memory")
+{
+  NekoSystem system;
+
+  runInstruction(&system, vectorCallInstruction(512));
+
+  REQUIRE(
+    system.eeCore().stopReason() ==
+    EEStopReason::UndefinedOperation);
+  REQUIRE(system.eeCore().programCounter() == 0);
+  REQUIRE_FALSE(system.vu0().clockActive());
+}
+
+TEST_CASE("Active VCALLMS execution survives save-state restoration")
+{
+  NekoSystem system;
+  system.vu0().writeMicroInstruction(
+    0,
+    VPU_LOWER_NOP,
+    VPU_E_BIT | VPU_NOP);
+  system.vu0().writeMicroInstruction(
+    1,
+    VPU_LOWER_NOP,
+    VPU_NOP);
+
+  runInstruction(&system, vectorCallInstruction(0));
+  REQUIRE(system.vu0().clockActive());
+  const std::vector<std::uint8_t> saved = system.saveState();
+
+  system.runMasterCycles(32);
+  REQUIRE_FALSE(system.vu0().clockActive());
+  system.loadState(saved);
+
+  REQUIRE(system.vu0().clockActive());
+  system.runMasterCycles(32);
+  REQUIRE_FALSE(system.vu0().clockActive());
+  REQUIRE(system.vu0().getState() == VPU_STATE_READY);
 }
 
 TEST_CASE("EE COP2 transfer results survive save-state restoration")

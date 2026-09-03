@@ -123,7 +123,9 @@ enum class EEOperation : std::uint8_t
   BranchCOP2False,
   BranchCOP2FalseLikely,
   BranchCOP2True,
-  BranchCOP2TrueLikely
+  BranchCOP2TrueLikely,
+  VectorCallMicroSubroutine,
+  VectorCallMicroSubroutineRegister
 };
 
 struct EEInstruction
@@ -138,6 +140,7 @@ struct EEInstruction
   std::uint8_t function = 0;
   std::uint16_t immediate = 0;
   std::uint32_t target = 0;
+  std::uint16_t cop2Immediate = 0;
 };
 
 enum class EEInstructionDecodeFailure : std::uint8_t
