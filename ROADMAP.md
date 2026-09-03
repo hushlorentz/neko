@@ -583,6 +583,9 @@ rather than host-side setup:
 
 ### EE COP1 and Multimedia Extensions
 
+- [ ] After guest-demo migration, split COP1 and MMI into separate,
+      independently reviewable milestones with focused instruction-family,
+      timing, conformance, integration, and audit items before implementation
 - [ ] Implement the EE COP1 register file, control registers, transfers,
       branches, and scalar single-precision instruction families
 - [ ] Match documented EE floating-point edge behavior with raw-bit reference
@@ -599,6 +602,10 @@ rather than host-side setup:
       hardware
 - [ ] Convert the POINT/SPRITE demo into an independently authored guest
       program that submits its drawing work through emulated hardware
+- [ ] Present completed guest-ELF GS framebuffers through the SDL desktop
+      while retaining headless `--elf` execution for diagnostics
+- [ ] Extend the rotating-triangle ELF into a persistent deterministic
+      workload that submits and presents successive animation frames
 - [ ] Retain the host-authored demo harnesses as fast deterministic component
       and integration tests after guest-program migration
 - [ ] Make guest executable loading the primary desktop execution path while
