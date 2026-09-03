@@ -671,7 +671,7 @@ TEST_CASE("EE VU macro mode reuses upper arithmetic families")
     system.eeCore().startExecution(0);
 
     REQUIRE(system.stepEEInstruction(8).instructions == 1);
-    REQUIRE(system.stepEEInstruction(8).instructions == 1);
+    REQUIRE(system.stepEEInstruction(16).instructions == 1);
     const EEExecutionResult added =
       system.stepEEInstruction(64);
     REQUIRE(added.instructions == 1);
@@ -687,9 +687,44 @@ TEST_CASE("EE VU macro mode reuses upper arithmetic families")
     REQUIRE(result->w == 4);
   }
 
-  TEST_CASE("EE writes wait until macro source operands are sampled")
+TEST_CASE("EE VU macro divider instructions share one resource")
+{
+  NekoSystem system;
+  system.vu0().loadFPRegister(1, 8, 0, 0, 0);
+  system.vu0().loadFPRegister(2, 2, 0, 0, 0);
+  system.eeBus().write32(
+    0,
+    macroLowerInstruction(
+      VPU_DIV_ENCODING |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(1) << 11)));
+  system.eeBus().write32(
+    4,
+    macroLowerInstruction(
+      VPU_SQRT_ENCODING |
+      (UINT32_C(2) << 16)));
+  system.eeBus().write32(
+    8,
+    macroLowerInstruction(VPU_WAITQ_ENCODING));
+  system.eeCore().startExecution(0);
+
+  REQUIRE(system.stepEEInstruction(8).instructions == 1);
+  const EEExecutionResult squareRoot =
+    system.stepEEInstruction(64);
+  REQUIRE(squareRoot.instructions == 1);
+  const EEExecutionResult waited =
+    system.stepEEInstruction(64);
+  REQUIRE(waited.instructions == 1);
+  REQUIRE(waited.masterCycles > 2);
+  system.runMasterCycles(64);
+  REQUIRE(
+    system.vu0().qRegisterBits() ==
+    UINT32_C(0x3fb504f3));
+}
+
+  TEST_CASE("EE writes do not create macro WAR hazards")
   {
-    SECTION("QMTC2 cannot replace a pending VF source")
+    SECTION("QMTC2 preserves an already-issued VF source")
     {
       NekoSystem system;
       system.vu0().loadFPRegister(1, 1, 2, 3, 4);
@@ -719,7 +754,7 @@ TEST_CASE("EE VU macro mode reuses upper arithmetic families")
       const EEExecutionResult written =
         system.stepEEInstruction(32);
       REQUIRE(written.instructions == 1);
-      REQUIRE(written.masterCycles > 1);
+      REQUIRE(written.masterCycles == 1);
       REQUIRE(system.stepEEInstruction(32).instructions == 1);
       const FPRegister *result =
         system.vu0().fpRegisterValue(3);
@@ -729,7 +764,7 @@ TEST_CASE("EE VU macro mode reuses upper arithmetic families")
       REQUIRE(result->w == 44);
     }
 
-    SECTION("CTC2 cannot replace a pending I source")
+    SECTION("CTC2 does not interlock on the I register")
     {
       NekoSystem system;
       system.vu0().loadFPRegister(1, 1, 2, 3, 4);
@@ -752,17 +787,155 @@ TEST_CASE("EE VU macro mode reuses upper arithmetic families")
       const EEExecutionResult written =
         system.stepEEInstruction(32);
       REQUIRE(written.instructions == 1);
-      REQUIRE(written.masterCycles > 1);
+      REQUIRE(written.masterCycles == 1);
       REQUIRE(system.stepEEInstruction(32).instructions == 1);
       const FPRegister *result =
         system.vu0().fpRegisterValue(3);
-      REQUIRE(result->x == 6);
-      REQUIRE(result->y == 7);
-      REQUIRE(result->z == 8);
-      REQUIRE(result->w == 9);
+      REQUIRE(result->x == 11);
+      REQUIRE(result->y == 12);
+      REQUIRE(result->z == 13);
+      REQUIRE(result->w == 14);
       REQUIRE(system.vu0().iRegisterBits() == UINT32_C(0x41200000));
     }
   }
+
+TEST_CASE("EE to VU transfers stall the next macro issue once")
+{
+  SECTION("A transfer immediately before a macro adds one issue cycle")
+  {
+    NekoSystem system;
+    system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+    system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+    system.eeCore().setGeneralRegister(
+      4,
+      EERegister128{
+        UINT64_C(0x42c8000042c80000),
+        UINT64_C(0x42c8000042c80000)});
+    system.eeBus().write32(
+      0,
+      quadwordMoveToCOP2(4, 8));
+    system.eeBus().write32(
+      4,
+      macroArithmeticInstruction(
+        FP_REGISTER_ALL_FIELDS,
+        2,
+        1,
+        3,
+        VPU_ADD));
+    system.eeCore().startExecution(0);
+
+    REQUIRE(system.stepEEInstruction(8).instructions == 1);
+    const EEExecutionResult macro =
+      system.stepEEInstruction(8);
+    REQUIRE(macro.instructions == 1);
+    REQUIRE(macro.masterCycles == 2);
+  }
+
+  SECTION("A transfer during micro mode does not leak into macro resume")
+  {
+    const auto resumeCycles =
+      [](bool transfer)
+      {
+        NekoSystem system;
+        system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+        system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+        system.vu0().writeMicroInstruction(
+          0,
+          VPU_LOWER_NOP,
+          VPU_E_BIT | VPU_NOP);
+        system.vu0().writeMicroInstruction(
+          1,
+          VPU_LOWER_NOP,
+          VPU_NOP);
+        system.vu0().startMicroMode();
+        system.eeCore().setGeneralRegister(
+          4,
+          EERegister128{
+            UINT64_C(0x42c8000042c80000),
+            UINT64_C(0x42c8000042c80000)});
+        system.eeBus().write32(
+          0,
+          transfer ? quadwordMoveToCOP2(4, 8) : 0);
+        system.eeBus().write32(
+          4,
+          macroArithmeticInstruction(
+            FP_REGISTER_ALL_FIELDS,
+            2,
+            1,
+            3,
+            VPU_ADD));
+        system.eeCore().startExecution(0);
+
+        REQUIRE(
+          system.stepEEInstruction(8).instructions ==
+          1);
+        const EEExecutionResult macro =
+          system.stepEEInstruction(32);
+        REQUIRE(macro.instructions == 1);
+        return macro.masterCycles;
+      };
+
+    REQUIRE(resumeCycles(true) == resumeCycles(false));
+  }
+}
+
+TEST_CASE("COP2 transfers honor cross-file macro hazards")
+{
+  SECTION("CFC2 waits for a same-numbered VF result")
+  {
+    NekoSystem system;
+    system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+    system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+    system.vu0().loadIntRegister(3, 7);
+    system.eeBus().write32(
+      0,
+      macroArithmeticInstruction(
+        FP_REGISTER_ALL_FIELDS,
+        2,
+        1,
+        3,
+        VPU_ADD));
+    system.eeBus().write32(
+      4,
+      controlMoveFromCOP2(2, 3));
+    system.eeCore().startExecution(0);
+
+    REQUIRE(system.stepEEInstruction(8).instructions == 1);
+    const EEExecutionResult read =
+      system.stepEEInstruction(32);
+    REQUIRE(read.instructions == 1);
+    REQUIRE(read.masterCycles > 1);
+    REQUIRE(system.eeCore().generalRegister(2).low == 7);
+  }
+
+  SECTION("QMFC2 waits for a same-numbered VI result")
+  {
+    NekoSystem system;
+    system.vu0().loadFPRegister(3, 1, 2, 3, 4);
+    system.vu0().loadIntRegister(1, 7);
+    system.vu0().loadIntRegister(2, 5);
+    system.eeBus().write32(
+      0,
+      macroLowerInstruction(
+        VPU_IADD_ENCODING |
+        (UINT32_C(2) << 16) |
+        (UINT32_C(1) << 11) |
+        (UINT32_C(3) << 6)));
+    system.eeBus().write32(
+      4,
+      quadwordMoveFromCOP2(2, 3));
+    system.eeCore().startExecution(0);
+
+    REQUIRE(system.stepEEInstruction(8).instructions == 1);
+    const EEExecutionResult read =
+      system.stepEEInstruction(32);
+    REQUIRE(read.instructions == 1);
+    REQUIRE(read.masterCycles > 1);
+    REQUIRE(
+      system.eeCore().generalRegister(2).low ==
+      UINT64_C(0x400000003f800000));
+  }
+}
 
 TEST_CASE("EE VU macro arithmetic waits for micro mode and rejects Stop")
 {
@@ -844,7 +1017,7 @@ TEST_CASE("EE VU macro arithmetic preserves pipeline dependencies")
   system.eeCore().startExecution(0);
 
   REQUIRE(system.stepEEInstruction(8).instructions == 1);
-  REQUIRE(system.stepEEInstruction(8).instructions == 1);
+  REQUIRE(system.stepEEInstruction(16).instructions == 1);
   REQUIRE(system.stepEEInstruction(32).instructions == 1);
 
   const FPRegister *result = system.vu0().fpRegisterValue(4);
@@ -852,6 +1025,96 @@ TEST_CASE("EE VU macro arithmetic preserves pipeline dependencies")
   REQUIRE(result->y == 20);
   REQUIRE(result->z == 30);
   REQUIRE(result->w == 40);
+}
+
+TEST_CASE("VU macro hazards use whole register numbers")
+{
+  SECTION("Different VF fields still conflict")
+  {
+    const auto secondIssueCycles =
+      [](std::uint8_t sourceRegister)
+      {
+        NekoSystem system;
+        system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+        system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+        system.vu0().loadFPRegister(3, 100, 200, 300, 400);
+        system.vu0().loadFPRegister(5, 100, 200, 300, 400);
+        system.eeBus().write32(
+          0,
+          macroArithmeticInstruction(
+            FP_REGISTER_X_FIELD,
+            2,
+            1,
+            3,
+            VPU_ADD));
+        system.eeBus().write32(
+          4,
+          macroArithmeticInstruction(
+            FP_REGISTER_Y_FIELD,
+            2,
+            sourceRegister,
+            4,
+            VPU_ADD));
+        system.eeCore().startExecution(0);
+        REQUIRE(
+          system.stepEEInstruction(8).instructions ==
+          1);
+        const EEExecutionResult second =
+          system.stepEEInstruction(32);
+        REQUIRE(second.instructions == 1);
+        return second.masterCycles;
+      };
+
+    const std::uint64_t conflicting =
+      secondIssueCycles(3);
+    const std::uint64_t independent =
+      secondIssueCycles(5);
+    REQUIRE(conflicting > independent);
+  }
+
+  SECTION("VF and VI registers with the same number conflict")
+  {
+    const auto integerIssueCycles =
+      [](std::uint8_t sourceRegister)
+      {
+        NekoSystem system;
+        system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+        system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+        system.vu0().loadIntRegister(3, 7);
+        system.vu0().loadIntRegister(4, 7);
+        system.vu0().loadIntRegister(5, 5);
+        system.eeBus().write32(
+          0,
+          macroArithmeticInstruction(
+            FP_REGISTER_ALL_FIELDS,
+            2,
+            1,
+            3,
+            VPU_ADD));
+        system.eeBus().write32(
+          4,
+          macroLowerInstruction(
+            VPU_IADD_ENCODING |
+            (UINT32_C(5) << 16) |
+            (static_cast<std::uint32_t>(
+              sourceRegister) << 11) |
+            (UINT32_C(6) << 6)));
+        system.eeCore().startExecution(0);
+        REQUIRE(
+          system.stepEEInstruction(8).instructions ==
+          1);
+        const EEExecutionResult second =
+          system.stepEEInstruction(32);
+        REQUIRE(second.instructions == 1);
+        return second.masterCycles;
+      };
+
+    const std::uint64_t conflicting =
+      integerIssueCycles(3);
+    const std::uint64_t independent =
+      integerIssueCycles(4);
+    REQUIRE(conflicting > independent);
+  }
 }
 
 TEST_CASE("EE VU macro arithmetic applies issue backpressure")
@@ -1179,6 +1442,49 @@ TEST_CASE("Active EE VU macro arithmetic survives save-state restoration")
   REQUIRE(result->y == 22);
   REQUIRE(result->z == 33);
   REQUIRE(result->w == 44);
+}
+
+TEST_CASE("Macro source snapshots survive save-state restoration")
+{
+  NekoSystem system;
+  system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+  system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+  system.eeCore().setGeneralRegister(
+    4,
+    EERegister128{
+      UINT64_C(0x42c8000042c80000),
+      UINT64_C(0x42c8000042c80000)});
+  system.eeBus().write32(
+    0,
+    macroArithmeticInstruction(
+      FP_REGISTER_ALL_FIELDS,
+      2,
+      1,
+      3,
+      VPU_ADD));
+  system.eeBus().write32(
+    4,
+    quadwordMoveToCOP2(4, 1));
+  system.eeBus().write32(
+    8,
+    quadwordMoveFromCOP2(2, 3));
+  system.eeCore().startExecution(0);
+
+  REQUIRE(system.stepEEInstruction(8).instructions == 1);
+  REQUIRE(system.stepEEInstruction(8).instructions == 1);
+  const std::vector<std::uint8_t> saved =
+    system.saveState();
+  REQUIRE(system.stepEEInstruction(32).instructions == 1);
+
+  system.loadState(saved);
+  REQUIRE(system.stepEEInstruction(32).instructions == 1);
+  const FPRegister *result =
+    system.vu0().fpRegisterValue(3);
+  REQUIRE(result->x == 11);
+  REQUIRE(result->y == 22);
+  REQUIRE(result->z == 33);
+  REQUIRE(result->w == 44);
+  REQUIRE(system.vu0().fpRegisterValue(1)->x == 100);
 }
 
 TEST_CASE("Accepted lower-style VU macro issue survives save-state restoration")

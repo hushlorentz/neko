@@ -267,6 +267,80 @@ bool PipelineOrchestrator::hasPendingRegisterRead(
   return false;
 }
 
+bool PipelineOrchestrator::hasPendingRegisterNumberWrite(
+  uint32_t registerMask) const
+{
+  const auto registerBit =
+    [](uint8_t registerID)
+    {
+      return
+        registerID == VPU_REGISTER_VF00 ||
+        registerID >= 32
+          ? UINT32_C(0)
+          : UINT32_C(1) << registerID;
+    };
+  const auto writesRegister =
+    [&registerBit, registerMask](const Pipeline *pipeline)
+    {
+      uint32_t writeMask = 0;
+      switch (pipeline->type)
+      {
+        case VPU_PIPELINE_TYPE_FMAC:
+          if (pipeline->opCode == VPU_MTIR)
+          {
+            writeMask |=
+              registerBit(pipeline->integerDestReg);
+          }
+          else if (pipeline->opCode != VPU_CLIP)
+          {
+            writeMask |= registerBit(pipeline->destReg);
+          }
+          break;
+        case VPU_PIPELINE_TYPE_IALU:
+        case VPU_PIPELINE_TYPE_BRANCH:
+          writeMask |= registerBit(pipeline->destReg);
+          break;
+        case VPU_PIPELINE_TYPE_LSU:
+          if (pipeline->opCode == VPU_ILW ||
+              pipeline->opCode == VPU_ILWR ||
+              pipeline->opCode == VPU_LQ ||
+              pipeline->opCode == VPU_LQD ||
+              pipeline->opCode == VPU_LQI)
+          {
+            writeMask |= registerBit(pipeline->destReg);
+          }
+          writeMask |=
+            registerBit(pipeline->integerDestReg);
+          break;
+        case VPU_PIPELINE_TYPE_FLAG:
+        case VPU_PIPELINE_TYPE_RANDOM:
+        case VPU_PIPELINE_TYPE_VIF_CONTROL:
+          writeMask |= registerBit(pipeline->destReg);
+          writeMask |=
+            registerBit(pipeline->integerDestReg);
+          break;
+      }
+      return (writeMask & registerMask) != 0;
+    };
+  for (const Pipeline *pipeline : executing)
+  {
+    if (!pipeline->discardWriteback &&
+        writesRegister(pipeline))
+    {
+      return true;
+    }
+  }
+  for (const Pipeline *pipeline : waiting)
+  {
+    if (!pipeline->discardWriteback &&
+        writesRegister(pipeline))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1FieldMask, uint8_t srcReg2, uint8_t srcReg2FieldMask) const
 {
   for (list<Pipeline *>::const_iterator iter = executing.begin(); iter != executing.end(); ++iter)
@@ -301,9 +375,9 @@ bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1Fie
   return false;
 }
 
-void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, int16_t immediate)
+Pipeline *PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, int16_t immediate)
 {
-  waiting.push_back(configurePipeline(
+  Pipeline *pipeline = configurePipeline(
     pipelineType,
     opCode,
     srcReg1,
@@ -314,7 +388,9 @@ void PipelineOrchestrator::initPipeline(uint8_t pipelineType, uint16_t opCode, u
     srcReg2FieldMask,
     instructionAddress,
     false,
-    immediate));
+    immediate);
+  waiting.push_back(pipeline);
+  return pipeline;
 }
 
 Pipeline *PipelineOrchestrator::startPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, bool discardWriteback, int16_t immediate)

@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 12;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 13;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1789,6 +1789,7 @@ void NekoSaveStateCodec::writeVPU(
   writer->writeU32(vpu.cycles);
   writer->writeU8(vpu.mode);
   writer->writeBool(vpu.macroIssueNeedsAdvance);
+  writer->writeBool(vpu.macroTransferStallPending);
   writer->writeU16(vpu.microMemPC);
   writer->writeU16(vpu.terminationPositionCounter);
   writer->writeBool(vpu.terminationPositionValid);
@@ -1873,6 +1874,8 @@ void NekoSaveStateCodec::readVPU(
   vpu->mode = reader->readU8();
   vpu->macroIssueNeedsAdvance =
     reader->readBool("VU macro issue-advance flag");
+  vpu->macroTransferStallPending =
+    reader->readBool("VU macro transfer-stall flag");
   vpu->microMemPC = reader->readU16();
   vpu->terminationPositionCounter = reader->readU16();
   vpu->terminationPositionValid =
@@ -2033,6 +2036,8 @@ void NekoSaveStateCodec::commitVPU(
   destination->mode = source->mode;
   destination->macroIssueNeedsAdvance =
     source->macroIssueNeedsAdvance;
+  destination->macroTransferStallPending =
+    source->macroTransferStallPending;
   destination->microMemPC = source->microMemPC;
   destination->terminationPositionCounter =
     source->terminationPositionCounter;
@@ -2121,6 +2126,8 @@ void NekoSaveStateCodec::writePipeline(
   writeFPRegister(writer, pipeline.flagResult);
   writeFPRegister(writer, pipeline.operationResult);
   writeFPRegister(writer, pipeline.accumulatorValue);
+  writeFPRegister(writer, pipeline.sourceValue1);
+  writeFPRegister(writer, pipeline.sourceValue2);
   writer->writeU8(pipeline.ignoredResultFields);
   writer->writeU8(pipeline.srcReg1);
   writer->writeU8(pipeline.srcReg2);
@@ -2140,6 +2147,7 @@ void NekoSaveStateCodec::writePipeline(
   writer->writeU16(pipeline.intSourceValue2);
   writer->writeBool(pipeline.intSource1Sampled);
   writer->writeBool(pipeline.intSource2Sampled);
+  writer->writeBool(pipeline.vectorSourcesSampled);
   writer->writeBool(pipeline.xgkickStarted);
   writer->writeBool(pipeline.discardWriteback);
   writer->writeU8(
@@ -2161,6 +2169,8 @@ void NekoSaveStateCodec::readPipeline(
   pipeline->flagResult = readFPRegister(reader);
   pipeline->operationResult = readFPRegister(reader);
   pipeline->accumulatorValue = readFPRegister(reader);
+  pipeline->sourceValue1 = readFPRegister(reader);
+  pipeline->sourceValue2 = readFPRegister(reader);
   pipeline->ignoredResultFields = reader->readU8();
   pipeline->srcReg1 = reader->readU8();
   pipeline->srcReg2 = reader->readU8();
@@ -2182,6 +2192,8 @@ void NekoSaveStateCodec::readPipeline(
     reader->readBool("VU pipeline source-1 sample flag");
   pipeline->intSource2Sampled =
     reader->readBool("VU pipeline source-2 sample flag");
+  pipeline->vectorSourcesSampled =
+    reader->readBool("VU pipeline vector-source sample flag");
   pipeline->xgkickStarted =
     reader->readBool("VU pipeline XGKICK flag");
   pipeline->discardWriteback =

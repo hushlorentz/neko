@@ -115,6 +115,9 @@ class VPU : public ClockedComponent, public PipelineHandler
       uint8_t fieldMask) const;
     bool macroIntegerWritePending(
       uint8_t registerID) const;
+    bool macroRegisterNumberWritePending(
+      uint8_t registerID) const;
+    void noteMacroTransferToVU();
     bool clockActive() const override;
     void clock() override;
     bool tick();
@@ -178,6 +181,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     uint32_t cycles = 0;
     uint8_t mode = VPU_MODE_MACRO;
     bool macroIssueNeedsAdvance = false;
+    bool macroTransferStallPending = false;
     uint16_t microMemPC = 0;
     uint16_t terminationPositionCounter = 0;
     bool terminationPositionValid = false;
@@ -234,7 +238,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool haltBitSet(uint32_t instruction);
     uint32_t nextUpperInstruction();
     uint32_t nextLowerInstruction();
-    uint16_t processUpperInstruction(uint32_t upperInstruction);
+    uint16_t processUpperInstruction(
+      uint32_t upperInstruction,
+      bool macroInstruction = false);
     uint16_t opCodeFromInstruction(uint32_t instruction);
     uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
     uint8_t src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
@@ -258,6 +264,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     void startRandomInstruction(const LowerInstruction &instruction);
     void startVIFControlInstruction(const LowerInstruction &instruction);
     void startXGKICKInstruction(const LowerInstruction &instruction);
+    void snapshotMacroVectorSources(Pipeline *pipeline);
+    FPRegister &vectorSource1(Pipeline *pipeline);
+    FPRegister &vectorSource2(Pipeline *pipeline);
     bool startXGKICKTransfer(Pipeline *pipeline);
     bool xgkickStallsIssue();
     uint16_t integerValueForExecution(uint8_t registerID) const;
@@ -294,7 +303,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     void setStickyFlagsFromStatusFlags();
     void updateDestinationRegisterWithPipelineResult(FPRegister * destReg, Pipeline * p);
     void updateClippingFlags(uint32_t clip);
-    int calculateNewClippingFlags(FPRegister * fsReg, FPRegister * ftReg);
+    int calculateNewClippingFlags(
+      FPRegister *fsReg,
+      FPRegister *ftReg);
     FPRegister * destinationRegisterFromPipeline(Pipeline * p);
     void handleMADDInstruction(Pipeline * p);
     void handleMSUBInstruction(Pipeline * p);

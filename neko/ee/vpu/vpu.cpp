@@ -384,6 +384,7 @@ void VPU::forceBreak()
 
   orchestrator.reset();
   macroIssueNeedsAdvance = false;
+  macroTransferStallPending = false;
   lowerInstructionPending = false;
   pendingIntegerWrites.fill(0);
   pendingIALUWrites.fill(0);
@@ -698,6 +699,7 @@ void VPU::startMicroMode(uint16_t startAddress)
   xgkickTransferStarted = false;
   mode = VPU_MODE_MICRO;
   macroIssueNeedsAdvance = false;
+  macroTransferStallPending = false;
   microMemPC = startAddress;
   endDelaySlotPending = false;
   branchDelaySlotPending = false;
@@ -731,6 +733,7 @@ bool VPU::startMicroModeFromMacro(uint16_t startAddress)
 
   mode = VPU_MODE_MICRO;
   macroIssueNeedsAdvance = false;
+  macroTransferStallPending = false;
   microMemPC = startAddress;
   terminationPositionValid = false;
   endDelaySlotPending = false;
@@ -762,8 +765,8 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
   {
     throw logic_error("Unsupported VU macro instruction.");
   }
-
   LowerInstruction lowerInstruction;
+  uint16_t upperOpCode = 0;
   if (instructionKind == VUMacroInstructionKind::Lower)
   {
     lowerInstruction =
@@ -773,6 +776,162 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
     {
       return false;
     }
+  }
+  else
+  {
+    upperOpCode = opCodeFromInstruction(instruction);
+  }
+
+  const auto registerBit =
+    [](uint8_t registerID)
+    {
+      return
+        registerID == VPU_REGISTER_VF00 ||
+        registerID >= NUM_FP_REGISTERS
+          ? UINT32_C(0)
+          : UINT32_C(1) << registerID;
+    };
+  uint32_t readRegisterMask = 0;
+  uint32_t writeRegisterMask = 0;
+  if (instructionKind == VUMacroInstructionKind::Upper)
+  {
+    const uint8_t encodedFieldMask =
+      (instruction >> VPU_DEST_SHIFT) &
+      VPU_DEST_MASK;
+    const uint8_t destinationFieldMask =
+      destinationMaskFromOpCode(
+        upperOpCode,
+        encodedFieldMask);
+    const uint8_t sourceRegister1 =
+      src1RegFromOpCodeAndInstruction(
+        upperOpCode,
+        instruction);
+    const uint8_t sourceRegister2 =
+      regFromInstruction(
+        instruction,
+        VPU_FS_REG_SHIFT);
+    if (srcReg1MaskFromOpCode(
+          upperOpCode,
+          destinationFieldMask) !=
+        FP_REGISTER_NO_FIELDS)
+    {
+      readRegisterMask |=
+        registerBit(sourceRegister1);
+    }
+    if (srcReg2MaskFromOpCode(
+          upperOpCode,
+          destinationFieldMask) !=
+        FP_REGISTER_NO_FIELDS)
+    {
+      readRegisterMask |=
+        registerBit(sourceRegister2);
+    }
+    if (destinationFieldMask !=
+        FP_REGISTER_NO_FIELDS)
+    {
+      writeRegisterMask |= registerBit(
+        destRegFromOpCodeAndInstruction(
+          upperOpCode,
+          instruction));
+    }
+  }
+  else
+  {
+    switch (lowerInstruction.opCode)
+    {
+      case VPU_IADD:
+      case VPU_IAND:
+      case VPU_IOR:
+      case VPU_ISUB:
+        readRegisterMask |= registerBit(
+          lowerInstruction.sourceRegister2);
+        // Fall through.
+      case VPU_IADDI:
+        readRegisterMask |= registerBit(
+          lowerInstruction.sourceRegister1);
+        writeRegisterMask |= registerBit(
+          lowerInstruction.destinationRegister);
+        break;
+      case VPU_ILWR:
+        readRegisterMask |= registerBit(
+          lowerInstruction.sourceRegister1);
+        writeRegisterMask |= registerBit(
+          lowerInstruction.integerDestinationRegister);
+        break;
+      case VPU_ISWR:
+        readRegisterMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.sourceRegister2);
+        break;
+      case VPU_LQD:
+      case VPU_LQI:
+        readRegisterMask |= registerBit(
+          lowerInstruction.sourceRegister1);
+        writeRegisterMask |=
+          registerBit(
+            lowerInstruction.destinationRegister) |
+          registerBit(
+            lowerInstruction.integerDestinationRegister);
+        break;
+      case VPU_SQD:
+      case VPU_SQI:
+        readRegisterMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.sourceRegister2);
+        writeRegisterMask |= registerBit(
+          lowerInstruction.integerDestinationRegister);
+        break;
+      case VPU_MFIR:
+        readRegisterMask |= registerBit(
+          lowerInstruction.sourceRegister1);
+        writeRegisterMask |= registerBit(
+          lowerInstruction.destinationRegister);
+        break;
+      case VPU_MOVE:
+      case VPU_MR32:
+        readRegisterMask |= registerBit(
+          lowerInstruction.sourceRegister1);
+        writeRegisterMask |= registerBit(
+          lowerInstruction.destinationRegister);
+        break;
+      case VPU_MTIR:
+        readRegisterMask |= registerBit(
+          lowerInstruction.sourceRegister1);
+        writeRegisterMask |= registerBit(
+          lowerInstruction.integerDestinationRegister);
+        break;
+      case VPU_DIV:
+      case VPU_RSQRT:
+        readRegisterMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.sourceRegister2);
+        break;
+      case VPU_SQRT:
+      case VPU_RINIT:
+      case VPU_RXOR:
+        readRegisterMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.sourceRegister2);
+        break;
+      case VPU_RGET:
+      case VPU_RNEXT:
+        writeRegisterMask |= registerBit(
+          lowerInstruction.destinationRegister);
+        break;
+    }
+  }
+  if (orchestrator.hasPendingRegisterNumberWrite(
+        readRegisterMask | writeRegisterMask))
+  {
+    return false;
   }
   if (state == VPU_STATE_RUN &&
       mode == VPU_MODE_MICRO)
@@ -788,6 +947,12 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
     branchDelaySlotPending = false;
     pendingBranchTaken = false;
     pendingBranchLinkValid = false;
+    macroTransferStallPending = false;
+  }
+  if (macroTransferStallPending)
+  {
+    macroTransferStallPending = false;
+    return false;
   }
   if (macroIssueNeedsAdvance ||
       !orchestrator.canAcceptInstruction())
@@ -797,7 +962,7 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
 
   if (instructionKind == VUMacroInstructionKind::Upper)
   {
-    processUpperInstruction(instruction);
+    processUpperInstruction(instruction, true);
   }
   else
   {
@@ -946,6 +1111,34 @@ bool VPU::macroIntegerWritePending(
   return
     pendingLowerInstruction.integerDestinationRegister ==
     registerID;
+}
+
+bool VPU::macroRegisterNumberWritePending(
+  uint8_t registerID) const
+{
+  if (!macroModeActive() ||
+      registerID == VPU_REGISTER_VF00)
+  {
+    return false;
+  }
+  const uint32_t registerMask =
+    UINT32_C(1) << registerID;
+  if (orchestrator.hasPendingRegisterNumberWrite(
+        registerMask))
+  {
+    return true;
+  }
+  return
+    lowerInstructionPending &&
+    (macroRegisterWritePending(
+       registerID,
+       FP_REGISTER_ALL_FIELDS) ||
+     macroIntegerWritePending(registerID));
+}
+
+void VPU::noteMacroTransferToVU()
+{
+  macroTransferStallPending = true;
 }
 
 bool VPU::clockActive() const
@@ -1122,6 +1315,7 @@ bool VPU::tick()
   catch (...)
   {
     macroIssueNeedsAdvance = false;
+    macroTransferStallPending = false;
     lowerInstructionPending = false;
     pendingIntegerWrites.fill(0);
     pendingIALUWrites.fill(0);
@@ -1208,7 +1402,9 @@ uint32_t VPU::nextLowerInstruction()
     (static_cast<uint32_t>(microMem[microMemPC + 3]) << 24);
 }
 
-uint16_t VPU::processUpperInstruction(uint32_t upperInstruction)
+uint16_t VPU::processUpperInstruction(
+  uint32_t upperInstruction,
+  bool macroInstruction)
 {
   uint16_t opCode = opCodeFromInstruction(upperInstruction);
 
@@ -1225,7 +1421,20 @@ uint16_t VPU::processUpperInstruction(uint32_t upperInstruction)
   uint8_t srcReg1Mask = srcReg1MaskFromOpCode(opCode, fieldMask);
   uint8_t srcReg2Mask = srcReg2MaskFromOpCode(opCode, fieldMask);
 
-  orchestrator.initPipeline(VPU_PIPELINE_TYPE_FMAC, opCode, srcReg1, srcReg2, destReg, fieldMask, srcReg1Mask, srcReg2Mask, microMemPC);
+  Pipeline *pipeline = orchestrator.initPipeline(
+    VPU_PIPELINE_TYPE_FMAC,
+    opCode,
+    srcReg1,
+    srcReg2,
+    destReg,
+    fieldMask,
+    srcReg1Mask,
+    srcReg2Mask,
+    microMemPC);
+  if (macroInstruction)
+  {
+    snapshotMacroVectorSources(pipeline);
+  }
   if (destReg == VPU_REGISTER_ACCUMULATOR)
   {
     pendingAccumulatorWrites++;
@@ -1760,6 +1969,10 @@ void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
     pendingLowerInstructionAddress,
     pendingLowerWritebackDiscarded,
     instruction.immediate);
+  if (mode == VPU_MODE_MACRO)
+  {
+    snapshotMacroVectorSources(pipeline);
+  }
   pipeline->integerDestReg = instruction.integerDestinationRegister;
   if (instruction.opCode == VPU_MTIR &&
       pipeline->integerDestReg != VPU_REGISTER_VI00)
@@ -1770,7 +1983,7 @@ void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
 
 void VPU::startFDIVInstruction(const LowerInstruction &instruction)
 {
-  orchestrator.startPipeline(
+  Pipeline *pipeline = orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_FDIV,
     instruction.opCode,
     instruction.sourceRegister1,
@@ -1780,6 +1993,10 @@ void VPU::startFDIVInstruction(const LowerInstruction &instruction)
     instruction.sourceFieldMask1,
     instruction.sourceFieldMask2,
     pendingLowerInstructionAddress);
+  if (mode == VPU_MODE_MACRO)
+  {
+    snapshotMacroVectorSources(pipeline);
+  }
 }
 
 void VPU::startEFUInstruction(const LowerInstruction &instruction)
@@ -1852,7 +2069,7 @@ void VPU::startFlagInstruction(const LowerInstruction &instruction)
 
 void VPU::startRandomInstruction(const LowerInstruction &instruction)
 {
-  orchestrator.startPipeline(
+  Pipeline *pipeline = orchestrator.startPipeline(
     VPU_PIPELINE_TYPE_RANDOM,
     instruction.opCode,
     instruction.sourceRegister1,
@@ -1863,6 +2080,10 @@ void VPU::startRandomInstruction(const LowerInstruction &instruction)
     FP_REGISTER_NO_FIELDS,
     pendingLowerInstructionAddress,
     pendingLowerWritebackDiscarded);
+  if (mode == VPU_MODE_MACRO)
+  {
+    snapshotMacroVectorSources(pipeline);
+  }
 }
 
 void VPU::startXGKICKInstruction(const LowerInstruction &instruction)
@@ -1954,6 +2175,10 @@ void VPU::startLSUInstruction(const LowerInstruction &instruction)
     pendingLowerInstructionAddress,
     pendingLowerWritebackDiscarded,
     instruction.immediate);
+  if (mode == VPU_MODE_MACRO)
+  {
+    snapshotMacroVectorSources(pipeline);
+  }
   pipeline->integerDestReg = instruction.integerDestinationRegister;
 
   if (pipeline->integerDestReg != VPU_REGISTER_VI00)
@@ -2316,6 +2541,7 @@ void VPU::resetFromControl()
   pendingAccumulatorWrites = 0;
   accumulatorForwardValid = false;
   macroIssueNeedsAdvance = false;
+  macroTransferStallPending = false;
   lowerInstructionPending = false;
   pendingLowerInstructionReady = false;
   pendingLowerWritebackDiscarded = false;
@@ -2464,7 +2690,9 @@ void VPU::updateClippingFlags(uint32_t clip)
   clippingFlags |= (clip & VPU_CLIP_MASK);
 }
 
-int VPU::calculateNewClippingFlags(FPRegister * fsReg, FPRegister * ftReg)
+int VPU::calculateNewClippingFlags(
+  FPRegister *fsReg,
+  FPRegister *ftReg)
 {
   int newClipFlags = 0;
   if (fsReg->x > abs(ftReg->w))
@@ -2512,6 +2740,31 @@ bool VPU::pipelineCanAdvance(Pipeline *pipeline)
     return startXGKICKTransfer(pipeline);
   }
   return true;
+}
+
+void VPU::snapshotMacroVectorSources(Pipeline *pipeline)
+{
+  pipeline->sourceValue1.copyFrom(
+    &fpRegisters[pipeline->srcReg1]);
+  pipeline->sourceValue2.copyFrom(
+    &fpRegisters[pipeline->srcReg2]);
+  pipeline->vectorSourcesSampled = true;
+}
+
+FPRegister &VPU::vectorSource1(Pipeline *pipeline)
+{
+  return
+    pipeline->vectorSourcesSampled
+      ? pipeline->sourceValue1
+      : fpRegisters[pipeline->srcReg1];
+}
+
+FPRegister &VPU::vectorSource2(Pipeline *pipeline)
+{
+  return
+    pipeline->vectorSourcesSampled
+      ? pipeline->sourceValue2
+      : fpRegisters[pipeline->srcReg2];
 }
 
 void VPU::pipelineAdvanced(Pipeline *p)
@@ -2586,25 +2839,25 @@ void VPU::executeFDIVPipeline(Pipeline *pipeline)
     case VPU_DIV:
       result = divFPRaw(
         selectedBits(
-          fpRegisters[pipeline->srcReg1],
+          vectorSource1(pipeline),
           pipeline->srcReg1FieldMask),
         selectedBits(
-          fpRegisters[pipeline->srcReg2],
+          vectorSource2(pipeline),
           pipeline->srcReg2FieldMask));
       break;
     case VPU_SQRT:
       result = sqrtFPRaw(
         selectedBits(
-          fpRegisters[pipeline->srcReg2],
+          vectorSource2(pipeline),
           pipeline->srcReg2FieldMask));
       break;
     case VPU_RSQRT:
       result = rsqrtFPRaw(
         selectedBits(
-          fpRegisters[pipeline->srcReg1],
+          vectorSource1(pipeline),
           pipeline->srcReg1FieldMask),
         selectedBits(
-          fpRegisters[pipeline->srcReg2],
+          vectorSource2(pipeline),
           pipeline->srcReg2FieldMask));
       break;
     default:
@@ -2624,7 +2877,7 @@ void VPU::executeRandomPipeline(Pipeline *pipeline)
   {
     const uint32_t source =
       selectedLaneBits(
-        fpRegisters[pipeline->srcReg1],
+        vectorSource1(pipeline),
         pipeline->srcReg1FieldMask) &
       RANDOM_MANTISSA_MASK;
     if (pipeline->opCode == VPU_RINIT)
@@ -2803,8 +3056,8 @@ void VPU::finishEFUPipeline(Pipeline *pipeline)
 void VPU::startFMACPipeline(Pipeline *p)
 {
   uint16_t opCode = p->opCode;
-  uint8_t ft = p->srcReg1;
-  uint8_t fs = p->srcReg2;
+  FPRegister &ft = vectorSource1(p);
+  FPRegister &fs = vectorSource2(p);
   uint8_t fieldMask = p->destFieldMask;
   FPRegister *destReg = destinationRegisterFromPipeline(p);
   FPRegister *accumulatorInput =
@@ -2866,7 +3119,7 @@ void VPU::startFMACPipeline(Pipeline *p)
 
   if (opCode == VPU_MOVE || opCode == VPU_MR32)
   {
-    const FPRegister &source = fpRegisters[p->srcReg1];
+    const FPRegister &source = ft;
     if (opCode == VPU_MOVE)
     {
       if (hasFlag(fieldMask, FP_REGISTER_X_FIELD))
@@ -2911,7 +3164,7 @@ void VPU::startFMACPipeline(Pipeline *p)
 
   if (opCode == VPU_MTIR)
   {
-    const FPRegister &source = fpRegisters[p->srcReg1];
+    const FPRegister &source = ft;
     switch (p->srcReg1FieldMask)
     {
       case FP_REGISTER_X_FIELD:
@@ -2935,202 +3188,204 @@ void VPU::startFMACPipeline(Pipeline *p)
   switch (opCode)
   {
     case VPU_ABS:
-      dest.storeAbs(&fpRegisters[fs], fieldMask);
+      dest.storeAbs(&fs, fieldMask);
       break;
     case VPU_ADD:
     case VPU_ADDA:
-      dest.storeAdd(&fpRegisters[ft], &fpRegisters[fs], fieldMask);
+      dest.storeAdd(&ft, &fs, fieldMask);
       break;
     case VPU_ADDi:
     case VPU_ADDAi:
-      dest.storeAddDouble(&fpRegisters[fs], iRegister, fieldMask);
+      dest.storeAddDouble(&fs, iRegister, fieldMask);
       break;
     case VPU_ADDq:
     case VPU_ADDAq:
-      dest.storeAddDouble(&fpRegisters[fs], qRegister, fieldMask);
+      dest.storeAddDouble(&fs, qRegister, fieldMask);
       break;
     case VPU_ADDx:
     case VPU_ADDAx:
-      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask);
+      dest.storeAddDouble(&fs, ft.x, fieldMask);
       break;
     case VPU_ADDy:
     case VPU_ADDAy:
-      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask);
+      dest.storeAddDouble(&fs, ft.y, fieldMask);
       break;
     case VPU_ADDz:
     case VPU_ADDAz:
-      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask);
+      dest.storeAddDouble(&fs, ft.z, fieldMask);
       break;
     case VPU_ADDw:
     case VPU_ADDAw:
-      dest.storeAddDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
+      dest.storeAddDouble(&fs, ft.w, fieldMask);
       break;
     case VPU_CLIP:
-      p->setIntResult(calculateNewClippingFlags(&fpRegisters[ft], &fpRegisters[fs]));
+      p->setIntResult(calculateNewClippingFlags(
+        &ft,
+        &fs));
       break;
     case VPU_FTOI0:
-      dest.toInt0(&fpRegisters[fs], fieldMask);
+      dest.toInt0(&fs, fieldMask);
       break;
     case VPU_FTOI4:
-      dest.toInt4(&fpRegisters[fs], fieldMask);
+      dest.toInt4(&fs, fieldMask);
       break;
     case VPU_FTOI12:
-      dest.toInt12(&fpRegisters[fs], fieldMask);
+      dest.toInt12(&fs, fieldMask);
       break;
     case VPU_FTOI15:
-      dest.toInt15(&fpRegisters[fs], fieldMask);
+      dest.toInt15(&fs, fieldMask);
       break;
     case VPU_ITOF0:
-      dest.toDouble0(&fpRegisters[fs], fieldMask);
+      dest.toDouble0(&fs, fieldMask);
       break;
     case VPU_ITOF4:
-      dest.toDouble4(&fpRegisters[fs], fieldMask);
+      dest.toDouble4(&fs, fieldMask);
       break;
     case VPU_ITOF12:
-      dest.toDouble12(&fpRegisters[fs], fieldMask);
+      dest.toDouble12(&fs, fieldMask);
       break;
     case VPU_ITOF15:
-      dest.toDouble15(&fpRegisters[fs], fieldMask);
+      dest.toDouble15(&fs, fieldMask);
       break;
     case VPU_MADD:
     case VPU_MSUB:
     case VPU_MUL:
-      dest.storeMul(&fpRegisters[ft], &fpRegisters[fs], fieldMask);
+      dest.storeMul(&ft, &fs, fieldMask);
       break;
     case VPU_MADDi:
     case VPU_MSUBi:
     case VPU_MULi:
-      dest.storeMulDouble(&fpRegisters[fs], iRegister, fieldMask);
+      dest.storeMulDouble(&fs, iRegister, fieldMask);
       break;
     case VPU_MADDq:
     case VPU_MSUBq:
     case VPU_MULq:
-      dest.storeMulDouble(&fpRegisters[fs], qRegister, fieldMask);
+      dest.storeMulDouble(&fs, qRegister, fieldMask);
       break;
     case VPU_MADDx:
     case VPU_MSUBx:
     case VPU_MULx:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask);
+      dest.storeMulDouble(&fs, ft.x, fieldMask);
       break;
     case VPU_MADDy:
     case VPU_MSUBy:
     case VPU_MULy:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask);
+      dest.storeMulDouble(&fs, ft.y, fieldMask);
       break;
     case VPU_MADDz:
     case VPU_MSUBz:
     case VPU_MULz:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask);
+      dest.storeMulDouble(&fs, ft.z, fieldMask);
       break;
     case VPU_MADDw:
     case VPU_MSUBw:
     case VPU_MULw:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
+      dest.storeMulDouble(&fs, ft.w, fieldMask);
       break;
     case VPU_MADDA:
     case VPU_MSUBA:
     case VPU_MULA:
-      dest.storeMul(&fpRegisters[ft], &fpRegisters[fs], fieldMask);
+      dest.storeMul(&ft, &fs, fieldMask);
       break;
     case VPU_MADDAi:
     case VPU_MSUBAi:
     case VPU_MULAi:
-      dest.storeMulDouble(&fpRegisters[fs], iRegister, fieldMask);
+      dest.storeMulDouble(&fs, iRegister, fieldMask);
       break;
     case VPU_MADDAq:
     case VPU_MSUBAq:
     case VPU_MULAq:
-      dest.storeMulDouble(&fpRegisters[fs], qRegister, fieldMask);
+      dest.storeMulDouble(&fs, qRegister, fieldMask);
       break;
     case VPU_MADDAx:
     case VPU_MSUBAx:
     case VPU_MULAx:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask);
+      dest.storeMulDouble(&fs, ft.x, fieldMask);
       break;
     case VPU_MADDAy:
     case VPU_MSUBAy:
     case VPU_MULAy:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask);
+      dest.storeMulDouble(&fs, ft.y, fieldMask);
       break;
     case VPU_MADDAz:
     case VPU_MSUBAz:
     case VPU_MULAz:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask);
+      dest.storeMulDouble(&fs, ft.z, fieldMask);
       break;
     case VPU_MADDAw:
     case VPU_MSUBAw:
     case VPU_MULAw:
-      dest.storeMulDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
+      dest.storeMulDouble(&fs, ft.w, fieldMask);
       break;
     case VPU_MAX:
-      dest.storeMax(&fpRegisters[fs], &fpRegisters[ft], fieldMask);
+      dest.storeMax(&fs, &ft, fieldMask);
       break;
     case VPU_MAXi:
-      dest.storeMaxDouble(&fpRegisters[fs], iRegister, fieldMask);
+      dest.storeMaxDouble(&fs, iRegister, fieldMask);
       break;
     case VPU_MAXx:
-      dest.storeMaxDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask);
+      dest.storeMaxDouble(&fs, ft.x, fieldMask);
       break;
     case VPU_MAXy:
-      dest.storeMaxDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask);
+      dest.storeMaxDouble(&fs, ft.y, fieldMask);
       break;
     case VPU_MAXz:
-      dest.storeMaxDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask);
+      dest.storeMaxDouble(&fs, ft.z, fieldMask);
       break;
     case VPU_MAXw:
-      dest.storeMaxDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
+      dest.storeMaxDouble(&fs, ft.w, fieldMask);
       break;
     case VPU_MINI:
-      dest.storeMin(&fpRegisters[fs], &fpRegisters[ft], fieldMask);
+      dest.storeMin(&fs, &ft, fieldMask);
       break;
     case VPU_MINIi:
-      dest.storeMinDouble(&fpRegisters[fs], iRegister, fieldMask);
+      dest.storeMinDouble(&fs, iRegister, fieldMask);
       break;
     case VPU_MINIx:
-      dest.storeMinDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask);
+      dest.storeMinDouble(&fs, ft.x, fieldMask);
       break;
     case VPU_MINIy:
-      dest.storeMinDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask);
+      dest.storeMinDouble(&fs, ft.y, fieldMask);
       break;
     case VPU_MINIz:
-      dest.storeMinDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask);
+      dest.storeMinDouble(&fs, ft.z, fieldMask);
       break;
     case VPU_MINIw:
-      dest.storeMinDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
+      dest.storeMinDouble(&fs, ft.w, fieldMask);
       break;
     case VPU_OPMULA:
-      dest.storeOuterProduct(&fpRegisters[fs], &fpRegisters[ft]);
+      dest.storeOuterProduct(&fs, &ft);
       break;
     case VPU_OPMSUB:
-      dest.storeOuterProduct(&fpRegisters[fs], &fpRegisters[ft]);
+      dest.storeOuterProduct(&fs, &ft);
       break;
     case VPU_SUB:
     case VPU_SUBA:
-      dest.storeSub(&fpRegisters[fs], &fpRegisters[ft], fieldMask);
+      dest.storeSub(&fs, &ft, fieldMask);
       break;
     case VPU_SUBi:
     case VPU_SUBAi:
-      dest.storeSubDouble(&fpRegisters[fs], iRegister, fieldMask);
+      dest.storeSubDouble(&fs, iRegister, fieldMask);
       break;
     case VPU_SUBq:
     case VPU_SUBAq:
-      dest.storeSubDouble(&fpRegisters[fs], qRegister, fieldMask);
+      dest.storeSubDouble(&fs, qRegister, fieldMask);
       break;
     case VPU_SUBx:
     case VPU_SUBAx:
-      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].x, fieldMask);
+      dest.storeSubDouble(&fs, ft.x, fieldMask);
       break;
     case VPU_SUBy:
     case VPU_SUBAy:
-      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].y, fieldMask);
+      dest.storeSubDouble(&fs, ft.y, fieldMask);
       break;
     case VPU_SUBz:
     case VPU_SUBAz:
-      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].z, fieldMask);
+      dest.storeSubDouble(&fs, ft.z, fieldMask);
       break;
     case VPU_SUBw:
     case VPU_SUBAw:
-      dest.storeSubDouble(&fpRegisters[fs], fpRegisters[ft].w, fieldMask);
+      dest.storeSubDouble(&fs, ft.w, fieldMask);
       break;
   }
 
@@ -3340,7 +3595,8 @@ void VPU::startLSUPipeline(Pipeline *pipeline)
         qwordAddress(base, pipeline->opCode == VPU_SQ
           ? pipeline->immediate
           : 0);
-      pipeline->setFPRegisterResult(&fpRegisters[pipeline->srcReg1]);
+      FPRegister &source = vectorSource1(pipeline);
+      pipeline->setFPRegisterResult(&source);
       if (pipeline->opCode == VPU_SQD)
       {
         pipeline->setIntResult(base);

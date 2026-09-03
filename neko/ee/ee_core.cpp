@@ -1438,12 +1438,8 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      if (attachedVU0().macroRegisterWritePending(
-            immediateDestination,
-            FP_REGISTER_ALL_FIELDS) ||
-          attachedVU0().macroRegisterReadPending(
-            immediateDestination,
-            FP_REGISTER_ALL_FIELDS))
+      if (attachedVU0().macroRegisterNumberWritePending(
+            immediateDestination))
       {
         pc = address;
         return false;
@@ -1472,6 +1468,7 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(value.low >> 32),
         static_cast<std::uint32_t>(value.high),
         static_cast<std::uint32_t>(value.high >> 32));
+      attachedVU0().noteMacroTransferToVU();
       return true;
     }
     case EEOperation::StoreQuadwordFromCOP2:
@@ -1486,9 +1483,8 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      if (attachedVU0().macroRegisterWritePending(
-            immediateDestination,
-            FP_REGISTER_ALL_FIELDS))
+      if (attachedVU0().macroRegisterNumberWritePending(
+            immediateDestination))
       {
         pc = address;
         return false;
@@ -1527,9 +1523,8 @@ bool EECore::executeInstruction(
     {
       if (((instruction.raw & 1) != 0 &&
            attachedVU0().microModeActive()) ||
-          attachedVU0().macroRegisterWritePending(
-            destination,
-            FP_REGISTER_ALL_FIELDS))
+          attachedVU0().macroRegisterNumberWritePending(
+            destination))
       {
         pc = address;
         return false;
@@ -1546,12 +1541,8 @@ bool EECore::executeInstruction(
     {
       if (((instruction.raw & 1) != 0 &&
            !attachedVU0().cop2WriteAvailable()) ||
-          attachedVU0().macroRegisterWritePending(
-            destination,
-            FP_REGISTER_ALL_FIELDS) ||
-          attachedVU0().macroRegisterReadPending(
-            destination,
-            FP_REGISTER_ALL_FIELDS))
+          attachedVU0().macroRegisterNumberWritePending(
+            destination))
       {
         pc = address;
         return false;
@@ -1564,6 +1555,7 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(value.low >> 32),
         static_cast<std::uint32_t>(value.high),
         static_cast<std::uint32_t>(value.high >> 32));
+      attachedVU0().noteMacroTransferToVU();
       return true;
     }
     case EEOperation::ControlMoveFromCOP2:
@@ -1571,7 +1563,7 @@ bool EECore::executeInstruction(
       if (((instruction.raw & 1) != 0 &&
            attachedVU0().microModeActive()) ||
           (destination < 16 &&
-           attachedVU0().macroIntegerWritePending(
+           attachedVU0().macroRegisterNumberWritePending(
              destination)) ||
           (attachedVU0().macroModeActive() &&
            (destination == 16 || destination == 17)))
@@ -1600,14 +1592,11 @@ bool EECore::executeInstruction(
       if (((instruction.raw & 1) != 0 &&
            !attachedVU0().cop2WriteAvailable()) ||
           (destination < 16 &&
-           attachedVU0().macroIntegerWritePending(
+           attachedVU0().macroRegisterNumberWritePending(
              destination)) ||
           (attachedVU0().macroModeActive() &&
            (destination == 16 ||
-            destination == 18 ||
-            destination == 20 ||
-            destination == 21 ||
-            destination == 22)))
+            destination == 18)))
       {
         pc = address;
         return false;
@@ -1620,6 +1609,7 @@ bool EECore::executeInstruction(
           address,
           instruction.raw);
       }
+      attachedVU0().noteMacroTransferToVU();
       return true;
     case EEOperation::BranchCOP2False:
     case EEOperation::BranchCOP2FalseLikely:
@@ -2733,21 +2723,21 @@ bool EECore::writeCOP2ControlRegister(
       attachedVU0().setClippingFlagsValue(value);
       return true;
     case 20:
-      if (attachedVU0().clockActive())
+      if (attachedVU0().microModeActive())
       {
         return false;
       }
       attachedVU0().setRandomRegisterValue(value);
       return true;
     case 21:
-      if (attachedVU0().clockActive())
+      if (attachedVU0().microModeActive())
       {
         return false;
       }
       attachedVU0().setIRegisterBits(value);
       return true;
     case 22:
-      if (attachedVU0().clockActive())
+      if (attachedVU0().microModeActive())
       {
         return false;
       }

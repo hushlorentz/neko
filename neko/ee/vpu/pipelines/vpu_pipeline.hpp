@@ -46,6 +46,8 @@ class Pipeline
     FPRegister flagResult;
     FPRegister operationResult;
     FPRegister accumulatorValue;
+    FPRegister sourceValue1;
+    FPRegister sourceValue2;
     uint8_t ignoredResultFields;
     uint8_t srcReg1;
     uint8_t srcReg2;
@@ -64,12 +66,13 @@ class Pipeline
     uint16_t intSourceValue2;
     bool intSource1Sampled;
     bool intSource2Sampled;
+    bool vectorSourcesSampled;
     bool xgkickStarted;
     bool discardWriteback;
 
     Pipeline();
     void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t destMask, uint8_t s1Mask, uint8_t s2Mask, uint16_t address, bool discard = false, int16_t immediateValue = 0);
-    void setFPRegisterResult(FPRegister * reg);
+    void setFPRegisterResult(FPRegister *reg);
     void setIntResult(int i);
     void advanceStage();
     bool isComplete() const;

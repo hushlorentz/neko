@@ -577,6 +577,9 @@ rather than host-side setup:
       architectural behavior agrees
 - [x] Audit every macro-mode opcode in the official table and reject reserved
       COP2 encodings deterministically
+- [x] Audit macro execution conformance, including whole-register VF/VI
+      hazards, transfer timing, divider serialization, and save-state
+      continuation
 
 ### EE COP1 and Multimedia Extensions
 
