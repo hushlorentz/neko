@@ -554,7 +554,6 @@ rather than host-side setup:
       ordinary RAM accesses through host-only bus helpers
 - [x] Implement VIF1 DMAC channel 1, including normal and source-chain modes,
       backpressure, completion, and interrupt state
-- [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
 - [x] Add a deterministic guest-driven transfer program that configures DMA,
       feeds VIF1, and observes completion and interrupt behavior
 
@@ -588,48 +587,6 @@ rather than host-side setup:
       hardware
 - [x] Convert the POINT/SPRITE demo into an independently authored guest
       program that submits its drawing work through emulated hardware
-
-### Long-Term Guest Execution Progression
-
-Keep each target incremental and expand it only when the preceding guest exposes
-the next concrete hardware or software dependency:
-
-- [ ] Advance through deterministic BIOS startup as the first large system
-      workload, adding IOP and other hardware only when execution requires it
-- [ ] Use directly loaded game executables for targeted bring-up experiments
-      without treating them as a substitute for the normal startup path
-- [ ] Boot a selected game through the BIOS as the long-term system-integration
-      target
-
-### Demand-Driven Graphics Diagnostics
-
-Add these when independently authored guest programs produce graphics failures
-that need more detail than the existing structured GIF/GS traces:
-
-- [ ] Report unsupported draw features by their decoded register fields and
-      values, while preserving strict failure behavior in the core
-- [ ] Capture a draw-kick snapshot containing the primitive and shading modes,
-      active context, framebuffer format, scissor and offset state, and each
-      submitted vertex with its `RGBAQ` value
-- [ ] Extend completion summaries with GS primitive counts, pixel writes, draw
-      bounds, and framebuffer hashes
-- [ ] Export selected GS framebuffer regions to a dependency-free portable
-      image format for inspecting external programs without frontend changes
-- [ ] Present completed guest-ELF GS framebuffers through the optional SDL
-      desktop when interactive visualization is useful; retain headless
-      `--elf` execution as the diagnostic path
-
-### Demand-Driven Hardware Expansion
-
-- [ ] Add IOP and SPU2 only when required by selected software
-
-### System Integration Programs
-
-- [ ] Exercise EE, DMA, VIF, VU1, GIF, and GS in one deterministic workload
-- [ ] Cover cross-component clock ratios, interrupts, and DMA completion ordering
-- [ ] Cover reset and restart while multiple hardware components are active
-- [x] Round-trip save states during representative workloads
-- [ ] Assert stable frame hashes and subsystem traces across repeated runs
 
 The emulation core must not open windows, poll host controllers, sleep, or print
 directly. Frontends provide those services through callbacks and buffers.
@@ -787,7 +744,56 @@ instruction tables and the requirements of selected guest programs.
       exception, save-state, and guest-program coverage
 - [ ] Complete a final reserved-encoding and conformance audit
 
-## Milestone 7: Frontends and libretro
+## Future Work
+
+These blocks are intentionally unsequenced. Promote and expand one into a
+numbered milestone only when an active guest or completed milestone establishes
+the concrete requirements.
+
+### Demand-Driven Hardware Expansion
+
+- [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
+- [ ] Add IOP, input devices, and SPU2 only when required by selected software
+
+### Long-Term Guest Execution Progression
+
+Keep each target incremental and expand it only when the preceding guest exposes
+the next concrete hardware or software dependency:
+
+- [ ] Advance through deterministic BIOS startup as the first large system
+      workload, adding IOP and other hardware only when execution requires it
+- [ ] Use directly loaded game executables for targeted bring-up experiments
+      without treating them as a substitute for the normal startup path
+- [ ] Boot a selected game through the BIOS as the long-term system-integration
+      target
+
+### Additional System Integration
+
+- [ ] Exercise EE, DMA, VIF, VU1, GIF, and GS in one deterministic workload
+- [ ] Cover cross-component clock ratios, interrupts, and DMA completion ordering
+- [ ] Cover reset and restart while multiple hardware components are active
+- [x] Round-trip save states during representative workloads
+- [ ] Assert stable frame hashes and subsystem traces across repeated runs
+
+### Demand-Driven Graphics Diagnostics
+
+Add these when independently authored guest programs produce graphics failures
+that need more detail than the existing structured GIF/GS traces:
+
+- [ ] Report unsupported draw features by their decoded register fields and
+      values, while preserving strict failure behavior in the core
+- [ ] Capture a draw-kick snapshot containing the primitive and shading modes,
+      active context, framebuffer format, scissor and offset state, and each
+      submitted vertex with its `RGBAQ` value
+- [ ] Extend completion summaries with GS primitive counts, pixel writes, draw
+      bounds, and framebuffer hashes
+- [ ] Export selected GS framebuffer regions to a dependency-free portable
+      image format for inspecting external programs without frontend changes
+- [ ] Present completed guest-ELF GS framebuffers through the optional SDL
+      desktop when interactive visualization is useful; retain headless
+      `--elf` execution as the diagnostic path
+
+## Future Milestone: Frontends and libretro
 
 ### Command-Line Debugger
 
