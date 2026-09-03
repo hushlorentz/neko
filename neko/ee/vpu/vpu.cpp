@@ -5,6 +5,7 @@
 #include "vpu.hpp"
 #include "vpu_field_mask.hpp"
 #include "vpu_flags.hpp"
+#include "vpu_instruction.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
 
@@ -13,76 +14,10 @@
 #define NUM_FP_REGISTERS 32
 #define NUM_INT_REGISTERS 16
 
-#define NUM_TYPE1_OPCODES 52
-uint16_t type1OpCodeList[NUM_TYPE1_OPCODES] = {VPU_ADD, VPU_ADDi, VPU_ADDq, VPU_ADDx, VPU_ADDy, VPU_ADDz, VPU_ADDw, VPU_ADDAx, VPU_ADDAy, VPU_ADDAz, VPU_ADDAw, VPU_MADD, VPU_MADDi, VPU_MADDq, VPU_MADDx, VPU_MADDy, VPU_MADDz, VPU_MADDw, VPU_MAX, VPU_MAXi, VPU_MAXx, VPU_MAXy, VPU_MAXz, VPU_MAXw, VPU_MINI, VPU_MINIi, VPU_MINIx, VPU_MINIy, VPU_MINIz, VPU_MINIw, VPU_MSUB, VPU_MSUBi, VPU_MSUBq, VPU_MSUBx, VPU_MSUBy, VPU_MSUBz, VPU_MSUBw, VPU_MUL, VPU_MULi, VPU_MULq, VPU_MULx, VPU_MULy, VPU_MULz, VPU_MULw, VPU_OPMSUB, VPU_SUB, VPU_SUBi, VPU_SUBq, VPU_SUBx, VPU_SUBy, VPU_SUBz, VPU_SUBw};
-
-#define NUM_TYPE3_OPCODES 43
-uint16_t type3OpCodeList[NUM_TYPE3_OPCODES] = {VPU_ABS, VPU_ADDA, VPU_ADDAi, VPU_ADDAq, VPU_CLIP, VPU_FTOI0, VPU_FTOI4, VPU_FTOI12, VPU_FTOI15, VPU_ITOF0, VPU_ITOF4, VPU_ITOF12, VPU_ITOF15, VPU_MADDA, VPU_MADDAi, VPU_MADDAq, VPU_MADDAx, VPU_MADDAy, VPU_MADDAz, VPU_MADDAw, VPU_MSUBA, VPU_MSUBAi, VPU_MSUBAq, VPU_MSUBAx, VPU_MSUBAy, VPU_MSUBAz, VPU_MSUBAw, VPU_MULA, VPU_MULAi, VPU_MULAq, VPU_MULAx, VPU_MULAy, VPU_MULAz, VPU_MULAw, VPU_NOP, VPU_OPMULA, VPU_SUBA, VPU_SUBAi, VPU_SUBAq, VPU_SUBAx, VPU_SUBAy, VPU_SUBAz, VPU_SUBAw};
-
 using namespace std;
 
 namespace
 {
-  bool upperInstructionUsesScalarRegister(uint16_t opCode)
-  {
-    switch (opCode)
-    {
-      case VPU_ADDi:
-      case VPU_ADDAi:
-      case VPU_ADDq:
-      case VPU_ADDAq:
-      case VPU_MADDi:
-      case VPU_MADDAi:
-      case VPU_MADDq:
-      case VPU_MADDAq:
-      case VPU_MAXi:
-      case VPU_MINIi:
-      case VPU_MSUBi:
-      case VPU_MSUBAi:
-      case VPU_MSUBq:
-      case VPU_MSUBAq:
-      case VPU_MULi:
-      case VPU_MULAi:
-      case VPU_MULq:
-      case VPU_MULAq:
-      case VPU_SUBi:
-      case VPU_SUBAi:
-      case VPU_SUBq:
-      case VPU_SUBAq:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  bool isCanonicalUpperEncoding(uint16_t opCode, uint32_t instruction)
-  {
-    if ((instruction & VPU_UPPER_RESERVED_BITS_MASK) != 0)
-    {
-      return false;
-    }
-
-    if (upperInstructionUsesScalarRegister(opCode) &&
-        (instruction & VPU_UPPER_FT_REGISTER_MASK) != 0)
-    {
-      return false;
-    }
-
-    switch (opCode)
-    {
-      case VPU_NOP:
-        return (instruction & VPU_UPPER_OPERAND_FIELDS_MASK) == 0;
-      case VPU_CLIP:
-      case VPU_OPMULA:
-      case VPU_OPMSUB:
-        return
-          (instruction & VPU_DEST_ALL_FIELDS) ==
-          VPU_DEST_XYZ_FIELDS;
-      default:
-        return true;
-    }
-  }
-
   bool isCompoundFMACOperation(uint16_t opCode)
   {
     switch (opCode)
@@ -356,7 +291,6 @@ VPU::VPU(VPUType type) : type(type)
   initMemory();
   initFPRegisters();
   initIntRegisters();
-  initOpCodeSets();
   initPipelineOrchestrator();
 }
 
@@ -389,19 +323,6 @@ void VPU::initFPRegisters()
 void VPU::initIntRegisters()
 {
   intRegisters.resize(NUM_INT_REGISTERS);
-}
-
-void VPU::initOpCodeSets()
-{
-  for (int i = 0; i < NUM_TYPE1_OPCODES; i++)
-  {
-    type1OpCodes.insert(type1OpCodeList[i]);
-  }
-
-  for (int i = 0; i < NUM_TYPE3_OPCODES; i++)
-  {
-    type3OpCodes.insert(type3OpCodeList[i]);
-  }
 }
 
 void VPU::initPipelineOrchestrator()
@@ -462,6 +383,7 @@ void VPU::forceBreak()
   }
 
   orchestrator.reset();
+  macroIssueNeedsAdvance = false;
   lowerInstructionPending = false;
   pendingIntegerWrites.fill(0);
   pendingIALUWrites.fill(0);
@@ -775,6 +697,7 @@ void VPU::startMicroMode(uint16_t startAddress)
   xgkickWaiting = false;
   xgkickTransferStarted = false;
   mode = VPU_MODE_MICRO;
+  macroIssueNeedsAdvance = false;
   microMemPC = startAddress;
   endDelaySlotPending = false;
   branchDelaySlotPending = false;
@@ -792,6 +715,7 @@ void VPU::startMicroMode(uint16_t startAddress)
 bool VPU::startMicroModeFromMacro(uint16_t startAddress)
 {
   if (!macroModeActive() ||
+      macroIssueNeedsAdvance ||
       !orchestrator.canAcceptInstruction())
   {
     return false;
@@ -806,6 +730,7 @@ bool VPU::startMicroModeFromMacro(uint16_t startAddress)
   }
 
   mode = VPU_MODE_MICRO;
+  macroIssueNeedsAdvance = false;
   microMemPC = startAddress;
   terminationPositionValid = false;
   endDelaySlotPending = false;
@@ -831,6 +756,24 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
   {
     throw logic_error("Macro instructions cannot execute while VU0 is stopped.");
   }
+  const VUMacroInstructionKind instructionKind =
+    classifyVUMacroInstruction(instruction);
+  if (instructionKind == VUMacroInstructionKind::Invalid)
+  {
+    throw logic_error("Unsupported VU macro instruction.");
+  }
+
+  LowerInstruction lowerInstruction;
+  if (instructionKind == VUMacroInstructionKind::Lower)
+  {
+    lowerInstruction =
+      decodeLowerInstruction(
+        instruction | VPU_I_BIT);
+    if (lowerInstructionStalls(lowerInstruction))
+    {
+      return false;
+    }
+  }
   if (state == VPU_STATE_RUN &&
       mode == VPU_MODE_MICRO)
   {
@@ -846,14 +789,27 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
     pendingBranchTaken = false;
     pendingBranchLinkValid = false;
   }
-  if (!orchestrator.canAcceptInstruction())
+  if (macroIssueNeedsAdvance ||
+      !orchestrator.canAcceptInstruction())
   {
     return false;
   }
 
-  processUpperInstruction(instruction);
+  if (instructionKind == VUMacroInstructionKind::Upper)
+  {
+    processUpperInstruction(instruction);
+  }
+  else
+  {
+    queueLowerInstruction(
+      lowerInstruction,
+      VPU_NOP,
+      VPU_NOP,
+      0);
+  }
   mode = VPU_MODE_MACRO;
   state = VPU_STATE_RUN;
+  macroIssueNeedsAdvance = true;
   terminationPositionValid = false;
   emitTrace({
     VPUTraceEventType::InstructionIssued,
@@ -882,11 +838,114 @@ bool VPU::macroRegisterWritePending(
   uint8_t registerID,
   uint8_t fieldMask) const
 {
+  if (!macroModeActive())
+  {
+    return false;
+  }
+  if (orchestrator.hasPendingRegisterWrite(
+        registerID,
+        fieldMask))
+  {
+    return true;
+  }
+  if (!lowerInstructionPending ||
+      pendingLowerInstruction.destinationRegister !=
+        registerID ||
+      (pendingLowerInstruction.destinationFieldMask &
+       fieldMask) == 0)
+  {
+    return false;
+  }
+  switch (pendingLowerInstruction.opCode)
+  {
+    case VPU_LQD:
+    case VPU_LQI:
+    case VPU_MFIR:
+    case VPU_MOVE:
+    case VPU_MR32:
+    case VPU_RGET:
+    case VPU_RNEXT:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool VPU::macroRegisterReadPending(
+  uint8_t registerID,
+  uint8_t fieldMask) const
+{
+  if (!macroModeActive())
+  {
+    return false;
+  }
+  if (orchestrator.hasPendingRegisterRead(
+        registerID,
+        fieldMask))
+  {
+    return true;
+  }
+  if (!lowerInstructionPending)
+  {
+    return false;
+  }
+  const LowerInstruction &pending =
+    pendingLowerInstruction;
+  switch (pending.opCode)
+  {
+    case VPU_SQD:
+    case VPU_SQI:
+      return
+        pending.sourceRegister1 == registerID &&
+        (pending.destinationFieldMask & fieldMask) != 0;
+    case VPU_MOVE:
+    case VPU_MR32:
+    case VPU_MTIR:
+    case VPU_RINIT:
+    case VPU_RXOR:
+      return
+        pending.sourceRegister1 == registerID &&
+        (pending.sourceFieldMask1 & fieldMask) != 0;
+    case VPU_DIV:
+    case VPU_RSQRT:
+    case VPU_SQRT:
+      return
+        (pending.sourceRegister1 == registerID &&
+         (pending.sourceFieldMask1 & fieldMask) != 0) ||
+        (pending.sourceRegister2 == registerID &&
+         (pending.sourceFieldMask2 & fieldMask) != 0);
+    default:
+      return false;
+  }
+}
+
+bool VPU::macroIntegerWritePending(
+  uint8_t registerID) const
+{
+  if (!macroModeActive() ||
+      registerID == VPU_REGISTER_VI00)
+  {
+    return false;
+  }
+  if (pendingIntegerWrites[registerID] != 0 ||
+      pendingIALUWrites[registerID] != 0)
+  {
+    return true;
+  }
+  if (!lowerInstructionPending)
+  {
+    return false;
+  }
+  if (pendingLowerInstruction.unit ==
+      LowerExecutionUnit::IALU)
+  {
+    return
+      pendingLowerInstruction.destinationRegister ==
+      registerID;
+  }
   return
-    macroModeActive() &&
-    orchestrator.hasPendingRegisterWrite(
-      registerID,
-      fieldMask);
+    pendingLowerInstruction.integerDestinationRegister ==
+    registerID;
 }
 
 bool VPU::clockActive() const
@@ -914,7 +973,10 @@ bool VPU::tick()
     if (mode == VPU_MODE_MACRO)
     {
       orchestrator.update();
-      if (!orchestrator.hasNext())
+      executePendingLowerInstruction();
+      macroIssueNeedsAdvance = false;
+      if (!orchestrator.hasNext() &&
+          !lowerInstructionPending)
       {
         state = VPU_STATE_READY;
       }
@@ -1059,6 +1121,7 @@ bool VPU::tick()
   }
   catch (...)
   {
+    macroIssueNeedsAdvance = false;
     lowerInstructionPending = false;
     pendingIntegerWrites.fill(0);
     pendingIALUWrites.fill(0);
@@ -1191,26 +1254,11 @@ uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
 
 uint16_t VPU::opCodeFromInstruction(uint32_t instruction)
 {
-  uint16_t type3OpCode = instruction & VPU_TYPE3_MASK;
-  if (type3OpCodes.find(type3OpCode) != type3OpCodes.end())
+  uint16_t opCode = 0;
+  if (decodeVUUpperInstruction(instruction, &opCode))
   {
-    if (isCanonicalUpperEncoding(type3OpCode, instruction))
-    {
-      return type3OpCode;
-    }
-    throw runtime_error("Unsupported VU upper instruction.");
+    return opCode;
   }
-
-  uint16_t type1OpCode = instruction & VPU_TYPE1_MASK;
-  if (type1OpCodes.find(type1OpCode) != type1OpCodes.end())
-  {
-    if (isCanonicalUpperEncoding(type1OpCode, instruction))
-    {
-      return type1OpCode;
-    }
-    throw runtime_error("Unsupported VU upper instruction.");
-  }
-
   throw runtime_error("Unsupported VU upper instruction.");
 }
 
@@ -2267,6 +2315,7 @@ void VPU::resetFromControl()
   clippingFlags = 0;
   pendingAccumulatorWrites = 0;
   accumulatorForwardValid = false;
+  macroIssueNeedsAdvance = false;
   lowerInstructionPending = false;
   pendingLowerInstructionReady = false;
   pendingLowerWritebackDiscarded = false;

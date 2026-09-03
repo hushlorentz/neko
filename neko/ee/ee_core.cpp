@@ -1440,6 +1440,9 @@ bool EECore::executeInstruction(
       }
       if (attachedVU0().macroRegisterWritePending(
             immediateDestination,
+            FP_REGISTER_ALL_FIELDS) ||
+          attachedVU0().macroRegisterReadPending(
+            immediateDestination,
             FP_REGISTER_ALL_FIELDS))
       {
         pc = address;
@@ -1545,6 +1548,9 @@ bool EECore::executeInstruction(
            !attachedVU0().cop2WriteAvailable()) ||
           attachedVU0().macroRegisterWritePending(
             destination,
+            FP_REGISTER_ALL_FIELDS) ||
+          attachedVU0().macroRegisterReadPending(
+            destination,
             FP_REGISTER_ALL_FIELDS))
       {
         pc = address;
@@ -1564,6 +1570,9 @@ bool EECore::executeInstruction(
     {
       if (((instruction.raw & 1) != 0 &&
            attachedVU0().microModeActive()) ||
+          (destination < 16 &&
+           attachedVU0().macroIntegerWritePending(
+             destination)) ||
           (attachedVU0().macroModeActive() &&
            (destination == 16 || destination == 17)))
       {
@@ -1590,8 +1599,15 @@ bool EECore::executeInstruction(
     case EEOperation::ControlMoveToCOP2:
       if (((instruction.raw & 1) != 0 &&
            !attachedVU0().cop2WriteAvailable()) ||
+          (destination < 16 &&
+           attachedVU0().macroIntegerWritePending(
+             destination)) ||
           (attachedVU0().macroModeActive() &&
-           destination == 16))
+           (destination == 16 ||
+            destination == 18 ||
+            destination == 20 ||
+            destination == 21 ||
+            destination == 22)))
       {
         pc = address;
         return false;

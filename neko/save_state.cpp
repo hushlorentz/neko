@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 11;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 12;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1788,6 +1788,7 @@ void NekoSaveStateCodec::writeVPU(
   writer->writeU8(vpu.state);
   writer->writeU32(vpu.cycles);
   writer->writeU8(vpu.mode);
+  writer->writeBool(vpu.macroIssueNeedsAdvance);
   writer->writeU16(vpu.microMemPC);
   writer->writeU16(vpu.terminationPositionCounter);
   writer->writeBool(vpu.terminationPositionValid);
@@ -1870,6 +1871,8 @@ void NekoSaveStateCodec::readVPU(
   vpu->state = reader->readU8();
   vpu->cycles = reader->readU32();
   vpu->mode = reader->readU8();
+  vpu->macroIssueNeedsAdvance =
+    reader->readBool("VU macro issue-advance flag");
   vpu->microMemPC = reader->readU16();
   vpu->terminationPositionCounter = reader->readU16();
   vpu->terminationPositionValid =
@@ -1966,6 +1969,11 @@ void NekoSaveStateCodec::readVPU(
     vpu->mode == VPU_MODE_MACRO,
     "VU mode is invalid");
   require(
+    !vpu->macroIssueNeedsAdvance ||
+    (vpu->state == VPU_STATE_RUN &&
+     vpu->mode == VPU_MODE_MACRO),
+    "VU macro issue-advance state is invalid");
+  require(
     vpu->microMemPC <= vpu->microMem.size() &&
     vpu->microMemPC % 8 == 0,
     "VU program counter is invalid");
@@ -2023,6 +2031,8 @@ void NekoSaveStateCodec::commitVPU(
   destination->state = source->state;
   destination->cycles = source->cycles;
   destination->mode = source->mode;
+  destination->macroIssueNeedsAdvance =
+    source->macroIssueNeedsAdvance;
   destination->microMemPC = source->microMemPC;
   destination->terminationPositionCounter =
     source->terminationPositionCounter;

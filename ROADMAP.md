@@ -571,11 +571,11 @@ rather than host-side setup:
 - [x] Decode and execute the first VU macro arithmetic slice: `VADD`,
       `VADDi`, `VADDq`, `VADDx/y/z/w`, `VSUB`, `VSUBi`, `VSUBq`, and
       `VSUBx/y/z/w`
-- [ ] Decode the remaining VU macro arithmetic, conversion, memory, transfer,
+- [x] Decode the remaining VU macro arithmetic, conversion, memory, transfer,
       random, and synchronization instruction families and reuse the
       corresponding microinstruction execution semantics where their
       architectural behavior agrees
-- [ ] Audit every macro-mode opcode in the official table and reject reserved
+- [x] Audit every macro-mode opcode in the official table and reject reserved
       COP2 encodings deterministically
 
 ### EE COP1 and Multimedia Extensions

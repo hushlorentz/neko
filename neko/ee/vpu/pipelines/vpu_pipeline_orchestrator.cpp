@@ -237,6 +237,36 @@ bool PipelineOrchestrator::hasPendingRegisterWrite(
   return false;
 }
 
+bool PipelineOrchestrator::hasPendingRegisterRead(
+  uint8_t registerID,
+  uint8_t fieldMask) const
+{
+  const auto conflicts =
+    [registerID, fieldMask](const Pipeline *pipeline)
+    {
+      return
+        ((pipeline->srcReg1 == registerID &&
+          (pipeline->srcReg1FieldMask & fieldMask) != 0) ||
+         (pipeline->srcReg2 == registerID &&
+          (pipeline->srcReg2FieldMask & fieldMask) != 0));
+    };
+  for (const Pipeline *pipeline : executing)
+  {
+    if (conflicts(pipeline))
+    {
+      return true;
+    }
+  }
+  for (const Pipeline *pipeline : waiting)
+  {
+    if (conflicts(pipeline))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1FieldMask, uint8_t srcReg2, uint8_t srcReg2FieldMask) const
 {
   for (list<Pipeline *>::const_iterator iter = executing.begin(); iter != executing.end(); ++iter)

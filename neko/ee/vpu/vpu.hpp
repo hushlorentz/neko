@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <set>
 #include <vector>
 
 #include "clocked_component.hpp"
@@ -111,6 +110,11 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool macroRegisterWritePending(
       uint8_t registerID,
       uint8_t fieldMask) const;
+    bool macroRegisterReadPending(
+      uint8_t registerID,
+      uint8_t fieldMask) const;
+    bool macroIntegerWritePending(
+      uint8_t registerID) const;
     bool clockActive() const override;
     void clock() override;
     bool tick();
@@ -173,6 +177,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     uint8_t state = VPU_STATE_READY;
     uint32_t cycles = 0;
     uint8_t mode = VPU_MODE_MACRO;
+    bool macroIssueNeedsAdvance = false;
     uint16_t microMemPC = 0;
     uint16_t terminationPositionCounter = 0;
     bool terminationPositionValid = false;
@@ -205,10 +210,6 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool tBitStop = false;
     bool forceBreakStop = false;
     bool cop2WriteInterlockReleased = false;
-    set<uint16_t> type0OpCodes;
-    set<uint16_t> type1OpCodes;
-    set<uint16_t> type2OpCodes;
-    set<uint16_t> type3OpCodes;
     PipelineOrchestrator orchestrator;
     FPRegister virtualDestRegister;
     FPRegister accumulatorForwardValue;
@@ -226,7 +227,6 @@ class VPU : public ClockedComponent, public PipelineHandler
     void initMemory();
     void initFPRegisters();
     void initIntRegisters();
-    void initOpCodeSets();
     void initPipelineOrchestrator();
     void executeMicroInstructions();
     void emitTrace(const VPUTraceEvent &event) const;

@@ -66,7 +66,8 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
     {"vif1_dma.elf", 34},
     {"cop2_transfer.elf", 19},
     {"cop2_control.elf", 23},
-    {"vu_macro_arithmetic.elf", 35}
+    {"vu_macro_arithmetic.elf", 35},
+    {"vu_macro_families.elf", 107}
   };
 
   for (const GuestExpectation &guest : guests)
@@ -74,7 +75,7 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
     CAPTURE(guest.fileName);
     NekoSystem system;
     const EEGuestExecutionResult result =
-      system.runELF(readGuest(guest.fileName), 128);
+      system.runELF(readGuest(guest.fileName), 512);
 
     REQUIRE(result.outcome == EEGuestOutcome::Completed);
     REQUIRE(result.exitCode == 0);
@@ -163,6 +164,26 @@ TEST_CASE("PS2DEV EE ELF guest executes VU0 macro arithmetic")
   REQUIRE(broadcast->y == 16);
   REQUIRE(broadcast->z == 26);
   REQUIRE(broadcast->w == 36);
+}
+
+TEST_CASE("PS2DEV EE ELF guest executes remaining VU0 macro families")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(
+      readGuest("vu_macro_families.elf"),
+      512);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 107);
+  REQUIRE(system.vu0().intRegisterValue(3) == 12);
+  const FPRegister *moved =
+    system.vu0().fpRegisterValue(8);
+  REQUIRE(moved->x == 20);
+  REQUIRE(moved->y == 3);
+  REQUIRE(moved->z == 24);
+  REQUIRE(moved->w == 10);
 }
 
 TEST_CASE("PS2DEV EE ELF guest configures VIF1 DMA")

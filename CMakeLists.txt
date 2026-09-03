@@ -78,6 +78,7 @@ add_library(neko_core
     neko/ee/vif/vif.cpp
     neko/ee/vif/vif_command.cpp
     neko/ee/vpu/vpu.cpp
+    neko/ee/vpu/vpu_instruction.cpp
     neko/ee/vpu/vpu_lower_instruction.cpp
     neko/ee/vpu/pipelines/vpu_pipeline.cpp
     neko/ee/vpu/pipelines/vpu_pipeline_orchestrator.cpp

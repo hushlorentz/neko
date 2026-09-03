@@ -102,6 +102,10 @@ verify_ee_elf_fixture(
   vu_macro_arithmetic.elf
   7fd2baf8ba09bc8c43dff19d6fa0d8e48cff9f182911dbf0334a8fd673aa5c2d
 )
+verify_ee_elf_fixture(
+  vu_macro_families.elf
+  f09d304e80cc06bef0648a2012b6fd18767c85f43db582c2079d8f02f2b96d88
+)
 
 verify_fixture(
   integer_fill.bin
