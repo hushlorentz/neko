@@ -22,7 +22,8 @@ namespace
     Special,
     Regimm,
     Mmi,
-    Cop0
+    Cop0,
+    Cop2
   };
 
   struct DecodeEntry
@@ -58,6 +59,7 @@ namespace
     table[0x00].kind = DecodeKind::Special;
     table[0x01].kind = DecodeKind::Regimm;
     table[0x10].kind = DecodeKind::Cop0;
+    table[0x12].kind = DecodeKind::Cop2;
     table[0x1c].kind = DecodeKind::Mmi;
     table[0x13].kind = DecodeKind::Reserved;
     table[0x1d].kind = DecodeKind::Reserved;
@@ -126,6 +128,8 @@ namespace
     direct(&table, 0x2d, EEOperation::StoreDoublewordRight);
     direct(&table, 0x2e, EEOperation::StoreWordRight);
     direct(&table, 0x37, EEOperation::LoadDoubleword);
+    direct(&table, 0x36, EEOperation::LoadQuadwordToCOP2);
+    direct(&table, 0x3e, EEOperation::StoreQuadwordFromCOP2);
     direct(&table, 0x3f, EEOperation::StoreDoubleword);
     direct(&table, 0x14, EEOperation::BranchEqualLikely);
     direct(&table, 0x15, EEOperation::BranchNotEqualLikely);
@@ -625,6 +629,24 @@ namespace
         ? DecodeKind::Unsupported
         : DecodeKind::Reserved);
   }
+
+  void applyCop2(EEInstruction *instruction)
+  {
+    if (instruction->sourceRegister == 0x01 ||
+        instruction->sourceRegister == 0x05)
+    {
+      if ((instruction->raw & UINT32_C(0x000007fe)) != 0)
+      {
+        reject(DecodeKind::Reserved);
+      }
+      instruction->operation =
+        instruction->sourceRegister == 0x01
+          ? EEOperation::QuadwordMoveFromCOP2
+          : EEOperation::QuadwordMoveToCOP2;
+      return;
+    }
+    reject(DecodeKind::Unsupported);
+  }
 }
 
 EEInstructionDecodeError::EEInstructionDecodeError(
@@ -717,6 +739,11 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
   if (primary.kind == DecodeKind::Cop0)
   {
     applyCop0(&instruction);
+    return instruction;
+  }
+  if (primary.kind == DecodeKind::Cop2)
+  {
+    applyCop2(&instruction);
     return instruction;
   }
 

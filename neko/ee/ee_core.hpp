@@ -9,6 +9,7 @@
 #include "ee_instruction.hpp"
 
 class EEBus;
+class VPU;
 
 struct EERegister128
 {
@@ -140,6 +141,7 @@ class EECore : public ClockedComponent
 
     void reset();
     void attachBus(EEBus *bus);
+    void attachVU0(VPU *vu0);
     EEInstructionFetchResult fetchInstruction();
     void startExecution(std::uint32_t startAddress);
     void haltExecution();
@@ -236,6 +238,7 @@ class EECore : public ClockedComponent
     std::uint32_t cop0EPC = 0;
     std::uint32_t cop0ErrorEPC = 0;
     EEBus *bus = nullptr;
+    VPU *vu0 = nullptr;
     EEException exception = EEException::None;
     std::uint32_t faultAddress = 0;
     EEExecutionState state = EEExecutionState::Halted;
@@ -266,6 +269,7 @@ class EECore : public ClockedComponent
       std::uint32_t stackPointer,
       std::uint32_t returnAddress);
     EEBus &attachedBus() const;
+    VPU &attachedVU0() const;
     EEInstructionFetchResult raiseFetchException(
       EEException type,
       std::uint32_t address);

@@ -560,8 +560,10 @@ rather than host-side setup:
 
 ### EE COP2 and VU Macro Mode
 
-- [ ] Implement EE COP2 branches and transfers: `BC2F`, `BC2FL`, `BC2T`,
-      `BC2TL`, `CFC2`, `CTC2`, `LQC2`, `QMFC2`, `QMTC2`, and `SQC2`
+- [x] Implement EE COP2 vector transfers: `LQC2`, `QMFC2`, `QMTC2`, and
+      `SQC2`
+- [ ] Implement EE COP2 control transfers and branches: `CFC2`, `CTC2`,
+      `BC2F`, `BC2FL`, `BC2T`, and `BC2TL`
 - [ ] Implement `VCALLMS` and `VCALLMSR` microprogram initiation
 - [ ] Decode the VU macro arithmetic, conversion, memory, transfer, random,
       and synchronization instruction families and reuse the corresponding

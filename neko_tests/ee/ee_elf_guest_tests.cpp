@@ -44,7 +44,8 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
     {"memory.elf", 23},
     {"mmio.elf", 20},
     {"fifo.elf", 16},
-    {"vif1_dma.elf", 34}
+    {"vif1_dma.elf", 34},
+    {"cop2_transfer.elf", 19}
   };
 
   for (const GuestExpectation &guest : guests)
@@ -64,6 +65,25 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
       result.execution.programCounter ==
       EEGuestRuntime::RETURN_ADDRESS);
   }
+}
+
+TEST_CASE("PS2DEV EE ELF guest transfers vectors through VU0 COP2")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop2_transfer.elf"), 64);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  const FPRegister *vf1 = system.vu0().fpRegisterValue(1);
+  const FPRegister *vf2 = system.vu0().fpRegisterValue(2);
+  REQUIRE(vf1->x.bits() == UINT32_C(0x33221100));
+  REQUIRE(vf1->y.bits() == UINT32_C(0x77665544));
+  REQUIRE(vf1->z.bits() == UINT32_C(0xbbaa9988));
+  REQUIRE(vf1->w.bits() == UINT32_C(0xffeeddcc));
+  REQUIRE(vf2->x.bits() == vf1->x.bits());
+  REQUIRE(vf2->y.bits() == vf1->y.bits());
+  REQUIRE(vf2->z.bits() == vf1->z.bits());
+  REQUIRE(vf2->w.bits() == vf1->w.bits());
 }
 
 TEST_CASE("PS2DEV EE ELF guest configures VIF1 DMA")

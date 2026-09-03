@@ -189,6 +189,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp
     neko_tests/ee/ee_cop0_tests.cpp
+    neko_tests/ee/ee_cop2_tests.cpp
     neko_tests/ee/ee_elf_guest_tests.cpp
     neko_tests/ee/ee_elf_loader_tests.cpp
     neko_tests/ee/ee_doubleword_memory_tests.cpp

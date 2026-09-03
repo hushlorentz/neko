@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "ee_bus.hpp"
+#include "vpu/vpu.hpp"
 
 constexpr std::size_t EECore::GENERAL_REGISTER_COUNT;
 
@@ -48,6 +49,17 @@ namespace
       return UINT64_C(0xffffffff00000000) | value;
     }
     return value;
+  }
+
+  EERegister128 quadwordFromFPRegister(
+    const FPRegister &value)
+  {
+    return {
+      static_cast<std::uint64_t>(value.x.bits()) |
+        (static_cast<std::uint64_t>(value.y.bits()) << 32),
+      static_cast<std::uint64_t>(value.z.bits()) |
+        (static_cast<std::uint64_t>(value.w.bits()) << 32)
+    };
   }
 
   std::int32_t signedWord(std::uint32_t value)
@@ -232,6 +244,26 @@ void EECore::attachBus(EEBus *newBus)
       "EE Core bus is already attached.");
   }
   bus = newBus;
+}
+
+void EECore::attachVU0(VPU *newVU0)
+{
+  if (newVU0 == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE Core requires a non-null VU0.");
+  }
+  if (vu0 != nullptr)
+  {
+    throw std::logic_error(
+      "EE Core VU0 is already attached.");
+  }
+  if (newVU0->unitType() != VPUType::VU0)
+  {
+    throw std::invalid_argument(
+      "EE Core COP2 must attach to VU0.");
+  }
+  vu0 = newVU0;
 }
 
 EEInstructionFetchResult EECore::fetchInstruction()
@@ -1374,6 +1406,120 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::LoadQuadwordToCOP2:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      if ((dataAddress & 0x0f) != 0)
+      {
+        return raiseDataAccessException(
+          EEException::AddressErrorLoadOrFetch,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      EEQuadword value = {};
+      const bool succeeded =
+        attachedBus().readData128(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        16,
+        false,
+        succeeded,
+        succeeded ? value.low : 0,
+        succeeded ? value.high : 0);
+      if (!succeeded)
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      attachedVU0().loadFPRegisterBits(
+        immediateDestination,
+        static_cast<std::uint32_t>(value.low),
+        static_cast<std::uint32_t>(value.low >> 32),
+        static_cast<std::uint32_t>(value.high),
+        static_cast<std::uint32_t>(value.high >> 32));
+      return true;
+    }
+    case EEOperation::StoreQuadwordFromCOP2:
+    {
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      if ((dataAddress & 0x0f) != 0)
+      {
+        return raiseDataAccessException(
+          EEException::AddressErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      const EERegister128 value = quadwordFromFPRegister(
+        *attachedVU0().fpRegisterValue(immediateDestination));
+      const EEDataWriteResult writeResult =
+        attachedBus().writeGuestData128(
+          dataAddress,
+          {value.low, value.high});
+      const bool succeeded =
+        writeResult == EEDataWriteResult::Completed;
+      recordMemoryTrace(
+        dataAddress,
+        16,
+        true,
+        succeeded,
+        value.low,
+        value.high);
+      if (writeResult == EEDataWriteResult::Stalled)
+      {
+        pc = address;
+        return false;
+      }
+      if (!succeeded)
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return true;
+    }
+    case EEOperation::QuadwordMoveFromCOP2:
+    {
+      if ((instruction.raw & 1) != 0 &&
+          attachedVU0().clockActive())
+      {
+        pc = address;
+        return false;
+      }
+      if (immediateDestination != 0)
+      {
+        generalRegisters[immediateDestination] =
+          quadwordFromFPRegister(
+            *attachedVU0().fpRegisterValue(destination));
+      }
+      return true;
+    }
+    case EEOperation::QuadwordMoveToCOP2:
+    {
+      if ((instruction.raw & 1) != 0 &&
+          attachedVU0().clockActive())
+      {
+        pc = address;
+        return false;
+      }
+      const EERegister128 &value =
+        generalRegisters[immediateDestination];
+      attachedVU0().loadFPRegisterBits(
+        destination,
+        static_cast<std::uint32_t>(value.low),
+        static_cast<std::uint32_t>(value.low >> 32),
+        static_cast<std::uint32_t>(value.high),
+        static_cast<std::uint32_t>(value.high >> 32));
+      return true;
+    }
     case EEOperation::Jump:
       scheduleBranch(
         true,
@@ -2303,6 +2449,16 @@ EEBus &EECore::attachedBus() const
       "EE Core bus is not attached.");
   }
   return *bus;
+}
+
+VPU &EECore::attachedVU0() const
+{
+  if (vu0 == nullptr)
+  {
+    throw std::logic_error(
+      "EE Core VU0 is not attached.");
+  }
+  return *vu0;
 }
 
 EEInstructionFetchResult EECore::raiseFetchException(
