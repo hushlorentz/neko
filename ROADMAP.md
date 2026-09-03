@@ -594,7 +594,7 @@ rather than host-side setup:
 
 ### Guest Demo Migration
 
-- [ ] Convert the rotating-triangle demo into an independently authored guest
+- [x] Convert the rotating-triangle demo into an independently authored guest
       program that drives its VU1, VIF, GIF, and GS work through emulated
       hardware
 - [ ] Convert the POINT/SPRITE demo into an independently authored guest

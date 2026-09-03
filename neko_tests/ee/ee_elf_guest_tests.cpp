@@ -208,6 +208,42 @@ TEST_CASE("PS2DEV EE ELF guest configures VIF1 DMA")
   REQUIRE(system.gifDMAC().interruptPending());
 }
 
+TEST_CASE("PS2DEV EE ELF guest renders a rotating VU1 triangle")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("rotation_vu1.elf"), 4096);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 705);
+  REQUIRE(system.vu1().getState() == VPU_STATE_READY);
+  REQUIRE_FALSE(system.gifPath1().path1TransferActive());
+  REQUIRE(system.gifPath1().transferredQuadwordCount() == 12);
+  REQUIRE(system.vif1DMAC().transferredQuadwordCount() == 38);
+  REQUIRE(system.vif1().wordsIngested() == 152);
+  REQUIRE(system.gs().triangleCount() == 1);
+  const GIFQuadword first =
+    system.vu1().readDataQuadword(12);
+  const GIFQuadword second =
+    system.vu1().readDataQuadword(14);
+  const GIFQuadword third =
+    system.vu1().readDataQuadword(16);
+  REQUIRE(first[0] == UINT32_C(0x00008000));
+  REQUIRE(first[1] == UINT32_C(0x00007caf));
+  REQUIRE(first[2] == UINT32_C(0x00000c00));
+  REQUIRE(second[0] == UINT32_C(0x000071db));
+  REQUIRE(second[1] == UINT32_C(0x00008ad4));
+  REQUIRE(second[2] == UINT32_C(0x00000c00));
+  REQUIRE(third[0] == UINT32_C(0x00007783));
+  REQUIRE(third[1] == UINT32_C(0x0000907c));
+  REQUIRE(third[2] == UINT32_C(0x00000c00));
+  REQUIRE(system.gs().pixelWriteCount() == 20566);
+  REQUIRE(
+    system.gs().framebufferHash(0, 640, 448) ==
+    UINT64_C(0xdf0bce57b91fbbd3));
+}
+
 TEST_CASE("PS2DEV EE ELF guest writes VIF and GIF FIFOs")
 {
   NekoSystem system;

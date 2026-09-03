@@ -239,5 +239,9 @@ verify_fixture(
   rotation_vu1_capstone.bin
   97025d110afe6b9c61b3094f81da514a7f064b44b60ba1c202c647973e196ad0
 )
+verify_ee_elf_fixture(
+  rotation_vu1.elf
+  15a69f9505959eb2be7c52f38a525465ac26ce3d55b353e8a23eda6d91478adf
+)
 
 message(STATUS "Repository checks passed")

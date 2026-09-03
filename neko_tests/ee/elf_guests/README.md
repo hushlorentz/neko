@@ -18,6 +18,9 @@ The fixtures exercise:
 - `vu_macro_arithmetic.elf`: pipelined VU0 `VADD`/`VSUB` macro arithmetic
 - `vu_macro_families.elf`: VU0 macro multiply, min/max, conversion, movement,
   and integer arithmetic families
+- `rotation_vu1.elf`: guest-configured VIF1 DMA uploads a VU1 transform,
+  unpacks a rotated triangle and GIF packet, starts it through `MSCAL`, and
+  renders through `XGKICK` and GIF PATH1
 
 Each guest returns zero through `$v0` on success or a small diagnostic code on
 failure, then returns through `$ra` to Neko's host sentinel.
@@ -48,6 +51,7 @@ f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386  cop2_control.e
 d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7  vcallms.elf
 7fd2baf8ba09bc8c43dff19d6fa0d8e48cff9f182911dbf0334a8fd673aa5c2d  vu_macro_arithmetic.elf
 f09d304e80cc06bef0648a2012b6fd18767c85f43db582c2079d8f02f2b96d88  vu_macro_families.elf
+15a69f9505959eb2be7c52f38a525465ac26ce3d55b353e8a23eda6d91478adf  rotation_vu1.elf
 ```
 
 Inspect a generated fixture with:
