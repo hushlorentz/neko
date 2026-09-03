@@ -555,7 +555,7 @@ rather than host-side setup:
 - [x] Implement VIF1 DMAC channel 1, including normal and source-chain modes,
       backpressure, completion, and interrupt state
 - [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
-- [ ] Add a deterministic guest-driven transfer program that configures DMA,
+- [x] Add a deterministic guest-driven transfer program that configures DMA,
       feeds VIF1, and observes completion and interrupt behavior
 
 ### EE COP2 and VU Macro Mode

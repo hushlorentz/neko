@@ -82,6 +82,10 @@ verify_ee_elf_fixture(
   fifo.elf
   0649d2f7dd8dd396ff1f45d4fa962b1bed53044a9972dbc97f7e3fb846161fae
 )
+verify_ee_elf_fixture(
+  vif1_dma.elf
+  df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20
+)
 
 verify_fixture(
   integer_fill.bin

@@ -43,7 +43,8 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
     {"branches.elf", 12},
     {"memory.elf", 23},
     {"mmio.elf", 20},
-    {"fifo.elf", 16}
+    {"fifo.elf", 16},
+    {"vif1_dma.elf", 34}
   };
 
   for (const GuestExpectation &guest : guests)
@@ -63,6 +64,28 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
       result.execution.programCounter ==
       EEGuestRuntime::RETURN_ADDRESS);
   }
+}
+
+TEST_CASE("PS2DEV EE ELF guest configures VIF1 DMA")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("vif1_dma.elf"), 128);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(system.vif1().wordsIngested() == 4);
+  REQUIRE(system.vif1().fifoQuadwordCount() == 0);
+  REQUIRE(system.vif1DMAC().transferredQuadwordCount() == 1);
+  REQUIRE(
+    (system.vif1DMAC().channelControl() &
+     GIFDMACChannelControl::START) == 0);
+  REQUIRE(
+    (system.gifDMAC().globalStatus() &
+     GIFDMACStatus::CHANNEL_1) != 0);
+  REQUIRE(
+    (system.gifDMAC().globalStatus() &
+     GIFDMACStatus::CHANNEL_1_MASK) != 0);
+  REQUIRE(system.gifDMAC().interruptPending());
 }
 
 TEST_CASE("PS2DEV EE ELF guest writes VIF and GIF FIFOs")
