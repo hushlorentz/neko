@@ -20,6 +20,7 @@
 #include "regression_trace.hpp"
 #include "system_interfaces.hpp"
 #include "vif.hpp"
+#include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
 
 struct EEExecutionResult
@@ -120,6 +121,8 @@ class NekoSystem
     const GIFRegisters &gifRegisters() const;
     GIFDMACChannel &gifDMAC();
     const GIFDMACChannel &gifDMAC() const;
+    VIF1DMACChannel &vif1DMAC();
+    const VIF1DMACChannel &vif1DMAC() const;
     GSDisplay &gsDisplay();
     const GSDisplay &gsDisplay() const;
     EEBus &eeBus();
@@ -154,6 +157,7 @@ class NekoSystem
     MasterClockScheduler masterClock;
     EEBus eeBusComponent;
     GIFDMACChannel gifDMACComponent;
+    VIF1DMACChannel vif1DMACComponent;
     GSDisplay gsDisplayComponent;
     NekoInputState inputState;
     bool collectingTrace = false;

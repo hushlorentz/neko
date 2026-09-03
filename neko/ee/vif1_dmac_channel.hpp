@@ -1,5 +1,5 @@
-#ifndef GIF_DMAC_CHANNEL_HPP
-#define GIF_DMAC_CHANNEL_HPP
+#ifndef VIF1_DMAC_CHANNEL_HPP
+#define VIF1_DMAC_CHANNEL_HPP
 
 #include <array>
 #include <cstddef>
@@ -8,48 +8,14 @@
 #include "clocked_component.hpp"
 
 class EEBus;
+class GIFDMACChannel;
 
-enum class GIFDMATagID : std::uint8_t
-{
-  ReferenceEnd = 0,
-  Count = 1,
-  Next = 2,
-  Reference = 3,
-  ReferenceStall = 4,
-  Call = 5,
-  Return = 6,
-  End = 7
-};
-
-namespace GIFDMACControl
-{
-  constexpr std::uint32_t DMA_ENABLE = 1u;
-}
-
-namespace GIFDMACChannelControl
-{
-  constexpr std::uint32_t FROM_MEMORY = 1u;
-  constexpr std::uint32_t MODE_MASK = 3u << 2;
-  constexpr std::uint32_t CHAIN_MODE = 1u << 2;
-  constexpr std::uint32_t ADDRESS_STACK_MASK = 3u << 4;
-  constexpr std::uint32_t TAG_TRANSFER_ENABLE = 1u << 6;
-  constexpr std::uint32_t TAG_INTERRUPT_ENABLE = 1u << 7;
-  constexpr std::uint32_t START = 1u << 8;
-  constexpr std::uint32_t TAG_MASK = UINT32_C(0xffff0000);
-}
-
-namespace GIFDMACStatus
-{
-  constexpr std::uint32_t CHANNEL_1 = 1u << 1;
-  constexpr std::uint32_t CHANNEL_2 = 1u << 2;
-  constexpr std::uint32_t CHANNEL_1_MASK = 1u << 17;
-  constexpr std::uint32_t CHANNEL_2_MASK = 1u << 18;
-}
-
-class GIFDMACChannel : public ClockedComponent
+class VIF1DMACChannel : public ClockedComponent
 {
   public:
-    explicit GIFDMACChannel(EEBus *bus);
+    VIF1DMACChannel(
+      EEBus *bus,
+      GIFDMACChannel *globalDMAC);
 
     bool clockActive() const override;
     void clock() override;
@@ -67,14 +33,7 @@ class GIFDMACChannel : public ClockedComponent
       std::size_t index,
       std::uint32_t value);
 
-    std::uint32_t globalControl() const;
-    void writeGlobalControl(std::uint32_t value);
-    std::uint32_t globalStatus() const;
-    void writeGlobalStatus(std::uint32_t value);
-    bool dmaEnabled() const;
-    void signalChannelCompletion(std::uint32_t channel);
-    bool interruptPending() const;
-    bool stalledByPATH3() const;
+    bool stalledByVIF1() const;
     std::uint64_t transferredQuadwordCount() const;
 
   private:
@@ -84,6 +43,9 @@ class GIFDMACChannel : public ClockedComponent
     std::uint32_t decodeAddress(
       std::uint32_t value,
       const char *registerName) const;
+    bool submitValue(const GIFQuadword &quadword);
+    bool submitQuadword(std::uint32_t address);
+    bool submitTag(std::uint32_t address);
     void transferQuadword();
     void readSourceChainTag();
     void configureSourceChainTag(
@@ -94,16 +56,14 @@ class GIFDMACChannel : public ClockedComponent
     void updateAddressStackField();
 
     EEBus *eeBus;
+    GIFDMACChannel *globalDMAC;
     std::uint32_t channelControlRegister = 0;
     std::uint32_t memoryAddressRegister = 0;
     std::uint32_t quadwordCountRegister = 0;
     std::uint32_t tagAddressRegister = 0;
     std::array<std::uint32_t, 2> addressStackRegisters = {};
-    std::uint32_t globalControlRegister = 0;
-    std::uint32_t statusRegister = 0;
-    std::uint32_t statusMaskRegister = 0;
     bool terminateAfterPacket = false;
-    bool path3Stalled = false;
+    bool vif1Stalled = false;
     std::uint8_t addressStackDepth = 0;
     std::uint64_t transferredQuadwords = 0;
 };

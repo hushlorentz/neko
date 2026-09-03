@@ -22,6 +22,9 @@ NekoSystem::NekoSystem() :
     &gsComponent,
     &interruptControllerComponent),
   gifDMACComponent(&eeBusComponent),
+  vif1DMACComponent(
+    &eeBusComponent,
+    &gifDMACComponent),
   gsDisplayComponent(&gsComponent)
 {
   masterClock.registerComponent(eeCoreComponent, 1);
@@ -37,9 +40,11 @@ NekoSystem::NekoSystem() :
     vu1Component,
     VU_CLOCK_PERIOD);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
+  eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   masterClock.registerComponent(gifDMACComponent, 1);
+  masterClock.registerComponent(vif1DMACComponent, 1);
   masterClock.registerComponent(gsDisplayComponent, 1);
 }
 
@@ -359,6 +364,16 @@ GIFDMACChannel &NekoSystem::gifDMAC()
 const GIFDMACChannel &NekoSystem::gifDMAC() const
 {
   return gifDMACComponent;
+}
+
+VIF1DMACChannel &NekoSystem::vif1DMAC()
+{
+  return vif1DMACComponent;
+}
+
+const VIF1DMACChannel &NekoSystem::vif1DMAC() const
+{
+  return vif1DMACComponent;
 }
 
 GSDisplay &NekoSystem::gsDisplay()

@@ -63,6 +63,7 @@ add_library(neko_core
     neko/ee/ee_instruction.cpp
     neko/ee/gif_dmac_channel.cpp
     neko/ee/interrupt_controller.cpp
+    neko/ee/vif1_dmac_channel.cpp
     neko/fp_register.cpp
     neko/neko_system.cpp
     neko/regression_trace.cpp
@@ -206,6 +207,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_word_merge_tests.cpp
     neko_tests/ee/ee_branch_tests.cpp
     neko_tests/ee/gif_dmac_channel_tests.cpp
+    neko_tests/ee/vif1_dmac_channel_tests.cpp
     neko_tests/ee/interrupt_controller_tests.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp

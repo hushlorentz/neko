@@ -14,9 +14,9 @@ namespace
 {
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
-  constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 156;
-  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 822;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 832;
+  constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
+  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 839;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 849;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -525,6 +525,37 @@ TEST_CASE("Queued guest FIFO data survives save states")
   REQUIRE(restored.saveState() == original.saveState());
 }
 
+TEST_CASE("In-flight VIF1 DMA resumes identically after load")
+{
+  NekoSystem original;
+  REQUIRE(original.eeBus().writeQuadword(0x1000, {}));
+  REQUIRE(original.eeBus().writeQuadword(0x1010, {}));
+  original.eeBus().write32(
+    EEMemoryMap::D_CTRL,
+    GIFDMACControl::DMA_ENABLE);
+  original.eeBus().write32(EEMemoryMap::D1_MADR, 0x1000);
+  original.eeBus().write32(EEMemoryMap::D1_QWC, 2);
+  original.eeBus().write32(
+    EEMemoryMap::D1_CHCR,
+    GIFDMACChannelControl::FROM_MEMORY |
+    GIFDMACChannelControl::START);
+  original.clockMasterCycle();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  REQUIRE(restored.vif1DMAC().memoryAddress() == 0x1010);
+  REQUIRE(restored.vif1DMAC().quadwordCount() == 1);
+  REQUIRE(restored.vif1().fifoQuadwordCount() == 1);
+
+  original.runMasterCycles(2);
+  restored.runMasterCycles(2);
+  REQUIRE(restored.saveState() == original.saveState());
+  REQUIRE(restored.vif1().wordsIngested() == 8);
+  REQUIRE(
+    (restored.gifDMAC().globalStatus() &
+     GIFDMACStatus::CHANNEL_1) != 0);
+}
+
 TEST_CASE("Reset machines can load prior save states")
 {
   NekoSystem system;
@@ -952,7 +983,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 10;
+  invalid[8] = 11;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 

@@ -552,7 +552,7 @@ rather than host-side setup:
       contracts
 - [x] Support guest writes to the VIF and GIF FIFO boundaries without routing
       ordinary RAM accesses through host-only bus helpers
-- [ ] Implement VIF1 DMAC channel 1, including normal and source-chain modes,
+- [x] Implement VIF1 DMAC channel 1, including normal and source-chain modes,
       backpressure, completion, and interrupt state
 - [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
 - [ ] Add a deterministic guest-driven transfer program that configures DMA,

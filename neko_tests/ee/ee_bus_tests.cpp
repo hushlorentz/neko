@@ -242,6 +242,14 @@ TEST_CASE("EE guest device accesses enforce register contracts")
   REQUIRE_FALSE(
     bus.writeData32(EEMemoryMap::D_CTRL, 2));
   REQUIRE(system.gifDMAC().globalControl() == 0);
+  REQUIRE_FALSE(
+    bus.writeData32(
+      EEMemoryMap::D1_CHCR,
+      GIFDMACChannelControl::START));
+  REQUIRE(system.vif1DMAC().channelControl() == 0);
+  REQUIRE(bus.writeData32(EEMemoryMap::D1_MADR, 0x1234));
+  REQUIRE(bus.readData32(EEMemoryMap::D1_MADR, &word));
+  REQUIRE(word == 0x1230);
   REQUIRE_THROWS_WITH(
     bus.write32(EEMemoryMap::D_CTRL, 2),
     "Only D_CTRL.DMAE is implemented.");

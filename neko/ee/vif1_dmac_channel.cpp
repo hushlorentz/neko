@@ -3,6 +3,7 @@
 
 #include "ee_bus.hpp"
 #include "gif_dmac_channel.hpp"
+#include "vif1_dmac_channel.hpp"
 
 namespace
 {
@@ -20,31 +21,34 @@ namespace
     GIFDMACChannelControl::TAG_MASK;
 }
 
-GIFDMACChannel::GIFDMACChannel(EEBus *bus) :
-  eeBus(bus)
+VIF1DMACChannel::VIF1DMACChannel(
+  EEBus *bus,
+  GIFDMACChannel *sharedDMAC) :
+  eeBus(bus),
+  globalDMAC(sharedDMAC)
 {
-  if (eeBus == nullptr)
+  if (eeBus == nullptr || globalDMAC == nullptr)
   {
     throw std::invalid_argument(
-      "GIF DMAC channel requires a non-null EE bus.");
+      "VIF1 DMAC channel requires non-null DMAC components.");
   }
 }
 
-bool GIFDMACChannel::clockActive() const
+bool VIF1DMACChannel::clockActive() const
 {
   return
-    (globalControlRegister & GIFDMACControl::DMA_ENABLE) != 0 &&
+    globalDMAC->dmaEnabled() &&
     (channelControlRegister &
      GIFDMACChannelControl::START) != 0;
 }
 
-void GIFDMACChannel::clock()
+void VIF1DMACChannel::clock()
 {
   if (!clockActive())
   {
     return;
   }
-  path3Stalled = false;
+  vif1Stalled = false;
   if (quadwordCountRegister != 0)
   {
     transferQuadword();
@@ -59,17 +63,22 @@ void GIFDMACChannel::clock()
   readSourceChainTag();
 }
 
-std::uint32_t GIFDMACChannel::channelControl() const
+std::uint32_t VIF1DMACChannel::channelControl() const
 {
   return channelControlRegister;
 }
 
-void GIFDMACChannel::writeChannelControl(std::uint32_t value)
+void VIF1DMACChannel::writeChannelControl(std::uint32_t value)
 {
   if ((value & ~CHANNEL_CONTROL_WRITABLE) != 0)
   {
     throw std::invalid_argument(
-      "GIF DMAC CHCR contains unsupported bits.");
+      "VIF1 DMAC CHCR contains unsupported bits.");
+  }
+  if ((value & GIFDMACChannelControl::FROM_MEMORY) == 0)
+  {
+    throw std::invalid_argument(
+      "VIF1 DMAC supports only transfers from memory.");
   }
   const std::uint32_t mode =
     value & GIFDMACChannelControl::MODE_MASK;
@@ -77,7 +86,7 @@ void GIFDMACChannel::writeChannelControl(std::uint32_t value)
       mode != GIFDMACChannelControl::CHAIN_MODE)
   {
     throw std::invalid_argument(
-      "GIF DMAC supports only normal and source-chain modes.");
+      "VIF1 DMAC supports only normal and source-chain modes.");
   }
 
   const bool active =
@@ -91,13 +100,13 @@ void GIFDMACChannel::writeChannelControl(std::uint32_t value)
     if (changedFields != 0)
     {
       throw std::logic_error(
-        "GIF DMAC control fields cannot change while active.");
+        "VIF1 DMAC control fields cannot change while active.");
     }
     if ((value & GIFDMACChannelControl::START) == 0)
     {
       channelControlRegister &=
         ~GIFDMACChannelControl::START;
-      path3Stalled = false;
+      vif1Stalled = false;
     }
     return;
   }
@@ -109,59 +118,59 @@ void GIFDMACChannel::writeChannelControl(std::uint32_t value)
   if (requestedStackDepth > addressStackRegisters.size())
   {
     throw std::invalid_argument(
-      "GIF DMAC address-stack pointer is invalid.");
+      "VIF1 DMAC address-stack pointer is invalid.");
   }
   channelControlRegister = value;
   addressStackDepth = requestedStackDepth;
   terminateAfterPacket = false;
-  path3Stalled = false;
+  vif1Stalled = false;
 }
 
-std::uint32_t GIFDMACChannel::memoryAddress() const
+std::uint32_t VIF1DMACChannel::memoryAddress() const
 {
   return memoryAddressRegister;
 }
 
-void GIFDMACChannel::writeMemoryAddress(std::uint32_t value)
+void VIF1DMACChannel::writeMemoryAddress(std::uint32_t value)
 {
   requireStopped();
   memoryAddressRegister = decodeAddress(value, "MADR");
 }
 
-std::uint32_t GIFDMACChannel::quadwordCount() const
+std::uint32_t VIF1DMACChannel::quadwordCount() const
 {
   return quadwordCountRegister;
 }
 
-void GIFDMACChannel::writeQuadwordCount(std::uint32_t value)
+void VIF1DMACChannel::writeQuadwordCount(std::uint32_t value)
 {
   requireStopped();
   quadwordCountRegister = value & QWC_MASK;
 }
 
-std::uint32_t GIFDMACChannel::tagAddress() const
+std::uint32_t VIF1DMACChannel::tagAddress() const
 {
   return tagAddressRegister;
 }
 
-void GIFDMACChannel::writeTagAddress(std::uint32_t value)
+void VIF1DMACChannel::writeTagAddress(std::uint32_t value)
 {
   requireStopped();
   tagAddressRegister = decodeAddress(value, "TADR");
 }
 
-std::uint32_t GIFDMACChannel::addressStack(
+std::uint32_t VIF1DMACChannel::addressStack(
   std::size_t index) const
 {
   if (index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
-      "GIF DMAC address-stack index is out of range.");
+      "VIF1 DMAC address-stack index is out of range.");
   }
   return addressStackRegisters[index];
 }
 
-void GIFDMACChannel::writeAddressStack(
+void VIF1DMACChannel::writeAddressStack(
   std::size_t index,
   std::uint32_t value)
 {
@@ -169,148 +178,100 @@ void GIFDMACChannel::writeAddressStack(
   if (index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
-      "GIF DMAC address-stack index is out of range.");
+      "VIF1 DMAC address-stack index is out of range.");
   }
   addressStackRegisters[index] =
     decodeAddress(value, "ASR");
 }
 
-std::uint32_t GIFDMACChannel::globalControl() const
+bool VIF1DMACChannel::stalledByVIF1() const
 {
-  return globalControlRegister;
-}
-
-void GIFDMACChannel::writeGlobalControl(std::uint32_t value)
-{
-  if ((value & ~GIFDMACControl::DMA_ENABLE) != 0)
-  {
-    throw std::invalid_argument(
-      "Only D_CTRL.DMAE is implemented.");
-  }
-  globalControlRegister = value;
-}
-
-std::uint32_t GIFDMACChannel::globalStatus() const
-{
-  return statusRegister | statusMaskRegister;
-}
-
-void GIFDMACChannel::writeGlobalStatus(std::uint32_t value)
-{
-  constexpr std::uint32_t CHANNELS =
-    GIFDMACStatus::CHANNEL_1 |
-    GIFDMACStatus::CHANNEL_2;
-  constexpr std::uint32_t MASKS =
-    GIFDMACStatus::CHANNEL_1_MASK |
-    GIFDMACStatus::CHANNEL_2_MASK;
-  statusRegister &= ~(value & CHANNELS);
-  statusMaskRegister ^=
-    value & MASKS;
-}
-
-bool GIFDMACChannel::dmaEnabled() const
-{
-  return
-    (globalControlRegister &
-     GIFDMACControl::DMA_ENABLE) != 0;
-}
-
-void GIFDMACChannel::signalChannelCompletion(
-  std::uint32_t channel)
-{
-  constexpr std::uint32_t CHANNELS =
-    GIFDMACStatus::CHANNEL_1 |
-    GIFDMACStatus::CHANNEL_2;
-  if ((channel & CHANNELS) == 0 ||
-      (channel & ~CHANNELS) != 0)
-  {
-    throw std::invalid_argument(
-      "Invalid DMAC completion channel.");
-  }
-  statusRegister |= channel;
-}
-
-bool GIFDMACChannel::interruptPending() const
-{
-  const bool vif1 =
-    (statusRegister & GIFDMACStatus::CHANNEL_1) != 0 &&
-    (statusMaskRegister &
-     GIFDMACStatus::CHANNEL_1_MASK) != 0;
-  const bool gif =
-    (statusRegister & GIFDMACStatus::CHANNEL_2) != 0 &&
-    (statusMaskRegister &
-     GIFDMACStatus::CHANNEL_2_MASK) != 0;
-  return vif1 || gif;
-}
-
-bool GIFDMACChannel::stalledByPATH3() const
-{
-  return path3Stalled;
+  return vif1Stalled;
 }
 
 std::uint64_t
-GIFDMACChannel::transferredQuadwordCount() const
+VIF1DMACChannel::transferredQuadwordCount() const
 {
   return transferredQuadwords;
 }
 
-void GIFDMACChannel::requireStopped() const
+void VIF1DMACChannel::requireStopped() const
 {
   if ((channelControlRegister &
        GIFDMACChannelControl::START) != 0)
   {
     throw std::logic_error(
-      "GIF DMAC channel registers cannot change while active.");
+      "VIF1 DMAC channel registers cannot change while active.");
   }
 }
 
-std::uint32_t GIFDMACChannel::decodeAddress(
+std::uint32_t VIF1DMACChannel::decodeAddress(
   std::uint32_t value,
   const char *registerName) const
 {
   if ((value & SPR_BIT) != 0)
   {
     throw std::invalid_argument(
-      std::string("GIF DMAC ") + registerName +
+      std::string("VIF1 DMAC ") + registerName +
       " does not support scratchpad memory.");
   }
   return value & ADDRESS_MASK;
 }
 
-void GIFDMACChannel::transferQuadword()
+bool VIF1DMACChannel::submitValue(
+  const GIFQuadword &quadword)
 {
-  const GIFQuadword quadword =
-    eeBus->readQuadword(memoryAddressRegister);
-  if (!eeBus->writeQuadword(EEMemoryMap::GIF_FIFO, quadword))
+  return
+    eeBus->writeGuestData128(
+      EEMemoryMap::VIF1_FIFO,
+      {
+        quadword[0] |
+          (static_cast<std::uint64_t>(quadword[1]) << 32),
+        quadword[2] |
+          (static_cast<std::uint64_t>(quadword[3]) << 32)
+      }) == EEDataWriteResult::Completed;
+}
+
+bool VIF1DMACChannel::submitQuadword(std::uint32_t address)
+{
+  return submitValue(eeBus->readQuadword(address));
+}
+
+bool VIF1DMACChannel::submitTag(std::uint32_t address)
+{
+  const GIFQuadword tag = eeBus->readQuadword(address);
+  return submitValue({{0, 0, tag[2], tag[3]}});
+}
+
+void VIF1DMACChannel::transferQuadword()
+{
+  if (!submitQuadword(memoryAddressRegister))
   {
-    path3Stalled = true;
+    vif1Stalled = true;
     return;
   }
 
   memoryAddressRegister += 16;
   --quadwordCountRegister;
   ++transferredQuadwords;
-  if (quadwordCountRegister == 0 && terminateAfterPacket)
-  {
-    completeTransfer();
-  }
-  else if (quadwordCountRegister == 0 &&
-           (channelControlRegister &
-            GIFDMACChannelControl::MODE_MASK) == 0)
+  if (quadwordCountRegister == 0 &&
+      (terminateAfterPacket ||
+       (channelControlRegister &
+        GIFDMACChannelControl::MODE_MASK) == 0))
   {
     completeTransfer();
   }
 }
 
-void GIFDMACChannel::readSourceChainTag()
+void VIF1DMACChannel::readSourceChainTag()
 {
   const std::uint32_t currentTagAddress = tagAddressRegister;
   const GIFQuadword tag = eeBus->readQuadword(currentTagAddress);
   if ((channelControlRegister &
        GIFDMACChannelControl::TAG_TRANSFER_ENABLE) != 0 &&
-      !eeBus->writeQuadword(EEMemoryMap::GIF_FIFO, tag))
+      !submitTag(currentTagAddress))
   {
-    path3Stalled = true;
+    vif1Stalled = true;
     return;
   }
   if ((channelControlRegister &
@@ -328,7 +289,7 @@ void GIFDMACChannel::readSourceChainTag()
   }
 }
 
-void GIFDMACChannel::configureSourceChainTag(
+void VIF1DMACChannel::configureSourceChainTag(
   std::uint32_t currentTagAddress,
   std::uint32_t low,
   std::uint32_t high)
@@ -336,7 +297,7 @@ void GIFDMACChannel::configureSourceChainTag(
   if ((high & SPR_BIT) != 0)
   {
     throw std::invalid_argument(
-      "GIF DMAC source-chain tags do not support scratchpad memory.");
+      "VIF1 DMAC source-chain tags do not support scratchpad memory.");
   }
 
   const GIFDMATagID id = static_cast<GIFDMATagID>(
@@ -413,16 +374,17 @@ void GIFDMACChannel::configureSourceChainTag(
   }
 }
 
-void GIFDMACChannel::completeTransfer()
+void VIF1DMACChannel::completeTransfer()
 {
   channelControlRegister &=
     ~GIFDMACChannelControl::START;
-  signalChannelCompletion(GIFDMACStatus::CHANNEL_2);
+  globalDMAC->signalChannelCompletion(
+    GIFDMACStatus::CHANNEL_1);
   terminateAfterPacket = false;
-  path3Stalled = false;
+  vif1Stalled = false;
 }
 
-void GIFDMACChannel::updateAddressStackField()
+void VIF1DMACChannel::updateAddressStackField()
 {
   channelControlRegister =
     (channelControlRegister &

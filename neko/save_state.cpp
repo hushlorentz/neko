@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 9;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 10;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1068,6 +1068,12 @@ class NekoSaveStateCodec
     static void readDMAC(
       SaveStateReader *reader,
       GIFDMACChannel *dmac);
+    static void writeVIF1DMAC(
+      SaveStateWriter *writer,
+      const VIF1DMACChannel &dmac);
+    static void readVIF1DMAC(
+      SaveStateReader *reader,
+      VIF1DMACChannel *dmac);
 };
 
 std::vector<std::uint8_t> NekoSaveStateCodec::save(
@@ -1176,6 +1182,7 @@ void NekoSaveStateCodec::writeSystem(
   writeGIFPath3(writer, system.gifPath3Component);
   writeGS(writer, system.gsComponent);
   writeDMAC(writer, system.gifDMACComponent);
+  writeVIF1DMAC(writer, system.vif1DMACComponent);
   writeGSDisplay(writer, system.gsDisplayComponent);
 }
 
@@ -1209,6 +1216,7 @@ void NekoSaveStateCodec::readSystem(
   readGIFPath3(reader, &system->gifPath3Component);
   readGS(reader, &system->gsComponent);
   readDMAC(reader, &system->gifDMACComponent);
+  readVIF1DMAC(reader, &system->vif1DMACComponent);
   readGSDisplay(reader, &system->gsDisplayComponent);
 }
 
@@ -1420,6 +1428,28 @@ void NekoSaveStateCodec::commitSystem(
   dmac.transferredQuadwords =
     sourceDMAC.transferredQuadwords;
 
+  VIF1DMACChannel &vif1DMAC =
+    destination->vif1DMACComponent;
+  const VIF1DMACChannel &sourceVIF1DMAC =
+    source->vif1DMACComponent;
+  vif1DMAC.channelControlRegister =
+    sourceVIF1DMAC.channelControlRegister;
+  vif1DMAC.memoryAddressRegister =
+    sourceVIF1DMAC.memoryAddressRegister;
+  vif1DMAC.quadwordCountRegister =
+    sourceVIF1DMAC.quadwordCountRegister;
+  vif1DMAC.tagAddressRegister =
+    sourceVIF1DMAC.tagAddressRegister;
+  vif1DMAC.addressStackRegisters =
+    sourceVIF1DMAC.addressStackRegisters;
+  vif1DMAC.terminateAfterPacket =
+    sourceVIF1DMAC.terminateAfterPacket;
+  vif1DMAC.vif1Stalled = sourceVIF1DMAC.vif1Stalled;
+  vif1DMAC.addressStackDepth =
+    sourceVIF1DMAC.addressStackDepth;
+  vif1DMAC.transferredQuadwords =
+    sourceVIF1DMAC.transferredQuadwords;
+
   GSDisplay &display = destination->gsDisplayComponent;
   const GSDisplay &sourceDisplay =
     source->gsDisplayComponent;
@@ -1464,15 +1494,15 @@ void NekoSaveStateCodec::readMasterClock(
 {
   system->masterClock.masterCycle = reader->readU64();
   const std::uint32_t count = reader->readU32();
-  require(count <= 6, "master-clock component count is invalid");
-  std::array<bool, 7> used = {};
+  require(count <= 7, "master-clock component count is invalid");
+  std::array<bool, 8> used = {};
   std::vector<MasterClockScheduler::ScheduledComponent>
     components;
   components.reserve(count);
   for (std::uint32_t index = 0; index < count; ++index)
   {
     const std::uint8_t id = reader->readU8();
-    require(id >= 1 && id <= 6, "clock component ID is invalid");
+    require(id >= 1 && id <= 7, "clock component ID is invalid");
     require(!used[id], "clock component ID is duplicated");
     used[id] = true;
     const std::uint64_t period = reader->readU64();
@@ -1516,6 +1546,10 @@ std::uint8_t NekoSaveStateCodec::componentID(
   {
     return 6;
   }
+  if (component == &system.vif1DMACComponent)
+  {
+    return 7;
+  }
   throw std::runtime_error(
     "Cannot save a host-owned master-clock component.");
 }
@@ -1538,6 +1572,8 @@ ClockedComponent *NekoSaveStateCodec::componentForID(
       return &system->gsDisplayComponent;
     case 6:
       return &system->eeCoreComponent;
+    case 7:
+      return &system->vif1DMACComponent;
     default:
       SaveStateReader::invalid("clock component ID is invalid");
   }
@@ -2814,9 +2850,12 @@ void NekoSaveStateCodec::readDMAC(
       GIFDMACControl::DMA_ENABLE,
     "GIF DMAC global control is invalid");
   require(
-    (dmac->statusRegister & ~GIFDMACStatus::CHANNEL_2) == 0 &&
+    (dmac->statusRegister &
+     ~(GIFDMACStatus::CHANNEL_1 |
+       GIFDMACStatus::CHANNEL_2)) == 0 &&
     (dmac->statusMaskRegister &
-     ~GIFDMACStatus::CHANNEL_2_MASK) == 0,
+     ~(GIFDMACStatus::CHANNEL_1_MASK |
+       GIFDMACStatus::CHANNEL_2_MASK)) == 0,
     "GIF DMAC status is invalid");
   require(
     dmac->addressStackDepth <=
@@ -2825,6 +2864,86 @@ void NekoSaveStateCodec::readDMAC(
       GIFDMACChannelControl::ADDRESS_STACK_MASK) >> 4) ==
       dmac->addressStackDepth,
     "GIF DMAC address-stack state is invalid");
+}
+
+void NekoSaveStateCodec::writeVIF1DMAC(
+  SaveStateWriter *writer,
+  const VIF1DMACChannel &dmac)
+{
+  writer->writeU32(dmac.channelControlRegister);
+  writer->writeU32(dmac.memoryAddressRegister);
+  writer->writeU32(dmac.quadwordCountRegister);
+  writer->writeU32(dmac.tagAddressRegister);
+  for (std::uint32_t address : dmac.addressStackRegisters)
+  {
+    writer->writeU32(address);
+  }
+  writer->writeBool(dmac.terminateAfterPacket);
+  writer->writeBool(dmac.vif1Stalled);
+  writer->writeU8(dmac.addressStackDepth);
+  writer->writeU64(dmac.transferredQuadwords);
+}
+
+void NekoSaveStateCodec::readVIF1DMAC(
+  SaveStateReader *reader,
+  VIF1DMACChannel *dmac)
+{
+  dmac->channelControlRegister = reader->readU32();
+  dmac->memoryAddressRegister = reader->readU32();
+  dmac->quadwordCountRegister = reader->readU32();
+  dmac->tagAddressRegister = reader->readU32();
+  for (std::uint32_t &address : dmac->addressStackRegisters)
+  {
+    address = reader->readU32();
+  }
+  dmac->terminateAfterPacket =
+    reader->readBool("VIF1 DMAC termination flag");
+  dmac->vif1Stalled =
+    reader->readBool("VIF1 DMAC stall flag");
+  dmac->addressStackDepth = reader->readU8();
+  dmac->transferredQuadwords = reader->readU64();
+
+  const std::uint32_t writableControl =
+    GIFDMACChannelControl::FROM_MEMORY |
+    GIFDMACChannelControl::MODE_MASK |
+    GIFDMACChannelControl::ADDRESS_STACK_MASK |
+    GIFDMACChannelControl::TAG_TRANSFER_ENABLE |
+    GIFDMACChannelControl::TAG_INTERRUPT_ENABLE |
+    GIFDMACChannelControl::START |
+    GIFDMACChannelControl::TAG_MASK;
+  const std::uint32_t mode =
+    dmac->channelControlRegister &
+    GIFDMACChannelControl::MODE_MASK;
+  require(
+    (dmac->channelControlRegister & ~writableControl) == 0 &&
+    ((dmac->channelControlRegister &
+      GIFDMACChannelControl::FROM_MEMORY) != 0 ||
+     (dmac->channelControlRegister &
+      GIFDMACChannelControl::START) == 0) &&
+    (mode == 0 || mode == GIFDMACChannelControl::CHAIN_MODE),
+    "VIF1 DMAC channel control is invalid");
+  require(
+    dmac->quadwordCountRegister <= 0xffff,
+    "VIF1 DMAC qword count is invalid");
+  const std::uint32_t addresses[] = {
+    dmac->memoryAddressRegister,
+    dmac->tagAddressRegister,
+    dmac->addressStackRegisters[0],
+    dmac->addressStackRegisters[1]
+  };
+  for (std::uint32_t address : addresses)
+  {
+    require(
+      (address & ~UINT32_C(0x7ffffff0)) == 0,
+      "VIF1 DMAC address is invalid");
+  }
+  require(
+    dmac->addressStackDepth <=
+      dmac->addressStackRegisters.size() &&
+    ((dmac->channelControlRegister &
+      GIFDMACChannelControl::ADDRESS_STACK_MASK) >> 4) ==
+      dmac->addressStackDepth,
+    "VIF1 DMAC address-stack state is invalid");
 }
 
 void NekoSaveStateCodec::writeGSDisplay(
