@@ -581,35 +581,13 @@ rather than host-side setup:
       hazards, transfer timing, divider serialization, and save-state
       continuation
 
-### EE COP1 and Multimedia Extensions
-
-- [ ] After guest-demo migration, split COP1 and MMI into separate,
-      independently reviewable milestones with focused instruction-family,
-      timing, conformance, integration, and audit items before implementation
-- [ ] Implement the EE COP1 register file, control registers, transfers,
-      branches, and scalar single-precision instruction families
-- [ ] Match documented EE floating-point edge behavior with raw-bit reference
-      operations rather than host floating-point defaults
-- [ ] Implement the MMI packed-integer instruction families incrementally from
-      the requirements of selected guest programs
-- [ ] Add COP1 and MMI state to exception, trace, reset, and save-state
-      contracts as each family is introduced
-
-### Guest Demo Migration
+### Guest Graphics Workloads
 
 - [x] Convert the rotating-triangle demo into an independently authored guest
       program that drives its VU1, VIF, GIF, and GS work through emulated
       hardware
 - [x] Convert the POINT/SPRITE demo into an independently authored guest
       program that submits its drawing work through emulated hardware
-- [ ] Present completed guest-ELF GS framebuffers through the SDL desktop
-      while retaining headless `--elf` execution for diagnostics
-- [ ] Extend the rotating-triangle ELF into a persistent deterministic
-      workload that submits and presents successive animation frames
-- [ ] Retain the host-authored demo harnesses as fast deterministic component
-      and integration tests after guest-program migration
-- [ ] Make guest executable loading the primary desktop execution path while
-      retaining explicit diagnostic scene selection for development
 
 ### Long-Term Guest Execution Progression
 
@@ -637,6 +615,9 @@ that need more detail than the existing structured GIF/GS traces:
       bounds, and framebuffer hashes
 - [ ] Export selected GS framebuffer regions to a dependency-free portable
       image format for inspecting external programs without frontend changes
+- [ ] Present completed guest-ELF GS framebuffers through the optional SDL
+      desktop when interactive visualization is useful; retain headless
+      `--elf` execution as the diagnostic path
 
 ### Demand-Driven Hardware Expansion
 
@@ -653,7 +634,160 @@ that need more detail than the existing structured GIF/GS traces:
 The emulation core must not open windows, poll host controllers, sleep, or print
 directly. Frontends provide those services through callbacks and buffers.
 
-## Milestone 5: Frontends and libretro
+## Milestone 5: EE COP1
+
+Implement the R5900 floating-point coprocessor from the official EE Core
+manuals. Preserve raw guest values and reproduce documented EE behavior rather
+than delegating architectural results to host floating-point defaults.
+
+### Architectural Audit and Execution Contract
+
+- [x] Reconcile all 34 concrete COP1 mnemonics in the official instruction
+      table with their encodings, fixed fields, operand roles, and reserved
+      patterns
+  - The official `MIN.S` instruction page incorrectly prints function `0x30`.
+    Appendix table 7.4.3 and PS2DEV Binutils 2.45.1 agree on `0x29`; `0x30`
+    encodes `C.F.S`.
+- [ ] Define the architectural contract for 32 32-bit FPRs, the 32-bit ACC,
+      read-only FCR0, writable FCR31 fields, and reserved FCR1-FCR30
+- [ ] Define deterministic reset values for architecturally undefined COP1
+      state without presenting those values as hardware guarantees
+- [ ] Define COP1 usability checks and Coprocessor Unusable exception behavior
+      for operations, transfers, branches, loads, and stores
+- [ ] Map COP1 operation and move instructions onto the documented C1 and
+      integer pipelines, including issue-pair restrictions and resource stalls
+- [ ] Record which instruction timing is explicitly documented locally and
+      pause before assigning any unresolved latency or throughput
+
+### Register, Control, and Memory Transfers
+
+- [ ] Add FPR, ACC, FCR0, and FCR31 state with checked architectural accessors
+- [ ] Implement `MFC1` and `MTC1`, including 32-bit sign extension into EE
+      GPRs and lower-word writes into FPRs
+- [ ] Implement `CFC1` and `CTC1`, including the FCR0 implementation/revision
+      value, writable FCR31 fields, hardwired rounding bits, and deterministic
+      rejection of reserved control registers
+- [ ] Implement aligned `LWC1` and `SWC1` through the EE memory and exception
+      paths
+- [ ] Model FPR load availability and dependent-use interlocks consistently
+      with the existing non-blocking EE load contract
+- [ ] Add decode, access, alignment, exception, and transfer conformance tests
+
+### Raw Floating-Point Foundation
+
+- [ ] Add raw-bit COP1 value classification for signed zero, normal values,
+      exponent-255 finite values, and unsupported IEEE encodings
+- [ ] Implement EE single-precision normalization and truncation without host
+      NaN, infinity, denormal, or rounding-mode behavior leaking into results
+- [ ] Implement documented signed-zero results for arithmetic, min/max,
+      division, square root, and reciprocal square root
+- [ ] Implement exponent overflow saturation to signed maximum and exponent
+      underflow flushing to signed zero
+- [ ] Implement FCR31 current and sticky `I`, `D`, `O`, and `U` flag updates,
+      including instructions that explicitly clear current flags
+- [ ] Add fixed raw-bit reference vectors derived from the official abnormal
+      computation, signed-zero, rounding, and IEEE-difference tables
+
+### Movement, Selection, and Conversion
+
+- [ ] Implement `MOV.S`, `ABS.S`, and `NEG.S` with exact raw-bit behavior and
+      documented flag effects
+- [ ] Implement `MAX.S` and `MIN.S`, including signed-zero selection and
+      operand-order behavior
+- [ ] Implement `CVT.S.W` with deterministic signed fixed-point conversion and
+      EE truncation
+- [ ] Implement `CVT.W.S`, including truncation, clamping, and out-of-range
+      behavior
+- [ ] Verify source dependencies, destination hazards, S-stage visibility, and
+      fixed-field rejection for each instruction form
+
+### Addition, Subtraction, and Accumulator
+
+- [ ] Implement `ADD.S` and `SUB.S` with documented signed-zero, overflow,
+      underflow, and flag behavior
+- [ ] Implement `ADDA.S` and `SUBA.S` with ACC as the architectural
+      destination
+- [ ] Model FPR and ACC RAW/WAW hazards and documented result forwarding
+- [ ] Add dependent, independent, ACC-chained, exceptional, and save-resume
+      timing tests
+
+### Multiplication and Multiply-Accumulate
+
+- [ ] Implement `MUL.S` and `MULA.S`
+- [ ] Implement `MADD.S` and `MADDA.S`, including their distinct FPR and ACC
+      destinations
+- [ ] Implement `MSUB.S` and `MSUBA.S`, including their distinct FPR and ACC
+      destinations
+- [ ] Preserve the documented intermediate product, ACC, saturation, and
+      underflow rules rather than reducing multiply-add to host arithmetic
+- [ ] Model multiply and ACC pipeline occupancy, dependencies, forwarding, and
+      issue restrictions
+- [ ] Add raw-bit compound-operation vectors that distinguish intermediate
+      precision and flag behavior from separate host operations
+
+### Comparison and Branch Control
+
+- [ ] Implement `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, including exact
+      comparison and equality of positive and negative zero
+- [ ] Update and expose the FCR31 condition bit with documented visibility
+      timing
+- [ ] Implement `BC1F`, `BC1T`, `BC1FL`, and `BC1TL` through the existing EE
+      branch, delay-slot, and likely-annulment machinery
+- [ ] Verify comparison-to-branch dependencies, taken and untaken paths,
+      delay-slot exceptions, and save-state continuation
+
+### Division and Square Root
+
+- [ ] Implement `DIV.S`, including signed saturation for division by zero and
+      distinct `0/0` invalid-operation behavior
+- [ ] Implement `SQRT.S`, including negative-input absolute-value results and
+      signed-zero preservation
+- [ ] Implement `RSQRT.S`, including numerator sign, negative radicands,
+      division by zero, overflow, and underflow
+- [ ] Model documented multicycle execution, structural occupancy, dependency
+      interlocks, and completion visibility without guessing unresolved timing
+- [ ] Add focused raw-bit, flag, overlap, drain, exception-entry, and
+      save-resume tests
+
+### Pipeline Timing and System Integration
+
+- [ ] Model the documented `T`, `X`, `Y`, `Z`, and `S` COP1 stages, including
+      1S result availability, 2S architectural writeback, and S/T bypassing
+- [ ] Enforce documented COP1 operation/move issue combinations and one-cycle
+      resource stalls within the EE dual-issue scheduler
+- [ ] Preserve in-flight COP1 work across unrelated EE execution, interrupts,
+      and `ERET` according to the existing continuation model
+- [ ] Add COP1 architectural and in-flight state to reset, canonical state
+      hashes, structured traces, and transactional save states
+- [ ] Verify repeated and save-state-resumed executions produce identical
+      registers, flags, stop reasons, trace hashes, and memory results
+
+### Guest Integration and Final Conformance Audit
+
+- [ ] Add focused independently authored EE programs for transfers, control
+      state, comparisons, branches, conversions, and each arithmetic pipeline
+- [ ] Add a PS2DEV ELF guest that exercises representative COP1 families and
+      validates raw results and FCR31 state in guest code
+- [ ] Audit every defined COP1 opcode for decode, execution, flags, timing,
+      hazards, exceptions, tracing, reset, and save-state coverage
+- [ ] Reject every reserved COP1 encoding and invalid fixed-field combination
+      deterministically
+- [ ] Perform an independent final review of the completed COP1 milestone
+
+## Milestone 6: EE Multimedia Extensions
+
+Keep this milestone high-level until COP1 is complete. Before implementing MMI,
+expand it into independently reviewable blocks and items using the official EE
+instruction tables and the requirements of selected guest programs.
+
+- [ ] Audit and classify the complete R5900 MMI instruction set
+- [ ] Divide MMI into focused packed-arithmetic, comparison, permutation,
+      shift, multiply/divide, load/store, timing, and integration blocks
+- [ ] Add each family incrementally with deterministic state, trace,
+      exception, save-state, and guest-program coverage
+- [ ] Complete a final reserved-encoding and conformance audit
+
+## Milestone 7: Frontends and libretro
 
 ### Command-Line Debugger
 
@@ -707,6 +841,12 @@ directly. Frontends provide those services through callbacks and buffers.
 
 ## Maintaining This File
 
+- Use **milestone** for a major independently complete capability, **block** for
+  an independently reviewable stage within a milestone, and **item** for a
+  concrete testable checklist entry within a block.
+- Keep distant milestones intentionally high-level. Before starting a block,
+  review its items and expand the work into additional milestones, blocks, or
+  items when the newly available evidence requires it.
 - Check off work only after tests demonstrate the expected behavior.
 - After completing each roadmap subsection or substantial implementation
   block, run `cmake -P cmake/Sanitize.cmake` before moving to the next block.
