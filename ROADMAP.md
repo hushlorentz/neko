@@ -565,6 +565,9 @@ rather than host-side setup:
 - [x] Implement EE COP2 control transfers and branches: `CFC2`, `CTC2`,
       `BC2F`, `BC2FL`, `BC2T`, and `BC2TL`
 - [x] Implement `VCALLMS` and `VCALLMSR` microprogram initiation
+- [x] Audit the completed COP2/VU initiation boundary, including interlock
+      save-state resume, reset invariants, Stop-state startup, and VIF
+      synchronization
 - [ ] Decode the VU macro arithmetic, conversion, memory, transfer, random,
       and synchronization instruction families and reuse the corresponding
       microinstruction execution semantics where their architectural behavior

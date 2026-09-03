@@ -351,23 +351,4 @@ TEST_CASE("VPU State Tests")
       REQUIRE_FALSE(vpu.hasTerminationPosition());
     }
 
-    SECTION("VPU cannot receive micro program startup from the VIF while in Stop state")
-    {
-      //WARN("Add this test");
-    }
-
-    SECTION("VPU transitions from Stop to Run when the VCALLMS instruction is executed")
-    {
-      //WARN("Add this test");
-    }
-
-    SECTION("VPU transitions from Stop to Run when the VCALLMSR instruction is executed")
-    {
-      //WARN("Add this test");
-    }
-
-    SECTION("VPU transitions from Stop to Run when the CMSAR1 register is written to")
-    {
-      //WARN("Add this test");
-    }
 }

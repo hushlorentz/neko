@@ -241,7 +241,7 @@ void VIF::startMicroProgram(const VIFCommand &command)
     throw std::runtime_error(
       "VIF microprogram execution requires an attached VPU.");
   }
-  if (vpu->getState() == VPU_STATE_RUN)
+  if (vpu->getState() != VPU_STATE_READY)
   {
     throw std::runtime_error(
       "VIF microprogram execution is waiting for the VPU.");
@@ -533,7 +533,7 @@ bool VIF::consumePayloadWord(
 bool VIF::commandReady(const VIFCommand &command) const
 {
   const bool microprogramEnded =
-    vpu == nullptr || vpu->getState() != VPU_STATE_RUN;
+    vpu == nullptr || vpu->getState() == VPU_STATE_READY;
   const bool path1And2Ended =
     gifPathArbiter == nullptr ||
     gifPathArbiter->pathsIdle(false);

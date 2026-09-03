@@ -26,21 +26,6 @@ TEST_CASE("VPU Microinstruction Tests")
 {
     VPU vpu;
     
-    SECTION("VPU1 Microinstruction programs can be started by writing the execution address to the control register CMSAR1")
-    {
-      //WARN("Add this test");
-    }
-
-    SECTION("VPU0 Microinstruction programs can be started by executing the VCALLMS instruction")
-    {
-      //WARN("Add this test");
-    }
-
-    SECTION("VPU0 Microinstruction programs can be started by executing the VCALLMSR instruction")
-    {
-      //WARN("Add this test");
-    }
-
     SECTION("The lower half of an instruction pair is fetched independently of the upper half")
     {
       std::vector<uint8_t> instructions;

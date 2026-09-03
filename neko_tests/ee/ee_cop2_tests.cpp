@@ -354,6 +354,53 @@ TEST_CASE("VU0 M bit releases interlocked COP2 writes during micro execution")
     UINT32_C(0x33221100));
 }
 
+TEST_CASE("EE COP2 control interlocks cover reads and save-state resume")
+{
+  SECTION("CFC2.I waits for VU0 to stop")
+  {
+    NekoSystem system;
+    system.vu0().loadIntRegister(3, 0x1234);
+    system.vu0().startMicroMode();
+
+    runInstruction(
+      &system,
+      cop2TransferInstruction(0x02, 2, 3, true));
+    REQUIRE(system.eeCore().programCounter() == 0);
+    REQUIRE(system.eeCore().generalRegister(2).low == 0);
+
+    system.vu0().forceBreak();
+    system.clockMasterCycle();
+    REQUIRE(system.eeCore().programCounter() == 4);
+    REQUIRE(system.eeCore().generalRegister(2).low == 0x1234);
+  }
+
+  SECTION("An M-bit release and stalled CTC2.I survive restoration")
+  {
+    NekoSystem system;
+    system.vu0().writeMicroInstruction(
+      0,
+      VPU_LOWER_NOP,
+      VPU_M_BIT | VPU_NOP);
+    system.vu0().startMicroMode();
+    system.eeCore().setGeneralRegister(2, {0x4321, 0});
+
+    runInstruction(
+      &system,
+      cop2TransferInstruction(0x06, 2, 3, true));
+    REQUIRE(system.eeCore().programCounter() == 0);
+    REQUIRE(system.vu0().intRegisterValue(3) == 0);
+    const std::vector<std::uint8_t> saved = system.saveState();
+
+    system.vu0().forceBreak();
+    system.loadState(saved);
+    system.clockMasterCycle();
+
+    REQUIRE(system.eeCore().programCounter() == 4);
+    REQUIRE(system.vu0().clockActive());
+    REQUIRE(system.vu0().intRegisterValue(3) == 0x4321);
+  }
+}
+
 TEST_CASE("EE VCALLMS starts VU0 at immediate and CMSAR0 addresses")
 {
   SECTION("VCALLMS scales its immediate by eight")
@@ -397,6 +444,30 @@ TEST_CASE("EE VCALLMS stalls while VU0 is running and retries")
 
   REQUIRE(system.eeCore().programCounter() == 4);
   REQUIRE(system.eeCore().hasLastInstruction());
+  REQUIRE(system.vu0().clockActive());
+  REQUIRE(system.vu0().programCounter() == 16);
+}
+
+TEST_CASE("A stalled EE VCALLMS survives save-state restoration")
+{
+  NekoSystem system;
+  system.vu0().startMicroMode();
+  system.eeBus().write32(0, vectorCallInstruction(2));
+  system.eeCore().startExecution(0);
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().programCounter() == 0);
+  const std::vector<std::uint8_t> saved = system.saveState();
+
+  system.vu0().forceBreak();
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().programCounter() == 4);
+  system.loadState(saved);
+
+  REQUIRE(system.eeCore().programCounter() == 0);
+  REQUIRE(system.vu0().clockActive());
+  system.vu0().forceBreak();
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().programCounter() == 4);
   REQUIRE(system.vu0().clockActive());
   REQUIRE(system.vu0().programCounter() == 16);
 }
@@ -554,6 +625,26 @@ TEST_CASE("EE CTC2 FBRST controls and reports both vector units")
     UINT64_C(0x00000808));
 }
 
+TEST_CASE("EE CTC2 reset clears VU0 COP2 interlock continuation state")
+{
+  NekoSystem system;
+  system.vu0().writeMicroInstruction(
+    0,
+    VPU_LOWER_NOP,
+    VPU_M_BIT | VPU_NOP);
+  system.vu0().startMicroMode();
+  system.clockMasterCycle();
+  system.eeCore().setGeneralRegister(2, {UINT32_C(1) << 1, 0});
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 28));
+
+  REQUIRE(system.vu0().getState() == VPU_STATE_READY);
+  const std::vector<std::uint8_t> saved = system.saveState();
+  REQUIRE_NOTHROW(system.loadState(saved));
+}
+
 TEST_CASE("EE CTC2 CMSAR1 starts VU1 and ignores writes while busy")
 {
   NekoSystem system;
@@ -571,6 +662,14 @@ TEST_CASE("EE CTC2 CMSAR1 starts VU1 and ignores writes while busy")
     cop2TransferInstruction(0x06, 2, 31));
   REQUIRE(system.vu1().clockActive());
   REQUIRE(system.vu1().programCounter() != 0x20);
+
+  system.vu1().forceBreak();
+  system.eeCore().setGeneralRegister(2, {0x28, 0});
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 31));
+  REQUIRE(system.vu1().clockActive());
+  REQUIRE(system.vu1().programCounter() == 0x30);
 }
 
 TEST_CASE("EE COP2 branches use VU1 activity and likely annulment")

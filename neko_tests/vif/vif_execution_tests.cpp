@@ -192,6 +192,22 @@ TEST_CASE("VIF Microprogram Execution Tests")
         vpu.microMemorySize() / MICRO_INSTRUCTION_SIZE)),
       "VIF microprogram start is outside VU micro memory.");
   }
+
+  SECTION("VIF microprogram starts remain stalled while the VU is stopped")
+  {
+    VPU vpu(VPUType::VU0);
+    VIF vif(VIFType::VIF0);
+    vif.attachVPU(&vpu);
+    vpu.forceBreak();
+    const std::uint64_t wordsBeforeStall = vif.wordsIngested();
+
+    const VIFStreamWord stalled =
+      vif.ingestWord(vifCode(VIFCommandEncoding::MSCAL));
+
+    REQUIRE(stalled.stalled);
+    REQUIRE(vif.wordsIngested() == wordsBeforeStall);
+    REQUIRE(vpu.getState() == VPU_STATE_STOP);
+  }
 }
 
 TEST_CASE("VU VIF Control Instruction Tests")

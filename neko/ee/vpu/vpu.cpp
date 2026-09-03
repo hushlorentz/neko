@@ -2165,6 +2165,7 @@ void VPU::resetFromControl()
   dBitStop = false;
   tBitStop = false;
   forceBreakStop = false;
+  cop2WriteInterlockReleased = false;
 }
 
 bool VPU::stoppedByDBit() const
