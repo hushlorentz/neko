@@ -25,6 +25,7 @@ class PipelineOrchestrator
     void reset();
     void update();
     bool hasNext();
+    bool hasPipelineType(uint8_t pipelineType) const;
     bool hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1FieldMask, uint8_t srcReg2, uint8_t srcReg2FieldMask) const;
     void initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress = 0, int16_t immediate = 0);
     Pipeline *startPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress = 0, bool discardWriteback = false, int16_t immediate = 0);

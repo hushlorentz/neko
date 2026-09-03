@@ -4,6 +4,7 @@
 #include "catch.hpp"
 #include "ee_core.hpp"
 #include "neko_system.hpp"
+#include "vpu_opcodes.hpp"
 
 namespace
 {
@@ -31,6 +32,17 @@ namespace
       (static_cast<std::uint32_t>(opcode) << 26) |
       (static_cast<std::uint32_t>(base) << 21) |
       (static_cast<std::uint32_t>(vectorRegister) << 16) |
+      offset;
+  }
+
+  std::uint32_t cop2BranchInstruction(
+    std::uint8_t condition,
+    std::uint16_t offset)
+  {
+    return
+      (UINT32_C(0x12) << 26) |
+      (UINT32_C(0x08) << 21) |
+      (static_cast<std::uint32_t>(condition) << 16) |
       offset;
   }
 
@@ -65,6 +77,40 @@ TEST_CASE("EE COP2 vector transfer instructions decode canonically")
   REQUIRE_THROWS_WITH(
     decodeEEInstruction(
       cop2TransferInstruction(0x01, 2, 3) | 2),
+    "Reserved EE instruction encoding.");
+}
+
+TEST_CASE("EE COP2 control and branch instructions decode canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop2TransferInstruction(0x02, 2, 3)).operation ==
+    EEOperation::ControlMoveFromCOP2);
+  REQUIRE(
+    decodeEEInstruction(
+      cop2TransferInstruction(0x06, 2, 3, true)).operation ==
+    EEOperation::ControlMoveToCOP2);
+
+  const EEOperation operations[] = {
+    EEOperation::BranchCOP2False,
+    EEOperation::BranchCOP2True,
+    EEOperation::BranchCOP2FalseLikely,
+    EEOperation::BranchCOP2TrueLikely
+  };
+  for (std::uint8_t condition = 0; condition < 4; ++condition)
+  {
+    REQUIRE(
+      decodeEEInstruction(
+        cop2BranchInstruction(condition, 0x1234)).operation ==
+      operations[condition]);
+  }
+
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(cop2BranchInstruction(4, 0)),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop2TransferInstruction(0x02, 2, 3) | 2),
     "Reserved EE instruction encoding.");
 }
 
@@ -244,6 +290,34 @@ TEST_CASE("Non-interlocked EE COP2 moves proceed during VU0 micro execution")
     UINT32_C(0x33221100));
 }
 
+TEST_CASE("VU0 M bit releases interlocked COP2 writes during micro execution")
+{
+  NekoSystem system;
+  system.vu0().writeMicroInstruction(
+    0,
+    VPU_LOWER_NOP,
+    VPU_M_BIT | VPU_NOP);
+  system.vu0().startMicroMode();
+  system.eeCore().setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x7766554433221100),
+      UINT64_C(0xffeeddccbbaa9988)
+    });
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x05, 2, 3, true));
+  REQUIRE(system.eeCore().programCounter() == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(system.eeCore().programCounter() == 4);
+  REQUIRE(
+    system.vu0().fpRegisterValue(3)->x.bits() ==
+    UINT32_C(0x33221100));
+}
+
 TEST_CASE("EE COP2 transfer results survive save-state restoration")
 {
   NekoSystem system;
@@ -271,4 +345,161 @@ TEST_CASE("EE COP2 transfer results survive save-state restoration")
       UINT64_C(0x7766554433221100),
       UINT64_C(0xffeeddccbbaa9988)
     }));
+}
+
+TEST_CASE("EE CTC2 and CFC2 transfer VU0 integer and special state")
+{
+  NekoSystem system;
+  system.eeCore().setGeneralRegister(
+    2,
+    {UINT64_C(0xaaaaaaaa8000ffff), UINT64_MAX});
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 3));
+  REQUIRE(system.vu0().intRegisterValue(3) == UINT16_C(0xffff));
+
+  system.eeCore().setGeneralRegister(4, {});
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x02, 4, 3));
+  REQUIRE(system.eeCore().generalRegister(4).low == UINT64_C(0xffff));
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 21));
+  system.eeCore().setGeneralRegister(4, {});
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x02, 4, 21));
+  REQUIRE(
+    system.eeCore().generalRegister(4).low ==
+    UINT64_C(0xffffffff8000ffff));
+}
+
+TEST_CASE("EE COP2 flag control registers enforce their write masks")
+{
+  NekoSystem system;
+  system.eeCore().setGeneralRegister(2, {UINT32_C(0xffffffff), 0});
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 16));
+  REQUIRE(system.vu0().statusFlagsValue() == UINT16_C(0x0fc0));
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 18));
+  REQUIRE(
+    system.vu0().clippingFlagsValue() ==
+    UINT32_C(0x00ffffff));
+}
+
+TEST_CASE("EE CTC2 FBRST controls and reports both vector units")
+{
+  NekoSystem system;
+  system.vu0().startMicroMode();
+  system.vu1().startMicroMode();
+  system.eeCore().setGeneralRegister(
+    2,
+    {UINT32_C(0x00000d0d), 0});
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 28));
+
+  REQUIRE(system.vu0().getState() == VPU_STATE_STOP);
+  REQUIRE(system.vu1().getState() == VPU_STATE_STOP);
+  REQUIRE(system.vu0().dBitEnabled());
+  REQUIRE(system.vu0().tBitEnabled());
+  REQUIRE(system.vu1().dBitEnabled());
+  REQUIRE(system.vu1().tBitEnabled());
+
+  system.eeCore().setGeneralRegister(3, {});
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x02, 3, 28));
+  REQUIRE(
+    system.eeCore().generalRegister(3).low ==
+    UINT64_C(0x00000c0c));
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x02, 3, 29));
+  REQUIRE(
+    (system.eeCore().generalRegister(3).low &
+     UINT64_C(0x00000808)) ==
+    UINT64_C(0x00000808));
+}
+
+TEST_CASE("EE CTC2 CMSAR1 starts VU1 and ignores writes while busy")
+{
+  NekoSystem system;
+  system.eeCore().setGeneralRegister(2, {8, 0});
+
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 31));
+  REQUIRE(system.vu1().clockActive());
+  REQUIRE(system.vu1().programCounter() == 16);
+
+  system.eeCore().setGeneralRegister(2, {0x20, 0});
+  runInstruction(
+    &system,
+    cop2TransferInstruction(0x06, 2, 31));
+  REQUIRE(system.vu1().clockActive());
+  REQUIRE(system.vu1().programCounter() != 0x20);
+}
+
+TEST_CASE("EE COP2 branches use VU1 activity and likely annulment")
+{
+  struct Contract
+  {
+    std::uint8_t condition;
+    bool vu1Running;
+    bool taken;
+    bool likely;
+  };
+  const Contract contracts[] = {
+    {0, false, true, false},
+    {0, true, false, false},
+    {1, false, false, false},
+    {1, true, true, false},
+    {2, false, true, true},
+    {2, true, false, true},
+    {3, false, false, true},
+    {3, true, true, true}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    if (contract.vu1Running)
+    {
+      system.vu1().startMicroMode();
+    }
+    const std::uint32_t program[] = {
+      cop2BranchInstruction(contract.condition, 2),
+      UINT32_C(0x34020001),
+      UINT32_C(0x34030002),
+      UINT32_C(0x34040003)
+    };
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      system.eeBus().write32(index * 4, program[index]);
+    }
+    system.eeCore().startExecution(0);
+    system.runMasterCycles(contract.taken ? 3 : 2);
+
+    REQUIRE(
+      system.eeCore().generalRegister(2).low ==
+      (contract.likely && !contract.taken ? 0 : 1));
+    REQUIRE(
+      system.eeCore().programCounter() ==
+      (contract.taken
+        ? 16
+        : contract.likely
+          ? 12
+          : 8));
+  }
 }

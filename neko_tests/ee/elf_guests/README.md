@@ -13,6 +13,7 @@ The fixtures exercise:
 - `fifo.elf`: 128-bit `SQ` writes to the VIF0, VIF1, and GIF FIFOs
 - `vif1_dma.elf`: guest-configured VIF1 DMA completion and interrupt status
 - `cop2_transfer.elf`: 128-bit EE memory/GPR transfers through VU0 registers
+- `cop2_control.elf`: VU0 control transfers and VU1 status branches
 
 Each guest returns zero through `$v0` on success or a small diagnostic code on
 failure, then returns through `$ra` to Neko's host sentinel.
@@ -39,6 +40,7 @@ d1aaa13f446f6f04d0f16eb929ced8d5f74d39bc0bc099ee158158c386940d8f  branches.elf
 0649d2f7dd8dd396ff1f45d4fa962b1bed53044a9972dbc97f7e3fb846161fae  fifo.elf
 df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20  vif1_dma.elf
 9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707  cop2_transfer.elf
+f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386  cop2_control.elf
 ```
 
 Inspect a generated fixture with:

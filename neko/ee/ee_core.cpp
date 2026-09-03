@@ -266,6 +266,26 @@ void EECore::attachVU0(VPU *newVU0)
   vu0 = newVU0;
 }
 
+void EECore::attachVU1(VPU *newVU1)
+{
+  if (newVU1 == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE Core requires a non-null VU1.");
+  }
+  if (vu1 != nullptr)
+  {
+    throw std::logic_error(
+      "EE Core VU1 is already attached.");
+  }
+  if (newVU1->unitType() != VPUType::VU1)
+  {
+    throw std::invalid_argument(
+      "EE Core COP2 condition must attach to VU1.");
+  }
+  vu1 = newVU1;
+}
+
 EEInstructionFetchResult EECore::fetchInstruction()
 {
   const std::uint32_t address = pc;
@@ -1505,7 +1525,7 @@ bool EECore::executeInstruction(
     case EEOperation::QuadwordMoveToCOP2:
     {
       if ((instruction.raw & 1) != 0 &&
-          attachedVU0().clockActive())
+          !attachedVU0().cop2WriteAvailable())
       {
         pc = address;
         return false;
@@ -1518,6 +1538,74 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(value.low >> 32),
         static_cast<std::uint32_t>(value.high),
         static_cast<std::uint32_t>(value.high >> 32));
+      return true;
+    }
+    case EEOperation::ControlMoveFromCOP2:
+    {
+      if ((instruction.raw & 1) != 0 &&
+          attachedVU0().clockActive())
+      {
+        pc = address;
+        return false;
+      }
+      std::uint32_t value = 0;
+      if (!readCOP2ControlRegister(destination, &value))
+      {
+        return stopUndefinedOperation(
+          address,
+          instruction.raw);
+      }
+      if (destination < 16)
+      {
+        writeLowDoubleword(immediateDestination, value);
+      }
+      else
+      {
+        writeWord(immediateDestination, value);
+      }
+      return true;
+    }
+    case EEOperation::ControlMoveToCOP2:
+      if ((instruction.raw & 1) != 0 &&
+          !attachedVU0().cop2WriteAvailable())
+      {
+        pc = address;
+        return false;
+      }
+      if (!writeCOP2ControlRegister(
+            destination,
+            static_cast<std::uint32_t>(target)))
+      {
+        return stopUndefinedOperation(
+          address,
+          instruction.raw);
+      }
+      return true;
+    case EEOperation::BranchCOP2False:
+    case EEOperation::BranchCOP2FalseLikely:
+    case EEOperation::BranchCOP2True:
+    case EEOperation::BranchCOP2TrueLikely:
+    {
+      const bool conditionSignal =
+        attachedVU1().clockActive();
+      const bool branchOnTrue =
+        instruction.operation == EEOperation::BranchCOP2True ||
+        instruction.operation ==
+          EEOperation::BranchCOP2TrueLikely;
+      const bool likely =
+        instruction.operation ==
+          EEOperation::BranchCOP2FalseLikely ||
+        instruction.operation ==
+          EEOperation::BranchCOP2TrueLikely;
+      const std::uint32_t branchTarget =
+        address + 4 +
+        static_cast<std::uint32_t>(
+          signExtend16(instruction.immediate) << 2);
+      scheduleBranch(
+        conditionSignal == branchOnTrue,
+        likely,
+        branchTarget,
+        address);
       return true;
     }
     case EEOperation::Jump:
@@ -2459,6 +2547,209 @@ VPU &EECore::attachedVU0() const
       "EE Core VU0 is not attached.");
   }
   return *vu0;
+}
+
+VPU &EECore::attachedVU1() const
+{
+  if (vu1 == nullptr)
+  {
+    throw std::logic_error(
+      "EE Core VU1 is not attached.");
+  }
+  return *vu1;
+}
+
+bool EECore::readCOP2ControlRegister(
+  std::uint8_t index,
+  std::uint32_t *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "COP2 control read requires an output.");
+  }
+  if (index < 16)
+  {
+    *value = attachedVU0().intRegisterValue(index);
+    return true;
+  }
+  switch (index)
+  {
+    case 16:
+      *value = attachedVU0().statusFlagsValue();
+      return true;
+    case 17:
+      *value = attachedVU0().macFlagsValue();
+      return true;
+    case 18:
+      *value = attachedVU0().clippingFlagsValue();
+      return true;
+    case 20:
+      *value = attachedVU0().randomRegisterValue();
+      return true;
+    case 21:
+      *value = attachedVU0().iRegisterBits();
+      return true;
+    case 22:
+      *value = attachedVU0().qRegisterBits();
+      return true;
+    case 26:
+      if (!attachedVU0().hasTerminationPosition())
+      {
+        return false;
+      }
+      *value = attachedVU0().terminationPosition();
+      return true;
+    case 27:
+      *value = attachedVU0().callAddressRegister();
+      return true;
+    case 28:
+      *value =
+        (attachedVU0().dBitEnabled() ? UINT32_C(1) << 2 : 0) |
+        (attachedVU0().tBitEnabled() ? UINT32_C(1) << 3 : 0) |
+        (attachedVU1().dBitEnabled() ? UINT32_C(1) << 10 : 0) |
+        (attachedVU1().tBitEnabled() ? UINT32_C(1) << 11 : 0);
+      return true;
+    case 29:
+      *value = vpuStatusRegister();
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool EECore::writeCOP2ControlRegister(
+  std::uint8_t index,
+  std::uint32_t value)
+{
+  if (index < 16)
+  {
+    attachedVU0().loadIntRegister(
+      index,
+      static_cast<std::uint16_t>(value));
+    return true;
+  }
+  switch (index)
+  {
+    case 16:
+      attachedVU0().setStatusFlagsValue(value);
+      return true;
+    case 18:
+      attachedVU0().setClippingFlagsValue(value);
+      return true;
+    case 20:
+      if (attachedVU0().clockActive())
+      {
+        return false;
+      }
+      attachedVU0().setRandomRegisterValue(value);
+      return true;
+    case 21:
+      if (attachedVU0().clockActive())
+      {
+        return false;
+      }
+      attachedVU0().setIRegisterBits(value);
+      return true;
+    case 22:
+      if (attachedVU0().clockActive())
+      {
+        return false;
+      }
+      attachedVU0().setQRegisterBits(value);
+      return true;
+    case 27:
+      attachedVU0().setCallAddressRegister(value);
+      return true;
+    case 28:
+      if ((value & (UINT32_C(1) << 1)) != 0)
+      {
+        attachedVU0().resetFromControl();
+      }
+      if ((value & (UINT32_C(1) << 9)) != 0)
+      {
+        attachedVU1().resetFromControl();
+      }
+      if ((value & UINT32_C(1)) != 0)
+      {
+        attachedVU0().forceBreak();
+      }
+      if ((value & (UINT32_C(1) << 8)) != 0)
+      {
+        attachedVU1().forceBreak();
+      }
+      attachedVU0().setDBitEnabled(
+        (value & (UINT32_C(1) << 2)) != 0);
+      attachedVU0().setTBitEnabled(
+        (value & (UINT32_C(1) << 3)) != 0);
+      attachedVU1().setDBitEnabled(
+        (value & (UINT32_C(1) << 10)) != 0);
+      attachedVU1().setTBitEnabled(
+        (value & (UINT32_C(1) << 11)) != 0);
+      return true;
+    case 31:
+    {
+      if (attachedVU1().clockActive())
+      {
+        return true;
+      }
+      const std::uint16_t startAddress =
+        static_cast<std::uint16_t>(value);
+      if ((startAddress & 7) != 0 ||
+          startAddress > attachedVU1().microMemorySize() - 8)
+      {
+        return false;
+      }
+      attachedVU1().startMicroMode(startAddress);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+std::uint32_t EECore::vpuStatusRegister() const
+{
+  std::uint32_t value = 0;
+  const auto addUnitStatus =
+    [&value](const VPU &vpu, std::uint8_t shift)
+    {
+      if (vpu.clockActive())
+      {
+        value |= UINT32_C(1) << shift;
+      }
+      if (vpu.stoppedByDBit())
+      {
+        value |= UINT32_C(1) << (shift + 1);
+      }
+      if (vpu.stoppedByTBit())
+      {
+        value |= UINT32_C(1) << (shift + 2);
+      }
+      if (vpu.stoppedByForceBreak())
+      {
+        value |= UINT32_C(1) << (shift + 3);
+      }
+    };
+  addUnitStatus(attachedVU0(), 0);
+  addUnitStatus(attachedVU1(), 8);
+  if (attachedVU0().divisionUnitBusy())
+  {
+    value |= UINT32_C(1) << 5;
+  }
+  if (attachedVU1().waitingForXGKICK())
+  {
+    value |= UINT32_C(1) << 12;
+  }
+  if (attachedVU1().divisionUnitBusy())
+  {
+    value |= UINT32_C(1) << 13;
+  }
+  if (attachedVU1().elementaryFunctionUnitBusy())
+  {
+    value |= UINT32_C(1) << 14;
+  }
+  return value;
 }
 
 EEInstructionFetchResult EECore::raiseFetchException(

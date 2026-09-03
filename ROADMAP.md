@@ -562,7 +562,7 @@ rather than host-side setup:
 
 - [x] Implement EE COP2 vector transfers: `LQC2`, `QMFC2`, `QMTC2`, and
       `SQC2`
-- [ ] Implement EE COP2 control transfers and branches: `CFC2`, `CTC2`,
+- [x] Implement EE COP2 control transfers and branches: `CFC2`, `CTC2`,
       `BC2F`, `BC2FL`, `BC2T`, and `BC2TL`
 - [ ] Implement `VCALLMS` and `VCALLMSR` microprogram initiation
 - [ ] Decode the VU macro arithmetic, conversion, memory, transfer, random,

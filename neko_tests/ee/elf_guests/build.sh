@@ -10,7 +10,7 @@ fi
 compiler="$PS2DEV/ee/bin/mips64r5900el-ps2-elf-gcc"
 directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-for guest in arithmetic branches memory mmio fifo vif1_dma cop2_transfer; do
+for guest in arithmetic branches memory mmio fifo vif1_dma cop2_transfer cop2_control; do
   object="$directory/$guest.o"
   "$compiler" \
     -x assembler-with-cpp \

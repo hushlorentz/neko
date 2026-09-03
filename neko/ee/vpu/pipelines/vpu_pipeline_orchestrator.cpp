@@ -166,6 +166,26 @@ bool PipelineOrchestrator::hasNext()
   return executing.size() > 0 || waiting.size() > 0;
 }
 
+bool PipelineOrchestrator::hasPipelineType(
+  uint8_t pipelineType) const
+{
+  for (const Pipeline *pipeline : executing)
+  {
+    if (pipeline->type == pipelineType)
+    {
+      return true;
+    }
+  }
+  for (const Pipeline *pipeline : waiting)
+  {
+    if (pipeline->type == pipelineType)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool PipelineOrchestrator::hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1FieldMask, uint8_t srcReg2, uint8_t srcReg2FieldMask) const
 {
   for (list<Pipeline *>::const_iterator iter = executing.begin(); iter != executing.end(); ++iter)

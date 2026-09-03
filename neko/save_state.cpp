@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 10;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 11;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1804,6 +1804,10 @@ void NekoSaveStateCodec::writeVPU(
   writer->writeBool(vpu.tEnabled);
   writer->writeBool(vpu.xgkickWaiting);
   writer->writeBool(vpu.xgkickTransferStarted);
+  writer->writeBool(vpu.dBitStop);
+  writer->writeBool(vpu.tBitStop);
+  writer->writeBool(vpu.forceBreakStop);
+  writer->writeBool(vpu.cop2WriteInterlockReleased);
 
   writer->writeSize(vpu.fpRegisters.size());
   for (const FPRegister &value : vpu.fpRegisters)
@@ -1819,6 +1823,7 @@ void NekoSaveStateCodec::writeVPU(
   writer->writeU32(vpu.qRegister.bits());
   writer->writeU32(vpu.pRegister.bits());
   writer->writeU32(vpu.rRegister);
+  writer->writeU16(vpu.cmsarRegister);
   writer->writeU16(vpu.MACFlags);
   writer->writeU16(vpu.statusFlags);
   writeFPRegister(writer, vpu.accumulator);
@@ -1890,6 +1895,14 @@ void NekoSaveStateCodec::readVPU(
     reader->readBool("VU XGKICK wait flag");
   vpu->xgkickTransferStarted =
     reader->readBool("VU XGKICK start flag");
+  vpu->dBitStop =
+    reader->readBool("VU D-bit stop flag");
+  vpu->tBitStop =
+    reader->readBool("VU T-bit stop flag");
+  vpu->forceBreakStop =
+    reader->readBool("VU force-break stop flag");
+  vpu->cop2WriteInterlockReleased =
+    reader->readBool("VU COP2 write-interlock flag");
 
   const std::uint32_t fpRegisterCount = reader->readU32();
   require(
@@ -1911,6 +1924,7 @@ void NekoSaveStateCodec::readVPU(
   vpu->qRegister.setBits(reader->readU32());
   vpu->pRegister.setBits(reader->readU32());
   vpu->rRegister = reader->readU32();
+  vpu->cmsarRegister = reader->readU16();
   vpu->MACFlags = reader->readU16();
   vpu->statusFlags = reader->readU16();
   vpu->accumulator = readFPRegister(reader);
@@ -1965,6 +1979,20 @@ void NekoSaveStateCodec::readVPU(
   require(
     vpu->statusFlags <= VPU_FLAG_DS,
     "VU status flags are invalid");
+  require(
+    !vpu->forceBreakStop ||
+      (!vpu->dBitStop && !vpu->tBitStop),
+    "VU stop cause is invalid");
+  require(
+    (!vpu->dBitStop &&
+     !vpu->tBitStop &&
+     !vpu->forceBreakStop) ||
+      vpu->state == VPU_STATE_STOP,
+    "VU stop cause does not match run state");
+  require(
+    !vpu->cop2WriteInterlockReleased ||
+      vpu->state == VPU_STATE_RUN,
+    "VU COP2 write interlock does not match run state");
   require(
     vpu->clippingFlags <= VPU_CLIPPING_FLAG_MASK,
     "VU clipping flags are invalid");
@@ -2022,12 +2050,18 @@ void NekoSaveStateCodec::commitVPU(
   destination->xgkickWaiting = source->xgkickWaiting;
   destination->xgkickTransferStarted =
     source->xgkickTransferStarted;
+  destination->dBitStop = source->dBitStop;
+  destination->tBitStop = source->tBitStop;
+  destination->forceBreakStop = source->forceBreakStop;
+  destination->cop2WriteInterlockReleased =
+    source->cop2WriteInterlockReleased;
   destination->fpRegisters.swap(source->fpRegisters);
   destination->intRegisters.swap(source->intRegisters);
   destination->iRegister = source->iRegister;
   destination->qRegister = source->qRegister;
   destination->pRegister = source->pRegister;
   destination->rRegister = source->rRegister;
+  destination->cmsarRegister = source->cmsarRegister;
   destination->MACFlags = source->MACFlags;
   destination->statusFlags = source->statusFlags;
   destination->accumulator = source->accumulator;

@@ -45,7 +45,8 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
     {"mmio.elf", 20},
     {"fifo.elf", 16},
     {"vif1_dma.elf", 34},
-    {"cop2_transfer.elf", 19}
+    {"cop2_transfer.elf", 19},
+    {"cop2_control.elf", 23}
   };
 
   for (const GuestExpectation &guest : guests)
@@ -65,6 +66,20 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
       result.execution.programCounter ==
       EEGuestRuntime::RETURN_ADDRESS);
   }
+}
+
+TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop2_control.elf"), 96);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(system.vu0().intRegisterValue(3) == UINT16_C(0x7f01));
+  REQUIRE(system.eeCore().generalRegister(11).low == 1);
+  REQUIRE(system.eeCore().generalRegister(12).low == 1);
+  REQUIRE(system.vu1().getState() == VPU_STATE_STOP);
+  REQUIRE(system.vu1().stoppedByForceBreak());
 }
 
 TEST_CASE("PS2DEV EE ELF guest transfers vectors through VU0 COP2")

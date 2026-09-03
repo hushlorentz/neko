@@ -477,6 +477,10 @@ void VPU::forceBreak()
   terminationRequested = false;
   haltAfterDrain = false;
   terminationPositionValid = false;
+  dBitStop = false;
+  tBitStop = false;
+  forceBreakStop = true;
+  cop2WriteInterlockReleased = false;
   state = VPU_STATE_STOP;
 
   emitTrace({
@@ -778,6 +782,10 @@ void VPU::startMicroMode(uint16_t startAddress)
   pendingBranchLinkValid = false;
   terminationRequested = false;
   haltAfterDrain = false;
+  dBitStop = false;
+  tBitStop = false;
+  forceBreakStop = false;
+  cop2WriteInterlockReleased = false;
   state = VPU_STATE_RUN;
 }
 
@@ -816,6 +824,7 @@ bool VPU::tick()
         terminationPositionCounter = microMemPC / 8;
         terminationPositionValid = true;
         state = haltAfterDrain ? VPU_STATE_STOP : VPU_STATE_READY;
+        cop2WriteInterlockReleased = false;
       }
     }
     else if (orchestrator.stalling || xgkickStallsIssue())
@@ -883,6 +892,10 @@ bool VPU::tick()
           instructionAddress);
         microMemPC += 8;
         instructionIssued = true;
+        if (hasFlag(upperInstruction, VPU_M_BIT))
+        {
+          cop2WriteInterlockReleased = true;
+        }
 
         emitTrace({
           VPUTraceEventType::InstructionIssued,
@@ -900,6 +913,12 @@ bool VPU::tick()
           endDelaySlotPending = false;
           terminationRequested = true;
           haltAfterDrain = true;
+          dBitStop =
+            dEnabled && hasFlag(upperInstruction, VPU_D_BIT);
+          tBitStop =
+            tEnabled && hasFlag(upperInstruction, VPU_T_BIT);
+          forceBreakStop = false;
+          cop2WriteInterlockReleased = false;
         }
         else if (executingEndDelaySlot)
         {
@@ -940,6 +959,10 @@ bool VPU::tick()
     branchDelaySlotPending = false;
     pendingBranchTaken = false;
     pendingBranchLinkValid = false;
+    dBitStop = false;
+    tBitStop = false;
+    forceBreakStop = false;
+    cop2WriteInterlockReleased = false;
     state = VPU_STATE_STOP;
     throw;
   }
@@ -2037,6 +2060,146 @@ uint32_t VPU::pRegisterBits() const
 uint32_t VPU::rRegisterBits() const
 {
   return VU_FLOAT_ONE_BITS | (rRegister & FP_MAX_MANTISSA);
+}
+
+uint16_t VPU::statusFlagsValue() const
+{
+  return statusFlags;
+}
+
+uint16_t VPU::macFlagsValue() const
+{
+  return MACFlags;
+}
+
+uint32_t VPU::clippingFlagsValue() const
+{
+  return clippingFlags & UINT32_C(0x00ffffff);
+}
+
+uint32_t VPU::randomRegisterValue() const
+{
+  return rRegister & FP_MAX_MANTISSA;
+}
+
+uint32_t VPU::iRegisterBits() const
+{
+  return iRegister.bits();
+}
+
+uint16_t VPU::callAddressRegister() const
+{
+  return cmsarRegister;
+}
+
+void VPU::setStatusFlagsValue(uint32_t value)
+{
+  statusFlags =
+    (statusFlags & UINT16_C(0x003f)) |
+    (static_cast<uint16_t>(value) & UINT16_C(0x0fc0));
+}
+
+void VPU::setClippingFlagsValue(uint32_t value)
+{
+  clippingFlags = value & UINT32_C(0x00ffffff);
+}
+
+void VPU::setRandomRegisterValue(uint32_t value)
+{
+  rRegister = value & FP_MAX_MANTISSA;
+}
+
+void VPU::setIRegisterBits(uint32_t value)
+{
+  iRegister.setBits(value);
+}
+
+void VPU::setQRegisterBits(uint32_t value)
+{
+  qRegister.setBits(value);
+}
+
+void VPU::setCallAddressRegister(uint32_t value)
+{
+  cmsarRegister = static_cast<uint16_t>(value);
+}
+
+void VPU::resetFromControl()
+{
+  orchestrator.reset();
+  state = VPU_STATE_READY;
+  mode = VPU_MODE_MACRO;
+  microMemPC = 0;
+  terminationPositionCounter = 0;
+  terminationPositionValid = false;
+  endDelaySlotPending = false;
+  branchDelaySlotPending = false;
+  pendingBranchTaken = false;
+  pendingBranchTarget = 0;
+  pendingBranchLinkValid = false;
+  pendingBranchLinkRegister = 0;
+  pendingBranchLinkValue = 0;
+  terminationRequested = false;
+  haltAfterDrain = false;
+  dEnabled = false;
+  tEnabled = false;
+  xgkickWaiting = false;
+  xgkickTransferStarted = false;
+  intRegisters.assign(NUM_INT_REGISTERS, 0);
+  iRegister.setBits(0);
+  qRegister.setBits(0);
+  pRegister.setBits(0);
+  rRegister = 0;
+  cmsarRegister = 0;
+  MACFlags = 0;
+  statusFlags = 0;
+  clippingFlags = 0;
+  pendingAccumulatorWrites = 0;
+  accumulatorForwardValid = false;
+  lowerInstructionPending = false;
+  pendingLowerInstructionReady = false;
+  pendingLowerWritebackDiscarded = false;
+  pendingIntegerWrites.fill(0);
+  pendingIALUWrites.fill(0);
+  bypassedIntegerValues.fill(0);
+  dBitStop = false;
+  tBitStop = false;
+  forceBreakStop = false;
+}
+
+bool VPU::stoppedByDBit() const
+{
+  return dBitStop;
+}
+
+bool VPU::stoppedByTBit() const
+{
+  return tBitStop;
+}
+
+bool VPU::stoppedByForceBreak() const
+{
+  return forceBreakStop;
+}
+
+bool VPU::divisionUnitBusy() const
+{
+  return orchestrator.hasPipelineType(VPU_PIPELINE_TYPE_FDIV);
+}
+
+bool VPU::elementaryFunctionUnitBusy() const
+{
+  return orchestrator.hasPipelineType(VPU_PIPELINE_TYPE_EFU);
+}
+
+bool VPU::waitingForXGKICK() const
+{
+  return xgkickWaiting;
+}
+
+bool VPU::cop2WriteAvailable() const
+{
+  return !clockActive() || cop2WriteInterlockReleased;
 }
 
 void VPU::setFlags(FPRegister * reg, uint8_t ignoredFields)

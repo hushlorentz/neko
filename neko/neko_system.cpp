@@ -44,6 +44,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   eeCoreComponent.attachVU0(&vu0Component);
+  eeCoreComponent.attachVU1(&vu1Component);
   masterClock.registerComponent(gifDMACComponent, 1);
   masterClock.registerComponent(vif1DMACComponent, 1);
   masterClock.registerComponent(gsDisplayComponent, 1);

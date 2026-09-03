@@ -142,6 +142,7 @@ class EECore : public ClockedComponent
     void reset();
     void attachBus(EEBus *bus);
     void attachVU0(VPU *vu0);
+    void attachVU1(VPU *vu1);
     EEInstructionFetchResult fetchInstruction();
     void startExecution(std::uint32_t startAddress);
     void haltExecution();
@@ -239,6 +240,7 @@ class EECore : public ClockedComponent
     std::uint32_t cop0ErrorEPC = 0;
     EEBus *bus = nullptr;
     VPU *vu0 = nullptr;
+    VPU *vu1 = nullptr;
     EEException exception = EEException::None;
     std::uint32_t faultAddress = 0;
     EEExecutionState state = EEExecutionState::Halted;
@@ -270,6 +272,14 @@ class EECore : public ClockedComponent
       std::uint32_t returnAddress);
     EEBus &attachedBus() const;
     VPU &attachedVU0() const;
+    VPU &attachedVU1() const;
+    bool readCOP2ControlRegister(
+      std::uint8_t index,
+      std::uint32_t *value) const;
+    bool writeCOP2ControlRegister(
+      std::uint8_t index,
+      std::uint32_t value);
+    std::uint32_t vpuStatusRegister() const;
     EEInstructionFetchResult raiseFetchException(
       EEException type,
       std::uint32_t address);

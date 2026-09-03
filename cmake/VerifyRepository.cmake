@@ -90,6 +90,10 @@ verify_ee_elf_fixture(
   cop2_transfer.elf
   9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707
 )
+verify_ee_elf_fixture(
+  cop2_control.elf
+  f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386
+)
 
 verify_fixture(
   integer_fill.bin

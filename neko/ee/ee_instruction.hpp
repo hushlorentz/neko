@@ -117,7 +117,13 @@ enum class EEOperation : std::uint8_t
   LoadQuadwordToCOP2,
   StoreQuadwordFromCOP2,
   QuadwordMoveFromCOP2,
-  QuadwordMoveToCOP2
+  QuadwordMoveToCOP2,
+  ControlMoveFromCOP2,
+  ControlMoveToCOP2,
+  BranchCOP2False,
+  BranchCOP2FalseLikely,
+  BranchCOP2True,
+  BranchCOP2TrueLikely
 };
 
 struct EEInstruction

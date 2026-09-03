@@ -633,17 +633,56 @@ namespace
   void applyCop2(EEInstruction *instruction)
   {
     if (instruction->sourceRegister == 0x01 ||
-        instruction->sourceRegister == 0x05)
+        instruction->sourceRegister == 0x02 ||
+        instruction->sourceRegister == 0x05 ||
+        instruction->sourceRegister == 0x06)
     {
       if ((instruction->raw & UINT32_C(0x000007fe)) != 0)
       {
         reject(DecodeKind::Reserved);
       }
-      instruction->operation =
-        instruction->sourceRegister == 0x01
-          ? EEOperation::QuadwordMoveFromCOP2
-          : EEOperation::QuadwordMoveToCOP2;
+      switch (instruction->sourceRegister)
+      {
+        case 0x01:
+          instruction->operation =
+            EEOperation::QuadwordMoveFromCOP2;
+          break;
+        case 0x02:
+          instruction->operation =
+            EEOperation::ControlMoveFromCOP2;
+          break;
+        case 0x05:
+          instruction->operation =
+            EEOperation::QuadwordMoveToCOP2;
+          break;
+        default:
+          instruction->operation =
+            EEOperation::ControlMoveToCOP2;
+          break;
+      }
       return;
+    }
+    if (instruction->sourceRegister == 0x08)
+    {
+      switch (instruction->targetRegister)
+      {
+        case 0x00:
+          instruction->operation = EEOperation::BranchCOP2False;
+          return;
+        case 0x01:
+          instruction->operation = EEOperation::BranchCOP2True;
+          return;
+        case 0x02:
+          instruction->operation =
+            EEOperation::BranchCOP2FalseLikely;
+          return;
+        case 0x03:
+          instruction->operation =
+            EEOperation::BranchCOP2TrueLikely;
+          return;
+        default:
+          reject(DecodeKind::Reserved);
+      }
     }
     reject(DecodeKind::Unsupported);
   }
@@ -687,6 +726,10 @@ bool isEEBranchOperation(EEOperation operation)
     case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
     case EEOperation::BranchLessThanZeroAndLinkLikely:
     case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+    case EEOperation::BranchCOP2False:
+    case EEOperation::BranchCOP2FalseLikely:
+    case EEOperation::BranchCOP2True:
+    case EEOperation::BranchCOP2TrueLikely:
       return true;
     default:
       return false;
@@ -703,7 +746,9 @@ bool isEEBranchLikelyOperation(EEOperation operation)
     operation == EEOperation::BranchLessThanZeroLikely ||
     operation == EEOperation::BranchGreaterThanOrEqualZeroLikely ||
     operation == EEOperation::BranchLessThanZeroAndLinkLikely ||
-    operation == EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
+    operation == EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely ||
+    operation == EEOperation::BranchCOP2FalseLikely ||
+    operation == EEOperation::BranchCOP2TrueLikely;
 }
 
 EEInstruction decodeEEInstruction(std::uint32_t raw)
