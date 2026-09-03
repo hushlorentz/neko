@@ -98,6 +98,10 @@ verify_ee_elf_fixture(
   vcallms.elf
   d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7
 )
+verify_ee_elf_fixture(
+  vu_macro_arithmetic.elf
+  7fd2baf8ba09bc8c43dff19d6fa0d8e48cff9f182911dbf0334a8fd673aa5c2d
+)
 
 verify_fixture(
   integer_fill.bin

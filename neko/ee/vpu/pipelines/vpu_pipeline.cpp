@@ -281,6 +281,45 @@ bool Pipeline::isComplete() const
   return complete;
 }
 
+bool Pipeline::completesOnNextAdvance() const
+{
+  switch (type)
+  {
+    case VPU_PIPELINE_TYPE_FMAC:
+    case VPU_PIPELINE_TYPE_LSU:
+    case VPU_PIPELINE_TYPE_XGKICK:
+      return currentStage == VUPipelineStage::Z;
+    case VPU_PIPELINE_TYPE_IALU:
+      return currentStage == VUPipelineStage::IZ;
+    case VPU_PIPELINE_TYPE_FLAG:
+      return
+        opCode == VPU_FCSET || opCode == VPU_FSSET
+          ? currentStage == VUPipelineStage::Z
+          : currentStage == VUPipelineStage::M;
+    case VPU_PIPELINE_TYPE_RANDOM:
+      return
+        opCode == VPU_RGET || opCode == VPU_RNEXT
+          ? currentStage == VUPipelineStage::Z
+          : currentStage == VUPipelineStage::M;
+    case VPU_PIPELINE_TYPE_BRANCH:
+    case VPU_PIPELINE_TYPE_I_REGISTER:
+    case VPU_PIPELINE_TYPE_WAITQ:
+    case VPU_PIPELINE_TYPE_WAITP:
+    case VPU_PIPELINE_TYPE_VIF_CONTROL:
+      return currentStage == VUPipelineStage::M;
+    case VPU_PIPELINE_TYPE_FDIV:
+      return
+        currentStage == VUPipelineStage::D &&
+        currentStageIndex == executionStageCount;
+    case VPU_PIPELINE_TYPE_EFU:
+      return
+        currentStage == VUPipelineStage::N &&
+        currentStageIndex == executionStageCount;
+    default:
+      return false;
+  }
+}
+
 bool Pipeline::destinationAvailableForNextTStage() const
 {
   return

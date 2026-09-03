@@ -15,6 +15,7 @@ The fixtures exercise:
 - `cop2_transfer.elf`: 128-bit EE memory/GPR transfers through VU0 registers
 - `cop2_control.elf`: VU0 control transfers and VU1 status branches
 - `vcallms.elf`: VU0 microprogram initiation through `VCALLMS` and `VCALLMSR`
+- `vu_macro_arithmetic.elf`: pipelined VU0 `VADD`/`VSUB` macro arithmetic
 
 Each guest returns zero through `$v0` on success or a small diagnostic code on
 failure, then returns through `$ra` to Neko's host sentinel.
@@ -43,6 +44,7 @@ df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20  vif1_dma.elf
 9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707  cop2_transfer.elf
 f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386  cop2_control.elf
 d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7  vcallms.elf
+7fd2baf8ba09bc8c43dff19d6fa0d8e48cff9f182911dbf0334a8fd673aa5c2d  vu_macro_arithmetic.elf
 ```
 
 Inspect a generated fixture with:

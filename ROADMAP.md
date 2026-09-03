@@ -568,10 +568,13 @@ rather than host-side setup:
 - [x] Audit the completed COP2/VU initiation boundary, including interlock
       save-state resume, reset invariants, Stop-state startup, and VIF
       synchronization
-- [ ] Decode the VU macro arithmetic, conversion, memory, transfer, random,
-      and synchronization instruction families and reuse the corresponding
-      microinstruction execution semantics where their architectural behavior
-      agrees
+- [x] Decode and execute the first VU macro arithmetic slice: `VADD`,
+      `VADDi`, `VADDq`, `VADDx/y/z/w`, `VSUB`, `VSUBi`, `VSUBq`, and
+      `VSUBx/y/z/w`
+- [ ] Decode the remaining VU macro arithmetic, conversion, memory, transfer,
+      random, and synchronization instruction families and reuse the
+      corresponding microinstruction execution semantics where their
+      architectural behavior agrees
 - [ ] Audit every macro-mode opcode in the official table and reject reserved
       COP2 encodings deterministically
 

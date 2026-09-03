@@ -789,6 +789,106 @@ void VPU::startMicroMode(uint16_t startAddress)
   state = VPU_STATE_RUN;
 }
 
+bool VPU::startMicroModeFromMacro(uint16_t startAddress)
+{
+  if (!macroModeActive() ||
+      !orchestrator.canAcceptInstruction())
+  {
+    return false;
+  }
+  if (startAddress % 8 != 0)
+  {
+    throw invalid_argument("VU start address must be 8-byte aligned.");
+  }
+  if (startAddress > microMem.size() - 8)
+  {
+    throw out_of_range("VU start address is outside micro memory.");
+  }
+
+  mode = VPU_MODE_MICRO;
+  microMemPC = startAddress;
+  terminationPositionValid = false;
+  endDelaySlotPending = false;
+  branchDelaySlotPending = false;
+  pendingBranchTaken = false;
+  pendingBranchLinkValid = false;
+  terminationRequested = false;
+  haltAfterDrain = false;
+  dBitStop = false;
+  tBitStop = false;
+  forceBreakStop = false;
+  cop2WriteInterlockReleased = false;
+  return true;
+}
+
+bool VPU::issueMacroInstruction(uint32_t instruction)
+{
+  if (type != VPUType::VU0)
+  {
+    throw logic_error("Macro instructions require VU0.");
+  }
+  if (state == VPU_STATE_STOP)
+  {
+    throw logic_error("Macro instructions cannot execute while VU0 is stopped.");
+  }
+  if (state == VPU_STATE_RUN &&
+      mode == VPU_MODE_MICRO)
+  {
+    if (!terminationRequested ||
+        haltAfterDrain ||
+        !orchestrator.pipelinesCompleteOnNextUpdate())
+    {
+      return false;
+    }
+    terminationRequested = false;
+    endDelaySlotPending = false;
+    branchDelaySlotPending = false;
+    pendingBranchTaken = false;
+    pendingBranchLinkValid = false;
+  }
+  if (!orchestrator.canAcceptInstruction())
+  {
+    return false;
+  }
+
+  processUpperInstruction(instruction);
+  mode = VPU_MODE_MACRO;
+  state = VPU_STATE_RUN;
+  terminationPositionValid = false;
+  emitTrace({
+    VPUTraceEventType::InstructionIssued,
+    cycles,
+    0,
+    instruction,
+    0,
+    0,
+    0,
+    0
+  });
+  return true;
+}
+
+bool VPU::microModeActive() const
+{
+  return state == VPU_STATE_RUN && mode == VPU_MODE_MICRO;
+}
+
+bool VPU::macroModeActive() const
+{
+  return state == VPU_STATE_RUN && mode == VPU_MODE_MACRO;
+}
+
+bool VPU::macroRegisterWritePending(
+  uint8_t registerID,
+  uint8_t fieldMask) const
+{
+  return
+    macroModeActive() &&
+    orchestrator.hasPendingRegisterWrite(
+      registerID,
+      fieldMask);
+}
+
 bool VPU::clockActive() const
 {
   return state == VPU_STATE_RUN;
@@ -811,6 +911,17 @@ bool VPU::tick()
 
   try
   {
+    if (mode == VPU_MODE_MACRO)
+    {
+      orchestrator.update();
+      if (!orchestrator.hasNext())
+      {
+        state = VPU_STATE_READY;
+      }
+      cycles++;
+      return false;
+    }
+
     if (xgkickHandler &&
         xgkickHandler->path1TransferActive())
     {
@@ -2210,6 +2321,16 @@ void VPU::setFlags(FPRegister * reg, uint8_t ignoredFields)
   setStickyFlagsFromStatusFlags();
 }
 
+void VPU::setFlagsForActiveFields(
+  FPRegister *reg,
+  uint8_t activeFields)
+{
+  MACFlags = 0;
+  setFlags(
+    reg,
+    FP_REGISTER_ALL_FIELDS & ~activeFields);
+}
+
 void VPU::setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields)
 {
   if (!hasFlag(ignoredFields, FP_REGISTER_X_FIELD))
@@ -3525,7 +3646,9 @@ void VPU::pipelineFinished(Pipeline * p)
       break;
     default:
       updateDestinationRegisterWithPipelineResult(destReg, p);
-      setFlags(destReg, FP_REGISTER_NO_FIELDS);
+      setFlagsForActiveFields(
+        &p->fpResult,
+        p->destFieldMask);
       break;
   }
 

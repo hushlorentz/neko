@@ -1438,6 +1438,13 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
+      if (attachedVU0().macroRegisterWritePending(
+            immediateDestination,
+            FP_REGISTER_ALL_FIELDS))
+      {
+        pc = address;
+        return false;
+      }
       EEQuadword value = {};
       const bool succeeded =
         attachedBus().readData128(dataAddress, &value);
@@ -1476,6 +1483,13 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
+      if (attachedVU0().macroRegisterWritePending(
+            immediateDestination,
+            FP_REGISTER_ALL_FIELDS))
+      {
+        pc = address;
+        return false;
+      }
       const EERegister128 value = quadwordFromFPRegister(
         *attachedVU0().fpRegisterValue(immediateDestination));
       const EEDataWriteResult writeResult =
@@ -1508,8 +1522,11 @@ bool EECore::executeInstruction(
     }
     case EEOperation::QuadwordMoveFromCOP2:
     {
-      if ((instruction.raw & 1) != 0 &&
-          attachedVU0().clockActive())
+      if (((instruction.raw & 1) != 0 &&
+           attachedVU0().microModeActive()) ||
+          attachedVU0().macroRegisterWritePending(
+            destination,
+            FP_REGISTER_ALL_FIELDS))
       {
         pc = address;
         return false;
@@ -1524,8 +1541,11 @@ bool EECore::executeInstruction(
     }
     case EEOperation::QuadwordMoveToCOP2:
     {
-      if ((instruction.raw & 1) != 0 &&
-          !attachedVU0().cop2WriteAvailable())
+      if (((instruction.raw & 1) != 0 &&
+           !attachedVU0().cop2WriteAvailable()) ||
+          attachedVU0().macroRegisterWritePending(
+            destination,
+            FP_REGISTER_ALL_FIELDS))
       {
         pc = address;
         return false;
@@ -1542,8 +1562,10 @@ bool EECore::executeInstruction(
     }
     case EEOperation::ControlMoveFromCOP2:
     {
-      if ((instruction.raw & 1) != 0 &&
-          attachedVU0().clockActive())
+      if (((instruction.raw & 1) != 0 &&
+           attachedVU0().microModeActive()) ||
+          (attachedVU0().macroModeActive() &&
+           (destination == 16 || destination == 17)))
       {
         pc = address;
         return false;
@@ -1566,8 +1588,10 @@ bool EECore::executeInstruction(
       return true;
     }
     case EEOperation::ControlMoveToCOP2:
-      if ((instruction.raw & 1) != 0 &&
-          !attachedVU0().cop2WriteAvailable())
+      if (((instruction.raw & 1) != 0 &&
+           !attachedVU0().cop2WriteAvailable()) ||
+          (attachedVU0().macroModeActive() &&
+           destination == 16))
       {
         pc = address;
         return false;
@@ -1612,11 +1636,6 @@ bool EECore::executeInstruction(
     case EEOperation::VectorCallMicroSubroutineRegister:
     {
       VPU &vu0 = attachedVU0();
-      if (vu0.clockActive())
-      {
-        pc = address;
-        return false;
-      }
       const std::size_t callAddress =
         static_cast<std::size_t>(
           instruction.operation ==
@@ -1630,8 +1649,42 @@ bool EECore::executeInstruction(
           address,
           instruction.raw);
       }
-      vu0.startMicroMode(
-        static_cast<std::uint16_t>(callAddress));
+      const std::uint16_t startAddress =
+        static_cast<std::uint16_t>(callAddress);
+      if (vu0.macroModeActive())
+      {
+        if (!vu0.startMicroModeFromMacro(startAddress))
+        {
+          pc = address;
+          return false;
+        }
+      }
+      else
+      {
+        if (vu0.microModeActive())
+        {
+          pc = address;
+          return false;
+        }
+        vu0.startMicroMode(startAddress);
+      }
+      return true;
+    }
+    case EEOperation::VectorMacroArithmetic:
+    {
+      VPU &vu0 = attachedVU0();
+      if (vu0.getState() == VPU_STATE_STOP)
+      {
+        return stopUndefinedOperation(
+          address,
+          instruction.raw);
+      }
+      if (!vu0.issueMacroInstruction(
+            instruction.raw & UINT32_C(0x01ffffff)))
+      {
+        pc = address;
+        return false;
+      }
       return true;
     }
     case EEOperation::Jump:
@@ -2740,7 +2793,7 @@ std::uint32_t EECore::vpuStatusRegister() const
   const auto addUnitStatus =
     [&value](const VPU &vpu, std::uint8_t shift)
     {
-      if (vpu.clockActive())
+      if (vpu.microModeActive())
       {
         value |= UINT32_C(1) << shift;
       }

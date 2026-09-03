@@ -166,6 +166,27 @@ bool PipelineOrchestrator::hasNext()
   return executing.size() > 0 || waiting.size() > 0;
 }
 
+bool PipelineOrchestrator::canAcceptInstruction() const
+{
+  return !stalling && waiting.empty() && !pool.empty();
+}
+
+bool PipelineOrchestrator::pipelinesCompleteOnNextUpdate() const
+{
+  if (stalling || !waiting.empty())
+  {
+    return false;
+  }
+  for (const Pipeline *pipeline : executing)
+  {
+    if (!pipeline->completesOnNextAdvance())
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool PipelineOrchestrator::hasPipelineType(
   uint8_t pipelineType) const
 {
@@ -179,6 +200,36 @@ bool PipelineOrchestrator::hasPipelineType(
   for (const Pipeline *pipeline : waiting)
   {
     if (pipeline->type == pipelineType)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool PipelineOrchestrator::hasPendingRegisterWrite(
+  uint8_t registerID,
+  uint8_t fieldMask) const
+{
+  const auto conflicts =
+    [registerID, fieldMask](const Pipeline *pipeline)
+    {
+      return
+        !pipeline->discardWriteback &&
+        pipeline->destReg == registerID &&
+        pipeline->destReg != VPU_REGISTER_VF00 &&
+        (pipeline->destFieldMask & fieldMask) != 0;
+    };
+  for (const Pipeline *pipeline : executing)
+  {
+    if (conflicts(pipeline))
+    {
+      return true;
+    }
+  }
+  for (const Pipeline *pipeline : waiting)
+  {
+    if (conflicts(pipeline))
     {
       return true;
     }

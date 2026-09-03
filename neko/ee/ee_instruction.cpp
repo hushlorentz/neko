@@ -646,6 +646,30 @@ namespace
         EEOperation::VectorCallMicroSubroutineRegister;
       return;
     }
+    if ((instruction->raw & UINT32_C(0xfe000000)) ==
+        UINT32_C(0x4a000000))
+    {
+      const bool fullVector =
+        instruction->function == 0x28 ||
+        instruction->function == 0x2c;
+      const bool scalar =
+        instruction->function == 0x20 ||
+        instruction->function == 0x22 ||
+        instruction->function == 0x24 ||
+        instruction->function == 0x26;
+      const bool broadcast =
+        instruction->function <= 0x07;
+      if (fullVector || scalar || broadcast)
+      {
+        if (scalar && instruction->targetRegister != 0)
+        {
+          reject(DecodeKind::Reserved);
+        }
+        instruction->operation =
+          EEOperation::VectorMacroArithmetic;
+        return;
+      }
+    }
     if (instruction->sourceRegister >= 0x10 &&
         (instruction->function == 0x38 ||
          instruction->function == 0x39))

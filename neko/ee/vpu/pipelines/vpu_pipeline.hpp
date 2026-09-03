@@ -73,6 +73,7 @@ class Pipeline
     void setIntResult(int i);
     void advanceStage();
     bool isComplete() const;
+    bool completesOnNextAdvance() const;
     bool destinationAvailableForNextTStage() const;
     bool blocksStructuralHazardFor(uint8_t requestedType) const;
     VUPipelineStage stage() const;

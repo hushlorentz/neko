@@ -104,6 +104,13 @@ class VPU : public ClockedComponent, public PipelineHandler
     void setMode(uint8_t newMode);
     void initMicroMode();
     void startMicroMode(uint16_t startAddress = 0);
+    bool startMicroModeFromMacro(uint16_t startAddress);
+    bool issueMacroInstruction(uint32_t instruction);
+    bool microModeActive() const;
+    bool macroModeActive() const;
+    bool macroRegisterWritePending(
+      uint8_t registerID,
+      uint8_t fieldMask) const;
     bool clockActive() const override;
     void clock() override;
     bool tick();
@@ -279,6 +286,9 @@ class VPU : public ClockedComponent, public PipelineHandler
       const Pipeline *pipeline) const;
     void evaluateBranchPipeline(Pipeline *pipeline);
     void setFlags(FPRegister * reg, uint8_t ignoredFields);
+    void setFlagsForActiveFields(
+      FPRegister *reg,
+      uint8_t activeFields);
     void setMACFlagsFromRegister(FPRegister * reg, uint8_t ignoredFields);
     void setStatusFlagsFromMACFlags();
     void setStickyFlagsFromStatusFlags();
