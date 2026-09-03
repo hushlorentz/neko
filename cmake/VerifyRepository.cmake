@@ -243,5 +243,9 @@ verify_ee_elf_fixture(
   rotation_vu1.elf
   15a69f9505959eb2be7c52f38a525465ac26ce3d55b353e8a23eda6d91478adf
 )
+verify_ee_elf_fixture(
+  point_sprite.elf
+  40ceb21e5e43c654098b08ea7c81e74a287048a8272cbbd8abb0d3c4eb61a403
+)
 
 message(STATUS "Repository checks passed")

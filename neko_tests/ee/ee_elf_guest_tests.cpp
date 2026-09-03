@@ -244,6 +244,25 @@ TEST_CASE("PS2DEV EE ELF guest renders a rotating VU1 triangle")
     UINT64_C(0xdf0bce57b91fbbd3));
 }
 
+TEST_CASE("PS2DEV EE ELF guest renders the point and sprite scene")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("point_sprite.elf"), 40000);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(system.gifPath3().guestFIFOQuadwordCount() == 0);
+  REQUIRE(system.gifPath3().transferredQuadwordCount() == 226);
+  REQUIRE(system.gs().pointCount() == 96);
+  REQUIRE(system.gs().lineCount() == 0);
+  REQUIRE(system.gs().spriteCount() == 7);
+  REQUIRE(system.gs().triangleCount() == 0);
+  REQUIRE(
+    system.gs().framebufferHash(0, 640, 448) ==
+    UINT64_C(0xc1adcf6554c82b99));
+}
+
 TEST_CASE("PS2DEV EE ELF guest writes VIF and GIF FIFOs")
 {
   NekoSystem system;
