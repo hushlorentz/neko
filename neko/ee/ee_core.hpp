@@ -233,7 +233,15 @@ class EECore : public ClockedComponent
       BranchScheduled,
       MemoryAccess,
       ExceptionEntered,
-      InterruptDelivered
+      InterruptDelivered,
+      COP1LoadInterlock
+    };
+
+    enum class FPRDependency : std::uint8_t
+    {
+      None,
+      Read,
+      Write
     };
 
     struct CycleTraceEvent
@@ -378,7 +386,7 @@ class EECore : public ClockedComponent
       bool writeGeneralRegister);
     bool completePendingCOP1Load(
       std::uint8_t *registerIndex);
-    static bool instructionDependsOnFPR(
+    static FPRDependency instructionFPRDependency(
       const EEInstruction &instruction,
       std::uint8_t registerIndex);
     bool validateShiftAmountOrdering(

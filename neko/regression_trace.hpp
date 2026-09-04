@@ -33,7 +33,8 @@ enum class NekoTraceEventType : std::uint8_t
   MemoryAccess,
   ExceptionEntered,
   InterruptDelivered,
-  StateSnapshot
+  StateSnapshot,
+  COP1LoadInterlock
 };
 
 namespace NekoEETraceBranch
@@ -47,6 +48,12 @@ namespace NekoEETraceMemory
   constexpr std::uint64_t WIDTH_MASK = UINT64_C(0xff);
   constexpr std::uint64_t WRITE = UINT64_C(1) << 8;
   constexpr std::uint64_t SUCCEEDED = UINT64_C(1) << 9;
+}
+
+namespace NekoEETraceCOP1Interlock
+{
+  constexpr std::uint64_t READ = UINT64_C(1);
+  constexpr std::uint64_t WRITE = UINT64_C(1) << 1;
 }
 
 struct NekoTraceEvent

@@ -631,6 +631,9 @@ void NekoSystem::recordCycleTrace(
       case EECore::CycleTraceKind::InterruptDelivered:
         type = NekoTraceEventType::InterruptDelivered;
         break;
+      case EECore::CycleTraceKind::COP1LoadInterlock:
+        type = NekoTraceEventType::COP1LoadInterlock;
+        break;
     }
     appendTrace(
       cycle,

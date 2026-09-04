@@ -452,11 +452,20 @@ void EECore::clock()
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
-  if (completedCOP1Load &&
-      instructionDependsOnFPR(
+  const FPRDependency fprDependency =
+    completedCOP1Load ?
+      instructionFPRDependency(
         decoded,
-        completedCOP1LoadRegister))
+        completedCOP1LoadRegister) :
+      FPRDependency::None;
+  if (fprDependency != FPRDependency::None)
   {
+    recordCycleTrace(
+      CycleTraceKind::COP1LoadInterlock,
+      fetched.address,
+      fetched.instruction,
+      completedCOP1LoadRegister,
+      static_cast<std::uint8_t>(fprDependency));
     pc = fetched.address;
     return;
   }
@@ -2232,20 +2241,30 @@ bool EECore::completePendingCOP1Load(
   return true;
 }
 
-bool EECore::instructionDependsOnFPR(
+EECore::FPRDependency EECore::instructionFPRDependency(
   const EEInstruction &instruction,
   std::uint8_t registerIndex)
 {
   switch (instruction.operation)
   {
     case EEOperation::MoveWordFromCOP1:
+      return instruction.destinationRegister == registerIndex ?
+        FPRDependency::Read :
+        FPRDependency::None;
     case EEOperation::MoveWordToCOP1:
-      return instruction.destinationRegister == registerIndex;
-    case EEOperation::LoadWordToCOP1:
+      return instruction.destinationRegister == registerIndex ?
+        FPRDependency::Write :
+        FPRDependency::None;
     case EEOperation::StoreWordFromCOP1:
-      return instruction.targetRegister == registerIndex;
+      return instruction.targetRegister == registerIndex ?
+        FPRDependency::Read :
+        FPRDependency::None;
+    case EEOperation::LoadWordToCOP1:
+      return instruction.targetRegister == registerIndex ?
+        FPRDependency::Write :
+        FPRDependency::None;
     default:
-      return false;
+      return FPRDependency::None;
   }
 }
 

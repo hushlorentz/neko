@@ -387,10 +387,29 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
   REQUIRE(events[2].value0 == core.stateHash());
 }
 
-TEST_CASE("EE COP1 load interlocks do not trace blocked instructions as issued")
+TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
+  std::uint32_t dependentInstruction = 0;
+  std::uint64_t expectedAccess = 0;
+  SECTION("read")
+  {
+    dependentInstruction =
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11);
+    expectedAccess = NekoEETraceCOP1Interlock::READ;
+  }
+  SECTION("write")
+  {
+    dependentInstruction =
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(4) << 21) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11);
+    expectedAccess = NekoEETraceCOP1Interlock::WRITE;
+  }
   core.setGeneralRegister(1, {0x100, 0});
   REQUIRE(
     system.eeBus().writeData32(
@@ -399,22 +418,25 @@ TEST_CASE("EE COP1 load interlocks do not trace blocked instructions as issued")
   system.eeBus().write32(
     0,
     immediateInstruction(0x31, 1, 3, 0));
-  system.eeBus().write32(
-    4,
-    (UINT32_C(0x11) << 26) |
-      (UINT32_C(2) << 16) |
-      (UINT32_C(3) << 11));
+  system.eeBus().write32(4, dependentInstruction);
   core.startExecution(0);
   system.startTrace();
 
   system.runMasterCycles(3);
 
   std::vector<NekoTraceEvent> issued;
+  std::vector<NekoTraceEvent> interlocks;
   for (const NekoTraceEvent &event : eeTrace(system))
   {
     if (event.type == NekoTraceEventType::InstructionIssued)
     {
       issued.push_back(event);
+    }
+    else if (
+      event.type ==
+      NekoTraceEventType::COP1LoadInterlock)
+    {
+      interlocks.push_back(event);
     }
   }
   REQUIRE(issued.size() == 2);
@@ -422,6 +444,12 @@ TEST_CASE("EE COP1 load interlocks do not trace blocked instructions as issued")
   REQUIRE(issued[0].value0 == 0);
   REQUIRE(issued[1].masterCycle == 3);
   REQUIRE(issued[1].value0 == 4);
+  REQUIRE(interlocks.size() == 1);
+  REQUIRE(interlocks[0].masterCycle == 2);
+  REQUIRE(interlocks[0].value0 == 4);
+  REQUIRE(interlocks[0].value1 == dependentInstruction);
+  REQUIRE(interlocks[0].value2 == 3);
+  REQUIRE(interlocks[0].value3 == expectedAccess);
 }
 
 TEST_CASE("EE state snapshots include in-flight execution")
