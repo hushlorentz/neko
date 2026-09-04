@@ -539,6 +539,24 @@ bool EECore::executeInstruction(
       floatingPointRegisters[destination] =
         static_cast<std::uint32_t>(target);
       return true;
+    case EEOperation::MoveControlWordFromCOP1:
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      writeWord(
+        immediateDestination,
+        cop1ControlRegister(destination));
+      return true;
+    case EEOperation::MoveControlWordToCOP1:
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      setCOP1ControlRegister(
+        destination,
+        static_cast<std::uint32_t>(target));
+      return true;
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:

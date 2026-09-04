@@ -621,7 +621,7 @@ than delegating architectural results to host floating-point defaults.
 - [x] Add FPR, ACC, FCR0, and FCR31 state with checked architectural accessors
 - [x] Implement `MFC1` and `MTC1`, including 32-bit sign extension into EE
       GPRs and lower-word writes into FPRs
-- [ ] Implement `CFC1` and `CTC1`, including the FCR0 implementation/revision
+- [x] Implement `CFC1` and `CTC1`, including the FCR0 implementation/revision
       value, writable FCR31 fields, hardwired rounding bits, and deterministic
       rejection of reserved control registers
 - [ ] Implement aligned `LWC1` and `SWC1` through the EE memory and exception

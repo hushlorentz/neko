@@ -128,7 +128,9 @@ enum class EEOperation : std::uint8_t
   VectorCallMicroSubroutineRegister,
   VectorMacroArithmetic,
   MoveWordFromCOP1,
-  MoveWordToCOP1
+  MoveWordToCOP1,
+  MoveControlWordFromCOP1,
+  MoveControlWordToCOP1
 };
 
 struct EEInstruction

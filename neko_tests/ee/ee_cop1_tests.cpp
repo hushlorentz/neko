@@ -39,6 +39,14 @@ TEST_CASE("EE COP1 word transfer instructions decode canonically")
     decodeEEInstruction(
       cop1TransferInstruction(0x04, 2, 3)).operation ==
     EEOperation::MoveWordToCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1TransferInstruction(0x02, 2, 0)).operation ==
+    EEOperation::MoveControlWordFromCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1TransferInstruction(0x06, 2, 31)).operation ==
+    EEOperation::MoveControlWordToCOP1);
 
   REQUIRE_THROWS_WITH(
     decodeEEInstruction(
@@ -48,6 +56,37 @@ TEST_CASE("EE COP1 word transfer instructions decode canonically")
     decodeEEInstruction(
       cop1TransferInstruction(0x04, 2, 3) | 1),
     "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1TransferInstruction(0x02, 2, 0) | 1),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1TransferInstruction(0x06, 2, 31) | 1),
+    "Reserved EE instruction encoding.");
+}
+
+TEST_CASE("EE COP1 control transfers reject reserved FCRs")
+{
+  for (std::uint8_t controlRegister = 1;
+       controlRegister < 31;
+       ++controlRegister)
+  {
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(
+        cop1TransferInstruction(
+          0x02,
+          2,
+          controlRegister)),
+      "Reserved EE instruction encoding.");
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(
+        cop1TransferInstruction(
+          0x06,
+          2,
+          controlRegister)),
+      "Reserved EE instruction encoding.");
+  }
 }
 
 TEST_CASE("EE MFC1 sign-extends raw FPR words into GPRs")
@@ -110,11 +149,76 @@ TEST_CASE("EE COP1 transfers preserve GPR zero")
     EERegister128{});
 }
 
+TEST_CASE("EE CFC1 exposes implemented control-register values")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP1ControlRegister(31, UINT32_MAX);
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0xaaaaaaaaaaaaaaaa),
+      UINT64_C(0xbbbbbbbbbbbbbbbb)
+    });
+
+  runInstruction(
+    &system,
+    cop1TransferInstruction(0x02, 2, 0));
+
+  REQUIRE(
+    core.generalRegister(2) ==
+    EERegister128{
+      EECOP1Control::IMPLEMENTATION_REVISION,
+      UINT64_C(0xbbbbbbbbbbbbbbbb)
+    });
+
+  runInstruction(
+    &system,
+    cop1TransferInstruction(0x02, 2, 31));
+
+  REQUIRE(
+    core.generalRegister(2) ==
+    EERegister128{
+      EECOP1Control::STATUS_FIXED |
+        EECOP1Control::STATUS_WRITABLE_MASK,
+      UINT64_C(0xbbbbbbbbbbbbbbbb)
+    });
+}
+
+TEST_CASE("EE CTC1 applies control-register architectural masks")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x11223344ffffffff),
+      UINT64_C(0xfedcba9876543210)
+    });
+
+  runInstruction(
+    &system,
+    cop1TransferInstruction(0x06, 2, 0));
+  REQUIRE(
+    core.cop1ControlRegister(0) ==
+    EECOP1Control::IMPLEMENTATION_REVISION);
+
+  runInstruction(
+    &system,
+    cop1TransferInstruction(0x06, 2, 31));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STATUS_WRITABLE_MASK));
+}
+
 TEST_CASE("EE COP1 transfers require Status CU1")
 {
   const std::uint32_t instructions[] = {
     cop1TransferInstruction(0x00, 2, 3),
-    cop1TransferInstruction(0x04, 2, 3)
+    cop1TransferInstruction(0x04, 2, 3),
+    cop1TransferInstruction(0x02, 2, 31),
+    cop1TransferInstruction(0x06, 2, 31)
   };
 
   for (const std::uint32_t instruction : instructions)
@@ -161,5 +265,8 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     REQUIRE(
       core.floatingPointRegister(3) ==
       UINT32_C(0x76543210));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
   }
 }

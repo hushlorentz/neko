@@ -727,25 +727,41 @@ namespace
   void applyCop1(EEInstruction *instruction)
   {
     if (instruction->sourceRegister == 0x00 ||
-        instruction->sourceRegister == 0x04)
+        instruction->sourceRegister == 0x02 ||
+        instruction->sourceRegister == 0x04 ||
+        instruction->sourceRegister == 0x06)
     {
       if ((instruction->raw & UINT32_C(0x000007ff)) != 0)
       {
         reject(DecodeKind::Reserved);
       }
-      instruction->operation =
-        instruction->sourceRegister == 0x00
-          ? EEOperation::MoveWordFromCOP1
-          : EEOperation::MoveWordToCOP1;
+      if ((instruction->sourceRegister == 0x02 ||
+           instruction->sourceRegister == 0x06) &&
+          instruction->destinationRegister != 0 &&
+          instruction->destinationRegister != 31)
+      {
+        reject(DecodeKind::Reserved);
+      }
+      switch (instruction->sourceRegister)
+      {
+        case 0x00:
+          instruction->operation =
+            EEOperation::MoveWordFromCOP1;
+          break;
+        case 0x02:
+          instruction->operation =
+            EEOperation::MoveControlWordFromCOP1;
+          break;
+        case 0x04:
+          instruction->operation =
+            EEOperation::MoveWordToCOP1;
+          break;
+        default:
+          instruction->operation =
+            EEOperation::MoveControlWordToCOP1;
+          break;
+      }
       return;
-    }
-    if (instruction->sourceRegister == 0x02 ||
-        instruction->sourceRegister == 0x06)
-    {
-      reject(
-        (instruction->raw & UINT32_C(0x000007ff)) == 0
-          ? DecodeKind::Unsupported
-          : DecodeKind::Reserved);
     }
     if (instruction->sourceRegister == 0x08)
     {
