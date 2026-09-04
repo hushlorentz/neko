@@ -638,7 +638,7 @@ than delegating architectural results to host floating-point defaults.
       NaN, infinity, denormal, or rounding-mode behavior leaking into results
 - [x] Implement documented signed-zero results for arithmetic, min/max,
       division, square root, and reciprocal square root
-- [ ] Implement exponent overflow saturation to signed maximum and exponent
+- [x] Implement exponent overflow saturation to signed maximum and exponent
       underflow flushing to signed zero
 - [ ] Implement FCR31 current and sticky `I`, `D`, `O`, and `U` flag updates,
       including instructions that explicitly clear current flags

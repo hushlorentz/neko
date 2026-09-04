@@ -189,6 +189,103 @@ TEST_CASE("EE COP1 normalization uses exact truncating binary arithmetic")
   }
 }
 
+TEST_CASE("EE COP1 normalization saturates and flushes exponent ranges")
+{
+  struct RangeVector
+  {
+    bool negative;
+    std::uint64_t magnitude;
+    std::int16_t leastSignificantBitExponent;
+    std::uint32_t expectedBits;
+    std::uint8_t expectedFlags;
+  };
+
+  const RangeVector vectors[] = {
+    {
+      false,
+      UINT64_C(1),
+      -126,
+      UINT32_C(0x00800000),
+      0
+    },
+    {
+      true,
+      UINT64_C(1),
+      -126,
+      UINT32_C(0x80800000),
+      0
+    },
+    {
+      false,
+      UINT64_C(0xffffff),
+      105,
+      UINT32_C(0x7fffffff),
+      0
+    },
+    {
+      true,
+      UINT64_C(0xffffff),
+      105,
+      UINT32_C(0xffffffff),
+      0
+    },
+    {
+      false,
+      UINT64_C(1),
+      129,
+      UINT32_C(0x7fffffff),
+      FP_FLAG_OVERFLOW
+    },
+    {
+      true,
+      UINT64_C(1),
+      129,
+      UINT32_C(0xffffffff),
+      FP_FLAG_OVERFLOW
+    },
+    {
+      false,
+      UINT64_C(1),
+      -127,
+      0,
+      FP_FLAG_UNDERFLOW
+    },
+    {
+      true,
+      UINT64_C(1),
+      -127,
+      FP_SIGN_BIT,
+      FP_FLAG_UNDERFLOW
+    },
+    {
+      false,
+      0,
+      129,
+      0,
+      0
+    },
+    {
+      true,
+      0,
+      -127,
+      FP_SIGN_BIT,
+      0
+    }
+  };
+
+  for (const RangeVector &vector : vectors)
+  {
+    const EEFloatResult result =
+      normalizeEEFloat(
+        vector.negative,
+        vector.magnitude,
+        vector.leastSignificantBitExponent);
+
+    REQUIRE(result.bits == vector.expectedBits);
+    REQUIRE(result.flags == vector.expectedFlags);
+  }
+}
+
 TEST_CASE("EE COP1 arithmetic follows the documented signed-zero table")
 {
   struct BinaryVector
