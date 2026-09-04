@@ -19,6 +19,20 @@ namespace
       (static_cast<std::uint32_t>(floatingPointRegister) << 11);
   }
 
+  std::uint32_t cop1MemoryInstruction(
+    std::uint8_t opcode,
+    std::uint8_t base,
+    std::uint8_t floatingPointRegister,
+    std::uint16_t offset)
+  {
+    return
+      (static_cast<std::uint32_t>(opcode) << 26) |
+      (static_cast<std::uint32_t>(base) << 21) |
+      (static_cast<std::uint32_t>(
+        floatingPointRegister) << 16) |
+      offset;
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -27,6 +41,26 @@ namespace
     system->eeCore().startExecution(0);
     system->clockMasterCycle();
   }
+}
+
+TEST_CASE("EE COP1 memory transfer instructions decode canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1MemoryInstruction(
+        0x31,
+        1,
+        2,
+        0x3456)).operation ==
+    EEOperation::LoadWordToCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1MemoryInstruction(
+        0x39,
+        1,
+        2,
+        0x3456)).operation ==
+    EEOperation::StoreWordFromCOP1);
 }
 
 TEST_CASE("EE COP1 word transfer instructions decode canonically")
@@ -212,13 +246,142 @@ TEST_CASE("EE CTC1 applies control-register architectural masks")
      EECOP1Control::STATUS_WRITABLE_MASK));
 }
 
+TEST_CASE("EE LWC1 and SWC1 transfer raw words through memory")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    1,
+    {
+      UINT64_C(0x1234000000000104),
+      UINT64_C(0xabcdef0123456789)
+    });
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+
+  runInstruction(
+    &system,
+    cop1MemoryInstruction(0x31, 1, 3, 0xfffc));
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+
+  core.setFloatingPointRegister(4, UINT32_C(0x76543210));
+  runInstruction(
+    &system,
+    cop1MemoryInstruction(0x39, 1, 4, 0));
+
+  std::uint32_t stored = 0;
+  REQUIRE(system.eeBus().readData32(0x104, &stored));
+  REQUIRE(stored == UINT32_C(0x76543210));
+}
+
+TEST_CASE("EE COP1 word memory alignment faults are precise")
+{
+  SECTION("LWC1 preserves its destination")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x102, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x12345678));
+
+    runInstruction(
+      &system,
+      cop1MemoryInstruction(0x31, 1, 2, 0));
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == 0x102);
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x12345678));
+  }
+
+  SECTION("SWC1 performs no partial write")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x102, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0xaabbccdd));
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x11223344)));
+
+    runInstruction(
+      &system,
+      cop1MemoryInstruction(0x39, 1, 2, 0));
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorStore);
+    REQUIRE(core.exceptionAddress() == 0x102);
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x11223344));
+  }
+}
+
+TEST_CASE("EE COP1 word memory bus faults preserve architectural state")
+{
+  SECTION("LWC1 reports a load bus error")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x12345678));
+
+    runInstruction(
+      &system,
+      cop1MemoryInstruction(0x31, 1, 2, 0));
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::DataBusErrorLoad);
+    REQUIRE(
+      core.exceptionAddress() ==
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x12345678));
+  }
+
+  SECTION("SWC1 reports a store bus error")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x89abcdef));
+
+    runInstruction(
+      &system,
+      cop1MemoryInstruction(0x39, 1, 2, 0));
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::DataBusErrorStore);
+    REQUIRE(
+      core.exceptionAddress() ==
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+  }
+}
+
 TEST_CASE("EE COP1 transfers require Status CU1")
 {
   const std::uint32_t instructions[] = {
     cop1TransferInstruction(0x00, 2, 3),
     cop1TransferInstruction(0x04, 2, 3),
     cop1TransferInstruction(0x02, 2, 31),
-    cop1TransferInstruction(0x06, 2, 31)
+    cop1TransferInstruction(0x06, 2, 31),
+    cop1MemoryInstruction(0x31, 1, 3, 2),
+    cop1MemoryInstruction(0x39, 1, 3, 2)
   };
 
   for (const std::uint32_t instruction : instructions)
@@ -236,6 +399,10 @@ TEST_CASE("EE COP1 transfers require Status CU1")
         UINT64_C(0x2222222233333333)
       });
     core.setFloatingPointRegister(3, UINT32_C(0x76543210));
+    REQUIRE(
+      system.eeBus().writeData32(
+        0,
+        UINT32_C(0x11223344)));
     system.eeBus().write32(0, instruction);
     core.startExecution(0);
 
@@ -268,5 +435,8 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     REQUIRE(
       core.cop1ControlRegister(31) ==
       EECOP1Control::STATUS_FIXED);
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0, &stored));
+    REQUIRE(stored == instruction);
   }
 }

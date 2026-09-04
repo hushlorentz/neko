@@ -624,7 +624,7 @@ than delegating architectural results to host floating-point defaults.
 - [x] Implement `CFC1` and `CTC1`, including the FCR0 implementation/revision
       value, writable FCR31 fields, hardwired rounding bits, and deterministic
       rejection of reserved control registers
-- [ ] Implement aligned `LWC1` and `SWC1` through the EE memory and exception
+- [x] Implement aligned `LWC1` and `SWC1` through the EE memory and exception
       paths
 - [ ] Model FPR load availability and dependent-use interlocks consistently
       with the existing non-blocking EE load contract

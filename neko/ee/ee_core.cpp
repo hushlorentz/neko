@@ -1051,6 +1051,78 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::LoadWordToCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      if ((dataAddress & 3) != 0)
+      {
+        return raiseDataAccessException(
+          EEException::AddressErrorLoadOrFetch,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      std::uint32_t value = 0;
+      const bool succeeded =
+        attachedBus().readData32(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        4,
+        false,
+        succeeded,
+        succeeded ? value : 0);
+      if (!succeeded)
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      floatingPointRegisters[immediateDestination] = value;
+      return true;
+    }
+    case EEOperation::StoreWordFromCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const std::uint32_t dataAddress =
+        static_cast<std::uint32_t>(source + immediate);
+      if ((dataAddress & 3) != 0)
+      {
+        return raiseDataAccessException(
+          EEException::AddressErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      const std::uint32_t value =
+        floatingPointRegisters[immediateDestination];
+      const bool succeeded =
+        attachedBus().writeData32(dataAddress, value);
+      recordMemoryTrace(
+        dataAddress,
+        4,
+        true,
+        succeeded,
+        value);
+      if (!succeeded)
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return true;
+    }
     case EEOperation::LoadWordLeft:
     case EEOperation::LoadWordRight:
     {
