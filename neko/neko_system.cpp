@@ -151,6 +151,9 @@ EEGuestExecutionResult NekoSystem::runELF(
     if (eeCoreComponent.programCounter() ==
         EEGuestRuntime::RETURN_ADDRESS)
     {
+      std::uint8_t completedRegister = 0;
+      eeCoreComponent.completePendingCOP1Load(
+        &completedRegister);
       eeCoreComponent.haltExecution();
       returned = true;
       break;
@@ -168,6 +171,9 @@ EEGuestExecutionResult NekoSystem::runELF(
       eeCoreComponent.programCounter() ==
         EEGuestRuntime::RETURN_ADDRESS)
   {
+    std::uint8_t completedRegister = 0;
+    eeCoreComponent.completePendingCOP1Load(
+      &completedRegister);
     eeCoreComponent.haltExecution();
     returned = true;
   }

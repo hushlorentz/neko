@@ -626,7 +626,7 @@ than delegating architectural results to host floating-point defaults.
       rejection of reserved control registers
 - [x] Implement aligned `LWC1` and `SWC1` through the EE memory and exception
       paths
-- [ ] Model FPR load availability and dependent-use interlocks consistently
+- [x] Model FPR load availability and dependent-use interlocks consistently
       with the existing non-blocking EE load contract
 - [ ] Add decode, access, alignment, exception, and transfer conformance tests
 

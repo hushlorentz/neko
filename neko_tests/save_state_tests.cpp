@@ -16,8 +16,9 @@ namespace
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
-  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 975;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 985;
+  constexpr std::size_t EE_PENDING_COP1_LOAD_REGISTER_OFFSET = 974;
+  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 981;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 991;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -1065,4 +1066,31 @@ TEST_CASE("Invalid save states are rejected transactionally")
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
+}
+
+TEST_CASE("Pending COP1 save-state loads match their instruction")
+{
+  NekoSystem source;
+  source.eeCore().setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    source.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+  source.eeBus().write32(
+    0,
+    (UINT32_C(0x31) << 26) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(3) << 16));
+  source.eeCore().startExecution(0);
+  source.clockMasterCycle();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[EE_PENDING_COP1_LOAD_REGISTER_OFFSET] = 4;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
 }

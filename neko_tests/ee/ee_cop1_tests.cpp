@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <vector>
 
 #include "catch.hpp"
 #include "ee_core.hpp"
@@ -261,9 +262,14 @@ TEST_CASE("EE LWC1 and SWC1 transfer raw words through memory")
       0x100,
       UINT32_C(0x89abcdef)));
 
-  runInstruction(
-    &system,
+  system.eeBus().write32(
+    0,
     cop1MemoryInstruction(0x31, 1, 3, 0xfffc));
+  system.eeBus().write32(4, 0);
+  core.startExecution(0);
+  system.clockMasterCycle();
+  REQUIRE(core.floatingPointRegister(3) == 0);
+  system.clockMasterCycle();
   REQUIRE(
     core.floatingPointRegister(3) ==
     UINT32_C(0x89abcdef));
@@ -276,6 +282,159 @@ TEST_CASE("EE LWC1 and SWC1 transfer raw words through memory")
   std::uint32_t stored = 0;
   REQUIRE(system.eeBus().readData32(0x104, &stored));
   REQUIRE(stored == UINT32_C(0x76543210));
+}
+
+TEST_CASE("EE LWC1 stalls an immediate dependent FPR use")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setFloatingPointRegister(3, UINT32_C(0x11111111));
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x00, 2, 3));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x11111111));
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(2) == EERegister128{});
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.generalRegister(2).low ==
+    UINT64_C(0xffffffff89abcdef));
+}
+
+TEST_CASE("EE LWC1 permits independent work during writeback")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(
+    4,
+    (UINT32_C(0x0d) << 26) |
+      (UINT32_C(4) << 16) |
+      UINT32_C(0x55));
+  system.eeBus().write32(
+    8,
+    cop1TransferInstruction(0x00, 2, 3));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.generalRegister(4).low == 0x55);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x12345678));
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 12);
+  REQUIRE(core.generalRegister(2).low == 0x12345678);
+}
+
+TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setGeneralRegister(
+    2,
+    {UINT32_C(0x76543210), 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x04, 2, 3));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x12345678));
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x76543210));
+}
+
+TEST_CASE("EE pending COP1 loads survive host halt and save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    original.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+  original.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  original.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x00, 2, 3));
+  originalCore.startExecution(0);
+  original.clockMasterCycle();
+  originalCore.haltExecution();
+
+  const std::vector<std::uint8_t> saved = original.saveState();
+  NekoSystem restored;
+  restored.loadState(saved);
+
+  originalCore.startExecution(4);
+  restored.eeCore().startExecution(4);
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(originalCore.programCounter() == 4);
+  REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(
+    originalCore.floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+  REQUIRE(
+    originalCore.generalRegister(2) ==
+    restored.eeCore().generalRegister(2));
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
 }
 
 TEST_CASE("EE COP1 word memory alignment faults are precise")

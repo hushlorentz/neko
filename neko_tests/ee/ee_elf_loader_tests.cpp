@@ -127,6 +127,18 @@ namespace
     writeU32(&image, 0x108, 0);
     return image;
   }
+
+  std::vector<std::uint8_t> returningLoadELF()
+  {
+    std::vector<std::uint8_t> image = returningELF(0);
+    writeU32(
+      &image,
+      0x108,
+      (UINT32_C(0x31) << 26) |
+        (UINT32_C(3) << 16) |
+        UINT32_C(0x2000));
+    return image;
+  }
 }
 
 TEST_CASE("PS2 ELF loadable segments initialize EE memory")
@@ -589,6 +601,19 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
       result.outcome ==
       EEGuestOutcome::GuestReportedFailure);
     REQUIRE(result.exitCode == 7);
+  }
+
+  SECTION("Return delay-slot writeback")
+  {
+    NekoSystem system;
+    const EEGuestExecutionResult result =
+      system.runELF(returningLoadELF(), 3);
+
+    REQUIRE(result.outcome == EEGuestOutcome::Completed);
+    REQUIRE(result.execution.instructions == 3);
+    REQUIRE(
+      system.eeCore().floatingPointRegister(3) ==
+      UINT32_C(0x44332211));
   }
 
   SECTION("Cycle limit")

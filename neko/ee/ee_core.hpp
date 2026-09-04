@@ -256,6 +256,13 @@ class EECore : public ClockedComponent
       std::uint64_t generalRegisterResult = 0;
     };
 
+    struct PendingCOP1Load
+    {
+      bool active = false;
+      std::uint8_t registerIndex = 0;
+      std::uint32_t value = 0;
+    };
+
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
     std::array<
@@ -291,6 +298,7 @@ class EECore : public ClockedComponent
     std::uint32_t rejectedInstructionValue = 0;
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
+    PendingCOP1Load pendingCOP1Load;
     std::uint8_t recentShiftAmountAccesses = 0;
     std::uint8_t recentShiftAmountReads = 0;
     bool branchDelayPending = false;
@@ -368,6 +376,11 @@ class EECore : public ClockedComponent
       std::uint64_t loResult,
       std::uint8_t generalRegister,
       bool writeGeneralRegister);
+    bool completePendingCOP1Load(
+      std::uint8_t *registerIndex);
+    static bool instructionDependsOnFPR(
+      const EEInstruction &instruction,
+      std::uint8_t registerIndex);
     bool validateShiftAmountOrdering(
       const EEInstruction &instruction,
       std::uint32_t address);

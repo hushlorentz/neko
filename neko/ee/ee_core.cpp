@@ -224,6 +224,7 @@ void EECore::reset()
   rejectedInstructionValue = 0;
   pendingMac0 = {};
   pendingMac1 = {};
+  pendingCOP1Load = {};
   recentShiftAmountAccesses = 0;
   recentShiftAmountReads = 0;
   branchDelayPending = false;
@@ -326,6 +327,11 @@ void EECore::startExecution(std::uint32_t startAddress)
     haltReason == EEStopReason::HostHalt &&
     pendingMultiplyDivideActive() &&
     startAddress == pc;
+  const bool resumePendingCOP1Load =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    pendingCOP1Load.active &&
+    startAddress == pc;
   pc = startAddress;
   clearPendingException();
   state = EEExecutionState::Running;
@@ -344,6 +350,10 @@ void EECore::startExecution(std::uint32_t startAddress)
   {
     pendingMac0 = {};
     pendingMac1 = {};
+  }
+  if (!resumePendingCOP1Load)
+  {
+    pendingCOP1Load = {};
   }
   rejectedInstructionValue = 0;
   exceptionEnteredThisCycle = false;
@@ -387,6 +397,9 @@ void EECore::clock()
   }
 
   ++cycles;
+  std::uint8_t completedCOP1LoadRegister = 0;
+  const bool completedCOP1Load =
+    completePendingCOP1Load(&completedCOP1LoadRegister);
   if (interruptDeliverable())
   {
     enterInterruptException();
@@ -445,6 +458,14 @@ void EECore::clock()
     fetched.instruction,
     static_cast<std::uint8_t>(decoded.operation),
     wasDelaySlot);
+  if (completedCOP1Load &&
+      instructionDependsOnFPR(
+        decoded,
+        completedCOP1LoadRegister))
+  {
+    pc = fetched.address;
+    return;
+  }
   if (!executeInstruction(decoded, fetched.address))
   {
     return;
@@ -1084,7 +1105,11 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      floatingPointRegisters[immediateDestination] = value;
+      pendingCOP1Load = {
+        true,
+        immediateDestination,
+        value
+      };
       return true;
     }
     case EEOperation::StoreWordFromCOP1:
@@ -2193,6 +2218,37 @@ void EECore::startPendingMultiplyDivide(
   operation.generalRegisterResult = loResult;
 }
 
+bool EECore::completePendingCOP1Load(
+  std::uint8_t *registerIndex)
+{
+  if (!pendingCOP1Load.active)
+  {
+    return false;
+  }
+  *registerIndex = pendingCOP1Load.registerIndex;
+  floatingPointRegisters[pendingCOP1Load.registerIndex] =
+    pendingCOP1Load.value;
+  pendingCOP1Load = {};
+  return true;
+}
+
+bool EECore::instructionDependsOnFPR(
+  const EEInstruction &instruction,
+  std::uint8_t registerIndex)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::MoveWordFromCOP1:
+    case EEOperation::MoveWordToCOP1:
+      return instruction.destinationRegister == registerIndex;
+    case EEOperation::LoadWordToCOP1:
+    case EEOperation::StoreWordFromCOP1:
+      return instruction.targetRegister == registerIndex;
+    default:
+      return false;
+  }
+}
+
 bool EECore::validateShiftAmountOrdering(
   const EEInstruction &instruction,
   std::uint32_t address)
@@ -2548,6 +2604,9 @@ std::uint64_t EECore::stateHash() const
     };
   hashPending(pendingMac0);
   hashPending(pendingMac1);
+  hashEEStateValue(&hash, pendingCOP1Load.active);
+  hashEEStateValue(&hash, pendingCOP1Load.registerIndex);
+  hashEEStateValue(&hash, pendingCOP1Load.value);
   hashEEStateValue(&hash, recentShiftAmountAccesses);
   hashEEStateValue(&hash, recentShiftAmountReads);
   hashEEStateValue(&hash, branchDelayPending);

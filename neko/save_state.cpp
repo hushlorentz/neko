@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 14;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 15;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1318,6 +1318,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.pendingMac0;
   destination->eeCoreComponent.pendingMac1 =
     source->eeCoreComponent.pendingMac1;
+  destination->eeCoreComponent.pendingCOP1Load =
+    source->eeCoreComponent.pendingCOP1Load;
   destination->eeCoreComponent.recentShiftAmountAccesses =
     source->eeCoreComponent.recentShiftAmountAccesses;
   destination->eeCoreComponent.recentShiftAmountReads =
@@ -1639,6 +1641,9 @@ void NekoSaveStateCodec::writeEECore(
     };
   writePending(core.pendingMac0);
   writePending(core.pendingMac1);
+  writer->writeBool(core.pendingCOP1Load.active);
+  writer->writeU8(core.pendingCOP1Load.registerIndex);
+  writer->writeU32(core.pendingCOP1Load.value);
   writer->writeU8(core.recentShiftAmountAccesses);
   writer->writeU8(core.recentShiftAmountReads);
   writer->writeBool(core.branchDelayPending);
@@ -1730,6 +1735,19 @@ void NekoSaveStateCodec::readEECore(
   readPending(
     &core->pendingMac1,
     "EE MAC1 pending flag");
+  core->pendingCOP1Load.active =
+    reader->readBool("EE COP1 pending-load flag");
+  core->pendingCOP1Load.registerIndex = reader->readU8();
+  core->pendingCOP1Load.value = reader->readU32();
+  require(
+    core->pendingCOP1Load.registerIndex <
+      EECore::FLOATING_POINT_REGISTER_COUNT,
+    "EE pending COP1 load register is invalid");
+  require(
+    core->pendingCOP1Load.active ||
+      (core->pendingCOP1Load.registerIndex == 0 &&
+       core->pendingCOP1Load.value == 0),
+    "EE inactive COP1 load contains state");
   core->recentShiftAmountAccesses = reader->readU8();
   core->recentShiftAmountReads = reader->readU8();
   require(
@@ -1780,6 +1798,14 @@ void NekoSaveStateCodec::readEECore(
   require(
     !(core->pendingMac0.active && core->pendingMac1.active),
     "EE reference core has concurrent multiply/divide state");
+  require(
+    !core->pendingCOP1Load.active ||
+      (core->lastInstructionValid &&
+       core->lastDecodedInstruction.operation ==
+         EEOperation::LoadWordToCOP1 &&
+       core->pendingCOP1Load.registerIndex ==
+         core->lastDecodedInstruction.targetRegister),
+    "EE pending COP1 load state is inconsistent");
   require(
     core->branchDelayPending ||
       (core->branchDelayTarget == 0 &&
