@@ -1678,7 +1678,7 @@ void NekoSaveStateCodec::readEECore(
   core->exception = readEnum<EEException>(
     reader,
     static_cast<std::uint8_t>(
-      EEException::Breakpoint),
+      EEException::CoprocessorUnusable),
     "EE exception");
   core->faultAddress = reader->readU32();
   core->state = readEnum<EEExecutionState>(

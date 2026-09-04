@@ -126,7 +126,9 @@ enum class EEOperation : std::uint8_t
   BranchCOP2TrueLikely,
   VectorCallMicroSubroutine,
   VectorCallMicroSubroutineRegister,
-  VectorMacroArithmetic
+  VectorMacroArithmetic,
+  MoveWordFromCOP1,
+  MoveWordToCOP1
 };
 
 struct EEInstruction

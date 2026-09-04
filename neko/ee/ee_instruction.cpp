@@ -25,6 +25,7 @@ namespace
     Regimm,
     Mmi,
     Cop0,
+    Cop1,
     Cop2
   };
 
@@ -61,6 +62,7 @@ namespace
     table[0x00].kind = DecodeKind::Special;
     table[0x01].kind = DecodeKind::Regimm;
     table[0x10].kind = DecodeKind::Cop0;
+    table[0x11].kind = DecodeKind::Cop1;
     table[0x12].kind = DecodeKind::Cop2;
     table[0x1c].kind = DecodeKind::Mmi;
     table[0x13].kind = DecodeKind::Reserved;
@@ -721,6 +723,44 @@ namespace
     }
     reject(DecodeKind::Unsupported);
   }
+
+  void applyCop1(EEInstruction *instruction)
+  {
+    if (instruction->sourceRegister == 0x00 ||
+        instruction->sourceRegister == 0x04)
+    {
+      if ((instruction->raw & UINT32_C(0x000007ff)) != 0)
+      {
+        reject(DecodeKind::Reserved);
+      }
+      instruction->operation =
+        instruction->sourceRegister == 0x00
+          ? EEOperation::MoveWordFromCOP1
+          : EEOperation::MoveWordToCOP1;
+      return;
+    }
+    if (instruction->sourceRegister == 0x02 ||
+        instruction->sourceRegister == 0x06)
+    {
+      reject(
+        (instruction->raw & UINT32_C(0x000007ff)) == 0
+          ? DecodeKind::Unsupported
+          : DecodeKind::Reserved);
+    }
+    if (instruction->sourceRegister == 0x08)
+    {
+      reject(
+        instruction->targetRegister <= 0x03
+          ? DecodeKind::Unsupported
+          : DecodeKind::Reserved);
+    }
+    if (instruction->sourceRegister == 0x10 ||
+        instruction->sourceRegister == 0x14)
+    {
+      reject(DecodeKind::Unsupported);
+    }
+    reject(DecodeKind::Reserved);
+  }
 }
 
 EEInstructionDecodeError::EEInstructionDecodeError(
@@ -819,6 +859,11 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
   if (primary.kind == DecodeKind::Cop0)
   {
     applyCop0(&instruction);
+    return instruction;
+  }
+  if (primary.kind == DecodeKind::Cop1)
+  {
+    applyCop1(&instruction);
     return instruction;
   }
   if (primary.kind == DecodeKind::Cop2)

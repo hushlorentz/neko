@@ -522,6 +522,23 @@ bool EECore::executeInstruction(
         address,
         instruction.raw);
       return false;
+    case EEOperation::MoveWordFromCOP1:
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      writeWord(
+        immediateDestination,
+        floatingPointRegisters[destination]);
+      return true;
+    case EEOperation::MoveWordToCOP1:
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      floatingPointRegisters[destination] =
+        static_cast<std::uint32_t>(target);
+      return true;
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
@@ -1999,6 +2016,25 @@ bool EECore::raiseArithmeticOverflow(
   return false;
 }
 
+bool EECore::requireCOP1Usable(
+  std::uint32_t address,
+  std::uint32_t instruction)
+{
+  if ((cop0Status & EECOP0Status::COP1_USABLE) != 0)
+  {
+    return true;
+  }
+  cop0Cause =
+    (cop0Cause & ~EECOP0Cause::COPROCESSOR_ERROR_MASK) |
+    EECOP0Cause::COPROCESSOR_1;
+  enterException(
+    EEException::CoprocessorUnusable,
+    address,
+    address,
+    instruction);
+  return false;
+}
+
 bool EECore::stopUndefinedOperation(
   std::uint32_t address,
   std::uint32_t instruction)
@@ -2287,6 +2323,8 @@ std::uint8_t EECore::exceptionCode(EEException type)
       return EEExceptionCode::BREAKPOINT;
     case EEException::ReservedInstruction:
       return EEExceptionCode::RESERVED_INSTRUCTION;
+    case EEException::CoprocessorUnusable:
+      return EEExceptionCode::COPROCESSOR_UNUSABLE;
     case EEException::ArithmeticOverflow:
       return EEExceptionCode::ARITHMETIC_OVERFLOW;
     case EEException::None:

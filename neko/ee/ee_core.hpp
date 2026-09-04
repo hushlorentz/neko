@@ -45,7 +45,8 @@ enum class EEException : std::uint8_t
   Interrupt,
   ReservedInstruction,
   SystemCall,
-  Breakpoint
+  Breakpoint,
+  CoprocessorUnusable
 };
 
 struct EEInstructionFetchResult
@@ -95,6 +96,7 @@ namespace EECOP0Status
     UINT32_C(1) << 16;
   constexpr std::uint32_t BOOTSTRAP_EXCEPTION_VECTOR =
     UINT32_C(1) << 22;
+  constexpr std::uint32_t COP1_USABLE = UINT32_C(1) << 29;
 }
 
 namespace EECOP0Cause
@@ -104,6 +106,10 @@ namespace EECOP0Cause
   constexpr std::uint32_t INTC_PENDING = UINT32_C(1) << 10;
   constexpr std::uint32_t DMAC_PENDING = UINT32_C(1) << 11;
   constexpr std::uint32_t BRANCH_DELAY = UINT32_C(1) << 31;
+  constexpr std::uint32_t COPROCESSOR_ERROR_MASK =
+    UINT32_C(0x3) << 28;
+  constexpr std::uint32_t COPROCESSOR_1 =
+    UINT32_C(1) << 28;
 }
 
 namespace EECOP1Control
@@ -128,6 +134,7 @@ namespace EEExceptionCode
   constexpr std::uint8_t SYSTEM_CALL = 8;
   constexpr std::uint8_t BREAKPOINT = 9;
   constexpr std::uint8_t RESERVED_INSTRUCTION = 10;
+  constexpr std::uint8_t COPROCESSOR_UNUSABLE = 11;
   constexpr std::uint8_t ARITHMETIC_OVERFLOW = 12;
 }
 
@@ -342,6 +349,9 @@ class EECore : public ClockedComponent
       std::uint8_t registerIndex,
       std::uint32_t value);
     bool raiseArithmeticOverflow(
+      std::uint32_t address,
+      std::uint32_t instruction);
+    bool requireCOP1Usable(
       std::uint32_t address,
       std::uint32_t instruction);
     bool stopUndefinedOperation(
