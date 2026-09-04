@@ -4,6 +4,7 @@
 #include "catch.hpp"
 #include "ee_core.hpp"
 #include "ee_instruction.hpp"
+#include "floating_point_ops.hpp"
 #include "neko_system.hpp"
 
 namespace
@@ -41,6 +42,90 @@ namespace
     system->eeBus().write32(0, instruction);
     system->eeCore().startExecution(0);
     system->clockMasterCycle();
+  }
+}
+
+TEST_CASE("EE COP1 raw values expose EE and IEEE classifications")
+{
+  struct ClassificationVector
+  {
+    std::uint32_t bits;
+    bool negative;
+    std::uint8_t encodedExponent;
+    std::int16_t unbiasedExponent;
+    std::uint32_t mantissa;
+    EEFloatClassification classification;
+    IEEEFloatEncoding ieeeEncoding;
+  };
+
+  const ClassificationVector vectors[] = {
+    {
+      UINT32_C(0x00000000),
+      false,
+      0,
+      -127,
+      0,
+      EEFloatClassification::Zero,
+      IEEEFloatEncoding::Zero
+    },
+    {
+      UINT32_C(0x80000000),
+      true,
+      0,
+      -127,
+      0,
+      EEFloatClassification::Zero,
+      IEEEFloatEncoding::Zero
+    },
+    {
+      UINT32_C(0x807fffff),
+      true,
+      0,
+      -127,
+      UINT32_C(0x7fffff),
+      EEFloatClassification::Zero,
+      IEEEFloatEncoding::Subnormal
+    },
+    {
+      UINT32_C(0x3fc12345),
+      false,
+      127,
+      0,
+      UINT32_C(0x412345),
+      EEFloatClassification::Normal,
+      IEEEFloatEncoding::Normal
+    },
+    {
+      UINT32_C(0x7f800000),
+      false,
+      255,
+      128,
+      0,
+      EEFloatClassification::ExtendedFinite,
+      IEEEFloatEncoding::Infinity
+    },
+    {
+      UINT32_C(0xffc00000),
+      true,
+      255,
+      128,
+      UINT32_C(0x400000),
+      EEFloatClassification::ExtendedFinite,
+      IEEEFloatEncoding::NaN
+    }
+  };
+
+  for (const ClassificationVector &vector : vectors)
+  {
+    const EEFloatDecomposition value =
+      decomposeEEFloat(vector.bits);
+
+    REQUIRE(value.negative == vector.negative);
+    REQUIRE(value.encodedExponent == vector.encodedExponent);
+    REQUIRE(value.unbiasedExponent == vector.unbiasedExponent);
+    REQUIRE(value.mantissa == vector.mantissa);
+    REQUIRE(value.classification == vector.classification);
+    REQUIRE(value.ieeeEncoding == vector.ieeeEncoding);
   }
 }
 

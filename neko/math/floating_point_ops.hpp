@@ -22,22 +22,37 @@ struct VUFloatResult
   std::uint8_t flags;
 };
 
-enum class VUFloatClassification : std::uint8_t
+enum class EEFloatClassification : std::uint8_t
 {
   Zero,
-  Finite,
+  Normal,
+  Finite = Normal,
   ExtendedFinite
 };
 
-struct VUFloatDecomposition
+enum class IEEEFloatEncoding : std::uint8_t
+{
+  Zero,
+  Subnormal,
+  Normal,
+  Infinity,
+  NaN
+};
+
+struct EEFloatDecomposition
 {
   bool negative;
   std::uint8_t encodedExponent;
   std::int16_t unbiasedExponent;
   std::uint32_t mantissa;
-  VUFloatClassification classification;
+  EEFloatClassification classification;
+  IEEEFloatEncoding ieeeEncoding;
 };
 
+using VUFloatClassification = EEFloatClassification;
+using VUFloatDecomposition = EEFloatDecomposition;
+
+EEFloatDecomposition decomposeEEFloat(std::uint32_t bits);
 VUFloatDecomposition decomposeVUFloat(std::uint32_t bits);
 VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);

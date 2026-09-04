@@ -361,18 +361,28 @@ namespace
   }
 }
 
-VUFloatDecomposition decomposeVUFloat(std::uint32_t bits)
+EEFloatDecomposition decomposeEEFloat(std::uint32_t bits)
 {
   const std::uint8_t encodedExponent =
     static_cast<std::uint8_t>((bits >> 23) & 0xff);
-  VUFloatClassification classification = VUFloatClassification::Finite;
+  const std::uint32_t mantissa = bits & FP_MAX_MANTISSA;
+  EEFloatClassification classification = EEFloatClassification::Normal;
+  IEEEFloatEncoding ieeeEncoding = IEEEFloatEncoding::Normal;
   if (encodedExponent == 0)
   {
-    classification = VUFloatClassification::Zero;
+    classification = EEFloatClassification::Zero;
+    ieeeEncoding =
+      mantissa == 0
+        ? IEEEFloatEncoding::Zero
+        : IEEEFloatEncoding::Subnormal;
   }
   else if (encodedExponent == 0xff)
   {
-    classification = VUFloatClassification::ExtendedFinite;
+    classification = EEFloatClassification::ExtendedFinite;
+    ieeeEncoding =
+      mantissa == 0
+        ? IEEEFloatEncoding::Infinity
+        : IEEEFloatEncoding::NaN;
   }
 
   return {
@@ -380,9 +390,15 @@ VUFloatDecomposition decomposeVUFloat(std::uint32_t bits)
     encodedExponent,
     static_cast<std::int16_t>(
       static_cast<std::int32_t>(encodedExponent) - 127),
-    bits & FP_MAX_MANTISSA,
-    classification
+    mantissa,
+    classification,
+    ieeeEncoding
   };
+}
+
+VUFloatDecomposition decomposeVUFloat(std::uint32_t bits)
+{
+  return decomposeEEFloat(bits);
 }
 
 VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)

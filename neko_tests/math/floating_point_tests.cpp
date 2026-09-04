@@ -836,6 +836,7 @@ TEST_CASE("VU raw values expose their arithmetic classification")
     REQUIRE(value.unbiasedExponent == -127);
     REQUIRE(value.mantissa == 0x7fffffu);
     REQUIRE(value.classification == VUFloatClassification::Zero);
+    REQUIRE(value.ieeeEncoding == IEEEFloatEncoding::Subnormal);
   }
 
   SECTION("Ordinary finite values expose their raw components")
@@ -846,7 +847,8 @@ TEST_CASE("VU raw values expose their arithmetic classification")
     REQUIRE(value.encodedExponent == 127);
     REQUIRE(value.unbiasedExponent == 0);
     REQUIRE(value.mantissa == 0x412345u);
-    REQUIRE(value.classification == VUFloatClassification::Finite);
+    REQUIRE(value.classification == VUFloatClassification::Normal);
+    REQUIRE(value.ieeeEncoding == IEEEFloatEncoding::Normal);
   }
 
   SECTION("Exponent-255 encodings are extended finite VU values")
@@ -859,5 +861,6 @@ TEST_CASE("VU raw values expose their arithmetic classification")
     REQUIRE(value.mantissa == 0x400000u);
     REQUIRE(value.classification ==
             VUFloatClassification::ExtendedFinite);
+    REQUIRE(value.ieeeEncoding == IEEEFloatEncoding::NaN);
   }
 }
