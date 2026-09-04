@@ -452,12 +452,6 @@ void EECore::clock()
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
-  recordCycleTrace(
-    CycleTraceKind::InstructionIssued,
-    fetched.address,
-    fetched.instruction,
-    static_cast<std::uint8_t>(decoded.operation),
-    wasDelaySlot);
   if (completedCOP1Load &&
       instructionDependsOnFPR(
         decoded,
@@ -466,6 +460,12 @@ void EECore::clock()
     pc = fetched.address;
     return;
   }
+  recordCycleTrace(
+    CycleTraceKind::InstructionIssued,
+    fetched.address,
+    fetched.instruction,
+    static_cast<std::uint8_t>(decoded.operation),
+    wasDelaySlot);
   if (!executeInstruction(decoded, fetched.address))
   {
     return;

@@ -352,6 +352,78 @@ TEST_CASE("EE regression traces retain failed memory attempts")
   REQUIRE(events[3].value0 == core.stateHash());
 }
 
+TEST_CASE("EE COP1 memory transfers produce structured traces")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+  const std::uint32_t instruction =
+    immediateInstruction(0x31, 1, 3, 0);
+  system.eeBus().write32(0, instruction);
+  core.startExecution(0);
+  system.startTrace();
+
+  system.clockMasterCycle();
+
+  const std::vector<NekoTraceEvent> events = eeTrace(system);
+  REQUIRE(events.size() == 3);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[0].value1 == instruction);
+  REQUIRE(events[1].type == NekoTraceEventType::MemoryAccess);
+  REQUIRE(events[1].value0 == 0x100);
+  REQUIRE(events[1].value1 == UINT32_C(0x89abcdef));
+  REQUIRE(events[1].value2 == 0);
+  REQUIRE(
+    events[1].value3 ==
+    (UINT64_C(4) |
+     NekoEETraceMemory::SUCCEEDED));
+  REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[2].value0 == core.stateHash());
+}
+
+TEST_CASE("EE COP1 load interlocks do not trace blocked instructions as issued")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+  system.eeBus().write32(
+    0,
+    immediateInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(3);
+
+  std::vector<NekoTraceEvent> issued;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.type == NekoTraceEventType::InstructionIssued)
+    {
+      issued.push_back(event);
+    }
+  }
+  REQUIRE(issued.size() == 2);
+  REQUIRE(issued[0].masterCycle == 1);
+  REQUIRE(issued[0].value0 == 0);
+  REQUIRE(issued[1].masterCycle == 3);
+  REQUIRE(issued[1].value0 == 4);
+}
+
 TEST_CASE("EE state snapshots include in-flight execution")
 {
   NekoSystem system;

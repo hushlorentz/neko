@@ -628,7 +628,7 @@ than delegating architectural results to host floating-point defaults.
       paths
 - [x] Model FPR load availability and dependent-use interlocks consistently
       with the existing non-blocking EE load contract
-- [ ] Add decode, access, alignment, exception, and transfer conformance tests
+- [x] Add decode, access, alignment, exception, and transfer conformance tests
 
 ### Raw Floating-Point Foundation
 

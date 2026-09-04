@@ -391,6 +391,37 @@ TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
     UINT32_C(0x76543210));
 }
 
+TEST_CASE("EE LWC1 interlocks an immediate SWC1 source")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(
+    4,
+    cop1MemoryInstruction(0x39, 1, 3, 4));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.programCounter() == 4);
+  std::uint32_t stored = 0;
+  REQUIRE(system.eeBus().readData32(0x104, &stored));
+  REQUIRE(stored == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(system.eeBus().readData32(0x104, &stored));
+  REQUIRE(stored == UINT32_C(0x89abcdef));
+}
+
 TEST_CASE("EE pending COP1 loads survive host halt and save-state restore")
 {
   NekoSystem original;
@@ -435,6 +466,66 @@ TEST_CASE("EE pending COP1 loads survive host halt and save-state restore")
     originalCore.generalRegister(2) ==
     restored.eeCore().generalRegister(2));
   REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+}
+
+TEST_CASE("EE reset cancels pending COP1 loads")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+
+  runInstruction(
+    &system,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  REQUIRE(core.floatingPointRegister(3) == 0);
+
+  core.reset();
+  system.eeBus().write32(0, 0);
+  core.startExecution(0);
+  system.clockMasterCycle();
+
+  REQUIRE(core.floatingPointRegister(3) == 0);
+}
+
+TEST_CASE("EE COP1 word memory accesses use RAM aliases and boundaries")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const std::uint32_t boundary =
+    EEMemoryMap::MAIN_MEMORY_SIZE - 4;
+  REQUIRE(
+    system.eeBus().writeData32(
+      boundary,
+      UINT32_C(0x89abcdef)));
+  core.setGeneralRegister(
+    1,
+    {EEMemoryMap::KSEG0_BASE + boundary, 0});
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(4, 0);
+  core.startExecution(0);
+  system.runMasterCycles(2);
+
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+
+  core.setFloatingPointRegister(4, UINT32_C(0x76543210));
+  core.setGeneralRegister(
+    1,
+    {EEMemoryMap::KSEG1_BASE + boundary, 0});
+  runInstruction(
+    &system,
+    cop1MemoryInstruction(0x39, 1, 4, 0));
+
+  std::uint32_t stored = 0;
+  REQUIRE(system.eeBus().readData32(boundary, &stored));
+  REQUIRE(stored == UINT32_C(0x76543210));
 }
 
 TEST_CASE("EE COP1 word memory alignment faults are precise")
@@ -482,6 +573,49 @@ TEST_CASE("EE COP1 word memory alignment faults are precise")
     REQUIRE(system.eeBus().readData32(0x100, &stored));
     REQUIRE(stored == UINT32_C(0x11223344));
   }
+}
+
+TEST_CASE("EE COP1 alignment faults identify branch delay slots")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setGeneralRegister(1, {0x102, 0});
+  system.eeBus().write32(
+    0,
+    (UINT32_C(0x04) << 26) |
+      UINT32_C(1));
+  system.eeBus().write32(
+    4,
+    cop1MemoryInstruction(0x31, 1, 2, 0));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::CoprocessorUnusable);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) != 0);
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.clearPendingException();
+  core.setProgramCounter(0);
+  core.startExecution(0);
+  system.runMasterCycles(2);
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::AddressErrorLoadOrFetch);
+  REQUIRE(core.exceptionAddress() == 0x102);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) != 0);
 }
 
 TEST_CASE("EE COP1 word memory bus faults preserve architectural state")
