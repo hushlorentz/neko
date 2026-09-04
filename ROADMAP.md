@@ -636,7 +636,7 @@ than delegating architectural results to host floating-point defaults.
       exponent-255 finite values, and unsupported IEEE encodings
 - [x] Implement EE single-precision normalization and truncation without host
       NaN, infinity, denormal, or rounding-mode behavior leaking into results
-- [ ] Implement documented signed-zero results for arithmetic, min/max,
+- [x] Implement documented signed-zero results for arithmetic, min/max,
       division, square root, and reciprocal square root
 - [ ] Implement exponent overflow saturation to signed maximum and exponent
       underflow flushing to signed zero

@@ -189,6 +189,156 @@ TEST_CASE("EE COP1 normalization uses exact truncating binary arithmetic")
   }
 }
 
+TEST_CASE("EE COP1 arithmetic follows the documented signed-zero table")
+{
+  struct BinaryVector
+  {
+    EEFloatResult (*operation)(std::uint32_t, std::uint32_t);
+    std::uint32_t left;
+    std::uint32_t right;
+    std::uint32_t expectedBits;
+    std::uint8_t expectedFlags;
+  };
+
+  const BinaryVector vectors[] = {
+    {addFPRaw, 0, 0, 0, 0},
+    {addFPRaw, 0, FP_SIGN_BIT, 0, 0},
+    {addFPRaw, FP_SIGN_BIT, 0, 0, 0},
+    {addFPRaw, FP_SIGN_BIT, FP_SIGN_BIT, FP_SIGN_BIT, 0},
+    {subFPRaw, 0, 0, 0, 0},
+    {subFPRaw, 0, FP_SIGN_BIT, 0, 0},
+    {subFPRaw, FP_SIGN_BIT, 0, FP_SIGN_BIT, 0},
+    {subFPRaw, FP_SIGN_BIT, FP_SIGN_BIT, 0, 0},
+    {mulFPRaw, 0, 0, 0, 0},
+    {mulFPRaw, 0, FP_SIGN_BIT, FP_SIGN_BIT, 0},
+    {mulFPRaw, FP_SIGN_BIT, 0, FP_SIGN_BIT, 0},
+    {mulFPRaw, FP_SIGN_BIT, FP_SIGN_BIT, 0, 0},
+    {divFPRaw, 0, 0, UINT32_C(0x7fffffff), FP_FLAG_I_BIT},
+    {
+      divFPRaw,
+      0,
+      FP_SIGN_BIT,
+      UINT32_C(0xffffffff),
+      FP_FLAG_I_BIT
+    },
+    {
+      divFPRaw,
+      FP_SIGN_BIT,
+      0,
+      UINT32_C(0xffffffff),
+      FP_FLAG_I_BIT
+    },
+    {
+      divFPRaw,
+      FP_SIGN_BIT,
+      FP_SIGN_BIT,
+      UINT32_C(0x7fffffff),
+      FP_FLAG_I_BIT
+    },
+    {maxFPRaw, 0, 0, 0, 0},
+    {maxFPRaw, 0, FP_SIGN_BIT, 0, 0},
+    {maxFPRaw, FP_SIGN_BIT, 0, 0, 0},
+    {maxFPRaw, FP_SIGN_BIT, FP_SIGN_BIT, FP_SIGN_BIT, 0},
+    {minFPRaw, 0, 0, 0, 0},
+    {minFPRaw, 0, FP_SIGN_BIT, FP_SIGN_BIT, 0},
+    {minFPRaw, FP_SIGN_BIT, 0, FP_SIGN_BIT, 0},
+    {minFPRaw, FP_SIGN_BIT, FP_SIGN_BIT, FP_SIGN_BIT, 0}
+  };
+
+  for (const BinaryVector &vector : vectors)
+  {
+    const EEFloatResult result =
+      vector.operation(vector.left, vector.right);
+
+    REQUIRE(result.bits == vector.expectedBits);
+    REQUIRE(result.flags == vector.expectedFlags);
+  }
+}
+
+TEST_CASE("EE COP1 square root operations preserve signed-zero behavior")
+{
+  REQUIRE(sqrtEEFloatRaw(0).bits == 0);
+  REQUIRE(sqrtEEFloatRaw(FP_SIGN_BIT).bits == FP_SIGN_BIT);
+  REQUIRE(sqrtEEFloatRaw(UINT32_C(0x807fffff)).bits == FP_SIGN_BIT);
+
+  struct ReciprocalSquareRootVector
+  {
+    std::uint32_t numerator;
+    std::uint32_t radicand;
+    std::uint32_t expectedBits;
+    std::uint8_t expectedFlags;
+  };
+
+  const ReciprocalSquareRootVector vectors[] = {
+    {0, 0, UINT32_C(0x7fffffff), FP_FLAG_I_BIT},
+    {0, FP_SIGN_BIT, UINT32_C(0xffffffff), FP_FLAG_I_BIT},
+    {FP_SIGN_BIT, 0, UINT32_C(0xffffffff), FP_FLAG_I_BIT},
+    {
+      FP_SIGN_BIT,
+      FP_SIGN_BIT,
+      UINT32_C(0x7fffffff),
+      FP_FLAG_I_BIT
+    },
+    {
+      UINT32_C(0x3f800000),
+      0,
+      UINT32_C(0x7fffffff),
+      FP_FLAG_D_BIT
+    },
+    {
+      UINT32_C(0x3f800000),
+      FP_SIGN_BIT,
+      UINT32_C(0xffffffff),
+      FP_FLAG_D_BIT
+    },
+    {
+      UINT32_C(0xbf800000),
+      0,
+      UINT32_C(0xffffffff),
+      FP_FLAG_D_BIT
+    },
+    {
+      UINT32_C(0xbf800000),
+      FP_SIGN_BIT,
+      UINT32_C(0x7fffffff),
+      FP_FLAG_D_BIT
+    }
+  };
+
+  for (const ReciprocalSquareRootVector &vector : vectors)
+  {
+    const EEFloatResult result =
+      rsqrtEEFloatRaw(vector.numerator, vector.radicand);
+
+    REQUIRE(result.bits == vector.expectedBits);
+    REQUIRE(result.flags == vector.expectedFlags);
+  }
+}
+
+TEST_CASE("EE COP1 min and max compare raw finite values without host floats")
+{
+  REQUIRE(
+    maxFPRaw(
+      UINT32_C(0x7fc00000),
+      UINT32_C(0x7f800000)).bits ==
+    UINT32_C(0x7fc00000));
+  REQUIRE(
+    minFPRaw(
+      UINT32_C(0xffc00000),
+      UINT32_C(0xff800000)).bits ==
+    UINT32_C(0xffc00000));
+  REQUIRE(
+    maxFPRaw(
+      UINT32_C(0x807fffff),
+      UINT32_C(0xbf800000)).bits ==
+    FP_SIGN_BIT);
+  REQUIRE(
+    minFPRaw(
+      UINT32_C(0x007fffff),
+      UINT32_C(0x3f800000)).bits ==
+    0);
+}
+
 TEST_CASE("EE COP1 memory transfer instructions decode canonically")
 {
   REQUIRE(

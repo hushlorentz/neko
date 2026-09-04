@@ -312,6 +312,71 @@ namespace
     return encodeNormalizedResult(negative, exponent, significand);
   }
 
+  int compareRaw(
+    const DecodedOperand &left,
+    std::uint32_t leftBits,
+    const DecodedOperand &right,
+    std::uint32_t rightBits)
+  {
+    if (left.zero && right.zero)
+    {
+      return 0;
+    }
+    if (left.zero)
+    {
+      return right.negative ? 1 : -1;
+    }
+    if (right.zero)
+    {
+      return left.negative ? -1 : 1;
+    }
+    if (left.negative != right.negative)
+    {
+      return left.negative ? -1 : 1;
+    }
+
+    const std::uint32_t leftMagnitude = leftBits & ~FP_SIGN_BIT;
+    const std::uint32_t rightMagnitude = rightBits & ~FP_SIGN_BIT;
+    if (leftMagnitude == rightMagnitude)
+    {
+      return 0;
+    }
+    const bool leftMagnitudeLess = leftMagnitude < rightMagnitude;
+    if (left.negative)
+    {
+      return leftMagnitudeLess ? 1 : -1;
+    }
+    return leftMagnitudeLess ? -1 : 1;
+  }
+
+  VUFloatResult selectRaw(
+    std::uint32_t leftBits,
+    std::uint32_t rightBits,
+    bool maximum)
+  {
+    const DecodedOperand left = decodeOperand(leftBits);
+    const DecodedOperand right = decodeOperand(rightBits);
+    if (left.zero && right.zero)
+    {
+      const bool negative =
+        maximum
+          ? left.negative && right.negative
+          : left.negative || right.negative;
+      return signedZero(negative);
+    }
+
+    const int comparison =
+      compareRaw(left, leftBits, right, rightBits);
+    const bool selectLeft =
+      maximum ? comparison >= 0 : comparison <= 0;
+    const DecodedOperand &selected = selectLeft ? left : right;
+    const std::uint32_t selectedBits =
+      selectLeft ? leftBits : rightBits;
+    return selected.zero
+      ? signedZero(selected.negative)
+      : VUFloatResult{selectedBits, 0};
+  }
+
   std::uint32_t integerSquareRoot(std::uint64_t value)
   {
     std::uint64_t result = 0;
@@ -336,12 +401,14 @@ namespace
     return static_cast<std::uint32_t>(result);
   }
 
-  VUFloatResult squareRootRaw(std::uint32_t bits)
+  VUFloatResult squareRootRaw(
+    std::uint32_t bits,
+    bool preserveZeroSign)
   {
     const DecodedOperand operand = decodeOperand(bits);
     if (operand.zero)
     {
-      return signedZero(false);
+      return signedZero(preserveZeroSign && operand.negative);
     }
 
     int exponent = operand.exponent / 2;
@@ -453,16 +520,43 @@ VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
   return divideRaw(d1Bits, d2Bits);
 }
 
+VUFloatResult maxFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
+{
+  return selectRaw(d1Bits, d2Bits, true);
+}
+
+VUFloatResult minFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
+{
+  return selectRaw(d1Bits, d2Bits, false);
+}
+
+EEFloatResult sqrtEEFloatRaw(std::uint32_t bits)
+{
+  return squareRootRaw(bits, true);
+}
+
+EEFloatResult rsqrtEEFloatRaw(
+  std::uint32_t numeratorBits,
+  std::uint32_t radicandBits)
+{
+  const EEFloatResult root =
+    squareRootRaw(radicandBits, true);
+  EEFloatResult result = divideRaw(numeratorBits, root.bits);
+  result.flags |= root.flags;
+  return result;
+}
+
 VUFloatResult sqrtFPRaw(std::uint32_t bits)
 {
-  return squareRootRaw(bits);
+  return squareRootRaw(bits, false);
 }
 
 VUFloatResult rsqrtFPRaw(
   std::uint32_t numeratorBits,
   std::uint32_t radicandBits)
 {
-  const VUFloatResult root = squareRootRaw(radicandBits);
+  const VUFloatResult root =
+    squareRootRaw(radicandBits, false);
   const std::uint32_t rootBits =
     (root.bits & ~FP_SIGN_BIT) == 0
       ? root.bits | (radicandBits & FP_SIGN_BIT)

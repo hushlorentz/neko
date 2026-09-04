@@ -675,11 +675,11 @@ TEST_CASE("VU square root and reciprocal square root use raw Q behavior")
     REQUIRE(result.flags == FP_FLAG_I_BIT);
   }
 
-  SECTION("Negative exponent-zero inputs are zero without I")
+  SECTION("Negative exponent-zero inputs become positive Q zero without I")
   {
     VUFloatResult result = sqrtFPRaw(0x807fffffu);
 
-    REQUIRE(result.bits == 0x00000000u);
+    REQUIRE(result.bits == 0);
     REQUIRE(result.flags == 0);
   }
 
