@@ -15,8 +15,9 @@ namespace
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
-  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 839;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 849;
+  constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
+  constexpr std::size_t PREPARED_EE_BRANCH_DELAY_FLAG_OFFSET = 975;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 985;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -116,6 +117,17 @@ namespace
     system->eeCore().setHI1(UINT64_C(0x5555555566666666));
     system->eeCore().setLO1(UINT64_C(0x7777777788888888));
     system->eeCore().setShiftAmount(0x99);
+    system->eeCore().setFloatingPointRegister(
+      0,
+      UINT32_C(0x3f800000));
+    system->eeCore().setFloatingPointRegister(
+      31,
+      UINT32_C(0x80000000));
+    system->eeCore().setFloatingPointAccumulator(
+      UINT32_C(0x40400000));
+    system->eeCore().setCOP1ControlRegister(
+      31,
+      EECOP1Control::STATUS_WRITABLE_MASK);
     system->eeCore().setCOP0Register(
       EECOP0Register::BadVAddr,
       UINT32_C(0x81234567));
@@ -379,6 +391,22 @@ TEST_CASE("Active system save states round trip and continue identically")
     restored.eeCore().lo1() ==
     UINT64_C(0x7777777788888888));
   REQUIRE(restored.eeCore().shiftAmount() == 0x99);
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(0) ==
+    UINT32_C(0x3f800000));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(31) ==
+    UINT32_C(0x80000000));
+  REQUIRE(
+    restored.eeCore().floatingPointAccumulator() ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    restored.eeCore().cop1ControlRegister(0) ==
+    EECOP1Control::IMPLEMENTATION_REVISION);
+  REQUIRE(
+    restored.eeCore().cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STATUS_WRITABLE_MASK));
   REQUIRE(
     restored.eeCore().cop0Register(EECOP0Register::BadVAddr) ==
     UINT32_C(0x81234567));
@@ -983,7 +1011,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid[8] = 14;
+  invalid[8] = 13;
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 
@@ -1010,6 +1038,12 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[PREPARED_EE_GPR_ZERO_HIGH_OFFSET] ^= 1;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[PREPARED_EE_FCR31_OFFSET] |= 1;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

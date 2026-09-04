@@ -618,7 +618,7 @@ than delegating architectural results to host floating-point defaults.
 
 ### Register, Control, and Memory Transfers
 
-- [ ] Add FPR, ACC, FCR0, and FCR31 state with checked architectural accessors
+- [x] Add FPR, ACC, FCR0, and FCR31 state with checked architectural accessors
 - [ ] Implement `MFC1` and `MTC1`, including 32-bit sign extension into EE
       GPRs and lower-word writes into FPRs
 - [ ] Implement `CFC1` and `CTC1`, including the FCR0 implementation/revision

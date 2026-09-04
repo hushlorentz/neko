@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 13;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 14;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1264,6 +1264,12 @@ void NekoSaveStateCodec::commitSystem(
   destination->masterClock.components.swap(*schedule);
   destination->eeCoreComponent.generalRegisters =
     source->eeCoreComponent.generalRegisters;
+  destination->eeCoreComponent.floatingPointRegisters =
+    source->eeCoreComponent.floatingPointRegisters;
+  destination->eeCoreComponent.floatingPointAccumulatorRegister =
+    source->eeCoreComponent.floatingPointAccumulatorRegister;
+  destination->eeCoreComponent.cop1StatusRegister =
+    source->eeCoreComponent.cop1StatusRegister;
   destination->eeCoreComponent.pc =
     source->eeCoreComponent.pc;
   destination->eeCoreComponent.hiRegister =
@@ -1589,6 +1595,12 @@ void NekoSaveStateCodec::writeEECore(
     writer->writeU64(value.low);
     writer->writeU64(value.high);
   }
+  for (const std::uint32_t value : core.floatingPointRegisters)
+  {
+    writer->writeU32(value);
+  }
+  writer->writeU32(core.floatingPointAccumulatorRegister);
+  writer->writeU32(core.cop1StatusRegister);
   writer->writeU32(core.pc);
   writer->writeU64(core.hiRegister);
   writer->writeU64(core.loRegister);
@@ -1644,6 +1656,12 @@ void NekoSaveStateCodec::readEECore(
     value.low = reader->readU64();
     value.high = reader->readU64();
   }
+  for (std::uint32_t &value : core->floatingPointRegisters)
+  {
+    value = reader->readU32();
+  }
+  core->floatingPointAccumulatorRegister = reader->readU32();
+  core->cop1StatusRegister = reader->readU32();
   core->pc = reader->readU32();
   core->hiRegister = reader->readU64();
   core->loRegister = reader->readU64();
@@ -1738,6 +1756,10 @@ void NekoSaveStateCodec::readEECore(
   require(
     core->generalRegisters[0] == EERegister128{},
     "EE general-purpose register zero is not immutable");
+  require(
+    (core->cop1StatusRegister &
+      ~EECOP1Control::STATUS_WRITABLE_MASK) == 0,
+    "EE FCR31 contains non-writable bits");
   require(
     core->exception != EEException::None ||
       core->faultAddress == 0,

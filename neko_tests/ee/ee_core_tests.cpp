@@ -57,6 +57,91 @@ TEST_CASE("EE Core architectural state")
         {}));
   }
 
+  SECTION("The EE exposes 32 independent raw-bit FPRs")
+  {
+    REQUIRE(EECore::FLOATING_POINT_REGISTER_COUNT == 32);
+    for (std::size_t index = 0;
+         index < EECore::FLOATING_POINT_REGISTER_COUNT;
+         ++index)
+    {
+      REQUIRE(core.floatingPointRegister(index) == 0);
+      core.setFloatingPointRegister(
+        index,
+        static_cast<std::uint32_t>(index + 1));
+    }
+    for (std::size_t index = 0;
+         index < EECore::FLOATING_POINT_REGISTER_COUNT;
+         ++index)
+    {
+      REQUIRE(
+        core.floatingPointRegister(index) ==
+        static_cast<std::uint32_t>(index + 1));
+    }
+  }
+
+  SECTION("FPR indices are checked")
+  {
+    REQUIRE_THROWS(
+      core.floatingPointRegister(
+        EECore::FLOATING_POINT_REGISTER_COUNT));
+    REQUIRE_THROWS(
+      core.setFloatingPointRegister(
+        EECore::FLOATING_POINT_REGISTER_COUNT,
+        0));
+  }
+
+  SECTION("The COP1 accumulator preserves raw bits")
+  {
+    core.setFloatingPointAccumulator(UINT32_C(0x89abcdef));
+
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("FCR0 is constant and read-only")
+  {
+    REQUIRE(
+      core.cop1ControlRegister(0) ==
+      EECOP1Control::IMPLEMENTATION_REVISION);
+
+    core.setCOP1ControlRegister(0, UINT32_MAX);
+
+    REQUIRE(
+      core.cop1ControlRegister(0) ==
+      EECOP1Control::IMPLEMENTATION_REVISION);
+  }
+
+  SECTION("FCR31 exposes only writable and hardwired fields")
+  {
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
+
+    core.setCOP1ControlRegister(31, UINT32_MAX);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::STATUS_WRITABLE_MASK));
+
+    core.setCOP1ControlRegister(31, 0);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
+  }
+
+  SECTION("Reserved COP1 control registers are rejected")
+  {
+    REQUIRE_THROWS(core.cop1ControlRegister(1));
+    REQUIRE_THROWS(core.cop1ControlRegister(30));
+    REQUIRE_THROWS(core.cop1ControlRegister(32));
+    REQUIRE_THROWS(core.setCOP1ControlRegister(1, 0));
+    REQUIRE_THROWS(core.setCOP1ControlRegister(30, 0));
+    REQUIRE_THROWS(core.setCOP1ControlRegister(32, 0));
+  }
+
   SECTION("PC and integer special registers are independent")
   {
     core.setProgramCounter(0x81234560);
@@ -87,6 +172,9 @@ TEST_CASE("EE Core architectural state")
     core.setHI1(3);
     core.setLO1(4);
     core.setShiftAmount(5);
+    core.setFloatingPointRegister(31, UINT32_C(0xaaaaaaaa));
+    core.setFloatingPointAccumulator(UINT32_C(0xbbbbbbbb));
+    core.setCOP1ControlRegister(31, UINT32_MAX);
     REQUIRE(core.stateHash() != resetHash);
 
     core.reset();
@@ -103,6 +191,19 @@ TEST_CASE("EE Core architectural state")
     REQUIRE(core.hi1() == 0);
     REQUIRE(core.lo1() == 0);
     REQUIRE(core.shiftAmount() == 0);
+    for (std::size_t index = 0;
+         index < EECore::FLOATING_POINT_REGISTER_COUNT;
+         ++index)
+    {
+      REQUIRE(core.floatingPointRegister(index) == 0);
+    }
+    REQUIRE(core.floatingPointAccumulator() == 0);
+    REQUIRE(
+      core.cop1ControlRegister(0) ==
+      EECOP1Control::IMPLEMENTATION_REVISION);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
     REQUIRE(core.stateHash() == resetHash);
   }
 }

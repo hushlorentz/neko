@@ -106,6 +106,18 @@ namespace EECOP0Cause
   constexpr std::uint32_t BRANCH_DELAY = UINT32_C(1) << 31;
 }
 
+namespace EECOP1Control
+{
+  constexpr std::size_t IMPLEMENTATION_REVISION_REGISTER = 0;
+  constexpr std::size_t STATUS_REGISTER = 31;
+  constexpr std::uint32_t IMPLEMENTATION_REVISION =
+    UINT32_C(0x00002e00);
+  constexpr std::uint32_t STATUS_FIXED =
+    UINT32_C(0x01000001);
+  constexpr std::uint32_t STATUS_WRITABLE_MASK =
+    UINT32_C(0x0083c078);
+}
+
 namespace EEExceptionCode
 {
   constexpr std::uint8_t INTERRUPT = 0;
@@ -138,6 +150,7 @@ class EECore : public ClockedComponent
 {
   public:
     static constexpr std::size_t GENERAL_REGISTER_COUNT = 32;
+    static constexpr std::size_t FLOATING_POINT_REGISTER_COUNT = 32;
 
     void reset();
     void attachBus(EEBus *bus);
@@ -163,6 +176,19 @@ class EECore : public ClockedComponent
     void setGeneralRegister(
       std::size_t index,
       const EERegister128 &value);
+
+    std::uint32_t floatingPointRegister(
+      std::size_t index) const;
+    void setFloatingPointRegister(
+      std::size_t index,
+      std::uint32_t value);
+    std::uint32_t floatingPointAccumulator() const;
+    void setFloatingPointAccumulator(std::uint32_t value);
+    std::uint32_t cop1ControlRegister(
+      std::size_t index) const;
+    void setCOP1ControlRegister(
+      std::size_t index,
+      std::uint32_t value);
 
     std::uint32_t programCounter() const;
     void setProgramCounter(std::uint32_t value);
@@ -225,6 +251,12 @@ class EECore : public ClockedComponent
 
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
+    std::array<
+      std::uint32_t,
+      FLOATING_POINT_REGISTER_COUNT>
+      floatingPointRegisters = {};
+    std::uint32_t floatingPointAccumulatorRegister = 0;
+    std::uint32_t cop1StatusRegister = 0;
     std::uint32_t pc = EEReset::VECTOR;
     std::uint64_t hiRegister = 0;
     std::uint64_t loRegister = 0;
@@ -265,6 +297,8 @@ class EECore : public ClockedComponent
     bool cycleTraceEnabled = false;
 
     static void requireGeneralRegisterIndex(
+      std::size_t index);
+    static void requireFloatingPointRegisterIndex(
       std::size_t index);
     void prepareFreshExecution(
       std::uint32_t entryPoint,

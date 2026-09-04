@@ -8,6 +8,7 @@
 #include "vpu/vpu.hpp"
 
 constexpr std::size_t EECore::GENERAL_REGISTER_COUNT;
+constexpr std::size_t EECore::FLOATING_POINT_REGISTER_COUNT;
 
 namespace
 {
@@ -196,6 +197,9 @@ namespace
 void EECore::reset()
 {
   generalRegisters.fill({});
+  floatingPointRegisters.fill(0);
+  floatingPointAccumulatorRegister = 0;
+  cop1StatusRegister = 0;
   pc = EEReset::VECTOR;
   hiRegister = 0;
   loRegister = 0;
@@ -2367,6 +2371,12 @@ std::uint64_t EECore::stateHash() const
     hashEEStateValue(&hash, value.low);
     hashEEStateValue(&hash, value.high);
   }
+  for (const std::uint32_t value : floatingPointRegisters)
+  {
+    hashEEStateValue(&hash, value);
+  }
+  hashEEStateValue(&hash, floatingPointAccumulatorRegister);
+  hashEEStateValue(&hash, cop1StatusRegister);
   hashEEStateValue(&hash, pc);
   hashEEStateValue(&hash, hiRegister);
   hashEEStateValue(&hash, loRegister);
@@ -2464,6 +2474,67 @@ void EECore::setGeneralRegister(
   if (index != 0)
   {
     generalRegisters[index] = value;
+  }
+}
+
+std::uint32_t EECore::floatingPointRegister(
+  std::size_t index) const
+{
+  requireFloatingPointRegisterIndex(index);
+  return floatingPointRegisters[index];
+}
+
+void EECore::setFloatingPointRegister(
+  std::size_t index,
+  std::uint32_t value)
+{
+  requireFloatingPointRegisterIndex(index);
+  floatingPointRegisters[index] = value;
+}
+
+std::uint32_t EECore::floatingPointAccumulator() const
+{
+  return floatingPointAccumulatorRegister;
+}
+
+void EECore::setFloatingPointAccumulator(
+  std::uint32_t value)
+{
+  floatingPointAccumulatorRegister = value;
+}
+
+std::uint32_t EECore::cop1ControlRegister(
+  std::size_t index) const
+{
+  switch (index)
+  {
+    case EECOP1Control::IMPLEMENTATION_REVISION_REGISTER:
+      return EECOP1Control::IMPLEMENTATION_REVISION;
+    case EECOP1Control::STATUS_REGISTER:
+      return
+        cop1StatusRegister |
+        EECOP1Control::STATUS_FIXED;
+    default:
+      throw std::out_of_range(
+        "EE COP1 control register is not implemented.");
+  }
+}
+
+void EECore::setCOP1ControlRegister(
+  std::size_t index,
+  std::uint32_t value)
+{
+  switch (index)
+  {
+    case EECOP1Control::IMPLEMENTATION_REVISION_REGISTER:
+      return;
+    case EECOP1Control::STATUS_REGISTER:
+      cop1StatusRegister =
+        value & EECOP1Control::STATUS_WRITABLE_MASK;
+      return;
+    default:
+      throw std::out_of_range(
+        "EE COP1 control register is not implemented.");
   }
 }
 
@@ -2602,6 +2673,16 @@ void EECore::clearPendingException()
 {
   exception = EEException::None;
   faultAddress = 0;
+}
+
+void EECore::requireFloatingPointRegisterIndex(
+  std::size_t index)
+{
+  if (index >= FLOATING_POINT_REGISTER_COUNT)
+  {
+    throw std::out_of_range(
+      "EE floating-point register index is out of range.");
+  }
 }
 
 void EECore::requireGeneralRegisterIndex(
