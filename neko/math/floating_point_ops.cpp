@@ -5,8 +5,8 @@
 
 namespace
 {
-  constexpr int VU_MIN_EXPONENT = -126;
-  constexpr int VU_VALUE_SCALE_EXPONENT = -149;
+  constexpr int EE_MIN_EXPONENT = -126;
+  constexpr int EE_VALUE_SCALE_EXPONENT = -149;
   constexpr std::size_t WIDE_WORD_COUNT = 5;
 
   struct DecodedOperand
@@ -134,10 +134,20 @@ namespace
     };
   }
 
-  VUFloatResult encodeResult(bool negative,
-                             int exponent,
-                             std::uint32_t significand)
+  EEFloatResult encodeNormalizedResult(
+    bool negative,
+    int exponent,
+    std::uint32_t significand)
   {
+    if (exponent > FP_MAX_EXPONENT)
+    {
+      return maximumResult(negative);
+    }
+    if (exponent < EE_MIN_EXPONENT)
+    {
+      return signedZero(negative, FP_FLAG_UNDERFLOW);
+    }
+
     return {
       (negative ? FP_SIGN_BIT : 0) |
         (static_cast<std::uint32_t>(exponent + 127) << 23) |
@@ -150,19 +160,26 @@ namespace
                                     bool negative)
   {
     const int highestBit = magnitude.highestBit();
-    const int exponent = highestBit + VU_VALUE_SCALE_EXPONENT;
+    if (highestBit < 0)
+    {
+      return signedZero(negative);
+    }
+    const int exponent = highestBit + EE_VALUE_SCALE_EXPONENT;
     if (exponent > FP_MAX_EXPONENT)
     {
       return maximumResult(negative);
     }
-    if (exponent < VU_MIN_EXPONENT)
+    if (exponent < EE_MIN_EXPONENT)
     {
       return signedZero(negative, FP_FLAG_UNDERFLOW);
     }
 
     const std::uint32_t significand =
       magnitude.shiftedToUint32(static_cast<unsigned>(highestBit - 23));
-    return encodeResult(negative, exponent, significand);
+    return encodeNormalizedResult(
+      negative,
+      exponent,
+      significand);
   }
 
   VUFloatResult addRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
@@ -185,10 +202,10 @@ namespace
 
     const WideMagnitude d1Magnitude = WideMagnitude::shifted(
       d1.significand,
-      static_cast<unsigned>(d1.exponent - VU_MIN_EXPONENT));
+      static_cast<unsigned>(d1.exponent - EE_MIN_EXPONENT));
     const WideMagnitude d2Magnitude = WideMagnitude::shifted(
       d2.significand,
-      static_cast<unsigned>(d2.exponent - VU_MIN_EXPONENT));
+      static_cast<unsigned>(d2.exponent - EE_MIN_EXPONENT));
 
     if (d1.negative == d2.negative)
     {
@@ -236,21 +253,11 @@ namespace
 
     const std::uint64_t product =
       static_cast<std::uint64_t>(d1.significand) * d2.significand;
-    const int productHighestBit = highestBit(product);
-    const int exponent =
-      d1.exponent + d2.exponent + productHighestBit - 46;
-    if (exponent > FP_MAX_EXPONENT)
-    {
-      return maximumResult(negative);
-    }
-    if (exponent < VU_MIN_EXPONENT)
-    {
-      return signedZero(negative, FP_FLAG_UNDERFLOW);
-    }
-
-    const std::uint32_t significand = static_cast<std::uint32_t>(
-      product >> (productHighestBit - 23));
-    return encodeResult(negative, exponent, significand);
+    return normalizeEEFloat(
+      negative,
+      product,
+      static_cast<std::int16_t>(
+        d1.exponent + d2.exponent - 46));
   }
 
   VUFloatResult divideRaw(
@@ -295,14 +302,14 @@ namespace
         0
       };
     }
-    if (exponent < VU_MIN_EXPONENT)
+    if (exponent < EE_MIN_EXPONENT)
     {
       return signedZero(negative);
     }
 
     const std::uint32_t significand = static_cast<std::uint32_t>(
       scaledNumerator / denominator.significand);
-    return encodeResult(negative, exponent, significand);
+    return encodeNormalizedResult(negative, exponent, significand);
   }
 
   std::uint32_t integerSquareRoot(std::uint64_t value)
@@ -347,7 +354,8 @@ namespace
       static_cast<std::uint64_t>(operand.significand) <<
       (23 + exponentRemainder);
     const std::uint32_t significand = integerSquareRoot(radicand);
-    VUFloatResult result = encodeResult(false, exponent, significand);
+    VUFloatResult result =
+      encodeNormalizedResult(false, exponent, significand);
     if (operand.negative)
     {
       result.flags = FP_FLAG_I_BIT;
@@ -399,6 +407,35 @@ EEFloatDecomposition decomposeEEFloat(std::uint32_t bits)
 VUFloatDecomposition decomposeVUFloat(std::uint32_t bits)
 {
   return decomposeEEFloat(bits);
+}
+
+EEFloatResult normalizeEEFloat(
+  bool negative,
+  std::uint64_t magnitude,
+  std::int16_t leastSignificantBitExponent)
+{
+  if (magnitude == 0)
+  {
+    return signedZero(negative);
+  }
+
+  const int magnitudeHighestBit = highestBit(magnitude);
+  std::uint32_t significand = 0;
+  if (magnitudeHighestBit > 23)
+  {
+    significand = static_cast<std::uint32_t>(
+      magnitude >> (magnitudeHighestBit - 23));
+  }
+  else
+  {
+    significand = static_cast<std::uint32_t>(
+      magnitude << (23 - magnitudeHighestBit));
+  }
+
+  return encodeNormalizedResult(
+    negative,
+    magnitudeHighestBit + leastSignificantBitExponent,
+    significand);
 }
 
 VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
@@ -565,26 +602,10 @@ std::uint32_t fixedToFloatRaw(
 
   const bool negative = (bits & FP_SIGN_BIT) != 0;
   const std::uint32_t magnitude = negative ? 0u - bits : bits;
-  int highestBit = 0;
-  for (std::uint32_t remaining = magnitude; (remaining >>= 1) != 0;)
-  {
-    highestBit++;
-  }
-
-  std::uint32_t significand;
-  if (highestBit > 23)
-  {
-    significand = magnitude >> (highestBit - 23);
-  }
-  else
-  {
-    significand = magnitude << (23 - highestBit);
-  }
-
-  const int exponent = highestBit - fractionalBits;
-  return (negative ? FP_SIGN_BIT : 0) |
-    (static_cast<std::uint32_t>(exponent + 127) << 23) |
-    (significand & FP_MAX_MANTISSA);
+  return normalizeEEFloat(
+    negative,
+    magnitude,
+    -static_cast<std::int16_t>(fractionalBits)).bits;
 }
 
 namespace

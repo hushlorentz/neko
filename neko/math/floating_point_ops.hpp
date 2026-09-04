@@ -16,11 +16,13 @@
 
 #include "fp_register.hpp"
 
-struct VUFloatResult
+struct EEFloatResult
 {
   std::uint32_t bits;
   std::uint8_t flags;
 };
+
+using VUFloatResult = EEFloatResult;
 
 enum class EEFloatClassification : std::uint8_t
 {
@@ -54,6 +56,10 @@ using VUFloatDecomposition = EEFloatDecomposition;
 
 EEFloatDecomposition decomposeEEFloat(std::uint32_t bits);
 VUFloatDecomposition decomposeVUFloat(std::uint32_t bits);
+EEFloatResult normalizeEEFloat(
+  bool negative,
+  std::uint64_t magnitude,
+  std::int16_t leastSignificantBitExponent);
 VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);

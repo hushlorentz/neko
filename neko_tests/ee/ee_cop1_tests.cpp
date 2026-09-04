@@ -129,6 +129,66 @@ TEST_CASE("EE COP1 raw values expose EE and IEEE classifications")
   }
 }
 
+TEST_CASE("EE COP1 normalization uses exact truncating binary arithmetic")
+{
+  SECTION("Exact magnitudes normalize left without changing their value")
+  {
+    const EEFloatResult result =
+      normalizeEEFloat(false, UINT64_C(1), 0);
+
+    REQUIRE(result.bits == UINT32_C(0x3f800000));
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Wide magnitudes normalize right and discard low bits")
+  {
+    const EEFloatResult result =
+      normalizeEEFloat(
+        false,
+        UINT64_C(0x1000001),
+        -24);
+
+    REQUIRE(result.bits == UINT32_C(0x3f800000));
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Negative magnitudes truncate toward zero symmetrically")
+  {
+    const EEFloatResult result =
+      normalizeEEFloat(
+        true,
+        UINT64_C(0x1000001),
+        -24);
+
+    REQUIRE(result.bits == UINT32_C(0xbf800000));
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Normalization renormalizes after leading-bit cancellation")
+  {
+    const EEFloatResult result =
+      normalizeEEFloat(
+        false,
+        UINT64_C(0x7fffff),
+        -23);
+
+    REQUIRE(result.bits == UINT32_C(0x3f7ffffe));
+    REQUIRE(result.flags == 0);
+  }
+
+  SECTION("Exponent 255 remains a finite EE encoding")
+  {
+    const EEFloatResult result =
+      normalizeEEFloat(
+        false,
+        UINT64_C(0xffffff),
+        105);
+
+    REQUIRE(result.bits == UINT32_C(0x7fffffff));
+    REQUIRE(result.flags == 0);
+  }
+}
+
 TEST_CASE("EE COP1 memory transfer instructions decode canonically")
 {
   REQUIRE(
