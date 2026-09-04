@@ -436,6 +436,118 @@ TEST_CASE("EE COP1 min and max compare raw finite values without host floats")
     0);
 }
 
+TEST_CASE("EE COP1 manual result tables have fixed raw-bit vectors")
+{
+  struct ReferenceVector
+  {
+    const char *description;
+    EEFloatResult result;
+    std::uint32_t expectedBits;
+    std::uint8_t affectedFlags;
+    std::uint8_t expectedFlags;
+  };
+
+  const ReferenceVector vectors[] = {
+    {
+      "zero divided by zero saturates and raises invalid",
+      divFPRaw(0, 0),
+      UINT32_C(0x7fffffff),
+      FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+      FP_FLAG_I_BIT
+    },
+    {
+      "negative divided by zero saturates and raises division by zero",
+      divFPRaw(UINT32_C(0xbf800000), 0),
+      UINT32_C(0xffffffff),
+      FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+      FP_FLAG_D_BIT
+    },
+    {
+      "negative square root uses the absolute value and raises invalid",
+      sqrtEEFloatRaw(UINT32_C(0xc0800000)),
+      UINT32_C(0x40000000),
+      FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+      FP_FLAG_I_BIT
+    },
+    {
+      "exponent overflow saturates to positive maximum",
+      mulFPRaw(UINT32_C(0x7fffffff), UINT32_C(0x40000000)),
+      UINT32_C(0x7fffffff),
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+      FP_FLAG_OVERFLOW
+    },
+    {
+      "exponent underflow flushes to negative zero",
+      mulFPRaw(UINT32_C(0x80800000), UINT32_C(0x3f000000)),
+      FP_SIGN_BIT,
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+      FP_FLAG_UNDERFLOW
+    },
+    {
+      "rounding discards product bits below the EE significand",
+      mulFPRaw(UINT32_C(0x3f800001), UINT32_C(0x3fc00000)),
+      UINT32_C(0x3fc00001),
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+      0
+    },
+    {
+      "IEEE infinity encodings participate as finite EE values",
+      addFPRaw(UINT32_C(0x7f800000), UINT32_C(0xff800000)),
+      0,
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+      0
+    }
+  };
+
+  for (const ReferenceVector &vector : vectors)
+  {
+    CAPTURE(vector.description);
+    REQUIRE(vector.result.bits == vector.expectedBits);
+    REQUIRE(vector.result.flags == vector.expectedFlags);
+
+    NekoSystem system;
+    system.eeCore().updateCOP1ArithmeticFlags(
+      vector.affectedFlags,
+      vector.result.flags);
+    const std::uint32_t status =
+      system.eeCore().cop1ControlRegister(31);
+
+    if ((vector.expectedFlags & FP_FLAG_I_BIT) != 0)
+    {
+      REQUIRE(
+        (status & EECOP1Control::CAUSE_INVALID) != 0);
+      REQUIRE(
+        (status & EECOP1Control::STICKY_INVALID) != 0);
+    }
+    if ((vector.expectedFlags & FP_FLAG_D_BIT) != 0)
+    {
+      REQUIRE(
+        (status &
+         EECOP1Control::CAUSE_DIVISION_BY_ZERO) != 0);
+      REQUIRE(
+        (status &
+         EECOP1Control::STICKY_DIVISION_BY_ZERO) != 0);
+    }
+    if ((vector.expectedFlags & FP_FLAG_OVERFLOW) != 0)
+    {
+      REQUIRE(
+        (status & EECOP1Control::CAUSE_OVERFLOW) != 0);
+      REQUIRE(
+        (status & EECOP1Control::STICKY_OVERFLOW) != 0);
+    }
+    if ((vector.expectedFlags & FP_FLAG_UNDERFLOW) != 0)
+    {
+      REQUIRE(
+        (status & EECOP1Control::CAUSE_UNDERFLOW) != 0);
+      REQUIRE(
+        (status & EECOP1Control::STICKY_UNDERFLOW) != 0);
+    }
+    REQUIRE(
+      (status & EECOP1Control::CAUSE_MASK) ==
+      (status & EECOP1Control::STICKY_MASK) << 11);
+  }
+}
+
 TEST_CASE("EE COP1 memory transfer instructions decode canonically")
 {
   REQUIRE(

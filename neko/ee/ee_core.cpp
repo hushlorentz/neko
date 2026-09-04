@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "ee_bus.hpp"
+#include "floating_point_ops.hpp"
 #include "vpu/vpu.hpp"
 
 constexpr std::size_t EECore::GENERAL_REGISTER_COUNT;
@@ -2741,6 +2742,67 @@ void EECore::setCOP1ControlRegister(
     default:
       throw std::out_of_range(
         "EE COP1 control register is not implemented.");
+  }
+}
+
+void EECore::updateCOP1ArithmeticFlags(
+  std::uint8_t affectedFlags,
+  std::uint8_t raisedFlags)
+{
+  constexpr std::uint8_t SUPPORTED_FLAGS =
+    FP_FLAG_I_BIT |
+    FP_FLAG_D_BIT |
+    FP_FLAG_OVERFLOW |
+    FP_FLAG_UNDERFLOW;
+  if ((affectedFlags & ~SUPPORTED_FLAGS) != 0 ||
+      (raisedFlags & ~affectedFlags) != 0)
+  {
+    throw std::invalid_argument(
+      "Invalid EE COP1 arithmetic flag update.");
+  }
+
+  struct FlagMapping
+  {
+    std::uint8_t resultFlag;
+    std::uint32_t causeFlag;
+    std::uint32_t stickyFlag;
+  };
+  constexpr FlagMapping FLAG_MAPPINGS[] = {
+    {
+      FP_FLAG_I_BIT,
+      EECOP1Control::CAUSE_INVALID,
+      EECOP1Control::STICKY_INVALID
+    },
+    {
+      FP_FLAG_D_BIT,
+      EECOP1Control::CAUSE_DIVISION_BY_ZERO,
+      EECOP1Control::STICKY_DIVISION_BY_ZERO
+    },
+    {
+      FP_FLAG_OVERFLOW,
+      EECOP1Control::CAUSE_OVERFLOW,
+      EECOP1Control::STICKY_OVERFLOW
+    },
+    {
+      FP_FLAG_UNDERFLOW,
+      EECOP1Control::CAUSE_UNDERFLOW,
+      EECOP1Control::STICKY_UNDERFLOW
+    }
+  };
+
+  for (const FlagMapping &mapping : FLAG_MAPPINGS)
+  {
+    if ((affectedFlags & mapping.resultFlag) == 0)
+    {
+      continue;
+    }
+    cop1StatusRegister &= ~mapping.causeFlag;
+    if ((raisedFlags & mapping.resultFlag) != 0)
+    {
+      cop1StatusRegister |=
+        mapping.causeFlag |
+        mapping.stickyFlag;
+    }
   }
 }
 

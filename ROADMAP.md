@@ -640,9 +640,9 @@ than delegating architectural results to host floating-point defaults.
       division, square root, and reciprocal square root
 - [x] Implement exponent overflow saturation to signed maximum and exponent
       underflow flushing to signed zero
-- [ ] Implement FCR31 current and sticky `I`, `D`, `O`, and `U` flag updates,
+- [x] Implement FCR31 current and sticky `I`, `D`, `O`, and `U` flag updates,
       including instructions that explicitly clear current flags
-- [ ] Add fixed raw-bit reference vectors derived from the official abnormal
+- [x] Add fixed raw-bit reference vectors derived from the official abnormal
       computation, signed-zero, rounding, and IEEE-difference tables
 
 ### Movement, Selection, and Conversion

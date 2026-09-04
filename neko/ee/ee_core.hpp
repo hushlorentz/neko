@@ -122,6 +122,32 @@ namespace EECOP1Control
     UINT32_C(0x01000001);
   constexpr std::uint32_t STATUS_WRITABLE_MASK =
     UINT32_C(0x0083c078);
+  constexpr std::uint32_t CAUSE_INVALID =
+    UINT32_C(1) << 17;
+  constexpr std::uint32_t CAUSE_DIVISION_BY_ZERO =
+    UINT32_C(1) << 16;
+  constexpr std::uint32_t CAUSE_OVERFLOW =
+    UINT32_C(1) << 15;
+  constexpr std::uint32_t CAUSE_UNDERFLOW =
+    UINT32_C(1) << 14;
+  constexpr std::uint32_t STICKY_INVALID =
+    UINT32_C(1) << 6;
+  constexpr std::uint32_t STICKY_DIVISION_BY_ZERO =
+    UINT32_C(1) << 5;
+  constexpr std::uint32_t STICKY_OVERFLOW =
+    UINT32_C(1) << 4;
+  constexpr std::uint32_t STICKY_UNDERFLOW =
+    UINT32_C(1) << 3;
+  constexpr std::uint32_t CAUSE_MASK =
+    CAUSE_INVALID |
+    CAUSE_DIVISION_BY_ZERO |
+    CAUSE_OVERFLOW |
+    CAUSE_UNDERFLOW;
+  constexpr std::uint32_t STICKY_MASK =
+    STICKY_INVALID |
+    STICKY_DIVISION_BY_ZERO |
+    STICKY_OVERFLOW |
+    STICKY_UNDERFLOW;
 }
 
 namespace EEExceptionCode
@@ -196,6 +222,9 @@ class EECore : public ClockedComponent
     void setCOP1ControlRegister(
       std::size_t index,
       std::uint32_t value);
+    void updateCOP1ArithmeticFlags(
+      std::uint8_t affectedFlags,
+      std::uint8_t raisedFlags);
 
     std::uint32_t programCounter() const;
     void setProgramCounter(std::uint32_t value);

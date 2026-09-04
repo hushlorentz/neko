@@ -4,6 +4,7 @@
 #include "catch.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
+#include "floating_point_ops.hpp"
 #include "ee_instruction.hpp"
 #include "neko_system.hpp"
 
@@ -130,6 +131,71 @@ TEST_CASE("EE Core architectural state")
     REQUIRE(
       core.cop1ControlRegister(31) ==
       EECOP1Control::STATUS_FIXED);
+  }
+
+  SECTION("COP1 arithmetic flags update current and sticky fields")
+  {
+    core.updateCOP1ArithmeticFlags(
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+      FP_FLAG_OVERFLOW);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+
+    core.updateCOP1ArithmeticFlags(
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+      FP_FLAG_UNDERFLOW);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_OVERFLOW |
+       EECOP1Control::STICKY_UNDERFLOW));
+  }
+
+  SECTION("COP1 flag updates preserve unaffected causes and all sticky flags")
+  {
+    core.updateCOP1ArithmeticFlags(
+      FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+      FP_FLAG_I_BIT);
+    core.updateCOP1ArithmeticFlags(
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+      FP_FLAG_UNDERFLOW);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_INVALID |
+       EECOP1Control::STICKY_UNDERFLOW));
+
+    core.updateCOP1ArithmeticFlags(
+      FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+      0);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_INVALID |
+       EECOP1Control::STICKY_UNDERFLOW));
+  }
+
+  SECTION("COP1 flag updates reject invalid masks")
+  {
+    REQUIRE_THROWS_WITH(
+      core.updateCOP1ArithmeticFlags(UINT8_C(0x10), 0),
+      "Invalid EE COP1 arithmetic flag update.");
+    REQUIRE_THROWS_WITH(
+      core.updateCOP1ArithmeticFlags(
+        FP_FLAG_OVERFLOW,
+        FP_FLAG_UNDERFLOW),
+      "Invalid EE COP1 arithmetic flag update.");
   }
 
   SECTION("Reserved COP1 control registers are rejected")
