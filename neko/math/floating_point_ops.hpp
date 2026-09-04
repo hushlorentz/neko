@@ -65,6 +65,12 @@ VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult maxFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult minFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
+EEFloatResult maxEEFloatRaw(
+  std::uint32_t fsBits,
+  std::uint32_t ftBits);
+EEFloatResult minEEFloatRaw(
+  std::uint32_t fsBits,
+  std::uint32_t ftBits);
 EEFloatResult sqrtEEFloatRaw(std::uint32_t bits);
 EEFloatResult rsqrtEEFloatRaw(
   std::uint32_t numeratorBits,

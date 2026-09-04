@@ -803,6 +803,14 @@ namespace
             instruction->operation =
               EEOperation::NegateSingleCOP1;
             return;
+          case 0x28:
+            instruction->operation =
+              EEOperation::MaximumSingleCOP1;
+            return;
+          case 0x29:
+            instruction->operation =
+              EEOperation::MinimumSingleCOP1;
+            return;
           default:
             break;
         }

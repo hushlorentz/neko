@@ -737,6 +737,136 @@ TEST_CASE("EE COP1 movement instructions apply documented flags")
   }
 }
 
+TEST_CASE("EE COP1 min and max instructions decode canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x28, 2, 4, 3)).operation ==
+    EEOperation::MaximumSingleCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x29, 2, 4, 3)).operation ==
+    EEOperation::MinimumSingleCOP1);
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x30, 2, 4, 3)),
+    "Unsupported EE instruction encoding.");
+}
+
+TEST_CASE("EE COP1 min and max select exact source encodings")
+{
+  struct SelectionVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const SelectionVector vectors[] = {
+    {0x28, UINT32_C(0x40000000), UINT32_C(0x3f800000),
+     UINT32_C(0x40000000)},
+    {0x28, UINT32_C(0xbf800000), UINT32_C(0xc0000000),
+     UINT32_C(0xbf800000)},
+    {0x29, UINT32_C(0x40000000), UINT32_C(0x3f800000),
+     UINT32_C(0x3f800000)},
+    {0x29, UINT32_C(0xbf800000), UINT32_C(0xc0000000),
+     UINT32_C(0xc0000000)},
+    {0x28, UINT32_C(0x7fc12345), UINT32_C(0x7f800000),
+     UINT32_C(0x7fc12345)},
+    {0x29, UINT32_C(0xffc12345), UINT32_C(0xff800000),
+     UINT32_C(0xffc12345)}
+  };
+
+  for (const SelectionVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        4,
+        3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 min and max break signed-zero ties toward fs")
+{
+  for (const std::uint8_t function : {0x28, 0x29})
+  {
+    NekoSystem negativeFirst;
+    negativeFirst.eeCore().setFloatingPointRegister(
+      2,
+      FP_SIGN_BIT);
+    negativeFirst.eeCore().setFloatingPointRegister(3, 0);
+    runInstruction(
+      &negativeFirst,
+      cop1SingleInstruction(function, 2, 4, 3));
+    REQUIRE(
+      negativeFirst.eeCore().floatingPointRegister(4) ==
+      FP_SIGN_BIT);
+
+    NekoSystem positiveFirst;
+    positiveFirst.eeCore().setFloatingPointRegister(2, 0);
+    positiveFirst.eeCore().setFloatingPointRegister(
+      3,
+      FP_SIGN_BIT);
+    runInstruction(
+      &positiveFirst,
+      cop1SingleInstruction(function, 2, 4, 3));
+    REQUIRE(
+      positiveFirst.eeCore().floatingPointRegister(4) == 0);
+  }
+}
+
+TEST_CASE("EE COP1 min and max flush selected denormals to signed zero")
+{
+  REQUIRE(
+    maxEEFloatRaw(
+      UINT32_C(0x007fffff),
+      UINT32_C(0x80000000)).bits ==
+    0);
+  REQUIRE(
+    minEEFloatRaw(
+      UINT32_C(0x807fffff),
+      UINT32_C(0x00000000)).bits ==
+    FP_SIGN_BIT);
+}
+
+TEST_CASE("EE COP1 min and max clear current O and U")
+{
+  for (const std::uint8_t function : {0x28, 0x29})
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_MASK |
+        EECOP1Control::STICKY_MASK);
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(function, 2, 4, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_MASK));
+  }
+}
+
 TEST_CASE("EE COP1 control transfers reject reserved FCRs")
 {
   for (std::uint8_t controlRegister = 1;
@@ -1124,6 +1254,58 @@ TEST_CASE("EE LWC1 interlocks COP1 movement source and destination")
   }
 }
 
+TEST_CASE("EE LWC1 interlocks COP1 min and max operands")
+{
+  struct DependencyVector
+  {
+    std::uint8_t loadedRegister;
+    std::uint8_t fs;
+    std::uint8_t ft;
+    std::uint8_t fd;
+  };
+  const DependencyVector vectors[] = {
+    {2, 2, 3, 4},
+    {3, 2, 3, 4},
+    {4, 2, 3, 4}
+  };
+
+  for (const DependencyVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x40400000)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(
+        0x31,
+        1,
+        vector.loadedRegister,
+        0));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(
+        0x28,
+        vector.fs,
+        vector.fd,
+        vector.ft));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+  }
+}
+
 TEST_CASE("EE pending COP1 loads survive host halt and save-state restore")
 {
   NekoSystem original;
@@ -1379,7 +1561,9 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1MemoryInstruction(0x39, 1, 3, 2),
     cop1SingleInstruction(0x05, 3, 4),
     cop1SingleInstruction(0x06, 3, 4),
-    cop1SingleInstruction(0x07, 3, 4)
+    cop1SingleInstruction(0x07, 3, 4),
+    cop1SingleInstruction(0x28, 3, 4, 5),
+    cop1SingleInstruction(0x29, 3, 4, 5)
   };
 
   for (const std::uint32_t instruction : instructions)
@@ -1398,6 +1582,7 @@ TEST_CASE("EE COP1 transfers require Status CU1")
       });
     core.setFloatingPointRegister(3, UINT32_C(0x76543210));
     core.setFloatingPointRegister(4, UINT32_C(0x12345678));
+    core.setFloatingPointRegister(5, UINT32_C(0x11223344));
     REQUIRE(
       system.eeBus().writeData32(
         0,
@@ -1434,6 +1619,9 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x12345678));
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x11223344));
     REQUIRE(
       core.cop1ControlRegister(31) ==
       EECOP1Control::STATUS_FIXED);

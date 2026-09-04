@@ -377,6 +377,25 @@ namespace
       : VUFloatResult{selectedBits, 0};
   }
 
+  EEFloatResult selectEERaw(
+    std::uint32_t fsBits,
+    std::uint32_t ftBits,
+    bool maximum)
+  {
+    const DecodedOperand fs = decodeOperand(fsBits);
+    const DecodedOperand ft = decodeOperand(ftBits);
+    const int comparison =
+      compareRaw(fs, fsBits, ft, ftBits);
+    const bool selectFS =
+      maximum ? comparison >= 0 : comparison <= 0;
+    const DecodedOperand &selected = selectFS ? fs : ft;
+    const std::uint32_t selectedBits =
+      selectFS ? fsBits : ftBits;
+    return selected.zero
+      ? signedZero(selected.negative)
+      : EEFloatResult{selectedBits, 0};
+  }
+
   std::uint32_t integerSquareRoot(std::uint64_t value)
   {
     std::uint64_t result = 0;
@@ -528,6 +547,20 @@ VUFloatResult maxFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 VUFloatResult minFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 {
   return selectRaw(d1Bits, d2Bits, false);
+}
+
+EEFloatResult maxEEFloatRaw(
+  std::uint32_t fsBits,
+  std::uint32_t ftBits)
+{
+  return selectEERaw(fsBits, ftBits, true);
+}
+
+EEFloatResult minEEFloatRaw(
+  std::uint32_t fsBits,
+  std::uint32_t ftBits)
+{
+  return selectEERaw(fsBits, ftBits, false);
 }
 
 EEFloatResult sqrtEEFloatRaw(std::uint32_t bits)

@@ -135,7 +135,9 @@ enum class EEOperation : std::uint8_t
   StoreWordFromCOP1,
   AbsoluteSingleCOP1,
   MoveSingleCOP1,
-  NegateSingleCOP1
+  NegateSingleCOP1,
+  MaximumSingleCOP1,
+  MinimumSingleCOP1
 };
 
 struct EEInstruction

@@ -620,6 +620,28 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const std::uint32_t fsBits =
+        floatingPointRegisters[destination];
+      const std::uint32_t ftBits =
+        floatingPointRegisters[instruction.targetRegister];
+      const EEFloatResult result =
+        instruction.operation == EEOperation::MaximumSingleCOP1
+          ? maxEEFloatRaw(fsBits, ftBits)
+          : minEEFloatRaw(fsBits, ftBits);
+      floatingPointRegisters[instruction.shiftAmount] =
+        result.bits;
+      updateCOP1ArithmeticFlags(
+        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+        0);
+      return true;
+    }
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
@@ -2300,6 +2322,16 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::MoveSingleCOP1:
     case EEOperation::NegateSingleCOP1:
       if (instruction.destinationRegister == registerIndex)
+      {
+        return FPRDependency::Read;
+      }
+      return instruction.shiftAmount == registerIndex ?
+        FPRDependency::Write :
+        FPRDependency::None;
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+      if (instruction.destinationRegister == registerIndex ||
+          instruction.targetRegister == registerIndex)
       {
         return FPRDependency::Read;
       }

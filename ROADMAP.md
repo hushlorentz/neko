@@ -649,7 +649,7 @@ than delegating architectural results to host floating-point defaults.
 
 - [x] Implement `MOV.S`, `ABS.S`, and `NEG.S` with exact raw-bit behavior and
       documented flag effects
-- [ ] Implement `MAX.S` and `MIN.S`, including signed-zero selection and
+- [x] Implement `MAX.S` and `MIN.S`, including signed-zero selection and
       operand-order behavior
 - [ ] Implement `CVT.S.W` with deterministic signed fixed-point conversion and
       EE truncation
