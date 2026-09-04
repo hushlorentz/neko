@@ -605,15 +605,15 @@ than delegating architectural results to host floating-point defaults.
   - The official `MIN.S` instruction page incorrectly prints function `0x30`.
     Appendix table 7.4.3 and PS2DEV Binutils 2.45.1 agree on `0x29`; `0x30`
     encodes `C.F.S`.
-- [ ] Define the architectural contract for 32 32-bit FPRs, the 32-bit ACC,
+- [x] Define the architectural contract for 32 32-bit FPRs, the 32-bit ACC,
       read-only FCR0, writable FCR31 fields, and reserved FCR1-FCR30
-- [ ] Define deterministic reset values for architecturally undefined COP1
+- [x] Define deterministic reset values for architecturally undefined COP1
       state without presenting those values as hardware guarantees
-- [ ] Define COP1 usability checks and Coprocessor Unusable exception behavior
+- [x] Define COP1 usability checks and Coprocessor Unusable exception behavior
       for operations, transfers, branches, loads, and stores
-- [ ] Map COP1 operation and move instructions onto the documented C1 and
+- [x] Map COP1 operation and move instructions onto the documented C1 and
       integer pipelines, including issue-pair restrictions and resource stalls
-- [ ] Record which instruction timing is explicitly documented locally and
+- [x] Record which instruction timing is explicitly documented locally and
       pause before assigning any unresolved latency or throughput
 
 ### Register, Control, and Memory Transfers
