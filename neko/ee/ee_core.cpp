@@ -588,6 +588,38 @@ bool EECore::executeInstruction(
         destination,
         static_cast<std::uint32_t>(target));
       return true;
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::MoveSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const std::uint32_t sourceBits =
+        floatingPointRegisters[destination];
+      std::uint32_t resultBits = sourceBits;
+      if (instruction.operation ==
+          EEOperation::AbsoluteSingleCOP1)
+      {
+        resultBits &= UINT32_C(0x7fffffff);
+      }
+      else if (instruction.operation ==
+               EEOperation::NegateSingleCOP1)
+      {
+        resultBits ^= UINT32_C(0x80000000);
+      }
+      floatingPointRegisters[instruction.shiftAmount] =
+        resultBits;
+      if (instruction.operation !=
+          EEOperation::MoveSingleCOP1)
+      {
+        updateCOP1ArithmeticFlags(
+          FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+          0);
+      }
+      return true;
+    }
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
@@ -2262,6 +2294,16 @@ EECore::FPRDependency EECore::instructionFPRDependency(
         FPRDependency::None;
     case EEOperation::LoadWordToCOP1:
       return instruction.targetRegister == registerIndex ?
+        FPRDependency::Write :
+        FPRDependency::None;
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::MoveSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+      if (instruction.destinationRegister == registerIndex)
+      {
+        return FPRDependency::Read;
+      }
+      return instruction.shiftAmount == registerIndex ?
         FPRDependency::Write :
         FPRDependency::None;
     default:

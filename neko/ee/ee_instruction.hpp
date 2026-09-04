@@ -132,7 +132,10 @@ enum class EEOperation : std::uint8_t
   MoveControlWordFromCOP1,
   MoveControlWordToCOP1,
   LoadWordToCOP1,
-  StoreWordFromCOP1
+  StoreWordFromCOP1,
+  AbsoluteSingleCOP1,
+  MoveSingleCOP1,
+  NegateSingleCOP1
 };
 
 struct EEInstruction

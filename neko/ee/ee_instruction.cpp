@@ -775,6 +775,38 @@ namespace
     if (instruction->sourceRegister == 0x10 ||
         instruction->sourceRegister == 0x14)
     {
+      if (instruction->sourceRegister == 0x10)
+      {
+        switch (instruction->function)
+        {
+          case 0x05:
+            if (instruction->targetRegister != 0)
+            {
+              reject(DecodeKind::Reserved);
+            }
+            instruction->operation =
+              EEOperation::AbsoluteSingleCOP1;
+            return;
+          case 0x06:
+            if (instruction->targetRegister != 0)
+            {
+              reject(DecodeKind::Reserved);
+            }
+            instruction->operation =
+              EEOperation::MoveSingleCOP1;
+            return;
+          case 0x07:
+            if (instruction->targetRegister != 0)
+            {
+              reject(DecodeKind::Reserved);
+            }
+            instruction->operation =
+              EEOperation::NegateSingleCOP1;
+            return;
+          default:
+            break;
+        }
+      }
       reject(DecodeKind::Unsupported);
     }
     reject(DecodeKind::Reserved);

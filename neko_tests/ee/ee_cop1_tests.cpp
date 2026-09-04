@@ -35,6 +35,21 @@ namespace
       offset;
   }
 
+  std::uint32_t cop1SingleInstruction(
+    std::uint8_t function,
+    std::uint8_t source,
+    std::uint8_t destination,
+    std::uint8_t target = 0)
+  {
+    return
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x10) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(source) << 11) |
+      (static_cast<std::uint32_t>(destination) << 6) |
+      function;
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -605,6 +620,123 @@ TEST_CASE("EE COP1 word transfer instructions decode canonically")
     "Reserved EE instruction encoding.");
 }
 
+TEST_CASE("EE COP1 single movement instructions decode canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x05, 2, 3)).operation ==
+    EEOperation::AbsoluteSingleCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x06, 2, 3)).operation ==
+    EEOperation::MoveSingleCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x07, 2, 3)).operation ==
+    EEOperation::NegateSingleCOP1);
+
+  for (const std::uint8_t function : {0x05, 0x06, 0x07})
+  {
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(
+        cop1SingleInstruction(function, 2, 3, 1)),
+      "Reserved EE instruction encoding.");
+  }
+}
+
+TEST_CASE("EE COP1 single movement instructions transform raw bits")
+{
+  struct MovementVector
+  {
+    std::uint8_t function;
+    std::uint32_t source;
+    std::uint32_t expected;
+  };
+  const MovementVector vectors[] = {
+    {0x05, UINT32_C(0xffc12345), UINT32_C(0x7fc12345)},
+    {0x05, UINT32_C(0x80000000), UINT32_C(0x00000000)},
+    {0x06, UINT32_C(0xffc12345), UINT32_C(0xffc12345)},
+    {0x06, UINT32_C(0x807fffff), UINT32_C(0x807fffff)},
+    {0x07, UINT32_C(0x7fc12345), UINT32_C(0xffc12345)},
+    {0x07, UINT32_C(0x80000000), UINT32_C(0x00000000)}
+  };
+
+  for (const MovementVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.source);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(vector.function, 2, 3));
+
+    REQUIRE(core.floatingPointRegister(2) == vector.source);
+    REQUIRE(
+      core.floatingPointRegister(3) == vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 single movement instructions support in-place writes")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0xffc12345));
+
+  runInstruction(
+    &system,
+    cop1SingleInstruction(0x05, 2, 2));
+
+  REQUIRE(
+    core.floatingPointRegister(2) ==
+    UINT32_C(0x7fc12345));
+}
+
+TEST_CASE("EE COP1 movement instructions apply documented flags")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+
+  SECTION("MOV.S leaves every arithmetic flag unchanged")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setFloatingPointRegister(2, UINT32_C(0x12345678));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x06, 2, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED | INITIAL_STATUS));
+  }
+
+  SECTION("ABS.S and NEG.S clear current O and U only")
+  {
+    for (const std::uint8_t function : {0x05, 0x07})
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP1ControlRegister(31, INITIAL_STATUS);
+      core.setFloatingPointRegister(2, UINT32_C(0x12345678));
+
+      runInstruction(
+        &system,
+        cop1SingleInstruction(function, 2, 3));
+
+      REQUIRE(
+        core.cop1ControlRegister(31) ==
+        (EECOP1Control::STATUS_FIXED |
+         EECOP1Control::CAUSE_INVALID |
+         EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+         EECOP1Control::STICKY_MASK));
+    }
+  }
+}
+
 TEST_CASE("EE COP1 control transfers reject reserved FCRs")
 {
   for (std::uint8_t controlRegister = 1;
@@ -926,6 +1058,72 @@ TEST_CASE("EE LWC1 interlocks an immediate SWC1 source")
   REQUIRE(stored == UINT32_C(0x89abcdef));
 }
 
+TEST_CASE("EE LWC1 interlocks COP1 movement source and destination")
+{
+  SECTION("source")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x89abcdef)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 2, 0));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x06, 2, 3));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("destination")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x76543210));
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x89abcdef)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 2, 0));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x06, 3, 2));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x89abcdef));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x76543210));
+  }
+}
+
 TEST_CASE("EE pending COP1 loads survive host halt and save-state restore")
 {
   NekoSystem original;
@@ -1178,7 +1376,10 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1TransferInstruction(0x02, 2, 31),
     cop1TransferInstruction(0x06, 2, 31),
     cop1MemoryInstruction(0x31, 1, 3, 2),
-    cop1MemoryInstruction(0x39, 1, 3, 2)
+    cop1MemoryInstruction(0x39, 1, 3, 2),
+    cop1SingleInstruction(0x05, 3, 4),
+    cop1SingleInstruction(0x06, 3, 4),
+    cop1SingleInstruction(0x07, 3, 4)
   };
 
   for (const std::uint32_t instruction : instructions)
@@ -1196,6 +1397,7 @@ TEST_CASE("EE COP1 transfers require Status CU1")
         UINT64_C(0x2222222233333333)
       });
     core.setFloatingPointRegister(3, UINT32_C(0x76543210));
+    core.setFloatingPointRegister(4, UINT32_C(0x12345678));
     REQUIRE(
       system.eeBus().writeData32(
         0,
@@ -1229,6 +1431,9 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     REQUIRE(
       core.floatingPointRegister(3) ==
       UINT32_C(0x76543210));
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x12345678));
     REQUIRE(
       core.cop1ControlRegister(31) ==
       EECOP1Control::STATUS_FIXED);
