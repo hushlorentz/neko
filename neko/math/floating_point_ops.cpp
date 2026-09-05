@@ -384,6 +384,15 @@ namespace
   {
     const DecodedOperand fs = decodeOperand(fsBits);
     const DecodedOperand ft = decodeOperand(ftBits);
+    if (fs.zero && ft.zero)
+    {
+      const bool negative =
+        maximum
+          ? fs.negative && ft.negative
+          : fs.negative || ft.negative;
+      return signedZero(negative);
+    }
+
     const int comparison =
       compareRaw(fs, fsBits, ft, ftBits);
     const bool selectFS =
@@ -602,6 +611,21 @@ VUFloatResult rsqrtFPRaw(
 VUFloatResult subFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 {
   return addRaw(d1Bits, d2Bits ^ FP_SIGN_BIT);
+}
+
+EEFloatResult convertEEFloatToWordRaw(std::uint32_t bits)
+{
+  const std::uint32_t encodedExponent = (bits >> 23) & 0xff;
+  if (encodedExponent > 0x9d)
+  {
+    return {
+      (bits & FP_SIGN_BIT) != 0
+        ? UINT32_C(0x80000000)
+        : UINT32_C(0x7fffffff),
+      FP_FLAG_I_BIT
+    };
+  }
+  return {floatToFixedRaw(bits, 0), 0};
 }
 
 double convertFromIEEE(double value, uint8_t * resultFlags)

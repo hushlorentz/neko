@@ -813,32 +813,44 @@ TEST_CASE("EE COP1 min and max select exact source encodings")
   }
 }
 
-TEST_CASE("EE COP1 min and max break signed-zero ties toward fs")
+TEST_CASE("EE COP1 min and max produce documented signed-zero results")
 {
-  for (const std::uint8_t function : {0x28, 0x29})
+  struct SignedZeroVector
   {
-    NekoSystem negativeFirst;
-    negativeFirst.eeCore().setFloatingPointRegister(
-      2,
-      FP_SIGN_BIT);
-    negativeFirst.eeCore().setFloatingPointRegister(3, 0);
-    runInstruction(
-      &negativeFirst,
-      cop1SingleInstruction(function, 2, 4, 3));
-    REQUIRE(
-      negativeFirst.eeCore().floatingPointRegister(4) ==
-      FP_SIGN_BIT);
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const SignedZeroVector vectors[] = {
+    {0x28, 0, 0, 0},
+    {0x28, 0, FP_SIGN_BIT, 0},
+    {0x28, FP_SIGN_BIT, 0, 0},
+    {0x28, FP_SIGN_BIT, FP_SIGN_BIT, FP_SIGN_BIT},
+    {0x29, 0, 0, 0},
+    {0x29, 0, FP_SIGN_BIT, FP_SIGN_BIT},
+    {0x29, FP_SIGN_BIT, 0, FP_SIGN_BIT},
+    {0x29, FP_SIGN_BIT, FP_SIGN_BIT, FP_SIGN_BIT}
+  };
 
-    NekoSystem positiveFirst;
-    positiveFirst.eeCore().setFloatingPointRegister(2, 0);
-    positiveFirst.eeCore().setFloatingPointRegister(
-      3,
-      FP_SIGN_BIT);
+  for (const SignedZeroVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+
     runInstruction(
-      &positiveFirst,
-      cop1SingleInstruction(function, 2, 4, 3));
+      &system,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        4,
+        3));
+
     REQUIRE(
-      positiveFirst.eeCore().floatingPointRegister(4) == 0);
+      core.floatingPointRegister(4) ==
+      vector.expected);
   }
 }
 
@@ -1032,23 +1044,150 @@ TEST_CASE("EE COP1 CVT.W.S supports in-place conversion")
     UINT32_C(0xffffffff));
 }
 
-TEST_CASE("EE COP1 CVT.W.S leaves arithmetic flags unchanged")
+TEST_CASE("EE COP1 CVT.W.S updates conversion overflow flags")
 {
   constexpr std::uint32_t INITIAL_STATUS =
     EECOP1Control::CAUSE_MASK |
     EECOP1Control::STICKY_MASK;
-  NekoSystem system;
-  EECore &core = system.eeCore();
-  core.setCOP1ControlRegister(31, INITIAL_STATUS);
-  core.setFloatingPointRegister(2, UINT32_C(0x7fffffff));
 
-  runInstruction(
-    &system,
-    cop1SingleInstruction(0x24, 2, 3));
+  SECTION("In-range conversion clears current I only")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setFloatingPointRegister(2, UINT32_C(0x3ff33333));
 
-  REQUIRE(
-    core.cop1ControlRegister(31) ==
-    (EECOP1Control::STATUS_FIXED | INITIAL_STATUS));
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x24, 2, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_MASK));
+  }
+
+  SECTION("Clamp-path conversion sets current and sticky I")
+  {
+    for (const std::uint32_t source : {
+           UINT32_C(0x4f000000),
+           UINT32_C(0xcf000000),
+           UINT32_C(0x7fffffff),
+           UINT32_C(0xffffffff)})
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setFloatingPointRegister(2, source);
+
+      runInstruction(
+        &system,
+        cop1SingleInstruction(0x24, 2, 3));
+
+      REQUIRE(
+        core.cop1ControlRegister(31) ==
+        (EECOP1Control::STATUS_FIXED |
+         EECOP1Control::CAUSE_INVALID |
+         EECOP1Control::STICKY_INVALID));
+    }
+  }
+}
+
+TEST_CASE(
+  "EE COP1 movement selection and conversion results have ordered visibility")
+{
+  struct VisibilityVector
+  {
+    std::uint32_t instruction;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const VisibilityVector vectors[] = {
+    {
+      cop1SingleInstruction(0x05, 2, 4),
+      UINT32_C(0xffc12345),
+      0,
+      UINT32_C(0x7fc12345)
+    },
+    {
+      cop1SingleInstruction(0x06, 2, 4),
+      UINT32_C(0x89abcdef),
+      0,
+      UINT32_C(0x89abcdef)
+    },
+    {
+      cop1SingleInstruction(0x07, 2, 4),
+      UINT32_C(0x7fc12345),
+      0,
+      UINT32_C(0xffc12345)
+    },
+    {
+      cop1SingleInstruction(0x28, 2, 4, 3),
+      UINT32_C(0x3f800000),
+      UINT32_C(0x40000000),
+      UINT32_C(0x40000000)
+    },
+    {
+      cop1SingleInstruction(0x29, 2, 4, 3),
+      UINT32_C(0x3f800000),
+      UINT32_C(0x40000000),
+      UINT32_C(0x3f800000)
+    },
+    {
+      cop1WordInstruction(0x20, 2, 4),
+      UINT32_C(0x01000001),
+      0,
+      UINT32_C(0x4b800000)
+    },
+    {
+      cop1SingleInstruction(0x24, 2, 4),
+      UINT32_C(0x3ff33333),
+      0,
+      UINT32_C(0x00000001)
+    }
+  };
+
+  for (const VisibilityVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    core.setFloatingPointRegister(6, UINT32_C(0x76543210));
+    system.eeBus().write32(0, vector.instruction);
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x06, 4, 5));
+    system.eeBus().write32(
+      8,
+      cop1SingleInstruction(0x06, 6, 4));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      vector.expected);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x76543210));
+  }
 }
 
 TEST_CASE("EE COP1 control transfers reject reserved FCRs")
@@ -1307,74 +1446,6 @@ TEST_CASE("EE LWC1 permits independent work during writeback")
   REQUIRE(core.generalRegister(2).low == 0x12345678);
 }
 
-TEST_CASE("EE LWC1 stalls an immediate CVT.S.W source dependency")
-{
-  NekoSystem system;
-  EECore &core = system.eeCore();
-  core.setGeneralRegister(1, {0x100, 0});
-  core.setFloatingPointRegister(3, UINT32_C(0x00000002));
-  REQUIRE(
-    system.eeBus().writeData32(
-      0x100,
-      UINT32_C(0x01000001)));
-  system.eeBus().write32(
-    0,
-    cop1MemoryInstruction(0x31, 1, 3, 0));
-  system.eeBus().write32(
-    4,
-    cop1WordInstruction(0x20, 3, 4));
-  core.startExecution(0);
-
-  system.runMasterCycles(2);
-
-  REQUIRE(core.programCounter() == 4);
-  REQUIRE(
-    core.floatingPointRegister(3) ==
-    UINT32_C(0x01000001));
-  REQUIRE(core.floatingPointRegister(4) == 0);
-
-  system.clockMasterCycle();
-
-  REQUIRE(core.programCounter() == 8);
-  REQUIRE(
-    core.floatingPointRegister(4) ==
-    UINT32_C(0x4b800000));
-}
-
-TEST_CASE("EE LWC1 stalls an immediate CVT.W.S source dependency")
-{
-  NekoSystem system;
-  EECore &core = system.eeCore();
-  core.setGeneralRegister(1, {0x100, 0});
-  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
-  REQUIRE(
-    system.eeBus().writeData32(
-      0x100,
-      UINT32_C(0x3ff33333)));
-  system.eeBus().write32(
-    0,
-    cop1MemoryInstruction(0x31, 1, 3, 0));
-  system.eeBus().write32(
-    4,
-    cop1SingleInstruction(0x24, 3, 4));
-  core.startExecution(0);
-
-  system.runMasterCycles(2);
-
-  REQUIRE(core.programCounter() == 4);
-  REQUIRE(
-    core.floatingPointRegister(3) ==
-    UINT32_C(0x3ff33333));
-  REQUIRE(core.floatingPointRegister(4) == 0);
-
-  system.clockMasterCycle();
-
-  REQUIRE(core.programCounter() == 8);
-  REQUIRE(
-    core.floatingPointRegister(4) ==
-    UINT32_C(0x00000001));
-}
-
 TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
 {
   NekoSystem system;
@@ -1440,85 +1511,31 @@ TEST_CASE("EE LWC1 interlocks an immediate SWC1 source")
   REQUIRE(stored == UINT32_C(0x89abcdef));
 }
 
-TEST_CASE("EE LWC1 interlocks COP1 movement source and destination")
-{
-  SECTION("source")
-  {
-    NekoSystem system;
-    EECore &core = system.eeCore();
-    core.setGeneralRegister(1, {0x100, 0});
-    REQUIRE(
-      system.eeBus().writeData32(
-        0x100,
-        UINT32_C(0x89abcdef)));
-    system.eeBus().write32(
-      0,
-      cop1MemoryInstruction(0x31, 1, 2, 0));
-    system.eeBus().write32(
-      4,
-      cop1SingleInstruction(0x06, 2, 3));
-    core.startExecution(0);
-
-    system.runMasterCycles(2);
-
-    REQUIRE(core.programCounter() == 4);
-    REQUIRE(core.floatingPointRegister(3) == 0);
-
-    system.clockMasterCycle();
-
-    REQUIRE(core.programCounter() == 8);
-    REQUIRE(
-      core.floatingPointRegister(3) ==
-      UINT32_C(0x89abcdef));
-  }
-
-  SECTION("destination")
-  {
-    NekoSystem system;
-    EECore &core = system.eeCore();
-    core.setGeneralRegister(1, {0x100, 0});
-    core.setFloatingPointRegister(3, UINT32_C(0x76543210));
-    REQUIRE(
-      system.eeBus().writeData32(
-        0x100,
-        UINT32_C(0x89abcdef)));
-    system.eeBus().write32(
-      0,
-      cop1MemoryInstruction(0x31, 1, 2, 0));
-    system.eeBus().write32(
-      4,
-      cop1SingleInstruction(0x06, 3, 2));
-    core.startExecution(0);
-
-    system.runMasterCycles(2);
-
-    REQUIRE(core.programCounter() == 4);
-    REQUIRE(
-      core.floatingPointRegister(2) ==
-      UINT32_C(0x89abcdef));
-
-    system.clockMasterCycle();
-
-    REQUIRE(core.programCounter() == 8);
-    REQUIRE(
-      core.floatingPointRegister(2) ==
-      UINT32_C(0x76543210));
-  }
-}
-
-TEST_CASE("EE LWC1 interlocks COP1 min and max operands")
+TEST_CASE(
+  "EE LWC1 interlocks every completed COP1 movement selection and conversion")
 {
   struct DependencyVector
   {
+    std::uint32_t instruction;
     std::uint8_t loadedRegister;
-    std::uint8_t fs;
-    std::uint8_t ft;
-    std::uint8_t fd;
   };
   const DependencyVector vectors[] = {
-    {2, 2, 3, 4},
-    {3, 2, 3, 4},
-    {4, 2, 3, 4}
+    {cop1SingleInstruction(0x05, 2, 4), 2},
+    {cop1SingleInstruction(0x05, 2, 4), 4},
+    {cop1SingleInstruction(0x06, 2, 4), 2},
+    {cop1SingleInstruction(0x06, 2, 4), 4},
+    {cop1SingleInstruction(0x07, 2, 4), 2},
+    {cop1SingleInstruction(0x07, 2, 4), 4},
+    {cop1SingleInstruction(0x28, 2, 4, 3), 2},
+    {cop1SingleInstruction(0x28, 2, 4, 3), 3},
+    {cop1SingleInstruction(0x28, 2, 4, 3), 4},
+    {cop1SingleInstruction(0x29, 2, 4, 3), 2},
+    {cop1SingleInstruction(0x29, 2, 4, 3), 3},
+    {cop1SingleInstruction(0x29, 2, 4, 3), 4},
+    {cop1WordInstruction(0x20, 2, 4), 2},
+    {cop1WordInstruction(0x20, 2, 4), 4},
+    {cop1SingleInstruction(0x24, 2, 4), 2},
+    {cop1SingleInstruction(0x24, 2, 4), 4}
   };
 
   for (const DependencyVector &vector : vectors)
@@ -1539,13 +1556,7 @@ TEST_CASE("EE LWC1 interlocks COP1 min and max operands")
         1,
         vector.loadedRegister,
         0));
-    system.eeBus().write32(
-      4,
-      cop1SingleInstruction(
-        0x28,
-        vector.fs,
-        vector.fd,
-        vector.ft));
+    system.eeBus().write32(4, vector.instruction);
     core.startExecution(0);
 
     system.runMasterCycles(2);

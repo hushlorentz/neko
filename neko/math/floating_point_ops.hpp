@@ -75,6 +75,7 @@ EEFloatResult sqrtEEFloatRaw(std::uint32_t bits);
 EEFloatResult rsqrtEEFloatRaw(
   std::uint32_t numeratorBits,
   std::uint32_t radicandBits);
+EEFloatResult convertEEFloatToWordRaw(std::uint32_t bits);
 VUFloatResult sqrtFPRaw(std::uint32_t bits);
 VUFloatResult rsqrtFPRaw(
   std::uint32_t numeratorBits,

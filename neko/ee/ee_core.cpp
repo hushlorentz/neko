@@ -653,15 +653,21 @@ bool EECore::executeInstruction(
           0);
       return true;
     case EEOperation::ConvertSingleToWordCOP1:
+    {
       if (!requireCOP1Usable(address, instruction.raw))
       {
         return false;
       }
+      const EEFloatResult result =
+        convertEEFloatToWordRaw(
+          floatingPointRegisters[destination]);
       floatingPointRegisters[instruction.shiftAmount] =
-        floatToFixedRaw(
-          floatingPointRegisters[destination],
-          0);
+        result.bits;
+      updateCOP1ArithmeticFlags(
+        FP_FLAG_I_BIT,
+        result.flags);
       return true;
+    }
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:

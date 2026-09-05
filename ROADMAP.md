@@ -655,8 +655,8 @@ than delegating architectural results to host floating-point defaults.
       EE truncation
 - [x] Implement `CVT.W.S`, including truncation, clamping, and out-of-range
       behavior
-- [ ] Verify source dependencies, destination hazards, S-stage visibility, and
-      fixed-field rejection for each instruction form
+- [x] Verify source dependencies, destination hazards, scalar result visibility,
+      and fixed-field rejection for each instruction form
 
 ### Addition, Subtraction, and Accumulator
 
