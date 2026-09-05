@@ -138,7 +138,8 @@ enum class EEOperation : std::uint8_t
   NegateSingleCOP1,
   MaximumSingleCOP1,
   MinimumSingleCOP1,
-  ConvertWordToSingleCOP1
+  ConvertWordToSingleCOP1,
+  ConvertSingleToWordCOP1
 };
 
 struct EEInstruction

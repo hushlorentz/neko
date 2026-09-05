@@ -967,6 +967,90 @@ TEST_CASE("EE COP1 CVT.S.W leaves arithmetic flags unchanged")
     (EECOP1Control::STATUS_FIXED | INITIAL_STATUS));
 }
 
+TEST_CASE("EE COP1 CVT.W.S decodes only its canonical S form")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x24, 2, 3)).operation ==
+    EEOperation::ConvertSingleToWordCOP1);
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x24, 2, 3, 1)),
+    "Reserved EE instruction encoding.");
+}
+
+TEST_CASE("EE COP1 CVT.W.S truncates and clamps raw EE values")
+{
+  struct ConversionVector
+  {
+    std::uint32_t source;
+    std::uint32_t expected;
+  };
+  const ConversionVector vectors[] = {
+    {UINT32_C(0x00000000), UINT32_C(0x00000000)},
+    {UINT32_C(0x80000000), UINT32_C(0x00000000)},
+    {UINT32_C(0x007fffff), UINT32_C(0x00000000)},
+    {UINT32_C(0x3ff33333), UINT32_C(0x00000001)},
+    {UINT32_C(0xbff33333), UINT32_C(0xffffffff)},
+    {UINT32_C(0x4effffff), UINT32_C(0x7fffff80)},
+    {UINT32_C(0x4f000000), UINT32_C(0x7fffffff)},
+    {UINT32_C(0xcf000000), UINT32_C(0x80000000)},
+    {UINT32_C(0xcf000001), UINT32_C(0x80000000)},
+    {UINT32_C(0x7fffffff), UINT32_C(0x7fffffff)},
+    {UINT32_C(0xffffffff), UINT32_C(0x80000000)}
+  };
+
+  for (const ConversionVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.source);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x24, 2, 3));
+
+    REQUIRE(core.floatingPointRegister(2) == vector.source);
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 CVT.W.S supports in-place conversion")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0xbff33333));
+
+  runInstruction(
+    &system,
+    cop1SingleInstruction(0x24, 2, 2));
+
+  REQUIRE(
+    core.floatingPointRegister(2) ==
+    UINT32_C(0xffffffff));
+}
+
+TEST_CASE("EE COP1 CVT.W.S leaves arithmetic flags unchanged")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP1ControlRegister(31, INITIAL_STATUS);
+  core.setFloatingPointRegister(2, UINT32_C(0x7fffffff));
+
+  runInstruction(
+    &system,
+    cop1SingleInstruction(0x24, 2, 3));
+
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED | INITIAL_STATUS));
+}
+
 TEST_CASE("EE COP1 control transfers reject reserved FCRs")
 {
   for (std::uint8_t controlRegister = 1;
@@ -1255,6 +1339,40 @@ TEST_CASE("EE LWC1 stalls an immediate CVT.S.W source dependency")
   REQUIRE(
     core.floatingPointRegister(4) ==
     UINT32_C(0x4b800000));
+}
+
+TEST_CASE("EE LWC1 stalls an immediate CVT.W.S source dependency")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x3ff33333)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x24, 3, 4));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x3ff33333));
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x00000001));
 }
 
 TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
@@ -1698,7 +1816,8 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1SingleInstruction(0x07, 3, 4),
     cop1SingleInstruction(0x28, 3, 4, 5),
     cop1SingleInstruction(0x29, 3, 4, 5),
-    cop1WordInstruction(0x20, 3, 4)
+    cop1WordInstruction(0x20, 3, 4),
+    cop1SingleInstruction(0x24, 3, 4)
   };
 
   for (const std::uint32_t instruction : instructions)

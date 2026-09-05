@@ -800,6 +800,14 @@ namespace
           instruction->operation =
             EEOperation::NegateSingleCOP1;
           return;
+        case 0x24:
+          if (instruction->targetRegister != 0)
+          {
+            reject(DecodeKind::Reserved);
+          }
+          instruction->operation =
+            EEOperation::ConvertSingleToWordCOP1;
+          return;
         case 0x28:
           instruction->operation =
             EEOperation::MaximumSingleCOP1;

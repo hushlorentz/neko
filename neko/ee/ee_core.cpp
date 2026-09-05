@@ -652,6 +652,16 @@ bool EECore::executeInstruction(
           floatingPointRegisters[destination],
           0);
       return true;
+    case EEOperation::ConvertSingleToWordCOP1:
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      floatingPointRegisters[instruction.shiftAmount] =
+        floatToFixedRaw(
+          floatingPointRegisters[destination],
+          0);
+      return true;
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
@@ -2332,6 +2342,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::MoveSingleCOP1:
     case EEOperation::NegateSingleCOP1:
     case EEOperation::ConvertWordToSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
       if (instruction.destinationRegister == registerIndex)
       {
         return FPRDependency::Read;

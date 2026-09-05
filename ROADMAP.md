@@ -653,7 +653,7 @@ than delegating architectural results to host floating-point defaults.
       operand-order behavior
 - [x] Implement `CVT.S.W` with deterministic signed fixed-point conversion and
       EE truncation
-- [ ] Implement `CVT.W.S`, including truncation, clamping, and out-of-range
+- [x] Implement `CVT.W.S`, including truncation, clamping, and out-of-range
       behavior
 - [ ] Verify source dependencies, destination hazards, S-stage visibility, and
       fixed-field rejection for each instruction form
