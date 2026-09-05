@@ -708,6 +708,9 @@ than delegating architectural results to host floating-point defaults.
 
 ### Pipeline Timing and System Integration
 
+- [ ] Expand this block into smaller independently reviewable pipeline-state,
+      result/writeback, dependency/bypass, structural-scheduling,
+      continuation/save-state, and determinism-validation items
 - [ ] Model the documented `T`, `X`, `Y`, `Z`, and `S` COP1 stages, including
       1S result availability, 2S architectural writeback, and S/T bypassing
 - [ ] Enforce documented COP1 operation/move issue combinations and one-cycle
