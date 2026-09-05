@@ -651,7 +651,7 @@ than delegating architectural results to host floating-point defaults.
       documented flag effects
 - [x] Implement `MAX.S` and `MIN.S`, including signed-zero selection and
       operand-order behavior
-- [ ] Implement `CVT.S.W` with deterministic signed fixed-point conversion and
+- [x] Implement `CVT.S.W` with deterministic signed fixed-point conversion and
       EE truncation
 - [ ] Implement `CVT.W.S`, including truncation, clamping, and out-of-range
       behavior

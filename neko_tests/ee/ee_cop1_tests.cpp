@@ -50,6 +50,21 @@ namespace
       function;
   }
 
+  std::uint32_t cop1WordInstruction(
+    std::uint8_t function,
+    std::uint8_t source,
+    std::uint8_t destination,
+    std::uint8_t target = 0)
+  {
+    return
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(source) << 11) |
+      (static_cast<std::uint32_t>(destination) << 6) |
+      function;
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -867,6 +882,91 @@ TEST_CASE("EE COP1 min and max clear current O and U")
   }
 }
 
+TEST_CASE("EE COP1 CVT.S.W decodes only its canonical W form")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1WordInstruction(0x20, 2, 3)).operation ==
+    EEOperation::ConvertWordToSingleCOP1);
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1WordInstruction(0x20, 2, 3, 1)),
+    "Reserved EE instruction encoding.");
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1WordInstruction(0x21, 2, 3)),
+    "Unsupported EE instruction encoding.");
+}
+
+TEST_CASE("EE COP1 CVT.S.W converts signed words with EE truncation")
+{
+  struct ConversionVector
+  {
+    std::uint32_t source;
+    std::uint32_t expected;
+  };
+  const ConversionVector vectors[] = {
+    {UINT32_C(0x00000000), UINT32_C(0x00000000)},
+    {UINT32_C(0x00000001), UINT32_C(0x3f800000)},
+    {UINT32_C(0xffffffff), UINT32_C(0xbf800000)},
+    {UINT32_C(0x01000000), UINT32_C(0x4b800000)},
+    {UINT32_C(0x01000001), UINT32_C(0x4b800000)},
+    {UINT32_C(0xfeffffff), UINT32_C(0xcb800000)},
+    {UINT32_C(0x7fffffff), UINT32_C(0x4effffff)},
+    {UINT32_C(0x80000000), UINT32_C(0xcf000000)}
+  };
+
+  for (const ConversionVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.source);
+
+    runInstruction(
+      &system,
+      cop1WordInstruction(0x20, 2, 3));
+
+    REQUIRE(core.floatingPointRegister(2) == vector.source);
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 CVT.S.W supports in-place conversion")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x01000001));
+
+  runInstruction(
+    &system,
+    cop1WordInstruction(0x20, 2, 2));
+
+  REQUIRE(
+    core.floatingPointRegister(2) ==
+    UINT32_C(0x4b800000));
+}
+
+TEST_CASE("EE COP1 CVT.S.W leaves arithmetic flags unchanged")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP1ControlRegister(31, INITIAL_STATUS);
+  core.setFloatingPointRegister(2, UINT32_C(0x7fffffff));
+
+  runInstruction(
+    &system,
+    cop1WordInstruction(0x20, 2, 3));
+
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED | INITIAL_STATUS));
+}
+
 TEST_CASE("EE COP1 control transfers reject reserved FCRs")
 {
   for (std::uint8_t controlRegister = 1;
@@ -1121,6 +1221,40 @@ TEST_CASE("EE LWC1 permits independent work during writeback")
   system.clockMasterCycle();
   REQUIRE(core.programCounter() == 12);
   REQUIRE(core.generalRegister(2).low == 0x12345678);
+}
+
+TEST_CASE("EE LWC1 stalls an immediate CVT.S.W source dependency")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setFloatingPointRegister(3, UINT32_C(0x00000002));
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x01000001)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(
+    4,
+    cop1WordInstruction(0x20, 3, 4));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x01000001));
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x4b800000));
 }
 
 TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
@@ -1563,7 +1697,8 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1SingleInstruction(0x06, 3, 4),
     cop1SingleInstruction(0x07, 3, 4),
     cop1SingleInstruction(0x28, 3, 4, 5),
-    cop1SingleInstruction(0x29, 3, 4, 5)
+    cop1SingleInstruction(0x29, 3, 4, 5),
+    cop1WordInstruction(0x20, 3, 4)
   };
 
   for (const std::uint32_t instruction : instructions)
