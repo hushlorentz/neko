@@ -622,6 +622,8 @@ bool EECore::executeInstruction(
     }
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -631,15 +633,27 @@ bool EECore::executeInstruction(
         floatingPointRegisters[destination];
       const std::uint32_t ftBits =
         floatingPointRegisters[instruction.targetRegister];
-      const EEFloatResult result =
-        instruction.operation == EEOperation::MaximumSingleCOP1
-          ? maxEEFloatRaw(fsBits, ftBits)
-          : minEEFloatRaw(fsBits, ftBits);
+      EEFloatResult result;
+      switch (instruction.operation)
+      {
+        case EEOperation::MaximumSingleCOP1:
+          result = maxEEFloatRaw(fsBits, ftBits);
+          break;
+        case EEOperation::MinimumSingleCOP1:
+          result = minEEFloatRaw(fsBits, ftBits);
+          break;
+        case EEOperation::AddSingleCOP1:
+          result = addFPRaw(fsBits, ftBits);
+          break;
+        default:
+          result = subFPRaw(fsBits, ftBits);
+          break;
+      }
       floatingPointRegisters[instruction.shiftAmount] =
         result.bits;
       updateCOP1ArithmeticFlags(
         FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
-        0);
+        result.flags);
       return true;
     }
     case EEOperation::ConvertWordToSingleCOP1:
@@ -2358,6 +2372,8 @@ EECore::FPRDependency EECore::instructionFPRDependency(
         FPRDependency::None;
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
       if (instruction.destinationRegister == registerIndex ||
           instruction.targetRegister == registerIndex)
       {

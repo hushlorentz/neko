@@ -660,7 +660,7 @@ than delegating architectural results to host floating-point defaults.
 
 ### Addition, Subtraction, and Accumulator
 
-- [ ] Implement `ADD.S` and `SUB.S` with documented signed-zero, overflow,
+- [x] Implement `ADD.S` and `SUB.S` with documented signed-zero, overflow,
       underflow, and flag behavior
 - [ ] Implement `ADDA.S` and `SUBA.S` with ACC as the architectural
       destination

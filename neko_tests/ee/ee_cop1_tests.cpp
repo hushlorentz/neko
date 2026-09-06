@@ -659,6 +659,169 @@ TEST_CASE("EE COP1 single movement instructions decode canonically")
   }
 }
 
+TEST_CASE("EE COP1 add and subtract instructions decode canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x00, 2, 4, 3)).operation ==
+    EEOperation::AddSingleCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x01, 2, 4, 3)).operation ==
+    EEOperation::SubtractSingleCOP1);
+}
+
+TEST_CASE("EE COP1 add and subtract produce exact raw results")
+{
+  struct ArithmeticVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const ArithmeticVector vectors[] = {
+    {0x00, UINT32_C(0x3fc00000), UINT32_C(0x40100000),
+     UINT32_C(0x40700000)},
+    {0x01, UINT32_C(0x40b00000), UINT32_C(0x3fc00000),
+     UINT32_C(0x40800000)},
+    {0x00, 0, FP_SIGN_BIT, 0},
+    {0x00, FP_SIGN_BIT, FP_SIGN_BIT, FP_SIGN_BIT},
+    {0x01, FP_SIGN_BIT, 0, FP_SIGN_BIT},
+    {0x01, FP_SIGN_BIT, FP_SIGN_BIT, 0},
+    {0x00, UINT32_C(0x7f800000), UINT32_C(0x7f800000),
+     UINT32_C(0x7fffffff)},
+    {0x01, UINT32_C(0x80800001), UINT32_C(0x80800000),
+     FP_SIGN_BIT}
+  };
+
+  for (const ArithmeticVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        4,
+        3));
+
+    REQUIRE(core.floatingPointRegister(2) == vector.fs);
+    REQUIRE(core.floatingPointRegister(3) == vector.ft);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 add and subtract support in-place writes")
+{
+  SECTION("The destination may alias fs")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3fc00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40100000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x00, 2, 2, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x40700000));
+  }
+
+  SECTION("The destination may alias ft")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40b00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3fc00000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x01, 2, 3, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x40800000));
+  }
+}
+
+TEST_CASE("EE COP1 add and subtract update overflow and underflow flags")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+
+  SECTION("An ordinary result clears current O and U only")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_MASK));
+  }
+
+  SECTION("Overflow sets current and sticky O and clears current U")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_UNDERFLOW);
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x7f800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("Underflow sets current and sticky U and clears current O")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_OVERFLOW);
+    core.setFloatingPointRegister(2, UINT32_C(0x00800001));
+    core.setFloatingPointRegister(3, UINT32_C(0x00800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x01, 2, 4, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_UNDERFLOW));
+  }
+}
+
 TEST_CASE("EE COP1 single movement instructions transform raw bits")
 {
   struct MovementVector
@@ -1096,7 +1259,7 @@ TEST_CASE("EE COP1 CVT.W.S updates conversion overflow flags")
 }
 
 TEST_CASE(
-  "EE COP1 movement selection and conversion results have ordered visibility")
+  "EE COP1 scalar results have ordered visibility")
 {
   struct VisibilityVector
   {
@@ -1135,6 +1298,18 @@ TEST_CASE(
       UINT32_C(0x3f800000),
       UINT32_C(0x40000000),
       UINT32_C(0x3f800000)
+    },
+    {
+      cop1SingleInstruction(0x00, 2, 4, 3),
+      UINT32_C(0x3fc00000),
+      UINT32_C(0x40100000),
+      UINT32_C(0x40700000)
+    },
+    {
+      cop1SingleInstruction(0x01, 2, 4, 3),
+      UINT32_C(0x40b00000),
+      UINT32_C(0x3fc00000),
+      UINT32_C(0x40800000)
     },
     {
       cop1WordInstruction(0x20, 2, 4),
@@ -1512,7 +1687,7 @@ TEST_CASE("EE LWC1 interlocks an immediate SWC1 source")
 }
 
 TEST_CASE(
-  "EE LWC1 interlocks every completed COP1 movement selection and conversion")
+  "EE LWC1 interlocks every completed scalar COP1 operation")
 {
   struct DependencyVector
   {
@@ -1532,6 +1707,12 @@ TEST_CASE(
     {cop1SingleInstruction(0x29, 2, 4, 3), 2},
     {cop1SingleInstruction(0x29, 2, 4, 3), 3},
     {cop1SingleInstruction(0x29, 2, 4, 3), 4},
+    {cop1SingleInstruction(0x00, 2, 4, 3), 2},
+    {cop1SingleInstruction(0x00, 2, 4, 3), 3},
+    {cop1SingleInstruction(0x00, 2, 4, 3), 4},
+    {cop1SingleInstruction(0x01, 2, 4, 3), 2},
+    {cop1SingleInstruction(0x01, 2, 4, 3), 3},
+    {cop1SingleInstruction(0x01, 2, 4, 3), 4},
     {cop1WordInstruction(0x20, 2, 4), 2},
     {cop1WordInstruction(0x20, 2, 4), 4},
     {cop1SingleInstruction(0x24, 2, 4), 2},
@@ -1825,6 +2006,8 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1SingleInstruction(0x05, 3, 4),
     cop1SingleInstruction(0x06, 3, 4),
     cop1SingleInstruction(0x07, 3, 4),
+    cop1SingleInstruction(0x00, 3, 4, 5),
+    cop1SingleInstruction(0x01, 3, 4, 5),
     cop1SingleInstruction(0x28, 3, 4, 5),
     cop1SingleInstruction(0x29, 3, 4, 5),
     cop1WordInstruction(0x20, 3, 4),

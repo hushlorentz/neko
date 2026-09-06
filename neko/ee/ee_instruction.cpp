@@ -776,6 +776,14 @@ namespace
     {
       switch (instruction->function)
       {
+        case 0x00:
+          instruction->operation =
+            EEOperation::AddSingleCOP1;
+          return;
+        case 0x01:
+          instruction->operation =
+            EEOperation::SubtractSingleCOP1;
+          return;
         case 0x05:
           if (instruction->targetRegister != 0)
           {
