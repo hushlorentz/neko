@@ -2055,61 +2055,71 @@ TEST_CASE(
     std::uint32_t fs;
     std::uint32_t ft;
     std::uint32_t expected;
+    bool interlocksFollowingMove;
   };
   const VisibilityVector vectors[] = {
     {
       cop1SingleInstruction(0x05, 2, 4),
       UINT32_C(0xffc12345),
       0,
-      UINT32_C(0x7fc12345)
+      UINT32_C(0x7fc12345),
+      true
     },
     {
       cop1SingleInstruction(0x06, 2, 4),
       UINT32_C(0x89abcdef),
       0,
-      UINT32_C(0x89abcdef)
+      UINT32_C(0x89abcdef),
+      false
     },
     {
       cop1SingleInstruction(0x07, 2, 4),
       UINT32_C(0x7fc12345),
       0,
-      UINT32_C(0xffc12345)
+      UINT32_C(0xffc12345),
+      true
     },
     {
       cop1SingleInstruction(0x28, 2, 4, 3),
       UINT32_C(0x3f800000),
       UINT32_C(0x40000000),
-      UINT32_C(0x40000000)
+      UINT32_C(0x40000000),
+      true
     },
     {
       cop1SingleInstruction(0x29, 2, 4, 3),
       UINT32_C(0x3f800000),
       UINT32_C(0x40000000),
-      UINT32_C(0x3f800000)
+      UINT32_C(0x3f800000),
+      true
     },
     {
       cop1SingleInstruction(0x00, 2, 4, 3),
       UINT32_C(0x3fc00000),
       UINT32_C(0x40100000),
-      UINT32_C(0x40700000)
+      UINT32_C(0x40700000),
+      true
     },
     {
       cop1SingleInstruction(0x01, 2, 4, 3),
       UINT32_C(0x40b00000),
       UINT32_C(0x3fc00000),
-      UINT32_C(0x40800000)
+      UINT32_C(0x40800000),
+      true
     },
     {
       cop1WordInstruction(0x20, 2, 4),
       UINT32_C(0x01000001),
       0,
-      UINT32_C(0x4b800000)
+      UINT32_C(0x4b800000),
+      true
     },
     {
       cop1SingleInstruction(0x24, 2, 4),
       UINT32_C(0x3ff33333),
       0,
-      UINT32_C(0x00000001)
+      UINT32_C(0x00000001),
+      true
     }
   };
 
@@ -2138,6 +2148,13 @@ TEST_CASE(
     REQUIRE(core.floatingPointRegister(5) == 0);
 
     system.clockMasterCycle();
+
+    if (vector.interlocksFollowingMove)
+    {
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.floatingPointRegister(5) == 0);
+      system.clockMasterCycle();
+    }
 
     REQUIRE(core.programCounter() == 8);
     REQUIRE(
@@ -2182,6 +2199,207 @@ TEST_CASE(
   REQUIRE(
     core.floatingPointRegister(5) ==
     UINT32_C(0x40000000));
+}
+
+TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
+{
+  SECTION("A multiply result feeds the next compound operation")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(5, UINT32_C(0x3f000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x1c, 4, 6, 5));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40c00000));
+    REQUIRE(
+      core.floatingPointRegister(6) ==
+      UINT32_C(0x40800000));
+  }
+
+  SECTION("An accumulator write feeds the next compound operation")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(5, UINT32_C(0x3f000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x1a, 2, 0, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x1d, 5, 4, 6));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40c00000));
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40a00000));
+  }
+
+  SECTION("A compound ACC write feeds a younger compound ACC write")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(5, UINT32_C(0x3f000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x1e, 2, 0, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x1f, 5, 0, 6));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40c00000));
+  }
+}
+
+TEST_CASE("EE COP1 operate resource interlocks a following move")
+{
+  SECTION("A following MFC1 waits one cycle")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1TransferInstruction(0x00, 5, 4));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.generalRegister(5).low ==
+      UINT64_C(0x0000000040c00000));
+  }
+
+  SECTION("A following operate issues without a structural stall")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(5, UINT32_C(0x3f000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 4, 6, 5));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(6) ==
+      UINT32_C(0x40d00000));
+  }
+
+  SECTION("An intervening non-move consumes the occupancy window")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      8,
+      cop1TransferInstruction(0x00, 5, 4));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(
+      core.generalRegister(5).low ==
+      UINT64_C(0x0000000040c00000));
+  }
+}
+
+TEST_CASE("EE COP1 resource occupancy survives halt and save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  originalCore.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x02, 2, 4, 3));
+  original.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x00, 5, 4));
+  originalCore.startExecution(0);
+  original.clockMasterCycle();
+  originalCore.haltExecution();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  originalCore.startExecution(4);
+  restored.eeCore().startExecution(4);
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(originalCore.programCounter() == 4);
+  REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(originalCore.programCounter() == 8);
+  REQUIRE(restored.eeCore().programCounter() == 8);
+  REQUIRE(
+    restored.eeCore().generalRegister(5).low ==
+    UINT64_C(0x0000000040c00000));
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
 }
 
 TEST_CASE(
@@ -2337,6 +2555,16 @@ TEST_CASE(
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.floatingPointRegister(5) == 0);
     REQUIRE(
       core.cop1ControlRegister(31) ==
       (EECOP1Control::STATUS_FIXED |

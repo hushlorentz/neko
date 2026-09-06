@@ -34,7 +34,8 @@ enum class NekoTraceEventType : std::uint8_t
   ExceptionEntered,
   InterruptDelivered,
   StateSnapshot,
-  COP1LoadInterlock
+  COP1LoadInterlock,
+  COP1ResourceInterlock
 };
 
 namespace NekoEETraceBranch

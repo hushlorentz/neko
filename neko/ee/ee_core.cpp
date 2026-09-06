@@ -226,6 +226,7 @@ void EECore::reset()
   pendingMac0 = {};
   pendingMac1 = {};
   pendingCOP1Load = {};
+  cop1OperateResourceOccupied = false;
   recentShiftAmountAccesses = 0;
   recentShiftAmountReads = 0;
   branchDelayPending = false;
@@ -333,6 +334,11 @@ void EECore::startExecution(std::uint32_t startAddress)
     haltReason == EEStopReason::HostHalt &&
     pendingCOP1Load.active &&
     startAddress == pc;
+  const bool resumeCOP1OperateResource =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    cop1OperateResourceOccupied &&
+    startAddress == pc;
   pc = startAddress;
   clearPendingException();
   state = EEExecutionState::Running;
@@ -355,6 +361,10 @@ void EECore::startExecution(std::uint32_t startAddress)
   if (!resumePendingCOP1Load)
   {
     pendingCOP1Load = {};
+  }
+  if (!resumeCOP1OperateResource)
+  {
+    cop1OperateResourceOccupied = false;
   }
   rejectedInstructionValue = 0;
   exceptionEnteredThisCycle = false;
@@ -453,6 +463,23 @@ void EECore::clock()
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
+  const bool hadCOP1OperateResource =
+    cop1OperateResourceOccupied;
+  cop1OperateResourceOccupied = false;
+  if (hadCOP1OperateResource &&
+      isCOP1MoveOperation(decoded.operation))
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1ResourceInterlock,
+      fetched.address,
+      fetched.instruction,
+      lastInstructionValid
+        ? static_cast<std::uint8_t>(
+            lastDecodedInstruction.operation)
+        : 0);
+    pc = fetched.address;
+    return;
+  }
   const FPRDependency fprDependency =
     completedCOP1Load ?
       instructionFPRDependency(
@@ -480,6 +507,8 @@ void EECore::clock()
   {
     return;
   }
+  cop1OperateResourceOccupied =
+    isCOP1OperateOperation(decoded.operation);
 
   if (wasDelaySlot)
   {
@@ -2475,6 +2504,49 @@ EECore::FPRDependency EECore::instructionFPRDependency(
   }
 }
 
+bool EECore::isCOP1MoveOperation(EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::MoveWordFromCOP1:
+    case EEOperation::MoveWordToCOP1:
+    case EEOperation::MoveControlWordFromCOP1:
+    case EEOperation::MoveControlWordToCOP1:
+    case EEOperation::LoadWordToCOP1:
+    case EEOperation::StoreWordFromCOP1:
+    case EEOperation::MoveSingleCOP1:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool EECore::isCOP1OperateOperation(EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+    case EEOperation::ConvertWordToSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool EECore::validateShiftAmountOrdering(
   const EEInstruction &instruction,
   std::uint32_t address)
@@ -2672,6 +2744,7 @@ void EECore::enterException(
   branchDelayTarget = 0;
   branchInstructionAddress = 0;
   branchDelayFromLikely = false;
+  cop1OperateResourceOccupied = false;
 }
 
 std::uint8_t EECore::exceptionCode(EEException type)
@@ -2833,6 +2906,7 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, pendingCOP1Load.active);
   hashEEStateValue(&hash, pendingCOP1Load.registerIndex);
   hashEEStateValue(&hash, pendingCOP1Load.value);
+  hashEEStateValue(&hash, cop1OperateResourceOccupied);
   hashEEStateValue(&hash, recentShiftAmountAccesses);
   hashEEStateValue(&hash, recentShiftAmountReads);
   hashEEStateValue(&hash, branchDelayPending);

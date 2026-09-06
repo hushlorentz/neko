@@ -17,7 +17,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 15;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 16;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1320,6 +1320,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.pendingMac1;
   destination->eeCoreComponent.pendingCOP1Load =
     source->eeCoreComponent.pendingCOP1Load;
+  destination->eeCoreComponent.cop1OperateResourceOccupied =
+    source->eeCoreComponent.cop1OperateResourceOccupied;
   destination->eeCoreComponent.recentShiftAmountAccesses =
     source->eeCoreComponent.recentShiftAmountAccesses;
   destination->eeCoreComponent.recentShiftAmountReads =
@@ -1644,6 +1646,7 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeBool(core.pendingCOP1Load.active);
   writer->writeU8(core.pendingCOP1Load.registerIndex);
   writer->writeU32(core.pendingCOP1Load.value);
+  writer->writeBool(core.cop1OperateResourceOccupied);
   writer->writeU8(core.recentShiftAmountAccesses);
   writer->writeU8(core.recentShiftAmountReads);
   writer->writeBool(core.branchDelayPending);
@@ -1748,6 +1751,8 @@ void NekoSaveStateCodec::readEECore(
       (core->pendingCOP1Load.registerIndex == 0 &&
        core->pendingCOP1Load.value == 0),
     "EE inactive COP1 load contains state");
+  core->cop1OperateResourceOccupied =
+    reader->readBool("EE COP1 operate resource flag");
   core->recentShiftAmountAccesses = reader->readU8();
   core->recentShiftAmountReads = reader->readU8();
   require(
@@ -1806,6 +1811,12 @@ void NekoSaveStateCodec::readEECore(
        core->pendingCOP1Load.registerIndex ==
          core->lastDecodedInstruction.targetRegister),
     "EE pending COP1 load state is inconsistent");
+  require(
+    !core->cop1OperateResourceOccupied ||
+      (core->lastInstructionValid &&
+       EECore::isCOP1OperateOperation(
+         core->lastDecodedInstruction.operation)),
+    "EE COP1 operate resource state is inconsistent");
   require(
     core->branchDelayPending ||
       (core->branchDelayTarget == 0 &&

@@ -452,6 +452,50 @@ TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
   REQUIRE(interlocks[0].value3 == expectedAccess);
 }
 
+TEST_CASE("EE COP1 resource interlock traces a blocked move")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const std::uint32_t multiplyInstruction =
+    (UINT32_C(0x11) << 26) |
+    (UINT32_C(0x10) << 21) |
+    (UINT32_C(3) << 16) |
+    (UINT32_C(2) << 11) |
+    (UINT32_C(4) << 6) |
+    UINT32_C(0x02);
+  const std::uint32_t moveInstruction =
+    (UINT32_C(0x11) << 26) |
+    (UINT32_C(5) << 16) |
+    (UINT32_C(4) << 11);
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  system.eeBus().write32(0, multiplyInstruction);
+  system.eeBus().write32(4, moveInstruction);
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(3);
+
+  std::vector<NekoTraceEvent> interlocks;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.type ==
+        NekoTraceEventType::COP1ResourceInterlock)
+    {
+      interlocks.push_back(event);
+    }
+  }
+  REQUIRE(interlocks.size() == 1);
+  REQUIRE(interlocks[0].masterCycle == 2);
+  REQUIRE(interlocks[0].value0 == 4);
+  REQUIRE(interlocks[0].value1 == moveInstruction);
+  REQUIRE(
+    interlocks[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::MultiplySingleCOP1));
+  REQUIRE(interlocks[0].value3 == 0);
+}
+
 TEST_CASE("EE state snapshots include in-flight execution")
 {
   NekoSystem system;

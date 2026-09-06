@@ -264,7 +264,8 @@ class EECore : public ClockedComponent
       MemoryAccess,
       ExceptionEntered,
       InterruptDelivered,
-      COP1LoadInterlock
+      COP1LoadInterlock,
+      COP1ResourceInterlock
     };
 
     enum class FPRDependency : std::uint8_t
@@ -337,6 +338,7 @@ class EECore : public ClockedComponent
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
     PendingCOP1Load pendingCOP1Load;
+    bool cop1OperateResourceOccupied = false;
     std::uint8_t recentShiftAmountAccesses = 0;
     std::uint8_t recentShiftAmountReads = 0;
     bool branchDelayPending = false;
@@ -419,6 +421,8 @@ class EECore : public ClockedComponent
     static FPRDependency instructionFPRDependency(
       const EEInstruction &instruction,
       std::uint8_t registerIndex);
+    static bool isCOP1MoveOperation(EEOperation operation);
+    static bool isCOP1OperateOperation(EEOperation operation);
     bool validateShiftAmountOrdering(
       const EEInstruction &instruction,
       std::uint32_t address);
