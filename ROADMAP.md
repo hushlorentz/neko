@@ -681,7 +681,7 @@ than delegating architectural results to host floating-point defaults.
       forwarding from accumulator and compound writes, and issue restrictions
 - [x] Add dependent, independent, ACC-chained, exceptional, and save-resume
       timing tests
-- [ ] Add raw-bit compound-operation vectors that distinguish intermediate
+- [x] Add raw-bit compound-operation vectors that distinguish intermediate
       precision and flag behavior from separate host operations
 
 ### Comparison and Branch Control

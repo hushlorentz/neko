@@ -1303,6 +1303,58 @@ TEST_CASE("EE COP1 compound operations preserve raw intermediate rules")
     REQUIRE(result.stickyFlags == 0);
   }
 
+  SECTION("An underflowed product preserves ACC but records sticky U")
+  {
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0x40000000),
+        UINT32_C(0x80800000),
+        UINT32_C(0x3f000000));
+
+    REQUIRE(result.bits == UINT32_C(0x40000000));
+    REQUIRE(result.flags == 0);
+    REQUIRE(result.stickyFlags == FP_FLAG_UNDERFLOW);
+  }
+
+  SECTION("Final magnitude underflow records current and sticky U")
+  {
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0x00800001),
+        UINT32_C(0x80800000),
+        UINT32_C(0x3f800000));
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == FP_FLAG_UNDERFLOW);
+    REQUIRE(result.stickyFlags == FP_FLAG_UNDERFLOW);
+  }
+
+  SECTION("Exact MADD cancellation records current and sticky U")
+  {
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0x3f800000),
+        UINT32_C(0xbf800000),
+        UINT32_C(0x3f800000));
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == FP_FLAG_UNDERFLOW);
+    REQUIRE(result.stickyFlags == FP_FLAG_UNDERFLOW);
+  }
+
+  SECTION("Exact MSUB cancellation records current and sticky U")
+  {
+    const EECompoundFloatResult result =
+      msubEEFloatRaw(
+        UINT32_C(0x3f800000),
+        UINT32_C(0x3f800000),
+        UINT32_C(0x3f800000));
+
+    REQUIRE(result.bits == 0);
+    REQUIRE(result.flags == FP_FLAG_UNDERFLOW);
+    REQUIRE(result.stickyFlags == FP_FLAG_UNDERFLOW);
+  }
+
   SECTION("ACC overflow and product underflow preserve both sticky causes")
   {
     const EECompoundFloatResult result =
@@ -1324,6 +1376,19 @@ TEST_CASE("EE COP1 compound operations preserve raw intermediate rules")
       maddEEFloatRaw(
         UINT32_C(0xffffffff),
         UINT32_C(0x7f800000),
+        UINT32_C(0x40000000));
+
+    REQUIRE(result.bits == UINT32_C(0x7fffffff));
+    REQUIRE(result.flags == FP_FLAG_OVERFLOW);
+    REQUIRE(result.stickyFlags == FP_FLAG_OVERFLOW);
+  }
+
+  SECTION("A final exponent-255 sum saturates and raises overflow")
+  {
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0x7f000000),
+        UINT32_C(0x7e800000),
         UINT32_C(0x40000000));
 
     REQUIRE(result.bits == UINT32_C(0x7fffffff));

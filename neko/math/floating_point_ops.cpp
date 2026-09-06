@@ -328,11 +328,16 @@ namespace
           productFlags | result.flags | FP_FLAG_OVERFLOW)
       };
     }
+    const std::uint8_t finalFlags =
+      (result.bits & ~FP_SIGN_BIT) == 0
+        ? static_cast<std::uint8_t>(
+            result.flags | FP_FLAG_UNDERFLOW)
+        : result.flags;
     return {
       result.bits,
-      result.flags,
+      finalFlags,
       static_cast<std::uint8_t>(
-        productFlags | result.flags)
+        productFlags | finalFlags)
     };
   }
 
