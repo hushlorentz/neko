@@ -693,18 +693,30 @@ bool EECore::executeInstruction(
     }
     case EEOperation::MultiplyAddSingleCOP1:
     case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
         return false;
       }
       const EECompoundFloatResult result =
-        maddEEFloatRaw(
-          floatingPointAccumulatorRegister,
-          floatingPointRegisters[destination],
-          floatingPointRegisters[instruction.targetRegister]);
+        instruction.operation ==
+          EEOperation::MultiplyAddSingleCOP1 ||
+        instruction.operation ==
+          EEOperation::MultiplyAddSingleToAccumulatorCOP1
+          ? maddEEFloatRaw(
+              floatingPointAccumulatorRegister,
+              floatingPointRegisters[destination],
+              floatingPointRegisters[instruction.targetRegister])
+          : msubEEFloatRaw(
+              floatingPointAccumulatorRegister,
+              floatingPointRegisters[destination],
+              floatingPointRegisters[instruction.targetRegister]);
       if (instruction.operation ==
-          EEOperation::MultiplyAddSingleCOP1)
+            EEOperation::MultiplyAddSingleCOP1 ||
+          instruction.operation ==
+            EEOperation::MultiplySubtractSingleCOP1)
       {
         floatingPointRegisters[instruction.shiftAmount] =
           result.bits;
@@ -2439,6 +2451,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
       if (instruction.destinationRegister == registerIndex ||
           instruction.targetRegister == registerIndex)
       {
@@ -2451,6 +2464,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::SubtractSingleToAccumulatorCOP1:
     case EEOperation::MultiplySingleToAccumulatorCOP1:
     case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
       return
         instruction.destinationRegister == registerIndex ||
         instruction.targetRegister == registerIndex

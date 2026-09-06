@@ -705,6 +705,23 @@ TEST_CASE("EE COP1 multiply-add instructions decode canonically")
     "Reserved EE instruction encoding.");
 }
 
+TEST_CASE("EE COP1 multiply-subtract instructions decode canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x1d, 2, 4, 3)).operation ==
+    EEOperation::MultiplySubtractSingleCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x1f, 2, 0, 3)).operation ==
+    EEOperation::MultiplySubtractSingleToAccumulatorCOP1);
+
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x1f, 2, 1, 3)),
+    "Reserved EE instruction encoding.");
+}
+
 TEST_CASE(
   "EE COP1 accumulator add and subtract decode only with fd zero")
 {
@@ -1053,6 +1070,180 @@ TEST_CASE("EE COP1 multiply-add preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1e, 2, 0, 3));
+
+    REQUIRE(core.floatingPointAccumulator() == 0);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_UNDERFLOW));
+  }
+}
+
+TEST_CASE("EE COP1 multiply-subtract uses ACC and selects its destination")
+{
+  SECTION("MSUB.S writes an FPR without changing ACC")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x41200000));
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1d, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40800000));
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x41200000));
+  }
+
+  SECTION("MSUBA.S writes ACC without changing FPR zero")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x41200000));
+    core.setFloatingPointRegister(0, UINT32_C(0x11111111));
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1f, 2, 0, 3));
+
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40800000));
+    REQUIRE(core.floatingPointRegister(0) == UINT32_C(0x11111111));
+  }
+}
+
+TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
+{
+  SECTION("Product underflow sets sticky U but leaves current U clear")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x40000000));
+    core.setFloatingPointRegister(2, UINT32_C(0x80800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3f000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1d, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40000000));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::STICKY_UNDERFLOW));
+  }
+
+  SECTION("Positive product overflow produces negative maximum")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1d, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xffffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("Negative exponent-255 product produces positive maximum")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0xff000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1f, 2, 0, 3));
+
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("An overflow-state ACC is preserved and raises O")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0xffc00000));
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1d, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xffc00000));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("A final exponent-255 difference saturates and raises O")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x7f000000));
+    core.setFloatingPointRegister(2, UINT32_C(0xfe800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1f, 2, 0, 3));
+
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("Final cancellation underflow sets current and sticky U")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x00800001));
+    core.setFloatingPointRegister(2, UINT32_C(0x00800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x1f, 2, 0, 3));
 
     REQUIRE(core.floatingPointAccumulator() == 0);
     REQUIRE(
@@ -2547,6 +2738,9 @@ TEST_CASE(
     {cop1SingleInstruction(0x1c, 2, 4, 3), 2},
     {cop1SingleInstruction(0x1c, 2, 4, 3), 3},
     {cop1SingleInstruction(0x1c, 2, 4, 3), 4},
+    {cop1SingleInstruction(0x1d, 2, 4, 3), 2},
+    {cop1SingleInstruction(0x1d, 2, 4, 3), 3},
+    {cop1SingleInstruction(0x1d, 2, 4, 3), 4},
     {cop1SingleInstruction(0x18, 2, 0, 3), 2},
     {cop1SingleInstruction(0x18, 2, 0, 3), 3},
     {cop1SingleInstruction(0x19, 2, 0, 3), 2},
@@ -2555,6 +2749,8 @@ TEST_CASE(
     {cop1SingleInstruction(0x1a, 2, 0, 3), 3},
     {cop1SingleInstruction(0x1e, 2, 0, 3), 2},
     {cop1SingleInstruction(0x1e, 2, 0, 3), 3},
+    {cop1SingleInstruction(0x1f, 2, 0, 3), 2},
+    {cop1SingleInstruction(0x1f, 2, 0, 3), 3},
     {cop1WordInstruction(0x20, 2, 4), 2},
     {cop1WordInstruction(0x20, 2, 4), 4},
     {cop1SingleInstruction(0x24, 2, 4), 2},
@@ -2852,10 +3048,12 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1SingleInstruction(0x01, 3, 4, 5),
     cop1SingleInstruction(0x02, 3, 4, 5),
     cop1SingleInstruction(0x1c, 3, 4, 5),
+    cop1SingleInstruction(0x1d, 3, 4, 5),
     cop1SingleInstruction(0x18, 3, 0, 5),
     cop1SingleInstruction(0x19, 3, 0, 5),
     cop1SingleInstruction(0x1a, 3, 0, 5),
     cop1SingleInstruction(0x1e, 3, 0, 5),
+    cop1SingleInstruction(0x1f, 3, 0, 5),
     cop1SingleInstruction(0x28, 3, 4, 5),
     cop1SingleInstruction(0x29, 3, 4, 5),
     cop1WordInstruction(0x20, 3, 4),

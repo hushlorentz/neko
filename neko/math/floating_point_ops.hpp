@@ -73,6 +73,10 @@ EECompoundFloatResult maddEEFloatRaw(
   std::uint32_t accumulatorBits,
   std::uint32_t fsBits,
   std::uint32_t ftBits);
+EECompoundFloatResult msubEEFloatRaw(
+  std::uint32_t accumulatorBits,
+  std::uint32_t fsBits,
+  std::uint32_t ftBits);
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult maxFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult minFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);

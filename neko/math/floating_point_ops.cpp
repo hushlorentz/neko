@@ -260,6 +260,82 @@ namespace
         d1.exponent + d2.exponent - 46));
   }
 
+  EECompoundFloatResult multiplyAccumulateRaw(
+    std::uint32_t accumulatorBits,
+    std::uint32_t fsBits,
+    std::uint32_t ftBits,
+    bool subtract)
+  {
+    const EEFloatResult product = multiplyRaw(fsBits, ftBits);
+    const std::uint8_t productFlags = product.flags;
+    const bool productOverflowed =
+      (productFlags & FP_FLAG_OVERFLOW) != 0 ||
+      ((product.bits >> 23) & 0xff) == 0xff;
+    const bool accumulatorOverflowed =
+      ((accumulatorBits >> 23) & 0xff) == 0xff;
+    const bool overflowResultNegative =
+      ((product.bits & FP_SIGN_BIT) != 0) != subtract;
+
+    if (accumulatorOverflowed)
+    {
+      if (productOverflowed)
+      {
+        return {
+          maximumResult(overflowResultNegative).bits,
+          FP_FLAG_OVERFLOW,
+          static_cast<std::uint8_t>(
+            productFlags | FP_FLAG_OVERFLOW)
+        };
+      }
+      return {
+        accumulatorBits,
+        FP_FLAG_OVERFLOW,
+        static_cast<std::uint8_t>(
+          productFlags | FP_FLAG_OVERFLOW)
+      };
+    }
+    if (productOverflowed)
+    {
+      return {
+        maximumResult(overflowResultNegative).bits,
+        FP_FLAG_OVERFLOW,
+        static_cast<std::uint8_t>(
+          productFlags | FP_FLAG_OVERFLOW)
+      };
+    }
+    if ((product.bits & ~FP_SIGN_BIT) == 0)
+    {
+      return {
+        accumulatorBits,
+        0,
+        productFlags
+      };
+    }
+
+    const std::uint32_t productTerm =
+      subtract ? product.bits ^ FP_SIGN_BIT : product.bits;
+    const EEFloatResult result =
+      addRaw(accumulatorBits, productTerm);
+    const bool resultOverflowed =
+      (result.flags & FP_FLAG_OVERFLOW) != 0 ||
+      ((result.bits >> 23) & 0xff) == 0xff;
+    if (resultOverflowed)
+    {
+      return {
+        maximumResult((result.bits & FP_SIGN_BIT) != 0).bits,
+        FP_FLAG_OVERFLOW,
+        static_cast<std::uint8_t>(
+          productFlags | result.flags | FP_FLAG_OVERFLOW)
+      };
+    }
+    return {
+      result.bits,
+      result.flags,
+      static_cast<std::uint8_t>(
+        productFlags | result.flags)
+    };
+  }
+
   VUFloatResult divideRaw(
     std::uint32_t numeratorBits,
     std::uint32_t denominatorBits)
@@ -548,70 +624,23 @@ EECompoundFloatResult maddEEFloatRaw(
   std::uint32_t fsBits,
   std::uint32_t ftBits)
 {
-  const EEFloatResult product = multiplyRaw(fsBits, ftBits);
-  const std::uint8_t productFlags = product.flags;
-  const bool productOverflowed =
-    (productFlags & FP_FLAG_OVERFLOW) != 0 ||
-    ((product.bits >> 23) & 0xff) == 0xff;
-  const bool accumulatorOverflowed =
-    ((accumulatorBits >> 23) & 0xff) == 0xff;
+  return multiplyAccumulateRaw(
+    accumulatorBits,
+    fsBits,
+    ftBits,
+    false);
+}
 
-  if (accumulatorOverflowed)
-  {
-    if (productOverflowed)
-    {
-      return {
-        maximumResult((product.bits & FP_SIGN_BIT) != 0).bits,
-        FP_FLAG_OVERFLOW,
-        static_cast<std::uint8_t>(
-          productFlags | FP_FLAG_OVERFLOW)
-      };
-    }
-    return {
-      accumulatorBits,
-      FP_FLAG_OVERFLOW,
-      static_cast<std::uint8_t>(
-        productFlags | FP_FLAG_OVERFLOW)
-    };
-  }
-  if (productOverflowed)
-  {
-    return {
-      maximumResult((product.bits & FP_SIGN_BIT) != 0).bits,
-      FP_FLAG_OVERFLOW,
-      static_cast<std::uint8_t>(
-        productFlags | FP_FLAG_OVERFLOW)
-    };
-  }
-  if ((product.bits & ~FP_SIGN_BIT) == 0)
-  {
-    return {
-      accumulatorBits,
-      0,
-      productFlags
-    };
-  }
-
-  const EEFloatResult result =
-    addRaw(accumulatorBits, product.bits);
-  const bool resultOverflowed =
-    (result.flags & FP_FLAG_OVERFLOW) != 0 ||
-    ((result.bits >> 23) & 0xff) == 0xff;
-  if (resultOverflowed)
-  {
-    return {
-      maximumResult((result.bits & FP_SIGN_BIT) != 0).bits,
-      FP_FLAG_OVERFLOW,
-      static_cast<std::uint8_t>(
-        productFlags | result.flags | FP_FLAG_OVERFLOW)
-    };
-  }
-  return {
-    result.bits,
-    result.flags,
-    static_cast<std::uint8_t>(
-      productFlags | result.flags)
-  };
+EECompoundFloatResult msubEEFloatRaw(
+  std::uint32_t accumulatorBits,
+  std::uint32_t fsBits,
+  std::uint32_t ftBits)
+{
+  return multiplyAccumulateRaw(
+    accumulatorBits,
+    fsBits,
+    ftBits,
+    true);
 }
 
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)

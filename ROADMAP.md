@@ -673,7 +673,7 @@ than delegating architectural results to host floating-point defaults.
 - [x] Implement `MUL.S` and `MULA.S`
 - [x] Implement `MADD.S` and `MADDA.S`, including their distinct FPR and ACC
       destinations
-- [ ] Implement `MSUB.S` and `MSUBA.S`, including their distinct FPR and ACC
+- [x] Implement `MSUB.S` and `MSUBA.S`, including their distinct FPR and ACC
       destinations
 - [ ] Preserve the documented intermediate product, ACC, saturation, and
       underflow rules rather than reducing multiply-add to host arithmetic
