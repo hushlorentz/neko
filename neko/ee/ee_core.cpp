@@ -624,6 +624,7 @@ bool EECore::executeInstruction(
     case EEOperation::MinimumSingleCOP1:
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
+    case EEOperation::MultiplySingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -645,6 +646,9 @@ bool EECore::executeInstruction(
         case EEOperation::AddSingleCOP1:
           result = addFPRaw(fsBits, ftBits);
           break;
+        case EEOperation::MultiplySingleCOP1:
+          result = mulFPRaw(fsBits, ftBits);
+          break;
         default:
           result = subFPRaw(fsBits, ftBits);
           break;
@@ -658,6 +662,7 @@ bool EECore::executeInstruction(
     }
     case EEOperation::AddSingleToAccumulatorCOP1:
     case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -667,11 +672,19 @@ bool EECore::executeInstruction(
         floatingPointRegisters[destination];
       const std::uint32_t ftBits =
         floatingPointRegisters[instruction.targetRegister];
-      const EEFloatResult result =
-        instruction.operation ==
-          EEOperation::AddSingleToAccumulatorCOP1
-          ? addFPRaw(fsBits, ftBits)
-          : subFPRaw(fsBits, ftBits);
+      EEFloatResult result;
+      switch (instruction.operation)
+      {
+        case EEOperation::AddSingleToAccumulatorCOP1:
+          result = addFPRaw(fsBits, ftBits);
+          break;
+        case EEOperation::MultiplySingleToAccumulatorCOP1:
+          result = mulFPRaw(fsBits, ftBits);
+          break;
+        default:
+          result = subFPRaw(fsBits, ftBits);
+          break;
+      }
       floatingPointAccumulatorRegister = result.bits;
       updateCOP1ArithmeticFlags(
         FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
@@ -2396,6 +2409,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::MinimumSingleCOP1:
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
+    case EEOperation::MultiplySingleCOP1:
       if (instruction.destinationRegister == registerIndex ||
           instruction.targetRegister == registerIndex)
       {
@@ -2406,6 +2420,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
         FPRDependency::None;
     case EEOperation::AddSingleToAccumulatorCOP1:
     case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
       return
         instruction.destinationRegister == registerIndex ||
         instruction.targetRegister == registerIndex

@@ -784,6 +784,10 @@ namespace
           instruction->operation =
             EEOperation::SubtractSingleCOP1;
           return;
+        case 0x02:
+          instruction->operation =
+            EEOperation::MultiplySingleCOP1;
+          return;
         case 0x05:
           if (instruction->targetRegister != 0)
           {
@@ -823,6 +827,14 @@ namespace
           }
           instruction->operation =
             EEOperation::SubtractSingleToAccumulatorCOP1;
+          return;
+        case 0x1a:
+          if (instruction->shiftAmount != 0)
+          {
+            reject(DecodeKind::Reserved);
+          }
+          instruction->operation =
+            EEOperation::MultiplySingleToAccumulatorCOP1;
           return;
         case 0x24:
           if (instruction->targetRegister != 0)
