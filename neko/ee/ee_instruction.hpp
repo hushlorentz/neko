@@ -141,7 +141,9 @@ enum class EEOperation : std::uint8_t
   ConvertWordToSingleCOP1,
   ConvertSingleToWordCOP1,
   AddSingleCOP1,
-  SubtractSingleCOP1
+  SubtractSingleCOP1,
+  AddSingleToAccumulatorCOP1,
+  SubtractSingleToAccumulatorCOP1
 };
 
 struct EEInstruction

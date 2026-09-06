@@ -662,11 +662,11 @@ than delegating architectural results to host floating-point defaults.
 
 - [x] Implement `ADD.S` and `SUB.S` with documented signed-zero, overflow,
       underflow, and flag behavior
-- [ ] Implement `ADDA.S` and `SUBA.S` with ACC as the architectural
+- [x] Implement `ADDA.S` and `SUBA.S` with ACC as the architectural
       destination
-- [ ] Model FPR and ACC RAW/WAW hazards and documented result forwarding
-- [ ] Add dependent, independent, ACC-chained, exceptional, and save-resume
-      timing tests
+- [x] Lock the scalar scheduler's back-to-back FPR RAW forwarding, FPR and ACC
+      WAW ordering, and independence between FPR and ACC destinations
+- [ ] Add dependent, independent, exceptional, and save-resume timing tests
 
 ### Multiplication and Multiply-Accumulate
 
@@ -677,8 +677,10 @@ than delegating architectural results to host floating-point defaults.
       destinations
 - [ ] Preserve the documented intermediate product, ACC, saturation, and
       underflow rules rather than reducing multiply-add to host arithmetic
-- [ ] Model multiply and ACC pipeline occupancy, dependencies, forwarding, and
-      issue restrictions
+- [ ] Model multiply pipeline occupancy, FPR and ACC dependencies, ACC RAW
+      forwarding from accumulator and compound writes, and issue restrictions
+- [ ] Add dependent, independent, ACC-chained, exceptional, and save-resume
+      timing tests
 - [ ] Add raw-bit compound-operation vectors that distinguish intermediate
       precision and flag behavior from separate host operations
 
@@ -856,6 +858,9 @@ that need more detail than the existing structured GIF/GS traces:
 - Keep distant milestones intentionally high-level. Before starting a block,
   review its items and expand the work into additional milestones, blocks, or
   items when the newly available evidence requires it.
+- Place each item where its prerequisites are implemented. If work depends on a
+  later feature, move the item into that later block instead of leaving a
+  placeholder that says to complete it when the prerequisite arrives.
 - Check off work only after tests demonstrate the expected behavior.
 - After completing each roadmap subsection or substantial implementation
   block, run `cmake -P cmake/Sanitize.cmake` before moving to the next block.

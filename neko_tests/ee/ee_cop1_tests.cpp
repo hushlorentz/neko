@@ -671,6 +671,27 @@ TEST_CASE("EE COP1 add and subtract instructions decode canonically")
     EEOperation::SubtractSingleCOP1);
 }
 
+TEST_CASE(
+  "EE COP1 accumulator add and subtract decode only with fd zero")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x18, 2, 0, 3)).operation ==
+    EEOperation::AddSingleToAccumulatorCOP1);
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x19, 2, 0, 3)).operation ==
+    EEOperation::SubtractSingleToAccumulatorCOP1);
+
+  for (const std::uint8_t function : {0x18, 0x19})
+  {
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(
+        cop1SingleInstruction(function, 2, 1, 3)),
+      "Reserved EE instruction encoding.");
+  }
+}
+
 TEST_CASE("EE COP1 add and subtract produce exact raw results")
 {
   struct ArithmeticVector
@@ -718,6 +739,56 @@ TEST_CASE("EE COP1 add and subtract produce exact raw results")
   }
 }
 
+TEST_CASE("EE COP1 accumulator add and subtract write only ACC")
+{
+  struct ArithmeticVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const ArithmeticVector vectors[] = {
+    {0x18, UINT32_C(0x3fc00000), UINT32_C(0x40100000),
+     UINT32_C(0x40700000)},
+    {0x19, UINT32_C(0x40b00000), UINT32_C(0x3fc00000),
+     UINT32_C(0x40800000)},
+    {0x18, 0, FP_SIGN_BIT, 0},
+    {0x18, FP_SIGN_BIT, FP_SIGN_BIT, FP_SIGN_BIT},
+    {0x19, FP_SIGN_BIT, 0, FP_SIGN_BIT},
+    {0x19, FP_SIGN_BIT, FP_SIGN_BIT, 0},
+    {0x18, UINT32_C(0x7f800000), UINT32_C(0x7f800000),
+     UINT32_C(0x7fffffff)},
+    {0x19, UINT32_C(0x80800001), UINT32_C(0x80800000),
+     FP_SIGN_BIT}
+  };
+
+  for (const ArithmeticVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(0, UINT32_C(0x11111111));
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    core.setFloatingPointAccumulator(UINT32_C(0x22222222));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        0,
+        3));
+
+    REQUIRE(core.floatingPointRegister(0) == UINT32_C(0x11111111));
+    REQUIRE(core.floatingPointRegister(2) == vector.fs);
+    REQUIRE(core.floatingPointRegister(3) == vector.ft);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      vector.expected);
+  }
+}
+
 TEST_CASE("EE COP1 add and subtract support in-place writes")
 {
   SECTION("The destination may alias fs")
@@ -750,6 +821,70 @@ TEST_CASE("EE COP1 add and subtract support in-place writes")
     REQUIRE(
       core.floatingPointRegister(3) ==
       UINT32_C(0x40800000));
+  }
+}
+
+TEST_CASE(
+  "EE COP1 accumulator add and subtract update overflow and underflow flags")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+
+  SECTION("An ordinary result clears current O and U only")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x18, 2, 0, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_MASK));
+  }
+
+  SECTION("Overflow sets current and sticky O")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x7f800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x18, 2, 0, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("Underflow sets current and sticky U")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x00800001));
+    core.setFloatingPointRegister(3, UINT32_C(0x00800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x19, 2, 0, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_UNDERFLOW));
   }
 }
 
@@ -1365,6 +1500,133 @@ TEST_CASE(
   }
 }
 
+TEST_CASE(
+  "EE COP1 add and subtract forward back-to-back FPR dependencies")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x01, 4, 5, 2));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x40000000));
+}
+
+TEST_CASE(
+  "EE COP1 add and subtract preserve FPR write-after-write order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x01, 6, 4, 2));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40800000));
+}
+
+TEST_CASE(
+  "EE COP1 accumulator writes preserve write-after-write order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x18, 2, 0, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x19, 6, 0, 2));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x40400000));
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x40800000));
+}
+
+TEST_CASE(
+  "EE COP1 FPR and accumulator destinations remain independent")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointAccumulator(UINT32_C(0x41100000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x19, 3, 0, 2));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x41100000));
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x3f800000));
+}
+
 TEST_CASE("EE COP1 control transfers reject reserved FCRs")
 {
   for (std::uint8_t controlRegister = 1;
@@ -1713,6 +1975,10 @@ TEST_CASE(
     {cop1SingleInstruction(0x01, 2, 4, 3), 2},
     {cop1SingleInstruction(0x01, 2, 4, 3), 3},
     {cop1SingleInstruction(0x01, 2, 4, 3), 4},
+    {cop1SingleInstruction(0x18, 2, 0, 3), 2},
+    {cop1SingleInstruction(0x18, 2, 0, 3), 3},
+    {cop1SingleInstruction(0x19, 2, 0, 3), 2},
+    {cop1SingleInstruction(0x19, 2, 0, 3), 3},
     {cop1WordInstruction(0x20, 2, 4), 2},
     {cop1WordInstruction(0x20, 2, 4), 4},
     {cop1SingleInstruction(0x24, 2, 4), 2},
@@ -2008,6 +2274,8 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1SingleInstruction(0x07, 3, 4),
     cop1SingleInstruction(0x00, 3, 4, 5),
     cop1SingleInstruction(0x01, 3, 4, 5),
+    cop1SingleInstruction(0x18, 3, 0, 5),
+    cop1SingleInstruction(0x19, 3, 0, 5),
     cop1SingleInstruction(0x28, 3, 4, 5),
     cop1SingleInstruction(0x29, 3, 4, 5),
     cop1WordInstruction(0x20, 3, 4),

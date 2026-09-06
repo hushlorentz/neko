@@ -656,6 +656,28 @@ bool EECore::executeInstruction(
         result.flags);
       return true;
     }
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const std::uint32_t fsBits =
+        floatingPointRegisters[destination];
+      const std::uint32_t ftBits =
+        floatingPointRegisters[instruction.targetRegister];
+      const EEFloatResult result =
+        instruction.operation ==
+          EEOperation::AddSingleToAccumulatorCOP1
+          ? addFPRaw(fsBits, ftBits)
+          : subFPRaw(fsBits, ftBits);
+      floatingPointAccumulatorRegister = result.bits;
+      updateCOP1ArithmeticFlags(
+        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+        result.flags);
+      return true;
+    }
     case EEOperation::ConvertWordToSingleCOP1:
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -2382,6 +2404,13 @@ EECore::FPRDependency EECore::instructionFPRDependency(
       return instruction.shiftAmount == registerIndex ?
         FPRDependency::Write :
         FPRDependency::None;
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+      return
+        instruction.destinationRegister == registerIndex ||
+        instruction.targetRegister == registerIndex
+          ? FPRDependency::Read
+          : FPRDependency::None;
     default:
       return FPRDependency::None;
   }

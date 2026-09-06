@@ -808,6 +808,22 @@ namespace
           instruction->operation =
             EEOperation::NegateSingleCOP1;
           return;
+        case 0x18:
+          if (instruction->shiftAmount != 0)
+          {
+            reject(DecodeKind::Reserved);
+          }
+          instruction->operation =
+            EEOperation::AddSingleToAccumulatorCOP1;
+          return;
+        case 0x19:
+          if (instruction->shiftAmount != 0)
+          {
+            reject(DecodeKind::Reserved);
+          }
+          instruction->operation =
+            EEOperation::SubtractSingleToAccumulatorCOP1;
+          return;
         case 0x24:
           if (instruction->targetRegister != 0)
           {
