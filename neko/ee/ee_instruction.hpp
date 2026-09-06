@@ -143,9 +143,11 @@ enum class EEOperation : std::uint8_t
   AddSingleCOP1,
   SubtractSingleCOP1,
   MultiplySingleCOP1,
+  MultiplyAddSingleCOP1,
   AddSingleToAccumulatorCOP1,
   SubtractSingleToAccumulatorCOP1,
-  MultiplySingleToAccumulatorCOP1
+  MultiplySingleToAccumulatorCOP1,
+  MultiplyAddSingleToAccumulatorCOP1
 };
 
 struct EEInstruction

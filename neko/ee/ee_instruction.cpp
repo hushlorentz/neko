@@ -836,6 +836,18 @@ namespace
           instruction->operation =
             EEOperation::MultiplySingleToAccumulatorCOP1;
           return;
+        case 0x1c:
+          instruction->operation =
+            EEOperation::MultiplyAddSingleCOP1;
+          return;
+        case 0x1e:
+          if (instruction->shiftAmount != 0)
+          {
+            reject(DecodeKind::Reserved);
+          }
+          instruction->operation =
+            EEOperation::MultiplyAddSingleToAccumulatorCOP1;
+          return;
         case 0x24:
           if (instruction->targetRegister != 0)
           {

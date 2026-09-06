@@ -671,7 +671,7 @@ than delegating architectural results to host floating-point defaults.
 ### Multiplication and Multiply-Accumulate
 
 - [x] Implement `MUL.S` and `MULA.S`
-- [ ] Implement `MADD.S` and `MADDA.S`, including their distinct FPR and ACC
+- [x] Implement `MADD.S` and `MADDA.S`, including their distinct FPR and ACC
       destinations
 - [ ] Implement `MSUB.S` and `MSUBA.S`, including their distinct FPR and ACC
       destinations

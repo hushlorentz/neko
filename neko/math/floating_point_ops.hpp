@@ -22,6 +22,13 @@ struct EEFloatResult
   std::uint8_t flags;
 };
 
+struct EECompoundFloatResult
+{
+  std::uint32_t bits;
+  std::uint8_t flags;
+  std::uint8_t stickyFlags;
+};
+
 using VUFloatResult = EEFloatResult;
 
 enum class EEFloatClassification : std::uint8_t
@@ -62,6 +69,10 @@ EEFloatResult normalizeEEFloat(
   std::int16_t leastSignificantBitExponent);
 VUFloatResult addFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
+EECompoundFloatResult maddEEFloatRaw(
+  std::uint32_t accumulatorBits,
+  std::uint32_t fsBits,
+  std::uint32_t ftBits);
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult maxFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);
 VUFloatResult minFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits);

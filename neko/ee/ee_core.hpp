@@ -224,7 +224,8 @@ class EECore : public ClockedComponent
       std::uint32_t value);
     void updateCOP1ArithmeticFlags(
       std::uint8_t affectedFlags,
-      std::uint8_t raisedFlags);
+      std::uint8_t raisedFlags,
+      std::uint8_t raisedStickyFlags = 0);
 
     std::uint32_t programCounter() const;
     void setProgramCounter(std::uint32_t value);

@@ -691,6 +691,34 @@ bool EECore::executeInstruction(
         result.flags);
       return true;
     }
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const EECompoundFloatResult result =
+        maddEEFloatRaw(
+          floatingPointAccumulatorRegister,
+          floatingPointRegisters[destination],
+          floatingPointRegisters[instruction.targetRegister]);
+      if (instruction.operation ==
+          EEOperation::MultiplyAddSingleCOP1)
+      {
+        floatingPointRegisters[instruction.shiftAmount] =
+          result.bits;
+      }
+      else
+      {
+        floatingPointAccumulatorRegister = result.bits;
+      }
+      updateCOP1ArithmeticFlags(
+        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+        result.flags,
+        result.stickyFlags);
+      return true;
+    }
     case EEOperation::ConvertWordToSingleCOP1:
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -2410,6 +2438,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplyAddSingleCOP1:
       if (instruction.destinationRegister == registerIndex ||
           instruction.targetRegister == registerIndex)
       {
@@ -2421,6 +2450,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::AddSingleToAccumulatorCOP1:
     case EEOperation::SubtractSingleToAccumulatorCOP1:
     case EEOperation::MultiplySingleToAccumulatorCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
       return
         instruction.destinationRegister == registerIndex ||
         instruction.targetRegister == registerIndex
@@ -2909,7 +2939,8 @@ void EECore::setCOP1ControlRegister(
 
 void EECore::updateCOP1ArithmeticFlags(
   std::uint8_t affectedFlags,
-  std::uint8_t raisedFlags)
+  std::uint8_t raisedFlags,
+  std::uint8_t raisedStickyFlags)
 {
   constexpr std::uint8_t SUPPORTED_FLAGS =
     FP_FLAG_I_BIT |
@@ -2917,7 +2948,8 @@ void EECore::updateCOP1ArithmeticFlags(
     FP_FLAG_OVERFLOW |
     FP_FLAG_UNDERFLOW;
   if ((affectedFlags & ~SUPPORTED_FLAGS) != 0 ||
-      (raisedFlags & ~affectedFlags) != 0)
+      (raisedFlags & ~affectedFlags) != 0 ||
+      (raisedStickyFlags & ~affectedFlags) != 0)
   {
     throw std::invalid_argument(
       "Invalid EE COP1 arithmetic flag update.");
@@ -2961,9 +2993,12 @@ void EECore::updateCOP1ArithmeticFlags(
     cop1StatusRegister &= ~mapping.causeFlag;
     if ((raisedFlags & mapping.resultFlag) != 0)
     {
-      cop1StatusRegister |=
-        mapping.causeFlag |
-        mapping.stickyFlag;
+      cop1StatusRegister |= mapping.causeFlag;
+    }
+    if (((raisedFlags | raisedStickyFlags) &
+         mapping.resultFlag) != 0)
+    {
+      cop1StatusRegister |= mapping.stickyFlag;
     }
   }
 }

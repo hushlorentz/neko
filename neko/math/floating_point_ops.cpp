@@ -543,6 +543,77 @@ VUFloatResult mulFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
   return multiplyRaw(d1Bits, d2Bits);
 }
 
+EECompoundFloatResult maddEEFloatRaw(
+  std::uint32_t accumulatorBits,
+  std::uint32_t fsBits,
+  std::uint32_t ftBits)
+{
+  const EEFloatResult product = multiplyRaw(fsBits, ftBits);
+  const std::uint8_t productFlags = product.flags;
+  const bool productOverflowed =
+    (productFlags & FP_FLAG_OVERFLOW) != 0 ||
+    ((product.bits >> 23) & 0xff) == 0xff;
+  const bool accumulatorOverflowed =
+    ((accumulatorBits >> 23) & 0xff) == 0xff;
+
+  if (accumulatorOverflowed)
+  {
+    if (productOverflowed)
+    {
+      return {
+        maximumResult((product.bits & FP_SIGN_BIT) != 0).bits,
+        FP_FLAG_OVERFLOW,
+        static_cast<std::uint8_t>(
+          productFlags | FP_FLAG_OVERFLOW)
+      };
+    }
+    return {
+      accumulatorBits,
+      FP_FLAG_OVERFLOW,
+      static_cast<std::uint8_t>(
+        productFlags | FP_FLAG_OVERFLOW)
+    };
+  }
+  if (productOverflowed)
+  {
+    return {
+      maximumResult((product.bits & FP_SIGN_BIT) != 0).bits,
+      FP_FLAG_OVERFLOW,
+      static_cast<std::uint8_t>(
+        productFlags | FP_FLAG_OVERFLOW)
+    };
+  }
+  if ((product.bits & ~FP_SIGN_BIT) == 0)
+  {
+    return {
+      accumulatorBits,
+      0,
+      productFlags
+    };
+  }
+
+  const EEFloatResult result =
+    addRaw(accumulatorBits, product.bits);
+  const bool resultOverflowed =
+    (result.flags & FP_FLAG_OVERFLOW) != 0 ||
+    ((result.bits >> 23) & 0xff) == 0xff;
+  if (resultOverflowed)
+  {
+    return {
+      maximumResult((result.bits & FP_SIGN_BIT) != 0).bits,
+      FP_FLAG_OVERFLOW,
+      static_cast<std::uint8_t>(
+        productFlags | result.flags | FP_FLAG_OVERFLOW)
+    };
+  }
+  return {
+    result.bits,
+    result.flags,
+    static_cast<std::uint8_t>(
+      productFlags | result.flags)
+  };
+}
+
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 {
   return divideRaw(d1Bits, d2Bits);
