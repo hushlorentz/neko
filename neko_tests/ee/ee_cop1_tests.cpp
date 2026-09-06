@@ -1254,6 +1254,97 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
   }
 }
 
+TEST_CASE("EE COP1 compound operations preserve raw intermediate rules")
+{
+  SECTION("MADD truncates the product before adding ACC")
+  {
+    const EEFloatResult product =
+      mulFPRaw(UINT32_C(0x3e000001), UINT32_C(0x3e000001));
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0xbc800001),
+        UINT32_C(0x3e000001),
+        UINT32_C(0x3e000001));
+
+    REQUIRE(product.bits == UINT32_C(0x3c800002));
+    REQUIRE(product.flags == 0);
+    REQUIRE(result.bits == UINT32_C(0x31000000));
+    REQUIRE(result.flags == 0);
+    REQUIRE(result.stickyFlags == 0);
+  }
+
+  SECTION("MSUB truncates the product before subtracting from ACC")
+  {
+    const EEFloatResult product =
+      mulFPRaw(UINT32_C(0x3e000001), UINT32_C(0x3e000001));
+    const EECompoundFloatResult result =
+      msubEEFloatRaw(
+        UINT32_C(0x3c800001),
+        UINT32_C(0x3e000001),
+        UINT32_C(0x3e000001));
+
+    REQUIRE(product.bits == UINT32_C(0x3c800002));
+    REQUIRE(product.flags == 0);
+    REQUIRE(result.bits == UINT32_C(0xb1000000));
+    REQUIRE(result.flags == 0);
+    REQUIRE(result.stickyFlags == 0);
+  }
+
+  SECTION("An exact zero product preserves ACC without underflow")
+  {
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0xc0400000),
+        FP_SIGN_BIT,
+        UINT32_C(0x7f000000));
+
+    REQUIRE(result.bits == UINT32_C(0xc0400000));
+    REQUIRE(result.flags == 0);
+    REQUIRE(result.stickyFlags == 0);
+  }
+
+  SECTION("ACC overflow and product underflow preserve both sticky causes")
+  {
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0xffc00000),
+        UINT32_C(0x80800000),
+        UINT32_C(0x3f000000));
+
+    REQUIRE(result.bits == UINT32_C(0xffc00000));
+    REQUIRE(result.flags == FP_FLAG_OVERFLOW);
+    REQUIRE(
+      result.stickyFlags ==
+      (FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW));
+  }
+
+  SECTION("MADD product overflow takes the product sign over ACC")
+  {
+    const EECompoundFloatResult result =
+      maddEEFloatRaw(
+        UINT32_C(0xffffffff),
+        UINT32_C(0x7f800000),
+        UINT32_C(0x40000000));
+
+    REQUIRE(result.bits == UINT32_C(0x7fffffff));
+    REQUIRE(result.flags == FP_FLAG_OVERFLOW);
+    REQUIRE(result.stickyFlags == FP_FLAG_OVERFLOW);
+  }
+
+  SECTION("MSUB product overflow inverts the product sign")
+  {
+    const EECompoundFloatResult result =
+      msubEEFloatRaw(
+        UINT32_C(0x7fffffff),
+        UINT32_C(0xff800000),
+        UINT32_C(0x40000000));
+
+    REQUIRE(result.bits == UINT32_C(0x7fffffff));
+    REQUIRE(result.flags == FP_FLAG_OVERFLOW);
+    REQUIRE(result.stickyFlags == FP_FLAG_OVERFLOW);
+  }
+}
+
 TEST_CASE("EE COP1 add and subtract produce exact raw results")
 {
   struct ArithmeticVector

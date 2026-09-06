@@ -675,7 +675,7 @@ than delegating architectural results to host floating-point defaults.
       destinations
 - [x] Implement `MSUB.S` and `MSUBA.S`, including their distinct FPR and ACC
       destinations
-- [ ] Preserve the documented intermediate product, ACC, saturation, and
+- [x] Preserve the documented intermediate product, ACC, saturation, and
       underflow rules rather than reducing multiply-add to host arithmetic
 - [ ] Model multiply pipeline occupancy, FPR and ACC dependencies, ACC RAW
       forwarding from accumulator and compound writes, and issue restrictions
