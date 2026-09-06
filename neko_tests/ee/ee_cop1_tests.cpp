@@ -1627,6 +1627,201 @@ TEST_CASE(
     UINT32_C(0x3f800000));
 }
 
+TEST_CASE(
+  "EE COP1 independent addition and subtraction retire every cycle")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
+  core.setFloatingPointRegister(7, UINT32_C(0x3f000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x01, 6, 5, 7));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 1);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 2);
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x40900000));
+}
+
+TEST_CASE(
+  "EE COP1 exceptional results are visible at the retirement boundary")
+{
+  SECTION("An overflowed FPR result is available to the next move")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x7f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x06, 4, 5));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("A younger ACC result clears the current flag but keeps history")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x00800001));
+    core.setFloatingPointRegister(3, UINT32_C(0x00800000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(7, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x19, 2, 0, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x18, 6, 0, 7));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.floatingPointAccumulator() == 0);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_UNDERFLOW));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40400000));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::STICKY_UNDERFLOW));
+  }
+}
+
+TEST_CASE(
+  "EE COP1 addition timing survives host halt and save-state restore")
+{
+  SECTION("A restored dependent FPR instruction sees the older result")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x3f800000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40000000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    original.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x01, 4, 5, 2));
+    originalCore.startExecution(0);
+    original.clockMasterCycle();
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.startExecution(4);
+    restored.eeCore().startExecution(4);
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(
+      originalCore.floatingPointRegister(5) ==
+      UINT32_C(0x40000000));
+    REQUIRE(
+      restored.eeCore().floatingPointRegister(5) ==
+      UINT32_C(0x40000000));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+  }
+
+  SECTION("Restored ACC writes preserve younger-write ordering")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x3f800000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40000000));
+    originalCore.setFloatingPointRegister(
+      6,
+      UINT32_C(0x40a00000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x18, 2, 0, 3));
+    original.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x19, 6, 0, 2));
+    originalCore.startExecution(0);
+    original.clockMasterCycle();
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.startExecution(4);
+    restored.eeCore().startExecution(4);
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(
+      originalCore.floatingPointAccumulator() ==
+      UINT32_C(0x40800000));
+    REQUIRE(
+      restored.eeCore().floatingPointAccumulator() ==
+      UINT32_C(0x40800000));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+  }
+}
+
 TEST_CASE("EE COP1 control transfers reject reserved FCRs")
 {
   for (std::uint8_t controlRegister = 1;

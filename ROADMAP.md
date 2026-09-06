@@ -666,7 +666,7 @@ than delegating architectural results to host floating-point defaults.
       destination
 - [x] Lock the scalar scheduler's back-to-back FPR RAW forwarding, FPR and ACC
       WAW ordering, and independence between FPR and ACC destinations
-- [ ] Add dependent, independent, exceptional, and save-resume timing tests
+- [x] Add dependent, independent, exceptional, and save-resume timing tests
 
 ### Multiplication and Multiply-Accumulate
 
