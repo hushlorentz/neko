@@ -679,7 +679,7 @@ than delegating architectural results to host floating-point defaults.
       underflow rules rather than reducing multiply-add to host arithmetic
 - [x] Model multiply pipeline occupancy, FPR and ACC dependencies, ACC RAW
       forwarding from accumulator and compound writes, and issue restrictions
-- [ ] Add dependent, independent, ACC-chained, exceptional, and save-resume
+- [x] Add dependent, independent, ACC-chained, exceptional, and save-resume
       timing tests
 - [ ] Add raw-bit compound-operation vectors that distinguish intermediate
       precision and flag behavior from separate host operations

@@ -2283,6 +2283,41 @@ TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
   }
 }
 
+TEST_CASE("EE COP1 independent multiply operations retire every cycle")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  core.setFloatingPointRegister(5, UINT32_C(0x40a00000));
+  core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x02, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x1c, 5, 7, 6));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 1);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40c00000));
+  REQUIRE(core.floatingPointRegister(7) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 2);
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(7) ==
+    UINT32_C(0x40600000));
+}
+
 TEST_CASE("EE COP1 operate resource interlocks a following move")
 {
   SECTION("A following MFC1 waits one cycle")
@@ -2619,6 +2654,136 @@ TEST_CASE(
       core.cop1ControlRegister(31) ==
       (EECOP1Control::STATUS_FIXED |
        EECOP1Control::STICKY_UNDERFLOW));
+  }
+}
+
+TEST_CASE("EE COP1 exceptional multiply timing preserves flag order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x40400000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x02, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x1c, 5, 7, 6));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_OVERFLOW |
+     EECOP1Control::STICKY_OVERFLOW));
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(7) ==
+    UINT32_C(0x40e00000));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_OVERFLOW));
+}
+
+TEST_CASE(
+  "EE COP1 multiply timing survives host halt and save-state restore")
+{
+  SECTION("A restored compound operation sees a multiplied FPR")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointAccumulator(
+      UINT32_C(0x3f800000));
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x40000000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40400000));
+    originalCore.setFloatingPointRegister(
+      5,
+      UINT32_C(0x3f000000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    original.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x1c, 4, 6, 5));
+    originalCore.startExecution(0);
+    original.clockMasterCycle();
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.startExecution(4);
+    restored.eeCore().startExecution(4);
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(
+      originalCore.floatingPointRegister(6) ==
+      UINT32_C(0x40800000));
+    REQUIRE(
+      restored.eeCore().floatingPointRegister(6) ==
+      UINT32_C(0x40800000));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+  }
+
+  SECTION("A restored compound operation sees a multiplied ACC")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x40000000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40400000));
+    originalCore.setFloatingPointRegister(
+      5,
+      UINT32_C(0x3f000000));
+    originalCore.setFloatingPointRegister(
+      6,
+      UINT32_C(0x40000000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x1a, 2, 0, 3));
+    original.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x1d, 5, 4, 6));
+    originalCore.startExecution(0);
+    original.clockMasterCycle();
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.startExecution(4);
+    restored.eeCore().startExecution(4);
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(
+      originalCore.floatingPointRegister(4) ==
+      UINT32_C(0x40a00000));
+    REQUIRE(
+      restored.eeCore().floatingPointRegister(4) ==
+      UINT32_C(0x40a00000));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
   }
 }
 
