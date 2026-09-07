@@ -665,6 +665,23 @@ bool EECore::executeInstruction(
         result.flags);
       return true;
     }
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const EEFloatResult result =
+        rsqrtEEFloatRaw(
+          floatingPointRegisters[destination],
+          floatingPointRegisters[instruction.targetRegister]);
+      floatingPointRegisters[instruction.shiftAmount] =
+        result.bits;
+      updateCOP1ArithmeticFlags(
+        FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+        result.flags);
+      return true;
+    }
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
     case EEOperation::AddSingleCOP1:
@@ -2577,6 +2594,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::DivideSingleCOP1:
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
     case EEOperation::MultiplyAddSingleCOP1:
     case EEOperation::MultiplySubtractSingleCOP1:
     case EEOperation::CompareFalseSingleCOP1:
@@ -2638,6 +2656,7 @@ bool EECore::isCOP1OperateOperation(EEOperation operation)
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::DivideSingleCOP1:
     case EEOperation::SquareRootSingleCOP1:
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
     case EEOperation::MultiplyAddSingleCOP1:
     case EEOperation::MultiplySubtractSingleCOP1:
     case EEOperation::AddSingleToAccumulatorCOP1:

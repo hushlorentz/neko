@@ -408,14 +408,14 @@ TEST_CASE("EE COP1 square root operations preserve signed-zero behavior")
   };
 
   const ReciprocalSquareRootVector vectors[] = {
-    {0, 0, UINT32_C(0x7fffffff), FP_FLAG_I_BIT},
-    {0, FP_SIGN_BIT, UINT32_C(0xffffffff), FP_FLAG_I_BIT},
-    {FP_SIGN_BIT, 0, UINT32_C(0xffffffff), FP_FLAG_I_BIT},
+    {0, 0, UINT32_C(0x7fffffff), FP_FLAG_D_BIT},
+    {0, FP_SIGN_BIT, UINT32_C(0xffffffff), FP_FLAG_D_BIT},
+    {FP_SIGN_BIT, 0, UINT32_C(0xffffffff), FP_FLAG_D_BIT},
     {
       FP_SIGN_BIT,
       FP_SIGN_BIT,
       UINT32_C(0x7fffffff),
-      FP_FLAG_I_BIT
+      FP_FLAG_D_BIT
     },
     {
       UINT32_C(0x3f800000),
@@ -718,6 +718,14 @@ TEST_CASE("EE COP1 square root decodes only with fs zero")
     decodeEEInstruction(
       cop1SingleInstruction(0x04, 2, 4, 3)),
     "Reserved EE instruction encoding.");
+}
+
+TEST_CASE("EE COP1 reciprocal square root decodes canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x16, 2, 4, 3)).operation ==
+    EEOperation::ReciprocalSquareRootSingleCOP1);
 }
 
 TEST_CASE("EE COP1 multiply-add instructions decode canonically")
@@ -1055,6 +1063,157 @@ TEST_CASE("EE COP1 square root updates only invalid and division flags")
        EECOP1Control::CAUSE_INVALID |
        EECOP1Control::STICKY_INVALID |
        EECOP1Control::STICKY_DIVISION_BY_ZERO));
+  }
+}
+
+TEST_CASE("EE COP1 reciprocal square root produces exact raw results")
+{
+  struct ArithmeticVector
+  {
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const ArithmeticVector vectors[] = {
+    {UINT32_C(0x40c00000), UINT32_C(0x40800000),
+     UINT32_C(0x40400000)},
+    {UINT32_C(0xc0c00000), UINT32_C(0x40800000),
+     UINT32_C(0xc0400000)},
+    {UINT32_C(0x40c00000), UINT32_C(0xc1100000),
+     UINT32_C(0x40000000)},
+    {UINT32_C(0x00000001), UINT32_C(0x3f800000), 0},
+    {UINT32_C(0x80000001), UINT32_C(0x3f800000),
+     FP_SIGN_BIT},
+    {UINT32_C(0x7fffffff), UINT32_C(0x00800000),
+     UINT32_C(0x7fffffff)}
+  };
+
+  for (const ArithmeticVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x16, 2, 4, 3));
+
+    REQUIRE(core.floatingPointRegister(2) == vector.fs);
+    REQUIRE(core.floatingPointRegister(3) == vector.ft);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 reciprocal square root supports in-place writes")
+{
+  SECTION("The destination may alias fs")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x16, 2, 2, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x40400000));
+  }
+
+  SECTION("The destination may alias ft")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x16, 2, 3, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x40400000));
+  }
+}
+
+TEST_CASE(
+  "EE COP1 reciprocal square root updates only invalid and division flags")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+
+  SECTION("An ordinary result clears current I and D only")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40800000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x16, 2, 4, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_MASK));
+  }
+
+  SECTION("A zero radicand raises division by zero even for zero over zero")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_INVALID |
+      EECOP1Control::STICKY_INVALID);
+    core.setFloatingPointRegister(2, 0);
+    core.setFloatingPointRegister(3, FP_SIGN_BIT);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x16, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xffffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_INVALID |
+       EECOP1Control::STICKY_DIVISION_BY_ZERO));
+  }
+
+  SECTION("A negative nonzero radicand raises invalid")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0xbf800000));
+    core.setFloatingPointRegister(3, UINT32_C(0xc1100000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x16, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xbeaaaaaa));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
   }
 }
 
@@ -4291,6 +4450,7 @@ TEST_CASE("EE COP1 instructions require Status CU1")
     cop1SingleInstruction(0x02, 3, 4, 5),
     cop1SingleInstruction(0x03, 3, 4, 5),
     cop1SingleInstruction(0x04, 0, 4, 5),
+    cop1SingleInstruction(0x16, 3, 4, 5),
     cop1SingleInstruction(0x1c, 3, 4, 5),
     cop1SingleInstruction(0x1d, 3, 4, 5),
     cop1SingleInstruction(0x18, 3, 0, 5),

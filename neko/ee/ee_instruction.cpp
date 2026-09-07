@@ -839,6 +839,10 @@ namespace
           instruction->operation =
             EEOperation::NegateSingleCOP1;
           return;
+        case 0x16:
+          instruction->operation =
+            EEOperation::ReciprocalSquareRootSingleCOP1;
+          return;
         case 0x18:
           if (instruction->shiftAmount != 0)
           {

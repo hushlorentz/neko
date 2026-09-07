@@ -724,13 +724,20 @@ zero and exponent-zero negative encodings preserve a negative-zero result
 without raising `I`. The instruction explicitly clears current `D` alongside
 updating `I`, while preserving current and sticky `O` and `U`.
 
+`RSQRT.S` treats a zero `ft` radicand as division by zero regardless of the
+numerator, so even `0/sqrt(0)` raises current/sticky `D` rather than `I`.
+Negative nonzero radicands use their absolute value and raise current/sticky
+`I`. Saturation and zero results use the sign of `fs/sqrt(ft)`, including the
+sign of a zero radicand. Like `DIV.S`, exponent overflow and underflow change
+the result without changing `O` or `U`.
+
 - [x] Exhaustively audit the local manuals and toolchain documentation for
       numeric timing and branch-adjacent pipeline restrictions
 - [x] Implement `DIV.S`, including signed saturation for division by zero and
       distinct `0/0` invalid-operation behavior
 - [x] Implement `SQRT.S`, including negative-input absolute-value results and
       signed-zero preservation
-- [ ] Implement `RSQRT.S`, including numerator sign, negative radicands,
+- [x] Implement `RSQRT.S`, including numerator sign, negative radicands,
       division by zero, overflow, and underflow
 - [ ] Isolate the provisional latency and initiation-interval values in a
       replaceable timing policy

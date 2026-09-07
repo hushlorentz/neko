@@ -704,6 +704,18 @@ EEFloatResult rsqrtEEFloatRaw(
   std::uint32_t numeratorBits,
   std::uint32_t radicandBits)
 {
+  const DecodedOperand numerator = decodeOperand(numeratorBits);
+  const DecodedOperand radicand = decodeOperand(radicandBits);
+  if (radicand.zero)
+  {
+    const bool negative =
+      numerator.negative != radicand.negative;
+    return {
+      (negative ? FP_SIGN_BIT : 0) | UINT32_C(0x7fffffff),
+      FP_FLAG_D_BIT
+    };
+  }
+
   const EEFloatResult root =
     squareRootRaw(radicandBits, true);
   EEFloatResult result = divideRaw(numeratorBits, root.bits);
