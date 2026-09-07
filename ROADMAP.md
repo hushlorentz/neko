@@ -697,16 +697,37 @@ than delegating architectural results to host floating-point defaults.
 
 ### Division and Square Root
 
+The local SCEI corpus defines C1 stage routing, `1S` result availability, `2S`
+architectural writeback, and issue-category hazards, but does not publish
+numeric latency or initiation intervals for these three instructions. Use an
+isolated provisional policy of `8/7` cycles for `DIV.S` and `SQRT.S`, and
+`14/13` cycles for `RSQRT.S` (latency/initiation interval), pending targeted
+hardware measurement. Do not present these values as documented EE behavior.
+
+The GNUPro EE Tools User's Guide also documents a separate hardware pipeline
+bug: `DIV.S`, `SQRT.S`, and `RSQRT.S` must not be placed in a branch delay
+slot, within two instructions after a branch delay slot, or within two
+instructions after a branch target. The failure effect is undocumented, so
+detect and diagnose these placements without inventing a stall, exception, or
+corrupted result.
+
+- [x] Exhaustively audit the local manuals and toolchain documentation for
+      numeric timing and branch-adjacent pipeline restrictions
 - [ ] Implement `DIV.S`, including signed saturation for division by zero and
       distinct `0/0` invalid-operation behavior
 - [ ] Implement `SQRT.S`, including negative-input absolute-value results and
       signed-zero preservation
 - [ ] Implement `RSQRT.S`, including numerator sign, negative radicands,
       division by zero, overflow, and underflow
-- [ ] Model documented multicycle execution, structural occupancy, dependency
-      interlocks, and completion visibility without guessing unresolved timing
+- [ ] Isolate the provisional latency and initiation-interval values in a
+      replaceable timing policy
+- [ ] Model pending multicycle execution, structural occupancy, dependency
+      interlocks, and documented `1S`/`2S` completion visibility
+- [ ] Track branch-delay and branch-target proximity and emit a deterministic
+      diagnostic for the documented GNUPro pipeline-bug regions
 - [ ] Add focused raw-bit, flag, overlap, drain, exception-entry, and
-      save-resume tests
+      save-resume tests, including legal and hazardous branch-adjacent
+      placements
 
 ### Pipeline Timing and System Integration
 
