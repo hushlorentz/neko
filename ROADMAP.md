@@ -711,9 +711,16 @@ instructions after a branch target. The failure effect is undocumented, so
 detect and diagnose these placements without inventing a stall, exception, or
 corrupted result.
 
+`DIV.S` uses the quotient sign for zero and saturation results. A zero
+denominator produces signed maximum; `0/0` raises only current/sticky `I`,
+while nonzero-over-zero raises only current/sticky `D`. Its instruction
+definition names only `I` and `D` as affected flags, so ordinary division
+clears current `I` and `D` while preserving current `O` and `U`; exponent
+overflow and underflow still saturate or flush without changing `O` or `U`.
+
 - [x] Exhaustively audit the local manuals and toolchain documentation for
       numeric timing and branch-adjacent pipeline restrictions
-- [ ] Implement `DIV.S`, including signed saturation for division by zero and
+- [x] Implement `DIV.S`, including signed saturation for division by zero and
       distinct `0/0` invalid-operation behavior
 - [ ] Implement `SQRT.S`, including negative-input absolute-value results and
       signed-zero preservation

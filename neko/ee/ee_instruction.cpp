@@ -803,6 +803,10 @@ namespace
           instruction->operation =
             EEOperation::MultiplySingleCOP1;
           return;
+        case 0x03:
+          instruction->operation =
+            EEOperation::DivideSingleCOP1;
+          return;
         case 0x05:
           if (instruction->targetRegister != 0)
           {

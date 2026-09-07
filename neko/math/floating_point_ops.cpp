@@ -648,6 +648,13 @@ EECompoundFloatResult msubEEFloatRaw(
     true);
 }
 
+EEFloatResult divEEFloatRaw(
+  std::uint32_t numeratorBits,
+  std::uint32_t denominatorBits)
+{
+  return divideRaw(numeratorBits, denominatorBits);
+}
+
 VUFloatResult divFPRaw(std::uint32_t d1Bits, std::uint32_t d2Bits)
 {
   return divideRaw(d1Bits, d2Bits);

@@ -654,6 +654,7 @@ bool EECore::executeInstruction(
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
+    case EEOperation::DivideSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -678,15 +679,27 @@ bool EECore::executeInstruction(
         case EEOperation::MultiplySingleCOP1:
           result = mulFPRaw(fsBits, ftBits);
           break;
+        case EEOperation::DivideSingleCOP1:
+          result = divEEFloatRaw(fsBits, ftBits);
+          break;
         default:
           result = subFPRaw(fsBits, ftBits);
           break;
       }
       floatingPointRegisters[instruction.shiftAmount] =
         result.bits;
-      updateCOP1ArithmeticFlags(
-        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
-        result.flags);
+      if (instruction.operation == EEOperation::DivideSingleCOP1)
+      {
+        updateCOP1ArithmeticFlags(
+          FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+          result.flags);
+      }
+      else
+      {
+        updateCOP1ArithmeticFlags(
+          FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
+          result.flags);
+      }
       return true;
     }
     case EEOperation::AddSingleToAccumulatorCOP1:
@@ -2539,6 +2552,7 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
+    case EEOperation::DivideSingleCOP1:
     case EEOperation::MultiplyAddSingleCOP1:
     case EEOperation::MultiplySubtractSingleCOP1:
     case EEOperation::CompareFalseSingleCOP1:
@@ -2598,6 +2612,7 @@ bool EECore::isCOP1OperateOperation(EEOperation operation)
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
+    case EEOperation::DivideSingleCOP1:
     case EEOperation::MultiplyAddSingleCOP1:
     case EEOperation::MultiplySubtractSingleCOP1:
     case EEOperation::AddSingleToAccumulatorCOP1:

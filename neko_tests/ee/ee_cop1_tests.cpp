@@ -699,6 +699,14 @@ TEST_CASE("EE COP1 multiply instructions decode canonically")
     "Reserved EE instruction encoding.");
 }
 
+TEST_CASE("EE COP1 divide decodes canonically")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x03, 2, 4, 3)).operation ==
+    EEOperation::DivideSingleCOP1);
+}
+
 TEST_CASE("EE COP1 multiply-add instructions decode canonically")
 {
   REQUIRE(
@@ -790,6 +798,151 @@ TEST_CASE("EE COP1 multiply produces exact raw results")
     REQUIRE(
       core.floatingPointRegister(4) ==
       vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 divide produces exact raw results")
+{
+  struct ArithmeticVector
+  {
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const ArithmeticVector vectors[] = {
+    {UINT32_C(0x40c00000), UINT32_C(0x40000000),
+     UINT32_C(0x40400000)},
+    {UINT32_C(0xc0c00000), UINT32_C(0x40000000),
+     UINT32_C(0xc0400000)},
+    {UINT32_C(0x40c00000), UINT32_C(0xc0000000),
+     UINT32_C(0xc0400000)},
+    {UINT32_C(0x00000001), UINT32_C(0x3f800000), 0},
+    {UINT32_C(0x80000001), UINT32_C(0x3f800000),
+     FP_SIGN_BIT},
+    {UINT32_C(0x7fffffff), UINT32_C(0x00800000),
+     UINT32_C(0x7fffffff)}
+  };
+
+  for (const ArithmeticVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+
+    REQUIRE(core.floatingPointRegister(2) == vector.fs);
+    REQUIRE(core.floatingPointRegister(3) == vector.ft);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 divide supports in-place writes")
+{
+  SECTION("The destination may alias fs")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x03, 2, 2, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x40400000));
+  }
+
+  SECTION("The destination may alias ft")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x03, 2, 3, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x40400000));
+  }
+}
+
+TEST_CASE("EE COP1 divide updates only invalid and division flags")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+
+  SECTION("An ordinary quotient clears current I and D only")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_MASK));
+  }
+
+  SECTION("Zero divided by zero raises invalid with the quotient sign")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, FP_SIGN_BIT);
+    core.setFloatingPointRegister(3, 0);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xffffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
+  }
+
+  SECTION("A nonzero numerator divided by zero raises division by zero")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0xbf800000));
+    core.setFloatingPointRegister(3, FP_SIGN_BIT);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_DIVISION_BY_ZERO));
   }
 }
 
@@ -3996,6 +4149,7 @@ TEST_CASE("EE COP1 instructions require Status CU1")
     cop1SingleInstruction(0x00, 3, 4, 5),
     cop1SingleInstruction(0x01, 3, 4, 5),
     cop1SingleInstruction(0x02, 3, 4, 5),
+    cop1SingleInstruction(0x03, 3, 4, 5),
     cop1SingleInstruction(0x1c, 3, 4, 5),
     cop1SingleInstruction(0x1d, 3, 4, 5),
     cop1SingleInstruction(0x18, 3, 0, 5),
