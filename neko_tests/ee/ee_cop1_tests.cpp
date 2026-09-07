@@ -2032,6 +2032,170 @@ TEST_CASE("EE COP1 branches use FCR31 condition and likely annulment")
   }
 }
 
+TEST_CASE("EE COP1 branches consume the preceding comparison condition")
+{
+  struct Contract
+  {
+    std::uint32_t ft;
+    std::uint8_t branchCondition;
+  };
+  const Contract contracts[] = {
+    {UINT32_C(0x3f800000), 1},
+    {UINT32_C(0x40000000), 0}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, contract.ft);
+    const std::uint32_t program[] = {
+      cop1SingleInstruction(0x32, 2, 0, 3),
+      cop1BranchInstruction(contract.branchCondition, 2),
+      UINT32_C(0x34020001),
+      UINT32_C(0x34030002),
+      UINT32_C(0x34040003)
+    };
+    for (std::size_t index = 0; index < 5; ++index)
+    {
+      system.eeBus().write32(index * 4, program[index]);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.elapsedCycles() == 3);
+    REQUIRE(core.programCounter() == 16);
+    REQUIRE(core.generalRegister(2).low == 1);
+    REQUIRE(core.generalRegister(3).low == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(4).low == 3);
+  }
+}
+
+TEST_CASE("EE COP1 branch delay-slot exceptions preserve branch ownership")
+{
+  struct Contract
+  {
+    std::uint8_t branchCondition;
+    bool conditionBit;
+    bool delaySlotExecutes;
+  };
+  const Contract contracts[] = {
+    {0, false, true},
+    {0, true, true},
+    {2, false, true},
+    {2, true, false},
+    {3, true, true},
+    {3, false, false}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setCOP1ControlRegister(
+      31,
+      contract.conditionBit
+        ? EECOP1Control::CONDITION
+        : 0);
+    system.eeBus().write32(
+      0,
+      cop1BranchInstruction(contract.branchCondition, 2));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(8, UINT32_C(0x34020001));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    if (contract.delaySlotExecutes)
+    {
+      REQUIRE(core.pendingException() == EEException::SystemCall);
+      REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+      REQUIRE(
+        (core.cop0Register(EECOP0Register::Cause) &
+          EECOP0Cause::BRANCH_DELAY) != 0);
+    }
+    else
+    {
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.generalRegister(2).low == 1);
+      REQUIRE(core.programCounter() == 12);
+    }
+  }
+}
+
+TEST_CASE("EE COP1 branch continuations survive save-state restore")
+{
+  struct Contract
+  {
+    std::uint8_t branchCondition;
+    bool conditionBit;
+    bool taken;
+    bool likely;
+  };
+  const Contract contracts[] = {
+    {0, false, true, false},
+    {0, true, false, false},
+    {1, true, true, false},
+    {1, false, false, false},
+    {2, false, true, true},
+    {2, true, false, true},
+    {3, true, true, true},
+    {3, false, false, true}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setCOP1ControlRegister(
+      31,
+      contract.conditionBit
+        ? EECOP1Control::CONDITION
+        : 0);
+    const std::uint32_t program[] = {
+      cop1BranchInstruction(contract.branchCondition, 2),
+      UINT32_C(0x34020001),
+      UINT32_C(0x34030002),
+      UINT32_C(0x34040003)
+    };
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      original.eeBus().write32(index * 4, program[index]);
+    }
+    originalCore.startExecution(0);
+    original.clockMasterCycle();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+    REQUIRE(
+      restored.eeCore().generalRegister(2).low ==
+      (contract.likely && !contract.taken ? 0 : 1));
+    REQUIRE(
+      restored.eeCore().programCounter() ==
+      (contract.taken
+        ? 12
+        : contract.likely
+          ? 12
+          : 8));
+  }
+}
+
 TEST_CASE("EE COP1 comparisons update the condition bit exactly")
 {
   struct ComparisonVector

@@ -692,7 +692,7 @@ than delegating architectural results to host floating-point defaults.
       timing
 - [x] Implement `BC1F`, `BC1T`, `BC1FL`, and `BC1TL` through the existing EE
       branch, delay-slot, and likely-annulment machinery
-- [ ] Verify comparison-to-branch dependencies, taken and untaken paths,
+- [x] Verify comparison-to-branch dependencies, taken and untaken paths,
       delay-slot exceptions, and save-state continuation
 
 ### Division and Square Root
