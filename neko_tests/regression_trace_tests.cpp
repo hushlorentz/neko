@@ -33,6 +33,21 @@ namespace
       function;
   }
 
+  std::uint32_t cop1SingleInstruction(
+    std::uint8_t function,
+    std::uint8_t source,
+    std::uint8_t destination,
+    std::uint8_t target = 0)
+  {
+    return
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x10) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(source) << 11) |
+      (static_cast<std::uint32_t>(destination) << 6) |
+      function;
+  }
+
   std::vector<NekoTraceEvent> eeTrace(
     const NekoSystem &system)
   {
@@ -40,6 +55,21 @@ namespace
     for (const NekoTraceEvent &event : system.trace())
     {
       if (event.subsystem == NekoTraceSubsystem::EE)
+      {
+        events.push_back(event);
+      }
+    }
+    return events;
+  }
+
+  std::vector<NekoTraceEvent> cop1DividerHazards(
+    const NekoSystem &system)
+  {
+    std::vector<NekoTraceEvent> events;
+    for (const NekoTraceEvent &event : system.trace())
+    {
+      if (event.type ==
+          NekoTraceEventType::COP1DividerHazard)
       {
         events.push_back(event);
       }
@@ -274,6 +304,324 @@ TEST_CASE("EE regression traces describe issued work")
   REQUIRE(events[9].value2 == EEExceptionVector::GENERAL);
   REQUIRE(events[10].type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events[10].value0 == core.stateHash());
+}
+
+TEST_CASE("EE regression traces identify COP1 divider branch hazards")
+{
+  const std::uint32_t divide =
+    cop1SingleInstruction(0x03, 2, 4, 3);
+
+  SECTION("delay slot")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    system.eeBus().write32(
+      32,
+      immediateInstruction(0x04, 0, 0, 2));
+    system.eeBus().write32(36, divide);
+    core.startExecution(32);
+    system.startTrace();
+
+    system.runMasterCycles(2);
+
+    const std::vector<NekoTraceEvent> hazards =
+      cop1DividerHazards(system);
+    REQUIRE(hazards.size() == 1);
+    REQUIRE(hazards[0].value0 == 36);
+    REQUIRE(hazards[0].value1 == divide);
+    REQUIRE(
+      hazards[0].value2 ==
+      NekoEETraceCOP1DividerHazard::BRANCH_DELAY_SLOT);
+    REQUIRE(
+      hazards[0].value3 ==
+      (UINT64_C(44) << 32 | UINT64_C(32)));
+  }
+
+  SECTION("untaken branch post-delay window")
+  {
+    for (std::uint32_t distance = 1; distance <= 3; ++distance)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      system.eeBus().write32(
+        0,
+        immediateInstruction(0x05, 0, 0, 4));
+      system.eeBus().write32(4, 0);
+      system.eeBus().write32(4 + distance * 4, divide);
+      core.startExecution(0);
+      system.startTrace();
+
+      system.runMasterCycles(2 + distance);
+
+      const std::vector<NekoTraceEvent> hazards =
+        cop1DividerHazards(system);
+      if (distance <= 2)
+      {
+        REQUIRE(hazards.size() == 1);
+        REQUIRE(hazards[0].value0 == 4 + distance * 4);
+        REQUIRE(
+          hazards[0].value2 ==
+          NekoEETraceCOP1DividerHazard::
+            AFTER_BRANCH_DELAY_SLOT);
+        REQUIRE(hazards[0].value3 == 0);
+      }
+      else
+      {
+        REQUIRE(hazards.empty());
+      }
+    }
+  }
+
+  SECTION("taken target window")
+  {
+    for (std::uint32_t distance = 1; distance <= 3; ++distance)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      system.eeBus().write32(
+        0,
+        immediateInstruction(0x04, 0, 0, 3));
+      system.eeBus().write32(4, 0);
+      system.eeBus().write32(
+        12 + distance * 4,
+        divide);
+      core.startExecution(0);
+      system.startTrace();
+
+      system.runMasterCycles(2 + distance);
+
+      const std::vector<NekoTraceEvent> hazards =
+        cop1DividerHazards(system);
+      if (distance <= 2)
+      {
+        REQUIRE(hazards.size() == 1);
+        REQUIRE(hazards[0].value0 == 12 + distance * 4);
+        REQUIRE(
+          hazards[0].value2 ==
+          (NekoEETraceCOP1DividerHazard::
+             AFTER_BRANCH_DELAY_SLOT |
+           NekoEETraceCOP1DividerHazard::
+             AFTER_BRANCH_TARGET));
+        REQUIRE(hazards[0].value3 == (UINT64_C(16) << 32));
+      }
+      else
+      {
+        REQUIRE(hazards.empty());
+      }
+    }
+
+    SECTION("taken branch target zero")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      system.eeBus().write32(0, divide);
+      system.eeBus().write32(
+        8,
+        immediateInstruction(0x04, 0, 0, 0xfffd));
+      system.eeBus().write32(12, 0);
+      core.startExecution(8);
+      system.startTrace();
+
+      system.runMasterCycles(3);
+
+      const std::vector<NekoTraceEvent> hazards =
+        cop1DividerHazards(system);
+      REQUIRE(hazards.size() == 1);
+      REQUIRE(
+        hazards[0].value2 ==
+        (NekoEETraceCOP1DividerHazard::
+           AFTER_BRANCH_DELAY_SLOT |
+         NekoEETraceCOP1DividerHazard::
+           AFTER_BRANCH_TARGET));
+      REQUIRE(hazards[0].value3 == UINT64_C(8));
+    }
+  }
+
+  SECTION("annulled likely delay slot")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {1, 0});
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x14, 0, 1, 3));
+    system.eeBus().write32(4, UINT32_C(0xffffffff));
+    system.eeBus().write32(8, divide);
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(2);
+
+    const std::vector<NekoTraceEvent> hazards =
+      cop1DividerHazards(system);
+    REQUIRE(hazards.size() == 1);
+    REQUIRE(hazards[0].value0 == 8);
+    REQUIRE(
+      hazards[0].value2 ==
+      NekoEETraceCOP1DividerHazard::
+        AFTER_BRANCH_DELAY_SLOT);
+  }
+
+  SECTION("interlock does not consume the window")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    system.eeBus().write32(0x100, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x05, 0, 0, 4));
+    system.eeBus().write32(
+      4,
+      immediateInstruction(0x31, 1, 2, 0));
+    system.eeBus().write32(8, divide);
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(4);
+
+    const std::vector<NekoTraceEvent> hazards =
+      cop1DividerHazards(system);
+    REQUIRE(hazards.size() == 1);
+    REQUIRE(hazards[0].value0 == 8);
+    REQUIRE(
+      hazards[0].value2 ==
+      NekoEETraceCOP1DividerHazard::
+        AFTER_BRANCH_DELAY_SLOT);
+  }
+
+  SECTION("overlapping branch contexts retain provenance")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x04, 0, 0, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      16,
+      immediateInstruction(0x04, 0, 0, 2));
+    system.eeBus().write32(20, divide);
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(4);
+
+    const std::vector<NekoTraceEvent> hazards =
+      cop1DividerHazards(system);
+    REQUIRE(hazards.size() == 2);
+    REQUIRE(
+      hazards[0].value2 ==
+      NekoEETraceCOP1DividerHazard::BRANCH_DELAY_SLOT);
+    REQUIRE(
+      hazards[0].value3 ==
+      (UINT64_C(28) << 32 | UINT64_C(16)));
+    REQUIRE(
+      hazards[1].value2 ==
+      (NekoEETraceCOP1DividerHazard::
+         AFTER_BRANCH_DELAY_SLOT |
+       NekoEETraceCOP1DividerHazard::
+         AFTER_BRANCH_TARGET));
+    REQUIRE(hazards[1].value3 == (UINT64_C(16) << 32));
+  }
+
+  SECTION("overlapping post windows remain separate")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {1, 0});
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x04, 0, 0, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      16,
+      immediateInstruction(0x14, 0, 1, 2));
+    system.eeBus().write32(20, UINT32_C(0xffffffff));
+    system.eeBus().write32(24, divide);
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(4);
+
+    const std::vector<NekoTraceEvent> hazards =
+      cop1DividerHazards(system);
+    REQUIRE(hazards.size() == 2);
+    REQUIRE(
+      hazards[0].value2 ==
+      NekoEETraceCOP1DividerHazard::
+        AFTER_BRANCH_DELAY_SLOT);
+    REQUIRE(hazards[0].value3 == UINT64_C(16));
+    REQUIRE(
+      hazards[1].value2 ==
+      NekoEETraceCOP1DividerHazard::
+        AFTER_BRANCH_TARGET);
+    REQUIRE(hazards[1].value3 == (UINT64_C(16) << 32));
+  }
+}
+
+TEST_CASE("COP1 divider hazard context survives save and reset")
+{
+  const std::uint32_t divide =
+    cop1SingleInstruction(0x03, 2, 4, 3);
+  NekoSystem original;
+  original.eeCore().setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  original.eeBus().write32(
+    0,
+    immediateInstruction(0x05, 0, 0, 4));
+  original.eeBus().write32(4, 0);
+  original.eeBus().write32(8, divide);
+  original.eeCore().startExecution(0);
+  original.runMasterCycles(2);
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  original.startTrace();
+  restored.startTrace();
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(original.traceHash() == restored.traceHash());
+  const std::vector<NekoTraceEvent> hazards =
+    cop1DividerHazards(restored);
+  REQUIRE(hazards.size() == 1);
+  REQUIRE(hazards[0].value0 == 8);
+
+  restored.eeCore().reset();
+  restored.eeCore().setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  restored.eeBus().write32(0, divide);
+  restored.eeCore().startExecution(0);
+  restored.clearTrace();
+  restored.clockMasterCycle();
+  REQUIRE(cop1DividerHazards(restored).empty());
 }
 
 TEST_CASE("EE regression traces identify interrupt delivery")

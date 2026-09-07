@@ -268,7 +268,8 @@ class EECore : public ClockedComponent
       ExceptionEntered,
       InterruptDelivered,
       COP1LoadInterlock,
-      COP1ResourceInterlock
+      COP1ResourceInterlock,
+      COP1DividerHazard
     };
 
     enum class FPRDependency : std::uint8_t
@@ -368,6 +369,13 @@ class EECore : public ClockedComponent
     std::uint32_t branchDelayTarget = 0;
     std::uint32_t branchInstructionAddress = 0;
     bool branchDelayFromLikely = false;
+    bool branchDelayTaken = false;
+    std::uint8_t cop1DividerPostDelayInstructions = 0;
+    std::uint32_t cop1DividerPostDelayBranchAddress = 0;
+    std::uint32_t cop1DividerPostDelayTargetAddress = 0;
+    bool cop1DividerPostDelayTaken = false;
+    std::uint8_t cop1DividerPostTargetInstructions = 0;
+    std::uint32_t cop1DividerPostTargetAddress = 0;
     bool instructionRetiredThisCycle = false;
     bool exceptionEnteredThisCycle = false;
     std::array<CycleTraceEvent, 8> cycleTraceEvents = {};

@@ -18,7 +18,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 17;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 18;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1341,6 +1341,20 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.branchInstructionAddress;
   destination->eeCoreComponent.branchDelayFromLikely =
     source->eeCoreComponent.branchDelayFromLikely;
+  destination->eeCoreComponent.branchDelayTaken =
+    source->eeCoreComponent.branchDelayTaken;
+  destination->eeCoreComponent.cop1DividerPostDelayInstructions =
+    source->eeCoreComponent.cop1DividerPostDelayInstructions;
+  destination->eeCoreComponent.cop1DividerPostDelayBranchAddress =
+    source->eeCoreComponent.cop1DividerPostDelayBranchAddress;
+  destination->eeCoreComponent.cop1DividerPostDelayTargetAddress =
+    source->eeCoreComponent.cop1DividerPostDelayTargetAddress;
+  destination->eeCoreComponent.cop1DividerPostDelayTaken =
+    source->eeCoreComponent.cop1DividerPostDelayTaken;
+  destination->eeCoreComponent.cop1DividerPostTargetInstructions =
+    source->eeCoreComponent.cop1DividerPostTargetInstructions;
+  destination->eeCoreComponent.cop1DividerPostTargetAddress =
+    source->eeCoreComponent.cop1DividerPostTargetAddress;
   destination->eeCoreComponent.instructionRetiredThisCycle = false;
   destination->eeCoreComponent.exceptionEnteredThisCycle = false;
   destination->interruptControllerComponent.statusRegister =
@@ -1674,6 +1688,13 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeU32(core.branchDelayTarget);
   writer->writeU32(core.branchInstructionAddress);
   writer->writeBool(core.branchDelayFromLikely);
+  writer->writeBool(core.branchDelayTaken);
+  writer->writeU8(core.cop1DividerPostDelayInstructions);
+  writer->writeU32(core.cop1DividerPostDelayBranchAddress);
+  writer->writeU32(core.cop1DividerPostDelayTargetAddress);
+  writer->writeBool(core.cop1DividerPostDelayTaken);
+  writer->writeU8(core.cop1DividerPostTargetInstructions);
+  writer->writeU32(core.cop1DividerPostTargetAddress);
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1908,6 +1929,15 @@ void NekoSaveStateCodec::readEECore(
   core->branchInstructionAddress = reader->readU32();
   core->branchDelayFromLikely =
     reader->readBool("EE branch-likely delay flag");
+  core->branchDelayTaken =
+    reader->readBool("EE branch taken flag");
+  core->cop1DividerPostDelayInstructions = reader->readU8();
+  core->cop1DividerPostDelayBranchAddress = reader->readU32();
+  core->cop1DividerPostDelayTargetAddress = reader->readU32();
+  core->cop1DividerPostDelayTaken =
+    reader->readBool("EE COP1 post-delay taken flag");
+  core->cop1DividerPostTargetInstructions = reader->readU8();
+  core->cop1DividerPostTargetAddress = reader->readU32();
   core->lastDecodedInstruction = {};
   if (core->lastInstructionValid)
   {
@@ -1960,7 +1990,8 @@ void NekoSaveStateCodec::readEECore(
     core->branchDelayPending ||
       (core->branchDelayTarget == 0 &&
        core->branchInstructionAddress == 0 &&
-       !core->branchDelayFromLikely),
+       !core->branchDelayFromLikely &&
+       !core->branchDelayTaken),
     "EE inactive branch delay contains state");
   require(
     !core->branchDelayPending ||
@@ -1974,6 +2005,37 @@ void NekoSaveStateCodec::readEECore(
          isEEBranchLikelyOperation(
            core->lastDecodedInstruction.operation)),
     "EE pending branch delay state is inconsistent");
+  require(
+    core->cop1DividerPostDelayInstructions <= 2 &&
+      (core->cop1DividerPostDelayInstructions != 0 ||
+       (core->cop1DividerPostDelayBranchAddress == 0 &&
+        core->cop1DividerPostDelayTargetAddress == 0 &&
+        !core->cop1DividerPostDelayTaken)) &&
+      (core->cop1DividerPostDelayBranchAddress & 3) == 0 &&
+      (core->cop1DividerPostDelayTargetAddress & 3) == 0,
+    "EE COP1 post-delay hazard state is invalid");
+  require(
+    core->cop1DividerPostTargetInstructions <= 2 &&
+      (core->cop1DividerPostTargetInstructions != 0 ||
+       core->cop1DividerPostTargetAddress == 0) &&
+      (core->cop1DividerPostTargetAddress & 3) == 0,
+    "EE COP1 post-target hazard state is invalid");
+  require(
+    core->cop1DividerPostTargetInstructions <=
+      core->cop1DividerPostDelayInstructions,
+    "EE COP1 branch hazard windows are inconsistent");
+  require(
+    !core->cop1DividerPostDelayTaken ||
+      (core->cop1DividerPostTargetInstructions != 0 &&
+       core->cop1DividerPostDelayInstructions ==
+         core->cop1DividerPostTargetInstructions &&
+       core->cop1DividerPostDelayTargetAddress ==
+         core->cop1DividerPostTargetAddress),
+    "EE COP1 branch hazard provenance is inconsistent");
+  require(
+    core->cop1DividerPostDelayTaken ||
+      core->cop1DividerPostDelayTargetAddress == 0,
+    "EE untaken branch hazard contains a target");
 }
 
 void NekoSaveStateCodec::writeVPU(

@@ -35,7 +35,8 @@ enum class NekoTraceEventType : std::uint8_t
   InterruptDelivered,
   StateSnapshot,
   COP1LoadInterlock,
-  COP1ResourceInterlock
+  COP1ResourceInterlock,
+  COP1DividerHazard
 };
 
 namespace NekoEETraceBranch
@@ -55,6 +56,15 @@ namespace NekoEETraceCOP1Interlock
 {
   constexpr std::uint64_t READ = UINT64_C(1);
   constexpr std::uint64_t WRITE = UINT64_C(1) << 1;
+}
+
+namespace NekoEETraceCOP1DividerHazard
+{
+  constexpr std::uint64_t BRANCH_DELAY_SLOT = UINT64_C(1);
+  constexpr std::uint64_t AFTER_BRANCH_DELAY_SLOT =
+    UINT64_C(1) << 1;
+  constexpr std::uint64_t AFTER_BRANCH_TARGET =
+    UINT64_C(1) << 2;
 }
 
 struct NekoTraceEvent

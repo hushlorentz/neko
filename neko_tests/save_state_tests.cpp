@@ -25,7 +25,13 @@ namespace
   constexpr std::size_t EE_COP1_DIVIDER_OPERATION_OFFSET = 973;
   constexpr std::size_t
     PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET = 1003;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 1012;
+  constexpr std::size_t EE_COP1_POST_DELAY_COUNT_OFFSET = 1005;
+  constexpr std::size_t EE_COP1_POST_DELAY_ADDRESS_OFFSET = 1006;
+  constexpr std::size_t EE_COP1_POST_DELAY_TARGET_OFFSET = 1010;
+  constexpr std::size_t EE_COP1_POST_DELAY_TAKEN_OFFSET = 1014;
+  constexpr std::size_t EE_COP1_POST_TARGET_COUNT_OFFSET = 1015;
+  constexpr std::size_t EE_COP1_POST_TARGET_ADDRESS_OFFSET = 1016;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 1028;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -1067,6 +1073,40 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET] = 1;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[EE_COP1_POST_DELAY_COUNT_OFFSET] = 3;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[EE_COP1_POST_DELAY_ADDRESS_OFFSET] = 4;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[EE_COP1_POST_DELAY_TARGET_OFFSET] = 4;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[EE_COP1_POST_DELAY_COUNT_OFFSET] = 2;
+  invalid[EE_COP1_POST_DELAY_TARGET_OFFSET] = 4;
+  invalid[EE_COP1_POST_DELAY_TAKEN_OFFSET] = 1;
+  invalid[EE_COP1_POST_TARGET_COUNT_OFFSET] = 1;
+  invalid[EE_COP1_POST_TARGET_ADDRESS_OFFSET] = 4;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[EE_COP1_POST_TARGET_COUNT_OFFSET] = 1;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

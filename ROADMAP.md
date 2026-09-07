@@ -739,10 +739,16 @@ represent the one-cycle overlap implied by those latency/interval pairs.
 Unrelated instructions continue while results are pending. Reads or writes of
 a pending destination, plus `CFC1` or `CTC1` access to `FCR31`, interlock until
 retirement; a dependent instruction may issue on the retirement cycle.
-Pending slots and divider occupancy participate in reset, state hashing, and
-save-state version 17. They continue through exception entry and host
+Pending slots, divider occupancy, and branch-proximity diagnostic context
+participate in reset, state hashing, and save-state version 18. Divider work
+continues through exception entry and host
 halt/resume, while the ELF runner drains outstanding results before reporting
-guest return.
+guest return. The branch diagnostic is observational: successfully issued
+divider operations emit a deterministic trace event when they occupy a branch
+delay slot, either of the next two executed instruction positions after the
+delay slot, or either of the first two executed positions at a taken target.
+Stalls do not consume those windows, annulled likely slots establish the same
+post-delay window, and no undocumented execution failure is modeled.
 
 - [x] Exhaustively audit the local manuals and toolchain documentation for
       numeric timing and branch-adjacent pipeline restrictions
@@ -758,7 +764,7 @@ guest return.
       completion visibility
 - [x] Preserve divider continuation and determinism across reset, halt/resume,
       exception entry, state hashing, save states, and execution drain
-- [ ] Track branch-delay and branch-target proximity and emit a deterministic
+- [x] Track branch-delay and branch-target proximity and emit a deterministic
       diagnostic for the documented GNUPro pipeline-bug regions
 - [ ] Complete cross-operation raw-bit, flag, overlap, timing, drain,
       save-resume, and legal/hazardous branch-placement validation

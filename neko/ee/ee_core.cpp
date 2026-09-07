@@ -236,6 +236,13 @@ void EECore::reset()
   branchDelayTarget = 0;
   branchInstructionAddress = 0;
   branchDelayFromLikely = false;
+  branchDelayTaken = false;
+  cop1DividerPostDelayInstructions = 0;
+  cop1DividerPostDelayBranchAddress = 0;
+  cop1DividerPostDelayTargetAddress = 0;
+  cop1DividerPostDelayTaken = false;
+  cop1DividerPostTargetInstructions = 0;
+  cop1DividerPostTargetAddress = 0;
   instructionRetiredThisCycle = false;
   exceptionEnteredThisCycle = false;
   cycleTraceEventCount = 0;
@@ -327,6 +334,10 @@ void EECore::startExecution(std::uint32_t startAddress)
     haltReason == EEStopReason::HostHalt &&
     branchDelayPending &&
     startAddress == pc;
+  const bool resumeCOP1DividerHazardContext =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    startAddress == pc;
   const bool resumePendingMultiplyDivide =
     state == EEExecutionState::Halted &&
     haltReason == EEStopReason::HostHalt &&
@@ -362,6 +373,16 @@ void EECore::startExecution(std::uint32_t startAddress)
     branchDelayTarget = 0;
     branchInstructionAddress = 0;
     branchDelayFromLikely = false;
+    branchDelayTaken = false;
+  }
+  if (!resumeCOP1DividerHazardContext)
+  {
+    cop1DividerPostDelayInstructions = 0;
+    cop1DividerPostDelayBranchAddress = 0;
+    cop1DividerPostDelayTargetAddress = 0;
+    cop1DividerPostDelayTaken = false;
+    cop1DividerPostTargetInstructions = 0;
+    cop1DividerPostTargetAddress = 0;
   }
   if (!resumePendingMultiplyDivide)
   {
@@ -480,6 +501,9 @@ void EECore::clock()
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
+  const std::uint32_t completedBranchAddress =
+    branchInstructionAddress;
+  const bool completedBranchTaken = branchDelayTaken;
   const bool hadCOP1OperateResource =
     cop1OperateResourceOccupied;
   cop1OperateResourceOccupied = false;
@@ -549,20 +573,116 @@ void EECore::clock()
     fetched.instruction,
     static_cast<std::uint8_t>(decoded.operation),
     wasDelaySlot);
+  bool dividerDelaySlotHazard = false;
+  std::uint64_t dividerProximityHazardReasons = 0;
+  bool dividerPostTargetCombined = false;
+  if (isCOP1DividerOperation(decoded.operation))
+  {
+    if (wasDelaySlot)
+    {
+      dividerDelaySlotHazard = true;
+    }
+    if (cop1DividerPostDelayInstructions != 0)
+    {
+      dividerProximityHazardReasons |= UINT64_C(1) << 1;
+      if (cop1DividerPostTargetInstructions != 0 &&
+          cop1DividerPostDelayTaken &&
+          cop1DividerPostDelayTargetAddress ==
+            cop1DividerPostTargetAddress)
+      {
+        dividerProximityHazardReasons |= UINT64_C(1) << 2;
+        dividerPostTargetCombined = true;
+      }
+    }
+  }
   if (!executeInstruction(decoded, fetched.address))
   {
     return;
+  }
+  if (dividerDelaySlotHazard)
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1DividerHazard,
+      fetched.address,
+      fetched.instruction,
+      UINT64_C(1),
+      completedBranchAddress |
+        (static_cast<std::uint64_t>(
+          completedBranchTaken ?
+            completedBranchTarget : 0) << 32));
+  }
+  if (dividerProximityHazardReasons != 0)
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1DividerHazard,
+      fetched.address,
+      fetched.instruction,
+      dividerProximityHazardReasons,
+      cop1DividerPostDelayBranchAddress |
+        (static_cast<std::uint64_t>(
+          cop1DividerPostDelayTargetAddress) << 32));
+  }
+  if (isCOP1DividerOperation(decoded.operation) &&
+      cop1DividerPostTargetInstructions != 0 &&
+      !dividerPostTargetCombined)
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1DividerHazard,
+      fetched.address,
+      fetched.instruction,
+      UINT64_C(1) << 2,
+      static_cast<std::uint64_t>(
+        cop1DividerPostTargetAddress) << 32);
+  }
+  if (cop1DividerPostDelayInstructions != 0)
+  {
+    --cop1DividerPostDelayInstructions;
+    if (cop1DividerPostDelayInstructions == 0)
+    {
+      cop1DividerPostDelayBranchAddress = 0;
+      cop1DividerPostDelayTargetAddress = 0;
+      cop1DividerPostDelayTaken = false;
+    }
+  }
+  if (cop1DividerPostTargetInstructions != 0)
+  {
+    --cop1DividerPostTargetInstructions;
+    if (cop1DividerPostTargetInstructions == 0)
+    {
+      cop1DividerPostTargetAddress = 0;
+    }
   }
   cop1OperateResourceOccupied =
     isCOP1OperateOperation(decoded.operation);
 
   if (wasDelaySlot)
   {
+    cop1DividerPostDelayInstructions = 2;
+    cop1DividerPostDelayBranchAddress =
+      completedBranchAddress;
+    cop1DividerPostDelayTargetAddress =
+      completedBranchTaken ? completedBranchTarget : 0;
+    cop1DividerPostDelayTaken = completedBranchTaken;
+    if (completedBranchTaken)
+    {
+      cop1DividerPostTargetInstructions = 2;
+      cop1DividerPostTargetAddress =
+        completedBranchTarget;
+    }
     pc = completedBranchTarget;
     branchDelayPending = false;
     branchDelayTarget = 0;
     branchInstructionAddress = 0;
     branchDelayFromLikely = false;
+    branchDelayTaken = false;
+  }
+  else if (isEEBranchLikelyOperation(decoded.operation) &&
+           !branchDelayPending)
+  {
+    cop1DividerPostDelayInstructions = 2;
+    cop1DividerPostDelayBranchAddress = fetched.address;
+    cop1DividerPostDelayTargetAddress = 0;
+    cop1DividerPostDelayTaken = false;
   }
   recordShiftAmountAccess(decoded);
   lastDecodedInstruction = decoded;
@@ -2949,6 +3069,7 @@ void EECore::scheduleBranch(
   branchDelayTarget = condition ? target : address + 8;
   branchInstructionAddress = address;
   branchDelayFromLikely = likely;
+  branchDelayTaken = condition;
 }
 
 void EECore::recordCycleTrace(
@@ -3067,6 +3188,13 @@ void EECore::enterException(
   branchDelayTarget = 0;
   branchInstructionAddress = 0;
   branchDelayFromLikely = false;
+  branchDelayTaken = false;
+  cop1DividerPostDelayInstructions = 0;
+  cop1DividerPostDelayBranchAddress = 0;
+  cop1DividerPostDelayTargetAddress = 0;
+  cop1DividerPostDelayTaken = false;
+  cop1DividerPostTargetInstructions = 0;
+  cop1DividerPostTargetAddress = 0;
   cop1OperateResourceOccupied = false;
 }
 
@@ -3250,6 +3378,13 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, branchDelayTarget);
   hashEEStateValue(&hash, branchInstructionAddress);
   hashEEStateValue(&hash, branchDelayFromLikely);
+  hashEEStateValue(&hash, branchDelayTaken);
+  hashEEStateValue(&hash, cop1DividerPostDelayInstructions);
+  hashEEStateValue(&hash, cop1DividerPostDelayBranchAddress);
+  hashEEStateValue(&hash, cop1DividerPostDelayTargetAddress);
+  hashEEStateValue(&hash, cop1DividerPostDelayTaken);
+  hashEEStateValue(&hash, cop1DividerPostTargetInstructions);
+  hashEEStateValue(&hash, cop1DividerPostTargetAddress);
   return hash;
 }
 

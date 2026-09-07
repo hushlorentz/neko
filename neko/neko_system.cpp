@@ -639,6 +639,9 @@ void NekoSystem::recordCycleTrace(
       case EECore::CycleTraceKind::COP1ResourceInterlock:
         type = NekoTraceEventType::COP1ResourceInterlock;
         break;
+      case EECore::CycleTraceKind::COP1DividerHazard:
+        type = NekoTraceEventType::COP1DividerHazard;
+        break;
     }
     appendTrace(
       cycle,
