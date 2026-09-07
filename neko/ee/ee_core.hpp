@@ -221,6 +221,7 @@ class EECore : public ClockedComponent
     void setFloatingPointAccumulator(std::uint32_t value);
     std::uint32_t cop1ControlRegister(
       std::size_t index) const;
+    bool cop1Condition() const;
     void setCOP1ControlRegister(
       std::size_t index,
       std::uint32_t value);
@@ -404,6 +405,7 @@ class EECore : public ClockedComponent
     bool requireCOP1Usable(
       std::uint32_t address,
       std::uint32_t instruction);
+    void setCOP1Condition(bool condition);
     bool stopUndefinedOperation(
       std::uint32_t address,
       std::uint32_t instruction);

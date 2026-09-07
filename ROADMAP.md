@@ -688,7 +688,7 @@ than delegating architectural results to host floating-point defaults.
 
 - [x] Implement `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, including exact
       comparison and equality of positive and negative zero
-- [ ] Update and expose the FCR31 condition bit with documented visibility
+- [x] Update and expose the FCR31 condition bit with documented visibility
       timing
 - [ ] Implement `BC1F`, `BC1T`, `BC1FL`, and `BC1TL` through the existing EE
       branch, delay-slot, and likely-annulment machinery

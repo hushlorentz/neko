@@ -1991,8 +1991,7 @@ TEST_CASE("EE COP1 comparisons update the condition bit exactly")
     const std::uint32_t status =
       core.cop1ControlRegister(31);
     REQUIRE(
-      ((status & EECOP1Control::CONDITION) != 0) ==
-      vector.expected);
+      core.cop1Condition() == vector.expected);
     REQUIRE(
       (status &
         (EECOP1Control::CAUSE_MASK |
@@ -2000,6 +1999,64 @@ TEST_CASE("EE COP1 comparisons update the condition bit exactly")
       (EECOP1Control::CAUSE_MASK |
        EECOP1Control::STICKY_MASK));
   }
+}
+
+TEST_CASE("EE COP1 comparison condition is visible at the 2S boundary")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x32, 2, 0, 3));
+  system.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x02, 5, 31));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 1);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.cop1Condition());
+  REQUIRE(core.generalRegister(5) == EERegister128{});
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 2);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(5) == EERegister128{});
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 3);
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.generalRegister(5).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CONDITION));
+}
+
+TEST_CASE("EE COP1 comparison condition retires in instruction order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x32, 2, 0, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x30, 2, 0, 3));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.cop1Condition());
+
+  system.clockMasterCycle();
+  REQUIRE_FALSE(core.cop1Condition());
 }
 
 TEST_CASE("EE COP1 CVT.S.W decodes only its canonical W form")

@@ -814,11 +814,7 @@ bool EECore::executeInstruction(
         default:
           break;
       }
-      cop1StatusRegister &= ~EECOP1Control::CONDITION;
-      if (condition)
-      {
-        cop1StatusRegister |= EECOP1Control::CONDITION;
-      }
+      setCOP1Condition(condition);
       return true;
     }
     case EEOperation::ShiftLeftLogicalWord:
@@ -3050,6 +3046,12 @@ std::uint32_t EECore::cop1ControlRegister(
   }
 }
 
+bool EECore::cop1Condition() const
+{
+  return
+    (cop1StatusRegister & EECOP1Control::CONDITION) != 0;
+}
+
 void EECore::setCOP1ControlRegister(
   std::size_t index,
   std::uint32_t value)
@@ -3065,6 +3067,15 @@ void EECore::setCOP1ControlRegister(
     default:
       throw std::out_of_range(
         "EE COP1 control register is not implemented.");
+  }
+}
+
+void EECore::setCOP1Condition(bool condition)
+{
+  cop1StatusRegister &= ~EECOP1Control::CONDITION;
+  if (condition)
+  {
+    cop1StatusRegister |= EECOP1Control::CONDITION;
   }
 }
 
