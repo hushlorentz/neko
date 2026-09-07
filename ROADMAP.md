@@ -780,28 +780,170 @@ changing guest execution. Later pipeline work can replace the provisional
 latencies without changing the arithmetic, continuation, or diagnostic
 contracts established here.
 
-### Pipeline Timing and System Integration
+The EE Core User's Manual defines two distinct layers that must not be
+implemented as one change. The C1 pipeline establishes operand fetch in `T`,
+multiply work in `X/Y`, ALU and conversion work in `Y/Z`, result availability
+in `1S`, architectural FPR/FCR31 writeback in `2S`, and S/W-to-`2T`
+bypassing. Separately, the EE fetches two instructions, buffers an unissued
+instruction between `Q` and `R`, assigns instructions to logical Pipe 0 or
+Pipe 1, and applies the pair restrictions in Table 1-3.
 
-- [ ] Expand this block into smaller independently reviewable pipeline-state,
-      result/writeback, dependency/bypass, structural-scheduling,
-      continuation/save-state, and determinism-validation items
-- [ ] Model the documented `T`, `X`, `Y`, `Z`, and `S` COP1 stages, including
-      1S result availability, 2S architectural writeback, and S/T bypassing
-- [ ] Enforce documented COP1 operation/move issue combinations and one-cycle
-      resource stalls within the EE dual-issue scheduler
-- [ ] Preserve in-flight COP1 work across unrelated EE execution, interrupts,
-      and `ERET` according to the existing continuation model
-- [ ] Add COP1 architectural and in-flight state to reset, canonical state
-      hashes, structured traces, and transactional save states
+Neko currently issues at most one EE instruction per cycle. Most COP1
+operations write architectural state during that issue call; only `LWC1` and
+the divider unit have explicit pending state. The existing one-cycle
+Operate-to-Move interlock approximates Table 1-3's `Y` combination in scalar
+execution, but it is not a substitute for concurrent issue. Implement the
+manual-backed C1 visibility model first, then add a general EE two-wide issue
+foundation before enabling COP1 instruction pairs.
+
+### C1 Pipeline State and Scoreboard Foundation
+
+- [x] Audit the local manual's C1 stages, result visibility, logical/physical
+      routing, Table 1-3 issue rules, and the current scalar EE scheduler
+- [ ] Lock the EE-cycle mapping for `R`, `T`, `X`, `Y`, `Z`, `1S`, and `2S`,
+      including which boundary captures operands, exposes bypass values, and
+      commits architectural state; explicitly anchor provisional divider
+      latency and initiation intervals while either preserving the completed
+      block's `N+8`/`N+14` architectural retirement contract or explicitly
+      re-baselining that contract and its tests
+- [ ] Classify every COP1 instruction by Move, Operate, or Branch routing;
+      source dependencies; and FPR, ACC, FCR31, condition, GPR, or memory
+      destinations; record the section 4.4 evidence for treating `MOV.S` as a
+      Move despite its FPR-to-FPR data path
+- [ ] Add a single-instruction decoded issue latch so scalar dependency and
+      resource stalls retain the already-fetched instruction instead of
+      re-fetching and re-decoding the same PC each cycle; define whether this
+      latch is canonical saved/hashed state or a derived cache, and which
+      redirects flush it
+- [ ] Introduce a general in-flight COP1 operation/result representation with
+      program order, current stage, captured operands, destination metadata,
+      raw result, affected flags, and raised sticky flags
+- [ ] Define precise exception and interrupt ownership for in-flight C1 work:
+      which older results continue, which younger work is discarded, and what
+      handler execution and `ERET` may observe
+- [ ] Introduce a COP1 scoreboard that distinguishes unavailable operands,
+      `1S` bypass-ready values, and `2S` committed values for FPRs, ACC, and
+      FCR31
+- [ ] Adapt the existing pending load and divider units to the shared
+      dependency and ordered-writeback interfaces without changing their
+      established timing contracts after the divider anchor is explicit
+- [ ] Route ELF guest-return drain through the shared in-flight interface while
+      preserving the existing pending-load and divider completion behavior
+- [ ] Define deterministic per-cycle trace ordering and sufficient event
+      capacity for multiple C1 stage transitions and retirements
+- [ ] Add a timing-independent PS2DEV COP1 semantic guest as a before/after
+      pipeline-migration baseline for raw registers and FCR31
+- [ ] Add focused state-transition, hash, trace, malformed-save-state, and
+      save/resume tests, then complete an independent foundation review
+
+### C1 Operate Stage Progression
+
+- [ ] Move one representative ALU family through captured `T` operands,
+      `Y/Z` processing, `1S` availability, and `2S` writeback, then re-baseline
+      its dependency, hash, trace, and save-state expectations
+- [ ] Migrate ABS/NEG, min/max, and add/subtract through the proven ALU-stage
+      path in independently reviewed family-sized changes
+- [ ] Migrate conversion and comparison operations, including their
+      stage-specific `Y/Z` work and FCR31 condition/flag results
+- [ ] Move multiply, accumulator, and compound multiply-add/subtract families
+      through captured `T` operands, `X/Y` multiply work, and ordered `S`
+      result delivery
+- [ ] Retire FPR, ACC, arithmetic flags, sticky flags, and the comparison
+      condition in program order at `2S`
+- [ ] Implement S/T overlap so a younger COP1 operation may consume a `1S`
+      result through the `2T` bypass before architectural writeback
+- [ ] Interlock or forward FPR, ACC, FCR31, comparison-to-branch, WAW, and
+      compound-operation dependencies at their documented visibility boundary
+- [ ] Deliver divider results through the shared `1S`/`2S` writeback contract
+      by applying the foundation's explicit latency anchor while retaining the
+      isolated provisional initiation policy
+- [ ] Generalize ELF guest-return drain from pending loads and divider results
+      to all in-flight C1 operations
+- [ ] Validate each operation family, cross-family forwarding, ordered flags,
+      exceptions, reset, halt/resume, state hashes, and save states before a
+      final C1 Operate review
+
+### COP1 Move and Memory Timing
+
+- [ ] Model `MFC1`, `MTC1`, `CFC1`, `CTC1`, and `MOV.S` as COP1 Move
+      instructions routed through logical Pipe 1 and the LS/C1 physical pipes
+- [ ] Model `LWC1` and `SWC1` operand transfer at the documented integer
+      `D/W` boundaries while retaining the current synchronous hit-path memory
+      policy
+- [ ] Replace the scalar one-bit Operate-to-Move approximation with stage-aware
+      C1 resource occupancy that remains correct before concurrent issue is
+      enabled
+- [ ] Ensure load-use, store-read, move-read/write, control-register, and
+      exception dependencies share the COP1 scoreboard
+- [ ] Preserve precise memory side effects and in-flight Move state across bus
+      stalls, interrupts, `ERET`, reset, halt/resume, hashing, and save states
+- [ ] Complete focused Move/Operate/Load/Store timing and continuation review
+
+### EE Two-Wide Issue Foundation
+
+- [ ] Classify every implemented EE instruction by logical-pipe eligibility
+      and physical resources, independent of COP1 execution semantics
+- [ ] Define how older/younger program order maps to fixed and flexible logical
+      pipes, including whether a Pipe-1-only older instruction may pair with a
+      Pipe-0-only younger instruction
+- [ ] Add two-instruction fetch/decode and the documented staging register for
+      an instruction that cannot issue from `Q` to `R`, widening the scalar
+      decoded-instruction latch without reintroducing fetch side effects
+- [ ] Select and issue zero, one, or two instructions in program order while
+      respecting data dependencies, Pipe 0/Pipe 1 routing, and Table 1-3
+      `O`/`X` pair legality
+- [ ] Integrate the documented illegal sequences for Branch-Branch,
+      Branch-ERET, Branch-SYNC.P/SYNC.L, and
+      Branch-Likely-MTSA/MTSAB/MTSAH with the existing deterministic
+      undefined-operation contract; add `SYNC.P`/`SYNC.L` decode in this item
+      if those instructions are still otherwise unimplemented
+- [ ] Preserve precise exceptions, delay-slot ownership, branch-likely
+      annulment, memory side effects, and older-before-younger write ordering
+      when a pair is considered or issued
+- [ ] Replace single-instruction retirement bookkeeping with ordered
+      zero/one/two retirement records for execution counts, stop reasons, and
+      structured traces
+- [ ] Define deterministic per-cycle trace ordering and sufficient trace-event
+      capacity for two issued instructions and their memory, interlock,
+      exception, and hazard events, extending the C1 foundation contract
+- [ ] Update `stepEEInstruction()`, `runEE()`, `runELF()`, guest-return
+      detection, and instruction budgets for zero/one/two retirement;
+      explicitly define whether stepping one instruction stops before or after
+      the inseparable younger member of an issued pair
+- [ ] Advance SA-ordering and divider branch-proximity instruction windows in
+      program order across a two-instruction issue group
+- [ ] Persist fetch, staging, pipe-assignment, and partially issued state
+      through reset, interrupts, halt/resume, canonical hashes, and
+      transactional save states
+- [ ] Validate single-issue fallback and every implemented instruction-category
+      pairing before an independent EE scheduler review
+
+### COP1 Concurrent Issue and Pipeline Integration
+
+- [ ] Enable COP1 Operate on Pipe 0 and COP1 Move on Pipe 1 using the completed
+      C1 scoreboard and two-wide EE scheduler
+- [ ] Implement Table 1-3's `Y` combination: both instructions enter `R`, then
+      the Pipe 1 COP1 Move stalls for one cycle at `A/T` on the shared C1
+      resource; cover every program-order arrangement permitted by the
+      resolved pipe-assignment contract
+- [ ] Enforce same-pair and cross-cycle FPR, ACC, FCR31, load, store,
+      comparison/branch, and structural dependencies without losing legal
+      concurrent issue
+- [ ] Verify `1S`/`2T` bypassing, `2S` writeback, divider overlap, and Move
+      timing in mixed one-wide and two-wide instruction streams
+- [ ] Preserve in-flight C1 and issue-queue work across unrelated EE
+      execution, interrupts, `ERET`, reset, halt/resume, and save-state restore
 - [ ] Verify repeated and save-state-resumed executions produce identical
-      registers, flags, stop reasons, trace hashes, and memory results
+      registers, flags, memory, stop reasons, retirement traces, and trace
+      hashes
+- [ ] Complete an independent final review of the integrated COP1 pipeline
 
 ### Guest Integration and Final Conformance Audit
 
 - [ ] Add focused independently authored EE programs for transfers, control
       state, comparisons, branches, conversions, and each arithmetic pipeline
-- [ ] Add a PS2DEV ELF guest that exercises representative COP1 families and
-      validates raw results and FCR31 state in guest code
+- [ ] Expand the foundation's PS2DEV semantic baseline into a timing,
+      forwarding, branch, and concurrent-issue COP1 capstone
 - [ ] Audit every defined COP1 opcode for decode, execution, flags, timing,
       hazards, exceptions, tracing, reset, and save-state coverage
 - [ ] Reject every reserved COP1 encoding and invalid fixed-field combination
