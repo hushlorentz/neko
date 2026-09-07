@@ -86,6 +86,9 @@ EEFloatResult maxEEFloatRaw(
 EEFloatResult minEEFloatRaw(
   std::uint32_t fsBits,
   std::uint32_t ftBits);
+int compareEEFloatRaw(
+  std::uint32_t fsBits,
+  std::uint32_t ftBits);
 EEFloatResult sqrtEEFloatRaw(std::uint32_t bits);
 EEFloatResult rsqrtEEFloatRaw(
   std::uint32_t numeratorBits,

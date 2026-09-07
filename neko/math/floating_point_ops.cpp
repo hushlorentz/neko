@@ -677,6 +677,17 @@ EEFloatResult minEEFloatRaw(
   return selectEERaw(fsBits, ftBits, false);
 }
 
+int compareEEFloatRaw(
+  std::uint32_t fsBits,
+  std::uint32_t ftBits)
+{
+  return compareRaw(
+    decodeOperand(fsBits),
+    fsBits,
+    decodeOperand(ftBits),
+    ftBits);
+}
+
 EEFloatResult sqrtEEFloatRaw(std::uint32_t bits)
 {
   return squareRootRaw(bits, true);

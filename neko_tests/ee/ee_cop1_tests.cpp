@@ -1781,7 +1781,7 @@ TEST_CASE("EE COP1 min and max instructions decode canonically")
   REQUIRE_THROWS_WITH(
     decodeEEInstruction(
       cop1SingleInstruction(0x30, 2, 4, 3)),
-    "Unsupported EE instruction encoding.");
+    "Reserved EE instruction encoding.");
 }
 
 TEST_CASE("EE COP1 min and max select exact source encodings")
@@ -1906,6 +1906,98 @@ TEST_CASE("EE COP1 min and max clear current O and U")
       (EECOP1Control::STATUS_FIXED |
        EECOP1Control::CAUSE_INVALID |
        EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_MASK));
+  }
+}
+
+TEST_CASE("EE COP1 comparisons decode only canonical encodings")
+{
+  struct DecodeVector
+  {
+    std::uint8_t function;
+    EEOperation operation;
+  };
+  const DecodeVector vectors[] = {
+    {0x30, EEOperation::CompareFalseSingleCOP1},
+    {0x32, EEOperation::CompareEqualSingleCOP1},
+    {0x34, EEOperation::CompareLessThanSingleCOP1},
+    {0x36, EEOperation::CompareLessThanOrEqualSingleCOP1}
+  };
+
+  for (const DecodeVector &vector : vectors)
+  {
+    REQUIRE(
+      decodeEEInstruction(
+        cop1SingleInstruction(
+          vector.function,
+          2,
+          0,
+          3)).operation ==
+      vector.operation);
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(
+        cop1SingleInstruction(
+          vector.function,
+          2,
+          1,
+          3)),
+      "Reserved EE instruction encoding.");
+  }
+}
+
+TEST_CASE("EE COP1 comparisons update the condition bit exactly")
+{
+  struct ComparisonVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    bool expected;
+  };
+  const ComparisonVector vectors[] = {
+    {0x30, UINT32_C(0x3f800000), UINT32_C(0x3f800000), false},
+    {0x32, UINT32_C(0x3f800000), UINT32_C(0x3f800000), true},
+    {0x32, UINT32_C(0x00000000), UINT32_C(0x80000000), true},
+    {0x32, UINT32_C(0x7fc12345), UINT32_C(0x7fc12345), true},
+    {0x32, UINT32_C(0x7fc12345), UINT32_C(0x7fc12346), false},
+    {0x34, UINT32_C(0xbf800000), UINT32_C(0x00000000), true},
+    {0x34, UINT32_C(0x80000000), UINT32_C(0x00000000), false},
+    {0x34, UINT32_C(0x7f800000), UINT32_C(0x7fc00000), true},
+    {0x36, UINT32_C(0x80000000), UINT32_C(0x00000000), true},
+    {0x36, UINT32_C(0xc0000000), UINT32_C(0xbf800000), true},
+    {0x36, UINT32_C(0x40000000), UINT32_C(0x3f800000), false}
+  };
+
+  for (const ComparisonVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CONDITION |
+        EECOP1Control::CAUSE_MASK |
+        EECOP1Control::STICKY_MASK);
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        0,
+        3));
+
+    const std::uint32_t status =
+      core.cop1ControlRegister(31);
+    REQUIRE(
+      ((status & EECOP1Control::CONDITION) != 0) ==
+      vector.expected);
+    REQUIRE(
+      (status &
+        (EECOP1Control::CAUSE_MASK |
+         EECOP1Control::STICKY_MASK)) ==
+      (EECOP1Control::CAUSE_MASK |
        EECOP1Control::STICKY_MASK));
   }
 }

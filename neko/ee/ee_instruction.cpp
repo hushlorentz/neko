@@ -876,6 +876,33 @@ namespace
           instruction->operation =
             EEOperation::MinimumSingleCOP1;
           return;
+        case 0x30:
+        case 0x32:
+        case 0x34:
+        case 0x36:
+          if (instruction->shiftAmount != 0)
+          {
+            reject(DecodeKind::Reserved);
+          }
+          switch (instruction->function)
+          {
+            case 0x30:
+              instruction->operation =
+                EEOperation::CompareFalseSingleCOP1;
+              return;
+            case 0x32:
+              instruction->operation =
+                EEOperation::CompareEqualSingleCOP1;
+              return;
+            case 0x34:
+              instruction->operation =
+                EEOperation::CompareLessThanSingleCOP1;
+              return;
+            default:
+              instruction->operation =
+                EEOperation::CompareLessThanOrEqualSingleCOP1;
+              return;
+          }
         default:
           break;
       }

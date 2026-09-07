@@ -149,7 +149,11 @@ enum class EEOperation : std::uint8_t
   SubtractSingleToAccumulatorCOP1,
   MultiplySingleToAccumulatorCOP1,
   MultiplyAddSingleToAccumulatorCOP1,
-  MultiplySubtractSingleToAccumulatorCOP1
+  MultiplySubtractSingleToAccumulatorCOP1,
+  CompareFalseSingleCOP1,
+  CompareEqualSingleCOP1,
+  CompareLessThanSingleCOP1,
+  CompareLessThanOrEqualSingleCOP1
 };
 
 struct EEInstruction

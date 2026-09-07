@@ -786,6 +786,41 @@ bool EECore::executeInstruction(
         result.flags);
       return true;
     }
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const int comparison =
+        compareEEFloatRaw(
+          floatingPointRegisters[destination],
+          floatingPointRegisters[instruction.targetRegister]);
+      bool condition = false;
+      switch (instruction.operation)
+      {
+        case EEOperation::CompareEqualSingleCOP1:
+          condition = comparison == 0;
+          break;
+        case EEOperation::CompareLessThanSingleCOP1:
+          condition = comparison < 0;
+          break;
+        case EEOperation::CompareLessThanOrEqualSingleCOP1:
+          condition = comparison <= 0;
+          break;
+        default:
+          break;
+      }
+      cop1StatusRegister &= ~EECOP1Control::CONDITION;
+      if (condition)
+      {
+        cop1StatusRegister |= EECOP1Control::CONDITION;
+      }
+      return true;
+    }
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
@@ -2481,6 +2516,10 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::MultiplyAddSingleCOP1:
     case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
       if (instruction.destinationRegister == registerIndex ||
           instruction.targetRegister == registerIndex)
       {
@@ -2541,6 +2580,10 @@ bool EECore::isCOP1OperateOperation(EEOperation operation)
     case EEOperation::MultiplySingleToAccumulatorCOP1:
     case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
     case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
       return true;
     default:
       return false;

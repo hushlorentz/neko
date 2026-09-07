@@ -686,7 +686,7 @@ than delegating architectural results to host floating-point defaults.
 
 ### Comparison and Branch Control
 
-- [ ] Implement `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, including exact
+- [x] Implement `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, including exact
       comparison and equality of positive and negative zero
 - [ ] Update and expose the FCR31 condition bit with documented visibility
       timing

@@ -122,6 +122,8 @@ namespace EECOP1Control
     UINT32_C(0x01000001);
   constexpr std::uint32_t STATUS_WRITABLE_MASK =
     UINT32_C(0x0083c078);
+  constexpr std::uint32_t CONDITION =
+    UINT32_C(1) << 23;
   constexpr std::uint32_t CAUSE_INVALID =
     UINT32_C(1) << 17;
   constexpr std::uint32_t CAUSE_DIVISION_BY_ZERO =
