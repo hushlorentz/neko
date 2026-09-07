@@ -154,6 +154,7 @@ EEGuestExecutionResult NekoSystem::runELF(
       std::uint8_t completedRegister = 0;
       eeCoreComponent.completePendingCOP1Load(
         &completedRegister);
+      eeCoreComponent.completePendingCOP1Divider();
       eeCoreComponent.haltExecution();
       returned = true;
       break;
@@ -174,6 +175,7 @@ EEGuestExecutionResult NekoSystem::runELF(
     std::uint8_t completedRegister = 0;
     eeCoreComponent.completePendingCOP1Load(
       &completedRegister);
+    eeCoreComponent.completePendingCOP1Divider();
     eeCoreComponent.haltExecution();
     returned = true;
   }

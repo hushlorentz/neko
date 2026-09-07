@@ -226,6 +226,9 @@ void EECore::reset()
   pendingMac0 = {};
   pendingMac1 = {};
   pendingCOP1Load = {};
+  pendingCOP1DividerResults = {};
+  cop1DividerInitiationCycles = 0;
+  cop1DividerOperation = EEOperation::Nop;
   cop1OperateResourceOccupied = false;
   recentShiftAmountAccesses = 0;
   recentShiftAmountReads = 0;
@@ -334,6 +337,13 @@ void EECore::startExecution(std::uint32_t startAddress)
     haltReason == EEStopReason::HostHalt &&
     pendingCOP1Load.active &&
     startAddress == pc;
+  const bool resumePendingCOP1Divider =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    (pendingCOP1DividerResults[0].active ||
+     pendingCOP1DividerResults[1].active ||
+     cop1DividerInitiationCycles != 0) &&
+    startAddress == pc;
   const bool resumeCOP1OperateResource =
     state == EEExecutionState::Halted &&
     haltReason == EEStopReason::HostHalt &&
@@ -361,6 +371,12 @@ void EECore::startExecution(std::uint32_t startAddress)
   if (!resumePendingCOP1Load)
   {
     pendingCOP1Load = {};
+  }
+  if (!resumePendingCOP1Divider)
+  {
+    pendingCOP1DividerResults = {};
+    cop1DividerInitiationCycles = 0;
+    cop1DividerOperation = EEOperation::Nop;
   }
   if (!resumeCOP1OperateResource)
   {
@@ -411,6 +427,7 @@ void EECore::clock()
   std::uint8_t completedCOP1LoadRegister = 0;
   const bool completedCOP1Load =
     completePendingCOP1Load(&completedCOP1LoadRegister);
+  advancePendingCOP1Divider();
   if (interruptDeliverable())
   {
     enterInterruptException();
@@ -477,6 +494,35 @@ void EECore::clock()
         ? static_cast<std::uint8_t>(
             lastDecodedInstruction.operation)
         : 0);
+    pc = fetched.address;
+    return;
+  }
+  if (isCOP1DividerOperation(decoded.operation) &&
+      cop1DividerInitiationCycles != 0)
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1ResourceInterlock,
+      fetched.address,
+      fetched.instruction,
+      static_cast<std::uint8_t>(cop1DividerOperation));
+    pc = fetched.address;
+    return;
+  }
+  std::uint8_t pendingCOP1DividerRegister = 0;
+  FPRDependency pendingCOP1DividerDependency =
+    FPRDependency::None;
+  if (pendingCOP1DividerBlocks(
+        decoded,
+        &pendingCOP1DividerRegister,
+        &pendingCOP1DividerDependency))
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1ResourceInterlock,
+      fetched.address,
+      fetched.instruction,
+      pendingCOP1DividerRegister,
+      static_cast<std::uint8_t>(
+        pendingCOP1DividerDependency));
     pc = fetched.address;
     return;
   }
@@ -658,10 +704,9 @@ bool EECore::executeInstruction(
       const EEFloatResult result =
         sqrtEEFloatRaw(
           floatingPointRegisters[instruction.targetRegister]);
-      floatingPointRegisters[instruction.shiftAmount] =
-        result.bits;
-      updateCOP1ArithmeticFlags(
-        FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+      startPendingCOP1Divider(
+        instruction,
+        result.bits,
         result.flags);
       return true;
     }
@@ -675,10 +720,9 @@ bool EECore::executeInstruction(
         rsqrtEEFloatRaw(
           floatingPointRegisters[destination],
           floatingPointRegisters[instruction.targetRegister]);
-      floatingPointRegisters[instruction.shiftAmount] =
-        result.bits;
-      updateCOP1ArithmeticFlags(
-        FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+      startPendingCOP1Divider(
+        instruction,
+        result.bits,
         result.flags);
       return true;
     }
@@ -719,16 +763,17 @@ bool EECore::executeInstruction(
           result = subFPRaw(fsBits, ftBits);
           break;
       }
-      floatingPointRegisters[instruction.shiftAmount] =
-        result.bits;
       if (instruction.operation == EEOperation::DivideSingleCOP1)
       {
-        updateCOP1ArithmeticFlags(
-          FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+        startPendingCOP1Divider(
+          instruction,
+          result.bits,
           result.flags);
       }
       else
       {
+        floatingPointRegisters[instruction.shiftAmount] =
+          result.bits;
         updateCOP1ArithmeticFlags(
           FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
           result.flags);
@@ -2546,6 +2591,133 @@ bool EECore::completePendingCOP1Load(
   return true;
 }
 
+void EECore::advancePendingCOP1Divider()
+{
+  if (cop1DividerInitiationCycles != 0)
+  {
+    --cop1DividerInitiationCycles;
+    if (cop1DividerInitiationCycles == 0)
+    {
+      cop1DividerOperation = EEOperation::Nop;
+    }
+  }
+
+  for (PendingCOP1DividerResult &result :
+       pendingCOP1DividerResults)
+  {
+    if (!result.active)
+    {
+      continue;
+    }
+    --result.remainingCycles;
+    if (result.remainingCycles != 0)
+    {
+      continue;
+    }
+
+    floatingPointRegisters[result.registerIndex] =
+      result.value;
+    updateCOP1ArithmeticFlags(
+      result.affectedFlags,
+      result.raisedFlags);
+    result = {};
+  }
+}
+
+bool EECore::pendingCOP1DividerActive() const
+{
+  for (const PendingCOP1DividerResult &result :
+       pendingCOP1DividerResults)
+  {
+    if (result.active)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+void EECore::completePendingCOP1Divider()
+{
+  while (pendingCOP1DividerActive())
+  {
+    advancePendingCOP1Divider();
+  }
+}
+
+void EECore::startPendingCOP1Divider(
+  const EEInstruction &instruction,
+  std::uint32_t result,
+  std::uint8_t raisedFlags)
+{
+  PendingCOP1DividerResult *pendingResult = nullptr;
+  for (PendingCOP1DividerResult &candidate :
+       pendingCOP1DividerResults)
+  {
+    if (!candidate.active)
+    {
+      pendingResult = &candidate;
+      break;
+    }
+  }
+  if (pendingResult == nullptr)
+  {
+    throw std::logic_error(
+      "EE COP1 divider has no free result slot.");
+  }
+
+  const COP1DividerTiming timing =
+    cop1DividerTiming(instruction.operation);
+  *pendingResult = {
+    true,
+    timing.latency,
+    instruction.shiftAmount,
+    result,
+    static_cast<std::uint8_t>(
+      FP_FLAG_I_BIT | FP_FLAG_D_BIT),
+    raisedFlags
+  };
+  cop1DividerInitiationCycles = timing.initiationInterval;
+  cop1DividerOperation = instruction.operation;
+}
+
+bool EECore::pendingCOP1DividerBlocks(
+  const EEInstruction &instruction,
+  std::uint8_t *registerIndex,
+  FPRDependency *dependency) const
+{
+  for (const PendingCOP1DividerResult &result :
+       pendingCOP1DividerResults)
+  {
+    if (!result.active)
+    {
+      continue;
+    }
+    const FPRDependency resultDependency =
+      instructionFPRDependency(
+        instruction,
+        result.registerIndex);
+    if (resultDependency != FPRDependency::None)
+    {
+      *registerIndex = result.registerIndex;
+      *dependency = resultDependency;
+      return true;
+    }
+    if ((instruction.operation ==
+           EEOperation::MoveControlWordFromCOP1 ||
+         instruction.operation ==
+           EEOperation::MoveControlWordToCOP1) &&
+        instruction.destinationRegister ==
+          EECOP1Control::STATUS_REGISTER)
+    {
+      *registerIndex = result.registerIndex;
+      *dependency = FPRDependency::Write;
+      return true;
+    }
+  }
+  return false;
+}
+
 EECore::FPRDependency EECore::instructionFPRDependency(
   const EEInstruction &instruction,
   std::uint8_t registerIndex)
@@ -2671,6 +2843,30 @@ bool EECore::isCOP1OperateOperation(EEOperation operation)
       return true;
     default:
       return false;
+  }
+}
+
+bool EECore::isCOP1DividerOperation(EEOperation operation)
+{
+  return
+    operation == EEOperation::DivideSingleCOP1 ||
+    operation == EEOperation::SquareRootSingleCOP1 ||
+    operation == EEOperation::ReciprocalSquareRootSingleCOP1;
+}
+
+EECore::COP1DividerTiming EECore::cop1DividerTiming(
+  EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::DivideSingleCOP1:
+    case EEOperation::SquareRootSingleCOP1:
+      return {8, 7};
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+      return {14, 13};
+    default:
+      throw std::invalid_argument(
+        "EE operation does not use the COP1 divider.");
   }
 }
 
@@ -3033,6 +3229,20 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, pendingCOP1Load.active);
   hashEEStateValue(&hash, pendingCOP1Load.registerIndex);
   hashEEStateValue(&hash, pendingCOP1Load.value);
+  for (const PendingCOP1DividerResult &result :
+       pendingCOP1DividerResults)
+  {
+    hashEEStateValue(&hash, result.active);
+    hashEEStateValue(&hash, result.remainingCycles);
+    hashEEStateValue(&hash, result.registerIndex);
+    hashEEStateValue(&hash, result.value);
+    hashEEStateValue(&hash, result.affectedFlags);
+    hashEEStateValue(&hash, result.raisedFlags);
+  }
+  hashEEStateValue(&hash, cop1DividerInitiationCycles);
+  hashEEStateValue(
+    &hash,
+    static_cast<std::uint8_t>(cop1DividerOperation));
   hashEEStateValue(&hash, cop1OperateResourceOccupied);
   hashEEStateValue(&hash, recentShiftAmountAccesses);
   hashEEStateValue(&hash, recentShiftAmountReads);

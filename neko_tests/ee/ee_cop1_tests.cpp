@@ -9,6 +9,9 @@
 
 namespace
 {
+  constexpr std::uint8_t COP1_DIV_SQRT_LATENCY = 8;
+  constexpr std::uint8_t COP1_RSQRT_LATENCY = 14;
+
   std::uint32_t cop1TransferInstruction(
     std::uint8_t source,
     std::uint8_t target,
@@ -854,6 +857,7 @@ TEST_CASE("EE COP1 divide produces exact raw results")
     runInstruction(
       &system,
       cop1SingleInstruction(0x03, 2, 4, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(core.floatingPointRegister(2) == vector.fs);
     REQUIRE(core.floatingPointRegister(3) == vector.ft);
@@ -875,6 +879,7 @@ TEST_CASE("EE COP1 divide supports in-place writes")
     runInstruction(
       &system,
       cop1SingleInstruction(0x03, 2, 2, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(2) ==
@@ -891,6 +896,7 @@ TEST_CASE("EE COP1 divide supports in-place writes")
     runInstruction(
       &system,
       cop1SingleInstruction(0x03, 2, 3, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(3) ==
@@ -915,6 +921,7 @@ TEST_CASE("EE COP1 divide updates only invalid and division flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x03, 2, 4, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -934,6 +941,7 @@ TEST_CASE("EE COP1 divide updates only invalid and division flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x03, 2, 4, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -955,6 +963,7 @@ TEST_CASE("EE COP1 divide updates only invalid and division flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x03, 2, 4, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -992,6 +1001,7 @@ TEST_CASE("EE COP1 square root produces exact raw results")
     runInstruction(
       &system,
       cop1SingleInstruction(0x04, 0, 4, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(core.floatingPointRegister(3) == vector.ft);
     REQUIRE(
@@ -1009,6 +1019,7 @@ TEST_CASE("EE COP1 square root supports an in-place ft destination")
   runInstruction(
     &system,
     cop1SingleInstruction(0x04, 0, 3, 3));
+  system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
   REQUIRE(
     core.floatingPointRegister(3) ==
@@ -1031,6 +1042,7 @@ TEST_CASE("EE COP1 square root updates only invalid and division flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x04, 0, 4, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -1053,6 +1065,7 @@ TEST_CASE("EE COP1 square root updates only invalid and division flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x04, 0, 4, 3));
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1098,6 +1111,7 @@ TEST_CASE("EE COP1 reciprocal square root produces exact raw results")
     runInstruction(
       &system,
       cop1SingleInstruction(0x16, 2, 4, 3));
+    system.runMasterCycles(COP1_RSQRT_LATENCY);
 
     REQUIRE(core.floatingPointRegister(2) == vector.fs);
     REQUIRE(core.floatingPointRegister(3) == vector.ft);
@@ -1119,6 +1133,7 @@ TEST_CASE("EE COP1 reciprocal square root supports in-place writes")
     runInstruction(
       &system,
       cop1SingleInstruction(0x16, 2, 2, 3));
+    system.runMasterCycles(COP1_RSQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(2) ==
@@ -1135,6 +1150,7 @@ TEST_CASE("EE COP1 reciprocal square root supports in-place writes")
     runInstruction(
       &system,
       cop1SingleInstruction(0x16, 2, 3, 3));
+    system.runMasterCycles(COP1_RSQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(3) ==
@@ -1160,6 +1176,7 @@ TEST_CASE(
     runInstruction(
       &system,
       cop1SingleInstruction(0x16, 2, 4, 3));
+    system.runMasterCycles(COP1_RSQRT_LATENCY);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -1183,6 +1200,7 @@ TEST_CASE(
     runInstruction(
       &system,
       cop1SingleInstruction(0x16, 2, 4, 3));
+    system.runMasterCycles(COP1_RSQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1205,6 +1223,7 @@ TEST_CASE(
     runInstruction(
       &system,
       cop1SingleInstruction(0x16, 2, 4, 3));
+    system.runMasterCycles(COP1_RSQRT_LATENCY);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -3207,6 +3226,314 @@ TEST_CASE("EE COP1 independent multiply operations retire every cycle")
     UINT32_C(0x40600000));
 }
 
+TEST_CASE(
+  "EE COP1 divider results retire after the provisional latency")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(4, UINT32_C(0x76543210));
+  for (std::uint32_t address = 4; address <= 32; address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x76543210));
+
+  system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+  REQUIRE(core.programCounter() == 32);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x76543210));
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 36);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+}
+
+TEST_CASE(
+  "EE COP1 divider dependencies wait for result retirement")
+{
+  SECTION("An FPR consumer issues on the completion cycle")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 4, 5, 6));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x40800000));
+  }
+
+  SECTION("CFC1 observes flags on the completion cycle")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(3, UINT32_C(0xc1100000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x04, 0, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1TransferInstruction(0x02, 5, 31));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.generalRegister(5).low ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
+  }
+}
+
+TEST_CASE(
+  "EE COP1 divider initiation intervals permit overlapping results")
+{
+  SECTION("DIV.S and SQRT.S use a seven-cycle initiation interval")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x41100000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x04, 0, 5, 6));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(6);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.runMasterCycles(7);
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x40400000));
+  }
+
+  SECTION("RSQRT.S uses a thirteen-cycle initiation interval")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40800000));
+    core.setFloatingPointRegister(6, UINT32_C(0x41100000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x16, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x04, 0, 5, 6));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(12);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+
+    system.runMasterCycles(7);
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x40400000));
+  }
+}
+
+TEST_CASE(
+  "EE COP1 divider state survives halt and save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  originalCore.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  originalCore.setFloatingPointRegister(6, UINT32_C(0x41100000));
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  original.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x04, 0, 5, 6));
+  originalCore.startExecution(0);
+  original.clockMasterCycle();
+  original.runMasterCycles(7);
+  originalCore.haltExecution();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+
+  originalCore.startExecution(8);
+  restored.eeCore().startExecution(8);
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(
+    originalCore.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+
+  original.runMasterCycles(7);
+  restored.runMasterCycles(7);
+
+  REQUIRE(
+    originalCore.floatingPointRegister(5) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(5) ==
+    UINT32_C(0x40400000));
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+}
+
+TEST_CASE("EE COP1 divider pending results participate in state hashes")
+{
+  NekoSystem first;
+  NekoSystem second;
+  first.eeCore().setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  second.eeCore().setFloatingPointRegister(2, UINT32_C(0x41000000));
+  first.eeCore().setFloatingPointRegister(3, UINT32_C(0x40000000));
+  second.eeCore().setFloatingPointRegister(3, UINT32_C(0x40000000));
+  const std::uint32_t instruction =
+    cop1SingleInstruction(0x03, 2, 4, 3);
+  first.eeBus().write32(0, instruction);
+  second.eeBus().write32(0, instruction);
+  first.eeCore().startExecution(0);
+  second.eeCore().startExecution(0);
+  first.clockMasterCycle();
+  second.clockMasterCycle();
+  first.eeCore().setFloatingPointRegister(2, 0);
+  second.eeCore().setFloatingPointRegister(2, 0);
+
+  REQUIRE(first.eeCore().stateHash() != second.eeCore().stateHash());
+}
+
+TEST_CASE("EE COP1 divider work continues through exception entry")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::RESET &
+      ~EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  system.eeBus().write32(4, UINT32_C(0x0000000c));
+  for (std::uint32_t address = EEExceptionVector::GENERAL;
+       address < EEExceptionVector::GENERAL + 32;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+  REQUIRE(core.pendingException() == EEException::SystemCall);
+  REQUIRE(
+    core.programCounter() ==
+    EEExceptionVector::GENERAL);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.runMasterCycles(7);
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+}
+
+TEST_CASE("EE reset cancels pending COP1 divider results")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  core.startExecution(0);
+  system.clockMasterCycle();
+
+  core.reset();
+  core.startExecution(4);
+  system.runMasterCycles(COP1_DIV_SQRT_LATENCY + 1);
+
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+}
+
 TEST_CASE("EE COP1 operate resource interlocks a following move")
 {
   SECTION("SQRT.S interlocks a following MFC1")
@@ -3226,7 +3553,7 @@ TEST_CASE("EE COP1 operate resource interlocks a following move")
     REQUIRE(core.programCounter() == 4);
     REQUIRE(core.generalRegister(5) == EERegister128{});
 
-    system.clockMasterCycle();
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
     REQUIRE(core.programCounter() == 4);
     REQUIRE(core.generalRegister(5) == EERegister128{});
 

@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "floating_point_ops.hpp"
 #include "vpu_flags.hpp"
 #include "vpu_register_ids.hpp"
 
@@ -17,7 +18,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 16;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 17;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1320,6 +1321,12 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.pendingMac1;
   destination->eeCoreComponent.pendingCOP1Load =
     source->eeCoreComponent.pendingCOP1Load;
+  destination->eeCoreComponent.pendingCOP1DividerResults =
+    source->eeCoreComponent.pendingCOP1DividerResults;
+  destination->eeCoreComponent.cop1DividerInitiationCycles =
+    source->eeCoreComponent.cop1DividerInitiationCycles;
+  destination->eeCoreComponent.cop1DividerOperation =
+    source->eeCoreComponent.cop1DividerOperation;
   destination->eeCoreComponent.cop1OperateResourceOccupied =
     source->eeCoreComponent.cop1OperateResourceOccupied;
   destination->eeCoreComponent.recentShiftAmountAccesses =
@@ -1646,6 +1653,20 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeBool(core.pendingCOP1Load.active);
   writer->writeU8(core.pendingCOP1Load.registerIndex);
   writer->writeU32(core.pendingCOP1Load.value);
+  for (const EECore::PendingCOP1DividerResult &result :
+       core.pendingCOP1DividerResults)
+  {
+    writer->writeBool(result.active);
+    writer->writeU8(result.remainingCycles);
+    writer->writeU8(result.registerIndex);
+    writer->writeU32(result.value);
+    writer->writeU8(result.affectedFlags);
+    writer->writeU8(result.raisedFlags);
+  }
+  writer->writeU8(core.cop1DividerInitiationCycles);
+  writer->writeU8(
+    static_cast<std::uint8_t>(
+      core.cop1DividerOperation));
   writer->writeBool(core.cop1OperateResourceOccupied);
   writer->writeU8(core.recentShiftAmountAccesses);
   writer->writeU8(core.recentShiftAmountReads);
@@ -1751,6 +1772,124 @@ void NekoSaveStateCodec::readEECore(
       (core->pendingCOP1Load.registerIndex == 0 &&
        core->pendingCOP1Load.value == 0),
     "EE inactive COP1 load contains state");
+  for (EECore::PendingCOP1DividerResult &result :
+       core->pendingCOP1DividerResults)
+  {
+    result.active =
+      reader->readBool("EE COP1 pending-divider flag");
+    result.remainingCycles = reader->readU8();
+    result.registerIndex = reader->readU8();
+    result.value = reader->readU32();
+    result.affectedFlags = reader->readU8();
+    result.raisedFlags = reader->readU8();
+    require(
+      result.registerIndex <
+        EECore::FLOATING_POINT_REGISTER_COUNT,
+      "EE pending COP1 divider register is invalid");
+    require(
+      !result.active ||
+        (result.remainingCycles >= 1 &&
+         result.remainingCycles <= 14),
+      "EE pending COP1 divider latency is invalid");
+    require(
+      !result.active ||
+        result.affectedFlags ==
+          (FP_FLAG_I_BIT | FP_FLAG_D_BIT),
+      "EE pending COP1 divider affected flags are invalid");
+    require(
+      result.raisedFlags == 0 ||
+        result.raisedFlags == FP_FLAG_I_BIT ||
+        result.raisedFlags == FP_FLAG_D_BIT,
+      "EE pending COP1 divider raised flags are invalid");
+    require(
+      result.active ||
+        (result.remainingCycles == 0 &&
+         result.registerIndex == 0 &&
+         result.value == 0 &&
+         result.affectedFlags == 0 &&
+         result.raisedFlags == 0),
+      "EE inactive COP1 divider result contains state");
+  }
+  core->cop1DividerInitiationCycles = reader->readU8();
+  core->cop1DividerOperation =
+    static_cast<EEOperation>(reader->readU8());
+  std::size_t activeDividerResults = 0;
+  std::uint8_t firstRemainingCycles = 0;
+  std::uint8_t secondRemainingCycles = 0;
+  std::uint8_t firstDividerRegister = 0;
+  std::uint8_t secondDividerRegister = 0;
+  for (const EECore::PendingCOP1DividerResult &result :
+       core->pendingCOP1DividerResults)
+  {
+    if (!result.active)
+    {
+      continue;
+    }
+    if (activeDividerResults == 0)
+    {
+      firstRemainingCycles = result.remainingCycles;
+      firstDividerRegister = result.registerIndex;
+    }
+    else
+    {
+      secondRemainingCycles = result.remainingCycles;
+      secondDividerRegister = result.registerIndex;
+    }
+    ++activeDividerResults;
+  }
+  require(
+    core->cop1DividerInitiationCycles <= 13,
+    "EE COP1 divider initiation interval is invalid");
+  require(
+    activeDividerResults != 0 ||
+      (core->cop1DividerInitiationCycles == 0 &&
+       core->cop1DividerOperation == EEOperation::Nop),
+    "EE inactive COP1 divider contains occupancy");
+  require(
+    core->cop1DividerInitiationCycles != 0 ||
+      (activeDividerResults == 0 ||
+       (activeDividerResults == 1 &&
+        firstRemainingCycles == 1)),
+    "EE unoccupied COP1 divider has invalid pending results");
+  require(
+    core->cop1DividerInitiationCycles != 0 ||
+      core->cop1DividerOperation == EEOperation::Nop,
+    "EE unoccupied COP1 divider names an operation");
+  require(
+    core->cop1DividerInitiationCycles == 0 ||
+      EECore::isCOP1DividerOperation(
+        core->cop1DividerOperation),
+    "EE COP1 divider operation state is inconsistent");
+  if (core->cop1DividerInitiationCycles != 0)
+  {
+    const EECore::COP1DividerTiming timing =
+      EECore::cop1DividerTiming(
+        core->cop1DividerOperation);
+    require(
+      core->cop1DividerInitiationCycles <=
+        timing.initiationInterval,
+      "EE COP1 divider occupancy exceeds its policy");
+    if (activeDividerResults == 1)
+    {
+      require(
+        firstRemainingCycles ==
+          core->cop1DividerInitiationCycles + 1,
+        "EE COP1 divider countdowns are inconsistent");
+    }
+    else
+    {
+      require(
+        activeDividerResults == 2 &&
+          firstDividerRegister != secondDividerRegister &&
+          core->cop1DividerInitiationCycles ==
+            timing.initiationInterval &&
+          ((firstRemainingCycles == 1 &&
+            secondRemainingCycles == timing.latency) ||
+           (secondRemainingCycles == 1 &&
+            firstRemainingCycles == timing.latency)),
+        "EE COP1 divider overlap state is inconsistent");
+    }
+  }
   core->cop1OperateResourceOccupied =
     reader->readBool("EE COP1 operate resource flag");
   core->recentShiftAmountAccesses = reader->readU8();

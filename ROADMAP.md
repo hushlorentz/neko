@@ -731,6 +731,19 @@ Negative nonzero radicands use their absolute value and raise current/sticky
 sign of a zero radicand. Like `DIV.S`, exponent overflow and underflow change
 the result without changing `O` or `U`.
 
+The provisional timing policy is isolated from execution state. An operation
+issued in cycle `N` may issue another divider operation in cycle `N+7` for
+`DIV.S`/`SQRT.S`, or `N+13` for `RSQRT.S`; its result and `I`/`D` flag updates
+retire at the start of cycle `N+8` or `N+14`, respectively. Two result slots
+represent the one-cycle overlap implied by those latency/interval pairs.
+Unrelated instructions continue while results are pending. Reads or writes of
+a pending destination, plus `CFC1` or `CTC1` access to `FCR31`, interlock until
+retirement; a dependent instruction may issue on the retirement cycle.
+Pending slots and divider occupancy participate in reset, state hashing, and
+save-state version 17. They continue through exception entry and host
+halt/resume, while the ELF runner drains outstanding results before reporting
+guest return.
+
 - [x] Exhaustively audit the local manuals and toolchain documentation for
       numeric timing and branch-adjacent pipeline restrictions
 - [x] Implement `DIV.S`, including signed saturation for division by zero and
@@ -739,15 +752,16 @@ the result without changing `O` or `U`.
       signed-zero preservation
 - [x] Implement `RSQRT.S`, including numerator sign, negative radicands,
       division by zero, overflow, and underflow
-- [ ] Isolate the provisional latency and initiation-interval values in a
-      replaceable timing policy
-- [ ] Model pending multicycle execution, structural occupancy, dependency
-      interlocks, and documented `1S`/`2S` completion visibility
+- [x] Introduce a replaceable timing policy and pending multicycle divider
+      engine, including initiation restrictions, structural occupancy,
+      dependency interlocks, result retirement, and documented `1S`/`2S`
+      completion visibility
+- [x] Preserve divider continuation and determinism across reset, halt/resume,
+      exception entry, state hashing, save states, and execution drain
 - [ ] Track branch-delay and branch-target proximity and emit a deterministic
       diagnostic for the documented GNUPro pipeline-bug regions
-- [ ] Add focused raw-bit, flag, overlap, drain, exception-entry, and
-      save-resume tests, including legal and hazardous branch-adjacent
-      placements
+- [ ] Complete cross-operation raw-bit, flag, overlap, timing, drain,
+      save-resume, and legal/hazardous branch-placement validation
 
 ### Pipeline Timing and System Integration
 

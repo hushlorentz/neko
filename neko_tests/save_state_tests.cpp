@@ -4,6 +4,7 @@
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
+#include "floating_point_ops.hpp"
 #include "gif_dmac_channel.hpp"
 #include "neko_system.hpp"
 #include "vif_command.hpp"
@@ -17,9 +18,14 @@ namespace
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_PENDING_COP1_LOAD_REGISTER_OFFSET = 949;
+  constexpr std::size_t EE_COP1_DIVIDER_FIRST_REGISTER_OFFSET = 956;
+  constexpr std::size_t EE_COP1_DIVIDER_FIRST_FLAGS_OFFSET = 962;
+  constexpr std::size_t EE_COP1_DIVIDER_SECOND_REGISTER_OFFSET = 965;
+  constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
+  constexpr std::size_t EE_COP1_DIVIDER_OPERATION_OFFSET = 973;
   constexpr std::size_t
-    PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET = 983;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 992;
+    PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET = 1003;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 1012;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -1051,6 +1057,15 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
+  invalid[EE_COP1_DIVIDER_INITIATION_OFFSET] = 1;
+  invalid[EE_COP1_DIVIDER_OPERATION_OFFSET] =
+    static_cast<std::uint8_t>(
+      EEOperation::DivideSingleCOP1);
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
   invalid[PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET] = 1;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
@@ -1094,4 +1109,60 @@ TEST_CASE("Pending COP1 save-state loads match their instruction")
     destination.saveState();
   REQUIRE_THROWS(destination.loadState(invalid));
   REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Invalid pending COP1 divider states are rejected")
+{
+  NekoSystem source;
+  source.eeCore().setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  source.eeCore().setFloatingPointRegister(3, UINT32_C(0x40000000));
+  source.eeCore().setFloatingPointRegister(6, UINT32_C(0x41100000));
+  source.eeBus().write32(
+    0,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x10) << 21) |
+      (UINT32_C(3) << 16) |
+      (UINT32_C(2) << 11) |
+      (UINT32_C(4) << 6) |
+      UINT32_C(0x03));
+  source.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x10) << 21) |
+      (UINT32_C(6) << 16) |
+      (UINT32_C(5) << 6) |
+      UINT32_C(0x04));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(8);
+  source.eeCore().haltExecution();
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+
+  SECTION("Overlapping results require distinct destinations")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    REQUIRE(
+      invalid[EE_COP1_DIVIDER_FIRST_REGISTER_OFFSET] == 4);
+    REQUIRE(
+      invalid[EE_COP1_DIVIDER_SECOND_REGISTER_OFFSET] == 5);
+    invalid[EE_COP1_DIVIDER_SECOND_REGISTER_OFFSET] =
+      invalid[EE_COP1_DIVIDER_FIRST_REGISTER_OFFSET];
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("A result cannot raise invalid and division by zero together")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[EE_COP1_DIVIDER_FIRST_FLAGS_OFFSET] =
+      FP_FLAG_I_BIT | FP_FLAG_D_BIT;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
 }

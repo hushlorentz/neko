@@ -305,6 +305,22 @@ class EECore : public ClockedComponent
       std::uint32_t value = 0;
     };
 
+    struct PendingCOP1DividerResult
+    {
+      bool active = false;
+      std::uint8_t remainingCycles = 0;
+      std::uint8_t registerIndex = 0;
+      std::uint32_t value = 0;
+      std::uint8_t affectedFlags = 0;
+      std::uint8_t raisedFlags = 0;
+    };
+
+    struct COP1DividerTiming
+    {
+      std::uint8_t latency;
+      std::uint8_t initiationInterval;
+    };
+
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
     std::array<
@@ -341,6 +357,10 @@ class EECore : public ClockedComponent
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
     PendingCOP1Load pendingCOP1Load;
+    std::array<PendingCOP1DividerResult, 2>
+      pendingCOP1DividerResults = {};
+    std::uint8_t cop1DividerInitiationCycles = 0;
+    EEOperation cop1DividerOperation = EEOperation::Nop;
     bool cop1OperateResourceOccupied = false;
     std::uint8_t recentShiftAmountAccesses = 0;
     std::uint8_t recentShiftAmountReads = 0;
@@ -422,11 +442,25 @@ class EECore : public ClockedComponent
       bool writeGeneralRegister);
     bool completePendingCOP1Load(
       std::uint8_t *registerIndex);
+    void advancePendingCOP1Divider();
+    bool pendingCOP1DividerActive() const;
+    void completePendingCOP1Divider();
+    void startPendingCOP1Divider(
+      const EEInstruction &instruction,
+      std::uint32_t result,
+      std::uint8_t raisedFlags);
+    bool pendingCOP1DividerBlocks(
+      const EEInstruction &instruction,
+      std::uint8_t *registerIndex,
+      FPRDependency *dependency) const;
     static FPRDependency instructionFPRDependency(
       const EEInstruction &instruction,
       std::uint8_t registerIndex);
     static bool isCOP1MoveOperation(EEOperation operation);
     static bool isCOP1OperateOperation(EEOperation operation);
+    static bool isCOP1DividerOperation(EEOperation operation);
+    static COP1DividerTiming cop1DividerTiming(
+      EEOperation operation);
     bool validateShiftAmountOrdering(
       const EEInstruction &instruction,
       std::uint32_t address);
