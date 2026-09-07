@@ -766,8 +766,19 @@ post-delay window, and no undocumented execution failure is modeled.
       exception entry, state hashing, save states, and execution drain
 - [x] Track branch-delay and branch-target proximity and emit a deterministic
       diagnostic for the documented GNUPro pipeline-bug regions
-- [ ] Complete cross-operation raw-bit, flag, overlap, timing, drain,
+- [x] Complete cross-operation raw-bit, flag, overlap, timing, drain,
       save-resume, and legal/hazardous branch-placement validation
+
+This block completes the initial EE COP1 divider unit. Neko can now execute all
+three scalar divider operations with manual-backed raw results and flags,
+continue independent EE work while results are pending, enforce result and
+control-register dependencies, overlap every operation pairing under the
+replaceable timing policy, and preserve in-flight work through exceptions,
+host suspension, save states, and ELF return. Regression traces can also
+identify every documented branch-adjacent hazardous placement without
+changing guest execution. Later pipeline work can replace the provisional
+latencies without changing the arithmetic, continuation, or diagnostic
+contracts established here.
 
 ### Pipeline Timing and System Integration
 

@@ -140,7 +140,8 @@ namespace
     return image;
   }
 
-  std::vector<std::uint8_t> returningCOP1DividerELF()
+  std::vector<std::uint8_t> returningCOP1DividerELF(
+    std::uint8_t function)
   {
     std::vector<std::uint8_t> image = returningELF(0);
     writeU32(
@@ -149,7 +150,7 @@ namespace
       (UINT32_C(0x11) << 26) |
         (UINT32_C(0x10) << 21) |
         (UINT32_C(4) << 6) |
-        UINT32_C(0x03));
+      function);
     return image;
   }
 }
@@ -631,20 +632,51 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
 
   SECTION("Return drains pending COP1 divider work")
   {
-    NekoSystem system;
-    const EEGuestExecutionResult result =
-      system.runELF(returningCOP1DividerELF(), 3);
+    struct DrainVector
+    {
+      std::uint8_t function;
+      std::uint32_t expected;
+      std::uint32_t expectedStatus;
+    };
+    const DrainVector vectors[] = {
+      {
+        0x03,
+        UINT32_C(0x7fffffff),
+        EECOP1Control::STATUS_FIXED |
+          EECOP1Control::CAUSE_INVALID |
+          EECOP1Control::STICKY_INVALID
+      },
+      {
+        0x04,
+        0,
+        EECOP1Control::STATUS_FIXED
+      },
+      {
+        0x16,
+        UINT32_C(0x7fffffff),
+        EECOP1Control::STATUS_FIXED |
+          EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+          EECOP1Control::STICKY_DIVISION_BY_ZERO
+      }
+    };
 
-    REQUIRE(result.outcome == EEGuestOutcome::Completed);
-    REQUIRE(result.execution.instructions == 3);
-    REQUIRE(
-      system.eeCore().floatingPointRegister(4) ==
-      UINT32_C(0x7fffffff));
-    REQUIRE(
-      system.eeCore().cop1ControlRegister(31) ==
-      (EECOP1Control::STATUS_FIXED |
-       EECOP1Control::CAUSE_INVALID |
-       EECOP1Control::STICKY_INVALID));
+    for (const DrainVector &vector : vectors)
+    {
+      NekoSystem system;
+      const EEGuestExecutionResult result =
+        system.runELF(
+          returningCOP1DividerELF(vector.function),
+          3);
+
+      REQUIRE(result.outcome == EEGuestOutcome::Completed);
+      REQUIRE(result.execution.instructions == 3);
+      REQUIRE(
+        system.eeCore().floatingPointRegister(4) ==
+        vector.expected);
+      REQUIRE(
+        system.eeCore().cop1ControlRegister(31) ==
+        vector.expectedStatus);
+    }
   }
 
   SECTION("Cycle limit")

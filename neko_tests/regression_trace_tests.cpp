@@ -582,6 +582,64 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
         AFTER_BRANCH_TARGET);
     REQUIRE(hazards[1].value3 == (UINT64_C(16) << 32));
   }
+
+  SECTION("all divider operations report hazardous placement")
+  {
+    for (const std::uint8_t function : {0x03, 0x04, 0x16})
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      system.eeBus().write32(
+        0,
+        immediateInstruction(0x04, 0, 0, 2));
+      system.eeBus().write32(
+        4,
+        cop1SingleInstruction(
+          function,
+          function == 0x04 ? 0 : 2,
+          4,
+          3));
+      core.startExecution(0);
+      system.startTrace();
+
+      system.runMasterCycles(2);
+
+      const std::vector<NekoTraceEvent> hazards =
+        cop1DividerHazards(system);
+      REQUIRE(hazards.size() == 1);
+      REQUIRE(
+        hazards[0].value2 ==
+        NekoEETraceCOP1DividerHazard::BRANCH_DELAY_SLOT);
+    }
+  }
+
+  SECTION("all divider operations remain silent in legal placement")
+  {
+    for (const std::uint8_t function : {0x03, 0x04, 0x16})
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      system.eeBus().write32(
+        0,
+        cop1SingleInstruction(
+          function,
+          function == 0x04 ? 0 : 2,
+          4,
+          3));
+      core.startExecution(0);
+      system.startTrace();
+
+      system.clockMasterCycle();
+
+      REQUIRE(cop1DividerHazards(system).empty());
+    }
+  }
 }
 
 TEST_CASE("COP1 divider hazard context survives save and reset")
