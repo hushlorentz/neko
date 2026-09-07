@@ -144,6 +144,7 @@ enum class EEOperation : std::uint8_t
   SubtractSingleCOP1,
   MultiplySingleCOP1,
   DivideSingleCOP1,
+  SquareRootSingleCOP1,
   MultiplyAddSingleCOP1,
   MultiplySubtractSingleCOP1,
   AddSingleToAccumulatorCOP1,

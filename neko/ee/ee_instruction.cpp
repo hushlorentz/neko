@@ -807,6 +807,14 @@ namespace
           instruction->operation =
             EEOperation::DivideSingleCOP1;
           return;
+        case 0x04:
+          if (instruction->destinationRegister != 0)
+          {
+            reject(DecodeKind::Reserved);
+          }
+          instruction->operation =
+            EEOperation::SquareRootSingleCOP1;
+          return;
         case 0x05:
           if (instruction->targetRegister != 0)
           {

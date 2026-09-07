@@ -718,11 +718,17 @@ definition names only `I` and `D` as affected flags, so ordinary division
 clears current `I` and `D` while preserving current `O` and `U`; exponent
 overflow and underflow still saturate or flush without changing `O` or `U`.
 
+`SQRT.S` reads `ft` and requires its encoded `fs` field to be zero. Negative
+nonzero inputs produce `sqrt(abs(ft))` and raise current/sticky `I`; negative
+zero and exponent-zero negative encodings preserve a negative-zero result
+without raising `I`. The instruction explicitly clears current `D` alongside
+updating `I`, while preserving current and sticky `O` and `U`.
+
 - [x] Exhaustively audit the local manuals and toolchain documentation for
       numeric timing and branch-adjacent pipeline restrictions
 - [x] Implement `DIV.S`, including signed saturation for division by zero and
       distinct `0/0` invalid-operation behavior
-- [ ] Implement `SQRT.S`, including negative-input absolute-value results and
+- [x] Implement `SQRT.S`, including negative-input absolute-value results and
       signed-zero preservation
 - [ ] Implement `RSQRT.S`, including numerator sign, negative radicands,
       division by zero, overflow, and underflow

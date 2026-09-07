@@ -649,6 +649,22 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::SquareRootSingleCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const EEFloatResult result =
+        sqrtEEFloatRaw(
+          floatingPointRegisters[instruction.targetRegister]);
+      floatingPointRegisters[instruction.shiftAmount] =
+        result.bits;
+      updateCOP1ArithmeticFlags(
+        FP_FLAG_I_BIT | FP_FLAG_D_BIT,
+        result.flags);
+      return true;
+    }
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
     case EEOperation::AddSingleCOP1:
@@ -2547,6 +2563,14 @@ EECore::FPRDependency EECore::instructionFPRDependency(
       return instruction.shiftAmount == registerIndex ?
         FPRDependency::Write :
         FPRDependency::None;
+    case EEOperation::SquareRootSingleCOP1:
+      if (instruction.targetRegister == registerIndex)
+      {
+        return FPRDependency::Read;
+      }
+      return instruction.shiftAmount == registerIndex ?
+        FPRDependency::Write :
+        FPRDependency::None;
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
     case EEOperation::AddSingleCOP1:
@@ -2613,6 +2637,7 @@ bool EECore::isCOP1OperateOperation(EEOperation operation)
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::DivideSingleCOP1:
+    case EEOperation::SquareRootSingleCOP1:
     case EEOperation::MultiplyAddSingleCOP1:
     case EEOperation::MultiplySubtractSingleCOP1:
     case EEOperation::AddSingleToAccumulatorCOP1:

@@ -707,6 +707,19 @@ TEST_CASE("EE COP1 divide decodes canonically")
     EEOperation::DivideSingleCOP1);
 }
 
+TEST_CASE("EE COP1 square root decodes only with fs zero")
+{
+  REQUIRE(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x04, 0, 4, 3)).operation ==
+    EEOperation::SquareRootSingleCOP1);
+
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(
+      cop1SingleInstruction(0x04, 2, 4, 3)),
+    "Reserved EE instruction encoding.");
+}
+
 TEST_CASE("EE COP1 multiply-add instructions decode canonically")
 {
   REQUIRE(
@@ -942,6 +955,105 @@ TEST_CASE("EE COP1 divide updates only invalid and division flags")
       core.cop1ControlRegister(31) ==
       (EECOP1Control::STATUS_FIXED |
        EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_DIVISION_BY_ZERO));
+  }
+}
+
+TEST_CASE("EE COP1 square root produces exact raw results")
+{
+  struct ArithmeticVector
+  {
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const ArithmeticVector vectors[] = {
+    {UINT32_C(0x41100000), UINT32_C(0x40400000)},
+    {UINT32_C(0x41200000), UINT32_C(0x404a62c1)},
+    {UINT32_C(0xc1100000), UINT32_C(0x40400000)},
+    {0, 0},
+    {FP_SIGN_BIT, FP_SIGN_BIT},
+    {UINT32_C(0x807fffff), FP_SIGN_BIT}
+  };
+
+  for (const ArithmeticVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(3, vector.ft);
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x04, 0, 4, 3));
+
+    REQUIRE(core.floatingPointRegister(3) == vector.ft);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 square root supports an in-place ft destination")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(3, UINT32_C(0x41100000));
+
+  runInstruction(
+    &system,
+    cop1SingleInstruction(0x04, 0, 3, 3));
+
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x40400000));
+}
+
+TEST_CASE("EE COP1 square root updates only invalid and division flags")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+
+  SECTION("A nonnegative operand clears current I and D only")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setFloatingPointRegister(3, UINT32_C(0x41100000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x04, 0, 4, 3));
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_MASK));
+  }
+
+  SECTION("A negative operand raises invalid and clears current D")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+      EECOP1Control::STICKY_DIVISION_BY_ZERO);
+    core.setFloatingPointRegister(3, UINT32_C(0xc1100000));
+
+    runInstruction(
+      &system,
+      cop1SingleInstruction(0x04, 0, 4, 3));
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID |
        EECOP1Control::STICKY_DIVISION_BY_ZERO));
   }
 }
@@ -2938,6 +3050,34 @@ TEST_CASE("EE COP1 independent multiply operations retire every cycle")
 
 TEST_CASE("EE COP1 operate resource interlocks a following move")
 {
+  SECTION("SQRT.S interlocks a following MFC1")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(3, UINT32_C(0x41100000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x04, 0, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1TransferInstruction(0x00, 5, 4));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.generalRegister(5).low ==
+      UINT64_C(0x0000000040400000));
+  }
+
   SECTION("A following MFC1 waits one cycle")
   {
     NekoSystem system;
@@ -4150,6 +4290,7 @@ TEST_CASE("EE COP1 instructions require Status CU1")
     cop1SingleInstruction(0x01, 3, 4, 5),
     cop1SingleInstruction(0x02, 3, 4, 5),
     cop1SingleInstruction(0x03, 3, 4, 5),
+    cop1SingleInstruction(0x04, 0, 4, 5),
     cop1SingleInstruction(0x1c, 3, 4, 5),
     cop1SingleInstruction(0x1d, 3, 4, 5),
     cop1SingleInstruction(0x18, 3, 0, 5),
