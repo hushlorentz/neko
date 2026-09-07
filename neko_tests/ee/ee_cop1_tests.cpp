@@ -65,6 +65,17 @@ namespace
       function;
   }
 
+  std::uint32_t cop1BranchInstruction(
+    std::uint8_t condition,
+    std::uint16_t offset)
+  {
+    return
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x08) << 21) |
+      (static_cast<std::uint32_t>(condition) << 16) |
+      offset;
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -1945,6 +1956,82 @@ TEST_CASE("EE COP1 comparisons decode only canonical encodings")
   }
 }
 
+TEST_CASE("EE COP1 branches decode canonical condition forms")
+{
+  const EEOperation operations[] = {
+    EEOperation::BranchCOP1False,
+    EEOperation::BranchCOP1True,
+    EEOperation::BranchCOP1FalseLikely,
+    EEOperation::BranchCOP1TrueLikely
+  };
+  for (std::uint8_t condition = 0; condition < 4; ++condition)
+  {
+    REQUIRE(
+      decodeEEInstruction(
+        cop1BranchInstruction(condition, 0x1234)).operation ==
+      operations[condition]);
+  }
+
+  REQUIRE_THROWS_WITH(
+    decodeEEInstruction(cop1BranchInstruction(4, 0)),
+    "Reserved EE instruction encoding.");
+}
+
+TEST_CASE("EE COP1 branches use FCR31 condition and likely annulment")
+{
+  struct Contract
+  {
+    std::uint8_t condition;
+    bool conditionBit;
+    bool taken;
+    bool likely;
+  };
+  const Contract contracts[] = {
+    {0, false, true, false},
+    {0, true, false, false},
+    {1, false, false, false},
+    {1, true, true, false},
+    {2, false, true, true},
+    {2, true, false, true},
+    {3, false, false, true},
+    {3, true, true, true}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      contract.conditionBit
+        ? EECOP1Control::CONDITION
+        : 0);
+    const std::uint32_t program[] = {
+      cop1BranchInstruction(contract.condition, 2),
+      UINT32_C(0x34020001),
+      UINT32_C(0x34030002),
+      UINT32_C(0x34040003)
+    };
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      system.eeBus().write32(index * 4, program[index]);
+    }
+    core.startExecution(0);
+    system.runMasterCycles(contract.taken ? 3 : 2);
+
+    REQUIRE(
+      core.generalRegister(2).low ==
+      (contract.likely && !contract.taken ? 0 : 1));
+    REQUIRE(
+      core.programCounter() ==
+      (contract.taken
+        ? 16
+        : contract.likely
+          ? 12
+          : 8));
+  }
+}
+
 TEST_CASE("EE COP1 comparisons update the condition bit exactly")
 {
   struct ComparisonVector
@@ -3730,7 +3817,7 @@ TEST_CASE("EE COP1 word memory bus faults preserve architectural state")
   }
 }
 
-TEST_CASE("EE COP1 transfers require Status CU1")
+TEST_CASE("EE COP1 instructions require Status CU1")
 {
   const std::uint32_t instructions[] = {
     cop1TransferInstruction(0x00, 2, 3),
@@ -3755,7 +3842,15 @@ TEST_CASE("EE COP1 transfers require Status CU1")
     cop1SingleInstruction(0x28, 3, 4, 5),
     cop1SingleInstruction(0x29, 3, 4, 5),
     cop1WordInstruction(0x20, 3, 4),
-    cop1SingleInstruction(0x24, 3, 4)
+    cop1SingleInstruction(0x24, 3, 4),
+    cop1SingleInstruction(0x30, 3, 0, 5),
+    cop1SingleInstruction(0x32, 3, 0, 5),
+    cop1SingleInstruction(0x34, 3, 0, 5),
+    cop1SingleInstruction(0x36, 3, 0, 5),
+    cop1BranchInstruction(0, 2),
+    cop1BranchInstruction(1, 2),
+    cop1BranchInstruction(2, 2),
+    cop1BranchInstruction(3, 2)
   };
 
   for (const std::uint32_t instruction : instructions)

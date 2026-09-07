@@ -153,7 +153,11 @@ enum class EEOperation : std::uint8_t
   CompareFalseSingleCOP1,
   CompareEqualSingleCOP1,
   CompareLessThanSingleCOP1,
-  CompareLessThanOrEqualSingleCOP1
+  CompareLessThanOrEqualSingleCOP1,
+  BranchCOP1False,
+  BranchCOP1FalseLikely,
+  BranchCOP1True,
+  BranchCOP1TrueLikely
 };
 
 struct EEInstruction

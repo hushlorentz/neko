@@ -767,10 +767,25 @@ namespace
     }
     if (instruction->sourceRegister == 0x08)
     {
-      reject(
-        instruction->targetRegister <= 0x03
-          ? DecodeKind::Unsupported
-          : DecodeKind::Reserved);
+      switch (instruction->targetRegister)
+      {
+        case 0x00:
+          instruction->operation = EEOperation::BranchCOP1False;
+          return;
+        case 0x01:
+          instruction->operation = EEOperation::BranchCOP1True;
+          return;
+        case 0x02:
+          instruction->operation =
+            EEOperation::BranchCOP1FalseLikely;
+          return;
+        case 0x03:
+          instruction->operation =
+            EEOperation::BranchCOP1TrueLikely;
+          return;
+        default:
+          reject(DecodeKind::Reserved);
+      }
     }
     if (instruction->sourceRegister == 0x10)
     {
@@ -964,6 +979,10 @@ bool isEEBranchOperation(EEOperation operation)
     case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
     case EEOperation::BranchLessThanZeroAndLinkLikely:
     case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+    case EEOperation::BranchCOP1False:
+    case EEOperation::BranchCOP1FalseLikely:
+    case EEOperation::BranchCOP1True:
+    case EEOperation::BranchCOP1TrueLikely:
     case EEOperation::BranchCOP2False:
     case EEOperation::BranchCOP2FalseLikely:
     case EEOperation::BranchCOP2True:
@@ -985,6 +1004,8 @@ bool isEEBranchLikelyOperation(EEOperation operation)
     operation == EEOperation::BranchGreaterThanOrEqualZeroLikely ||
     operation == EEOperation::BranchLessThanZeroAndLinkLikely ||
     operation == EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely ||
+    operation == EEOperation::BranchCOP1FalseLikely ||
+    operation == EEOperation::BranchCOP1TrueLikely ||
     operation == EEOperation::BranchCOP2FalseLikely ||
     operation == EEOperation::BranchCOP2TrueLikely;
 }

@@ -817,6 +817,35 @@ bool EECore::executeInstruction(
       setCOP1Condition(condition);
       return true;
     }
+    case EEOperation::BranchCOP1False:
+    case EEOperation::BranchCOP1FalseLikely:
+    case EEOperation::BranchCOP1True:
+    case EEOperation::BranchCOP1TrueLikely:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      const bool branchOnTrue =
+        instruction.operation == EEOperation::BranchCOP1True ||
+        instruction.operation ==
+          EEOperation::BranchCOP1TrueLikely;
+      const bool likely =
+        instruction.operation ==
+          EEOperation::BranchCOP1FalseLikely ||
+        instruction.operation ==
+          EEOperation::BranchCOP1TrueLikely;
+      const std::uint32_t branchTarget =
+        address + 4 +
+        static_cast<std::uint32_t>(
+          signExtend16(instruction.immediate) << 2);
+      scheduleBranch(
+        cop1Condition() == branchOnTrue,
+        likely,
+        branchTarget,
+        address);
+      return true;
+    }
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
