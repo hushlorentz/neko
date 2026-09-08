@@ -18,7 +18,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 19;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 20;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1317,6 +1317,10 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.rejectedInstructionValue;
   destination->eeCoreComponent.issueLatch =
     source->eeCoreComponent.issueLatch;
+  destination->eeCoreComponent.inFlightCOP1Operations =
+    source->eeCoreComponent.inFlightCOP1Operations;
+  destination->eeCoreComponent.nextCOP1ProgramOrder =
+    source->eeCoreComponent.nextCOP1ProgramOrder;
   destination->eeCoreComponent.pendingMac0 =
     source->eeCoreComponent.pendingMac0;
   destination->eeCoreComponent.pendingMac1 =
@@ -1700,6 +1704,32 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeBool(core.issueLatch.valid);
   writer->writeU32(core.issueLatch.address);
   writer->writeU32(core.issueLatch.instruction.raw);
+  writer->writeU64(core.nextCOP1ProgramOrder);
+  for (const EECore::InFlightCOP1Operation &operation :
+       core.inFlightCOP1Operations)
+  {
+    writer->writeBool(operation.active);
+    writer->writeU64(operation.programOrder);
+    writer->writeU8(
+      static_cast<std::uint8_t>(operation.stage));
+    writer->writeU32(operation.instructionAddress);
+    writer->writeU32(operation.instruction.raw);
+    writer->writeU32(operation.capturedFS);
+    writer->writeU32(operation.capturedFT);
+    writer->writeU32(operation.capturedAccumulator);
+    writer->writeU32(operation.capturedControl);
+    writer->writeU64(operation.capturedGPR);
+    writer->writeU32(operation.memoryAddress);
+    writer->writeU32(operation.capturedMemoryValue);
+    writer->writeU8(operation.destination.mask);
+    writer->writeU8(operation.destination.fprRegister);
+    writer->writeU8(operation.destination.gprRegister);
+    writer->writeU32(operation.rawResult);
+    writer->writeU8(operation.affectedFlags);
+    writer->writeU8(operation.raisedFlags);
+    writer->writeU8(operation.raisedStickyFlags);
+    writer->writeBool(operation.conditionResult);
+  }
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1947,6 +1977,170 @@ void NekoSaveStateCodec::readEECore(
     reader->readBool("EE decoded issue-latch flag");
   core->issueLatch.address = reader->readU32();
   const std::uint32_t issueInstruction = reader->readU32();
+  core->nextCOP1ProgramOrder = reader->readU64();
+  require(
+    core->nextCOP1ProgramOrder != 0,
+    "EE COP1 program-order counter is invalid");
+  for (EECore::InFlightCOP1Operation &operation :
+       core->inFlightCOP1Operations)
+  {
+    operation.active =
+      reader->readBool("EE in-flight COP1 operation flag");
+    operation.programOrder = reader->readU64();
+    operation.stage =
+      readEnum<EECore::COP1PipelineStage>(
+        reader,
+        static_cast<std::uint8_t>(
+          EECore::COP1PipelineStage::S2),
+        "EE COP1 pipeline stage");
+    operation.instructionAddress = reader->readU32();
+    const std::uint32_t instruction = reader->readU32();
+    operation.capturedFS = reader->readU32();
+    operation.capturedFT = reader->readU32();
+    operation.capturedAccumulator = reader->readU32();
+    operation.capturedControl = reader->readU32();
+    operation.capturedGPR = reader->readU64();
+    operation.memoryAddress = reader->readU32();
+    operation.capturedMemoryValue = reader->readU32();
+    operation.destination.mask = reader->readU8();
+    operation.destination.fprRegister = reader->readU8();
+    operation.destination.gprRegister = reader->readU8();
+    operation.rawResult = reader->readU32();
+    operation.affectedFlags = reader->readU8();
+    operation.raisedFlags = reader->readU8();
+    operation.raisedStickyFlags = reader->readU8();
+    operation.conditionResult =
+      reader->readBool("EE COP1 condition result");
+
+    constexpr std::uint8_t destinationMask =
+      EECore::COP1_DESTINATION_FPR |
+      EECore::COP1_DESTINATION_ACCUMULATOR |
+      EECore::COP1_DESTINATION_FCR31 |
+      EECore::COP1_DESTINATION_CONDITION |
+      EECore::COP1_DESTINATION_GPR |
+      EECore::COP1_DESTINATION_MEMORY;
+    constexpr std::uint8_t supportedFlags =
+      FP_FLAG_I_BIT |
+      FP_FLAG_D_BIT |
+      FP_FLAG_OVERFLOW |
+      FP_FLAG_UNDERFLOW;
+    require(
+      (operation.destination.mask & ~destinationMask) == 0,
+      "EE COP1 destination mask is invalid");
+    require(
+      operation.destination.fprRegister <
+        EECore::FLOATING_POINT_REGISTER_COUNT,
+      "EE COP1 destination FPR is invalid");
+    require(
+      operation.destination.gprRegister <
+        EECore::GENERAL_REGISTER_COUNT,
+      "EE COP1 destination GPR is invalid");
+    require(
+      (operation.affectedFlags & ~supportedFlags) == 0 &&
+        (operation.raisedFlags &
+         ~operation.affectedFlags) == 0 &&
+        (operation.raisedStickyFlags &
+         ~operation.affectedFlags) == 0,
+      "EE COP1 result flags are invalid");
+
+    operation.instruction = {};
+    if (operation.active)
+    {
+      operation.instruction =
+        decodeEEInstruction(instruction);
+      require(
+        operation.programOrder != 0 &&
+          operation.programOrder <
+            core->nextCOP1ProgramOrder,
+        "EE COP1 program order is invalid");
+      require(
+        (operation.instructionAddress & 3) == 0,
+        "EE COP1 instruction address is invalid");
+      require(
+        EECore::isCOP1MoveOperation(
+          operation.instruction.operation) ||
+          EECore::isCOP1OperateOperation(
+            operation.instruction.operation),
+        "EE in-flight operation is not a C1 instruction");
+      require(
+        (operation.destination.mask &
+         EECore::COP1_DESTINATION_FPR) != 0 ||
+          operation.destination.fprRegister == 0,
+        "EE COP1 result names an unused FPR destination");
+      require(
+        (operation.destination.mask &
+         EECore::COP1_DESTINATION_GPR) != 0 ||
+          operation.destination.gprRegister == 0,
+        "EE COP1 result names an unused GPR destination");
+      const bool memoryOperation =
+        operation.instruction.operation ==
+          EEOperation::LoadWordToCOP1 ||
+        operation.instruction.operation ==
+          EEOperation::StoreWordFromCOP1;
+      require(
+        memoryOperation
+          ? (operation.memoryAddress & 3) == 0
+          : (operation.memoryAddress == 0 &&
+             operation.capturedMemoryValue == 0),
+        "EE COP1 captured memory state is invalid");
+      require(
+        (operation.destination.mask &
+         EECore::COP1_DESTINATION_MEMORY) == 0 ||
+          operation.instruction.operation ==
+            EEOperation::StoreWordFromCOP1,
+        "EE COP1 memory destination is invalid");
+      require(
+        (operation.destination.mask &
+         EECore::COP1_DESTINATION_CONDITION) != 0 ||
+          !operation.conditionResult,
+        "EE COP1 result contains an unused condition value");
+    }
+    else
+    {
+      require(
+        operation.programOrder == 0 &&
+          operation.stage ==
+            EECore::COP1PipelineStage::R &&
+          operation.instructionAddress == 0 &&
+          instruction == 0 &&
+          operation.capturedFS == 0 &&
+          operation.capturedFT == 0 &&
+          operation.capturedAccumulator == 0 &&
+          operation.capturedControl == 0 &&
+          operation.capturedGPR == 0 &&
+          operation.memoryAddress == 0 &&
+          operation.capturedMemoryValue == 0 &&
+          operation.destination.mask ==
+            EECore::COP1_DESTINATION_NONE &&
+          operation.destination.fprRegister == 0 &&
+          operation.destination.gprRegister == 0 &&
+          operation.rawResult == 0 &&
+          operation.affectedFlags == 0 &&
+          operation.raisedFlags == 0 &&
+          operation.raisedStickyFlags == 0 &&
+          !operation.conditionResult,
+        "EE inactive COP1 operation contains state");
+    }
+  }
+  for (std::size_t left = 0;
+       left < core->inFlightCOP1Operations.size();
+       ++left)
+  {
+    if (!core->inFlightCOP1Operations[left].active)
+    {
+      continue;
+    }
+    for (std::size_t right = left + 1;
+         right < core->inFlightCOP1Operations.size();
+         ++right)
+    {
+      require(
+        !core->inFlightCOP1Operations[right].active ||
+          core->inFlightCOP1Operations[left].programOrder !=
+            core->inFlightCOP1Operations[right].programOrder,
+        "EE in-flight COP1 program order is duplicated");
+    }
+  }
   core->lastDecodedInstruction = {};
   if (core->lastInstructionValid)
   {

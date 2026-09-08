@@ -279,6 +279,28 @@ class EECore : public ClockedComponent
       Write
     };
 
+    enum class COP1PipelineStage : std::uint8_t
+    {
+      R,
+      T,
+      X,
+      Y,
+      Z,
+      S1,
+      S2
+    };
+
+    enum COP1Destination : std::uint8_t
+    {
+      COP1_DESTINATION_NONE = 0,
+      COP1_DESTINATION_FPR = 1 << 0,
+      COP1_DESTINATION_ACCUMULATOR = 1 << 1,
+      COP1_DESTINATION_FCR31 = 1 << 2,
+      COP1_DESTINATION_CONDITION = 1 << 3,
+      COP1_DESTINATION_GPR = 1 << 4,
+      COP1_DESTINATION_MEMORY = 1 << 5
+    };
+
     struct CycleTraceEvent
     {
       CycleTraceKind kind = CycleTraceKind::InstructionIssued;
@@ -293,6 +315,35 @@ class EECore : public ClockedComponent
       bool valid = false;
       std::uint32_t address = 0;
       EEInstruction instruction;
+    };
+
+    struct COP1DestinationMetadata
+    {
+      std::uint8_t mask = COP1_DESTINATION_NONE;
+      std::uint8_t fprRegister = 0;
+      std::uint8_t gprRegister = 0;
+    };
+
+    struct InFlightCOP1Operation
+    {
+      bool active = false;
+      std::uint64_t programOrder = 0;
+      COP1PipelineStage stage = COP1PipelineStage::R;
+      std::uint32_t instructionAddress = 0;
+      EEInstruction instruction;
+      std::uint32_t capturedFS = 0;
+      std::uint32_t capturedFT = 0;
+      std::uint32_t capturedAccumulator = 0;
+      std::uint32_t capturedControl = 0;
+      std::uint64_t capturedGPR = 0;
+      std::uint32_t memoryAddress = 0;
+      std::uint32_t capturedMemoryValue = 0;
+      COP1DestinationMetadata destination;
+      std::uint32_t rawResult = 0;
+      std::uint8_t affectedFlags = 0;
+      std::uint8_t raisedFlags = 0;
+      std::uint8_t raisedStickyFlags = 0;
+      bool conditionResult = false;
     };
 
     struct PendingMultiplyDivide
@@ -363,6 +414,11 @@ class EECore : public ClockedComponent
     EEInstruction lastDecodedInstruction;
     std::uint32_t rejectedInstructionValue = 0;
     DecodedIssueLatch issueLatch;
+    static constexpr std::size_t COP1_IN_FLIGHT_CAPACITY = 16;
+    std::array<
+      InFlightCOP1Operation,
+      COP1_IN_FLIGHT_CAPACITY> inFlightCOP1Operations = {};
+    std::uint64_t nextCOP1ProgramOrder = 1;
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
     PendingCOP1Load pendingCOP1Load;

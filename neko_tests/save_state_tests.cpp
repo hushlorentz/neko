@@ -32,7 +32,21 @@ namespace
   constexpr std::size_t EE_COP1_POST_TARGET_COUNT_OFFSET = 1015;
   constexpr std::size_t EE_COP1_POST_TARGET_ADDRESS_OFFSET = 1016;
   constexpr std::size_t EE_ISSUE_LATCH_ADDRESS_OFFSET = 1021;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 1037;
+  constexpr std::size_t EE_NEXT_COP1_PROGRAM_ORDER_OFFSET = 1029;
+  constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET = 1037;
+  constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET = 1038;
+  constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET = 1046;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET = 1047;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1051;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_MEMORY_ADDRESS_OFFSET = 1079;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1087;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1088;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2021;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -53,6 +67,30 @@ namespace
       (*state)[SAVE_STATE_CHECKSUM_OFFSET + index] =
         static_cast<std::uint8_t>(
           checksum >> (index * 8));
+    }
+  }
+
+  void writeU32(
+    std::vector<std::uint8_t> *state,
+    std::size_t offset,
+    std::uint32_t value)
+  {
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      (*state)[offset + index] =
+        static_cast<std::uint8_t>(value >> (index * 8));
+    }
+  }
+
+  void writeU64(
+    std::vector<std::uint8_t> *state,
+    std::size_t offset,
+    std::uint64_t value)
+  {
+    for (std::size_t index = 0; index < 8; ++index)
+    {
+      (*state)[offset + index] =
+        static_cast<std::uint8_t>(value >> (index * 8));
     }
   }
 
@@ -371,6 +409,37 @@ TEST_CASE("Neko save states are canonical and deterministic")
   first.loadState(firstState);
   first.vu1().forceBreak();
   REQUIRE(traceCount == 1);
+}
+
+TEST_CASE("In-flight EE COP1 memory-source state is canonical")
+{
+  NekoSystem source;
+  prepareInFlightSystem(&source);
+  std::vector<std::uint8_t> state = source.saveState();
+  writeU64(&state, EE_NEXT_COP1_PROGRAM_ORDER_OFFSET, 2);
+  state[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
+  writeU64(&state, EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET, 1);
+  state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = 1;
+  writeU32(&state, EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET, 4);
+  writeU32(
+    &state,
+    EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    UINT32_C(0xc4430000));
+  writeU32(
+    &state,
+    EE_FIRST_IN_FLIGHT_COP1_MEMORY_ADDRESS_OFFSET,
+    0x100);
+  state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] = 1;
+  state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 3;
+  updateChecksum(&state);
+
+  NekoSystem restored;
+  restored.loadState(state);
+
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(
+    restored.eeCore().stateHash() !=
+    source.eeCore().stateHash());
 }
 
 TEST_CASE("Active system save states round trip and continue identically")
@@ -1086,6 +1155,12 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[EE_ISSUE_LATCH_ADDRESS_OFFSET] = 4;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET] = 4;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

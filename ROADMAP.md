@@ -740,7 +740,7 @@ Unrelated instructions continue while results are pending. Reads or writes of
 a pending destination, plus `CFC1` or `CTC1` access to `FCR31`, interlock until
 retirement; a dependent instruction may issue on the retirement cycle.
 Pending slots, divider occupancy, and branch-proximity diagnostic context
-participate in reset, state hashing, and save-state version 19. Divider work
+participate in reset, state hashing, and save-state version 20. Divider work
 continues through exception entry and host
 halt/resume, while the ELF runner drains outstanding results before reporting
 guest return. The branch diagnostic is observational: successfully issued
@@ -815,7 +815,7 @@ foundation before enabling COP1 instruction pairs.
       re-fetching and re-decoding the same PC each cycle; define whether this
       latch is canonical saved/hashed state or a derived cache, and which
       redirects flush it
-- [ ] Introduce a general in-flight COP1 operation/result representation with
+- [x] Introduce a general in-flight COP1 operation/result representation with
       program order, current stage, captured operands, destination metadata,
       raw result, affected flags, and raised sticky flags
 - [ ] Define precise exception and interrupt ownership for in-flight C1 work:

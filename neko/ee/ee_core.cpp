@@ -224,6 +224,8 @@ void EECore::reset()
   lastDecodedInstruction = {};
   rejectedInstructionValue = 0;
   issueLatch = {};
+  inFlightCOP1Operations.fill({});
+  nextCOP1ProgramOrder = 1;
   pendingMac0 = {};
   pendingMac1 = {};
   pendingCOP1Load = {};
@@ -3364,6 +3366,37 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, issueLatch.valid);
   hashEEStateValue(&hash, issueLatch.address);
   hashEEStateValue(&hash, issueLatch.instruction.raw);
+  hashEEStateValue(&hash, nextCOP1ProgramOrder);
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    hashEEStateValue(&hash, operation.active);
+    hashEEStateValue(&hash, operation.programOrder);
+    hashEEStateValue(
+      &hash,
+      static_cast<std::uint8_t>(operation.stage));
+    hashEEStateValue(&hash, operation.instructionAddress);
+    hashEEStateValue(&hash, operation.instruction.raw);
+    hashEEStateValue(&hash, operation.capturedFS);
+    hashEEStateValue(&hash, operation.capturedFT);
+    hashEEStateValue(&hash, operation.capturedAccumulator);
+    hashEEStateValue(&hash, operation.capturedControl);
+    hashEEStateValue(&hash, operation.capturedGPR);
+    hashEEStateValue(&hash, operation.memoryAddress);
+    hashEEStateValue(&hash, operation.capturedMemoryValue);
+    hashEEStateValue(&hash, operation.destination.mask);
+    hashEEStateValue(
+      &hash,
+      operation.destination.fprRegister);
+    hashEEStateValue(
+      &hash,
+      operation.destination.gprRegister);
+    hashEEStateValue(&hash, operation.rawResult);
+    hashEEStateValue(&hash, operation.affectedFlags);
+    hashEEStateValue(&hash, operation.raisedFlags);
+    hashEEStateValue(&hash, operation.raisedStickyFlags);
+    hashEEStateValue(&hash, operation.conditionResult);
+  }
   const auto hashPending =
     [&hash](const PendingMultiplyDivide &operation)
     {
