@@ -32,7 +32,7 @@ namespace
   constexpr std::size_t EE_COP1_POST_TARGET_COUNT_OFFSET = 1015;
   constexpr std::size_t EE_COP1_POST_TARGET_ADDRESS_OFFSET = 1016;
   constexpr std::size_t EE_ISSUE_LATCH_ADDRESS_OFFSET = 1021;
-  constexpr std::size_t EE_NEXT_COP1_PROGRAM_ORDER_OFFSET = 1029;
+  constexpr std::size_t EE_NEXT_PROGRAM_ORDER_OFFSET = 1029;
   constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET = 1037;
   constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET = 1038;
   constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET = 1046;
@@ -416,7 +416,7 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
   NekoSystem source;
   prepareInFlightSystem(&source);
   std::vector<std::uint8_t> state = source.saveState();
-  writeU64(&state, EE_NEXT_COP1_PROGRAM_ORDER_OFFSET, 2);
+  writeU64(&state, EE_NEXT_PROGRAM_ORDER_OFFSET, 2);
   state[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
   writeU64(&state, EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET, 1);
   state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = 1;

@@ -418,7 +418,8 @@ class EECore : public ClockedComponent
     std::array<
       InFlightCOP1Operation,
       COP1_IN_FLIGHT_CAPACITY> inFlightCOP1Operations = {};
-    std::uint64_t nextCOP1ProgramOrder = 1;
+    std::uint64_t nextEEProgramOrder = 1;
+    std::uint64_t executingProgramOrder = 0;
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
     PendingCOP1Load pendingCOP1Load;
@@ -472,6 +473,8 @@ class EECore : public ClockedComponent
       std::uint32_t instructionAddress,
       std::uint32_t exceptionAddress,
       std::uint32_t instruction);
+    void discardInFlightCOP1AtOrAfter(
+      std::uint64_t programOrder);
     static std::uint8_t exceptionCode(EEException type);
     std::uint32_t exceptionVector(
       EEException type,

@@ -225,7 +225,8 @@ void EECore::reset()
   rejectedInstructionValue = 0;
   issueLatch = {};
   inFlightCOP1Operations.fill({});
-  nextCOP1ProgramOrder = 1;
+  nextEEProgramOrder = 1;
+  executingProgramOrder = 0;
   pendingMac0 = {};
   pendingMac1 = {};
   pendingCOP1Load = {};
@@ -368,6 +369,10 @@ void EECore::startExecution(std::uint32_t startAddress)
     haltReason == EEStopReason::HostHalt &&
     issueLatch.valid &&
     startAddress == pc;
+  const bool resumeEEProgramOrder =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    startAddress == pc;
   pc = startAddress;
   clearPendingException();
   state = EEExecutionState::Running;
@@ -415,6 +420,12 @@ void EECore::startExecution(std::uint32_t startAddress)
   {
     issueLatch = {};
   }
+  if (!resumeEEProgramOrder)
+  {
+    inFlightCOP1Operations.fill({});
+    nextEEProgramOrder = 1;
+  }
+  executingProgramOrder = 0;
   rejectedInstructionValue = 0;
   exceptionEnteredThisCycle = false;
 }
@@ -591,6 +602,12 @@ void EECore::clock()
     return;
   }
   pc = instructionAddress + 4;
+  if (nextEEProgramOrder == UINT64_MAX)
+  {
+    throw std::overflow_error(
+      "EE instruction program order overflow.");
+  }
+  executingProgramOrder = nextEEProgramOrder++;
   recordCycleTrace(
     CycleTraceKind::InstructionIssued,
     instructionAddress,
@@ -620,7 +637,10 @@ void EECore::clock()
     }
   }
   issueLatch = {};
-  if (!executeInstruction(decoded, instructionAddress))
+  const bool executed =
+    executeInstruction(decoded, instructionAddress);
+  executingProgramOrder = 0;
+  if (!executed)
   {
     return;
   }
@@ -747,6 +767,8 @@ bool EECore::executeInstruction(
     case EEOperation::Nop:
       return true;
     case EEOperation::ExceptionReturn:
+      discardInFlightCOP1AtOrAfter(
+        executingProgramOrder + 1);
       if ((cop0Status & EECOP0Status::ERROR_LEVEL) != 0)
       {
         pc = cop0ErrorEPC;
@@ -3160,6 +3182,11 @@ void EECore::enterException(
   std::uint32_t address,
   std::uint32_t instruction)
 {
+  const std::uint64_t exceptionBoundary =
+    executingProgramOrder != 0
+      ? executingProgramOrder
+      : nextEEProgramOrder;
+  discardInFlightCOP1AtOrAfter(exceptionBoundary);
   const bool alreadyExceptionLevel =
     (cop0Status & EECOP0Status::EXCEPTION_LEVEL) != 0;
   if (!alreadyExceptionLevel)
@@ -3222,6 +3249,20 @@ void EECore::enterException(
   cop1DividerPostTargetAddress = 0;
   cop1OperateResourceOccupied = false;
   issueLatch = {};
+}
+
+void EECore::discardInFlightCOP1AtOrAfter(
+  std::uint64_t programOrder)
+{
+  for (InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (operation.active &&
+        operation.programOrder >= programOrder)
+    {
+      operation = {};
+    }
+  }
 }
 
 std::uint8_t EECore::exceptionCode(EEException type)
@@ -3366,7 +3407,7 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, issueLatch.valid);
   hashEEStateValue(&hash, issueLatch.address);
   hashEEStateValue(&hash, issueLatch.instruction.raw);
-  hashEEStateValue(&hash, nextCOP1ProgramOrder);
+  hashEEStateValue(&hash, nextEEProgramOrder);
   for (const InFlightCOP1Operation &operation :
        inFlightCOP1Operations)
   {

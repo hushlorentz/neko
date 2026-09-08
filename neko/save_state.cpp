@@ -18,7 +18,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 20;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 21;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1319,8 +1319,9 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.issueLatch;
   destination->eeCoreComponent.inFlightCOP1Operations =
     source->eeCoreComponent.inFlightCOP1Operations;
-  destination->eeCoreComponent.nextCOP1ProgramOrder =
-    source->eeCoreComponent.nextCOP1ProgramOrder;
+  destination->eeCoreComponent.nextEEProgramOrder =
+    source->eeCoreComponent.nextEEProgramOrder;
+  destination->eeCoreComponent.executingProgramOrder = 0;
   destination->eeCoreComponent.pendingMac0 =
     source->eeCoreComponent.pendingMac0;
   destination->eeCoreComponent.pendingMac1 =
@@ -1704,7 +1705,7 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeBool(core.issueLatch.valid);
   writer->writeU32(core.issueLatch.address);
   writer->writeU32(core.issueLatch.instruction.raw);
-  writer->writeU64(core.nextCOP1ProgramOrder);
+  writer->writeU64(core.nextEEProgramOrder);
   for (const EECore::InFlightCOP1Operation &operation :
        core.inFlightCOP1Operations)
   {
@@ -1977,10 +1978,11 @@ void NekoSaveStateCodec::readEECore(
     reader->readBool("EE decoded issue-latch flag");
   core->issueLatch.address = reader->readU32();
   const std::uint32_t issueInstruction = reader->readU32();
-  core->nextCOP1ProgramOrder = reader->readU64();
+  core->nextEEProgramOrder = reader->readU64();
   require(
-    core->nextCOP1ProgramOrder != 0,
-    "EE COP1 program-order counter is invalid");
+    core->nextEEProgramOrder != 0,
+    "EE program-order counter is invalid");
+  core->executingProgramOrder = 0;
   for (EECore::InFlightCOP1Operation &operation :
        core->inFlightCOP1Operations)
   {
@@ -2051,7 +2053,7 @@ void NekoSaveStateCodec::readEECore(
       require(
         operation.programOrder != 0 &&
           operation.programOrder <
-            core->nextCOP1ProgramOrder,
+            core->nextEEProgramOrder,
         "EE COP1 program order is invalid");
       require(
         (operation.instructionAddress & 3) == 0,

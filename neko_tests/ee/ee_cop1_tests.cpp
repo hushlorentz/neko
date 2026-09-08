@@ -4075,6 +4075,127 @@ TEST_CASE("EE COP1 divider work continues through exception entry")
     UINT32_C(0x40400000));
 }
 
+TEST_CASE(
+  "EE COP1 dependencies cross exception-handler boundaries")
+{
+  SECTION("A handler read waits for an older result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1TransferInstruction(0x00, 5, 4));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(
+      core.generalRegister(5).low ==
+      UINT64_C(0x0000000040400000));
+  }
+
+  SECTION("A handler write remains newer than an older result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(5, {UINT64_C(0x12345678), 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1TransferInstruction(0x04, 5, 4));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x12345678));
+  }
+}
+
+TEST_CASE("EE interrupt entry preserves older COP1 work")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  for (std::uint32_t address = EEExceptionVector::INTERRUPT;
+       address < EEExceptionVector::INTERRUPT + 32;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(0);
+  system.clockMasterCycle();
+
+  core.enterInterruptException();
+  system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+}
+
+TEST_CASE("EE ERET preserves handler-issued COP1 work")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE |
+      EECOP0Status::EXCEPTION_LEVEL);
+  core.setCOP0Register(EECOP0Register::EPC, 0x100);
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    EEExceptionVector::GENERAL,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  system.eeBus().write32(
+    EEExceptionVector::GENERAL + 4,
+    UINT32_C(0x42000018));
+  for (std::uint32_t address = 0x100;
+       address < 0x120;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(EEExceptionVector::GENERAL);
+
+  system.runMasterCycles(2);
+  REQUIRE(core.programCounter() == 0x100);
+
+  system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+}
+
 TEST_CASE("EE reset cancels pending COP1 divider results")
 {
   NekoSystem system;
