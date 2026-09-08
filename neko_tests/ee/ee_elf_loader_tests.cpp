@@ -153,6 +153,25 @@ namespace
       function);
     return image;
   }
+
+  std::vector<std::uint8_t> returningCOP1WorkELF()
+  {
+    std::vector<std::uint8_t> image = returningELF(0);
+    writeU32(
+      &image,
+      0x100,
+      (UINT32_C(0x11) << 26) |
+        (UINT32_C(0x10) << 21) |
+        (UINT32_C(4) << 6) |
+        UINT32_C(0x03));
+    writeU32(
+      &image,
+      0x108,
+      (UINT32_C(0x31) << 26) |
+        (UINT32_C(3) << 16) |
+        UINT32_C(0x2000));
+    return image;
+  }
 }
 
 TEST_CASE("PS2 ELF loadable segments initialize EE memory")
@@ -677,6 +696,27 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
         system.eeCore().cop1ControlRegister(31) ==
         vector.expectedStatus);
     }
+  }
+
+  SECTION("Return drains all in-flight COP1 work in program order")
+  {
+    NekoSystem system;
+    const EEGuestExecutionResult result =
+      system.runELF(returningCOP1WorkELF(), 3);
+
+    REQUIRE(result.outcome == EEGuestOutcome::Completed);
+    REQUIRE(result.execution.instructions == 3);
+    REQUIRE(
+      system.eeCore().floatingPointRegister(3) ==
+      UINT32_C(0x44332211));
+    REQUIRE(
+      system.eeCore().floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      system.eeCore().cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
   }
 
   SECTION("Cycle limit")

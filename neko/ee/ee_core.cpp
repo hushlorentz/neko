@@ -2863,31 +2863,53 @@ bool EECore::pendingCOP1LoadActive() const
   return false;
 }
 
-bool EECore::completePendingCOP1Load(
-  std::uint8_t *registerIndex)
+void EECore::drainInFlightCOP1()
 {
-  InFlightCOP1Operation *pendingLoad = nullptr;
-  for (InFlightCOP1Operation &operation :
+  bool drainedDivider = false;
+  for (const InFlightCOP1Operation &operation :
        inFlightCOP1Operations)
   {
-    if (operation.active &&
-        operation.instruction.operation ==
-          EEOperation::LoadWordToCOP1)
+    if (!operation.active)
     {
-      if (pendingLoad == nullptr ||
-          operation.programOrder < pendingLoad->programOrder)
+      continue;
+    }
+    if (operation.instruction.operation !=
+          EEOperation::LoadWordToCOP1 &&
+        !isCOP1DividerOperation(
+          operation.instruction.operation))
+    {
+      throw std::logic_error(
+        "ELF return cannot drain an unsupported COP1 operation.");
+    }
+    drainedDivider =
+      drainedDivider ||
+      isCOP1DividerOperation(operation.instruction.operation);
+  }
+
+  while (true)
+  {
+    InFlightCOP1Operation *oldest = nullptr;
+    for (InFlightCOP1Operation &operation :
+         inFlightCOP1Operations)
+    {
+      if (operation.active &&
+          (oldest == nullptr ||
+           operation.programOrder < oldest->programOrder))
       {
-        pendingLoad = &operation;
+        oldest = &operation;
       }
     }
+    if (oldest == nullptr)
+    {
+      break;
+    }
+    commitInFlightCOP1(oldest);
   }
-  if (pendingLoad == nullptr)
+  if (drainedDivider)
   {
-    return false;
+    cop1DividerInitiationCycles = 0;
+    cop1DividerOperation = EEOperation::Nop;
   }
-  *registerIndex = pendingLoad->destination.fprRegister;
-  commitInFlightCOP1(pendingLoad);
-  return true;
 }
 
 void EECore::advancePendingCOP1(
@@ -2976,18 +2998,6 @@ bool EECore::pendingCOP1DividerActive() const
     }
   }
   return false;
-}
-
-void EECore::completePendingCOP1Divider()
-{
-  while (pendingCOP1DividerActive())
-  {
-    std::uint8_t completedLoadRegister = 0;
-    bool completedLoad = false;
-    advancePendingCOP1(
-      &completedLoadRegister,
-      &completedLoad);
-  }
 }
 
 void EECore::startPendingCOP1Divider(

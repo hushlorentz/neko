@@ -531,13 +531,11 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t instructionAddress);
     bool pendingCOP1LoadActive() const;
-    bool completePendingCOP1Load(
-      std::uint8_t *registerIndex);
+    void drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint8_t *completedLoadRegister,
       bool *completedLoad);
     bool pendingCOP1DividerActive() const;
-    void completePendingCOP1Divider();
     void startPendingCOP1Divider(
       const EEInstruction &instruction,
       std::uint32_t result,

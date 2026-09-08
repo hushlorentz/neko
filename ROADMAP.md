@@ -827,7 +827,7 @@ foundation before enabling COP1 instruction pairs.
 - [x] Adapt the existing pending load and divider units to the shared
       dependency and ordered-writeback interfaces without changing their
       established timing contracts after the divider anchor is explicit
-- [ ] Route ELF guest-return drain through the shared in-flight interface while
+- [x] Route ELF guest-return drain through the shared in-flight interface while
       preserving the existing pending-load and divider completion behavior
 - [ ] Define deterministic per-cycle trace ordering and sufficient event
       capacity for multiple C1 stage transitions and retirements
