@@ -272,11 +272,26 @@ class EECore : public ClockedComponent
       COP1DividerHazard
     };
 
-    enum class FPRDependency : std::uint8_t
+    enum class COP1Dependency : std::uint8_t
     {
-      None,
-      Read,
-      Write
+      None = 0,
+      Read = 1 << 0,
+      Write = 1 << 1,
+      ReadWrite = Read | Write
+    };
+
+    enum class COP1ScoreboardResource : std::uint8_t
+    {
+      FPR,
+      Accumulator,
+      FCR31
+    };
+
+    enum class COP1ScoreboardAvailability : std::uint8_t
+    {
+      Committed,
+      BypassReady,
+      Unavailable
     };
 
     enum class COP1PipelineStage : std::uint8_t
@@ -344,6 +359,22 @@ class EECore : public ClockedComponent
       std::uint8_t raisedFlags = 0;
       std::uint8_t raisedStickyFlags = 0;
       bool conditionResult = false;
+    };
+
+    struct COP1ScoreboardValue
+    {
+      COP1ScoreboardAvailability availability =
+        COP1ScoreboardAvailability::Committed;
+      std::uint32_t value = 0;
+      std::uint64_t producerOrder = 0;
+    };
+
+    struct COP1ScoreboardHazard
+    {
+      COP1ScoreboardResource resource =
+        COP1ScoreboardResource::FPR;
+      std::uint8_t registerIndex = 0;
+      COP1Dependency dependency = COP1Dependency::None;
     };
 
     struct PendingMultiplyDivide
@@ -527,10 +558,24 @@ class EECore : public ClockedComponent
     bool pendingCOP1DividerBlocks(
       const EEInstruction &instruction,
       std::uint8_t *registerIndex,
-      FPRDependency *dependency) const;
-    static FPRDependency instructionFPRDependency(
+      COP1Dependency *dependency) const;
+    bool cop1ScoreboardBlocks(
+      const EEInstruction &instruction,
+      COP1ScoreboardHazard *hazard) const;
+    COP1ScoreboardValue cop1ScoreboardValue(
+      COP1ScoreboardResource resource,
+      std::uint8_t registerIndex = 0) const;
+    std::uint32_t scoreboardFPRValue(
+      std::uint8_t registerIndex) const;
+    std::uint32_t scoreboardAccumulatorValue() const;
+    std::uint32_t scoreboardFCR31Value() const;
+    static COP1Dependency instructionFPRDependency(
       const EEInstruction &instruction,
       std::uint8_t registerIndex);
+    static COP1Dependency instructionAccumulatorDependency(
+      const EEInstruction &instruction);
+    static COP1Dependency instructionFCR31Dependency(
+      const EEInstruction &instruction);
     static bool isCOP1MoveOperation(EEOperation operation);
     static bool isCOP1OperateOperation(EEOperation operation);
     static bool isCOP1DividerOperation(EEOperation operation);

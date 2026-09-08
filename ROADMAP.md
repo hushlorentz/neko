@@ -821,7 +821,7 @@ foundation before enabling COP1 instruction pairs.
 - [x] Define precise exception and interrupt ownership for in-flight C1 work:
       which older results continue, which younger work is discarded, and what
       handler execution and `ERET` may observe
-- [ ] Introduce a COP1 scoreboard that distinguishes unavailable operands,
+- [x] Introduce a COP1 scoreboard that distinguishes unavailable operands,
       `1S` bypass-ready values, and `2S` committed values for FPRs, ACC, and
       FCR31
 - [ ] Adapt the existing pending load and divider units to the shared

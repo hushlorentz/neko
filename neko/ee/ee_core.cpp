@@ -24,6 +24,61 @@ namespace
   constexpr std::uint8_t MULTIPLY_LATENCY = 4;
   constexpr std::uint8_t DIVIDE_LATENCY = 37;
 
+  std::uint32_t updatedCOP1Status(
+    std::uint32_t status,
+    std::uint8_t affectedFlags,
+    std::uint8_t raisedFlags,
+    std::uint8_t raisedStickyFlags)
+  {
+    struct FlagMapping
+    {
+      std::uint8_t resultFlag;
+      std::uint32_t causeFlag;
+      std::uint32_t stickyFlag;
+    };
+    constexpr FlagMapping FLAG_MAPPINGS[] = {
+      {
+        FP_FLAG_I_BIT,
+        EECOP1Control::CAUSE_INVALID,
+        EECOP1Control::STICKY_INVALID
+      },
+      {
+        FP_FLAG_D_BIT,
+        EECOP1Control::CAUSE_DIVISION_BY_ZERO,
+        EECOP1Control::STICKY_DIVISION_BY_ZERO
+      },
+      {
+        FP_FLAG_OVERFLOW,
+        EECOP1Control::CAUSE_OVERFLOW,
+        EECOP1Control::STICKY_OVERFLOW
+      },
+      {
+        FP_FLAG_UNDERFLOW,
+        EECOP1Control::CAUSE_UNDERFLOW,
+        EECOP1Control::STICKY_UNDERFLOW
+      }
+    };
+
+    for (const FlagMapping &mapping : FLAG_MAPPINGS)
+    {
+      if ((affectedFlags & mapping.resultFlag) == 0)
+      {
+        continue;
+      }
+      status &= ~mapping.causeFlag;
+      if ((raisedFlags & mapping.resultFlag) != 0)
+      {
+        status |= mapping.causeFlag;
+      }
+      if (((raisedFlags | raisedStickyFlags) &
+           mapping.resultFlag) != 0)
+      {
+        status |= mapping.stickyFlag;
+      }
+    }
+    return status;
+  }
+
   void hashEEStateValue(
     std::uint64_t *hash,
     std::uint64_t value)
@@ -567,8 +622,8 @@ void EECore::clock()
     return;
   }
   std::uint8_t pendingCOP1DividerRegister = 0;
-  FPRDependency pendingCOP1DividerDependency =
-    FPRDependency::None;
+  COP1Dependency pendingCOP1DividerDependency =
+    COP1Dependency::None;
   if (pendingCOP1DividerBlocks(
         decoded,
         &pendingCOP1DividerRegister,
@@ -584,13 +639,13 @@ void EECore::clock()
     pc = instructionAddress;
     return;
   }
-  const FPRDependency fprDependency =
+  const COP1Dependency fprDependency =
     completedCOP1Load ?
       instructionFPRDependency(
         decoded,
         completedCOP1LoadRegister) :
-      FPRDependency::None;
-  if (fprDependency != FPRDependency::None)
+      COP1Dependency::None;
+  if (fprDependency != COP1Dependency::None)
   {
     recordCycleTrace(
       CycleTraceKind::COP1LoadInterlock,
@@ -598,6 +653,27 @@ void EECore::clock()
       instructionValue,
       completedCOP1LoadRegister,
       static_cast<std::uint8_t>(fprDependency));
+    pc = instructionAddress;
+    return;
+  }
+  COP1ScoreboardHazard scoreboardHazard;
+  if (cop1ScoreboardBlocks(decoded, &scoreboardHazard))
+  {
+    const std::uint64_t resource =
+      scoreboardHazard.resource ==
+        COP1ScoreboardResource::FPR
+        ? scoreboardHazard.registerIndex
+        : scoreboardHazard.resource ==
+            COP1ScoreboardResource::Accumulator
+          ? FLOATING_POINT_REGISTER_COUNT
+          : FLOATING_POINT_REGISTER_COUNT + 1;
+    recordCycleTrace(
+      CycleTraceKind::COP1ResourceInterlock,
+      instructionAddress,
+      instructionValue,
+      resource,
+      static_cast<std::uint8_t>(
+        scoreboardHazard.dependency));
     pc = instructionAddress;
     return;
   }
@@ -802,7 +878,7 @@ bool EECore::executeInstruction(
       }
       writeWord(
         immediateDestination,
-        floatingPointRegisters[destination]);
+        scoreboardFPRValue(destination));
       return true;
     case EEOperation::MoveWordToCOP1:
       if (!requireCOP1Usable(address, instruction.raw))
@@ -819,7 +895,9 @@ bool EECore::executeInstruction(
       }
       writeWord(
         immediateDestination,
-        cop1ControlRegister(destination));
+        destination == EECOP1Control::STATUS_REGISTER
+          ? scoreboardFCR31Value()
+          : cop1ControlRegister(destination));
       return true;
     case EEOperation::MoveControlWordToCOP1:
       if (!requireCOP1Usable(address, instruction.raw))
@@ -839,7 +917,7 @@ bool EECore::executeInstruction(
         return false;
       }
       const std::uint32_t sourceBits =
-        floatingPointRegisters[destination];
+        scoreboardFPRValue(destination);
       std::uint32_t resultBits = sourceBits;
       if (instruction.operation ==
           EEOperation::AbsoluteSingleCOP1)
@@ -870,7 +948,7 @@ bool EECore::executeInstruction(
       }
       const EEFloatResult result =
         sqrtEEFloatRaw(
-          floatingPointRegisters[instruction.targetRegister]);
+          scoreboardFPRValue(instruction.targetRegister));
       startPendingCOP1Divider(
         instruction,
         result.bits,
@@ -885,8 +963,8 @@ bool EECore::executeInstruction(
       }
       const EEFloatResult result =
         rsqrtEEFloatRaw(
-          floatingPointRegisters[destination],
-          floatingPointRegisters[instruction.targetRegister]);
+          scoreboardFPRValue(destination),
+          scoreboardFPRValue(instruction.targetRegister));
       startPendingCOP1Divider(
         instruction,
         result.bits,
@@ -905,9 +983,9 @@ bool EECore::executeInstruction(
         return false;
       }
       const std::uint32_t fsBits =
-        floatingPointRegisters[destination];
+        scoreboardFPRValue(destination);
       const std::uint32_t ftBits =
-        floatingPointRegisters[instruction.targetRegister];
+        scoreboardFPRValue(instruction.targetRegister);
       EEFloatResult result;
       switch (instruction.operation)
       {
@@ -956,9 +1034,9 @@ bool EECore::executeInstruction(
         return false;
       }
       const std::uint32_t fsBits =
-        floatingPointRegisters[destination];
+        scoreboardFPRValue(destination);
       const std::uint32_t ftBits =
-        floatingPointRegisters[instruction.targetRegister];
+        scoreboardFPRValue(instruction.targetRegister);
       EEFloatResult result;
       switch (instruction.operation)
       {
@@ -993,13 +1071,13 @@ bool EECore::executeInstruction(
         instruction.operation ==
           EEOperation::MultiplyAddSingleToAccumulatorCOP1
           ? maddEEFloatRaw(
-              floatingPointAccumulatorRegister,
-              floatingPointRegisters[destination],
-              floatingPointRegisters[instruction.targetRegister])
+              scoreboardAccumulatorValue(),
+              scoreboardFPRValue(destination),
+              scoreboardFPRValue(instruction.targetRegister))
           : msubEEFloatRaw(
-              floatingPointAccumulatorRegister,
-              floatingPointRegisters[destination],
-              floatingPointRegisters[instruction.targetRegister]);
+              scoreboardAccumulatorValue(),
+              scoreboardFPRValue(destination),
+              scoreboardFPRValue(instruction.targetRegister));
       if (instruction.operation ==
             EEOperation::MultiplyAddSingleCOP1 ||
           instruction.operation ==
@@ -1025,7 +1103,7 @@ bool EECore::executeInstruction(
       }
       floatingPointRegisters[instruction.shiftAmount] =
         fixedToFloatRaw(
-          floatingPointRegisters[destination],
+          scoreboardFPRValue(destination),
           0);
       return true;
     case EEOperation::ConvertSingleToWordCOP1:
@@ -1036,7 +1114,7 @@ bool EECore::executeInstruction(
       }
       const EEFloatResult result =
         convertEEFloatToWordRaw(
-          floatingPointRegisters[destination]);
+          scoreboardFPRValue(destination));
       floatingPointRegisters[instruction.shiftAmount] =
         result.bits;
       updateCOP1ArithmeticFlags(
@@ -1055,8 +1133,8 @@ bool EECore::executeInstruction(
       }
       const int comparison =
         compareEEFloatRaw(
-          floatingPointRegisters[destination],
-          floatingPointRegisters[instruction.targetRegister]);
+          scoreboardFPRValue(destination),
+          scoreboardFPRValue(instruction.targetRegister));
       bool condition = false;
       switch (instruction.operation)
       {
@@ -1098,7 +1176,8 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(
           signExtend16(instruction.immediate) << 2);
       scheduleBranch(
-        cop1Condition() == branchOnTrue,
+        ((scoreboardFCR31Value() &
+          EECOP1Control::CONDITION) != 0) == branchOnTrue,
         likely,
         branchTarget,
         address);
@@ -1655,7 +1734,7 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       const std::uint32_t value =
-        floatingPointRegisters[immediateDestination];
+        scoreboardFPRValue(immediateDestination);
       const bool succeeded =
         attachedBus().writeData32(dataAddress, value);
       recordMemoryTrace(
@@ -2851,7 +2930,7 @@ void EECore::startPendingCOP1Divider(
 bool EECore::pendingCOP1DividerBlocks(
   const EEInstruction &instruction,
   std::uint8_t *registerIndex,
-  FPRDependency *dependency) const
+  COP1Dependency *dependency) const
 {
   for (const PendingCOP1DividerResult &result :
        pendingCOP1DividerResults)
@@ -2860,11 +2939,11 @@ bool EECore::pendingCOP1DividerBlocks(
     {
       continue;
     }
-    const FPRDependency resultDependency =
+    const COP1Dependency resultDependency =
       instructionFPRDependency(
         instruction,
         result.registerIndex);
-    if (resultDependency != FPRDependency::None)
+    if (resultDependency != COP1Dependency::None)
     {
       *registerIndex = result.registerIndex;
       *dependency = resultDependency;
@@ -2878,55 +2957,273 @@ bool EECore::pendingCOP1DividerBlocks(
           EECOP1Control::STATUS_REGISTER)
     {
       *registerIndex = result.registerIndex;
-      *dependency = FPRDependency::Write;
+      *dependency = COP1Dependency::Write;
       return true;
     }
   }
   return false;
 }
 
-EECore::FPRDependency EECore::instructionFPRDependency(
+bool EECore::cop1ScoreboardBlocks(
+  const EEInstruction &instruction,
+  COP1ScoreboardHazard *hazard) const
+{
+  for (std::uint8_t registerIndex = 0;
+       registerIndex < FLOATING_POINT_REGISTER_COUNT;
+       ++registerIndex)
+  {
+    const COP1Dependency dependency =
+      instructionFPRDependency(instruction, registerIndex);
+    if (dependency == COP1Dependency::None)
+    {
+      continue;
+    }
+    const COP1ScoreboardValue value =
+      cop1ScoreboardValue(
+        COP1ScoreboardResource::FPR,
+        registerIndex);
+    if (value.availability ==
+        COP1ScoreboardAvailability::Unavailable)
+    {
+      *hazard = {
+        COP1ScoreboardResource::FPR,
+        registerIndex,
+        dependency
+      };
+      return true;
+    }
+  }
+
+  const COP1Dependency accumulatorDependency =
+    instructionAccumulatorDependency(instruction);
+  if (accumulatorDependency != COP1Dependency::None &&
+      cop1ScoreboardValue(
+        COP1ScoreboardResource::Accumulator)
+        .availability ==
+          COP1ScoreboardAvailability::Unavailable)
+  {
+    *hazard = {
+      COP1ScoreboardResource::Accumulator,
+      0,
+      accumulatorDependency
+    };
+    return true;
+  }
+
+  const COP1Dependency controlDependency =
+    instructionFCR31Dependency(instruction);
+  if (controlDependency != COP1Dependency::None &&
+      cop1ScoreboardValue(
+        COP1ScoreboardResource::FCR31)
+        .availability ==
+          COP1ScoreboardAvailability::Unavailable)
+  {
+    *hazard = {
+      COP1ScoreboardResource::FCR31,
+      EECOP1Control::STATUS_REGISTER,
+      controlDependency
+    };
+    return true;
+  }
+  return false;
+}
+
+EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
+  COP1ScoreboardResource resource,
+  std::uint8_t registerIndex) const
+{
+  COP1ScoreboardValue value;
+  switch (resource)
+  {
+    case COP1ScoreboardResource::FPR:
+      requireFloatingPointRegisterIndex(registerIndex);
+      value.value = floatingPointRegisters[registerIndex];
+      break;
+    case COP1ScoreboardResource::Accumulator:
+      value.value = floatingPointAccumulatorRegister;
+      break;
+    case COP1ScoreboardResource::FCR31:
+      value.value = cop1ControlRegister(
+        EECOP1Control::STATUS_REGISTER);
+      break;
+  }
+
+  const InFlightCOP1Operation *producer = nullptr;
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (!operation.active)
+    {
+      continue;
+    }
+    bool writesResource = false;
+    switch (resource)
+    {
+      case COP1ScoreboardResource::FPR:
+        writesResource =
+          (operation.destination.mask &
+           COP1_DESTINATION_FPR) != 0 &&
+          operation.destination.fprRegister == registerIndex;
+        break;
+      case COP1ScoreboardResource::Accumulator:
+        writesResource =
+          (operation.destination.mask &
+           COP1_DESTINATION_ACCUMULATOR) != 0;
+        break;
+      case COP1ScoreboardResource::FCR31:
+        writesResource =
+          (operation.destination.mask &
+           (COP1_DESTINATION_FCR31 |
+            COP1_DESTINATION_CONDITION)) != 0;
+        break;
+    }
+    if (writesResource &&
+        (producer == nullptr ||
+         operation.programOrder > producer->programOrder))
+    {
+      producer = &operation;
+    }
+  }
+  if (producer == nullptr)
+  {
+    return value;
+  }
+
+  value.producerOrder = producer->programOrder;
+  if (producer->stage < COP1PipelineStage::S1)
+  {
+    value.availability =
+      COP1ScoreboardAvailability::Unavailable;
+    return value;
+  }
+  if (producer->stage == COP1PipelineStage::S2)
+  {
+    return value;
+  }
+
+  value.availability =
+    COP1ScoreboardAvailability::BypassReady;
+  switch (resource)
+  {
+    case COP1ScoreboardResource::FPR:
+    case COP1ScoreboardResource::Accumulator:
+      value.value = producer->rawResult;
+      break;
+    case COP1ScoreboardResource::FCR31:
+    {
+      std::uint32_t status =
+        producer->capturedControl &
+        EECOP1Control::STATUS_WRITABLE_MASK;
+      if (producer->instruction.operation ==
+            EEOperation::MoveControlWordToCOP1 &&
+          producer->instruction.destinationRegister ==
+            EECOP1Control::STATUS_REGISTER)
+      {
+        status =
+          static_cast<std::uint32_t>(
+            producer->capturedGPR) &
+          EECOP1Control::STATUS_WRITABLE_MASK;
+      }
+      else if ((producer->destination.mask &
+                COP1_DESTINATION_FCR31) != 0)
+      {
+        status = updatedCOP1Status(
+          status,
+          producer->affectedFlags,
+          producer->raisedFlags,
+          producer->raisedStickyFlags);
+      }
+      if ((producer->destination.mask &
+           COP1_DESTINATION_CONDITION) != 0)
+      {
+        status &= ~EECOP1Control::CONDITION;
+        if (producer->conditionResult)
+        {
+          status |= EECOP1Control::CONDITION;
+        }
+      }
+      value.value = status | EECOP1Control::STATUS_FIXED;
+      break;
+    }
+  }
+  return value;
+}
+
+std::uint32_t EECore::scoreboardFPRValue(
+  std::uint8_t registerIndex) const
+{
+  const COP1ScoreboardValue value =
+    cop1ScoreboardValue(
+      COP1ScoreboardResource::FPR,
+      registerIndex);
+  if (value.availability ==
+      COP1ScoreboardAvailability::Unavailable)
+  {
+    throw std::logic_error(
+      "Unavailable EE COP1 FPR reached execution.");
+  }
+  return value.value;
+}
+
+std::uint32_t EECore::scoreboardAccumulatorValue() const
+{
+  const COP1ScoreboardValue value =
+    cop1ScoreboardValue(
+      COP1ScoreboardResource::Accumulator);
+  if (value.availability ==
+      COP1ScoreboardAvailability::Unavailable)
+  {
+    throw std::logic_error(
+      "Unavailable EE COP1 accumulator reached execution.");
+  }
+  return value.value;
+}
+
+std::uint32_t EECore::scoreboardFCR31Value() const
+{
+  const COP1ScoreboardValue value =
+    cop1ScoreboardValue(COP1ScoreboardResource::FCR31);
+  if (value.availability ==
+      COP1ScoreboardAvailability::Unavailable)
+  {
+    throw std::logic_error(
+      "Unavailable EE FCR31 reached execution.");
+  }
+  return value.value;
+}
+
+EECore::COP1Dependency EECore::instructionFPRDependency(
   const EEInstruction &instruction,
   std::uint8_t registerIndex)
 {
+  bool reads = false;
+  bool writes = false;
   switch (instruction.operation)
   {
     case EEOperation::MoveWordFromCOP1:
-      return instruction.destinationRegister == registerIndex ?
-        FPRDependency::Read :
-        FPRDependency::None;
+      reads = instruction.destinationRegister == registerIndex;
+      break;
     case EEOperation::MoveWordToCOP1:
-      return instruction.destinationRegister == registerIndex ?
-        FPRDependency::Write :
-        FPRDependency::None;
+      writes = instruction.destinationRegister == registerIndex;
+      break;
     case EEOperation::StoreWordFromCOP1:
-      return instruction.targetRegister == registerIndex ?
-        FPRDependency::Read :
-        FPRDependency::None;
+      reads = instruction.targetRegister == registerIndex;
+      break;
     case EEOperation::LoadWordToCOP1:
-      return instruction.targetRegister == registerIndex ?
-        FPRDependency::Write :
-        FPRDependency::None;
+      writes = instruction.targetRegister == registerIndex;
+      break;
     case EEOperation::AbsoluteSingleCOP1:
     case EEOperation::MoveSingleCOP1:
     case EEOperation::NegateSingleCOP1:
     case EEOperation::ConvertWordToSingleCOP1:
     case EEOperation::ConvertSingleToWordCOP1:
-      if (instruction.destinationRegister == registerIndex)
-      {
-        return FPRDependency::Read;
-      }
-      return instruction.shiftAmount == registerIndex ?
-        FPRDependency::Write :
-        FPRDependency::None;
+      reads = instruction.destinationRegister == registerIndex;
+      writes = instruction.shiftAmount == registerIndex;
+      break;
     case EEOperation::SquareRootSingleCOP1:
-      if (instruction.targetRegister == registerIndex)
-      {
-        return FPRDependency::Read;
-      }
-      return instruction.shiftAmount == registerIndex ?
-        FPRDependency::Write :
-        FPRDependency::None;
+      reads = instruction.targetRegister == registerIndex;
+      writes = instruction.shiftAmount == registerIndex;
+      break;
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
     case EEOperation::AddSingleCOP1:
@@ -2940,26 +3237,87 @@ EECore::FPRDependency EECore::instructionFPRDependency(
     case EEOperation::CompareEqualSingleCOP1:
     case EEOperation::CompareLessThanSingleCOP1:
     case EEOperation::CompareLessThanOrEqualSingleCOP1:
-      if (instruction.destinationRegister == registerIndex ||
-          instruction.targetRegister == registerIndex)
-      {
-        return FPRDependency::Read;
-      }
-      return instruction.shiftAmount == registerIndex ?
-        FPRDependency::Write :
-        FPRDependency::None;
+      reads =
+        instruction.destinationRegister == registerIndex ||
+        instruction.targetRegister == registerIndex;
+      writes =
+        instruction.operation !=
+          EEOperation::CompareFalseSingleCOP1 &&
+        instruction.operation !=
+          EEOperation::CompareEqualSingleCOP1 &&
+        instruction.operation !=
+          EEOperation::CompareLessThanSingleCOP1 &&
+        instruction.operation !=
+          EEOperation::CompareLessThanOrEqualSingleCOP1 &&
+        instruction.shiftAmount == registerIndex;
+      break;
     case EEOperation::AddSingleToAccumulatorCOP1:
     case EEOperation::SubtractSingleToAccumulatorCOP1:
     case EEOperation::MultiplySingleToAccumulatorCOP1:
     case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
     case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
-      return
+      reads =
         instruction.destinationRegister == registerIndex ||
-        instruction.targetRegister == registerIndex
-          ? FPRDependency::Read
-          : FPRDependency::None;
+        instruction.targetRegister == registerIndex;
+      break;
     default:
-      return FPRDependency::None;
+      break;
+  }
+  return static_cast<COP1Dependency>(
+    (reads ? static_cast<std::uint8_t>(
+      COP1Dependency::Read) : 0) |
+    (writes ? static_cast<std::uint8_t>(
+      COP1Dependency::Write) : 0));
+}
+
+EECore::COP1Dependency
+EECore::instructionAccumulatorDependency(
+  const EEInstruction &instruction)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+      return COP1Dependency::Write;
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+      return COP1Dependency::Read;
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+      return COP1Dependency::ReadWrite;
+    default:
+      return COP1Dependency::None;
+  }
+}
+
+EECore::COP1Dependency EECore::instructionFCR31Dependency(
+  const EEInstruction &instruction)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::MoveControlWordFromCOP1:
+      return instruction.destinationRegister ==
+        EECOP1Control::STATUS_REGISTER
+          ? COP1Dependency::Read
+          : COP1Dependency::None;
+    case EEOperation::MoveControlWordToCOP1:
+      return instruction.destinationRegister ==
+        EECOP1Control::STATUS_REGISTER
+          ? COP1Dependency::Write
+          : COP1Dependency::None;
+    case EEOperation::BranchCOP1False:
+    case EEOperation::BranchCOP1FalseLikely:
+    case EEOperation::BranchCOP1True:
+    case EEOperation::BranchCOP1TrueLikely:
+      return COP1Dependency::Read;
+    case EEOperation::MoveSingleCOP1:
+    case EEOperation::ConvertWordToSingleCOP1:
+      return COP1Dependency::None;
+    default:
+      return isCOP1OperateOperation(instruction.operation)
+        ? COP1Dependency::ReadWrite
+        : COP1Dependency::None;
   }
 }
 
@@ -3631,52 +3989,11 @@ void EECore::updateCOP1ArithmeticFlags(
       "Invalid EE COP1 arithmetic flag update.");
   }
 
-  struct FlagMapping
-  {
-    std::uint8_t resultFlag;
-    std::uint32_t causeFlag;
-    std::uint32_t stickyFlag;
-  };
-  constexpr FlagMapping FLAG_MAPPINGS[] = {
-    {
-      FP_FLAG_I_BIT,
-      EECOP1Control::CAUSE_INVALID,
-      EECOP1Control::STICKY_INVALID
-    },
-    {
-      FP_FLAG_D_BIT,
-      EECOP1Control::CAUSE_DIVISION_BY_ZERO,
-      EECOP1Control::STICKY_DIVISION_BY_ZERO
-    },
-    {
-      FP_FLAG_OVERFLOW,
-      EECOP1Control::CAUSE_OVERFLOW,
-      EECOP1Control::STICKY_OVERFLOW
-    },
-    {
-      FP_FLAG_UNDERFLOW,
-      EECOP1Control::CAUSE_UNDERFLOW,
-      EECOP1Control::STICKY_UNDERFLOW
-    }
-  };
-
-  for (const FlagMapping &mapping : FLAG_MAPPINGS)
-  {
-    if ((affectedFlags & mapping.resultFlag) == 0)
-    {
-      continue;
-    }
-    cop1StatusRegister &= ~mapping.causeFlag;
-    if ((raisedFlags & mapping.resultFlag) != 0)
-    {
-      cop1StatusRegister |= mapping.causeFlag;
-    }
-    if (((raisedFlags | raisedStickyFlags) &
-         mapping.resultFlag) != 0)
-    {
-      cop1StatusRegister |= mapping.stickyFlag;
-    }
-  }
+  cop1StatusRegister = updatedCOP1Status(
+    cop1StatusRegister,
+    affectedFlags,
+    raisedFlags,
+    raisedStickyFlags);
 }
 
 std::uint32_t EECore::programCounter() const

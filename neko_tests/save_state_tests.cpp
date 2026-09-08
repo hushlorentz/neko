@@ -41,12 +41,26 @@ namespace
   constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1051;
   constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_CAPTURED_CONTROL_OFFSET = 1067;
+  constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_MEMORY_ADDRESS_OFFSET = 1079;
   constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1087;
   constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1088;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET = 1090;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_AFFECTED_FLAGS_OFFSET = 1094;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET = 1095;
   constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2021;
+  constexpr std::uint8_t COP1_STAGE_Y = 3;
+  constexpr std::uint8_t COP1_STAGE_S1 = 5;
+  constexpr std::uint8_t COP1_STAGE_S2 = 6;
+  constexpr std::uint8_t COP1_DESTINATION_FPR = 1 << 0;
+  constexpr std::uint8_t COP1_DESTINATION_ACCUMULATOR = 1 << 1;
+  constexpr std::uint8_t COP1_DESTINATION_FCR31 = 1 << 2;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -92,6 +106,65 @@ namespace
       (*state)[offset + index] =
         static_cast<std::uint8_t>(value >> (index * 8));
     }
+  }
+
+  std::uint32_t cop1TransferInstruction(
+    std::uint8_t type,
+    std::uint8_t generalRegister,
+    std::uint8_t floatingPointRegister)
+  {
+    return
+      (UINT32_C(0x11) << 26) |
+      (static_cast<std::uint32_t>(type) << 21) |
+      (static_cast<std::uint32_t>(generalRegister) << 16) |
+      (static_cast<std::uint32_t>(
+        floatingPointRegister) << 11);
+  }
+
+  std::uint32_t cop1SingleInstruction(
+    std::uint8_t function,
+    std::uint8_t sourceRegister,
+    std::uint8_t destinationRegister,
+    std::uint8_t targetRegister)
+  {
+    return
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x10) << 21) |
+      (static_cast<std::uint32_t>(targetRegister) << 16) |
+      (static_cast<std::uint32_t>(sourceRegister) << 11) |
+      (static_cast<std::uint32_t>(
+        destinationRegister) << 6) |
+      function;
+  }
+
+  std::vector<std::uint8_t> withInFlightCOP1Result(
+    NekoSystem *system,
+    std::uint32_t producerInstruction,
+    std::uint8_t stage,
+    std::uint8_t destinationMask,
+    std::uint8_t destinationFPR,
+    std::uint32_t rawResult)
+  {
+    std::vector<std::uint8_t> state = system->saveState();
+    writeU64(&state, EE_NEXT_PROGRAM_ORDER_OFFSET, 2);
+    state[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
+    writeU64(&state, EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET, 1);
+    state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = stage;
+    writeU32(&state, EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET, 0x100);
+    writeU32(
+      &state,
+      EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+      producerInstruction);
+    state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+      destinationMask;
+    state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] =
+      destinationFPR;
+    writeU32(
+      &state,
+      EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET,
+      rawResult);
+    updateChecksum(&state);
+    return state;
   }
 
   std::uint32_t vifCode(
@@ -440,6 +513,206 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
   REQUIRE(
     restored.eeCore().stateHash() !=
     source.eeCore().stateHash());
+}
+
+TEST_CASE("EE COP1 scoreboard tracks FPR result visibility")
+{
+  const auto makeState =
+    [](std::uint8_t stage,
+       std::uint32_t committedValue,
+       std::uint32_t pendingValue)
+    {
+      NekoSystem source;
+      prepareInFlightSystem(&source);
+      source.eeCore().reset();
+      source.eeCore().setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      source.eeCore().setFloatingPointRegister(
+        3,
+        committedValue);
+      source.eeBus().write32(
+        0,
+        cop1TransferInstruction(0x00, 5, 3));
+      source.eeCore().startExecution(0);
+      return withInFlightCOP1Result(
+        &source,
+        cop1SingleInstruction(0x00, 1, 3, 2),
+        stage,
+        COP1_DESTINATION_FPR,
+        3,
+        pendingValue);
+    };
+
+  SECTION("A pre-S result is unavailable")
+  {
+    NekoSystem system;
+    system.loadState(
+      makeState(
+        COP1_STAGE_Y,
+        UINT32_C(0x3f800000),
+        UINT32_C(0x40a00000)));
+
+    system.eeCore().clock();
+
+    REQUIRE(system.eeCore().programCounter() == 0);
+    REQUIRE(system.eeCore().generalRegister(5) == EERegister128{});
+  }
+
+  SECTION("A 1S result is bypass-ready")
+  {
+    NekoSystem system;
+    system.loadState(
+      makeState(
+        COP1_STAGE_S1,
+        UINT32_C(0x3f800000),
+        UINT32_C(0x40a00000)));
+
+    system.eeCore().clock();
+
+    REQUIRE(system.eeCore().programCounter() == 4);
+    REQUIRE(
+      system.eeCore().generalRegister(5).low ==
+      UINT64_C(0x0000000040a00000));
+  }
+
+  SECTION("A 2S result is already committed")
+  {
+    NekoSystem system;
+    system.loadState(
+      makeState(
+        COP1_STAGE_S2,
+        UINT32_C(0x40a00000),
+        UINT32_C(0xdeadbeef)));
+
+    system.eeCore().clock();
+
+    REQUIRE(system.eeCore().programCounter() == 4);
+    REQUIRE(
+      system.eeCore().generalRegister(5).low ==
+      UINT64_C(0x0000000040a00000));
+  }
+}
+
+TEST_CASE("EE COP1 scoreboard tracks ACC result visibility")
+{
+  const auto makeState =
+    [](std::uint8_t stage)
+    {
+      NekoSystem source;
+      prepareInFlightSystem(&source);
+      source.eeCore().reset();
+      source.eeCore().setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      source.eeCore().setFloatingPointRegister(
+        1,
+        UINT32_C(0x40000000));
+      source.eeCore().setFloatingPointRegister(
+        2,
+        UINT32_C(0x40400000));
+      source.eeCore().setFloatingPointAccumulator(
+        UINT32_C(0x42c80000));
+      source.eeBus().write32(
+        0,
+        cop1SingleInstruction(0x1c, 1, 3, 2));
+      source.eeCore().startExecution(0);
+      return withInFlightCOP1Result(
+        &source,
+        cop1SingleInstruction(0x18, 4, 0, 5),
+        stage,
+        COP1_DESTINATION_ACCUMULATOR,
+        0,
+        UINT32_C(0x3f800000));
+    };
+
+  SECTION("A pre-S accumulator result is unavailable")
+  {
+    NekoSystem system;
+    system.loadState(makeState(COP1_STAGE_Y));
+
+    system.eeCore().clock();
+
+    REQUIRE(system.eeCore().programCounter() == 0);
+    REQUIRE(system.eeCore().floatingPointRegister(3) == 0);
+  }
+
+  SECTION("A 1S accumulator result is bypass-ready")
+  {
+    NekoSystem system;
+    system.loadState(makeState(COP1_STAGE_S1));
+
+    system.eeCore().clock();
+
+    REQUIRE(system.eeCore().programCounter() == 4);
+    REQUIRE(
+      system.eeCore().floatingPointRegister(3) ==
+      UINT32_C(0x40e00000));
+  }
+}
+
+TEST_CASE("EE COP1 scoreboard tracks FCR31 result visibility")
+{
+  const auto makeState =
+    [](std::uint8_t stage)
+    {
+      NekoSystem source;
+      prepareInFlightSystem(&source);
+      source.eeCore().reset();
+      source.eeCore().setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      source.eeBus().write32(
+        0,
+        cop1TransferInstruction(0x02, 5, 31));
+      source.eeCore().startExecution(0);
+      std::vector<std::uint8_t> state =
+        withInFlightCOP1Result(
+          &source,
+          cop1SingleInstruction(0x00, 1, 3, 2),
+          stage,
+          COP1_DESTINATION_FPR |
+            COP1_DESTINATION_FCR31,
+          3,
+          UINT32_C(0x40a00000));
+      writeU32(
+        &state,
+        EE_FIRST_IN_FLIGHT_COP1_CAPTURED_CONTROL_OFFSET,
+        EECOP1Control::STICKY_UNDERFLOW);
+      state[EE_FIRST_IN_FLIGHT_COP1_AFFECTED_FLAGS_OFFSET] =
+        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW;
+      state[EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET] =
+        FP_FLAG_OVERFLOW;
+      updateChecksum(&state);
+      return state;
+    };
+
+  SECTION("A pre-S control result is unavailable")
+  {
+    NekoSystem system;
+    system.loadState(makeState(COP1_STAGE_Y));
+
+    system.eeCore().clock();
+
+    REQUIRE(system.eeCore().programCounter() == 0);
+    REQUIRE(system.eeCore().generalRegister(5) == EERegister128{});
+  }
+
+  SECTION("A 1S control result is bypass-ready")
+  {
+    NekoSystem system;
+    system.loadState(makeState(COP1_STAGE_S1));
+
+    system.eeCore().clock();
+
+    REQUIRE(system.eeCore().programCounter() == 4);
+    REQUIRE(
+      system.eeCore().generalRegister(5).low ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW |
+       EECOP1Control::STICKY_UNDERFLOW));
+  }
 }
 
 TEST_CASE("Active system save states round trip and continue identically")
