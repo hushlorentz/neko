@@ -824,7 +824,7 @@ foundation before enabling COP1 instruction pairs.
 - [x] Introduce a COP1 scoreboard that distinguishes unavailable operands,
       `1S` bypass-ready values, and `2S` committed values for FPRs, ACC, and
       FCR31
-- [ ] Adapt the existing pending load and divider units to the shared
+- [x] Adapt the existing pending load and divider units to the shared
       dependency and ordered-writeback interfaces without changing their
       established timing contracts after the divider anchor is explicit
 - [ ] Route ELF guest-return drain through the shared in-flight interface while

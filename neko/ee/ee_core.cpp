@@ -284,8 +284,6 @@ void EECore::reset()
   executingProgramOrder = 0;
   pendingMac0 = {};
   pendingMac1 = {};
-  pendingCOP1Load = {};
-  pendingCOP1DividerResults = {};
   cop1DividerInitiationCycles = 0;
   cop1DividerOperation = EEOperation::Nop;
   cop1OperateResourceOccupied = false;
@@ -405,13 +403,12 @@ void EECore::startExecution(std::uint32_t startAddress)
   const bool resumePendingCOP1Load =
     state == EEExecutionState::Halted &&
     haltReason == EEStopReason::HostHalt &&
-    pendingCOP1Load.active &&
+    pendingCOP1LoadActive() &&
     startAddress == pc;
   const bool resumePendingCOP1Divider =
     state == EEExecutionState::Halted &&
     haltReason == EEStopReason::HostHalt &&
-    (pendingCOP1DividerResults[0].active ||
-     pendingCOP1DividerResults[1].active ||
+    (pendingCOP1DividerActive() ||
      cop1DividerInitiationCycles != 0) &&
     startAddress == pc;
   const bool resumeCOP1OperateResource =
@@ -457,13 +454,8 @@ void EECore::startExecution(std::uint32_t startAddress)
     pendingMac0 = {};
     pendingMac1 = {};
   }
-  if (!resumePendingCOP1Load)
-  {
-    pendingCOP1Load = {};
-  }
   if (!resumePendingCOP1Divider)
   {
-    pendingCOP1DividerResults = {};
     cop1DividerInitiationCycles = 0;
     cop1DividerOperation = EEOperation::Nop;
   }
@@ -479,6 +471,27 @@ void EECore::startExecution(std::uint32_t startAddress)
   {
     inFlightCOP1Operations.fill({});
     nextEEProgramOrder = 1;
+  }
+  else if (!resumePendingCOP1Load ||
+           !resumePendingCOP1Divider)
+  {
+    for (InFlightCOP1Operation &operation :
+         inFlightCOP1Operations)
+    {
+      if (!operation.active)
+      {
+        continue;
+      }
+      if ((!resumePendingCOP1Load &&
+           operation.instruction.operation ==
+             EEOperation::LoadWordToCOP1) ||
+          (!resumePendingCOP1Divider &&
+           isCOP1DividerOperation(
+             operation.instruction.operation)))
+      {
+        operation = {};
+      }
+    }
   }
   executingProgramOrder = 0;
   rejectedInstructionValue = 0;
@@ -524,9 +537,10 @@ void EECore::clock()
 
   ++cycles;
   std::uint8_t completedCOP1LoadRegister = 0;
-  const bool completedCOP1Load =
-    completePendingCOP1Load(&completedCOP1LoadRegister);
-  advancePendingCOP1Divider();
+  bool completedCOP1Load = false;
+  advancePendingCOP1(
+    &completedCOP1LoadRegister,
+    &completedCOP1Load);
   if (interruptDeliverable())
   {
     enterInterruptException();
@@ -618,24 +632,6 @@ void EECore::clock()
       instructionAddress,
       instructionValue,
       static_cast<std::uint8_t>(cop1DividerOperation));
-    pc = instructionAddress;
-    return;
-  }
-  std::uint8_t pendingCOP1DividerRegister = 0;
-  COP1Dependency pendingCOP1DividerDependency =
-    COP1Dependency::None;
-  if (pendingCOP1DividerBlocks(
-        decoded,
-        &pendingCOP1DividerRegister,
-        &pendingCOP1DividerDependency))
-  {
-    recordCycleTrace(
-      CycleTraceKind::COP1ResourceInterlock,
-      instructionAddress,
-      instructionValue,
-      pendingCOP1DividerRegister,
-      static_cast<std::uint8_t>(
-        pendingCOP1DividerDependency));
     pc = instructionAddress;
     return;
   }
@@ -1710,11 +1706,17 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      pendingCOP1Load = {
-        true,
-        immediateDestination,
-        value
-      };
+      InFlightCOP1Operation &operation =
+        allocateInFlightCOP1(instruction, address);
+      operation.stage = COP1PipelineStage::R;
+      operation.capturedGPR = source;
+      operation.memoryAddress = dataAddress;
+      operation.capturedMemoryValue = value;
+      operation.destination.mask = COP1_DESTINATION_FPR;
+      operation.destination.fprRegister =
+        immediateDestination;
+      operation.rawResult = value;
+      operation.remainingCycles = 1;
       return true;
     }
     case EEOperation::StoreWordFromCOP1:
@@ -2823,22 +2825,78 @@ void EECore::startPendingMultiplyDivide(
   operation.generalRegisterResult = loResult;
 }
 
+EECore::InFlightCOP1Operation &
+EECore::allocateInFlightCOP1(
+  const EEInstruction &instruction,
+  std::uint32_t instructionAddress)
+{
+  for (InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (!operation.active)
+    {
+      operation = {};
+      operation.active = true;
+      operation.programOrder = executingProgramOrder;
+      operation.stage = COP1PipelineStage::R;
+      operation.instructionAddress = instructionAddress;
+      operation.instruction = instruction;
+      return operation;
+    }
+  }
+  throw std::logic_error(
+    "EE COP1 has no free in-flight operation slot.");
+}
+
+bool EECore::pendingCOP1LoadActive() const
+{
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (operation.active &&
+        operation.instruction.operation ==
+          EEOperation::LoadWordToCOP1)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool EECore::completePendingCOP1Load(
   std::uint8_t *registerIndex)
 {
-  if (!pendingCOP1Load.active)
+  InFlightCOP1Operation *pendingLoad = nullptr;
+  for (InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (operation.active &&
+        operation.instruction.operation ==
+          EEOperation::LoadWordToCOP1)
+    {
+      if (pendingLoad == nullptr ||
+          operation.programOrder < pendingLoad->programOrder)
+      {
+        pendingLoad = &operation;
+      }
+    }
+  }
+  if (pendingLoad == nullptr)
   {
     return false;
   }
-  *registerIndex = pendingCOP1Load.registerIndex;
-  floatingPointRegisters[pendingCOP1Load.registerIndex] =
-    pendingCOP1Load.value;
-  pendingCOP1Load = {};
+  *registerIndex = pendingLoad->destination.fprRegister;
+  commitInFlightCOP1(pendingLoad);
   return true;
 }
 
-void EECore::advancePendingCOP1Divider()
+void EECore::advancePendingCOP1(
+  std::uint8_t *completedLoadRegister,
+  bool *completedLoad)
 {
+  *completedLoad = false;
+  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
+    readyToCommit = {};
   if (cop1DividerInitiationCycles != 0)
   {
     --cop1DividerInitiationCycles;
@@ -2848,34 +2906,71 @@ void EECore::advancePendingCOP1Divider()
     }
   }
 
-  for (PendingCOP1DividerResult &result :
-       pendingCOP1DividerResults)
+  for (std::size_t index = 0;
+       index < inFlightCOP1Operations.size();
+       ++index)
   {
-    if (!result.active)
+    InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[index];
+    if (!operation.active ||
+        operation.remainingCycles == 0)
     {
       continue;
     }
-    --result.remainingCycles;
-    if (result.remainingCycles != 0)
+    --operation.remainingCycles;
+    if (operation.remainingCycles == 0)
     {
-      continue;
+      operation.stage = COP1PipelineStage::S1;
+      readyToCommit[index] = true;
     }
+  }
 
-    floatingPointRegisters[result.registerIndex] =
-      result.value;
-    updateCOP1ArithmeticFlags(
-      result.affectedFlags,
-      result.raisedFlags);
-    result = {};
+  while (true)
+  {
+    InFlightCOP1Operation *readyOperation = nullptr;
+    std::size_t readyIndex = 0;
+    for (std::size_t index = 0;
+         index < inFlightCOP1Operations.size();
+         ++index)
+    {
+      InFlightCOP1Operation &operation =
+        inFlightCOP1Operations[index];
+      if (!operation.active ||
+          !readyToCommit[index])
+      {
+        continue;
+      }
+      if (readyOperation == nullptr ||
+          operation.programOrder < readyOperation->programOrder)
+      {
+        readyOperation = &operation;
+        readyIndex = index;
+      }
+    }
+    if (readyOperation == nullptr)
+    {
+      break;
+    }
+    readyToCommit[readyIndex] = false;
+    if (readyOperation->instruction.operation ==
+        EEOperation::LoadWordToCOP1)
+    {
+      *completedLoad = true;
+      *completedLoadRegister =
+        readyOperation->destination.fprRegister;
+    }
+    commitInFlightCOP1(readyOperation);
   }
 }
 
 bool EECore::pendingCOP1DividerActive() const
 {
-  for (const PendingCOP1DividerResult &result :
-       pendingCOP1DividerResults)
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
   {
-    if (result.active)
+    if (operation.active &&
+        isCOP1DividerOperation(
+          operation.instruction.operation))
     {
       return true;
     }
@@ -2887,7 +2982,11 @@ void EECore::completePendingCOP1Divider()
 {
   while (pendingCOP1DividerActive())
   {
-    advancePendingCOP1Divider();
+    std::uint8_t completedLoadRegister = 0;
+    bool completedLoad = false;
+    advancePendingCOP1(
+      &completedLoadRegister,
+      &completedLoad);
   }
 }
 
@@ -2896,72 +2995,50 @@ void EECore::startPendingCOP1Divider(
   std::uint32_t result,
   std::uint8_t raisedFlags)
 {
-  PendingCOP1DividerResult *pendingResult = nullptr;
-  for (PendingCOP1DividerResult &candidate :
-       pendingCOP1DividerResults)
-  {
-    if (!candidate.active)
-    {
-      pendingResult = &candidate;
-      break;
-    }
-  }
-  if (pendingResult == nullptr)
-  {
-    throw std::logic_error(
-      "EE COP1 divider has no free result slot.");
-  }
-
   const COP1DividerTiming timing =
     cop1DividerTiming(instruction.operation);
-  *pendingResult = {
-    true,
-    timing.latency,
-    instruction.shiftAmount,
-    result,
-    static_cast<std::uint8_t>(
-      FP_FLAG_I_BIT | FP_FLAG_D_BIT),
-    raisedFlags
-  };
+  InFlightCOP1Operation &operation =
+    allocateInFlightCOP1(
+      instruction,
+      pc - 4);
+  operation.capturedFS =
+    scoreboardFPRValue(instruction.destinationRegister);
+  operation.capturedFT =
+    scoreboardFPRValue(instruction.targetRegister);
+  operation.destination.mask =
+    COP1_DESTINATION_FPR |
+    COP1_DESTINATION_FCR31;
+  operation.destination.fprRegister =
+    instruction.shiftAmount;
+  operation.rawResult = result;
+  operation.affectedFlags =
+    FP_FLAG_I_BIT | FP_FLAG_D_BIT;
+  operation.raisedFlags = raisedFlags;
+  operation.remainingCycles = timing.latency;
   cop1DividerInitiationCycles = timing.initiationInterval;
   cop1DividerOperation = instruction.operation;
 }
 
-bool EECore::pendingCOP1DividerBlocks(
-  const EEInstruction &instruction,
-  std::uint8_t *registerIndex,
-  COP1Dependency *dependency) const
+void EECore::commitInFlightCOP1(
+  InFlightCOP1Operation *operation)
 {
-  for (const PendingCOP1DividerResult &result :
-       pendingCOP1DividerResults)
+  operation->stage = COP1PipelineStage::S2;
+  if ((operation->destination.mask &
+       COP1_DESTINATION_FPR) != 0)
   {
-    if (!result.active)
-    {
-      continue;
-    }
-    const COP1Dependency resultDependency =
-      instructionFPRDependency(
-        instruction,
-        result.registerIndex);
-    if (resultDependency != COP1Dependency::None)
-    {
-      *registerIndex = result.registerIndex;
-      *dependency = resultDependency;
-      return true;
-    }
-    if ((instruction.operation ==
-           EEOperation::MoveControlWordFromCOP1 ||
-         instruction.operation ==
-           EEOperation::MoveControlWordToCOP1) &&
-        instruction.destinationRegister ==
-          EECOP1Control::STATUS_REGISTER)
-    {
-      *registerIndex = result.registerIndex;
-      *dependency = COP1Dependency::Write;
-      return true;
-    }
+    floatingPointRegisters[
+      operation->destination.fprRegister] =
+        operation->rawResult;
   }
-  return false;
+  if ((operation->destination.mask &
+       COP1_DESTINATION_FCR31) != 0)
+  {
+    updateCOP1ArithmeticFlags(
+      operation->affectedFlags,
+      operation->raisedFlags,
+      operation->raisedStickyFlags);
+  }
+  *operation = {};
 }
 
 bool EECore::cop1ScoreboardBlocks(
@@ -3012,7 +3089,8 @@ bool EECore::cop1ScoreboardBlocks(
 
   const COP1Dependency controlDependency =
     instructionFCR31Dependency(instruction);
-  if (controlDependency != COP1Dependency::None &&
+  if (!isCOP1DividerOperation(instruction.operation) &&
+      controlDependency != COP1Dependency::None &&
       cop1ScoreboardValue(
         COP1ScoreboardResource::FCR31)
         .availability ==
@@ -3795,6 +3873,7 @@ std::uint64_t EECore::stateHash() const
     hashEEStateValue(&hash, operation.raisedFlags);
     hashEEStateValue(&hash, operation.raisedStickyFlags);
     hashEEStateValue(&hash, operation.conditionResult);
+    hashEEStateValue(&hash, operation.remainingCycles);
   }
   const auto hashPending =
     [&hash](const PendingMultiplyDivide &operation)
@@ -3813,19 +3892,6 @@ std::uint64_t EECore::stateHash() const
     };
   hashPending(pendingMac0);
   hashPending(pendingMac1);
-  hashEEStateValue(&hash, pendingCOP1Load.active);
-  hashEEStateValue(&hash, pendingCOP1Load.registerIndex);
-  hashEEStateValue(&hash, pendingCOP1Load.value);
-  for (const PendingCOP1DividerResult &result :
-       pendingCOP1DividerResults)
-  {
-    hashEEStateValue(&hash, result.active);
-    hashEEStateValue(&hash, result.remainingCycles);
-    hashEEStateValue(&hash, result.registerIndex);
-    hashEEStateValue(&hash, result.value);
-    hashEEStateValue(&hash, result.affectedFlags);
-    hashEEStateValue(&hash, result.raisedFlags);
-  }
   hashEEStateValue(&hash, cop1DividerInitiationCycles);
   hashEEStateValue(
     &hash,

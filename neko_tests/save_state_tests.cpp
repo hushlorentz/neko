@@ -17,10 +17,6 @@ namespace
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
-  constexpr std::size_t EE_PENDING_COP1_LOAD_REGISTER_OFFSET = 949;
-  constexpr std::size_t EE_COP1_DIVIDER_FIRST_REGISTER_OFFSET = 956;
-  constexpr std::size_t EE_COP1_DIVIDER_FIRST_FLAGS_OFFSET = 962;
-  constexpr std::size_t EE_COP1_DIVIDER_SECOND_REGISTER_OFFSET = 965;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
   constexpr std::size_t EE_COP1_DIVIDER_OPERATION_OFFSET = 973;
   constexpr std::size_t
@@ -54,7 +50,17 @@ namespace
     EE_FIRST_IN_FLIGHT_COP1_AFFECTED_FLAGS_OFFSET = 1094;
   constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET = 1095;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2021;
+  constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1098;
+  constexpr std::size_t
+    EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1150;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1071;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET = 1078;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1133;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2037;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
   constexpr std::uint8_t COP1_STAGE_S1 = 5;
   constexpr std::uint8_t COP1_STAGE_S2 = 6;
@@ -492,7 +498,7 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
   writeU64(&state, EE_NEXT_PROGRAM_ORDER_OFFSET, 2);
   state[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
   writeU64(&state, EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET, 1);
-  state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = 1;
+  state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = 0;
   writeU32(&state, EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET, 4);
   writeU32(
     &state,
@@ -504,6 +510,7 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
     0x100);
   state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] = 1;
   state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 3;
+  state[EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] = 1;
   updateChecksum(&state);
 
   NekoSystem restored;
@@ -1479,7 +1486,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 }
 
-TEST_CASE("Pending COP1 save-state loads match their instruction")
+TEST_CASE("In-flight COP1 save-state loads match their instruction")
 {
   NekoSystem source;
   source.eeCore().setGeneralRegister(1, {0x100, 0});
@@ -1496,7 +1503,8 @@ TEST_CASE("Pending COP1 save-state loads match their instruction")
   source.clockMasterCycle();
 
   std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[EE_PENDING_COP1_LOAD_REGISTER_OFFSET] = 4;
+  invalid[
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 4;
   updateChecksum(&invalid);
 
   NekoSystem destination;
@@ -1539,11 +1547,17 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
   {
     std::vector<std::uint8_t> invalid = source.saveState();
     REQUIRE(
-      invalid[EE_COP1_DIVIDER_FIRST_REGISTER_OFFSET] == 4);
+      invalid[
+        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] ==
+      4);
     REQUIRE(
-      invalid[EE_COP1_DIVIDER_SECOND_REGISTER_OFFSET] == 5);
-    invalid[EE_COP1_DIVIDER_SECOND_REGISTER_OFFSET] =
-      invalid[EE_COP1_DIVIDER_FIRST_REGISTER_OFFSET];
+      invalid[
+        SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] ==
+      5);
+    invalid[
+      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] =
+      invalid[
+        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET];
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -1553,7 +1567,8 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
   SECTION("A result cannot raise invalid and division by zero together")
   {
     std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[EE_COP1_DIVIDER_FIRST_FLAGS_OFFSET] =
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET] =
       FP_FLAG_I_BIT | FP_FLAG_D_BIT;
     updateChecksum(&invalid);
 

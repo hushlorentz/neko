@@ -359,6 +359,7 @@ class EECore : public ClockedComponent
       std::uint8_t raisedFlags = 0;
       std::uint8_t raisedStickyFlags = 0;
       bool conditionResult = false;
+      std::uint8_t remainingCycles = 0;
     };
 
     struct COP1ScoreboardValue
@@ -386,23 +387,6 @@ class EECore : public ClockedComponent
       bool writeGeneralRegister = false;
       std::uint8_t generalRegister = 0;
       std::uint64_t generalRegisterResult = 0;
-    };
-
-    struct PendingCOP1Load
-    {
-      bool active = false;
-      std::uint8_t registerIndex = 0;
-      std::uint32_t value = 0;
-    };
-
-    struct PendingCOP1DividerResult
-    {
-      bool active = false;
-      std::uint8_t remainingCycles = 0;
-      std::uint8_t registerIndex = 0;
-      std::uint32_t value = 0;
-      std::uint8_t affectedFlags = 0;
-      std::uint8_t raisedFlags = 0;
     };
 
     struct COP1DividerTiming
@@ -453,9 +437,6 @@ class EECore : public ClockedComponent
     std::uint64_t executingProgramOrder = 0;
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
-    PendingCOP1Load pendingCOP1Load;
-    std::array<PendingCOP1DividerResult, 2>
-      pendingCOP1DividerResults = {};
     std::uint8_t cop1DividerInitiationCycles = 0;
     EEOperation cop1DividerOperation = EEOperation::Nop;
     bool cop1OperateResourceOccupied = false;
@@ -546,19 +527,23 @@ class EECore : public ClockedComponent
       std::uint64_t loResult,
       std::uint8_t generalRegister,
       bool writeGeneralRegister);
+    InFlightCOP1Operation &allocateInFlightCOP1(
+      const EEInstruction &instruction,
+      std::uint32_t instructionAddress);
+    bool pendingCOP1LoadActive() const;
     bool completePendingCOP1Load(
       std::uint8_t *registerIndex);
-    void advancePendingCOP1Divider();
+    void advancePendingCOP1(
+      std::uint8_t *completedLoadRegister,
+      bool *completedLoad);
     bool pendingCOP1DividerActive() const;
     void completePendingCOP1Divider();
     void startPendingCOP1Divider(
       const EEInstruction &instruction,
       std::uint32_t result,
       std::uint8_t raisedFlags);
-    bool pendingCOP1DividerBlocks(
-      const EEInstruction &instruction,
-      std::uint8_t *registerIndex,
-      COP1Dependency *dependency) const;
+    void commitInFlightCOP1(
+      InFlightCOP1Operation *operation);
     bool cop1ScoreboardBlocks(
       const EEInstruction &instruction,
       COP1ScoreboardHazard *hazard) const;

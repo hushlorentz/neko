@@ -18,7 +18,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 21;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 22;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1326,10 +1326,6 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.pendingMac0;
   destination->eeCoreComponent.pendingMac1 =
     source->eeCoreComponent.pendingMac1;
-  destination->eeCoreComponent.pendingCOP1Load =
-    source->eeCoreComponent.pendingCOP1Load;
-  destination->eeCoreComponent.pendingCOP1DividerResults =
-    source->eeCoreComponent.pendingCOP1DividerResults;
   destination->eeCoreComponent.cop1DividerInitiationCycles =
     source->eeCoreComponent.cop1DividerInitiationCycles;
   destination->eeCoreComponent.cop1DividerOperation =
@@ -1671,18 +1667,17 @@ void NekoSaveStateCodec::writeEECore(
     };
   writePending(core.pendingMac0);
   writePending(core.pendingMac1);
-  writer->writeBool(core.pendingCOP1Load.active);
-  writer->writeU8(core.pendingCOP1Load.registerIndex);
-  writer->writeU32(core.pendingCOP1Load.value);
-  for (const EECore::PendingCOP1DividerResult &result :
-       core.pendingCOP1DividerResults)
+  writer->writeBool(false);
+  writer->writeU8(0);
+  writer->writeU32(0);
+  for (std::size_t index = 0; index < 2; ++index)
   {
-    writer->writeBool(result.active);
-    writer->writeU8(result.remainingCycles);
-    writer->writeU8(result.registerIndex);
-    writer->writeU32(result.value);
-    writer->writeU8(result.affectedFlags);
-    writer->writeU8(result.raisedFlags);
+    writer->writeBool(false);
+    writer->writeU8(0);
+    writer->writeU8(0);
+    writer->writeU32(0);
+    writer->writeU8(0);
+    writer->writeU8(0);
   }
   writer->writeU8(core.cop1DividerInitiationCycles);
   writer->writeU8(
@@ -1730,6 +1725,7 @@ void NekoSaveStateCodec::writeEECore(
     writer->writeU8(operation.raisedFlags);
     writer->writeU8(operation.raisedStickyFlags);
     writer->writeBool(operation.conditionResult);
+    writer->writeU8(operation.remainingCycles);
   }
 }
 
@@ -1816,98 +1812,41 @@ void NekoSaveStateCodec::readEECore(
   readPending(
     &core->pendingMac1,
     "EE MAC1 pending flag");
-  core->pendingCOP1Load.active =
-    reader->readBool("EE COP1 pending-load flag");
-  core->pendingCOP1Load.registerIndex = reader->readU8();
-  core->pendingCOP1Load.value = reader->readU32();
+  const bool retiredPendingLoadActive =
+    reader->readBool("retired EE COP1 pending-load flag");
+  const std::uint8_t retiredPendingLoadRegister =
+    reader->readU8();
+  const std::uint32_t retiredPendingLoadValue =
+    reader->readU32();
   require(
-    core->pendingCOP1Load.registerIndex <
-      EECore::FLOATING_POINT_REGISTER_COUNT,
-    "EE pending COP1 load register is invalid");
-  require(
-    core->pendingCOP1Load.active ||
-      (core->pendingCOP1Load.registerIndex == 0 &&
-       core->pendingCOP1Load.value == 0),
-    "EE inactive COP1 load contains state");
-  for (EECore::PendingCOP1DividerResult &result :
-       core->pendingCOP1DividerResults)
+    !retiredPendingLoadActive &&
+      retiredPendingLoadRegister == 0 &&
+      retiredPendingLoadValue == 0,
+    "retired EE COP1 pending-load state is not empty");
+  for (std::size_t index = 0; index < 2; ++index)
   {
-    result.active =
-      reader->readBool("EE COP1 pending-divider flag");
-    result.remainingCycles = reader->readU8();
-    result.registerIndex = reader->readU8();
-    result.value = reader->readU32();
-    result.affectedFlags = reader->readU8();
-    result.raisedFlags = reader->readU8();
+    const bool active =
+      reader->readBool("retired EE COP1 pending-divider flag");
+    const std::uint8_t remainingCycles = reader->readU8();
+    const std::uint8_t registerIndex = reader->readU8();
+    const std::uint32_t value = reader->readU32();
+    const std::uint8_t affectedFlags = reader->readU8();
+    const std::uint8_t raisedFlags = reader->readU8();
     require(
-      result.registerIndex <
-        EECore::FLOATING_POINT_REGISTER_COUNT,
-      "EE pending COP1 divider register is invalid");
-    require(
-      !result.active ||
-        (result.remainingCycles >= 1 &&
-         result.remainingCycles <= 14),
-      "EE pending COP1 divider latency is invalid");
-    require(
-      !result.active ||
-        result.affectedFlags ==
-          (FP_FLAG_I_BIT | FP_FLAG_D_BIT),
-      "EE pending COP1 divider affected flags are invalid");
-    require(
-      result.raisedFlags == 0 ||
-        result.raisedFlags == FP_FLAG_I_BIT ||
-        result.raisedFlags == FP_FLAG_D_BIT,
-      "EE pending COP1 divider raised flags are invalid");
-    require(
-      result.active ||
-        (result.remainingCycles == 0 &&
-         result.registerIndex == 0 &&
-         result.value == 0 &&
-         result.affectedFlags == 0 &&
-         result.raisedFlags == 0),
-      "EE inactive COP1 divider result contains state");
+      !active &&
+        remainingCycles == 0 &&
+        registerIndex == 0 &&
+        value == 0 &&
+        affectedFlags == 0 &&
+        raisedFlags == 0,
+      "retired EE COP1 pending-divider state is not empty");
   }
   core->cop1DividerInitiationCycles = reader->readU8();
   core->cop1DividerOperation =
     static_cast<EEOperation>(reader->readU8());
-  std::size_t activeDividerResults = 0;
-  std::uint8_t firstRemainingCycles = 0;
-  std::uint8_t secondRemainingCycles = 0;
-  std::uint8_t firstDividerRegister = 0;
-  std::uint8_t secondDividerRegister = 0;
-  for (const EECore::PendingCOP1DividerResult &result :
-       core->pendingCOP1DividerResults)
-  {
-    if (!result.active)
-    {
-      continue;
-    }
-    if (activeDividerResults == 0)
-    {
-      firstRemainingCycles = result.remainingCycles;
-      firstDividerRegister = result.registerIndex;
-    }
-    else
-    {
-      secondRemainingCycles = result.remainingCycles;
-      secondDividerRegister = result.registerIndex;
-    }
-    ++activeDividerResults;
-  }
   require(
     core->cop1DividerInitiationCycles <= 13,
     "EE COP1 divider initiation interval is invalid");
-  require(
-    activeDividerResults != 0 ||
-      (core->cop1DividerInitiationCycles == 0 &&
-       core->cop1DividerOperation == EEOperation::Nop),
-    "EE inactive COP1 divider contains occupancy");
-  require(
-    core->cop1DividerInitiationCycles != 0 ||
-      (activeDividerResults == 0 ||
-       (activeDividerResults == 1 &&
-        firstRemainingCycles == 1)),
-    "EE unoccupied COP1 divider has invalid pending results");
   require(
     core->cop1DividerInitiationCycles != 0 ||
       core->cop1DividerOperation == EEOperation::Nop,
@@ -1917,36 +1856,6 @@ void NekoSaveStateCodec::readEECore(
       EECore::isCOP1DividerOperation(
         core->cop1DividerOperation),
     "EE COP1 divider operation state is inconsistent");
-  if (core->cop1DividerInitiationCycles != 0)
-  {
-    const EECore::COP1DividerTiming timing =
-      EECore::cop1DividerTiming(
-        core->cop1DividerOperation);
-    require(
-      core->cop1DividerInitiationCycles <=
-        timing.initiationInterval,
-      "EE COP1 divider occupancy exceeds its policy");
-    if (activeDividerResults == 1)
-    {
-      require(
-        firstRemainingCycles ==
-          core->cop1DividerInitiationCycles + 1,
-        "EE COP1 divider countdowns are inconsistent");
-    }
-    else
-    {
-      require(
-        activeDividerResults == 2 &&
-          firstDividerRegister != secondDividerRegister &&
-          core->cop1DividerInitiationCycles ==
-            timing.initiationInterval &&
-          ((firstRemainingCycles == 1 &&
-            secondRemainingCycles == timing.latency) ||
-           (secondRemainingCycles == 1 &&
-            firstRemainingCycles == timing.latency)),
-        "EE COP1 divider overlap state is inconsistent");
-    }
-  }
   core->cop1OperateResourceOccupied =
     reader->readBool("EE COP1 operate resource flag");
   core->recentShiftAmountAccesses = reader->readU8();
@@ -2013,6 +1922,7 @@ void NekoSaveStateCodec::readEECore(
     operation.raisedStickyFlags = reader->readU8();
     operation.conditionResult =
       reader->readBool("EE COP1 condition result");
+    operation.remainingCycles = reader->readU8();
 
     constexpr std::uint8_t destinationMask =
       EECore::COP1_DESTINATION_FPR |
@@ -2096,6 +2006,53 @@ void NekoSaveStateCodec::readEECore(
          EECore::COP1_DESTINATION_CONDITION) != 0 ||
           !operation.conditionResult,
         "EE COP1 result contains an unused condition value");
+      const bool load =
+        operation.instruction.operation ==
+          EEOperation::LoadWordToCOP1;
+      const bool divider =
+        EECore::isCOP1DividerOperation(
+          operation.instruction.operation);
+      require(
+        load || divider || operation.remainingCycles == 0,
+        "EE COP1 operation has an unexpected countdown");
+      if (load)
+      {
+        require(
+          operation.stage == EECore::COP1PipelineStage::R &&
+            operation.remainingCycles == 1 &&
+            operation.destination.mask ==
+              EECore::COP1_DESTINATION_FPR &&
+            operation.destination.fprRegister ==
+              operation.instruction.targetRegister &&
+            operation.rawResult ==
+              operation.capturedMemoryValue &&
+            operation.affectedFlags == 0 &&
+            operation.raisedFlags == 0 &&
+            operation.raisedStickyFlags == 0,
+          "EE in-flight COP1 load state is inconsistent");
+      }
+      if (divider)
+      {
+        const EECore::COP1DividerTiming timing =
+          EECore::cop1DividerTiming(
+            operation.instruction.operation);
+        require(
+          operation.stage == EECore::COP1PipelineStage::R &&
+            operation.remainingCycles >= 1 &&
+            operation.remainingCycles <= timing.latency &&
+            operation.destination.mask ==
+              (EECore::COP1_DESTINATION_FPR |
+               EECore::COP1_DESTINATION_FCR31) &&
+            operation.destination.fprRegister ==
+              operation.instruction.shiftAmount &&
+            operation.affectedFlags ==
+              (FP_FLAG_I_BIT | FP_FLAG_D_BIT) &&
+            (operation.raisedFlags == 0 ||
+             operation.raisedFlags == FP_FLAG_I_BIT ||
+             operation.raisedFlags == FP_FLAG_D_BIT) &&
+            operation.raisedStickyFlags == 0,
+          "EE in-flight COP1 divider state is inconsistent");
+      }
     }
     else
     {
@@ -2120,7 +2077,8 @@ void NekoSaveStateCodec::readEECore(
           operation.affectedFlags == 0 &&
           operation.raisedFlags == 0 &&
           operation.raisedStickyFlags == 0 &&
-          !operation.conditionResult,
+          !operation.conditionResult &&
+          operation.remainingCycles == 0,
         "EE inactive COP1 operation contains state");
     }
   }
@@ -2131,6 +2089,67 @@ void NekoSaveStateCodec::readEECore(
     if (!core->inFlightCOP1Operations[left].active)
     {
       continue;
+    }
+    std::array<const EECore::InFlightCOP1Operation *, 2>
+      dividerResults = {};
+    std::size_t activeDividerResults = 0;
+    for (const EECore::InFlightCOP1Operation &operation :
+         core->inFlightCOP1Operations)
+    {
+      if (!operation.active ||
+          !EECore::isCOP1DividerOperation(
+            operation.instruction.operation))
+      {
+        continue;
+      }
+      require(
+        activeDividerResults < dividerResults.size(),
+        "EE COP1 divider has too many pending results");
+      dividerResults[activeDividerResults++] = &operation;
+    }
+    require(
+      activeDividerResults != 0 ||
+        (core->cop1DividerInitiationCycles == 0 &&
+         core->cop1DividerOperation == EEOperation::Nop),
+      "EE inactive COP1 divider contains occupancy");
+    require(
+      core->cop1DividerInitiationCycles != 0 ||
+        (activeDividerResults == 0 ||
+         (activeDividerResults == 1 &&
+          dividerResults[0]->remainingCycles == 1)),
+      "EE unoccupied COP1 divider has invalid pending results");
+    if (core->cop1DividerInitiationCycles != 0)
+    {
+      const EECore::COP1DividerTiming timing =
+        EECore::cop1DividerTiming(
+          core->cop1DividerOperation);
+      require(
+        core->cop1DividerInitiationCycles <=
+          timing.initiationInterval,
+        "EE COP1 divider occupancy exceeds its policy");
+      if (activeDividerResults == 1)
+      {
+        require(
+          dividerResults[0]->remainingCycles ==
+            core->cop1DividerInitiationCycles + 1,
+          "EE COP1 divider countdowns are inconsistent");
+      }
+      else
+      {
+        require(
+          activeDividerResults == 2 &&
+            dividerResults[0]->destination.fprRegister !=
+              dividerResults[1]->destination.fprRegister &&
+            core->cop1DividerInitiationCycles ==
+              timing.initiationInterval &&
+            ((dividerResults[0]->remainingCycles == 1 &&
+              dividerResults[1]->remainingCycles ==
+                timing.latency) ||
+             (dividerResults[1]->remainingCycles == 1 &&
+              dividerResults[0]->remainingCycles ==
+                timing.latency)),
+          "EE COP1 divider overlap state is inconsistent");
+      }
     }
     for (std::size_t right = left + 1;
          right < core->inFlightCOP1Operations.size();
@@ -2196,14 +2215,6 @@ void NekoSaveStateCodec::readEECore(
   require(
     !(core->pendingMac0.active && core->pendingMac1.active),
     "EE reference core has concurrent multiply/divide state");
-  require(
-    !core->pendingCOP1Load.active ||
-      (core->lastInstructionValid &&
-       core->lastDecodedInstruction.operation ==
-         EEOperation::LoadWordToCOP1 &&
-       core->pendingCOP1Load.registerIndex ==
-         core->lastDecodedInstruction.targetRegister),
-    "EE pending COP1 load state is inconsistent");
   require(
     !core->cop1OperateResourceOccupied ||
       (core->lastInstructionValid &&
