@@ -87,6 +87,10 @@ verify_ee_elf_fixture(
   df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20
 )
 verify_ee_elf_fixture(
+  cop1_semantics.elf
+  b6a47315e2de5b39315b88a1e0fdc7a4d2aeceb1a7654a430f4f9b3b6f9de07d
+)
+verify_ee_elf_fixture(
   cop2_transfer.elf
   9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707
 )

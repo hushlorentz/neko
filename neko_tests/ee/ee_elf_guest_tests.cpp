@@ -89,6 +89,82 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
   }
 }
 
+TEST_CASE("PS2DEV COP1 semantic guest preserves raw results and FCR31")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop1_semantics.elf"), 256);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  const EECore &core = system.eeCore();
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40700000));
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x3f400000));
+  REQUIRE(
+    core.floatingPointRegister(6) ==
+    UINT32_C(0x40580000));
+  REQUIRE(
+    core.floatingPointRegister(7) ==
+    UINT32_C(0x40800000));
+  REQUIRE(
+    core.floatingPointRegister(9) ==
+    UINT32_C(0xbfc00000));
+  REQUIRE(
+    core.floatingPointRegister(10) ==
+    UINT32_C(0x40100000));
+  REQUIRE(
+    core.floatingPointRegister(11) ==
+    UINT32_C(0x3fc00000));
+  REQUIRE(
+    core.floatingPointRegister(12) ==
+    UINT32_C(0xc0400000));
+  REQUIRE(core.floatingPointRegister(14) == 2);
+  REQUIRE(
+    core.floatingPointRegister(15) ==
+    UINT32_C(0x40000000));
+  REQUIRE(
+    core.floatingPointRegister(16) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CONDITION |
+     EECOP1Control::CAUSE_INVALID |
+     EECOP1Control::STICKY_INVALID));
+  const std::uint32_t expectedReadbacks[] = {
+    UINT32_C(0x40700000),
+    UINT32_C(0x3f400000),
+    UINT32_C(0x40580000),
+    UINT32_C(0x40800000),
+    UINT32_C(0xbfc00000),
+    UINT32_C(0x40100000),
+    UINT32_C(0x3fc00000),
+    UINT32_C(0xc0400000),
+    UINT32_C(0x00000002),
+    UINT32_C(0x40000000),
+    UINT32_C(0x7fffffff),
+    EECOP1Control::STATUS_FIXED |
+      EECOP1Control::CONDITION |
+      EECOP1Control::CAUSE_INVALID |
+      EECOP1Control::STICKY_INVALID
+  };
+  for (std::size_t index = 0;
+       index < sizeof(expectedReadbacks) /
+         sizeof(expectedReadbacks[0]);
+       ++index)
+  {
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        core.generalRegister(9 + index).low) ==
+      expectedReadbacks[index]);
+  }
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;

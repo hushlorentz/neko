@@ -12,6 +12,7 @@ The fixtures exercise:
 - `mmio.elf`: 32-bit INTC/DMAC registers and a 64-bit GS privileged write
 - `fifo.elf`: 128-bit `SQ` writes to the VIF0, VIF1, and GIF FIFOs
 - `vif1_dma.elf`: guest-configured VIF1 DMA completion and interrupt status
+- `cop1_semantics.elf`: timing-independent scalar COP1 raw results and FCR31
 - `cop2_transfer.elf`: 128-bit EE memory/GPR transfers through VU0 registers
 - `cop2_control.elf`: VU0 control transfers and VU1 status branches
 - `vcallms.elf`: VU0 microprogram initiation through `VCALLMS` and `VCALLMSR`
@@ -48,6 +49,7 @@ d1aaa13f446f6f04d0f16eb929ced8d5f74d39bc0bc099ee158158c386940d8f  branches.elf
 6cee1dbb9db0d422882d981a351516d6ac8e170e88736a89ef26f9ff3ecd0488  mmio.elf
 0649d2f7dd8dd396ff1f45d4fa962b1bed53044a9972dbc97f7e3fb846161fae  fifo.elf
 df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20  vif1_dma.elf
+b6a47315e2de5b39315b88a1e0fdc7a4d2aeceb1a7654a430f4f9b3b6f9de07d  cop1_semantics.elf
 9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707  cop2_transfer.elf
 f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386  cop2_control.elf
 d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7  vcallms.elf
