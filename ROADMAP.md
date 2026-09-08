@@ -833,7 +833,7 @@ foundation before enabling COP1 instruction pairs.
       capacity for multiple C1 stage transitions and retirements
 - [x] Add a timing-independent PS2DEV COP1 semantic guest as a before/after
       pipeline-migration baseline for raw registers and FCR31
-- [ ] Add focused state-transition, hash, trace, malformed-save-state, and
+- [x] Add focused state-transition, hash, trace, malformed-save-state, and
       save/resume tests, then complete an independent foundation review
 
 ### C1 Operate Stage Progression

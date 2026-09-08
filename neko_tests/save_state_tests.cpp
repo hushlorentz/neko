@@ -20,6 +20,10 @@ namespace
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
   constexpr std::size_t EE_COP1_DIVIDER_OPERATION_OFFSET = 973;
   constexpr std::size_t
+    SIMPLE_EE_COP1_DIVIDER_INITIATION_OFFSET = 955;
+  constexpr std::size_t
+    SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET = 956;
+  constexpr std::size_t
     PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET = 1003;
   constexpr std::size_t EE_COP1_POST_DELAY_COUNT_OFFSET = 1005;
   constexpr std::size_t EE_COP1_POST_DELAY_ADDRESS_OFFSET = 1006;
@@ -58,6 +62,14 @@ namespace
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1071;
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET = 1078;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET = 1021;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET = 1029;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1081;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET = 1083;
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1133;
   constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2037;
@@ -520,6 +532,53 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
   REQUIRE(
     restored.eeCore().stateHash() !=
     source.eeCore().stateHash());
+}
+
+TEST_CASE("EE COP1 stage and program order participate in state hashes")
+{
+  NekoSystem source;
+  prepareInFlightSystem(&source);
+  source.eeCore().reset();
+  const std::uint32_t producer =
+    cop1SingleInstruction(0x00, 1, 3, 2);
+
+  std::vector<std::uint8_t> stageY =
+    withInFlightCOP1Result(
+      &source,
+      producer,
+      COP1_STAGE_Y,
+      COP1_DESTINATION_FPR,
+      3,
+      UINT32_C(0x40a00000));
+  std::vector<std::uint8_t> stageS1 = stageY;
+  stageS1[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    COP1_STAGE_S1;
+  updateChecksum(&stageS1);
+
+  NekoSystem ySystem;
+  NekoSystem s1System;
+  ySystem.loadState(stageY);
+  s1System.loadState(stageS1);
+  REQUIRE(
+    ySystem.eeCore().stateHash() !=
+    s1System.eeCore().stateHash());
+
+  writeU64(&stageY, EE_NEXT_PROGRAM_ORDER_OFFSET, 3);
+  updateChecksum(&stageY);
+  std::vector<std::uint8_t> orderTwo = stageY;
+  writeU64(
+    &orderTwo,
+    EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET,
+    2);
+  updateChecksum(&orderTwo);
+
+  NekoSystem orderOneSystem;
+  NekoSystem orderTwoSystem;
+  orderOneSystem.loadState(stageY);
+  orderTwoSystem.loadState(orderTwo);
+  REQUIRE(
+    orderOneSystem.eeCore().stateHash() !=
+    orderTwoSystem.eeCore().stateHash());
 }
 
 TEST_CASE("EE COP1 scoreboard tracks FPR result visibility")
@@ -1486,7 +1545,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 }
 
-TEST_CASE("In-flight COP1 save-state loads match their instruction")
+TEST_CASE("In-flight COP1 load save states are internally consistent")
 {
   NekoSystem source;
   source.eeCore().setGeneralRegister(1, {0x100, 0});
@@ -1502,16 +1561,42 @@ TEST_CASE("In-flight COP1 save-state loads match their instruction")
   source.eeCore().startExecution(0);
   source.clockMasterCycle();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 4;
-  updateChecksum(&invalid);
-
   NekoSystem destination;
   const std::vector<std::uint8_t> before =
     destination.saveState();
-  REQUIRE_THROWS(destination.loadState(invalid));
-  REQUIRE(destination.saveState() == before);
+
+  SECTION("The destination matches the instruction")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 4;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("A pending load remains in R")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+      COP1_STAGE_S1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("A pending load retains its one-cycle countdown")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] = 0;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
 }
 
 TEST_CASE("Invalid pending COP1 divider states are rejected")
@@ -1543,6 +1628,19 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
   const std::vector<std::uint8_t> before =
     destination.saveState();
 
+  SECTION("Divider occupancy requires a pending result")
+  {
+    std::vector<std::uint8_t> invalid = before;
+    invalid[SIMPLE_EE_COP1_DIVIDER_INITIATION_OFFSET] = 1;
+    invalid[SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET] =
+      static_cast<std::uint8_t>(
+        EEOperation::DivideSingleCOP1);
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
   SECTION("Overlapping results require distinct destinations")
   {
     std::vector<std::uint8_t> invalid = source.saveState();
@@ -1570,6 +1668,48 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
     invalid[
       SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET] =
       FP_FLAG_I_BIT | FP_FLAG_D_BIT;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("Overlapping results require unique program order")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    writeU64(
+      &invalid,
+      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+      1);
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("The older overlapping result must complete first")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    writeU64(
+      &invalid,
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET,
+      8);
+    writeU64(
+      &invalid,
+      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+      1);
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("Divider occupancy names the newest result")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET] =
+      static_cast<std::uint8_t>(
+        EEOperation::DivideSingleCOP1);
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));

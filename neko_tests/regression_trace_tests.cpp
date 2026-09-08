@@ -77,6 +77,30 @@ namespace
     return events;
   }
 
+  void prepareSimultaneousCOP1Completion(NekoSystem *system)
+  {
+    EECore &core = system->eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    REQUIRE(
+      system->eeBus().writeData32(
+        0x100,
+        UINT32_C(0x89abcdef)));
+    system->eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    for (std::uint32_t address = 4;
+         address <= 24;
+         address += 4)
+    {
+      system->eeBus().write32(address, 0);
+    }
+    system->eeBus().write32(
+      28,
+      immediateInstruction(0x31, 1, 3, 0));
+    system->eeBus().write32(32, 0);
+    core.startExecution(0);
+  }
+
   GIFQuadword gifTag()
   {
     const std::uint64_t low =
@@ -724,35 +748,10 @@ TEST_CASE("EE regression traces identify interrupt delivery")
 TEST_CASE(
   "EE C1 transitions and retirements have deterministic cycle ordering")
 {
-  const auto prepare =
-    [](NekoSystem *system)
-    {
-      EECore &core = system->eeCore();
-      core.setGeneralRegister(1, {0x100, 0});
-      REQUIRE(
-        system->eeBus().writeData32(
-          0x100,
-          UINT32_C(0x89abcdef)));
-      system->eeBus().write32(
-        0,
-        cop1SingleInstruction(0x03, 2, 4, 3));
-      for (std::uint32_t address = 4;
-           address <= 24;
-           address += 4)
-      {
-        system->eeBus().write32(address, 0);
-      }
-      system->eeBus().write32(
-        28,
-        immediateInstruction(0x31, 1, 3, 0));
-      system->eeBus().write32(32, 0);
-      core.startExecution(0);
-    };
-
   NekoSystem traced;
   NekoSystem untraced;
-  prepare(&traced);
-  prepare(&untraced);
+  prepareSimultaneousCOP1Completion(&traced);
+  prepareSimultaneousCOP1Completion(&untraced);
   traced.startTrace();
 
   traced.runMasterCycles(9);
@@ -777,9 +776,19 @@ TEST_CASE(
     NekoTraceEventType::COP1StageTransition);
   REQUIRE(completionEvents[0].value0 == 1);
   REQUIRE(
+    completionEvents[0].value2 ==
+    (NekoEETraceCOP1Stage::R |
+     (NekoEETraceCOP1Stage::S1 <<
+      NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(
     completionEvents[1].type ==
     NekoTraceEventType::COP1StageTransition);
   REQUIRE(completionEvents[1].value0 == 8);
+  REQUIRE(
+    completionEvents[1].value2 ==
+    (NekoEETraceCOP1Stage::R |
+     (NekoEETraceCOP1Stage::S1 <<
+      NekoEETraceCOP1Stage::TO_SHIFT)));
   REQUIRE(
     completionEvents[2].type ==
     NekoTraceEventType::COP1Retired);
@@ -810,6 +819,43 @@ TEST_CASE(
   REQUIRE(
     completionEvents[5].type ==
     NekoTraceEventType::StateSnapshot);
+}
+
+TEST_CASE("EE C1 completion traces survive save-state restore")
+{
+  NekoSystem original;
+  prepareSimultaneousCOP1Completion(&original);
+  original.runMasterCycles(8);
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  REQUIRE(
+    original.eeCore().stateHash() ==
+    restored.eeCore().stateHash());
+  REQUIRE(original.saveState() == restored.saveState());
+
+  original.startTrace();
+  restored.startTrace();
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(original.traceHash() == restored.traceHash());
+  REQUIRE(original.trace().size() == restored.trace().size());
+  REQUIRE(
+    original.eeCore().stateHash() ==
+    restored.eeCore().stateHash());
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(4) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    restored.eeCore().cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_INVALID |
+     EECOP1Control::STICKY_INVALID));
 }
 
 TEST_CASE("EE regression traces retain failed memory attempts")

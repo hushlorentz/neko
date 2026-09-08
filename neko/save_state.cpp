@@ -2082,6 +2082,77 @@ void NekoSaveStateCodec::readEECore(
         "EE inactive COP1 operation contains state");
     }
   }
+  std::array<const EECore::InFlightCOP1Operation *, 2>
+    dividerResults = {};
+  std::size_t activeDividerResults = 0;
+  for (const EECore::InFlightCOP1Operation &operation :
+       core->inFlightCOP1Operations)
+  {
+    if (!operation.active ||
+        !EECore::isCOP1DividerOperation(
+          operation.instruction.operation))
+    {
+      continue;
+    }
+    require(
+      activeDividerResults < dividerResults.size(),
+      "EE COP1 divider has too many pending results");
+    dividerResults[activeDividerResults++] = &operation;
+  }
+  require(
+    activeDividerResults != 0 ||
+      (core->cop1DividerInitiationCycles == 0 &&
+       core->cop1DividerOperation == EEOperation::Nop),
+    "EE inactive COP1 divider contains occupancy");
+  require(
+    core->cop1DividerInitiationCycles != 0 ||
+      (activeDividerResults == 0 ||
+       (activeDividerResults == 1 &&
+        dividerResults[0]->remainingCycles == 1)),
+    "EE unoccupied COP1 divider has invalid pending results");
+  if (core->cop1DividerInitiationCycles != 0)
+  {
+    const EECore::COP1DividerTiming timing =
+      EECore::cop1DividerTiming(
+        core->cop1DividerOperation);
+    require(
+      core->cop1DividerInitiationCycles <=
+        timing.initiationInterval,
+      "EE COP1 divider occupancy exceeds its policy");
+    if (activeDividerResults == 1)
+    {
+      require(
+        dividerResults[0]->instruction.operation ==
+          core->cop1DividerOperation &&
+          dividerResults[0]->remainingCycles ==
+            core->cop1DividerInitiationCycles + 1,
+        "EE COP1 divider countdowns are inconsistent");
+    }
+    else
+    {
+      require(
+        activeDividerResults == 2 &&
+          dividerResults[0]->destination.fprRegister !=
+            dividerResults[1]->destination.fprRegister &&
+          core->cop1DividerInitiationCycles ==
+            timing.initiationInterval &&
+          ((dividerResults[0]->remainingCycles == 1 &&
+            dividerResults[1]->remainingCycles ==
+              timing.latency &&
+            dividerResults[0]->programOrder <
+              dividerResults[1]->programOrder &&
+            dividerResults[1]->instruction.operation ==
+              core->cop1DividerOperation) ||
+           (dividerResults[1]->remainingCycles == 1 &&
+            dividerResults[0]->remainingCycles ==
+              timing.latency &&
+            dividerResults[1]->programOrder <
+              dividerResults[0]->programOrder &&
+            dividerResults[0]->instruction.operation ==
+              core->cop1DividerOperation)),
+        "EE COP1 divider overlap state is inconsistent");
+    }
+  }
   for (std::size_t left = 0;
        left < core->inFlightCOP1Operations.size();
        ++left)
@@ -2089,67 +2160,6 @@ void NekoSaveStateCodec::readEECore(
     if (!core->inFlightCOP1Operations[left].active)
     {
       continue;
-    }
-    std::array<const EECore::InFlightCOP1Operation *, 2>
-      dividerResults = {};
-    std::size_t activeDividerResults = 0;
-    for (const EECore::InFlightCOP1Operation &operation :
-         core->inFlightCOP1Operations)
-    {
-      if (!operation.active ||
-          !EECore::isCOP1DividerOperation(
-            operation.instruction.operation))
-      {
-        continue;
-      }
-      require(
-        activeDividerResults < dividerResults.size(),
-        "EE COP1 divider has too many pending results");
-      dividerResults[activeDividerResults++] = &operation;
-    }
-    require(
-      activeDividerResults != 0 ||
-        (core->cop1DividerInitiationCycles == 0 &&
-         core->cop1DividerOperation == EEOperation::Nop),
-      "EE inactive COP1 divider contains occupancy");
-    require(
-      core->cop1DividerInitiationCycles != 0 ||
-        (activeDividerResults == 0 ||
-         (activeDividerResults == 1 &&
-          dividerResults[0]->remainingCycles == 1)),
-      "EE unoccupied COP1 divider has invalid pending results");
-    if (core->cop1DividerInitiationCycles != 0)
-    {
-      const EECore::COP1DividerTiming timing =
-        EECore::cop1DividerTiming(
-          core->cop1DividerOperation);
-      require(
-        core->cop1DividerInitiationCycles <=
-          timing.initiationInterval,
-        "EE COP1 divider occupancy exceeds its policy");
-      if (activeDividerResults == 1)
-      {
-        require(
-          dividerResults[0]->remainingCycles ==
-            core->cop1DividerInitiationCycles + 1,
-          "EE COP1 divider countdowns are inconsistent");
-      }
-      else
-      {
-        require(
-          activeDividerResults == 2 &&
-            dividerResults[0]->destination.fprRegister !=
-              dividerResults[1]->destination.fprRegister &&
-            core->cop1DividerInitiationCycles ==
-              timing.initiationInterval &&
-            ((dividerResults[0]->remainingCycles == 1 &&
-              dividerResults[1]->remainingCycles ==
-                timing.latency) ||
-             (dividerResults[1]->remainingCycles == 1 &&
-              dividerResults[0]->remainingCycles ==
-                timing.latency)),
-          "EE COP1 divider overlap state is inconsistent");
-      }
     }
     for (std::size_t right = left + 1;
          right < core->inFlightCOP1Operations.size();
