@@ -988,6 +988,12 @@ the next concrete hardware or software dependency:
 
 ### Additional System Integration
 
+- [ ] Complete a bounded independent retrospective review of VU pipeline
+      invariants: reset, Force Break, halt/resume, save-state continuation,
+      branch and termination drain ordering, simultaneous-write priority,
+      forwarding, and VIF/VU/GIF boundary assumptions; do not reopen the
+      completed instruction-by-instruction manual audit unless a concrete
+      finding requires it
 - [ ] Exercise EE, DMA, VIF, VU1, GIF, and GS in one deterministic workload
 - [ ] Cover cross-component clock ratios, interrupts, and DMA completion ordering
 - [ ] Cover reset and restart while multiple hardware components are active
