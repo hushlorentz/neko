@@ -800,7 +800,7 @@ foundation before enabling COP1 instruction pairs.
 
 - [x] Audit the local manual's C1 stages, result visibility, logical/physical
       routing, Table 1-3 issue rules, and the current scalar EE scheduler
-- [ ] Lock the EE-cycle mapping for `R`, `T`, `X`, `Y`, `Z`, `1S`, and `2S`,
+- [x] Lock the EE-cycle mapping for `R`, `T`, `X`, `Y`, `Z`, `1S`, and `2S`,
       including which boundary captures operands, exposes bypass values, and
       commits architectural state; explicitly anchor provisional divider
       latency and initiation intervals while either preserving the completed
