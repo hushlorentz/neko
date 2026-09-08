@@ -836,32 +836,87 @@ foundation before enabling COP1 instruction pairs.
 - [x] Add focused state-transition, hash, trace, malformed-save-state, and
       save/resume tests, then complete an independent foundation review
 
-### C1 Operate Stage Progression
+### Representative C1 ALU Pipeline
 
-- [ ] Move one representative ALU family through captured `T` operands,
-      `Y/Z` processing, `1S` availability, and `2S` writeback, then re-baseline
-      its dependency, hash, trace, and save-state expectations
-- [ ] Migrate ABS/NEG, min/max, and add/subtract through the proven ALU-stage
-      path in independently reviewed family-sized changes
-- [ ] Migrate conversion and comparison operations, including their
-      stage-specific `Y/Z` work and FCR31 condition/flag results
-- [ ] Move multiply, accumulator, and compound multiply-add/subtract families
-      through captured `T` operands, `X/Y` multiply work, and ordered `S`
-      result delivery
-- [ ] Retire FPR, ACC, arithmetic flags, sticky flags, and the comparison
-      condition in program order at `2S`
-- [ ] Implement S/T overlap so a younger COP1 operation may consume a `1S`
-      result through the `2T` bypass before architectural writeback
-- [ ] Interlock or forward FPR, ACC, FCR31, comparison-to-branch, WAW, and
-      compound-operation dependencies at their documented visibility boundary
-- [ ] Deliver divider results through the shared `1S`/`2S` writeback contract
-      by applying the foundation's explicit latency anchor while retaining the
-      isolated provisional initiation policy
+Prove one complete Operate path before scaling the stage machinery across the
+remaining families:
+
+- [ ] Move `ADD.S` and `SUB.S` through `1T` operand selection, immutable `2T`
+      capture, their documented `Y/Z` work, `1S` result availability, and `2S`
+      architectural writeback
+- [ ] Add generic per-cycle C1 stage advancement and program-ordered `2S`
+      retirement for FPR results and their arithmetic/sticky FCR31 flags
+- [ ] Implement the `1S`-to-`2T` bypass for dependent add/subtract operations,
+      while interlocking pre-`1S` reads and preserving WAW order
+- [ ] Re-baseline add/subtract issue, dependency, raw-result, flag, hash, trace,
+      malformed-save-state, halt/resume, exception, and save/restore coverage
+- [ ] Complete an independent review of the representative staged path before
+      migrating another operation family
+
+### C1 Unary and Min/Max Migration
+
+Reuse the reviewed ALU path for operations that do not introduce a new
+accumulator or condition-result contract:
+
+- [ ] Migrate `ABS.S` and `NEG.S` through their documented stages, preserving
+      signed-zero and raw extended-finite behavior
+- [ ] Migrate `MAX.S` and `MIN.S`, including selected-operand normalization and
+      ordered FCR31 overflow/underflow updates
+- [ ] Cover cross-family forwarding, same-register read/write aliases, WAW
+      ordering, traces, hashes, exceptions, and save-state continuation
+- [ ] Complete an independent unary/min/max migration review
+
+### C1 Conversion and Comparison Migration
+
+- [ ] Migrate `CVT.S.W` and `CVT.W.S` through their documented `Y/Z` work and
+      ordered FPR/FCR31 result delivery
+- [ ] Migrate `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, retaining condition
+      results in flight until their documented visibility and commit boundaries
+- [ ] Interlock or forward comparison-to-branch and `CFC1` dependencies without
+      exposing a younger condition or FCR31 value early
+- [ ] Verify conversion truncation, comparison edge cases, ordered flags and
+      condition writes, traces, hashes, exceptions, and save/restore behavior
+- [ ] Complete an independent conversion/comparison migration review
+
+### C1 Multiply and Accumulator Migration
+
+- [ ] Resolve ACC operand capture, forwarding, and commit timing from the local
+      manuals before implementation; if the manuals do not define a required
+      boundary, pause rather than assigning speculative hardware behavior
+- [ ] Migrate `MUL.S` and `MULA.S` through captured `T` operands, documented
+      `X/Y` multiply work, and ordered FPR or ACC result delivery
+- [ ] Migrate accumulator add/subtract and compound
+      `MADD`/`MSUB`/`MADDA`/`MSUBA` families through the proven multiply and
+      accumulator paths
+- [ ] Interlock or forward FPR, ACC, FCR31, WAW, and read-modify-write
+      dependencies at their documented visibility boundaries
+- [ ] Preserve product and accumulation arithmetic/sticky flags in program
+      order across overlap, exceptions, halt/resume, hashes, traces, and
+      save-state restore
+- [ ] Complete an independent multiply/accumulator migration review
+
+### C1 Divider Stage Integration
+
+- [ ] Deliver `DIV.S`, `SQRT.S`, and `RSQRT.S` results through the shared
+      `1S`/`2S` writeback contract using the foundation's explicit latency
+      anchor while retaining the isolated provisional initiation policy
+- [ ] Preserve two-result overlap, destination and FCR31 dependencies,
+      older-before-younger retirement, and the documented completion-cycle
+      issue behavior
+- [ ] Re-baseline divider traces, hashes, branch-proximity diagnostics,
+      exceptions, halt/resume, malformed save states, and save/restore coverage
+- [ ] Complete an independent divider-stage integration review
+
+### C1 Operate Integration and Final Review
+
 - [ ] Generalize ELF guest-return drain from pending loads and divider results
-      to all in-flight C1 operations
-- [ ] Validate each operation family, cross-family forwarding, ordered flags,
-      exceptions, reset, halt/resume, state hashes, and save states before a
-      final C1 Operate review
+      to every in-flight C1 Operate family, without adding emulated cycles
+- [ ] Run the timing-independent PS2DEV COP1 semantic guest before and after
+      migration and retain identical raw FPR and FCR31 results
+- [ ] Validate cross-family forwarding, ordered FPR/ACC/flag/condition
+      retirement, exceptions, `ERET`, reset, halt/resume, state hashes,
+      deterministic traces, malformed save states, and save-state continuation
+- [ ] Complete an independent final C1 Operate review
 
 ### COP1 Move and Memory Timing
 
