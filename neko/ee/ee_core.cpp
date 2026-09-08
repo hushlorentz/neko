@@ -223,6 +223,7 @@ void EECore::reset()
   lastAddress = 0;
   lastDecodedInstruction = {};
   rejectedInstructionValue = 0;
+  issueLatch = {};
   pendingMac0 = {};
   pendingMac1 = {};
   pendingCOP1Load = {};
@@ -360,6 +361,11 @@ void EECore::startExecution(std::uint32_t startAddress)
     haltReason == EEStopReason::HostHalt &&
     cop1OperateResourceOccupied &&
     startAddress == pc;
+  const bool resumeIssueLatch =
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    issueLatch.valid &&
+    startAddress == pc;
   pc = startAddress;
   clearPendingException();
   state = EEExecutionState::Running;
@@ -402,6 +408,10 @@ void EECore::startExecution(std::uint32_t startAddress)
   if (!resumeCOP1OperateResource)
   {
     cop1OperateResourceOccupied = false;
+  }
+  if (!resumeIssueLatch)
+  {
+    issueLatch = {};
   }
   rejectedInstructionValue = 0;
   exceptionEnteredThisCycle = false;
@@ -463,41 +473,52 @@ void EECore::clock()
     return;
   }
 
-  const EEInstructionFetchResult fetched =
-    fetchInstruction();
-  if (!fetched.succeeded)
+  if (!issueLatch.valid)
   {
-    enterException(
-      exception,
-      fetched.address,
-      fetched.address,
-      0);
-    return;
-  }
-
-  EEInstruction decoded;
-  try
-  {
-    decoded = decodeEEInstruction(fetched.instruction);
-  }
-  catch (const EEInstructionDecodeError &error)
-  {
-    rejectedInstructionValue = fetched.instruction;
-    if (error.failure() == EEInstructionDecodeFailure::Reserved)
+    const EEInstructionFetchResult fetched =
+      fetchInstruction();
+    if (!fetched.succeeded)
     {
       enterException(
-        EEException::ReservedInstruction,
+        exception,
         fetched.address,
         fetched.address,
-        fetched.instruction);
+        0);
       return;
     }
-    pc = fetched.address;
-    state = EEExecutionState::Halted;
-    haltReason = EEStopReason::UnsupportedInstruction;
-    return;
+
+    try
+    {
+      issueLatch = {
+        true,
+        fetched.address,
+        decodeEEInstruction(fetched.instruction)
+      };
+    }
+    catch (const EEInstructionDecodeError &error)
+    {
+      rejectedInstructionValue = fetched.instruction;
+      if (error.failure() == EEInstructionDecodeFailure::Reserved)
+      {
+        enterException(
+          EEException::ReservedInstruction,
+          fetched.address,
+          fetched.address,
+          fetched.instruction);
+        return;
+      }
+      pc = fetched.address;
+      state = EEExecutionState::Halted;
+      haltReason = EEStopReason::UnsupportedInstruction;
+      return;
+    }
   }
 
+  const std::uint32_t instructionAddress =
+    issueLatch.address;
+  const std::uint32_t instructionValue =
+    issueLatch.instruction.raw;
+  const EEInstruction decoded = issueLatch.instruction;
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
@@ -512,13 +533,13 @@ void EECore::clock()
   {
     recordCycleTrace(
       CycleTraceKind::COP1ResourceInterlock,
-      fetched.address,
-      fetched.instruction,
+      instructionAddress,
+      instructionValue,
       lastInstructionValid
         ? static_cast<std::uint8_t>(
             lastDecodedInstruction.operation)
         : 0);
-    pc = fetched.address;
+    pc = instructionAddress;
     return;
   }
   if (isCOP1DividerOperation(decoded.operation) &&
@@ -526,10 +547,10 @@ void EECore::clock()
   {
     recordCycleTrace(
       CycleTraceKind::COP1ResourceInterlock,
-      fetched.address,
-      fetched.instruction,
+      instructionAddress,
+      instructionValue,
       static_cast<std::uint8_t>(cop1DividerOperation));
-    pc = fetched.address;
+    pc = instructionAddress;
     return;
   }
   std::uint8_t pendingCOP1DividerRegister = 0;
@@ -542,12 +563,12 @@ void EECore::clock()
   {
     recordCycleTrace(
       CycleTraceKind::COP1ResourceInterlock,
-      fetched.address,
-      fetched.instruction,
+      instructionAddress,
+      instructionValue,
       pendingCOP1DividerRegister,
       static_cast<std::uint8_t>(
         pendingCOP1DividerDependency));
-    pc = fetched.address;
+    pc = instructionAddress;
     return;
   }
   const FPRDependency fprDependency =
@@ -560,17 +581,18 @@ void EECore::clock()
   {
     recordCycleTrace(
       CycleTraceKind::COP1LoadInterlock,
-      fetched.address,
-      fetched.instruction,
+      instructionAddress,
+      instructionValue,
       completedCOP1LoadRegister,
       static_cast<std::uint8_t>(fprDependency));
-    pc = fetched.address;
+    pc = instructionAddress;
     return;
   }
+  pc = instructionAddress + 4;
   recordCycleTrace(
     CycleTraceKind::InstructionIssued,
-    fetched.address,
-    fetched.instruction,
+    instructionAddress,
+    instructionValue,
     static_cast<std::uint8_t>(decoded.operation),
     wasDelaySlot);
   bool dividerDelaySlotHazard = false;
@@ -595,7 +617,8 @@ void EECore::clock()
       }
     }
   }
-  if (!executeInstruction(decoded, fetched.address))
+  issueLatch = {};
+  if (!executeInstruction(decoded, instructionAddress))
   {
     return;
   }
@@ -603,8 +626,8 @@ void EECore::clock()
   {
     recordCycleTrace(
       CycleTraceKind::COP1DividerHazard,
-      fetched.address,
-      fetched.instruction,
+      instructionAddress,
+      instructionValue,
       UINT64_C(1),
       completedBranchAddress |
         (static_cast<std::uint64_t>(
@@ -615,8 +638,8 @@ void EECore::clock()
   {
     recordCycleTrace(
       CycleTraceKind::COP1DividerHazard,
-      fetched.address,
-      fetched.instruction,
+      instructionAddress,
+      instructionValue,
       dividerProximityHazardReasons,
       cop1DividerPostDelayBranchAddress |
         (static_cast<std::uint64_t>(
@@ -628,8 +651,8 @@ void EECore::clock()
   {
     recordCycleTrace(
       CycleTraceKind::COP1DividerHazard,
-      fetched.address,
-      fetched.instruction,
+      instructionAddress,
+      instructionValue,
       UINT64_C(1) << 2,
       static_cast<std::uint64_t>(
         cop1DividerPostTargetAddress) << 32);
@@ -680,13 +703,13 @@ void EECore::clock()
            !branchDelayPending)
   {
     cop1DividerPostDelayInstructions = 2;
-    cop1DividerPostDelayBranchAddress = fetched.address;
+    cop1DividerPostDelayBranchAddress = instructionAddress;
     cop1DividerPostDelayTargetAddress = 0;
     cop1DividerPostDelayTaken = false;
   }
   recordShiftAmountAccess(decoded);
   lastDecodedInstruction = decoded;
-  lastAddress = fetched.address;
+  lastAddress = instructionAddress;
   lastInstructionValid = true;
   instructionRetiredThisCycle = true;
 }
@@ -3196,6 +3219,7 @@ void EECore::enterException(
   cop1DividerPostTargetInstructions = 0;
   cop1DividerPostTargetAddress = 0;
   cop1OperateResourceOccupied = false;
+  issueLatch = {};
 }
 
 std::uint8_t EECore::exceptionCode(EEException type)
@@ -3337,6 +3361,9 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, lastAddress);
   hashEEStateValue(&hash, lastDecodedInstruction.raw);
   hashEEStateValue(&hash, rejectedInstructionValue);
+  hashEEStateValue(&hash, issueLatch.valid);
+  hashEEStateValue(&hash, issueLatch.address);
+  hashEEStateValue(&hash, issueLatch.instruction.raw);
   const auto hashPending =
     [&hash](const PendingMultiplyDivide &operation)
     {
@@ -3586,6 +3613,7 @@ std::uint32_t EECore::programCounter() const
 void EECore::setProgramCounter(std::uint32_t value)
 {
   pc = value;
+  issueLatch = {};
 }
 
 std::uint64_t EECore::hi() const

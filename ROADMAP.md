@@ -740,7 +740,7 @@ Unrelated instructions continue while results are pending. Reads or writes of
 a pending destination, plus `CFC1` or `CTC1` access to `FCR31`, interlock until
 retirement; a dependent instruction may issue on the retirement cycle.
 Pending slots, divider occupancy, and branch-proximity diagnostic context
-participate in reset, state hashing, and save-state version 18. Divider work
+participate in reset, state hashing, and save-state version 19. Divider work
 continues through exception entry and host
 halt/resume, while the ELF runner drains outstanding results before reporting
 guest return. The branch diagnostic is observational: successfully issued
@@ -806,11 +806,11 @@ foundation before enabling COP1 instruction pairs.
       latency and initiation intervals while either preserving the completed
       block's `N+8`/`N+14` architectural retirement contract or explicitly
       re-baselining that contract and its tests
-- [ ] Classify every COP1 instruction by Move, Operate, or Branch routing;
+- [x] Classify every COP1 instruction by Move, Operate, or Branch routing;
       source dependencies; and FPR, ACC, FCR31, condition, GPR, or memory
       destinations; record the section 4.4 evidence for treating `MOV.S` as a
       Move despite its FPR-to-FPR data path
-- [ ] Add a single-instruction decoded issue latch so scalar dependency and
+- [x] Add a single-instruction decoded issue latch so scalar dependency and
       resource stalls retain the already-fetched instruction instead of
       re-fetching and re-decoding the same PC each cycle; define whether this
       latch is canonical saved/hashed state or a derived cache, and which

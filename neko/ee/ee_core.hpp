@@ -288,6 +288,13 @@ class EECore : public ClockedComponent
       std::uint64_t value3 = 0;
     };
 
+    struct DecodedIssueLatch
+    {
+      bool valid = false;
+      std::uint32_t address = 0;
+      EEInstruction instruction;
+    };
+
     struct PendingMultiplyDivide
     {
       bool active = false;
@@ -355,6 +362,7 @@ class EECore : public ClockedComponent
     std::uint32_t lastAddress = 0;
     EEInstruction lastDecodedInstruction;
     std::uint32_t rejectedInstructionValue = 0;
+    DecodedIssueLatch issueLatch;
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
     PendingCOP1Load pendingCOP1Load;

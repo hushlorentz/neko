@@ -31,7 +31,8 @@ namespace
   constexpr std::size_t EE_COP1_POST_DELAY_TAKEN_OFFSET = 1014;
   constexpr std::size_t EE_COP1_POST_TARGET_COUNT_OFFSET = 1015;
   constexpr std::size_t EE_COP1_POST_TARGET_ADDRESS_OFFSET = 1016;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 1028;
+  constexpr std::size_t EE_ISSUE_LATCH_ADDRESS_OFFSET = 1021;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 1037;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
@@ -1079,6 +1080,12 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[EE_COP1_POST_DELAY_COUNT_OFFSET] = 3;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[EE_ISSUE_LATCH_ADDRESS_OFFSET] = 4;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

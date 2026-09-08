@@ -18,7 +18,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 18;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 19;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1315,6 +1315,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.lastDecodedInstruction;
   destination->eeCoreComponent.rejectedInstructionValue =
     source->eeCoreComponent.rejectedInstructionValue;
+  destination->eeCoreComponent.issueLatch =
+    source->eeCoreComponent.issueLatch;
   destination->eeCoreComponent.pendingMac0 =
     source->eeCoreComponent.pendingMac0;
   destination->eeCoreComponent.pendingMac1 =
@@ -1695,6 +1697,9 @@ void NekoSaveStateCodec::writeEECore(
   writer->writeBool(core.cop1DividerPostDelayTaken);
   writer->writeU8(core.cop1DividerPostTargetInstructions);
   writer->writeU32(core.cop1DividerPostTargetAddress);
+  writer->writeBool(core.issueLatch.valid);
+  writer->writeU32(core.issueLatch.address);
+  writer->writeU32(core.issueLatch.instruction.raw);
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1938,11 +1943,21 @@ void NekoSaveStateCodec::readEECore(
     reader->readBool("EE COP1 post-delay taken flag");
   core->cop1DividerPostTargetInstructions = reader->readU8();
   core->cop1DividerPostTargetAddress = reader->readU32();
+  core->issueLatch.valid =
+    reader->readBool("EE decoded issue-latch flag");
+  core->issueLatch.address = reader->readU32();
+  const std::uint32_t issueInstruction = reader->readU32();
   core->lastDecodedInstruction = {};
   if (core->lastInstructionValid)
   {
     core->lastDecodedInstruction =
       decodeEEInstruction(lastInstruction);
+  }
+  core->issueLatch.instruction = {};
+  if (core->issueLatch.valid)
+  {
+    core->issueLatch.instruction =
+      decodeEEInstruction(issueInstruction);
   }
 
   require(
@@ -1969,6 +1984,19 @@ void NekoSaveStateCodec::readEECore(
     core->lastInstructionValid ||
       (core->lastAddress == 0 && lastInstruction == 0),
     "EE invalid last instruction contains state");
+  require(
+    core->issueLatch.valid ||
+      (core->issueLatch.address == 0 &&
+       issueInstruction == 0),
+    "EE inactive issue latch contains state");
+  require(
+    !core->issueLatch.valid ||
+      ((core->issueLatch.address & 3) == 0 &&
+       core->pc == core->issueLatch.address &&
+       (core->state == EEExecutionState::Running ||
+        (core->state == EEExecutionState::Halted &&
+         core->haltReason == EEStopReason::HostHalt))),
+    "EE decoded issue latch state is inconsistent");
   require(
     !(core->pendingMac0.active && core->pendingMac1.active),
     "EE reference core has concurrent multiply/divide state");

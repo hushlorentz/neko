@@ -3486,6 +3486,197 @@ TEST_CASE(
 }
 
 TEST_CASE(
+  "EE decoded issue latch retains a stalled instruction without refetching")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x00, 4, 5, 6));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+  REQUIRE(core.programCounter() == 4);
+
+  system.eeBus().write32(4, 0);
+  system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x40800000));
+}
+
+TEST_CASE(
+  "EE decoded issue latch participates in hashes and save states")
+{
+  SECTION("Different retained instructions produce different hashes")
+  {
+    NekoSystem addSystem;
+    NekoSystem subtractSystem;
+    for (NekoSystem *system : {&addSystem, &subtractSystem})
+    {
+      system->eeCore().setFloatingPointRegister(
+        2,
+        UINT32_C(0x40c00000));
+      system->eeCore().setFloatingPointRegister(
+        3,
+        UINT32_C(0x40000000));
+      system->eeCore().setFloatingPointRegister(
+        6,
+        UINT32_C(0x3f800000));
+      system->eeBus().write32(
+        0,
+        cop1SingleInstruction(0x03, 2, 4, 3));
+    }
+    addSystem.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 4, 5, 6));
+    subtractSystem.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x01, 4, 5, 6));
+    addSystem.eeCore().startExecution(0);
+    subtractSystem.eeCore().startExecution(0);
+
+    addSystem.runMasterCycles(2);
+    subtractSystem.runMasterCycles(2);
+
+    REQUIRE(
+      addSystem.eeCore().stateHash() !=
+      subtractSystem.eeCore().stateHash());
+  }
+
+  SECTION("Save-state restore preserves the decoded instruction")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x40c00000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40000000));
+    originalCore.setFloatingPointRegister(
+      6,
+      UINT32_C(0x3f800000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    original.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 4, 5, 6));
+    originalCore.startExecution(0);
+    original.runMasterCycles(2);
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    original.eeBus().write32(4, 0);
+    restored.eeBus().write32(4, 0);
+
+    original.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+    restored.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(
+      originalCore.floatingPointRegister(5) ==
+      UINT32_C(0x40800000));
+    REQUIRE(
+      restored.eeCore().floatingPointRegister(5) ==
+      UINT32_C(0x40800000));
+    REQUIRE(original.saveState() == restored.saveState());
+  }
+}
+
+TEST_CASE(
+  "EE decoded issue latch obeys resume and redirect ownership")
+{
+  SECTION("Matching host halt and resume preserve the latch")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 4, 5, 6));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    core.haltExecution();
+    core.startExecution(core.programCounter());
+    system.eeBus().write32(4, 0);
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x40800000));
+  }
+
+  SECTION("An explicit PC redirect flushes the latch")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 4, 5, 2));
+    system.eeBus().write32(0x100, 0);
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    core.setProgramCounter(0x100);
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 0x104);
+    REQUIRE(core.floatingPointRegister(5) == 0);
+  }
+
+  SECTION("Exception entry flushes the latch before handler execution")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 4, 5, 2));
+    system.eeBus().write32(
+      EEExceptionVector::INTERRUPT,
+      UINT32_C(0x42000018));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    core.enterInterruptException();
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(
+      (core.cop0Register(EECOP0Register::Status) &
+       EECOP0Status::EXCEPTION_LEVEL) == 0);
+    REQUIRE(core.floatingPointRegister(5) == 0);
+  }
+}
+
+TEST_CASE(
   "EE COP1 divider initiation intervals permit overlapping results")
 {
   SECTION("DIV.S and SQRT.S use a seven-cycle initiation interval")
