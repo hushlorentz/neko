@@ -636,6 +636,12 @@ void NekoSystem::recordCycleTrace(
       case EECore::CycleTraceKind::COP1DividerHazard:
         type = NekoTraceEventType::COP1DividerHazard;
         break;
+      case EECore::CycleTraceKind::COP1StageTransition:
+        type = NekoTraceEventType::COP1StageTransition;
+        break;
+      case EECore::CycleTraceKind::COP1Retired:
+        type = NekoTraceEventType::COP1Retired;
+        break;
     }
     appendTrace(
       cycle,

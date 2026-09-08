@@ -721,6 +721,97 @@ TEST_CASE("EE regression traces identify interrupt delivery")
   REQUIRE(events[2].value0 == core.stateHash());
 }
 
+TEST_CASE(
+  "EE C1 transitions and retirements have deterministic cycle ordering")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setGeneralRegister(1, {0x100, 0});
+      REQUIRE(
+        system->eeBus().writeData32(
+          0x100,
+          UINT32_C(0x89abcdef)));
+      system->eeBus().write32(
+        0,
+        cop1SingleInstruction(0x03, 2, 4, 3));
+      for (std::uint32_t address = 4;
+           address <= 24;
+           address += 4)
+      {
+        system->eeBus().write32(address, 0);
+      }
+      system->eeBus().write32(
+        28,
+        immediateInstruction(0x31, 1, 3, 0));
+      system->eeBus().write32(32, 0);
+      core.startExecution(0);
+    };
+
+  NekoSystem traced;
+  NekoSystem untraced;
+  prepare(&traced);
+  prepare(&untraced);
+  traced.startTrace();
+
+  traced.runMasterCycles(9);
+  untraced.runMasterCycles(9);
+
+  REQUIRE(
+    traced.eeCore().stateHash() ==
+    untraced.eeCore().stateHash());
+  REQUIRE(traced.saveState() == untraced.saveState());
+
+  std::vector<NekoTraceEvent> completionEvents;
+  for (const NekoTraceEvent &event : eeTrace(traced))
+  {
+    if (event.masterCycle == 9)
+    {
+      completionEvents.push_back(event);
+    }
+  }
+  REQUIRE(completionEvents.size() == 6);
+  REQUIRE(
+    completionEvents[0].type ==
+    NekoTraceEventType::COP1StageTransition);
+  REQUIRE(completionEvents[0].value0 == 1);
+  REQUIRE(
+    completionEvents[1].type ==
+    NekoTraceEventType::COP1StageTransition);
+  REQUIRE(completionEvents[1].value0 == 8);
+  REQUIRE(
+    completionEvents[2].type ==
+    NekoTraceEventType::COP1Retired);
+  REQUIRE(completionEvents[2].value0 == 1);
+  REQUIRE(
+    completionEvents[2].value2 ==
+    (UINT64_C(0x7fffffff) |
+     ((NekoEETraceCOP1Result::DESTINATION_FPR |
+       NekoEETraceCOP1Result::DESTINATION_FCR31) <<
+      NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
+     (UINT64_C(4) <<
+      NekoEETraceCOP1Result::FPR_REGISTER_SHIFT)));
+  REQUIRE(
+    completionEvents[3].type ==
+    NekoTraceEventType::COP1Retired);
+  REQUIRE(completionEvents[3].value0 == 8);
+  REQUIRE(
+    completionEvents[3].value2 ==
+    (UINT64_C(0x89abcdef) |
+     (NekoEETraceCOP1Result::DESTINATION_FPR <<
+      NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
+     (UINT64_C(3) <<
+      NekoEETraceCOP1Result::FPR_REGISTER_SHIFT)));
+  REQUIRE(
+    completionEvents[4].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(completionEvents[4].value0 == 32);
+  REQUIRE(
+    completionEvents[5].type ==
+    NekoTraceEventType::StateSnapshot);
+}
+
 TEST_CASE("EE regression traces retain failed memory attempts")
 {
   NekoSystem system;
@@ -776,7 +867,7 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
   system.clockMasterCycle();
 
   const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 3);
+  REQUIRE(events.size() == 4);
   REQUIRE(
     events[0].type ==
     NekoTraceEventType::InstructionIssued);
@@ -789,8 +880,26 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
     events[1].value3 ==
     (UINT64_C(4) |
      NekoEETraceMemory::SUCCEEDED));
-  REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
-  REQUIRE(events[2].value0 == core.stateHash());
+  REQUIRE(
+    events[2].type ==
+    NekoTraceEventType::COP1StageTransition);
+  REQUIRE(events[2].value0 == 1);
+  REQUIRE(
+    events[2].value1 ==
+    (static_cast<std::uint64_t>(instruction) << 32));
+  REQUIRE(
+    events[2].value2 ==
+    (NekoEETraceCOP1Stage::NONE |
+     (NekoEETraceCOP1Stage::R <<
+      NekoEETraceCOP1Stage::TO_SHIFT) |
+     (UINT64_C(1) <<
+      NekoEETraceCOP1Stage::REMAINING_CYCLES_SHIFT)));
+  REQUIRE(
+    events[2].value3 ==
+    (NekoEETraceCOP1Result::DESTINATION_FPR |
+     (UINT64_C(3) << 8)));
+  REQUIRE(events[3].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[3].value0 == core.stateHash());
 }
 
 TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")

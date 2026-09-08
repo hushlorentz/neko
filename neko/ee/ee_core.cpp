@@ -1717,6 +1717,10 @@ bool EECore::executeInstruction(
         immediateDestination;
       operation.rawResult = value;
       operation.remainingCycles = 1;
+      recordCOP1StageTransition(
+        operation,
+        UINT8_MAX,
+        COP1PipelineStage::R);
       return true;
     }
     case EEOperation::StoreWordFromCOP1:
@@ -2903,7 +2907,7 @@ void EECore::drainInFlightCOP1()
     {
       break;
     }
-    commitInFlightCOP1(oldest);
+    commitInFlightCOP1(oldest, false);
   }
   if (drainedDivider)
   {
@@ -2919,6 +2923,8 @@ void EECore::advancePendingCOP1(
   *completedLoad = false;
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
     readyToCommit = {};
+  std::array<COP1PipelineStage, COP1_IN_FLIGHT_CAPACITY>
+    previousStages = {};
   if (cop1DividerInitiationCycles != 0)
   {
     --cop1DividerInitiationCycles;
@@ -2942,9 +2948,46 @@ void EECore::advancePendingCOP1(
     --operation.remainingCycles;
     if (operation.remainingCycles == 0)
     {
+      previousStages[index] = operation.stage;
       operation.stage = COP1PipelineStage::S1;
       readyToCommit[index] = true;
     }
+  }
+
+  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
+    transitionsToRecord = readyToCommit;
+  while (true)
+  {
+    const InFlightCOP1Operation *transition = nullptr;
+    std::size_t transitionIndex = 0;
+    for (std::size_t index = 0;
+         index < inFlightCOP1Operations.size();
+         ++index)
+    {
+      const InFlightCOP1Operation &operation =
+        inFlightCOP1Operations[index];
+      if (!operation.active ||
+          !transitionsToRecord[index])
+      {
+        continue;
+      }
+      if (transition == nullptr ||
+          operation.programOrder < transition->programOrder)
+      {
+        transition = &operation;
+        transitionIndex = index;
+      }
+    }
+    if (transition == nullptr)
+    {
+      break;
+    }
+    transitionsToRecord[transitionIndex] = false;
+    recordCOP1StageTransition(
+      *transition,
+      static_cast<std::uint8_t>(
+        previousStages[transitionIndex]),
+      COP1PipelineStage::S1);
   }
 
   while (true)
@@ -2981,7 +3024,7 @@ void EECore::advancePendingCOP1(
       *completedLoadRegister =
         readyOperation->destination.fprRegister;
     }
-    commitInFlightCOP1(readyOperation);
+    commitInFlightCOP1(readyOperation, true);
   }
 }
 
@@ -3025,14 +3068,23 @@ void EECore::startPendingCOP1Divider(
     FP_FLAG_I_BIT | FP_FLAG_D_BIT;
   operation.raisedFlags = raisedFlags;
   operation.remainingCycles = timing.latency;
+  recordCOP1StageTransition(
+    operation,
+    UINT8_MAX,
+    COP1PipelineStage::R);
   cop1DividerInitiationCycles = timing.initiationInterval;
   cop1DividerOperation = instruction.operation;
 }
 
 void EECore::commitInFlightCOP1(
-  InFlightCOP1Operation *operation)
+  InFlightCOP1Operation *operation,
+  bool traceRetirement)
 {
   operation->stage = COP1PipelineStage::S2;
+  if (traceRetirement)
+  {
+    recordCOP1Retirement(*operation);
+  }
   if ((operation->destination.mask &
        COP1_DESTINATION_FPR) != 0)
   {
@@ -3049,6 +3101,53 @@ void EECore::commitInFlightCOP1(
       operation->raisedStickyFlags);
   }
   *operation = {};
+}
+
+void EECore::recordCOP1StageTransition(
+  const InFlightCOP1Operation &operation,
+  std::uint8_t fromStage,
+  COP1PipelineStage toStage)
+{
+  recordCycleTrace(
+    CycleTraceKind::COP1StageTransition,
+    operation.programOrder,
+    operation.instructionAddress |
+      (static_cast<std::uint64_t>(
+        operation.instruction.raw) << 32),
+    fromStage |
+      (static_cast<std::uint64_t>(
+        static_cast<std::uint8_t>(toStage)) << 8) |
+      (static_cast<std::uint64_t>(
+        operation.remainingCycles) << 16),
+    operation.destination.mask |
+      (static_cast<std::uint64_t>(
+        operation.destination.fprRegister) << 8) |
+      (static_cast<std::uint64_t>(
+        operation.destination.gprRegister) << 16));
+}
+
+void EECore::recordCOP1Retirement(
+  const InFlightCOP1Operation &operation)
+{
+  recordCycleTrace(
+    CycleTraceKind::COP1Retired,
+    operation.programOrder,
+    operation.instructionAddress |
+      (static_cast<std::uint64_t>(
+        operation.instruction.raw) << 32),
+    operation.rawResult |
+      (static_cast<std::uint64_t>(
+        operation.destination.mask) << 32) |
+      (static_cast<std::uint64_t>(
+        operation.destination.fprRegister) << 40) |
+      (static_cast<std::uint64_t>(
+        operation.destination.gprRegister) << 48),
+    operation.affectedFlags |
+      (static_cast<std::uint64_t>(
+        operation.raisedFlags) << 8) |
+      (static_cast<std::uint64_t>(
+        operation.raisedStickyFlags) << 16) |
+      (operation.conditionResult ? UINT64_C(1) << 24 : 0));
 }
 
 bool EECore::cop1ScoreboardBlocks(

@@ -269,7 +269,9 @@ class EECore : public ClockedComponent
       InterruptDelivered,
       COP1LoadInterlock,
       COP1ResourceInterlock,
-      COP1DividerHazard
+      COP1DividerHazard,
+      COP1StageTransition,
+      COP1Retired
     };
 
     enum class COP1Dependency : std::uint8_t
@@ -455,7 +457,15 @@ class EECore : public ClockedComponent
     std::uint32_t cop1DividerPostTargetAddress = 0;
     bool instructionRetiredThisCycle = false;
     bool exceptionEnteredThisCycle = false;
-    std::array<CycleTraceEvent, 8> cycleTraceEvents = {};
+    static constexpr std::size_t CYCLE_TRACE_CAPACITY =
+      COP1_IN_FLIGHT_CAPACITY * 2 + 8;
+    static_assert(
+      CYCLE_TRACE_CAPACITY >=
+        COP1_IN_FLIGHT_CAPACITY * 2 + 2,
+      "EE trace capacity must hold all C1 transitions, "
+      "retirements, and interrupt events.");
+    std::array<CycleTraceEvent, CYCLE_TRACE_CAPACITY>
+      cycleTraceEvents = {};
     std::size_t cycleTraceEventCount = 0;
     bool cycleTraceEnabled = false;
 
@@ -541,7 +551,14 @@ class EECore : public ClockedComponent
       std::uint32_t result,
       std::uint8_t raisedFlags);
     void commitInFlightCOP1(
-      InFlightCOP1Operation *operation);
+      InFlightCOP1Operation *operation,
+      bool traceRetirement);
+    void recordCOP1StageTransition(
+      const InFlightCOP1Operation &operation,
+      std::uint8_t fromStage,
+      COP1PipelineStage toStage);
+    void recordCOP1Retirement(
+      const InFlightCOP1Operation &operation);
     bool cop1ScoreboardBlocks(
       const EEInstruction &instruction,
       COP1ScoreboardHazard *hazard) const;

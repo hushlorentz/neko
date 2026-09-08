@@ -829,7 +829,7 @@ foundation before enabling COP1 instruction pairs.
       established timing contracts after the divider anchor is explicit
 - [x] Route ELF guest-return drain through the shared in-flight interface while
       preserving the existing pending-load and divider completion behavior
-- [ ] Define deterministic per-cycle trace ordering and sufficient event
+- [x] Define deterministic per-cycle trace ordering and sufficient event
       capacity for multiple C1 stage transitions and retirements
 - [ ] Add a timing-independent PS2DEV COP1 semantic guest as a before/after
       pipeline-migration baseline for raw registers and FCR31
