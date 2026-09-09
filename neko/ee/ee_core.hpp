@@ -550,7 +550,7 @@ class EECore : public ClockedComponent
     bool advanceInFlightCOP1Operation(
       InFlightCOP1Operation *operation,
       COP1PipelineStage *previousStage);
-    static void computeInFlightCOP1StagedALU(
+    static void computeInFlightCOP1StagedOperation(
       InFlightCOP1Operation *operation);
     bool pendingCOP1DividerActive() const;
     void startPendingCOP1Divider(
@@ -594,7 +594,9 @@ class EECore : public ClockedComponent
     static bool isCOP1UnaryOperation(EEOperation operation);
     static bool isCOP1SingleSourceStagedOperation(
       EEOperation operation);
-    static bool isCOP1StagedALUOperation(
+    static bool isCOP1ComparisonOperation(
+      EEOperation operation);
+    static bool isCOP1StagedOperation(
       EEOperation operation);
     static bool isCOP1ManagedPipelineOperation(
       EEOperation operation);

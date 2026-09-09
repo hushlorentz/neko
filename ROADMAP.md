@@ -871,7 +871,7 @@ accumulator or condition-result contract:
 
 - [x] Migrate `CVT.S.W` and `CVT.W.S` through their documented `Y/Z` work and
       ordered FPR/FCR31 result delivery
-- [ ] Migrate `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, retaining condition
+- [x] Migrate `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, retaining condition
       results in flight until their documented visibility and commit boundaries
 - [ ] Interlock or forward comparison-to-branch and `CFC1` dependencies without
       exposing a younger condition or FCR31 value early

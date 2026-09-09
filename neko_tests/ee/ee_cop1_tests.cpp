@@ -2605,9 +2605,9 @@ TEST_CASE("EE COP1 branches consume the preceding comparison condition")
     }
     core.startExecution(0);
 
-    system.runMasterCycles(3);
+    system.runMasterCycles(7);
 
-    REQUIRE(core.elapsedCycles() == 3);
+    REQUIRE(core.elapsedCycles() == 7);
     REQUIRE(core.programCounter() == 16);
     REQUIRE(core.generalRegister(2).low == 1);
     REQUIRE(core.generalRegister(3).low == 0);
@@ -2780,6 +2780,7 @@ TEST_CASE("EE COP1 comparisons update the condition bit exactly")
         2,
         0,
         3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     const std::uint32_t status =
       core.cop1ControlRegister(31);
@@ -2812,19 +2813,21 @@ TEST_CASE("EE COP1 comparison condition is visible at the 2S boundary")
 
   REQUIRE(core.elapsedCycles() == 1);
   REQUIRE(core.programCounter() == 4);
-  REQUIRE(core.cop1Condition());
+  REQUIRE_FALSE(core.cop1Condition());
   REQUIRE(core.generalRegister(5) == EERegister128{});
 
-  system.clockMasterCycle();
+  system.runMasterCycles(4);
 
-  REQUIRE(core.elapsedCycles() == 2);
+  REQUIRE(core.elapsedCycles() == 5);
   REQUIRE(core.programCounter() == 4);
+  REQUIRE_FALSE(core.cop1Condition());
   REQUIRE(core.generalRegister(5) == EERegister128{});
 
   system.clockMasterCycle();
 
-  REQUIRE(core.elapsedCycles() == 3);
+  REQUIRE(core.elapsedCycles() == 6);
   REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.cop1Condition());
   REQUIRE(
     core.generalRegister(5).low ==
     (EECOP1Control::STATUS_FIXED |
@@ -2845,7 +2848,7 @@ TEST_CASE("EE COP1 comparison condition retires in instruction order")
     cop1SingleInstruction(0x30, 2, 0, 3));
   core.startExecution(0);
 
-  system.clockMasterCycle();
+  system.runMasterCycles(6);
   REQUIRE(core.cop1Condition());
 
   system.clockMasterCycle();

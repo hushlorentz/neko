@@ -1002,6 +1002,10 @@ bool EECore::executeInstruction(
     case EEOperation::ConvertSingleToWordCOP1:
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -1009,11 +1013,20 @@ bool EECore::executeInstruction(
       }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
-      operation.destination.mask = COP1_DESTINATION_FPR;
-      if (instruction.operation !=
-          EEOperation::ConvertWordToSingleCOP1)
+      if (isCOP1ComparisonOperation(instruction.operation))
       {
-        operation.destination.mask |= COP1_DESTINATION_FCR31;
+        operation.destination.mask =
+          COP1_DESTINATION_CONDITION;
+      }
+      else
+      {
+        operation.destination.mask = COP1_DESTINATION_FPR;
+        if (instruction.operation !=
+            EEOperation::ConvertWordToSingleCOP1)
+        {
+          operation.destination.mask |=
+            COP1_DESTINATION_FCR31;
+        }
       }
       operation.destination.fprRegister =
         instruction.shiftAmount;
@@ -1023,7 +1036,9 @@ bool EECore::executeInstruction(
         operation.affectedFlags = FP_FLAG_I_BIT;
       }
       else if (instruction.operation !=
-               EEOperation::ConvertWordToSingleCOP1)
+                 EEOperation::ConvertWordToSingleCOP1 &&
+               !isCOP1ComparisonOperation(
+                 instruction.operation))
       {
         operation.affectedFlags =
           FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW;
@@ -1103,37 +1118,6 @@ bool EECore::executeInstruction(
         FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
         result.flags,
         result.stickyFlags);
-      return true;
-    }
-    case EEOperation::CompareFalseSingleCOP1:
-    case EEOperation::CompareEqualSingleCOP1:
-    case EEOperation::CompareLessThanSingleCOP1:
-    case EEOperation::CompareLessThanOrEqualSingleCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      const int comparison =
-        compareEEFloatRaw(
-          scoreboardFPRValue(destination),
-          scoreboardFPRValue(instruction.targetRegister));
-      bool condition = false;
-      switch (instruction.operation)
-      {
-        case EEOperation::CompareEqualSingleCOP1:
-          condition = comparison == 0;
-          break;
-        case EEOperation::CompareLessThanSingleCOP1:
-          condition = comparison < 0;
-          break;
-        case EEOperation::CompareLessThanOrEqualSingleCOP1:
-          condition = comparison <= 0;
-          break;
-        default:
-          break;
-      }
-      setCOP1Condition(condition);
       return true;
     }
     case EEOperation::BranchCOP1False:
@@ -2868,7 +2852,7 @@ void EECore::drainInFlightCOP1()
           EEOperation::LoadWordToCOP1 &&
         !isCOP1DividerOperation(
           operation.instruction.operation) &&
-        !isCOP1StagedALUOperation(
+        !isCOP1StagedOperation(
           operation.instruction.operation))
     {
       throw std::logic_error(
@@ -2896,7 +2880,7 @@ void EECore::drainInFlightCOP1()
     {
       break;
     }
-    if (isCOP1StagedALUOperation(
+    if (isCOP1StagedOperation(
           oldest->instruction.operation))
     {
       if (oldest->stage == COP1PipelineStage::R)
@@ -2917,7 +2901,7 @@ void EECore::drainInFlightCOP1()
       }
       if (oldest->stage < COP1PipelineStage::Z)
       {
-        computeInFlightCOP1StagedALU(oldest);
+        computeInFlightCOP1StagedOperation(oldest);
       }
     }
     commitInFlightCOP1(oldest, false);
@@ -3048,7 +3032,7 @@ bool EECore::advanceInFlightCOP1Operation(
   COP1PipelineStage *previousStage)
 {
   *previousStage = operation->stage;
-  if (isCOP1StagedALUOperation(
+  if (isCOP1StagedOperation(
         operation->instruction.operation))
   {
     switch (operation->stage)
@@ -3078,7 +3062,7 @@ bool EECore::advanceInFlightCOP1Operation(
         operation->stage = COP1PipelineStage::Y;
         return true;
       case COP1PipelineStage::Y:
-        computeInFlightCOP1StagedALU(operation);
+        computeInFlightCOP1StagedOperation(operation);
         operation->stage = COP1PipelineStage::Z;
         return true;
       case COP1PipelineStage::Z:
@@ -3102,7 +3086,7 @@ bool EECore::advanceInFlightCOP1Operation(
   return true;
 }
 
-void EECore::computeInFlightCOP1StagedALU(
+void EECore::computeInFlightCOP1StagedOperation(
   InFlightCOP1Operation *operation)
 {
   switch (operation->instruction.operation)
@@ -3142,6 +3126,31 @@ void EECore::computeInFlightCOP1StagedALU(
       operation->rawResult = result.bits;
       operation->raisedFlags = result.flags;
       return;
+    }
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
+    {
+      const int comparison =
+        compareEEFloatRaw(
+          operation->capturedFS,
+          operation->capturedFT);
+      switch (operation->instruction.operation)
+      {
+        case EEOperation::CompareEqualSingleCOP1:
+          operation->conditionResult = comparison == 0;
+          return;
+        case EEOperation::CompareLessThanSingleCOP1:
+          operation->conditionResult = comparison < 0;
+          return;
+        case EEOperation::CompareLessThanOrEqualSingleCOP1:
+          operation->conditionResult = comparison <= 0;
+          return;
+        default:
+          operation->conditionResult = false;
+          return;
+      }
     }
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
@@ -3237,6 +3246,11 @@ void EECore::commitInFlightCOP1(
       operation->raisedFlags,
       operation->raisedStickyFlags);
   }
+  if ((operation->destination.mask &
+       COP1_DESTINATION_CONDITION) != 0)
+  {
+    setCOP1Condition(operation->conditionResult);
+  }
   *operation = {};
 }
 
@@ -3306,8 +3320,8 @@ bool EECore::cop1ScoreboardBlocks(
         COP1ScoreboardResource::FPR,
         registerIndex);
     const bool orderedStagedALUDependency =
-      isCOP1StagedALUOperation(instruction.operation) &&
-      isCOP1StagedALUOperation(value.producerOperation) &&
+      isCOP1StagedOperation(instruction.operation) &&
+      isCOP1StagedOperation(value.producerOperation) &&
       (dependency == COP1Dependency::Write ||
        value.producerStage == COP1PipelineStage::Z ||
        value.producerStage == COP1PipelineStage::S1);
@@ -3347,8 +3361,8 @@ bool EECore::cop1ScoreboardBlocks(
   const bool orderedStagedALUWrite =
     (controlDependency == COP1Dependency::Write ||
      controlDependency == COP1Dependency::ReadWrite) &&
-    isCOP1StagedALUOperation(instruction.operation) &&
-    isCOP1StagedALUOperation(
+    isCOP1StagedOperation(instruction.operation) &&
+    isCOP1StagedOperation(
       controlValue.producerOperation);
   if (!isCOP1DividerOperation(instruction.operation) &&
       !orderedStagedALUWrite &&
@@ -3537,7 +3551,7 @@ std::uint32_t EECore::scoreboardFPRValueForT(
     return floatingPointRegisters[registerIndex];
   }
   if (producer->stage == COP1PipelineStage::S1 ||
-      (isCOP1StagedALUOperation(
+      (isCOP1StagedOperation(
          producer->instruction.operation) &&
        producer->stage == COP1PipelineStage::Z))
   {
@@ -3782,13 +3796,24 @@ bool EECore::isCOP1SingleSourceStagedOperation(
     operation == EEOperation::ConvertSingleToWordCOP1;
 }
 
-bool EECore::isCOP1StagedALUOperation(
+bool EECore::isCOP1ComparisonOperation(
+  EEOperation operation)
+{
+  return operation == EEOperation::CompareFalseSingleCOP1 ||
+    operation == EEOperation::CompareEqualSingleCOP1 ||
+    operation == EEOperation::CompareLessThanSingleCOP1 ||
+    operation ==
+      EEOperation::CompareLessThanOrEqualSingleCOP1;
+}
+
+bool EECore::isCOP1StagedOperation(
   EEOperation operation)
 {
   return isCOP1SingleSourceStagedOperation(operation) ||
     isCOP1AddSubtractOperation(operation) ||
     operation == EEOperation::MaximumSingleCOP1 ||
-    operation == EEOperation::MinimumSingleCOP1;
+    operation == EEOperation::MinimumSingleCOP1 ||
+    isCOP1ComparisonOperation(operation);
 }
 
 bool EECore::isCOP1ManagedPipelineOperation(
@@ -3796,7 +3821,7 @@ bool EECore::isCOP1ManagedPipelineOperation(
 {
   return operation == EEOperation::LoadWordToCOP1 ||
     isCOP1DividerOperation(operation) ||
-    isCOP1StagedALUOperation(operation);
+    isCOP1StagedOperation(operation);
 }
 
 EECore::COP1DividerTiming EECore::cop1DividerTiming(

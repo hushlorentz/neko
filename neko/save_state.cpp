@@ -2010,8 +2010,8 @@ void NekoSaveStateCodec::readEECore(
       const bool divider =
         EECore::isCOP1DividerOperation(
           operation.instruction.operation);
-      const bool stagedALU =
-        EECore::isCOP1StagedALUOperation(
+      const bool stagedOperation =
+        EECore::isCOP1StagedOperation(
           operation.instruction.operation);
       require(
         load || divider || operation.remainingCycles == 0,
@@ -2087,7 +2087,7 @@ void NekoSaveStateCodec::readEECore(
             operation.raisedStickyFlags == 0,
           "EE in-flight COP1 divider state is inconsistent");
       }
-      if (stagedALU)
+      if (stagedOperation)
       {
         const bool operandsCaptured =
           operation.stage != EECore::COP1PipelineStage::R;
@@ -2095,6 +2095,7 @@ void NekoSaveStateCodec::readEECore(
           operation.stage == EECore::COP1PipelineStage::Z;
         std::uint32_t expectedResult = 0;
         std::uint8_t expectedFlags = 0;
+        bool expectedCondition = false;
         if (resultComputed)
         {
           switch (operation.instruction.operation)
@@ -2151,6 +2152,31 @@ void NekoSaveStateCodec::readEECore(
               expectedFlags = result.flags;
               break;
             }
+            case EEOperation::CompareFalseSingleCOP1:
+            case EEOperation::CompareEqualSingleCOP1:
+            case EEOperation::CompareLessThanSingleCOP1:
+            case EEOperation::CompareLessThanOrEqualSingleCOP1:
+            {
+              const int comparison =
+                compareEEFloatRaw(
+                  operation.capturedFS,
+                  operation.capturedFT);
+              switch (operation.instruction.operation)
+              {
+                case EEOperation::CompareEqualSingleCOP1:
+                  expectedCondition = comparison == 0;
+                  break;
+                case EEOperation::CompareLessThanSingleCOP1:
+                  expectedCondition = comparison < 0;
+                  break;
+                case EEOperation::CompareLessThanOrEqualSingleCOP1:
+                  expectedCondition = comparison <= 0;
+                  break;
+                default:
+                  break;
+              }
+              break;
+            }
             default:
               break;
           }
@@ -2164,13 +2190,18 @@ void NekoSaveStateCodec::readEECore(
         const bool singleToWord =
           operation.instruction.operation ==
             EEOperation::ConvertSingleToWordCOP1;
+        const bool comparison =
+          EECore::isCOP1ComparisonOperation(
+            operation.instruction.operation);
         const std::uint8_t expectedDestination =
-          EECore::COP1_DESTINATION_FPR |
-          (wordToSingle
-            ? 0
-            : EECore::COP1_DESTINATION_FCR31);
+          comparison
+            ? EECore::COP1_DESTINATION_CONDITION
+            : EECore::COP1_DESTINATION_FPR |
+              (wordToSingle
+                ? 0
+                : EECore::COP1_DESTINATION_FCR31);
         const std::uint8_t expectedAffectedFlags =
-          wordToSingle
+          wordToSingle || comparison
             ? 0
             : (singleToWord
               ? FP_FLAG_I_BIT
@@ -2187,7 +2218,9 @@ void NekoSaveStateCodec::readEECore(
             operation.affectedFlags ==
               expectedAffectedFlags &&
             operation.raisedStickyFlags == 0 &&
-            !operation.conditionResult &&
+            (resultComputed
+              ? operation.conditionResult == expectedCondition
+              : !operation.conditionResult) &&
             (!singleSource || operation.capturedFT == 0) &&
             (operandsCaptured ||
              (operation.capturedFS == 0 &&
@@ -2198,7 +2231,7 @@ void NekoSaveStateCodec::readEECore(
                  operation.raisedFlags == expectedFlags)
               : (operation.rawResult == 0 &&
                  operation.raisedFlags == 0)),
-          "EE in-flight COP1 staged ALU state is inconsistent");
+          "EE in-flight COP1 staged operation state is inconsistent");
       }
     }
     else
