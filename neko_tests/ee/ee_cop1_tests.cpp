@@ -2895,6 +2895,7 @@ TEST_CASE("EE COP1 CVT.S.W converts signed words with EE truncation")
     runInstruction(
       &system,
       cop1WordInstruction(0x20, 2, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(core.floatingPointRegister(2) == vector.source);
     REQUIRE(
@@ -2912,6 +2913,7 @@ TEST_CASE("EE COP1 CVT.S.W supports in-place conversion")
   runInstruction(
     &system,
     cop1WordInstruction(0x20, 2, 2));
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
   REQUIRE(
     core.floatingPointRegister(2) ==
@@ -2931,6 +2933,7 @@ TEST_CASE("EE COP1 CVT.S.W leaves arithmetic flags unchanged")
   runInstruction(
     &system,
     cop1WordInstruction(0x20, 2, 3));
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
   REQUIRE(
     core.cop1ControlRegister(31) ==
@@ -2979,6 +2982,7 @@ TEST_CASE("EE COP1 CVT.W.S truncates and clamps raw EE values")
     runInstruction(
       &system,
       cop1SingleInstruction(0x24, 2, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(core.floatingPointRegister(2) == vector.source);
     REQUIRE(
@@ -2996,6 +3000,7 @@ TEST_CASE("EE COP1 CVT.W.S supports in-place conversion")
   runInstruction(
     &system,
     cop1SingleInstruction(0x24, 2, 2));
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
   REQUIRE(
     core.floatingPointRegister(2) ==
@@ -3018,6 +3023,7 @@ TEST_CASE("EE COP1 CVT.W.S updates conversion overflow flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x24, 2, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -3043,6 +3049,7 @@ TEST_CASE("EE COP1 CVT.W.S updates conversion overflow flags")
       runInstruction(
         &system,
         cop1SingleInstruction(0x24, 2, 3));
+      system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
       REQUIRE(
         core.cop1ControlRegister(31) ==
@@ -3051,6 +3058,35 @@ TEST_CASE("EE COP1 CVT.W.S updates conversion overflow flags")
          EECOP1Control::STICKY_INVALID));
     }
   }
+}
+
+TEST_CASE("EE COP1 CVT.W.S retires its FPR and flags together")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x4f000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x24, 2, 3));
+  core.startExecution(0);
+
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
+  REQUIRE(core.floatingPointRegister(3) == 0);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_INVALID |
+     EECOP1Control::STICKY_INVALID));
 }
 
 TEST_CASE(
@@ -3128,7 +3164,7 @@ TEST_CASE(
       0,
       UINT32_C(0x4b800000),
       true,
-      false
+      true
     },
     {
       cop1SingleInstruction(0x24, 2, 4),
@@ -3136,7 +3172,7 @@ TEST_CASE(
       0,
       UINT32_C(0x00000001),
       true,
-      false
+      true
     }
   };
 

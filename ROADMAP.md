@@ -869,7 +869,7 @@ accumulator or condition-result contract:
 
 ### C1 Conversion and Comparison Migration
 
-- [ ] Migrate `CVT.S.W` and `CVT.W.S` through their documented `Y/Z` work and
+- [x] Migrate `CVT.S.W` and `CVT.W.S` through their documented `Y/Z` work and
       ordered FPR/FCR31 result delivery
 - [ ] Migrate `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, retaining condition
       results in flight until their documented visibility and commit boundaries

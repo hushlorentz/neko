@@ -2123,6 +2123,18 @@ void NekoSaveStateCodec::readEECore(
               expectedFlags = result.flags;
               break;
             }
+            case EEOperation::ConvertWordToSingleCOP1:
+              expectedResult =
+                fixedToFloatRaw(operation.capturedFS, 0);
+              break;
+            case EEOperation::ConvertSingleToWordCOP1:
+            {
+              const EEFloatResult result =
+                convertEEFloatToWordRaw(operation.capturedFS);
+              expectedResult = result.bits;
+              expectedFlags = result.flags;
+              break;
+            }
             case EEOperation::AddSingleCOP1:
             case EEOperation::SubtractSingleCOP1:
             {
@@ -2143,24 +2155,40 @@ void NekoSaveStateCodec::readEECore(
               break;
           }
         }
-        const bool unary =
-          EECore::isCOP1UnaryOperation(
+        const bool singleSource =
+          EECore::isCOP1SingleSourceStagedOperation(
             operation.instruction.operation);
+        const bool wordToSingle =
+          operation.instruction.operation ==
+            EEOperation::ConvertWordToSingleCOP1;
+        const bool singleToWord =
+          operation.instruction.operation ==
+            EEOperation::ConvertSingleToWordCOP1;
+        const std::uint8_t expectedDestination =
+          EECore::COP1_DESTINATION_FPR |
+          (wordToSingle
+            ? 0
+            : EECore::COP1_DESTINATION_FCR31);
+        const std::uint8_t expectedAffectedFlags =
+          wordToSingle
+            ? 0
+            : (singleToWord
+              ? FP_FLAG_I_BIT
+              : FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW);
         require(
           operation.remainingCycles == 0 &&
             operation.stage <= EECore::COP1PipelineStage::Z &&
             operation.destination.mask ==
-              (EECore::COP1_DESTINATION_FPR |
-               EECore::COP1_DESTINATION_FCR31) &&
+              expectedDestination &&
             operation.destination.fprRegister ==
               operation.instruction.shiftAmount &&
             operation.capturedAccumulator == 0 &&
             operation.capturedGPR == 0 &&
             operation.affectedFlags ==
-              (FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW) &&
+              expectedAffectedFlags &&
             operation.raisedStickyFlags == 0 &&
             !operation.conditionResult &&
-            (!unary || operation.capturedFT == 0) &&
+            (!singleSource || operation.capturedFT == 0) &&
             (operandsCaptured ||
              (operation.capturedFS == 0 &&
               operation.capturedFT == 0 &&

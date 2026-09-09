@@ -998,6 +998,8 @@ bool EECore::executeInstruction(
     case EEOperation::NegateSingleCOP1:
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
+    case EEOperation::ConvertWordToSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     {
@@ -1007,13 +1009,25 @@ bool EECore::executeInstruction(
       }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
-      operation.destination.mask =
-        COP1_DESTINATION_FPR |
-        COP1_DESTINATION_FCR31;
+      operation.destination.mask = COP1_DESTINATION_FPR;
+      if (instruction.operation !=
+          EEOperation::ConvertWordToSingleCOP1)
+      {
+        operation.destination.mask |= COP1_DESTINATION_FCR31;
+      }
       operation.destination.fprRegister =
         instruction.shiftAmount;
-      operation.affectedFlags =
-        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW;
+      if (instruction.operation ==
+          EEOperation::ConvertSingleToWordCOP1)
+      {
+        operation.affectedFlags = FP_FLAG_I_BIT;
+      }
+      else if (instruction.operation !=
+               EEOperation::ConvertWordToSingleCOP1)
+      {
+        operation.affectedFlags =
+          FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW;
+      }
       recordCOP1StageTransition(
         operation,
         UINT8_MAX,
@@ -1089,32 +1103,6 @@ bool EECore::executeInstruction(
         FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
         result.flags,
         result.stickyFlags);
-      return true;
-    }
-    case EEOperation::ConvertWordToSingleCOP1:
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      floatingPointRegisters[instruction.shiftAmount] =
-        fixedToFloatRaw(
-          scoreboardFPRValue(destination),
-          0);
-      return true;
-    case EEOperation::ConvertSingleToWordCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      const EEFloatResult result =
-        convertEEFloatToWordRaw(
-          scoreboardFPRValue(destination));
-      floatingPointRegisters[instruction.shiftAmount] =
-        result.bits;
-      updateCOP1ArithmeticFlags(
-        FP_FLAG_I_BIT,
-        result.flags);
       return true;
     }
     case EEOperation::CompareFalseSingleCOP1:
@@ -2916,7 +2904,7 @@ void EECore::drainInFlightCOP1()
         oldest->capturedFS =
           floatingPointRegisters[
             oldest->instruction.destinationRegister];
-        if (!isCOP1UnaryOperation(
+        if (!isCOP1SingleSourceStagedOperation(
               oldest->instruction.operation))
         {
           oldest->capturedFT =
@@ -3070,7 +3058,7 @@ bool EECore::advanceInFlightCOP1Operation(
           scoreboardFPRValueForT(
             operation->instruction.destinationRegister,
             operation->programOrder);
-        if (!isCOP1UnaryOperation(
+        if (!isCOP1SingleSourceStagedOperation(
               operation->instruction.operation))
         {
           operation->capturedFT =
@@ -3139,6 +3127,18 @@ void EECore::computeInFlightCOP1StagedALU(
           : minEEFloatRaw(
               operation->capturedFS,
               operation->capturedFT);
+      operation->rawResult = result.bits;
+      operation->raisedFlags = result.flags;
+      return;
+    }
+    case EEOperation::ConvertWordToSingleCOP1:
+      operation->rawResult =
+        fixedToFloatRaw(operation->capturedFS, 0);
+      return;
+    case EEOperation::ConvertSingleToWordCOP1:
+    {
+      const EEFloatResult result =
+        convertEEFloatToWordRaw(operation->capturedFS);
       operation->rawResult = result.bits;
       operation->raisedFlags = result.flags;
       return;
@@ -3774,10 +3774,18 @@ bool EECore::isCOP1UnaryOperation(EEOperation operation)
     operation == EEOperation::NegateSingleCOP1;
 }
 
-bool EECore::isCOP1StagedALUOperation(
+bool EECore::isCOP1SingleSourceStagedOperation(
   EEOperation operation)
 {
   return isCOP1UnaryOperation(operation) ||
+    operation == EEOperation::ConvertWordToSingleCOP1 ||
+    operation == EEOperation::ConvertSingleToWordCOP1;
+}
+
+bool EECore::isCOP1StagedALUOperation(
+  EEOperation operation)
+{
+  return isCOP1SingleSourceStagedOperation(operation) ||
     isCOP1AddSubtractOperation(operation) ||
     operation == EEOperation::MaximumSingleCOP1 ||
     operation == EEOperation::MinimumSingleCOP1;
