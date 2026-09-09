@@ -69,6 +69,8 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET = 1029;
   constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET = 1038;
+  constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1081;
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET = 1083;
@@ -1798,6 +1800,56 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
     std::vector<std::uint8_t> invalid = source.saveState();
     invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
       1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("An R-stage operation cannot contain captured operands")
+  {
+    NekoSystem rSource;
+    rSource.eeCore().setFloatingPointRegister(
+      2,
+      UINT32_C(0x3f800000));
+    rSource.eeCore().setFloatingPointRegister(
+      3,
+      UINT32_C(0x40000000));
+    rSource.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    rSource.eeCore().startExecution(0);
+    rSource.clockMasterCycle();
+    rSource.eeCore().haltExecution();
+
+    std::vector<std::uint8_t> invalid =
+      rSource.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET] = 1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("A Z-stage result must carry its computed flags")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET] =
+        FP_FLAG_UNDERFLOW;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("The destination must match the encoded fd")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] =
+        5;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));

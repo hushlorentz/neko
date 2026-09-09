@@ -4166,6 +4166,40 @@ TEST_CASE("EE COP1 divider pending results participate in state hashes")
   REQUIRE(first.eeCore().stateHash() != second.eeCore().stateHash());
 }
 
+TEST_CASE("EE staged COP1 add state participates in state hashes")
+{
+  const auto stagedHash =
+    [](std::uint32_t fs, std::size_t cycles)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setFloatingPointRegister(2, fs);
+      core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+      system.eeBus().write32(
+        0,
+        cop1SingleInstruction(0x00, 2, 4, 3));
+      core.startExecution(0);
+      system.runMasterCycles(cycles);
+      core.setFloatingPointRegister(2, 0);
+      core.setFloatingPointRegister(3, 0);
+      return core.stateHash();
+    };
+
+  SECTION("Captured T operands affect the hash")
+  {
+    REQUIRE(
+      stagedHash(UINT32_C(0x3f800000), 2) !=
+      stagedHash(UINT32_C(0x40400000), 2));
+  }
+
+  SECTION("Computed Z results and flags affect the hash")
+  {
+    REQUIRE(
+      stagedHash(UINT32_C(0x3f800000), 5) !=
+      stagedHash(UINT32_C(0x7f800000), 5));
+  }
+}
+
 TEST_CASE("EE COP1 divider work continues through exception entry")
 {
   NekoSystem system;
@@ -4200,6 +4234,74 @@ TEST_CASE("EE COP1 divider work continues through exception entry")
   REQUIRE(
     core.floatingPointRegister(4) ==
     UINT32_C(0x40400000));
+}
+
+TEST_CASE("EE staged COP1 add work crosses exception entry")
+{
+  SECTION("Older add work completes in the handler")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    for (std::uint32_t address = EEExceptionVector::GENERAL;
+         address < EEExceptionVector::GENERAL + 24;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+  }
+
+  SECTION("A handler add receives the older S-to-T bypass")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1SingleInstruction(0x01, 4, 5, 2));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::GENERAL + 4);
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x40000000));
+  }
 }
 
 TEST_CASE(
@@ -5109,6 +5211,52 @@ TEST_CASE(
     REQUIRE(
       restored.eeCore().floatingPointRegister(4) ==
       UINT32_C(0x40400000));
+
+    original.runMasterCycles(4);
+    restored.runMasterCycles(4);
+
+    REQUIRE(
+      originalCore.floatingPointRegister(5) ==
+      UINT32_C(0x40000000));
+    REQUIRE(
+      restored.eeCore().floatingPointRegister(5) ==
+      UINT32_C(0x40000000));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+  }
+
+  SECTION("A forwarded T operand survives halt and restore")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x3f800000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40000000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    original.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x01, 4, 5, 2));
+    originalCore.startExecution(0);
+    original.runMasterCycles(6);
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.setFloatingPointRegister(
+      4,
+      UINT32_C(0xdeadbeef));
+    restored.eeCore().setFloatingPointRegister(
+      4,
+      UINT32_C(0xdeadbeef));
+    const std::uint32_t resumeAddress =
+      originalCore.programCounter();
+    originalCore.startExecution(resumeAddress);
+    restored.eeCore().startExecution(resumeAddress);
 
     original.runMasterCycles(4);
     restored.runMasterCycles(4);

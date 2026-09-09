@@ -849,7 +849,7 @@ remaining families:
       retirement for FPR results and their arithmetic/sticky FCR31 flags
 - [x] Implement the `1S`-to-`2T` bypass for dependent add/subtract operations,
       while interlocking pre-`1S` reads and preserving WAW order
-- [ ] Re-baseline add/subtract issue, dependency, raw-result, flag, hash, trace,
+- [x] Re-baseline add/subtract issue, dependency, raw-result, flag, hash, trace,
       malformed-save-state, halt/resume, exception, and save/restore coverage
 - [ ] Complete an independent review of the representative staged path before
       migrating another operation family
