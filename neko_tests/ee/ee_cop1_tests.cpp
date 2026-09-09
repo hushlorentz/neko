@@ -2319,6 +2319,7 @@ TEST_CASE("EE COP1 min and max select exact source encodings")
         2,
         4,
         3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -2360,6 +2361,7 @@ TEST_CASE("EE COP1 min and max produce documented signed-zero results")
         2,
         4,
         3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -2369,16 +2371,34 @@ TEST_CASE("EE COP1 min and max produce documented signed-zero results")
 
 TEST_CASE("EE COP1 min and max flush selected denormals to signed zero")
 {
-  REQUIRE(
-    maxEEFloatRaw(
-      UINT32_C(0x007fffff),
-      UINT32_C(0x80000000)).bits ==
-    0);
-  REQUIRE(
-    minEEFloatRaw(
-      UINT32_C(0x807fffff),
-      UINT32_C(0x00000000)).bits ==
-    FP_SIGN_BIT);
+  struct SelectionVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const SelectionVector vectors[] = {
+    {0x28, UINT32_C(0x007fffff), UINT32_C(0x80000000), 0},
+    {0x29, UINT32_C(0x807fffff), UINT32_C(0x00000000),
+     FP_SIGN_BIT}
+  };
+
+  for (const SelectionVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    runInstruction(
+      &system,
+      cop1SingleInstruction(vector.function, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+  }
 }
 
 TEST_CASE("EE COP1 min and max clear current O and U")
@@ -2397,6 +2417,7 @@ TEST_CASE("EE COP1 min and max clear current O and U")
     runInstruction(
       &system,
       cop1SingleInstruction(function, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -2404,6 +2425,41 @@ TEST_CASE("EE COP1 min and max clear current O and U")
        EECOP1Control::CAUSE_INVALID |
        EECOP1Control::CAUSE_DIVISION_BY_ZERO |
        EECOP1Control::STICKY_MASK));
+  }
+}
+
+TEST_CASE("EE COP1 min and max clear O and U in retirement order")
+{
+  for (const std::uint8_t function : {0x28, 0x29})
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(5, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(6, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(function, 5, 7, 6));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::STICKY_OVERFLOW));
   }
 }
 
@@ -3040,7 +3096,7 @@ TEST_CASE(
       UINT32_C(0x40000000),
       UINT32_C(0x40000000),
       true,
-      false
+      true
     },
     {
       cop1SingleInstruction(0x29, 2, 4, 3),
@@ -3048,7 +3104,7 @@ TEST_CASE(
       UINT32_C(0x40000000),
       UINT32_C(0x3f800000),
       true,
-      false
+      true
     },
     {
       cop1SingleInstruction(0x00, 2, 4, 3),

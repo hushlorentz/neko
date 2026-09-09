@@ -950,8 +950,6 @@ bool EECore::executeInstruction(
         result.flags);
       return true;
     }
-    case EEOperation::MaximumSingleCOP1:
-    case EEOperation::MinimumSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::DivideSingleCOP1:
     {
@@ -966,12 +964,6 @@ bool EECore::executeInstruction(
       EEFloatResult result;
       switch (instruction.operation)
       {
-        case EEOperation::MaximumSingleCOP1:
-          result = maxEEFloatRaw(fsBits, ftBits);
-          break;
-        case EEOperation::MinimumSingleCOP1:
-          result = minEEFloatRaw(fsBits, ftBits);
-          break;
         case EEOperation::AddSingleCOP1:
           result = addFPRaw(fsBits, ftBits);
           break;
@@ -1004,6 +996,8 @@ bool EECore::executeInstruction(
     }
     case EEOperation::AbsoluteSingleCOP1:
     case EEOperation::NegateSingleCOP1:
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     {
@@ -2922,7 +2916,7 @@ void EECore::drainInFlightCOP1()
         oldest->capturedFS =
           floatingPointRegisters[
             oldest->instruction.destinationRegister];
-        if (isCOP1AddSubtractOperation(
+        if (!isCOP1UnaryOperation(
               oldest->instruction.operation))
         {
           oldest->capturedFT =
@@ -3076,7 +3070,7 @@ bool EECore::advanceInFlightCOP1Operation(
           scoreboardFPRValueForT(
             operation->instruction.destinationRegister,
             operation->programOrder);
-        if (isCOP1AddSubtractOperation(
+        if (!isCOP1UnaryOperation(
               operation->instruction.operation))
         {
           operation->capturedFT =
@@ -3133,6 +3127,22 @@ void EECore::computeInFlightCOP1StagedALU(
       operation->rawResult =
         operation->capturedFS ^ UINT32_C(0x80000000);
       return;
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+    {
+      const EEFloatResult result =
+        operation->instruction.operation ==
+          EEOperation::MaximumSingleCOP1
+          ? maxEEFloatRaw(
+              operation->capturedFS,
+              operation->capturedFT)
+          : minEEFloatRaw(
+              operation->capturedFS,
+              operation->capturedFT);
+      operation->rawResult = result.bits;
+      operation->raisedFlags = result.flags;
+      return;
+    }
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     {
@@ -3768,7 +3778,9 @@ bool EECore::isCOP1StagedALUOperation(
   EEOperation operation)
 {
   return isCOP1UnaryOperation(operation) ||
-    isCOP1AddSubtractOperation(operation);
+    isCOP1AddSubtractOperation(operation) ||
+    operation == EEOperation::MaximumSingleCOP1 ||
+    operation == EEOperation::MinimumSingleCOP1;
 }
 
 bool EECore::isCOP1ManagedPipelineOperation(

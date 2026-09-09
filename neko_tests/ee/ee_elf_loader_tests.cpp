@@ -164,7 +164,7 @@ namespace
       (UINT32_C(0x11) << 26) |
         (UINT32_C(0x10) << 21) |
         (static_cast<std::uint32_t>(
-          function == 0x00 || function == 0x01 ? 3 : 0) << 16) |
+        function == 0x05 || function == 0x07 ? 0 : 3) << 16) |
         (UINT32_C(2) << 11) |
         (UINT32_C(4) << 6) |
         function);
@@ -725,6 +725,8 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
     const DrainVector vectors[] = {
       {0x05, 0},
       {0x07, UINT32_C(0x80000000)},
+      {0x28, 0},
+      {0x29, 0},
       {0x00, 0},
       {0x01, 0}
     };

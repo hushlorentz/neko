@@ -861,7 +861,7 @@ accumulator or condition-result contract:
 
 - [x] Migrate `ABS.S` and `NEG.S` through their documented stages, preserving
       signed-zero and raw extended-finite behavior
-- [ ] Migrate `MAX.S` and `MIN.S`, including selected-operand normalization and
+- [x] Migrate `MAX.S` and `MIN.S`, including selected-operand normalization and
       ordered FCR31 overflow/underflow updates
 - [ ] Cover cross-family forwarding, same-register read/write aliases, WAW
       ordering, traces, hashes, exceptions, and save-state continuation

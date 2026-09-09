@@ -2107,6 +2107,22 @@ void NekoSaveStateCodec::readEECore(
               expectedResult =
                 operation.capturedFS ^ UINT32_C(0x80000000);
               break;
+            case EEOperation::MaximumSingleCOP1:
+            case EEOperation::MinimumSingleCOP1:
+            {
+              const EEFloatResult result =
+                operation.instruction.operation ==
+                  EEOperation::MaximumSingleCOP1
+                  ? maxEEFloatRaw(
+                      operation.capturedFS,
+                      operation.capturedFT)
+                  : minEEFloatRaw(
+                      operation.capturedFS,
+                      operation.capturedFT);
+              expectedResult = result.bits;
+              expectedFlags = result.flags;
+              break;
+            }
             case EEOperation::AddSingleCOP1:
             case EEOperation::SubtractSingleCOP1:
             {
