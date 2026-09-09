@@ -664,8 +664,9 @@ than delegating architectural results to host floating-point defaults.
       underflow, and flag behavior
 - [x] Implement `ADDA.S` and `SUBA.S` with ACC as the architectural
       destination
-- [x] Lock the scalar scheduler's back-to-back FPR RAW forwarding, FPR and ACC
-      WAW ordering, and independence between FPR and ACC destinations
+- [x] Lock the original immediate scalar scheduler's back-to-back FPR RAW
+      forwarding, FPR and ACC WAW ordering, and independence between FPR and
+      ACC destinations as the pre-pipeline baseline
 - [x] Add dependent, independent, exceptional, and save-resume timing tests
 
 ### Multiplication and Multiply-Accumulate
@@ -841,7 +842,7 @@ foundation before enabling COP1 instruction pairs.
 Prove one complete Operate path before scaling the stage machinery across the
 remaining families:
 
-- [ ] Move `ADD.S` and `SUB.S` through `1T` operand selection, immutable `2T`
+- [x] Move `ADD.S` and `SUB.S` through `1T` operand selection, immutable `2T`
       capture, their documented `Y/Z` work, `1S` result availability, and `2S`
       architectural writeback
 - [ ] Add generic per-cycle C1 stage advancement and program-ordered `2S`

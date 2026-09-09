@@ -11,6 +11,7 @@ namespace
 {
   constexpr std::uint8_t COP1_DIV_SQRT_LATENCY = 8;
   constexpr std::uint8_t COP1_RSQRT_LATENCY = 14;
+  constexpr std::uint8_t COP1_ADD_SUB_PIPELINE_CYCLES = 5;
 
   std::uint32_t cop1TransferInstruction(
     std::uint8_t source,
@@ -1902,6 +1903,7 @@ TEST_CASE("EE COP1 add and subtract produce exact raw results")
         2,
         4,
         3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(core.floatingPointRegister(2) == vector.fs);
     REQUIRE(core.floatingPointRegister(3) == vector.ft);
@@ -1909,6 +1911,36 @@ TEST_CASE("EE COP1 add and subtract produce exact raw results")
       core.floatingPointRegister(4) ==
       vector.expected);
   }
+}
+
+TEST_CASE("EE COP1 add captures operands in T and writes in S")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  core.setFloatingPointRegister(2, UINT32_C(0x40400000));
+  system.clockMasterCycle();
+  core.setFloatingPointRegister(2, UINT32_C(0x41200000));
+
+  system.runMasterCycles(3);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.clockMasterCycle();
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40a00000));
+  REQUIRE(
+    core.floatingPointRegister(2) ==
+    UINT32_C(0x41200000));
 }
 
 TEST_CASE("EE COP1 accumulator add and subtract write only ACC")
@@ -1973,6 +2005,7 @@ TEST_CASE("EE COP1 add and subtract support in-place writes")
     runInstruction(
       &system,
       cop1SingleInstruction(0x00, 2, 2, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(2) ==
@@ -1989,6 +2022,7 @@ TEST_CASE("EE COP1 add and subtract support in-place writes")
     runInstruction(
       &system,
       cop1SingleInstruction(0x01, 2, 3, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(3) ==
@@ -2077,6 +2111,7 @@ TEST_CASE("EE COP1 add and subtract update overflow and underflow flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x00, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -2099,6 +2134,7 @@ TEST_CASE("EE COP1 add and subtract update overflow and underflow flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x00, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -2120,6 +2156,7 @@ TEST_CASE("EE COP1 add and subtract update overflow and underflow flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x01, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -2964,6 +3001,7 @@ TEST_CASE(
     std::uint32_t ft;
     std::uint32_t expected;
     bool interlocksFollowingMove;
+    bool staged;
   };
   const VisibilityVector vectors[] = {
     {
@@ -2971,13 +3009,15 @@ TEST_CASE(
       UINT32_C(0xffc12345),
       0,
       UINT32_C(0x7fc12345),
-      true
+      true,
+      false
     },
     {
       cop1SingleInstruction(0x06, 2, 4),
       UINT32_C(0x89abcdef),
       0,
       UINT32_C(0x89abcdef),
+      false,
       false
     },
     {
@@ -2985,27 +3025,31 @@ TEST_CASE(
       UINT32_C(0x7fc12345),
       0,
       UINT32_C(0xffc12345),
-      true
+      true,
+      false
     },
     {
       cop1SingleInstruction(0x28, 2, 4, 3),
       UINT32_C(0x3f800000),
       UINT32_C(0x40000000),
       UINT32_C(0x40000000),
-      true
+      true,
+      false
     },
     {
       cop1SingleInstruction(0x29, 2, 4, 3),
       UINT32_C(0x3f800000),
       UINT32_C(0x40000000),
       UINT32_C(0x3f800000),
-      true
+      true,
+      false
     },
     {
       cop1SingleInstruction(0x00, 2, 4, 3),
       UINT32_C(0x3fc00000),
       UINT32_C(0x40100000),
       UINT32_C(0x40700000),
+      true,
       true
     },
     {
@@ -3013,6 +3057,7 @@ TEST_CASE(
       UINT32_C(0x40b00000),
       UINT32_C(0x3fc00000),
       UINT32_C(0x40800000),
+      true,
       true
     },
     {
@@ -3020,14 +3065,16 @@ TEST_CASE(
       UINT32_C(0x01000001),
       0,
       UINT32_C(0x4b800000),
-      true
+      true,
+      false
     },
     {
       cop1SingleInstruction(0x24, 2, 4),
       UINT32_C(0x3ff33333),
       0,
       UINT32_C(0x00000001),
-      true
+      true,
+      false
     }
   };
 
@@ -3052,16 +3099,27 @@ TEST_CASE(
     REQUIRE(core.programCounter() == 4);
     REQUIRE(
       core.floatingPointRegister(4) ==
-      vector.expected);
+      (vector.staged ? 0 : vector.expected));
     REQUIRE(core.floatingPointRegister(5) == 0);
 
-    system.clockMasterCycle();
-
-    if (vector.interlocksFollowingMove)
+    if (vector.staged)
     {
+      system.runMasterCycles(4);
       REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.floatingPointRegister(4) == 0);
       REQUIRE(core.floatingPointRegister(5) == 0);
       system.clockMasterCycle();
+    }
+    else
+    {
+      system.clockMasterCycle();
+
+      if (vector.interlocksFollowingMove)
+      {
+        REQUIRE(core.programCounter() == 4);
+        REQUIRE(core.floatingPointRegister(5) == 0);
+        system.clockMasterCycle();
+      }
     }
 
     REQUIRE(core.programCounter() == 8);
@@ -3079,7 +3137,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "EE COP1 add and subtract forward back-to-back FPR dependencies")
+  "EE COP1 add and subtract interlock pre-S FPR dependencies")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -3096,14 +3154,25 @@ TEST_CASE(
   system.clockMasterCycle();
 
   REQUIRE(core.programCounter() == 4);
-  REQUIRE(
-    core.floatingPointRegister(4) ==
-    UINT32_C(0x40400000));
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.floatingPointRegister(4) == 0);
   REQUIRE(core.floatingPointRegister(5) == 0);
 
   system.clockMasterCycle();
 
   REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
   REQUIRE(
     core.floatingPointRegister(5) ==
     UINT32_C(0x40000000));
@@ -3353,6 +3422,10 @@ TEST_CASE(
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x40400000));
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
     REQUIRE(
       core.floatingPointRegister(5) ==
       UINT32_C(0x40800000));
@@ -3508,6 +3581,10 @@ TEST_CASE(
   system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
 
   REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
   REQUIRE(
     core.floatingPointRegister(5) ==
     UINT32_C(0x40800000));
@@ -3582,6 +3659,12 @@ TEST_CASE(
     original.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
     restored.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
 
+    REQUIRE(originalCore.floatingPointRegister(5) == 0);
+    REQUIRE(restored.eeCore().floatingPointRegister(5) == 0);
+
+    original.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+    restored.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
     REQUIRE(
       originalCore.floatingPointRegister(5) ==
       UINT32_C(0x40800000));
@@ -3615,6 +3698,10 @@ TEST_CASE(
     core.startExecution(core.programCounter());
     system.eeBus().write32(4, 0);
     system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(5) ==
@@ -4295,6 +4382,10 @@ TEST_CASE("EE COP1 operate resource interlocks a following move")
     system.runMasterCycles(2);
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.floatingPointRegister(6) == 0);
+
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
     REQUIRE(
       core.floatingPointRegister(6) ==
       UINT32_C(0x40d00000));
@@ -4383,13 +4474,22 @@ TEST_CASE(
 
   system.clockMasterCycle();
 
-  REQUIRE(
-    core.floatingPointRegister(4) ==
-    UINT32_C(0x40400000));
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.floatingPointRegister(4) == 0);
 
   system.clockMasterCycle();
 
   REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
   REQUIRE(
     core.floatingPointRegister(4) ==
     UINT32_C(0x40800000));
@@ -4426,7 +4526,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "EE COP1 FPR and accumulator destinations remain independent")
+  "EE COP1 FPR and accumulator results preserve FCR31 order")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -4443,9 +4543,15 @@ TEST_CASE(
 
   system.clockMasterCycle();
 
+  REQUIRE(core.floatingPointRegister(4) == 0);
   REQUIRE(
-    core.floatingPointRegister(4) ==
-    UINT32_C(0x40400000));
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x41100000));
+
+  system.runMasterCycles(4);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.floatingPointRegister(4) == 0);
   REQUIRE(
     core.floatingPointAccumulator() ==
     UINT32_C(0x41100000));
@@ -4462,7 +4568,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "EE COP1 independent addition and subtraction retire every cycle")
+  "EE COP1 addition and subtraction serialize FCR31 writeback")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -4482,15 +4588,27 @@ TEST_CASE(
 
   REQUIRE(core.elapsedCycles() == 1);
   REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(core.elapsedCycles() == 5);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 6);
+  REQUIRE(core.programCounter() == 8);
   REQUIRE(
     core.floatingPointRegister(4) ==
     UINT32_C(0x40400000));
   REQUIRE(core.floatingPointRegister(5) == 0);
 
-  system.clockMasterCycle();
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
-  REQUIRE(core.elapsedCycles() == 2);
-  REQUIRE(core.programCounter() == 8);
   REQUIRE(
     core.floatingPointRegister(5) ==
     UINT32_C(0x40900000));
@@ -4515,28 +4633,25 @@ TEST_CASE(
 
     system.clockMasterCycle();
 
-    REQUIRE(
-      core.floatingPointRegister(4) ==
-      UINT32_C(0x7fffffff));
+    REQUIRE(core.floatingPointRegister(4) == 0);
     REQUIRE(
       core.cop1ControlRegister(31) ==
-      (EECOP1Control::STATUS_FIXED |
-       EECOP1Control::CAUSE_OVERFLOW |
-       EECOP1Control::STICKY_OVERFLOW));
+      EECOP1Control::STATUS_FIXED);
 
-    system.clockMasterCycle();
+    system.runMasterCycles(4);
 
     REQUIRE(core.programCounter() == 4);
     REQUIRE(core.floatingPointRegister(5) == 0);
     REQUIRE(
       core.cop1ControlRegister(31) ==
-      (EECOP1Control::STATUS_FIXED |
-       EECOP1Control::CAUSE_OVERFLOW |
-       EECOP1Control::STICKY_OVERFLOW));
+      EECOP1Control::STATUS_FIXED);
 
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
     REQUIRE(
       core.floatingPointRegister(5) ==
       UINT32_C(0x7fffffff));
@@ -4742,8 +4857,28 @@ TEST_CASE(
     restored.loadState(original.saveState());
     originalCore.startExecution(4);
     restored.eeCore().startExecution(4);
+    original.runMasterCycles(4);
+    restored.runMasterCycles(4);
+
+    REQUIRE(originalCore.programCounter() == 4);
+    REQUIRE(restored.eeCore().programCounter() == 4);
+    REQUIRE(originalCore.floatingPointRegister(4) == 0);
+    REQUIRE(restored.eeCore().floatingPointRegister(4) == 0);
+
     original.clockMasterCycle();
     restored.clockMasterCycle();
+
+    REQUIRE(originalCore.programCounter() == 8);
+    REQUIRE(restored.eeCore().programCounter() == 8);
+    REQUIRE(
+      originalCore.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+    REQUIRE(
+      restored.eeCore().floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+
+    original.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+    restored.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       originalCore.floatingPointRegister(5) ==

@@ -61,6 +61,8 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1071;
   constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET = 1073;
+  constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET = 1078;
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET = 1021;
@@ -540,7 +542,7 @@ TEST_CASE("EE COP1 stage and program order participate in state hashes")
   prepareInFlightSystem(&source);
   source.eeCore().reset();
   const std::uint32_t producer =
-    cop1SingleInstruction(0x00, 1, 3, 2);
+    cop1SingleInstruction(0x06, 1, 3, 0);
 
   std::vector<std::uint8_t> stageY =
     withInFlightCOP1Result(
@@ -603,7 +605,7 @@ TEST_CASE("EE COP1 scoreboard tracks FPR result visibility")
       source.eeCore().startExecution(0);
       return withInFlightCOP1Result(
         &source,
-        cop1SingleInstruction(0x00, 1, 3, 2),
+        cop1SingleInstruction(0x06, 1, 3, 0),
         stage,
         COP1_DESTINATION_FPR,
         3,
@@ -735,7 +737,7 @@ TEST_CASE("EE COP1 scoreboard tracks FCR31 result visibility")
       std::vector<std::uint8_t> state =
         withInFlightCOP1Result(
           &source,
-          cop1SingleInstruction(0x00, 1, 3, 2),
+          cop1SingleInstruction(0x02, 1, 3, 2),
           stage,
           COP1_DESTINATION_FPR |
             COP1_DESTINATION_FCR31,
@@ -1710,6 +1712,54 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
     invalid[SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET] =
       static_cast<std::uint8_t>(
         EEOperation::DivideSingleCOP1);
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+}
+
+TEST_CASE("Invalid staged COP1 add states are rejected")
+{
+  NekoSystem source;
+  source.eeCore().setFloatingPointRegister(
+    2,
+    UINT32_C(0x3f800000));
+  source.eeCore().setFloatingPointRegister(
+    3,
+    UINT32_C(0x40000000));
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(5);
+  source.eeCore().haltExecution();
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+
+  SECTION("The transient S phases cannot be restored")
+  {
+    for (const std::uint8_t stage : {
+           COP1_STAGE_S1,
+           COP1_STAGE_S2})
+    {
+      std::vector<std::uint8_t> invalid = source.saveState();
+      invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+        stage;
+      updateChecksum(&invalid);
+
+      REQUIRE_THROWS(destination.loadState(invalid));
+      REQUIRE(destination.saveState() == before);
+    }
+  }
+
+  SECTION("A Z-stage result must match its captured operands")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+      1;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));

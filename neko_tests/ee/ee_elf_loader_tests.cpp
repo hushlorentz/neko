@@ -154,6 +154,22 @@ namespace
     return image;
   }
 
+  std::vector<std::uint8_t> returningCOP1AddSubtractELF(
+    std::uint8_t function)
+  {
+    std::vector<std::uint8_t> image = returningELF(0);
+    writeU32(
+      &image,
+      0x108,
+      (UINT32_C(0x11) << 26) |
+        (UINT32_C(0x10) << 21) |
+        (UINT32_C(3) << 16) |
+        (UINT32_C(2) << 11) |
+        (UINT32_C(4) << 6) |
+        function);
+    return image;
+  }
+
   std::vector<std::uint8_t> returningCOP1WorkELF()
   {
     std::vector<std::uint8_t> image = returningELF(0);
@@ -695,6 +711,37 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
       REQUIRE(
         system.eeCore().cop1ControlRegister(31) ==
         vector.expectedStatus);
+    }
+  }
+
+  SECTION("Return drains staged COP1 add and subtract work")
+  {
+    struct DrainVector
+    {
+      std::uint8_t function;
+      std::uint32_t expected;
+    };
+    const DrainVector vectors[] = {
+      {0x00, 0},
+      {0x01, 0}
+    };
+
+    for (const DrainVector &vector : vectors)
+    {
+      NekoSystem system;
+      const EEGuestExecutionResult result =
+        system.runELF(
+          returningCOP1AddSubtractELF(vector.function),
+          3);
+
+      REQUIRE(result.outcome == EEGuestOutcome::Completed);
+      REQUIRE(result.execution.instructions == 3);
+      REQUIRE(
+        system.eeCore().floatingPointRegister(4) ==
+        vector.expected);
+      REQUIRE(
+        system.eeCore().cop1ControlRegister(31) ==
+        EECOP1Control::STATUS_FIXED);
     }
   }
 

@@ -2012,6 +2012,11 @@ void NekoSaveStateCodec::readEECore(
       const bool divider =
         EECore::isCOP1DividerOperation(
           operation.instruction.operation);
+      const bool addSubtract =
+        operation.instruction.operation ==
+          EEOperation::AddSingleCOP1 ||
+        operation.instruction.operation ==
+          EEOperation::SubtractSingleCOP1;
       require(
         load || divider || operation.remainingCycles == 0,
         "EE COP1 operation has an unexpected countdown");
@@ -2052,6 +2057,51 @@ void NekoSaveStateCodec::readEECore(
              operation.raisedFlags == FP_FLAG_D_BIT) &&
             operation.raisedStickyFlags == 0,
           "EE in-flight COP1 divider state is inconsistent");
+      }
+      if (addSubtract)
+      {
+        const bool operandsCaptured =
+          operation.stage != EECore::COP1PipelineStage::R;
+        const bool resultComputed =
+          operation.stage == EECore::COP1PipelineStage::Z;
+        EEFloatResult expectedResult;
+        if (resultComputed)
+        {
+          expectedResult =
+            operation.instruction.operation ==
+              EEOperation::AddSingleCOP1
+              ? addFPRaw(
+                  operation.capturedFS,
+                  operation.capturedFT)
+              : subFPRaw(
+                  operation.capturedFS,
+                  operation.capturedFT);
+        }
+        require(
+          operation.remainingCycles == 0 &&
+            operation.stage <= EECore::COP1PipelineStage::Z &&
+            operation.destination.mask ==
+              (EECore::COP1_DESTINATION_FPR |
+               EECore::COP1_DESTINATION_FCR31) &&
+            operation.destination.fprRegister ==
+              operation.instruction.shiftAmount &&
+            operation.capturedAccumulator == 0 &&
+            operation.capturedGPR == 0 &&
+            operation.affectedFlags ==
+              (FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW) &&
+            operation.raisedStickyFlags == 0 &&
+            !operation.conditionResult &&
+            (operandsCaptured ||
+             (operation.capturedFS == 0 &&
+              operation.capturedFT == 0 &&
+              operation.capturedControl == 0)) &&
+            (resultComputed
+              ? (operation.rawResult == expectedResult.bits &&
+                 operation.raisedFlags ==
+                   expectedResult.flags)
+              : (operation.rawResult == 0 &&
+                 operation.raisedFlags == 0)),
+          "EE in-flight COP1 add/subtract state is inconsistent");
       }
     }
     else

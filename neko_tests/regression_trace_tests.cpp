@@ -821,6 +821,75 @@ TEST_CASE(
     NekoTraceEventType::StateSnapshot);
 }
 
+TEST_CASE("EE COP1 add traces its manual-backed stage progression")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(6);
+
+  std::vector<NekoTraceEvent> pipelineEvents;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.type ==
+          NekoTraceEventType::COP1StageTransition ||
+        event.type == NekoTraceEventType::COP1Retired)
+    {
+      pipelineEvents.push_back(event);
+    }
+  }
+  REQUIRE(pipelineEvents.size() == 7);
+  const std::uint64_t stages[] = {
+    NekoEETraceCOP1Stage::NONE |
+      (NekoEETraceCOP1Stage::R <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::R |
+      (NekoEETraceCOP1Stage::T <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::T |
+      (NekoEETraceCOP1Stage::X <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::X |
+      (NekoEETraceCOP1Stage::Y <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::Y |
+      (NekoEETraceCOP1Stage::Z <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::Z |
+      (NekoEETraceCOP1Stage::S1 <<
+       NekoEETraceCOP1Stage::TO_SHIFT)
+  };
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    REQUIRE(
+      pipelineEvents[index].type ==
+      NekoTraceEventType::COP1StageTransition);
+    REQUIRE(pipelineEvents[index].masterCycle == index + 1);
+    REQUIRE(pipelineEvents[index].value0 == 1);
+    REQUIRE(pipelineEvents[index].value2 == stages[index]);
+  }
+  REQUIRE(
+    pipelineEvents[6].type ==
+    NekoTraceEventType::COP1Retired);
+  REQUIRE(pipelineEvents[6].masterCycle == 6);
+  REQUIRE(pipelineEvents[6].value0 == 1);
+  REQUIRE(
+    pipelineEvents[6].value2 ==
+    (UINT64_C(0x40400000) |
+     ((NekoEETraceCOP1Result::DESTINATION_FPR |
+       NekoEETraceCOP1Result::DESTINATION_FCR31) <<
+      NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
+     (UINT64_C(4) <<
+      NekoEETraceCOP1Result::FPR_REGISTER_SHIFT)));
+}
+
 TEST_CASE("EE C1 completion traces survive save-state restore")
 {
   NekoSystem original;

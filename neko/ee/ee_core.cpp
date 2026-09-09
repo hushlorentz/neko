@@ -969,8 +969,6 @@ bool EECore::executeInstruction(
     }
     case EEOperation::MaximumSingleCOP1:
     case EEOperation::MinimumSingleCOP1:
-    case EEOperation::AddSingleCOP1:
-    case EEOperation::SubtractSingleCOP1:
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::DivideSingleCOP1:
     {
@@ -1019,6 +1017,28 @@ bool EECore::executeInstruction(
           FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
           result.flags);
       }
+      return true;
+    }
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    {
+      if (!requireCOP1Usable(address, instruction.raw))
+      {
+        return false;
+      }
+      InFlightCOP1Operation &operation =
+        allocateInFlightCOP1(instruction, address);
+      operation.destination.mask =
+        COP1_DESTINATION_FPR |
+        COP1_DESTINATION_FCR31;
+      operation.destination.fprRegister =
+        instruction.shiftAmount;
+      operation.affectedFlags =
+        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW;
+      recordCOP1StageTransition(
+        operation,
+        UINT8_MAX,
+        COP1PipelineStage::R);
       return true;
     }
     case EEOperation::AddSingleToAccumulatorCOP1:
@@ -2880,7 +2900,11 @@ void EECore::drainInFlightCOP1()
     if (operation.instruction.operation !=
           EEOperation::LoadWordToCOP1 &&
         !isCOP1DividerOperation(
-          operation.instruction.operation))
+          operation.instruction.operation) &&
+        operation.instruction.operation !=
+          EEOperation::AddSingleCOP1 &&
+        operation.instruction.operation !=
+          EEOperation::SubtractSingleCOP1)
     {
       throw std::logic_error(
         "ELF return cannot drain an unsupported COP1 operation.");
@@ -2907,6 +2931,38 @@ void EECore::drainInFlightCOP1()
     {
       break;
     }
+    if (oldest->instruction.operation ==
+          EEOperation::AddSingleCOP1 ||
+        oldest->instruction.operation ==
+          EEOperation::SubtractSingleCOP1)
+    {
+      if (oldest->stage == COP1PipelineStage::R)
+      {
+        oldest->capturedFS =
+          floatingPointRegisters[
+            oldest->instruction.destinationRegister];
+        oldest->capturedFT =
+          floatingPointRegisters[
+            oldest->instruction.targetRegister];
+        oldest->capturedControl =
+          cop1ControlRegister(
+            EECOP1Control::STATUS_REGISTER);
+      }
+      if (oldest->stage < COP1PipelineStage::Z)
+      {
+        const EEFloatResult result =
+          oldest->instruction.operation ==
+            EEOperation::AddSingleCOP1
+            ? addFPRaw(
+                oldest->capturedFS,
+                oldest->capturedFT)
+            : subFPRaw(
+                oldest->capturedFS,
+                oldest->capturedFT);
+        oldest->rawResult = result.bits;
+        oldest->raisedFlags = result.flags;
+      }
+    }
     commitInFlightCOP1(oldest, false);
   }
   if (drainedDivider)
@@ -2923,6 +2979,8 @@ void EECore::advancePendingCOP1(
   *completedLoad = false;
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
     readyToCommit = {};
+  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
+    transitioned = {};
   std::array<COP1PipelineStage, COP1_IN_FLIGHT_CAPACITY>
     previousStages = {};
   if (cop1DividerInitiationCycles != 0)
@@ -2940,22 +2998,81 @@ void EECore::advancePendingCOP1(
   {
     InFlightCOP1Operation &operation =
       inFlightCOP1Operations[index];
-    if (!operation.active ||
-        operation.remainingCycles == 0)
+    if (!operation.active)
     {
       continue;
     }
-    --operation.remainingCycles;
-    if (operation.remainingCycles == 0)
+    if (operation.instruction.operation ==
+          EEOperation::AddSingleCOP1 ||
+        operation.instruction.operation ==
+          EEOperation::SubtractSingleCOP1)
     {
       previousStages[index] = operation.stage;
-      operation.stage = COP1PipelineStage::S1;
-      readyToCommit[index] = true;
+      switch (operation.stage)
+      {
+        case COP1PipelineStage::R:
+          operation.capturedFS =
+            floatingPointRegisters[
+              operation.instruction.destinationRegister];
+          operation.capturedFT =
+            floatingPointRegisters[
+              operation.instruction.targetRegister];
+          operation.capturedControl =
+            cop1ControlRegister(
+              EECOP1Control::STATUS_REGISTER);
+          operation.stage = COP1PipelineStage::T;
+          break;
+        case COP1PipelineStage::T:
+          operation.stage = COP1PipelineStage::X;
+          break;
+        case COP1PipelineStage::X:
+          operation.stage = COP1PipelineStage::Y;
+          break;
+        case COP1PipelineStage::Y:
+        {
+          const EEFloatResult result =
+            operation.instruction.operation ==
+              EEOperation::AddSingleCOP1
+              ? addFPRaw(
+                  operation.capturedFS,
+                  operation.capturedFT)
+              : subFPRaw(
+                  operation.capturedFS,
+                  operation.capturedFT);
+          operation.rawResult = result.bits;
+          operation.raisedFlags = result.flags;
+          operation.stage = COP1PipelineStage::Z;
+          break;
+        }
+        case COP1PipelineStage::Z:
+          operation.stage = COP1PipelineStage::S1;
+          readyToCommit[index] = true;
+          break;
+        case COP1PipelineStage::S1:
+        case COP1PipelineStage::S2:
+          continue;
+      }
+      transitioned[index] = true;
+    }
+    else
+    {
+      if (operation.remainingCycles == 0)
+      {
+        continue;
+      }
+      --operation.remainingCycles;
+      if (operation.remainingCycles == 0)
+      {
+        previousStages[index] = operation.stage;
+        operation.stage = COP1PipelineStage::S1;
+        transitioned[index] = true;
+        readyToCommit[index] = true;
+      }
     }
   }
 
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
-    transitionsToRecord = readyToCommit;
+    transitionsToRecord = transitioned;
   while (true)
   {
     const InFlightCOP1Operation *transition = nullptr;
@@ -2987,7 +3104,7 @@ void EECore::advancePendingCOP1(
       *transition,
       static_cast<std::uint8_t>(
         previousStages[transitionIndex]),
-      COP1PipelineStage::S1);
+      transition->stage);
   }
 
   while (true)
