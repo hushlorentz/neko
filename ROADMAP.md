@@ -851,7 +851,7 @@ remaining families:
       while interlocking pre-`1S` reads and preserving WAW order
 - [x] Re-baseline add/subtract issue, dependency, raw-result, flag, hash, trace,
       malformed-save-state, halt/resume, exception, and save/restore coverage
-- [ ] Complete an independent review of the representative staged path before
+- [x] Complete an independent review of the representative staged path before
       migrating another operation family
 
 ### C1 Unary and Min/Max Migration

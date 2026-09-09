@@ -1969,11 +1969,9 @@ void NekoSaveStateCodec::readEECore(
         (operation.instructionAddress & 3) == 0,
         "EE COP1 instruction address is invalid");
       require(
-        EECore::isCOP1MoveOperation(
-          operation.instruction.operation) ||
-          EECore::isCOP1OperateOperation(
-            operation.instruction.operation),
-        "EE in-flight operation is not a C1 instruction");
+        EECore::isCOP1ManagedPipelineOperation(
+          operation.instruction.operation),
+        "EE in-flight operation is not managed by the C1 pipeline");
       require(
         (operation.destination.mask &
          EECore::COP1_DESTINATION_FPR) != 0 ||
@@ -2048,6 +2046,26 @@ void NekoSaveStateCodec::readEECore(
         const EECore::COP1DividerTiming timing =
           EECore::cop1DividerTiming(
             operation.instruction.operation);
+        EEFloatResult expectedResult;
+        switch (operation.instruction.operation)
+        {
+          case EEOperation::DivideSingleCOP1:
+            expectedResult =
+              divEEFloatRaw(
+                operation.capturedFS,
+                operation.capturedFT);
+            break;
+          case EEOperation::SquareRootSingleCOP1:
+            expectedResult =
+              sqrtEEFloatRaw(operation.capturedFT);
+            break;
+          default:
+            expectedResult =
+              rsqrtEEFloatRaw(
+                operation.capturedFS,
+                operation.capturedFT);
+            break;
+        }
         const bool waitingForResult =
           operation.stage ==
             EECore::COP1PipelineStage::R &&
@@ -2064,11 +2082,10 @@ void NekoSaveStateCodec::readEECore(
                EECore::COP1_DESTINATION_FCR31) &&
             operation.destination.fprRegister ==
               operation.instruction.shiftAmount &&
+            operation.rawResult == expectedResult.bits &&
             operation.affectedFlags ==
               (FP_FLAG_I_BIT | FP_FLAG_D_BIT) &&
-            (operation.raisedFlags == 0 ||
-             operation.raisedFlags == FP_FLAG_I_BIT ||
-             operation.raisedFlags == FP_FLAG_D_BIT) &&
+            operation.raisedFlags == expectedResult.flags &&
             operation.raisedStickyFlags == 0,
           "EE in-flight COP1 divider state is inconsistent");
       }
