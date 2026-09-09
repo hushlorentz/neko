@@ -662,6 +662,44 @@ TEST_CASE("EE COP1 scoreboard tracks FPR result visibility")
   }
 }
 
+TEST_CASE("Synthetic COP1 scoreboard state does not block retirement")
+{
+  NekoSystem source;
+  prepareInFlightSystem(&source);
+  source.eeCore().reset();
+  source.eeCore().setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  source.eeCore().setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    source.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  source.eeBus().write32(
+    0,
+    (UINT32_C(0x31) << 26) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(5) << 16));
+  source.eeCore().startExecution(0);
+
+  NekoSystem restored;
+  restored.loadState(
+    withInFlightCOP1Result(
+      &source,
+      cop1SingleInstruction(0x06, 1, 3, 0),
+      COP1_STAGE_S1,
+      COP1_DESTINATION_FPR,
+      3,
+      UINT32_C(0x40a00000)));
+
+  restored.eeCore().clock();
+  restored.eeCore().clock();
+
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(5) ==
+    UINT32_C(0x12345678));
+}
+
 TEST_CASE("EE COP1 scoreboard tracks ACC result visibility")
 {
   const auto makeState =
@@ -1765,4 +1803,44 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
     REQUIRE_THROWS(destination.loadState(invalid));
     REQUIRE(destination.saveState() == before);
   }
+}
+
+TEST_CASE("Blocked COP1 1S retirement survives save-state restore")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, UINT32_C(0xdeadbeef));
+  REQUIRE(
+    original.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  original.eeBus().write32(
+    4,
+    (UINT32_C(0x31) << 26) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(5) << 16));
+  core.startExecution(0);
+  original.runMasterCycles(3);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+
+  original.runMasterCycles(3);
+  restored.runMasterCycles(3);
+
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(5) ==
+    UINT32_C(0x12345678));
+  REQUIRE(restored.saveState() == original.saveState());
 }

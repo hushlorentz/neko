@@ -890,6 +890,59 @@ TEST_CASE("EE COP1 add traces its manual-backed stage progression")
       NekoEETraceCOP1Result::FPR_REGISTER_SHIFT)));
 }
 
+TEST_CASE("EE COP1 overlapping ALU results retire in program order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
+  core.setFloatingPointRegister(7, UINT32_C(0x3f000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x01, 6, 5, 7));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(7);
+
+  std::vector<NekoTraceEvent> cycleSix;
+  std::vector<NekoTraceEvent> retirements;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.masterCycle == 6)
+    {
+       cycleSix.push_back(event);
+    }
+    if (event.type == NekoTraceEventType::COP1Retired)
+    {
+       retirements.push_back(event);
+    }
+  }
+  REQUIRE(cycleSix.size() == 5);
+  REQUIRE(
+    cycleSix[0].type ==
+    NekoTraceEventType::COP1StageTransition);
+  REQUIRE(cycleSix[0].value0 == 1);
+  REQUIRE(
+    cycleSix[1].type ==
+    NekoTraceEventType::COP1StageTransition);
+  REQUIRE(cycleSix[1].value0 == 2);
+  REQUIRE(
+    cycleSix[2].type ==
+    NekoTraceEventType::COP1Retired);
+  REQUIRE(cycleSix[2].value0 == 1);
+
+  REQUIRE(retirements.size() == 2);
+  REQUIRE(retirements[0].masterCycle == 6);
+  REQUIRE(retirements[0].value0 == 1);
+  REQUIRE(retirements[1].masterCycle == 7);
+  REQUIRE(retirements[1].value0 == 2);
+}
+
 TEST_CASE("EE C1 completion traces survive save-state restore")
 {
   NekoSystem original;

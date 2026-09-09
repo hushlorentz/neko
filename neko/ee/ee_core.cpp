@@ -536,11 +536,8 @@ void EECore::clock()
   }
 
   ++cycles;
-  std::uint8_t completedCOP1LoadRegister = 0;
-  bool completedCOP1Load = false;
-  advancePendingCOP1(
-    &completedCOP1LoadRegister,
-    &completedCOP1Load);
+  std::uint32_t completedCOP1LoadRegisters = 0;
+  advancePendingCOP1(&completedCOP1LoadRegisters);
   if (interruptDeliverable())
   {
     enterInterruptException();
@@ -635,22 +632,28 @@ void EECore::clock()
     pc = instructionAddress;
     return;
   }
-  const COP1Dependency fprDependency =
-    completedCOP1Load ?
-      instructionFPRDependency(
-        decoded,
-        completedCOP1LoadRegister) :
-      COP1Dependency::None;
-  if (fprDependency != COP1Dependency::None)
+  for (std::uint8_t registerIndex = 0;
+       registerIndex < FLOATING_POINT_REGISTER_COUNT;
+       ++registerIndex)
   {
-    recordCycleTrace(
-      CycleTraceKind::COP1LoadInterlock,
-      instructionAddress,
-      instructionValue,
-      completedCOP1LoadRegister,
-      static_cast<std::uint8_t>(fprDependency));
-    pc = instructionAddress;
-    return;
+    if ((completedCOP1LoadRegisters &
+         (UINT32_C(1) << registerIndex)) == 0)
+    {
+      continue;
+    }
+    const COP1Dependency fprDependency =
+      instructionFPRDependency(decoded, registerIndex);
+    if (fprDependency != COP1Dependency::None)
+    {
+      recordCycleTrace(
+        CycleTraceKind::COP1LoadInterlock,
+        instructionAddress,
+        instructionValue,
+        registerIndex,
+        static_cast<std::uint8_t>(fprDependency));
+      pc = instructionAddress;
+      return;
+    }
   }
   COP1ScoreboardHazard scoreboardHazard;
   if (cop1ScoreboardBlocks(decoded, &scoreboardHazard))
@@ -2931,10 +2934,8 @@ void EECore::drainInFlightCOP1()
     {
       break;
     }
-    if (oldest->instruction.operation ==
-          EEOperation::AddSingleCOP1 ||
-        oldest->instruction.operation ==
-          EEOperation::SubtractSingleCOP1)
+    if (isCOP1AddSubtractOperation(
+          oldest->instruction.operation))
     {
       if (oldest->stage == COP1PipelineStage::R)
       {
@@ -2950,17 +2951,7 @@ void EECore::drainInFlightCOP1()
       }
       if (oldest->stage < COP1PipelineStage::Z)
       {
-        const EEFloatResult result =
-          oldest->instruction.operation ==
-            EEOperation::AddSingleCOP1
-            ? addFPRaw(
-                oldest->capturedFS,
-                oldest->capturedFT)
-            : subFPRaw(
-                oldest->capturedFS,
-                oldest->capturedFT);
-        oldest->rawResult = result.bits;
-        oldest->raisedFlags = result.flags;
+        computeInFlightCOP1AddSubtract(oldest);
       }
     }
     commitInFlightCOP1(oldest, false);
@@ -2973,12 +2964,9 @@ void EECore::drainInFlightCOP1()
 }
 
 void EECore::advancePendingCOP1(
-  std::uint8_t *completedLoadRegister,
-  bool *completedLoad)
+  std::uint32_t *completedLoadRegisters)
 {
-  *completedLoad = false;
-  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
-    readyToCommit = {};
+  *completedLoadRegisters = 0;
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
     transitioned = {};
   std::array<COP1PipelineStage, COP1_IN_FLIGHT_CAPACITY>
@@ -2998,77 +2986,16 @@ void EECore::advancePendingCOP1(
   {
     InFlightCOP1Operation &operation =
       inFlightCOP1Operations[index];
-    if (!operation.active)
+    if (!operation.active ||
+        !isCOP1ManagedPipelineOperation(
+          operation.instruction.operation))
     {
       continue;
     }
-    if (operation.instruction.operation ==
-          EEOperation::AddSingleCOP1 ||
-        operation.instruction.operation ==
-          EEOperation::SubtractSingleCOP1)
-    {
-      previousStages[index] = operation.stage;
-      switch (operation.stage)
-      {
-        case COP1PipelineStage::R:
-          operation.capturedFS =
-            floatingPointRegisters[
-              operation.instruction.destinationRegister];
-          operation.capturedFT =
-            floatingPointRegisters[
-              operation.instruction.targetRegister];
-          operation.capturedControl =
-            cop1ControlRegister(
-              EECOP1Control::STATUS_REGISTER);
-          operation.stage = COP1PipelineStage::T;
-          break;
-        case COP1PipelineStage::T:
-          operation.stage = COP1PipelineStage::X;
-          break;
-        case COP1PipelineStage::X:
-          operation.stage = COP1PipelineStage::Y;
-          break;
-        case COP1PipelineStage::Y:
-        {
-          const EEFloatResult result =
-            operation.instruction.operation ==
-              EEOperation::AddSingleCOP1
-              ? addFPRaw(
-                  operation.capturedFS,
-                  operation.capturedFT)
-              : subFPRaw(
-                  operation.capturedFS,
-                  operation.capturedFT);
-          operation.rawResult = result.bits;
-          operation.raisedFlags = result.flags;
-          operation.stage = COP1PipelineStage::Z;
-          break;
-        }
-        case COP1PipelineStage::Z:
-          operation.stage = COP1PipelineStage::S1;
-          readyToCommit[index] = true;
-          break;
-        case COP1PipelineStage::S1:
-        case COP1PipelineStage::S2:
-          continue;
-      }
-      transitioned[index] = true;
-    }
-    else
-    {
-      if (operation.remainingCycles == 0)
-      {
-        continue;
-      }
-      --operation.remainingCycles;
-      if (operation.remainingCycles == 0)
-      {
-        previousStages[index] = operation.stage;
-        operation.stage = COP1PipelineStage::S1;
-        transitioned[index] = true;
-        readyToCommit[index] = true;
-      }
-    }
+    transitioned[index] =
+      advanceInFlightCOP1Operation(
+        &operation,
+        &previousStages[index]);
   }
 
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
@@ -3109,8 +3036,7 @@ void EECore::advancePendingCOP1(
 
   while (true)
   {
-    InFlightCOP1Operation *readyOperation = nullptr;
-    std::size_t readyIndex = 0;
+    InFlightCOP1Operation *oldestOperation = nullptr;
     for (std::size_t index = 0;
          index < inFlightCOP1Operations.size();
          ++index)
@@ -3118,31 +3044,106 @@ void EECore::advancePendingCOP1(
       InFlightCOP1Operation &operation =
         inFlightCOP1Operations[index];
       if (!operation.active ||
-          !readyToCommit[index])
+          !isCOP1ManagedPipelineOperation(
+            operation.instruction.operation))
       {
         continue;
       }
-      if (readyOperation == nullptr ||
-          operation.programOrder < readyOperation->programOrder)
+      if (oldestOperation == nullptr ||
+          operation.programOrder <
+            oldestOperation->programOrder)
       {
-        readyOperation = &operation;
-        readyIndex = index;
+        oldestOperation = &operation;
       }
     }
-    if (readyOperation == nullptr)
+    if (oldestOperation == nullptr)
     {
       break;
     }
-    readyToCommit[readyIndex] = false;
-    if (readyOperation->instruction.operation ==
+    const bool retirementReady =
+      oldestOperation->stage == COP1PipelineStage::S1;
+    if (!retirementReady)
+    {
+      break;
+    }
+    if (oldestOperation->instruction.operation ==
         EEOperation::LoadWordToCOP1)
     {
-      *completedLoad = true;
-      *completedLoadRegister =
-        readyOperation->destination.fprRegister;
+      *completedLoadRegisters |=
+        UINT32_C(1) <<
+          oldestOperation->destination.fprRegister;
     }
-    commitInFlightCOP1(readyOperation, true);
+    commitInFlightCOP1(oldestOperation, true);
   }
+}
+
+bool EECore::advanceInFlightCOP1Operation(
+  InFlightCOP1Operation *operation,
+  COP1PipelineStage *previousStage)
+{
+  *previousStage = operation->stage;
+  if (isCOP1AddSubtractOperation(
+        operation->instruction.operation))
+  {
+    switch (operation->stage)
+    {
+      case COP1PipelineStage::R:
+        operation->capturedFS =
+          floatingPointRegisters[
+            operation->instruction.destinationRegister];
+        operation->capturedFT =
+          floatingPointRegisters[
+            operation->instruction.targetRegister];
+        operation->capturedControl =
+          cop1ControlRegister(
+            EECOP1Control::STATUS_REGISTER);
+        operation->stage = COP1PipelineStage::T;
+        return true;
+      case COP1PipelineStage::T:
+        operation->stage = COP1PipelineStage::X;
+        return true;
+      case COP1PipelineStage::X:
+        operation->stage = COP1PipelineStage::Y;
+        return true;
+      case COP1PipelineStage::Y:
+        computeInFlightCOP1AddSubtract(operation);
+        operation->stage = COP1PipelineStage::Z;
+        return true;
+      case COP1PipelineStage::Z:
+        operation->stage = COP1PipelineStage::S1;
+        return true;
+      case COP1PipelineStage::S1:
+      case COP1PipelineStage::S2:
+        return false;
+    }
+  }
+  if (operation->remainingCycles == 0)
+  {
+    return false;
+  }
+  --operation->remainingCycles;
+  if (operation->remainingCycles != 0)
+  {
+    return false;
+  }
+  operation->stage = COP1PipelineStage::S1;
+  return true;
+}
+
+void EECore::computeInFlightCOP1AddSubtract(
+  InFlightCOP1Operation *operation)
+{
+  const EEFloatResult result =
+    operation->instruction.operation ==
+      EEOperation::AddSingleCOP1
+      ? addFPRaw(
+          operation->capturedFS,
+          operation->capturedFT)
+      : subFPRaw(
+          operation->capturedFS,
+          operation->capturedFT);
+  operation->rawResult = result.bits;
+  operation->raisedFlags = result.flags;
 }
 
 bool EECore::pendingCOP1DividerActive() const
@@ -3315,12 +3316,19 @@ bool EECore::cop1ScoreboardBlocks(
 
   const COP1Dependency controlDependency =
     instructionFCR31Dependency(instruction);
+  const COP1ScoreboardValue controlValue =
+    cop1ScoreboardValue(COP1ScoreboardResource::FCR31);
+  const bool orderedAddSubtractWrite =
+    (controlDependency == COP1Dependency::Write ||
+     controlDependency == COP1Dependency::ReadWrite) &&
+    isCOP1AddSubtractOperation(instruction.operation) &&
+    isCOP1AddSubtractOperation(
+      controlValue.producerOperation);
   if (!isCOP1DividerOperation(instruction.operation) &&
+      !orderedAddSubtractWrite &&
       controlDependency != COP1Dependency::None &&
-      cop1ScoreboardValue(
-        COP1ScoreboardResource::FCR31)
-        .availability ==
-          COP1ScoreboardAvailability::Unavailable)
+      controlValue.availability ==
+        COP1ScoreboardAvailability::Unavailable)
   {
     *hazard = {
       COP1ScoreboardResource::FCR31,
@@ -3394,7 +3402,11 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
   }
 
   value.producerOrder = producer->programOrder;
-  if (producer->stage < COP1PipelineStage::S1)
+  value.producerOperation = producer->instruction.operation;
+  if (producer->stage < COP1PipelineStage::S1 ||
+      (producer->stage == COP1PipelineStage::S1 &&
+       isCOP1ManagedPipelineOperation(
+         producer->instruction.operation)))
   {
     value.availability =
       COP1ScoreboardAvailability::Unavailable;
@@ -3681,6 +3693,21 @@ bool EECore::isCOP1DividerOperation(EEOperation operation)
     operation == EEOperation::DivideSingleCOP1 ||
     operation == EEOperation::SquareRootSingleCOP1 ||
     operation == EEOperation::ReciprocalSquareRootSingleCOP1;
+}
+
+bool EECore::isCOP1AddSubtractOperation(
+  EEOperation operation)
+{
+  return operation == EEOperation::AddSingleCOP1 ||
+    operation == EEOperation::SubtractSingleCOP1;
+}
+
+bool EECore::isCOP1ManagedPipelineOperation(
+  EEOperation operation)
+{
+  return operation == EEOperation::LoadWordToCOP1 ||
+    isCOP1DividerOperation(operation) ||
+    isCOP1AddSubtractOperation(operation);
 }
 
 EECore::COP1DividerTiming EECore::cop1DividerTiming(

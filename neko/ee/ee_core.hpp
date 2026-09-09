@@ -370,6 +370,7 @@ class EECore : public ClockedComponent
         COP1ScoreboardAvailability::Committed;
       std::uint32_t value = 0;
       std::uint64_t producerOrder = 0;
+      EEOperation producerOperation = EEOperation::Nop;
     };
 
     struct COP1ScoreboardHazard
@@ -543,8 +544,12 @@ class EECore : public ClockedComponent
     bool pendingCOP1LoadActive() const;
     void drainInFlightCOP1();
     void advancePendingCOP1(
-      std::uint8_t *completedLoadRegister,
-      bool *completedLoad);
+      std::uint32_t *completedLoadRegisters);
+    bool advanceInFlightCOP1Operation(
+      InFlightCOP1Operation *operation,
+      COP1PipelineStage *previousStage);
+    static void computeInFlightCOP1AddSubtract(
+      InFlightCOP1Operation *operation);
     bool pendingCOP1DividerActive() const;
     void startPendingCOP1Divider(
       const EEInstruction &instruction,
@@ -579,6 +584,10 @@ class EECore : public ClockedComponent
     static bool isCOP1MoveOperation(EEOperation operation);
     static bool isCOP1OperateOperation(EEOperation operation);
     static bool isCOP1DividerOperation(EEOperation operation);
+    static bool isCOP1AddSubtractOperation(
+      EEOperation operation);
+    static bool isCOP1ManagedPipelineOperation(
+      EEOperation operation);
     static COP1DividerTiming cop1DividerTiming(
       EEOperation operation);
     bool validateShiftAmountOrdering(

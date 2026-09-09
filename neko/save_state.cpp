@@ -2022,9 +2022,16 @@ void NekoSaveStateCodec::readEECore(
         "EE COP1 operation has an unexpected countdown");
       if (load)
       {
+        const bool waitingForResult =
+          operation.stage ==
+            EECore::COP1PipelineStage::R &&
+          operation.remainingCycles == 1;
+        const bool waitingToRetire =
+          operation.stage ==
+            EECore::COP1PipelineStage::S1 &&
+          operation.remainingCycles == 0;
         require(
-          operation.stage == EECore::COP1PipelineStage::R &&
-            operation.remainingCycles == 1 &&
+          (waitingForResult || waitingToRetire) &&
             operation.destination.mask ==
               EECore::COP1_DESTINATION_FPR &&
             operation.destination.fprRegister ==
@@ -2041,10 +2048,17 @@ void NekoSaveStateCodec::readEECore(
         const EECore::COP1DividerTiming timing =
           EECore::cop1DividerTiming(
             operation.instruction.operation);
+        const bool waitingForResult =
+          operation.stage ==
+            EECore::COP1PipelineStage::R &&
+          operation.remainingCycles >= 1 &&
+          operation.remainingCycles <= timing.latency;
+        const bool waitingToRetire =
+          operation.stage ==
+            EECore::COP1PipelineStage::S1 &&
+          operation.remainingCycles == 0;
         require(
-          operation.stage == EECore::COP1PipelineStage::R &&
-            operation.remainingCycles >= 1 &&
-            operation.remainingCycles <= timing.latency &&
+          (waitingForResult || waitingToRetire) &&
             operation.destination.mask ==
               (EECore::COP1_DESTINATION_FPR |
                EECore::COP1_DESTINATION_FCR31) &&
@@ -2133,8 +2147,9 @@ void NekoSaveStateCodec::readEECore(
     }
   }
   std::array<const EECore::InFlightCOP1Operation *, 2>
-    dividerResults = {};
+    pendingDividerResults = {};
   std::size_t activeDividerResults = 0;
+  std::size_t pendingDividerResultCount = 0;
   for (const EECore::InFlightCOP1Operation &operation :
        core->inFlightCOP1Operations)
   {
@@ -2145,20 +2160,26 @@ void NekoSaveStateCodec::readEECore(
       continue;
     }
     require(
-      activeDividerResults < dividerResults.size(),
+      activeDividerResults <
+        pendingDividerResults.size(),
       "EE COP1 divider has too many pending results");
-    dividerResults[activeDividerResults++] = &operation;
+    ++activeDividerResults;
+    if (operation.stage == EECore::COP1PipelineStage::R)
+    {
+      pendingDividerResults[
+        pendingDividerResultCount++] = &operation;
+    }
   }
   require(
-    activeDividerResults != 0 ||
+    pendingDividerResultCount != 0 ||
       (core->cop1DividerInitiationCycles == 0 &&
        core->cop1DividerOperation == EEOperation::Nop),
     "EE inactive COP1 divider contains occupancy");
   require(
     core->cop1DividerInitiationCycles != 0 ||
-      (activeDividerResults == 0 ||
-       (activeDividerResults == 1 &&
-        dividerResults[0]->remainingCycles == 1)),
+      (pendingDividerResultCount == 0 ||
+       (pendingDividerResultCount == 1 &&
+        pendingDividerResults[0]->remainingCycles == 1)),
     "EE unoccupied COP1 divider has invalid pending results");
   if (core->cop1DividerInitiationCycles != 0)
   {
@@ -2169,36 +2190,36 @@ void NekoSaveStateCodec::readEECore(
       core->cop1DividerInitiationCycles <=
         timing.initiationInterval,
       "EE COP1 divider occupancy exceeds its policy");
-    if (activeDividerResults == 1)
+    if (pendingDividerResultCount == 1)
     {
       require(
-        dividerResults[0]->instruction.operation ==
+        pendingDividerResults[0]->instruction.operation ==
           core->cop1DividerOperation &&
-          dividerResults[0]->remainingCycles ==
+          pendingDividerResults[0]->remainingCycles ==
             core->cop1DividerInitiationCycles + 1,
         "EE COP1 divider countdowns are inconsistent");
     }
     else
     {
       require(
-        activeDividerResults == 2 &&
-          dividerResults[0]->destination.fprRegister !=
-            dividerResults[1]->destination.fprRegister &&
+        pendingDividerResultCount == 2 &&
+          pendingDividerResults[0]->destination.fprRegister !=
+            pendingDividerResults[1]->destination.fprRegister &&
           core->cop1DividerInitiationCycles ==
             timing.initiationInterval &&
-          ((dividerResults[0]->remainingCycles == 1 &&
-            dividerResults[1]->remainingCycles ==
+          ((pendingDividerResults[0]->remainingCycles == 1 &&
+            pendingDividerResults[1]->remainingCycles ==
               timing.latency &&
-            dividerResults[0]->programOrder <
-              dividerResults[1]->programOrder &&
-            dividerResults[1]->instruction.operation ==
+            pendingDividerResults[0]->programOrder <
+              pendingDividerResults[1]->programOrder &&
+            pendingDividerResults[1]->instruction.operation ==
               core->cop1DividerOperation) ||
-           (dividerResults[1]->remainingCycles == 1 &&
-            dividerResults[0]->remainingCycles ==
+           (pendingDividerResults[1]->remainingCycles == 1 &&
+            pendingDividerResults[0]->remainingCycles ==
               timing.latency &&
-            dividerResults[1]->programOrder <
-              dividerResults[0]->programOrder &&
-            dividerResults[0]->instruction.operation ==
+            pendingDividerResults[1]->programOrder <
+              pendingDividerResults[0]->programOrder &&
+            pendingDividerResults[0]->instruction.operation ==
               core->cop1DividerOperation)),
         "EE COP1 divider overlap state is inconsistent");
     }

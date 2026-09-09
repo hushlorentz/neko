@@ -845,7 +845,7 @@ remaining families:
 - [x] Move `ADD.S` and `SUB.S` through `1T` operand selection, immutable `2T`
       capture, their documented `Y/Z` work, `1S` result availability, and `2S`
       architectural writeback
-- [ ] Add generic per-cycle C1 stage advancement and program-ordered `2S`
+- [x] Add generic per-cycle C1 stage advancement and program-ordered `2S`
       retirement for FPR results and their arithmetic/sticky FCR31 flags
 - [ ] Implement the `1S`-to-`2T` bypass for dependent add/subtract operations,
       while interlocking pre-`1S` reads and preserving WAW order

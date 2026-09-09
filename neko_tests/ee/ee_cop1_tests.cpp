@@ -4568,7 +4568,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "EE COP1 addition and subtraction serialize FCR31 writeback")
+  "EE COP1 independent addition and subtraction overlap")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -4591,27 +4591,215 @@ TEST_CASE(
   REQUIRE(core.floatingPointRegister(4) == 0);
   REQUIRE(core.floatingPointRegister(5) == 0);
 
-  system.runMasterCycles(4);
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 2);
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.runMasterCycles(3);
 
   REQUIRE(core.elapsedCycles() == 5);
-  REQUIRE(core.programCounter() == 4);
   REQUIRE(core.floatingPointRegister(4) == 0);
   REQUIRE(core.floatingPointRegister(5) == 0);
 
   system.clockMasterCycle();
 
   REQUIRE(core.elapsedCycles() == 6);
-  REQUIRE(core.programCounter() == 8);
   REQUIRE(
     core.floatingPointRegister(4) ==
     UINT32_C(0x40400000));
   REQUIRE(core.floatingPointRegister(5) == 0);
 
-  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+  system.clockMasterCycle();
 
+  REQUIRE(core.elapsedCycles() == 7);
   REQUIRE(
     core.floatingPointRegister(5) ==
     UINT32_C(0x40900000));
+}
+
+TEST_CASE("EE COP1 overlapping add flags retire in program order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x7f800000));
+  core.setFloatingPointRegister(6, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x01, 6, 5, 7));
+  core.startExecution(0);
+
+  system.runMasterCycles(6);
+
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_OVERFLOW |
+     EECOP1Control::STICKY_OVERFLOW));
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_OVERFLOW));
+}
+
+TEST_CASE("EE COP1 ALU overlap preserves non-forwarded hazards")
+{
+  SECTION("FPR write-after-write remains interlocked")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x01, 6, 4, 7));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40900000));
+  }
+
+  SECTION("CFC1 waits for the producing ALU result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x7f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1TransferInstruction(0x02, 5, 31));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.generalRegister(5).low ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+}
+
+TEST_CASE("EE COP1 retirement waits for every older operation")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, UINT32_C(0xdeadbeef));
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1MemoryInstruction(0x31, 1, 5, 0));
+  core.startExecution(0);
+
+  system.runMasterCycles(5);
+
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0xdeadbeef));
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x12345678));
+}
+
+TEST_CASE("EE COP1 blocked load preserves younger WAW order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setGeneralRegister(6, {UINT64_C(0x87654321), 0});
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, UINT32_C(0xdeadbeef));
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1MemoryInstruction(0x31, 1, 5, 0));
+  system.eeBus().write32(
+    8,
+    cop1TransferInstruction(0x04, 6, 5));
+  core.startExecution(0);
+
+  system.runMasterCycles(5);
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0xdeadbeef));
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x12345678));
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 12);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x87654321));
 }
 
 TEST_CASE(
