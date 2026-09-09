@@ -943,6 +943,71 @@ TEST_CASE("EE COP1 overlapping ALU results retire in program order")
   REQUIRE(retirements[1].value0 == 2);
 }
 
+TEST_CASE("EE COP1 trace exposes S-to-T dependent overlap")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x01, 4, 5, 2));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(10);
+
+  std::vector<NekoTraceEvent> dependentTransitions;
+  std::vector<NekoTraceEvent> interlocks;
+  std::vector<NekoTraceEvent> retirements;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.type ==
+          NekoTraceEventType::COP1StageTransition &&
+        event.value0 == 2)
+    {
+      dependentTransitions.push_back(event);
+    }
+    if (event.type ==
+        NekoTraceEventType::COP1ResourceInterlock)
+    {
+      interlocks.push_back(event);
+    }
+    if (event.type == NekoTraceEventType::COP1Retired)
+    {
+      retirements.push_back(event);
+    }
+  }
+
+  REQUIRE(interlocks.size() == 3);
+  REQUIRE(interlocks[0].masterCycle == 2);
+  REQUIRE(interlocks[1].masterCycle == 3);
+  REQUIRE(interlocks[2].masterCycle == 4);
+
+  REQUIRE(dependentTransitions.size() == 6);
+  REQUIRE(dependentTransitions[0].masterCycle == 5);
+  REQUIRE(
+    dependentTransitions[0].value2 ==
+    (NekoEETraceCOP1Stage::NONE |
+     (NekoEETraceCOP1Stage::R <<
+      NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(dependentTransitions[1].masterCycle == 6);
+  REQUIRE(
+    dependentTransitions[1].value2 ==
+    (NekoEETraceCOP1Stage::R |
+     (NekoEETraceCOP1Stage::T <<
+      NekoEETraceCOP1Stage::TO_SHIFT)));
+
+  REQUIRE(retirements.size() == 2);
+  REQUIRE(retirements[0].masterCycle == 6);
+  REQUIRE(retirements[0].value0 == 1);
+  REQUIRE(retirements[1].masterCycle == 10);
+  REQUIRE(retirements[1].value0 == 2);
+}
+
 TEST_CASE("EE C1 completion traces survive save-state restore")
 {
   NekoSystem original;

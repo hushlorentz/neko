@@ -847,7 +847,7 @@ remaining families:
       architectural writeback
 - [x] Add generic per-cycle C1 stage advancement and program-ordered `2S`
       retirement for FPR results and their arithmetic/sticky FCR31 flags
-- [ ] Implement the `1S`-to-`2T` bypass for dependent add/subtract operations,
+- [x] Implement the `1S`-to-`2T` bypass for dependent add/subtract operations,
       while interlocking pre-`1S` reads and preserving WAW order
 - [ ] Re-baseline add/subtract issue, dependency, raw-result, flag, hash, trace,
       malformed-save-state, halt/resume, exception, and save/restore coverage

@@ -371,6 +371,8 @@ class EECore : public ClockedComponent
       std::uint32_t value = 0;
       std::uint64_t producerOrder = 0;
       EEOperation producerOperation = EEOperation::Nop;
+      COP1PipelineStage producerStage =
+        COP1PipelineStage::R;
     };
 
     struct COP1ScoreboardHazard
@@ -572,6 +574,9 @@ class EECore : public ClockedComponent
       std::uint8_t registerIndex = 0) const;
     std::uint32_t scoreboardFPRValue(
       std::uint8_t registerIndex) const;
+    std::uint32_t scoreboardFPRValueForT(
+      std::uint8_t registerIndex,
+      std::uint64_t consumerOrder) const;
     std::uint32_t scoreboardAccumulatorValue() const;
     std::uint32_t scoreboardFCR31Value() const;
     static COP1Dependency instructionFPRDependency(

@@ -3089,11 +3089,13 @@ bool EECore::advanceInFlightCOP1Operation(
     {
       case COP1PipelineStage::R:
         operation->capturedFS =
-          floatingPointRegisters[
-            operation->instruction.destinationRegister];
+          scoreboardFPRValueForT(
+            operation->instruction.destinationRegister,
+            operation->programOrder);
         operation->capturedFT =
-          floatingPointRegisters[
-            operation->instruction.targetRegister];
+          scoreboardFPRValueForT(
+            operation->instruction.targetRegister,
+            operation->programOrder);
         operation->capturedControl =
           cop1ControlRegister(
             EECOP1Control::STATUS_REGISTER);
@@ -3286,8 +3288,15 @@ bool EECore::cop1ScoreboardBlocks(
       cop1ScoreboardValue(
         COP1ScoreboardResource::FPR,
         registerIndex);
+    const bool orderedAddSubtractDependency =
+      isCOP1AddSubtractOperation(instruction.operation) &&
+      isCOP1AddSubtractOperation(value.producerOperation) &&
+      (dependency == COP1Dependency::Write ||
+       value.producerStage == COP1PipelineStage::Z ||
+       value.producerStage == COP1PipelineStage::S1);
     if (value.availability ==
-        COP1ScoreboardAvailability::Unavailable)
+          COP1ScoreboardAvailability::Unavailable &&
+        !orderedAddSubtractDependency)
     {
       *hazard = {
         COP1ScoreboardResource::FPR,
@@ -3403,6 +3412,7 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
 
   value.producerOrder = producer->programOrder;
   value.producerOperation = producer->instruction.operation;
+  value.producerStage = producer->stage;
   if (producer->stage < COP1PipelineStage::S1 ||
       (producer->stage == COP1PipelineStage::S1 &&
        isCOP1ManagedPipelineOperation(
@@ -3479,6 +3489,45 @@ std::uint32_t EECore::scoreboardFPRValue(
       "Unavailable EE COP1 FPR reached execution.");
   }
   return value.value;
+}
+
+std::uint32_t EECore::scoreboardFPRValueForT(
+  std::uint8_t registerIndex,
+  std::uint64_t consumerOrder) const
+{
+  requireFloatingPointRegisterIndex(registerIndex);
+  const InFlightCOP1Operation *producer = nullptr;
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (!operation.active ||
+        operation.programOrder >= consumerOrder ||
+        (operation.destination.mask &
+         COP1_DESTINATION_FPR) == 0 ||
+        operation.destination.fprRegister != registerIndex)
+    {
+      continue;
+    }
+    if (producer == nullptr ||
+        operation.programOrder > producer->programOrder)
+    {
+      producer = &operation;
+    }
+  }
+  if (producer == nullptr ||
+      producer->stage == COP1PipelineStage::S2)
+  {
+    return floatingPointRegisters[registerIndex];
+  }
+  if (producer->stage == COP1PipelineStage::S1 ||
+      (isCOP1AddSubtractOperation(
+         producer->instruction.operation) &&
+       producer->stage == COP1PipelineStage::Z))
+  {
+    return producer->rawResult;
+  }
+  throw std::logic_error(
+    "Unavailable EE COP1 FPR reached 2T capture.");
 }
 
 std::uint32_t EECore::scoreboardAccumulatorValue() const

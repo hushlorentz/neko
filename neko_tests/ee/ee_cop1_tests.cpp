@@ -3157,25 +3157,65 @@ TEST_CASE(
   REQUIRE(core.floatingPointRegister(4) == 0);
   REQUIRE(core.floatingPointRegister(5) == 0);
 
-  system.runMasterCycles(4);
+  system.runMasterCycles(3);
 
+  REQUIRE(core.elapsedCycles() == 4);
   REQUIRE(core.programCounter() == 4);
   REQUIRE(core.floatingPointRegister(4) == 0);
   REQUIRE(core.floatingPointRegister(5) == 0);
 
   system.clockMasterCycle();
 
+  REQUIRE(core.elapsedCycles() == 5);
   REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.elapsedCycles() == 6);
   REQUIRE(
     core.floatingPointRegister(4) ==
     UINT32_C(0x40400000));
   REQUIRE(core.floatingPointRegister(5) == 0);
 
-  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+  core.setFloatingPointRegister(4, UINT32_C(0xdeadbeef));
+  system.runMasterCycles(4);
 
   REQUIRE(
     core.floatingPointRegister(5) ==
     UINT32_C(0x40000000));
+}
+
+TEST_CASE("EE COP1 add forwards a same-destination 1S result to 2T")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x00, 4, 4, 2));
+  core.startExecution(0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.runMasterCycles(5);
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40800000));
 }
 
 TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
@@ -4476,19 +4516,22 @@ TEST_CASE(
 
   REQUIRE(core.floatingPointRegister(4) == 0);
 
-  system.runMasterCycles(4);
+  system.clockMasterCycle();
 
-  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  system.runMasterCycles(3);
+
   REQUIRE(core.floatingPointRegister(4) == 0);
 
   system.clockMasterCycle();
 
-  REQUIRE(core.programCounter() == 8);
   REQUIRE(
     core.floatingPointRegister(4) ==
     UINT32_C(0x40400000));
 
-  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+  system.clockMasterCycle();
 
   REQUIRE(
     core.floatingPointRegister(4) ==
@@ -4652,9 +4695,9 @@ TEST_CASE("EE COP1 overlapping add flags retire in program order")
      EECOP1Control::STICKY_OVERFLOW));
 }
 
-TEST_CASE("EE COP1 ALU overlap preserves non-forwarded hazards")
+TEST_CASE("EE COP1 ALU overlap preserves ordered hazards")
 {
-  SECTION("FPR write-after-write remains interlocked")
+  SECTION("FPR write-after-write retires in issue order")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
@@ -4670,7 +4713,7 @@ TEST_CASE("EE COP1 ALU overlap preserves non-forwarded hazards")
       cop1SingleInstruction(0x01, 6, 4, 7));
     core.startExecution(0);
 
-    system.runMasterCycles(5);
+    system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 4);
     REQUIRE(core.floatingPointRegister(4) == 0);
@@ -4678,11 +4721,15 @@ TEST_CASE("EE COP1 ALU overlap preserves non-forwarded hazards")
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.runMasterCycles(4);
+
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x40400000));
 
-    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+    system.clockMasterCycle();
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -5048,16 +5095,14 @@ TEST_CASE(
     original.runMasterCycles(4);
     restored.runMasterCycles(4);
 
-    REQUIRE(originalCore.programCounter() == 4);
-    REQUIRE(restored.eeCore().programCounter() == 4);
+    REQUIRE(originalCore.programCounter() == 8);
+    REQUIRE(restored.eeCore().programCounter() == 8);
     REQUIRE(originalCore.floatingPointRegister(4) == 0);
     REQUIRE(restored.eeCore().floatingPointRegister(4) == 0);
 
     original.clockMasterCycle();
     restored.clockMasterCycle();
 
-    REQUIRE(originalCore.programCounter() == 8);
-    REQUIRE(restored.eeCore().programCounter() == 8);
     REQUIRE(
       originalCore.floatingPointRegister(4) ==
       UINT32_C(0x40400000));
@@ -5065,8 +5110,8 @@ TEST_CASE(
       restored.eeCore().floatingPointRegister(4) ==
       UINT32_C(0x40400000));
 
-    original.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
-    restored.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+    original.runMasterCycles(4);
+    restored.runMasterCycles(4);
 
     REQUIRE(
       originalCore.floatingPointRegister(5) ==
