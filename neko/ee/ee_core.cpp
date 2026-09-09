@@ -907,9 +907,7 @@ bool EECore::executeInstruction(
         destination,
         static_cast<std::uint32_t>(target));
       return true;
-    case EEOperation::AbsoluteSingleCOP1:
     case EEOperation::MoveSingleCOP1:
-    case EEOperation::NegateSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -917,26 +915,8 @@ bool EECore::executeInstruction(
       }
       const std::uint32_t sourceBits =
         scoreboardFPRValue(destination);
-      std::uint32_t resultBits = sourceBits;
-      if (instruction.operation ==
-          EEOperation::AbsoluteSingleCOP1)
-      {
-        resultBits &= UINT32_C(0x7fffffff);
-      }
-      else if (instruction.operation ==
-               EEOperation::NegateSingleCOP1)
-      {
-        resultBits ^= UINT32_C(0x80000000);
-      }
       floatingPointRegisters[instruction.shiftAmount] =
-        resultBits;
-      if (instruction.operation !=
-          EEOperation::MoveSingleCOP1)
-      {
-        updateCOP1ArithmeticFlags(
-          FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
-          0);
-      }
+        sourceBits;
       return true;
     }
     case EEOperation::SquareRootSingleCOP1:
@@ -1022,6 +1002,8 @@ bool EECore::executeInstruction(
       }
       return true;
     }
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     {
@@ -2904,10 +2886,8 @@ void EECore::drainInFlightCOP1()
           EEOperation::LoadWordToCOP1 &&
         !isCOP1DividerOperation(
           operation.instruction.operation) &&
-        operation.instruction.operation !=
-          EEOperation::AddSingleCOP1 &&
-        operation.instruction.operation !=
-          EEOperation::SubtractSingleCOP1)
+        !isCOP1StagedALUOperation(
+          operation.instruction.operation))
     {
       throw std::logic_error(
         "ELF return cannot drain an unsupported COP1 operation.");
@@ -2934,7 +2914,7 @@ void EECore::drainInFlightCOP1()
     {
       break;
     }
-    if (isCOP1AddSubtractOperation(
+    if (isCOP1StagedALUOperation(
           oldest->instruction.operation))
     {
       if (oldest->stage == COP1PipelineStage::R)
@@ -2942,16 +2922,20 @@ void EECore::drainInFlightCOP1()
         oldest->capturedFS =
           floatingPointRegisters[
             oldest->instruction.destinationRegister];
-        oldest->capturedFT =
-          floatingPointRegisters[
-            oldest->instruction.targetRegister];
+        if (isCOP1AddSubtractOperation(
+              oldest->instruction.operation))
+        {
+          oldest->capturedFT =
+            floatingPointRegisters[
+              oldest->instruction.targetRegister];
+        }
         oldest->capturedControl =
           cop1ControlRegister(
             EECOP1Control::STATUS_REGISTER);
       }
       if (oldest->stage < COP1PipelineStage::Z)
       {
-        computeInFlightCOP1AddSubtract(oldest);
+        computeInFlightCOP1StagedALU(oldest);
       }
     }
     commitInFlightCOP1(oldest, false);
@@ -3082,7 +3066,7 @@ bool EECore::advanceInFlightCOP1Operation(
   COP1PipelineStage *previousStage)
 {
   *previousStage = operation->stage;
-  if (isCOP1AddSubtractOperation(
+  if (isCOP1StagedALUOperation(
         operation->instruction.operation))
   {
     switch (operation->stage)
@@ -3092,10 +3076,14 @@ bool EECore::advanceInFlightCOP1Operation(
           scoreboardFPRValueForT(
             operation->instruction.destinationRegister,
             operation->programOrder);
-        operation->capturedFT =
-          scoreboardFPRValueForT(
-            operation->instruction.targetRegister,
-            operation->programOrder);
+        if (isCOP1AddSubtractOperation(
+              operation->instruction.operation))
+        {
+          operation->capturedFT =
+            scoreboardFPRValueForT(
+              operation->instruction.targetRegister,
+              operation->programOrder);
+        }
         operation->capturedControl =
           cop1ControlRegister(
             EECOP1Control::STATUS_REGISTER);
@@ -3108,7 +3096,7 @@ bool EECore::advanceInFlightCOP1Operation(
         operation->stage = COP1PipelineStage::Y;
         return true;
       case COP1PipelineStage::Y:
-        computeInFlightCOP1AddSubtract(operation);
+        computeInFlightCOP1StagedALU(operation);
         operation->stage = COP1PipelineStage::Z;
         return true;
       case COP1PipelineStage::Z:
@@ -3132,20 +3120,39 @@ bool EECore::advanceInFlightCOP1Operation(
   return true;
 }
 
-void EECore::computeInFlightCOP1AddSubtract(
+void EECore::computeInFlightCOP1StagedALU(
   InFlightCOP1Operation *operation)
 {
-  const EEFloatResult result =
-    operation->instruction.operation ==
-      EEOperation::AddSingleCOP1
-      ? addFPRaw(
-          operation->capturedFS,
-          operation->capturedFT)
-      : subFPRaw(
-          operation->capturedFS,
-          operation->capturedFT);
-  operation->rawResult = result.bits;
-  operation->raisedFlags = result.flags;
+  switch (operation->instruction.operation)
+  {
+    case EEOperation::AbsoluteSingleCOP1:
+      operation->rawResult =
+        operation->capturedFS & UINT32_C(0x7fffffff);
+      return;
+    case EEOperation::NegateSingleCOP1:
+      operation->rawResult =
+        operation->capturedFS ^ UINT32_C(0x80000000);
+      return;
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    {
+      const EEFloatResult result =
+        operation->instruction.operation ==
+          EEOperation::AddSingleCOP1
+          ? addFPRaw(
+              operation->capturedFS,
+              operation->capturedFT)
+          : subFPRaw(
+              operation->capturedFS,
+              operation->capturedFT);
+      operation->rawResult = result.bits;
+      operation->raisedFlags = result.flags;
+      return;
+    }
+    default:
+      throw std::logic_error(
+        "Unsupported staged EE COP1 ALU operation.");
+  }
 }
 
 bool EECore::pendingCOP1DividerActive() const
@@ -3288,15 +3295,15 @@ bool EECore::cop1ScoreboardBlocks(
       cop1ScoreboardValue(
         COP1ScoreboardResource::FPR,
         registerIndex);
-    const bool orderedAddSubtractDependency =
-      isCOP1AddSubtractOperation(instruction.operation) &&
-      isCOP1AddSubtractOperation(value.producerOperation) &&
+    const bool orderedStagedALUDependency =
+      isCOP1StagedALUOperation(instruction.operation) &&
+      isCOP1StagedALUOperation(value.producerOperation) &&
       (dependency == COP1Dependency::Write ||
        value.producerStage == COP1PipelineStage::Z ||
        value.producerStage == COP1PipelineStage::S1);
     if (value.availability ==
           COP1ScoreboardAvailability::Unavailable &&
-        !orderedAddSubtractDependency)
+        !orderedStagedALUDependency)
     {
       *hazard = {
         COP1ScoreboardResource::FPR,
@@ -3327,14 +3334,14 @@ bool EECore::cop1ScoreboardBlocks(
     instructionFCR31Dependency(instruction);
   const COP1ScoreboardValue controlValue =
     cop1ScoreboardValue(COP1ScoreboardResource::FCR31);
-  const bool orderedAddSubtractWrite =
+  const bool orderedStagedALUWrite =
     (controlDependency == COP1Dependency::Write ||
      controlDependency == COP1Dependency::ReadWrite) &&
-    isCOP1AddSubtractOperation(instruction.operation) &&
-    isCOP1AddSubtractOperation(
+    isCOP1StagedALUOperation(instruction.operation) &&
+    isCOP1StagedALUOperation(
       controlValue.producerOperation);
   if (!isCOP1DividerOperation(instruction.operation) &&
-      !orderedAddSubtractWrite &&
+      !orderedStagedALUWrite &&
       controlDependency != COP1Dependency::None &&
       controlValue.availability ==
         COP1ScoreboardAvailability::Unavailable)
@@ -3520,7 +3527,7 @@ std::uint32_t EECore::scoreboardFPRValueForT(
     return floatingPointRegisters[registerIndex];
   }
   if (producer->stage == COP1PipelineStage::S1 ||
-      (isCOP1AddSubtractOperation(
+      (isCOP1StagedALUOperation(
          producer->instruction.operation) &&
        producer->stage == COP1PipelineStage::Z))
   {
@@ -3751,12 +3758,25 @@ bool EECore::isCOP1AddSubtractOperation(
     operation == EEOperation::SubtractSingleCOP1;
 }
 
+bool EECore::isCOP1UnaryOperation(EEOperation operation)
+{
+  return operation == EEOperation::AbsoluteSingleCOP1 ||
+    operation == EEOperation::NegateSingleCOP1;
+}
+
+bool EECore::isCOP1StagedALUOperation(
+  EEOperation operation)
+{
+  return isCOP1UnaryOperation(operation) ||
+    isCOP1AddSubtractOperation(operation);
+}
+
 bool EECore::isCOP1ManagedPipelineOperation(
   EEOperation operation)
 {
   return operation == EEOperation::LoadWordToCOP1 ||
     isCOP1DividerOperation(operation) ||
-    isCOP1AddSubtractOperation(operation);
+    isCOP1StagedALUOperation(operation);
 }
 
 EECore::COP1DividerTiming EECore::cop1DividerTiming(

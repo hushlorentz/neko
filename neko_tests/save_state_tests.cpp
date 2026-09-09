@@ -1568,6 +1568,31 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
   }
 }
 
+TEST_CASE("Invalid staged COP1 unary results are rejected")
+{
+  NekoSystem source;
+  source.eeCore().setFloatingPointRegister(
+    2,
+    UINT32_C(0xffc12345));
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x05, 2, 4, 0));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(5);
+  source.eeCore().haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+    1;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
 TEST_CASE("Blocked COP1 1S retirement survives save-state restore")
 {
   NekoSystem original;

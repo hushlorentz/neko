@@ -2192,6 +2192,10 @@ TEST_CASE("EE COP1 single movement instructions transform raw bits")
     runInstruction(
       &system,
       cop1SingleInstruction(vector.function, 2, 3));
+    if (vector.function != 0x06)
+    {
+      system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+    }
 
     REQUIRE(core.floatingPointRegister(2) == vector.source);
     REQUIRE(
@@ -2208,6 +2212,7 @@ TEST_CASE("EE COP1 single movement instructions support in-place writes")
   runInstruction(
     &system,
     cop1SingleInstruction(0x05, 2, 2));
+  system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
   REQUIRE(
     core.floatingPointRegister(2) ==
@@ -2248,6 +2253,7 @@ TEST_CASE("EE COP1 movement instructions apply documented flags")
       runInstruction(
         &system,
         cop1SingleInstruction(function, 2, 3));
+      system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
       REQUIRE(
         core.cop1ControlRegister(31) ==
@@ -3010,7 +3016,7 @@ TEST_CASE(
       0,
       UINT32_C(0x7fc12345),
       true,
-      false
+      true
     },
     {
       cop1SingleInstruction(0x06, 2, 4),
@@ -3026,7 +3032,7 @@ TEST_CASE(
       0,
       UINT32_C(0xffc12345),
       true,
-      false
+      true
     },
     {
       cop1SingleInstruction(0x28, 2, 4, 3),
@@ -3133,6 +3139,28 @@ TEST_CASE(
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x76543210));
+  }
+}
+
+TEST_CASE("EE COP1 unary operations capture their source at T")
+{
+  for (const std::uint8_t function : {0x05, 0x07})
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0xffc12345));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(function, 2, 2));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+    core.setFloatingPointRegister(2, UINT32_C(0x12345678));
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x7fc12345));
   }
 }
 

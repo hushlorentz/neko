@@ -2010,11 +2010,9 @@ void NekoSaveStateCodec::readEECore(
       const bool divider =
         EECore::isCOP1DividerOperation(
           operation.instruction.operation);
-      const bool addSubtract =
-        operation.instruction.operation ==
-          EEOperation::AddSingleCOP1 ||
-        operation.instruction.operation ==
-          EEOperation::SubtractSingleCOP1;
+      const bool stagedALU =
+        EECore::isCOP1StagedALUOperation(
+          operation.instruction.operation);
       require(
         load || divider || operation.remainingCycles == 0,
         "EE COP1 operation has an unexpected countdown");
@@ -2089,25 +2087,49 @@ void NekoSaveStateCodec::readEECore(
             operation.raisedStickyFlags == 0,
           "EE in-flight COP1 divider state is inconsistent");
       }
-      if (addSubtract)
+      if (stagedALU)
       {
         const bool operandsCaptured =
           operation.stage != EECore::COP1PipelineStage::R;
         const bool resultComputed =
           operation.stage == EECore::COP1PipelineStage::Z;
-        EEFloatResult expectedResult;
+        std::uint32_t expectedResult = 0;
+        std::uint8_t expectedFlags = 0;
         if (resultComputed)
         {
-          expectedResult =
-            operation.instruction.operation ==
-              EEOperation::AddSingleCOP1
-              ? addFPRaw(
-                  operation.capturedFS,
-                  operation.capturedFT)
-              : subFPRaw(
-                  operation.capturedFS,
-                  operation.capturedFT);
+          switch (operation.instruction.operation)
+          {
+            case EEOperation::AbsoluteSingleCOP1:
+              expectedResult =
+                operation.capturedFS & UINT32_C(0x7fffffff);
+              break;
+            case EEOperation::NegateSingleCOP1:
+              expectedResult =
+                operation.capturedFS ^ UINT32_C(0x80000000);
+              break;
+            case EEOperation::AddSingleCOP1:
+            case EEOperation::SubtractSingleCOP1:
+            {
+              const EEFloatResult result =
+                operation.instruction.operation ==
+                  EEOperation::AddSingleCOP1
+                  ? addFPRaw(
+                      operation.capturedFS,
+                      operation.capturedFT)
+                  : subFPRaw(
+                      operation.capturedFS,
+                      operation.capturedFT);
+              expectedResult = result.bits;
+              expectedFlags = result.flags;
+              break;
+            }
+            default:
+              break;
+          }
         }
+        const bool unary =
+          EECore::isCOP1UnaryOperation(
+            operation.instruction.operation);
         require(
           operation.remainingCycles == 0 &&
             operation.stage <= EECore::COP1PipelineStage::Z &&
@@ -2122,17 +2144,17 @@ void NekoSaveStateCodec::readEECore(
               (FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW) &&
             operation.raisedStickyFlags == 0 &&
             !operation.conditionResult &&
+            (!unary || operation.capturedFT == 0) &&
             (operandsCaptured ||
              (operation.capturedFS == 0 &&
               operation.capturedFT == 0 &&
               operation.capturedControl == 0)) &&
             (resultComputed
-              ? (operation.rawResult == expectedResult.bits &&
-                 operation.raisedFlags ==
-                   expectedResult.flags)
+              ? (operation.rawResult == expectedResult &&
+                 operation.raisedFlags == expectedFlags)
               : (operation.rawResult == 0 &&
                  operation.raisedFlags == 0)),
-          "EE in-flight COP1 add/subtract state is inconsistent");
+          "EE in-flight COP1 staged ALU state is inconsistent");
       }
     }
     else

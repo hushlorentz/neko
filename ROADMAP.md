@@ -859,7 +859,7 @@ remaining families:
 Reuse the reviewed ALU path for operations that do not introduce a new
 accumulator or condition-result contract:
 
-- [ ] Migrate `ABS.S` and `NEG.S` through their documented stages, preserving
+- [x] Migrate `ABS.S` and `NEG.S` through their documented stages, preserving
       signed-zero and raw extended-finite behavior
 - [ ] Migrate `MAX.S` and `MIN.S`, including selected-operand normalization and
       ordered FCR31 overflow/underflow updates

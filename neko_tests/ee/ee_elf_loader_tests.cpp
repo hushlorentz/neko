@@ -154,7 +154,7 @@ namespace
     return image;
   }
 
-  std::vector<std::uint8_t> returningCOP1AddSubtractELF(
+  std::vector<std::uint8_t> returningCOP1StagedALUELF(
     std::uint8_t function)
   {
     std::vector<std::uint8_t> image = returningELF(0);
@@ -163,7 +163,8 @@ namespace
       0x108,
       (UINT32_C(0x11) << 26) |
         (UINT32_C(0x10) << 21) |
-        (UINT32_C(3) << 16) |
+        (static_cast<std::uint32_t>(
+          function == 0x00 || function == 0x01 ? 3 : 0) << 16) |
         (UINT32_C(2) << 11) |
         (UINT32_C(4) << 6) |
         function);
@@ -714,7 +715,7 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
     }
   }
 
-  SECTION("Return drains staged COP1 add and subtract work")
+  SECTION("Return drains staged COP1 ALU work")
   {
     struct DrainVector
     {
@@ -722,6 +723,8 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
       std::uint32_t expected;
     };
     const DrainVector vectors[] = {
+      {0x05, 0},
+      {0x07, UINT32_C(0x80000000)},
       {0x00, 0},
       {0x01, 0}
     };
@@ -731,7 +734,7 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
       NekoSystem system;
       const EEGuestExecutionResult result =
         system.runELF(
-          returningCOP1AddSubtractELF(vector.function),
+          returningCOP1StagedALUELF(vector.function),
           3);
 
       REQUIRE(result.outcome == EEGuestOutcome::Completed);
