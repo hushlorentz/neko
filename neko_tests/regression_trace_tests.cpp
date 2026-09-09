@@ -890,6 +890,95 @@ TEST_CASE("EE COP1 add traces its manual-backed stage progression")
       NekoEETraceCOP1Result::FPR_REGISTER_SHIFT)));
 }
 
+TEST_CASE("EE COP1 unary and min/max trace staged progression")
+{
+  struct TraceVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const TraceVector vectors[] = {
+    {0x05, UINT32_C(0xbf800000), 0, UINT32_C(0x3f800000)},
+    {0x07, UINT32_C(0x3f800000), 0, UINT32_C(0xbf800000)},
+    {0x28, UINT32_C(0x3f800000), UINT32_C(0x40000000),
+     UINT32_C(0x40000000)},
+    {0x29, UINT32_C(0x3f800000), UINT32_C(0x40000000),
+     UINT32_C(0x3f800000)}
+  };
+  const std::uint64_t stages[] = {
+    NekoEETraceCOP1Stage::NONE |
+      (NekoEETraceCOP1Stage::R <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::R |
+      (NekoEETraceCOP1Stage::T <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::T |
+      (NekoEETraceCOP1Stage::X <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::X |
+      (NekoEETraceCOP1Stage::Y <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::Y |
+      (NekoEETraceCOP1Stage::Z <<
+       NekoEETraceCOP1Stage::TO_SHIFT),
+    NekoEETraceCOP1Stage::Z |
+      (NekoEETraceCOP1Stage::S1 <<
+       NekoEETraceCOP1Stage::TO_SHIFT)
+  };
+
+  for (const TraceVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        4,
+        vector.function == 0x05 ||
+            vector.function == 0x07
+          ? 0
+          : 3));
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(6);
+
+    std::vector<NekoTraceEvent> pipelineEvents;
+    for (const NekoTraceEvent &event : eeTrace(system))
+    {
+      if (event.type ==
+            NekoTraceEventType::COP1StageTransition ||
+          event.type == NekoTraceEventType::COP1Retired)
+      {
+        pipelineEvents.push_back(event);
+      }
+    }
+    REQUIRE(pipelineEvents.size() == 7);
+    for (std::size_t index = 0; index < 6; ++index)
+    {
+      REQUIRE(
+        pipelineEvents[index].type ==
+        NekoTraceEventType::COP1StageTransition);
+      REQUIRE(pipelineEvents[index].masterCycle == index + 1);
+      REQUIRE(pipelineEvents[index].value2 == stages[index]);
+    }
+    REQUIRE(
+      pipelineEvents[6].type ==
+      NekoTraceEventType::COP1Retired);
+    REQUIRE(pipelineEvents[6].masterCycle == 6);
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        pipelineEvents[6].value2) ==
+      vector.expected);
+  }
+}
+
 TEST_CASE("EE COP1 overlapping ALU results retire in program order")
 {
   NekoSystem system;

@@ -863,9 +863,9 @@ accumulator or condition-result contract:
       signed-zero and raw extended-finite behavior
 - [x] Migrate `MAX.S` and `MIN.S`, including selected-operand normalization and
       ordered FCR31 overflow/underflow updates
-- [ ] Cover cross-family forwarding, same-register read/write aliases, WAW
+- [x] Cover cross-family forwarding, same-register read/write aliases, WAW
       ordering, traces, hashes, exceptions, and save-state continuation
-- [ ] Complete an independent unary/min/max migration review
+- [x] Complete an independent unary/min/max migration review
 
 ### C1 Conversion and Comparison Migration
 

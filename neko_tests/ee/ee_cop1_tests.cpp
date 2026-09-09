@@ -3220,6 +3220,93 @@ TEST_CASE("EE COP1 unary operations capture their source at T")
   }
 }
 
+TEST_CASE("EE COP1 staged ALU families forward through aliases")
+{
+  SECTION("Unary to min/max read-modify-write")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0xbf800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x07, 2, 4));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x28, 4, 4, 3));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x3f800000));
+
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40000000));
+  }
+
+  SECTION("Min/max to unary read-modify-write")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x29, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x07, 4, 4));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x3f800000));
+
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xbf800000));
+  }
+
+  SECTION("Pure cross-family WAW retires in issue order")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0xbf800000));
+    core.setFloatingPointRegister(5, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x40400000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x05, 2, 4));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x28, 5, 4, 6));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x3f800000));
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+  }
+}
+
 TEST_CASE(
   "EE COP1 add and subtract interlock pre-S FPR dependencies")
 {
@@ -4284,6 +4371,48 @@ TEST_CASE("EE staged COP1 add state participates in state hashes")
   }
 }
 
+TEST_CASE("EE staged unary and min/max state participates in hashes")
+{
+  const auto stagedHash =
+    [](std::uint8_t function,
+       std::uint32_t fs,
+       std::uint32_t ft,
+       std::size_t cycles)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setFloatingPointRegister(2, fs);
+      core.setFloatingPointRegister(3, ft);
+      system.eeBus().write32(
+        0,
+        cop1SingleInstruction(
+          function,
+          2,
+          4,
+          function == 0x05 || function == 0x07 ? 0 : 3));
+      core.startExecution(0);
+      system.runMasterCycles(cycles);
+      core.setFloatingPointRegister(2, 0);
+      core.setFloatingPointRegister(3, 0);
+      return core.stateHash();
+    };
+
+  REQUIRE(
+    stagedHash(0x05, UINT32_C(0xbf800000), 0, 2) !=
+    stagedHash(0x05, UINT32_C(0xc0000000), 0, 2));
+  REQUIRE(
+    stagedHash(
+      0x28,
+      UINT32_C(0x3f800000),
+      UINT32_C(0x40000000),
+      5) !=
+    stagedHash(
+      0x28,
+      UINT32_C(0x40400000),
+      UINT32_C(0x40000000),
+      5));
+}
+
 TEST_CASE("EE COP1 divider work continues through exception entry")
 {
   NekoSystem system;
@@ -4385,6 +4514,62 @@ TEST_CASE("EE staged COP1 add work crosses exception entry")
     REQUIRE(
       core.floatingPointRegister(5) ==
       UINT32_C(0x40000000));
+  }
+}
+
+TEST_CASE("EE staged unary and min/max work crosses exception entry")
+{
+  struct ExceptionVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+  };
+  const ExceptionVector vectors[] = {
+    {0x05, UINT32_C(0xbf800000), 0, UINT32_C(0x3f800000)},
+    {0x28, UINT32_C(0x3f800000), UINT32_C(0x40000000),
+     UINT32_C(0x40000000)}
+  };
+
+  for (const ExceptionVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        4,
+        vector.function == 0x05 ||
+            vector.function == 0x07
+          ? 0
+          : 3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    for (std::uint32_t address = EEExceptionVector::GENERAL;
+         address < EEExceptionVector::GENERAL + 24;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
   }
 }
 
@@ -4639,6 +4824,51 @@ TEST_CASE("EE COP1 operate resource interlocks a following move")
       core.generalRegister(5).low ==
       UINT64_C(0x0000000040c00000));
   }
+}
+
+TEST_CASE("EE cross-family forwarded operands survive save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setFloatingPointRegister(
+    2,
+    UINT32_C(0xbf800000));
+  originalCore.setFloatingPointRegister(
+    3,
+    UINT32_C(0x40000000));
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x07, 2, 4));
+  original.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x28, 4, 5, 3));
+  originalCore.startExecution(0);
+  original.runMasterCycles(6);
+  originalCore.haltExecution();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  originalCore.setFloatingPointRegister(
+    4,
+    UINT32_C(0xdeadbeef));
+  restored.eeCore().setFloatingPointRegister(
+    4,
+    UINT32_C(0xdeadbeef));
+  originalCore.startExecution(originalCore.programCounter());
+  restored.eeCore().startExecution(
+    restored.eeCore().programCounter());
+
+  original.runMasterCycles(4);
+  restored.runMasterCycles(4);
+
+  REQUIRE(
+    originalCore.floatingPointRegister(5) ==
+    UINT32_C(0x40000000));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(5) ==
+    UINT32_C(0x40000000));
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
 }
 
 TEST_CASE("EE COP1 resource occupancy survives halt and save-state restore")
