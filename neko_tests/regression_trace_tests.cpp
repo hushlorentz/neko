@@ -993,24 +993,34 @@ TEST_CASE("EE COP1 unary and min/max trace staged progression")
   }
 }
 
-TEST_CASE("EE COP1 multiply traces FPR and ACC retirement")
+TEST_CASE("EE COP1 multiply and ADDA trace FPR and ACC retirement")
 {
   struct TraceVector
   {
     std::uint8_t function;
     std::uint8_t destination;
+    std::uint32_t expected;
     std::uint64_t destinationMask;
   };
   const TraceVector vectors[] = {
     {
       0x02,
       4,
+      UINT32_C(0x40c00000),
       NekoEETraceCOP1Result::DESTINATION_FPR |
         NekoEETraceCOP1Result::DESTINATION_FCR31
     },
     {
       0x1a,
       0,
+      UINT32_C(0x40c00000),
+      NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
+    },
+    {
+      0x18,
+      0,
+      UINT32_C(0x40a00000),
       NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
         NekoEETraceCOP1Result::DESTINATION_FCR31
     }
@@ -1051,7 +1061,7 @@ TEST_CASE("EE COP1 multiply traces FPR and ACC retirement")
     REQUIRE(pipelineEvents[6].masterCycle == 6);
     REQUIRE(
       pipelineEvents[6].value2 ==
-      (UINT64_C(0x40c00000) |
+      (vector.expected |
        (vector.destinationMask <<
         NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
        (static_cast<std::uint64_t>(vector.destination) <<

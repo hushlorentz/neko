@@ -2055,6 +2055,10 @@ TEST_CASE("EE COP1 accumulator add and subtract write only ACC")
         2,
         0,
         3));
+    if (vector.function == 0x18)
+    {
+      system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+    }
 
     REQUIRE(core.floatingPointRegister(0) == UINT32_C(0x11111111));
     REQUIRE(core.floatingPointRegister(2) == vector.fs);
@@ -2063,6 +2067,38 @@ TEST_CASE("EE COP1 accumulator add and subtract write only ACC")
       core.floatingPointAccumulator() ==
       vector.expected);
   }
+}
+
+TEST_CASE("EE COP1 ADDA captures operands in T and writes ACC in S")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointAccumulator(UINT32_C(0x11111111));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x18, 2, 0, 3));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  core.setFloatingPointRegister(2, UINT32_C(0x40400000));
+  system.clockMasterCycle();
+  core.setFloatingPointRegister(2, UINT32_C(0x41200000));
+  system.runMasterCycles(3);
+
+  REQUIRE(
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x11111111));
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x40a00000));
+  REQUIRE(
+    core.floatingPointRegister(2) ==
+    UINT32_C(0x41200000));
 }
 
 TEST_CASE("EE COP1 add and subtract support in-place writes")
@@ -2120,6 +2156,7 @@ TEST_CASE(
     runInstruction(
       &system,
       cop1SingleInstruction(0x18, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -2139,6 +2176,7 @@ TEST_CASE(
     runInstruction(
       &system,
       cop1SingleInstruction(0x18, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -3590,6 +3628,30 @@ TEST_CASE("EE COP1 staged ALU families forward through aliases")
       core.floatingPointRegister(4) ==
       UINT32_C(0x40400000));
   }
+
+  SECTION("FPR add forwards into accumulator add")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(5, UINT32_C(0x3f000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x18, 4, 0, 5));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+    core.setFloatingPointRegister(4, UINT32_C(0xdeadbeef));
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40600000));
+  }
 }
 
 TEST_CASE(
@@ -4762,6 +4824,33 @@ TEST_CASE("EE staged COP1 multiply state participates in state hashes")
   }
 }
 
+TEST_CASE("EE staged COP1 ADDA state participates in state hashes")
+{
+  const auto stagedHash =
+    [](std::uint32_t fs, std::size_t cycles)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setFloatingPointRegister(2, fs);
+      core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+      system.eeBus().write32(
+        0,
+        cop1SingleInstruction(0x18, 2, 0, 3));
+      core.startExecution(0);
+      system.runMasterCycles(cycles);
+      core.setFloatingPointRegister(2, 0);
+      core.setFloatingPointRegister(3, 0);
+      return core.stateHash();
+    };
+
+  REQUIRE(
+    stagedHash(UINT32_C(0x3f800000), 2) !=
+    stagedHash(UINT32_C(0x40400000), 2));
+  REQUIRE(
+    stagedHash(UINT32_C(0x3f800000), 5) !=
+    stagedHash(UINT32_C(0x7f800000), 5));
+}
+
 TEST_CASE("EE staged unary and min/max state participates in hashes")
 {
   const auto stagedHash =
@@ -4995,6 +5084,39 @@ TEST_CASE("EE staged COP1 multiply work crosses exception entry")
   REQUIRE(
     core.floatingPointAccumulator() ==
     UINT32_C(0x40c00000));
+}
+
+TEST_CASE("EE staged COP1 ADDA work crosses exception entry")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x18, 2, 0, 3));
+  system.eeBus().write32(4, UINT32_C(0x0000000c));
+  for (std::uint32_t address = EEExceptionVector::GENERAL;
+       address < EEExceptionVector::GENERAL + 24;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.pendingException() == EEException::SystemCall);
+  REQUIRE(core.floatingPointAccumulator() == 0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(
+    core.floatingPointAccumulator() ==
+    UINT32_C(0x40400000));
 }
 
 TEST_CASE("EE staged unary and min/max work crosses exception entry")
@@ -5520,31 +5642,67 @@ TEST_CASE(
 TEST_CASE(
   "EE COP1 accumulator writes preserve write-after-write order")
 {
-  NekoSystem system;
-  EECore &core = system.eeCore();
-  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
-  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
-  core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
-  system.eeBus().write32(
-    0,
-    cop1SingleInstruction(0x18, 2, 0, 3));
-  system.eeBus().write32(
-    4,
-    cop1SingleInstruction(0x19, 6, 0, 2));
-  core.startExecution(0);
+  SECTION("Staged writers retire on consecutive cycles")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x18, 2, 0, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x1a, 6, 0, 7));
+    core.startExecution(0);
 
-  system.clockMasterCycle();
+    system.runMasterCycles(5);
 
-  REQUIRE(
-    core.floatingPointAccumulator() ==
-    UINT32_C(0x40400000));
+    REQUIRE(core.programCounter() == 20);
+    REQUIRE(core.floatingPointAccumulator() == 0);
 
-  system.clockMasterCycle();
+    system.clockMasterCycle();
 
-  REQUIRE(core.programCounter() == 8);
-  REQUIRE(
-    core.floatingPointAccumulator() ==
-    UINT32_C(0x40800000));
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40400000));
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40200000));
+  }
+
+  SECTION("Atomic SUBA waits for staged ADDA retirement")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x40a00000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x18, 2, 0, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x19, 6, 0, 2));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.floatingPointAccumulator() == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40800000));
+  }
 }
 
 TEST_CASE(
@@ -5904,6 +6062,15 @@ TEST_CASE(
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.floatingPointAccumulator() == 0);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_UNDERFLOW |
+       EECOP1Control::STICKY_UNDERFLOW));
+
+    system.runMasterCycles(5);
+
     REQUIRE(
       core.floatingPointAccumulator() ==
       UINT32_C(0x40400000));
@@ -6047,6 +6214,51 @@ TEST_CASE(
 TEST_CASE(
   "EE COP1 addition timing survives host halt and save-state restore")
 {
+  SECTION("A restored ADDA preserves captured operands")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x3f800000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40000000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x18, 2, 0, 3));
+    originalCore.startExecution(0);
+    original.runMasterCycles(2);
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0xdeadbeef));
+    restored.eeCore().setFloatingPointRegister(
+      2,
+      UINT32_C(0xdeadbeef));
+    const std::uint32_t resumeAddress =
+      originalCore.programCounter();
+    originalCore.startExecution(resumeAddress);
+    restored.eeCore().startExecution(resumeAddress);
+
+    original.runMasterCycles(4);
+    restored.runMasterCycles(4);
+
+    REQUIRE(
+      originalCore.floatingPointAccumulator() ==
+      UINT32_C(0x40400000));
+    REQUIRE(
+      restored.eeCore().floatingPointAccumulator() ==
+      UINT32_C(0x40400000));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(
+      originalCore.stateHash() ==
+      restored.eeCore().stateHash());
+  }
+
   SECTION("A restored dependent FPR instruction sees the older result")
   {
     NekoSystem original;
@@ -6175,8 +6387,8 @@ TEST_CASE(
     restored.loadState(original.saveState());
     originalCore.startExecution(4);
     restored.eeCore().startExecution(4);
-    original.clockMasterCycle();
-    restored.clockMasterCycle();
+    original.runMasterCycles(5);
+    restored.runMasterCycles(5);
 
     REQUIRE(
       originalCore.floatingPointAccumulator() ==

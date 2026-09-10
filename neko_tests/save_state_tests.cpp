@@ -1641,6 +1641,50 @@ TEST_CASE("Invalid staged COP1 multiply results are rejected")
   }
 }
 
+TEST_CASE("Invalid staged COP1 ADDA results are rejected")
+{
+  NekoSystem source;
+  source.eeCore().setFloatingPointRegister(
+    2,
+    UINT32_C(0x7f800000));
+  source.eeCore().setFloatingPointRegister(
+    3,
+    UINT32_C(0x7f800000));
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x18, 2, 0, 3));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(5);
+  source.eeCore().haltExecution();
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+
+  SECTION("The Z-stage result must match its captured operands")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+      1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("ADDA must name ACC and FCR31 as its destinations")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+        1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+}
+
 TEST_CASE("Invalid staged COP1 min/max results are rejected")
 {
   NekoSystem source;
