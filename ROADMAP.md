@@ -873,7 +873,7 @@ accumulator or condition-result contract:
       ordered FPR/FCR31 result delivery
 - [x] Migrate `C.F.S`, `C.EQ.S`, `C.LT.S`, and `C.LE.S`, retaining condition
       results in flight until their documented visibility and commit boundaries
-- [ ] Interlock or forward comparison-to-branch and `CFC1` dependencies without
+- [x] Interlock or forward comparison-to-branch and `CFC1` dependencies without
       exposing a younger condition or FCR31 value early
 - [ ] Verify conversion truncation, comparison edge cases, ordered flags and
       condition writes, traces, hashes, exceptions, and save/restore behavior

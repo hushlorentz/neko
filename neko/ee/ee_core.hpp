@@ -286,7 +286,8 @@ class EECore : public ClockedComponent
     {
       FPR,
       Accumulator,
-      FCR31
+      FCR31,
+      Condition
     };
 
     enum class COP1ScoreboardAvailability : std::uint8_t
@@ -579,12 +580,15 @@ class EECore : public ClockedComponent
       std::uint64_t consumerOrder) const;
     std::uint32_t scoreboardAccumulatorValue() const;
     std::uint32_t scoreboardFCR31Value() const;
+    bool scoreboardCOP1Condition() const;
     static COP1Dependency instructionFPRDependency(
       const EEInstruction &instruction,
       std::uint8_t registerIndex);
     static COP1Dependency instructionAccumulatorDependency(
       const EEInstruction &instruction);
     static COP1Dependency instructionFCR31Dependency(
+      const EEInstruction &instruction);
+    static COP1Dependency instructionConditionDependency(
       const EEInstruction &instruction);
     static bool isCOP1MoveOperation(EEOperation operation);
     static bool isCOP1OperateOperation(EEOperation operation);

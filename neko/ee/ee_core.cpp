@@ -665,7 +665,10 @@ void EECore::clock()
         : scoreboardHazard.resource ==
             COP1ScoreboardResource::Accumulator
           ? FLOATING_POINT_REGISTER_COUNT
-          : FLOATING_POINT_REGISTER_COUNT + 1;
+          : scoreboardHazard.resource ==
+              COP1ScoreboardResource::FCR31
+            ? FLOATING_POINT_REGISTER_COUNT + 1
+            : FLOATING_POINT_REGISTER_COUNT + 2;
     recordCycleTrace(
       CycleTraceKind::COP1ResourceInterlock,
       instructionAddress,
@@ -1143,8 +1146,7 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(
           signExtend16(instruction.immediate) << 2);
       scheduleBranch(
-        ((scoreboardFCR31Value() &
-          EECOP1Control::CONDITION) != 0) == branchOnTrue,
+        scoreboardCOP1Condition() == branchOnTrue,
         likely,
         branchTarget,
         address);
@@ -3377,6 +3379,22 @@ bool EECore::cop1ScoreboardBlocks(
     };
     return true;
   }
+
+  const COP1Dependency conditionDependency =
+    instructionConditionDependency(instruction);
+  if (conditionDependency != COP1Dependency::None &&
+      cop1ScoreboardValue(
+        COP1ScoreboardResource::Condition)
+        .availability ==
+          COP1ScoreboardAvailability::Unavailable)
+  {
+    *hazard = {
+      COP1ScoreboardResource::Condition,
+      0,
+      conditionDependency
+    };
+    return true;
+  }
   return false;
 }
 
@@ -3397,6 +3415,10 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
     case COP1ScoreboardResource::FCR31:
       value.value = cop1ControlRegister(
         EECOP1Control::STATUS_REGISTER);
+      break;
+    case COP1ScoreboardResource::Condition:
+      value.value =
+        cop1Condition() ? EECOP1Control::CONDITION : 0;
       break;
   }
 
@@ -3427,6 +3449,15 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
           (operation.destination.mask &
            (COP1_DESTINATION_FCR31 |
             COP1_DESTINATION_CONDITION)) != 0;
+        break;
+      case COP1ScoreboardResource::Condition:
+        writesResource =
+          (operation.destination.mask &
+           COP1_DESTINATION_CONDITION) != 0 ||
+          ((operation.destination.mask &
+            COP1_DESTINATION_FCR31) != 0 &&
+            operation.instruction.operation ==
+              EEOperation::MoveControlWordToCOP1);
         break;
     }
     if (writesResource &&
@@ -3502,6 +3533,23 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
       value.value = status | EECOP1Control::STATUS_FIXED;
       break;
     }
+    case COP1ScoreboardResource::Condition:
+      if ((producer->destination.mask &
+           COP1_DESTINATION_CONDITION) != 0)
+      {
+        value.value =
+          producer->conditionResult
+            ? EECOP1Control::CONDITION
+            : 0;
+      }
+      else
+      {
+        value.value =
+          static_cast<std::uint32_t>(
+            producer->capturedGPR) &
+          EECOP1Control::CONDITION;
+      }
+      break;
   }
   return value;
 }
@@ -3586,6 +3634,20 @@ std::uint32_t EECore::scoreboardFCR31Value() const
       "Unavailable EE FCR31 reached execution.");
   }
   return value.value;
+}
+
+bool EECore::scoreboardCOP1Condition() const
+{
+  const COP1ScoreboardValue value =
+    cop1ScoreboardValue(
+      COP1ScoreboardResource::Condition);
+  if (value.availability ==
+      COP1ScoreboardAvailability::Unavailable)
+  {
+    throw std::logic_error(
+      "Unavailable EE COP1 condition reached execution.");
+  }
+  return (value.value & EECOP1Control::CONDITION) != 0;
 }
 
 EECore::COP1Dependency EECore::instructionFPRDependency(
@@ -3702,11 +3764,6 @@ EECore::COP1Dependency EECore::instructionFCR31Dependency(
         EECOP1Control::STATUS_REGISTER
           ? COP1Dependency::Write
           : COP1Dependency::None;
-    case EEOperation::BranchCOP1False:
-    case EEOperation::BranchCOP1FalseLikely:
-    case EEOperation::BranchCOP1True:
-    case EEOperation::BranchCOP1TrueLikely:
-      return COP1Dependency::Read;
     case EEOperation::MoveSingleCOP1:
     case EEOperation::ConvertWordToSingleCOP1:
       return COP1Dependency::None;
@@ -3714,6 +3771,22 @@ EECore::COP1Dependency EECore::instructionFCR31Dependency(
       return isCOP1OperateOperation(instruction.operation)
         ? COP1Dependency::ReadWrite
         : COP1Dependency::None;
+  }
+}
+
+EECore::COP1Dependency
+EECore::instructionConditionDependency(
+  const EEInstruction &instruction)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::BranchCOP1False:
+    case EEOperation::BranchCOP1FalseLikely:
+    case EEOperation::BranchCOP1True:
+    case EEOperation::BranchCOP1TrueLikely:
+      return COP1Dependency::Read;
+    default:
+      return COP1Dependency::None;
   }
 }
 

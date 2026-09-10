@@ -2855,6 +2855,116 @@ TEST_CASE("EE COP1 comparison condition retires in instruction order")
   REQUIRE_FALSE(core.cop1Condition());
 }
 
+TEST_CASE(
+  "EE COP1 condition dependencies are ordered independently of flags")
+{
+  SECTION("A branch need not wait for a newer arithmetic flag result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(6, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(7, UINT32_C(0x7f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x32, 2, 0, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 6, 8, 7));
+    system.eeBus().write32(
+      8,
+      cop1BranchInstruction(1, 2));
+    system.eeBus().write32(12, UINT32_C(0x34020001));
+    system.eeBus().write32(16, UINT32_C(0x34030002));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.cop1Condition());
+    REQUIRE(core.floatingPointRegister(8) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 20);
+    REQUIRE(
+      core.floatingPointRegister(8) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CONDITION |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+
+  SECTION("A branch cannot observe a younger comparison early")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x32, 6, 0, 7));
+    system.eeBus().write32(
+      8,
+      cop1BranchInstruction(1, 2));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE_FALSE(core.cop1Condition());
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.cop1Condition());
+  }
+
+  SECTION("CFC1 waits for the complete ordered FCR31 value")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(6, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(7, UINT32_C(0x7f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x32, 2, 0, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 6, 8, 7));
+    system.eeBus().write32(
+      8,
+      cop1TransferInstruction(0x02, 5, 31));
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(
+      core.generalRegister(5).low ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CONDITION |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
+  }
+}
+
 TEST_CASE("EE COP1 CVT.S.W decodes only its canonical W form")
 {
   REQUIRE(
