@@ -886,7 +886,7 @@ accumulator or condition-result contract:
       undefined, adopt an isolated provisional policy of immutable `2T`
       capture, `1S` availability with S-to-`2T` bypass, and `2S` architectural
       commit, pending stronger documentation or hardware measurement
-- [ ] Migrate `MUL.S` and `MULA.S` through captured `T` operands, documented
+- [x] Migrate `MUL.S` and `MULA.S` through captured `T` operands, documented
       `X/Y` multiply work, and ordered FPR or ACC result delivery
 - [ ] Migrate accumulator add/subtract and compound
       `MADD`/`MSUB`/`MADDA`/`MSUBA` families through the proven multiply and

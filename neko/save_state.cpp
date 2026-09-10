@@ -2152,6 +2152,17 @@ void NekoSaveStateCodec::readEECore(
               expectedFlags = result.flags;
               break;
             }
+            case EEOperation::MultiplySingleCOP1:
+            case EEOperation::MultiplySingleToAccumulatorCOP1:
+            {
+              const EEFloatResult result =
+                mulFPRaw(
+                  operation.capturedFS,
+                  operation.capturedFT);
+              expectedResult = result.bits;
+              expectedFlags = result.flags;
+              break;
+            }
             case EEOperation::CompareFalseSingleCOP1:
             case EEOperation::CompareEqualSingleCOP1:
             case EEOperation::CompareLessThanSingleCOP1:
@@ -2193,13 +2204,19 @@ void NekoSaveStateCodec::readEECore(
         const bool comparison =
           EECore::isCOP1ComparisonOperation(
             operation.instruction.operation);
+        const bool accumulatorDestination =
+          operation.instruction.operation ==
+            EEOperation::MultiplySingleToAccumulatorCOP1;
         const std::uint8_t expectedDestination =
           comparison
             ? EECore::COP1_DESTINATION_CONDITION
-            : EECore::COP1_DESTINATION_FPR |
-              (wordToSingle
-                ? 0
-                : EECore::COP1_DESTINATION_FCR31);
+            : accumulatorDestination
+              ? EECore::COP1_DESTINATION_ACCUMULATOR |
+                EECore::COP1_DESTINATION_FCR31
+              : EECore::COP1_DESTINATION_FPR |
+                (wordToSingle
+                  ? 0
+                  : EECore::COP1_DESTINATION_FCR31);
         const std::uint8_t expectedAffectedFlags =
           wordToSingle || comparison
             ? 0

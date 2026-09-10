@@ -993,6 +993,75 @@ TEST_CASE("EE COP1 unary and min/max trace staged progression")
   }
 }
 
+TEST_CASE("EE COP1 multiply traces FPR and ACC retirement")
+{
+  struct TraceVector
+  {
+    std::uint8_t function;
+    std::uint8_t destination;
+    std::uint64_t destinationMask;
+  };
+  const TraceVector vectors[] = {
+    {
+      0x02,
+      4,
+      NekoEETraceCOP1Result::DESTINATION_FPR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
+    },
+    {
+      0x1a,
+      0,
+      NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
+    }
+  };
+
+  for (const TraceVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        vector.function,
+        2,
+        vector.destination,
+        3));
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(6);
+
+    std::vector<NekoTraceEvent> pipelineEvents;
+    for (const NekoTraceEvent &event : eeTrace(system))
+    {
+      if (event.type ==
+            NekoTraceEventType::COP1StageTransition ||
+          event.type == NekoTraceEventType::COP1Retired)
+      {
+        pipelineEvents.push_back(event);
+      }
+    }
+    REQUIRE(pipelineEvents.size() == 7);
+    REQUIRE(
+      pipelineEvents[6].type ==
+      NekoTraceEventType::COP1Retired);
+    REQUIRE(pipelineEvents[6].masterCycle == 6);
+    REQUIRE(
+      pipelineEvents[6].value2 ==
+      (UINT64_C(0x40c00000) |
+       (vector.destinationMask <<
+        NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
+       (static_cast<std::uint64_t>(vector.destination) <<
+        NekoEETraceCOP1Result::FPR_REGISTER_SHIFT)));
+    REQUIRE(
+      pipelineEvents[6].value3 ==
+      (FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW));
+  }
+}
+
 TEST_CASE("EE COP1 conversion and comparison traces encode results")
 {
   struct TraceVector
@@ -1395,9 +1464,10 @@ TEST_CASE("EE COP1 resource interlock traces a blocked move")
   const std::uint32_t moveInstruction =
     (UINT32_C(0x11) << 26) |
     (UINT32_C(5) << 16) |
-    (UINT32_C(4) << 11);
+    (UINT32_C(7) << 11);
   core.setFloatingPointRegister(2, UINT32_C(0x40000000));
   core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  core.setFloatingPointRegister(7, UINT32_C(0x89abcdef));
   system.eeBus().write32(0, multiplyInstruction);
   system.eeBus().write32(4, moveInstruction);
   core.startExecution(0);

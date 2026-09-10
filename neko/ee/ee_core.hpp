@@ -595,6 +595,8 @@ class EECore : public ClockedComponent
     static bool isCOP1DividerOperation(EEOperation operation);
     static bool isCOP1AddSubtractOperation(
       EEOperation operation);
+    static bool isCOP1MultiplyOperation(
+      EEOperation operation);
     static bool isCOP1UnaryOperation(EEOperation operation);
     static bool isCOP1SingleSourceStagedOperation(
       EEOperation operation);

@@ -953,7 +953,6 @@ bool EECore::executeInstruction(
         result.flags);
       return true;
     }
-    case EEOperation::MultiplySingleCOP1:
     case EEOperation::DivideSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
@@ -964,37 +963,12 @@ bool EECore::executeInstruction(
         scoreboardFPRValue(destination);
       const std::uint32_t ftBits =
         scoreboardFPRValue(instruction.targetRegister);
-      EEFloatResult result;
-      switch (instruction.operation)
-      {
-        case EEOperation::AddSingleCOP1:
-          result = addFPRaw(fsBits, ftBits);
-          break;
-        case EEOperation::MultiplySingleCOP1:
-          result = mulFPRaw(fsBits, ftBits);
-          break;
-        case EEOperation::DivideSingleCOP1:
-          result = divEEFloatRaw(fsBits, ftBits);
-          break;
-        default:
-          result = subFPRaw(fsBits, ftBits);
-          break;
-      }
-      if (instruction.operation == EEOperation::DivideSingleCOP1)
-      {
-        startPendingCOP1Divider(
-          instruction,
-          result.bits,
-          result.flags);
-      }
-      else
-      {
-        floatingPointRegisters[instruction.shiftAmount] =
-          result.bits;
-        updateCOP1ArithmeticFlags(
-          FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
-          result.flags);
-      }
+      const EEFloatResult result =
+        divEEFloatRaw(fsBits, ftBits);
+      startPendingCOP1Divider(
+        instruction,
+        result.bits,
+        result.flags);
       return true;
     }
     case EEOperation::AbsoluteSingleCOP1:
@@ -1005,6 +979,8 @@ bool EECore::executeInstruction(
     case EEOperation::ConvertSingleToWordCOP1:
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
     case EEOperation::CompareFalseSingleCOP1:
     case EEOperation::CompareEqualSingleCOP1:
     case EEOperation::CompareLessThanSingleCOP1:
@@ -1020,6 +996,13 @@ bool EECore::executeInstruction(
       {
         operation.destination.mask =
           COP1_DESTINATION_CONDITION;
+      }
+      else if (instruction.operation ==
+                 EEOperation::MultiplySingleToAccumulatorCOP1)
+      {
+        operation.destination.mask =
+          COP1_DESTINATION_ACCUMULATOR |
+          COP1_DESTINATION_FCR31;
       }
       else
       {
@@ -1054,7 +1037,6 @@ bool EECore::executeInstruction(
     }
     case EEOperation::AddSingleToAccumulatorCOP1:
     case EEOperation::SubtractSingleToAccumulatorCOP1:
-    case EEOperation::MultiplySingleToAccumulatorCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
@@ -1069,9 +1051,6 @@ bool EECore::executeInstruction(
       {
         case EEOperation::AddSingleToAccumulatorCOP1:
           result = addFPRaw(fsBits, ftBits);
-          break;
-        case EEOperation::MultiplySingleToAccumulatorCOP1:
-          result = mulFPRaw(fsBits, ftBits);
           break;
         default:
           result = subFPRaw(fsBits, ftBits);
@@ -3170,6 +3149,17 @@ void EECore::computeInFlightCOP1StagedOperation(
       operation->raisedFlags = result.flags;
       return;
     }
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+    {
+      const EEFloatResult result =
+        mulFPRaw(
+          operation->capturedFS,
+          operation->capturedFT);
+      operation->rawResult = result.bits;
+      operation->raisedFlags = result.flags;
+      return;
+    }
     default:
       throw std::logic_error(
         "Unsupported staged EE COP1 ALU operation.");
@@ -3239,6 +3229,12 @@ void EECore::commitInFlightCOP1(
     floatingPointRegisters[
       operation->destination.fprRegister] =
         operation->rawResult;
+  }
+  if ((operation->destination.mask &
+       COP1_DESTINATION_ACCUMULATOR) != 0)
+  {
+    floatingPointAccumulatorRegister =
+      operation->rawResult;
   }
   if ((operation->destination.mask &
        COP1_DESTINATION_FCR31) != 0)
@@ -3342,11 +3338,18 @@ bool EECore::cop1ScoreboardBlocks(
 
   const COP1Dependency accumulatorDependency =
     instructionAccumulatorDependency(instruction);
+  const COP1ScoreboardValue accumulatorValue =
+    cop1ScoreboardValue(
+      COP1ScoreboardResource::Accumulator);
+  const bool orderedStagedAccumulatorWrite =
+    accumulatorDependency == COP1Dependency::Write &&
+    isCOP1StagedOperation(instruction.operation) &&
+    isCOP1StagedOperation(
+      accumulatorValue.producerOperation);
   if (accumulatorDependency != COP1Dependency::None &&
-      cop1ScoreboardValue(
-        COP1ScoreboardResource::Accumulator)
-        .availability ==
-          COP1ScoreboardAvailability::Unavailable)
+      !orderedStagedAccumulatorWrite &&
+      accumulatorValue.availability ==
+        COP1ScoreboardAvailability::Unavailable)
   {
     *hazard = {
       COP1ScoreboardResource::Accumulator,
@@ -3855,6 +3858,14 @@ bool EECore::isCOP1AddSubtractOperation(
     operation == EEOperation::SubtractSingleCOP1;
 }
 
+bool EECore::isCOP1MultiplyOperation(
+  EEOperation operation)
+{
+  return operation == EEOperation::MultiplySingleCOP1 ||
+    operation ==
+      EEOperation::MultiplySingleToAccumulatorCOP1;
+}
+
 bool EECore::isCOP1UnaryOperation(EEOperation operation)
 {
   return operation == EEOperation::AbsoluteSingleCOP1 ||
@@ -3884,6 +3895,7 @@ bool EECore::isCOP1StagedOperation(
 {
   return isCOP1SingleSourceStagedOperation(operation) ||
     isCOP1AddSubtractOperation(operation) ||
+    isCOP1MultiplyOperation(operation) ||
     operation == EEOperation::MaximumSingleCOP1 ||
     operation == EEOperation::MinimumSingleCOP1 ||
     isCOP1ComparisonOperation(operation);
