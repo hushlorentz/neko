@@ -881,16 +881,19 @@ accumulator or condition-result contract:
 
 ### C1 Multiply and Accumulator Migration
 
-- [ ] Resolve ACC operand capture, forwarding, and commit timing from the local
-      manuals before implementation; if the manuals do not define a required
-      boundary, pause rather than assigning speculative hardware behavior
+- [x] Resolve ACC operand capture, forwarding, and commit timing: after the
+      local manuals and approved secondary sources left the boundaries
+      undefined, adopt an isolated provisional policy of immutable `2T`
+      capture, `1S` availability with S-to-`2T` bypass, and `2S` architectural
+      commit, pending stronger documentation or hardware measurement
 - [ ] Migrate `MUL.S` and `MULA.S` through captured `T` operands, documented
       `X/Y` multiply work, and ordered FPR or ACC result delivery
 - [ ] Migrate accumulator add/subtract and compound
       `MADD`/`MSUB`/`MADDA`/`MSUBA` families through the proven multiply and
       accumulator paths
 - [ ] Interlock or forward FPR, ACC, FCR31, WAW, and read-modify-write
-      dependencies at their documented visibility boundaries
+      dependencies at their documented FPR/FCR31 and provisional ACC
+      visibility boundaries
 - [ ] Preserve product and accumulation arithmetic/sticky flags in program
       order across overlap, exceptions, halt/resume, hashes, traces, and
       save-state restore
