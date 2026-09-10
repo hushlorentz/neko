@@ -1641,47 +1641,54 @@ TEST_CASE("Invalid staged COP1 multiply results are rejected")
   }
 }
 
-TEST_CASE("Invalid staged COP1 ADDA results are rejected")
+TEST_CASE("Invalid staged COP1 accumulator add results are rejected")
 {
-  NekoSystem source;
-  source.eeCore().setFloatingPointRegister(
-    2,
-    UINT32_C(0x7f800000));
-  source.eeCore().setFloatingPointRegister(
-    3,
-    UINT32_C(0x7f800000));
-  source.eeBus().write32(
-    0,
-    cop1SingleInstruction(0x18, 2, 0, 3));
-  source.eeCore().startExecution(0);
-  source.runMasterCycles(5);
-  source.eeCore().haltExecution();
-
-  NekoSystem destination;
-  const std::vector<std::uint8_t> before =
-    destination.saveState();
-
-  SECTION("The Z-stage result must match its captured operands")
+  for (const std::uint8_t function : {0x18, 0x19})
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
-      1;
-    updateChecksum(&invalid);
+    NekoSystem source;
+    source.eeCore().setFloatingPointRegister(
+      2,
+      function == 0x18
+        ? UINT32_C(0x7f800000)
+        : UINT32_C(0x00800001));
+    source.eeCore().setFloatingPointRegister(
+      3,
+      function == 0x18
+        ? UINT32_C(0x7f800000)
+        : UINT32_C(0x00800000));
+    source.eeBus().write32(
+      0,
+      cop1SingleInstruction(function, 2, 0, 3));
+    source.eeCore().startExecution(0);
+    source.runMasterCycles(5);
+    source.eeCore().haltExecution();
 
-    REQUIRE_THROWS(destination.loadState(invalid));
-    REQUIRE(destination.saveState() == before);
-  }
+    NekoSystem destination;
+    const std::vector<std::uint8_t> before =
+      destination.saveState();
 
-  SECTION("ADDA must name ACC and FCR31 as its destinations")
-  {
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
-        1;
-    updateChecksum(&invalid);
+    SECTION("The Z-stage result must match its captured operands")
+    {
+      std::vector<std::uint8_t> invalid = source.saveState();
+      invalid[
+        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^= 1;
+      updateChecksum(&invalid);
 
-    REQUIRE_THROWS(destination.loadState(invalid));
-    REQUIRE(destination.saveState() == before);
+      REQUIRE_THROWS(destination.loadState(invalid));
+      REQUIRE(destination.saveState() == before);
+    }
+
+    SECTION("The instruction must name ACC and FCR31 as destinations")
+    {
+      std::vector<std::uint8_t> invalid = source.saveState();
+      invalid[
+        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+          1;
+      updateChecksum(&invalid);
+
+      REQUIRE_THROWS(destination.loadState(invalid));
+      REQUIRE(destination.saveState() == before);
+    }
   }
 }
 

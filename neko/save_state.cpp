@@ -2139,10 +2139,13 @@ void NekoSaveStateCodec::readEECore(
             case EEOperation::AddSingleCOP1:
             case EEOperation::SubtractSingleCOP1:
             case EEOperation::AddSingleToAccumulatorCOP1:
+            case EEOperation::SubtractSingleToAccumulatorCOP1:
             {
               const EEFloatResult result =
                 operation.instruction.operation !=
-                  EEOperation::SubtractSingleCOP1
+                  EEOperation::SubtractSingleCOP1 &&
+                operation.instruction.operation !=
+                  EEOperation::SubtractSingleToAccumulatorCOP1
                   ? addFPRaw(
                       operation.capturedFS,
                       operation.capturedFT)
@@ -2208,6 +2211,8 @@ void NekoSaveStateCodec::readEECore(
         const bool accumulatorDestination =
           operation.instruction.operation ==
             EEOperation::AddSingleToAccumulatorCOP1 ||
+          operation.instruction.operation ==
+            EEOperation::SubtractSingleToAccumulatorCOP1 ||
           operation.instruction.operation ==
             EEOperation::MultiplySingleToAccumulatorCOP1;
         const std::uint8_t expectedDestination =

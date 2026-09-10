@@ -993,7 +993,7 @@ TEST_CASE("EE COP1 unary and min/max trace staged progression")
   }
 }
 
-TEST_CASE("EE COP1 multiply and ADDA trace FPR and ACC retirement")
+TEST_CASE("EE COP1 multiply and accumulator add trace retirement")
 {
   struct TraceVector
   {
@@ -1021,6 +1021,13 @@ TEST_CASE("EE COP1 multiply and ADDA trace FPR and ACC retirement")
       0x18,
       0,
       UINT32_C(0x40a00000),
+      NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
+    },
+    {
+      0x19,
+      0,
+      UINT32_C(0xbf800000),
       NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
         NekoEETraceCOP1Result::DESTINATION_FCR31
     }

@@ -980,6 +980,7 @@ bool EECore::executeInstruction(
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::MultiplySingleToAccumulatorCOP1:
     case EEOperation::CompareFalseSingleCOP1:
@@ -1000,6 +1001,8 @@ bool EECore::executeInstruction(
       }
       else if (instruction.operation ==
                  EEOperation::AddSingleToAccumulatorCOP1 ||
+               instruction.operation ==
+                 EEOperation::SubtractSingleToAccumulatorCOP1 ||
                instruction.operation ==
                  EEOperation::MultiplySingleToAccumulatorCOP1)
       {
@@ -1036,24 +1039,6 @@ bool EECore::executeInstruction(
         operation,
         UINT8_MAX,
         COP1PipelineStage::R);
-      return true;
-    }
-    case EEOperation::SubtractSingleToAccumulatorCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      const std::uint32_t fsBits =
-        scoreboardFPRValue(destination);
-      const std::uint32_t ftBits =
-        scoreboardFPRValue(instruction.targetRegister);
-      const EEFloatResult result =
-        subFPRaw(fsBits, ftBits);
-      floatingPointAccumulatorRegister = result.bits;
-      updateCOP1ArithmeticFlags(
-        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
-        result.flags);
       return true;
     }
     case EEOperation::MultiplyAddSingleCOP1:
@@ -3130,10 +3115,13 @@ void EECore::computeInFlightCOP1StagedOperation(
     case EEOperation::AddSingleCOP1:
     case EEOperation::SubtractSingleCOP1:
     case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
     {
       const EEFloatResult result =
         operation->instruction.operation !=
-          EEOperation::SubtractSingleCOP1
+          EEOperation::SubtractSingleCOP1 &&
+        operation->instruction.operation !=
+          EEOperation::SubtractSingleToAccumulatorCOP1
           ? addFPRaw(
               operation->capturedFS,
               operation->capturedFT)
@@ -3851,7 +3839,9 @@ bool EECore::isCOP1AddSubtractOperation(
 {
   return operation == EEOperation::AddSingleCOP1 ||
     operation == EEOperation::SubtractSingleCOP1 ||
-    operation == EEOperation::AddSingleToAccumulatorCOP1;
+    operation == EEOperation::AddSingleToAccumulatorCOP1 ||
+    operation ==
+      EEOperation::SubtractSingleToAccumulatorCOP1;
 }
 
 bool EECore::isCOP1MultiplyOperation(
