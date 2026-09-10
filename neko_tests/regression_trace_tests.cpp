@@ -2,6 +2,7 @@
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
+#include "floating_point_ops.hpp"
 #include "neko_system.hpp"
 #include "regression_trace.hpp"
 
@@ -43,6 +44,19 @@ namespace
       (UINT32_C(0x11) << 26) |
       (UINT32_C(0x10) << 21) |
       (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(source) << 11) |
+      (static_cast<std::uint32_t>(destination) << 6) |
+      function;
+  }
+
+  std::uint32_t cop1WordInstruction(
+    std::uint8_t function,
+    std::uint8_t source,
+    std::uint8_t destination)
+  {
+    return
+      (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
       (static_cast<std::uint32_t>(source) << 11) |
       (static_cast<std::uint32_t>(destination) << 6) |
       function;
@@ -976,6 +990,84 @@ TEST_CASE("EE COP1 unary and min/max trace staged progression")
       static_cast<std::uint32_t>(
         pipelineEvents[6].value2) ==
       vector.expected);
+  }
+}
+
+TEST_CASE("EE COP1 conversion and comparison traces encode results")
+{
+  struct TraceVector
+  {
+    std::uint32_t instruction;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint64_t expectedResult;
+    std::uint64_t expectedFlags;
+  };
+  const TraceVector vectors[] = {
+    {
+      cop1WordInstruction(0x20, 2, 4),
+      UINT32_C(0x01000001),
+      0,
+      UINT64_C(0x4b800000) |
+        (NekoEETraceCOP1Result::DESTINATION_FPR <<
+         NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
+        (UINT64_C(4) <<
+         NekoEETraceCOP1Result::FPR_REGISTER_SHIFT),
+      0
+    },
+    {
+      cop1SingleInstruction(0x24, 2, 4),
+      UINT32_C(0x4f000000),
+      0,
+      UINT64_C(0x7fffffff) |
+        ((NekoEETraceCOP1Result::DESTINATION_FPR |
+          NekoEETraceCOP1Result::DESTINATION_FCR31) <<
+         NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
+        (UINT64_C(4) <<
+         NekoEETraceCOP1Result::FPR_REGISTER_SHIFT),
+      FP_FLAG_I_BIT |
+        (static_cast<std::uint64_t>(FP_FLAG_I_BIT) <<
+         NekoEETraceCOP1Result::RAISED_FLAGS_SHIFT)
+    },
+    {
+      cop1SingleInstruction(0x32, 2, 0, 3),
+      UINT32_C(0x3f800000),
+      UINT32_C(0x3f800000),
+      NekoEETraceCOP1Result::DESTINATION_CONDITION <<
+        NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT,
+      NekoEETraceCOP1Result::CONDITION
+    }
+  };
+
+  for (const TraceVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    system.eeBus().write32(0, vector.instruction);
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(6);
+
+    std::vector<NekoTraceEvent> pipelineEvents;
+    for (const NekoTraceEvent &event : eeTrace(system))
+    {
+      if (event.type ==
+            NekoTraceEventType::COP1StageTransition ||
+          event.type == NekoTraceEventType::COP1Retired)
+      {
+        pipelineEvents.push_back(event);
+      }
+    }
+    REQUIRE(pipelineEvents.size() == 7);
+    REQUIRE(
+      pipelineEvents[6].type ==
+      NekoTraceEventType::COP1Retired);
+    REQUIRE(pipelineEvents[6].masterCycle == 6);
+    REQUIRE(pipelineEvents[6].value2 == vector.expectedResult);
+    REQUIRE(pipelineEvents[6].value3 == vector.expectedFlags);
   }
 }
 

@@ -875,7 +875,7 @@ accumulator or condition-result contract:
       results in flight until their documented visibility and commit boundaries
 - [x] Interlock or forward comparison-to-branch and `CFC1` dependencies without
       exposing a younger condition or FCR31 value early
-- [ ] Verify conversion truncation, comparison edge cases, ordered flags and
+- [x] Verify conversion truncation, comparison edge cases, ordered flags and
       condition writes, traces, hashes, exceptions, and save/restore behavior
 - [ ] Complete an independent conversion/comparison migration review
 

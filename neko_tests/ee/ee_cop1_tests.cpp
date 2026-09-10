@@ -2965,6 +2965,62 @@ TEST_CASE(
   }
 }
 
+TEST_CASE(
+  "EE COP1 conversion flags and comparison conditions retire in order")
+{
+  struct OrderingVector
+  {
+    std::uint32_t firstInstruction;
+    std::uint32_t secondInstruction;
+    std::uint32_t firstStatus;
+  };
+  const OrderingVector vectors[] = {
+    {
+      cop1SingleInstruction(0x24, 2, 4),
+      cop1SingleInstruction(0x32, 6, 0, 7),
+      EECOP1Control::STATUS_FIXED |
+        EECOP1Control::CAUSE_INVALID |
+        EECOP1Control::STICKY_INVALID
+    },
+    {
+      cop1SingleInstruction(0x32, 6, 0, 7),
+      cop1SingleInstruction(0x24, 2, 4),
+      EECOP1Control::STATUS_FIXED |
+        EECOP1Control::CONDITION
+    }
+  };
+
+  for (const OrderingVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x4f000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    system.eeBus().write32(0, vector.firstInstruction);
+    system.eeBus().write32(4, vector.secondInstruction);
+    core.startExecution(0);
+
+    system.runMasterCycles(6);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      vector.firstStatus);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CONDITION |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
+  }
+}
+
 TEST_CASE("EE COP1 CVT.S.W decodes only its canonical W form")
 {
   REQUIRE(
@@ -4562,6 +4618,62 @@ TEST_CASE("EE staged unary and min/max state participates in hashes")
       5));
 }
 
+TEST_CASE(
+  "EE staged conversion and comparison state participates in hashes")
+{
+  const auto stagedHash =
+    [](std::uint32_t instruction,
+       std::uint32_t fs,
+       std::uint32_t ft,
+       std::size_t cycles)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setFloatingPointRegister(2, fs);
+      core.setFloatingPointRegister(3, ft);
+      system.eeBus().write32(0, instruction);
+      core.startExecution(0);
+      system.runMasterCycles(cycles);
+      core.setFloatingPointRegister(2, 0);
+      core.setFloatingPointRegister(3, 0);
+      return core.stateHash();
+    };
+
+  SECTION("Captured conversion operands affect the hash")
+  {
+    const std::uint32_t instruction =
+      cop1SingleInstruction(0x24, 2, 4);
+    REQUIRE(
+      stagedHash(
+        instruction,
+        UINT32_C(0x3ff33333),
+        0,
+        2) !=
+      stagedHash(
+        instruction,
+        UINT32_C(0x4f000000),
+        0,
+        2));
+  }
+
+  SECTION("Computed comparison conditions affect the hash")
+  {
+    const std::uint32_t instruction =
+      cop1SingleInstruction(0x32, 2, 0, 3);
+    REQUIRE(
+      stagedHash(
+        instruction,
+        UINT32_C(0x3f800000),
+        UINT32_C(0x3f800000),
+        5) !=
+      stagedHash(
+        instruction,
+        UINT32_C(0x3f800000),
+        UINT32_C(0x40000000),
+        5));
+  }
+}
+
 TEST_CASE("EE COP1 divider work continues through exception entry")
 {
   NekoSystem system;
@@ -4719,6 +4831,88 @@ TEST_CASE("EE staged unary and min/max work crosses exception entry")
     REQUIRE(
       core.floatingPointRegister(4) ==
       vector.expected);
+  }
+}
+
+TEST_CASE(
+  "EE staged conversion and comparison work crosses exception entry")
+{
+  SECTION("A conversion retires its result and flags in the handler")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(2, UINT32_C(0x4f000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x24, 2, 4));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    for (std::uint32_t address = EEExceptionVector::GENERAL;
+         address < EEExceptionVector::GENERAL + 24;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
+  }
+
+  SECTION("A comparison retires its condition in the handler")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_MASK |
+        EECOP1Control::STICKY_MASK);
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x32, 2, 0, 3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    for (std::uint32_t address = EEExceptionVector::GENERAL;
+         address < EEExceptionVector::GENERAL + 24;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE_FALSE(core.cop1Condition());
+
+    system.runMasterCycles(4);
+
+    REQUIRE(core.cop1Condition());
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CONDITION |
+       EECOP1Control::CAUSE_MASK |
+       EECOP1Control::STICKY_MASK));
   }
 }
 
@@ -5772,6 +5966,110 @@ TEST_CASE(
       UINT32_C(0x40800000));
     REQUIRE(original.saveState() == restored.saveState());
     REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+  }
+}
+
+TEST_CASE(
+  "EE conversion and comparison timing survives save-state restore")
+{
+  SECTION("A Z-stage conversion preserves its result and flags")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x4f000000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x24, 2, 4));
+    originalCore.startExecution(0);
+    original.runMasterCycles(5);
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0xdeadbeef));
+    restored.eeCore().setFloatingPointRegister(
+      2,
+      UINT32_C(0xdeadbeef));
+    const std::uint32_t resumeAddress =
+      originalCore.programCounter();
+    originalCore.startExecution(resumeAddress);
+    restored.eeCore().startExecution(resumeAddress);
+
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(
+      restored.eeCore().floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      restored.eeCore().cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(
+      originalCore.stateHash() ==
+      restored.eeCore().stateHash());
+  }
+
+  SECTION("A Z-stage comparison preserves its condition result")
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_MASK |
+        EECOP1Control::STICKY_MASK);
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x3f800000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x3f800000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x32, 2, 0, 3));
+    originalCore.startExecution(0);
+    original.runMasterCycles(5);
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0xdeadbeef));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x12345678));
+    restored.eeCore().setFloatingPointRegister(
+      2,
+      UINT32_C(0xdeadbeef));
+    restored.eeCore().setFloatingPointRegister(
+      3,
+      UINT32_C(0x12345678));
+    const std::uint32_t resumeAddress =
+      originalCore.programCounter();
+    originalCore.startExecution(resumeAddress);
+    restored.eeCore().startExecution(resumeAddress);
+
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(restored.eeCore().cop1Condition());
+    REQUIRE(
+      restored.eeCore().cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CONDITION |
+       EECOP1Control::CAUSE_MASK |
+       EECOP1Control::STICKY_MASK));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(
+      originalCore.stateHash() ==
+      restored.eeCore().stateHash());
   }
 }
 

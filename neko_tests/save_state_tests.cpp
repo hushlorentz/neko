@@ -57,6 +57,8 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET = 1078;
   constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CONDITION_OFFSET = 1080;
+  constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET = 1021;
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET = 1029;
@@ -1612,6 +1614,59 @@ TEST_CASE("Invalid staged COP1 min/max results are rejected")
   std::vector<std::uint8_t> invalid = source.saveState();
   invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] =
     1;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Invalid staged COP1 conversion results are rejected")
+{
+  NekoSystem source;
+  source.eeCore().setFloatingPointRegister(
+    2,
+    UINT32_C(0x4f000000));
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x24, 2, 4, 0));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(5);
+  source.eeCore().haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+    1;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Invalid staged COP1 comparison results are rejected")
+{
+  NekoSystem source;
+  source.eeCore().setFloatingPointRegister(
+    2,
+    UINT32_C(0x3f800000));
+  source.eeCore().setFloatingPointRegister(
+    3,
+    UINT32_C(0x3f800000));
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x32, 2, 0, 3));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(5);
+  source.eeCore().haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CONDITION_OFFSET] ^= 1;
   updateChecksum(&invalid);
 
   NekoSystem destination;
