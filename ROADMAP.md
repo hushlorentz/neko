@@ -907,7 +907,7 @@ accumulator or condition-result contract:
 - [x] Preserve two-result overlap, destination and FCR31 dependencies,
       older-before-younger retirement, and the documented completion-cycle
       issue behavior
-- [ ] Re-baseline divider traces, hashes, branch-proximity diagnostics,
+- [x] Re-baseline divider traces, hashes, branch-proximity diagnostics,
       exceptions, halt/resume, malformed save states, and save/restore coverage
 - [ ] Complete an independent divider-stage integration review
 

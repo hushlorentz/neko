@@ -5000,26 +5000,41 @@ TEST_CASE("Every EE COP1 divider operation survives save-state restore")
   }
 }
 
-TEST_CASE("EE COP1 divider pending results participate in state hashes")
+TEST_CASE("Every EE COP1 divider pending result participates in state hashes")
 {
-  NekoSystem first;
-  NekoSystem second;
-  first.eeCore().setFloatingPointRegister(2, UINT32_C(0x40c00000));
-  second.eeCore().setFloatingPointRegister(2, UINT32_C(0x41000000));
-  first.eeCore().setFloatingPointRegister(3, UINT32_C(0x40000000));
-  second.eeCore().setFloatingPointRegister(3, UINT32_C(0x40000000));
-  const std::uint32_t instruction =
-    cop1SingleInstruction(0x03, 2, 4, 3);
-  first.eeBus().write32(0, instruction);
-  second.eeBus().write32(0, instruction);
-  first.eeCore().startExecution(0);
-  second.eeCore().startExecution(0);
-  first.clockMasterCycle();
-  second.clockMasterCycle();
-  first.eeCore().setFloatingPointRegister(2, 0);
-  second.eeCore().setFloatingPointRegister(2, 0);
+  for (const std::uint8_t function : {0x03, 0x04, 0x16})
+  {
+    const auto pendingHash =
+      [function](std::uint32_t fs, std::uint32_t ft)
+      {
+        NekoSystem system;
+        EECore &core = system.eeCore();
+        core.setFloatingPointRegister(2, fs);
+        core.setFloatingPointRegister(3, ft);
+        system.eeBus().write32(
+          0,
+          cop1SingleInstruction(
+            function,
+            function == 0x04 ? 0 : 2,
+            4,
+            3));
+        core.startExecution(0);
+        system.clockMasterCycle();
+        core.setFloatingPointRegister(2, 0);
+        core.setFloatingPointRegister(3, 0);
+        return core.stateHash();
+      };
 
-  REQUIRE(first.eeCore().stateHash() != second.eeCore().stateHash());
+    REQUIRE(
+      pendingHash(
+        UINT32_C(0x40c00000),
+        UINT32_C(0x40000000)) !=
+      pendingHash(
+        UINT32_C(0x41000000),
+        function == 0x04
+          ? UINT32_C(0x41800000)
+          : UINT32_C(0x40000000)));
+  }
 }
 
 TEST_CASE("EE staged COP1 add state participates in state hashes")
@@ -5265,40 +5280,90 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("EE COP1 divider work continues through exception entry")
+TEST_CASE("Every EE COP1 divider result crosses exception entry")
 {
-  NekoSystem system;
-  EECore &core = system.eeCore();
-  core.setCOP0Register(
-    EECOP0Register::Status,
-    EECOP0Status::RESET &
-      ~EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
-  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
-  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
-  system.eeBus().write32(
-    0,
-    cop1SingleInstruction(0x03, 2, 4, 3));
-  system.eeBus().write32(4, UINT32_C(0x0000000c));
-  for (std::uint32_t address = EEExceptionVector::GENERAL;
-       address < EEExceptionVector::GENERAL + 32;
-       address += 4)
+  struct ExceptionVector
   {
-    system.eeBus().write32(address, 0);
+    std::uint8_t function;
+    std::uint8_t sourceRegister;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+    std::uint32_t expectedStatus;
+    std::uint8_t latency;
+  };
+  const ExceptionVector vectors[] = {
+    {
+      0x03, 2, 0, 0, UINT32_C(0x7fffffff),
+      EECOP1Control::STATUS_FIXED |
+        EECOP1Control::CAUSE_INVALID |
+        EECOP1Control::STICKY_INVALID,
+      COP1_DIV_SQRT_LATENCY
+    },
+    {
+      0x04, 0, 0, UINT32_C(0xc1100000),
+      UINT32_C(0x40400000),
+      EECOP1Control::STATUS_FIXED |
+        EECOP1Control::CAUSE_INVALID |
+        EECOP1Control::STICKY_INVALID,
+      COP1_DIV_SQRT_LATENCY
+    },
+    {
+      0x16, 2, UINT32_C(0x3f800000), 0,
+      UINT32_C(0x7fffffff),
+      EECOP1Control::STATUS_FIXED |
+        EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+        EECOP1Control::STICKY_DIVISION_BY_ZERO,
+      COP1_RSQRT_LATENCY
+    }
+  };
+
+  for (const ExceptionVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::RESET &
+        ~EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        vector.function,
+        vector.sourceRegister,
+        4,
+        3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    for (std::uint32_t address = EEExceptionVector::GENERAL;
+         address < EEExceptionVector::GENERAL + 64;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::GENERAL);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
+
+    system.runMasterCycles(vector.latency - 1);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      vector.expected);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      vector.expectedStatus);
   }
-  core.startExecution(0);
-
-  system.runMasterCycles(2);
-  REQUIRE(core.pendingException() == EEException::SystemCall);
-  REQUIRE(
-    core.programCounter() ==
-    EEExceptionVector::GENERAL);
-  REQUIRE(core.floatingPointRegister(4) == 0);
-
-  system.runMasterCycles(7);
-
-  REQUIRE(
-    core.floatingPointRegister(4) ==
-    UINT32_C(0x40400000));
 }
 
 TEST_CASE("EE staged COP1 add work crosses exception entry")

@@ -1465,6 +1465,50 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
   }
 }
 
+TEST_CASE("Every malformed COP1 divider result is rejected")
+{
+  struct DividerVector
+  {
+    std::uint8_t function;
+    std::uint8_t sourceRegister;
+    std::uint32_t fs;
+    std::uint32_t ft;
+  };
+  const DividerVector vectors[] = {
+    {0x03, 2, 0, 0},
+    {0x04, 0, 0, UINT32_C(0xc1100000)},
+    {0x16, 2, UINT32_C(0x3f800000), 0}
+  };
+
+  for (const DividerVector &vector : vectors)
+  {
+    NekoSystem source;
+    source.eeCore().setFloatingPointRegister(2, vector.fs);
+    source.eeCore().setFloatingPointRegister(3, vector.ft);
+    source.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        vector.function,
+        vector.sourceRegister,
+        4,
+        3));
+    source.eeCore().startExecution(0);
+    source.clockMasterCycle();
+    source.eeCore().haltExecution();
+
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+      1;
+    updateChecksum(&invalid);
+
+    NekoSystem destination;
+    const std::vector<std::uint8_t> before =
+      destination.saveState();
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+}
+
 TEST_CASE("Invalid staged COP1 add states are rejected")
 {
   NekoSystem source;
