@@ -1399,6 +1399,20 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
     REQUIRE(destination.saveState() == before);
   }
 
+  SECTION("A transient S1 result cannot be restored")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+      COP1_STAGE_S1;
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+      0;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
   SECTION("A result cannot contain a forged raw value")
   {
     std::vector<std::uint8_t> invalid = source.saveState();

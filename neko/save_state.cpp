@@ -2069,12 +2069,8 @@ void NekoSaveStateCodec::readEECore(
             EECore::COP1PipelineStage::R &&
           operation.remainingCycles >= 1 &&
           operation.remainingCycles <= timing.latency;
-        const bool waitingToRetire =
-          operation.stage ==
-            EECore::COP1PipelineStage::S1 &&
-          operation.remainingCycles == 0;
         require(
-          (waitingForResult || waitingToRetire) &&
+          waitingForResult &&
             operation.destination.mask ==
               (EECore::COP1_DESTINATION_FPR |
                EECore::COP1_DESTINATION_FCR31) &&
