@@ -154,19 +154,53 @@ namespace
     return image;
   }
 
-  std::vector<std::uint8_t> returningCOP1StagedALUELF(
-    std::uint8_t function)
+  std::vector<std::uint8_t> returningCOP1StagedOperateELF(
+    std::uint8_t format,
+    std::uint8_t function,
+    std::uint32_t sourceValue,
+    std::uint8_t targetRegister,
+    std::uint8_t destinationRegister)
   {
-    std::vector<std::uint8_t> image = returningELF(0);
+    std::vector<std::uint8_t> image = validELF();
+    writeU32(
+      &image,
+      PROGRAM_HEADER_OFFSET + 16,
+      24);
+    writeU32(
+      &image,
+      PROGRAM_HEADER_OFFSET + 20,
+      24);
+    writeU32(
+      &image,
+      0x100,
+      (UINT32_C(0x0f) << 26) |
+        (UINT32_C(1) << 16) |
+        (sourceValue >> 16));
+    writeU32(
+      &image,
+      0x104,
+      (UINT32_C(0x0d) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(1) << 16) |
+        (sourceValue & UINT32_C(0xffff)));
     writeU32(
       &image,
       0x108,
       (UINT32_C(0x11) << 26) |
-        (UINT32_C(0x10) << 21) |
+        (UINT32_C(0x04) << 21) |
+        (UINT32_C(1) << 16) |
+        (UINT32_C(2) << 11));
+    writeU32(&image, 0x10c, UINT32_C(0x03e00008));
+    writeU32(
+      &image,
+      0x110,
+      (UINT32_C(0x11) << 26) |
+        (static_cast<std::uint32_t>(format) << 21) |
         (static_cast<std::uint32_t>(
-        function == 0x05 || function == 0x07 ? 0 : 3) << 16) |
+          targetRegister) << 16) |
         (UINT32_C(2) << 11) |
-        (UINT32_C(4) << 6) |
+        (static_cast<std::uint32_t>(
+          destinationRegister) << 6) |
         function);
     return image;
   }
@@ -715,20 +749,65 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
     }
   }
 
-  SECTION("Return drains staged COP1 ALU work")
+  SECTION("Return drains every staged COP1 Operate family")
   {
+    enum class DrainDestination
+    {
+      FPR,
+      Accumulator,
+      Condition
+    };
     struct DrainVector
     {
+      std::uint8_t format;
       std::uint8_t function;
+      std::uint32_t sourceValue;
+      std::uint8_t targetRegister;
+      std::uint8_t destinationRegister;
+      DrainDestination destination;
       std::uint32_t expected;
     };
     const DrainVector vectors[] = {
-      {0x05, 0},
-      {0x07, UINT32_C(0x80000000)},
-      {0x28, 0},
-      {0x29, 0},
-      {0x00, 0},
-      {0x01, 0}
+      {0x10, 0x05, UINT32_C(0x40000000), 0, 4,
+       DrainDestination::FPR, UINT32_C(0x40000000)},
+      {0x10, 0x07, UINT32_C(0x40000000), 0, 4,
+       DrainDestination::FPR, UINT32_C(0xc0000000)},
+      {0x10, 0x28, UINT32_C(0x40000000), 2, 4,
+       DrainDestination::FPR, UINT32_C(0x40000000)},
+      {0x10, 0x29, UINT32_C(0x40000000), 2, 4,
+       DrainDestination::FPR, UINT32_C(0x40000000)},
+      {0x14, 0x20, 2, 0, 4,
+       DrainDestination::FPR, UINT32_C(0x40000000)},
+      {0x10, 0x24, UINT32_C(0x40000000), 0, 4,
+       DrainDestination::FPR, 2},
+      {0x10, 0x00, UINT32_C(0x40000000), 2, 4,
+       DrainDestination::FPR, UINT32_C(0x40800000)},
+      {0x10, 0x01, UINT32_C(0x40000000), 2, 4,
+       DrainDestination::FPR, 0},
+      {0x10, 0x02, UINT32_C(0x40000000), 2, 4,
+       DrainDestination::FPR, UINT32_C(0x40800000)},
+      {0x10, 0x1c, UINT32_C(0x40000000), 2, 4,
+       DrainDestination::FPR, UINT32_C(0x40800000)},
+      {0x10, 0x1d, UINT32_C(0x40000000), 2, 4,
+       DrainDestination::FPR, UINT32_C(0xc0800000)},
+      {0x10, 0x18, UINT32_C(0x40000000), 2, 0,
+       DrainDestination::Accumulator, UINT32_C(0x40800000)},
+      {0x10, 0x19, UINT32_C(0x40000000), 2, 0,
+       DrainDestination::Accumulator, 0},
+      {0x10, 0x1a, UINT32_C(0x40000000), 2, 0,
+       DrainDestination::Accumulator, UINT32_C(0x40800000)},
+      {0x10, 0x1e, UINT32_C(0x40000000), 2, 0,
+       DrainDestination::Accumulator, UINT32_C(0x40800000)},
+      {0x10, 0x1f, UINT32_C(0x40000000), 2, 0,
+       DrainDestination::Accumulator, UINT32_C(0xc0800000)},
+      {0x10, 0x30, UINT32_C(0x40000000), 2, 0,
+       DrainDestination::Condition, 0},
+      {0x10, 0x32, UINT32_C(0x40000000), 2, 0,
+       DrainDestination::Condition, 1},
+      {0x10, 0x34, UINT32_C(0xc0000000), 3, 0,
+       DrainDestination::Condition, 1},
+      {0x10, 0x36, UINT32_C(0xc0000000), 3, 0,
+       DrainDestination::Condition, 1}
     };
 
     for (const DrainVector &vector : vectors)
@@ -736,16 +815,44 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
       NekoSystem system;
       const EEGuestExecutionResult result =
         system.runELF(
-          returningCOP1StagedALUELF(vector.function),
-          3);
+          returningCOP1StagedOperateELF(
+            vector.format,
+            vector.function,
+            vector.sourceValue,
+            vector.targetRegister,
+            vector.destinationRegister),
+          5);
 
       REQUIRE(result.outcome == EEGuestOutcome::Completed);
-      REQUIRE(result.execution.instructions == 3);
+      REQUIRE(result.execution.masterCycles == 5);
+      REQUIRE(result.execution.eeCycles == 5);
+      REQUIRE(result.execution.instructions == 5);
+      if (vector.destination == DrainDestination::FPR)
+      {
+        REQUIRE(
+          system.eeCore().floatingPointRegister(4) ==
+          vector.expected);
+      }
+      else if (
+        vector.destination ==
+        DrainDestination::Accumulator)
+      {
+        REQUIRE(
+          system.eeCore().floatingPointAccumulator() ==
+          vector.expected);
+      }
+      else
+      {
+        REQUIRE(
+          (system.eeCore().cop1ControlRegister(31) &
+           EECOP1Control::CONDITION) ==
+          (vector.expected == 0
+             ? 0
+             : EECOP1Control::CONDITION));
+      }
       REQUIRE(
-        system.eeCore().floatingPointRegister(4) ==
-        vector.expected);
-      REQUIRE(
-        system.eeCore().cop1ControlRegister(31) ==
+        (system.eeCore().cop1ControlRegister(31) &
+         ~EECOP1Control::CONDITION) ==
         EECOP1Control::STATUS_FIXED);
     }
   }

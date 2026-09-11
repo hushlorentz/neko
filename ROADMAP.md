@@ -913,7 +913,7 @@ accumulator or condition-result contract:
 
 ### C1 Operate Integration and Final Review
 
-- [ ] Generalize ELF guest-return drain from pending loads and divider results
+- [x] Generalize ELF guest-return drain from pending loads and divider results
       to every in-flight C1 Operate family, without adding emulated cycles
 - [ ] Run the timing-independent PS2DEV COP1 semantic guest before and after
       migration and retain identical raw FPR and FCR31 results
