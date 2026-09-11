@@ -77,8 +77,25 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET = 1083;
   constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET = 1091;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1096;
+  constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1133;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1143;
+  constexpr std::size_t
+    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_ORDER_OFFSET = 1145;
+  constexpr std::size_t
+    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_STAGE_OFFSET = 1153;
+  constexpr std::size_t
+    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET = 1162;
+  constexpr std::size_t
+    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_RAW_RESULT_OFFSET = 1197;
   constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2037;
+  constexpr std::uint8_t COP1_STAGE_X = 2;
+  constexpr std::uint8_t COP1_STAGE_Y = 3;
+  constexpr std::uint8_t COP1_STAGE_Z = 4;
   constexpr std::uint8_t COP1_STAGE_S1 = 5;
   constexpr std::uint8_t COP1_STAGE_S2 = 6;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
@@ -1543,7 +1560,7 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
   const std::vector<std::uint8_t> before =
     destination.saveState();
 
-  SECTION("The transient S phases cannot be restored")
+  SECTION("Unblocked S1 and transient S2 cannot be restored")
   {
     for (const std::uint8_t stage : {
            COP1_STAGE_S1,
@@ -1557,6 +1574,30 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
       REQUIRE_THROWS(destination.loadState(invalid));
       REQUIRE(destination.saveState() == before);
     }
+  }
+
+  SECTION("An older staged operation cannot justify a younger S1 result")
+  {
+    NekoSystem stagedSource;
+    stagedSource.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    stagedSource.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 5, 7, 6));
+    stagedSource.eeCore().startExecution(0);
+    stagedSource.runMasterCycles(2);
+    stagedSource.eeCore().haltExecution();
+
+    std::vector<std::uint8_t> invalid =
+      stagedSource.saveState();
+    invalid[
+      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+      COP1_STAGE_S1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
   }
 
   SECTION("A Z-stage result must match its captured operands")
@@ -1930,4 +1971,365 @@ TEST_CASE("Blocked COP1 1S retirement survives save-state restore")
     restored.eeCore().floatingPointRegister(5) ==
     UINT32_C(0x12345678));
   REQUIRE(restored.saveState() == original.saveState());
+}
+
+TEST_CASE("Unreachable COP1 load 1S states are rejected")
+{
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+
+  SECTION("A parked load requires an older non-ready operation")
+  {
+    NekoSystem source;
+    source.eeCore().setGeneralRegister(1, {0x100, 0});
+    REQUIRE(
+      source.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x12345678)));
+    source.eeBus().write32(
+      0,
+      (UINT32_C(0x31) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(5) << 16));
+    source.eeCore().startExecution(0);
+    source.clockMasterCycle();
+    source.eeCore().haltExecution();
+
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+      COP1_STAGE_S1;
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+      0;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("A parked load cannot bypass an older FPR writer")
+  {
+    NekoSystem source;
+    EECore &core = source.eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    REQUIRE(
+      source.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x12345678)));
+    source.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x00, 2, 4, 3));
+    source.eeBus().write32(
+      4,
+      (UINT32_C(0x31) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(5) << 16));
+    core.startExecution(0);
+    source.runMasterCycles(3);
+    core.haltExecution();
+
+    std::vector<std::uint8_t> invalid = source.saveState();
+    writeU32(
+      &invalid,
+      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+      (UINT32_C(0x31) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(4) << 16));
+    invalid[
+      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] =
+      4;
+    invalid[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+      COP1_STAGE_S1;
+    invalid[
+      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+      0;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+}
+
+TEST_CASE("Blocked staged COP1 1S retirement survives save-state restore")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, 2);
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  original.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(5) << 11) |
+      (UINT32_C(6) << 6) |
+      UINT32_C(0x20));
+  core.startExecution(0);
+  original.runMasterCycles(7);
+  core.haltExecution();
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+  original.eeCore().startExecution(
+    original.eeCore().programCounter());
+  restored.eeCore().startExecution(
+    restored.eeCore().programCounter());
+
+  original.runMasterCycles(2);
+  restored.runMasterCycles(2);
+
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(6) ==
+    UINT32_C(0x40000000));
+  REQUIRE(restored.saveState() == original.saveState());
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
+}
+
+TEST_CASE("Dependent staged COP1 1S overlap is rejected")
+{
+  NekoSystem source;
+  EECore &core = source.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, 2);
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  source.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(5) << 11) |
+      (UINT32_C(6) << 6) |
+      UINT32_C(0x20));
+  core.startExecution(0);
+  source.runMasterCycles(7);
+  core.haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  writeU32(
+    &invalid,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(4) << 11) |
+      (UINT32_C(6) << 6) |
+      UINT32_C(0x20));
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Premature staged COP1 1S overlap is rejected")
+{
+  NekoSystem source;
+  EECore &core = source.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, 2);
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  source.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(5) << 11) |
+      (UINT32_C(6) << 6) |
+      UINT32_C(0x20));
+  core.startExecution(0);
+  source.runMasterCycles(7);
+  core.haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[SIMPLE_EE_COP1_DIVIDER_INITIATION_OFFSET] = 7;
+  invalid[
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+    8;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Out-of-order staged COP1 1S overlap is rejected")
+{
+  NekoSystem source;
+  EECore &core = source.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, 2);
+  core.setFloatingPointRegister(7, 3);
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  source.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(5) << 11) |
+      (UINT32_C(6) << 6) |
+      UINT32_C(0x20));
+  source.eeBus().write32(
+    8,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(7) << 11) |
+      (UINT32_C(8) << 6) |
+      UINT32_C(0x20));
+  core.startExecution(0);
+  source.runMasterCycles(7);
+  core.haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    COP1_STAGE_Z;
+  invalid[SIMPLE_EE_THIRD_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    COP1_STAGE_S1;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Staged COP1 pipeline order is validated")
+{
+  NekoSystem source;
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  source.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x00, 5, 7, 6));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(2);
+  source.eeCore().haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    COP1_STAGE_X;
+  invalid[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    COP1_STAGE_Y;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Staged COP1 1S cannot follow two active dividers")
+{
+  NekoSystem source;
+  EECore &core = source.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, 2);
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  source.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(5) << 11) |
+      (UINT32_C(6) << 6) |
+      UINT32_C(0x20));
+  for (std::uint32_t address = 8; address < 28; address += 4)
+  {
+    source.eeBus().write32(address, 0);
+  }
+  source.eeBus().write32(
+    28,
+    cop1SingleInstruction(0x03, 2, 8, 3));
+  core.startExecution(0);
+  source.runMasterCycles(8);
+  core.haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  writeU64(
+    &invalid,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+    3);
+  writeU64(
+    &invalid,
+    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_ORDER_OFFSET,
+    2);
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
+}
+
+TEST_CASE("Staged COP1 1S validates forwarded operands")
+{
+  NekoSystem source;
+  EECore &core = source.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, 2);
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x16, 2, 4, 3));
+  source.eeBus().write32(
+    4,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(5) << 11) |
+      (UINT32_C(6) << 6) |
+      UINT32_C(0x20));
+  source.eeBus().write32(
+    8,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x14) << 21) |
+      (UINT32_C(6) << 11) |
+      (UINT32_C(7) << 6) |
+      UINT32_C(0x20));
+  core.startExecution(0);
+  source.runMasterCycles(11);
+  core.haltExecution();
+
+  std::vector<std::uint8_t> invalid = source.saveState();
+  writeU32(
+    &invalid,
+    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET,
+    3);
+  writeU32(
+    &invalid,
+    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_RAW_RESULT_OFFSET,
+    UINT32_C(0x40400000));
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
 }

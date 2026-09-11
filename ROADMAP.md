@@ -920,7 +920,7 @@ accumulator or condition-result contract:
 - [x] Validate cross-family forwarding, ordered FPR/ACC/flag/condition
       retirement, exceptions, `ERET`, reset, halt/resume, state hashes,
       deterministic traces, malformed save states, and save-state continuation
-- [ ] Complete an independent final C1 Operate review
+- [x] Complete an independent final C1 Operate review
 
 ### COP1 Move and Memory Timing
 

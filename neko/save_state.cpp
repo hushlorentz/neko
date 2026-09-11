@@ -2088,7 +2088,8 @@ void NekoSaveStateCodec::readEECore(
         const bool operandsCaptured =
           operation.stage != EECore::COP1PipelineStage::R;
         const bool resultComputed =
-          operation.stage == EECore::COP1PipelineStage::Z;
+          operation.stage == EECore::COP1PipelineStage::Z ||
+          operation.stage == EECore::COP1PipelineStage::S1;
         std::uint32_t expectedResult = 0;
         std::uint8_t expectedFlags = 0;
         std::uint8_t expectedStickyFlags = 0;
@@ -2260,7 +2261,7 @@ void NekoSaveStateCodec::readEECore(
               : FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW);
         require(
           operation.remainingCycles == 0 &&
-            operation.stage <= EECore::COP1PipelineStage::Z &&
+            operation.stage <= EECore::COP1PipelineStage::S1 &&
             operation.destination.mask ==
               expectedDestination &&
             operation.destination.fprRegister ==
@@ -2405,6 +2406,143 @@ void NekoSaveStateCodec::readEECore(
     {
       continue;
     }
+    const EECore::InFlightCOP1Operation &operation =
+      core->inFlightCOP1Operations[left];
+    if (operation.instruction.operation ==
+          EEOperation::LoadWordToCOP1 &&
+        operation.stage == EECore::COP1PipelineStage::S1)
+    {
+      bool blockedByOlderOperation = false;
+      bool conflictsWithOlderWriter = false;
+      bool reachableBehindOlderOperations = true;
+      for (const EECore::InFlightCOP1Operation &candidate :
+           core->inFlightCOP1Operations)
+      {
+        if (!candidate.active ||
+            candidate.programOrder >= operation.programOrder)
+        {
+          continue;
+        }
+        const bool olderDivider =
+          EECore::isCOP1DividerOperation(
+            candidate.instruction.operation);
+        const bool olderStagedOperation =
+          EECore::isCOP1StagedOperation(
+            candidate.instruction.operation);
+        const std::uint64_t orderDistance =
+          operation.programOrder - candidate.programOrder;
+        bool validDividerTiming = false;
+        if (olderDivider)
+        {
+          const EECore::COP1DividerTiming timing =
+            EECore::cop1DividerTiming(
+              candidate.instruction.operation);
+          validDividerTiming =
+            orderDistance + 1 <= timing.latency &&
+            candidate.remainingCycles <=
+              timing.latency - (orderDistance + 1);
+        }
+        const bool validStagedTiming =
+          olderStagedOperation &&
+          (candidate.stage == EECore::COP1PipelineStage::S1 ||
+           (candidate.stage >= EECore::COP1PipelineStage::X &&
+            static_cast<std::uint64_t>(candidate.stage) >=
+              orderDistance + 1));
+        const bool validOlderStage =
+          validDividerTiming ||
+          validStagedTiming ||
+          (candidate.instruction.operation ==
+             EEOperation::LoadWordToCOP1 &&
+           candidate.stage == EECore::COP1PipelineStage::S1);
+        reachableBehindOlderOperations =
+          reachableBehindOlderOperations && validOlderStage;
+        blockedByOlderOperation =
+          blockedByOlderOperation ||
+          validDividerTiming ||
+          (validStagedTiming &&
+           candidate.stage != EECore::COP1PipelineStage::S1);
+        conflictsWithOlderWriter =
+          conflictsWithOlderWriter ||
+          ((candidate.destination.mask &
+            EECore::COP1_DESTINATION_FPR) != 0 &&
+           candidate.destination.fprRegister ==
+             operation.destination.fprRegister);
+      }
+      require(
+        blockedByOlderOperation &&
+          reachableBehindOlderOperations &&
+          !conflictsWithOlderWriter,
+        "EE COP1 load S1 result has no valid older blocker");
+    }
+    if (EECore::isCOP1StagedOperation(
+          operation.instruction.operation) &&
+        operation.stage == EECore::COP1PipelineStage::S1)
+    {
+      std::size_t olderDividerCount = 0;
+      bool reachableBehindOlderOperations = true;
+      const EECore::InFlightCOP1Operation *
+        forwardedSource = nullptr;
+      for (const EECore::InFlightCOP1Operation &candidate :
+           core->inFlightCOP1Operations)
+      {
+        if (!candidate.active ||
+            candidate.programOrder >= operation.programOrder)
+        {
+          continue;
+        }
+        if (EECore::isCOP1DividerOperation(
+              candidate.instruction.operation))
+        {
+          ++olderDividerCount;
+          const std::uint64_t orderDistance =
+            operation.programOrder - candidate.programOrder;
+          const EECore::COP1DividerTiming timing =
+            EECore::cop1DividerTiming(
+              candidate.instruction.operation);
+          reachableBehindOlderOperations =
+            reachableBehindOlderOperations &&
+            orderDistance + 5 <= timing.latency &&
+            candidate.remainingCycles <=
+              timing.latency - (orderDistance + 5) &&
+            EECore::instructionFPRDependency(
+              operation.instruction,
+              candidate.destination.fprRegister) ==
+              EECore::COP1Dependency::None;
+          continue;
+        }
+        reachableBehindOlderOperations =
+          reachableBehindOlderOperations &&
+          candidate.stage == EECore::COP1PipelineStage::S1 &&
+          (candidate.instruction.operation ==
+             EEOperation::LoadWordToCOP1 ||
+           candidate.instruction.operation ==
+             EEOperation::ConvertWordToSingleCOP1) &&
+          (candidate.instruction.operation !=
+             EEOperation::LoadWordToCOP1 ||
+           EECore::instructionFPRDependency(
+             operation.instruction,
+             candidate.destination.fprRegister) ==
+             EECore::COP1Dependency::None);
+        if ((candidate.destination.mask &
+             EECore::COP1_DESTINATION_FPR) != 0 &&
+            candidate.destination.fprRegister ==
+              operation.instruction.destinationRegister &&
+            (forwardedSource == nullptr ||
+             candidate.programOrder >
+               forwardedSource->programOrder))
+        {
+          forwardedSource = &candidate;
+        }
+      }
+      require(
+        operation.instruction.operation ==
+            EEOperation::ConvertWordToSingleCOP1 &&
+          olderDividerCount == 1 &&
+          reachableBehindOlderOperations &&
+          (forwardedSource == nullptr ||
+           operation.capturedFS == forwardedSource->rawResult),
+        "EE COP1 staged S1 result has no valid older blocker");
+    }
     for (std::size_t right = left + 1;
          right < core->inFlightCOP1Operations.size();
          ++right)
@@ -2414,6 +2552,34 @@ void NekoSaveStateCodec::readEECore(
           core->inFlightCOP1Operations[left].programOrder !=
             core->inFlightCOP1Operations[right].programOrder,
         "EE in-flight COP1 program order is duplicated");
+      if (!core->inFlightCOP1Operations[right].active)
+      {
+        continue;
+      }
+      const EECore::InFlightCOP1Operation &first =
+        core->inFlightCOP1Operations[left];
+      const EECore::InFlightCOP1Operation &second =
+        core->inFlightCOP1Operations[right];
+      if (!EECore::isCOP1StagedOperation(
+            first.instruction.operation) ||
+          !EECore::isCOP1StagedOperation(
+            second.instruction.operation) ||
+          first.stage == EECore::COP1PipelineStage::S1 ||
+          second.stage == EECore::COP1PipelineStage::S1)
+      {
+        continue;
+      }
+      const EECore::InFlightCOP1Operation &older =
+        first.programOrder < second.programOrder
+          ? first
+          : second;
+      const EECore::InFlightCOP1Operation &younger =
+        first.programOrder < second.programOrder
+          ? second
+          : first;
+      require(
+        older.stage > younger.stage,
+        "EE staged COP1 pipeline order is inconsistent");
     }
   }
   core->lastDecodedInstruction = {};
