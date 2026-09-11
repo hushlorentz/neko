@@ -917,7 +917,7 @@ accumulator or condition-result contract:
       to every in-flight C1 Operate family, without adding emulated cycles
 - [x] Run the timing-independent PS2DEV COP1 semantic guest before and after
       migration and retain identical raw FPR and FCR31 results
-- [ ] Validate cross-family forwarding, ordered FPR/ACC/flag/condition
+- [x] Validate cross-family forwarding, ordered FPR/ACC/flag/condition
       retirement, exceptions, `ERET`, reset, halt/resume, state hashes,
       deterministic traces, malformed save states, and save-state continuation
 - [ ] Complete an independent final C1 Operate review

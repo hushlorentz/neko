@@ -3728,6 +3728,130 @@ TEST_CASE("EE COP1 staged ALU families forward through aliases")
 }
 
 TEST_CASE(
+  "EE mixed staged COP1 destinations survive halt and restore in order")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+      core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+      core.setFloatingPointRegister(6, UINT32_C(0x4f000000));
+      core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+      core.setFloatingPointRegister(8, UINT32_C(0x40000000));
+      core.setFloatingPointRegister(10, UINT32_C(0x40400000));
+      core.setFloatingPointRegister(11, UINT32_C(0x40400000));
+      system->eeBus().write32(
+        0,
+        cop1SingleInstruction(0x1a, 2, 0, 3));
+      system->eeBus().write32(
+        4,
+        cop1SingleInstruction(0x24, 6, 4));
+      system->eeBus().write32(
+        8,
+        cop1SingleInstruction(0x00, 7, 5, 8));
+      system->eeBus().write32(
+        12,
+        cop1SingleInstruction(0x32, 10, 0, 11));
+      core.startExecution(0);
+      system->runMasterCycles(4);
+      core.haltExecution();
+    };
+
+  NekoSystem original;
+  prepare(&original);
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+
+  REQUIRE(
+    original.eeCore().stateHash() ==
+    restored.eeCore().stateHash());
+  REQUIRE(original.saveState() == restored.saveState());
+
+  original.eeCore().startExecution(
+    original.eeCore().programCounter());
+  restored.eeCore().startExecution(
+    restored.eeCore().programCounter());
+  original.startTrace();
+  restored.startTrace();
+
+  for (std::size_t cycle = 5; cycle <= 9; ++cycle)
+  {
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+
+    REQUIRE(
+      original.eeCore().stateHash() ==
+      restored.eeCore().stateHash());
+    REQUIRE(original.traceHash() == restored.traceHash());
+
+    if (cycle == 6)
+    {
+      REQUIRE(
+        restored.eeCore().floatingPointAccumulator() ==
+        UINT32_C(0x7fffffff));
+      REQUIRE(
+        restored.eeCore().cop1ControlRegister(31) ==
+        (EECOP1Control::STATUS_FIXED |
+         EECOP1Control::CAUSE_OVERFLOW |
+         EECOP1Control::STICKY_OVERFLOW));
+    }
+    else if (cycle == 7)
+    {
+      REQUIRE(
+        restored.eeCore().floatingPointRegister(4) ==
+        UINT32_C(0x7fffffff));
+      REQUIRE(
+        restored.eeCore().cop1ControlRegister(31) ==
+        (EECOP1Control::STATUS_FIXED |
+         EECOP1Control::CAUSE_INVALID |
+         EECOP1Control::CAUSE_OVERFLOW |
+         EECOP1Control::STICKY_INVALID |
+         EECOP1Control::STICKY_OVERFLOW));
+    }
+    else if (cycle == 8)
+    {
+      REQUIRE(
+        restored.eeCore().floatingPointRegister(5) ==
+        UINT32_C(0x40400000));
+      REQUIRE(
+        restored.eeCore().cop1ControlRegister(31) ==
+        (EECOP1Control::STATUS_FIXED |
+         EECOP1Control::CAUSE_INVALID |
+         EECOP1Control::STICKY_INVALID |
+         EECOP1Control::STICKY_OVERFLOW));
+    }
+    else if (cycle == 9)
+    {
+      REQUIRE(restored.eeCore().cop1Condition());
+      REQUIRE(
+        restored.eeCore().cop1ControlRegister(31) ==
+        (EECOP1Control::STATUS_FIXED |
+         EECOP1Control::CONDITION |
+         EECOP1Control::CAUSE_INVALID |
+         EECOP1Control::STICKY_INVALID |
+         EECOP1Control::STICKY_OVERFLOW));
+    }
+  }
+
+  std::vector<NekoTraceEvent> retirements;
+  for (const NekoTraceEvent &event : restored.trace())
+  {
+    if (event.type == NekoTraceEventType::COP1Retired)
+    {
+      retirements.push_back(event);
+    }
+  }
+  REQUIRE(retirements.size() == 4);
+  for (std::size_t index = 0; index < retirements.size(); ++index)
+  {
+    REQUIRE(retirements[index].value0 == index + 1);
+    REQUIRE(retirements[index].masterCycle == index + 6);
+  }
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
+TEST_CASE(
   "EE COP1 add and subtract interlock pre-S FPR dependencies")
 {
   NekoSystem system;
@@ -5805,6 +5929,93 @@ TEST_CASE("EE ERET preserves handler-issued COP1 work")
     UINT32_C(0x40400000));
 }
 
+TEST_CASE("EE ERET preserves every staged COP1 destination class")
+{
+  enum class ResultDestination
+  {
+    FPR,
+    Accumulator,
+    Condition
+  };
+  struct ERETVector
+  {
+    std::uint32_t instruction;
+    ResultDestination destination;
+    std::uint32_t expected;
+  };
+  const ERETVector vectors[] = {
+    {
+      cop1SingleInstruction(0x00, 2, 4, 3),
+      ResultDestination::FPR,
+      UINT32_C(0x40a00000)
+    },
+    {
+      cop1SingleInstruction(0x1a, 2, 0, 3),
+      ResultDestination::Accumulator,
+      UINT32_C(0x40c00000)
+    },
+    {
+      cop1SingleInstruction(0x32, 2, 0, 2),
+      ResultDestination::Condition,
+      1
+    }
+  };
+
+  for (const ERETVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE |
+        EECOP0Status::EXCEPTION_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      vector.instruction);
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL + 4,
+      UINT32_C(0x42000018));
+    for (std::uint32_t address = 0x100;
+         address < 0x120;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(EEExceptionVector::GENERAL);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+    REQUIRE(core.floatingPointAccumulator() == 0);
+    REQUIRE_FALSE(core.cop1Condition());
+
+    system.runMasterCycles(4);
+
+    if (vector.destination == ResultDestination::FPR)
+    {
+      REQUIRE(
+        core.floatingPointRegister(4) ==
+        vector.expected);
+    }
+    else if (
+      vector.destination ==
+      ResultDestination::Accumulator)
+    {
+      REQUIRE(
+        core.floatingPointAccumulator() ==
+        vector.expected);
+    }
+    else
+    {
+      REQUIRE(core.cop1Condition());
+    }
+  }
+}
+
 TEST_CASE("EE reset cancels pending COP1 divider results")
 {
   NekoSystem system;
@@ -5822,6 +6033,39 @@ TEST_CASE("EE reset cancels pending COP1 divider results")
   system.runMasterCycles(COP1_DIV_SQRT_LATENCY + 1);
 
   REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+}
+
+TEST_CASE("EE reset cancels mixed staged COP1 destination classes")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x40400000));
+  core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x1a, 5, 0, 6));
+  system.eeBus().write32(
+    8,
+    cop1SingleInstruction(0x32, 7, 0, 7));
+  core.startExecution(0);
+  system.runMasterCycles(3);
+
+  core.reset();
+  core.startExecution(0x100);
+  system.runMasterCycles(8);
+
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointAccumulator() == 0);
+  REQUIRE_FALSE(core.cop1Condition());
   REQUIRE(
     core.cop1ControlRegister(31) ==
     EECOP1Control::STATUS_FIXED);
