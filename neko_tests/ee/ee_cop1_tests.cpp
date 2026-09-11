@@ -4090,7 +4090,7 @@ TEST_CASE("EE COP1 accumulator multiply preserves staged WAW order")
 }
 
 TEST_CASE(
-  "EE COP1 divider operations retire results and flags after their provisional latency")
+  "EE COP1 dividers deliver results through shared S-stage retirement")
 {
   struct TimingVector
   {

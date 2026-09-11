@@ -901,7 +901,7 @@ accumulator or condition-result contract:
 
 ### C1 Divider Stage Integration
 
-- [ ] Deliver `DIV.S`, `SQRT.S`, and `RSQRT.S` results through the shared
+- [x] Deliver `DIV.S`, `SQRT.S`, and `RSQRT.S` results through the shared
       `1S`/`2S` writeback contract using the foundation's explicit latency
       anchor while retaining the isolated provisional initiation policy
 - [ ] Preserve two-result overlap, destination and FCR31 dependencies,

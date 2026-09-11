@@ -835,6 +835,111 @@ TEST_CASE(
     NekoTraceEventType::StateSnapshot);
 }
 
+TEST_CASE("EE COP1 dividers retire through the shared S-stage contract")
+{
+  struct TraceVector
+  {
+    std::uint8_t function;
+    std::uint32_t fs;
+    std::uint32_t ft;
+    std::uint32_t expected;
+    std::uint8_t latency;
+  };
+  const TraceVector vectors[] = {
+    {
+      0x03,
+      UINT32_C(0x40c00000),
+      UINT32_C(0x40000000),
+      UINT32_C(0x40400000),
+      8
+    },
+    {
+      0x04,
+      0,
+      UINT32_C(0x41100000),
+      UINT32_C(0x40400000),
+      8
+    },
+    {
+      0x16,
+      UINT32_C(0x40c00000),
+      UINT32_C(0x40800000),
+      UINT32_C(0x40400000),
+      14
+    }
+  };
+
+  for (const TraceVector &vector : vectors)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, vector.fs);
+    core.setFloatingPointRegister(3, vector.ft);
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        vector.function,
+        vector.function == 0x04 ? 0 : 2,
+        4,
+        3));
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(vector.latency + 1);
+
+    std::vector<NekoTraceEvent> pipelineEvents;
+    for (const NekoTraceEvent &event : eeTrace(system))
+    {
+      if (event.type ==
+            NekoTraceEventType::COP1StageTransition ||
+          event.type == NekoTraceEventType::COP1Retired)
+      {
+        pipelineEvents.push_back(event);
+      }
+    }
+    REQUIRE(pipelineEvents.size() == 3);
+    REQUIRE(
+      pipelineEvents[0].type ==
+      NekoTraceEventType::COP1StageTransition);
+    REQUIRE(pipelineEvents[0].masterCycle == 1);
+    REQUIRE(
+      pipelineEvents[0].value2 ==
+      (NekoEETraceCOP1Stage::NONE |
+       (NekoEETraceCOP1Stage::R <<
+        NekoEETraceCOP1Stage::TO_SHIFT) |
+       (static_cast<std::uint64_t>(vector.latency) <<
+        NekoEETraceCOP1Stage::REMAINING_CYCLES_SHIFT)));
+    REQUIRE(
+      pipelineEvents[1].type ==
+      NekoTraceEventType::COP1StageTransition);
+    REQUIRE(
+      pipelineEvents[1].masterCycle ==
+      static_cast<std::uint64_t>(vector.latency + 1));
+    REQUIRE(
+      pipelineEvents[1].value2 ==
+      (NekoEETraceCOP1Stage::R |
+       (NekoEETraceCOP1Stage::S1 <<
+        NekoEETraceCOP1Stage::TO_SHIFT)));
+    REQUIRE(
+      pipelineEvents[2].type ==
+      NekoTraceEventType::COP1Retired);
+    REQUIRE(
+      pipelineEvents[2].masterCycle ==
+      static_cast<std::uint64_t>(vector.latency + 1));
+    REQUIRE(
+      pipelineEvents[2].value2 ==
+      (vector.expected |
+       ((NekoEETraceCOP1Result::DESTINATION_FPR |
+         NekoEETraceCOP1Result::DESTINATION_FCR31) <<
+        NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
+       (UINT64_C(4) <<
+        NekoEETraceCOP1Result::FPR_REGISTER_SHIFT)));
+    REQUIRE(
+      pipelineEvents[2].value3 ==
+      (FP_FLAG_I_BIT | FP_FLAG_D_BIT));
+  }
+}
+
 TEST_CASE("EE COP1 add traces its manual-backed stage progression")
 {
   NekoSystem system;
