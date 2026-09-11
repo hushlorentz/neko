@@ -1030,6 +1030,34 @@ TEST_CASE("EE COP1 multiply and accumulator add trace retirement")
       UINT32_C(0xbf800000),
       NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
         NekoEETraceCOP1Result::DESTINATION_FCR31
+    },
+    {
+      0x1c,
+      4,
+      UINT32_C(0x41800000),
+      NekoEETraceCOP1Result::DESTINATION_FPR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
+    },
+    {
+      0x1d,
+      4,
+      UINT32_C(0x40800000),
+      NekoEETraceCOP1Result::DESTINATION_FPR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
+    },
+    {
+      0x1e,
+      0,
+      UINT32_C(0x41800000),
+      NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
+    },
+    {
+      0x1f,
+      0,
+      UINT32_C(0x40800000),
+      NekoEETraceCOP1Result::DESTINATION_ACCUMULATOR |
+        NekoEETraceCOP1Result::DESTINATION_FCR31
     }
   };
 
@@ -1037,6 +1065,7 @@ TEST_CASE("EE COP1 multiply and accumulator add trace retirement")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x41200000));
     core.setFloatingPointRegister(2, UINT32_C(0x40000000));
     core.setFloatingPointRegister(3, UINT32_C(0x40400000));
     system.eeBus().write32(

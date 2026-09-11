@@ -2095,6 +2095,7 @@ void NekoSaveStateCodec::readEECore(
           operation.stage == EECore::COP1PipelineStage::Z;
         std::uint32_t expectedResult = 0;
         std::uint8_t expectedFlags = 0;
+        std::uint8_t expectedStickyFlags = 0;
         bool expectedCondition = false;
         if (resultComputed)
         {
@@ -2167,6 +2168,29 @@ void NekoSaveStateCodec::readEECore(
               expectedFlags = result.flags;
               break;
             }
+            case EEOperation::MultiplyAddSingleCOP1:
+            case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+            case EEOperation::MultiplySubtractSingleCOP1:
+            case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+            {
+              const EECompoundFloatResult result =
+                operation.instruction.operation ==
+                    EEOperation::MultiplyAddSingleCOP1 ||
+                  operation.instruction.operation ==
+                    EEOperation::MultiplyAddSingleToAccumulatorCOP1
+                  ? maddEEFloatRaw(
+                      operation.capturedAccumulator,
+                      operation.capturedFS,
+                      operation.capturedFT)
+                  : msubEEFloatRaw(
+                      operation.capturedAccumulator,
+                      operation.capturedFS,
+                      operation.capturedFT);
+              expectedResult = result.bits;
+              expectedFlags = result.flags;
+              expectedStickyFlags = result.stickyFlags;
+              break;
+            }
             case EEOperation::CompareFalseSingleCOP1:
             case EEOperation::CompareEqualSingleCOP1:
             case EEOperation::CompareLessThanSingleCOP1:
@@ -2214,7 +2238,14 @@ void NekoSaveStateCodec::readEECore(
           operation.instruction.operation ==
             EEOperation::SubtractSingleToAccumulatorCOP1 ||
           operation.instruction.operation ==
-            EEOperation::MultiplySingleToAccumulatorCOP1;
+            EEOperation::MultiplySingleToAccumulatorCOP1 ||
+          operation.instruction.operation ==
+            EEOperation::MultiplyAddSingleToAccumulatorCOP1 ||
+          operation.instruction.operation ==
+            EEOperation::MultiplySubtractSingleToAccumulatorCOP1;
+        const bool compound =
+          EECore::isCOP1CompoundOperation(
+            operation.instruction.operation);
         const std::uint8_t expectedDestination =
           comparison
             ? EECore::COP1_DESTINATION_CONDITION
@@ -2238,11 +2269,15 @@ void NekoSaveStateCodec::readEECore(
               expectedDestination &&
             operation.destination.fprRegister ==
               operation.instruction.shiftAmount &&
-            operation.capturedAccumulator == 0 &&
+            (compound ||
+             operation.capturedAccumulator == 0) &&
             operation.capturedGPR == 0 &&
             operation.affectedFlags ==
               expectedAffectedFlags &&
-            operation.raisedStickyFlags == 0 &&
+            (resultComputed
+              ? operation.raisedStickyFlags ==
+                  expectedStickyFlags
+              : operation.raisedStickyFlags == 0) &&
             (resultComputed
               ? operation.conditionResult == expectedCondition
               : !operation.conditionResult) &&
@@ -2250,6 +2285,7 @@ void NekoSaveStateCodec::readEECore(
             (operandsCaptured ||
              (operation.capturedFS == 0 &&
               operation.capturedFT == 0 &&
+              operation.capturedAccumulator == 0 &&
               operation.capturedControl == 0)) &&
             (resultComputed
               ? (operation.rawResult == expectedResult &&

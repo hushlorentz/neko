@@ -983,6 +983,10 @@ bool EECore::executeInstruction(
     case EEOperation::SubtractSingleToAccumulatorCOP1:
     case EEOperation::MultiplySingleCOP1:
     case EEOperation::MultiplySingleToAccumulatorCOP1:
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
     case EEOperation::CompareFalseSingleCOP1:
     case EEOperation::CompareEqualSingleCOP1:
     case EEOperation::CompareLessThanSingleCOP1:
@@ -1004,7 +1008,11 @@ bool EECore::executeInstruction(
                instruction.operation ==
                  EEOperation::SubtractSingleToAccumulatorCOP1 ||
                instruction.operation ==
-                 EEOperation::MultiplySingleToAccumulatorCOP1)
+                 EEOperation::MultiplySingleToAccumulatorCOP1 ||
+               instruction.operation ==
+                 EEOperation::MultiplyAddSingleToAccumulatorCOP1 ||
+               instruction.operation ==
+                 EEOperation::MultiplySubtractSingleToAccumulatorCOP1)
       {
         operation.destination.mask =
           COP1_DESTINATION_ACCUMULATOR |
@@ -1039,46 +1047,6 @@ bool EECore::executeInstruction(
         operation,
         UINT8_MAX,
         COP1PipelineStage::R);
-      return true;
-    }
-    case EEOperation::MultiplyAddSingleCOP1:
-    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
-    case EEOperation::MultiplySubtractSingleCOP1:
-    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      const EECompoundFloatResult result =
-        instruction.operation ==
-          EEOperation::MultiplyAddSingleCOP1 ||
-        instruction.operation ==
-          EEOperation::MultiplyAddSingleToAccumulatorCOP1
-          ? maddEEFloatRaw(
-              scoreboardAccumulatorValue(),
-              scoreboardFPRValue(destination),
-              scoreboardFPRValue(instruction.targetRegister))
-          : msubEEFloatRaw(
-              scoreboardAccumulatorValue(),
-              scoreboardFPRValue(destination),
-              scoreboardFPRValue(instruction.targetRegister));
-      if (instruction.operation ==
-            EEOperation::MultiplyAddSingleCOP1 ||
-          instruction.operation ==
-            EEOperation::MultiplySubtractSingleCOP1)
-      {
-        floatingPointRegisters[instruction.shiftAmount] =
-          result.bits;
-      }
-      else
-      {
-        floatingPointAccumulatorRegister = result.bits;
-      }
-      updateCOP1ArithmeticFlags(
-        FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW,
-        result.flags,
-        result.stickyFlags);
       return true;
     }
     case EEOperation::BranchCOP1False:
@@ -2855,6 +2823,12 @@ void EECore::drainInFlightCOP1()
             floatingPointRegisters[
               oldest->instruction.targetRegister];
         }
+        if (isCOP1CompoundOperation(
+              oldest->instruction.operation))
+        {
+          oldest->capturedAccumulator =
+            floatingPointAccumulatorRegister;
+        }
         oldest->capturedControl =
           cop1ControlRegister(
             EECOP1Control::STATUS_REGISTER);
@@ -3010,6 +2984,13 @@ bool EECore::advanceInFlightCOP1Operation(
               operation->instruction.targetRegister,
               operation->programOrder);
         }
+        if (isCOP1CompoundOperation(
+              operation->instruction.operation))
+        {
+          operation->capturedAccumulator =
+            scoreboardAccumulatorValueForT(
+              operation->programOrder);
+        }
         operation->capturedControl =
           cop1ControlRegister(
             EECOP1Control::STATUS_REGISTER);
@@ -3141,6 +3122,29 @@ void EECore::computeInFlightCOP1StagedOperation(
           operation->capturedFT);
       operation->rawResult = result.bits;
       operation->raisedFlags = result.flags;
+      return;
+    }
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+    {
+      const EECompoundFloatResult result =
+        operation->instruction.operation ==
+          EEOperation::MultiplyAddSingleCOP1 ||
+        operation->instruction.operation ==
+          EEOperation::MultiplyAddSingleToAccumulatorCOP1
+          ? maddEEFloatRaw(
+              operation->capturedAccumulator,
+              operation->capturedFS,
+              operation->capturedFT)
+          : msubEEFloatRaw(
+              operation->capturedAccumulator,
+              operation->capturedFS,
+              operation->capturedFT);
+      operation->rawResult = result.bits;
+      operation->raisedFlags = result.flags;
+      operation->raisedStickyFlags = result.stickyFlags;
       return;
     }
     default:
@@ -3595,18 +3599,40 @@ std::uint32_t EECore::scoreboardFPRValueForT(
     "Unavailable EE COP1 FPR reached 2T capture.");
 }
 
-std::uint32_t EECore::scoreboardAccumulatorValue() const
+std::uint32_t EECore::scoreboardAccumulatorValueForT(
+  std::uint64_t consumerOrder) const
 {
-  const COP1ScoreboardValue value =
-    cop1ScoreboardValue(
-      COP1ScoreboardResource::Accumulator);
-  if (value.availability ==
-      COP1ScoreboardAvailability::Unavailable)
+  const InFlightCOP1Operation *producer = nullptr;
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
   {
-    throw std::logic_error(
-      "Unavailable EE COP1 accumulator reached execution.");
+    if (!operation.active ||
+        operation.programOrder >= consumerOrder ||
+        (operation.destination.mask &
+         COP1_DESTINATION_ACCUMULATOR) == 0)
+    {
+      continue;
+    }
+    if (producer == nullptr ||
+        operation.programOrder > producer->programOrder)
+    {
+      producer = &operation;
+    }
   }
-  return value.value;
+  if (producer == nullptr ||
+      producer->stage == COP1PipelineStage::S2)
+  {
+    return floatingPointAccumulatorRegister;
+  }
+  if (producer->stage == COP1PipelineStage::S1 ||
+      (isCOP1StagedOperation(
+         producer->instruction.operation) &&
+       producer->stage == COP1PipelineStage::Z))
+  {
+    return producer->rawResult;
+  }
+  throw std::logic_error(
+    "Unavailable EE COP1 accumulator reached 2T capture.");
 }
 
 std::uint32_t EECore::scoreboardFCR31Value() const
@@ -3852,6 +3878,17 @@ bool EECore::isCOP1MultiplyOperation(
       EEOperation::MultiplySingleToAccumulatorCOP1;
 }
 
+bool EECore::isCOP1CompoundOperation(
+  EEOperation operation)
+{
+  return operation == EEOperation::MultiplyAddSingleCOP1 ||
+    operation ==
+      EEOperation::MultiplyAddSingleToAccumulatorCOP1 ||
+    operation == EEOperation::MultiplySubtractSingleCOP1 ||
+    operation ==
+      EEOperation::MultiplySubtractSingleToAccumulatorCOP1;
+}
+
 bool EECore::isCOP1UnaryOperation(EEOperation operation)
 {
   return operation == EEOperation::AbsoluteSingleCOP1 ||
@@ -3882,6 +3919,7 @@ bool EECore::isCOP1StagedOperation(
   return isCOP1SingleSourceStagedOperation(operation) ||
     isCOP1AddSubtractOperation(operation) ||
     isCOP1MultiplyOperation(operation) ||
+    isCOP1CompoundOperation(operation) ||
     operation == EEOperation::MaximumSingleCOP1 ||
     operation == EEOperation::MinimumSingleCOP1 ||
     isCOP1ComparisonOperation(operation);

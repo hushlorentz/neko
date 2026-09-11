@@ -1446,6 +1446,7 @@ TEST_CASE("EE COP1 multiply-add uses ACC and selects its destination")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1c, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1467,6 +1468,7 @@ TEST_CASE("EE COP1 multiply-add uses ACC and selects its destination")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1e, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointAccumulator() ==
@@ -1488,6 +1490,7 @@ TEST_CASE("EE COP1 multiply-add preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1c, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1509,6 +1512,7 @@ TEST_CASE("EE COP1 multiply-add preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1c, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1531,6 +1535,7 @@ TEST_CASE("EE COP1 multiply-add preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1c, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1553,6 +1558,7 @@ TEST_CASE("EE COP1 multiply-add preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1e, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointAccumulator() ==
@@ -1575,6 +1581,7 @@ TEST_CASE("EE COP1 multiply-add preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1e, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointAccumulator() ==
@@ -1597,6 +1604,7 @@ TEST_CASE("EE COP1 multiply-add preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1e, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(core.floatingPointAccumulator() == 0);
     REQUIRE(
@@ -1620,6 +1628,7 @@ TEST_CASE("EE COP1 multiply-subtract uses ACC and selects its destination")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1d, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1641,6 +1650,7 @@ TEST_CASE("EE COP1 multiply-subtract uses ACC and selects its destination")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1f, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointAccumulator() ==
@@ -1662,6 +1672,7 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1d, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1683,6 +1694,7 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1d, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1705,6 +1717,7 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1f, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointAccumulator() ==
@@ -1727,6 +1740,7 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1d, 2, 4, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -1749,6 +1763,7 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1f, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointAccumulator() ==
@@ -1771,6 +1786,7 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
     runInstruction(
       &system,
       cop1SingleInstruction(0x1f, 2, 0, 3));
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(core.floatingPointAccumulator() == 0);
     REQUIRE(
@@ -1778,6 +1794,60 @@ TEST_CASE("EE COP1 multiply-subtract preserves intermediate flag rules")
       (EECOP1Control::STATUS_FIXED |
        EECOP1Control::CAUSE_UNDERFLOW |
        EECOP1Control::STICKY_UNDERFLOW));
+  }
+}
+
+TEST_CASE("EE COP1 compound operations capture operands in T and write in S")
+{
+  for (const std::uint8_t function : {0x1c, 0x1d, 0x1e, 0x1f})
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        function,
+        2,
+        function >= 0x1e ? 0 : 4,
+        3));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    core.setFloatingPointAccumulator(UINT32_C(0x41200000));
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    system.clockMasterCycle();
+    core.setFloatingPointAccumulator(UINT32_C(0x42c80000));
+    core.setFloatingPointRegister(2, 0);
+    core.setFloatingPointRegister(3, 0);
+    system.runMasterCycles(3);
+
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x42c80000));
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.clockMasterCycle();
+
+    const std::uint32_t expected =
+      function == 0x1c || function == 0x1e
+        ? UINT32_C(0x41800000)
+        : UINT32_C(0x40800000);
+    if (function >= 0x1e)
+    {
+      REQUIRE(core.floatingPointAccumulator() == expected);
+      REQUIRE(core.floatingPointRegister(4) == 0);
+    }
+    else
+    {
+      REQUIRE(core.floatingPointRegister(4) == expected);
+      REQUIRE(
+        core.floatingPointAccumulator() ==
+        UINT32_C(0x42c80000));
+    }
   }
 }
 
@@ -3771,7 +3841,7 @@ TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
       UINT32_C(0x40400000));
   }
 
-  SECTION("A multiply result feeds the next compound operation after retirement")
+  SECTION("A multiply result feeds the next staged compound operation")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
@@ -3789,16 +3859,20 @@ TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
 
     system.runMasterCycles(6);
 
-    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.programCounter() == 12);
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x40c00000));
+    REQUIRE(core.floatingPointRegister(6) == 0);
+
+    system.runMasterCycles(4);
+
     REQUIRE(
       core.floatingPointRegister(6) ==
       UINT32_C(0x40800000));
   }
 
-  SECTION("An accumulator write feeds the next compound operation after retirement")
+  SECTION("An accumulator write feeds the next staged compound operation")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
@@ -3820,6 +3894,10 @@ TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
     REQUIRE(
       core.floatingPointAccumulator() ==
       UINT32_C(0x40c00000));
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.runMasterCycles(5);
+
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x40a00000));
@@ -3844,7 +3922,20 @@ TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
 
     system.runMasterCycles(2);
 
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x3f800000));
+
+    system.runMasterCycles(4);
+
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x40e00000));
+
+    system.runMasterCycles(5);
+
     REQUIRE(
       core.floatingPointAccumulator() ==
       UINT32_C(0x40c00000));
@@ -4854,6 +4945,48 @@ TEST_CASE("EE staged COP1 accumulator add state participates in state hashes")
   REQUIRE(
     stagedHash(0x19, UINT32_C(0x3f800000), 5) !=
     stagedHash(0x19, UINT32_C(0x00800001), 5));
+}
+
+TEST_CASE("EE staged COP1 compound state participates in state hashes")
+{
+  const auto stagedHash =
+    [](std::uint8_t function,
+       std::uint32_t accumulator,
+       std::size_t cycles)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setFloatingPointAccumulator(accumulator);
+      core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+      core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+      system.eeBus().write32(
+        0,
+        cop1SingleInstruction(
+          function,
+          2,
+          function >= 0x1e ? 0 : 4,
+          3));
+      core.startExecution(0);
+      system.runMasterCycles(cycles);
+      core.setFloatingPointAccumulator(0);
+      core.setFloatingPointRegister(2, 0);
+      core.setFloatingPointRegister(3, 0);
+      return core.stateHash();
+    };
+
+  SECTION("Captured ACC operands affect the hash")
+  {
+    REQUIRE(
+      stagedHash(0x1c, UINT32_C(0x41200000), 2) !=
+      stagedHash(0x1c, UINT32_C(0x41a00000), 2));
+  }
+
+  SECTION("Computed compound results and sticky flags affect the hash")
+  {
+    REQUIRE(
+      stagedHash(0x1e, UINT32_C(0x40000000), 5) !=
+      stagedHash(0x1e, UINT32_C(0xffc00000), 5));
+  }
 }
 
 TEST_CASE("EE staged unary and min/max state participates in hashes")
@@ -6226,6 +6359,73 @@ TEST_CASE(
     REQUIRE(
       restored.eeCore().floatingPointAccumulator() ==
       UINT32_C(0x40c00000));
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+  }
+}
+
+TEST_CASE(
+  "EE COP1 compound timing survives host halt and save-state restore")
+{
+  for (const std::uint8_t function : {0x1c, 0x1d, 0x1e, 0x1f})
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setFloatingPointAccumulator(
+      UINT32_C(0x41200000));
+    originalCore.setFloatingPointRegister(
+      2,
+      UINT32_C(0x40000000));
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x40400000));
+    original.eeBus().write32(
+      0,
+      cop1SingleInstruction(
+        function,
+        2,
+        function >= 0x1e ? 0 : 4,
+        3));
+    originalCore.startExecution(0);
+    original.runMasterCycles(2);
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.setFloatingPointAccumulator(0);
+    originalCore.setFloatingPointRegister(2, 0);
+    originalCore.setFloatingPointRegister(3, 0);
+    restored.eeCore().setFloatingPointAccumulator(0);
+    restored.eeCore().setFloatingPointRegister(2, 0);
+    restored.eeCore().setFloatingPointRegister(3, 0);
+    originalCore.startExecution(originalCore.programCounter());
+    restored.eeCore().startExecution(
+      restored.eeCore().programCounter());
+    original.runMasterCycles(4);
+    restored.runMasterCycles(4);
+
+    const std::uint32_t expected =
+      function == 0x1c || function == 0x1e
+        ? UINT32_C(0x41800000)
+        : UINT32_C(0x40800000);
+    if (function >= 0x1e)
+    {
+      REQUIRE(
+        originalCore.floatingPointAccumulator() ==
+        expected);
+      REQUIRE(
+        restored.eeCore().floatingPointAccumulator() ==
+        expected);
+    }
+    else
+    {
+      REQUIRE(
+        originalCore.floatingPointRegister(4) ==
+        expected);
+      REQUIRE(
+        restored.eeCore().floatingPointRegister(4) ==
+        expected);
+    }
     REQUIRE(original.saveState() == restored.saveState());
     REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
   }

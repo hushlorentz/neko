@@ -888,7 +888,7 @@ accumulator or condition-result contract:
       commit, pending stronger documentation or hardware measurement
 - [x] Migrate `MUL.S` and `MULA.S` through captured `T` operands, documented
       `X/Y` multiply work, and ordered FPR or ACC result delivery
-- [ ] Migrate accumulator add/subtract and compound
+- [x] Migrate accumulator add/subtract and compound
       `MADD`/`MSUB`/`MADDA`/`MSUBA` families through the proven multiply and
       accumulator paths
 - [ ] Interlock or forward FPR, ACC, FCR31, WAW, and read-modify-write

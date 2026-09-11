@@ -578,7 +578,8 @@ class EECore : public ClockedComponent
     std::uint32_t scoreboardFPRValueForT(
       std::uint8_t registerIndex,
       std::uint64_t consumerOrder) const;
-    std::uint32_t scoreboardAccumulatorValue() const;
+    std::uint32_t scoreboardAccumulatorValueForT(
+      std::uint64_t consumerOrder) const;
     std::uint32_t scoreboardFCR31Value() const;
     bool scoreboardCOP1Condition() const;
     static COP1Dependency instructionFPRDependency(
@@ -596,6 +597,8 @@ class EECore : public ClockedComponent
     static bool isCOP1AddSubtractOperation(
       EEOperation operation);
     static bool isCOP1MultiplyOperation(
+      EEOperation operation);
+    static bool isCOP1CompoundOperation(
       EEOperation operation);
     static bool isCOP1UnaryOperation(EEOperation operation);
     static bool isCOP1SingleSourceStagedOperation(

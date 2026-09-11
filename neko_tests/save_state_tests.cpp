@@ -69,6 +69,10 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET = 1038;
   constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_ACC_OFFSET = 1046;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_STICKY_FLAGS_OFFSET = 1079;
+  constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1081;
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET = 1083;
@@ -1689,6 +1693,63 @@ TEST_CASE("Invalid staged COP1 accumulator add results are rejected")
       REQUIRE_THROWS(destination.loadState(invalid));
       REQUIRE(destination.saveState() == before);
     }
+  }
+}
+
+TEST_CASE("Invalid staged COP1 compound results are rejected")
+{
+  NekoSystem source;
+  source.eeCore().setFloatingPointAccumulator(
+    UINT32_C(0x40000000));
+  source.eeCore().setFloatingPointRegister(
+    2,
+    UINT32_C(0x80800000));
+  source.eeCore().setFloatingPointRegister(
+    3,
+    UINT32_C(0x3f000000));
+  source.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x1e, 2, 0, 3));
+  source.eeCore().startExecution(0);
+  source.runMasterCycles(5);
+  source.eeCore().haltExecution();
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+
+  SECTION("The Z-stage result must match all captured operands")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_ACC_OFFSET] ^= 1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("The Z-stage result must carry product sticky flags")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_STICKY_FLAGS_OFFSET] = 0;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("MADDA must name ACC and FCR31 as its destinations")
+  {
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+        1;
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
   }
 }
 
