@@ -891,7 +891,7 @@ accumulator or condition-result contract:
 - [x] Migrate accumulator add/subtract and compound
       `MADD`/`MSUB`/`MADDA`/`MSUBA` families through the proven multiply and
       accumulator paths
-- [ ] Interlock or forward FPR, ACC, FCR31, WAW, and read-modify-write
+- [x] Interlock or forward FPR, ACC, FCR31, WAW, and read-modify-write
       dependencies at their documented FPR/FCR31 and provisional ACC
       visibility boundaries
 - [ ] Preserve product and accumulation arithmetic/sticky flags in program

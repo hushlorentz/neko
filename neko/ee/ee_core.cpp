@@ -3328,13 +3328,15 @@ bool EECore::cop1ScoreboardBlocks(
   const COP1ScoreboardValue accumulatorValue =
     cop1ScoreboardValue(
       COP1ScoreboardResource::Accumulator);
-  const bool orderedStagedAccumulatorWrite =
-    accumulatorDependency == COP1Dependency::Write &&
+  const bool orderedStagedAccumulatorDependency =
     isCOP1StagedOperation(instruction.operation) &&
     isCOP1StagedOperation(
-      accumulatorValue.producerOperation);
+      accumulatorValue.producerOperation) &&
+    (accumulatorDependency == COP1Dependency::Write ||
+     accumulatorValue.producerStage == COP1PipelineStage::Z ||
+     accumulatorValue.producerStage == COP1PipelineStage::S1);
   if (accumulatorDependency != COP1Dependency::None &&
-      !orderedStagedAccumulatorWrite &&
+      !orderedStagedAccumulatorDependency &&
       accumulatorValue.availability ==
         COP1ScoreboardAvailability::Unavailable)
   {

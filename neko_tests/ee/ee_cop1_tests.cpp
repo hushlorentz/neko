@@ -3890,13 +3890,13 @@ TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
 
     system.runMasterCycles(6);
 
-    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.programCounter() == 12);
     REQUIRE(
       core.floatingPointAccumulator() ==
       UINT32_C(0x40c00000));
     REQUIRE(core.floatingPointRegister(4) == 0);
 
-    system.runMasterCycles(5);
+    system.runMasterCycles(4);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -3920,25 +3920,101 @@ TEST_CASE("EE COP1 multiply chains forward FPR and ACC results")
       cop1SingleInstruction(0x1f, 5, 0, 6));
     core.startExecution(0);
 
-    system.runMasterCycles(2);
+    system.runMasterCycles(4);
 
     REQUIRE(core.programCounter() == 4);
     REQUIRE(
       core.floatingPointAccumulator() ==
       UINT32_C(0x3f800000));
 
-    system.runMasterCycles(4);
+    system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
     REQUIRE(
       core.floatingPointAccumulator() ==
+      UINT32_C(0x3f800000));
+
+    core.setFloatingPointAccumulator(UINT32_C(0x42c80000));
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(
+      core.floatingPointAccumulator() ==
       UINT32_C(0x40e00000));
 
-    system.runMasterCycles(5);
+    system.runMasterCycles(4);
 
     REQUIRE(
       core.floatingPointAccumulator() ==
       UINT32_C(0x40c00000));
+  }
+}
+
+TEST_CASE("EE COP1 compound dependencies use staged visibility boundaries")
+{
+  SECTION("An aliased FPR read-write waits for and forwards the older result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(5, UINT32_C(0x3f000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x1c, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x1d, 4, 4, 5));
+    core.startExecution(0);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.clockMasterCycle();
+    core.setFloatingPointRegister(4, UINT32_C(0xdeadbeef));
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xc0200000));
+  }
+
+  SECTION("CFC1 waits for a compound FCR31 result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointAccumulator(UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x1c, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1TransferInstruction(0x02, 5, 31));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.generalRegister(5).low ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW |
+       EECOP1Control::STICKY_OVERFLOW));
   }
 }
 
