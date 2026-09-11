@@ -894,10 +894,10 @@ accumulator or condition-result contract:
 - [x] Interlock or forward FPR, ACC, FCR31, WAW, and read-modify-write
       dependencies at their documented FPR/FCR31 and provisional ACC
       visibility boundaries
-- [ ] Preserve product and accumulation arithmetic/sticky flags in program
+- [x] Preserve product and accumulation arithmetic/sticky flags in program
       order across overlap, exceptions, halt/resume, hashes, traces, and
       save-state restore
-- [ ] Complete an independent multiply/accumulator migration review
+- [x] Complete an independent multiply/accumulator migration review
 
 ### C1 Divider Stage Integration
 

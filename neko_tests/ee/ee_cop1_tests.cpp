@@ -5338,6 +5338,47 @@ TEST_CASE("EE staged COP1 accumulator add work crosses exception entry")
   }
 }
 
+TEST_CASE("EE staged COP1 compound flags cross exception entry")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setFloatingPointAccumulator(UINT32_C(0x40000000));
+  core.setFloatingPointRegister(2, UINT32_C(0x80800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x3f000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x1c, 2, 4, 3));
+  system.eeBus().write32(4, UINT32_C(0x0000000c));
+  for (std::uint32_t address = EEExceptionVector::GENERAL;
+       address < EEExceptionVector::GENERAL + 24;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(core.pendingException() == EEException::SystemCall);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40000000));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_UNDERFLOW));
+}
+
 TEST_CASE("EE staged unary and min/max work crosses exception entry")
 {
   struct ExceptionVector
@@ -6358,6 +6399,56 @@ TEST_CASE("EE COP1 exceptional multiply timing preserves flag order")
      EECOP1Control::STICKY_OVERFLOW));
 }
 
+TEST_CASE("EE COP1 overlapping compound flags retire in program order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointAccumulator(UINT32_C(0x40000000));
+  core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(5, UINT32_C(0x80800000));
+  core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x1c, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x1c, 5, 7, 6));
+  core.startExecution(0);
+
+  system.runMasterCycles(5);
+
+  REQUIRE(core.programCounter() == 20);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(7) == 0);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(core.floatingPointRegister(7) == 0);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_OVERFLOW |
+     EECOP1Control::STICKY_OVERFLOW));
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(7) ==
+    UINT32_C(0x40000000));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_OVERFLOW |
+     EECOP1Control::STICKY_UNDERFLOW));
+}
+
 TEST_CASE(
   "EE COP1 multiply timing survives host halt and save-state restore")
 {
@@ -6505,6 +6596,52 @@ TEST_CASE(
     REQUIRE(original.saveState() == restored.saveState());
     REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
   }
+}
+
+TEST_CASE(
+  "EE COP1 compound sticky flags survive halt and save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setFloatingPointAccumulator(
+    UINT32_C(0x40000000));
+  originalCore.setFloatingPointRegister(
+    2,
+    UINT32_C(0x80800000));
+  originalCore.setFloatingPointRegister(
+    3,
+    UINT32_C(0x3f000000));
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x1e, 2, 0, 3));
+  originalCore.startExecution(0);
+  original.runMasterCycles(5);
+  originalCore.haltExecution();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  originalCore.startExecution(originalCore.programCounter());
+  restored.eeCore().startExecution(
+    restored.eeCore().programCounter());
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(
+    originalCore.floatingPointAccumulator() ==
+    UINT32_C(0x40000000));
+  REQUIRE(
+    restored.eeCore().floatingPointAccumulator() ==
+    UINT32_C(0x40000000));
+  REQUIRE(
+    originalCore.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_UNDERFLOW));
+  REQUIRE(
+    restored.eeCore().cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_UNDERFLOW));
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
 }
 
 TEST_CASE(

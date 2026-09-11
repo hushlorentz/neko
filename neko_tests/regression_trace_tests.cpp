@@ -1108,6 +1108,40 @@ TEST_CASE("EE COP1 multiply and accumulator add trace retirement")
   }
 }
 
+TEST_CASE("EE COP1 compound traces preserve product sticky flags")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointAccumulator(UINT32_C(0x40000000));
+  core.setFloatingPointRegister(2, UINT32_C(0x80800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x3f000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x1e, 2, 0, 3));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(6);
+
+  std::vector<NekoTraceEvent> retirements;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.type == NekoTraceEventType::COP1Retired)
+    {
+      retirements.push_back(event);
+    }
+  }
+  REQUIRE(retirements.size() == 1);
+  REQUIRE(
+    static_cast<std::uint32_t>(retirements[0].value2) ==
+    UINT32_C(0x40000000));
+  REQUIRE(
+    retirements[0].value3 ==
+    ((FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW) |
+     (static_cast<std::uint64_t>(FP_FLAG_UNDERFLOW) <<
+      NekoEETraceCOP1Result::RAISED_STICKY_FLAGS_SHIFT)));
+}
+
 TEST_CASE("EE COP1 conversion and comparison traces encode results")
 {
   struct TraceVector
