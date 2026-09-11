@@ -4745,6 +4745,108 @@ TEST_CASE("EE COP1 divider overlap supports every operation pairing")
   }
 }
 
+TEST_CASE("EE COP1 overlapping dividers preserve destination and FCR31 order")
+{
+  SECTION("A same-destination divider issues on the older completion cycle")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(6, UINT32_C(0x41800000));
+    core.setFloatingPointRegister(4, UINT32_C(0xdeadbeef));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x04, 0, 4, 6));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0xdeadbeef));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40800000));
+  }
+
+  SECTION("A younger current cause retains the older sticky history")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, 0);
+    core.setFloatingPointRegister(3, 0);
+    core.setFloatingPointRegister(6, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x03, 6, 5, 3));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(6);
+
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
+
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 2);
+
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(5) ==
+      UINT32_C(0x7fffffff));
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_DIVISION_BY_ZERO |
+       EECOP1Control::STICKY_INVALID |
+       EECOP1Control::STICKY_DIVISION_BY_ZERO));
+  }
+}
+
 TEST_CASE(
   "EE COP1 divider state survives halt and save-state restore")
 {

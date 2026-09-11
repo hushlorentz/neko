@@ -904,7 +904,7 @@ accumulator or condition-result contract:
 - [x] Deliver `DIV.S`, `SQRT.S`, and `RSQRT.S` results through the shared
       `1S`/`2S` writeback contract using the foundation's explicit latency
       anchor while retaining the isolated provisional initiation policy
-- [ ] Preserve two-result overlap, destination and FCR31 dependencies,
+- [x] Preserve two-result overlap, destination and FCR31 dependencies,
       older-before-younger retirement, and the documented completion-cycle
       issue behavior
 - [ ] Re-baseline divider traces, hashes, branch-proximity diagnostics,
