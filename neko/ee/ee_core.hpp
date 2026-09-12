@@ -545,6 +545,7 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t instructionAddress);
     bool pendingCOP1LoadActive() const;
+    bool pendingCOP1GPRWriteActive() const;
     void drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
@@ -592,6 +593,8 @@ class EECore : public ClockedComponent
     static COP1Dependency instructionConditionDependency(
       const EEInstruction &instruction);
     static bool isCOP1MoveOperation(EEOperation operation);
+    static bool isCOP1RegisterMoveOperation(
+      EEOperation operation);
     static bool isCOP1OperateOperation(EEOperation operation);
     static bool isCOP1DividerOperation(EEOperation operation);
     static bool isCOP1AddSubtractOperation(

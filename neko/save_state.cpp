@@ -2007,6 +2007,9 @@ void NekoSaveStateCodec::readEECore(
       const bool load =
         operation.instruction.operation ==
           EEOperation::LoadWordToCOP1;
+      const bool registerMove =
+        EECore::isCOP1RegisterMoveOperation(
+          operation.instruction.operation);
       const bool divider =
         EECore::isCOP1DividerOperation(
           operation.instruction.operation);
@@ -2016,6 +2019,99 @@ void NekoSaveStateCodec::readEECore(
       require(
         load || divider || operation.remainingCycles == 0,
         "EE COP1 operation has an unexpected countdown");
+      if (registerMove)
+      {
+        const bool cop1SourceCaptured =
+          operation.stage != EECore::COP1PipelineStage::R;
+        const bool resultComputed =
+          operation.stage == EECore::COP1PipelineStage::Y;
+        std::uint8_t expectedDestination =
+          EECore::COP1_DESTINATION_NONE;
+        std::uint8_t expectedFPR = 0;
+        std::uint8_t expectedGPR = 0;
+        std::uint32_t expectedResult = 0;
+        bool usesFPRSource = false;
+        bool usesControlSource = false;
+        bool usesGPRSource = false;
+        switch (operation.instruction.operation)
+        {
+          case EEOperation::MoveWordFromCOP1:
+            expectedDestination =
+              EECore::COP1_DESTINATION_GPR;
+            expectedGPR =
+              operation.instruction.targetRegister;
+            usesFPRSource = true;
+            expectedResult = operation.capturedFS;
+            break;
+          case EEOperation::MoveWordToCOP1:
+            expectedDestination =
+              EECore::COP1_DESTINATION_FPR;
+            expectedFPR =
+              operation.instruction.destinationRegister;
+            usesGPRSource = true;
+            expectedResult =
+              static_cast<std::uint32_t>(
+                operation.capturedGPR);
+            break;
+          case EEOperation::MoveControlWordFromCOP1:
+            expectedDestination =
+              EECore::COP1_DESTINATION_GPR;
+            expectedGPR =
+              operation.instruction.targetRegister;
+            usesControlSource = true;
+            expectedResult = operation.capturedControl;
+            break;
+          case EEOperation::MoveControlWordToCOP1:
+            if (operation.instruction.destinationRegister ==
+                EECOP1Control::STATUS_REGISTER)
+            {
+              expectedDestination =
+                EECore::COP1_DESTINATION_FCR31;
+            }
+            usesGPRSource = true;
+            expectedResult =
+              static_cast<std::uint32_t>(
+                operation.capturedGPR);
+            break;
+          case EEOperation::MoveSingleCOP1:
+            expectedDestination =
+              EECore::COP1_DESTINATION_FPR;
+            expectedFPR =
+              operation.instruction.shiftAmount;
+            usesFPRSource = true;
+            expectedResult = operation.capturedFS;
+            break;
+          default:
+            break;
+        }
+        require(
+          operation.stage <= EECore::COP1PipelineStage::Y &&
+            operation.destination.mask == expectedDestination &&
+            operation.destination.fprRegister == expectedFPR &&
+            operation.destination.gprRegister == expectedGPR &&
+            operation.capturedFT == 0 &&
+            operation.capturedAccumulator == 0 &&
+            operation.memoryAddress == 0 &&
+            operation.capturedMemoryValue == 0 &&
+            operation.affectedFlags == 0 &&
+            operation.raisedFlags == 0 &&
+            operation.raisedStickyFlags == 0 &&
+            !operation.conditionResult &&
+            (usesFPRSource
+              ? (cop1SourceCaptured ||
+                 operation.capturedFS == 0)
+              : operation.capturedFS == 0) &&
+            (usesControlSource
+              ? (cop1SourceCaptured ||
+                 operation.capturedControl == 0)
+              : operation.capturedControl == 0) &&
+            (usesGPRSource ||
+             operation.capturedGPR == 0) &&
+            (resultComputed
+              ? operation.rawResult == expectedResult
+              : operation.rawResult == 0),
+          "EE in-flight COP1 register move state is inconsistent");
+      }
       if (load)
       {
         const bool waitingForResult =
@@ -2408,6 +2504,31 @@ void NekoSaveStateCodec::readEECore(
     }
     const EECore::InFlightCOP1Operation &operation =
       core->inFlightCOP1Operations[left];
+    if (EECore::isCOP1RegisterMoveOperation(
+          operation.instruction.operation) &&
+        operation.stage == EECore::COP1PipelineStage::Y)
+    {
+      bool blockedByOlderOperation = false;
+      for (const EECore::InFlightCOP1Operation &candidate :
+           core->inFlightCOP1Operations)
+      {
+        if (!candidate.active ||
+            candidate.programOrder >= operation.programOrder)
+        {
+          continue;
+        }
+        const bool candidateReady =
+          candidate.stage == EECore::COP1PipelineStage::S1 ||
+          (EECore::isCOP1RegisterMoveOperation(
+             candidate.instruction.operation) &&
+           candidate.stage == EECore::COP1PipelineStage::Y);
+        blockedByOlderOperation =
+          blockedByOlderOperation || !candidateReady;
+      }
+      require(
+        blockedByOlderOperation,
+        "EE COP1 register move W result has no older blocker");
+    }
     if (operation.instruction.operation ==
           EEOperation::LoadWordToCOP1 &&
         operation.stage == EECore::COP1PipelineStage::S1)

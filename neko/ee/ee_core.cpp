@@ -607,6 +607,16 @@ void EECore::clock()
   const bool hadCOP1OperateResource =
     cop1OperateResourceOccupied;
   cop1OperateResourceOccupied = false;
+  if (pendingCOP1GPRWriteActive())
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1ResourceInterlock,
+      instructionAddress,
+      instructionValue,
+      FLOATING_POINT_REGISTER_COUNT + 3);
+    pc = instructionAddress;
+    return;
+  }
   if (hadCOP1OperateResource &&
       isCOP1MoveOperation(decoded.operation))
   {
@@ -874,52 +884,55 @@ bool EECore::executeInstruction(
         instruction.raw);
       return false;
     case EEOperation::MoveWordFromCOP1:
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      writeWord(
-        immediateDestination,
-        scoreboardFPRValue(destination));
-      return true;
     case EEOperation::MoveWordToCOP1:
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      floatingPointRegisters[destination] =
-        static_cast<std::uint32_t>(target);
-      return true;
     case EEOperation::MoveControlWordFromCOP1:
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      writeWord(
-        immediateDestination,
-        destination == EECOP1Control::STATUS_REGISTER
-          ? scoreboardFCR31Value()
-          : cop1ControlRegister(destination));
-      return true;
     case EEOperation::MoveControlWordToCOP1:
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return false;
-      }
-      setCOP1ControlRegister(
-        destination,
-        static_cast<std::uint32_t>(target));
-      return true;
     case EEOperation::MoveSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
         return false;
       }
-      const std::uint32_t sourceBits =
-        scoreboardFPRValue(destination);
-      floatingPointRegisters[instruction.shiftAmount] =
-        sourceBits;
+      InFlightCOP1Operation &operation =
+        allocateInFlightCOP1(instruction, address);
+      switch (instruction.operation)
+      {
+        case EEOperation::MoveWordFromCOP1:
+          operation.destination.mask = COP1_DESTINATION_GPR;
+          operation.destination.gprRegister =
+            immediateDestination;
+          break;
+        case EEOperation::MoveWordToCOP1:
+          operation.capturedGPR = target;
+          operation.destination.mask = COP1_DESTINATION_FPR;
+          operation.destination.fprRegister = destination;
+          break;
+        case EEOperation::MoveControlWordFromCOP1:
+          operation.destination.mask = COP1_DESTINATION_GPR;
+          operation.destination.gprRegister =
+            immediateDestination;
+          break;
+        case EEOperation::MoveControlWordToCOP1:
+          operation.capturedGPR = target;
+          if (destination ==
+              EECOP1Control::STATUS_REGISTER)
+          {
+            operation.destination.mask =
+              COP1_DESTINATION_FCR31;
+          }
+          break;
+        case EEOperation::MoveSingleCOP1:
+          operation.destination.mask = COP1_DESTINATION_FPR;
+          operation.destination.fprRegister =
+            instruction.shiftAmount;
+          break;
+        default:
+          break;
+      }
+      recordCOP1StageTransition(
+        operation,
+        UINT8_MAX,
+        COP1PipelineStage::R);
       return true;
     }
     case EEOperation::SquareRootSingleCOP1:
@@ -2766,6 +2779,21 @@ bool EECore::pendingCOP1LoadActive() const
   return false;
 }
 
+bool EECore::pendingCOP1GPRWriteActive() const
+{
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (operation.active &&
+        (operation.destination.mask &
+         COP1_DESTINATION_GPR) != 0)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 void EECore::drainInFlightCOP1()
 {
   bool drainedDivider = false;
@@ -2778,6 +2806,8 @@ void EECore::drainInFlightCOP1()
     }
     if (operation.instruction.operation !=
           EEOperation::LoadWordToCOP1 &&
+        !isCOP1RegisterMoveOperation(
+          operation.instruction.operation) &&
         !isCOP1DividerOperation(
           operation.instruction.operation) &&
         !isCOP1StagedOperation(
@@ -2836,6 +2866,42 @@ void EECore::drainInFlightCOP1()
       if (oldest->stage < COP1PipelineStage::Z)
       {
         computeInFlightCOP1StagedOperation(oldest);
+      }
+    }
+    else if (isCOP1RegisterMoveOperation(
+               oldest->instruction.operation))
+    {
+      const bool captureCOP1Source =
+        oldest->stage == COP1PipelineStage::R;
+      switch (oldest->instruction.operation)
+      {
+        case EEOperation::MoveWordFromCOP1:
+        case EEOperation::MoveSingleCOP1:
+          if (captureCOP1Source)
+          {
+            oldest->capturedFS =
+              floatingPointRegisters[
+                oldest->instruction.destinationRegister];
+          }
+          oldest->rawResult = oldest->capturedFS;
+          break;
+        case EEOperation::MoveWordToCOP1:
+        case EEOperation::MoveControlWordToCOP1:
+          oldest->rawResult =
+            static_cast<std::uint32_t>(
+              oldest->capturedGPR);
+          break;
+        case EEOperation::MoveControlWordFromCOP1:
+          if (captureCOP1Source)
+          {
+            oldest->capturedControl =
+              cop1ControlRegister(
+                oldest->instruction.destinationRegister);
+          }
+          oldest->rawResult = oldest->capturedControl;
+          break;
+        default:
+          break;
       }
     }
     commitInFlightCOP1(oldest, false);
@@ -2945,7 +3011,10 @@ void EECore::advancePendingCOP1(
       break;
     }
     const bool retirementReady =
-      oldestOperation->stage == COP1PipelineStage::S1;
+      oldestOperation->stage == COP1PipelineStage::S1 ||
+      (isCOP1RegisterMoveOperation(
+         oldestOperation->instruction.operation) &&
+       oldestOperation->stage == COP1PipelineStage::Y);
     if (!retirementReady)
     {
       break;
@@ -3009,6 +3078,66 @@ bool EECore::advanceInFlightCOP1Operation(
       case COP1PipelineStage::Z:
         operation->stage = COP1PipelineStage::S1;
         return true;
+      case COP1PipelineStage::S1:
+      case COP1PipelineStage::S2:
+        return false;
+    }
+  }
+  if (isCOP1RegisterMoveOperation(
+        operation->instruction.operation))
+  {
+    switch (operation->stage)
+    {
+      case COP1PipelineStage::R:
+        switch (operation->instruction.operation)
+        {
+          case EEOperation::MoveWordFromCOP1:
+          case EEOperation::MoveSingleCOP1:
+            operation->capturedFS =
+              scoreboardFPRValueForT(
+                operation->instruction.destinationRegister,
+                operation->programOrder);
+            break;
+          case EEOperation::MoveControlWordFromCOP1:
+            operation->capturedControl =
+              operation->instruction.destinationRegister ==
+                  EECOP1Control::STATUS_REGISTER
+                ? scoreboardFCR31Value()
+                : cop1ControlRegister(
+                    operation->instruction.destinationRegister);
+            break;
+          default:
+            break;
+        }
+        operation->stage = COP1PipelineStage::T;
+        return true;
+      case COP1PipelineStage::T:
+        operation->stage = COP1PipelineStage::X;
+        return true;
+      case COP1PipelineStage::X:
+        switch (operation->instruction.operation)
+        {
+          case EEOperation::MoveWordFromCOP1:
+          case EEOperation::MoveSingleCOP1:
+            operation->rawResult = operation->capturedFS;
+            break;
+          case EEOperation::MoveWordToCOP1:
+          case EEOperation::MoveControlWordToCOP1:
+            operation->rawResult =
+              static_cast<std::uint32_t>(
+                operation->capturedGPR);
+            break;
+          case EEOperation::MoveControlWordFromCOP1:
+            operation->rawResult =
+              operation->capturedControl;
+            break;
+          default:
+            break;
+        }
+        operation->stage = COP1PipelineStage::Y;
+        return true;
+      case COP1PipelineStage::Y:
+      case COP1PipelineStage::Z:
       case COP1PipelineStage::S1:
       case COP1PipelineStage::S2:
         return false;
@@ -3235,6 +3364,20 @@ void EECore::commitInFlightCOP1(
        COP1_DESTINATION_CONDITION) != 0)
   {
     setCOP1Condition(operation->conditionResult);
+  }
+  if ((operation->destination.mask &
+       COP1_DESTINATION_GPR) != 0)
+  {
+    writeWord(
+      operation->destination.gprRegister,
+      operation->rawResult);
+  }
+  if (operation->instruction.operation ==
+        EEOperation::MoveControlWordToCOP1)
+  {
+    setCOP1ControlRegister(
+      operation->instruction.destinationRegister,
+      operation->rawResult);
   }
   *operation = {};
 }
@@ -3821,6 +3964,22 @@ bool EECore::isCOP1MoveOperation(EEOperation operation)
   }
 }
 
+bool EECore::isCOP1RegisterMoveOperation(
+  EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::MoveWordFromCOP1:
+    case EEOperation::MoveWordToCOP1:
+    case EEOperation::MoveControlWordFromCOP1:
+    case EEOperation::MoveControlWordToCOP1:
+    case EEOperation::MoveSingleCOP1:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool EECore::isCOP1OperateOperation(EEOperation operation)
 {
   switch (operation)
@@ -3930,7 +4089,8 @@ bool EECore::isCOP1StagedOperation(
 bool EECore::isCOP1ManagedPipelineOperation(
   EEOperation operation)
 {
-  return operation == EEOperation::LoadWordToCOP1 ||
+  return isCOP1RegisterMoveOperation(operation) ||
+    operation == EEOperation::LoadWordToCOP1 ||
     isCOP1DividerOperation(operation) ||
     isCOP1StagedOperation(operation);
 }

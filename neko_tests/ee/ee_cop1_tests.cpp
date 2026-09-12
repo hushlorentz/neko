@@ -12,6 +12,7 @@ namespace
   constexpr std::uint8_t COP1_DIV_SQRT_LATENCY = 8;
   constexpr std::uint8_t COP1_RSQRT_LATENCY = 14;
   constexpr std::uint8_t COP1_ADD_SUB_PIPELINE_CYCLES = 5;
+  constexpr std::uint8_t COP1_MOVE_PIPELINE_CYCLES = 3;
 
   std::uint32_t cop1TransferInstruction(
     std::uint8_t source,
@@ -2375,10 +2376,10 @@ TEST_CASE("EE COP1 single movement instructions transform raw bits")
     runInstruction(
       &system,
       cop1SingleInstruction(vector.function, 2, 3));
-    if (vector.function != 0x06)
-    {
-      system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
-    }
+    system.runMasterCycles(
+      vector.function == 0x06
+        ? COP1_MOVE_PIPELINE_CYCLES
+        : COP1_ADD_SUB_PIPELINE_CYCLES);
 
     REQUIRE(core.floatingPointRegister(2) == vector.source);
     REQUIRE(
@@ -2402,6 +2403,164 @@ TEST_CASE("EE COP1 single movement instructions support in-place writes")
     UINT32_C(0x7fc12345));
 }
 
+TEST_CASE("EE COP1 register moves commit at the W/Y boundary")
+{
+  SECTION("MFC1 captures its FPR source at T")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x00, 2, 3));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+    core.setFloatingPointRegister(3, UINT32_C(0x12345678));
+
+    REQUIRE(core.generalRegister(2) == EERegister128{});
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(2) == EERegister128{});
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.generalRegister(2).low ==
+      UINT64_C(0xffffffff89abcdef));
+  }
+
+  SECTION("MTC1 retains its R-stage GPR source")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x1122334489abcdef), 0});
+    system.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x04, 2, 3));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    core.setGeneralRegister(2, {UINT64_C(0x12345678), 0});
+
+    system.runMasterCycles(2);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("CFC1 captures FCR31 at T")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_OVERFLOW);
+    system.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x02, 2, 31));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+    core.setCOP1ControlRegister(
+      31,
+      EECOP1Control::CAUSE_UNDERFLOW);
+
+    system.runMasterCycles(2);
+    REQUIRE(
+      core.generalRegister(2).low ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW));
+  }
+
+  SECTION("CTC1 retains its R-stage GPR source")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      2,
+      {EECOP1Control::CAUSE_OVERFLOW, 0});
+    system.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x06, 2, 31));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    core.setGeneralRegister(
+      2,
+      {EECOP1Control::CAUSE_UNDERFLOW, 0});
+
+    system.runMasterCycles(3);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_OVERFLOW));
+  }
+
+  SECTION("MOV.S captures its FPR source at T")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x06, 2, 3));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+    core.setFloatingPointRegister(2, UINT32_C(0x12345678));
+
+    system.clockMasterCycle();
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+}
+
+TEST_CASE("EE COP1 register move continuation is deterministic")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setGeneralRegister(
+    2,
+    {UINT64_C(0x1122334489abcdef), 0});
+  original.eeBus().write32(
+    0,
+    cop1TransferInstruction(0x04, 2, 3));
+  originalCore.startExecution(0);
+  original.runMasterCycles(2);
+  originalCore.haltExecution();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  originalCore.setGeneralRegister(2, {UINT64_C(0x12345678), 0});
+  restored.eeCore().setGeneralRegister(
+    2,
+    {UINT64_C(0x12345678), 0});
+  originalCore.startExecution(originalCore.programCounter());
+  restored.eeCore().startExecution(
+    restored.eeCore().programCounter());
+
+  original.runMasterCycles(2);
+  restored.runMasterCycles(2);
+
+  REQUIRE(
+    originalCore.floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+}
+
 TEST_CASE("EE COP1 movement instructions apply documented flags")
 {
   constexpr std::uint32_t INITIAL_STATUS =
@@ -2418,6 +2577,7 @@ TEST_CASE("EE COP1 movement instructions apply documented flags")
     runInstruction(
       &system,
       cop1SingleInstruction(0x06, 2, 3));
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
     REQUIRE(
       core.cop1ControlRegister(31) ==
@@ -3011,6 +3171,10 @@ TEST_CASE("EE COP1 comparison condition is visible at the 2S boundary")
   REQUIRE(core.elapsedCycles() == 6);
   REQUIRE(core.programCounter() == 8);
   REQUIRE(core.cop1Condition());
+  REQUIRE(core.generalRegister(5) == EERegister128{});
+
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
   REQUIRE(
     core.generalRegister(5).low ==
     (EECOP1Control::STATUS_FIXED |
@@ -3139,6 +3303,10 @@ TEST_CASE(
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.generalRegister(5).low ==
       (EECOP1Control::STATUS_FIXED |
@@ -3450,7 +3618,6 @@ TEST_CASE(
     std::uint32_t fs;
     std::uint32_t ft;
     std::uint32_t expected;
-    bool interlocksFollowingMove;
     bool staged;
   };
   const VisibilityVector vectors[] = {
@@ -3459,7 +3626,6 @@ TEST_CASE(
       UINT32_C(0xffc12345),
       0,
       UINT32_C(0x7fc12345),
-      true,
       true
     },
     {
@@ -3467,7 +3633,6 @@ TEST_CASE(
       UINT32_C(0x89abcdef),
       0,
       UINT32_C(0x89abcdef),
-      false,
       false
     },
     {
@@ -3475,7 +3640,6 @@ TEST_CASE(
       UINT32_C(0x7fc12345),
       0,
       UINT32_C(0xffc12345),
-      true,
       true
     },
     {
@@ -3483,7 +3647,6 @@ TEST_CASE(
       UINT32_C(0x3f800000),
       UINT32_C(0x40000000),
       UINT32_C(0x40000000),
-      true,
       true
     },
     {
@@ -3491,7 +3654,6 @@ TEST_CASE(
       UINT32_C(0x3f800000),
       UINT32_C(0x40000000),
       UINT32_C(0x3f800000),
-      true,
       true
     },
     {
@@ -3499,7 +3661,6 @@ TEST_CASE(
       UINT32_C(0x3fc00000),
       UINT32_C(0x40100000),
       UINT32_C(0x40700000),
-      true,
       true
     },
     {
@@ -3507,7 +3668,6 @@ TEST_CASE(
       UINT32_C(0x40b00000),
       UINT32_C(0x3fc00000),
       UINT32_C(0x40800000),
-      true,
       true
     },
     {
@@ -3515,7 +3675,6 @@ TEST_CASE(
       UINT32_C(0x40000000),
       UINT32_C(0x40400000),
       UINT32_C(0x40c00000),
-      true,
       true
     },
     {
@@ -3523,7 +3682,6 @@ TEST_CASE(
       UINT32_C(0x01000001),
       0,
       UINT32_C(0x4b800000),
-      true,
       true
     },
     {
@@ -3531,7 +3689,6 @@ TEST_CASE(
       UINT32_C(0x3ff33333),
       0,
       UINT32_C(0x00000001),
-      true,
       true
     }
   };
@@ -3555,9 +3712,7 @@ TEST_CASE(
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 4);
-    REQUIRE(
-      core.floatingPointRegister(4) ==
-      (vector.staged ? 0 : vector.expected));
+    REQUIRE(core.floatingPointRegister(4) == 0);
     REQUIRE(core.floatingPointRegister(5) == 0);
 
     if (vector.staged)
@@ -3570,24 +3725,21 @@ TEST_CASE(
     }
     else
     {
-      system.clockMasterCycle();
-
-      if (vector.interlocksFollowingMove)
-      {
-        REQUIRE(core.programCounter() == 4);
-        REQUIRE(core.floatingPointRegister(5) == 0);
-        system.clockMasterCycle();
-      }
+      system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
     }
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.floatingPointRegister(5) ==
       vector.expected);
 
     system.clockMasterCycle();
 
-    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.programCounter() == 24);
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x76543210));
@@ -4134,6 +4286,10 @@ TEST_CASE("EE COP1 compound dependencies use staged visibility boundaries")
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.generalRegister(5).low ==
       (EECOP1Control::STATUS_FIXED |
@@ -4371,6 +4527,10 @@ TEST_CASE(
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.generalRegister(5).low ==
       (EECOP1Control::STATUS_FIXED |
@@ -4402,6 +4562,12 @@ TEST_CASE(
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40400000));
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x12345678));
@@ -4469,6 +4635,14 @@ TEST_CASE(
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::CAUSE_INVALID |
+       EECOP1Control::STICKY_INVALID));
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.cop1ControlRegister(31) ==
       (EECOP1Control::STATUS_FIXED |
@@ -5831,6 +6005,7 @@ TEST_CASE(
 
     system.runMasterCycles(2);
     system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
     REQUIRE(
       core.generalRegister(5).low ==
@@ -5858,6 +6033,7 @@ TEST_CASE(
 
     system.runMasterCycles(2);
     system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
     REQUIRE(
       core.floatingPointRegister(4) ==
@@ -6096,6 +6272,10 @@ TEST_CASE("EE COP1 operate resource interlocks a following move")
 
     system.clockMasterCycle();
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.generalRegister(5).low ==
       UINT64_C(0x0000000040400000));
@@ -6125,6 +6305,10 @@ TEST_CASE("EE COP1 operate resource interlocks a following move")
 
     system.clockMasterCycle();
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.generalRegister(5).low ==
       UINT64_C(0x0000000040c00000));
@@ -6172,9 +6356,9 @@ TEST_CASE("EE COP1 operate resource interlocks a following move")
       cop1TransferInstruction(0x00, 5, 4));
     core.startExecution(0);
 
-    system.runMasterCycles(6);
+    system.runMasterCycles(6 + COP1_MOVE_PIPELINE_CYCLES);
 
-    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.programCounter() == 16);
     REQUIRE(
       core.generalRegister(5).low ==
       UINT64_C(0x0000000040c00000));
@@ -6261,6 +6445,11 @@ TEST_CASE("EE COP1 resource occupancy survives halt and save-state restore")
 
   REQUIRE(originalCore.programCounter() == 8);
   REQUIRE(restored.eeCore().programCounter() == 8);
+  REQUIRE(restored.eeCore().generalRegister(5) == EERegister128{});
+
+  original.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+  restored.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
   REQUIRE(
     restored.eeCore().generalRegister(5).low ==
     UINT64_C(0xffffffff89abcdef));
@@ -6576,6 +6765,10 @@ TEST_CASE("EE COP1 ALU overlap preserves ordered hazards")
     system.clockMasterCycle();
 
     REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(5) == EERegister128{});
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.generalRegister(5).low ==
       (EECOP1Control::STATUS_FIXED |
@@ -6664,6 +6857,12 @@ TEST_CASE("EE COP1 blocked load preserves younger WAW order")
   REQUIRE(core.programCounter() == 12);
   REQUIRE(
     core.floatingPointRegister(5) ==
+    UINT32_C(0x12345678));
+
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
+  REQUIRE(
+    core.floatingPointRegister(5) ==
     UINT32_C(0x87654321));
 }
 
@@ -6705,6 +6904,10 @@ TEST_CASE(
     REQUIRE(
       core.floatingPointRegister(4) ==
       UINT32_C(0x7fffffff));
+    REQUIRE(core.floatingPointRegister(5) == 0);
+
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
     REQUIRE(
       core.floatingPointRegister(5) ==
       UINT32_C(0x7fffffff));
@@ -7387,6 +7590,7 @@ TEST_CASE("EE MFC1 sign-extends raw FPR words into GPRs")
   runInstruction(
     &system,
     cop1TransferInstruction(0x00, 2, 3));
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
   REQUIRE(
     core.generalRegister(2) ==
@@ -7410,6 +7614,7 @@ TEST_CASE("EE MTC1 writes the low GPR word into any FPR")
   runInstruction(
     &system,
     cop1TransferInstruction(0x04, 2, 0));
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
   REQUIRE(
     core.floatingPointRegister(0) ==
@@ -7426,6 +7631,7 @@ TEST_CASE("EE COP1 transfers preserve GPR zero")
   runInstruction(
     &system,
     cop1TransferInstruction(0x00, 0, 3));
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
   REQUIRE(
     system.eeCore().generalRegister(0) ==
@@ -7447,6 +7653,7 @@ TEST_CASE("EE CFC1 exposes implemented control-register values")
   runInstruction(
     &system,
     cop1TransferInstruction(0x02, 2, 0));
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
   REQUIRE(
     core.generalRegister(2) ==
@@ -7458,6 +7665,7 @@ TEST_CASE("EE CFC1 exposes implemented control-register values")
   runInstruction(
     &system,
     cop1TransferInstruction(0x02, 2, 31));
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
   REQUIRE(
     core.generalRegister(2) ==
@@ -7482,6 +7690,7 @@ TEST_CASE("EE CTC1 applies control-register architectural masks")
   runInstruction(
     &system,
     cop1TransferInstruction(0x06, 2, 0));
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
   REQUIRE(
     core.cop1ControlRegister(0) ==
     EECOP1Control::IMPLEMENTATION_REVISION);
@@ -7489,6 +7698,7 @@ TEST_CASE("EE CTC1 applies control-register architectural masks")
   runInstruction(
     &system,
     cop1TransferInstruction(0x06, 2, 31));
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
   REQUIRE(
     core.cop1ControlRegister(31) ==
     (EECOP1Control::STATUS_FIXED |
@@ -7565,6 +7775,10 @@ TEST_CASE("EE LWC1 stalls an immediate dependent FPR use")
 
   system.clockMasterCycle();
   REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.generalRegister(2) == EERegister128{});
+
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
   REQUIRE(
     core.generalRegister(2).low ==
     UINT64_C(0xffffffff89abcdef));
@@ -7602,6 +7816,10 @@ TEST_CASE("EE LWC1 permits independent work during writeback")
 
   system.clockMasterCycle();
   REQUIRE(core.programCounter() == 12);
+  REQUIRE(core.generalRegister(2) == EERegister128{});
+
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
   REQUIRE(core.generalRegister(2).low == 0x12345678);
 }
 
@@ -7634,6 +7852,12 @@ TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
 
   system.clockMasterCycle();
   REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x12345678));
+
+  system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
   REQUIRE(
     core.floatingPointRegister(3) ==
     UINT32_C(0x76543210));

@@ -821,11 +821,11 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
             vector.sourceValue,
             vector.targetRegister,
             vector.destinationRegister),
-          5);
+          6);
 
       REQUIRE(result.outcome == EEGuestOutcome::Completed);
-      REQUIRE(result.execution.masterCycles == 5);
-      REQUIRE(result.execution.eeCycles == 5);
+      REQUIRE(result.execution.masterCycles == 6);
+      REQUIRE(result.execution.eeCycles == 6);
       REQUIRE(result.execution.instructions == 5);
       if (vector.destination == DrainDestination::FPR)
       {
