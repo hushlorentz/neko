@@ -41,6 +41,8 @@ namespace
   constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1051;
   constexpr std::size_t
+    EE_FIRST_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET = 1071;
+  constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_MEMORY_ADDRESS_OFFSET = 1079;
   constexpr std::size_t
     EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1087;
@@ -94,6 +96,7 @@ namespace
     SIMPLE_EE_THIRD_IN_FLIGHT_COP1_RAW_RESULT_OFFSET = 1197;
   constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2037;
   constexpr std::uint8_t COP1_STAGE_X = 2;
+  constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
   constexpr std::uint8_t COP1_STAGE_Z = 4;
   constexpr std::uint8_t COP1_STAGE_S1 = 5;
@@ -499,19 +502,22 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
   writeU64(&state, EE_NEXT_PROGRAM_ORDER_OFFSET, 2);
   state[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
   writeU64(&state, EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET, 1);
-  state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = 0;
+  state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = COP1_STAGE_T;
   writeU32(&state, EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET, 4);
   writeU32(
     &state,
     EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
     UINT32_C(0xc4430000));
+  writeU64(
+    &state,
+    EE_FIRST_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET,
+    0x100);
   writeU32(
     &state,
     EE_FIRST_IN_FLIGHT_COP1_MEMORY_ADDRESS_OFFSET,
     0x100);
   state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] = 1;
   state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 3;
-  state[EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] = 1;
   updateChecksum(&state);
 
   NekoSystem restored;
@@ -1329,11 +1335,11 @@ TEST_CASE("In-flight COP1 load save states are internally consistent")
     REQUIRE(destination.saveState() == before);
   }
 
-  SECTION("A pending load retains its one-cycle countdown")
+  SECTION("A pending load has no synthetic countdown")
   {
     std::vector<std::uint8_t> invalid = source.saveState();
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] = 0;
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] = 1;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));

@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "catch.hpp"
@@ -13,6 +14,7 @@ namespace
   constexpr std::uint8_t COP1_RSQRT_LATENCY = 14;
   constexpr std::uint8_t COP1_ADD_SUB_PIPELINE_CYCLES = 5;
   constexpr std::uint8_t COP1_MOVE_PIPELINE_CYCLES = 3;
+  constexpr std::uint8_t COP1_MEMORY_PIPELINE_CYCLES = 3;
 
   std::uint32_t cop1TransferInstruction(
     std::uint8_t source,
@@ -7727,7 +7729,7 @@ TEST_CASE("EE LWC1 and SWC1 transfer raw words through memory")
   core.startExecution(0);
   system.clockMasterCycle();
   REQUIRE(core.floatingPointRegister(3) == 0);
-  system.clockMasterCycle();
+  system.runMasterCycles(COP1_MEMORY_PIPELINE_CYCLES);
   REQUIRE(
     core.floatingPointRegister(3) ==
     UINT32_C(0x89abcdef));
@@ -7738,6 +7740,9 @@ TEST_CASE("EE LWC1 and SWC1 transfer raw words through memory")
     cop1MemoryInstruction(0x39, 1, 4, 0));
 
   std::uint32_t stored = 0;
+  REQUIRE(system.eeBus().readData32(0x104, &stored));
+  REQUIRE(stored == 0);
+  system.runMasterCycles(COP1_MEMORY_PIPELINE_CYCLES);
   REQUIRE(system.eeBus().readData32(0x104, &stored));
   REQUIRE(stored == UINT32_C(0x76543210));
 }
@@ -7771,11 +7776,17 @@ TEST_CASE("EE LWC1 stalls an immediate dependent FPR use")
   REQUIRE(core.generalRegister(2) == EERegister128{});
   REQUIRE(
     core.floatingPointRegister(3) ==
+    UINT32_C(0x11111111));
+
+  system.runMasterCycles(2);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
     UINT32_C(0x89abcdef));
+  REQUIRE(core.generalRegister(2) == EERegister128{});
 
   system.clockMasterCycle();
   REQUIRE(core.programCounter() == 8);
-  REQUIRE(core.generalRegister(2) == EERegister128{});
 
   system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
@@ -7808,15 +7819,24 @@ TEST_CASE("EE LWC1 permits independent work during writeback")
 
   system.runMasterCycles(2);
 
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(4) == EERegister128{});
+  REQUIRE(core.floatingPointRegister(3) == 0);
+
+  system.clockMasterCycle();
   REQUIRE(core.programCounter() == 8);
   REQUIRE(core.generalRegister(4).low == 0x55);
+  REQUIRE(core.floatingPointRegister(3) == 0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 8);
   REQUIRE(
     core.floatingPointRegister(3) ==
     UINT32_C(0x12345678));
+  REQUIRE(core.generalRegister(2) == EERegister128{});
 
   system.clockMasterCycle();
   REQUIRE(core.programCounter() == 12);
-  REQUIRE(core.generalRegister(2) == EERegister128{});
 
   system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
 
@@ -7843,7 +7863,7 @@ TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
     cop1TransferInstruction(0x04, 2, 3));
   core.startExecution(0);
 
-  system.runMasterCycles(2);
+  system.runMasterCycles(4);
 
   REQUIRE(core.programCounter() == 4);
   REQUIRE(
@@ -7880,18 +7900,39 @@ TEST_CASE("EE LWC1 interlocks an immediate SWC1 source")
     cop1MemoryInstruction(0x39, 1, 3, 4));
   core.startExecution(0);
 
-  system.runMasterCycles(2);
+  system.runMasterCycles(4);
 
   REQUIRE(core.programCounter() == 4);
   std::uint32_t stored = 0;
   REQUIRE(system.eeBus().readData32(0x104, &stored));
   REQUIRE(stored == 0);
 
-  system.clockMasterCycle();
+  system.runMasterCycles(4);
 
-  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.programCounter() == 12);
   REQUIRE(system.eeBus().readData32(0x104, &stored));
   REQUIRE(stored == UINT32_C(0x89abcdef));
+}
+
+TEST_CASE("EE SWC1 captures its FPR source at the D boundary")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setFloatingPointRegister(3, UINT32_C(0x11111111));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x39, 1, 3, 0));
+  system.eeBus().write32(4, 0);
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+  core.setFloatingPointRegister(3, UINT32_C(0x22222222));
+  system.runMasterCycles(2);
+
+  std::uint32_t stored = 0;
+  REQUIRE(system.eeBus().readData32(0x100, &stored));
+  REQUIRE(stored == UINT32_C(0x22222222));
 }
 
 TEST_CASE(
@@ -7967,7 +8008,7 @@ TEST_CASE(
     system.eeBus().write32(4, vector.instruction);
     core.startExecution(0);
 
-    system.runMasterCycles(2);
+    system.runMasterCycles(4);
 
     REQUIRE(core.programCounter() == 4);
 
@@ -8002,8 +8043,8 @@ TEST_CASE("EE pending COP1 loads survive host halt and save-state restore")
 
   originalCore.startExecution(4);
   restored.eeCore().startExecution(4);
-  original.clockMasterCycle();
-  restored.clockMasterCycle();
+  original.runMasterCycles(3);
+  restored.runMasterCycles(3);
 
   REQUIRE(originalCore.programCounter() == 4);
   REQUIRE(restored.eeCore().programCounter() == 4);
@@ -8017,10 +8058,97 @@ TEST_CASE("EE pending COP1 loads survive host halt and save-state restore")
 
   original.clockMasterCycle();
   restored.clockMasterCycle();
+  REQUIRE(originalCore.programCounter() == 8);
+  REQUIRE(restored.eeCore().programCounter() == 8);
+
+  original.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+  restored.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
   REQUIRE(
     originalCore.generalRegister(2) ==
     restored.eeCore().generalRegister(2));
   REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+}
+
+TEST_CASE("EE COP1 memory stages resume deterministically")
+{
+  for (std::uint64_t checkpointCycle = 1;
+       checkpointCycle <= COP1_MEMORY_PIPELINE_CYCLES;
+       ++checkpointCycle)
+  {
+    SECTION("LWC1 checkpoint " + std::to_string(checkpointCycle))
+    {
+      NekoSystem original;
+      EECore &originalCore = original.eeCore();
+      originalCore.setGeneralRegister(1, {0x100, 0});
+      REQUIRE(
+        original.eeBus().writeData32(
+          0x100,
+          UINT32_C(0x89abcdef)));
+      original.eeBus().write32(
+        0,
+        cop1MemoryInstruction(0x31, 1, 3, 0));
+      original.eeBus().write32(4, 0);
+      originalCore.startExecution(0);
+      original.runMasterCycles(checkpointCycle);
+      originalCore.haltExecution();
+
+      NekoSystem restored;
+      restored.loadState(original.saveState());
+      originalCore.startExecution(originalCore.programCounter());
+      restored.eeCore().startExecution(
+        restored.eeCore().programCounter());
+      original.runMasterCycles(
+        COP1_MEMORY_PIPELINE_CYCLES + 1 - checkpointCycle);
+      restored.runMasterCycles(
+        COP1_MEMORY_PIPELINE_CYCLES + 1 - checkpointCycle);
+
+      REQUIRE(
+        originalCore.floatingPointRegister(3) ==
+        UINT32_C(0x89abcdef));
+      REQUIRE(
+        originalCore.stateHash() ==
+        restored.eeCore().stateHash());
+    }
+
+    SECTION("SWC1 checkpoint " + std::to_string(checkpointCycle))
+    {
+      NekoSystem original;
+      EECore &originalCore = original.eeCore();
+      originalCore.setGeneralRegister(1, {0x100, 0});
+      originalCore.setFloatingPointRegister(
+        3,
+        UINT32_C(0x76543210));
+      original.eeBus().write32(
+        0,
+        cop1MemoryInstruction(0x39, 1, 3, 0));
+      original.eeBus().write32(4, 0);
+      originalCore.startExecution(0);
+      original.runMasterCycles(checkpointCycle);
+      originalCore.haltExecution();
+
+      NekoSystem restored;
+      restored.loadState(original.saveState());
+      originalCore.startExecution(originalCore.programCounter());
+      restored.eeCore().startExecution(
+        restored.eeCore().programCounter());
+      original.runMasterCycles(
+        COP1_MEMORY_PIPELINE_CYCLES + 1 - checkpointCycle);
+      restored.runMasterCycles(
+        COP1_MEMORY_PIPELINE_CYCLES + 1 - checkpointCycle);
+
+      std::uint32_t originalStored = 0;
+      std::uint32_t restoredStored = 0;
+      REQUIRE(
+        original.eeBus().readData32(0x100, &originalStored));
+      REQUIRE(
+        restored.eeBus().readData32(0x100, &restoredStored));
+      REQUIRE(originalStored == UINT32_C(0x76543210));
+      REQUIRE(restoredStored == originalStored);
+      REQUIRE(
+        originalCore.stateHash() ==
+        restored.eeCore().stateHash());
+    }
+  }
 }
 
 TEST_CASE("EE reset cancels pending COP1 loads")
@@ -8064,7 +8192,7 @@ TEST_CASE("EE COP1 word memory accesses use RAM aliases and boundaries")
     cop1MemoryInstruction(0x31, 1, 3, 0));
   system.eeBus().write32(4, 0);
   core.startExecution(0);
-  system.runMasterCycles(2);
+  system.runMasterCycles(4);
 
   REQUIRE(
     core.floatingPointRegister(3) ==
@@ -8079,6 +8207,9 @@ TEST_CASE("EE COP1 word memory accesses use RAM aliases and boundaries")
     cop1MemoryInstruction(0x39, 1, 4, 0));
 
   std::uint32_t stored = 0;
+  REQUIRE(system.eeBus().readData32(boundary, &stored));
+  REQUIRE(stored == UINT32_C(0x89abcdef));
+  system.runMasterCycles(COP1_MEMORY_PIPELINE_CYCLES);
   REQUIRE(system.eeBus().readData32(boundary, &stored));
   REQUIRE(stored == UINT32_C(0x76543210));
 }
@@ -8095,6 +8226,7 @@ TEST_CASE("EE COP1 word memory alignment faults are precise")
     runInstruction(
       &system,
       cop1MemoryInstruction(0x31, 1, 2, 0));
+    system.runMasterCycles(2);
 
     REQUIRE(
       core.pendingException() ==
@@ -8119,6 +8251,7 @@ TEST_CASE("EE COP1 word memory alignment faults are precise")
     runInstruction(
       &system,
       cop1MemoryInstruction(0x39, 1, 2, 0));
+    system.runMasterCycles(2);
 
     REQUIRE(
       core.pendingException() ==
@@ -8161,7 +8294,7 @@ TEST_CASE("EE COP1 alignment faults identify branch delay slots")
   core.clearPendingException();
   core.setProgramCounter(0);
   core.startExecution(0);
-  system.runMasterCycles(2);
+  system.runMasterCycles(4);
 
   REQUIRE(
     core.pendingException() ==
@@ -8171,6 +8304,42 @@ TEST_CASE("EE COP1 alignment faults identify branch delay slots")
   REQUIRE(
     (core.cop0Register(EECOP0Register::Cause) &
       EECOP0Cause::BRANCH_DELAY) != 0);
+}
+
+TEST_CASE("EE COP1 deferred faults preserve nested exception ownership")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE |
+      EECOP0Status::EXCEPTION_LEVEL);
+  core.setCOP0Register(
+    EECOP0Register::EPC,
+    UINT32_C(0x80001234));
+  core.setCOP0Register(EECOP0Register::Cause, 0);
+  core.setGeneralRegister(1, {0x102, 0});
+  system.eeBus().write32(
+    0,
+    (UINT32_C(0x04) << 26) |
+      UINT32_C(1));
+  system.eeBus().write32(
+    4,
+    cop1MemoryInstruction(0x31, 1, 2, 0));
+  core.startExecution(0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::AddressErrorLoadOrFetch);
+  REQUIRE(core.exceptionAddress() == 0x102);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EPC) ==
+    UINT32_C(0x80001234));
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) == 0);
 }
 
 TEST_CASE("EE COP1 word memory bus faults preserve architectural state")
@@ -8187,6 +8356,7 @@ TEST_CASE("EE COP1 word memory bus faults preserve architectural state")
     runInstruction(
       &system,
       cop1MemoryInstruction(0x31, 1, 2, 0));
+    system.runMasterCycles(2);
 
     REQUIRE(
       core.pendingException() ==
@@ -8211,6 +8381,7 @@ TEST_CASE("EE COP1 word memory bus faults preserve architectural state")
     runInstruction(
       &system,
       cop1MemoryInstruction(0x39, 1, 2, 0));
+    system.runMasterCycles(3);
 
     REQUIRE(
       core.pendingException() ==

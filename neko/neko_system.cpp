@@ -151,9 +151,11 @@ EEGuestExecutionResult NekoSystem::runELF(
     if (eeCoreComponent.programCounter() ==
         EEGuestRuntime::RETURN_ADDRESS)
     {
-      eeCoreComponent.drainInFlightCOP1();
-      eeCoreComponent.haltExecution();
-      returned = true;
+      if (eeCoreComponent.drainInFlightCOP1())
+      {
+        eeCoreComponent.haltExecution();
+        returned = true;
+      }
       break;
     }
     clockMasterCycle();
@@ -169,9 +171,11 @@ EEGuestExecutionResult NekoSystem::runELF(
       eeCoreComponent.programCounter() ==
         EEGuestRuntime::RETURN_ADDRESS)
   {
-    eeCoreComponent.drainInFlightCOP1();
-    eeCoreComponent.haltExecution();
-    returned = true;
+    if (eeCoreComponent.drainInFlightCOP1())
+    {
+      eeCoreComponent.haltExecution();
+      returned = true;
+    }
   }
   const bool cycleLimitReached =
     eeCoreComponent.clockActive() &&

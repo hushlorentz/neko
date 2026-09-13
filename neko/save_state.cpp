@@ -1988,10 +1988,9 @@ void NekoSaveStateCodec::readEECore(
         operation.instruction.operation ==
           EEOperation::StoreWordFromCOP1;
       require(
-        memoryOperation
-          ? (operation.memoryAddress & 3) == 0
-          : (operation.memoryAddress == 0 &&
-             operation.capturedMemoryValue == 0),
+        memoryOperation ||
+          (operation.memoryAddress == 0 &&
+           operation.capturedMemoryValue == 0),
         "EE COP1 captured memory state is invalid");
       require(
         (operation.destination.mask &
@@ -2017,8 +2016,50 @@ void NekoSaveStateCodec::readEECore(
         EECore::isCOP1StagedOperation(
           operation.instruction.operation);
       require(
-        load || divider || operation.remainingCycles == 0,
+        divider || operation.remainingCycles == 0,
         "EE COP1 operation has an unexpected countdown");
+      if (memoryOperation)
+      {
+        const bool addressReady =
+          operation.stage != EECore::COP1PipelineStage::R;
+        const bool transferReady =
+          operation.stage >= EECore::COP1PipelineStage::X;
+        const std::uint32_t expectedAddress =
+          static_cast<std::uint32_t>(
+            operation.capturedGPR +
+            static_cast<std::int16_t>(
+              operation.instruction.immediate));
+        require(
+          operation.stage <= EECore::COP1PipelineStage::Y &&
+            operation.destination.mask ==
+              (load
+                ? EECore::COP1_DESTINATION_FPR
+                : EECore::COP1_DESTINATION_MEMORY) &&
+            operation.destination.fprRegister ==
+              (load
+                ? operation.instruction.targetRegister
+                : 0) &&
+            operation.destination.gprRegister == 0 &&
+            operation.capturedFS == 0 &&
+            operation.capturedFT == 0 &&
+            operation.capturedAccumulator == 0 &&
+            operation.capturedControl == 0 &&
+            operation.affectedFlags == 0 &&
+            operation.raisedFlags == 0 &&
+            operation.raisedStickyFlags == 0 &&
+            !operation.conditionResult &&
+            (addressReady
+              ? operation.memoryAddress == expectedAddress
+              : operation.memoryAddress == 0) &&
+            (operation.stage < EECore::COP1PipelineStage::X ||
+             (operation.memoryAddress & 3) == 0) &&
+            (transferReady
+              ? operation.rawResult ==
+                  operation.capturedMemoryValue
+              : (operation.rawResult == 0 &&
+                 operation.capturedMemoryValue == 0)),
+          "EE in-flight COP1 memory operation is inconsistent");
+      }
       if (registerMove)
       {
         const bool cop1SourceCaptured =
@@ -2111,29 +2152,6 @@ void NekoSaveStateCodec::readEECore(
               ? operation.rawResult == expectedResult
               : operation.rawResult == 0),
           "EE in-flight COP1 register move state is inconsistent");
-      }
-      if (load)
-      {
-        const bool waitingForResult =
-          operation.stage ==
-            EECore::COP1PipelineStage::R &&
-          operation.remainingCycles == 1;
-        const bool waitingToRetire =
-          operation.stage ==
-            EECore::COP1PipelineStage::S1 &&
-          operation.remainingCycles == 0;
-        require(
-          (waitingForResult || waitingToRetire) &&
-            operation.destination.mask ==
-              EECore::COP1_DESTINATION_FPR &&
-            operation.destination.fprRegister ==
-              operation.instruction.targetRegister &&
-            operation.rawResult ==
-              operation.capturedMemoryValue &&
-            operation.affectedFlags == 0 &&
-            operation.raisedFlags == 0 &&
-            operation.raisedStickyFlags == 0,
-          "EE in-flight COP1 load state is inconsistent");
       }
       if (divider)
       {
@@ -2529,13 +2547,16 @@ void NekoSaveStateCodec::readEECore(
         blockedByOlderOperation,
         "EE COP1 register move W result has no older blocker");
     }
-    if (operation.instruction.operation ==
-          EEOperation::LoadWordToCOP1 &&
-        operation.stage == EECore::COP1PipelineStage::S1)
+    const bool memoryOperation =
+      operation.instruction.operation ==
+        EEOperation::LoadWordToCOP1 ||
+      operation.instruction.operation ==
+        EEOperation::StoreWordFromCOP1;
+    if (memoryOperation &&
+        operation.stage == EECore::COP1PipelineStage::Y)
     {
       bool blockedByOlderOperation = false;
       bool conflictsWithOlderWriter = false;
-      bool reachableBehindOlderOperations = true;
       for (const EECore::InFlightCOP1Operation &candidate :
            core->inFlightCOP1Operations)
       {
@@ -2544,56 +2565,30 @@ void NekoSaveStateCodec::readEECore(
         {
           continue;
         }
-        const bool olderDivider =
-          EECore::isCOP1DividerOperation(
-            candidate.instruction.operation);
-        const bool olderStagedOperation =
-          EECore::isCOP1StagedOperation(
-            candidate.instruction.operation);
-        const std::uint64_t orderDistance =
-          operation.programOrder - candidate.programOrder;
-        bool validDividerTiming = false;
-        if (olderDivider)
-        {
-          const EECore::COP1DividerTiming timing =
-            EECore::cop1DividerTiming(
-              candidate.instruction.operation);
-          validDividerTiming =
-            orderDistance + 1 <= timing.latency &&
-            candidate.remainingCycles <=
-              timing.latency - (orderDistance + 1);
-        }
-        const bool validStagedTiming =
-          olderStagedOperation &&
-          (candidate.stage == EECore::COP1PipelineStage::S1 ||
-           (candidate.stage >= EECore::COP1PipelineStage::X &&
-            static_cast<std::uint64_t>(candidate.stage) >=
-              orderDistance + 1));
-        const bool validOlderStage =
-          validDividerTiming ||
-          validStagedTiming ||
-          (candidate.instruction.operation ==
-             EEOperation::LoadWordToCOP1 &&
-           candidate.stage == EECore::COP1PipelineStage::S1);
-        reachableBehindOlderOperations =
-          reachableBehindOlderOperations && validOlderStage;
+        const bool candidateReady =
+          candidate.stage == EECore::COP1PipelineStage::S1 ||
+          ((EECore::isCOP1RegisterMoveOperation(
+               candidate.instruction.operation) ||
+            candidate.instruction.operation ==
+              EEOperation::LoadWordToCOP1 ||
+            candidate.instruction.operation ==
+              EEOperation::StoreWordFromCOP1) &&
+           candidate.stage == EECore::COP1PipelineStage::Y);
         blockedByOlderOperation =
-          blockedByOlderOperation ||
-          validDividerTiming ||
-          (validStagedTiming &&
-           candidate.stage != EECore::COP1PipelineStage::S1);
+          blockedByOlderOperation || !candidateReady;
         conflictsWithOlderWriter =
           conflictsWithOlderWriter ||
-          ((candidate.destination.mask &
+          (operation.instruction.operation ==
+              EEOperation::LoadWordToCOP1 &&
+           (candidate.destination.mask &
             EECore::COP1_DESTINATION_FPR) != 0 &&
            candidate.destination.fprRegister ==
              operation.destination.fprRegister);
       }
       require(
         blockedByOlderOperation &&
-          reachableBehindOlderOperations &&
           !conflictsWithOlderWriter,
-        "EE COP1 load S1 result has no valid older blocker");
+        "EE COP1 memory W result has no valid older blocker");
     }
     if (EECore::isCOP1StagedOperation(
           operation.instruction.operation) &&
@@ -2635,15 +2630,11 @@ void NekoSaveStateCodec::readEECore(
           reachableBehindOlderOperations &&
           candidate.stage == EECore::COP1PipelineStage::S1 &&
           (candidate.instruction.operation ==
-             EEOperation::LoadWordToCOP1 ||
-           candidate.instruction.operation ==
              EEOperation::ConvertWordToSingleCOP1) &&
-          (candidate.instruction.operation !=
-             EEOperation::LoadWordToCOP1 ||
-           EECore::instructionFPRDependency(
-             operation.instruction,
-             candidate.destination.fprRegister) ==
-             EECore::COP1Dependency::None);
+          EECore::instructionFPRDependency(
+            operation.instruction,
+            candidate.destination.fprRegister) ==
+            EECore::COP1Dependency::None;
         if ((candidate.destination.mask &
              EECore::COP1_DESTINATION_FPR) != 0 &&
             candidate.destination.fprRegister ==

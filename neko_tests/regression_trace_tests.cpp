@@ -116,15 +116,15 @@ namespace
       0,
       cop1SingleInstruction(0x03, 2, 4, 3));
     for (std::uint32_t address = 4;
-         address <= 24;
+         address <= 16;
          address += 4)
     {
       system->eeBus().write32(address, 0);
     }
     system->eeBus().write32(
-      28,
+      20,
       immediateInstruction(0x31, 1, 3, 0));
-    system->eeBus().write32(32, 0);
+    system->eeBus().write32(24, 0);
     core.startExecution(0);
   }
 
@@ -547,7 +547,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
     core.startExecution(0);
     system.startTrace();
 
-    system.runMasterCycles(4);
+    system.runMasterCycles(6);
 
     const std::vector<NekoTraceEvent> hazards =
       cop1DividerHazards(system);
@@ -810,11 +810,11 @@ TEST_CASE(
   REQUIRE(
     completionEvents[1].type ==
     NekoTraceEventType::COP1StageTransition);
-  REQUIRE(completionEvents[1].value0 == 8);
+  REQUIRE(completionEvents[1].value0 == 6);
   REQUIRE(
     completionEvents[1].value2 ==
-    (NekoEETraceCOP1Stage::R |
-     (NekoEETraceCOP1Stage::S1 <<
+    (NekoEETraceCOP1Stage::X |
+     (NekoEETraceCOP1Stage::Y <<
       NekoEETraceCOP1Stage::TO_SHIFT)));
   REQUIRE(
     completionEvents[2].type ==
@@ -831,7 +831,7 @@ TEST_CASE(
   REQUIRE(
     completionEvents[3].type ==
     NekoTraceEventType::COP1Retired);
-  REQUIRE(completionEvents[3].value0 == 8);
+  REQUIRE(completionEvents[3].value0 == 6);
   REQUIRE(
     completionEvents[3].value2 ==
     (UINT64_C(0x89abcdef) |
@@ -842,7 +842,7 @@ TEST_CASE(
   REQUIRE(
     completionEvents[4].type ==
     NekoTraceEventType::InstructionIssued);
-  REQUIRE(completionEvents[4].value0 == 32);
+  REQUIRE(completionEvents[4].value0 == 28);
   REQUIRE(
     completionEvents[5].type ==
     NekoTraceEventType::StateSnapshot);
@@ -1606,42 +1606,70 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
   core.startExecution(0);
   system.startTrace();
 
-  system.clockMasterCycle();
+  system.runMasterCycles(4);
 
   const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 4);
-  REQUIRE(
-    events[0].type ==
-    NekoTraceEventType::InstructionIssued);
+  std::vector<NekoTraceEvent> memoryEvents;
+  std::vector<NekoTraceEvent> stageEvents;
+  std::vector<NekoTraceEvent> retirementEvents;
+  for (const NekoTraceEvent &event : events)
+  {
+    if (event.type == NekoTraceEventType::MemoryAccess)
+    {
+      memoryEvents.push_back(event);
+    }
+    else if (
+      event.type ==
+      NekoTraceEventType::COP1StageTransition)
+    {
+      stageEvents.push_back(event);
+    }
+    else if (
+      event.type == NekoTraceEventType::COP1Retired)
+    {
+      retirementEvents.push_back(event);
+    }
+  }
+
+  REQUIRE(events[0].type == NekoTraceEventType::InstructionIssued);
   REQUIRE(events[0].value1 == instruction);
-  REQUIRE(events[1].type == NekoTraceEventType::MemoryAccess);
-  REQUIRE(events[1].value0 == 0x100);
-  REQUIRE(events[1].value1 == UINT32_C(0x89abcdef));
-  REQUIRE(events[1].value2 == 0);
+  REQUIRE(memoryEvents.size() == 1);
+  REQUIRE(memoryEvents[0].masterCycle == 3);
+  REQUIRE(memoryEvents[0].value0 == 0x100);
+  REQUIRE(memoryEvents[0].value1 == UINT32_C(0x89abcdef));
+  REQUIRE(memoryEvents[0].value2 == 0);
   REQUIRE(
-    events[1].value3 ==
+    memoryEvents[0].value3 ==
     (UINT64_C(4) |
      NekoEETraceMemory::SUCCEEDED));
+  REQUIRE(stageEvents.size() == 4);
+  REQUIRE(stageEvents[0].masterCycle == 1);
+  REQUIRE(stageEvents[0].value0 == 1);
+  REQUIRE(stageEvents[0].value1 ==
+          (static_cast<std::uint64_t>(instruction) << 32));
   REQUIRE(
-    events[2].type ==
-    NekoTraceEventType::COP1StageTransition);
-  REQUIRE(events[2].value0 == 1);
-  REQUIRE(
-    events[2].value1 ==
-    (static_cast<std::uint64_t>(instruction) << 32));
-  REQUIRE(
-    events[2].value2 ==
+    stageEvents[0].value2 ==
     (NekoEETraceCOP1Stage::NONE |
      (NekoEETraceCOP1Stage::R <<
-      NekoEETraceCOP1Stage::TO_SHIFT) |
-     (UINT64_C(1) <<
-      NekoEETraceCOP1Stage::REMAINING_CYCLES_SHIFT)));
-  REQUIRE(
-    events[2].value3 ==
+      NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(stageEvents[0].value3 ==
     (NekoEETraceCOP1Result::DESTINATION_FPR |
      (UINT64_C(3) << 8)));
-  REQUIRE(events[3].type == NekoTraceEventType::StateSnapshot);
-  REQUIRE(events[3].value0 == core.stateHash());
+  REQUIRE(stageEvents[1].value2 ==
+          (NekoEETraceCOP1Stage::R |
+           (NekoEETraceCOP1Stage::T <<
+            NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(stageEvents[2].value2 ==
+          (NekoEETraceCOP1Stage::T |
+           (NekoEETraceCOP1Stage::X <<
+            NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(stageEvents[3].value2 ==
+          (NekoEETraceCOP1Stage::X |
+           (NekoEETraceCOP1Stage::Y <<
+            NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(retirementEvents.size() == 1);
+  REQUIRE(retirementEvents[0].masterCycle == 4);
+  REQUIRE(retirementEvents[0].value0 == 1);
 }
 
 TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
@@ -1679,7 +1707,7 @@ TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
   core.startExecution(0);
   system.startTrace();
 
-  system.runMasterCycles(3);
+  system.runMasterCycles(5);
 
   std::vector<NekoTraceEvent> issued;
   std::vector<NekoTraceEvent> interlocks;
@@ -1699,10 +1727,10 @@ TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
   REQUIRE(issued.size() == 2);
   REQUIRE(issued[0].masterCycle == 1);
   REQUIRE(issued[0].value0 == 0);
-  REQUIRE(issued[1].masterCycle == 3);
+  REQUIRE(issued[1].masterCycle == 5);
   REQUIRE(issued[1].value0 == 4);
   REQUIRE(interlocks.size() == 1);
-  REQUIRE(interlocks[0].masterCycle == 2);
+  REQUIRE(interlocks[0].masterCycle == 4);
   REQUIRE(interlocks[0].value0 == 4);
   REQUIRE(interlocks[0].value1 == dependentInstruction);
   REQUIRE(interlocks[0].value2 == 3);

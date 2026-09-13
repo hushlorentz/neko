@@ -538,7 +538,12 @@ void EECore::clock()
   ++cycles;
   std::uint32_t completedCOP1LoadRegisters = 0;
   advancePendingCOP1(&completedCOP1LoadRegisters);
-  if (interruptDeliverable())
+  if (exceptionEnteredThisCycle)
+  {
+    return;
+  }
+  if (!pendingCOP1MemoryExceptionActive() &&
+      interruptDeliverable())
   {
     enterInterruptException();
     return;
@@ -607,6 +612,16 @@ void EECore::clock()
   const bool hadCOP1OperateResource =
     cop1OperateResourceOccupied;
   cop1OperateResourceOccupied = false;
+  if (pendingCOP1MemoryExceptionActive())
+  {
+    recordCycleTrace(
+      CycleTraceKind::COP1ResourceInterlock,
+      instructionAddress,
+      instructionValue,
+      FLOATING_POINT_REGISTER_COUNT + 4);
+    pc = instructionAddress;
+    return;
+  }
   if (pendingCOP1GPRWriteActive())
   {
     recordCycleTrace(
@@ -1591,44 +1606,12 @@ bool EECore::executeInstruction(
       {
         return false;
       }
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 3) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorLoadOrFetch,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      std::uint32_t value = 0;
-      const bool succeeded =
-        attachedBus().readData32(dataAddress, &value);
-      recordMemoryTrace(
-        dataAddress,
-        4,
-        false,
-        succeeded,
-        succeeded ? value : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
-      operation.stage = COP1PipelineStage::R;
       operation.capturedGPR = source;
-      operation.memoryAddress = dataAddress;
-      operation.capturedMemoryValue = value;
       operation.destination.mask = COP1_DESTINATION_FPR;
       operation.destination.fprRegister =
         immediateDestination;
-      operation.rawResult = value;
-      operation.remainingCycles = 1;
       recordCOP1StageTransition(
         operation,
         UINT8_MAX,
@@ -1641,34 +1624,14 @@ bool EECore::executeInstruction(
       {
         return false;
       }
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 3) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const std::uint32_t value =
-        scoreboardFPRValue(immediateDestination);
-      const bool succeeded =
-        attachedBus().writeData32(dataAddress, value);
-      recordMemoryTrace(
-        dataAddress,
-        4,
-        true,
-        succeeded,
-        value);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
+      InFlightCOP1Operation &operation =
+        allocateInFlightCOP1(instruction, address);
+      operation.capturedGPR = source;
+      operation.destination.mask = COP1_DESTINATION_MEMORY;
+      recordCOP1StageTransition(
+        operation,
+        UINT8_MAX,
+        COP1PipelineStage::R);
       return true;
     }
     case EEOperation::LoadWordLeft:
@@ -2794,7 +2757,32 @@ bool EECore::pendingCOP1GPRWriteActive() const
   return false;
 }
 
-void EECore::drainInFlightCOP1()
+bool EECore::pendingCOP1MemoryExceptionActive() const
+{
+  for (const InFlightCOP1Operation &operation :
+       inFlightCOP1Operations)
+  {
+    if (!operation.active)
+    {
+      continue;
+    }
+    if (operation.instruction.operation ==
+          EEOperation::LoadWordToCOP1 &&
+        operation.stage < COP1PipelineStage::X)
+    {
+      return true;
+    }
+    if (operation.instruction.operation ==
+          EEOperation::StoreWordFromCOP1 &&
+        operation.stage < COP1PipelineStage::Y)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool EECore::drainInFlightCOP1()
 {
   bool drainedDivider = false;
   for (const InFlightCOP1Operation &operation :
@@ -2804,8 +2792,8 @@ void EECore::drainInFlightCOP1()
     {
       continue;
     }
-    if (operation.instruction.operation !=
-          EEOperation::LoadWordToCOP1 &&
+    if (!isCOP1MoveOperation(
+          operation.instruction.operation) &&
         !isCOP1RegisterMoveOperation(
           operation.instruction.operation) &&
         !isCOP1DividerOperation(
@@ -2868,6 +2856,88 @@ void EECore::drainInFlightCOP1()
         computeInFlightCOP1StagedOperation(oldest);
       }
     }
+    else if (oldest->instruction.operation ==
+               EEOperation::LoadWordToCOP1 ||
+             oldest->instruction.operation ==
+               EEOperation::StoreWordFromCOP1)
+    {
+      if (oldest->stage == COP1PipelineStage::R)
+      {
+        oldest->memoryAddress =
+          static_cast<std::uint32_t>(
+            oldest->capturedGPR +
+            signExtend16(oldest->instruction.immediate));
+      }
+      if ((oldest->memoryAddress & 3) != 0)
+      {
+        return raiseCOP1DataAccessException(
+          *oldest,
+          oldest->instruction.operation ==
+              EEOperation::LoadWordToCOP1
+            ? EEException::AddressErrorLoadOrFetch
+            : EEException::AddressErrorStore,
+          oldest->memoryAddress);
+      }
+      if (oldest->instruction.operation ==
+          EEOperation::LoadWordToCOP1)
+      {
+        if (oldest->stage < COP1PipelineStage::X)
+        {
+          std::uint32_t value = 0;
+          const bool succeeded =
+            attachedBus().readData32(
+              oldest->memoryAddress,
+              &value);
+          recordMemoryTrace(
+            oldest->memoryAddress,
+            4,
+            false,
+            succeeded,
+            succeeded ? value : 0);
+          if (!succeeded)
+          {
+            return raiseCOP1DataAccessException(
+              *oldest,
+              EEException::DataBusErrorLoad,
+              oldest->memoryAddress);
+          }
+          oldest->capturedMemoryValue = value;
+          oldest->rawResult = value;
+        }
+      }
+      else
+      {
+        if (oldest->stage < COP1PipelineStage::X)
+        {
+          oldest->capturedMemoryValue =
+            scoreboardFPRValueForT(
+              oldest->instruction.targetRegister,
+              oldest->programOrder);
+          oldest->rawResult =
+            oldest->capturedMemoryValue;
+        }
+        if (oldest->stage < COP1PipelineStage::Y)
+        {
+          const bool succeeded =
+            attachedBus().writeData32(
+              oldest->memoryAddress,
+              oldest->capturedMemoryValue);
+          recordMemoryTrace(
+            oldest->memoryAddress,
+            4,
+            true,
+            succeeded,
+            oldest->capturedMemoryValue);
+          if (!succeeded)
+          {
+            return raiseCOP1DataAccessException(
+              *oldest,
+              EEException::DataBusErrorStore,
+              oldest->memoryAddress);
+          }
+        }
+      }
+    }
     else if (isCOP1RegisterMoveOperation(
                oldest->instruction.operation))
     {
@@ -2911,6 +2981,7 @@ void EECore::drainInFlightCOP1()
     cop1DividerInitiationCycles = 0;
     cop1DividerOperation = EEOperation::Nop;
   }
+  return true;
 }
 
 void EECore::advancePendingCOP1(
@@ -2946,6 +3017,10 @@ void EECore::advancePendingCOP1(
       advanceInFlightCOP1Operation(
         &operation,
         &previousStages[index]);
+    if (exceptionEnteredThisCycle)
+    {
+      return;
+    }
   }
 
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
@@ -3012,9 +3087,14 @@ void EECore::advancePendingCOP1(
     }
     const bool retirementReady =
       oldestOperation->stage == COP1PipelineStage::S1 ||
-      (isCOP1RegisterMoveOperation(
+      ((isCOP1RegisterMoveOperation(
          oldestOperation->instruction.operation) &&
-       oldestOperation->stage == COP1PipelineStage::Y);
+        oldestOperation->stage == COP1PipelineStage::Y) ||
+       ((oldestOperation->instruction.operation ==
+           EEOperation::LoadWordToCOP1 ||
+         oldestOperation->instruction.operation ==
+           EEOperation::StoreWordFromCOP1) &&
+        oldestOperation->stage == COP1PipelineStage::Y));
     if (!retirementReady)
     {
       break;
@@ -3133,6 +3213,96 @@ bool EECore::advanceInFlightCOP1Operation(
             break;
           default:
             break;
+        }
+        operation->stage = COP1PipelineStage::Y;
+        return true;
+      case COP1PipelineStage::Y:
+      case COP1PipelineStage::Z:
+      case COP1PipelineStage::S1:
+      case COP1PipelineStage::S2:
+        return false;
+    }
+  }
+  if (operation->instruction.operation ==
+        EEOperation::LoadWordToCOP1 ||
+      operation->instruction.operation ==
+        EEOperation::StoreWordFromCOP1)
+  {
+    const bool load =
+      operation->instruction.operation ==
+      EEOperation::LoadWordToCOP1;
+    switch (operation->stage)
+    {
+      case COP1PipelineStage::R:
+        operation->memoryAddress =
+          static_cast<std::uint32_t>(
+            operation->capturedGPR +
+            signExtend16(operation->instruction.immediate));
+        operation->stage = COP1PipelineStage::T;
+        return true;
+      case COP1PipelineStage::T:
+        if ((operation->memoryAddress & 3) != 0)
+        {
+          return raiseCOP1DataAccessException(
+            *operation,
+            load
+              ? EEException::AddressErrorLoadOrFetch
+              : EEException::AddressErrorStore,
+            operation->memoryAddress);
+        }
+        if (load)
+        {
+          std::uint32_t value = 0;
+          const bool succeeded =
+            attachedBus().readData32(
+              operation->memoryAddress,
+              &value);
+          recordMemoryTrace(
+            operation->memoryAddress,
+            4,
+            false,
+            succeeded,
+            succeeded ? value : 0);
+          if (!succeeded)
+          {
+            return raiseCOP1DataAccessException(
+              *operation,
+              EEException::DataBusErrorLoad,
+              operation->memoryAddress);
+          }
+          operation->capturedMemoryValue = value;
+        }
+        else
+        {
+          operation->capturedMemoryValue =
+            scoreboardFPRValueForT(
+              operation->instruction.targetRegister,
+              operation->programOrder);
+        }
+        operation->rawResult =
+          operation->capturedMemoryValue;
+        operation->stage = COP1PipelineStage::X;
+        return true;
+      case COP1PipelineStage::X:
+        if (!load)
+        {
+          const bool succeeded =
+            attachedBus().writeData32(
+              operation->memoryAddress,
+              operation->capturedMemoryValue);
+          recordMemoryTrace(
+            operation->memoryAddress,
+            4,
+            true,
+            succeeded,
+            operation->capturedMemoryValue);
+          if (!succeeded)
+          {
+            return raiseCOP1DataAccessException(
+              *operation,
+              EEException::DataBusErrorStore,
+              operation->memoryAddress);
+          }
         }
         operation->stage = COP1PipelineStage::Y;
         return true;
@@ -4091,6 +4261,7 @@ bool EECore::isCOP1ManagedPipelineOperation(
 {
   return isCOP1RegisterMoveOperation(operation) ||
     operation == EEOperation::LoadWordToCOP1 ||
+    operation == EEOperation::StoreWordFromCOP1 ||
     isCOP1DividerOperation(operation) ||
     isCOP1StagedOperation(operation);
 }
@@ -4247,6 +4418,36 @@ bool EECore::raiseDataAccessException(
     instructionAddress,
     dataAddress,
     instruction);
+  return false;
+}
+
+bool EECore::raiseCOP1DataAccessException(
+  const InFlightCOP1Operation &operation,
+  EEException type,
+  std::uint32_t dataAddress)
+{
+  const bool alreadyExceptionLevel =
+    (cop0Status & EECOP0Status::EXCEPTION_LEVEL) != 0;
+  const bool delaySlot =
+    cop1DividerPostDelayInstructions != 0 &&
+    operation.instructionAddress ==
+      cop1DividerPostDelayBranchAddress + 4;
+  const std::uint32_t owningBranchAddress =
+    cop1DividerPostDelayBranchAddress;
+  const std::uint64_t previousProgramOrder =
+    executingProgramOrder;
+  executingProgramOrder = operation.programOrder;
+  enterException(
+    type,
+    operation.instructionAddress,
+    dataAddress,
+    operation.instruction.raw);
+  executingProgramOrder = previousProgramOrder;
+  if (delaySlot && !alreadyExceptionLevel)
+  {
+    cop0EPC = owningBranchAddress;
+    cop0Cause |= EECOP0Cause::BRANCH_DELAY;
+  }
   return false;
 }
 

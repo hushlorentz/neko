@@ -546,7 +546,8 @@ class EECore : public ClockedComponent
       std::uint32_t instructionAddress);
     bool pendingCOP1LoadActive() const;
     bool pendingCOP1GPRWriteActive() const;
-    void drainInFlightCOP1();
+    bool pendingCOP1MemoryExceptionActive() const;
+    bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
     bool advanceInFlightCOP1Operation(
@@ -645,6 +646,10 @@ class EECore : public ClockedComponent
       std::uint32_t instructionAddress,
       std::uint32_t dataAddress,
       std::uint32_t instruction);
+    bool raiseCOP1DataAccessException(
+      const InFlightCOP1Operation &operation,
+      EEException type,
+      std::uint32_t dataAddress);
 };
 
 #endif

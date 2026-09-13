@@ -926,7 +926,7 @@ accumulator or condition-result contract:
 
 - [x] Model `MFC1`, `MTC1`, `CFC1`, `CTC1`, and `MOV.S` as COP1 Move
       instructions routed through logical Pipe 1 and the LS/C1 physical pipes
-- [ ] Model `LWC1` and `SWC1` operand transfer at the documented integer
+- [x] Model `LWC1` and `SWC1` operand transfer at the documented integer
       `D/W` boundaries while retaining the current synchronous hit-path memory
       policy
 - [ ] Replace the scalar one-bit Operate-to-Move approximation with stage-aware
