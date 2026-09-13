@@ -6412,7 +6412,7 @@ TEST_CASE("EE cross-family forwarded operands survive save-state restore")
   REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
 }
 
-TEST_CASE("EE COP1 resource occupancy survives halt and save-state restore")
+TEST_CASE("EE COP1 stage state survives halt and save-state restore")
 {
   NekoSystem original;
   EECore &originalCore = original.eeCore();
@@ -6437,20 +6437,14 @@ TEST_CASE("EE COP1 resource occupancy survives halt and save-state restore")
   original.clockMasterCycle();
   restored.clockMasterCycle();
 
-  REQUIRE(originalCore.programCounter() == 4);
-  REQUIRE(restored.eeCore().programCounter() == 4);
-  REQUIRE(original.saveState() == restored.saveState());
-  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
-
-  original.clockMasterCycle();
-  restored.clockMasterCycle();
-
   REQUIRE(originalCore.programCounter() == 8);
   REQUIRE(restored.eeCore().programCounter() == 8);
   REQUIRE(restored.eeCore().generalRegister(5) == EERegister128{});
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
 
-  original.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
-  restored.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+  original.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES + 1);
+  restored.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES + 1);
 
   REQUIRE(
     restored.eeCore().generalRegister(5).low ==

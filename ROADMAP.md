@@ -929,7 +929,7 @@ accumulator or condition-result contract:
 - [x] Model `LWC1` and `SWC1` operand transfer at the documented integer
       `D/W` boundaries while retaining the current synchronous hit-path memory
       policy
-- [ ] Replace the scalar one-bit Operate-to-Move approximation with stage-aware
+- [x] Replace the scalar one-bit Operate-to-Move approximation with stage-aware
       C1 resource occupancy that remains correct before concurrent issue is
       enabled
 - [ ] Ensure load-use, store-read, move-read/write, control-register, and

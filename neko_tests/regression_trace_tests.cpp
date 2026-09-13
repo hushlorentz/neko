@@ -1737,7 +1737,7 @@ TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
   REQUIRE(interlocks[0].value3 == expectedAccess);
 }
 
-TEST_CASE("EE COP1 resource interlock traces a blocked move")
+TEST_CASE("EE scalar COP1 issue does not invent a C1 stage conflict")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -1760,9 +1760,10 @@ TEST_CASE("EE COP1 resource interlock traces a blocked move")
   core.startExecution(0);
   system.startTrace();
 
-  system.runMasterCycles(3);
+  system.runMasterCycles(2);
 
   std::vector<NekoTraceEvent> interlocks;
+  std::vector<NekoTraceEvent> issued;
   for (const NekoTraceEvent &event : eeTrace(system))
   {
     if (event.type ==
@@ -1770,16 +1771,17 @@ TEST_CASE("EE COP1 resource interlock traces a blocked move")
     {
       interlocks.push_back(event);
     }
+    else if (
+      event.type == NekoTraceEventType::InstructionIssued)
+    {
+      issued.push_back(event);
+    }
   }
-  REQUIRE(interlocks.size() == 1);
-  REQUIRE(interlocks[0].masterCycle == 2);
-  REQUIRE(interlocks[0].value0 == 4);
-  REQUIRE(interlocks[0].value1 == moveInstruction);
-  REQUIRE(
-    interlocks[0].value2 ==
-    static_cast<std::uint8_t>(
-      EEOperation::MultiplySingleCOP1));
-  REQUIRE(interlocks[0].value3 == 0);
+  REQUIRE(interlocks.empty());
+  REQUIRE(issued.size() == 2);
+  REQUIRE(issued[1].masterCycle == 2);
+  REQUIRE(issued[1].value0 == 4);
+  REQUIRE(issued[1].value1 == moveInstruction);
 }
 
 TEST_CASE("EE state snapshots include in-flight execution")

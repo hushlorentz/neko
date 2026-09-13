@@ -445,7 +445,6 @@ class EECore : public ClockedComponent
     PendingMultiplyDivide pendingMac1;
     std::uint8_t cop1DividerInitiationCycles = 0;
     EEOperation cop1DividerOperation = EEOperation::Nop;
-    bool cop1OperateResourceOccupied = false;
     std::uint8_t recentShiftAmountAccesses = 0;
     std::uint8_t recentShiftAmountReads = 0;
     bool branchDelayPending = false;

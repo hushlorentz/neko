@@ -286,7 +286,6 @@ void EECore::reset()
   pendingMac1 = {};
   cop1DividerInitiationCycles = 0;
   cop1DividerOperation = EEOperation::Nop;
-  cop1OperateResourceOccupied = false;
   recentShiftAmountAccesses = 0;
   recentShiftAmountReads = 0;
   branchDelayPending = false;
@@ -411,11 +410,6 @@ void EECore::startExecution(std::uint32_t startAddress)
     (pendingCOP1DividerActive() ||
      cop1DividerInitiationCycles != 0) &&
     startAddress == pc;
-  const bool resumeCOP1OperateResource =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    cop1OperateResourceOccupied &&
-    startAddress == pc;
   const bool resumeIssueLatch =
     state == EEExecutionState::Halted &&
     haltReason == EEStopReason::HostHalt &&
@@ -458,10 +452,6 @@ void EECore::startExecution(std::uint32_t startAddress)
   {
     cop1DividerInitiationCycles = 0;
     cop1DividerOperation = EEOperation::Nop;
-  }
-  if (!resumeCOP1OperateResource)
-  {
-    cop1OperateResourceOccupied = false;
   }
   if (!resumeIssueLatch)
   {
@@ -609,9 +599,6 @@ void EECore::clock()
   const std::uint32_t completedBranchAddress =
     branchInstructionAddress;
   const bool completedBranchTaken = branchDelayTaken;
-  const bool hadCOP1OperateResource =
-    cop1OperateResourceOccupied;
-  cop1OperateResourceOccupied = false;
   if (pendingCOP1MemoryExceptionActive())
   {
     recordCycleTrace(
@@ -629,20 +616,6 @@ void EECore::clock()
       instructionAddress,
       instructionValue,
       FLOATING_POINT_REGISTER_COUNT + 3);
-    pc = instructionAddress;
-    return;
-  }
-  if (hadCOP1OperateResource &&
-      isCOP1MoveOperation(decoded.operation))
-  {
-    recordCycleTrace(
-      CycleTraceKind::COP1ResourceInterlock,
-      instructionAddress,
-      instructionValue,
-      lastInstructionValid
-        ? static_cast<std::uint8_t>(
-            lastDecodedInstruction.operation)
-        : 0);
     pc = instructionAddress;
     return;
   }
@@ -800,9 +773,6 @@ void EECore::clock()
       cop1DividerPostTargetAddress = 0;
     }
   }
-  cop1OperateResourceOccupied =
-    isCOP1OperateOperation(decoded.operation);
-
   if (wasDelaySlot)
   {
     cop1DividerPostDelayInstructions = 2;
@@ -2990,8 +2960,50 @@ void EECore::advancePendingCOP1(
   *completedLoadRegisters = 0;
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
     transitioned = {};
+  std::array<
+    const InFlightCOP1Operation *,
+    COP1_IN_FLIGHT_CAPACITY> moveTStageBlockers = {};
   std::array<COP1PipelineStage, COP1_IN_FLIGHT_CAPACITY>
     previousStages = {};
+  for (std::size_t moveIndex = 0;
+       moveIndex < inFlightCOP1Operations.size();
+       ++moveIndex)
+  {
+    const InFlightCOP1Operation &move =
+      inFlightCOP1Operations[moveIndex];
+    if (!move.active ||
+        move.stage != COP1PipelineStage::R ||
+        !isCOP1MoveOperation(move.instruction.operation))
+    {
+      continue;
+    }
+    for (const InFlightCOP1Operation &candidate :
+         inFlightCOP1Operations)
+    {
+      if (!candidate.active ||
+          candidate.programOrder >= move.programOrder)
+      {
+        continue;
+      }
+      const bool entersT =
+        (isCOP1StagedOperation(
+           candidate.instruction.operation) &&
+         candidate.stage == COP1PipelineStage::R) ||
+        (isCOP1DividerOperation(
+           candidate.instruction.operation) &&
+         candidate.stage == COP1PipelineStage::R &&
+         candidate.remainingCycles ==
+           cop1DividerTiming(
+             candidate.instruction.operation).latency);
+      if (entersT &&
+          (moveTStageBlockers[moveIndex] == nullptr ||
+           candidate.programOrder >
+             moveTStageBlockers[moveIndex]->programOrder))
+      {
+        moveTStageBlockers[moveIndex] = &candidate;
+      }
+    }
+  }
   if (cop1DividerInitiationCycles != 0)
   {
     --cop1DividerInitiationCycles;
@@ -3010,6 +3022,10 @@ void EECore::advancePendingCOP1(
     if (!operation.active ||
         !isCOP1ManagedPipelineOperation(
           operation.instruction.operation))
+    {
+      continue;
+    }
+    if (moveTStageBlockers[index] != nullptr)
     {
       continue;
     }
@@ -3057,6 +3073,51 @@ void EECore::advancePendingCOP1(
       static_cast<std::uint8_t>(
         previousStages[transitionIndex]),
       transition->stage);
+  }
+
+  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
+    interlocksToRecord = {};
+  for (std::size_t index = 0;
+       index < moveTStageBlockers.size();
+       ++index)
+  {
+    interlocksToRecord[index] =
+      moveTStageBlockers[index] != nullptr;
+  }
+  while (true)
+  {
+    const InFlightCOP1Operation *blockedMove = nullptr;
+    std::size_t blockedIndex = 0;
+    for (std::size_t index = 0;
+         index < inFlightCOP1Operations.size();
+         ++index)
+    {
+      const InFlightCOP1Operation &operation =
+        inFlightCOP1Operations[index];
+      if (!operation.active ||
+          !interlocksToRecord[index])
+      {
+        continue;
+      }
+      if (blockedMove == nullptr ||
+          operation.programOrder < blockedMove->programOrder)
+      {
+        blockedMove = &operation;
+        blockedIndex = index;
+      }
+    }
+    if (blockedMove == nullptr)
+    {
+      break;
+    }
+    interlocksToRecord[blockedIndex] = false;
+    recordCycleTrace(
+      CycleTraceKind::COP1ResourceInterlock,
+      blockedMove->instructionAddress,
+      blockedMove->instruction.raw,
+      static_cast<std::uint8_t>(
+        moveTStageBlockers[blockedIndex]->
+          instruction.operation));
   }
 
   while (true)
@@ -4522,7 +4583,6 @@ void EECore::enterException(
   cop1DividerPostDelayTaken = false;
   cop1DividerPostTargetInstructions = 0;
   cop1DividerPostTargetAddress = 0;
-  cop1OperateResourceOccupied = false;
   issueLatch = {};
 }
 
@@ -4735,7 +4795,6 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(
     &hash,
     static_cast<std::uint8_t>(cop1DividerOperation));
-  hashEEStateValue(&hash, cop1OperateResourceOccupied);
   hashEEStateValue(&hash, recentShiftAmountAccesses);
   hashEEStateValue(&hash, recentShiftAmountReads);
   hashEEStateValue(&hash, branchDelayPending);

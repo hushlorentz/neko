@@ -24,6 +24,10 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET = 956;
   constexpr std::size_t
+    SIMPLE_EE_RETIRED_COP1_OPERATE_RESOURCE_OFFSET = 957;
+  constexpr std::size_t
+    SIMPLE_EE_NEXT_PROGRAM_ORDER_OFFSET = 1012;
+  constexpr std::size_t
     PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET = 1003;
   constexpr std::size_t EE_COP1_POST_DELAY_COUNT_OFFSET = 1005;
   constexpr std::size_t EE_COP1_POST_DELAY_ADDRESS_OFFSET = 1006;
@@ -77,13 +81,21 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1081;
   constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ACTIVE_OFFSET = 1082;
+  constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET = 1083;
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET = 1091;
   constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ADDRESS_OFFSET = 1092;
+  constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1096;
   constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1132;
+  constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1133;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_GPR_OFFSET = 1134;
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1143;
   constexpr std::size_t
@@ -527,6 +539,127 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
   REQUIRE(
     restored.eeCore().stateHash() !=
     source.eeCore().stateHash());
+}
+
+TEST_CASE("COP1 Move waits when an older Operate enters T")
+{
+  std::uint32_t operateInstruction = 0;
+  EEOperation expectedBlocker = EEOperation::Nop;
+  bool stagedOperate = false;
+  SECTION("staged operation")
+  {
+    operateInstruction =
+      cop1SingleInstruction(0x02, 2, 4, 3);
+    expectedBlocker = EEOperation::MultiplySingleCOP1;
+    stagedOperate = true;
+  }
+  SECTION("divider operation")
+  {
+    operateInstruction =
+      cop1SingleInstruction(0x03, 2, 4, 3);
+    expectedBlocker = EEOperation::DivideSingleCOP1;
+  }
+
+  NekoSystem source;
+  EECore &sourceCore = source.eeCore();
+  sourceCore.setFloatingPointRegister(
+    2,
+    UINT32_C(0x40000000));
+  sourceCore.setFloatingPointRegister(
+    3,
+    UINT32_C(0x40400000));
+  sourceCore.setFloatingPointRegister(
+    7,
+    UINT32_C(0x89abcdef));
+  source.eeBus().write32(
+    0,
+    operateInstruction);
+  sourceCore.startExecution(0);
+  source.clockMasterCycle();
+  sourceCore.haltExecution();
+
+  std::vector<std::uint8_t> state = source.saveState();
+  const std::uint32_t moveInstruction =
+    cop1TransferInstruction(0x00, 5, 7);
+  writeU64(&state, SIMPLE_EE_NEXT_PROGRAM_ORDER_OFFSET, 3);
+  state[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
+  writeU64(
+    &state,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+    2);
+  writeU32(
+    &state,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ADDRESS_OFFSET,
+    4);
+  writeU32(
+    &state,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    moveInstruction);
+  state[
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+      1 << 4;
+  state[
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_GPR_OFFSET] = 5;
+  updateChecksum(&state);
+
+  NekoSystem restored;
+  restored.loadState(state);
+  restored.eeCore().setProgramCounter(8);
+  restored.eeCore().startExecution(8);
+  restored.startTrace();
+
+  restored.clockMasterCycle();
+
+  REQUIRE(
+    restored.eeCore().generalRegister(5) ==
+    EERegister128{});
+  std::vector<NekoTraceEvent> stageInterlocks;
+  for (const NekoTraceEvent &event : restored.trace())
+  {
+    if (event.type ==
+          NekoTraceEventType::COP1ResourceInterlock &&
+        event.value0 == 4)
+    {
+      stageInterlocks.push_back(event);
+    }
+  }
+  REQUIRE(stageInterlocks.size() == 1);
+  REQUIRE(stageInterlocks[0].masterCycle == 2);
+  REQUIRE(stageInterlocks[0].value1 == moveInstruction);
+  REQUIRE(
+    stageInterlocks[0].value2 ==
+    static_cast<std::uint8_t>(expectedBlocker));
+
+  if (stagedOperate)
+  {
+    restored.runMasterCycles(2);
+    REQUIRE(
+      restored.eeCore().generalRegister(5) ==
+      EERegister128{});
+    restored.clockMasterCycle();
+    REQUIRE(
+      restored.eeCore().generalRegister(5) ==
+      EERegister128{});
+    restored.clockMasterCycle();
+    REQUIRE(
+      restored.eeCore().generalRegister(5).low ==
+      UINT64_C(0xffffffff89abcdef));
+  }
+}
+
+TEST_CASE("Retired COP1 occupancy state is rejected")
+{
+  NekoSystem source;
+  std::vector<std::uint8_t> invalid = source.saveState();
+  invalid[
+    SIMPLE_EE_RETIRED_COP1_OPERATE_RESOURCE_OFFSET] = 1;
+  updateChecksum(&invalid);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
 }
 
 TEST_CASE("Active system save states round trip and continue identically")
