@@ -934,7 +934,7 @@ accumulator or condition-result contract:
       enabled
 - [x] Ensure load-use, store-read, move-read/write, control-register, and
       exception dependencies share the COP1 scoreboard
-- [ ] Preserve precise memory side effects and in-flight Move state across bus
+- [x] Preserve precise memory side effects and in-flight Move state across bus
       stalls, interrupts, `ERET`, reset, halt/resume, hashing, and save states
 - [ ] Complete focused Move/Operate/Load/Store timing and continuation review
 

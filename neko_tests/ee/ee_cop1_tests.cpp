@@ -15,6 +15,11 @@ namespace
   constexpr std::uint8_t COP1_ADD_SUB_PIPELINE_CYCLES = 5;
   constexpr std::uint8_t COP1_MOVE_PIPELINE_CYCLES = 3;
   constexpr std::uint8_t COP1_MEMORY_PIPELINE_CYCLES = 3;
+  constexpr std::uint32_t COP1_INTC_ENABLED_STATUS =
+    EECOP0Status::COP1_USABLE |
+    EECOP0Status::INTERRUPT_ENABLE |
+    EECOP0Status::MASTER_INTERRUPT_ENABLE |
+    EECOP0Status::INTC_MASK;
 
   std::uint32_t cop1TransferInstruction(
     std::uint8_t source,
@@ -90,6 +95,15 @@ namespace
     system->eeBus().write32(0, instruction);
     system->eeCore().startExecution(0);
     system->clockMasterCycle();
+  }
+
+  void assertCOP1TestInterrupt(NekoSystem *system)
+  {
+    system->interruptController().setSource(
+      EEInterruptSource::VIF0,
+      true);
+    system->interruptController().toggleMask(
+      EEInterruptSource::mask(EEInterruptSource::VIF0));
   }
 }
 
@@ -6194,6 +6208,527 @@ TEST_CASE("EE ERET preserves every staged COP1 destination class")
   }
 }
 
+TEST_CASE("EE exceptions preserve older write-side COP1 Moves")
+{
+  SECTION("MTC1")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(2, {UINT64_C(0x89abcdef), 0});
+    system.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x04, 2, 3));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(EEExceptionVector::GENERAL, 0);
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("CTC1")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(
+      2,
+      {EECOP1Control::STATUS_WRITABLE_MASK, 0});
+    system.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x06, 2, 31));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(EEExceptionVector::GENERAL, 0);
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::STATUS_WRITABLE_MASK));
+  }
+
+  SECTION("MOV.S")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x06, 3, 4));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(EEExceptionVector::GENERAL, 0);
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x89abcdef));
+  }
+}
+
+TEST_CASE("EE COP1 memory side effects precede younger exceptions")
+{
+  SECTION("LWC1 survives after its read succeeds")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {0x100, 0});
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x89abcdef)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    system.eeBus().write32(EEExceptionVector::GENERAL, 0);
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("SWC1 completes before the exception is accepted")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x39, 1, 3, 0));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == 0);
+    REQUIRE(core.pendingException() == EEException::None);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x89abcdef));
+  }
+}
+
+TEST_CASE("EE interrupts respect COP1 memory exception ordering")
+{
+  SECTION("A successful load commits after interrupt entry")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      COP1_INTC_ENABLED_STATUS);
+    core.setGeneralRegister(1, {0x100, 0});
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x89abcdef)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    system.eeBus().write32(EEExceptionVector::INTERRUPT, 0);
+    core.startExecution(0);
+    system.clockMasterCycle();
+    assertCOP1TestInterrupt(&system);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::Interrupt);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("A store completes before interrupt entry")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      COP1_INTC_ENABLED_STATUS);
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x39, 1, 3, 0));
+    core.startExecution(0);
+    system.clockMasterCycle();
+    assertCOP1TestInterrupt(&system);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::None);
+
+    system.clockMasterCycle();
+
+    std::uint32_t stored = 0;
+    REQUIRE(core.pendingException() == EEException::Interrupt);
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x89abcdef));
+  }
+
+  SECTION("A load fault wins over a pending interrupt")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      COP1_INTC_ENABLED_STATUS);
+    core.setGeneralRegister(
+      1,
+      {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x12345678));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    core.startExecution(0);
+    system.clockMasterCycle();
+    assertCOP1TestInterrupt(&system);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::DataBusErrorLoad);
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x12345678));
+  }
+
+  SECTION("A store fault wins over a pending interrupt")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      COP1_INTC_ENABLED_STATUS);
+    core.setGeneralRegister(
+      1,
+      {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x39, 1, 3, 0));
+    core.startExecution(0);
+    system.clockMasterCycle();
+    assertCOP1TestInterrupt(&system);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::DataBusErrorStore);
+  }
+}
+
+TEST_CASE("EE ERET preserves handler-issued COP1 Moves and loads")
+{
+  SECTION("MTC1 commits after returning")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE |
+        EECOP0Status::EXCEPTION_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setGeneralRegister(2, {UINT64_C(0x89abcdef), 0});
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1TransferInstruction(0x04, 2, 3));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL + 4,
+      UINT32_C(0x42000018));
+    system.eeBus().write32(0x100, 0);
+    core.startExecution(EEExceptionVector::GENERAL);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("CTC1 commits after returning")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE |
+        EECOP0Status::EXCEPTION_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setGeneralRegister(
+      2,
+      {EECOP1Control::STATUS_WRITABLE_MASK, 0});
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1TransferInstruction(0x06, 2, 31));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL + 4,
+      UINT32_C(0x42000018));
+    system.eeBus().write32(0x100, 0);
+    core.startExecution(EEExceptionVector::GENERAL);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       EECOP1Control::STATUS_WRITABLE_MASK));
+  }
+
+  SECTION("MOV.S commits after returning")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE |
+        EECOP0Status::EXCEPTION_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1SingleInstruction(0x06, 3, 4));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL + 4,
+      UINT32_C(0x42000018));
+    system.eeBus().write32(0x100, 0);
+    core.startExecution(EEExceptionVector::GENERAL);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(core.floatingPointRegister(4) == 0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("LWC1 returns after its read and commits afterward")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE |
+        EECOP0Status::EXCEPTION_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setGeneralRegister(1, {0x200, 0});
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x200,
+        UINT32_C(0x89abcdef)));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL + 4,
+      UINT32_C(0x42000018));
+    system.eeBus().write32(0x100, 0);
+    core.startExecution(EEExceptionVector::GENERAL);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+  }
+
+  SECTION("SWC1 writes before returning")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE |
+        EECOP0Status::EXCEPTION_LEVEL);
+    core.setCOP0Register(EECOP0Register::EPC, 0x100);
+    core.setGeneralRegister(1, {0x200, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL,
+      cop1MemoryInstruction(0x39, 1, 3, 0));
+    system.eeBus().write32(
+      EEExceptionVector::GENERAL + 4,
+      UINT32_C(0x42000018));
+    core.startExecution(EEExceptionVector::GENERAL);
+
+    system.runMasterCycles(3);
+
+    std::uint32_t stored = 0;
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::GENERAL + 4);
+    REQUIRE(system.eeBus().readData32(0x200, &stored));
+    REQUIRE(stored == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(system.eeBus().readData32(0x200, &stored));
+    REQUIRE(stored == UINT32_C(0x89abcdef));
+  }
+}
+
+TEST_CASE("EE reset cancels pending COP1 Moves and stores")
+{
+  SECTION("MTC1")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, {UINT64_C(0x89abcdef), 0});
+    runInstruction(
+      &system,
+      cop1TransferInstruction(0x04, 2, 3));
+
+    core.reset();
+    system.eeBus().write32(0, 0);
+    core.startExecution(0);
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
+    REQUIRE(core.floatingPointRegister(3) == 0);
+  }
+
+  SECTION("CTC1")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      2,
+      {EECOP1Control::STATUS_WRITABLE_MASK, 0});
+    runInstruction(
+      &system,
+      cop1TransferInstruction(0x06, 2, 31));
+
+    core.reset();
+    system.eeBus().write32(0, 0);
+    core.startExecution(0);
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      EECOP1Control::STATUS_FIXED);
+  }
+
+  SECTION("MOV.S")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x06, 3, 4));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    core.reset();
+    system.eeBus().write32(0, 0);
+    core.startExecution(0);
+    system.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
+    REQUIRE(core.floatingPointRegister(4) == 0);
+  }
+
+  SECTION("SWC1")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x39, 1, 3, 0));
+    core.startExecution(0);
+    system.runMasterCycles(3);
+
+    core.reset();
+    system.eeBus().write32(0, 0);
+    core.startExecution(0);
+    system.runMasterCycles(COP1_MEMORY_PIPELINE_CYCLES);
+
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == 0);
+  }
+}
+
 TEST_CASE("EE reset cancels pending COP1 divider results")
 {
   NekoSystem system;
@@ -6451,6 +6986,154 @@ TEST_CASE("EE COP1 stage state survives halt and save-state restore")
     UINT64_C(0xffffffff89abcdef));
   REQUIRE(original.saveState() == restored.saveState());
   REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+}
+
+TEST_CASE("Every EE COP1 Move survives halt and save-state restore")
+{
+  enum class MoveResult
+  {
+    GPRFromFPR,
+    GPRFromControl,
+    FPRFromGPR,
+    ControlFromGPR,
+    FPRFromFPR
+  };
+  struct MoveVector
+  {
+    std::uint32_t instruction;
+    MoveResult result;
+  };
+  const MoveVector vectors[] = {
+    {
+      cop1TransferInstruction(0x00, 2, 3),
+      MoveResult::GPRFromFPR
+    },
+    {
+      cop1TransferInstruction(0x02, 2, 0),
+      MoveResult::GPRFromControl
+    },
+    {
+      cop1TransferInstruction(0x04, 2, 3),
+      MoveResult::FPRFromGPR
+    },
+    {
+      cop1TransferInstruction(0x06, 2, 31),
+      MoveResult::ControlFromGPR
+    },
+    {
+      cop1SingleInstruction(0x06, 3, 4),
+      MoveResult::FPRFromFPR
+    }
+  };
+
+  for (const MoveVector &vector : vectors)
+  {
+    NekoSystem original;
+    EECore &originalCore = original.eeCore();
+    originalCore.setGeneralRegister(
+      2,
+      {EECOP1Control::STATUS_WRITABLE_MASK, 0});
+    originalCore.setFloatingPointRegister(
+      3,
+      UINT32_C(0x89abcdef));
+    original.eeBus().write32(0, vector.instruction);
+    original.eeBus().write32(4, 0);
+    originalCore.startExecution(0);
+    original.clockMasterCycle();
+    originalCore.haltExecution();
+
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    originalCore.startExecution(4);
+    restored.eeCore().startExecution(4);
+    original.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+    restored.runMasterCycles(COP1_MOVE_PIPELINE_CYCLES);
+
+    switch (vector.result)
+    {
+      case MoveResult::GPRFromFPR:
+        REQUIRE(
+          originalCore.generalRegister(2).low ==
+          UINT64_C(0xffffffff89abcdef));
+        break;
+      case MoveResult::GPRFromControl:
+        REQUIRE(
+          originalCore.generalRegister(2).low ==
+          EECOP1Control::IMPLEMENTATION_REVISION);
+        break;
+      case MoveResult::FPRFromGPR:
+        REQUIRE(
+          originalCore.floatingPointRegister(3) ==
+          EECOP1Control::STATUS_WRITABLE_MASK);
+        break;
+      case MoveResult::ControlFromGPR:
+        REQUIRE(
+          originalCore.cop1ControlRegister(31) ==
+          (EECOP1Control::STATUS_FIXED |
+           EECOP1Control::STATUS_WRITABLE_MASK));
+        break;
+      case MoveResult::FPRFromFPR:
+        REQUIRE(
+          originalCore.floatingPointRegister(4) ==
+          UINT32_C(0x89abcdef));
+        break;
+    }
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(
+      originalCore.stateHash() ==
+      restored.eeCore().stateHash());
+  }
+}
+
+TEST_CASE("EE in-flight COP1 Move and memory state participates in hashes")
+{
+  SECTION("Captured Move source")
+  {
+    NekoSystem first;
+    NekoSystem second;
+    first.eeCore().setGeneralRegister(2, {1, 0});
+    second.eeCore().setGeneralRegister(2, {2, 0});
+    first.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x04, 2, 3));
+    second.eeBus().write32(
+      0,
+      cop1TransferInstruction(0x04, 2, 3));
+    first.eeCore().startExecution(0);
+    second.eeCore().startExecution(0);
+    first.clockMasterCycle();
+    second.clockMasterCycle();
+    first.eeCore().setGeneralRegister(2, {});
+    second.eeCore().setGeneralRegister(2, {});
+
+    REQUIRE(
+      first.eeCore().stateHash() !=
+      second.eeCore().stateHash());
+  }
+
+  SECTION("Captured memory base")
+  {
+    NekoSystem first;
+    NekoSystem second;
+    first.eeCore().setGeneralRegister(1, {0x100, 0});
+    second.eeCore().setGeneralRegister(1, {0x200, 0});
+    first.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    second.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    first.eeCore().startExecution(0);
+    second.eeCore().startExecution(0);
+    first.clockMasterCycle();
+    second.clockMasterCycle();
+    first.eeCore().setGeneralRegister(1, {});
+    second.eeCore().setGeneralRegister(1, {});
+
+    REQUIRE(
+      first.eeCore().stateHash() !=
+      second.eeCore().stateHash());
+  }
 }
 
 TEST_CASE(
@@ -8143,6 +8826,52 @@ TEST_CASE("EE COP1 memory stages resume deterministically")
         restored.eeCore().stateHash());
     }
   }
+}
+
+TEST_CASE("EE restored COP1 stores do not repeat completed side effects")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  const std::uint32_t interruptMask =
+    EEInterruptSource::mask(EEInterruptSource::VIF0);
+  originalCore.setGeneralRegister(
+    1,
+    {EEMemoryMap::INTC_MASK, 0});
+  originalCore.setFloatingPointRegister(
+    2,
+    UINT32_C(0x40c00000));
+  originalCore.setFloatingPointRegister(
+    3,
+    interruptMask);
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 2));
+  original.eeBus().write32(
+    4,
+    cop1MemoryInstruction(0x39, 1, 3, 0));
+  original.eeBus().write32(8, 0);
+  originalCore.startExecution(0);
+  original.runMasterCycles(5);
+
+  REQUIRE(
+    original.interruptController().mask() ==
+    interruptMask);
+  originalCore.haltExecution();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  originalCore.startExecution(8);
+  restored.eeCore().startExecution(8);
+  original.runMasterCycles(COP1_DIV_SQRT_LATENCY);
+  restored.runMasterCycles(COP1_DIV_SQRT_LATENCY);
+
+  REQUIRE(
+    original.interruptController().mask() ==
+    interruptMask);
+  REQUIRE(
+    restored.interruptController().mask() ==
+    interruptMask);
+  REQUIRE(original.saveState() == restored.saveState());
 }
 
 TEST_CASE("EE reset cancels pending COP1 loads")
