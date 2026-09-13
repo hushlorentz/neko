@@ -936,7 +936,7 @@ accumulator or condition-result contract:
       exception dependencies share the COP1 scoreboard
 - [x] Preserve precise memory side effects and in-flight Move state across bus
       stalls, interrupts, `ERET`, reset, halt/resume, hashing, and save states
-- [ ] Complete focused Move/Operate/Load/Store timing and continuation review
+- [x] Complete focused Move/Operate/Load/Store timing and continuation review
 
 ### EE Two-Wide Issue Foundation
 

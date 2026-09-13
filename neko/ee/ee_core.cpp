@@ -3190,7 +3190,8 @@ bool EECore::advanceInFlightCOP1Operation(
             operation->capturedControl =
               operation->instruction.destinationRegister ==
                   EECOP1Control::STATUS_REGISTER
-                ? scoreboardFCR31Value()
+                ? scoreboardFCR31ValueForT(
+                    operation->programOrder)
                 : cop1ControlRegister(
                     operation->instruction.destinationRegister);
             break;
@@ -3799,6 +3800,17 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
   COP1ScoreboardResource resource,
   std::uint8_t registerIndex) const
 {
+  return cop1ScoreboardValueBefore(
+    resource,
+    registerIndex,
+    nextEEProgramOrder);
+}
+
+EECore::COP1ScoreboardValue EECore::cop1ScoreboardValueBefore(
+  COP1ScoreboardResource resource,
+  std::uint8_t registerIndex,
+  std::uint64_t consumerOrder) const
+{
   COP1ScoreboardValue value;
   switch (resource)
   {
@@ -3832,7 +3844,8 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
   for (const InFlightCOP1Operation &operation :
        inFlightCOP1Operations)
   {
-    if (!operation.active)
+    if (!operation.active ||
+        operation.programOrder >= consumerOrder)
     {
       continue;
     }
@@ -4074,10 +4087,14 @@ std::uint32_t EECore::scoreboardAccumulatorValueForT(
     "Unavailable EE COP1 accumulator reached 2T capture.");
 }
 
-std::uint32_t EECore::scoreboardFCR31Value() const
+std::uint32_t EECore::scoreboardFCR31ValueForT(
+  std::uint64_t consumerOrder) const
 {
   const COP1ScoreboardValue value =
-    cop1ScoreboardValue(COP1ScoreboardResource::FCR31);
+    cop1ScoreboardValueBefore(
+      COP1ScoreboardResource::FCR31,
+      0,
+      consumerOrder);
   if (value.availability ==
       COP1ScoreboardAvailability::Unavailable)
   {

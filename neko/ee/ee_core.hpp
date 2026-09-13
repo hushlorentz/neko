@@ -578,6 +578,10 @@ class EECore : public ClockedComponent
     COP1ScoreboardValue cop1ScoreboardValue(
       COP1ScoreboardResource resource,
       std::uint8_t registerIndex = 0) const;
+    COP1ScoreboardValue cop1ScoreboardValueBefore(
+      COP1ScoreboardResource resource,
+      std::uint8_t registerIndex,
+      std::uint64_t consumerOrder) const;
     std::uint32_t scoreboardFPRValue(
       std::uint8_t registerIndex) const;
     std::uint32_t scoreboardFPRValueForT(
@@ -585,7 +589,8 @@ class EECore : public ClockedComponent
       std::uint64_t consumerOrder) const;
     std::uint32_t scoreboardAccumulatorValueForT(
       std::uint64_t consumerOrder) const;
-    std::uint32_t scoreboardFCR31Value() const;
+    std::uint32_t scoreboardFCR31ValueForT(
+      std::uint64_t consumerOrder) const;
     bool scoreboardCOP1Condition() const;
     static COP1Dependency instructionFPRDependency(
       const EEInstruction &instruction,

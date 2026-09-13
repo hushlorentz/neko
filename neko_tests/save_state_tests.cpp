@@ -91,6 +91,8 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1096;
   constexpr std::size_t
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET = 1116;
+  constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1132;
   constexpr std::size_t
     SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1133;
@@ -645,6 +647,63 @@ TEST_CASE("COP1 Move waits when an older Operate enters T")
       restored.eeCore().generalRegister(5).low ==
       UINT64_C(0xffffffff89abcdef));
   }
+}
+
+TEST_CASE("Older CFC1 ignores younger restored FCR31 producers")
+{
+  NekoSystem source;
+  EECore &sourceCore = source.eeCore();
+  sourceCore.setCOP1ControlRegister(
+    31,
+    EECOP1Control::CAUSE_INVALID);
+  sourceCore.setGeneralRegister(
+    6,
+    {EECOP1Control::CONDITION, 0});
+  source.eeBus().write32(
+    0,
+    cop1TransferInstruction(0x02, 5, 31));
+  sourceCore.startExecution(0);
+  source.clockMasterCycle();
+  sourceCore.haltExecution();
+
+  std::vector<std::uint8_t> state = source.saveState();
+  writeU64(&state, SIMPLE_EE_NEXT_PROGRAM_ORDER_OFFSET, 3);
+  state[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
+  writeU64(
+    &state,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+    2);
+  writeU32(
+    &state,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ADDRESS_OFFSET,
+    4);
+  writeU32(
+    &state,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    cop1TransferInstruction(0x06, 6, 31));
+  writeU64(
+    &state,
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET,
+    EECOP1Control::CONDITION);
+  state[
+    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+      1 << 2;
+  updateChecksum(&state);
+
+  NekoSystem restored;
+  restored.loadState(state);
+  restored.eeCore().setProgramCounter(8);
+  restored.eeCore().startExecution(8);
+  restored.runMasterCycles(3);
+
+  REQUIRE(
+    restored.eeCore().generalRegister(5).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_INVALID));
+  REQUIRE(
+    restored.eeCore().cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CONDITION));
 }
 
 TEST_CASE("Retired COP1 occupancy state is rejected")
