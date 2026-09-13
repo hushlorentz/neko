@@ -1036,6 +1036,7 @@ TEST_CASE("EE COP1 move traces the LS and C1 stage boundaries")
   system.runMasterCycles(4);
 
   std::vector<NekoTraceEvent> pipelineEvents;
+  std::vector<NekoTraceEvent> resourceInterlocks;
   for (const NekoTraceEvent &event : eeTrace(system))
   {
     if (event.type ==
@@ -1043,6 +1044,12 @@ TEST_CASE("EE COP1 move traces the LS and C1 stage boundaries")
         event.type == NekoTraceEventType::COP1Retired)
     {
       pipelineEvents.push_back(event);
+    }
+    else if (
+      event.type ==
+      NekoTraceEventType::COP1ResourceInterlock)
+    {
+      resourceInterlocks.push_back(event);
     }
   }
   REQUIRE(pipelineEvents.size() == 5);
@@ -1081,6 +1088,19 @@ TEST_CASE("EE COP1 move traces the LS and C1 stage boundaries")
       NekoEETraceCOP1Result::DESTINATION_MASK_SHIFT) |
      (UINT64_C(2) <<
       NekoEETraceCOP1Result::GPR_REGISTER_SHIFT)));
+  REQUIRE(resourceInterlocks.size() == 2);
+  REQUIRE(resourceInterlocks[0].masterCycle == 2);
+  REQUIRE(resourceInterlocks[1].masterCycle == 3);
+  for (const NekoTraceEvent &event : resourceInterlocks)
+  {
+    REQUIRE(
+      event.value2 ==
+      NekoEETraceCOP1Resource::GPR);
+    REQUIRE(
+      event.value3 ==
+      (NekoEETraceCOP1Interlock::READ |
+       NekoEETraceCOP1Interlock::WRITE));
+  }
 }
 
 TEST_CASE("EE COP1 unary and min/max trace staged progression")
@@ -1711,6 +1731,7 @@ TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
 
   std::vector<NekoTraceEvent> issued;
   std::vector<NekoTraceEvent> interlocks;
+  std::vector<NekoTraceEvent> resourceInterlocks;
   for (const NekoTraceEvent &event : eeTrace(system))
   {
     if (event.type == NekoTraceEventType::InstructionIssued)
@@ -1722,6 +1743,12 @@ TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
       NekoTraceEventType::COP1LoadInterlock)
     {
       interlocks.push_back(event);
+    }
+    else if (
+      event.type ==
+      NekoTraceEventType::COP1ResourceInterlock)
+    {
+      resourceInterlocks.push_back(event);
     }
   }
   REQUIRE(issued.size() == 2);
@@ -1735,6 +1762,65 @@ TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")
   REQUIRE(interlocks[0].value1 == dependentInstruction);
   REQUIRE(interlocks[0].value2 == 3);
   REQUIRE(interlocks[0].value3 == expectedAccess);
+  REQUIRE(resourceInterlocks.size() == 2);
+  REQUIRE(resourceInterlocks[0].masterCycle == 2);
+  REQUIRE(
+    resourceInterlocks[0].value2 ==
+    NekoEETraceCOP1Resource::MEMORY_EXCEPTION);
+  REQUIRE(resourceInterlocks[0].value3 == 0);
+  REQUIRE(resourceInterlocks[1].masterCycle == 3);
+  REQUIRE(resourceInterlocks[1].value2 == 3);
+  REQUIRE(
+    resourceInterlocks[1].value3 == expectedAccess);
+}
+
+TEST_CASE("EE COP1 scoreboard prioritizes completed load hazards")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {0x100, 0});
+  core.setFloatingPointRegister(6, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(7, UINT32_C(0x40400000));
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x3f800000)));
+  system.eeBus().write32(
+    0,
+    immediateInstruction(0x31, 1, 5, 0));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x02, 6, 2, 7));
+  const std::uint32_t dependentInstruction =
+    cop1SingleInstruction(0x00, 2, 8, 5);
+  system.eeBus().write32(8, dependentInstruction);
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(4);
+
+  std::vector<NekoTraceEvent> cycleFourInterlocks;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.masterCycle == 4 &&
+        (event.type ==
+           NekoTraceEventType::COP1LoadInterlock ||
+         event.type ==
+           NekoTraceEventType::COP1ResourceInterlock))
+    {
+      cycleFourInterlocks.push_back(event);
+    }
+  }
+  REQUIRE(cycleFourInterlocks.size() == 1);
+  REQUIRE(
+    cycleFourInterlocks[0].type ==
+    NekoTraceEventType::COP1LoadInterlock);
+  REQUIRE(cycleFourInterlocks[0].value0 == 8);
+  REQUIRE(cycleFourInterlocks[0].value1 == dependentInstruction);
+  REQUIRE(cycleFourInterlocks[0].value2 == 5);
+  REQUIRE(
+    cycleFourInterlocks[0].value3 ==
+    NekoEETraceCOP1Interlock::READ);
 }
 
 TEST_CASE("EE scalar COP1 issue does not invent a C1 stage conflict")

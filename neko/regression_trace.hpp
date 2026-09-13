@@ -60,6 +60,15 @@ namespace NekoEETraceCOP1Interlock
   constexpr std::uint64_t WRITE = UINT64_C(1) << 1;
 }
 
+namespace NekoEETraceCOP1Resource
+{
+  constexpr std::uint64_t ACCUMULATOR = 32;
+  constexpr std::uint64_t FCR31 = 33;
+  constexpr std::uint64_t CONDITION = 34;
+  constexpr std::uint64_t GPR = 35;
+  constexpr std::uint64_t MEMORY_EXCEPTION = 36;
+}
+
 namespace NekoEETraceCOP1DividerHazard
 {
   constexpr std::uint64_t BRANCH_DELAY_SLOT = UINT64_C(1);

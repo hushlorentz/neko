@@ -287,7 +287,10 @@ class EECore : public ClockedComponent
       FPR,
       Accumulator,
       FCR31,
-      Condition
+      Condition,
+      GPR,
+      MemoryException,
+      Divider
     };
 
     enum class COP1ScoreboardAvailability : std::uint8_t
@@ -382,6 +385,8 @@ class EECore : public ClockedComponent
         COP1ScoreboardResource::FPR;
       std::uint8_t registerIndex = 0;
       COP1Dependency dependency = COP1Dependency::None;
+      bool completedLoad = false;
+      EEOperation blockingOperation = EEOperation::Nop;
     };
 
     struct PendingMultiplyDivide
@@ -544,8 +549,6 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t instructionAddress);
     bool pendingCOP1LoadActive() const;
-    bool pendingCOP1GPRWriteActive() const;
-    bool pendingCOP1MemoryExceptionActive() const;
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
@@ -570,6 +573,7 @@ class EECore : public ClockedComponent
       const InFlightCOP1Operation &operation);
     bool cop1ScoreboardBlocks(
       const EEInstruction &instruction,
+      std::uint32_t completedLoadRegisters,
       COP1ScoreboardHazard *hazard) const;
     COP1ScoreboardValue cop1ScoreboardValue(
       COP1ScoreboardResource resource,

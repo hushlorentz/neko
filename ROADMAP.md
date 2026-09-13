@@ -932,7 +932,7 @@ accumulator or condition-result contract:
 - [x] Replace the scalar one-bit Operate-to-Move approximation with stage-aware
       C1 resource occupancy that remains correct before concurrent issue is
       enabled
-- [ ] Ensure load-use, store-read, move-read/write, control-register, and
+- [x] Ensure load-use, store-read, move-read/write, control-register, and
       exception dependencies share the COP1 scoreboard
 - [ ] Preserve precise memory side effects and in-flight Move state across bus
       stalls, interrupts, `ERET`, reset, halt/resume, hashing, and save states

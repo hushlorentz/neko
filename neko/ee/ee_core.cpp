@@ -532,7 +532,10 @@ void EECore::clock()
   {
     return;
   }
-  if (!pendingCOP1MemoryExceptionActive() &&
+  if (cop1ScoreboardValue(
+        COP1ScoreboardResource::MemoryException)
+        .availability !=
+          COP1ScoreboardAvailability::Unavailable &&
       interruptDeliverable())
   {
     enterInterruptException();
@@ -599,81 +602,65 @@ void EECore::clock()
   const std::uint32_t completedBranchAddress =
     branchInstructionAddress;
   const bool completedBranchTaken = branchDelayTaken;
-  if (pendingCOP1MemoryExceptionActive())
+  COP1ScoreboardHazard scoreboardHazard;
+  if (cop1ScoreboardBlocks(
+        decoded,
+        completedCOP1LoadRegisters,
+        &scoreboardHazard))
   {
-    recordCycleTrace(
-      CycleTraceKind::COP1ResourceInterlock,
-      instructionAddress,
-      instructionValue,
-      FLOATING_POINT_REGISTER_COUNT + 4);
-    pc = instructionAddress;
-    return;
-  }
-  if (pendingCOP1GPRWriteActive())
-  {
-    recordCycleTrace(
-      CycleTraceKind::COP1ResourceInterlock,
-      instructionAddress,
-      instructionValue,
-      FLOATING_POINT_REGISTER_COUNT + 3);
-    pc = instructionAddress;
-    return;
-  }
-  if (isCOP1DividerOperation(decoded.operation) &&
-      cop1DividerInitiationCycles != 0)
-  {
-    recordCycleTrace(
-      CycleTraceKind::COP1ResourceInterlock,
-      instructionAddress,
-      instructionValue,
-      static_cast<std::uint8_t>(cop1DividerOperation));
-    pc = instructionAddress;
-    return;
-  }
-  for (std::uint8_t registerIndex = 0;
-       registerIndex < FLOATING_POINT_REGISTER_COUNT;
-       ++registerIndex)
-  {
-    if ((completedCOP1LoadRegisters &
-         (UINT32_C(1) << registerIndex)) == 0)
-    {
-      continue;
-    }
-    const COP1Dependency fprDependency =
-      instructionFPRDependency(decoded, registerIndex);
-    if (fprDependency != COP1Dependency::None)
+    if (scoreboardHazard.completedLoad)
     {
       recordCycleTrace(
         CycleTraceKind::COP1LoadInterlock,
         instructionAddress,
         instructionValue,
-        registerIndex,
-        static_cast<std::uint8_t>(fprDependency));
-      pc = instructionAddress;
-      return;
+        scoreboardHazard.registerIndex,
+        static_cast<std::uint8_t>(
+          scoreboardHazard.dependency));
     }
-  }
-  COP1ScoreboardHazard scoreboardHazard;
-  if (cop1ScoreboardBlocks(decoded, &scoreboardHazard))
-  {
-    const std::uint64_t resource =
-      scoreboardHazard.resource ==
-        COP1ScoreboardResource::FPR
-        ? scoreboardHazard.registerIndex
-        : scoreboardHazard.resource ==
-            COP1ScoreboardResource::Accumulator
-          ? FLOATING_POINT_REGISTER_COUNT
-          : scoreboardHazard.resource ==
-              COP1ScoreboardResource::FCR31
-            ? FLOATING_POINT_REGISTER_COUNT + 1
-            : FLOATING_POINT_REGISTER_COUNT + 2;
-    recordCycleTrace(
-      CycleTraceKind::COP1ResourceInterlock,
-      instructionAddress,
-      instructionValue,
-      resource,
-      static_cast<std::uint8_t>(
-        scoreboardHazard.dependency));
+    else
+    {
+      std::uint64_t resource = 0;
+      if (scoreboardHazard.resource ==
+          COP1ScoreboardResource::Divider)
+      {
+        resource = static_cast<std::uint8_t>(
+          scoreboardHazard.blockingOperation);
+      }
+      else
+      {
+        switch (scoreboardHazard.resource)
+        {
+          case COP1ScoreboardResource::FPR:
+            resource = scoreboardHazard.registerIndex;
+            break;
+          case COP1ScoreboardResource::Accumulator:
+            resource = FLOATING_POINT_REGISTER_COUNT;
+            break;
+          case COP1ScoreboardResource::FCR31:
+            resource = FLOATING_POINT_REGISTER_COUNT + 1;
+            break;
+          case COP1ScoreboardResource::Condition:
+            resource = FLOATING_POINT_REGISTER_COUNT + 2;
+            break;
+          case COP1ScoreboardResource::GPR:
+            resource = FLOATING_POINT_REGISTER_COUNT + 3;
+            break;
+          case COP1ScoreboardResource::MemoryException:
+            resource = FLOATING_POINT_REGISTER_COUNT + 4;
+            break;
+          case COP1ScoreboardResource::Divider:
+            break;
+        }
+      }
+      recordCycleTrace(
+        CycleTraceKind::COP1ResourceInterlock,
+        instructionAddress,
+        instructionValue,
+        resource,
+        static_cast<std::uint8_t>(
+          scoreboardHazard.dependency));
+    }
     pc = instructionAddress;
     return;
   }
@@ -2712,46 +2699,6 @@ bool EECore::pendingCOP1LoadActive() const
   return false;
 }
 
-bool EECore::pendingCOP1GPRWriteActive() const
-{
-  for (const InFlightCOP1Operation &operation :
-       inFlightCOP1Operations)
-  {
-    if (operation.active &&
-        (operation.destination.mask &
-         COP1_DESTINATION_GPR) != 0)
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool EECore::pendingCOP1MemoryExceptionActive() const
-{
-  for (const InFlightCOP1Operation &operation :
-       inFlightCOP1Operations)
-  {
-    if (!operation.active)
-    {
-      continue;
-    }
-    if (operation.instruction.operation ==
-          EEOperation::LoadWordToCOP1 &&
-        operation.stage < COP1PipelineStage::X)
-    {
-      return true;
-    }
-    if (operation.instruction.operation ==
-          EEOperation::StoreWordFromCOP1 &&
-        operation.stage < COP1PipelineStage::Y)
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
 bool EECore::drainInFlightCOP1()
 {
   bool drainedDivider = false;
@@ -3662,8 +3609,82 @@ void EECore::recordCOP1Retirement(
 
 bool EECore::cop1ScoreboardBlocks(
   const EEInstruction &instruction,
+  std::uint32_t completedLoadRegisters,
   COP1ScoreboardHazard *hazard) const
 {
+  if (cop1ScoreboardValue(
+        COP1ScoreboardResource::MemoryException)
+        .availability ==
+          COP1ScoreboardAvailability::Unavailable)
+  {
+    *hazard = {
+      COP1ScoreboardResource::MemoryException,
+      0,
+      COP1Dependency::None,
+      false,
+      EEOperation::Nop
+    };
+    return true;
+  }
+
+  for (std::uint8_t registerIndex = 0;
+       registerIndex < GENERAL_REGISTER_COUNT;
+       ++registerIndex)
+  {
+    if (cop1ScoreboardValue(
+          COP1ScoreboardResource::GPR,
+          registerIndex)
+          .availability ==
+            COP1ScoreboardAvailability::Unavailable)
+    {
+      *hazard = {
+        COP1ScoreboardResource::GPR,
+        registerIndex,
+        COP1Dependency::ReadWrite,
+        false,
+        EEOperation::Nop
+      };
+      return true;
+    }
+  }
+
+  if (isCOP1DividerOperation(instruction.operation) &&
+      cop1DividerInitiationCycles != 0)
+  {
+    *hazard = {
+      COP1ScoreboardResource::Divider,
+      0,
+      COP1Dependency::None,
+      false,
+      cop1DividerOperation
+    };
+    return true;
+  }
+
+  for (std::uint8_t registerIndex = 0;
+       registerIndex < FLOATING_POINT_REGISTER_COUNT;
+       ++registerIndex)
+  {
+    if ((completedLoadRegisters &
+         (UINT32_C(1) << registerIndex)) == 0)
+    {
+      continue;
+    }
+    const COP1Dependency dependency =
+      instructionFPRDependency(instruction, registerIndex);
+    if (dependency != COP1Dependency::None)
+    {
+      *hazard = {
+        COP1ScoreboardResource::FPR,
+        registerIndex,
+        dependency,
+        true,
+        EEOperation::LoadWordToCOP1
+      };
+      return true;
+    }
+  }
+
   for (std::uint8_t registerIndex = 0;
        registerIndex < FLOATING_POINT_REGISTER_COUNT;
        ++registerIndex)
@@ -3691,7 +3712,9 @@ bool EECore::cop1ScoreboardBlocks(
       *hazard = {
         COP1ScoreboardResource::FPR,
         registerIndex,
-        dependency
+        dependency,
+        false,
+        value.producerOperation
       };
       return true;
     }
@@ -3717,7 +3740,9 @@ bool EECore::cop1ScoreboardBlocks(
     *hazard = {
       COP1ScoreboardResource::Accumulator,
       0,
-      accumulatorDependency
+      accumulatorDependency,
+      false,
+      accumulatorValue.producerOperation
     };
     return true;
   }
@@ -3741,7 +3766,9 @@ bool EECore::cop1ScoreboardBlocks(
     *hazard = {
       COP1ScoreboardResource::FCR31,
       EECOP1Control::STATUS_REGISTER,
-      controlDependency
+      controlDependency,
+      false,
+      controlValue.producerOperation
     };
     return true;
   }
@@ -3757,7 +3784,11 @@ bool EECore::cop1ScoreboardBlocks(
     *hazard = {
       COP1ScoreboardResource::Condition,
       0,
-      conditionDependency
+      conditionDependency,
+      false,
+      cop1ScoreboardValue(
+        COP1ScoreboardResource::Condition)
+        .producerOperation
     };
     return true;
   }
@@ -3785,6 +3816,15 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
     case COP1ScoreboardResource::Condition:
       value.value =
         cop1Condition() ? EECOP1Control::CONDITION : 0;
+      break;
+    case COP1ScoreboardResource::GPR:
+      requireGeneralRegisterIndex(registerIndex);
+      value.value =
+        static_cast<std::uint32_t>(
+          generalRegisters[registerIndex].low);
+      break;
+    case COP1ScoreboardResource::MemoryException:
+    case COP1ScoreboardResource::Divider:
       break;
   }
 
@@ -3824,6 +3864,23 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
             COP1_DESTINATION_FCR31) != 0 &&
             operation.instruction.operation ==
               EEOperation::MoveControlWordToCOP1);
+        break;
+      case COP1ScoreboardResource::GPR:
+        writesResource =
+          (operation.destination.mask &
+           COP1_DESTINATION_GPR) != 0 &&
+          operation.destination.gprRegister == registerIndex;
+        break;
+      case COP1ScoreboardResource::MemoryException:
+        writesResource =
+          (operation.instruction.operation ==
+             EEOperation::LoadWordToCOP1 &&
+           operation.stage < COP1PipelineStage::X) ||
+          (operation.instruction.operation ==
+             EEOperation::StoreWordFromCOP1 &&
+           operation.stage < COP1PipelineStage::Y);
+        break;
+      case COP1ScoreboardResource::Divider:
         break;
     }
     if (writesResource &&
@@ -3915,6 +3972,12 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValue(
             producer->capturedGPR) &
           EECOP1Control::CONDITION;
       }
+      break;
+    case COP1ScoreboardResource::GPR:
+      value.value = producer->rawResult;
+      break;
+    case COP1ScoreboardResource::MemoryException:
+    case COP1ScoreboardResource::Divider:
       break;
   }
   return value;
