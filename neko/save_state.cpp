@@ -1332,10 +1332,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.cop1DividerInitiationCycles;
   destination->eeCoreComponent.cop1DividerOperation =
     source->eeCoreComponent.cop1DividerOperation;
-  destination->eeCoreComponent.recentShiftAmountAccesses =
-    source->eeCoreComponent.recentShiftAmountAccesses;
-  destination->eeCoreComponent.recentShiftAmountReads =
-    source->eeCoreComponent.recentShiftAmountReads;
+  destination->eeCoreComponent.shiftAmountOrdering =
+    source->eeCoreComponent.shiftAmountOrdering;
   destination->eeCoreComponent.branchDelayPending =
     source->eeCoreComponent.branchDelayPending;
   destination->eeCoreComponent.branchDelayTarget =
@@ -1685,8 +1683,10 @@ void NekoSaveStateCodec::writeEECore(
     static_cast<std::uint8_t>(
       core.cop1DividerOperation));
   writer->writeBool(false);
-  writer->writeU8(core.recentShiftAmountAccesses);
-  writer->writeU8(core.recentShiftAmountReads);
+  writer->writeU8(
+    core.shiftAmountOrdering.accessHistory());
+  writer->writeU8(
+    core.shiftAmountOrdering.readHistory());
   writer->writeBool(core.branchDelayPending);
   writer->writeU32(core.branchDelayTarget);
   writer->writeU32(core.branchInstructionAddress);
@@ -1856,16 +1856,21 @@ void NekoSaveStateCodec::readEECore(
   require(
     !retiredCOP1OperateResource,
     "retired EE COP1 operate resource state is not empty");
-  core->recentShiftAmountAccesses = reader->readU8();
-  core->recentShiftAmountReads = reader->readU8();
+  const std::uint8_t recentShiftAmountAccesses =
+    reader->readU8();
+  const std::uint8_t recentShiftAmountReads =
+    reader->readU8();
   require(
-    (core->recentShiftAmountAccesses & 0xf8) == 0 &&
-      (core->recentShiftAmountReads & 0xf8) == 0,
+    (recentShiftAmountAccesses & 0xf8) == 0 &&
+      (recentShiftAmountReads & 0xf8) == 0,
     "EE shift-amount ordering history is invalid");
   require(
-    (core->recentShiftAmountReads &
-      ~core->recentShiftAmountAccesses) == 0,
+    (recentShiftAmountReads &
+      ~recentShiftAmountAccesses) == 0,
     "EE shift-amount read history is inconsistent");
+  core->shiftAmountOrdering.restore(
+    recentShiftAmountAccesses,
+    recentShiftAmountReads);
   core->branchDelayPending =
     reader->readBool("EE branch delay flag");
   core->branchDelayTarget = reader->readU32();

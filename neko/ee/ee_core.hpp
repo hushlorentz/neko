@@ -81,6 +81,23 @@ class EEAcceptanceRecords
     std::size_t count = 0;
 };
 
+class EEShiftAmountOrderingWindow
+{
+  public:
+    void clear();
+    bool permits(EEOperation operation) const;
+    void accept(EEOperation operation);
+    std::uint8_t accessHistory() const;
+    std::uint8_t readHistory() const;
+    void restore(
+      std::uint8_t accesses,
+      std::uint8_t reads);
+
+  private:
+    std::uint8_t recentAccesses = 0;
+    std::uint8_t recentReads = 0;
+};
+
 enum class EEExecutionState : std::uint8_t
 {
   Halted,
@@ -490,8 +507,7 @@ class EECore : public ClockedComponent
     PendingMultiplyDivide pendingMac1;
     std::uint8_t cop1DividerInitiationCycles = 0;
     EEOperation cop1DividerOperation = EEOperation::Nop;
-    std::uint8_t recentShiftAmountAccesses = 0;
-    std::uint8_t recentShiftAmountReads = 0;
+    EEShiftAmountOrderingWindow shiftAmountOrdering;
     bool branchDelayPending = false;
     std::uint32_t branchDelayTarget = 0;
     std::uint32_t branchInstructionAddress = 0;
@@ -564,6 +580,8 @@ class EECore : public ClockedComponent
       std::uint32_t address,
       const EEInstruction &instruction,
       bool delaySlot);
+    void applyInstructionAcceptanceEffects(
+      const EEAcceptanceRecord &record);
     void updateIssueSelection(
       std::uint32_t completedLoadRegisters);
     bool issueCandidateReady(
@@ -692,11 +710,6 @@ class EECore : public ClockedComponent
       EEOperation operation);
     static COP1DividerTiming cop1DividerTiming(
       EEOperation operation);
-    bool validateShiftAmountOrdering(
-      const EEInstruction &instruction,
-      std::uint32_t address);
-    void recordShiftAmountAccess(
-      const EEInstruction &instruction);
     bool validateDelaySlotInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);

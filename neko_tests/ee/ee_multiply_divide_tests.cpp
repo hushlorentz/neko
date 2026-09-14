@@ -283,3 +283,21 @@ TEST_CASE("EE shift amount ordering restrictions are explicit")
   REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
   REQUIRE(core.programCounter() == 4);
 }
+
+TEST_CASE("EE shift amount windows advance per acceptance")
+{
+  EEShiftAmountOrderingWindow window;
+  window.accept(EEOperation::MoveFromShiftAmount);
+  window.accept(EEOperation::Nop);
+  window.accept(EEOperation::Nop);
+
+  REQUIRE_FALSE(
+    window.permits(
+      EEOperation::MoveByteCountToShiftAmount));
+
+  window.accept(EEOperation::Nop);
+
+  REQUIRE(
+    window.permits(
+      EEOperation::MoveByteCountToShiftAmount));
+}

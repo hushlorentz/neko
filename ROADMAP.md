@@ -981,7 +981,7 @@ accumulator or condition-result contract:
       detection, and instruction counts to consume ordered acceptance records
       and stop only after every successfully accepted member has produced its
       record, independently of delayed pipeline completion
-- [ ] Advance SA-ordering and divider branch-proximity instruction windows from
+- [x] Advance SA-ordering and divider branch-proximity instruction windows from
       ordered acceptance records so the younger instruction observes the
       older instruction's program-order effects independently of pipe number
 - [ ] Implement ordered per-instruction commit boundaries within an atomic

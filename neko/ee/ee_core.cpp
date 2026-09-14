@@ -59,6 +59,69 @@ const EEAcceptanceRecord &EEAcceptanceRecords::operator[](
   return records[index];
 }
 
+void EEShiftAmountOrderingWindow::clear()
+{
+  recentAccesses = 0;
+  recentReads = 0;
+}
+
+bool EEShiftAmountOrderingWindow::permits(
+  EEOperation operation) const
+{
+  const bool restore =
+    operation == EEOperation::MoveToShiftAmount;
+  const bool calculate =
+    operation == EEOperation::MoveByteCountToShiftAmount ||
+    operation == EEOperation::MoveHalfwordCountToShiftAmount;
+  return
+    (!restore || (recentAccesses & 0x07) == 0) &&
+    (!calculate || (recentReads & 0x07) == 0);
+}
+
+void EEShiftAmountOrderingWindow::accept(
+  EEOperation operation)
+{
+  const bool reads =
+    operation == EEOperation::MoveFromShiftAmount;
+  const bool accesses =
+    reads ||
+    operation == EEOperation::MoveByteCountToShiftAmount ||
+    operation == EEOperation::MoveHalfwordCountToShiftAmount;
+  recentAccesses =
+    static_cast<std::uint8_t>(
+      ((recentAccesses << 1) |
+       (accesses ? 1 : 0)) & 0x07);
+  recentReads =
+    static_cast<std::uint8_t>(
+      ((recentReads << 1) |
+       (reads ? 1 : 0)) & 0x07);
+}
+
+std::uint8_t EEShiftAmountOrderingWindow::accessHistory() const
+{
+  return recentAccesses;
+}
+
+std::uint8_t EEShiftAmountOrderingWindow::readHistory() const
+{
+  return recentReads;
+}
+
+void EEShiftAmountOrderingWindow::restore(
+  std::uint8_t accesses,
+  std::uint8_t reads)
+{
+  if ((accesses & 0xf8) != 0 ||
+      (reads & 0xf8) != 0 ||
+      (reads & ~accesses) != 0)
+  {
+    throw std::invalid_argument(
+      "EE shift-amount ordering history is invalid.");
+  }
+  recentAccesses = accesses;
+  recentReads = reads;
+}
+
 namespace
 {
   constexpr std::uint64_t WORD_SIGN_BIT =
@@ -335,8 +398,7 @@ void EECore::reset()
   pendingMac1 = {};
   cop1DividerInitiationCycles = 0;
   cop1DividerOperation = EEOperation::Nop;
-  recentShiftAmountAccesses = 0;
-  recentShiftAmountReads = 0;
+  shiftAmountOrdering.clear();
   branchDelayPending = false;
   branchDelayTarget = 0;
   branchInstructionAddress = 0;
@@ -952,9 +1014,6 @@ void EECore::clock()
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
-  const std::uint32_t completedBranchAddress =
-    branchInstructionAddress;
-  const bool completedBranchTaken = branchDelayTaken;
   COP1ScoreboardHazard scoreboardHazard;
   if (cop1ScoreboardBlocks(
         decoded,
@@ -1032,28 +1091,6 @@ void EECore::clock()
     instructionValue,
     static_cast<std::uint8_t>(decoded.operation),
     wasDelaySlot);
-  bool dividerDelaySlotHazard = false;
-  std::uint64_t dividerProximityHazardReasons = 0;
-  bool dividerPostTargetCombined = false;
-  if (isCOP1DividerOperation(decoded.operation))
-  {
-    if (wasDelaySlot)
-    {
-      dividerDelaySlotHazard = true;
-    }
-    if (cop1DividerPostDelayInstructions != 0)
-    {
-      dividerProximityHazardReasons |= UINT64_C(1) << 1;
-      if (cop1DividerPostTargetInstructions != 0 &&
-          cop1DividerPostDelayTaken &&
-          cop1DividerPostDelayTargetAddress ==
-            cop1DividerPostTargetAddress)
-      {
-        dividerProximityHazardReasons |= UINT64_C(1) << 2;
-        dividerPostTargetCombined = true;
-      }
-    }
-  }
   const bool executed =
     executeInstruction(decoded, instructionAddress);
   executingProgramOrder = 0;
@@ -1071,41 +1108,103 @@ void EECore::clock()
     decoded,
     wasDelaySlot);
   advanceIssueFrontEnd();
-  if (dividerDelaySlotHazard)
+  if (wasDelaySlot)
   {
-    recordCycleTrace(
-      CycleTraceKind::COP1DividerHazard,
-      instructionAddress,
-      instructionValue,
-      UINT64_C(1),
-      completedBranchAddress |
-        (static_cast<std::uint64_t>(
-          completedBranchTaken ?
-            completedBranchTarget : 0) << 32));
+    pc = completedBranchTarget;
+    branchDelayPending = false;
+    branchDelayTarget = 0;
+    branchInstructionAddress = 0;
+    branchDelayFromLikely = false;
+    branchDelayTaken = false;
+    clearIssueFrontEnd();
   }
-  if (dividerProximityHazardReasons != 0)
+  else if (isEEBranchLikelyOperation(decoded.operation) &&
+           !branchDelayPending)
   {
-    recordCycleTrace(
-      CycleTraceKind::COP1DividerHazard,
-      instructionAddress,
-      instructionValue,
-      dividerProximityHazardReasons,
-      cop1DividerPostDelayBranchAddress |
-        (static_cast<std::uint64_t>(
-          cop1DividerPostDelayTargetAddress) << 32));
+    clearIssueFrontEnd();
   }
-  if (isCOP1DividerOperation(decoded.operation) &&
-      cop1DividerPostTargetInstructions != 0 &&
-      !dividerPostTargetCombined)
+  else if (decoded.operation == EEOperation::ExceptionReturn)
   {
-    recordCycleTrace(
-      CycleTraceKind::COP1DividerHazard,
-      instructionAddress,
-      instructionValue,
-      UINT64_C(1) << 2,
-      static_cast<std::uint64_t>(
-        cop1DividerPostTargetAddress) << 32);
+    clearIssueFrontEnd();
   }
+}
+
+void EECore::recordInstructionAcceptance(
+  std::uint64_t programOrder,
+  std::uint32_t address,
+  const EEInstruction &instruction,
+  bool delaySlot)
+{
+  acceptanceRecords.append({
+    programOrder,
+    address,
+    instruction,
+    delaySlot
+  });
+  applyInstructionAcceptanceEffects(
+    acceptanceRecords[
+      acceptanceRecords.size() - 1]);
+  lastDecodedInstruction = instruction;
+  lastAddress = address;
+  lastInstructionValid = true;
+}
+
+void EECore::applyInstructionAcceptanceEffects(
+  const EEAcceptanceRecord &record)
+{
+  const EEInstruction &instruction = record.instruction;
+  if (isCOP1DividerOperation(instruction.operation))
+  {
+    if (record.delaySlot)
+    {
+      recordCycleTrace(
+        CycleTraceKind::COP1DividerHazard,
+        record.address,
+        instruction.raw,
+        UINT64_C(1),
+        branchInstructionAddress |
+          (static_cast<std::uint64_t>(
+            branchDelayTaken ? branchDelayTarget : 0) << 32));
+    }
+
+    std::uint64_t proximityReasons = 0;
+    bool combinedTargetReason = false;
+    if (cop1DividerPostDelayInstructions != 0)
+    {
+      proximityReasons |= UINT64_C(1) << 1;
+      if (cop1DividerPostTargetInstructions != 0 &&
+          cop1DividerPostDelayTaken &&
+          cop1DividerPostDelayTargetAddress ==
+            cop1DividerPostTargetAddress)
+      {
+        proximityReasons |= UINT64_C(1) << 2;
+        combinedTargetReason = true;
+      }
+    }
+    if (proximityReasons != 0)
+    {
+      recordCycleTrace(
+        CycleTraceKind::COP1DividerHazard,
+        record.address,
+        instruction.raw,
+        proximityReasons,
+        cop1DividerPostDelayBranchAddress |
+          (static_cast<std::uint64_t>(
+            cop1DividerPostDelayTargetAddress) << 32));
+    }
+    if (cop1DividerPostTargetInstructions != 0 &&
+        !combinedTargetReason)
+    {
+      recordCycleTrace(
+        CycleTraceKind::COP1DividerHazard,
+        record.address,
+        instruction.raw,
+        UINT64_C(1) << 2,
+        static_cast<std::uint64_t>(
+          cop1DividerPostTargetAddress) << 32);
+    }
+  }
+
   if (cop1DividerPostDelayInstructions != 0)
   {
     --cop1DividerPostDelayInstructions;
@@ -1124,67 +1223,41 @@ void EECore::clock()
       cop1DividerPostTargetAddress = 0;
     }
   }
-  if (wasDelaySlot)
+
+  if (record.delaySlot)
   {
     cop1DividerPostDelayInstructions = 2;
     cop1DividerPostDelayBranchAddress =
-      completedBranchAddress;
+      branchInstructionAddress;
     cop1DividerPostDelayTargetAddress =
-      completedBranchTaken ? completedBranchTarget : 0;
-    cop1DividerPostDelayTaken = completedBranchTaken;
-    if (completedBranchTaken)
+      branchDelayTaken ? branchDelayTarget : 0;
+    cop1DividerPostDelayTaken = branchDelayTaken;
+    if (branchDelayTaken)
     {
       cop1DividerPostTargetInstructions = 2;
-      cop1DividerPostTargetAddress =
-        completedBranchTarget;
+      cop1DividerPostTargetAddress = branchDelayTarget;
     }
-    pc = completedBranchTarget;
-    branchDelayPending = false;
-    branchDelayTarget = 0;
-    branchInstructionAddress = 0;
-    branchDelayFromLikely = false;
-    branchDelayTaken = false;
-    clearIssueFrontEnd();
   }
-  else if (isEEBranchLikelyOperation(decoded.operation) &&
+  else if (isEEBranchLikelyOperation(
+             instruction.operation) &&
            !branchDelayPending)
   {
     cop1DividerPostDelayInstructions = 2;
-    cop1DividerPostDelayBranchAddress = instructionAddress;
+    cop1DividerPostDelayBranchAddress = record.address;
     cop1DividerPostDelayTargetAddress = 0;
     cop1DividerPostDelayTaken = false;
-    clearIssueFrontEnd();
   }
-  else if (decoded.operation == EEOperation::ExceptionReturn)
-  {
-    clearIssueFrontEnd();
-  }
-  recordShiftAmountAccess(decoded);
-}
 
-void EECore::recordInstructionAcceptance(
-  std::uint64_t programOrder,
-  std::uint32_t address,
-  const EEInstruction &instruction,
-  bool delaySlot)
-{
-  acceptanceRecords.append({
-    programOrder,
-    address,
-    instruction,
-    delaySlot
-  });
-  lastDecodedInstruction = instruction;
-  lastAddress = address;
-  lastInstructionValid = true;
+  shiftAmountOrdering.accept(instruction.operation);
 }
 
 bool EECore::executeInstruction(
   const EEInstruction &instruction,
   std::uint32_t address)
 {
-  if (!validateShiftAmountOrdering(instruction, address))
+  if (!shiftAmountOrdering.permits(instruction.operation))
   {
+    stopUndefinedOperation(address, instruction.raw);
     rejectedInstructionValue = instruction.raw;
     return false;
   }
@@ -4831,46 +4904,6 @@ EECore::COP1DividerTiming EECore::cop1DividerTiming(
   }
 }
 
-bool EECore::validateShiftAmountOrdering(
-  const EEInstruction &instruction,
-  std::uint32_t address)
-{
-  const bool restore =
-    instruction.operation == EEOperation::MoveToShiftAmount;
-  const bool calculate =
-    instruction.operation ==
-      EEOperation::MoveByteCountToShiftAmount ||
-    instruction.operation ==
-      EEOperation::MoveHalfwordCountToShiftAmount;
-  if ((restore && (recentShiftAmountAccesses & 0x07) != 0) ||
-      (calculate && (recentShiftAmountReads & 0x07) != 0))
-  {
-    return stopUndefinedOperation(address, instruction.raw);
-  }
-  return true;
-}
-
-void EECore::recordShiftAmountAccess(
-  const EEInstruction &instruction)
-{
-  const bool reads =
-    instruction.operation == EEOperation::MoveFromShiftAmount;
-  const bool accesses =
-    reads ||
-    instruction.operation ==
-      EEOperation::MoveByteCountToShiftAmount ||
-    instruction.operation ==
-      EEOperation::MoveHalfwordCountToShiftAmount;
-  recentShiftAmountAccesses =
-    static_cast<std::uint8_t>(
-      ((recentShiftAmountAccesses << 1) |
-       (accesses ? 1 : 0)) & 0x07);
-  recentShiftAmountReads =
-    static_cast<std::uint8_t>(
-      ((recentShiftAmountReads << 1) |
-       (reads ? 1 : 0)) & 0x07);
-}
-
 bool EECore::validateDelaySlotInstruction(
   const EEInstruction &instruction,
   std::uint32_t address)
@@ -5296,8 +5329,12 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(
     &hash,
     static_cast<std::uint8_t>(cop1DividerOperation));
-  hashEEStateValue(&hash, recentShiftAmountAccesses);
-  hashEEStateValue(&hash, recentShiftAmountReads);
+  hashEEStateValue(
+    &hash,
+    shiftAmountOrdering.accessHistory());
+  hashEEStateValue(
+    &hash,
+    shiftAmountOrdering.readHistory());
   hashEEStateValue(&hash, branchDelayPending);
   hashEEStateValue(&hash, branchDelayTarget);
   hashEEStateValue(&hash, branchInstructionAddress);
