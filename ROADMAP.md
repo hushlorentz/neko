@@ -998,7 +998,7 @@ accumulator or condition-result contract:
 - [x] Extend ordinary `O` activation to branch, branch-likely, and resolved
       delay-slot pairs while preserving delay-slot ownership, annulment,
       redirects, exceptions, and divider branch-proximity windows
-- [ ] Persist concrete post-activation front-end entries,
+- [x] Persist concrete post-activation front-end entries,
       admitted-but-incomplete pipeline work including `Y` stalls, and
       continuation state through reset, interrupts, halt/resume, canonical
       hashes, and transactional save states; do not serialize per-cycle issue

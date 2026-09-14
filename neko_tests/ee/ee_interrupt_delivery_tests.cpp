@@ -171,6 +171,42 @@ TEST_CASE("EE interrupts wait for a complete branch issue group")
   REQUIRE(core.generalRegister(1).low == 1);
 }
 
+TEST_CASE("EE interrupts preserve both in-flight MAC pipelines")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setGeneralRegister(1, {3, 0});
+  core.setGeneralRegister(2, {4, 0});
+  core.setGeneralRegister(4, {5, 0});
+  core.setGeneralRegister(5, {6, 0});
+  system.eeBus().write32(0, UINT32_C(0x00221818));
+  system.eeBus().write32(4, UINT32_C(0x70853018));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  assertINTCLine(&system);
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    INTC_ENABLED_STATUS);
+  system.clockMasterCycle();
+
+  REQUIRE(core.pendingException() == EEException::Interrupt);
+  REQUIRE(core.generalRegister(3).low == 0);
+  REQUIRE(core.generalRegister(6).low == 0);
+
+  system.interruptController().acknowledge(
+    EEInterruptSource::mask(EEInterruptSource::VIF0));
+  system.runMasterCycles(4);
+
+  REQUIRE(core.generalRegister(3).low == 12);
+  REQUIRE(core.generalRegister(6).low == 30);
+  REQUIRE(core.lo() == 12);
+  REQUIRE(core.lo1() == 30);
+}
+
 TEST_CASE("EE observes DMAC completion at the next instruction boundary")
 {
   NekoSystem system;

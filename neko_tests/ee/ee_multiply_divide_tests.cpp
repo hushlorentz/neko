@@ -301,3 +301,33 @@ TEST_CASE("EE shift amount windows advance per acceptance")
     window.permits(
       EEOperation::MoveByteCountToShiftAmount));
 }
+
+TEST_CASE("EE reset clears both pending MAC pipelines")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(1, {3, 0});
+  core.setGeneralRegister(2, {4, 0});
+  core.setGeneralRegister(4, {5, 0});
+  core.setGeneralRegister(5, {6, 0});
+  system.eeBus().write32(
+    0,
+    registerInstruction(0x18, 1, 2, 3));
+  system.eeBus().write32(
+    4,
+    UINT32_C(0x70000000) |
+      registerInstruction(0x18, 4, 5, 6));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  core.reset();
+
+  EECore baseline;
+  REQUIRE(core.stateHash() == baseline.stateHash());
+  REQUIRE(core.generalRegister(3).low == 0);
+  REQUIRE(core.generalRegister(6).low == 0);
+  REQUIRE(core.lo() == 0);
+  REQUIRE(core.lo1() == 0);
+}

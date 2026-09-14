@@ -1356,6 +1356,7 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.cop1DividerPostTargetInstructions;
   destination->eeCoreComponent.cop1DividerPostTargetAddress =
     source->eeCoreComponent.cop1DividerPostTargetAddress;
+  destination->eeCoreComponent.issueSelection = {};
   destination->eeCoreComponent.acceptanceRecords.clear();
   destination->eeCoreComponent.exceptionEnteredThisCycle = false;
   destination->interruptControllerComponent.statusRegister =
@@ -1813,6 +1814,38 @@ void NekoSaveStateCodec::readEECore(
   readPending(
     &core->pendingMac1,
     "EE MAC1 pending flag");
+  if (core->pendingMac0.active &&
+      core->pendingMac1.active)
+  {
+    require(
+      core->state == EEExecutionState::Running ||
+        (core->state == EEExecutionState::Halted &&
+         core->haltReason == EEStopReason::HostHalt),
+      "EE concurrent multiply/divide state cannot resume");
+    const bool mac0Multiply =
+      core->pendingMac0.writeGeneralRegister;
+    const bool mac1Multiply =
+      core->pendingMac1.writeGeneralRegister;
+    const std::uint8_t mac0Cycles =
+      core->pendingMac0.remainingCycles;
+    const std::uint8_t mac1Cycles =
+      core->pendingMac1.remainingCycles;
+    require(
+      mac0Multiply == mac1Multiply
+        ? mac0Cycles == mac1Cycles
+        : (mac0Multiply
+             ? mac1Cycles == mac0Cycles + 33
+             : mac0Cycles == mac1Cycles + 33),
+      "EE concurrent multiply/divide latencies are invalid");
+    require(
+      !mac0Multiply ||
+        !mac1Multiply ||
+        core->pendingMac0.generalRegister == 0 ||
+        core->pendingMac1.generalRegister == 0 ||
+        core->pendingMac0.generalRegister !=
+          core->pendingMac1.generalRegister,
+      "EE concurrent multiply destinations conflict");
+  }
   core->issueLatch.failure =
     readEnum<EECore::IssueLatchFailure>(
       reader,
@@ -2813,9 +2846,6 @@ void NekoSaveStateCodec::readEECore(
          core->issueLatch.address + 4 &&
        !core->branchDelayPending),
     "EE staging latch state is inconsistent");
-  require(
-    !(core->pendingMac0.active && core->pendingMac1.active),
-    "EE reference core has concurrent multiply/divide state");
   require(
     core->branchDelayPending ||
       (core->branchDelayTarget == 0 &&

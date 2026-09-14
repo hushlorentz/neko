@@ -25,6 +25,16 @@ namespace
     SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET = 956;
   constexpr std::size_t
     SIMPLE_EE_RETIRED_COP1_OPERATE_RESOURCE_OFFSET = 957;
+  constexpr std::size_t SIMPLE_EE_EXECUTION_STATE_OFFSET = 869;
+  constexpr std::size_t SIMPLE_EE_STOP_REASON_OFFSET = 870;
+  constexpr std::size_t
+    SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET = 893;
+  constexpr std::size_t
+    SIMPLE_EE_PENDING_MAC0_GENERAL_REGISTER_OFFSET = 911;
+  constexpr std::size_t
+    SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET = 921;
+  constexpr std::size_t
+    SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET = 939;
   constexpr std::size_t
     SIMPLE_EE_NEXT_PROGRAM_ORDER_OFFSET = 1012;
   constexpr std::size_t
@@ -729,8 +739,18 @@ TEST_CASE("Active system save states round trip and continue identically")
     original.saveState();
 
   NekoSystem restored;
+  restored.eeBus().write32(0, UINT32_C(0x24020001));
+  restored.eeBus().write32(4, UINT32_C(0x24030002));
+  restored.eeCore().startExecution(0);
+  restored.clockMasterCycle();
+  REQUIRE(
+    restored.eeCore().lastIssueSelection().instructionCount ==
+    2);
   restored.loadState(state);
   REQUIRE(restored.saveState() == state);
+  REQUIRE(
+    restored.eeCore().lastIssueSelection().instructionCount ==
+    0);
   REQUIRE(
     restored.eeCore().stateHash() ==
     original.eeCore().stateHash());
@@ -1124,6 +1144,212 @@ TEST_CASE("Pending EE branch delay slots survive save states")
   restored.clockMasterCycle();
   REQUIRE(original.saveState() == restored.saveState());
   REQUIRE(restored.eeCore().generalRegister(4).low == 2);
+}
+
+TEST_CASE("Dual EE MAC pipelines survive halt and save-state resume")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setGeneralRegister(1, {3, 0});
+  originalCore.setGeneralRegister(2, {4, 0});
+  originalCore.setGeneralRegister(4, {5, 0});
+  originalCore.setGeneralRegister(5, {6, 0});
+  original.eeBus().write32(0, UINT32_C(0x00221818));
+  original.eeBus().write32(4, UINT32_C(0x70853018));
+  originalCore.startExecution(0);
+
+  original.clockMasterCycle();
+
+  REQUIRE(
+    originalCore.acceptanceRecordsThisCycle().size() ==
+    2);
+  REQUIRE(originalCore.programCounter() == 8);
+  originalCore.haltExecution();
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+
+  NekoSystem restored;
+  restored.loadState(state);
+
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(
+    restored.eeCore().acceptanceRecordsThisCycle().size() ==
+    0);
+  REQUIRE(
+    restored.eeCore().lastIssueSelection().instructionCount ==
+    0);
+  REQUIRE(
+    restored.eeCore().executionState() ==
+    EEExecutionState::Halted);
+
+  originalCore.startExecution(8);
+  restored.eeCore().startExecution(8);
+  original.runMasterCycles(4);
+  restored.runMasterCycles(4);
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    originalCore.stateHash() ==
+    restored.eeCore().stateHash());
+  REQUIRE(restored.eeCore().generalRegister(3).low == 12);
+  REQUIRE(restored.eeCore().generalRegister(6).low == 30);
+  REQUIRE(restored.eeCore().lo() == 12);
+  REQUIRE(restored.eeCore().lo1() == 30);
+}
+
+TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
+{
+  NekoSystem source;
+  EECore &core = source.eeCore();
+  core.setGeneralRegister(1, {3, 0});
+  core.setGeneralRegister(2, {4, 0});
+  core.setGeneralRegister(4, {5, 0});
+  core.setGeneralRegister(5, {6, 0});
+  source.eeBus().write32(0, UINT32_C(0x00221818));
+  source.eeBus().write32(4, UINT32_C(0x70853018));
+  core.startExecution(0);
+  source.clockMasterCycle();
+  const std::vector<std::uint8_t> valid =
+    source.saveState();
+
+  REQUIRE(
+    valid[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] ==
+    4);
+  REQUIRE(
+    valid[SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] ==
+    4);
+  REQUIRE(
+    valid[SIMPLE_EE_PENDING_MAC0_GENERAL_REGISTER_OFFSET] ==
+    3);
+  REQUIRE(
+    valid[SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET] ==
+    6);
+
+  SECTION("latencies must describe one co-issued pair")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[
+      SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] = 3;
+    updateChecksum(&invalid);
+    NekoSystem destination;
+    REQUIRE_THROWS(destination.loadState(invalid));
+  }
+
+  SECTION("multiply destinations must remain independent")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[
+      SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET] = 3;
+    updateChecksum(&invalid);
+    NekoSystem destination;
+    REQUIRE_THROWS(destination.loadState(invalid));
+  }
+
+  SECTION("terminal halts cannot retain both pipelines")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_EXECUTION_STATE_OFFSET] =
+      static_cast<std::uint8_t>(EEExecutionState::Halted);
+    invalid[SIMPLE_EE_STOP_REASON_OFFSET] =
+      static_cast<std::uint8_t>(
+        EEStopReason::FetchException);
+    updateChecksum(&invalid);
+    NekoSystem destination;
+    REQUIRE_THROWS(destination.loadState(invalid));
+  }
+}
+
+TEST_CASE("Concurrent multiply and divide save states are accepted")
+{
+  NekoSystem source;
+  EECore &core = source.eeCore();
+  core.setGeneralRegister(1, {12, 0});
+  core.setGeneralRegister(2, {3, 0});
+  core.setGeneralRegister(4, {20, 0});
+  core.setGeneralRegister(5, {4, 0});
+
+  SECTION("MAC0 multiply and MAC1 divide")
+  {
+    source.eeBus().write32(0, UINT32_C(0x00221818));
+    source.eeBus().write32(4, UINT32_C(0x7085001a));
+  }
+
+  SECTION("MAC0 divide and MAC1 multiply")
+  {
+    source.eeBus().write32(0, UINT32_C(0x0022001a));
+    source.eeBus().write32(4, UINT32_C(0x70853018));
+  }
+
+  core.startExecution(0);
+  source.clockMasterCycle();
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  const std::vector<std::uint8_t> state =
+    source.saveState();
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(state));
+  REQUIRE(restored.saveState() == state);
+}
+
+TEST_CASE("Blocked dual EE front ends survive save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  originalCore.setFloatingPointRegister(
+    1,
+    UINT32_C(0x3f800000));
+  originalCore.setFloatingPointRegister(
+    2,
+    UINT32_C(0x40000000));
+  original.eeBus().write32(0, UINT32_C(0x460208c0));
+  original.eeBus().write32(4, UINT32_C(0x24040001));
+  original.eeBus().write32(8, UINT32_C(0x44051800));
+  original.eeBus().write32(12, UINT32_C(0x24060002));
+  original.eeBus().write32(16, UINT32_C(0x0000000c));
+  originalCore.startExecution(0);
+
+  original.clockMasterCycle();
+  REQUIRE(
+    originalCore.acceptanceRecordsThisCycle().size() ==
+    2);
+  original.clockMasterCycle();
+  REQUIRE(
+    originalCore.acceptanceRecordsThisCycle().size() ==
+    0);
+  REQUIRE(originalCore.programCounter() == 8);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(
+    originalCore.stateHash() ==
+    restored.eeCore().stateHash());
+  REQUIRE(
+    restored.eeCore().acceptanceRecordsThisCycle().size() ==
+    0);
+
+  const EEExecutionResult originalResult =
+    original.runEE(32);
+  const EEExecutionResult restoredResult =
+    restored.runEE(32);
+
+  REQUIRE(
+    originalResult.instructions ==
+    restoredResult.instructions);
+  REQUIRE(
+    originalResult.masterCycles ==
+    restoredResult.masterCycles);
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    restored.eeCore().generalRegister(5).low ==
+    UINT32_C(0x40400000));
+  REQUIRE(restored.eeCore().generalRegister(6).low == 2);
 }
 
 TEST_CASE("EE byte data faults survive save states")
