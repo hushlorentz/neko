@@ -1358,7 +1358,7 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.cop1DividerPostTargetInstructions;
   destination->eeCoreComponent.cop1DividerPostTargetAddress =
     source->eeCoreComponent.cop1DividerPostTargetAddress;
-  destination->eeCoreComponent.instructionRetiredThisCycle = false;
+  destination->eeCoreComponent.acceptanceRecords.clear();
   destination->eeCoreComponent.exceptionEnteredThisCycle = false;
   destination->interruptControllerComponent.statusRegister =
     source->interruptControllerComponent.statusRegister;

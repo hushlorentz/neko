@@ -161,6 +161,52 @@ TEST_CASE("EE issue readiness preserves COP1 memory exception order")
   REQUIRE(core.programCounter() == 4);
 }
 
+TEST_CASE("EE accepts delayed COP1 work before completion")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  EEBus &bus = system.eeBus();
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  bus.write32(
+    0,
+    cop1SingleInstruction(0x00, 1, 3, 2));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  const EEAcceptanceRecords &records =
+    core.acceptanceRecordsThisCycle();
+  REQUIRE(records.size() == 1);
+  REQUIRE(
+    records[0].instruction.operation ==
+    EEOperation::AddSingleCOP1);
+  REQUIRE(core.floatingPointRegister(3) == 0);
+
+  for (std::uint8_t cycle = 0;
+       cycle < COP1_ADD_SUB_PIPELINE_CYCLES;
+       ++cycle)
+  {
+    system.clockMasterCycle();
+    const EEAcceptanceRecords &laterRecords =
+      core.acceptanceRecordsThisCycle();
+    for (std::size_t index = 0;
+         index < laterRecords.size();
+         ++index)
+    {
+      REQUIRE(
+        laterRecords[index].instruction.operation !=
+        EEOperation::AddSingleCOP1);
+    }
+  }
+
+  REQUIRE(core.floatingPointRegister(3) == UINT32_C(0x40400000));
+}
+
 TEST_CASE("EE COP1 raw values expose EE and IEEE classifications")
 {
   struct ClassificationVector

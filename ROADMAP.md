@@ -971,7 +971,7 @@ accumulator or condition-result contract:
       readiness from the existing scoreboards; refuse pairs involving deferred
       younger faults, unresolved dependencies, unsafe memory ordering, or
       unresolved control-flow and branch-likely annulment
-- [ ] Replace single-instruction retirement bookkeeping with ordered
+- [x] Replace single-instruction retirement bookkeeping with ordered
       zero/one/two architectural acceptance records, distinct from issue-trace
       events and delayed pipeline completion or retirement, defining execution
       counts, stop reasons, exception ownership, deterministic per-cycle trace

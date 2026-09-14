@@ -56,6 +56,30 @@ struct EEInstructionFetchResult
   std::uint32_t instruction = 0;
 };
 
+struct EEAcceptanceRecord
+{
+  std::uint64_t programOrder = 0;
+  std::uint32_t address = 0;
+  EEInstruction instruction;
+  bool delaySlot = false;
+};
+
+class EEAcceptanceRecords
+{
+  public:
+    static constexpr std::size_t CAPACITY = 2;
+
+    void clear();
+    void append(const EEAcceptanceRecord &record);
+    std::size_t size() const;
+    const EEAcceptanceRecord &operator[](
+      std::size_t index) const;
+
+  private:
+    std::array<EEAcceptanceRecord, CAPACITY> records = {};
+    std::size_t count = 0;
+};
+
 enum class EEExecutionState : std::uint8_t
 {
   Halted,
@@ -205,6 +229,8 @@ class EECore : public ClockedComponent
     std::uint32_t lastInstructionAddress() const;
     const EEInstruction &lastInstruction() const;
     const EEIssueSelection &lastIssueSelection() const;
+    const EEAcceptanceRecords &
+      acceptanceRecordsThisCycle() const;
     std::uint32_t rejectedInstruction() const;
 
     const EERegister128 &generalRegister(
@@ -476,15 +502,16 @@ class EECore : public ClockedComponent
     bool cop1DividerPostDelayTaken = false;
     std::uint8_t cop1DividerPostTargetInstructions = 0;
     std::uint32_t cop1DividerPostTargetAddress = 0;
-    bool instructionRetiredThisCycle = false;
+    EEAcceptanceRecords acceptanceRecords;
     bool exceptionEnteredThisCycle = false;
     static constexpr std::size_t CYCLE_TRACE_CAPACITY =
-      COP1_IN_FLIGHT_CAPACITY * 2 + 8;
+      COP1_IN_FLIGHT_CAPACITY * 2 + 16;
     static_assert(
       CYCLE_TRACE_CAPACITY >=
-        COP1_IN_FLIGHT_CAPACITY * 2 + 2,
+        COP1_IN_FLIGHT_CAPACITY * 2 + 16,
       "EE trace capacity must hold all C1 transitions, "
-      "retirements, and interrupt events.");
+      "retirements, both issued instructions, and their "
+      "architectural events.");
     std::array<CycleTraceEvent, CYCLE_TRACE_CAPACITY>
       cycleTraceEvents = {};
     std::size_t cycleTraceEventCount = 0;
@@ -531,6 +558,11 @@ class EECore : public ClockedComponent
     void advanceIssueFrontEnd();
     void clearIssueFrontEnd();
     bool handleIssueLatchFailure();
+    void recordInstructionAcceptance(
+      std::uint64_t programOrder,
+      std::uint32_t address,
+      const EEInstruction &instruction,
+      bool delaySlot);
     void updateIssueSelection(
       std::uint32_t completedLoadRegisters);
     bool issueCandidateReady(

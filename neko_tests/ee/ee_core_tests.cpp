@@ -8,6 +8,61 @@
 #include "ee_instruction.hpp"
 #include "neko_system.hpp"
 
+TEST_CASE("EE acceptance records preserve issue-group order")
+{
+  EEAcceptanceRecords records;
+  REQUIRE(records.size() == 0);
+
+  records.append({
+    7,
+    0x100,
+    decodeEEInstruction(UINT32_C(0x24020001)),
+    false
+  });
+  records.append({
+    8,
+    0x104,
+    decodeEEInstruction(UINT32_C(0x24030002)),
+    true
+  });
+
+  REQUIRE(records.size() == 2);
+  REQUIRE(records[0].programOrder == 7);
+  REQUIRE(records[0].address == 0x100);
+  REQUIRE(records[0].instruction.raw == 0x24020001);
+  REQUIRE_FALSE(records[0].delaySlot);
+  REQUIRE(records[1].programOrder == 8);
+  REQUIRE(records[1].address == 0x104);
+  REQUIRE(records[1].instruction.raw == 0x24030002);
+  REQUIRE(records[1].delaySlot);
+  REQUIRE_THROWS_AS(
+    records.append({
+      9,
+      0x108,
+      decodeEEInstruction(0),
+      false
+    }),
+    std::overflow_error);
+
+  records.clear();
+  REQUIRE(records.size() == 0);
+
+  records.append({
+    4,
+    0x200,
+    decodeEEInstruction(0),
+    false
+  });
+  REQUIRE_THROWS_AS(
+    records.append({
+      3,
+      0x204,
+      decodeEEInstruction(0),
+      false
+    }),
+    std::invalid_argument);
+}
+
 TEST_CASE("EE Core architectural state")
 {
   EECore core;
@@ -434,6 +489,24 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.programCounter() == 4);
   }
 
+  SECTION("Successful issue produces one acceptance record")
+  {
+    bus.write32(0, UINT32_C(0x24020001));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0].programOrder == 1);
+    REQUIRE(records[0].address == 0);
+    REQUIRE(records[0].instruction.raw == 0x24020001);
+    REQUIRE_FALSE(records[0].delaySlot);
+    REQUIRE(core.lastInstructionAddress() == 0);
+    REQUIRE(core.lastInstruction().raw == 0x24020001);
+  }
+
   SECTION("A younger fetch fault waits for the older instruction")
   {
     const std::uint32_t finalMappedAddress =
@@ -566,12 +639,57 @@ TEST_CASE("EE Core scheduled execution")
 
     system.clockMasterCycle();
 
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
     REQUIRE_FALSE(core.clockActive());
     REQUIRE(core.programCounter() == 0);
     REQUIRE(
       core.stopReason() ==
       EEStopReason::UnsupportedInstruction);
     REQUIRE(core.rejectedInstruction() == 0xbc000000);
+  }
+
+  SECTION("A synchronous stop does not replace prior acceptance")
+  {
+    bus.write32(0, 0);
+    bus.write32(4, UINT32_C(0xbc000000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::UnsupportedInstruction);
+    REQUIRE(core.lastInstructionAddress() == 0);
+    REQUIRE(core.lastInstruction().operation == EEOperation::Nop);
+    REQUIRE(core.rejectedInstruction() == 0xbc000000);
+  }
+
+  SECTION("A synchronous exception produces no acceptance")
+  {
+    bus.write32(0, 0);
+    bus.write32(4, UINT32_C(0x0000000c));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.lastInstructionAddress() == 0);
+    REQUIRE(core.lastInstruction().operation == EEOperation::Nop);
   }
 
   SECTION("Host halt and restart preserve accumulated cycles")

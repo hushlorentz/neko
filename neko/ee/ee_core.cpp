@@ -11,6 +11,48 @@
 
 constexpr std::size_t EECore::GENERAL_REGISTER_COUNT;
 constexpr std::size_t EECore::FLOATING_POINT_REGISTER_COUNT;
+constexpr std::size_t EEAcceptanceRecords::CAPACITY;
+
+void EEAcceptanceRecords::clear()
+{
+  records = {};
+  count = 0;
+}
+
+void EEAcceptanceRecords::append(
+  const EEAcceptanceRecord &record)
+{
+  if (count >= records.size())
+  {
+    throw std::overflow_error(
+      "EE accepted more than two instructions in one cycle.");
+  }
+  if (record.programOrder == 0 ||
+      (count != 0 &&
+       record.programOrder <=
+         records[count - 1].programOrder))
+  {
+    throw std::invalid_argument(
+      "EE acceptance records are not in program order.");
+  }
+  records[count++] = record;
+}
+
+std::size_t EEAcceptanceRecords::size() const
+{
+  return count;
+}
+
+const EEAcceptanceRecord &EEAcceptanceRecords::operator[](
+  std::size_t index) const
+{
+  if (index >= count)
+  {
+    throw std::out_of_range(
+      "EE acceptance record index is out of range.");
+  }
+  return records[index];
+}
 
 namespace
 {
@@ -301,7 +343,7 @@ void EECore::reset()
   cop1DividerPostDelayTaken = false;
   cop1DividerPostTargetInstructions = 0;
   cop1DividerPostTargetAddress = 0;
-  instructionRetiredThisCycle = false;
+  acceptanceRecords.clear();
   exceptionEnteredThisCycle = false;
   cycleTraceEventCount = 0;
 }
@@ -851,7 +893,7 @@ bool EECore::clockActive() const
 
 void EECore::clock()
 {
-  instructionRetiredThisCycle = false;
+  acceptanceRecords.clear();
   exceptionEnteredThisCycle = false;
   cycleTraceEventCount = 0;
   issueSelection = {};
@@ -976,7 +1018,9 @@ void EECore::clock()
     throw std::overflow_error(
       "EE instruction program order overflow.");
   }
-  executingProgramOrder = nextEEProgramOrder++;
+  const std::uint64_t instructionProgramOrder =
+    nextEEProgramOrder++;
+  executingProgramOrder = instructionProgramOrder;
   recordCycleTrace(
     CycleTraceKind::InstructionIssued,
     instructionAddress,
@@ -1016,6 +1060,11 @@ void EECore::clock()
     }
     return;
   }
+  recordInstructionAcceptance(
+    instructionProgramOrder,
+    instructionAddress,
+    decoded,
+    wasDelaySlot);
   advanceIssueFrontEnd();
   if (dividerDelaySlotHazard)
   {
@@ -1106,10 +1155,23 @@ void EECore::clock()
     clearIssueFrontEnd();
   }
   recordShiftAmountAccess(decoded);
-  lastDecodedInstruction = decoded;
-  lastAddress = instructionAddress;
+}
+
+void EECore::recordInstructionAcceptance(
+  std::uint64_t programOrder,
+  std::uint32_t address,
+  const EEInstruction &instruction,
+  bool delaySlot)
+{
+  acceptanceRecords.append({
+    programOrder,
+    address,
+    instruction,
+    delaySlot
+  });
+  lastDecodedInstruction = instruction;
+  lastAddress = address;
   lastInstructionValid = true;
-  instructionRetiredThisCycle = true;
 }
 
 bool EECore::executeInstruction(
@@ -5273,6 +5335,12 @@ const EEInstruction &EECore::lastInstruction() const
 const EEIssueSelection &EECore::lastIssueSelection() const
 {
   return issueSelection;
+}
+
+const EEAcceptanceRecords &
+EECore::acceptanceRecordsThisCycle() const
+{
+  return acceptanceRecords;
 }
 
 std::uint32_t EECore::rejectedInstruction() const

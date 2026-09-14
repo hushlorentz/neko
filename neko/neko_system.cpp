@@ -160,7 +160,7 @@ EEGuestExecutionResult NekoSystem::runELF(
     }
     clockMasterCycle();
     ++masterCycles;
-    if (eeCoreComponent.instructionRetiredThisCycle)
+    if (eeCoreComponent.acceptanceRecords.size() != 0)
     {
       ++instructions;
     }
@@ -522,7 +522,7 @@ EEExecutionResult NekoSystem::stepEEInstruction(
   {
     clockMasterCycle();
     ++masterCycles;
-    if (eeCoreComponent.instructionRetiredThisCycle)
+    if (eeCoreComponent.acceptanceRecords.size() != 0)
     {
       ++instructions;
     }
@@ -552,7 +552,7 @@ EEExecutionResult NekoSystem::runEE(
   {
     clockMasterCycle();
     ++masterCycles;
-    if (eeCoreComponent.instructionRetiredThisCycle)
+    if (eeCoreComponent.acceptanceRecords.size() != 0)
     {
       ++instructions;
     }

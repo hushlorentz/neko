@@ -355,6 +355,7 @@ TEST_CASE("EE regression traces describe issued work")
   REQUIRE(events[9].value2 == EEExceptionVector::GENERAL);
   REQUIRE(events[10].type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events[10].value0 == core.stateHash());
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
 }
 
 TEST_CASE("EE regression traces identify COP1 divider branch hazards")
