@@ -79,6 +79,170 @@ TEST_CASE("EE instruction field decoding")
   }
 }
 
+TEST_CASE("EE instruction routing classification")
+{
+  const auto requireRouting =
+    [](EEOperation operation,
+       EEInstructionCategory category,
+       bool pipe0,
+       bool pipe1,
+       std::uint8_t pipe0PhysicalPipelines,
+       std::uint8_t pipe1PhysicalPipelines)
+    {
+      const EEInstructionRouting routing =
+        eeInstructionRouting(operation);
+      REQUIRE(routing.category == category);
+      REQUIRE(
+        eeInstructionSupportsLogicalPipe(
+          routing,
+          EELogicalPipe::Pipe0) == pipe0);
+      REQUIRE(
+        eeInstructionSupportsLogicalPipe(
+          routing,
+          EELogicalPipe::Pipe1) == pipe1);
+      REQUIRE(
+        eeInstructionPhysicalPipelines(
+          routing,
+          EELogicalPipe::Pipe0) ==
+        pipe0PhysicalPipelines);
+      REQUIRE(
+        eeInstructionPhysicalPipelines(
+          routing,
+          EELogicalPipe::Pipe1) ==
+        pipe1PhysicalPipelines);
+    };
+  const auto physical =
+    [](EEPhysicalPipeline pipeline)
+    {
+      return static_cast<std::uint8_t>(pipeline);
+    };
+
+  SECTION("Flexible categories expose both compatible integer pipes")
+  {
+    requireRouting(
+      EEOperation::AddWord,
+      EEInstructionCategory::ALU,
+      true,
+      true,
+      physical(EEPhysicalPipeline::I0),
+      physical(EEPhysicalPipeline::I1));
+    requireRouting(
+      EEOperation::BranchEqual,
+      EEInstructionCategory::Branch,
+      true,
+      true,
+      physical(EEPhysicalPipeline::Branch),
+      physical(EEPhysicalPipeline::Branch));
+  }
+
+  SECTION("Fixed integer categories expose their documented pipe")
+  {
+    requireRouting(
+      EEOperation::LoadQuadword,
+      EEInstructionCategory::LoadStore,
+      false,
+      true,
+      0,
+      physical(EEPhysicalPipeline::LoadStore));
+    requireRouting(
+      EEOperation::ExceptionReturn,
+      EEInstructionCategory::ExceptionReturn,
+      false,
+      true,
+      0,
+      physical(EEPhysicalPipeline::I1));
+    requireRouting(
+      EEOperation::MoveToShiftAmount,
+      EEInstructionCategory::ShiftAmountOperate,
+      true,
+      false,
+      physical(EEPhysicalPipeline::I0),
+      0);
+    requireRouting(
+      EEOperation::MultiplyAddWord,
+      EEInstructionCategory::MAC0,
+      true,
+      false,
+      physical(EEPhysicalPipeline::I0),
+      0);
+    requireRouting(
+      EEOperation::MultiplyAddWord1,
+      EEInstructionCategory::MAC1,
+      false,
+      true,
+      0,
+      physical(EEPhysicalPipeline::I1));
+  }
+
+  SECTION("Coprocessor categories expose every required physical pipe")
+  {
+    requireRouting(
+      EEOperation::MoveSingleCOP1,
+      EEInstructionCategory::COP1Move,
+      false,
+      true,
+      0,
+      static_cast<std::uint8_t>(
+        physical(EEPhysicalPipeline::LoadStore) |
+        physical(EEPhysicalPipeline::COP1)));
+    requireRouting(
+      EEOperation::AddSingleCOP1,
+      EEInstructionCategory::COP1Operate,
+      true,
+      false,
+      static_cast<std::uint8_t>(
+        physical(EEPhysicalPipeline::I0) |
+        physical(EEPhysicalPipeline::COP1)),
+      0);
+    requireRouting(
+      EEOperation::QuadwordMoveToCOP2,
+      EEInstructionCategory::COP2Move,
+      false,
+      true,
+      0,
+      static_cast<std::uint8_t>(
+        physical(EEPhysicalPipeline::LoadStore) |
+        physical(EEPhysicalPipeline::COP2)));
+    requireRouting(
+      EEOperation::VectorMacroArithmetic,
+      EEInstructionCategory::COP2Operate,
+      true,
+      false,
+      static_cast<std::uint8_t>(
+        physical(EEPhysicalPipeline::I0) |
+        physical(EEPhysicalPipeline::COP2)),
+      0);
+  }
+
+  SECTION("Every implemented operation has a complete classification")
+  {
+    for (std::uint8_t value = 0;
+         value < EE_OPERATION_COUNT;
+         ++value)
+    {
+      const EEInstructionRouting routing =
+        eeInstructionRouting(
+          static_cast<EEOperation>(value));
+      REQUIRE(routing.logicalPipes != 0);
+      REQUIRE(
+        (routing.pipe0PhysicalPipelines != 0) ==
+        eeInstructionSupportsLogicalPipe(
+          routing,
+          EELogicalPipe::Pipe0));
+      REQUIRE(
+        (routing.pipe1PhysicalPipelines != 0) ==
+        eeInstructionSupportsLogicalPipe(
+          routing,
+          EELogicalPipe::Pipe1));
+    }
+  }
+
+  REQUIRE_THROWS_WITH(
+    eeInstructionRouting(
+      static_cast<EEOperation>(EE_OPERATION_COUNT)),
+    "Unknown EE operation routing classification.");
+}
+
 TEST_CASE("EE base integer decoder tables")
 {
   struct RegisterContract

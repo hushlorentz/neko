@@ -163,6 +163,53 @@ enum class EEOperation : std::uint8_t
   BranchCOP1TrueLikely
 };
 
+constexpr std::uint8_t EE_OPERATION_COUNT =
+  static_cast<std::uint8_t>(
+    EEOperation::BranchCOP1TrueLikely) + 1;
+
+enum class EEInstructionCategory : std::uint8_t
+{
+  LoadStore,
+  Synchronization,
+  LeadingZeroCount,
+  ExceptionReturn,
+  ShiftAmountOperate,
+  COP0,
+  COP1Move,
+  COP2Move,
+  COP1Operate,
+  COP2Operate,
+  ALU,
+  MAC0,
+  MAC1,
+  Branch,
+  WideOperate
+};
+
+enum class EELogicalPipe : std::uint8_t
+{
+  Pipe0 = 1 << 0,
+  Pipe1 = 1 << 1
+};
+
+enum class EEPhysicalPipeline : std::uint8_t
+{
+  I0 = 1 << 0,
+  I1 = 1 << 1,
+  LoadStore = 1 << 2,
+  Branch = 1 << 3,
+  COP1 = 1 << 4,
+  COP2 = 1 << 5
+};
+
+struct EEInstructionRouting
+{
+  EEInstructionCategory category = EEInstructionCategory::ALU;
+  std::uint8_t logicalPipes = 0;
+  std::uint8_t pipe0PhysicalPipelines = 0;
+  std::uint8_t pipe1PhysicalPipelines = 0;
+};
+
 struct EEInstruction
 {
   EEOperation operation = EEOperation::Nop;
@@ -197,6 +244,17 @@ class EEInstructionDecodeError : public std::runtime_error
 };
 
 EEInstruction decodeEEInstruction(std::uint32_t instruction);
+EEInstructionRouting eeInstructionRouting(EEOperation operation);
+bool eeInstructionSupportsLogicalPipe(
+  const EEInstructionRouting &routing,
+  EELogicalPipe pipe);
+std::uint8_t eeInstructionPhysicalPipelines(
+  const EEInstructionRouting &routing,
+  EELogicalPipe pipe);
+bool eeInstructionUsesPhysicalPipeline(
+  const EEInstructionRouting &routing,
+  EELogicalPipe pipe,
+  EEPhysicalPipeline pipeline);
 bool isEEBranchOperation(EEOperation operation);
 bool isEEBranchLikelyOperation(EEOperation operation);
 

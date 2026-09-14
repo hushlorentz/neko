@@ -971,6 +971,289 @@ EEInstructionDecodeError::failure() const
   return failureType;
 }
 
+EEInstructionRouting eeInstructionRouting(EEOperation operation)
+{
+  constexpr std::uint8_t PIPE_0 =
+    static_cast<std::uint8_t>(EELogicalPipe::Pipe0);
+  constexpr std::uint8_t PIPE_1 =
+    static_cast<std::uint8_t>(EELogicalPipe::Pipe1);
+  constexpr std::uint8_t PHYSICAL_I0 =
+    static_cast<std::uint8_t>(EEPhysicalPipeline::I0);
+  constexpr std::uint8_t PHYSICAL_I1 =
+    static_cast<std::uint8_t>(EEPhysicalPipeline::I1);
+  constexpr std::uint8_t PHYSICAL_LS =
+    static_cast<std::uint8_t>(
+      EEPhysicalPipeline::LoadStore);
+  constexpr std::uint8_t PHYSICAL_BRANCH =
+    static_cast<std::uint8_t>(
+      EEPhysicalPipeline::Branch);
+  constexpr std::uint8_t PHYSICAL_COP1 =
+    static_cast<std::uint8_t>(EEPhysicalPipeline::COP1);
+  constexpr std::uint8_t PHYSICAL_COP2 =
+    static_cast<std::uint8_t>(EEPhysicalPipeline::COP2);
+
+  switch (operation)
+  {
+    case EEOperation::LoadByte:
+    case EEOperation::LoadByteUnsigned:
+    case EEOperation::StoreByte:
+    case EEOperation::LoadHalfword:
+    case EEOperation::LoadHalfwordUnsigned:
+    case EEOperation::StoreHalfword:
+    case EEOperation::LoadWord:
+    case EEOperation::LoadWordUnsigned:
+    case EEOperation::StoreWord:
+    case EEOperation::LoadWordLeft:
+    case EEOperation::LoadWordRight:
+    case EEOperation::StoreWordLeft:
+    case EEOperation::StoreWordRight:
+    case EEOperation::LoadDoubleword:
+    case EEOperation::StoreDoubleword:
+    case EEOperation::LoadDoublewordLeft:
+    case EEOperation::LoadDoublewordRight:
+    case EEOperation::StoreDoublewordLeft:
+    case EEOperation::StoreDoublewordRight:
+    case EEOperation::LoadQuadword:
+    case EEOperation::StoreQuadword:
+      return {
+        EEInstructionCategory::LoadStore,
+        PIPE_1,
+        0,
+        PHYSICAL_LS
+      };
+    case EEOperation::ExceptionReturn:
+      return {
+        EEInstructionCategory::ExceptionReturn,
+        PIPE_1,
+        0,
+        PHYSICAL_I1
+      };
+    case EEOperation::MoveFromShiftAmount:
+    case EEOperation::MoveToShiftAmount:
+    case EEOperation::MoveByteCountToShiftAmount:
+    case EEOperation::MoveHalfwordCountToShiftAmount:
+      return {
+        EEInstructionCategory::ShiftAmountOperate,
+        PIPE_0,
+        PHYSICAL_I0,
+        0
+      };
+    case EEOperation::MoveWordFromCOP1:
+    case EEOperation::MoveWordToCOP1:
+    case EEOperation::MoveControlWordFromCOP1:
+    case EEOperation::MoveControlWordToCOP1:
+    case EEOperation::LoadWordToCOP1:
+    case EEOperation::StoreWordFromCOP1:
+    case EEOperation::MoveSingleCOP1:
+      return {
+        EEInstructionCategory::COP1Move,
+        PIPE_1,
+        0,
+        static_cast<std::uint8_t>(
+          PHYSICAL_LS | PHYSICAL_COP1)
+      };
+    case EEOperation::LoadQuadwordToCOP2:
+    case EEOperation::StoreQuadwordFromCOP2:
+    case EEOperation::QuadwordMoveFromCOP2:
+    case EEOperation::QuadwordMoveToCOP2:
+    case EEOperation::ControlMoveFromCOP2:
+    case EEOperation::ControlMoveToCOP2:
+      return {
+        EEInstructionCategory::COP2Move,
+        PIPE_1,
+        0,
+        static_cast<std::uint8_t>(
+          PHYSICAL_LS | PHYSICAL_COP2)
+      };
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+    case EEOperation::ConvertWordToSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::DivideSingleCOP1:
+    case EEOperation::SquareRootSingleCOP1:
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
+      return {
+        EEInstructionCategory::COP1Operate,
+        PIPE_0,
+        static_cast<std::uint8_t>(
+          PHYSICAL_I0 | PHYSICAL_COP1),
+        0
+      };
+    case EEOperation::VectorCallMicroSubroutine:
+    case EEOperation::VectorCallMicroSubroutineRegister:
+    case EEOperation::VectorMacroArithmetic:
+      return {
+        EEInstructionCategory::COP2Operate,
+        PIPE_0,
+        static_cast<std::uint8_t>(
+          PHYSICAL_I0 | PHYSICAL_COP2),
+        0
+      };
+    case EEOperation::MoveFromHI:
+    case EEOperation::MoveToHI:
+    case EEOperation::MoveFromLO:
+    case EEOperation::MoveToLO:
+    case EEOperation::MultiplyWord:
+    case EEOperation::MultiplyUnsignedWord:
+    case EEOperation::DivideWord:
+    case EEOperation::DivideUnsignedWord:
+    case EEOperation::MultiplyAddWord:
+    case EEOperation::MultiplyAddUnsignedWord:
+      return {
+        EEInstructionCategory::MAC0,
+        PIPE_0,
+        PHYSICAL_I0,
+        0
+      };
+    case EEOperation::MoveFromHI1:
+    case EEOperation::MoveToHI1:
+    case EEOperation::MoveFromLO1:
+    case EEOperation::MoveToLO1:
+    case EEOperation::MultiplyWord1:
+    case EEOperation::MultiplyUnsignedWord1:
+    case EEOperation::DivideWord1:
+    case EEOperation::DivideUnsignedWord1:
+    case EEOperation::MultiplyAddWord1:
+    case EEOperation::MultiplyAddUnsignedWord1:
+      return {
+        EEInstructionCategory::MAC1,
+        PIPE_1,
+        0,
+        PHYSICAL_I1
+      };
+    case EEOperation::Jump:
+    case EEOperation::JumpAndLink:
+    case EEOperation::JumpRegister:
+    case EEOperation::JumpAndLinkRegister:
+    case EEOperation::BranchEqual:
+    case EEOperation::BranchNotEqual:
+    case EEOperation::BranchLessThanOrEqualZero:
+    case EEOperation::BranchGreaterThanZero:
+    case EEOperation::BranchLessThanZero:
+    case EEOperation::BranchGreaterThanOrEqualZero:
+    case EEOperation::BranchEqualLikely:
+    case EEOperation::BranchNotEqualLikely:
+    case EEOperation::BranchLessThanOrEqualZeroLikely:
+    case EEOperation::BranchGreaterThanZeroLikely:
+    case EEOperation::BranchLessThanZeroLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroLikely:
+    case EEOperation::BranchLessThanZeroAndLink:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
+    case EEOperation::BranchLessThanZeroAndLinkLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+    case EEOperation::BranchCOP1False:
+    case EEOperation::BranchCOP1FalseLikely:
+    case EEOperation::BranchCOP1True:
+    case EEOperation::BranchCOP1TrueLikely:
+    case EEOperation::BranchCOP2False:
+    case EEOperation::BranchCOP2FalseLikely:
+    case EEOperation::BranchCOP2True:
+    case EEOperation::BranchCOP2TrueLikely:
+      return {
+        EEInstructionCategory::Branch,
+        static_cast<std::uint8_t>(PIPE_0 | PIPE_1),
+        PHYSICAL_BRANCH,
+        PHYSICAL_BRANCH
+      };
+    case EEOperation::Nop:
+    case EEOperation::ShiftLeftLogicalWord:
+    case EEOperation::ShiftRightLogicalWord:
+    case EEOperation::ShiftRightArithmeticWord:
+    case EEOperation::ShiftLeftLogicalVariableWord:
+    case EEOperation::ShiftRightLogicalVariableWord:
+    case EEOperation::ShiftRightArithmeticVariableWord:
+    case EEOperation::ShiftLeftLogicalVariableDoubleword:
+    case EEOperation::ShiftRightLogicalVariableDoubleword:
+    case EEOperation::ShiftRightArithmeticVariableDoubleword:
+    case EEOperation::AddWord:
+    case EEOperation::AddUnsignedWord:
+    case EEOperation::SubtractWord:
+    case EEOperation::SubtractUnsignedWord:
+    case EEOperation::And:
+    case EEOperation::Or:
+    case EEOperation::Xor:
+    case EEOperation::Nor:
+    case EEOperation::SetLessThan:
+    case EEOperation::SetLessThanUnsigned:
+    case EEOperation::AddDoubleword:
+    case EEOperation::AddUnsignedDoubleword:
+    case EEOperation::SubtractDoubleword:
+    case EEOperation::SubtractUnsignedDoubleword:
+    case EEOperation::ShiftLeftLogicalDoubleword:
+    case EEOperation::ShiftRightLogicalDoubleword:
+    case EEOperation::ShiftRightArithmeticDoubleword:
+    case EEOperation::ShiftLeftLogicalDoubleword32:
+    case EEOperation::ShiftRightLogicalDoubleword32:
+    case EEOperation::ShiftRightArithmeticDoubleword32:
+    case EEOperation::AddImmediateWord:
+    case EEOperation::AddImmediateUnsignedWord:
+    case EEOperation::SetLessThanImmediate:
+    case EEOperation::SetLessThanImmediateUnsigned:
+    case EEOperation::AndImmediate:
+    case EEOperation::OrImmediate:
+    case EEOperation::XorImmediate:
+    case EEOperation::LoadUpperImmediate:
+    case EEOperation::AddImmediateDoubleword:
+    case EEOperation::AddImmediateUnsignedDoubleword:
+    case EEOperation::SystemCall:
+    case EEOperation::Breakpoint:
+      return {
+        EEInstructionCategory::ALU,
+        static_cast<std::uint8_t>(PIPE_0 | PIPE_1),
+        PHYSICAL_I0,
+        PHYSICAL_I1
+      };
+  }
+
+  throw std::invalid_argument(
+    "Unknown EE operation routing classification.");
+}
+
+bool eeInstructionSupportsLogicalPipe(
+  const EEInstructionRouting &routing,
+  EELogicalPipe pipe)
+{
+  return
+    (routing.logicalPipes &
+     static_cast<std::uint8_t>(pipe)) != 0;
+}
+
+bool eeInstructionUsesPhysicalPipeline(
+  const EEInstructionRouting &routing,
+  EELogicalPipe pipe,
+  EEPhysicalPipeline pipeline)
+{
+  return
+    (eeInstructionPhysicalPipelines(routing, pipe) &
+     static_cast<std::uint8_t>(pipeline)) != 0;
+}
+
+std::uint8_t eeInstructionPhysicalPipelines(
+  const EEInstructionRouting &routing,
+  EELogicalPipe pipe)
+{
+  return
+    pipe == EELogicalPipe::Pipe0
+      ? routing.pipe0PhysicalPipelines
+      : routing.pipe1PhysicalPipelines;
+}
+
 bool isEEBranchOperation(EEOperation operation)
 {
   switch (operation)
