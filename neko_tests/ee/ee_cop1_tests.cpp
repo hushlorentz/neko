@@ -107,6 +107,60 @@ namespace
   }
 }
 
+TEST_CASE("EE issue readiness observes cross-cycle COP1 producers")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  EEBus &bus = system.eeBus();
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  bus.write32(
+    0,
+    cop1SingleInstruction(0x00, 1, 3, 2));
+  bus.write32(4, UINT32_C(0x24040001));
+  bus.write32(
+    8,
+    cop1TransferInstruction(0x00, 5, 3));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.lastIssueSelection().instructionCount ==
+    1);
+  REQUIRE(core.programCounter() == 8);
+}
+
+TEST_CASE("EE issue readiness preserves COP1 memory exception order")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  EEBus &bus = system.eeBus();
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  bus.write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 2, 0));
+  bus.write32(4, UINT32_C(0x24030001));
+  bus.write32(8, UINT32_C(0x24040002));
+  core.setGeneralRegister(1, {0x100, 0});
+  bus.write32(0x100, UINT32_C(0x3f800000));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.lastIssueSelection().instructionCount ==
+    0);
+  REQUIRE(core.programCounter() == 4);
+}
+
 TEST_CASE("EE COP1 raw values expose EE and IEEE classifications")
 {
   struct ClassificationVector

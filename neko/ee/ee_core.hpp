@@ -204,6 +204,7 @@ class EECore : public ClockedComponent
     bool hasLastInstruction() const;
     std::uint32_t lastInstructionAddress() const;
     const EEInstruction &lastInstruction() const;
+    const EEIssueSelection &lastIssueSelection() const;
     std::uint32_t rejectedInstruction() const;
 
     const EERegister128 &generalRegister(
@@ -448,6 +449,7 @@ class EECore : public ClockedComponent
     bool lastInstructionValid = false;
     std::uint32_t lastAddress = 0;
     EEInstruction lastDecodedInstruction;
+    EEIssueSelection issueSelection;
     std::uint32_t rejectedInstructionValue = 0;
     DecodedIssueLatch issueLatch;
     DecodedIssueLatch stagingLatch;
@@ -529,6 +531,22 @@ class EECore : public ClockedComponent
     void advanceIssueFrontEnd();
     void clearIssueFrontEnd();
     bool handleIssueLatchFailure();
+    void updateIssueSelection(
+      std::uint32_t completedLoadRegisters);
+    bool issueCandidateReady(
+      const EEInstruction &instruction,
+      std::uint32_t completedLoadRegisters,
+      std::size_t availableCOP1Slots) const;
+    bool issuePairStructurallySafe(
+      const EEInstruction &older,
+      const EEInstruction &younger,
+      std::size_t availableCOP1Slots) const;
+    bool branchLikelyTaken(
+      const EEInstruction &instruction) const;
+    bool cop2ScoreboardBlocks(
+      const EEInstruction &instruction) const;
+    static bool isMemoryOperation(
+      EEOperation operation);
     bool executeInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);

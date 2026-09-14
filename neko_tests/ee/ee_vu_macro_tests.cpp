@@ -881,6 +881,35 @@ TEST_CASE("EE to VU transfers stall the next macro issue once")
 
 TEST_CASE("COP2 transfers honor cross-file macro hazards")
 {
+  SECTION("Issue readiness sees a pending macro register producer")
+  {
+    NekoSystem system;
+    system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+    system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+    system.eeBus().write32(
+      0,
+      macroArithmeticInstruction(
+        FP_REGISTER_ALL_FIELDS,
+        2,
+        1,
+        3,
+        VPU_ADD));
+    system.eeBus().write32(4, UINT32_C(0x24040001));
+    system.eeBus().write32(
+      8,
+      quadwordMoveFromCOP2(5, 3));
+    system.eeCore().startExecution(0);
+
+    system.clockMasterCycle();
+    system.clockMasterCycle();
+
+    REQUIRE(
+      system.eeCore()
+        .lastIssueSelection()
+        .instructionCount == 1);
+    REQUIRE(system.eeCore().programCounter() == 8);
+  }
+
   SECTION("CFC2 waits for a same-numbered VF result")
   {
     NekoSystem system;
@@ -935,6 +964,30 @@ TEST_CASE("COP2 transfers honor cross-file macro hazards")
       system.eeCore().generalRegister(2).low ==
       UINT64_C(0x400000003f800000));
   }
+}
+
+TEST_CASE("EE issue readiness observes VU macro structural stalls")
+{
+  NekoSystem system;
+  system.vu0().startMicroMode();
+  system.eeBus().write32(
+    0,
+    macroArithmeticInstruction(
+      FP_REGISTER_ALL_FIELDS,
+      2,
+      1,
+      3,
+      VPU_ADD));
+  system.eeBus().write32(4, UINT32_C(0x24040001));
+  system.eeCore().startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    system.eeCore()
+      .lastIssueSelection()
+      .instructionCount == 0);
+  REQUIRE(system.eeCore().programCounter() == 0);
 }
 
 TEST_CASE("EE VU macro arithmetic waits for micro mode and rejects Stop")

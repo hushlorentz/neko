@@ -417,6 +417,23 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.lastInstruction().raw == 0x24030001);
   }
 
+  SECTION("Issue readiness previews an independent pair")
+  {
+    bus.write32(0, UINT32_C(0x24020001));
+    bus.write32(4, UINT32_C(0x24030002));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEIssueSelection selection =
+      core.lastIssueSelection();
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.pairing ==
+      EEIssuePairing::Concurrent);
+    REQUIRE(core.programCounter() == 4);
+  }
+
   SECTION("A younger fetch fault waits for the older instruction")
   {
     const std::uint32_t finalMappedAddress =
@@ -430,6 +447,9 @@ TEST_CASE("EE Core scheduled execution")
 
     REQUIRE_FALSE(core.exceptionPending());
     REQUIRE(core.generalRegister(2).low == 1);
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      1);
     REQUIRE(
       core.programCounter() ==
       EEMemoryMap::MAIN_MEMORY_SIZE);
@@ -454,6 +474,9 @@ TEST_CASE("EE Core scheduled execution")
 
     REQUIRE_FALSE(core.exceptionPending());
     REQUIRE(core.generalRegister(2).low == 1);
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      1);
     REQUIRE(core.programCounter() == 4);
 
     system.clockMasterCycle();
@@ -462,6 +485,40 @@ TEST_CASE("EE Core scheduled execution")
       core.pendingException() ==
       EEException::ReservedInstruction);
     REQUIRE(core.rejectedInstruction() == 0x4c000000);
+  }
+
+  SECTION("Unsafe memory pairs remain scalar candidates")
+  {
+    bus.write32(0, UINT32_C(0x8c220000));
+    bus.write32(4, UINT32_C(0x24030001));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      1);
+  }
+
+  SECTION("Branch-likely annulment participates in readiness")
+  {
+    bus.write32(0, UINT32_C(0x50220001));
+    bus.write32(4, UINT32_C(0x24030001));
+
+    core.setGeneralRegister(1, {1, 0});
+    core.setGeneralRegister(2, {2, 0});
+    core.startExecution(0);
+    system.clockMasterCycle();
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      1);
+
+    core.setGeneralRegister(1, {2, 0});
+    core.startExecution(0);
+    system.clockMasterCycle();
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      2);
   }
 
   SECTION("A fetch exception enters the bootstrap handler")

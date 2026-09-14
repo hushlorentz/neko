@@ -749,22 +749,46 @@ bool VPU::startMicroModeFromMacro(uint16_t startAddress)
   return true;
 }
 
-bool VPU::issueMacroInstruction(uint32_t instruction)
+bool VPU::macroCallReady() const
 {
+  if (macroModeActive())
+  {
+    return
+      !macroIssueNeedsAdvance &&
+      orchestrator.canAcceptInstruction();
+  }
+  return !microModeActive();
+}
+
+bool VPU::macroInstructionReady(uint32_t instruction) const
+{
+  bool transferStall = false;
+  return macroInstructionReady(
+    instruction,
+    &transferStall);
+}
+
+bool VPU::macroInstructionReady(
+  uint32_t instruction,
+  bool *transferStall) const
+{
+  *transferStall = false;
   if (type != VPUType::VU0)
   {
     throw logic_error("Macro instructions require VU0.");
   }
   if (state == VPU_STATE_STOP)
   {
-    throw logic_error("Macro instructions cannot execute while VU0 is stopped.");
+    return true;
   }
+
   const VUMacroInstructionKind instructionKind =
     classifyVUMacroInstruction(instruction);
   if (instructionKind == VUMacroInstructionKind::Invalid)
   {
     throw logic_error("Unsupported VU macro instruction.");
   }
+
   LowerInstruction lowerInstruction;
   uint16_t upperOpCode = 0;
   if (instructionKind == VUMacroInstructionKind::Lower)
@@ -791,8 +815,7 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
           ? UINT32_C(0)
           : UINT32_C(1) << registerID;
     };
-  uint32_t readRegisterMask = 0;
-  uint32_t writeRegisterMask = 0;
+  uint32_t registerNumberMask = 0;
   if (instructionKind == VUMacroInstructionKind::Upper)
   {
     const uint8_t encodedFieldMask =
@@ -802,34 +825,30 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
       destinationMaskFromOpCode(
         upperOpCode,
         encodedFieldMask);
-    const uint8_t sourceRegister1 =
-      src1RegFromOpCodeAndInstruction(
-        upperOpCode,
-        instruction);
-    const uint8_t sourceRegister2 =
-      regFromInstruction(
-        instruction,
-        VPU_FS_REG_SHIFT);
     if (srcReg1MaskFromOpCode(
           upperOpCode,
           destinationFieldMask) !=
         FP_REGISTER_NO_FIELDS)
     {
-      readRegisterMask |=
-        registerBit(sourceRegister1);
+      registerNumberMask |= registerBit(
+        src1RegFromOpCodeAndInstruction(
+          upperOpCode,
+          instruction));
     }
     if (srcReg2MaskFromOpCode(
           upperOpCode,
           destinationFieldMask) !=
         FP_REGISTER_NO_FIELDS)
     {
-      readRegisterMask |=
-        registerBit(sourceRegister2);
+      registerNumberMask |= registerBit(
+        regFromInstruction(
+          instruction,
+          VPU_FS_REG_SHIFT));
     }
     if (destinationFieldMask !=
         FP_REGISTER_NO_FIELDS)
     {
-      writeRegisterMask |= registerBit(
+      registerNumberMask |= registerBit(
         destRegFromOpCodeAndInstruction(
           upperOpCode,
           instruction));
@@ -843,23 +862,25 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
       case VPU_IAND:
       case VPU_IOR:
       case VPU_ISUB:
-        readRegisterMask |= registerBit(
+        registerNumberMask |= registerBit(
           lowerInstruction.sourceRegister2);
         // Fall through.
       case VPU_IADDI:
-        readRegisterMask |= registerBit(
-          lowerInstruction.sourceRegister1);
-        writeRegisterMask |= registerBit(
-          lowerInstruction.destinationRegister);
+        registerNumberMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.destinationRegister);
         break;
       case VPU_ILWR:
-        readRegisterMask |= registerBit(
-          lowerInstruction.sourceRegister1);
-        writeRegisterMask |= registerBit(
-          lowerInstruction.integerDestinationRegister);
+        registerNumberMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.integerDestinationRegister);
         break;
       case VPU_ISWR:
-        readRegisterMask |=
+        registerNumberMask |=
           registerBit(
             lowerInstruction.sourceRegister1) |
           registerBit(
@@ -867,9 +888,9 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
         break;
       case VPU_LQD:
       case VPU_LQI:
-        readRegisterMask |= registerBit(
-          lowerInstruction.sourceRegister1);
-        writeRegisterMask |=
+        registerNumberMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
           registerBit(
             lowerInstruction.destinationRegister) |
           registerBit(
@@ -877,45 +898,36 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
         break;
       case VPU_SQD:
       case VPU_SQI:
-        readRegisterMask |=
+        registerNumberMask |=
           registerBit(
             lowerInstruction.sourceRegister1) |
           registerBit(
-            lowerInstruction.sourceRegister2);
-        writeRegisterMask |= registerBit(
-          lowerInstruction.integerDestinationRegister);
+            lowerInstruction.sourceRegister2) |
+          registerBit(
+            lowerInstruction.integerDestinationRegister);
         break;
       case VPU_MFIR:
-        readRegisterMask |= registerBit(
-          lowerInstruction.sourceRegister1);
-        writeRegisterMask |= registerBit(
-          lowerInstruction.destinationRegister);
-        break;
       case VPU_MOVE:
       case VPU_MR32:
-        readRegisterMask |= registerBit(
-          lowerInstruction.sourceRegister1);
-        writeRegisterMask |= registerBit(
-          lowerInstruction.destinationRegister);
+        registerNumberMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.destinationRegister);
         break;
       case VPU_MTIR:
-        readRegisterMask |= registerBit(
-          lowerInstruction.sourceRegister1);
-        writeRegisterMask |= registerBit(
-          lowerInstruction.integerDestinationRegister);
+        registerNumberMask |=
+          registerBit(
+            lowerInstruction.sourceRegister1) |
+          registerBit(
+            lowerInstruction.integerDestinationRegister);
         break;
       case VPU_DIV:
       case VPU_RSQRT:
-        readRegisterMask |=
-          registerBit(
-            lowerInstruction.sourceRegister1) |
-          registerBit(
-            lowerInstruction.sourceRegister2);
-        break;
       case VPU_SQRT:
       case VPU_RINIT:
       case VPU_RXOR:
-        readRegisterMask |=
+        registerNumberMask |=
           registerBit(
             lowerInstruction.sourceRegister1) |
           registerBit(
@@ -923,41 +935,80 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
         break;
       case VPU_RGET:
       case VPU_RNEXT:
-        writeRegisterMask |= registerBit(
+        registerNumberMask |= registerBit(
           lowerInstruction.destinationRegister);
         break;
     }
   }
   if (orchestrator.hasPendingRegisterNumberWrite(
-        readRegisterMask | writeRegisterMask))
+        registerNumberMask))
   {
     return false;
+  }
+  const bool resumesFromMicro =
+    state == VPU_STATE_RUN &&
+    mode == VPU_MODE_MICRO;
+  if (resumesFromMicro &&
+      (!terminationRequested ||
+       haltAfterDrain ||
+       !orchestrator.pipelinesCompleteOnNextUpdate()))
+  {
+    return false;
+  }
+  if (macroTransferStallPending &&
+      !resumesFromMicro)
+  {
+    *transferStall = true;
+    return false;
+  }
+  return
+    !macroIssueNeedsAdvance &&
+    orchestrator.canAcceptInstruction();
+}
+
+bool VPU::issueMacroInstruction(uint32_t instruction)
+{
+  if (type != VPUType::VU0)
+  {
+    throw logic_error("Macro instructions require VU0.");
+  }
+  if (state == VPU_STATE_STOP)
+  {
+    throw logic_error("Macro instructions cannot execute while VU0 is stopped.");
+  }
+  const VUMacroInstructionKind instructionKind =
+    classifyVUMacroInstruction(instruction);
+  if (instructionKind == VUMacroInstructionKind::Invalid)
+  {
+    throw logic_error("Unsupported VU macro instruction.");
+  }
+  bool transferStall = false;
+  if (!macroInstructionReady(
+        instruction,
+        &transferStall))
+  {
+    if (transferStall)
+    {
+      macroTransferStallPending = false;
+    }
+    return false;
+  }
+  LowerInstruction lowerInstruction;
+  if (instructionKind == VUMacroInstructionKind::Lower)
+  {
+    lowerInstruction =
+      decodeLowerInstruction(
+        instruction | VPU_I_BIT);
   }
   if (state == VPU_STATE_RUN &&
       mode == VPU_MODE_MICRO)
   {
-    if (!terminationRequested ||
-        haltAfterDrain ||
-        !orchestrator.pipelinesCompleteOnNextUpdate())
-    {
-      return false;
-    }
     terminationRequested = false;
     endDelaySlotPending = false;
     branchDelaySlotPending = false;
     pendingBranchTaken = false;
     pendingBranchLinkValid = false;
     macroTransferStallPending = false;
-  }
-  if (macroTransferStallPending)
-  {
-    macroTransferStallPending = false;
-    return false;
-  }
-  if (macroIssueNeedsAdvance ||
-      !orchestrator.canAcceptInstruction())
-  {
-    return false;
   }
 
   if (instructionKind == VUMacroInstructionKind::Upper)
@@ -1442,7 +1493,9 @@ uint16_t VPU::processUpperInstruction(
   return opCode;
 }
 
-uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
+uint8_t VPU::src1RegFromOpCodeAndInstruction(
+  uint16_t opCode,
+  uint32_t instruction) const
 {
   switch (opCode)
   {
@@ -1461,7 +1514,8 @@ uint8_t VPU::src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
   }
 }
 
-uint16_t VPU::opCodeFromInstruction(uint32_t instruction)
+uint16_t VPU::opCodeFromInstruction(
+  uint32_t instruction) const
 {
   uint16_t opCode = 0;
   if (decodeVUUpperInstruction(instruction, &opCode))
@@ -1471,12 +1525,16 @@ uint16_t VPU::opCodeFromInstruction(uint32_t instruction)
   throw runtime_error("Unsupported VU upper instruction.");
 }
 
-uint8_t VPU::regFromInstruction(uint32_t instruction, uint8_t shift)
+uint8_t VPU::regFromInstruction(
+  uint32_t instruction,
+  uint8_t shift) const
 {
   return (instruction >> shift) & VPU_REG_MASK;
 }
 
-uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction)
+uint8_t VPU::destRegFromOpCodeAndInstruction(
+  uint16_t opCode,
+  uint32_t instruction) const
 {
   switch (opCode)
   {
@@ -1532,7 +1590,9 @@ uint8_t VPU::destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instructi
   }
 }
 
-uint8_t VPU::destinationMaskFromOpCode(uint16_t opCode, uint8_t encodedMask)
+uint8_t VPU::destinationMaskFromOpCode(
+  uint16_t opCode,
+  uint8_t encodedMask) const
 {
   switch (opCode)
   {
@@ -1546,7 +1606,9 @@ uint8_t VPU::destinationMaskFromOpCode(uint16_t opCode, uint8_t encodedMask)
   }
 }
 
-uint8_t VPU::srcReg1MaskFromOpCode(uint16_t opCode, uint8_t destinationMask)
+uint8_t VPU::srcReg1MaskFromOpCode(
+  uint16_t opCode,
+  uint8_t destinationMask) const
 {
   switch (opCode)
   {
@@ -1644,7 +1706,9 @@ uint8_t VPU::srcReg1MaskFromOpCode(uint16_t opCode, uint8_t destinationMask)
   }
 }
 
-uint8_t VPU::srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask)
+uint8_t VPU::srcReg2MaskFromOpCode(
+  uint16_t opCode,
+  uint8_t destinationMask) const
 {
   switch (opCode)
   {

@@ -104,6 +104,8 @@ class VPU : public ClockedComponent, public PipelineHandler
     void initMicroMode();
     void startMicroMode(uint16_t startAddress = 0);
     bool startMicroModeFromMacro(uint16_t startAddress);
+    bool macroCallReady() const;
+    bool macroInstructionReady(uint32_t instruction) const;
     bool issueMacroInstruction(uint32_t instruction);
     bool microModeActive() const;
     bool macroModeActive() const;
@@ -241,13 +243,26 @@ class VPU : public ClockedComponent, public PipelineHandler
     uint16_t processUpperInstruction(
       uint32_t upperInstruction,
       bool macroInstruction = false);
-    uint16_t opCodeFromInstruction(uint32_t instruction);
-    uint8_t regFromInstruction(uint32_t instruction, uint8_t shift);
-    uint8_t src1RegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
-    uint8_t destRegFromOpCodeAndInstruction(uint16_t opCode, uint32_t instruction);
-    uint8_t destinationMaskFromOpCode(uint16_t opCode, uint8_t encodedMask);
-    uint8_t srcReg1MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
-    uint8_t srcReg2MaskFromOpCode(uint16_t opCode, uint8_t destinationMask);
+    uint16_t opCodeFromInstruction(
+      uint32_t instruction) const;
+    uint8_t regFromInstruction(
+      uint32_t instruction,
+      uint8_t shift) const;
+    uint8_t src1RegFromOpCodeAndInstruction(
+      uint16_t opCode,
+      uint32_t instruction) const;
+    uint8_t destRegFromOpCodeAndInstruction(
+      uint16_t opCode,
+      uint32_t instruction) const;
+    uint8_t destinationMaskFromOpCode(
+      uint16_t opCode,
+      uint8_t encodedMask) const;
+    uint8_t srcReg1MaskFromOpCode(
+      uint16_t opCode,
+      uint8_t destinationMask) const;
+    uint8_t srcReg2MaskFromOpCode(
+      uint16_t opCode,
+      uint8_t destinationMask) const;
     void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
     void executePendingLowerInstruction();
     void startIRegisterInstruction(const LowerInstruction &instruction);
@@ -275,6 +290,9 @@ class VPU : public ClockedComponent, public PipelineHandler
       uint8_t registerID) const;
     bool hasPendingIntegerWrite(uint8_t registerID) const;
     bool lowerInstructionStalls(const LowerInstruction &instruction) const;
+    bool macroInstructionReady(
+      uint32_t instruction,
+      bool *transferStall) const;
     bool lowerInstructionForbiddenInEndDelaySlot(const LowerInstruction &instruction) const;
     uint16_t qwordAddress(uint16_t base, int16_t offset = 0) const;
     uint32_t readDataWord(uint16_t address) const;

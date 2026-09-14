@@ -145,6 +145,10 @@ TEST_CASE("EE SYNC.P does not wait for integer multiply completion")
   REQUIRE(
     system.eeCore().lastInstruction().operation ==
     EEOperation::SynchronizePipeline);
+  REQUIRE(
+    system.eeCore()
+      .lastIssueSelection()
+      .instructionCount == 1);
 }
 
 TEST_CASE("EE instruction stepping follows repeated branch addresses")

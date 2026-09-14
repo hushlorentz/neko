@@ -967,7 +967,7 @@ accumulator or condition-result contract:
       explicitly define whether a branch may issue with its own delay-slot
       instruction while preventing an older `ERET` or other no-delay-slot
       redirect from admitting its sequential successor
-- [ ] Combine same-pair selection with cross-cycle producer and structural
+- [x] Combine same-pair selection with cross-cycle producer and structural
       readiness from the existing scoreboards; refuse pairs involving deferred
       younger faults, unresolved dependencies, unsafe memory ordering, or
       unresolved control-flow and branch-likely annulment

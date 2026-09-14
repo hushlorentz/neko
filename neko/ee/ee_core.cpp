@@ -1,5 +1,6 @@
 #include "ee_core.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -277,6 +278,7 @@ void EECore::reset()
   lastInstructionValid = false;
   lastAddress = 0;
   lastDecodedInstruction = {};
+  issueSelection = {};
   rejectedInstructionValue = 0;
   clearIssueFrontEnd();
   inFlightCOP1Operations.fill({});
@@ -497,6 +499,224 @@ bool EECore::handleIssueLatchFailure()
     "Unknown EE issue-latch failure.");
 }
 
+void EECore::updateIssueSelection(
+  std::uint32_t completedLoadRegisters)
+{
+  if (!issueLatch.valid ||
+      issueLatch.failure != IssueLatchFailure::None)
+  {
+    issueSelection = {};
+    return;
+  }
+
+  const std::size_t availableCOP1Slots =
+    static_cast<std::size_t>(std::count_if(
+      inFlightCOP1Operations.begin(),
+      inFlightCOP1Operations.end(),
+      [](const InFlightCOP1Operation &operation)
+      {
+        return !operation.active;
+      }));
+  const bool olderReady =
+    issueCandidateReady(
+      issueLatch.instruction,
+      completedLoadRegisters,
+      availableCOP1Slots);
+  bool youngerReady =
+    stagingLatch.valid &&
+    stagingLatch.failure == IssueLatchFailure::None &&
+    issueCandidateReady(
+      stagingLatch.instruction,
+      completedLoadRegisters,
+      availableCOP1Slots);
+  if (youngerReady &&
+      !issuePairStructurallySafe(
+        issueLatch.instruction,
+        stagingLatch.instruction,
+        availableCOP1Slots))
+  {
+    youngerReady = false;
+  }
+
+  issueSelection = selectEEIssueGroup(
+    issueLatch.instruction,
+    stagingLatch.instruction,
+    olderReady,
+    youngerReady);
+}
+
+bool EECore::issueCandidateReady(
+  const EEInstruction &instruction,
+  std::uint32_t completedLoadRegisters,
+  std::size_t availableCOP1Slots) const
+{
+  if (pendingMultiplyDivideActive() &&
+      instruction.operation !=
+        EEOperation::SynchronizePipeline)
+  {
+    return false;
+  }
+
+  COP1ScoreboardHazard hazard;
+  if (cop1ScoreboardBlocks(
+        instruction,
+        completedLoadRegisters,
+        &hazard))
+  {
+    return false;
+  }
+  if (cop2ScoreboardBlocks(instruction))
+  {
+    return false;
+  }
+  return
+    !isCOP1ManagedPipelineOperation(
+      instruction.operation) ||
+    availableCOP1Slots != 0;
+}
+
+bool EECore::issuePairStructurallySafe(
+  const EEInstruction &older,
+  const EEInstruction &younger,
+  std::size_t availableCOP1Slots) const
+{
+  if (isMemoryOperation(older.operation) ||
+      isMemoryOperation(younger.operation))
+  {
+    return false;
+  }
+
+  const std::size_t requiredCOP1Slots =
+    static_cast<std::size_t>(
+      isCOP1ManagedPipelineOperation(
+        older.operation)) +
+    static_cast<std::size_t>(
+      isCOP1ManagedPipelineOperation(
+        younger.operation));
+  if (requiredCOP1Slots > availableCOP1Slots)
+  {
+    return false;
+  }
+
+  return
+    !isEEBranchLikelyOperation(older.operation) ||
+    branchLikelyTaken(older);
+}
+
+bool EECore::branchLikelyTaken(
+  const EEInstruction &instruction) const
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::BranchCOP1FalseLikely:
+      return !scoreboardCOP1Condition();
+    case EEOperation::BranchCOP1TrueLikely:
+      return scoreboardCOP1Condition();
+    case EEOperation::BranchCOP2FalseLikely:
+      return !attachedVU1().clockActive();
+    case EEOperation::BranchCOP2TrueLikely:
+      return attachedVU1().clockActive();
+    default:
+      break;
+  }
+
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t target =
+    generalRegisters[instruction.targetRegister].low;
+  const bool negative =
+    (source & DOUBLEWORD_SIGN_BIT) != 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::BranchEqualLikely:
+      return source == target;
+    case EEOperation::BranchNotEqualLikely:
+      return source != target;
+    case EEOperation::BranchLessThanOrEqualZeroLikely:
+      return negative || source == 0;
+    case EEOperation::BranchGreaterThanZeroLikely:
+      return !negative && source != 0;
+    case EEOperation::BranchLessThanZeroLikely:
+    case EEOperation::BranchLessThanZeroAndLinkLikely:
+      return negative;
+    case EEOperation::BranchGreaterThanOrEqualZeroLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+      return !negative;
+    default:
+      throw std::logic_error(
+        "EE instruction is not a branch-likely operation.");
+  }
+}
+
+bool EECore::cop2ScoreboardBlocks(
+  const EEInstruction &instruction) const
+{
+  const std::uint8_t registerIndex =
+    instruction.destinationRegister;
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadQuadwordToCOP2:
+    case EEOperation::StoreQuadwordFromCOP2:
+      return
+        attachedVU0().macroRegisterNumberWritePending(
+          instruction.targetRegister);
+    case EEOperation::QuadwordMoveFromCOP2:
+      return
+        ((instruction.raw & 1) != 0 &&
+         attachedVU0().microModeActive()) ||
+        attachedVU0().macroRegisterNumberWritePending(
+          registerIndex);
+    case EEOperation::QuadwordMoveToCOP2:
+      return
+        ((instruction.raw & 1) != 0 &&
+         !attachedVU0().cop2WriteAvailable()) ||
+        attachedVU0().macroRegisterNumberWritePending(
+          registerIndex);
+    case EEOperation::ControlMoveFromCOP2:
+      return
+        ((instruction.raw & 1) != 0 &&
+         attachedVU0().microModeActive()) ||
+        (registerIndex < 16 &&
+         attachedVU0().macroRegisterNumberWritePending(
+           registerIndex)) ||
+        (attachedVU0().macroModeActive() &&
+         (registerIndex == 16 ||
+          registerIndex == 17));
+    case EEOperation::ControlMoveToCOP2:
+      return
+        ((instruction.raw & 1) != 0 &&
+         !attachedVU0().cop2WriteAvailable()) ||
+        (registerIndex < 16 &&
+         attachedVU0().macroRegisterNumberWritePending(
+           registerIndex)) ||
+        (attachedVU0().macroModeActive() &&
+         (registerIndex == 16 ||
+          registerIndex == 18));
+    case EEOperation::VectorCallMicroSubroutine:
+    case EEOperation::VectorCallMicroSubroutineRegister:
+      return !attachedVU0().macroCallReady();
+    case EEOperation::VectorMacroArithmetic:
+      return !attachedVU0().macroInstructionReady(
+        instruction.raw & UINT32_C(0x01ffffff));
+    default:
+      return false;
+  }
+}
+
+bool EECore::isMemoryOperation(EEOperation operation)
+{
+  if (eeInstructionRouting(operation).category ==
+      EEInstructionCategory::LoadStore)
+  {
+    return true;
+  }
+  return
+    operation == EEOperation::LoadWordToCOP1 ||
+    operation == EEOperation::StoreWordFromCOP1 ||
+    operation == EEOperation::LoadQuadwordToCOP2 ||
+    operation == EEOperation::StoreQuadwordFromCOP2;
+}
+
 void EECore::startExecution(std::uint32_t startAddress)
 {
   const bool resumePendingBranch =
@@ -634,6 +854,7 @@ void EECore::clock()
   instructionRetiredThisCycle = false;
   exceptionEnteredThisCycle = false;
   cycleTraceEventCount = 0;
+  issueSelection = {};
   if (!clockActive())
   {
     return;
@@ -661,6 +882,7 @@ void EECore::clock()
     pendingMultiplyDivideActive();
   advancePendingMultiplyDivide(&pendingMac0, false);
   advancePendingMultiplyDivide(&pendingMac1, true);
+  updateIssueSelection(completedCOP1LoadRegisters);
   if (hadPendingOperation &&
       pendingMultiplyDivideActive() &&
       (issueLatch.failure != IssueLatchFailure::None ||
@@ -5046,6 +5268,11 @@ const EEInstruction &EECore::lastInstruction() const
       "EE Core has no decoded instruction.");
   }
   return lastDecodedInstruction;
+}
+
+const EEIssueSelection &EECore::lastIssueSelection() const
+{
+  return issueSelection;
 }
 
 std::uint32_t EECore::rejectedInstruction() const
