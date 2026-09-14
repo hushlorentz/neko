@@ -959,7 +959,7 @@ accumulator or condition-result contract:
 - [x] Implement and classify `SYNC.P` and `SYNC.L` independently of scheduler
       activation, including deterministic scalar execution and reserved-field
       handling
-- [ ] Resolve the documented illegal sequences for Branch-Branch,
+- [x] Resolve the documented illegal sequences for Branch-Branch,
       Branch-ERET, Branch-SYNC.P/SYNC.L, and
       Branch-Likely-MTSA/MTSAB/MTSAH against the manual, including whether each
       sequence is undefined or merely unpairable; make legality sensitive to

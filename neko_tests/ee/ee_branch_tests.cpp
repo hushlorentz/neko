@@ -32,6 +32,18 @@ namespace
       immediate;
   }
 
+  std::uint32_t regimmInstruction(
+    std::uint8_t function,
+    std::uint8_t rs,
+    std::uint16_t immediate)
+  {
+    return
+      (UINT32_C(0x01) << 26) |
+      (static_cast<std::uint32_t>(rs) << 21) |
+      (static_cast<std::uint32_t>(function) << 16) |
+      immediate;
+  }
+
   void writeProgram(
     NekoSystem *system,
     const std::uint32_t *instructions,
@@ -328,22 +340,62 @@ TEST_CASE("EE rejects forbidden delay-slot instructions")
     REQUIRE(system.eeCore().programCounter() == 4);
   }
 
-  SECTION("A taken branch-likely cannot put MTSA in its delay slot")
+  SECTION("A taken branch-likely cannot write SA in its delay slot")
   {
-    NekoSystem system;
-    setLow(&system.eeCore(), 1, 4);
-    const std::uint32_t program[] = {
-      immediateInstruction(0x14, 0, 0, 1),
-      registerInstruction(0x29, 1, 0, 0)
+    const std::uint32_t shiftAmountWrites[] = {
+      registerInstruction(0x29, 1, 0, 0),
+      regimmInstruction(0x18, 1, 0),
+      regimmInstruction(0x19, 1, 0)
     };
-    writeProgram(&system, program, 2);
-    system.eeCore().startExecution(0);
-    system.runMasterCycles(2);
+    for (const std::uint32_t shiftAmountWrite :
+         shiftAmountWrites)
+    {
+      NekoSystem system;
+      setLow(&system.eeCore(), 1, 4);
+      const std::uint32_t program[] = {
+        immediateInstruction(0x14, 0, 0, 1),
+        shiftAmountWrite
+      };
+      writeProgram(&system, program, 2);
+      system.eeCore().startExecution(0);
+      system.runMasterCycles(2);
 
-    REQUIRE(
-      system.eeCore().stopReason() ==
-      EEStopReason::UndefinedOperation);
-    REQUIRE(system.eeCore().programCounter() == 4);
+      REQUIRE(
+        system.eeCore().stopReason() ==
+        EEStopReason::UndefinedOperation);
+      REQUIRE(system.eeCore().programCounter() == 4);
+      REQUIRE(
+        system.eeCore().rejectedInstruction() ==
+        shiftAmountWrite);
+    }
+  }
+
+  SECTION("Synchronization cannot occupy a branch delay slot")
+  {
+    const std::uint32_t synchronizations[] = {
+      UINT32_C(0x0000000f),
+      UINT32_C(0x0000040f)
+    };
+    for (const std::uint32_t synchronization :
+         synchronizations)
+    {
+      NekoSystem system;
+      const std::uint32_t program[] = {
+        UINT32_C(0x08000003),
+        synchronization
+      };
+      writeProgram(&system, program, 2);
+      system.eeCore().startExecution(0);
+      system.runMasterCycles(2);
+
+      REQUIRE(
+        system.eeCore().stopReason() ==
+        EEStopReason::UndefinedOperation);
+      REQUIRE(system.eeCore().programCounter() == 4);
+      REQUIRE(
+        system.eeCore().rejectedInstruction() ==
+        synchronization);
+    }
   }
 }
 

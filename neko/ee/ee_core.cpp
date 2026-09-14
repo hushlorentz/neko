@@ -4592,6 +4592,10 @@ bool EECore::validateDelaySlotInstruction(
   }
   if (isEEBranchOperation(instruction.operation) ||
        instruction.operation == EEOperation::ExceptionReturn ||
+       instruction.operation ==
+         EEOperation::SynchronizeLoadStore ||
+       instruction.operation ==
+         EEOperation::SynchronizePipeline ||
        (branchDelayFromLikely &&
         writesShiftAmount(instruction.operation)))
   {

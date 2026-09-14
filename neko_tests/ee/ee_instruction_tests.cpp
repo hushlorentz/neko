@@ -32,6 +32,18 @@ namespace
       (static_cast<std::uint32_t>(rt) << 16) |
       immediate;
   }
+
+  std::uint32_t regimmInstruction(
+    std::uint8_t function,
+    std::uint8_t rs,
+    std::uint16_t immediate)
+  {
+    return
+      (UINT32_C(0x01) << 26) |
+      (static_cast<std::uint32_t>(rs) << 21) |
+      (static_cast<std::uint32_t>(function) << 16) |
+      immediate;
+  }
 }
 
 TEST_CASE("EE instruction field decoding")
@@ -168,17 +180,17 @@ TEST_CASE("EE instruction routing classification")
     requireRouting(
       EEOperation::SynchronizeLoadStore,
       EEInstructionCategory::Synchronization,
-      true,
       false,
-      physical(EEPhysicalPipeline::I0),
-      0);
+      true,
+      0,
+      physical(EEPhysicalPipeline::I1));
     requireRouting(
       EEOperation::SynchronizePipeline,
       EEInstructionCategory::Synchronization,
-      true,
       false,
-      physical(EEPhysicalPipeline::I0),
-      0);
+      true,
+      0,
+      physical(EEPhysicalPipeline::I1));
     requireRouting(
       EEOperation::LoadQuadword,
       EEInstructionCategory::LoadStore,
@@ -468,6 +480,101 @@ TEST_CASE("EE two-wide issue selection")
     REQUIRE(
       selection.pairing ==
       EEIssuePairing::Forbidden);
+  }
+
+  SECTION("Legal branches may issue with their delay-slot instruction")
+  {
+    REQUIRE(
+      selectEEIssueGroup(
+        decodeEEInstruction(
+          immediateInstruction(0x04, 1, 2, 1)),
+        decodeEEInstruction(
+          immediateInstruction(0x09, 0, 3, 1)),
+        true,
+        true).instructionCount == 2);
+    REQUIRE(
+      selectEEIssueGroup(
+        decodeEEInstruction(
+          immediateInstruction(0x04, 1, 2, 1)),
+        decodeEEInstruction(
+          registerInstruction(0x29, 4, 0, 0)),
+        true,
+        true).instructionCount == 2);
+    REQUIRE(
+      selectEEIssueGroup(
+        decodeEEInstruction(
+          immediateInstruction(0x14, 1, 2, 1)),
+        decodeEEInstruction(
+          registerInstruction(0x28, 0, 0, 3)),
+        true,
+        true).instructionCount == 2);
+  }
+
+  SECTION("Illegal delay-slot sequences remain scalar for validation")
+  {
+    const EEInstruction branch =
+      decodeEEInstruction(
+        immediateInstruction(0x04, 1, 2, 1));
+    const EEInstruction likely =
+      decodeEEInstruction(
+        immediateInstruction(0x14, 1, 2, 1));
+    const EEInstruction forbiddenYounger[] = {
+      decodeEEInstruction(
+        immediateInstruction(0x05, 3, 4, 1)),
+      decodeEEInstruction(UINT32_C(0x42000018)),
+      decodeEEInstruction(UINT32_C(0x0000000f)),
+      decodeEEInstruction(UINT32_C(0x0000040f))
+    };
+    for (const EEInstruction &younger : forbiddenYounger)
+    {
+      REQUIRE(
+        selectEEIssueGroup(
+          branch,
+          younger,
+          true,
+          true).instructionCount == 1);
+    }
+
+    const EEInstruction forbiddenLikelyYounger[] = {
+      decodeEEInstruction(
+        registerInstruction(0x29, 5, 0, 0)),
+      decodeEEInstruction(
+        regimmInstruction(0x18, 5, 0)),
+      decodeEEInstruction(
+        regimmInstruction(0x19, 5, 0))
+    };
+    for (const EEInstruction &younger :
+         forbiddenLikelyYounger)
+    {
+      REQUIRE(
+        selectEEIssueGroup(
+          likely,
+          younger,
+          true,
+          true).instructionCount == 1);
+    }
+  }
+
+  SECTION("A no-delay-slot redirect cannot admit its successor")
+  {
+    const EEInstruction eret =
+      decodeEEInstruction(UINT32_C(0x42000018));
+    const EEInstruction alu =
+      decodeEEInstruction(
+        immediateInstruction(0x09, 0, 3, 1));
+
+    REQUIRE(
+      selectEEIssueGroup(
+        eret,
+        alu,
+        true,
+        true).instructionCount == 1);
+    REQUIRE(
+      selectEEIssueGroup(
+        alu,
+        eret,
+        true,
+        true).instructionCount == 2);
   }
 
   SECTION("Table 1-3 delayed pairs remain two-wide selections")

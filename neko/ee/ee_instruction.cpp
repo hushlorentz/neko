@@ -484,6 +484,39 @@ namespace
         youngerDependencies.specialWrites)) != 0;
   }
 
+  bool isIllegalProgramOrderPair(
+    const EEInstruction &older,
+    const EEInstruction &younger)
+  {
+    if (older.operation == EEOperation::ExceptionReturn)
+    {
+      return true;
+    }
+    if (!isEEBranchOperation(older.operation))
+    {
+      return false;
+    }
+    if (isEEBranchOperation(younger.operation) ||
+         younger.operation == EEOperation::ExceptionReturn ||
+         younger.operation ==
+           EEOperation::SynchronizeLoadStore ||
+         younger.operation ==
+           EEOperation::SynchronizePipeline)
+    {
+      return true;
+    }
+    if (!isEEBranchLikelyOperation(older.operation))
+    {
+      return false;
+    }
+    return
+      younger.operation == EEOperation::MoveToShiftAmount ||
+      younger.operation ==
+         EEOperation::MoveByteCountToShiftAmount ||
+      younger.operation ==
+         EEOperation::MoveHalfwordCountToShiftAmount;
+  }
+
   EEIssuePairing issuePairing(
     EEInstructionCategory pipe0,
     EEInstructionCategory pipe1)
@@ -1502,9 +1535,9 @@ EEInstructionRouting eeInstructionRouting(EEOperation operation)
     case EEOperation::SynchronizePipeline:
       return {
         EEInstructionCategory::Synchronization,
-        PIPE_0,
-        PHYSICAL_I0,
-        0
+        PIPE_1,
+        0,
+        PHYSICAL_I1
       };
     case EEOperation::ExceptionReturn:
       return {
@@ -1800,6 +1833,10 @@ EEIssueSelection selectEEIssueGroup(
       ? EELogicalPipe::Pipe0
       : EELogicalPipe::Pipe1;
   if (!youngerReady)
+  {
+    return selection;
+  }
+  if (isIllegalProgramOrderPair(older, younger))
   {
     return selection;
   }
