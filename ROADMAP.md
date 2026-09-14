@@ -951,11 +951,11 @@ accumulator or condition-result contract:
 - [x] Select zero, one, or two candidate instructions in program order while
       respecting same-pair data dependencies, Pipe 0/Pipe 1 routing, and
       Table 1-3 `O`/`X`/`Y` classification without changing scalar retirement
-- [ ] Define the architectural issue-group contract before activation:
-      admission and commit are atomic, no half-issued pair is externally
-      observable, effects and retirement remain in older-to-younger program
-      order, and stepping and instruction budgets count both members of an
-      inseparable group
+- [x] Define the architectural issue-group contract before activation:
+      pair admission is atomic, no half-issued pair is externally observable,
+      architectural acceptance remains in older-to-younger program order, and
+      stepping and instruction counts include both members of an inseparable
+      group without conflating issue with delayed pipeline completion
 - [ ] Implement and classify `SYNC.P` and `SYNC.L` independently of scheduler
       activation, including deterministic scalar execution and reserved-field
       handling
@@ -965,25 +965,30 @@ accumulator or condition-result contract:
       sequence is undefined or merely unpairable; make legality sensitive to
       older/younger operations rather than only pipe-numbered categories, and
       explicitly define whether a branch may issue with its own delay-slot
-      instruction
+      instruction while preventing an older `ERET` or other no-delay-slot
+      redirect from admitting its sequential successor
 - [ ] Combine same-pair selection with cross-cycle producer and structural
       readiness from the existing scoreboards; refuse pairs involving deferred
       younger faults, unresolved dependencies, unsafe memory ordering, or
       unresolved control-flow and branch-likely annulment
 - [ ] Replace single-instruction retirement bookkeeping with ordered
-      zero/one/two retirement records, defining execution counts, stop reasons,
-      exception ownership, deterministic per-cycle trace ordering, and
-      sufficient trace-event capacity for both instructions and their memory,
-      interlock, exception, and hazard events
+      zero/one/two architectural acceptance records, distinct from issue-trace
+      events and delayed pipeline completion or retirement, defining execution
+      counts, stop reasons, exception ownership, deterministic per-cycle trace
+      ordering, and sufficient trace-event capacity for both instructions and
+      their memory, interlock, exception, and hazard events
 - [ ] Update `stepEEInstruction()`, `runEE()`, `runELF()`, guest-return
-      detection, and instruction budgets to consume ordered retirement records
-      and stop only after the complete atomic issue group has retired
+      detection, and instruction counts to consume ordered acceptance records
+      and stop only after every successfully accepted member has produced its
+      record, independently of delayed pipeline completion
 - [ ] Advance SA-ordering and divider branch-proximity instruction windows from
-      ordered retirement records so the younger instruction observes the
+      ordered acceptance records so the younger instruction observes the
       older instruction's program-order effects independently of pipe number
-- [ ] Implement atomic ordered pair execution and commit boundaries, ensuring
-      an older exception suppresses all younger effects and older-before-younger
-      register, control, and stop-reason behavior remains precise
+- [ ] Implement ordered per-instruction commit boundaries within an atomic
+      issue group, ensuring an older exception suppresses all younger effects,
+      a younger synchronous exception preserves completed older effects, and
+      older-before-younger register, control, and stop-reason behavior remains
+      precise
 - [ ] Activate only ordinary Table 1-3 `O` register-only pairs; keep every `Y`
       selection on the scalar fallback path until its owning pipeline block
       implements the required stall, and assert that concurrently issued
@@ -993,10 +998,11 @@ accumulator or condition-result contract:
 - [ ] Extend ordinary `O` activation to branch, branch-likely, and resolved
       delay-slot pairs while preserving delay-slot ownership, annulment,
       redirects, exceptions, and divider branch-proximity windows
-- [ ] Persist the concrete post-activation front-end, issue-group, assignment,
-      retirement, and continuation state that can cross a cycle boundary
-      through reset, interrupts, halt/resume, canonical hashes, and
-      transactional save states; do not serialize recomputable selection state
+- [ ] Persist concrete post-activation front-end entries,
+      admitted-but-incomplete pipeline work including `Y` stalls, and
+      continuation state through reset, interrupts, halt/resume, canonical
+      hashes, and transactional save states; do not serialize per-cycle issue
+      acceptance records or recomputable selection and assignment state
 - [ ] Validate single-issue fallback, deferred `Y` behavior, both permitted
       older/younger pipe arrangements, and every implemented
       instruction-category pairing before an independent EE scheduler review
@@ -1007,7 +1013,7 @@ accumulator or condition-result contract:
       C1 scoreboard and two-wide EE scheduler
 - [ ] Implement Table 1-3's `Y` combination: both instructions enter `R`, then
       the Pipe 1 COP1 Move stalls for one cycle at `A/T` on the shared C1
-      resource; resolve retirement ordering when the stalled Move is older,
+      resource; resolve completion ordering when the stalled Move is older,
       and cover every program-order arrangement permitted by the pipe-assignment
       and atomic issue-group contracts
 - [ ] Enforce cross-cycle FPR, ACC, FCR31, load, store, comparison/branch, and
