@@ -1,6 +1,7 @@
 #include "ee_core.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -712,6 +713,66 @@ bool EECore::issuePairStructurallySafe(
     branchLikelyTaken(older);
 }
 
+bool EECore::issueSelectionCanExecuteConcurrently() const
+{
+  if (issueSelection.instructionCount != 2 ||
+      issueSelection.pairing !=
+        EEIssuePairing::Concurrent ||
+      branchDelayPending ||
+      !isRegisterOnlyIssueOperation(
+        issueLatch.instruction.operation) ||
+      !isRegisterOnlyIssueOperation(
+        stagingLatch.instruction.operation))
+  {
+    return false;
+  }
+
+  const EEInstructionRouting olderRouting =
+    eeInstructionRouting(issueLatch.instruction.operation);
+  const EEInstructionRouting youngerRouting =
+    eeInstructionRouting(stagingLatch.instruction.operation);
+  const std::uint8_t olderPhysicalPipelines =
+    eeInstructionPhysicalPipelines(
+      olderRouting,
+      issueSelection.assignment.olderPipe);
+  const std::uint8_t youngerPhysicalPipelines =
+    eeInstructionPhysicalPipelines(
+      youngerRouting,
+      issueSelection.assignment.youngerPipe);
+  const bool compatible =
+    (olderPhysicalPipelines &
+     youngerPhysicalPipelines) == 0;
+  assert(compatible);
+  return compatible;
+}
+
+bool EECore::isRegisterOnlyIssueOperation(
+  EEOperation operation)
+{
+  if (isMemoryOperation(operation) ||
+      isEEBranchOperation(operation))
+  {
+    return false;
+  }
+
+  switch (operation)
+  {
+    case EEOperation::Nop:
+    case EEOperation::SynchronizeLoadStore:
+    case EEOperation::SynchronizePipeline:
+    case EEOperation::ExceptionReturn:
+    case EEOperation::MoveFromShiftAmount:
+    case EEOperation::MoveToShiftAmount:
+    case EEOperation::MoveByteCountToShiftAmount:
+    case EEOperation::MoveHalfwordCountToShiftAmount:
+    case EEOperation::SystemCall:
+    case EEOperation::Breakpoint:
+      return false;
+    default:
+      return true;
+  }
+}
+
 bool EECore::branchLikelyTaken(
   const EEInstruction &instruction) const
 {
@@ -1001,7 +1062,9 @@ void EECore::clock()
     return;
   }
 
-  executeIssueGroup(1, completedCOP1LoadRegisters);
+  executeIssueGroup(
+    issueSelectionCanExecuteConcurrently() ? 2 : 1,
+    completedCOP1LoadRegisters);
 }
 
 EEIssueGroupExecutionResult EECore::executeIssueGroup(
@@ -1010,14 +1073,17 @@ EEIssueGroupExecutionResult EECore::executeIssueGroup(
 {
   return executeEEIssueGroupMembers(
     memberCount,
-    [this, completedLoadRegisters](std::uint8_t)
+    [this, completedLoadRegisters](std::uint8_t member)
     {
-      return executeIssueMember(completedLoadRegisters);
+      return executeIssueMember(
+        completedLoadRegisters,
+        member != 0);
     });
 }
 
 EEIssueMemberExecution EECore::executeIssueMember(
-  std::uint32_t completedLoadRegisters)
+  std::uint32_t completedLoadRegisters,
+  bool ignoreNewGroupGPRProducer)
 {
   if (!issueLatch.valid)
   {
@@ -1040,7 +1106,8 @@ EEIssueMemberExecution EECore::executeIssueMember(
   if (cop1ScoreboardBlocks(
         decoded,
         completedLoadRegisters,
-        &scoreboardHazard))
+        &scoreboardHazard,
+        ignoreNewGroupGPRProducer))
   {
     if (scoreboardHazard.completedLoad)
     {
@@ -4099,7 +4166,8 @@ void EECore::recordCOP1Retirement(
 bool EECore::cop1ScoreboardBlocks(
   const EEInstruction &instruction,
   std::uint32_t completedLoadRegisters,
-  COP1ScoreboardHazard *hazard) const
+  COP1ScoreboardHazard *hazard,
+  bool ignoreGPRProducer) const
 {
   if (instruction.operation ==
       EEOperation::SynchronizeLoadStore)
@@ -4139,24 +4207,27 @@ bool EECore::cop1ScoreboardBlocks(
     return true;
   }
 
-  for (std::uint8_t registerIndex = 0;
-       registerIndex < GENERAL_REGISTER_COUNT;
-       ++registerIndex)
+  if (!ignoreGPRProducer)
   {
-    if (cop1ScoreboardValue(
-          COP1ScoreboardResource::GPR,
-          registerIndex)
-          .availability ==
-            COP1ScoreboardAvailability::Unavailable)
+    for (std::uint8_t registerIndex = 0;
+         registerIndex < GENERAL_REGISTER_COUNT;
+         ++registerIndex)
     {
-      *hazard = {
-        COP1ScoreboardResource::GPR,
-        registerIndex,
-        COP1Dependency::ReadWrite,
-        false,
-        EEOperation::Nop
-      };
-      return true;
+      if (cop1ScoreboardValue(
+            COP1ScoreboardResource::GPR,
+            registerIndex)
+            .availability ==
+              COP1ScoreboardAvailability::Unavailable)
+      {
+        *hazard = {
+          COP1ScoreboardResource::GPR,
+          registerIndex,
+          COP1Dependency::ReadWrite,
+          false,
+          EEOperation::Nop
+        };
+        return true;
+      }
     }
   }
 

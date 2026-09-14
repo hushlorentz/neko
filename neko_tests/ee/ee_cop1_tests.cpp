@@ -126,11 +126,17 @@ TEST_CASE("EE issue readiness observes cross-cycle COP1 producers")
   core.startExecution(0);
 
   system.clockMasterCycle();
+
+  REQUIRE(
+    core.acceptanceRecordsThisCycle().size() ==
+    2);
+  REQUIRE(core.programCounter() == 8);
+
   system.clockMasterCycle();
 
   REQUIRE(
     core.lastIssueSelection().instructionCount ==
-    1);
+    0);
   REQUIRE(core.programCounter() == 8);
 }
 
@@ -3055,7 +3061,7 @@ TEST_CASE("EE COP1 branches use FCR31 condition and likely annulment")
       (contract.taken
         ? 16
         : contract.likely
-          ? 12
+          ? 16
           : 8));
   }
 }
@@ -3219,7 +3225,7 @@ TEST_CASE("EE COP1 branch continuations survive save-state restore")
       (contract.taken
         ? 12
         : contract.likely
-          ? 12
+          ? 16
           : 8));
   }
 }

@@ -628,7 +628,8 @@ class EECore : public ClockedComponent
       std::uint8_t memberCount,
       std::uint32_t completedLoadRegisters);
     EEIssueMemberExecution executeIssueMember(
-      std::uint32_t completedLoadRegisters);
+      std::uint32_t completedLoadRegisters,
+      bool ignoreNewGroupGPRProducer);
     void recordInstructionAcceptance(
       std::uint64_t programOrder,
       std::uint32_t address,
@@ -646,6 +647,9 @@ class EECore : public ClockedComponent
       const EEInstruction &older,
       const EEInstruction &younger,
       std::size_t availableCOP1Slots) const;
+    bool issueSelectionCanExecuteConcurrently() const;
+    static bool isRegisterOnlyIssueOperation(
+      EEOperation operation);
     bool branchLikelyTaken(
       const EEInstruction &instruction) const;
     bool cop2ScoreboardBlocks(
@@ -715,7 +719,8 @@ class EECore : public ClockedComponent
     bool cop1ScoreboardBlocks(
       const EEInstruction &instruction,
       std::uint32_t completedLoadRegisters,
-      COP1ScoreboardHazard *hazard) const;
+      COP1ScoreboardHazard *hazard,
+      bool ignoreGPRProducer = false) const;
     COP1ScoreboardValue cop1ScoreboardValue(
       COP1ScoreboardResource resource,
       std::uint8_t registerIndex = 0) const;

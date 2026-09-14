@@ -989,7 +989,7 @@ accumulator or condition-result contract:
       a younger synchronous exception preserves completed older effects, and
       older-before-younger register, control, and stop-reason behavior remains
       precise
-- [ ] Activate only ordinary Table 1-3 `O` register-only pairs; keep every `Y`
+- [x] Activate only ordinary Table 1-3 `O` register-only pairs; keep every `Y`
       selection on the scalar fallback path until its owning pipeline block
       implements the required stall, and assert that concurrently issued
       physical-resource masks are compatible

@@ -50,11 +50,11 @@ TEST_CASE("EE bounded execution reports cycle-limit progress")
 
   REQUIRE(result.masterCycles == 2);
   REQUIRE(result.eeCycles == 2);
-  REQUIRE(result.instructions == 2);
+  REQUIRE(result.instructions == 3);
   REQUIRE(result.cycleLimitReached);
   REQUIRE(result.state == EEExecutionState::Running);
   REQUIRE(result.stopReason == EEStopReason::None);
-  REQUIRE(result.programCounter == 8);
+  REQUIRE(result.programCounter == 12);
   REQUIRE(result.pendingException == EEException::None);
   REQUIRE(result.exceptionAddress == 0);
   REQUIRE(system.masterClockScheduler().currentCycle() == 2);
@@ -189,19 +189,19 @@ TEST_CASE("EE instruction stepping waits through execution latency")
     immediateInstruction(0x0d, 0, 4, 1));
   system.eeCore().startExecution(0);
 
-  const EEExecutionResult multiply =
+  const EEExecutionResult pair =
     system.stepEEInstruction(1);
   const EEExecutionResult following =
     system.stepEEInstruction(10);
 
-  REQUIRE(multiply.masterCycles == 1);
-  REQUIRE(multiply.instructions == 1);
+  REQUIRE(pair.masterCycles == 1);
+  REQUIRE(pair.instructions == 2);
+  REQUIRE(system.eeCore().generalRegister(4).low == 1);
   REQUIRE(following.masterCycles == 4);
   REQUIRE(following.eeCycles == 4);
   REQUIRE(following.instructions == 1);
   REQUIRE_FALSE(following.cycleLimitReached);
-  REQUIRE(following.programCounter == 8);
-  REQUIRE(system.eeCore().generalRegister(4).low == 1);
+  REQUIRE(following.programCounter == 12);
 }
 
 TEST_CASE("EE instruction stepping can stop at its cycle bound")

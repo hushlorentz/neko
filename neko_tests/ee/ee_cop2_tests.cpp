@@ -720,7 +720,7 @@ TEST_CASE("EE COP2 branches use VU1 activity and likely annulment")
       (contract.taken
         ? 16
         : contract.likely
-          ? 12
+          ? 16
           : 8));
   }
 }

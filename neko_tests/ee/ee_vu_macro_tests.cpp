@@ -906,7 +906,7 @@ TEST_CASE("COP2 transfers honor cross-file macro hazards")
     REQUIRE(
       system.eeCore()
         .lastIssueSelection()
-        .instructionCount == 1);
+        .instructionCount == 0);
     REQUIRE(system.eeCore().programCounter() == 8);
   }
 

@@ -645,7 +645,7 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.elapsedCycles() == 0);
   }
 
-  SECTION("The front end fetches two while scalar issue retires one")
+  SECTION("The front end refills after two-wide issue")
   {
     bus.write32(0, 0);
     bus.write32(4, UINT32_C(0x00021900));
@@ -663,6 +663,7 @@ TEST_CASE("EE Core scheduled execution")
       core.lastInstruction().operation ==
       EEOperation::AddImmediateUnsignedWord);
     REQUIRE(core.lastInstruction().raw == 0x24030001);
+    REQUIRE(core.generalRegister(3).low == 1);
   }
 
   SECTION("Issue readiness previews an independent pair")
@@ -679,12 +680,165 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(
       selection.pairing ==
       EEIssuePairing::Concurrent);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("Independent register instructions issue together")
+  {
+    bus.write32(0, UINT32_C(0x24020001));
+    bus.write32(4, UINT32_C(0x24030002));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(2).low == 1);
+    REQUIRE(core.generalRegister(3).low == 2);
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0].address == 0);
+    REQUIRE(records[1].address == 4);
+    REQUIRE(records[0].programOrder == 1);
+    REQUIRE(records[1].programOrder == 2);
+    REQUIRE(core.lastInstructionAddress() == 4);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("Stepping observes a complete register-only pair")
+  {
+    bus.write32(0, UINT32_C(0x24020001));
+    bus.write32(4, UINT32_C(0x24030002));
+    core.startExecution(0);
+
+    const EEExecutionResult result =
+      system.stepEEInstruction(1);
+
+    REQUIRE(result.masterCycles == 1);
+    REQUIRE(result.eeCycles == 1);
+    REQUIRE(result.instructions == 2);
+    REQUIRE(core.generalRegister(2).low == 1);
+    REQUIRE(core.generalRegister(3).low == 2);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("Reverse fixed-pipe order issues concurrently")
+  {
+    core.setHI1(9);
+    bus.write32(0, UINT32_C(0x70001010));
+    bus.write32(4, UINT32_C(0x24030002));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEIssueSelection selection =
+      core.lastIssueSelection();
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.assignment.olderPipe ==
+      EELogicalPipe::Pipe1);
+    REQUIRE(
+      selection.assignment.youngerPipe ==
+      EELogicalPipe::Pipe0);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.generalRegister(2).low == 9);
+    REQUIRE(core.generalRegister(3).low == 2);
+  }
+
+  SECTION("An older COP1 GPR producer permits an independent partner")
+  {
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
+    bus.write32(0, UINT32_C(0x44020800));
+    bus.write32(4, UINT32_C(0x24030002));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      2);
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::Concurrent);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.generalRegister(2).low == 0);
+    REQUIRE(core.generalRegister(3).low == 2);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("Deferred pairs remain scalar")
+  {
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    bus.write32(0, UINT32_C(0x44020800));
+    bus.write32(4, UINT32_C(0x46031000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(core.programCounter() == 4);
+  }
+
+  SECTION("Memory pairs remain scalar")
+  {
+    core.setGeneralRegister(1, {0x100, 0});
+    bus.write32(0x100, UINT32_C(0x12345678));
+    bus.write32(0, UINT32_C(0x8c220000));
+    bus.write32(4, UINT32_C(0x24030001));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(
+      core.generalRegister(2).low ==
+      UINT64_C(0x0000000012345678));
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.programCounter() == 4);
+  }
+
+  SECTION("Shift-amount pairs remain scalar")
+  {
+    core.setGeneralRegister(1, {3, 0});
+    bus.write32(0, UINT32_C(0x00200029));
+    bus.write32(4, UINT32_C(0x24020001));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(core.shiftAmount() == 3);
+    REQUIRE(core.generalRegister(2).low == 0);
     REQUIRE(core.programCounter() == 4);
   }
 
   SECTION("Successful issue produces one acceptance record")
   {
     bus.write32(0, UINT32_C(0x24020001));
+    bus.write32(4, UINT32_C(0x0000000c));
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -890,6 +1044,9 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(EECOP0Register::Status, 0);
     bus.write32(0, UINT32_C(0x0000000c));
     bus.write32(EEExceptionVector::GENERAL, 0);
+    bus.write32(
+      EEExceptionVector::GENERAL + 4,
+      UINT32_C(0x0000000c));
     core.startExecution(0);
 
     system.clockMasterCycle();

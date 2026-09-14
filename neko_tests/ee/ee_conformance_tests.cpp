@@ -410,13 +410,18 @@ TEST_CASE("In-flight EE save states resume identically")
   {
     NekoSystem original;
     prepareDeterminismProgram(&original);
-    for (std::uint8_t instruction = 0;
-         instruction < 6;
-         ++instruction)
+    std::uint64_t accepted = 0;
+    do
     {
+      const EEExecutionResult step =
+        original.stepEEInstruction(16);
       REQUIRE(
-        original.stepEEInstruction(16).instructions == 1);
+        step.instructions ==
+        (accepted == 0 ? 2 : 1));
+      accepted += step.instructions;
     }
+    while (original.eeCore().lastInstructionAddress() != 20);
+    REQUIRE(accepted == 6);
     REQUIRE(original.eeCore().programCounter() == 24);
     REQUIRE(original.eeCore().lastInstructionAddress() == 20);
     const std::vector<std::uint8_t> state =
