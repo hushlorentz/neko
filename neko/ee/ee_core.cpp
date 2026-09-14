@@ -43,6 +43,11 @@ std::size_t EEAcceptanceRecords::size() const
   return count;
 }
 
+std::uint64_t EEAcceptanceRecords::instructionCount() const
+{
+  return count;
+}
+
 const EEAcceptanceRecord &EEAcceptanceRecords::operator[](
   std::size_t index) const
 {

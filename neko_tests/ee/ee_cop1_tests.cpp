@@ -207,6 +207,33 @@ TEST_CASE("EE accepts delayed COP1 work before completion")
   REQUIRE(core.floatingPointRegister(3) == UINT32_C(0x40400000));
 }
 
+TEST_CASE("EE stepping counts delayed COP1 admission")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 1, 3, 2));
+  core.startExecution(0);
+
+  const EEExecutionResult result =
+    system.stepEEInstruction(1);
+
+  REQUIRE(result.instructions == 1);
+  REQUIRE(result.masterCycles == 1);
+  REQUIRE(result.programCounter == 4);
+  REQUIRE(core.floatingPointRegister(3) == 0);
+  REQUIRE(
+    core.acceptanceRecordsThisCycle()
+      .instructionCount() == 1);
+}
+
 TEST_CASE("EE COP1 raw values expose EE and IEEE classifications")
 {
   struct ClassificationVector

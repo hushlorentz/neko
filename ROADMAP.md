@@ -977,7 +977,7 @@ accumulator or condition-result contract:
       counts, stop reasons, exception ownership, deterministic per-cycle trace
       ordering, and sufficient trace-event capacity for both instructions and
       their memory, interlock, exception, and hazard events
-- [ ] Update `stepEEInstruction()`, `runEE()`, `runELF()`, guest-return
+- [x] Update `stepEEInstruction()`, `runEE()`, `runELF()`, guest-return
       detection, and instruction counts to consume ordered acceptance records
       and stop only after every successfully accepted member has produced its
       record, independently of delayed pipeline completion

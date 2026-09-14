@@ -27,6 +27,7 @@ TEST_CASE("EE acceptance records preserve issue-group order")
   });
 
   REQUIRE(records.size() == 2);
+  REQUIRE(records.instructionCount() == 2);
   REQUIRE(records[0].programOrder == 7);
   REQUIRE(records[0].address == 0x100);
   REQUIRE(records[0].instruction.raw == 0x24020001);

@@ -72,6 +72,7 @@ class EEAcceptanceRecords
     void clear();
     void append(const EEAcceptanceRecord &record);
     std::size_t size() const;
+    std::uint64_t instructionCount() const;
     const EEAcceptanceRecord &operator[](
       std::size_t index) const;
 

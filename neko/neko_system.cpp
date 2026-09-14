@@ -160,10 +160,8 @@ EEGuestExecutionResult NekoSystem::runELF(
     }
     clockMasterCycle();
     ++masterCycles;
-    if (eeCoreComponent.acceptanceRecords.size() != 0)
-    {
-      ++instructions;
-    }
+    instructions +=
+      eeCoreComponent.acceptanceRecords.instructionCount();
   }
 
   if (eeCoreComponent.clockActive() &&
@@ -522,10 +520,8 @@ EEExecutionResult NekoSystem::stepEEInstruction(
   {
     clockMasterCycle();
     ++masterCycles;
-    if (eeCoreComponent.acceptanceRecords.size() != 0)
-    {
-      ++instructions;
-    }
+    instructions +=
+      eeCoreComponent.acceptanceRecords.instructionCount();
   }
 
   return makeEEExecutionResult(
@@ -552,10 +548,8 @@ EEExecutionResult NekoSystem::runEE(
   {
     clockMasterCycle();
     ++masterCycles;
-    if (eeCoreComponent.acceptanceRecords.size() != 0)
-    {
-      ++instructions;
-    }
+    instructions +=
+      eeCoreComponent.acceptanceRecords.instructionCount();
   }
 
   return makeEEExecutionResult(
