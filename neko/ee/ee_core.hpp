@@ -311,6 +311,15 @@ class EECore : public ClockedComponent
       S2
     };
 
+    enum class IssueLatchFailure : std::uint8_t
+    {
+      None,
+      AddressError,
+      BusError,
+      ReservedInstruction,
+      UnsupportedInstruction
+    };
+
     enum COP1Destination : std::uint8_t
     {
       COP1_DESTINATION_NONE = 0,
@@ -336,6 +345,7 @@ class EECore : public ClockedComponent
       bool valid = false;
       std::uint32_t address = 0;
       EEInstruction instruction;
+      IssueLatchFailure failure = IssueLatchFailure::None;
     };
 
     struct COP1DestinationMetadata
@@ -440,6 +450,7 @@ class EECore : public ClockedComponent
     EEInstruction lastDecodedInstruction;
     std::uint32_t rejectedInstructionValue = 0;
     DecodedIssueLatch issueLatch;
+    DecodedIssueLatch stagingLatch;
     static constexpr std::size_t COP1_IN_FLIGHT_CAPACITY = 16;
     std::array<
       InFlightCOP1Operation,
@@ -511,6 +522,13 @@ class EECore : public ClockedComponent
       bool alreadyExceptionLevel) const;
     void setInterruptLines(bool intc, bool dmac);
     bool interruptDeliverable() const;
+    void fillIssueLatch(
+      DecodedIssueLatch *latch,
+      std::uint32_t address);
+    void fillIssueFrontEnd();
+    void advanceIssueFrontEnd();
+    void clearIssueFrontEnd();
+    bool handleIssueLatchFailure();
     bool executeInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);

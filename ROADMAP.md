@@ -945,7 +945,7 @@ accumulator or condition-result contract:
 - [x] Define how older/younger program order maps to fixed and flexible logical
       pipes, including whether a Pipe-1-only older instruction may pair with a
       Pipe-0-only younger instruction
-- [ ] Add two-instruction fetch/decode and the documented staging register for
+- [x] Add two-instruction fetch/decode and the documented staging register for
       an instruction that cannot issue from `Q` to `R`, widening the scalar
       decoded-instruction latch without reintroducing fetch side effects
 - [ ] Select and issue zero, one, or two instructions in program order while

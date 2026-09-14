@@ -397,7 +397,7 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.elapsedCycles() == 0);
   }
 
-  SECTION("Each master cycle fetches and decodes one instruction")
+  SECTION("The front end fetches two while scalar issue retires one")
   {
     bus.write32(0, 0);
     bus.write32(4, UINT32_C(0x00021900));
@@ -415,6 +415,53 @@ TEST_CASE("EE Core scheduled execution")
       core.lastInstruction().operation ==
       EEOperation::AddImmediateUnsignedWord);
     REQUIRE(core.lastInstruction().raw == 0x24030001);
+  }
+
+  SECTION("A younger fetch fault waits for the older instruction")
+  {
+    const std::uint32_t finalMappedAddress =
+      EEMemoryMap::MAIN_MEMORY_SIZE - 4;
+    bus.write32(
+      finalMappedAddress,
+      UINT32_C(0x24020001));
+    core.startExecution(finalMappedAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE_FALSE(core.exceptionPending());
+    REQUIRE(core.generalRegister(2).low == 1);
+    REQUIRE(
+      core.programCounter() ==
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::InstructionBusError);
+    REQUIRE(
+      core.exceptionAddress() ==
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+  }
+
+  SECTION("A younger decode fault waits for the older instruction")
+  {
+    bus.write32(0, UINT32_C(0x24020001));
+    bus.write32(4, UINT32_C(0x4c000000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE_FALSE(core.exceptionPending());
+    REQUIRE(core.generalRegister(2).low == 1);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::ReservedInstruction);
+    REQUIRE(core.rejectedInstruction() == 0x4c000000);
   }
 
   SECTION("A fetch exception enters the bootstrap handler")

@@ -4667,7 +4667,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "EE decoded issue latch retains a stalled instruction without refetching")
+  "EE two-entry front end retains a stalled instruction without refetching")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -4682,10 +4682,11 @@ TEST_CASE(
     cop1SingleInstruction(0x00, 4, 5, 6));
   core.startExecution(0);
 
-  system.runMasterCycles(2);
+  system.clockMasterCycle();
   REQUIRE(core.programCounter() == 4);
 
   system.eeBus().write32(4, 0);
+  system.clockMasterCycle();
   system.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
 
   REQUIRE(core.programCounter() == 8);
@@ -4699,9 +4700,9 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "EE decoded issue latch participates in hashes and save states")
+  "EE staged instruction participates in hashes and save states")
 {
-  SECTION("Different retained instructions produce different hashes")
+  SECTION("Different staged instructions produce different hashes")
   {
     NekoSystem addSystem;
     NekoSystem subtractSystem;
@@ -4729,15 +4730,15 @@ TEST_CASE(
     addSystem.eeCore().startExecution(0);
     subtractSystem.eeCore().startExecution(0);
 
-    addSystem.runMasterCycles(2);
-    subtractSystem.runMasterCycles(2);
+    addSystem.runMasterCycles(1);
+    subtractSystem.runMasterCycles(1);
 
     REQUIRE(
       addSystem.eeCore().stateHash() !=
       subtractSystem.eeCore().stateHash());
   }
 
-  SECTION("Save-state restore preserves the decoded instruction")
+  SECTION("Save-state restore preserves the staged instruction")
   {
     NekoSystem original;
     EECore &originalCore = original.eeCore();
@@ -4757,15 +4758,15 @@ TEST_CASE(
       4,
       cop1SingleInstruction(0x00, 4, 5, 6));
     originalCore.startExecution(0);
-    original.runMasterCycles(2);
+    original.runMasterCycles(1);
 
     NekoSystem restored;
     restored.loadState(original.saveState());
     original.eeBus().write32(4, 0);
     restored.eeBus().write32(4, 0);
 
-    original.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
-    restored.runMasterCycles(COP1_DIV_SQRT_LATENCY - 1);
+    original.runMasterCycles(COP1_DIV_SQRT_LATENCY);
+    restored.runMasterCycles(COP1_DIV_SQRT_LATENCY);
 
     REQUIRE(originalCore.floatingPointRegister(5) == 0);
     REQUIRE(restored.eeCore().floatingPointRegister(5) == 0);
@@ -4784,7 +4785,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-  "EE decoded issue latch obeys resume and redirect ownership")
+  "EE two-entry front end obeys resume and redirect ownership")
 {
   SECTION("Matching host halt and resume preserve the latch")
   {

@@ -18,7 +18,7 @@ namespace
   constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  constexpr std::uint32_t SAVE_STATE_VERSION = 23;
+  constexpr std::uint32_t SAVE_STATE_VERSION = 24;
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
     UINT64_C(14695981039346656037);
@@ -1317,6 +1317,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.rejectedInstructionValue;
   destination->eeCoreComponent.issueLatch =
     source->eeCoreComponent.issueLatch;
+  destination->eeCoreComponent.stagingLatch =
+    source->eeCoreComponent.stagingLatch;
   destination->eeCoreComponent.inFlightCOP1Operations =
     source->eeCoreComponent.inFlightCOP1Operations;
   destination->eeCoreComponent.nextEEProgramOrder =
@@ -1665,16 +1667,17 @@ void NekoSaveStateCodec::writeEECore(
     };
   writePending(core.pendingMac0);
   writePending(core.pendingMac1);
-  writer->writeBool(false);
-  writer->writeU8(0);
-  writer->writeU32(0);
-  for (std::size_t index = 0; index < 2; ++index)
+  writer->writeU8(
+    static_cast<std::uint8_t>(
+      core.issueLatch.failure));
+  writer->writeBool(core.stagingLatch.valid);
+  writer->writeU8(
+    static_cast<std::uint8_t>(
+      core.stagingLatch.failure));
+  writer->writeU32(core.stagingLatch.address);
+  writer->writeU32(core.stagingLatch.instruction.raw);
+  for (std::size_t index = 0; index < 13; ++index)
   {
-    writer->writeBool(false);
-    writer->writeU8(0);
-    writer->writeU8(0);
-    writer->writeU32(0);
-    writer->writeU8(0);
     writer->writeU8(0);
   }
   writer->writeU8(core.cop1DividerInitiationCycles);
@@ -1810,34 +1813,28 @@ void NekoSaveStateCodec::readEECore(
   readPending(
     &core->pendingMac1,
     "EE MAC1 pending flag");
-  const bool retiredPendingLoadActive =
-    reader->readBool("retired EE COP1 pending-load flag");
-  const std::uint8_t retiredPendingLoadRegister =
-    reader->readU8();
-  const std::uint32_t retiredPendingLoadValue =
+  core->issueLatch.failure =
+    readEnum<EECore::IssueLatchFailure>(
+      reader,
+      static_cast<std::uint8_t>(
+        EECore::IssueLatchFailure::UnsupportedInstruction),
+      "EE decoded issue-latch failure");
+  core->stagingLatch.valid =
+    reader->readBool("EE staging-latch flag");
+  core->stagingLatch.failure =
+    readEnum<EECore::IssueLatchFailure>(
+      reader,
+      static_cast<std::uint8_t>(
+        EECore::IssueLatchFailure::UnsupportedInstruction),
+      "EE staging-latch failure");
+  core->stagingLatch.address = reader->readU32();
+  const std::uint32_t stagingInstruction =
     reader->readU32();
-  require(
-    !retiredPendingLoadActive &&
-      retiredPendingLoadRegister == 0 &&
-      retiredPendingLoadValue == 0,
-    "retired EE COP1 pending-load state is not empty");
-  for (std::size_t index = 0; index < 2; ++index)
+  for (std::size_t index = 0; index < 13; ++index)
   {
-    const bool active =
-      reader->readBool("retired EE COP1 pending-divider flag");
-    const std::uint8_t remainingCycles = reader->readU8();
-    const std::uint8_t registerIndex = reader->readU8();
-    const std::uint32_t value = reader->readU32();
-    const std::uint8_t affectedFlags = reader->readU8();
-    const std::uint8_t raisedFlags = reader->readU8();
     require(
-      !active &&
-        remainingCycles == 0 &&
-        registerIndex == 0 &&
-        value == 0 &&
-        affectedFlags == 0 &&
-        raisedFlags == 0,
-      "retired EE COP1 pending-divider state is not empty");
+      reader->readU8() == 0,
+      "EE reserved front-end state is not empty");
   }
   core->cop1DividerInitiationCycles = reader->readU8();
   core->cop1DividerOperation =
@@ -2701,12 +2698,75 @@ void NekoSaveStateCodec::readEECore(
     core->lastDecodedInstruction =
       decodeEEInstruction(lastInstruction);
   }
-  core->issueLatch.instruction = {};
-  if (core->issueLatch.valid)
-  {
-    core->issueLatch.instruction =
-      decodeEEInstruction(issueInstruction);
-  }
+  const auto restoreIssueLatch =
+    [](EECore::DecodedIssueLatch *latch,
+       std::uint32_t instruction)
+    {
+      latch->instruction = {};
+      if (!latch->valid)
+      {
+        require(
+          latch->address == 0 &&
+            instruction == 0 &&
+            latch->failure ==
+              EECore::IssueLatchFailure::None,
+          "EE inactive issue latch contains state");
+        return;
+      }
+
+      if (latch->failure == EECore::IssueLatchFailure::None)
+      {
+        require(
+          (latch->address & 3) == 0,
+          "EE decoded issue latch address is invalid");
+        latch->instruction =
+          decodeEEInstruction(instruction);
+        return;
+      }
+
+      latch->instruction.raw = instruction;
+      if (latch->failure ==
+            EECore::IssueLatchFailure::AddressError)
+      {
+        require(
+          (latch->address & 3) != 0 && instruction == 0,
+          "EE address-error issue latch is inconsistent");
+        return;
+      }
+      if (latch->failure == EECore::IssueLatchFailure::BusError)
+      {
+        require(
+          (latch->address & 3) == 0 && instruction == 0,
+          "EE bus-error issue latch is inconsistent");
+        return;
+      }
+
+      require(
+        (latch->address & 3) == 0,
+        "EE decode-failure issue latch address is invalid");
+      bool matchingDecodeFailure = false;
+      try
+      {
+        decodeEEInstruction(instruction);
+      }
+      catch (const EEInstructionDecodeError &error)
+      {
+        matchingDecodeFailure =
+          (latch->failure ==
+             EECore::IssueLatchFailure::ReservedInstruction &&
+           error.failure() ==
+             EEInstructionDecodeFailure::Reserved) ||
+          (latch->failure ==
+             EECore::IssueLatchFailure::UnsupportedInstruction &&
+           error.failure() ==
+             EEInstructionDecodeFailure::Unsupported);
+      }
+      require(
+        matchingDecodeFailure,
+        "EE decode-failure issue latch is inconsistent");
+    };
+  restoreIssueLatch(&core->issueLatch, issueInstruction);
+  restoreIssueLatch(&core->stagingLatch, stagingInstruction);
 
   require(
     core->generalRegisters[0] == EERegister128{},
@@ -2733,18 +2793,21 @@ void NekoSaveStateCodec::readEECore(
       (core->lastAddress == 0 && lastInstruction == 0),
     "EE invalid last instruction contains state");
   require(
-    core->issueLatch.valid ||
-      (core->issueLatch.address == 0 &&
-       issueInstruction == 0),
-    "EE inactive issue latch contains state");
-  require(
     !core->issueLatch.valid ||
-      ((core->issueLatch.address & 3) == 0 &&
-       core->pc == core->issueLatch.address &&
+      (core->pc == core->issueLatch.address &&
        (core->state == EEExecutionState::Running ||
         (core->state == EEExecutionState::Halted &&
          core->haltReason == EEStopReason::HostHalt))),
     "EE decoded issue latch state is inconsistent");
+  require(
+    !core->stagingLatch.valid ||
+      (core->issueLatch.valid &&
+       core->issueLatch.failure ==
+         EECore::IssueLatchFailure::None &&
+       core->stagingLatch.address ==
+         core->issueLatch.address + 4 &&
+       !core->branchDelayPending),
+    "EE staging latch state is inconsistent");
   require(
     !(core->pendingMac0.active && core->pendingMac1.active),
     "EE reference core has concurrent multiply/divide state");

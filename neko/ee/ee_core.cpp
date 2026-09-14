@@ -278,7 +278,7 @@ void EECore::reset()
   lastAddress = 0;
   lastDecodedInstruction = {};
   rejectedInstructionValue = 0;
-  issueLatch = {};
+  clearIssueFrontEnd();
   inFlightCOP1Operations.fill({});
   nextEEProgramOrder = 1;
   executingProgramOrder = 0;
@@ -383,6 +383,120 @@ EEInstructionFetchResult EECore::fetchInstruction()
   return {true, address, instruction};
 }
 
+void EECore::fillIssueLatch(
+  DecodedIssueLatch *latch,
+  std::uint32_t address)
+{
+  *latch = {};
+  latch->valid = true;
+  latch->address = address;
+  if ((address & 3) != 0)
+  {
+    latch->failure = IssueLatchFailure::AddressError;
+    return;
+  }
+
+  std::uint32_t instruction = 0;
+  if (!attachedBus().readInstruction32(
+        address,
+        &instruction))
+  {
+    latch->failure = IssueLatchFailure::BusError;
+    return;
+  }
+
+  try
+  {
+    latch->instruction = decodeEEInstruction(instruction);
+  }
+  catch (const EEInstructionDecodeError &error)
+  {
+    latch->instruction.raw = instruction;
+    latch->failure =
+      error.failure() == EEInstructionDecodeFailure::Reserved
+        ? IssueLatchFailure::ReservedInstruction
+        : IssueLatchFailure::UnsupportedInstruction;
+  }
+}
+
+void EECore::fillIssueFrontEnd()
+{
+  if (!issueLatch.valid)
+  {
+    fillIssueLatch(&issueLatch, pc);
+  }
+  if (issueLatch.failure != IssueLatchFailure::None ||
+      stagingLatch.valid ||
+      branchDelayPending)
+  {
+    return;
+  }
+  fillIssueLatch(
+    &stagingLatch,
+    issueLatch.address + 4);
+}
+
+void EECore::advanceIssueFrontEnd()
+{
+  issueLatch = stagingLatch;
+  stagingLatch = {};
+}
+
+void EECore::clearIssueFrontEnd()
+{
+  issueLatch = {};
+  stagingLatch = {};
+}
+
+bool EECore::handleIssueLatchFailure()
+{
+  if (!issueLatch.valid ||
+      issueLatch.failure == IssueLatchFailure::None)
+  {
+    return false;
+  }
+
+  const std::uint32_t address = issueLatch.address;
+  const std::uint32_t instruction =
+    issueLatch.instruction.raw;
+  switch (issueLatch.failure)
+  {
+    case IssueLatchFailure::AddressError:
+      enterException(
+        EEException::AddressErrorLoadOrFetch,
+        address,
+        address,
+        0);
+      return true;
+    case IssueLatchFailure::BusError:
+      enterException(
+        EEException::InstructionBusError,
+        address,
+        address,
+        0);
+      return true;
+    case IssueLatchFailure::ReservedInstruction:
+      rejectedInstructionValue = instruction;
+      enterException(
+        EEException::ReservedInstruction,
+        address,
+        address,
+        instruction);
+      return true;
+    case IssueLatchFailure::UnsupportedInstruction:
+      rejectedInstructionValue = instruction;
+      pc = address;
+      state = EEExecutionState::Halted;
+      haltReason = EEStopReason::UnsupportedInstruction;
+      clearIssueFrontEnd();
+      return true;
+    case IssueLatchFailure::None:
+      break;
+  }
+  throw std::logic_error(
+    "Unknown EE issue-latch failure.");
+}
+
 void EECore::startExecution(std::uint32_t startAddress)
 {
   const bool resumePendingBranch =
@@ -410,7 +524,7 @@ void EECore::startExecution(std::uint32_t startAddress)
     (pendingCOP1DividerActive() ||
      cop1DividerInitiationCycles != 0) &&
     startAddress == pc;
-  const bool resumeIssueLatch =
+  const bool resumeIssueFrontEnd =
     state == EEExecutionState::Halted &&
     haltReason == EEStopReason::HostHalt &&
     issueLatch.valid &&
@@ -453,9 +567,9 @@ void EECore::startExecution(std::uint32_t startAddress)
     cop1DividerInitiationCycles = 0;
     cop1DividerOperation = EEOperation::Nop;
   }
-  if (!resumeIssueLatch)
+  if (!resumeIssueFrontEnd)
   {
-    issueLatch = {};
+    clearIssueFrontEnd();
   }
   if (!resumeEEProgramOrder)
   {
@@ -550,45 +664,10 @@ void EECore::clock()
     return;
   }
 
-  if (!issueLatch.valid)
+  fillIssueFrontEnd();
+  if (handleIssueLatchFailure())
   {
-    const EEInstructionFetchResult fetched =
-      fetchInstruction();
-    if (!fetched.succeeded)
-    {
-      enterException(
-        exception,
-        fetched.address,
-        fetched.address,
-        0);
-      return;
-    }
-
-    try
-    {
-      issueLatch = {
-        true,
-        fetched.address,
-        decodeEEInstruction(fetched.instruction)
-      };
-    }
-    catch (const EEInstructionDecodeError &error)
-    {
-      rejectedInstructionValue = fetched.instruction;
-      if (error.failure() == EEInstructionDecodeFailure::Reserved)
-      {
-        enterException(
-          EEException::ReservedInstruction,
-          fetched.address,
-          fetched.address,
-          fetched.instruction);
-        return;
-      }
-      pc = fetched.address;
-      state = EEExecutionState::Halted;
-      haltReason = EEStopReason::UnsupportedInstruction;
-      return;
-    }
+    return;
   }
 
   const std::uint32_t instructionAddress =
@@ -699,14 +778,18 @@ void EECore::clock()
       }
     }
   }
-  issueLatch = {};
   const bool executed =
     executeInstruction(decoded, instructionAddress);
   executingProgramOrder = 0;
   if (!executed)
   {
+    if (state != EEExecutionState::Running)
+    {
+      clearIssueFrontEnd();
+    }
     return;
   }
+  advanceIssueFrontEnd();
   if (dividerDelaySlotHazard)
   {
     recordCycleTrace(
@@ -780,6 +863,7 @@ void EECore::clock()
     branchInstructionAddress = 0;
     branchDelayFromLikely = false;
     branchDelayTaken = false;
+    clearIssueFrontEnd();
   }
   else if (isEEBranchLikelyOperation(decoded.operation) &&
            !branchDelayPending)
@@ -788,6 +872,11 @@ void EECore::clock()
     cop1DividerPostDelayBranchAddress = instructionAddress;
     cop1DividerPostDelayTargetAddress = 0;
     cop1DividerPostDelayTaken = false;
+    clearIssueFrontEnd();
+  }
+  else if (decoded.operation == EEOperation::ExceptionReturn)
+  {
+    clearIssueFrontEnd();
   }
   recordShiftAmountAccess(decoded);
   lastDecodedInstruction = decoded;
@@ -4663,7 +4752,7 @@ void EECore::enterException(
   cop1DividerPostDelayTaken = false;
   cop1DividerPostTargetInstructions = 0;
   cop1DividerPostTargetAddress = 0;
-  issueLatch = {};
+  clearIssueFrontEnd();
 }
 
 void EECore::discardInFlightCOP1AtOrAfter(
@@ -4822,6 +4911,15 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, issueLatch.valid);
   hashEEStateValue(&hash, issueLatch.address);
   hashEEStateValue(&hash, issueLatch.instruction.raw);
+  hashEEStateValue(
+    &hash,
+    static_cast<std::uint8_t>(issueLatch.failure));
+  hashEEStateValue(&hash, stagingLatch.valid);
+  hashEEStateValue(&hash, stagingLatch.address);
+  hashEEStateValue(&hash, stagingLatch.instruction.raw);
+  hashEEStateValue(
+    &hash,
+    static_cast<std::uint8_t>(stagingLatch.failure));
   hashEEStateValue(&hash, nextEEProgramOrder);
   for (const InFlightCOP1Operation &operation :
        inFlightCOP1Operations)
@@ -5048,7 +5146,7 @@ std::uint32_t EECore::programCounter() const
 void EECore::setProgramCounter(std::uint32_t value)
 {
   pc = value;
-  issueLatch = {};
+  clearIssueFrontEnd();
 }
 
 std::uint64_t EECore::hi() const
