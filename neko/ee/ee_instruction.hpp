@@ -217,6 +217,20 @@ struct EEInstructionPipeAssignment
   EELogicalPipe youngerPipe = EELogicalPipe::Pipe1;
 };
 
+enum class EEIssuePairing : std::uint8_t
+{
+  Forbidden,
+  Concurrent,
+  ConcurrentWithStall
+};
+
+struct EEIssueSelection
+{
+  std::uint8_t instructionCount = 0;
+  EEInstructionPipeAssignment assignment;
+  EEIssuePairing pairing = EEIssuePairing::Forbidden;
+};
+
 struct EEInstruction
 {
   EEOperation operation = EEOperation::Nop;
@@ -265,6 +279,11 @@ bool eeInstructionUsesPhysicalPipeline(
 EEInstructionPipeAssignment assignEEInstructionPairPipes(
   EEOperation older,
   EEOperation younger);
+EEIssueSelection selectEEIssueGroup(
+  const EEInstruction &older,
+  const EEInstruction &younger,
+  bool olderReady,
+  bool youngerReady);
 bool isEEBranchOperation(EEOperation operation);
 bool isEEBranchLikelyOperation(EEOperation operation);
 

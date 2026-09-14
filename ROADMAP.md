@@ -948,9 +948,9 @@ accumulator or condition-result contract:
 - [x] Add two-instruction fetch/decode and the documented staging register for
       an instruction that cannot issue from `Q` to `R`, widening the scalar
       decoded-instruction latch without reintroducing fetch side effects
-- [ ] Select and issue zero, one, or two instructions in program order while
-      respecting data dependencies, Pipe 0/Pipe 1 routing, and Table 1-3
-      `O`/`X` pair legality
+- [x] Select zero, one, or two candidate instructions in program order while
+      respecting same-pair data dependencies, Pipe 0/Pipe 1 routing, and
+      Table 1-3 `O`/`X`/`Y` classification without changing scalar retirement
 - [ ] Integrate the documented illegal sequences for Branch-Branch,
       Branch-ERET, Branch-SYNC.P/SYNC.L, and
       Branch-Likely-MTSA/MTSAB/MTSAH with the existing deterministic
@@ -974,6 +974,8 @@ accumulator or condition-result contract:
 - [ ] Persist fetch, staging, pipe-assignment, and partially issued state
       through reset, interrupts, halt/resume, canonical hashes, and
       transactional save states
+- [ ] Activate selected two-instruction groups after precise pair execution,
+      retirement, trace, stepping, and continuation contracts are defined
 - [ ] Validate single-issue fallback and every implemented instruction-category
       pairing before an independent EE scheduler review
 

@@ -312,6 +312,178 @@ TEST_CASE("EE pair pipe assignment preserves program order")
   }
 }
 
+TEST_CASE("EE two-wide issue selection")
+{
+  SECTION("Independent flexible instructions issue together")
+  {
+    const EEIssueSelection selection =
+      selectEEIssueGroup(
+        decodeEEInstruction(
+          immediateInstruction(0x09, 0, 2, 1)),
+        decodeEEInstruction(
+          immediateInstruction(0x09, 0, 3, 2)),
+        true,
+        true);
+
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.pairing ==
+      EEIssuePairing::Concurrent);
+    REQUIRE(
+      selection.assignment.olderPipe ==
+      EELogicalPipe::Pipe0);
+    REQUIRE(
+      selection.assignment.youngerPipe ==
+      EELogicalPipe::Pipe1);
+  }
+
+  SECTION("Reverse fixed-pipe order remains pairable")
+  {
+    const EEIssueSelection selection =
+      selectEEIssueGroup(
+        decodeEEInstruction(
+          immediateInstruction(0x23, 1, 2, 0)),
+        decodeEEInstruction(
+          UINT32_C(0x46031040)),
+        true,
+        true);
+
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.assignment.olderPipe ==
+      EELogicalPipe::Pipe1);
+    REQUIRE(
+      selection.assignment.youngerPipe ==
+      EELogicalPipe::Pipe0);
+  }
+
+  SECTION("Same-pair GPR dependencies fall back to the older instruction")
+  {
+    const EEInstruction producer =
+      decodeEEInstruction(
+        immediateInstruction(0x09, 0, 2, 1));
+
+    REQUIRE(
+      selectEEIssueGroup(
+        producer,
+        decodeEEInstruction(
+          immediateInstruction(0x09, 2, 3, 1)),
+        true,
+        true).instructionCount == 1);
+    REQUIRE(
+      selectEEIssueGroup(
+        producer,
+        decodeEEInstruction(
+          immediateInstruction(0x09, 0, 2, 2)),
+        true,
+        true).instructionCount == 1);
+  }
+
+  SECTION("FCR31 condition aliases prevent same-pair issue")
+  {
+    REQUIRE(
+      selectEEIssueGroup(
+        decodeEEInstruction(UINT32_C(0x46031032)),
+        decodeEEInstruction(UINT32_C(0x4442f800)),
+        true,
+        true).instructionCount == 1);
+    REQUIRE(
+      selectEEIssueGroup(
+        decodeEEInstruction(UINT32_C(0x44c2f800)),
+        decodeEEInstruction(UINT32_C(0x45010001)),
+        true,
+        true).instructionCount == 1);
+  }
+
+  SECTION("Conservative COP2 state blocks dependent transfer pairs")
+  {
+    REQUIRE(
+      selectEEIssueGroup(
+        decodeEEInstruction(UINT32_C(0x4a0002ff)),
+        decodeEEInstruction(UINT32_C(0x48220800)),
+        true,
+        true).instructionCount == 1);
+    REQUIRE(
+      selectEEIssueGroup(
+        decodeEEInstruction(UINT32_C(0x48a20800)),
+        decodeEEInstruction(UINT32_C(0x4a0002ff)),
+        true,
+        true).instructionCount == 1);
+  }
+
+  SECTION("Table 1-3 forbidden pairs fall back to one instruction")
+  {
+    const EEIssueSelection selection =
+      selectEEIssueGroup(
+        decodeEEInstruction(
+          immediateInstruction(0x04, 1, 2, 1)),
+        decodeEEInstruction(
+          immediateInstruction(0x05, 3, 4, 1)),
+        true,
+        true);
+
+    REQUIRE(selection.instructionCount == 1);
+    REQUIRE(
+      selection.pairing ==
+      EEIssuePairing::Forbidden);
+  }
+
+  SECTION("Table 1-3 delayed pairs remain two-wide selections")
+  {
+    const EEIssueSelection selection =
+      selectEEIssueGroup(
+        decodeEEInstruction(UINT32_C(0x44020800)),
+        decodeEEInstruction(UINT32_C(0x46031000)),
+        true,
+        true);
+
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+  }
+
+  SECTION("Readiness selects zero or only the older instruction")
+  {
+    const EEInstruction older =
+      decodeEEInstruction(
+        immediateInstruction(0x09, 0, 2, 1));
+    const EEInstruction younger =
+      decodeEEInstruction(
+        immediateInstruction(0x09, 0, 3, 2));
+
+    REQUIRE(
+      selectEEIssueGroup(
+        older,
+        younger,
+        false,
+        true).instructionCount == 0);
+    REQUIRE(
+      selectEEIssueGroup(
+        older,
+        younger,
+        true,
+        false).instructionCount == 1);
+  }
+
+  SECTION("Failed pairing retains the older scalar pipe")
+  {
+    const EEIssueSelection selection =
+      selectEEIssueGroup(
+        decodeEEInstruction(
+          immediateInstruction(0x23, 1, 2, 0)),
+        decodeEEInstruction(UINT32_C(0x44020800)),
+        true,
+        true);
+
+    REQUIRE(selection.instructionCount == 1);
+    REQUIRE_FALSE(selection.assignment.assignable);
+    REQUIRE(
+      selection.assignment.olderPipe ==
+      EELogicalPipe::Pipe1);
+  }
+}
+
 TEST_CASE("EE base integer decoder tables")
 {
   struct RegisterContract

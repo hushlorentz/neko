@@ -38,6 +38,474 @@ namespace
 
   using DecodeTable = std::array<DecodeEntry, 64>;
 
+  enum InstructionSpecialResource : std::uint16_t
+  {
+    RESOURCE_HI = 1 << 0,
+    RESOURCE_LO = 1 << 1,
+    RESOURCE_HI1 = 1 << 2,
+    RESOURCE_LO1 = 1 << 3,
+    RESOURCE_SA = 1 << 4,
+    RESOURCE_COP1_ACCUMULATOR = 1 << 5,
+    RESOURCE_COP1_FCR31 = 1 << 6,
+    RESOURCE_COP2_STATE = 1 << 7
+  };
+
+  struct InstructionDependencies
+  {
+    std::uint32_t gprReads = 0;
+    std::uint32_t gprWrites = 0;
+    std::uint32_t fprReads = 0;
+    std::uint32_t fprWrites = 0;
+    std::uint32_t cop2Reads = 0;
+    std::uint32_t cop2Writes = 0;
+    std::uint32_t cop2ControlReads = 0;
+    std::uint32_t cop2ControlWrites = 0;
+    std::uint16_t specialReads = 0;
+    std::uint16_t specialWrites = 0;
+  };
+
+  std::uint32_t registerMask(std::uint8_t index)
+  {
+    return index == 0 ? 0 : UINT32_C(1) << index;
+  }
+
+  std::uint32_t coprocessorRegisterMask(std::uint8_t index)
+  {
+    return UINT32_C(1) << index;
+  }
+
+  InstructionDependencies instructionDependencies(
+    const EEInstruction &instruction)
+  {
+    InstructionDependencies dependencies;
+    const std::uint32_t source =
+      registerMask(instruction.sourceRegister);
+    const std::uint32_t target =
+      registerMask(instruction.targetRegister);
+    const std::uint32_t destination =
+      registerMask(instruction.destinationRegister);
+    const std::uint32_t coprocessorTarget =
+      coprocessorRegisterMask(instruction.targetRegister);
+    const std::uint32_t coprocessorDestination =
+      coprocessorRegisterMask(
+        instruction.destinationRegister);
+    const std::uint32_t coprocessorResult =
+      coprocessorRegisterMask(instruction.shiftAmount);
+
+    switch (instruction.operation)
+    {
+      case EEOperation::Nop:
+      case EEOperation::SystemCall:
+      case EEOperation::Breakpoint:
+      case EEOperation::ExceptionReturn:
+      case EEOperation::Jump:
+        break;
+      case EEOperation::ShiftLeftLogicalWord:
+      case EEOperation::ShiftRightLogicalWord:
+      case EEOperation::ShiftRightArithmeticWord:
+      case EEOperation::ShiftLeftLogicalDoubleword:
+      case EEOperation::ShiftRightLogicalDoubleword:
+      case EEOperation::ShiftRightArithmeticDoubleword:
+      case EEOperation::ShiftLeftLogicalDoubleword32:
+      case EEOperation::ShiftRightLogicalDoubleword32:
+      case EEOperation::ShiftRightArithmeticDoubleword32:
+        dependencies.gprReads = target;
+        dependencies.gprWrites = destination;
+        break;
+      case EEOperation::ShiftLeftLogicalVariableWord:
+      case EEOperation::ShiftRightLogicalVariableWord:
+      case EEOperation::ShiftRightArithmeticVariableWord:
+      case EEOperation::ShiftLeftLogicalVariableDoubleword:
+      case EEOperation::ShiftRightLogicalVariableDoubleword:
+      case EEOperation::ShiftRightArithmeticVariableDoubleword:
+      case EEOperation::AddWord:
+      case EEOperation::AddUnsignedWord:
+      case EEOperation::SubtractWord:
+      case EEOperation::SubtractUnsignedWord:
+      case EEOperation::And:
+      case EEOperation::Or:
+      case EEOperation::Xor:
+      case EEOperation::Nor:
+      case EEOperation::SetLessThan:
+      case EEOperation::SetLessThanUnsigned:
+      case EEOperation::AddDoubleword:
+      case EEOperation::AddUnsignedDoubleword:
+      case EEOperation::SubtractDoubleword:
+      case EEOperation::SubtractUnsignedDoubleword:
+        dependencies.gprReads = source | target;
+        dependencies.gprWrites = destination;
+        break;
+      case EEOperation::AddImmediateWord:
+      case EEOperation::AddImmediateUnsignedWord:
+      case EEOperation::SetLessThanImmediate:
+      case EEOperation::SetLessThanImmediateUnsigned:
+      case EEOperation::AndImmediate:
+      case EEOperation::OrImmediate:
+      case EEOperation::XorImmediate:
+      case EEOperation::AddImmediateDoubleword:
+      case EEOperation::AddImmediateUnsignedDoubleword:
+        dependencies.gprReads = source;
+        dependencies.gprWrites = target;
+        break;
+      case EEOperation::LoadUpperImmediate:
+        dependencies.gprWrites = target;
+        break;
+      case EEOperation::MoveFromHI:
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_HI;
+        break;
+      case EEOperation::MoveToHI:
+        dependencies.gprReads = source;
+        dependencies.specialWrites = RESOURCE_HI;
+        break;
+      case EEOperation::MoveFromLO:
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_HI | RESOURCE_LO;
+        break;
+      case EEOperation::MoveToLO:
+        dependencies.gprReads = source;
+        dependencies.specialWrites = RESOURCE_LO;
+        break;
+      case EEOperation::MultiplyWord:
+      case EEOperation::MultiplyUnsignedWord:
+        dependencies.gprReads = source | target;
+        dependencies.gprWrites = destination;
+        dependencies.specialWrites = RESOURCE_HI | RESOURCE_LO;
+        break;
+      case EEOperation::DivideWord:
+      case EEOperation::DivideUnsignedWord:
+        dependencies.gprReads = source | target;
+        dependencies.specialWrites = RESOURCE_HI | RESOURCE_LO;
+        break;
+      case EEOperation::MultiplyAddWord:
+      case EEOperation::MultiplyAddUnsignedWord:
+        dependencies.gprReads = source | target;
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_LO;
+        dependencies.specialWrites = RESOURCE_HI | RESOURCE_LO;
+        break;
+      case EEOperation::MoveFromHI1:
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_HI1;
+        break;
+      case EEOperation::MoveToHI1:
+        dependencies.gprReads = source;
+        dependencies.specialWrites = RESOURCE_HI1;
+        break;
+      case EEOperation::MoveFromLO1:
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_HI1 | RESOURCE_LO1;
+        break;
+      case EEOperation::MoveToLO1:
+        dependencies.gprReads = source;
+        dependencies.specialWrites = RESOURCE_LO1;
+        break;
+      case EEOperation::MultiplyWord1:
+      case EEOperation::MultiplyUnsignedWord1:
+        dependencies.gprReads = source | target;
+        dependencies.gprWrites = destination;
+        dependencies.specialWrites =
+          RESOURCE_HI1 | RESOURCE_LO1;
+        break;
+      case EEOperation::DivideWord1:
+      case EEOperation::DivideUnsignedWord1:
+        dependencies.gprReads = source | target;
+        dependencies.specialWrites =
+          RESOURCE_HI1 | RESOURCE_LO1;
+        break;
+      case EEOperation::MultiplyAddWord1:
+      case EEOperation::MultiplyAddUnsignedWord1:
+        dependencies.gprReads = source | target;
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_LO1;
+        dependencies.specialWrites =
+          RESOURCE_HI1 | RESOURCE_LO1;
+        break;
+      case EEOperation::MoveFromShiftAmount:
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_SA;
+        break;
+      case EEOperation::MoveToShiftAmount:
+      case EEOperation::MoveByteCountToShiftAmount:
+      case EEOperation::MoveHalfwordCountToShiftAmount:
+        dependencies.gprReads = source;
+        dependencies.specialWrites = RESOURCE_SA;
+        break;
+      case EEOperation::JumpAndLink:
+        dependencies.gprWrites = registerMask(31);
+        break;
+      case EEOperation::JumpRegister:
+        dependencies.gprReads = source;
+        break;
+      case EEOperation::JumpAndLinkRegister:
+        dependencies.gprReads = source;
+        dependencies.gprWrites = destination;
+        break;
+      case EEOperation::BranchEqual:
+      case EEOperation::BranchNotEqual:
+      case EEOperation::BranchEqualLikely:
+      case EEOperation::BranchNotEqualLikely:
+        dependencies.gprReads = source | target;
+        break;
+      case EEOperation::BranchLessThanOrEqualZero:
+      case EEOperation::BranchGreaterThanZero:
+      case EEOperation::BranchLessThanZero:
+      case EEOperation::BranchGreaterThanOrEqualZero:
+      case EEOperation::BranchLessThanOrEqualZeroLikely:
+      case EEOperation::BranchGreaterThanZeroLikely:
+      case EEOperation::BranchLessThanZeroLikely:
+      case EEOperation::BranchGreaterThanOrEqualZeroLikely:
+        dependencies.gprReads = source;
+        break;
+      case EEOperation::BranchLessThanZeroAndLink:
+      case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
+      case EEOperation::BranchLessThanZeroAndLinkLikely:
+      case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+        dependencies.gprReads = source;
+        dependencies.gprWrites = registerMask(31);
+        break;
+      case EEOperation::LoadByte:
+      case EEOperation::LoadByteUnsigned:
+      case EEOperation::LoadHalfword:
+      case EEOperation::LoadHalfwordUnsigned:
+      case EEOperation::LoadWord:
+      case EEOperation::LoadWordUnsigned:
+      case EEOperation::LoadWordLeft:
+      case EEOperation::LoadWordRight:
+      case EEOperation::LoadDoubleword:
+      case EEOperation::LoadDoublewordLeft:
+      case EEOperation::LoadDoublewordRight:
+      case EEOperation::LoadQuadword:
+        dependencies.gprReads = source;
+        dependencies.gprWrites = target;
+        break;
+      case EEOperation::StoreByte:
+      case EEOperation::StoreHalfword:
+      case EEOperation::StoreWord:
+      case EEOperation::StoreWordLeft:
+      case EEOperation::StoreWordRight:
+      case EEOperation::StoreDoubleword:
+      case EEOperation::StoreDoublewordLeft:
+      case EEOperation::StoreDoublewordRight:
+      case EEOperation::StoreQuadword:
+        dependencies.gprReads = source | target;
+        break;
+      case EEOperation::MoveWordFromCOP1:
+        dependencies.gprWrites = target;
+        dependencies.fprReads = coprocessorDestination;
+        break;
+      case EEOperation::MoveWordToCOP1:
+        dependencies.gprReads = target;
+        dependencies.fprWrites = coprocessorDestination;
+        break;
+      case EEOperation::MoveControlWordFromCOP1:
+        dependencies.gprWrites = target;
+        if (instruction.destinationRegister == 31)
+        {
+          dependencies.specialReads = RESOURCE_COP1_FCR31;
+        }
+        break;
+      case EEOperation::MoveControlWordToCOP1:
+        dependencies.gprReads = target;
+        if (instruction.destinationRegister == 31)
+        {
+          dependencies.specialWrites = RESOURCE_COP1_FCR31;
+        }
+        break;
+      case EEOperation::LoadWordToCOP1:
+        dependencies.gprReads = source;
+        dependencies.fprWrites = coprocessorTarget;
+        break;
+      case EEOperation::StoreWordFromCOP1:
+        dependencies.gprReads = source;
+        dependencies.fprReads = coprocessorTarget;
+        break;
+      case EEOperation::MoveSingleCOP1:
+      case EEOperation::AbsoluteSingleCOP1:
+      case EEOperation::NegateSingleCOP1:
+      case EEOperation::ConvertSingleToWordCOP1:
+        dependencies.fprReads = coprocessorDestination;
+        dependencies.fprWrites = coprocessorResult;
+        break;
+      case EEOperation::ConvertWordToSingleCOP1:
+        dependencies.fprReads = coprocessorDestination;
+        dependencies.fprWrites = coprocessorResult;
+        break;
+      case EEOperation::AddSingleCOP1:
+      case EEOperation::SubtractSingleCOP1:
+      case EEOperation::MultiplySingleCOP1:
+      case EEOperation::DivideSingleCOP1:
+      case EEOperation::ReciprocalSquareRootSingleCOP1:
+      case EEOperation::MaximumSingleCOP1:
+      case EEOperation::MinimumSingleCOP1:
+        dependencies.fprReads =
+          coprocessorDestination | coprocessorTarget;
+        dependencies.fprWrites = coprocessorResult;
+        break;
+      case EEOperation::SquareRootSingleCOP1:
+        dependencies.fprReads = coprocessorTarget;
+        dependencies.fprWrites = coprocessorResult;
+        break;
+      case EEOperation::AddSingleToAccumulatorCOP1:
+      case EEOperation::SubtractSingleToAccumulatorCOP1:
+      case EEOperation::MultiplySingleToAccumulatorCOP1:
+        dependencies.fprReads =
+          coprocessorDestination | coprocessorTarget;
+        dependencies.specialWrites =
+          RESOURCE_COP1_ACCUMULATOR |
+          RESOURCE_COP1_FCR31;
+        dependencies.specialReads = RESOURCE_COP1_FCR31;
+        break;
+      case EEOperation::MultiplyAddSingleCOP1:
+      case EEOperation::MultiplySubtractSingleCOP1:
+        dependencies.fprReads =
+          coprocessorDestination | coprocessorTarget;
+        dependencies.fprWrites = coprocessorResult;
+        dependencies.specialReads =
+          RESOURCE_COP1_ACCUMULATOR |
+          RESOURCE_COP1_FCR31;
+        dependencies.specialWrites = RESOURCE_COP1_FCR31;
+        break;
+      case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+      case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+        dependencies.fprReads =
+          coprocessorDestination | coprocessorTarget;
+        dependencies.specialReads =
+          RESOURCE_COP1_ACCUMULATOR |
+          RESOURCE_COP1_FCR31;
+        dependencies.specialWrites =
+          RESOURCE_COP1_ACCUMULATOR |
+          RESOURCE_COP1_FCR31;
+        break;
+      case EEOperation::CompareFalseSingleCOP1:
+      case EEOperation::CompareEqualSingleCOP1:
+      case EEOperation::CompareLessThanSingleCOP1:
+      case EEOperation::CompareLessThanOrEqualSingleCOP1:
+        dependencies.fprReads =
+          coprocessorDestination | coprocessorTarget;
+        dependencies.specialWrites = RESOURCE_COP1_FCR31;
+        break;
+      case EEOperation::BranchCOP1False:
+      case EEOperation::BranchCOP1FalseLikely:
+      case EEOperation::BranchCOP1True:
+      case EEOperation::BranchCOP1TrueLikely:
+        dependencies.specialReads = RESOURCE_COP1_FCR31;
+        break;
+      case EEOperation::BranchCOP2False:
+      case EEOperation::BranchCOP2FalseLikely:
+      case EEOperation::BranchCOP2True:
+      case EEOperation::BranchCOP2TrueLikely:
+        dependencies.specialReads = RESOURCE_COP2_STATE;
+        break;
+      case EEOperation::LoadQuadwordToCOP2:
+        dependencies.gprReads = source;
+        dependencies.cop2Writes = coprocessorTarget;
+        dependencies.specialWrites = RESOURCE_COP2_STATE;
+        break;
+      case EEOperation::StoreQuadwordFromCOP2:
+        dependencies.gprReads = source;
+        dependencies.cop2Reads = coprocessorTarget;
+        dependencies.specialReads = RESOURCE_COP2_STATE;
+        break;
+      case EEOperation::QuadwordMoveFromCOP2:
+        dependencies.gprWrites = target;
+        dependencies.cop2Reads = coprocessorDestination;
+        dependencies.specialReads = RESOURCE_COP2_STATE;
+        break;
+      case EEOperation::QuadwordMoveToCOP2:
+        dependencies.gprReads = target;
+        dependencies.cop2Writes = coprocessorDestination;
+        dependencies.specialWrites = RESOURCE_COP2_STATE;
+        break;
+      case EEOperation::ControlMoveFromCOP2:
+        dependencies.gprWrites = target;
+        dependencies.cop2ControlReads = coprocessorDestination;
+        dependencies.specialReads = RESOURCE_COP2_STATE;
+        break;
+      case EEOperation::ControlMoveToCOP2:
+        dependencies.gprReads = target;
+        dependencies.cop2ControlWrites = coprocessorDestination;
+        dependencies.specialWrites = RESOURCE_COP2_STATE;
+        break;
+      case EEOperation::VectorCallMicroSubroutine:
+      case EEOperation::VectorCallMicroSubroutineRegister:
+      case EEOperation::VectorMacroArithmetic:
+        dependencies.specialReads = RESOURCE_COP2_STATE;
+        dependencies.specialWrites = RESOURCE_COP2_STATE;
+        break;
+    }
+
+    const bool updatesCOP1ArithmeticFlags =
+      instruction.operation == EEOperation::AbsoluteSingleCOP1 ||
+      instruction.operation == EEOperation::NegateSingleCOP1 ||
+      instruction.operation == EEOperation::ConvertSingleToWordCOP1 ||
+      instruction.operation == EEOperation::AddSingleCOP1 ||
+      instruction.operation == EEOperation::SubtractSingleCOP1 ||
+      instruction.operation == EEOperation::MultiplySingleCOP1 ||
+      instruction.operation == EEOperation::DivideSingleCOP1 ||
+      instruction.operation == EEOperation::SquareRootSingleCOP1 ||
+      instruction.operation ==
+        EEOperation::ReciprocalSquareRootSingleCOP1 ||
+      instruction.operation == EEOperation::MaximumSingleCOP1 ||
+      instruction.operation == EEOperation::MinimumSingleCOP1;
+    if (updatesCOP1ArithmeticFlags)
+    {
+      dependencies.specialReads |= RESOURCE_COP1_FCR31;
+      dependencies.specialWrites |= RESOURCE_COP1_FCR31;
+    }
+    return dependencies;
+  }
+
+  bool hasSamePairDependency(
+    const EEInstruction &older,
+    const EEInstruction &younger)
+  {
+    const InstructionDependencies olderDependencies =
+      instructionDependencies(older);
+    const InstructionDependencies youngerDependencies =
+      instructionDependencies(younger);
+    return
+      (olderDependencies.gprWrites &
+       (youngerDependencies.gprReads |
+        youngerDependencies.gprWrites)) != 0 ||
+      (olderDependencies.fprWrites &
+       (youngerDependencies.fprReads |
+        youngerDependencies.fprWrites)) != 0 ||
+      (olderDependencies.cop2Writes &
+       (youngerDependencies.cop2Reads |
+        youngerDependencies.cop2Writes)) != 0 ||
+      (olderDependencies.cop2ControlWrites &
+       (youngerDependencies.cop2ControlReads |
+        youngerDependencies.cop2ControlWrites)) != 0 ||
+      (olderDependencies.specialWrites &
+       (youngerDependencies.specialReads |
+        youngerDependencies.specialWrites)) != 0;
+  }
+
+  EEIssuePairing issuePairing(
+    EEInstructionCategory pipe0,
+    EEInstructionCategory pipe1)
+  {
+    if ((pipe0 == EEInstructionCategory::Branch &&
+         (pipe1 == EEInstructionCategory::ExceptionReturn ||
+          pipe1 == EEInstructionCategory::Branch)))
+    {
+      return EEIssuePairing::Forbidden;
+    }
+    if ((pipe0 == EEInstructionCategory::WideOperate &&
+         (pipe1 == EEInstructionCategory::LeadingZeroCount ||
+          pipe1 == EEInstructionCategory::ALU ||
+          pipe1 == EEInstructionCategory::MAC1)) ||
+        (pipe0 == EEInstructionCategory::COP1Operate &&
+         pipe1 == EEInstructionCategory::COP1Move) ||
+        (pipe0 == EEInstructionCategory::COP2Operate &&
+         pipe1 == EEInstructionCategory::COP2Move))
+    {
+      return EEIssuePairing::ConcurrentWithStall;
+    }
+    return EEIssuePairing::Concurrent;
+  }
+
   void direct(
     DecodeTable *table,
     std::uint8_t encoding,
@@ -1291,6 +1759,62 @@ EEInstructionPipeAssignment assignEEInstructionPairPipes(
   }
 
   return {};
+}
+
+EEIssueSelection selectEEIssueGroup(
+  const EEInstruction &older,
+  const EEInstruction &younger,
+  bool olderReady,
+  bool youngerReady)
+{
+  EEIssueSelection selection;
+  if (!olderReady)
+  {
+    return selection;
+  }
+
+  selection.instructionCount = 1;
+  const EEInstructionRouting olderRouting =
+    eeInstructionRouting(older.operation);
+  selection.assignment.olderPipe =
+    eeInstructionSupportsLogicalPipe(
+      olderRouting,
+      EELogicalPipe::Pipe0)
+      ? EELogicalPipe::Pipe0
+      : EELogicalPipe::Pipe1;
+  if (!youngerReady)
+  {
+    return selection;
+  }
+
+  const EEInstructionPipeAssignment pairAssignment =
+    assignEEInstructionPairPipes(
+      older.operation,
+      younger.operation);
+  if (!pairAssignment.assignable ||
+      hasSamePairDependency(older, younger))
+  {
+    return selection;
+  }
+  selection.assignment = pairAssignment;
+
+  const EEInstructionRouting youngerRouting =
+    eeInstructionRouting(younger.operation);
+  const EEInstructionCategory pipe0Category =
+    selection.assignment.olderPipe == EELogicalPipe::Pipe0
+      ? olderRouting.category
+      : youngerRouting.category;
+  const EEInstructionCategory pipe1Category =
+    selection.assignment.olderPipe == EELogicalPipe::Pipe1
+      ? olderRouting.category
+      : youngerRouting.category;
+  selection.pairing =
+    issuePairing(pipe0Category, pipe1Category);
+  if (selection.pairing != EEIssuePairing::Forbidden)
+  {
+    selection.instructionCount = 2;
+  }
+  return selection;
 }
 
 bool isEEBranchOperation(EEOperation operation)
