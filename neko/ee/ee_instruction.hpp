@@ -160,12 +160,14 @@ enum class EEOperation : std::uint8_t
   BranchCOP1False,
   BranchCOP1FalseLikely,
   BranchCOP1True,
-  BranchCOP1TrueLikely
+  BranchCOP1TrueLikely,
+  SynchronizeLoadStore,
+  SynchronizePipeline
 };
 
 constexpr std::uint8_t EE_OPERATION_COUNT =
   static_cast<std::uint8_t>(
-    EEOperation::BranchCOP1TrueLikely) + 1;
+    EEOperation::SynchronizePipeline) + 1;
 
 enum class EEInstructionCategory : std::uint8_t
 {

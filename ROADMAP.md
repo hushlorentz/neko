@@ -956,7 +956,7 @@ accumulator or condition-result contract:
       architectural acceptance remains in older-to-younger program order, and
       stepping and instruction counts include both members of an inseparable
       group without conflating issue with delayed pipeline completion
-- [ ] Implement and classify `SYNC.P` and `SYNC.L` independently of scheduler
+- [x] Implement and classify `SYNC.P` and `SYNC.L` independently of scheduler
       activation, including deterministic scalar execution and reserved-field
       handling
 - [ ] Resolve the documented illegal sequences for Branch-Branch,

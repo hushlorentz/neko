@@ -655,16 +655,21 @@ void EECore::clock()
     enterInterruptException();
     return;
   }
+
+  fillIssueFrontEnd();
   const bool hadPendingOperation =
     pendingMultiplyDivideActive();
   advancePendingMultiplyDivide(&pendingMac0, false);
   advancePendingMultiplyDivide(&pendingMac1, true);
-  if (hadPendingOperation && pendingMultiplyDivideActive())
+  if (hadPendingOperation &&
+      pendingMultiplyDivideActive() &&
+      (issueLatch.failure != IssueLatchFailure::None ||
+       issueLatch.instruction.operation !=
+         EEOperation::SynchronizePipeline))
   {
     return;
   }
 
-  fillIssueFrontEnd();
   if (handleIssueLatchFailure())
   {
     return;
@@ -914,6 +919,8 @@ bool EECore::executeInstruction(
   switch (instruction.operation)
   {
     case EEOperation::Nop:
+    case EEOperation::SynchronizeLoadStore:
+    case EEOperation::SynchronizePipeline:
       return true;
     case EEOperation::ExceptionReturn:
       discardInFlightCOP1AtOrAfter(
@@ -3702,6 +3709,29 @@ bool EECore::cop1ScoreboardBlocks(
   std::uint32_t completedLoadRegisters,
   COP1ScoreboardHazard *hazard) const
 {
+  if (instruction.operation ==
+      EEOperation::SynchronizeLoadStore)
+  {
+    for (const InFlightCOP1Operation &operation :
+         inFlightCOP1Operations)
+    {
+      if (operation.active &&
+          (operation.instruction.operation ==
+             EEOperation::LoadWordToCOP1 ||
+           operation.instruction.operation ==
+             EEOperation::StoreWordFromCOP1))
+      {
+        *hazard = {
+          COP1ScoreboardResource::MemoryException,
+          0,
+          COP1Dependency::None,
+          false,
+          operation.instruction.operation
+        };
+        return true;
+      }
+    }
+  }
   if (cop1ScoreboardValue(
         COP1ScoreboardResource::MemoryException)
         .availability ==

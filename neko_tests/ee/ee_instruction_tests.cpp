@@ -77,6 +77,34 @@ TEST_CASE("EE instruction field decoding")
     REQUIRE(instruction.targetRegister == 5);
     REQUIRE(instruction.immediate == 0xfffc);
   }
+
+  SECTION("SYNC stype selects load-store or pipeline synchronization")
+  {
+    for (std::uint8_t stype = 0; stype < 16; ++stype)
+    {
+      const EEInstruction instruction =
+        decodeEEInstruction(
+          (static_cast<std::uint32_t>(stype) << 6) |
+          UINT32_C(0x0f));
+
+      REQUIRE(
+        instruction.operation ==
+        EEOperation::SynchronizeLoadStore);
+      REQUIRE(instruction.shiftAmount == stype);
+    }
+    for (std::uint8_t stype = 16; stype < 32; ++stype)
+    {
+      const EEInstruction instruction =
+        decodeEEInstruction(
+          (static_cast<std::uint32_t>(stype) << 6) |
+          UINT32_C(0x0f));
+
+      REQUIRE(
+        instruction.operation ==
+        EEOperation::SynchronizePipeline);
+      REQUIRE(instruction.shiftAmount == stype);
+    }
+  }
 }
 
 TEST_CASE("EE instruction routing classification")
@@ -137,6 +165,20 @@ TEST_CASE("EE instruction routing classification")
 
   SECTION("Fixed integer categories expose their documented pipe")
   {
+    requireRouting(
+      EEOperation::SynchronizeLoadStore,
+      EEInstructionCategory::Synchronization,
+      true,
+      false,
+      physical(EEPhysicalPipeline::I0),
+      0);
+    requireRouting(
+      EEOperation::SynchronizePipeline,
+      EEInstructionCategory::Synchronization,
+      true,
+      false,
+      physical(EEPhysicalPipeline::I0),
+      0);
     requireRouting(
       EEOperation::LoadQuadword,
       EEInstructionCategory::LoadStore,
@@ -623,6 +665,12 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
     REQUIRE_THROWS_WITH(
       decodeEEInstruction(
         immediateInstruction(0x0f, 1, 2, 3)),
+      "Reserved EE instruction encoding.");
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(UINT32_C(0x0000080f)),
+      "Reserved EE instruction encoding.");
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(UINT32_C(0x0010000f)),
       "Reserved EE instruction encoding.");
   }
 }

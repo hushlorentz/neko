@@ -8521,6 +8521,73 @@ TEST_CASE("EE LWC1 permits independent work during writeback")
   REQUIRE(core.generalRegister(2).low == 0x12345678);
 }
 
+TEST_CASE("EE SYNC.L waits for a preceding LWC1 writeback")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(4, UINT32_C(0x0000000f));
+  core.startExecution(0);
+
+  system.runMasterCycles(3);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.floatingPointRegister(3) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x12345678));
+  REQUIRE(
+    core.lastInstruction().operation ==
+    EEOperation::SynchronizeLoadStore);
+}
+
+TEST_CASE("EE SYNC.P need not wait for a pending LWC1 writeback")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setGeneralRegister(1, {0x100, 0});
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x12345678)));
+  system.eeBus().write32(
+    0,
+    cop1MemoryInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(4, UINT32_C(0x0000040f));
+  core.startExecution(0);
+
+  system.runMasterCycles(3);
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.floatingPointRegister(3) == 0);
+  REQUIRE(
+    core.lastInstruction().operation ==
+    EEOperation::SynchronizePipeline);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x12345678));
+}
+
 TEST_CASE("EE LWC1 interlocks younger writes to the same FPR")
 {
   NekoSystem system;

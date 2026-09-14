@@ -101,6 +101,52 @@ TEST_CASE("EE bounded execution reports pending exceptions")
     EEExceptionVector::BOOTSTRAP_GENERAL);
 }
 
+TEST_CASE("EE synchronization instructions execute scalarly")
+{
+  NekoSystem system;
+  system.eeBus().write32(0, UINT32_C(0x0000000f));
+  system.eeBus().write32(4, UINT32_C(0x0000040f));
+  system.eeCore().startExecution(0);
+
+  const EEExecutionResult loadStore =
+    system.stepEEInstruction(1);
+  REQUIRE(
+    system.eeCore().lastInstruction().operation ==
+    EEOperation::SynchronizeLoadStore);
+  const EEExecutionResult pipeline =
+    system.stepEEInstruction(1);
+
+  REQUIRE(loadStore.instructions == 1);
+  REQUIRE(loadStore.programCounter == 4);
+  REQUIRE(
+    system.eeCore().lastInstruction().operation ==
+    EEOperation::SynchronizePipeline);
+  REQUIRE(pipeline.instructions == 1);
+  REQUIRE(pipeline.programCounter == 8);
+}
+
+TEST_CASE("EE SYNC.P does not wait for integer multiply completion")
+{
+  NekoSystem system;
+  system.eeCore().setGeneralRegister(1, {3, 0});
+  system.eeCore().setGeneralRegister(2, {4, 0});
+  system.eeBus().write32(
+    0,
+    registerInstruction(0x18, 1, 2, 3));
+  system.eeBus().write32(4, UINT32_C(0x0000040f));
+  system.eeCore().startExecution(0);
+
+  system.clockMasterCycle();
+  const EEExecutionResult synchronization =
+    system.stepEEInstruction(1);
+
+  REQUIRE(synchronization.instructions == 1);
+  REQUIRE(synchronization.programCounter == 8);
+  REQUIRE(
+    system.eeCore().lastInstruction().operation ==
+    EEOperation::SynchronizePipeline);
+}
+
 TEST_CASE("EE instruction stepping follows repeated branch addresses")
 {
   NekoSystem system;

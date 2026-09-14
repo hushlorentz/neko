@@ -95,6 +95,8 @@ namespace
     switch (instruction.operation)
     {
       case EEOperation::Nop:
+      case EEOperation::SynchronizeLoadStore:
+      case EEOperation::SynchronizePipeline:
       case EEOperation::SystemCall:
       case EEOperation::Breakpoint:
       case EEOperation::ExceptionReturn:
@@ -681,6 +683,13 @@ namespace
         REGISTER_SHIFT_MASK);
     direct(&table, 0x0c, EEOperation::SystemCall);
     direct(&table, 0x0d, EEOperation::Breakpoint);
+    direct(
+      &table,
+      0x0f,
+      EEOperation::SynchronizeLoadStore,
+      REGISTER_SOURCE_MASK |
+        REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK);
     direct(
       &table,
       0x14,
@@ -1489,6 +1498,14 @@ EEInstructionRouting eeInstructionRouting(EEOperation operation)
         0,
         PHYSICAL_LS
       };
+    case EEOperation::SynchronizeLoadStore:
+    case EEOperation::SynchronizePipeline:
+      return {
+        EEInstructionCategory::Synchronization,
+        PIPE_0,
+        PHYSICAL_I0,
+        0
+      };
     case EEOperation::ExceptionReturn:
       return {
         EEInstructionCategory::ExceptionReturn,
@@ -1882,6 +1899,13 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
     const DecodeEntry &special =
       specialTable()[instruction.function];
     applyEntry(special, &instruction);
+    if (instruction.operation ==
+          EEOperation::SynchronizeLoadStore &&
+        (instruction.shiftAmount & 0x10) != 0)
+    {
+      instruction.operation =
+        EEOperation::SynchronizePipeline;
+    }
     if (raw == 0)
     {
       instruction.operation = EEOperation::Nop;
