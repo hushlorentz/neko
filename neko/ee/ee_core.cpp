@@ -722,6 +722,13 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
   {
     return false;
   }
+  if (issueLatch.instruction.operation ==
+        EEOperation::LoadWordToCOP1 ||
+      issueLatch.instruction.operation ==
+        EEOperation::StoreWordFromCOP1)
+  {
+    return false;
+  }
 
   const bool resolvedBranchPair =
     isEEBranchOperation(issueLatch.instruction.operation);

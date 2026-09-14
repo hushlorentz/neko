@@ -142,6 +142,69 @@ namespace
   }
 }
 
+TEST_CASE("EE dual issue covers both COP2 instruction categories")
+{
+  SECTION("A COP2 move may be the older Pipe 1 member")
+  {
+    NekoSystem system;
+    system.vu0().loadIntRegister(1, 7);
+    system.eeBus().write32(
+      0,
+      controlMoveFromCOP2(2, 1));
+    system.eeBus().write32(4, UINT32_C(0x24030002));
+    system.eeCore().startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEIssueSelection selection =
+      system.eeCore().lastIssueSelection();
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.assignment.olderPipe ==
+      EELogicalPipe::Pipe1);
+    REQUIRE(
+      selection.assignment.youngerPipe ==
+      EELogicalPipe::Pipe0);
+    REQUIRE(
+      system.eeCore()
+        .acceptanceRecordsThisCycle().size() == 2);
+    REQUIRE(system.eeCore().generalRegister(3).low == 2);
+  }
+
+  SECTION("A COP2 operate may be the older Pipe 0 member")
+  {
+    NekoSystem system;
+    system.vu0().loadFPRegister(1, 1, 2, 3, 4);
+    system.vu0().loadFPRegister(2, 10, 20, 30, 40);
+    system.eeBus().write32(
+      0,
+      macroArithmeticInstruction(
+        FP_REGISTER_ALL_FIELDS,
+        2,
+        1,
+        3,
+        VPU_ADD));
+    system.eeBus().write32(4, UINT32_C(0x24040002));
+    system.eeCore().startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEIssueSelection selection =
+      system.eeCore().lastIssueSelection();
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.assignment.olderPipe ==
+      EELogicalPipe::Pipe0);
+    REQUIRE(
+      selection.assignment.youngerPipe ==
+      EELogicalPipe::Pipe1);
+    REQUIRE(
+      system.eeCore()
+        .acceptanceRecordsThisCycle().size() == 2);
+    REQUIRE(system.eeCore().generalRegister(4).low == 2);
+  }
+}
+
 TEST_CASE("EE VU macro VADD and VSUB variants decode canonically")
 {
   const std::uint8_t operations[] = {

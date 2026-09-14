@@ -1003,7 +1003,7 @@ accumulator or condition-result contract:
       continuation state through reset, interrupts, halt/resume, canonical
       hashes, and transactional save states; do not serialize per-cycle issue
       acceptance records or recomputable selection and assignment state
-- [ ] Validate single-issue fallback, deferred `Y` behavior, both permitted
+- [x] Validate single-issue fallback, deferred `Y` behavior, both permitted
       older/younger pipe arrangements, and every implemented
       instruction-category pairing before an independent EE scheduler review
 

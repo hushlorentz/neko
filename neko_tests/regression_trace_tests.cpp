@@ -1900,6 +1900,62 @@ TEST_CASE("EE state snapshots include in-flight execution")
   REQUIRE(events[2].value0 != issuedStateHash);
 }
 
+TEST_CASE("Older COP1 memory work does not partially enter an issue group")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setGeneralRegister(1, {0x100, 0});
+  std::uint8_t opcode = 0;
+  SECTION("LWC1")
+  {
+    opcode = 0x31;
+    system.eeBus().write32(
+      0x100, UINT32_C(0x3f800000));
+  }
+  SECTION("SWC1")
+  {
+    opcode = 0x39;
+    core.setFloatingPointRegister(
+      2, UINT32_C(0x3f800000));
+  }
+  system.eeBus().write32(
+    0,
+    immediateInstruction(opcode, 1, 2, 0));
+  system.eeBus().write32(
+    4,
+    immediateInstruction(0x09, 0, 3, 1));
+  system.startTrace();
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  std::size_t issued = 0;
+  std::size_t resourceInterlocks = 0;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.type == NekoTraceEventType::InstructionIssued)
+    {
+      ++issued;
+    }
+    else if (
+      event.type ==
+      NekoTraceEventType::COP1ResourceInterlock)
+    {
+      ++resourceInterlocks;
+    }
+  }
+  REQUIRE(issued == 1);
+  REQUIRE(resourceInterlocks == 0);
+  REQUIRE(
+    core.acceptanceRecordsThisCycle().size() ==
+    1);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(3).low == 0);
+}
+
 TEST_CASE("EE state snapshots retain changes outside clock execution")
 {
   NekoSystem system;

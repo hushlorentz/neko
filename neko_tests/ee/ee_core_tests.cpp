@@ -792,6 +792,96 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.programCounter() == 4);
   }
 
+  SECTION("Forward deferred pairs also remain scalar")
+  {
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    bus.write32(0, UINT32_C(0x46031000));
+    bus.write32(4, UINT32_C(0x44040800));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      2);
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+    REQUIRE(
+      core.lastIssueSelection().assignment.olderPipe ==
+      EELogicalPipe::Pipe0);
+    REQUIRE(
+      core.lastIssueSelection().assignment.youngerPipe ==
+      EELogicalPipe::Pipe1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(core.programCounter() == 4);
+  }
+
+  SECTION("Ordinary NOP partners remain scalar")
+  {
+    bus.write32(0, 0);
+    bus.write32(4, UINT32_C(0x24030002));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.programCounter() == 4);
+  }
+
+  SECTION("Synchronization partners remain scalar")
+  {
+    bus.write32(0, UINT32_C(0x0000040f));
+    bus.write32(4, UINT32_C(0x24030002));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.programCounter() == 4);
+  }
+
+  SECTION("Independent same-pipe memory operations remain scalar")
+  {
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setGeneralRegister(4, {0x104, 0});
+    bus.write32(0x100, UINT32_C(0x12345678));
+    bus.write32(0x104, UINT32_C(0x89abcdef));
+    bus.write32(0, UINT32_C(0x8c220000));
+    bus.write32(4, UINT32_C(0x8c830000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().instructionCount ==
+      1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(
+      core.generalRegister(2).low ==
+      UINT64_C(0x0000000012345678));
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.programCounter() == 4);
+  }
+
   SECTION("Dependent memory pairs remain scalar")
   {
     core.setGeneralRegister(1, {0x100, 0});
