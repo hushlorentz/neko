@@ -648,8 +648,10 @@ class EECore : public ClockedComponent
       const EEInstruction &younger,
       std::size_t availableCOP1Slots) const;
     bool issueSelectionCanExecuteConcurrently() const;
-    static bool isRegisterOnlyIssueOperation(
+    static bool isActivatedOIssueOperation(
       EEOperation operation);
+    bool memoryIssueCanJoinPair(
+      const EEInstruction &instruction) const;
     bool branchLikelyTaken(
       const EEInstruction &instruction) const;
     bool cop2ScoreboardBlocks(

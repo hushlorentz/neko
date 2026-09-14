@@ -19,6 +19,8 @@ struct GIFPath3SubmissionResult
 class GIFPath3Transfer
 {
   public:
+    static constexpr std::size_t GUEST_FIFO_CAPACITY = 16;
+
     explicit GIFPath3Transfer(GIFDecoder *decoder);
     explicit GIFPath3Transfer(GIFPathArbiter &arbiter);
 

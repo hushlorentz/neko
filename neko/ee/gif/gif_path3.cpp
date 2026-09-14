@@ -61,8 +61,7 @@ GIFPath3SubmissionResult GIFPath3Transfer::submitQuadwords(
 bool GIFPath3Transfer::submitGuestQuadword(
   const GIFQuadword &quadword)
 {
-  constexpr std::size_t GIF_FIFO_CAPACITY = 16;
-  if (guestFIFO.size() == GIF_FIFO_CAPACITY)
+  if (guestFIFO.size() == GUEST_FIFO_CAPACITY)
   {
     return false;
   }

@@ -147,6 +147,8 @@ class EEBus
     EEDataWriteResult writeGuestData128(
       std::uint32_t address,
       const EEQuadword &value);
+    bool guestData128WriteReady(
+      std::uint32_t address) const;
     void advanceGuestFIFOs();
     std::uint32_t read32(std::uint32_t address) const;
     void write32(

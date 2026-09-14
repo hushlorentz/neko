@@ -690,8 +690,8 @@ bool EECore::issuePairStructurallySafe(
   const EEInstruction &younger,
   std::size_t availableCOP1Slots) const
 {
-  if (isMemoryOperation(older.operation) ||
-      isMemoryOperation(younger.operation))
+  if (!memoryIssueCanJoinPair(older) ||
+      !memoryIssueCanJoinPair(younger))
   {
     return false;
   }
@@ -719,9 +719,9 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
       issueSelection.pairing !=
         EEIssuePairing::Concurrent ||
       branchDelayPending ||
-      !isRegisterOnlyIssueOperation(
+      !isActivatedOIssueOperation(
         issueLatch.instruction.operation) ||
-      !isRegisterOnlyIssueOperation(
+      !isActivatedOIssueOperation(
         stagingLatch.instruction.operation))
   {
     return false;
@@ -746,11 +746,10 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
   return compatible;
 }
 
-bool EECore::isRegisterOnlyIssueOperation(
+bool EECore::isActivatedOIssueOperation(
   EEOperation operation)
 {
-  if (isMemoryOperation(operation) ||
-      isEEBranchOperation(operation))
+  if (isEEBranchOperation(operation))
   {
     return false;
   }
@@ -761,16 +760,32 @@ bool EECore::isRegisterOnlyIssueOperation(
     case EEOperation::SynchronizeLoadStore:
     case EEOperation::SynchronizePipeline:
     case EEOperation::ExceptionReturn:
-    case EEOperation::MoveFromShiftAmount:
-    case EEOperation::MoveToShiftAmount:
-    case EEOperation::MoveByteCountToShiftAmount:
-    case EEOperation::MoveHalfwordCountToShiftAmount:
     case EEOperation::SystemCall:
     case EEOperation::Breakpoint:
       return false;
     default:
       return true;
   }
+}
+
+bool EECore::memoryIssueCanJoinPair(
+  const EEInstruction &instruction) const
+{
+  if (instruction.operation != EEOperation::StoreQuadword &&
+      instruction.operation !=
+        EEOperation::StoreQuadwordFromCOP2)
+  {
+    return true;
+  }
+
+  std::uint32_t address = static_cast<std::uint32_t>(
+    generalRegisters[instruction.sourceRegister].low +
+    signExtend16(instruction.immediate));
+  if (instruction.operation == EEOperation::StoreQuadword)
+  {
+    address &= ~UINT32_C(0x0f);
+  }
+  return attachedBus().guestData128WriteReady(address);
 }
 
 bool EECore::branchLikelyTaken(

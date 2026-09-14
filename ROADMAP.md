@@ -993,7 +993,7 @@ accumulator or condition-result contract:
       selection on the scalar fallback path until its owning pipeline block
       implements the required stall, and assert that concurrently issued
       physical-resource masks are compatible
-- [ ] Extend ordinary `O` activation to memory and SA pairs while preserving
+- [x] Extend ordinary `O` activation to memory and SA pairs while preserving
       precise memory side effects, bus-stall continuation, and SA ordering
 - [ ] Extend ordinary `O` activation to branch, branch-likely, and resolved
       delay-slot pairs while preserving delay-slot ownership, annulment,

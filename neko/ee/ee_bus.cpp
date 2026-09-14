@@ -480,6 +480,31 @@ EEDataWriteResult EEBus::writeGuestData128(
   return EEDataWriteResult::Completed;
 }
 
+bool EEBus::guestData128WriteReady(
+  std::uint32_t address) const
+{
+  address = directMappedPhysicalAddress(address);
+  if (address == EEMemoryMap::VIF0_FIFO)
+  {
+    return
+      vif0Component->fifoQuadwordCount() <
+      vif0Component->fifoCapacity();
+  }
+  if (address == EEMemoryMap::VIF1_FIFO)
+  {
+    return
+      vif1Component->fifoQuadwordCount() <
+      vif1Component->fifoCapacity();
+  }
+  if (address == EEMemoryMap::GIF_FIFO)
+  {
+    return
+      gifPath3Transfer->guestFIFOQuadwordCount() <
+      GIFPath3Transfer::GUEST_FIFO_CAPACITY;
+  }
+  return true;
+}
+
 void EEBus::advanceGuestFIFOs()
 {
   vif0Component->advanceFIFO();

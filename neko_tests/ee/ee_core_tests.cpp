@@ -792,12 +792,12 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.programCounter() == 4);
   }
 
-  SECTION("Memory pairs remain scalar")
+  SECTION("Dependent memory pairs remain scalar")
   {
     core.setGeneralRegister(1, {0x100, 0});
     bus.write32(0x100, UINT32_C(0x12345678));
     bus.write32(0, UINT32_C(0x8c220000));
-    bus.write32(4, UINT32_C(0x24030001));
+    bus.write32(4, UINT32_C(0x24430001));
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -815,24 +815,157 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.programCounter() == 4);
   }
 
-  SECTION("Shift-amount pairs remain scalar")
+  SECTION("A load and independent register instruction issue together")
   {
-    core.setGeneralRegister(1, {3, 0});
-    bus.write32(0, UINT32_C(0x00200029));
-    bus.write32(4, UINT32_C(0x24020001));
+    core.setGeneralRegister(1, {0x100, 0});
+    bus.write32(0x100, UINT32_C(0x12345678));
+    bus.write32(0, UINT32_C(0x8c220000));
+    bus.write32(4, UINT32_C(0x24030001));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(
+      core.generalRegister(2).low ==
+      UINT64_C(0x0000000012345678));
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("A younger store commits after its older register partner")
+  {
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setGeneralRegister(2, {UINT32_C(0x12345678), 0});
+    bus.write32(0, UINT32_C(0x24030001));
+    bus.write32(4, UINT32_C(0xac220000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    std::uint32_t stored = 0;
+    REQUIRE(bus.readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x12345678));
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("A younger memory fault preserves its older partner")
+  {
+    core.setGeneralRegister(1, {0x101, 0});
+    bus.write32(0, UINT32_C(0x24030001));
+    bus.write32(4, UINT32_C(0x84220000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == 0x101);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 4);
+  }
+
+  SECTION("A main-memory quadword store issues with its partner")
+  {
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setGeneralRegister(
+      2,
+      {
+        UINT64_C(0x1122334455667788),
+        UINT64_C(0x99aabbccddeeff00)
+      });
+    bus.write32(0, UINT32_C(0x24030001));
+    bus.write32(4, UINT32_C(0x7c220000));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    EEQuadword stored;
+    REQUIRE(bus.readData128(0x100, &stored));
+    REQUIRE(stored.low == UINT64_C(0x1122334455667788));
+    REQUIRE(stored.high == UINT64_C(0x99aabbccddeeff00));
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("Dependent shift-amount pairs remain scalar")
+  {
+    core.setShiftAmount(3);
+    bus.write32(0, UINT32_C(0x00001028));
+    bus.write32(4, UINT32_C(0x24430001));
     core.startExecution(0);
 
     system.clockMasterCycle();
 
     REQUIRE(
       core.lastIssueSelection().instructionCount ==
-      2);
+      1);
     REQUIRE(
       core.acceptanceRecordsThisCycle().size() ==
       1);
-    REQUIRE(core.shiftAmount() == 3);
-    REQUIRE(core.generalRegister(2).low == 0);
+    REQUIRE(core.generalRegister(2).low == 3);
+    REQUIRE(core.generalRegister(3).low == 0);
     REQUIRE(core.programCounter() == 4);
+  }
+
+  SECTION("An independent shift-amount operation issues in reverse pipe order")
+  {
+    core.setGeneralRegister(1, {7, 0});
+    bus.write32(0, UINT32_C(0x24030001));
+    bus.write32(4, UINT32_C(0x00200029));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEIssueSelection selection =
+      core.lastIssueSelection();
+    REQUIRE(selection.instructionCount == 2);
+    REQUIRE(
+      selection.assignment.olderPipe ==
+      EELogicalPipe::Pipe1);
+    REQUIRE(
+      selection.assignment.youngerPipe ==
+      EELogicalPipe::Pipe0);
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(core.shiftAmount() == 7);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("An older partner advances the younger SA ordering window")
+  {
+    core.setGeneralRegister(1, {1, 0});
+    bus.write32(0, UINT32_C(0x00001028));
+    bus.write32(4, 0);
+    bus.write32(8, 0);
+    bus.write32(12, UINT32_C(0x24030001));
+    bus.write32(16, UINT32_C(0x04380000));
+    core.startExecution(0);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(core.shiftAmount() == 8);
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0].address == 12);
+    REQUIRE(records[1].address == 16);
+    REQUIRE(core.programCounter() == 20);
   }
 
   SECTION("Successful issue produces one acceptance record")
@@ -907,7 +1040,7 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.rejectedInstruction() == 0x4c000000);
   }
 
-  SECTION("Unsafe memory pairs remain scalar candidates")
+  SECTION("Memory pairs participate in readiness")
   {
     bus.write32(0, UINT32_C(0x8c220000));
     bus.write32(4, UINT32_C(0x24030001));
@@ -917,7 +1050,7 @@ TEST_CASE("EE Core scheduled execution")
 
     REQUIRE(
       core.lastIssueSelection().instructionCount ==
-      1);
+      2);
   }
 
   SECTION("Branch-likely annulment participates in readiness")

@@ -341,6 +341,60 @@ TEST_CASE("EE SQ retries a full guest FIFO without raising an exception")
   REQUIRE(system.vif0().fifoQuadwordCount() == 1);
 }
 
+TEST_CASE("EE pairs fall back before a younger SQ FIFO stall")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  EECore &core = system.eeCore();
+  const EEQuadword interruptedNops = {
+    UINT64_C(0x0000000080000000),
+    0
+  };
+
+  REQUIRE(
+    bus.writeGuestData128(
+      EEMemoryMap::VIF0_FIFO,
+      interruptedNops) ==
+    EEDataWriteResult::Completed);
+  bus.advanceGuestFIFOs();
+  for (std::size_t index = 0; index < 7; ++index)
+  {
+    REQUIRE(
+      bus.writeGuestData128(EEMemoryMap::VIF0_FIFO, {}) ==
+      EEDataWriteResult::Completed);
+  }
+
+  core.setGeneralRegister(1, {EEMemoryMap::VIF0_FIFO, 0});
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x1111111122222222),
+      UINT64_C(0x3333333344444444)
+    });
+  bus.write32(0, immediateInstruction(0x09, 0, 3, 1));
+  bus.write32(4, immediateInstruction(0x1f, 1, 2));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  REQUIRE(core.generalRegister(3).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(system.vif0().fifoQuadwordCount() == 8);
+
+  system.clockMasterCycle();
+  REQUIRE(core.generalRegister(3).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.pendingException() == EEException::None);
+
+  bus.write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
+  system.clockMasterCycle();
+  REQUIRE(core.generalRegister(3).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(system.vif0().fifoQuadwordCount() == 1);
+}
+
 TEST_CASE("EE guest GIF FIFO retains refused PATH3 transfers")
 {
   NekoSystem system;
