@@ -159,7 +159,7 @@ TEST_CASE("EE halfword alignment faults restart branch delay slots")
     4,
     memoryInstruction(0x25, 1, 2, 0));
   core.startExecution(0);
-  system.runMasterCycles(2);
+  system.runMasterCycles(1);
 
   REQUIRE(
     core.pendingException() ==

@@ -180,7 +180,7 @@ TEST_CASE("EE byte faults restart from the preceding branch")
     12,
     memoryInstruction(0x0d, 0, 3, 1));
   core.startExecution(0);
-  system.runMasterCycles(2);
+  system.runMasterCycles(1);
 
   REQUIRE(core.stopReason() == EEStopReason::None);
   REQUIRE(core.pendingException() == EEException::DataBusErrorLoad);

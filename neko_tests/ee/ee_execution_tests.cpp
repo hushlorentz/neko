@@ -160,19 +160,16 @@ TEST_CASE("EE instruction stepping follows repeated branch addresses")
   system.eeBus().write32(4, 0);
   system.eeCore().startExecution(0);
 
-  const EEExecutionResult branch = system.stepEEInstruction(1);
-  const EEExecutionResult delay = system.stepEEInstruction(1);
+  const EEExecutionResult firstGroup =
+    system.stepEEInstruction(1);
   const EEExecutionResult repeatedBranch =
     system.stepEEInstruction(1);
 
-  REQUIRE(branch.instructions == 1);
-  REQUIRE(branch.programCounter == 4);
-  REQUIRE_FALSE(branch.cycleLimitReached);
-  REQUIRE(delay.instructions == 1);
-  REQUIRE(delay.programCounter == 0);
-  REQUIRE_FALSE(delay.cycleLimitReached);
-  REQUIRE(repeatedBranch.instructions == 1);
-  REQUIRE(repeatedBranch.programCounter == 4);
+  REQUIRE(firstGroup.instructions == 2);
+  REQUIRE(firstGroup.programCounter == 0);
+  REQUIRE_FALSE(firstGroup.cycleLimitReached);
+  REQUIRE(repeatedBranch.instructions == 2);
+  REQUIRE(repeatedBranch.programCounter == 0);
   REQUIRE_FALSE(repeatedBranch.cycleLimitReached);
 }
 

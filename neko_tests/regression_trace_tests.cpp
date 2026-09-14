@@ -292,10 +292,10 @@ TEST_CASE("EE regression traces describe issued work")
   core.startExecution(0);
   system.startTrace();
 
-  system.runMasterCycles(4);
+  system.runMasterCycles(3);
 
   const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 11);
+  REQUIRE(events.size() == 10);
 
   REQUIRE(events[0].masterCycle == 1);
   REQUIRE(
@@ -333,28 +333,28 @@ TEST_CASE("EE regression traces describe issued work")
   REQUIRE(events[4].value1 == 12);
   REQUIRE(events[4].value2 == NekoEETraceBranch::TAKEN);
 
-  REQUIRE(events[6].masterCycle == 3);
+  REQUIRE(events[5].masterCycle == 2);
   REQUIRE(
-    events[6].type ==
+    events[5].type ==
     NekoTraceEventType::InstructionIssued);
-  REQUIRE(events[6].value0 == 8);
-  REQUIRE(events[6].value3 == 1);
+  REQUIRE(events[5].value0 == 8);
+  REQUIRE(events[5].value3 == 1);
 
-  REQUIRE(events[8].masterCycle == 4);
+  REQUIRE(events[7].masterCycle == 3);
+  REQUIRE(
+    events[7].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[7].value0 == 12);
   REQUIRE(
     events[8].type ==
-    NekoTraceEventType::InstructionIssued);
-  REQUIRE(events[8].value0 == 12);
-  REQUIRE(
-    events[9].type ==
     NekoTraceEventType::ExceptionEntered);
   REQUIRE(
-    events[9].value0 ==
+    events[8].value0 ==
     static_cast<std::uint8_t>(EEException::SystemCall));
-  REQUIRE(events[9].value1 == 12);
-  REQUIRE(events[9].value2 == EEExceptionVector::GENERAL);
-  REQUIRE(events[10].type == NekoTraceEventType::StateSnapshot);
-  REQUIRE(events[10].value0 == core.stateHash());
+  REQUIRE(events[8].value1 == 12);
+  REQUIRE(events[8].value2 == EEExceptionVector::GENERAL);
+  REQUIRE(events[9].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[9].value0 == core.stateHash());
   REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
 }
 
@@ -708,7 +708,7 @@ TEST_CASE("COP1 divider hazard context survives save and reset")
   original.eeBus().write32(4, 0);
   original.eeBus().write32(8, divide);
   original.eeCore().startExecution(0);
-  original.runMasterCycles(2);
+  original.runMasterCycles(1);
 
   NekoSystem restored;
   restored.loadState(original.saveState());

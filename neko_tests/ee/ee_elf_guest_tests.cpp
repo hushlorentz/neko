@@ -292,7 +292,7 @@ TEST_CASE("PS2DEV EE ELF guest renders a rotating VU1 triangle")
 
   REQUIRE(result.outcome == EEGuestOutcome::Completed);
   REQUIRE(result.exitCode == 0);
-  REQUIRE(result.execution.instructions == 705);
+  REQUIRE(result.execution.instructions == 1361);
   REQUIRE(system.vu1().getState() == VPU_STATE_READY);
   REQUIRE_FALSE(system.gifPath1().path1TransferActive());
   REQUIRE(system.gifPath1().transferredQuadwordCount() == 12);

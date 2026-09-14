@@ -710,7 +710,8 @@ TEST_CASE("EE COP2 branches use VU1 activity and likely annulment")
       system.eeBus().write32(index * 4, program[index]);
     }
     system.eeCore().startExecution(0);
-    system.runMasterCycles(contract.taken ? 3 : 2);
+    system.runMasterCycles(
+      contract.taken || contract.likely ? 2 : 1);
 
     REQUIRE(
       system.eeCore().generalRegister(2).low ==

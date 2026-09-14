@@ -142,7 +142,7 @@ TEST_CASE("EE ERET exposes a pending interrupt at the next boundary")
   REQUIRE(core.programCounter() == EEExceptionVector::INTERRUPT);
 }
 
-TEST_CASE("EE interrupt delivery preserves a pending branch restart")
+TEST_CASE("EE interrupts wait for a complete branch issue group")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -164,11 +164,11 @@ TEST_CASE("EE interrupt delivery preserves a pending branch restart")
   system.clockMasterCycle();
 
   REQUIRE(core.pendingException() == EEException::Interrupt);
-  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 12);
   REQUIRE(
     (core.cop0Register(EECOP0Register::Cause) &
-      EECOP0Cause::BRANCH_DELAY) != 0);
-  REQUIRE(core.generalRegister(1).low == 0);
+      EECOP0Cause::BRANCH_DELAY) == 0);
+  REQUIRE(core.generalRegister(1).low == 1);
 }
 
 TEST_CASE("EE observes DMAC completion at the next instruction boundary")

@@ -995,7 +995,7 @@ accumulator or condition-result contract:
       physical-resource masks are compatible
 - [x] Extend ordinary `O` activation to memory and SA pairs while preserving
       precise memory side effects, bus-stall continuation, and SA ordering
-- [ ] Extend ordinary `O` activation to branch, branch-likely, and resolved
+- [x] Extend ordinary `O` activation to branch, branch-likely, and resolved
       delay-slot pairs while preserving delay-slot ownership, annulment,
       redirects, exceptions, and divider branch-proximity windows
 - [ ] Persist concrete post-activation front-end entries,

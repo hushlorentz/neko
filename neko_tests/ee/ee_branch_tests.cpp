@@ -69,6 +69,143 @@ namespace
   }
 }
 
+TEST_CASE("EE branch issue groups execute resolved delay slots")
+{
+  SECTION("A taken branch and its delay slot issue together")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setLow(&core, 1, 7);
+    setLow(&core, 2, 7);
+    const std::uint32_t program[] = {
+      immediateInstruction(0x04, 1, 2, 2),
+      immediateInstruction(0x0d, 0, 3, 1),
+      immediateInstruction(0x0d, 0, 4, 2),
+      immediateInstruction(0x0d, 0, 5, 3)
+    };
+    writeProgram(&system, program, 4);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 2);
+    REQUIRE(records[0].address == 0);
+    REQUIRE_FALSE(records[0].delaySlot);
+    REQUIRE(records[1].address == 4);
+    REQUIRE(records[1].delaySlot);
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(core.generalRegister(4).low == 0);
+    REQUIRE(core.generalRegister(5).low == 0);
+    REQUIRE(core.programCounter() == 12);
+  }
+
+  SECTION("An untaken ordinary branch still issues its delay slot")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setLow(&core, 1, 1);
+    setLow(&core, 2, 2);
+    const std::uint32_t program[] = {
+      immediateInstruction(0x04, 1, 2, 2),
+      immediateInstruction(0x0d, 0, 3, 1),
+      immediateInstruction(0x0d, 0, 4, 2)
+    };
+    writeProgram(&system, program, 3);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(core.generalRegister(4).low == 0);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("A taken likely branch issues its delay slot")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setLow(&core, 1, 2);
+    setLow(&core, 2, 2);
+    const std::uint32_t program[] = {
+      immediateInstruction(0x14, 1, 2, 2),
+      immediateInstruction(0x0d, 0, 3, 1),
+      0,
+      immediateInstruction(0x0d, 0, 4, 2)
+    };
+    writeProgram(&system, program, 4);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(core.generalRegister(4).low == 0);
+    REQUIRE(core.programCounter() == 12);
+  }
+
+  SECTION("An untaken likely branch annuls without pairing")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setLow(&core, 1, 1);
+    setLow(&core, 2, 2);
+    const std::uint32_t program[] = {
+      immediateInstruction(0x14, 1, 2, 2),
+      immediateInstruction(0x0d, 0, 3, 1),
+      immediateInstruction(0x0d, 0, 4, 2)
+    };
+    writeProgram(&system, program, 3);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.generalRegister(4).low == 0);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("A younger delay-slot fault retains the branch acceptance")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    setLow(&core, 1, 0x101);
+    const std::uint32_t program[] = {
+      immediateInstruction(0x04, 0, 0, 2),
+      immediateInstruction(0x21, 1, 2, 0),
+      0,
+      0
+    };
+    writeProgram(&system, program, 4);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0].address == 0);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == 0x101);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+    REQUIRE(
+      (core.cop0Register(EECOP0Register::Cause) &
+       EECOP0Cause::BRANCH_DELAY) != 0);
+  }
+}
+
 TEST_CASE("EE conditional branches execute architectural delay slots")
 {
   NekoSystem system;
@@ -83,10 +220,6 @@ TEST_CASE("EE conditional branches execute architectural delay slots")
   };
   writeProgram(&system, program, 4);
   core.startExecution(0);
-
-  system.clockMasterCycle();
-  REQUIRE(core.programCounter() == 4);
-  REQUIRE(core.generalRegister(3).low == 0);
 
   system.clockMasterCycle();
   REQUIRE(core.programCounter() == 12);
@@ -185,7 +318,7 @@ TEST_CASE("EE signed branch families use 64-bit conditions")
     };
     writeProgram(&system, program, 4);
     system.eeCore().startExecution(0);
-    system.runMasterCycles(contract.taken ? 3 : 2);
+    system.runMasterCycles(contract.taken ? 2 : 1);
 
     if (contract.rt >= 2 && !contract.taken)
     {
@@ -274,7 +407,7 @@ TEST_CASE("EE branch link and target restrictions are deterministic")
     REQUIRE(
       core.generalRegister(31).high ==
       UINT64_C(0xfeedfacecafebeef));
-    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.programCounter() == 8);
   }
 
   SECTION("JALR rejects using the target as its link register")
@@ -303,7 +436,7 @@ TEST_CASE("EE branch link and target restrictions are deterministic")
     };
     writeProgram(&system, program, 2);
     system.eeCore().startExecution(0);
-    system.runMasterCycles(3);
+    system.runMasterCycles(2);
 
     REQUIRE(system.eeCore().stopReason() == EEStopReason::None);
     REQUIRE(

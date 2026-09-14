@@ -1091,19 +1091,15 @@ TEST_CASE("In-flight EE multiply latency survives save states")
 TEST_CASE("Pending EE branch delay slots survive save states")
 {
   NekoSystem original;
-  original.eeCore().setGeneralRegister(1, {7, 0});
-  original.eeCore().setGeneralRegister(2, {7, 0});
   original.eeBus().write32(
     0,
-    (UINT32_C(0x04) << 26) |
-    (UINT32_C(1) << 21) |
-    (UINT32_C(2) << 16) |
-    2);
+    UINT32_C(0x0c000003));
   original.eeBus().write32(
     4,
-    (UINT32_C(0x0d) << 26) |
+    (UINT32_C(0x19) << 26) |
+    (UINT32_C(31) << 21) |
     (UINT32_C(3) << 16) |
-    1);
+    0);
   original.eeBus().write32(
     12,
     (UINT32_C(0x0d) << 26) |
@@ -1122,7 +1118,7 @@ TEST_CASE("Pending EE branch delay slots survive save states")
   restored.clockMasterCycle();
   REQUIRE(original.saveState() == restored.saveState());
   REQUIRE(restored.eeCore().programCounter() == 12);
-  REQUIRE(restored.eeCore().generalRegister(3).low == 1);
+  REQUIRE(restored.eeCore().generalRegister(3).low == 8);
 
   original.clockMasterCycle();
   restored.clockMasterCycle();

@@ -409,21 +409,24 @@ TEST_CASE("In-flight EE save states resume identically")
   SECTION("Pending branch delay slot")
   {
     NekoSystem original;
-    prepareDeterminismProgram(&original);
-    std::uint64_t accepted = 0;
-    do
-    {
-      const EEExecutionResult step =
-        original.stepEEInstruction(16);
-      REQUIRE(
-        step.instructions ==
-        (accepted == 0 ? 2 : 1));
-      accepted += step.instructions;
-    }
-    while (original.eeCore().lastInstructionAddress() != 20);
-    REQUIRE(accepted == 6);
-    REQUIRE(original.eeCore().programCounter() == 24);
-    REQUIRE(original.eeCore().lastInstructionAddress() == 20);
+    original.eeCore().setCOP0Register(
+      EECOP0Register::Status,
+      0);
+    const std::uint32_t program[] = {
+      UINT32_C(0x0c000003),
+      immediateInstruction(0x19, 31, 3, 0),
+      0,
+      immediateInstruction(0x0d, 0, 4, 42),
+      UINT32_C(0x0000000c)
+    };
+    writeProgram(&original, 0, program, 5);
+    original.eeCore().startExecution(0);
+
+    const EEExecutionResult branch =
+      original.stepEEInstruction(16);
+    REQUIRE(branch.instructions == 1);
+    REQUIRE(original.eeCore().programCounter() == 4);
+    REQUIRE(original.eeCore().lastInstructionAddress() == 0);
     const std::vector<std::uint8_t> state =
       original.saveState();
 
@@ -443,7 +446,7 @@ TEST_CASE("In-flight EE save states resume identically")
       restored,
       originalResult,
       restoredResult);
-    REQUIRE(original.eeCore().generalRegister(5).low == 0);
-    REQUIRE(original.eeCore().generalRegister(6).low == 42);
+    REQUIRE(original.eeCore().generalRegister(3).low == 8);
+    REQUIRE(original.eeCore().generalRegister(4).low == 42);
   }
 }

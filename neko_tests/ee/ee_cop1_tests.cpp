@@ -3051,7 +3051,8 @@ TEST_CASE("EE COP1 branches use FCR31 condition and likely annulment")
       system.eeBus().write32(index * 4, program[index]);
     }
     core.startExecution(0);
-    system.runMasterCycles(contract.taken ? 3 : 2);
+    system.runMasterCycles(
+      contract.taken || contract.likely ? 2 : 1);
 
     REQUIRE(
       core.generalRegister(2).low ==
@@ -3097,9 +3098,9 @@ TEST_CASE("EE COP1 branches consume the preceding comparison condition")
     }
     core.startExecution(0);
 
-    system.runMasterCycles(7);
+    system.runMasterCycles(6);
 
-    REQUIRE(core.elapsedCycles() == 7);
+    REQUIRE(core.elapsedCycles() == 6);
     REQUIRE(core.programCounter() == 16);
     REQUIRE(core.generalRegister(2).low == 1);
     REQUIRE(core.generalRegister(3).low == 0);
@@ -3164,7 +3165,7 @@ TEST_CASE("EE COP1 branch delay-slot exceptions preserve branch ownership")
   }
 }
 
-TEST_CASE("EE COP1 branch continuations survive save-state restore")
+TEST_CASE("EE COP1 branch results survive save-state restore")
 {
   struct Contract
   {
@@ -3220,13 +3221,7 @@ TEST_CASE("EE COP1 branch continuations survive save-state restore")
     REQUIRE(
       restored.eeCore().generalRegister(2).low ==
       (contract.likely && !contract.taken ? 0 : 1));
-    REQUIRE(
-      restored.eeCore().programCounter() ==
-      (contract.taken
-        ? 12
-        : contract.likely
-          ? 16
-          : 8));
+    REQUIRE(restored.eeCore().programCounter() == 16);
   }
 }
 
@@ -3377,13 +3372,13 @@ TEST_CASE(
 
     system.runMasterCycles(6);
 
-    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.programCounter() == 20);
     REQUIRE(core.cop1Condition());
     REQUIRE(core.floatingPointRegister(8) == 0);
 
     system.clockMasterCycle();
 
-    REQUIRE(core.programCounter() == 20);
+    REQUIRE(core.programCounter() == 24);
     REQUIRE(
       core.floatingPointRegister(8) ==
       UINT32_C(0x7fffffff));
@@ -3421,7 +3416,7 @@ TEST_CASE(
 
     system.clockMasterCycle();
 
-    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.programCounter() == 20);
     REQUIRE(core.cop1Condition());
   }
 

@@ -718,11 +718,19 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
   if (issueSelection.instructionCount != 2 ||
       issueSelection.pairing !=
         EEIssuePairing::Concurrent ||
-      branchDelayPending ||
-      !isActivatedOIssueOperation(
-        issueLatch.instruction.operation) ||
-      !isActivatedOIssueOperation(
-        stagingLatch.instruction.operation))
+      branchDelayPending)
+  {
+    return false;
+  }
+
+  const bool resolvedBranchPair =
+    isEEBranchOperation(issueLatch.instruction.operation);
+  const bool ordinaryPair =
+    isActivatedOIssueOperation(
+      issueLatch.instruction.operation) &&
+    isActivatedOIssueOperation(
+      stagingLatch.instruction.operation);
+  if (!resolvedBranchPair && !ordinaryPair)
   {
     return false;
   }

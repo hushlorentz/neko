@@ -261,7 +261,7 @@ TEST_CASE("EE delay-slot exceptions identify the restartable branch")
       immediateInstruction(0x21, 1, 2, 0));
     core.startExecution(0);
 
-    system.runMasterCycles(2);
+    system.runMasterCycles(1);
 
     REQUIRE(
       core.pendingException() ==
@@ -298,7 +298,7 @@ TEST_CASE("EE delay-slot exceptions identify the restartable branch")
     system.eeBus().write32(4, UINT32_C(0x0000000c));
     core.startExecution(0);
 
-    system.runMasterCycles(2);
+    system.runMasterCycles(1);
 
     REQUIRE(core.pendingException() == EEException::SystemCall);
     REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
