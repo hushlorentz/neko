@@ -942,7 +942,7 @@ accumulator or condition-result contract:
 
 - [x] Classify every implemented EE instruction by logical-pipe eligibility
       and physical resources, independent of COP1 execution semantics
-- [ ] Define how older/younger program order maps to fixed and flexible logical
+- [x] Define how older/younger program order maps to fixed and flexible logical
       pipes, including whether a Pipe-1-only older instruction may pair with a
       Pipe-0-only younger instruction
 - [ ] Add two-instruction fetch/decode and the documented staging register for

@@ -210,6 +210,13 @@ struct EEInstructionRouting
   std::uint8_t pipe1PhysicalPipelines = 0;
 };
 
+struct EEInstructionPipeAssignment
+{
+  bool assignable = false;
+  EELogicalPipe olderPipe = EELogicalPipe::Pipe0;
+  EELogicalPipe youngerPipe = EELogicalPipe::Pipe1;
+};
+
 struct EEInstruction
 {
   EEOperation operation = EEOperation::Nop;
@@ -255,6 +262,9 @@ bool eeInstructionUsesPhysicalPipeline(
   const EEInstructionRouting &routing,
   EELogicalPipe pipe,
   EEPhysicalPipeline pipeline);
+EEInstructionPipeAssignment assignEEInstructionPairPipes(
+  EEOperation older,
+  EEOperation younger);
 bool isEEBranchOperation(EEOperation operation);
 bool isEEBranchLikelyOperation(EEOperation operation);
 

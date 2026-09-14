@@ -1254,6 +1254,45 @@ std::uint8_t eeInstructionPhysicalPipelines(
       : routing.pipe1PhysicalPipelines;
 }
 
+EEInstructionPipeAssignment assignEEInstructionPairPipes(
+  EEOperation older,
+  EEOperation younger)
+{
+  const EEInstructionRouting olderRouting =
+    eeInstructionRouting(older);
+  const EEInstructionRouting youngerRouting =
+    eeInstructionRouting(younger);
+
+  if (eeInstructionSupportsLogicalPipe(
+        olderRouting,
+        EELogicalPipe::Pipe0) &&
+      eeInstructionSupportsLogicalPipe(
+        youngerRouting,
+        EELogicalPipe::Pipe1))
+  {
+    return {
+      true,
+      EELogicalPipe::Pipe0,
+      EELogicalPipe::Pipe1
+    };
+  }
+  if (eeInstructionSupportsLogicalPipe(
+        olderRouting,
+        EELogicalPipe::Pipe1) &&
+      eeInstructionSupportsLogicalPipe(
+        youngerRouting,
+        EELogicalPipe::Pipe0))
+  {
+    return {
+      true,
+      EELogicalPipe::Pipe1,
+      EELogicalPipe::Pipe0
+    };
+  }
+
+  return {};
+}
+
 bool isEEBranchOperation(EEOperation operation)
 {
   switch (operation)

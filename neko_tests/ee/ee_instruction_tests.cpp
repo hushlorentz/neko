@@ -243,6 +243,75 @@ TEST_CASE("EE instruction routing classification")
     "Unknown EE operation routing classification.");
 }
 
+TEST_CASE("EE pair pipe assignment preserves program order")
+{
+  const auto requireAssignment =
+    [](EEOperation older,
+       EEOperation younger,
+       EELogicalPipe olderPipe,
+       EELogicalPipe youngerPipe)
+    {
+      const EEInstructionPipeAssignment assignment =
+        assignEEInstructionPairPipes(older, younger);
+      REQUIRE(assignment.assignable);
+      REQUIRE(assignment.olderPipe == olderPipe);
+      REQUIRE(assignment.youngerPipe == youngerPipe);
+    };
+
+  SECTION("Flexible pairs prefer ascending logical pipe order")
+  {
+    requireAssignment(
+      EEOperation::AddWord,
+      EEOperation::BranchEqual,
+      EELogicalPipe::Pipe0,
+      EELogicalPipe::Pipe1);
+  }
+
+  SECTION("A fixed younger instruction redirects an older flexible one")
+  {
+    requireAssignment(
+      EEOperation::AddWord,
+      EEOperation::MoveToShiftAmount,
+      EELogicalPipe::Pipe1,
+      EELogicalPipe::Pipe0);
+  }
+
+  SECTION("A fixed older instruction redirects a younger flexible one")
+  {
+    requireAssignment(
+      EEOperation::LoadWord,
+      EEOperation::AddWord,
+      EELogicalPipe::Pipe1,
+      EELogicalPipe::Pipe0);
+  }
+
+  SECTION("Opposing fixed pipes may pair in either program order")
+  {
+    requireAssignment(
+      EEOperation::MoveWordFromCOP1,
+      EEOperation::AddSingleCOP1,
+      EELogicalPipe::Pipe1,
+      EELogicalPipe::Pipe0);
+    requireAssignment(
+      EEOperation::AddSingleCOP1,
+      EEOperation::MoveWordFromCOP1,
+      EELogicalPipe::Pipe0,
+      EELogicalPipe::Pipe1);
+  }
+
+  SECTION("Instructions fixed to the same pipe cannot be assigned")
+  {
+    REQUIRE_FALSE(
+      assignEEInstructionPairPipes(
+        EEOperation::AddSingleCOP1,
+        EEOperation::MoveToShiftAmount).assignable);
+    REQUIRE_FALSE(
+      assignEEInstructionPairPipes(
+        EEOperation::LoadWord,
+        EEOperation::MoveWordFromCOP1).assignable);
+  }
+}
+
 TEST_CASE("EE base integer decoder tables")
 {
   struct RegisterContract
