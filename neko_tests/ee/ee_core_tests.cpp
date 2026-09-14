@@ -8,6 +8,18 @@
 #include "ee_instruction.hpp"
 #include "neko_system.hpp"
 
+struct EECoreTestAccess
+{
+  static EEIssueGroupExecutionResult executeIssueGroup(
+    EECore *core,
+    std::uint8_t memberCount)
+  {
+    core->acceptanceRecords.clear();
+    core->fillIssueFrontEnd();
+    return core->executeIssueGroup(memberCount, 0);
+  }
+};
+
 TEST_CASE("EE acceptance records preserve issue-group order")
 {
   EEAcceptanceRecords records;
@@ -62,6 +74,186 @@ TEST_CASE("EE acceptance records preserve issue-group order")
       false
     }),
     std::invalid_argument);
+}
+
+TEST_CASE("EE issue groups stop at precise member boundaries")
+{
+  SECTION("An older failure suppresses the younger member")
+  {
+    std::uint8_t attempts = 0;
+    const EEIssueGroupExecutionResult result =
+      executeEEIssueGroupMembers(
+        2,
+        [&attempts](std::uint8_t member)
+        {
+          ++attempts;
+          REQUIRE(member == 0);
+          return EEIssueMemberExecution::Failed;
+        });
+
+    REQUIRE(attempts == 1);
+    REQUIRE(result.attempted == 1);
+    REQUIRE(result.accepted == 0);
+    REQUIRE(result.stoppedMember == 0);
+    REQUIRE(
+      result.stop ==
+      EEIssueMemberExecution::Failed);
+  }
+
+  SECTION("A younger failure preserves the older member")
+  {
+    std::uint32_t architecturalValue = 0;
+    EEAcceptanceRecords records;
+    const EEIssueGroupExecutionResult result =
+      executeEEIssueGroupMembers(
+        2,
+        [&architecturalValue, &records](
+          std::uint8_t member)
+        {
+          if (member == 0)
+          {
+            architecturalValue = 7;
+            records.append({
+              1,
+              0,
+              decodeEEInstruction(
+                UINT32_C(0x24020007)),
+              false
+            });
+            return EEIssueMemberExecution::Accepted;
+          }
+          REQUIRE(architecturalValue == 7);
+          return EEIssueMemberExecution::Failed;
+        });
+
+    REQUIRE(architecturalValue == 7);
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0].instruction.raw == 0x24020007);
+    REQUIRE(result.attempted == 2);
+    REQUIRE(result.accepted == 1);
+    REQUIRE(result.stoppedMember == 1);
+    REQUIRE(
+      result.stop ==
+      EEIssueMemberExecution::Failed);
+  }
+}
+
+TEST_CASE("EE Core executes issue groups at precise boundaries")
+{
+  SECTION("An older exception suppresses younger effects")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    system.eeBus().write32(0, UINT32_C(0x0000000c));
+    system.eeBus().write32(4, UINT32_C(0x24020007));
+    core.startExecution(0);
+
+    const EEIssueGroupExecutionResult result =
+      EECoreTestAccess::executeIssueGroup(&core, 2);
+
+    REQUIRE(result.attempted == 1);
+    REQUIRE(result.accepted == 0);
+    REQUIRE(result.stoppedMember == 0);
+    REQUIRE(
+      result.stop ==
+      EEIssueMemberExecution::Failed);
+    REQUIRE(core.generalRegister(2).low == 0);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.exceptionAddress() == 0);
+    REQUIRE_FALSE(core.hasLastInstruction());
+  }
+
+  SECTION("A younger exception preserves older effects")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    system.eeBus().write32(0, UINT32_C(0x24020007));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    core.startExecution(0);
+
+    const EEIssueGroupExecutionResult result =
+      EECoreTestAccess::executeIssueGroup(&core, 2);
+
+    REQUIRE(result.attempted == 2);
+    REQUIRE(result.accepted == 1);
+    REQUIRE(result.stoppedMember == 1);
+    REQUIRE(
+      result.stop ==
+      EEIssueMemberExecution::Failed);
+    REQUIRE(core.generalRegister(2).low == 7);
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0].address == 0);
+    REQUIRE(records[0].instruction.raw == 0x24020007);
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.exceptionAddress() == 4);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 4);
+    REQUIRE(core.lastInstructionAddress() == 0);
+    REQUIRE(core.lastInstruction().raw == 0x24020007);
+  }
+
+  SECTION("A younger stop preserves older effects and owns the reason")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(0, UINT32_C(0x24020007));
+    system.eeBus().write32(4, UINT32_C(0xbc000000));
+    core.startExecution(0);
+
+    const EEIssueGroupExecutionResult result =
+      EECoreTestAccess::executeIssueGroup(&core, 2);
+
+    REQUIRE(result.attempted == 2);
+    REQUIRE(result.accepted == 1);
+    REQUIRE(result.stoppedMember == 1);
+    REQUIRE(
+      result.stop ==
+      EEIssueMemberExecution::Failed);
+    REQUIRE(core.generalRegister(2).low == 7);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::UnsupportedInstruction);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.rejectedInstruction() == 0xbc000000);
+    REQUIRE(core.lastInstructionAddress() == 0);
+  }
+
+  SECTION("A younger exception preserves older delayed work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    system.eeBus().write32(0, UINT32_C(0x460208c0));
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    core.startExecution(0);
+
+    const EEIssueGroupExecutionResult result =
+      EECoreTestAccess::executeIssueGroup(&core, 2);
+
+    REQUIRE(result.accepted == 1);
+    REQUIRE(core.floatingPointRegister(3) == 0);
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x40400000));
+  }
 }
 
 TEST_CASE("EE Core architectural state")
@@ -691,6 +883,27 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.pendingException() == EEException::SystemCall);
     REQUIRE(core.lastInstructionAddress() == 0);
     REQUIRE(core.lastInstruction().operation == EEOperation::Nop);
+  }
+
+  SECTION("A failed instruction does not consume program order")
+  {
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    bus.write32(0, UINT32_C(0x0000000c));
+    bus.write32(EEExceptionVector::GENERAL, 0);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+
+    system.clockMasterCycle();
+
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0].programOrder == 1);
+    REQUIRE(records[0].address == EEExceptionVector::GENERAL);
   }
 
   SECTION("Host halt and restart preserve accumulated cycles")

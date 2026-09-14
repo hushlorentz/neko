@@ -1001,9 +1001,31 @@ void EECore::clock()
     return;
   }
 
+  executeIssueGroup(1, completedCOP1LoadRegisters);
+}
+
+EEIssueGroupExecutionResult EECore::executeIssueGroup(
+  std::uint8_t memberCount,
+  std::uint32_t completedLoadRegisters)
+{
+  return executeEEIssueGroupMembers(
+    memberCount,
+    [this, completedLoadRegisters](std::uint8_t)
+    {
+      return executeIssueMember(completedLoadRegisters);
+    });
+}
+
+EEIssueMemberExecution EECore::executeIssueMember(
+  std::uint32_t completedLoadRegisters)
+{
+  if (!issueLatch.valid)
+  {
+    return EEIssueMemberExecution::Blocked;
+  }
   if (handleIssueLatchFailure())
   {
-    return;
+    return EEIssueMemberExecution::Failed;
   }
 
   const std::uint32_t instructionAddress =
@@ -1017,7 +1039,7 @@ void EECore::clock()
   COP1ScoreboardHazard scoreboardHazard;
   if (cop1ScoreboardBlocks(
         decoded,
-        completedCOP1LoadRegisters,
+        completedLoadRegisters,
         &scoreboardHazard))
   {
     if (scoreboardHazard.completedLoad)
@@ -1074,8 +1096,9 @@ void EECore::clock()
           scoreboardHazard.dependency));
     }
     pc = instructionAddress;
-    return;
+    return EEIssueMemberExecution::Blocked;
   }
+
   pc = instructionAddress + 4;
   if (nextEEProgramOrder == UINT64_MAX)
   {
@@ -1083,7 +1106,7 @@ void EECore::clock()
       "EE instruction program order overflow.");
   }
   const std::uint64_t instructionProgramOrder =
-    nextEEProgramOrder++;
+    nextEEProgramOrder;
   executingProgramOrder = instructionProgramOrder;
   recordCycleTrace(
     CycleTraceKind::InstructionIssued,
@@ -1100,8 +1123,14 @@ void EECore::clock()
     {
       clearIssueFrontEnd();
     }
-    return;
+    return
+      exceptionEnteredThisCycle ||
+      state != EEExecutionState::Running
+        ? EEIssueMemberExecution::Failed
+        : EEIssueMemberExecution::Blocked;
   }
+
+  ++nextEEProgramOrder;
   recordInstructionAcceptance(
     instructionProgramOrder,
     instructionAddress,
@@ -1127,6 +1156,7 @@ void EECore::clock()
   {
     clearIssueFrontEnd();
   }
+  return EEIssueMemberExecution::Accepted;
 }
 
 void EECore::recordInstructionAcceptance(

@@ -4,12 +4,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 
 #include "clocked_component.hpp"
 #include "ee_instruction.hpp"
 
 class EEBus;
 class VPU;
+struct EECoreTestAccess;
 
 struct EERegister128
 {
@@ -97,6 +99,52 @@ class EEShiftAmountOrderingWindow
     std::uint8_t recentAccesses = 0;
     std::uint8_t recentReads = 0;
 };
+
+enum class EEIssueMemberExecution : std::uint8_t
+{
+  Accepted,
+  Blocked,
+  Failed
+};
+
+struct EEIssueGroupExecutionResult
+{
+  std::uint8_t attempted = 0;
+  std::uint8_t accepted = 0;
+  std::uint8_t stoppedMember = UINT8_MAX;
+  EEIssueMemberExecution stop =
+    EEIssueMemberExecution::Accepted;
+};
+
+template <typename AttemptMember>
+EEIssueGroupExecutionResult executeEEIssueGroupMembers(
+  std::uint8_t memberCount,
+  AttemptMember attemptMember)
+{
+  if (memberCount > EEAcceptanceRecords::CAPACITY)
+  {
+    throw std::invalid_argument(
+      "EE issue group exceeds architectural capacity.");
+  }
+
+  EEIssueGroupExecutionResult result;
+  for (std::uint8_t member = 0;
+       member < memberCount;
+       ++member)
+  {
+    ++result.attempted;
+    const EEIssueMemberExecution execution =
+      attemptMember(member);
+    if (execution != EEIssueMemberExecution::Accepted)
+    {
+      result.stoppedMember = member;
+      result.stop = execution;
+      return result;
+    }
+    ++result.accepted;
+  }
+  return result;
+}
 
 enum class EEExecutionState : std::uint8_t
 {
@@ -304,6 +352,7 @@ class EECore : public ClockedComponent
   private:
     friend class NekoSystem;
     friend class NekoSaveStateCodec;
+    friend struct EECoreTestAccess;
 
     enum class CycleTraceKind : std::uint8_t
     {
@@ -575,6 +624,11 @@ class EECore : public ClockedComponent
     void advanceIssueFrontEnd();
     void clearIssueFrontEnd();
     bool handleIssueLatchFailure();
+    EEIssueGroupExecutionResult executeIssueGroup(
+      std::uint8_t memberCount,
+      std::uint32_t completedLoadRegisters);
+    EEIssueMemberExecution executeIssueMember(
+      std::uint32_t completedLoadRegisters);
     void recordInstructionAcceptance(
       std::uint64_t programOrder,
       std::uint32_t address,

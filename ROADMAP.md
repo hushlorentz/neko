@@ -984,7 +984,7 @@ accumulator or condition-result contract:
 - [x] Advance SA-ordering and divider branch-proximity instruction windows from
       ordered acceptance records so the younger instruction observes the
       older instruction's program-order effects independently of pipe number
-- [ ] Implement ordered per-instruction commit boundaries within an atomic
+- [x] Implement ordered per-instruction commit boundaries within an atomic
       issue group, ensuring an older exception suppresses all younger effects,
       a younger synchronous exception preserves completed older effects, and
       older-before-younger register, control, and stop-reason behavior remains
