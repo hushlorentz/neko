@@ -951,33 +951,55 @@ accumulator or condition-result contract:
 - [x] Select zero, one, or two candidate instructions in program order while
       respecting same-pair data dependencies, Pipe 0/Pipe 1 routing, and
       Table 1-3 `O`/`X`/`Y` classification without changing scalar retirement
-- [ ] Integrate the documented illegal sequences for Branch-Branch,
+- [ ] Define the architectural issue-group contract before activation:
+      admission and commit are atomic, no half-issued pair is externally
+      observable, effects and retirement remain in older-to-younger program
+      order, and stepping and instruction budgets count both members of an
+      inseparable group
+- [ ] Implement and classify `SYNC.P` and `SYNC.L` independently of scheduler
+      activation, including deterministic scalar execution and reserved-field
+      handling
+- [ ] Resolve the documented illegal sequences for Branch-Branch,
       Branch-ERET, Branch-SYNC.P/SYNC.L, and
-      Branch-Likely-MTSA/MTSAB/MTSAH with the existing deterministic
-      undefined-operation contract; add `SYNC.P`/`SYNC.L` decode in this item
-      if those instructions are still otherwise unimplemented
-- [ ] Preserve precise exceptions, delay-slot ownership, branch-likely
-      annulment, memory side effects, and older-before-younger write ordering
-      when a pair is considered or issued
+      Branch-Likely-MTSA/MTSAB/MTSAH against the manual, including whether each
+      sequence is undefined or merely unpairable; make legality sensitive to
+      older/younger operations rather than only pipe-numbered categories, and
+      explicitly define whether a branch may issue with its own delay-slot
+      instruction
+- [ ] Combine same-pair selection with cross-cycle producer and structural
+      readiness from the existing scoreboards; refuse pairs involving deferred
+      younger faults, unresolved dependencies, unsafe memory ordering, or
+      unresolved control-flow and branch-likely annulment
 - [ ] Replace single-instruction retirement bookkeeping with ordered
-      zero/one/two retirement records for execution counts, stop reasons, and
-      structured traces
-- [ ] Define deterministic per-cycle trace ordering and sufficient trace-event
-      capacity for two issued instructions and their memory, interlock,
-      exception, and hazard events, extending the C1 foundation contract
+      zero/one/two retirement records, defining execution counts, stop reasons,
+      exception ownership, deterministic per-cycle trace ordering, and
+      sufficient trace-event capacity for both instructions and their memory,
+      interlock, exception, and hazard events
 - [ ] Update `stepEEInstruction()`, `runEE()`, `runELF()`, guest-return
-      detection, and instruction budgets for zero/one/two retirement;
-      explicitly define whether stepping one instruction stops before or after
-      the inseparable younger member of an issued pair
-- [ ] Advance SA-ordering and divider branch-proximity instruction windows in
-      program order across a two-instruction issue group
-- [ ] Persist fetch, staging, pipe-assignment, and partially issued state
+      detection, and instruction budgets to consume ordered retirement records
+      and stop only after the complete atomic issue group has retired
+- [ ] Advance SA-ordering and divider branch-proximity instruction windows from
+      ordered retirement records so the younger instruction observes the
+      older instruction's program-order effects independently of pipe number
+- [ ] Implement atomic ordered pair execution and commit boundaries, ensuring
+      an older exception suppresses all younger effects and older-before-younger
+      register, control, and stop-reason behavior remains precise
+- [ ] Activate only ordinary Table 1-3 `O` register-only pairs; keep every `Y`
+      selection on the scalar fallback path until its owning pipeline block
+      implements the required stall, and assert that concurrently issued
+      physical-resource masks are compatible
+- [ ] Extend ordinary `O` activation to memory and SA pairs while preserving
+      precise memory side effects, bus-stall continuation, and SA ordering
+- [ ] Extend ordinary `O` activation to branch, branch-likely, and resolved
+      delay-slot pairs while preserving delay-slot ownership, annulment,
+      redirects, exceptions, and divider branch-proximity windows
+- [ ] Persist the concrete post-activation front-end, issue-group, assignment,
+      retirement, and continuation state that can cross a cycle boundary
       through reset, interrupts, halt/resume, canonical hashes, and
-      transactional save states
-- [ ] Activate selected two-instruction groups after precise pair execution,
-      retirement, trace, stepping, and continuation contracts are defined
-- [ ] Validate single-issue fallback and every implemented instruction-category
-      pairing before an independent EE scheduler review
+      transactional save states; do not serialize recomputable selection state
+- [ ] Validate single-issue fallback, deferred `Y` behavior, both permitted
+      older/younger pipe arrangements, and every implemented
+      instruction-category pairing before an independent EE scheduler review
 
 ### COP1 Concurrent Issue and Pipeline Integration
 
@@ -985,11 +1007,12 @@ accumulator or condition-result contract:
       C1 scoreboard and two-wide EE scheduler
 - [ ] Implement Table 1-3's `Y` combination: both instructions enter `R`, then
       the Pipe 1 COP1 Move stalls for one cycle at `A/T` on the shared C1
-      resource; cover every program-order arrangement permitted by the
-      resolved pipe-assignment contract
-- [ ] Enforce same-pair and cross-cycle FPR, ACC, FCR31, load, store,
-      comparison/branch, and structural dependencies without losing legal
-      concurrent issue
+      resource; resolve retirement ordering when the stalled Move is older,
+      and cover every program-order arrangement permitted by the pipe-assignment
+      and atomic issue-group contracts
+- [ ] Enforce cross-cycle FPR, ACC, FCR31, load, store, comparison/branch, and
+      C1 structural readiness using the foundation's same-pair dependency
+      contract without losing legal concurrent issue
 - [ ] Verify `1S`/`2T` bypassing, `2S` writeback, divider overlap, and Move
       timing in mixed one-wide and two-wide instruction streams
 - [ ] Preserve in-flight C1 and issue-queue work across unrelated EE
