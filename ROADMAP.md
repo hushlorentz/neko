@@ -1054,7 +1054,7 @@ accumulator or condition-result contract:
 - [x] Add an independently authored mixed concurrent-issue program covering
       Operate/Move pairing, dependencies, forwarding, ordered memory effects,
       and deterministic final state
-- [ ] For each focused COP1 program, assert its expected registers, `FCR31`,
+- [x] For each focused COP1 program, assert its expected registers, `FCR31`,
       memory outputs, instruction count, and termination reason; also assert
       retirement and stage traces where timing is part of the contract
 - [ ] Expand the foundation's PS2DEV semantic baseline into a timing,

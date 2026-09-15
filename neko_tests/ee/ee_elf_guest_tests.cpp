@@ -428,6 +428,7 @@ TEST_CASE("PS2DEV COP1 basic arithmetic guest covers flags and saturation")
 TEST_CASE("PS2DEV COP1 accumulator guest covers forwarding and flags")
 {
   NekoSystem system;
+  system.startTrace();
   const EEGuestExecutionResult result =
     system.runELF(readGuest("cop1_accumulator_compound.elf"), 256);
 
@@ -488,6 +489,81 @@ TEST_CASE("PS2DEV COP1 accumulator guest covers forwarding and flags")
      EECOP1Control::CAUSE_OVERFLOW));
   REQUIRE(core.generalRegister(19).low == stickyStatus);
   REQUIRE(core.cop1ControlRegister(31) == stickyStatus);
+
+  const std::uint32_t chainAddresses[] = {
+    result.load.entryPoint + 52,
+    result.load.entryPoint + 56,
+    result.load.entryPoint + 60,
+    result.load.entryPoint + 64,
+    result.load.entryPoint + 68,
+    result.load.entryPoint + 72,
+    result.load.entryPoint + 76,
+    result.load.entryPoint + 80,
+    result.load.entryPoint + 84,
+    result.load.entryPoint + 88
+  };
+  const auto isChainAddress =
+    [&chainAddresses](std::uint32_t address)
+    {
+      for (const std::uint32_t chainAddress :
+           chainAddresses)
+      {
+        if (address == chainAddress)
+        {
+          return true;
+        }
+      }
+      return false;
+    };
+
+  std::vector<NekoTraceEvent> admissions;
+  std::vector<NekoTraceEvent> retirements;
+  for (const NekoTraceEvent &event : system.trace())
+  {
+    const std::uint32_t address =
+      static_cast<std::uint32_t>(event.value1);
+    if (!isChainAddress(address))
+    {
+      continue;
+    }
+    if (event.type ==
+          NekoTraceEventType::COP1StageTransition &&
+        (event.value2 &
+         NekoEETraceCOP1Stage::FROM_MASK) ==
+          NekoEETraceCOP1Stage::NONE)
+    {
+      admissions.push_back(event);
+    }
+    else if (
+      event.type == NekoTraceEventType::COP1Retired)
+    {
+      retirements.push_back(event);
+    }
+  }
+
+  REQUIRE(admissions.size() == 10);
+  REQUIRE(retirements.size() == 10);
+  for (std::size_t index = 0; index < 10; ++index)
+  {
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        admissions[index].value1) ==
+      chainAddresses[index]);
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        retirements[index].value1) ==
+      chainAddresses[index]);
+  }
+  const std::size_t forwardingConsumers[] = {
+    1, 3, 5, 7, 8, 9
+  };
+  for (const std::size_t consumer :
+       forwardingConsumers)
+  {
+    REQUIRE(
+      admissions[consumer].masterCycle + 1 ==
+      retirements[consumer - 1].masterCycle);
+  }
 }
 
 TEST_CASE("PS2DEV COP1 divider guest overlaps initiation and visibility")
