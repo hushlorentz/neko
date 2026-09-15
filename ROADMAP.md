@@ -1016,7 +1016,7 @@ accumulator or condition-result contract:
       resource; resolve completion ordering when the stalled Move is older,
       and cover every program-order arrangement permitted by the pipe-assignment
       and atomic issue-group contracts
-- [ ] Enforce cross-cycle FPR, ACC, FCR31, load, store, comparison/branch, and
+- [x] Enforce cross-cycle FPR, ACC, FCR31, load, store, comparison/branch, and
       C1 structural readiness using the foundation's same-pair dependency
       contract without losing legal concurrent issue
 - [ ] Verify `1S`/`2T` bypassing, `2S` writeback, divider overlap, and Move

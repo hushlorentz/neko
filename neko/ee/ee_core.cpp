@@ -4243,6 +4243,8 @@ bool EECore::cop1ScoreboardBlocks(
 {
   const bool includeAllOlderProducers =
     query == COP1ScoreboardQuery::CandidateReadiness;
+  const EEInstructionDependencies dependencies =
+    eeInstructionDependencies(instruction);
   if (instruction.operation ==
       EEOperation::SynchronizeLoadStore)
   {
@@ -4329,7 +4331,11 @@ bool EECore::cop1ScoreboardBlocks(
       continue;
     }
     const COP1Dependency dependency =
-      instructionFPRDependency(instruction, registerIndex);
+      dependencyForAccess(
+        (dependencies.fprReads &
+         (UINT32_C(1) << registerIndex)) != 0,
+        (dependencies.fprWrites &
+         (UINT32_C(1) << registerIndex)) != 0);
     if (dependency != COP1Dependency::None)
     {
       *hazard = {
@@ -4348,7 +4354,11 @@ bool EECore::cop1ScoreboardBlocks(
        ++registerIndex)
   {
     const COP1Dependency dependency =
-      instructionFPRDependency(instruction, registerIndex);
+      dependencyForAccess(
+        (dependencies.fprReads &
+         (UINT32_C(1) << registerIndex)) != 0,
+        (dependencies.fprWrites &
+         (UINT32_C(1) << registerIndex)) != 0);
     if (dependency == COP1Dependency::None)
     {
       continue;
@@ -4379,7 +4389,11 @@ bool EECore::cop1ScoreboardBlocks(
   }
 
   const COP1Dependency accumulatorDependency =
-    instructionAccumulatorDependency(instruction);
+    dependencyForAccess(
+      (dependencies.specialReads &
+       RESOURCE_COP1_ACCUMULATOR) != 0,
+      (dependencies.specialWrites &
+       RESOURCE_COP1_ACCUMULATOR) != 0);
   const COP1ScoreboardValue accumulatorValue =
     cop1ScoreboardValue(
       COP1ScoreboardResource::Accumulator);
@@ -4405,8 +4419,17 @@ bool EECore::cop1ScoreboardBlocks(
     return true;
   }
 
+  const bool conditionBranch =
+    isCOP1ConditionBranchOperation(
+      instruction.operation);
   const COP1Dependency controlDependency =
-    instructionFCR31Dependency(instruction);
+    conditionBranch
+      ? COP1Dependency::None
+      : dependencyForAccess(
+          (dependencies.specialReads &
+           RESOURCE_COP1_FCR31) != 0,
+          (dependencies.specialWrites &
+           RESOURCE_COP1_FCR31) != 0);
   const COP1ScoreboardValue controlValue =
     cop1ScoreboardValue(COP1ScoreboardResource::FCR31);
   const bool orderedStagedALUWrite =
@@ -4432,7 +4455,9 @@ bool EECore::cop1ScoreboardBlocks(
   }
 
   const COP1Dependency conditionDependency =
-    instructionConditionDependency(instruction);
+    conditionBranch
+      ? COP1Dependency::Read
+      : COP1Dependency::None;
   if (conditionDependency != COP1Dependency::None &&
       cop1ScoreboardValue(
         COP1ScoreboardResource::Condition)
@@ -4775,77 +4800,10 @@ bool EECore::scoreboardCOP1Condition() const
   return (value.value & EECOP1Control::CONDITION) != 0;
 }
 
-EECore::COP1Dependency EECore::instructionFPRDependency(
-  const EEInstruction &instruction,
-  std::uint8_t registerIndex)
+EECore::COP1Dependency EECore::dependencyForAccess(
+  bool reads,
+  bool writes)
 {
-  bool reads = false;
-  bool writes = false;
-  switch (instruction.operation)
-  {
-    case EEOperation::MoveWordFromCOP1:
-      reads = instruction.destinationRegister == registerIndex;
-      break;
-    case EEOperation::MoveWordToCOP1:
-      writes = instruction.destinationRegister == registerIndex;
-      break;
-    case EEOperation::StoreWordFromCOP1:
-      reads = instruction.targetRegister == registerIndex;
-      break;
-    case EEOperation::LoadWordToCOP1:
-      writes = instruction.targetRegister == registerIndex;
-      break;
-    case EEOperation::AbsoluteSingleCOP1:
-    case EEOperation::MoveSingleCOP1:
-    case EEOperation::NegateSingleCOP1:
-    case EEOperation::ConvertWordToSingleCOP1:
-    case EEOperation::ConvertSingleToWordCOP1:
-      reads = instruction.destinationRegister == registerIndex;
-      writes = instruction.shiftAmount == registerIndex;
-      break;
-    case EEOperation::SquareRootSingleCOP1:
-      reads = instruction.targetRegister == registerIndex;
-      writes = instruction.shiftAmount == registerIndex;
-      break;
-    case EEOperation::MaximumSingleCOP1:
-    case EEOperation::MinimumSingleCOP1:
-    case EEOperation::AddSingleCOP1:
-    case EEOperation::SubtractSingleCOP1:
-    case EEOperation::MultiplySingleCOP1:
-    case EEOperation::DivideSingleCOP1:
-    case EEOperation::ReciprocalSquareRootSingleCOP1:
-    case EEOperation::MultiplyAddSingleCOP1:
-    case EEOperation::MultiplySubtractSingleCOP1:
-    case EEOperation::CompareFalseSingleCOP1:
-    case EEOperation::CompareEqualSingleCOP1:
-    case EEOperation::CompareLessThanSingleCOP1:
-    case EEOperation::CompareLessThanOrEqualSingleCOP1:
-      reads =
-        instruction.destinationRegister == registerIndex ||
-        instruction.targetRegister == registerIndex;
-      writes =
-        instruction.operation !=
-          EEOperation::CompareFalseSingleCOP1 &&
-        instruction.operation !=
-          EEOperation::CompareEqualSingleCOP1 &&
-        instruction.operation !=
-          EEOperation::CompareLessThanSingleCOP1 &&
-        instruction.operation !=
-          EEOperation::CompareLessThanOrEqualSingleCOP1 &&
-        instruction.shiftAmount == registerIndex;
-      break;
-    case EEOperation::AddSingleToAccumulatorCOP1:
-    case EEOperation::SubtractSingleToAccumulatorCOP1:
-    case EEOperation::MultiplySingleToAccumulatorCOP1:
-    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
-    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
-      reads =
-        instruction.destinationRegister == registerIndex ||
-        instruction.targetRegister == registerIndex;
-      break;
-    default:
-      break;
-  }
   return static_cast<COP1Dependency>(
     (reads ? static_cast<std::uint8_t>(
       COP1Dependency::Read) : 0) |
@@ -4853,65 +4811,18 @@ EECore::COP1Dependency EECore::instructionFPRDependency(
       COP1Dependency::Write) : 0));
 }
 
-EECore::COP1Dependency
-EECore::instructionAccumulatorDependency(
-  const EEInstruction &instruction)
+bool EECore::isCOP1ConditionBranchOperation(
+  EEOperation operation)
 {
-  switch (instruction.operation)
-  {
-    case EEOperation::AddSingleToAccumulatorCOP1:
-    case EEOperation::SubtractSingleToAccumulatorCOP1:
-    case EEOperation::MultiplySingleToAccumulatorCOP1:
-      return COP1Dependency::Write;
-    case EEOperation::MultiplyAddSingleCOP1:
-    case EEOperation::MultiplySubtractSingleCOP1:
-      return COP1Dependency::Read;
-    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
-    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
-      return COP1Dependency::ReadWrite;
-    default:
-      return COP1Dependency::None;
-  }
-}
-
-EECore::COP1Dependency EECore::instructionFCR31Dependency(
-  const EEInstruction &instruction)
-{
-  switch (instruction.operation)
-  {
-    case EEOperation::MoveControlWordFromCOP1:
-      return instruction.destinationRegister ==
-        EECOP1Control::STATUS_REGISTER
-          ? COP1Dependency::Read
-          : COP1Dependency::None;
-    case EEOperation::MoveControlWordToCOP1:
-      return instruction.destinationRegister ==
-        EECOP1Control::STATUS_REGISTER
-          ? COP1Dependency::Write
-          : COP1Dependency::None;
-    case EEOperation::MoveSingleCOP1:
-    case EEOperation::ConvertWordToSingleCOP1:
-      return COP1Dependency::None;
-    default:
-      return isCOP1OperateOperation(instruction.operation)
-        ? COP1Dependency::ReadWrite
-        : COP1Dependency::None;
-  }
-}
-
-EECore::COP1Dependency
-EECore::instructionConditionDependency(
-  const EEInstruction &instruction)
-{
-  switch (instruction.operation)
+  switch (operation)
   {
     case EEOperation::BranchCOP1False:
     case EEOperation::BranchCOP1FalseLikely:
     case EEOperation::BranchCOP1True:
     case EEOperation::BranchCOP1TrueLikely:
-      return COP1Dependency::Read;
+      return true;
     default:
-      return COP1Dependency::None;
+      return false;
   }
 }
 

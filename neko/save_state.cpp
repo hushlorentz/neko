@@ -2632,6 +2632,8 @@ void NekoSaveStateCodec::readEECore(
     {
       std::size_t olderDividerCount = 0;
       bool reachableBehindOlderOperations = true;
+      const EEInstructionDependencies operationDependencies =
+        eeInstructionDependencies(operation.instruction);
       const EECore::InFlightCOP1Operation *
         forwardedSource = nullptr;
       for (const EECore::InFlightCOP1Operation &candidate :
@@ -2656,10 +2658,10 @@ void NekoSaveStateCodec::readEECore(
             orderDistance + 5 <= timing.latency &&
             candidate.remainingCycles <=
               timing.latency - (orderDistance + 5) &&
-            EECore::instructionFPRDependency(
-              operation.instruction,
-              candidate.destination.fprRegister) ==
-              EECore::COP1Dependency::None;
+            ((operationDependencies.fprReads |
+              operationDependencies.fprWrites) &
+             (UINT32_C(1) <<
+              candidate.destination.fprRegister)) == 0;
           continue;
         }
         reachableBehindOlderOperations =
@@ -2667,10 +2669,10 @@ void NekoSaveStateCodec::readEECore(
           candidate.stage == EECore::COP1PipelineStage::S1 &&
           (candidate.instruction.operation ==
              EEOperation::ConvertWordToSingleCOP1) &&
-          EECore::instructionFPRDependency(
-            operation.instruction,
-            candidate.destination.fprRegister) ==
-            EECore::COP1Dependency::None;
+          ((operationDependencies.fprReads |
+            operationDependencies.fprWrites) &
+           (UINT32_C(1) <<
+            candidate.destination.fprRegister)) == 0;
         if ((candidate.destination.mask &
              EECore::COP1_DESTINATION_FPR) != 0 &&
             candidate.destination.fprRegister ==

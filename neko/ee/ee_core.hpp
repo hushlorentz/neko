@@ -757,15 +757,11 @@ class EECore : public ClockedComponent
     std::uint32_t scoreboardFCR31ValueForT(
       std::uint64_t consumerOrder) const;
     bool scoreboardCOP1Condition() const;
-    static COP1Dependency instructionFPRDependency(
-      const EEInstruction &instruction,
-      std::uint8_t registerIndex);
-    static COP1Dependency instructionAccumulatorDependency(
-      const EEInstruction &instruction);
-    static COP1Dependency instructionFCR31Dependency(
-      const EEInstruction &instruction);
-    static COP1Dependency instructionConditionDependency(
-      const EEInstruction &instruction);
+    static COP1Dependency dependencyForAccess(
+      bool reads,
+      bool writes);
+    static bool isCOP1ConditionBranchOperation(
+      EEOperation operation);
     static bool isCOP1MoveOperation(EEOperation operation);
     static bool isCOP1RegisterMoveOperation(
       EEOperation operation);

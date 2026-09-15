@@ -204,6 +204,32 @@ enum class EEPhysicalPipeline : std::uint8_t
   COP2 = 1 << 5
 };
 
+enum EEInstructionSpecialResource : std::uint16_t
+{
+  RESOURCE_HI = 1 << 0,
+  RESOURCE_LO = 1 << 1,
+  RESOURCE_HI1 = 1 << 2,
+  RESOURCE_LO1 = 1 << 3,
+  RESOURCE_SA = 1 << 4,
+  RESOURCE_COP1_ACCUMULATOR = 1 << 5,
+  RESOURCE_COP1_FCR31 = 1 << 6,
+  RESOURCE_COP2_STATE = 1 << 7
+};
+
+struct EEInstructionDependencies
+{
+  std::uint32_t gprReads = 0;
+  std::uint32_t gprWrites = 0;
+  std::uint32_t fprReads = 0;
+  std::uint32_t fprWrites = 0;
+  std::uint32_t cop2Reads = 0;
+  std::uint32_t cop2Writes = 0;
+  std::uint32_t cop2ControlReads = 0;
+  std::uint32_t cop2ControlWrites = 0;
+  std::uint16_t specialReads = 0;
+  std::uint16_t specialWrites = 0;
+};
+
 struct EEInstructionRouting
 {
   EEInstructionCategory category = EEInstructionCategory::ALU;
@@ -274,6 +300,8 @@ bool eeInstructionSupportsLogicalPipe(
 std::uint8_t eeInstructionPhysicalPipelines(
   const EEInstructionRouting &routing,
   EELogicalPipe pipe);
+EEInstructionDependencies eeInstructionDependencies(
+  const EEInstruction &instruction);
 bool eeInstructionUsesPhysicalPipeline(
   const EEInstructionRouting &routing,
   EELogicalPipe pipe,

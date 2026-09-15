@@ -4198,6 +4198,215 @@ TEST_CASE(
     UINT32_C(0x40000000));
 }
 
+TEST_CASE("EE COP1 dual issue honors cross-cycle scoreboard resources")
+{
+  SECTION("An FPR dependency blocks only the dependent younger member")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      8,
+      cop1TransferInstruction(0x00, 5, 7));
+    system.eeBus().write32(
+      12,
+      cop1SingleInstruction(0x00, 4, 6, 7));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::MoveWordFromCOP1);
+    REQUIRE(core.programCounter() == 12);
+  }
+
+  SECTION("An ACC dependency blocks only the dependent younger member")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x1a, 2, 0, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      8,
+      cop1TransferInstruction(0x00, 5, 7));
+    system.eeBus().write32(
+      12,
+      cop1SingleInstruction(0x1c, 6, 4, 7));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::MoveWordFromCOP1);
+    REQUIRE(core.programCounter() == 12);
+  }
+
+  SECTION("An FCR31 dependency leaves an older staged operation eligible")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      8,
+      cop1SingleInstruction(0x00, 6, 5, 7));
+    system.eeBus().write32(
+      12,
+      cop1TransferInstruction(0x02, 8, 31));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::AddSingleCOP1);
+    REQUIRE(core.programCounter() == 12);
+  }
+
+  SECTION("A pending comparison blocks only its younger branch")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x32, 2, 0, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      8,
+      UINT32_C(0x24050001));
+    system.eeBus().write32(
+      12,
+      cop1BranchInstruction(0x01, 1));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::AddImmediateUnsignedWord);
+    REQUIRE(core.programCounter() == 12);
+  }
+
+  SECTION("Faultable memory blocks later issue then releases a legal pair")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x12345678)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 6, 0));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(
+      8,
+      UINT32_C(0x24050001));
+    system.eeBus().write32(
+      12,
+      cop1TransferInstruction(0x00, 8, 7));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE(core.programCounter() == 8);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE(core.programCounter() == 8);
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.programCounter() == 16);
+  }
+
+  SECTION("Unrelated pending resources retain legal COP1 Y issue")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      8,
+      cop1SingleInstruction(0x00, 6, 5, 7));
+    system.eeBus().write32(
+      12,
+      cop1TransferInstruction(0x00, 8, 7));
+    core.startExecution(0);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+    REQUIRE(core.programCounter() == 16);
+  }
+}
+
 TEST_CASE("EE COP1 add forwards a same-destination 1S result to 2T")
 {
   NekoSystem system;

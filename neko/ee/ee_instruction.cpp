@@ -38,32 +38,6 @@ namespace
 
   using DecodeTable = std::array<DecodeEntry, 64>;
 
-  enum InstructionSpecialResource : std::uint16_t
-  {
-    RESOURCE_HI = 1 << 0,
-    RESOURCE_LO = 1 << 1,
-    RESOURCE_HI1 = 1 << 2,
-    RESOURCE_LO1 = 1 << 3,
-    RESOURCE_SA = 1 << 4,
-    RESOURCE_COP1_ACCUMULATOR = 1 << 5,
-    RESOURCE_COP1_FCR31 = 1 << 6,
-    RESOURCE_COP2_STATE = 1 << 7
-  };
-
-  struct InstructionDependencies
-  {
-    std::uint32_t gprReads = 0;
-    std::uint32_t gprWrites = 0;
-    std::uint32_t fprReads = 0;
-    std::uint32_t fprWrites = 0;
-    std::uint32_t cop2Reads = 0;
-    std::uint32_t cop2Writes = 0;
-    std::uint32_t cop2ControlReads = 0;
-    std::uint32_t cop2ControlWrites = 0;
-    std::uint16_t specialReads = 0;
-    std::uint16_t specialWrites = 0;
-  };
-
   std::uint32_t registerMask(std::uint8_t index)
   {
     return index == 0 ? 0 : UINT32_C(1) << index;
@@ -74,10 +48,10 @@ namespace
     return UINT32_C(1) << index;
   }
 
-  InstructionDependencies instructionDependencies(
+  EEInstructionDependencies buildInstructionDependencies(
     const EEInstruction &instruction)
   {
-    InstructionDependencies dependencies;
+    EEInstructionDependencies dependencies;
     const std::uint32_t source =
       registerMask(instruction.sourceRegister);
     const std::uint32_t target =
@@ -462,10 +436,10 @@ namespace
     const EEInstruction &older,
     const EEInstruction &younger)
   {
-    const InstructionDependencies olderDependencies =
-      instructionDependencies(older);
-    const InstructionDependencies youngerDependencies =
-      instructionDependencies(younger);
+    const EEInstructionDependencies olderDependencies =
+      buildInstructionDependencies(older);
+    const EEInstructionDependencies youngerDependencies =
+      buildInstructionDependencies(younger);
     return
       (olderDependencies.gprWrites &
        (youngerDependencies.gprReads |
@@ -1479,6 +1453,12 @@ EEInstructionDecodeFailure
 EEInstructionDecodeError::failure() const
 {
   return failureType;
+}
+
+EEInstructionDependencies eeInstructionDependencies(
+  const EEInstruction &instruction)
+{
+  return buildInstructionDependencies(instruction);
 }
 
 EEInstructionRouting eeInstructionRouting(EEOperation operation)
