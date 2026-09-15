@@ -2219,8 +2219,13 @@ void NekoSaveStateCodec::readEECore(
             EECore::COP1PipelineStage::R &&
           operation.remainingCycles >= 1 &&
           operation.remainingCycles <= timing.latency;
+        const bool canonicalOperands =
+          operation.instruction.operation !=
+              EEOperation::SquareRootSingleCOP1 ||
+          operation.capturedFS == 0;
         require(
           waitingForResult &&
+            canonicalOperands &&
             operation.destination.mask ==
               (EECore::COP1_DESTINATION_FPR |
                EECore::COP1_DESTINATION_FCR31) &&

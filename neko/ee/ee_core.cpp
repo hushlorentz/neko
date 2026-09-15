@@ -1571,11 +1571,14 @@ bool EECore::executeInstruction(
       {
         return false;
       }
+      const std::uint32_t ftBits =
+        scoreboardFPRValue(instruction.targetRegister);
       const EEFloatResult result =
-        sqrtEEFloatRaw(
-          scoreboardFPRValue(instruction.targetRegister));
+        sqrtEEFloatRaw(ftBits);
       startPendingCOP1Divider(
         instruction,
+        0,
+        ftBits,
         result.bits,
         result.flags);
       return true;
@@ -1586,12 +1589,18 @@ bool EECore::executeInstruction(
       {
         return false;
       }
+      const std::uint32_t fsBits =
+        scoreboardFPRValue(destination);
+      const std::uint32_t ftBits =
+        scoreboardFPRValue(instruction.targetRegister);
       const EEFloatResult result =
         rsqrtEEFloatRaw(
-          scoreboardFPRValue(destination),
-          scoreboardFPRValue(instruction.targetRegister));
+          fsBits,
+          ftBits);
       startPendingCOP1Divider(
         instruction,
+        fsBits,
+        ftBits,
         result.bits,
         result.flags);
       return true;
@@ -1610,6 +1619,8 @@ bool EECore::executeInstruction(
         divEEFloatRaw(fsBits, ftBits);
       startPendingCOP1Divider(
         instruction,
+        fsBits,
+        ftBits,
         result.bits,
         result.flags);
       return true;
@@ -3383,6 +3394,12 @@ bool EECore::drainInFlightCOP1()
       drainedDivider ||
       isCOP1DividerOperation(operation.instruction.operation);
   }
+  const auto finishFailure =
+    [this](bool result)
+    {
+      clearInactiveCOP1DividerOccupancy();
+      return result;
+    };
 
   while (true)
   {
@@ -3445,13 +3462,14 @@ bool EECore::drainInFlightCOP1()
       }
       if ((oldest->memoryAddress & 3) != 0)
       {
-        return raiseCOP1DataAccessException(
-          *oldest,
-          oldest->instruction.operation ==
-              EEOperation::LoadWordToCOP1
-            ? EEException::AddressErrorLoadOrFetch
-            : EEException::AddressErrorStore,
-          oldest->memoryAddress);
+        return finishFailure(
+          raiseCOP1DataAccessException(
+            *oldest,
+            oldest->instruction.operation ==
+                EEOperation::LoadWordToCOP1
+              ? EEException::AddressErrorLoadOrFetch
+              : EEException::AddressErrorStore,
+            oldest->memoryAddress));
       }
       if (oldest->instruction.operation ==
           EEOperation::LoadWordToCOP1)
@@ -3471,10 +3489,11 @@ bool EECore::drainInFlightCOP1()
             succeeded ? value : 0);
           if (!succeeded)
           {
-            return raiseCOP1DataAccessException(
-              *oldest,
-              EEException::DataBusErrorLoad,
-              oldest->memoryAddress);
+            return finishFailure(
+              raiseCOP1DataAccessException(
+                *oldest,
+                EEException::DataBusErrorLoad,
+                oldest->memoryAddress));
           }
           oldest->capturedMemoryValue = value;
           oldest->rawResult = value;
@@ -3505,10 +3524,11 @@ bool EECore::drainInFlightCOP1()
             oldest->capturedMemoryValue);
           if (!succeeded)
           {
-            return raiseCOP1DataAccessException(
-              *oldest,
-              EEException::DataBusErrorStore,
-              oldest->memoryAddress);
+            return finishFailure(
+              raiseCOP1DataAccessException(
+                *oldest,
+                EEException::DataBusErrorStore,
+                oldest->memoryAddress));
           }
         }
       }
@@ -3553,8 +3573,7 @@ bool EECore::drainInFlightCOP1()
   }
   if (drainedDivider)
   {
-    cop1DividerInitiationCycles = 0;
-    cop1DividerOperation = EEOperation::Nop;
+    clearInactiveCOP1DividerOccupancy();
   }
   return true;
 }
@@ -3563,6 +3582,8 @@ void EECore::advancePendingCOP1(
   std::uint32_t *completedLoadRegisters)
 {
   *completedLoadRegisters = 0;
+  const std::size_t deferredTraceStart =
+    cycleTraceEventCount;
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
     transitioned = {};
   std::array<
@@ -3594,31 +3615,83 @@ void EECore::advancePendingCOP1(
     }
   }
 
-  for (std::size_t index = 0;
-       index < inFlightCOP1Operations.size();
-       ++index)
+  bool exceptionDuringAdvance = false;
+  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
+    advancedThisCycle = {};
+  while (true)
   {
-    InFlightCOP1Operation &operation =
-      inFlightCOP1Operations[index];
-    if (!operation.active ||
-        !isCOP1ManagedPipelineOperation(
-          operation.instruction.operation))
+    std::size_t index = inFlightCOP1Operations.size();
+    for (std::size_t candidateIndex = 0;
+         candidateIndex < inFlightCOP1Operations.size();
+         ++candidateIndex)
     {
-      continue;
+      const InFlightCOP1Operation &candidate =
+        inFlightCOP1Operations[candidateIndex];
+      if (advancedThisCycle[candidateIndex] ||
+          !candidate.active ||
+          !isCOP1ManagedPipelineOperation(
+            candidate.instruction.operation))
+      {
+        continue;
+      }
+      if (index == inFlightCOP1Operations.size() ||
+          candidate.programOrder <
+            inFlightCOP1Operations[index].programOrder)
+      {
+        index = candidateIndex;
+      }
     }
+    if (index == inFlightCOP1Operations.size())
+    {
+      break;
+    }
+    advancedThisCycle[index] = true;
     if (moveTStageBlockers[index] != nullptr)
     {
       continue;
     }
+    InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[index];
     transitioned[index] =
       advanceInFlightCOP1Operation(
         &operation,
         &previousStages[index]);
     if (exceptionEnteredThisCycle)
     {
-      return;
+      exceptionDuringAdvance = true;
+      break;
     }
   }
+
+  std::array<CycleTraceEvent, CYCLE_TRACE_CAPACITY>
+    deferredTraceEvents = {};
+  const std::size_t deferredTraceCount =
+    cycleTraceEventCount - deferredTraceStart;
+  for (std::size_t index = 0;
+       index < deferredTraceCount;
+       ++index)
+  {
+    deferredTraceEvents[index] =
+      cycleTraceEvents[deferredTraceStart + index];
+  }
+  cycleTraceEventCount = deferredTraceStart;
+  const auto appendDeferredTraceEvents =
+    [this, &deferredTraceEvents, deferredTraceCount]()
+    {
+      for (std::size_t index = 0;
+           index < deferredTraceCount;
+           ++index)
+      {
+        if (cycleTraceEventCount >=
+            cycleTraceEvents.size())
+        {
+          throw std::logic_error(
+            "EE produced too many trace events in one cycle.");
+        }
+        cycleTraceEvents[cycleTraceEventCount++] =
+          deferredTraceEvents[index];
+      }
+    };
 
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
     transitionsToRecord = transitioned;
@@ -3654,6 +3727,68 @@ void EECore::advancePendingCOP1(
       static_cast<std::uint8_t>(
         previousStages[transitionIndex]),
       transition->stage);
+  }
+
+  const auto retireReadyOperations =
+    [this, completedLoadRegisters]()
+    {
+      while (true)
+      {
+        InFlightCOP1Operation *oldestOperation = nullptr;
+        for (std::size_t index = 0;
+             index < inFlightCOP1Operations.size();
+             ++index)
+        {
+          InFlightCOP1Operation &operation =
+            inFlightCOP1Operations[index];
+          if (!operation.active ||
+              !isCOP1ManagedPipelineOperation(
+                operation.instruction.operation))
+          {
+            continue;
+          }
+          if (oldestOperation == nullptr ||
+              operation.programOrder <
+                oldestOperation->programOrder)
+          {
+            oldestOperation = &operation;
+          }
+        }
+        if (oldestOperation == nullptr)
+        {
+          break;
+        }
+        const bool retirementReady =
+          oldestOperation->stage == COP1PipelineStage::S1 ||
+          ((isCOP1RegisterMoveOperation(
+             oldestOperation->instruction.operation) &&
+            oldestOperation->stage == COP1PipelineStage::Y) ||
+           ((oldestOperation->instruction.operation ==
+               EEOperation::LoadWordToCOP1 ||
+             oldestOperation->instruction.operation ==
+               EEOperation::StoreWordFromCOP1) &&
+            oldestOperation->stage == COP1PipelineStage::Y));
+        if (!retirementReady)
+        {
+          break;
+        }
+        if (oldestOperation->instruction.operation ==
+            EEOperation::LoadWordToCOP1)
+        {
+          *completedLoadRegisters |=
+            UINT32_C(1) <<
+              oldestOperation->destination.fprRegister;
+        }
+        commitInFlightCOP1(oldestOperation, true);
+      }
+    };
+
+  if (exceptionDuringAdvance)
+  {
+    retireReadyOperations();
+    clearInactiveCOP1DividerOccupancy();
+    appendDeferredTraceEvents();
+    return;
   }
 
   std::array<bool, COP1_IN_FLIGHT_CAPACITY>
@@ -3701,55 +3836,8 @@ void EECore::advancePendingCOP1(
           instruction.operation));
   }
 
-  while (true)
-  {
-    InFlightCOP1Operation *oldestOperation = nullptr;
-    for (std::size_t index = 0;
-         index < inFlightCOP1Operations.size();
-         ++index)
-    {
-      InFlightCOP1Operation &operation =
-        inFlightCOP1Operations[index];
-      if (!operation.active ||
-          !isCOP1ManagedPipelineOperation(
-            operation.instruction.operation))
-      {
-        continue;
-      }
-      if (oldestOperation == nullptr ||
-          operation.programOrder <
-            oldestOperation->programOrder)
-      {
-        oldestOperation = &operation;
-      }
-    }
-    if (oldestOperation == nullptr)
-    {
-      break;
-    }
-    const bool retirementReady =
-      oldestOperation->stage == COP1PipelineStage::S1 ||
-      ((isCOP1RegisterMoveOperation(
-         oldestOperation->instruction.operation) &&
-        oldestOperation->stage == COP1PipelineStage::Y) ||
-       ((oldestOperation->instruction.operation ==
-           EEOperation::LoadWordToCOP1 ||
-         oldestOperation->instruction.operation ==
-           EEOperation::StoreWordFromCOP1) &&
-        oldestOperation->stage == COP1PipelineStage::Y));
-    if (!retirementReady)
-    {
-      break;
-    }
-    if (oldestOperation->instruction.operation ==
-        EEOperation::LoadWordToCOP1)
-    {
-      *completedLoadRegisters |=
-        UINT32_C(1) <<
-          oldestOperation->destination.fprRegister;
-    }
-    commitInFlightCOP1(oldestOperation, true);
-  }
+  retireReadyOperations();
+  appendDeferredTraceEvents();
 }
 
 const EECore::InFlightCOP1Operation *
@@ -4146,8 +4234,19 @@ bool EECore::pendingCOP1DividerActive() const
   return false;
 }
 
+void EECore::clearInactiveCOP1DividerOccupancy()
+{
+  if (!pendingCOP1DividerActive())
+  {
+    cop1DividerInitiationCycles = 0;
+    cop1DividerOperation = EEOperation::Nop;
+  }
+}
+
 void EECore::startPendingCOP1Divider(
   const EEInstruction &instruction,
+  std::uint32_t capturedFS,
+  std::uint32_t capturedFT,
   std::uint32_t result,
   std::uint8_t raisedFlags)
 {
@@ -4157,10 +4256,8 @@ void EECore::startPendingCOP1Divider(
     allocateInFlightCOP1(
       instruction,
       pc - 4);
-  operation.capturedFS =
-    scoreboardFPRValue(instruction.destinationRegister);
-  operation.capturedFT =
-    scoreboardFPRValue(instruction.targetRegister);
+  operation.capturedFS = capturedFS;
+  operation.capturedFT = capturedFT;
   operation.destination.mask =
     COP1_DESTINATION_FPR |
     COP1_DESTINATION_FCR31;

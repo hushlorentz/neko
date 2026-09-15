@@ -724,8 +724,11 @@ class EECore : public ClockedComponent
     static void computeInFlightCOP1StagedOperation(
       InFlightCOP1Operation *operation);
     bool pendingCOP1DividerActive() const;
+    void clearInactiveCOP1DividerOccupancy();
     void startPendingCOP1Divider(
       const EEInstruction &instruction,
+      std::uint32_t capturedFS,
+      std::uint32_t capturedFT,
       std::uint32_t result,
       std::uint8_t raisedFlags);
     void commitInFlightCOP1(

@@ -1643,6 +1643,39 @@ TEST_CASE("EE COP1 square root supports an in-place ft destination")
     UINT32_C(0x40400000));
 }
 
+TEST_CASE("EE COP1 square root ignores the fixed-zero fs field")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0xdeadbeef), 0});
+  core.setFloatingPointRegister(
+    3,
+    UINT32_C(0x41100000));
+  system.eeBus().write32(
+    0,
+    cop1TransferInstruction(0x04, 2, 0));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x04, 0, 4, 3));
+  core.startExecution(0);
+
+  REQUIRE_NOTHROW(system.clockMasterCycle());
+  REQUIRE(
+    core.acceptanceRecordsThisCycle().size() ==
+    2);
+
+  system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
+
+  REQUIRE(
+    core.floatingPointRegister(0) ==
+    UINT32_C(0xdeadbeef));
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+}
+
 TEST_CASE("EE COP1 square root updates only invalid and division flags")
 {
   constexpr std::uint32_t INITIAL_STATUS =

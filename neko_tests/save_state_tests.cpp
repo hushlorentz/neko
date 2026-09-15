@@ -1836,6 +1836,35 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
     REQUIRE(destination.saveState() == before);
   }
 
+  SECTION("Square root requires its canonical zero fs capture")
+  {
+    NekoSystem squareRootSource;
+    squareRootSource.eeCore().setFloatingPointRegister(
+      6,
+      UINT32_C(0x41100000));
+    squareRootSource.eeBus().write32(
+      0,
+      (UINT32_C(0x11) << 26) |
+        (UINT32_C(0x10) << 21) |
+        (UINT32_C(6) << 16) |
+        (UINT32_C(5) << 6) |
+        UINT32_C(0x04));
+    squareRootSource.eeCore().startExecution(0);
+    squareRootSource.clockMasterCycle();
+    squareRootSource.eeCore().haltExecution();
+
+    std::vector<std::uint8_t> invalid =
+      squareRootSource.saveState();
+    writeU32(
+      &invalid,
+      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET,
+      UINT32_C(0xdeadbeef));
+    updateChecksum(&invalid);
+
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
   SECTION("A transient S1 result cannot be restored")
   {
     std::vector<std::uint8_t> invalid = source.saveState();

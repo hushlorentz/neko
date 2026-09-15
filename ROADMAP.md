@@ -1063,7 +1063,7 @@ accumulator or condition-result contract:
       hazards, exceptions, tracing, reset, and save-state coverage
 - [x] Reject every reserved COP1 encoding and invalid fixed-field combination
       deterministically
-- [ ] Perform an independent final review of the completed COP1 milestone
+- [x] Perform an independent final review of the completed COP1 milestone
 
 ### Post-COP1 Architecture and Maintainability Review
 

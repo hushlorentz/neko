@@ -1834,6 +1834,30 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
     memoryEvents[0].value3 ==
     (UINT64_C(4) |
      NekoEETraceMemory::SUCCEEDED));
+  std::size_t memoryEventIndex = events.size();
+  std::size_t memoryTransitionIndex = events.size();
+  for (std::size_t index = 0;
+       index < events.size();
+       ++index)
+  {
+    if (events[index].masterCycle == 3 &&
+        events[index].type ==
+          NekoTraceEventType::MemoryAccess)
+    {
+      memoryEventIndex = index;
+    }
+    if (events[index].masterCycle == 3 &&
+        events[index].type ==
+          NekoTraceEventType::COP1StageTransition &&
+        events[index].value2 ==
+          (NekoEETraceCOP1Stage::T |
+           (NekoEETraceCOP1Stage::X <<
+            NekoEETraceCOP1Stage::TO_SHIFT)))
+    {
+      memoryTransitionIndex = index;
+    }
+  }
+  REQUIRE(memoryTransitionIndex < memoryEventIndex);
   REQUIRE(stageEvents.size() == 4);
   REQUIRE(stageEvents[0].masterCycle == 1);
   REQUIRE(stageEvents[0].value0 == 1);
@@ -1862,6 +1886,183 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
   REQUIRE(retirementEvents.size() == 1);
   REQUIRE(retirementEvents[0].masterCycle == 4);
   REQUIRE(retirementEvents[0].value0 == 1);
+}
+
+TEST_CASE(
+  "EE COP1 transitions precede a same-cycle memory exception")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    1,
+    {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+  core.setFloatingPointRegister(
+    2,
+    UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(
+    3,
+    UINT32_C(0x40000000));
+  const std::uint32_t add =
+    cop1SingleInstruction(0x00, 2, 4, 3);
+  system.eeBus().write32(0, add);
+  system.eeBus().write32(
+    4,
+    immediateInstruction(0x31, 1, 5, 0));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(4);
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::DataBusErrorLoad);
+  std::vector<NekoTraceEvent> faultCycle;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.masterCycle == 4)
+    {
+      faultCycle.push_back(event);
+    }
+  }
+  REQUIRE(faultCycle.size() == 4);
+  REQUIRE(
+    faultCycle[0].type ==
+    NekoTraceEventType::COP1StageTransition);
+  REQUIRE(faultCycle[0].value0 == 1);
+  REQUIRE(
+    faultCycle[0].value1 ==
+    (static_cast<std::uint64_t>(add) << 32));
+  REQUIRE(
+    faultCycle[0].value2 ==
+    (NekoEETraceCOP1Stage::X |
+     (NekoEETraceCOP1Stage::Y <<
+      NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(
+    faultCycle[1].type ==
+    NekoTraceEventType::MemoryAccess);
+  REQUIRE(
+    faultCycle[2].type ==
+    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(
+    faultCycle[3].type ==
+    NekoTraceEventType::StateSnapshot);
+}
+
+TEST_CASE(
+  "EE COP1 retires an older reused-slot divider before a memory exception")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    1,
+    {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+  core.setFloatingPointRegister(
+    2,
+    UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(
+    3,
+    UINT32_C(0x40000000));
+  core.setFloatingPointRegister(
+    7,
+    UINT32_C(0x3f800000));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x06, 7, 6));
+  const std::uint32_t divide =
+    cop1SingleInstruction(0x03, 2, 4, 3);
+  system.eeBus().write32(4, divide);
+  for (std::uint32_t address = 8;
+       address < 28;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  system.eeBus().write32(
+    28,
+    immediateInstruction(0x31, 1, 5, 0));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(9);
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::DataBusErrorLoad);
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  std::vector<NekoTraceEvent> faultCycle;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.masterCycle == 9)
+    {
+      faultCycle.push_back(event);
+    }
+  }
+  REQUIRE(faultCycle.size() == 5);
+  REQUIRE(
+    faultCycle[0].type ==
+    NekoTraceEventType::COP1StageTransition);
+  REQUIRE(faultCycle[0].value0 == 2);
+  REQUIRE(
+    faultCycle[0].value1 ==
+    ((static_cast<std::uint64_t>(divide) << 32) |
+     UINT64_C(4)));
+  REQUIRE(
+    faultCycle[0].value2 ==
+    (NekoEETraceCOP1Stage::R |
+     (NekoEETraceCOP1Stage::S1 <<
+      NekoEETraceCOP1Stage::TO_SHIFT)));
+  REQUIRE(
+    faultCycle[1].type ==
+    NekoTraceEventType::COP1Retired);
+  REQUIRE(
+    faultCycle[2].type ==
+    NekoTraceEventType::MemoryAccess);
+  REQUIRE(
+    faultCycle[3].type ==
+    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(
+    faultCycle[4].type ==
+    NekoTraceEventType::StateSnapshot);
+
+  NekoSystem restored;
+  REQUIRE_NOTHROW(
+    restored.loadState(system.saveState()));
+}
+
+TEST_CASE(
+  "EE COP1 exception discard clears younger divider occupancy")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    1,
+    {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+  core.setFloatingPointRegister(
+    2,
+    UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(
+    3,
+    UINT32_C(0x40000000));
+  system.eeBus().write32(
+    0,
+    immediateInstruction(0x31, 1, 5, 0));
+  system.eeBus().write32(
+    4,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  core.startExecution(0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::DataBusErrorLoad);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+
+  NekoSystem restored;
+  REQUIRE_NOTHROW(
+    restored.loadState(system.saveState()));
 }
 
 TEST_CASE("EE COP1 load interlock traces describe blocked FPR access")

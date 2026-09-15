@@ -721,6 +721,36 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
     REQUIRE(result.execution.exceptionAddress == 0x2002);
   }
 
+  SECTION(
+    "Return drain clears completed divider occupancy before a load fault")
+  {
+    std::vector<std::uint8_t> image =
+      returningCOP1WorkELF();
+    writeU32(
+      &image,
+      0x108,
+      (UINT32_C(0x31) << 26) |
+        (UINT32_C(3) << 16) |
+        UINT32_C(0x2002));
+
+    NekoSystem system;
+    const EEGuestExecutionResult result =
+      system.runELF(image, 3);
+
+    REQUIRE(result.outcome == EEGuestOutcome::Exception);
+    REQUIRE(
+      result.execution.pendingException ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(result.execution.exceptionAddress == 0x2002);
+    REQUIRE(
+      system.eeCore().floatingPointRegister(4) ==
+      UINT32_C(0x7fffffff));
+
+    NekoSystem restored;
+    REQUIRE_NOTHROW(
+      restored.loadState(system.saveState()));
+  }
+
   SECTION("Return drains pending COP1 divider work")
   {
     struct DrainVector
