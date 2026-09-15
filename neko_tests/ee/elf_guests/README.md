@@ -25,6 +25,8 @@ The fixtures exercise:
   minimum, and maximum results with ordered overflow/underflow flags
 - `cop1_accumulator_compound.elf`: all accumulator and compound arithmetic
   forms, immediate ACC forwarding, and ordered product/final flags
+- `cop1_dividers.elf`: overlapping `RSQRT.S`, `DIV.S`, and `SQRT.S`
+  initiation with delayed result retirement
 - `cop2_transfer.elf`: 128-bit EE memory/GPR transfers through VU0 registers
 - `cop2_control.elf`: VU0 control transfers and VU1 status branches
 - `vcallms.elf`: VU0 microprogram initiation through `VCALLMS` and `VCALLMSR`
@@ -68,6 +70,7 @@ b6a47315e2de5b39315b88a1e0fdc7a4d2aeceb1a7654a430f4f9b3b6f9de07d  cop1_semantics
 780183dbbabdea2f939e321eaf5cb464821e764fcced5c2906a96a9a4ade05cc  cop1_conversion_unary.elf
 ac805378054f1fcb762f1d8d428f71a4710da04dd587ccc606ec34175d47ac78  cop1_basic_arithmetic.elf
 763c6ebcaa23d8acce500062aea7e559c0f07d48b3d2b2696a2c8540f85b1c07  cop1_accumulator_compound.elf
+e9a77add85add831a78dba34ec341af8afbc4b63add48b188860113a8ab4f148  cop1_dividers.elf
 9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707  cop2_transfer.elf
 f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386  cop2_control.elf
 d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7  vcallms.elf

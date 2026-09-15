@@ -1048,7 +1048,7 @@ accumulator or condition-result contract:
 - [x] Add an independently authored accumulator and compound program covering
       the `ADDA`, `SUBA`, `MULA`, `MADD`, and `MSUB` families, including ACC
       forwarding and ordered flag behavior
-- [ ] Add an independently authored divider program covering `DIV.S`,
+- [x] Add an independently authored divider program covering `DIV.S`,
       `SQRT.S`, and `RSQRT.S`, including result visibility and initiation
       overlap
 - [ ] Add an independently authored mixed concurrent-issue program covering

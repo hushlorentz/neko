@@ -490,6 +490,121 @@ TEST_CASE("PS2DEV COP1 accumulator guest covers forwarding and flags")
   REQUIRE(core.cop1ControlRegister(31) == stickyStatus);
 }
 
+TEST_CASE("PS2DEV COP1 divider guest overlaps initiation and visibility")
+{
+  NekoSystem system;
+  system.startTrace();
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop1_dividers.elf"), 256);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 17);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+
+  const EECore &core = system.eeCore();
+  for (const std::size_t registerIndex : {20, 21, 22})
+  {
+    REQUIRE(
+      core.floatingPointRegister(registerIndex) ==
+      UINT32_C(0x40400000));
+  }
+  for (const std::size_t registerIndex : {15, 16, 17})
+  {
+    REQUIRE(
+      core.generalRegister(registerIndex).low ==
+      UINT64_C(0x0000000040400000));
+  }
+  REQUIRE(
+    core.generalRegister(18).low ==
+    EECOP1Control::STATUS_FIXED);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+
+  const std::uint32_t dividerAddresses[] = {
+    result.load.entryPoint + 28,
+    result.load.entryPoint + 32,
+    result.load.entryPoint + 36
+  };
+  const auto isDividerAddress =
+    [&dividerAddresses](std::uint32_t address)
+    {
+      for (const std::uint32_t dividerAddress :
+           dividerAddresses)
+      {
+        if (address == dividerAddress)
+        {
+          return true;
+        }
+      }
+      return false;
+    };
+
+  std::vector<NekoTraceEvent> admissions;
+  std::vector<NekoTraceEvent> retirements;
+  for (const NekoTraceEvent &event : system.trace())
+  {
+    const std::uint32_t address =
+      static_cast<std::uint32_t>(event.value1);
+    if (!isDividerAddress(address))
+    {
+      continue;
+    }
+    if (event.type ==
+          NekoTraceEventType::COP1StageTransition &&
+        (event.value2 &
+         NekoEETraceCOP1Stage::FROM_MASK) ==
+          NekoEETraceCOP1Stage::NONE)
+    {
+      admissions.push_back(event);
+    }
+    else if (
+      event.type == NekoTraceEventType::COP1Retired)
+    {
+      retirements.push_back(event);
+    }
+  }
+
+  REQUIRE(admissions.size() == 3);
+  REQUIRE(retirements.size() == 3);
+  const std::uint64_t latencies[] = {14, 8, 8};
+  for (std::size_t index = 0; index < 3; ++index)
+  {
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        admissions[index].value1) ==
+      dividerAddresses[index]);
+    REQUIRE(
+      admissions[index].value2 ==
+      (NekoEETraceCOP1Stage::NONE |
+       (NekoEETraceCOP1Stage::R <<
+        NekoEETraceCOP1Stage::TO_SHIFT) |
+       (latencies[index] <<
+        NekoEETraceCOP1Stage::
+          REMAINING_CYCLES_SHIFT)));
+    REQUIRE(
+      retirements[index].masterCycle ==
+      admissions[index].masterCycle +
+        latencies[index]);
+  }
+  REQUIRE(
+    admissions[1].masterCycle ==
+    admissions[0].masterCycle + 13);
+  REQUIRE(
+    retirements[0].masterCycle ==
+    admissions[1].masterCycle + 1);
+  REQUIRE(
+    admissions[2].masterCycle ==
+    admissions[1].masterCycle + 7);
+  REQUIRE(
+    retirements[1].masterCycle ==
+    admissions[2].masterCycle + 1);
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;
