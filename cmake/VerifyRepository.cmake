@@ -95,6 +95,10 @@ verify_ee_elf_fixture(
   7203bc4bde83e64f41fe9dafe88c1992ee4ec5b21e052df3d8321270ea9a223f
 )
 verify_ee_elf_fixture(
+  cop1_control_state.elf
+  05655052ceeb43a33457433795b6144ef4da47c2b6e6dd2106ef8192a0154470
+)
+verify_ee_elf_fixture(
   cop2_transfer.elf
   9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707
 )

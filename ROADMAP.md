@@ -1033,7 +1033,7 @@ accumulator or condition-result contract:
 - [x] Add an independently authored transfer and memory program covering
       `MFC1`, `MTC1`, `MOV.S`, `LWC1`, and `SWC1`, including raw-bit
       preservation and memory round trips
-- [ ] Add an independently authored control-state program covering `CFC1`,
+- [x] Add an independently authored control-state program covering `CFC1`,
       `CTC1`, writable and fixed `FCR31` fields, condition state, current
       causes, and sticky flags
 - [ ] Add an independently authored comparison and branch program covering

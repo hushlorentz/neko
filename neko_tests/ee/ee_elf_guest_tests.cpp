@@ -219,6 +219,45 @@ TEST_CASE("PS2DEV COP1 transfer and memory guest preserves raw words")
     UINT32_C(0x7fc12345));
 }
 
+TEST_CASE("PS2DEV COP1 control-state guest applies FCR31 fields")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop1_control_state.elf"), 128);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 19);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+
+  const EECore &core = system.eeCore();
+  REQUIRE(
+    core.generalRegister(9).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CONDITION));
+  REQUIRE(
+    core.generalRegister(11).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_MASK));
+  REQUIRE(
+    core.generalRegister(13).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_MASK));
+  REQUIRE(
+    core.generalRegister(15).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STATUS_WRITABLE_MASK));
+  REQUIRE(
+    core.generalRegister(16).low ==
+    EECOP1Control::STATUS_FIXED);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;
