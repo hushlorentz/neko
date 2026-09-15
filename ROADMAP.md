@@ -1030,7 +1030,7 @@ accumulator or condition-result contract:
 
 ### Guest Integration and Final Conformance Audit
 
-- [ ] Add an independently authored transfer and memory program covering
+- [x] Add an independently authored transfer and memory program covering
       `MFC1`, `MTC1`, `MOV.S`, `LWC1`, and `SWC1`, including raw-bit
       preservation and memory round trips
 - [ ] Add an independently authored control-state program covering `CFC1`,

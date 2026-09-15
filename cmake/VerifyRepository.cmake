@@ -91,6 +91,10 @@ verify_ee_elf_fixture(
   b6a47315e2de5b39315b88a1e0fdc7a4d2aeceb1a7654a430f4f9b3b6f9de07d
 )
 verify_ee_elf_fixture(
+  cop1_transfer_memory.elf
+  7203bc4bde83e64f41fe9dafe88c1992ee4ec5b21e052df3d8321270ea9a223f
+)
+verify_ee_elf_fixture(
   cop2_transfer.elf
   9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707
 )

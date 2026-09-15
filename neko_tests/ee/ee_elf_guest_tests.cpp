@@ -165,6 +165,60 @@ TEST_CASE("PS2DEV COP1 semantic guest preserves raw results and FCR31")
   }
 }
 
+TEST_CASE("PS2DEV COP1 transfer and memory guest preserves raw words")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop1_transfer_memory.elf"), 128);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 17);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+
+  const EECore &core = system.eeCore();
+  REQUIRE(
+    core.floatingPointRegister(2) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x7fc12345));
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    core.floatingPointRegister(6) ==
+    UINT32_C(0x7fc12345));
+  REQUIRE(
+    core.generalRegister(10).low ==
+    UINT64_C(0xffffffff89abcdef));
+  REQUIRE(
+    core.generalRegister(11).low ==
+    UINT64_C(0xffffffff89abcdef));
+  REQUIRE(
+    core.generalRegister(12).low ==
+    UINT64_C(0x000000007fc12345));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+
+  const std::uint32_t payloadAddress =
+    static_cast<std::uint32_t>(
+      core.generalRegister(8).low);
+  REQUIRE(
+    system.eeBus().read32(payloadAddress + 8) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    system.eeBus().read32(payloadAddress + 12) ==
+    UINT32_C(0x7fc12345));
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;
