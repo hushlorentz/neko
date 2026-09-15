@@ -283,6 +283,79 @@ TEST_CASE("PS2DEV COP1 comparison guest covers every branch path")
     EECOP1Control::STATUS_FIXED);
 }
 
+TEST_CASE("PS2DEV COP1 conversion and unary guest covers raw edge cases")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop1_conversion_unary.elf"), 256);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 35);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+
+  const EECore &core = system.eeCore();
+  REQUIRE(core.floatingPointRegister(10) == 0);
+  REQUIRE(
+    core.floatingPointRegister(11) ==
+    UINT32_C(0x80000000));
+  REQUIRE(
+    core.floatingPointRegister(12) ==
+    UINT32_C(0x40600000));
+  REQUIRE(
+    core.floatingPointRegister(13) ==
+    UINT32_C(0x40600000));
+  REQUIRE(core.floatingPointRegister(14) == 0);
+  REQUIRE(
+    core.floatingPointRegister(15) ==
+    UINT32_C(0xc0400000));
+  REQUIRE(
+    core.floatingPointRegister(16) ==
+    UINT32_C(0x4effffff));
+  REQUIRE(
+    core.floatingPointRegister(17) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(
+    core.floatingPointRegister(18) ==
+    UINT32_C(0x80000000));
+  REQUIRE(
+    core.floatingPointRegister(19) ==
+    UINT32_C(0xffffffff));
+
+  const std::uint32_t unaryStatus =
+    EECOP1Control::STATUS_FIXED |
+    EECOP1Control::STICKY_OVERFLOW |
+    EECOP1Control::STICKY_UNDERFLOW;
+  REQUIRE(core.generalRegister(23).low == unaryStatus);
+  REQUIRE(core.generalRegister(24).low == unaryStatus);
+  REQUIRE(
+    core.generalRegister(25).low ==
+    (unaryStatus |
+     EECOP1Control::CAUSE_OVERFLOW |
+     EECOP1Control::CAUSE_UNDERFLOW));
+  REQUIRE(
+    core.generalRegister(20).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_INVALID |
+     EECOP1Control::STICKY_INVALID));
+  REQUIRE(
+    core.generalRegister(21).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_INVALID |
+     EECOP1Control::STICKY_INVALID));
+  REQUIRE(
+    core.generalRegister(22).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_INVALID));
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::STICKY_INVALID));
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;
