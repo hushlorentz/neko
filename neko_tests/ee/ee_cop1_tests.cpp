@@ -937,6 +937,406 @@ TEST_CASE(
   }
 }
 
+TEST_CASE("EE COP1 rejects the complete invalid encoding space")
+{
+  const auto requireDecodeFailure =
+    [](std::uint32_t instruction,
+       EEInstructionDecodeFailure expected)
+    {
+      try
+      {
+        static_cast<void>(
+          decodeEEInstruction(instruction));
+        FAIL("Invalid COP1 encoding decoded successfully");
+      }
+      catch (const EEInstructionDecodeError &error)
+      {
+        REQUIRE(error.failure() == expected);
+      }
+    };
+
+  for (const std::uint8_t sourceRegister :
+       {UINT8_C(0x00), UINT8_C(0x02),
+        UINT8_C(0x04), UINT8_C(0x06)})
+  {
+    const std::uint8_t controlRegister =
+      sourceRegister == 0x02 ||
+          sourceRegister == 0x06
+        ? 31
+        : 3;
+    const std::uint32_t canonical =
+      cop1TransferInstruction(
+        sourceRegister,
+        2,
+        controlRegister);
+    for (std::uint32_t lowFields = 1;
+         lowFields <= UINT32_C(0x7ff);
+         ++lowFields)
+    {
+      requireDecodeFailure(
+        canonical | lowFields,
+        EEInstructionDecodeFailure::Reserved);
+    }
+  }
+
+  for (std::uint8_t controlRegister = 1;
+       controlRegister < 31;
+       ++controlRegister)
+  {
+    requireDecodeFailure(
+      cop1TransferInstruction(
+        0x02,
+        2,
+        controlRegister),
+      EEInstructionDecodeFailure::Reserved);
+    requireDecodeFailure(
+      cop1TransferInstruction(
+        0x06,
+        2,
+        controlRegister),
+      EEInstructionDecodeFailure::Reserved);
+  }
+
+  for (std::uint8_t sourceRegister = 0;
+       sourceRegister < 32;
+       ++sourceRegister)
+  {
+    const bool defined =
+      sourceRegister == 0x00 ||
+      sourceRegister == 0x02 ||
+      sourceRegister == 0x04 ||
+      sourceRegister == 0x06 ||
+      sourceRegister == 0x08 ||
+      sourceRegister == 0x10 ||
+      sourceRegister == 0x14;
+    if (!defined)
+    {
+      requireDecodeFailure(
+        (UINT32_C(0x11) << 26) |
+          (static_cast<std::uint32_t>(
+            sourceRegister) << 21),
+        EEInstructionDecodeFailure::Reserved);
+    }
+  }
+
+  for (std::uint8_t condition = 4;
+       condition < 32;
+       ++condition)
+  {
+    requireDecodeFailure(
+      cop1BranchInstruction(condition, 0x1234),
+      EEInstructionDecodeFailure::Reserved);
+  }
+
+  const std::uint8_t definedSingleFunctions[] = {
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+    0x06, 0x07, 0x16, 0x18, 0x19, 0x1a,
+    0x1c, 0x1d, 0x1e, 0x1f, 0x24, 0x28,
+    0x29, 0x30, 0x32, 0x34, 0x36
+  };
+  for (std::uint8_t function = 0;
+       function < 64;
+       ++function)
+  {
+    bool defined = false;
+    for (const std::uint8_t candidate :
+         definedSingleFunctions)
+    {
+      if (function == candidate)
+      {
+        defined = true;
+        break;
+      }
+    }
+    if (!defined)
+    {
+      requireDecodeFailure(
+        cop1SingleInstruction(
+          function,
+          2,
+          4,
+          3),
+        EEInstructionDecodeFailure::Unsupported);
+    }
+  }
+
+  for (std::uint8_t function = 0;
+       function < 64;
+       ++function)
+  {
+    if (function != 0x20)
+    {
+      requireDecodeFailure(
+        cop1WordInstruction(
+          function,
+          2,
+          4),
+        EEInstructionDecodeFailure::Unsupported);
+    }
+  }
+
+  for (std::uint8_t fixedField = 1;
+       fixedField < 32;
+       ++fixedField)
+  {
+    requireDecodeFailure(
+      cop1SingleInstruction(
+        0x04,
+        fixedField,
+        4,
+        3),
+      EEInstructionDecodeFailure::Reserved);
+
+    for (const std::uint8_t function :
+         {UINT8_C(0x05), UINT8_C(0x06),
+          UINT8_C(0x07), UINT8_C(0x24)})
+    {
+      requireDecodeFailure(
+        cop1SingleInstruction(
+          function,
+          2,
+          4,
+          fixedField),
+        EEInstructionDecodeFailure::Reserved);
+    }
+
+    for (const std::uint8_t function :
+         {UINT8_C(0x18), UINT8_C(0x19),
+          UINT8_C(0x1a), UINT8_C(0x1e),
+          UINT8_C(0x1f), UINT8_C(0x30),
+          UINT8_C(0x32), UINT8_C(0x34),
+          UINT8_C(0x36)})
+    {
+      requireDecodeFailure(
+        cop1SingleInstruction(
+          function,
+          2,
+          fixedField,
+          3),
+        EEInstructionDecodeFailure::Reserved);
+    }
+
+    requireDecodeFailure(
+      cop1WordInstruction(
+        0x20,
+        2,
+        4,
+        fixedField),
+      EEInstructionDecodeFailure::Reserved);
+  }
+}
+
+TEST_CASE(
+  "EE COP1 invalid encodings have no architectural side effects")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CONDITION |
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+  const std::uint32_t reservedInstructions[] = {
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(0x01) << 21),
+    cop1BranchInstruction(4, 2),
+    cop1TransferInstruction(0x04, 2, 3) |
+      UINT32_C(0x7ff),
+    cop1TransferInstruction(0x06, 2, 20),
+    cop1SingleInstruction(0x04, 1, 4, 3),
+    cop1SingleInstruction(0x06, 2, 4, 1),
+    cop1SingleInstruction(0x18, 2, 1, 3),
+    cop1SingleInstruction(0x32, 2, 1, 3),
+    cop1WordInstruction(0x20, 2, 4, 1)
+  };
+  const std::uint32_t unsupportedInstructions[] = {
+    cop1SingleInstruction(0x08, 2, 4, 3),
+    cop1WordInstruction(0x00, 2, 4, 3)
+  };
+
+  const auto initializeSentinels =
+    [INITIAL_STATUS](
+      NekoSystem *system,
+      std::uint32_t instruction)
+    {
+      EECore &core = system->eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::COP1_USABLE);
+      core.setGeneralRegister(
+        1,
+        {
+          UINT64_C(0x100),
+          UINT64_C(0x5555555566666666)
+        });
+      core.setGeneralRegister(
+        2,
+        {
+          UINT64_C(0x1111111189abcdef),
+          UINT64_C(0x2222222233333333)
+        });
+      core.setFloatingPointRegister(
+        2,
+        UINT32_C(0x76543210));
+      core.setFloatingPointRegister(
+        3,
+        UINT32_C(0x12345678));
+      core.setFloatingPointRegister(
+        4,
+        UINT32_C(0x11223344));
+      core.setFloatingPointAccumulator(
+        UINT32_C(0x55667788));
+      core.setCOP1ControlRegister(31, INITIAL_STATUS);
+      REQUIRE(
+        system->eeBus().writeData32(
+          0x100,
+          UINT32_C(0xaabbccdd)));
+      system->eeBus().write32(0, instruction);
+      system->startTrace();
+      core.startExecution(0);
+    };
+  const auto requireSentinels =
+    [INITIAL_STATUS](NekoSystem *system)
+    {
+      const EECore &core = system->eeCore();
+      REQUIRE(
+        core.generalRegister(1) ==
+        EERegister128{
+          UINT64_C(0x100),
+          UINT64_C(0x5555555566666666)
+        });
+      REQUIRE(
+        core.generalRegister(2) ==
+        EERegister128{
+          UINT64_C(0x1111111189abcdef),
+          UINT64_C(0x2222222233333333)
+        });
+      REQUIRE(
+        core.floatingPointRegister(2) ==
+        UINT32_C(0x76543210));
+      REQUIRE(
+        core.floatingPointRegister(3) ==
+        UINT32_C(0x12345678));
+      REQUIRE(
+        core.floatingPointRegister(4) ==
+        UINT32_C(0x11223344));
+      REQUIRE(
+        core.floatingPointAccumulator() ==
+        UINT32_C(0x55667788));
+      REQUIRE(
+        core.cop1ControlRegister(31) ==
+        (EECOP1Control::STATUS_FIXED |
+         INITIAL_STATUS));
+      std::uint32_t stored = 0;
+      REQUIRE(
+        system->eeBus().readData32(
+          0x100,
+          &stored));
+      REQUIRE(stored == UINT32_C(0xaabbccdd));
+    };
+  const auto requireNoCOP1Trace =
+    [](const NekoSystem &system)
+    {
+      std::size_t unexpectedEvents = 0;
+      for (const NekoTraceEvent &event :
+           system.trace())
+      {
+        if (event.type ==
+              NekoTraceEventType::BranchScheduled ||
+            event.type ==
+              NekoTraceEventType::COP1StageTransition ||
+            event.type ==
+              NekoTraceEventType::COP1Retired ||
+            event.type ==
+              NekoTraceEventType::COP1ResourceInterlock ||
+            event.type ==
+              NekoTraceEventType::COP1LoadInterlock ||
+            event.type ==
+              NekoTraceEventType::COP1DividerHazard)
+        {
+          ++unexpectedEvents;
+        }
+      }
+      REQUIRE(unexpectedEvents == 0);
+    };
+
+  for (const std::uint32_t instruction :
+       reservedInstructions)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    initializeSentinels(&system, instruction);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE(core.clockActive());
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::ReservedInstruction);
+    REQUIRE(
+      ((core.cop0Register(
+          EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::RESERVED_INSTRUCTION);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      0);
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::GENERAL);
+    REQUIRE(
+      core.rejectedInstruction() ==
+      instruction);
+    REQUIRE_FALSE(core.hasLastInstruction());
+    requireSentinels(&system);
+
+    system.runMasterCycles(
+      COP1_RSQRT_LATENCY + 1);
+
+    requireSentinels(&system);
+    requireNoCOP1Trace(system);
+  }
+
+  for (const std::uint32_t instruction :
+       unsupportedInstructions)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    initializeSentinels(&system, instruction);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::UnsupportedInstruction);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::None);
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(
+      core.rejectedInstruction() ==
+      instruction);
+    REQUIRE_FALSE(core.hasLastInstruction());
+    requireSentinels(&system);
+
+    core.haltExecution();
+    core.setProgramCounter(4);
+    core.startExecution(4);
+    system.runMasterCycles(
+      COP1_RSQRT_LATENCY + 1);
+
+    REQUIRE(core.clockActive());
+    REQUIRE(core.programCounter() != 4);
+    requireSentinels(&system);
+    requireNoCOP1Trace(system);
+  }
+}
+
 TEST_CASE("EE COP1 multiply produces exact raw results")
 {
   struct ArithmeticVector

@@ -1061,7 +1061,7 @@ accumulator or condition-result contract:
       forwarding, branch, and concurrent-issue COP1 capstone
 - [x] Audit every defined COP1 opcode for decode, execution, flags, timing,
       hazards, exceptions, tracing, reset, and save-state coverage
-- [ ] Reject every reserved COP1 encoding and invalid fixed-field combination
+- [x] Reject every reserved COP1 encoding and invalid fixed-field combination
       deterministically
 - [ ] Perform an independent final review of the completed COP1 milestone
 
