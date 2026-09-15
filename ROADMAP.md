@@ -1045,7 +1045,7 @@ accumulator or condition-result contract:
 - [x] Add an independently authored basic arithmetic program covering add,
       subtract, multiply, minimum, and maximum with representative normal and
       exceptional operands
-- [ ] Add an independently authored accumulator and compound program covering
+- [x] Add an independently authored accumulator and compound program covering
       the `ADDA`, `SUBA`, `MULA`, `MADD`, and `MSUB` families, including ACC
       forwarding and ordered flag behavior
 - [ ] Add an independently authored divider program covering `DIV.S`,

@@ -111,6 +111,10 @@ verify_ee_elf_fixture(
   ac805378054f1fcb762f1d8d428f71a4710da04dd587ccc606ec34175d47ac78
 )
 verify_ee_elf_fixture(
+  cop1_accumulator_compound.elf
+  763c6ebcaa23d8acce500062aea7e559c0f07d48b3d2b2696a2c8540f85b1c07
+)
+verify_ee_elf_fixture(
   cop2_transfer.elf
   9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707
 )
