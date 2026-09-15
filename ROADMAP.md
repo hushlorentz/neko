@@ -1011,7 +1011,7 @@ accumulator or condition-result contract:
 
 - [x] Enable COP1 Operate on Pipe 0 and COP1 Move on Pipe 1 using the completed
       C1 scoreboard and two-wide EE scheduler
-- [ ] Implement Table 1-3's `Y` combination: both instructions enter `R`, then
+- [x] Implement Table 1-3's `Y` combination: both instructions enter `R`, then
       the Pipe 1 COP1 Move stalls for one cycle at `A/T` on the shared C1
       resource; resolve completion ordering when the stalled Move is older,
       and cover every program-order arrangement permitted by the pipe-assignment

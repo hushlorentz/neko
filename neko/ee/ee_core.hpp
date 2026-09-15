@@ -414,6 +414,18 @@ class EECore : public ClockedComponent
       UnsupportedInstruction
     };
 
+    enum class IssueMemberPosition : std::uint8_t
+    {
+      Older,
+      Younger
+    };
+
+    enum class COP1ScoreboardQuery : std::uint8_t
+    {
+      CandidateReadiness,
+      YoungerIssueGroupMember
+    };
+
     enum COP1Destination : std::uint8_t
     {
       COP1_DESTINATION_NONE = 0,
@@ -629,7 +641,7 @@ class EECore : public ClockedComponent
       std::uint32_t completedLoadRegisters);
     EEIssueMemberExecution executeIssueMember(
       std::uint32_t completedLoadRegisters,
-      bool ignoreNewGroupProducers);
+      IssueMemberPosition position);
     void recordInstructionAcceptance(
       std::uint64_t programOrder,
       std::uint32_t address,
@@ -648,6 +660,8 @@ class EECore : public ClockedComponent
       const EEInstruction &younger,
       std::size_t availableCOP1Slots) const;
     bool issueSelectionCanExecuteConcurrently() const;
+    bool issueSelectionUsesCompatiblePhysicalPipelines()
+      const;
     static bool isActivatedOIssueOperation(
       EEOperation operation);
     bool memoryIssueCanJoinPair(
@@ -699,6 +713,9 @@ class EECore : public ClockedComponent
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
+    const InFlightCOP1Operation *
+      cop1MoveTStageBlocker(
+        const InFlightCOP1Operation &move) const;
     bool advanceInFlightCOP1Operation(
       InFlightCOP1Operation *operation,
       COP1PipelineStage *previousStage);
@@ -722,7 +739,7 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t completedLoadRegisters,
       COP1ScoreboardHazard *hazard,
-      bool ignoreNewGroupProducers = false) const;
+      COP1ScoreboardQuery query) const;
     COP1ScoreboardValue cop1ScoreboardValue(
       COP1ScoreboardResource resource,
       std::uint8_t registerIndex = 0) const;

@@ -909,6 +909,72 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.programCounter() == 8);
   }
 
+  SECTION("An older COP1 Operate issues with a younger COP1 load")
+  {
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {0x100, 0});
+    bus.write32(0, UINT32_C(0x46031000));
+    bus.write32(
+      4,
+      (UINT32_C(0x31) << 26) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(6) << 16));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::AddSingleCOP1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[1]
+        .instruction.operation ==
+      EEOperation::LoadWordToCOP1);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  SECTION("An older COP1 Operate issues with a younger COP1 store")
+  {
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {0x100, 0});
+    bus.write32(0, UINT32_C(0x46031000));
+    bus.write32(
+      4,
+      (UINT32_C(0x39) << 26) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(6) << 16));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::AddSingleCOP1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[1]
+        .instruction.operation ==
+      EEOperation::StoreWordFromCOP1);
+    REQUIRE(core.programCounter() == 8);
+  }
+
   SECTION("Ordinary NOP partners remain scalar")
   {
     bus.write32(0, 0);

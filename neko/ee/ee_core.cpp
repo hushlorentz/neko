@@ -671,7 +671,8 @@ bool EECore::issueCandidateReady(
   if (cop1ScoreboardBlocks(
         instruction,
         completedLoadRegisters,
-        &hazard))
+        &hazard,
+        COP1ScoreboardQuery::CandidateReadiness))
   {
     return false;
   }
@@ -746,10 +747,18 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
     return false;
   }
 
+  return issueSelectionUsesCompatiblePhysicalPipelines();
+}
+
+bool EECore::issueSelectionUsesCompatiblePhysicalPipelines()
+  const
+{
   const EEInstructionRouting olderRouting =
-    eeInstructionRouting(issueLatch.instruction.operation);
+    eeInstructionRouting(
+      issueLatch.instruction.operation);
   const EEInstructionRouting youngerRouting =
-    eeInstructionRouting(stagingLatch.instruction.operation);
+    eeInstructionRouting(
+      stagingLatch.instruction.operation);
   const std::uint8_t olderPhysicalPipelines =
     eeInstructionPhysicalPipelines(
       olderRouting,
@@ -770,10 +779,9 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
     return false;
   }
   const bool compatible =
+    sharedPhysicalPipelines == 0 ||
     issueSelection.pairing ==
-      EEIssuePairing::Concurrent
-      ? sharedPhysicalPipelines == 0
-      : true;
+      EEIssuePairing::ConcurrentWithStall;
   assert(compatible);
   return compatible;
 }
@@ -1124,13 +1132,15 @@ EEIssueGroupExecutionResult EECore::executeIssueGroup(
     {
       return executeIssueMember(
         completedLoadRegisters,
-        member != 0);
+        member == 0
+          ? IssueMemberPosition::Older
+          : IssueMemberPosition::Younger);
     });
 }
 
 EEIssueMemberExecution EECore::executeIssueMember(
   std::uint32_t completedLoadRegisters,
-  bool ignoreNewGroupProducers)
+  IssueMemberPosition position)
 {
   if (!issueLatch.valid)
   {
@@ -1154,7 +1164,10 @@ EEIssueMemberExecution EECore::executeIssueMember(
         decoded,
         completedLoadRegisters,
         &scoreboardHazard,
-        ignoreNewGroupProducers))
+        position == IssueMemberPosition::Older
+          ? COP1ScoreboardQuery::CandidateReadiness
+          : COP1ScoreboardQuery::
+              YoungerIssueGroupMember))
   {
     if (scoreboardHazard.completedLoad)
     {
@@ -3526,31 +3539,8 @@ void EECore::advancePendingCOP1(
     {
       continue;
     }
-    for (const InFlightCOP1Operation &candidate :
-         inFlightCOP1Operations)
-    {
-      if (!candidate.active)
-      {
-        continue;
-      }
-      const bool entersT =
-        (isCOP1StagedOperation(
-           candidate.instruction.operation) &&
-         candidate.stage == COP1PipelineStage::R) ||
-        (isCOP1DividerOperation(
-           candidate.instruction.operation) &&
-         candidate.stage == COP1PipelineStage::R &&
-         candidate.remainingCycles ==
-           cop1DividerTiming(
-             candidate.instruction.operation).latency);
-      if (entersT &&
-          (moveTStageBlockers[moveIndex] == nullptr ||
-           candidate.programOrder <
-             moveTStageBlockers[moveIndex]->programOrder))
-      {
-        moveTStageBlockers[moveIndex] = &candidate;
-      }
-    }
+    moveTStageBlockers[moveIndex] =
+      cop1MoveTStageBlocker(move);
   }
   if (cop1DividerInitiationCycles != 0)
   {
@@ -3717,6 +3707,42 @@ void EECore::advancePendingCOP1(
     }
     commitInFlightCOP1(oldestOperation, true);
   }
+}
+
+const EECore::InFlightCOP1Operation *
+EECore::cop1MoveTStageBlocker(
+  const InFlightCOP1Operation &move) const
+{
+  assert(move.active);
+  assert(move.stage == COP1PipelineStage::R);
+  assert(isCOP1MoveOperation(move.instruction.operation));
+
+  const InFlightCOP1Operation *blocker = nullptr;
+  for (const InFlightCOP1Operation &candidate :
+       inFlightCOP1Operations)
+  {
+    if (!candidate.active)
+    {
+      continue;
+    }
+    const bool entersT =
+      (isCOP1StagedOperation(
+         candidate.instruction.operation) &&
+       candidate.stage == COP1PipelineStage::R) ||
+      (isCOP1DividerOperation(
+         candidate.instruction.operation) &&
+       candidate.stage == COP1PipelineStage::R &&
+       candidate.remainingCycles ==
+         cop1DividerTiming(
+           candidate.instruction.operation).latency);
+    if (entersT &&
+        (blocker == nullptr ||
+         candidate.programOrder < blocker->programOrder))
+    {
+      blocker = &candidate;
+    }
+  }
+  return blocker;
 }
 
 bool EECore::advanceInFlightCOP1Operation(
@@ -4213,8 +4239,10 @@ bool EECore::cop1ScoreboardBlocks(
   const EEInstruction &instruction,
   std::uint32_t completedLoadRegisters,
   COP1ScoreboardHazard *hazard,
-  bool ignoreNewGroupProducers) const
+  COP1ScoreboardQuery query) const
 {
+  const bool includeAllOlderProducers =
+    query == COP1ScoreboardQuery::CandidateReadiness;
   if (instruction.operation ==
       EEOperation::SynchronizeLoadStore)
   {
@@ -4238,7 +4266,7 @@ bool EECore::cop1ScoreboardBlocks(
       }
     }
   }
-  if (!ignoreNewGroupProducers &&
+  if (includeAllOlderProducers &&
       cop1ScoreboardValue(
         COP1ScoreboardResource::MemoryException)
           .availability ==
@@ -4254,7 +4282,7 @@ bool EECore::cop1ScoreboardBlocks(
     return true;
   }
 
-  if (!ignoreNewGroupProducers)
+  if (includeAllOlderProducers)
   {
     for (std::uint8_t registerIndex = 0;
          registerIndex < GENERAL_REGISTER_COUNT;

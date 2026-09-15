@@ -104,6 +104,15 @@ namespace
     return events;
   }
 
+  std::uint64_t cop1StageTransition(
+    std::uint64_t from,
+    std::uint64_t to)
+  {
+    return
+      from |
+      (to << NekoEETraceCOP1Stage::TO_SHIFT);
+  }
+
   void prepareSimultaneousCOP1Completion(NekoSystem *system)
   {
     EECore &core = system->eeCore();
@@ -1950,6 +1959,168 @@ TEST_CASE("EE reverse paired COP1 issue still stalls the Pipe 1 Move")
   REQUIRE(issued[1].masterCycle == 1);
   REQUIRE(issued[1].value0 == 4);
   REQUIRE(issued[1].value1 == multiplyInstruction);
+}
+
+TEST_CASE("EE COP1 Y pairs have deterministic stage and retirement order")
+{
+  struct PairOrder
+  {
+    bool moveOlder;
+    const char *description;
+  };
+  const PairOrder orders[] = {
+    {false, "Operate older"},
+    {true, "Move older"}
+  };
+
+  for (const PairOrder &order : orders)
+  {
+    INFO(order.description);
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const std::uint32_t moveInstruction =
+      cop1TransferInstruction(0x00, 5, 7);
+    const std::uint32_t operateInstruction =
+      cop1SingleInstruction(0x02, 2, 4, 3);
+    const std::uint32_t moveAddress =
+      order.moveOlder ? 0 : 4;
+    const std::uint64_t moveOrder =
+      order.moveOlder ? 1 : 2;
+    const std::uint64_t operateOrder =
+      order.moveOlder ? 2 : 1;
+    core.setFloatingPointRegister(
+      2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(
+      3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(
+      7, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      order.moveOlder
+        ? moveInstruction
+        : operateInstruction);
+    system.eeBus().write32(
+      4,
+      order.moveOlder
+        ? operateInstruction
+        : moveInstruction);
+    core.startExecution(0);
+    system.startTrace();
+
+    system.runMasterCycles(6);
+
+    std::vector<NekoTraceEvent> moveTransitions;
+    std::vector<NekoTraceEvent> operateTransitions;
+    std::vector<NekoTraceEvent> moveInterlocks;
+    std::vector<NekoTraceEvent> retirements;
+    std::vector<NekoTraceEvent> pairIssues;
+    for (const NekoTraceEvent &event : eeTrace(system))
+    {
+      if (event.type ==
+            NekoTraceEventType::COP1StageTransition &&
+          event.value0 == moveOrder)
+      {
+        moveTransitions.push_back(event);
+      }
+      else if (
+        event.type ==
+          NekoTraceEventType::COP1StageTransition &&
+        event.value0 == operateOrder)
+      {
+        operateTransitions.push_back(event);
+      }
+      else if (
+        event.type ==
+          NekoTraceEventType::COP1ResourceInterlock &&
+        event.value0 == moveAddress &&
+        event.value1 == moveInstruction)
+      {
+        moveInterlocks.push_back(event);
+      }
+      else if (
+        event.type == NekoTraceEventType::COP1Retired)
+      {
+        retirements.push_back(event);
+      }
+      else if (
+        event.type == NekoTraceEventType::InstructionIssued &&
+        event.value0 <= 4)
+      {
+        pairIssues.push_back(event);
+      }
+    }
+
+    REQUIRE(pairIssues.size() == 2);
+    REQUIRE(pairIssues[0].masterCycle == 1);
+    REQUIRE(pairIssues[1].masterCycle == 1);
+
+    REQUIRE(moveInterlocks.size() == 1);
+    REQUIRE(moveInterlocks[0].masterCycle == 2);
+    REQUIRE(
+      moveInterlocks[0].value2 ==
+      static_cast<std::uint8_t>(
+        EEOperation::MultiplySingleCOP1));
+
+    REQUIRE(moveTransitions.size() == 4);
+    REQUIRE(moveTransitions[0].masterCycle == 1);
+    REQUIRE(
+      moveTransitions[0].value2 ==
+      cop1StageTransition(
+        NekoEETraceCOP1Stage::NONE,
+        NekoEETraceCOP1Stage::R));
+    REQUIRE(moveTransitions[1].masterCycle == 3);
+    REQUIRE(
+      moveTransitions[1].value2 ==
+      cop1StageTransition(
+        NekoEETraceCOP1Stage::R,
+        NekoEETraceCOP1Stage::T));
+    REQUIRE(moveTransitions[2].masterCycle == 4);
+    REQUIRE(
+      moveTransitions[2].value2 ==
+      cop1StageTransition(
+        NekoEETraceCOP1Stage::T,
+        NekoEETraceCOP1Stage::X));
+    REQUIRE(moveTransitions[3].masterCycle == 5);
+    REQUIRE(
+      moveTransitions[3].value2 ==
+      cop1StageTransition(
+        NekoEETraceCOP1Stage::X,
+        NekoEETraceCOP1Stage::Y));
+
+    REQUIRE(operateTransitions.size() == 6);
+    REQUIRE(operateTransitions[0].masterCycle == 1);
+    REQUIRE(
+      operateTransitions[0].value2 ==
+      cop1StageTransition(
+        NekoEETraceCOP1Stage::NONE,
+        NekoEETraceCOP1Stage::R));
+    for (std::size_t index = 1;
+         index < operateTransitions.size();
+         ++index)
+    {
+      REQUIRE(
+        operateTransitions[index].masterCycle ==
+        index + 1);
+    }
+    REQUIRE(
+      operateTransitions[1].value2 ==
+      cop1StageTransition(
+        NekoEETraceCOP1Stage::R,
+        NekoEETraceCOP1Stage::T));
+    REQUIRE(
+      operateTransitions[5].value2 ==
+      cop1StageTransition(
+        NekoEETraceCOP1Stage::Z,
+        NekoEETraceCOP1Stage::S1));
+
+    REQUIRE(retirements.size() == 2);
+    REQUIRE(retirements[0].value0 == 1);
+    REQUIRE(retirements[1].value0 == 2);
+    REQUIRE(
+      retirements[0].masterCycle ==
+      (order.moveOlder ? 5 : 6));
+    REQUIRE(retirements[1].masterCycle == 6);
+  }
 }
 
 TEST_CASE("EE state snapshots include in-flight execution")
