@@ -89,15 +89,20 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
   }
 }
 
-TEST_CASE("PS2DEV COP1 semantic guest preserves raw results and FCR31")
+TEST_CASE("PS2DEV COP1 semantic capstone integrates pipeline behavior")
 {
   NekoSystem system;
+  system.startTrace();
   const EEGuestExecutionResult result =
     system.runELF(readGuest("cop1_semantics.elf"), 256);
 
   REQUIRE(result.outcome == EEGuestOutcome::Completed);
   REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 52);
   REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
   const EECore &core = system.eeCore();
   REQUIRE(
     core.floatingPointRegister(4) ==
@@ -131,6 +136,29 @@ TEST_CASE("PS2DEV COP1 semantic guest preserves raw results and FCR31")
     core.floatingPointRegister(16) ==
     UINT32_C(0x7fffffff));
   REQUIRE(
+    core.floatingPointRegister(17) ==
+    UINT32_C(0x40700000));
+  REQUIRE(
+    core.floatingPointRegister(18) ==
+    UINT32_C(0x40b40000));
+  REQUIRE(
+    core.floatingPointRegister(19) ==
+    UINT32_C(0x40700000));
+  REQUIRE(core.generalRegister(21).low == UINT64_C(5));
+  REQUIRE(
+    core.generalRegister(22).low ==
+    UINT64_C(0xfffffffffffffffd));
+  REQUIRE(
+    core.generalRegister(23).low ==
+    UINT64_C(0x0000000040b40000));
+  REQUIRE(
+    core.generalRegister(24).low ==
+    UINT64_C(0x0000000040700000));
+  REQUIRE(
+    core.generalRegister(25).low ==
+    UINT64_C(0x0000000040700000));
+  REQUIRE(core.generalRegister(26).low == UINT64_C(4));
+  REQUIRE(
     core.cop1ControlRegister(31) ==
     (EECOP1Control::STATUS_FIXED |
      EECOP1Control::CONDITION |
@@ -163,6 +191,140 @@ TEST_CASE("PS2DEV COP1 semantic guest preserves raw results and FCR31")
         core.generalRegister(9 + index).low) ==
       expectedReadbacks[index]);
   }
+
+  const std::uint32_t branchAddress =
+    result.load.entryPoint + 80;
+  const std::uint32_t branchTarget =
+    result.load.entryPoint + 92;
+  std::size_t branchEvents = 0;
+  for (const NekoTraceEvent &event : system.trace())
+  {
+    if (event.type ==
+          NekoTraceEventType::BranchScheduled &&
+        event.value0 == branchAddress)
+    {
+      REQUIRE(event.value1 == branchTarget);
+      REQUIRE(event.value2 == NekoEETraceBranch::TAKEN);
+      ++branchEvents;
+    }
+  }
+  REQUIRE(branchEvents == 1);
+
+  const std::uint32_t forwardingAddresses[] = {
+    result.load.entryPoint + 96,
+    result.load.entryPoint + 100
+  };
+  std::vector<NekoTraceEvent> forwardingAdmissions;
+  std::vector<NekoTraceEvent> forwardingRetirements;
+  for (const NekoTraceEvent &event : system.trace())
+  {
+    const std::uint32_t address =
+      static_cast<std::uint32_t>(event.value1);
+    if (address != forwardingAddresses[0] &&
+        address != forwardingAddresses[1])
+    {
+      continue;
+    }
+    if (event.type ==
+          NekoTraceEventType::COP1StageTransition &&
+        (event.value2 &
+         NekoEETraceCOP1Stage::FROM_MASK) ==
+          NekoEETraceCOP1Stage::NONE)
+    {
+      forwardingAdmissions.push_back(event);
+    }
+    else if (
+      event.type == NekoTraceEventType::COP1Retired)
+    {
+      forwardingRetirements.push_back(event);
+    }
+  }
+  REQUIRE(forwardingAdmissions.size() == 2);
+  REQUIRE(forwardingRetirements.size() == 2);
+  for (std::size_t index = 0; index < 2; ++index)
+  {
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        forwardingAdmissions[index].value1) ==
+      forwardingAddresses[index]);
+    REQUIRE(
+      ((forwardingAdmissions[index].value2 >>
+        NekoEETraceCOP1Stage::TO_SHIFT) &
+       NekoEETraceCOP1Stage::FROM_MASK) ==
+      NekoEETraceCOP1Stage::R);
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        forwardingRetirements[index].value1) ==
+      forwardingAddresses[index]);
+  }
+  REQUIRE(
+    forwardingAdmissions[1].masterCycle + 1 ==
+    forwardingRetirements[0].masterCycle);
+
+  const std::uint32_t operateAddress =
+    result.load.entryPoint + 132;
+  const std::uint32_t moveAddress =
+    result.load.entryPoint + 136;
+  std::vector<NekoTraceEvent> pairAdmissions;
+  for (const NekoTraceEvent &event : system.trace())
+  {
+    if (event.type ==
+          NekoTraceEventType::COP1StageTransition &&
+        (event.value2 &
+         NekoEETraceCOP1Stage::FROM_MASK) ==
+          NekoEETraceCOP1Stage::NONE)
+    {
+      const std::uint32_t address =
+        static_cast<std::uint32_t>(event.value1);
+      if (address == operateAddress ||
+          address == moveAddress)
+      {
+        pairAdmissions.push_back(event);
+      }
+    }
+  }
+  REQUIRE(pairAdmissions.size() == 2);
+  REQUIRE(
+    static_cast<std::uint32_t>(
+      pairAdmissions[0].value1) ==
+    operateAddress);
+  REQUIRE(
+    static_cast<std::uint32_t>(
+      pairAdmissions[1].value1) ==
+    moveAddress);
+  for (const NekoTraceEvent &admission :
+       pairAdmissions)
+  {
+    REQUIRE(
+      ((admission.value2 >>
+        NekoEETraceCOP1Stage::TO_SHIFT) &
+       NekoEETraceCOP1Stage::FROM_MASK) ==
+      NekoEETraceCOP1Stage::R);
+  }
+  REQUIRE(
+    pairAdmissions[0].masterCycle ==
+    pairAdmissions[1].masterCycle);
+
+  std::vector<NekoTraceEvent> moveInterlocks;
+  for (const NekoTraceEvent &event : system.trace())
+  {
+    if (event.type ==
+          NekoTraceEventType::COP1ResourceInterlock &&
+        event.value0 == moveAddress &&
+        event.masterCycle >
+          pairAdmissions[1].masterCycle)
+    {
+      moveInterlocks.push_back(event);
+    }
+  }
+  REQUIRE(moveInterlocks.size() == 1);
+  REQUIRE(
+    moveInterlocks[0].masterCycle ==
+    pairAdmissions[1].masterCycle + 1);
+  REQUIRE(
+    moveInterlocks[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::AddSingleCOP1));
 }
 
 TEST_CASE("PS2DEV COP1 transfer and memory guest preserves raw words")

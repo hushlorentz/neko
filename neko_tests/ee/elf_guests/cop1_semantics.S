@@ -26,6 +26,28 @@ _start:
   div.s $f16, $f0, $f0
   c.eq.s $f4, $f4
 
+  or $21, $zero, $zero
+  bc1t branch_taken
+  addiu $21, $21, 1
+  addiu $21, $21, 2
+branch_taken:
+  addiu $21, $21, 4
+
+  add.s $f17, $f2, $f3
+  mul.s $f18, $f17, $f2
+
+  or $26, $zero, $zero
+  addiu $26, $26, 1
+  addiu $26, $26, 1
+  addiu $26, $26, 1
+  addiu $26, $26, 1
+
+  beq $zero, $zero, concurrent_pair
+  nop
+concurrent_pair:
+  add.s $f19, $f2, $f3
+  mfc1 $22, $f13
+
   mfc1 $9, $f4
   mfc1 $10, $f5
   mfc1 $11, $f6
@@ -38,6 +60,9 @@ _start:
   mfc1 $18, $f15
   mfc1 $19, $f16
   cfc1 $20, $31
+  mfc1 $23, $f18
+  mfc1 $24, $f17
+  mfc1 $25, $f19
 
   or $v0, $zero, $zero
   jr $ra

@@ -88,7 +88,7 @@ verify_ee_elf_fixture(
 )
 verify_ee_elf_fixture(
   cop1_semantics.elf
-  b6a47315e2de5b39315b88a1e0fdc7a4d2aeceb1a7654a430f4f9b3b6f9de07d
+  9478e2dd9230a4215cfd5ab2c3ae420cb39cd5313e5eb51b9544cda0a1e987cf
 )
 verify_ee_elf_fixture(
   cop1_transfer_memory.elf

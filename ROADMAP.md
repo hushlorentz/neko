@@ -1057,7 +1057,7 @@ accumulator or condition-result contract:
 - [x] For each focused COP1 program, assert its expected registers, `FCR31`,
       memory outputs, instruction count, and termination reason; also assert
       retirement and stage traces where timing is part of the contract
-- [ ] Expand the foundation's PS2DEV semantic baseline into a timing,
+- [x] Expand the foundation's PS2DEV semantic baseline into a timing,
       forwarding, branch, and concurrent-issue COP1 capstone
 - [ ] Audit every defined COP1 opcode for decode, execution, flags, timing,
       hazards, exceptions, tracing, reset, and save-state coverage
