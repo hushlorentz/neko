@@ -4407,6 +4407,157 @@ TEST_CASE("EE COP1 dual issue honors cross-cycle scoreboard resources")
   }
 }
 
+TEST_CASE("EE COP1 mixed issue preserves S bypass and Move timing")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(4, UINT32_C(0x11111111));
+  core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+  core.setFloatingPointRegister(7, UINT32_C(0x89abcdef));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x00, 2, 4, 3));
+  system.eeBus().write32(4, 0);
+  system.eeBus().write32(8, 0);
+  system.eeBus().write32(12, 0);
+  system.eeBus().write32(
+    16,
+    cop1TransferInstruction(0x00, 8, 7));
+  system.eeBus().write32(
+    20,
+    cop1SingleInstruction(0x00, 4, 5, 6));
+  core.startExecution(0);
+
+  system.runMasterCycles(5);
+
+  REQUIRE(
+    core.acceptanceRecordsThisCycle().size() ==
+    2);
+  REQUIRE(core.floatingPointRegister(4) == UINT32_C(0x11111111));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+  REQUIRE(core.generalRegister(8) == EERegister128{});
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+  REQUIRE(core.generalRegister(8) == EERegister128{});
+
+  core.setFloatingPointRegister(4, UINT32_C(0xdeadbeef));
+  system.runMasterCycles(2);
+
+  REQUIRE(core.generalRegister(8) == EERegister128{});
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.generalRegister(8).low ==
+    UINT64_C(0xffffffff89abcdef));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x40600000));
+}
+
+TEST_CASE("EE COP1 mixed issue preserves divider and Move overlap timing")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(8, {UINT32_C(0x11111111), 0});
+  core.setGeneralRegister(9, {UINT32_C(0x22222222), 0});
+  core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(6, UINT32_C(0x41100000));
+  core.setFloatingPointRegister(7, UINT32_C(0xaaaaaaaa));
+  core.setFloatingPointRegister(10, UINT32_C(0xbbbbbbbb));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x03, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x04, 8, 7));
+  system.eeBus().write32(8, UINT32_C(0x240a0001));
+  system.eeBus().write32(12, UINT32_C(0x240b0002));
+  system.eeBus().write32(16, UINT32_C(0x240c0003));
+  system.eeBus().write32(20, UINT32_C(0x240d0004));
+  system.eeBus().write32(24, UINT32_C(0x240e0005));
+  system.eeBus().write32(28, UINT32_C(0x240f0006));
+  system.eeBus().write32(
+    32,
+    cop1SingleInstruction(0x04, 0, 5, 6));
+  system.eeBus().write32(
+    36,
+    cop1TransferInstruction(0x04, 9, 10));
+  core.startExecution(0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(core.programCounter() == 32);
+  REQUIRE(
+    core.floatingPointRegister(7) ==
+    UINT32_C(0xaaaaaaaa));
+
+  system.runMasterCycles(3);
+
+  REQUIRE(core.programCounter() == 32);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.acceptanceRecordsThisCycle().size() ==
+    2);
+  REQUIRE(core.programCounter() == 40);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40400000));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+  REQUIRE(
+    core.floatingPointRegister(7) ==
+    UINT32_C(0x11111111));
+  REQUIRE(
+    core.floatingPointRegister(10) ==
+    UINT32_C(0xbbbbbbbb));
+
+  system.runMasterCycles(2);
+  REQUIRE(
+    core.floatingPointRegister(10) ==
+    UINT32_C(0xbbbbbbbb));
+
+  system.clockMasterCycle();
+  REQUIRE(
+    core.floatingPointRegister(10) ==
+    UINT32_C(0xbbbbbbbb));
+
+  system.runMasterCycles(3);
+  REQUIRE(
+    core.floatingPointRegister(10) ==
+    UINT32_C(0xbbbbbbbb));
+  REQUIRE(core.floatingPointRegister(5) == 0);
+
+  system.clockMasterCycle();
+  REQUIRE(
+    core.floatingPointRegister(10) ==
+    UINT32_C(0x22222222));
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x40400000));
+}
+
 TEST_CASE("EE COP1 add forwards a same-destination 1S result to 2T")
 {
   NekoSystem system;

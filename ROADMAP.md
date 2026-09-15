@@ -1019,7 +1019,7 @@ accumulator or condition-result contract:
 - [x] Enforce cross-cycle FPR, ACC, FCR31, load, store, comparison/branch, and
       C1 structural readiness using the foundation's same-pair dependency
       contract without losing legal concurrent issue
-- [ ] Verify `1S`/`2T` bypassing, `2S` writeback, divider overlap, and Move
+- [x] Verify `1S`/`2T` bypassing, `2S` writeback, divider overlap, and Move
       timing in mixed one-wide and two-wide instruction streams
 - [ ] Preserve in-flight C1 and issue-queue work across unrelated EE
       execution, interrupts, `ERET`, reset, halt/resume, and save-state restore
