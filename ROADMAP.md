@@ -1051,7 +1051,7 @@ accumulator or condition-result contract:
 - [x] Add an independently authored divider program covering `DIV.S`,
       `SQRT.S`, and `RSQRT.S`, including result visibility and initiation
       overlap
-- [ ] Add an independently authored mixed concurrent-issue program covering
+- [x] Add an independently authored mixed concurrent-issue program covering
       Operate/Move pairing, dependencies, forwarding, ordered memory effects,
       and deterministic final state
 - [ ] For each focused COP1 program, assert its expected registers, `FCR31`,

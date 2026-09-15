@@ -119,6 +119,10 @@ verify_ee_elf_fixture(
   e9a77add85add831a78dba34ec341af8afbc4b63add48b188860113a8ab4f148
 )
 verify_ee_elf_fixture(
+  cop1_mixed_concurrent.elf
+  07cf7a367ef943e017a8b1b488a3f727e5cc581634b060a36f87579d7fe367d0
+)
+verify_ee_elf_fixture(
   cop2_transfer.elf
   9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707
 )

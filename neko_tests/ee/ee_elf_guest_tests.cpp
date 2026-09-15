@@ -605,6 +605,235 @@ TEST_CASE("PS2DEV COP1 divider guest overlaps initiation and visibility")
     admissions[2].masterCycle + 1);
 }
 
+TEST_CASE("PS2DEV COP1 mixed guest is concurrent and deterministic")
+{
+  const std::vector<std::uint8_t> guest =
+    readGuest("cop1_mixed_concurrent.elf");
+  NekoSystem first;
+  NekoSystem second;
+  first.startTrace();
+  second.startTrace();
+
+  const EEGuestExecutionResult firstResult =
+    first.runELF(guest, 512);
+  const EEGuestExecutionResult secondResult =
+    second.runELF(guest, 512);
+
+  REQUIRE(firstResult.outcome == EEGuestOutcome::Completed);
+  REQUIRE(firstResult.exitCode == 0);
+  REQUIRE(firstResult.execution.instructions == 27);
+  REQUIRE_FALSE(firstResult.execution.cycleLimitReached);
+  REQUIRE(
+    firstResult.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+  REQUIRE(
+    firstResult.execution.masterCycles ==
+    secondResult.execution.masterCycles);
+  REQUIRE(
+    firstResult.execution.eeCycles ==
+    secondResult.execution.eeCycles);
+  REQUIRE(
+    firstResult.execution.instructions ==
+    secondResult.execution.instructions);
+  REQUIRE(firstResult.outcome == secondResult.outcome);
+  REQUIRE(firstResult.exitCode == secondResult.exitCode);
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(first.saveState() == second.saveState());
+
+  const EECore &core = first.eeCore();
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    core.floatingPointRegister(10) ==
+    UINT32_C(0x40700000));
+  REQUIRE(
+    core.floatingPointRegister(11) ==
+    UINT32_C(0x40a80000));
+  REQUIRE(
+    core.floatingPointRegister(12) ==
+    UINT32_C(0xc0400000));
+  REQUIRE(
+    core.floatingPointRegister(13) ==
+    UINT32_C(0xbfc00000));
+  REQUIRE(
+    core.floatingPointRegister(14) ==
+    UINT32_C(0x40a80000));
+  REQUIRE(
+    core.floatingPointRegister(15) ==
+    UINT32_C(0xc0100000));
+  REQUIRE(
+    core.generalRegister(10).low ==
+    UINT64_C(0xffffffff89abcdef));
+  REQUIRE(
+    core.generalRegister(11).low ==
+    UINT64_C(0x0000000040700000));
+  REQUIRE(
+    core.generalRegister(12).low ==
+    UINT64_C(0x0000000040a80000));
+  REQUIRE(
+    core.generalRegister(13).low ==
+    UINT64_C(0xffffffffc0400000));
+  REQUIRE(
+    core.generalRegister(14).low ==
+    UINT64_C(0xffffffffbfc00000));
+  REQUIRE(
+    core.generalRegister(15).low ==
+    UINT64_C(0x0000000040a80000));
+  REQUIRE(
+    core.generalRegister(16).low ==
+    UINT64_C(0xffffffffc0100000));
+  REQUIRE(
+    core.generalRegister(17).low ==
+    EECOP1Control::STATUS_FIXED);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+
+  const std::uint32_t payloadAddress =
+    static_cast<std::uint32_t>(
+      core.generalRegister(8).low);
+  REQUIRE(
+    first.eeBus().read32(payloadAddress + 16) ==
+    UINT32_C(0x40a80000));
+  REQUIRE(
+    first.eeBus().read32(payloadAddress + 20) ==
+    UINT32_C(0x40a80000));
+  REQUIRE(
+    second.eeBus().read32(payloadAddress + 16) ==
+    UINT32_C(0x40a80000));
+  REQUIRE(
+    second.eeBus().read32(payloadAddress + 20) ==
+    UINT32_C(0x40a80000));
+
+  const std::uint32_t pairAddresses[] = {
+    firstResult.load.entryPoint + 28,
+    firstResult.load.entryPoint + 32,
+    firstResult.load.entryPoint + 36,
+    firstResult.load.entryPoint + 40,
+    firstResult.load.entryPoint + 44,
+    firstResult.load.entryPoint + 48,
+    firstResult.load.entryPoint + 52,
+    firstResult.load.entryPoint + 56,
+    firstResult.load.entryPoint + 60,
+    firstResult.load.entryPoint + 64
+  };
+  std::vector<NekoTraceEvent> admissions;
+  for (const NekoTraceEvent &event : first.trace())
+  {
+    if (event.type !=
+          NekoTraceEventType::COP1StageTransition ||
+        (event.value2 &
+         NekoEETraceCOP1Stage::FROM_MASK) !=
+          NekoEETraceCOP1Stage::NONE)
+    {
+      continue;
+    }
+    const std::uint32_t address =
+      static_cast<std::uint32_t>(event.value1);
+    for (const std::uint32_t pairAddress :
+         pairAddresses)
+    {
+      if (address == pairAddress)
+      {
+        admissions.push_back(event);
+        break;
+      }
+    }
+  }
+
+  REQUIRE(admissions.size() == 10);
+  for (std::size_t index = 0; index < 10; ++index)
+  {
+    REQUIRE(
+      static_cast<std::uint32_t>(
+        admissions[index].value1) ==
+      pairAddresses[index]);
+  }
+  for (std::size_t index = 0; index < 10; index += 2)
+  {
+    REQUIRE(
+      admissions[index].masterCycle ==
+      admissions[index + 1].masterCycle);
+  }
+
+  struct MoveInterlock
+  {
+    std::uint32_t address;
+    std::size_t admissionIndex;
+    EEOperation blocker;
+  };
+  const MoveInterlock moveInterlocks[] = {
+    {
+      pairAddresses[1],
+      1,
+      EEOperation::AddSingleCOP1
+    },
+    {
+      pairAddresses[2],
+      2,
+      EEOperation::AddSingleCOP1
+    },
+    {
+      pairAddresses[4],
+      4,
+      EEOperation::ConvertWordToSingleCOP1
+    },
+    {
+      pairAddresses[7],
+      7,
+      EEOperation::AddSingleCOP1
+    },
+    {
+      pairAddresses[8],
+      8,
+      EEOperation::MultiplySingleCOP1
+    }
+  };
+  for (const MoveInterlock &interlock : moveInterlocks)
+  {
+    std::size_t interlockCount = 0;
+    for (const NekoTraceEvent &event : first.trace())
+    {
+      if (event.type ==
+            NekoTraceEventType::COP1ResourceInterlock &&
+          event.value0 == interlock.address &&
+          event.masterCycle >
+            admissions[interlock.admissionIndex]
+              .masterCycle &&
+          event.value2 ==
+            static_cast<std::uint8_t>(
+              interlock.blocker))
+      {
+        REQUIRE(
+          event.masterCycle ==
+          admissions[interlock.admissionIndex]
+              .masterCycle + 1);
+        ++interlockCount;
+      }
+    }
+    REQUIRE(interlockCount == 1);
+  }
+
+  std::uint64_t firstAddRetirement = 0;
+  for (const NekoTraceEvent &event : first.trace())
+  {
+    if (event.type == NekoTraceEventType::COP1Retired &&
+        static_cast<std::uint32_t>(event.value1) ==
+          pairAddresses[0])
+    {
+      firstAddRetirement = event.masterCycle;
+    }
+  }
+  REQUIRE(firstAddRetirement != 0);
+  REQUIRE(
+    admissions[2].masterCycle ==
+    firstAddRetirement);
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;
