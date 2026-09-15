@@ -17,6 +17,8 @@ The fixtures exercise:
   and memory round trips
 - `cop1_control_state.elf`: `FCR31` condition, cause, sticky, fixed, and
   writable-field control transfers
+- `cop1_comparison_branches.elf`: every scalar comparison and taken, untaken,
+  delay-slot, and branch-likely-annulled COP1 paths
 - `cop2_transfer.elf`: 128-bit EE memory/GPR transfers through VU0 registers
 - `cop2_control.elf`: VU0 control transfers and VU1 status branches
 - `vcallms.elf`: VU0 microprogram initiation through `VCALLMS` and `VCALLMSR`
@@ -56,6 +58,7 @@ df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20  vif1_dma.elf
 b6a47315e2de5b39315b88a1e0fdc7a4d2aeceb1a7654a430f4f9b3b6f9de07d  cop1_semantics.elf
 7203bc4bde83e64f41fe9dafe88c1992ee4ec5b21e052df3d8321270ea9a223f  cop1_transfer_memory.elf
 05655052ceeb43a33457433795b6144ef4da47c2b6e6dd2106ef8192a0154470  cop1_control_state.elf
+4af9a966074b2323a43cd34c4b7e24e6a139af37900edc94ee602647dede61a1  cop1_comparison_branches.elf
 9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707  cop2_transfer.elf
 f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386  cop2_control.elf
 d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7  vcallms.elf

@@ -1036,7 +1036,7 @@ accumulator or condition-result contract:
 - [x] Add an independently authored control-state program covering `CFC1`,
       `CTC1`, writable and fixed `FCR31` fields, condition state, current
       causes, and sticky flags
-- [ ] Add an independently authored comparison and branch program covering
+- [x] Add an independently authored comparison and branch program covering
       every comparison plus `BC1F`, `BC1T`, `BC1FL`, and `BC1TL`, including
       taken, untaken, and annulled delay-slot behavior
 - [ ] Add an independently authored conversion and unary program covering

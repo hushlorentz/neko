@@ -258,6 +258,31 @@ TEST_CASE("PS2DEV COP1 control-state guest applies FCR31 fields")
     EECOP1Control::STATUS_FIXED);
 }
 
+TEST_CASE("PS2DEV COP1 comparison guest covers every branch path")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop1_comparison_branches.elf"), 256);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 38);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+
+  const EECore &core = system.eeCore();
+  REQUIRE(core.generalRegister(16).low == UINT64_C(0x5f));
+  REQUIRE(core.generalRegister(17).low == UINT64_C(0xaa));
+  REQUIRE(
+    core.generalRegister(18).low ==
+    EECOP1Control::STATUS_FIXED);
+  REQUIRE(
+    core.cop1ControlRegister(31) ==
+    EECOP1Control::STATUS_FIXED);
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;
