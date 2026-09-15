@@ -639,7 +639,8 @@ void EECore::updateIssueSelection(
       stagingLatch.instruction,
       completedLoadRegisters,
       availableCOP1Slots);
-  if (youngerReady &&
+  if (olderReady &&
+      youngerReady &&
       !issuePairStructurallySafe(
         issueLatch.instruction,
         stagingLatch.instruction,
@@ -666,6 +667,12 @@ bool EECore::issueCandidateReady(
   {
     return false;
   }
+  if (isCOP1ManagedPipelineOperation(
+        instruction.operation) &&
+      cop1TransferReservedByStalledMove())
+  {
+    return false;
+  }
 
   COP1ScoreboardHazard hazard;
   if (cop1ScoreboardBlocks(
@@ -684,6 +691,29 @@ bool EECore::issueCandidateReady(
     !isCOP1ManagedPipelineOperation(
       instruction.operation) ||
     availableCOP1Slots != 0;
+}
+
+bool EECore::cop1TransferReservedByStalledMove() const
+{
+  return std::any_of(
+    inFlightCOP1Operations.begin(),
+    inFlightCOP1Operations.end(),
+    [](const InFlightCOP1Operation &operation)
+    {
+      return
+        operation.active &&
+        operation.stage == COP1PipelineStage::R &&
+        isCOP1MoveOperation(operation.instruction.operation);
+    });
+}
+
+bool EECore::cop1MemoryExceptionPending() const
+{
+  return
+    cop1ScoreboardValue(
+      COP1ScoreboardResource::MemoryException)
+      .availability ==
+        COP1ScoreboardAvailability::Unavailable;
 }
 
 bool EECore::issuePairStructurallySafe(
@@ -1146,6 +1176,12 @@ EEIssueMemberExecution EECore::executeIssueMember(
   {
     return EEIssueMemberExecution::Blocked;
   }
+  if (issueLatch.failure != IssueLatchFailure::None &&
+      cop1MemoryExceptionPending())
+  {
+    pc = issueLatch.address;
+    return EEIssueMemberExecution::Blocked;
+  }
   if (handleIssueLatchFailure())
   {
     return EEIssueMemberExecution::Failed;
@@ -1159,6 +1195,13 @@ EEIssueMemberExecution EECore::executeIssueMember(
   const bool wasDelaySlot = branchDelayPending;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
+  if (position == IssueMemberPosition::Older &&
+      isCOP1ManagedPipelineOperation(decoded.operation) &&
+      cop1TransferReservedByStalledMove())
+  {
+    pc = instructionAddress;
+    return EEIssueMemberExecution::Blocked;
+  }
   COP1ScoreboardHazard scoreboardHazard;
   if (cop1ScoreboardBlocks(
         decoded,
@@ -4269,10 +4312,7 @@ bool EECore::cop1ScoreboardBlocks(
     }
   }
   if (includeAllOlderProducers &&
-      cop1ScoreboardValue(
-        COP1ScoreboardResource::MemoryException)
-          .availability ==
-            COP1ScoreboardAvailability::Unavailable)
+      cop1MemoryExceptionPending())
   {
     *hazard = {
       COP1ScoreboardResource::MemoryException,

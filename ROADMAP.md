@@ -1026,7 +1026,7 @@ accumulator or condition-result contract:
 - [x] Verify repeated and save-state-resumed executions produce identical
       registers, flags, memory, stop reasons, retirement traces, and trace
       hashes
-- [ ] Complete an independent final review of the integrated COP1 pipeline
+- [x] Complete an independent final review of the integrated COP1 pipeline
 
 ### Guest Integration and Final Conformance Audit
 

@@ -655,6 +655,8 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t completedLoadRegisters,
       std::size_t availableCOP1Slots) const;
+    bool cop1TransferReservedByStalledMove() const;
+    bool cop1MemoryExceptionPending() const;
     bool issuePairStructurallySafe(
       const EEInstruction &older,
       const EEInstruction &younger,

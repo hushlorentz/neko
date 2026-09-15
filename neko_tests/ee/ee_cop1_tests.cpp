@@ -4325,6 +4325,33 @@ TEST_CASE("EE COP1 dual issue honors cross-cycle scoreboard resources")
     REQUIRE(core.programCounter() == 12);
   }
 
+  SECTION("A pending comparison blocks an older likely branch safely")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x32, 2, 0, 3));
+    system.eeBus().write32(4, 0);
+    system.eeBus().write32(
+      8,
+      cop1BranchInstruction(0x03, 1));
+    system.eeBus().write32(
+      12,
+      UINT32_C(0x24050001));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE_NOTHROW(system.clockMasterCycle());
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+  }
+
   SECTION("Faultable memory blocks later issue then releases a legal pair")
   {
     NekoSystem system;
@@ -4404,6 +4431,132 @@ TEST_CASE("EE COP1 dual issue honors cross-cycle scoreboard resources")
       core.lastIssueSelection().pairing ==
       EEIssuePairing::ConcurrentWithStall);
     REQUIRE(core.programCounter() == 16);
+  }
+
+  SECTION("A stalled Move reserves the next C1 transfer boundary")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(8, {UINT32_C(0x3f800000), 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+    core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1TransferInstruction(0x04, 8, 9));
+    system.eeBus().write32(
+      8,
+      cop1SingleInstruction(0x00, 6, 5, 7));
+    system.eeBus().write32(12, UINT32_C(0x240a0001));
+    core.startExecution(0);
+    system.startTrace();
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      0);
+    REQUIRE(core.programCounter() == 8);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(core.programCounter() == 16);
+
+    std::size_t moveInterlocks = 0;
+    for (const NekoTraceEvent &event : system.trace())
+    {
+      if (event.type ==
+            NekoTraceEventType::COP1ResourceInterlock &&
+          event.value0 == 4)
+      {
+        ++moveInterlocks;
+      }
+    }
+    REQUIRE(moveInterlocks == 1);
+  }
+}
+
+TEST_CASE("EE COP1 memory owns faults before younger front-end failures")
+{
+  SECTION("A reserved instruction waits for an older load fault")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0x101, 0});
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 2, 0));
+    system.eeBus().write32(4, UINT32_C(0x4c000000));
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == 0x101);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  }
+
+  SECTION("A fetch fault waits for an older store side effect")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const std::uint32_t instructionAddress =
+      EEMemoryMap::MAIN_MEMORY_SIZE - 4;
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setFloatingPointRegister(
+      2,
+      UINT32_C(0x12345678));
+    system.eeBus().write32(
+      instructionAddress,
+      cop1MemoryInstruction(0x39, 1, 2, 0));
+    core.startExecution(instructionAddress);
+
+    system.runMasterCycles(3);
+
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == 0);
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(
+      core.programCounter() ==
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+
+    system.clockMasterCycle();
+
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x12345678));
+    REQUIRE(
+      core.pendingException() ==
+      EEException::InstructionBusError);
+    REQUIRE(
+      core.exceptionAddress() ==
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      EEMemoryMap::MAIN_MEMORY_SIZE);
   }
 }
 
