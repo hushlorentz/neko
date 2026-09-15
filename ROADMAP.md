@@ -1042,7 +1042,7 @@ accumulator or condition-result contract:
 - [x] Add an independently authored conversion and unary program covering
       `CVT.S.W`, `CVT.W.S`, `ABS.S`, and `NEG.S`, including zero, sign,
       saturation, and exceptional-flag cases
-- [ ] Add an independently authored basic arithmetic program covering add,
+- [x] Add an independently authored basic arithmetic program covering add,
       subtract, multiply, minimum, and maximum with representative normal and
       exceptional operands
 - [ ] Add an independently authored accumulator and compound program covering

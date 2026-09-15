@@ -356,6 +356,75 @@ TEST_CASE("PS2DEV COP1 conversion and unary guest covers raw edge cases")
      EECOP1Control::STICKY_INVALID));
 }
 
+TEST_CASE("PS2DEV COP1 basic arithmetic guest covers flags and saturation")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("cop1_basic_arithmetic.elf"), 256);
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 37);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+
+  const EECore &core = system.eeCore();
+  REQUIRE(
+    core.floatingPointRegister(20) ==
+    UINT32_C(0x40700000));
+  REQUIRE(
+    core.floatingPointRegister(21) ==
+    UINT32_C(0x40800000));
+  REQUIRE(
+    core.floatingPointRegister(22) ==
+    UINT32_C(0xc0c00000));
+  REQUIRE(
+    core.floatingPointRegister(23) ==
+    UINT32_C(0xbf800000));
+  REQUIRE(
+    core.floatingPointRegister(24) ==
+    UINT32_C(0xc0000000));
+  REQUIRE(
+    core.floatingPointRegister(25) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(core.floatingPointRegister(26) == 0);
+  REQUIRE(
+    core.floatingPointRegister(27) ==
+    UINT32_C(0x7fffffff));
+  REQUIRE(core.floatingPointRegister(28) == 0);
+  REQUIRE(core.floatingPointRegister(29) == 0);
+  REQUIRE(
+    core.floatingPointRegister(30) ==
+    UINT32_C(0x80000000));
+
+  const std::uint32_t overflowStatus =
+    EECOP1Control::STATUS_FIXED |
+    EECOP1Control::CAUSE_OVERFLOW |
+    EECOP1Control::STICKY_OVERFLOW;
+  const std::uint32_t stickyStatus =
+    EECOP1Control::STATUS_FIXED |
+    EECOP1Control::STICKY_OVERFLOW |
+    EECOP1Control::STICKY_UNDERFLOW;
+  REQUIRE(core.generalRegister(15).low == overflowStatus);
+  REQUIRE(
+    core.generalRegister(16).low ==
+    (stickyStatus |
+     EECOP1Control::CAUSE_UNDERFLOW));
+  REQUIRE(
+    core.generalRegister(17).low ==
+    (stickyStatus |
+     EECOP1Control::CAUSE_OVERFLOW));
+  REQUIRE(
+    core.generalRegister(18).low ==
+    (stickyStatus |
+     EECOP1Control::CAUSE_UNDERFLOW));
+  REQUIRE(core.generalRegister(19).low == stickyStatus);
+  REQUIRE(core.generalRegister(20).low == stickyStatus);
+  REQUIRE(core.cop1ControlRegister(31) == stickyStatus);
+}
+
 TEST_CASE("PS2DEV EE ELF guest controls and polls vector units through COP2")
 {
   NekoSystem system;

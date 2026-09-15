@@ -107,6 +107,10 @@ verify_ee_elf_fixture(
   780183dbbabdea2f939e321eaf5cb464821e764fcced5c2906a96a9a4ade05cc
 )
 verify_ee_elf_fixture(
+  cop1_basic_arithmetic.elf
+  ac805378054f1fcb762f1d8d428f71a4710da04dd587ccc606ec34175d47ac78
+)
+verify_ee_elf_fixture(
   cop2_transfer.elf
   9e570b58b1fc785330632b45ea8ef26eb6a21c86d06dabc6bd2140993eee4707
 )
