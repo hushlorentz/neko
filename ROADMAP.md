@@ -1030,8 +1030,33 @@ accumulator or condition-result contract:
 
 ### Guest Integration and Final Conformance Audit
 
-- [ ] Add focused independently authored EE programs for transfers, control
-      state, comparisons, branches, conversions, and each arithmetic pipeline
+- [ ] Add an independently authored transfer and memory program covering
+      `MFC1`, `MTC1`, `MOV.S`, `LWC1`, and `SWC1`, including raw-bit
+      preservation and memory round trips
+- [ ] Add an independently authored control-state program covering `CFC1`,
+      `CTC1`, writable and fixed `FCR31` fields, condition state, current
+      causes, and sticky flags
+- [ ] Add an independently authored comparison and branch program covering
+      every comparison plus `BC1F`, `BC1T`, `BC1FL`, and `BC1TL`, including
+      taken, untaken, and annulled delay-slot behavior
+- [ ] Add an independently authored conversion and unary program covering
+      `CVT.S.W`, `CVT.W.S`, `ABS.S`, and `NEG.S`, including zero, sign,
+      saturation, and exceptional-flag cases
+- [ ] Add an independently authored basic arithmetic program covering add,
+      subtract, multiply, minimum, and maximum with representative normal and
+      exceptional operands
+- [ ] Add an independently authored accumulator and compound program covering
+      the `ADDA`, `SUBA`, `MULA`, `MADD`, and `MSUB` families, including ACC
+      forwarding and ordered flag behavior
+- [ ] Add an independently authored divider program covering `DIV.S`,
+      `SQRT.S`, and `RSQRT.S`, including result visibility and initiation
+      overlap
+- [ ] Add an independently authored mixed concurrent-issue program covering
+      Operate/Move pairing, dependencies, forwarding, ordered memory effects,
+      and deterministic final state
+- [ ] For each focused COP1 program, assert its expected registers, `FCR31`,
+      memory outputs, instruction count, and termination reason; also assert
+      retirement and stage traces where timing is part of the contract
 - [ ] Expand the foundation's PS2DEV semantic baseline into a timing,
       forwarding, branch, and concurrent-issue COP1 capstone
 - [ ] Audit every defined COP1 opcode for decode, execution, flags, timing,
