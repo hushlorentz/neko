@@ -1023,7 +1023,7 @@ accumulator or condition-result contract:
       timing in mixed one-wide and two-wide instruction streams
 - [x] Preserve in-flight C1 and issue-queue work across unrelated EE
       execution, interrupts, `ERET`, reset, halt/resume, and save-state restore
-- [ ] Verify repeated and save-state-resumed executions produce identical
+- [x] Verify repeated and save-state-resumed executions produce identical
       registers, flags, memory, stop reasons, retirement traces, and trace
       hashes
 - [ ] Complete an independent final review of the integrated COP1 pipeline

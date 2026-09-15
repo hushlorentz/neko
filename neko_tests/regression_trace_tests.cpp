@@ -137,6 +137,168 @@ namespace
     core.startExecution(0);
   }
 
+  void prepareConcurrentCOP1DeterminismProgram(
+    NekoSystem *system)
+  {
+    EECore &core = system->eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setGeneralRegister(5, {UINT32_C(0x3f800000), 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(9, UINT32_C(3));
+    system->eeBus().write32(
+      0,
+      cop1SingleInstruction(0x02, 2, 4, 3));
+    system->eeBus().write32(
+      4,
+      cop1TransferInstruction(0x04, 5, 7));
+    system->eeBus().write32(
+      8,
+      immediateInstruction(0x39, 1, 4, 0));
+    system->eeBus().write32(
+      12,
+      cop1WordInstruction(0x20, 9, 11));
+    system->eeBus().write32(
+      16,
+      cop1TransferInstruction(0x02, 12, 31));
+    system->eeBus().write32(
+      20,
+      cop1TransferInstruction(0x00, 13, 11));
+    system->eeBus().write32(24, UINT32_C(0x0000000c));
+    core.startExecution(0);
+  }
+
+  void requireInitialConcurrentCOP1Issue(
+    NekoSystem *system)
+  {
+    system->clockMasterCycle();
+    const EECore &core = system->eeCore();
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::ConcurrentWithStall);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::MultiplySingleCOP1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[1]
+        .instruction.operation ==
+      EEOperation::MoveWordToCOP1);
+    REQUIRE(core.programCounter() == 8);
+  }
+
+  void requireEquivalentCOP1Execution(
+    const NekoSystem &first,
+    const NekoSystem &second,
+    const EEExecutionResult &firstResult,
+    const EEExecutionResult &secondResult)
+  {
+    for (std::size_t index = 0;
+         index < EECore::GENERAL_REGISTER_COUNT;
+         ++index)
+    {
+      REQUIRE(
+        first.eeCore().generalRegister(index) ==
+        second.eeCore().generalRegister(index));
+    }
+    for (std::size_t index = 0;
+         index < EECore::FLOATING_POINT_REGISTER_COUNT;
+         ++index)
+    {
+      REQUIRE(
+        first.eeCore().floatingPointRegister(index) ==
+        second.eeCore().floatingPointRegister(index));
+    }
+    REQUIRE(
+      first.eeCore().floatingPointAccumulator() ==
+      second.eeCore().floatingPointAccumulator());
+    REQUIRE(
+      first.eeCore().cop1ControlRegister(31) ==
+      second.eeCore().cop1ControlRegister(31));
+    REQUIRE(
+      first.eeCore().cop1Condition() ==
+      second.eeCore().cop1Condition());
+
+    std::uint32_t firstMemory = 0;
+    std::uint32_t secondMemory = 0;
+    REQUIRE(first.eeBus().readData32(0x100, &firstMemory));
+    REQUIRE(second.eeBus().readData32(0x100, &secondMemory));
+    REQUIRE(firstMemory == secondMemory);
+
+    REQUIRE(firstResult.masterCycles == secondResult.masterCycles);
+    REQUIRE(firstResult.eeCycles == secondResult.eeCycles);
+    REQUIRE(firstResult.instructions == secondResult.instructions);
+    REQUIRE(
+      firstResult.cycleLimitReached ==
+      secondResult.cycleLimitReached);
+    REQUIRE(firstResult.state == secondResult.state);
+    REQUIRE(firstResult.stopReason == secondResult.stopReason);
+    REQUIRE(
+      firstResult.programCounter ==
+      secondResult.programCounter);
+    REQUIRE(
+      firstResult.pendingException ==
+      secondResult.pendingException);
+    REQUIRE(
+      firstResult.exceptionAddress ==
+      secondResult.exceptionAddress);
+    REQUIRE(
+      first.eeCore().stateHash() ==
+      second.eeCore().stateHash());
+    REQUIRE(first.saveState() == second.saveState());
+  }
+
+  std::vector<NekoTraceEvent> cop1Retirements(
+    const NekoSystem &system)
+  {
+    std::vector<NekoTraceEvent> retirements;
+    for (const NekoTraceEvent &event : system.trace())
+    {
+      if (event.type == NekoTraceEventType::COP1Retired)
+      {
+        retirements.push_back(event);
+      }
+    }
+    return retirements;
+  }
+
+  void requireEquivalentRetirements(
+    const NekoSystem &first,
+    const NekoSystem &second)
+  {
+    const std::vector<NekoTraceEvent> firstRetirements =
+      cop1Retirements(first);
+    const std::vector<NekoTraceEvent> secondRetirements =
+      cop1Retirements(second);
+    REQUIRE(firstRetirements.size() == secondRetirements.size());
+    for (std::size_t index = 0;
+         index < firstRetirements.size();
+         ++index)
+    {
+      REQUIRE(
+        firstRetirements[index].masterCycle ==
+        secondRetirements[index].masterCycle);
+      REQUIRE(
+        firstRetirements[index].value0 ==
+        secondRetirements[index].value0);
+      REQUIRE(
+        firstRetirements[index].value1 ==
+        secondRetirements[index].value1);
+      REQUIRE(
+        firstRetirements[index].value2 ==
+        secondRetirements[index].value2);
+      REQUIRE(
+        firstRetirements[index].value3 ==
+        secondRetirements[index].value3);
+    }
+  }
+
   GIFQuadword gifTag()
   {
     const std::uint64_t low =
@@ -2120,6 +2282,102 @@ TEST_CASE("EE COP1 Y pairs have deterministic stage and retirement order")
       retirements[0].masterCycle ==
       (order.moveOlder ? 5 : 6));
     REQUIRE(retirements[1].masterCycle == 6);
+  }
+}
+
+TEST_CASE("EE concurrent COP1 execution is repeatably deterministic")
+{
+  NekoSystem first;
+  NekoSystem second;
+  prepareConcurrentCOP1DeterminismProgram(&first);
+  prepareConcurrentCOP1DeterminismProgram(&second);
+  first.startTrace();
+  second.startTrace();
+  requireInitialConcurrentCOP1Issue(&first);
+  requireInitialConcurrentCOP1Issue(&second);
+
+  const EEExecutionResult firstResult = first.runEE(128);
+  const EEExecutionResult secondResult = second.runEE(128);
+
+  requireEquivalentCOP1Execution(
+    first,
+    second,
+    firstResult,
+    secondResult);
+  REQUIRE(first.traceHash() == second.traceHash());
+  requireEquivalentRetirements(first, second);
+
+  const std::vector<NekoTraceEvent> retirements =
+    cop1Retirements(first);
+  REQUIRE(retirements.size() == 6);
+  for (std::size_t index = 0;
+       index < retirements.size();
+       ++index)
+  {
+    REQUIRE(retirements[index].value0 == index + 1);
+  }
+
+  std::uint32_t stored = 0;
+  REQUIRE(first.eeBus().readData32(0x100, &stored));
+  REQUIRE(stored == UINT32_C(0x7fffffff));
+  REQUIRE(
+    first.eeCore().floatingPointRegister(7) ==
+    UINT32_C(0x3f800000));
+  REQUIRE(
+    first.eeCore().floatingPointRegister(11) ==
+    UINT32_C(0x40400000));
+  REQUIRE(
+    first.eeCore().generalRegister(12).low ==
+    (EECOP1Control::STATUS_FIXED |
+     EECOP1Control::CAUSE_OVERFLOW |
+     EECOP1Control::STICKY_OVERFLOW));
+  REQUIRE(
+    first.eeCore().generalRegister(13).low ==
+    UINT32_C(0x40400000));
+  REQUIRE(firstResult.stopReason == EEStopReason::None);
+  REQUIRE(firstResult.pendingException == EEException::SystemCall);
+}
+
+TEST_CASE("EE concurrent COP1 save continuation is deterministic")
+{
+  NekoSystem original;
+  prepareConcurrentCOP1DeterminismProgram(&original);
+  requireInitialConcurrentCOP1Issue(&original);
+  original.runMasterCycles(1);
+  REQUIRE(original.eeCore().programCounter() == 8);
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+
+  NekoSystem restored;
+  restored.loadState(state);
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
+  original.startTrace();
+  restored.startTrace();
+
+  const EEExecutionResult originalResult =
+    original.runEE(128);
+  const EEExecutionResult restoredResult =
+    restored.runEE(128);
+
+  requireEquivalentCOP1Execution(
+    original,
+    restored,
+    originalResult,
+    restoredResult);
+  REQUIRE(original.traceHash() == restored.traceHash());
+  requireEquivalentRetirements(original, restored);
+
+  const std::vector<NekoTraceEvent> retirements =
+    cop1Retirements(restored);
+  REQUIRE(retirements.size() == 6);
+  for (std::size_t index = 0;
+       index < retirements.size();
+       ++index)
+  {
+    REQUIRE(retirements[index].value0 == index + 1);
   }
 }
 
