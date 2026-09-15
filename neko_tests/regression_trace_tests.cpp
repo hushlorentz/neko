@@ -1798,33 +1798,35 @@ TEST_CASE("EE COP1 scoreboard prioritizes completed load hazards")
   core.startExecution(0);
   system.startTrace();
 
-  system.runMasterCycles(4);
+  system.runMasterCycles(5);
 
-  std::vector<NekoTraceEvent> cycleFourInterlocks;
+  std::vector<NekoTraceEvent> completionCycleInterlocks;
   for (const NekoTraceEvent &event : eeTrace(system))
   {
-    if (event.masterCycle == 4 &&
+    if (event.masterCycle == 5 &&
         (event.type ==
            NekoTraceEventType::COP1LoadInterlock ||
          event.type ==
            NekoTraceEventType::COP1ResourceInterlock))
     {
-      cycleFourInterlocks.push_back(event);
+      completionCycleInterlocks.push_back(event);
     }
   }
-  REQUIRE(cycleFourInterlocks.size() == 1);
+  REQUIRE(completionCycleInterlocks.size() == 1);
   REQUIRE(
-    cycleFourInterlocks[0].type ==
+    completionCycleInterlocks[0].type ==
     NekoTraceEventType::COP1LoadInterlock);
-  REQUIRE(cycleFourInterlocks[0].value0 == 8);
-  REQUIRE(cycleFourInterlocks[0].value1 == dependentInstruction);
-  REQUIRE(cycleFourInterlocks[0].value2 == 5);
+  REQUIRE(completionCycleInterlocks[0].value0 == 8);
   REQUIRE(
-    cycleFourInterlocks[0].value3 ==
+    completionCycleInterlocks[0].value1 ==
+    dependentInstruction);
+  REQUIRE(completionCycleInterlocks[0].value2 == 5);
+  REQUIRE(
+    completionCycleInterlocks[0].value3 ==
     NekoEETraceCOP1Interlock::READ);
 }
 
-TEST_CASE("EE scalar COP1 issue does not invent a C1 stage conflict")
+TEST_CASE("EE paired COP1 issue exposes the shared C1 stage conflict")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -1864,11 +1866,90 @@ TEST_CASE("EE scalar COP1 issue does not invent a C1 stage conflict")
       issued.push_back(event);
     }
   }
-  REQUIRE(interlocks.empty());
+  REQUIRE(interlocks.size() == 2);
+  REQUIRE(interlocks[0].masterCycle == 2);
+  REQUIRE(interlocks[0].value0 == 4);
+  REQUIRE(interlocks[0].value1 == moveInstruction);
+  REQUIRE(
+    interlocks[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::MultiplySingleCOP1));
+  REQUIRE(interlocks[1].masterCycle == 2);
+  REQUIRE(interlocks[1].value0 == 8);
+  REQUIRE(interlocks[1].value1 == 0);
+  REQUIRE(
+    interlocks[1].value2 ==
+    NekoEETraceCOP1Resource::GPR);
   REQUIRE(issued.size() == 2);
-  REQUIRE(issued[1].masterCycle == 2);
+  REQUIRE(issued[0].masterCycle == 1);
+  REQUIRE(issued[0].value0 == 0);
+  REQUIRE(issued[0].value1 == multiplyInstruction);
+  REQUIRE(issued[1].masterCycle == 1);
   REQUIRE(issued[1].value0 == 4);
   REQUIRE(issued[1].value1 == moveInstruction);
+}
+
+TEST_CASE("EE reverse paired COP1 issue still stalls the Pipe 1 Move")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const std::uint32_t moveInstruction =
+    (UINT32_C(0x11) << 26) |
+    (UINT32_C(5) << 16) |
+    (UINT32_C(7) << 11);
+  const std::uint32_t multiplyInstruction =
+    (UINT32_C(0x11) << 26) |
+    (UINT32_C(0x10) << 21) |
+    (UINT32_C(3) << 16) |
+    (UINT32_C(2) << 11) |
+    (UINT32_C(4) << 6) |
+    UINT32_C(0x02);
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  core.setFloatingPointRegister(7, UINT32_C(0x89abcdef));
+  system.eeBus().write32(0, moveInstruction);
+  system.eeBus().write32(4, multiplyInstruction);
+  core.startExecution(0);
+  system.startTrace();
+
+  system.runMasterCycles(2);
+
+  std::vector<NekoTraceEvent> interlocks;
+  std::vector<NekoTraceEvent> issued;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (event.type ==
+        NekoTraceEventType::COP1ResourceInterlock)
+    {
+      interlocks.push_back(event);
+    }
+    else if (
+      event.type == NekoTraceEventType::InstructionIssued)
+    {
+      issued.push_back(event);
+    }
+  }
+  REQUIRE(interlocks.size() == 2);
+  REQUIRE(interlocks[0].masterCycle == 2);
+  REQUIRE(interlocks[0].value0 == 0);
+  REQUIRE(interlocks[0].value1 == moveInstruction);
+  REQUIRE(
+    interlocks[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::MultiplySingleCOP1));
+  REQUIRE(interlocks[1].masterCycle == 2);
+  REQUIRE(interlocks[1].value0 == 8);
+  REQUIRE(interlocks[1].value1 == 0);
+  REQUIRE(
+    interlocks[1].value2 ==
+    NekoEETraceCOP1Resource::GPR);
+  REQUIRE(issued.size() == 2);
+  REQUIRE(issued[0].masterCycle == 1);
+  REQUIRE(issued[0].value0 == 0);
+  REQUIRE(issued[0].value1 == moveInstruction);
+  REQUIRE(issued[1].masterCycle == 1);
+  REQUIRE(issued[1].value0 == 4);
+  REQUIRE(issued[1].value1 == multiplyInstruction);
 }
 
 TEST_CASE("EE state snapshots include in-flight execution")

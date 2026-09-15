@@ -716,16 +716,20 @@ bool EECore::issuePairStructurallySafe(
 bool EECore::issueSelectionCanExecuteConcurrently() const
 {
   if (issueSelection.instructionCount != 2 ||
-      issueSelection.pairing !=
-        EEIssuePairing::Concurrent ||
+      (issueSelection.pairing !=
+         EEIssuePairing::Concurrent &&
+       issueSelection.pairing !=
+         EEIssuePairing::ConcurrentWithStall) ||
       branchDelayPending)
   {
     return false;
   }
-  if (issueLatch.instruction.operation ==
-        EEOperation::LoadWordToCOP1 ||
-      issueLatch.instruction.operation ==
-        EEOperation::StoreWordFromCOP1)
+  if ((issueLatch.instruction.operation ==
+         EEOperation::LoadWordToCOP1 ||
+       issueLatch.instruction.operation ==
+         EEOperation::StoreWordFromCOP1) &&
+      issueSelection.pairing !=
+        EEIssuePairing::ConcurrentWithStall)
   {
     return false;
   }
@@ -754,9 +758,22 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
     eeInstructionPhysicalPipelines(
       youngerRouting,
       issueSelection.assignment.youngerPipe);
+  const std::uint8_t sharedPhysicalPipelines =
+    olderPhysicalPipelines &
+    youngerPhysicalPipelines;
+  if (issueSelection.pairing ==
+        EEIssuePairing::ConcurrentWithStall &&
+      sharedPhysicalPipelines !=
+        static_cast<std::uint8_t>(
+          EEPhysicalPipeline::COP1))
+  {
+    return false;
+  }
   const bool compatible =
-    (olderPhysicalPipelines &
-     youngerPhysicalPipelines) == 0;
+    issueSelection.pairing ==
+      EEIssuePairing::Concurrent
+      ? sharedPhysicalPipelines == 0
+      : true;
   assert(compatible);
   return compatible;
 }
@@ -1113,7 +1130,7 @@ EEIssueGroupExecutionResult EECore::executeIssueGroup(
 
 EEIssueMemberExecution EECore::executeIssueMember(
   std::uint32_t completedLoadRegisters,
-  bool ignoreNewGroupGPRProducer)
+  bool ignoreNewGroupProducers)
 {
   if (!issueLatch.valid)
   {
@@ -1137,7 +1154,7 @@ EEIssueMemberExecution EECore::executeIssueMember(
         decoded,
         completedLoadRegisters,
         &scoreboardHazard,
-        ignoreNewGroupGPRProducer))
+        ignoreNewGroupProducers))
   {
     if (scoreboardHazard.completedLoad)
     {
@@ -3512,8 +3529,7 @@ void EECore::advancePendingCOP1(
     for (const InFlightCOP1Operation &candidate :
          inFlightCOP1Operations)
     {
-      if (!candidate.active ||
-          candidate.programOrder >= move.programOrder)
+      if (!candidate.active)
       {
         continue;
       }
@@ -3529,7 +3545,7 @@ void EECore::advancePendingCOP1(
              candidate.instruction.operation).latency);
       if (entersT &&
           (moveTStageBlockers[moveIndex] == nullptr ||
-           candidate.programOrder >
+           candidate.programOrder <
              moveTStageBlockers[moveIndex]->programOrder))
       {
         moveTStageBlockers[moveIndex] = &candidate;
@@ -4197,7 +4213,7 @@ bool EECore::cop1ScoreboardBlocks(
   const EEInstruction &instruction,
   std::uint32_t completedLoadRegisters,
   COP1ScoreboardHazard *hazard,
-  bool ignoreGPRProducer) const
+  bool ignoreNewGroupProducers) const
 {
   if (instruction.operation ==
       EEOperation::SynchronizeLoadStore)
@@ -4222,10 +4238,11 @@ bool EECore::cop1ScoreboardBlocks(
       }
     }
   }
-  if (cop1ScoreboardValue(
+  if (!ignoreNewGroupProducers &&
+      cop1ScoreboardValue(
         COP1ScoreboardResource::MemoryException)
-        .availability ==
-          COP1ScoreboardAvailability::Unavailable)
+          .availability ==
+            COP1ScoreboardAvailability::Unavailable)
   {
     *hazard = {
       COP1ScoreboardResource::MemoryException,
@@ -4237,7 +4254,7 @@ bool EECore::cop1ScoreboardBlocks(
     return true;
   }
 
-  if (!ignoreGPRProducer)
+  if (!ignoreNewGroupProducers)
   {
     for (std::uint8_t registerIndex = 0;
          registerIndex < GENERAL_REGISTER_COUNT;

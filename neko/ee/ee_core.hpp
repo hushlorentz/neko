@@ -629,7 +629,7 @@ class EECore : public ClockedComponent
       std::uint32_t completedLoadRegisters);
     EEIssueMemberExecution executeIssueMember(
       std::uint32_t completedLoadRegisters,
-      bool ignoreNewGroupGPRProducer);
+      bool ignoreNewGroupProducers);
     void recordInstructionAcceptance(
       std::uint64_t programOrder,
       std::uint32_t address,
@@ -722,7 +722,7 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t completedLoadRegisters,
       COP1ScoreboardHazard *hazard,
-      bool ignoreGPRProducer = false) const;
+      bool ignoreNewGroupProducers = false) const;
     COP1ScoreboardValue cop1ScoreboardValue(
       COP1ScoreboardResource resource,
       std::uint8_t registerIndex = 0) const;

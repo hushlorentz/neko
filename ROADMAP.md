@@ -1009,7 +1009,7 @@ accumulator or condition-result contract:
 
 ### COP1 Concurrent Issue and Pipeline Integration
 
-- [ ] Enable COP1 Operate on Pipe 0 and COP1 Move on Pipe 1 using the completed
+- [x] Enable COP1 Operate on Pipe 0 and COP1 Move on Pipe 1 using the completed
       C1 scoreboard and two-wide EE scheduler
 - [ ] Implement Table 1-3's `Y` combination: both instructions enter `R`, then
       the Pipe 1 COP1 Move stalls for one cycle at `A/T` on the shared C1
