@@ -1040,6 +1040,22 @@ accumulator or condition-result contract:
       deterministically
 - [ ] Perform an independent final review of the completed COP1 milestone
 
+### Post-COP1 Architecture and Maintainability Review
+
+- [ ] Review the complete codebase for responsibility boundaries, dependency
+      direction, duplicated policy, oversized methods and classes, boolean
+      control parameters, naming clarity, and reusable architectural concepts
+- [ ] Identify performance-sensitive paths before proposing abstractions, and
+      preserve fixed-capacity, deterministic execution where it is beneficial
+- [ ] Prioritize concrete maintainability risks over mechanical pattern
+      adoption; record justified exceptions where emulator architecture does
+      not benefit from a textbook SOLID decomposition
+- [ ] Refactor in independently reviewable, behavior-preserving changes backed
+      by the existing focused tests, full repository check, hashes, traces, and
+      save-state contracts
+- [ ] Complete an independent review of the resulting architecture before
+      expanding the MMI milestone
+
 ## Milestone 6: EE Multimedia Extensions
 
 Keep this milestone high-level until COP1 is complete. Before implementing MMI,
