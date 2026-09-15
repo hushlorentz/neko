@@ -6575,6 +6575,225 @@ TEST_CASE("EE interrupt entry preserves older COP1 work")
     UINT32_C(0x40400000));
 }
 
+TEST_CASE("EE COP1 Y pair and blocked front end survive halt and restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  originalCore.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  originalCore.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+  originalCore.setFloatingPointRegister(7, UINT32_C(0x89abcdef));
+  original.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x02, 2, 4, 3));
+  original.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x00, 5, 7));
+  original.eeBus().write32(
+    8,
+    cop1SingleInstruction(0x00, 4, 8, 6));
+  original.eeBus().write32(12, UINT32_C(0x24090001));
+  for (std::uint32_t address = 16;
+       address < 64;
+       address += 4)
+  {
+    original.eeBus().write32(address, 0);
+  }
+  originalCore.startExecution(0);
+
+  original.clockMasterCycle();
+  REQUIRE(
+    originalCore.acceptanceRecordsThisCycle().size() ==
+    2);
+  original.clockMasterCycle();
+  REQUIRE(
+    originalCore.acceptanceRecordsThisCycle().size() ==
+    0);
+  REQUIRE(originalCore.programCounter() == 8);
+  originalCore.haltExecution();
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  REQUIRE(
+    restored.eeCore().programCounter() ==
+    originalCore.programCounter());
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    originalCore.stateHash());
+
+  original.eeBus().write32(8, UINT32_C(0x240a0009));
+  original.eeBus().write32(12, UINT32_C(0x240b000a));
+  restored.eeBus().write32(8, UINT32_C(0x240a0009));
+  restored.eeBus().write32(12, UINT32_C(0x240b000a));
+  originalCore.startExecution(originalCore.programCounter());
+  restored.eeCore().startExecution(
+    restored.eeCore().programCounter());
+  original.runMasterCycles(10);
+  restored.runMasterCycles(10);
+
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(4) ==
+    UINT32_C(0x40c00000));
+  REQUIRE(
+    restored.eeCore().floatingPointRegister(8) ==
+    UINT32_C(0x40d00000));
+  REQUIRE(
+    restored.eeCore().generalRegister(5).low ==
+    UINT64_C(0xffffffff89abcdef));
+  REQUIRE(restored.eeCore().generalRegister(9).low == 1);
+  REQUIRE(restored.eeCore().generalRegister(10) == EERegister128{});
+  REQUIRE(restored.eeCore().generalRegister(11) == EERegister128{});
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    originalCore.stateHash() ==
+    restored.eeCore().stateHash());
+}
+
+TEST_CASE("EE interrupt preserves a COP1 Y pair and flushes blocked issue")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    COP1_INTC_ENABLED_STATUS);
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+  core.setFloatingPointRegister(7, UINT32_C(0x89abcdef));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x02, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x00, 5, 7));
+  system.eeBus().write32(
+    8,
+    cop1SingleInstruction(0x00, 4, 8, 6));
+  system.eeBus().write32(12, UINT32_C(0x24090001));
+  for (std::uint32_t address = EEExceptionVector::INTERRUPT;
+       address < EEExceptionVector::INTERRUPT + 32;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+  REQUIRE(core.programCounter() == 8);
+  assertCOP1TestInterrupt(&system);
+
+  system.clockMasterCycle();
+  REQUIRE(core.pendingException() == EEException::Interrupt);
+  REQUIRE(
+    core.programCounter() ==
+    EEExceptionVector::INTERRUPT);
+
+  system.runMasterCycles(3);
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40c00000));
+  REQUIRE(
+    core.generalRegister(5).low ==
+    UINT64_C(0xffffffff89abcdef));
+  REQUIRE(core.floatingPointRegister(8) == 0);
+  REQUIRE(core.generalRegister(9) == EERegister128{});
+  REQUIRE(
+    core.programCounter() >=
+    EEExceptionVector::INTERRUPT);
+}
+
+TEST_CASE("EE ERET preserves a handler-issued COP1 Y pair")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE |
+      EECOP0Status::EXCEPTION_LEVEL);
+  core.setCOP0Register(EECOP0Register::EPC, 0x100);
+  core.setGeneralRegister(5, {UINT32_C(0x89abcdef), 0});
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  system.eeBus().write32(
+    EEExceptionVector::GENERAL,
+    cop1SingleInstruction(0x02, 2, 4, 3));
+  system.eeBus().write32(
+    EEExceptionVector::GENERAL + 4,
+    cop1TransferInstruction(0x04, 5, 7));
+  system.eeBus().write32(
+    EEExceptionVector::GENERAL + 8,
+    UINT32_C(0x42000018));
+  for (std::uint32_t address = 0x100;
+       address < 0x120;
+       address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(EEExceptionVector::GENERAL);
+
+  system.clockMasterCycle();
+  REQUIRE(
+    core.acceptanceRecordsThisCycle().size() ==
+    2);
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 0x100);
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(7) == 0);
+
+  system.runMasterCycles(3);
+
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(7) == 0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.floatingPointRegister(4) ==
+    UINT32_C(0x40c00000));
+  REQUIRE(
+    core.floatingPointRegister(7) ==
+    UINT32_C(0x89abcdef));
+}
+
+TEST_CASE("EE reset cancels a COP1 Y pair and blocked front end")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  core.setFloatingPointRegister(3, UINT32_C(0x40400000));
+  core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
+  core.setFloatingPointRegister(7, UINT32_C(0x89abcdef));
+  system.eeBus().write32(
+    0,
+    cop1SingleInstruction(0x02, 2, 4, 3));
+  system.eeBus().write32(
+    4,
+    cop1TransferInstruction(0x00, 5, 7));
+  system.eeBus().write32(
+    8,
+    cop1SingleInstruction(0x00, 4, 8, 6));
+  system.eeBus().write32(12, UINT32_C(0x24090001));
+  core.startExecution(0);
+
+  system.runMasterCycles(2);
+  REQUIRE(core.programCounter() == 8);
+
+  core.reset();
+  NekoSystem freshlyReset;
+  REQUIRE(
+    core.stateHash() ==
+    freshlyReset.eeCore().stateHash());
+  system.eeBus().write32(0x100, 0);
+  core.startExecution(0x100);
+  system.runMasterCycles(6);
+
+  REQUIRE(core.floatingPointRegister(4) == 0);
+  REQUIRE(core.floatingPointRegister(8) == 0);
+  REQUIRE(core.generalRegister(5) == EERegister128{});
+  REQUIRE(core.generalRegister(9) == EERegister128{});
+}
+
 TEST_CASE("EE ERET preserves handler-issued COP1 work")
 {
   NekoSystem system;

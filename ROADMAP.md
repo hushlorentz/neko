@@ -1021,7 +1021,7 @@ accumulator or condition-result contract:
       contract without losing legal concurrent issue
 - [x] Verify `1S`/`2T` bypassing, `2S` writeback, divider overlap, and Move
       timing in mixed one-wide and two-wide instruction streams
-- [ ] Preserve in-flight C1 and issue-queue work across unrelated EE
+- [x] Preserve in-flight C1 and issue-queue work across unrelated EE
       execution, interrupts, `ERET`, reset, halt/resume, and save-state restore
 - [ ] Verify repeated and save-state-resumed executions produce identical
       registers, flags, memory, stop reasons, retirement traces, and trace
