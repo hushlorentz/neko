@@ -1059,7 +1059,7 @@ accumulator or condition-result contract:
       retirement and stage traces where timing is part of the contract
 - [x] Expand the foundation's PS2DEV semantic baseline into a timing,
       forwarding, branch, and concurrent-issue COP1 capstone
-- [ ] Audit every defined COP1 opcode for decode, execution, flags, timing,
+- [x] Audit every defined COP1 opcode for decode, execution, flags, timing,
       hazards, exceptions, tracing, reset, and save-state coverage
 - [ ] Reject every reserved COP1 encoding and invalid fixed-field combination
       deterministically

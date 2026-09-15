@@ -2757,6 +2757,54 @@ TEST_CASE("EE COP1 movement instructions apply documented flags")
   }
 }
 
+TEST_CASE("EE flag-neutral COP1 operations preserve FCR31")
+{
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CONDITION |
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+  const std::uint32_t instructions[] = {
+    cop1TransferInstruction(0x00, 2, 3),
+    cop1TransferInstruction(0x04, 2, 3),
+    cop1TransferInstruction(0x02, 2, 31),
+    cop1MemoryInstruction(0x31, 1, 3, 0),
+    cop1MemoryInstruction(0x39, 1, 3, 0),
+    cop1SingleInstruction(0x06, 3, 4),
+    cop1WordInstruction(0x20, 3, 4),
+    cop1BranchInstruction(0, 0),
+    cop1BranchInstruction(1, 0),
+    cop1BranchInstruction(2, 0),
+    cop1BranchInstruction(3, 0)
+  };
+
+  for (const std::uint32_t instruction : instructions)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
+    core.setGeneralRegister(1, {0x100, 0});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x1122334489abcdef), 0});
+    core.setFloatingPointRegister(
+      3,
+      UINT32_C(0x76543210));
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x12345678)));
+    system.eeBus().write32(0, instruction);
+    core.startExecution(0);
+
+    system.runMasterCycles(12);
+
+    REQUIRE(
+      core.cop1ControlRegister(31) ==
+      (EECOP1Control::STATUS_FIXED |
+       INITIAL_STATUS));
+  }
+}
+
 TEST_CASE("EE COP1 min and max instructions decode canonically")
 {
   REQUIRE(
@@ -10043,53 +10091,182 @@ TEST_CASE("EE COP1 word memory bus faults preserve architectural state")
   }
 }
 
-TEST_CASE("EE COP1 instructions require Status CU1")
+TEST_CASE("Every canonical EE COP1 opcode requires Status CU1")
 {
-  const std::uint32_t instructions[] = {
-    cop1TransferInstruction(0x00, 2, 3),
-    cop1TransferInstruction(0x04, 2, 3),
-    cop1TransferInstruction(0x02, 2, 31),
-    cop1TransferInstruction(0x06, 2, 31),
-    cop1MemoryInstruction(0x31, 1, 3, 2),
-    cop1MemoryInstruction(0x39, 1, 3, 2),
-    cop1SingleInstruction(0x05, 3, 4),
-    cop1SingleInstruction(0x06, 3, 4),
-    cop1SingleInstruction(0x07, 3, 4),
-    cop1SingleInstruction(0x00, 3, 4, 5),
-    cop1SingleInstruction(0x01, 3, 4, 5),
-    cop1SingleInstruction(0x02, 3, 4, 5),
-    cop1SingleInstruction(0x03, 3, 4, 5),
-    cop1SingleInstruction(0x04, 0, 4, 5),
-    cop1SingleInstruction(0x16, 3, 4, 5),
-    cop1SingleInstruction(0x1c, 3, 4, 5),
-    cop1SingleInstruction(0x1d, 3, 4, 5),
-    cop1SingleInstruction(0x18, 3, 0, 5),
-    cop1SingleInstruction(0x19, 3, 0, 5),
-    cop1SingleInstruction(0x1a, 3, 0, 5),
-    cop1SingleInstruction(0x1e, 3, 0, 5),
-    cop1SingleInstruction(0x1f, 3, 0, 5),
-    cop1SingleInstruction(0x28, 3, 4, 5),
-    cop1SingleInstruction(0x29, 3, 4, 5),
-    cop1WordInstruction(0x20, 3, 4),
-    cop1SingleInstruction(0x24, 3, 4),
-    cop1SingleInstruction(0x30, 3, 0, 5),
-    cop1SingleInstruction(0x32, 3, 0, 5),
-    cop1SingleInstruction(0x34, 3, 0, 5),
-    cop1SingleInstruction(0x36, 3, 0, 5),
-    cop1BranchInstruction(0, 2),
-    cop1BranchInstruction(1, 2),
-    cop1BranchInstruction(2, 2),
-    cop1BranchInstruction(3, 2)
-  };
-
-  for (const std::uint32_t instruction : instructions)
+  constexpr std::uint32_t INITIAL_STATUS =
+    EECOP1Control::CONDITION |
+    EECOP1Control::CAUSE_MASK |
+    EECOP1Control::STICKY_MASK;
+  struct OpcodeVector
   {
+    std::uint32_t instruction;
+    EEOperation operation;
+  };
+  const OpcodeVector vectors[] = {
+    {
+      cop1TransferInstruction(0x00, 2, 3),
+      EEOperation::MoveWordFromCOP1
+    },
+    {
+      cop1TransferInstruction(0x04, 2, 3),
+      EEOperation::MoveWordToCOP1
+    },
+    {
+      cop1TransferInstruction(0x02, 2, 31),
+      EEOperation::MoveControlWordFromCOP1
+    },
+    {
+      cop1TransferInstruction(0x06, 2, 31),
+      EEOperation::MoveControlWordToCOP1
+    },
+    {
+      cop1MemoryInstruction(0x31, 1, 3, 0),
+      EEOperation::LoadWordToCOP1
+    },
+    {
+      cop1MemoryInstruction(0x39, 1, 3, 0),
+      EEOperation::StoreWordFromCOP1
+    },
+    {
+      cop1SingleInstruction(0x05, 3, 4),
+      EEOperation::AbsoluteSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x06, 3, 4),
+      EEOperation::MoveSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x07, 3, 4),
+      EEOperation::NegateSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x00, 3, 4, 5),
+      EEOperation::AddSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x01, 3, 4, 5),
+      EEOperation::SubtractSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x02, 3, 4, 5),
+      EEOperation::MultiplySingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x03, 3, 4, 5),
+      EEOperation::DivideSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x04, 0, 4, 5),
+      EEOperation::SquareRootSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x16, 3, 4, 5),
+      EEOperation::ReciprocalSquareRootSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x1c, 3, 4, 5),
+      EEOperation::MultiplyAddSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x1d, 3, 4, 5),
+      EEOperation::MultiplySubtractSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x18, 3, 0, 5),
+      EEOperation::AddSingleToAccumulatorCOP1
+    },
+    {
+      cop1SingleInstruction(0x19, 3, 0, 5),
+      EEOperation::SubtractSingleToAccumulatorCOP1
+    },
+    {
+      cop1SingleInstruction(0x1a, 3, 0, 5),
+      EEOperation::MultiplySingleToAccumulatorCOP1
+    },
+    {
+      cop1SingleInstruction(0x1e, 3, 0, 5),
+      EEOperation::MultiplyAddSingleToAccumulatorCOP1
+    },
+    {
+      cop1SingleInstruction(0x1f, 3, 0, 5),
+      EEOperation::MultiplySubtractSingleToAccumulatorCOP1
+    },
+    {
+      cop1SingleInstruction(0x28, 3, 4, 5),
+      EEOperation::MaximumSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x29, 3, 4, 5),
+      EEOperation::MinimumSingleCOP1
+    },
+    {
+      cop1WordInstruction(0x20, 3, 4),
+      EEOperation::ConvertWordToSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x24, 3, 4),
+      EEOperation::ConvertSingleToWordCOP1
+    },
+    {
+      cop1SingleInstruction(0x30, 3, 0, 5),
+      EEOperation::CompareFalseSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x32, 3, 0, 5),
+      EEOperation::CompareEqualSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x34, 3, 0, 5),
+      EEOperation::CompareLessThanSingleCOP1
+    },
+    {
+      cop1SingleInstruction(0x36, 3, 0, 5),
+      EEOperation::CompareLessThanOrEqualSingleCOP1
+    },
+    {
+      cop1BranchInstruction(0, 2),
+      EEOperation::BranchCOP1False
+    },
+    {
+      cop1BranchInstruction(1, 2),
+      EEOperation::BranchCOP1True
+    },
+    {
+      cop1BranchInstruction(2, 2),
+      EEOperation::BranchCOP1FalseLikely
+    },
+    {
+      cop1BranchInstruction(3, 2),
+      EEOperation::BranchCOP1TrueLikely
+    }
+  };
+  constexpr std::size_t COP1_OPCODE_COUNT =
+    static_cast<std::size_t>(
+      EEOperation::BranchCOP1TrueLikely) -
+    static_cast<std::size_t>(
+      EEOperation::MoveWordFromCOP1) + 1;
+  static_assert(
+    sizeof(vectors) / sizeof(vectors[0]) ==
+      COP1_OPCODE_COUNT,
+    "Canonical COP1 opcode inventory is incomplete");
+
+  for (const OpcodeVector &vector : vectors)
+  {
+    REQUIRE(
+      decodeEEInstruction(vector.instruction).operation ==
+      vector.operation);
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
     core.setCOP0Register(
       EECOP0Register::Cause,
       UINT32_C(0xc0000000));
+    core.setGeneralRegister(
+      1,
+      {
+        UINT64_C(0x100),
+        UINT64_C(0x5555555566666666)
+      });
     core.setGeneralRegister(
       2,
       {
@@ -10099,11 +10276,14 @@ TEST_CASE("EE COP1 instructions require Status CU1")
     core.setFloatingPointRegister(3, UINT32_C(0x76543210));
     core.setFloatingPointRegister(4, UINT32_C(0x12345678));
     core.setFloatingPointRegister(5, UINT32_C(0x11223344));
+    core.setFloatingPointAccumulator(UINT32_C(0x55667788));
+    core.setCOP1ControlRegister(31, INITIAL_STATUS);
     REQUIRE(
       system.eeBus().writeData32(
-        0,
+        0x100,
         UINT32_C(0x11223344)));
-    system.eeBus().write32(0, instruction);
+    system.eeBus().write32(0, vector.instruction);
+    system.startTrace();
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -10123,6 +10303,13 @@ TEST_CASE("EE COP1 instructions require Status CU1")
     REQUIRE(
       core.programCounter() ==
       EEExceptionVector::GENERAL);
+    system.runMasterCycles(COP1_RSQRT_LATENCY + 1);
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{
+        UINT64_C(0x100),
+        UINT64_C(0x5555555566666666)
+      });
     REQUIRE(
       core.generalRegister(2) ==
       EERegister128{
@@ -10139,10 +10326,36 @@ TEST_CASE("EE COP1 instructions require Status CU1")
       core.floatingPointRegister(5) ==
       UINT32_C(0x11223344));
     REQUIRE(
+      core.floatingPointAccumulator() ==
+      UINT32_C(0x55667788));
+    REQUIRE(
       core.cop1ControlRegister(31) ==
-      EECOP1Control::STATUS_FIXED);
+      (EECOP1Control::STATUS_FIXED |
+       INITIAL_STATUS));
     std::uint32_t stored = 0;
     REQUIRE(system.eeBus().readData32(0, &stored));
-    REQUIRE(stored == instruction);
+    REQUIRE(stored == vector.instruction);
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x11223344));
+    std::size_t unexpectedCOP1Events = 0;
+    for (const NekoTraceEvent &event : system.trace())
+    {
+      if (event.type ==
+            NekoTraceEventType::BranchScheduled ||
+          event.type ==
+            NekoTraceEventType::COP1StageTransition ||
+          event.type ==
+            NekoTraceEventType::COP1Retired ||
+          event.type ==
+            NekoTraceEventType::COP1ResourceInterlock ||
+          event.type ==
+            NekoTraceEventType::COP1LoadInterlock ||
+          event.type ==
+            NekoTraceEventType::COP1DividerHazard)
+      {
+        ++unexpectedCOP1Events;
+      }
+    }
+    REQUIRE(unexpectedCOP1Events == 0);
   }
 }
