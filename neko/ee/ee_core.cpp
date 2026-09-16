@@ -1480,113 +1480,11 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::MoveControlWordFromCOP1:
     case EEOperation::MoveControlWordToCOP1:
     case EEOperation::MoveSingleCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      InFlightCOP1Operation &operation =
-        allocateInFlightCOP1(instruction, address);
-      switch (instruction.operation)
-      {
-        case EEOperation::MoveWordFromCOP1:
-          operation.destination.mask = COP1_DESTINATION_GPR;
-          operation.destination.gprRegister =
-            immediateDestination;
-          break;
-        case EEOperation::MoveWordToCOP1:
-          operation.capturedGPR = target;
-          operation.destination.mask = COP1_DESTINATION_FPR;
-          operation.destination.fprRegister = destination;
-          break;
-        case EEOperation::MoveControlWordFromCOP1:
-          operation.destination.mask = COP1_DESTINATION_GPR;
-          operation.destination.gprRegister =
-            immediateDestination;
-          break;
-        case EEOperation::MoveControlWordToCOP1:
-          operation.capturedGPR = target;
-          if (destination ==
-              EECOP1Control::STATUS_REGISTER)
-          {
-            operation.destination.mask =
-              COP1_DESTINATION_FCR31;
-          }
-          break;
-        case EEOperation::MoveSingleCOP1:
-          operation.destination.mask = COP1_DESTINATION_FPR;
-          operation.destination.fprRegister =
-            instruction.shiftAmount;
-          break;
-        default:
-          break;
-      }
-      recordCOP1StageTransition(
-        operation,
-        UINT8_MAX,
-        COP1PipelineStage::R);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP1RegisterMove(instruction, address);
     case EEOperation::SquareRootSingleCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      const std::uint32_t ftBits =
-        scoreboardFPRValue(instruction.targetRegister);
-      const EEFloatResult result =
-        sqrtEEFloatRaw(ftBits);
-      startPendingCOP1Divider(
-        instruction,
-        0,
-        ftBits,
-        result.bits,
-        result.flags);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::ReciprocalSquareRootSingleCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      const std::uint32_t fsBits =
-        scoreboardFPRValue(destination);
-      const std::uint32_t ftBits =
-        scoreboardFPRValue(instruction.targetRegister);
-      const EEFloatResult result =
-        rsqrtEEFloatRaw(
-          fsBits,
-          ftBits);
-      startPendingCOP1Divider(
-        instruction,
-        fsBits,
-        ftBits,
-        result.bits,
-        result.flags);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::DivideSingleCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      const std::uint32_t fsBits =
-        scoreboardFPRValue(destination);
-      const std::uint32_t ftBits =
-        scoreboardFPRValue(instruction.targetRegister);
-      const EEFloatResult result =
-        divEEFloatRaw(fsBits, ftBits);
-      startPendingCOP1Divider(
-        instruction,
-        fsBits,
-        ftBits,
-        result.bits,
-        result.flags);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP1Divider(instruction, address);
     case EEOperation::AbsoluteSingleCOP1:
     case EEOperation::NegateSingleCOP1:
     case EEOperation::MaximumSingleCOP1:
@@ -1607,89 +1505,12 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::CompareEqualSingleCOP1:
     case EEOperation::CompareLessThanSingleCOP1:
     case EEOperation::CompareLessThanOrEqualSingleCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      InFlightCOP1Operation &operation =
-        allocateInFlightCOP1(instruction, address);
-      const EECOP1ResultDestination resultDestination =
-        eeOperationMetadata(
-          instruction.operation).cop1ResultDestination;
-      if (resultDestination ==
-          EECOP1ResultDestination::Condition)
-      {
-        operation.destination.mask =
-          COP1_DESTINATION_CONDITION;
-      }
-      else if (resultDestination ==
-               EECOP1ResultDestination::Accumulator)
-      {
-        operation.destination.mask =
-          COP1_DESTINATION_ACCUMULATOR |
-          COP1_DESTINATION_FCR31;
-      }
-      else
-      {
-        operation.destination.mask = COP1_DESTINATION_FPR;
-        if (instruction.operation !=
-            EEOperation::ConvertWordToSingleCOP1)
-        {
-          operation.destination.mask |=
-            COP1_DESTINATION_FCR31;
-        }
-      }
-      operation.destination.fprRegister =
-        instruction.shiftAmount;
-      if (instruction.operation ==
-          EEOperation::ConvertSingleToWordCOP1)
-      {
-        operation.affectedFlags = FP_FLAG_I_BIT;
-      }
-      else if (instruction.operation !=
-                 EEOperation::ConvertWordToSingleCOP1 &&
-               !isCOP1ComparisonOperation(
-                 instruction.operation))
-      {
-        operation.affectedFlags =
-          FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW;
-      }
-      recordCOP1StageTransition(
-        operation,
-        UINT8_MAX,
-        COP1PipelineStage::R);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP1StagedOperation(instruction, address);
     case EEOperation::BranchCOP1False:
     case EEOperation::BranchCOP1FalseLikely:
     case EEOperation::BranchCOP1True:
     case EEOperation::BranchCOP1TrueLikely:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      const bool branchOnTrue =
-        instruction.operation == EEOperation::BranchCOP1True ||
-        instruction.operation ==
-          EEOperation::BranchCOP1TrueLikely;
-      const bool likely =
-        instruction.operation ==
-          EEOperation::BranchCOP1FalseLikely ||
-        instruction.operation ==
-          EEOperation::BranchCOP1TrueLikely;
-      const std::uint32_t branchTarget =
-        address + 4 +
-        static_cast<std::uint32_t>(
-          signExtend16(instruction.immediate) << 2);
-      scheduleBranch(
-        scoreboardCOP1Condition() == branchOnTrue,
-        likely,
-        branchTarget,
-        address);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP1Branch(instruction, address);
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
     case EEOperation::ShiftRightArithmeticWord:
@@ -3296,6 +3117,251 @@ EEInstructionExecutionOutcome EECore::executeSoftwareException(
     address,
     instruction.raw);
   return EEInstructionExecutionOutcome::Faulted;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP1RegisterMove(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::MoveWordFromCOP1:
+    case EEOperation::MoveWordToCOP1:
+    case EEOperation::MoveControlWordFromCOP1:
+    case EEOperation::MoveControlWordToCOP1:
+    case EEOperation::MoveSingleCOP1:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP1-register-move handler received an incompatible "
+        "operation.");
+  }
+  if (!requireCOP1Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+
+  InFlightCOP1Operation &operation =
+    allocateInFlightCOP1(instruction, address);
+  switch (instruction.operation)
+  {
+    case EEOperation::MoveWordFromCOP1:
+      operation.destination.mask = COP1_DESTINATION_GPR;
+      operation.destination.gprRegister =
+        instruction.targetRegister;
+      break;
+    case EEOperation::MoveWordToCOP1:
+      operation.capturedGPR =
+        generalRegisters[instruction.targetRegister].low;
+      operation.destination.mask = COP1_DESTINATION_FPR;
+      operation.destination.fprRegister =
+        instruction.destinationRegister;
+      break;
+    case EEOperation::MoveControlWordFromCOP1:
+      operation.destination.mask = COP1_DESTINATION_GPR;
+      operation.destination.gprRegister =
+        instruction.targetRegister;
+      break;
+    case EEOperation::MoveControlWordToCOP1:
+      operation.capturedGPR =
+        generalRegisters[instruction.targetRegister].low;
+      if (instruction.destinationRegister ==
+          EECOP1Control::STATUS_REGISTER)
+      {
+        operation.destination.mask =
+          COP1_DESTINATION_FCR31;
+      }
+      break;
+    case EEOperation::MoveSingleCOP1:
+      operation.destination.mask = COP1_DESTINATION_FPR;
+      operation.destination.fprRegister =
+        instruction.shiftAmount;
+      break;
+    default:
+      break;
+  }
+  recordCOP1StageTransition(
+    operation,
+    UINT8_MAX,
+    COP1PipelineStage::R);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP1Divider(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::SquareRootSingleCOP1:
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+    case EEOperation::DivideSingleCOP1:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP1-divider handler received an incompatible "
+        "operation.");
+  }
+  if (!requireCOP1Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+
+  const std::uint32_t ftBits =
+    scoreboardFPRValue(instruction.targetRegister);
+  std::uint32_t fsBits = 0;
+  EEFloatResult result;
+  switch (instruction.operation)
+  {
+    case EEOperation::SquareRootSingleCOP1:
+      result = sqrtEEFloatRaw(ftBits);
+      break;
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+      fsBits =
+        scoreboardFPRValue(instruction.destinationRegister);
+      result = rsqrtEEFloatRaw(fsBits, ftBits);
+      break;
+    case EEOperation::DivideSingleCOP1:
+      fsBits =
+        scoreboardFPRValue(instruction.destinationRegister);
+      result = divEEFloatRaw(fsBits, ftBits);
+      break;
+    default:
+      break;
+  }
+  startPendingCOP1Divider(
+    instruction,
+    fsBits,
+    ftBits,
+    result.bits,
+    result.flags);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP1StagedOperation(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+    case EEOperation::ConvertWordToSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP1-staged-operation handler received an "
+        "incompatible operation.");
+  }
+  if (!requireCOP1Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+
+  InFlightCOP1Operation &operation =
+    allocateInFlightCOP1(instruction, address);
+  const EECOP1ResultDestination resultDestination =
+    eeOperationMetadata(
+      instruction.operation).cop1ResultDestination;
+  if (resultDestination ==
+      EECOP1ResultDestination::Condition)
+  {
+    operation.destination.mask =
+      COP1_DESTINATION_CONDITION;
+  }
+  else if (resultDestination ==
+           EECOP1ResultDestination::Accumulator)
+  {
+    operation.destination.mask =
+      COP1_DESTINATION_ACCUMULATOR |
+      COP1_DESTINATION_FCR31;
+  }
+  else
+  {
+    operation.destination.mask = COP1_DESTINATION_FPR;
+    if (instruction.operation !=
+        EEOperation::ConvertWordToSingleCOP1)
+    {
+      operation.destination.mask |=
+        COP1_DESTINATION_FCR31;
+    }
+  }
+  operation.destination.fprRegister =
+    instruction.shiftAmount;
+  if (instruction.operation ==
+      EEOperation::ConvertSingleToWordCOP1)
+  {
+    operation.affectedFlags = FP_FLAG_I_BIT;
+  }
+  else if (instruction.operation !=
+             EEOperation::ConvertWordToSingleCOP1 &&
+           !isCOP1ComparisonOperation(
+             instruction.operation))
+  {
+    operation.affectedFlags =
+      FP_FLAG_OVERFLOW | FP_FLAG_UNDERFLOW;
+  }
+  recordCOP1StageTransition(
+    operation,
+    UINT8_MAX,
+    COP1PipelineStage::R);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP1Branch(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::BranchCOP1False:
+    case EEOperation::BranchCOP1FalseLikely:
+    case EEOperation::BranchCOP1True:
+    case EEOperation::BranchCOP1TrueLikely:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP1-branch handler received an incompatible "
+        "operation.");
+  }
+  if (!requireCOP1Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+
+  const bool branchOnTrue =
+    instruction.operation == EEOperation::BranchCOP1True ||
+    instruction.operation == EEOperation::BranchCOP1TrueLikely;
+  const bool likely =
+    instruction.operation == EEOperation::BranchCOP1FalseLikely ||
+    instruction.operation == EEOperation::BranchCOP1TrueLikely;
+  const std::uint32_t branchTarget =
+    address + 4 +
+    static_cast<std::uint32_t>(
+      signExtend16(instruction.immediate) << 2);
+  scheduleBranch(
+    scoreboardCOP1Condition() == branchOnTrue,
+    likely,
+    branchTarget,
+    address);
+  return EEInstructionExecutionOutcome::Completed;
 }
 
 EEInstructionExecutionOutcome EECore::executeCOP1Memory(

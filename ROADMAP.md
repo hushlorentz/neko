@@ -1141,7 +1141,7 @@ accumulator or condition-result contract:
         and overflow coverage
   - [x] Extract scalar memory width and merge families with alignment, bus,
         trace, and retry coverage
-  - [ ] Extract remaining C1 admission families with pipeline and retirement
+  - [x] Extract remaining C1 admission families with pipeline and retirement
         coverage
   - [ ] Extract remaining C2 admission families with retry and VU coupling
         coverage

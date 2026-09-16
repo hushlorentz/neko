@@ -173,6 +173,34 @@ struct EECoreTestAccess
     return core->executeCOP1Memory(instruction, 0);
   }
 
+  static EEInstructionExecutionOutcome executeCOP1RegisterMove(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP1RegisterMove(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP1Divider(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP1Divider(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP1StagedOperation(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP1StagedOperation(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP1Branch(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP1Branch(instruction, 0);
+  }
+
   static EEInstructionExecutionOutcome executeCOP2VectorMove(
     EECore *core,
     const EEInstruction &instruction)
@@ -321,6 +349,24 @@ TEST_CASE("EE focused handlers reject incompatible operations")
     REQUIRE_THROWS_WITH(
       EECoreTestAccess::executeCOP1Memory(&core, instruction),
       "EE COP1-memory handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP1RegisterMove(
+        &core,
+        instruction),
+      "EE COP1-register-move handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP1Divider(&core, instruction),
+      "EE COP1-divider handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP1StagedOperation(
+        &core,
+        instruction),
+      "EE COP1-staged-operation handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP1Branch(&core, instruction),
+      "EE COP1-branch handler received an incompatible operation.");
     REQUIRE_THROWS_WITH(
       EECoreTestAccess::executeCOP2VectorMove(&core, instruction),
       "EE COP2-vector-move handler received an incompatible "

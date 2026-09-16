@@ -734,6 +734,18 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeSoftwareException(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP1RegisterMove(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP1Divider(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP1StagedOperation(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP1Branch(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeCOP1Memory(
       const EEInstruction &instruction,
       std::uint32_t address);
