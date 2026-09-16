@@ -1471,34 +1471,10 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::SynchronizePipeline:
       return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ExceptionReturn:
-      discardInFlightCOP1AtOrAfter(
-        executingProgramOrder + 1);
-      if ((cop0Status & EECOP0Status::ERROR_LEVEL) != 0)
-      {
-        pc = cop0ErrorEPC;
-        cop0Status &= ~EECOP0Status::ERROR_LEVEL;
-      }
-      else
-      {
-        pc = cop0EPC;
-        cop0Status &= ~EECOP0Status::EXCEPTION_LEVEL;
-      }
-      clearPendingException();
-      return EEInstructionExecutionOutcome::Completed;
+      return executeExceptionReturn(instruction);
     case EEOperation::SystemCall:
-      enterException(
-        EEException::SystemCall,
-        address,
-        address,
-        instruction.raw);
-      return EEInstructionExecutionOutcome::Faulted;
     case EEOperation::Breakpoint:
-      enterException(
-        EEException::Breakpoint,
-        address,
-        address,
-        instruction.raw);
-      return EEInstructionExecutionOutcome::Faulted;
+      return executeSoftwareException(instruction, address);
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -2040,39 +2016,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadWordToCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      InFlightCOP1Operation &operation =
-        allocateInFlightCOP1(instruction, address);
-      operation.capturedGPR = source;
-      operation.destination.mask = COP1_DESTINATION_FPR;
-      operation.destination.fprRegister =
-        immediateDestination;
-      recordCOP1StageTransition(
-        operation,
-        UINT8_MAX,
-        COP1PipelineStage::R);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreWordFromCOP1:
-    {
-      if (!requireCOP1Usable(address, instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Faulted;
-      }
-      InFlightCOP1Operation &operation =
-        allocateInFlightCOP1(instruction, address);
-      operation.capturedGPR = source;
-      operation.destination.mask = COP1_DESTINATION_MEMORY;
-      recordCOP1StageTransition(
-        operation,
-        UINT8_MAX,
-        COP1PipelineStage::R);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP1Memory(instruction, address);
     case EEOperation::LoadWordLeft:
     case EEOperation::LoadWordRight:
     {
@@ -2581,44 +2526,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::QuadwordMoveFromCOP2:
-    {
-      if (((instruction.raw & 1) != 0 &&
-           attachedVU0().microModeActive()) ||
-          attachedVU0().macroRegisterNumberWritePending(
-            destination))
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      if (immediateDestination != 0)
-      {
-        generalRegisters[immediateDestination] =
-          quadwordFromFPRegister(
-            *attachedVU0().fpRegisterValue(destination));
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::QuadwordMoveToCOP2:
-    {
-      if (((instruction.raw & 1) != 0 &&
-           !attachedVU0().cop2WriteAvailable()) ||
-          attachedVU0().macroRegisterNumberWritePending(
-            destination))
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      const EERegister128 &value =
-        generalRegisters[immediateDestination];
-      attachedVU0().loadFPRegisterBits(
-        destination,
-        static_cast<std::uint32_t>(value.low),
-        static_cast<std::uint32_t>(value.low >> 32),
-        static_cast<std::uint32_t>(value.high),
-        static_cast<std::uint32_t>(value.high >> 32));
-      attachedVU0().noteMacroTransferToVU();
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP2VectorMove(instruction, address);
     case EEOperation::ControlMoveFromCOP2:
     {
       if (((instruction.raw & 1) != 0 &&
@@ -2674,29 +2583,7 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::BranchCOP2FalseLikely:
     case EEOperation::BranchCOP2True:
     case EEOperation::BranchCOP2TrueLikely:
-    {
-      const bool conditionSignal =
-        attachedVU1().clockActive();
-      const bool branchOnTrue =
-        instruction.operation == EEOperation::BranchCOP2True ||
-        instruction.operation ==
-          EEOperation::BranchCOP2TrueLikely;
-      const bool likely =
-        instruction.operation ==
-          EEOperation::BranchCOP2FalseLikely ||
-        instruction.operation ==
-          EEOperation::BranchCOP2TrueLikely;
-      const std::uint32_t branchTarget =
-        address + 4 +
-        static_cast<std::uint32_t>(
-          signExtend16(instruction.immediate) << 2);
-      scheduleBranch(
-        conditionSignal == branchOnTrue,
-        likely,
-        branchTarget,
-        address);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP2Branch(instruction, address);
     case EEOperation::VectorCallMicroSubroutine:
     case EEOperation::VectorCallMicroSubroutineRegister:
     {
@@ -2751,42 +2638,10 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::Jump:
-      scheduleBranch(
-        true,
-        false,
-        ((address + 4) & UINT32_C(0xf0000000)) |
-          (instruction.target << 2),
-        address);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::JumpAndLink:
-      writeLowDoubleword(31, address + 8);
-      scheduleBranch(
-        true,
-        false,
-        ((address + 4) & UINT32_C(0xf0000000)) |
-          (instruction.target << 2),
-        address);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::JumpRegister:
-      scheduleBranch(
-        true,
-        false,
-        static_cast<std::uint32_t>(source),
-        address);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::JumpAndLinkRegister:
-      if (instruction.sourceRegister == destination)
-      {
-        haltUndefinedOperation(address, instruction.raw);
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      writeLowDoubleword(destination, address + 8);
-      scheduleBranch(
-        true,
-        false,
-        static_cast<std::uint32_t>(source),
-        address);
-      return EEInstructionExecutionOutcome::Completed;
+      return executeJump(instruction, address);
     case EEOperation::BranchEqual:
     case EEOperation::BranchNotEqual:
     case EEOperation::BranchLessThanOrEqualZero:
@@ -2887,120 +2742,12 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::MultiplyAddUnsignedWord:
     case EEOperation::MultiplyAddWord1:
     case EEOperation::MultiplyAddUnsignedWord1:
-    {
-      if (!requireWordValue(
-            instruction.sourceRegister,
-            address,
-            instruction.raw) ||
-          !requireWordValue(
-            instruction.targetRegister,
-            address,
-            instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      const bool pipeline1 =
-        instruction.operation == EEOperation::MultiplyWord1 ||
-        instruction.operation ==
-          EEOperation::MultiplyUnsignedWord1 ||
-        instruction.operation == EEOperation::MultiplyAddWord1 ||
-        instruction.operation ==
-          EEOperation::MultiplyAddUnsignedWord1;
-      const bool signedOperands =
-        instruction.operation == EEOperation::MultiplyWord ||
-        instruction.operation == EEOperation::MultiplyWord1 ||
-        instruction.operation == EEOperation::MultiplyAddWord ||
-        instruction.operation == EEOperation::MultiplyAddWord1;
-      const bool accumulate =
-        instruction.operation == EEOperation::MultiplyAddWord ||
-        instruction.operation ==
-          EEOperation::MultiplyAddUnsignedWord ||
-        instruction.operation == EEOperation::MultiplyAddWord1 ||
-        instruction.operation ==
-          EEOperation::MultiplyAddUnsignedWord1;
-      std::uint64_t result = multiplyWords(
-        static_cast<std::uint32_t>(source),
-        static_cast<std::uint32_t>(target),
-        signedOperands);
-      if (accumulate)
-      {
-        result += pipeline1
-          ? accumulatorValue(hi1Register, lo1Register)
-          : accumulatorValue(hiRegister, loRegister);
-      }
-      startPendingMultiplyDivide(
-        pipeline1,
-        MULTIPLY_LATENCY,
-        signExtendWord(static_cast<std::uint32_t>(result >> 32)),
-        signExtendWord(static_cast<std::uint32_t>(result)),
-        destination,
-        true);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeMultiply(instruction, address);
     case EEOperation::DivideWord:
     case EEOperation::DivideUnsignedWord:
     case EEOperation::DivideWord1:
     case EEOperation::DivideUnsignedWord1:
-    {
-      if (!requireWordValue(
-            instruction.sourceRegister,
-            address,
-            instruction.raw) ||
-          !requireWordValue(
-            instruction.targetRegister,
-            address,
-            instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      const std::uint32_t dividend =
-        static_cast<std::uint32_t>(source);
-      const std::uint32_t divisor =
-        static_cast<std::uint32_t>(target);
-      if (divisor == 0)
-      {
-        haltUndefinedOperation(address, instruction.raw);
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      const bool pipeline1 =
-        instruction.operation == EEOperation::DivideWord1 ||
-        instruction.operation == EEOperation::DivideUnsignedWord1;
-      const bool signedOperands =
-        instruction.operation == EEOperation::DivideWord ||
-        instruction.operation == EEOperation::DivideWord1;
-      std::uint32_t quotient = 0;
-      std::uint32_t remainder = 0;
-      if (signedOperands &&
-          dividend == UINT32_C(0x80000000) &&
-          divisor == UINT32_MAX)
-      {
-        quotient = dividend;
-      }
-      else if (signedOperands)
-      {
-        const std::int64_t signedDividend =
-          signedWord(dividend);
-        const std::int64_t signedDivisor =
-          signedWord(divisor);
-        quotient = static_cast<std::uint32_t>(
-          signedDividend / signedDivisor);
-        remainder = static_cast<std::uint32_t>(
-          signedDividend % signedDivisor);
-      }
-      else
-      {
-        quotient = dividend / divisor;
-        remainder = dividend % divisor;
-      }
-      startPendingMultiplyDivide(
-        pipeline1,
-        DIVIDE_LATENCY,
-        signExtendWord(remainder),
-        signExtendWord(quotient),
-        0,
-        false);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeDivide(instruction, address);
     case EEOperation::Count:
       break;
   }
@@ -3297,6 +3044,380 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
         "EE byte-memory handler received an "
         "incompatible operation.");
   }
+}
+
+EEInstructionExecutionOutcome EECore::executeExceptionReturn(
+  const EEInstruction &instruction)
+{
+  if (instruction.operation != EEOperation::ExceptionReturn)
+  {
+    throw std::logic_error(
+      "EE exception-return handler received an "
+      "incompatible operation.");
+  }
+  discardInFlightCOP1AtOrAfter(executingProgramOrder + 1);
+  if ((cop0Status & EECOP0Status::ERROR_LEVEL) != 0)
+  {
+    pc = cop0ErrorEPC;
+    cop0Status &= ~EECOP0Status::ERROR_LEVEL;
+  }
+  else
+  {
+    pc = cop0EPC;
+    cop0Status &= ~EECOP0Status::EXCEPTION_LEVEL;
+  }
+  clearPendingException();
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeSoftwareException(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  EEException exceptionType = EEException::None;
+  switch (instruction.operation)
+  {
+    case EEOperation::SystemCall:
+      exceptionType = EEException::SystemCall;
+      break;
+    case EEOperation::Breakpoint:
+      exceptionType = EEException::Breakpoint;
+      break;
+    default:
+      throw std::logic_error(
+        "EE software-exception handler received an "
+        "incompatible operation.");
+  }
+  enterException(
+    exceptionType,
+    address,
+    address,
+    instruction.raw);
+  return EEInstructionExecutionOutcome::Faulted;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP1Memory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadWordToCOP1:
+    case EEOperation::StoreWordFromCOP1:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP1-memory handler received an "
+        "incompatible operation.");
+  }
+  if (!requireCOP1Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+
+  InFlightCOP1Operation &operation =
+    allocateInFlightCOP1(instruction, address);
+  operation.capturedGPR =
+    generalRegisters[instruction.sourceRegister].low;
+  if (instruction.operation == EEOperation::LoadWordToCOP1)
+  {
+    operation.destination.mask = COP1_DESTINATION_FPR;
+    operation.destination.fprRegister =
+      instruction.targetRegister;
+  }
+  else
+  {
+    operation.destination.mask = COP1_DESTINATION_MEMORY;
+  }
+  recordCOP1StageTransition(
+    operation,
+    UINT8_MAX,
+    COP1PipelineStage::R);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP2VectorMove(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  const std::uint8_t vectorRegister =
+    instruction.destinationRegister;
+  switch (instruction.operation)
+  {
+    case EEOperation::QuadwordMoveFromCOP2:
+      if (((instruction.raw & 1) != 0 &&
+           attachedVU0().microModeActive()) ||
+          attachedVU0().macroRegisterNumberWritePending(
+            vectorRegister))
+      {
+        pc = address;
+        return EEInstructionExecutionOutcome::Delayed;
+      }
+      if (instruction.targetRegister != 0)
+      {
+        generalRegisters[instruction.targetRegister] =
+          quadwordFromFPRegister(
+            *attachedVU0().fpRegisterValue(vectorRegister));
+      }
+      return EEInstructionExecutionOutcome::Completed;
+    case EEOperation::QuadwordMoveToCOP2:
+    {
+      if (((instruction.raw & 1) != 0 &&
+           !attachedVU0().cop2WriteAvailable()) ||
+          attachedVU0().macroRegisterNumberWritePending(
+            vectorRegister))
+      {
+        pc = address;
+        return EEInstructionExecutionOutcome::Delayed;
+      }
+      const EERegister128 &value =
+        generalRegisters[instruction.targetRegister];
+      attachedVU0().loadFPRegisterBits(
+        vectorRegister,
+        static_cast<std::uint32_t>(value.low),
+        static_cast<std::uint32_t>(value.low >> 32),
+        static_cast<std::uint32_t>(value.high),
+        static_cast<std::uint32_t>(value.high >> 32));
+      attachedVU0().noteMacroTransferToVU();
+      return EEInstructionExecutionOutcome::Completed;
+    }
+    default:
+      throw std::logic_error(
+        "EE COP2-vector-move handler received an "
+        "incompatible operation.");
+  }
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP2Branch(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::BranchCOP2False:
+    case EEOperation::BranchCOP2FalseLikely:
+    case EEOperation::BranchCOP2True:
+    case EEOperation::BranchCOP2TrueLikely:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP2-branch handler received an "
+        "incompatible operation.");
+  }
+  const bool branchOnTrue =
+    instruction.operation == EEOperation::BranchCOP2True ||
+    instruction.operation == EEOperation::BranchCOP2TrueLikely;
+  const bool likely =
+    instruction.operation == EEOperation::BranchCOP2FalseLikely ||
+    instruction.operation == EEOperation::BranchCOP2TrueLikely;
+  const std::uint32_t branchTarget =
+    address + 4 +
+    static_cast<std::uint32_t>(
+      signExtend16(instruction.immediate) << 2);
+  scheduleBranch(
+    attachedVU1().clockActive() == branchOnTrue,
+    likely,
+    branchTarget,
+    address);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeJump(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  switch (instruction.operation)
+  {
+    case EEOperation::Jump:
+      scheduleBranch(
+        true,
+        false,
+        ((address + 4) & UINT32_C(0xf0000000)) |
+          (instruction.target << 2),
+        address);
+      return EEInstructionExecutionOutcome::Completed;
+    case EEOperation::JumpAndLink:
+      writeLowDoubleword(31, address + 8);
+      scheduleBranch(
+        true,
+        false,
+        ((address + 4) & UINT32_C(0xf0000000)) |
+          (instruction.target << 2),
+        address);
+      return EEInstructionExecutionOutcome::Completed;
+    case EEOperation::JumpRegister:
+      scheduleBranch(
+        true,
+        false,
+        static_cast<std::uint32_t>(source),
+        address);
+      return EEInstructionExecutionOutcome::Completed;
+    case EEOperation::JumpAndLinkRegister:
+      if (instruction.sourceRegister ==
+          instruction.destinationRegister)
+      {
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
+      }
+      writeLowDoubleword(
+        instruction.destinationRegister,
+        address + 8);
+      scheduleBranch(
+        true,
+        false,
+        static_cast<std::uint32_t>(source),
+        address);
+      return EEInstructionExecutionOutcome::Completed;
+    default:
+      throw std::logic_error(
+        "EE jump handler received an incompatible operation.");
+  }
+}
+
+EEInstructionExecutionOutcome EECore::executeMultiply(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::MultiplyWord:
+    case EEOperation::MultiplyUnsignedWord:
+    case EEOperation::MultiplyWord1:
+    case EEOperation::MultiplyUnsignedWord1:
+    case EEOperation::MultiplyAddWord:
+    case EEOperation::MultiplyAddUnsignedWord:
+    case EEOperation::MultiplyAddWord1:
+    case EEOperation::MultiplyAddUnsignedWord1:
+      break;
+    default:
+      throw std::logic_error(
+        "EE multiply handler received an incompatible operation.");
+  }
+  if (!requireWordValue(
+        instruction.sourceRegister,
+        address,
+        instruction.raw) ||
+      !requireWordValue(
+        instruction.targetRegister,
+        address,
+        instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Halted;
+  }
+
+  const bool pipeline1 =
+    eeOperationMetadata(instruction.operation).
+      executionDispatch ==
+    EEExecutionDispatch::MAC1Continuation;
+  const bool signedOperands =
+    instruction.operation == EEOperation::MultiplyWord ||
+    instruction.operation == EEOperation::MultiplyWord1 ||
+    instruction.operation == EEOperation::MultiplyAddWord ||
+    instruction.operation == EEOperation::MultiplyAddWord1;
+  const bool accumulate =
+    instruction.operation == EEOperation::MultiplyAddWord ||
+    instruction.operation == EEOperation::MultiplyAddUnsignedWord ||
+    instruction.operation == EEOperation::MultiplyAddWord1 ||
+    instruction.operation == EEOperation::MultiplyAddUnsignedWord1;
+  std::uint64_t result = multiplyWords(
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low),
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.targetRegister].low),
+    signedOperands);
+  if (accumulate)
+  {
+    result += pipeline1
+      ? accumulatorValue(hi1Register, lo1Register)
+      : accumulatorValue(hiRegister, loRegister);
+  }
+  startPendingMultiplyDivide(
+    pipeline1,
+    MULTIPLY_LATENCY,
+    signExtendWord(static_cast<std::uint32_t>(result >> 32)),
+    signExtendWord(static_cast<std::uint32_t>(result)),
+    instruction.destinationRegister,
+    true);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeDivide(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::DivideWord:
+    case EEOperation::DivideUnsignedWord:
+    case EEOperation::DivideWord1:
+    case EEOperation::DivideUnsignedWord1:
+      break;
+    default:
+      throw std::logic_error(
+        "EE divide handler received an incompatible operation.");
+  }
+  if (!requireWordValue(
+        instruction.sourceRegister,
+        address,
+        instruction.raw) ||
+      !requireWordValue(
+        instruction.targetRegister,
+        address,
+        instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Halted;
+  }
+
+  const std::uint32_t dividend =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low);
+  const std::uint32_t divisor =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.targetRegister].low);
+  if (divisor == 0)
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
+  const bool pipeline1 =
+    eeOperationMetadata(instruction.operation).
+      executionDispatch ==
+    EEExecutionDispatch::MAC1Continuation;
+  const bool signedOperands =
+    instruction.operation == EEOperation::DivideWord ||
+    instruction.operation == EEOperation::DivideWord1;
+  std::uint32_t quotient = 0;
+  std::uint32_t remainder = 0;
+  if (signedOperands &&
+      dividend == UINT32_C(0x80000000) &&
+      divisor == UINT32_MAX)
+  {
+    quotient = dividend;
+  }
+  else if (signedOperands)
+  {
+    const std::int64_t signedDividend = signedWord(dividend);
+    const std::int64_t signedDivisor = signedWord(divisor);
+    quotient = static_cast<std::uint32_t>(
+      signedDividend / signedDivisor);
+    remainder = static_cast<std::uint32_t>(
+      signedDividend % signedDivisor);
+  }
+  else
+  {
+    quotient = dividend / divisor;
+    remainder = dividend % divisor;
+  }
+  startPendingMultiplyDivide(
+    pipeline1,
+    DIVIDE_LATENCY,
+    signExtendWord(remainder),
+    signExtendWord(quotient),
+    0,
+    false);
+  return EEInstructionExecutionOutcome::Completed;
 }
 
 bool EECore::requireWordValue(

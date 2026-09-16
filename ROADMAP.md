@@ -1132,7 +1132,7 @@ accumulator or condition-result contract:
 - [x] Retain one exhaustive operation dispatch boundary while moving operand
       handling, computation, memory access, and side effects into focused
       family methods
-- [ ] Keep delayed MAC, C1, COP2, branch, and exception ownership at their
+- [x] Keep delayed MAC, C1, COP2, branch, and exception ownership at their
       existing lifecycle boundaries rather than hiding timing in handlers
 - [ ] Avoid per-instruction allocation and unnecessary virtual dispatch in the
       execution path

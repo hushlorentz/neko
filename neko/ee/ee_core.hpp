@@ -694,6 +694,29 @@ class EECore : public ClockedComponent
     EEInstructionExecutionOutcome executeByteMemory(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeExceptionReturn(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeSoftwareException(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP1Memory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP2VectorMove(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP2Branch(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeJump(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeMultiply(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeDivide(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     bool requireWordValue(
       std::uint8_t registerIndex,
       std::uint32_t address,

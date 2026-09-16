@@ -40,6 +40,62 @@ struct EECoreTestAccess
     return core->executeByteMemory(instruction, 0);
   }
 
+  static EEInstructionExecutionOutcome executeExceptionReturn(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeExceptionReturn(instruction);
+  }
+
+  static EEInstructionExecutionOutcome executeSoftwareException(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeSoftwareException(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP1Memory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP1Memory(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP2VectorMove(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP2VectorMove(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP2Branch(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP2Branch(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeJump(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeJump(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeMultiply(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeMultiply(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeDivide(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeDivide(instruction, 0);
+  }
+
   static void setShiftAmountOrdering(
     EECore *core,
     std::uint8_t accesses,
@@ -89,6 +145,55 @@ TEST_CASE("EE focused handlers reject incompatible operations")
       "EE byte-memory handler received an incompatible operation.");
     REQUIRE(core.generalRegister(2).low == 0x55);
     REQUIRE(core.pendingException() == EEException::None);
+  }
+
+  SECTION("Lifecycle handlers reject before architectural effects")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.startExecution(0);
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x123456789abcdef0), 1});
+    core.setGeneralRegister(3, {0x55, 0});
+    EEInstruction instruction;
+    instruction.operation = EEOperation::AddWord;
+    instruction.sourceRegister = 2;
+    instruction.targetRegister = 2;
+    instruction.destinationRegister = 3;
+
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeExceptionReturn(&core, instruction),
+      "EE exception-return handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeSoftwareException(&core, instruction),
+      "EE software-exception handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP1Memory(&core, instruction),
+      "EE COP1-memory handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP2VectorMove(&core, instruction),
+      "EE COP2-vector-move handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP2Branch(&core, instruction),
+      "EE COP2-branch handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeJump(&core, instruction),
+      "EE jump handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeMultiply(&core, instruction),
+      "EE multiply handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeDivide(&core, instruction),
+      "EE divide handler received an incompatible operation.");
+
+    REQUIRE(core.executionState() == EEExecutionState::Running);
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.generalRegister(3).low == 0x55);
   }
 }
 
