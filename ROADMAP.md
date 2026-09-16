@@ -1069,19 +1069,28 @@ accumulator or condition-result contract:
 
 #### Architecture Baseline and Risk Map
 
-- [ ] Inventory ownership and dependency direction across system orchestration,
+- [x] Inventory ownership and dependency direction across system orchestration,
       EE execution, VU execution, DMA, VIF, GIF, GS, tracing, and persistence
-- [ ] Map the cycle-sensitive and allocation-sensitive paths, including EE
+- [x] Map the cycle-sensitive and allocation-sensitive paths, including EE
       issue and C1 advancement, VU pipeline advancement, DMA transport, GIF
       arbitration, and GS rasterization
-- [ ] Catalogue duplicated policy and weak control vocabulary, including
+- [x] Catalogue duplicated policy and weak control vocabulary, including
       instruction-family classification, program-order traversal, cancellation,
       derived occupancy, save-state reachability, and boolean mode parameters
-- [ ] Rank the findings by correctness risk, change amplification, and
+- [x] Identify methods where large conditional or switch-driven control flow
+      mixes independent policies, and classify each branch set by the invariant
+      it should own before extracting code
+- [x] Treat focused method purpose as mandatory while allowing a component
+      class to retain several closely related hardware responsibilities when it
+      remains the clearest owner of their shared state and sequencing
+- [x] Distinguish behavioral boolean parameters from ordinary state and
+      enablement flags; prioritize only the booleans that make call-site intent
+      or architectural outcomes ambiguous
+- [x] Rank the findings by correctness risk, change amplification, and
       obstruction to MMI work rather than by file size alone
-- [ ] Record justified non-refactors where direct ownership, fixed-capacity
+- [x] Record justified non-refactors where direct ownership, fixed-capacity
       storage, or explicit sequencing is clearer than an additional abstraction
-- [ ] Identify the focused tests, hashes, traces, and save-state cases that
+- [x] Identify the focused tests, hashes, traces, and save-state cases that
       protect each selected refactor before production code changes begin
 
 #### Shared EE Instruction Metadata
@@ -1098,10 +1107,33 @@ accumulator or condition-result contract:
 - [ ] Remove superseded classifiers only after focused pairing, hazard,
       retirement, and reserved-operation tests remain unchanged
 
+#### EE Operation Dispatch and Focused Execution Methods
+
+- [ ] Classify every `EECore::executeInstruction()` case into a coherent
+      execution family with one architectural purpose
+- [ ] Define an explicit execution outcome that distinguishes completed,
+      delayed, faulted, halted, and rejected work without behavioral booleans
+- [ ] Add a table-driven completeness test proving every value below
+      `EE_OPERATION_COUNT` has an execution-family and dispatch classification,
+      with invalid enum values handled separately
+- [ ] Retain one exhaustive operation dispatch boundary while moving operand
+      handling, computation, memory access, and side effects into focused
+      family methods
+- [ ] Keep delayed MAC, C1, COP2, branch, and exception ownership at their
+      existing lifecycle boundaries rather than hiding timing in handlers
+- [ ] Avoid per-instruction allocation and unnecessary virtual dispatch in the
+      execution path
+- [ ] Migrate operation families incrementally, keeping each change covered by
+      its integer, memory, branch, COP0, COP1, COP2, and guest tests
+- [ ] Remove obsolete execution branches and boolean modes only after every
+      defined operation remains exhaustively dispatched
+
 #### EE Front-End and Issue Lifecycle
 
 - [ ] Specify the invariant owned by fetch, decode, issue-latch, staging-latch,
       selection, acceptance, and PC-advance state
+- [ ] Reshape each front-end method around one decision or state transition,
+      even when the resulting methods remain private to `EECore`
 - [ ] Separate issue-candidate construction from readiness and structural-pair
       policy while retaining the fixed two-entry front end
 - [ ] Replace boolean controls that select issue-member position, pipeline
@@ -1120,8 +1152,14 @@ accumulator or condition-result contract:
 - [ ] Use the traversal primitive for oldest-operation selection, producer
       lookup, ready-prefix retirement, stage transition ordering, and
       cancellation ranges
+- [ ] Use the same read-only order and reachability predicates for malformed
+      save-state validation, or document and test any invariant that must remain
+      independently represented by the non-mutating validator
 - [ ] Define one lifecycle contract for C1 allocation, source capture,
       advancement, completion, retirement, and slot release
+- [ ] Split C1 methods that currently combine traversal, eligibility,
+      transition, side effects, and tracing into focused stages with explicit
+      inputs and outcomes
 - [ ] Centralize divider occupancy derivation and reconciliation so runtime,
       reset, hashing, and save-state validation cannot disagree
 - [ ] Centralize exception and flush cancellation of in-flight C1 work while
@@ -1143,6 +1181,12 @@ accumulator or condition-result contract:
       payloads or explicit modes
 - [ ] Preserve cycle-local fixed-capacity event storage and deterministic event
       ordering
+- [ ] Audit synchronous VU and GIF trace callbacks as observation dependencies;
+      either route them through the event boundary or explicitly defer them
+      with traced-versus-untraced equivalence coverage
+- [ ] Define callback-exception containment or post-commit publication
+      semantics for VU and GIF observation, and cover throwing callbacks so an
+      observer cannot make a completed hardware transition appear retryable
 - [ ] Verify tracing off and tracing on produce identical architectural hashes,
       save states, stop reasons, and guest results
 
@@ -1174,6 +1218,8 @@ accumulator or condition-result contract:
       consumers of core state rather than alternate hardware owners
 - [ ] Audit VU issue, pipeline orchestration, execution units, writeback,
       flags, and macro/micro coordination for duplicated lifecycle policy
+- [ ] Refactor broad VU or GS methods when they combine unrelated decisions,
+      without requiring the owning hardware class itself to be fragmented
 - [ ] Audit GS register handling, transfer, primitive assembly, rasterization,
       texture sampling, and presentation for boundaries with independent
       invariants
