@@ -429,6 +429,18 @@ class EECore final : public ClockedComponent
       Younger
     };
 
+    enum class MACPipeline : std::uint8_t
+    {
+      MAC0,
+      MAC1
+    };
+
+    enum class MACResultDestination : std::uint8_t
+    {
+      HIAndLO,
+      HIAndLOAndGPR
+    };
+
     enum class COP1ScoreboardQuery : std::uint8_t
     {
       CandidateReadiness,
@@ -520,7 +532,8 @@ class EECore final : public ClockedComponent
       std::uint8_t remainingCycles = 0;
       std::uint64_t hiResult = 0;
       std::uint64_t loResult = 0;
-      bool writeGeneralRegister = false;
+      MACResultDestination resultDestination =
+        MACResultDestination::HIAndLO;
       std::uint8_t generalRegister = 0;
       std::uint64_t generalRegisterResult = 0;
     };
@@ -801,15 +814,14 @@ class EECore final : public ClockedComponent
       std::uint32_t instruction);
     bool pendingMultiplyDivideActive() const;
     void advancePendingMultiplyDivide(
-      PendingMultiplyDivide *operation,
-      bool pipeline1);
+      MACPipeline pipeline);
     void startPendingMultiplyDivide(
-      bool pipeline1,
+      MACPipeline pipeline,
       std::uint8_t latency,
       std::uint64_t hiResult,
       std::uint64_t loResult,
       std::uint8_t generalRegister,
-      bool writeGeneralRegister);
+      MACResultDestination resultDestination);
     InFlightCOP1Operation &allocateInFlightCOP1(
       const EEInstruction &instruction,
       std::uint32_t instructionAddress);
@@ -834,8 +846,9 @@ class EECore final : public ClockedComponent
       std::uint32_t result,
       std::uint8_t raisedFlags);
     void commitInFlightCOP1(
-      InFlightCOP1Operation *operation,
-      bool traceRetirement);
+      InFlightCOP1Operation *operation);
+    void retireInFlightCOP1(
+      InFlightCOP1Operation *operation);
     void recordCOP1StageTransition(
       const InFlightCOP1Operation &operation,
       std::uint8_t fromStage,

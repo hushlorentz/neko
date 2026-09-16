@@ -1136,7 +1136,7 @@ accumulator or condition-result contract:
       existing lifecycle boundaries rather than hiding timing in handlers
 - [x] Avoid per-instruction allocation and unnecessary virtual dispatch in the
       execution path
-- [ ] Migrate operation families incrementally:
+- [x] Migrate operation families incrementally:
   - [x] Extract scalar arithmetic and special-register families with integer
         and overflow coverage
   - [x] Extract scalar memory width and merge families with alignment, bus,
@@ -1146,9 +1146,9 @@ accumulator or condition-result contract:
   - [x] Extract remaining C2 admission families with retry and VU coupling
         coverage
   - [x] Extract integer branches with link, likely, and delay-slot coverage
-  - [ ] Re-run guest and cross-family regression coverage after all families
+  - [x] Re-run guest and cross-family regression coverage after all families
         use focused execution methods
-- [ ] Remove obsolete execution branches and boolean modes only after every
+- [x] Remove obsolete execution branches and boolean modes only after every
       defined operation remains exhaustively dispatched
 
 #### EE Front-End and Issue Lifecycle

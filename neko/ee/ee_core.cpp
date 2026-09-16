@@ -239,17 +239,19 @@ namespace
     return result;
   }
 
-  std::uint64_t multiplyWords(
+  std::uint64_t multiplyUnsignedWords(
     std::uint32_t left,
-    std::uint32_t right,
-    bool signedOperands)
+    std::uint32_t right)
   {
-    if (!signedOperands)
-    {
-      return
-        static_cast<std::uint64_t>(left) *
-        static_cast<std::uint64_t>(right);
-    }
+    return
+      static_cast<std::uint64_t>(left) *
+      static_cast<std::uint64_t>(right);
+  }
+
+  std::uint64_t multiplySignedWords(
+    std::uint32_t left,
+    std::uint32_t right)
+  {
     const std::int64_t product =
       static_cast<std::int64_t>(signedWord(left)) *
       static_cast<std::int64_t>(signedWord(right));
@@ -1120,8 +1122,8 @@ void EECore::clock()
   fillIssueFrontEnd();
   const bool hadPendingOperation =
     pendingMultiplyDivideActive();
-  advancePendingMultiplyDivide(&pendingMac0, false);
-  advancePendingMultiplyDivide(&pendingMac1, true);
+  advancePendingMultiplyDivide(MACPipeline::MAC0);
+  advancePendingMultiplyDivide(MACPipeline::MAC1);
   updateIssueSelection(completedCOP1LoadRegisters);
   if (hadPendingOperation &&
       pendingMultiplyDivideActive() &&
@@ -1452,17 +1454,6 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     rejectedInstructionValue = instruction.raw;
     return EEInstructionExecutionOutcome::Rejected;
   }
-
-  const std::uint64_t source =
-    generalRegisters[instruction.sourceRegister].low;
-  const std::uint64_t target =
-    generalRegisters[instruction.targetRegister].low;
-  const std::uint64_t immediate =
-    signExtend16(instruction.immediate);
-  const std::uint8_t destination =
-    instruction.destinationRegister;
-  const std::uint8_t immediateDestination =
-    instruction.targetRegister;
 
   switch (instruction.operation)
   {
@@ -3639,10 +3630,12 @@ EEInstructionExecutionOutcome EECore::executeMultiply(
     return EEInstructionExecutionOutcome::Halted;
   }
 
-  const bool pipeline1 =
+  const MACPipeline pipeline =
     eeOperationMetadata(instruction.operation).
       executionDispatch ==
-    EEExecutionDispatch::MAC1Continuation;
+        EEExecutionDispatch::MAC1Continuation
+      ? MACPipeline::MAC1
+      : MACPipeline::MAC0;
   const bool signedOperands =
     instruction.operation == EEOperation::MultiplyWord ||
     instruction.operation == EEOperation::MultiplyWord1 ||
@@ -3653,25 +3646,28 @@ EEInstructionExecutionOutcome EECore::executeMultiply(
     instruction.operation == EEOperation::MultiplyAddUnsignedWord ||
     instruction.operation == EEOperation::MultiplyAddWord1 ||
     instruction.operation == EEOperation::MultiplyAddUnsignedWord1;
-  std::uint64_t result = multiplyWords(
+  const std::uint32_t left =
     static_cast<std::uint32_t>(
-      generalRegisters[instruction.sourceRegister].low),
+      generalRegisters[instruction.sourceRegister].low);
+  const std::uint32_t right =
     static_cast<std::uint32_t>(
-      generalRegisters[instruction.targetRegister].low),
-    signedOperands);
+      generalRegisters[instruction.targetRegister].low);
+  std::uint64_t result = signedOperands
+    ? multiplySignedWords(left, right)
+    : multiplyUnsignedWords(left, right);
   if (accumulate)
   {
-    result += pipeline1
+    result += pipeline == MACPipeline::MAC1
       ? accumulatorValue(hi1Register, lo1Register)
       : accumulatorValue(hiRegister, loRegister);
   }
   startPendingMultiplyDivide(
-    pipeline1,
+    pipeline,
     MULTIPLY_LATENCY,
     signExtendWord(static_cast<std::uint32_t>(result >> 32)),
     signExtendWord(static_cast<std::uint32_t>(result)),
     instruction.destinationRegister,
-    true);
+    MACResultDestination::HIAndLOAndGPR);
   return EEInstructionExecutionOutcome::Completed;
 }
 
@@ -3713,10 +3709,12 @@ EEInstructionExecutionOutcome EECore::executeDivide(
     haltUndefinedOperation(address, instruction.raw);
     return EEInstructionExecutionOutcome::Halted;
   }
-  const bool pipeline1 =
+  const MACPipeline pipeline =
     eeOperationMetadata(instruction.operation).
       executionDispatch ==
-    EEExecutionDispatch::MAC1Continuation;
+        EEExecutionDispatch::MAC1Continuation
+      ? MACPipeline::MAC1
+      : MACPipeline::MAC0;
   const bool signedOperands =
     instruction.operation == EEOperation::DivideWord ||
     instruction.operation == EEOperation::DivideWord1;
@@ -3743,12 +3741,12 @@ EEInstructionExecutionOutcome EECore::executeDivide(
     remainder = dividend % divisor;
   }
   startPendingMultiplyDivide(
-    pipeline1,
+    pipeline,
     DIVIDE_LATENCY,
     signExtendWord(remainder),
     signExtendWord(quotient),
     0,
-    false);
+    MACResultDestination::HIAndLO);
   return EEInstructionExecutionOutcome::Completed;
 }
 
@@ -3830,9 +3828,12 @@ bool EECore::pendingMultiplyDivideActive() const
 }
 
 void EECore::advancePendingMultiplyDivide(
-  PendingMultiplyDivide *operation,
-  bool pipeline1)
+  MACPipeline pipeline)
 {
+  PendingMultiplyDivide *operation =
+    pipeline == MACPipeline::MAC1
+      ? &pendingMac1
+      : &pendingMac0;
   if (!operation->active)
   {
     return;
@@ -3843,7 +3844,7 @@ void EECore::advancePendingMultiplyDivide(
     return;
   }
 
-  if (pipeline1)
+  if (pipeline == MACPipeline::MAC1)
   {
     hi1Register = operation->hiResult;
     lo1Register = operation->loResult;
@@ -3853,7 +3854,8 @@ void EECore::advancePendingMultiplyDivide(
     hiRegister = operation->hiResult;
     loRegister = operation->loResult;
   }
-  if (operation->writeGeneralRegister)
+  if (operation->resultDestination ==
+      MACResultDestination::HIAndLOAndGPR)
   {
     writeLowDoubleword(
       operation->generalRegister,
@@ -3863,20 +3865,22 @@ void EECore::advancePendingMultiplyDivide(
 }
 
 void EECore::startPendingMultiplyDivide(
-  bool pipeline1,
+  MACPipeline pipeline,
   std::uint8_t latency,
   std::uint64_t hiResult,
   std::uint64_t loResult,
   std::uint8_t generalRegister,
-  bool writeGeneralRegister)
+  MACResultDestination resultDestination)
 {
   PendingMultiplyDivide &operation =
-    pipeline1 ? pendingMac1 : pendingMac0;
+    pipeline == MACPipeline::MAC1
+      ? pendingMac1
+      : pendingMac0;
   operation.active = true;
   operation.remainingCycles = latency;
   operation.hiResult = hiResult;
   operation.loResult = loResult;
-  operation.writeGeneralRegister = writeGeneralRegister;
+  operation.resultDestination = resultDestination;
   operation.generalRegister = generalRegister;
   operation.generalRegisterResult = loResult;
 }
@@ -4117,7 +4121,7 @@ bool EECore::drainInFlightCOP1()
           break;
       }
     }
-    commitInFlightCOP1(oldest, false);
+    commitInFlightCOP1(oldest);
   }
   if (drainedDivider)
   {
@@ -4325,7 +4329,7 @@ void EECore::advancePendingCOP1(
             UINT32_C(1) <<
               oldestOperation->destination.fprRegister;
         }
-        commitInFlightCOP1(oldestOperation, true);
+        retireInFlightCOP1(oldestOperation);
       }
     };
 
@@ -4820,14 +4824,9 @@ void EECore::startPendingCOP1Divider(
 }
 
 void EECore::commitInFlightCOP1(
-  InFlightCOP1Operation *operation,
-  bool traceRetirement)
+  InFlightCOP1Operation *operation)
 {
   operation->stage = COP1PipelineStage::S2;
-  if (traceRetirement)
-  {
-    recordCOP1Retirement(*operation);
-  }
   if ((operation->destination.mask &
        COP1_DESTINATION_FPR) != 0)
   {
@@ -4869,6 +4868,13 @@ void EECore::commitInFlightCOP1(
       operation->rawResult);
   }
   *operation = {};
+}
+
+void EECore::retireInFlightCOP1(
+  InFlightCOP1Operation *operation)
+{
+  recordCOP1Retirement(*operation);
+  commitInFlightCOP1(operation);
 }
 
 void EECore::recordCOP1StageTransition(
@@ -5906,7 +5912,8 @@ std::uint64_t EECore::stateHash() const
       hashEEStateValue(&hash, operation.loResult);
       hashEEStateValue(
         &hash,
-        operation.writeGeneralRegister);
+        operation.resultDestination ==
+          MACResultDestination::HIAndLOAndGPR);
       hashEEStateValue(&hash, operation.generalRegister);
       hashEEStateValue(
         &hash,

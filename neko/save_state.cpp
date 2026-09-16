@@ -1660,7 +1660,9 @@ void NekoSaveStateCodec::writeEECore(
       writer->writeU8(operation.remainingCycles);
       writer->writeU64(operation.hiResult);
       writer->writeU64(operation.loResult);
-      writer->writeBool(operation.writeGeneralRegister);
+      writer->writeBool(
+        operation.resultDestination ==
+          EECore::MACResultDestination::HIAndLOAndGPR);
       writer->writeU8(operation.generalRegister);
       writer->writeU64(operation.generalRegisterResult);
     };
@@ -1790,8 +1792,10 @@ void NekoSaveStateCodec::readEECore(
       operation->remainingCycles = reader->readU8();
       operation->hiResult = reader->readU64();
       operation->loResult = reader->readU64();
-      operation->writeGeneralRegister =
-        reader->readBool(label);
+      operation->resultDestination =
+        reader->readBool(label)
+          ? EECore::MACResultDestination::HIAndLOAndGPR
+          : EECore::MACResultDestination::HIAndLO;
       operation->generalRegister = reader->readU8();
       operation->generalRegisterResult = reader->readU64();
       require(
@@ -1804,7 +1808,8 @@ void NekoSaveStateCodec::readEECore(
           EECore::GENERAL_REGISTER_COUNT,
         "EE pending multiply/divide register is invalid");
       require(
-        operation->writeGeneralRegister ||
+        operation->resultDestination ==
+            EECore::MACResultDestination::HIAndLOAndGPR ||
           operation->generalRegister == 0,
         "EE pending divide contains a destination register");
     };
@@ -1823,9 +1828,11 @@ void NekoSaveStateCodec::readEECore(
          core->haltReason == EEStopReason::HostHalt),
       "EE concurrent multiply/divide state cannot resume");
     const bool mac0Multiply =
-      core->pendingMac0.writeGeneralRegister;
+      core->pendingMac0.resultDestination ==
+      EECore::MACResultDestination::HIAndLOAndGPR;
     const bool mac1Multiply =
-      core->pendingMac1.writeGeneralRegister;
+      core->pendingMac1.resultDestination ==
+      EECore::MACResultDestination::HIAndLOAndGPR;
     const std::uint8_t mac0Cycles =
       core->pendingMac0.remainingCycles;
     const std::uint8_t mac1Cycles =
