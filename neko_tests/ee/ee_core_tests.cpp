@@ -63,6 +63,49 @@ struct EECoreTestAccess
     return core->executeByteMemory(instruction, 0);
   }
 
+  static EEInstructionExecutionOutcome executeHalfwordMemory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeHalfwordMemory(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeWordMemory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeWordMemory(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeWordMergeMemory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeWordMergeMemory(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeDoublewordMemory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeDoublewordMemory(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome
+    executeDoublewordMergeMemory(
+      EECore *core,
+      const EEInstruction &instruction)
+  {
+    return core->executeDoublewordMergeMemory(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeQuadwordMemory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeQuadwordMemory(instruction, 0);
+  }
+
   static EEInstructionExecutionOutcome executeWordArithmetic(
     EECore *core,
     const EEInstruction &instruction)
@@ -197,7 +240,7 @@ TEST_CASE("EE focused handlers reject incompatible operations")
     REQUIRE(core.stopReason() == EEStopReason::None);
   }
 
-  SECTION("Byte memory rejects before bus or register effects")
+  SECTION("Scalar memory rejects before bus or register effects")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
@@ -212,6 +255,42 @@ TEST_CASE("EE focused handlers reject incompatible operations")
         &core,
         instruction),
       "EE byte-memory handler received an incompatible operation.");
+    instruction.operation = EEOperation::LoadByte;
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeHalfwordMemory(
+        &core,
+        instruction),
+      "EE halfword-memory handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeWordMemory(
+        &core,
+        instruction),
+      "EE word-memory handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeWordMergeMemory(
+        &core,
+        instruction),
+      "EE word-merge-memory handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeDoublewordMemory(
+        &core,
+        instruction),
+      "EE doubleword-memory handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeDoublewordMergeMemory(
+        &core,
+        instruction),
+      "EE doubleword-merge-memory handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeQuadwordMemory(
+        &core,
+        instruction),
+      "EE quadword-memory handler received an incompatible "
+      "operation.");
     REQUIRE(core.generalRegister(2).low == 0x55);
     REQUIRE(core.pendingException() == EEException::None);
   }

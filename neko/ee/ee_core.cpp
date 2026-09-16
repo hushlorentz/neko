@@ -1761,559 +1761,31 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return executeByteMemory(instruction, address);
     case EEOperation::LoadHalfword:
     case EEOperation::LoadHalfwordUnsigned:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 1) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorLoadOrFetch,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      std::uint16_t value = 0;
-      const bool succeeded =
-        attachedBus().readData16(dataAddress, &value);
-      recordMemoryTrace(
-        dataAddress,
-        2,
-        false,
-        succeeded,
-        succeeded ? value : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      writeLowDoubleword(
-        immediateDestination,
-        instruction.operation == EEOperation::LoadHalfword
-          ? signExtend16(value)
-          : value);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreHalfword:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 1) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const std::uint16_t value =
-        static_cast<std::uint16_t>(target);
-      const bool succeeded =
-        attachedBus().writeData16(dataAddress, value);
-      recordMemoryTrace(
-        dataAddress,
-        2,
-        true,
-        succeeded,
-        value);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeHalfwordMemory(instruction, address);
     case EEOperation::LoadWord:
     case EEOperation::LoadWordUnsigned:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 3) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorLoadOrFetch,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      std::uint32_t value = 0;
-      const bool succeeded =
-        attachedBus().readData32(dataAddress, &value);
-      recordMemoryTrace(
-        dataAddress,
-        4,
-        false,
-        succeeded,
-        succeeded ? value : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      writeLowDoubleword(
-        immediateDestination,
-        instruction.operation == EEOperation::LoadWord
-          ? signExtendWord(value)
-          : value);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreWord:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 3) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const std::uint32_t value =
-        static_cast<std::uint32_t>(target);
-      const bool succeeded =
-        attachedBus().writeData32(dataAddress, value);
-      recordMemoryTrace(
-        dataAddress,
-        4,
-        true,
-        succeeded,
-        value);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeWordMemory(instruction, address);
     case EEOperation::LoadWordToCOP1:
     case EEOperation::StoreWordFromCOP1:
       return executeCOP1Memory(instruction, address);
     case EEOperation::LoadWordLeft:
     case EEOperation::LoadWordRight:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      const std::uint32_t alignedAddress =
-        dataAddress & ~UINT32_C(3);
-      std::uint32_t memory = 0;
-      const bool succeeded =
-        attachedBus().readData32(alignedAddress, &memory);
-      recordMemoryTrace(
-        alignedAddress,
-        4,
-        false,
-        succeeded,
-        succeeded ? memory : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const std::uint8_t byteOffset = dataAddress & 3;
-      std::uint32_t result =
-        static_cast<std::uint32_t>(target);
-      if (instruction.operation == EEOperation::LoadWordLeft)
-      {
-        for (std::uint8_t memoryByte = 0;
-             memoryByte <= byteOffset;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            3 - byteOffset + memoryByte;
-          const std::uint32_t mask =
-            UINT32_C(0xff) << (registerByte * 8);
-          result =
-            (result & ~mask) |
-            (((memory >> (memoryByte * 8)) & 0xff) <<
-             (registerByte * 8));
-        }
-        writeLowDoubleword(
-          immediateDestination,
-          signExtendWord(result));
-      }
-      else
-      {
-        for (std::uint8_t memoryByte = byteOffset;
-             memoryByte < 4;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            memoryByte - byteOffset;
-          const std::uint32_t mask =
-            UINT32_C(0xff) << (registerByte * 8);
-          result =
-            (result & ~mask) |
-            (((memory >> (memoryByte * 8)) & 0xff) <<
-             (registerByte * 8));
-        }
-        writeLowDoubleword(
-          immediateDestination,
-          byteOffset == 0
-            ? signExtendWord(result)
-            : (target & UINT64_C(0xffffffff00000000)) |
-              result);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreWordLeft:
     case EEOperation::StoreWordRight:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      const std::uint32_t alignedAddress =
-        dataAddress & ~UINT32_C(3);
-      std::uint32_t memory = 0;
-      const bool readSucceeded =
-        attachedBus().readData32(alignedAddress, &memory);
-      recordMemoryTrace(
-        alignedAddress,
-        4,
-        false,
-        readSucceeded,
-        readSucceeded ? memory : 0);
-      if (!readSucceeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const std::uint8_t byteOffset = dataAddress & 3;
-      const std::uint32_t registerValue =
-        static_cast<std::uint32_t>(target);
-      if (instruction.operation == EEOperation::StoreWordLeft)
-      {
-        for (std::uint8_t memoryByte = 0;
-             memoryByte <= byteOffset;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            3 - byteOffset + memoryByte;
-          const std::uint32_t mask =
-            UINT32_C(0xff) << (memoryByte * 8);
-          memory =
-            (memory & ~mask) |
-            (((registerValue >> (registerByte * 8)) & 0xff) <<
-             (memoryByte * 8));
-        }
-      }
-      else
-      {
-        for (std::uint8_t memoryByte = byteOffset;
-             memoryByte < 4;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            memoryByte - byteOffset;
-          const std::uint32_t mask =
-            UINT32_C(0xff) << (memoryByte * 8);
-          memory =
-            (memory & ~mask) |
-            (((registerValue >> (registerByte * 8)) & 0xff) <<
-             (memoryByte * 8));
-        }
-      }
-      const bool writeSucceeded =
-        attachedBus().writeData32(alignedAddress, memory);
-      recordMemoryTrace(
-        alignedAddress,
-        4,
-        true,
-        writeSucceeded,
-        memory);
-      if (!writeSucceeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeWordMergeMemory(instruction, address);
     case EEOperation::LoadDoubleword:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 7) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorLoadOrFetch,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      std::uint64_t value = 0;
-      const bool succeeded =
-        attachedBus().readData64(dataAddress, &value);
-      recordMemoryTrace(
-        dataAddress,
-        8,
-        false,
-        succeeded,
-        succeeded ? value : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      writeLowDoubleword(immediateDestination, value);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreDoubleword:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 7) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const bool succeeded =
-        attachedBus().writeData64(dataAddress, target);
-      recordMemoryTrace(
-        dataAddress,
-        8,
-        true,
-        succeeded,
-        target);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeDoublewordMemory(instruction, address);
     case EEOperation::LoadDoublewordLeft:
     case EEOperation::LoadDoublewordRight:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      const std::uint32_t alignedAddress =
-        dataAddress & ~UINT32_C(7);
-      std::uint64_t memory = 0;
-      const bool succeeded =
-        attachedBus().readData64(alignedAddress, &memory);
-      recordMemoryTrace(
-        alignedAddress,
-        8,
-        false,
-        succeeded,
-        succeeded ? memory : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const std::uint8_t byteOffset = dataAddress & 7;
-      std::uint64_t result = target;
-      if (instruction.operation ==
-          EEOperation::LoadDoublewordLeft)
-      {
-        for (std::uint8_t memoryByte = 0;
-             memoryByte <= byteOffset;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            7 - byteOffset + memoryByte;
-          const std::uint64_t mask =
-            UINT64_C(0xff) << (registerByte * 8);
-          result =
-            (result & ~mask) |
-            (((memory >> (memoryByte * 8)) & 0xff) <<
-             (registerByte * 8));
-        }
-      }
-      else
-      {
-        for (std::uint8_t memoryByte = byteOffset;
-             memoryByte < 8;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            memoryByte - byteOffset;
-          const std::uint64_t mask =
-            UINT64_C(0xff) << (registerByte * 8);
-          result =
-            (result & ~mask) |
-            (((memory >> (memoryByte * 8)) & 0xff) <<
-             (registerByte * 8));
-        }
-      }
-      writeLowDoubleword(immediateDestination, result);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreDoublewordLeft:
     case EEOperation::StoreDoublewordRight:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      const std::uint32_t alignedAddress =
-        dataAddress & ~UINT32_C(7);
-      std::uint64_t memory = 0;
-      const bool readSucceeded =
-        attachedBus().readData64(alignedAddress, &memory);
-      recordMemoryTrace(
-        alignedAddress,
-        8,
-        false,
-        readSucceeded,
-        readSucceeded ? memory : 0);
-      if (!readSucceeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      const std::uint8_t byteOffset = dataAddress & 7;
-      if (instruction.operation ==
-          EEOperation::StoreDoublewordLeft)
-      {
-        for (std::uint8_t memoryByte = 0;
-             memoryByte <= byteOffset;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            7 - byteOffset + memoryByte;
-          const std::uint64_t mask =
-            UINT64_C(0xff) << (memoryByte * 8);
-          memory =
-            (memory & ~mask) |
-            (((target >> (registerByte * 8)) & 0xff) <<
-             (memoryByte * 8));
-        }
-      }
-      else
-      {
-        for (std::uint8_t memoryByte = byteOffset;
-             memoryByte < 8;
-             ++memoryByte)
-        {
-          const std::uint8_t registerByte =
-            memoryByte - byteOffset;
-          const std::uint64_t mask =
-            UINT64_C(0xff) << (memoryByte * 8);
-          memory =
-            (memory & ~mask) |
-            (((target >> (registerByte * 8)) & 0xff) <<
-             (memoryByte * 8));
-        }
-      }
-      const bool writeSucceeded =
-        attachedBus().writeData64(alignedAddress, memory);
-      recordMemoryTrace(
-        alignedAddress,
-        8,
-        true,
-        writeSucceeded,
-        memory);
-      if (!writeSucceeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeDoublewordMergeMemory(instruction, address);
     case EEOperation::LoadQuadword:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate) &
-        ~UINT32_C(0x0f);
-      EEQuadword value = {};
-      const bool succeeded =
-        attachedBus().readData128(dataAddress, &value);
-      recordMemoryTrace(
-        dataAddress,
-        16,
-        false,
-        succeeded,
-        succeeded ? value.low : 0,
-        succeeded ? value.high : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      if (immediateDestination != 0)
-      {
-        generalRegisters[immediateDestination] = {
-          value.low,
-          value.high
-        };
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreQuadword:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate) &
-        ~UINT32_C(0x0f);
-      const EERegister128 &value =
-        generalRegisters[immediateDestination];
-      const EEDataWriteResult writeResult =
-        attachedBus().writeGuestData128(
-          dataAddress,
-          {value.low, value.high});
-      const bool succeeded =
-        writeResult == EEDataWriteResult::Completed;
-      recordMemoryTrace(
-        dataAddress,
-        16,
-        true,
-        succeeded,
-        value.low,
-        value.high);
-      if (writeResult == EEDataWriteResult::Stalled)
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeQuadwordMemory(instruction, address);
     case EEOperation::LoadQuadwordToCOP2:
     {
       const std::uint32_t dataAddress =
@@ -3165,6 +2637,615 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
         "EE byte-memory handler received an "
         "incompatible operation.");
   }
+}
+
+EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadHalfword:
+    case EEOperation::LoadHalfwordUnsigned:
+    case EEOperation::StoreHalfword:
+      break;
+    default:
+      throw std::logic_error(
+        "EE halfword-memory handler received an incompatible "
+        "operation.");
+  }
+
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate));
+  const bool store =
+    instruction.operation == EEOperation::StoreHalfword;
+  if ((dataAddress & 1) != 0)
+  {
+    return raiseDataAccessException(
+      store
+        ? EEException::AddressErrorStore
+        : EEException::AddressErrorLoadOrFetch,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  if (store)
+  {
+    const std::uint16_t value =
+      static_cast<std::uint16_t>(
+        generalRegisters[instruction.targetRegister].low);
+    const bool succeeded =
+      attachedBus().writeData16(dataAddress, value);
+    recordMemoryTrace(
+      dataAddress,
+      2,
+      true,
+      succeeded,
+      value);
+    if (!succeeded)
+    {
+      return raiseDataAccessException(
+        EEException::DataBusErrorStore,
+        address,
+        dataAddress,
+        instruction.raw);
+    }
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  std::uint16_t value = 0;
+  const bool succeeded =
+    attachedBus().readData16(dataAddress, &value);
+  recordMemoryTrace(
+    dataAddress,
+    2,
+    false,
+    succeeded,
+    succeeded ? value : 0);
+  if (!succeeded)
+  {
+    return raiseDataAccessException(
+      EEException::DataBusErrorLoad,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  writeLowDoubleword(
+    instruction.targetRegister,
+    instruction.operation == EEOperation::LoadHalfword
+      ? signExtend16(value)
+      : value);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeWordMemory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadWord:
+    case EEOperation::LoadWordUnsigned:
+    case EEOperation::StoreWord:
+      break;
+    default:
+      throw std::logic_error(
+        "EE word-memory handler received an incompatible "
+        "operation.");
+  }
+
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate));
+  const bool store =
+    instruction.operation == EEOperation::StoreWord;
+  if ((dataAddress & 3) != 0)
+  {
+    return raiseDataAccessException(
+      store
+        ? EEException::AddressErrorStore
+        : EEException::AddressErrorLoadOrFetch,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  if (store)
+  {
+    const std::uint32_t value =
+      static_cast<std::uint32_t>(
+        generalRegisters[instruction.targetRegister].low);
+    const bool succeeded =
+      attachedBus().writeData32(dataAddress, value);
+    recordMemoryTrace(
+      dataAddress,
+      4,
+      true,
+      succeeded,
+      value);
+    if (!succeeded)
+    {
+      return raiseDataAccessException(
+        EEException::DataBusErrorStore,
+        address,
+        dataAddress,
+        instruction.raw);
+    }
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  std::uint32_t value = 0;
+  const bool succeeded =
+    attachedBus().readData32(dataAddress, &value);
+  recordMemoryTrace(
+    dataAddress,
+    4,
+    false,
+    succeeded,
+    succeeded ? value : 0);
+  if (!succeeded)
+  {
+    return raiseDataAccessException(
+      EEException::DataBusErrorLoad,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  writeLowDoubleword(
+    instruction.targetRegister,
+    instruction.operation == EEOperation::LoadWord
+      ? signExtendWord(value)
+      : value);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadWordLeft:
+    case EEOperation::LoadWordRight:
+    case EEOperation::StoreWordLeft:
+    case EEOperation::StoreWordRight:
+      break;
+    default:
+      throw std::logic_error(
+        "EE word-merge-memory handler received an incompatible "
+        "operation.");
+  }
+
+  const std::uint64_t target =
+    generalRegisters[instruction.targetRegister].low;
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate));
+  const std::uint32_t alignedAddress =
+    dataAddress & ~UINT32_C(3);
+  const bool store =
+    instruction.operation == EEOperation::StoreWordLeft ||
+    instruction.operation == EEOperation::StoreWordRight;
+  std::uint32_t memory = 0;
+  const bool readSucceeded =
+    attachedBus().readData32(alignedAddress, &memory);
+  recordMemoryTrace(
+    alignedAddress,
+    4,
+    false,
+    readSucceeded,
+    readSucceeded ? memory : 0);
+  if (!readSucceeded)
+  {
+    return raiseDataAccessException(
+      store
+        ? EEException::DataBusErrorStore
+        : EEException::DataBusErrorLoad,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+
+  const std::uint8_t byteOffset = dataAddress & 3;
+  if (!store)
+  {
+    std::uint32_t result =
+      static_cast<std::uint32_t>(target);
+    if (instruction.operation == EEOperation::LoadWordLeft)
+    {
+      for (std::uint8_t memoryByte = 0;
+           memoryByte <= byteOffset;
+           ++memoryByte)
+      {
+        const std::uint8_t registerByte =
+          3 - byteOffset + memoryByte;
+        const std::uint32_t mask =
+          UINT32_C(0xff) << (registerByte * 8);
+        result =
+          (result & ~mask) |
+          (((memory >> (memoryByte * 8)) & 0xff) <<
+           (registerByte * 8));
+      }
+      writeLowDoubleword(
+        instruction.targetRegister,
+        signExtendWord(result));
+    }
+    else
+    {
+      for (std::uint8_t memoryByte = byteOffset;
+           memoryByte < 4;
+           ++memoryByte)
+      {
+        const std::uint8_t registerByte =
+          memoryByte - byteOffset;
+        const std::uint32_t mask =
+          UINT32_C(0xff) << (registerByte * 8);
+        result =
+          (result & ~mask) |
+          (((memory >> (memoryByte * 8)) & 0xff) <<
+           (registerByte * 8));
+      }
+      writeLowDoubleword(
+        instruction.targetRegister,
+        byteOffset == 0
+          ? signExtendWord(result)
+          : (target & UINT64_C(0xffffffff00000000)) |
+            result);
+    }
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  const std::uint32_t registerValue =
+    static_cast<std::uint32_t>(target);
+  if (instruction.operation == EEOperation::StoreWordLeft)
+  {
+    for (std::uint8_t memoryByte = 0;
+         memoryByte <= byteOffset;
+         ++memoryByte)
+    {
+      const std::uint8_t registerByte =
+        3 - byteOffset + memoryByte;
+      const std::uint32_t mask =
+        UINT32_C(0xff) << (memoryByte * 8);
+      memory =
+        (memory & ~mask) |
+        (((registerValue >> (registerByte * 8)) & 0xff) <<
+         (memoryByte * 8));
+    }
+  }
+  else
+  {
+    for (std::uint8_t memoryByte = byteOffset;
+         memoryByte < 4;
+         ++memoryByte)
+    {
+      const std::uint8_t registerByte =
+        memoryByte - byteOffset;
+      const std::uint32_t mask =
+        UINT32_C(0xff) << (memoryByte * 8);
+      memory =
+        (memory & ~mask) |
+        (((registerValue >> (registerByte * 8)) & 0xff) <<
+         (memoryByte * 8));
+    }
+  }
+  const bool writeSucceeded =
+    attachedBus().writeData32(alignedAddress, memory);
+  recordMemoryTrace(
+    alignedAddress,
+    4,
+    true,
+    writeSucceeded,
+    memory);
+  if (!writeSucceeded)
+  {
+    return raiseDataAccessException(
+      EEException::DataBusErrorStore,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadDoubleword:
+    case EEOperation::StoreDoubleword:
+      break;
+    default:
+      throw std::logic_error(
+        "EE doubleword-memory handler received an incompatible "
+        "operation.");
+  }
+
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate));
+  const bool store =
+    instruction.operation == EEOperation::StoreDoubleword;
+  if ((dataAddress & 7) != 0)
+  {
+    return raiseDataAccessException(
+      store
+        ? EEException::AddressErrorStore
+        : EEException::AddressErrorLoadOrFetch,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  if (store)
+  {
+    const std::uint64_t value =
+      generalRegisters[instruction.targetRegister].low;
+    const bool succeeded =
+      attachedBus().writeData64(dataAddress, value);
+    recordMemoryTrace(
+      dataAddress,
+      8,
+      true,
+      succeeded,
+      value);
+    if (!succeeded)
+    {
+      return raiseDataAccessException(
+        EEException::DataBusErrorStore,
+        address,
+        dataAddress,
+        instruction.raw);
+    }
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  std::uint64_t value = 0;
+  const bool succeeded =
+    attachedBus().readData64(dataAddress, &value);
+  recordMemoryTrace(
+    dataAddress,
+    8,
+    false,
+    succeeded,
+    succeeded ? value : 0);
+  if (!succeeded)
+  {
+    return raiseDataAccessException(
+      EEException::DataBusErrorLoad,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  writeLowDoubleword(instruction.targetRegister, value);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadDoublewordLeft:
+    case EEOperation::LoadDoublewordRight:
+    case EEOperation::StoreDoublewordLeft:
+    case EEOperation::StoreDoublewordRight:
+      break;
+    default:
+      throw std::logic_error(
+        "EE doubleword-merge-memory handler received an "
+        "incompatible operation.");
+  }
+
+  const std::uint64_t target =
+    generalRegisters[instruction.targetRegister].low;
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate));
+  const std::uint32_t alignedAddress =
+    dataAddress & ~UINT32_C(7);
+  const bool store =
+    instruction.operation == EEOperation::StoreDoublewordLeft ||
+    instruction.operation == EEOperation::StoreDoublewordRight;
+  std::uint64_t memory = 0;
+  const bool readSucceeded =
+    attachedBus().readData64(alignedAddress, &memory);
+  recordMemoryTrace(
+    alignedAddress,
+    8,
+    false,
+    readSucceeded,
+    readSucceeded ? memory : 0);
+  if (!readSucceeded)
+  {
+    return raiseDataAccessException(
+      store
+        ? EEException::DataBusErrorStore
+        : EEException::DataBusErrorLoad,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+
+  const std::uint8_t byteOffset = dataAddress & 7;
+  if (!store)
+  {
+    std::uint64_t result = target;
+    if (instruction.operation ==
+        EEOperation::LoadDoublewordLeft)
+    {
+      for (std::uint8_t memoryByte = 0;
+           memoryByte <= byteOffset;
+           ++memoryByte)
+      {
+        const std::uint8_t registerByte =
+          7 - byteOffset + memoryByte;
+        const std::uint64_t mask =
+          UINT64_C(0xff) << (registerByte * 8);
+        result =
+          (result & ~mask) |
+          (((memory >> (memoryByte * 8)) & 0xff) <<
+           (registerByte * 8));
+      }
+    }
+    else
+    {
+      for (std::uint8_t memoryByte = byteOffset;
+           memoryByte < 8;
+           ++memoryByte)
+      {
+        const std::uint8_t registerByte =
+          memoryByte - byteOffset;
+        const std::uint64_t mask =
+          UINT64_C(0xff) << (registerByte * 8);
+        result =
+          (result & ~mask) |
+          (((memory >> (memoryByte * 8)) & 0xff) <<
+           (registerByte * 8));
+      }
+    }
+    writeLowDoubleword(instruction.targetRegister, result);
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  if (instruction.operation ==
+      EEOperation::StoreDoublewordLeft)
+  {
+    for (std::uint8_t memoryByte = 0;
+         memoryByte <= byteOffset;
+         ++memoryByte)
+    {
+      const std::uint8_t registerByte =
+        7 - byteOffset + memoryByte;
+      const std::uint64_t mask =
+        UINT64_C(0xff) << (memoryByte * 8);
+      memory =
+        (memory & ~mask) |
+        (((target >> (registerByte * 8)) & 0xff) <<
+         (memoryByte * 8));
+    }
+  }
+  else
+  {
+    for (std::uint8_t memoryByte = byteOffset;
+         memoryByte < 8;
+         ++memoryByte)
+    {
+      const std::uint8_t registerByte =
+        memoryByte - byteOffset;
+      const std::uint64_t mask =
+        UINT64_C(0xff) << (memoryByte * 8);
+      memory =
+        (memory & ~mask) |
+        (((target >> (registerByte * 8)) & 0xff) <<
+         (memoryByte * 8));
+    }
+  }
+  const bool writeSucceeded =
+    attachedBus().writeData64(alignedAddress, memory);
+  recordMemoryTrace(
+    alignedAddress,
+    8,
+    true,
+    writeSucceeded,
+    memory);
+  if (!writeSucceeded)
+  {
+    return raiseDataAccessException(
+      EEException::DataBusErrorStore,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadQuadword:
+    case EEOperation::StoreQuadword:
+      break;
+    default:
+      throw std::logic_error(
+        "EE quadword-memory handler received an incompatible "
+        "operation.");
+  }
+
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate)) &
+    ~UINT32_C(0x0f);
+  if (instruction.operation == EEOperation::StoreQuadword)
+  {
+    const EERegister128 &value =
+      generalRegisters[instruction.targetRegister];
+    const EEDataWriteResult writeResult =
+      attachedBus().writeGuestData128(
+        dataAddress,
+        {value.low, value.high});
+    const bool succeeded =
+      writeResult == EEDataWriteResult::Completed;
+    recordMemoryTrace(
+      dataAddress,
+      16,
+      true,
+      succeeded,
+      value.low,
+      value.high);
+    if (writeResult == EEDataWriteResult::Stalled)
+    {
+      pc = address;
+      return EEInstructionExecutionOutcome::Delayed;
+    }
+    if (!succeeded)
+    {
+      return raiseDataAccessException(
+        EEException::DataBusErrorStore,
+        address,
+        dataAddress,
+        instruction.raw);
+    }
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  EEQuadword value = {};
+  const bool succeeded =
+    attachedBus().readData128(dataAddress, &value);
+  recordMemoryTrace(
+    dataAddress,
+    16,
+    false,
+    succeeded,
+    succeeded ? value.low : 0,
+    succeeded ? value.high : 0);
+  if (!succeeded)
+  {
+    return raiseDataAccessException(
+      EEException::DataBusErrorLoad,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  if (instruction.targetRegister != 0)
+  {
+    generalRegisters[instruction.targetRegister] = {
+      value.low,
+      value.high
+    };
+  }
+  return EEInstructionExecutionOutcome::Completed;
 }
 
 EEInstructionExecutionOutcome EECore::executeExceptionReturn(

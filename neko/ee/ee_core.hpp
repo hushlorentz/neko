@@ -711,6 +711,24 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeByteMemory(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeHalfwordMemory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeWordMemory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeWordMergeMemory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeDoublewordMemory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeDoublewordMergeMemory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeQuadwordMemory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeExceptionReturn(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeSoftwareException(

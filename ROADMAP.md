@@ -1139,7 +1139,7 @@ accumulator or condition-result contract:
 - [ ] Migrate operation families incrementally:
   - [x] Extract scalar arithmetic and special-register families with integer
         and overflow coverage
-  - [ ] Extract scalar memory width and merge families with alignment, bus,
+  - [x] Extract scalar memory width and merge families with alignment, bus,
         trace, and retry coverage
   - [ ] Extract remaining C1 admission families with pipeline and retirement
         coverage
