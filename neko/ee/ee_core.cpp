@@ -1269,20 +1269,21 @@ EEIssueMemberExecution EECore::executeIssueMember(
     instructionValue,
     static_cast<std::uint8_t>(decoded.operation),
     wasDelaySlot);
-  const bool executed =
+  const EEInstructionExecutionOutcome execution =
     executeInstruction(decoded, instructionAddress);
   executingProgramOrder = 0;
-  if (!executed)
+  switch (execution)
   {
-    if (state != EEExecutionState::Running)
-    {
+    case EEInstructionExecutionOutcome::Completed:
+      break;
+    case EEInstructionExecutionOutcome::Delayed:
+      return EEIssueMemberExecution::Blocked;
+    case EEInstructionExecutionOutcome::Faulted:
+      return EEIssueMemberExecution::Failed;
+    case EEInstructionExecutionOutcome::Halted:
+    case EEInstructionExecutionOutcome::Rejected:
       clearIssueFrontEnd();
-    }
-    return
-      exceptionEnteredThisCycle ||
-      state != EEExecutionState::Running
-        ? EEIssueMemberExecution::Failed
-        : EEIssueMemberExecution::Blocked;
+      return EEIssueMemberExecution::Failed;
   }
 
   ++nextEEProgramOrder;
@@ -1436,20 +1437,20 @@ void EECore::applyInstructionAcceptanceEffects(
   shiftAmountOrdering.accept(instruction.operation);
 }
 
-bool EECore::executeInstruction(
+EEInstructionExecutionOutcome EECore::executeInstruction(
   const EEInstruction &instruction,
   std::uint32_t address)
 {
   if (!shiftAmountOrdering.permits(instruction.operation))
   {
-    stopUndefinedOperation(address, instruction.raw);
+    haltUndefinedOperation(address, instruction.raw);
     rejectedInstructionValue = instruction.raw;
-    return false;
+    return EEInstructionExecutionOutcome::Rejected;
   }
   if (!validateDelaySlotInstruction(instruction, address))
   {
     rejectedInstructionValue = instruction.raw;
-    return false;
+    return EEInstructionExecutionOutcome::Rejected;
   }
 
   const std::uint64_t source =
@@ -1468,7 +1469,7 @@ bool EECore::executeInstruction(
     case EEOperation::Nop:
     case EEOperation::SynchronizeLoadStore:
     case EEOperation::SynchronizePipeline:
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ExceptionReturn:
       discardInFlightCOP1AtOrAfter(
         executingProgramOrder + 1);
@@ -1483,21 +1484,21 @@ bool EECore::executeInstruction(
         cop0Status &= ~EECOP0Status::EXCEPTION_LEVEL;
       }
       clearPendingException();
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::SystemCall:
       enterException(
         EEException::SystemCall,
         address,
         address,
         instruction.raw);
-      return false;
+      return EEInstructionExecutionOutcome::Faulted;
     case EEOperation::Breakpoint:
       enterException(
         EEException::Breakpoint,
         address,
         address,
         instruction.raw);
-      return false;
+      return EEInstructionExecutionOutcome::Faulted;
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -1506,7 +1507,7 @@ bool EECore::executeInstruction(
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
@@ -1548,13 +1549,13 @@ bool EECore::executeInstruction(
         operation,
         UINT8_MAX,
         COP1PipelineStage::R);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::SquareRootSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       const std::uint32_t ftBits =
         scoreboardFPRValue(instruction.targetRegister);
@@ -1566,13 +1567,13 @@ bool EECore::executeInstruction(
         ftBits,
         result.bits,
         result.flags);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::ReciprocalSquareRootSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       const std::uint32_t fsBits =
         scoreboardFPRValue(destination);
@@ -1588,13 +1589,13 @@ bool EECore::executeInstruction(
         ftBits,
         result.bits,
         result.flags);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::DivideSingleCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       const std::uint32_t fsBits =
         scoreboardFPRValue(destination);
@@ -1608,7 +1609,7 @@ bool EECore::executeInstruction(
         ftBits,
         result.bits,
         result.flags);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::AbsoluteSingleCOP1:
     case EEOperation::NegateSingleCOP1:
@@ -1633,7 +1634,7 @@ bool EECore::executeInstruction(
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
@@ -1682,7 +1683,7 @@ bool EECore::executeInstruction(
         operation,
         UINT8_MAX,
         COP1PipelineStage::R);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::BranchCOP1False:
     case EEOperation::BranchCOP1FalseLikely:
@@ -1691,7 +1692,7 @@ bool EECore::executeInstruction(
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       const bool branchOnTrue =
         instruction.operation == EEOperation::BranchCOP1True ||
@@ -1711,7 +1712,7 @@ bool EECore::executeInstruction(
         likely,
         branchTarget,
         address);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::ShiftLeftLogicalWord:
     case EEOperation::ShiftRightLogicalWord:
@@ -1725,7 +1726,7 @@ bool EECore::executeInstruction(
             address,
             instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Halted;
       }
       const std::uint8_t amount =
         instruction.operation ==
@@ -1758,59 +1759,59 @@ bool EECore::executeInstruction(
         result = arithmeticShiftRight32(word, amount);
       }
       writeWord(destination, result);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::ShiftLeftLogicalVariableDoubleword:
       writeLowDoubleword(
         destination,
         target << (source & 0x3f));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightLogicalVariableDoubleword:
       writeLowDoubleword(
         destination,
         target >> (source & 0x3f));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightArithmeticVariableDoubleword:
       writeLowDoubleword(
         destination,
         arithmeticShiftRight64(
           target,
           source & 0x3f));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftLeftLogicalDoubleword:
       writeLowDoubleword(
         destination,
         target << instruction.shiftAmount);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightLogicalDoubleword:
       writeLowDoubleword(
         destination,
         target >> instruction.shiftAmount);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightArithmeticDoubleword:
       writeLowDoubleword(
         destination,
         arithmeticShiftRight64(
           target,
           instruction.shiftAmount));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftLeftLogicalDoubleword32:
       writeLowDoubleword(
         destination,
         target << (instruction.shiftAmount + 32));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightLogicalDoubleword32:
       writeLowDoubleword(
         destination,
         target >> (instruction.shiftAmount + 32));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightArithmeticDoubleword32:
       writeLowDoubleword(
         destination,
         arithmeticShiftRight64(
           target,
           instruction.shiftAmount + 32));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::AddWord:
     case EEOperation::AddUnsignedWord:
     case EEOperation::SubtractWord:
@@ -1825,7 +1826,7 @@ bool EECore::executeInstruction(
             address,
             instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Halted;
       }
       const std::uint32_t left =
         static_cast<std::uint32_t>(source);
@@ -1850,7 +1851,7 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       writeWord(destination, result);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::AddDoubleword:
     case EEOperation::AddUnsignedDoubleword:
@@ -1878,30 +1879,30 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       writeLowDoubleword(destination, result);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::And:
       writeLowDoubleword(destination, source & target);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::Or:
       writeLowDoubleword(destination, source | target);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::Xor:
       writeLowDoubleword(destination, source ^ target);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::Nor:
       writeLowDoubleword(destination, ~(source | target));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::SetLessThan:
       writeLowDoubleword(
         destination,
         signedLess(source, target) ? 1 : 0);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::SetLessThanUnsigned:
       writeLowDoubleword(
         destination,
         source < target ? 1 : 0);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::AddImmediateWord:
     case EEOperation::AddImmediateUnsignedWord:
     {
@@ -1910,7 +1911,7 @@ bool EECore::executeInstruction(
             address,
             instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Halted;
       }
       const std::uint32_t left =
         static_cast<std::uint32_t>(source);
@@ -1926,7 +1927,7 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       writeWord(immediateDestination, result);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::AddImmediateDoubleword:
     case EEOperation::AddImmediateUnsignedDoubleword:
@@ -1941,80 +1942,80 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       writeLowDoubleword(immediateDestination, result);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::SetLessThanImmediate:
       writeLowDoubleword(
         immediateDestination,
         signedLess(source, immediate) ? 1 : 0);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::SetLessThanImmediateUnsigned:
       writeLowDoubleword(
         immediateDestination,
         source < immediate ? 1 : 0);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::AndImmediate:
       writeLowDoubleword(
         immediateDestination,
         source & instruction.immediate);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::OrImmediate:
       writeLowDoubleword(
         immediateDestination,
         source | instruction.immediate);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::XorImmediate:
       writeLowDoubleword(
         immediateDestination,
         source ^ instruction.immediate);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::LoadUpperImmediate:
       writeLowDoubleword(
         immediateDestination,
         signExtendWord(
           static_cast<std::uint32_t>(
             instruction.immediate) << 16));
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveFromHI:
       writeLowDoubleword(destination, hiRegister);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveToHI:
       hiRegister = source;
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveFromLO:
       writeLowDoubleword(destination, loRegister);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveToLO:
       loRegister = source;
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveFromHI1:
       writeLowDoubleword(destination, hi1Register);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveToHI1:
       hi1Register = source;
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveFromLO1:
       writeLowDoubleword(destination, lo1Register);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveToLO1:
       lo1Register = source;
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveFromShiftAmount:
       writeLowDoubleword(destination, saRegister);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveToShiftAmount:
       saRegister = static_cast<std::uint32_t>(source);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveByteCountToShiftAmount:
       saRegister =
         ((static_cast<std::uint32_t>(source) ^
           instruction.immediate) & 0x0f) * 8;
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::MoveHalfwordCountToShiftAmount:
       saRegister =
         ((static_cast<std::uint32_t>(source) ^
           instruction.immediate) & 0x07) * 16;
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::LoadByte:
     case EEOperation::LoadByteUnsigned:
     {
@@ -2043,7 +2044,7 @@ bool EECore::executeInstruction(
           (value & 0x80) != 0
           ? UINT64_C(0xffffffffffffff00) | value
           : value);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreByte:
     {
@@ -2067,7 +2068,7 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadHalfword:
     case EEOperation::LoadHalfwordUnsigned:
@@ -2104,7 +2105,7 @@ bool EECore::executeInstruction(
         instruction.operation == EEOperation::LoadHalfword
           ? signExtend16(value)
           : value);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreHalfword:
     {
@@ -2136,7 +2137,7 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadWord:
     case EEOperation::LoadWordUnsigned:
@@ -2173,7 +2174,7 @@ bool EECore::executeInstruction(
         instruction.operation == EEOperation::LoadWord
           ? signExtendWord(value)
           : value);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreWord:
     {
@@ -2205,13 +2206,13 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadWordToCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
@@ -2223,13 +2224,13 @@ bool EECore::executeInstruction(
         operation,
         UINT8_MAX,
         COP1PipelineStage::R);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreWordFromCOP1:
     {
       if (!requireCOP1Usable(address, instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Faulted;
       }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
@@ -2239,7 +2240,7 @@ bool EECore::executeInstruction(
         operation,
         UINT8_MAX,
         COP1PipelineStage::R);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadWordLeft:
     case EEOperation::LoadWordRight:
@@ -2309,7 +2310,7 @@ bool EECore::executeInstruction(
             : (target & UINT64_C(0xffffffff00000000)) |
               result);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreWordLeft:
     case EEOperation::StoreWordRight:
@@ -2386,7 +2387,7 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadDoubleword:
     {
@@ -2418,7 +2419,7 @@ bool EECore::executeInstruction(
           instruction.raw);
       }
       writeLowDoubleword(immediateDestination, value);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreDoubleword:
     {
@@ -2448,7 +2449,7 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadDoublewordLeft:
     case EEOperation::LoadDoublewordRight:
@@ -2510,7 +2511,7 @@ bool EECore::executeInstruction(
         }
       }
       writeLowDoubleword(immediateDestination, result);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreDoublewordLeft:
     case EEOperation::StoreDoublewordRight:
@@ -2586,7 +2587,7 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadQuadword:
     {
@@ -2618,7 +2619,7 @@ bool EECore::executeInstruction(
           value.high
         };
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreQuadword:
     {
@@ -2643,7 +2644,7 @@ bool EECore::executeInstruction(
       if (writeResult == EEDataWriteResult::Stalled)
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       if (!succeeded)
       {
@@ -2653,7 +2654,7 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::LoadQuadwordToCOP2:
     {
@@ -2671,7 +2672,7 @@ bool EECore::executeInstruction(
             immediateDestination))
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       EEQuadword value = {};
       const bool succeeded =
@@ -2698,7 +2699,7 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(value.high),
         static_cast<std::uint32_t>(value.high >> 32));
       attachedVU0().noteMacroTransferToVU();
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::StoreQuadwordFromCOP2:
     {
@@ -2716,7 +2717,7 @@ bool EECore::executeInstruction(
             immediateDestination))
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       const EERegister128 value = quadwordFromFPRegister(
         *attachedVU0().fpRegisterValue(immediateDestination));
@@ -2736,7 +2737,7 @@ bool EECore::executeInstruction(
       if (writeResult == EEDataWriteResult::Stalled)
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       if (!succeeded)
       {
@@ -2746,7 +2747,7 @@ bool EECore::executeInstruction(
           dataAddress,
           instruction.raw);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::QuadwordMoveFromCOP2:
     {
@@ -2756,7 +2757,7 @@ bool EECore::executeInstruction(
             destination))
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       if (immediateDestination != 0)
       {
@@ -2764,7 +2765,7 @@ bool EECore::executeInstruction(
           quadwordFromFPRegister(
             *attachedVU0().fpRegisterValue(destination));
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::QuadwordMoveToCOP2:
     {
@@ -2774,7 +2775,7 @@ bool EECore::executeInstruction(
             destination))
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       const EERegister128 &value =
         generalRegisters[immediateDestination];
@@ -2785,7 +2786,7 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(value.high),
         static_cast<std::uint32_t>(value.high >> 32));
       attachedVU0().noteMacroTransferToVU();
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::ControlMoveFromCOP2:
     {
@@ -2798,14 +2799,13 @@ bool EECore::executeInstruction(
            (destination == 16 || destination == 17)))
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       std::uint32_t value = 0;
       if (!readCOP2ControlRegister(destination, &value))
       {
-        return stopUndefinedOperation(
-          address,
-          instruction.raw);
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
       }
       if (destination < 16)
       {
@@ -2815,7 +2815,7 @@ bool EECore::executeInstruction(
       {
         writeWord(immediateDestination, value);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::ControlMoveToCOP2:
       if (((instruction.raw & 1) != 0 &&
@@ -2828,18 +2828,17 @@ bool EECore::executeInstruction(
             destination == 18)))
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
       if (!writeCOP2ControlRegister(
             destination,
             static_cast<std::uint32_t>(target)))
       {
-        return stopUndefinedOperation(
-          address,
-          instruction.raw);
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
       }
       attachedVU0().noteMacroTransferToVU();
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::BranchCOP2False:
     case EEOperation::BranchCOP2FalseLikely:
     case EEOperation::BranchCOP2True:
@@ -2865,7 +2864,7 @@ bool EECore::executeInstruction(
         likely,
         branchTarget,
         address);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::VectorCallMicroSubroutine:
     case EEOperation::VectorCallMicroSubroutineRegister:
@@ -2880,9 +2879,8 @@ bool EECore::executeInstruction(
         8;
       if (callAddress > vu0.microMemorySize() - 8)
       {
-        return stopUndefinedOperation(
-          address,
-          instruction.raw);
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
       }
       const std::uint16_t startAddress =
         static_cast<std::uint16_t>(callAddress);
@@ -2891,7 +2889,7 @@ bool EECore::executeInstruction(
         if (!vu0.startMicroModeFromMacro(startAddress))
         {
           pc = address;
-          return false;
+          return EEInstructionExecutionOutcome::Delayed;
         }
       }
       else
@@ -2899,28 +2897,27 @@ bool EECore::executeInstruction(
         if (vu0.microModeActive())
         {
           pc = address;
-          return false;
+          return EEInstructionExecutionOutcome::Delayed;
         }
         vu0.startMicroMode(startAddress);
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::VectorMacroArithmetic:
     {
       VPU &vu0 = attachedVU0();
       if (vu0.getState() == VPU_STATE_STOP)
       {
-        return stopUndefinedOperation(
-          address,
-          instruction.raw);
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
       }
       if (!vu0.issueMacroInstruction(
             instruction.raw & UINT32_C(0x01ffffff)))
       {
         pc = address;
-        return false;
+        return EEInstructionExecutionOutcome::Delayed;
       }
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::Jump:
       scheduleBranch(
@@ -2929,7 +2926,7 @@ bool EECore::executeInstruction(
         ((address + 4) & UINT32_C(0xf0000000)) |
           (instruction.target << 2),
         address);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::JumpAndLink:
       writeLowDoubleword(31, address + 8);
       scheduleBranch(
@@ -2938,20 +2935,19 @@ bool EECore::executeInstruction(
         ((address + 4) & UINT32_C(0xf0000000)) |
           (instruction.target << 2),
         address);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::JumpRegister:
       scheduleBranch(
         true,
         false,
         static_cast<std::uint32_t>(source),
         address);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::JumpAndLinkRegister:
       if (instruction.sourceRegister == destination)
       {
-        return stopUndefinedOperation(
-          address,
-          instruction.raw);
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
       }
       writeLowDoubleword(destination, address + 8);
       scheduleBranch(
@@ -2959,7 +2955,7 @@ bool EECore::executeInstruction(
         false,
         static_cast<std::uint32_t>(source),
         address);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::BranchEqual:
     case EEOperation::BranchNotEqual:
     case EEOperation::BranchLessThanOrEqualZero:
@@ -3034,9 +3030,8 @@ bool EECore::executeInstruction(
           EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
       if (link && instruction.sourceRegister == 31)
       {
-        return stopUndefinedOperation(
-          address,
-          instruction.raw);
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
       }
       if (link)
       {
@@ -3051,7 +3046,7 @@ bool EECore::executeInstruction(
         likely,
         branchTarget,
         address);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::MultiplyWord:
     case EEOperation::MultiplyUnsignedWord:
@@ -3071,7 +3066,7 @@ bool EECore::executeInstruction(
             address,
             instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Halted;
       }
       const bool pipeline1 =
         instruction.operation == EEOperation::MultiplyWord1 ||
@@ -3109,7 +3104,7 @@ bool EECore::executeInstruction(
         signExtendWord(static_cast<std::uint32_t>(result)),
         destination,
         true);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::DivideWord:
     case EEOperation::DivideUnsignedWord:
@@ -3125,7 +3120,7 @@ bool EECore::executeInstruction(
             address,
             instruction.raw))
       {
-        return false;
+        return EEInstructionExecutionOutcome::Halted;
       }
       const std::uint32_t dividend =
         static_cast<std::uint32_t>(source);
@@ -3133,9 +3128,8 @@ bool EECore::executeInstruction(
         static_cast<std::uint32_t>(target);
       if (divisor == 0)
       {
-        return stopUndefinedOperation(
-          address,
-          instruction.raw);
+        haltUndefinedOperation(address, instruction.raw);
+        return EEInstructionExecutionOutcome::Halted;
       }
       const bool pipeline1 =
         instruction.operation == EEOperation::DivideWord1 ||
@@ -3174,15 +3168,14 @@ bool EECore::executeInstruction(
         signExtendWord(quotient),
         0,
         false);
-      return true;
+      return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::Count:
       break;
   }
 
-  return stopUndefinedOperation(
-    address,
-    instruction.raw);
+  haltUndefinedOperation(address, instruction.raw);
+  return EEInstructionExecutionOutcome::Rejected;
 }
 
 bool EECore::requireWordValue(
@@ -3194,7 +3187,8 @@ bool EECore::requireWordValue(
   {
     return true;
   }
-  return stopUndefinedOperation(address, instruction);
+  haltUndefinedOperation(address, instruction);
+  return false;
 }
 
 void EECore::writeLowDoubleword(
@@ -3214,7 +3208,8 @@ void EECore::writeWord(
   writeLowDoubleword(registerIndex, signExtendWord(value));
 }
 
-bool EECore::raiseArithmeticOverflow(
+EEInstructionExecutionOutcome
+EECore::raiseArithmeticOverflow(
   std::uint32_t address,
   std::uint32_t instruction)
 {
@@ -3223,7 +3218,7 @@ bool EECore::raiseArithmeticOverflow(
     address,
     address,
     instruction);
-  return false;
+  return EEInstructionExecutionOutcome::Faulted;
 }
 
 bool EECore::requireCOP1Usable(
@@ -3245,7 +3240,7 @@ bool EECore::requireCOP1Usable(
   return false;
 }
 
-bool EECore::stopUndefinedOperation(
+void EECore::haltUndefinedOperation(
   std::uint32_t address,
   std::uint32_t instruction)
 {
@@ -3253,7 +3248,6 @@ bool EECore::stopUndefinedOperation(
   state = EEExecutionState::Halted;
   haltReason = EEStopReason::UndefinedOperation;
   rejectedInstructionValue = instruction;
-  return false;
 }
 
 bool EECore::pendingMultiplyDivideActive() const
@@ -4940,7 +4934,8 @@ bool EECore::validateDelaySlotInstruction(
        (branchDelayFromLikely &&
         writesShiftAmount(instruction.operation)))
   {
-    return stopUndefinedOperation(address, instruction.raw);
+    haltUndefinedOperation(address, instruction.raw);
+    return false;
   }
   return true;
 }
@@ -5012,7 +5007,8 @@ void EECore::recordMemoryTrace(
       (succeeded ? UINT64_C(1) << 9 : 0));
 }
 
-bool EECore::raiseDataAccessException(
+EEInstructionExecutionOutcome
+EECore::raiseDataAccessException(
   EEException type,
   std::uint32_t instructionAddress,
   std::uint32_t dataAddress,
@@ -5023,7 +5019,7 @@ bool EECore::raiseDataAccessException(
     instructionAddress,
     dataAddress,
     instruction);
-  return false;
+  return EEInstructionExecutionOutcome::Faulted;
 }
 
 bool EECore::raiseCOP1DataAccessException(

@@ -18,7 +18,97 @@ struct EECoreTestAccess
     core->fillIssueFrontEnd();
     return core->executeIssueGroup(memberCount, 0);
   }
+
+  static EEInstructionExecutionOutcome executeInstruction(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeInstruction(instruction, 0);
+  }
+
+  static void setShiftAmountOrdering(
+    EECore *core,
+    std::uint8_t accesses,
+    std::uint8_t reads)
+  {
+    core->shiftAmountOrdering.restore(accesses, reads);
+  }
 };
+
+TEST_CASE("EE instruction execution reports explicit outcomes")
+{
+  SECTION("Completed work")
+  {
+    NekoSystem system;
+    system.eeCore().startExecution(0);
+    EEInstruction instruction;
+    instruction.operation = EEOperation::Nop;
+    REQUIRE(
+      EECoreTestAccess::executeInstruction(
+        &system.eeCore(),
+        instruction) ==
+      EEInstructionExecutionOutcome::Completed);
+  }
+
+  SECTION("Delayed work")
+  {
+    NekoSystem system;
+    system.eeCore().startExecution(0);
+    system.vu0().startMicroMode(0);
+    EEInstruction instruction;
+    instruction.operation = EEOperation::QuadwordMoveToCOP2;
+    instruction.raw = 1;
+    REQUIRE(
+      EECoreTestAccess::executeInstruction(
+        &system.eeCore(),
+        instruction) ==
+      EEInstructionExecutionOutcome::Delayed);
+  }
+
+  SECTION("Faulted work")
+  {
+    NekoSystem system;
+    system.eeCore().startExecution(0);
+    EEInstruction instruction;
+    instruction.operation = EEOperation::SystemCall;
+    REQUIRE(
+      EECoreTestAccess::executeInstruction(
+        &system.eeCore(),
+        instruction) ==
+      EEInstructionExecutionOutcome::Faulted);
+  }
+
+  SECTION("Halted work")
+  {
+    NekoSystem system;
+    system.eeCore().startExecution(0);
+    EEInstruction instruction;
+    instruction.operation = EEOperation::DivideWord;
+    REQUIRE(
+      EECoreTestAccess::executeInstruction(
+        &system.eeCore(),
+        instruction) ==
+      EEInstructionExecutionOutcome::Halted);
+  }
+
+  SECTION("Rejected work")
+  {
+    NekoSystem system;
+    system.eeCore().startExecution(0);
+    EECoreTestAccess::setShiftAmountOrdering(
+      &system.eeCore(),
+      1,
+      1);
+    EEInstruction instruction;
+    instruction.operation =
+      EEOperation::MoveByteCountToShiftAmount;
+    REQUIRE(
+      EECoreTestAccess::executeInstruction(
+        &system.eeCore(),
+        instruction) ==
+      EEInstructionExecutionOutcome::Rejected);
+  }
+}
 
 TEST_CASE("EE acceptance records preserve issue-group order")
 {

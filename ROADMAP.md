@@ -1124,7 +1124,7 @@ accumulator or condition-result contract:
 
 - [x] Classify every `EECore::executeInstruction()` case into a coherent
       execution family with one architectural purpose
-- [ ] Define an explicit execution outcome that distinguishes completed,
+- [x] Define an explicit execution outcome that distinguishes completed,
       delayed, faulted, halted, and rejected work without behavioral booleans
 - [ ] Add a table-driven completeness test proving every value below
       `EE_OPERATION_COUNT` has an execution-family and dispatch classification,

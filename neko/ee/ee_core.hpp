@@ -107,6 +107,15 @@ enum class EEIssueMemberExecution : std::uint8_t
   Failed
 };
 
+enum class EEInstructionExecutionOutcome : std::uint8_t
+{
+  Completed,
+  Delayed,
+  Faulted,
+  Halted,
+  Rejected
+};
+
 struct EEIssueGroupExecutionResult
 {
   std::uint8_t attempted = 0;
@@ -666,7 +675,7 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction) const;
     bool cop2ScoreboardBlocks(
       const EEInstruction &instruction) const;
-    bool executeInstruction(
+    EEInstructionExecutionOutcome executeInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);
     bool requireWordValue(
@@ -679,14 +688,14 @@ class EECore : public ClockedComponent
     void writeWord(
       std::uint8_t registerIndex,
       std::uint32_t value);
-    bool raiseArithmeticOverflow(
+    EEInstructionExecutionOutcome raiseArithmeticOverflow(
       std::uint32_t address,
       std::uint32_t instruction);
     bool requireCOP1Usable(
       std::uint32_t address,
       std::uint32_t instruction);
     void setCOP1Condition(bool condition);
-    bool stopUndefinedOperation(
+    void haltUndefinedOperation(
       std::uint32_t address,
       std::uint32_t instruction);
     bool pendingMultiplyDivideActive() const;
@@ -778,7 +787,7 @@ class EECore : public ClockedComponent
       bool succeeded,
       std::uint64_t low,
       std::uint64_t high = 0);
-    bool raiseDataAccessException(
+    EEInstructionExecutionOutcome raiseDataAccessException(
       EEException type,
       std::uint32_t instructionAddress,
       std::uint32_t dataAddress,
