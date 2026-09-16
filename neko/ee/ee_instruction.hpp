@@ -269,9 +269,55 @@ enum class EECOP1ResultDestination : std::uint8_t
   Condition
 };
 
+enum class EEExecutionFamily : std::uint8_t
+{
+  Unclassified,
+  NoOperation,
+  LoadStoreSynchronization,
+  PipelineSynchronization,
+  ExceptionReturn,
+  SoftwareException,
+  COP1RegisterMove,
+  COP1Divider,
+  COP1StagedOperation,
+  COP1Branch,
+  WordShift,
+  DoublewordShift,
+  WordArithmetic,
+  DoublewordArithmetic,
+  RegisterLogical,
+  RegisterCompare,
+  ImmediateWordArithmetic,
+  ImmediateDoublewordArithmetic,
+  ImmediateCompare,
+  ImmediateLogical,
+  MACRegisterMove,
+  ShiftAmountOperation,
+  ByteMemory,
+  HalfwordMemory,
+  WordMemory,
+  WordMergeMemory,
+  DoublewordMemory,
+  DoublewordMergeMemory,
+  QuadwordMemory,
+  COP1Memory,
+  COP2Memory,
+  COP2VectorMove,
+  COP2ControlMove,
+  COP2Branch,
+  COP2MicroCall,
+  COP2Macro,
+  Jump,
+  IntegerBranch,
+  Multiply,
+  Divide
+};
+
 struct EEOperationMetadata
 {
   EEInstructionRouting routing;
+  EEExecutionFamily executionFamily =
+    EEExecutionFamily::Unclassified;
   EEMemoryAccess memoryAccess = EEMemoryAccess::None;
   EECOP1OperationFamily cop1Family =
     EECOP1OperationFamily::None;

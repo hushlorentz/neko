@@ -1122,7 +1122,7 @@ accumulator or condition-result contract:
 
 #### EE Operation Dispatch and Focused Execution Methods
 
-- [ ] Classify every `EECore::executeInstruction()` case into a coherent
+- [x] Classify every `EECore::executeInstruction()` case into a coherent
       execution family with one architectural purpose
 - [ ] Define an explicit execution outcome that distinguishes completed,
       delayed, faulted, halted, and rejected work without behavioral booleans

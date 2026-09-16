@@ -299,6 +299,212 @@ TEST_CASE("EE instruction routing classification")
 
 TEST_CASE("Every EE operation has complete shared metadata")
 {
+  const auto expectedExecutionFamily =
+    [](EEOperation operation)
+    {
+      switch (operation)
+      {
+        case EEOperation::Nop:
+          return EEExecutionFamily::NoOperation;
+        case EEOperation::SynchronizeLoadStore:
+          return EEExecutionFamily::LoadStoreSynchronization;
+        case EEOperation::SynchronizePipeline:
+          return EEExecutionFamily::PipelineSynchronization;
+        case EEOperation::ExceptionReturn:
+          return EEExecutionFamily::ExceptionReturn;
+        case EEOperation::SystemCall:
+        case EEOperation::Breakpoint:
+          return EEExecutionFamily::SoftwareException;
+        case EEOperation::MoveWordFromCOP1:
+        case EEOperation::MoveWordToCOP1:
+        case EEOperation::MoveControlWordFromCOP1:
+        case EEOperation::MoveControlWordToCOP1:
+        case EEOperation::MoveSingleCOP1:
+          return EEExecutionFamily::COP1RegisterMove;
+        case EEOperation::DivideSingleCOP1:
+        case EEOperation::SquareRootSingleCOP1:
+        case EEOperation::ReciprocalSquareRootSingleCOP1:
+          return EEExecutionFamily::COP1Divider;
+        case EEOperation::AbsoluteSingleCOP1:
+        case EEOperation::NegateSingleCOP1:
+        case EEOperation::MaximumSingleCOP1:
+        case EEOperation::MinimumSingleCOP1:
+        case EEOperation::ConvertWordToSingleCOP1:
+        case EEOperation::ConvertSingleToWordCOP1:
+        case EEOperation::AddSingleCOP1:
+        case EEOperation::SubtractSingleCOP1:
+        case EEOperation::MultiplySingleCOP1:
+        case EEOperation::MultiplyAddSingleCOP1:
+        case EEOperation::MultiplySubtractSingleCOP1:
+        case EEOperation::AddSingleToAccumulatorCOP1:
+        case EEOperation::SubtractSingleToAccumulatorCOP1:
+        case EEOperation::MultiplySingleToAccumulatorCOP1:
+        case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+        case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+        case EEOperation::CompareFalseSingleCOP1:
+        case EEOperation::CompareEqualSingleCOP1:
+        case EEOperation::CompareLessThanSingleCOP1:
+        case EEOperation::CompareLessThanOrEqualSingleCOP1:
+          return EEExecutionFamily::COP1StagedOperation;
+        case EEOperation::BranchCOP1False:
+        case EEOperation::BranchCOP1FalseLikely:
+        case EEOperation::BranchCOP1True:
+        case EEOperation::BranchCOP1TrueLikely:
+          return EEExecutionFamily::COP1Branch;
+        case EEOperation::ShiftLeftLogicalWord:
+        case EEOperation::ShiftRightLogicalWord:
+        case EEOperation::ShiftRightArithmeticWord:
+        case EEOperation::ShiftLeftLogicalVariableWord:
+        case EEOperation::ShiftRightLogicalVariableWord:
+        case EEOperation::ShiftRightArithmeticVariableWord:
+          return EEExecutionFamily::WordShift;
+        case EEOperation::ShiftLeftLogicalVariableDoubleword:
+        case EEOperation::ShiftRightLogicalVariableDoubleword:
+        case EEOperation::ShiftRightArithmeticVariableDoubleword:
+        case EEOperation::ShiftLeftLogicalDoubleword:
+        case EEOperation::ShiftRightLogicalDoubleword:
+        case EEOperation::ShiftRightArithmeticDoubleword:
+        case EEOperation::ShiftLeftLogicalDoubleword32:
+        case EEOperation::ShiftRightLogicalDoubleword32:
+        case EEOperation::ShiftRightArithmeticDoubleword32:
+          return EEExecutionFamily::DoublewordShift;
+        case EEOperation::AddWord:
+        case EEOperation::AddUnsignedWord:
+        case EEOperation::SubtractWord:
+        case EEOperation::SubtractUnsignedWord:
+          return EEExecutionFamily::WordArithmetic;
+        case EEOperation::AddDoubleword:
+        case EEOperation::AddUnsignedDoubleword:
+        case EEOperation::SubtractDoubleword:
+        case EEOperation::SubtractUnsignedDoubleword:
+          return EEExecutionFamily::DoublewordArithmetic;
+        case EEOperation::And:
+        case EEOperation::Or:
+        case EEOperation::Xor:
+        case EEOperation::Nor:
+          return EEExecutionFamily::RegisterLogical;
+        case EEOperation::SetLessThan:
+        case EEOperation::SetLessThanUnsigned:
+          return EEExecutionFamily::RegisterCompare;
+        case EEOperation::AddImmediateWord:
+        case EEOperation::AddImmediateUnsignedWord:
+          return EEExecutionFamily::ImmediateWordArithmetic;
+        case EEOperation::AddImmediateDoubleword:
+        case EEOperation::AddImmediateUnsignedDoubleword:
+          return EEExecutionFamily::ImmediateDoublewordArithmetic;
+        case EEOperation::SetLessThanImmediate:
+        case EEOperation::SetLessThanImmediateUnsigned:
+          return EEExecutionFamily::ImmediateCompare;
+        case EEOperation::AndImmediate:
+        case EEOperation::OrImmediate:
+        case EEOperation::XorImmediate:
+        case EEOperation::LoadUpperImmediate:
+          return EEExecutionFamily::ImmediateLogical;
+        case EEOperation::MoveFromHI:
+        case EEOperation::MoveToHI:
+        case EEOperation::MoveFromLO:
+        case EEOperation::MoveToLO:
+        case EEOperation::MoveFromHI1:
+        case EEOperation::MoveToHI1:
+        case EEOperation::MoveFromLO1:
+        case EEOperation::MoveToLO1:
+          return EEExecutionFamily::MACRegisterMove;
+        case EEOperation::MoveFromShiftAmount:
+        case EEOperation::MoveToShiftAmount:
+        case EEOperation::MoveByteCountToShiftAmount:
+        case EEOperation::MoveHalfwordCountToShiftAmount:
+          return EEExecutionFamily::ShiftAmountOperation;
+        case EEOperation::LoadByte:
+        case EEOperation::LoadByteUnsigned:
+        case EEOperation::StoreByte:
+          return EEExecutionFamily::ByteMemory;
+        case EEOperation::LoadHalfword:
+        case EEOperation::LoadHalfwordUnsigned:
+        case EEOperation::StoreHalfword:
+          return EEExecutionFamily::HalfwordMemory;
+        case EEOperation::LoadWord:
+        case EEOperation::LoadWordUnsigned:
+        case EEOperation::StoreWord:
+          return EEExecutionFamily::WordMemory;
+        case EEOperation::LoadWordLeft:
+        case EEOperation::LoadWordRight:
+        case EEOperation::StoreWordLeft:
+        case EEOperation::StoreWordRight:
+          return EEExecutionFamily::WordMergeMemory;
+        case EEOperation::LoadDoubleword:
+        case EEOperation::StoreDoubleword:
+          return EEExecutionFamily::DoublewordMemory;
+        case EEOperation::LoadDoublewordLeft:
+        case EEOperation::LoadDoublewordRight:
+        case EEOperation::StoreDoublewordLeft:
+        case EEOperation::StoreDoublewordRight:
+          return EEExecutionFamily::DoublewordMergeMemory;
+        case EEOperation::LoadQuadword:
+        case EEOperation::StoreQuadword:
+          return EEExecutionFamily::QuadwordMemory;
+        case EEOperation::LoadWordToCOP1:
+        case EEOperation::StoreWordFromCOP1:
+          return EEExecutionFamily::COP1Memory;
+        case EEOperation::LoadQuadwordToCOP2:
+        case EEOperation::StoreQuadwordFromCOP2:
+          return EEExecutionFamily::COP2Memory;
+        case EEOperation::QuadwordMoveFromCOP2:
+        case EEOperation::QuadwordMoveToCOP2:
+          return EEExecutionFamily::COP2VectorMove;
+        case EEOperation::ControlMoveFromCOP2:
+        case EEOperation::ControlMoveToCOP2:
+          return EEExecutionFamily::COP2ControlMove;
+        case EEOperation::BranchCOP2False:
+        case EEOperation::BranchCOP2FalseLikely:
+        case EEOperation::BranchCOP2True:
+        case EEOperation::BranchCOP2TrueLikely:
+          return EEExecutionFamily::COP2Branch;
+        case EEOperation::VectorCallMicroSubroutine:
+        case EEOperation::VectorCallMicroSubroutineRegister:
+          return EEExecutionFamily::COP2MicroCall;
+        case EEOperation::VectorMacroArithmetic:
+          return EEExecutionFamily::COP2Macro;
+        case EEOperation::Jump:
+        case EEOperation::JumpAndLink:
+        case EEOperation::JumpRegister:
+        case EEOperation::JumpAndLinkRegister:
+          return EEExecutionFamily::Jump;
+        case EEOperation::BranchEqual:
+        case EEOperation::BranchNotEqual:
+        case EEOperation::BranchLessThanOrEqualZero:
+        case EEOperation::BranchGreaterThanZero:
+        case EEOperation::BranchLessThanZero:
+        case EEOperation::BranchGreaterThanOrEqualZero:
+        case EEOperation::BranchEqualLikely:
+        case EEOperation::BranchNotEqualLikely:
+        case EEOperation::BranchLessThanOrEqualZeroLikely:
+        case EEOperation::BranchGreaterThanZeroLikely:
+        case EEOperation::BranchLessThanZeroLikely:
+        case EEOperation::BranchGreaterThanOrEqualZeroLikely:
+        case EEOperation::BranchLessThanZeroAndLink:
+        case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
+        case EEOperation::BranchLessThanZeroAndLinkLikely:
+        case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+          return EEExecutionFamily::IntegerBranch;
+        case EEOperation::MultiplyWord:
+        case EEOperation::MultiplyUnsignedWord:
+        case EEOperation::MultiplyWord1:
+        case EEOperation::MultiplyUnsignedWord1:
+        case EEOperation::MultiplyAddWord:
+        case EEOperation::MultiplyAddUnsignedWord:
+        case EEOperation::MultiplyAddWord1:
+        case EEOperation::MultiplyAddUnsignedWord1:
+          return EEExecutionFamily::Multiply;
+        case EEOperation::DivideWord:
+        case EEOperation::DivideUnsignedWord:
+        case EEOperation::DivideWord1:
+        case EEOperation::DivideUnsignedWord1:
+          return EEExecutionFamily::Divide;
+        case EEOperation::Count:
+          break;
+      }
+      return EEExecutionFamily::Unclassified;
+    };
   const auto expectedCOP1ResultDestination =
     [](EEOperation operation)
     {
@@ -448,6 +654,12 @@ TEST_CASE("Every EE operation has complete shared metadata")
       eeOperationMetadata(operation);
 
     REQUIRE(metadata.routing.logicalPipes != 0);
+    REQUIRE(
+      metadata.executionFamily !=
+      EEExecutionFamily::Unclassified);
+    REQUIRE(
+      metadata.executionFamily ==
+      expectedExecutionFamily(operation));
     if (metadata.routing.category ==
         EEInstructionCategory::LoadStore)
     {
