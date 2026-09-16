@@ -1067,19 +1067,134 @@ accumulator or condition-result contract:
 
 ### Post-COP1 Architecture and Maintainability Review
 
-- [ ] Review the complete codebase for responsibility boundaries, dependency
-      direction, duplicated policy, oversized methods and classes, boolean
-      control parameters, naming clarity, and reusable architectural concepts
-- [ ] Identify performance-sensitive paths before proposing abstractions, and
-      preserve fixed-capacity, deterministic execution where it is beneficial
-- [ ] Prioritize concrete maintainability risks over mechanical pattern
-      adoption; record justified exceptions where emulator architecture does
-      not benefit from a textbook SOLID decomposition
-- [ ] Refactor in independently reviewable, behavior-preserving changes backed
-      by the existing focused tests, full repository check, hashes, traces, and
-      save-state contracts
-- [ ] Complete an independent review of the resulting architecture before
-      expanding the MMI milestone
+#### Architecture Baseline and Risk Map
+
+- [ ] Inventory ownership and dependency direction across system orchestration,
+      EE execution, VU execution, DMA, VIF, GIF, GS, tracing, and persistence
+- [ ] Map the cycle-sensitive and allocation-sensitive paths, including EE
+      issue and C1 advancement, VU pipeline advancement, DMA transport, GIF
+      arbitration, and GS rasterization
+- [ ] Catalogue duplicated policy and weak control vocabulary, including
+      instruction-family classification, program-order traversal, cancellation,
+      derived occupancy, save-state reachability, and boolean mode parameters
+- [ ] Rank the findings by correctness risk, change amplification, and
+      obstruction to MMI work rather than by file size alone
+- [ ] Record justified non-refactors where direct ownership, fixed-capacity
+      storage, or explicit sequencing is clearer than an additional abstraction
+- [ ] Identify the focused tests, hashes, traces, and save-state cases that
+      protect each selected refactor before production code changes begin
+
+#### Shared EE Instruction Metadata
+
+- [ ] Define one authoritative metadata contract for each `EEOperation`,
+      covering dependencies, issue routing, memory behavior, COP1 family,
+      managed-pipeline participation, and operation-specific timing
+- [ ] Add table-driven completeness tests proving that every defined operation,
+      including future MMI operations, has deliberate metadata
+- [ ] Move COP1 family and timing classification out of `EECore` without
+      changing decode, issue, scoreboard, execution, or trace behavior
+- [ ] Make issue selection, execution, save-state validation, and diagnostics
+      consume the shared metadata instead of maintaining parallel classifiers
+- [ ] Remove superseded classifiers only after focused pairing, hazard,
+      retirement, and reserved-operation tests remain unchanged
+
+#### EE Front-End and Issue Lifecycle
+
+- [ ] Specify the invariant owned by fetch, decode, issue-latch, staging-latch,
+      selection, acceptance, and PC-advance state
+- [ ] Separate issue-candidate construction from readiness and structural-pair
+      policy while retaining the fixed two-entry front end
+- [ ] Replace boolean controls that select issue-member position, pipeline
+      identity, or acceptance mode with explicit enums or result types
+- [ ] Make issue-group outcomes explicit for accepted, stalled, faulted, and
+      cancelled members without changing program-order effects
+- [ ] Keep delay-slot validation and branch-likely annulment at one documented
+      ownership boundary
+- [ ] Cover one-wide, two-wide, stalled younger, faulted older, faulted younger,
+      and delay-slot issue transitions with focused tests
+
+#### EE C1 Pipeline Lifecycle and Ordered Work
+
+- [ ] Introduce one allocation-free program-order traversal primitive for the
+      fixed-capacity in-flight C1 array
+- [ ] Use the traversal primitive for oldest-operation selection, producer
+      lookup, ready-prefix retirement, stage transition ordering, and
+      cancellation ranges
+- [ ] Define one lifecycle contract for C1 allocation, source capture,
+      advancement, completion, retirement, and slot release
+- [ ] Centralize divider occupancy derivation and reconciliation so runtime,
+      reset, hashing, and save-state validation cannot disagree
+- [ ] Centralize exception and flush cancellation of in-flight C1 work while
+      preserving older completed effects and discarding younger work
+- [ ] Preserve load interlocks, `1S`/`2T` bypasses, `2S` writeback, Move
+      blocking, divider overlap, and ordered memory exceptions
+- [ ] Prove repeated and save-state-resumed mixed C1 workloads retain identical
+      retirement traces, hashes, register state, and memory state
+
+#### Architectural Events, Exceptions, and Observation
+
+- [ ] Separate architectural state transitions from trace publication so trace
+      enablement cannot participate in execution decisions
+- [ ] Define typed EE events for acceptance, memory access, branch scheduling,
+      exception entry, interrupt delivery, C1 stage transition, and retirement
+- [ ] Give exception entry one owner for CP0 updates, branch-delay handling,
+      fault metadata, issue-front-end cleanup, and younger-work cancellation
+- [ ] Replace ambiguous trace and exception boolean parameters with typed event
+      payloads or explicit modes
+- [ ] Preserve cycle-local fixed-capacity event storage and deterministic event
+      ordering
+- [ ] Verify tracing off and tracing on produce identical architectural hashes,
+      save states, stop reasons, and guest results
+
+#### Persistence and Derived-State Reconciliation
+
+- [ ] Separate save-state container framing from per-component serialization,
+      validation, reconciliation, and transactional commit
+- [ ] Keep format order and the current save-state version stable during
+      behavior-preserving source decomposition
+- [ ] Define which fields are serialized architectural state, serialized
+      runtime state, derived state, or host wiring
+- [ ] Share invariant helpers between runtime assertions and load validation
+      where doing so does not make malformed input mutate live state
+- [ ] Reconstruct pointer topology and derived occupancy through explicit
+      reconciliation steps rather than scattered commit-time assignments
+- [ ] Preserve canonical bytes, strict malformed-state rejection, atomic load
+      failure, and byte-identical repeated saves
+- [ ] Split the save-state implementation by coherent component boundaries only
+      after cross-component transactional ownership is explicit
+
+#### System Orchestration and Remaining Subsystem Boundaries
+
+- [ ] Audit `NekoSystem` construction, clock ordering, interrupt
+      synchronization, run control, guest outcome classification, tracing, and
+      frontend-facing output as distinct responsibilities
+- [ ] Keep hardware ownership and deterministic master-cycle sequencing in one
+      explicit orchestration boundary
+- [ ] Extract host-control or observation helpers only where they can remain
+      consumers of core state rather than alternate hardware owners
+- [ ] Audit VU issue, pipeline orchestration, execution units, writeback,
+      flags, and macro/micro coordination for duplicated lifecycle policy
+- [ ] Audit GS register handling, transfer, primitive assembly, rasterization,
+      texture sampling, and presentation for boundaries with independent
+      invariants
+- [ ] Audit EEBus, DMA, VIF, and GIF transport for duplicated address,
+      readiness, transfer-completion, or arbitration policy
+- [ ] Implement only the remaining subsystem refactors whose risk ranking
+      justifies change before MMI; document deliberate deferrals with their
+      preserved invariants and future trigger
+- [ ] Verify CLI, ELF, frame, trace, reset, and save-state workflows remain
+      behaviorally identical after the selected boundary changes
+
+#### Final Architecture Review
+
+- [ ] Re-audit dependency direction and duplicated policy after all selected
+      refactors
+- [ ] Run the complete optimized repository check and compare representative
+      trace, state, framebuffer, and save-state hashes with the baseline
+- [ ] Complete an independent read-only review of the resulting architecture
+      and resolve concrete correctness or maintainability findings
+- [ ] Reconcile `PROJECT.md` with the durable contracts and justified
+      deferrals, then confirm the architecture is ready for the MMI milestone
 
 ## Milestone 6: EE Multimedia Extensions
 
