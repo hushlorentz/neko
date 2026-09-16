@@ -26,6 +26,20 @@ struct EECoreTestAccess
     return core->executeInstruction(instruction, 0);
   }
 
+  static EEInstructionExecutionOutcome executeWordShift(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeWordShift(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeByteMemory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeByteMemory(instruction, 0);
+  }
+
   static void setShiftAmountOrdering(
     EECore *core,
     std::uint8_t accesses,
@@ -34,6 +48,49 @@ struct EECoreTestAccess
     core->shiftAmountOrdering.restore(accesses, reads);
   }
 };
+
+TEST_CASE("EE focused handlers reject incompatible operations")
+{
+  SECTION("Word shifts reject before word-state validation")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.startExecution(0);
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x123456789abcdef0), 0});
+    EEInstruction instruction;
+    instruction.operation = EEOperation::AddWord;
+    instruction.targetRegister = 2;
+
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeWordShift(
+        &core,
+        instruction),
+      "EE word-shift handler received an incompatible operation.");
+    REQUIRE(core.executionState() == EEExecutionState::Running);
+    REQUIRE(core.stopReason() == EEStopReason::None);
+  }
+
+  SECTION("Byte memory rejects before bus or register effects")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.startExecution(0);
+    core.setGeneralRegister(2, {0x55, 0});
+    EEInstruction instruction;
+    instruction.operation = EEOperation::LoadHalfword;
+    instruction.targetRegister = 2;
+
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeByteMemory(
+        &core,
+        instruction),
+      "EE byte-memory handler received an incompatible operation.");
+    REQUIRE(core.generalRegister(2).low == 0x55);
+    REQUIRE(core.pendingException() == EEException::None);
+  }
+}
 
 TEST_CASE("EE instruction execution reports explicit outcomes")
 {

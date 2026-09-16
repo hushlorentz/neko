@@ -1720,98 +1720,17 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ShiftLeftLogicalVariableWord:
     case EEOperation::ShiftRightLogicalVariableWord:
     case EEOperation::ShiftRightArithmeticVariableWord:
-    {
-      if (!requireWordValue(
-            instruction.targetRegister,
-            address,
-            instruction.raw))
-      {
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      const std::uint8_t amount =
-        instruction.operation ==
-          EEOperation::ShiftLeftLogicalWord ||
-        instruction.operation ==
-          EEOperation::ShiftRightLogicalWord ||
-        instruction.operation ==
-          EEOperation::ShiftRightArithmeticWord
-          ? instruction.shiftAmount
-          : source & 0x1f;
-      const std::uint32_t word =
-        static_cast<std::uint32_t>(target);
-      std::uint32_t result = 0;
-      if (instruction.operation ==
-            EEOperation::ShiftLeftLogicalWord ||
-          instruction.operation ==
-            EEOperation::ShiftLeftLogicalVariableWord)
-      {
-        result = word << amount;
-      }
-      else if (instruction.operation ==
-                 EEOperation::ShiftRightLogicalWord ||
-               instruction.operation ==
-                 EEOperation::ShiftRightLogicalVariableWord)
-      {
-        result = word >> amount;
-      }
-      else
-      {
-        result = arithmeticShiftRight32(word, amount);
-      }
-      writeWord(destination, result);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeWordShift(instruction, address);
     case EEOperation::ShiftLeftLogicalVariableDoubleword:
-      writeLowDoubleword(
-        destination,
-        target << (source & 0x3f));
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightLogicalVariableDoubleword:
-      writeLowDoubleword(
-        destination,
-        target >> (source & 0x3f));
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightArithmeticVariableDoubleword:
-      writeLowDoubleword(
-        destination,
-        arithmeticShiftRight64(
-          target,
-          source & 0x3f));
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftLeftLogicalDoubleword:
-      writeLowDoubleword(
-        destination,
-        target << instruction.shiftAmount);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightLogicalDoubleword:
-      writeLowDoubleword(
-        destination,
-        target >> instruction.shiftAmount);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightArithmeticDoubleword:
-      writeLowDoubleword(
-        destination,
-        arithmeticShiftRight64(
-          target,
-          instruction.shiftAmount));
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftLeftLogicalDoubleword32:
-      writeLowDoubleword(
-        destination,
-        target << (instruction.shiftAmount + 32));
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightLogicalDoubleword32:
-      writeLowDoubleword(
-        destination,
-        target >> (instruction.shiftAmount + 32));
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::ShiftRightArithmeticDoubleword32:
-      writeLowDoubleword(
-        destination,
-        arithmeticShiftRight64(
-          target,
-          instruction.shiftAmount + 32));
-      return EEInstructionExecutionOutcome::Completed;
+      return executeDoublewordShift(instruction);
     case EEOperation::AddWord:
     case EEOperation::AddUnsignedWord:
     case EEOperation::SubtractWord:
@@ -1882,27 +1801,13 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::And:
-      writeLowDoubleword(destination, source & target);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::Or:
-      writeLowDoubleword(destination, source | target);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::Xor:
-      writeLowDoubleword(destination, source ^ target);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::Nor:
-      writeLowDoubleword(destination, ~(source | target));
-      return EEInstructionExecutionOutcome::Completed;
+      return executeRegisterLogical(instruction);
     case EEOperation::SetLessThan:
-      writeLowDoubleword(
-        destination,
-        signedLess(source, target) ? 1 : 0);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::SetLessThanUnsigned:
-      writeLowDoubleword(
-        destination,
-        source < target ? 1 : 0);
-      return EEInstructionExecutionOutcome::Completed;
+      return executeRegisterCompare(instruction);
     case EEOperation::AddImmediateWord:
     case EEOperation::AddImmediateUnsignedWord:
     {
@@ -1945,37 +1850,13 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return EEInstructionExecutionOutcome::Completed;
     }
     case EEOperation::SetLessThanImmediate:
-      writeLowDoubleword(
-        immediateDestination,
-        signedLess(source, immediate) ? 1 : 0);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::SetLessThanImmediateUnsigned:
-      writeLowDoubleword(
-        immediateDestination,
-        source < immediate ? 1 : 0);
-      return EEInstructionExecutionOutcome::Completed;
+      return executeImmediateCompare(instruction);
     case EEOperation::AndImmediate:
-      writeLowDoubleword(
-        immediateDestination,
-        source & instruction.immediate);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::OrImmediate:
-      writeLowDoubleword(
-        immediateDestination,
-        source | instruction.immediate);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::XorImmediate:
-      writeLowDoubleword(
-        immediateDestination,
-        source ^ instruction.immediate);
-      return EEInstructionExecutionOutcome::Completed;
     case EEOperation::LoadUpperImmediate:
-      writeLowDoubleword(
-        immediateDestination,
-        signExtendWord(
-          static_cast<std::uint32_t>(
-            instruction.immediate) << 16));
-      return EEInstructionExecutionOutcome::Completed;
+      return executeImmediateLogical(instruction);
     case EEOperation::MoveFromHI:
       writeLowDoubleword(destination, hiRegister);
       return EEInstructionExecutionOutcome::Completed;
@@ -2018,58 +1899,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return EEInstructionExecutionOutcome::Completed;
     case EEOperation::LoadByte:
     case EEOperation::LoadByteUnsigned:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      std::uint8_t value = 0;
-      const bool succeeded =
-        attachedBus().readData8(dataAddress, &value);
-      recordMemoryTrace(
-        dataAddress,
-        1,
-        false,
-        succeeded,
-        succeeded ? value : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      writeLowDoubleword(
-        immediateDestination,
-        instruction.operation == EEOperation::LoadByte &&
-          (value & 0x80) != 0
-          ? UINT64_C(0xffffffffffffff00) | value
-          : value);
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreByte:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      const std::uint8_t value =
-        static_cast<std::uint8_t>(target);
-      const bool succeeded =
-        attachedBus().writeData8(dataAddress, value);
-      recordMemoryTrace(
-        dataAddress,
-        1,
-        true,
-        succeeded,
-        value);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeByteMemory(instruction, address);
     case EEOperation::LoadHalfword:
     case EEOperation::LoadHalfwordUnsigned:
     {
@@ -3176,6 +3007,296 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
 
   haltUndefinedOperation(address, instruction.raw);
   return EEInstructionExecutionOutcome::Rejected;
+}
+
+EEInstructionExecutionOutcome EECore::executeWordShift(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::ShiftLeftLogicalWord:
+    case EEOperation::ShiftRightLogicalWord:
+    case EEOperation::ShiftRightArithmeticWord:
+    case EEOperation::ShiftLeftLogicalVariableWord:
+    case EEOperation::ShiftRightLogicalVariableWord:
+    case EEOperation::ShiftRightArithmeticVariableWord:
+      break;
+    default:
+      throw std::logic_error(
+        "EE word-shift handler received an incompatible operation.");
+  }
+  if (!requireWordValue(
+        instruction.targetRegister,
+        address,
+        instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Halted;
+  }
+
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint32_t word =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.targetRegister].low);
+  const bool immediate =
+    instruction.operation == EEOperation::ShiftLeftLogicalWord ||
+    instruction.operation == EEOperation::ShiftRightLogicalWord ||
+    instruction.operation == EEOperation::ShiftRightArithmeticWord;
+  const std::uint8_t amount = immediate
+    ? instruction.shiftAmount
+    : source & 0x1f;
+  std::uint32_t result = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::ShiftLeftLogicalWord:
+    case EEOperation::ShiftLeftLogicalVariableWord:
+      result = word << amount;
+      break;
+    case EEOperation::ShiftRightLogicalWord:
+    case EEOperation::ShiftRightLogicalVariableWord:
+      result = word >> amount;
+      break;
+    case EEOperation::ShiftRightArithmeticWord:
+    case EEOperation::ShiftRightArithmeticVariableWord:
+      result = arithmeticShiftRight32(word, amount);
+      break;
+    default:
+      throw std::logic_error(
+        "EE word-shift handler received an incompatible operation.");
+  }
+  writeWord(instruction.destinationRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeDoublewordShift(
+  const EEInstruction &instruction)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t target =
+    generalRegisters[instruction.targetRegister].low;
+  std::uint64_t result = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::ShiftLeftLogicalVariableDoubleword:
+      result = target << (source & 0x3f);
+      break;
+    case EEOperation::ShiftRightLogicalVariableDoubleword:
+      result = target >> (source & 0x3f);
+      break;
+    case EEOperation::ShiftRightArithmeticVariableDoubleword:
+      result = arithmeticShiftRight64(target, source & 0x3f);
+      break;
+    case EEOperation::ShiftLeftLogicalDoubleword:
+      result = target << instruction.shiftAmount;
+      break;
+    case EEOperation::ShiftRightLogicalDoubleword:
+      result = target >> instruction.shiftAmount;
+      break;
+    case EEOperation::ShiftRightArithmeticDoubleword:
+      result =
+        arithmeticShiftRight64(target, instruction.shiftAmount);
+      break;
+    case EEOperation::ShiftLeftLogicalDoubleword32:
+      result = target << (instruction.shiftAmount + 32);
+      break;
+    case EEOperation::ShiftRightLogicalDoubleword32:
+      result = target >> (instruction.shiftAmount + 32);
+      break;
+    case EEOperation::ShiftRightArithmeticDoubleword32:
+      result = arithmeticShiftRight64(
+        target,
+        instruction.shiftAmount + 32);
+      break;
+    default:
+      throw std::logic_error(
+        "EE doubleword-shift handler received an "
+        "incompatible operation.");
+  }
+  writeLowDoubleword(instruction.destinationRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeRegisterLogical(
+  const EEInstruction &instruction)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t target =
+    generalRegisters[instruction.targetRegister].low;
+  std::uint64_t result = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::And:
+      result = source & target;
+      break;
+    case EEOperation::Or:
+      result = source | target;
+      break;
+    case EEOperation::Xor:
+      result = source ^ target;
+      break;
+    case EEOperation::Nor:
+      result = ~(source | target);
+      break;
+    default:
+      throw std::logic_error(
+        "EE register-logical handler received an "
+        "incompatible operation.");
+  }
+  writeLowDoubleword(instruction.destinationRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeRegisterCompare(
+  const EEInstruction &instruction)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t target =
+    generalRegisters[instruction.targetRegister].low;
+  std::uint64_t result = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::SetLessThan:
+      result = signedLess(source, target) ? 1 : 0;
+      break;
+    case EEOperation::SetLessThanUnsigned:
+      result = source < target ? 1 : 0;
+      break;
+    default:
+      throw std::logic_error(
+        "EE register-compare handler received an "
+        "incompatible operation.");
+  }
+  writeLowDoubleword(instruction.destinationRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeImmediateCompare(
+  const EEInstruction &instruction)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t immediate =
+    signExtend16(instruction.immediate);
+  std::uint64_t result = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::SetLessThanImmediate:
+      result = signedLess(source, immediate) ? 1 : 0;
+      break;
+    case EEOperation::SetLessThanImmediateUnsigned:
+      result = source < immediate ? 1 : 0;
+      break;
+    default:
+      throw std::logic_error(
+        "EE immediate-compare handler received an "
+        "incompatible operation.");
+  }
+  writeLowDoubleword(instruction.targetRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeImmediateLogical(
+  const EEInstruction &instruction)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  std::uint64_t result = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::AndImmediate:
+      result = source & instruction.immediate;
+      break;
+    case EEOperation::OrImmediate:
+      result = source | instruction.immediate;
+      break;
+    case EEOperation::XorImmediate:
+      result = source ^ instruction.immediate;
+      break;
+    case EEOperation::LoadUpperImmediate:
+      result = signExtendWord(
+        static_cast<std::uint32_t>(
+          instruction.immediate) << 16);
+      break;
+    default:
+      throw std::logic_error(
+        "EE immediate-logical handler received an "
+        "incompatible operation.");
+  }
+  writeLowDoubleword(instruction.targetRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeByteMemory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      source + signExtend16(instruction.immediate));
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadByte:
+    case EEOperation::LoadByteUnsigned:
+    {
+      std::uint8_t value = 0;
+      const bool succeeded =
+        attachedBus().readData8(dataAddress, &value);
+      recordMemoryTrace(
+        dataAddress,
+        1,
+        false,
+        succeeded,
+        succeeded ? value : 0);
+      if (!succeeded)
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorLoad,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      writeLowDoubleword(
+        instruction.targetRegister,
+        instruction.operation == EEOperation::LoadByte &&
+          (value & 0x80) != 0
+          ? UINT64_C(0xffffffffffffff00) | value
+          : value);
+      return EEInstructionExecutionOutcome::Completed;
+    }
+    case EEOperation::StoreByte:
+    {
+      const std::uint8_t value =
+        static_cast<std::uint8_t>(
+          generalRegisters[instruction.targetRegister].low);
+      const bool succeeded =
+        attachedBus().writeData8(dataAddress, value);
+      recordMemoryTrace(
+        dataAddress,
+        1,
+        true,
+        succeeded,
+        value);
+      if (!succeeded)
+      {
+        return raiseDataAccessException(
+          EEException::DataBusErrorStore,
+          address,
+          dataAddress,
+          instruction.raw);
+      }
+      return EEInstructionExecutionOutcome::Completed;
+    }
+    default:
+      throw std::logic_error(
+        "EE byte-memory handler received an "
+        "incompatible operation.");
+  }
 }
 
 bool EECore::requireWordValue(

@@ -678,6 +678,22 @@ class EECore : public ClockedComponent
     EEInstructionExecutionOutcome executeInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeWordShift(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeDoublewordShift(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeRegisterLogical(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeRegisterCompare(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeImmediateCompare(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeImmediateLogical(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeByteMemory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     bool requireWordValue(
       std::uint8_t registerIndex,
       std::uint32_t address,

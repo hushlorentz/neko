@@ -1129,7 +1129,7 @@ accumulator or condition-result contract:
 - [x] Add a table-driven completeness test proving every value below
       `EE_OPERATION_COUNT` has an execution-family and dispatch classification,
       with invalid enum values handled separately
-- [ ] Retain one exhaustive operation dispatch boundary while moving operand
+- [x] Retain one exhaustive operation dispatch boundary while moving operand
       handling, computation, memory access, and side effects into focused
       family methods
 - [ ] Keep delayed MAC, C1, COP2, branch, and exception ownership at their
