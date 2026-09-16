@@ -10,6 +10,19 @@ dependency rather than estimated completion date.
 - Prefer documented hardware behavior and independently verified test vectors.
 - Add functionality with red-green TDD: first demonstrate the missing behavior
   with a failing test, then implement it and run the full regression suite.
+- Plan hardware behavior and code architecture together. Before starting a new
+  milestone or block, identify the intended owner, extension points, state
+  lifecycle, dependency direction, persistence impact, observation boundary,
+  and performance-sensitive paths.
+- Prefer an architecture that supports the foreseeable adjacent hardware work.
+  When evidence is insufficient to justify that structure, implement the
+  smallest isolated behavior and record the condition that should trigger a
+  later generalization.
+- Apply the Boy Scout rule within the active change boundary: leave encountered
+  code clearer and safer when the improvement is well understood,
+  behavior-preserving, proportionate, and protected by existing or focused
+  tests. Record larger or unrelated cleanup instead of expanding scope
+  silently.
 - Keep emulated hardware deterministic and separate from user interfaces.
 - Preserve raw guest data and avoid relying on host floating-point behavior.
 - Add optimization only after profiling demonstrates a need.
@@ -1095,10 +1108,10 @@ accumulator or condition-result contract:
 
 #### Shared EE Instruction Metadata
 
-- [ ] Define one authoritative metadata contract for each `EEOperation`,
+- [x] Define one authoritative metadata contract for each `EEOperation`,
       covering dependencies, issue routing, memory behavior, COP1 family,
       managed-pipeline participation, and operation-specific timing
-- [ ] Add table-driven completeness tests proving that every defined operation,
+- [x] Add table-driven completeness tests proving that every defined operation,
       including future MMI operations, has deliberate metadata
 - [ ] Move COP1 family and timing classification out of `EECore` without
       changing decode, issue, scoreboard, execution, or trace behavior
@@ -1370,6 +1383,14 @@ that need more detail than the existing structured GIF/GS traces:
 - Keep distant milestones intentionally high-level. Before starting a block,
   review its items and expand the work into additional milestones, blocks, or
   items when the newly available evidence requires it.
+- Before beginning a new milestone or block, record both its hardware contract
+  and its architectural direction. Name the state owner, method boundaries,
+  dependencies, extension strategy, save-state and trace effects, hot paths,
+  and regression surfaces.
+- Decide explicitly whether the work receives a durable extensible boundary or
+  a minimal isolated implementation. Do not leave an accidental intermediate
+  design: document why the minimal form is sufficient and what concrete future
+  requirement would justify refactoring it.
 - Place each item where its prerequisites are implemented. If work depends on a
   later feature, move the item into that later block instead of leaving a
   placeholder that says to complete it when the prerequisite arrives.

@@ -297,6 +297,186 @@ TEST_CASE("EE instruction routing classification")
     "Unknown EE operation routing classification.");
 }
 
+TEST_CASE("Every EE operation has complete shared metadata")
+{
+  const auto requireOperationMetadata =
+    [](EEOperation operation,
+       EEMemoryAccess memoryAccess,
+       EECOP1OperationFamily cop1Family,
+       bool cop1ManagedPipeline,
+       std::uint8_t dividerLatency = 0,
+       std::uint8_t dividerInitiationInterval = 0)
+    {
+      const EEOperationMetadata metadata =
+        eeOperationMetadata(operation);
+      REQUIRE(metadata.memoryAccess == memoryAccess);
+      REQUIRE(metadata.cop1Family == cop1Family);
+      REQUIRE(
+        metadata.cop1ManagedPipeline ==
+        cop1ManagedPipeline);
+      REQUIRE(
+        metadata.cop1DividerLatency ==
+        dividerLatency);
+      REQUIRE(
+        metadata.cop1DividerInitiationInterval ==
+        dividerInitiationInterval);
+    };
+
+  requireOperationMetadata(
+    EEOperation::AddWord,
+    EEMemoryAccess::None,
+    EECOP1OperationFamily::None,
+    false);
+  requireOperationMetadata(
+    EEOperation::LoadWord,
+    EEMemoryAccess::Load,
+    EECOP1OperationFamily::None,
+    false);
+  requireOperationMetadata(
+    EEOperation::StoreWord,
+    EEMemoryAccess::Store,
+    EECOP1OperationFamily::None,
+    false);
+  requireOperationMetadata(
+    EEOperation::BranchCOP1True,
+    EEMemoryAccess::None,
+    EECOP1OperationFamily::ConditionBranch,
+    false);
+  requireOperationMetadata(
+    EEOperation::MoveWordFromCOP1,
+    EEMemoryAccess::None,
+    EECOP1OperationFamily::RegisterMove,
+    true);
+  requireOperationMetadata(
+    EEOperation::LoadWordToCOP1,
+    EEMemoryAccess::Load,
+    EECOP1OperationFamily::MemoryMove,
+    true);
+  requireOperationMetadata(
+    EEOperation::AddSingleCOP1,
+    EEMemoryAccess::None,
+    EECOP1OperationFamily::AddSubtract,
+    true);
+  requireOperationMetadata(
+    EEOperation::DivideSingleCOP1,
+    EEMemoryAccess::None,
+    EECOP1OperationFamily::Divider,
+    true,
+    8,
+    7);
+  requireOperationMetadata(
+    EEOperation::ReciprocalSquareRootSingleCOP1,
+    EEMemoryAccess::None,
+    EECOP1OperationFamily::Divider,
+    true,
+    14,
+    13);
+  REQUIRE(
+    eeOperationMetadata(
+      EEOperation::MultiplyAddSingleToAccumulatorCOP1)
+      .updatesCOP1ArithmeticFlags);
+  REQUIRE(
+    eeOperationMetadata(
+      EEOperation::AddSingleToAccumulatorCOP1)
+      .updatesCOP1ArithmeticFlags);
+  REQUIRE_FALSE(
+    eeOperationMetadata(
+      EEOperation::ConvertWordToSingleCOP1)
+      .updatesCOP1ArithmeticFlags);
+  REQUIRE_FALSE(
+    eeOperationMetadata(
+      EEOperation::CompareEqualSingleCOP1)
+      .updatesCOP1ArithmeticFlags);
+
+  for (std::uint8_t value = 0;
+       value < EE_OPERATION_COUNT;
+       ++value)
+  {
+    const EEOperation operation =
+      static_cast<EEOperation>(value);
+    const EEOperationMetadata metadata =
+      eeOperationMetadata(operation);
+
+    REQUIRE(metadata.routing.logicalPipes != 0);
+    if (metadata.routing.category ==
+        EEInstructionCategory::LoadStore)
+    {
+      REQUIRE(
+        metadata.memoryAccess != EEMemoryAccess::None);
+    }
+    if (metadata.memoryAccess != EEMemoryAccess::None)
+    {
+      REQUIRE(
+        (metadata.routing.category ==
+           EEInstructionCategory::LoadStore ||
+         metadata.cop1Family ==
+           EECOP1OperationFamily::MemoryMove ||
+         metadata.routing.category ==
+           EEInstructionCategory::COP2Move));
+    }
+    if (metadata.routing.category ==
+          EEInstructionCategory::COP1Move ||
+        metadata.routing.category ==
+          EEInstructionCategory::COP1Operate)
+    {
+      REQUIRE(
+        metadata.cop1Family !=
+        EECOP1OperationFamily::None);
+    }
+    REQUIRE(
+      (metadata.cop1Family ==
+       EECOP1OperationFamily::Divider) ==
+      (metadata.cop1DividerLatency != 0));
+    REQUIRE(
+      (metadata.cop1Family ==
+       EECOP1OperationFamily::Divider) ==
+      (metadata.cop1DividerInitiationInterval != 0));
+    REQUIRE(
+      metadata.cop1ManagedPipeline ==
+      (metadata.cop1Family !=
+         EECOP1OperationFamily::None &&
+       metadata.cop1Family !=
+         EECOP1OperationFamily::ConditionBranch));
+
+    EEInstruction instruction;
+    instruction.operation = operation;
+    instruction.sourceRegister = 1;
+    instruction.targetRegister = 2;
+    instruction.destinationRegister = 3;
+    instruction.shiftAmount = 4;
+    const EEInstructionMetadata instructionMetadata =
+      eeInstructionMetadata(instruction);
+    REQUIRE(
+      instructionMetadata.operation.routing.category ==
+      metadata.routing.category);
+    REQUIRE(
+      instructionMetadata.operation.memoryAccess ==
+      metadata.memoryAccess);
+    REQUIRE(
+      instructionMetadata.operation.cop1Family ==
+      metadata.cop1Family);
+    REQUIRE(
+      instructionMetadata.operation.cop1ManagedPipeline ==
+      metadata.cop1ManagedPipeline);
+  }
+
+  const EEOperation invalidOperation =
+    static_cast<EEOperation>(EE_OPERATION_COUNT);
+  REQUIRE_THROWS_WITH(
+    eeOperationMetadata(invalidOperation),
+    "Unknown EE operation metadata.");
+
+  EEInstruction invalidInstruction;
+  invalidInstruction.operation = invalidOperation;
+  REQUIRE_THROWS_WITH(
+    eeInstructionMetadata(invalidInstruction),
+    "Unknown EE operation metadata.");
+
+  REQUIRE_THROWS_WITH(
+    eeInstructionDependencies(invalidInstruction),
+    "Unknown EE operation metadata.");
+}
+
 TEST_CASE("EE pair pipe assignment preserves program order")
 {
   const auto requireAssignment =

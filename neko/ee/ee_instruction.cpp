@@ -38,6 +38,8 @@ namespace
 
   using DecodeTable = std::array<DecodeEntry, 64>;
 
+  bool updatesCOP1ArithmeticFlags(EEOperation operation);
+
   std::uint32_t registerMask(std::uint8_t index)
   {
     return index == 0 ? 0 : UINT32_C(1) << index;
@@ -409,22 +411,13 @@ namespace
         dependencies.specialReads = RESOURCE_COP2_STATE;
         dependencies.specialWrites = RESOURCE_COP2_STATE;
         break;
+      case EEOperation::Count:
+      default:
+        throw std::invalid_argument(
+          "Unknown EE operation dependency classification.");
     }
 
-    const bool updatesCOP1ArithmeticFlags =
-      instruction.operation == EEOperation::AbsoluteSingleCOP1 ||
-      instruction.operation == EEOperation::NegateSingleCOP1 ||
-      instruction.operation == EEOperation::ConvertSingleToWordCOP1 ||
-      instruction.operation == EEOperation::AddSingleCOP1 ||
-      instruction.operation == EEOperation::SubtractSingleCOP1 ||
-      instruction.operation == EEOperation::MultiplySingleCOP1 ||
-      instruction.operation == EEOperation::DivideSingleCOP1 ||
-      instruction.operation == EEOperation::SquareRootSingleCOP1 ||
-      instruction.operation ==
-        EEOperation::ReciprocalSquareRootSingleCOP1 ||
-      instruction.operation == EEOperation::MaximumSingleCOP1 ||
-      instruction.operation == EEOperation::MinimumSingleCOP1;
-    if (updatesCOP1ArithmeticFlags)
+    if (updatesCOP1ArithmeticFlags(instruction.operation))
     {
       dependencies.specialReads |= RESOURCE_COP1_FCR31;
       dependencies.specialWrites |= RESOURCE_COP1_FCR31;
@@ -437,9 +430,9 @@ namespace
     const EEInstruction &younger)
   {
     const EEInstructionDependencies olderDependencies =
-      buildInstructionDependencies(older);
+      eeInstructionDependencies(older);
     const EEInstructionDependencies youngerDependencies =
-      buildInstructionDependencies(younger);
+      eeInstructionDependencies(younger);
     return
       (olderDependencies.gprWrites &
        (youngerDependencies.gprReads |
@@ -1458,10 +1451,12 @@ EEInstructionDecodeError::failure() const
 EEInstructionDependencies eeInstructionDependencies(
   const EEInstruction &instruction)
 {
-  return buildInstructionDependencies(instruction);
+  return eeInstructionMetadata(instruction).dependencies;
 }
 
-EEInstructionRouting eeInstructionRouting(EEOperation operation)
+namespace
+{
+EEInstructionRouting buildOperationRouting(EEOperation operation)
 {
   constexpr std::uint8_t PIPE_0 =
     static_cast<std::uint8_t>(EELogicalPipe::Pipe0);
@@ -1717,10 +1712,190 @@ EEInstructionRouting eeInstructionRouting(EEOperation operation)
         PHYSICAL_I0,
         PHYSICAL_I1
       };
+    case EEOperation::Count:
+      break;
   }
 
   throw std::invalid_argument(
     "Unknown EE operation routing classification.");
+}
+
+EEMemoryAccess memoryAccessFor(EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::LoadByte:
+    case EEOperation::LoadByteUnsigned:
+    case EEOperation::LoadHalfword:
+    case EEOperation::LoadHalfwordUnsigned:
+    case EEOperation::LoadWord:
+    case EEOperation::LoadWordUnsigned:
+    case EEOperation::LoadWordLeft:
+    case EEOperation::LoadWordRight:
+    case EEOperation::LoadDoubleword:
+    case EEOperation::LoadDoublewordLeft:
+    case EEOperation::LoadDoublewordRight:
+    case EEOperation::LoadQuadword:
+    case EEOperation::LoadWordToCOP1:
+    case EEOperation::LoadQuadwordToCOP2:
+      return EEMemoryAccess::Load;
+    case EEOperation::StoreByte:
+    case EEOperation::StoreHalfword:
+    case EEOperation::StoreWord:
+    case EEOperation::StoreWordLeft:
+    case EEOperation::StoreWordRight:
+    case EEOperation::StoreDoubleword:
+    case EEOperation::StoreDoublewordLeft:
+    case EEOperation::StoreDoublewordRight:
+    case EEOperation::StoreQuadword:
+    case EEOperation::StoreWordFromCOP1:
+    case EEOperation::StoreQuadwordFromCOP2:
+      return EEMemoryAccess::Store;
+    default:
+      return EEMemoryAccess::None;
+  }
+}
+
+EECOP1OperationFamily cop1FamilyFor(EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::BranchCOP1False:
+    case EEOperation::BranchCOP1FalseLikely:
+    case EEOperation::BranchCOP1True:
+    case EEOperation::BranchCOP1TrueLikely:
+      return EECOP1OperationFamily::ConditionBranch;
+    case EEOperation::MoveWordFromCOP1:
+    case EEOperation::MoveWordToCOP1:
+    case EEOperation::MoveControlWordFromCOP1:
+    case EEOperation::MoveControlWordToCOP1:
+    case EEOperation::MoveSingleCOP1:
+      return EECOP1OperationFamily::RegisterMove;
+    case EEOperation::LoadWordToCOP1:
+    case EEOperation::StoreWordFromCOP1:
+      return EECOP1OperationFamily::MemoryMove;
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+      return EECOP1OperationFamily::Unary;
+    case EEOperation::ConvertWordToSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
+      return EECOP1OperationFamily::Conversion;
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+      return EECOP1OperationFamily::AddSubtract;
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+      return EECOP1OperationFamily::Multiply;
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+      return EECOP1OperationFamily::Compound;
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+      return EECOP1OperationFamily::MinMax;
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
+      return EECOP1OperationFamily::Comparison;
+    case EEOperation::DivideSingleCOP1:
+    case EEOperation::SquareRootSingleCOP1:
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+      return EECOP1OperationFamily::Divider;
+    default:
+      return EECOP1OperationFamily::None;
+  }
+}
+
+bool updatesCOP1ArithmeticFlags(EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+    case EEOperation::DivideSingleCOP1:
+    case EEOperation::SquareRootSingleCOP1:
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+      return true;
+    default:
+      return false;
+  }
+}
+}
+
+EEOperationMetadata eeOperationMetadata(EEOperation operation)
+{
+  if (static_cast<std::uint8_t>(operation) >=
+      EE_OPERATION_COUNT)
+  {
+    throw std::invalid_argument(
+      "Unknown EE operation metadata.");
+  }
+
+  EEOperationMetadata metadata;
+  metadata.routing = buildOperationRouting(operation);
+  metadata.memoryAccess = memoryAccessFor(operation);
+  metadata.cop1Family = cop1FamilyFor(operation);
+  metadata.cop1ManagedPipeline =
+    metadata.cop1Family != EECOP1OperationFamily::None &&
+    metadata.cop1Family !=
+      EECOP1OperationFamily::ConditionBranch;
+  metadata.updatesCOP1ArithmeticFlags =
+    updatesCOP1ArithmeticFlags(operation);
+  if (metadata.cop1Family ==
+      EECOP1OperationFamily::Divider)
+  {
+    if (operation ==
+        EEOperation::ReciprocalSquareRootSingleCOP1)
+    {
+      metadata.cop1DividerLatency = 14;
+      metadata.cop1DividerInitiationInterval = 13;
+    }
+    else
+    {
+      metadata.cop1DividerLatency = 8;
+      metadata.cop1DividerInitiationInterval = 7;
+    }
+  }
+  return metadata;
+}
+
+EEInstructionMetadata eeInstructionMetadata(
+  const EEInstruction &instruction)
+{
+  EEInstructionMetadata metadata;
+  metadata.operation =
+    eeOperationMetadata(instruction.operation);
+  metadata.dependencies =
+    buildInstructionDependencies(instruction);
+  return metadata;
+}
+
+EEInstructionRouting eeInstructionRouting(EEOperation operation)
+{
+  if (static_cast<std::uint8_t>(operation) >=
+      EE_OPERATION_COUNT)
+  {
+    throw std::invalid_argument(
+      "Unknown EE operation routing classification.");
+  }
+  return eeOperationMetadata(operation).routing;
 }
 
 bool eeInstructionSupportsLogicalPipe(

@@ -162,12 +162,12 @@ enum class EEOperation : std::uint8_t
   BranchCOP1True,
   BranchCOP1TrueLikely,
   SynchronizeLoadStore,
-  SynchronizePipeline
+  SynchronizePipeline,
+  Count
 };
 
 constexpr std::uint8_t EE_OPERATION_COUNT =
-  static_cast<std::uint8_t>(
-    EEOperation::SynchronizePipeline) + 1;
+  static_cast<std::uint8_t>(EEOperation::Count);
 
 enum class EEInstructionCategory : std::uint8_t
 {
@@ -238,6 +238,41 @@ struct EEInstructionRouting
   std::uint8_t pipe1PhysicalPipelines = 0;
 };
 
+enum class EEMemoryAccess : std::uint8_t
+{
+  None,
+  Load,
+  Store
+};
+
+enum class EECOP1OperationFamily : std::uint8_t
+{
+  None,
+  ConditionBranch,
+  RegisterMove,
+  MemoryMove,
+  Unary,
+  Conversion,
+  AddSubtract,
+  Multiply,
+  Compound,
+  MinMax,
+  Comparison,
+  Divider
+};
+
+struct EEOperationMetadata
+{
+  EEInstructionRouting routing;
+  EEMemoryAccess memoryAccess = EEMemoryAccess::None;
+  EECOP1OperationFamily cop1Family =
+    EECOP1OperationFamily::None;
+  bool cop1ManagedPipeline = false;
+  bool updatesCOP1ArithmeticFlags = false;
+  std::uint8_t cop1DividerLatency = 0;
+  std::uint8_t cop1DividerInitiationInterval = 0;
+};
+
 struct EEInstructionPipeAssignment
 {
   bool assignable = false;
@@ -274,6 +309,12 @@ struct EEInstruction
   std::uint16_t cop2Immediate = 0;
 };
 
+struct EEInstructionMetadata
+{
+  EEOperationMetadata operation;
+  EEInstructionDependencies dependencies;
+};
+
 enum class EEInstructionDecodeFailure : std::uint8_t
 {
   Reserved,
@@ -293,6 +334,9 @@ class EEInstructionDecodeError : public std::runtime_error
 };
 
 EEInstruction decodeEEInstruction(std::uint32_t instruction);
+EEOperationMetadata eeOperationMetadata(EEOperation operation);
+EEInstructionMetadata eeInstructionMetadata(
+  const EEInstruction &instruction);
 EEInstructionRouting eeInstructionRouting(EEOperation operation);
 bool eeInstructionSupportsLogicalPipe(
   const EEInstructionRouting &routing,

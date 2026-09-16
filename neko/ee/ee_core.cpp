@@ -3195,6 +3195,8 @@ bool EECore::executeInstruction(
         false);
       return true;
     }
+    case EEOperation::Count:
+      break;
   }
 
   return stopUndefinedOperation(
