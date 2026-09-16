@@ -1881,7 +1881,7 @@ void NekoSaveStateCodec::readEECore(
     "EE unoccupied COP1 divider names an operation");
   require(
     core->cop1DividerInitiationCycles == 0 ||
-      EECore::isCOP1DividerOperation(
+      isCOP1DividerOperation(
         core->cop1DividerOperation),
     "EE COP1 divider operation state is inconsistent");
   const bool retiredCOP1OperateResource =
@@ -2005,7 +2005,7 @@ void NekoSaveStateCodec::readEECore(
         (operation.instructionAddress & 3) == 0,
         "EE COP1 instruction address is invalid");
       require(
-        EECore::isCOP1ManagedPipelineOperation(
+        isCOP1ManagedPipelineOperation(
           operation.instruction.operation),
         "EE in-flight operation is not managed by the C1 pipeline");
       require(
@@ -2043,13 +2043,13 @@ void NekoSaveStateCodec::readEECore(
         operation.instruction.operation ==
           EEOperation::LoadWordToCOP1;
       const bool registerMove =
-        EECore::isCOP1RegisterMoveOperation(
+        isCOP1RegisterMoveOperation(
           operation.instruction.operation);
       const bool divider =
-        EECore::isCOP1DividerOperation(
+        isCOP1DividerOperation(
           operation.instruction.operation);
       const bool stagedOperation =
-        EECore::isCOP1StagedOperation(
+        isCOP1StagedOperation(
           operation.instruction.operation);
       require(
         divider || operation.remainingCycles == 0,
@@ -2191,8 +2191,8 @@ void NekoSaveStateCodec::readEECore(
       }
       if (divider)
       {
-        const EECore::COP1DividerTiming timing =
-          EECore::cop1DividerTiming(
+        const EECOP1DividerTiming timing =
+          cop1DividerTiming(
             operation.instruction.operation);
         EEFloatResult expectedResult;
         switch (operation.instruction.operation)
@@ -2373,7 +2373,7 @@ void NekoSaveStateCodec::readEECore(
           }
         }
         const bool singleSource =
-          EECore::isCOP1SingleSourceStagedOperation(
+          isCOP1SingleSourceStagedOperation(
             operation.instruction.operation);
         const bool wordToSingle =
           operation.instruction.operation ==
@@ -2382,7 +2382,7 @@ void NekoSaveStateCodec::readEECore(
           operation.instruction.operation ==
             EEOperation::ConvertSingleToWordCOP1;
         const bool comparison =
-          EECore::isCOP1ComparisonOperation(
+          isCOP1ComparisonOperation(
             operation.instruction.operation);
         const bool accumulatorDestination =
           operation.instruction.operation ==
@@ -2396,7 +2396,7 @@ void NekoSaveStateCodec::readEECore(
           operation.instruction.operation ==
             EEOperation::MultiplySubtractSingleToAccumulatorCOP1;
         const bool compound =
-          EECore::isCOP1CompoundOperation(
+          isCOP1CompoundOperation(
             operation.instruction.operation);
         const std::uint8_t expectedDestination =
           comparison
@@ -2483,7 +2483,7 @@ void NekoSaveStateCodec::readEECore(
        core->inFlightCOP1Operations)
   {
     if (!operation.active ||
-        !EECore::isCOP1DividerOperation(
+        !isCOP1DividerOperation(
           operation.instruction.operation))
     {
       continue;
@@ -2512,8 +2512,8 @@ void NekoSaveStateCodec::readEECore(
     "EE unoccupied COP1 divider has invalid pending results");
   if (core->cop1DividerInitiationCycles != 0)
   {
-    const EECore::COP1DividerTiming timing =
-      EECore::cop1DividerTiming(
+    const EECOP1DividerTiming timing =
+      cop1DividerTiming(
         core->cop1DividerOperation);
     require(
       core->cop1DividerInitiationCycles <=
@@ -2563,7 +2563,7 @@ void NekoSaveStateCodec::readEECore(
     }
     const EECore::InFlightCOP1Operation &operation =
       core->inFlightCOP1Operations[left];
-    if (EECore::isCOP1RegisterMoveOperation(
+    if (isCOP1RegisterMoveOperation(
           operation.instruction.operation) &&
         operation.stage == EECore::COP1PipelineStage::Y)
     {
@@ -2578,7 +2578,7 @@ void NekoSaveStateCodec::readEECore(
         }
         const bool candidateReady =
           candidate.stage == EECore::COP1PipelineStage::S1 ||
-          (EECore::isCOP1RegisterMoveOperation(
+          (isCOP1RegisterMoveOperation(
              candidate.instruction.operation) &&
            candidate.stage == EECore::COP1PipelineStage::Y);
         blockedByOlderOperation =
@@ -2608,7 +2608,7 @@ void NekoSaveStateCodec::readEECore(
         }
         const bool candidateReady =
           candidate.stage == EECore::COP1PipelineStage::S1 ||
-          ((EECore::isCOP1RegisterMoveOperation(
+          ((isCOP1RegisterMoveOperation(
                candidate.instruction.operation) ||
             candidate.instruction.operation ==
               EEOperation::LoadWordToCOP1 ||
@@ -2631,7 +2631,7 @@ void NekoSaveStateCodec::readEECore(
           !conflictsWithOlderWriter,
         "EE COP1 memory W result has no valid older blocker");
     }
-    if (EECore::isCOP1StagedOperation(
+    if (isCOP1StagedOperation(
           operation.instruction.operation) &&
         operation.stage == EECore::COP1PipelineStage::S1)
     {
@@ -2649,14 +2649,14 @@ void NekoSaveStateCodec::readEECore(
         {
           continue;
         }
-        if (EECore::isCOP1DividerOperation(
+        if (isCOP1DividerOperation(
               candidate.instruction.operation))
         {
           ++olderDividerCount;
           const std::uint64_t orderDistance =
             operation.programOrder - candidate.programOrder;
-          const EECore::COP1DividerTiming timing =
-            EECore::cop1DividerTiming(
+          const EECOP1DividerTiming timing =
+            cop1DividerTiming(
               candidate.instruction.operation);
           reachableBehindOlderOperations =
             reachableBehindOlderOperations &&
@@ -2715,9 +2715,9 @@ void NekoSaveStateCodec::readEECore(
         core->inFlightCOP1Operations[left];
       const EECore::InFlightCOP1Operation &second =
         core->inFlightCOP1Operations[right];
-      if (!EECore::isCOP1StagedOperation(
+      if (!isCOP1StagedOperation(
             first.instruction.operation) ||
-          !EECore::isCOP1StagedOperation(
+          !isCOP1StagedOperation(
             second.instruction.operation) ||
           first.stage == EECore::COP1PipelineStage::S1 ||
           second.stage == EECore::COP1PipelineStage::S1)

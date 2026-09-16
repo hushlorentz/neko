@@ -273,6 +273,12 @@ struct EEOperationMetadata
   std::uint8_t cop1DividerInitiationInterval = 0;
 };
 
+struct EECOP1DividerTiming
+{
+  std::uint8_t latency = 0;
+  std::uint8_t initiationInterval = 0;
+};
+
 struct EEInstructionPipeAssignment
 {
   bool assignable = false;
@@ -334,9 +340,26 @@ class EEInstructionDecodeError : public std::runtime_error
 };
 
 EEInstruction decodeEEInstruction(std::uint32_t instruction);
-EEOperationMetadata eeOperationMetadata(EEOperation operation);
+const EEOperationMetadata &eeOperationMetadata(
+  EEOperation operation);
 EEInstructionMetadata eeInstructionMetadata(
   const EEInstruction &instruction);
+bool isCOP1ConditionBranchOperation(EEOperation operation);
+bool isCOP1MoveOperation(EEOperation operation);
+bool isCOP1RegisterMoveOperation(EEOperation operation);
+bool isCOP1OperateOperation(EEOperation operation);
+bool isCOP1DividerOperation(EEOperation operation);
+bool isCOP1AddSubtractOperation(EEOperation operation);
+bool isCOP1MultiplyOperation(EEOperation operation);
+bool isCOP1CompoundOperation(EEOperation operation);
+bool isCOP1UnaryOperation(EEOperation operation);
+bool isCOP1SingleSourceStagedOperation(
+  EEOperation operation);
+bool isCOP1ComparisonOperation(EEOperation operation);
+bool isCOP1StagedOperation(EEOperation operation);
+bool isCOP1ManagedPipelineOperation(EEOperation operation);
+EECOP1DividerTiming cop1DividerTiming(
+  EEOperation operation);
 EEInstructionRouting eeInstructionRouting(EEOperation operation);
 bool eeInstructionSupportsLogicalPipe(
   const EEInstructionRouting &routing,

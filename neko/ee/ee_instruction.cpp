@@ -1451,7 +1451,8 @@ EEInstructionDecodeError::failure() const
 EEInstructionDependencies eeInstructionDependencies(
   const EEInstruction &instruction)
 {
-  return eeInstructionMetadata(instruction).dependencies;
+  eeOperationMetadata(instruction.operation);
+  return buildInstructionDependencies(instruction);
 }
 
 namespace
@@ -1837,17 +1838,10 @@ bool updatesCOP1ArithmeticFlags(EEOperation operation)
       return false;
   }
 }
-}
 
-EEOperationMetadata eeOperationMetadata(EEOperation operation)
+EEOperationMetadata buildOperationMetadata(
+  EEOperation operation)
 {
-  if (static_cast<std::uint8_t>(operation) >=
-      EE_OPERATION_COUNT)
-  {
-    throw std::invalid_argument(
-      "Unknown EE operation metadata.");
-  }
-
   EEOperationMetadata metadata;
   metadata.routing = buildOperationRouting(operation);
   metadata.memoryAccess = memoryAccessFor(operation);
@@ -1876,6 +1870,43 @@ EEOperationMetadata eeOperationMetadata(EEOperation operation)
   return metadata;
 }
 
+const std::array<EEOperationMetadata, EE_OPERATION_COUNT> &
+operationMetadataTable()
+{
+  static const std::array<
+    EEOperationMetadata,
+    EE_OPERATION_COUNT> table = []()
+    {
+      std::array<
+        EEOperationMetadata,
+        EE_OPERATION_COUNT> result = {};
+      for (std::uint8_t value = 0;
+           value < EE_OPERATION_COUNT;
+           ++value)
+      {
+        result[value] = buildOperationMetadata(
+          static_cast<EEOperation>(value));
+      }
+      return result;
+    }();
+  return table;
+}
+}
+
+const EEOperationMetadata &eeOperationMetadata(
+  EEOperation operation)
+{
+  if (static_cast<std::uint8_t>(operation) >=
+      EE_OPERATION_COUNT)
+  {
+    throw std::invalid_argument(
+      "Unknown EE operation metadata.");
+  }
+
+  return operationMetadataTable()[
+    static_cast<std::uint8_t>(operation)];
+}
+
 EEInstructionMetadata eeInstructionMetadata(
   const EEInstruction &instruction)
 {
@@ -1885,6 +1916,126 @@ EEInstructionMetadata eeInstructionMetadata(
   metadata.dependencies =
     buildInstructionDependencies(instruction);
   return metadata;
+}
+
+bool isCOP1ConditionBranchOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::ConditionBranch;
+}
+
+bool isCOP1MoveOperation(EEOperation operation)
+{
+  const EECOP1OperationFamily family =
+    eeOperationMetadata(operation).cop1Family;
+  return family == EECOP1OperationFamily::RegisterMove ||
+    family == EECOP1OperationFamily::MemoryMove;
+}
+
+bool isCOP1RegisterMoveOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::RegisterMove;
+}
+
+bool isCOP1OperateOperation(EEOperation operation)
+{
+  const EECOP1OperationFamily family =
+    eeOperationMetadata(operation).cop1Family;
+  return
+    family != EECOP1OperationFamily::None &&
+    family != EECOP1OperationFamily::ConditionBranch &&
+    family != EECOP1OperationFamily::RegisterMove &&
+    family != EECOP1OperationFamily::MemoryMove;
+}
+
+bool isCOP1DividerOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::Divider;
+}
+
+bool isCOP1AddSubtractOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::AddSubtract;
+}
+
+bool isCOP1MultiplyOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::Multiply;
+}
+
+bool isCOP1CompoundOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::Compound;
+}
+
+bool isCOP1UnaryOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::Unary;
+}
+
+bool isCOP1SingleSourceStagedOperation(
+  EEOperation operation)
+{
+  const EECOP1OperationFamily family =
+    eeOperationMetadata(operation).cop1Family;
+  return family == EECOP1OperationFamily::Unary ||
+    family == EECOP1OperationFamily::Conversion;
+}
+
+bool isCOP1ComparisonOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::Comparison;
+}
+
+bool isCOP1StagedOperation(EEOperation operation)
+{
+  const EECOP1OperationFamily family =
+    eeOperationMetadata(operation).cop1Family;
+  return
+    family == EECOP1OperationFamily::Unary ||
+    family == EECOP1OperationFamily::Conversion ||
+    family == EECOP1OperationFamily::AddSubtract ||
+    family == EECOP1OperationFamily::Multiply ||
+    family == EECOP1OperationFamily::Compound ||
+    family == EECOP1OperationFamily::MinMax ||
+    family == EECOP1OperationFamily::Comparison;
+}
+
+bool isCOP1ManagedPipelineOperation(EEOperation operation)
+{
+  return eeOperationMetadata(operation).cop1ManagedPipeline;
+}
+
+EECOP1DividerTiming cop1DividerTiming(
+  EEOperation operation)
+{
+  const EEOperationMetadata &metadata =
+    eeOperationMetadata(operation);
+  if (metadata.cop1Family !=
+      EECOP1OperationFamily::Divider)
+  {
+    throw std::invalid_argument(
+      "EE operation does not use the COP1 divider.");
+  }
+  return {
+    metadata.cop1DividerLatency,
+    metadata.cop1DividerInitiationInterval
+  };
 }
 
 EEInstructionRouting eeInstructionRouting(EEOperation operation)

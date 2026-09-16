@@ -1113,7 +1113,7 @@ accumulator or condition-result contract:
       managed-pipeline participation, and operation-specific timing
 - [x] Add table-driven completeness tests proving that every defined operation,
       including future MMI operations, has deliberate metadata
-- [ ] Move COP1 family and timing classification out of `EECore` without
+- [x] Move COP1 family and timing classification out of `EECore` without
       changing decode, issue, scoreboard, execution, or trace behavior
 - [ ] Make issue selection, execution, save-state validation, and diagnostics
       consume the shared metadata instead of maintaining parallel classifiers

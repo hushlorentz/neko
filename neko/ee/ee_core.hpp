@@ -516,12 +516,6 @@ class EECore : public ClockedComponent
       std::uint64_t generalRegisterResult = 0;
     };
 
-    struct COP1DividerTiming
-    {
-      std::uint8_t latency;
-      std::uint8_t initiationInterval;
-    };
-
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
     std::array<
@@ -765,30 +759,6 @@ class EECore : public ClockedComponent
     static COP1Dependency dependencyForAccess(
       bool reads,
       bool writes);
-    static bool isCOP1ConditionBranchOperation(
-      EEOperation operation);
-    static bool isCOP1MoveOperation(EEOperation operation);
-    static bool isCOP1RegisterMoveOperation(
-      EEOperation operation);
-    static bool isCOP1OperateOperation(EEOperation operation);
-    static bool isCOP1DividerOperation(EEOperation operation);
-    static bool isCOP1AddSubtractOperation(
-      EEOperation operation);
-    static bool isCOP1MultiplyOperation(
-      EEOperation operation);
-    static bool isCOP1CompoundOperation(
-      EEOperation operation);
-    static bool isCOP1UnaryOperation(EEOperation operation);
-    static bool isCOP1SingleSourceStagedOperation(
-      EEOperation operation);
-    static bool isCOP1ComparisonOperation(
-      EEOperation operation);
-    static bool isCOP1StagedOperation(
-      EEOperation operation);
-    static bool isCOP1ManagedPipelineOperation(
-      EEOperation operation);
-    static COP1DividerTiming cop1DividerTiming(
-      EEOperation operation);
     bool validateDelaySlotInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);
