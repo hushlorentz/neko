@@ -261,12 +261,22 @@ enum class EECOP1OperationFamily : std::uint8_t
   Divider
 };
 
+enum class EECOP1ResultDestination : std::uint8_t
+{
+  None,
+  FPR,
+  Accumulator,
+  Condition
+};
+
 struct EEOperationMetadata
 {
   EEInstructionRouting routing;
   EEMemoryAccess memoryAccess = EEMemoryAccess::None;
   EECOP1OperationFamily cop1Family =
     EECOP1OperationFamily::None;
+  EECOP1ResultDestination cop1ResultDestination =
+    EECOP1ResultDestination::None;
   bool cop1ManagedPipeline = false;
   bool updatesCOP1ArithmeticFlags = false;
   std::uint8_t cop1DividerLatency = 0;
@@ -347,6 +357,7 @@ EEInstructionMetadata eeInstructionMetadata(
 bool isCOP1ConditionBranchOperation(EEOperation operation);
 bool isCOP1MoveOperation(EEOperation operation);
 bool isCOP1RegisterMoveOperation(EEOperation operation);
+bool isCOP1MemoryMoveOperation(EEOperation operation);
 bool isCOP1OperateOperation(EEOperation operation);
 bool isCOP1DividerOperation(EEOperation operation);
 bool isCOP1AddSubtractOperation(EEOperation operation);
@@ -358,6 +369,8 @@ bool isCOP1SingleSourceStagedOperation(
 bool isCOP1ComparisonOperation(EEOperation operation);
 bool isCOP1StagedOperation(EEOperation operation);
 bool isCOP1ManagedPipelineOperation(EEOperation operation);
+bool isLoadOperation(EEOperation operation);
+bool isStoreOperation(EEOperation operation);
 EECOP1DividerTiming cop1DividerTiming(
   EEOperation operation);
 EEInstructionRouting eeInstructionRouting(EEOperation operation);

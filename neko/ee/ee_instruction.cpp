@@ -1839,6 +1839,42 @@ bool updatesCOP1ArithmeticFlags(EEOperation operation)
   }
 }
 
+EECOP1ResultDestination cop1ResultDestinationFor(
+  EEOperation operation)
+{
+  switch (operation)
+  {
+    case EEOperation::CompareFalseSingleCOP1:
+    case EEOperation::CompareEqualSingleCOP1:
+    case EEOperation::CompareLessThanSingleCOP1:
+    case EEOperation::CompareLessThanOrEqualSingleCOP1:
+      return EECOP1ResultDestination::Condition;
+    case EEOperation::AddSingleToAccumulatorCOP1:
+    case EEOperation::SubtractSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySingleToAccumulatorCOP1:
+    case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+    case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+      return EECOP1ResultDestination::Accumulator;
+    case EEOperation::AbsoluteSingleCOP1:
+    case EEOperation::NegateSingleCOP1:
+    case EEOperation::MaximumSingleCOP1:
+    case EEOperation::MinimumSingleCOP1:
+    case EEOperation::ConvertWordToSingleCOP1:
+    case EEOperation::ConvertSingleToWordCOP1:
+    case EEOperation::AddSingleCOP1:
+    case EEOperation::SubtractSingleCOP1:
+    case EEOperation::MultiplySingleCOP1:
+    case EEOperation::MultiplyAddSingleCOP1:
+    case EEOperation::MultiplySubtractSingleCOP1:
+    case EEOperation::DivideSingleCOP1:
+    case EEOperation::SquareRootSingleCOP1:
+    case EEOperation::ReciprocalSquareRootSingleCOP1:
+      return EECOP1ResultDestination::FPR;
+    default:
+      return EECOP1ResultDestination::None;
+  }
+}
+
 EEOperationMetadata buildOperationMetadata(
   EEOperation operation)
 {
@@ -1846,6 +1882,8 @@ EEOperationMetadata buildOperationMetadata(
   metadata.routing = buildOperationRouting(operation);
   metadata.memoryAccess = memoryAccessFor(operation);
   metadata.cop1Family = cop1FamilyFor(operation);
+  metadata.cop1ResultDestination =
+    cop1ResultDestinationFor(operation);
   metadata.cop1ManagedPipeline =
     metadata.cop1Family != EECOP1OperationFamily::None &&
     metadata.cop1Family !=
@@ -1940,6 +1978,13 @@ bool isCOP1RegisterMoveOperation(EEOperation operation)
     EECOP1OperationFamily::RegisterMove;
 }
 
+bool isCOP1MemoryMoveOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).cop1Family ==
+    EECOP1OperationFamily::MemoryMove;
+}
+
 bool isCOP1OperateOperation(EEOperation operation)
 {
   const EECOP1OperationFamily family =
@@ -2019,6 +2064,20 @@ bool isCOP1StagedOperation(EEOperation operation)
 bool isCOP1ManagedPipelineOperation(EEOperation operation)
 {
   return eeOperationMetadata(operation).cop1ManagedPipeline;
+}
+
+bool isLoadOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).memoryAccess ==
+    EEMemoryAccess::Load;
+}
+
+bool isStoreOperation(EEOperation operation)
+{
+  return
+    eeOperationMetadata(operation).memoryAccess ==
+    EEMemoryAccess::Store;
 }
 
 EECOP1DividerTiming cop1DividerTiming(

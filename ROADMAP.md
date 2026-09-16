@@ -1115,9 +1115,9 @@ accumulator or condition-result contract:
       including future MMI operations, has deliberate metadata
 - [x] Move COP1 family and timing classification out of `EECore` without
       changing decode, issue, scoreboard, execution, or trace behavior
-- [ ] Make issue selection, execution, save-state validation, and diagnostics
+- [x] Make issue selection, execution, save-state validation, and diagnostics
       consume the shared metadata instead of maintaining parallel classifiers
-- [ ] Remove superseded classifiers only after focused pairing, hazard,
+- [x] Remove superseded classifiers only after focused pairing, hazard,
       retirement, and reserved-operation tests remain unchanged
 
 #### EE Operation Dispatch and Focused Execution Methods

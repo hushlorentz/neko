@@ -666,8 +666,6 @@ class EECore : public ClockedComponent
       const EEInstruction &instruction) const;
     bool cop2ScoreboardBlocks(
       const EEInstruction &instruction) const;
-    static bool isMemoryOperation(
-      EEOperation operation);
     bool executeInstruction(
       const EEInstruction &instruction,
       std::uint32_t address);

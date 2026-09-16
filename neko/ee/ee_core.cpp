@@ -755,10 +755,8 @@ bool EECore::issueSelectionCanExecuteConcurrently() const
   {
     return false;
   }
-  if ((issueLatch.instruction.operation ==
-         EEOperation::LoadWordToCOP1 ||
-       issueLatch.instruction.operation ==
-         EEOperation::StoreWordFromCOP1) &&
+  if (isCOP1MemoryMoveOperation(
+        issueLatch.instruction.operation) &&
       issueSelection.pairing !=
         EEIssuePairing::ConcurrentWithStall)
   {
@@ -958,20 +956,6 @@ bool EECore::cop2ScoreboardBlocks(
   }
 }
 
-bool EECore::isMemoryOperation(EEOperation operation)
-{
-  if (eeInstructionRouting(operation).category ==
-      EEInstructionCategory::LoadStore)
-  {
-    return true;
-  }
-  return
-    operation == EEOperation::LoadWordToCOP1 ||
-    operation == EEOperation::StoreWordFromCOP1 ||
-    operation == EEOperation::LoadQuadwordToCOP2 ||
-    operation == EEOperation::StoreQuadwordFromCOP2;
-}
-
 void EECore::startExecution(std::uint32_t startAddress)
 {
   const bool resumePendingBranch =
@@ -1062,8 +1046,9 @@ void EECore::startExecution(std::uint32_t startAddress)
         continue;
       }
       if ((!resumePendingCOP1Load &&
-           operation.instruction.operation ==
-             EEOperation::LoadWordToCOP1) ||
+           isCOP1MemoryMoveOperation(
+             operation.instruction.operation) &&
+           isLoadOperation(operation.instruction.operation)) ||
           (!resumePendingCOP1Divider &&
            isCOP1DividerOperation(
              operation.instruction.operation)))
@@ -1652,21 +1637,17 @@ bool EECore::executeInstruction(
       }
       InFlightCOP1Operation &operation =
         allocateInFlightCOP1(instruction, address);
-      if (isCOP1ComparisonOperation(instruction.operation))
+      const EECOP1ResultDestination resultDestination =
+        eeOperationMetadata(
+          instruction.operation).cop1ResultDestination;
+      if (resultDestination ==
+          EECOP1ResultDestination::Condition)
       {
         operation.destination.mask =
           COP1_DESTINATION_CONDITION;
       }
-      else if (instruction.operation ==
-                 EEOperation::AddSingleToAccumulatorCOP1 ||
-               instruction.operation ==
-                 EEOperation::SubtractSingleToAccumulatorCOP1 ||
-               instruction.operation ==
-                 EEOperation::MultiplySingleToAccumulatorCOP1 ||
-               instruction.operation ==
-                 EEOperation::MultiplyAddSingleToAccumulatorCOP1 ||
-               instruction.operation ==
-                 EEOperation::MultiplySubtractSingleToAccumulatorCOP1)
+      else if (resultDestination ==
+               EECOP1ResultDestination::Accumulator)
       {
         operation.destination.mask =
           COP1_DESTINATION_ACCUMULATOR |
@@ -3361,8 +3342,9 @@ bool EECore::pendingCOP1LoadActive() const
        inFlightCOP1Operations)
   {
     if (operation.active &&
-        operation.instruction.operation ==
-          EEOperation::LoadWordToCOP1)
+        isCOP1MemoryMoveOperation(
+          operation.instruction.operation) &&
+        isLoadOperation(operation.instruction.operation))
     {
       return true;
     }
@@ -3450,10 +3432,8 @@ bool EECore::drainInFlightCOP1()
         computeInFlightCOP1StagedOperation(oldest);
       }
     }
-    else if (oldest->instruction.operation ==
-               EEOperation::LoadWordToCOP1 ||
-             oldest->instruction.operation ==
-               EEOperation::StoreWordFromCOP1)
+    else if (isCOP1MemoryMoveOperation(
+               oldest->instruction.operation))
     {
       if (oldest->stage == COP1PipelineStage::R)
       {
@@ -3467,14 +3447,12 @@ bool EECore::drainInFlightCOP1()
         return finishFailure(
           raiseCOP1DataAccessException(
             *oldest,
-            oldest->instruction.operation ==
-                EEOperation::LoadWordToCOP1
+            isLoadOperation(oldest->instruction.operation)
               ? EEException::AddressErrorLoadOrFetch
               : EEException::AddressErrorStore,
             oldest->memoryAddress));
       }
-      if (oldest->instruction.operation ==
-          EEOperation::LoadWordToCOP1)
+      if (isLoadOperation(oldest->instruction.operation))
       {
         if (oldest->stage < COP1PipelineStage::X)
         {
@@ -3765,17 +3743,15 @@ void EECore::advancePendingCOP1(
           ((isCOP1RegisterMoveOperation(
              oldestOperation->instruction.operation) &&
             oldestOperation->stage == COP1PipelineStage::Y) ||
-           ((oldestOperation->instruction.operation ==
-               EEOperation::LoadWordToCOP1 ||
-             oldestOperation->instruction.operation ==
-               EEOperation::StoreWordFromCOP1) &&
+           (isCOP1MemoryMoveOperation(
+              oldestOperation->instruction.operation) &&
             oldestOperation->stage == COP1PipelineStage::Y));
         if (!retirementReady)
         {
           break;
         }
-        if (oldestOperation->instruction.operation ==
-            EEOperation::LoadWordToCOP1)
+        if (isLoadOperation(
+              oldestOperation->instruction.operation))
         {
           *completedLoadRegisters |=
             UINT32_C(1) <<
@@ -3992,14 +3968,11 @@ bool EECore::advanceInFlightCOP1Operation(
         return false;
     }
   }
-  if (operation->instruction.operation ==
-        EEOperation::LoadWordToCOP1 ||
-      operation->instruction.operation ==
-        EEOperation::StoreWordFromCOP1)
+  if (isCOP1MemoryMoveOperation(
+        operation->instruction.operation))
   {
     const bool load =
-      operation->instruction.operation ==
-      EEOperation::LoadWordToCOP1;
+      isLoadOperation(operation->instruction.operation);
     switch (operation->stage)
     {
       case COP1PipelineStage::R:
@@ -4394,10 +4367,8 @@ bool EECore::cop1ScoreboardBlocks(
          inFlightCOP1Operations)
     {
       if (operation.active &&
-          (operation.instruction.operation ==
-             EEOperation::LoadWordToCOP1 ||
-           operation.instruction.operation ==
-             EEOperation::StoreWordFromCOP1))
+          isCOP1MemoryMoveOperation(
+            operation.instruction.operation))
       {
         *hazard = {
           COP1ScoreboardResource::MemoryException,
@@ -4707,11 +4678,13 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValueBefore(
         break;
       case COP1ScoreboardResource::MemoryException:
         writesResource =
-          (operation.instruction.operation ==
-             EEOperation::LoadWordToCOP1 &&
+          (isCOP1MemoryMoveOperation(
+             operation.instruction.operation) &&
+           isLoadOperation(operation.instruction.operation) &&
            operation.stage < COP1PipelineStage::X) ||
-          (operation.instruction.operation ==
-             EEOperation::StoreWordFromCOP1 &&
+          (isCOP1MemoryMoveOperation(
+             operation.instruction.operation) &&
+           isStoreOperation(operation.instruction.operation) &&
            operation.stage < COP1PipelineStage::Y);
         break;
       case COP1ScoreboardResource::Divider:

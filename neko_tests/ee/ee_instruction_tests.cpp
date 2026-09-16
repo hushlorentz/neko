@@ -299,6 +299,41 @@ TEST_CASE("EE instruction routing classification")
 
 TEST_CASE("Every EE operation has complete shared metadata")
 {
+  const auto expectedCOP1ResultDestination =
+    [](EEOperation operation)
+    {
+      switch (operation)
+      {
+        case EEOperation::CompareFalseSingleCOP1:
+        case EEOperation::CompareEqualSingleCOP1:
+        case EEOperation::CompareLessThanSingleCOP1:
+        case EEOperation::CompareLessThanOrEqualSingleCOP1:
+          return EECOP1ResultDestination::Condition;
+        case EEOperation::AddSingleToAccumulatorCOP1:
+        case EEOperation::SubtractSingleToAccumulatorCOP1:
+        case EEOperation::MultiplySingleToAccumulatorCOP1:
+        case EEOperation::MultiplyAddSingleToAccumulatorCOP1:
+        case EEOperation::MultiplySubtractSingleToAccumulatorCOP1:
+          return EECOP1ResultDestination::Accumulator;
+        case EEOperation::AbsoluteSingleCOP1:
+        case EEOperation::NegateSingleCOP1:
+        case EEOperation::MaximumSingleCOP1:
+        case EEOperation::MinimumSingleCOP1:
+        case EEOperation::ConvertWordToSingleCOP1:
+        case EEOperation::ConvertSingleToWordCOP1:
+        case EEOperation::AddSingleCOP1:
+        case EEOperation::SubtractSingleCOP1:
+        case EEOperation::MultiplySingleCOP1:
+        case EEOperation::MultiplyAddSingleCOP1:
+        case EEOperation::MultiplySubtractSingleCOP1:
+        case EEOperation::DivideSingleCOP1:
+        case EEOperation::SquareRootSingleCOP1:
+        case EEOperation::ReciprocalSquareRootSingleCOP1:
+          return EECOP1ResultDestination::FPR;
+        default:
+          return EECOP1ResultDestination::None;
+      }
+    };
   const auto requireOperationMetadata =
     [](EEOperation operation,
        EEMemoryAccess memoryAccess,
@@ -379,14 +414,29 @@ TEST_CASE("Every EE operation has complete shared metadata")
     eeOperationMetadata(
       EEOperation::AddSingleToAccumulatorCOP1)
       .updatesCOP1ArithmeticFlags);
+  REQUIRE(
+    eeOperationMetadata(
+      EEOperation::AddSingleToAccumulatorCOP1)
+      .cop1ResultDestination ==
+    EECOP1ResultDestination::Accumulator);
   REQUIRE_FALSE(
     eeOperationMetadata(
       EEOperation::ConvertWordToSingleCOP1)
       .updatesCOP1ArithmeticFlags);
+  REQUIRE(
+    eeOperationMetadata(
+      EEOperation::DivideSingleCOP1)
+      .cop1ResultDestination ==
+    EECOP1ResultDestination::FPR);
   REQUIRE_FALSE(
     eeOperationMetadata(
       EEOperation::CompareEqualSingleCOP1)
       .updatesCOP1ArithmeticFlags);
+  REQUIRE(
+    eeOperationMetadata(
+      EEOperation::CompareEqualSingleCOP1)
+      .cop1ResultDestination ==
+    EECOP1ResultDestination::Condition);
 
   for (std::uint8_t value = 0;
        value < EE_OPERATION_COUNT;
@@ -437,6 +487,9 @@ TEST_CASE("Every EE operation has complete shared metadata")
          EECOP1OperationFamily::None &&
        metadata.cop1Family !=
          EECOP1OperationFamily::ConditionBranch));
+    REQUIRE(
+      metadata.cop1ResultDestination ==
+      expectedCOP1ResultDestination(operation));
 
     EEInstruction instruction;
     instruction.operation = operation;

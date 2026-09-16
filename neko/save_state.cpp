@@ -2019,10 +2019,8 @@ void NekoSaveStateCodec::readEECore(
           operation.destination.gprRegister == 0,
         "EE COP1 result names an unused GPR destination");
       const bool memoryOperation =
-        operation.instruction.operation ==
-          EEOperation::LoadWordToCOP1 ||
-        operation.instruction.operation ==
-          EEOperation::StoreWordFromCOP1;
+        isCOP1MemoryMoveOperation(
+          operation.instruction.operation);
       require(
         memoryOperation ||
           (operation.memoryAddress == 0 &&
@@ -2040,8 +2038,8 @@ void NekoSaveStateCodec::readEECore(
           !operation.conditionResult,
         "EE COP1 result contains an unused condition value");
       const bool load =
-        operation.instruction.operation ==
-          EEOperation::LoadWordToCOP1;
+        memoryOperation &&
+        isLoadOperation(operation.instruction.operation);
       const bool registerMove =
         isCOP1RegisterMoveOperation(
           operation.instruction.operation);
@@ -2384,24 +2382,19 @@ void NekoSaveStateCodec::readEECore(
         const bool comparison =
           isCOP1ComparisonOperation(
             operation.instruction.operation);
-        const bool accumulatorDestination =
-          operation.instruction.operation ==
-            EEOperation::AddSingleToAccumulatorCOP1 ||
-          operation.instruction.operation ==
-            EEOperation::SubtractSingleToAccumulatorCOP1 ||
-          operation.instruction.operation ==
-            EEOperation::MultiplySingleToAccumulatorCOP1 ||
-          operation.instruction.operation ==
-            EEOperation::MultiplyAddSingleToAccumulatorCOP1 ||
-          operation.instruction.operation ==
-            EEOperation::MultiplySubtractSingleToAccumulatorCOP1;
+        const EECOP1ResultDestination resultDestination =
+          eeOperationMetadata(
+            operation.instruction.operation).
+              cop1ResultDestination;
         const bool compound =
           isCOP1CompoundOperation(
             operation.instruction.operation);
         const std::uint8_t expectedDestination =
-          comparison
+          resultDestination ==
+              EECOP1ResultDestination::Condition
             ? EECore::COP1_DESTINATION_CONDITION
-            : accumulatorDestination
+            : resultDestination ==
+                  EECOP1ResultDestination::Accumulator
               ? EECore::COP1_DESTINATION_ACCUMULATOR |
                 EECore::COP1_DESTINATION_FCR31
               : EECore::COP1_DESTINATION_FPR |
@@ -2589,10 +2582,8 @@ void NekoSaveStateCodec::readEECore(
         "EE COP1 register move W result has no older blocker");
     }
     const bool memoryOperation =
-      operation.instruction.operation ==
-        EEOperation::LoadWordToCOP1 ||
-      operation.instruction.operation ==
-        EEOperation::StoreWordFromCOP1;
+      isCOP1MemoryMoveOperation(
+        operation.instruction.operation);
     if (memoryOperation &&
         operation.stage == EECore::COP1PipelineStage::Y)
     {
@@ -2610,17 +2601,15 @@ void NekoSaveStateCodec::readEECore(
           candidate.stage == EECore::COP1PipelineStage::S1 ||
           ((isCOP1RegisterMoveOperation(
                candidate.instruction.operation) ||
-            candidate.instruction.operation ==
-              EEOperation::LoadWordToCOP1 ||
-            candidate.instruction.operation ==
-              EEOperation::StoreWordFromCOP1) &&
+            isCOP1MemoryMoveOperation(
+              candidate.instruction.operation)) &&
            candidate.stage == EECore::COP1PipelineStage::Y);
         blockedByOlderOperation =
           blockedByOlderOperation || !candidateReady;
         conflictsWithOlderWriter =
           conflictsWithOlderWriter ||
-          (operation.instruction.operation ==
-              EEOperation::LoadWordToCOP1 &&
+          (isLoadOperation(
+             operation.instruction.operation) &&
            (candidate.destination.mask &
             EECore::COP1_DESTINATION_FPR) != 0 &&
            candidate.destination.fprRegister ==
