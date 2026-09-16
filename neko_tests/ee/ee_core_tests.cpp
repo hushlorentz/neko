@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
@@ -7,6 +8,28 @@
 #include "floating_point_ops.hpp"
 #include "ee_instruction.hpp"
 #include "neko_system.hpp"
+
+static_assert(
+  std::is_final<EECore>::value,
+  "EE instruction execution must remain concrete and non-overridable.");
+
+class NonCopyableIssueMemberAttempt
+{
+  public:
+    NonCopyableIssueMemberAttempt() = default;
+    NonCopyableIssueMemberAttempt(
+      const NonCopyableIssueMemberAttempt &) = delete;
+    NonCopyableIssueMemberAttempt &operator=(
+      const NonCopyableIssueMemberAttempt &) = delete;
+
+    EEIssueMemberExecution operator()(std::uint8_t)
+    {
+      ++attempts;
+      return EEIssueMemberExecution::Accepted;
+    }
+
+    std::uint8_t attempts = 0;
+};
 
 struct EECoreTestAccess
 {
@@ -330,6 +353,17 @@ TEST_CASE("EE acceptance records preserve issue-group order")
 
 TEST_CASE("EE issue groups stop at precise member boundaries")
 {
+  SECTION("The attempt callable is used without ownership or copying")
+  {
+    NonCopyableIssueMemberAttempt attempt;
+    const EEIssueGroupExecutionResult result =
+      executeEEIssueGroupMembers(2, attempt);
+
+    REQUIRE(attempt.attempts == 2);
+    REQUIRE(result.attempted == 2);
+    REQUIRE(result.accepted == 2);
+  }
+
   SECTION("An older failure suppresses the younger member")
   {
     std::uint8_t attempts = 0;

@@ -128,7 +128,7 @@ struct EEIssueGroupExecutionResult
 template <typename AttemptMember>
 EEIssueGroupExecutionResult executeEEIssueGroupMembers(
   std::uint8_t memberCount,
-  AttemptMember attemptMember)
+  AttemptMember &&attemptMember)
 {
   if (memberCount > EEAcceptanceRecords::CAPACITY)
   {
@@ -280,7 +280,7 @@ namespace EEReset
   constexpr std::uint32_t VECTOR = UINT32_C(0xbfc00000);
 }
 
-class EECore : public ClockedComponent
+class EECore final : public ClockedComponent
 {
   public:
     static constexpr std::size_t GENERAL_REGISTER_COUNT = 32;

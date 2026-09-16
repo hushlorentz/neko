@@ -1134,7 +1134,7 @@ accumulator or condition-result contract:
       family methods
 - [x] Keep delayed MAC, C1, COP2, branch, and exception ownership at their
       existing lifecycle boundaries rather than hiding timing in handlers
-- [ ] Avoid per-instruction allocation and unnecessary virtual dispatch in the
+- [x] Avoid per-instruction allocation and unnecessary virtual dispatch in the
       execution path
 - [ ] Migrate operation families incrementally, keeping each change covered by
       its integer, memory, branch, COP0, COP1, COP2, and guest tests
