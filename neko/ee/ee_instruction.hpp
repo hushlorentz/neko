@@ -313,11 +313,23 @@ enum class EEExecutionFamily : std::uint8_t
   Divide
 };
 
+enum class EEExecutionDispatch : std::uint8_t
+{
+  Unclassified,
+  Immediate,
+  ManagedCOP1,
+  MAC0Continuation,
+  MAC1Continuation,
+  COP2Coupled
+};
+
 struct EEOperationMetadata
 {
   EEInstructionRouting routing;
   EEExecutionFamily executionFamily =
     EEExecutionFamily::Unclassified;
+  EEExecutionDispatch executionDispatch =
+    EEExecutionDispatch::Unclassified;
   EEMemoryAccess memoryAccess = EEMemoryAccess::None;
   EECOP1OperationFamily cop1Family =
     EECOP1OperationFamily::None;

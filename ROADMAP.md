@@ -1126,7 +1126,7 @@ accumulator or condition-result contract:
       execution family with one architectural purpose
 - [x] Define an explicit execution outcome that distinguishes completed,
       delayed, faulted, halted, and rejected work without behavioral booleans
-- [ ] Add a table-driven completeness test proving every value below
+- [x] Add a table-driven completeness test proving every value below
       `EE_OPERATION_COUNT` has an execution-family and dispatch classification,
       with invalid enum values handled separately
 - [ ] Retain one exhaustive operation dispatch boundary while moving operand

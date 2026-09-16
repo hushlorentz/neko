@@ -1928,6 +1928,37 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
   return EEExecutionFamily::Unclassified;
 }
 
+EEExecutionDispatch executionDispatchFor(
+  const EEInstructionRouting &routing,
+  EEExecutionFamily family)
+{
+  if (family == EEExecutionFamily::Multiply ||
+      family == EEExecutionFamily::Divide)
+  {
+    return routing.category == EEInstructionCategory::MAC1
+      ? EEExecutionDispatch::MAC1Continuation
+      : EEExecutionDispatch::MAC0Continuation;
+  }
+  switch (family)
+  {
+    case EEExecutionFamily::Unclassified:
+      return EEExecutionDispatch::Unclassified;
+    case EEExecutionFamily::COP1RegisterMove:
+    case EEExecutionFamily::COP1Divider:
+    case EEExecutionFamily::COP1StagedOperation:
+    case EEExecutionFamily::COP1Memory:
+      return EEExecutionDispatch::ManagedCOP1;
+    case EEExecutionFamily::COP2Memory:
+    case EEExecutionFamily::COP2VectorMove:
+    case EEExecutionFamily::COP2ControlMove:
+    case EEExecutionFamily::COP2MicroCall:
+    case EEExecutionFamily::COP2Macro:
+      return EEExecutionDispatch::COP2Coupled;
+    default:
+      return EEExecutionDispatch::Immediate;
+  }
+}
+
 EEMemoryAccess memoryAccessFor(EEOperation operation)
 {
   switch (operation)
@@ -2088,6 +2119,10 @@ EEOperationMetadata buildOperationMetadata(
   EEOperationMetadata metadata;
   metadata.routing = buildOperationRouting(operation);
   metadata.executionFamily = executionFamilyFor(operation);
+  metadata.executionDispatch =
+    executionDispatchFor(
+      metadata.routing,
+      metadata.executionFamily);
   metadata.memoryAccess = memoryAccessFor(operation);
   metadata.cop1Family = cop1FamilyFor(operation);
   metadata.cop1ResultDestination =

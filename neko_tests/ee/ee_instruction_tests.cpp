@@ -299,32 +299,58 @@ TEST_CASE("EE instruction routing classification")
 
 TEST_CASE("Every EE operation has complete shared metadata")
 {
-  const auto expectedExecutionFamily =
+  struct ExpectedExecutionClassification
+  {
+    EEExecutionFamily family;
+    EEExecutionDispatch dispatch;
+  };
+  const auto expectedExecutionClassification =
     [](EEOperation operation)
     {
       switch (operation)
       {
         case EEOperation::Nop:
-          return EEExecutionFamily::NoOperation;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::NoOperation,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::SynchronizeLoadStore:
-          return EEExecutionFamily::LoadStoreSynchronization;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::LoadStoreSynchronization,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::SynchronizePipeline:
-          return EEExecutionFamily::PipelineSynchronization;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::PipelineSynchronization,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::ExceptionReturn:
-          return EEExecutionFamily::ExceptionReturn;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ExceptionReturn,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::SystemCall:
         case EEOperation::Breakpoint:
-          return EEExecutionFamily::SoftwareException;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::SoftwareException,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::MoveWordFromCOP1:
         case EEOperation::MoveWordToCOP1:
         case EEOperation::MoveControlWordFromCOP1:
         case EEOperation::MoveControlWordToCOP1:
         case EEOperation::MoveSingleCOP1:
-          return EEExecutionFamily::COP1RegisterMove;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP1RegisterMove,
+            EEExecutionDispatch::ManagedCOP1
+          };
         case EEOperation::DivideSingleCOP1:
         case EEOperation::SquareRootSingleCOP1:
         case EEOperation::ReciprocalSquareRootSingleCOP1:
-          return EEExecutionFamily::COP1Divider;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP1Divider,
+            EEExecutionDispatch::ManagedCOP1
+          };
         case EEOperation::AbsoluteSingleCOP1:
         case EEOperation::NegateSingleCOP1:
         case EEOperation::MaximumSingleCOP1:
@@ -345,19 +371,28 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::CompareEqualSingleCOP1:
         case EEOperation::CompareLessThanSingleCOP1:
         case EEOperation::CompareLessThanOrEqualSingleCOP1:
-          return EEExecutionFamily::COP1StagedOperation;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP1StagedOperation,
+            EEExecutionDispatch::ManagedCOP1
+          };
         case EEOperation::BranchCOP1False:
         case EEOperation::BranchCOP1FalseLikely:
         case EEOperation::BranchCOP1True:
         case EEOperation::BranchCOP1TrueLikely:
-          return EEExecutionFamily::COP1Branch;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP1Branch,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::ShiftLeftLogicalWord:
         case EEOperation::ShiftRightLogicalWord:
         case EEOperation::ShiftRightArithmeticWord:
         case EEOperation::ShiftLeftLogicalVariableWord:
         case EEOperation::ShiftRightLogicalVariableWord:
         case EEOperation::ShiftRightArithmeticVariableWord:
-          return EEExecutionFamily::WordShift;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::WordShift,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::ShiftLeftLogicalVariableDoubleword:
         case EEOperation::ShiftRightLogicalVariableDoubleword:
         case EEOperation::ShiftRightArithmeticVariableDoubleword:
@@ -367,39 +402,66 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::ShiftLeftLogicalDoubleword32:
         case EEOperation::ShiftRightLogicalDoubleword32:
         case EEOperation::ShiftRightArithmeticDoubleword32:
-          return EEExecutionFamily::DoublewordShift;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::DoublewordShift,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::AddWord:
         case EEOperation::AddUnsignedWord:
         case EEOperation::SubtractWord:
         case EEOperation::SubtractUnsignedWord:
-          return EEExecutionFamily::WordArithmetic;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::WordArithmetic,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::AddDoubleword:
         case EEOperation::AddUnsignedDoubleword:
         case EEOperation::SubtractDoubleword:
         case EEOperation::SubtractUnsignedDoubleword:
-          return EEExecutionFamily::DoublewordArithmetic;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::DoublewordArithmetic,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::And:
         case EEOperation::Or:
         case EEOperation::Xor:
         case EEOperation::Nor:
-          return EEExecutionFamily::RegisterLogical;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::RegisterLogical,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::SetLessThan:
         case EEOperation::SetLessThanUnsigned:
-          return EEExecutionFamily::RegisterCompare;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::RegisterCompare,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::AddImmediateWord:
         case EEOperation::AddImmediateUnsignedWord:
-          return EEExecutionFamily::ImmediateWordArithmetic;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ImmediateWordArithmetic,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::AddImmediateDoubleword:
         case EEOperation::AddImmediateUnsignedDoubleword:
-          return EEExecutionFamily::ImmediateDoublewordArithmetic;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ImmediateDoublewordArithmetic,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::SetLessThanImmediate:
         case EEOperation::SetLessThanImmediateUnsigned:
-          return EEExecutionFamily::ImmediateCompare;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ImmediateCompare,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::AndImmediate:
         case EEOperation::OrImmediate:
         case EEOperation::XorImmediate:
         case EEOperation::LoadUpperImmediate:
-          return EEExecutionFamily::ImmediateLogical;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ImmediateLogical,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::MoveFromHI:
         case EEOperation::MoveToHI:
         case EEOperation::MoveFromLO:
@@ -408,67 +470,118 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::MoveToHI1:
         case EEOperation::MoveFromLO1:
         case EEOperation::MoveToLO1:
-          return EEExecutionFamily::MACRegisterMove;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::MACRegisterMove,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::MoveFromShiftAmount:
         case EEOperation::MoveToShiftAmount:
         case EEOperation::MoveByteCountToShiftAmount:
         case EEOperation::MoveHalfwordCountToShiftAmount:
-          return EEExecutionFamily::ShiftAmountOperation;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ShiftAmountOperation,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadByte:
         case EEOperation::LoadByteUnsigned:
         case EEOperation::StoreByte:
-          return EEExecutionFamily::ByteMemory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ByteMemory,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadHalfword:
         case EEOperation::LoadHalfwordUnsigned:
         case EEOperation::StoreHalfword:
-          return EEExecutionFamily::HalfwordMemory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::HalfwordMemory,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadWord:
         case EEOperation::LoadWordUnsigned:
         case EEOperation::StoreWord:
-          return EEExecutionFamily::WordMemory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::WordMemory,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadWordLeft:
         case EEOperation::LoadWordRight:
         case EEOperation::StoreWordLeft:
         case EEOperation::StoreWordRight:
-          return EEExecutionFamily::WordMergeMemory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::WordMergeMemory,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadDoubleword:
         case EEOperation::StoreDoubleword:
-          return EEExecutionFamily::DoublewordMemory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::DoublewordMemory,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadDoublewordLeft:
         case EEOperation::LoadDoublewordRight:
         case EEOperation::StoreDoublewordLeft:
         case EEOperation::StoreDoublewordRight:
-          return EEExecutionFamily::DoublewordMergeMemory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::DoublewordMergeMemory,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadQuadword:
         case EEOperation::StoreQuadword:
-          return EEExecutionFamily::QuadwordMemory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::QuadwordMemory,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::LoadWordToCOP1:
         case EEOperation::StoreWordFromCOP1:
-          return EEExecutionFamily::COP1Memory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP1Memory,
+            EEExecutionDispatch::ManagedCOP1
+          };
         case EEOperation::LoadQuadwordToCOP2:
         case EEOperation::StoreQuadwordFromCOP2:
-          return EEExecutionFamily::COP2Memory;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP2Memory,
+            EEExecutionDispatch::COP2Coupled
+          };
         case EEOperation::QuadwordMoveFromCOP2:
         case EEOperation::QuadwordMoveToCOP2:
-          return EEExecutionFamily::COP2VectorMove;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP2VectorMove,
+            EEExecutionDispatch::COP2Coupled
+          };
         case EEOperation::ControlMoveFromCOP2:
         case EEOperation::ControlMoveToCOP2:
-          return EEExecutionFamily::COP2ControlMove;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP2ControlMove,
+            EEExecutionDispatch::COP2Coupled
+          };
         case EEOperation::BranchCOP2False:
         case EEOperation::BranchCOP2FalseLikely:
         case EEOperation::BranchCOP2True:
         case EEOperation::BranchCOP2TrueLikely:
-          return EEExecutionFamily::COP2Branch;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP2Branch,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::VectorCallMicroSubroutine:
         case EEOperation::VectorCallMicroSubroutineRegister:
-          return EEExecutionFamily::COP2MicroCall;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP2MicroCall,
+            EEExecutionDispatch::COP2Coupled
+          };
         case EEOperation::VectorMacroArithmetic:
-          return EEExecutionFamily::COP2Macro;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP2Macro,
+            EEExecutionDispatch::COP2Coupled
+          };
         case EEOperation::Jump:
         case EEOperation::JumpAndLink:
         case EEOperation::JumpRegister:
         case EEOperation::JumpAndLinkRegister:
-          return EEExecutionFamily::Jump;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::Jump,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::BranchEqual:
         case EEOperation::BranchNotEqual:
         case EEOperation::BranchLessThanOrEqualZero:
@@ -485,25 +598,45 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
         case EEOperation::BranchLessThanZeroAndLinkLikely:
         case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
-          return EEExecutionFamily::IntegerBranch;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::IntegerBranch,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::MultiplyWord:
         case EEOperation::MultiplyUnsignedWord:
-        case EEOperation::MultiplyWord1:
-        case EEOperation::MultiplyUnsignedWord1:
         case EEOperation::MultiplyAddWord:
         case EEOperation::MultiplyAddUnsignedWord:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::Multiply,
+            EEExecutionDispatch::MAC0Continuation
+          };
+        case EEOperation::MultiplyWord1:
+        case EEOperation::MultiplyUnsignedWord1:
         case EEOperation::MultiplyAddWord1:
         case EEOperation::MultiplyAddUnsignedWord1:
-          return EEExecutionFamily::Multiply;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::Multiply,
+            EEExecutionDispatch::MAC1Continuation
+          };
         case EEOperation::DivideWord:
         case EEOperation::DivideUnsignedWord:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::Divide,
+            EEExecutionDispatch::MAC0Continuation
+          };
         case EEOperation::DivideWord1:
         case EEOperation::DivideUnsignedWord1:
-          return EEExecutionFamily::Divide;
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::Divide,
+            EEExecutionDispatch::MAC1Continuation
+          };
         case EEOperation::Count:
           break;
       }
-      return EEExecutionFamily::Unclassified;
+      return ExpectedExecutionClassification{
+        EEExecutionFamily::Unclassified,
+        EEExecutionDispatch::Unclassified
+      };
     };
   const auto expectedCOP1ResultDestination =
     [](EEOperation operation)
@@ -652,6 +785,10 @@ TEST_CASE("Every EE operation has complete shared metadata")
       static_cast<EEOperation>(value);
     const EEOperationMetadata metadata =
       eeOperationMetadata(operation);
+    const ExpectedExecutionClassification
+      expectedExecution =
+        expectedExecutionClassification(operation);
+    INFO("EE operation " << static_cast<unsigned>(value));
 
     REQUIRE(metadata.routing.logicalPipes != 0);
     REQUIRE(
@@ -659,7 +796,13 @@ TEST_CASE("Every EE operation has complete shared metadata")
       EEExecutionFamily::Unclassified);
     REQUIRE(
       metadata.executionFamily ==
-      expectedExecutionFamily(operation));
+      expectedExecution.family);
+    REQUIRE(
+      metadata.executionDispatch !=
+      EEExecutionDispatch::Unclassified);
+    REQUIRE(
+      metadata.executionDispatch ==
+      expectedExecution.dispatch);
     if (metadata.routing.category ==
         EEInstructionCategory::LoadStore)
     {
@@ -718,6 +861,9 @@ TEST_CASE("Every EE operation has complete shared metadata")
       instructionMetadata.operation.memoryAccess ==
       metadata.memoryAccess);
     REQUIRE(
+      instructionMetadata.operation.executionDispatch ==
+      metadata.executionDispatch);
+    REQUIRE(
       instructionMetadata.operation.cop1Family ==
       metadata.cop1Family);
     REQUIRE(
@@ -729,6 +875,10 @@ TEST_CASE("Every EE operation has complete shared metadata")
     static_cast<EEOperation>(EE_OPERATION_COUNT);
   REQUIRE_THROWS_WITH(
     eeOperationMetadata(invalidOperation),
+    "Unknown EE operation metadata.");
+  REQUIRE_THROWS_WITH(
+    eeOperationMetadata(
+      static_cast<EEOperation>(UINT8_MAX)),
     "Unknown EE operation metadata.");
 
   EEInstruction invalidInstruction;
