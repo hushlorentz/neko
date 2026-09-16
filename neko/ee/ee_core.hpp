@@ -691,6 +691,23 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeImmediateLogical(
       const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeWordArithmetic(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeDoublewordArithmetic(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeImmediateWordArithmetic(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome
+      executeImmediateDoublewordArithmetic(
+        const EEInstruction &instruction,
+        std::uint32_t address);
+    EEInstructionExecutionOutcome executeMACRegisterMove(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeShiftAmountOperation(
+      const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeByteMemory(
       const EEInstruction &instruction,
       std::uint32_t address);

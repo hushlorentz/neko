@@ -63,6 +63,52 @@ struct EECoreTestAccess
     return core->executeByteMemory(instruction, 0);
   }
 
+  static EEInstructionExecutionOutcome executeWordArithmetic(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeWordArithmetic(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeDoublewordArithmetic(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeDoublewordArithmetic(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome
+    executeImmediateWordArithmetic(
+      EECore *core,
+      const EEInstruction &instruction)
+  {
+    return core->executeImmediateWordArithmetic(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome
+    executeImmediateDoublewordArithmetic(
+      EECore *core,
+      const EEInstruction &instruction)
+  {
+    return core->executeImmediateDoublewordArithmetic(
+      instruction,
+      0);
+  }
+
+  static EEInstructionExecutionOutcome executeMACRegisterMove(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeMACRegisterMove(instruction);
+  }
+
+  static EEInstructionExecutionOutcome executeShiftAmountOperation(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeShiftAmountOperation(instruction);
+  }
+
   static EEInstructionExecutionOutcome executeExceptionReturn(
     EECore *core,
     const EEInstruction &instruction)
@@ -217,6 +263,65 @@ TEST_CASE("EE focused handlers reject incompatible operations")
     REQUIRE(core.stopReason() == EEStopReason::None);
     REQUIRE(core.pendingException() == EEException::None);
     REQUIRE(core.generalRegister(3).low == 0x55);
+  }
+
+  SECTION("Scalar state handlers reject before architectural effects")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.startExecution(0);
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x123456789abcdef0), 1});
+    core.setGeneralRegister(3, {0x55, 0});
+    core.setHI(0x11);
+    core.setLO(0x22);
+    core.setShiftAmount(7);
+    EEInstruction instruction;
+    instruction.operation = EEOperation::And;
+    instruction.sourceRegister = 2;
+    instruction.targetRegister = 2;
+    instruction.destinationRegister = 3;
+
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeWordArithmetic(&core, instruction),
+      "EE word-arithmetic handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeDoublewordArithmetic(
+        &core,
+        instruction),
+      "EE doubleword-arithmetic handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeImmediateWordArithmetic(
+        &core,
+        instruction),
+      "EE immediate-word-arithmetic handler received an "
+      "incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeImmediateDoublewordArithmetic(
+        &core,
+        instruction),
+      "EE immediate-doubleword-arithmetic handler received an "
+      "incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeMACRegisterMove(&core, instruction),
+      "EE MAC-register-move handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeShiftAmountOperation(
+        &core,
+        instruction),
+      "EE shift-amount handler received an incompatible operation.");
+
+    REQUIRE(core.executionState() == EEExecutionState::Running);
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.generalRegister(3).low == 0x55);
+    REQUIRE(core.hi() == 0x11);
+    REQUIRE(core.lo() == 0x22);
+    REQUIRE(core.shiftAmount() == 7);
   }
 }
 
