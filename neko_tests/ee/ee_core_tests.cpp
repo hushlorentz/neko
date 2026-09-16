@@ -208,6 +208,34 @@ struct EECoreTestAccess
     return core->executeCOP2VectorMove(instruction, 0);
   }
 
+  static EEInstructionExecutionOutcome executeCOP2Memory(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP2Memory(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP2ControlMove(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP2ControlMove(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP2MicroCall(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP2MicroCall(instruction, 0);
+  }
+
+  static EEInstructionExecutionOutcome executeCOP2Macro(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeCOP2Macro(instruction, 0);
+  }
+
   static EEInstructionExecutionOutcome executeCOP2Branch(
     EECore *core,
     const EEInstruction &instruction)
@@ -371,6 +399,22 @@ TEST_CASE("EE focused handlers reject incompatible operations")
       EECoreTestAccess::executeCOP2VectorMove(&core, instruction),
       "EE COP2-vector-move handler received an incompatible "
       "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP2Memory(&core, instruction),
+      "EE COP2-memory handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP2ControlMove(
+        &core,
+        instruction),
+      "EE COP2-control-move handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP2MicroCall(&core, instruction),
+      "EE COP2-micro-call handler received an incompatible "
+      "operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeCOP2Macro(&core, instruction),
+      "EE COP2-macro handler received an incompatible operation.");
     REQUIRE_THROWS_WITH(
       EECoreTestAccess::executeCOP2Branch(&core, instruction),
       "EE COP2-branch handler received an incompatible operation.");

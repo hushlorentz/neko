@@ -749,10 +749,22 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeCOP1Memory(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP2Memory(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeCOP2VectorMove(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP2ControlMove(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeCOP2Branch(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP2MicroCall(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP2Macro(
       const EEInstruction &instruction,
       std::uint32_t address);
     EEInstructionExecutionOutcome executeJump(

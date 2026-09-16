@@ -1608,152 +1608,14 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::StoreQuadword:
       return executeQuadwordMemory(instruction, address);
     case EEOperation::LoadQuadwordToCOP2:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 0x0f) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorLoadOrFetch,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      if (attachedVU0().macroRegisterNumberWritePending(
-            immediateDestination))
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      EEQuadword value = {};
-      const bool succeeded =
-        attachedBus().readData128(dataAddress, &value);
-      recordMemoryTrace(
-        dataAddress,
-        16,
-        false,
-        succeeded,
-        succeeded ? value.low : 0,
-        succeeded ? value.high : 0);
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorLoad,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      attachedVU0().loadFPRegisterBits(
-        immediateDestination,
-        static_cast<std::uint32_t>(value.low),
-        static_cast<std::uint32_t>(value.low >> 32),
-        static_cast<std::uint32_t>(value.high),
-        static_cast<std::uint32_t>(value.high >> 32));
-      attachedVU0().noteMacroTransferToVU();
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::StoreQuadwordFromCOP2:
-    {
-      const std::uint32_t dataAddress =
-        static_cast<std::uint32_t>(source + immediate);
-      if ((dataAddress & 0x0f) != 0)
-      {
-        return raiseDataAccessException(
-          EEException::AddressErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      if (attachedVU0().macroRegisterNumberWritePending(
-            immediateDestination))
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      const EERegister128 value = quadwordFromFPRegister(
-        *attachedVU0().fpRegisterValue(immediateDestination));
-      const EEDataWriteResult writeResult =
-        attachedBus().writeGuestData128(
-          dataAddress,
-          {value.low, value.high});
-      const bool succeeded =
-        writeResult == EEDataWriteResult::Completed;
-      recordMemoryTrace(
-        dataAddress,
-        16,
-        true,
-        succeeded,
-        value.low,
-        value.high);
-      if (writeResult == EEDataWriteResult::Stalled)
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      if (!succeeded)
-      {
-        return raiseDataAccessException(
-          EEException::DataBusErrorStore,
-          address,
-          dataAddress,
-          instruction.raw);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP2Memory(instruction, address);
     case EEOperation::QuadwordMoveFromCOP2:
     case EEOperation::QuadwordMoveToCOP2:
       return executeCOP2VectorMove(instruction, address);
     case EEOperation::ControlMoveFromCOP2:
-    {
-      if (((instruction.raw & 1) != 0 &&
-           attachedVU0().microModeActive()) ||
-          (destination < 16 &&
-           attachedVU0().macroRegisterNumberWritePending(
-             destination)) ||
-          (attachedVU0().macroModeActive() &&
-           (destination == 16 || destination == 17)))
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      std::uint32_t value = 0;
-      if (!readCOP2ControlRegister(destination, &value))
-      {
-        haltUndefinedOperation(address, instruction.raw);
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      if (destination < 16)
-      {
-        writeLowDoubleword(immediateDestination, value);
-      }
-      else
-      {
-        writeWord(immediateDestination, value);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
     case EEOperation::ControlMoveToCOP2:
-      if (((instruction.raw & 1) != 0 &&
-           !attachedVU0().cop2WriteAvailable()) ||
-          (destination < 16 &&
-           attachedVU0().macroRegisterNumberWritePending(
-             destination)) ||
-          (attachedVU0().macroModeActive() &&
-           (destination == 16 ||
-            destination == 18)))
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      if (!writeCOP2ControlRegister(
-            destination,
-            static_cast<std::uint32_t>(target)))
-      {
-        haltUndefinedOperation(address, instruction.raw);
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      attachedVU0().noteMacroTransferToVU();
-      return EEInstructionExecutionOutcome::Completed;
+      return executeCOP2ControlMove(instruction, address);
     case EEOperation::BranchCOP2False:
     case EEOperation::BranchCOP2FalseLikely:
     case EEOperation::BranchCOP2True:
@@ -1761,57 +1623,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return executeCOP2Branch(instruction, address);
     case EEOperation::VectorCallMicroSubroutine:
     case EEOperation::VectorCallMicroSubroutineRegister:
-    {
-      VPU &vu0 = attachedVU0();
-      const std::size_t callAddress =
-        static_cast<std::size_t>(
-          instruction.operation ==
-            EEOperation::VectorCallMicroSubroutine
-            ? instruction.cop2Immediate
-            : vu0.callAddressRegister()) *
-        8;
-      if (callAddress > vu0.microMemorySize() - 8)
-      {
-        haltUndefinedOperation(address, instruction.raw);
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      const std::uint16_t startAddress =
-        static_cast<std::uint16_t>(callAddress);
-      if (vu0.macroModeActive())
-      {
-        if (!vu0.startMicroModeFromMacro(startAddress))
-        {
-          pc = address;
-          return EEInstructionExecutionOutcome::Delayed;
-        }
-      }
-      else
-      {
-        if (vu0.microModeActive())
-        {
-          pc = address;
-          return EEInstructionExecutionOutcome::Delayed;
-        }
-        vu0.startMicroMode(startAddress);
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP2MicroCall(instruction, address);
     case EEOperation::VectorMacroArithmetic:
-    {
-      VPU &vu0 = attachedVU0();
-      if (vu0.getState() == VPU_STATE_STOP)
-      {
-        haltUndefinedOperation(address, instruction.raw);
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      if (!vu0.issueMacroInstruction(
-            instruction.raw & UINT32_C(0x01ffffff)))
-      {
-        pc = address;
-        return EEInstructionExecutionOutcome::Delayed;
-      }
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeCOP2Macro(instruction, address);
     case EEOperation::Jump:
     case EEOperation::JumpAndLink:
     case EEOperation::JumpRegister:
@@ -3404,6 +3218,106 @@ EEInstructionExecutionOutcome EECore::executeCOP1Memory(
   return EEInstructionExecutionOutcome::Completed;
 }
 
+EEInstructionExecutionOutcome EECore::executeCOP2Memory(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::LoadQuadwordToCOP2:
+    case EEOperation::StoreQuadwordFromCOP2:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP2-memory handler received an incompatible "
+        "operation.");
+  }
+
+  const std::uint32_t dataAddress =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate));
+  const bool store =
+    instruction.operation == EEOperation::StoreQuadwordFromCOP2;
+  if ((dataAddress & 0x0f) != 0)
+  {
+    return raiseDataAccessException(
+      store
+        ? EEException::AddressErrorStore
+        : EEException::AddressErrorLoadOrFetch,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  if (attachedVU0().macroRegisterNumberWritePending(
+        instruction.targetRegister))
+  {
+    pc = address;
+    return EEInstructionExecutionOutcome::Delayed;
+  }
+
+  if (store)
+  {
+    const EERegister128 value = quadwordFromFPRegister(
+      *attachedVU0().fpRegisterValue(
+        instruction.targetRegister));
+    const EEDataWriteResult writeResult =
+      attachedBus().writeGuestData128(
+        dataAddress,
+        {value.low, value.high});
+    const bool succeeded =
+      writeResult == EEDataWriteResult::Completed;
+    recordMemoryTrace(
+      dataAddress,
+      16,
+      true,
+      succeeded,
+      value.low,
+      value.high);
+    if (writeResult == EEDataWriteResult::Stalled)
+    {
+      pc = address;
+      return EEInstructionExecutionOutcome::Delayed;
+    }
+    if (!succeeded)
+    {
+      return raiseDataAccessException(
+        EEException::DataBusErrorStore,
+        address,
+        dataAddress,
+        instruction.raw);
+    }
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  EEQuadword value = {};
+  const bool succeeded =
+    attachedBus().readData128(dataAddress, &value);
+  recordMemoryTrace(
+    dataAddress,
+    16,
+    false,
+    succeeded,
+    succeeded ? value.low : 0,
+    succeeded ? value.high : 0);
+  if (!succeeded)
+  {
+    return raiseDataAccessException(
+      EEException::DataBusErrorLoad,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
+  attachedVU0().loadFPRegisterBits(
+    instruction.targetRegister,
+    static_cast<std::uint32_t>(value.low),
+    static_cast<std::uint32_t>(value.low >> 32),
+    static_cast<std::uint32_t>(value.high),
+    static_cast<std::uint32_t>(value.high >> 32));
+  attachedVU0().noteMacroTransferToVU();
+  return EEInstructionExecutionOutcome::Completed;
+}
+
 EEInstructionExecutionOutcome EECore::executeCOP2VectorMove(
   const EEInstruction &instruction,
   std::uint32_t address)
@@ -3456,6 +3370,76 @@ EEInstructionExecutionOutcome EECore::executeCOP2VectorMove(
   }
 }
 
+EEInstructionExecutionOutcome EECore::executeCOP2ControlMove(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::ControlMoveFromCOP2:
+    case EEOperation::ControlMoveToCOP2:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP2-control-move handler received an incompatible "
+        "operation.");
+  }
+
+  const std::uint8_t controlRegister =
+    instruction.destinationRegister;
+  if (instruction.operation == EEOperation::ControlMoveFromCOP2)
+  {
+    if (((instruction.raw & 1) != 0 &&
+         attachedVU0().microModeActive()) ||
+        (controlRegister < 16 &&
+         attachedVU0().macroRegisterNumberWritePending(
+           controlRegister)) ||
+        (attachedVU0().macroModeActive() &&
+         (controlRegister == 16 || controlRegister == 17)))
+    {
+      pc = address;
+      return EEInstructionExecutionOutcome::Delayed;
+    }
+    std::uint32_t value = 0;
+    if (!readCOP2ControlRegister(controlRegister, &value))
+    {
+      haltUndefinedOperation(address, instruction.raw);
+      return EEInstructionExecutionOutcome::Halted;
+    }
+    if (controlRegister < 16)
+    {
+      writeLowDoubleword(instruction.targetRegister, value);
+    }
+    else
+    {
+      writeWord(instruction.targetRegister, value);
+    }
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  if (((instruction.raw & 1) != 0 &&
+       !attachedVU0().cop2WriteAvailable()) ||
+      (controlRegister < 16 &&
+       attachedVU0().macroRegisterNumberWritePending(
+         controlRegister)) ||
+      (attachedVU0().macroModeActive() &&
+       (controlRegister == 16 || controlRegister == 18)))
+  {
+    pc = address;
+    return EEInstructionExecutionOutcome::Delayed;
+  }
+  if (!writeCOP2ControlRegister(
+        controlRegister,
+        static_cast<std::uint32_t>(
+          generalRegisters[instruction.targetRegister].low)))
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
+  attachedVU0().noteMacroTransferToVU();
+  return EEInstructionExecutionOutcome::Completed;
+}
+
 EEInstructionExecutionOutcome EECore::executeCOP2Branch(
   const EEInstruction &instruction,
   std::uint32_t address)
@@ -3487,6 +3471,82 @@ EEInstructionExecutionOutcome EECore::executeCOP2Branch(
     likely,
     branchTarget,
     address);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP2MicroCall(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::VectorCallMicroSubroutine:
+    case EEOperation::VectorCallMicroSubroutineRegister:
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP2-micro-call handler received an incompatible "
+        "operation.");
+  }
+
+  VPU &vu0 = attachedVU0();
+  const std::size_t callAddress =
+    static_cast<std::size_t>(
+      instruction.operation ==
+        EEOperation::VectorCallMicroSubroutine
+        ? instruction.cop2Immediate
+        : vu0.callAddressRegister()) *
+    8;
+  if (callAddress > vu0.microMemorySize() - 8)
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
+  const std::uint16_t startAddress =
+    static_cast<std::uint16_t>(callAddress);
+  if (vu0.macroModeActive())
+  {
+    if (!vu0.startMicroModeFromMacro(startAddress))
+    {
+      pc = address;
+      return EEInstructionExecutionOutcome::Delayed;
+    }
+  }
+  else
+  {
+    if (vu0.microModeActive())
+    {
+      pc = address;
+      return EEInstructionExecutionOutcome::Delayed;
+    }
+    vu0.startMicroMode(startAddress);
+  }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP2Macro(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  if (instruction.operation != EEOperation::VectorMacroArithmetic)
+  {
+    throw std::logic_error(
+      "EE COP2-macro handler received an incompatible "
+      "operation.");
+  }
+
+  VPU &vu0 = attachedVU0();
+  if (vu0.getState() == VPU_STATE_STOP)
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
+  if (!vu0.issueMacroInstruction(
+        instruction.raw & UINT32_C(0x01ffffff)))
+  {
+    pc = address;
+    return EEInstructionExecutionOutcome::Delayed;
+  }
   return EEInstructionExecutionOutcome::Completed;
 }
 

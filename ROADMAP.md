@@ -1143,7 +1143,7 @@ accumulator or condition-result contract:
         trace, and retry coverage
   - [x] Extract remaining C1 admission families with pipeline and retirement
         coverage
-  - [ ] Extract remaining C2 admission families with retry and VU coupling
+  - [x] Extract remaining C2 admission families with retry and VU coupling
         coverage
   - [ ] Extract integer branches with link, likely, and delay-slot coverage
   - [ ] Re-run guest and cross-family regression coverage after all families
