@@ -250,6 +250,13 @@ struct EECoreTestAccess
     return core->executeJump(instruction, 0);
   }
 
+  static EEInstructionExecutionOutcome executeIntegerBranch(
+    EECore *core,
+    const EEInstruction &instruction)
+  {
+    return core->executeIntegerBranch(instruction, 0);
+  }
+
   static EEInstructionExecutionOutcome executeMultiply(
     EECore *core,
     const EEInstruction &instruction)
@@ -421,6 +428,10 @@ TEST_CASE("EE focused handlers reject incompatible operations")
     REQUIRE_THROWS_WITH(
       EECoreTestAccess::executeJump(&core, instruction),
       "EE jump handler received an incompatible operation.");
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::executeIntegerBranch(&core, instruction),
+      "EE integer-branch handler received an incompatible "
+      "operation.");
     REQUIRE_THROWS_WITH(
       EECoreTestAccess::executeMultiply(&core, instruction),
       "EE multiply handler received an incompatible operation.");

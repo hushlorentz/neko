@@ -1145,7 +1145,7 @@ accumulator or condition-result contract:
         coverage
   - [x] Extract remaining C2 admission families with retry and VU coupling
         coverage
-  - [ ] Extract integer branches with link, likely, and delay-slot coverage
+  - [x] Extract integer branches with link, likely, and delay-slot coverage
   - [ ] Re-run guest and cross-family regression coverage after all families
         use focused execution methods
 - [ ] Remove obsolete execution branches and boolean modes only after every

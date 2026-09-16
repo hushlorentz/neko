@@ -1647,82 +1647,7 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
     case EEOperation::BranchLessThanZeroAndLinkLikely:
     case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
-    {
-      const bool negative =
-        (source & DOUBLEWORD_SIGN_BIT) != 0;
-      bool condition = false;
-      switch (instruction.operation)
-      {
-        case EEOperation::BranchEqual:
-        case EEOperation::BranchEqualLikely:
-          condition = source == target;
-          break;
-        case EEOperation::BranchNotEqual:
-        case EEOperation::BranchNotEqualLikely:
-          condition = source != target;
-          break;
-        case EEOperation::BranchLessThanOrEqualZero:
-        case EEOperation::BranchLessThanOrEqualZeroLikely:
-          condition = negative || source == 0;
-          break;
-        case EEOperation::BranchGreaterThanZero:
-        case EEOperation::BranchGreaterThanZeroLikely:
-          condition = !negative && source != 0;
-          break;
-        case EEOperation::BranchLessThanZero:
-        case EEOperation::BranchLessThanZeroLikely:
-        case EEOperation::BranchLessThanZeroAndLink:
-        case EEOperation::BranchLessThanZeroAndLinkLikely:
-          condition = negative;
-          break;
-        default:
-          condition = !negative;
-          break;
-      }
-      const bool likely =
-        instruction.operation == EEOperation::BranchEqualLikely ||
-        instruction.operation == EEOperation::BranchNotEqualLikely ||
-        instruction.operation ==
-          EEOperation::BranchLessThanOrEqualZeroLikely ||
-        instruction.operation ==
-          EEOperation::BranchGreaterThanZeroLikely ||
-        instruction.operation ==
-          EEOperation::BranchLessThanZeroLikely ||
-        instruction.operation ==
-          EEOperation::BranchGreaterThanOrEqualZeroLikely ||
-        instruction.operation ==
-          EEOperation::BranchLessThanZeroAndLinkLikely ||
-        instruction.operation ==
-          EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
-      const bool link =
-        instruction.operation ==
-          EEOperation::BranchLessThanZeroAndLink ||
-        instruction.operation ==
-          EEOperation::BranchGreaterThanOrEqualZeroAndLink ||
-        instruction.operation ==
-          EEOperation::BranchLessThanZeroAndLinkLikely ||
-        instruction.operation ==
-          EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
-      if (link && instruction.sourceRegister == 31)
-      {
-        haltUndefinedOperation(address, instruction.raw);
-        return EEInstructionExecutionOutcome::Halted;
-      }
-      if (link)
-      {
-        writeLowDoubleword(31, address + 8);
-      }
-      const std::uint32_t branchTarget =
-        address + 4 +
-        static_cast<std::uint32_t>(
-          signExtend16(instruction.immediate) << 2);
-      scheduleBranch(
-        condition,
-        likely,
-        branchTarget,
-        address);
-      return EEInstructionExecutionOutcome::Completed;
-    }
+      return executeIntegerBranch(instruction, address);
     case EEOperation::MultiplyWord:
     case EEOperation::MultiplyUnsignedWord:
     case EEOperation::MultiplyWord1:
@@ -3602,6 +3527,85 @@ EEInstructionExecutionOutcome EECore::executeJump(
       throw std::logic_error(
         "EE jump handler received an incompatible operation.");
   }
+}
+
+EEInstructionExecutionOutcome EECore::executeIntegerBranch(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t target =
+    generalRegisters[instruction.targetRegister].low;
+  const bool negative =
+    (source & DOUBLEWORD_SIGN_BIT) != 0;
+  bool condition = false;
+  switch (instruction.operation)
+  {
+    case EEOperation::BranchEqual:
+    case EEOperation::BranchEqualLikely:
+      condition = source == target;
+      break;
+    case EEOperation::BranchNotEqual:
+    case EEOperation::BranchNotEqualLikely:
+      condition = source != target;
+      break;
+    case EEOperation::BranchLessThanOrEqualZero:
+    case EEOperation::BranchLessThanOrEqualZeroLikely:
+      condition = negative || source == 0;
+      break;
+    case EEOperation::BranchGreaterThanZero:
+    case EEOperation::BranchGreaterThanZeroLikely:
+      condition = !negative && source != 0;
+      break;
+    case EEOperation::BranchLessThanZero:
+    case EEOperation::BranchLessThanZeroLikely:
+    case EEOperation::BranchLessThanZeroAndLink:
+    case EEOperation::BranchLessThanZeroAndLinkLikely:
+      condition = negative;
+      break;
+    case EEOperation::BranchGreaterThanOrEqualZero:
+    case EEOperation::BranchGreaterThanOrEqualZeroLikely:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLink:
+    case EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely:
+      condition = !negative;
+      break;
+    default:
+      throw std::logic_error(
+        "EE integer-branch handler received an incompatible "
+        "operation.");
+  }
+
+  const bool likely =
+    isEEBranchLikelyOperation(instruction.operation);
+  const bool link =
+    instruction.operation ==
+      EEOperation::BranchLessThanZeroAndLink ||
+    instruction.operation ==
+      EEOperation::BranchGreaterThanOrEqualZeroAndLink ||
+    instruction.operation ==
+      EEOperation::BranchLessThanZeroAndLinkLikely ||
+    instruction.operation ==
+      EEOperation::BranchGreaterThanOrEqualZeroAndLinkLikely;
+  if (link && instruction.sourceRegister == 31)
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
+  if (link)
+  {
+    writeLowDoubleword(31, address + 8);
+  }
+  const std::uint32_t branchTarget =
+    address + 4 +
+    static_cast<std::uint32_t>(
+      signExtend16(instruction.immediate) << 2);
+  scheduleBranch(
+    condition,
+    likely,
+    branchTarget,
+    address);
+  return EEInstructionExecutionOutcome::Completed;
 }
 
 EEInstructionExecutionOutcome EECore::executeMultiply(

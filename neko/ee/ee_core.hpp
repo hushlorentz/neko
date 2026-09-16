@@ -770,6 +770,9 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeJump(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeIntegerBranch(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeMultiply(
       const EEInstruction &instruction,
       std::uint32_t address);
