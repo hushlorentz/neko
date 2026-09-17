@@ -1164,7 +1164,7 @@ accumulator or condition-result contract:
       policy while retaining the fixed two-entry front end
 - [x] Replace boolean controls that select issue-member position, pipeline
       identity, or acceptance mode with explicit enums or result types
-- [ ] Make issue-group outcomes explicit for accepted, stalled, faulted, and
+- [x] Make issue-group outcomes explicit for accepted, stalled, faulted, and
       cancelled members without changing program-order effects
 - [ ] Keep delay-slot validation and branch-likely annulment at one documented
       ownership boundary

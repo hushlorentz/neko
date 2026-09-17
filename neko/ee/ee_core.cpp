@@ -616,12 +616,13 @@ bool EECore::frontEndContinuationActive() const
     branchDelayPending;
 }
 
-bool EECore::handleIssueLatchFailure()
+EEIssueMemberOutcome EECore::resolveIssueLatchFailure()
 {
   if (!issueLatch.valid ||
       issueLatch.failure == IssueLatchFailure::None)
   {
-    return false;
+    throw std::logic_error(
+      "EE issue-latch failure resolution requires a failure.");
   }
 
   const std::uint32_t address = issueLatch.address;
@@ -635,14 +636,14 @@ bool EECore::handleIssueLatchFailure()
         address,
         address,
         0);
-      return true;
+      return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::BusError:
       enterException(
         EEException::InstructionBusError,
         address,
         address,
         0);
-      return true;
+      return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::ReservedInstruction:
       rejectedInstructionValue = instruction;
       enterException(
@@ -650,14 +651,14 @@ bool EECore::handleIssueLatchFailure()
         address,
         address,
         instruction);
-      return true;
+      return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::UnsupportedInstruction:
       rejectedInstructionValue = instruction;
       pc = address;
       state = EEExecutionState::Halted;
       haltReason = EEStopReason::UnsupportedInstruction;
       clearIssueFrontEnd();
-      return true;
+      return EEIssueMemberOutcome::Cancelled;
     case IssueLatchFailure::None:
       break;
   }
@@ -1249,23 +1250,22 @@ EEIssueGroupExecutionResult EECore::executeIssueGroup(
     });
 }
 
-EEIssueMemberExecution EECore::executeIssueMember(
+EEIssueMemberOutcome EECore::executeIssueMember(
   std::uint32_t completedLoadRegisters,
   EEIssueMemberPosition position)
 {
   if (!issueLatch.valid)
   {
-    return EEIssueMemberExecution::Blocked;
+    return EEIssueMemberOutcome::Cancelled;
   }
-  if (issueLatch.failure != IssueLatchFailure::None &&
-      cop1MemoryExceptionPending())
+  if (issueLatch.failure != IssueLatchFailure::None)
   {
-    pc = issueLatch.address;
-    return EEIssueMemberExecution::Blocked;
-  }
-  if (handleIssueLatchFailure())
-  {
-    return EEIssueMemberExecution::Failed;
+    if (cop1MemoryExceptionPending())
+    {
+      pc = issueLatch.address;
+      return EEIssueMemberOutcome::Stalled;
+    }
+    return resolveIssueLatchFailure();
   }
 
   const std::uint32_t instructionAddress =
@@ -1284,7 +1284,7 @@ EEIssueMemberExecution EECore::executeIssueMember(
       cop1TransferReservedByStalledMove())
   {
     pc = instructionAddress;
-    return EEIssueMemberExecution::Blocked;
+    return EEIssueMemberOutcome::Stalled;
   }
   COP1ScoreboardHazard scoreboardHazard;
   if (cop1ScoreboardBlocks(
@@ -1350,7 +1350,7 @@ EEIssueMemberExecution EECore::executeIssueMember(
           scoreboardHazard.dependency));
     }
     pc = instructionAddress;
-    return EEIssueMemberExecution::Blocked;
+    return EEIssueMemberOutcome::Stalled;
   }
 
   pc = instructionAddress + 4;
@@ -1376,13 +1376,13 @@ EEIssueMemberExecution EECore::executeIssueMember(
     case EEInstructionExecutionOutcome::Completed:
       break;
     case EEInstructionExecutionOutcome::Delayed:
-      return EEIssueMemberExecution::Blocked;
+      return EEIssueMemberOutcome::Stalled;
     case EEInstructionExecutionOutcome::Faulted:
-      return EEIssueMemberExecution::Failed;
+      return EEIssueMemberOutcome::Faulted;
     case EEInstructionExecutionOutcome::Halted:
     case EEInstructionExecutionOutcome::Rejected:
       clearIssueFrontEnd();
-      return EEIssueMemberExecution::Failed;
+      return EEIssueMemberOutcome::Cancelled;
   }
 
   ++nextEEProgramOrder;
@@ -1411,7 +1411,7 @@ EEIssueMemberExecution EECore::executeIssueMember(
   {
     clearIssueFrontEnd();
   }
-  return EEIssueMemberExecution::Accepted;
+  return EEIssueMemberOutcome::Accepted;
 }
 
 void EECore::recordInstructionAcceptance(

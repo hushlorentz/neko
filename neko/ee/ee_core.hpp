@@ -106,11 +106,12 @@ class EEShiftAmountOrderingWindow
     std::uint8_t recentReads = 0;
 };
 
-enum class EEIssueMemberExecution : std::uint8_t
+enum class EEIssueMemberOutcome : std::uint8_t
 {
   Accepted,
-  Blocked,
-  Failed
+  Stalled,
+  Faulted,
+  Cancelled
 };
 
 enum class EEIssueMemberPosition : std::uint8_t
@@ -136,11 +137,21 @@ enum class EEInstructionExecutionOutcome : std::uint8_t
 
 struct EEIssueGroupExecutionResult
 {
+  EEIssueWidth width = EEIssueWidth::One;
   std::uint8_t attempted = 0;
   std::uint8_t accepted = 0;
-  std::uint8_t stoppedMember = UINT8_MAX;
-  EEIssueMemberExecution stop =
-    EEIssueMemberExecution::Accepted;
+  EEIssueMemberOutcome older =
+    EEIssueMemberOutcome::Cancelled;
+  EEIssueMemberOutcome younger =
+    EEIssueMemberOutcome::Cancelled;
+
+  EEIssueMemberOutcome outcome(
+    EEIssueMemberPosition position) const
+  {
+    return position == EEIssueMemberPosition::Older
+      ? older
+      : younger;
+  }
 };
 
 template <typename AttemptMember>
@@ -163,6 +174,7 @@ EEIssueGroupExecutionResult executeEEIssueGroupMembers(
   }
 
   EEIssueGroupExecutionResult result;
+  result.width = width;
   for (std::uint8_t member = 0;
        member < memberCount;
        ++member)
@@ -172,12 +184,18 @@ EEIssueGroupExecutionResult executeEEIssueGroupMembers(
       member == 0
         ? EEIssueMemberPosition::Older
         : EEIssueMemberPosition::Younger;
-    const EEIssueMemberExecution execution =
+    const EEIssueMemberOutcome outcome =
       attemptMember(position);
-    if (execution != EEIssueMemberExecution::Accepted)
+    if (position == EEIssueMemberPosition::Older)
     {
-      result.stoppedMember = member;
-      result.stop = execution;
+      result.older = outcome;
+    }
+    else
+    {
+      result.younger = outcome;
+    }
+    if (outcome != EEIssueMemberOutcome::Accepted)
+    {
       return result;
     }
     ++result.accepted;
@@ -715,11 +733,11 @@ class EECore final : public ClockedComponent
     void promoteStagingLatch();
     void clearIssueFrontEnd();
     bool frontEndContinuationActive() const;
-    bool handleIssueLatchFailure();
+    EEIssueMemberOutcome resolveIssueLatchFailure();
     EEIssueGroupExecutionResult executeIssueGroup(
       EEIssueWidth width,
       std::uint32_t completedLoadRegisters);
-    EEIssueMemberExecution executeIssueMember(
+    EEIssueMemberOutcome executeIssueMember(
       std::uint32_t completedLoadRegisters,
       EEIssueMemberPosition position);
     void recordInstructionAcceptance(

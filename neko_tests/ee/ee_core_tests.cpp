@@ -31,10 +31,10 @@ class NonCopyableIssueMemberAttempt
     NonCopyableIssueMemberAttempt &operator=(
       const NonCopyableIssueMemberAttempt &) = delete;
 
-    EEIssueMemberExecution operator()(EEIssueMemberPosition)
+    EEIssueMemberOutcome operator()(EEIssueMemberPosition)
     {
       ++attempts;
-      return EEIssueMemberExecution::Accepted;
+      return EEIssueMemberOutcome::Accepted;
     }
 
     std::uint8_t attempts = 0;
@@ -695,9 +695,15 @@ TEST_CASE("EE issue groups stop at precise member boundaries")
     REQUIRE(attempt.attempts == 2);
     REQUIRE(result.attempted == 2);
     REQUIRE(result.accepted == 2);
+    REQUIRE(
+      result.older ==
+      EEIssueMemberOutcome::Accepted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Accepted);
   }
 
-  SECTION("An older failure suppresses the younger member")
+  SECTION("An older fault cancels the younger member")
   {
     std::uint8_t attempts = 0;
     const EEIssueGroupExecutionResult result =
@@ -708,19 +714,43 @@ TEST_CASE("EE issue groups stop at precise member boundaries")
           ++attempts;
           REQUIRE(
             position == EEIssueMemberPosition::Older);
-          return EEIssueMemberExecution::Failed;
+          return EEIssueMemberOutcome::Faulted;
         });
 
     REQUIRE(attempts == 1);
     REQUIRE(result.attempted == 1);
     REQUIRE(result.accepted == 0);
-    REQUIRE(result.stoppedMember == 0);
     REQUIRE(
-      result.stop ==
-      EEIssueMemberExecution::Failed);
+      result.older ==
+      EEIssueMemberOutcome::Faulted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Cancelled);
   }
 
-  SECTION("A younger failure preserves the older member")
+  SECTION("An older stall cancels the younger member")
+  {
+    const EEIssueGroupExecutionResult result =
+      executeEEIssueGroupMembers(
+        EEIssueWidth::Two,
+        [](EEIssueMemberPosition position)
+        {
+          REQUIRE(
+            position == EEIssueMemberPosition::Older);
+          return EEIssueMemberOutcome::Stalled;
+        });
+
+    REQUIRE(result.attempted == 1);
+    REQUIRE(result.accepted == 0);
+    REQUIRE(
+      result.older ==
+      EEIssueMemberOutcome::Stalled);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Cancelled);
+  }
+
+  SECTION("A younger fault preserves the older member")
   {
     std::uint32_t architecturalValue = 0;
     EEAcceptanceRecords records;
@@ -740,10 +770,10 @@ TEST_CASE("EE issue groups stop at precise member boundaries")
                 UINT32_C(0x24020007)),
               EEAcceptanceMode::Ordinary
             });
-            return EEIssueMemberExecution::Accepted;
+            return EEIssueMemberOutcome::Accepted;
           }
           REQUIRE(architecturalValue == 7);
-          return EEIssueMemberExecution::Failed;
+          return EEIssueMemberOutcome::Faulted;
         });
 
     REQUIRE(architecturalValue == 7);
@@ -751,15 +781,53 @@ TEST_CASE("EE issue groups stop at precise member boundaries")
     REQUIRE(records[0].instruction.raw == 0x24020007);
     REQUIRE(result.attempted == 2);
     REQUIRE(result.accepted == 1);
-    REQUIRE(result.stoppedMember == 1);
     REQUIRE(
-      result.stop ==
-      EEIssueMemberExecution::Failed);
+      result.older ==
+      EEIssueMemberOutcome::Accepted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Faulted);
   }
 }
 
 TEST_CASE("EE Core executes issue groups at precise boundaries")
 {
+  SECTION("An older interlock stalls and cancels the younger member")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(
+      1,
+      UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(
+      2,
+      UINT32_C(0x40000000));
+    system.eeBus().write32(0, UINT32_C(0x460208c0));
+    system.eeBus().write32(4, UINT32_C(0x24040001));
+    system.eeBus().write32(8, UINT32_C(0x44051800));
+    system.eeBus().write32(12, UINT32_C(0x24060002));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    const EEIssueGroupExecutionResult result =
+      EECoreTestAccess::executeIssueGroup(
+        &core,
+        EEIssueWidth::Two);
+
+    REQUIRE(result.attempted == 1);
+    REQUIRE(result.accepted == 0);
+    REQUIRE(
+      result.older ==
+      EEIssueMemberOutcome::Stalled);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Cancelled);
+    REQUIRE(core.programCounter() == 8);
+  }
+
   SECTION("An older exception suppresses younger effects")
   {
     NekoSystem system;
@@ -776,10 +844,12 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
 
     REQUIRE(result.attempted == 1);
     REQUIRE(result.accepted == 0);
-    REQUIRE(result.stoppedMember == 0);
     REQUIRE(
-      result.stop ==
-      EEIssueMemberExecution::Failed);
+      result.older ==
+      EEIssueMemberOutcome::Faulted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Cancelled);
     REQUIRE(core.generalRegister(2).low == 0);
     REQUIRE(
       core.acceptanceRecordsThisCycle().size() ==
@@ -805,10 +875,12 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
 
     REQUIRE(result.attempted == 2);
     REQUIRE(result.accepted == 1);
-    REQUIRE(result.stoppedMember == 1);
     REQUIRE(
-      result.stop ==
-      EEIssueMemberExecution::Failed);
+      result.older ==
+      EEIssueMemberOutcome::Accepted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Faulted);
     REQUIRE(core.generalRegister(2).low == 7);
     const EEAcceptanceRecords &records =
       core.acceptanceRecordsThisCycle();
@@ -837,10 +909,12 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
 
     REQUIRE(result.attempted == 2);
     REQUIRE(result.accepted == 1);
-    REQUIRE(result.stoppedMember == 1);
     REQUIRE(
-      result.stop ==
-      EEIssueMemberExecution::Failed);
+      result.older ==
+      EEIssueMemberOutcome::Accepted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Cancelled);
     REQUIRE(core.generalRegister(2).low == 7);
     REQUIRE(
       core.acceptanceRecordsThisCycle().size() ==
@@ -873,6 +947,12 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
         EEIssueWidth::Two);
 
     REQUIRE(result.accepted == 1);
+    REQUIRE(
+      result.older ==
+      EEIssueMemberOutcome::Accepted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Faulted);
     REQUIRE(core.floatingPointRegister(3) == 0);
     REQUIRE(core.pendingException() == EEException::SystemCall);
 
