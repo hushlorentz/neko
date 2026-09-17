@@ -92,9 +92,9 @@ TEST_CASE("EE branch issue groups execute resolved delay slots")
       core.acceptanceRecordsThisCycle();
     REQUIRE(records.size() == 2);
     REQUIRE(records[0].address == 0);
-    REQUIRE_FALSE(records[0].delaySlot);
+    REQUIRE(records[0].mode == EEAcceptanceMode::Ordinary);
     REQUIRE(records[1].address == 4);
-    REQUIRE(records[1].delaySlot);
+    REQUIRE(records[1].mode == EEAcceptanceMode::DelaySlot);
     REQUIRE(core.generalRegister(3).low == 1);
     REQUIRE(core.generalRegister(4).low == 0);
     REQUIRE(core.generalRegister(5).low == 0);

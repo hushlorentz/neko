@@ -12,6 +12,15 @@
 static_assert(
   std::is_final<EECore>::value,
   "EE instruction execution must remain concrete and non-overridable.");
+static_assert(
+  std::is_enum<EEIssueWidth>::value,
+  "EE issue width must remain an explicit control type.");
+static_assert(
+  std::is_enum<EEIssueMemberPosition>::value,
+  "EE issue-member position must remain an explicit control type.");
+static_assert(
+  std::is_enum<EEAcceptanceMode>::value,
+  "EE acceptance mode must remain an explicit control type.");
 
 class NonCopyableIssueMemberAttempt
 {
@@ -22,7 +31,7 @@ class NonCopyableIssueMemberAttempt
     NonCopyableIssueMemberAttempt &operator=(
       const NonCopyableIssueMemberAttempt &) = delete;
 
-    EEIssueMemberExecution operator()(std::uint8_t)
+    EEIssueMemberExecution operator()(EEIssueMemberPosition)
     {
       ++attempts;
       return EEIssueMemberExecution::Accepted;
@@ -56,11 +65,11 @@ struct EECoreTestAccess
 
   static EEIssueGroupExecutionResult executeIssueGroup(
     EECore *core,
-    std::uint8_t memberCount)
+    EEIssueWidth width)
   {
     core->acceptanceRecords.clear();
     core->fillIssueFrontEnd();
-    return core->executeIssueGroup(memberCount, 0);
+    return core->executeIssueGroup(width, 0);
   }
 
   static EEInstructionExecutionOutcome executeInstruction(
@@ -610,13 +619,13 @@ TEST_CASE("EE acceptance records preserve issue-group order")
     7,
     0x100,
     decodeEEInstruction(UINT32_C(0x24020001)),
-    false
+    EEAcceptanceMode::Ordinary
   });
   records.append({
     8,
     0x104,
     decodeEEInstruction(UINT32_C(0x24030002)),
-    true
+    EEAcceptanceMode::DelaySlot
   });
 
   REQUIRE(records.size() == 2);
@@ -624,17 +633,17 @@ TEST_CASE("EE acceptance records preserve issue-group order")
   REQUIRE(records[0].programOrder == 7);
   REQUIRE(records[0].address == 0x100);
   REQUIRE(records[0].instruction.raw == 0x24020001);
-  REQUIRE_FALSE(records[0].delaySlot);
+  REQUIRE(records[0].mode == EEAcceptanceMode::Ordinary);
   REQUIRE(records[1].programOrder == 8);
   REQUIRE(records[1].address == 0x104);
   REQUIRE(records[1].instruction.raw == 0x24030002);
-  REQUIRE(records[1].delaySlot);
+  REQUIRE(records[1].mode == EEAcceptanceMode::DelaySlot);
   REQUIRE_THROWS_AS(
     records.append({
       9,
       0x108,
       decodeEEInstruction(0),
-      false
+      EEAcceptanceMode::Ordinary
     }),
     std::overflow_error);
 
@@ -645,25 +654,43 @@ TEST_CASE("EE acceptance records preserve issue-group order")
     4,
     0x200,
     decodeEEInstruction(0),
-    false
+    EEAcceptanceMode::Ordinary
   });
   REQUIRE_THROWS_AS(
     records.append({
       3,
       0x204,
       decodeEEInstruction(0),
-      false
+      EEAcceptanceMode::Ordinary
     }),
     std::invalid_argument);
 }
 
 TEST_CASE("EE issue groups stop at precise member boundaries")
 {
+  SECTION("Invalid issue widths are rejected")
+  {
+    NonCopyableIssueMemberAttempt attempt;
+    REQUIRE_THROWS_WITH(
+      executeEEIssueGroupMembers(
+        static_cast<EEIssueWidth>(0),
+        attempt),
+      "EE issue group width is invalid.");
+    REQUIRE_THROWS_WITH(
+      executeEEIssueGroupMembers(
+        static_cast<EEIssueWidth>(3),
+        attempt),
+      "EE issue group width is invalid.");
+    REQUIRE(attempt.attempts == 0);
+  }
+
   SECTION("The attempt callable is used without ownership or copying")
   {
     NonCopyableIssueMemberAttempt attempt;
     const EEIssueGroupExecutionResult result =
-      executeEEIssueGroupMembers(2, attempt);
+      executeEEIssueGroupMembers(
+        EEIssueWidth::Two,
+        attempt);
 
     REQUIRE(attempt.attempts == 2);
     REQUIRE(result.attempted == 2);
@@ -675,11 +702,12 @@ TEST_CASE("EE issue groups stop at precise member boundaries")
     std::uint8_t attempts = 0;
     const EEIssueGroupExecutionResult result =
       executeEEIssueGroupMembers(
-        2,
-        [&attempts](std::uint8_t member)
+        EEIssueWidth::Two,
+        [&attempts](EEIssueMemberPosition position)
         {
           ++attempts;
-          REQUIRE(member == 0);
+          REQUIRE(
+            position == EEIssueMemberPosition::Older);
           return EEIssueMemberExecution::Failed;
         });
 
@@ -698,11 +726,11 @@ TEST_CASE("EE issue groups stop at precise member boundaries")
     EEAcceptanceRecords records;
     const EEIssueGroupExecutionResult result =
       executeEEIssueGroupMembers(
-        2,
+        EEIssueWidth::Two,
         [&architecturalValue, &records](
-          std::uint8_t member)
+          EEIssueMemberPosition position)
         {
-          if (member == 0)
+          if (position == EEIssueMemberPosition::Older)
           {
             architecturalValue = 7;
             records.append({
@@ -710,7 +738,7 @@ TEST_CASE("EE issue groups stop at precise member boundaries")
               0,
               decodeEEInstruction(
                 UINT32_C(0x24020007)),
-              false
+              EEAcceptanceMode::Ordinary
             });
             return EEIssueMemberExecution::Accepted;
           }
@@ -742,7 +770,9 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     core.startExecution(0);
 
     const EEIssueGroupExecutionResult result =
-      EECoreTestAccess::executeIssueGroup(&core, 2);
+      EECoreTestAccess::executeIssueGroup(
+        &core,
+        EEIssueWidth::Two);
 
     REQUIRE(result.attempted == 1);
     REQUIRE(result.accepted == 0);
@@ -769,7 +799,9 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     core.startExecution(0);
 
     const EEIssueGroupExecutionResult result =
-      EECoreTestAccess::executeIssueGroup(&core, 2);
+      EECoreTestAccess::executeIssueGroup(
+        &core,
+        EEIssueWidth::Two);
 
     REQUIRE(result.attempted == 2);
     REQUIRE(result.accepted == 1);
@@ -799,7 +831,9 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     core.startExecution(0);
 
     const EEIssueGroupExecutionResult result =
-      EECoreTestAccess::executeIssueGroup(&core, 2);
+      EECoreTestAccess::executeIssueGroup(
+        &core,
+        EEIssueWidth::Two);
 
     REQUIRE(result.attempted == 2);
     REQUIRE(result.accepted == 1);
@@ -834,7 +868,9 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     core.startExecution(0);
 
     const EEIssueGroupExecutionResult result =
-      EECoreTestAccess::executeIssueGroup(&core, 2);
+      EECoreTestAccess::executeIssueGroup(
+        &core,
+        EEIssueWidth::Two);
 
     REQUIRE(result.accepted == 1);
     REQUIRE(core.floatingPointRegister(3) == 0);
@@ -1867,7 +1903,9 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(records[0].programOrder == 1);
     REQUIRE(records[0].address == 0);
     REQUIRE(records[0].instruction.raw == 0x24020001);
-    REQUIRE_FALSE(records[0].delaySlot);
+    REQUIRE(
+      records[0].mode ==
+      EEAcceptanceMode::Ordinary);
     REQUIRE(core.lastInstructionAddress() == 0);
     REQUIRE(core.lastInstruction().raw == 0x24020001);
   }

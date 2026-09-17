@@ -58,12 +58,18 @@ struct EEInstructionFetchResult
   std::uint32_t instruction = 0;
 };
 
+enum class EEAcceptanceMode : std::uint8_t
+{
+  Ordinary,
+  DelaySlot
+};
+
 struct EEAcceptanceRecord
 {
   std::uint64_t programOrder = 0;
   std::uint32_t address = 0;
   EEInstruction instruction;
-  bool delaySlot = false;
+  EEAcceptanceMode mode = EEAcceptanceMode::Ordinary;
 };
 
 class EEAcceptanceRecords
@@ -107,6 +113,18 @@ enum class EEIssueMemberExecution : std::uint8_t
   Failed
 };
 
+enum class EEIssueMemberPosition : std::uint8_t
+{
+  Older,
+  Younger
+};
+
+enum class EEIssueWidth : std::uint8_t
+{
+  One = 1,
+  Two = 2
+};
+
 enum class EEInstructionExecutionOutcome : std::uint8_t
 {
   Completed,
@@ -127,13 +145,21 @@ struct EEIssueGroupExecutionResult
 
 template <typename AttemptMember>
 EEIssueGroupExecutionResult executeEEIssueGroupMembers(
-  std::uint8_t memberCount,
+  EEIssueWidth width,
   AttemptMember &&attemptMember)
 {
-  if (memberCount > EEAcceptanceRecords::CAPACITY)
+  std::uint8_t memberCount = 0;
+  switch (width)
   {
-    throw std::invalid_argument(
-      "EE issue group exceeds architectural capacity.");
+    case EEIssueWidth::One:
+      memberCount = 1;
+      break;
+    case EEIssueWidth::Two:
+      memberCount = 2;
+      break;
+    default:
+      throw std::invalid_argument(
+        "EE issue group width is invalid.");
   }
 
   EEIssueGroupExecutionResult result;
@@ -142,8 +168,12 @@ EEIssueGroupExecutionResult executeEEIssueGroupMembers(
        ++member)
   {
     ++result.attempted;
+    const EEIssueMemberPosition position =
+      member == 0
+        ? EEIssueMemberPosition::Older
+        : EEIssueMemberPosition::Younger;
     const EEIssueMemberExecution execution =
-      attemptMember(member);
+      attemptMember(position);
     if (execution != EEIssueMemberExecution::Accepted)
     {
       result.stoppedMember = member;
@@ -430,12 +460,6 @@ class EECore final : public ClockedComponent
       BusError
     };
 
-    enum class IssueMemberPosition : std::uint8_t
-    {
-      Older,
-      Younger
-    };
-
     enum class MACPipeline : std::uint8_t
     {
       MAC0,
@@ -693,16 +717,16 @@ class EECore final : public ClockedComponent
     bool frontEndContinuationActive() const;
     bool handleIssueLatchFailure();
     EEIssueGroupExecutionResult executeIssueGroup(
-      std::uint8_t memberCount,
+      EEIssueWidth width,
       std::uint32_t completedLoadRegisters);
     EEIssueMemberExecution executeIssueMember(
       std::uint32_t completedLoadRegisters,
-      IssueMemberPosition position);
+      EEIssueMemberPosition position);
     void recordInstructionAcceptance(
       std::uint64_t programOrder,
       std::uint32_t address,
       const EEInstruction &instruction,
-      bool delaySlot);
+      EEAcceptanceMode mode);
     void applyInstructionAcceptanceEffects(
       const EEAcceptanceRecord &record);
     void updateIssueSelection(

@@ -1228,29 +1228,30 @@ void EECore::clock()
   }
 
   executeIssueGroup(
-    issueSelectionCanExecuteConcurrently() ? 2 : 1,
+    issueSelectionCanExecuteConcurrently()
+      ? EEIssueWidth::Two
+      : EEIssueWidth::One,
     completedCOP1LoadRegisters);
 }
 
 EEIssueGroupExecutionResult EECore::executeIssueGroup(
-  std::uint8_t memberCount,
+  EEIssueWidth width,
   std::uint32_t completedLoadRegisters)
 {
   return executeEEIssueGroupMembers(
-    memberCount,
-    [this, completedLoadRegisters](std::uint8_t member)
+    width,
+    [this, completedLoadRegisters](
+      EEIssueMemberPosition position)
     {
       return executeIssueMember(
         completedLoadRegisters,
-        member == 0
-          ? IssueMemberPosition::Older
-          : IssueMemberPosition::Younger);
+        position);
     });
 }
 
 EEIssueMemberExecution EECore::executeIssueMember(
   std::uint32_t completedLoadRegisters,
-  IssueMemberPosition position)
+  EEIssueMemberPosition position)
 {
   if (!issueLatch.valid)
   {
@@ -1272,10 +1273,13 @@ EEIssueMemberExecution EECore::executeIssueMember(
   const std::uint32_t instructionValue =
     issueLatch.instruction.raw;
   const EEInstruction decoded = issueLatch.instruction;
-  const bool wasDelaySlot = branchDelayPending;
+  const EEAcceptanceMode acceptanceMode =
+    branchDelayPending
+      ? EEAcceptanceMode::DelaySlot
+      : EEAcceptanceMode::Ordinary;
   const std::uint32_t completedBranchTarget =
     branchDelayTarget;
-  if (position == IssueMemberPosition::Older &&
+  if (position == EEIssueMemberPosition::Older &&
       isCOP1ManagedPipelineOperation(decoded.operation) &&
       cop1TransferReservedByStalledMove())
   {
@@ -1287,7 +1291,7 @@ EEIssueMemberExecution EECore::executeIssueMember(
         decoded,
         completedLoadRegisters,
         &scoreboardHazard,
-        position == IssueMemberPosition::Older
+        position == EEIssueMemberPosition::Older
           ? COP1ScoreboardQuery::CandidateReadiness
           : COP1ScoreboardQuery::
               YoungerIssueGroupMember))
@@ -1363,7 +1367,7 @@ EEIssueMemberExecution EECore::executeIssueMember(
     instructionAddress,
     instructionValue,
     static_cast<std::uint8_t>(decoded.operation),
-    wasDelaySlot);
+    acceptanceMode == EEAcceptanceMode::DelaySlot);
   const EEInstructionExecutionOutcome execution =
     executeInstruction(decoded, instructionAddress);
   executingProgramOrder = 0;
@@ -1386,9 +1390,9 @@ EEIssueMemberExecution EECore::executeIssueMember(
     instructionProgramOrder,
     instructionAddress,
     decoded,
-    wasDelaySlot);
+    acceptanceMode);
   promoteStagingLatch();
-  if (wasDelaySlot)
+  if (acceptanceMode == EEAcceptanceMode::DelaySlot)
   {
     pc = completedBranchTarget;
     branchDelayPending = false;
@@ -1414,13 +1418,13 @@ void EECore::recordInstructionAcceptance(
   std::uint64_t programOrder,
   std::uint32_t address,
   const EEInstruction &instruction,
-  bool delaySlot)
+  EEAcceptanceMode mode)
 {
   acceptanceRecords.append({
     programOrder,
     address,
     instruction,
-    delaySlot
+    mode
   });
   applyInstructionAcceptanceEffects(
     acceptanceRecords[
@@ -1436,7 +1440,7 @@ void EECore::applyInstructionAcceptanceEffects(
   const EEInstruction &instruction = record.instruction;
   if (isCOP1DividerOperation(instruction.operation))
   {
-    if (record.delaySlot)
+    if (record.mode == EEAcceptanceMode::DelaySlot)
     {
       recordCycleTrace(
         CycleTraceKind::COP1DividerHazard,
@@ -1505,7 +1509,7 @@ void EECore::applyInstructionAcceptanceEffects(
     }
   }
 
-  if (record.delaySlot)
+  if (record.mode == EEAcceptanceMode::DelaySlot)
   {
     cop1DividerPostDelayInstructions = 2;
     cop1DividerPostDelayBranchAddress =

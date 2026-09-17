@@ -1162,7 +1162,7 @@ accumulator or condition-result contract:
       unreachable save-state configuration
 - [x] Separate issue-candidate construction from readiness and structural-pair
       policy while retaining the fixed two-entry front end
-- [ ] Replace boolean controls that select issue-member position, pipeline
+- [x] Replace boolean controls that select issue-member position, pipeline
       identity, or acceptance mode with explicit enums or result types
 - [ ] Make issue-group outcomes explicit for accepted, stalled, faulted, and
       cancelled members without changing program-order effects
