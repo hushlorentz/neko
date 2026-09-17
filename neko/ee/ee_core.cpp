@@ -475,6 +475,12 @@ void EECore::attachVU1(VPU *newVU1)
 
 EEInstructionFetchResult EECore::fetchInstruction()
 {
+  if (frontEndContinuationActive())
+  {
+    throw std::logic_error(
+      "EE public instruction fetch requires an empty front end.");
+  }
+
   const std::uint32_t address = pc;
   if ((address & 3) != 0)
   {
@@ -600,6 +606,14 @@ void EECore::clearIssueFrontEnd()
 {
   issueLatch = {};
   stagingLatch = {};
+}
+
+bool EECore::frontEndContinuationActive() const
+{
+  return
+    issueLatch.valid ||
+    stagingLatch.valid ||
+    branchDelayPending;
 }
 
 bool EECore::handleIssueLatchFailure()

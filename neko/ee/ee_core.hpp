@@ -669,6 +669,7 @@ class EECore final : public ClockedComponent
     void fillIssueFrontEnd();
     void promoteStagingLatch();
     void clearIssueFrontEnd();
+    bool frontEndContinuationActive() const;
     bool handleIssueLatchFailure();
     EEIssueGroupExecutionResult executeIssueGroup(
       std::uint8_t memberCount,

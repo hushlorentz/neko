@@ -1178,6 +1178,55 @@ TEST_CASE("EE Core instruction fetching")
       EEException::AddressErrorLoadOrFetch);
   }
 
+  SECTION("Public fetch rejects live front-end continuation")
+  {
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(
+      1,
+      UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(
+      2,
+      UINT32_C(0x40000000));
+    bus.write32(0, UINT32_C(0x460208c0));
+    bus.write32(4, UINT32_C(0x24040001));
+    bus.write32(8, UINT32_C(0x44051800));
+    bus.write32(12, UINT32_C(0x24060002));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+    core.haltExecution();
+
+    REQUIRE(core.programCounter() == 8);
+    const std::uint64_t stateHash = core.stateHash();
+
+    REQUIRE_THROWS_WITH(
+      core.fetchInstruction(),
+      "EE public instruction fetch requires an empty front end.");
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.stateHash() == stateHash);
+  }
+
+  SECTION("Public fetch rejects a pending delay-slot continuation")
+  {
+    bus.write32(0, UINT32_C(0x08000003));
+    bus.write32(4, UINT32_C(0x0000000f));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::UndefinedOperation);
+    REQUIRE(core.programCounter() == 4);
+    const std::uint64_t stateHash = core.stateHash();
+
+    REQUIRE_THROWS_WITH(
+      core.fetchInstruction(),
+      "EE public instruction fetch requires an empty front end.");
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.stateHash() == stateHash);
+  }
+
   SECTION("Reset clears a pending fetch exception")
   {
     core.setProgramCounter(2);

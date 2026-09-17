@@ -1157,7 +1157,7 @@ accumulator or condition-result contract:
       selection, acceptance, and PC-advance state
 - [x] Reshape each front-end method around one decision or state transition,
       even when the resulting methods remain private to `EECore`
-- [ ] Reconcile the stateful public `fetchInstruction()` API with decoded
+- [x] Reconcile the stateful public `fetchInstruction()` API with decoded
       front-end continuation so it cannot leave `pc` and live latches in an
       unreachable save-state configuration
 - [ ] Separate issue-candidate construction from readiness and structural-pair
