@@ -1188,7 +1188,7 @@ accumulator or condition-result contract:
 - [x] Split C1 methods that currently combine traversal, eligibility,
       transition, side effects, and tracing into focused stages with explicit
       inputs and outcomes
-- [ ] Centralize divider occupancy derivation and reconciliation so runtime,
+- [x] Centralize divider occupancy derivation and reconciliation so runtime,
       reset, hashing, and save-state validation cannot disagree
 - [ ] Centralize exception and flush cancellation of in-flight C1 work while
       preserving older completed effects and discarding younger work

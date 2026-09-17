@@ -182,6 +182,41 @@ struct EECoreTestAccess
       core->cop1DividerOperation == EEOperation::Nop;
   }
 
+  static bool reconcileCOP1DerivesDividerOccupancy(
+    EECore *core)
+  {
+    EECore::InFlightCOP1Operation &divider =
+      core->inFlightCOP1Operations[0];
+    divider.active = true;
+    divider.programOrder = 1;
+    divider.instruction.operation =
+      EEOperation::DivideSingleCOP1;
+    divider.remainingCycles = 5;
+    core->cop1DividerInitiationCycles = 1;
+    core->cop1DividerOperation =
+      EEOperation::SquareRootSingleCOP1;
+
+    core->reconcileCOP1DividerOccupancy();
+    return
+      core->cop1DividerInitiationCycles == 4 &&
+      core->cop1DividerOperation ==
+        EEOperation::DivideSingleCOP1;
+  }
+
+  static void setCOP1DividerOccupancyCache(
+    EECore *core,
+    std::uint8_t initiationCycles,
+    EEOperation operation)
+  {
+    core->cop1DividerInitiationCycles = initiationCycles;
+    core->cop1DividerOperation = operation;
+  }
+
+  static void reconcileCOP1DividerOccupancy(EECore *core)
+  {
+    core->reconcileCOP1DividerOccupancy();
+  }
+
   static EEIssuePreview previewIssueSelection(EECore *core)
   {
     core->fillIssueFrontEnd();
@@ -508,6 +543,19 @@ TEST_CASE("EE in-flight COP1 lifecycle gates invalid transitions")
   REQUIRE(
     EECoreTestAccess::discardCOP1ReconcilesDividerOccupancy(
       &core));
+  REQUIRE(
+    EECoreTestAccess::reconcileCOP1DerivesDividerOccupancy(
+      &core));
+  const std::uint64_t canonicalHash = core.stateHash();
+  const std::vector<std::uint8_t> canonicalSaveState =
+    system.saveState();
+  EECoreTestAccess::setCOP1DividerOccupancyCache(
+    &core,
+    1,
+    EEOperation::SquareRootSingleCOP1);
+  REQUIRE(core.stateHash() == canonicalHash);
+  REQUIRE(system.saveState() == canonicalSaveState);
+  EECoreTestAccess::reconcileCOP1DividerOccupancy(&core);
 }
 
 TEST_CASE("EE focused handlers reject incompatible operations")

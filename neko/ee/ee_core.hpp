@@ -654,6 +654,12 @@ class EECore final : public ClockedComponent
       std::uint32_t completedLoadRegisters = 0;
     };
 
+    struct COP1DividerOccupancy
+    {
+      std::uint8_t initiationCycles = 0;
+      EEOperation operation = EEOperation::Nop;
+    };
+
     struct COP1ScoreboardValue
     {
       COP1ScoreboardAvailability availability =
@@ -1027,8 +1033,9 @@ class EECore final : public ClockedComponent
       InFlightCOP1Operation *operation);
     static void computeInFlightCOP1StagedOperation(
       InFlightCOP1Operation *operation);
-    bool pendingCOP1DividerActive() const;
-    void clearInactiveCOP1DividerOccupancy();
+    COP1DividerOccupancy derivedCOP1DividerOccupancy()
+      const;
+    void reconcileCOP1DividerOccupancy();
     void startPendingCOP1Divider(
       const EEInstruction &instruction,
       std::uint32_t capturedFS,

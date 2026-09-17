@@ -1328,10 +1328,12 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.pendingMac0;
   destination->eeCoreComponent.pendingMac1 =
     source->eeCoreComponent.pendingMac1;
+  const EECore::COP1DividerOccupancy dividerOccupancy =
+    source->eeCoreComponent.derivedCOP1DividerOccupancy();
   destination->eeCoreComponent.cop1DividerInitiationCycles =
-    source->eeCoreComponent.cop1DividerInitiationCycles;
+    dividerOccupancy.initiationCycles;
   destination->eeCoreComponent.cop1DividerOperation =
-    source->eeCoreComponent.cop1DividerOperation;
+    dividerOccupancy.operation;
   destination->eeCoreComponent.shiftAmountOrdering =
     source->eeCoreComponent.shiftAmountOrdering;
   destination->eeCoreComponent.branchDelayPending =
@@ -1681,10 +1683,12 @@ void NekoSaveStateCodec::writeEECore(
   {
     writer->writeU8(0);
   }
-  writer->writeU8(core.cop1DividerInitiationCycles);
+  const EECore::COP1DividerOccupancy dividerOccupancy =
+    core.derivedCOP1DividerOccupancy();
+  writer->writeU8(dividerOccupancy.initiationCycles);
   writer->writeU8(
     static_cast<std::uint8_t>(
-      core.cop1DividerOperation));
+      dividerOccupancy.operation));
   writer->writeBool(false);
   writer->writeU8(
     core.shiftAmountOrdering.accessHistory());
@@ -2516,51 +2520,27 @@ void NekoSaveStateCodec::readEECore(
         pendingDividerResultCount++] = &operation;
     }
   }
-  require(
-    pendingDividerResultCount != 0 ||
-      (core->cop1DividerInitiationCycles == 0 &&
-       core->cop1DividerOperation == EEOperation::Nop),
-    "EE inactive COP1 divider contains occupancy");
-  require(
-    core->cop1DividerInitiationCycles != 0 ||
-      (pendingDividerResultCount == 0 ||
-       (pendingDividerResultCount == 1 &&
-        pendingDividerResults[0]->remainingCycles == 1)),
-    "EE unoccupied COP1 divider has invalid pending results");
-  if (core->cop1DividerInitiationCycles != 0)
+  if (pendingDividerResultCount == 2)
   {
     const EECOP1DividerTiming timing =
       cop1DividerTiming(
-        core->cop1DividerOperation);
+        pendingDividerResults[1]->instruction.operation);
     require(
-      core->cop1DividerInitiationCycles <=
-        timing.initiationInterval,
-      "EE COP1 divider occupancy exceeds its policy");
-    if (pendingDividerResultCount == 1)
-    {
-      require(
-        pendingDividerResults[0]->instruction.operation ==
-          core->cop1DividerOperation &&
-          pendingDividerResults[0]->remainingCycles ==
-            core->cop1DividerInitiationCycles + 1,
-        "EE COP1 divider countdowns are inconsistent");
-    }
-    else
-    {
-      require(
-        pendingDividerResultCount == 2 &&
-          pendingDividerResults[0]->destination.fprRegister !=
-            pendingDividerResults[1]->destination.fprRegister &&
-          core->cop1DividerInitiationCycles ==
-            timing.initiationInterval &&
-          pendingDividerResults[0]->remainingCycles == 1 &&
-          pendingDividerResults[1]->remainingCycles ==
-            timing.latency &&
-          pendingDividerResults[1]->instruction.operation ==
-            core->cop1DividerOperation,
-        "EE COP1 divider overlap state is inconsistent");
-    }
+      pendingDividerResults[0]->destination.fprRegister !=
+          pendingDividerResults[1]->destination.fprRegister &&
+        pendingDividerResults[0]->remainingCycles == 1 &&
+        pendingDividerResults[1]->remainingCycles ==
+          timing.latency,
+      "EE COP1 divider overlap state is inconsistent");
   }
+  const EECore::COP1DividerOccupancy dividerOccupancy =
+    core->derivedCOP1DividerOccupancy();
+  require(
+    core->cop1DividerInitiationCycles ==
+        dividerOccupancy.initiationCycles &&
+      core->cop1DividerOperation ==
+        dividerOccupancy.operation,
+    "EE COP1 divider occupancy is inconsistent");
   const EECore::InFlightCOP1Operation *
     previousOrderedStagedOperation = nullptr;
   for (std::size_t orderIndex = 0;
@@ -2866,6 +2846,7 @@ void NekoSaveStateCodec::readEECore(
     core->cop1DividerPostDelayTaken ||
       core->cop1DividerPostDelayTargetAddress == 0,
     "EE untaken branch hazard contains a target");
+  core->reconcileCOP1DividerOccupancy();
 }
 
 void NekoSaveStateCodec::writeVPU(

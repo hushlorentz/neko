@@ -391,8 +391,6 @@ void EECore::reset()
   executingProgramOrder = 0;
   pendingMac0 = {};
   pendingMac1 = {};
-  cop1DividerInitiationCycles = 0;
-  cop1DividerOperation = EEOperation::Nop;
   shiftAmountOrdering.clear();
   clearBranchDelayContinuation();
   cop1DividerPostDelayInstructions = 0;
@@ -401,6 +399,7 @@ void EECore::reset()
   cop1DividerPostDelayTaken = false;
   cop1DividerPostTargetInstructions = 0;
   cop1DividerPostTargetAddress = 0;
+  reconcileCOP1DividerOccupancy();
   acceptanceRecords.clear();
   exceptionEnteredThisCycle = false;
   cycleTraceEventCount = 0;
@@ -630,12 +629,11 @@ void EECore::resetExecutionContinuation()
   cop1DividerPostTargetAddress = 0;
   pendingMac0 = {};
   pendingMac1 = {};
-  cop1DividerInitiationCycles = 0;
-  cop1DividerOperation = EEOperation::Nop;
   shiftAmountOrdering.clear();
   clearIssueFrontEnd();
   issueSelection = {};
   inFlightCOP1Operations.fill({});
+  reconcileCOP1DividerOccupancy();
   nextEEProgramOrder = 1;
 }
 
@@ -4058,7 +4056,6 @@ void EECore::releaseInFlightCOP1(
 
 bool EECore::drainInFlightCOP1()
 {
-  bool drainedDivider = false;
   for (const InFlightCOP1Operation &operation :
        inFlightCOP1Operations)
   {
@@ -4078,14 +4075,11 @@ bool EECore::drainInFlightCOP1()
       throw std::logic_error(
         "ELF return cannot drain an unsupported COP1 operation.");
     }
-    drainedDivider =
-      drainedDivider ||
-      isCOP1DividerOperation(operation.instruction.operation);
   }
   const auto finishFailure =
     [this](bool result)
     {
-      clearInactiveCOP1DividerOccupancy();
+      reconcileCOP1DividerOccupancy();
       return result;
     };
 
@@ -4256,10 +4250,7 @@ bool EECore::drainInFlightCOP1()
     }
     commitInFlightCOP1(oldest);
   }
-  if (drainedDivider)
-  {
-    clearInactiveCOP1DividerOccupancy();
-  }
+  reconcileCOP1DividerOccupancy();
   return true;
 }
 
@@ -4304,11 +4295,6 @@ void EECore::advancePendingCOP1(
     retireReadyInFlightCOP1();
   *completedLoadRegisters =
     retirement.completedLoadRegisters;
-  if (advanceResult.exceptionEntered)
-  {
-    clearInactiveCOP1DividerOccupancy();
-  }
-
   for (std::size_t index = 0;
        index < deferredTraceCount;
        ++index)
@@ -4351,15 +4337,6 @@ EECore::advanceInFlightCOP1Operations(
   const COP1AdvanceEligibility &eligibility)
 {
   COP1AdvanceResult result;
-  if (cop1DividerInitiationCycles != 0)
-  {
-    --cop1DividerInitiationCycles;
-    if (cop1DividerInitiationCycles == 0)
-    {
-      cop1DividerOperation = EEOperation::Nop;
-    }
-  }
-
   for (std::size_t orderIndex = 0;
        orderIndex < programOrder.size();
        ++orderIndex)
@@ -4397,6 +4374,7 @@ EECore::advanceInFlightCOP1Operations(
       break;
     }
   }
+  reconcileCOP1DividerOccupancy();
   return result;
 }
 
@@ -4931,28 +4909,42 @@ void EECore::computeInFlightCOP1StagedOperation(
   }
 }
 
-bool EECore::pendingCOP1DividerActive() const
+EECore::COP1DividerOccupancy
+EECore::derivedCOP1DividerOccupancy() const
 {
-  for (const InFlightCOP1Operation &operation :
+  const InFlightCOP1Operation *occupyingDivider = nullptr;
+  for (const InFlightCOP1Operation &candidate :
        inFlightCOP1Operations)
   {
-    if (operation.active &&
+    if (candidate.active &&
         isCOP1DividerOperation(
-          operation.instruction.operation))
+          candidate.instruction.operation) &&
+        candidate.remainingCycles > 1 &&
+        (occupyingDivider == nullptr ||
+         candidate.programOrder >
+           occupyingDivider->programOrder))
     {
-      return true;
+      occupyingDivider = &candidate;
     }
   }
-  return false;
+  if (occupyingDivider == nullptr)
+  {
+    return {};
+  }
+  return {
+    static_cast<std::uint8_t>(
+      occupyingDivider->remainingCycles - 1),
+    occupyingDivider->instruction.operation
+  };
 }
 
-void EECore::clearInactiveCOP1DividerOccupancy()
+void EECore::reconcileCOP1DividerOccupancy()
 {
-  if (!pendingCOP1DividerActive())
-  {
-    cop1DividerInitiationCycles = 0;
-    cop1DividerOperation = EEOperation::Nop;
-  }
+  const COP1DividerOccupancy occupancy =
+    derivedCOP1DividerOccupancy();
+  cop1DividerInitiationCycles =
+    occupancy.initiationCycles;
+  cop1DividerOperation = occupancy.operation;
 }
 
 void EECore::startPendingCOP1Divider(
@@ -4984,8 +4976,7 @@ void EECore::startPendingCOP1Divider(
     operation,
     UINT8_MAX,
     COP1PipelineStage::R);
-  cop1DividerInitiationCycles = timing.initiationInterval;
-  cop1DividerOperation = instruction.operation;
+  reconcileCOP1DividerOccupancy();
 }
 
 void EECore::commitInFlightCOP1(
@@ -5163,15 +5154,17 @@ bool EECore::cop1ScoreboardBlocks(
     }
   }
 
+  const COP1DividerOccupancy dividerOccupancy =
+    derivedCOP1DividerOccupancy();
   if (isCOP1DividerOperation(instruction.operation) &&
-      cop1DividerInitiationCycles != 0)
+      dividerOccupancy.initiationCycles != 0)
   {
     *hazard = {
       COP1ScoreboardResource::Divider,
       0,
       COP1Dependency::None,
       false,
-      cop1DividerOperation
+      dividerOccupancy.operation
     };
     return true;
   }
@@ -5890,7 +5883,7 @@ void EECore::discardInFlightCOP1AtOrAfter(
       releaseInFlightCOP1(&operation);
     }
   }
-  clearInactiveCOP1DividerOccupancy();
+  reconcileCOP1DividerOccupancy();
 }
 
 std::uint8_t EECore::exceptionCode(EEException type)
@@ -6094,10 +6087,15 @@ std::uint64_t EECore::stateHash() const
     };
   hashPending(pendingMac0);
   hashPending(pendingMac1);
-  hashEEStateValue(&hash, cop1DividerInitiationCycles);
+  const COP1DividerOccupancy dividerOccupancy =
+    derivedCOP1DividerOccupancy();
   hashEEStateValue(
     &hash,
-    static_cast<std::uint8_t>(cop1DividerOperation));
+    dividerOccupancy.initiationCycles);
+  hashEEStateValue(
+    &hash,
+    static_cast<std::uint8_t>(
+      dividerOccupancy.operation));
   hashEEStateValue(
     &hash,
     shiftAmountOrdering.accessHistory());
