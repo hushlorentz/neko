@@ -668,14 +668,45 @@ bool EECore::handleIssueLatchFailure()
 void EECore::updateIssueSelection(
   std::uint32_t completedLoadRegisters)
 {
-  if (!issueLatch.valid ||
-      issueLatch.failure != IssueLatchFailure::None)
+  const IssueCandidates candidates =
+    constructIssueCandidates();
+  const IssueCandidateReadiness readiness =
+    evaluateIssueCandidateReadiness(
+      candidates,
+      completedLoadRegisters);
+  issueSelection =
+    selectReadyIssueCandidates(candidates, readiness);
+}
+
+EECore::IssueCandidates EECore::constructIssueCandidates()
+  const
+{
+  IssueCandidates candidates;
+  if (!issueLatch.valid)
   {
-    issueSelection = {};
-    return;
+    return candidates;
+  }
+  candidates.older = &issueLatch;
+  if (stagingLatch.valid)
+  {
+    candidates.younger = &stagingLatch;
+  }
+  return candidates;
+}
+
+EECore::IssueCandidateReadiness
+EECore::evaluateIssueCandidateReadiness(
+  const IssueCandidates &candidates,
+  std::uint32_t completedLoadRegisters) const
+{
+  IssueCandidateReadiness readiness;
+  if (candidates.older == nullptr ||
+      candidates.older->failure != IssueLatchFailure::None)
+  {
+    return readiness;
   }
 
-  const std::size_t availableCOP1Slots =
+  readiness.availableCOP1Slots =
     static_cast<std::size_t>(std::count_if(
       inFlightCOP1Operations.begin(),
       inFlightCOP1Operations.end(),
@@ -683,33 +714,41 @@ void EECore::updateIssueSelection(
       {
         return !operation.active;
       }));
-  const bool olderReady =
+  readiness.older =
     issueCandidateReady(
-      issueLatch.instruction,
+      candidates.older->instruction,
       completedLoadRegisters,
-      availableCOP1Slots);
-  bool youngerReady =
-    stagingLatch.valid &&
-    stagingLatch.failure == IssueLatchFailure::None &&
+      readiness.availableCOP1Slots);
+  readiness.younger =
+    candidates.younger != nullptr &&
+    candidates.younger->failure == IssueLatchFailure::None &&
     issueCandidateReady(
-      stagingLatch.instruction,
+      candidates.younger->instruction,
       completedLoadRegisters,
-      availableCOP1Slots);
-  if (olderReady &&
-      youngerReady &&
-      !issuePairStructurallySafe(
-        issueLatch.instruction,
-        stagingLatch.instruction,
-        availableCOP1Slots))
-  {
-    youngerReady = false;
-  }
+      readiness.availableCOP1Slots);
+  return readiness;
+}
 
-  issueSelection = selectEEIssueGroup(
-    issueLatch.instruction,
-    stagingLatch.instruction,
-    olderReady,
-    youngerReady);
+EEIssueSelection EECore::selectReadyIssueCandidates(
+  const IssueCandidates &candidates,
+  const IssueCandidateReadiness &readiness) const
+{
+  if (!readiness.older)
+  {
+    return {};
+  }
+  if (!readiness.younger ||
+      !issuePairStructurallySafe(
+        candidates.older->instruction,
+        candidates.younger->instruction,
+        readiness.availableCOP1Slots))
+  {
+    return selectEESingleIssue(
+      candidates.older->instruction);
+  }
+  return selectEEIssuePair(
+    candidates.older->instruction,
+    candidates.younger->instruction);
 }
 
 bool EECore::issueCandidateReady(

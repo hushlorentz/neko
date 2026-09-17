@@ -447,11 +447,11 @@ bool eeInstructionUsesPhysicalPipeline(
 EEInstructionPipeAssignment assignEEInstructionPairPipes(
   EEOperation older,
   EEOperation younger);
-EEIssueSelection selectEEIssueGroup(
+EEIssueSelection selectEESingleIssue(
+  const EEInstruction &instruction);
+EEIssueSelection selectEEIssuePair(
   const EEInstruction &older,
-  const EEInstruction &younger,
-  bool olderReady,
-  bool youngerReady);
+  const EEInstruction &younger);
 bool isEEBranchOperation(EEOperation operation);
 bool isEEBranchLikelyOperation(EEOperation operation);
 

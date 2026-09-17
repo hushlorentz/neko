@@ -966,13 +966,11 @@ TEST_CASE("EE two-wide issue selection")
   SECTION("Independent flexible instructions issue together")
   {
     const EEIssueSelection selection =
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(
           immediateInstruction(0x09, 0, 2, 1)),
         decodeEEInstruction(
-          immediateInstruction(0x09, 0, 3, 2)),
-        true,
-        true);
+          immediateInstruction(0x09, 0, 3, 2)));
 
     REQUIRE(selection.instructionCount == 2);
     REQUIRE(
@@ -989,13 +987,10 @@ TEST_CASE("EE two-wide issue selection")
   SECTION("Reverse fixed-pipe order remains pairable")
   {
     const EEIssueSelection selection =
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(
           immediateInstruction(0x23, 1, 2, 0)),
-        decodeEEInstruction(
-          UINT32_C(0x46031040)),
-        true,
-        true);
+        decodeEEInstruction(UINT32_C(0x46031040)));
 
     REQUIRE(selection.instructionCount == 2);
     REQUIRE(
@@ -1013,63 +1008,55 @@ TEST_CASE("EE two-wide issue selection")
         immediateInstruction(0x09, 0, 2, 1));
 
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         producer,
         decodeEEInstruction(
-          immediateInstruction(0x09, 2, 3, 1)),
-        true,
-        true).instructionCount == 1);
+          immediateInstruction(0x09, 2, 3, 1)))
+        .instructionCount == 1);
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         producer,
         decodeEEInstruction(
-          immediateInstruction(0x09, 0, 2, 2)),
-        true,
-        true).instructionCount == 1);
+          immediateInstruction(0x09, 0, 2, 2)))
+        .instructionCount == 1);
   }
 
   SECTION("FCR31 condition aliases prevent same-pair issue")
   {
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(UINT32_C(0x46031032)),
-        decodeEEInstruction(UINT32_C(0x4442f800)),
-        true,
-        true).instructionCount == 1);
+        decodeEEInstruction(UINT32_C(0x4442f800)))
+        .instructionCount == 1);
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(UINT32_C(0x44c2f800)),
-        decodeEEInstruction(UINT32_C(0x45010001)),
-        true,
-        true).instructionCount == 1);
+        decodeEEInstruction(UINT32_C(0x45010001)))
+        .instructionCount == 1);
   }
 
   SECTION("Conservative COP2 state blocks dependent transfer pairs")
   {
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(UINT32_C(0x4a0002ff)),
-        decodeEEInstruction(UINT32_C(0x48220800)),
-        true,
-        true).instructionCount == 1);
+        decodeEEInstruction(UINT32_C(0x48220800)))
+        .instructionCount == 1);
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(UINT32_C(0x48a20800)),
-        decodeEEInstruction(UINT32_C(0x4a0002ff)),
-        true,
-        true).instructionCount == 1);
+        decodeEEInstruction(UINT32_C(0x4a0002ff)))
+        .instructionCount == 1);
   }
 
   SECTION("Table 1-3 forbidden pairs fall back to one instruction")
   {
     const EEIssueSelection selection =
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(
           immediateInstruction(0x04, 1, 2, 1)),
         decodeEEInstruction(
-          immediateInstruction(0x05, 3, 4, 1)),
-        true,
-        true);
+          immediateInstruction(0x05, 3, 4, 1)));
 
     REQUIRE(selection.instructionCount == 1);
     REQUIRE(
@@ -1080,29 +1067,26 @@ TEST_CASE("EE two-wide issue selection")
   SECTION("Legal branches may issue with their delay-slot instruction")
   {
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(
           immediateInstruction(0x04, 1, 2, 1)),
         decodeEEInstruction(
-          immediateInstruction(0x09, 0, 3, 1)),
-        true,
-        true).instructionCount == 2);
+          immediateInstruction(0x09, 0, 3, 1)))
+        .instructionCount == 2);
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(
           immediateInstruction(0x04, 1, 2, 1)),
         decodeEEInstruction(
-          registerInstruction(0x29, 4, 0, 0)),
-        true,
-        true).instructionCount == 2);
+          registerInstruction(0x29, 4, 0, 0)))
+        .instructionCount == 2);
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(
           immediateInstruction(0x14, 1, 2, 1)),
         decodeEEInstruction(
-          registerInstruction(0x28, 0, 0, 3)),
-        true,
-        true).instructionCount == 2);
+          registerInstruction(0x28, 0, 0, 3)))
+        .instructionCount == 2);
   }
 
   SECTION("Illegal delay-slot sequences remain scalar for validation")
@@ -1123,11 +1107,9 @@ TEST_CASE("EE two-wide issue selection")
     for (const EEInstruction &younger : forbiddenYounger)
     {
       REQUIRE(
-        selectEEIssueGroup(
+        selectEEIssuePair(
           branch,
-          younger,
-          true,
-          true).instructionCount == 1);
+          younger).instructionCount == 1);
     }
 
     const EEInstruction forbiddenLikelyYounger[] = {
@@ -1142,11 +1124,9 @@ TEST_CASE("EE two-wide issue selection")
          forbiddenLikelyYounger)
     {
       REQUIRE(
-        selectEEIssueGroup(
+        selectEEIssuePair(
           likely,
-          younger,
-          true,
-          true).instructionCount == 1);
+          younger).instructionCount == 1);
     }
   }
 
@@ -1159,27 +1139,21 @@ TEST_CASE("EE two-wide issue selection")
         immediateInstruction(0x09, 0, 3, 1));
 
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         eret,
-        alu,
-        true,
-        true).instructionCount == 1);
+        alu).instructionCount == 1);
     REQUIRE(
-      selectEEIssueGroup(
+      selectEEIssuePair(
         alu,
-        eret,
-        true,
-        true).instructionCount == 2);
+        eret).instructionCount == 2);
   }
 
   SECTION("Table 1-3 delayed pairs remain two-wide selections")
   {
     const EEIssueSelection selection =
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(UINT32_C(0x44020800)),
-        decodeEEInstruction(UINT32_C(0x46031000)),
-        true,
-        true);
+        decodeEEInstruction(UINT32_C(0x46031000)));
 
     REQUIRE(selection.instructionCount == 2);
     REQUIRE(
@@ -1187,38 +1161,22 @@ TEST_CASE("EE two-wide issue selection")
       EEIssuePairing::ConcurrentWithStall);
   }
 
-  SECTION("Readiness selects zero or only the older instruction")
+  SECTION("Scalar selection assigns the older instruction")
   {
     const EEInstruction older =
       decodeEEInstruction(
         immediateInstruction(0x09, 0, 2, 1));
-    const EEInstruction younger =
-      decodeEEInstruction(
-        immediateInstruction(0x09, 0, 3, 2));
 
-    REQUIRE(
-      selectEEIssueGroup(
-        older,
-        younger,
-        false,
-        true).instructionCount == 0);
-    REQUIRE(
-      selectEEIssueGroup(
-        older,
-        younger,
-        true,
-        false).instructionCount == 1);
+    REQUIRE(selectEESingleIssue(older).instructionCount == 1);
   }
 
   SECTION("Failed pairing retains the older scalar pipe")
   {
     const EEIssueSelection selection =
-      selectEEIssueGroup(
+      selectEEIssuePair(
         decodeEEInstruction(
           immediateInstruction(0x23, 1, 2, 0)),
-        decodeEEInstruction(UINT32_C(0x44020800)),
-        true,
-        true);
+        decodeEEInstruction(UINT32_C(0x44020800)));
 
     REQUIRE(selection.instructionCount == 1);
     REQUIRE_FALSE(selection.assignment.assignable);

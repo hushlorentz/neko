@@ -2419,31 +2419,29 @@ EEInstructionPipeAssignment assignEEInstructionPairPipes(
   return {};
 }
 
-EEIssueSelection selectEEIssueGroup(
-  const EEInstruction &older,
-  const EEInstruction &younger,
-  bool olderReady,
-  bool youngerReady)
+EEIssueSelection selectEESingleIssue(
+  const EEInstruction &instruction)
 {
   EEIssueSelection selection;
-  if (!olderReady)
-  {
-    return selection;
-  }
-
   selection.instructionCount = 1;
-  const EEInstructionRouting olderRouting =
-    eeInstructionRouting(older.operation);
+  const EEInstructionRouting routing =
+    eeInstructionRouting(instruction.operation);
   selection.assignment.olderPipe =
     eeInstructionSupportsLogicalPipe(
-      olderRouting,
+      routing,
       EELogicalPipe::Pipe0)
       ? EELogicalPipe::Pipe0
       : EELogicalPipe::Pipe1;
-  if (!youngerReady)
-  {
-    return selection;
-  }
+  return selection;
+}
+
+EEIssueSelection selectEEIssuePair(
+  const EEInstruction &older,
+  const EEInstruction &younger)
+{
+  EEIssueSelection selection = selectEESingleIssue(older);
+  const EEInstructionRouting olderRouting =
+    eeInstructionRouting(older.operation);
   if (isIllegalProgramOrderPair(older, younger))
   {
     return selection;

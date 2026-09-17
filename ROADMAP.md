@@ -1160,7 +1160,7 @@ accumulator or condition-result contract:
 - [x] Reconcile the stateful public `fetchInstruction()` API with decoded
       front-end continuation so it cannot leave `pc` and live latches in an
       unreachable save-state configuration
-- [ ] Separate issue-candidate construction from readiness and structural-pair
+- [x] Separate issue-candidate construction from readiness and structural-pair
       policy while retaining the fixed two-entry front end
 - [ ] Replace boolean controls that select issue-member position, pipeline
       identity, or acceptance mode with explicit enums or result types

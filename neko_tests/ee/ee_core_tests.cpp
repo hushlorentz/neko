@@ -31,8 +31,29 @@ class NonCopyableIssueMemberAttempt
     std::uint8_t attempts = 0;
 };
 
+struct EEIssuePreview
+{
+  std::uint8_t candidateCount = 0;
+  EEIssueSelection selection;
+};
+
 struct EECoreTestAccess
 {
+  static EEIssuePreview previewIssueSelection(EECore *core)
+  {
+    core->fillIssueFrontEnd();
+    const EECore::IssueCandidates candidates =
+      core->constructIssueCandidates();
+    const EECore::IssueCandidateReadiness readiness =
+      core->evaluateIssueCandidateReadiness(candidates, 0);
+    return {
+      candidates.count(),
+      core->selectReadyIssueCandidates(
+        candidates,
+        readiness)
+    };
+  }
+
   static EEIssueGroupExecutionResult executeIssueGroup(
     EECore *core,
     std::uint8_t memberCount)
@@ -2078,5 +2099,50 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(core.elapsedCycles() == 2);
     REQUIRE(core.programCounter() == 8);
     REQUIRE(core.stopReason() == EEStopReason::None);
+  }
+}
+
+TEST_CASE("EE issue candidates are independent of selection policy")
+{
+  SECTION("Readiness can block a complete candidate window")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setFloatingPointRegister(
+      1,
+      UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(
+      2,
+      UINT32_C(0x40000000));
+    system.eeBus().write32(0, UINT32_C(0x460208c0));
+    system.eeBus().write32(4, UINT32_C(0x24040001));
+    system.eeBus().write32(8, UINT32_C(0x44051800));
+    system.eeBus().write32(12, UINT32_C(0x24060002));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    const EEIssuePreview preview =
+      EECoreTestAccess::previewIssueSelection(&core);
+    REQUIRE(preview.candidateCount == 2);
+    REQUIRE(preview.selection.instructionCount == 0);
+  }
+
+  SECTION("Structural policy can scalarize two ready candidates")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {1, 0});
+    core.setGeneralRegister(2, {2, 0});
+    system.eeBus().write32(0, UINT32_C(0x50220001));
+    system.eeBus().write32(4, UINT32_C(0x24030001));
+    core.startExecution(0);
+
+    const EEIssuePreview preview =
+      EECoreTestAccess::previewIssueSelection(&core);
+    REQUIRE(preview.candidateCount == 2);
+    REQUIRE(preview.selection.instructionCount == 1);
   }
 }

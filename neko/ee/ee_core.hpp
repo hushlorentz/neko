@@ -490,6 +490,27 @@ class EECore final : public ClockedComponent
         FrontEndFetchFailure::None;
     };
 
+    struct IssueCandidates
+    {
+      const DecodedIssueLatch *older = nullptr;
+      const DecodedIssueLatch *younger = nullptr;
+
+      std::uint8_t count() const
+      {
+        return older == nullptr
+          ? 0
+          : static_cast<std::uint8_t>(
+              younger == nullptr ? 1 : 2);
+      }
+    };
+
+    struct IssueCandidateReadiness
+    {
+      bool older = false;
+      bool younger = false;
+      std::size_t availableCOP1Slots = 0;
+    };
+
     struct COP1DestinationMetadata
     {
       std::uint8_t mask = COP1_DESTINATION_NONE;
@@ -686,6 +707,13 @@ class EECore final : public ClockedComponent
       const EEAcceptanceRecord &record);
     void updateIssueSelection(
       std::uint32_t completedLoadRegisters);
+    IssueCandidates constructIssueCandidates() const;
+    IssueCandidateReadiness evaluateIssueCandidateReadiness(
+      const IssueCandidates &candidates,
+      std::uint32_t completedLoadRegisters) const;
+    EEIssueSelection selectReadyIssueCandidates(
+      const IssueCandidates &candidates,
+      const IssueCandidateReadiness &readiness) const;
     bool issueCandidateReady(
       const EEInstruction &instruction,
       std::uint32_t completedLoadRegisters,
