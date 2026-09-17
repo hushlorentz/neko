@@ -1177,7 +1177,7 @@ accumulator or condition-result contract:
 
 - [x] Introduce one allocation-free program-order traversal primitive for the
       fixed-capacity in-flight C1 array
-- [ ] Use the traversal primitive for oldest-operation selection, producer
+- [x] Use the traversal primitive for oldest-operation selection, producer
       lookup, ready-prefix retirement, stage transition ordering, and
       cancellation ranges
 - [ ] Use the same read-only order and reachability predicates for malformed

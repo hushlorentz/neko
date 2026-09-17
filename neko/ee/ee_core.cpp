@@ -3999,22 +3999,17 @@ bool EECore::drainInFlightCOP1()
       return result;
     };
 
-  while (true)
+  const COP1ProgramOrderView programOrder =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
   {
-    InFlightCOP1Operation *oldest = nullptr;
-    for (InFlightCOP1Operation &operation :
-         inFlightCOP1Operations)
+    InFlightCOP1Operation *oldest =
+      &inFlightCOP1Operations[programOrder[orderIndex]];
+    if (!oldest->active)
     {
-      if (operation.active &&
-          (oldest == nullptr ||
-           operation.programOrder < oldest->programOrder))
-      {
-        oldest = &operation;
-      }
-    }
-    if (oldest == nullptr)
-    {
-      break;
+      continue;
     }
     if (isCOP1StagedOperation(
           oldest->instruction.operation))
@@ -4210,46 +4205,29 @@ void EECore::advancePendingCOP1(
   }
 
   bool exceptionDuringAdvance = false;
-  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
-    advancedThisCycle = {};
-  while (true)
+  const COP1ProgramOrderView programOrder =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
   {
-    std::size_t index = inFlightCOP1Operations.size();
-    for (std::size_t candidateIndex = 0;
-         candidateIndex < inFlightCOP1Operations.size();
-         ++candidateIndex)
-    {
-      const InFlightCOP1Operation &candidate =
-        inFlightCOP1Operations[candidateIndex];
-      if (advancedThisCycle[candidateIndex] ||
-          !candidate.active ||
-          !isCOP1ManagedPipelineOperation(
-            candidate.instruction.operation))
-      {
-        continue;
-      }
-      if (index == inFlightCOP1Operations.size() ||
-          candidate.programOrder <
-            inFlightCOP1Operations[index].programOrder)
-      {
-        index = candidateIndex;
-      }
-    }
-    if (index == inFlightCOP1Operations.size())
-    {
-      break;
-    }
-    advancedThisCycle[index] = true;
-    if (moveTStageBlockers[index] != nullptr)
+    const std::size_t slotIndex = programOrder[orderIndex];
+    InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[slotIndex];
+    if (!operation.active ||
+        !isCOP1ManagedPipelineOperation(
+          operation.instruction.operation))
     {
       continue;
     }
-    InFlightCOP1Operation &operation =
-      inFlightCOP1Operations[index];
-    transitioned[index] =
+    if (moveTStageBlockers[slotIndex] != nullptr)
+    {
+      continue;
+    }
+    transitioned[slotIndex] =
       advanceInFlightCOP1Operation(
         &operation,
-        &previousStages[index]);
+        &previousStages[slotIndex]);
     if (exceptionEnteredThisCycle)
     {
       exceptionDuringAdvance = true;
@@ -4287,70 +4265,42 @@ void EECore::advancePendingCOP1(
       }
     };
 
-  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
-    transitionsToRecord = transitioned;
-  while (true)
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
   {
-    const InFlightCOP1Operation *transition = nullptr;
-    std::size_t transitionIndex = 0;
-    for (std::size_t index = 0;
-         index < inFlightCOP1Operations.size();
-         ++index)
+    const std::size_t slotIndex = programOrder[orderIndex];
+    const InFlightCOP1Operation &transition =
+      inFlightCOP1Operations[slotIndex];
+    if (!transition.active ||
+        !transitioned[slotIndex])
     {
-      const InFlightCOP1Operation &operation =
-        inFlightCOP1Operations[index];
-      if (!operation.active ||
-          !transitionsToRecord[index])
-      {
-        continue;
-      }
-      if (transition == nullptr ||
-          operation.programOrder < transition->programOrder)
-      {
-        transition = &operation;
-        transitionIndex = index;
-      }
+      continue;
     }
-    if (transition == nullptr)
-    {
-      break;
-    }
-    transitionsToRecord[transitionIndex] = false;
     recordCOP1StageTransition(
-      *transition,
+      transition,
       static_cast<std::uint8_t>(
-        previousStages[transitionIndex]),
-      transition->stage);
+        previousStages[slotIndex]),
+      transition.stage);
   }
 
   const auto retireReadyOperations =
     [this, completedLoadRegisters]()
     {
-      while (true)
+      const COP1ProgramOrderView retirementOrder =
+        inFlightCOP1ProgramOrder();
+      for (std::size_t orderIndex = 0;
+           orderIndex < retirementOrder.size();
+           ++orderIndex)
       {
-        InFlightCOP1Operation *oldestOperation = nullptr;
-        for (std::size_t index = 0;
-             index < inFlightCOP1Operations.size();
-             ++index)
+        InFlightCOP1Operation *oldestOperation =
+          &inFlightCOP1Operations[
+            retirementOrder[orderIndex]];
+        if (!oldestOperation->active ||
+            !isCOP1ManagedPipelineOperation(
+              oldestOperation->instruction.operation))
         {
-          InFlightCOP1Operation &operation =
-            inFlightCOP1Operations[index];
-          if (!operation.active ||
-              !isCOP1ManagedPipelineOperation(
-                operation.instruction.operation))
-          {
-            continue;
-          }
-          if (oldestOperation == nullptr ||
-              operation.programOrder <
-                oldestOperation->programOrder)
-          {
-            oldestOperation = &operation;
-          }
-        }
-        if (oldestOperation == nullptr)
-        {
-          break;
+          continue;
         }
         const bool retirementReady =
           oldestOperation->stage == COP1PipelineStage::S1 ||
@@ -4383,48 +4333,24 @@ void EECore::advancePendingCOP1(
     return;
   }
 
-  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
-    interlocksToRecord = {};
-  for (std::size_t index = 0;
-       index < moveTStageBlockers.size();
-       ++index)
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
   {
-    interlocksToRecord[index] =
-      moveTStageBlockers[index] != nullptr;
-  }
-  while (true)
-  {
-    const InFlightCOP1Operation *blockedMove = nullptr;
-    std::size_t blockedIndex = 0;
-    for (std::size_t index = 0;
-         index < inFlightCOP1Operations.size();
-         ++index)
+    const std::size_t slotIndex = programOrder[orderIndex];
+    const InFlightCOP1Operation &blockedMove =
+      inFlightCOP1Operations[slotIndex];
+    if (!blockedMove.active ||
+        moveTStageBlockers[slotIndex] == nullptr)
     {
-      const InFlightCOP1Operation &operation =
-        inFlightCOP1Operations[index];
-      if (!operation.active ||
-          !interlocksToRecord[index])
-      {
-        continue;
-      }
-      if (blockedMove == nullptr ||
-          operation.programOrder < blockedMove->programOrder)
-      {
-        blockedMove = &operation;
-        blockedIndex = index;
-      }
+      continue;
     }
-    if (blockedMove == nullptr)
-    {
-      break;
-    }
-    interlocksToRecord[blockedIndex] = false;
     recordCycleTrace(
       CycleTraceKind::COP1ResourceInterlock,
-      blockedMove->instructionAddress,
-      blockedMove->instruction.raw,
+      blockedMove.instructionAddress,
+      blockedMove.instruction.raw,
       static_cast<std::uint8_t>(
-        moveTStageBlockers[blockedIndex]->
+        moveTStageBlockers[slotIndex]->
           instruction.operation));
   }
 
@@ -4440,14 +4366,14 @@ EECore::cop1MoveTStageBlocker(
   assert(move.stage == COP1PipelineStage::R);
   assert(isCOP1MoveOperation(move.instruction.operation));
 
-  const InFlightCOP1Operation *blocker = nullptr;
-  for (const InFlightCOP1Operation &candidate :
-       inFlightCOP1Operations)
+  const COP1ProgramOrderView programOrder =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
   {
-    if (!candidate.active)
-    {
-      continue;
-    }
+    const InFlightCOP1Operation &candidate =
+      inFlightCOP1Operations[programOrder[orderIndex]];
     const bool entersT =
       (isCOP1StagedOperation(
          candidate.instruction.operation) &&
@@ -4458,14 +4384,12 @@ EECore::cop1MoveTStageBlocker(
        candidate.remainingCycles ==
          cop1DividerTiming(
            candidate.instruction.operation).latency);
-    if (entersT &&
-        (blocker == nullptr ||
-         candidate.programOrder < blocker->programOrder))
+    if (entersT)
     {
-      blocker = &candidate;
+      return &candidate;
     }
   }
-  return blocker;
+  return nullptr;
 }
 
 bool EECore::advanceInFlightCOP1Operation(
@@ -5249,11 +5173,15 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValueBefore(
   }
 
   const InFlightCOP1Operation *producer = nullptr;
-  for (const InFlightCOP1Operation &operation :
-       inFlightCOP1Operations)
+  const COP1ProgramOrderView programOrder =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = programOrder.size();
+       orderIndex != 0;
+       --orderIndex)
   {
-    if (!operation.active ||
-        operation.programOrder >= consumerOrder)
+    const InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[programOrder[orderIndex - 1]];
+    if (operation.programOrder >= consumerOrder)
     {
       continue;
     }
@@ -5306,11 +5234,10 @@ EECore::COP1ScoreboardValue EECore::cop1ScoreboardValueBefore(
       case COP1ScoreboardResource::Divider:
         break;
     }
-    if (writesResource &&
-        (producer == nullptr ||
-         operation.programOrder > producer->programOrder))
+    if (writesResource)
     {
       producer = &operation;
+      break;
     }
   }
   if (producer == nullptr)
@@ -5428,22 +5355,23 @@ std::uint32_t EECore::scoreboardFPRValueForT(
 {
   requireFloatingPointRegisterIndex(registerIndex);
   const InFlightCOP1Operation *producer = nullptr;
-  for (const InFlightCOP1Operation &operation :
-       inFlightCOP1Operations)
+  const COP1ProgramOrderView programOrder =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = programOrder.size();
+       orderIndex != 0;
+       --orderIndex)
   {
-    if (!operation.active ||
-        operation.programOrder >= consumerOrder ||
+    const InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[programOrder[orderIndex - 1]];
+    if (operation.programOrder >= consumerOrder ||
         (operation.destination.mask &
          COP1_DESTINATION_FPR) == 0 ||
         operation.destination.fprRegister != registerIndex)
     {
       continue;
     }
-    if (producer == nullptr ||
-        operation.programOrder > producer->programOrder)
-    {
-      producer = &operation;
-    }
+    producer = &operation;
+    break;
   }
   if (producer == nullptr ||
       producer->stage == COP1PipelineStage::S2)
@@ -5465,21 +5393,22 @@ std::uint32_t EECore::scoreboardAccumulatorValueForT(
   std::uint64_t consumerOrder) const
 {
   const InFlightCOP1Operation *producer = nullptr;
-  for (const InFlightCOP1Operation &operation :
-       inFlightCOP1Operations)
+  const COP1ProgramOrderView programOrder =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = programOrder.size();
+       orderIndex != 0;
+       --orderIndex)
   {
-    if (!operation.active ||
-        operation.programOrder >= consumerOrder ||
+    const InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[programOrder[orderIndex - 1]];
+    if (operation.programOrder >= consumerOrder ||
         (operation.destination.mask &
          COP1_DESTINATION_ACCUMULATOR) == 0)
     {
       continue;
     }
-    if (producer == nullptr ||
-        operation.programOrder > producer->programOrder)
-    {
-      producer = &operation;
-    }
+    producer = &operation;
+    break;
   }
   if (producer == nullptr ||
       producer->stage == COP1PipelineStage::S2)
@@ -5743,11 +5672,15 @@ void EECore::enterException(
 void EECore::discardInFlightCOP1AtOrAfter(
   std::uint64_t programOrder)
 {
-  for (InFlightCOP1Operation &operation :
-       inFlightCOP1Operations)
+  const COP1ProgramOrderView order =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = 0;
+       orderIndex < order.size();
+       ++orderIndex)
   {
-    if (operation.active &&
-        operation.programOrder >= programOrder)
+    InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[order[orderIndex]];
+    if (operation.programOrder >= programOrder)
     {
       operation = {};
     }
