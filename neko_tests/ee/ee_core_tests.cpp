@@ -668,6 +668,32 @@ TEST_CASE("EE acceptance records preserve issue-group order")
 
 TEST_CASE("EE issue groups stop at precise member boundaries")
 {
+  SECTION("One-wide issue attempts only the older member")
+  {
+    std::uint8_t attempts = 0;
+    const EEIssueGroupExecutionResult result =
+      executeEEIssueGroupMembers(
+        EEIssueWidth::One,
+        [&attempts](EEIssueMemberPosition position)
+        {
+          ++attempts;
+          REQUIRE(
+            position == EEIssueMemberPosition::Older);
+          return EEIssueMemberOutcome::Accepted;
+        });
+
+    REQUIRE(attempts == 1);
+    REQUIRE(result.width == EEIssueWidth::One);
+    REQUIRE(result.attempted == 1);
+    REQUIRE(result.accepted == 1);
+    REQUIRE(
+      result.older ==
+      EEIssueMemberOutcome::Accepted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Cancelled);
+  }
+
   SECTION("Invalid issue widths are rejected")
   {
     NonCopyableIssueMemberAttempt attempt;
@@ -892,6 +918,65 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     REQUIRE(core.cop0Register(EECOP0Register::EPC) == 4);
     REQUIRE(core.lastInstructionAddress() == 0);
     REQUIRE(core.lastInstruction().raw == 0x24020007);
+  }
+
+  SECTION("A younger stall preserves the older member")
+  {
+    NekoSystem system;
+    EEBus &bus = system.eeBus();
+    EECore &core = system.eeCore();
+    const EEQuadword interruptedNops = {
+      UINT64_C(0x0000000080000000),
+      0
+    };
+    REQUIRE(
+      bus.writeGuestData128(
+        EEMemoryMap::VIF0_FIFO,
+        interruptedNops) ==
+      EEDataWriteResult::Completed);
+    bus.advanceGuestFIFOs();
+    for (std::size_t index = 0; index < 7; ++index)
+    {
+      REQUIRE(
+        bus.writeGuestData128(
+          EEMemoryMap::VIF0_FIFO,
+          {}) ==
+        EEDataWriteResult::Completed);
+    }
+
+    core.setGeneralRegister(
+      1,
+      {EEMemoryMap::VIF0_FIFO, 0});
+    core.setGeneralRegister(
+      2,
+      {
+        UINT64_C(0x1111111122222222),
+        UINT64_C(0x3333333344444444)
+      });
+    bus.write32(0, UINT32_C(0x24030001));
+    bus.write32(4, UINT32_C(0x7c220000));
+    core.startExecution(0);
+
+    const EEIssueGroupExecutionResult result =
+      EECoreTestAccess::executeIssueGroup(
+        &core,
+        EEIssueWidth::Two);
+
+    REQUIRE(result.attempted == 2);
+    REQUIRE(result.accepted == 1);
+    REQUIRE(
+      result.older ==
+      EEIssueMemberOutcome::Accepted);
+    REQUIRE(
+      result.younger ==
+      EEIssueMemberOutcome::Stalled);
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle().size() ==
+      1);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(system.vif0().fifoQuadwordCount() == 8);
+    REQUIRE(core.pendingException() == EEException::None);
   }
 
   SECTION("A younger stop preserves older effects and owns the reason")

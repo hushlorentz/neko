@@ -1170,7 +1170,7 @@ accumulator or condition-result contract:
       ownership boundary
 - [x] Preserve explicit run-control ownership for same-PC host-halt resume,
       different-address restart, and external program-counter mutation
-- [ ] Cover one-wide, two-wide, stalled younger, faulted older, faulted younger,
+- [x] Cover one-wide, two-wide, stalled younger, faulted older, faulted younger,
       delay-slot, public-fetch, and run-control transitions with focused tests
 
 #### EE C1 Pipeline Lifecycle and Ordered Work
