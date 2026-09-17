@@ -478,6 +478,12 @@ class EECore final : public ClockedComponent
       BusError
     };
 
+    enum class ExecutionStartMode : std::uint8_t
+    {
+      ResumeHostContinuation,
+      Restart
+    };
+
     enum class MACPipeline : std::uint8_t
     {
       MAC0,
@@ -732,6 +738,10 @@ class EECore final : public ClockedComponent
     void fillIssueFrontEnd();
     void promoteStagingLatch();
     void clearIssueFrontEnd();
+    void clearBranchDelayContinuation();
+    ExecutionStartMode executionStartMode(
+      std::uint32_t startAddress) const;
+    void resetExecutionContinuation();
     bool frontEndContinuationActive() const;
     EEIssueMemberOutcome resolveIssueLatchFailure();
     EEIssueGroupExecutionResult executeIssueGroup(
@@ -914,7 +924,6 @@ class EECore final : public ClockedComponent
     InFlightCOP1Operation &allocateInFlightCOP1(
       const EEInstruction &instruction,
       std::uint32_t instructionAddress);
-    bool pendingCOP1LoadActive() const;
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);

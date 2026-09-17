@@ -394,11 +394,7 @@ void EECore::reset()
   cop1DividerInitiationCycles = 0;
   cop1DividerOperation = EEOperation::Nop;
   shiftAmountOrdering.clear();
-  branchDelayPending = false;
-  branchDelayTarget = 0;
-  branchInstructionAddress = 0;
-  branchDelayFromLikely = false;
-  branchDelayTaken = false;
+  clearBranchDelayContinuation();
   cop1DividerPostDelayInstructions = 0;
   cop1DividerPostDelayBranchAddress = 0;
   cop1DividerPostDelayTargetAddress = 0;
@@ -598,6 +594,49 @@ void EECore::clearIssueFrontEnd()
 {
   issueLatch = {};
   stagingLatch = {};
+}
+
+void EECore::clearBranchDelayContinuation()
+{
+  branchDelayPending = false;
+  branchDelayTarget = 0;
+  branchInstructionAddress = 0;
+  branchDelayFromLikely = false;
+  branchDelayTaken = false;
+}
+
+EECore::ExecutionStartMode EECore::executionStartMode(
+  std::uint32_t startAddress) const
+{
+  return
+    state == EEExecutionState::Halted &&
+    haltReason == EEStopReason::HostHalt &&
+    startAddress == pc
+      ? ExecutionStartMode::ResumeHostContinuation
+      : ExecutionStartMode::Restart;
+}
+
+void EECore::resetExecutionContinuation()
+{
+  lastInstructionValid = false;
+  lastAddress = 0;
+  lastDecodedInstruction = {};
+  clearBranchDelayContinuation();
+  cop1DividerPostDelayInstructions = 0;
+  cop1DividerPostDelayBranchAddress = 0;
+  cop1DividerPostDelayTargetAddress = 0;
+  cop1DividerPostDelayTaken = false;
+  cop1DividerPostTargetInstructions = 0;
+  cop1DividerPostTargetAddress = 0;
+  pendingMac0 = {};
+  pendingMac1 = {};
+  cop1DividerInitiationCycles = 0;
+  cop1DividerOperation = EEOperation::Nop;
+  shiftAmountOrdering.clear();
+  clearIssueFrontEnd();
+  issueSelection = {};
+  inFlightCOP1Operations.fill({});
+  nextEEProgramOrder = 1;
 }
 
 bool EECore::frontEndContinuationActive() const
@@ -1046,104 +1085,15 @@ bool EECore::cop2ScoreboardBlocks(
 
 void EECore::startExecution(std::uint32_t startAddress)
 {
-  const bool resumePendingBranch =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    branchDelayPending &&
-    startAddress == pc;
-  const bool resumeCOP1DividerHazardContext =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    startAddress == pc;
-  const bool resumePendingMultiplyDivide =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    pendingMultiplyDivideActive() &&
-    startAddress == pc;
-  const bool resumePendingCOP1Load =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    pendingCOP1LoadActive() &&
-    startAddress == pc;
-  const bool resumePendingCOP1Divider =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    (pendingCOP1DividerActive() ||
-     cop1DividerInitiationCycles != 0) &&
-    startAddress == pc;
-  const bool resumeIssueFrontEnd =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    issueLatch.valid &&
-    startAddress == pc;
-  const bool resumeEEProgramOrder =
-    state == EEExecutionState::Halted &&
-    haltReason == EEStopReason::HostHalt &&
-    startAddress == pc;
+  const ExecutionStartMode mode =
+    executionStartMode(startAddress);
   pc = startAddress;
   clearPendingException();
   state = EEExecutionState::Running;
   haltReason = EEStopReason::None;
-  if (!resumePendingBranch)
+  if (mode == ExecutionStartMode::Restart)
   {
-    lastInstructionValid = false;
-    lastAddress = 0;
-    lastDecodedInstruction = {};
-    branchDelayPending = false;
-    branchDelayTarget = 0;
-    branchInstructionAddress = 0;
-    branchDelayFromLikely = false;
-    branchDelayTaken = false;
-  }
-  if (!resumeCOP1DividerHazardContext)
-  {
-    cop1DividerPostDelayInstructions = 0;
-    cop1DividerPostDelayBranchAddress = 0;
-    cop1DividerPostDelayTargetAddress = 0;
-    cop1DividerPostDelayTaken = false;
-    cop1DividerPostTargetInstructions = 0;
-    cop1DividerPostTargetAddress = 0;
-  }
-  if (!resumePendingMultiplyDivide)
-  {
-    pendingMac0 = {};
-    pendingMac1 = {};
-  }
-  if (!resumePendingCOP1Divider)
-  {
-    cop1DividerInitiationCycles = 0;
-    cop1DividerOperation = EEOperation::Nop;
-  }
-  if (!resumeIssueFrontEnd)
-  {
-    clearIssueFrontEnd();
-  }
-  if (!resumeEEProgramOrder)
-  {
-    inFlightCOP1Operations.fill({});
-    nextEEProgramOrder = 1;
-  }
-  else if (!resumePendingCOP1Load ||
-           !resumePendingCOP1Divider)
-  {
-    for (InFlightCOP1Operation &operation :
-         inFlightCOP1Operations)
-    {
-      if (!operation.active)
-      {
-        continue;
-      }
-      if ((!resumePendingCOP1Load &&
-           isCOP1MemoryMoveOperation(
-             operation.instruction.operation) &&
-           isLoadOperation(operation.instruction.operation)) ||
-          (!resumePendingCOP1Divider &&
-           isCOP1DividerOperation(
-             operation.instruction.operation)))
-      {
-        operation = {};
-      }
-    }
+    resetExecutionContinuation();
   }
   executingProgramOrder = 0;
   rejectedInstructionValue = 0;
@@ -1387,11 +1337,7 @@ EEIssueMemberOutcome EECore::executeIssueMember(
   if (acceptanceMode == EEAcceptanceMode::DelaySlot)
   {
     pc = completedBranchTarget;
-    branchDelayPending = false;
-    branchDelayTarget = 0;
-    branchInstructionAddress = 0;
-    branchDelayFromLikely = false;
-    branchDelayTaken = false;
+    clearBranchDelayContinuation();
     clearIssueFrontEnd();
   }
   else if (decoded.operation == EEOperation::ExceptionReturn)
@@ -3992,22 +3938,6 @@ EECore::allocateInFlightCOP1(
     "EE COP1 has no free in-flight operation slot.");
 }
 
-bool EECore::pendingCOP1LoadActive() const
-{
-  for (const InFlightCOP1Operation &operation :
-       inFlightCOP1Operations)
-  {
-    if (operation.active &&
-        isCOP1MemoryMoveOperation(
-          operation.instruction.operation) &&
-        isLoadOperation(operation.instruction.operation))
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
 bool EECore::drainInFlightCOP1()
 {
   bool drainedDivider = false;
@@ -5772,11 +5702,7 @@ void EECore::enterException(
     address,
     pc,
     cop0Cause);
-  branchDelayPending = false;
-  branchDelayTarget = 0;
-  branchInstructionAddress = 0;
-  branchDelayFromLikely = false;
-  branchDelayTaken = false;
+  clearBranchDelayContinuation();
   cop1DividerPostDelayInstructions = 0;
   cop1DividerPostDelayBranchAddress = 0;
   cop1DividerPostDelayTargetAddress = 0;
@@ -6194,6 +6120,8 @@ void EECore::setProgramCounter(std::uint32_t value)
 {
   pc = value;
   clearIssueFrontEnd();
+  clearBranchDelayContinuation();
+  issueSelection = {};
 }
 
 std::uint64_t EECore::hi() const

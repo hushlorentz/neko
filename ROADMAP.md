@@ -1168,7 +1168,7 @@ accumulator or condition-result contract:
       cancelled members without changing program-order effects
 - [x] Keep delay-slot validation and branch-likely annulment at one documented
       ownership boundary
-- [ ] Preserve explicit run-control ownership for same-PC host-halt resume,
+- [x] Preserve explicit run-control ownership for same-PC host-halt resume,
       different-address restart, and external program-counter mutation
 - [ ] Cover one-wide, two-wide, stalled younger, faulted older, faulted younger,
       delay-slot, public-fetch, and run-control transitions with focused tests

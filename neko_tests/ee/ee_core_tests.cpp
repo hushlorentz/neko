@@ -2264,3 +2264,78 @@ TEST_CASE("EE issue candidates are independent of selection policy")
     REQUIRE(preview.selection.instructionCount == 1);
   }
 }
+
+TEST_CASE("EE run control owns resume restart and PC mutation")
+{
+  SECTION("Same-PC host resume preserves decoded continuation")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(0, UINT32_C(0x08000003));
+    system.eeBus().write32(4, UINT32_C(0x0000000f));
+    core.startExecution(0);
+    system.clockMasterCycle();
+    core.haltExecution();
+    system.eeBus().write32(4, UINT32_C(0x24010001));
+
+    core.startExecution(core.programCounter());
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.stopReason() ==
+      EEStopReason::UndefinedOperation);
+    REQUIRE(core.rejectedInstruction() == 0x0000000f);
+    REQUIRE(core.generalRegister(1).low == 0);
+  }
+
+  SECTION("Different-address start performs a fresh restart")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(0, UINT32_C(0x08000003));
+    system.eeBus().write32(4, UINT32_C(0x0000000f));
+    system.eeBus().write32(0x100, UINT32_C(0x24010001));
+    core.startExecution(0);
+    system.clockMasterCycle();
+    core.haltExecution();
+
+    core.startExecution(0x100);
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(1).low == 1);
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(core.programCounter() == 0x104);
+    const EEAcceptanceRecords &records =
+      core.acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0].programOrder == 1);
+    REQUIRE(records[0].mode == EEAcceptanceMode::Ordinary);
+  }
+
+  SECTION("External PC mutation preserves order but drops branch context")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(0, UINT32_C(0x08000003));
+    system.eeBus().write32(4, UINT32_C(0x0000000f));
+    system.eeBus().write32(0x100, UINT32_C(0x24010001));
+    core.startExecution(0);
+    system.clockMasterCycle();
+    core.haltExecution();
+
+    core.setProgramCounter(0x100);
+    NekoSystem restored;
+    REQUIRE_NOTHROW(restored.loadState(system.saveState()));
+
+    restored.eeCore().startExecution(0x100);
+    restored.clockMasterCycle();
+
+    REQUIRE(restored.eeCore().generalRegister(1).low == 1);
+    REQUIRE(restored.eeCore().programCounter() == 0x104);
+    const EEAcceptanceRecords &records =
+      restored.eeCore().acceptanceRecordsThisCycle();
+    REQUIRE(records.size() == 1);
+    REQUIRE(records[0].programOrder == 2);
+    REQUIRE(records[0].mode == EEAcceptanceMode::Ordinary);
+  }
+}
