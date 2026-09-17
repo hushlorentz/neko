@@ -81,6 +81,107 @@ struct EECoreTestAccess
     return core.inFlightCOP1ProgramOrder().size();
   }
 
+  static void allocateCOP1WithoutAssignedOrder(EECore *core)
+  {
+    EEInstruction instruction;
+    instruction.operation = EEOperation::AddSingleCOP1;
+    core->allocateInFlightCOP1(instruction, 0);
+  }
+
+  static bool completionMatchesCOP1Family(
+    EECore *core,
+    EEOperation operation)
+  {
+    EECore::InFlightCOP1Operation pending;
+    pending.active = true;
+    pending.programOrder = 1;
+    pending.instruction.operation = operation;
+    const bool operateFamily =
+      isCOP1StagedOperation(operation) ||
+      isCOP1DividerOperation(operation);
+    if (isCOP1StagedOperation(operation))
+    {
+      pending.stage = EECore::COP1PipelineStage::Z;
+    }
+    else if (isCOP1RegisterMoveOperation(operation) ||
+             isCOP1MemoryMoveOperation(operation))
+    {
+      pending.stage = EECore::COP1PipelineStage::X;
+    }
+    core->completeInFlightCOP1(
+      &pending,
+      EECore::COP1CompletionReason::PipelineAdvance);
+    return pending.stage ==
+      (operateFamily
+        ? EECore::COP1PipelineStage::S1
+        : EECore::COP1PipelineStage::Y);
+  }
+
+  static void commitPendingCOP1(EECore *core)
+  {
+    EECore::InFlightCOP1Operation pending;
+    pending.active = true;
+    pending.programOrder = 1;
+    pending.instruction.operation = EEOperation::AddSingleCOP1;
+    core->commitInFlightCOP1(&pending);
+  }
+
+  static void completeCOP1BeforeFinalStage(EECore *core)
+  {
+    EECore::InFlightCOP1Operation pending;
+    pending.active = true;
+    pending.programOrder = 1;
+    pending.stage = EECore::COP1PipelineStage::X;
+    pending.instruction.operation = EEOperation::AddSingleCOP1;
+    core->completeInFlightCOP1(
+      &pending,
+      EECore::COP1CompletionReason::PipelineAdvance);
+  }
+
+  static void releaseInactiveCOP1(EECore *core)
+  {
+    EECore::InFlightCOP1Operation inactive;
+    core->releaseInFlightCOP1(&inactive);
+  }
+
+  static bool releaseCOP1ClearsSlot(EECore *core)
+  {
+    EECore::InFlightCOP1Operation pending;
+    pending.active = true;
+    pending.programOrder = 7;
+    pending.stage = EECore::COP1PipelineStage::Y;
+    pending.instruction.operation = EEOperation::MoveWordToCOP1;
+    pending.rawResult = UINT32_C(0x12345678);
+    core->releaseInFlightCOP1(&pending);
+    return
+      !pending.active &&
+      pending.programOrder == 0 &&
+      pending.stage == EECore::COP1PipelineStage::R &&
+      pending.instruction.operation == EEOperation::Nop &&
+      pending.rawResult == 0;
+  }
+
+  static bool discardCOP1ReconcilesDividerOccupancy(
+    EECore *core)
+  {
+    EECore::InFlightCOP1Operation &divider =
+      core->inFlightCOP1Operations[0];
+    divider.active = true;
+    divider.programOrder = 2;
+    divider.instruction.operation =
+      EEOperation::DivideSingleCOP1;
+    divider.remainingCycles = 5;
+    core->cop1DividerInitiationCycles = 4;
+    core->cop1DividerOperation =
+      EEOperation::DivideSingleCOP1;
+
+    core->discardInFlightCOP1AtOrAfter(2);
+    return
+      !divider.active &&
+      core->cop1DividerInitiationCycles == 0 &&
+      core->cop1DividerOperation == EEOperation::Nop;
+  }
+
   static EEIssuePreview previewIssueSelection(EECore *core)
   {
     core->fillIssueFrontEnd();
@@ -363,6 +464,50 @@ TEST_CASE("EE in-flight COP1 program order is allocation-free and slot-independe
   REQUIRE(order[0] == 2);
   REQUIRE(order[1] == 7);
   REQUIRE(order[2] == 9);
+}
+
+TEST_CASE("EE in-flight COP1 lifecycle gates invalid transitions")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+
+  REQUIRE_THROWS_WITH(
+    EECoreTestAccess::allocateCOP1WithoutAssignedOrder(&core),
+    "EE COP1 allocation requires assigned program order.");
+  REQUIRE(
+    EECoreTestAccess::completionMatchesCOP1Family(
+      &core,
+      EEOperation::AddSingleCOP1));
+  REQUIRE(
+    EECoreTestAccess::completionMatchesCOP1Family(
+      &core,
+      EEOperation::DivideSingleCOP1));
+  REQUIRE(
+    EECoreTestAccess::completionMatchesCOP1Family(
+      &core,
+      EEOperation::MoveWordToCOP1));
+  REQUIRE(
+    EECoreTestAccess::completionMatchesCOP1Family(
+      &core,
+      EEOperation::LoadWordToCOP1));
+  REQUIRE_THROWS_WITH(
+    EECoreTestAccess::completionMatchesCOP1Family(
+      &core,
+      EEOperation::Nop),
+    "EE COP1 completion received an unmanaged operation.");
+  REQUIRE_THROWS_WITH(
+    EECoreTestAccess::commitPendingCOP1(&core),
+    "EE COP1 commit requires completed work.");
+  REQUIRE_THROWS_WITH(
+    EECoreTestAccess::completeCOP1BeforeFinalStage(&core),
+    "EE COP1 pipeline completion requires final-stage work.");
+  REQUIRE_THROWS_WITH(
+    EECoreTestAccess::releaseInactiveCOP1(&core),
+    "EE COP1 release requires active work.");
+  REQUIRE(EECoreTestAccess::releaseCOP1ClearsSlot(&core));
+  REQUIRE(
+    EECoreTestAccess::discardCOP1ReconcilesDividerOccupancy(
+      &core));
 }
 
 TEST_CASE("EE focused handlers reject incompatible operations")

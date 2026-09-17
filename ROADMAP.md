@@ -1183,7 +1183,7 @@ accumulator or condition-result contract:
 - [x] Use the same read-only order and reachability predicates for malformed
       save-state validation, or document and test any invariant that must remain
       independently represented by the non-mutating validator
-- [ ] Define one lifecycle contract for C1 allocation, source capture,
+- [x] Define one lifecycle contract for C1 allocation, source capture,
       advancement, completion, retirement, and slot release
 - [ ] Split C1 methods that currently combine traversal, eligibility,
       transition, side effects, and tracing into focused stages with explicit

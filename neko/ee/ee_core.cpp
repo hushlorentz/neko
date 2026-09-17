@@ -3920,6 +3920,16 @@ EECore::allocateInFlightCOP1(
   const EEInstruction &instruction,
   std::uint32_t instructionAddress)
 {
+  if (executingProgramOrder == 0)
+  {
+    throw std::logic_error(
+      "EE COP1 allocation requires assigned program order.");
+  }
+  if (!isCOP1ManagedPipelineOperation(instruction.operation))
+  {
+    throw std::logic_error(
+      "EE COP1 allocation received an unmanaged operation.");
+  }
   for (InFlightCOP1Operation &operation :
        inFlightCOP1Operations)
   {
@@ -3976,6 +3986,74 @@ bool EECore::cop1RetirementReady(
       isCOP1MemoryMoveOperation(
         operation.instruction.operation)) &&
      operation.stage == COP1PipelineStage::Y);
+}
+
+void EECore::completeInFlightCOP1(
+  InFlightCOP1Operation *operation,
+  COP1CompletionReason reason)
+{
+  if (!operation->active)
+  {
+    throw std::logic_error(
+      "EE COP1 completion requires active work.");
+  }
+  if (cop1RetirementReady(*operation))
+  {
+    throw std::logic_error(
+      "EE COP1 completion requires pending work.");
+  }
+  const bool operated =
+    isCOP1StagedOperation(
+      operation->instruction.operation) ||
+    isCOP1DividerOperation(
+      operation->instruction.operation);
+  const bool moved =
+    isCOP1RegisterMoveOperation(
+      operation->instruction.operation) ||
+    isCOP1MemoryMoveOperation(
+      operation->instruction.operation);
+  if (!operated && !moved)
+  {
+    throw std::logic_error(
+      "EE COP1 completion received an unmanaged operation.");
+  }
+  if (reason == COP1CompletionReason::PipelineAdvance)
+  {
+    const bool validFinalStage =
+      (isCOP1StagedOperation(
+         operation->instruction.operation) &&
+       operation->stage == COP1PipelineStage::Z) ||
+      ((isCOP1RegisterMoveOperation(
+          operation->instruction.operation) ||
+        isCOP1MemoryMoveOperation(
+          operation->instruction.operation)) &&
+       operation->stage == COP1PipelineStage::X) ||
+      (isCOP1DividerOperation(
+         operation->instruction.operation) &&
+       operation->remainingCycles == 0);
+    if (!validFinalStage)
+    {
+      throw std::logic_error(
+        "EE COP1 pipeline completion requires final-stage work.");
+    }
+  }
+  if (operated)
+  {
+    operation->stage = COP1PipelineStage::S1;
+    return;
+  }
+  operation->stage = COP1PipelineStage::Y;
+}
+
+void EECore::releaseInFlightCOP1(
+  InFlightCOP1Operation *operation)
+{
+  if (!operation->active)
+  {
+    throw std::logic_error(
+      "EE COP1 release requires active work.");
+  }
+  *operation = {};
 }
 
 bool EECore::drainInFlightCOP1()
@@ -4170,6 +4248,12 @@ bool EECore::drainInFlightCOP1()
           break;
       }
     }
+    if (!cop1RetirementReady(*oldest))
+    {
+      completeInFlightCOP1(
+        oldest,
+        COP1CompletionReason::Drain);
+    }
     commitInFlightCOP1(oldest);
   }
   if (drainedDivider)
@@ -4233,6 +4317,10 @@ void EECore::advancePendingCOP1(
       continue;
     }
     if (moveTStageBlockers[slotIndex] != nullptr)
+    {
+      continue;
+    }
+    if (cop1RetirementReady(operation))
     {
       continue;
     }
@@ -4400,6 +4488,18 @@ bool EECore::advanceInFlightCOP1Operation(
   InFlightCOP1Operation *operation,
   COP1PipelineStage *previousStage)
 {
+  if (!operation->active ||
+      !isCOP1ManagedPipelineOperation(
+        operation->instruction.operation))
+  {
+    throw std::logic_error(
+      "EE COP1 advancement requires active managed work.");
+  }
+  if (cop1RetirementReady(*operation))
+  {
+    throw std::logic_error(
+      "EE COP1 advancement received completed work.");
+  }
   *previousStage = operation->stage;
   if (isCOP1StagedOperation(
         operation->instruction.operation))
@@ -4442,7 +4542,9 @@ bool EECore::advanceInFlightCOP1Operation(
         operation->stage = COP1PipelineStage::Z;
         return true;
       case COP1PipelineStage::Z:
-        operation->stage = COP1PipelineStage::S1;
+        completeInFlightCOP1(
+          operation,
+          COP1CompletionReason::PipelineAdvance);
         return true;
       case COP1PipelineStage::S1:
       case COP1PipelineStage::S2:
@@ -4501,7 +4603,9 @@ bool EECore::advanceInFlightCOP1Operation(
           default:
             break;
         }
-        operation->stage = COP1PipelineStage::Y;
+        completeInFlightCOP1(
+          operation,
+          COP1CompletionReason::PipelineAdvance);
         return true;
       case COP1PipelineStage::Y:
       case COP1PipelineStage::Z:
@@ -4588,7 +4692,9 @@ bool EECore::advanceInFlightCOP1Operation(
               operation->memoryAddress);
           }
         }
-        operation->stage = COP1PipelineStage::Y;
+        completeInFlightCOP1(
+          operation,
+          COP1CompletionReason::PipelineAdvance);
         return true;
       case COP1PipelineStage::Y:
       case COP1PipelineStage::Z:
@@ -4606,7 +4712,9 @@ bool EECore::advanceInFlightCOP1Operation(
   {
     return false;
   }
-  operation->stage = COP1PipelineStage::S1;
+  completeInFlightCOP1(
+    operation,
+    COP1CompletionReason::PipelineAdvance);
   return true;
 }
 
@@ -4796,6 +4904,12 @@ void EECore::startPendingCOP1Divider(
 void EECore::commitInFlightCOP1(
   InFlightCOP1Operation *operation)
 {
+  if (!operation->active ||
+      !cop1RetirementReady(*operation))
+  {
+    throw std::logic_error(
+      "EE COP1 commit requires completed work.");
+  }
   operation->stage = COP1PipelineStage::S2;
   if ((operation->destination.mask &
        COP1_DESTINATION_FPR) != 0)
@@ -4837,7 +4951,7 @@ void EECore::commitInFlightCOP1(
       operation->instruction.destinationRegister,
       operation->rawResult);
   }
-  *operation = {};
+  releaseInFlightCOP1(operation);
 }
 
 void EECore::retireInFlightCOP1(
@@ -5686,9 +5800,10 @@ void EECore::discardInFlightCOP1AtOrAfter(
       inFlightCOP1Operations[order[orderIndex]];
     if (operation.programOrder >= programOrder)
     {
-      operation = {};
+      releaseInFlightCOP1(&operation);
     }
   }
+  clearInactiveCOP1DividerOccupancy();
 }
 
 std::uint8_t EECore::exceptionCode(EEException type)

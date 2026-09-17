@@ -462,6 +462,12 @@ class EECore final : public ClockedComponent
       S2
     };
 
+    enum class COP1CompletionReason : std::uint8_t
+    {
+      PipelineAdvance,
+      Drain
+    };
+
     enum class IssueLatchFailure : std::uint8_t
     {
       None,
@@ -946,6 +952,11 @@ class EECore final : public ClockedComponent
     COP1ProgramOrderView inFlightCOP1ProgramOrder() const;
     static bool cop1RetirementReady(
       const InFlightCOP1Operation &operation);
+    static void completeInFlightCOP1(
+      InFlightCOP1Operation *operation,
+      COP1CompletionReason reason);
+    static void releaseInFlightCOP1(
+      InFlightCOP1Operation *operation);
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
