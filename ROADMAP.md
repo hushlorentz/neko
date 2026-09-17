@@ -1185,7 +1185,7 @@ accumulator or condition-result contract:
       independently represented by the non-mutating validator
 - [x] Define one lifecycle contract for C1 allocation, source capture,
       advancement, completion, retirement, and slot release
-- [ ] Split C1 methods that currently combine traversal, eligibility,
+- [x] Split C1 methods that currently combine traversal, eligibility,
       transition, side effects, and tracing into focused stages with explicit
       inputs and outcomes
 - [ ] Centralize divider occupancy derivation and reconciliation so runtime,

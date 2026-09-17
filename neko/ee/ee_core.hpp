@@ -468,6 +468,14 @@ class EECore final : public ClockedComponent
       Drain
     };
 
+    enum class COP1OperationAdvanceOutcome : std::uint8_t
+    {
+      Unchanged,
+      Advanced,
+      Completed,
+      Faulted
+    };
+
     enum class IssueLatchFailure : std::uint8_t
     {
       None,
@@ -613,6 +621,37 @@ class EECore final : public ClockedComponent
         std::size_t,
         COP1_IN_FLIGHT_CAPACITY> slotIndices = {};
       std::size_t count = 0;
+    };
+
+    struct COP1AdvanceEligibility
+    {
+      std::array<
+        const InFlightCOP1Operation *,
+        COP1_IN_FLIGHT_CAPACITY> moveTStageBlockers = {};
+    };
+
+    struct COP1AdvanceResult
+    {
+      std::array<
+        bool,
+        COP1_IN_FLIGHT_CAPACITY> transitioned = {};
+      std::array<
+        COP1PipelineStage,
+        COP1_IN_FLIGHT_CAPACITY> previousStages = {};
+      bool exceptionEntered = false;
+    };
+
+    struct COP1OperationAdvanceResult
+    {
+      COP1OperationAdvanceOutcome outcome =
+        COP1OperationAdvanceOutcome::Unchanged;
+      COP1PipelineStage previousStage =
+        COP1PipelineStage::R;
+    };
+
+    struct COP1RetirementResult
+    {
+      std::uint32_t completedLoadRegisters = 0;
     };
 
     struct COP1ScoreboardValue
@@ -960,12 +999,32 @@ class EECore final : public ClockedComponent
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
+    COP1AdvanceEligibility evaluateCOP1AdvanceEligibility()
+      const;
+    COP1AdvanceResult advanceInFlightCOP1Operations(
+      const COP1ProgramOrderView &programOrder,
+      const COP1AdvanceEligibility &eligibility);
+    void recordCOP1StageTransitions(
+      const COP1ProgramOrderView &programOrder,
+      const COP1AdvanceResult &result);
+    void recordCOP1MoveInterlocks(
+      const COP1ProgramOrderView &programOrder,
+      const COP1AdvanceEligibility &eligibility);
+    COP1RetirementResult retireReadyInFlightCOP1();
     const InFlightCOP1Operation *
       cop1MoveTStageBlocker(
         const InFlightCOP1Operation &move) const;
-    bool advanceInFlightCOP1Operation(
-      InFlightCOP1Operation *operation,
-      COP1PipelineStage *previousStage);
+    COP1OperationAdvanceResult advanceInFlightCOP1Operation(
+      InFlightCOP1Operation *operation);
+    COP1OperationAdvanceOutcome advanceStagedCOP1Operation(
+      InFlightCOP1Operation *operation);
+    COP1OperationAdvanceOutcome
+      advanceRegisterMoveCOP1Operation(
+        InFlightCOP1Operation *operation);
+    COP1OperationAdvanceOutcome advanceMemoryCOP1Operation(
+      InFlightCOP1Operation *operation);
+    COP1OperationAdvanceOutcome advanceDividerCOP1Operation(
+      InFlightCOP1Operation *operation);
     static void computeInFlightCOP1StagedOperation(
       InFlightCOP1Operation *operation);
     bool pendingCOP1DividerActive() const;

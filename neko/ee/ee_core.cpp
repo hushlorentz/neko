@@ -4269,71 +4269,14 @@ void EECore::advancePendingCOP1(
   *completedLoadRegisters = 0;
   const std::size_t deferredTraceStart =
     cycleTraceEventCount;
-  std::array<bool, COP1_IN_FLIGHT_CAPACITY>
-    transitioned = {};
-  std::array<
-    const InFlightCOP1Operation *,
-    COP1_IN_FLIGHT_CAPACITY> moveTStageBlockers = {};
-  std::array<COP1PipelineStage, COP1_IN_FLIGHT_CAPACITY>
-    previousStages = {};
-  for (std::size_t moveIndex = 0;
-       moveIndex < inFlightCOP1Operations.size();
-       ++moveIndex)
-  {
-    const InFlightCOP1Operation &move =
-      inFlightCOP1Operations[moveIndex];
-    if (!move.active ||
-        move.stage != COP1PipelineStage::R ||
-        !isCOP1MoveOperation(move.instruction.operation))
-    {
-      continue;
-    }
-    moveTStageBlockers[moveIndex] =
-      cop1MoveTStageBlocker(move);
-  }
-  if (cop1DividerInitiationCycles != 0)
-  {
-    --cop1DividerInitiationCycles;
-    if (cop1DividerInitiationCycles == 0)
-    {
-      cop1DividerOperation = EEOperation::Nop;
-    }
-  }
-
-  bool exceptionDuringAdvance = false;
+  const COP1AdvanceEligibility eligibility =
+    evaluateCOP1AdvanceEligibility();
   const COP1ProgramOrderView programOrder =
     inFlightCOP1ProgramOrder();
-  for (std::size_t orderIndex = 0;
-       orderIndex < programOrder.size();
-       ++orderIndex)
-  {
-    const std::size_t slotIndex = programOrder[orderIndex];
-    InFlightCOP1Operation &operation =
-      inFlightCOP1Operations[slotIndex];
-    if (!operation.active ||
-        !isCOP1ManagedPipelineOperation(
-          operation.instruction.operation))
-    {
-      continue;
-    }
-    if (moveTStageBlockers[slotIndex] != nullptr)
-    {
-      continue;
-    }
-    if (cop1RetirementReady(operation))
-    {
-      continue;
-    }
-    transitioned[slotIndex] =
-      advanceInFlightCOP1Operation(
-        &operation,
-        &previousStages[slotIndex]);
-    if (exceptionEnteredThisCycle)
-    {
-      exceptionDuringAdvance = true;
-      break;
-    }
-  }
+  const COP1AdvanceResult advanceResult =
+    advanceInFlightCOP1Operations(
+      programOrder,
+      eligibility);
 
   std::array<CycleTraceEvent, CYCLE_TRACE_CAPACITY>
     deferredTraceEvents = {};
@@ -4347,24 +4290,120 @@ void EECore::advancePendingCOP1(
       cycleTraceEvents[deferredTraceStart + index];
   }
   cycleTraceEventCount = deferredTraceStart;
-  const auto appendDeferredTraceEvents =
-    [this, &deferredTraceEvents, deferredTraceCount]()
-    {
-      for (std::size_t index = 0;
-           index < deferredTraceCount;
-           ++index)
-      {
-        if (cycleTraceEventCount >=
-            cycleTraceEvents.size())
-        {
-          throw std::logic_error(
-            "EE produced too many trace events in one cycle.");
-        }
-        cycleTraceEvents[cycleTraceEventCount++] =
-          deferredTraceEvents[index];
-      }
-    };
 
+  recordCOP1StageTransitions(
+    programOrder,
+    advanceResult);
+  if (!advanceResult.exceptionEntered)
+  {
+    recordCOP1MoveInterlocks(
+      programOrder,
+      eligibility);
+  }
+  const COP1RetirementResult retirement =
+    retireReadyInFlightCOP1();
+  *completedLoadRegisters =
+    retirement.completedLoadRegisters;
+  if (advanceResult.exceptionEntered)
+  {
+    clearInactiveCOP1DividerOccupancy();
+  }
+
+  for (std::size_t index = 0;
+       index < deferredTraceCount;
+       ++index)
+  {
+    if (cycleTraceEventCount >= cycleTraceEvents.size())
+    {
+      throw std::logic_error(
+        "EE produced too many trace events in one cycle.");
+    }
+    cycleTraceEvents[cycleTraceEventCount++] =
+      deferredTraceEvents[index];
+  }
+}
+
+EECore::COP1AdvanceEligibility
+EECore::evaluateCOP1AdvanceEligibility() const
+{
+  COP1AdvanceEligibility eligibility;
+  for (std::size_t moveIndex = 0;
+       moveIndex < inFlightCOP1Operations.size();
+       ++moveIndex)
+  {
+    const InFlightCOP1Operation &move =
+      inFlightCOP1Operations[moveIndex];
+    if (!move.active ||
+        move.stage != COP1PipelineStage::R ||
+        !isCOP1MoveOperation(move.instruction.operation))
+    {
+      continue;
+    }
+    eligibility.moveTStageBlockers[moveIndex] =
+      cop1MoveTStageBlocker(move);
+  }
+  return eligibility;
+}
+
+EECore::COP1AdvanceResult
+EECore::advanceInFlightCOP1Operations(
+  const COP1ProgramOrderView &programOrder,
+  const COP1AdvanceEligibility &eligibility)
+{
+  COP1AdvanceResult result;
+  if (cop1DividerInitiationCycles != 0)
+  {
+    --cop1DividerInitiationCycles;
+    if (cop1DividerInitiationCycles == 0)
+    {
+      cop1DividerOperation = EEOperation::Nop;
+    }
+  }
+
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
+  {
+    const std::size_t slotIndex = programOrder[orderIndex];
+    InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[slotIndex];
+    if (!operation.active ||
+        !isCOP1ManagedPipelineOperation(
+          operation.instruction.operation))
+    {
+      continue;
+    }
+    if (eligibility.moveTStageBlockers[slotIndex] != nullptr)
+    {
+      continue;
+    }
+    if (cop1RetirementReady(operation))
+    {
+      continue;
+    }
+    const COP1OperationAdvanceResult operationResult =
+      advanceInFlightCOP1Operation(&operation);
+    result.previousStages[slotIndex] =
+      operationResult.previousStage;
+    result.transitioned[slotIndex] =
+      operationResult.outcome ==
+        COP1OperationAdvanceOutcome::Advanced ||
+      operationResult.outcome ==
+        COP1OperationAdvanceOutcome::Completed;
+    if (operationResult.outcome ==
+        COP1OperationAdvanceOutcome::Faulted)
+    {
+      result.exceptionEntered = true;
+      break;
+    }
+  }
+  return result;
+}
+
+void EECore::recordCOP1StageTransitions(
+  const COP1ProgramOrderView &programOrder,
+  const COP1AdvanceResult &result)
+{
   for (std::size_t orderIndex = 0;
        orderIndex < programOrder.size();
        ++orderIndex)
@@ -4373,58 +4412,22 @@ void EECore::advancePendingCOP1(
     const InFlightCOP1Operation &transition =
       inFlightCOP1Operations[slotIndex];
     if (!transition.active ||
-        !transitioned[slotIndex])
+        !result.transitioned[slotIndex])
     {
       continue;
     }
     recordCOP1StageTransition(
       transition,
       static_cast<std::uint8_t>(
-        previousStages[slotIndex]),
+        result.previousStages[slotIndex]),
       transition.stage);
   }
+}
 
-  const auto retireReadyOperations =
-    [this, completedLoadRegisters]()
-    {
-      const COP1ProgramOrderView retirementOrder =
-        inFlightCOP1ProgramOrder();
-      for (std::size_t orderIndex = 0;
-           orderIndex < retirementOrder.size();
-           ++orderIndex)
-      {
-        InFlightCOP1Operation *oldestOperation =
-          &inFlightCOP1Operations[
-            retirementOrder[orderIndex]];
-        if (!oldestOperation->active ||
-            !isCOP1ManagedPipelineOperation(
-              oldestOperation->instruction.operation))
-        {
-          continue;
-        }
-        if (!cop1RetirementReady(*oldestOperation))
-        {
-          break;
-        }
-        if (isLoadOperation(
-              oldestOperation->instruction.operation))
-        {
-          *completedLoadRegisters |=
-            UINT32_C(1) <<
-              oldestOperation->destination.fprRegister;
-        }
-        retireInFlightCOP1(oldestOperation);
-      }
-    };
-
-  if (exceptionDuringAdvance)
-  {
-    retireReadyOperations();
-    clearInactiveCOP1DividerOccupancy();
-    appendDeferredTraceEvents();
-    return;
-  }
-
+void EECore::recordCOP1MoveInterlocks(
+  const COP1ProgramOrderView &programOrder,
+  const COP1AdvanceEligibility &eligibility)
+{
   for (std::size_t orderIndex = 0;
        orderIndex < programOrder.size();
        ++orderIndex)
@@ -4433,7 +4436,7 @@ void EECore::advancePendingCOP1(
     const InFlightCOP1Operation &blockedMove =
       inFlightCOP1Operations[slotIndex];
     if (!blockedMove.active ||
-        moveTStageBlockers[slotIndex] == nullptr)
+        eligibility.moveTStageBlockers[slotIndex] == nullptr)
     {
       continue;
     }
@@ -4442,12 +4445,44 @@ void EECore::advancePendingCOP1(
       blockedMove.instructionAddress,
       blockedMove.instruction.raw,
       static_cast<std::uint8_t>(
-        moveTStageBlockers[slotIndex]->
+        eligibility.moveTStageBlockers[slotIndex]->
           instruction.operation));
   }
+}
 
-  retireReadyOperations();
-  appendDeferredTraceEvents();
+EECore::COP1RetirementResult
+EECore::retireReadyInFlightCOP1()
+{
+  COP1RetirementResult result;
+  const COP1ProgramOrderView retirementOrder =
+    inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = 0;
+       orderIndex < retirementOrder.size();
+       ++orderIndex)
+  {
+    InFlightCOP1Operation *oldestOperation =
+      &inFlightCOP1Operations[
+        retirementOrder[orderIndex]];
+    if (!oldestOperation->active ||
+        !isCOP1ManagedPipelineOperation(
+          oldestOperation->instruction.operation))
+    {
+      continue;
+    }
+    if (!cop1RetirementReady(*oldestOperation))
+    {
+      break;
+    }
+    if (isLoadOperation(
+          oldestOperation->instruction.operation))
+    {
+      result.completedLoadRegisters |=
+        UINT32_C(1) <<
+          oldestOperation->destination.fprRegister;
+    }
+    retireInFlightCOP1(oldestOperation);
+  }
+  return result;
 }
 
 const EECore::InFlightCOP1Operation *
@@ -4484,9 +4519,9 @@ EECore::cop1MoveTStageBlocker(
   return nullptr;
 }
 
-bool EECore::advanceInFlightCOP1Operation(
-  InFlightCOP1Operation *operation,
-  COP1PipelineStage *previousStage)
+EECore::COP1OperationAdvanceResult
+EECore::advanceInFlightCOP1Operation(
+  InFlightCOP1Operation *operation)
 {
   if (!operation->active ||
       !isCOP1ManagedPipelineOperation(
@@ -4500,222 +4535,274 @@ bool EECore::advanceInFlightCOP1Operation(
     throw std::logic_error(
       "EE COP1 advancement received completed work.");
   }
-  *previousStage = operation->stage;
+  COP1OperationAdvanceResult result;
+  result.previousStage = operation->stage;
   if (isCOP1StagedOperation(
         operation->instruction.operation))
   {
-    switch (operation->stage)
-    {
-      case COP1PipelineStage::R:
-        operation->capturedFS =
-          scoreboardFPRValueForT(
-            operation->instruction.destinationRegister,
-            operation->programOrder);
-        if (!isCOP1SingleSourceStagedOperation(
-              operation->instruction.operation))
-        {
-          operation->capturedFT =
-            scoreboardFPRValueForT(
-              operation->instruction.targetRegister,
-              operation->programOrder);
-        }
-        if (isCOP1CompoundOperation(
-              operation->instruction.operation))
-        {
-          operation->capturedAccumulator =
-            scoreboardAccumulatorValueForT(
-              operation->programOrder);
-        }
-        operation->capturedControl =
-          cop1ControlRegister(
-            EECOP1Control::STATUS_REGISTER);
-        operation->stage = COP1PipelineStage::T;
-        return true;
-      case COP1PipelineStage::T:
-        operation->stage = COP1PipelineStage::X;
-        return true;
-      case COP1PipelineStage::X:
-        operation->stage = COP1PipelineStage::Y;
-        return true;
-      case COP1PipelineStage::Y:
-        computeInFlightCOP1StagedOperation(operation);
-        operation->stage = COP1PipelineStage::Z;
-        return true;
-      case COP1PipelineStage::Z:
-        completeInFlightCOP1(
-          operation,
-          COP1CompletionReason::PipelineAdvance);
-        return true;
-      case COP1PipelineStage::S1:
-      case COP1PipelineStage::S2:
-        return false;
-    }
+    result.outcome =
+      advanceStagedCOP1Operation(operation);
+    return result;
   }
   if (isCOP1RegisterMoveOperation(
         operation->instruction.operation))
   {
-    switch (operation->stage)
-    {
-      case COP1PipelineStage::R:
-        switch (operation->instruction.operation)
-        {
-          case EEOperation::MoveWordFromCOP1:
-          case EEOperation::MoveSingleCOP1:
-            operation->capturedFS =
-              scoreboardFPRValueForT(
-                operation->instruction.destinationRegister,
-                operation->programOrder);
-            break;
-          case EEOperation::MoveControlWordFromCOP1:
-            operation->capturedControl =
-              operation->instruction.destinationRegister ==
-                  EECOP1Control::STATUS_REGISTER
-                ? scoreboardFCR31ValueForT(
-                    operation->programOrder)
-                : cop1ControlRegister(
-                    operation->instruction.destinationRegister);
-            break;
-          default:
-            break;
-        }
-        operation->stage = COP1PipelineStage::T;
-        return true;
-      case COP1PipelineStage::T:
-        operation->stage = COP1PipelineStage::X;
-        return true;
-      case COP1PipelineStage::X:
-        switch (operation->instruction.operation)
-        {
-          case EEOperation::MoveWordFromCOP1:
-          case EEOperation::MoveSingleCOP1:
-            operation->rawResult = operation->capturedFS;
-            break;
-          case EEOperation::MoveWordToCOP1:
-          case EEOperation::MoveControlWordToCOP1:
-            operation->rawResult =
-              static_cast<std::uint32_t>(
-                operation->capturedGPR);
-            break;
-          case EEOperation::MoveControlWordFromCOP1:
-            operation->rawResult =
-              operation->capturedControl;
-            break;
-          default:
-            break;
-        }
-        completeInFlightCOP1(
-          operation,
-          COP1CompletionReason::PipelineAdvance);
-        return true;
-      case COP1PipelineStage::Y:
-      case COP1PipelineStage::Z:
-      case COP1PipelineStage::S1:
-      case COP1PipelineStage::S2:
-        return false;
-    }
+    result.outcome =
+      advanceRegisterMoveCOP1Operation(operation);
+    return result;
   }
   if (isCOP1MemoryMoveOperation(
         operation->instruction.operation))
   {
-    const bool load =
-      isLoadOperation(operation->instruction.operation);
-    switch (operation->stage)
-    {
-      case COP1PipelineStage::R:
-        operation->memoryAddress =
-          static_cast<std::uint32_t>(
-            operation->capturedGPR +
-            signExtend16(operation->instruction.immediate));
-        operation->stage = COP1PipelineStage::T;
-        return true;
-      case COP1PipelineStage::T:
-        if ((operation->memoryAddress & 3) != 0)
-        {
-          return raiseCOP1DataAccessException(
-            *operation,
-            load
-              ? EEException::AddressErrorLoadOrFetch
-              : EEException::AddressErrorStore,
-            operation->memoryAddress);
-        }
-        if (load)
-        {
-          std::uint32_t value = 0;
-          const bool succeeded =
-            attachedBus().readData32(
-              operation->memoryAddress,
-              &value);
-          recordMemoryTrace(
-            operation->memoryAddress,
-            4,
-            false,
-            succeeded,
-            succeeded ? value : 0);
-          if (!succeeded)
-          {
-            return raiseCOP1DataAccessException(
-              *operation,
-              EEException::DataBusErrorLoad,
-              operation->memoryAddress);
-          }
-          operation->capturedMemoryValue = value;
-        }
-        else
-        {
-          operation->capturedMemoryValue =
-            scoreboardFPRValueForT(
-              operation->instruction.targetRegister,
-              operation->programOrder);
-        }
-        operation->rawResult =
-          operation->capturedMemoryValue;
-        operation->stage = COP1PipelineStage::X;
-        return true;
-      case COP1PipelineStage::X:
-        if (!load)
-        {
-          const bool succeeded =
-            attachedBus().writeData32(
-              operation->memoryAddress,
-              operation->capturedMemoryValue);
-          recordMemoryTrace(
-            operation->memoryAddress,
-            4,
-            true,
-            succeeded,
-            operation->capturedMemoryValue);
-          if (!succeeded)
-          {
-            return raiseCOP1DataAccessException(
-              *operation,
-              EEException::DataBusErrorStore,
-              operation->memoryAddress);
-          }
-        }
-        completeInFlightCOP1(
-          operation,
-          COP1CompletionReason::PipelineAdvance);
-        return true;
-      case COP1PipelineStage::Y:
-      case COP1PipelineStage::Z:
-      case COP1PipelineStage::S1:
-      case COP1PipelineStage::S2:
-        return false;
-    }
+    result.outcome =
+      advanceMemoryCOP1Operation(operation);
+    return result;
   }
+  if (isCOP1DividerOperation(
+        operation->instruction.operation))
+  {
+    result.outcome =
+      advanceDividerCOP1Operation(operation);
+    return result;
+  }
+  throw std::logic_error(
+    "EE COP1 advancement received an unmanaged operation.");
+}
+
+EECore::COP1OperationAdvanceOutcome
+EECore::advanceStagedCOP1Operation(
+  InFlightCOP1Operation *operation)
+{
+  switch (operation->stage)
+  {
+    case COP1PipelineStage::R:
+      operation->capturedFS =
+        scoreboardFPRValueForT(
+          operation->instruction.destinationRegister,
+          operation->programOrder);
+      if (!isCOP1SingleSourceStagedOperation(
+            operation->instruction.operation))
+      {
+        operation->capturedFT =
+          scoreboardFPRValueForT(
+            operation->instruction.targetRegister,
+            operation->programOrder);
+      }
+      if (isCOP1CompoundOperation(
+            operation->instruction.operation))
+      {
+        operation->capturedAccumulator =
+          scoreboardAccumulatorValueForT(
+            operation->programOrder);
+      }
+      operation->capturedControl =
+        cop1ControlRegister(
+          EECOP1Control::STATUS_REGISTER);
+      operation->stage = COP1PipelineStage::T;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::T:
+      operation->stage = COP1PipelineStage::X;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::X:
+      operation->stage = COP1PipelineStage::Y;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::Y:
+      computeInFlightCOP1StagedOperation(operation);
+      operation->stage = COP1PipelineStage::Z;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::Z:
+      completeInFlightCOP1(
+        operation,
+        COP1CompletionReason::PipelineAdvance);
+      return COP1OperationAdvanceOutcome::Completed;
+    case COP1PipelineStage::S1:
+    case COP1PipelineStage::S2:
+      break;
+  }
+  throw std::logic_error(
+    "EE staged COP1 advancement reached a completed stage.");
+}
+
+EECore::COP1OperationAdvanceOutcome
+EECore::advanceRegisterMoveCOP1Operation(
+  InFlightCOP1Operation *operation)
+{
+  switch (operation->stage)
+  {
+    case COP1PipelineStage::R:
+      switch (operation->instruction.operation)
+      {
+        case EEOperation::MoveWordFromCOP1:
+        case EEOperation::MoveSingleCOP1:
+          operation->capturedFS =
+            scoreboardFPRValueForT(
+              operation->instruction.destinationRegister,
+              operation->programOrder);
+          break;
+        case EEOperation::MoveControlWordFromCOP1:
+          operation->capturedControl =
+            operation->instruction.destinationRegister ==
+                EECOP1Control::STATUS_REGISTER
+              ? scoreboardFCR31ValueForT(
+                  operation->programOrder)
+              : cop1ControlRegister(
+                  operation->instruction.destinationRegister);
+          break;
+        default:
+          break;
+      }
+      operation->stage = COP1PipelineStage::T;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::T:
+      operation->stage = COP1PipelineStage::X;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::X:
+      switch (operation->instruction.operation)
+      {
+        case EEOperation::MoveWordFromCOP1:
+        case EEOperation::MoveSingleCOP1:
+          operation->rawResult = operation->capturedFS;
+          break;
+        case EEOperation::MoveWordToCOP1:
+        case EEOperation::MoveControlWordToCOP1:
+          operation->rawResult =
+            static_cast<std::uint32_t>(
+              operation->capturedGPR);
+          break;
+        case EEOperation::MoveControlWordFromCOP1:
+          operation->rawResult =
+            operation->capturedControl;
+          break;
+        default:
+          break;
+      }
+      completeInFlightCOP1(
+        operation,
+        COP1CompletionReason::PipelineAdvance);
+      return COP1OperationAdvanceOutcome::Completed;
+    case COP1PipelineStage::Y:
+    case COP1PipelineStage::Z:
+    case COP1PipelineStage::S1:
+    case COP1PipelineStage::S2:
+      break;
+  }
+  throw std::logic_error(
+    "EE COP1 Move advancement reached an invalid stage.");
+}
+
+EECore::COP1OperationAdvanceOutcome
+EECore::advanceMemoryCOP1Operation(
+  InFlightCOP1Operation *operation)
+{
+  const bool load =
+    isLoadOperation(operation->instruction.operation);
+  switch (operation->stage)
+  {
+    case COP1PipelineStage::R:
+      operation->memoryAddress =
+        static_cast<std::uint32_t>(
+          operation->capturedGPR +
+          signExtend16(operation->instruction.immediate));
+      operation->stage = COP1PipelineStage::T;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::T:
+      if ((operation->memoryAddress & 3) != 0)
+      {
+        raiseCOP1DataAccessException(
+          *operation,
+          load
+            ? EEException::AddressErrorLoadOrFetch
+            : EEException::AddressErrorStore,
+          operation->memoryAddress);
+        return COP1OperationAdvanceOutcome::Faulted;
+      }
+      if (load)
+      {
+        std::uint32_t value = 0;
+        const bool succeeded =
+          attachedBus().readData32(
+            operation->memoryAddress,
+            &value);
+        recordMemoryTrace(
+          operation->memoryAddress,
+          4,
+          false,
+          succeeded,
+          succeeded ? value : 0);
+        if (!succeeded)
+        {
+          raiseCOP1DataAccessException(
+            *operation,
+            EEException::DataBusErrorLoad,
+            operation->memoryAddress);
+          return COP1OperationAdvanceOutcome::Faulted;
+        }
+        operation->capturedMemoryValue = value;
+      }
+      else
+      {
+        operation->capturedMemoryValue =
+          scoreboardFPRValueForT(
+            operation->instruction.targetRegister,
+            operation->programOrder);
+      }
+      operation->rawResult =
+        operation->capturedMemoryValue;
+      operation->stage = COP1PipelineStage::X;
+      return COP1OperationAdvanceOutcome::Advanced;
+    case COP1PipelineStage::X:
+      if (!load)
+      {
+        const bool succeeded =
+          attachedBus().writeData32(
+            operation->memoryAddress,
+            operation->capturedMemoryValue);
+        recordMemoryTrace(
+          operation->memoryAddress,
+          4,
+          true,
+          succeeded,
+          operation->capturedMemoryValue);
+        if (!succeeded)
+        {
+          raiseCOP1DataAccessException(
+            *operation,
+            EEException::DataBusErrorStore,
+            operation->memoryAddress);
+          return COP1OperationAdvanceOutcome::Faulted;
+        }
+      }
+      completeInFlightCOP1(
+        operation,
+        COP1CompletionReason::PipelineAdvance);
+      return COP1OperationAdvanceOutcome::Completed;
+    case COP1PipelineStage::Y:
+    case COP1PipelineStage::Z:
+    case COP1PipelineStage::S1:
+    case COP1PipelineStage::S2:
+      break;
+  }
+  throw std::logic_error(
+    "EE COP1 memory advancement reached an invalid stage.");
+}
+
+EECore::COP1OperationAdvanceOutcome
+EECore::advanceDividerCOP1Operation(
+  InFlightCOP1Operation *operation)
+{
   if (operation->remainingCycles == 0)
   {
-    return false;
+    return COP1OperationAdvanceOutcome::Unchanged;
   }
   --operation->remainingCycles;
   if (operation->remainingCycles != 0)
   {
-    return false;
+    return COP1OperationAdvanceOutcome::Unchanged;
   }
   completeInFlightCOP1(
     operation,
     COP1CompletionReason::PipelineAdvance);
-  return true;
+  return COP1OperationAdvanceOutcome::Completed;
 }
 
 void EECore::computeInFlightCOP1StagedOperation(
