@@ -3966,6 +3966,18 @@ EECore::inFlightCOP1ProgramOrder() const
   return order;
 }
 
+bool EECore::cop1RetirementReady(
+  const InFlightCOP1Operation &operation)
+{
+  return
+    operation.stage == COP1PipelineStage::S1 ||
+    ((isCOP1RegisterMoveOperation(
+       operation.instruction.operation) ||
+      isCOP1MemoryMoveOperation(
+        operation.instruction.operation)) &&
+     operation.stage == COP1PipelineStage::Y);
+}
+
 bool EECore::drainInFlightCOP1()
 {
   bool drainedDivider = false;
@@ -4302,15 +4314,7 @@ void EECore::advancePendingCOP1(
         {
           continue;
         }
-        const bool retirementReady =
-          oldestOperation->stage == COP1PipelineStage::S1 ||
-          ((isCOP1RegisterMoveOperation(
-             oldestOperation->instruction.operation) &&
-            oldestOperation->stage == COP1PipelineStage::Y) ||
-           (isCOP1MemoryMoveOperation(
-              oldestOperation->instruction.operation) &&
-            oldestOperation->stage == COP1PipelineStage::Y));
-        if (!retirementReady)
+        if (!cop1RetirementReady(*oldestOperation))
         {
           break;
         }

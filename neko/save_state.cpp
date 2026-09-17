@@ -2475,15 +2475,32 @@ void NekoSaveStateCodec::readEECore(
         "EE inactive COP1 operation contains state");
     }
   }
+  const EECore::COP1ProgramOrderView programOrder =
+    core->inFlightCOP1ProgramOrder();
+  for (std::size_t orderIndex = 1;
+       orderIndex < programOrder.size();
+       ++orderIndex)
+  {
+    require(
+      core->inFlightCOP1Operations[
+        programOrder[orderIndex - 1]].programOrder !=
+        core->inFlightCOP1Operations[
+          programOrder[orderIndex]].programOrder,
+      "EE in-flight COP1 program order is duplicated");
+  }
+
   std::array<const EECore::InFlightCOP1Operation *, 2>
     pendingDividerResults = {};
   std::size_t activeDividerResults = 0;
   std::size_t pendingDividerResultCount = 0;
-  for (const EECore::InFlightCOP1Operation &operation :
-       core->inFlightCOP1Operations)
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
   {
-    if (!operation.active ||
-        !isCOP1DividerOperation(
+    const EECore::InFlightCOP1Operation &operation =
+      core->inFlightCOP1Operations[
+        programOrder[orderIndex]];
+    if (!isCOP1DividerOperation(
           operation.instruction.operation))
     {
       continue;
@@ -2536,53 +2553,38 @@ void NekoSaveStateCodec::readEECore(
             pendingDividerResults[1]->destination.fprRegister &&
           core->cop1DividerInitiationCycles ==
             timing.initiationInterval &&
-          ((pendingDividerResults[0]->remainingCycles == 1 &&
-            pendingDividerResults[1]->remainingCycles ==
-              timing.latency &&
-            pendingDividerResults[0]->programOrder <
-              pendingDividerResults[1]->programOrder &&
-            pendingDividerResults[1]->instruction.operation ==
-              core->cop1DividerOperation) ||
-           (pendingDividerResults[1]->remainingCycles == 1 &&
-            pendingDividerResults[0]->remainingCycles ==
-              timing.latency &&
-            pendingDividerResults[1]->programOrder <
-              pendingDividerResults[0]->programOrder &&
-            pendingDividerResults[0]->instruction.operation ==
-              core->cop1DividerOperation)),
+          pendingDividerResults[0]->remainingCycles == 1 &&
+          pendingDividerResults[1]->remainingCycles ==
+            timing.latency &&
+          pendingDividerResults[1]->instruction.operation ==
+            core->cop1DividerOperation,
         "EE COP1 divider overlap state is inconsistent");
     }
   }
-  for (std::size_t left = 0;
-       left < core->inFlightCOP1Operations.size();
-       ++left)
+  const EECore::InFlightCOP1Operation *
+    previousOrderedStagedOperation = nullptr;
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
   {
-    if (!core->inFlightCOP1Operations[left].active)
-    {
-      continue;
-    }
     const EECore::InFlightCOP1Operation &operation =
-      core->inFlightCOP1Operations[left];
+      core->inFlightCOP1Operations[
+        programOrder[orderIndex]];
     if (isCOP1RegisterMoveOperation(
           operation.instruction.operation) &&
         operation.stage == EECore::COP1PipelineStage::Y)
     {
       bool blockedByOlderOperation = false;
-      for (const EECore::InFlightCOP1Operation &candidate :
-           core->inFlightCOP1Operations)
+      for (std::size_t olderIndex = 0;
+           olderIndex < orderIndex;
+           ++olderIndex)
       {
-        if (!candidate.active ||
-            candidate.programOrder >= operation.programOrder)
-        {
-          continue;
-        }
-        const bool candidateReady =
-          candidate.stage == EECore::COP1PipelineStage::S1 ||
-          (isCOP1RegisterMoveOperation(
-             candidate.instruction.operation) &&
-           candidate.stage == EECore::COP1PipelineStage::Y);
+        const EECore::InFlightCOP1Operation &candidate =
+          core->inFlightCOP1Operations[
+            programOrder[olderIndex]];
         blockedByOlderOperation =
-          blockedByOlderOperation || !candidateReady;
+          blockedByOlderOperation ||
+          !EECore::cop1RetirementReady(candidate);
       }
       require(
         blockedByOlderOperation,
@@ -2596,23 +2598,16 @@ void NekoSaveStateCodec::readEECore(
     {
       bool blockedByOlderOperation = false;
       bool conflictsWithOlderWriter = false;
-      for (const EECore::InFlightCOP1Operation &candidate :
-           core->inFlightCOP1Operations)
+      for (std::size_t olderIndex = 0;
+           olderIndex < orderIndex;
+           ++olderIndex)
       {
-        if (!candidate.active ||
-            candidate.programOrder >= operation.programOrder)
-        {
-          continue;
-        }
-        const bool candidateReady =
-          candidate.stage == EECore::COP1PipelineStage::S1 ||
-          ((isCOP1RegisterMoveOperation(
-               candidate.instruction.operation) ||
-            isCOP1MemoryMoveOperation(
-              candidate.instruction.operation)) &&
-           candidate.stage == EECore::COP1PipelineStage::Y);
+        const EECore::InFlightCOP1Operation &candidate =
+          core->inFlightCOP1Operations[
+            programOrder[olderIndex]];
         blockedByOlderOperation =
-          blockedByOlderOperation || !candidateReady;
+          blockedByOlderOperation ||
+          !EECore::cop1RetirementReady(candidate);
         conflictsWithOlderWriter =
           conflictsWithOlderWriter ||
           (isLoadOperation(
@@ -2637,14 +2632,13 @@ void NekoSaveStateCodec::readEECore(
         eeInstructionDependencies(operation.instruction);
       const EECore::InFlightCOP1Operation *
         forwardedSource = nullptr;
-      for (const EECore::InFlightCOP1Operation &candidate :
-           core->inFlightCOP1Operations)
+      for (std::size_t olderIndex = 0;
+           olderIndex < orderIndex;
+           ++olderIndex)
       {
-        if (!candidate.active ||
-            candidate.programOrder >= operation.programOrder)
-        {
-          continue;
-        }
+        const EECore::InFlightCOP1Operation &candidate =
+          core->inFlightCOP1Operations[
+            programOrder[olderIndex]];
         if (isCOP1DividerOperation(
               candidate.instruction.operation))
         {
@@ -2677,10 +2671,7 @@ void NekoSaveStateCodec::readEECore(
         if ((candidate.destination.mask &
              EECore::COP1_DESTINATION_FPR) != 0 &&
             candidate.destination.fprRegister ==
-              operation.instruction.destinationRegister &&
-            (forwardedSource == nullptr ||
-             candidate.programOrder >
-               forwardedSource->programOrder))
+              operation.instruction.destinationRegister)
         {
           forwardedSource = &candidate;
         }
@@ -2694,44 +2685,20 @@ void NekoSaveStateCodec::readEECore(
            operation.capturedFS == forwardedSource->rawResult),
         "EE COP1 staged S1 result has no valid older blocker");
     }
-    for (std::size_t right = left + 1;
-         right < core->inFlightCOP1Operations.size();
-         ++right)
+    if (!isCOP1StagedOperation(
+          operation.instruction.operation) ||
+        operation.stage == EECore::COP1PipelineStage::S1)
+    {
+      continue;
+    }
+    if (previousOrderedStagedOperation != nullptr)
     {
       require(
-        !core->inFlightCOP1Operations[right].active ||
-          core->inFlightCOP1Operations[left].programOrder !=
-            core->inFlightCOP1Operations[right].programOrder,
-        "EE in-flight COP1 program order is duplicated");
-      if (!core->inFlightCOP1Operations[right].active)
-      {
-        continue;
-      }
-      const EECore::InFlightCOP1Operation &first =
-        core->inFlightCOP1Operations[left];
-      const EECore::InFlightCOP1Operation &second =
-        core->inFlightCOP1Operations[right];
-      if (!isCOP1StagedOperation(
-            first.instruction.operation) ||
-          !isCOP1StagedOperation(
-            second.instruction.operation) ||
-          first.stage == EECore::COP1PipelineStage::S1 ||
-          second.stage == EECore::COP1PipelineStage::S1)
-      {
-        continue;
-      }
-      const EECore::InFlightCOP1Operation &older =
-        first.programOrder < second.programOrder
-          ? first
-          : second;
-      const EECore::InFlightCOP1Operation &younger =
-        first.programOrder < second.programOrder
-          ? second
-          : first;
-      require(
-        older.stage > younger.stage,
+        previousOrderedStagedOperation->stage >
+          operation.stage,
         "EE staged COP1 pipeline order is inconsistent");
     }
+    previousOrderedStagedOperation = &operation;
   }
   core->lastDecodedInstruction = {};
   if (core->lastInstructionValid)

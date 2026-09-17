@@ -1180,7 +1180,7 @@ accumulator or condition-result contract:
 - [x] Use the traversal primitive for oldest-operation selection, producer
       lookup, ready-prefix retirement, stage transition ordering, and
       cancellation ranges
-- [ ] Use the same read-only order and reachability predicates for malformed
+- [x] Use the same read-only order and reachability predicates for malformed
       save-state validation, or document and test any invariant that must remain
       independently represented by the non-mutating validator
 - [ ] Define one lifecycle contract for C1 allocation, source capture,

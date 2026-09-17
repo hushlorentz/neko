@@ -944,6 +944,8 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t instructionAddress);
     COP1ProgramOrderView inFlightCOP1ProgramOrder() const;
+    static bool cop1RetirementReady(
+      const InFlightCOP1Operation &operation);
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
