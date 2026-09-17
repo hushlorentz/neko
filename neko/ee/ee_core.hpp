@@ -566,6 +566,8 @@ class EECore final : public ClockedComponent
       std::uint8_t gprRegister = 0;
     };
 
+    static constexpr std::size_t COP1_IN_FLIGHT_CAPACITY = 16;
+
     struct InFlightCOP1Operation
     {
       bool active = false;
@@ -587,6 +589,24 @@ class EECore final : public ClockedComponent
       std::uint8_t raisedStickyFlags = 0;
       bool conditionResult = false;
       std::uint8_t remainingCycles = 0;
+    };
+
+    struct COP1ProgramOrderView
+    {
+      std::size_t size() const
+      {
+        return count;
+      }
+
+      std::size_t operator[](std::size_t index) const
+      {
+        return slotIndices[index];
+      }
+
+      std::array<
+        std::size_t,
+        COP1_IN_FLIGHT_CAPACITY> slotIndices = {};
+      std::size_t count = 0;
     };
 
     struct COP1ScoreboardValue
@@ -658,7 +678,6 @@ class EECore final : public ClockedComponent
     std::uint32_t rejectedInstructionValue = 0;
     DecodedIssueLatch issueLatch;
     DecodedIssueLatch stagingLatch;
-    static constexpr std::size_t COP1_IN_FLIGHT_CAPACITY = 16;
     std::array<
       InFlightCOP1Operation,
       COP1_IN_FLIGHT_CAPACITY> inFlightCOP1Operations = {};
@@ -924,6 +943,7 @@ class EECore final : public ClockedComponent
     InFlightCOP1Operation &allocateInFlightCOP1(
       const EEInstruction &instruction,
       std::uint32_t instructionAddress);
+    COP1ProgramOrderView inFlightCOP1ProgramOrder() const;
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);

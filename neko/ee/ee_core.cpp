@@ -3938,6 +3938,34 @@ EECore::allocateInFlightCOP1(
     "EE COP1 has no free in-flight operation slot.");
 }
 
+EECore::COP1ProgramOrderView
+EECore::inFlightCOP1ProgramOrder() const
+{
+  COP1ProgramOrderView order;
+  for (std::size_t slotIndex = 0;
+       slotIndex < inFlightCOP1Operations.size();
+       ++slotIndex)
+  {
+    if (!inFlightCOP1Operations[slotIndex].active)
+    {
+      continue;
+    }
+    std::size_t insertionIndex = order.count;
+    while (insertionIndex != 0 &&
+           inFlightCOP1Operations[
+             order.slotIndices[insertionIndex - 1]].programOrder >
+             inFlightCOP1Operations[slotIndex].programOrder)
+    {
+      order.slotIndices[insertionIndex] =
+        order.slotIndices[insertionIndex - 1];
+      --insertionIndex;
+    }
+    order.slotIndices[insertionIndex] = slotIndex;
+    ++order.count;
+  }
+  return order;
+}
+
 bool EECore::drainInFlightCOP1()
 {
   bool drainedDivider = false;

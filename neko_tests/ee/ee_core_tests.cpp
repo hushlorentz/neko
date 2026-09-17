@@ -48,6 +48,39 @@ struct EEIssuePreview
 
 struct EECoreTestAccess
 {
+  static void setInFlightCOP1ProgramOrder(
+    EECore *core,
+    std::size_t slot,
+    bool active,
+    std::uint64_t programOrder)
+  {
+    EECore::InFlightCOP1Operation &operation =
+      core->inFlightCOP1Operations.at(slot);
+    operation = {};
+    operation.active = active;
+    operation.programOrder = programOrder;
+  }
+
+  static std::array<std::uint64_t, 16>
+    inFlightCOP1ProgramOrder(const EECore &core)
+  {
+    const EECore::COP1ProgramOrderView order =
+      core.inFlightCOP1ProgramOrder();
+    std::array<std::uint64_t, 16> result = {};
+    for (std::size_t index = 0; index < order.size(); ++index)
+    {
+      result[index] =
+        core.inFlightCOP1Operations[order[index]].programOrder;
+    }
+    return result;
+  }
+
+  static std::size_t inFlightCOP1OperationCount(
+    const EECore &core)
+  {
+    return core.inFlightCOP1ProgramOrder().size();
+  }
+
   static EEIssuePreview previewIssueSelection(EECore *core)
   {
     core->fillIssueFrontEnd();
@@ -309,6 +342,28 @@ struct EECoreTestAccess
     core->shiftAmountOrdering.restore(accesses, reads);
   }
 };
+
+TEST_CASE("EE in-flight COP1 program order is allocation-free and slot-independent")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  EECoreTestAccess::setInFlightCOP1ProgramOrder(
+    &core, 1, true, 9);
+  EECoreTestAccess::setInFlightCOP1ProgramOrder(
+    &core, 4, true, 2);
+  EECoreTestAccess::setInFlightCOP1ProgramOrder(
+    &core, 8, false, 1);
+  EECoreTestAccess::setInFlightCOP1ProgramOrder(
+    &core, 12, true, 7);
+
+  REQUIRE(
+    EECoreTestAccess::inFlightCOP1OperationCount(core) == 3);
+  const std::array<std::uint64_t, 16> order =
+    EECoreTestAccess::inFlightCOP1ProgramOrder(core);
+  REQUIRE(order[0] == 2);
+  REQUIRE(order[1] == 7);
+  REQUIRE(order[2] == 9);
+}
 
 TEST_CASE("EE focused handlers reject incompatible operations")
 {
