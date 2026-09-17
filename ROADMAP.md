@@ -1414,6 +1414,8 @@ that need more detail than the existing structured GIF/GS traces:
   block, run `cmake -P cmake/Sanitize.cmake` before moving to the next block.
 - Run the sanitizer workflow immediately after changes to ownership, lifetime,
   allocation, or container invalidation behavior.
+- At milestone completion on macOS, run
+  `cmake -P cmake/LeakCheck.cmake` for the complete native leak check.
 - Add newly discovered prerequisites to the milestone they block.
 - Record major architectural decisions in the relevant section.
 - Keep immediate work near the top and long-term ideas intentionally broad.

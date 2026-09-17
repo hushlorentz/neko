@@ -50,8 +50,15 @@ Run the memory-safety workflow:
 cmake -P cmake/Sanitize.cmake
 ```
 
-This uses AddressSanitizer. On macOS it also runs the tests with the native
-`leaks` tool.
+This runs the complete optimized, assertion-enabled test suite with
+AddressSanitizer.
+
+At milestone completion on macOS, run the complete test suite with the native
+`leaks` tool:
+
+```sh
+cmake -P cmake/LeakCheck.cmake
+```
 
 ## Desktop Demo
 
