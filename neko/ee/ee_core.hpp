@@ -423,6 +423,13 @@ class EECore final : public ClockedComponent
       UnsupportedInstruction
     };
 
+    enum class FrontEndFetchFailure : std::uint8_t
+    {
+      None,
+      AddressError,
+      BusError
+    };
+
     enum class IssueMemberPosition : std::uint8_t
     {
       Older,
@@ -473,6 +480,14 @@ class EECore final : public ClockedComponent
       std::uint32_t address = 0;
       EEInstruction instruction;
       IssueLatchFailure failure = IssueLatchFailure::None;
+    };
+
+    struct FrontEndFetchResult
+    {
+      std::uint32_t address = 0;
+      std::uint32_t instruction = 0;
+      FrontEndFetchFailure failure =
+        FrontEndFetchFailure::None;
     };
 
     struct COP1DestinationMetadata
@@ -645,11 +660,14 @@ class EECore final : public ClockedComponent
       bool alreadyExceptionLevel) const;
     void setInterruptLines(bool intc, bool dmac);
     bool interruptDeliverable() const;
-    void fillIssueLatch(
-      DecodedIssueLatch *latch,
-      std::uint32_t address);
+    FrontEndFetchResult fetchIssueCandidate(
+      std::uint32_t address) const;
+    static DecodedIssueLatch decodeIssueCandidate(
+      const FrontEndFetchResult &fetch);
+    void ensureIssueLatch();
+    void ensureStagingLatch();
     void fillIssueFrontEnd();
-    void advanceIssueFrontEnd();
+    void promoteStagingLatch();
     void clearIssueFrontEnd();
     bool handleIssueLatchFailure();
     EEIssueGroupExecutionResult executeIssueGroup(

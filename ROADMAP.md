@@ -1153,10 +1153,13 @@ accumulator or condition-result contract:
 
 #### EE Front-End and Issue Lifecycle
 
-- [ ] Specify the invariant owned by fetch, decode, issue-latch, staging-latch,
+- [x] Specify the invariant owned by fetch, decode, issue-latch, staging-latch,
       selection, acceptance, and PC-advance state
-- [ ] Reshape each front-end method around one decision or state transition,
+- [x] Reshape each front-end method around one decision or state transition,
       even when the resulting methods remain private to `EECore`
+- [ ] Reconcile the stateful public `fetchInstruction()` API with decoded
+      front-end continuation so it cannot leave `pc` and live latches in an
+      unreachable save-state configuration
 - [ ] Separate issue-candidate construction from readiness and structural-pair
       policy while retaining the fixed two-entry front end
 - [ ] Replace boolean controls that select issue-member position, pipeline
@@ -1165,8 +1168,10 @@ accumulator or condition-result contract:
       cancelled members without changing program-order effects
 - [ ] Keep delay-slot validation and branch-likely annulment at one documented
       ownership boundary
+- [ ] Preserve explicit run-control ownership for same-PC host-halt resume,
+      different-address restart, and external program-counter mutation
 - [ ] Cover one-wide, two-wide, stalled younger, faulted older, faulted younger,
-      and delay-slot issue transitions with focused tests
+      delay-slot, public-fetch, and run-control transitions with focused tests
 
 #### EE C1 Pipeline Lifecycle and Ordered Work
 

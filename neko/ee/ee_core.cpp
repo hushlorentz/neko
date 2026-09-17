@@ -497,17 +497,16 @@ EEInstructionFetchResult EECore::fetchInstruction()
   return {true, address, instruction};
 }
 
-void EECore::fillIssueLatch(
-  DecodedIssueLatch *latch,
-  std::uint32_t address)
+EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
+  std::uint32_t address) const
 {
-  *latch = {};
-  latch->valid = true;
-  latch->address = address;
   if ((address & 3) != 0)
   {
-    latch->failure = IssueLatchFailure::AddressError;
-    return;
+    return {
+      address,
+      0,
+      FrontEndFetchFailure::AddressError
+    };
   }
 
   std::uint32_t instruction = 0;
@@ -515,42 +514,83 @@ void EECore::fillIssueLatch(
         address,
         &instruction))
   {
-    latch->failure = IssueLatchFailure::BusError;
-    return;
+    return {
+      address,
+      0,
+      FrontEndFetchFailure::BusError
+    };
+  }
+
+  return {
+    address,
+    instruction,
+    FrontEndFetchFailure::None
+  };
+}
+
+EECore::DecodedIssueLatch EECore::decodeIssueCandidate(
+  const FrontEndFetchResult &fetch)
+{
+  DecodedIssueLatch latch;
+  latch.valid = true;
+  latch.address = fetch.address;
+  switch (fetch.failure)
+  {
+    case FrontEndFetchFailure::AddressError:
+      latch.failure = IssueLatchFailure::AddressError;
+      return latch;
+    case FrontEndFetchFailure::BusError:
+      latch.failure = IssueLatchFailure::BusError;
+      return latch;
+    case FrontEndFetchFailure::None:
+      break;
   }
 
   try
   {
-    latch->instruction = decodeEEInstruction(instruction);
+    latch.instruction =
+      decodeEEInstruction(fetch.instruction);
   }
   catch (const EEInstructionDecodeError &error)
   {
-    latch->instruction.raw = instruction;
-    latch->failure =
+    latch.instruction.raw = fetch.instruction;
+    latch.failure =
       error.failure() == EEInstructionDecodeFailure::Reserved
         ? IssueLatchFailure::ReservedInstruction
         : IssueLatchFailure::UnsupportedInstruction;
   }
+  return latch;
 }
 
-void EECore::fillIssueFrontEnd()
+void EECore::ensureIssueLatch()
 {
-  if (!issueLatch.valid)
+  if (issueLatch.valid)
   {
-    fillIssueLatch(&issueLatch, pc);
+    return;
   }
+  issueLatch =
+    decodeIssueCandidate(fetchIssueCandidate(pc));
+}
+
+void EECore::ensureStagingLatch()
+{
   if (issueLatch.failure != IssueLatchFailure::None ||
       stagingLatch.valid ||
       branchDelayPending)
   {
     return;
   }
-  fillIssueLatch(
-    &stagingLatch,
-    issueLatch.address + 4);
+  stagingLatch = decodeIssueCandidate(
+    fetchIssueCandidate(issueLatch.address + 4));
 }
 
-void EECore::advanceIssueFrontEnd()
+void EECore::fillIssueFrontEnd()
+{
+  ensureIssueLatch();
+  ensureStagingLatch();
+}
+
+void EECore::promoteStagingLatch()
 {
   issueLatch = stagingLatch;
   stagingLatch = {};
@@ -1294,7 +1334,7 @@ EEIssueMemberExecution EECore::executeIssueMember(
     instructionAddress,
     decoded,
     wasDelaySlot);
-  advanceIssueFrontEnd();
+  promoteStagingLatch();
   if (wasDelaySlot)
   {
     pc = completedBranchTarget;
