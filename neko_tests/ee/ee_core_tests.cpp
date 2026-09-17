@@ -161,7 +161,7 @@ struct EECoreTestAccess
       pending.rawResult == 0;
   }
 
-  static bool discardCOP1ReconcilesDividerOccupancy(
+  static bool cancelCOP1ReconcilesDividerOccupancy(
     EECore *core)
   {
     EECore::InFlightCOP1Operation &divider =
@@ -175,7 +175,9 @@ struct EECoreTestAccess
     core->cop1DividerOperation =
       EEOperation::DivideSingleCOP1;
 
-    core->discardInFlightCOP1AtOrAfter(2);
+    core->cancelInFlightCOP1(
+      EECore::COP1CancellationScope::AtOrAfter,
+      2);
     return
       !divider.active &&
       core->cop1DividerInitiationCycles == 0 &&
@@ -215,6 +217,84 @@ struct EECoreTestAccess
   static void reconcileCOP1DividerOccupancy(EECore *core)
   {
     core->reconcileCOP1DividerOccupancy();
+  }
+
+  static bool cancelCOP1PreservesRequestedBoundary(
+    EECore *core,
+    bool preserveBoundary)
+  {
+    core->inFlightCOP1Operations.fill({});
+    for (std::size_t index = 0; index < 3; ++index)
+    {
+      EECore::InFlightCOP1Operation &operation =
+        core->inFlightCOP1Operations[index];
+      operation.active = true;
+      operation.programOrder = index + 1;
+      operation.instruction.operation =
+        EEOperation::AddSingleCOP1;
+      operation.stage = EECore::COP1PipelineStage::S1;
+      operation.destination.mask =
+        EECore::COP1_DESTINATION_FPR;
+      operation.destination.fprRegister =
+        static_cast<std::uint8_t>(index + 4);
+      operation.rawResult =
+        UINT32_C(0x3f800000) +
+        static_cast<std::uint32_t>(index);
+    }
+
+    core->cancelInFlightCOP1(
+      preserveBoundary
+        ? EECore::COP1CancellationScope::After
+        : EECore::COP1CancellationScope::AtOrAfter,
+      2);
+    const bool boundaryRemains = preserveBoundary;
+    const bool preserved =
+      core->inFlightCOP1Operations[0].active &&
+      core->inFlightCOP1Operations[1].active ==
+        boundaryRemains &&
+      !core->inFlightCOP1Operations[2].active;
+    core->retireReadyInFlightCOP1();
+    return
+      preserved &&
+      core->floatingPointRegisters[4] ==
+        UINT32_C(0x3f800000) &&
+      core->floatingPointRegisters[5] ==
+        (boundaryRemains
+          ? UINT32_C(0x3f800001)
+          : 0) &&
+      core->floatingPointRegisters[6] == 0;
+  }
+
+  static void cancelCOP1WithoutAssignedOrder(EECore *core)
+  {
+    core->cancelInFlightCOP1(
+      EECore::COP1CancellationScope::AtOrAfter);
+  }
+
+  static bool cancelAllCOP1(EECore *core)
+  {
+    for (std::size_t index = 0; index < 2; ++index)
+    {
+      EECore::InFlightCOP1Operation &operation =
+        core->inFlightCOP1Operations[index];
+      operation.active = true;
+      operation.programOrder = index + 1;
+      operation.instruction.operation =
+        index == 0
+          ? EEOperation::AddSingleCOP1
+          : EEOperation::DivideSingleCOP1;
+      operation.remainingCycles =
+        index == 0 ? 0 : 5;
+    }
+    core->reconcileCOP1DividerOccupancy();
+
+    core->cancelInFlightCOP1(
+      EECore::COP1CancellationScope::All);
+    return
+      !core->inFlightCOP1Operations[0].active &&
+      !core->inFlightCOP1Operations[1].active &&
+      core->cop1DividerInitiationCycles == 0 &&
+      core->cop1DividerOperation == EEOperation::Nop;
   }
 
   static EEIssuePreview previewIssueSelection(EECore *core)
@@ -541,7 +621,7 @@ TEST_CASE("EE in-flight COP1 lifecycle gates invalid transitions")
     "EE COP1 release requires active work.");
   REQUIRE(EECoreTestAccess::releaseCOP1ClearsSlot(&core));
   REQUIRE(
-    EECoreTestAccess::discardCOP1ReconcilesDividerOccupancy(
+    EECoreTestAccess::cancelCOP1ReconcilesDividerOccupancy(
       &core));
   REQUIRE(
     EECoreTestAccess::reconcileCOP1DerivesDividerOccupancy(
@@ -556,6 +636,42 @@ TEST_CASE("EE in-flight COP1 lifecycle gates invalid transitions")
   REQUIRE(core.stateHash() == canonicalHash);
   REQUIRE(system.saveState() == canonicalSaveState);
   EECoreTestAccess::reconcileCOP1DividerOccupancy(&core);
+}
+
+TEST_CASE("EE COP1 cancellation owns program-order boundaries")
+{
+  SECTION("Exceptions discard the boundary and younger work")
+  {
+    NekoSystem system;
+    REQUIRE(
+      EECoreTestAccess::cancelCOP1PreservesRequestedBoundary(
+        &system.eeCore(),
+        false));
+  }
+
+  SECTION("Redirects preserve the boundary and discard younger work")
+  {
+    NekoSystem system;
+    REQUIRE(
+      EECoreTestAccess::cancelCOP1PreservesRequestedBoundary(
+        &system.eeCore(),
+        true));
+  }
+
+  SECTION("Cancellation requires an architectural boundary")
+  {
+    NekoSystem system;
+    REQUIRE_THROWS_WITH(
+      EECoreTestAccess::cancelCOP1WithoutAssignedOrder(
+        &system.eeCore()),
+      "EE COP1 cancellation requires assigned program order.");
+  }
+
+  SECTION("Full continuation flushes discard all work")
+  {
+    NekoSystem system;
+    REQUIRE(EECoreTestAccess::cancelAllCOP1(&system.eeCore()));
+  }
 }
 
 TEST_CASE("EE focused handlers reject incompatible operations")

@@ -386,7 +386,7 @@ void EECore::reset()
   issueSelection = {};
   rejectedInstructionValue = 0;
   clearIssueFrontEnd();
-  inFlightCOP1Operations.fill({});
+  cancelInFlightCOP1(COP1CancellationScope::All);
   nextEEProgramOrder = 1;
   executingProgramOrder = 0;
   pendingMac0 = {};
@@ -632,8 +632,7 @@ void EECore::resetExecutionContinuation()
   shiftAmountOrdering.clear();
   clearIssueFrontEnd();
   issueSelection = {};
-  inFlightCOP1Operations.fill({});
-  reconcileCOP1DividerOccupancy();
+  cancelInFlightCOP1(COP1CancellationScope::All);
   nextEEProgramOrder = 1;
 }
 
@@ -2836,7 +2835,9 @@ EEInstructionExecutionOutcome EECore::executeExceptionReturn(
       "EE exception-return handler received an "
       "incompatible operation.");
   }
-  discardInFlightCOP1AtOrAfter(executingProgramOrder + 1);
+  cancelInFlightCOP1(
+    COP1CancellationScope::After,
+    executingProgramOrder);
   if ((cop0Status & EECOP0Status::ERROR_LEVEL) != 0)
   {
     pc = cop0ErrorEPC;
@@ -5807,7 +5808,9 @@ void EECore::enterException(
     executingProgramOrder != 0
       ? executingProgramOrder
       : nextEEProgramOrder;
-  discardInFlightCOP1AtOrAfter(exceptionBoundary);
+  cancelInFlightCOP1(
+    COP1CancellationScope::AtOrAfter,
+    exceptionBoundary);
   const bool alreadyExceptionLevel =
     (cop0Status & EECOP0Status::EXCEPTION_LEVEL) != 0;
   if (!alreadyExceptionLevel)
@@ -5867,9 +5870,16 @@ void EECore::enterException(
   clearIssueFrontEnd();
 }
 
-void EECore::discardInFlightCOP1AtOrAfter(
+void EECore::cancelInFlightCOP1(
+  COP1CancellationScope scope,
   std::uint64_t programOrder)
 {
+  if (scope != COP1CancellationScope::All &&
+      programOrder == 0)
+  {
+    throw std::logic_error(
+      "EE COP1 cancellation requires assigned program order.");
+  }
   const COP1ProgramOrderView order =
     inFlightCOP1ProgramOrder();
   for (std::size_t orderIndex = 0;
@@ -5878,7 +5888,23 @@ void EECore::discardInFlightCOP1AtOrAfter(
   {
     InFlightCOP1Operation &operation =
       inFlightCOP1Operations[order[orderIndex]];
-    if (operation.programOrder >= programOrder)
+    bool cancel = false;
+    switch (scope)
+    {
+      case COP1CancellationScope::All:
+        cancel = true;
+        break;
+      case COP1CancellationScope::AtOrAfter:
+        cancel = operation.programOrder >= programOrder;
+        break;
+      case COP1CancellationScope::After:
+        cancel = operation.programOrder > programOrder;
+        break;
+      default:
+        throw std::logic_error(
+          "EE COP1 cancellation scope is invalid.");
+    }
+    if (cancel)
     {
       releaseInFlightCOP1(&operation);
     }

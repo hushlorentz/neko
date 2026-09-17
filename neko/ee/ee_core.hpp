@@ -468,6 +468,13 @@ class EECore final : public ClockedComponent
       Drain
     };
 
+    enum class COP1CancellationScope : std::uint8_t
+    {
+      All,
+      AtOrAfter,
+      After
+    };
+
     enum class COP1OperationAdvanceOutcome : std::uint8_t
     {
       Unchanged,
@@ -791,8 +798,9 @@ class EECore final : public ClockedComponent
       std::uint32_t instructionAddress,
       std::uint32_t exceptionAddress,
       std::uint32_t instruction);
-    void discardInFlightCOP1AtOrAfter(
-      std::uint64_t programOrder);
+    void cancelInFlightCOP1(
+      COP1CancellationScope scope,
+      std::uint64_t programOrder = 0);
     static std::uint8_t exceptionCode(EEException type);
     std::uint32_t exceptionVector(
       EEException type,

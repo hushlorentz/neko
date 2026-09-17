@@ -1190,7 +1190,7 @@ accumulator or condition-result contract:
       inputs and outcomes
 - [x] Centralize divider occupancy derivation and reconciliation so runtime,
       reset, hashing, and save-state validation cannot disagree
-- [ ] Centralize exception and flush cancellation of in-flight C1 work while
+- [x] Centralize exception and flush cancellation of in-flight C1 work while
       preserving older completed effects and discarding younger work
 - [ ] Preserve load interlocks, `1S`/`2T` bypasses, `2S` writeback, Move
       blocking, divider overlap, and ordered memory exceptions
