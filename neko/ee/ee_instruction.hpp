@@ -454,5 +454,8 @@ EEIssueSelection selectEEIssuePair(
   const EEInstruction &younger);
 bool isEEBranchOperation(EEOperation operation);
 bool isEEBranchLikelyOperation(EEOperation operation);
+bool isEEDelaySlotInstructionLegal(
+  const EEInstruction &branch,
+  const EEInstruction &candidate);
 
 #endif

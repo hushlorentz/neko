@@ -451,37 +451,14 @@ namespace
         youngerDependencies.specialWrites)) != 0;
   }
 
-  bool isIllegalProgramOrderPair(
-    const EEInstruction &older,
-    const EEInstruction &younger)
+  bool writesShiftAmount(EEOperation operation)
   {
-    if (older.operation == EEOperation::ExceptionReturn)
-    {
-      return true;
-    }
-    if (!isEEBranchOperation(older.operation))
-    {
-      return false;
-    }
-    if (isEEBranchOperation(younger.operation) ||
-         younger.operation == EEOperation::ExceptionReturn ||
-         younger.operation ==
-           EEOperation::SynchronizeLoadStore ||
-         younger.operation ==
-           EEOperation::SynchronizePipeline)
-    {
-      return true;
-    }
-    if (!isEEBranchLikelyOperation(older.operation))
-    {
-      return false;
-    }
     return
-      younger.operation == EEOperation::MoveToShiftAmount ||
-      younger.operation ==
-         EEOperation::MoveByteCountToShiftAmount ||
-      younger.operation ==
-         EEOperation::MoveHalfwordCountToShiftAmount;
+      operation == EEOperation::MoveToShiftAmount ||
+      operation ==
+        EEOperation::MoveByteCountToShiftAmount ||
+      operation ==
+        EEOperation::MoveHalfwordCountToShiftAmount;
   }
 
   EEIssuePairing issuePairing(
@@ -2442,7 +2419,9 @@ EEIssueSelection selectEEIssuePair(
   EEIssueSelection selection = selectEESingleIssue(older);
   const EEInstructionRouting olderRouting =
     eeInstructionRouting(older.operation);
-  if (isIllegalProgramOrderPair(older, younger))
+  if (older.operation == EEOperation::ExceptionReturn ||
+      (isEEBranchOperation(older.operation) &&
+       !isEEDelaySlotInstructionLegal(older, younger)))
   {
     return selection;
   }
@@ -2530,6 +2509,29 @@ bool isEEBranchLikelyOperation(EEOperation operation)
     operation == EEOperation::BranchCOP1TrueLikely ||
     operation == EEOperation::BranchCOP2FalseLikely ||
     operation == EEOperation::BranchCOP2TrueLikely;
+}
+
+bool isEEDelaySlotInstructionLegal(
+  const EEInstruction &branch,
+  const EEInstruction &candidate)
+{
+  if (!isEEBranchOperation(branch.operation))
+  {
+    throw std::invalid_argument(
+      "EE delay-slot validation requires a branch.");
+  }
+  if (isEEBranchOperation(candidate.operation) ||
+      candidate.operation == EEOperation::ExceptionReturn ||
+      candidate.operation ==
+        EEOperation::SynchronizeLoadStore ||
+      candidate.operation ==
+        EEOperation::SynchronizePipeline)
+  {
+    return false;
+  }
+  return
+    !isEEBranchLikelyOperation(branch.operation) ||
+    !writesShiftAmount(candidate.operation);
 }
 
 EEInstruction decodeEEInstruction(std::uint32_t raw)

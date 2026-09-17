@@ -1166,7 +1166,7 @@ accumulator or condition-result contract:
       identity, or acceptance mode with explicit enums or result types
 - [x] Make issue-group outcomes explicit for accepted, stalled, faulted, and
       cancelled members without changing program-order effects
-- [ ] Keep delay-slot validation and branch-likely annulment at one documented
+- [x] Keep delay-slot validation and branch-likely annulment at one documented
       ownership boundary
 - [ ] Preserve explicit run-control ownership for same-PC host-halt resume,
       different-address restart, and external program-counter mutation

@@ -1186,6 +1186,48 @@ TEST_CASE("EE two-wide issue selection")
   }
 }
 
+TEST_CASE("EE delay-slot legality is centralized")
+{
+  const EEInstruction branch =
+    decodeEEInstruction(
+      immediateInstruction(0x04, 1, 2, 1));
+  const EEInstruction likely =
+    decodeEEInstruction(
+      immediateInstruction(0x14, 1, 2, 1));
+  const EEInstruction alu =
+    decodeEEInstruction(
+      immediateInstruction(0x09, 0, 3, 1));
+  const EEInstruction shiftAmountWrite =
+    decodeEEInstruction(
+      registerInstruction(0x29, 4, 0, 0));
+
+  REQUIRE(isEEDelaySlotInstructionLegal(branch, alu));
+  REQUIRE(
+    isEEDelaySlotInstructionLegal(
+      branch,
+      shiftAmountWrite));
+  REQUIRE_FALSE(
+    isEEDelaySlotInstructionLegal(
+      likely,
+      shiftAmountWrite));
+  REQUIRE_FALSE(
+    isEEDelaySlotInstructionLegal(
+      branch,
+      decodeEEInstruction(
+        immediateInstruction(0x05, 3, 4, 1))));
+  REQUIRE_FALSE(
+    isEEDelaySlotInstructionLegal(
+      branch,
+      decodeEEInstruction(UINT32_C(0x42000018))));
+  REQUIRE_FALSE(
+    isEEDelaySlotInstructionLegal(
+      branch,
+      decodeEEInstruction(UINT32_C(0x0000000f))));
+  REQUIRE_THROWS_AS(
+    isEEDelaySlotInstructionLegal(alu, alu),
+    std::invalid_argument);
+}
+
 TEST_CASE("EE base integer decoder tables")
 {
   struct RegisterContract

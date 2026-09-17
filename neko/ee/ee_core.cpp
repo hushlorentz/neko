@@ -268,14 +268,6 @@ namespace
       static_cast<std::uint32_t>(lo);
   }
 
-  bool writesShiftAmount(EEOperation operation)
-  {
-    return
-      operation == EEOperation::MoveToShiftAmount ||
-      operation == EEOperation::MoveByteCountToShiftAmount ||
-      operation == EEOperation::MoveHalfwordCountToShiftAmount;
-  }
-
   bool isWordValue(std::uint64_t value)
   {
     return value == signExtendWord(
@@ -1400,11 +1392,6 @@ EEIssueMemberOutcome EECore::executeIssueMember(
     branchInstructionAddress = 0;
     branchDelayFromLikely = false;
     branchDelayTaken = false;
-    clearIssueFrontEnd();
-  }
-  else if (isEEBranchLikelyOperation(decoded.operation) &&
-           !branchDelayPending)
-  {
     clearIssueFrontEnd();
   }
   else if (decoded.operation == EEOperation::ExceptionReturn)
@@ -5602,14 +5589,9 @@ bool EECore::validateDelaySlotInstruction(
   {
     return true;
   }
-  if (isEEBranchOperation(instruction.operation) ||
-       instruction.operation == EEOperation::ExceptionReturn ||
-       instruction.operation ==
-         EEOperation::SynchronizeLoadStore ||
-       instruction.operation ==
-         EEOperation::SynchronizePipeline ||
-       (branchDelayFromLikely &&
-        writesShiftAmount(instruction.operation)))
+  if (!isEEDelaySlotInstructionLegal(
+         lastDecodedInstruction,
+         instruction))
   {
     haltUndefinedOperation(address, instruction.raw);
     return false;
@@ -5632,6 +5614,7 @@ void EECore::scheduleBranch(
   if (likely && !condition)
   {
     pc = address + 8;
+    stagingLatch = {};
     return;
   }
   branchDelayPending = true;
