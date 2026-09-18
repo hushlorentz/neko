@@ -1224,7 +1224,7 @@ accumulator or condition-result contract:
       validation, reconciliation, and transactional commit
 - [x] Keep format order and the current save-state version stable during
       behavior-preserving source decomposition
-- [ ] Define which fields are serialized architectural state, serialized
+- [x] Define which fields are serialized architectural state, serialized
       runtime state, derived state, or host wiring
 - [ ] Share invariant helpers between runtime assertions and load validation
       where doing so does not make malformed input mutate live state

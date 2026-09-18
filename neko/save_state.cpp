@@ -1205,6 +1205,7 @@ void NekoSaveStateCodec::writeSystem(
   SaveStateWriter *writer,
   const NekoSystem &system)
 {
+  // Version 24 payload order is part of the on-disk compatibility contract.
   writer->writeU16(system.inputState.buttons);
   writer->writeU8(system.inputState.leftStickX);
   writer->writeU8(system.inputState.leftStickY);
