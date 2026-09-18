@@ -2161,8 +2161,8 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
       recordMemoryTrace(
         dataAddress,
         1,
-        false,
-        succeeded,
+        MemoryAccessDirection::Read,
+        memoryAccessOutcome(succeeded),
         succeeded ? value : 0);
       if (!succeeded)
       {
@@ -2190,8 +2190,8 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
       recordMemoryTrace(
         dataAddress,
         1,
-        true,
-        succeeded,
+        MemoryAccessDirection::Write,
+        memoryAccessOutcome(succeeded),
         value);
       if (!succeeded)
       {
@@ -2252,8 +2252,8 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
     recordMemoryTrace(
       dataAddress,
       2,
-      true,
-      succeeded,
+      MemoryAccessDirection::Write,
+      memoryAccessOutcome(succeeded),
       value);
     if (!succeeded)
     {
@@ -2272,8 +2272,8 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
   recordMemoryTrace(
     dataAddress,
     2,
-    false,
-    succeeded,
+    MemoryAccessDirection::Read,
+    memoryAccessOutcome(succeeded),
     succeeded ? value : 0);
   if (!succeeded)
   {
@@ -2333,8 +2333,8 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
     recordMemoryTrace(
       dataAddress,
       4,
-      true,
-      succeeded,
+      MemoryAccessDirection::Write,
+      memoryAccessOutcome(succeeded),
       value);
     if (!succeeded)
     {
@@ -2353,8 +2353,8 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
   recordMemoryTrace(
     dataAddress,
     4,
-    false,
-    succeeded,
+    MemoryAccessDirection::Read,
+    memoryAccessOutcome(succeeded),
     succeeded ? value : 0);
   if (!succeeded)
   {
@@ -2406,8 +2406,8 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
   recordMemoryTrace(
     alignedAddress,
     4,
-    false,
-    readSucceeded,
+    MemoryAccessDirection::Read,
+    memoryAccessOutcome(readSucceeded),
     readSucceeded ? memory : 0);
   if (!readSucceeded)
   {
@@ -2508,8 +2508,8 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
   recordMemoryTrace(
     alignedAddress,
     4,
-    true,
-    writeSucceeded,
+    MemoryAccessDirection::Write,
+    memoryAccessOutcome(writeSucceeded),
     memory);
   if (!writeSucceeded)
   {
@@ -2562,8 +2562,8 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
     recordMemoryTrace(
       dataAddress,
       8,
-      true,
-      succeeded,
+      MemoryAccessDirection::Write,
+      memoryAccessOutcome(succeeded),
       value);
     if (!succeeded)
     {
@@ -2582,8 +2582,8 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
   recordMemoryTrace(
     dataAddress,
     8,
-    false,
-    succeeded,
+    MemoryAccessDirection::Read,
+    memoryAccessOutcome(succeeded),
     succeeded ? value : 0);
   if (!succeeded)
   {
@@ -2631,8 +2631,8 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
   recordMemoryTrace(
     alignedAddress,
     8,
-    false,
-    readSucceeded,
+    MemoryAccessDirection::Read,
+    memoryAccessOutcome(readSucceeded),
     readSucceeded ? memory : 0);
   if (!readSucceeded)
   {
@@ -2724,8 +2724,8 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
   recordMemoryTrace(
     alignedAddress,
     8,
-    true,
-    writeSucceeded,
+    MemoryAccessDirection::Write,
+    memoryAccessOutcome(writeSucceeded),
     memory);
   if (!writeSucceeded)
   {
@@ -2771,8 +2771,8 @@ EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
     recordMemoryTrace(
       dataAddress,
       16,
-      true,
-      succeeded,
+      MemoryAccessDirection::Write,
+      memoryAccessOutcome(succeeded),
       value.low,
       value.high);
     if (writeResult == EEDataWriteResult::Stalled)
@@ -2797,8 +2797,8 @@ EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
   recordMemoryTrace(
     dataAddress,
     16,
-    false,
-    succeeded,
+    MemoryAccessDirection::Read,
+    memoryAccessOutcome(succeeded),
     succeeded ? value.low : 0,
     succeeded ? value.high : 0);
   if (!succeeded)
@@ -3109,8 +3109,10 @@ EEInstructionExecutionOutcome EECore::executeCOP1Branch(
     static_cast<std::uint32_t>(
       signExtend16(instruction.immediate) << 2);
   scheduleBranch(
-    scoreboardCOP1Condition() == branchOnTrue,
-    likely,
+    scoreboardCOP1Condition() == branchOnTrue
+      ? BranchOutcome::Taken
+      : BranchOutcome::NotTaken,
+    likely ? BranchMode::Likely : BranchMode::Ordinary,
     branchTarget,
     address);
   return EEInstructionExecutionOutcome::Completed;
@@ -3208,8 +3210,8 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
     recordMemoryTrace(
       dataAddress,
       16,
-      true,
-      succeeded,
+      MemoryAccessDirection::Write,
+      memoryAccessOutcome(succeeded),
       value.low,
       value.high);
     if (writeResult == EEDataWriteResult::Stalled)
@@ -3234,8 +3236,8 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
   recordMemoryTrace(
     dataAddress,
     16,
-    false,
-    succeeded,
+    MemoryAccessDirection::Read,
+    memoryAccessOutcome(succeeded),
     succeeded ? value.low : 0,
     succeeded ? value.high : 0);
   if (!succeeded)
@@ -3405,8 +3407,10 @@ EEInstructionExecutionOutcome EECore::executeCOP2Branch(
     static_cast<std::uint32_t>(
       signExtend16(instruction.immediate) << 2);
   scheduleBranch(
-    attachedVU1().clockActive() == branchOnTrue,
-    likely,
+    attachedVU1().clockActive() == branchOnTrue
+      ? BranchOutcome::Taken
+      : BranchOutcome::NotTaken,
+    likely ? BranchMode::Likely : BranchMode::Ordinary,
     branchTarget,
     address);
   return EEInstructionExecutionOutcome::Completed;
@@ -3498,8 +3502,8 @@ EEInstructionExecutionOutcome EECore::executeJump(
   {
     case EEOperation::Jump:
       scheduleBranch(
-        true,
-        false,
+        BranchOutcome::Taken,
+        BranchMode::Ordinary,
         ((address + 4) & UINT32_C(0xf0000000)) |
           (instruction.target << 2),
         address);
@@ -3507,16 +3511,16 @@ EEInstructionExecutionOutcome EECore::executeJump(
     case EEOperation::JumpAndLink:
       writeLowDoubleword(31, address + 8);
       scheduleBranch(
-        true,
-        false,
+        BranchOutcome::Taken,
+        BranchMode::Ordinary,
         ((address + 4) & UINT32_C(0xf0000000)) |
           (instruction.target << 2),
         address);
       return EEInstructionExecutionOutcome::Completed;
     case EEOperation::JumpRegister:
       scheduleBranch(
-        true,
-        false,
+        BranchOutcome::Taken,
+        BranchMode::Ordinary,
         static_cast<std::uint32_t>(source),
         address);
       return EEInstructionExecutionOutcome::Completed;
@@ -3531,8 +3535,8 @@ EEInstructionExecutionOutcome EECore::executeJump(
         instruction.destinationRegister,
         address + 8);
       scheduleBranch(
-        true,
-        false,
+        BranchOutcome::Taken,
+        BranchMode::Ordinary,
         static_cast<std::uint32_t>(source),
         address);
       return EEInstructionExecutionOutcome::Completed;
@@ -3614,8 +3618,8 @@ EEInstructionExecutionOutcome EECore::executeIntegerBranch(
     static_cast<std::uint32_t>(
       signExtend16(instruction.immediate) << 2);
   scheduleBranch(
-    condition,
-    likely,
+    condition ? BranchOutcome::Taken : BranchOutcome::NotTaken,
+    likely ? BranchMode::Likely : BranchMode::Ordinary,
     branchTarget,
     address);
   return EEInstructionExecutionOutcome::Completed;
@@ -4149,8 +4153,8 @@ bool EECore::drainInFlightCOP1()
           recordMemoryTrace(
             oldest->memoryAddress,
             4,
-            false,
-            succeeded,
+            MemoryAccessDirection::Read,
+            memoryAccessOutcome(succeeded),
             succeeded ? value : 0);
           if (!succeeded)
           {
@@ -4184,8 +4188,8 @@ bool EECore::drainInFlightCOP1()
           recordMemoryTrace(
             oldest->memoryAddress,
             4,
-            true,
-            succeeded,
+            MemoryAccessDirection::Write,
+            memoryAccessOutcome(succeeded),
             oldest->capturedMemoryValue);
           if (!succeeded)
           {
@@ -4696,8 +4700,8 @@ EECore::advanceMemoryCOP1Operation(
         recordMemoryTrace(
           operation->memoryAddress,
           4,
-          false,
-          succeeded,
+          MemoryAccessDirection::Read,
+          memoryAccessOutcome(succeeded),
           succeeded ? value : 0);
         if (!succeeded)
         {
@@ -4730,8 +4734,8 @@ EECore::advanceMemoryCOP1Operation(
         recordMemoryTrace(
           operation->memoryAddress,
           4,
-          true,
-          succeeded,
+          MemoryAccessDirection::Write,
+          memoryAccessOutcome(succeeded),
           operation->capturedMemoryValue);
         if (!succeeded)
         {
@@ -5664,27 +5668,29 @@ bool EECore::validateDelaySlotInstruction(
 }
 
 void EECore::scheduleBranch(
-  bool condition,
-  bool likely,
+  BranchOutcome outcome,
+  BranchMode mode,
   std::uint32_t target,
   std::uint32_t address)
 {
   recordCycleEvent(BranchScheduledEvent{
     address,
     target,
-    condition,
-    likely});
-  if (likely && !condition)
+    outcome,
+    mode});
+  if (mode == BranchMode::Likely &&
+      outcome == BranchOutcome::NotTaken)
   {
     pc = address + 8;
     stagingLatch = {};
     return;
   }
   branchDelayPending = true;
-  branchDelayTarget = condition ? target : address + 8;
+  branchDelayTarget =
+    outcome == BranchOutcome::Taken ? target : address + 8;
   branchInstructionAddress = address;
-  branchDelayFromLikely = likely;
-  branchDelayTaken = condition;
+  branchDelayFromLikely = mode == BranchMode::Likely;
+  branchDelayTaken = outcome == BranchOutcome::Taken;
 }
 
 void EECore::recordCycleEvent(
@@ -5701,22 +5707,26 @@ void EECore::recordCycleEvent(
 void EECore::recordMemoryTrace(
   std::uint32_t address,
   std::uint8_t width,
-  bool write,
-  bool succeeded,
+  MemoryAccessDirection direction,
+  MemoryAccessOutcome outcome,
   std::uint64_t low,
   std::uint64_t high)
 {
   recordCycleEvent(MemoryAccessEvent{
     address,
     width,
-    write
-      ? MemoryAccessDirection::Write
-      : MemoryAccessDirection::Read,
-    succeeded
-      ? MemoryAccessOutcome::Succeeded
-      : MemoryAccessOutcome::Failed,
+    direction,
+    outcome,
     low,
     high});
+}
+
+EECore::MemoryAccessOutcome EECore::memoryAccessOutcome(
+  bool succeeded)
+{
+  return succeeded
+    ? MemoryAccessOutcome::Succeeded
+    : MemoryAccessOutcome::Failed;
 }
 
 EEInstructionExecutionOutcome

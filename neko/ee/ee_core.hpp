@@ -535,6 +535,18 @@ class EECore final : public ClockedComponent
       Succeeded
     };
 
+    enum class BranchOutcome : std::uint8_t
+    {
+      NotTaken,
+      Taken
+    };
+
+    enum class BranchMode : std::uint8_t
+    {
+      Ordinary,
+      Likely
+    };
+
     enum class ExceptionRestartMode : std::uint8_t
     {
       Instruction,
@@ -570,8 +582,8 @@ class EECore final : public ClockedComponent
     {
       std::uint32_t address;
       std::uint32_t target;
-      bool taken;
-      bool likely;
+      BranchOutcome outcome;
+      BranchMode mode;
     };
 
     struct MemoryAccessEvent
@@ -1376,18 +1388,20 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t address);
     void scheduleBranch(
-      bool condition,
-      bool likely,
+      BranchOutcome outcome,
+      BranchMode mode,
       std::uint32_t target,
       std::uint32_t address);
     void recordCycleEvent(const CycleTraceEvent &event);
     void recordMemoryTrace(
       std::uint32_t address,
       std::uint8_t width,
-      bool write,
-      bool succeeded,
+      MemoryAccessDirection direction,
+      MemoryAccessOutcome outcome,
       std::uint64_t low,
       std::uint64_t high = 0);
+    static MemoryAccessOutcome memoryAccessOutcome(
+      bool succeeded);
     EEInstructionExecutionOutcome raiseDataAccessException(
       EEException type,
       std::uint32_t instructionAddress,

@@ -1205,7 +1205,7 @@ accumulator or condition-result contract:
       exception entry, interrupt delivery, C1 stage transition, and retirement
 - [x] Give exception entry one owner for CP0 updates, branch-delay handling,
       fault metadata, issue-front-end cleanup, and younger-work cancellation
-- [ ] Replace ambiguous trace and exception boolean parameters with typed event
+- [x] Replace ambiguous trace and exception boolean parameters with typed event
       payloads or explicit modes
 - [ ] Preserve cycle-local fixed-capacity event storage and deterministic event
       ordering

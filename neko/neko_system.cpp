@@ -632,8 +632,12 @@ void NekoSystem::recordCycleTrace(
         value0 = branch.address;
         value1 = branch.target;
         value2 =
-          (branch.taken ? UINT64_C(1) : 0) |
-          (branch.likely ? UINT64_C(2) : 0);
+          (branch.outcome == EECore::BranchOutcome::Taken
+            ? UINT64_C(1)
+            : 0) |
+          (branch.mode == EECore::BranchMode::Likely
+            ? UINT64_C(2)
+            : 0);
         break;
       }
       case EECore::CycleTraceKind::MemoryAccess:
