@@ -1226,14 +1226,20 @@ accumulator or condition-result contract:
       behavior-preserving source decomposition
 - [x] Define which fields are serialized architectural state, serialized
       runtime state, derived state, or host wiring
-- [ ] Share invariant helpers between runtime assertions and load validation
-      where doing so does not make malformed input mutate live state
+- [ ] Consolidate pure, non-mutating invariant predicates shared by runtime
+      assertions and load validation, retaining separate adapters where live
+      state and malformed parsed state require different handling
+- [ ] Complete an independent read-only review of the shared invariant boundary
+      before changing reconciliation or component ownership
 - [ ] Reconstruct pointer topology and derived occupancy through explicit
       reconciliation steps rather than scattered commit-time assignments
+- [ ] Make cross-component transactional ownership explicit, then split the
+      save-state implementation by coherent component boundaries
 - [ ] Preserve canonical bytes, strict malformed-state rejection, atomic load
-      failure, and byte-identical repeated saves
-- [ ] Split the save-state implementation by coherent component boundaries only
-      after cross-component transactional ownership is explicit
+      failure, and byte-identical repeated saves throughout reconciliation and
+      source decomposition
+- [ ] Complete an independent read-only review of reconciliation, transactional
+      commit, and the resulting component boundaries
 
 #### System Orchestration and Remaining Subsystem Boundaries
 
