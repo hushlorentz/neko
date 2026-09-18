@@ -55,8 +55,12 @@ struct EECoreTestAccess
       core.cycleTraceEventCount == 1 &&
       core.cycleTraceEvents[0].kind ==
         EECore::CycleTraceKind::InstructionIssued &&
-      core.cycleTraceEvents[0].value0 == 0 &&
-      core.cycleTraceEvents[0].value1 == 0;
+      core.cycleTraceEvents[0].payload.instructionIssued.address == 0 &&
+      core.cycleTraceEvents[0].payload.instructionIssued.instruction == 0 &&
+      core.cycleTraceEvents[0].payload.instructionIssued.operation ==
+        EEOperation::Nop &&
+      core.cycleTraceEvents[0].payload.instructionIssued.mode ==
+        EEAcceptanceMode::Ordinary;
   }
 
   static void setInFlightCOP1ProgramOrder(

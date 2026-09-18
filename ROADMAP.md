@@ -1201,7 +1201,7 @@ accumulator or condition-result contract:
 
 - [x] Separate architectural state transitions from trace publication so trace
       enablement cannot participate in execution decisions
-- [ ] Define typed EE events for acceptance, memory access, branch scheduling,
+- [x] Define typed EE events for acceptance, memory access, branch scheduling,
       exception entry, interrupt delivery, C1 stage transition, and retirement
 - [ ] Give exception entry one owner for CP0 updates, branch-delay handling,
       fault metadata, issue-front-end cleanup, and younger-work cancellation

@@ -606,47 +606,179 @@ void NekoSystem::recordCycleTrace(
       eeCoreComponent.cycleTraceEvents[index];
     NekoTraceEventType type =
       NekoTraceEventType::InstructionIssued;
+    std::uint64_t value0 = 0;
+    std::uint64_t value1 = 0;
+    std::uint64_t value2 = 0;
+    std::uint64_t value3 = 0;
     switch (event.kind)
     {
       case EECore::CycleTraceKind::InstructionIssued:
+      {
+        const EECore::InstructionIssuedEvent &issued =
+          event.payload.instructionIssued;
         type = NekoTraceEventType::InstructionIssued;
+        value0 = issued.address;
+        value1 = issued.instruction;
+        value2 = static_cast<std::uint8_t>(issued.operation);
+        value3 =
+          issued.mode == EEAcceptanceMode::DelaySlot;
         break;
+      }
       case EECore::CycleTraceKind::BranchScheduled:
+      {
+        const EECore::BranchScheduledEvent &branch =
+          event.payload.branchScheduled;
         type = NekoTraceEventType::BranchScheduled;
+        value0 = branch.address;
+        value1 = branch.target;
+        value2 =
+          (branch.taken ? UINT64_C(1) : 0) |
+          (branch.likely ? UINT64_C(2) : 0);
         break;
+      }
       case EECore::CycleTraceKind::MemoryAccess:
+      {
+        const EECore::MemoryAccessEvent &memory =
+          event.payload.memoryAccess;
         type = NekoTraceEventType::MemoryAccess;
+        value0 = memory.address;
+        value1 = memory.low;
+        value2 = memory.high;
+        value3 =
+          memory.width |
+          (memory.direction ==
+              EECore::MemoryAccessDirection::Write
+            ? UINT64_C(1) << 8
+            : 0) |
+          (memory.outcome ==
+              EECore::MemoryAccessOutcome::Succeeded
+            ? UINT64_C(1) << 9
+            : 0);
         break;
+      }
       case EECore::CycleTraceKind::ExceptionEntered:
+      {
+        const EECore::ExceptionEnteredEvent &exception =
+          event.payload.exceptionEntered;
         type = NekoTraceEventType::ExceptionEntered;
+        value0 = static_cast<std::uint8_t>(exception.type);
+        value1 = exception.address;
+        value2 = exception.vector;
+        value3 = exception.cause;
         break;
+      }
       case EECore::CycleTraceKind::InterruptDelivered:
+      {
+        const EECore::InterruptDeliveredEvent &interrupt =
+          event.payload.interruptDelivered;
         type = NekoTraceEventType::InterruptDelivered;
+        value0 = interrupt.instructionAddress;
+        value1 = interrupt.status;
+        value2 = interrupt.cause;
+        value3 = interrupt.vector;
         break;
+      }
       case EECore::CycleTraceKind::COP1LoadInterlock:
+      {
+        const EECore::COP1LoadInterlockEvent &interlock =
+          event.payload.cop1LoadInterlock;
         type = NekoTraceEventType::COP1LoadInterlock;
+        value0 = interlock.instructionAddress;
+        value1 = interlock.instruction;
+        value2 = interlock.registerIndex;
+        value3 =
+          static_cast<std::uint8_t>(interlock.dependency);
         break;
+      }
       case EECore::CycleTraceKind::COP1ResourceInterlock:
+      {
+        const EECore::COP1ResourceInterlockEvent &interlock =
+          event.payload.cop1ResourceInterlock;
         type = NekoTraceEventType::COP1ResourceInterlock;
+        value0 = interlock.instructionAddress;
+        value1 = interlock.instruction;
+        value2 = interlock.resource;
+        value3 =
+          static_cast<std::uint8_t>(interlock.dependency);
         break;
+      }
       case EECore::CycleTraceKind::COP1DividerHazard:
+      {
+        const EECore::COP1DividerHazardEvent &hazard =
+          event.payload.cop1DividerHazard;
         type = NekoTraceEventType::COP1DividerHazard;
+        value0 = hazard.instructionAddress;
+        value1 = hazard.instruction;
+        value2 = hazard.reasons;
+        value3 =
+          hazard.branchAddress |
+          (static_cast<std::uint64_t>(
+            hazard.targetAddress) << 32);
         break;
+      }
       case EECore::CycleTraceKind::COP1StageTransition:
+      {
+        const EECore::COP1StageTransitionEvent &transition =
+          event.payload.cop1StageTransition;
         type = NekoTraceEventType::COP1StageTransition;
+        value0 = transition.programOrder;
+        value1 =
+          transition.instructionAddress |
+          (static_cast<std::uint64_t>(
+            transition.instruction) << 32);
+        value2 =
+          transition.fromStage |
+          (static_cast<std::uint64_t>(
+            static_cast<std::uint8_t>(
+              transition.toStage)) << 8) |
+          (static_cast<std::uint64_t>(
+            transition.remainingCycles) << 16);
+        value3 =
+          transition.destinationMask |
+          (static_cast<std::uint64_t>(
+            transition.destinationFPR) << 8) |
+          (static_cast<std::uint64_t>(
+            transition.destinationGPR) << 16);
         break;
+      }
       case EECore::CycleTraceKind::COP1Retired:
+      {
+        const EECore::COP1RetiredEvent &retirement =
+          event.payload.cop1Retired;
         type = NekoTraceEventType::COP1Retired;
+        value0 = retirement.programOrder;
+        value1 =
+          retirement.instructionAddress |
+          (static_cast<std::uint64_t>(
+            retirement.instruction) << 32);
+        value2 =
+          retirement.rawResult |
+          (static_cast<std::uint64_t>(
+            retirement.destinationMask) << 32) |
+          (static_cast<std::uint64_t>(
+            retirement.destinationFPR) << 40) |
+          (static_cast<std::uint64_t>(
+            retirement.destinationGPR) << 48);
+        value3 =
+          retirement.affectedFlags |
+          (static_cast<std::uint64_t>(
+            retirement.raisedFlags) << 8) |
+          (static_cast<std::uint64_t>(
+            retirement.raisedStickyFlags) << 16) |
+          (retirement.conditionResult
+            ? UINT64_C(1) << 24
+            : 0);
         break;
+      }
     }
     appendTrace(
       cycle,
       NekoTraceSubsystem::EE,
       type,
-      event.value0,
-      event.value1,
-      event.value2,
-      event.value3);
+      value0,
+      value1,
+      value2,
+      value3);
   }
   const std::uint64_t currentEEStateHash =
     eeCoreComponent.stateHash();

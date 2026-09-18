@@ -1237,13 +1237,11 @@ EEIssueMemberOutcome EECore::executeIssueMember(
   {
     if (scoreboardHazard.completedLoad)
     {
-      recordCycleTrace(
-        CycleTraceKind::COP1LoadInterlock,
+      recordCycleEvent(COP1LoadInterlockEvent{
         instructionAddress,
         instructionValue,
         scoreboardHazard.registerIndex,
-        static_cast<std::uint8_t>(
-          scoreboardHazard.dependency));
+        scoreboardHazard.dependency});
     }
     else
     {
@@ -1280,13 +1278,11 @@ EEIssueMemberOutcome EECore::executeIssueMember(
             break;
         }
       }
-      recordCycleTrace(
-        CycleTraceKind::COP1ResourceInterlock,
+      recordCycleEvent(COP1ResourceInterlockEvent{
         instructionAddress,
         instructionValue,
         resource,
-        static_cast<std::uint8_t>(
-          scoreboardHazard.dependency));
+        scoreboardHazard.dependency});
     }
     pc = instructionAddress;
     return EEIssueMemberOutcome::Stalled;
@@ -1301,12 +1297,11 @@ EEIssueMemberOutcome EECore::executeIssueMember(
   const std::uint64_t instructionProgramOrder =
     nextEEProgramOrder;
   executingProgramOrder = instructionProgramOrder;
-  recordCycleTrace(
-    CycleTraceKind::InstructionIssued,
+  recordCycleEvent(InstructionIssuedEvent{
     instructionAddress,
     instructionValue,
-    static_cast<std::uint8_t>(decoded.operation),
-    acceptanceMode == EEAcceptanceMode::DelaySlot);
+    decoded.operation,
+    acceptanceMode});
   const EEInstructionExecutionOutcome execution =
     executeInstruction(decoded, instructionAddress);
   executingProgramOrder = 0;
@@ -1372,14 +1367,12 @@ void EECore::applyInstructionAcceptanceEffects(
   {
     if (record.mode == EEAcceptanceMode::DelaySlot)
     {
-      recordCycleTrace(
-        CycleTraceKind::COP1DividerHazard,
+      recordCycleEvent(COP1DividerHazardEvent{
         record.address,
         instruction.raw,
         UINT64_C(1),
-        branchInstructionAddress |
-          (static_cast<std::uint64_t>(
-            branchDelayTaken ? branchDelayTarget : 0) << 32));
+        branchInstructionAddress,
+        branchDelayTaken ? branchDelayTarget : 0});
     }
 
     std::uint64_t proximityReasons = 0;
@@ -1398,25 +1391,22 @@ void EECore::applyInstructionAcceptanceEffects(
     }
     if (proximityReasons != 0)
     {
-      recordCycleTrace(
-        CycleTraceKind::COP1DividerHazard,
+      recordCycleEvent(COP1DividerHazardEvent{
         record.address,
         instruction.raw,
         proximityReasons,
-        cop1DividerPostDelayBranchAddress |
-          (static_cast<std::uint64_t>(
-            cop1DividerPostDelayTargetAddress) << 32));
+        cop1DividerPostDelayBranchAddress,
+        cop1DividerPostDelayTargetAddress});
     }
     if (cop1DividerPostTargetInstructions != 0 &&
         !combinedTargetReason)
     {
-      recordCycleTrace(
-        CycleTraceKind::COP1DividerHazard,
+      recordCycleEvent(COP1DividerHazardEvent{
         record.address,
         instruction.raw,
         UINT64_C(1) << 2,
-        static_cast<std::uint64_t>(
-          cop1DividerPostTargetAddress) << 32);
+        0,
+        cop1DividerPostTargetAddress});
     }
   }
 
@@ -4419,13 +4409,13 @@ void EECore::recordCOP1MoveInterlocks(
     {
       continue;
     }
-    recordCycleTrace(
-      CycleTraceKind::COP1ResourceInterlock,
+    recordCycleEvent(COP1ResourceInterlockEvent{
       blockedMove.instructionAddress,
       blockedMove.instruction.raw,
       static_cast<std::uint8_t>(
         eligibility.moveTStageBlockers[slotIndex]->
-          instruction.operation));
+          instruction.operation),
+      COP1Dependency::None});
   }
 }
 
@@ -5045,46 +5035,33 @@ void EECore::recordCOP1StageTransition(
   std::uint8_t fromStage,
   COP1PipelineStage toStage)
 {
-  recordCycleTrace(
-    CycleTraceKind::COP1StageTransition,
+  recordCycleEvent(COP1StageTransitionEvent{
     operation.programOrder,
-    operation.instructionAddress |
-      (static_cast<std::uint64_t>(
-        operation.instruction.raw) << 32),
-    fromStage |
-      (static_cast<std::uint64_t>(
-        static_cast<std::uint8_t>(toStage)) << 8) |
-      (static_cast<std::uint64_t>(
-        operation.remainingCycles) << 16),
-    operation.destination.mask |
-      (static_cast<std::uint64_t>(
-        operation.destination.fprRegister) << 8) |
-      (static_cast<std::uint64_t>(
-        operation.destination.gprRegister) << 16));
+    operation.instructionAddress,
+    operation.instruction.raw,
+    fromStage,
+    toStage,
+    operation.remainingCycles,
+    operation.destination.mask,
+    operation.destination.fprRegister,
+    operation.destination.gprRegister});
 }
 
 void EECore::recordCOP1Retirement(
   const InFlightCOP1Operation &operation)
 {
-  recordCycleTrace(
-    CycleTraceKind::COP1Retired,
+  recordCycleEvent(COP1RetiredEvent{
     operation.programOrder,
-    operation.instructionAddress |
-      (static_cast<std::uint64_t>(
-        operation.instruction.raw) << 32),
-    operation.rawResult |
-      (static_cast<std::uint64_t>(
-        operation.destination.mask) << 32) |
-      (static_cast<std::uint64_t>(
-        operation.destination.fprRegister) << 40) |
-      (static_cast<std::uint64_t>(
-        operation.destination.gprRegister) << 48),
-    operation.affectedFlags |
-      (static_cast<std::uint64_t>(
-        operation.raisedFlags) << 8) |
-      (static_cast<std::uint64_t>(
-        operation.raisedStickyFlags) << 16) |
-      (operation.conditionResult ? UINT64_C(1) << 24 : 0));
+    operation.instructionAddress,
+    operation.instruction.raw,
+    operation.rawResult,
+    operation.destination.mask,
+    operation.destination.fprRegister,
+    operation.destination.gprRegister,
+    operation.affectedFlags,
+    operation.raisedFlags,
+    operation.raisedStickyFlags,
+    operation.conditionResult});
 }
 
 bool EECore::cop1ScoreboardBlocks(
@@ -5691,12 +5668,11 @@ void EECore::scheduleBranch(
   std::uint32_t target,
   std::uint32_t address)
 {
-  recordCycleTrace(
-    CycleTraceKind::BranchScheduled,
+  recordCycleEvent(BranchScheduledEvent{
     address,
     target,
-    (condition ? UINT64_C(1) : 0) |
-      (likely ? UINT64_C(2) : 0));
+    condition,
+    likely});
   if (likely && !condition)
   {
     pc = address + 8;
@@ -5710,25 +5686,15 @@ void EECore::scheduleBranch(
   branchDelayTaken = condition;
 }
 
-void EECore::recordCycleTrace(
-  CycleTraceKind kind,
-  std::uint64_t value0,
-  std::uint64_t value1,
-  std::uint64_t value2,
-  std::uint64_t value3)
+void EECore::recordCycleEvent(
+  const CycleTraceEvent &event)
 {
   if (cycleTraceEventCount >= cycleTraceEvents.size())
   {
     throw std::logic_error(
       "EE produced too many trace events in one cycle.");
   }
-  cycleTraceEvents[cycleTraceEventCount++] = {
-    kind,
-    value0,
-    value1,
-    value2,
-    value3
-  };
+  cycleTraceEvents[cycleTraceEventCount++] = event;
 }
 
 void EECore::recordMemoryTrace(
@@ -5739,14 +5705,17 @@ void EECore::recordMemoryTrace(
   std::uint64_t low,
   std::uint64_t high)
 {
-  recordCycleTrace(
-    CycleTraceKind::MemoryAccess,
+  recordCycleEvent(MemoryAccessEvent{
     address,
+    width,
+    write
+      ? MemoryAccessDirection::Write
+      : MemoryAccessDirection::Read,
+    succeeded
+      ? MemoryAccessOutcome::Succeeded
+      : MemoryAccessOutcome::Failed,
     low,
-    high,
-    width |
-      (write ? UINT64_C(1) << 8 : 0) |
-      (succeeded ? UINT64_C(1) << 9 : 0));
+    high});
 }
 
 EEInstructionExecutionOutcome
@@ -5843,19 +5812,17 @@ void EECore::enterException(
   exceptionEnteredThisCycle = true;
   if (type == EEException::Interrupt)
   {
-    recordCycleTrace(
-      CycleTraceKind::InterruptDelivered,
+    recordCycleEvent(InterruptDeliveredEvent{
       instructionAddress,
       cop0Status,
       cop0Cause,
-      pc);
+      pc});
   }
-  recordCycleTrace(
-    CycleTraceKind::ExceptionEntered,
-    static_cast<std::uint8_t>(type),
+  recordCycleEvent(ExceptionEnteredEvent{
+    type,
     address,
     pc,
-    cop0Cause);
+    cop0Cause});
   clearBranchDelayContinuation();
   cop1DividerPostDelayInstructions = 0;
   cop1DividerPostDelayBranchAddress = 0;

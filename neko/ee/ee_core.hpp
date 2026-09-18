@@ -523,6 +523,18 @@ class EECore final : public ClockedComponent
       YoungerIssueGroupMember
     };
 
+    enum class MemoryAccessDirection : std::uint8_t
+    {
+      Read,
+      Write
+    };
+
+    enum class MemoryAccessOutcome : std::uint8_t
+    {
+      Failed,
+      Succeeded
+    };
+
     enum COP1Destination : std::uint8_t
     {
       COP1_DESTINATION_NONE = 0,
@@ -534,13 +546,259 @@ class EECore final : public ClockedComponent
       COP1_DESTINATION_MEMORY = 1 << 5
     };
 
+    struct InstructionIssuedEvent
+    {
+      std::uint32_t address;
+      std::uint32_t instruction;
+      EEOperation operation;
+      EEAcceptanceMode mode;
+    };
+
+    struct BranchScheduledEvent
+    {
+      std::uint32_t address;
+      std::uint32_t target;
+      bool taken;
+      bool likely;
+    };
+
+    struct MemoryAccessEvent
+    {
+      std::uint32_t address;
+      std::uint8_t width;
+      MemoryAccessDirection direction;
+      MemoryAccessOutcome outcome;
+      std::uint64_t low;
+      std::uint64_t high;
+    };
+
+    struct ExceptionEnteredEvent
+    {
+      EEException type;
+      std::uint32_t address;
+      std::uint32_t vector;
+      std::uint32_t cause;
+    };
+
+    struct InterruptDeliveredEvent
+    {
+      std::uint32_t instructionAddress;
+      std::uint32_t status;
+      std::uint32_t cause;
+      std::uint32_t vector;
+    };
+
+    struct COP1LoadInterlockEvent
+    {
+      std::uint32_t instructionAddress;
+      std::uint32_t instruction;
+      std::uint8_t registerIndex;
+      COP1Dependency dependency;
+    };
+
+    struct COP1ResourceInterlockEvent
+    {
+      std::uint32_t instructionAddress;
+      std::uint32_t instruction;
+      std::uint64_t resource;
+      COP1Dependency dependency;
+    };
+
+    struct COP1DividerHazardEvent
+    {
+      std::uint32_t instructionAddress;
+      std::uint32_t instruction;
+      std::uint64_t reasons;
+      std::uint32_t branchAddress;
+      std::uint32_t targetAddress;
+    };
+
+    struct COP1StageTransitionEvent
+    {
+      std::uint64_t programOrder;
+      std::uint32_t instructionAddress;
+      std::uint32_t instruction;
+      std::uint8_t fromStage;
+      COP1PipelineStage toStage;
+      std::uint8_t remainingCycles;
+      std::uint8_t destinationMask;
+      std::uint8_t destinationFPR;
+      std::uint8_t destinationGPR;
+    };
+
+    struct COP1RetiredEvent
+    {
+      std::uint64_t programOrder;
+      std::uint32_t instructionAddress;
+      std::uint32_t instruction;
+      std::uint32_t rawResult;
+      std::uint8_t destinationMask;
+      std::uint8_t destinationFPR;
+      std::uint8_t destinationGPR;
+      std::uint8_t affectedFlags;
+      std::uint8_t raisedFlags;
+      std::uint8_t raisedStickyFlags;
+      bool conditionResult;
+    };
+
+    union CycleTracePayload
+    {
+      InstructionIssuedEvent instructionIssued;
+      BranchScheduledEvent branchScheduled;
+      MemoryAccessEvent memoryAccess;
+      ExceptionEnteredEvent exceptionEntered;
+      InterruptDeliveredEvent interruptDelivered;
+      COP1LoadInterlockEvent cop1LoadInterlock;
+      COP1ResourceInterlockEvent cop1ResourceInterlock;
+      COP1DividerHazardEvent cop1DividerHazard;
+      COP1StageTransitionEvent cop1StageTransition;
+      COP1RetiredEvent cop1Retired;
+
+      CycleTracePayload(
+        const InstructionIssuedEvent &event) :
+        instructionIssued(event)
+      {
+      }
+
+      CycleTracePayload(
+        const BranchScheduledEvent &event) :
+        branchScheduled(event)
+      {
+      }
+
+      CycleTracePayload(
+        const MemoryAccessEvent &event) :
+        memoryAccess(event)
+      {
+      }
+
+      CycleTracePayload(
+        const ExceptionEnteredEvent &event) :
+        exceptionEntered(event)
+      {
+      }
+
+      CycleTracePayload(
+        const InterruptDeliveredEvent &event) :
+        interruptDelivered(event)
+      {
+      }
+
+      CycleTracePayload(
+        const COP1LoadInterlockEvent &event) :
+        cop1LoadInterlock(event)
+      {
+      }
+
+      CycleTracePayload(
+        const COP1ResourceInterlockEvent &event) :
+        cop1ResourceInterlock(event)
+      {
+      }
+
+      CycleTracePayload(
+        const COP1DividerHazardEvent &event) :
+        cop1DividerHazard(event)
+      {
+      }
+
+      CycleTracePayload(
+        const COP1StageTransitionEvent &event) :
+        cop1StageTransition(event)
+      {
+      }
+
+      CycleTracePayload(
+        const COP1RetiredEvent &event) :
+        cop1Retired(event)
+      {
+      }
+    };
+
     struct CycleTraceEvent
     {
-      CycleTraceKind kind = CycleTraceKind::InstructionIssued;
-      std::uint64_t value0 = 0;
-      std::uint64_t value1 = 0;
-      std::uint64_t value2 = 0;
-      std::uint64_t value3 = 0;
+      CycleTraceEvent() :
+        kind(CycleTraceKind::InstructionIssued),
+        payload(InstructionIssuedEvent{
+          0,
+          0,
+          EEOperation::Nop,
+          EEAcceptanceMode::Ordinary})
+      {
+      }
+
+      CycleTraceEvent(
+        const InstructionIssuedEvent &event) :
+        kind(CycleTraceKind::InstructionIssued),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const BranchScheduledEvent &event) :
+        kind(CycleTraceKind::BranchScheduled),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const MemoryAccessEvent &event) :
+        kind(CycleTraceKind::MemoryAccess),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const ExceptionEnteredEvent &event) :
+        kind(CycleTraceKind::ExceptionEntered),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const InterruptDeliveredEvent &event) :
+        kind(CycleTraceKind::InterruptDelivered),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const COP1LoadInterlockEvent &event) :
+        kind(CycleTraceKind::COP1LoadInterlock),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const COP1ResourceInterlockEvent &event) :
+        kind(CycleTraceKind::COP1ResourceInterlock),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const COP1DividerHazardEvent &event) :
+        kind(CycleTraceKind::COP1DividerHazard),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const COP1StageTransitionEvent &event) :
+        kind(CycleTraceKind::COP1StageTransition),
+        payload(event)
+      {
+      }
+
+      CycleTraceEvent(
+        const COP1RetiredEvent &event) :
+        kind(CycleTraceKind::COP1Retired),
+        payload(event)
+      {
+      }
+
+      CycleTraceKind kind;
+      CycleTracePayload payload;
     };
 
     struct DecodedIssueLatch
@@ -1092,12 +1350,7 @@ class EECore final : public ClockedComponent
       bool likely,
       std::uint32_t target,
       std::uint32_t address);
-    void recordCycleTrace(
-      CycleTraceKind kind,
-      std::uint64_t value0,
-      std::uint64_t value1 = 0,
-      std::uint64_t value2 = 0,
-      std::uint64_t value3 = 0);
+    void recordCycleEvent(const CycleTraceEvent &event);
     void recordMemoryTrace(
       std::uint32_t address,
       std::uint8_t width,
