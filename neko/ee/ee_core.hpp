@@ -535,6 +535,18 @@ class EECore final : public ClockedComponent
       Succeeded
     };
 
+    enum class ExceptionRestartMode : std::uint8_t
+    {
+      Instruction,
+      BranchDelaySlot
+    };
+
+    enum class ExceptionCoprocessor : std::uint8_t
+    {
+      None,
+      COP1
+    };
+
     enum COP1Destination : std::uint8_t
     {
       COP1_DESTINATION_NONE = 0,
@@ -639,6 +651,20 @@ class EECore final : public ClockedComponent
       std::uint8_t raisedFlags;
       std::uint8_t raisedStickyFlags;
       bool conditionResult;
+    };
+
+    struct ExceptionTransitionRequest
+    {
+      EEException type = EEException::None;
+      std::uint32_t instructionAddress = 0;
+      std::uint32_t faultAddress = 0;
+      std::uint32_t instruction = 0;
+      std::uint64_t programOrder = 0;
+      ExceptionRestartMode restartMode =
+        ExceptionRestartMode::Instruction;
+      std::uint32_t branchAddress = 0;
+      ExceptionCoprocessor coprocessor =
+        ExceptionCoprocessor::None;
     };
 
     union CycleTracePayload
@@ -1050,11 +1076,15 @@ class EECore final : public ClockedComponent
     EEInstructionFetchResult raiseFetchException(
       EEException type,
       std::uint32_t address);
-    void enterException(
+    ExceptionTransitionRequest makeExceptionTransitionRequest(
       EEException type,
       std::uint32_t instructionAddress,
-      std::uint32_t exceptionAddress,
-      std::uint32_t instruction);
+      std::uint32_t faultAddress,
+      std::uint32_t instruction,
+      ExceptionCoprocessor coprocessor =
+        ExceptionCoprocessor::None) const;
+    void enterException(
+      const ExceptionTransitionRequest &request);
     void cancelInFlightCOP1(
       COP1CancellationScope scope,
       std::uint64_t programOrder = 0);

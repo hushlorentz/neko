@@ -659,26 +659,25 @@ EEIssueMemberOutcome EECore::resolveIssueLatchFailure()
   switch (issueLatch.failure)
   {
     case IssueLatchFailure::AddressError:
-      enterException(
+      enterException(makeExceptionTransitionRequest(
         EEException::AddressErrorLoadOrFetch,
         address,
         address,
-        0);
+        0));
       return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::BusError:
-      enterException(
+      enterException(makeExceptionTransitionRequest(
         EEException::InstructionBusError,
         address,
         address,
-        0);
+        0));
       return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::ReservedInstruction:
-      rejectedInstructionValue = instruction;
-      enterException(
+      enterException(makeExceptionTransitionRequest(
         EEException::ReservedInstruction,
         address,
         address,
-        instruction);
+        instruction));
       return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::UnsupportedInstruction:
       rejectedInstructionValue = instruction;
@@ -1116,7 +1115,11 @@ void EECore::haltExecution()
 
 void EECore::enterInterruptException()
 {
-  enterException(EEException::Interrupt, pc, pc, 0);
+  enterException(makeExceptionTransitionRequest(
+    EEException::Interrupt,
+    pc,
+    pc,
+    0));
 }
 
 bool EECore::clockActive() const
@@ -2860,11 +2863,11 @@ EEInstructionExecutionOutcome EECore::executeSoftwareException(
         "EE software-exception handler received an "
         "incompatible operation.");
   }
-  enterException(
+  enterException(makeExceptionTransitionRequest(
     exceptionType,
     address,
     address,
-    instruction.raw);
+    instruction.raw));
   return EEInstructionExecutionOutcome::Faulted;
 }
 
@@ -3804,11 +3807,11 @@ EECore::raiseArithmeticOverflow(
   std::uint32_t address,
   std::uint32_t instruction)
 {
-  enterException(
+  enterException(makeExceptionTransitionRequest(
     EEException::ArithmeticOverflow,
     address,
     address,
-    instruction);
+    instruction));
   return EEInstructionExecutionOutcome::Faulted;
 }
 
@@ -3820,14 +3823,12 @@ bool EECore::requireCOP1Usable(
   {
     return true;
   }
-  cop0Cause =
-    (cop0Cause & ~EECOP0Cause::COPROCESSOR_ERROR_MASK) |
-    EECOP0Cause::COPROCESSOR_1;
-  enterException(
+  enterException(makeExceptionTransitionRequest(
     EEException::CoprocessorUnusable,
     address,
     address,
-    instruction);
+    instruction,
+    ExceptionCoprocessor::COP1));
   return false;
 }
 
@@ -5725,11 +5726,11 @@ EECore::raiseDataAccessException(
   std::uint32_t dataAddress,
   std::uint32_t instruction)
 {
-  enterException(
+  enterException(makeExceptionTransitionRequest(
     type,
     instructionAddress,
     dataAddress,
-    instruction);
+    instruction));
   return EEInstructionExecutionOutcome::Faulted;
 }
 
@@ -5738,89 +5739,113 @@ bool EECore::raiseCOP1DataAccessException(
   EEException type,
   std::uint32_t dataAddress)
 {
-  const bool alreadyExceptionLevel =
-    (cop0Status & EECOP0Status::EXCEPTION_LEVEL) != 0;
-  const bool delaySlot =
+  ExceptionTransitionRequest request =
+    makeExceptionTransitionRequest(
+      type,
+      operation.instructionAddress,
+      dataAddress,
+      operation.instruction.raw);
+  request.programOrder = operation.programOrder;
+  request.restartMode = ExceptionRestartMode::Instruction;
+  request.branchAddress = 0;
+  if (
     cop1DividerPostDelayInstructions != 0 &&
     operation.instructionAddress ==
-      cop1DividerPostDelayBranchAddress + 4;
-  const std::uint32_t owningBranchAddress =
-    cop1DividerPostDelayBranchAddress;
-  const std::uint64_t previousProgramOrder =
-    executingProgramOrder;
-  executingProgramOrder = operation.programOrder;
-  enterException(
-    type,
-    operation.instructionAddress,
-    dataAddress,
-    operation.instruction.raw);
-  executingProgramOrder = previousProgramOrder;
-  if (delaySlot && !alreadyExceptionLevel)
+      cop1DividerPostDelayBranchAddress + 4)
   {
-    cop0EPC = owningBranchAddress;
-    cop0Cause |= EECOP0Cause::BRANCH_DELAY;
+    request.restartMode =
+      ExceptionRestartMode::BranchDelaySlot;
+    request.branchAddress =
+      cop1DividerPostDelayBranchAddress;
   }
+  enterException(request);
   return false;
 }
 
-void EECore::enterException(
+EECore::ExceptionTransitionRequest
+EECore::makeExceptionTransitionRequest(
   EEException type,
   std::uint32_t instructionAddress,
-  std::uint32_t address,
-  std::uint32_t instruction)
+  std::uint32_t faultAddress,
+  std::uint32_t instruction,
+  ExceptionCoprocessor coprocessor) const
 {
-  const std::uint64_t exceptionBoundary =
+  ExceptionTransitionRequest request;
+  request.type = type;
+  request.instructionAddress = instructionAddress;
+  request.faultAddress = faultAddress;
+  request.instruction = instruction;
+  request.programOrder =
     executingProgramOrder != 0
       ? executingProgramOrder
       : nextEEProgramOrder;
+  if (branchDelayPending)
+  {
+    request.restartMode =
+      ExceptionRestartMode::BranchDelaySlot;
+    request.branchAddress = branchInstructionAddress;
+  }
+  request.coprocessor = coprocessor;
+  return request;
+}
+
+void EECore::enterException(
+  const ExceptionTransitionRequest &request)
+{
   cancelInFlightCOP1(
     COP1CancellationScope::AtOrAfter,
-    exceptionBoundary);
+    request.programOrder);
   const bool alreadyExceptionLevel =
     (cop0Status & EECOP0Status::EXCEPTION_LEVEL) != 0;
   if (!alreadyExceptionLevel)
   {
-    const bool delaySlot = branchDelayPending;
-    cop0EPC = delaySlot
-      ? branchInstructionAddress
-      : instructionAddress;
-    if (delaySlot)
+    if (request.restartMode ==
+        ExceptionRestartMode::BranchDelaySlot)
     {
+      cop0EPC = request.branchAddress;
       cop0Cause |= EECOP0Cause::BRANCH_DELAY;
     }
     else
     {
+      cop0EPC = request.instructionAddress;
       cop0Cause &= ~EECOP0Cause::BRANCH_DELAY;
     }
   }
   cop0Cause =
     (cop0Cause & ~EECOP0Cause::EXCEPTION_CODE_MASK) |
-    (static_cast<std::uint32_t>(exceptionCode(type)) << 2);
-  cop0Status |= EECOP0Status::EXCEPTION_LEVEL;
-  if (type == EEException::AddressErrorLoadOrFetch ||
-      type == EEException::AddressErrorStore)
+    (static_cast<std::uint32_t>(
+      exceptionCode(request.type)) << 2);
+  if (request.coprocessor == ExceptionCoprocessor::COP1)
   {
-    cop0BadVAddr = address;
+    cop0Cause =
+      (cop0Cause & ~EECOP0Cause::COPROCESSOR_ERROR_MASK) |
+      EECOP0Cause::COPROCESSOR_1;
+  }
+  cop0Status |= EECOP0Status::EXCEPTION_LEVEL;
+  if (request.type == EEException::AddressErrorLoadOrFetch ||
+      request.type == EEException::AddressErrorStore)
+  {
+    cop0BadVAddr = request.faultAddress;
   }
 
-  exception = type;
-  faultAddress = address;
-  pc = exceptionVector(type, alreadyExceptionLevel);
+  exception = request.type;
+  faultAddress = request.faultAddress;
+  pc = exceptionVector(request.type, alreadyExceptionLevel);
   state = EEExecutionState::Running;
   haltReason = EEStopReason::None;
-  rejectedInstructionValue = instruction;
+  rejectedInstructionValue = request.instruction;
   exceptionEnteredThisCycle = true;
-  if (type == EEException::Interrupt)
+  if (request.type == EEException::Interrupt)
   {
     recordCycleEvent(InterruptDeliveredEvent{
-      instructionAddress,
+      request.instructionAddress,
       cop0Status,
       cop0Cause,
       pc});
   }
   recordCycleEvent(ExceptionEnteredEvent{
-    type,
-    address,
+    request.type,
+    request.faultAddress,
     pc,
     cop0Cause});
   clearBranchDelayContinuation();
