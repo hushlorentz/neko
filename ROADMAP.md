@@ -1220,7 +1220,7 @@ accumulator or condition-result contract:
 
 #### Persistence and Derived-State Reconciliation
 
-- [ ] Separate save-state container framing from per-component serialization,
+- [x] Separate save-state container framing from per-component serialization,
       validation, reconciliation, and transactional commit
 - [ ] Keep format order and the current save-state version stable during
       behavior-preserving source decomposition

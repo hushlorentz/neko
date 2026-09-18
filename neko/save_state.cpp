@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <limits>
 #include <list>
 #include <stdexcept>
@@ -33,6 +34,11 @@ namespace
   constexpr std::uint32_t MAX_GIF_REGISTER_VALUES =
     0x7fffu * 16u;
   constexpr std::uint8_t MAX_PIPELINE_STAGE_INDEX = 64;
+  static_assert(
+    noexcept(
+      std::declval<std::deque<GIFQuadword> &>().swap(
+        std::declval<std::deque<GIFQuadword> &>())),
+    "Transactional save-state commit requires noexcept GIF FIFO swap.");
 
   class SaveStateWriter
   {
@@ -282,6 +288,89 @@ namespace
 
       const std::vector<std::uint8_t> &bytes;
       std::size_t position = 0;
+  };
+
+  class SaveStateContainerWriter
+  {
+    public:
+      SaveStateContainerWriter()
+      {
+        writer.writeBytes(
+          SAVE_STATE_MAGIC,
+          sizeof(SAVE_STATE_MAGIC));
+        writer.writeU32(SAVE_STATE_VERSION);
+        payloadLengthOffset = writer.size();
+        writer.writeU64(0);
+        checksumOffset = writer.size();
+        writer.writeU64(0);
+      }
+
+      SaveStateWriter *payload()
+      {
+        return &writer;
+      }
+
+      std::vector<std::uint8_t> finish()
+      {
+        writer.patchU64(
+          payloadLengthOffset,
+          writer.size() - SAVE_STATE_HEADER_SIZE);
+        writer.patchU64(
+          checksumOffset,
+          writer.checksumFrom(SAVE_STATE_HEADER_SIZE));
+        return writer.finish();
+      }
+
+    private:
+      SaveStateWriter writer;
+      std::size_t payloadLengthOffset = 0;
+      std::size_t checksumOffset = 0;
+  };
+
+  class SaveStateContainerReader
+  {
+    public:
+      explicit SaveStateContainerReader(
+        const std::vector<std::uint8_t> &state) :
+        reader(state)
+      {
+        reader.expectBytes(
+          SAVE_STATE_MAGIC,
+          sizeof(SAVE_STATE_MAGIC),
+          "magic");
+        const std::uint32_t version = reader.readU32();
+        if (version != SAVE_STATE_VERSION)
+        {
+          SaveStateReader::invalid("version is incompatible");
+        }
+        const std::uint64_t payloadLength = reader.readU64();
+        const std::uint64_t expectedChecksum =
+          reader.readU64();
+        if (payloadLength != reader.size() - reader.offset())
+        {
+          SaveStateReader::invalid(
+            "payload length does not match the input");
+        }
+        if (expectedChecksum !=
+            reader.checksumFrom(reader.offset()))
+        {
+          SaveStateReader::invalid(
+            "payload checksum does not match");
+        }
+      }
+
+      SaveStateReader *payload()
+      {
+        return &reader;
+      }
+
+      void requireEnd() const
+      {
+        reader.requireEnd();
+      }
+
+    private:
+      SaveStateReader reader;
   };
 
   template<typename Enum>
@@ -948,6 +1037,15 @@ class NekoSaveStateCodec
     using PipelineLists =
       std::array<std::list<Pipeline *>, 3>;
 
+    struct SystemReconciliation
+    {
+      PipelineLists vu0Lists;
+      PipelineLists vu1Lists;
+      EECore::COP1DividerOccupancy dividerOccupancy;
+      std::vector<MasterClockScheduler::ScheduledComponent>
+        schedule;
+    };
+
     static void writeSystem(
       SaveStateWriter *writer,
       const NekoSystem &system);
@@ -955,13 +1053,13 @@ class NekoSaveStateCodec
       SaveStateReader *reader,
       NekoSystem *system);
     static void validateSystem(const NekoSystem &system);
+    static SystemReconciliation reconcileSystem(
+      const NekoSystem &source,
+      NekoSystem *destination);
     static void commitSystem(
       NekoSystem *destination,
       NekoSystem *source,
-      PipelineLists *vu0Lists,
-      PipelineLists *vu1Lists,
-      std::vector<MasterClockScheduler::ScheduledComponent>
-        *schedule);
+      SystemReconciliation *reconciliation);
 
     static void writeMasterClock(
       SaveStateWriter *writer,
@@ -1080,80 +1178,27 @@ class NekoSaveStateCodec
 std::vector<std::uint8_t> NekoSaveStateCodec::save(
   const NekoSystem &system)
 {
-  SaveStateWriter writer;
-  writer.writeBytes(
-    SAVE_STATE_MAGIC,
-    sizeof(SAVE_STATE_MAGIC));
-  writer.writeU32(SAVE_STATE_VERSION);
-  const std::size_t payloadLengthOffset = writer.size();
-  writer.writeU64(0);
-  const std::size_t checksumOffset = writer.size();
-  writer.writeU64(0);
-  writeSystem(&writer, system);
-  writer.patchU64(
-    payloadLengthOffset,
-    writer.size() - SAVE_STATE_HEADER_SIZE);
-  writer.patchU64(
-    checksumOffset,
-    writer.checksumFrom(SAVE_STATE_HEADER_SIZE));
-  return writer.finish();
+  SaveStateContainerWriter container;
+  writeSystem(container.payload(), system);
+  return container.finish();
 }
 
 void NekoSaveStateCodec::load(
   NekoSystem *system,
   const std::vector<std::uint8_t> &state)
 {
-  SaveStateReader reader(state);
-  reader.expectBytes(
-    SAVE_STATE_MAGIC,
-    sizeof(SAVE_STATE_MAGIC),
-    "magic");
-  const std::uint32_t version = reader.readU32();
-  if (version != SAVE_STATE_VERSION)
-  {
-    SaveStateReader::invalid("version is incompatible");
-  }
-  const std::uint64_t payloadLength = reader.readU64();
-  const std::uint64_t expectedChecksum = reader.readU64();
-  require(
-    payloadLength == reader.size() - reader.offset(),
-    "payload length does not match the input");
-  require(
-    expectedChecksum ==
-      reader.checksumFrom(reader.offset()),
-    "payload checksum does not match");
-
+  SaveStateContainerReader container(state);
   NekoSystem parsed;
-  readSystem(&reader, &parsed);
-  reader.requireEnd();
+  readSystem(container.payload(), &parsed);
+  container.requireEnd();
   validateSystem(parsed);
 
-  PipelineLists vu0Lists = makePipelineLists(
-    parsed.vu0Component.orchestrator,
-    &system->vu0Component.orchestrator);
-  PipelineLists vu1Lists = makePipelineLists(
-    parsed.vu1Component.orchestrator,
-    &system->vu1Component.orchestrator);
-  std::vector<MasterClockScheduler::ScheduledComponent>
-    schedule;
-  schedule.reserve(parsed.masterClock.components.size());
-  for (const auto &scheduled : parsed.masterClock.components)
-  {
-    schedule.push_back({
-      componentForID(
-        system,
-        componentID(parsed, scheduled.component)),
-      scheduled.period,
-      scheduled.phase
-    });
-  }
-
+  SystemReconciliation reconciliation =
+    reconcileSystem(parsed, system);
   commitSystem(
     system,
     &parsed,
-    &vu0Lists,
-    &vu1Lists,
-    &schedule);
+    &reconciliation);
 }
 
 void NekoSaveStateCodec::writeSystem(
@@ -1251,18 +1296,45 @@ void NekoSaveStateCodec::validateSystem(
   }
 }
 
+NekoSaveStateCodec::SystemReconciliation
+NekoSaveStateCodec::reconcileSystem(
+  const NekoSystem &source,
+  NekoSystem *destination)
+{
+  SystemReconciliation reconciliation;
+  reconciliation.vu0Lists = makePipelineLists(
+    source.vu0Component.orchestrator,
+    &destination->vu0Component.orchestrator);
+  reconciliation.vu1Lists = makePipelineLists(
+    source.vu1Component.orchestrator,
+    &destination->vu1Component.orchestrator);
+  reconciliation.dividerOccupancy =
+    source.eeCoreComponent.derivedCOP1DividerOccupancy();
+  reconciliation.schedule.reserve(
+    source.masterClock.components.size());
+  for (const auto &scheduled : source.masterClock.components)
+  {
+    reconciliation.schedule.push_back({
+      componentForID(
+        destination,
+        componentID(source, scheduled.component)),
+      scheduled.period,
+      scheduled.phase
+    });
+  }
+  return reconciliation;
+}
+
 void NekoSaveStateCodec::commitSystem(
   NekoSystem *destination,
   NekoSystem *source,
-  PipelineLists *vu0Lists,
-  PipelineLists *vu1Lists,
-  std::vector<MasterClockScheduler::ScheduledComponent>
-    *schedule)
+  SystemReconciliation *reconciliation)
 {
   destination->inputState = source->inputState;
   destination->masterClock.masterCycle =
     source->masterClock.masterCycle;
-  destination->masterClock.components.swap(*schedule);
+  destination->masterClock.components.swap(
+    reconciliation->schedule);
   destination->eeCoreComponent.generalRegisters =
     source->eeCoreComponent.generalRegisters;
   destination->eeCoreComponent.floatingPointRegisters =
@@ -1328,12 +1400,10 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.pendingMac0;
   destination->eeCoreComponent.pendingMac1 =
     source->eeCoreComponent.pendingMac1;
-  const EECore::COP1DividerOccupancy dividerOccupancy =
-    source->eeCoreComponent.derivedCOP1DividerOccupancy();
   destination->eeCoreComponent.cop1DividerInitiationCycles =
-    dividerOccupancy.initiationCycles;
+    reconciliation->dividerOccupancy.initiationCycles;
   destination->eeCoreComponent.cop1DividerOperation =
-    dividerOccupancy.operation;
+    reconciliation->dividerOccupancy.operation;
   destination->eeCoreComponent.shiftAmountOrdering =
     source->eeCoreComponent.shiftAmountOrdering;
   destination->eeCoreComponent.branchDelayPending =
@@ -1370,11 +1440,11 @@ void NekoSaveStateCodec::commitSystem(
   commitVPU(
     &destination->vu0Component,
     &source->vu0Component,
-    vu0Lists);
+    &reconciliation->vu0Lists);
   commitVPU(
     &destination->vu1Component,
     &source->vu1Component,
-    vu1Lists);
+    &reconciliation->vu1Lists);
   commitVIF(
     &destination->vif0Component,
     &source->vif0Component);
@@ -1434,7 +1504,8 @@ void NekoSaveStateCodec::commitSystem(
     source->gifPath3Component.transferredQuadwords;
   path3.completedPackets =
     source->gifPath3Component.completedPackets;
-  path3.guestFIFO = source->gifPath3Component.guestFIFO;
+  path3.guestFIFO.swap(
+    source->gifPath3Component.guestFIFO);
 
   commitGS(
     &destination->gsComponent,
