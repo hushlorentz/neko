@@ -213,14 +213,14 @@ EEGuestExecutionResult NekoSystem::runELF(
 void NekoSystem::startTrace()
 {
   traceEvents.clear();
-  eeCoreComponent.cycleTraceEventCount = 0;
+  eeCoreComponent.cycleEventCount = 0;
   lastTracedEEStateHash = eeCoreComponent.stateHash();
   collectingTrace = true;
 }
 
 void NekoSystem::stopTrace()
 {
-  eeCoreComponent.cycleTraceEventCount = 0;
+  eeCoreComponent.cycleEventCount = 0;
   lastTracedEEStateHash = 0;
   collectingTrace = false;
 }
@@ -228,7 +228,7 @@ void NekoSystem::stopTrace()
 void NekoSystem::clearTrace()
 {
   traceEvents.clear();
-  eeCoreComponent.cycleTraceEventCount = 0;
+  eeCoreComponent.cycleEventCount = 0;
   if (collectingTrace)
   {
     lastTracedEEStateHash = eeCoreComponent.stateHash();
@@ -484,7 +484,7 @@ void NekoSystem::clockMasterCycle()
       pixels,
       presentationBoundary);
   }
-  eeCoreComponent.cycleTraceEventCount = 0;
+  eeCoreComponent.cycleEventCount = 0;
 }
 
 void NekoSystem::synchronizeEEInterruptLines()
@@ -599,11 +599,11 @@ void NekoSystem::recordCycleTrace(
   std::uint64_t presentationBoundary)
 {
   for (std::size_t index = 0;
-       index < eeCoreComponent.cycleTraceEventCount;
+       index < eeCoreComponent.cycleEventCount;
        ++index)
   {
-    const EECore::CycleTraceEvent &event =
-      eeCoreComponent.cycleTraceEvents[index];
+    const EECore::CycleEvent &event =
+      eeCoreComponent.cycleEvents[index];
     NekoTraceEventType type =
       NekoTraceEventType::InstructionIssued;
     std::uint64_t value0 = 0;
@@ -612,7 +612,7 @@ void NekoSystem::recordCycleTrace(
     std::uint64_t value3 = 0;
     switch (event.kind)
     {
-      case EECore::CycleTraceKind::InstructionIssued:
+      case EECore::CycleEventKind::InstructionIssued:
       {
         const EECore::InstructionIssuedEvent &issued =
           event.payload.instructionIssued;
@@ -624,7 +624,7 @@ void NekoSystem::recordCycleTrace(
           issued.mode == EEAcceptanceMode::DelaySlot;
         break;
       }
-      case EECore::CycleTraceKind::BranchScheduled:
+      case EECore::CycleEventKind::BranchScheduled:
       {
         const EECore::BranchScheduledEvent &branch =
           event.payload.branchScheduled;
@@ -640,7 +640,7 @@ void NekoSystem::recordCycleTrace(
             : 0);
         break;
       }
-      case EECore::CycleTraceKind::MemoryAccess:
+      case EECore::CycleEventKind::MemoryAccess:
       {
         const EECore::MemoryAccessEvent &memory =
           event.payload.memoryAccess;
@@ -660,7 +660,7 @@ void NekoSystem::recordCycleTrace(
             : 0);
         break;
       }
-      case EECore::CycleTraceKind::ExceptionEntered:
+      case EECore::CycleEventKind::ExceptionEntered:
       {
         const EECore::ExceptionEnteredEvent &exception =
           event.payload.exceptionEntered;
@@ -671,7 +671,7 @@ void NekoSystem::recordCycleTrace(
         value3 = exception.cause;
         break;
       }
-      case EECore::CycleTraceKind::InterruptDelivered:
+      case EECore::CycleEventKind::InterruptDelivered:
       {
         const EECore::InterruptDeliveredEvent &interrupt =
           event.payload.interruptDelivered;
@@ -682,7 +682,7 @@ void NekoSystem::recordCycleTrace(
         value3 = interrupt.vector;
         break;
       }
-      case EECore::CycleTraceKind::COP1LoadInterlock:
+      case EECore::CycleEventKind::COP1LoadInterlock:
       {
         const EECore::COP1LoadInterlockEvent &interlock =
           event.payload.cop1LoadInterlock;
@@ -694,7 +694,7 @@ void NekoSystem::recordCycleTrace(
           static_cast<std::uint8_t>(interlock.dependency);
         break;
       }
-      case EECore::CycleTraceKind::COP1ResourceInterlock:
+      case EECore::CycleEventKind::COP1ResourceInterlock:
       {
         const EECore::COP1ResourceInterlockEvent &interlock =
           event.payload.cop1ResourceInterlock;
@@ -706,7 +706,7 @@ void NekoSystem::recordCycleTrace(
           static_cast<std::uint8_t>(interlock.dependency);
         break;
       }
-      case EECore::CycleTraceKind::COP1DividerHazard:
+      case EECore::CycleEventKind::COP1DividerHazard:
       {
         const EECore::COP1DividerHazardEvent &hazard =
           event.payload.cop1DividerHazard;
@@ -720,7 +720,7 @@ void NekoSystem::recordCycleTrace(
             hazard.targetAddress) << 32);
         break;
       }
-      case EECore::CycleTraceKind::COP1StageTransition:
+      case EECore::CycleEventKind::COP1StageTransition:
       {
         const EECore::COP1StageTransitionEvent &transition =
           event.payload.cop1StageTransition;
@@ -745,7 +745,7 @@ void NekoSystem::recordCycleTrace(
             transition.destinationGPR) << 16);
         break;
       }
-      case EECore::CycleTraceKind::COP1Retired:
+      case EECore::CycleEventKind::COP1Retired:
       {
         const EECore::COP1RetiredEvent &retirement =
           event.payload.cop1Retired;

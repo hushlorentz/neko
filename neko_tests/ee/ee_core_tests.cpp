@@ -52,15 +52,55 @@ struct EECoreTestAccess
     const EECore &core)
   {
     return
-      core.cycleTraceEventCount == 1 &&
-      core.cycleTraceEvents[0].kind ==
-        EECore::CycleTraceKind::InstructionIssued &&
-      core.cycleTraceEvents[0].payload.instructionIssued.address == 0 &&
-      core.cycleTraceEvents[0].payload.instructionIssued.instruction == 0 &&
-      core.cycleTraceEvents[0].payload.instructionIssued.operation ==
+      core.cycleEventCount == 1 &&
+      core.cycleEvents[0].kind ==
+        EECore::CycleEventKind::InstructionIssued &&
+      core.cycleEvents[0].payload.instructionIssued.address == 0 &&
+      core.cycleEvents[0].payload.instructionIssued.instruction == 0 &&
+      core.cycleEvents[0].payload.instructionIssued.operation ==
         EEOperation::Nop &&
-      core.cycleTraceEvents[0].payload.instructionIssued.mode ==
+      core.cycleEvents[0].payload.instructionIssued.mode ==
         EEAcceptanceMode::Ordinary;
+  }
+
+  static bool fillCycleEventCapacityInOrder(EECore *core)
+  {
+    core->cycleEventCount = 0;
+    for (std::size_t index = 0;
+         index < EECore::CYCLE_EVENT_CAPACITY;
+         ++index)
+    {
+      core->recordCycleEvent(EECore::InstructionIssuedEvent{
+        static_cast<std::uint32_t>(index),
+        0,
+        EEOperation::Nop,
+        EEAcceptanceMode::Ordinary});
+    }
+    if (core->cycleEventCount !=
+        EECore::CYCLE_EVENT_CAPACITY)
+    {
+      return false;
+    }
+    for (std::size_t index = 0;
+         index < core->cycleEventCount;
+         ++index)
+    {
+      if (core->cycleEvents[index]
+            .payload.instructionIssued.address != index)
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static void appendCycleEvent(EECore *core)
+  {
+    core->recordCycleEvent(EECore::InstructionIssuedEvent{
+      0,
+      0,
+      EEOperation::Nop,
+      EEAcceptanceMode::Ordinary});
   }
 
   static void setInFlightCOP1ProgramOrder(
@@ -589,6 +629,19 @@ TEST_CASE(
   REQUIRE(
     EECoreTestAccess::cycleEventsStartWithInstructionIssue(
       core));
+}
+
+TEST_CASE("EE cycle event storage is fixed-capacity and ordered")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+
+  REQUIRE(
+    EECoreTestAccess::fillCycleEventCapacityInOrder(
+      &core));
+  REQUIRE_THROWS_WITH(
+    EECoreTestAccess::appendCycleEvent(&core),
+    "EE produced too many cycle events.");
 }
 
 TEST_CASE("EE in-flight COP1 program order is allocation-free and slot-independent")

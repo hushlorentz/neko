@@ -411,7 +411,7 @@ class EECore final : public ClockedComponent
     friend class NekoSaveStateCodec;
     friend struct EECoreTestAccess;
 
-    enum class CycleTraceKind : std::uint8_t
+    enum class CycleEventKind : std::uint8_t
     {
       InstructionIssued,
       BranchScheduled,
@@ -679,7 +679,7 @@ class EECore final : public ClockedComponent
         ExceptionCoprocessor::None;
     };
 
-    union CycleTracePayload
+    union CycleEventPayload
     {
       InstructionIssuedEvent instructionIssued;
       BranchScheduledEvent branchScheduled;
@@ -692,71 +692,71 @@ class EECore final : public ClockedComponent
       COP1StageTransitionEvent cop1StageTransition;
       COP1RetiredEvent cop1Retired;
 
-      CycleTracePayload(
+      CycleEventPayload(
         const InstructionIssuedEvent &event) :
         instructionIssued(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const BranchScheduledEvent &event) :
         branchScheduled(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const MemoryAccessEvent &event) :
         memoryAccess(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const ExceptionEnteredEvent &event) :
         exceptionEntered(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const InterruptDeliveredEvent &event) :
         interruptDelivered(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const COP1LoadInterlockEvent &event) :
         cop1LoadInterlock(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const COP1ResourceInterlockEvent &event) :
         cop1ResourceInterlock(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const COP1DividerHazardEvent &event) :
         cop1DividerHazard(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const COP1StageTransitionEvent &event) :
         cop1StageTransition(event)
       {
       }
 
-      CycleTracePayload(
+      CycleEventPayload(
         const COP1RetiredEvent &event) :
         cop1Retired(event)
       {
       }
     };
 
-    struct CycleTraceEvent
+    struct CycleEvent
     {
-      CycleTraceEvent() :
-        kind(CycleTraceKind::InstructionIssued),
+      CycleEvent() :
+        kind(CycleEventKind::InstructionIssued),
         payload(InstructionIssuedEvent{
           0,
           0,
@@ -765,78 +765,78 @@ class EECore final : public ClockedComponent
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const InstructionIssuedEvent &event) :
-        kind(CycleTraceKind::InstructionIssued),
+        kind(CycleEventKind::InstructionIssued),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const BranchScheduledEvent &event) :
-        kind(CycleTraceKind::BranchScheduled),
+        kind(CycleEventKind::BranchScheduled),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const MemoryAccessEvent &event) :
-        kind(CycleTraceKind::MemoryAccess),
+        kind(CycleEventKind::MemoryAccess),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const ExceptionEnteredEvent &event) :
-        kind(CycleTraceKind::ExceptionEntered),
+        kind(CycleEventKind::ExceptionEntered),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const InterruptDeliveredEvent &event) :
-        kind(CycleTraceKind::InterruptDelivered),
+        kind(CycleEventKind::InterruptDelivered),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const COP1LoadInterlockEvent &event) :
-        kind(CycleTraceKind::COP1LoadInterlock),
+        kind(CycleEventKind::COP1LoadInterlock),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const COP1ResourceInterlockEvent &event) :
-        kind(CycleTraceKind::COP1ResourceInterlock),
+        kind(CycleEventKind::COP1ResourceInterlock),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const COP1DividerHazardEvent &event) :
-        kind(CycleTraceKind::COP1DividerHazard),
+        kind(CycleEventKind::COP1DividerHazard),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const COP1StageTransitionEvent &event) :
-        kind(CycleTraceKind::COP1StageTransition),
+        kind(CycleEventKind::COP1StageTransition),
         payload(event)
       {
       }
 
-      CycleTraceEvent(
+      CycleEvent(
         const COP1RetiredEvent &event) :
-        kind(CycleTraceKind::COP1Retired),
+        kind(CycleEventKind::COP1Retired),
         payload(event)
       {
       }
 
-      CycleTraceKind kind;
-      CycleTracePayload payload;
+      CycleEventKind kind;
+      CycleEventPayload payload;
     };
 
     struct DecodedIssueLatch
@@ -1055,17 +1055,21 @@ class EECore final : public ClockedComponent
     std::uint32_t cop1DividerPostTargetAddress = 0;
     EEAcceptanceRecords acceptanceRecords;
     bool exceptionEnteredThisCycle = false;
-    static constexpr std::size_t CYCLE_TRACE_CAPACITY =
-      COP1_IN_FLIGHT_CAPACITY * 2 + 16;
+    static constexpr std::size_t
+      MAX_COP1_CYCLE_EVENTS =
+        COP1_IN_FLIGHT_CAPACITY * 2;
+    static constexpr std::size_t
+      MAX_FRONT_END_CYCLE_EVENTS = 16;
+    static constexpr std::size_t CYCLE_EVENT_CAPACITY =
+      MAX_COP1_CYCLE_EVENTS + MAX_FRONT_END_CYCLE_EVENTS;
     static_assert(
-      CYCLE_TRACE_CAPACITY >=
-        COP1_IN_FLIGHT_CAPACITY * 2 + 16,
-      "EE trace capacity must hold all C1 transitions, "
-      "retirements, both issued instructions, and their "
-      "architectural events.");
-    std::array<CycleTraceEvent, CYCLE_TRACE_CAPACITY>
-      cycleTraceEvents = {};
-    std::size_t cycleTraceEventCount = 0;
+      MAX_FRONT_END_CYCLE_EVENTS >= 8,
+      "EE cycle event capacity must hold two issued "
+      "instructions, branch or memory effects, divider "
+      "diagnostics, and interrupt or exception entry.");
+    std::array<CycleEvent, CYCLE_EVENT_CAPACITY>
+      cycleEvents = {};
+    std::size_t cycleEventCount = 0;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);
@@ -1392,7 +1396,7 @@ class EECore final : public ClockedComponent
       BranchMode mode,
       std::uint32_t target,
       std::uint32_t address);
-    void recordCycleEvent(const CycleTraceEvent &event);
+    void recordCycleEvent(const CycleEvent &event);
     void recordMemoryTrace(
       std::uint32_t address,
       std::uint8_t width,

@@ -1207,7 +1207,7 @@ accumulator or condition-result contract:
       fault metadata, issue-front-end cleanup, and younger-work cancellation
 - [x] Replace ambiguous trace and exception boolean parameters with typed event
       payloads or explicit modes
-- [ ] Preserve cycle-local fixed-capacity event storage and deterministic event
+- [x] Preserve cycle-local fixed-capacity event storage and deterministic event
       ordering
 - [ ] Audit synchronous VU and GIF trace callbacks as observation dependencies;
       either route them through the event boundary or explicitly defer them

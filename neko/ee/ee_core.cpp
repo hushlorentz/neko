@@ -402,7 +402,7 @@ void EECore::reset()
   reconcileCOP1DividerOccupancy();
   acceptanceRecords.clear();
   exceptionEnteredThisCycle = false;
-  cycleTraceEventCount = 0;
+  cycleEventCount = 0;
 }
 
 void EECore::attachBus(EEBus *newBus)
@@ -1131,7 +1131,7 @@ void EECore::clock()
 {
   acceptanceRecords.clear();
   exceptionEnteredThisCycle = false;
-  cycleTraceEventCount = 0;
+  cycleEventCount = 0;
   issueSelection = {};
   if (!clockActive())
   {
@@ -4254,8 +4254,8 @@ void EECore::advancePendingCOP1(
   std::uint32_t *completedLoadRegisters)
 {
   *completedLoadRegisters = 0;
-  const std::size_t deferredTraceStart =
-    cycleTraceEventCount;
+  const std::size_t deferredEventStart =
+    cycleEventCount;
   const COP1AdvanceEligibility eligibility =
     evaluateCOP1AdvanceEligibility();
   const COP1ProgramOrderView programOrder =
@@ -4265,18 +4265,18 @@ void EECore::advancePendingCOP1(
       programOrder,
       eligibility);
 
-  std::array<CycleTraceEvent, CYCLE_TRACE_CAPACITY>
-    deferredTraceEvents = {};
-  const std::size_t deferredTraceCount =
-    cycleTraceEventCount - deferredTraceStart;
+  std::array<CycleEvent, CYCLE_EVENT_CAPACITY>
+    deferredEvents = {};
+  const std::size_t deferredEventCount =
+    cycleEventCount - deferredEventStart;
   for (std::size_t index = 0;
-       index < deferredTraceCount;
+       index < deferredEventCount;
        ++index)
   {
-    deferredTraceEvents[index] =
-      cycleTraceEvents[deferredTraceStart + index];
+    deferredEvents[index] =
+      cycleEvents[deferredEventStart + index];
   }
-  cycleTraceEventCount = deferredTraceStart;
+  cycleEventCount = deferredEventStart;
 
   recordCOP1StageTransitions(
     programOrder,
@@ -4292,16 +4292,16 @@ void EECore::advancePendingCOP1(
   *completedLoadRegisters =
     retirement.completedLoadRegisters;
   for (std::size_t index = 0;
-       index < deferredTraceCount;
+       index < deferredEventCount;
        ++index)
   {
-    if (cycleTraceEventCount >= cycleTraceEvents.size())
+    if (cycleEventCount >= cycleEvents.size())
     {
       throw std::logic_error(
-        "EE produced too many trace events in one cycle.");
+        "EE produced too many cycle events.");
     }
-    cycleTraceEvents[cycleTraceEventCount++] =
-      deferredTraceEvents[index];
+    cycleEvents[cycleEventCount++] =
+      deferredEvents[index];
   }
 }
 
@@ -5694,14 +5694,14 @@ void EECore::scheduleBranch(
 }
 
 void EECore::recordCycleEvent(
-  const CycleTraceEvent &event)
+  const CycleEvent &event)
 {
-  if (cycleTraceEventCount >= cycleTraceEvents.size())
+  if (cycleEventCount >= cycleEvents.size())
   {
     throw std::logic_error(
-      "EE produced too many trace events in one cycle.");
+      "EE produced too many cycle events.");
   }
-  cycleTraceEvents[cycleTraceEventCount++] = event;
+  cycleEvents[cycleEventCount++] = event;
 }
 
 void EECore::recordMemoryTrace(
