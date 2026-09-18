@@ -1215,7 +1215,7 @@ accumulator or condition-result contract:
 - [x] Define callback-exception containment or post-commit publication
       semantics for VU and GIF observation, and cover throwing callbacks so an
       observer cannot make a completed hardware transition appear retryable
-- [ ] Verify tracing off and tracing on produce identical architectural hashes,
+- [x] Verify tracing off and tracing on produce identical architectural hashes,
       save states, stop reasons, and guest results
 
 #### Persistence and Derived-State Reconciliation

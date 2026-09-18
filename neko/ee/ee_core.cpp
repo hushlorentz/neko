@@ -5822,14 +5822,14 @@ void EECore::enterException(
     }
   }
   cop0Cause =
-    (cop0Cause & ~EECOP0Cause::EXCEPTION_CODE_MASK) |
+    (cop0Cause &
+      ~EECOP0Cause::EXCEPTION_CODE_MASK &
+      ~EECOP0Cause::COPROCESSOR_ERROR_MASK) |
     (static_cast<std::uint32_t>(
       exceptionCode(request.type)) << 2);
   if (request.coprocessor == ExceptionCoprocessor::COP1)
   {
-    cop0Cause =
-      (cop0Cause & ~EECOP0Cause::COPROCESSOR_ERROR_MASK) |
-      EECOP0Cause::COPROCESSOR_1;
+    cop0Cause |= EECOP0Cause::COPROCESSOR_1;
   }
   cop0Status |= EECOP0Status::EXCEPTION_LEVEL;
   if (request.type == EEException::AddressErrorLoadOrFetch ||

@@ -92,6 +92,37 @@ TEST_CASE("EE exceptions enter the general vector through COP0")
     EEExceptionVector::GENERAL);
 }
 
+TEST_CASE("EE exception entry replaces coprocessor attribution")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  system.eeBus().write32(
+    0,
+    (UINT32_C(0x11) << 26) |
+      (UINT32_C(1) << 16));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::CoprocessorUnusable);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::COPROCESSOR_ERROR_MASK) ==
+    EECOP0Cause::COPROCESSOR_1);
+
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setProgramCounter(0x100);
+  core.enterInterruptException();
+
+  REQUIRE(core.pendingException() == EEException::Interrupt);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::COPROCESSOR_ERROR_MASK) == 0);
+}
+
 TEST_CASE("EE bootstrap and interrupt vectors follow Status BEV")
 {
   SECTION("A general exception uses the bootstrap vector")

@@ -1191,6 +1191,83 @@ TEST_CASE("PS2DEV EE ELF guest configures VIF1 DMA")
   REQUIRE(system.gifDMAC().interruptPending());
 }
 
+TEST_CASE("Tracing does not alter guest execution or machine state")
+{
+  struct GuestRun
+  {
+    const char *fileName;
+    std::uint64_t maxMasterCycles;
+  };
+  const GuestRun guests[] = {
+    {"cop1_mixed_concurrent.elf", 512},
+    {"rotation_vu1.elf", 4096}
+  };
+
+  for (const GuestRun &guest : guests)
+  {
+    CAPTURE(guest.fileName);
+    const std::vector<std::uint8_t> image =
+      readGuest(guest.fileName);
+    NekoSystem untraced;
+    NekoSystem traced;
+    traced.startTrace();
+
+    const EEGuestExecutionResult untracedResult =
+      untraced.runELF(image, guest.maxMasterCycles);
+    const EEGuestExecutionResult tracedResult =
+      traced.runELF(image, guest.maxMasterCycles);
+
+    REQUIRE_FALSE(untraced.traceEnabled());
+    REQUIRE(traced.traceEnabled());
+    REQUIRE_FALSE(traced.trace().empty());
+    REQUIRE(
+      untracedResult.load.entryPoint ==
+      tracedResult.load.entryPoint);
+    REQUIRE(
+      untracedResult.load.loadedSegments ==
+      tracedResult.load.loadedSegments);
+    REQUIRE(
+      untracedResult.load.fileBytes ==
+      tracedResult.load.fileBytes);
+    REQUIRE(
+      untracedResult.load.zeroedBytes ==
+      tracedResult.load.zeroedBytes);
+    REQUIRE(
+      untracedResult.execution.masterCycles ==
+      tracedResult.execution.masterCycles);
+    REQUIRE(
+      untracedResult.execution.eeCycles ==
+      tracedResult.execution.eeCycles);
+    REQUIRE(
+      untracedResult.execution.instructions ==
+      tracedResult.execution.instructions);
+    REQUIRE(
+      untracedResult.execution.cycleLimitReached ==
+      tracedResult.execution.cycleLimitReached);
+    REQUIRE(
+      untracedResult.execution.state ==
+      tracedResult.execution.state);
+    REQUIRE(
+      untracedResult.execution.stopReason ==
+      tracedResult.execution.stopReason);
+    REQUIRE(
+      untracedResult.execution.programCounter ==
+      tracedResult.execution.programCounter);
+    REQUIRE(
+      untracedResult.execution.pendingException ==
+      tracedResult.execution.pendingException);
+    REQUIRE(
+      untracedResult.execution.exceptionAddress ==
+      tracedResult.execution.exceptionAddress);
+    REQUIRE(untracedResult.outcome == tracedResult.outcome);
+    REQUIRE(untracedResult.exitCode == tracedResult.exitCode);
+    REQUIRE(
+      untraced.eeCore().stateHash() ==
+      traced.eeCore().stateHash());
+    REQUIRE(untraced.saveState() == traced.saveState());
+  }
+}
+
 TEST_CASE("PS2DEV EE ELF guest renders a rotating VU1 triangle")
 {
   NekoSystem system;
