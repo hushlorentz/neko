@@ -10,6 +10,7 @@
 #include "vif_command.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
+#include "vpu_upper_instruction_utils.hpp"
 
 namespace
 {
@@ -516,6 +517,92 @@ TEST_CASE("Neko save states are canonical and deterministic")
   first.loadState(firstState);
   first.vu1().forceBreak();
   REQUIRE(traceCount == 1);
+}
+
+TEST_CASE(
+  "VU and GIF trace callbacks do not alter machine continuation")
+{
+  SECTION("VU compound arithmetic diagnostics")
+  {
+    NekoSystem unobserved;
+    NekoSystem observed;
+    bool sawArithmeticWriteback = false;
+    observed.vu0().setTraceCallback(
+      [&sawArithmeticWriteback](
+        const VPUTraceEvent &event)
+      {
+        sawArithmeticWriteback =
+          sawArithmeticWriteback ||
+          (event.type == VPUTraceEventType::PipelineWriteback &&
+           event.arithmetic.present);
+      });
+    for (NekoSystem *system : {&unobserved, &observed})
+    {
+      system->vu0().loadFPRegister(
+        VPU_REGISTER_VF01, 1, 2, 3, 4);
+      system->vu0().loadFPRegister(
+        VPU_REGISTER_VF02, 5, 6, 7, 8);
+      system->vu0().loadAccumulator(9, 10, 11, 12);
+    }
+    std::vector<std::uint8_t> unobservedInstructions;
+    std::vector<std::uint8_t> observedInstructions;
+    executeSingleUpperInstruction(
+      &unobserved.vu0(),
+      &unobservedInstructions,
+      0,
+      VPU_DEST_X_BIT,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF03,
+      VPU_MADD);
+    executeSingleUpperInstruction(
+      &observed.vu0(),
+      &observedInstructions,
+      0,
+      VPU_DEST_X_BIT,
+      VPU_REGISTER_VF01,
+      VPU_REGISTER_VF02,
+      VPU_REGISTER_VF03,
+      VPU_MADD);
+
+    REQUIRE(sawArithmeticWriteback);
+    REQUIRE(observed.saveState() == unobserved.saveState());
+  }
+
+  SECTION("Active VU and GIF continuation")
+  {
+    NekoSystem unobserved;
+    NekoSystem observed;
+    prepareInFlightSystem(&unobserved);
+    prepareInFlightSystem(&observed);
+    unobserved.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
+    observed.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
+    std::size_t vpuEvents = 0;
+    std::size_t gifEvents = 0;
+    observed.vu1().setTraceCallback(
+      [&vpuEvents](const VPUTraceEvent &)
+      {
+        ++vpuEvents;
+      });
+    observed.gifPathArbiter().setTraceCallback(
+      [&gifEvents](const GIFTraceEvent &)
+      {
+        ++gifEvents;
+      });
+
+    for (std::size_t cycle = 0; cycle < 32; ++cycle)
+    {
+      unobserved.clockMasterCycle();
+      observed.clockMasterCycle();
+      REQUIRE(observed.saveState() == unobserved.saveState());
+    }
+
+    REQUIRE(vpuEvents > 0);
+    REQUIRE(gifEvents > 0);
+    REQUIRE(
+      observed.eeCore().stateHash() ==
+      unobserved.eeCore().stateHash());
+  }
 }
 
 TEST_CASE("In-flight EE COP1 memory-source state is canonical")

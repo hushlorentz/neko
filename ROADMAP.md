@@ -1209,7 +1209,7 @@ accumulator or condition-result contract:
       payloads or explicit modes
 - [x] Preserve cycle-local fixed-capacity event storage and deterministic event
       ordering
-- [ ] Audit synchronous VU and GIF trace callbacks as observation dependencies;
+- [x] Audit synchronous VU and GIF trace callbacks as observation dependencies;
       either route them through the event boundary or explicitly defer them
       with traced-versus-untraced equivalence coverage
 - [ ] Define callback-exception containment or post-commit publication
