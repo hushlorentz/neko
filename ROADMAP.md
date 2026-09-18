@@ -1192,9 +1192,9 @@ accumulator or condition-result contract:
       reset, hashing, and save-state validation cannot disagree
 - [x] Centralize exception and flush cancellation of in-flight C1 work while
       preserving older completed effects and discarding younger work
-- [ ] Preserve load interlocks, `1S`/`2T` bypasses, `2S` writeback, Move
+- [x] Preserve load interlocks, `1S`/`2T` bypasses, `2S` writeback, Move
       blocking, divider overlap, and ordered memory exceptions
-- [ ] Prove repeated and save-state-resumed mixed C1 workloads retain identical
+- [x] Prove repeated and save-state-resumed mixed C1 workloads retain identical
       retirement traces, hashes, register state, and memory state
 
 #### Architectural Events, Exceptions, and Observation
