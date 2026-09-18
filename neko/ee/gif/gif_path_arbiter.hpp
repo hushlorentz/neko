@@ -3,7 +3,9 @@
 
 #include <array>
 #include <cstdint>
+#include <exception>
 #include <functional>
+#include <memory>
 
 #include "clocked_component.hpp"
 #include "gif.hpp"
@@ -86,6 +88,9 @@ class GIFPathArbiter : public ClockedComponent
     bool decoderAwaitingTag() const;
     bool decoderPacketInProgress() const;
     void setTraceCallback(GIFTraceCallback callback);
+    bool traceCallbackFailed() const;
+    void rethrowTraceCallbackFailure() const;
+    void clearTraceCallbackFailure();
 
   private:
     friend class NekoSaveStateCodec;
@@ -95,6 +100,7 @@ class GIFPathArbiter : public ClockedComponent
     void emitEvent(
       GIFTraceEventType type,
       GIFPath path);
+    void emitTrace(const GIFTraceEvent &event);
     void emitDecodeEvents(
       GIFPath path,
       const GIFDecodeResult &result);
@@ -115,7 +121,9 @@ class GIFPathArbiter : public ClockedComponent
     std::uint16_t path3Tag = 0;
     std::uint8_t remainingIdleCycles = 0;
     GIFDecoderState suspendedPath3State;
-    GIFTraceCallback traceCallback;
+    std::shared_ptr<GIFTraceCallback> traceCallback;
+    std::exception_ptr traceCallbackFailure;
+    bool traceCallbackActive = false;
 };
 
 #endif

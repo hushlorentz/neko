@@ -1419,14 +1419,61 @@ void VPU::executeMicroInstructions()
 
 void VPU::setTraceCallback(VPUTraceCallback callback)
 {
-  traceCallback = callback;
+  if (callback)
+  {
+    traceCallback =
+      std::make_shared<VPUTraceCallback>(std::move(callback));
+  }
+  else
+  {
+    traceCallback.reset();
+  }
 }
 
-void VPU::emitTrace(const VPUTraceEvent &event) const
+bool VPU::traceCallbackFailed() const
 {
-  if (traceCallback)
+  return traceCallbackFailure != nullptr;
+}
+
+void VPU::rethrowTraceCallbackFailure() const
+{
+  if (traceCallbackFailure)
   {
-    traceCallback(event);
+    std::rethrow_exception(traceCallbackFailure);
+  }
+}
+
+void VPU::clearTraceCallbackFailure()
+{
+  traceCallbackFailure = nullptr;
+}
+
+void VPU::emitTrace(const VPUTraceEvent &event)
+{
+  if (!traceCallback ||
+      traceCallbackActive)
+  {
+    return;
+  }
+  traceCallbackActive = true;
+  const std::shared_ptr<VPUTraceCallback> callback =
+    traceCallback;
+  try
+  {
+    (*callback)(event);
+    traceCallbackActive = false;
+  }
+  catch (...)
+  {
+    traceCallbackActive = false;
+    if (!traceCallbackFailure)
+    {
+      traceCallbackFailure = std::current_exception();
+    }
+    if (traceCallback == callback)
+    {
+      traceCallback.reset();
+    }
   }
 }
 

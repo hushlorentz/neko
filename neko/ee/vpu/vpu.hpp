@@ -4,7 +4,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "clocked_component.hpp"
@@ -126,6 +128,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool stepInstruction();
     uint32_t run(uint32_t maxCycles);
     void setTraceCallback(VPUTraceCallback callback);
+    bool traceCallbackFailed() const;
+    void rethrowTraceCallbackFailure() const;
+    void clearTraceCallbackFailure();
     void setVIFRegisterSource(VUVIFRegisterSource *source);
     void setXGKICKHandler(VUXGKICKHandler *handler);
     void uploadMicroInstructions(const vector<uint8_t> &instructions);
@@ -198,7 +203,9 @@ class VPU : public ClockedComponent, public PipelineHandler
     bool haltAfterDrain = false;
     bool dEnabled = false;
     bool tEnabled = false;
-    VPUTraceCallback traceCallback;
+    std::shared_ptr<VPUTraceCallback> traceCallback;
+    std::exception_ptr traceCallbackFailure;
+    bool traceCallbackActive = false;
     VUVIFRegisterSource *vifRegisterSource = nullptr;
     VUXGKICKHandler *xgkickHandler = nullptr;
     bool xgkickWaiting = false;
@@ -235,7 +242,7 @@ class VPU : public ClockedComponent, public PipelineHandler
     void initIntRegisters();
     void initPipelineOrchestrator();
     void executeMicroInstructions();
-    void emitTrace(const VPUTraceEvent &event) const;
+    void emitTrace(const VPUTraceEvent &event);
     bool endBitSet(uint32_t instruction);
     bool haltBitSet(uint32_t instruction);
     uint32_t nextUpperInstruction();

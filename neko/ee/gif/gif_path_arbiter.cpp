@@ -61,10 +61,7 @@ void GIFPathArbiter::setPath3MaskedByVIF(bool masked)
   event.type = GIFTraceEventType::Path3MaskChanged;
   event.path = GIFPath::Path3;
   event.path3Masked = masked;
-  if (traceCallback)
-  {
-    traceCallback(event);
-  }
+  emitTrace(event);
   if (!path3Masked() &&
       currentPath == GIFPath::Idle)
   {
@@ -83,10 +80,7 @@ void GIFPathArbiter::setPath3MaskedByMode(bool masked)
   event.type = GIFTraceEventType::Path3MaskChanged;
   event.path = GIFPath::Path3;
   event.path3Masked = masked;
-  if (traceCallback)
-  {
-    traceCallback(event);
-  }
+  emitTrace(event);
   if (!path3Masked() &&
       currentPath == GIFPath::Idle)
   {
@@ -132,14 +126,11 @@ GIFPathTransferResult GIFPathArbiter::transferQuadword(
     gifDecoder->currentTag().format == GIFDataFormat::Image;
   result.decodeResult = gifDecoder->ingestQuadword(quadword);
   result.accepted = true;
-  if (traceCallback)
-  {
-    GIFTraceEvent event;
-    event.type = GIFTraceEventType::QuadwordTransferred;
-    event.path = path;
-    event.quadword = quadword;
-    traceCallback(event);
-  }
+  GIFTraceEvent event;
+  event.type = GIFTraceEventType::QuadwordTransferred;
+  event.path = path;
+  event.quadword = quadword;
+  emitTrace(event);
   emitDecodeEvents(path, result.decodeResult);
   if (result.decodeResult.tagDecoded)
   {
@@ -304,7 +295,33 @@ bool GIFPathArbiter::decoderPacketInProgress() const
 void GIFPathArbiter::setTraceCallback(
   GIFTraceCallback callback)
 {
-  traceCallback = callback;
+  if (callback)
+  {
+    traceCallback =
+      std::make_shared<GIFTraceCallback>(std::move(callback));
+  }
+  else
+  {
+    traceCallback.reset();
+  }
+}
+
+bool GIFPathArbiter::traceCallbackFailed() const
+{
+  return traceCallbackFailure != nullptr;
+}
+
+void GIFPathArbiter::rethrowTraceCallbackFailure() const
+{
+  if (traceCallbackFailure)
+  {
+    std::rethrow_exception(traceCallbackFailure);
+  }
+}
+
+void GIFPathArbiter::clearTraceCallbackFailure()
+{
+  traceCallbackFailure = nullptr;
 }
 
 std::size_t GIFPathArbiter::pathIndex(GIFPath path)
@@ -392,14 +409,40 @@ void GIFPathArbiter::emitEvent(
   GIFTraceEventType type,
   GIFPath path)
 {
-  if (!traceCallback)
-  {
-    return;
-  }
   GIFTraceEvent event;
   event.type = type;
   event.path = path;
-  traceCallback(event);
+  emitTrace(event);
+}
+
+void GIFPathArbiter::emitTrace(
+  const GIFTraceEvent &event)
+{
+  if (!traceCallback ||
+      traceCallbackActive)
+  {
+    return;
+  }
+  traceCallbackActive = true;
+  const std::shared_ptr<GIFTraceCallback> callback =
+    traceCallback;
+  try
+  {
+    (*callback)(event);
+    traceCallbackActive = false;
+  }
+  catch (...)
+  {
+    traceCallbackActive = false;
+    if (!traceCallbackFailure)
+    {
+      traceCallbackFailure = std::current_exception();
+    }
+    if (traceCallback == callback)
+    {
+      traceCallback.reset();
+    }
+  }
 }
 
 void GIFPathArbiter::emitDecodeEvents(
@@ -416,7 +459,7 @@ void GIFPathArbiter::emitDecodeEvents(
     event.type = GIFTraceEventType::TagDecoded;
     event.path = path;
     event.tag = result.tag;
-    traceCallback(event);
+    emitTrace(event);
   }
   for (const GIFRegisterWrite &write : result.writes)
   {
@@ -424,7 +467,7 @@ void GIFPathArbiter::emitDecodeEvents(
     event.type = GIFTraceEventType::RegisterWrite;
     event.path = path;
     event.registerWrite = write;
-    traceCallback(event);
+    emitTrace(event);
   }
   if (result.primitiveComplete)
   {

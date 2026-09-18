@@ -1212,7 +1212,7 @@ accumulator or condition-result contract:
 - [x] Audit synchronous VU and GIF trace callbacks as observation dependencies;
       either route them through the event boundary or explicitly defer them
       with traced-versus-untraced equivalence coverage
-- [ ] Define callback-exception containment or post-commit publication
+- [x] Define callback-exception containment or post-commit publication
       semantics for VU and GIF observation, and cover throwing callbacks so an
       observer cannot make a completed hardware transition appear retryable
 - [ ] Verify tracing off and tracing on produce identical architectural hashes,

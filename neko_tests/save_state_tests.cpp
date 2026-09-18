@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "catch.hpp"
@@ -603,6 +604,38 @@ TEST_CASE(
       observed.eeCore().stateHash() ==
       unobserved.eeCore().stateHash());
   }
+}
+
+TEST_CASE("Save-state loads clear retained callback failures")
+{
+  NekoSystem system;
+  const std::vector<std::uint8_t> state = system.saveState();
+  system.vu1().setTraceCallback(
+    [](const VPUTraceEvent &)
+    {
+      throw std::runtime_error("VU observer failed.");
+    });
+  system.gifPathArbiter().setTraceCallback(
+    [](const GIFTraceEvent &event)
+    {
+      if (event.type == GIFTraceEventType::QuadwordTransferred)
+      {
+        throw std::runtime_error("GIF observer failed.");
+      }
+    });
+
+  REQUIRE_NOTHROW(system.vu1().forceBreak());
+  REQUIRE_NOTHROW(
+    system.gifPathArbiter().transferQuadword(
+      GIFPath::Path2,
+      gifTag(0, true, GIFDataFormat::Packed, 0)));
+  REQUIRE(system.vu1().traceCallbackFailed());
+  REQUIRE(system.gifPathArbiter().traceCallbackFailed());
+
+  system.loadState(state);
+
+  REQUIRE_FALSE(system.vu1().traceCallbackFailed());
+  REQUIRE_FALSE(system.gifPathArbiter().traceCallbackFailed());
 }
 
 TEST_CASE("In-flight EE COP1 memory-source state is canonical")

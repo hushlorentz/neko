@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 #include "catch.hpp"
@@ -57,6 +58,60 @@ TEST_CASE("GIF Diagnostics Tests")
     REQUIRE(traced.accepted);
     REQUIRE(traced.decodeResult.packetComplete);
     REQUIRE(eventCount == 7);
+  }
+
+  SECTION("Throwing trace callbacks cannot interrupt transfers")
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    std::size_t callbackCount = 0;
+    std::size_t replacementCallbackCount = 0;
+    arbiter.setTraceCallback(
+      [&arbiter,
+       &callbackCount,
+       &replacementCallbackCount](const GIFTraceEvent &event)
+      {
+        ++callbackCount;
+        if (event.type == GIFTraceEventType::PathRequested)
+        {
+          arbiter.setPath3MaskedByVIF(true);
+        }
+        if (event.type == GIFTraceEventType::QuadwordTransferred)
+        {
+          arbiter.setTraceCallback(
+            [&replacementCallbackCount](
+              const GIFTraceEvent &)
+            {
+              ++replacementCallbackCount;
+            });
+          throw std::runtime_error("GIF observer failed.");
+        }
+      });
+
+    GIFPathTransferResult result;
+    REQUIRE_NOTHROW(
+      result = arbiter.transferQuadword(
+        GIFPath::Path2,
+        gifTag(0, true, 0, 0)));
+    REQUIRE(result.accepted);
+    REQUIRE(result.decodeResult.packetComplete);
+    REQUIRE(decoder.awaitingTag());
+    REQUIRE(arbiter.path3MaskedByVIF());
+    REQUIRE(callbackCount == 3);
+    REQUIRE(arbiter.traceCallbackFailed());
+    REQUIRE_THROWS_WITH(
+      arbiter.rethrowTraceCallbackFailure(),
+      "GIF observer failed.");
+
+    REQUIRE_NOTHROW(
+      result = arbiter.transferQuadword(
+        GIFPath::Path2,
+        gifTag(0, true, 0, 0)));
+    REQUIRE(result.accepted);
+    REQUIRE(callbackCount == 3);
+    REQUIRE(replacementCallbackCount > 0);
+    arbiter.clearTraceCallbackFailure();
+    REQUIRE_FALSE(arbiter.traceCallbackFailed());
   }
 
   SECTION("A decoded packet produces structured events and a summary")

@@ -208,6 +208,46 @@ TEST_CASE("VPU Debug Execution Tests")
     REQUIRE(sawWritebackAtZero);
   }
 
+  SECTION("Throwing trace callbacks cannot interrupt Force Break")
+  {
+    VPU vpu;
+    std::size_t callbackCount = 0;
+    std::size_t replacementCallbackCount = 0;
+    vpu.setTraceCallback(
+      [&vpu,
+       &callbackCount,
+       &replacementCallbackCount](const VPUTraceEvent &)
+      {
+        ++callbackCount;
+        if (callbackCount == 1)
+        {
+          vpu.forceBreak();
+          vpu.setTraceCallback(
+            [&replacementCallbackCount](
+              const VPUTraceEvent &)
+            {
+              ++replacementCallbackCount;
+            });
+        }
+        throw std::runtime_error("VU observer failed.");
+      });
+
+    REQUIRE_NOTHROW(vpu.forceBreak());
+    REQUIRE(vpu.stoppedByForceBreak());
+    REQUIRE(callbackCount == 1);
+    REQUIRE(vpu.traceCallbackFailed());
+    REQUIRE_THROWS_WITH(
+      vpu.rethrowTraceCallbackFailure(),
+      "VU observer failed.");
+
+    vpu.startMicroMode();
+    REQUIRE_NOTHROW(vpu.forceBreak());
+    REQUIRE(callbackCount == 1);
+    REQUIRE(replacementCallbackCount == 1);
+    vpu.clearTraceCallbackFailure();
+    REQUIRE_FALSE(vpu.traceCallbackFailed());
+  }
+
   SECTION("Restarting after an execution error discards queued pipeline work")
   {
     VPU vpu;

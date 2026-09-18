@@ -1418,6 +1418,7 @@ void NekoSaveStateCodec::commitSystem(
     sourceArbiter.remainingIdleCycles;
   arbiter.suspendedPath3State =
     sourceArbiter.suspendedPath3State;
+  arbiter.traceCallbackFailure = nullptr;
 
   GIFPath1Transfer &path1 = destination->gifPath1Component;
   path1.active = source->gifPath1Component.active;
@@ -3100,6 +3101,7 @@ void NekoSaveStateCodec::commitVPU(
   VPU *source,
   PipelineLists *lists)
 {
+  destination->traceCallbackFailure = nullptr;
   destination->microMem.swap(source->microMem);
   destination->vuMem.swap(source->vuMem);
   destination->state = source->state;
