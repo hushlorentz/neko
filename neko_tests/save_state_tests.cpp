@@ -17,6 +17,12 @@ namespace
 {
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
+  constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
+  constexpr std::size_t
+    VERSION_24_PREPARED_STATE_SIZE = 37800432;
+  constexpr std::uint64_t
+    VERSION_24_PREPARED_STATE_HASH =
+      UINT64_C(0x3919a00eec819a38);
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
@@ -132,16 +138,25 @@ namespace
   constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
     UINT64_C(1099511628211);
 
-  void updateChecksum(std::vector<std::uint8_t> *state)
+  std::uint64_t hashBytes(
+    const std::vector<std::uint8_t> &bytes,
+    std::size_t offset = 0)
   {
-    std::uint64_t checksum = SAVE_STATE_FNV_OFFSET_BASIS;
-    for (std::size_t index = SAVE_STATE_HEADER_SIZE;
-         index < state->size();
+    std::uint64_t hash = SAVE_STATE_FNV_OFFSET_BASIS;
+    for (std::size_t index = offset;
+         index < bytes.size();
          ++index)
     {
-      checksum ^= (*state)[index];
-      checksum *= SAVE_STATE_FNV_PRIME;
+      hash ^= bytes[index];
+      hash *= SAVE_STATE_FNV_PRIME;
     }
+    return hash;
+  }
+
+  void updateChecksum(std::vector<std::uint8_t> *state)
+  {
+    const std::uint64_t checksum =
+      hashBytes(*state, SAVE_STATE_HEADER_SIZE);
     for (std::size_t index = 0; index < 8; ++index)
     {
       (*state)[SAVE_STATE_CHECKSUM_OFFSET + index] =
@@ -518,6 +533,31 @@ TEST_CASE("Neko save states are canonical and deterministic")
   first.loadState(firstState);
   first.vu1().forceBreak();
   REQUIRE(traceCount == 1);
+}
+
+TEST_CASE("Version 24 save-state layout is byte-stable")
+{
+  NekoSystem system;
+  prepareInFlightSystem(&system);
+  const std::vector<std::uint8_t> state = system.saveState();
+  const std::uint8_t magic[] = {
+    'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
+  };
+  REQUIRE(state.size() >= SAVE_STATE_HEADER_SIZE);
+  for (std::size_t index = 0;
+       index < sizeof(magic);
+       ++index)
+  {
+    REQUIRE(state[index] == magic[index]);
+  }
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 24);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
+  REQUIRE(state.size() == VERSION_24_PREPARED_STATE_SIZE);
+  REQUIRE(
+    hashBytes(state) ==
+    VERSION_24_PREPARED_STATE_HASH);
 }
 
 TEST_CASE(

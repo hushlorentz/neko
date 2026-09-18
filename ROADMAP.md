@@ -1222,7 +1222,7 @@ accumulator or condition-result contract:
 
 - [x] Separate save-state container framing from per-component serialization,
       validation, reconciliation, and transactional commit
-- [ ] Keep format order and the current save-state version stable during
+- [x] Keep format order and the current save-state version stable during
       behavior-preserving source decomposition
 - [ ] Define which fields are serialized architectural state, serialized
       runtime state, derived state, or host wiring
