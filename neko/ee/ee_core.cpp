@@ -5717,10 +5717,6 @@ void EECore::recordCycleTrace(
   std::uint64_t value2,
   std::uint64_t value3)
 {
-  if (!cycleTraceEnabled)
-  {
-    return;
-  }
   if (cycleTraceEventCount >= cycleTraceEvents.size())
   {
     throw std::logic_error(

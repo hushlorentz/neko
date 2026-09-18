@@ -1199,7 +1199,7 @@ accumulator or condition-result contract:
 
 #### Architectural Events, Exceptions, and Observation
 
-- [ ] Separate architectural state transitions from trace publication so trace
+- [x] Separate architectural state transitions from trace publication so trace
       enablement cannot participate in execution decisions
 - [ ] Define typed EE events for acceptance, memory access, branch scheduling,
       exception entry, interrupt delivery, C1 stage transition, and retirement

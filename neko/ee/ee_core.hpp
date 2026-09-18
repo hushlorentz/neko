@@ -770,7 +770,6 @@ class EECore final : public ClockedComponent
     std::array<CycleTraceEvent, CYCLE_TRACE_CAPACITY>
       cycleTraceEvents = {};
     std::size_t cycleTraceEventCount = 0;
-    bool cycleTraceEnabled = false;
 
     static void requireGeneralRegisterIndex(
       std::size_t index);

@@ -214,14 +214,12 @@ void NekoSystem::startTrace()
 {
   traceEvents.clear();
   eeCoreComponent.cycleTraceEventCount = 0;
-  eeCoreComponent.cycleTraceEnabled = true;
   lastTracedEEStateHash = eeCoreComponent.stateHash();
   collectingTrace = true;
 }
 
 void NekoSystem::stopTrace()
 {
-  eeCoreComponent.cycleTraceEnabled = false;
   eeCoreComponent.cycleTraceEventCount = 0;
   lastTracedEEStateHash = 0;
   collectingTrace = false;

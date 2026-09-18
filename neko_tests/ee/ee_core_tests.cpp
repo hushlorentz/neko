@@ -48,6 +48,17 @@ struct EEIssuePreview
 
 struct EECoreTestAccess
 {
+  static bool cycleEventsStartWithInstructionIssue(
+    const EECore &core)
+  {
+    return
+      core.cycleTraceEventCount == 1 &&
+      core.cycleTraceEvents[0].kind ==
+        EECore::CycleTraceKind::InstructionIssued &&
+      core.cycleTraceEvents[0].value0 == 0 &&
+      core.cycleTraceEvents[0].value1 == 0;
+  }
+
   static void setInFlightCOP1ProgramOrder(
     EECore *core,
     std::size_t slot,
@@ -558,6 +569,23 @@ struct EECoreTestAccess
     core->shiftAmountOrdering.restore(accesses, reads);
   }
 };
+
+TEST_CASE(
+  "EE architectural events are produced independently of trace collection")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(0, 0);
+  core.startExecution(0);
+
+  core.clock();
+
+  REQUIRE_FALSE(system.traceEnabled());
+  REQUIRE(system.trace().empty());
+  REQUIRE(
+    EECoreTestAccess::cycleEventsStartWithInstructionIssue(
+      core));
+}
 
 TEST_CASE("EE in-flight COP1 program order is allocation-free and slot-independent")
 {
