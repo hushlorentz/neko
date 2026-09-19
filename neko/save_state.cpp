@@ -1876,18 +1876,13 @@ void NekoSaveStateCodec::readEECore(
       operation->generalRegister = reader->readU8();
       operation->generalRegisterResult = reader->readU64();
       require(
-        !operation->active ||
-          (operation->remainingCycles >= 1 &&
-           operation->remainingCycles <= 37),
+        EECore::pendingMultiplyDivideLatencyValid(*operation),
         "EE pending multiply/divide latency is invalid");
       require(
-        operation->generalRegister <
-          EECore::GENERAL_REGISTER_COUNT,
+        EECore::pendingMultiplyDivideRegisterValid(*operation),
         "EE pending multiply/divide register is invalid");
       require(
-        operation->resultDestination ==
-            EECore::MACResultDestination::HIAndLOAndGPR ||
-          operation->generalRegister == 0,
+        EECore::pendingMultiplyDivideDestinationValid(*operation),
         "EE pending divide contains a destination register");
     };
   readPending(
@@ -1900,34 +1895,13 @@ void NekoSaveStateCodec::readEECore(
       core->pendingMac1.active)
   {
     require(
-      core->state == EEExecutionState::Running ||
-        (core->state == EEExecutionState::Halted &&
-         core->haltReason == EEStopReason::HostHalt),
+      core->concurrentMultiplyDivideCanResume(),
       "EE concurrent multiply/divide state cannot resume");
-    const bool mac0Multiply =
-      core->pendingMac0.resultDestination ==
-      EECore::MACResultDestination::HIAndLOAndGPR;
-    const bool mac1Multiply =
-      core->pendingMac1.resultDestination ==
-      EECore::MACResultDestination::HIAndLOAndGPR;
-    const std::uint8_t mac0Cycles =
-      core->pendingMac0.remainingCycles;
-    const std::uint8_t mac1Cycles =
-      core->pendingMac1.remainingCycles;
     require(
-      mac0Multiply == mac1Multiply
-        ? mac0Cycles == mac1Cycles
-        : (mac0Multiply
-             ? mac1Cycles == mac0Cycles + 33
-             : mac0Cycles == mac1Cycles + 33),
+      core->concurrentMultiplyDivideLatenciesValid(),
       "EE concurrent multiply/divide latencies are invalid");
     require(
-      !mac0Multiply ||
-        !mac1Multiply ||
-        core->pendingMac0.generalRegister == 0 ||
-        core->pendingMac1.generalRegister == 0 ||
-        core->pendingMac0.generalRegister !=
-          core->pendingMac1.generalRegister,
+      core->concurrentMultiplyDestinationsValid(),
       "EE concurrent multiply destinations conflict");
   }
   core->issueLatch.failure =
@@ -1956,17 +1930,21 @@ void NekoSaveStateCodec::readEECore(
   core->cop1DividerInitiationCycles = reader->readU8();
   core->cop1DividerOperation =
     static_cast<EEOperation>(reader->readU8());
+  const EECore::COP1DividerOccupancy serializedOccupancy = {
+    core->cop1DividerInitiationCycles,
+    core->cop1DividerOperation
+  };
   require(
-    core->cop1DividerInitiationCycles <= 13,
+    EECore::cop1DividerInitiationIntervalValid(
+      serializedOccupancy),
     "EE COP1 divider initiation interval is invalid");
   require(
-    core->cop1DividerInitiationCycles != 0 ||
-      core->cop1DividerOperation == EEOperation::Nop,
+    EECore::cop1DividerOperationPresenceValid(
+      serializedOccupancy),
     "EE unoccupied COP1 divider names an operation");
   require(
-    core->cop1DividerInitiationCycles == 0 ||
-      isCOP1DividerOperation(
-        core->cop1DividerOperation),
+    EECore::cop1DividerOperationFamilyValid(
+      serializedOccupancy),
     "EE COP1 divider operation state is inconsistent");
   const bool retiredCOP1OperateResource =
     reader->readBool("retired EE COP1 operate resource flag");
@@ -1978,12 +1956,14 @@ void NekoSaveStateCodec::readEECore(
   const std::uint8_t recentShiftAmountReads =
     reader->readU8();
   require(
-    (recentShiftAmountAccesses & 0xf8) == 0 &&
-      (recentShiftAmountReads & 0xf8) == 0,
+    EEShiftAmountOrderingWindow::historyBitsValid(
+      recentShiftAmountAccesses,
+      recentShiftAmountReads),
     "EE shift-amount ordering history is invalid");
   require(
-    (recentShiftAmountReads &
-      ~recentShiftAmountAccesses) == 0,
+    EEShiftAmountOrderingWindow::readHistoryConsistent(
+      recentShiftAmountAccesses,
+      recentShiftAmountReads),
     "EE shift-amount read history is inconsistent");
   core->shiftAmountOrdering.restore(
     recentShiftAmountAccesses,
@@ -2081,9 +2061,7 @@ void NekoSaveStateCodec::readEECore(
       operation.instruction =
         decodeEEInstruction(instruction);
       require(
-        operation.programOrder != 0 &&
-          operation.programOrder <
-            core->nextEEProgramOrder,
+        core->cop1ProgramOrderInRange(operation),
         "EE COP1 program order is invalid");
       require(
         (operation.instructionAddress & 3) == 0,
@@ -2554,68 +2532,18 @@ void NekoSaveStateCodec::readEECore(
   }
   const EECore::COP1ProgramOrderView programOrder =
     core->inFlightCOP1ProgramOrder();
-  for (std::size_t orderIndex = 1;
-       orderIndex < programOrder.size();
-       ++orderIndex)
-  {
-    require(
-      core->inFlightCOP1Operations[
-        programOrder[orderIndex - 1]].programOrder !=
-        core->inFlightCOP1Operations[
-          programOrder[orderIndex]].programOrder,
-      "EE in-flight COP1 program order is duplicated");
-  }
-
-  std::array<const EECore::InFlightCOP1Operation *, 2>
-    pendingDividerResults = {};
-  std::size_t activeDividerResults = 0;
-  std::size_t pendingDividerResultCount = 0;
-  for (std::size_t orderIndex = 0;
-       orderIndex < programOrder.size();
-       ++orderIndex)
-  {
-    const EECore::InFlightCOP1Operation &operation =
-      core->inFlightCOP1Operations[
-        programOrder[orderIndex]];
-    if (!isCOP1DividerOperation(
-          operation.instruction.operation))
-    {
-      continue;
-    }
-    require(
-      activeDividerResults <
-        pendingDividerResults.size(),
-      "EE COP1 divider has too many pending results");
-    ++activeDividerResults;
-    if (operation.stage == EECore::COP1PipelineStage::R)
-    {
-      pendingDividerResults[
-        pendingDividerResultCount++] = &operation;
-    }
-  }
-  if (pendingDividerResultCount == 2)
-  {
-    const EECOP1DividerTiming timing =
-      cop1DividerTiming(
-        pendingDividerResults[1]->instruction.operation);
-    require(
-      pendingDividerResults[0]->destination.fprRegister !=
-          pendingDividerResults[1]->destination.fprRegister &&
-        pendingDividerResults[0]->remainingCycles == 1 &&
-        pendingDividerResults[1]->remainingCycles ==
-          timing.latency,
-      "EE COP1 divider overlap state is inconsistent");
-  }
-  const EECore::COP1DividerOccupancy dividerOccupancy =
-    core->derivedCOP1DividerOccupancy();
   require(
-    core->cop1DividerInitiationCycles ==
-        dividerOccupancy.initiationCycles &&
-      core->cop1DividerOperation ==
-        dividerOccupancy.operation,
+    core->cop1ProgramOrderUnique(programOrder),
+    "EE in-flight COP1 program order is duplicated");
+  require(
+    core->cop1DividerResultCountValid(programOrder),
+    "EE COP1 divider has too many pending results");
+  require(
+    core->cop1DividerOverlapValid(programOrder),
+    "EE COP1 divider overlap state is inconsistent");
+  require(
+    core->cop1DividerOccupancyConsistent(),
     "EE COP1 divider occupancy is inconsistent");
-  const EECore::InFlightCOP1Operation *
-    previousOrderedStagedOperation = nullptr;
   for (std::size_t orderIndex = 0;
        orderIndex < programOrder.size();
        ++orderIndex)
@@ -2738,21 +2666,10 @@ void NekoSaveStateCodec::readEECore(
            operation.capturedFS == forwardedSource->rawResult),
         "EE COP1 staged S1 result has no valid older blocker");
     }
-    if (!isCOP1StagedOperation(
-          operation.instruction.operation) ||
-        operation.stage == EECore::COP1PipelineStage::S1)
-    {
-      continue;
-    }
-    if (previousOrderedStagedOperation != nullptr)
-    {
-      require(
-        previousOrderedStagedOperation->stage >
-          operation.stage,
-        "EE staged COP1 pipeline order is inconsistent");
-    }
-    previousOrderedStagedOperation = &operation;
   }
+  require(
+    core->stagedCOP1PipelineOrderValid(programOrder),
+    "EE staged COP1 pipeline order is inconsistent");
   core->lastDecodedInstruction = {};
   if (core->lastInstructionValid)
   {

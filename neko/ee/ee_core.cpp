@@ -14,6 +14,22 @@ constexpr std::size_t EECore::GENERAL_REGISTER_COUNT;
 constexpr std::size_t EECore::FLOATING_POINT_REGISTER_COUNT;
 constexpr std::size_t EEAcceptanceRecords::CAPACITY;
 
+bool EEShiftAmountOrderingWindow::historyBitsValid(
+  std::uint8_t accesses,
+  std::uint8_t reads)
+{
+  return
+    (accesses & 0xf8) == 0 &&
+    (reads & 0xf8) == 0;
+}
+
+bool EEShiftAmountOrderingWindow::readHistoryConsistent(
+  std::uint8_t accesses,
+  std::uint8_t reads)
+{
+  return (reads & ~accesses) == 0;
+}
+
 void EEAcceptanceRecords::clear()
 {
   records = {};
@@ -96,6 +112,8 @@ void EEShiftAmountOrderingWindow::accept(
     static_cast<std::uint8_t>(
       ((recentReads << 1) |
        (reads ? 1 : 0)) & 0x07);
+  assert(historyBitsValid(recentAccesses, recentReads));
+  assert(readHistoryConsistent(recentAccesses, recentReads));
 }
 
 std::uint8_t EEShiftAmountOrderingWindow::accessHistory() const
@@ -112,9 +130,8 @@ void EEShiftAmountOrderingWindow::restore(
   std::uint8_t accesses,
   std::uint8_t reads)
 {
-  if ((accesses & 0xf8) != 0 ||
-      (reads & 0xf8) != 0 ||
-      (reads & ~accesses) != 0)
+  if (!historyBitsValid(accesses, reads) ||
+      !readHistoryConsistent(accesses, reads))
   {
     throw std::invalid_argument(
       "EE shift-amount ordering history is invalid.");
@@ -3907,6 +3924,12 @@ void EECore::startPendingMultiplyDivide(
   operation.resultDestination = resultDestination;
   operation.generalRegister = generalRegister;
   operation.generalRegisterResult = loResult;
+  assert(pendingMultiplyDivideLatencyValid(operation));
+  assert(pendingMultiplyDivideRegisterValid(operation));
+  assert(pendingMultiplyDivideDestinationValid(operation));
+  assert(concurrentMultiplyDivideCanResume());
+  assert(concurrentMultiplyDivideLatenciesValid());
+  assert(concurrentMultiplyDestinationsValid());
 }
 
 EECore::InFlightCOP1Operation &
@@ -3980,6 +4003,224 @@ bool EECore::cop1RetirementReady(
       isCOP1MemoryMoveOperation(
         operation.instruction.operation)) &&
      operation.stage == COP1PipelineStage::Y);
+}
+
+bool EECore::pendingMultiplyDivideLatencyValid(
+  const PendingMultiplyDivide &operation)
+{
+  return
+    (!operation.active ||
+     (operation.remainingCycles >= 1 &&
+      operation.remainingCycles <= 37));
+}
+
+bool EECore::pendingMultiplyDivideRegisterValid(
+  const PendingMultiplyDivide &operation)
+{
+  return operation.generalRegister < GENERAL_REGISTER_COUNT;
+}
+
+bool EECore::pendingMultiplyDivideDestinationValid(
+  const PendingMultiplyDivide &operation)
+{
+  return
+    operation.resultDestination ==
+      MACResultDestination::HIAndLOAndGPR ||
+    operation.generalRegister == 0;
+}
+
+bool EECore::concurrentMultiplyDivideCanResume() const
+{
+  return
+    !pendingMac0.active ||
+    !pendingMac1.active ||
+    state == EEExecutionState::Running ||
+    (state == EEExecutionState::Halted &&
+     haltReason == EEStopReason::HostHalt);
+}
+
+bool EECore::concurrentMultiplyDivideLatenciesValid() const
+{
+  if (!pendingMac0.active || !pendingMac1.active)
+  {
+    return true;
+  }
+  const bool mac0Multiply =
+    pendingMac0.resultDestination ==
+    MACResultDestination::HIAndLOAndGPR;
+  const bool mac1Multiply =
+    pendingMac1.resultDestination ==
+    MACResultDestination::HIAndLOAndGPR;
+  if (mac0Multiply == mac1Multiply)
+  {
+    return
+      pendingMac0.remainingCycles ==
+      pendingMac1.remainingCycles;
+  }
+  return
+    mac0Multiply
+      ? pendingMac1.remainingCycles ==
+          pendingMac0.remainingCycles + 33
+      : pendingMac0.remainingCycles ==
+          pendingMac1.remainingCycles + 33;
+}
+
+bool EECore::concurrentMultiplyDestinationsValid() const
+{
+  return
+    !pendingMac0.active ||
+    !pendingMac1.active ||
+    pendingMac0.resultDestination !=
+      MACResultDestination::HIAndLOAndGPR ||
+    pendingMac1.resultDestination !=
+      MACResultDestination::HIAndLOAndGPR ||
+    pendingMac0.generalRegister == 0 ||
+    pendingMac1.generalRegister == 0 ||
+    pendingMac0.generalRegister !=
+      pendingMac1.generalRegister;
+}
+
+bool EECore::cop1ProgramOrderInRange(
+  const InFlightCOP1Operation &operation) const
+{
+  return
+    !operation.active ||
+    (operation.programOrder != 0 &&
+     operation.programOrder < nextEEProgramOrder);
+}
+
+bool EECore::cop1ProgramOrderUnique(
+  const COP1ProgramOrderView &programOrder) const
+{
+  for (std::size_t orderIndex = 1;
+       orderIndex < programOrder.size();
+       ++orderIndex)
+  {
+    if (inFlightCOP1Operations[
+          programOrder[orderIndex - 1]].programOrder ==
+        inFlightCOP1Operations[
+          programOrder[orderIndex]].programOrder)
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool EECore::cop1DividerOverlapValid(
+  const COP1ProgramOrderView &programOrder) const
+{
+  std::array<const InFlightCOP1Operation *, 2>
+    pendingResults = {};
+  std::size_t pendingResultCount = 0;
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
+  {
+    const InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[programOrder[orderIndex]];
+    if (!isCOP1DividerOperation(
+          operation.instruction.operation))
+    {
+      continue;
+    }
+    if (pendingResultCount == pendingResults.size())
+    {
+      return false;
+    }
+    if (operation.stage == COP1PipelineStage::R)
+    {
+      pendingResults[pendingResultCount++] = &operation;
+    }
+  }
+  if (pendingResultCount != 2)
+  {
+    return true;
+  }
+  const EECOP1DividerTiming timing =
+    cop1DividerTiming(
+      pendingResults[1]->instruction.operation);
+  return
+    pendingResults[0]->destination.fprRegister !=
+      pendingResults[1]->destination.fprRegister &&
+    pendingResults[0]->remainingCycles == 1 &&
+    pendingResults[1]->remainingCycles == timing.latency;
+}
+
+bool EECore::cop1DividerResultCountValid(
+  const COP1ProgramOrderView &programOrder) const
+{
+  std::size_t activeResults = 0;
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
+  {
+    if (isCOP1DividerOperation(
+          inFlightCOP1Operations[
+            programOrder[orderIndex]].instruction.operation) &&
+        ++activeResults > 2)
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool EECore::cop1DividerInitiationIntervalValid(
+  const COP1DividerOccupancy &occupancy)
+{
+  return occupancy.initiationCycles <= 13;
+}
+
+bool EECore::cop1DividerOperationPresenceValid(
+  const COP1DividerOccupancy &occupancy)
+{
+  return
+    occupancy.initiationCycles != 0 ||
+    occupancy.operation == EEOperation::Nop;
+}
+
+bool EECore::cop1DividerOperationFamilyValid(
+  const COP1DividerOccupancy &occupancy)
+{
+  return
+    occupancy.initiationCycles == 0 ||
+    isCOP1DividerOperation(occupancy.operation);
+}
+
+bool EECore::cop1DividerOccupancyConsistent() const
+{
+  const COP1DividerOccupancy derived =
+    derivedCOP1DividerOccupancy();
+  return
+    cop1DividerInitiationCycles == derived.initiationCycles &&
+    cop1DividerOperation == derived.operation;
+}
+
+bool EECore::stagedCOP1PipelineOrderValid(
+  const COP1ProgramOrderView &programOrder) const
+{
+  const InFlightCOP1Operation *previous = nullptr;
+  for (std::size_t orderIndex = 0;
+       orderIndex < programOrder.size();
+       ++orderIndex)
+  {
+    const InFlightCOP1Operation &operation =
+      inFlightCOP1Operations[programOrder[orderIndex]];
+    if (!isCOP1StagedOperation(
+          operation.instruction.operation) ||
+        operation.stage == COP1PipelineStage::S1)
+    {
+      continue;
+    }
+    if (previous != nullptr &&
+        previous->stage <= operation.stage)
+    {
+      return false;
+    }
+    previous = &operation;
+  }
+  return true;
 }
 
 void EECore::completeInFlightCOP1(
@@ -4941,6 +5182,10 @@ void EECore::reconcileCOP1DividerOccupancy()
   cop1DividerInitiationCycles =
     occupancy.initiationCycles;
   cop1DividerOperation = occupancy.operation;
+  assert(cop1DividerInitiationIntervalValid(occupancy));
+  assert(cop1DividerOperationPresenceValid(occupancy));
+  assert(cop1DividerOperationFamilyValid(occupancy));
+  assert(cop1DividerOccupancyConsistent());
 }
 
 void EECore::startPendingCOP1Divider(

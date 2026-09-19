@@ -612,6 +612,95 @@ struct EECoreTestAccess
   {
     core->shiftAmountOrdering.restore(accesses, reads);
   }
+
+  static bool continuationInvariantPredicatesArePure(
+    EECore *core)
+  {
+    core->state = EEExecutionState::Halted;
+    core->haltReason = EEStopReason::HostHalt;
+    core->nextEEProgramOrder = 3;
+
+    core->pendingMac0 = {};
+    core->pendingMac0.active = true;
+    core->pendingMac0.remainingCycles = 5;
+    core->pendingMac0.resultDestination =
+      EECore::MACResultDestination::HIAndLOAndGPR;
+    core->pendingMac0.generalRegister = 2;
+    core->pendingMac1 = core->pendingMac0;
+    core->pendingMac1.generalRegister = 3;
+
+    core->inFlightCOP1Operations.fill({});
+    for (std::size_t index = 0; index < 2; ++index)
+    {
+      EECore::InFlightCOP1Operation &operation =
+        core->inFlightCOP1Operations[index];
+      operation.active = true;
+      operation.programOrder = index + 1;
+      operation.instruction.operation =
+        EEOperation::DivideSingleCOP1;
+      operation.stage = EECore::COP1PipelineStage::R;
+      operation.destination.fprRegister =
+        static_cast<std::uint8_t>(index + 4);
+      operation.remainingCycles = index == 0 ? 1 : 8;
+    }
+    core->cop1DividerInitiationCycles = 7;
+    core->cop1DividerOperation =
+      EEOperation::DivideSingleCOP1;
+
+    const std::uint64_t stateHashBefore = core->stateHash();
+    const std::uint8_t mac0CyclesBefore =
+      core->pendingMac0.remainingCycles;
+    const std::uint8_t mac1RegisterBefore =
+      core->pendingMac1.generalRegister;
+    const std::uint64_t firstProgramOrderBefore =
+      core->inFlightCOP1Operations[0].programOrder;
+    const std::uint8_t dividerCyclesBefore =
+      core->cop1DividerInitiationCycles;
+    const EECore::COP1ProgramOrderView order =
+      core->inFlightCOP1ProgramOrder();
+    const bool valid =
+      EEShiftAmountOrderingWindow::historyBitsValid(7, 3) &&
+      EEShiftAmountOrderingWindow::readHistoryConsistent(7, 3) &&
+      EECore::pendingMultiplyDivideLatencyValid(
+        core->pendingMac0) &&
+      EECore::pendingMultiplyDivideRegisterValid(
+        core->pendingMac0) &&
+      EECore::pendingMultiplyDivideDestinationValid(
+        core->pendingMac0) &&
+      core->concurrentMultiplyDivideCanResume() &&
+      core->concurrentMultiplyDivideLatenciesValid() &&
+      core->concurrentMultiplyDestinationsValid() &&
+      core->cop1ProgramOrderInRange(
+        core->inFlightCOP1Operations[0]) &&
+      core->cop1ProgramOrderUnique(order) &&
+      core->cop1DividerResultCountValid(order) &&
+      core->cop1DividerOverlapValid(order) &&
+      EECore::cop1DividerInitiationIntervalValid({
+        core->cop1DividerInitiationCycles,
+        core->cop1DividerOperation
+      }) &&
+      EECore::cop1DividerOperationPresenceValid({
+        core->cop1DividerInitiationCycles,
+        core->cop1DividerOperation
+      }) &&
+      EECore::cop1DividerOperationFamilyValid({
+        core->cop1DividerInitiationCycles,
+        core->cop1DividerOperation
+      }) &&
+      core->cop1DividerOccupancyConsistent() &&
+      core->stagedCOP1PipelineOrderValid(order);
+    return
+      valid &&
+      core->stateHash() == stateHashBefore &&
+      core->pendingMac0.remainingCycles ==
+        mac0CyclesBefore &&
+      core->pendingMac1.generalRegister ==
+        mac1RegisterBefore &&
+      core->inFlightCOP1Operations[0].programOrder ==
+        firstProgramOrderBefore &&
+      core->cop1DividerInitiationCycles ==
+        dividerCyclesBefore;
+  }
 };
 
 TEST_CASE(
@@ -721,6 +810,20 @@ TEST_CASE("EE in-flight COP1 lifecycle gates invalid transitions")
   REQUIRE(core.stateHash() == canonicalHash);
   REQUIRE(system.saveState() == canonicalSaveState);
   EECoreTestAccess::reconcileCOP1DividerOccupancy(&core);
+}
+
+TEST_CASE("EE continuation invariant predicates are pure")
+{
+  NekoSystem system;
+  REQUIRE(
+    EECoreTestAccess::continuationInvariantPredicatesArePure(
+      &system.eeCore()));
+  REQUIRE(
+    EEShiftAmountOrderingWindow::historyBitsValid(7, 3));
+  REQUIRE(
+    EEShiftAmountOrderingWindow::readHistoryConsistent(7, 3));
+  REQUIRE_FALSE(
+    EEShiftAmountOrderingWindow::readHistoryConsistent(1, 2));
 }
 
 TEST_CASE("EE COP1 cancellation owns program-order boundaries")

@@ -92,6 +92,12 @@ class EEAcceptanceRecords
 class EEShiftAmountOrderingWindow
 {
   public:
+    static bool historyBitsValid(
+      std::uint8_t accesses,
+      std::uint8_t reads);
+    static bool readHistoryConsistent(
+      std::uint8_t accesses,
+      std::uint8_t reads);
     void clear();
     bool permits(EEOperation operation) const;
     void accept(EEOperation operation);
@@ -1308,6 +1314,32 @@ class EECore final : public ClockedComponent
     COP1ProgramOrderView inFlightCOP1ProgramOrder() const;
     static bool cop1RetirementReady(
       const InFlightCOP1Operation &operation);
+    static bool pendingMultiplyDivideLatencyValid(
+      const PendingMultiplyDivide &operation);
+    static bool pendingMultiplyDivideRegisterValid(
+      const PendingMultiplyDivide &operation);
+    static bool pendingMultiplyDivideDestinationValid(
+      const PendingMultiplyDivide &operation);
+    bool concurrentMultiplyDivideCanResume() const;
+    bool concurrentMultiplyDivideLatenciesValid() const;
+    bool concurrentMultiplyDestinationsValid() const;
+    bool cop1ProgramOrderInRange(
+      const InFlightCOP1Operation &operation) const;
+    bool cop1ProgramOrderUnique(
+      const COP1ProgramOrderView &programOrder) const;
+    bool cop1DividerResultCountValid(
+      const COP1ProgramOrderView &programOrder) const;
+    bool cop1DividerOverlapValid(
+      const COP1ProgramOrderView &programOrder) const;
+    static bool cop1DividerInitiationIntervalValid(
+      const COP1DividerOccupancy &occupancy);
+    static bool cop1DividerOperationPresenceValid(
+      const COP1DividerOccupancy &occupancy);
+    static bool cop1DividerOperationFamilyValid(
+      const COP1DividerOccupancy &occupancy);
+    bool cop1DividerOccupancyConsistent() const;
+    bool stagedCOP1PipelineOrderValid(
+      const COP1ProgramOrderView &programOrder) const;
     static void completeInFlightCOP1(
       InFlightCOP1Operation *operation,
       COP1CompletionReason reason);
