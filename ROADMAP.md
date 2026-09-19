@@ -1231,7 +1231,7 @@ accumulator or condition-result contract:
       state and malformed parsed state require different handling
 - [x] Complete an independent read-only review of the shared invariant boundary
       before changing reconciliation or component ownership
-- [ ] Reconstruct pointer topology and derived occupancy through explicit
+- [x] Reconstruct pointer topology and derived occupancy through explicit
       reconciliation steps rather than scattered commit-time assignments
 - [ ] Make cross-component transactional ownership explicit, then split the
       save-state implementation by coherent component boundaries

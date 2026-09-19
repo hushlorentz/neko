@@ -1036,6 +1036,23 @@ class NekoSaveStateCodec
   private:
     using PipelineLists =
       std::array<std::list<Pipeline *>, 3>;
+    using PipelineListIndices =
+      std::array<std::vector<std::uint8_t>, 3>;
+
+    struct ScheduledComponentState
+    {
+      std::uint8_t id = 0;
+      std::uint64_t period = 0;
+      std::uint64_t phase = 0;
+    };
+
+    struct DecodedTopology
+    {
+      PipelineListIndices vu0PipelineLists;
+      PipelineListIndices vu1PipelineLists;
+      EECore::COP1DividerOccupancy dividerOccupancy;
+      std::vector<ScheduledComponentState> schedule;
+    };
 
     struct SystemReconciliation
     {
@@ -1051,10 +1068,12 @@ class NekoSaveStateCodec
       const NekoSystem &system);
     static void readSystem(
       SaveStateReader *reader,
-      NekoSystem *system);
+      NekoSystem *system,
+      DecodedTopology *topology);
     static void validateSystem(const NekoSystem &system);
     static SystemReconciliation reconcileSystem(
       const NekoSystem &source,
+      const DecodedTopology &topology,
       NekoSystem *destination);
     static void commitSystem(
       NekoSystem *destination,
@@ -1066,7 +1085,8 @@ class NekoSaveStateCodec
       const NekoSystem &system);
     static void readMasterClock(
       SaveStateReader *reader,
-      NekoSystem *system);
+      MasterClockScheduler *clock,
+      std::vector<ScheduledComponentState> *schedule);
     static std::uint8_t componentID(
       const NekoSystem &system,
       const ClockedComponent *component);
@@ -1079,14 +1099,16 @@ class NekoSaveStateCodec
       const EECore &core);
     static void readEECore(
       SaveStateReader *reader,
-      EECore *core);
+      EECore *core,
+      EECore::COP1DividerOccupancy *dividerOccupancy);
 
     static void writeVPU(
       SaveStateWriter *writer,
       const VPU &vpu);
     static void readVPU(
       SaveStateReader *reader,
-      VPU *vpu);
+      VPU *vpu,
+      PipelineListIndices *pipelineLists);
     static void commitVPU(
       VPU *destination,
       VPU *source,
@@ -1102,9 +1124,15 @@ class NekoSaveStateCodec
       const PipelineOrchestrator &orchestrator);
     static void readOrchestrator(
       SaveStateReader *reader,
-      PipelineOrchestrator *orchestrator);
-    static PipelineLists makePipelineLists(
-      const PipelineOrchestrator &source,
+      PipelineOrchestrator *orchestrator,
+      PipelineListIndices *pipelineLists);
+    static std::vector<
+      MasterClockScheduler::ScheduledComponent>
+      reconcileMasterClockSchedule(
+        const std::vector<ScheduledComponentState> &source,
+        NekoSystem *destination);
+    static PipelineLists reconcilePipelineLists(
+      const PipelineListIndices &source,
       PipelineOrchestrator *destination);
     static std::uint8_t pipelineIndex(
       const PipelineOrchestrator &orchestrator,
@@ -1189,12 +1217,19 @@ void NekoSaveStateCodec::load(
 {
   SaveStateContainerReader container(state);
   NekoSystem parsed;
-  readSystem(container.payload(), &parsed);
+  DecodedTopology decodedTopology;
+  readSystem(
+    container.payload(),
+    &parsed,
+    &decodedTopology);
   container.requireEnd();
   validateSystem(parsed);
 
   SystemReconciliation reconciliation =
-    reconcileSystem(parsed, system);
+    reconcileSystem(
+      parsed,
+      decodedTopology,
+      system);
   commitSystem(
     system,
     &parsed,
@@ -1235,7 +1270,8 @@ void NekoSaveStateCodec::writeSystem(
 
 void NekoSaveStateCodec::readSystem(
   SaveStateReader *reader,
-  NekoSystem *system)
+  NekoSystem *system,
+  DecodedTopology *topology)
 {
   system->inputState.buttons = reader->readU16();
   system->inputState.leftStickX = reader->readU8();
@@ -1243,8 +1279,14 @@ void NekoSaveStateCodec::readSystem(
   system->inputState.rightStickX = reader->readU8();
   system->inputState.rightStickY = reader->readU8();
 
-  readMasterClock(reader, system);
-  readEECore(reader, &system->eeCoreComponent);
+  readMasterClock(
+    reader,
+    &system->masterClock,
+    &topology->schedule);
+  readEECore(
+    reader,
+    &system->eeCoreComponent,
+    &topology->dividerOccupancy);
   system->interruptControllerComponent.statusRegister =
     reader->readU32();
   system->interruptControllerComponent.maskRegister =
@@ -1253,8 +1295,14 @@ void NekoSaveStateCodec::readSystem(
     reader->readByteVector(
       EEMemoryMap::MAIN_MEMORY_SIZE,
       "EE main memory");
-  readVPU(reader, &system->vu0Component);
-  readVPU(reader, &system->vu1Component);
+  readVPU(
+    reader,
+    &system->vu0Component,
+    &topology->vu0PipelineLists);
+  readVPU(
+    reader,
+    &system->vu1Component,
+    &topology->vu1PipelineLists);
   readVIF(reader, &system->vif0Component);
   readVIF(reader, &system->vif1Component);
   readGIFDecoder(reader, &system->gifDecoderComponent);
@@ -1300,29 +1348,22 @@ void NekoSaveStateCodec::validateSystem(
 NekoSaveStateCodec::SystemReconciliation
 NekoSaveStateCodec::reconcileSystem(
   const NekoSystem &source,
+  const DecodedTopology &topology,
   NekoSystem *destination)
 {
   SystemReconciliation reconciliation;
-  reconciliation.vu0Lists = makePipelineLists(
-    source.vu0Component.orchestrator,
+  reconciliation.schedule =
+    reconcileMasterClockSchedule(
+      topology.schedule,
+      destination);
+  reconciliation.vu0Lists = reconcilePipelineLists(
+    topology.vu0PipelineLists,
     &destination->vu0Component.orchestrator);
-  reconciliation.vu1Lists = makePipelineLists(
-    source.vu1Component.orchestrator,
+  reconciliation.vu1Lists = reconcilePipelineLists(
+    topology.vu1PipelineLists,
     &destination->vu1Component.orchestrator);
   reconciliation.dividerOccupancy =
     source.eeCoreComponent.derivedCOP1DividerOccupancy();
-  reconciliation.schedule.reserve(
-    source.masterClock.components.size());
-  for (const auto &scheduled : source.masterClock.components)
-  {
-    reconciliation.schedule.push_back({
-      componentForID(
-        destination,
-        componentID(source, scheduled.component)),
-      scheduled.period,
-      scheduled.phase
-    });
-  }
   return reconciliation;
 }
 
@@ -1598,15 +1639,15 @@ void NekoSaveStateCodec::writeMasterClock(
 
 void NekoSaveStateCodec::readMasterClock(
   SaveStateReader *reader,
-  NekoSystem *system)
+  MasterClockScheduler *clock,
+  std::vector<ScheduledComponentState> *schedule)
 {
-  system->masterClock.masterCycle = reader->readU64();
+  clock->masterCycle = reader->readU64();
   const std::uint32_t count = reader->readU32();
   require(count <= 7, "master-clock component count is invalid");
   std::array<bool, 8> used = {};
-  std::vector<MasterClockScheduler::ScheduledComponent>
-    components;
-  components.reserve(count);
+  schedule->clear();
+  schedule->reserve(count);
   for (std::uint32_t index = 0; index < count; ++index)
   {
     const std::uint8_t id = reader->readU8();
@@ -1617,13 +1658,12 @@ void NekoSaveStateCodec::readMasterClock(
     const std::uint64_t phase = reader->readU64();
     require(period != 0, "clock period is zero");
     require(phase < period, "clock phase is outside its period");
-    components.push_back({
-      componentForID(system, id),
+    schedule->push_back({
+      id,
       period,
       phase
     });
   }
-  system->masterClock.components.swap(components);
 }
 
 std::uint8_t NekoSaveStateCodec::componentID(
@@ -1812,7 +1852,8 @@ void NekoSaveStateCodec::writeEECore(
 
 void NekoSaveStateCodec::readEECore(
   SaveStateReader *reader,
-  EECore *core)
+  EECore *core,
+  EECore::COP1DividerOccupancy *dividerOccupancy)
 {
   for (EERegister128 &value : core->generalRegisters)
   {
@@ -1927,24 +1968,20 @@ void NekoSaveStateCodec::readEECore(
       reader->readU8() == 0,
       "EE reserved front-end state is not empty");
   }
-  core->cop1DividerInitiationCycles = reader->readU8();
-  core->cop1DividerOperation =
+  dividerOccupancy->initiationCycles = reader->readU8();
+  dividerOccupancy->operation =
     static_cast<EEOperation>(reader->readU8());
-  const EECore::COP1DividerOccupancy serializedOccupancy = {
-    core->cop1DividerInitiationCycles,
-    core->cop1DividerOperation
-  };
   require(
     EECore::cop1DividerInitiationIntervalValid(
-      serializedOccupancy),
+      *dividerOccupancy),
     "EE COP1 divider initiation interval is invalid");
   require(
     EECore::cop1DividerOperationPresenceValid(
-      serializedOccupancy),
+      *dividerOccupancy),
     "EE unoccupied COP1 divider names an operation");
   require(
     EECore::cop1DividerOperationFamilyValid(
-      serializedOccupancy),
+      *dividerOccupancy),
     "EE COP1 divider operation state is inconsistent");
   const bool retiredCOP1OperateResource =
     reader->readBool("retired EE COP1 operate resource flag");
@@ -2541,8 +2578,13 @@ void NekoSaveStateCodec::readEECore(
   require(
     core->cop1DividerOverlapValid(programOrder),
     "EE COP1 divider overlap state is inconsistent");
+  const EECore::COP1DividerOccupancy derivedDividerOccupancy =
+    core->derivedCOP1DividerOccupancy();
   require(
-    core->cop1DividerOccupancyConsistent(),
+    dividerOccupancy->initiationCycles ==
+        derivedDividerOccupancy.initiationCycles &&
+      dividerOccupancy->operation ==
+        derivedDividerOccupancy.operation,
     "EE COP1 divider occupancy is inconsistent");
   for (std::size_t orderIndex = 0;
        orderIndex < programOrder.size();
@@ -2836,7 +2878,6 @@ void NekoSaveStateCodec::readEECore(
     core->cop1DividerPostDelayTaken ||
       core->cop1DividerPostDelayTargetAddress == 0,
     "EE untaken branch hazard contains a target");
-  core->reconcileCOP1DividerOccupancy();
 }
 
 void NekoSaveStateCodec::writeVPU(
@@ -2917,7 +2958,8 @@ void NekoSaveStateCodec::writeVPU(
 
 void NekoSaveStateCodec::readVPU(
   SaveStateReader *reader,
-  VPU *vpu)
+  VPU *vpu,
+  PipelineListIndices *pipelineLists)
 {
   const VPUType type = readEnum<VPUType>(
     reader,
@@ -2996,7 +3038,10 @@ void NekoSaveStateCodec::readVPU(
   vpu->statusFlags = reader->readU16();
   vpu->accumulator = readFPRegister(reader);
   vpu->clippingFlags = reader->readU64();
-  readOrchestrator(reader, &vpu->orchestrator);
+  readOrchestrator(
+    reader,
+    &vpu->orchestrator,
+    pipelineLists);
   vpu->virtualDestRegister = readFPRegister(reader);
   vpu->accumulatorForwardValue = readFPRegister(reader);
   vpu->pendingAccumulatorWrites = reader->readU8();
@@ -3322,7 +3367,8 @@ void NekoSaveStateCodec::writeOrchestrator(
 
 void NekoSaveStateCodec::readOrchestrator(
   SaveStateReader *reader,
-  PipelineOrchestrator *orchestrator)
+  PipelineOrchestrator *orchestrator,
+  PipelineListIndices *pipelineLists)
 {
   orchestrator->stalling =
     reader->readBool("VU orchestrator stall flag");
@@ -3335,20 +3381,17 @@ void NekoSaveStateCodec::readOrchestrator(
     readPipeline(reader, &pipeline);
   }
 
-  orchestrator->executing.clear();
-  orchestrator->waiting.clear();
-  orchestrator->pool.clear();
   std::array<bool, MAX_PIPELINES> used = {};
-  std::list<Pipeline *> *lists[] = {
-    &orchestrator->executing,
-    &orchestrator->waiting,
-    &orchestrator->pool
-  };
+  for (std::vector<std::uint8_t> &list : *pipelineLists)
+  {
+    list.clear();
+  }
   std::size_t membershipCount = 0;
-  for (std::list<Pipeline *> *list : lists)
+  for (std::vector<std::uint8_t> &list : *pipelineLists)
   {
     const std::uint32_t count = reader->readU32();
     require(count <= MAX_PIPELINES, "VU pipeline-list size is invalid");
+    list.reserve(count);
     membershipCount += count;
     for (std::uint32_t index = 0; index < count; ++index)
     {
@@ -3360,7 +3403,7 @@ void NekoSaveStateCodec::readOrchestrator(
         !used[pipeline],
         "VU pipeline appears in multiple lists");
       used[pipeline] = true;
-      list->push_back(&orchestrator->pipelines[pipeline]);
+      list.push_back(pipeline);
     }
   }
   require(
@@ -3368,27 +3411,38 @@ void NekoSaveStateCodec::readOrchestrator(
     "VU pipeline-list membership is incomplete");
 }
 
+std::vector<MasterClockScheduler::ScheduledComponent>
+NekoSaveStateCodec::reconcileMasterClockSchedule(
+  const std::vector<ScheduledComponentState> &source,
+  NekoSystem *destination)
+{
+  std::vector<MasterClockScheduler::ScheduledComponent> result;
+  result.reserve(source.size());
+  for (const ScheduledComponentState &scheduled : source)
+  {
+    result.push_back({
+      componentForID(destination, scheduled.id),
+      scheduled.period,
+      scheduled.phase
+    });
+  }
+  return result;
+}
+
 NekoSaveStateCodec::PipelineLists
-NekoSaveStateCodec::makePipelineLists(
-  const PipelineOrchestrator &source,
+NekoSaveStateCodec::reconcilePipelineLists(
+  const PipelineListIndices &source,
   PipelineOrchestrator *destination)
 {
   PipelineLists result;
-  const std::list<Pipeline *> *sourceLists[] = {
-    &source.executing,
-    &source.waiting,
-    &source.pool
-  };
   for (std::size_t listIndex = 0;
        listIndex < result.size();
        ++listIndex)
   {
-    for (const Pipeline *pipeline : *sourceLists[listIndex])
+    for (std::uint8_t pipeline : source[listIndex])
     {
       result[listIndex].push_back(
-        &destination->pipelines[pipelineIndex(
-          source,
-          pipeline)]);
+        &destination->pipelines[pipeline]);
     }
   }
   return result;
