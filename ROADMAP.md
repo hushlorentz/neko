@@ -1233,7 +1233,7 @@ accumulator or condition-result contract:
       before changing reconciliation or component ownership
 - [x] Reconstruct pointer topology and derived occupancy through explicit
       reconciliation steps rather than scattered commit-time assignments
-- [ ] Make cross-component transactional ownership explicit, then split the
+- [x] Make cross-component transactional ownership explicit, then split the
       save-state implementation by coherent component boundaries
 - [ ] Preserve canonical bytes, strict malformed-state rejection, atomic load
       failure, and byte-identical repeated saves throughout reconciliation and

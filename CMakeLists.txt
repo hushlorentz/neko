@@ -68,6 +68,9 @@ add_library(neko_core
     neko/neko_system.cpp
     neko/regression_trace.cpp
     neko/save_state.cpp
+    neko/save_state_ee.cpp
+    neko/save_state_graphics.cpp
+    neko/save_state_vu.cpp
     neko/ee/gif/gif.cpp
     neko/ee/gif/gif_path_arbiter.cpp
     neko/ee/gif/gif_path1.cpp
