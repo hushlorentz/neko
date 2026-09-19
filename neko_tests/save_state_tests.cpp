@@ -907,7 +907,10 @@ TEST_CASE("Active system save states round trip and continue identically")
     restored.eeCore().lastIssueSelection().instructionCount ==
     2);
   restored.loadState(state);
-  REQUIRE(restored.saveState() == state);
+  const std::vector<std::uint8_t> restoredState =
+    restored.saveState();
+  REQUIRE(restoredState == state);
+  REQUIRE(restored.saveState() == restoredState);
   REQUIRE(
     restored.eeCore().lastIssueSelection().instructionCount ==
     0);

@@ -1235,7 +1235,7 @@ accumulator or condition-result contract:
       reconciliation steps rather than scattered commit-time assignments
 - [x] Make cross-component transactional ownership explicit, then split the
       save-state implementation by coherent component boundaries
-- [ ] Preserve canonical bytes, strict malformed-state rejection, atomic load
+- [x] Preserve canonical bytes, strict malformed-state rejection, atomic load
       failure, and byte-identical repeated saves throughout reconciliation and
       source decomposition
 - [ ] Complete an independent read-only review of reconciliation, transactional
