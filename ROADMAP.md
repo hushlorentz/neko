@@ -1260,7 +1260,7 @@ accumulator or condition-result contract:
       start, macro-to-micro handoff, micro-to-macro takeover, Force Break,
       control-reset, and execution-failure policies while preserving which
       transitions cancel pipeline membership
-- [ ] Split the VU orchestrator callback bridge and post-update paired-lower
+- [x] Split the VU orchestrator callback bridge and post-update paired-lower
       release into focused family-owned transitions while preserving callback
       order, XGKICK readiness side effects, pending write accounting, flags,
       forwarding, and trace publication

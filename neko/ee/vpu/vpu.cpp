@@ -1277,8 +1277,7 @@ bool VPU::tick()
   {
     if (mode == VPU_MODE_MACRO)
     {
-      orchestrator.update();
-      executePendingLowerInstruction(
+      updatePipelineLifecycle(
         VUPipelineIssueContext::Macro);
       macroIssueNeedsAdvance = false;
       if (!orchestrator.hasNext() &&
@@ -1420,8 +1419,7 @@ bool VPU::tick()
       }
     }
 
-    orchestrator.update();
-    executePendingLowerInstruction(
+    updatePipelineLifecycle(
       VUPipelineIssueContext::Micro);
     if (branchDelaySlotIssued)
     {
@@ -2874,14 +2872,38 @@ int VPU::calculateNewClippingFlags(
 
 void VPU::pipelineStarted(Pipeline * p)
 {
+  releasePairedLowerInstruction(p);
+}
+
+bool VPU::pipelineCanAdvance(Pipeline *pipeline)
+{
+  return canAdvancePipelineAtCurrentStage(pipeline);
+}
+
+void VPU::pipelineAdvanced(Pipeline *pipeline)
+{
+  if (pipeline->stage() == VUPipelineStage::T)
+  {
+    advancePipelineAtTStage(pipeline);
+    return;
+  }
+
+  advancePipelineAtXStage(pipeline);
+}
+
+void VPU::releasePairedLowerInstruction(
+  const Pipeline *pipeline)
+{
   if (lowerInstructionPending &&
-      pendingLowerInstructionAddress == p->instructionAddress)
+      pendingLowerInstructionAddress ==
+        pipeline->instructionAddress)
   {
     pendingLowerInstructionReady = true;
   }
 }
 
-bool VPU::pipelineCanAdvance(Pipeline *pipeline)
+bool VPU::canAdvancePipelineAtCurrentStage(
+  Pipeline *pipeline)
 {
   if (pipeline->type == VPU_PIPELINE_TYPE_XGKICK &&
       pipeline->stage() == VUPipelineStage::T)
@@ -2889,6 +2911,55 @@ bool VPU::pipelineCanAdvance(Pipeline *pipeline)
     return startXGKICKTransfer(pipeline);
   }
   return true;
+}
+
+void VPU::advancePipelineAtTStage(Pipeline *pipeline)
+{
+  switch (pipeline->type)
+  {
+    case VPU_PIPELINE_TYPE_FMAC:
+      startFMACPipeline(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_IALU:
+      startIALUPipeline(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_LSU:
+      startLSUPipeline(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_XGKICK:
+      startXGKICKTransfer(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_BRANCH:
+      evaluateBranchPipeline(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_I_REGISTER:
+      iRegister.setBits(pipeline->immediateBits);
+      break;
+    case VPU_PIPELINE_TYPE_FDIV:
+      executeFDIVPipeline(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_EFU:
+      executeEFUPipeline(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_RANDOM:
+      executeRandomPipeline(pipeline);
+      break;
+    case VPU_PIPELINE_TYPE_VIF_CONTROL:
+      pipeline->setIntResult(
+        pipeline->opCode == VPU_XTOP
+          ? vifRegisterSource->top()
+          : vifRegisterSource->itop());
+      break;
+  }
+}
+
+void VPU::advancePipelineAtXStage(Pipeline *pipeline)
+{
+  if (pipeline->type == VPU_PIPELINE_TYPE_IALU &&
+      pipeline->stage() == VUPipelineStage::X)
+  {
+    executeIALUPipeline(pipeline);
+  }
 }
 
 void VPU::capturePipelineSourcesForIssue(
@@ -2922,52 +2993,11 @@ FPRegister &VPU::vectorSource2(Pipeline *pipeline)
       : fpRegisters[pipeline->srcReg2];
 }
 
-void VPU::pipelineAdvanced(Pipeline *p)
+void VPU::updatePipelineLifecycle(
+  VUPipelineIssueContext issueContext)
 {
-  if (p->stage() == VUPipelineStage::T)
-  {
-    switch (p->type)
-    {
-      case VPU_PIPELINE_TYPE_FMAC:
-        startFMACPipeline(p);
-        break;
-      case VPU_PIPELINE_TYPE_IALU:
-        startIALUPipeline(p);
-        break;
-      case VPU_PIPELINE_TYPE_LSU:
-        startLSUPipeline(p);
-        break;
-      case VPU_PIPELINE_TYPE_XGKICK:
-        startXGKICKTransfer(p);
-        break;
-      case VPU_PIPELINE_TYPE_BRANCH:
-        evaluateBranchPipeline(p);
-        break;
-      case VPU_PIPELINE_TYPE_I_REGISTER:
-        iRegister.setBits(p->immediateBits);
-        break;
-      case VPU_PIPELINE_TYPE_FDIV:
-        executeFDIVPipeline(p);
-        break;
-      case VPU_PIPELINE_TYPE_EFU:
-        executeEFUPipeline(p);
-        break;
-      case VPU_PIPELINE_TYPE_RANDOM:
-        executeRandomPipeline(p);
-        break;
-      case VPU_PIPELINE_TYPE_VIF_CONTROL:
-        p->setIntResult(
-          p->opCode == VPU_XTOP
-            ? vifRegisterSource->top()
-            : vifRegisterSource->itop());
-        break;
-    }
-  }
-  else if (p->type == VPU_PIPELINE_TYPE_IALU &&
-           p->stage() == VUPipelineStage::X)
-  {
-    executeIALUPipeline(p);
-  }
+  orchestrator.update();
+  executePendingLowerInstruction(issueContext);
 }
 
 void VPU::executeFDIVPipeline(Pipeline *pipeline)
@@ -3821,208 +3851,199 @@ FPRegister * VPU::destinationRegisterFromPipeline(Pipeline * p)
 
 void VPU::pipelineFinished(Pipeline * p)
 {
-  if (p->type == VPU_PIPELINE_TYPE_FDIV)
+  switch (p->type)
   {
-    finishFDIVPipeline(p);
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
-      VPU_REGISTER_VF00,
-      FP_REGISTER_NO_FIELDS
-    });
-    return;
+    case VPU_PIPELINE_TYPE_FDIV:
+      completeFDIVPipeline(p);
+      return;
+    case VPU_PIPELINE_TYPE_EFU:
+      completeEFUPipeline(p);
+      return;
+    case VPU_PIPELINE_TYPE_WAITQ:
+    case VPU_PIPELINE_TYPE_WAITP:
+    case VPU_PIPELINE_TYPE_BRANCH:
+    case VPU_PIPELINE_TYPE_I_REGISTER:
+      return;
+    case VPU_PIPELINE_TYPE_FLAG:
+      completeFlagPipeline(p);
+      return;
+    case VPU_PIPELINE_TYPE_RANDOM:
+      completeRandomPipeline(p);
+      return;
+    case VPU_PIPELINE_TYPE_LSU:
+      completeLSUPipeline(p);
+      return;
+    case VPU_PIPELINE_TYPE_IALU:
+      completeIALUPipeline(p);
+      return;
+    case VPU_PIPELINE_TYPE_VIF_CONTROL:
+      completeVIFControlPipeline(p);
+      return;
+    default:
+      completeVectorPipeline(p);
+      return;
   }
-  if (p->type == VPU_PIPELINE_TYPE_EFU)
+}
+
+void VPU::completeFDIVPipeline(Pipeline *pipeline)
+{
+  finishFDIVPipeline(pipeline);
+  emitPipelineWriteback(
+    pipeline,
+    VPU_REGISTER_VF00,
+    FP_REGISTER_NO_FIELDS);
+}
+
+void VPU::completeEFUPipeline(Pipeline *pipeline)
+{
+  finishEFUPipeline(pipeline);
+  emitPipelineWriteback(
+    pipeline,
+    VPU_REGISTER_VF00,
+    FP_REGISTER_NO_FIELDS);
+}
+
+void VPU::completeFlagPipeline(Pipeline *pipeline)
+{
+  switch (pipeline->opCode)
   {
-    finishEFUPipeline(p);
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
-      VPU_REGISTER_VF00,
-      FP_REGISTER_NO_FIELDS
-    });
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_WAITQ)
-  {
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_WAITP)
-  {
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_FLAG)
-  {
-    switch (p->opCode)
-    {
-      case VPU_FCAND:
-        intRegisters[VPU_REGISTER_VI01] =
-          (clippingFlags & p->immediateBits) != 0;
-        break;
-      case VPU_FCEQ:
-        intRegisters[VPU_REGISTER_VI01] =
-          (clippingFlags & 0x00ffffff) == p->immediateBits;
-        break;
-      case VPU_FCGET:
-        if (p->integerDestReg != VPU_REGISTER_VI00)
-        {
-          intRegisters[p->integerDestReg] = clippingFlags & 0x0fff;
-        }
-        break;
-      case VPU_FCOR:
-        intRegisters[VPU_REGISTER_VI01] =
-          ((clippingFlags | p->immediateBits) & 0x00ffffff) ==
-          0x00ffffff;
-        break;
-      case VPU_FCSET:
-        clippingFlags = p->immediateBits;
-        break;
-      case VPU_FSAND:
-        if (p->integerDestReg != VPU_REGISTER_VI00)
-        {
-          intRegisters[p->integerDestReg] =
-            statusFlags & p->immediateBits;
-        }
-        break;
-      case VPU_FSEQ:
-        if (p->integerDestReg != VPU_REGISTER_VI00)
-        {
-          intRegisters[p->integerDestReg] =
-            statusFlags == p->immediateBits;
-        }
-        break;
-      case VPU_FSOR:
-        if (p->integerDestReg != VPU_REGISTER_VI00)
-        {
-          intRegisters[p->integerDestReg] =
-            statusFlags | p->immediateBits;
-        }
-        break;
-      case VPU_FSSET:
-        statusFlags =
-          (statusFlags & 0x003f) |
-          (p->immediateBits & 0x0fc0);
-        break;
-      case VPU_FMAND:
-        if (p->integerDestReg != VPU_REGISTER_VI00)
-        {
-          intRegisters[p->integerDestReg] =
-            MACFlags & integerValueForExecution(p->srcReg1);
-        }
-        break;
-      case VPU_FMEQ:
-        if (p->integerDestReg != VPU_REGISTER_VI00)
-        {
-          intRegisters[p->integerDestReg] =
-            MACFlags == integerValueForExecution(p->srcReg1);
-        }
-        break;
-      case VPU_FMOR:
-        if (p->integerDestReg != VPU_REGISTER_VI00)
-        {
-          intRegisters[p->integerDestReg] =
-            MACFlags | integerValueForExecution(p->srcReg1);
-        }
-        break;
-      default:
-        throw runtime_error("Unsupported VU clipping flag instruction.");
-    }
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
-      p->integerDestReg,
-      FP_REGISTER_NO_FIELDS
-    });
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_RANDOM)
-  {
-    if ((p->opCode == VPU_RGET || p->opCode == VPU_RNEXT) &&
-        p->writebackDisposition ==
-          VUPipelineWritebackDisposition::Commit)
-    {
-      updateDestinationRegisterWithPipelineResult(
-        &fpRegisters[p->destReg],
-        p);
-    }
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
-      p->destReg,
-      p->destFieldMask
-    });
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_LSU)
-  {
-    finishLSUPipeline(p);
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
-      p->destReg,
-      p->destFieldMask
-    });
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_IALU)
-  {
-    finishIALUPipeline(p);
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
-      p->destReg,
-      FP_REGISTER_NO_FIELDS
-    });
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_VIF_CONTROL)
-  {
-    if (p->integerDestReg != VPU_REGISTER_VI00)
-    {
-      intRegisters[p->integerDestReg] = p->intResult;
-    }
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
-      p->integerDestReg,
-      FP_REGISTER_NO_FIELDS
-    });
-    return;
-  }
-  if (p->type == VPU_PIPELINE_TYPE_BRANCH ||
-      p->type == VPU_PIPELINE_TYPE_I_REGISTER)
-  {
-    return;
+    case VPU_FCAND:
+      intRegisters[VPU_REGISTER_VI01] =
+        (clippingFlags & pipeline->immediateBits) != 0;
+      break;
+    case VPU_FCEQ:
+      intRegisters[VPU_REGISTER_VI01] =
+        (clippingFlags & 0x00ffffff) ==
+        pipeline->immediateBits;
+      break;
+    case VPU_FCGET:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] =
+          clippingFlags & 0x0fff;
+      }
+      break;
+    case VPU_FCOR:
+      intRegisters[VPU_REGISTER_VI01] =
+        ((clippingFlags | pipeline->immediateBits) &
+         0x00ffffff) == 0x00ffffff;
+      break;
+    case VPU_FCSET:
+      clippingFlags = pipeline->immediateBits;
+      break;
+    case VPU_FSAND:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] =
+          statusFlags & pipeline->immediateBits;
+      }
+      break;
+    case VPU_FSEQ:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] =
+          statusFlags == pipeline->immediateBits;
+      }
+      break;
+    case VPU_FSOR:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] =
+          statusFlags | pipeline->immediateBits;
+      }
+      break;
+    case VPU_FSSET:
+      statusFlags =
+        (statusFlags & 0x003f) |
+        (pipeline->immediateBits & 0x0fc0);
+      break;
+    case VPU_FMAND:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] =
+          MACFlags &
+          integerValueForExecution(pipeline->srcReg1);
+      }
+      break;
+    case VPU_FMEQ:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] =
+          MACFlags ==
+          integerValueForExecution(pipeline->srcReg1);
+      }
+      break;
+    case VPU_FMOR:
+      if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+      {
+        intRegisters[pipeline->integerDestReg] =
+          MACFlags |
+          integerValueForExecution(pipeline->srcReg1);
+      }
+      break;
+    default:
+      throw runtime_error(
+        "Unsupported VU clipping flag instruction.");
   }
 
+  emitPipelineWriteback(
+    pipeline,
+    pipeline->integerDestReg,
+    FP_REGISTER_NO_FIELDS);
+}
+
+void VPU::completeRandomPipeline(Pipeline *pipeline)
+{
+  if ((pipeline->opCode == VPU_RGET ||
+       pipeline->opCode == VPU_RNEXT) &&
+      pipeline->writebackDisposition ==
+        VUPipelineWritebackDisposition::Commit)
+  {
+    updateDestinationRegisterWithPipelineResult(
+      &fpRegisters[pipeline->destReg],
+      pipeline);
+  }
+
+  emitPipelineWriteback(
+    pipeline,
+    pipeline->destReg,
+    pipeline->destFieldMask);
+}
+
+void VPU::completeLSUPipeline(Pipeline *pipeline)
+{
+  finishLSUPipeline(pipeline);
+  emitPipelineWriteback(
+    pipeline,
+    pipeline->destReg,
+    pipeline->destFieldMask);
+}
+
+void VPU::completeIALUPipeline(Pipeline *pipeline)
+{
+  finishIALUPipeline(pipeline);
+  emitPipelineWriteback(
+    pipeline,
+    pipeline->destReg,
+    FP_REGISTER_NO_FIELDS);
+}
+
+void VPU::completeVIFControlPipeline(Pipeline *pipeline)
+{
+  if (pipeline->integerDestReg != VPU_REGISTER_VI00)
+  {
+    intRegisters[pipeline->integerDestReg] =
+      pipeline->intResult;
+  }
+
+  emitPipelineWriteback(
+    pipeline,
+    pipeline->integerDestReg,
+    FP_REGISTER_NO_FIELDS);
+}
+
+void VPU::completeVectorPipeline(Pipeline *p)
+{
   if (p->opCode == VPU_MTIR)
   {
     if (p->integerDestReg != VPU_REGISTER_VI00)
@@ -4030,16 +4051,10 @@ void VPU::pipelineFinished(Pipeline * p)
       intRegisters[p->integerDestReg] = p->intResult;
       pendingIntegerWrites[p->integerDestReg]--;
     }
-    emitTrace({
-      VPUTraceEventType::PipelineWriteback,
-      cycles,
-      p->instructionAddress,
-      0,
-      0,
-      p->opCode,
+    emitPipelineWriteback(
+      p,
       p->integerDestReg,
-      FP_REGISTER_NO_FIELDS
-    });
+      FP_REGISTER_NO_FIELDS);
     return;
   }
 
@@ -4115,19 +4130,44 @@ void VPU::pipelineFinished(Pipeline * p)
   }
 
   finishAccumulatorWrite(p);
+  emitVectorPipelineWriteback(p);
+}
+
+void VPU::emitPipelineWriteback(
+  const Pipeline *pipeline,
+  uint8_t destinationRegister,
+  uint8_t destinationFieldMask)
+{
   VPUTraceEvent event{
     VPUTraceEventType::PipelineWriteback,
     cycles,
-    p->instructionAddress,
+    pipeline->instructionAddress,
     0,
     0,
-    p->opCode,
-    p->destReg,
-    p->destFieldMask
+    pipeline->opCode,
+    destinationRegister,
+    destinationFieldMask
+  };
+  emitTrace(event);
+}
+
+void VPU::emitVectorPipelineWriteback(
+  const Pipeline *pipeline)
+{
+  VPUTraceEvent event{
+    VPUTraceEventType::PipelineWriteback,
+    cycles,
+    pipeline->instructionAddress,
+    0,
+    0,
+    pipeline->opCode,
+    pipeline->destReg,
+    pipeline->destFieldMask
   };
   if (traceCallback)
   {
-    event.arithmetic = arithmeticTraceForPipeline(*p);
+    event.arithmetic =
+      arithmeticTraceForPipeline(*pipeline);
   }
   emitTrace(event);
 }

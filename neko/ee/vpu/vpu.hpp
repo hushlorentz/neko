@@ -289,8 +289,12 @@ class VPU : public ClockedComponent, public PipelineHandler
       uint16_t opCode,
       uint8_t destinationMask) const;
     void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
+    void updatePipelineLifecycle(
+      VUPipelineIssueContext issueContext);
     void executePendingLowerInstruction(
       VUPipelineIssueContext issueContext);
+    void releasePairedLowerInstruction(
+      const Pipeline *pipeline);
     void startIRegisterInstruction(
       const LowerInstruction &instruction,
       VUPipelineIssueContext issueContext);
@@ -336,6 +340,10 @@ class VPU : public ClockedComponent, public PipelineHandler
       const VUPipelineRequest &request);
     FPRegister &vectorSource1(Pipeline *pipeline);
     FPRegister &vectorSource2(Pipeline *pipeline);
+    bool canAdvancePipelineAtCurrentStage(
+      Pipeline *pipeline);
+    void advancePipelineAtTStage(Pipeline *pipeline);
+    void advancePipelineAtXStage(Pipeline *pipeline);
     bool startXGKICKTransfer(Pipeline *pipeline);
     bool xgkickStallsIssue();
     uint16_t integerValueForExecution(uint8_t registerID) const;
@@ -379,6 +387,20 @@ class VPU : public ClockedComponent, public PipelineHandler
       FPRegister *fsReg,
       FPRegister *ftReg);
     FPRegister * destinationRegisterFromPipeline(Pipeline * p);
+    void completeFDIVPipeline(Pipeline *pipeline);
+    void completeEFUPipeline(Pipeline *pipeline);
+    void completeFlagPipeline(Pipeline *pipeline);
+    void completeRandomPipeline(Pipeline *pipeline);
+    void completeLSUPipeline(Pipeline *pipeline);
+    void completeIALUPipeline(Pipeline *pipeline);
+    void completeVIFControlPipeline(Pipeline *pipeline);
+    void completeVectorPipeline(Pipeline *pipeline);
+    void emitPipelineWriteback(
+      const Pipeline *pipeline,
+      uint8_t destinationRegister,
+      uint8_t destinationFieldMask);
+    void emitVectorPipelineWriteback(
+      const Pipeline *pipeline);
     void handleMADDInstruction(Pipeline * p);
     void handleMSUBInstruction(Pipeline * p);
     void handleOPMSUBInstruction(Pipeline * p);
