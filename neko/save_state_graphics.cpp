@@ -814,46 +814,48 @@ void NekoSaveStateCodec::commitGS(
 
 void NekoSaveStateCodec::writeDMAC(
   SaveStateWriter *writer,
-  const GIFDMACChannel &dmac)
+  const GIFDMACChannel &channel,
+  const DMACController &controller)
 {
-  writer->writeU32(dmac.channelControlRegister);
-  writer->writeU32(dmac.memoryAddressRegister);
-  writer->writeU32(dmac.quadwordCountRegister);
-  writer->writeU32(dmac.tagAddressRegister);
-  for (std::uint32_t value : dmac.addressStackRegisters)
+  writer->writeU32(channel.channelControlRegister);
+  writer->writeU32(channel.memoryAddressRegister);
+  writer->writeU32(channel.quadwordCountRegister);
+  writer->writeU32(channel.tagAddressRegister);
+  for (std::uint32_t value : channel.addressStackRegisters)
   {
     writer->writeU32(value);
   }
-  writer->writeU32(dmac.globalControlRegister);
-  writer->writeU32(dmac.statusRegister);
-  writer->writeU32(dmac.statusMaskRegister);
-  writer->writeBool(dmac.terminateAfterPacket);
-  writer->writeBool(dmac.path3Stalled);
-  writer->writeU8(dmac.addressStackDepth);
-  writer->writeU64(dmac.transferredQuadwords);
+  writer->writeU32(controller.controlRegister);
+  writer->writeU32(controller.statusRegister);
+  writer->writeU32(controller.statusMaskRegister);
+  writer->writeBool(channel.terminateAfterPacket);
+  writer->writeBool(channel.path3Stalled);
+  writer->writeU8(channel.addressStackDepth);
+  writer->writeU64(channel.transferredQuadwords);
 }
 
 void NekoSaveStateCodec::readDMAC(
   SaveStateReader *reader,
-  GIFDMACChannel *dmac)
+  GIFDMACChannel *channel,
+  DMACController *controller)
 {
-  dmac->channelControlRegister = reader->readU32();
-  dmac->memoryAddressRegister = reader->readU32();
-  dmac->quadwordCountRegister = reader->readU32();
-  dmac->tagAddressRegister = reader->readU32();
-  for (std::uint32_t &value : dmac->addressStackRegisters)
+  channel->channelControlRegister = reader->readU32();
+  channel->memoryAddressRegister = reader->readU32();
+  channel->quadwordCountRegister = reader->readU32();
+  channel->tagAddressRegister = reader->readU32();
+  for (std::uint32_t &value : channel->addressStackRegisters)
   {
     value = reader->readU32();
   }
-  dmac->globalControlRegister = reader->readU32();
-  dmac->statusRegister = reader->readU32();
-  dmac->statusMaskRegister = reader->readU32();
-  dmac->terminateAfterPacket =
+  controller->controlRegister = reader->readU32();
+  controller->statusRegister = reader->readU32();
+  controller->statusMaskRegister = reader->readU32();
+  channel->terminateAfterPacket =
     reader->readBool("GIF DMAC termination flag");
-  dmac->path3Stalled =
+  channel->path3Stalled =
     reader->readBool("GIF DMAC PATH3 stall flag");
-  dmac->addressStackDepth = reader->readU8();
-  dmac->transferredQuadwords = reader->readU64();
+  channel->addressStackDepth = reader->readU8();
+  channel->transferredQuadwords = reader->readU64();
 
   const std::uint32_t writableControl =
     GIFDMACChannelControl::FROM_MEMORY |
@@ -864,20 +866,20 @@ void NekoSaveStateCodec::readDMAC(
     GIFDMACChannelControl::START |
     GIFDMACChannelControl::TAG_MASK;
   const std::uint32_t mode =
-    dmac->channelControlRegister &
+    channel->channelControlRegister &
     GIFDMACChannelControl::MODE_MASK;
   require(
-    (dmac->channelControlRegister & ~writableControl) == 0 &&
+    (channel->channelControlRegister & ~writableControl) == 0 &&
     (mode == 0 || mode == GIFDMACChannelControl::CHAIN_MODE),
     "GIF DMAC channel control is invalid");
   require(
-    dmac->quadwordCountRegister <= 0xffff,
+    channel->quadwordCountRegister <= 0xffff,
     "GIF DMAC qword count is invalid");
   const std::uint32_t addresses[] = {
-    dmac->memoryAddressRegister,
-    dmac->tagAddressRegister,
-    dmac->addressStackRegisters[0],
-    dmac->addressStackRegisters[1]
+    channel->memoryAddressRegister,
+    channel->tagAddressRegister,
+    channel->addressStackRegisters[0],
+    channel->addressStackRegisters[1]
   };
   for (std::uint32_t address : addresses)
   {
@@ -886,23 +888,23 @@ void NekoSaveStateCodec::readDMAC(
       "GIF DMAC address is invalid");
   }
   require(
-    dmac->globalControlRegister <=
-      GIFDMACControl::DMA_ENABLE,
-    "GIF DMAC global control is invalid");
+    controller->controlRegister <=
+      DMACControl::DMA_ENABLE,
+    "DMAC global control is invalid");
   require(
-    (dmac->statusRegister &
-     ~(GIFDMACStatus::CHANNEL_1 |
-       GIFDMACStatus::CHANNEL_2)) == 0 &&
-    (dmac->statusMaskRegister &
-     ~(GIFDMACStatus::CHANNEL_1_MASK |
-       GIFDMACStatus::CHANNEL_2_MASK)) == 0,
-    "GIF DMAC status is invalid");
+    (controller->statusRegister &
+     ~(DMACStatus::CHANNEL_1 |
+       DMACStatus::CHANNEL_2)) == 0 &&
+    (controller->statusMaskRegister &
+     ~(DMACStatus::CHANNEL_1_MASK |
+       DMACStatus::CHANNEL_2_MASK)) == 0,
+    "DMAC status is invalid");
   require(
-    dmac->addressStackDepth <=
-      dmac->addressStackRegisters.size() &&
-    ((dmac->channelControlRegister &
+    channel->addressStackDepth <=
+      channel->addressStackRegisters.size() &&
+    ((channel->channelControlRegister &
       GIFDMACChannelControl::ADDRESS_STACK_MASK) >> 4) ==
-      dmac->addressStackDepth,
+      channel->addressStackDepth,
     "GIF DMAC address-stack state is invalid");
 }
 
@@ -1080,4 +1082,3 @@ void NekoSaveStateCodec::readGSDisplay(
      ~GSInterruptMask::ALL) == 0,
     "GS display register state is invalid");
 }
-

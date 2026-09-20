@@ -7,6 +7,7 @@
 #include "gif.hpp"
 
 class EEInterruptController;
+class DMACController;
 class GIFRegisters;
 class GIFDMACChannel;
 class GIFPath3Transfer;
@@ -104,6 +105,7 @@ class EEBus
       GIFPath3Transfer *gifPath3,
       GS *gs,
       EEInterruptController *interrupts);
+    void attachDMACController(DMACController *dmac);
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
     void attachVIF1DMACChannel(VIF1DMACChannel *vif1DMAC);
     void attachGSDisplay(GSDisplay *gsDisplay);
@@ -185,6 +187,7 @@ class EEBus
       std::uint64_t value,
       bool checkedGuestAccess);
     std::uint32_t vifStatus(const VIF &vif) const;
+    DMACController &attachedDMACController() const;
     GIFDMACChannel &attachedGIFDMAC() const;
     VIF1DMACChannel &attachedVIF1DMAC() const;
     GSDisplay &attachedGSDisplay() const;
@@ -195,6 +198,7 @@ class EEBus
     GIFPath3Transfer *gifPath3Transfer;
     GS *gsComponent;
     EEInterruptController *interruptController;
+    DMACController *dmacController = nullptr;
     GIFDMACChannel *gifDMACChannel = nullptr;
     VIF1DMACChannel *vif1DMACChannel = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;

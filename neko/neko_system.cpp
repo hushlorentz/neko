@@ -21,10 +21,12 @@ NekoSystem::NekoSystem() :
     &gifPath3Component,
     &gsComponent,
     &interruptControllerComponent),
-  gifDMACComponent(&eeBusComponent),
+  gifDMACComponent(
+    &eeBusComponent,
+    &dmacControllerComponent),
   vif1DMACComponent(
     &eeBusComponent,
-    &gifDMACComponent),
+    &dmacControllerComponent),
   gsDisplayComponent(&gsComponent)
 {
   masterClock.registerComponent(eeCoreComponent, 1);
@@ -39,6 +41,8 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(
     vu1Component,
     VU_CLOCK_PERIOD);
+  eeBusComponent.attachDMACController(
+    &dmacControllerComponent);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
   eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
@@ -360,6 +364,16 @@ const GIFRegisters &NekoSystem::gifRegisters() const
   return gifRegisterFile;
 }
 
+DMACController &NekoSystem::dmacController()
+{
+  return dmacControllerComponent;
+}
+
+const DMACController &NekoSystem::dmacController() const
+{
+  return dmacControllerComponent;
+}
+
 GIFDMACChannel &NekoSystem::gifDMAC()
 {
   return gifDMACComponent;
@@ -449,7 +463,7 @@ void NekoSystem::publishEEInterruptLines()
 {
   eeCoreComponent.setInterruptLines(
     interruptControllerComponent.interruptPending(),
-    gifDMACComponent.interruptPending());
+    dmacControllerComponent.interruptPending());
 }
 
 NekoSystem::CycleObservationSnapshot
@@ -561,7 +575,7 @@ bool NekoSystem::interruptPending() const
 {
   return
     interruptControllerComponent.interruptPending() ||
-    gifDMACComponent.interruptPending();
+    dmacControllerComponent.interruptPending();
 }
 
 EEExecutionResult NekoSystem::makeEEExecutionResult(
@@ -865,7 +879,7 @@ void NekoSystem::publishCycleTrace(
       cycle,
       NekoTraceSubsystem::GIFDMAC,
       NekoTraceEventType::TransferCompleted,
-      gifDMACComponent.globalStatus());
+      dmacControllerComponent.status());
   }
   if (gsComponent.pixelWriteCount() != beforeCycle.pixels)
   {

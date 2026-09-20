@@ -478,10 +478,12 @@ class NekoSaveStateCodec
 
     static void writeDMAC(
       SaveStateWriter *writer,
-      const GIFDMACChannel &dmac);
+      const GIFDMACChannel &channel,
+      const DMACController &controller);
     static void readDMAC(
       SaveStateReader *reader,
-      GIFDMACChannel *dmac);
+      GIFDMACChannel *channel,
+      DMACController *controller);
     static void writeVIF1DMAC(
       SaveStateWriter *writer,
       const VIF1DMACChannel &dmac);

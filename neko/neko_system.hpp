@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "clock_scheduler.hpp"
+#include "dmac_controller.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
 #include "ee_elf_loader.hpp"
@@ -119,6 +120,8 @@ class NekoSystem
     const GS &gs() const;
     GIFRegisters &gifRegisters();
     const GIFRegisters &gifRegisters() const;
+    DMACController &dmacController();
+    const DMACController &dmacController() const;
     GIFDMACChannel &gifDMAC();
     const GIFDMACChannel &gifDMAC() const;
     VIF1DMACChannel &vif1DMAC();
@@ -156,6 +159,7 @@ class NekoSystem
     EEInterruptController interruptControllerComponent;
     MasterClockScheduler masterClock;
     EEBus eeBusComponent;
+    DMACController dmacControllerComponent;
     GIFDMACChannel gifDMACComponent;
     VIF1DMACChannel vif1DMACComponent;
     GSDisplay gsDisplayComponent;

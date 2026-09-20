@@ -31,7 +31,7 @@ namespace
     std::uint32_t address,
     std::uint16_t qwc)
   {
-    bus->write32(EEMemoryMap::D_CTRL, GIFDMACControl::DMA_ENABLE);
+    bus->write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
     bus->write32(EEMemoryMap::D1_MADR, address);
     bus->write32(EEMemoryMap::D1_QWC, qwc);
     bus->write32(
@@ -45,7 +45,7 @@ namespace
     std::uint32_t address,
     std::uint32_t options = 0)
   {
-    bus->write32(EEMemoryMap::D_CTRL, GIFDMACControl::DMA_ENABLE);
+    bus->write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
     bus->write32(EEMemoryMap::D1_TADR, address);
     bus->write32(
       EEMemoryMap::D1_CHCR,
@@ -78,7 +78,7 @@ TEST_CASE("VIF1 DMAC normal transfers feed the VIF1 FIFO")
      GIFDMACChannelControl::START) == 0);
   REQUIRE(
     (bus.read32(EEMemoryMap::D_STAT) &
-     GIFDMACStatus::CHANNEL_1) != 0);
+     DMACStatus::CHANNEL_1) != 0);
 
   system.clockMasterCycle();
   REQUIRE(system.vif1().wordsIngested() == 8);
@@ -86,9 +86,9 @@ TEST_CASE("VIF1 DMAC normal transfers feed the VIF1 FIFO")
 
   bus.write32(
     EEMemoryMap::D_STAT,
-    GIFDMACStatus::CHANNEL_1_MASK);
+    DMACStatus::CHANNEL_1_MASK);
   REQUIRE(system.interruptPending());
-  bus.write32(EEMemoryMap::D_STAT, GIFDMACStatus::CHANNEL_1);
+  bus.write32(EEMemoryMap::D_STAT, DMACStatus::CHANNEL_1);
   REQUIRE_FALSE(system.interruptPending());
 }
 
@@ -258,6 +258,6 @@ TEST_CASE("VIF1 DMAC source-chain addressing follows tag control")
        GIFDMACChannelControl::START) == 0);
     REQUIRE(
       (bus.read32(EEMemoryMap::D_STAT) &
-       GIFDMACStatus::CHANNEL_1) != 0);
+       DMACStatus::CHANNEL_1) != 0);
   }
 }

@@ -72,7 +72,7 @@ namespace
     std::uint32_t address,
     std::uint16_t qwc)
   {
-    bus->write32(EEMemoryMap::D_CTRL, GIFDMACControl::DMA_ENABLE);
+    bus->write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
     bus->write32(EEMemoryMap::D2_MADR, address);
     bus->write32(EEMemoryMap::D2_QWC, qwc);
     bus->write32(EEMemoryMap::D2_CHCR, GIFDMACChannelControl::START);
@@ -105,14 +105,14 @@ TEST_CASE("GIF DMAC Normal Transfer Tests")
      GIFDMACChannelControl::START) == 0);
   REQUIRE(
     (bus.read32(EEMemoryMap::D_STAT) &
-     GIFDMACStatus::CHANNEL_2) != 0);
+     DMACStatus::CHANNEL_2) != 0);
 
   bus.write32(
     EEMemoryMap::D_STAT,
-    GIFDMACStatus::CHANNEL_2_MASK);
+    DMACStatus::CHANNEL_2_MASK);
   REQUIRE(system.interruptPending());
 
-  bus.write32(EEMemoryMap::D_STAT, GIFDMACStatus::CHANNEL_2);
+  bus.write32(EEMemoryMap::D_STAT, DMACStatus::CHANNEL_2);
   REQUIRE_FALSE(system.interruptPending());
 }
 
@@ -153,7 +153,7 @@ TEST_CASE("GIF DMAC Source Chain Tests")
     dmaTag(GIFDMATagID::End, 2, 0, true)));
   writePacket(&bus, 0x1040, GSPrimitiveType::Sprite);
 
-  bus.write32(EEMemoryMap::D_CTRL, GIFDMACControl::DMA_ENABLE);
+  bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
   bus.write32(EEMemoryMap::D2_TADR, 0x1000);
   bus.write32(
     EEMemoryMap::D2_CHCR,
@@ -176,7 +176,7 @@ TEST_CASE("GIF DMAC Source Chain Tests")
      UINT32_C(0x8000)));
   REQUIRE(
     (bus.read32(EEMemoryMap::D_STAT) &
-     GIFDMACStatus::CHANNEL_2) != 0);
+     DMACStatus::CHANNEL_2) != 0);
 }
 
 TEST_CASE("GIF DMAC Source Chain Address Tests")
@@ -190,7 +190,7 @@ TEST_CASE("GIF DMAC Source Chain Address Tests")
       dmaTag(GIFDMATagID::ReferenceEnd, 2, 0x2000)));
     writePacket(&bus, 0x2000, GSPrimitiveType::TriangleStrip);
 
-    bus.write32(EEMemoryMap::D_CTRL, GIFDMACControl::DMA_ENABLE);
+    bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
     bus.write32(EEMemoryMap::D2_TADR, 0x1000);
     bus.write32(
       EEMemoryMap::D2_CHCR,
@@ -219,7 +219,7 @@ TEST_CASE("GIF DMAC Source Chain Address Tests")
       0x2000,
       dmaTag(GIFDMATagID::End, 0)));
 
-    bus.write32(EEMemoryMap::D_CTRL, GIFDMACControl::DMA_ENABLE);
+    bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
     bus.write32(EEMemoryMap::D2_TADR, 0x1000);
     bus.write32(
       EEMemoryMap::D2_CHCR,
@@ -248,7 +248,7 @@ TEST_CASE("GIF DMAC Source Chain Address Tests")
       0x2000,
       dmaTag(GIFDMATagID::Return, 0)));
 
-    bus.write32(EEMemoryMap::D_CTRL, GIFDMACControl::DMA_ENABLE);
+    bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
     bus.write32(EEMemoryMap::D2_TADR, 0x1000);
     bus.write32(
       EEMemoryMap::D2_CHCR,

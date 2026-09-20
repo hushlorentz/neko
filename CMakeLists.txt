@@ -57,6 +57,7 @@ endif()
 
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
+    neko/ee/dmac_controller.cpp
     neko/ee/ee_bus.cpp
     neko/ee/ee_core.cpp
     neko/ee/ee_elf_loader.cpp

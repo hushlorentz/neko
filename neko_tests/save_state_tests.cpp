@@ -403,11 +403,11 @@ namespace
       dmaTag(GIFDMATagID::Return, 0)));
     system->eeBus().write32(
       EEMemoryMap::D_CTRL,
-      GIFDMACControl::DMA_ENABLE);
+      DMACControl::DMA_ENABLE);
     system->eeBus().write32(EEMemoryMap::D2_TADR, 0x1000);
     system->eeBus().write32(
       EEMemoryMap::D_STAT,
-      GIFDMACStatus::CHANNEL_2_MASK);
+      DMACStatus::CHANNEL_2_MASK);
     system->eeBus().write32(
       EEMemoryMap::D2_CHCR,
       GIFDMACChannelControl::CHAIN_MODE |
@@ -1089,7 +1089,7 @@ TEST_CASE("Stalled GIF DMA state resumes identically after load")
   REQUIRE(original.eeBus().writeQuadword(0x3010, payload));
   original.eeBus().write32(
     EEMemoryMap::D_CTRL,
-    GIFDMACControl::DMA_ENABLE);
+    DMACControl::DMA_ENABLE);
   original.eeBus().write32(EEMemoryMap::D2_MADR, 0x3000);
   original.eeBus().write32(EEMemoryMap::D2_QWC, 2);
   original.eeBus().write32(
@@ -1171,7 +1171,7 @@ TEST_CASE("In-flight VIF1 DMA resumes identically after load")
   REQUIRE(original.eeBus().writeQuadword(0x1010, {}));
   original.eeBus().write32(
     EEMemoryMap::D_CTRL,
-    GIFDMACControl::DMA_ENABLE);
+    DMACControl::DMA_ENABLE);
   original.eeBus().write32(EEMemoryMap::D1_MADR, 0x1000);
   original.eeBus().write32(EEMemoryMap::D1_QWC, 2);
   original.eeBus().write32(
@@ -1191,8 +1191,8 @@ TEST_CASE("In-flight VIF1 DMA resumes identically after load")
   REQUIRE(restored.saveState() == original.saveState());
   REQUIRE(restored.vif1().wordsIngested() == 8);
   REQUIRE(
-    (restored.gifDMAC().globalStatus() &
-     GIFDMACStatus::CHANNEL_1) != 0);
+    (restored.dmacController().status() &
+     DMACStatus::CHANNEL_1) != 0);
 }
 
 TEST_CASE("Reset machines can load prior save states")

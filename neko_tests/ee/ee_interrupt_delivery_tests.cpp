@@ -217,10 +217,10 @@ TEST_CASE("EE observes DMAC completion at the next instruction boundary")
     DMAC_ENABLED_STATUS);
   bus.write32(
     EEMemoryMap::D_STAT,
-    GIFDMACStatus::CHANNEL_2_MASK);
+    DMACStatus::CHANNEL_2_MASK);
   bus.write32(
     EEMemoryMap::D_CTRL,
-    GIFDMACControl::DMA_ENABLE);
+    DMACControl::DMA_ENABLE);
   bus.write32(EEMemoryMap::D2_QWC, 0);
   bus.write32(
     EEMemoryMap::D2_CHCR,

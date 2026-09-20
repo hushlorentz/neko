@@ -1,6 +1,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "dmac_controller.hpp"
 #include "ee_bus.hpp"
 #include "gif_dmac_channel.hpp"
 
@@ -20,20 +21,23 @@ namespace
     GIFDMACChannelControl::TAG_MASK;
 }
 
-GIFDMACChannel::GIFDMACChannel(EEBus *bus) :
-  eeBus(bus)
+GIFDMACChannel::GIFDMACChannel(
+  EEBus *bus,
+  DMACController *controller) :
+  eeBus(bus),
+  dmacController(controller)
 {
-  if (eeBus == nullptr)
+  if (eeBus == nullptr || dmacController == nullptr)
   {
     throw std::invalid_argument(
-      "GIF DMAC channel requires a non-null EE bus.");
+      "GIF DMAC channel requires non-null DMAC components.");
   }
 }
 
 bool GIFDMACChannel::clockActive() const
 {
   return
-    (globalControlRegister & GIFDMACControl::DMA_ENABLE) != 0 &&
+    dmacController->enabled() &&
     (channelControlRegister &
      GIFDMACChannelControl::START) != 0;
 }
@@ -173,74 +177,6 @@ void GIFDMACChannel::writeAddressStack(
   }
   addressStackRegisters[index] =
     decodeAddress(value, "ASR");
-}
-
-std::uint32_t GIFDMACChannel::globalControl() const
-{
-  return globalControlRegister;
-}
-
-void GIFDMACChannel::writeGlobalControl(std::uint32_t value)
-{
-  if ((value & ~GIFDMACControl::DMA_ENABLE) != 0)
-  {
-    throw std::invalid_argument(
-      "Only D_CTRL.DMAE is implemented.");
-  }
-  globalControlRegister = value;
-}
-
-std::uint32_t GIFDMACChannel::globalStatus() const
-{
-  return statusRegister | statusMaskRegister;
-}
-
-void GIFDMACChannel::writeGlobalStatus(std::uint32_t value)
-{
-  constexpr std::uint32_t CHANNELS =
-    GIFDMACStatus::CHANNEL_1 |
-    GIFDMACStatus::CHANNEL_2;
-  constexpr std::uint32_t MASKS =
-    GIFDMACStatus::CHANNEL_1_MASK |
-    GIFDMACStatus::CHANNEL_2_MASK;
-  statusRegister &= ~(value & CHANNELS);
-  statusMaskRegister ^=
-    value & MASKS;
-}
-
-bool GIFDMACChannel::dmaEnabled() const
-{
-  return
-    (globalControlRegister &
-     GIFDMACControl::DMA_ENABLE) != 0;
-}
-
-void GIFDMACChannel::signalChannelCompletion(
-  std::uint32_t channel)
-{
-  constexpr std::uint32_t CHANNELS =
-    GIFDMACStatus::CHANNEL_1 |
-    GIFDMACStatus::CHANNEL_2;
-  if ((channel & CHANNELS) == 0 ||
-      (channel & ~CHANNELS) != 0)
-  {
-    throw std::invalid_argument(
-      "Invalid DMAC completion channel.");
-  }
-  statusRegister |= channel;
-}
-
-bool GIFDMACChannel::interruptPending() const
-{
-  const bool vif1 =
-    (statusRegister & GIFDMACStatus::CHANNEL_1) != 0 &&
-    (statusMaskRegister &
-     GIFDMACStatus::CHANNEL_1_MASK) != 0;
-  const bool gif =
-    (statusRegister & GIFDMACStatus::CHANNEL_2) != 0 &&
-    (statusMaskRegister &
-     GIFDMACStatus::CHANNEL_2_MASK) != 0;
-  return vif1 || gif;
 }
 
 bool GIFDMACChannel::stalledByPATH3() const
@@ -417,7 +353,8 @@ void GIFDMACChannel::completeTransfer()
 {
   channelControlRegister &=
     ~GIFDMACChannelControl::START;
-  signalChannelCompletion(GIFDMACStatus::CHANNEL_2);
+  dmacController->signalChannelCompletion(
+    DMACStatus::CHANNEL_2);
   terminateAfterPacket = false;
   path3Stalled = false;
 }

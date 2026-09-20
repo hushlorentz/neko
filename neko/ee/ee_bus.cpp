@@ -1,5 +1,6 @@
 #include <stdexcept>
 
+#include "dmac_controller.hpp"
 #include "ee_bus.hpp"
 #include "gif_registers.hpp"
 #include "gif_dmac_channel.hpp"
@@ -120,6 +121,21 @@ bool EEBus::isMainMemoryRange(
   return mainMemoryAddress(address, width, &physicalAddress);
 }
 
+void EEBus::attachDMACController(DMACController *dmac)
+{
+  if (dmac == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires a non-null DMAC controller.");
+  }
+  if (dmacController != nullptr)
+  {
+    throw std::logic_error(
+      "EE bus DMAC controller is already attached.");
+  }
+  dmacController = dmac;
+}
+
 void EEBus::attachGIFDMACChannel(GIFDMACChannel *gifDMAC)
 {
   if (gifDMAC == nullptr)
@@ -190,6 +206,16 @@ std::uint32_t EEBus::vifStatus(const VIF &vif) const
       EEVIFStatus::INTERRUPT;
   }
   return status;
+}
+
+DMACController &EEBus::attachedDMACController() const
+{
+  if (dmacController == nullptr)
+  {
+    throw std::logic_error(
+      "EE bus DMAC controller is not attached.");
+  }
+  return *dmacController;
 }
 
 GIFDMACChannel &EEBus::attachedGIFDMAC() const
@@ -591,10 +617,10 @@ bool EEBus::readMapped32(
       *value = attachedGIFDMAC().addressStack(1);
       return true;
     case EEMemoryMap::D_CTRL:
-      *value = attachedGIFDMAC().globalControl();
+      *value = attachedDMACController().control();
       return true;
     case EEMemoryMap::D_STAT:
-      *value = attachedGIFDMAC().globalStatus();
+      *value = attachedDMACController().status();
       return true;
     case EEMemoryMap::INTC_STAT:
       *value = interruptController->status();
@@ -745,17 +771,17 @@ bool EEBus::writeMapped32(
     }
     case EEMemoryMap::D_CTRL:
     {
-      GIFDMACChannel &dmac = attachedGIFDMAC();
+      DMACController &dmac = attachedDMACController();
       return performDeviceWrite(
         checkedGuestAccess,
-        [&]() { dmac.writeGlobalControl(value); });
+        [&]() { dmac.writeControl(value); });
     }
     case EEMemoryMap::D_STAT:
     {
-      GIFDMACChannel &dmac = attachedGIFDMAC();
+      DMACController &dmac = attachedDMACController();
       return performDeviceWrite(
         checkedGuestAccess,
-        [&]() { dmac.writeGlobalStatus(value); });
+        [&]() { dmac.writeStatus(value); });
     }
     case EEMemoryMap::INTC_STAT:
       interruptController->acknowledge(value);

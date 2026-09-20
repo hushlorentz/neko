@@ -204,7 +204,10 @@ void NekoSaveStateCodec::writeSystem(
   writeGIFPath1(writer, system.gifPath1Component);
   writeGIFPath3(writer, system.gifPath3Component);
   writeGS(writer, system.gsComponent);
-  writeDMAC(writer, system.gifDMACComponent);
+  writeDMAC(
+    writer,
+    system.gifDMACComponent,
+    system.dmacControllerComponent);
   writeVIF1DMAC(writer, system.vif1DMACComponent);
   writeGSDisplay(writer, system.gsDisplayComponent);
 }
@@ -251,7 +254,10 @@ void NekoSaveStateCodec::readSystem(
   readGIFPath1(reader, &system->gifPath1Component);
   readGIFPath3(reader, &system->gifPath3Component);
   readGS(reader, &system->gsComponent);
-  readDMAC(reader, &system->gifDMACComponent);
+  readDMAC(
+    reader,
+    &system->gifDMACComponent,
+    &system->dmacControllerComponent);
   readVIF1DMAC(reader, &system->vif1DMACComponent);
   readGSDisplay(reader, &system->gsDisplayComponent);
 }
@@ -509,16 +515,19 @@ void NekoSaveStateCodec::commitSystem(
     sourceDMAC.tagAddressRegister;
   dmac.addressStackRegisters =
     sourceDMAC.addressStackRegisters;
-  dmac.globalControlRegister =
-    sourceDMAC.globalControlRegister;
-  dmac.statusRegister = sourceDMAC.statusRegister;
-  dmac.statusMaskRegister = sourceDMAC.statusMaskRegister;
   dmac.terminateAfterPacket =
     sourceDMAC.terminateAfterPacket;
   dmac.path3Stalled = sourceDMAC.path3Stalled;
   dmac.addressStackDepth = sourceDMAC.addressStackDepth;
   dmac.transferredQuadwords =
     sourceDMAC.transferredQuadwords;
+
+  destination->dmacControllerComponent.controlRegister =
+    source->dmacControllerComponent.controlRegister;
+  destination->dmacControllerComponent.statusRegister =
+    source->dmacControllerComponent.statusRegister;
+  destination->dmacControllerComponent.statusMaskRegister =
+    source->dmacControllerComponent.statusMaskRegister;
 
   VIF1DMACChannel &vif1DMAC =
     destination->vif1DMACComponent;

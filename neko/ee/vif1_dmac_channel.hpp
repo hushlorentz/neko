@@ -8,14 +8,14 @@
 #include "clocked_component.hpp"
 
 class EEBus;
-class GIFDMACChannel;
+class DMACController;
 
 class VIF1DMACChannel : public ClockedComponent
 {
   public:
     VIF1DMACChannel(
       EEBus *bus,
-      GIFDMACChannel *globalDMAC);
+      DMACController *controller);
 
     bool clockActive() const override;
     void clock() override;
@@ -56,7 +56,7 @@ class VIF1DMACChannel : public ClockedComponent
     void updateAddressStackField();
 
     EEBus *eeBus;
-    GIFDMACChannel *globalDMAC;
+    DMACController *dmacController;
     std::uint32_t channelControlRegister = 0;
     std::uint32_t memoryAddressRegister = 0;
     std::uint32_t quadwordCountRegister = 0;

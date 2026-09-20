@@ -1273,7 +1273,7 @@ accumulator or condition-result contract:
       serialized continuation
 - [x] Audit EEBus, DMA, VIF, and GIF transport for duplicated address,
       readiness, transfer-completion, or arbitration policy
-- [ ] Move common DMAC control, status, channel-completion, and interrupt
+- [x] Move common DMAC control, status, channel-completion, and interrupt
       ownership out of the GIF channel while preserving register behavior,
       master-cycle ordering, and version-24 save-state bytes
 - [ ] Centralize the duplicated GIF/VIF1 normal and source-chain register,

@@ -1,6 +1,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "dmac_controller.hpp"
 #include "ee_bus.hpp"
 #include "gif_dmac_channel.hpp"
 #include "vif1_dmac_channel.hpp"
@@ -23,11 +24,11 @@ namespace
 
 VIF1DMACChannel::VIF1DMACChannel(
   EEBus *bus,
-  GIFDMACChannel *sharedDMAC) :
+  DMACController *controller) :
   eeBus(bus),
-  globalDMAC(sharedDMAC)
+  dmacController(controller)
 {
-  if (eeBus == nullptr || globalDMAC == nullptr)
+  if (eeBus == nullptr || dmacController == nullptr)
   {
     throw std::invalid_argument(
       "VIF1 DMAC channel requires non-null DMAC components.");
@@ -37,7 +38,7 @@ VIF1DMACChannel::VIF1DMACChannel(
 bool VIF1DMACChannel::clockActive() const
 {
   return
-    globalDMAC->dmaEnabled() &&
+    dmacController->enabled() &&
     (channelControlRegister &
      GIFDMACChannelControl::START) != 0;
 }
@@ -378,8 +379,8 @@ void VIF1DMACChannel::completeTransfer()
 {
   channelControlRegister &=
     ~GIFDMACChannelControl::START;
-  globalDMAC->signalChannelCompletion(
-    GIFDMACStatus::CHANNEL_1);
+  dmacController->signalChannelCompletion(
+    DMACStatus::CHANNEL_1);
   terminateAfterPacket = false;
   vif1Stalled = false;
 }

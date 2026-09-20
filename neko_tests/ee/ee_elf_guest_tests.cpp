@@ -1183,12 +1183,12 @@ TEST_CASE("PS2DEV EE ELF guest configures VIF1 DMA")
     (system.vif1DMAC().channelControl() &
      GIFDMACChannelControl::START) == 0);
   REQUIRE(
-    (system.gifDMAC().globalStatus() &
-     GIFDMACStatus::CHANNEL_1) != 0);
+    (system.dmacController().status() &
+     DMACStatus::CHANNEL_1) != 0);
   REQUIRE(
-    (system.gifDMAC().globalStatus() &
-     GIFDMACStatus::CHANNEL_1_MASK) != 0);
-  REQUIRE(system.gifDMAC().interruptPending());
+    (system.dmacController().status() &
+     DMACStatus::CHANNEL_1_MASK) != 0);
+  REQUIRE(system.dmacController().interruptPending());
 }
 
 TEST_CASE("Tracing does not alter guest execution or machine state")
@@ -1348,7 +1348,7 @@ TEST_CASE("PS2DEV EE ELF guest drives mapped device registers")
   REQUIRE(
     system.interruptController().mask() ==
     EEInterruptSource::mask(EEInterruptSource::VIF0));
-  REQUIRE(system.gifDMAC().globalControl() == 1);
+  REQUIRE(system.dmacController().control() == 1);
   REQUIRE(system.gs().hostInterfaceReversed());
 }
 

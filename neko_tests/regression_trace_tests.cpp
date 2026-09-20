@@ -342,7 +342,7 @@ namespace
       primitiveWrite()));
     system->eeBus().write32(
       EEMemoryMap::D_CTRL,
-      GIFDMACControl::DMA_ENABLE);
+      DMACControl::DMA_ENABLE);
     system->eeBus().write32(EEMemoryMap::D2_MADR, 0x1000);
     system->eeBus().write32(EEMemoryMap::D2_QWC, 2);
     system->eeBus().write32(

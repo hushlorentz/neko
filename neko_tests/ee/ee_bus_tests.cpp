@@ -241,7 +241,7 @@ TEST_CASE("EE guest device accesses enforce register contracts")
 
   REQUIRE_FALSE(
     bus.writeData32(EEMemoryMap::D_CTRL, 2));
-  REQUIRE(system.gifDMAC().globalControl() == 0);
+  REQUIRE(system.dmacController().control() == 0);
   REQUIRE_FALSE(
     bus.writeData32(
       EEMemoryMap::D1_CHCR,
@@ -520,7 +520,7 @@ TEST_CASE("EE guest instructions reject invalid device access directions")
     REQUIRE(
       result.pendingException ==
       EEException::DataBusErrorStore);
-    REQUIRE(system.gifDMAC().globalControl() == 0);
+    REQUIRE(system.dmacController().control() == 0);
   }
 }
 

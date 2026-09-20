@@ -87,6 +87,6 @@ TEST_CASE("Neko System Interface Tests")
     REQUIRE(system.input().leftStickX == 0x80);
     REQUIRE(system.gsDisplay().presentationBoundaryCount() == 0);
     REQUIRE(system.gsDisplay().presentation().rgba.empty());
-    REQUIRE(system.gifDMAC().globalControl() == 0);
+    REQUIRE(system.dmacController().control() == 0);
   }
 }
