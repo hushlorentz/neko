@@ -1276,7 +1276,7 @@ accumulator or condition-result contract:
 - [x] Move common DMAC control, status, channel-completion, and interrupt
       ownership out of the GIF channel while preserving register behavior,
       master-cycle ordering, and version-24 save-state bytes
-- [ ] Centralize the duplicated GIF/VIF1 normal and source-chain register,
+- [x] Centralize the duplicated GIF/VIF1 normal and source-chain register,
       tag, address-stack, termination, and completion transitions in one
       fixed-state DMAC policy while retaining channel-specific tag delivery,
       sink backpressure, counters, and completion signalling

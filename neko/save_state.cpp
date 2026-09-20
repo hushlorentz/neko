@@ -505,20 +505,21 @@ void NekoSaveStateCodec::commitSystem(
   GIFDMACChannel &dmac = destination->gifDMACComponent;
   const GIFDMACChannel &sourceDMAC =
     source->gifDMACComponent;
-  dmac.channelControlRegister =
-    sourceDMAC.channelControlRegister;
-  dmac.memoryAddressRegister =
-    sourceDMAC.memoryAddressRegister;
-  dmac.quadwordCountRegister =
-    sourceDMAC.quadwordCountRegister;
-  dmac.tagAddressRegister =
-    sourceDMAC.tagAddressRegister;
-  dmac.addressStackRegisters =
-    sourceDMAC.addressStackRegisters;
-  dmac.terminateAfterPacket =
-    sourceDMAC.terminateAfterPacket;
+  dmac.channelState.channelControlRegister =
+    sourceDMAC.channelState.channelControlRegister;
+  dmac.channelState.memoryAddressRegister =
+    sourceDMAC.channelState.memoryAddressRegister;
+  dmac.channelState.quadwordCountRegister =
+    sourceDMAC.channelState.quadwordCountRegister;
+  dmac.channelState.tagAddressRegister =
+    sourceDMAC.channelState.tagAddressRegister;
+  dmac.channelState.addressStackRegisters =
+    sourceDMAC.channelState.addressStackRegisters;
+  dmac.channelState.terminateAfterPacket =
+    sourceDMAC.channelState.terminateAfterPacket;
   dmac.path3Stalled = sourceDMAC.path3Stalled;
-  dmac.addressStackDepth = sourceDMAC.addressStackDepth;
+  dmac.channelState.addressStackDepth =
+    sourceDMAC.channelState.addressStackDepth;
   dmac.transferredQuadwords =
     sourceDMAC.transferredQuadwords;
 
@@ -533,21 +534,21 @@ void NekoSaveStateCodec::commitSystem(
     destination->vif1DMACComponent;
   const VIF1DMACChannel &sourceVIF1DMAC =
     source->vif1DMACComponent;
-  vif1DMAC.channelControlRegister =
-    sourceVIF1DMAC.channelControlRegister;
-  vif1DMAC.memoryAddressRegister =
-    sourceVIF1DMAC.memoryAddressRegister;
-  vif1DMAC.quadwordCountRegister =
-    sourceVIF1DMAC.quadwordCountRegister;
-  vif1DMAC.tagAddressRegister =
-    sourceVIF1DMAC.tagAddressRegister;
-  vif1DMAC.addressStackRegisters =
-    sourceVIF1DMAC.addressStackRegisters;
-  vif1DMAC.terminateAfterPacket =
-    sourceVIF1DMAC.terminateAfterPacket;
+  vif1DMAC.channelState.channelControlRegister =
+    sourceVIF1DMAC.channelState.channelControlRegister;
+  vif1DMAC.channelState.memoryAddressRegister =
+    sourceVIF1DMAC.channelState.memoryAddressRegister;
+  vif1DMAC.channelState.quadwordCountRegister =
+    sourceVIF1DMAC.channelState.quadwordCountRegister;
+  vif1DMAC.channelState.tagAddressRegister =
+    sourceVIF1DMAC.channelState.tagAddressRegister;
+  vif1DMAC.channelState.addressStackRegisters =
+    sourceVIF1DMAC.channelState.addressStackRegisters;
+  vif1DMAC.channelState.terminateAfterPacket =
+    sourceVIF1DMAC.channelState.terminateAfterPacket;
   vif1DMAC.vif1Stalled = sourceVIF1DMAC.vif1Stalled;
-  vif1DMAC.addressStackDepth =
-    sourceVIF1DMAC.addressStackDepth;
+  vif1DMAC.channelState.addressStackDepth =
+    sourceVIF1DMAC.channelState.addressStackDepth;
   vif1DMAC.transferredQuadwords =
     sourceVIF1DMAC.transferredQuadwords;
 

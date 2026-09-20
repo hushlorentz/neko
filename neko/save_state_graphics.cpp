@@ -817,20 +817,21 @@ void NekoSaveStateCodec::writeDMAC(
   const GIFDMACChannel &channel,
   const DMACController &controller)
 {
-  writer->writeU32(channel.channelControlRegister);
-  writer->writeU32(channel.memoryAddressRegister);
-  writer->writeU32(channel.quadwordCountRegister);
-  writer->writeU32(channel.tagAddressRegister);
-  for (std::uint32_t value : channel.addressStackRegisters)
+  const DMACChannelState &state = channel.channelState;
+  writer->writeU32(state.channelControlRegister);
+  writer->writeU32(state.memoryAddressRegister);
+  writer->writeU32(state.quadwordCountRegister);
+  writer->writeU32(state.tagAddressRegister);
+  for (std::uint32_t value : state.addressStackRegisters)
   {
     writer->writeU32(value);
   }
   writer->writeU32(controller.controlRegister);
   writer->writeU32(controller.statusRegister);
   writer->writeU32(controller.statusMaskRegister);
-  writer->writeBool(channel.terminateAfterPacket);
+  writer->writeBool(state.terminateAfterPacket);
   writer->writeBool(channel.path3Stalled);
-  writer->writeU8(channel.addressStackDepth);
+  writer->writeU8(state.addressStackDepth);
   writer->writeU64(channel.transferredQuadwords);
 }
 
@@ -839,22 +840,23 @@ void NekoSaveStateCodec::readDMAC(
   GIFDMACChannel *channel,
   DMACController *controller)
 {
-  channel->channelControlRegister = reader->readU32();
-  channel->memoryAddressRegister = reader->readU32();
-  channel->quadwordCountRegister = reader->readU32();
-  channel->tagAddressRegister = reader->readU32();
-  for (std::uint32_t &value : channel->addressStackRegisters)
+  DMACChannelState &state = channel->channelState;
+  state.channelControlRegister = reader->readU32();
+  state.memoryAddressRegister = reader->readU32();
+  state.quadwordCountRegister = reader->readU32();
+  state.tagAddressRegister = reader->readU32();
+  for (std::uint32_t &value : state.addressStackRegisters)
   {
     value = reader->readU32();
   }
   controller->controlRegister = reader->readU32();
   controller->statusRegister = reader->readU32();
   controller->statusMaskRegister = reader->readU32();
-  channel->terminateAfterPacket =
+  state.terminateAfterPacket =
     reader->readBool("GIF DMAC termination flag");
   channel->path3Stalled =
     reader->readBool("GIF DMAC PATH3 stall flag");
-  channel->addressStackDepth = reader->readU8();
+  state.addressStackDepth = reader->readU8();
   channel->transferredQuadwords = reader->readU64();
 
   const std::uint32_t writableControl =
@@ -866,20 +868,20 @@ void NekoSaveStateCodec::readDMAC(
     GIFDMACChannelControl::START |
     GIFDMACChannelControl::TAG_MASK;
   const std::uint32_t mode =
-    channel->channelControlRegister &
+    state.channelControlRegister &
     GIFDMACChannelControl::MODE_MASK;
   require(
-    (channel->channelControlRegister & ~writableControl) == 0 &&
+    (state.channelControlRegister & ~writableControl) == 0 &&
     (mode == 0 || mode == GIFDMACChannelControl::CHAIN_MODE),
     "GIF DMAC channel control is invalid");
   require(
-    channel->quadwordCountRegister <= 0xffff,
+    state.quadwordCountRegister <= 0xffff,
     "GIF DMAC qword count is invalid");
   const std::uint32_t addresses[] = {
-    channel->memoryAddressRegister,
-    channel->tagAddressRegister,
-    channel->addressStackRegisters[0],
-    channel->addressStackRegisters[1]
+    state.memoryAddressRegister,
+    state.tagAddressRegister,
+    state.addressStackRegisters[0],
+    state.addressStackRegisters[1]
   };
   for (std::uint32_t address : addresses)
   {
@@ -900,11 +902,11 @@ void NekoSaveStateCodec::readDMAC(
        DMACStatus::CHANNEL_2_MASK)) == 0,
     "DMAC status is invalid");
   require(
-    channel->addressStackDepth <=
-      channel->addressStackRegisters.size() &&
-    ((channel->channelControlRegister &
+    state.addressStackDepth <=
+      state.addressStackRegisters.size() &&
+    ((state.channelControlRegister &
       GIFDMACChannelControl::ADDRESS_STACK_MASK) >> 4) ==
-      channel->addressStackDepth,
+      state.addressStackDepth,
     "GIF DMAC address-stack state is invalid");
 }
 
@@ -912,17 +914,18 @@ void NekoSaveStateCodec::writeVIF1DMAC(
   SaveStateWriter *writer,
   const VIF1DMACChannel &dmac)
 {
-  writer->writeU32(dmac.channelControlRegister);
-  writer->writeU32(dmac.memoryAddressRegister);
-  writer->writeU32(dmac.quadwordCountRegister);
-  writer->writeU32(dmac.tagAddressRegister);
-  for (std::uint32_t address : dmac.addressStackRegisters)
+  const DMACChannelState &state = dmac.channelState;
+  writer->writeU32(state.channelControlRegister);
+  writer->writeU32(state.memoryAddressRegister);
+  writer->writeU32(state.quadwordCountRegister);
+  writer->writeU32(state.tagAddressRegister);
+  for (std::uint32_t address : state.addressStackRegisters)
   {
     writer->writeU32(address);
   }
-  writer->writeBool(dmac.terminateAfterPacket);
+  writer->writeBool(state.terminateAfterPacket);
   writer->writeBool(dmac.vif1Stalled);
-  writer->writeU8(dmac.addressStackDepth);
+  writer->writeU8(state.addressStackDepth);
   writer->writeU64(dmac.transferredQuadwords);
 }
 
@@ -930,19 +933,20 @@ void NekoSaveStateCodec::readVIF1DMAC(
   SaveStateReader *reader,
   VIF1DMACChannel *dmac)
 {
-  dmac->channelControlRegister = reader->readU32();
-  dmac->memoryAddressRegister = reader->readU32();
-  dmac->quadwordCountRegister = reader->readU32();
-  dmac->tagAddressRegister = reader->readU32();
-  for (std::uint32_t &address : dmac->addressStackRegisters)
+  DMACChannelState &state = dmac->channelState;
+  state.channelControlRegister = reader->readU32();
+  state.memoryAddressRegister = reader->readU32();
+  state.quadwordCountRegister = reader->readU32();
+  state.tagAddressRegister = reader->readU32();
+  for (std::uint32_t &address : state.addressStackRegisters)
   {
     address = reader->readU32();
   }
-  dmac->terminateAfterPacket =
+  state.terminateAfterPacket =
     reader->readBool("VIF1 DMAC termination flag");
   dmac->vif1Stalled =
     reader->readBool("VIF1 DMAC stall flag");
-  dmac->addressStackDepth = reader->readU8();
+  state.addressStackDepth = reader->readU8();
   dmac->transferredQuadwords = reader->readU64();
 
   const std::uint32_t writableControl =
@@ -954,24 +958,24 @@ void NekoSaveStateCodec::readVIF1DMAC(
     GIFDMACChannelControl::START |
     GIFDMACChannelControl::TAG_MASK;
   const std::uint32_t mode =
-    dmac->channelControlRegister &
+    state.channelControlRegister &
     GIFDMACChannelControl::MODE_MASK;
   require(
-    (dmac->channelControlRegister & ~writableControl) == 0 &&
-    ((dmac->channelControlRegister &
+    (state.channelControlRegister & ~writableControl) == 0 &&
+    ((state.channelControlRegister &
       GIFDMACChannelControl::FROM_MEMORY) != 0 ||
-     (dmac->channelControlRegister &
+     (state.channelControlRegister &
       GIFDMACChannelControl::START) == 0) &&
     (mode == 0 || mode == GIFDMACChannelControl::CHAIN_MODE),
     "VIF1 DMAC channel control is invalid");
   require(
-    dmac->quadwordCountRegister <= 0xffff,
+    state.quadwordCountRegister <= 0xffff,
     "VIF1 DMAC qword count is invalid");
   const std::uint32_t addresses[] = {
-    dmac->memoryAddressRegister,
-    dmac->tagAddressRegister,
-    dmac->addressStackRegisters[0],
-    dmac->addressStackRegisters[1]
+    state.memoryAddressRegister,
+    state.tagAddressRegister,
+    state.addressStackRegisters[0],
+    state.addressStackRegisters[1]
   };
   for (std::uint32_t address : addresses)
   {
@@ -980,11 +984,11 @@ void NekoSaveStateCodec::readVIF1DMAC(
       "VIF1 DMAC address is invalid");
   }
   require(
-    dmac->addressStackDepth <=
-      dmac->addressStackRegisters.size() &&
-    ((dmac->channelControlRegister &
+    state.addressStackDepth <=
+      state.addressStackRegisters.size() &&
+    ((state.channelControlRegister &
       GIFDMACChannelControl::ADDRESS_STACK_MASK) >> 4) ==
-      dmac->addressStackDepth,
+      state.addressStackDepth,
     "VIF1 DMAC address-stack state is invalid");
 }
 

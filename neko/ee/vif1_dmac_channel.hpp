@@ -1,11 +1,11 @@
 #ifndef VIF1_DMAC_CHANNEL_HPP
 #define VIF1_DMAC_CHANNEL_HPP
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 
 #include "clocked_component.hpp"
+#include "dmac_channel_state.hpp"
 
 class EEBus;
 class DMACController;
@@ -39,32 +39,17 @@ class VIF1DMACChannel : public ClockedComponent
   private:
     friend class NekoSaveStateCodec;
 
-    void requireStopped() const;
-    std::uint32_t decodeAddress(
-      std::uint32_t value,
-      const char *registerName) const;
     bool submitValue(const GIFQuadword &quadword);
     bool submitQuadword(std::uint32_t address);
     bool submitTag(std::uint32_t address);
     void transferQuadword();
     void readSourceChainTag();
-    void configureSourceChainTag(
-      std::uint32_t tagAddress,
-      std::uint32_t low,
-      std::uint32_t high);
     void completeTransfer();
-    void updateAddressStackField();
 
     EEBus *eeBus;
     DMACController *dmacController;
-    std::uint32_t channelControlRegister = 0;
-    std::uint32_t memoryAddressRegister = 0;
-    std::uint32_t quadwordCountRegister = 0;
-    std::uint32_t tagAddressRegister = 0;
-    std::array<std::uint32_t, 2> addressStackRegisters = {};
-    bool terminateAfterPacket = false;
+    DMACChannelState channelState;
     bool vif1Stalled = false;
-    std::uint8_t addressStackDepth = 0;
     std::uint64_t transferredQuadwords = 0;
 };
 
