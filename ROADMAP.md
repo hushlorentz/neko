@@ -1289,7 +1289,7 @@ accumulator or condition-result contract:
 
 #### Final Architecture Review
 
-- [ ] Re-audit dependency direction and duplicated policy after all selected
+- [x] Re-audit dependency direction and duplicated policy after all selected
       refactors
 - [ ] Run the complete optimized repository check and compare representative
       trace, state, framebuffer, and save-state hashes with the baseline

@@ -1153,4 +1153,3 @@ void NekoSaveStateCodec::readEECore(
       core->cop1DividerPostDelayTargetAddress == 0,
     "EE untaken branch hazard contains a target");
 }
-
