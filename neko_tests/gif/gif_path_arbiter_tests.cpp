@@ -134,6 +134,48 @@ TEST_CASE("GIF Path Arbitration Tests")
   }
 }
 
+TEST_CASE("GIF PATH2 interruption policy accumulates explicitly")
+{
+  const GIFQuadword imageTag = timedGIFTag(
+    9,
+    true,
+    false,
+    GIFDataFormat::Image);
+  const GIFQuadword payload = {};
+
+  for (bool interruptFirst : {false, true})
+  {
+    GIFDecoder decoder;
+    GIFPathArbiter arbiter(&decoder);
+    arbiter.setPath3IntermittentMode(true);
+    REQUIRE(
+      arbiter.transferQuadword(
+        GIFPath::Path3,
+        imageTag).accepted);
+
+    const GIFPath3InterruptionPolicy first =
+      interruptFirst ?
+        GIFPath3InterruptionPolicy::Interrupt :
+        GIFPath3InterruptionPolicy::Defer;
+    const GIFPath3InterruptionPolicy second =
+      interruptFirst ?
+        GIFPath3InterruptionPolicy::Defer :
+        GIFPath3InterruptionPolicy::Interrupt;
+    REQUIRE_FALSE(arbiter.requestPath(GIFPath::Path2, first));
+    REQUIRE_FALSE(arbiter.requestPath(GIFPath::Path2, second));
+
+    for (std::size_t index = 0; index < 8; ++index)
+    {
+      REQUIRE(
+        arbiter.transferQuadword(
+          GIFPath::Path3,
+          payload).accepted);
+    }
+    REQUIRE(arbiter.path3Interrupted());
+    REQUIRE(arbiter.activePath() == GIFPath::Path2);
+  }
+}
+
 TEST_CASE("GIF Cycle Timing Tests")
 {
   SECTION("Selecting a path incurs one arbitration cycle")

@@ -498,7 +498,9 @@ bool VIF::consumePayloadWord(
           gifPathArbiter->transferQuadword(
             GIFPath::Path2,
             directQuadword,
-            streamCommand.kind != VIFCommandKind::DIRECTHL);
+            streamCommand.kind == VIFCommandKind::DIRECT ?
+              GIFPath3InterruptionPolicy::Interrupt :
+              GIFPath3InterruptionPolicy::Defer);
         if (!transfer.accepted)
         {
           return false;

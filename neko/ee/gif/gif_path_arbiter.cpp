@@ -14,7 +14,7 @@ GIFPathArbiter::GIFPathArbiter(GIFDecoder *decoder) :
 
 bool GIFPathArbiter::requestPath(
   GIFPath path,
-  bool canInterruptPath3)
+  GIFPath3InterruptionPolicy path3Interruption)
 {
   if (path == GIFPath::Idle)
   {
@@ -33,13 +33,14 @@ bool GIFPathArbiter::requestPath(
   {
     if (!queuedPaths[requestedIndex])
     {
-      queuedPath2CanInterruptPath3 = canInterruptPath3;
+      queuedPath2Interruption = path3Interruption;
     }
-    else
+    else if (
+      path3Interruption ==
+      GIFPath3InterruptionPolicy::Interrupt)
     {
-      queuedPath2CanInterruptPath3 =
-        queuedPath2CanInterruptPath3 ||
-        canInterruptPath3;
+      queuedPath2Interruption =
+        GIFPath3InterruptionPolicy::Interrupt;
     }
   }
   queuedPaths[requestedIndex] = true;
@@ -106,10 +107,10 @@ void GIFPathArbiter::setCycleTimingEnabled(bool enabled)
 GIFPathTransferResult GIFPathArbiter::transferQuadword(
   GIFPath path,
   const GIFQuadword &quadword,
-  bool canInterruptPath3)
+  GIFPath3InterruptionPolicy path3Interruption)
 {
   GIFPathTransferResult result;
-  if (!requestPath(path, canInterruptPath3))
+  if (!requestPath(path, path3Interruption))
   {
     emitEvent(GIFTraceEventType::TransferStalled, path);
     return result;
@@ -175,7 +176,8 @@ GIFPathTransferResult GIFPathArbiter::transferQuadword(
         queuedPaths[pathIndex(GIFPath::Path1)];
       const bool interruptiblePath2Waiting =
         queuedPaths[pathIndex(GIFPath::Path2)] &&
-        queuedPath2CanInterruptPath3;
+        queuedPath2Interruption ==
+          GIFPath3InterruptionPolicy::Interrupt;
       if (path1Waiting || interruptiblePath2Waiting)
       {
         interruptPath3();
@@ -352,7 +354,8 @@ void GIFPathArbiter::selectQueuedPath()
     }
     if (interruptedPath3 &&
         index == pathIndex(GIFPath::Path2) &&
-        !queuedPath2CanInterruptPath3)
+        queuedPath2Interruption ==
+          GIFPath3InterruptionPolicy::Defer)
     {
       continue;
     }
@@ -362,7 +365,8 @@ void GIFPathArbiter::selectQueuedPath()
       static_cast<GIFPath>(index + 1);
     if (currentPath == GIFPath::Path2)
     {
-      queuedPath2CanInterruptPath3 = false;
+      queuedPath2Interruption =
+        GIFPath3InterruptionPolicy::Defer;
     }
     if (currentPath == GIFPath::Path3 &&
         interruptedPath3)

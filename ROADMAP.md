@@ -1280,7 +1280,7 @@ accumulator or condition-result contract:
       tag, address-stack, termination, and completion transitions in one
       fixed-state DMAC policy while retaining channel-specific tag delivery,
       sink backpressure, counters, and completion signalling
-- [ ] Replace the GIF PATH3 interruption Boolean with a typed policy that
+- [x] Replace the GIF PATH3 interruption Boolean with a typed policy that
       distinguishes DIRECT-style interruption from DIRECTHL-style deferral
       without changing queued requests, intermittent IMAGE slicing, masks, or
       producer retry behavior

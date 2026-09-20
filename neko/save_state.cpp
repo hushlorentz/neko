@@ -469,8 +469,8 @@ void NekoSaveStateCodec::commitSystem(
   arbiter.timedTransfers = sourceArbiter.timedTransfers;
   arbiter.interruptedPath3 =
     sourceArbiter.interruptedPath3;
-  arbiter.queuedPath2CanInterruptPath3 =
-    sourceArbiter.queuedPath2CanInterruptPath3;
+  arbiter.queuedPath2Interruption =
+    sourceArbiter.queuedPath2Interruption;
   arbiter.path3ImageSliceQuadwords =
     sourceArbiter.path3ImageSliceQuadwords;
   arbiter.path3Count = sourceArbiter.path3Count;

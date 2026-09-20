@@ -548,7 +548,8 @@ void NekoSaveStateCodec::writeGIFArbiter(
   writer->writeBool(arbiter.timedTransfers);
   writer->writeBool(arbiter.interruptedPath3);
   writer->writeBool(
-    arbiter.queuedPath2CanInterruptPath3);
+    arbiter.queuedPath2Interruption ==
+    GIFPath3InterruptionPolicy::Interrupt);
   writer->writeU8(arbiter.path3ImageSliceQuadwords);
   writer->writeU16(arbiter.path3Count);
   writer->writeU16(arbiter.path3Tag);
@@ -583,8 +584,10 @@ void NekoSaveStateCodec::readGIFArbiter(
     reader->readBool("GIF timing-mode flag");
   arbiter->interruptedPath3 =
     reader->readBool("GIF PATH3 interruption flag");
-  arbiter->queuedPath2CanInterruptPath3 =
-    reader->readBool("GIF PATH2 interruption flag");
+  arbiter->queuedPath2Interruption =
+    reader->readBool("GIF PATH2 interruption flag") ?
+      GIFPath3InterruptionPolicy::Interrupt :
+      GIFPath3InterruptionPolicy::Defer;
   arbiter->path3ImageSliceQuadwords = reader->readU8();
   arbiter->path3Count = reader->readU16();
   arbiter->path3Tag = reader->readU16();

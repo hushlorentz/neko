@@ -18,6 +18,12 @@ enum class GIFPath : std::uint8_t
   Path3 = 3
 };
 
+enum class GIFPath3InterruptionPolicy : std::uint8_t
+{
+  Defer,
+  Interrupt
+};
+
 struct GIFPathTransferResult
 {
   bool accepted = false;
@@ -60,7 +66,8 @@ class GIFPathArbiter : public ClockedComponent
 
     bool requestPath(
       GIFPath path,
-      bool canInterruptPath3 = true);
+      GIFPath3InterruptionPolicy path3Interruption =
+        GIFPath3InterruptionPolicy::Interrupt);
     void setPath3MaskedByVIF(bool masked);
     void setPath3MaskedByMode(bool masked);
     void setPath3IntermittentMode(bool intermittent);
@@ -68,7 +75,8 @@ class GIFPathArbiter : public ClockedComponent
     GIFPathTransferResult transferQuadword(
       GIFPath path,
       const GIFQuadword &quadword,
-      bool canInterruptPath3 = true);
+      GIFPath3InterruptionPolicy path3Interruption =
+        GIFPath3InterruptionPolicy::Interrupt);
 
     bool clockActive() const override;
     void clock() override;
@@ -115,7 +123,8 @@ class GIFPathArbiter : public ClockedComponent
     bool intermittentPath3 = false;
     bool timedTransfers = false;
     bool interruptedPath3 = false;
-    bool queuedPath2CanInterruptPath3 = false;
+    GIFPath3InterruptionPolicy queuedPath2Interruption =
+      GIFPath3InterruptionPolicy::Defer;
     std::uint8_t path3ImageSliceQuadwords = 0;
     std::uint16_t path3Count = 0;
     std::uint16_t path3Tag = 0;
