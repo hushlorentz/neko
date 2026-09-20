@@ -249,7 +249,8 @@ class VPU : public ClockedComponent, public PipelineHandler
     uint32_t nextLowerInstruction();
     uint16_t processUpperInstruction(
       uint32_t upperInstruction,
-      bool macroInstruction = false);
+      VUPipelineIssueContext issueContext,
+      uint16_t microInstructionAddress);
     uint16_t opCodeFromInstruction(
       uint32_t instruction) const;
     uint8_t regFromInstruction(
@@ -271,22 +272,51 @@ class VPU : public ClockedComponent, public PipelineHandler
       uint16_t opCode,
       uint8_t destinationMask) const;
     void queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16_t upperOpCode, uint32_t upperInstruction, uint16_t instructionAddress);
-    void executePendingLowerInstruction();
-    void startIRegisterInstruction(const LowerInstruction &instruction);
+    void executePendingLowerInstruction(
+      VUPipelineIssueContext issueContext);
+    void startIRegisterInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
     void completeBranchDelaySlot();
-    void startIALUInstruction(const LowerInstruction &instruction);
-    void startBranchInstruction(const LowerInstruction &instruction);
-    void startLSUInstruction(const LowerInstruction &instruction);
-    void startLowerFMACInstruction(const LowerInstruction &instruction);
-    void startFDIVInstruction(const LowerInstruction &instruction);
-    void startEFUInstruction(const LowerInstruction &instruction);
-    void startWaitQInstruction(const LowerInstruction &instruction);
-    void startWaitPInstruction(const LowerInstruction &instruction);
-    void startFlagInstruction(const LowerInstruction &instruction);
-    void startRandomInstruction(const LowerInstruction &instruction);
-    void startVIFControlInstruction(const LowerInstruction &instruction);
-    void startXGKICKInstruction(const LowerInstruction &instruction);
-    void snapshotMacroVectorSources(Pipeline *pipeline);
+    void startIALUInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startBranchInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startLSUInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startLowerFMACInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startFDIVInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startEFUInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startWaitQInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startWaitPInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startFlagInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startRandomInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startVIFControlInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void startXGKICKInstruction(
+      const LowerInstruction &instruction,
+      VUPipelineIssueContext issueContext);
+    void capturePipelineSourcesForIssue(
+      Pipeline *pipeline,
+      const VUPipelineRequest &request);
     FPRegister &vectorSource1(Pipeline *pipeline);
     FPRegister &vectorSource2(Pipeline *pipeline);
     bool startXGKICKTransfer(Pipeline *pipeline);

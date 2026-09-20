@@ -47,6 +47,62 @@ namespace
 
     return cycles;
   }
+
+  Pipeline *queuePipeline(
+    PipelineOrchestrator *orchestrator,
+    uint8_t pipelineType,
+    uint16_t opCode,
+    uint8_t sourceRegister1,
+    uint8_t sourceRegister2,
+    uint8_t destinationRegister,
+    uint8_t destinationFieldMask,
+    uint8_t sourceFieldMask1,
+    uint8_t sourceFieldMask2,
+    uint16_t microInstructionAddress = 0,
+    int16_t immediate = 0)
+  {
+    VUPipelineRequest request;
+    request.type =
+      static_cast<VUPipelineType>(pipelineType);
+    request.opCode = opCode;
+    request.sourceRegister1 = sourceRegister1;
+    request.sourceRegister2 = sourceRegister2;
+    request.destinationRegister = destinationRegister;
+    request.destinationFieldMask = destinationFieldMask;
+    request.sourceFieldMask1 = sourceFieldMask1;
+    request.sourceFieldMask2 = sourceFieldMask2;
+    request.microInstructionAddress = microInstructionAddress;
+    request.immediate = immediate;
+    return orchestrator->initPipeline(request);
+  }
+
+  Pipeline *startPipeline(
+    PipelineOrchestrator *orchestrator,
+    uint8_t pipelineType,
+    uint16_t opCode,
+    uint8_t sourceRegister1,
+    uint8_t sourceRegister2,
+    uint8_t destinationRegister,
+    uint8_t destinationFieldMask,
+    uint8_t sourceFieldMask1,
+    uint8_t sourceFieldMask2,
+    uint16_t microInstructionAddress = 0,
+    int16_t immediate = 0)
+  {
+    VUPipelineRequest request;
+    request.type =
+      static_cast<VUPipelineType>(pipelineType);
+    request.opCode = opCode;
+    request.sourceRegister1 = sourceRegister1;
+    request.sourceRegister2 = sourceRegister2;
+    request.destinationRegister = destinationRegister;
+    request.destinationFieldMask = destinationFieldMask;
+    request.sourceFieldMask1 = sourceFieldMask1;
+    request.sourceFieldMask2 = sourceFieldMask2;
+    request.microInstructionAddress = microInstructionAddress;
+    request.immediate = immediate;
+    return orchestrator->startPipeline(request);
+  }
 }
 
 TEST_CASE("VPU Pipeline Tests")
@@ -62,7 +118,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("The FMAC pipeline executes in 6 cycles")
   {
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC,
       VPU_ADD,
       VPU_REGISTER_VF02,
@@ -79,7 +135,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC,
       VPU_ADD,
       VPU_REGISTER_VF02,
@@ -107,7 +163,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_IALU,
       VPU_IADD,
       VPU_REGISTER_VI01,
@@ -131,7 +187,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_LSU,
       VPU_LQ,
       VPU_REGISTER_VI01,
@@ -155,7 +211,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_BRANCH,
       VPU_IBNE,
       VPU_REGISTER_VI01,
@@ -175,7 +231,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_I_REGISTER,
       0,
       0,
@@ -198,7 +254,7 @@ TEST_CASE("VPU Pipeline Tests")
       PipelineOrchestrator typedOrchestrator;
       TestPipelineHandler handler;
       typedOrchestrator.setPipelineHandler(&handler);
-      typedOrchestrator.initPipeline(
+      queuePipeline(&typedOrchestrator,
         VPU_PIPELINE_TYPE_FDIV,
         opCode,
         VPU_REGISTER_VF01,
@@ -222,7 +278,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FDIV,
       VPU_RSQRT,
       VPU_REGISTER_VF01,
@@ -240,7 +296,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("A second FDIV operation stalls at M until the first reaches F")
   {
-    Pipeline *first = orchestrator.startPipeline(
+    Pipeline *first = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FDIV,
       VPU_DIV,
       VPU_REGISTER_VF01,
@@ -252,7 +308,7 @@ TEST_CASE("VPU Pipeline Tests")
     orchestrator.update();
     REQUIRE(first->stage() == VUPipelineStage::T);
 
-    Pipeline *second = orchestrator.startPipeline(
+    Pipeline *second = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FDIV,
       VPU_DIV,
       VPU_REGISTER_VF03,
@@ -298,7 +354,7 @@ TEST_CASE("VPU Pipeline Tests")
       PipelineOrchestrator typedOrchestrator;
       TestPipelineHandler handler;
       typedOrchestrator.setPipelineHandler(&handler);
-      typedOrchestrator.initPipeline(
+      queuePipeline(&typedOrchestrator,
         VPU_PIPELINE_TYPE_EFU,
         timing.opCode,
         VPU_REGISTER_VF01,
@@ -322,7 +378,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("A second EFU operation starts when the first reaches its final N stage")
   {
-    Pipeline *first = orchestrator.startPipeline(
+    Pipeline *first = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_EFU,
       VPU_ESADD,
       VPU_REGISTER_VF01,
@@ -334,7 +390,7 @@ TEST_CASE("VPU Pipeline Tests")
     orchestrator.update();
     REQUIRE(first->stage() == VUPipelineStage::T);
 
-    Pipeline *second = orchestrator.startPipeline(
+    Pipeline *second = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_EFU,
       VPU_ESADD,
       VPU_REGISTER_VF02,
@@ -363,7 +419,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("WAITQ completes at T when the active FDIV operation reaches F")
   {
-    Pipeline *producer = orchestrator.startPipeline(
+    Pipeline *producer = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FDIV,
       VPU_DIV,
       VPU_REGISTER_VF01,
@@ -374,7 +430,7 @@ TEST_CASE("VPU Pipeline Tests")
       FP_REGISTER_X_FIELD);
     orchestrator.update();
 
-    Pipeline *wait = orchestrator.startPipeline(
+    Pipeline *wait = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_WAITQ,
       VPU_WAITQ,
       0,
@@ -401,7 +457,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("WAITP completes at T when the active EFU reaches its final N stage")
   {
-    Pipeline *producer = orchestrator.startPipeline(
+    Pipeline *producer = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_EFU,
       VPU_ESADD,
       VPU_REGISTER_VF01,
@@ -412,7 +468,7 @@ TEST_CASE("VPU Pipeline Tests")
       FP_REGISTER_NO_FIELDS);
     orchestrator.update();
 
-    Pipeline *wait = orchestrator.startPipeline(
+    Pipeline *wait = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_WAITP,
       VPU_WAITP,
       0,
@@ -441,7 +497,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("FDIV and EFU resources operate independently")
   {
-    Pipeline *fdiv = orchestrator.startPipeline(
+    Pipeline *fdiv = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FDIV,
       VPU_DIV,
       VPU_REGISTER_VF01,
@@ -450,7 +506,7 @@ TEST_CASE("VPU Pipeline Tests")
       FP_REGISTER_NO_FIELDS,
       FP_REGISTER_X_FIELD,
       FP_REGISTER_X_FIELD);
-    Pipeline *efu = orchestrator.startPipeline(
+    Pipeline *efu = startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_EFU,
       VPU_ESADD,
       VPU_REGISTER_VF03,
@@ -469,7 +525,7 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("Reset clears structural stalls and pending synchronization")
   {
-    orchestrator.startPipeline(
+    startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FDIV,
       VPU_DIV,
       VPU_REGISTER_VF01,
@@ -478,7 +534,7 @@ TEST_CASE("VPU Pipeline Tests")
       FP_REGISTER_NO_FIELDS,
       FP_REGISTER_X_FIELD,
       FP_REGISTER_X_FIELD);
-    orchestrator.startPipeline(
+    startPipeline(&orchestrator,
       VPU_PIPELINE_TYPE_WAITQ,
       VPU_WAITQ,
       0,
@@ -499,7 +555,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_XGKICK,
       VPU_XGKICK,
       VPU_REGISTER_VI01,
@@ -523,7 +579,7 @@ TEST_CASE("VPU Pipeline Tests")
   {
     TestPipelineHandler handler;
     orchestrator.setPipelineHandler(&handler);
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC,
       VPU_ADDx,
       VPU_REGISTER_VF02,
@@ -543,13 +599,13 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("Independent FMAC pipelines execute without a stall")
   {
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF01, VPU_REGISTER_VF02, VPU_REGISTER_VF03,
       FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     orchestrator.update();
 
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF04, VPU_REGISTER_VF05, VPU_REGISTER_VF06,
       FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
@@ -559,13 +615,13 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("A source stalls when it reads a pending destination lane")
   {
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF01, VPU_REGISTER_VF02, VPU_REGISTER_VF03,
       FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     orchestrator.update();
 
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF06,
       FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_Y_FIELD);
@@ -575,13 +631,13 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("A source does not stall when it reads another lane of the same register")
   {
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF01, VPU_REGISTER_VF02, VPU_REGISTER_VF03,
       FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     orchestrator.update();
 
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF06,
       FP_REGISTER_Y_FIELD, FP_REGISTER_Y_FIELD, FP_REGISTER_Y_FIELD);
@@ -591,13 +647,13 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("The second source uses its own lane mask for dependencies")
   {
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF01, VPU_REGISTER_VF02, VPU_REGISTER_VF03,
       FP_REGISTER_Z_FIELD, FP_REGISTER_Z_FIELD, FP_REGISTER_Z_FIELD);
     orchestrator.update();
 
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF04, VPU_REGISTER_VF03, VPU_REGISTER_VF06,
       FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_Z_FIELD);
@@ -607,13 +663,13 @@ TEST_CASE("VPU Pipeline Tests")
 
   SECTION("Broadcast dependencies use the broadcast lane rather than the destination lane")
   {
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
       VPU_REGISTER_VF01, VPU_REGISTER_VF02, VPU_REGISTER_VF03,
       FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     orchestrator.update();
 
-    orchestrator.initPipeline(
+    queuePipeline(&orchestrator,
       VPU_PIPELINE_TYPE_FMAC, VPU_ADDx,
       VPU_REGISTER_VF03, VPU_REGISTER_VF05, VPU_REGISTER_VF06,
       FP_REGISTER_Y_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_Y_FIELD);
@@ -625,14 +681,14 @@ TEST_CASE("VPU Pipeline Tests")
   {
     for (int i = 0; i < MAX_PIPELINES; i++)
     {
-      orchestrator.initPipeline(
+      queuePipeline(&orchestrator,
         VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
         VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
         FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD);
     }
 
     REQUIRE_THROWS_WITH(
-      orchestrator.initPipeline(
+      queuePipeline(&orchestrator,
         VPU_PIPELINE_TYPE_FMAC, VPU_ADD,
         VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
         FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
@@ -642,7 +698,7 @@ TEST_CASE("VPU Pipeline Tests")
   SECTION("Pipeline types without explicit stage timing are rejected")
   {
     REQUIRE_THROWS_WITH(
-      orchestrator.initPipeline(
+      queuePipeline(&orchestrator,
         VPU_PIPELINE_TYPE_NONE, VPU_ADD,
         VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
         FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
@@ -652,13 +708,13 @@ TEST_CASE("VPU Pipeline Tests")
   SECTION("Variable pipelines reject operations without timing definitions")
   {
     REQUIRE_THROWS_WITH(
-      orchestrator.initPipeline(
+      queuePipeline(&orchestrator,
         VPU_PIPELINE_TYPE_FDIV, VPU_ADD,
         VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
         FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),
       "VU FDIV operation does not have defined stage timing.");
     REQUIRE_THROWS_WITH(
-      orchestrator.initPipeline(
+      queuePipeline(&orchestrator,
         VPU_PIPELINE_TYPE_EFU, VPU_ADD,
         VPU_REGISTER_VF02, VPU_REGISTER_VF03, VPU_REGISTER_VF01,
         FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD, FP_REGISTER_X_FIELD),

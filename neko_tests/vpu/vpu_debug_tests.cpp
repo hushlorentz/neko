@@ -208,6 +208,43 @@ TEST_CASE("VPU Debug Execution Tests")
     REQUIRE(sawWritebackAtZero);
   }
 
+  SECTION("Macro writeback provenance does not reuse the previous micro PC")
+  {
+    VPU vpu;
+    std::vector<uint8_t> instructions;
+    std::vector<VPUTraceEvent> events;
+    appendInstructionPair(&instructions, VPU_E_BIT | VPU_NOP);
+    appendInstructionPair(&instructions, VPU_NOP);
+    vpu.uploadMicroInstructions(instructions);
+    vpu.initMicroMode();
+    REQUIRE(vpu.programCounter() == 16);
+
+    vpu.loadFPRegister(VPU_REGISTER_VF02, 1, 2, 3, 4);
+    vpu.loadFPRegister(VPU_REGISTER_VF03, 10, 20, 30, 40);
+    vpu.setTraceCallback([&events](const VPUTraceEvent &event) {
+      events.push_back(event);
+    });
+
+    REQUIRE(vpu.issueMacroInstruction(
+      addInstruction(
+        VPU_REGISTER_VF02,
+        VPU_REGISTER_VF03,
+        VPU_REGISTER_VF01)));
+    vpu.run(8);
+
+    bool sawMacroWriteback = false;
+    for (const VPUTraceEvent &event : events)
+    {
+      if (event.type == VPUTraceEventType::PipelineWriteback &&
+          event.opCode == VPU_ADD)
+      {
+        sawMacroWriteback = true;
+        REQUIRE(event.instructionAddress == 0);
+      }
+    }
+    REQUIRE(sawMacroWriteback);
+  }
+
   SECTION("Throwing trace callbacks cannot interrupt Force Break")
   {
     VPU vpu;

@@ -20,6 +20,54 @@
 #define VPU_PIPELINE_TYPE_RANDOM 12
 #define VPU_PIPELINE_TYPE_VIF_CONTROL 13
 
+enum class VUPipelineType : uint8_t
+{
+  None = VPU_PIPELINE_TYPE_NONE,
+  FMAC = VPU_PIPELINE_TYPE_FMAC,
+  FDIV = VPU_PIPELINE_TYPE_FDIV,
+  EFU = VPU_PIPELINE_TYPE_EFU,
+  IALU = VPU_PIPELINE_TYPE_IALU,
+  XGKICK = VPU_PIPELINE_TYPE_XGKICK,
+  LSU = VPU_PIPELINE_TYPE_LSU,
+  Branch = VPU_PIPELINE_TYPE_BRANCH,
+  IRegister = VPU_PIPELINE_TYPE_I_REGISTER,
+  WaitQ = VPU_PIPELINE_TYPE_WAITQ,
+  WaitP = VPU_PIPELINE_TYPE_WAITP,
+  Flag = VPU_PIPELINE_TYPE_FLAG,
+  Random = VPU_PIPELINE_TYPE_RANDOM,
+  VIFControl = VPU_PIPELINE_TYPE_VIF_CONTROL
+};
+
+enum class VUPipelineIssueContext : uint8_t
+{
+  Micro,
+  Macro
+};
+
+enum class VUPipelineWritebackDisposition : uint8_t
+{
+  Commit,
+  Discard
+};
+
+struct VUPipelineRequest
+{
+  VUPipelineType type = VUPipelineType::None;
+  uint16_t opCode = 0;
+  uint8_t sourceRegister1 = 0;
+  uint8_t sourceRegister2 = 0;
+  uint8_t destinationRegister = 0;
+  uint8_t destinationFieldMask = 0;
+  uint8_t sourceFieldMask1 = 0;
+  uint8_t sourceFieldMask2 = 0;
+  uint16_t microInstructionAddress = 0;
+  int16_t immediate = 0;
+  VUPipelineIssueContext issueContext =
+    VUPipelineIssueContext::Micro;
+  VUPipelineWritebackDisposition writeback =
+    VUPipelineWritebackDisposition::Commit;
+};
+
 enum class VUPipelineStage : uint8_t
 {
   M,
@@ -68,10 +116,10 @@ class Pipeline
     bool intSource2Sampled;
     bool vectorSourcesSampled;
     bool xgkickStarted;
-    bool discardWriteback;
+    VUPipelineWritebackDisposition writebackDisposition;
 
     Pipeline();
-    void configure(uint8_t pipelineType, uint16_t oc, uint8_t s1, uint8_t s2, uint8_t d, uint8_t destMask, uint8_t s1Mask, uint8_t s2Mask, uint16_t address, bool discard = false, int16_t immediateValue = 0);
+    void configure(const VUPipelineRequest &request);
     void setFPRegisterResult(FPRegister *reg);
     void setIntResult(int i);
     void advanceStage();

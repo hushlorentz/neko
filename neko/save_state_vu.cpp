@@ -487,7 +487,9 @@ void NekoSaveStateCodec::writePipeline(
   writer->writeBool(pipeline.intSource2Sampled);
   writer->writeBool(pipeline.vectorSourcesSampled);
   writer->writeBool(pipeline.xgkickStarted);
-  writer->writeBool(pipeline.discardWriteback);
+  writer->writeBool(
+    pipeline.writebackDisposition ==
+      VUPipelineWritebackDisposition::Discard);
   writer->writeU8(
     static_cast<std::uint8_t>(pipeline.currentStage));
   writer->writeU8(pipeline.currentStageIndex);
@@ -534,8 +536,10 @@ void NekoSaveStateCodec::readPipeline(
     reader->readBool("VU pipeline vector-source sample flag");
   pipeline->xgkickStarted =
     reader->readBool("VU pipeline XGKICK flag");
-  pipeline->discardWriteback =
-    reader->readBool("VU pipeline discard flag");
+  pipeline->writebackDisposition =
+    reader->readBool("VU pipeline discard flag")
+      ? VUPipelineWritebackDisposition::Discard
+      : VUPipelineWritebackDisposition::Commit;
   pipeline->currentStage = readEnum<VUPipelineStage>(
     reader,
     static_cast<std::uint8_t>(VUPipelineStage::P),
@@ -842,4 +846,3 @@ void NekoSaveStateCodec::commitVIF(
   destination->unpackPayload.swap(source->unpackPayload);
   destination->fifoWords.swap(source->fifoWords);
 }
-

@@ -1013,7 +1013,10 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
 
   if (instructionKind == VUMacroInstructionKind::Upper)
   {
-    processUpperInstruction(instruction, true);
+    processUpperInstruction(
+      instruction,
+      VUPipelineIssueContext::Macro,
+      0);
   }
   else
   {
@@ -1217,7 +1220,8 @@ bool VPU::tick()
     if (mode == VPU_MODE_MACRO)
     {
       orchestrator.update();
-      executePendingLowerInstruction();
+      executePendingLowerInstruction(
+        VUPipelineIssueContext::Macro);
       macroIssueNeedsAdvance = false;
       if (!orchestrator.hasNext() &&
           !lowerInstructionPending)
@@ -1301,7 +1305,10 @@ bool VPU::tick()
       }
       else
       {
-        uint16_t upperOpCode = processUpperInstruction(upperInstruction);
+        uint16_t upperOpCode = processUpperInstruction(
+          upperInstruction,
+          VUPipelineIssueContext::Micro,
+          instructionAddress);
         queueLowerInstruction(
           decodedLowerInstruction,
           upperOpCode,
@@ -1356,7 +1363,8 @@ bool VPU::tick()
     }
 
     orchestrator.update();
-    executePendingLowerInstruction();
+    executePendingLowerInstruction(
+      VUPipelineIssueContext::Micro);
     if (branchDelaySlotIssued)
     {
       completeBranchDelaySlot();
@@ -1502,7 +1510,8 @@ uint32_t VPU::nextLowerInstruction()
 
 uint16_t VPU::processUpperInstruction(
   uint32_t upperInstruction,
-  bool macroInstruction)
+  VUPipelineIssueContext issueContext,
+  uint16_t microInstructionAddress)
 {
   uint16_t opCode = opCodeFromInstruction(upperInstruction);
 
@@ -1519,20 +1528,19 @@ uint16_t VPU::processUpperInstruction(
   uint8_t srcReg1Mask = srcReg1MaskFromOpCode(opCode, fieldMask);
   uint8_t srcReg2Mask = srcReg2MaskFromOpCode(opCode, fieldMask);
 
-  Pipeline *pipeline = orchestrator.initPipeline(
-    VPU_PIPELINE_TYPE_FMAC,
-    opCode,
-    srcReg1,
-    srcReg2,
-    destReg,
-    fieldMask,
-    srcReg1Mask,
-    srcReg2Mask,
-    microMemPC);
-  if (macroInstruction)
-  {
-    snapshotMacroVectorSources(pipeline);
-  }
+  VUPipelineRequest request;
+  request.type = VUPipelineType::FMAC;
+  request.opCode = opCode;
+  request.sourceRegister1 = srcReg1;
+  request.sourceRegister2 = srcReg2;
+  request.destinationRegister = destReg;
+  request.destinationFieldMask = fieldMask;
+  request.sourceFieldMask1 = srcReg1Mask;
+  request.sourceFieldMask2 = srcReg2Mask;
+  request.microInstructionAddress = microInstructionAddress;
+  request.issueContext = issueContext;
+  Pipeline *pipeline = orchestrator.initPipeline(request);
+  capturePipelineSourcesForIssue(pipeline, request);
   if (destReg == VPU_REGISTER_ACCUMULATOR)
   {
     pendingAccumulatorWrites++;
@@ -1816,7 +1824,8 @@ void VPU::queueLowerInstruction(const LowerInstruction &lowerInstruction, uint16
   }
 }
 
-void VPU::executePendingLowerInstruction()
+void VPU::executePendingLowerInstruction(
+  VUPipelineIssueContext issueContext)
 {
   if (!lowerInstructionPending || !pendingLowerInstructionReady)
   {
@@ -1830,50 +1839,52 @@ void VPU::executePendingLowerInstruction()
   switch (instruction.unit)
   {
     case LowerExecutionUnit::Immediate:
-      startIRegisterInstruction(instruction);
+      startIRegisterInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::IALU:
-      startIALUInstruction(instruction);
+      startIALUInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::LSU:
-      startLSUInstruction(instruction);
+      startLSUInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::FMAC:
-      startLowerFMACInstruction(instruction);
+      startLowerFMACInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::FDIV:
-      startFDIVInstruction(instruction);
+      startFDIVInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::EFU:
-      startEFUInstruction(instruction);
+      startEFUInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::WaitQ:
-      startWaitQInstruction(instruction);
+      startWaitQInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::WaitP:
-      startWaitPInstruction(instruction);
+      startWaitPInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::Flag:
-      startFlagInstruction(instruction);
+      startFlagInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::Random:
-      startRandomInstruction(instruction);
+      startRandomInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::VIFControl:
-      startVIFControlInstruction(instruction);
+      startVIFControlInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::XGKICK:
-      startXGKICKInstruction(instruction);
+      startXGKICKInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::Branch:
-      startBranchInstruction(instruction);
+      startBranchInstruction(instruction, issueContext);
       break;
     case LowerExecutionUnit::None:
       break;
   }
 }
 
-void VPU::startVIFControlInstruction(const LowerInstruction &instruction)
+void VPU::startVIFControlInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
   if (vifRegisterSource == nullptr)
   {
@@ -1885,48 +1896,45 @@ void VPU::startVIFControlInstruction(const LowerInstruction &instruction)
     throw runtime_error("XTOP is only supported on VU1.");
   }
 
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_VIF_CONTROL,
-    instruction.opCode,
-    0,
-    0,
-    0,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::VIFControl;
+  request.opCode = instruction.opCode;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
   pipeline->integerDestReg = instruction.integerDestinationRegister;
 }
 
-void VPU::startIRegisterInstruction(const LowerInstruction &instruction)
+void VPU::startIRegisterInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_I_REGISTER,
-    0,
-    0,
-    0,
-    0,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::IRegister;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
   pipeline->immediateBits = instruction.immediateBits;
 }
 
-void VPU::startIALUInstruction(const LowerInstruction &instruction)
+void VPU::startIALUInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_IALU,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    instruction.sourceRegister2,
-    instruction.destinationRegister,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress,
-    false,
-    instruction.immediate);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::IALU;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.sourceRegister2 = instruction.sourceRegister2;
+  request.destinationRegister =
+    instruction.destinationRegister;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.immediate = instruction.immediate;
+  request.issueContext = issueContext;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
 
   if (branchDelaySlotPending && pendingBranchLinkValid)
   {
@@ -1951,20 +1959,22 @@ void VPU::startIALUInstruction(const LowerInstruction &instruction)
   }
 }
 
-void VPU::startBranchInstruction(const LowerInstruction &instruction)
+void VPU::startBranchInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
-  orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_BRANCH,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    instruction.sourceRegister2,
-    instruction.destinationRegister,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress,
-    false,
-    instruction.immediate);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::Branch;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.sourceRegister2 = instruction.sourceRegister2;
+  request.destinationRegister =
+    instruction.destinationRegister;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.immediate = instruction.immediate;
+  request.issueContext = issueContext;
+  orchestrator.startPipeline(request);
 
   branchDelaySlotPending = true;
 }
@@ -2061,29 +2071,34 @@ void VPU::completeBranchDelaySlot()
   pendingBranchLinkValid = false;
 }
 
-void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
+void VPU::startLowerFMACInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
   if (instruction.opCode == VPU_MFP && type != VPUType::VU1)
   {
     throw runtime_error("MFP is only supported on VU1.");
   }
 
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_FMAC,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    0,
-    instruction.destinationRegister,
-    instruction.destinationFieldMask,
-    instruction.sourceFieldMask1,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress,
-    pendingLowerWritebackDiscarded,
-    instruction.immediate);
-  if (mode == VPU_MODE_MACRO)
-  {
-    snapshotMacroVectorSources(pipeline);
-  }
+  VUPipelineRequest request;
+  request.type = VUPipelineType::FMAC;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.destinationRegister =
+    instruction.destinationRegister;
+  request.destinationFieldMask =
+    instruction.destinationFieldMask;
+  request.sourceFieldMask1 = instruction.sourceFieldMask1;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.immediate = instruction.immediate;
+  request.issueContext = issueContext;
+  request.writeback =
+    pendingLowerWritebackDiscarded
+      ? VUPipelineWritebackDisposition::Discard
+      : VUPipelineWritebackDisposition::Commit;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
+  capturePipelineSourcesForIssue(pipeline, request);
   pipeline->integerDestReg = instruction.integerDestinationRegister;
   if (instruction.opCode == VPU_MTIR &&
       pipeline->integerDestReg != VPU_REGISTER_VI00)
@@ -2092,128 +2107,133 @@ void VPU::startLowerFMACInstruction(const LowerInstruction &instruction)
   }
 }
 
-void VPU::startFDIVInstruction(const LowerInstruction &instruction)
+void VPU::startFDIVInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_FDIV,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    instruction.sourceRegister2,
-    VPU_REGISTER_VF00,
-    FP_REGISTER_NO_FIELDS,
-    instruction.sourceFieldMask1,
-    instruction.sourceFieldMask2,
-    pendingLowerInstructionAddress);
-  if (mode == VPU_MODE_MACRO)
-  {
-    snapshotMacroVectorSources(pipeline);
-  }
+  VUPipelineRequest request;
+  request.type = VUPipelineType::FDIV;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.sourceRegister2 = instruction.sourceRegister2;
+  request.sourceFieldMask1 = instruction.sourceFieldMask1;
+  request.sourceFieldMask2 = instruction.sourceFieldMask2;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
+  capturePipelineSourcesForIssue(pipeline, request);
 }
 
-void VPU::startEFUInstruction(const LowerInstruction &instruction)
+void VPU::startEFUInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
   if (type != VPUType::VU1)
   {
     throw runtime_error("EFU instructions are only supported on VU1.");
   }
 
-  orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_EFU,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    0,
-    VPU_REGISTER_VF00,
-    FP_REGISTER_NO_FIELDS,
-    instruction.sourceFieldMask1,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::EFU;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.sourceFieldMask1 = instruction.sourceFieldMask1;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
+  capturePipelineSourcesForIssue(pipeline, request);
 }
 
-void VPU::startWaitQInstruction(const LowerInstruction &instruction)
+void VPU::startWaitQInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
-  orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_WAITQ,
-    instruction.opCode,
-    0,
-    0,
-    VPU_REGISTER_VF00,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::WaitQ;
+  request.opCode = instruction.opCode;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  orchestrator.startPipeline(request);
 }
 
-void VPU::startWaitPInstruction(const LowerInstruction &instruction)
+void VPU::startWaitPInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
   if (type != VPUType::VU1)
   {
     throw runtime_error("WAITP is only supported on VU1.");
   }
 
-  orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_WAITP,
-    instruction.opCode,
-    0,
-    0,
-    VPU_REGISTER_VF00,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::WaitP;
+  request.opCode = instruction.opCode;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  orchestrator.startPipeline(request);
 }
 
-void VPU::startFlagInstruction(const LowerInstruction &instruction)
+void VPU::startFlagInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_FLAG,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    0,
-    0,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::Flag;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
   pipeline->integerDestReg = instruction.integerDestinationRegister;
   pipeline->immediateBits = instruction.immediateBits;
 }
 
-void VPU::startRandomInstruction(const LowerInstruction &instruction)
+void VPU::startRandomInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_RANDOM,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    0,
-    instruction.destinationRegister,
-    instruction.destinationFieldMask,
-    instruction.sourceFieldMask1,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress,
-    pendingLowerWritebackDiscarded);
-  if (mode == VPU_MODE_MACRO)
-  {
-    snapshotMacroVectorSources(pipeline);
-  }
+  VUPipelineRequest request;
+  request.type = VUPipelineType::Random;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.destinationRegister =
+    instruction.destinationRegister;
+  request.destinationFieldMask =
+    instruction.destinationFieldMask;
+  request.sourceFieldMask1 = instruction.sourceFieldMask1;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  request.writeback =
+    pendingLowerWritebackDiscarded
+      ? VUPipelineWritebackDisposition::Discard
+      : VUPipelineWritebackDisposition::Commit;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
+  capturePipelineSourcesForIssue(pipeline, request);
 }
 
-void VPU::startXGKICKInstruction(const LowerInstruction &instruction)
+void VPU::startXGKICKInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
   if (type != VPUType::VU1)
   {
     throw runtime_error("XGKICK is only supported on VU1.");
   }
 
-  orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_XGKICK,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    VPU_REGISTER_VI00,
-    VPU_REGISTER_VI00,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    FP_REGISTER_NO_FIELDS,
-    pendingLowerInstructionAddress);
+  VUPipelineRequest request;
+  request.type = VUPipelineType::XGKICK;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.issueContext = issueContext;
+  orchestrator.startPipeline(request);
 }
 
 bool VPU::startXGKICKTransfer(Pipeline *pipeline)
@@ -2266,30 +2286,37 @@ bool VPU::xgkickStallsIssue()
   return false;
 }
 
-void VPU::startLSUInstruction(const LowerInstruction &instruction)
+void VPU::startLSUInstruction(
+  const LowerInstruction &instruction,
+  VUPipelineIssueContext issueContext)
 {
   const bool readsVectorRegister =
     instruction.opCode == VPU_SQ ||
     instruction.opCode == VPU_SQD ||
     instruction.opCode == VPU_SQI;
-  Pipeline *pipeline = orchestrator.startPipeline(
-    VPU_PIPELINE_TYPE_LSU,
-    instruction.opCode,
-    instruction.sourceRegister1,
-    instruction.sourceRegister2,
-    instruction.destinationRegister,
-    instruction.destinationFieldMask,
+  VUPipelineRequest request;
+  request.type = VUPipelineType::LSU;
+  request.opCode = instruction.opCode;
+  request.sourceRegister1 = instruction.sourceRegister1;
+  request.sourceRegister2 = instruction.sourceRegister2;
+  request.destinationRegister =
+    instruction.destinationRegister;
+  request.destinationFieldMask =
+    instruction.destinationFieldMask;
+  request.sourceFieldMask1 =
     readsVectorRegister
       ? instruction.destinationFieldMask
-      : FP_REGISTER_NO_FIELDS,
-    0,
-    pendingLowerInstructionAddress,
-    pendingLowerWritebackDiscarded,
-    instruction.immediate);
-  if (mode == VPU_MODE_MACRO)
-  {
-    snapshotMacroVectorSources(pipeline);
-  }
+      : FP_REGISTER_NO_FIELDS;
+  request.microInstructionAddress =
+    pendingLowerInstructionAddress;
+  request.immediate = instruction.immediate;
+  request.issueContext = issueContext;
+  request.writeback =
+    pendingLowerWritebackDiscarded
+      ? VUPipelineWritebackDisposition::Discard
+      : VUPipelineWritebackDisposition::Commit;
+  Pipeline *pipeline = orchestrator.startPipeline(request);
+  capturePipelineSourcesForIssue(pipeline, request);
   pipeline->integerDestReg = instruction.integerDestinationRegister;
 
   if (pipeline->integerDestReg != VPU_REGISTER_VI00)
@@ -2853,8 +2880,14 @@ bool VPU::pipelineCanAdvance(Pipeline *pipeline)
   return true;
 }
 
-void VPU::snapshotMacroVectorSources(Pipeline *pipeline)
+void VPU::capturePipelineSourcesForIssue(
+  Pipeline *pipeline,
+  const VUPipelineRequest &request)
 {
+  if (request.issueContext != VUPipelineIssueContext::Macro)
+  {
+    return;
+  }
   pipeline->sourceValue1.copyFrom(
     &fpRegisters[pipeline->srcReg1]);
   pipeline->sourceValue2.copyFrom(
@@ -3906,7 +3939,8 @@ void VPU::pipelineFinished(Pipeline * p)
   if (p->type == VPU_PIPELINE_TYPE_RANDOM)
   {
     if ((p->opCode == VPU_RGET || p->opCode == VPU_RNEXT) &&
-        !p->discardWriteback)
+        p->writebackDisposition ==
+          VUPipelineWritebackDisposition::Commit)
     {
       updateDestinationRegisterWithPipelineResult(
         &fpRegisters[p->destReg],
@@ -4020,7 +4054,8 @@ void VPU::pipelineFinished(Pipeline * p)
     case VPU_MFP:
     case VPU_MOVE:
     case VPU_MR32:
-      if (!p->discardWriteback)
+      if (p->writebackDisposition ==
+          VUPipelineWritebackDisposition::Commit)
       {
         updateDestinationRegisterWithPipelineResult(destReg, p);
       }
@@ -4180,7 +4215,8 @@ void VPU::finishLSUPipeline(Pipeline *pipeline)
     case VPU_LQ:
     case VPU_LQD:
     case VPU_LQI:
-      if (!pipeline->discardWriteback)
+      if (pipeline->writebackDisposition ==
+          VUPipelineWritebackDisposition::Commit)
       {
         updateDestinationRegisterWithPipelineResult(
           &fpRegisters[pipeline->destReg],

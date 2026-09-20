@@ -1252,7 +1252,7 @@ accumulator or condition-result contract:
       consumers of core state rather than alternate hardware owners
 - [x] Audit VU issue, pipeline orchestration, execution units, writeback,
       flags, and macro/micro coordination for duplicated lifecycle policy
-- [ ] Replace positional VU pipeline admission and behavioral booleans with a
+- [x] Replace positional VU pipeline admission and behavioral booleans with a
       typed request covering upper and lower issue context, operands, timing
       family, writeback disposition, and provenance separately from the
       architectural micro address

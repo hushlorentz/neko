@@ -37,8 +37,8 @@ class PipelineOrchestrator
     bool hasPendingRegisterNumberWrite(
       uint32_t registerMask) const;
     bool hasRegisterHazard(uint8_t srcReg1, uint8_t srcReg1FieldMask, uint8_t srcReg2, uint8_t srcReg2FieldMask) const;
-    Pipeline *initPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress = 0, int16_t immediate = 0);
-    Pipeline *startPipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress = 0, bool discardWriteback = false, int16_t immediate = 0);
+    Pipeline *initPipeline(const VUPipelineRequest &request);
+    Pipeline *startPipeline(const VUPipelineRequest &request);
     void setPipelineHandler(PipelineHandler * handler);
   private:
     friend class NekoSaveStateCodec;
@@ -52,7 +52,8 @@ class PipelineOrchestrator
     void updateWaitingPipelines();
     void detectStalls(Pipeline * pipeline);
     bool hasStructuralHazard(const Pipeline *pipeline) const;
-    Pipeline *configurePipeline(uint8_t pipelineType, uint16_t opCode, uint8_t srcReg1, uint8_t srcReg2, uint8_t destReg, uint8_t destFieldMask, uint8_t srcReg1FieldMask, uint8_t srcReg2FieldMask, uint16_t instructionAddress, bool discardWriteback, int16_t immediate);
+    Pipeline *configurePipeline(
+      const VUPipelineRequest &request);
 };
 
 #endif
