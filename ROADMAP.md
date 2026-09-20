@@ -1284,7 +1284,7 @@ accumulator or condition-result contract:
       distinguishes DIRECT-style interruption from DIRECTHL-style deferral
       without changing queued requests, intermittent IMAGE slicing, masks, or
       producer retry behavior
-- [ ] Verify CLI, ELF, frame, trace, reset, and save-state workflows remain
+- [x] Verify CLI, ELF, frame, trace, reset, and save-state workflows remain
       behaviorally identical after the selected boundary changes
 
 #### Final Architecture Review
