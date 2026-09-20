@@ -1293,7 +1293,7 @@ accumulator or condition-result contract:
       refactors
 - [x] Run the complete optimized repository check and compare representative
       trace, state, framebuffer, and save-state hashes with the baseline
-- [ ] Complete an independent read-only review of the resulting architecture
+- [x] Complete an independent read-only review of the resulting architecture
       and resolve concrete correctness or maintainability findings
 - [ ] Reconcile `PROJECT.md` with the durable contracts and justified
       deferrals, then confirm the architecture is ready for the MMI milestone

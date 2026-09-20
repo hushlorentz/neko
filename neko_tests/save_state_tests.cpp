@@ -18,6 +18,8 @@ namespace
   constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
+  constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
+  constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
     VERSION_24_PREPARED_STATE_SIZE = 37800432;
   constexpr std::uint64_t
@@ -1845,6 +1847,23 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[46] = 0xff;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  for (std::size_t index = 0;
+       index < MASTER_CLOCK_COMPONENT_SIZE;
+       ++index)
+  {
+    const std::size_t first =
+      MASTER_CLOCK_FIRST_COMPONENT_OFFSET + index;
+    const std::size_t second =
+      first + MASTER_CLOCK_COMPONENT_SIZE;
+    const std::uint8_t value = invalid[first];
+    invalid[first] = invalid[second];
+    invalid[second] = value;
+  }
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

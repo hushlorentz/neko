@@ -10438,6 +10438,42 @@ TEST_CASE("EE COP1 alignment faults identify branch delay slots")
       EECOP0Cause::BRANCH_DELAY) != 0);
 }
 
+TEST_CASE(
+  "External PC mutation preserves in-flight COP1 delay-slot fault provenance")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  core.setGeneralRegister(1, {0x102, 0});
+  original.eeBus().write32(
+    0,
+    (UINT32_C(0x04) << 26) |
+      UINT32_C(1));
+  original.eeBus().write32(
+    4,
+    cop1MemoryInstruction(0x31, 1, 2, 0));
+  original.eeBus().write32(0x100, 0);
+  core.startExecution(0);
+  original.clockMasterCycle();
+  core.setProgramCounter(0x100);
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  restored.runMasterCycles(3);
+
+  REQUIRE(
+    restored.eeCore().pendingException() ==
+    EEException::AddressErrorLoadOrFetch);
+  REQUIRE(restored.eeCore().exceptionAddress() == 0x102);
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(
+    (restored.eeCore().cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) != 0);
+}
+
 TEST_CASE("EE COP1 deferred faults preserve nested exception ownership")
 {
   NekoSystem system;

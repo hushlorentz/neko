@@ -595,9 +595,22 @@ void NekoSaveStateCodec::readMasterClock(
   MasterClockScheduler *clock,
   std::vector<ScheduledComponentState> *schedule)
 {
+  constexpr std::array<ScheduledComponentState, 6>
+    REQUIRED_COMPONENTS = {{
+      {6, 1, 0},
+      {1, NekoSystem::VU_CLOCK_PERIOD, 0},
+      {2, NekoSystem::VU_CLOCK_PERIOD, 0},
+      {4, 1, 0},
+      {7, 1, 0},
+      {5, 1, 0}
+    }};
+
   clock->masterCycle = reader->readU64();
   const std::uint32_t count = reader->readU32();
-  require(count <= 7, "master-clock component count is invalid");
+  require(
+    count == REQUIRED_COMPONENTS.size() ||
+      count == REQUIRED_COMPONENTS.size() + 1,
+    "master-clock component count is invalid");
   std::array<bool, 8> used = {};
   schedule->clear();
   schedule->reserve(count);
@@ -616,6 +629,27 @@ void NekoSaveStateCodec::readMasterClock(
       period,
       phase
     });
+  }
+
+  for (std::size_t index = 0;
+       index < REQUIRED_COMPONENTS.size();
+       ++index)
+  {
+    const ScheduledComponentState &actual =
+      (*schedule)[index];
+    const ScheduledComponentState &expected =
+      REQUIRED_COMPONENTS[index];
+    require(
+      actual.id == expected.id &&
+        actual.period == expected.period &&
+        actual.phase == expected.phase,
+      "master-clock component schedule is invalid");
+  }
+  if (schedule->size() > REQUIRED_COMPONENTS.size())
+  {
+    require(
+      schedule->back().id == 3,
+      "optional master-clock component is invalid");
   }
 }
 

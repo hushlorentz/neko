@@ -902,6 +902,8 @@ class EECore final : public ClockedComponent
       std::uint32_t capturedFT = 0;
       std::uint32_t capturedAccumulator = 0;
       std::uint32_t capturedControl = 0;
+      bool branchDelaySlot = false;
+      std::uint32_t branchAddress = 0;
       std::uint64_t capturedGPR = 0;
       std::uint32_t memoryAddress = 0;
       std::uint32_t capturedMemoryValue = 0;
@@ -1126,6 +1128,7 @@ class EECore final : public ClockedComponent
     void promoteStagingLatch();
     void clearIssueFrontEnd();
     void clearBranchDelayContinuation();
+    void clearCOP1DividerBranchContext();
     ExecutionStartMode executionStartMode(
       std::uint32_t startAddress) const;
     void resetExecutionContinuation();

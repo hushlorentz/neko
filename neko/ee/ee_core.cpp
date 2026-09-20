@@ -410,12 +410,7 @@ void EECore::reset()
   pendingMac1 = {};
   shiftAmountOrdering.clear();
   clearBranchDelayContinuation();
-  cop1DividerPostDelayInstructions = 0;
-  cop1DividerPostDelayBranchAddress = 0;
-  cop1DividerPostDelayTargetAddress = 0;
-  cop1DividerPostDelayTaken = false;
-  cop1DividerPostTargetInstructions = 0;
-  cop1DividerPostTargetAddress = 0;
+  clearCOP1DividerBranchContext();
   reconcileCOP1DividerOccupancy();
   acceptanceRecords.clear();
   exceptionEnteredThisCycle = false;
@@ -621,6 +616,16 @@ void EECore::clearBranchDelayContinuation()
   branchDelayTaken = false;
 }
 
+void EECore::clearCOP1DividerBranchContext()
+{
+  cop1DividerPostDelayInstructions = 0;
+  cop1DividerPostDelayBranchAddress = 0;
+  cop1DividerPostDelayTargetAddress = 0;
+  cop1DividerPostDelayTaken = false;
+  cop1DividerPostTargetInstructions = 0;
+  cop1DividerPostTargetAddress = 0;
+}
+
 EECore::ExecutionStartMode EECore::executionStartMode(
   std::uint32_t startAddress) const
 {
@@ -638,12 +643,7 @@ void EECore::resetExecutionContinuation()
   lastAddress = 0;
   lastDecodedInstruction = {};
   clearBranchDelayContinuation();
-  cop1DividerPostDelayInstructions = 0;
-  cop1DividerPostDelayBranchAddress = 0;
-  cop1DividerPostDelayTargetAddress = 0;
-  cop1DividerPostDelayTaken = false;
-  cop1DividerPostTargetInstructions = 0;
-  cop1DividerPostTargetAddress = 0;
+  clearCOP1DividerBranchContext();
   pendingMac0 = {};
   pendingMac1 = {};
   shiftAmountOrdering.clear();
@@ -3958,6 +3958,12 @@ EECore::allocateInFlightCOP1(
       operation.stage = COP1PipelineStage::R;
       operation.instructionAddress = instructionAddress;
       operation.instruction = instruction;
+      if (isCOP1MemoryMoveOperation(instruction.operation) &&
+          branchDelayPending)
+      {
+        operation.branchDelaySlot = true;
+        operation.branchAddress = branchInstructionAddress;
+      }
       return operation;
     }
   }
@@ -6003,15 +6009,11 @@ bool EECore::raiseCOP1DataAccessException(
   request.programOrder = operation.programOrder;
   request.restartMode = ExceptionRestartMode::Instruction;
   request.branchAddress = 0;
-  if (
-    cop1DividerPostDelayInstructions != 0 &&
-    operation.instructionAddress ==
-      cop1DividerPostDelayBranchAddress + 4)
+  if (operation.branchDelaySlot)
   {
     request.restartMode =
       ExceptionRestartMode::BranchDelaySlot;
-    request.branchAddress =
-      cop1DividerPostDelayBranchAddress;
+    request.branchAddress = operation.branchAddress;
   }
   enterException(request);
   return false;
@@ -6104,12 +6106,7 @@ void EECore::enterException(
     pc,
     cop0Cause});
   clearBranchDelayContinuation();
-  cop1DividerPostDelayInstructions = 0;
-  cop1DividerPostDelayBranchAddress = 0;
-  cop1DividerPostDelayTargetAddress = 0;
-  cop1DividerPostDelayTaken = false;
-  cop1DividerPostTargetInstructions = 0;
-  cop1DividerPostTargetAddress = 0;
+  clearCOP1DividerBranchContext();
   clearIssueFrontEnd();
 }
 
@@ -6320,7 +6317,12 @@ std::uint64_t EECore::stateHash() const
     hashEEStateValue(&hash, operation.capturedFS);
     hashEEStateValue(&hash, operation.capturedFT);
     hashEEStateValue(&hash, operation.capturedAccumulator);
-    hashEEStateValue(&hash, operation.capturedControl);
+    hashEEStateValue(
+      &hash,
+      isCOP1MemoryMoveOperation(
+        operation.instruction.operation)
+        ? operation.branchAddress
+        : operation.capturedControl);
     hashEEStateValue(&hash, operation.capturedGPR);
     hashEEStateValue(&hash, operation.memoryAddress);
     hashEEStateValue(&hash, operation.capturedMemoryValue);
@@ -6335,7 +6337,12 @@ std::uint64_t EECore::stateHash() const
     hashEEStateValue(&hash, operation.affectedFlags);
     hashEEStateValue(&hash, operation.raisedFlags);
     hashEEStateValue(&hash, operation.raisedStickyFlags);
-    hashEEStateValue(&hash, operation.conditionResult);
+    hashEEStateValue(
+      &hash,
+      isCOP1MemoryMoveOperation(
+        operation.instruction.operation)
+        ? operation.branchDelaySlot
+        : operation.conditionResult);
     hashEEStateValue(&hash, operation.remainingCycles);
   }
   const auto hashPending =
@@ -6555,6 +6562,7 @@ void EECore::setProgramCounter(std::uint32_t value)
   pc = value;
   clearIssueFrontEnd();
   clearBranchDelayContinuation();
+  clearCOP1DividerBranchContext();
   issueSelection = {};
 }
 

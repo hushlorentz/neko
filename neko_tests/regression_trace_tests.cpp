@@ -905,6 +905,31 @@ TEST_CASE("COP1 divider hazard context survives save and reset")
   REQUIRE(cop1DividerHazards(restored).empty());
 }
 
+TEST_CASE("External EE PC mutation clears COP1 divider branch context")
+{
+  const std::uint32_t divide =
+    cop1SingleInstruction(0x03, 2, 4, 3);
+  NekoSystem original;
+  original.eeCore().setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  original.eeBus().write32(
+    0,
+    immediateInstruction(0x05, 0, 0, 4));
+  original.eeBus().write32(4, 0);
+  original.eeBus().write32(0x100, divide);
+  original.eeCore().startExecution(0);
+  original.clockMasterCycle();
+  original.eeCore().setProgramCounter(0x100);
+
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  restored.startTrace();
+  restored.clockMasterCycle();
+
+  REQUIRE(cop1DividerHazards(restored).empty());
+}
+
 TEST_CASE("EE regression traces identify interrupt delivery")
 {
   NekoSystem system;

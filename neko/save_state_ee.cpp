@@ -99,6 +99,10 @@ void NekoSaveStateCodec::writeEECore(
   for (const EECore::InFlightCOP1Operation &operation :
        core.inFlightCOP1Operations)
   {
+    const bool memoryOperation =
+      operation.active &&
+      isCOP1MemoryMoveOperation(
+        operation.instruction.operation);
     writer->writeBool(operation.active);
     writer->writeU64(operation.programOrder);
     writer->writeU8(
@@ -108,7 +112,12 @@ void NekoSaveStateCodec::writeEECore(
     writer->writeU32(operation.capturedFS);
     writer->writeU32(operation.capturedFT);
     writer->writeU32(operation.capturedAccumulator);
-    writer->writeU32(operation.capturedControl);
+    // Memory operations use otherwise-unused result slots for
+    // branch-delay fault provenance without changing version-24 layout.
+    writer->writeU32(
+      memoryOperation
+        ? operation.branchAddress
+        : operation.capturedControl);
     writer->writeU64(operation.capturedGPR);
     writer->writeU32(operation.memoryAddress);
     writer->writeU32(operation.capturedMemoryValue);
@@ -119,7 +128,10 @@ void NekoSaveStateCodec::writeEECore(
     writer->writeU8(operation.affectedFlags);
     writer->writeU8(operation.raisedFlags);
     writer->writeU8(operation.raisedStickyFlags);
-    writer->writeBool(operation.conditionResult);
+    writer->writeBool(
+      memoryOperation
+        ? operation.branchDelaySlot
+        : operation.conditionResult);
     writer->writeU8(operation.remainingCycles);
   }
 }
@@ -306,6 +318,7 @@ void NekoSaveStateCodec::readEECore(
   for (EECore::InFlightCOP1Operation &operation :
        core->inFlightCOP1Operations)
   {
+    operation = {};
     operation.active =
       reader->readBool("EE in-flight COP1 operation flag");
     operation.programOrder = reader->readU64();
@@ -320,7 +333,8 @@ void NekoSaveStateCodec::readEECore(
     operation.capturedFS = reader->readU32();
     operation.capturedFT = reader->readU32();
     operation.capturedAccumulator = reader->readU32();
-    operation.capturedControl = reader->readU32();
+    const std::uint32_t serializedControl =
+      reader->readU32();
     operation.capturedGPR = reader->readU64();
     operation.memoryAddress = reader->readU32();
     operation.capturedMemoryValue = reader->readU32();
@@ -331,7 +345,7 @@ void NekoSaveStateCodec::readEECore(
     operation.affectedFlags = reader->readU8();
     operation.raisedFlags = reader->readU8();
     operation.raisedStickyFlags = reader->readU8();
-    operation.conditionResult =
+    const bool serializedCondition =
       reader->readBool("EE COP1 condition result");
     operation.remainingCycles = reader->readU8();
 
@@ -394,6 +408,16 @@ void NekoSaveStateCodec::readEECore(
       const bool memoryOperation =
         isCOP1MemoryMoveOperation(
           operation.instruction.operation);
+      if (memoryOperation)
+      {
+        operation.branchAddress = serializedControl;
+        operation.branchDelaySlot = serializedCondition;
+      }
+      else
+      {
+        operation.capturedControl = serializedControl;
+        operation.conditionResult = serializedCondition;
+      }
       require(
         memoryOperation ||
           (operation.memoryAddress == 0 &&
@@ -455,6 +479,11 @@ void NekoSaveStateCodec::readEECore(
             operation.raisedFlags == 0 &&
             operation.raisedStickyFlags == 0 &&
             !operation.conditionResult &&
+            (operation.branchDelaySlot
+              ? (operation.branchAddress & 3) == 0 &&
+                operation.instructionAddress ==
+                  operation.branchAddress + 4
+              : operation.branchAddress == 0) &&
             (addressReady
               ? operation.memoryAddress == expectedAddress
               : operation.memoryAddress == 0) &&
@@ -824,7 +853,10 @@ void NekoSaveStateCodec::readEECore(
           operation.capturedFS == 0 &&
           operation.capturedFT == 0 &&
           operation.capturedAccumulator == 0 &&
+          serializedControl == 0 &&
           operation.capturedControl == 0 &&
+          !operation.branchDelaySlot &&
+          operation.branchAddress == 0 &&
           operation.capturedGPR == 0 &&
           operation.memoryAddress == 0 &&
           operation.capturedMemoryValue == 0 &&
@@ -836,6 +868,7 @@ void NekoSaveStateCodec::readEECore(
           operation.affectedFlags == 0 &&
           operation.raisedFlags == 0 &&
           operation.raisedStickyFlags == 0 &&
+          !serializedCondition &&
           !operation.conditionResult &&
           operation.remainingCycles == 0,
         "EE inactive COP1 operation contains state");
