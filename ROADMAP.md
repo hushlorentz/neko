@@ -1264,11 +1264,13 @@ accumulator or condition-result contract:
       release into focused family-owned transitions while preserving callback
       order, XGKICK readiness side effects, pending write accounting, flags,
       forwarding, and trace publication
-- [ ] Audit GS register handling, transfer, primitive assembly, rasterization,
+- [x] Audit GS register handling, transfer, primitive assembly, rasterization,
       texture sampling, and presentation for boundaries with independent
       invariants
-- [ ] Refactor broad GS methods when they combine unrelated decisions, without
-      requiring the owning hardware class itself to be fragmented
+- [ ] Separate GS vertex-queue assembly from drawing-kick and rasterizer
+      dispatch behind an explicit submission result while preserving XYZ2
+      versus XYZ3 behavior, strip/fan carry state, primitive counters, and
+      serialized continuation
 - [ ] Audit EEBus, DMA, VIF, and GIF transport for duplicated address,
       readiness, transfer-completion, or arbitration policy
 - [ ] Implement only the remaining subsystem refactors whose risk ranking
@@ -1311,6 +1313,11 @@ the concrete requirements.
 
 - [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
 - [ ] Add IOP, input devices, and SPU2 only when required by selected software
+- [ ] Implement GS alpha-test comparisons and `AFAIL` frame/depth write
+      controls when selected software enables `ATE`
+- [ ] Implement the GS `FINISH` request, CSR acknowledgement and clear,
+      IMR masking, interrupt delivery, and complete local-to-host transfer
+      handshake when selected software relies on that synchronization
 
 ### Long-Term Guest Execution Progression
 
