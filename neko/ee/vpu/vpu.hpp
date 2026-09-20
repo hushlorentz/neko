@@ -181,6 +181,16 @@ class VPU : public ClockedComponent, public PipelineHandler
   private:
     friend class NekoSaveStateCodec;
 
+    enum class ContinuationTransition : std::uint8_t
+    {
+      FreshMicroStart,
+      MacroToMicro,
+      MicroToMacro,
+      ForceBreak,
+      ControlReset,
+      ExecutionFailure
+    };
+
     VPUType type;
     vector<uint8_t> microMem;
     vector<uint8_t> vuMem;
@@ -241,6 +251,13 @@ class VPU : public ClockedComponent, public PipelineHandler
     void initFPRegisters();
     void initIntRegisters();
     void initPipelineOrchestrator();
+    void clearPendingExecutionBookkeeping();
+    void discardPipelineContinuation();
+    void clearBranchContinuation();
+    void clearStopCauses();
+    void applyContinuationTransition(
+      ContinuationTransition transition,
+      std::uint16_t startAddress = 0);
     void executeMicroInstructions();
     void emitTrace(const VPUTraceEvent &event);
     bool endBitSet(uint32_t instruction);

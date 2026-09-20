@@ -330,6 +330,122 @@ void VPU::initPipelineOrchestrator()
   orchestrator.setPipelineHandler(this);
 }
 
+void VPU::clearPendingExecutionBookkeeping()
+{
+  macroIssueNeedsAdvance = false;
+  macroTransferStallPending = false;
+  lowerInstructionPending = false;
+  pendingIntegerWrites.fill(0);
+  pendingIALUWrites.fill(0);
+  bypassedIntegerValues.fill(0);
+  pendingAccumulatorWrites = 0;
+  accumulatorForwardValid = false;
+  xgkickWaiting = false;
+  xgkickTransferStarted = false;
+}
+
+void VPU::discardPipelineContinuation()
+{
+  orchestrator.reset();
+  clearPendingExecutionBookkeeping();
+}
+
+void VPU::clearBranchContinuation()
+{
+  branchDelaySlotPending = false;
+  pendingBranchTaken = false;
+  pendingBranchLinkValid = false;
+}
+
+void VPU::clearStopCauses()
+{
+  dBitStop = false;
+  tBitStop = false;
+  forceBreakStop = false;
+}
+
+void VPU::applyContinuationTransition(
+  ContinuationTransition transition,
+  std::uint16_t startAddress)
+{
+  switch (transition)
+  {
+    case ContinuationTransition::FreshMicroStart:
+      discardPipelineContinuation();
+      mode = VPU_MODE_MICRO;
+      microMemPC = startAddress;
+      endDelaySlotPending = false;
+      clearBranchContinuation();
+      terminationRequested = false;
+      haltAfterDrain = false;
+      clearStopCauses();
+      cop2WriteInterlockReleased = false;
+      state = VPU_STATE_RUN;
+      return;
+    case ContinuationTransition::MacroToMicro:
+      mode = VPU_MODE_MICRO;
+      macroIssueNeedsAdvance = false;
+      macroTransferStallPending = false;
+      microMemPC = startAddress;
+      terminationPositionValid = false;
+      endDelaySlotPending = false;
+      clearBranchContinuation();
+      terminationRequested = false;
+      haltAfterDrain = false;
+      clearStopCauses();
+      cop2WriteInterlockReleased = false;
+      state = VPU_STATE_RUN;
+      return;
+    case ContinuationTransition::MicroToMacro:
+      terminationRequested = false;
+      endDelaySlotPending = false;
+      clearBranchContinuation();
+      macroTransferStallPending = false;
+      return;
+    case ContinuationTransition::ForceBreak:
+      discardPipelineContinuation();
+      endDelaySlotPending = false;
+      clearBranchContinuation();
+      terminationRequested = false;
+      haltAfterDrain = false;
+      terminationPositionValid = false;
+      clearStopCauses();
+      forceBreakStop = true;
+      cop2WriteInterlockReleased = false;
+      state = VPU_STATE_STOP;
+      return;
+    case ContinuationTransition::ControlReset:
+      discardPipelineContinuation();
+      state = VPU_STATE_READY;
+      mode = VPU_MODE_MACRO;
+      microMemPC = 0;
+      terminationPositionCounter = 0;
+      terminationPositionValid = false;
+      endDelaySlotPending = false;
+      clearBranchContinuation();
+      pendingBranchTarget = 0;
+      pendingBranchLinkRegister = 0;
+      pendingBranchLinkValue = 0;
+      terminationRequested = false;
+      haltAfterDrain = false;
+      dEnabled = false;
+      tEnabled = false;
+      pendingLowerInstructionReady = false;
+      pendingLowerWritebackDiscarded = false;
+      clearStopCauses();
+      cop2WriteInterlockReleased = false;
+      return;
+    case ContinuationTransition::ExecutionFailure:
+      clearPendingExecutionBookkeeping();
+      clearBranchContinuation();
+      clearStopCauses();
+      cop2WriteInterlockReleased = false;
+      state = VPU_STATE_STOP;
+      return;
+  }
+  throw logic_error("Unknown VU continuation transition.");
+}
+
 uint8_t VPU::getState() const
 {
   return state;
@@ -382,29 +498,8 @@ void VPU::forceBreak()
     return;
   }
 
-  orchestrator.reset();
-  macroIssueNeedsAdvance = false;
-  macroTransferStallPending = false;
-  lowerInstructionPending = false;
-  pendingIntegerWrites.fill(0);
-  pendingIALUWrites.fill(0);
-  bypassedIntegerValues.fill(0);
-  pendingAccumulatorWrites = 0;
-  accumulatorForwardValid = false;
-  xgkickWaiting = false;
-  xgkickTransferStarted = false;
-  endDelaySlotPending = false;
-  branchDelaySlotPending = false;
-  pendingBranchTaken = false;
-  pendingBranchLinkValid = false;
-  terminationRequested = false;
-  haltAfterDrain = false;
-  terminationPositionValid = false;
-  dBitStop = false;
-  tBitStop = false;
-  forceBreakStop = true;
-  cop2WriteInterlockReleased = false;
-  state = VPU_STATE_STOP;
+  applyContinuationTransition(
+    ContinuationTransition::ForceBreak);
 
   emitTrace({
     VPUTraceEventType::ForceBreak,
@@ -688,30 +783,9 @@ void VPU::startMicroMode(uint16_t startAddress)
     throw out_of_range("VU start address is outside micro memory.");
   }
 
-  orchestrator.reset();
-  lowerInstructionPending = false;
-  pendingIntegerWrites.fill(0);
-  pendingIALUWrites.fill(0);
-  bypassedIntegerValues.fill(0);
-  pendingAccumulatorWrites = 0;
-  accumulatorForwardValid = false;
-  xgkickWaiting = false;
-  xgkickTransferStarted = false;
-  mode = VPU_MODE_MICRO;
-  macroIssueNeedsAdvance = false;
-  macroTransferStallPending = false;
-  microMemPC = startAddress;
-  endDelaySlotPending = false;
-  branchDelaySlotPending = false;
-  pendingBranchTaken = false;
-  pendingBranchLinkValid = false;
-  terminationRequested = false;
-  haltAfterDrain = false;
-  dBitStop = false;
-  tBitStop = false;
-  forceBreakStop = false;
-  cop2WriteInterlockReleased = false;
-  state = VPU_STATE_RUN;
+  applyContinuationTransition(
+    ContinuationTransition::FreshMicroStart,
+    startAddress);
 }
 
 bool VPU::startMicroModeFromMacro(uint16_t startAddress)
@@ -731,21 +805,9 @@ bool VPU::startMicroModeFromMacro(uint16_t startAddress)
     throw out_of_range("VU start address is outside micro memory.");
   }
 
-  mode = VPU_MODE_MICRO;
-  macroIssueNeedsAdvance = false;
-  macroTransferStallPending = false;
-  microMemPC = startAddress;
-  terminationPositionValid = false;
-  endDelaySlotPending = false;
-  branchDelaySlotPending = false;
-  pendingBranchTaken = false;
-  pendingBranchLinkValid = false;
-  terminationRequested = false;
-  haltAfterDrain = false;
-  dBitStop = false;
-  tBitStop = false;
-  forceBreakStop = false;
-  cop2WriteInterlockReleased = false;
+  applyContinuationTransition(
+    ContinuationTransition::MacroToMicro,
+    startAddress);
   return true;
 }
 
@@ -1003,12 +1065,8 @@ bool VPU::issueMacroInstruction(uint32_t instruction)
   if (state == VPU_STATE_RUN &&
       mode == VPU_MODE_MICRO)
   {
-    terminationRequested = false;
-    endDelaySlotPending = false;
-    branchDelaySlotPending = false;
-    pendingBranchTaken = false;
-    pendingBranchLinkValid = false;
-    macroTransferStallPending = false;
+    applyContinuationTransition(
+      ContinuationTransition::MicroToMacro);
   }
 
   if (instructionKind == VUMacroInstructionKind::Upper)
@@ -1373,24 +1431,8 @@ bool VPU::tick()
   }
   catch (...)
   {
-    macroIssueNeedsAdvance = false;
-    macroTransferStallPending = false;
-    lowerInstructionPending = false;
-    pendingIntegerWrites.fill(0);
-    pendingIALUWrites.fill(0);
-    bypassedIntegerValues.fill(0);
-    pendingAccumulatorWrites = 0;
-    accumulatorForwardValid = false;
-    xgkickWaiting = false;
-    xgkickTransferStarted = false;
-    branchDelaySlotPending = false;
-    pendingBranchTaken = false;
-    pendingBranchLinkValid = false;
-    dBitStop = false;
-    tBitStop = false;
-    forceBreakStop = false;
-    cop2WriteInterlockReleased = false;
-    state = VPU_STATE_STOP;
+    applyContinuationTransition(
+      ContinuationTransition::ExecutionFailure);
     throw;
   }
 
@@ -2648,25 +2690,8 @@ void VPU::setCallAddressRegister(uint32_t value)
 
 void VPU::resetFromControl()
 {
-  orchestrator.reset();
-  state = VPU_STATE_READY;
-  mode = VPU_MODE_MACRO;
-  microMemPC = 0;
-  terminationPositionCounter = 0;
-  terminationPositionValid = false;
-  endDelaySlotPending = false;
-  branchDelaySlotPending = false;
-  pendingBranchTaken = false;
-  pendingBranchTarget = 0;
-  pendingBranchLinkValid = false;
-  pendingBranchLinkRegister = 0;
-  pendingBranchLinkValue = 0;
-  terminationRequested = false;
-  haltAfterDrain = false;
-  dEnabled = false;
-  tEnabled = false;
-  xgkickWaiting = false;
-  xgkickTransferStarted = false;
+  applyContinuationTransition(
+    ContinuationTransition::ControlReset);
   intRegisters.assign(NUM_INT_REGISTERS, 0);
   iRegister.setBits(0);
   qRegister.setBits(0);
@@ -2676,20 +2701,6 @@ void VPU::resetFromControl()
   MACFlags = 0;
   statusFlags = 0;
   clippingFlags = 0;
-  pendingAccumulatorWrites = 0;
-  accumulatorForwardValid = false;
-  macroIssueNeedsAdvance = false;
-  macroTransferStallPending = false;
-  lowerInstructionPending = false;
-  pendingLowerInstructionReady = false;
-  pendingLowerWritebackDiscarded = false;
-  pendingIntegerWrites.fill(0);
-  pendingIALUWrites.fill(0);
-  bypassedIntegerValues.fill(0);
-  dBitStop = false;
-  tBitStop = false;
-  forceBreakStop = false;
-  cop2WriteInterlockReleased = false;
 }
 
 bool VPU::stoppedByDBit() const

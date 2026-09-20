@@ -1256,7 +1256,7 @@ accumulator or condition-result contract:
       typed request covering upper and lower issue context, operands, timing
       family, writeback disposition, and provenance separately from the
       architectural micro address
-- [ ] Centralize shared VU continuation transitions behind explicit fresh
+- [x] Centralize shared VU continuation transitions behind explicit fresh
       start, macro-to-micro handoff, micro-to-macro takeover, Force Break,
       control-reset, and execution-failure policies while preserving which
       transitions cancel pipeline membership
