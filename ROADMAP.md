@@ -1243,12 +1243,12 @@ accumulator or condition-result contract:
 
 #### System Orchestration and Remaining Subsystem Boundaries
 
-- [ ] Audit `NekoSystem` construction, clock ordering, interrupt
+- [x] Audit `NekoSystem` construction, clock ordering, interrupt
       synchronization, run control, guest outcome classification, tracing, and
       frontend-facing output as distinct responsibilities
-- [ ] Keep hardware ownership and deterministic master-cycle sequencing in one
+- [x] Keep hardware ownership and deterministic master-cycle sequencing in one
       explicit orchestration boundary
-- [ ] Extract host-control or observation helpers only where they can remain
+- [x] Extract host-control or observation helpers only where they can remain
       consumers of core state rather than alternate hardware owners
 - [ ] Audit VU issue, pipeline orchestration, execution units, writeback,
       flags, and macro/micro coordination for duplicated lifecycle policy

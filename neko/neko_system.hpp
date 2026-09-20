@@ -164,25 +164,32 @@ class NekoSystem
     std::vector<NekoTraceEvent> traceEvents;
     std::uint64_t lastTracedEEStateHash = 0;
 
-    void synchronizeInterrupts();
-    void synchronizeEEInterruptLines();
+    struct CycleObservationSnapshot
+    {
+      std::uint64_t vu0Cycles;
+      std::uint64_t vu1Cycles;
+      std::uint64_t vif0Words;
+      std::uint64_t vif1Words;
+      std::uint64_t gifQuadwords;
+      std::uint64_t dmacQuadwords;
+      std::uint32_t dmacControl;
+      std::uint32_t interruptStatus;
+      std::uint64_t pixels;
+      std::uint64_t presentationBoundary;
+    };
+
+    void latchComponentInterrupts();
+    void publishEEInterruptLines();
+    CycleObservationSnapshot
+      captureCycleObservation() const;
     EEExecutionResult makeEEExecutionResult(
       std::uint64_t masterCycles,
       std::uint64_t startingEECycles,
       std::uint64_t instructions,
       bool cycleLimitReached) const;
-    void recordCycleTrace(
+    void publishCycleTrace(
       std::uint64_t cycle,
-      std::uint64_t vu0Cycles,
-      std::uint64_t vu1Cycles,
-      std::uint64_t vif0Words,
-      std::uint64_t vif1Words,
-      std::uint64_t gifQuadwords,
-      std::uint64_t dmacQuadwords,
-      std::uint32_t dmacControl,
-      std::uint32_t interruptStatus,
-      std::uint64_t pixels,
-      std::uint64_t presentationBoundary);
+      const CycleObservationSnapshot &beforeCycle);
     void appendTrace(
       std::uint64_t cycle,
       NekoTraceSubsystem subsystem,

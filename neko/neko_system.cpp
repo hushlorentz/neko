@@ -411,7 +411,7 @@ NekoSystem::interruptController() const
   return interruptControllerComponent;
 }
 
-void NekoSystem::synchronizeInterrupts()
+void NekoSystem::latchComponentInterrupts()
 {
   if (vif0Component.interruptPending())
   {
@@ -445,53 +445,51 @@ void NekoSystem::synchronizeInterrupts()
   }
 }
 
-void NekoSystem::clockMasterCycle()
-{
-  synchronizeInterrupts();
-  synchronizeEEInterruptLines();
-  eeBusComponent.advanceGuestFIFOs();
-  const std::uint64_t vu0Cycles = vu0Component.elapsedCycles();
-  const std::uint64_t vu1Cycles = vu1Component.elapsedCycles();
-  const std::uint64_t vif0Words = vif0Component.wordsIngested();
-  const std::uint64_t vif1Words = vif1Component.wordsIngested();
-  const std::uint64_t gifQuadwords =
-    gifPath1Component.transferredQuadwordCount() +
-    gifPath3Component.transferredQuadwordCount();
-  const std::uint64_t dmacQuadwords =
-    gifDMACComponent.transferredQuadwordCount();
-  const std::uint32_t dmacControl =
-    gifDMACComponent.channelControl();
-  const std::uint32_t interruptStatus =
-    interruptControllerComponent.status();
-  const std::uint64_t pixels = gsComponent.pixelWriteCount();
-  const std::uint64_t presentationBoundary =
-    gsDisplayComponent.presentationBoundaryCount();
-  masterClock.clock();
-  synchronizeInterrupts();
-  synchronizeEEInterruptLines();
-  if (collectingTrace)
-  {
-    recordCycleTrace(
-      masterClock.currentCycle(),
-      vu0Cycles,
-      vu1Cycles,
-      vif0Words,
-      vif1Words,
-      gifQuadwords,
-      dmacQuadwords,
-      dmacControl,
-      interruptStatus,
-      pixels,
-      presentationBoundary);
-  }
-  eeCoreComponent.cycleEventCount = 0;
-}
-
-void NekoSystem::synchronizeEEInterruptLines()
+void NekoSystem::publishEEInterruptLines()
 {
   eeCoreComponent.setInterruptLines(
     interruptControllerComponent.interruptPending(),
     gifDMACComponent.interruptPending());
+}
+
+NekoSystem::CycleObservationSnapshot
+NekoSystem::captureCycleObservation() const
+{
+  return {
+    vu0Component.elapsedCycles(),
+    vu1Component.elapsedCycles(),
+    vif0Component.wordsIngested(),
+    vif1Component.wordsIngested(),
+    gifPath1Component.transferredQuadwordCount() +
+      gifPath3Component.transferredQuadwordCount(),
+    gifDMACComponent.transferredQuadwordCount(),
+    gifDMACComponent.channelControl(),
+    interruptControllerComponent.status(),
+    gsComponent.pixelWriteCount(),
+    gsDisplayComponent.presentationBoundaryCount()
+  };
+}
+
+void NekoSystem::clockMasterCycle()
+{
+  latchComponentInterrupts();
+  publishEEInterruptLines();
+  eeBusComponent.advanceGuestFIFOs();
+  CycleObservationSnapshot beforeCycle;
+  if (collectingTrace)
+  {
+    beforeCycle = captureCycleObservation();
+  }
+  masterClock.clock();
+  latchComponentInterrupts();
+  publishEEInterruptLines();
+  if (collectingTrace)
+  {
+    publishCycleTrace(
+      masterClock.currentCycle(),
+      beforeCycle);
+  }
+  eeCoreComponent.cycleEventCount = 0;
 }
 
 std::uint64_t NekoSystem::runMasterCycles(std::uint64_t cycles)
@@ -585,18 +583,9 @@ EEExecutionResult NekoSystem::makeEEExecutionResult(
   };
 }
 
-void NekoSystem::recordCycleTrace(
+void NekoSystem::publishCycleTrace(
   std::uint64_t cycle,
-  std::uint64_t vu0Cycles,
-  std::uint64_t vu1Cycles,
-  std::uint64_t vif0Words,
-  std::uint64_t vif1Words,
-  std::uint64_t gifQuadwords,
-  std::uint64_t dmacQuadwords,
-  std::uint32_t dmacControl,
-  std::uint32_t interruptStatus,
-  std::uint64_t pixels,
-  std::uint64_t presentationBoundary)
+  const CycleObservationSnapshot &beforeCycle)
 {
   for (std::size_t index = 0;
        index < eeCoreComponent.cycleEventCount;
@@ -802,7 +791,7 @@ void NekoSystem::recordCycleTrace(
           EECOP0Register::Cause));
     lastTracedEEStateHash = currentEEStateHash;
   }
-  if (vu0Component.elapsedCycles() != vu0Cycles)
+  if (vu0Component.elapsedCycles() != beforeCycle.vu0Cycles)
   {
     appendTrace(
       cycle,
@@ -812,7 +801,7 @@ void NekoSystem::recordCycleTrace(
       vu0Component.programCounter(),
       vu0Component.getState());
   }
-  if (vu1Component.elapsedCycles() != vu1Cycles)
+  if (vu1Component.elapsedCycles() != beforeCycle.vu1Cycles)
   {
     appendTrace(
       cycle,
@@ -822,7 +811,7 @@ void NekoSystem::recordCycleTrace(
       vu1Component.programCounter(),
       vu1Component.getState());
   }
-  if (vif0Component.wordsIngested() != vif0Words)
+  if (vif0Component.wordsIngested() != beforeCycle.vif0Words)
   {
     appendTrace(
       cycle,
@@ -832,7 +821,7 @@ void NekoSystem::recordCycleTrace(
       vif0Component.payloadWordsRemaining(),
       vif0Component.interruptPending());
   }
-  if (vif1Component.wordsIngested() != vif1Words)
+  if (vif1Component.wordsIngested() != beforeCycle.vif1Words)
   {
     appendTrace(
       cycle,
@@ -845,7 +834,7 @@ void NekoSystem::recordCycleTrace(
   const std::uint64_t currentGIFQuadwords =
     gifPath1Component.transferredQuadwordCount() +
     gifPath3Component.transferredQuadwordCount();
-  if (currentGIFQuadwords != gifQuadwords)
+  if (currentGIFQuadwords != beforeCycle.gifQuadwords)
   {
     appendTrace(
       cycle,
@@ -857,7 +846,7 @@ void NekoSystem::recordCycleTrace(
       gifDecoderComponent.quadwordsRemaining());
   }
   if (gifDMACComponent.transferredQuadwordCount() !=
-      dmacQuadwords)
+      beforeCycle.dmacQuadwords)
   {
     appendTrace(
       cycle,
@@ -867,7 +856,8 @@ void NekoSystem::recordCycleTrace(
       gifDMACComponent.memoryAddress(),
       gifDMACComponent.quadwordCount());
   }
-  if ((dmacControl & GIFDMACChannelControl::START) != 0 &&
+  if ((beforeCycle.dmacControl &
+       GIFDMACChannelControl::START) != 0 &&
       (gifDMACComponent.channelControl() &
        GIFDMACChannelControl::START) == 0)
   {
@@ -877,7 +867,7 @@ void NekoSystem::recordCycleTrace(
       NekoTraceEventType::TransferCompleted,
       gifDMACComponent.globalStatus());
   }
-  if (gsComponent.pixelWriteCount() != pixels)
+  if (gsComponent.pixelWriteCount() != beforeCycle.pixels)
   {
     appendTrace(
       cycle,
@@ -885,7 +875,8 @@ void NekoSystem::recordCycleTrace(
       NekoTraceEventType::Progress,
       gsComponent.pixelWriteCount());
   }
-  if (interruptControllerComponent.status() != interruptStatus)
+  if (interruptControllerComponent.status() !=
+      beforeCycle.interruptStatus)
   {
     appendTrace(
       cycle,
@@ -895,7 +886,7 @@ void NekoSystem::recordCycleTrace(
       interruptControllerComponent.mask());
   }
   if (gsDisplayComponent.presentationBoundaryCount() !=
-      presentationBoundary)
+      beforeCycle.presentationBoundary)
   {
     appendTrace(
       cycle,
