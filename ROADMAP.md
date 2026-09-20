@@ -1250,13 +1250,25 @@ accumulator or condition-result contract:
       explicit orchestration boundary
 - [x] Extract host-control or observation helpers only where they can remain
       consumers of core state rather than alternate hardware owners
-- [ ] Audit VU issue, pipeline orchestration, execution units, writeback,
+- [x] Audit VU issue, pipeline orchestration, execution units, writeback,
       flags, and macro/micro coordination for duplicated lifecycle policy
-- [ ] Refactor broad VU or GS methods when they combine unrelated decisions,
-      without requiring the owning hardware class itself to be fragmented
+- [ ] Replace positional VU pipeline admission and behavioral booleans with a
+      typed request covering upper and lower issue context, operands, timing
+      family, writeback disposition, and provenance separately from the
+      architectural micro address
+- [ ] Centralize shared VU continuation transitions behind explicit fresh
+      start, macro-to-micro handoff, micro-to-macro takeover, Force Break,
+      control-reset, and execution-failure policies while preserving which
+      transitions cancel pipeline membership
+- [ ] Split the VU orchestrator callback bridge and post-update paired-lower
+      release into focused family-owned transitions while preserving callback
+      order, XGKICK readiness side effects, pending write accounting, flags,
+      forwarding, and trace publication
 - [ ] Audit GS register handling, transfer, primitive assembly, rasterization,
       texture sampling, and presentation for boundaries with independent
       invariants
+- [ ] Refactor broad GS methods when they combine unrelated decisions, without
+      requiring the owning hardware class itself to be fragmented
 - [ ] Audit EEBus, DMA, VIF, and GIF transport for duplicated address,
       readiness, transfer-completion, or arbitration policy
 - [ ] Implement only the remaining subsystem refactors whose risk ranking
