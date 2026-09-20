@@ -1291,7 +1291,7 @@ accumulator or condition-result contract:
 
 - [x] Re-audit dependency direction and duplicated policy after all selected
       refactors
-- [ ] Run the complete optimized repository check and compare representative
+- [x] Run the complete optimized repository check and compare representative
       trace, state, framebuffer, and save-state hashes with the baseline
 - [ ] Complete an independent read-only review of the resulting architecture
       and resolve concrete correctness or maintainability findings
