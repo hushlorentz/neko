@@ -1267,7 +1267,7 @@ accumulator or condition-result contract:
 - [x] Audit GS register handling, transfer, primitive assembly, rasterization,
       texture sampling, and presentation for boundaries with independent
       invariants
-- [ ] Separate GS vertex-queue assembly from drawing-kick and rasterizer
+- [x] Separate GS vertex-queue assembly from drawing-kick and rasterizer
       dispatch behind an explicit submission result while preserving XYZ2
       versus XYZ3 behavior, strip/fan carry state, primitive counters, and
       serialized continuation

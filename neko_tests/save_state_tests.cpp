@@ -535,6 +535,71 @@ TEST_CASE("Neko save states are canonical and deterministic")
   REQUIRE(traceCount == 1);
 }
 
+TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
+{
+  NekoSystem original;
+  NekoSystem restored;
+  constexpr std::uint64_t FRAME_WIDTH_ONE = UINT64_C(1) << 16;
+  constexpr std::uint64_t SCISSOR_8_BY_8 =
+    (UINT64_C(7) << 16) | (UINT64_C(7) << 48);
+  constexpr std::uint64_t TRIANGLE =
+    static_cast<std::uint64_t>(GSPrimitiveType::Triangle);
+  const auto vertex =
+    [](std::uint16_t x, std::uint16_t y, std::uint32_t z)
+    {
+      return
+        static_cast<std::uint64_t>(x) |
+        (static_cast<std::uint64_t>(y) << 16) |
+        (static_cast<std::uint64_t>(z) << 32);
+    };
+
+  original.gs().writeRegister(
+    GSRegisterAddress::FRAME_1,
+    FRAME_WIDTH_ONE);
+  original.gs().writeRegister(
+    GSRegisterAddress::SCISSOR_1,
+    SCISSOR_8_BY_8);
+  original.gs().writeRegister(
+    GSRegisterAddress::PRIM,
+    TRIANGLE);
+  original.gs().writeRegister(
+    GSRegisterAddress::RGBAQ,
+    UINT64_C(0x04030201));
+  original.gs().writeRegister(
+    GSRegisterAddress::XYZ2,
+    vertex(16, 16, 1));
+  original.gs().writeRegister(
+    GSRegisterAddress::RGBAQ,
+    UINT64_C(0x08070605));
+  original.gs().writeRegister(
+    GSRegisterAddress::XYZ2,
+    vertex(64, 16, 2));
+
+  REQUIRE(original.gs().queuedVertexCount() == 2);
+  restored.loadState(original.saveState());
+
+  for (NekoSystem *system : {&original, &restored})
+  {
+    system->gs().writeRegister(
+      GSRegisterAddress::RGBAQ,
+      UINT64_C(0x80402010));
+    system->gs().writeRegister(
+      GSRegisterAddress::XYZ2,
+      vertex(16, 64, 3));
+  }
+
+  REQUIRE(original.gs().queuedVertexCount() == 0);
+  REQUIRE(restored.gs().queuedVertexCount() == 0);
+  REQUIRE(original.gs().triangleCount() == 1);
+  REQUIRE(restored.gs().triangleCount() == 1);
+  REQUIRE(original.gs().pixelWriteCount() == 6);
+  REQUIRE(restored.gs().pixelWriteCount() == 6);
+  REQUIRE(
+    original.gs().framebufferHash(0, 8, 8) ==
+    restored.gs().framebufferHash(0, 8, 8));
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("Version 24 save-state layout is byte-stable")
 {
   NekoSystem system;

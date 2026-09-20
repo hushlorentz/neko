@@ -292,10 +292,10 @@ void GS::writeRegister(
       decodeUV(data);
       break;
     case GSRegisterAddress::XYZ2:
-      decodeVertex(data, true);
+      decodeVertex(data, VertexSubmissionMode::Draw);
       break;
     case GSRegisterAddress::XYZ3:
-      decodeVertex(data, false);
+      decodeVertex(data, VertexSubmissionMode::QueueOnly);
       break;
     case GSRegisterAddress::TEX0_1:
       decodeTexture(0, data);
@@ -469,111 +469,94 @@ void GS::decodeUV(std::uint64_t data)
 
 void GS::decodeVertex(
   std::uint64_t data,
-  bool drawingKick)
+  VertexSubmissionMode submissionMode)
 {
   vertexRegister.x = data & GS_VERTEX_XY_MASK;
   vertexRegister.y =
     (data >> GS_VERTEX_Y_SHIFT) & GS_VERTEX_XY_MASK;
   vertexRegister.z = data >> GS_VERTEX_Z_SHIFT;
-  submitVertex(drawingKick);
+  const PrimitiveAssemblyResult assembly =
+    assemblePrimitive();
+  if (submissionMode == VertexSubmissionMode::Draw &&
+      assembly.complete)
+  {
+    dispatchPrimitive(assembly);
+  }
 }
 
-void GS::submitVertex(bool drawingKick)
+GS::PrimitiveAssemblyResult GS::assemblePrimitive()
 {
+  PrimitiveAssemblyResult result;
+  result.type = primitiveRegister.type;
+
   switch (primitiveRegister.type)
   {
     case GSPrimitiveType::Point:
       primitiveVertexCount = 0;
-      if (drawingKick)
-      {
-        rasterizePoint();
-      }
-      return;
+      result.vertices[0] = vertexRegister;
+      result.colors[0] = colorRegister;
+      result.textureCoordinates[0] =
+        textureCoordinateRegister;
+      result.complete = true;
+      return result;
     case GSPrimitiveType::Line:
     case GSPrimitiveType::LineStrip:
     {
-      primitiveVertices[primitiveVertexCount] = vertexRegister;
-      primitiveColors[primitiveVertexCount] = colorRegister;
-      primitiveTextureCoordinates[primitiveVertexCount] =
-        textureCoordinateRegister;
-      ++primitiveVertexCount;
+      queueCurrentVertex();
       if (primitiveVertexCount != 2)
       {
-        return;
+        return result;
       }
-      const GSVertexCoordinate firstVertex = primitiveVertices[0];
-      const GSVertexCoordinate secondVertex = primitiveVertices[1];
-      const GSColor firstColor = primitiveColors[0];
-      const GSColor secondColor = primitiveColors[1];
-      const GSTextureCoordinate firstTextureCoordinate =
-        primitiveTextureCoordinates[0];
-      const GSTextureCoordinate secondTextureCoordinate =
-        primitiveTextureCoordinates[1];
+      result.vertices = primitiveVertices;
+      result.colors = primitiveColors;
+      result.textureCoordinates =
+        primitiveTextureCoordinates;
       if (primitiveRegister.type == GSPrimitiveType::LineStrip)
       {
-        primitiveVertices[0] = secondVertex;
-        primitiveColors[0] = secondColor;
+        primitiveVertices[0] = result.vertices[1];
+        primitiveColors[0] = result.colors[1];
         primitiveTextureCoordinates[0] =
-          secondTextureCoordinate;
+          result.textureCoordinates[1];
         primitiveVertexCount = 1;
       }
       else
       {
         primitiveVertexCount = 0;
       }
-      if (drawingKick)
-      {
-        rasterizeLine(
-          firstVertex,
-          secondVertex,
-          firstColor,
-          secondColor,
-          firstTextureCoordinate,
-          secondTextureCoordinate);
-      }
-      return;
+      result.complete = true;
+      return result;
     }
     case GSPrimitiveType::Sprite:
-      primitiveVertices[primitiveVertexCount] = vertexRegister;
-      primitiveColors[primitiveVertexCount] = colorRegister;
-      primitiveTextureCoordinates[primitiveVertexCount] =
-        textureCoordinateRegister;
-      ++primitiveVertexCount;
+      queueCurrentVertex();
       if (primitiveVertexCount != 2)
       {
-        return;
+        return result;
       }
+      result.vertices = primitiveVertices;
+      result.colors = primitiveColors;
+      result.textureCoordinates =
+        primitiveTextureCoordinates;
       primitiveVertexCount = 0;
-      if (drawingKick)
-      {
-        rasterizeSprite();
-      }
-      return;
+      result.complete = true;
+      return result;
     case GSPrimitiveType::Triangle:
     case GSPrimitiveType::TriangleStrip:
     case GSPrimitiveType::TriangleFan:
       break;
     default:
       primitiveVertexCount = 0;
-      return;
+      return result;
   }
 
-  primitiveVertices[primitiveVertexCount] = vertexRegister;
-  primitiveColors[primitiveVertexCount] = colorRegister;
-  primitiveTextureCoordinates[primitiveVertexCount] =
-    textureCoordinateRegister;
-  ++primitiveVertexCount;
+  queueCurrentVertex();
   if (primitiveVertexCount != TRIANGLE_VERTEX_COUNT)
   {
-    return;
+    return result;
   }
 
-  const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
-    vertices = primitiveVertices;
-  const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
-    colors = primitiveColors;
-  const std::array<GSTextureCoordinate, TRIANGLE_VERTEX_COUNT>
-    textureCoordinates = primitiveTextureCoordinates;
+  result.vertices = primitiveVertices;
+  result.colors = primitiveColors;
+  result.textureCoordinates = primitiveTextureCoordinates;
   if (primitiveRegister.type == GSPrimitiveType::TriangleStrip)
   {
     primitiveVertices[0] = primitiveVertices[1];
@@ -598,9 +581,54 @@ void GS::submitVertex(bool drawingKick)
   {
     primitiveVertexCount = 0;
   }
-  if (drawingKick)
+  result.complete = true;
+  return result;
+}
+
+void GS::queueCurrentVertex()
+{
+  primitiveVertices[primitiveVertexCount] = vertexRegister;
+  primitiveColors[primitiveVertexCount] = colorRegister;
+  primitiveTextureCoordinates[primitiveVertexCount] =
+    textureCoordinateRegister;
+  ++primitiveVertexCount;
+}
+
+void GS::dispatchPrimitive(
+  const PrimitiveAssemblyResult &assembly)
+{
+  switch (assembly.type)
   {
-    rasterizeTriangle(vertices, colors, textureCoordinates);
+    case GSPrimitiveType::Point:
+      rasterizePoint(
+        assembly.vertices[0],
+        assembly.colors[0],
+        assembly.textureCoordinates[0]);
+      return;
+    case GSPrimitiveType::Line:
+    case GSPrimitiveType::LineStrip:
+      rasterizeLine(
+        assembly.vertices[0],
+        assembly.vertices[1],
+        assembly.colors[0],
+        assembly.colors[1],
+        assembly.textureCoordinates[0],
+        assembly.textureCoordinates[1]);
+      return;
+    case GSPrimitiveType::Sprite:
+      rasterizeSprite(
+        assembly.vertices,
+        assembly.colors,
+        assembly.textureCoordinates);
+      return;
+    case GSPrimitiveType::Triangle:
+    case GSPrimitiveType::TriangleStrip:
+    case GSPrimitiveType::TriangleFan:
+      rasterizeTriangle(
+        assembly.vertices,
+        assembly.colors,
+        assembly.textureCoordinates);
+      return;
   }
 }
 
@@ -632,16 +660,16 @@ void GS::validateBasicDrawing(
   }
 }
 
-std::uint32_t GS::packedColor() const
+std::uint32_t GS::packedColor(const GSColor &color) const
 {
   return
-    (static_cast<std::uint32_t>(colorRegister.red) <<
+    (static_cast<std::uint32_t>(color.red) <<
      GS_RED_SHIFT) |
-    (static_cast<std::uint32_t>(colorRegister.green) <<
+    (static_cast<std::uint32_t>(color.green) <<
      GS_GREEN_SHIFT) |
-    (static_cast<std::uint32_t>(colorRegister.blue) <<
+    (static_cast<std::uint32_t>(color.blue) <<
      GS_BLUE_SHIFT) |
-    (static_cast<std::uint32_t>(colorRegister.alpha) <<
+    (static_cast<std::uint32_t>(color.alpha) <<
      GS_ALPHA_SHIFT);
 }
 
@@ -892,16 +920,19 @@ bool GS::writeFragment(
   return true;
 }
 
-void GS::rasterizePoint()
+void GS::rasterizePoint(
+  const GSVertexCoordinate &vertex,
+  const GSColor &color,
+  const GSTextureCoordinate &textureCoordinate)
 {
   validateBasicDrawing("point", false);
   const GSContext &drawingContext =
     checkedContext(primitiveRegister.context);
   const std::int32_t fixedX =
-    static_cast<std::int32_t>(vertexRegister.x) -
+    static_cast<std::int32_t>(vertex.x) -
     drawingContext.offset.x;
   const std::int32_t fixedY =
-    static_cast<std::int32_t>(vertexRegister.y) -
+    static_cast<std::int32_t>(vertex.y) -
     drawingContext.offset.y;
   const std::int32_t x =
     floorDivide(fixedX + GS_FIXED_POINT_ONE / 2,
@@ -918,24 +949,24 @@ void GS::rasterizePoint()
     return;
   }
 
-  std::uint32_t color = packedColor();
+  std::uint32_t fragmentColor = packedColor(color);
   if (primitiveRegister.textureMapping)
   {
-    color = shadeTexturedFragment(
+    fragmentColor = shadeTexturedFragment(
       primitiveRegister.context,
-      color,
-      textureCoordinateRegister.u,
-      textureCoordinateRegister.v,
-      floatValue(textureCoordinateRegister.s),
-      floatValue(textureCoordinateRegister.t),
-      floatValue(colorRegister.q));
+      fragmentColor,
+      textureCoordinate.u,
+      textureCoordinate.v,
+      floatValue(textureCoordinate.s),
+      floatValue(textureCoordinate.t),
+      floatValue(color.q));
   }
   writeFragment(
     primitiveRegister.context,
     static_cast<std::uint16_t>(x),
     static_cast<std::uint16_t>(y),
-    color,
-    vertexRegister.z);
+    fragmentColor,
+    vertex.z);
 }
 
 void GS::rasterizeLine(
@@ -1095,7 +1126,7 @@ void GS::rasterizeLine(
         y >= drawingContext.scissor.y0 &&
         y <= drawingContext.scissor.y1)
     {
-      std::uint32_t color = packedColor();
+      std::uint32_t color = packedColor(secondColor);
       if (primitiveRegister.gouraudShading)
       {
         color =
@@ -1160,22 +1191,29 @@ void GS::rasterizeLine(
   }
 }
 
-void GS::rasterizeSprite()
+void GS::rasterizeSprite(
+  const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
+    &vertices,
+  const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
+    &colors,
+  const std::array<GSTextureCoordinate,
+                   TRIANGLE_VERTEX_COUNT>
+    &textureCoordinates)
 {
   validateBasicDrawing("sprite", false);
   const GSContext &drawingContext =
     checkedContext(primitiveRegister.context);
   const std::int32_t firstX =
-    static_cast<std::int32_t>(primitiveVertices[0].x) -
+    static_cast<std::int32_t>(vertices[0].x) -
     drawingContext.offset.x;
   const std::int32_t firstY =
-    static_cast<std::int32_t>(primitiveVertices[0].y) -
+    static_cast<std::int32_t>(vertices[0].y) -
     drawingContext.offset.y;
   const std::int32_t secondX =
-    static_cast<std::int32_t>(primitiveVertices[1].x) -
+    static_cast<std::int32_t>(vertices[1].x) -
     drawingContext.offset.x;
   const std::int32_t secondY =
-    static_cast<std::int32_t>(primitiveVertices[1].y) -
+    static_cast<std::int32_t>(vertices[1].y) -
     drawingContext.offset.y;
   const std::int32_t minimumX = std::max<std::int32_t>(
     ceilDivide(std::min(firstX, secondX), GS_FIXED_POINT_ONE),
@@ -1191,7 +1229,7 @@ void GS::rasterizeSprite()
     drawingContext.scissor.y1);
 
   ++renderedSprites;
-  const std::uint32_t fragmentColor = packedColor();
+  const std::uint32_t fragmentColor = packedColor(colors[1]);
   for (std::int32_t y = minimumY; y <= maximumY; ++y)
   {
     for (std::int32_t x = minimumX; x <= maximumX; ++x)
@@ -1223,27 +1261,27 @@ void GS::rasterizeSprite()
           primitiveRegister.context,
           color,
           interpolateHorizontal(
-            primitiveTextureCoordinates[0].u,
-            primitiveTextureCoordinates[1].u),
+            textureCoordinates[0].u,
+            textureCoordinates[1].u),
           interpolateVertical(
-            primitiveTextureCoordinates[0].v,
-            primitiveTextureCoordinates[1].v),
+            textureCoordinates[0].v,
+            textureCoordinates[1].v),
           interpolateHorizontal(
-            floatValue(primitiveTextureCoordinates[0].s),
-            floatValue(primitiveTextureCoordinates[1].s)),
+            floatValue(textureCoordinates[0].s),
+            floatValue(textureCoordinates[1].s)),
           interpolateVertical(
-            floatValue(primitiveTextureCoordinates[0].t),
-            floatValue(primitiveTextureCoordinates[1].t)),
+            floatValue(textureCoordinates[0].t),
+            floatValue(textureCoordinates[1].t)),
           interpolateHorizontal(
-            floatValue(primitiveColors[0].q),
-            floatValue(primitiveColors[1].q)));
+            floatValue(colors[0].q),
+            floatValue(colors[1].q)));
       }
       writeFragment(
         primitiveRegister.context,
         static_cast<std::uint16_t>(x),
         static_cast<std::uint16_t>(y),
         color,
-        primitiveVertices[1].z);
+        vertices[1].z);
     }
   }
 }
@@ -1361,10 +1399,10 @@ void GS::rasterizeTriangle(
         edge(vertices[2], vertices[0], pixel),
         edge(vertices[0], vertices[1], pixel)
       };
-      std::uint32_t red = colorRegister.red;
-      std::uint32_t green = colorRegister.green;
-      std::uint32_t blue = colorRegister.blue;
-      std::uint32_t alpha = colorRegister.alpha;
+      std::uint32_t red = sourceColors[2].red;
+      std::uint32_t green = sourceColors[2].green;
+      std::uint32_t blue = sourceColors[2].blue;
+      std::uint32_t alpha = sourceColors[2].alpha;
       if (primitiveRegister.gouraudShading)
       {
         const auto interpolate =

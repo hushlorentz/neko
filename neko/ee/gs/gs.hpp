@@ -313,6 +313,23 @@ class GS : public GIFRegisterWriteHandler
     static constexpr std::size_t CONTEXT_COUNT = 2;
     static constexpr std::size_t TRIANGLE_VERTEX_COUNT = 3;
 
+    enum class VertexSubmissionMode : std::uint8_t
+    {
+      QueueOnly,
+      Draw
+    };
+
+    struct PrimitiveAssemblyResult
+    {
+      GSPrimitiveType type = GSPrimitiveType::Point;
+      bool complete = false;
+      std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
+        vertices = {};
+      std::array<GSColor, TRIANGLE_VERTEX_COUNT> colors = {};
+      std::array<GSTextureCoordinate, TRIANGLE_VERTEX_COUNT>
+        textureCoordinates = {};
+    };
+
     GSContext &mutableContext(std::size_t index);
     const GSContext &checkedContext(std::size_t index) const;
     void decodePrimitive(std::uint64_t data);
@@ -321,7 +338,7 @@ class GS : public GIFRegisterWriteHandler
     void decodeUV(std::uint64_t data);
     void decodeVertex(
       std::uint64_t data,
-      bool drawingKick);
+      VertexSubmissionMode submissionMode);
     void decodeFrame(std::size_t index, std::uint64_t data);
     void decodeScissor(std::size_t index, std::uint64_t data);
     void decodeOffset(std::size_t index, std::uint64_t data);
@@ -349,8 +366,14 @@ class GS : public GIFRegisterWriteHandler
       std::uint8_t bufferWidth,
       std::uint16_t x,
       std::uint16_t y) const;
-    void submitVertex(bool drawingKick);
-    void rasterizePoint();
+    PrimitiveAssemblyResult assemblePrimitive();
+    void queueCurrentVertex();
+    void dispatchPrimitive(
+      const PrimitiveAssemblyResult &assembly);
+    void rasterizePoint(
+      const GSVertexCoordinate &vertex,
+      const GSColor &color,
+      const GSTextureCoordinate &textureCoordinate);
     void rasterizeLine(
       const GSVertexCoordinate &firstVertex,
       const GSVertexCoordinate &secondVertex,
@@ -358,7 +381,14 @@ class GS : public GIFRegisterWriteHandler
       const GSColor &secondColor,
       const GSTextureCoordinate &firstTextureCoordinate,
       const GSTextureCoordinate &secondTextureCoordinate);
-    void rasterizeSprite();
+    void rasterizeSprite(
+      const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
+        &vertices,
+      const std::array<GSColor, TRIANGLE_VERTEX_COUNT>
+        &colors,
+      const std::array<GSTextureCoordinate,
+                       TRIANGLE_VERTEX_COUNT>
+        &textureCoordinates);
     void rasterizeTriangle(
       const std::array<GSVertexCoordinate, TRIANGLE_VERTEX_COUNT>
         &vertices,
@@ -370,7 +400,7 @@ class GS : public GIFRegisterWriteHandler
     void validateBasicDrawing(
       const char *primitiveName,
       bool antialiasingUnsupported) const;
-    std::uint32_t packedColor() const;
+    std::uint32_t packedColor(const GSColor &color) const;
     std::uint32_t shadeTexturedFragment(
       std::size_t contextIndex,
       std::uint32_t fragmentColor,
