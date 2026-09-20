@@ -1271,11 +1271,19 @@ accumulator or condition-result contract:
       dispatch behind an explicit submission result while preserving XYZ2
       versus XYZ3 behavior, strip/fan carry state, primitive counters, and
       serialized continuation
-- [ ] Audit EEBus, DMA, VIF, and GIF transport for duplicated address,
+- [x] Audit EEBus, DMA, VIF, and GIF transport for duplicated address,
       readiness, transfer-completion, or arbitration policy
-- [ ] Implement only the remaining subsystem refactors whose risk ranking
-      justifies change before MMI; document deliberate deferrals with their
-      preserved invariants and future trigger
+- [ ] Move common DMAC control, status, channel-completion, and interrupt
+      ownership out of the GIF channel while preserving register behavior,
+      master-cycle ordering, and version-24 save-state bytes
+- [ ] Centralize the duplicated GIF/VIF1 normal and source-chain register,
+      tag, address-stack, termination, and completion transitions in one
+      fixed-state DMAC policy while retaining channel-specific tag delivery,
+      sink backpressure, counters, and completion signalling
+- [ ] Replace the GIF PATH3 interruption Boolean with a typed policy that
+      distinguishes DIRECT-style interruption from DIRECTHL-style deferral
+      without changing queued requests, intermittent IMAGE slicing, masks, or
+      producer retry behavior
 - [ ] Verify CLI, ELF, frame, trace, reset, and save-state workflows remain
       behaviorally identical after the selected boundary changes
 
@@ -1312,6 +1320,10 @@ the concrete requirements.
 ### Demand-Driven Hardware Expansion
 
 - [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
+- [ ] Extend the EE DMAC beyond the current channel-1/channel-2 subset with
+      priority and slice arbitration, stall control, MFIFO, hold control, and
+      bus-error behavior when selected software relies on those common
+      facilities
 - [ ] Add IOP, input devices, and SPU2 only when required by selected software
 - [ ] Implement GS alpha-test comparisons and `AFAIL` frame/depth write
       controls when selected software enables `ATE`
