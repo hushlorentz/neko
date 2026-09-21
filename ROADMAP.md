@@ -1390,7 +1390,7 @@ continuation state before a live consumer exists.
       operands
 - [x] Implement `PCEQB`, `PCEQH`, and `PCEQW` with all-ones or zero results in
       each compared lane
-- [ ] Implement signed `PCGTB`, `PCGTH`, and `PCGTW` lane comparisons
+- [x] Implement signed `PCGTB`, `PCGTH`, and `PCGTW` lane comparisons
 - [ ] Implement signed `PMAXH`, `PMAXW`, `PMINH`, and `PMINW`, including equal
       operands and signed extrema
 - [ ] Implement `PABSH` and `PABSW`, including the documented minimum-value

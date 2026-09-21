@@ -263,6 +263,45 @@ namespace
     return result;
   }
 
+  std::uint64_t compareGreaterSignedLanes(
+    std::uint64_t source,
+    std::uint64_t target,
+    std::uint8_t laneBits)
+  {
+    if (laneBits != 8 && laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE signed packed comparison lane width is invalid.");
+    }
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    const std::uint64_t signMask =
+      UINT64_C(1) << (laneBits - 1);
+    std::uint64_t result = 0;
+    for (std::uint8_t shift = 0;
+         shift < 64;
+         shift = static_cast<std::uint8_t>(shift + laneBits))
+    {
+      const std::uint64_t sourceLane =
+        (source >> shift) & laneMask;
+      const std::uint64_t targetLane =
+        (target >> shift) & laneMask;
+      const bool sourceNegative =
+        (sourceLane & signMask) != 0;
+      const bool targetNegative =
+        (targetLane & signMask) != 0;
+      const bool greater =
+        sourceNegative != targetNegative
+          ? !sourceNegative
+          : sourceLane > targetLane;
+      if (greater)
+      {
+        result |= laneMask << shift;
+      }
+    }
+    return result;
+  }
+
   EERegister128 quadwordFromFPRegister(
     const FPRegister &value)
   {
@@ -1696,6 +1735,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
+    case EEOperation::ParallelCompareGreaterThanByte:
+    case EEOperation::ParallelCompareGreaterThanHalfword:
+    case EEOperation::ParallelCompareGreaterThanWord:
       return executePackedCompare(instruction);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
@@ -2019,6 +2061,7 @@ EEInstructionExecutionOutcome EECore::executePackedCompare(
   const EERegister128 target =
     generalRegisters[instruction.targetRegister];
   std::uint8_t laneBits = 0;
+  bool greaterThan = false;
   switch (instruction.operation)
   {
     case EEOperation::ParallelCompareEqualByte:
@@ -2030,6 +2073,18 @@ EEInstructionExecutionOutcome EECore::executePackedCompare(
     case EEOperation::ParallelCompareEqualWord:
       laneBits = 32;
       break;
+    case EEOperation::ParallelCompareGreaterThanByte:
+      laneBits = 8;
+      greaterThan = true;
+      break;
+    case EEOperation::ParallelCompareGreaterThanHalfword:
+      laneBits = 16;
+      greaterThan = true;
+      break;
+    case EEOperation::ParallelCompareGreaterThanWord:
+      laneBits = 32;
+      greaterThan = true;
+      break;
     default:
       throw std::logic_error(
         "EE packed-compare handler received an "
@@ -2038,8 +2093,24 @@ EEInstructionExecutionOutcome EECore::executePackedCompare(
   if (instruction.destinationRegister != 0)
   {
     generalRegisters[instruction.destinationRegister] = {
-      compareEqualLanes(source.low, target.low, laneBits),
-      compareEqualLanes(source.high, target.high, laneBits)
+      greaterThan
+        ? compareGreaterSignedLanes(
+            source.low,
+            target.low,
+            laneBits)
+        : compareEqualLanes(
+            source.low,
+            target.low,
+            laneBits),
+      greaterThan
+        ? compareGreaterSignedLanes(
+            source.high,
+            target.high,
+            laneBits)
+        : compareEqualLanes(
+            source.high,
+            target.high,
+            laneBits)
     };
   }
   return EEInstructionExecutionOutcome::Completed;

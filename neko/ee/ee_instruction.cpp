@@ -124,6 +124,9 @@ namespace
       case EEOperation::ParallelCompareEqualByte:
       case EEOperation::ParallelCompareEqualHalfword:
       case EEOperation::ParallelCompareEqualWord:
+      case EEOperation::ParallelCompareGreaterThanByte:
+      case EEOperation::ParallelCompareGreaterThanHalfword:
+      case EEOperation::ParallelCompareGreaterThanWord:
       case EEOperation::SetLessThan:
       case EEOperation::SetLessThanUnsigned:
       case EEOperation::AddDoubleword:
@@ -1134,8 +1137,10 @@ namespace
 
   const NestedMmiDecodeTable &mmi0Table()
   {
-    static const NestedMmiDecodeTable table =
-      makeNestedMmiTable({
+    static const NestedMmiDecodeTable table = []()
+    {
+      NestedMmiDecodeTable result =
+        makeNestedMmiTable({
         0x0b,
         0x0c,
         0x0d,
@@ -1147,6 +1152,23 @@ namespace
         {0x1e, REGISTER_SOURCE_MASK},
         {0x1f, REGISTER_SOURCE_MASK}
       });
+      result[0x02] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelCompareGreaterThanWord,
+        0
+      };
+      result[0x06] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelCompareGreaterThanHalfword,
+        0
+      };
+      result[0x0a] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelCompareGreaterThanByte,
+        0
+      };
+      return result;
+    }();
     return table;
   }
 
@@ -1992,6 +2014,9 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
+    case EEOperation::ParallelCompareGreaterThanByte:
+    case EEOperation::ParallelCompareGreaterThanHalfword:
+    case EEOperation::ParallelCompareGreaterThanWord:
       return {
         EEInstructionCategory::WideOperate,
         PIPE_0,
@@ -2098,6 +2123,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
+    case EEOperation::ParallelCompareGreaterThanByte:
+    case EEOperation::ParallelCompareGreaterThanHalfword:
+    case EEOperation::ParallelCompareGreaterThanWord:
       return EEExecutionFamily::PackedCompare;
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:

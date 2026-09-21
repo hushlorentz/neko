@@ -413,6 +413,7 @@ TEST_CASE("EE packed equality execution")
         UINT64_C(0xffff00ff00ff00ff),
         UINT64_C(0xffff00ffff00ff00)
       }
+
     },
     {
       0x06,
@@ -517,6 +518,131 @@ TEST_CASE("EE packed equality execution")
     runInstruction(
       &system,
       nestedMmiInstruction(0x28, 0x0a, 1, 2, 3));
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.generalRegister(3).high == 0);
+  }
+}
+
+TEST_CASE("EE signed packed greater-than execution")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EERegister128 source;
+    EERegister128 target;
+    EERegister128 expected;
+  };
+  const Contract contracts[] = {
+    {
+      0x0a,
+      {
+        UINT64_C(0x05fe0200ff01807f),
+        UINT64_C(0x807f00ff0102fe80)
+      },
+      {
+        UINT64_C(0x05fd0300fe01817e),
+        UINT64_C(0xff7f00000101ff7f)
+      },
+      {
+        UINT64_C(0x00ff0000ff0000ff),
+        UINT64_C(0x0000000000ff0000)
+      }
+    },
+    {
+      0x06,
+      {
+        UINT64_C(0xffff000080007fff),
+        UINT64_C(0x0001fffe7fff8000)
+      },
+      {
+        UINT64_C(0xfffe000080017ffe),
+        UINT64_C(0x0000ffff7fff8000)
+      },
+      {
+        UINT64_C(0xffff00000000ffff),
+        UINT64_C(0xffff000000000000)
+      }
+    },
+    {
+      0x02,
+      {
+        UINT64_C(0x800000007fffffff),
+        UINT64_C(0xffffffff00000000)
+      },
+      {
+        UINT64_C(0x800000017ffffffe),
+        UINT64_C(0xfffffffe00000000)
+      },
+      {
+        UINT64_C(0x00000000ffffffff),
+        UINT64_C(0xffffffff00000000)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, contract.source);
+    core.setGeneralRegister(2, contract.target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        0x08,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3).low == contract.expected.low);
+    REQUIRE(core.generalRegister(3).high == contract.expected.high);
+  }
+
+  SECTION("Equal lanes are false and aliases preserve source values")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const EERegister128 value = {
+      UINT64_C(0x800000007fffffff),
+      UINT64_C(0xffffffff00000000)
+    };
+    core.setGeneralRegister(1, value);
+    core.setGeneralRegister(2, value);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x02, 1, 2, 1));
+    REQUIRE(core.generalRegister(1).low == 0);
+    REQUIRE(core.generalRegister(1).high == 0);
+
+    core.setGeneralRegister(1, value);
+    core.setGeneralRegister(2, value);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x06, 1, 2, 2));
+    REQUIRE(core.generalRegister(2).low == 0);
+    REQUIRE(core.generalRegister(2).high == 0);
+  }
+
+  SECTION("Register zero is immutable and repeated execution replaces lanes")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(2, {0, 0});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x0a, 1, 2, 0));
+    REQUIRE(core.generalRegister(0).low == 0);
+    REQUIRE(core.generalRegister(0).high == 0);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x0a, 2, 1, 3));
+    REQUIRE(core.generalRegister(3).low == UINT64_MAX);
+    REQUIRE(core.generalRegister(3).high == UINT64_MAX);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x0a, 1, 2, 3));
     REQUIRE(core.generalRegister(3).low == 0);
     REQUIRE(core.generalRegister(3).high == 0);
   }
