@@ -127,6 +127,10 @@ namespace
       case EEOperation::ParallelCompareGreaterThanByte:
       case EEOperation::ParallelCompareGreaterThanHalfword:
       case EEOperation::ParallelCompareGreaterThanWord:
+      case EEOperation::ParallelMaximumHalfword:
+      case EEOperation::ParallelMaximumWord:
+      case EEOperation::ParallelMinimumHalfword:
+      case EEOperation::ParallelMinimumWord:
       case EEOperation::SetLessThan:
       case EEOperation::SetLessThanUnsigned:
       case EEOperation::AddDoubleword:
@@ -1157,9 +1161,19 @@ namespace
         EEOperation::ParallelCompareGreaterThanWord,
         0
       };
+      result[0x03] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMaximumWord,
+        0
+      };
       result[0x06] = {
         DecodeKind::Direct,
         EEOperation::ParallelCompareGreaterThanHalfword,
+        0
+      };
+      result[0x07] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMaximumHalfword,
         0
       };
       result[0x0a] = {
@@ -1201,9 +1215,19 @@ namespace
         EEOperation::ParallelCompareEqualWord,
         0
       };
+      result[0x03] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMinimumWord,
+        0
+      };
       result[0x06] = {
         DecodeKind::Direct,
         EEOperation::ParallelCompareEqualHalfword,
+        0
+      };
+      result[0x07] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMinimumHalfword,
         0
       };
       result[0x0a] = {
@@ -2017,6 +2041,10 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelCompareGreaterThanByte:
     case EEOperation::ParallelCompareGreaterThanHalfword:
     case EEOperation::ParallelCompareGreaterThanWord:
+    case EEOperation::ParallelMaximumHalfword:
+    case EEOperation::ParallelMaximumWord:
+    case EEOperation::ParallelMinimumHalfword:
+    case EEOperation::ParallelMinimumWord:
       return {
         EEInstructionCategory::WideOperate,
         PIPE_0,
@@ -2126,6 +2154,10 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelCompareGreaterThanByte:
     case EEOperation::ParallelCompareGreaterThanHalfword:
     case EEOperation::ParallelCompareGreaterThanWord:
+    case EEOperation::ParallelMaximumHalfword:
+    case EEOperation::ParallelMaximumWord:
+    case EEOperation::ParallelMinimumHalfword:
+    case EEOperation::ParallelMinimumWord:
       return EEExecutionFamily::PackedCompare;
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:

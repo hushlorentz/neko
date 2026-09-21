@@ -648,6 +648,156 @@ TEST_CASE("EE signed packed greater-than execution")
   }
 }
 
+TEST_CASE("EE signed packed min max execution")
+{
+  struct Contract
+  {
+    std::uint8_t function;
+    std::uint8_t nestedFunction;
+    EERegister128 expected;
+  };
+  const EERegister128 source = {
+    UINT64_C(0xffff000080007fff),
+    UINT64_C(0x0001fffe7fff8000)
+  };
+  const EERegister128 target = {
+    UINT64_C(0xfffe000080017ffe),
+    UINT64_C(0x0000ffff7fff8001)
+  };
+  const Contract halfwordContracts[] = {
+    {
+      0x08,
+      0x07,
+      {
+        UINT64_C(0xffff000080017fff),
+        UINT64_C(0x0001ffff7fff8001)
+      }
+    },
+    {
+      0x28,
+      0x07,
+      {
+        UINT64_C(0xfffe000080007ffe),
+        UINT64_C(0x0000fffe7fff8000)
+      }
+    }
+  };
+
+  for (const Contract &contract : halfwordContracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        contract.function,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3).low == contract.expected.low);
+    REQUIRE(core.generalRegister(3).high == contract.expected.high);
+  }
+
+  const EERegister128 wordSource = {
+    UINT64_C(0x800000007fffffff),
+    UINT64_C(0xffffffff00000000)
+  };
+  const EERegister128 wordTarget = {
+    UINT64_C(0x800000017ffffffe),
+    UINT64_C(0xfffffffe00000000)
+  };
+  const Contract wordContracts[] = {
+    {
+      0x08,
+      0x03,
+      {
+        UINT64_C(0x800000017fffffff),
+        UINT64_C(0xffffffff00000000)
+      }
+    },
+    {
+      0x28,
+      0x03,
+      {
+        UINT64_C(0x800000007ffffffe),
+        UINT64_C(0xfffffffe00000000)
+      }
+    }
+  };
+
+  for (const Contract &contract : wordContracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, wordSource);
+    core.setGeneralRegister(2, wordTarget);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        contract.function,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3).low == contract.expected.low);
+    REQUIRE(core.generalRegister(3).high == contract.expected.high);
+  }
+
+  SECTION("Equal lanes and source aliases preserve lane values")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, wordSource);
+    core.setGeneralRegister(2, wordSource);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x03, 1, 2, 1));
+    REQUIRE(core.generalRegister(1).low == wordSource.low);
+    REQUIRE(core.generalRegister(1).high == wordSource.high);
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x07, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2).low ==
+      UINT64_C(0xfffe000080007ffe));
+    REQUIRE(
+      core.generalRegister(2).high ==
+      UINT64_C(0x0000fffe7fff8000));
+  }
+
+  SECTION("Register zero is immutable and repeated execution replaces lanes")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, wordSource);
+    core.setGeneralRegister(2, wordTarget);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x03, 1, 2, 0));
+    REQUIRE(core.generalRegister(0).low == 0);
+    REQUIRE(core.generalRegister(0).high == 0);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x03, 1, 2, 3));
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x800000017fffffff));
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x03, 1, 2, 3));
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x800000007ffffffe));
+  }
+}
+
 TEST_CASE("EE integer shift execution")
 {
   NekoSystem system;

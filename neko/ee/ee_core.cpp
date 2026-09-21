@@ -263,6 +263,28 @@ namespace
     return result;
   }
 
+  bool signedLaneGreater(
+    std::uint64_t sourceLane,
+    std::uint64_t targetLane,
+    std::uint64_t signMask)
+  {
+    const bool sourceNegative =
+      (sourceLane & signMask) != 0;
+    const bool targetNegative =
+      (targetLane & signMask) != 0;
+    return sourceNegative != targetNegative
+      ? !sourceNegative
+      : sourceLane > targetLane;
+  }
+
+  enum class PackedCompareMode : std::uint8_t
+  {
+    Equal,
+    GreaterThan,
+    Minimum,
+    Maximum
+  };
+
   std::uint64_t compareGreaterSignedLanes(
     std::uint64_t source,
     std::uint64_t target,
@@ -286,20 +308,89 @@ namespace
         (source >> shift) & laneMask;
       const std::uint64_t targetLane =
         (target >> shift) & laneMask;
-      const bool sourceNegative =
-        (sourceLane & signMask) != 0;
-      const bool targetNegative =
-        (targetLane & signMask) != 0;
-      const bool greater =
-        sourceNegative != targetNegative
-          ? !sourceNegative
-          : sourceLane > targetLane;
-      if (greater)
+      if (signedLaneGreater(
+            sourceLane,
+            targetLane,
+            signMask))
       {
         result |= laneMask << shift;
       }
     }
     return result;
+  }
+
+  std::uint64_t selectSignedExtremaLanes(
+    std::uint64_t source,
+    std::uint64_t target,
+    std::uint8_t laneBits,
+    PackedCompareMode mode)
+  {
+    if (laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE signed packed min/max lane width is invalid.");
+    }
+    if (mode != PackedCompareMode::Minimum &&
+        mode != PackedCompareMode::Maximum)
+    {
+      throw std::invalid_argument(
+        "EE signed packed min/max mode is invalid.");
+    }
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    const std::uint64_t signMask =
+      UINT64_C(1) << (laneBits - 1);
+    std::uint64_t result = 0;
+    for (std::uint8_t shift = 0;
+         shift < 64;
+         shift = static_cast<std::uint8_t>(shift + laneBits))
+    {
+      const std::uint64_t sourceLane =
+        (source >> shift) & laneMask;
+      const std::uint64_t targetLane =
+        (target >> shift) & laneMask;
+      const bool sourceGreater =
+        signedLaneGreater(
+          sourceLane,
+          targetLane,
+          signMask);
+      const std::uint64_t selected =
+        mode == PackedCompareMode::Maximum
+          ? (sourceGreater ? sourceLane : targetLane)
+          : (sourceGreater ? targetLane : sourceLane);
+      result |= selected << shift;
+    }
+    return result;
+  }
+
+  std::uint64_t comparePackedLanes(
+    std::uint64_t source,
+    std::uint64_t target,
+    std::uint8_t laneBits,
+    PackedCompareMode mode)
+  {
+    switch (mode)
+    {
+      case PackedCompareMode::Equal:
+        return compareEqualLanes(
+          source,
+          target,
+          laneBits);
+      case PackedCompareMode::GreaterThan:
+        return compareGreaterSignedLanes(
+          source,
+          target,
+          laneBits);
+      case PackedCompareMode::Minimum:
+      case PackedCompareMode::Maximum:
+        return selectSignedExtremaLanes(
+          source,
+          target,
+          laneBits,
+          mode);
+    }
+    throw std::logic_error(
+      "Unknown EE packed comparison mode.");
   }
 
   EERegister128 quadwordFromFPRegister(
@@ -1738,6 +1829,10 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelCompareGreaterThanByte:
     case EEOperation::ParallelCompareGreaterThanHalfword:
     case EEOperation::ParallelCompareGreaterThanWord:
+    case EEOperation::ParallelMaximumHalfword:
+    case EEOperation::ParallelMaximumWord:
+    case EEOperation::ParallelMinimumHalfword:
+    case EEOperation::ParallelMinimumWord:
       return executePackedCompare(instruction);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
@@ -2061,7 +2156,7 @@ EEInstructionExecutionOutcome EECore::executePackedCompare(
   const EERegister128 target =
     generalRegisters[instruction.targetRegister];
   std::uint8_t laneBits = 0;
-  bool greaterThan = false;
+  PackedCompareMode mode = PackedCompareMode::Equal;
   switch (instruction.operation)
   {
     case EEOperation::ParallelCompareEqualByte:
@@ -2075,15 +2170,31 @@ EEInstructionExecutionOutcome EECore::executePackedCompare(
       break;
     case EEOperation::ParallelCompareGreaterThanByte:
       laneBits = 8;
-      greaterThan = true;
+      mode = PackedCompareMode::GreaterThan;
       break;
     case EEOperation::ParallelCompareGreaterThanHalfword:
       laneBits = 16;
-      greaterThan = true;
+      mode = PackedCompareMode::GreaterThan;
       break;
     case EEOperation::ParallelCompareGreaterThanWord:
       laneBits = 32;
-      greaterThan = true;
+      mode = PackedCompareMode::GreaterThan;
+      break;
+    case EEOperation::ParallelMaximumHalfword:
+      laneBits = 16;
+      mode = PackedCompareMode::Maximum;
+      break;
+    case EEOperation::ParallelMaximumWord:
+      laneBits = 32;
+      mode = PackedCompareMode::Maximum;
+      break;
+    case EEOperation::ParallelMinimumHalfword:
+      laneBits = 16;
+      mode = PackedCompareMode::Minimum;
+      break;
+    case EEOperation::ParallelMinimumWord:
+      laneBits = 32;
+      mode = PackedCompareMode::Minimum;
       break;
     default:
       throw std::logic_error(
@@ -2093,24 +2204,16 @@ EEInstructionExecutionOutcome EECore::executePackedCompare(
   if (instruction.destinationRegister != 0)
   {
     generalRegisters[instruction.destinationRegister] = {
-      greaterThan
-        ? compareGreaterSignedLanes(
-            source.low,
-            target.low,
-            laneBits)
-        : compareEqualLanes(
-            source.low,
-            target.low,
-            laneBits),
-      greaterThan
-        ? compareGreaterSignedLanes(
-            source.high,
-            target.high,
-            laneBits)
-        : compareEqualLanes(
-            source.high,
-            target.high,
-            laneBits)
+      comparePackedLanes(
+        source.low,
+        target.low,
+        laneBits,
+        mode),
+      comparePackedLanes(
+        source.high,
+        target.high,
+        laneBits,
+        mode)
     };
   }
   return EEInstructionExecutionOutcome::Completed;
