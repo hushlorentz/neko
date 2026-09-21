@@ -1357,7 +1357,10 @@ For every MMI operation enabled in the family blocks below, the enabling
 change must add its `EEOperation`, dependencies, routing, `EEExecutionFamily`,
 and continuation/dispatch metadata together and keep the exhaustive metadata
 tests green. Deferred encodings remain unsupported; do not add unclassified
-operation placeholders ahead of their semantic implementation.
+operation placeholders ahead of their semantic implementation. Ordinary
+128-bit MMI operations route as Wide Operate on logical Pipe 0 through both I0
+and I1; `PLZCW` uses the existing LZC category. Existing SA operations and
+quadword memory instructions retain their current routing.
 
 - [x] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
       preserving the existing primary MMI table for direct functions and
@@ -1367,10 +1370,6 @@ operation placeholders ahead of their semantic implementation.
 - [x] Validate each instruction's required-zero fields and all five defined
       `PMFHL` format selectors; reject unused selectors and reserved table
       cells deterministically
-- [ ] Route Wide Operate through logical Pipe 0 with both I0 and I1 physical
-      resources, while keeping `PLZCW` in the existing LZC category and the
-      implemented SA and quadword-memory prerequisites in their current
-      categories
 - [ ] Generalize the one-cycle issue continuation needed for Table 1-3 `Y`
       pairs so a Wide Operate may enter `R` with a younger LZC, ALU, or MAC1
       instruction whose A-stage work stalls exactly one cycle
