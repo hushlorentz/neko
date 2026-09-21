@@ -127,6 +127,10 @@ enum class EEOperation : std::uint8_t
   VectorCallMicroSubroutine,
   VectorCallMicroSubroutineRegister,
   VectorMacroArithmetic,
+  ParallelAnd,
+  ParallelOr,
+  ParallelXor,
+  ParallelNor,
   MoveWordFromCOP1,
   MoveWordToCOP1,
   MoveControlWordFromCOP1,
@@ -309,6 +313,7 @@ enum class EEExecutionFamily : std::uint8_t
   COP2Macro,
   Jump,
   IntegerBranch,
+  PackedLogical,
   Multiply,
   Divide
 };

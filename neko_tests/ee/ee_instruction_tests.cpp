@@ -226,6 +226,15 @@ TEST_CASE("EE instruction routing classification")
       true,
       0,
       physical(EEPhysicalPipeline::I1));
+    requireRouting(
+      EEOperation::ParallelAnd,
+      EEInstructionCategory::WideOperate,
+      true,
+      false,
+      static_cast<std::uint8_t>(
+        physical(EEPhysicalPipeline::I0) |
+        physical(EEPhysicalPipeline::I1)),
+      0);
   }
 
   SECTION("Coprocessor categories expose every required physical pipe")
@@ -629,6 +638,14 @@ TEST_CASE("Every EE operation has complete shared metadata")
           return ExpectedExecutionClassification{
             EEExecutionFamily::Divide,
             EEExecutionDispatch::MAC1Continuation
+          };
+        case EEOperation::ParallelAnd:
+        case EEOperation::ParallelOr:
+        case EEOperation::ParallelXor:
+        case EEOperation::ParallelNor:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::PackedLogical,
+            EEExecutionDispatch::Immediate
           };
         case EEOperation::Count:
           break;
@@ -1508,6 +1525,53 @@ TEST_CASE("EE multiply divide and SA decoder tables")
       decodeEEInstruction(contract.instruction).operation ==
       contract.operation);
   }
+
+}
+
+TEST_CASE("EE packed logical decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint32_t instruction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {
+      UINT32_C(0x70000000) |
+        registerInstruction(0x09, 1, 2, 3, 0x12),
+      EEOperation::ParallelAnd
+    },
+    {
+      UINT32_C(0x70000000) |
+        registerInstruction(0x29, 1, 2, 3, 0x12),
+      EEOperation::ParallelOr
+    },
+    {
+      UINT32_C(0x70000000) |
+        registerInstruction(0x09, 1, 2, 3, 0x13),
+      EEOperation::ParallelXor
+    },
+    {
+      UINT32_C(0x70000000) |
+        registerInstruction(0x29, 1, 2, 3, 0x13),
+      EEOperation::ParallelNor
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(contract.instruction);
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == ((UINT32_C(1) << 1) |
+                                      (UINT32_C(1) << 2)));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(dependencies.specialWrites == 0);
+  }
 }
 
 TEST_CASE("EE nested MMI tables classify every encoding")
@@ -1516,12 +1580,13 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   {
     std::uint8_t function;
     std::uint32_t reservedMask;
+    std::uint32_t enabledMask;
   };
   const NestedTableContract contracts[] = {
-    {0x08, UINT32_C(0x3000f800)},
-    {0x28, UINT32_C(0xf088fb01)},
-    {0x09, UINT32_C(0x03c088e2)},
-    {0x29, UINT32_C(0xb3f388f6)}
+    {0x08, UINT32_C(0x3000f800), 0},
+    {0x28, UINT32_C(0xf088fb01), 0},
+    {0x09, UINT32_C(0x03c088e2), UINT32_C(0x000c0000)},
+    {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x000c0000)}
   };
   const auto requireDecodeFailure =
     [](std::uint32_t instruction,
@@ -1548,14 +1613,22 @@ TEST_CASE("EE nested MMI tables classify every encoding")
       const bool reserved =
         (contract.reservedMask &
          (UINT32_C(1) << nestedFunction)) != 0;
-      requireDecodeFailure(
+      const std::uint32_t instruction =
         UINT32_C(0x70000000) |
-          registerInstruction(
-            contract.function,
-            0,
-            0,
-            0,
-            nestedFunction),
+        registerInstruction(
+          contract.function,
+          0,
+          0,
+          0,
+          nestedFunction);
+      if ((contract.enabledMask &
+           (UINT32_C(1) << nestedFunction)) != 0)
+      {
+        REQUIRE_NOTHROW(decodeEEInstruction(instruction));
+        continue;
+      }
+      requireDecodeFailure(
+        instruction,
         reserved
           ? EEInstructionDecodeFailure::Reserved
           : EEInstructionDecodeFailure::Unsupported);

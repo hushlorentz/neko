@@ -853,6 +853,14 @@ class EECore final : public ClockedComponent
       IssueLatchFailure failure = IssueLatchFailure::None;
     };
 
+    struct YoungerAStageContinuation
+    {
+      bool active = false;
+      std::uint64_t programOrder = 0;
+      std::uint32_t address = 0;
+      EEInstruction instruction;
+    };
+
     struct FrontEndFetchResult
     {
       std::uint32_t address = 0;
@@ -1040,6 +1048,7 @@ class EECore final : public ClockedComponent
     std::uint32_t rejectedInstructionValue = 0;
     DecodedIssueLatch issueLatch;
     DecodedIssueLatch stagingLatch;
+    YoungerAStageContinuation youngerAStageContinuation;
     std::array<
       InFlightCOP1Operation,
       COP1_IN_FLIGHT_CAPACITY> inFlightCOP1Operations = {};
@@ -1140,6 +1149,8 @@ class EECore final : public ClockedComponent
     EEIssueMemberOutcome executeIssueMember(
       std::uint32_t completedLoadRegisters,
       EEIssueMemberPosition position);
+    EEIssueMemberOutcome acceptYoungerAStageContinuation();
+    void executeYoungerAStageContinuation();
     void recordInstructionAcceptance(
       std::uint64_t programOrder,
       std::uint32_t address,
@@ -1186,6 +1197,8 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeDoublewordShift(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeRegisterLogical(
+      const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executePackedLogical(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeRegisterCompare(
       const EEInstruction &instruction);

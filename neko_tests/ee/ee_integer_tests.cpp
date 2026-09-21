@@ -34,6 +34,23 @@ namespace
       immediate;
   }
 
+  std::uint32_t nestedMmiInstruction(
+    std::uint8_t primaryFunction,
+    std::uint8_t nestedFunction,
+    std::uint8_t rs,
+    std::uint8_t rt,
+    std::uint8_t rd)
+  {
+    return
+      UINT32_C(0x70000000) |
+      registerInstruction(
+        primaryFunction,
+        rs,
+        rt,
+        rd,
+        nestedFunction);
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -237,6 +254,138 @@ TEST_CASE("EE register integer execution")
       registerInstruction(0x2d, 1, 2, 0));
 
     REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+}
+
+TEST_CASE("EE packed logical execution")
+{
+  struct Contract
+  {
+    std::uint8_t primaryFunction;
+    std::uint8_t nestedFunction;
+    EERegister128 expected;
+  };
+  const EERegister128 source = {
+    UINT64_C(0xf0f00f0faaaa5555),
+    UINT64_C(0x0123456789abcdef)
+  };
+  const EERegister128 target = {
+    UINT64_C(0xff00ff0012345678),
+    UINT64_C(0xfedcba9876543210)
+  };
+  const Contract contracts[] = {
+    {
+      0x09,
+      0x12,
+      {source.low & target.low, source.high & target.high}
+    },
+    {
+      0x29,
+      0x12,
+      {source.low | target.low, source.high | target.high}
+    },
+    {
+      0x09,
+      0x13,
+      {source.low ^ target.low, source.high ^ target.high}
+    },
+    {
+      0x29,
+      0x13,
+      {
+        ~(source.low | target.low),
+        ~(source.high | target.high)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        contract.primaryFunction,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3).low == contract.expected.low);
+    REQUIRE(core.generalRegister(3).high == contract.expected.high);
+  }
+
+  SECTION("Source and destination aliases use captured operands")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x13, 1, 2, 1));
+    REQUIRE(core.generalRegister(1).low == (source.low ^ target.low));
+    REQUIRE(core.generalRegister(1).high == (source.high ^ target.high));
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x12, 1, 2, 2));
+    REQUIRE(core.generalRegister(2).low == (source.low | target.low));
+    REQUIRE(core.generalRegister(2).high == (source.high | target.high));
+
+    core.setGeneralRegister(1, source);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x12, 1, 1, 3));
+    REQUIRE(core.generalRegister(3).low == source.low);
+    REQUIRE(core.generalRegister(3).high == source.high);
+  }
+
+  SECTION("Register zero discards the complete result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x12, 1, 2, 0));
+    REQUIRE(core.generalRegister(0).low == 0);
+    REQUIRE(core.generalRegister(0).high == 0);
+  }
+
+  SECTION("Repeated execution replaces both destination halves")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x12, 1, 2, 3));
+
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x1111222233334444),
+       UINT64_C(0x5555666677778888)});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0xffff0000ffff0000),
+       UINT64_C(0x0000ffff0000ffff)});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x13, 1, 2, 3));
+
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x0000dddd0000bbbb));
+    REQUIRE(
+      core.generalRegister(3).high ==
+      UINT64_C(0xaaaa000088880000));
   }
 }
 

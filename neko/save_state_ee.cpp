@@ -66,7 +66,13 @@ void NekoSaveStateCodec::writeEECore(
       core.stagingLatch.failure));
   writer->writeU32(core.stagingLatch.address);
   writer->writeU32(core.stagingLatch.instruction.raw);
-  for (std::size_t index = 0; index < 13; ++index)
+  writer->writeBool(
+    core.youngerAStageContinuation.active);
+  writer->writeU32(
+    core.youngerAStageContinuation.instruction.raw);
+  writer->writeU32(
+    core.youngerAStageContinuation.address);
+  for (std::size_t index = 0; index < 4; ++index)
   {
     writer->writeU8(0);
   }
@@ -248,7 +254,13 @@ void NekoSaveStateCodec::readEECore(
   core->stagingLatch.address = reader->readU32();
   const std::uint32_t stagingInstruction =
     reader->readU32();
-  for (std::size_t index = 0; index < 13; ++index)
+  const bool youngerAStageActive =
+    reader->readBool("EE younger A-stage continuation flag");
+  const std::uint32_t youngerAStageInstruction =
+    reader->readU32();
+  const std::uint32_t youngerAStageAddress =
+    reader->readU32();
+  for (std::size_t index = 0; index < 4; ++index)
   {
     require(
       reader->readU8() == 0,
@@ -1094,6 +1106,56 @@ void NekoSaveStateCodec::readEECore(
     };
   restoreIssueLatch(&core->issueLatch, issueInstruction);
   restoreIssueLatch(&core->stagingLatch, stagingInstruction);
+  if (youngerAStageActive)
+  {
+    require(
+      core->nextEEProgramOrder > 1,
+      "EE younger A-stage continuation has no program order");
+    require(
+      (youngerAStageAddress & 3) == 0,
+      "EE younger A-stage continuation address is unaligned");
+    try
+    {
+      const EEInstruction instruction =
+        decodeEEInstruction(youngerAStageInstruction);
+      const EEInstructionRouting routing =
+        eeInstructionRouting(instruction.operation);
+      require(
+        routing.category == EEInstructionCategory::ALU ||
+          routing.category ==
+            EEInstructionCategory::LeadingZeroCount ||
+          routing.category == EEInstructionCategory::MAC1,
+        "EE younger A-stage continuation operation is invalid");
+      require(
+        (routing.logicalPipes &
+          static_cast<std::uint8_t>(
+            EELogicalPipe::Pipe1)) != 0,
+        "EE younger A-stage continuation cannot use Pipe 1");
+      require(
+        EECore::isActivatedOIssueOperation(
+          instruction.operation),
+        "EE younger A-stage continuation operation is inactive");
+      core->youngerAStageContinuation = {
+        true,
+        core->nextEEProgramOrder - 1,
+        youngerAStageAddress,
+        instruction
+      };
+    }
+    catch (const EEInstructionDecodeError &)
+    {
+      throw std::runtime_error(
+        "EE younger A-stage continuation cannot be decoded");
+    }
+  }
+  else
+  {
+    require(
+      youngerAStageInstruction == 0 &&
+        youngerAStageAddress == 0,
+      "EE inactive younger A-stage continuation contains state");
+    core->youngerAStageContinuation = {};
+  }
 
   require(
     core->generalRegisters[0] == EERegister128{},
@@ -1135,6 +1197,20 @@ void NekoSaveStateCodec::readEECore(
          core->issueLatch.address + 4 &&
        !core->branchDelayPending),
     "EE staging latch state is inconsistent");
+  require(
+    !core->youngerAStageContinuation.active ||
+      (core->state == EEExecutionState::Running ||
+       (core->state == EEExecutionState::Halted &&
+        core->haltReason == EEStopReason::HostHalt)),
+    "EE younger A-stage continuation state is inconsistent");
+  require(
+    !core->youngerAStageContinuation.active ||
+      (!core->issueLatch.valid &&
+       !core->stagingLatch.valid &&
+       !core->branchDelayPending &&
+       !core->pendingMac0.active &&
+       !core->pendingMac1.active),
+    "EE younger A-stage continuation conflicts with other state");
   require(
     core->branchDelayPending ||
       (core->branchDelayTarget == 0 &&

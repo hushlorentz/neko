@@ -48,6 +48,38 @@ struct EEIssuePreview
 
 struct EECoreTestAccess
 {
+  static bool youngerAStageContinuationActive(
+    const EECore &core)
+  {
+    return core.youngerAStageContinuation.active;
+  }
+
+  static bool pendingMac1Active(const EECore &core)
+  {
+    return core.pendingMac1.active;
+  }
+
+  static std::size_t cycleEventCount(const EECore &core)
+  {
+    return core.cycleEventCount;
+  }
+
+  static bool instructionIssueEventMatches(
+    const EECore &core,
+    std::size_t index,
+    std::uint32_t address,
+    EEOperation operation)
+  {
+    return
+      index < core.cycleEventCount &&
+      core.cycleEvents[index].kind ==
+        EECore::CycleEventKind::InstructionIssued &&
+      core.cycleEvents[index].payload.instructionIssued.address ==
+        address &&
+      core.cycleEvents[index].payload.instructionIssued.operation ==
+        operation;
+  }
+
   static bool cycleEventsStartWithInstructionIssue(
     const EECore &core)
   {
@@ -2899,6 +2931,223 @@ TEST_CASE("EE issue candidates are independent of selection policy")
       EECoreTestAccess::previewIssueSelection(&core);
     REQUIRE(preview.candidateCount == 2);
     REQUIRE(preview.selection.instructionCount == 1);
+  }
+}
+
+TEST_CASE("EE Wide pairs defer the younger A stage by one cycle")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(
+    0,
+    UINT32_C(0x70000000) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11) |
+      (UINT32_C(0x12) << 6) |
+      UINT32_C(0x09));
+  system.eeBus().write32(4, UINT32_C(0x24040001));
+  system.eeBus().write32(8, UINT32_C(0x24050002));
+  core.setGeneralRegister(
+    1,
+    {
+      UINT64_C(0xff00ff00ff00ff00),
+      UINT64_C(0xffff0000ffff0000)
+    });
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x0f0f0f0f0f0f0f0f),
+      UINT64_C(0x00ff00ff00ff00ff)
+    });
+  core.startExecution(0);
+
+  core.clock();
+
+  REQUIRE(core.lastIssueSelection().instructionCount == 2);
+  REQUIRE(
+    core.lastIssueSelection().continuation ==
+    EEIssueContinuation::YoungerAStageOneCycle);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+  REQUIRE(core.acceptanceRecordsThisCycle()[0].address == 0);
+  REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle()[1].address == 4);
+  REQUIRE(core.acceptanceRecordsThisCycle()[1].programOrder == 2);
+  REQUIRE(EECoreTestAccess::cycleEventCount(core) >= 2);
+  REQUIRE(
+    EECoreTestAccess::instructionIssueEventMatches(
+      core,
+      0,
+      0,
+      EEOperation::ParallelAnd));
+  REQUIRE(
+    EECoreTestAccess::instructionIssueEventMatches(
+      core,
+      1,
+      4,
+      EEOperation::AddImmediateUnsignedWord));
+  REQUIRE(core.generalRegister(3).low == UINT64_C(0x0f000f000f000f00));
+  REQUIRE(core.generalRegister(3).high == UINT64_C(0x00ff000000ff0000));
+  REQUIRE(core.generalRegister(4).low == 0);
+  REQUIRE(core.programCounter() == 8);
+
+  core.clock();
+
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+  REQUIRE(core.generalRegister(4).low == 1);
+  REQUIRE(core.generalRegister(5).low == 0);
+  REQUIRE(core.programCounter() == 8);
+
+  core.clock();
+
+  REQUIRE(core.generalRegister(5).low == 2);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 3);
+}
+
+TEST_CASE("EE Wide continuation participates in lifecycle control")
+{
+  const auto preparePair = [](NekoSystem *system)
+  {
+    system->eeBus().write32(
+      0,
+      UINT32_C(0x70000000) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16) |
+        (UINT32_C(3) << 11) |
+        (UINT32_C(0x12) << 6) |
+        UINT32_C(0x09));
+    system->eeBus().write32(4, UINT32_C(0x24040001));
+    system->eeCore().setGeneralRegister(
+      1,
+      {UINT64_MAX, UINT64_MAX});
+    system->eeCore().setGeneralRegister(
+      2,
+      {UINT64_MAX, UINT64_MAX});
+    system->eeCore().startExecution(0);
+    system->clockMasterCycle();
+    REQUIRE(
+      EECoreTestAccess::youngerAStageContinuationActive(
+        system->eeCore()));
+  };
+
+  SECTION("Host halt and same-PC resume preserve accepted work")
+  {
+    NekoSystem system;
+    preparePair(&system);
+    EECore &core = system.eeCore();
+
+    core.haltExecution();
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(4).low == 0);
+    REQUIRE(
+      EECoreTestAccess::youngerAStageContinuationActive(core));
+
+    core.startExecution(core.programCounter());
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(4).low == 1);
+    REQUIRE_FALSE(
+      EECoreTestAccess::youngerAStageContinuationActive(core));
+  }
+
+  SECTION("Fresh restart cancels accepted continuation")
+  {
+    NekoSystem system;
+    preparePair(&system);
+    EECore &core = system.eeCore();
+    system.eeBus().write32(0x100, 0);
+    core.haltExecution();
+
+    core.startExecution(0x100);
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(4).low == 0);
+    REQUIRE_FALSE(
+      EECoreTestAccess::youngerAStageContinuationActive(core));
+  }
+
+  SECTION("External PC redirect preserves accepted work")
+  {
+    NekoSystem system;
+    preparePair(&system);
+    EECore &core = system.eeCore();
+    system.eeBus().write32(0x100, 0);
+
+    core.setProgramCounter(0x100);
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(4).low == 1);
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE_FALSE(
+      EECoreTestAccess::youngerAStageContinuationActive(core));
+  }
+
+  SECTION("Younger MAC1 work enters A stage on the next cycle")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(
+      0,
+      UINT32_C(0x70000000) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16) |
+        (UINT32_C(3) << 11) |
+        (UINT32_C(0x12) << 6) |
+        UINT32_C(0x09));
+    system.eeBus().write32(
+      4,
+      UINT32_C(0x70000000) |
+        (UINT32_C(4) << 21) |
+        (UINT32_C(5) << 16) |
+        (UINT32_C(6) << 11) |
+        UINT32_C(0x18));
+    core.setGeneralRegister(1, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(4, {6, 0});
+    core.setGeneralRegister(5, {7, 0});
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE_FALSE(EECoreTestAccess::pendingMac1Active(core));
+    REQUIRE(
+      EECoreTestAccess::youngerAStageContinuationActive(core));
+
+    system.clockMasterCycle();
+    REQUIRE(EECoreTestAccess::pendingMac1Active(core));
+    REQUIRE_FALSE(
+      EECoreTestAccess::youngerAStageContinuationActive(core));
+  }
+
+  SECTION("A deferred undefined MAC1 operation halts normally")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(
+      0,
+      UINT32_C(0x70000000) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16) |
+        (UINT32_C(3) << 11) |
+        (UINT32_C(0x12) << 6) |
+        UINT32_C(0x09));
+    system.eeBus().write32(
+      4,
+      UINT32_C(0x70000000) |
+        (UINT32_C(4) << 21) |
+        (UINT32_C(5) << 16) |
+        UINT32_C(0x1a));
+    core.setGeneralRegister(1, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(4, {42, 0});
+    core.setGeneralRegister(5, {0, 0});
+    core.startExecution(0);
+    system.clockMasterCycle();
+
+    REQUIRE_NOTHROW(system.clockMasterCycle());
+    REQUIRE_FALSE(core.clockActive());
+    REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+    REQUIRE_FALSE(
+      EECoreTestAccess::youngerAStageContinuationActive(core));
   }
 }
 

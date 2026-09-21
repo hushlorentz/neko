@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
   constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
-    VERSION_24_PREPARED_STATE_SIZE = 37800432;
+    VERSION_25_PREPARED_STATE_SIZE = 37800432;
   constexpr std::uint64_t
-    VERSION_24_PREPARED_STATE_HASH =
-      UINT64_C(0x3919a00eec819a38);
+    VERSION_25_PREPARED_STATE_HASH =
+      UINT64_C(0x27c762f3e0d1cfb9);
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
@@ -35,6 +35,10 @@ namespace
     SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET = 956;
   constexpr std::size_t
     SIMPLE_EE_RETIRED_COP1_OPERATE_RESOURCE_OFFSET = 957;
+  constexpr std::size_t
+    SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET = 959;
+  constexpr std::size_t
+    SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET = 960;
   constexpr std::size_t SIMPLE_EE_EXECUTION_STATE_OFFSET = 869;
   constexpr std::size_t SIMPLE_EE_STOP_REASON_OFFSET = 870;
   constexpr std::size_t
@@ -43,6 +47,8 @@ namespace
     SIMPLE_EE_PENDING_MAC0_GENERAL_REGISTER_OFFSET = 911;
   constexpr std::size_t
     SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET = 921;
+  constexpr std::size_t
+    SIMPLE_EE_PENDING_MAC1_ACTIVE_OFFSET = 920;
   constexpr std::size_t
     SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET = 939;
   constexpr std::size_t
@@ -153,6 +159,21 @@ namespace
       hash *= SAVE_STATE_FNV_PRIME;
     }
     return hash;
+  }
+
+  void requireStateBytesEqual(
+    const std::vector<std::uint8_t> &actual,
+    const std::vector<std::uint8_t> &expected)
+  {
+    REQUIRE(actual.size() == expected.size());
+    std::size_t mismatch = SAVE_STATE_HEADER_SIZE;
+    while (mismatch < actual.size() &&
+           actual[mismatch] == expected[mismatch])
+    {
+      ++mismatch;
+    }
+    INFO("save-state byte offset: " << mismatch);
+    REQUIRE(mismatch == actual.size());
   }
 
   void updateChecksum(std::vector<std::uint8_t> *state)
@@ -602,7 +623,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 24 save-state layout is byte-stable")
+TEST_CASE("Version 25 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -617,14 +638,14 @@ TEST_CASE("Version 24 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 24);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 25);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_24_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_25_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_24_PREPARED_STATE_HASH);
+    VERSION_25_PREPARED_STATE_HASH);
 }
 
 TEST_CASE(
@@ -1053,6 +1074,103 @@ TEST_CASE("Active system save states round trip and continue identically")
   REQUIRE(original.vu1().getState() == VPU_STATE_READY);
   REQUIRE(original.vif0().payloadWordsRemaining() == 2);
   REQUIRE(original.saveState() == restored.saveState());
+}
+
+TEST_CASE("Accepted EE younger A-stage work survives save states")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  original.eeBus().write32(
+    0,
+    UINT32_C(0x70000000) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11) |
+      (UINT32_C(0x12) << 6) |
+      UINT32_C(0x09));
+  original.eeBus().write32(4, UINT32_C(0x24040001));
+  core.setGeneralRegister(
+    1,
+    {UINT64_MAX, UINT64_C(0xffff0000ffff0000)});
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0x00ff00ff00ff00ff),
+     UINT64_C(0x00ff00ff00ff00ff)});
+  core.startExecution(0);
+  original.clockMasterCycle();
+
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+  REQUIRE(core.generalRegister(4).low == 0);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+  requireStateBytesEqual(restored.saveState(), state);
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(restored.eeCore().generalRegister(4).low == 1);
+  requireStateBytesEqual(
+    restored.saveState(),
+    original.saveState());
+  REQUIRE(
+    original.eeCore().stateHash() ==
+    restored.eeCore().stateHash());
+}
+
+TEST_CASE("Malformed EE younger A-stage state is rejected")
+{
+  SECTION("Inactive continuation cannot contain an instruction")
+  {
+    NekoSystem source;
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET] = 1;
+    updateChecksum(&invalid);
+
+    NekoSystem destination;
+    const std::vector<std::uint8_t> before =
+      destination.saveState();
+    REQUIRE(
+      invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] ==
+      0);
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+  SECTION("Continuation cannot overlap active MAC state")
+  {
+    NekoSystem source;
+    EECore &core = source.eeCore();
+    source.eeBus().write32(
+      0,
+      UINT32_C(0x70000000) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16) |
+        (UINT32_C(3) << 11) |
+        (UINT32_C(0x12) << 6) |
+        UINT32_C(0x09));
+    source.eeBus().write32(4, UINT32_C(0x24040001));
+    core.setGeneralRegister(1, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+    core.startExecution(0);
+    source.clockMasterCycle();
+
+    std::vector<std::uint8_t> invalid = source.saveState();
+    invalid[SIMPLE_EE_PENDING_MAC1_ACTIVE_OFFSET] = 1;
+    invalid[SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] = 4;
+    updateChecksum(&invalid);
+
+    NekoSystem destination;
+    const std::vector<std::uint8_t> before =
+      destination.saveState();
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
 }
 
 TEST_CASE("Suspended PATH3 and PATH1 progress survive save states")

@@ -1360,7 +1360,11 @@ tests green. Deferred encodings remain unsupported; do not add unclassified
 operation placeholders ahead of their semantic implementation. Ordinary
 128-bit MMI operations route as Wide Operate on logical Pipe 0 through both I0
 and I1; `PLZCW` uses the existing LZC category. Existing SA operations and
-quadword memory instructions retain their current routing.
+quadword memory instructions retain their current routing. The first enabled
+Wide operation must also implement the typed one-cycle `Y` continuation and
+its acceptance, dependency, exception, branch-delay, trace, reset,
+halt/resume, hash, and transactional save-state contracts; do not add dormant
+continuation state before a live consumer exists.
 
 - [x] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
       preserving the existing primary MMI table for direct functions and
@@ -1374,18 +1378,15 @@ quadword memory instructions retain their current routing.
       Wide Operate with a younger LZC, ALU, or MAC1 requires a one-cycle
       younger A-stage continuation, while existing C1 and C2 `Y` pairs do not
       use that front-end continuation
-- [ ] Implement the typed one-cycle `Y` continuation while preserving
-      older-before-younger acceptance, dependencies, exceptions, branch-delay
-      ownership, tracing, reset, halt/resume, hashing, and transactional
-      save-state behavior
-- [ ] Add exhaustive direct/nested decode, reserved-field, routing, physical
-      resource, pairing, and metadata-completeness tests
-- [ ] Complete an independent review of nested decode and Wide Operate issue
-      plumbing before adding instruction semantics
+- [x] Add exhaustive direct/nested decode, reserved-field, `PMFHL` format,
+      pair-policy, and metadata-completeness tests; defer live Wide routing,
+      physical-resource, and continuation tests to the first enabled family
+- [x] Complete an independent review of the nested decoder and pair-policy
+      foundation before adding instruction semantics
 
 ### Packed Logical, Comparison, Absolute, and Count Operations
 
-- [ ] Implement `PAND`, `POR`, `PXOR`, and `PNOR` over the complete 128-bit
+- [x] Implement `PAND`, `POR`, `PXOR`, and `PNOR` over the complete 128-bit
       operands
 - [ ] Implement `PCEQB`, `PCEQH`, and `PCEQW` with all-ones or zero results in
       each compared lane

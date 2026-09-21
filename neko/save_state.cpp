@@ -181,7 +181,7 @@ void NekoSaveStateCodec::writeSystem(
   SaveStateWriter *writer,
   const NekoSystem &system)
 {
-  // Version 24 payload order is part of the on-disk compatibility contract.
+  // Version 25 payload order is part of the on-disk compatibility contract.
   writer->writeU16(system.inputState.buttons);
   writer->writeU8(system.inputState.leftStickX);
   writer->writeU8(system.inputState.leftStickY);
@@ -382,6 +382,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.issueLatch;
   destination->eeCoreComponent.stagingLatch =
     source->eeCoreComponent.stagingLatch;
+  destination->eeCoreComponent.youngerAStageContinuation =
+    source->eeCoreComponent.youngerAStageContinuation;
   destination->eeCoreComponent.inFlightCOP1Operations =
     source->eeCoreComponent.inFlightCOP1Operations;
   destination->eeCoreComponent.nextEEProgramOrder =

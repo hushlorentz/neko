@@ -403,6 +403,7 @@ void EECore::reset()
   issueSelection = {};
   rejectedInstructionValue = 0;
   clearIssueFrontEnd();
+  youngerAStageContinuation = {};
   cancelInFlightCOP1(COP1CancellationScope::All);
   nextEEProgramOrder = 1;
   executingProgramOrder = 0;
@@ -648,6 +649,7 @@ void EECore::resetExecutionContinuation()
   pendingMac1 = {};
   shiftAmountOrdering.clear();
   clearIssueFrontEnd();
+  youngerAStageContinuation = {};
   issueSelection = {};
   cancelInFlightCOP1(COP1CancellationScope::All);
   nextEEProgramOrder = 1;
@@ -658,7 +660,8 @@ bool EECore::frontEndContinuationActive() const
   return
     issueLatch.valid ||
     stagingLatch.valid ||
-    branchDelayPending;
+    branchDelayPending ||
+    youngerAStageContinuation.active;
 }
 
 EEIssueMemberOutcome EECore::resolveIssueLatchFailure()
@@ -938,6 +941,14 @@ bool EECore::issueSelectionUsesCompatiblePhysicalPipelines()
   const std::uint8_t sharedPhysicalPipelines =
     olderPhysicalPipelines &
     youngerPhysicalPipelines;
+  if (issueSelection.continuation ==
+        EEIssueContinuation::YoungerAStageOneCycle)
+  {
+    return
+      sharedPhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        EEPhysicalPipeline::I1);
+  }
   if (issueSelection.pairing ==
         EEIssuePairing::ConcurrentWithStall &&
       sharedPhysicalPipelines !=
@@ -1162,6 +1173,11 @@ void EECore::clock()
   {
     return;
   }
+  if (youngerAStageContinuation.active)
+  {
+    executeYoungerAStageContinuation();
+    return;
+  }
   if (cop1ScoreboardValue(
         COP1ScoreboardResource::MemoryException)
         .availability !=
@@ -1203,10 +1219,85 @@ EEIssueGroupExecutionResult EECore::executeIssueGroup(
     [this, completedLoadRegisters](
       EEIssueMemberPosition position)
     {
+      if (position == EEIssueMemberPosition::Younger &&
+          issueSelection.continuation ==
+            EEIssueContinuation::YoungerAStageOneCycle)
+      {
+        return acceptYoungerAStageContinuation();
+      }
       return executeIssueMember(
         completedLoadRegisters,
         position);
     });
+}
+
+EEIssueMemberOutcome
+EECore::acceptYoungerAStageContinuation()
+{
+  if (!issueLatch.valid ||
+      issueLatch.failure != IssueLatchFailure::None ||
+      branchDelayPending ||
+      youngerAStageContinuation.active)
+  {
+    throw std::logic_error(
+      "EE younger A-stage continuation cannot be accepted.");
+  }
+  if (nextEEProgramOrder == UINT64_MAX)
+  {
+    throw std::overflow_error(
+      "EE instruction program order overflow.");
+  }
+
+  const std::uint64_t programOrder = nextEEProgramOrder++;
+  youngerAStageContinuation = {
+    true,
+    programOrder,
+    issueLatch.address,
+    issueLatch.instruction
+  };
+  pc = issueLatch.address + 4;
+  recordCycleEvent(InstructionIssuedEvent{
+    issueLatch.address,
+    issueLatch.instruction.raw,
+    issueLatch.instruction.operation,
+    EEAcceptanceMode::Ordinary});
+  recordInstructionAcceptance(
+    programOrder,
+    issueLatch.address,
+    issueLatch.instruction,
+    EEAcceptanceMode::Ordinary);
+  promoteStagingLatch();
+  return EEIssueMemberOutcome::Accepted;
+}
+
+void EECore::executeYoungerAStageContinuation()
+{
+  const YoungerAStageContinuation continuation =
+    youngerAStageContinuation;
+  youngerAStageContinuation = {};
+  executingProgramOrder = continuation.programOrder;
+  const EEInstructionExecutionOutcome execution =
+    executeInstruction(
+      continuation.instruction,
+      continuation.address);
+  executingProgramOrder = 0;
+
+  switch (execution)
+  {
+    case EEInstructionExecutionOutcome::Completed:
+      return;
+    case EEInstructionExecutionOutcome::Faulted:
+    case EEInstructionExecutionOutcome::Halted:
+      return;
+    case EEInstructionExecutionOutcome::Delayed:
+      throw std::logic_error(
+        "EE accepted younger A-stage continuation delayed.");
+    case EEInstructionExecutionOutcome::Rejected:
+      throw std::logic_error(
+        "EE accepted younger A-stage continuation was rejected.");
+  }
+  throw std::logic_error(
+    "Unknown EE younger A-stage execution outcome.");
 }
 
 EEIssueMemberOutcome EECore::executeIssueMember(
@@ -1571,6 +1662,11 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::Xor:
     case EEOperation::Nor:
       return executeRegisterLogical(instruction);
+    case EEOperation::ParallelAnd:
+    case EEOperation::ParallelOr:
+    case EEOperation::ParallelXor:
+    case EEOperation::ParallelNor:
+      return executePackedLogical(instruction);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return executeRegisterCompare(instruction);
@@ -1835,6 +1931,53 @@ EEInstructionExecutionOutcome EECore::executeRegisterLogical(
         "incompatible operation.");
   }
   writeLowDoubleword(instruction.destinationRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedLogical(
+  const EEInstruction &instruction)
+{
+  const EERegister128 source =
+    generalRegisters[instruction.sourceRegister];
+  const EERegister128 target =
+    generalRegisters[instruction.targetRegister];
+  EERegister128 result;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelAnd:
+      result = {
+        source.low & target.low,
+        source.high & target.high
+      };
+      break;
+    case EEOperation::ParallelOr:
+      result = {
+        source.low | target.low,
+        source.high | target.high
+      };
+      break;
+    case EEOperation::ParallelXor:
+      result = {
+        source.low ^ target.low,
+        source.high ^ target.high
+      };
+      break;
+    case EEOperation::ParallelNor:
+      result = {
+        ~(source.low | target.low),
+        ~(source.high | target.high)
+      };
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed-logical handler received an "
+        "incompatible operation.");
+  }
+  if (instruction.destinationRegister != 0)
+  {
+    generalRegisters[instruction.destinationRegister] =
+      result;
+  }
   return EEInstructionExecutionOutcome::Completed;
 }
 
@@ -6108,6 +6251,7 @@ void EECore::enterException(
   clearBranchDelayContinuation();
   clearCOP1DividerBranchContext();
   clearIssueFrontEnd();
+  youngerAStageContinuation = {};
 }
 
 void EECore::cancelInFlightCOP1(
@@ -6303,6 +6447,18 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(
     &hash,
     static_cast<std::uint8_t>(stagingLatch.failure));
+  hashEEStateValue(
+    &hash,
+    youngerAStageContinuation.active);
+  hashEEStateValue(
+    &hash,
+    youngerAStageContinuation.programOrder);
+  hashEEStateValue(
+    &hash,
+    youngerAStageContinuation.address);
+  hashEEStateValue(
+    &hash,
+    youngerAStageContinuation.instruction.raw);
   hashEEStateValue(&hash, nextEEProgramOrder);
   for (const InFlightCOP1Operation &operation :
        inFlightCOP1Operations)

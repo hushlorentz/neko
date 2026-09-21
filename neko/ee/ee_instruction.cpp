@@ -117,6 +117,10 @@ namespace
       case EEOperation::Or:
       case EEOperation::Xor:
       case EEOperation::Nor:
+      case EEOperation::ParallelAnd:
+      case EEOperation::ParallelOr:
+      case EEOperation::ParallelXor:
+      case EEOperation::ParallelNor:
       case EEOperation::SetLessThan:
       case EEOperation::SetLessThanUnsigned:
       case EEOperation::AddDoubleword:
@@ -1170,8 +1174,10 @@ namespace
 
   const NestedMmiDecodeTable &mmi2Table()
   {
-    static const NestedMmiDecodeTable table =
-      makeNestedMmiTable({
+    static const NestedMmiDecodeTable table = []()
+    {
+      NestedMmiDecodeTable result =
+        makeNestedMmiTable({
         0x01,
         0x05,
         0x06,
@@ -1200,13 +1206,27 @@ namespace
         {0x1e, REGISTER_SOURCE_MASK},
         {0x1f, REGISTER_SOURCE_MASK}
       });
+      result[0x12] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAnd,
+        0
+      };
+      result[0x13] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelXor,
+        0
+      };
+      return result;
+    }();
     return table;
   }
 
   const NestedMmiDecodeTable &mmi3Table()
   {
-    static const NestedMmiDecodeTable table =
-      makeNestedMmiTable({
+    static const NestedMmiDecodeTable table = []()
+    {
+      NestedMmiDecodeTable result =
+        makeNestedMmiTable({
         0x01,
         0x02,
         0x04,
@@ -1242,6 +1262,18 @@ namespace
         {0x1b, REGISTER_SOURCE_MASK},
         {0x1e, REGISTER_SOURCE_MASK}
       });
+      result[0x12] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelOr,
+        0
+      };
+      result[0x13] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelNor,
+        0
+      };
+      return result;
+    }();
     return table;
   }
 
@@ -1931,6 +1963,17 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
         PHYSICAL_I0,
         PHYSICAL_I1
       };
+    case EEOperation::ParallelAnd:
+    case EEOperation::ParallelOr:
+    case EEOperation::ParallelXor:
+    case EEOperation::ParallelNor:
+      return {
+        EEInstructionCategory::WideOperate,
+        PIPE_0,
+        static_cast<std::uint8_t>(
+          PHYSICAL_I0 | PHYSICAL_I1),
+        0
+      };
     case EEOperation::Count:
       break;
   }
@@ -2022,6 +2065,11 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::Xor:
     case EEOperation::Nor:
       return EEExecutionFamily::RegisterLogical;
+    case EEOperation::ParallelAnd:
+    case EEOperation::ParallelOr:
+    case EEOperation::ParallelXor:
+    case EEOperation::ParallelNor:
+      return EEExecutionFamily::PackedLogical;
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return EEExecutionFamily::RegisterCompare;
