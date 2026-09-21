@@ -1300,16 +1300,262 @@ accumulator or condition-result contract:
 
 ## Milestone 6: EE Multimedia Extensions
 
-Keep this milestone high-level until COP1 is complete. Before implementing MMI,
-expand it into independently reviewable blocks and items using the official EE
-instruction tables and the requirements of selected guest programs.
+Implement the 91 currently missing MMI semantic operations defined by the
+official EE manuals. `LQ`, `SQ`, `MFSA`, `MTSA`, `MTSAB`, and `MTSAH`, plus
+the twelve scalar multiply/divide operations encoded in the primary MMI class,
+are existing prerequisites rather than duplicate work in this milestone.
 
-- [ ] Audit and classify the complete R5900 MMI instruction set
-- [ ] Divide MMI into focused packed-arithmetic, comparison, permutation,
-      shift, multiply/divide, load/store, timing, and integration blocks
-- [ ] Add each family incrementally with deterministic state, trace,
-      exception, save-state, and guest-program coverage
-- [ ] Complete a final reserved-encoding and conformance audit
+Primary sources:
+
+- EE Core User's Manual version 3.1, pages 18-22 and 50-52, for physical and
+  logical pipe routing, `O`/`X`/`Y` issue combinations, 128-bit register use,
+  multimedia families, and multiply/divide latency and throughput.
+- EE Core Instruction Set Manual version 3.1, pages 156-282 and 373-377, for
+  instruction semantics, operand restrictions, fixed fields, nested
+  MMI0/MMI1/MMI2/MMI3 encodings, format selectors, and reserved encodings.
+
+### MMI Audit and Architecture Contract
+
+- [x] Inventory all 91 missing semantic operations and classify them into
+      wrapping arithmetic, saturating arithmetic, comparison/selection,
+      logical, shift/funnel, permutation/format, HI/LO transfer, packed word
+      multiply/accumulate, packed halfword multiply/accumulate, and packed
+      divide families
+- [x] Reconcile the instruction inventory with the encoding appendix: direct
+      MMI functions plus the complete MMI0, MMI1, MMI2, and MMI3 tables,
+      including all reserved cells and fixed-zero operand fields
+- [x] Confirm that `LQ`, `SQ`, `MFSA`, `MTSA`, `MTSAB`, and `MTSAH` already
+      provide the required memory and SA-register prerequisites
+- [x] Confirm that ordinary 128-bit MMI operations are Wide Operate
+      instructions issued on logical Pipe 0 through both I0 and I1, completing
+      in the integer A stage, while Table 1-3 `Y` pairings admit a younger
+      LZC, ALU, or MAC1 operation with a one-cycle resource stall
+- [x] Confirm packed multiply/accumulate latency 4 and throughput 2, and packed
+      divide latency and throughput 37, with asynchronous HI/LO interlocks
+- [x] Define `EECore` as the owner of MMI state and continuation, using the
+      existing 128-bit GPR and combined HI/HI1/LO/LO1 architectural state
+      rather than sharing VU execution policy
+- [x] Choose a dedicated fixed-capacity, program-ordered packed-MAC
+      continuation boundary instead of coupling one instruction across the
+      independent scalar MAC0 and MAC1 slots; reserve a single save-state
+      version transition for the first durable MMI continuation state
+- [x] Preserve the existing deterministic undefined-operation stop for
+      manual-undefined operand shapes and divide-by-zero cases without
+      inventing an architectural exception
+- [x] Record the two unresolved instruction-level manual questions separately:
+      undefined HI/LO words after `PHMADH`/`PHMSBH`, and contradictory
+      `PDIVBW` remainder extension; keep those operations blocked until each
+      policy is resolved from approved evidence
+- [x] Expand the milestone into independently reviewable implementation,
+      timing, persistence, guest-integration, and final-conformance blocks
+- [x] Complete an independent read-only review of the audit, architecture
+      contract, and milestone decomposition before implementing MMI
+
+### Nested Decode, Metadata, and Wide-Issue Foundation
+
+- [ ] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
+      preserving the existing primary MMI table for direct functions and
+      already implemented scalar operations
+- [ ] Distinguish every defined-but-unimplemented encoding from every reserved
+      encoding before enabling semantic execution
+- [ ] Validate each instruction's required-zero fields and all five defined
+      `PMFHL` format selectors; reject unused selectors and reserved table
+      cells deterministically
+- [ ] Extend `EEOperation`, `EEExecutionFamily`, and `EEOperationMetadata`
+      incrementally so every enabled MMI operation has one deliberate routing,
+      dependency, execution, and continuation classification
+- [ ] Route Wide Operate through logical Pipe 0 with both I0 and I1 physical
+      resources, while keeping `PLZCW` in the existing LZC category and the
+      implemented SA and quadword-memory prerequisites in their current
+      categories
+- [ ] Generalize the one-cycle issue continuation needed for Table 1-3 `Y`
+      pairs so a Wide Operate may enter `R` with a younger LZC, ALU, or MAC1
+      instruction whose A-stage work stalls exactly one cycle
+- [ ] Preserve older-before-younger acceptance, dependencies, exceptions,
+      branch-delay ownership, tracing, reset, halt/resume, hashing, and
+      transactional save-state behavior across the new `Y` continuation
+- [ ] Add exhaustive direct/nested decode, reserved-field, routing, physical
+      resource, pairing, and metadata-completeness tests
+- [ ] Complete an independent review of nested decode and Wide Operate issue
+      plumbing before adding instruction semantics
+
+### Packed Logical, Comparison, Absolute, and Count Operations
+
+- [ ] Implement `PAND`, `POR`, `PXOR`, and `PNOR` over the complete 128-bit
+      operands
+- [ ] Implement `PCEQB`, `PCEQH`, and `PCEQW` with all-ones or zero results in
+      each compared lane
+- [ ] Implement signed `PCGTB`, `PCGTH`, and `PCGTW` lane comparisons
+- [ ] Implement signed `PMAXH`, `PMAXW`, `PMINH`, and `PMINW`, including equal
+      operands and signed extrema
+- [ ] Implement `PABSH` and `PABSW`, including the documented minimum-value
+      clamp to the corresponding signed maximum without an exception
+- [ ] Implement `PLZCW` over the two low 32-bit words by counting leading bits
+      equal to each word's sign bit and subtracting one, preserving the
+      documented 64-bit destination behavior
+- [ ] Cover register-zero destinations, source/destination aliases, mixed lane
+      signs, extrema, decode fields, routing, `Y` issue, traces, hashes, and
+      repeated execution
+- [ ] Complete an independent review of the logical/comparison family
+
+### Packed Addition, Subtraction, and Saturation
+
+- [ ] Implement wrapping `PADDB`, `PADDH`, `PADDW`, `PSUBB`, `PSUBH`, and
+      `PSUBW` with independent modulo arithmetic in every lane
+- [ ] Implement mixed `PADSBH`, subtracting the low four halfword lanes and
+      adding the high four lanes
+- [ ] Implement signed-saturating `PADDSB`, `PADDSH`, `PADDSW`, `PSUBSB`,
+      `PSUBSH`, and `PSUBSW`
+- [ ] Implement unsigned-saturating `PADDUB`, `PADDUH`, `PADDUW`, `PSUBUB`,
+      `PSUBUH`, and `PSUBUW`
+- [ ] Cover every positive and negative saturation boundary, carry and borrow
+      isolation, source/destination aliases, register zero, routing, pairing,
+      traces, hashes, and repeated execution
+- [ ] Complete an independent review of packed arithmetic
+
+### Packed Interleave, Extend, and Pack Operations
+
+- [ ] Implement lower interleave `PEXTLB`, `PEXTLH`, and `PEXTLW`
+- [ ] Implement upper interleave `PEXTUB`, `PEXTUH`, and `PEXTUW`
+- [ ] Implement truncating pack `PPACB`, `PPACH`, and `PPACW`
+- [ ] Implement `PINTH` and `PINTEH` with the manual's exact source-lane
+      ordering
+- [ ] Cover lane-order sentinels, source/destination aliases, register zero,
+      decode fields, routing, pairing, traces, hashes, and repeated execution
+- [ ] Complete an independent review of the interleave/pack family
+
+### Packed Copy, Exchange, and Pixel-Format Operations
+
+- [ ] Implement `PCPYH`, `PCPYLD`, and `PCPYUD`
+- [ ] Implement `PEXEH`, `PEXCH`, `PEXEW`, and `PEXCW`
+- [ ] Implement `PREVH` and `PROT3W`
+- [ ] Implement the exact documented 1-5-5-5 to 8-8-8-8 `PEXT5` expansion
+      and inverse `PPAC5` truncation, including alpha-bit placement
+- [ ] Cover asymmetric lane markers, aliases, register zero, format round
+      trips where defined, routing, pairing, traces, hashes, and repeated
+      execution
+- [ ] Complete an independent review of copy/exchange/format operations
+
+### Packed Shifts and SA Funnel Shift
+
+- [ ] Implement immediate `PSLLH`, `PSRLH`, and `PSRAH`, enforcing the
+      documented 0-15 shift-field restriction
+- [ ] Implement immediate `PSLLW`, `PSRLW`, and `PSRAW`
+- [ ] Implement `PSLLVW`, `PSRLVW`, and `PSRAVW` using the low five bits of
+      the corresponding source word and the documented sign-extended
+      doubleword results
+- [ ] Implement `QFSRV` over the 256-bit `rs || rt` concatenation using the SA
+      register, including zero, byte, halfword, and rotate-style cases
+- [ ] Extend the existing three-instruction SA ordering window so `QFSRV`
+      counts as an SA read for `MTSA`, `MTSAB`, and `MTSAH` restrictions
+- [ ] Cover source/destination aliases, immediate reserved values, SA
+      save/restore, branch-likely restrictions, traces, hashes, and
+      deterministic continuation
+- [ ] Complete an independent review of packed shifts and SA ordering
+
+### Parallel HI/LO Transfers
+
+- [ ] Implement full-width `PMFHI`, `PMFLO`, `PMTHI`, and `PMTLO`
+- [ ] Implement `PMFHL.LW`, `PMFHL.UW`, and `PMFHL.LH` with the exact
+      documented HI/LO word or halfword selection order
+- [ ] Implement saturating `PMFHL.SLW` and `PMFHL.SH`, including signed
+      boundary values
+- [ ] Implement `PMTHL.LW`, preserving the HI/LO words that the manual marks
+      unchanged
+- [ ] Model dependencies against all affected `HI`, `LO`, `HI1`, and `LO1`
+      resources so scalar and packed MAC work interlocks without false
+      independence
+- [ ] Cover all format selectors, partial-register preservation, aliases,
+      register zero, pending-MAC interlocks, traces, hashes, and save states
+- [ ] Complete an independent review of parallel HI/LO transfers
+
+### Packed MAC Continuation and Word Operations
+
+- [ ] Add a fixed-capacity, allocation-free in-flight MMI MAC representation
+      with operation, program order, captured operands/results, destination,
+      remaining latency, and initiation occupancy
+- [ ] Permit the documented 4-cycle latency and 2-cycle throughput without
+      allowing a third overlapping packed multiply/accumulate operation or a
+      conflicting scalar MAC0/MAC1 access
+- [ ] Implement signed `PMULTW` and unsigned `PMULTUW`, atomically delivering
+      the two 64-bit products to the full HI/LO state and `rd`
+- [ ] Implement `PMADDW`, `PMADDUW`, and `PMSUBW` using the corresponding
+      64-bit HI/LO accumulators and documented modulo results
+- [ ] Enforce the manual's sign-extended-word operand restriction through the
+      deterministic undefined-operation policy before allocating delayed work
+- [ ] Define completion, bypass/interlock, exception, interrupt, host halt,
+      guest-return drain, reset, and external-PC-mutation behavior for accepted
+      packed MAC operations
+- [ ] Introduce one save-state version transition for reachable MMI
+      continuation, with strict validation, canonical hashing, transactional
+      load, byte-stable repeated saves, and malformed-state coverage
+- [ ] Cover overlapping initiation, HI/LO and `rd` hazards, older-before-younger
+      retirement, trace ordering, save/resume, and mixed scalar/packed MAC use
+- [ ] Complete an independent review of the MMI continuation foundation and
+      packed word operations
+
+### Packed Halfword and Horizontal MAC Operations
+
+- [ ] Implement `PMULTH`, `PMADDH`, and `PMSUBH` with the documented eight
+      16-bit products, HI/LO lane placement, and selected `rd` lanes
+- [ ] Before implementing `PHMADH` or `PHMSBH`, resolve the manual's undefined
+      alternating HI/LO destination words using approved evidence or an
+      explicitly accepted deterministic policy; cover the chosen preservation
+      or canonicalization behavior in hashes and save states
+- [ ] Implement `PHMADH` and `PHMSBH` with exact horizontal pair grouping,
+      add/subtract direction, defined HI/LO placement, `rd` result selection,
+      and the resolved policy for undefined HI/LO words
+- [ ] Reuse the packed-MAC latency, throughput, occupancy, ordering, and
+      persistence owner without duplicating a halfword-specific lifecycle
+- [ ] Cover signed extrema, modulo accumulation, horizontal lane sentinels,
+      aliases, interlocks, overlap, traces, hashes, and save/resume
+- [ ] Complete an independent review of packed halfword MAC behavior
+
+### Packed Divide Operations
+
+- [ ] Implement signed `PDIVW` and unsigned `PDIVUW` over the low word of each
+      64-bit half, storing sign-extended quotient and remainder results in the
+      corresponding LO and HI halves
+- [ ] Before implementing `PDIVBW`, resolve the instruction page's conflict
+      between prose specifying zero-extended 16-bit remainders and
+      pseudocode/diagram specifying sign extension; do not choose silently
+- [ ] Implement signed broadcast `PDIVBW` over all four source words using the
+      low halfword divisor and the resolved remainder-extension policy
+- [ ] Model 37-cycle latency and 37-cycle throughput with asynchronous HI/LO
+      interlocks and no architectural arithmetic exception
+- [ ] Enforce manual-defined operand-shape restrictions and the milestone's
+      deterministic policy for otherwise undefined zero-divisor results
+- [ ] Cover signed minimum divided by minus one, signed remainder rules,
+      unsigned high-bit inputs, all four broadcast lanes, scalar/packed MAC
+      conflicts, interrupts, halt/resume, traces, hashes, and save/resume
+- [ ] Complete an independent review of packed divide behavior
+
+### MMI Guest Integration and Final Conformance Audit
+
+- [ ] Add independently authored PS2DEV semantic guests for packed arithmetic
+      and comparisons, shifts and permutations, and HI/LO multiply/divide
+      behavior; record fixture provenance and generated hashes
+- [ ] Add a mixed MMI guest that exercises ordinary `O` pairs, every Wide
+      Operate `Y` pairing, SA ordering, scalar/packed MAC interlocks, and
+      asynchronous completion
+- [ ] Assert guest registers, full-width HI/LO and SA state, memory outputs,
+      instruction counts, stop reasons, deterministic traces, and state hashes
+- [ ] Round-trip save states with two overlapping packed MAC operations and
+      with a packed divide in flight; verify byte-identical consecutive saves
+      after reconciliation
+- [ ] Audit all 91 MMI semantic operations for decode, operands, lane order,
+      arithmetic edge cases, routing, dependencies, timing, exceptions,
+      tracing, reset, halt/resume, hashing, and persistence coverage
+- [ ] Exhaustively reject every reserved primary MMI and nested
+      MMI0/MMI1/MMI2/MMI3 encoding, invalid `PMFHL` format, and nonzero
+      fixed-field combination
+- [ ] Run the complete optimized repository check and compare representative
+      trace, state, guest-output, and save-state hashes with the pre-MMI
+      baseline
+- [ ] Complete an independent final review of the full MMI milestone and
+      resolve every concrete finding
+- [ ] Reconcile `PROJECT.md`, run the complete optimized AddressSanitizer
+      check, and run the macOS leak check before closing the milestone
 
 ## Future Work
 
