@@ -127,6 +127,9 @@ enum class EEOperation : std::uint8_t
   VectorCallMicroSubroutine,
   VectorCallMicroSubroutineRegister,
   VectorMacroArithmetic,
+  ParallelCompareEqualByte,
+  ParallelCompareEqualHalfword,
+  ParallelCompareEqualWord,
   ParallelAnd,
   ParallelOr,
   ParallelXor,
@@ -313,6 +316,7 @@ enum class EEExecutionFamily : std::uint8_t
   COP2Macro,
   Jump,
   IntegerBranch,
+  PackedCompare,
   PackedLogical,
   Multiply,
   Divide

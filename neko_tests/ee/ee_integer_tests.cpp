@@ -389,6 +389,139 @@ TEST_CASE("EE packed logical execution")
   }
 }
 
+TEST_CASE("EE packed equality execution")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EERegister128 source;
+    EERegister128 target;
+    EERegister128 expected;
+  };
+  const Contract contracts[] = {
+    {
+      0x0a,
+      {
+        UINT64_C(0x0011223344556677),
+        UINT64_C(0x8899aabbccddeeff)
+      },
+      {
+        UINT64_C(0x0011aa33bb55cc77),
+        UINT64_C(0x889900bbcc00ee00)
+      },
+      {
+        UINT64_C(0xffff00ff00ff00ff),
+        UINT64_C(0xffff00ffff00ff00)
+      }
+    },
+    {
+      0x06,
+      {
+        UINT64_C(0x1111222233334444),
+        UINT64_C(0xaaaabbbbccccdddd)
+      },
+      {
+        UINT64_C(0x1111aaaa3333bbbb),
+        UINT64_C(0xaaaaffff0000dddd)
+      },
+      {
+        UINT64_C(0xffff0000ffff0000),
+        UINT64_C(0xffff00000000ffff)
+      }
+    },
+    {
+      0x02,
+      {
+        UINT64_C(0x1111111122222222),
+        UINT64_C(0x3333333344444444)
+      },
+      {
+        UINT64_C(0xaaaaaaaa22222222),
+        UINT64_C(0x33333333bbbbbbbb)
+      },
+      {
+        UINT64_C(0x00000000ffffffff),
+        UINT64_C(0xffffffff00000000)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, contract.source);
+    core.setGeneralRegister(2, contract.target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        0x28,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3).low == contract.expected.low);
+    REQUIRE(core.generalRegister(3).high == contract.expected.high);
+  }
+
+  SECTION("Aliases use captured operands and register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const EERegister128 source = {
+      UINT64_C(0x1111222233334444),
+      UINT64_C(0x5555666677778888)
+    };
+    const EERegister128 target = {
+      UINT64_C(0x1111aaaa3333bbbb),
+      UINT64_C(0x5555cccc7777dddd)
+    };
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x06, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1).low ==
+      UINT64_C(0xffff0000ffff0000));
+    REQUIRE(
+      core.generalRegister(1).high ==
+      UINT64_C(0xffff0000ffff0000));
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, source);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x02, 1, 2, 2));
+    REQUIRE(core.generalRegister(2).low == UINT64_MAX);
+    REQUIRE(core.generalRegister(2).high == UINT64_MAX);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x0a, 1, 2, 0));
+    REQUIRE(core.generalRegister(0).low == 0);
+    REQUIRE(core.generalRegister(0).high == 0);
+  }
+
+  SECTION("Repeated execution replaces every lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x0a, 1, 2, 3));
+
+    core.setGeneralRegister(2, {0, 0});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x0a, 1, 2, 3));
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.generalRegister(3).high == 0);
+  }
+}
+
 TEST_CASE("EE integer shift execution")
 {
   NekoSystem system;

@@ -237,6 +237,32 @@ namespace
     return value;
   }
 
+  std::uint64_t compareEqualLanes(
+    std::uint64_t source,
+    std::uint64_t target,
+    std::uint8_t laneBits)
+  {
+    if (laneBits != 8 && laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE packed equality lane width is invalid.");
+    }
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    std::uint64_t result = 0;
+    for (std::uint8_t shift = 0;
+         shift < 64;
+         shift = static_cast<std::uint8_t>(shift + laneBits))
+    {
+      if (((source >> shift) & laneMask) ==
+          ((target >> shift) & laneMask))
+      {
+        result |= laneMask << shift;
+      }
+    }
+    return result;
+  }
+
   EERegister128 quadwordFromFPRegister(
     const FPRegister &value)
   {
@@ -1667,6 +1693,10 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelXor:
     case EEOperation::ParallelNor:
       return executePackedLogical(instruction);
+    case EEOperation::ParallelCompareEqualByte:
+    case EEOperation::ParallelCompareEqualHalfword:
+    case EEOperation::ParallelCompareEqualWord:
+      return executePackedCompare(instruction);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return executeRegisterCompare(instruction);
@@ -1977,6 +2007,40 @@ EEInstructionExecutionOutcome EECore::executePackedLogical(
   {
     generalRegisters[instruction.destinationRegister] =
       result;
+  }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedCompare(
+  const EEInstruction &instruction)
+{
+  const EERegister128 source =
+    generalRegisters[instruction.sourceRegister];
+  const EERegister128 target =
+    generalRegisters[instruction.targetRegister];
+  std::uint8_t laneBits = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelCompareEqualByte:
+      laneBits = 8;
+      break;
+    case EEOperation::ParallelCompareEqualHalfword:
+      laneBits = 16;
+      break;
+    case EEOperation::ParallelCompareEqualWord:
+      laneBits = 32;
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed-compare handler received an "
+        "incompatible operation.");
+  }
+  if (instruction.destinationRegister != 0)
+  {
+    generalRegisters[instruction.destinationRegister] = {
+      compareEqualLanes(source.low, target.low, laneBits),
+      compareEqualLanes(source.high, target.high, laneBits)
+    };
   }
   return EEInstructionExecutionOutcome::Completed;
 }

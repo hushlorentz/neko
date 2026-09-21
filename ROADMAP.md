@@ -1388,7 +1388,7 @@ continuation state before a live consumer exists.
 
 - [x] Implement `PAND`, `POR`, `PXOR`, and `PNOR` over the complete 128-bit
       operands
-- [ ] Implement `PCEQB`, `PCEQH`, and `PCEQW` with all-ones or zero results in
+- [x] Implement `PCEQB`, `PCEQH`, and `PCEQW` with all-ones or zero results in
       each compared lane
 - [ ] Implement signed `PCGTB`, `PCGTH`, and `PCGTW` lane comparisons
 - [ ] Implement signed `PMAXH`, `PMAXW`, `PMINH`, and `PMINW`, including equal

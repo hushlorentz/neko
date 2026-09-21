@@ -647,6 +647,13 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::PackedLogical,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::ParallelCompareEqualByte:
+        case EEOperation::ParallelCompareEqualHalfword:
+        case EEOperation::ParallelCompareEqualWord:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::PackedCompare,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::Count:
           break;
       }
@@ -1574,6 +1581,53 @@ TEST_CASE("EE packed logical decoder and dependencies")
   }
 }
 
+TEST_CASE("EE packed equality decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {0x0a, EEOperation::ParallelCompareEqualByte},
+    {0x06, EEOperation::ParallelCompareEqualHalfword},
+    {0x02, EEOperation::ParallelCompareEqualWord}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          0x28,
+          1,
+          2,
+          3,
+          contract.nestedFunction));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == ((UINT32_C(1) << 1) |
+                                      (UINT32_C(1) << 2)));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(dependencies.specialWrites == 0);
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(routing.category == EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
+    REQUIRE(
+      routing.pipe0PhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I0) |
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I1)));
+  }
+}
+
 TEST_CASE("EE nested MMI tables classify every encoding")
 {
   struct NestedTableContract
@@ -1584,7 +1638,7 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   };
   const NestedTableContract contracts[] = {
     {0x08, UINT32_C(0x3000f800), 0},
-    {0x28, UINT32_C(0xf088fb01), 0},
+    {0x28, UINT32_C(0xf088fb01), UINT32_C(0x00000444)},
     {0x09, UINT32_C(0x03c088e2), UINT32_C(0x000c0000)},
     {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x000c0000)}
   };

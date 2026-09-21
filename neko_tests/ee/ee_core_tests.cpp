@@ -3151,6 +3151,54 @@ TEST_CASE("EE Wide continuation participates in lifecycle control")
   }
 }
 
+TEST_CASE("EE packed equality participates in Wide issue")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(
+    0,
+    UINT32_C(0x70000000) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11) |
+      (UINT32_C(0x02) << 6) |
+      UINT32_C(0x28));
+  system.eeBus().write32(4, UINT32_C(0x24040001));
+  core.setGeneralRegister(
+    1,
+    {
+      UINT64_C(0x1111111122222222),
+      UINT64_C(0x3333333344444444)
+    });
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0xaaaaaaaa22222222),
+      UINT64_C(0x33333333bbbbbbbb)
+    });
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.lastIssueSelection().instructionCount == 2);
+  REQUIRE(
+    core.lastIssueSelection().continuation ==
+    EEIssueContinuation::YoungerAStageOneCycle);
+  REQUIRE(
+    core.generalRegister(3).low ==
+    UINT64_C(0x00000000ffffffff));
+  REQUIRE(
+    core.generalRegister(3).high ==
+    UINT64_C(0xffffffff00000000));
+  REQUIRE(core.generalRegister(4).low == 0);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.generalRegister(4).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+}
+
 TEST_CASE("EE run control owns resume restart and PC mutation")
 {
   SECTION("Same-PC host resume preserves decoded continuation")
