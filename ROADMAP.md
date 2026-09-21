@@ -1356,7 +1356,7 @@ Primary sources:
 - [x] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
       preserving the existing primary MMI table for direct functions and
       already implemented scalar operations
-- [ ] Distinguish every defined-but-unimplemented encoding from every reserved
+- [x] Distinguish every defined-but-unimplemented encoding from every reserved
       encoding before enabling semantic execution
 - [ ] Validate each instruction's required-zero fields and all five defined
       `PMFHL` format selectors; reject unused selectors and reserved table

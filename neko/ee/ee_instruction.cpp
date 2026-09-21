@@ -1,6 +1,7 @@
 #include "ee_instruction.hpp"
 
 #include <array>
+#include <initializer_list>
 #include <stdexcept>
 
 #include "vpu_instruction.hpp"
@@ -989,7 +990,8 @@ namespace
     return table;
   }
 
-  NestedMmiDecodeTable makeNestedMmiTable()
+  NestedMmiDecodeTable makeNestedMmiTable(
+    std::initializer_list<std::uint8_t> reservedEncodings)
   {
     NestedMmiDecodeTable table = {};
     table.fill({
@@ -997,6 +999,10 @@ namespace
       EEOperation::Nop,
       0
     });
+    for (const std::uint8_t encoding : reservedEncodings)
+    {
+      table[encoding].kind = DecodeKind::Reserved;
+    }
     return table;
   }
 
@@ -1027,28 +1033,82 @@ namespace
   const NestedMmiDecodeTable &mmi0Table()
   {
     static const NestedMmiDecodeTable table =
-      makeNestedMmiTable();
+      makeNestedMmiTable({
+        0x0b,
+        0x0c,
+        0x0d,
+        0x0e,
+        0x0f,
+        0x1c,
+        0x1d
+      });
     return table;
   }
 
   const NestedMmiDecodeTable &mmi1Table()
   {
     static const NestedMmiDecodeTable table =
-      makeNestedMmiTable();
+      makeNestedMmiTable({
+        0x00,
+        0x08,
+        0x09,
+        0x0b,
+        0x0c,
+        0x0d,
+        0x0e,
+        0x0f,
+        0x13,
+        0x17,
+        0x1c,
+        0x1d,
+        0x1e,
+        0x1f
+      });
     return table;
   }
 
   const NestedMmiDecodeTable &mmi2Table()
   {
     static const NestedMmiDecodeTable table =
-      makeNestedMmiTable();
+      makeNestedMmiTable({
+        0x01,
+        0x05,
+        0x06,
+        0x07,
+        0x0b,
+        0x0f,
+        0x16,
+        0x17,
+        0x18,
+        0x19
+      });
     return table;
   }
 
   const NestedMmiDecodeTable &mmi3Table()
   {
     static const NestedMmiDecodeTable table =
-      makeNestedMmiTable();
+      makeNestedMmiTable({
+        0x01,
+        0x02,
+        0x04,
+        0x05,
+        0x06,
+        0x07,
+        0x0b,
+        0x0f,
+        0x10,
+        0x11,
+        0x14,
+        0x15,
+        0x16,
+        0x17,
+        0x18,
+        0x19,
+        0x1c,
+        0x1d,
+        0x1f
+      });
     return table;
   }
 

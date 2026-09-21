@@ -1443,6 +1443,59 @@ TEST_CASE("EE multiply divide and SA decoder tables")
   }
 }
 
+TEST_CASE("EE nested MMI tables classify every encoding")
+{
+  struct NestedTableContract
+  {
+    std::uint8_t function;
+    std::uint32_t reservedMask;
+  };
+  const NestedTableContract contracts[] = {
+    {0x08, UINT32_C(0x3000f800)},
+    {0x28, UINT32_C(0xf088fb01)},
+    {0x09, UINT32_C(0x03c088e2)},
+    {0x29, UINT32_C(0xb3f388f6)}
+  };
+  const auto requireDecodeFailure =
+    [](std::uint32_t instruction,
+       EEInstructionDecodeFailure expected)
+    {
+      try
+      {
+        static_cast<void>(
+          decodeEEInstruction(instruction));
+        FAIL("Deferred MMI encoding decoded successfully");
+      }
+      catch (const EEInstructionDecodeError &error)
+      {
+        REQUIRE(error.failure() == expected);
+      }
+    };
+
+  for (const NestedTableContract &contract : contracts)
+  {
+    for (std::uint8_t nestedFunction = 0;
+         nestedFunction < 32;
+         ++nestedFunction)
+    {
+      const bool reserved =
+        (contract.reservedMask &
+         (UINT32_C(1) << nestedFunction)) != 0;
+      requireDecodeFailure(
+        UINT32_C(0x70000000) |
+          registerInstruction(
+            contract.function,
+            1,
+            2,
+            3,
+            nestedFunction),
+        reserved
+          ? EEInstructionDecodeFailure::Reserved
+          : EEInstructionDecodeFailure::Unsupported);
+    }
+  }
+}
+
 TEST_CASE("EE branch and jump decoder tables")
 {
   struct Contract
