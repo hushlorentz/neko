@@ -1202,6 +1202,8 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executePackedCompare(
       const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executePackedAbsolute(
+      const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeRegisterCompare(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeImmediateCompare(

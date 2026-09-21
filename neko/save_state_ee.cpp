@@ -2,6 +2,19 @@
 
 #include "floating_point_ops.hpp"
 
+static_assert(
+  static_cast<std::uint8_t>(
+    EEOperation::DivideSingleCOP1) == 141,
+  "Version-25 DIV.S save-state ordinal changed.");
+static_assert(
+  static_cast<std::uint8_t>(
+    EEOperation::SquareRootSingleCOP1) == 142,
+  "Version-25 SQRT.S save-state ordinal changed.");
+static_assert(
+  static_cast<std::uint8_t>(
+    EEOperation::ReciprocalSquareRootSingleCOP1) == 143,
+  "Version-25 RSQRT.S save-state ordinal changed.");
+
 void NekoSaveStateCodec::writeEECore(
   SaveStateWriter *writer,
   const EECore &core)

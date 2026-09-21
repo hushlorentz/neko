@@ -3295,6 +3295,47 @@ TEST_CASE("EE signed packed min max participates in Wide issue")
   REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
 }
 
+TEST_CASE("EE packed absolute participates in Wide issue")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(
+    0,
+    UINT32_C(0x70000000) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11) |
+      (UINT32_C(0x01) << 6) |
+      UINT32_C(0x28));
+  system.eeBus().write32(4, UINT32_C(0x24040001));
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x800000007fffffff),
+      UINT64_C(0xffffffff00000000)
+    });
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.lastIssueSelection().instructionCount == 2);
+  REQUIRE(
+    core.lastIssueSelection().continuation ==
+    EEIssueContinuation::YoungerAStageOneCycle);
+  REQUIRE(
+    core.generalRegister(3).low ==
+    UINT64_C(0x7fffffff7fffffff));
+  REQUIRE(
+    core.generalRegister(3).high ==
+    UINT64_C(0x0000000100000000));
+  REQUIRE(core.generalRegister(4).low == 0);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.generalRegister(4).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+}
+
 TEST_CASE("EE run control owns resume restart and PC mutation")
 {
   SECTION("Same-PC host resume preserves decoded continuation")

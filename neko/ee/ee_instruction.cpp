@@ -131,6 +131,14 @@ namespace
       case EEOperation::ParallelMaximumWord:
       case EEOperation::ParallelMinimumHalfword:
       case EEOperation::ParallelMinimumWord:
+        dependencies.gprReads = source | target;
+        dependencies.gprWrites = destination;
+        break;
+      case EEOperation::ParallelAbsoluteHalfword:
+      case EEOperation::ParallelAbsoluteWord:
+        dependencies.gprReads = target;
+        dependencies.gprWrites = destination;
+        break;
       case EEOperation::SetLessThan:
       case EEOperation::SetLessThanUnsigned:
       case EEOperation::AddDoubleword:
@@ -1215,6 +1223,11 @@ namespace
         EEOperation::ParallelCompareEqualWord,
         0
       };
+      result[0x01] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAbsoluteWord,
+        REGISTER_SOURCE_MASK
+      };
       result[0x03] = {
         DecodeKind::Direct,
         EEOperation::ParallelMinimumWord,
@@ -1224,6 +1237,11 @@ namespace
         DecodeKind::Direct,
         EEOperation::ParallelCompareEqualHalfword,
         0
+      };
+      result[0x05] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAbsoluteHalfword,
+        REGISTER_SOURCE_MASK
       };
       result[0x07] = {
         DecodeKind::Direct,
@@ -2045,6 +2063,8 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
     case EEOperation::ParallelMinimumWord:
+    case EEOperation::ParallelAbsoluteHalfword:
+    case EEOperation::ParallelAbsoluteWord:
       return {
         EEInstructionCategory::WideOperate,
         PIPE_0,
@@ -2159,6 +2179,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelMinimumHalfword:
     case EEOperation::ParallelMinimumWord:
       return EEExecutionFamily::PackedCompare;
+    case EEOperation::ParallelAbsoluteHalfword:
+    case EEOperation::ParallelAbsoluteWord:
+      return EEExecutionFamily::PackedAbsolute;
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return EEExecutionFamily::RegisterCompare;

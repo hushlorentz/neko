@@ -798,6 +798,101 @@ TEST_CASE("EE signed packed min max execution")
   }
 }
 
+TEST_CASE("EE packed absolute execution")
+{
+  SECTION("Halfword lanes include signed extrema")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      2,
+      {
+        UINT64_C(0x80007fff0001ffff),
+        UINT64_C(0x0000fffe80010002)
+      });
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x05, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x7fff7fff00010001));
+    REQUIRE(
+      core.generalRegister(3).high ==
+      UINT64_C(0x000000027fff0002));
+  }
+
+  SECTION("Word lanes include signed extrema")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      2,
+      {
+        UINT64_C(0x800000007fffffff),
+        UINT64_C(0xffffffff00000000)
+      });
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x01, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x7fffffff7fffffff));
+    REQUIRE(
+      core.generalRegister(3).high ==
+      UINT64_C(0x0000000100000000));
+  }
+
+  SECTION("Target aliases and register zero remain valid")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      2,
+      {
+        UINT64_C(0x800000007fffffff),
+        UINT64_C(0xffffffff00000000)
+      });
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x01, 0, 2, 2));
+    REQUIRE(
+      core.generalRegister(2).low ==
+      UINT64_C(0x7fffffff7fffffff));
+    REQUIRE(
+      core.generalRegister(2).high ==
+      UINT64_C(0x0000000100000000));
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x01, 0, 2, 0));
+    REQUIRE(core.generalRegister(0).low == 0);
+    REQUIRE(core.generalRegister(0).high == 0);
+  }
+
+  SECTION("Repeated execution replaces all lanes")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x05, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x0001000100010001));
+    REQUIRE(
+      core.generalRegister(3).high ==
+      UINT64_C(0x0001000100010001));
+
+    core.setGeneralRegister(2, {0, 0});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x05, 0, 2, 3));
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.generalRegister(3).high == 0);
+  }
+}
+
 TEST_CASE("EE integer shift execution")
 {
   NekoSystem system;

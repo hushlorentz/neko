@@ -1393,7 +1393,7 @@ continuation state before a live consumer exists.
 - [x] Implement signed `PCGTB`, `PCGTH`, and `PCGTW` lane comparisons
 - [x] Implement signed `PMAXH`, `PMAXW`, `PMINH`, and `PMINW`, including equal
       operands and signed extrema
-- [ ] Implement `PABSH` and `PABSW`, including the documented minimum-value
+- [x] Implement `PABSH` and `PABSW`, including the documented minimum-value
       clamp to the corresponding signed maximum without an exception
 - [ ] Implement `PLZCW` over the two low 32-bit words by counting leading bits
       equal to each word's sign bit and subtracting one, preserving the

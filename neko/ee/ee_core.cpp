@@ -393,6 +393,40 @@ namespace
       "Unknown EE packed comparison mode.");
   }
 
+  std::uint64_t absoluteSignedLanes(
+    std::uint64_t target,
+    std::uint8_t laneBits)
+  {
+    if (laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE packed absolute lane width is invalid.");
+    }
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    const std::uint64_t signMask =
+      UINT64_C(1) << (laneBits - 1);
+    std::uint64_t result = 0;
+    for (std::uint8_t shift = 0;
+         shift < 64;
+         shift = static_cast<std::uint8_t>(shift + laneBits))
+    {
+      const std::uint64_t lane =
+        (target >> shift) & laneMask;
+      std::uint64_t absolute = lane;
+      if (lane == signMask)
+      {
+        absolute = signMask - 1;
+      }
+      else if ((lane & signMask) != 0)
+      {
+        absolute = (-lane) & laneMask;
+      }
+      result |= absolute << shift;
+    }
+    return result;
+  }
+
   EERegister128 quadwordFromFPRegister(
     const FPRegister &value)
   {
@@ -1834,6 +1868,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelMinimumHalfword:
     case EEOperation::ParallelMinimumWord:
       return executePackedCompare(instruction);
+    case EEOperation::ParallelAbsoluteHalfword:
+    case EEOperation::ParallelAbsoluteWord:
+      return executePackedAbsolute(instruction);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return executeRegisterCompare(instruction);
@@ -2214,6 +2251,35 @@ EEInstructionExecutionOutcome EECore::executePackedCompare(
         target.high,
         laneBits,
         mode)
+    };
+  }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedAbsolute(
+  const EEInstruction &instruction)
+{
+  std::uint8_t laneBits = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelAbsoluteHalfword:
+      laneBits = 16;
+      break;
+    case EEOperation::ParallelAbsoluteWord:
+      laneBits = 32;
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed-absolute handler received an "
+        "incompatible operation.");
+  }
+  if (instruction.destinationRegister != 0)
+  {
+    const EERegister128 target =
+      generalRegisters[instruction.targetRegister];
+    generalRegisters[instruction.destinationRegister] = {
+      absoluteSignedLanes(target.low, laneBits),
+      absoluteSignedLanes(target.high, laneBits)
     };
   }
   return EEInstructionExecutionOutcome::Completed;
