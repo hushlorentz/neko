@@ -24,6 +24,10 @@ namespace
     Special,
     Regimm,
     Mmi,
+    Mmi0,
+    Mmi1,
+    Mmi2,
+    Mmi3,
     Cop0,
     Cop1,
     Cop2
@@ -37,6 +41,7 @@ namespace
   };
 
   using DecodeTable = std::array<DecodeEntry, 64>;
+  using NestedMmiDecodeTable = std::array<DecodeEntry, 32>;
 
   bool updatesCOP1ArithmeticFlags(EEOperation operation);
 
@@ -917,6 +922,8 @@ namespace
       0x01,
       EEOperation::MultiplyAddUnsignedWord,
       REGISTER_SHIFT_MASK);
+    table[0x08].kind = DecodeKind::Mmi0;
+    table[0x09].kind = DecodeKind::Mmi2;
     direct(
       &table,
       0x10,
@@ -977,6 +984,19 @@ namespace
       0x21,
       EEOperation::MultiplyAddUnsignedWord1,
       REGISTER_SHIFT_MASK);
+    table[0x28].kind = DecodeKind::Mmi1;
+    table[0x29].kind = DecodeKind::Mmi3;
+    return table;
+  }
+
+  NestedMmiDecodeTable makeNestedMmiTable()
+  {
+    NestedMmiDecodeTable table = {};
+    table.fill({
+      DecodeKind::Unsupported,
+      EEOperation::Nop,
+      0
+    });
     return table;
   }
 
@@ -1001,6 +1021,34 @@ namespace
   const DecodeTable &mmiTable()
   {
     static const DecodeTable table = makeMmiTable();
+    return table;
+  }
+
+  const NestedMmiDecodeTable &mmi0Table()
+  {
+    static const NestedMmiDecodeTable table =
+      makeNestedMmiTable();
+    return table;
+  }
+
+  const NestedMmiDecodeTable &mmi1Table()
+  {
+    static const NestedMmiDecodeTable table =
+      makeNestedMmiTable();
+    return table;
+  }
+
+  const NestedMmiDecodeTable &mmi2Table()
+  {
+    static const NestedMmiDecodeTable table =
+      makeNestedMmiTable();
+    return table;
+  }
+
+  const NestedMmiDecodeTable &mmi3Table()
+  {
+    static const NestedMmiDecodeTable table =
+      makeNestedMmiTable();
     return table;
   }
 
@@ -2566,9 +2614,37 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
   }
   if (primary.kind == DecodeKind::Mmi)
   {
-    applyEntry(
-      mmiTable()[instruction.function],
-      &instruction);
+    const DecodeEntry &mmi =
+      mmiTable()[instruction.function];
+    if (mmi.kind == DecodeKind::Mmi0)
+    {
+      applyEntry(
+        mmi0Table()[instruction.shiftAmount],
+        &instruction);
+      return instruction;
+    }
+    if (mmi.kind == DecodeKind::Mmi1)
+    {
+      applyEntry(
+        mmi1Table()[instruction.shiftAmount],
+        &instruction);
+      return instruction;
+    }
+    if (mmi.kind == DecodeKind::Mmi2)
+    {
+      applyEntry(
+        mmi2Table()[instruction.shiftAmount],
+        &instruction);
+      return instruction;
+    }
+    if (mmi.kind == DecodeKind::Mmi3)
+    {
+      applyEntry(
+        mmi3Table()[instruction.shiftAmount],
+        &instruction);
+      return instruction;
+    }
+    applyEntry(mmi, &instruction);
     return instruction;
   }
   if (primary.kind == DecodeKind::Cop0)

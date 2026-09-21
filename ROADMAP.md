@@ -1353,7 +1353,7 @@ Primary sources:
 
 ### Nested Decode, Metadata, and Wide-Issue Foundation
 
-- [ ] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
+- [x] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
       preserving the existing primary MMI table for direct functions and
       already implemented scalar operations
 - [ ] Distinguish every defined-but-unimplemented encoding from every reserved
