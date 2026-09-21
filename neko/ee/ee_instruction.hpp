@@ -361,11 +361,26 @@ enum class EEIssuePairing : std::uint8_t
   ConcurrentWithStall
 };
 
+enum class EEIssueContinuation : std::uint8_t
+{
+  None,
+  YoungerAStageOneCycle
+};
+
+struct EEIssuePairPolicy
+{
+  EEIssuePairing pairing = EEIssuePairing::Forbidden;
+  EEIssueContinuation continuation =
+    EEIssueContinuation::None;
+};
+
 struct EEIssueSelection
 {
   std::uint8_t instructionCount = 0;
   EEInstructionPipeAssignment assignment;
   EEIssuePairing pairing = EEIssuePairing::Forbidden;
+  EEIssueContinuation continuation =
+    EEIssueContinuation::None;
 };
 
 struct EEInstruction
@@ -444,6 +459,11 @@ bool eeInstructionUsesPhysicalPipeline(
   const EEInstructionRouting &routing,
   EELogicalPipe pipe,
   EEPhysicalPipeline pipeline);
+EEIssuePairPolicy eeIssuePairPolicy(
+  EEInstructionCategory older,
+  EELogicalPipe olderPipe,
+  EEInstructionCategory younger,
+  EELogicalPipe youngerPipe);
 EEInstructionPipeAssignment assignEEInstructionPairPipes(
   EEOperation older,
   EEOperation younger);

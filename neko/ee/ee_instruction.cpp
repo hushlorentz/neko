@@ -474,28 +474,55 @@ namespace
         EEOperation::MoveHalfwordCountToShiftAmount;
   }
 
-  EEIssuePairing issuePairing(
-    EEInstructionCategory pipe0,
-    EEInstructionCategory pipe1)
+  EEIssuePairPolicy buildIssuePairPolicy(
+    EEInstructionCategory older,
+    EELogicalPipe olderPipe,
+    EEInstructionCategory younger,
+    EELogicalPipe youngerPipe)
   {
+    const EEInstructionCategory pipe0 =
+      olderPipe == EELogicalPipe::Pipe0
+        ? older
+        : younger;
+    const EEInstructionCategory pipe1 =
+      youngerPipe == EELogicalPipe::Pipe1
+        ? younger
+        : older;
     if ((pipe0 == EEInstructionCategory::Branch &&
          (pipe1 == EEInstructionCategory::ExceptionReturn ||
           pipe1 == EEInstructionCategory::Branch)))
     {
-      return EEIssuePairing::Forbidden;
+      return {
+        EEIssuePairing::Forbidden,
+        EEIssueContinuation::None
+      };
     }
-    if ((pipe0 == EEInstructionCategory::WideOperate &&
-         (pipe1 == EEInstructionCategory::LeadingZeroCount ||
-          pipe1 == EEInstructionCategory::ALU ||
-          pipe1 == EEInstructionCategory::MAC1)) ||
-        (pipe0 == EEInstructionCategory::COP1Operate &&
+    if (pipe0 == EEInstructionCategory::WideOperate &&
+        (pipe1 == EEInstructionCategory::LeadingZeroCount ||
+         pipe1 == EEInstructionCategory::ALU ||
+         pipe1 == EEInstructionCategory::MAC1))
+    {
+      return {
+        EEIssuePairing::ConcurrentWithStall,
+        older == EEInstructionCategory::WideOperate
+          ? EEIssueContinuation::YoungerAStageOneCycle
+          : EEIssueContinuation::None
+      };
+    }
+    if ((pipe0 == EEInstructionCategory::COP1Operate &&
          pipe1 == EEInstructionCategory::COP1Move) ||
         (pipe0 == EEInstructionCategory::COP2Operate &&
          pipe1 == EEInstructionCategory::COP2Move))
     {
-      return EEIssuePairing::ConcurrentWithStall;
+      return {
+        EEIssuePairing::ConcurrentWithStall,
+        EEIssueContinuation::None
+      };
     }
-    return EEIssuePairing::Concurrent;
+    return {
+      EEIssuePairing::Concurrent,
+      EEIssueContinuation::None
+    };
   }
 
   void direct(
@@ -2379,6 +2406,19 @@ const EEOperationMetadata &eeOperationMetadata(
     static_cast<std::uint8_t>(operation)];
 }
 
+EEIssuePairPolicy eeIssuePairPolicy(
+  EEInstructionCategory older,
+  EELogicalPipe olderPipe,
+  EEInstructionCategory younger,
+  EELogicalPipe youngerPipe)
+{
+  return buildIssuePairPolicy(
+    older,
+    olderPipe,
+    younger,
+    youngerPipe);
+}
+
 EEInstructionMetadata eeInstructionMetadata(
   const EEInstruction &instruction)
 {
@@ -2653,16 +2693,14 @@ EEIssueSelection selectEEIssuePair(
 
   const EEInstructionRouting youngerRouting =
     eeInstructionRouting(younger.operation);
-  const EEInstructionCategory pipe0Category =
-    selection.assignment.olderPipe == EELogicalPipe::Pipe0
-      ? olderRouting.category
-      : youngerRouting.category;
-  const EEInstructionCategory pipe1Category =
-    selection.assignment.olderPipe == EELogicalPipe::Pipe1
-      ? olderRouting.category
-      : youngerRouting.category;
-  selection.pairing =
-    issuePairing(pipe0Category, pipe1Category);
+  const EEIssuePairPolicy policy =
+    eeIssuePairPolicy(
+      olderRouting.category,
+      selection.assignment.olderPipe,
+      youngerRouting.category,
+      selection.assignment.youngerPipe);
+  selection.pairing = policy.pairing;
+  selection.continuation = policy.continuation;
   if (selection.pairing != EEIssuePairing::Forbidden)
   {
     selection.instructionCount = 2;

@@ -1159,6 +1159,9 @@ TEST_CASE("EE two-wide issue selection")
     REQUIRE(
       selection.pairing ==
       EEIssuePairing::ConcurrentWithStall);
+    REQUIRE(
+      selection.continuation ==
+      EEIssueContinuation::None);
   }
 
   SECTION("Scalar selection assigns the older instruction")
@@ -1184,6 +1187,70 @@ TEST_CASE("EE two-wide issue selection")
       selection.assignment.olderPipe ==
       EELogicalPipe::Pipe1);
   }
+}
+
+TEST_CASE("EE issue-pair continuation policy")
+{
+  const auto requirePolicy =
+    [](EEInstructionCategory older,
+       EELogicalPipe olderPipe,
+       EEInstructionCategory younger,
+       EELogicalPipe youngerPipe,
+       EEIssuePairing pairing,
+       EEIssueContinuation continuation)
+    {
+      const EEIssuePairPolicy policy =
+        eeIssuePairPolicy(
+          older,
+          olderPipe,
+          younger,
+          youngerPipe);
+      REQUIRE(policy.pairing == pairing);
+      REQUIRE(policy.continuation == continuation);
+    };
+
+  for (const EEInstructionCategory younger : {
+         EEInstructionCategory::LeadingZeroCount,
+         EEInstructionCategory::ALU,
+         EEInstructionCategory::MAC1})
+  {
+    requirePolicy(
+      EEInstructionCategory::WideOperate,
+      EELogicalPipe::Pipe0,
+      younger,
+      EELogicalPipe::Pipe1,
+      EEIssuePairing::ConcurrentWithStall,
+      EEIssueContinuation::YoungerAStageOneCycle);
+  }
+
+  requirePolicy(
+    EEInstructionCategory::ALU,
+    EELogicalPipe::Pipe1,
+    EEInstructionCategory::WideOperate,
+    EELogicalPipe::Pipe0,
+    EEIssuePairing::ConcurrentWithStall,
+    EEIssueContinuation::None);
+  requirePolicy(
+    EEInstructionCategory::COP1Operate,
+    EELogicalPipe::Pipe0,
+    EEInstructionCategory::COP1Move,
+    EELogicalPipe::Pipe1,
+    EEIssuePairing::ConcurrentWithStall,
+    EEIssueContinuation::None);
+  requirePolicy(
+    EEInstructionCategory::COP2Operate,
+    EELogicalPipe::Pipe0,
+    EEInstructionCategory::COP2Move,
+    EELogicalPipe::Pipe1,
+    EEIssuePairing::ConcurrentWithStall,
+    EEIssueContinuation::None);
+  requirePolicy(
+    EEInstructionCategory::Branch,
+    EELogicalPipe::Pipe0,
+    EEInstructionCategory::Branch,
+    EELogicalPipe::Pipe1,
+    EEIssuePairing::Forbidden,
+    EEIssueContinuation::None);
 }
 
 TEST_CASE("EE delay-slot legality is centralized")

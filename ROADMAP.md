@@ -1370,12 +1370,14 @@ quadword memory instructions retain their current routing.
 - [x] Validate each instruction's required-zero fields and all five defined
       `PMFHL` format selectors; reject unused selectors and reserved table
       cells deterministically
-- [ ] Generalize the one-cycle issue continuation needed for Table 1-3 `Y`
-      pairs so a Wide Operate may enter `R` with a younger LZC, ALU, or MAC1
-      instruction whose A-stage work stalls exactly one cycle
-- [ ] Preserve older-before-younger acceptance, dependencies, exceptions,
-      branch-delay ownership, tracing, reset, halt/resume, hashing, and
-      transactional save-state behavior across the new `Y` continuation
+- [x] Classify Table 1-3 `Y` pairs with an explicit continuation policy:
+      Wide Operate with a younger LZC, ALU, or MAC1 requires a one-cycle
+      younger A-stage continuation, while existing C1 and C2 `Y` pairs do not
+      use that front-end continuation
+- [ ] Implement the typed one-cycle `Y` continuation while preserving
+      older-before-younger acceptance, dependencies, exceptions, branch-delay
+      ownership, tracing, reset, halt/resume, hashing, and transactional
+      save-state behavior
 - [ ] Add exhaustive direct/nested decode, reserved-field, routing, physical
       resource, pairing, and metadata-completeness tests
 - [ ] Complete an independent review of nested decode and Wide Operate issue
