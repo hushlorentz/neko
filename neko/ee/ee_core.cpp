@@ -427,6 +427,22 @@ namespace
     return result;
   }
 
+  std::uint32_t leadingSignCountMinusOne(
+    std::uint32_t value)
+  {
+    const bool sign = (value & WORD_SIGN_BIT) != 0;
+    std::uint32_t count = 0;
+    for (std::int32_t bit = 31; bit >= 0; --bit)
+    {
+      if (((value >> bit) & 1) != sign)
+      {
+        break;
+      }
+      ++count;
+    }
+    return count - 1;
+  }
+
   EERegister128 quadwordFromFPRegister(
     const FPRegister &value)
   {
@@ -1871,6 +1887,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelAbsoluteHalfword:
     case EEOperation::ParallelAbsoluteWord:
       return executePackedAbsolute(instruction);
+    case EEOperation::ParallelLeadingSignCountWord:
+      return executePackedLeadingSignCount(instruction);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return executeRegisterCompare(instruction);
@@ -2282,6 +2300,24 @@ EEInstructionExecutionOutcome EECore::executePackedAbsolute(
       absoluteSignedLanes(target.high, laneBits)
     };
   }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome
+EECore::executePackedLeadingSignCount(
+  const EEInstruction &instruction)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t result =
+    leadingSignCountMinusOne(
+      static_cast<std::uint32_t>(source)) |
+    (static_cast<std::uint64_t>(
+       leadingSignCountMinusOne(
+         static_cast<std::uint32_t>(source >> 32))) << 32);
+  writeLowDoubleword(
+    instruction.destinationRegister,
+    result);
   return EEInstructionExecutionOutcome::Completed;
 }
 

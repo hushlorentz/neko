@@ -179,6 +179,7 @@ enum class EEOperation : std::uint8_t
   ParallelMinimumWord,
   ParallelAbsoluteHalfword,
   ParallelAbsoluteWord,
+  ParallelLeadingSignCountWord,
   Count
 };
 
@@ -327,6 +328,7 @@ enum class EEExecutionFamily : std::uint8_t
   IntegerBranch,
   PackedCompare,
   PackedAbsolute,
+  PackedLeadingSignCount,
   PackedLogical,
   Multiply,
   Divide

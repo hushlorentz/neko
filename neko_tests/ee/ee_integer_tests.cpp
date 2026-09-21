@@ -893,6 +893,124 @@ TEST_CASE("EE packed absolute execution")
   }
 }
 
+TEST_CASE("EE packed leading sign count execution")
+{
+  SECTION("Manual example counts both low words")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {
+        UINT64_C(0x000fff0fff0ff00f),
+        UINT64_C(0x123456789abcdef0)
+      });
+    core.setGeneralRegister(
+      3,
+      {
+        UINT64_MAX,
+        UINT64_C(0xfedcba9876543210)
+      });
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x04, 1, 0, 3, 0));
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x0000000b00000007));
+    REQUIRE(
+      core.generalRegister(3).high ==
+      UINT64_C(0xfedcba9876543210));
+  }
+
+  SECTION("Zero one and sign boundaries produce documented counts")
+  {
+    struct Contract
+    {
+      std::uint64_t source;
+      std::uint64_t expected;
+    };
+    const Contract contracts[] = {
+      {
+        UINT64_C(0xffffffff00000000),
+        UINT64_C(0x0000001f0000001f)
+      },
+      {
+        UINT64_C(0x800000007fffffff),
+        0
+      },
+      {
+        UINT64_C(0xc00000003fffffff),
+        UINT64_C(0x0000000100000001)
+      }
+    };
+    for (const Contract &contract : contracts)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setGeneralRegister(1, {contract.source, UINT64_MAX});
+      runInstruction(
+        &system,
+        UINT32_C(0x70000000) |
+          registerInstruction(0x04, 1, 0, 3, 0));
+      REQUIRE(core.generalRegister(3).low == contract.expected);
+      REQUIRE(core.generalRegister(3).high == 0);
+    }
+  }
+
+  SECTION("Source aliases and register zero remain valid")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {
+        UINT64_C(0x000fff0fff0ff00f),
+        UINT64_C(0x123456789abcdef0)
+      });
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x04, 1, 0, 1, 0));
+    REQUIRE(
+      core.generalRegister(1).low ==
+      UINT64_C(0x0000000b00000007));
+    REQUIRE(
+      core.generalRegister(1).high ==
+      UINT64_C(0x123456789abcdef0));
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x04, 1, 0, 0, 0));
+    REQUIRE(core.generalRegister(0).low == 0);
+    REQUIRE(core.generalRegister(0).high == 0);
+  }
+
+  SECTION("Repeated execution replaces the low doubleword")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {0, 0});
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x04, 1, 0, 3, 0));
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x0000001f0000001f));
+
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x800000007fffffff), 0});
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x04, 1, 0, 3, 0));
+    REQUIRE(core.generalRegister(3).low == 0);
+  }
+}
+
 TEST_CASE("EE integer shift execution")
 {
   NekoSystem system;

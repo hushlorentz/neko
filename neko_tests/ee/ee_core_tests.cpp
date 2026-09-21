@@ -3336,6 +3336,65 @@ TEST_CASE("EE packed absolute participates in Wide issue")
   REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
 }
 
+TEST_CASE("EE packed leading sign count continues after older Wide issue")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(
+    0,
+    UINT32_C(0x70000000) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11) |
+      (UINT32_C(0x12) << 6) |
+      UINT32_C(0x09));
+  system.eeBus().write32(
+    4,
+    UINT32_C(0x70000000) |
+      (UINT32_C(4) << 21) |
+      (UINT32_C(5) << 11) |
+      UINT32_C(0x04));
+  core.setGeneralRegister(
+    1,
+    {
+      UINT64_C(0xffff0000ffff0000),
+      UINT64_C(0xaaaaaaaaaaaaaaaa)
+    });
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x00ff00ff00ff00ff),
+      UINT64_C(0x5555555555555555)
+    });
+  core.setGeneralRegister(
+    4,
+    {
+      UINT64_C(0x000fff0fff0ff00f),
+      UINT64_MAX
+    });
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.lastIssueSelection().instructionCount == 2);
+  REQUIRE(
+    core.lastIssueSelection().continuation ==
+    EEIssueContinuation::YoungerAStageOneCycle);
+  REQUIRE(
+    core.generalRegister(3).low ==
+    UINT64_C(0x00ff000000ff0000));
+  REQUIRE(core.generalRegister(3).high == 0);
+  REQUIRE(core.generalRegister(5).low == 0);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.generalRegister(5).low ==
+    UINT64_C(0x0000000b00000007));
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+}
+
 TEST_CASE("EE run control owns resume restart and PC mutation")
 {
   SECTION("Same-PC host resume preserves decoded continuation")

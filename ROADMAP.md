@@ -1395,13 +1395,13 @@ continuation state before a live consumer exists.
       operands and signed extrema
 - [x] Implement `PABSH` and `PABSW`, including the documented minimum-value
       clamp to the corresponding signed maximum without an exception
-- [ ] Implement `PLZCW` over the two low 32-bit words by counting leading bits
+- [x] Implement `PLZCW` over the two low 32-bit words by counting leading bits
       equal to each word's sign bit and subtracting one, preserving the
       documented 64-bit destination behavior
-- [ ] Cover register-zero destinations, source/destination aliases, mixed lane
+- [x] Cover register-zero destinations, source/destination aliases, mixed lane
       signs, extrema, decode fields, routing, `Y` issue, traces, hashes, and
       repeated execution
-- [ ] Complete an independent review of the logical/comparison family
+- [x] Complete an independent review of the logical/comparison family
 
 ### Packed Addition, Subtraction, and Saturation
 

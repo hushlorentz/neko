@@ -139,6 +139,10 @@ namespace
         dependencies.gprReads = target;
         dependencies.gprWrites = destination;
         break;
+      case EEOperation::ParallelLeadingSignCountWord:
+        dependencies.gprReads = source;
+        dependencies.gprWrites = destination;
+        break;
       case EEOperation::SetLessThan:
       case EEOperation::SetLessThanUnsigned:
       case EEOperation::AddDoubleword:
@@ -991,9 +995,10 @@ namespace
       0x01,
       EEOperation::MultiplyAddUnsignedWord,
       REGISTER_SHIFT_MASK);
-    unsupported(
+    direct(
       &table,
       0x04,
+      EEOperation::ParallelLeadingSignCountWord,
       REGISTER_TARGET_MASK |
         REGISTER_SHIFT_MASK);
     table[0x08].kind = DecodeKind::Mmi0;
@@ -2072,6 +2077,13 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
           PHYSICAL_I0 | PHYSICAL_I1),
         0
       };
+    case EEOperation::ParallelLeadingSignCountWord:
+      return {
+        EEInstructionCategory::LeadingZeroCount,
+        PIPE_1,
+        0,
+        PHYSICAL_I1
+      };
     case EEOperation::Count:
       break;
   }
@@ -2182,6 +2194,8 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelAbsoluteHalfword:
     case EEOperation::ParallelAbsoluteWord:
       return EEExecutionFamily::PackedAbsolute;
+    case EEOperation::ParallelLeadingSignCountWord:
+      return EEExecutionFamily::PackedLeadingSignCount;
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return EEExecutionFamily::RegisterCompare;
