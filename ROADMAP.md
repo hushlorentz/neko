@@ -1353,6 +1353,12 @@ Primary sources:
 
 ### Nested Decode, Metadata, and Wide-Issue Foundation
 
+For every MMI operation enabled in the family blocks below, the enabling
+change must add its `EEOperation`, dependencies, routing, `EEExecutionFamily`,
+and continuation/dispatch metadata together and keep the exhaustive metadata
+tests green. Deferred encodings remain unsupported; do not add unclassified
+operation placeholders ahead of their semantic implementation.
+
 - [x] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
       preserving the existing primary MMI table for direct functions and
       already implemented scalar operations
@@ -1361,9 +1367,6 @@ Primary sources:
 - [x] Validate each instruction's required-zero fields and all five defined
       `PMFHL` format selectors; reject unused selectors and reserved table
       cells deterministically
-- [ ] Extend `EEOperation`, `EEExecutionFamily`, and `EEOperationMetadata`
-      incrementally so every enabled MMI operation has one deliberate routing,
-      dependency, execution, and continuation classification
 - [ ] Route Wide Operate through logical Pipe 0 with both I0 and I1 physical
       resources, while keeping `PLZCW` in the existing LZC category and the
       implemented SA and quadword-memory prerequisites in their current
