@@ -25,6 +25,7 @@ namespace
     Special,
     Regimm,
     Mmi,
+    Pmfhl,
     Mmi0,
     Mmi1,
     Mmi2,
@@ -43,6 +44,12 @@ namespace
 
   using DecodeTable = std::array<DecodeEntry, 64>;
   using NestedMmiDecodeTable = std::array<DecodeEntry, 32>;
+
+  struct FixedFieldEncoding
+  {
+    std::uint8_t encoding;
+    std::uint32_t requiredZeroMask;
+  };
 
   bool updatesCOP1ArithmeticFlags(EEOperation operation);
 
@@ -504,6 +511,18 @@ namespace
     };
   }
 
+  void unsupported(
+    DecodeTable *table,
+    std::uint8_t encoding,
+    std::uint32_t requiredZeroMask = 0)
+  {
+    (*table)[encoding] = {
+      DecodeKind::Unsupported,
+      EEOperation::Nop,
+      requiredZeroMask
+    };
+  }
+
   DecodeTable makePrimaryTable()
   {
     DecodeTable table = {};
@@ -909,7 +928,7 @@ namespace
   {
     DecodeTable table = {};
     table.fill({
-      DecodeKind::Unsupported,
+      DecodeKind::Reserved,
       EEOperation::Nop,
       0
     });
@@ -923,6 +942,11 @@ namespace
       0x01,
       EEOperation::MultiplyAddUnsignedWord,
       REGISTER_SHIFT_MASK);
+    unsupported(
+      &table,
+      0x04,
+      REGISTER_TARGET_MASK |
+        REGISTER_SHIFT_MASK);
     table[0x08].kind = DecodeKind::Mmi0;
     table[0x09].kind = DecodeKind::Mmi2;
     direct(
@@ -987,11 +1011,49 @@ namespace
       REGISTER_SHIFT_MASK);
     table[0x28].kind = DecodeKind::Mmi1;
     table[0x29].kind = DecodeKind::Mmi3;
+    table[0x30] = {
+      DecodeKind::Pmfhl,
+      EEOperation::Nop,
+      REGISTER_SOURCE_MASK |
+        REGISTER_TARGET_MASK
+    };
+    unsupported(
+      &table,
+      0x31,
+      REGISTER_TARGET_MASK |
+        REGISTER_DESTINATION_MASK |
+        REGISTER_SHIFT_MASK);
+    unsupported(
+      &table,
+      0x34,
+      REGISTER_SOURCE_MASK);
+    unsupported(
+      &table,
+      0x36,
+      REGISTER_SOURCE_MASK);
+    unsupported(
+      &table,
+      0x37,
+      REGISTER_SOURCE_MASK);
+    unsupported(
+      &table,
+      0x3c,
+      REGISTER_SOURCE_MASK);
+    unsupported(
+      &table,
+      0x3e,
+      REGISTER_SOURCE_MASK);
+    unsupported(
+      &table,
+      0x3f,
+      REGISTER_SOURCE_MASK);
     return table;
   }
 
   NestedMmiDecodeTable makeNestedMmiTable(
-    std::initializer_list<std::uint8_t> reservedEncodings)
+    std::initializer_list<std::uint8_t> reservedEncodings,
+    std::initializer_list<FixedFieldEncoding>
+      fixedFieldEncodings)
   {
     NestedMmiDecodeTable table = {};
     table.fill({
@@ -1002,6 +1064,12 @@ namespace
     for (const std::uint8_t encoding : reservedEncodings)
     {
       table[encoding].kind = DecodeKind::Reserved;
+    }
+    for (const FixedFieldEncoding &encoding :
+         fixedFieldEncodings)
+    {
+      table[encoding.encoding].requiredZeroMask =
+        encoding.requiredZeroMask;
     }
     return table;
   }
@@ -1041,6 +1109,9 @@ namespace
         0x0f,
         0x1c,
         0x1d
+      }, {
+        {0x1e, REGISTER_SOURCE_MASK},
+        {0x1f, REGISTER_SOURCE_MASK}
       });
     return table;
   }
@@ -1063,6 +1134,9 @@ namespace
         0x1d,
         0x1e,
         0x1f
+      }, {
+        {0x01, REGISTER_SOURCE_MASK},
+        {0x05, REGISTER_SOURCE_MASK}
       });
     return table;
   }
@@ -1081,6 +1155,23 @@ namespace
         0x17,
         0x18,
         0x19
+      }, {
+        {
+          0x08,
+          REGISTER_SOURCE_MASK |
+            REGISTER_TARGET_MASK
+        },
+        {
+          0x09,
+          REGISTER_SOURCE_MASK |
+            REGISTER_TARGET_MASK
+        },
+        {0x0d, REGISTER_DESTINATION_MASK},
+        {0x1a, REGISTER_SOURCE_MASK},
+        {0x1b, REGISTER_SOURCE_MASK},
+        {0x1d, REGISTER_DESTINATION_MASK},
+        {0x1e, REGISTER_SOURCE_MASK},
+        {0x1f, REGISTER_SOURCE_MASK}
       });
     return table;
   }
@@ -1108,6 +1199,21 @@ namespace
         0x1c,
         0x1d,
         0x1f
+      }, {
+        {
+          0x08,
+          REGISTER_TARGET_MASK |
+            REGISTER_DESTINATION_MASK
+        },
+        {
+          0x09,
+          REGISTER_TARGET_MASK |
+            REGISTER_DESTINATION_MASK
+        },
+        {0x0d, REGISTER_DESTINATION_MASK},
+        {0x1a, REGISTER_SOURCE_MASK},
+        {0x1b, REGISTER_SOURCE_MASK},
+        {0x1e, REGISTER_SOURCE_MASK}
       });
     return table;
   }
@@ -1145,13 +1251,13 @@ namespace
     const DecodeEntry &entry,
     EEInstruction *instruction)
   {
-    if (entry.kind != DecodeKind::Direct)
-    {
-      reject(entry.kind);
-    }
     if ((instruction->raw & entry.requiredZeroMask) != 0)
     {
       reject(DecodeKind::Reserved);
+    }
+    if (entry.kind != DecodeKind::Direct)
+    {
+      reject(entry.kind);
     }
     instruction->operation = entry.operation;
   }
@@ -2676,6 +2782,15 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
   {
     const DecodeEntry &mmi =
       mmiTable()[instruction.function];
+    if (mmi.kind == DecodeKind::Pmfhl)
+    {
+      if ((instruction.raw & mmi.requiredZeroMask) != 0 ||
+          instruction.shiftAmount > 4)
+      {
+        reject(DecodeKind::Reserved);
+      }
+      reject(DecodeKind::Unsupported);
+    }
     if (mmi.kind == DecodeKind::Mmi0)
     {
       applyEntry(

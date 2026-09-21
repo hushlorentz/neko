@@ -1358,7 +1358,7 @@ Primary sources:
       already implemented scalar operations
 - [x] Distinguish every defined-but-unimplemented encoding from every reserved
       encoding before enabling semantic execution
-- [ ] Validate each instruction's required-zero fields and all five defined
+- [x] Validate each instruction's required-zero fields and all five defined
       `PMFHL` format selectors; reject unused selectors and reserved table
       cells deterministically
 - [ ] Extend `EEOperation`, `EEExecutionFamily`, and `EEOperationMetadata`
