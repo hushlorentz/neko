@@ -1411,7 +1411,7 @@ continuation state before a live consumer exists.
       adding the high four lanes
 - [x] Implement signed-saturating `PADDSB`, `PADDSH`, `PADDSW`, `PSUBSB`,
       `PSUBSH`, and `PSUBSW`
-- [ ] Implement unsigned-saturating `PADDUB`, `PADDUH`, `PADDUW`, `PSUBUB`,
+- [x] Implement unsigned-saturating `PADDUB`, `PADDUH`, `PADDUW`, `PSUBUB`,
       `PSUBUH`, and `PSUBUW`
 - [ ] Cover every positive and negative saturation boundary, carry and borrow
       isolation, source/destination aliases, register zero, routing, pairing,

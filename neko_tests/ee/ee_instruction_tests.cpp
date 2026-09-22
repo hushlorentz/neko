@@ -660,6 +660,12 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::ParallelSubtractSignedSaturateByte:
         case EEOperation::ParallelSubtractSignedSaturateHalfword:
         case EEOperation::ParallelSubtractSignedSaturateWord:
+        case EEOperation::ParallelAddUnsignedSaturateByte:
+        case EEOperation::ParallelAddUnsignedSaturateHalfword:
+        case EEOperation::ParallelAddUnsignedSaturateWord:
+        case EEOperation::ParallelSubtractUnsignedSaturateByte:
+        case EEOperation::ParallelSubtractUnsignedSaturateHalfword:
+        case EEOperation::ParallelSubtractUnsignedSaturateWord:
           return ExpectedExecutionClassification{
             EEExecutionFamily::PackedArithmetic,
             EEExecutionDispatch::Immediate
@@ -1794,6 +1800,56 @@ TEST_CASE("EE signed saturating packed arithmetic decoder and dependencies")
   }
 }
 
+TEST_CASE("EE unsigned saturating packed arithmetic decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {0x18, EEOperation::ParallelAddUnsignedSaturateByte},
+    {0x14, EEOperation::ParallelAddUnsignedSaturateHalfword},
+    {0x10, EEOperation::ParallelAddUnsignedSaturateWord},
+    {0x19, EEOperation::ParallelSubtractUnsignedSaturateByte},
+    {0x15, EEOperation::ParallelSubtractUnsignedSaturateHalfword},
+    {0x11, EEOperation::ParallelSubtractUnsignedSaturateWord}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          0x28,
+          1,
+          2,
+          3,
+          contract.nestedFunction));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == ((UINT32_C(1) << 1) |
+                                      (UINT32_C(1) << 2)));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(dependencies.specialWrites == 0);
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(routing.category == EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
+    REQUIRE(
+      routing.pipe0PhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I0) |
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I1)));
+  }
+}
+
 TEST_CASE("EE signed packed comparison decoder and dependencies")
 {
   struct Contract
@@ -1986,7 +2042,7 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   };
   const NestedTableContract contracts[] = {
     {0x08, UINT32_C(0x3000f800), UINT32_C(0x033307ff)},
-    {0x28, UINT32_C(0xf088fb01), UINT32_C(0x000004fe)},
+    {0x28, UINT32_C(0xf088fb01), UINT32_C(0x033304fe)},
     {0x09, UINT32_C(0x03c088e2), UINT32_C(0x000c0000)},
     {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x000c0000)}
   };
