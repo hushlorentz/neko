@@ -558,6 +558,14 @@ namespace
     return result;
   }
 
+  std::uint64_t broadcastLowHalfword(std::uint64_t value)
+  {
+    std::uint64_t result = value & UINT64_C(0xffff);
+    result |= result << 16;
+    result |= result << 32;
+    return result;
+  }
+
   bool signedLaneGreater(
     std::uint64_t sourceLane,
     std::uint64_t targetLane,
@@ -2199,6 +2207,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelPackToWord:
     case EEOperation::ParallelInterleaveHalfword:
     case EEOperation::ParallelInterleaveEvenHalfword:
+    case EEOperation::ParallelCopyHalfword:
+    case EEOperation::ParallelCopyLowerDoubleword:
+    case EEOperation::ParallelCopyUpperDoubleword:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2704,6 +2715,18 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
       break;
     case EEOperation::ParallelInterleaveEvenHalfword:
       result = interleaveEvenHalfwords(source, target);
+      break;
+    case EEOperation::ParallelCopyHalfword:
+      result = {
+        broadcastLowHalfword(target.low),
+        broadcastLowHalfword(target.high)
+      };
+      break;
+    case EEOperation::ParallelCopyLowerDoubleword:
+      result = {target.low, source.low};
+      break;
+    case EEOperation::ParallelCopyUpperDoubleword:
+      result = {source.high, target.high};
       break;
     default:
       throw std::logic_error(

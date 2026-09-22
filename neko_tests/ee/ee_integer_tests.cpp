@@ -1488,6 +1488,113 @@ TEST_CASE("EE selected packed halfword interleave execution")
   }
 }
 
+TEST_CASE("EE packed copy execution")
+{
+  const EERegister128 source = {
+    UINT64_C(0x1716151413121110),
+    UINT64_C(0xf7f6f5f4f3f2f1f0)
+  };
+  const EERegister128 target = {
+    UINT64_C(0x0706050403020100),
+    UINT64_C(0xe7e6e5e4e3e2e1e0)
+  };
+
+  SECTION("PCPYH broadcasts each doubleword's low halfword")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x1b, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x0100010001000100),
+                    UINT64_C(0xe1e0e1e0e1e0e1e0)});
+  }
+
+  SECTION("PCPYLD combines both low doublewords")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x0e, 1, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{target.low, source.low});
+  }
+
+  SECTION("PCPYUD combines both high doublewords")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x0e, 1, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{source.high, target.high});
+  }
+
+  SECTION("Aliases capture operands and register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x0e, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{target.low, source.low});
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x0e, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{source.high, target.high});
+
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x1b, 0, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0x0100010001000100),
+                    UINT64_C(0xe1e0e1e0e1e0e1e0)});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x0e, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Repeated execution replaces every destination lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x1b, 0, 2, 3));
+
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x1b, 0, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

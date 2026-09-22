@@ -1431,7 +1431,7 @@ continuation state before a live consumer exists.
 
 ### Packed Copy, Exchange, and Pixel-Format Operations
 
-- [ ] Implement `PCPYH`, `PCPYLD`, and `PCPYUD`
+- [x] Implement `PCPYH`, `PCPYLD`, and `PCPYUD`
 - [ ] Implement `PEXEH`, `PEXCH`, `PEXEW`, and `PEXCW`
 - [ ] Implement `PREVH` and `PROT3W`
 - [ ] Implement the exact documented 1-5-5-5 to 8-8-8-8 `PEXT5` expansion
