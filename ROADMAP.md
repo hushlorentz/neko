@@ -1405,7 +1405,7 @@ continuation state before a live consumer exists.
 
 ### Packed Addition, Subtraction, and Saturation
 
-- [ ] Implement wrapping `PADDB`, `PADDH`, `PADDW`, `PSUBB`, `PSUBH`, and
+- [x] Implement wrapping `PADDB`, `PADDH`, `PADDW`, `PSUBB`, `PSUBH`, and
       `PSUBW` with independent modulo arithmetic in every lane
 - [ ] Implement mixed `PADSBH`, subtracting the low four halfword lanes and
       adding the high four lanes

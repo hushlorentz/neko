@@ -523,6 +523,136 @@ TEST_CASE("EE packed equality execution")
   }
 }
 
+TEST_CASE("EE wrapping packed arithmetic execution")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EERegister128 expected;
+  };
+  const EERegister128 source = {
+    UINT64_C(0xfffe7fff80000001),
+    UINT64_C(0xffffffff7fffffff)
+  };
+  const EERegister128 target = {
+    UINT64_C(0x020380010001ffff),
+    UINT64_C(0x0000000180000001)
+  };
+  const Contract contracts[] = {
+    {
+      0x08,
+      {
+        UINT64_C(0x0101ff008001ff00),
+        UINT64_C(0xffffff00ffffff00)
+      }
+    },
+    {
+      0x04,
+      {
+        UINT64_C(0x0201000080010000),
+        UINT64_C(0xffff0000ffff0000)
+      }
+    },
+    {
+      0x00,
+      {
+        UINT64_C(0x0202000080020000),
+        UINT64_C(0x0000000000000000)
+      }
+    },
+    {
+      0x09,
+      {
+        UINT64_C(0xfdfbfffe80ff0102),
+        UINT64_C(0xfffffffefffffffe)
+      }
+    },
+    {
+      0x05,
+      {
+        UINT64_C(0xfdfbfffe7fff0002),
+        UINT64_C(0xfffffffefffffffe)
+      }
+    },
+    {
+      0x01,
+      {
+        UINT64_C(0xfdfafffe7ffe0002),
+        UINT64_C(0xfffffffefffffffe)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        0x08,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3).low == contract.expected.low);
+    REQUIRE(core.generalRegister(3).high == contract.expected.high);
+  }
+
+  SECTION("Aliases register zero and repeated execution remain lane local")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x08, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1).low ==
+      UINT64_C(0x0101ff008001ff00));
+    REQUIRE(
+      core.generalRegister(1).high ==
+      UINT64_C(0xffffff00ffffff00));
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x05, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2).low ==
+      UINT64_C(0xfdfbfffe7fff0002));
+    REQUIRE(
+      core.generalRegister(2).high ==
+      UINT64_C(0xfffffffefffffffe));
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x00, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+
+    core.setGeneralRegister(1, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(2, {1, 1});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x08, 1, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0xffffffffffffff00),
+                    UINT64_C(0xffffffffffffff00)});
+
+    core.setGeneralRegister(1, {});
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x08, 1, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

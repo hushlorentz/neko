@@ -263,6 +263,43 @@ namespace
     return result;
   }
 
+  enum class PackedArithmeticMode : std::uint8_t
+  {
+    Add,
+    Subtract
+  };
+
+  std::uint64_t wrappingPackedArithmetic(
+    std::uint64_t source,
+    std::uint64_t target,
+    std::uint8_t laneBits,
+    PackedArithmeticMode mode)
+  {
+    if (laneBits != 8 && laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE wrapping packed arithmetic lane width is invalid.");
+    }
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    std::uint64_t result = 0;
+    for (std::uint8_t shift = 0;
+         shift < 64;
+         shift = static_cast<std::uint8_t>(shift + laneBits))
+    {
+      const std::uint64_t sourceLane =
+        (source >> shift) & laneMask;
+      const std::uint64_t targetLane =
+        (target >> shift) & laneMask;
+      const std::uint64_t resultLane =
+        mode == PackedArithmeticMode::Subtract
+          ? (sourceLane - targetLane) & laneMask
+          : (sourceLane + targetLane) & laneMask;
+      result |= resultLane << shift;
+    }
+    return result;
+  }
+
   bool signedLaneGreater(
     std::uint64_t sourceLane,
     std::uint64_t targetLane,
@@ -1873,6 +1910,13 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelXor:
     case EEOperation::ParallelNor:
       return executePackedLogical(instruction);
+    case EEOperation::ParallelAddByte:
+    case EEOperation::ParallelAddHalfword:
+    case EEOperation::ParallelAddWord:
+    case EEOperation::ParallelSubtractByte:
+    case EEOperation::ParallelSubtractHalfword:
+    case EEOperation::ParallelSubtractWord:
+      return executePackedArithmetic(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
@@ -2199,6 +2243,62 @@ EEInstructionExecutionOutcome EECore::executePackedLogical(
   {
     generalRegisters[instruction.destinationRegister] =
       result;
+  }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedArithmetic(
+  const EEInstruction &instruction)
+{
+  std::uint8_t laneBits = 0;
+  PackedArithmeticMode mode = PackedArithmeticMode::Add;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelAddByte:
+      laneBits = 8;
+      break;
+    case EEOperation::ParallelAddHalfword:
+      laneBits = 16;
+      break;
+    case EEOperation::ParallelAddWord:
+      laneBits = 32;
+      break;
+    case EEOperation::ParallelSubtractByte:
+      laneBits = 8;
+      mode = PackedArithmeticMode::Subtract;
+      break;
+    case EEOperation::ParallelSubtractHalfword:
+      laneBits = 16;
+      mode = PackedArithmeticMode::Subtract;
+      break;
+    case EEOperation::ParallelSubtractWord:
+      laneBits = 32;
+      mode = PackedArithmeticMode::Subtract;
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed-arithmetic handler received an "
+        "incompatible operation.");
+  }
+
+  if (instruction.destinationRegister != 0)
+  {
+    const EERegister128 source =
+      generalRegisters[instruction.sourceRegister];
+    const EERegister128 target =
+      generalRegisters[instruction.targetRegister];
+    generalRegisters[instruction.destinationRegister] = {
+      wrappingPackedArithmetic(
+        source.low,
+        target.low,
+        laneBits,
+        mode),
+      wrappingPackedArithmetic(
+        source.high,
+        target.high,
+        laneBits,
+        mode)
+    };
   }
   return EEInstructionExecutionOutcome::Completed;
 }

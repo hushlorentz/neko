@@ -127,6 +127,12 @@ namespace
       case EEOperation::ParallelCompareGreaterThanByte:
       case EEOperation::ParallelCompareGreaterThanHalfword:
       case EEOperation::ParallelCompareGreaterThanWord:
+      case EEOperation::ParallelAddByte:
+      case EEOperation::ParallelAddHalfword:
+      case EEOperation::ParallelAddWord:
+      case EEOperation::ParallelSubtractByte:
+      case EEOperation::ParallelSubtractHalfword:
+      case EEOperation::ParallelSubtractWord:
       case EEOperation::ParallelMaximumHalfword:
       case EEOperation::ParallelMaximumWord:
       case EEOperation::ParallelMinimumHalfword:
@@ -1169,6 +1175,16 @@ namespace
         {0x1e, REGISTER_SOURCE_MASK},
         {0x1f, REGISTER_SOURCE_MASK}
       });
+      result[0x00] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAddWord,
+        0
+      };
+      result[0x01] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelSubtractWord,
+        0
+      };
       result[0x02] = {
         DecodeKind::Direct,
         EEOperation::ParallelCompareGreaterThanWord,
@@ -1179,6 +1195,16 @@ namespace
         EEOperation::ParallelMaximumWord,
         0
       };
+      result[0x04] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAddHalfword,
+        0
+      };
+      result[0x05] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelSubtractHalfword,
+        0
+      };
       result[0x06] = {
         DecodeKind::Direct,
         EEOperation::ParallelCompareGreaterThanHalfword,
@@ -1187,6 +1213,16 @@ namespace
       result[0x07] = {
         DecodeKind::Direct,
         EEOperation::ParallelMaximumHalfword,
+        0
+      };
+      result[0x08] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAddByte,
+        0
+      };
+      result[0x09] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelSubtractByte,
         0
       };
       result[0x0a] = {
@@ -2064,6 +2100,12 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelCompareGreaterThanByte:
     case EEOperation::ParallelCompareGreaterThanHalfword:
     case EEOperation::ParallelCompareGreaterThanWord:
+    case EEOperation::ParallelAddByte:
+    case EEOperation::ParallelAddHalfword:
+    case EEOperation::ParallelAddWord:
+    case EEOperation::ParallelSubtractByte:
+    case EEOperation::ParallelSubtractHalfword:
+    case EEOperation::ParallelSubtractWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2180,6 +2222,13 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelXor:
     case EEOperation::ParallelNor:
       return EEExecutionFamily::PackedLogical;
+    case EEOperation::ParallelAddByte:
+    case EEOperation::ParallelAddHalfword:
+    case EEOperation::ParallelAddWord:
+    case EEOperation::ParallelSubtractByte:
+    case EEOperation::ParallelSubtractHalfword:
+    case EEOperation::ParallelSubtractWord:
+      return EEExecutionFamily::PackedArithmetic;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
