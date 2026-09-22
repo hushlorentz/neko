@@ -2712,6 +2712,66 @@ TEST_CASE("EE packed arithmetic traces and hashes are deterministic")
   REQUIRE(events[1].value0 == first.eeCore().stateHash());
 }
 
+TEST_CASE("EE packed rearrangement traces and hashes are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      system->eeBus().write32(
+        0,
+        nestedMmiInstruction(0x09, 0x0a, 1, 2, 3));
+      system->eeCore().setGeneralRegister(
+        1,
+        {
+          UINT64_C(0xa003a002a001a000),
+          UINT64_C(0xa007a006a005a004)
+        });
+      system->eeCore().setGeneralRegister(
+        2,
+        {
+          UINT64_C(0xb003b002b001b000),
+          UINT64_C(0xb007b006b005b004)
+        });
+      system->eeCore().startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+  const std::uint64_t initialHash =
+    first.eeCore().stateHash();
+
+  first.clockMasterCycle();
+  second.clockMasterCycle();
+
+  REQUIRE(
+    first.eeCore().generalRegister(3) ==
+    EERegister128{UINT64_C(0xa005b001a004b000),
+                  UINT64_C(0xa007b003a006b002)});
+  REQUIRE(first.eeCore().stateHash() != initialHash);
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+  REQUIRE(first.traceHash() == second.traceHash());
+
+  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  REQUIRE(events.size() == 2);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(
+    events[0].value1 ==
+    nestedMmiInstruction(0x09, 0x0a, 1, 2, 3));
+  REQUIRE(
+    events[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::ParallelInterleaveHalfword));
+  REQUIRE(events[1].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[1].value0 == first.eeCore().stateHash());
+}
+
 TEST_CASE("Older COP1 memory work does not partially enter an issue group")
 {
   NekoSystem system;

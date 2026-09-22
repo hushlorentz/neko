@@ -3282,6 +3282,52 @@ TEST_CASE("EE saturating packed arithmetic participates in Wide issue")
   REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
 }
 
+TEST_CASE("EE packed rearrangement participates in Wide issue")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(
+    0,
+    UINT32_C(0x70000000) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11) |
+      (UINT32_C(0x0a) << 6) |
+      UINT32_C(0x29));
+  system.eeBus().write32(4, UINT32_C(0x24040001));
+  core.setGeneralRegister(
+    1,
+    {
+      UINT64_C(0xa003a002a001a000),
+      UINT64_C(0xa007a006a005a004)
+    });
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0xb003b002b001b000),
+      UINT64_C(0xb007b006b005b004)
+    });
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.lastIssueSelection().instructionCount == 2);
+  REQUIRE(
+    core.lastIssueSelection().continuation ==
+    EEIssueContinuation::YoungerAStageOneCycle);
+  REQUIRE(
+    core.generalRegister(3) ==
+    EERegister128{UINT64_C(0xa002b002a000b000),
+                  UINT64_C(0xa006b006a004b004)});
+  REQUIRE(core.generalRegister(4).low == 0);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.generalRegister(4).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+}
+
 TEST_CASE("EE signed packed comparison participates in Wide issue")
 {
   NekoSystem system;

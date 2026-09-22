@@ -1425,7 +1425,7 @@ continuation state before a live consumer exists.
 - [x] Implement truncating pack `PPACB`, `PPACH`, and `PPACW`
 - [x] Implement `PINTH` and `PINTEH` with the manual's exact source-lane
       ordering
-- [ ] Cover lane-order sentinels, source/destination aliases, register zero,
+- [x] Cover lane-order sentinels, source/destination aliases, register zero,
       decode fields, routing, pairing, traces, hashes, and repeated execution
 - [ ] Complete an independent review of the interleave/pack family
 
