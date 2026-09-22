@@ -479,6 +479,54 @@ namespace
     return result;
   }
 
+  EERegister128 packPacked(
+    const EERegister128 &source,
+    const EERegister128 &target,
+    std::uint8_t laneBits)
+  {
+    if (laneBits != 8 && laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE packed pack lane width is invalid.");
+    }
+    const std::uint8_t inputLaneBits =
+      static_cast<std::uint8_t>(laneBits * 2);
+    const std::uint8_t inputLaneCount =
+      static_cast<std::uint8_t>(128 / inputLaneBits);
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    const EERegister128 inputs[] = {target, source};
+    EERegister128 result;
+    for (std::uint8_t input = 0; input < 2; ++input)
+    {
+      for (std::uint8_t lane = 0;
+           lane < inputLaneCount;
+           ++lane)
+      {
+        const std::uint8_t inputShift =
+          static_cast<std::uint8_t>(lane * inputLaneBits);
+        const std::uint64_t inputHalf =
+          inputShift < 64
+            ? inputs[input].low
+            : inputs[input].high;
+        const std::uint64_t value =
+          (inputHalf >> (inputShift % 64)) & laneMask;
+        const std::uint8_t outputShift =
+          static_cast<std::uint8_t>(
+            (input * inputLaneCount + lane) * laneBits);
+        if (outputShift < 64)
+        {
+          result.low |= value << outputShift;
+        }
+        else
+        {
+          result.high |= value << (outputShift - 64);
+        }
+      }
+    }
+    return result;
+  }
+
   bool signedLaneGreater(
     std::uint64_t sourceLane,
     std::uint64_t targetLane,
@@ -2115,6 +2163,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelExtendUpperByte:
     case EEOperation::ParallelExtendUpperHalfword:
     case EEOperation::ParallelExtendUpperWord:
+    case EEOperation::ParallelPackToByte:
+    case EEOperation::ParallelPackToHalfword:
+    case EEOperation::ParallelPackToWord:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2602,6 +2653,15 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
       laneBits = 32;
       upper = true;
       break;
+    case EEOperation::ParallelPackToByte:
+      laneBits = 8;
+      break;
+    case EEOperation::ParallelPackToHalfword:
+      laneBits = 16;
+      break;
+    case EEOperation::ParallelPackToWord:
+      laneBits = 32;
+      break;
     default:
       throw std::logic_error(
         "EE packed-rearrange handler received an "
@@ -2614,11 +2674,18 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
       generalRegisters[instruction.sourceRegister];
     const EERegister128 target =
       generalRegisters[instruction.targetRegister];
+    const bool pack =
+      instruction.operation == EEOperation::ParallelPackToByte ||
+      instruction.operation ==
+        EEOperation::ParallelPackToHalfword ||
+      instruction.operation == EEOperation::ParallelPackToWord;
     generalRegisters[instruction.destinationRegister] =
-      interleavePacked(
-        upper ? source.high : source.low,
-        upper ? target.high : target.low,
-        laneBits);
+      pack
+        ? packPacked(source, target, laneBits)
+        : interleavePacked(
+            upper ? source.high : source.low,
+            upper ? target.high : target.low,
+            laneBits);
   }
   return EEInstructionExecutionOutcome::Completed;
 }

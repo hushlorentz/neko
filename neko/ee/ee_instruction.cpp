@@ -152,6 +152,9 @@ namespace
       case EEOperation::ParallelExtendUpperByte:
       case EEOperation::ParallelExtendUpperHalfword:
       case EEOperation::ParallelExtendUpperWord:
+      case EEOperation::ParallelPackToByte:
+      case EEOperation::ParallelPackToHalfword:
+      case EEOperation::ParallelPackToWord:
       case EEOperation::ParallelMaximumHalfword:
       case EEOperation::ParallelMaximumWord:
       case EEOperation::ParallelMinimumHalfword:
@@ -1284,14 +1287,29 @@ namespace
         EEOperation::ParallelExtendLowerWord,
         0
       };
+      result[0x13] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelPackToWord,
+        0
+      };
       result[0x16] = {
         DecodeKind::Direct,
         EEOperation::ParallelExtendLowerHalfword,
         0
       };
+      result[0x17] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelPackToHalfword,
+        0
+      };
       result[0x1a] = {
         DecodeKind::Direct,
         EEOperation::ParallelExtendLowerByte,
+        0
+      };
+      result[0x1b] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelPackToByte,
         0
       };
       return result;
@@ -2239,6 +2257,9 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelExtendUpperByte:
     case EEOperation::ParallelExtendUpperHalfword:
     case EEOperation::ParallelExtendUpperWord:
+    case EEOperation::ParallelPackToByte:
+    case EEOperation::ParallelPackToHalfword:
+    case EEOperation::ParallelPackToWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2381,6 +2402,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelExtendUpperByte:
     case EEOperation::ParallelExtendUpperHalfword:
     case EEOperation::ParallelExtendUpperWord:
+    case EEOperation::ParallelPackToByte:
+    case EEOperation::ParallelPackToHalfword:
+    case EEOperation::ParallelPackToWord:
       return EEExecutionFamily::PackedRearrange;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:

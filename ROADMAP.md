@@ -1422,7 +1422,7 @@ continuation state before a live consumer exists.
 
 - [x] Implement lower interleave `PEXTLB`, `PEXTLH`, and `PEXTLW`
 - [x] Implement upper interleave `PEXTUB`, `PEXTUH`, and `PEXTUW`
-- [ ] Implement truncating pack `PPACB`, `PPACH`, and `PPACW`
+- [x] Implement truncating pack `PPACB`, `PPACH`, and `PPACW`
 - [ ] Implement `PINTH` and `PINTEH` with the manual's exact source-lane
       ordering
 - [ ] Cover lane-order sentinels, source/destination aliases, register zero,
