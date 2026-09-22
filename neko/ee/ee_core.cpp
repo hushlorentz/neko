@@ -437,7 +437,7 @@ namespace
       "Unknown EE packed arithmetic behavior.");
   }
 
-  EERegister128 interleavePackedLower(
+  EERegister128 interleavePacked(
     std::uint64_t source,
     std::uint64_t target,
     std::uint8_t laneBits)
@@ -445,7 +445,7 @@ namespace
     if (laneBits != 8 && laneBits != 16 && laneBits != 32)
     {
       throw std::invalid_argument(
-        "EE lower packed interleave lane width is invalid.");
+        "EE packed interleave lane width is invalid.");
     }
     const std::uint64_t laneMask =
       (UINT64_C(1) << laneBits) - 1;
@@ -2112,6 +2112,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelExtendLowerByte:
     case EEOperation::ParallelExtendLowerHalfword:
     case EEOperation::ParallelExtendLowerWord:
+    case EEOperation::ParallelExtendUpperByte:
+    case EEOperation::ParallelExtendUpperHalfword:
+    case EEOperation::ParallelExtendUpperWord:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2575,6 +2578,7 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
   const EEInstruction &instruction)
 {
   std::uint8_t laneBits = 0;
+  bool upper = false;
   switch (instruction.operation)
   {
     case EEOperation::ParallelExtendLowerByte:
@@ -2586,6 +2590,18 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
     case EEOperation::ParallelExtendLowerWord:
       laneBits = 32;
       break;
+    case EEOperation::ParallelExtendUpperByte:
+      laneBits = 8;
+      upper = true;
+      break;
+    case EEOperation::ParallelExtendUpperHalfword:
+      laneBits = 16;
+      upper = true;
+      break;
+    case EEOperation::ParallelExtendUpperWord:
+      laneBits = 32;
+      upper = true;
+      break;
     default:
       throw std::logic_error(
         "EE packed-rearrange handler received an "
@@ -2594,10 +2610,14 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
 
   if (instruction.destinationRegister != 0)
   {
+    const EERegister128 source =
+      generalRegisters[instruction.sourceRegister];
+    const EERegister128 target =
+      generalRegisters[instruction.targetRegister];
     generalRegisters[instruction.destinationRegister] =
-      interleavePackedLower(
-        generalRegisters[instruction.sourceRegister].low,
-        generalRegisters[instruction.targetRegister].low,
+      interleavePacked(
+        upper ? source.high : source.low,
+        upper ? target.high : target.low,
         laneBits);
   }
   return EEInstructionExecutionOutcome::Completed;

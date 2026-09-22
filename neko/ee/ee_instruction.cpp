@@ -149,6 +149,9 @@ namespace
       case EEOperation::ParallelExtendLowerByte:
       case EEOperation::ParallelExtendLowerHalfword:
       case EEOperation::ParallelExtendLowerWord:
+      case EEOperation::ParallelExtendUpperByte:
+      case EEOperation::ParallelExtendUpperHalfword:
+      case EEOperation::ParallelExtendUpperWord:
       case EEOperation::ParallelMaximumHalfword:
       case EEOperation::ParallelMaximumWord:
       case EEOperation::ParallelMinimumHalfword:
@@ -1390,6 +1393,21 @@ namespace
         EEOperation::ParallelSubtractUnsignedSaturateByte,
         0
       };
+      result[0x12] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExtendUpperWord,
+        0
+      };
+      result[0x16] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExtendUpperHalfword,
+        0
+      };
+      result[0x1a] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExtendUpperByte,
+        0
+      };
       return result;
     }();
     return table;
@@ -2218,6 +2236,9 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelExtendLowerByte:
     case EEOperation::ParallelExtendLowerHalfword:
     case EEOperation::ParallelExtendLowerWord:
+    case EEOperation::ParallelExtendUpperByte:
+    case EEOperation::ParallelExtendUpperHalfword:
+    case EEOperation::ParallelExtendUpperWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2357,6 +2378,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelExtendLowerByte:
     case EEOperation::ParallelExtendLowerHalfword:
     case EEOperation::ParallelExtendLowerWord:
+    case EEOperation::ParallelExtendUpperByte:
+    case EEOperation::ParallelExtendUpperHalfword:
+    case EEOperation::ParallelExtendUpperWord:
       return EEExecutionFamily::PackedRearrange;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:

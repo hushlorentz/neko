@@ -1198,6 +1198,93 @@ TEST_CASE("EE lower packed interleave execution")
   }
 }
 
+TEST_CASE("EE upper packed interleave execution")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EERegister128 expected;
+  };
+  const EERegister128 source = {
+    UINT64_C(0x1716151413121110),
+    UINT64_C(0xf7f6f5f4f3f2f1f0)
+  };
+  const EERegister128 target = {
+    UINT64_C(0x0706050403020100),
+    UINT64_C(0xe7e6e5e4e3e2e1e0)
+  };
+  const Contract contracts[] = {
+    {
+      0x1a,
+      {
+        UINT64_C(0xf3e3f2e2f1e1f0e0),
+        UINT64_C(0xf7e7f6e6f5e5f4e4)
+      }
+    },
+    {
+      0x16,
+      {
+        UINT64_C(0xf3f2e3e2f1f0e1e0),
+        UINT64_C(0xf7f6e7e6f5f4e5e4)
+      }
+    },
+    {
+      0x12,
+      {
+        UINT64_C(0xf3f2f1f0e3e2e1e0),
+        UINT64_C(0xf7f6f5f4e7e6e5e4)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        0x28,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3) == contract.expected);
+  }
+
+  SECTION("Aliases capture high operands and register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1a, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{UINT64_C(0xf3e3f2e2f1e1f0e0),
+                    UINT64_C(0xf7e7f6e6f5e5f4e4)});
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x16, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0xf3f2e3e2f1f0e1e0),
+                    UINT64_C(0xf7f6e7e6f5f4e5e4)});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x12, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract
