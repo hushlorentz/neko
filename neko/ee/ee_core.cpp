@@ -566,28 +566,44 @@ namespace
     return result;
   }
 
-  enum class PackedExchangeMode : std::uint8_t
+  enum class PackedPermutationMode : std::uint8_t
   {
     Even,
-    Center
+    Center,
+    Reverse,
+    RotateThree
   };
 
-  EERegister128 exchangePacked(
+  EERegister128 permutePacked(
     const EERegister128 &value,
     std::uint8_t laneBits,
-    PackedExchangeMode mode)
+    PackedPermutationMode mode)
   {
     if (laneBits != 16 && laneBits != 32)
     {
       throw std::invalid_argument(
-        "EE packed exchange lane width is invalid.");
+        "EE packed permutation lane width is invalid.");
     }
     const std::uint8_t evenOrder[] = {2, 1, 0, 3};
     const std::uint8_t centerOrder[] = {0, 2, 1, 3};
-    const std::uint8_t *order =
-      mode == PackedExchangeMode::Even
-        ? evenOrder
-        : centerOrder;
+    const std::uint8_t reverseOrder[] = {3, 2, 1, 0};
+    const std::uint8_t rotateThreeOrder[] = {1, 2, 0, 3};
+    const std::uint8_t *order = nullptr;
+    switch (mode)
+    {
+      case PackedPermutationMode::Even:
+        order = evenOrder;
+        break;
+      case PackedPermutationMode::Center:
+        order = centerOrder;
+        break;
+      case PackedPermutationMode::Reverse:
+        order = reverseOrder;
+        break;
+      case PackedPermutationMode::RotateThree:
+        order = rotateThreeOrder;
+        break;
+    }
     const std::uint64_t laneMask =
       (UINT64_C(1) << laneBits) - 1;
     const std::uint8_t laneCount =
@@ -2268,6 +2284,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelExchangeCenterHalfword:
     case EEOperation::ParallelExchangeEvenWord:
     case EEOperation::ParallelExchangeCenterWord:
+    case EEOperation::ParallelReverseHalfword:
+    case EEOperation::ParallelRotateThreeWords:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2788,19 +2806,30 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
       break;
     case EEOperation::ParallelExchangeEvenHalfword:
       result =
-        exchangePacked(target, 16, PackedExchangeMode::Even);
+        permutePacked(target, 16, PackedPermutationMode::Even);
       break;
     case EEOperation::ParallelExchangeCenterHalfword:
       result =
-        exchangePacked(target, 16, PackedExchangeMode::Center);
+        permutePacked(target, 16, PackedPermutationMode::Center);
       break;
     case EEOperation::ParallelExchangeEvenWord:
       result =
-        exchangePacked(target, 32, PackedExchangeMode::Even);
+        permutePacked(target, 32, PackedPermutationMode::Even);
       break;
     case EEOperation::ParallelExchangeCenterWord:
       result =
-        exchangePacked(target, 32, PackedExchangeMode::Center);
+        permutePacked(target, 32, PackedPermutationMode::Center);
+      break;
+    case EEOperation::ParallelReverseHalfword:
+      result =
+        permutePacked(target, 16, PackedPermutationMode::Reverse);
+      break;
+    case EEOperation::ParallelRotateThreeWords:
+      result =
+        permutePacked(
+          target,
+          32,
+          PackedPermutationMode::RotateThree);
       break;
     default:
       throw std::logic_error(

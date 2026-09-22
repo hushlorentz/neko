@@ -1700,6 +1700,83 @@ TEST_CASE("EE packed exchange execution")
   }
 }
 
+TEST_CASE("EE packed reverse and rotate execution")
+{
+  const EERegister128 target = {
+    UINT64_C(0xa003a002a001a000),
+    UINT64_C(0xa007a006a005a004)
+  };
+
+  SECTION("PREVH reverses halfwords within each doubleword")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x1b, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0xa000a001a002a003),
+                    UINT64_C(0xa004a005a006a007)});
+  }
+
+  SECTION("PROT3W rotates only the low three words")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x1f, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0xa005a004a003a002),
+                    UINT64_C(0xa007a006a001a000)});
+  }
+
+  SECTION("Target alias captures every source lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x1f, 0, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0xa005a004a003a002),
+                    UINT64_C(0xa007a006a001a000)});
+  }
+
+  SECTION("Register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x1b, 0, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Repeated execution replaces every destination lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x1b, 0, 2, 3));
+
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x1b, 0, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

@@ -171,6 +171,8 @@ namespace
       case EEOperation::ParallelExchangeCenterHalfword:
       case EEOperation::ParallelExchangeEvenWord:
       case EEOperation::ParallelExchangeCenterWord:
+      case EEOperation::ParallelReverseHalfword:
+      case EEOperation::ParallelRotateThreeWords:
       case EEOperation::ParallelAbsoluteHalfword:
       case EEOperation::ParallelAbsoluteWord:
         dependencies.gprReads = target;
@@ -1504,6 +1506,16 @@ namespace
         EEOperation::ParallelExchangeEvenWord,
         REGISTER_SOURCE_MASK
       };
+      result[0x1b] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelReverseHalfword,
+        REGISTER_SOURCE_MASK
+      };
+      result[0x1f] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelRotateThreeWords,
+        REGISTER_SOURCE_MASK
+      };
       return result;
     }();
     return table;
@@ -2323,6 +2335,8 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelExchangeCenterHalfword:
     case EEOperation::ParallelExchangeEvenWord:
     case EEOperation::ParallelExchangeCenterWord:
+    case EEOperation::ParallelReverseHalfword:
+    case EEOperation::ParallelRotateThreeWords:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2477,6 +2491,8 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelExchangeCenterHalfword:
     case EEOperation::ParallelExchangeEvenWord:
     case EEOperation::ParallelExchangeCenterWord:
+    case EEOperation::ParallelReverseHalfword:
+    case EEOperation::ParallelRotateThreeWords:
       return EEExecutionFamily::PackedRearrange;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
