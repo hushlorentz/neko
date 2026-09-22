@@ -642,6 +642,13 @@ namespace
     Pack
   };
 
+  enum class PackedShiftMode : std::uint8_t
+  {
+    LeftLogical,
+    RightLogical,
+    RightArithmetic
+  };
+
   EERegister128 convertFiveBitPixels(
     const EERegister128 &value,
     PackedPixelFormatMode mode)
@@ -974,6 +981,26 @@ namespace
     if ((value & UINT32_C(0x80000000)) != 0)
     {
       result |= UINT32_MAX << (32 - amount);
+    }
+    return result;
+  }
+
+  std::uint16_t arithmeticShiftRight16(
+    std::uint16_t value,
+    std::uint8_t amount)
+  {
+    if (amount == 0)
+    {
+      return value;
+    }
+    std::uint16_t result =
+      static_cast<std::uint16_t>(value >> amount);
+    if ((value & UINT16_C(0x8000)) != 0)
+    {
+      result = static_cast<std::uint16_t>(
+        result |
+        static_cast<std::uint16_t>(
+          UINT16_MAX << (16 - amount)));
     }
     return result;
   }
@@ -2332,6 +2359,10 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelExtendFiveBit:
     case EEOperation::ParallelPackFiveBit:
       return executePackedRearrange(instruction);
+    case EEOperation::ParallelShiftLeftLogicalHalfword:
+    case EEOperation::ParallelShiftRightLogicalHalfword:
+    case EEOperation::ParallelShiftRightArithmeticHalfword:
+      return executePackedShift(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
@@ -2894,6 +2925,71 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
         "incompatible operation.");
   }
   generalRegisters[instruction.destinationRegister] = result;
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedShift(
+  const EEInstruction &instruction)
+{
+  PackedShiftMode mode = PackedShiftMode::LeftLogical;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelShiftLeftLogicalHalfword:
+      break;
+    case EEOperation::ParallelShiftRightLogicalHalfword:
+      mode = PackedShiftMode::RightLogical;
+      break;
+    case EEOperation::ParallelShiftRightArithmeticHalfword:
+      mode = PackedShiftMode::RightArithmetic;
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed-shift handler received an "
+        "incompatible operation.");
+  }
+
+  if (instruction.destinationRegister != 0)
+  {
+    const EERegister128 target =
+      generalRegisters[instruction.targetRegister];
+    const auto shiftHalf =
+      [mode, &instruction](std::uint64_t value)
+      {
+        std::uint64_t result = 0;
+        for (std::uint8_t shift = 0;
+             shift < 64;
+             shift = static_cast<std::uint8_t>(shift + 16))
+        {
+          const std::uint16_t lane =
+            static_cast<std::uint16_t>(value >> shift);
+          std::uint16_t shifted = 0;
+          switch (mode)
+          {
+            case PackedShiftMode::LeftLogical:
+              shifted = static_cast<std::uint16_t>(
+                static_cast<std::uint32_t>(lane) <<
+                instruction.shiftAmount);
+              break;
+            case PackedShiftMode::RightLogical:
+              shifted = static_cast<std::uint16_t>(
+                lane >> instruction.shiftAmount);
+              break;
+            case PackedShiftMode::RightArithmetic:
+              shifted = arithmeticShiftRight16(
+                lane,
+                instruction.shiftAmount);
+              break;
+          }
+          result |=
+            static_cast<std::uint64_t>(shifted) << shift;
+        }
+        return result;
+      };
+    generalRegisters[instruction.destinationRegister] = {
+      shiftHalf(target.low),
+      shiftHalf(target.high)
+    };
+  }
   return EEInstructionExecutionOutcome::Completed;
 }
 

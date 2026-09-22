@@ -12,6 +12,8 @@ namespace
     UINT32_C(0x03e00000);
   constexpr std::uint32_t REGISTER_SHIFT_MASK =
     UINT32_C(0x000007c0);
+  constexpr std::uint32_t REGISTER_SHIFT_HIGH_MASK =
+    UINT32_C(0x00000400);
   constexpr std::uint32_t REGISTER_TARGET_MASK =
     UINT32_C(0x001f0000);
   constexpr std::uint32_t REGISTER_DESTINATION_MASK =
@@ -175,6 +177,9 @@ namespace
       case EEOperation::ParallelRotateThreeWords:
       case EEOperation::ParallelExtendFiveBit:
       case EEOperation::ParallelPackFiveBit:
+      case EEOperation::ParallelShiftLeftLogicalHalfword:
+      case EEOperation::ParallelShiftRightLogicalHalfword:
+      case EEOperation::ParallelShiftRightArithmeticHalfword:
       case EEOperation::ParallelAbsoluteHalfword:
       case EEOperation::ParallelAbsoluteWord:
         dependencies.gprReads = target;
@@ -1118,18 +1123,24 @@ namespace
       REGISTER_TARGET_MASK |
         REGISTER_DESTINATION_MASK |
         REGISTER_SHIFT_MASK);
-    unsupported(
+    direct(
       &table,
       0x34,
-      REGISTER_SOURCE_MASK);
-    unsupported(
+      EEOperation::ParallelShiftLeftLogicalHalfword,
+      REGISTER_SOURCE_MASK |
+        REGISTER_SHIFT_HIGH_MASK);
+    direct(
       &table,
       0x36,
-      REGISTER_SOURCE_MASK);
-    unsupported(
+      EEOperation::ParallelShiftRightLogicalHalfword,
+      REGISTER_SOURCE_MASK |
+        REGISTER_SHIFT_HIGH_MASK);
+    direct(
       &table,
       0x37,
-      REGISTER_SOURCE_MASK);
+      EEOperation::ParallelShiftRightArithmeticHalfword,
+      REGISTER_SOURCE_MASK |
+        REGISTER_SHIFT_HIGH_MASK);
     unsupported(
       &table,
       0x3c,
@@ -2351,6 +2362,9 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelRotateThreeWords:
     case EEOperation::ParallelExtendFiveBit:
     case EEOperation::ParallelPackFiveBit:
+    case EEOperation::ParallelShiftLeftLogicalHalfword:
+    case EEOperation::ParallelShiftRightLogicalHalfword:
+    case EEOperation::ParallelShiftRightArithmeticHalfword:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2510,6 +2524,10 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelExtendFiveBit:
     case EEOperation::ParallelPackFiveBit:
       return EEExecutionFamily::PackedRearrange;
+    case EEOperation::ParallelShiftLeftLogicalHalfword:
+    case EEOperation::ParallelShiftRightLogicalHalfword:
+    case EEOperation::ParallelShiftRightArithmeticHalfword:
+      return EEExecutionFamily::PackedShift;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:

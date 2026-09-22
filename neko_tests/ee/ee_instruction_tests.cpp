@@ -696,6 +696,13 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::PackedRearrange,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::ParallelShiftLeftLogicalHalfword:
+        case EEOperation::ParallelShiftRightLogicalHalfword:
+        case EEOperation::ParallelShiftRightArithmeticHalfword:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::PackedShift,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::ParallelCompareEqualByte:
         case EEOperation::ParallelCompareEqualHalfword:
         case EEOperation::ParallelCompareEqualWord:
@@ -2274,6 +2281,72 @@ TEST_CASE("EE packed pixel format decoder and dependencies")
   }
 }
 
+TEST_CASE("EE immediate packed halfword shift decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t function;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {0x34, EEOperation::ParallelShiftLeftLogicalHalfword},
+    {0x36, EEOperation::ParallelShiftRightLogicalHalfword},
+    {0x37, EEOperation::ParallelShiftRightArithmeticHalfword}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          contract.function,
+          0,
+          2,
+          3,
+          15));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == (UINT32_C(1) << 2));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(dependencies.specialWrites == 0);
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(routing.category == EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
+    REQUIRE(
+      routing.pipe0PhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I0) |
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I1)));
+
+    try
+    {
+      static_cast<void>(
+        decodeEEInstruction(
+          UINT32_C(0x70000000) |
+          registerInstruction(
+            contract.function,
+            0,
+            2,
+            3,
+            16)));
+      FAIL("Reserved packed halfword shift decoded");
+    }
+    catch (const EEInstructionDecodeError &error)
+    {
+      REQUIRE(
+        error.failure() ==
+        EEInstructionDecodeFailure::Reserved);
+    }
+  }
+}
+
 TEST_CASE("EE signed packed comparison decoder and dependencies")
 {
   struct Contract
@@ -2528,6 +2601,8 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
     UINT32_C(0x0000f800);
   constexpr std::uint32_t shiftMask =
     UINT32_C(0x000007c0);
+  constexpr std::uint32_t shiftHighMask =
+    UINT32_C(0x00000400);
   const auto requireDecodeFailure =
     [](std::uint32_t instruction,
        EEInstructionDecodeFailure expected)
@@ -2559,13 +2634,16 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
      targetMask | destinationMask | shiftMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x34, 0, 2, 3, 7),
-     sourceMask},
+     sourceMask | shiftHighMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x36, 0, 2, 3, 7),
-     sourceMask},
+     sourceMask | shiftHighMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x37, 0, 2, 3, 7),
-     sourceMask},
+     sourceMask | shiftHighMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x3c, 0, 2, 3, 7),
      sourceMask},

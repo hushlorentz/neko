@@ -1443,7 +1443,7 @@ continuation state before a live consumer exists.
 
 ### Packed Shifts and SA Funnel Shift
 
-- [ ] Implement immediate `PSLLH`, `PSRLH`, and `PSRAH`, enforcing the
+- [x] Implement immediate `PSLLH`, `PSRLH`, and `PSRAH`, enforcing the
       documented 0-15 shift-field restriction
 - [ ] Implement immediate `PSLLW`, `PSRLW`, and `PSRAW`
 - [ ] Implement `PSLLVW`, `PSRLVW`, and `PSRAVW` using the low five bits of
