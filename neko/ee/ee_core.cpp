@@ -649,10 +649,11 @@ namespace
     RightArithmetic
   };
 
-  enum class PackedShiftLaneWidth : std::uint8_t
+  enum class PackedShiftForm : std::uint8_t
   {
-    Halfword,
-    Word
+    ImmediateHalfword,
+    ImmediateWord,
+    VariableWord
   };
 
   EERegister128 convertFiveBitPixels(
@@ -2371,6 +2372,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelShiftRightLogicalWord:
     case EEOperation::ParallelShiftRightArithmeticHalfword:
     case EEOperation::ParallelShiftRightArithmeticWord:
+    case EEOperation::ParallelShiftLeftLogicalVariableWord:
+    case EEOperation::ParallelShiftRightLogicalVariableWord:
+    case EEOperation::ParallelShiftRightArithmeticVariableWord:
       return executePackedShift(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2941,8 +2945,8 @@ EEInstructionExecutionOutcome EECore::executePackedShift(
   const EEInstruction &instruction)
 {
   PackedShiftMode mode = PackedShiftMode::LeftLogical;
-  PackedShiftLaneWidth laneWidth =
-    PackedShiftLaneWidth::Halfword;
+  PackedShiftForm form =
+    PackedShiftForm::ImmediateHalfword;
   switch (instruction.operation)
   {
     case EEOperation::ParallelShiftLeftLogicalHalfword:
@@ -2954,15 +2958,26 @@ EEInstructionExecutionOutcome EECore::executePackedShift(
       mode = PackedShiftMode::RightArithmetic;
       break;
     case EEOperation::ParallelShiftLeftLogicalWord:
-      laneWidth = PackedShiftLaneWidth::Word;
+      form = PackedShiftForm::ImmediateWord;
       break;
     case EEOperation::ParallelShiftRightLogicalWord:
       mode = PackedShiftMode::RightLogical;
-      laneWidth = PackedShiftLaneWidth::Word;
+      form = PackedShiftForm::ImmediateWord;
       break;
     case EEOperation::ParallelShiftRightArithmeticWord:
       mode = PackedShiftMode::RightArithmetic;
-      laneWidth = PackedShiftLaneWidth::Word;
+      form = PackedShiftForm::ImmediateWord;
+      break;
+    case EEOperation::ParallelShiftLeftLogicalVariableWord:
+      form = PackedShiftForm::VariableWord;
+      break;
+    case EEOperation::ParallelShiftRightLogicalVariableWord:
+      mode = PackedShiftMode::RightLogical;
+      form = PackedShiftForm::VariableWord;
+      break;
+    case EEOperation::ParallelShiftRightArithmeticVariableWord:
+      mode = PackedShiftMode::RightArithmetic;
+      form = PackedShiftForm::VariableWord;
       break;
     default:
       throw std::logic_error(
@@ -3037,20 +3052,52 @@ EEInstructionExecutionOutcome EECore::executePackedShift(
         }
         return result;
       };
-    switch (laneWidth)
+    switch (form)
     {
-      case PackedShiftLaneWidth::Halfword:
+      case PackedShiftForm::ImmediateHalfword:
         generalRegisters[instruction.destinationRegister] = {
           shiftHalf(target.low),
           shiftHalf(target.high)
         };
         break;
-      case PackedShiftLaneWidth::Word:
+      case PackedShiftForm::ImmediateWord:
         generalRegisters[instruction.destinationRegister] = {
           shiftWord(target.low),
           shiftWord(target.high)
         };
         break;
+      case PackedShiftForm::VariableWord:
+      {
+        const EERegister128 source =
+          generalRegisters[instruction.sourceRegister];
+        const auto shiftVariableWord =
+          [mode](std::uint64_t value, std::uint64_t amount)
+          {
+            const std::uint32_t word =
+              static_cast<std::uint32_t>(value);
+            const std::uint8_t shift =
+              static_cast<std::uint8_t>(amount & 0x1f);
+            std::uint32_t result = 0;
+            switch (mode)
+            {
+              case PackedShiftMode::LeftLogical:
+                result = word << shift;
+                break;
+              case PackedShiftMode::RightLogical:
+                result = word >> shift;
+                break;
+              case PackedShiftMode::RightArithmetic:
+                result = arithmeticShiftRight32(word, shift);
+                break;
+            }
+            return signExtendWord(result);
+          };
+        generalRegisters[instruction.destinationRegister] = {
+          shiftVariableWord(target.low, source.low),
+          shiftVariableWord(target.high, source.high)
+        };
+        break;
+      }
     }
   }
   return EEInstructionExecutionOutcome::Completed;

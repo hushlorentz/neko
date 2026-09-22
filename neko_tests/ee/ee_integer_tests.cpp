@@ -2110,6 +2110,133 @@ TEST_CASE("EE immediate packed word shift execution")
   }
 }
 
+TEST_CASE("EE variable packed word shift execution")
+{
+  struct Contract
+  {
+    std::uint8_t primaryFunction;
+    std::uint8_t nestedFunction;
+    EERegister128 expected;
+  };
+  const EERegister128 source = {
+    UINT64_C(0xaaaaaaaa00000021),
+    UINT64_C(0xbbbbbbbb00000044)
+  };
+  const EERegister128 target = {
+    UINT64_C(0xdeadbeef40000001),
+    UINT64_C(0xcafebabef0000001)
+  };
+  const Contract contracts[] = {
+    {
+      0x09,
+      0x02,
+      {
+        UINT64_C(0xffffffff80000002),
+        UINT64_C(0x0000000000000010)
+      }
+    },
+    {
+      0x09,
+      0x03,
+      {
+        UINT64_C(0x0000000020000000),
+        UINT64_C(0x000000000f000000)
+      }
+    },
+    {
+      0x29,
+      0x03,
+      {
+        UINT64_C(0x0000000020000000),
+        UINT64_C(0xffffffffff000000)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        contract.primaryFunction,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3) == contract.expected);
+  }
+
+  SECTION("Counts use only the corresponding low five bits")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0xffffffffffffffe0),
+       UINT64_C(0xffffffffffffffff)});
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x03, 1, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x0000000040000001),
+                    UINT64_C(0xffffffffffffffff)});
+  }
+
+  SECTION("Source and target aliases preserve both inputs")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x03, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{UINT64_C(0x0000000020000000),
+                    UINT64_C(0x000000000f000000)});
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x03, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0x0000000020000000),
+                    UINT64_C(0xffffffffff000000)});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x02, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Repeated execution replaces both destination doublewords")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x02, 1, 2, 3));
+
+    core.setGeneralRegister(1, {});
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x02, 1, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

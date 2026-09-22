@@ -148,6 +148,9 @@ namespace
       case EEOperation::ParallelSubtractUnsignedSaturateByte:
       case EEOperation::ParallelSubtractUnsignedSaturateHalfword:
       case EEOperation::ParallelSubtractUnsignedSaturateWord:
+      case EEOperation::ParallelShiftLeftLogicalVariableWord:
+      case EEOperation::ParallelShiftRightLogicalVariableWord:
+      case EEOperation::ParallelShiftRightArithmeticVariableWord:
       case EEOperation::ParallelExtendLowerByte:
       case EEOperation::ParallelExtendLowerHalfword:
       case EEOperation::ParallelExtendLowerWord:
@@ -1510,6 +1513,16 @@ namespace
         EEOperation::ParallelAnd,
         0
       };
+      result[0x02] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelShiftLeftLogicalVariableWord,
+        0
+      };
+      result[0x03] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelShiftRightLogicalVariableWord,
+        0
+      };
       result[0x13] = {
         DecodeKind::Direct,
         EEOperation::ParallelXor,
@@ -1594,6 +1607,11 @@ namespace
       result[0x12] = {
         DecodeKind::Direct,
         EEOperation::ParallelOr,
+        0
+      };
+      result[0x03] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelShiftRightArithmeticVariableWord,
         0
       };
       result[0x13] = {
@@ -2374,6 +2392,9 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelShiftLeftLogicalWord:
     case EEOperation::ParallelShiftRightLogicalWord:
     case EEOperation::ParallelShiftRightArithmeticWord:
+    case EEOperation::ParallelShiftLeftLogicalVariableWord:
+    case EEOperation::ParallelShiftRightLogicalVariableWord:
+    case EEOperation::ParallelShiftRightArithmeticVariableWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2539,6 +2560,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelShiftLeftLogicalWord:
     case EEOperation::ParallelShiftRightLogicalWord:
     case EEOperation::ParallelShiftRightArithmeticWord:
+    case EEOperation::ParallelShiftLeftLogicalVariableWord:
+    case EEOperation::ParallelShiftRightLogicalVariableWord:
+    case EEOperation::ParallelShiftRightArithmeticVariableWord:
       return EEExecutionFamily::PackedShift;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
