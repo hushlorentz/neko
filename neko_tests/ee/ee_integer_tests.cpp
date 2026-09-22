@@ -653,6 +653,66 @@ TEST_CASE("EE wrapping packed arithmetic execution")
   }
 }
 
+TEST_CASE("EE mixed packed halfword arithmetic execution")
+{
+  const EERegister128 source = {
+    UINT64_C(0xfffe7fff80000001),
+    UINT64_C(0xffffffff7fffffff)
+  };
+  const EERegister128 target = {
+    UINT64_C(0x020380010001ffff),
+    UINT64_C(0x0000000180000001)
+  };
+
+  SECTION("Low lanes subtract while high lanes add")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x04, 1, 2, 3));
+
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0xfdfbfffe7fff0002));
+    REQUIRE(
+      core.generalRegister(3).high ==
+      UINT64_C(0xffff0000ffff0000));
+  }
+
+  SECTION("Aliases capture both operands and register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x04, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{UINT64_C(0xfdfbfffe7fff0002),
+                    UINT64_C(0xffff0000ffff0000)});
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x04, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0xfdfbfffe7fff0002),
+                    UINT64_C(0xffff0000ffff0000)});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x04, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

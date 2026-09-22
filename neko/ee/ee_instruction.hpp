@@ -179,6 +179,7 @@ enum class EEOperation : std::uint8_t
   ParallelSubtractByte,
   ParallelSubtractHalfword,
   ParallelSubtractWord,
+  ParallelAddSubtractHalfword,
   ParallelMaximumHalfword,
   ParallelMaximumWord,
   ParallelMinimumHalfword,

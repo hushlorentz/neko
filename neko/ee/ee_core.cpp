@@ -1916,6 +1916,7 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelSubtractByte:
     case EEOperation::ParallelSubtractHalfword:
     case EEOperation::ParallelSubtractWord:
+    case EEOperation::ParallelAddSubtractHalfword:
       return executePackedArithmetic(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2251,7 +2252,8 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
   const EEInstruction &instruction)
 {
   std::uint8_t laneBits = 0;
-  PackedArithmeticMode mode = PackedArithmeticMode::Add;
+  PackedArithmeticMode lowMode = PackedArithmeticMode::Add;
+  PackedArithmeticMode highMode = PackedArithmeticMode::Add;
   switch (instruction.operation)
   {
     case EEOperation::ParallelAddByte:
@@ -2265,15 +2267,22 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
       break;
     case EEOperation::ParallelSubtractByte:
       laneBits = 8;
-      mode = PackedArithmeticMode::Subtract;
+      lowMode = PackedArithmeticMode::Subtract;
+      highMode = PackedArithmeticMode::Subtract;
       break;
     case EEOperation::ParallelSubtractHalfword:
       laneBits = 16;
-      mode = PackedArithmeticMode::Subtract;
+      lowMode = PackedArithmeticMode::Subtract;
+      highMode = PackedArithmeticMode::Subtract;
       break;
     case EEOperation::ParallelSubtractWord:
       laneBits = 32;
-      mode = PackedArithmeticMode::Subtract;
+      lowMode = PackedArithmeticMode::Subtract;
+      highMode = PackedArithmeticMode::Subtract;
+      break;
+    case EEOperation::ParallelAddSubtractHalfword:
+      laneBits = 16;
+      lowMode = PackedArithmeticMode::Subtract;
       break;
     default:
       throw std::logic_error(
@@ -2292,12 +2301,12 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
         source.low,
         target.low,
         laneBits,
-        mode),
+        lowMode),
       wrappingPackedArithmetic(
         source.high,
         target.high,
         laneBits,
-        mode)
+        highMode)
     };
   }
   return EEInstructionExecutionOutcome::Completed;
