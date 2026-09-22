@@ -99,7 +99,9 @@ void EEShiftAmountOrderingWindow::accept(
   EEOperation operation)
 {
   const bool reads =
-    operation == EEOperation::MoveFromShiftAmount;
+    operation == EEOperation::MoveFromShiftAmount ||
+    operation ==
+      EEOperation::QuadwordFunnelShiftRightVariable;
   const bool accesses =
     reads ||
     operation == EEOperation::MoveByteCountToShiftAmount ||

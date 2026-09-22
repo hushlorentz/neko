@@ -1451,7 +1451,7 @@ continuation state before a live consumer exists.
       doubleword results
 - [x] Implement `QFSRV` over the 256-bit `rs || rt` concatenation using the SA
       register, including zero, byte, halfword, and rotate-style cases
-- [ ] Extend the existing three-instruction SA ordering window so `QFSRV`
+- [x] Extend the existing three-instruction SA ordering window so `QFSRV`
       counts as an SA read for `MTSA`, `MTSAB`, and `MTSAH` restrictions
 - [ ] Cover source/destination aliases, immediate reserved values, SA
       save/restore, branch-likely restrictions, traces, hashes, and

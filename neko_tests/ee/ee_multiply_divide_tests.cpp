@@ -10,12 +10,14 @@ namespace
     std::uint8_t function,
     std::uint8_t rs,
     std::uint8_t rt,
-    std::uint8_t rd)
+    std::uint8_t rd,
+    std::uint8_t shiftAmount = 0)
   {
     return
       (static_cast<std::uint32_t>(rs) << 21) |
       (static_cast<std::uint32_t>(rt) << 16) |
       (static_cast<std::uint32_t>(rd) << 11) |
+      (static_cast<std::uint32_t>(shiftAmount) << 6) |
       function;
   }
 
@@ -23,11 +25,17 @@ namespace
     std::uint8_t function,
     std::uint8_t rs,
     std::uint8_t rt,
-    std::uint8_t rd)
+    std::uint8_t rd,
+    std::uint8_t nestedFunction = 0)
   {
     return
       UINT32_C(0x70000000) |
-      registerInstruction(function, rs, rt, rd);
+      registerInstruction(
+        function,
+        rs,
+        rt,
+        rd,
+        nestedFunction);
   }
 
   std::uint32_t regimmInstruction(
@@ -284,22 +292,68 @@ TEST_CASE("EE shift amount ordering restrictions are explicit")
   REQUIRE(core.programCounter() == 4);
 }
 
+TEST_CASE("EE QFSRV establishes shift amount read restrictions")
+{
+  const std::uint32_t restrictedFollowers[] = {
+    registerInstruction(0x29, 1, 0, 0),
+    regimmInstruction(0x18, 1, 0),
+    regimmInstruction(0x19, 1, 0)
+  };
+
+  for (std::uint32_t follower : restrictedFollowers)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x28, 1, 2, 3, 0x1b));
+    system.eeBus().write32(4, follower);
+    core.startExecution(0);
+    system.runMasterCycles(2);
+
+    REQUIRE(core.executionState() == EEExecutionState::Halted);
+    REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.rejectedInstruction() == follower);
+  }
+}
+
 TEST_CASE("EE shift amount windows advance per acceptance")
 {
   EEShiftAmountOrderingWindow window;
-  window.accept(EEOperation::MoveFromShiftAmount);
+  window.accept(
+    EEOperation::QuadwordFunnelShiftRightVariable);
+  REQUIRE_FALSE(
+    window.permits(EEOperation::MoveToShiftAmount));
+  REQUIRE_FALSE(
+    window.permits(
+      EEOperation::MoveByteCountToShiftAmount));
+  REQUIRE_FALSE(
+    window.permits(
+      EEOperation::MoveHalfwordCountToShiftAmount));
+
   window.accept(EEOperation::Nop);
   window.accept(EEOperation::Nop);
 
   REQUIRE_FALSE(
+    window.permits(EEOperation::MoveToShiftAmount));
+  REQUIRE_FALSE(
     window.permits(
       EEOperation::MoveByteCountToShiftAmount));
+  REQUIRE_FALSE(
+    window.permits(
+      EEOperation::MoveHalfwordCountToShiftAmount));
 
   window.accept(EEOperation::Nop);
 
   REQUIRE(
+    window.permits(EEOperation::MoveToShiftAmount));
+  REQUIRE(
     window.permits(
       EEOperation::MoveByteCountToShiftAmount));
+  REQUIRE(
+    window.permits(
+      EEOperation::MoveHalfwordCountToShiftAmount));
 }
 
 TEST_CASE("EE reset clears both pending MAC pipelines")
