@@ -2772,6 +2772,60 @@ TEST_CASE("EE packed rearrangement traces and hashes are deterministic")
   REQUIRE(events[1].value0 == first.eeCore().stateHash());
 }
 
+TEST_CASE("EE packed copy traces and hashes are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      system->eeBus().write32(
+        0,
+        nestedMmiInstruction(0x29, 0x1b, 0, 2, 3));
+      system->eeCore().setGeneralRegister(
+        2,
+        {
+          UINT64_C(0x0706050403020100),
+          UINT64_C(0xe7e6e5e4e3e2e1e0)
+        });
+      system->eeCore().startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+  const std::uint64_t initialHash =
+    first.eeCore().stateHash();
+
+  first.clockMasterCycle();
+  second.clockMasterCycle();
+
+  REQUIRE(
+    first.eeCore().generalRegister(3) ==
+    EERegister128{UINT64_C(0x0100010001000100),
+                  UINT64_C(0xe1e0e1e0e1e0e1e0)});
+  REQUIRE(first.eeCore().stateHash() != initialHash);
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+  REQUIRE(first.traceHash() == second.traceHash());
+
+  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  REQUIRE(events.size() == 2);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(
+    events[0].value1 ==
+    nestedMmiInstruction(0x29, 0x1b, 0, 2, 3));
+  REQUIRE(
+    events[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::ParallelCopyHalfword));
+  REQUIRE(events[1].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[1].value0 == first.eeCore().stateHash());
+}
+
 TEST_CASE("Older COP1 memory work does not partially enter an issue group")
 {
   NekoSystem system;

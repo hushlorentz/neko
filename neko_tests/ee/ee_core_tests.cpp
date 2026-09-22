@@ -3328,6 +3328,45 @@ TEST_CASE("EE packed rearrangement participates in Wide issue")
   REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
 }
 
+TEST_CASE("EE packed pixel format participates in Wide issue")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  system.eeBus().write32(
+    0,
+    UINT32_C(0x70000000) |
+      (UINT32_C(2) << 16) |
+      (UINT32_C(3) << 11) |
+      (UINT32_C(0x1e) << 6) |
+      UINT32_C(0x08));
+  system.eeBus().write32(4, UINT32_C(0x24040001));
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0xa5a57fffa5a50000),
+      UINT64_C(0xa5a5d6b3a5a58000)
+    });
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.lastIssueSelection().instructionCount == 2);
+  REQUIRE(
+    core.lastIssueSelection().continuation ==
+    EEIssueContinuation::YoungerAStageOneCycle);
+  REQUIRE(
+    core.generalRegister(3) ==
+    EERegister128{UINT64_C(0x00f8f8f800000000),
+                  UINT64_C(0x80a8a89880000000)});
+  REQUIRE(core.generalRegister(4).low == 0);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.generalRegister(4).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+}
+
 TEST_CASE("EE signed packed comparison participates in Wide issue")
 {
   NekoSystem system;

@@ -1436,7 +1436,7 @@ continuation state before a live consumer exists.
 - [x] Implement `PREVH` and `PROT3W`
 - [x] Implement the exact documented 1-5-5-5 to 8-8-8-8 `PEXT5` expansion
       and inverse `PPAC5` truncation, including alpha-bit placement
-- [ ] Cover asymmetric lane markers, aliases, register zero, format round
+- [x] Cover asymmetric lane markers, aliases, register zero, format round
       trips where defined, routing, pairing, traces, hashes, and repeated
       execution
 - [ ] Complete an independent review of copy/exchange/format operations
