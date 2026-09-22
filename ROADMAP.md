@@ -1427,7 +1427,7 @@ continuation state before a live consumer exists.
       ordering
 - [x] Cover lane-order sentinels, source/destination aliases, register zero,
       decode fields, routing, pairing, traces, hashes, and repeated execution
-- [ ] Complete an independent review of the interleave/pack family
+- [x] Complete an independent review of the interleave/pack family
 
 ### Packed Copy, Exchange, and Pixel-Format Operations
 
