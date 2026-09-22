@@ -269,6 +269,12 @@ namespace
     Subtract
   };
 
+  enum class PackedArithmeticBehavior : std::uint8_t
+  {
+    Wrapping,
+    SignedSaturating
+  };
+
   std::uint64_t wrappingPackedArithmetic(
     std::uint64_t source,
     std::uint64_t target,
@@ -296,6 +302,68 @@ namespace
           ? (sourceLane - targetLane) & laneMask
           : (sourceLane + targetLane) & laneMask;
       result |= resultLane << shift;
+    }
+    return result;
+  }
+
+  std::int64_t signedPackedLane(
+    std::uint64_t lane,
+    std::uint8_t laneBits)
+  {
+    const std::uint64_t signMask =
+      UINT64_C(1) << (laneBits - 1);
+    return (lane & signMask) == 0
+      ? static_cast<std::int64_t>(lane)
+      : static_cast<std::int64_t>(
+          lane - (UINT64_C(1) << laneBits));
+  }
+
+  std::uint64_t signedSaturatingPackedArithmetic(
+    std::uint64_t source,
+    std::uint64_t target,
+    std::uint8_t laneBits,
+    PackedArithmeticMode mode)
+  {
+    if (laneBits != 8 && laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE signed saturating packed arithmetic lane width "
+        "is invalid.");
+    }
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    const std::int64_t minimum =
+      -static_cast<std::int64_t>(
+        UINT64_C(1) << (laneBits - 1));
+    const std::int64_t maximum =
+      static_cast<std::int64_t>(
+        (UINT64_C(1) << (laneBits - 1)) - 1);
+    std::uint64_t result = 0;
+    for (std::uint8_t shift = 0;
+         shift < 64;
+         shift = static_cast<std::uint8_t>(shift + laneBits))
+    {
+      const std::int64_t sourceLane =
+        signedPackedLane(
+          (source >> shift) & laneMask,
+          laneBits);
+      const std::int64_t targetLane =
+        signedPackedLane(
+          (target >> shift) & laneMask,
+          laneBits);
+      const std::int64_t arithmeticResult =
+        mode == PackedArithmeticMode::Subtract
+          ? sourceLane - targetLane
+          : sourceLane + targetLane;
+      const std::int64_t saturatedResult =
+        arithmeticResult < minimum
+          ? minimum
+          : (arithmeticResult > maximum
+               ? maximum
+               : arithmeticResult);
+      result |=
+        (static_cast<std::uint64_t>(saturatedResult) &
+         laneMask) << shift;
     }
     return result;
   }
@@ -1917,6 +1985,12 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelSubtractHalfword:
     case EEOperation::ParallelSubtractWord:
     case EEOperation::ParallelAddSubtractHalfword:
+    case EEOperation::ParallelAddSignedSaturateByte:
+    case EEOperation::ParallelAddSignedSaturateHalfword:
+    case EEOperation::ParallelAddSignedSaturateWord:
+    case EEOperation::ParallelSubtractSignedSaturateByte:
+    case EEOperation::ParallelSubtractSignedSaturateHalfword:
+    case EEOperation::ParallelSubtractSignedSaturateWord:
       return executePackedArithmetic(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2254,6 +2328,8 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
   std::uint8_t laneBits = 0;
   PackedArithmeticMode lowMode = PackedArithmeticMode::Add;
   PackedArithmeticMode highMode = PackedArithmeticMode::Add;
+  PackedArithmeticBehavior behavior =
+    PackedArithmeticBehavior::Wrapping;
   switch (instruction.operation)
   {
     case EEOperation::ParallelAddByte:
@@ -2284,6 +2360,36 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
       laneBits = 16;
       lowMode = PackedArithmeticMode::Subtract;
       break;
+    case EEOperation::ParallelAddSignedSaturateByte:
+      laneBits = 8;
+      behavior = PackedArithmeticBehavior::SignedSaturating;
+      break;
+    case EEOperation::ParallelAddSignedSaturateHalfword:
+      laneBits = 16;
+      behavior = PackedArithmeticBehavior::SignedSaturating;
+      break;
+    case EEOperation::ParallelAddSignedSaturateWord:
+      laneBits = 32;
+      behavior = PackedArithmeticBehavior::SignedSaturating;
+      break;
+    case EEOperation::ParallelSubtractSignedSaturateByte:
+      laneBits = 8;
+      lowMode = PackedArithmeticMode::Subtract;
+      highMode = PackedArithmeticMode::Subtract;
+      behavior = PackedArithmeticBehavior::SignedSaturating;
+      break;
+    case EEOperation::ParallelSubtractSignedSaturateHalfword:
+      laneBits = 16;
+      lowMode = PackedArithmeticMode::Subtract;
+      highMode = PackedArithmeticMode::Subtract;
+      behavior = PackedArithmeticBehavior::SignedSaturating;
+      break;
+    case EEOperation::ParallelSubtractSignedSaturateWord:
+      laneBits = 32;
+      lowMode = PackedArithmeticMode::Subtract;
+      highMode = PackedArithmeticMode::Subtract;
+      behavior = PackedArithmeticBehavior::SignedSaturating;
+      break;
     default:
       throw std::logic_error(
         "EE packed-arithmetic handler received an "
@@ -2296,13 +2402,17 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
       generalRegisters[instruction.sourceRegister];
     const EERegister128 target =
       generalRegisters[instruction.targetRegister];
+    const auto arithmetic =
+      behavior == PackedArithmeticBehavior::SignedSaturating
+        ? signedSaturatingPackedArithmetic
+        : wrappingPackedArithmetic;
     generalRegisters[instruction.destinationRegister] = {
-      wrappingPackedArithmetic(
+      arithmetic(
         source.low,
         target.low,
         laneBits,
         lowMode),
-      wrappingPackedArithmetic(
+      arithmetic(
         source.high,
         target.high,
         laneBits,

@@ -713,6 +713,195 @@ TEST_CASE("EE mixed packed halfword arithmetic execution")
   }
 }
 
+TEST_CASE("EE signed saturating packed arithmetic execution")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EERegister128 source;
+    EERegister128 target;
+    EERegister128 expected;
+  };
+  const Contract contracts[] = {
+    {
+      0x18,
+      {
+        UINT64_C(0xff01817e807f807f),
+        UINT64_C(0xff01817e807f807f)
+      },
+      {
+        UINT64_C(0x01ffff010000ff01),
+        UINT64_C(0x01ffff010000ff01)
+      },
+      {
+        UINT64_C(0x0000807f807f807f),
+        UINT64_C(0x0000807f807f807f)
+      }
+    },
+    {
+      0x14,
+      {
+        UINT64_C(0x80007fff80007fff),
+        UINT64_C(0xffff000180017ffe)
+      },
+      {
+        UINT64_C(0x00000000ffff0001),
+        UINT64_C(0x0001ffffffff0001)
+      },
+      {
+        UINT64_C(0x80007fff80007fff),
+        UINT64_C(0x0000000080007fff)
+      }
+    },
+    {
+      0x10,
+      {
+        UINT64_C(0x800000007fffffff),
+        UINT64_C(0xffffffff00000001)
+      },
+      {
+        UINT64_C(0xffffffff00000001),
+        UINT64_C(0xfffffffe00000002)
+      },
+      {
+        UINT64_C(0x800000007fffffff),
+        UINT64_C(0xfffffffd00000003)
+      }
+    },
+    {
+      0x19,
+      {
+        UINT64_C(0xff01817e807f807f),
+        UINT64_C(0xff01817e807f807f)
+      },
+      {
+        UINT64_C(0x01ff01ff000001ff),
+        UINT64_C(0x01ff01ff000001ff)
+      },
+      {
+        UINT64_C(0xfe02807f807f807f),
+        UINT64_C(0xfe02807f807f807f)
+      }
+    },
+    {
+      0x15,
+      {
+        UINT64_C(0x80007fff80007fff),
+        UINT64_C(0xffff000180017ffe)
+      },
+      {
+        UINT64_C(0x000000000001ffff),
+        UINT64_C(0x0001ffff0001ffff)
+      },
+      {
+        UINT64_C(0x80007fff80007fff),
+        UINT64_C(0xfffe000280007fff)
+      }
+    },
+    {
+      0x11,
+      {
+        UINT64_C(0x800000007fffffff),
+        UINT64_C(0xffffffff00000001)
+      },
+      {
+        UINT64_C(0x00000001ffffffff),
+        UINT64_C(0x00000002fffffffe)
+      },
+      {
+        UINT64_C(0x800000007fffffff),
+        UINT64_C(0xfffffffd00000003)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, contract.source);
+    core.setGeneralRegister(2, contract.target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        0x08,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3) == contract.expected);
+  }
+
+  SECTION("Word extrema remain exact without overflow")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const EERegister128 extrema = {
+      UINT64_C(0x800000007fffffff),
+      0
+    };
+    core.setGeneralRegister(1, extrema);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x10, 1, 0, 3));
+    REQUIRE(core.generalRegister(3) == extrema);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x11, 1, 0, 3));
+    REQUIRE(core.generalRegister(3) == extrema);
+  }
+
+  SECTION("Aliases capture operands and register zero discards results")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {
+        UINT64_C(0x80007fff80007fff),
+        UINT64_C(0xffff000180017ffe)
+      });
+    core.setGeneralRegister(
+      2,
+      {
+        UINT64_C(0x00000000ffff0001),
+        UINT64_C(0x0001ffffffff0001)
+      });
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x14, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{UINT64_C(0x80007fff80007fff),
+                    UINT64_C(0x0000000080007fff)});
+
+    core.setGeneralRegister(
+      1,
+      {
+        UINT64_C(0xff01817e807f807f),
+        UINT64_C(0xff01817e807f807f)
+      });
+    core.setGeneralRegister(
+      2,
+      {
+        UINT64_C(0x01ff01ff000001ff),
+        UINT64_C(0x01ff01ff000001ff)
+      });
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x19, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0xfe02807f807f807f),
+                    UINT64_C(0xfe02807f807f807f)});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x10, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

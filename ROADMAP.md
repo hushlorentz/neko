@@ -1409,7 +1409,7 @@ continuation state before a live consumer exists.
       `PSUBW` with independent modulo arithmetic in every lane
 - [x] Implement mixed `PADSBH`, subtracting the low four halfword lanes and
       adding the high four lanes
-- [ ] Implement signed-saturating `PADDSB`, `PADDSH`, `PADDSW`, `PSUBSB`,
+- [x] Implement signed-saturating `PADDSB`, `PADDSH`, `PADDSW`, `PSUBSB`,
       `PSUBSH`, and `PSUBSW`
 - [ ] Implement unsigned-saturating `PADDUB`, `PADDUH`, `PADDUW`, `PSUBUB`,
       `PSUBUH`, and `PSUBUW`

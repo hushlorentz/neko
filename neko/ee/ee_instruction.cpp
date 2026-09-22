@@ -134,6 +134,12 @@ namespace
       case EEOperation::ParallelSubtractHalfword:
       case EEOperation::ParallelSubtractWord:
       case EEOperation::ParallelAddSubtractHalfword:
+      case EEOperation::ParallelAddSignedSaturateByte:
+      case EEOperation::ParallelAddSignedSaturateHalfword:
+      case EEOperation::ParallelAddSignedSaturateWord:
+      case EEOperation::ParallelSubtractSignedSaturateByte:
+      case EEOperation::ParallelSubtractSignedSaturateHalfword:
+      case EEOperation::ParallelSubtractSignedSaturateWord:
       case EEOperation::ParallelMaximumHalfword:
       case EEOperation::ParallelMaximumWord:
       case EEOperation::ParallelMinimumHalfword:
@@ -1231,6 +1237,36 @@ namespace
         EEOperation::ParallelCompareGreaterThanByte,
         0
       };
+      result[0x10] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAddSignedSaturateWord,
+        0
+      };
+      result[0x11] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelSubtractSignedSaturateWord,
+        0
+      };
+      result[0x14] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAddSignedSaturateHalfword,
+        0
+      };
+      result[0x15] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelSubtractSignedSaturateHalfword,
+        0
+      };
+      result[0x18] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelAddSignedSaturateByte,
+        0
+      };
+      result[0x19] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelSubtractSignedSaturateByte,
+        0
+      };
       return result;
     }();
     return table;
@@ -2113,6 +2149,12 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelSubtractHalfword:
     case EEOperation::ParallelSubtractWord:
     case EEOperation::ParallelAddSubtractHalfword:
+    case EEOperation::ParallelAddSignedSaturateByte:
+    case EEOperation::ParallelAddSignedSaturateHalfword:
+    case EEOperation::ParallelAddSignedSaturateWord:
+    case EEOperation::ParallelSubtractSignedSaturateByte:
+    case EEOperation::ParallelSubtractSignedSaturateHalfword:
+    case EEOperation::ParallelSubtractSignedSaturateWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2236,6 +2278,12 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelSubtractHalfword:
     case EEOperation::ParallelSubtractWord:
     case EEOperation::ParallelAddSubtractHalfword:
+    case EEOperation::ParallelAddSignedSaturateByte:
+    case EEOperation::ParallelAddSignedSaturateHalfword:
+    case EEOperation::ParallelAddSignedSaturateWord:
+    case EEOperation::ParallelSubtractSignedSaturateByte:
+    case EEOperation::ParallelSubtractSignedSaturateHalfword:
+    case EEOperation::ParallelSubtractSignedSaturateWord:
       return EEExecutionFamily::PackedArithmetic;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
