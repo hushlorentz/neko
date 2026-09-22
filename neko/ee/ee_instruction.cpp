@@ -146,6 +146,9 @@ namespace
       case EEOperation::ParallelSubtractUnsignedSaturateByte:
       case EEOperation::ParallelSubtractUnsignedSaturateHalfword:
       case EEOperation::ParallelSubtractUnsignedSaturateWord:
+      case EEOperation::ParallelExtendLowerByte:
+      case EEOperation::ParallelExtendLowerHalfword:
+      case EEOperation::ParallelExtendLowerWord:
       case EEOperation::ParallelMaximumHalfword:
       case EEOperation::ParallelMaximumWord:
       case EEOperation::ParallelMinimumHalfword:
@@ -1273,6 +1276,21 @@ namespace
         EEOperation::ParallelSubtractSignedSaturateByte,
         0
       };
+      result[0x12] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExtendLowerWord,
+        0
+      };
+      result[0x16] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExtendLowerHalfword,
+        0
+      };
+      result[0x1a] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExtendLowerByte,
+        0
+      };
       return result;
     }();
     return table;
@@ -2197,6 +2215,9 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelSubtractUnsignedSaturateByte:
     case EEOperation::ParallelSubtractUnsignedSaturateHalfword:
     case EEOperation::ParallelSubtractUnsignedSaturateWord:
+    case EEOperation::ParallelExtendLowerByte:
+    case EEOperation::ParallelExtendLowerHalfword:
+    case EEOperation::ParallelExtendLowerWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2333,6 +2354,10 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelSubtractUnsignedSaturateHalfword:
     case EEOperation::ParallelSubtractUnsignedSaturateWord:
       return EEExecutionFamily::PackedArithmetic;
+    case EEOperation::ParallelExtendLowerByte:
+    case EEOperation::ParallelExtendLowerHalfword:
+    case EEOperation::ParallelExtendLowerWord:
+      return EEExecutionFamily::PackedRearrange;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:

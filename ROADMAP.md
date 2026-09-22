@@ -1420,7 +1420,7 @@ continuation state before a live consumer exists.
 
 ### Packed Interleave, Extend, and Pack Operations
 
-- [ ] Implement lower interleave `PEXTLB`, `PEXTLH`, and `PEXTLW`
+- [x] Implement lower interleave `PEXTLB`, `PEXTLH`, and `PEXTLW`
 - [ ] Implement upper interleave `PEXTUB`, `PEXTUH`, and `PEXTUW`
 - [ ] Implement truncating pack `PPACB`, `PPACH`, and `PPACW`
 - [ ] Implement `PINTH` and `PINTEH` with the manual's exact source-lane

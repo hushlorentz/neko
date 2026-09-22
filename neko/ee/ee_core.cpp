@@ -437,6 +437,48 @@ namespace
       "Unknown EE packed arithmetic behavior.");
   }
 
+  EERegister128 interleavePackedLower(
+    std::uint64_t source,
+    std::uint64_t target,
+    std::uint8_t laneBits)
+  {
+    if (laneBits != 8 && laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE lower packed interleave lane width is invalid.");
+    }
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    EERegister128 result;
+    for (std::uint8_t lane = 0;
+         lane < 64 / laneBits;
+         ++lane)
+    {
+      const std::uint8_t inputShift =
+        static_cast<std::uint8_t>(lane * laneBits);
+      const std::uint8_t targetOutputShift =
+        static_cast<std::uint8_t>(lane * laneBits * 2);
+      const std::uint8_t sourceOutputShift =
+        static_cast<std::uint8_t>(
+          targetOutputShift + laneBits);
+      const std::uint64_t targetLane =
+        (target >> inputShift) & laneMask;
+      const std::uint64_t sourceLane =
+        (source >> inputShift) & laneMask;
+      if (targetOutputShift < 64)
+      {
+        result.low |= targetLane << targetOutputShift;
+        result.low |= sourceLane << sourceOutputShift;
+      }
+      else
+      {
+        result.high |= targetLane << (targetOutputShift - 64);
+        result.high |= sourceLane << (sourceOutputShift - 64);
+      }
+    }
+    return result;
+  }
+
   bool signedLaneGreater(
     std::uint64_t sourceLane,
     std::uint64_t targetLane,
@@ -2067,6 +2109,10 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelSubtractUnsignedSaturateHalfword:
     case EEOperation::ParallelSubtractUnsignedSaturateWord:
       return executePackedArithmetic(instruction);
+    case EEOperation::ParallelExtendLowerByte:
+    case EEOperation::ParallelExtendLowerHalfword:
+    case EEOperation::ParallelExtendLowerWord:
+      return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
@@ -2521,6 +2567,38 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
         highMode,
         behavior)
     };
+  }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedRearrange(
+  const EEInstruction &instruction)
+{
+  std::uint8_t laneBits = 0;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelExtendLowerByte:
+      laneBits = 8;
+      break;
+    case EEOperation::ParallelExtendLowerHalfword:
+      laneBits = 16;
+      break;
+    case EEOperation::ParallelExtendLowerWord:
+      laneBits = 32;
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed-rearrange handler received an "
+        "incompatible operation.");
+  }
+
+  if (instruction.destinationRegister != 0)
+  {
+    generalRegisters[instruction.destinationRegister] =
+      interleavePackedLower(
+        generalRegisters[instruction.sourceRegister].low,
+        generalRegisters[instruction.targetRegister].low,
+        laneBits);
   }
   return EEInstructionExecutionOutcome::Completed;
 }

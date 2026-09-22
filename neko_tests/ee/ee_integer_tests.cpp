@@ -1093,6 +1093,111 @@ TEST_CASE("EE unsigned saturating packed arithmetic execution")
   }
 }
 
+TEST_CASE("EE lower packed interleave execution")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EERegister128 expected;
+  };
+  const EERegister128 source = {
+    UINT64_C(0x1716151413121110),
+    UINT64_C(0xf7f6f5f4f3f2f1f0)
+  };
+  const EERegister128 target = {
+    UINT64_C(0x0706050403020100),
+    UINT64_C(0xe7e6e5e4e3e2e1e0)
+  };
+  const Contract contracts[] = {
+    {
+      0x1a,
+      {
+        UINT64_C(0x1303120211011000),
+        UINT64_C(0x1707160615051404)
+      }
+    },
+    {
+      0x16,
+      {
+        UINT64_C(0x1312030211100100),
+        UINT64_C(0x1716070615140504)
+      }
+    },
+    {
+      0x12,
+      {
+        UINT64_C(0x1312111003020100),
+        UINT64_C(0x1716151407060504)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(
+        0x08,
+        contract.nestedFunction,
+        1,
+        2,
+        3));
+    REQUIRE(core.generalRegister(3) == contract.expected);
+  }
+
+  SECTION("Aliases capture low operands and register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1a, 1, 2, 1));
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{UINT64_C(0x1303120211011000),
+                    UINT64_C(0x1707160615051404)});
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x16, 1, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0x1312030211100100),
+                    UINT64_C(0x1716070615140504)});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x12, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Repeated execution replaces every destination lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1a, 1, 2, 3));
+
+    core.setGeneralRegister(1, {});
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1a, 1, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

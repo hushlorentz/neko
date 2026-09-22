@@ -670,6 +670,13 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::PackedArithmetic,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::ParallelExtendLowerByte:
+        case EEOperation::ParallelExtendLowerHalfword:
+        case EEOperation::ParallelExtendLowerWord:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::PackedRearrange,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::ParallelCompareEqualByte:
         case EEOperation::ParallelCompareEqualHalfword:
         case EEOperation::ParallelCompareEqualWord:
@@ -1850,6 +1857,53 @@ TEST_CASE("EE unsigned saturating packed arithmetic decoder and dependencies")
   }
 }
 
+TEST_CASE("EE lower packed interleave decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t nestedFunction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {0x1a, EEOperation::ParallelExtendLowerByte},
+    {0x16, EEOperation::ParallelExtendLowerHalfword},
+    {0x12, EEOperation::ParallelExtendLowerWord}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          0x08,
+          1,
+          2,
+          3,
+          contract.nestedFunction));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == ((UINT32_C(1) << 1) |
+                                      (UINT32_C(1) << 2)));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(dependencies.specialWrites == 0);
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(routing.category == EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
+    REQUIRE(
+      routing.pipe0PhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I0) |
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I1)));
+  }
+}
+
 TEST_CASE("EE signed packed comparison decoder and dependencies")
 {
   struct Contract
@@ -2041,7 +2095,7 @@ TEST_CASE("EE nested MMI tables classify every encoding")
     std::uint32_t enabledMask;
   };
   const NestedTableContract contracts[] = {
-    {0x08, UINT32_C(0x3000f800), UINT32_C(0x033307ff)},
+    {0x08, UINT32_C(0x3000f800), UINT32_C(0x077707ff)},
     {0x28, UINT32_C(0xf088fb01), UINT32_C(0x033304fe)},
     {0x09, UINT32_C(0x03c088e2), UINT32_C(0x000c0000)},
     {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x000c0000)}
