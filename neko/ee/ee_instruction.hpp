@@ -212,6 +212,8 @@ enum class EEOperation : std::uint8_t
   ParallelExchangeCenterWord,
   ParallelReverseHalfword,
   ParallelRotateThreeWords,
+  ParallelExtendFiveBit,
+  ParallelPackFiveBit,
   ParallelMaximumHalfword,
   ParallelMaximumWord,
   ParallelMinimumHalfword,

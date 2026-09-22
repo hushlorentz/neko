@@ -1777,6 +1777,115 @@ TEST_CASE("EE packed reverse and rotate execution")
   }
 }
 
+TEST_CASE("EE packed pixel format execution")
+{
+  const EERegister128 packed = {
+    UINT64_C(0xa5a57fffa5a50000),
+    UINT64_C(0xa5a5d6b3a5a58000)
+  };
+  const EERegister128 rgba = {
+    UINT64_C(0x89abcdef01234567),
+    UINT64_C(0xfedcba9876543210)
+  };
+
+  SECTION("PEXT5 expands channels and alpha into documented bits")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, packed);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1e, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x00f8f8f800000000),
+                    UINT64_C(0x80a8a89880000000)});
+  }
+
+  SECTION("PPAC5 truncates channels and packs alpha")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, rgba);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1f, 0, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x0000d73d0000110c),
+                    UINT64_C(0x0000eef3000028c2)});
+  }
+
+  SECTION("Packed values round trip after ignored bits are cleared")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, packed);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1e, 0, 2, 3));
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1f, 0, 3, 4));
+    REQUIRE(
+      core.generalRegister(4) ==
+      EERegister128{UINT64_C(0x00007fff00000000),
+                    UINT64_C(0x0000d6b300008000)});
+  }
+
+  SECTION("RGBA values round trip with documented truncation")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, rgba);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1f, 0, 2, 3));
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1e, 0, 3, 4));
+    REQUIRE(
+      core.generalRegister(4) ==
+      EERegister128{UINT64_C(0x80a8c8e800204060),
+                    UINT64_C(0x80d8b89800503010)});
+  }
+
+  SECTION("Target alias is safe and register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, packed);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1e, 0, 2, 2));
+    REQUIRE(
+      core.generalRegister(2) ==
+      EERegister128{UINT64_C(0x00f8f8f800000000),
+                    UINT64_C(0x80a8a89880000000)});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1f, 0, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Repeated execution replaces every destination bit")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, rgba);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1f, 0, 2, 3));
+
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x08, 0x1f, 0, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

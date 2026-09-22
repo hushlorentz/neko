@@ -636,6 +636,49 @@ namespace
     return result;
   }
 
+  enum class PackedPixelFormatMode : std::uint8_t
+  {
+    Extend,
+    Pack
+  };
+
+  EERegister128 convertFiveBitPixels(
+    const EERegister128 &value,
+    PackedPixelFormatMode mode)
+  {
+    EERegister128 result;
+    for (std::uint8_t word = 0; word < 4; ++word)
+    {
+      const std::uint8_t shift =
+        static_cast<std::uint8_t>(word * 32);
+      const std::uint64_t inputHalf =
+        shift < 64 ? value.low : value.high;
+      const std::uint32_t input =
+        static_cast<std::uint32_t>(
+          inputHalf >> (shift % 64));
+      const std::uint32_t output =
+        mode == PackedPixelFormatMode::Extend
+          ? ((input & UINT32_C(0x001f)) << 3) |
+              ((input & UINT32_C(0x03e0)) << 6) |
+              ((input & UINT32_C(0x7c00)) << 9) |
+              ((input & UINT32_C(0x8000)) << 16)
+          : ((input >> 3) & UINT32_C(0x001f)) |
+              ((input >> 6) & UINT32_C(0x03e0)) |
+              ((input >> 9) & UINT32_C(0x7c00)) |
+              ((input >> 16) & UINT32_C(0x8000));
+      if (shift < 64)
+      {
+        result.low |= static_cast<std::uint64_t>(output) << shift;
+      }
+      else
+      {
+        result.high |=
+          static_cast<std::uint64_t>(output) << (shift - 64);
+      }
+    }
+    return result;
+  }
+
   bool signedLaneGreater(
     std::uint64_t sourceLane,
     std::uint64_t targetLane,
@@ -2286,6 +2329,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelExchangeCenterWord:
     case EEOperation::ParallelReverseHalfword:
     case EEOperation::ParallelRotateThreeWords:
+    case EEOperation::ParallelExtendFiveBit:
+    case EEOperation::ParallelPackFiveBit:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2830,6 +2875,18 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
           target,
           32,
           PackedPermutationMode::RotateThree);
+      break;
+    case EEOperation::ParallelExtendFiveBit:
+      result =
+        convertFiveBitPixels(
+          target,
+          PackedPixelFormatMode::Extend);
+      break;
+    case EEOperation::ParallelPackFiveBit:
+      result =
+        convertFiveBitPixels(
+          target,
+          PackedPixelFormatMode::Pack);
       break;
     default:
       throw std::logic_error(
