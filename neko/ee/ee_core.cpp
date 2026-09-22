@@ -527,6 +527,37 @@ namespace
     return result;
   }
 
+  EERegister128 interleaveEvenHalfwords(
+    const EERegister128 &source,
+    const EERegister128 &target)
+  {
+    const EERegister128 inputs[] = {target, source};
+    EERegister128 result;
+    for (std::uint8_t word = 0; word < 4; ++word)
+    {
+      const std::uint8_t inputShift =
+        static_cast<std::uint8_t>(word * 32);
+      const std::uint8_t halfShift =
+        static_cast<std::uint8_t>(inputShift % 64);
+      const std::uint64_t targetHalf =
+        inputShift < 64 ? inputs[0].low : inputs[0].high;
+      const std::uint64_t sourceHalf =
+        inputShift < 64 ? inputs[1].low : inputs[1].high;
+      const std::uint64_t value =
+        ((sourceHalf >> halfShift) & UINT64_C(0xffff)) << 16 |
+        ((targetHalf >> halfShift) & UINT64_C(0xffff));
+      if (inputShift < 64)
+      {
+        result.low |= value << inputShift;
+      }
+      else
+      {
+        result.high |= value << (inputShift - 64);
+      }
+    }
+    return result;
+  }
+
   bool signedLaneGreater(
     std::uint64_t sourceLane,
     std::uint64_t targetLane,
@@ -2166,6 +2197,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelPackToByte:
     case EEOperation::ParallelPackToHalfword:
     case EEOperation::ParallelPackToWord:
+    case EEOperation::ParallelInterleaveHalfword:
+    case EEOperation::ParallelInterleaveEvenHalfword:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2628,65 +2661,56 @@ EEInstructionExecutionOutcome EECore::executePackedArithmetic(
 EEInstructionExecutionOutcome EECore::executePackedRearrange(
   const EEInstruction &instruction)
 {
-  std::uint8_t laneBits = 0;
-  bool upper = false;
+  if (instruction.destinationRegister == 0)
+  {
+    return EEInstructionExecutionOutcome::Completed;
+  }
+  const EERegister128 source =
+    generalRegisters[instruction.sourceRegister];
+  const EERegister128 target =
+    generalRegisters[instruction.targetRegister];
+  EERegister128 result;
   switch (instruction.operation)
   {
     case EEOperation::ParallelExtendLowerByte:
-      laneBits = 8;
+      result = interleavePacked(source.low, target.low, 8);
       break;
     case EEOperation::ParallelExtendLowerHalfword:
-      laneBits = 16;
+      result = interleavePacked(source.low, target.low, 16);
       break;
     case EEOperation::ParallelExtendLowerWord:
-      laneBits = 32;
+      result = interleavePacked(source.low, target.low, 32);
       break;
     case EEOperation::ParallelExtendUpperByte:
-      laneBits = 8;
-      upper = true;
+      result = interleavePacked(source.high, target.high, 8);
       break;
     case EEOperation::ParallelExtendUpperHalfword:
-      laneBits = 16;
-      upper = true;
+      result = interleavePacked(source.high, target.high, 16);
       break;
     case EEOperation::ParallelExtendUpperWord:
-      laneBits = 32;
-      upper = true;
+      result = interleavePacked(source.high, target.high, 32);
       break;
     case EEOperation::ParallelPackToByte:
-      laneBits = 8;
+      result = packPacked(source, target, 8);
       break;
     case EEOperation::ParallelPackToHalfword:
-      laneBits = 16;
+      result = packPacked(source, target, 16);
       break;
     case EEOperation::ParallelPackToWord:
-      laneBits = 32;
+      result = packPacked(source, target, 32);
+      break;
+    case EEOperation::ParallelInterleaveHalfword:
+      result = interleavePacked(source.high, target.low, 16);
+      break;
+    case EEOperation::ParallelInterleaveEvenHalfword:
+      result = interleaveEvenHalfwords(source, target);
       break;
     default:
       throw std::logic_error(
         "EE packed-rearrange handler received an "
         "incompatible operation.");
   }
-
-  if (instruction.destinationRegister != 0)
-  {
-    const EERegister128 source =
-      generalRegisters[instruction.sourceRegister];
-    const EERegister128 target =
-      generalRegisters[instruction.targetRegister];
-    const bool pack =
-      instruction.operation == EEOperation::ParallelPackToByte ||
-      instruction.operation ==
-        EEOperation::ParallelPackToHalfword ||
-      instruction.operation == EEOperation::ParallelPackToWord;
-    generalRegisters[instruction.destinationRegister] =
-      pack
-        ? packPacked(source, target, laneBits)
-        : interleavePacked(
-            upper ? source.high : source.low,
-            upper ? target.high : target.low,
-            laneBits);
-  }
+  generalRegisters[instruction.destinationRegister] = result;
   return EEInstructionExecutionOutcome::Completed;
 }
 

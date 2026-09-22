@@ -155,6 +155,8 @@ namespace
       case EEOperation::ParallelPackToByte:
       case EEOperation::ParallelPackToHalfword:
       case EEOperation::ParallelPackToWord:
+      case EEOperation::ParallelInterleaveHalfword:
+      case EEOperation::ParallelInterleaveEvenHalfword:
       case EEOperation::ParallelMaximumHalfword:
       case EEOperation::ParallelMaximumWord:
       case EEOperation::ParallelMinimumHalfword:
@@ -1475,6 +1477,11 @@ namespace
         EEOperation::ParallelXor,
         0
       };
+      result[0x0a] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelInterleaveHalfword,
+        0
+      };
       return result;
     }();
     return table;
@@ -1529,6 +1536,11 @@ namespace
       result[0x13] = {
         DecodeKind::Direct,
         EEOperation::ParallelNor,
+        0
+      };
+      result[0x0a] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelInterleaveEvenHalfword,
         0
       };
       return result;
@@ -2260,6 +2272,8 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelPackToByte:
     case EEOperation::ParallelPackToHalfword:
     case EEOperation::ParallelPackToWord:
+    case EEOperation::ParallelInterleaveHalfword:
+    case EEOperation::ParallelInterleaveEvenHalfword:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2405,6 +2419,8 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelPackToByte:
     case EEOperation::ParallelPackToHalfword:
     case EEOperation::ParallelPackToWord:
+    case EEOperation::ParallelInterleaveHalfword:
+    case EEOperation::ParallelInterleaveEvenHalfword:
       return EEExecutionFamily::PackedRearrange;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:

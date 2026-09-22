@@ -201,6 +201,8 @@ enum class EEOperation : std::uint8_t
   ParallelPackToByte,
   ParallelPackToHalfword,
   ParallelPackToWord,
+  ParallelInterleaveHalfword,
+  ParallelInterleaveEvenHalfword,
   ParallelMaximumHalfword,
   ParallelMaximumWord,
   ParallelMinimumHalfword,
