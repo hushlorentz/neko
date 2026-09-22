@@ -1456,7 +1456,7 @@ continuation state before a live consumer exists.
 - [x] Cover source/destination aliases, immediate reserved values, SA
       save/restore, branch-likely restrictions, traces, hashes, and
       deterministic continuation
-- [ ] Complete an independent review of packed shifts and SA ordering
+- [x] Complete an independent review of packed shifts and SA ordering
 
 ### Parallel HI/LO Transfers
 
