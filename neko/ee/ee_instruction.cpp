@@ -167,6 +167,10 @@ namespace
         dependencies.gprWrites = destination;
         break;
       case EEOperation::ParallelCopyHalfword:
+      case EEOperation::ParallelExchangeEvenHalfword:
+      case EEOperation::ParallelExchangeCenterHalfword:
+      case EEOperation::ParallelExchangeEvenWord:
+      case EEOperation::ParallelExchangeCenterWord:
       case EEOperation::ParallelAbsoluteHalfword:
       case EEOperation::ParallelAbsoluteWord:
         dependencies.gprReads = target;
@@ -1490,6 +1494,16 @@ namespace
         EEOperation::ParallelCopyLowerDoubleword,
         0
       };
+      result[0x1a] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExchangeEvenHalfword,
+        REGISTER_SOURCE_MASK
+      };
+      result[0x1e] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExchangeEvenWord,
+        REGISTER_SOURCE_MASK
+      };
       return result;
     }();
     return table;
@@ -1559,6 +1573,16 @@ namespace
       result[0x1b] = {
         DecodeKind::Direct,
         EEOperation::ParallelCopyHalfword,
+        REGISTER_SOURCE_MASK
+      };
+      result[0x1a] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExchangeCenterHalfword,
+        REGISTER_SOURCE_MASK
+      };
+      result[0x1e] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelExchangeCenterWord,
         REGISTER_SOURCE_MASK
       };
       return result;
@@ -2295,6 +2319,10 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelCopyHalfword:
     case EEOperation::ParallelCopyLowerDoubleword:
     case EEOperation::ParallelCopyUpperDoubleword:
+    case EEOperation::ParallelExchangeEvenHalfword:
+    case EEOperation::ParallelExchangeCenterHalfword:
+    case EEOperation::ParallelExchangeEvenWord:
+    case EEOperation::ParallelExchangeCenterWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2445,6 +2473,10 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelCopyHalfword:
     case EEOperation::ParallelCopyLowerDoubleword:
     case EEOperation::ParallelCopyUpperDoubleword:
+    case EEOperation::ParallelExchangeEvenHalfword:
+    case EEOperation::ParallelExchangeCenterHalfword:
+    case EEOperation::ParallelExchangeEvenWord:
+    case EEOperation::ParallelExchangeCenterWord:
       return EEExecutionFamily::PackedRearrange;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:

@@ -566,6 +566,60 @@ namespace
     return result;
   }
 
+  enum class PackedExchangeMode : std::uint8_t
+  {
+    Even,
+    Center
+  };
+
+  EERegister128 exchangePacked(
+    const EERegister128 &value,
+    std::uint8_t laneBits,
+    PackedExchangeMode mode)
+  {
+    if (laneBits != 16 && laneBits != 32)
+    {
+      throw std::invalid_argument(
+        "EE packed exchange lane width is invalid.");
+    }
+    const std::uint8_t evenOrder[] = {2, 1, 0, 3};
+    const std::uint8_t centerOrder[] = {0, 2, 1, 3};
+    const std::uint8_t *order =
+      mode == PackedExchangeMode::Even
+        ? evenOrder
+        : centerOrder;
+    const std::uint64_t laneMask =
+      (UINT64_C(1) << laneBits) - 1;
+    const std::uint8_t laneCount =
+      static_cast<std::uint8_t>(128 / laneBits);
+    EERegister128 result;
+    for (std::uint8_t outputLane = 0;
+         outputLane < laneCount;
+         ++outputLane)
+    {
+      const std::uint8_t sourceLane =
+        static_cast<std::uint8_t>(
+          (outputLane / 4) * 4 + order[outputLane % 4]);
+      const std::uint8_t sourceShift =
+        static_cast<std::uint8_t>(sourceLane * laneBits);
+      const std::uint64_t sourceHalf =
+        sourceShift < 64 ? value.low : value.high;
+      const std::uint64_t lane =
+        (sourceHalf >> (sourceShift % 64)) & laneMask;
+      const std::uint8_t outputShift =
+        static_cast<std::uint8_t>(outputLane * laneBits);
+      if (outputShift < 64)
+      {
+        result.low |= lane << outputShift;
+      }
+      else
+      {
+        result.high |= lane << (outputShift - 64);
+      }
+    }
+    return result;
+  }
+
   bool signedLaneGreater(
     std::uint64_t sourceLane,
     std::uint64_t targetLane,
@@ -2210,6 +2264,10 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelCopyHalfword:
     case EEOperation::ParallelCopyLowerDoubleword:
     case EEOperation::ParallelCopyUpperDoubleword:
+    case EEOperation::ParallelExchangeEvenHalfword:
+    case EEOperation::ParallelExchangeCenterHalfword:
+    case EEOperation::ParallelExchangeEvenWord:
+    case EEOperation::ParallelExchangeCenterWord:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2727,6 +2785,22 @@ EEInstructionExecutionOutcome EECore::executePackedRearrange(
       break;
     case EEOperation::ParallelCopyUpperDoubleword:
       result = {source.high, target.high};
+      break;
+    case EEOperation::ParallelExchangeEvenHalfword:
+      result =
+        exchangePacked(target, 16, PackedExchangeMode::Even);
+      break;
+    case EEOperation::ParallelExchangeCenterHalfword:
+      result =
+        exchangePacked(target, 16, PackedExchangeMode::Center);
+      break;
+    case EEOperation::ParallelExchangeEvenWord:
+      result =
+        exchangePacked(target, 32, PackedExchangeMode::Even);
+      break;
+    case EEOperation::ParallelExchangeCenterWord:
+      result =
+        exchangePacked(target, 32, PackedExchangeMode::Center);
       break;
     default:
       throw std::logic_error(
