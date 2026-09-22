@@ -34,6 +34,22 @@ namespace
       function;
   }
 
+  std::uint32_t nestedMmiInstruction(
+    std::uint8_t primaryFunction,
+    std::uint8_t nestedFunction,
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint8_t destination)
+  {
+    return
+      UINT32_C(0x70000000) |
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(destination) << 11) |
+      (static_cast<std::uint32_t>(nestedFunction) << 6) |
+      primaryFunction;
+  }
+
   std::uint32_t cop1SingleInstruction(
     std::uint8_t function,
     std::uint8_t source,
@@ -2634,6 +2650,66 @@ TEST_CASE("EE state snapshots include in-flight execution")
   REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events[2].value0 == core.stateHash());
   REQUIRE(events[2].value0 != issuedStateHash);
+}
+
+TEST_CASE("EE packed arithmetic traces and hashes are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      system->eeBus().write32(
+        0,
+        nestedMmiInstruction(0x28, 0x18, 1, 2, 3));
+      system->eeCore().setGeneralRegister(
+        1,
+        {
+          UINT64_C(0x0100ffff0100ffff),
+          UINT64_C(0x0100ffff0100ffff)
+        });
+      system->eeCore().setGeneralRegister(
+        2,
+        {
+          UINT64_C(0x0200000102000001),
+          UINT64_C(0x0200000102000001)
+        });
+      system->eeCore().startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+  const std::uint64_t initialHash =
+    first.eeCore().stateHash();
+
+  first.clockMasterCycle();
+  second.clockMasterCycle();
+
+  REQUIRE(
+    first.eeCore().generalRegister(3) ==
+    EERegister128{UINT64_C(0x0300ffff0300ffff),
+                  UINT64_C(0x0300ffff0300ffff)});
+  REQUIRE(first.eeCore().stateHash() != initialHash);
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+  REQUIRE(first.traceHash() == second.traceHash());
+
+  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  REQUIRE(events.size() == 2);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(
+    events[0].value1 ==
+    nestedMmiInstruction(0x28, 0x18, 1, 2, 3));
+  REQUIRE(
+    events[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::ParallelAddUnsignedSaturateByte));
+  REQUIRE(events[1].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[1].value0 == first.eeCore().stateHash());
 }
 
 TEST_CASE("Older COP1 memory work does not partially enter an issue group")

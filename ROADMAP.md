@@ -1413,10 +1413,10 @@ continuation state before a live consumer exists.
       `PSUBSH`, and `PSUBSW`
 - [x] Implement unsigned-saturating `PADDUB`, `PADDUH`, `PADDUW`, `PSUBUB`,
       `PSUBUH`, and `PSUBUW`
-- [ ] Cover every positive and negative saturation boundary, carry and borrow
+- [x] Cover every positive and negative saturation boundary, carry and borrow
       isolation, source/destination aliases, register zero, routing, pairing,
       traces, hashes, and repeated execution
-- [ ] Complete an independent review of packed arithmetic
+- [x] Complete an independent review of packed arithmetic
 
 ### Packed Interleave, Extend, and Pack Operations
 

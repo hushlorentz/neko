@@ -1070,6 +1070,27 @@ TEST_CASE("EE unsigned saturating packed arithmetic execution")
       nestedMmiInstruction(0x28, 0x10, 1, 2, 0));
     REQUIRE(core.generalRegister(0) == EERegister128{});
   }
+
+  SECTION("Repeated execution replaces every saturated lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x18, 1, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_MAX, UINT64_MAX});
+
+    core.setGeneralRegister(1, {});
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x18, 1, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
 }
 
 TEST_CASE("EE signed packed greater-than execution")
