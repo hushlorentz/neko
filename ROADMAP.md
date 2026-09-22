@@ -1453,7 +1453,7 @@ continuation state before a live consumer exists.
       register, including zero, byte, halfword, and rotate-style cases
 - [x] Extend the existing three-instruction SA ordering window so `QFSRV`
       counts as an SA read for `MTSA`, `MTSAB`, and `MTSAH` restrictions
-- [ ] Cover source/destination aliases, immediate reserved values, SA
+- [x] Cover source/destination aliases, immediate reserved values, SA
       save/restore, branch-likely restrictions, traces, hashes, and
       deterministic continuation
 - [ ] Complete an independent review of packed shifts and SA ordering

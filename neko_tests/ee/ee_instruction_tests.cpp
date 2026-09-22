@@ -1376,8 +1376,13 @@ TEST_CASE("EE delay-slot legality is centralized")
   const EEInstruction shiftAmountWrite =
     decodeEEInstruction(
       registerInstruction(0x29, 4, 0, 0));
+  const EEInstruction funnelShift =
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x28, 1, 2, 3, 0x1b));
 
   REQUIRE(isEEDelaySlotInstructionLegal(branch, alu));
+  REQUIRE(isEEDelaySlotInstructionLegal(likely, funnelShift));
   REQUIRE(
     isEEDelaySlotInstructionLegal(
       branch,

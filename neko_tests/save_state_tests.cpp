@@ -1123,6 +1123,62 @@ TEST_CASE("Accepted EE younger A-stage work survives save states")
     restored.eeCore().stateHash());
 }
 
+TEST_CASE("QFSRV shift amount history survives save states")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  original.eeBus().write32(0, UINT32_C(0x70221ee8));
+  original.eeBus().write32(4, UINT32_C(0x04180000));
+  core.setGeneralRegister(
+    1,
+    {
+      UINT64_C(0x1716151413121110),
+      UINT64_C(0x1f1e1d1c1b1a1918)
+    });
+  core.setGeneralRegister(
+    2,
+    {
+      UINT64_C(0x0706050403020100),
+      UINT64_C(0x0f0e0d0c0b0a0908)
+    });
+  core.setShiftAmount(8);
+  core.startExecution(0);
+  original.clockMasterCycle();
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(
+    core.generalRegister(3) ==
+    EERegister128{UINT64_C(0x0807060504030201),
+                  UINT64_C(0x100f0e0d0c0b0a09)});
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+  requireStateBytesEqual(restored.saveState(), state);
+  REQUIRE(restored.eeCore().shiftAmount() == 8);
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(
+    original.eeCore().stopReason() ==
+    EEStopReason::UndefinedOperation);
+  REQUIRE(
+    restored.eeCore().stopReason() ==
+    EEStopReason::UndefinedOperation);
+  REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(
+    restored.eeCore().rejectedInstruction() ==
+    UINT32_C(0x04180000));
+  requireStateBytesEqual(
+    restored.saveState(),
+    original.saveState());
+}
+
 TEST_CASE("Malformed EE younger A-stage state is rejected")
 {
   SECTION("Inactive continuation cannot contain an instruction")
