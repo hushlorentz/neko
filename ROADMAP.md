@@ -1439,7 +1439,7 @@ continuation state before a live consumer exists.
 - [x] Cover asymmetric lane markers, aliases, register zero, format round
       trips where defined, routing, pairing, traces, hashes, and repeated
       execution
-- [ ] Complete an independent review of copy/exchange/format operations
+- [x] Complete an independent review of copy/exchange/format operations
 
 ### Packed Shifts and SA Funnel Shift
 
