@@ -171,6 +171,11 @@ namespace
         dependencies.gprReads = source | target;
         dependencies.gprWrites = destination;
         break;
+      case EEOperation::QuadwordFunnelShiftRightVariable:
+        dependencies.gprReads = source | target;
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_SA;
+        break;
       case EEOperation::ParallelCopyHalfword:
       case EEOperation::ParallelExchangeEvenHalfword:
       case EEOperation::ParallelExchangeCenterHalfword:
@@ -1469,6 +1474,11 @@ namespace
         EEOperation::ParallelExtendUpperByte,
         0
       };
+      result[0x1b] = {
+        DecodeKind::Direct,
+        EEOperation::QuadwordFunnelShiftRightVariable,
+        0
+      };
       return result;
     }();
     return table;
@@ -2395,6 +2405,7 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelShiftLeftLogicalVariableWord:
     case EEOperation::ParallelShiftRightLogicalVariableWord:
     case EEOperation::ParallelShiftRightArithmeticVariableWord:
+    case EEOperation::QuadwordFunnelShiftRightVariable:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2564,6 +2575,8 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelShiftRightLogicalVariableWord:
     case EEOperation::ParallelShiftRightArithmeticVariableWord:
       return EEExecutionFamily::PackedShift;
+    case EEOperation::QuadwordFunnelShiftRightVariable:
+      return EEExecutionFamily::FunnelShift;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:

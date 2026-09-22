@@ -2237,6 +2237,131 @@ TEST_CASE("EE variable packed word shift execution")
   }
 }
 
+TEST_CASE("EE quadword funnel shift execution")
+{
+  const EERegister128 source = {
+    UINT64_C(0x1716151413121110),
+    UINT64_C(0x1f1e1d1c1b1a1918)
+  };
+  const EERegister128 target = {
+    UINT64_C(0x0706050403020100),
+    UINT64_C(0x0f0e0d0c0b0a0908)
+  };
+
+  struct Contract
+  {
+    std::uint32_t amount;
+    EERegister128 expected;
+  };
+  const Contract contracts[] = {
+    {0, target},
+    {
+      8,
+      {
+        UINT64_C(0x0807060504030201),
+        UINT64_C(0x100f0e0d0c0b0a09)
+      }
+    },
+    {
+      16,
+      {
+        UINT64_C(0x0908070605040302),
+        UINT64_C(0x11100f0e0d0c0b0a)
+      }
+    },
+    {
+      64,
+      {
+        UINT64_C(0x0f0e0d0c0b0a0908),
+        UINT64_C(0x1716151413121110)
+      }
+    },
+    {
+      120,
+      {
+        UINT64_C(0x161514131211100f),
+        UINT64_C(0x1e1d1c1b1a191817)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    core.setShiftAmount(contract.amount);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1b, 1, 2, 3));
+    REQUIRE(core.generalRegister(3) == contract.expected);
+  }
+
+  SECTION("Equal inputs rotate a quadword")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, target);
+    core.setShiftAmount(48);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1b, 2, 2, 3));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x0d0c0b0a09080706),
+                    UINT64_C(0x0504030201000f0e)});
+  }
+
+  SECTION("Source and target destination aliases are safe")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    core.setShiftAmount(8);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1b, 1, 2, 1));
+    const EERegister128 expected = {
+      UINT64_C(0x0807060504030201),
+      UINT64_C(0x100f0e0d0c0b0a09)
+    };
+    REQUIRE(core.generalRegister(1) == expected);
+
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1b, 1, 2, 2));
+    REQUIRE(core.generalRegister(2) == expected);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1b, 1, 2, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Repeated execution replaces the destination")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    core.setShiftAmount(16);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1b, 1, 2, 3));
+
+    core.setGeneralRegister(1, {});
+    core.setGeneralRegister(2, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x28, 0x1b, 1, 2, 3));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE signed packed greater-than execution")
 {
   struct Contract

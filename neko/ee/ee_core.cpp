@@ -2376,6 +2376,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelShiftRightLogicalVariableWord:
     case EEOperation::ParallelShiftRightArithmeticVariableWord:
       return executePackedShift(instruction);
+    case EEOperation::QuadwordFunnelShiftRightVariable:
+      return executeFunnelShift(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
@@ -3100,6 +3102,58 @@ EEInstructionExecutionOutcome EECore::executePackedShift(
       }
     }
   }
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeFunnelShift(
+  const EEInstruction &instruction)
+{
+  if (instruction.operation !=
+      EEOperation::QuadwordFunnelShiftRightVariable)
+  {
+    throw std::logic_error(
+      "EE funnel-shift handler received an "
+      "incompatible operation.");
+  }
+  if (instruction.destinationRegister == 0)
+  {
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  const EERegister128 source =
+    generalRegisters[instruction.sourceRegister];
+  const EERegister128 target =
+    generalRegisters[instruction.targetRegister];
+  const std::uint64_t words[] = {
+    target.low,
+    target.high,
+    source.low,
+    source.high
+  };
+  const std::uint32_t wordOffset = saRegister / 64;
+  const std::uint8_t bitOffset =
+    static_cast<std::uint8_t>(saRegister % 64);
+  const auto word =
+    [&words](std::uint32_t index)
+    {
+      return index < 4 ? words[index] : UINT64_C(0);
+    };
+  const auto shiftedWord =
+    [&word, bitOffset](std::uint32_t index)
+    {
+      const std::uint64_t result = word(index) >> bitOffset;
+      if (bitOffset == 0)
+      {
+        return result;
+      }
+      return
+        result |
+        (word(index + 1) << (64 - bitOffset));
+    };
+  generalRegisters[instruction.destinationRegister] = {
+    shiftedWord(wordOffset),
+    shiftedWord(wordOffset + 1)
+  };
   return EEInstructionExecutionOutcome::Completed;
 }
 
