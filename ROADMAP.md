@@ -1445,7 +1445,7 @@ continuation state before a live consumer exists.
 
 - [x] Implement immediate `PSLLH`, `PSRLH`, and `PSRAH`, enforcing the
       documented 0-15 shift-field restriction
-- [ ] Implement immediate `PSLLW`, `PSRLW`, and `PSRAW`
+- [x] Implement immediate `PSLLW`, `PSRLW`, and `PSRAW`
 - [ ] Implement `PSLLVW`, `PSRLVW`, and `PSRAVW` using the low five bits of
       the corresponding source word and the documented sign-extended
       doubleword results

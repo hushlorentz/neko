@@ -180,6 +180,9 @@ namespace
       case EEOperation::ParallelShiftLeftLogicalHalfword:
       case EEOperation::ParallelShiftRightLogicalHalfword:
       case EEOperation::ParallelShiftRightArithmeticHalfword:
+      case EEOperation::ParallelShiftLeftLogicalWord:
+      case EEOperation::ParallelShiftRightLogicalWord:
+      case EEOperation::ParallelShiftRightArithmeticWord:
       case EEOperation::ParallelAbsoluteHalfword:
       case EEOperation::ParallelAbsoluteWord:
         dependencies.gprReads = target;
@@ -1141,17 +1144,20 @@ namespace
       EEOperation::ParallelShiftRightArithmeticHalfword,
       REGISTER_SOURCE_MASK |
         REGISTER_SHIFT_HIGH_MASK);
-    unsupported(
+    direct(
       &table,
       0x3c,
+      EEOperation::ParallelShiftLeftLogicalWord,
       REGISTER_SOURCE_MASK);
-    unsupported(
+    direct(
       &table,
       0x3e,
+      EEOperation::ParallelShiftRightLogicalWord,
       REGISTER_SOURCE_MASK);
-    unsupported(
+    direct(
       &table,
       0x3f,
+      EEOperation::ParallelShiftRightArithmeticWord,
       REGISTER_SOURCE_MASK);
     return table;
   }
@@ -2365,6 +2371,9 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelShiftLeftLogicalHalfword:
     case EEOperation::ParallelShiftRightLogicalHalfword:
     case EEOperation::ParallelShiftRightArithmeticHalfword:
+    case EEOperation::ParallelShiftLeftLogicalWord:
+    case EEOperation::ParallelShiftRightLogicalWord:
+    case EEOperation::ParallelShiftRightArithmeticWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2527,6 +2536,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelShiftLeftLogicalHalfword:
     case EEOperation::ParallelShiftRightLogicalHalfword:
     case EEOperation::ParallelShiftRightArithmeticHalfword:
+    case EEOperation::ParallelShiftLeftLogicalWord:
+    case EEOperation::ParallelShiftRightLogicalWord:
+    case EEOperation::ParallelShiftRightArithmeticWord:
       return EEExecutionFamily::PackedShift;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:

@@ -649,6 +649,12 @@ namespace
     RightArithmetic
   };
 
+  enum class PackedShiftLaneWidth : std::uint8_t
+  {
+    Halfword,
+    Word
+  };
+
   EERegister128 convertFiveBitPixels(
     const EERegister128 &value,
     PackedPixelFormatMode mode)
@@ -2360,8 +2366,11 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelPackFiveBit:
       return executePackedRearrange(instruction);
     case EEOperation::ParallelShiftLeftLogicalHalfword:
+    case EEOperation::ParallelShiftLeftLogicalWord:
     case EEOperation::ParallelShiftRightLogicalHalfword:
+    case EEOperation::ParallelShiftRightLogicalWord:
     case EEOperation::ParallelShiftRightArithmeticHalfword:
+    case EEOperation::ParallelShiftRightArithmeticWord:
       return executePackedShift(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -2932,6 +2941,8 @@ EEInstructionExecutionOutcome EECore::executePackedShift(
   const EEInstruction &instruction)
 {
   PackedShiftMode mode = PackedShiftMode::LeftLogical;
+  PackedShiftLaneWidth laneWidth =
+    PackedShiftLaneWidth::Halfword;
   switch (instruction.operation)
   {
     case EEOperation::ParallelShiftLeftLogicalHalfword:
@@ -2941,6 +2952,17 @@ EEInstructionExecutionOutcome EECore::executePackedShift(
       break;
     case EEOperation::ParallelShiftRightArithmeticHalfword:
       mode = PackedShiftMode::RightArithmetic;
+      break;
+    case EEOperation::ParallelShiftLeftLogicalWord:
+      laneWidth = PackedShiftLaneWidth::Word;
+      break;
+    case EEOperation::ParallelShiftRightLogicalWord:
+      mode = PackedShiftMode::RightLogical;
+      laneWidth = PackedShiftLaneWidth::Word;
+      break;
+    case EEOperation::ParallelShiftRightArithmeticWord:
+      mode = PackedShiftMode::RightArithmetic;
+      laneWidth = PackedShiftLaneWidth::Word;
       break;
     default:
       throw std::logic_error(
@@ -2985,10 +3007,51 @@ EEInstructionExecutionOutcome EECore::executePackedShift(
         }
         return result;
       };
-    generalRegisters[instruction.destinationRegister] = {
-      shiftHalf(target.low),
-      shiftHalf(target.high)
-    };
+    const auto shiftWord =
+      [mode, &instruction](std::uint64_t value)
+      {
+        std::uint64_t result = 0;
+        for (std::uint8_t shift = 0;
+             shift < 64;
+             shift = static_cast<std::uint8_t>(shift + 32))
+        {
+          const std::uint32_t lane =
+            static_cast<std::uint32_t>(value >> shift);
+          std::uint32_t shifted = 0;
+          switch (mode)
+          {
+            case PackedShiftMode::LeftLogical:
+              shifted = lane << instruction.shiftAmount;
+              break;
+            case PackedShiftMode::RightLogical:
+              shifted = lane >> instruction.shiftAmount;
+              break;
+            case PackedShiftMode::RightArithmetic:
+              shifted = arithmeticShiftRight32(
+                lane,
+                instruction.shiftAmount);
+              break;
+          }
+          result |=
+            static_cast<std::uint64_t>(shifted) << shift;
+        }
+        return result;
+      };
+    switch (laneWidth)
+    {
+      case PackedShiftLaneWidth::Halfword:
+        generalRegisters[instruction.destinationRegister] = {
+          shiftHalf(target.low),
+          shiftHalf(target.high)
+        };
+        break;
+      case PackedShiftLaneWidth::Word:
+        generalRegisters[instruction.destinationRegister] = {
+          shiftWord(target.low),
+          shiftWord(target.high)
+        };
+        break;
+    }
   }
   return EEInstructionExecutionOutcome::Completed;
 }

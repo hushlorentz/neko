@@ -699,6 +699,9 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::ParallelShiftLeftLogicalHalfword:
         case EEOperation::ParallelShiftRightLogicalHalfword:
         case EEOperation::ParallelShiftRightArithmeticHalfword:
+        case EEOperation::ParallelShiftLeftLogicalWord:
+        case EEOperation::ParallelShiftRightLogicalWord:
+        case EEOperation::ParallelShiftRightArithmeticWord:
           return ExpectedExecutionClassification{
             EEExecutionFamily::PackedShift,
             EEExecutionDispatch::Immediate
@@ -2347,6 +2350,52 @@ TEST_CASE("EE immediate packed halfword shift decoder and dependencies")
   }
 }
 
+TEST_CASE("EE immediate packed word shift decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t function;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {0x3c, EEOperation::ParallelShiftLeftLogicalWord},
+    {0x3e, EEOperation::ParallelShiftRightLogicalWord},
+    {0x3f, EEOperation::ParallelShiftRightArithmeticWord}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          contract.function,
+          0,
+          2,
+          3,
+          31));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == (UINT32_C(1) << 2));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(dependencies.specialWrites == 0);
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(routing.category == EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
+    REQUIRE(
+      routing.pipe0PhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I0) |
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I1)));
+  }
+}
+
 TEST_CASE("EE signed packed comparison decoder and dependencies")
 {
   struct Contract
@@ -2646,13 +2695,16 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
      true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x3c, 0, 2, 3, 7),
-     sourceMask},
+     sourceMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x3e, 0, 2, 3, 7),
-     sourceMask},
+     sourceMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x3f, 0, 2, 3, 7),
-     sourceMask},
+     sourceMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x28, 0, 2, 3, 0x01),
      sourceMask,
