@@ -1684,6 +1684,108 @@ TEST_CASE("EE full-width parallel HI LO transfer execution")
   }
 }
 
+TEST_CASE("EE formatted parallel HI LO transfer execution")
+{
+  const std::uint64_t hi =
+    UINT64_C(0xa003a002a001a000);
+  const std::uint64_t hi1 =
+    UINT64_C(0xa007a006a005a004);
+  const std::uint64_t lo =
+    UINT64_C(0xb003b002b001b000);
+  const std::uint64_t lo1 =
+    UINT64_C(0xb007b006b005b004);
+  struct Contract
+  {
+    std::uint8_t format;
+    EERegister128 expected;
+  };
+  const Contract contracts[] = {
+    {
+      0,
+      {
+        UINT64_C(0xa001a000b001b000),
+        UINT64_C(0xa005a004b005b004)
+      }
+    },
+    {
+      1,
+      {
+        UINT64_C(0xa003a002b003b002),
+        UINT64_C(0xa007a006b007b006)
+      }
+    },
+    {
+      3,
+      {
+        UINT64_C(0xa002a000b002b000),
+        UINT64_C(0xa006a004b006b004)
+      }
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI(hi);
+    core.setHI1(hi1);
+    core.setLO(lo);
+    core.setLO1(lo1);
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(
+          0x30,
+          0,
+          0,
+          3,
+          contract.format));
+
+    REQUIRE(core.generalRegister(3) == contract.expected);
+  }
+
+  SECTION("Register zero is immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI(hi);
+    core.setHI1(hi1);
+    core.setLO(lo);
+    core.setLO1(lo1);
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 0, 3));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Repeated execution replaces every destination lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI(hi);
+    core.setHI1(hi1);
+    core.setLO(lo);
+    core.setLO1(lo1);
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 3, 0));
+
+    core.setHI(0);
+    core.setHI1(0);
+    core.setLO(0);
+    core.setLO1(0);
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 3, 0));
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE packed exchange execution")
 {
   struct Contract

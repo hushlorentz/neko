@@ -718,6 +718,9 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::ParallelMoveFromLO:
         case EEOperation::ParallelMoveToHI:
         case EEOperation::ParallelMoveToLO:
+        case EEOperation::ParallelMoveFromHILOLowerWord:
+        case EEOperation::ParallelMoveFromHILOUpperWord:
+        case EEOperation::ParallelMoveFromHILOHalfword:
           return ExpectedExecutionClassification{
             EEExecutionFamily::PackedHILOTransfer,
             EEExecutionDispatch::Immediate
@@ -1791,6 +1794,66 @@ TEST_CASE("EE full-width parallel HI LO transfer decoder and dependencies")
     decodeEEInstruction(
       UINT32_C(0x70000000) |
       registerInstruction(0x29, 1, 0, 1, 0x09)),
+    EEInstructionDecodeError);
+}
+
+TEST_CASE("EE formatted parallel HI LO transfer decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t format;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {0, EEOperation::ParallelMoveFromHILOLowerWord},
+    {1, EEOperation::ParallelMoveFromHILOUpperWord},
+    {3, EEOperation::ParallelMoveFromHILOHalfword}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          0x30,
+          0,
+          0,
+          3,
+          contract.format));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == 0);
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(
+      dependencies.specialReads ==
+      (RESOURCE_HI | RESOURCE_LO |
+       RESOURCE_HI1 | RESOURCE_LO1));
+    REQUIRE(dependencies.specialWrites == 0);
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(routing.category == EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
+    REQUIRE(
+      routing.pipe0PhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I0) |
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I1)));
+  }
+
+  REQUIRE_THROWS_AS(
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x30, 1, 0, 3, 0)),
+    EEInstructionDecodeError);
+  REQUIRE_THROWS_AS(
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x30, 0, 1, 3, 3)),
     EEInstructionDecodeError);
 }
 
@@ -3036,9 +3099,16 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
 
   for (std::uint8_t format = 0; format < 32; ++format)
   {
-    requireDecodeFailure(
+    const std::uint32_t instruction =
       UINT32_C(0x70000000) |
-        registerInstruction(0x30, 0, 0, 3, format),
+      registerInstruction(0x30, 0, 0, 3, format);
+    if (format == 0 || format == 1 || format == 3)
+    {
+      REQUIRE_NOTHROW(decodeEEInstruction(instruction));
+      continue;
+    }
+    requireDecodeFailure(
+      instruction,
       format < 5
         ? EEInstructionDecodeFailure::Unsupported
         : EEInstructionDecodeFailure::Reserved);

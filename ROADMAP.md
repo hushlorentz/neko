@@ -1461,7 +1461,7 @@ continuation state before a live consumer exists.
 ### Parallel HI/LO Transfers
 
 - [x] Implement full-width `PMFHI`, `PMFLO`, `PMTHI`, and `PMTLO`
-- [ ] Implement `PMFHL.LW`, `PMFHL.UW`, and `PMFHL.LH` with the exact
+- [x] Implement `PMFHL.LW`, `PMFHL.UW`, and `PMFHL.LH` with the exact
       documented HI/LO word or halfword selection order
 - [ ] Implement saturating `PMFHL.SLW` and `PMFHL.SH`, including signed
       boundary values

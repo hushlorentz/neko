@@ -235,6 +235,9 @@ enum class EEOperation : std::uint8_t
   ParallelMoveFromLO,
   ParallelMoveToHI,
   ParallelMoveToLO,
+  ParallelMoveFromHILOLowerWord,
+  ParallelMoveFromHILOUpperWord,
+  ParallelMoveFromHILOHalfword,
   Count
 };
 

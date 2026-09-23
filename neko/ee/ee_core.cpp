@@ -2384,6 +2384,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelMoveFromLO:
     case EEOperation::ParallelMoveToHI:
     case EEOperation::ParallelMoveToLO:
+    case EEOperation::ParallelMoveFromHILOLowerWord:
+    case EEOperation::ParallelMoveFromHILOUpperWord:
+    case EEOperation::ParallelMoveFromHILOHalfword:
       return executePackedHILOTransfer(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -3195,6 +3198,39 @@ EEInstructionExecutionOutcome EECore::executePackedHILOTransfer(
         generalRegisters[instruction.sourceRegister];
       loRegister = source.low;
       lo1Register = source.high;
+      break;
+    }
+    case EEOperation::ParallelMoveFromHILOLowerWord:
+      generalRegisters[instruction.destinationRegister] = {
+        ((hiRegister & UINT64_C(0xffffffff)) << 32) |
+          (loRegister & UINT64_C(0xffffffff)),
+        ((hi1Register & UINT64_C(0xffffffff)) << 32) |
+          (lo1Register & UINT64_C(0xffffffff))
+      };
+      break;
+    case EEOperation::ParallelMoveFromHILOUpperWord:
+      generalRegisters[instruction.destinationRegister] = {
+        (hiRegister & UINT64_C(0xffffffff00000000)) |
+          (loRegister >> 32),
+        (hi1Register & UINT64_C(0xffffffff00000000)) |
+          (lo1Register >> 32)
+      };
+      break;
+    case EEOperation::ParallelMoveFromHILOHalfword:
+    {
+      const auto selectHalfwords =
+        [](std::uint64_t hi, std::uint64_t lo)
+        {
+          return
+            (lo & UINT64_C(0x000000000000ffff)) |
+            ((lo & UINT64_C(0x0000ffff00000000)) >> 16) |
+            ((hi & UINT64_C(0x000000000000ffff)) << 32) |
+            ((hi & UINT64_C(0x0000ffff00000000)) << 16);
+        };
+      generalRegisters[instruction.destinationRegister] = {
+        selectHalfwords(hiRegister, loRegister),
+        selectHalfwords(hi1Register, lo1Register)
+      };
       break;
     }
     default:
