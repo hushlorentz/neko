@@ -2400,6 +2400,7 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelMoveFromHILOHalfword:
     case EEOperation::ParallelMoveFromHILOSaturatedWord:
     case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
+    case EEOperation::ParallelMoveToHILOLowerWord:
       return executePackedHILOTransfer(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -3292,6 +3293,24 @@ EEInstructionExecutionOutcome EECore::executePackedHILOTransfer(
         packClampedWords(hiRegister, loRegister),
         packClampedWords(hi1Register, lo1Register)
       };
+      break;
+    }
+    case EEOperation::ParallelMoveToHILOLowerWord:
+    {
+      const EERegister128 source =
+        generalRegisters[instruction.sourceRegister];
+      loRegister =
+        (loRegister & UINT64_C(0xffffffff00000000)) |
+        static_cast<std::uint32_t>(source.low);
+      hiRegister =
+        (hiRegister & UINT64_C(0xffffffff00000000)) |
+        static_cast<std::uint32_t>(source.low >> 32);
+      lo1Register =
+        (lo1Register & UINT64_C(0xffffffff00000000)) |
+        static_cast<std::uint32_t>(source.high);
+      hi1Register =
+        (hi1Register & UINT64_C(0xffffffff00000000)) |
+        static_cast<std::uint32_t>(source.high >> 32);
       break;
     }
     default:

@@ -1884,6 +1884,94 @@ TEST_CASE("EE saturating parallel HI LO transfer execution")
   }
 }
 
+TEST_CASE("EE partial parallel HI LO write execution")
+{
+  const EERegister128 source = {
+    UINT64_C(0xa1a1a1a1a0a0a0a0),
+    UINT64_C(0xa3a3a3a3a2a2a2a2)
+  };
+
+  SECTION("PMTHL.LW replaces selected words and preserves the others")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setHI(UINT64_C(0x11111111aaaaaaaa));
+    core.setLO(UINT64_C(0x22222222bbbbbbbb));
+    core.setHI1(UINT64_C(0x33333333cccccccc));
+    core.setLO1(UINT64_C(0x44444444dddddddd));
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x31, 1, 0, 0, 0));
+
+    REQUIRE(core.lo() == UINT64_C(0x22222222a0a0a0a0));
+    REQUIRE(core.hi() == UINT64_C(0x11111111a1a1a1a1));
+    REQUIRE(core.lo1() == UINT64_C(0x44444444a2a2a2a2));
+    REQUIRE(core.hi1() == UINT64_C(0x33333333a3a3a3a3));
+  }
+
+  SECTION("Register zero clears selected words and preserves upper words")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI(UINT64_C(0x11111111aaaaaaaa));
+    core.setLO(UINT64_C(0x22222222bbbbbbbb));
+    core.setHI1(UINT64_C(0x33333333cccccccc));
+    core.setLO1(UINT64_C(0x44444444dddddddd));
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x31, 0, 0, 0, 0));
+
+    REQUIRE(core.lo() == UINT64_C(0x2222222200000000));
+    REQUIRE(core.hi() == UINT64_C(0x1111111100000000));
+    REQUIRE(core.lo1() == UINT64_C(0x4444444400000000));
+    REQUIRE(core.hi1() == UINT64_C(0x3333333300000000));
+  }
+
+  SECTION("PMTHL.LW and PMFHL.LW round trip selected words")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x31, 1, 0, 0, 0));
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 2, 0));
+
+    REQUIRE(core.generalRegister(2) == source);
+  }
+
+  SECTION("Repeated writes replace every selected word")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x31, 1, 0, 0, 0));
+
+    core.setGeneralRegister(1, {});
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x31, 1, 0, 0, 0));
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo1() == 0);
+    REQUIRE(core.hi1() == 0);
+  }
+}
+
 TEST_CASE("EE packed exchange execution")
 {
   struct Contract

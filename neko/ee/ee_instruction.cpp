@@ -202,6 +202,15 @@ namespace
           RESOURCE_HI | RESOURCE_LO |
           RESOURCE_HI1 | RESOURCE_LO1;
         break;
+      case EEOperation::ParallelMoveToHILOLowerWord:
+        dependencies.gprReads = source;
+        dependencies.specialReads =
+          RESOURCE_HI | RESOURCE_LO |
+          RESOURCE_HI1 | RESOURCE_LO1;
+        dependencies.specialWrites =
+          RESOURCE_HI | RESOURCE_LO |
+          RESOURCE_HI1 | RESOURCE_LO1;
+        break;
       case EEOperation::ParallelCopyHalfword:
       case EEOperation::ParallelExchangeEvenHalfword:
       case EEOperation::ParallelExchangeCenterHalfword:
@@ -1154,9 +1163,10 @@ namespace
       REGISTER_SOURCE_MASK |
         REGISTER_TARGET_MASK
     };
-    unsupported(
+    direct(
       &table,
       0x31,
+      EEOperation::ParallelMoveToHILOLowerWord,
       REGISTER_TARGET_MASK |
         REGISTER_DESTINATION_MASK |
         REGISTER_SHIFT_MASK);
@@ -2465,6 +2475,7 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelMoveFromHILOHalfword:
     case EEOperation::ParallelMoveFromHILOSaturatedWord:
     case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
+    case EEOperation::ParallelMoveToHILOLowerWord:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2645,6 +2656,7 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelMoveFromHILOHalfword:
     case EEOperation::ParallelMoveFromHILOSaturatedWord:
     case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
+    case EEOperation::ParallelMoveToHILOLowerWord:
       return EEExecutionFamily::PackedHILOTransfer;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:

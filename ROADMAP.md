@@ -1465,7 +1465,7 @@ continuation state before a live consumer exists.
       documented HI/LO word or halfword selection order
 - [x] Implement saturating `PMFHL.SLW` and `PMFHL.SH`, including signed
       boundary values
-- [ ] Implement `PMTHL.LW`, preserving the HI/LO words that the manual marks
+- [x] Implement `PMTHL.LW`, preserving the HI/LO words that the manual marks
       unchanged
 - [ ] Model dependencies against all affected `HI`, `LO`, `HI1`, and `LO1`
       resources so scalar and packed MAC work interlocks without false
