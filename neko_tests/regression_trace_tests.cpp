@@ -2640,16 +2640,20 @@ TEST_CASE("EE state snapshots include in-flight execution")
   system.clockMasterCycle();
 
   const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 3);
+  REQUIRE(events.size() == 4);
   REQUIRE(
     events[0].type ==
     NekoTraceEventType::InstructionIssued);
   REQUIRE(events[1].type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events[1].value0 == issuedStateHash);
   REQUIRE(events[2].masterCycle == 2);
-  REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
-  REQUIRE(events[2].value0 == core.stateHash());
-  REQUIRE(events[2].value0 != issuedStateHash);
+  REQUIRE(
+    events[2].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[3].masterCycle == 2);
+  REQUIRE(events[3].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[3].value0 == core.stateHash());
+  REQUIRE(events[3].value0 != issuedStateHash);
 }
 
 TEST_CASE("EE packed arithmetic traces and hashes are deterministic")

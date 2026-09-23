@@ -148,7 +148,7 @@ TEST_CASE("EE SYNC.P does not wait for integer multiply completion")
   REQUIRE(
     system.eeCore()
       .lastIssueSelection()
-      .instructionCount == 1);
+      .instructionCount == 2);
 }
 
 TEST_CASE("EE instruction stepping follows repeated branch addresses")
@@ -184,6 +184,9 @@ TEST_CASE("EE instruction stepping waits through execution latency")
   system.eeBus().write32(
     4,
     immediateInstruction(0x0d, 0, 4, 1));
+  system.eeBus().write32(
+    8,
+    registerInstruction(0x12, 0, 0, 5));
   system.eeCore().startExecution(0);
 
   const EEExecutionResult pair =
@@ -199,6 +202,7 @@ TEST_CASE("EE instruction stepping waits through execution latency")
   REQUIRE(following.instructions == 1);
   REQUIRE_FALSE(following.cycleLimitReached);
   REQUIRE(following.programCounter == 12);
+  REQUIRE(system.eeCore().generalRegister(5).low == 12);
 }
 
 TEST_CASE("EE instruction stepping can stop at its cycle bound")
@@ -209,7 +213,9 @@ TEST_CASE("EE instruction stepping can stop at its cycle bound")
   system.eeBus().write32(
     0,
     registerInstruction(0x18, 1, 2, 3));
-  system.eeBus().write32(4, 0);
+  system.eeBus().write32(
+    4,
+    registerInstruction(0x12, 0, 0, 4));
   system.eeCore().startExecution(0);
   REQUIRE(system.stepEEInstruction(1).instructions == 1);
 

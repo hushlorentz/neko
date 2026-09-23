@@ -654,7 +654,7 @@ struct EECoreTestAccess
 
     core->pendingMac0 = {};
     core->pendingMac0.active = true;
-    core->pendingMac0.remainingCycles = 5;
+    core->pendingMac0.remainingCycles = 4;
     core->pendingMac0.resultDestination =
       EECore::MACResultDestination::HIAndLOAndGPR;
     core->pendingMac0.generalRegister = 2;

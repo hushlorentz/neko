@@ -177,6 +177,210 @@ TEST_CASE("EE multiply and multiply-add execution")
   }
 }
 
+TEST_CASE("EE pending multiply divide interlocks are resource specific")
+{
+  const auto startMAC0Multiply =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      setWord(&core, 1, 2);
+      setWord(&core, 2, 3);
+      system->eeBus().write32(
+        0,
+        registerInstruction(0x18, 1, 2, 3));
+      system->eeBus().write32(
+        4,
+        registerInstruction(0x29, 0, 0, 0));
+      core.startExecution(0);
+      system->clockMasterCycle();
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.lo() == 0);
+    };
+
+  SECTION("Unrelated integer work continues while MAC0 is pending")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setWord(&core, 4, 7);
+    setWord(&core, 5, 8);
+    system.eeBus().write32(
+      8,
+      registerInstruction(0x21, 4, 5, 6));
+    startMAC0Multiply(&system);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(6).low == 15);
+    REQUIRE(core.lo() == 0);
+  }
+
+  SECTION("MAC1 can start after an older independent MAC0")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setWord(&core, 4, 4);
+    setWord(&core, 5, 5);
+    system.eeBus().write32(
+      8,
+      mmiInstruction(0x18, 4, 5, 6));
+    startMAC0Multiply(&system);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() >= 12);
+
+    system.runMasterCycles(3);
+    REQUIRE(core.lo() == 6);
+    REQUIRE(core.lo1() == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.lo1() == 20);
+  }
+
+  SECTION("MAC0 can start after an older independent MAC1")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setWord(&core, 1, 2);
+    setWord(&core, 2, 3);
+    setWord(&core, 4, 4);
+    setWord(&core, 5, 5);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x18, 1, 2, 3));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x04, 0, 0, 7));
+    system.eeBus().write32(
+      8,
+      registerInstruction(0x18, 4, 5, 6));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() >= 12);
+
+    system.runMasterCycles(3);
+    REQUIRE(core.lo1() == 6);
+    REQUIRE(core.lo() == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.lo() == 20);
+  }
+
+  SECTION("A scalar MAC0 read waits for MAC0 completion")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(
+      8,
+      registerInstruction(0x12, 0, 0, 4));
+    startMAC0Multiply(&system);
+
+    system.runMasterCycles(3);
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(4).low == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(4).low == 6);
+  }
+
+  SECTION("A scalar MAC0 write waits and follows MAC0 completion")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      4,
+      {UINT64_C(0x123456789abcdef0), 0});
+    system.eeBus().write32(
+      8,
+      registerInstruction(0x11, 4, 0, 0));
+    startMAC0Multiply(&system);
+
+    system.runMasterCycles(3);
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.hi() == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.hi() == UINT64_C(0x123456789abcdef0));
+  }
+
+  SECTION("An independent scalar MAC1 read does not wait for MAC0")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setLO1(UINT64_C(0x123456789abcdef0));
+    system.eeBus().write32(
+      8,
+      mmiInstruction(0x12, 0, 0, 4));
+    startMAC0Multiply(&system);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.generalRegister(4).low ==
+      UINT64_C(0x123456789abcdef0));
+    REQUIRE(core.lo() == 0);
+  }
+
+  SECTION("A packed full-width read waits for either MAC pipeline")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI1(UINT64_C(0x123456789abcdef0));
+    system.eeBus().write32(
+      8,
+      mmiInstruction(0x09, 0, 0, 4, 0x08));
+    startMAC0Multiply(&system);
+
+    system.runMasterCycles(3);
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(4) == EERegister128{});
+
+    system.clockMasterCycle();
+    REQUIRE(
+      core.generalRegister(4) ==
+      EERegister128{0, UINT64_C(0x123456789abcdef0)});
+  }
+
+  SECTION("A pending multiply destination interlocks GPR consumers")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    system.eeBus().write32(
+      8,
+      registerInstruction(0x21, 3, 0, 4));
+    startMAC0Multiply(&system);
+
+    system.runMasterCycles(3);
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(4).low == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(3).low == 6);
+    REQUIRE(core.generalRegister(4).low == 6);
+  }
+
+  SECTION("A pending multiply destination interlocks GPR writers")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setWord(&core, 4, 7);
+    setWord(&core, 5, 8);
+    system.eeBus().write32(
+      8,
+      registerInstruction(0x21, 4, 5, 3));
+    startMAC0Multiply(&system);
+
+    system.runMasterCycles(3);
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.generalRegister(3).low == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(3).low == 15);
+  }
+}
+
 TEST_CASE("EE divide execution")
 {
   NekoSystem system;

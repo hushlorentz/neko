@@ -1473,9 +1473,7 @@ bool EECore::issueCandidateReady(
   std::uint32_t completedLoadRegisters,
   std::size_t availableCOP1Slots) const
 {
-  if (pendingMultiplyDivideActive() &&
-      instruction.operation !=
-        EEOperation::SynchronizePipeline)
+  if (pendingMultiplyDivideBlocks(instruction))
   {
     return false;
   }
@@ -1503,6 +1501,47 @@ bool EECore::issueCandidateReady(
     !isCOP1ManagedPipelineOperation(
       instruction.operation) ||
     availableCOP1Slots != 0;
+}
+
+bool EECore::pendingMultiplyDivideBlocks(
+  const EEInstruction &instruction) const
+{
+  const EEInstructionDependencies dependencies =
+    eeInstructionDependencies(instruction);
+  const std::uint16_t specialAccesses =
+    dependencies.specialReads | dependencies.specialWrites;
+  const std::uint32_t generalRegisterAccesses =
+    dependencies.gprReads | dependencies.gprWrites;
+  const auto operationBlocks =
+    [specialAccesses, generalRegisterAccesses](
+      const PendingMultiplyDivide &operation,
+      std::uint16_t specialResources)
+    {
+      if (!operation.active)
+      {
+        return false;
+      }
+      if ((specialAccesses & specialResources) != 0)
+      {
+        return true;
+      }
+      if (operation.resultDestination !=
+            MACResultDestination::HIAndLOAndGPR ||
+          operation.generalRegister == 0)
+      {
+        return false;
+      }
+      return
+        (generalRegisterAccesses &
+         (UINT32_C(1) << operation.generalRegister)) != 0;
+    };
+  return
+    operationBlocks(
+      pendingMac0,
+      RESOURCE_HI | RESOURCE_LO) ||
+    operationBlocks(
+      pendingMac1,
+      RESOURCE_HI1 | RESOURCE_LO1);
 }
 
 bool EECore::cop1TransferReservedByStalledMove() const
@@ -1865,9 +1904,7 @@ void EECore::clock()
   updateIssueSelection(completedCOP1LoadRegisters);
   if (hadPendingOperation &&
       pendingMultiplyDivideActive() &&
-      (issueLatch.failure != IssueLatchFailure::None ||
-       issueLatch.instruction.operation !=
-         EEOperation::SynchronizePipeline))
+      issueLatch.failure != IssueLatchFailure::None)
   {
     return;
   }
@@ -1992,6 +2029,11 @@ EEIssueMemberOutcome EECore::executeIssueMember(
   const std::uint32_t instructionValue =
     issueLatch.instruction.raw;
   const EEInstruction decoded = issueLatch.instruction;
+  if (pendingMultiplyDivideBlocks(decoded))
+  {
+    pc = instructionAddress;
+    return EEIssueMemberOutcome::Stalled;
+  }
   const EEAcceptanceMode acceptanceMode =
     branchDelayPending
       ? EEAcceptanceMode::DelaySlot
@@ -5616,10 +5658,15 @@ bool EECore::cop1RetirementReady(
 bool EECore::pendingMultiplyDivideLatencyValid(
   const PendingMultiplyDivide &operation)
 {
+  const std::uint8_t maximumLatency =
+    operation.resultDestination ==
+      MACResultDestination::HIAndLOAndGPR
+      ? MULTIPLY_LATENCY
+      : DIVIDE_LATENCY;
   return
     (!operation.active ||
      (operation.remainingCycles >= 1 &&
-      operation.remainingCycles <= 37));
+      operation.remainingCycles <= maximumLatency));
 }
 
 bool EECore::pendingMultiplyDivideRegisterValid(
@@ -5649,28 +5696,9 @@ bool EECore::concurrentMultiplyDivideCanResume() const
 
 bool EECore::concurrentMultiplyDivideLatenciesValid() const
 {
-  if (!pendingMac0.active || !pendingMac1.active)
-  {
-    return true;
-  }
-  const bool mac0Multiply =
-    pendingMac0.resultDestination ==
-    MACResultDestination::HIAndLOAndGPR;
-  const bool mac1Multiply =
-    pendingMac1.resultDestination ==
-    MACResultDestination::HIAndLOAndGPR;
-  if (mac0Multiply == mac1Multiply)
-  {
-    return
-      pendingMac0.remainingCycles ==
-      pendingMac1.remainingCycles;
-  }
   return
-    mac0Multiply
-      ? pendingMac1.remainingCycles ==
-          pendingMac0.remainingCycles + 33
-      : pendingMac0.remainingCycles ==
-          pendingMac1.remainingCycles + 33;
+    pendingMultiplyDivideLatencyValid(pendingMac0) &&
+    pendingMultiplyDivideLatencyValid(pendingMac1);
 }
 
 bool EECore::concurrentMultiplyDestinationsValid() const

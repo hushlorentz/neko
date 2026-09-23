@@ -1490,7 +1490,7 @@ TEST_CASE("In-flight EE multiply latency survives save states")
   NekoSystem restored;
   restored.loadState(original.saveState());
 
-  REQUIRE(restored.eeCore().programCounter() == 4);
+  REQUIRE(restored.eeCore().programCounter() == 8);
   REQUIRE(
     restored.eeCore().stateHash() ==
     original.eeCore().stateHash());
@@ -1601,6 +1601,44 @@ TEST_CASE("Dual EE MAC pipelines survive halt and save-state resume")
   REQUIRE(restored.eeCore().lo1() == 30);
 }
 
+TEST_CASE("Staggered EE MAC pipelines survive save states")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setGeneralRegister(1, {3, 0});
+  originalCore.setGeneralRegister(2, {4, 0});
+  originalCore.setGeneralRegister(4, {5, 0});
+  originalCore.setGeneralRegister(5, {6, 0});
+  original.eeBus().write32(0, UINT32_C(0x00221818));
+  original.eeBus().write32(4, UINT32_C(0x00000029));
+  original.eeBus().write32(8, UINT32_C(0x70853018));
+  originalCore.startExecution(0);
+
+  original.runMasterCycles(2);
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+
+  REQUIRE(
+    state[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] ==
+    3);
+  REQUIRE(
+    state[SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] ==
+    4);
+
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(state));
+  REQUIRE(restored.saveState() == state);
+
+  original.runMasterCycles(4);
+  restored.runMasterCycles(4);
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(restored.eeCore().generalRegister(3).low == 12);
+  REQUIRE(restored.eeCore().generalRegister(6).low == 30);
+  REQUIRE(restored.eeCore().lo() == 12);
+  REQUIRE(restored.eeCore().lo1() == 30);
+}
+
 TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
 {
   NekoSystem source;
@@ -1629,11 +1667,11 @@ TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
     valid[SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET] ==
     6);
 
-  SECTION("latencies must describe one co-issued pair")
+  SECTION("multiply latency cannot exceed four cycles")
   {
     std::vector<std::uint8_t> invalid = valid;
     invalid[
-      SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] = 3;
+      SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] = 5;
     updateChecksum(&invalid);
     NekoSystem destination;
     REQUIRE_THROWS(destination.loadState(invalid));

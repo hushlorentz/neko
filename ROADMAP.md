@@ -1467,7 +1467,7 @@ continuation state before a live consumer exists.
       boundary values
 - [x] Implement `PMTHL.LW`, preserving the HI/LO words that the manual marks
       unchanged
-- [ ] Model dependencies against all affected `HI`, `LO`, `HI1`, and `LO1`
+- [x] Model dependencies against all affected `HI`, `LO`, `HI1`, and `LO1`
       resources so scalar and packed MAC work interlocks without false
       independence
 - [ ] Cover all format selectors, partial-register preservation, aliases,

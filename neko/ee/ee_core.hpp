@@ -1171,6 +1171,8 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t completedLoadRegisters,
       std::size_t availableCOP1Slots) const;
+    bool pendingMultiplyDivideBlocks(
+      const EEInstruction &instruction) const;
     bool cop1TransferReservedByStalledMove() const;
     bool cop1MemoryExceptionPending() const;
     bool issuePairStructurallySafe(
