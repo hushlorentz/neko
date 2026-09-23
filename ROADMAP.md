@@ -1463,7 +1463,7 @@ continuation state before a live consumer exists.
 - [x] Implement full-width `PMFHI`, `PMFLO`, `PMTHI`, and `PMTLO`
 - [x] Implement `PMFHL.LW`, `PMFHL.UW`, and `PMFHL.LH` with the exact
       documented HI/LO word or halfword selection order
-- [ ] Implement saturating `PMFHL.SLW` and `PMFHL.SH`, including signed
+- [x] Implement saturating `PMFHL.SLW` and `PMFHL.SH`, including signed
       boundary values
 - [ ] Implement `PMTHL.LW`, preserving the HI/LO words that the manual marks
       unchanged

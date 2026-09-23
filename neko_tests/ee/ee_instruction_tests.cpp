@@ -721,6 +721,8 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::ParallelMoveFromHILOLowerWord:
         case EEOperation::ParallelMoveFromHILOUpperWord:
         case EEOperation::ParallelMoveFromHILOHalfword:
+        case EEOperation::ParallelMoveFromHILOSaturatedWord:
+        case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
           return ExpectedExecutionClassification{
             EEExecutionFamily::PackedHILOTransfer,
             EEExecutionDispatch::Immediate
@@ -1807,7 +1809,9 @@ TEST_CASE("EE formatted parallel HI LO transfer decoder and dependencies")
   const Contract contracts[] = {
     {0, EEOperation::ParallelMoveFromHILOLowerWord},
     {1, EEOperation::ParallelMoveFromHILOUpperWord},
-    {3, EEOperation::ParallelMoveFromHILOHalfword}
+    {2, EEOperation::ParallelMoveFromHILOSaturatedWord},
+    {3, EEOperation::ParallelMoveFromHILOHalfword},
+    {4, EEOperation::ParallelMoveFromHILOSaturatedHalfword}
   };
 
   for (const Contract &contract : contracts)
@@ -3102,7 +3106,7 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
     const std::uint32_t instruction =
       UINT32_C(0x70000000) |
       registerInstruction(0x30, 0, 0, 3, format);
-    if (format == 0 || format == 1 || format == 3)
+    if (format < 5)
     {
       REQUIRE_NOTHROW(decodeEEInstruction(instruction));
       continue;

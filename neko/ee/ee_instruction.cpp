@@ -195,6 +195,8 @@ namespace
       case EEOperation::ParallelMoveFromHILOLowerWord:
       case EEOperation::ParallelMoveFromHILOUpperWord:
       case EEOperation::ParallelMoveFromHILOHalfword:
+      case EEOperation::ParallelMoveFromHILOSaturatedWord:
+      case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
         dependencies.gprWrites = destination;
         dependencies.specialReads =
           RESOURCE_HI | RESOURCE_LO |
@@ -2461,6 +2463,8 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelMoveFromHILOLowerWord:
     case EEOperation::ParallelMoveFromHILOUpperWord:
     case EEOperation::ParallelMoveFromHILOHalfword:
+    case EEOperation::ParallelMoveFromHILOSaturatedWord:
+    case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2639,6 +2643,8 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelMoveFromHILOLowerWord:
     case EEOperation::ParallelMoveFromHILOUpperWord:
     case EEOperation::ParallelMoveFromHILOHalfword:
+    case EEOperation::ParallelMoveFromHILOSaturatedWord:
+    case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
       return EEExecutionFamily::PackedHILOTransfer;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -3471,13 +3477,18 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
           instruction.operation =
             EEOperation::ParallelMoveFromHILOUpperWord;
           return instruction;
+        case 2:
+          instruction.operation =
+            EEOperation::ParallelMoveFromHILOSaturatedWord;
+          return instruction;
         case 3:
           instruction.operation =
             EEOperation::ParallelMoveFromHILOHalfword;
           return instruction;
-        case 2:
         case 4:
-          reject(DecodeKind::Unsupported);
+          instruction.operation =
+            EEOperation::ParallelMoveFromHILOSaturatedHalfword;
+          return instruction;
       }
       throw std::logic_error(
         "EE PMFHL format validation is incomplete.");

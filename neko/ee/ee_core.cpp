@@ -317,8 +317,32 @@ namespace
       UINT64_C(1) << (laneBits - 1);
     return (lane & signMask) == 0
       ? static_cast<std::int64_t>(lane)
-      : static_cast<std::int64_t>(
-          lane - (UINT64_C(1) << laneBits));
+      : -static_cast<std::int64_t>(
+          (UINT64_C(1) << laneBits) - lane);
+  }
+
+  std::uint64_t clampSignedValue(
+    std::int64_t value,
+    std::uint8_t outputBits)
+  {
+    if (outputBits == 0 || outputBits >= 64)
+    {
+      throw std::invalid_argument(
+        "EE signed clamp width is invalid.");
+    }
+    const std::int64_t minimum =
+      -static_cast<std::int64_t>(
+        UINT64_C(1) << (outputBits - 1));
+    const std::int64_t maximum =
+      static_cast<std::int64_t>(
+        (UINT64_C(1) << (outputBits - 1)) - 1);
+    const std::int64_t clamped =
+      value < minimum
+        ? minimum
+        : (value > maximum ? maximum : value);
+    return
+      static_cast<std::uint64_t>(clamped) &
+      ((UINT64_C(1) << outputBits) - 1);
   }
 
   std::uint64_t signedSaturatingPackedArithmetic(
@@ -335,12 +359,6 @@ namespace
     }
     const std::uint64_t laneMask =
       (UINT64_C(1) << laneBits) - 1;
-    const std::int64_t minimum =
-      -static_cast<std::int64_t>(
-        UINT64_C(1) << (laneBits - 1));
-    const std::int64_t maximum =
-      static_cast<std::int64_t>(
-        (UINT64_C(1) << (laneBits - 1)) - 1);
     std::uint64_t result = 0;
     for (std::uint8_t shift = 0;
          shift < 64;
@@ -358,15 +376,8 @@ namespace
         mode == PackedArithmeticMode::Subtract
           ? sourceLane - targetLane
           : sourceLane + targetLane;
-      const std::int64_t saturatedResult =
-        arithmeticResult < minimum
-          ? minimum
-          : (arithmeticResult > maximum
-               ? maximum
-               : arithmeticResult);
       result |=
-        (static_cast<std::uint64_t>(saturatedResult) &
-         laneMask) << shift;
+        clampSignedValue(arithmeticResult, laneBits) << shift;
     }
     return result;
   }
@@ -2387,6 +2398,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelMoveFromHILOLowerWord:
     case EEOperation::ParallelMoveFromHILOUpperWord:
     case EEOperation::ParallelMoveFromHILOHalfword:
+    case EEOperation::ParallelMoveFromHILOSaturatedWord:
+    case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
       return executePackedHILOTransfer(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
@@ -3230,6 +3243,54 @@ EEInstructionExecutionOutcome EECore::executePackedHILOTransfer(
       generalRegisters[instruction.destinationRegister] = {
         selectHalfwords(hiRegister, loRegister),
         selectHalfwords(hi1Register, lo1Register)
+      };
+      break;
+    }
+    case EEOperation::ParallelMoveFromHILOSaturatedWord:
+    {
+      const auto clampAccumulator =
+        [](std::uint64_t hi, std::uint64_t lo)
+        {
+          const std::uint64_t value =
+            ((hi & UINT64_C(0xffffffff)) << 32) |
+            (lo & UINT64_C(0xffffffff));
+          if ((value & UINT64_C(0x8000000000000000)) == 0)
+          {
+            return value > UINT64_C(0x000000007fffffff)
+              ? UINT64_C(0x000000007fffffff)
+              : value;
+          }
+          return value < UINT64_C(0xffffffff80000000)
+            ? UINT64_C(0xffffffff80000000)
+            : value;
+        };
+      generalRegisters[instruction.destinationRegister] = {
+        clampAccumulator(hiRegister, loRegister),
+        clampAccumulator(hi1Register, lo1Register)
+      };
+      break;
+    }
+    case EEOperation::ParallelMoveFromHILOSaturatedHalfword:
+    {
+      const auto packClampedWords =
+        [](std::uint64_t hi, std::uint64_t lo)
+        {
+          const auto clampWord =
+            [](std::uint32_t value)
+            {
+              return clampSignedValue(
+                signedPackedLane(value, 32),
+                16);
+            };
+          return
+            clampWord(static_cast<std::uint32_t>(lo)) |
+            (clampWord(static_cast<std::uint32_t>(lo >> 32)) << 16) |
+            (clampWord(static_cast<std::uint32_t>(hi)) << 32) |
+            (clampWord(static_cast<std::uint32_t>(hi >> 32)) << 48);
+        };
+      generalRegisters[instruction.destinationRegister] = {
+        packClampedWords(hiRegister, loRegister),
+        packClampedWords(hi1Register, lo1Register)
       };
       break;
     }

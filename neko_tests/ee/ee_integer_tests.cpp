@@ -1786,6 +1786,104 @@ TEST_CASE("EE formatted parallel HI LO transfer execution")
   }
 }
 
+TEST_CASE("EE saturating parallel HI LO transfer execution")
+{
+  SECTION("PMFHL.SH clamps signed words to halfwords in manual order")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setLO(UINT64_C(0x0000800000007fff));
+    core.setHI(UINT64_C(0xffff7fffffff8000));
+    core.setLO1(UINT64_C(0xffffffff00000001));
+    core.setHI1(UINT64_C(0x800000007fffffff));
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 3, 4));
+
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x800080007fff7fff),
+                    UINT64_C(0x80007fffffff0001)});
+  }
+
+  SECTION("PMFHL.SLW preserves exact signed word boundaries")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setLO(UINT64_C(0x111111117fffffff));
+    core.setHI(UINT64_C(0x2222222200000000));
+    core.setLO1(UINT64_C(0x3333333380000000));
+    core.setHI1(UINT64_C(0x44444444ffffffff));
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 3, 2));
+
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x000000007fffffff),
+                    UINT64_C(0xffffffff80000000)});
+  }
+
+  SECTION("PMFHL.SLW clamps positive and negative overflow")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setLO(UINT64_C(0x1111111100000000));
+    core.setHI(UINT64_C(0x2222222200000001));
+    core.setLO1(UINT64_C(0x33333333ffffffff));
+    core.setHI1(UINT64_C(0x44444444fffffffe));
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 3, 2));
+
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x000000007fffffff),
+                    UINT64_C(0xffffffff80000000)});
+  }
+
+  SECTION("PMFHL.SLW sign extends in-range words")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setLO(UINT64_C(0x1111111100000001));
+    core.setHI(UINT64_C(0x2222222200000000));
+    core.setLO1(UINT64_C(0x33333333ffffffff));
+    core.setHI1(UINT64_C(0x44444444ffffffff));
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 3, 2));
+
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{1, UINT64_MAX});
+  }
+
+  SECTION("Register zero remains immutable")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setLO(UINT64_MAX);
+    core.setHI(UINT64_MAX);
+    core.setLO1(UINT64_MAX);
+    core.setHI1(UINT64_MAX);
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 0, 4));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE packed exchange execution")
 {
   struct Contract
