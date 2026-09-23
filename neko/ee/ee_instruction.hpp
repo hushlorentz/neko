@@ -231,6 +231,10 @@ enum class EEOperation : std::uint8_t
   ParallelAbsoluteHalfword,
   ParallelAbsoluteWord,
   ParallelLeadingSignCountWord,
+  ParallelMoveFromHI,
+  ParallelMoveFromLO,
+  ParallelMoveToHI,
+  ParallelMoveToLO,
   Count
 };
 
@@ -381,6 +385,7 @@ enum class EEExecutionFamily : std::uint8_t
   PackedRearrange,
   PackedShift,
   FunnelShift,
+  PackedHILOTransfer,
   PackedCompare,
   PackedAbsolute,
   PackedLeadingSignCount,

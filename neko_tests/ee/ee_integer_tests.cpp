@@ -1595,6 +1595,95 @@ TEST_CASE("EE packed copy execution")
   }
 }
 
+TEST_CASE("EE full-width parallel HI LO transfer execution")
+{
+  const EERegister128 hi = {
+    UINT64_C(0x1111222233334444),
+    UINT64_C(0x5555666677778888)
+  };
+  const EERegister128 lo = {
+    UINT64_C(0x9999aaaabbbbcccc),
+    UINT64_C(0xddddeeeeffff0000)
+  };
+
+  SECTION("PMFHI and PMFLO copy both architectural halves")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI(hi.low);
+    core.setHI1(hi.high);
+    core.setLO(lo.low);
+    core.setLO1(lo.high);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x08, 0, 0, 2));
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x09, 0, 0, 3));
+
+    REQUIRE(core.generalRegister(2) == hi);
+    REQUIRE(core.generalRegister(3) == lo);
+  }
+
+  SECTION("PMTHI and PMTLO replace both architectural halves")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, hi);
+    core.setGeneralRegister(2, lo);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x08, 1, 0, 0));
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x09, 2, 0, 0));
+
+    REQUIRE(core.hi() == hi.low);
+    REQUIRE(core.hi1() == hi.high);
+    REQUIRE(core.lo() == lo.low);
+    REQUIRE(core.lo1() == lo.high);
+  }
+
+  SECTION("Register zero remains immutable and supplies zero")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI(hi.low);
+    core.setHI1(hi.high);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x08, 0, 0, 0));
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x08, 0, 0, 0));
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.hi1() == 0);
+  }
+
+  SECTION("Repeated transfers replace the complete destination")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setHI(hi.low);
+    core.setHI1(hi.high);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x08, 0, 0, 2));
+
+    core.setHI(0);
+    core.setHI1(0);
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x08, 0, 0, 2));
+    REQUIRE(core.generalRegister(2) == EERegister128{});
+  }
+}
+
 TEST_CASE("EE packed exchange execution")
 {
   struct Contract

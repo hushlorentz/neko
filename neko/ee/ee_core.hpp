@@ -1208,6 +1208,8 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeFunnelShift(
       const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executePackedHILOTransfer(
+      const EEInstruction &instruction);
     EEInstructionExecutionOutcome executePackedCompare(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executePackedAbsolute(

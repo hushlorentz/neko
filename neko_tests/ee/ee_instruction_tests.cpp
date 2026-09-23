@@ -714,6 +714,14 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::FunnelShift,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::ParallelMoveFromHI:
+        case EEOperation::ParallelMoveFromLO:
+        case EEOperation::ParallelMoveToHI:
+        case EEOperation::ParallelMoveToLO:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::PackedHILOTransfer,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::ParallelCompareEqualByte:
         case EEOperation::ParallelCompareEqualHalfword:
         case EEOperation::ParallelCompareEqualWord:
@@ -1669,6 +1677,121 @@ TEST_CASE("EE packed logical decoder and dependencies")
     REQUIRE(dependencies.specialReads == 0);
     REQUIRE(dependencies.specialWrites == 0);
   }
+}
+
+TEST_CASE("EE full-width parallel HI LO transfer decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t primaryFunction;
+    std::uint8_t nestedFunction;
+    std::uint8_t source;
+    std::uint8_t destination;
+    EEOperation operation;
+    std::uint32_t gprReads;
+    std::uint32_t gprWrites;
+    std::uint16_t specialReads;
+    std::uint16_t specialWrites;
+  };
+  const Contract contracts[] = {
+    {
+      0x09,
+      0x08,
+      0,
+      3,
+      EEOperation::ParallelMoveFromHI,
+      0,
+      UINT32_C(1) << 3,
+      RESOURCE_HI | RESOURCE_HI1,
+      0
+    },
+    {
+      0x09,
+      0x09,
+      0,
+      3,
+      EEOperation::ParallelMoveFromLO,
+      0,
+      UINT32_C(1) << 3,
+      RESOURCE_LO | RESOURCE_LO1,
+      0
+    },
+    {
+      0x29,
+      0x08,
+      1,
+      0,
+      EEOperation::ParallelMoveToHI,
+      UINT32_C(1) << 1,
+      0,
+      0,
+      RESOURCE_HI | RESOURCE_HI1
+    },
+    {
+      0x29,
+      0x09,
+      1,
+      0,
+      EEOperation::ParallelMoveToLO,
+      UINT32_C(1) << 1,
+      0,
+      0,
+      RESOURCE_LO | RESOURCE_LO1
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          contract.primaryFunction,
+          contract.source,
+          0,
+          contract.destination,
+          contract.nestedFunction));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(dependencies.gprReads == contract.gprReads);
+    REQUIRE(dependencies.gprWrites == contract.gprWrites);
+    REQUIRE(dependencies.specialReads == contract.specialReads);
+    REQUIRE(dependencies.specialWrites == contract.specialWrites);
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(routing.category == EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
+    REQUIRE(
+      routing.pipe0PhysicalPipelines ==
+      static_cast<std::uint8_t>(
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I0) |
+        static_cast<std::uint8_t>(EEPhysicalPipeline::I1)));
+  }
+
+  REQUIRE_THROWS_AS(
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x09, 1, 0, 3, 0x08)),
+    EEInstructionDecodeError);
+  REQUIRE_THROWS_AS(
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x09, 0, 1, 3, 0x09)),
+    EEInstructionDecodeError);
+  REQUIRE_THROWS_AS(
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x29, 1, 1, 0, 0x08)),
+    EEInstructionDecodeError);
+  REQUIRE_THROWS_AS(
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x29, 1, 0, 1, 0x09)),
+    EEInstructionDecodeError);
 }
 
 TEST_CASE("EE packed equality decoder and dependencies")
@@ -2694,8 +2817,8 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   const NestedTableContract contracts[] = {
     {0x08, UINT32_C(0x3000f800), UINT32_C(0xcfff07ff)},
     {0x28, UINT32_C(0xf088fb01), UINT32_C(0x0f7704fe)},
-    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xcc0c440c)},
-    {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c4408)}
+    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xcc0c470c)},
+    {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c4708)}
   };
   const auto requireDecodeFailure =
     [](std::uint32_t instruction,
@@ -2856,16 +2979,20 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
      true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 0, 3, 0x08),
-     sourceMask | targetMask},
+     sourceMask | targetMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 0, 3, 0x09),
-     sourceMask | targetMask},
+     sourceMask | targetMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 1, 0, 0, 0x08),
-     targetMask | destinationMask},
+     targetMask | destinationMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 1, 0, 0, 0x09),
-     targetMask | destinationMask},
+     targetMask | destinationMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 1, 2, 0, 0x1d),
      destinationMask},

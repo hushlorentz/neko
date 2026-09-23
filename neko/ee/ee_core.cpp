@@ -2380,6 +2380,11 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return executePackedShift(instruction);
     case EEOperation::QuadwordFunnelShiftRightVariable:
       return executeFunnelShift(instruction);
+    case EEOperation::ParallelMoveFromHI:
+    case EEOperation::ParallelMoveFromLO:
+    case EEOperation::ParallelMoveToHI:
+    case EEOperation::ParallelMoveToLO:
+      return executePackedHILOTransfer(instruction);
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
@@ -3156,6 +3161,48 @@ EEInstructionExecutionOutcome EECore::executeFunnelShift(
     shiftedWord(wordOffset),
     shiftedWord(wordOffset + 1)
   };
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedHILOTransfer(
+  const EEInstruction &instruction)
+{
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelMoveFromHI:
+      generalRegisters[instruction.destinationRegister] = {
+        hiRegister,
+        hi1Register
+      };
+      break;
+    case EEOperation::ParallelMoveFromLO:
+      generalRegisters[instruction.destinationRegister] = {
+        loRegister,
+        lo1Register
+      };
+      break;
+    case EEOperation::ParallelMoveToHI:
+    {
+      const EERegister128 source =
+        generalRegisters[instruction.sourceRegister];
+      hiRegister = source.low;
+      hi1Register = source.high;
+      break;
+    }
+    case EEOperation::ParallelMoveToLO:
+    {
+      const EERegister128 source =
+        generalRegisters[instruction.sourceRegister];
+      loRegister = source.low;
+      lo1Register = source.high;
+      break;
+    }
+    default:
+      throw std::logic_error(
+        "EE packed-HI-LO-transfer handler received an "
+        "incompatible operation.");
+  }
+  generalRegisters[0] = {};
   return EEInstructionExecutionOutcome::Completed;
 }
 

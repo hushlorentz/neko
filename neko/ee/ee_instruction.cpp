@@ -176,6 +176,22 @@ namespace
         dependencies.gprWrites = destination;
         dependencies.specialReads = RESOURCE_SA;
         break;
+      case EEOperation::ParallelMoveFromHI:
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_HI | RESOURCE_HI1;
+        break;
+      case EEOperation::ParallelMoveFromLO:
+        dependencies.gprWrites = destination;
+        dependencies.specialReads = RESOURCE_LO | RESOURCE_LO1;
+        break;
+      case EEOperation::ParallelMoveToHI:
+        dependencies.gprReads = source;
+        dependencies.specialWrites = RESOURCE_HI | RESOURCE_HI1;
+        break;
+      case EEOperation::ParallelMoveToLO:
+        dependencies.gprReads = source;
+        dependencies.specialWrites = RESOURCE_LO | RESOURCE_LO1;
+        break;
       case EEOperation::ParallelCopyHalfword:
       case EEOperation::ParallelExchangeEvenHalfword:
       case EEOperation::ParallelExchangeCenterHalfword:
@@ -1523,6 +1539,18 @@ namespace
         EEOperation::ParallelAnd,
         0
       };
+      result[0x08] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMoveFromHI,
+        REGISTER_SOURCE_MASK |
+          REGISTER_TARGET_MASK
+      };
+      result[0x09] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMoveFromLO,
+        REGISTER_SOURCE_MASK |
+          REGISTER_TARGET_MASK
+      };
       result[0x02] = {
         DecodeKind::Direct,
         EEOperation::ParallelShiftLeftLogicalVariableWord,
@@ -1618,6 +1646,18 @@ namespace
         DecodeKind::Direct,
         EEOperation::ParallelOr,
         0
+      };
+      result[0x08] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMoveToHI,
+        REGISTER_TARGET_MASK |
+          REGISTER_DESTINATION_MASK
+      };
+      result[0x09] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMoveToLO,
+        REGISTER_TARGET_MASK |
+          REGISTER_DESTINATION_MASK
       };
       result[0x03] = {
         DecodeKind::Direct,
@@ -2406,6 +2446,10 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelShiftRightLogicalVariableWord:
     case EEOperation::ParallelShiftRightArithmeticVariableWord:
     case EEOperation::QuadwordFunnelShiftRightVariable:
+    case EEOperation::ParallelMoveFromHI:
+    case EEOperation::ParallelMoveFromLO:
+    case EEOperation::ParallelMoveToHI:
+    case EEOperation::ParallelMoveToLO:
     case EEOperation::ParallelMaximumHalfword:
     case EEOperation::ParallelMaximumWord:
     case EEOperation::ParallelMinimumHalfword:
@@ -2577,6 +2621,11 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
       return EEExecutionFamily::PackedShift;
     case EEOperation::QuadwordFunnelShiftRightVariable:
       return EEExecutionFamily::FunnelShift;
+    case EEOperation::ParallelMoveFromHI:
+    case EEOperation::ParallelMoveFromLO:
+    case EEOperation::ParallelMoveToHI:
+    case EEOperation::ParallelMoveToLO:
+      return EEExecutionFamily::PackedHILOTransfer;
     case EEOperation::ParallelCompareEqualByte:
     case EEOperation::ParallelCompareEqualHalfword:
     case EEOperation::ParallelCompareEqualWord:
