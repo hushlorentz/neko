@@ -699,7 +699,7 @@ struct EECoreTestAccess
         core->pendingMac0) &&
       EECore::pendingMultiplyDivideDestinationValid(
         core->pendingMac0) &&
-      core->concurrentMultiplyDivideCanResume() &&
+      core->concurrentMultiplyDivideExecutionStateValid() &&
       core->concurrentMultiplyDivideLatenciesValid() &&
       core->concurrentMultiplyDestinationsValid() &&
       core->cop1ProgramOrderInRange(

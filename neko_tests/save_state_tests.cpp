@@ -1687,6 +1687,71 @@ TEST_CASE("Staggered EE MAC pipelines survive save states")
   REQUIRE(restored.eeCore().lo1() == 30);
 }
 
+TEST_CASE("Pending EE MAC work excludes younger A-stage continuations")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setGeneralRegister(1, {3, 0});
+  core.setGeneralRegister(2, {4, 0});
+  original.eeBus().write32(0, UINT32_C(0x00221818));
+  original.eeBus().write32(4, UINT32_C(0x00000029));
+  original.eeBus().write32(8, UINT32_C(0x70224489));
+  original.eeBus().write32(12, UINT32_C(0x24040001));
+  core.startExecution(0);
+
+  original.runMasterCycles(3);
+  REQUIRE(core.programCounter() == 12);
+  REQUIRE(core.lo() == 0);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(state));
+  REQUIRE(restored.saveState() == state);
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(restored.eeCore().generalRegister(4).low == 1);
+  REQUIRE(restored.eeCore().lo() == 0);
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(restored.eeCore().lo() == 12);
+}
+
+TEST_CASE("Dual EE MAC undefined-operation halts survive save states")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setGeneralRegister(1, {3, 0});
+  core.setGeneralRegister(2, {4, 0});
+  core.setGeneralRegister(4, {5, 0});
+  core.setGeneralRegister(5, {6, 0});
+  core.setGeneralRegister(7, {0x100, 0});
+  original.eeBus().write32(0, UINT32_C(0x00221818));
+  original.eeBus().write32(4, UINT32_C(0x70853018));
+  original.eeBus().write32(8, UINT32_C(0x00e03809));
+  core.startExecution(0);
+
+  original.runMasterCycles(2);
+  REQUIRE_FALSE(core.clockActive());
+  REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.lo() == 0);
+  REQUIRE(core.lo1() == 0);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(state));
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    original.eeCore().stateHash());
+}
+
 TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
 {
   NekoSystem source;
@@ -1735,7 +1800,7 @@ TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
     REQUIRE_THROWS(destination.loadState(invalid));
   }
 
-  SECTION("terminal halts cannot retain both pipelines")
+  SECTION("fetch halts cannot retain both pipelines")
   {
     std::vector<std::uint8_t> invalid = valid;
     invalid[SIMPLE_EE_EXECUTION_STATE_OFFSET] =

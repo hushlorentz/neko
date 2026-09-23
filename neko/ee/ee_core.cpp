@@ -1463,9 +1463,17 @@ EEIssueSelection EECore::selectReadyIssueCandidates(
     return selectEESingleIssue(
       candidates.older->instruction);
   }
-  return selectEEIssuePair(
+  const EEIssueSelection selection = selectEEIssuePair(
     candidates.older->instruction,
     candidates.younger->instruction);
+  if (pendingMultiplyDivideActive() &&
+      selection.continuation ==
+        EEIssueContinuation::YoungerAStageOneCycle)
+  {
+    return selectEESingleIssue(
+      candidates.older->instruction);
+  }
+  return selection;
 }
 
 bool EECore::issueCandidateReady(
@@ -5571,7 +5579,7 @@ void EECore::startPendingMultiplyDivide(
   assert(pendingMultiplyDivideLatencyValid(operation));
   assert(pendingMultiplyDivideRegisterValid(operation));
   assert(pendingMultiplyDivideDestinationValid(operation));
-  assert(concurrentMultiplyDivideCanResume());
+  assert(concurrentMultiplyDivideExecutionStateValid());
   assert(concurrentMultiplyDivideLatenciesValid());
   assert(concurrentMultiplyDestinationsValid());
 }
@@ -5684,14 +5692,15 @@ bool EECore::pendingMultiplyDivideDestinationValid(
     operation.generalRegister == 0;
 }
 
-bool EECore::concurrentMultiplyDivideCanResume() const
+bool EECore::concurrentMultiplyDivideExecutionStateValid() const
 {
   return
     !pendingMac0.active ||
     !pendingMac1.active ||
     state == EEExecutionState::Running ||
     (state == EEExecutionState::Halted &&
-     haltReason == EEStopReason::HostHalt);
+     (haltReason == EEStopReason::HostHalt ||
+      haltReason == EEStopReason::UndefinedOperation));
 }
 
 bool EECore::concurrentMultiplyDivideLatenciesValid() const

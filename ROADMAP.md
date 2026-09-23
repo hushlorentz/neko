@@ -1472,7 +1472,7 @@ continuation state before a live consumer exists.
       independence
 - [x] Cover all format selectors, partial-register preservation, aliases,
       register zero, pending-MAC interlocks, traces, hashes, and save states
-- [ ] Complete an independent review of parallel HI/LO transfers
+- [x] Complete an independent review of parallel HI/LO transfers
 
 ### Packed MAC Continuation and Word Operations
 

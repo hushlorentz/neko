@@ -1354,7 +1354,7 @@ class EECore final : public ClockedComponent
       const PendingMultiplyDivide &operation);
     static bool pendingMultiplyDivideDestinationValid(
       const PendingMultiplyDivide &operation);
-    bool concurrentMultiplyDivideCanResume() const;
+    bool concurrentMultiplyDivideExecutionStateValid() const;
     bool concurrentMultiplyDivideLatenciesValid() const;
     bool concurrentMultiplyDestinationsValid() const;
     bool cop1ProgramOrderInRange(

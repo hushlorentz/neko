@@ -241,8 +241,8 @@ void NekoSaveStateCodec::readEECore(
       core->pendingMac1.active)
   {
     require(
-      core->concurrentMultiplyDivideCanResume(),
-      "EE concurrent multiply/divide state cannot resume");
+      core->concurrentMultiplyDivideExecutionStateValid(),
+      "EE concurrent multiply/divide execution state is invalid");
     require(
       core->concurrentMultiplyDivideLatenciesValid(),
       "EE concurrent multiply/divide latencies are invalid");
