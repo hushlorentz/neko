@@ -1470,7 +1470,7 @@ continuation state before a live consumer exists.
 - [x] Model dependencies against all affected `HI`, `LO`, `HI1`, and `LO1`
       resources so scalar and packed MAC work interlocks without false
       independence
-- [ ] Cover all format selectors, partial-register preservation, aliases,
+- [x] Cover all format selectors, partial-register preservation, aliases,
       register zero, pending-MAC interlocks, traces, hashes, and save states
 - [ ] Complete an independent review of parallel HI/LO transfers
 

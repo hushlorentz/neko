@@ -2891,6 +2891,76 @@ TEST_CASE("EE funnel shift traces and hashes are deterministic")
   REQUIRE(events[1].value0 == first.eeCore().stateHash());
 }
 
+TEST_CASE("EE parallel HI LO transfer traces and hashes are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      system->eeBus().write32(
+        0,
+        nestedMmiInstruction(0x31, 0, 1, 0, 0));
+      system->eeCore().setGeneralRegister(
+        1,
+        {
+          UINT64_C(0xa1a1a1a1a0a0a0a0),
+          UINT64_C(0xa3a3a3a3a2a2a2a2)
+        });
+      system->eeCore().setHI(
+        UINT64_C(0x11111111aaaaaaaa));
+      system->eeCore().setLO(
+        UINT64_C(0x22222222bbbbbbbb));
+      system->eeCore().setHI1(
+        UINT64_C(0x33333333cccccccc));
+      system->eeCore().setLO1(
+        UINT64_C(0x44444444dddddddd));
+      system->eeCore().startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+  const std::uint64_t initialHash =
+    first.eeCore().stateHash();
+
+  first.clockMasterCycle();
+  second.clockMasterCycle();
+
+  REQUIRE(
+    first.eeCore().lo() ==
+    UINT64_C(0x22222222a0a0a0a0));
+  REQUIRE(
+    first.eeCore().hi() ==
+    UINT64_C(0x11111111a1a1a1a1));
+  REQUIRE(
+    first.eeCore().lo1() ==
+    UINT64_C(0x44444444a2a2a2a2));
+  REQUIRE(
+    first.eeCore().hi1() ==
+    UINT64_C(0x33333333a3a3a3a3));
+  REQUIRE(first.eeCore().stateHash() != initialHash);
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+  REQUIRE(first.traceHash() == second.traceHash());
+
+  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  REQUIRE(events.size() == 2);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(
+    events[0].value1 ==
+    nestedMmiInstruction(0x31, 0, 1, 0, 0));
+  REQUIRE(
+    events[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::ParallelMoveToHILOLowerWord));
+  REQUIRE(events[1].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[1].value0 == first.eeCore().stateHash());
+}
+
 TEST_CASE("Older COP1 memory work does not partially enter an issue group")
 {
   NekoSystem system;

@@ -1431,6 +1431,54 @@ TEST_CASE("Running EE scheduler state survives save states")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("Parallel HI LO transfer state survives save states")
+{
+  const EERegister128 source = {
+    UINT64_C(0xa1a1a1a1a0a0a0a0),
+    UINT64_C(0xa3a3a3a3a2a2a2a2)
+  };
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setGeneralRegister(1, source);
+  originalCore.setHI(UINT64_C(0x11111111aaaaaaaa));
+  originalCore.setLO(UINT64_C(0x22222222bbbbbbbb));
+  originalCore.setHI1(UINT64_C(0x33333333cccccccc));
+  originalCore.setLO1(UINT64_C(0x44444444dddddddd));
+  original.eeBus().write32(0, UINT32_C(0x70200031));
+  original.eeBus().write32(4, UINT32_C(0x70001030));
+  originalCore.startExecution(0);
+
+  original.clockMasterCycle();
+  REQUIRE(originalCore.programCounter() == 4);
+  REQUIRE(
+    originalCore.lo() ==
+    UINT64_C(0x22222222a0a0a0a0));
+  REQUIRE(
+    originalCore.hi() ==
+    UINT64_C(0x11111111a1a1a1a1));
+  REQUIRE(
+    originalCore.lo1() ==
+    UINT64_C(0x44444444a2a2a2a2));
+  REQUIRE(
+    originalCore.hi1() ==
+    UINT64_C(0x33333333a3a3a3a3));
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+  REQUIRE(restored.saveState() == state);
+
+  original.clockMasterCycle();
+  restored.clockMasterCycle();
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    originalCore.stateHash() ==
+    restored.eeCore().stateHash());
+  REQUIRE(restored.eeCore().generalRegister(2) == source);
+}
+
 TEST_CASE("EE integer execution exceptions survive save states")
 {
   NekoSystem original;

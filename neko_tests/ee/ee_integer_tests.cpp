@@ -1682,6 +1682,23 @@ TEST_CASE("EE full-width parallel HI LO transfer execution")
       nestedMmiInstruction(0x09, 0x08, 0, 0, 2));
     REQUIRE(core.generalRegister(2) == EERegister128{});
   }
+
+  SECTION("Full-width transfers round trip through the same GPR")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, hi);
+
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x29, 0x08, 1, 0, 0));
+    core.setGeneralRegister(1, {});
+    runInstruction(
+      &system,
+      nestedMmiInstruction(0x09, 0x08, 0, 0, 1));
+
+    REQUIRE(core.generalRegister(1) == hi);
+  }
 }
 
 TEST_CASE("EE formatted parallel HI LO transfer execution")
@@ -1948,6 +1965,25 @@ TEST_CASE("EE partial parallel HI LO write execution")
         registerInstruction(0x30, 0, 0, 2, 0));
 
     REQUIRE(core.generalRegister(2) == source);
+  }
+
+  SECTION("Partial transfers round trip through the same GPR")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x31, 1, 0, 0, 0));
+    core.setGeneralRegister(1, {});
+    runInstruction(
+      &system,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x30, 0, 0, 1, 0));
+
+    REQUIRE(core.generalRegister(1) == source);
   }
 
   SECTION("Repeated writes replace every selected word")

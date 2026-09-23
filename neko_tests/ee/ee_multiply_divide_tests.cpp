@@ -381,6 +381,95 @@ TEST_CASE("EE pending multiply divide interlocks are resource specific")
   }
 }
 
+TEST_CASE("EE packed HI LO transfers wait for either pending MAC pipeline")
+{
+  struct Contract
+  {
+    std::uint32_t instruction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {
+      mmiInstruction(0x09, 0, 0, 8, 0x08),
+      EEOperation::ParallelMoveFromHI
+    },
+    {
+      mmiInstruction(0x09, 0, 0, 8, 0x09),
+      EEOperation::ParallelMoveFromLO
+    },
+    {
+      mmiInstruction(0x29, 8, 0, 0, 0x08),
+      EEOperation::ParallelMoveToHI
+    },
+    {
+      mmiInstruction(0x29, 8, 0, 0, 0x09),
+      EEOperation::ParallelMoveToLO
+    },
+    {
+      mmiInstruction(0x30, 0, 0, 8, 0),
+      EEOperation::ParallelMoveFromHILOLowerWord
+    },
+    {
+      mmiInstruction(0x30, 0, 0, 8, 1),
+      EEOperation::ParallelMoveFromHILOUpperWord
+    },
+    {
+      mmiInstruction(0x30, 0, 0, 8, 2),
+      EEOperation::ParallelMoveFromHILOSaturatedWord
+    },
+    {
+      mmiInstruction(0x30, 0, 0, 8, 3),
+      EEOperation::ParallelMoveFromHILOHalfword
+    },
+    {
+      mmiInstruction(0x30, 0, 0, 8, 4),
+      EEOperation::ParallelMoveFromHILOSaturatedHalfword
+    },
+    {
+      mmiInstruction(0x31, 8, 0, 0),
+      EEOperation::ParallelMoveToHILOLowerWord
+    }
+  };
+
+  for (const bool mac1 : {false, true})
+  {
+    for (const Contract &contract : contracts)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      setWord(&core, 1, 2);
+      setWord(&core, 2, 3);
+      core.setGeneralRegister(
+        8,
+        {
+          UINT64_C(0x1111222233334444),
+          UINT64_C(0x5555666677778888)
+        });
+      system.eeBus().write32(
+        0,
+        mac1
+          ? mmiInstruction(0x18, 1, 2, 3)
+          : registerInstruction(0x18, 1, 2, 3));
+      system.eeBus().write32(
+        4,
+        mac1
+          ? mmiInstruction(0x04, 0, 0, 7)
+          : registerInstruction(0x29, 0, 0, 0));
+      system.eeBus().write32(8, contract.instruction);
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      REQUIRE(core.programCounter() == 4);
+      system.runMasterCycles(3);
+      REQUIRE(core.programCounter() == 8);
+
+      system.clockMasterCycle();
+      REQUIRE(core.programCounter() >= 12);
+      REQUIRE(core.lastInstruction().operation == contract.operation);
+    }
+  }
+}
+
 TEST_CASE("EE divide execution")
 {
   NekoSystem system;
