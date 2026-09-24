@@ -1484,7 +1484,7 @@ continuation state before a live consumer exists.
       conflicting scalar MAC0/MAC1 access
 - [x] Implement signed `PMULTW` and unsigned `PMULTUW`, atomically delivering
       the two 64-bit products to the full HI/LO state and `rd`
-- [ ] Implement `PMADDW`, `PMADDUW`, and `PMSUBW` using the corresponding
+- [x] Implement `PMADDW`, `PMADDUW`, and `PMSUBW` using the corresponding
       64-bit HI/LO accumulators and documented modulo results
 - [ ] Enforce the manual's sign-extended-word operand restriction through the
       deterministic undefined-operation policy before allocating delayed work

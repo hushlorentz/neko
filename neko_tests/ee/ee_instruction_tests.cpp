@@ -649,6 +649,9 @@ TEST_CASE("Every EE operation has complete shared metadata")
           };
         case EEOperation::ParallelMultiplyWord:
         case EEOperation::ParallelMultiplyUnsignedWord:
+        case EEOperation::ParallelMultiplyAddWord:
+        case EEOperation::ParallelMultiplyAddUnsignedWord:
+        case EEOperation::ParallelMultiplySubtractWord:
           return ExpectedExecutionClassification{
             EEExecutionFamily::PackedMultiply,
             EEExecutionDispatch::PackedMACContinuation
@@ -1696,11 +1699,34 @@ TEST_CASE("EE packed word multiply decoder and dependencies")
   struct Contract
   {
     std::uint8_t primaryFunction;
+    std::uint8_t nestedFunction;
     EEOperation operation;
+    std::uint16_t specialReads;
   };
   const Contract contracts[] = {
-    {0x09, EEOperation::ParallelMultiplyWord},
-    {0x29, EEOperation::ParallelMultiplyUnsignedWord}
+    {0x09, 0x0c, EEOperation::ParallelMultiplyWord, 0},
+    {0x29, 0x0c, EEOperation::ParallelMultiplyUnsignedWord, 0},
+    {
+      0x09,
+      0x00,
+      EEOperation::ParallelMultiplyAddWord,
+      RESOURCE_HI | RESOURCE_LO |
+        RESOURCE_HI1 | RESOURCE_LO1
+    },
+    {
+      0x29,
+      0x00,
+      EEOperation::ParallelMultiplyAddUnsignedWord,
+      RESOURCE_HI | RESOURCE_LO |
+        RESOURCE_HI1 | RESOURCE_LO1
+    },
+    {
+      0x09,
+      0x04,
+      EEOperation::ParallelMultiplySubtractWord,
+      RESOURCE_HI | RESOURCE_LO |
+        RESOURCE_HI1 | RESOURCE_LO1
+    }
   };
 
   for (const Contract &contract : contracts)
@@ -1713,7 +1739,7 @@ TEST_CASE("EE packed word multiply decoder and dependencies")
           1,
           2,
           3,
-          0x0c));
+          contract.nestedFunction));
     const EEInstructionDependencies dependencies =
       eeInstructionDependencies(decoded);
 
@@ -1722,7 +1748,9 @@ TEST_CASE("EE packed word multiply decoder and dependencies")
       dependencies.gprReads ==
       ((UINT32_C(1) << 1) | (UINT32_C(1) << 2)));
     REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
-    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(
+      dependencies.specialReads ==
+      contract.specialReads);
     REQUIRE(
       dependencies.specialWrites ==
       (RESOURCE_HI | RESOURCE_LO |
@@ -2989,8 +3017,8 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   const NestedTableContract contracts[] = {
     {0x08, UINT32_C(0x3000f800), UINT32_C(0xcfff07ff)},
     {0x28, UINT32_C(0xf088fb01), UINT32_C(0x0f7704fe)},
-    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xcc0c570c)},
-    {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c5708)}
+    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xcc0c571d)},
+    {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c5709)}
   };
   const auto requireDecodeFailure =
     [](std::uint32_t instruction,

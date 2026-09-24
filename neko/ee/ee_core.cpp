@@ -2479,6 +2479,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return executePackedLeadingSignCount(instruction);
     case EEOperation::ParallelMultiplyWord:
     case EEOperation::ParallelMultiplyUnsignedWord:
+    case EEOperation::ParallelMultiplyAddWord:
+    case EEOperation::ParallelMultiplyAddUnsignedWord:
+    case EEOperation::ParallelMultiplySubtractWord:
       return executePackedMultiply(instruction, address);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
@@ -3521,8 +3524,41 @@ EEInstructionExecutionOutcome EECore::executePackedMultiply(
     generalRegisters[instruction.sourceRegister];
   const EERegister128 target =
     generalRegisters[instruction.targetRegister];
-  const bool signedOperands =
-    instruction.operation == EEOperation::ParallelMultiplyWord;
+  bool signedOperands = true;
+  bool accumulate = false;
+  bool subtract = false;
+  PackedMACOperation packedOperation =
+    PackedMACOperation::MultiplyWord;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelMultiplyWord:
+      break;
+    case EEOperation::ParallelMultiplyUnsignedWord:
+      signedOperands = false;
+      packedOperation =
+        PackedMACOperation::MultiplyUnsignedWord;
+      break;
+    case EEOperation::ParallelMultiplyAddWord:
+      accumulate = true;
+      packedOperation =
+        PackedMACOperation::MultiplyAddWord;
+      break;
+    case EEOperation::ParallelMultiplyAddUnsignedWord:
+      signedOperands = false;
+      accumulate = true;
+      packedOperation =
+        PackedMACOperation::MultiplyAddUnsignedWord;
+      break;
+    case EEOperation::ParallelMultiplySubtractWord:
+      accumulate = true;
+      subtract = true;
+      packedOperation =
+        PackedMACOperation::MultiplySubtractWord;
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed multiply operation classification is incomplete.");
+  }
   const auto multiplyLane =
     [signedOperands](std::uint64_t left, std::uint64_t right)
     {
@@ -3534,10 +3570,24 @@ EEInstructionExecutionOutcome EECore::executePackedMultiply(
         ? multiplySignedWords(leftWord, rightWord)
         : multiplyUnsignedWords(leftWord, rightWord);
     };
-  const EERegister128 products = {
+  EERegister128 products = {
     multiplyLane(source.low, target.low),
     multiplyLane(source.high, target.high)
   };
+  if (accumulate)
+  {
+    const EERegister128 accumulator =
+      packedMACAccumulatorValues();
+    products = subtract
+      ? EERegister128{
+          accumulator.low - products.low,
+          accumulator.high - products.high
+        }
+      : EERegister128{
+          accumulator.low + products.low,
+          accumulator.high + products.high
+        };
+  }
   const EERegister128 hiResult = {
     signExtendWord(
       static_cast<std::uint32_t>(products.low >> 32)),
@@ -3551,9 +3601,7 @@ EEInstructionExecutionOutcome EECore::executePackedMultiply(
       static_cast<std::uint32_t>(products.high))
   };
   startPackedMACOperation(
-    signedOperands
-      ? PackedMACOperation::MultiplyWord
-      : PackedMACOperation::MultiplyUnsignedWord,
+    packedOperation,
     source,
     target,
     hiResult,
@@ -5631,6 +5679,33 @@ bool EECore::packedMACAdmissionAvailable() const
       {
         return !operation.active;
       });
+}
+
+EERegister128 EECore::packedMACAccumulatorValues() const
+{
+  const InFlightPackedMACOperation *newest = nullptr;
+  for (const InFlightPackedMACOperation &operation :
+       packedMACContinuation.operations)
+  {
+    if (operation.active &&
+        (newest == nullptr ||
+         operation.programOrder > newest->programOrder))
+    {
+      newest = &operation;
+    }
+  }
+  const EERegister128 hi =
+    newest == nullptr
+      ? EERegister128{hiRegister, hi1Register}
+      : newest->hiResult;
+  const EERegister128 lo =
+    newest == nullptr
+      ? EERegister128{loRegister, lo1Register}
+      : newest->loResult;
+  return {
+    accumulatorValue(hi.low, lo.low),
+    accumulatorValue(hi.high, lo.high)
+  };
 }
 
 bool EECore::packedMACContinuationBlocks(

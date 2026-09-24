@@ -1381,6 +1381,7 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction) const;
     bool packedMACContinuationActive() const;
     bool packedMACAdmissionAvailable() const;
+    EERegister128 packedMACAccumulatorValues() const;
     bool packedMACContinuationBlocks(
       const EEInstruction &instruction) const;
     bool packedMACBlocksScalarMAC(

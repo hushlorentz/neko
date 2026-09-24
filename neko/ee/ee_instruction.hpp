@@ -243,6 +243,9 @@ enum class EEOperation : std::uint8_t
   ParallelMoveToHILOLowerWord,
   ParallelMultiplyWord,
   ParallelMultiplyUnsignedWord,
+  ParallelMultiplyAddWord,
+  ParallelMultiplyAddUnsignedWord,
+  ParallelMultiplySubtractWord,
   Count
 };
 

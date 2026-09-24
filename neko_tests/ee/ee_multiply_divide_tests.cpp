@@ -365,6 +365,124 @@ TEST_CASE("EE packed word multiply execution")
   }
 }
 
+TEST_CASE("EE packed word multiply accumulate execution")
+{
+  SECTION("PMADDW adds signed products to both accumulators")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0xfffffffffffffffe), 2});
+    core.setGeneralRegister(2, {3, 3});
+    core.setHI(0);
+    core.setLO(10);
+    core.setHI1(1);
+    core.setLO1(0);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x00));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo() == 4);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 6);
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{4, UINT64_C(0x0000000100000006)});
+  }
+
+  SECTION("PMADDUW wraps unsigned accumulation modulo 64 bits")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {1, 4});
+    core.setGeneralRegister(2, {3, 5});
+    core.setHI(UINT64_MAX);
+    core.setLO(UINT64_C(0xfffffffffffffffe));
+    core.setHI1(0);
+    core.setLO1(5);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x29, 1, 2, 3, 0x00));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo() == 1);
+    REQUIRE(core.hi1() == 0);
+    REQUIRE(core.lo1() == 25);
+    REQUIRE(core.generalRegister(3) == EERegister128{1, 25});
+  }
+
+  SECTION("PMSUBW subtracts signed products modulo 64 bits")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {2, UINT64_C(0xfffffffffffffffe)});
+    core.setGeneralRegister(2, {4, 3});
+    core.setHI(0);
+    core.setLO(5);
+    core.setHI1(0);
+    core.setLO1(0);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x04));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.hi() == UINT64_MAX);
+    REQUIRE(core.lo() == UINT64_C(0xfffffffffffffffd));
+    REQUIRE(core.hi1() == 0);
+    REQUIRE(core.lo1() == 6);
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0xfffffffffffffffd), 6});
+  }
+
+  SECTION("Overlapping accumulate forwards the newest packed result")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {2, 3});
+    core.setGeneralRegister(2, {4, 5});
+    core.setGeneralRegister(5, {1, 1});
+    core.setGeneralRegister(6, {2, 2});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x0c));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x09, 5, 6, 4, 0x00));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() >= 8);
+
+    system.runMasterCycles(2);
+    REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+    REQUIRE(core.generalRegister(4) == EERegister128{});
+
+    system.runMasterCycles(2);
+    REQUIRE(core.generalRegister(4) == EERegister128{10, 17});
+    REQUIRE(core.lo() == 10);
+    REQUIRE(core.lo1() == 17);
+  }
+}
+
 TEST_CASE("EE pending multiply divide interlocks are resource specific")
 {
   const auto startMAC0Multiply =
