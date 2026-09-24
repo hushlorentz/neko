@@ -177,6 +177,194 @@ TEST_CASE("EE multiply and multiply-add execution")
   }
 }
 
+TEST_CASE("EE packed word multiply execution")
+{
+  SECTION("PMULTW commits signed lane products atomically")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0xfffffffffffffffe),
+       UINT64_C(0xffffffff80000000)});
+    core.setGeneralRegister(
+      2,
+      {3, UINT64_MAX});
+    core.setGeneralRegister(
+      3,
+      {UINT64_C(0x1111222233334444),
+       UINT64_C(0x5555666677778888)});
+    core.setHI(UINT64_C(0x1111));
+    core.setLO(UINT64_C(0x2222));
+    core.setHI1(UINT64_C(0x3333));
+    core.setLO1(UINT64_C(0x4444));
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x0c));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(3);
+    REQUIRE(core.hi() == UINT64_C(0x1111));
+    REQUIRE(core.lo() == UINT64_C(0x2222));
+    REQUIRE(core.hi1() == UINT64_C(0x3333));
+    REQUIRE(core.lo1() == UINT64_C(0x4444));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x1111222233334444),
+                    UINT64_C(0x5555666677778888)});
+
+    system.clockMasterCycle();
+    REQUIRE(core.hi() == UINT64_MAX);
+    REQUIRE(core.lo() == UINT64_C(0xfffffffffffffffa));
+    REQUIRE(core.hi1() == 0);
+    REQUIRE(core.lo1() == UINT64_C(0xffffffff80000000));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0xfffffffffffffffa),
+                    UINT64_C(0x0000000080000000)});
+  }
+
+  SECTION("PMULTUW sign extends HI LO words but preserves full products")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_MAX, UINT64_C(0xffffffff80000000)});
+    core.setGeneralRegister(2, {2, 3});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x29, 1, 2, 4, 0x0c));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == UINT64_C(0xfffffffffffffffe));
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == UINT64_C(0xffffffff80000000));
+    REQUIRE(
+      core.generalRegister(4) ==
+      EERegister128{UINT64_C(0x00000001fffffffe),
+                    UINT64_C(0x0000000180000000)});
+  }
+
+  SECTION("A zero destination still commits both HI LO products")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {4, 5});
+    core.setGeneralRegister(2, {6, 7});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0c));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.lo() == 24);
+    REQUIRE(core.lo1() == 35);
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+  }
+
+  SECTION("Two packed multiplies overlap at the two-cycle interval")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {2, 3});
+    core.setGeneralRegister(2, {4, 5});
+    core.setGeneralRegister(5, {6, 7});
+    core.setGeneralRegister(6, {8, 9});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x0c));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x29, 5, 6, 4, 0x0c));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() >= 8);
+
+    system.runMasterCycles(2);
+    REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+    REQUIRE(core.generalRegister(4) == EERegister128{});
+
+    system.runMasterCycles(2);
+    REQUIRE(core.generalRegister(4) == EERegister128{48, 63});
+    REQUIRE(core.lo() == 48);
+    REQUIRE(core.lo1() == 63);
+  }
+
+  SECTION("Packed and scalar MAC1 starts retry in either order")
+  {
+    const auto prepareRegisters =
+      [](EECore *core)
+      {
+        core->setGeneralRegister(1, {2, 3});
+        core->setGeneralRegister(2, {4, 5});
+        setWord(core, 5, 6);
+        setWord(core, 6, 7);
+      };
+
+    SECTION("Packed older blocks the younger MAC1 continuation")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      prepareRegisters(&core);
+      system.eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      system.eeBus().write32(
+        4,
+        mmiInstruction(0x18, 5, 6, 7));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      REQUIRE(core.programCounter() == 4);
+      system.clockMasterCycle();
+      REQUIRE(core.programCounter() == 4);
+      system.clockMasterCycle();
+      REQUIRE(core.programCounter() == 4);
+      system.clockMasterCycle();
+      REQUIRE(core.programCounter() == 4);
+      system.clockMasterCycle();
+      REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+      REQUIRE(core.lo1() == 15);
+      system.runMasterCycles(4);
+      REQUIRE(core.lo1() == 42);
+    }
+
+    SECTION("Scalar MAC1 older makes the younger packed work retry")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      prepareRegisters(&core);
+      system.eeBus().write32(
+        0,
+        mmiInstruction(0x18, 5, 6, 7));
+      system.eeBus().write32(
+        4,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      REQUIRE(core.programCounter() == 4);
+      system.runMasterCycles(4);
+      REQUIRE(core.lo1() == 42);
+      REQUIRE(core.generalRegister(3) == EERegister128{});
+      system.runMasterCycles(4);
+      REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+    }
+  }
+}
+
 TEST_CASE("EE pending multiply divide interlocks are resource specific")
 {
   const auto startMAC0Multiply =

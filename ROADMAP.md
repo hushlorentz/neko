@@ -1482,7 +1482,7 @@ continuation state before a live consumer exists.
 - [x] Permit the documented 4-cycle latency and 2-cycle throughput without
       allowing a third overlapping packed multiply/accumulate operation or a
       conflicting scalar MAC0/MAC1 access
-- [ ] Implement signed `PMULTW` and unsigned `PMULTUW`, atomically delivering
+- [x] Implement signed `PMULTW` and unsigned `PMULTUW`, atomically delivering
       the two 64-bit products to the full HI/LO state and `rd`
 - [ ] Implement `PMADDW`, `PMADDUW`, and `PMSUBW` using the corresponding
       64-bit HI/LO accumulators and documented modulo results

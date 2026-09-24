@@ -1484,11 +1484,7 @@ bool EECore::issueCandidateReady(
   std::uint32_t completedLoadRegisters,
   std::size_t availableCOP1Slots) const
 {
-  if (pendingMultiplyDivideBlocks(instruction))
-  {
-    return false;
-  }
-  if (packedMACBlocksScalarMAC(instruction))
+  if (multiplyDivideContinuationBlocks(instruction))
   {
     return false;
   }
@@ -2050,7 +2046,7 @@ EEIssueMemberOutcome EECore::executeIssueMember(
   const std::uint32_t instructionValue =
     issueLatch.instruction.raw;
   const EEInstruction decoded = issueLatch.instruction;
-  if (pendingMultiplyDivideBlocks(decoded))
+  if (multiplyDivideContinuationBlocks(decoded))
   {
     pc = instructionAddress;
     return EEIssueMemberOutcome::Stalled;
@@ -2481,6 +2477,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return executePackedAbsolute(instruction);
     case EEOperation::ParallelLeadingSignCountWord:
       return executePackedLeadingSignCount(instruction);
+    case EEOperation::ParallelMultiplyWord:
+    case EEOperation::ParallelMultiplyUnsignedWord:
+      return executePackedMultiply(instruction, address);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return executeRegisterCompare(instruction);
@@ -3500,6 +3499,67 @@ EECore::executePackedLeadingSignCount(
   writeLowDoubleword(
     instruction.destinationRegister,
     result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedMultiply(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  if (!isPackedMultiplyOperation(instruction.operation))
+  {
+    throw std::logic_error(
+      "EE packed multiply handler received an incompatible operation.");
+  }
+  if (!packedMACAdmissionAvailable())
+  {
+    pc = address;
+    return EEInstructionExecutionOutcome::Delayed;
+  }
+
+  const EERegister128 source =
+    generalRegisters[instruction.sourceRegister];
+  const EERegister128 target =
+    generalRegisters[instruction.targetRegister];
+  const bool signedOperands =
+    instruction.operation == EEOperation::ParallelMultiplyWord;
+  const auto multiplyLane =
+    [signedOperands](std::uint64_t left, std::uint64_t right)
+    {
+      const std::uint32_t leftWord =
+        static_cast<std::uint32_t>(left);
+      const std::uint32_t rightWord =
+        static_cast<std::uint32_t>(right);
+      return signedOperands
+        ? multiplySignedWords(leftWord, rightWord)
+        : multiplyUnsignedWords(leftWord, rightWord);
+    };
+  const EERegister128 products = {
+    multiplyLane(source.low, target.low),
+    multiplyLane(source.high, target.high)
+  };
+  const EERegister128 hiResult = {
+    signExtendWord(
+      static_cast<std::uint32_t>(products.low >> 32)),
+    signExtendWord(
+      static_cast<std::uint32_t>(products.high >> 32))
+  };
+  const EERegister128 loResult = {
+    signExtendWord(
+      static_cast<std::uint32_t>(products.low)),
+    signExtendWord(
+      static_cast<std::uint32_t>(products.high))
+  };
+  startPackedMACOperation(
+    signedOperands
+      ? PackedMACOperation::MultiplyWord
+      : PackedMACOperation::MultiplyUnsignedWord,
+    source,
+    target,
+    hiResult,
+    loResult,
+    instruction.destinationRegister,
+    products);
   return EEInstructionExecutionOutcome::Completed;
 }
 
@@ -5536,6 +5596,17 @@ bool EECore::pendingMACContinuationActive() const
     packedMACContinuationActive();
 }
 
+bool EECore::multiplyDivideContinuationBlocks(
+  const EEInstruction &instruction) const
+{
+  return
+    pendingMultiplyDivideBlocks(instruction) ||
+    (isPackedMultiplyOperation(instruction.operation) &&
+     !packedMACAdmissionAvailable()) ||
+    packedMACContinuationBlocks(instruction) ||
+    packedMACBlocksScalarMAC(instruction);
+}
+
 bool EECore::packedMACContinuationActive() const
 {
   return std::any_of(
@@ -5560,6 +5631,43 @@ bool EECore::packedMACAdmissionAvailable() const
       {
         return !operation.active;
       });
+}
+
+bool EECore::packedMACContinuationBlocks(
+  const EEInstruction &instruction) const
+{
+  if (!packedMACContinuationActive())
+  {
+    return false;
+  }
+  const EEInstructionDependencies dependencies =
+    eeInstructionDependencies(instruction);
+  const std::uint32_t generalRegisterAccesses =
+    dependencies.gprReads | dependencies.gprWrites;
+  for (const InFlightPackedMACOperation &operation :
+       packedMACContinuation.operations)
+  {
+    if (!operation.active)
+    {
+      continue;
+    }
+    if (operation.destinationRegister != 0 &&
+        (generalRegisterAccesses &
+         (UINT32_C(1) << operation.destinationRegister)) != 0)
+    {
+      return true;
+    }
+  }
+  if (isPackedMultiplyOperation(instruction.operation))
+  {
+    return false;
+  }
+  const std::uint16_t specialAccesses =
+    dependencies.specialReads | dependencies.specialWrites;
+  return
+    (specialAccesses &
+     (RESOURCE_HI | RESOURCE_LO |
+      RESOURCE_HI1 | RESOURCE_LO1)) != 0;
 }
 
 bool EECore::packedMACBlocksScalarMAC(
@@ -5609,6 +5717,15 @@ void EECore::advancePackedMACContinuation()
     if (oldest == nullptr || oldest->remainingCycles != 0)
     {
       return;
+    }
+    hiRegister = oldest->hiResult.low;
+    hi1Register = oldest->hiResult.high;
+    loRegister = oldest->loResult.low;
+    lo1Register = oldest->loResult.high;
+    if (oldest->destinationRegister != 0)
+    {
+      generalRegisters[oldest->destinationRegister] =
+        oldest->generalRegisterResult;
     }
     *oldest = {};
   }

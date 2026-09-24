@@ -647,6 +647,12 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::PackedLogical,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::ParallelMultiplyWord:
+        case EEOperation::ParallelMultiplyUnsignedWord:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::PackedMultiply,
+            EEExecutionDispatch::PackedMACContinuation
+          };
         case EEOperation::ParallelAddByte:
         case EEOperation::ParallelAddHalfword:
         case EEOperation::ParallelAddWord:
@@ -1682,6 +1688,53 @@ TEST_CASE("EE packed logical decoder and dependencies")
     REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
     REQUIRE(dependencies.specialReads == 0);
     REQUIRE(dependencies.specialWrites == 0);
+  }
+}
+
+TEST_CASE("EE packed word multiply decoder and dependencies")
+{
+  struct Contract
+  {
+    std::uint8_t primaryFunction;
+    EEOperation operation;
+  };
+  const Contract contracts[] = {
+    {0x09, EEOperation::ParallelMultiplyWord},
+    {0x29, EEOperation::ParallelMultiplyUnsignedWord}
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    const EEInstruction decoded =
+      decodeEEInstruction(
+        UINT32_C(0x70000000) |
+        registerInstruction(
+          contract.primaryFunction,
+          1,
+          2,
+          3,
+          0x0c));
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(decoded);
+
+    REQUIRE(decoded.operation == contract.operation);
+    REQUIRE(
+      dependencies.gprReads ==
+      ((UINT32_C(1) << 1) | (UINT32_C(1) << 2)));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(
+      dependencies.specialWrites ==
+      (RESOURCE_HI | RESOURCE_LO |
+       RESOURCE_HI1 | RESOURCE_LO1));
+    const EEInstructionRouting routing =
+      eeInstructionRouting(decoded.operation);
+    REQUIRE(
+      routing.category ==
+      EEInstructionCategory::WideOperate);
+    REQUIRE(
+      routing.logicalPipes ==
+      static_cast<std::uint8_t>(EELogicalPipe::Pipe0));
   }
 }
 
@@ -2936,8 +2989,8 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   const NestedTableContract contracts[] = {
     {0x08, UINT32_C(0x3000f800), UINT32_C(0xcfff07ff)},
     {0x28, UINT32_C(0xf088fb01), UINT32_C(0x0f7704fe)},
-    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xcc0c470c)},
-    {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c4708)}
+    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xcc0c570c)},
+    {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c5708)}
   };
   const auto requireDecodeFailure =
     [](std::uint32_t instruction,

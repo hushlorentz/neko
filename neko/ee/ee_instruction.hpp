@@ -241,6 +241,8 @@ enum class EEOperation : std::uint8_t
   ParallelMoveFromHILOSaturatedWord,
   ParallelMoveFromHILOSaturatedHalfword,
   ParallelMoveToHILOLowerWord,
+  ParallelMultiplyWord,
+  ParallelMultiplyUnsignedWord,
   Count
 };
 
@@ -396,6 +398,7 @@ enum class EEExecutionFamily : std::uint8_t
   PackedAbsolute,
   PackedLeadingSignCount,
   PackedLogical,
+  PackedMultiply,
   Multiply,
   Divide
 };
@@ -407,6 +410,7 @@ enum class EEExecutionDispatch : std::uint8_t
   ManagedCOP1,
   MAC0Continuation,
   MAC1Continuation,
+  PackedMACContinuation,
   COP2Coupled
 };
 
@@ -529,6 +533,7 @@ bool isCOP1SingleSourceStagedOperation(
 bool isCOP1ComparisonOperation(EEOperation operation);
 bool isCOP1StagedOperation(EEOperation operation);
 bool isCOP1ManagedPipelineOperation(EEOperation operation);
+bool isPackedMultiplyOperation(EEOperation operation);
 bool isLoadOperation(EEOperation operation);
 bool isStoreOperation(EEOperation operation);
 EECOP1DividerTiming cop1DividerTiming(

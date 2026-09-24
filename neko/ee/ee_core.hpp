@@ -1259,6 +1259,9 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executePackedLeadingSignCount(
       const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executePackedMultiply(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeRegisterCompare(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeImmediateCompare(
@@ -1374,8 +1377,12 @@ class EECore final : public ClockedComponent
       std::uint32_t address,
       std::uint32_t instruction);
     bool pendingMACContinuationActive() const;
+    bool multiplyDivideContinuationBlocks(
+      const EEInstruction &instruction) const;
     bool packedMACContinuationActive() const;
     bool packedMACAdmissionAvailable() const;
+    bool packedMACContinuationBlocks(
+      const EEInstruction &instruction) const;
     bool packedMACBlocksScalarMAC(
       const EEInstruction &instruction) const;
     void advancePackedMACContinuation();
