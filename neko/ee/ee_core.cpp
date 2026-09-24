@@ -1078,6 +1078,7 @@ void EECore::reset()
   executingProgramOrder = 0;
   pendingMac0 = {};
   pendingMac1 = {};
+  packedMACContinuation = {};
   shiftAmountOrdering.clear();
   clearBranchDelayContinuation();
   clearCOP1DividerBranchContext();
@@ -1316,6 +1317,7 @@ void EECore::resetExecutionContinuation()
   clearCOP1DividerBranchContext();
   pendingMac0 = {};
   pendingMac1 = {};
+  packedMACContinuation = {};
   shiftAmountOrdering.clear();
   clearIssueFrontEnd();
   youngerAStageContinuation = {};

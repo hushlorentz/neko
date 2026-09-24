@@ -1476,7 +1476,7 @@ continuation state before a live consumer exists.
 
 ### Packed MAC Continuation and Word Operations
 
-- [ ] Add a fixed-capacity, allocation-free in-flight MMI MAC representation
+- [x] Add a fixed-capacity, allocation-free in-flight MMI MAC representation
       with operation, program order, captured operands/results, destination,
       remaining latency, and initiation occupancy
 - [ ] Permit the documented 4-cycle latency and 2-cycle throughput without

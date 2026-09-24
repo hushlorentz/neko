@@ -523,6 +523,21 @@ class EECore final : public ClockedComponent
       HIAndLOAndGPR
     };
 
+    enum class PackedMACOperation : std::uint8_t
+    {
+      None,
+      MultiplyWord,
+      MultiplyUnsignedWord,
+      MultiplyAddWord,
+      MultiplyAddUnsignedWord,
+      MultiplySubtractWord,
+      MultiplyHalfword,
+      MultiplyAddHalfword,
+      MultiplySubtractHalfword,
+      HorizontalMultiplyAddHalfword,
+      HorizontalMultiplySubtractHalfword
+    };
+
     enum class COP1ScoreboardQuery : std::uint8_t
     {
       CandidateReadiness,
@@ -1012,6 +1027,31 @@ class EECore final : public ClockedComponent
       std::uint64_t generalRegisterResult = 0;
     };
 
+    struct InFlightPackedMACOperation
+    {
+      bool active = false;
+      PackedMACOperation operation =
+        PackedMACOperation::None;
+      std::uint64_t programOrder = 0;
+      EERegister128 source;
+      EERegister128 target;
+      EERegister128 hiResult;
+      EERegister128 loResult;
+      std::uint8_t destinationRegister = 0;
+      EERegister128 generalRegisterResult;
+      std::uint8_t remainingCycles = 0;
+    };
+
+    struct PackedMACContinuation
+    {
+      static constexpr std::size_t CAPACITY = 2;
+
+      std::array<
+        InFlightPackedMACOperation,
+        CAPACITY> operations = {};
+      std::uint8_t initiationCycles = 0;
+    };
+
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
     std::array<
@@ -1056,6 +1096,7 @@ class EECore final : public ClockedComponent
     std::uint64_t executingProgramOrder = 0;
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
+    PackedMACContinuation packedMACContinuation;
     std::uint8_t cop1DividerInitiationCycles = 0;
     EEOperation cop1DividerOperation = EEOperation::Nop;
     EEShiftAmountOrderingWindow shiftAmountOrdering;

@@ -168,6 +168,122 @@ struct EECoreTestAccess
     return core.inFlightCOP1ProgramOrder().size();
   }
 
+  static bool packedMACContinuationIsFixedCapacity(
+    EECore *core)
+  {
+    static_assert(
+      std::is_trivially_copyable<
+        EECore::PackedMACContinuation>::value,
+      "Packed MAC continuation must remain inline state.");
+    static_assert(
+      EECore::PackedMACContinuation::CAPACITY == 2,
+      "Packed MAC continuation capacity must permit two overlaps.");
+
+    EECore::PackedMACContinuation &continuation =
+      core->packedMACContinuation;
+    continuation = {};
+    continuation.initiationCycles = 2;
+    EECore::InFlightPackedMACOperation &operation =
+      continuation.operations[1];
+    operation.active = true;
+    operation.operation =
+      EECore::PackedMACOperation::MultiplyWord;
+    operation.programOrder = 7;
+    operation.source = {
+      UINT64_C(0x0123456789abcdef),
+      UINT64_C(0xfedcba9876543210)
+    };
+    operation.target = {
+      UINT64_C(0x1111222233334444),
+      UINT64_C(0xaaaabbbbccccdddd)
+    };
+    operation.hiResult = {
+      UINT64_C(0x1020304050607080),
+      UINT64_C(0x90a0b0c0d0e0f000)
+    };
+    operation.loResult = {
+      UINT64_C(0x0011223344556677),
+      UINT64_C(0x8899aabbccddeeff)
+    };
+    operation.destinationRegister = 9;
+    operation.generalRegisterResult = {
+      UINT64_C(0x13579bdf2468ace0),
+      UINT64_C(0x0eca8642fdb97531)
+    };
+    operation.remainingCycles = 4;
+
+    return
+      continuation.operations.size() == 2 &&
+      continuation.initiationCycles == 2 &&
+      operation.active &&
+      operation.operation ==
+        EECore::PackedMACOperation::MultiplyWord &&
+      operation.programOrder == 7 &&
+      operation.source.low ==
+        UINT64_C(0x0123456789abcdef) &&
+      operation.source.high ==
+        UINT64_C(0xfedcba9876543210) &&
+      operation.target.low ==
+        UINT64_C(0x1111222233334444) &&
+      operation.target.high ==
+        UINT64_C(0xaaaabbbbccccdddd) &&
+      operation.hiResult.low ==
+        UINT64_C(0x1020304050607080) &&
+      operation.hiResult.high ==
+        UINT64_C(0x90a0b0c0d0e0f000) &&
+      operation.loResult.low ==
+        UINT64_C(0x0011223344556677) &&
+      operation.loResult.high ==
+        UINT64_C(0x8899aabbccddeeff) &&
+      operation.destinationRegister == 9 &&
+      operation.generalRegisterResult.low ==
+        UINT64_C(0x13579bdf2468ace0) &&
+      operation.generalRegisterResult.high ==
+        UINT64_C(0x0eca8642fdb97531) &&
+      operation.remainingCycles == 4;
+  }
+
+  static bool packedMACContinuationClears(
+    EECore *core)
+  {
+    const auto seed =
+      [core]()
+      {
+        core->packedMACContinuation = {};
+        core->packedMACContinuation.initiationCycles = 2;
+        EECore::InFlightPackedMACOperation &operation =
+          core->packedMACContinuation.operations[0];
+        operation.active = true;
+        operation.operation =
+          EECore::PackedMACOperation::MultiplyUnsignedWord;
+        operation.programOrder = 3;
+        operation.remainingCycles = 4;
+      };
+    const auto cleared =
+      [core]()
+      {
+        return
+          core->packedMACContinuation.initiationCycles == 0 &&
+          !core->packedMACContinuation.operations[0].active &&
+          core->packedMACContinuation.operations[0].operation ==
+            EECore::PackedMACOperation::None &&
+          core->packedMACContinuation.operations[0].programOrder ==
+            0 &&
+          core->packedMACContinuation.operations[0]
+            .remainingCycles == 0;
+      };
+
+    seed();
+    core->resetExecutionContinuation();
+    if (!cleared())
+    {
+      return false;
+    }
+    seed();
+    core->reset();
+    return cleared();
+  }
+
   static void allocateCOP1WithoutAssignedOrder(EECore *core)
   {
     EEInstruction instruction;
@@ -785,6 +901,24 @@ TEST_CASE("EE in-flight COP1 program order is allocation-free and slot-independe
   REQUIRE(order[0] == 2);
   REQUIRE(order[1] == 7);
   REQUIRE(order[2] == 9);
+}
+
+TEST_CASE("EE packed MAC continuation is fixed-capacity inline state")
+{
+  NekoSystem system;
+
+  REQUIRE(
+    EECoreTestAccess::packedMACContinuationIsFixedCapacity(
+      &system.eeCore()));
+}
+
+TEST_CASE("EE packed MAC continuation clears across restart and reset")
+{
+  NekoSystem system;
+
+  REQUIRE(
+    EECoreTestAccess::packedMACContinuationClears(
+      &system.eeCore()));
 }
 
 TEST_CASE("EE in-flight COP1 lifecycle gates invalid transitions")
