@@ -154,6 +154,7 @@ namespace
     UINT64_C(1099511628211);
   constexpr std::uint8_t MULTIPLY_LATENCY = 4;
   constexpr std::uint8_t DIVIDE_LATENCY = 37;
+  constexpr std::uint8_t PACKED_MAC_INITIATION_CYCLES = 2;
 
   std::uint32_t updatedCOP1Status(
     std::uint32_t status,
@@ -1468,7 +1469,7 @@ EEIssueSelection EECore::selectReadyIssueCandidates(
   const EEIssueSelection selection = selectEEIssuePair(
     candidates.older->instruction,
     candidates.younger->instruction);
-  if (pendingMultiplyDivideActive() &&
+  if (pendingMACContinuationActive() &&
       selection.continuation ==
         EEIssueContinuation::YoungerAStageOneCycle)
   {
@@ -1484,6 +1485,10 @@ bool EECore::issueCandidateReady(
   std::size_t availableCOP1Slots) const
 {
   if (pendingMultiplyDivideBlocks(instruction))
+  {
+    return false;
+  }
+  if (packedMACBlocksScalarMAC(instruction))
   {
     return false;
   }
@@ -1893,6 +1898,7 @@ void EECore::clock()
   }
   if (youngerAStageContinuation.active)
   {
+    advancePackedMACContinuation();
     executeYoungerAStageContinuation();
     return;
   }
@@ -1908,12 +1914,13 @@ void EECore::clock()
 
   fillIssueFrontEnd();
   const bool hadPendingOperation =
-    pendingMultiplyDivideActive();
+    pendingMACContinuationActive();
   advancePendingMultiplyDivide(MACPipeline::MAC0);
   advancePendingMultiplyDivide(MACPipeline::MAC1);
+  advancePackedMACContinuation();
   updateIssueSelection(completedCOP1LoadRegisters);
   if (hadPendingOperation &&
-      pendingMultiplyDivideActive() &&
+      pendingMACContinuationActive() &&
       issueLatch.failure != IssueLatchFailure::None)
   {
     return;
@@ -1957,6 +1964,10 @@ EECore::acceptYoungerAStageContinuation()
   {
     throw std::logic_error(
       "EE younger A-stage continuation cannot be accepted.");
+  }
+  if (packedMACBlocksScalarMAC(issueLatch.instruction))
+  {
+    return EEIssueMemberOutcome::Stalled;
   }
   if (nextEEProgramOrder == UINT64_MAX)
   {
@@ -5517,9 +5528,146 @@ void EECore::haltUndefinedOperation(
   rejectedInstructionValue = instruction;
 }
 
-bool EECore::pendingMultiplyDivideActive() const
+bool EECore::pendingMACContinuationActive() const
 {
-  return pendingMac0.active || pendingMac1.active;
+  return
+    pendingMac0.active ||
+    pendingMac1.active ||
+    packedMACContinuationActive();
+}
+
+bool EECore::packedMACContinuationActive() const
+{
+  return std::any_of(
+    packedMACContinuation.operations.begin(),
+    packedMACContinuation.operations.end(),
+    [](const InFlightPackedMACOperation &operation)
+    {
+      return operation.active;
+    });
+}
+
+bool EECore::packedMACAdmissionAvailable() const
+{
+  return
+    !pendingMac0.active &&
+    !pendingMac1.active &&
+    packedMACContinuation.initiationCycles == 0 &&
+    std::any_of(
+      packedMACContinuation.operations.begin(),
+      packedMACContinuation.operations.end(),
+      [](const InFlightPackedMACOperation &operation)
+      {
+        return !operation.active;
+      });
+}
+
+bool EECore::packedMACBlocksScalarMAC(
+  const EEInstruction &instruction) const
+{
+  if (!packedMACContinuationActive())
+  {
+    return false;
+  }
+  const EEInstructionCategory category =
+    eeOperationMetadata(instruction.operation).routing.category;
+  return
+    category == EEInstructionCategory::MAC0 ||
+    category == EEInstructionCategory::MAC1;
+}
+
+void EECore::advancePackedMACContinuation()
+{
+  if (packedMACContinuation.initiationCycles != 0)
+  {
+    --packedMACContinuation.initiationCycles;
+  }
+  for (InFlightPackedMACOperation &operation :
+       packedMACContinuation.operations)
+  {
+    if (!operation.active)
+    {
+      continue;
+    }
+    assert(operation.remainingCycles != 0);
+    --operation.remainingCycles;
+  }
+
+  while (true)
+  {
+    InFlightPackedMACOperation *oldest = nullptr;
+    for (InFlightPackedMACOperation &operation :
+         packedMACContinuation.operations)
+    {
+      if (operation.active &&
+          (oldest == nullptr ||
+           operation.programOrder < oldest->programOrder))
+      {
+        oldest = &operation;
+      }
+    }
+    if (oldest == nullptr || oldest->remainingCycles != 0)
+    {
+      return;
+    }
+    *oldest = {};
+  }
+}
+
+void EECore::startPackedMACOperation(
+  PackedMACOperation operation,
+  const EERegister128 &source,
+  const EERegister128 &target,
+  const EERegister128 &hiResult,
+  const EERegister128 &loResult,
+  std::uint8_t destinationRegister,
+  const EERegister128 &generalRegisterResult)
+{
+  if (executingProgramOrder == 0)
+  {
+    throw std::logic_error(
+      "EE packed MAC allocation requires assigned program order.");
+  }
+  if (operation == PackedMACOperation::None)
+  {
+    throw std::invalid_argument(
+      "EE packed MAC allocation requires an operation.");
+  }
+  if (destinationRegister >= GENERAL_REGISTER_COUNT)
+  {
+    throw std::invalid_argument(
+      "EE packed MAC destination register is invalid.");
+  }
+  if (!packedMACAdmissionAvailable())
+  {
+    throw std::logic_error(
+      "EE packed MAC continuation is not available.");
+  }
+
+  for (InFlightPackedMACOperation &pending :
+       packedMACContinuation.operations)
+  {
+    if (pending.active)
+    {
+      continue;
+    }
+    pending = {};
+    pending.active = true;
+    pending.operation = operation;
+    pending.programOrder = executingProgramOrder;
+    pending.source = source;
+    pending.target = target;
+    pending.hiResult = hiResult;
+    pending.loResult = loResult;
+    pending.destinationRegister = destinationRegister;
+    pending.generalRegisterResult = generalRegisterResult;
+    pending.remainingCycles = MULTIPLY_LATENCY;
+    packedMACContinuation.initiationCycles =
+      PACKED_MAC_INITIATION_CYCLES;
+    return;
+  }
+  throw std::logic_error(
+    "EE packed MAC has no free continuation slot.");
 }
 
 void EECore::advancePendingMultiplyDivide(
@@ -5567,6 +5715,7 @@ void EECore::startPendingMultiplyDivide(
   std::uint8_t generalRegister,
   MACResultDestination resultDestination)
 {
+  assert(!packedMACContinuationActive());
   PendingMultiplyDivide &operation =
     pipeline == MACPipeline::MAC1
       ? pendingMac1

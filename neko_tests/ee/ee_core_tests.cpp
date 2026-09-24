@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -282,6 +283,213 @@ struct EECoreTestAccess
     seed();
     core->reset();
     return cleared();
+  }
+
+  static bool packedMACTimingPermitsTwoOverlaps(
+    EECore *core)
+  {
+    const auto start =
+      [core](std::uint64_t programOrder)
+      {
+        core->executingProgramOrder = programOrder;
+        core->startPackedMACOperation(
+          EECore::PackedMACOperation::MultiplyWord,
+          {},
+          {},
+          {},
+          {},
+          static_cast<std::uint8_t>(programOrder),
+          {});
+        core->executingProgramOrder = 0;
+      };
+    const auto activeCount =
+      [core]()
+      {
+        return static_cast<std::size_t>(std::count_if(
+          core->packedMACContinuation.operations.begin(),
+          core->packedMACContinuation.operations.end(),
+          [](const EECore::InFlightPackedMACOperation &operation)
+          {
+            return operation.active;
+          }));
+      };
+
+    core->packedMACContinuation = {};
+    start(1);
+    if (core->packedMACAdmissionAvailable() ||
+        activeCount() != 1 ||
+        core->packedMACContinuation.initiationCycles != 2)
+    {
+      return false;
+    }
+
+    core->advancePackedMACContinuation();
+    if (core->packedMACAdmissionAvailable() ||
+        core->packedMACContinuation.operations[0]
+          .remainingCycles != 3 ||
+        core->packedMACContinuation.initiationCycles != 1)
+    {
+      return false;
+    }
+
+    core->advancePackedMACContinuation();
+    if (!core->packedMACAdmissionAvailable() ||
+        core->packedMACContinuation.operations[0]
+          .remainingCycles != 2 ||
+        core->packedMACContinuation.initiationCycles != 0)
+    {
+      return false;
+    }
+    start(2);
+    if (core->packedMACAdmissionAvailable() ||
+        activeCount() != 2)
+    {
+      return false;
+    }
+
+    core->advancePackedMACContinuation();
+    core->advancePackedMACContinuation();
+    if (!core->packedMACAdmissionAvailable() ||
+        activeCount() != 1)
+    {
+      return false;
+    }
+    start(3);
+    return
+      activeCount() == 2 &&
+      !core->packedMACAdmissionAvailable();
+  }
+
+  static bool packedMACAndScalarMACExcludeEachOther(
+    EECore *core)
+  {
+    EEInstruction mac0;
+    mac0.operation = EEOperation::MultiplyWord;
+    mac0.sourceRegister = 1;
+    mac0.targetRegister = 2;
+    mac0.destinationRegister = 3;
+    EEInstruction mac1 = mac0;
+    mac1.operation = EEOperation::MultiplyWord1;
+    EEInstruction unrelated;
+    unrelated.operation = EEOperation::AddUnsignedWord;
+    unrelated.sourceRegister = 4;
+    unrelated.targetRegister = 5;
+    unrelated.destinationRegister = 6;
+
+    core->packedMACContinuation = {};
+    core->pendingMac0 = {};
+    core->pendingMac0.active = true;
+    core->pendingMac0.remainingCycles = 4;
+    core->pendingMac0.resultDestination =
+      EECore::MACResultDestination::HIAndLOAndGPR;
+    if (core->packedMACAdmissionAvailable())
+    {
+      return false;
+    }
+    core->pendingMac0 = {};
+    core->pendingMac1 = {};
+    core->pendingMac1.active = true;
+    core->pendingMac1.remainingCycles = 4;
+    core->pendingMac1.resultDestination =
+      EECore::MACResultDestination::HIAndLOAndGPR;
+    if (core->packedMACAdmissionAvailable())
+    {
+      return false;
+    }
+
+    core->pendingMac1 = {};
+    core->executingProgramOrder = 1;
+    core->startPackedMACOperation(
+      EECore::PackedMACOperation::MultiplyWord,
+      {},
+      {},
+      {},
+      {},
+      7,
+      {});
+    core->executingProgramOrder = 0;
+    return
+      !core->issueCandidateReady(mac0, 0, 16) &&
+      !core->issueCandidateReady(mac1, 0, 16) &&
+      core->issueCandidateReady(unrelated, 0, 16);
+  }
+
+  static bool packedMACAgesThroughYoungerAContinuation(
+    EECore *core)
+  {
+    core->startExecution(0);
+    core->executingProgramOrder = 1;
+    core->startPackedMACOperation(
+      EECore::PackedMACOperation::MultiplyWord,
+      {},
+      {},
+      {},
+      {},
+      7,
+      {});
+    core->executingProgramOrder = 0;
+
+    EEInstruction younger;
+    younger.operation = EEOperation::AddUnsignedWord;
+    younger.sourceRegister = 1;
+    younger.targetRegister = 2;
+    younger.destinationRegister = 3;
+    core->youngerAStageContinuation = {
+      true,
+      2,
+      4,
+      younger
+    };
+
+    core->clock();
+    return
+      !core->youngerAStageContinuation.active &&
+      core->packedMACContinuation.operations[0].active &&
+      core->packedMACContinuation.operations[0]
+        .remainingCycles == 3;
+  }
+
+  static bool packedMACRejectsYoungerMAC1Continuation(
+    EECore *core)
+  {
+    core->startExecution(0);
+    core->executingProgramOrder = 1;
+    core->startPackedMACOperation(
+      EECore::PackedMACOperation::MultiplyWord,
+      {},
+      {},
+      {},
+      {},
+      7,
+      {});
+    core->executingProgramOrder = 0;
+
+    core->issueLatch = {};
+    core->issueLatch.valid = true;
+    core->issueLatch.address = 4;
+    core->issueLatch.instruction.operation =
+      EEOperation::MultiplyWord1;
+    core->nextEEProgramOrder = 2;
+    const EEIssueMemberOutcome outcome =
+      core->acceptYoungerAStageContinuation();
+    return
+      outcome == EEIssueMemberOutcome::Stalled &&
+      core->issueLatch.valid &&
+      !core->youngerAStageContinuation.active &&
+      core->nextEEProgramOrder == 2;
+  }
+
+  static void startPackedMACWithoutAssignedOrder(
+    EECore *core)
+  {
+    core->startPackedMACOperation(
+      EECore::PackedMACOperation::MultiplyWord,
+      {},
+      {},
+      {},
+      {},
+      0,
+      {});
   }
 
   static void allocateCOP1WithoutAssignedOrder(EECore *core)
@@ -918,6 +1126,46 @@ TEST_CASE("EE packed MAC continuation clears across restart and reset")
 
   REQUIRE(
     EECoreTestAccess::packedMACContinuationClears(
+      &system.eeCore()));
+}
+
+TEST_CASE("EE packed MAC timing permits two overlapping operations")
+{
+  NekoSystem system;
+
+  REQUIRE(
+    EECoreTestAccess::packedMACTimingPermitsTwoOverlaps(
+      &system.eeCore()));
+}
+
+TEST_CASE("EE packed and scalar MAC continuations exclude each other")
+{
+  NekoSystem system;
+
+  REQUIRE(
+    EECoreTestAccess::packedMACAndScalarMACExcludeEachOther(
+      &system.eeCore()));
+  REQUIRE_THROWS_WITH(
+    EECoreTestAccess::startPackedMACWithoutAssignedOrder(
+      &system.eeCore()),
+    "EE packed MAC allocation requires assigned program order.");
+}
+
+TEST_CASE("EE packed MAC ages through a younger A-stage continuation")
+{
+  NekoSystem system;
+
+  REQUIRE(
+    EECoreTestAccess::packedMACAgesThroughYoungerAContinuation(
+      &system.eeCore()));
+}
+
+TEST_CASE("EE packed MAC rejects a younger MAC1 continuation")
+{
+  NekoSystem system;
+
+  REQUIRE(
+    EECoreTestAccess::packedMACRejectsYoungerMAC1Continuation(
       &system.eeCore()));
 }
 

@@ -1479,7 +1479,7 @@ continuation state before a live consumer exists.
 - [x] Add a fixed-capacity, allocation-free in-flight MMI MAC representation
       with operation, program order, captured operands/results, destination,
       remaining latency, and initiation occupancy
-- [ ] Permit the documented 4-cycle latency and 2-cycle throughput without
+- [x] Permit the documented 4-cycle latency and 2-cycle throughput without
       allowing a third overlapping packed multiply/accumulate operation or a
       conflicting scalar MAC0/MAC1 access
 - [ ] Implement signed `PMULTW` and unsigned `PMULTUW`, atomically delivering

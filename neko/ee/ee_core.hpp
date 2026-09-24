@@ -1373,7 +1373,20 @@ class EECore final : public ClockedComponent
     void haltUndefinedOperation(
       std::uint32_t address,
       std::uint32_t instruction);
-    bool pendingMultiplyDivideActive() const;
+    bool pendingMACContinuationActive() const;
+    bool packedMACContinuationActive() const;
+    bool packedMACAdmissionAvailable() const;
+    bool packedMACBlocksScalarMAC(
+      const EEInstruction &instruction) const;
+    void advancePackedMACContinuation();
+    void startPackedMACOperation(
+      PackedMACOperation operation,
+      const EERegister128 &source,
+      const EERegister128 &target,
+      const EERegister128 &hiResult,
+      const EERegister128 &loResult,
+      std::uint8_t destinationRegister,
+      const EERegister128 &generalRegisterResult);
     void advancePendingMultiplyDivide(
       MACPipeline pipeline);
     void startPendingMultiplyDivide(
