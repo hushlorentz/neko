@@ -483,6 +483,104 @@ TEST_CASE("EE packed word multiply accumulate execution")
   }
 }
 
+TEST_CASE("EE packed word MAC operations require word-valued lanes")
+{
+  struct OperationEncoding
+  {
+    std::uint8_t function;
+    std::uint8_t nestedFunction;
+  };
+  const OperationEncoding operations[] = {
+    {0x09, 0x0c},
+    {0x29, 0x0c},
+    {0x09, 0x00},
+    {0x29, 0x00},
+    {0x09, 0x04}
+  };
+  struct InvalidOperands
+  {
+    EERegister128 source;
+    EERegister128 target;
+  };
+  const EERegister128 validSource = {
+    UINT64_C(0xfffffffffffffffe), 3
+  };
+  const EERegister128 validTarget = {
+    4, UINT64_C(0xfffffffffffffffb)
+  };
+  const InvalidOperands invalidOperands[] = {
+    {
+      {UINT64_C(0x0000000080000000), 3},
+      validTarget
+    },
+    {
+      {UINT64_C(0xfffffffffffffffe),
+       UINT64_C(0x0000000080000000)},
+      validTarget
+    },
+    {
+      validSource,
+      {UINT64_C(0x0000000080000000),
+       UINT64_C(0xfffffffffffffffb)}
+    },
+    {
+      validSource,
+      {4, UINT64_C(0x0000000080000000)}
+    }
+  };
+
+  for (const OperationEncoding operation : operations)
+  {
+    for (const InvalidOperands &operands : invalidOperands)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      const std::uint32_t instruction = mmiInstruction(
+        operation.function,
+        1,
+        2,
+        3,
+        operation.nestedFunction);
+      core.setGeneralRegister(1, operands.source);
+      core.setGeneralRegister(2, operands.target);
+      core.setGeneralRegister(
+        3,
+        {UINT64_C(0x1111222233334444),
+         UINT64_C(0x5555666677778888)});
+      core.setHI(UINT64_C(0x1111));
+      core.setLO(UINT64_C(0x2222));
+      core.setHI1(UINT64_C(0x3333));
+      core.setLO1(UINT64_C(0x4444));
+      system.eeBus().write32(0, instruction);
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+
+      CAPTURE(operation.function);
+      CAPTURE(operation.nestedFunction);
+      CAPTURE(operands.source.low);
+      CAPTURE(operands.source.high);
+      CAPTURE(operands.target.low);
+      CAPTURE(operands.target.high);
+      REQUIRE(
+        core.executionState() == EEExecutionState::Halted);
+      REQUIRE(
+        core.stopReason() ==
+        EEStopReason::UndefinedOperation);
+      REQUIRE(core.programCounter() == 0);
+      REQUIRE(core.rejectedInstruction() == instruction);
+      REQUIRE(core.hi() == UINT64_C(0x1111));
+      REQUIRE(core.lo() == UINT64_C(0x2222));
+      REQUIRE(core.hi1() == UINT64_C(0x3333));
+      REQUIRE(core.lo1() == UINT64_C(0x4444));
+      REQUIRE(
+        core.generalRegister(3) ==
+        EERegister128{UINT64_C(0x1111222233334444),
+                      UINT64_C(0x5555666677778888)});
+    }
+  }
+}
+
 TEST_CASE("EE pending multiply divide interlocks are resource specific")
 {
   const auto startMAC0Multiply =

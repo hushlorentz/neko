@@ -1486,7 +1486,7 @@ continuation state before a live consumer exists.
       the two 64-bit products to the full HI/LO state and `rd`
 - [x] Implement `PMADDW`, `PMADDUW`, and `PMSUBW` using the corresponding
       64-bit HI/LO accumulators and documented modulo results
-- [ ] Enforce the manual's sign-extended-word operand restriction through the
+- [x] Enforce the manual's sign-extended-word operand restriction through the
       deterministic undefined-operation policy before allocating delayed work
 - [ ] Define completion, bypass/interlock, exception, interrupt, host halt,
       guest-return drain, reset, and external-PC-mutation behavior for accepted

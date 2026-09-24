@@ -941,6 +941,13 @@ namespace
       static_cast<std::uint32_t>(value));
   }
 
+  bool isPackedWordValue(const EERegister128 &value)
+  {
+    return
+      isWordValue(value.low) &&
+      isWordValue(value.high);
+  }
+
   bool signedLess(
     std::uint64_t left,
     std::uint64_t right)
@@ -3524,6 +3531,12 @@ EEInstructionExecutionOutcome EECore::executePackedMultiply(
     generalRegisters[instruction.sourceRegister];
   const EERegister128 target =
     generalRegisters[instruction.targetRegister];
+  if (!isPackedWordValue(source) ||
+      !isPackedWordValue(target))
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
   bool signedOperands = true;
   bool accumulate = false;
   bool subtract = false;
