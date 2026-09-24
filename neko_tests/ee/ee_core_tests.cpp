@@ -479,6 +479,50 @@ struct EECoreTestAccess
       core->nextEEProgramOrder == 2;
   }
 
+  static bool packedMACHashIsCanonical(EECore *core)
+  {
+    core->packedMACContinuation = {};
+    core->nextEEProgramOrder = 3;
+    core->packedMACContinuation.initiationCycles = 2;
+    EECore::InFlightPackedMACOperation &older =
+      core->packedMACContinuation.operations[0];
+    older.active = true;
+    older.operation =
+      EECore::PackedMACOperation::MultiplyWord;
+    older.programOrder = 1;
+    older.source = {2, 3};
+    older.target = {4, 5};
+    older.hiResult = {};
+    older.loResult = {8, 15};
+    older.destinationRegister = 3;
+    older.generalRegisterResult = {8, 15};
+    older.remainingCycles = 2;
+    EECore::InFlightPackedMACOperation &newer =
+      core->packedMACContinuation.operations[1];
+    newer.active = true;
+    newer.operation =
+      EECore::PackedMACOperation::MultiplyAddWord;
+    newer.programOrder = 2;
+    newer.source = {1, 1};
+    newer.target = {2, 2};
+    newer.hiResult = {};
+    newer.loResult = {10, 17};
+    newer.destinationRegister = 4;
+    newer.generalRegisterResult = {10, 17};
+    newer.remainingCycles = 4;
+
+    const std::uint64_t orderedHash = core->stateHash();
+    std::swap(
+      core->packedMACContinuation.operations[0],
+      core->packedMACContinuation.operations[1]);
+    const std::uint64_t swappedHash = core->stateHash();
+    core->packedMACContinuation.operations[0].source.low = 6;
+    const std::uint64_t changedHash = core->stateHash();
+    return
+      orderedHash == swappedHash &&
+      swappedHash != changedHash;
+  }
+
   static void startPackedMACWithoutAssignedOrder(
     EECore *core)
   {
@@ -1149,6 +1193,15 @@ TEST_CASE("EE packed and scalar MAC continuations exclude each other")
     EECoreTestAccess::startPackedMACWithoutAssignedOrder(
       &system.eeCore()),
     "EE packed MAC allocation requires assigned program order.");
+}
+
+TEST_CASE("EE packed MAC continuation hash is canonical")
+{
+  NekoSystem system;
+
+  REQUIRE(
+    EECoreTestAccess::packedMACHashIsCanonical(
+      &system.eeCore()));
 }
 
 TEST_CASE("EE packed MAC ages through a younger A-stage continuation")

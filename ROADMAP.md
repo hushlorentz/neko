@@ -1491,7 +1491,7 @@ continuation state before a live consumer exists.
 - [x] Define completion, bypass/interlock, exception, interrupt, host halt,
       guest-return drain, reset, and external-PC-mutation behavior for accepted
       packed MAC operations
-- [ ] Introduce one save-state version transition for reachable MMI
+- [x] Introduce one save-state version transition for reachable MMI
       continuation, with strict validation, canonical hashing, transactional
       load, byte-stable repeated saves, and malformed-state coverage
 - [ ] Cover overlapping initiation, HI/LO and `rd` hazards, older-before-younger

@@ -5,15 +5,15 @@
 static_assert(
   static_cast<std::uint8_t>(
     EEOperation::DivideSingleCOP1) == 141,
-  "Version-25 DIV.S save-state ordinal changed.");
+  "Version-26 DIV.S save-state ordinal changed.");
 static_assert(
   static_cast<std::uint8_t>(
     EEOperation::SquareRootSingleCOP1) == 142,
-  "Version-25 SQRT.S save-state ordinal changed.");
+  "Version-26 SQRT.S save-state ordinal changed.");
 static_assert(
   static_cast<std::uint8_t>(
     EEOperation::ReciprocalSquareRootSingleCOP1) == 143,
-  "Version-25 RSQRT.S save-state ordinal changed.");
+  "Version-26 RSQRT.S save-state ordinal changed.");
 
 void NekoSaveStateCodec::writeEECore(
   SaveStateWriter *writer,
@@ -151,6 +151,40 @@ void NekoSaveStateCodec::writeEECore(
       memoryOperation
         ? operation.branchDelaySlot
         : operation.conditionResult);
+    writer->writeU8(operation.remainingCycles);
+  }
+  writer->writeU8(
+    core.packedMACContinuation.initiationCycles);
+  const EECore::PackedMACProgramOrderView packedOrder =
+    core.packedMACProgramOrder();
+  for (std::size_t orderIndex = 0;
+       orderIndex < EECore::PackedMACContinuation::CAPACITY;
+       ++orderIndex)
+  {
+    EECore::InFlightPackedMACOperation operation;
+    if (orderIndex < packedOrder.size())
+    {
+      operation =
+        core.packedMACContinuation.operations[
+          packedOrder[orderIndex]];
+    }
+    writer->writeBool(operation.active);
+    writer->writeU8(
+      static_cast<std::uint8_t>(operation.operation));
+    writer->writeU64(operation.programOrder);
+    writer->writeU64(operation.source.low);
+    writer->writeU64(operation.source.high);
+    writer->writeU64(operation.target.low);
+    writer->writeU64(operation.target.high);
+    writer->writeU64(operation.hiResult.low);
+    writer->writeU64(operation.hiResult.high);
+    writer->writeU64(operation.loResult.low);
+    writer->writeU64(operation.loResult.high);
+    writer->writeU8(operation.destinationRegister);
+    writer->writeU64(
+      operation.generalRegisterResult.low);
+    writer->writeU64(
+      operation.generalRegisterResult.high);
     writer->writeU8(operation.remainingCycles);
   }
 }
@@ -899,6 +933,43 @@ void NekoSaveStateCodec::readEECore(
         "EE inactive COP1 operation contains state");
     }
   }
+  core->packedMACContinuation = {};
+  core->packedMACContinuation.initiationCycles =
+    reader->readU8();
+  for (EECore::InFlightPackedMACOperation &operation :
+       core->packedMACContinuation.operations)
+  {
+    operation.active =
+      reader->readBool("EE packed MAC operation flag");
+    operation.operation =
+      readEnum<EECore::PackedMACOperation>(
+        reader,
+        static_cast<std::uint8_t>(
+          EECore::PackedMACOperation::MultiplySubtractWord),
+        "EE packed MAC operation");
+    operation.programOrder = reader->readU64();
+    operation.source.low = reader->readU64();
+    operation.source.high = reader->readU64();
+    operation.target.low = reader->readU64();
+    operation.target.high = reader->readU64();
+    operation.hiResult.low = reader->readU64();
+    operation.hiResult.high = reader->readU64();
+    operation.loResult.low = reader->readU64();
+    operation.loResult.high = reader->readU64();
+    operation.destinationRegister = reader->readU8();
+    operation.generalRegisterResult.low = reader->readU64();
+    operation.generalRegisterResult.high = reader->readU64();
+    operation.remainingCycles = reader->readU8();
+  }
+  require(
+    !core->packedMACContinuation.operations[1].active ||
+      (core->packedMACContinuation.operations[0].active &&
+       core->packedMACContinuation.operations[0].programOrder <
+         core->packedMACContinuation.operations[1].programOrder),
+    "EE packed MAC serialization order is not canonical");
+  require(
+    core->packedMACContinuationStateValid(),
+    "EE packed MAC continuation state is invalid");
   const EECore::COP1ProgramOrderView programOrder =
     core->inFlightCOP1ProgramOrder();
   require(
@@ -1216,13 +1287,47 @@ void NekoSaveStateCodec::readEECore(
        (core->state == EEExecutionState::Halted &&
         core->haltReason == EEStopReason::HostHalt)),
     "EE younger A-stage continuation state is inconsistent");
+  bool packedMACPrecedesYoungerAStage = true;
+  bool packedMACYoungerPairReachable = true;
+  if (core->youngerAStageContinuation.active)
+  {
+    for (const EECore::InFlightPackedMACOperation &operation :
+         core->packedMACContinuation.operations)
+    {
+      packedMACPrecedesYoungerAStage =
+        packedMACPrecedesYoungerAStage &&
+        (!operation.active ||
+         operation.programOrder <
+           core->youngerAStageContinuation.programOrder);
+    }
+    if (core->packedMACContinuationActive())
+    {
+      const EECore::PackedMACProgramOrderView packedOrder =
+        core->packedMACProgramOrder();
+      const EECore::InFlightPackedMACOperation &operation =
+        core->packedMACContinuation.operations[
+          packedOrder[0]];
+      packedMACYoungerPairReachable =
+        packedOrder.size() == 1 &&
+        core->packedMACContinuation.initiationCycles == 2 &&
+        operation.remainingCycles == 4 &&
+        operation.programOrder ==
+          core->youngerAStageContinuation.programOrder - 1;
+    }
+  }
   require(
     !core->youngerAStageContinuation.active ||
       (!core->issueLatch.valid &&
        !core->stagingLatch.valid &&
        !core->branchDelayPending &&
        !core->pendingMac0.active &&
-       !core->pendingMac1.active),
+       !core->pendingMac1.active &&
+       packedMACPrecedesYoungerAStage &&
+       packedMACYoungerPairReachable &&
+       !core->packedMACContinuationBlocks(
+         core->youngerAStageContinuation.instruction) &&
+       !core->packedMACBlocksScalarMAC(
+         core->youngerAStageContinuation.instruction)),
     "EE younger A-stage continuation conflicts with other state");
   require(
     core->branchDelayPending ||

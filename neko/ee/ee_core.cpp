@@ -5694,6 +5694,205 @@ bool EECore::packedMACAdmissionAvailable() const
       });
 }
 
+EECore::PackedMACProgramOrderView
+EECore::packedMACProgramOrder() const
+{
+  PackedMACProgramOrderView order;
+  for (std::size_t slotIndex = 0;
+       slotIndex < packedMACContinuation.operations.size();
+       ++slotIndex)
+  {
+    if (!packedMACContinuation.operations[slotIndex].active)
+    {
+      continue;
+    }
+    std::size_t insertionIndex = order.count;
+    while (insertionIndex != 0 &&
+           packedMACContinuation.operations[
+             order.slotIndices[insertionIndex - 1]].programOrder >
+             packedMACContinuation.operations[
+               slotIndex].programOrder)
+    {
+      order.slotIndices[insertionIndex] =
+        order.slotIndices[insertionIndex - 1];
+      --insertionIndex;
+    }
+    order.slotIndices[insertionIndex] = slotIndex;
+    ++order.count;
+  }
+  return order;
+}
+
+bool EECore::packedMACOperationStateValid(
+  const InFlightPackedMACOperation &operation)
+{
+  if (!operation.active)
+  {
+    return
+      operation.operation == PackedMACOperation::None &&
+      operation.programOrder == 0 &&
+      operation.source == EERegister128{} &&
+      operation.target == EERegister128{} &&
+      operation.hiResult == EERegister128{} &&
+      operation.loResult == EERegister128{} &&
+      operation.destinationRegister == 0 &&
+      operation.generalRegisterResult == EERegister128{} &&
+      operation.remainingCycles == 0;
+  }
+  if (operation.operation < PackedMACOperation::MultiplyWord ||
+      operation.operation >
+        PackedMACOperation::MultiplySubtractWord ||
+      operation.programOrder == 0 ||
+      operation.destinationRegister >= GENERAL_REGISTER_COUNT ||
+      operation.remainingCycles == 0 ||
+      operation.remainingCycles > MULTIPLY_LATENCY ||
+      !isPackedWordValue(operation.source) ||
+      !isPackedWordValue(operation.target))
+  {
+    return false;
+  }
+  const EERegister128 expectedHI = {
+    signExtendWord(static_cast<std::uint32_t>(
+      operation.generalRegisterResult.low >> 32)),
+    signExtendWord(static_cast<std::uint32_t>(
+      operation.generalRegisterResult.high >> 32))
+  };
+  const EERegister128 expectedLO = {
+    signExtendWord(static_cast<std::uint32_t>(
+      operation.generalRegisterResult.low)),
+    signExtendWord(static_cast<std::uint32_t>(
+      operation.generalRegisterResult.high))
+  };
+  if (operation.hiResult != expectedHI ||
+      operation.loResult != expectedLO)
+  {
+    return false;
+  }
+  return true;
+}
+
+bool EECore::packedMACContinuationStateValid() const
+{
+  if (packedMACContinuation.initiationCycles >
+        PACKED_MAC_INITIATION_CYCLES)
+  {
+    return false;
+  }
+  for (const InFlightPackedMACOperation &operation :
+       packedMACContinuation.operations)
+  {
+    if (!packedMACOperationStateValid(operation))
+    {
+      return false;
+    }
+  }
+  const PackedMACProgramOrderView order =
+    packedMACProgramOrder();
+  if (order.size() == 0)
+  {
+    return packedMACContinuation.initiationCycles == 0;
+  }
+  if (pendingMac0.active || pendingMac1.active ||
+      nextEEProgramOrder == 0 ||
+      !(state == EEExecutionState::Running ||
+        (state == EEExecutionState::Halted &&
+         (haltReason == EEStopReason::HostHalt ||
+          haltReason == EEStopReason::UndefinedOperation))))
+  {
+    return false;
+  }
+  EERegister128 accumulator = {
+    accumulatorValue(hiRegister, loRegister),
+    accumulatorValue(hi1Register, lo1Register)
+  };
+  for (std::size_t index = 0; index < order.size(); ++index)
+  {
+    const InFlightPackedMACOperation &operation =
+      packedMACContinuation.operations[order[index]];
+    if (operation.programOrder >= nextEEProgramOrder)
+    {
+      return false;
+    }
+    if (index != 0)
+    {
+      const InFlightPackedMACOperation &older =
+        packedMACContinuation.operations[order[index - 1]];
+      if (older.programOrder == operation.programOrder ||
+          older.remainingCycles >= operation.remainingCycles ||
+          (older.destinationRegister != 0 &&
+           older.destinationRegister ==
+             operation.destinationRegister))
+      {
+        return false;
+      }
+    }
+    const bool unsignedOperands =
+      operation.operation ==
+        PackedMACOperation::MultiplyUnsignedWord ||
+      operation.operation ==
+        PackedMACOperation::MultiplyAddUnsignedWord;
+    const auto multiplyLane =
+      [unsignedOperands](
+        std::uint64_t left,
+        std::uint64_t right)
+      {
+        const std::uint32_t leftWord =
+          static_cast<std::uint32_t>(left);
+        const std::uint32_t rightWord =
+          static_cast<std::uint32_t>(right);
+        return unsignedOperands
+          ? multiplyUnsignedWords(leftWord, rightWord)
+          : multiplySignedWords(leftWord, rightWord);
+      };
+    const EERegister128 products = {
+      multiplyLane(operation.source.low, operation.target.low),
+      multiplyLane(operation.source.high, operation.target.high)
+    };
+    EERegister128 expected = products;
+    if (operation.operation ==
+          PackedMACOperation::MultiplyAddWord ||
+        operation.operation ==
+          PackedMACOperation::MultiplyAddUnsignedWord)
+    {
+      expected = {
+        accumulator.low + products.low,
+        accumulator.high + products.high
+      };
+    }
+    else if (operation.operation ==
+               PackedMACOperation::MultiplySubtractWord)
+    {
+      expected = {
+        accumulator.low - products.low,
+        accumulator.high - products.high
+      };
+    }
+    if (operation.generalRegisterResult != expected)
+    {
+      return false;
+    }
+    accumulator = expected;
+  }
+  const InFlightPackedMACOperation &newest =
+    packedMACContinuation.operations[
+      order[order.size() - 1]];
+  if (order.size() == 2)
+  {
+    const InFlightPackedMACOperation &older =
+      packedMACContinuation.operations[order[0]];
+    return
+      packedMACContinuation.initiationCycles != 0 &&
+      older.remainingCycles ==
+        packedMACContinuation.initiationCycles &&
+      newest.remainingCycles ==
+        packedMACContinuation.initiationCycles + 2;
+  }
+  return packedMACContinuation.initiationCycles == 0
+    ? newest.remainingCycles <= 2
+    : newest.remainingCycles ==
+        packedMACContinuation.initiationCycles + 2;
+}
+
 EERegister128 EECore::packedMACAccumulatorValues() const
 {
   const InFlightPackedMACOperation *newest = nullptr;
@@ -8393,6 +8592,45 @@ std::uint64_t EECore::stateHash() const
     };
   hashPending(pendingMac0);
   hashPending(pendingMac1);
+  hashEEStateValue(
+    &hash,
+    packedMACContinuation.initiationCycles);
+  const PackedMACProgramOrderView packedOrder =
+    packedMACProgramOrder();
+  for (std::size_t orderIndex = 0;
+       orderIndex < PackedMACContinuation::CAPACITY;
+       ++orderIndex)
+  {
+    const bool active = orderIndex < packedOrder.size();
+    hashEEStateValue(&hash, active);
+    if (!active)
+    {
+      continue;
+    }
+    const InFlightPackedMACOperation &operation =
+      packedMACContinuation.operations[
+        packedOrder[orderIndex]];
+    hashEEStateValue(
+      &hash,
+      static_cast<std::uint8_t>(operation.operation));
+    hashEEStateValue(&hash, operation.programOrder);
+    hashEEStateValue(&hash, operation.source.low);
+    hashEEStateValue(&hash, operation.source.high);
+    hashEEStateValue(&hash, operation.target.low);
+    hashEEStateValue(&hash, operation.target.high);
+    hashEEStateValue(&hash, operation.hiResult.low);
+    hashEEStateValue(&hash, operation.hiResult.high);
+    hashEEStateValue(&hash, operation.loResult.low);
+    hashEEStateValue(&hash, operation.loResult.high);
+    hashEEStateValue(&hash, operation.destinationRegister);
+    hashEEStateValue(
+      &hash,
+      operation.generalRegisterResult.low);
+    hashEEStateValue(
+      &hash,
+      operation.generalRegisterResult.high);
+    hashEEStateValue(&hash, operation.remainingCycles);
+  }
   const COP1DividerOccupancy dividerOccupancy =
     derivedCOP1DividerOccupancy();
   hashEEStateValue(

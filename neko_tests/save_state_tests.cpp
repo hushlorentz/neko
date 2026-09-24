@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -21,10 +22,10 @@ namespace
   constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
   constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
-    VERSION_25_PREPARED_STATE_SIZE = 37800432;
+    VERSION_26_PREPARED_STATE_SIZE = 37800617;
   constexpr std::uint64_t
-    VERSION_25_PREPARED_STATE_HASH =
-      UINT64_C(0x27c762f3e0d1cfb9);
+    VERSION_26_PREPARED_STATE_HASH =
+      UINT64_C(0x36a98177176c8864);
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
@@ -39,6 +40,8 @@ namespace
     SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET = 959;
   constexpr std::size_t
     SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET = 960;
+  constexpr std::size_t
+    SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET = 964;
   constexpr std::size_t SIMPLE_EE_EXECUTION_STATE_OFFSET = 869;
   constexpr std::size_t SIMPLE_EE_STOP_REASON_OFFSET = 870;
   constexpr std::size_t
@@ -134,7 +137,37 @@ namespace
     SIMPLE_EE_THIRD_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET = 1162;
   constexpr std::size_t
     SIMPLE_EE_THIRD_IN_FLIGHT_COP1_RAW_RESULT_OFFSET = 1197;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2037;
+  constexpr std::size_t
+    SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET = 2012;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_ACTIVE_OFFSET = 2013;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_OPERATION_OFFSET = 2014;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_ORDER_OFFSET = 2015;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_SOURCE_LOW_OFFSET = 2023;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_HI_LOW_OFFSET = 2055;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_LO_LOW_OFFSET = 2071;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_DESTINATION_OFFSET = 2087;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_RESULT_LOW_OFFSET = 2088;
+  constexpr std::size_t
+    SIMPLE_EE_FIRST_PACKED_MAC_REMAINING_CYCLES_OFFSET = 2104;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET = 2107;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_PACKED_MAC_ACTIVE_OFFSET = 2105;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_PACKED_MAC_DESTINATION_OFFSET = 2179;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_PACKED_MAC_LO_LOW_OFFSET = 2163;
+  constexpr std::size_t
+    SIMPLE_EE_SECOND_PACKED_MAC_RESULT_LOW_OFFSET = 2180;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2222;
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -238,6 +271,26 @@ namespace
       (static_cast<std::uint32_t>(sourceRegister) << 11) |
       (static_cast<std::uint32_t>(
         destinationRegister) << 6) |
+      function;
+  }
+
+  std::uint32_t packedMACInstruction(
+    std::uint8_t function,
+    std::uint8_t sourceRegister,
+    std::uint8_t targetRegister,
+    std::uint8_t destinationRegister,
+    std::uint8_t nestedFunction)
+  {
+    return
+      UINT32_C(0x70000000) |
+      (static_cast<std::uint32_t>(
+        sourceRegister) << 21) |
+      (static_cast<std::uint32_t>(
+        targetRegister) << 16) |
+      (static_cast<std::uint32_t>(
+        destinationRegister) << 11) |
+      (static_cast<std::uint32_t>(
+        nestedFunction) << 6) |
       function;
   }
 
@@ -623,7 +676,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 25 save-state layout is byte-stable")
+TEST_CASE("Version 26 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -638,14 +691,268 @@ TEST_CASE("Version 25 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 25);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 26);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_25_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_26_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_25_PREPARED_STATE_HASH);
+    VERSION_26_PREPARED_STATE_HASH);
+}
+
+TEST_CASE("Invalid packed MAC continuation states are rejected")
+{
+  NekoSystem source;
+  EECore &sourceCore = source.eeCore();
+  sourceCore.setGeneralRegister(1, {2, 3});
+  sourceCore.setGeneralRegister(2, {4, 5});
+  sourceCore.setGeneralRegister(5, {1, 1});
+  sourceCore.setGeneralRegister(6, {2, 2});
+  source.eeBus().write32(
+    0,
+    packedMACInstruction(0x09, 1, 2, 3, 0x0c));
+  source.eeBus().write32(
+    4,
+    packedMACInstruction(0x09, 5, 6, 4, 0x00));
+  sourceCore.startExecution(0);
+  source.runMasterCycles(3);
+  sourceCore.setProgramCounter(8);
+  sourceCore.haltExecution();
+  const std::vector<std::uint8_t> valid =
+    source.saveState();
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  const auto requireRejected =
+    [&destination, &before](
+      std::vector<std::uint8_t> invalid)
+    {
+      updateChecksum(&invalid);
+      REQUIRE_THROWS(destination.loadState(invalid));
+      const bool unchanged =
+        destination.saveState() == before;
+      REQUIRE(unchanged);
+    };
+
+  SECTION("Initiation occupancy is bounded")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET] = 3;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Initiation occupancy matches the newest latency")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET] = 1;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Active operations require a supported operation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_FIRST_PACKED_MAC_OPERATION_OFFSET] = 0;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Active operations require unique program order")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET,
+      1);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Active operations precede the next program order")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET,
+      3);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Serialized operations are already program ordered")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_FIRST_PACKED_MAC_ORDER_OFFSET,
+      2);
+    writeU64(
+      &invalid,
+      SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET,
+      1);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Captured operands remain word-valued")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_FIRST_PACKED_MAC_SOURCE_LOW_OFFSET,
+      UINT64_C(0x0000000080000000));
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("HI and LO results match the pending GPR result")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_FIRST_PACKED_MAC_HI_LOW_OFFSET,
+      1);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Multiply results match the captured operands")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_FIRST_PACKED_MAC_LO_LOW_OFFSET,
+      9);
+    writeU64(
+      &invalid,
+      SIMPLE_EE_FIRST_PACKED_MAC_RESULT_LOW_OFFSET,
+      9);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Accumulation results match the forwarded accumulator")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_SECOND_PACKED_MAC_LO_LOW_OFFSET,
+      11);
+    writeU64(
+      &invalid,
+      SIMPLE_EE_SECOND_PACKED_MAC_RESULT_LOW_OFFSET,
+      11);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Pending latency is nonzero")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[
+      SIMPLE_EE_FIRST_PACKED_MAC_REMAINING_CYCLES_OFFSET] = 0;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Destination registers are in range")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_FIRST_PACKED_MAC_DESTINATION_OFFSET] =
+      32;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Overlapping destinations are distinct")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_SECOND_PACKED_MAC_DESTINATION_OFFSET] =
+      3;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Packed and scalar continuations cannot overlap")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] =
+      4;
+    invalid[
+      SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET - 1] = 1;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Packed work rejects a restored younger MAC1 continuation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      UINT32_C(0x70853018));
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      8);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Packed work rejects a conflicting younger ALU continuation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      UINT32_C(0x00603821));
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      8);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Packed work precedes an unrelated younger continuation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      UINT32_C(0x01003821));
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      8);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Packed and younger continuations share an acceptance boundary")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET] = 0;
+    std::fill(
+      invalid.begin() +
+        SIMPLE_EE_SECOND_PACKED_MAC_ACTIVE_OFFSET,
+      invalid.begin() +
+        SIMPLE_EE_SECOND_PACKED_MAC_ACTIVE_OFFSET + 92,
+      0);
+    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      UINT32_C(0x01003821));
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      8);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Inactive slots contain no payload")
+  {
+    NekoSystem inactive;
+    std::vector<std::uint8_t> invalid =
+      inactive.saveState();
+    REQUIRE(
+      invalid[SIMPLE_EE_FIRST_PACKED_MAC_ACTIVE_OFFSET] == 0);
+    writeU64(
+      &invalid,
+      SIMPLE_EE_FIRST_PACKED_MAC_SOURCE_LOW_OFFSET,
+      1);
+    requireRejected(std::move(invalid));
+  }
 }
 
 TEST_CASE(

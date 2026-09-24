@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <vector>
 
 #include "catch.hpp"
 #include "ee_core.hpp"
@@ -718,6 +719,54 @@ TEST_CASE("EE packed word MAC lifecycle is explicit")
     REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
     REQUIRE(core.programCounter() >= 0x110);
   }
+}
+
+TEST_CASE("EE packed MAC continuation survives save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setGeneralRegister(1, {2, 3});
+  originalCore.setGeneralRegister(2, {4, 5});
+  originalCore.setGeneralRegister(5, {1, 1});
+  originalCore.setGeneralRegister(6, {2, 2});
+  original.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 3, 0x0c));
+  original.eeBus().write32(
+    4,
+    mmiInstruction(0x09, 5, 6, 4, 0x00));
+  originalCore.startExecution(0);
+  original.runMasterCycles(3);
+  REQUIRE(originalCore.generalRegister(3) == EERegister128{});
+  REQUIRE(originalCore.generalRegister(4) == EERegister128{});
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  const bool repeatedSaveMatches =
+    original.saveState() == state;
+  REQUIRE(repeatedSaveMatches);
+
+  NekoSystem restored;
+  restored.loadState(state);
+  const std::vector<std::uint8_t> restoredState =
+    restored.saveState();
+  const bool restoredSaveMatches =
+    restoredState == state;
+  REQUIRE(restoredSaveMatches);
+  REQUIRE(
+    restored.eeCore().stateHash() ==
+    originalCore.stateHash());
+
+  original.runMasterCycles(4);
+  restored.runMasterCycles(4);
+
+  const bool resumedStatesMatch =
+    original.saveState() == restored.saveState();
+  REQUIRE(resumedStatesMatch);
+  REQUIRE(originalCore.generalRegister(3) == EERegister128{8, 15});
+  REQUIRE(originalCore.generalRegister(4) == EERegister128{10, 17});
+  REQUIRE(originalCore.lo() == 10);
+  REQUIRE(originalCore.lo1() == 17);
 }
 
 TEST_CASE("EE pending multiply divide interlocks are resource specific")

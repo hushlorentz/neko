@@ -1052,6 +1052,24 @@ class EECore final : public ClockedComponent
       std::uint8_t initiationCycles = 0;
     };
 
+    struct PackedMACProgramOrderView
+    {
+      std::size_t size() const
+      {
+        return count;
+      }
+
+      std::size_t operator[](std::size_t index) const
+      {
+        return slotIndices[index];
+      }
+
+      std::array<
+        std::size_t,
+        PackedMACContinuation::CAPACITY> slotIndices = {};
+      std::size_t count = 0;
+    };
+
     std::array<EERegister128, GENERAL_REGISTER_COUNT>
       generalRegisters = {};
     std::array<
@@ -1381,6 +1399,11 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction) const;
     bool packedMACContinuationActive() const;
     bool packedMACAdmissionAvailable() const;
+    PackedMACProgramOrderView
+      packedMACProgramOrder() const;
+    static bool packedMACOperationStateValid(
+      const InFlightPackedMACOperation &operation);
+    bool packedMACContinuationStateValid() const;
     EERegister128 packedMACAccumulatorValues() const;
     bool packedMACContinuationBlocks(
       const EEInstruction &instruction) const;
