@@ -1494,7 +1494,7 @@ continuation state before a live consumer exists.
 - [x] Introduce one save-state version transition for reachable MMI
       continuation, with strict validation, canonical hashing, transactional
       load, byte-stable repeated saves, and malformed-state coverage
-- [ ] Cover overlapping initiation, HI/LO and `rd` hazards, older-before-younger
+- [x] Cover overlapping initiation, HI/LO and `rd` hazards, older-before-younger
       retirement, trace ordering, save/resume, and mixed scalar/packed MAC use
 - [ ] Complete an independent review of the MMI continuation foundation and
       packed word operations

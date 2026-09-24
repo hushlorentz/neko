@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdint>
 
 #include "catch.hpp"
@@ -2714,6 +2715,104 @@ TEST_CASE("EE packed arithmetic traces and hashes are deterministic")
       EEOperation::ParallelAddUnsignedSaturateByte));
   REQUIRE(events[1].type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events[1].value0 == first.eeCore().stateHash());
+}
+
+TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setGeneralRegister(1, {2, 3});
+      core.setGeneralRegister(2, {4, 5});
+      core.setGeneralRegister(5, {6, 7});
+      core.setGeneralRegister(6, {8, 9});
+      core.setGeneralRegister(7, {10, 11});
+      core.setGeneralRegister(8, {2, 3});
+      system->eeBus().write32(
+        0,
+        nestedMmiInstruction(0x09, 0x0c, 1, 2, 3));
+      system->eeBus().write32(
+        4,
+        nestedMmiInstruction(0x29, 0x0c, 5, 6, 4));
+      system->eeBus().write32(
+        8,
+        nestedMmiInstruction(0x09, 0x0c, 7, 8, 9));
+      system->eeBus().write32(12, UINT32_C(0xbc000000));
+      core.startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+  std::array<std::uint64_t, 9> stateHashes = {};
+  for (std::size_t cycle = 0; cycle < stateHashes.size(); ++cycle)
+  {
+    first.clockMasterCycle();
+    second.clockMasterCycle();
+    stateHashes[cycle] = first.eeCore().stateHash();
+    REQUIRE(
+      first.eeCore().stateHash() ==
+      second.eeCore().stateHash());
+    REQUIRE(first.traceHash() == second.traceHash());
+    if (cycle == 4)
+    {
+      REQUIRE(
+        first.eeCore().generalRegister(3) ==
+        EERegister128{8, 15});
+      REQUIRE(first.eeCore().generalRegister(4) == EERegister128{});
+      REQUIRE(first.eeCore().generalRegister(9) == EERegister128{});
+    }
+    if (cycle == 6)
+    {
+      REQUIRE(
+        first.eeCore().generalRegister(4) ==
+        EERegister128{48, 63});
+      REQUIRE(first.eeCore().generalRegister(9) == EERegister128{});
+    }
+  }
+
+  REQUIRE(
+    first.eeCore().generalRegister(9) ==
+    EERegister128{20, 33});
+  REQUIRE(
+    first.eeCore().stopReason() ==
+    EEStopReason::UnsupportedInstruction);
+
+  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::array<std::uint64_t, 3> issueCycles = {1, 3, 5};
+  const std::array<std::uint64_t, 3> issueAddresses = {0, 4, 8};
+  std::size_t eventIndex = 0;
+  std::size_t issueIndex = 0;
+  for (std::size_t cycle = 0; cycle < stateHashes.size(); ++cycle)
+  {
+    const std::uint64_t masterCycle = cycle + 1;
+    if (issueIndex < issueCycles.size() &&
+        masterCycle == issueCycles[issueIndex])
+    {
+      REQUIRE(eventIndex < events.size());
+      REQUIRE(events[eventIndex].masterCycle == masterCycle);
+      REQUIRE(
+        events[eventIndex].type ==
+        NekoTraceEventType::InstructionIssued);
+      REQUIRE(
+        events[eventIndex].value0 ==
+        issueAddresses[issueIndex]);
+      ++eventIndex;
+      ++issueIndex;
+    }
+    REQUIRE(eventIndex < events.size());
+    REQUIRE(events[eventIndex].masterCycle == masterCycle);
+    REQUIRE(
+      events[eventIndex].type ==
+      NekoTraceEventType::StateSnapshot);
+    REQUIRE(events[eventIndex].value0 == stateHashes[cycle]);
+    ++eventIndex;
+  }
+  REQUIRE(issueIndex == issueCycles.size());
+  REQUIRE(eventIndex == events.size());
 }
 
 TEST_CASE("EE packed rearrangement traces and hashes are deterministic")

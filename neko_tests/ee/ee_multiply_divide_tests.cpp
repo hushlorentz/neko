@@ -303,6 +303,185 @@ TEST_CASE("EE packed word multiply execution")
     REQUIRE(core.lo1() == 63);
   }
 
+  SECTION("Packed destinations interlock consumers and writers")
+  {
+    SECTION("A consumer waits for the full packed result")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setGeneralRegister(1, {2, 3});
+      core.setGeneralRegister(2, {4, 5});
+      system.eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      system.eeBus().write32(
+        4,
+        registerInstruction(0x21, 3, 0, 7));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      system.runMasterCycles(3);
+
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.generalRegister(3) == EERegister128{});
+      REQUIRE(core.generalRegister(7) == EERegister128{});
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+      REQUIRE(core.generalRegister(7).low == 8);
+    }
+
+    SECTION("A writer waits and follows packed retirement")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setGeneralRegister(1, {2, 3});
+      core.setGeneralRegister(2, {4, 5});
+      setWord(&core, 5, 7);
+      setWord(&core, 6, 8);
+      system.eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      system.eeBus().write32(
+        4,
+        registerInstruction(0x21, 5, 6, 3));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      system.runMasterCycles(3);
+
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.generalRegister(3) == EERegister128{});
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.generalRegister(3) == EERegister128{15, 15});
+    }
+  }
+
+  SECTION("Packed HI LO hazards interlock full-width transfers")
+  {
+    SECTION("A full-width read waits for packed retirement")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setGeneralRegister(1, {2, 3});
+      core.setGeneralRegister(2, {4, 5});
+      system.eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      system.eeBus().write32(
+        4,
+        mmiInstruction(0x09, 0, 0, 7, 0x09));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      system.runMasterCycles(3);
+
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.generalRegister(7) == EERegister128{});
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.generalRegister(7) == EERegister128{8, 15});
+    }
+
+    SECTION("A full-width write follows packed retirement")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setGeneralRegister(1, {2, 3});
+      core.setGeneralRegister(2, {4, 5});
+      core.setGeneralRegister(5, {11, 12});
+      system.eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      system.eeBus().write32(
+        4,
+        mmiInstruction(0x29, 5, 0, 0, 0x09));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      system.runMasterCycles(3);
+
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.lo() == 0);
+      REQUIRE(core.lo1() == 0);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+      REQUIRE(core.lo() == 11);
+      REQUIRE(core.lo1() == 12);
+    }
+  }
+
+  SECTION("Packed and scalar MAC0 starts retry in either order")
+  {
+    const auto prepareRegisters =
+      [](EECore *core)
+      {
+        core->setGeneralRegister(1, {2, 3});
+        core->setGeneralRegister(2, {4, 5});
+        setWord(core, 5, 6);
+        setWord(core, 6, 7);
+      };
+
+    SECTION("Packed older blocks scalar MAC0")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      prepareRegisters(&core);
+      system.eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      system.eeBus().write32(
+        4,
+        registerInstruction(0x18, 5, 6, 7));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      system.runMasterCycles(4);
+
+      REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+      REQUIRE(core.lo() == 8);
+      REQUIRE(core.generalRegister(7).low == 0);
+
+      system.runMasterCycles(4);
+
+      REQUIRE(core.generalRegister(7).low == 42);
+      REQUIRE(core.lo() == 42);
+    }
+
+    SECTION("Scalar MAC0 older blocks packed work")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      prepareRegisters(&core);
+      system.eeBus().write32(
+        0,
+        registerInstruction(0x18, 5, 6, 7));
+      system.eeBus().write32(
+        4,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+      system.runMasterCycles(4);
+
+      REQUIRE(core.generalRegister(7).low == 42);
+      REQUIRE(core.lo() == 42);
+      REQUIRE(core.generalRegister(3) == EERegister128{});
+
+      system.runMasterCycles(4);
+
+      REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+      REQUIRE(core.lo() == 8);
+      REQUIRE(core.lo1() == 15);
+    }
+  }
+
   SECTION("Packed and scalar MAC1 starts retry in either order")
   {
     const auto prepareRegisters =
