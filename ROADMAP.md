@@ -1488,7 +1488,7 @@ continuation state before a live consumer exists.
       64-bit HI/LO accumulators and documented modulo results
 - [x] Enforce the manual's sign-extended-word operand restriction through the
       deterministic undefined-operation policy before allocating delayed work
-- [ ] Define completion, bypass/interlock, exception, interrupt, host halt,
+- [x] Define completion, bypass/interlock, exception, interrupt, host halt,
       guest-return drain, reset, and external-PC-mutation behavior for accepted
       packed MAC operations
 - [ ] Introduce one save-state version transition for reachable MMI

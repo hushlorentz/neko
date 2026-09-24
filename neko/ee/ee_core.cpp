@@ -6292,6 +6292,28 @@ void EECore::releaseInFlightCOP1(
   *operation = {};
 }
 
+bool EECore::drainInFlightExecution()
+{
+  drainIntegerMACContinuations();
+  return drainInFlightCOP1();
+}
+
+void EECore::drainIntegerMACContinuations()
+{
+  while (pendingMac0.active)
+  {
+    advancePendingMultiplyDivide(MACPipeline::MAC0);
+  }
+  while (pendingMac1.active)
+  {
+    advancePendingMultiplyDivide(MACPipeline::MAC1);
+  }
+  while (packedMACContinuationActive())
+  {
+    advancePackedMACContinuation();
+  }
+}
+
 bool EECore::drainInFlightCOP1()
 {
   for (const InFlightCOP1Operation &operation :

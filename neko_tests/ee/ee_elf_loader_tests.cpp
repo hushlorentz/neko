@@ -140,6 +140,57 @@ namespace
     return image;
   }
 
+  std::vector<std::uint8_t> returningPackedMultiplyELF()
+  {
+    std::vector<std::uint8_t> image = validELF();
+    writeU32(
+      &image,
+      PROGRAM_HEADER_OFFSET + 16,
+      20);
+    writeU32(
+      &image,
+      PROGRAM_HEADER_OFFSET + 20,
+      20);
+    writeU32(
+      &image,
+      0x100,
+      (UINT32_C(0x09) << 26) |
+        (UINT32_C(1) << 16) |
+        3);
+    writeU32(
+      &image,
+      0x104,
+      (UINT32_C(0x09) << 26) |
+        (UINT32_C(4) << 16) |
+        4);
+    writeU32(
+      &image,
+      0x108,
+      UINT32_C(0x70000000) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(4) << 16) |
+        (UINT32_C(3) << 11) |
+        (UINT32_C(0x0c) << 6) |
+        UINT32_C(0x09));
+    writeU32(&image, 0x10c, UINT32_C(0x03e00008));
+    writeU32(&image, 0x110, 0);
+    return image;
+  }
+
+  std::vector<std::uint8_t> returningScalarMultiplyELF()
+  {
+    std::vector<std::uint8_t> image =
+      returningPackedMultiplyELF();
+    writeU32(
+      &image,
+      0x108,
+      (UINT32_C(1) << 21) |
+        (UINT32_C(4) << 16) |
+        (UINT32_C(3) << 11) |
+        UINT32_C(0x18));
+    return image;
+  }
+
   std::vector<std::uint8_t> returningCOP1DividerELF(
     std::uint8_t function)
   {
@@ -698,6 +749,32 @@ TEST_CASE("PS2 ELF guests report bounded host outcomes")
     REQUIRE(
       system.eeCore().floatingPointRegister(3) ==
       UINT32_C(0x44332211));
+  }
+
+  SECTION("Return drains accepted packed MAC work")
+  {
+    NekoSystem system;
+    const EEGuestExecutionResult result =
+      system.runELF(returningPackedMultiplyELF(), 4);
+
+    REQUIRE(result.outcome == EEGuestOutcome::Completed);
+    REQUIRE(system.eeCore().generalRegister(3) == EERegister128{12, 0});
+    REQUIRE(system.eeCore().lo() == 12);
+    REQUIRE(system.eeCore().hi() == 0);
+    REQUIRE(system.eeCore().lo1() == 0);
+    REQUIRE(system.eeCore().hi1() == 0);
+  }
+
+  SECTION("Return drains accepted scalar MAC work")
+  {
+    NekoSystem system;
+    const EEGuestExecutionResult result =
+      system.runELF(returningScalarMultiplyELF(), 4);
+
+    REQUIRE(result.outcome == EEGuestOutcome::Completed);
+    REQUIRE(system.eeCore().generalRegister(3).low == 12);
+    REQUIRE(system.eeCore().lo() == 12);
+    REQUIRE(system.eeCore().hi() == 0);
   }
 
   SECTION("Return drain preserves COP1 memory faults")

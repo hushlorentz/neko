@@ -155,7 +155,7 @@ EEGuestExecutionResult NekoSystem::runELF(
     if (eeCoreComponent.programCounter() ==
         EEGuestRuntime::RETURN_ADDRESS)
     {
-      if (eeCoreComponent.drainInFlightCOP1())
+      if (eeCoreComponent.drainInFlightExecution())
       {
         eeCoreComponent.haltExecution();
         returned = true;
@@ -173,7 +173,7 @@ EEGuestExecutionResult NekoSystem::runELF(
       eeCoreComponent.programCounter() ==
         EEGuestRuntime::RETURN_ADDRESS)
   {
-    if (eeCoreComponent.drainInFlightCOP1())
+    if (eeCoreComponent.drainInFlightExecution())
     {
       eeCoreComponent.haltExecution();
       returned = true;

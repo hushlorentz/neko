@@ -581,6 +581,145 @@ TEST_CASE("EE packed word MAC operations require word-valued lanes")
   }
 }
 
+TEST_CASE("EE packed word MAC lifecycle is explicit")
+{
+  const auto preparePackedMultiply =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setGeneralRegister(1, {2, 3});
+      core.setGeneralRegister(2, {4, 5});
+      system->eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 3, 0x0c));
+    };
+
+  SECTION("Accepted work crosses synchronous exception entry")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedMultiply(&system);
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    for (std::uint32_t address = EEExceptionVector::GENERAL;
+         address < EEExceptionVector::GENERAL + 16;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+    REQUIRE(core.lo() == 8);
+    REQUIRE(core.lo1() == 15);
+  }
+
+  SECTION("Accepted work crosses interrupt entry")
+  {
+    constexpr std::uint32_t INTC_ENABLED_STATUS =
+      EECOP0Status::INTERRUPT_ENABLE |
+      EECOP0Status::MASTER_INTERRUPT_ENABLE |
+      EECOP0Status::INTC_MASK;
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedMultiply(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+    system.interruptController().setSource(
+      EEInterruptSource::VIF0,
+      true);
+    system.interruptController().toggleMask(
+      EEInterruptSource::mask(EEInterruptSource::VIF0));
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      INTC_ENABLED_STATUS);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::Interrupt);
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+
+    system.interruptController().acknowledge(
+      EEInterruptSource::mask(EEInterruptSource::VIF0));
+    system.runMasterCycles(4);
+
+    REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+    REQUIRE(core.lo() == 8);
+    REQUIRE(core.lo1() == 15);
+  }
+
+  SECTION("Host halt freezes and exact resume preserves accepted work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedMultiply(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+
+    core.haltExecution();
+    system.runMasterCycles(6);
+
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+
+    core.startExecution(core.programCounter());
+    system.runMasterCycles(4);
+
+    REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+  }
+
+  SECTION("Fresh execution restart discards accepted work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedMultiply(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+    core.haltExecution();
+    for (std::uint32_t address = 0x100;
+         address < 0x118;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+
+    core.startExecution(0x100);
+    system.runMasterCycles(5);
+
+    REQUIRE(core.generalRegister(3) == EERegister128{});
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.hi1() == 0);
+    REQUIRE(core.lo1() == 0);
+  }
+
+  SECTION("External PC mutation preserves accepted work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedMultiply(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+    for (std::uint32_t address = 0x100;
+         address < 0x118;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+
+    core.setProgramCounter(0x100);
+    system.runMasterCycles(4);
+
+    REQUIRE(core.generalRegister(3) == EERegister128{8, 15});
+    REQUIRE(core.programCounter() >= 0x110);
+  }
+}
+
 TEST_CASE("EE pending multiply divide interlocks are resource specific")
 {
   const auto startMAC0Multiply =

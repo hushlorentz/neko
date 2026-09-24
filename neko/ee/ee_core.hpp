@@ -1441,6 +1441,8 @@ class EECore final : public ClockedComponent
       COP1CompletionReason reason);
     static void releaseInFlightCOP1(
       InFlightCOP1Operation *operation);
+    bool drainInFlightExecution();
+    void drainIntegerMACContinuations();
     bool drainInFlightCOP1();
     void advancePendingCOP1(
       std::uint32_t *completedLoadRegisters);
