@@ -1496,7 +1496,7 @@ continuation state before a live consumer exists.
       load, byte-stable repeated saves, and malformed-state coverage
 - [x] Cover overlapping initiation, HI/LO and `rd` hazards, older-before-younger
       retirement, trace ordering, save/resume, and mixed scalar/packed MAC use
-- [ ] Complete an independent review of the MMI continuation foundation and
+- [x] Complete an independent review of the MMI continuation foundation and
       packed word operations
 
 ### Packed Halfword and Horizontal MAC Operations
