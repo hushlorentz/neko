@@ -1650,6 +1650,8 @@ required hardware.
       interrupt, backpressure, retry, and reset behavior.
 - [ ] Define deterministic EE/IOP scheduling and whole-system continuation
       across exceptions, interrupts, reset, halt, save states, and tracing.
+      Cover cross-component clock ratios, interrupt and DMA completion ordering,
+      and reset or restart while EE, IOP, SIF, and DMA work is active.
 - [ ] Advance the BIOS to the selected startup boundary and record every
       missing hardware dependency that should shape the next milestone.
 - [ ] Complete repeated-run, trace, hash, save-state, optimized, sanitizer,
@@ -1705,9 +1707,25 @@ guest evidence and define a bounded success point before implementation.
       blocks and items before implementation. Inventory the required DMAC
       channels, GS features, IPU behavior, timers, media commands, modules,
       synchronization, diagnostics, persistence, and acceptance artifacts.
+- [ ] Before title-specific expansion, complete a bounded retrospective review
+      of VU pipeline reset, Force Break, halt/resume, save-state continuation,
+      branch and termination drain ordering, simultaneous-write priority,
+      forwarding, and VIF/VU/GIF assumptions. Exercise EE, DMA, VIF, VU1, GIF,
+      and GS together with deterministic clock, interrupt, DMA, reset, trace,
+      framebuffer-hash, and continuation assertions.
 - [ ] Advance the title incrementally through the normal BIOS boot path,
       recording each new hardware dependency and moving broadly reusable work
       into the appropriate subsystem block.
+- [ ] Add demand-driven transport and graphics behavior only when the selected
+      title demonstrates it: VIF0 DMAC channel 0; additional EE DMAC priority,
+      slicing, stall, MFIFO, hold, or bus-error facilities; GS alpha-test and
+      `AFAIL`; and GS `FINISH`, CSR acknowledgement, IMR, interrupt, and
+      local-to-host transfer synchronization.
+- [ ] Add graphics diagnostics only when existing traces cannot localize a
+      failure. Candidate signals include decoded unsupported-feature reports,
+      draw-kick state and vertex snapshots, primitive and pixel summaries,
+      draw bounds, framebuffer hashes, and dependency-free framebuffer-region
+      export.
 - [ ] Reach the selected stable checkpoint with deterministic frame, audio,
       trace, state, save-state, reset, and repeated-run results.
 - [ ] Complete focused compatibility audits and an independent milestone
@@ -1734,57 +1752,6 @@ not as an unbounded completeness requirement.
 - [ ] Complete cross-subsystem conformance, optimized, sanitizer, leak, and
       independent final review before frontend packaging becomes the focus.
 
-## Cross-Cutting Future Work
-
-These items are intentionally unassigned. Move and expand one into the active
-numbered milestone only when guest evidence or a completed milestone
-establishes its concrete requirements.
-
-### Demand-Driven Hardware Expansion
-
-- [ ] Add VIF0 DMAC channel 0 when a selected guest requires it
-- [ ] Extend the EE DMAC beyond the current channel-1/channel-2 subset with
-      priority and slice arbitration, stall control, MFIFO, hold control, and
-      bus-error behavior when selected software relies on those common
-      facilities
-- [ ] Implement GS alpha-test comparisons and `AFAIL` frame/depth write
-      controls when selected software enables `ATE`
-- [ ] Implement the GS `FINISH` request, CSR acknowledgement and clear,
-      IMR masking, interrupt delivery, and complete local-to-host transfer
-      handshake when selected software relies on that synchronization
-
-### Additional System Integration
-
-- [ ] Complete a bounded independent retrospective review of VU pipeline
-      invariants: reset, Force Break, halt/resume, save-state continuation,
-      branch and termination drain ordering, simultaneous-write priority,
-      forwarding, and VIF/VU/GIF boundary assumptions; do not reopen the
-      completed instruction-by-instruction manual audit unless a concrete
-      finding requires it
-- [ ] Exercise EE, DMA, VIF, VU1, GIF, and GS in one deterministic workload
-- [ ] Cover cross-component clock ratios, interrupts, and DMA completion ordering
-- [ ] Cover reset and restart while multiple hardware components are active
-- [x] Round-trip save states during representative workloads
-- [ ] Assert stable frame hashes and subsystem traces across repeated runs
-
-### Demand-Driven Graphics Diagnostics
-
-Add these when independently authored guest programs produce graphics failures
-that need more detail than the existing structured GIF/GS traces:
-
-- [ ] Report unsupported draw features by their decoded register fields and
-      values, while preserving strict failure behavior in the core
-- [ ] Capture a draw-kick snapshot containing the primitive and shading modes,
-      active context, framebuffer format, scissor and offset state, and each
-      submitted vertex with its `RGBAQ` value
-- [ ] Extend completion summaries with GS primitive counts, pixel writes, draw
-      bounds, and framebuffer hashes
-- [ ] Export selected GS framebuffer regions to a dependency-free portable
-      image format for inspecting external programs without frontend changes
-- [ ] Present completed guest-ELF GS framebuffers through the optional SDL
-      desktop when interactive visualization is useful; retain headless
-      `--elf` execution as the diagnostic path
-
 ## Milestone 14: Frontends and libretro
 
 Package the deterministic core through maintained debugging, desktop, and
@@ -1797,6 +1764,9 @@ compatibility policy into a frontend.
       libretro, packaging, compatibility, and integration-test boundaries;
       identify which existing items below remain justified by the final core
       architecture.
+- [ ] Present completed guest-ELF framebuffers through the optional SDL desktop
+      while retaining headless `--elf` execution as the diagnostic and
+      automation path.
 
 ### Command-Line Debugger
 
