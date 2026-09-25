@@ -1426,6 +1426,7 @@ class EECore final : public ClockedComponent
       std::uint32_t address,
       std::uint32_t instruction);
     bool pendingMACContinuationActive() const;
+    bool pendingMultiplyDivideContinuationActive() const;
     bool multiplyDivideContinuationBlocks(
       const EEInstruction &instruction) const;
     bool packedMACContinuationActive() const;

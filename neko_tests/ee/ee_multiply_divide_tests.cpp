@@ -2016,6 +2016,99 @@ TEST_CASE("EE packed divide timing and interlocks")
     REQUIRE(core.lo1() == 2);
   }
 
+  SECTION("Independent Wide pairs retain dual issue during a divide")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    core.setGeneralRegister(
+      5,
+      {UINT64_C(0xff00ff00ff00ff00),
+       UINT64_C(0xffff0000ffff0000)});
+    core.setGeneralRegister(
+      6,
+      {UINT64_C(0x0f0f0f0f0f0f0f0f),
+       UINT64_C(0x00ff00ff00ff00ff)});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x09, 5, 6, 7, 0x12));
+    system.eeBus().write32(
+      8,
+      UINT32_C(0x24080001));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(
+      core.generalRegister(7) ==
+      EERegister128{
+        UINT64_C(0x0f000f000f000f00),
+        UINT64_C(0x00ff000000ff0000)});
+    REQUIRE(core.generalRegister(8).low == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(8).low == 1);
+
+    system.runMasterCycles(34);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.lo1() == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("A later independent Wide pair survives save restore")
+  {
+    NekoSystem original;
+    EECore &core = original.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    core.setGeneralRegister(5, {UINT64_MAX, UINT64_MAX});
+    core.setGeneralRegister(6, {UINT64_MAX, UINT64_MAX});
+    original.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    original.eeBus().write32(
+      4,
+      UINT32_C(0x8c090100));
+    original.eeBus().write32(
+      8,
+      mmiInstruction(0x09, 5, 6, 7, 0x12));
+    original.eeBus().write32(
+      12,
+      UINT32_C(0x24080001));
+    original.eeBus().write32(
+      0x100,
+      UINT32_C(0x12345678));
+    core.startExecution(0);
+    original.runMasterCycles(2);
+    REQUIRE(core.programCounter() == 16);
+
+    const std::vector<std::uint8_t> state =
+      original.saveState();
+    NekoSystem restored;
+    restored.loadState(state);
+    REQUIRE(restored.saveState() == state);
+    REQUIRE(restored.eeCore().stateHash() == core.stateHash());
+
+    original.runMasterCycles(36);
+    restored.runMasterCycles(36);
+
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(core.generalRegister(8).low == 1);
+    REQUIRE(core.generalRegister(9).low == UINT64_C(0x12345678));
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.lo1() == 2);
+  }
+
   SECTION("A paired younger A-stage continuation survives save restore")
   {
     NekoSystem original;

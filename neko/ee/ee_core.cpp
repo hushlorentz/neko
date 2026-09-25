@@ -2056,14 +2056,14 @@ void EECore::clock()
 
   fillIssueFrontEnd();
   const bool hadPendingOperation =
-    pendingMACContinuationActive();
+    pendingMultiplyDivideContinuationActive();
   advancePendingMultiplyDivide(MACPipeline::MAC0);
   advancePendingMultiplyDivide(MACPipeline::MAC1);
   advancePackedMACContinuation();
   advancePackedDivideContinuation();
   updateIssueSelection(completedCOP1LoadRegisters);
   if (hadPendingOperation &&
-      pendingMACContinuationActive() &&
+      pendingMultiplyDivideContinuationActive() &&
       issueLatch.failure != IssueLatchFailure::None)
   {
     return;
@@ -5929,7 +5929,13 @@ bool EECore::pendingMACContinuationActive() const
   return
     pendingMac0.active ||
     pendingMac1.active ||
-    packedMACContinuationActive() ||
+    packedMACContinuationActive();
+}
+
+bool EECore::pendingMultiplyDivideContinuationActive() const
+{
+  return
+    pendingMACContinuationActive() ||
     packedDivideContinuation.active;
 }
 

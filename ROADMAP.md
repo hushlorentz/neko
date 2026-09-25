@@ -1535,7 +1535,7 @@ continuation state before a live consumer exists.
 - [x] Cover signed minimum divided by minus one, signed remainder rules,
       unsigned high-bit inputs, all four broadcast lanes, scalar/packed MAC
       conflicts, interrupts, halt/resume, traces, hashes, and save/resume
-- [ ] Complete an independent review of packed divide behavior
+- [x] Complete an independent review of packed divide behavior
 
 ### MMI Guest Integration and Final Conformance Audit
 

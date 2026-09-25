@@ -1379,10 +1379,21 @@ void NekoSaveStateCodec::readEECore(
       packedDividePrecedesYoungerAStage =
         core->packedDivideContinuation.programOrder <
           core->youngerAStageContinuation.programOrder;
+      const std::uint64_t programOrderDistance =
+        core->youngerAStageContinuation.programOrder -
+          core->packedDivideContinuation.programOrder;
+      const std::uint8_t elapsedDivideCycles =
+        static_cast<std::uint8_t>(
+          37 -
+          core->packedDivideContinuation.remainingCycles);
       packedDivideYoungerPairReachable =
-        core->packedDivideContinuation.remainingCycles == 37 &&
-        core->packedDivideContinuation.programOrder ==
-          core->youngerAStageContinuation.programOrder - 1;
+        (elapsedDivideCycles == 0 &&
+         programOrderDistance == 1) ||
+        (elapsedDivideCycles != 0 &&
+         programOrderDistance >= 2 &&
+         programOrderDistance <=
+           static_cast<std::uint64_t>(
+             elapsedDivideCycles) * 2 + 1);
     }
   }
   require(
