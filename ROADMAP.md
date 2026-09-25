@@ -1521,9 +1521,11 @@ continuation state before a live consumer exists.
 - [x] Implement signed `PDIVW` and unsigned `PDIVUW` over the low word of each
       64-bit half, storing sign-extended quotient and remainder results in the
       corresponding LO and HI halves
-- [ ] Before implementing `PDIVBW`, resolve the instruction page's conflict
+- [x] Before implementing `PDIVBW`, resolve the instruction page's conflict
       between prose specifying zero-extended 16-bit remainders and
-      pseudocode/diagram specifying sign extension; do not choose silently
+      pseudocode/diagram specifying sign extension; use sign extension because
+      the four formal assignments, the dataflow diagram, and all three approved
+      local reference-emulator implementations agree on that behavior
 - [ ] Implement signed broadcast `PDIVBW` over all four source words using the
       low halfword divisor and the resolved remainder-extension policy
 - [ ] Model 37-cycle latency and 37-cycle throughput with asynchronous HI/LO
