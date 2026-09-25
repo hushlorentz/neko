@@ -1564,11 +1564,181 @@ continuation state before a live consumer exists.
 - [ ] Reconcile `PROJECT.md`, run the complete optimized AddressSanitizer
       check, and run the macOS leak check before closing the milestone
 
-## Future Work
+## Milestone 7: EE Virtual Memory and Memory-System Foundation
 
-These blocks are intentionally unsequenced. Promote and expand one into a
-numbered milestone only when an active guest or completed milestone establishes
-the concrete requirements.
+Build the functional EE memory-system foundation required for realistic
+privileged software and later BIOS startup. Cover TLB-managed translation,
+scratchpad mapping, guest-visible cache behavior, precise exceptions,
+deterministic continuation, and conformance without presenting unresolved
+whole-system contention timing as measured hardware behavior.
+
+Keep functional translation and cache correctness separate from replaceable
+timing and arbitration policy. Extend the existing COP0, exception, EE bus,
+trace, state-hash, and transactional persistence boundaries rather than
+creating parallel ownership.
+
+- [ ] Audit the local SCEI manuals and expand this milestone into independently
+      reviewable blocks and items before implementation. Inventory the required
+      COP0 state and instructions, segment and page rules, ITLB/DTLB behavior,
+      exception priority and vectors, scratchpad mapping, cache organization
+      and operations, dependency and issue effects, persistence and trace
+      surfaces, guest fixtures, unresolved evidence, and final validation.
+      Define the state owner, focused method boundaries, dependency direction,
+      derived-versus-serialized lookup state, performance-sensitive paths, and
+      the boundary between functional behavior and replaceable contention
+      timing.
+- [ ] Implement the required COP0 translation state and complete TLB-management
+      instruction behavior with exhaustive encoding and reserved-field
+      validation.
+- [ ] Route EE instruction fetches and data accesses through one functional
+      segment and TLB translation authority, including ASIDs, global mappings,
+      supported page sizes, even/odd pages, and access permissions.
+- [ ] Implement precise refill, invalid, modified, address, and bus exception
+      behavior with correct COP0 side effects, vectors, branch-delay ownership,
+      two-wide issue boundaries, and cancellation of younger work.
+- [ ] Add EE scratchpad storage and mapping with explicit CPU, DMA, aliasing,
+      hashing, reset, and persistence contracts derived from the manuals.
+- [ ] Implement the documented guest-visible instruction-cache and data-cache
+      organization and maintenance behavior while isolating uncertain refill,
+      contention, and arbitration timing behind replaceable policy.
+- [ ] Extend structured traces, canonical state hashes, transactional save
+      states, malformed-state rejection, and deterministic halt/resume,
+      restart, interrupt, and exception continuation across the memory system.
+- [ ] Add independently authored semantic and integration guests covering
+      translation, page sizes, ASIDs, permissions, TLB management, exceptions,
+      scratchpad access, cache maintenance, aliases, and self-modifying code.
+- [ ] Complete exhaustive conformance, optimized and sanitizer validation,
+      macOS leak checking, and independent final review, then use a bounded
+      BIOS-startup experiment to identify the next concrete system dependency.
+
+## Milestone 8: IOP Execution and Platform Foundation
+
+Build an independently testable IOP subsystem around the R3000A execution
+core, privileged state, memory map, interrupts, timers, and the minimum common
+DMA infrastructure required by authored IOP programs. Do not make BIOS progress
+a prerequisite for validating the processor and platform contracts.
+
+- [ ] Audit the local SCEI manuals and expand this milestone into independently
+      reviewable blocks and items before implementation. Inventory the R3000A
+      instruction and encoding surface, COP0 and exception behavior, memory
+      map, reset state, INTC, timers, DMA, clock relationship to the EE,
+      persistence and trace requirements, guest fixtures, unresolved evidence,
+      and final validation. Define ownership and the boundary between the IOP
+      core, IOP bus, common platform devices, and later SIF/device work.
+- [ ] Implement and exhaustively audit the R3000A execution core, privileged
+      state, precise exceptions, delay slots, and deterministic run control.
+- [ ] Add the IOP memory map, interrupt controller, timers, and the minimum DMA
+      foundation needed for isolated platform tests.
+- [ ] Add deterministic traces, hashes, transactional persistence, semantic
+      guests, optimized and sanitizer validation, and independent final review.
+
+## Milestone 9: EE-IOP Interconnect and Deterministic BIOS Startup
+
+Connect the completed EE and IOP foundations through the documented SIF and
+boot-control boundaries, then advance a real BIOS through a bounded,
+deterministic startup sequence. Treat the BIOS as an integration workload and
+stop at explicit missing-device boundaries rather than silently stubbing
+required hardware.
+
+- [ ] Audit the local SCEI manuals and the completed EE/IOP contracts, then
+      expand this milestone into independently reviewable blocks and items
+      before implementation. Inventory SIF registers and FIFOs, EE and IOP DMA
+      channels, reset and boot sequencing, interrupt behavior, clock ordering,
+      BIOS observability, persistence, diagnostics, unresolved evidence, and
+      the exact bounded startup target.
+- [ ] Implement SIF communication and the required EE-side and IOP-side DMA,
+      interrupt, backpressure, retry, and reset behavior.
+- [ ] Define deterministic EE/IOP scheduling and whole-system continuation
+      across exceptions, interrupts, reset, halt, save states, and tracing.
+- [ ] Advance the BIOS to the selected startup boundary and record every
+      missing hardware dependency that should shape the next milestone.
+- [ ] Complete repeated-run, trace, hash, save-state, optimized, sanitizer,
+      leak, and independent-review validation.
+
+## Milestone 10: Boot Services, Media, and Input
+
+Implement the concrete boot-service hardware exposed by BIOS progress,
+including optical-media commands and data flow, SIO2-facing input, controller
+and memory-card behavior, and any required ROM or module-loading support.
+Preserve deterministic emulated device time independently of host I/O speed.
+
+- [ ] Use the Milestone 9 BIOS dependency record and local SCEI manuals to
+      expand this milestone into independently reviewable blocks and items
+      before implementation. Identify the exact CD/DVD, SIO2, controller,
+      memory-card, ROM/module, DMA, interrupt, timing, persistence, and
+      diagnostic behavior required by the selected boot path; defer unrelated
+      peripheral breadth.
+- [ ] Implement the required CD/DVD command, interrupt, DMA, sector, seek, and
+      transfer-continuation behavior with deterministic emulated timing.
+- [ ] Implement the required SIO2, controller, and memory-card protocols with
+      deterministic input and persistent-media boundaries.
+- [ ] Complete the selected BIOS boot-service flows with reproducible traces,
+      hashes, save states, failure diagnostics, and independent review.
+
+## Milestone 11: SPU2 and Deterministic Audio
+
+Implement the PS2 audio hardware as a deterministic core subsystem that
+produces PCM without owning host audio devices or pacing. Cover both SPU2
+cores, voice processing, streaming, effects, DMA, interrupts, and continuation.
+
+- [ ] Audit the local SCEI manuals and expand this milestone into independently
+      reviewable blocks and items before implementation. Inventory register
+      state, two-core and 48-voice organization, ADPCM, looping, pitch, ADSR,
+      mixing, effects and reverb, streaming, DMA, interrupts, sample timing,
+      persistence, PCM validation, unresolved evidence, and frontend
+      boundaries.
+- [ ] Implement voice decoding and lifecycle, pitch, envelopes, looping, and
+      deterministic per-sample mixing for both cores.
+- [ ] Add effects, streaming, DMA, interrupt, timing, reset, and save-state
+      behavior required by authored guests and the selected system workload.
+- [ ] Add headless PCM hashes and reference fixtures, then complete optimized,
+      sanitizer, leak, and independent-review validation.
+
+## Milestone 12: Boot a Selected Game
+
+Boot one deliberately selected title through the BIOS using the real EE, IOP,
+media, input, graphics, and audio paths. Expand hardware only from concrete
+guest evidence and define a bounded success point before implementation.
+
+- [ ] Select the target title and startup checkpoint, capture its known boot
+      requirements, and expand this milestone into independently reviewable
+      blocks and items before implementation. Inventory the required DMAC
+      channels, GS features, IPU behavior, timers, media commands, modules,
+      synchronization, diagnostics, persistence, and acceptance artifacts.
+- [ ] Advance the title incrementally through the normal BIOS boot path,
+      recording each new hardware dependency and moving broadly reusable work
+      into the appropriate subsystem block.
+- [ ] Reach the selected stable checkpoint with deterministic frame, audio,
+      trace, state, save-state, reset, and repeated-run results.
+- [ ] Complete focused compatibility audits and an independent milestone
+      review without generalizing from one title beyond demonstrated behavior.
+
+## Milestone 13: Playable-System Integration
+
+Advance the selected workload from boot success to a defined playable
+checkpoint with coherent input, audio, graphics, timing, persistence, reset,
+and host control. Use additional titles as targeted compatibility evidence,
+not as an unbounded completeness requirement.
+
+- [ ] Define the playable checkpoint and expand this milestone into
+      independently reviewable blocks and items before implementation.
+      Inventory gameplay-time hardware dependencies, performance limits,
+      synchronization risks, input and presentation requirements, save-state
+      boundaries, compatibility probes, diagnostics, and final acceptance
+      artifacts.
+- [ ] Complete the input, audio, graphics, media, timing, and system behavior
+      required to reach and repeat the selected playable checkpoint.
+- [ ] Establish deterministic frame and PCM hashes, stable save/load and reset,
+      bounded performance targets, and divergence diagnostics over extended
+      execution.
+- [ ] Complete cross-subsystem conformance, optimized, sanitizer, leak, and
+      independent final review before frontend packaging becomes the focus.
+
+## Cross-Cutting Future Work
+
+These items are intentionally unassigned. Move and expand one into the active
+numbered milestone only when guest evidence or a completed milestone
+establishes its concrete requirements.
 
 ### Demand-Driven Hardware Expansion
 
@@ -1577,24 +1747,11 @@ the concrete requirements.
       priority and slice arbitration, stall control, MFIFO, hold control, and
       bus-error behavior when selected software relies on those common
       facilities
-- [ ] Add IOP, input devices, and SPU2 only when required by selected software
 - [ ] Implement GS alpha-test comparisons and `AFAIL` frame/depth write
       controls when selected software enables `ATE`
 - [ ] Implement the GS `FINISH` request, CSR acknowledgement and clear,
       IMR masking, interrupt delivery, and complete local-to-host transfer
       handshake when selected software relies on that synchronization
-
-### Long-Term Guest Execution Progression
-
-Keep each target incremental and expand it only when the preceding guest exposes
-the next concrete hardware or software dependency:
-
-- [ ] Advance through deterministic BIOS startup as the first large system
-      workload, adding IOP and other hardware only when execution requires it
-- [ ] Use directly loaded game executables for targeted bring-up experiments
-      without treating them as a substitute for the normal startup path
-- [ ] Boot a selected game through the BIOS as the long-term system-integration
-      target
 
 ### Additional System Integration
 
@@ -1628,7 +1785,18 @@ that need more detail than the existing structured GIF/GS traces:
       desktop when interactive visualization is useful; retain headless
       `--elf` execution as the diagnostic path
 
-## Future Milestone: Frontends and libretro
+## Milestone 14: Frontends and libretro
+
+Package the deterministic core through maintained debugging, desktop, and
+libretro consumers without moving hardware, timing, persistence, or
+compatibility policy into a frontend.
+
+- [ ] Audit the completed core APIs and expand this milestone into independently
+      reviewable blocks and items before implementation. Define debugger,
+      checkpoint and replay, input, video, audio, logging, save-state, desktop,
+      libretro, packaging, compatibility, and integration-test boundaries;
+      identify which existing items below remain justified by the final core
+      architecture.
 
 ### Command-Line Debugger
 
