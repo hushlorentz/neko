@@ -663,6 +663,205 @@ TEST_CASE("EE packed word multiply accumulate execution")
   }
 }
 
+TEST_CASE("EE packed halfword multiply execution")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    1,
+    {UINT64_C(0x0004fffd0002ffff),
+     UINT64_C(0x80007fff0001fffe)});
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0xfffb00040003fffe),
+     UINT64_C(0x0002ffff80000003)});
+  system.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 3, 0x1c));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  system.runMasterCycles(4);
+
+  REQUIRE(core.lo() == UINT64_C(0x0000000600000002));
+  REQUIRE(core.hi() == UINT64_C(0xffffffecfffffff4));
+  REQUIRE(core.lo1() == UINT64_C(0xffff8000fffffffa));
+  REQUIRE(core.hi1() == UINT64_C(0xffff0000ffff8001));
+  REQUIRE(
+    core.generalRegister(3) ==
+    EERegister128{UINT64_C(0xfffffff400000002),
+                  UINT64_C(0xffff8001fffffffa)});
+}
+
+TEST_CASE("EE packed halfword multiply accumulate execution")
+{
+  SECTION("PMADDH adds products modulo 32 bits")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x0004000300020001),
+       UINT64_C(0x0008000700060005)});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x0001000100010001),
+       UINT64_C(0x0001000100010001)});
+    core.setLO(UINT64_C(0xffffffff00000010));
+    core.setHI(UINT64_C(0x00000020fffffffe));
+    core.setLO1(UINT64_C(0xfffffff000000030));
+    core.setHI1(UINT64_C(0x00000040fffffffc));
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x10));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.lo() == UINT64_C(0x0000000100000011));
+    REQUIRE(core.hi() == UINT64_C(0x0000002400000001));
+    REQUIRE(core.lo1() == UINT64_C(0xfffffff600000035));
+    REQUIRE(core.hi1() == UINT64_C(0x0000004800000003));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x0000000100000011),
+                    UINT64_C(0x0000000300000035)});
+  }
+
+  SECTION("PMSUBH subtracts products modulo 32 bits")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x0004000300020001),
+       UINT64_C(0x0008000700060005)});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x0001000100010001),
+       UINT64_C(0x0001000100010001)});
+    core.setLO(UINT64_C(0x0000000100000010));
+    core.setHI(UINT64_C(0x00000020fffffffe));
+    core.setLO1(UINT64_C(0x0000001000000030));
+    core.setHI1(UINT64_C(0x00000040fffffffc));
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x14));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.lo() == UINT64_C(0xffffffff0000000f));
+    REQUIRE(core.hi() == UINT64_C(0x0000001cfffffffb));
+    REQUIRE(core.lo1() == UINT64_C(0x0000000a0000002b));
+    REQUIRE(core.hi1() == UINT64_C(0x00000038fffffff5));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0xfffffffb0000000f),
+                    UINT64_C(0xfffffff50000002b)});
+  }
+}
+
+TEST_CASE("EE packed MAC forwards halfword state into word accumulation")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    1,
+    {UINT64_C(0x0004000300020001),
+     UINT64_C(0x0008000700060005)});
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0x0001000100010001),
+     UINT64_C(0x0001000100010001)});
+  core.setGeneralRegister(5, {2, 3});
+  core.setGeneralRegister(6, {4, 5});
+  system.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 3, 0x1c));
+  system.eeBus().write32(
+    4,
+    mmiInstruction(0x09, 5, 6, 4, 0x00));
+  core.startExecution(0);
+
+  system.runMasterCycles(7);
+
+  REQUIRE(
+    core.generalRegister(3) ==
+    EERegister128{UINT64_C(0x0000000300000001),
+                  UINT64_C(0x0000000700000005)});
+  REQUIRE(
+    core.generalRegister(4) ==
+    EERegister128{UINT64_C(0x0000000300000009),
+                  UINT64_C(0x0000000700000014)});
+  REQUIRE(core.hi() == 3);
+  REQUIRE(core.lo() == 9);
+  REQUIRE(core.hi1() == 7);
+  REQUIRE(core.lo1() == 20);
+}
+
+TEST_CASE("EE packed horizontal halfword MAC execution")
+{
+  const EERegister128 source = {
+    UINT64_C(0x0004000300020001),
+    UINT64_C(0x0008000700060005)
+  };
+  const EERegister128 target = {
+    UINT64_C(0x0005000400030002),
+    UINT64_C(0x0009000800070006)
+  };
+
+  SECTION("PHMADH stores sums and the observed odd products")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x11));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.lo() == UINT64_C(0x0000000600000008));
+    REQUIRE(core.hi() == UINT64_C(0x0000001400000020));
+    REQUIRE(core.lo1() == UINT64_C(0x0000002a00000048));
+    REQUIRE(core.hi1() == UINT64_C(0x0000004800000080));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x0000002000000008),
+                    UINT64_C(0x0000008000000048)});
+  }
+
+  SECTION("PHMSBH stores differences and complemented odd products")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, source);
+    core.setGeneralRegister(2, target);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x15));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(4);
+
+    REQUIRE(core.lo() == UINT64_C(0xfffffff900000004));
+    REQUIRE(core.hi() == UINT64_C(0xffffffeb00000008));
+    REQUIRE(core.lo1() == UINT64_C(0xffffffd50000000c));
+    REQUIRE(core.hi1() == UINT64_C(0xffffffb700000010));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x0000000800000004),
+                    UINT64_C(0x000000100000000c)});
+  }
+}
+
 TEST_CASE("EE packed word MAC operations require word-valued lanes")
 {
   struct OperationEncoding
@@ -946,6 +1145,88 @@ TEST_CASE("EE packed MAC continuation survives save-state restore")
   REQUIRE(originalCore.generalRegister(4) == EERegister128{10, 17});
   REQUIRE(originalCore.lo() == 10);
   REQUIRE(originalCore.lo1() == 17);
+}
+
+TEST_CASE("EE packed halfword MAC continuation survives save-state restore")
+{
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  originalCore.setGeneralRegister(
+    1,
+    {UINT64_C(0x0004000300020001),
+     UINT64_C(0x0008000700060005)});
+  originalCore.setGeneralRegister(
+    2,
+    {UINT64_C(0x0001000100010001),
+     UINT64_C(0x0001000100010001)});
+  originalCore.setLO(UINT64_C(0xffffffff00000010));
+  originalCore.setHI(UINT64_C(0x00000020fffffffe));
+  originalCore.setLO1(UINT64_C(0xfffffff000000030));
+  originalCore.setHI1(UINT64_C(0x00000040fffffffc));
+  original.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 3, 0x10));
+  originalCore.startExecution(0);
+  original.clockMasterCycle();
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(restored.eeCore().stateHash() == originalCore.stateHash());
+
+  original.runMasterCycles(4);
+  restored.runMasterCycles(4);
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(
+    originalCore.generalRegister(3) ==
+    EERegister128{UINT64_C(0x0000000100000011),
+                  UINT64_C(0x0000000300000035)});
+}
+
+TEST_CASE("EE delayed packed MAC overlap survives save-state restore")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setGeneralRegister(
+    1,
+    {UINT64_C(0x0004000300020001),
+     UINT64_C(0x0008000700060005)});
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0x0001000100010001),
+     UINT64_C(0x0001000100010001)});
+  original.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 3, 0x1c));
+  original.eeBus().write32(
+    4,
+    mmiInstruction(0x09, 1, 2, 7, 0x12));
+  original.eeBus().write32(
+    8,
+    mmiInstruction(0x09, 1, 2, 8, 0x12));
+  original.eeBus().write32(
+    12,
+    mmiInstruction(0x09, 1, 2, 4, 0x10));
+  core.startExecution(0);
+  original.runMasterCycles(4);
+
+  REQUIRE(core.programCounter() >= 16);
+  REQUIRE(core.generalRegister(3) == EERegister128{});
+  REQUIRE(core.generalRegister(4) == EERegister128{});
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(state));
+
+  original.runMasterCycles(4);
+  restored.runMasterCycles(4);
+
+  REQUIRE(original.saveState() == restored.saveState());
 }
 
 TEST_CASE("EE pending multiply divide interlocks are resource specific")

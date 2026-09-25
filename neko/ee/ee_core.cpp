@@ -322,6 +322,142 @@ namespace
           (UINT64_C(1) << laneBits) - lane);
   }
 
+  std::uint16_t packedHalfword(
+    const EERegister128 &value,
+    std::uint8_t lane)
+  {
+    const std::uint64_t limb =
+      lane < 4 ? value.low : value.high;
+    return static_cast<std::uint16_t>(
+      limb >> ((lane & 3) * 16));
+  }
+
+  std::uint32_t packedWord(
+    const EERegister128 &value,
+    std::uint8_t lane)
+  {
+    const std::uint64_t limb =
+      lane < 2 ? value.low : value.high;
+    return static_cast<std::uint32_t>(
+      limb >> ((lane & 1) * 32));
+  }
+
+  EERegister128 packWords(
+    const std::array<std::uint32_t, 4> &words)
+  {
+    return {
+      words[0] | (static_cast<std::uint64_t>(words[1]) << 32),
+      words[2] | (static_cast<std::uint64_t>(words[3]) << 32)
+    };
+  }
+
+  struct PackedHalfwordMACResults
+  {
+    EERegister128 hi;
+    EERegister128 lo;
+    EERegister128 destination;
+  };
+
+  PackedHalfwordMACResults calculatePackedHalfwordMAC(
+    const EERegister128 &source,
+    const EERegister128 &target,
+    const EERegister128 &accumulatorHI,
+    const EERegister128 &accumulatorLO,
+    bool accumulate,
+    bool subtract)
+  {
+    std::array<std::uint32_t, 4> hiWords = {};
+    std::array<std::uint32_t, 4> loWords = {};
+    std::array<std::uint32_t, 4> destinationWords = {};
+    for (std::uint8_t lane = 0; lane < 8; ++lane)
+    {
+      const std::int64_t product =
+        signedPackedLane(packedHalfword(source, lane), 16) *
+        signedPackedLane(packedHalfword(target, lane), 16);
+      const std::uint8_t resultWord =
+        static_cast<std::uint8_t>(
+          (lane / 4) * 2 + (lane & 1));
+      const bool hiDestination = (lane & 2) != 0;
+      const EERegister128 &accumulator =
+        hiDestination ? accumulatorHI : accumulatorLO;
+      const std::uint32_t accumulatorWord =
+        accumulate ? packedWord(accumulator, resultWord) : 0;
+      const std::uint32_t productWord =
+        static_cast<std::uint32_t>(product);
+      const std::uint32_t result =
+        subtract
+          ? accumulatorWord - productWord
+          : accumulatorWord + productWord;
+      if (hiDestination)
+      {
+        hiWords[resultWord] = result;
+      }
+      else
+      {
+        loWords[resultWord] = result;
+      }
+      if ((lane & 1) == 0)
+      {
+        destinationWords[lane / 2] = result;
+      }
+    }
+    return {
+      packWords(hiWords),
+      packWords(loWords),
+      packWords(destinationWords)
+    };
+  }
+
+  PackedHalfwordMACResults calculatePackedHorizontalMAC(
+    const EERegister128 &source,
+    const EERegister128 &target,
+    bool subtract)
+  {
+    std::array<std::uint32_t, 4> hiWords = {};
+    std::array<std::uint32_t, 4> loWords = {};
+    std::array<std::uint32_t, 4> destinationWords = {};
+    for (std::uint8_t pair = 0; pair < 4; ++pair)
+    {
+      const std::uint8_t evenLane =
+        static_cast<std::uint8_t>(pair * 2);
+      const std::uint8_t oddLane =
+        static_cast<std::uint8_t>(evenLane + 1);
+      const std::uint32_t evenProduct =
+        static_cast<std::uint32_t>(
+          signedPackedLane(
+            packedHalfword(source, evenLane),
+            16) *
+          signedPackedLane(
+            packedHalfword(target, evenLane),
+            16));
+      const std::uint32_t oddProduct =
+        static_cast<std::uint32_t>(
+          signedPackedLane(
+            packedHalfword(source, oddLane),
+            16) *
+          signedPackedLane(
+            packedHalfword(target, oddLane),
+            16));
+      const std::uint32_t result =
+        subtract
+          ? oddProduct - evenProduct
+          : oddProduct + evenProduct;
+      const std::uint8_t resultWord =
+        static_cast<std::uint8_t>((pair / 2) * 2);
+      std::array<std::uint32_t, 4> &words =
+        (pair & 1) == 0 ? loWords : hiWords;
+      words[resultWord] = result;
+      words[resultWord + 1] =
+        subtract ? ~oddProduct : oddProduct;
+      destinationWords[pair] = result;
+    }
+    return {
+      packWords(hiWords),
+      packWords(loWords),
+      packWords(destinationWords)
+    };
+  }
+
   std::uint64_t clampSignedValue(
     std::int64_t value,
     std::uint8_t outputBits)
@@ -2489,6 +2625,11 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelMultiplyAddWord:
     case EEOperation::ParallelMultiplyAddUnsignedWord:
     case EEOperation::ParallelMultiplySubtractWord:
+    case EEOperation::ParallelMultiplyHalfword:
+    case EEOperation::ParallelMultiplyAddHalfword:
+    case EEOperation::ParallelMultiplySubtractHalfword:
+    case EEOperation::ParallelHorizontalMultiplyAddHalfword:
+    case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
       return executePackedMultiply(instruction, address);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
@@ -3531,6 +3672,67 @@ EEInstructionExecutionOutcome EECore::executePackedMultiply(
     generalRegisters[instruction.sourceRegister];
   const EERegister128 target =
     generalRegisters[instruction.targetRegister];
+  if (instruction.operation ==
+        EEOperation::ParallelHorizontalMultiplyAddHalfword ||
+      instruction.operation ==
+        EEOperation::ParallelHorizontalMultiplySubtractHalfword)
+  {
+    const bool subtract =
+      instruction.operation ==
+        EEOperation::ParallelHorizontalMultiplySubtractHalfword;
+    const PackedHalfwordMACResults results =
+      calculatePackedHorizontalMAC(source, target, subtract);
+    startPackedMACOperation(
+      subtract
+        ? PackedMACOperation::HorizontalMultiplySubtractHalfword
+        : PackedMACOperation::HorizontalMultiplyAddHalfword,
+      source,
+      target,
+      results.hi,
+      results.lo,
+      instruction.destinationRegister,
+      results.destination);
+    return EEInstructionExecutionOutcome::Completed;
+  }
+  if (instruction.operation ==
+        EEOperation::ParallelMultiplyHalfword ||
+      instruction.operation ==
+        EEOperation::ParallelMultiplyAddHalfword ||
+      instruction.operation ==
+        EEOperation::ParallelMultiplySubtractHalfword)
+  {
+    const bool accumulate =
+      instruction.operation !=
+        EEOperation::ParallelMultiplyHalfword;
+    const bool subtract =
+      instruction.operation ==
+        EEOperation::ParallelMultiplySubtractHalfword;
+    const PackedMACAccumulatorState accumulator =
+      packedMACAccumulatorState();
+    const PackedHalfwordMACResults results =
+      calculatePackedHalfwordMAC(
+        source,
+        target,
+        accumulator.hi,
+        accumulator.lo,
+        accumulate,
+        subtract);
+    const PackedMACOperation packedOperation =
+      !accumulate
+        ? PackedMACOperation::MultiplyHalfword
+        : (subtract
+            ? PackedMACOperation::MultiplySubtractHalfword
+            : PackedMACOperation::MultiplyAddHalfword);
+    startPackedMACOperation(
+      packedOperation,
+      source,
+      target,
+      results.hi,
+      results.lo,
+      instruction.destinationRegister,
+      results.destination);
+    return EEInstructionExecutionOutcome::Completed;
+  }
   if (!isPackedWordValue(source) ||
       !isPackedWordValue(target))
   {
@@ -3589,8 +3791,16 @@ EEInstructionExecutionOutcome EECore::executePackedMultiply(
   };
   if (accumulate)
   {
-    const EERegister128 accumulator =
-      packedMACAccumulatorValues();
+    const PackedMACAccumulatorState accumulatorState =
+      packedMACAccumulatorState();
+    const EERegister128 accumulator = {
+      accumulatorValue(
+        accumulatorState.hi.low,
+        accumulatorState.lo.low),
+      accumulatorValue(
+        accumulatorState.hi.high,
+        accumulatorState.lo.high)
+    };
     products = subtract
       ? EERegister128{
           accumulator.low - products.low,
@@ -5741,15 +5951,34 @@ bool EECore::packedMACOperationStateValid(
   }
   if (operation.operation < PackedMACOperation::MultiplyWord ||
       operation.operation >
-        PackedMACOperation::MultiplySubtractWord ||
+        PackedMACOperation::HorizontalMultiplySubtractHalfword ||
       operation.programOrder == 0 ||
       operation.destinationRegister >= GENERAL_REGISTER_COUNT ||
       operation.remainingCycles == 0 ||
-      operation.remainingCycles > MULTIPLY_LATENCY ||
-      !isPackedWordValue(operation.source) ||
-      !isPackedWordValue(operation.target))
+      operation.remainingCycles > MULTIPLY_LATENCY)
   {
     return false;
+  }
+  const bool halfwordOperation =
+    operation.operation >= PackedMACOperation::MultiplyHalfword;
+  if (!halfwordOperation &&
+      (!isPackedWordValue(operation.source) ||
+       !isPackedWordValue(operation.target)))
+  {
+    return false;
+  }
+  if (halfwordOperation)
+  {
+    const EERegister128 expectedDestination = {
+      packedWord(operation.loResult, 0) |
+        (static_cast<std::uint64_t>(
+           packedWord(operation.hiResult, 0)) << 32),
+      packedWord(operation.loResult, 2) |
+        (static_cast<std::uint64_t>(
+           packedWord(operation.hiResult, 2)) << 32)
+    };
+    return operation.generalRegisterResult ==
+      expectedDestination;
   }
   const EERegister128 expectedHI = {
     signExtendWord(static_cast<std::uint32_t>(
@@ -5801,10 +6030,8 @@ bool EECore::packedMACContinuationStateValid() const
   {
     return false;
   }
-  EERegister128 accumulator = {
-    accumulatorValue(hiRegister, loRegister),
-    accumulatorValue(hi1Register, lo1Register)
-  };
+  EERegister128 accumulatorHI = {hiRegister, hi1Register};
+  EERegister128 accumulatorLO = {loRegister, lo1Register};
   for (std::size_t index = 0; index < order.size(); ++index)
   {
     const InFlightPackedMACOperation &operation =
@@ -5825,6 +6052,58 @@ bool EECore::packedMACContinuationStateValid() const
       {
         return false;
       }
+    }
+    const bool halfwordOperation =
+      operation.operation >= PackedMACOperation::MultiplyHalfword;
+    if (halfwordOperation)
+    {
+      const bool horizontalOperation =
+        operation.operation >=
+          PackedMACOperation::HorizontalMultiplyAddHalfword;
+      if (horizontalOperation)
+      {
+        const PackedHalfwordMACResults expected =
+          calculatePackedHorizontalMAC(
+            operation.source,
+            operation.target,
+            operation.operation ==
+              PackedMACOperation::
+                HorizontalMultiplySubtractHalfword);
+        if (operation.hiResult != expected.hi ||
+            operation.loResult != expected.lo ||
+            operation.generalRegisterResult !=
+              expected.destination)
+        {
+          return false;
+        }
+        accumulatorHI = expected.hi;
+        accumulatorLO = expected.lo;
+        continue;
+      }
+      const bool accumulate =
+        operation.operation !=
+          PackedMACOperation::MultiplyHalfword;
+      const bool subtract =
+        operation.operation ==
+          PackedMACOperation::MultiplySubtractHalfword;
+      const PackedHalfwordMACResults expected =
+        calculatePackedHalfwordMAC(
+          operation.source,
+          operation.target,
+          accumulatorHI,
+          accumulatorLO,
+          accumulate,
+          subtract);
+      if (operation.hiResult != expected.hi ||
+          operation.loResult != expected.lo ||
+          operation.generalRegisterResult !=
+            expected.destination)
+      {
+        return false;
+      }
+      accumulatorHI = expected.hi;
+      accumulatorLO = expected.lo;
+      continue;
     }
     const bool unsignedOperands =
       operation.operation ==
@@ -5855,23 +6134,40 @@ bool EECore::packedMACContinuationStateValid() const
           PackedMACOperation::MultiplyAddUnsignedWord)
     {
       expected = {
-        accumulator.low + products.low,
-        accumulator.high + products.high
+        accumulatorValue(
+          accumulatorHI.low,
+          accumulatorLO.low) + products.low,
+        accumulatorValue(
+          accumulatorHI.high,
+          accumulatorLO.high) + products.high
       };
     }
     else if (operation.operation ==
                PackedMACOperation::MultiplySubtractWord)
     {
       expected = {
-        accumulator.low - products.low,
-        accumulator.high - products.high
+        accumulatorValue(
+          accumulatorHI.low,
+          accumulatorLO.low) - products.low,
+        accumulatorValue(
+          accumulatorHI.high,
+          accumulatorLO.high) - products.high
       };
     }
     if (operation.generalRegisterResult != expected)
     {
       return false;
     }
-    accumulator = expected;
+    accumulatorHI = {
+      signExtendWord(
+        static_cast<std::uint32_t>(expected.low >> 32)),
+      signExtendWord(
+        static_cast<std::uint32_t>(expected.high >> 32))
+    };
+    accumulatorLO = {
+      signExtendWord(static_cast<std::uint32_t>(expected.low)),
+      signExtendWord(static_cast<std::uint32_t>(expected.high))
+    };
   }
   const InFlightPackedMACOperation &newest =
     packedMACContinuation.operations[
@@ -5882,7 +6178,7 @@ bool EECore::packedMACContinuationStateValid() const
       packedMACContinuation.operations[order[0]];
     return
       packedMACContinuation.initiationCycles != 0 &&
-      older.remainingCycles ==
+      older.remainingCycles <=
         packedMACContinuation.initiationCycles &&
       newest.remainingCycles ==
         packedMACContinuation.initiationCycles + 2;
@@ -5893,7 +6189,8 @@ bool EECore::packedMACContinuationStateValid() const
         packedMACContinuation.initiationCycles + 2;
 }
 
-EERegister128 EECore::packedMACAccumulatorValues() const
+EECore::PackedMACAccumulatorState
+EECore::packedMACAccumulatorState() const
 {
   const InFlightPackedMACOperation *newest = nullptr;
   for (const InFlightPackedMACOperation &operation :
@@ -5914,10 +6211,7 @@ EERegister128 EECore::packedMACAccumulatorValues() const
     newest == nullptr
       ? EERegister128{loRegister, lo1Register}
       : newest->loResult;
-  return {
-    accumulatorValue(hi.low, lo.low),
-    accumulatorValue(hi.high, lo.high)
-  };
+  return {hi, lo};
 }
 
 bool EECore::packedMACContinuationBlocks(

@@ -1501,16 +1501,16 @@ continuation state before a live consumer exists.
 
 ### Packed Halfword and Horizontal MAC Operations
 
-- [ ] Implement `PMULTH`, `PMADDH`, and `PMSUBH` with the documented eight
+- [x] Implement `PMULTH`, `PMADDH`, and `PMSUBH` with the documented eight
       16-bit products, HI/LO lane placement, and selected `rd` lanes
-- [ ] Before implementing `PHMADH` or `PHMSBH`, resolve the manual's undefined
+- [x] Before implementing `PHMADH` or `PHMSBH`, resolve the manual's undefined
       alternating HI/LO destination words using approved evidence or an
       explicitly accepted deterministic policy; cover the chosen preservation
       or canonicalization behavior in hashes and save states
-- [ ] Implement `PHMADH` and `PHMSBH` with exact horizontal pair grouping,
+- [x] Implement `PHMADH` and `PHMSBH` with exact horizontal pair grouping,
       add/subtract direction, defined HI/LO placement, `rd` result selection,
       and the resolved policy for undefined HI/LO words
-- [ ] Reuse the packed-MAC latency, throughput, occupancy, ordering, and
+- [x] Reuse the packed-MAC latency, throughput, occupancy, ordering, and
       persistence owner without duplicating a halfword-specific lifecycle
 - [ ] Cover signed extrema, modulo accumulation, horizontal lane sentinels,
       aliases, interlocks, overlap, traces, hashes, and save/resume

@@ -945,7 +945,8 @@ void NekoSaveStateCodec::readEECore(
       readEnum<EECore::PackedMACOperation>(
         reader,
         static_cast<std::uint8_t>(
-          EECore::PackedMACOperation::MultiplySubtractWord),
+          EECore::PackedMACOperation::
+            HorizontalMultiplySubtractHalfword),
         "EE packed MAC operation");
     operation.programOrder = reader->readU64();
     operation.source.low = reader->readU64();

@@ -652,6 +652,11 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::ParallelMultiplyAddWord:
         case EEOperation::ParallelMultiplyAddUnsignedWord:
         case EEOperation::ParallelMultiplySubtractWord:
+        case EEOperation::ParallelMultiplyHalfword:
+        case EEOperation::ParallelMultiplyAddHalfword:
+        case EEOperation::ParallelMultiplySubtractHalfword:
+        case EEOperation::ParallelHorizontalMultiplyAddHalfword:
+        case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
           return ExpectedExecutionClassification{
             EEExecutionFamily::PackedMultiply,
             EEExecutionDispatch::PackedMACContinuation
@@ -1726,7 +1731,24 @@ TEST_CASE("EE packed word multiply decoder and dependencies")
       EEOperation::ParallelMultiplySubtractWord,
       RESOURCE_HI | RESOURCE_LO |
         RESOURCE_HI1 | RESOURCE_LO1
-    }
+    },
+    {0x09, 0x1c, EEOperation::ParallelMultiplyHalfword, 0},
+    {
+      0x09,
+      0x10,
+      EEOperation::ParallelMultiplyAddHalfword,
+      RESOURCE_HI | RESOURCE_LO |
+        RESOURCE_HI1 | RESOURCE_LO1
+    },
+    {
+      0x09,
+      0x14,
+      EEOperation::ParallelMultiplySubtractHalfword,
+      RESOURCE_HI | RESOURCE_LO |
+        RESOURCE_HI1 | RESOURCE_LO1
+    },
+    {0x09, 0x11, EEOperation::ParallelHorizontalMultiplyAddHalfword, 0},
+    {0x09, 0x15, EEOperation::ParallelHorizontalMultiplySubtractHalfword, 0}
   };
 
   for (const Contract &contract : contracts)
@@ -3017,7 +3039,7 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   const NestedTableContract contracts[] = {
     {0x08, UINT32_C(0x3000f800), UINT32_C(0xcfff07ff)},
     {0x28, UINT32_C(0xf088fb01), UINT32_C(0x0f7704fe)},
-    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xcc0c571d)},
+    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xdc3f571d)},
     {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c5709)}
   };
   const auto requireDecodeFailure =

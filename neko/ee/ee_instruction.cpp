@@ -173,6 +173,9 @@ namespace
         break;
       case EEOperation::ParallelMultiplyWord:
       case EEOperation::ParallelMultiplyUnsignedWord:
+      case EEOperation::ParallelMultiplyHalfword:
+      case EEOperation::ParallelHorizontalMultiplyAddHalfword:
+      case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
         dependencies.gprReads = source | target;
         dependencies.gprWrites = destination;
         dependencies.specialWrites =
@@ -182,6 +185,8 @@ namespace
       case EEOperation::ParallelMultiplyAddWord:
       case EEOperation::ParallelMultiplyAddUnsignedWord:
       case EEOperation::ParallelMultiplySubtractWord:
+      case EEOperation::ParallelMultiplyAddHalfword:
+      case EEOperation::ParallelMultiplySubtractHalfword:
         dependencies.gprReads = source | target;
         dependencies.gprWrites = destination;
         dependencies.specialReads =
@@ -1594,6 +1599,31 @@ namespace
         EEOperation::ParallelMultiplySubtractWord,
         0
       };
+      result[0x1c] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMultiplyHalfword,
+        0
+      };
+      result[0x10] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMultiplyAddHalfword,
+        0
+      };
+      result[0x14] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelMultiplySubtractHalfword,
+        0
+      };
+      result[0x11] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelHorizontalMultiplyAddHalfword,
+        0
+      };
+      result[0x15] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelHorizontalMultiplySubtractHalfword,
+        0
+      };
       result[0x08] = {
         DecodeKind::Direct,
         EEOperation::ParallelMoveFromHI,
@@ -2532,6 +2562,11 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelMultiplyAddWord:
     case EEOperation::ParallelMultiplyAddUnsignedWord:
     case EEOperation::ParallelMultiplySubtractWord:
+    case EEOperation::ParallelMultiplyHalfword:
+    case EEOperation::ParallelMultiplyAddHalfword:
+    case EEOperation::ParallelMultiplySubtractHalfword:
+    case EEOperation::ParallelHorizontalMultiplyAddHalfword:
+    case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
       return {
         EEInstructionCategory::WideOperate,
         PIPE_0,
@@ -2647,6 +2682,11 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelMultiplyAddWord:
     case EEOperation::ParallelMultiplyAddUnsignedWord:
     case EEOperation::ParallelMultiplySubtractWord:
+    case EEOperation::ParallelMultiplyHalfword:
+    case EEOperation::ParallelMultiplyAddHalfword:
+    case EEOperation::ParallelMultiplySubtractHalfword:
+    case EEOperation::ParallelHorizontalMultiplyAddHalfword:
+    case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
       return EEExecutionFamily::PackedMultiply;
     case EEOperation::ParallelAddByte:
     case EEOperation::ParallelAddHalfword:
@@ -3257,7 +3297,14 @@ bool isPackedMultiplyOperation(EEOperation operation)
     operation == EEOperation::ParallelMultiplyUnsignedWord ||
     operation == EEOperation::ParallelMultiplyAddWord ||
     operation == EEOperation::ParallelMultiplyAddUnsignedWord ||
-    operation == EEOperation::ParallelMultiplySubtractWord;
+    operation == EEOperation::ParallelMultiplySubtractWord ||
+    operation == EEOperation::ParallelMultiplyHalfword ||
+    operation == EEOperation::ParallelMultiplyAddHalfword ||
+    operation == EEOperation::ParallelMultiplySubtractHalfword ||
+    operation ==
+      EEOperation::ParallelHorizontalMultiplyAddHalfword ||
+    operation ==
+      EEOperation::ParallelHorizontalMultiplySubtractHalfword;
 }
 
 bool isLoadOperation(EEOperation operation)

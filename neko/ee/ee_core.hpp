@@ -1042,6 +1042,12 @@ class EECore final : public ClockedComponent
       std::uint8_t remainingCycles = 0;
     };
 
+    struct PackedMACAccumulatorState
+    {
+      EERegister128 hi;
+      EERegister128 lo;
+    };
+
     struct PackedMACContinuation
     {
       static constexpr std::size_t CAPACITY = 2;
@@ -1404,7 +1410,7 @@ class EECore final : public ClockedComponent
     static bool packedMACOperationStateValid(
       const InFlightPackedMACOperation &operation);
     bool packedMACContinuationStateValid() const;
-    EERegister128 packedMACAccumulatorValues() const;
+    PackedMACAccumulatorState packedMACAccumulatorState() const;
     bool packedMACContinuationBlocks(
       const EEInstruction &instruction) const;
     bool packedMACBlocksScalarMAC(
