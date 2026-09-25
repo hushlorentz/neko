@@ -251,6 +251,8 @@ enum class EEOperation : std::uint8_t
   ParallelMultiplySubtractHalfword,
   ParallelHorizontalMultiplyAddHalfword,
   ParallelHorizontalMultiplySubtractHalfword,
+  ParallelDivideWord,
+  ParallelDivideUnsignedWord,
   Count
 };
 
@@ -407,6 +409,7 @@ enum class EEExecutionFamily : std::uint8_t
   PackedLeadingSignCount,
   PackedLogical,
   PackedMultiply,
+  PackedDivide,
   Multiply,
   Divide
 };
@@ -419,6 +422,7 @@ enum class EEExecutionDispatch : std::uint8_t
   MAC0Continuation,
   MAC1Continuation,
   PackedMACContinuation,
+  PackedDivideContinuation,
   COP2Coupled
 };
 

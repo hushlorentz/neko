@@ -22,10 +22,10 @@ namespace
   constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
   constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
-    VERSION_26_PREPARED_STATE_SIZE = 37800617;
+    VERSION_27_PREPARED_STATE_SIZE = 37800692;
   constexpr std::uint64_t
-    VERSION_26_PREPARED_STATE_HASH =
-      UINT64_C(0x36a98177176c8864);
+    VERSION_27_PREPARED_STATE_HASH =
+      UINT64_C(0x4a8e8d5e750f83f5);
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
@@ -167,7 +167,17 @@ namespace
     SIMPLE_EE_SECOND_PACKED_MAC_LO_LOW_OFFSET = 2163;
   constexpr std::size_t
     SIMPLE_EE_SECOND_PACKED_MAC_RESULT_LOW_OFFSET = 2180;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2222;
+  constexpr std::size_t
+    SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET = 2197;
+  constexpr std::size_t
+    SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET = 2198;
+  constexpr std::size_t
+    SIMPLE_EE_PACKED_DIVIDE_SOURCE_LOW_OFFSET = 2207;
+  constexpr std::size_t
+    SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET = 2239;
+  constexpr std::size_t
+    SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET = 2271;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2297;
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -676,7 +686,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 26 save-state layout is byte-stable")
+TEST_CASE("Version 27 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -691,14 +701,14 @@ TEST_CASE("Version 26 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 26);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 27);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_26_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_27_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_26_PREPARED_STATE_HASH);
+    VERSION_27_PREPARED_STATE_HASH);
 }
 
 TEST_CASE("Invalid packed MAC continuation states are rejected")
@@ -951,6 +961,94 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
       &invalid,
       SIMPLE_EE_FIRST_PACKED_MAC_SOURCE_LOW_OFFSET,
       1);
+    requireRejected(std::move(invalid));
+  }
+}
+
+TEST_CASE("Invalid packed divide continuation states are rejected")
+{
+  NekoSystem source;
+  EECore &sourceCore = source.eeCore();
+  sourceCore.setGeneralRegister(
+    1,
+    {UINT64_C(0xfffffffffffffff9), 9});
+  sourceCore.setGeneralRegister(2, {3, 4});
+  source.eeBus().write32(
+    0,
+    packedMACInstruction(0x09, 1, 2, 0, 0x0d));
+  sourceCore.startExecution(0);
+  source.runMasterCycles(3);
+  sourceCore.setProgramCounter(4);
+  sourceCore.haltExecution();
+  const std::vector<std::uint8_t> valid =
+    source.saveState();
+  REQUIRE(valid[SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET] == 1);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  const auto requireRejected =
+    [&destination, &before](
+      std::vector<std::uint8_t> invalid)
+    {
+      updateChecksum(&invalid);
+      REQUIRE_THROWS(destination.loadState(invalid));
+      REQUIRE(destination.saveState() == before);
+    };
+
+  SECTION("Active work requires a supported operation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET] = 0;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Captured operands remain word-valued")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_PACKED_DIVIDE_SOURCE_LOW_OFFSET,
+      UINT64_C(0x0000000080000000));
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Serialized results match the captured operands")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET,
+      0);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Pending latency is nonzero")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[
+      SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET] = 0;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Packed divide and scalar work cannot overlap")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[
+      SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET - 1] = 1;
+    invalid[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] =
+      4;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Inactive continuations contain no payload")
+  {
+    NekoSystem inactive;
+    std::vector<std::uint8_t> invalid =
+      inactive.saveState();
+    REQUIRE(
+      invalid[SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET] == 0);
+    invalid[SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET] = 1;
     requireRejected(std::move(invalid));
   }
 }

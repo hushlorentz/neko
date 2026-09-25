@@ -1518,7 +1518,7 @@ continuation state before a live consumer exists.
 
 ### Packed Divide Operations
 
-- [ ] Implement signed `PDIVW` and unsigned `PDIVUW` over the low word of each
+- [x] Implement signed `PDIVW` and unsigned `PDIVUW` over the low word of each
       64-bit half, storing sign-extended quotient and remainder results in the
       corresponding LO and HI halves
 - [ ] Before implementing `PDIVBW`, resolve the instruction page's conflict

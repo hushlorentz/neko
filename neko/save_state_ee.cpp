@@ -187,6 +187,31 @@ void NekoSaveStateCodec::writeEECore(
       operation.generalRegisterResult.high);
     writer->writeU8(operation.remainingCycles);
   }
+  writer->writeBool(
+    core.packedDivideContinuation.active);
+  writer->writeU8(
+    static_cast<std::uint8_t>(
+      core.packedDivideContinuation.operation));
+  writer->writeU64(
+    core.packedDivideContinuation.programOrder);
+  writer->writeU64(
+    core.packedDivideContinuation.source.low);
+  writer->writeU64(
+    core.packedDivideContinuation.source.high);
+  writer->writeU64(
+    core.packedDivideContinuation.target.low);
+  writer->writeU64(
+    core.packedDivideContinuation.target.high);
+  writer->writeU64(
+    core.packedDivideContinuation.hiResult.low);
+  writer->writeU64(
+    core.packedDivideContinuation.hiResult.high);
+  writer->writeU64(
+    core.packedDivideContinuation.loResult.low);
+  writer->writeU64(
+    core.packedDivideContinuation.loResult.high);
+  writer->writeU8(
+    core.packedDivideContinuation.remainingCycles);
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -971,6 +996,38 @@ void NekoSaveStateCodec::readEECore(
   require(
     core->packedMACContinuationStateValid(),
     "EE packed MAC continuation state is invalid");
+  core->packedDivideContinuation = {};
+  core->packedDivideContinuation.active =
+    reader->readBool("EE packed divide operation flag");
+  core->packedDivideContinuation.operation =
+    readEnum<EECore::PackedDivideOperation>(
+      reader,
+      static_cast<std::uint8_t>(
+        EECore::PackedDivideOperation::DivideUnsignedWord),
+      "EE packed divide operation");
+  core->packedDivideContinuation.programOrder =
+    reader->readU64();
+  core->packedDivideContinuation.source.low =
+    reader->readU64();
+  core->packedDivideContinuation.source.high =
+    reader->readU64();
+  core->packedDivideContinuation.target.low =
+    reader->readU64();
+  core->packedDivideContinuation.target.high =
+    reader->readU64();
+  core->packedDivideContinuation.hiResult.low =
+    reader->readU64();
+  core->packedDivideContinuation.hiResult.high =
+    reader->readU64();
+  core->packedDivideContinuation.loResult.low =
+    reader->readU64();
+  core->packedDivideContinuation.loResult.high =
+    reader->readU64();
+  core->packedDivideContinuation.remainingCycles =
+    reader->readU8();
+  require(
+    core->packedDivideContinuationStateValid(),
+    "EE packed divide continuation state is invalid");
   const EECore::COP1ProgramOrderView programOrder =
     core->inFlightCOP1ProgramOrder();
   require(
@@ -1323,6 +1380,7 @@ void NekoSaveStateCodec::readEECore(
        !core->branchDelayPending &&
        !core->pendingMac0.active &&
        !core->pendingMac1.active &&
+       !core->packedDivideContinuation.active &&
        packedMACPrecedesYoungerAStage &&
        packedMACYoungerPairReachable &&
        !core->packedMACContinuationBlocks(

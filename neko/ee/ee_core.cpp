@@ -1223,6 +1223,7 @@ void EECore::reset()
   pendingMac0 = {};
   pendingMac1 = {};
   packedMACContinuation = {};
+  packedDivideContinuation = {};
   shiftAmountOrdering.clear();
   clearBranchDelayContinuation();
   clearCOP1DividerBranchContext();
@@ -1462,6 +1463,7 @@ void EECore::resetExecutionContinuation()
   pendingMac0 = {};
   pendingMac1 = {};
   packedMACContinuation = {};
+  packedDivideContinuation = {};
   shiftAmountOrdering.clear();
   clearIssueFrontEnd();
   youngerAStageContinuation = {};
@@ -2057,6 +2059,7 @@ void EECore::clock()
   advancePendingMultiplyDivide(MACPipeline::MAC0);
   advancePendingMultiplyDivide(MACPipeline::MAC1);
   advancePackedMACContinuation();
+  advancePackedDivideContinuation();
   updateIssueSelection(completedCOP1LoadRegisters);
   if (hadPendingOperation &&
       pendingMACContinuationActive() &&
@@ -2631,6 +2634,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::ParallelHorizontalMultiplyAddHalfword:
     case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
       return executePackedMultiply(instruction, address);
+    case EEOperation::ParallelDivideWord:
+    case EEOperation::ParallelDivideUnsignedWord:
+      return executePackedDivide(instruction, address);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
       return executeRegisterCompare(instruction);
@@ -3831,6 +3837,59 @@ EEInstructionExecutionOutcome EECore::executePackedMultiply(
     loResult,
     instruction.destinationRegister,
     products);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executePackedDivide(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  PackedDivideOperation operation =
+    PackedDivideOperation::None;
+  switch (instruction.operation)
+  {
+    case EEOperation::ParallelDivideWord:
+      operation = PackedDivideOperation::DivideWord;
+      break;
+    case EEOperation::ParallelDivideUnsignedWord:
+      operation = PackedDivideOperation::DivideUnsignedWord;
+      break;
+    default:
+      throw std::logic_error(
+        "EE packed divide handler received an incompatible operation.");
+  }
+
+  const EERegister128 source =
+    generalRegisters[instruction.sourceRegister];
+  const EERegister128 target =
+    generalRegisters[instruction.targetRegister];
+  if (!isWordValue(source.low) ||
+      !isWordValue(source.high) ||
+      !isWordValue(target.low) ||
+      !isWordValue(target.high))
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
+
+  EERegister128 hiResult;
+  EERegister128 loResult;
+  if (!computePackedDivideResults(
+        operation,
+        source,
+        target,
+        &hiResult,
+        &loResult))
+  {
+    haltUndefinedOperation(address, instruction.raw);
+    return EEInstructionExecutionOutcome::Halted;
+  }
+  startPackedDivideOperation(
+    operation,
+    source,
+    target,
+    hiResult,
+    loResult);
   return EEInstructionExecutionOutcome::Completed;
 }
 
@@ -5864,7 +5923,8 @@ bool EECore::pendingMACContinuationActive() const
   return
     pendingMac0.active ||
     pendingMac1.active ||
-    packedMACContinuationActive();
+    packedMACContinuationActive() ||
+    packedDivideContinuation.active;
 }
 
 bool EECore::multiplyDivideContinuationBlocks(
@@ -5875,7 +5935,15 @@ bool EECore::multiplyDivideContinuationBlocks(
     (isPackedMultiplyOperation(instruction.operation) &&
      !packedMACAdmissionAvailable()) ||
     packedMACContinuationBlocks(instruction) ||
-    packedMACBlocksScalarMAC(instruction);
+    packedMACBlocksScalarMAC(instruction) ||
+    packedDivideContinuationBlocks(instruction) ||
+    ((instruction.operation == EEOperation::ParallelDivideWord ||
+      instruction.operation ==
+        EEOperation::ParallelDivideUnsignedWord) &&
+     (pendingMac0.active ||
+      pendingMac1.active ||
+      packedMACContinuationActive() ||
+      packedDivideContinuation.active));
 }
 
 bool EECore::packedMACContinuationActive() const
@@ -5894,6 +5962,7 @@ bool EECore::packedMACAdmissionAvailable() const
   return
     !pendingMac0.active &&
     !pendingMac1.active &&
+    !packedDivideContinuation.active &&
     packedMACContinuation.initiationCycles == 0 &&
     std::any_of(
       packedMACContinuation.operations.begin(),
@@ -6263,6 +6332,189 @@ bool EECore::packedMACBlocksScalarMAC(
   return
     category == EEInstructionCategory::MAC0 ||
     category == EEInstructionCategory::MAC1;
+}
+
+bool EECore::packedDivideContinuationBlocks(
+  const EEInstruction &instruction) const
+{
+  if (!packedDivideContinuation.active)
+  {
+    return false;
+  }
+  const EEInstructionDependencies dependencies =
+    eeInstructionDependencies(instruction);
+  return
+    ((dependencies.specialReads | dependencies.specialWrites) &
+     (RESOURCE_HI | RESOURCE_LO |
+      RESOURCE_HI1 | RESOURCE_LO1)) != 0;
+}
+
+bool EECore::computePackedDivideResults(
+  PackedDivideOperation operation,
+  const EERegister128 &source,
+  const EERegister128 &target,
+  EERegister128 *hiResult,
+  EERegister128 *loResult) const
+{
+  if (operation != PackedDivideOperation::DivideWord &&
+      operation != PackedDivideOperation::DivideUnsignedWord)
+  {
+    return false;
+  }
+  const std::uint64_t dividends[] = {
+    source.low,
+    source.high
+  };
+  const std::uint64_t divisors[] = {
+    target.low,
+    target.high
+  };
+  std::uint64_t remainders[2] = {};
+  std::uint64_t quotients[2] = {};
+  for (std::size_t lane = 0; lane < 2; ++lane)
+  {
+    if (!isWordValue(dividends[lane]) ||
+        !isWordValue(divisors[lane]))
+    {
+      return false;
+    }
+    const std::uint32_t dividend =
+      static_cast<std::uint32_t>(dividends[lane]);
+    const std::uint32_t divisor =
+      static_cast<std::uint32_t>(divisors[lane]);
+    if (divisor == 0)
+    {
+      return false;
+    }
+    std::uint32_t quotient = 0;
+    std::uint32_t remainder = 0;
+    if (operation == PackedDivideOperation::DivideWord &&
+        dividend == UINT32_C(0x80000000) &&
+        divisor == UINT32_MAX)
+    {
+      quotient = dividend;
+    }
+    else if (operation == PackedDivideOperation::DivideWord)
+    {
+      const std::int64_t signedDividend = signedWord(dividend);
+      const std::int64_t signedDivisor = signedWord(divisor);
+      quotient = static_cast<std::uint32_t>(
+        signedDividend / signedDivisor);
+      remainder = static_cast<std::uint32_t>(
+        signedDividend % signedDivisor);
+    }
+    else
+    {
+      quotient = dividend / divisor;
+      remainder = dividend % divisor;
+    }
+    quotients[lane] = signExtendWord(quotient);
+    remainders[lane] = signExtendWord(remainder);
+  }
+  *hiResult = {remainders[0], remainders[1]};
+  *loResult = {quotients[0], quotients[1]};
+  return true;
+}
+
+bool EECore::packedDivideContinuationStateValid() const
+{
+  const PackedDivideContinuation &operation =
+    packedDivideContinuation;
+  if (!operation.active)
+  {
+    return
+      operation.operation == PackedDivideOperation::None &&
+      operation.programOrder == 0 &&
+      operation.source == EERegister128{} &&
+      operation.target == EERegister128{} &&
+      operation.hiResult == EERegister128{} &&
+      operation.loResult == EERegister128{} &&
+      operation.remainingCycles == 0;
+  }
+  if (operation.operation < PackedDivideOperation::DivideWord ||
+      operation.operation >
+        PackedDivideOperation::DivideUnsignedWord ||
+      operation.programOrder == 0 ||
+      operation.programOrder > nextEEProgramOrder ||
+      (operation.programOrder == nextEEProgramOrder &&
+       executingProgramOrder != operation.programOrder) ||
+      operation.remainingCycles == 0 ||
+      operation.remainingCycles > DIVIDE_LATENCY ||
+      pendingMac0.active ||
+      pendingMac1.active ||
+      packedMACContinuationActive() ||
+      !(state == EEExecutionState::Running ||
+        (state == EEExecutionState::Halted &&
+         (haltReason == EEStopReason::HostHalt ||
+          haltReason == EEStopReason::UndefinedOperation))))
+  {
+    return false;
+  }
+  EERegister128 expectedHI;
+  EERegister128 expectedLO;
+  return
+    computePackedDivideResults(
+      operation.operation,
+      operation.source,
+      operation.target,
+      &expectedHI,
+      &expectedLO) &&
+    operation.hiResult == expectedHI &&
+    operation.loResult == expectedLO;
+}
+
+void EECore::advancePackedDivideContinuation()
+{
+  if (!packedDivideContinuation.active)
+  {
+    return;
+  }
+  --packedDivideContinuation.remainingCycles;
+  if (packedDivideContinuation.remainingCycles != 0)
+  {
+    return;
+  }
+  hiRegister = packedDivideContinuation.hiResult.low;
+  hi1Register = packedDivideContinuation.hiResult.high;
+  loRegister = packedDivideContinuation.loResult.low;
+  lo1Register = packedDivideContinuation.loResult.high;
+  packedDivideContinuation = {};
+}
+
+void EECore::startPackedDivideOperation(
+  PackedDivideOperation operation,
+  const EERegister128 &source,
+  const EERegister128 &target,
+  const EERegister128 &hiResult,
+  const EERegister128 &loResult)
+{
+  if (executingProgramOrder == 0)
+  {
+    throw std::logic_error(
+      "EE packed divide allocation requires assigned program order.");
+  }
+  if (operation == PackedDivideOperation::None)
+  {
+    throw std::invalid_argument(
+      "EE packed divide allocation requires an operation.");
+  }
+  if (pendingMac0.active ||
+      pendingMac1.active ||
+      packedMACContinuationActive() ||
+      packedDivideContinuation.active)
+  {
+    throw std::logic_error(
+      "EE packed divide continuation is not available.");
+  }
+  packedDivideContinuation.active = true;
+  packedDivideContinuation.operation = operation;
+  packedDivideContinuation.programOrder = executingProgramOrder;
+  packedDivideContinuation.source = source;
+  packedDivideContinuation.target = target;
+  packedDivideContinuation.hiResult = hiResult;
+  packedDivideContinuation.loResult = loResult;
+  packedDivideContinuation.remainingCycles = DIVIDE_LATENCY;
+  assert(packedDivideContinuationStateValid());
 }
 
 void EECore::advancePackedMACContinuation()
@@ -6804,6 +7056,10 @@ void EECore::drainIntegerMACContinuations()
   while (packedMACContinuationActive())
   {
     advancePackedMACContinuation();
+  }
+  while (packedDivideContinuation.active)
+  {
+    advancePackedDivideContinuation();
   }
 }
 
@@ -8925,6 +9181,43 @@ std::uint64_t EECore::stateHash() const
       operation.generalRegisterResult.high);
     hashEEStateValue(&hash, operation.remainingCycles);
   }
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.active);
+  hashEEStateValue(
+    &hash,
+    static_cast<std::uint8_t>(
+      packedDivideContinuation.operation));
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.programOrder);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.source.low);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.source.high);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.target.low);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.target.high);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.hiResult.low);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.hiResult.high);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.loResult.low);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.loResult.high);
+  hashEEStateValue(
+    &hash,
+    packedDivideContinuation.remainingCycles);
   const COP1DividerOccupancy dividerOccupancy =
     derivedCOP1DividerOccupancy();
   hashEEStateValue(

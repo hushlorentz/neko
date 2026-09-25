@@ -1722,6 +1722,159 @@ TEST_CASE("EE divide execution")
   }
 }
 
+TEST_CASE("EE packed word divide execution")
+{
+  SECTION("PDIVW commits signed lane quotients and remainders atomically")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0xfffffffffffffff9),
+       UINT64_C(0xffffffff80000000)});
+    core.setGeneralRegister(
+      2,
+      {3, UINT64_MAX});
+    core.setHI(UINT64_C(0x1111));
+    core.setLO(UINT64_C(0x2222));
+    core.setHI1(UINT64_C(0x3333));
+    core.setLO1(UINT64_C(0x4444));
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(36);
+
+    REQUIRE(core.hi() == UINT64_C(0x1111));
+    REQUIRE(core.lo() == UINT64_C(0x2222));
+    REQUIRE(core.hi1() == UINT64_C(0x3333));
+    REQUIRE(core.lo1() == UINT64_C(0x4444));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.hi() == UINT64_MAX);
+    REQUIRE(core.lo() == UINT64_C(0xfffffffffffffffe));
+    REQUIRE(core.hi1() == 0);
+    REQUIRE(core.lo1() == UINT64_C(0xffffffff80000000));
+  }
+
+  SECTION("PDIVUW treats high-bit words as unsigned")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_MAX, UINT64_C(0xffffffff80000000)});
+    core.setGeneralRegister(2, {1, 3});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x29, 1, 2, 0, 0x0d));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(37);
+
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo() == UINT64_MAX);
+    REQUIRE(core.hi1() == 2);
+    REQUIRE(core.lo1() == UINT64_C(0x000000002aaaaaaa));
+  }
+
+  SECTION("Packed divide rejects non-word operands")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, UINT64_C(0x0000000080000000)});
+    core.setGeneralRegister(2, {3, 2});
+
+    runToCompletion(
+      &system,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d),
+      1);
+
+    REQUIRE(core.executionState() == EEExecutionState::Halted);
+    REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+    REQUIRE(core.programCounter() == 0);
+  }
+
+  SECTION("Packed divide rejects a zero divisor in either lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 0});
+
+    runToCompletion(
+      &system,
+      mmiInstruction(0x29, 1, 2, 0, 0x0d),
+      1);
+
+    REQUIRE(core.executionState() == EEExecutionState::Halted);
+    REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+    REQUIRE(core.programCounter() == 0);
+  }
+
+  SECTION("Packed divide interlocks full-width HI LO consumers")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x09, 0, 0, 7, 0x09));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(36);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.generalRegister(7) == EERegister128{});
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(7) == EERegister128{2, 2});
+  }
+}
+
+TEST_CASE("EE packed divide continuation survives save-state restore")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setGeneralRegister(
+    1,
+    {UINT64_C(0xfffffffffffffff9), 9});
+  core.setGeneralRegister(2, {3, 4});
+  original.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 0, 0x0d));
+  core.startExecution(0);
+  original.runMasterCycles(3);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  REQUIRE(original.saveState() == state);
+
+  NekoSystem restored;
+  restored.loadState(state);
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(restored.eeCore().stateHash() == core.stateHash());
+
+  original.runMasterCycles(35);
+  restored.runMasterCycles(35);
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(core.hi() == UINT64_MAX);
+  REQUIRE(core.lo() == UINT64_C(0xfffffffffffffffe));
+  REQUIRE(core.hi1() == 1);
+  REQUIRE(core.lo1() == 2);
+}
+
 TEST_CASE("EE HI LO and shift amount transfers")
 {
   NekoSystem system;

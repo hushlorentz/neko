@@ -538,6 +538,13 @@ class EECore final : public ClockedComponent
       HorizontalMultiplySubtractHalfword
     };
 
+    enum class PackedDivideOperation : std::uint8_t
+    {
+      None,
+      DivideWord,
+      DivideUnsignedWord
+    };
+
     enum class COP1ScoreboardQuery : std::uint8_t
     {
       CandidateReadiness,
@@ -1058,6 +1065,19 @@ class EECore final : public ClockedComponent
       std::uint8_t initiationCycles = 0;
     };
 
+    struct PackedDivideContinuation
+    {
+      bool active = false;
+      PackedDivideOperation operation =
+        PackedDivideOperation::None;
+      std::uint64_t programOrder = 0;
+      EERegister128 source;
+      EERegister128 target;
+      EERegister128 hiResult;
+      EERegister128 loResult;
+      std::uint8_t remainingCycles = 0;
+    };
+
     struct PackedMACProgramOrderView
     {
       std::size_t size() const
@@ -1121,6 +1141,7 @@ class EECore final : public ClockedComponent
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
     PackedMACContinuation packedMACContinuation;
+    PackedDivideContinuation packedDivideContinuation;
     std::uint8_t cop1DividerInitiationCycles = 0;
     EEOperation cop1DividerOperation = EEOperation::Nop;
     EEShiftAmountOrderingWindow shiftAmountOrdering;
@@ -1286,6 +1307,9 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executePackedMultiply(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executePackedDivide(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeRegisterCompare(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeImmediateCompare(
@@ -1415,6 +1439,22 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction) const;
     bool packedMACBlocksScalarMAC(
       const EEInstruction &instruction) const;
+    bool packedDivideContinuationBlocks(
+      const EEInstruction &instruction) const;
+    bool packedDivideContinuationStateValid() const;
+    bool computePackedDivideResults(
+      PackedDivideOperation operation,
+      const EERegister128 &source,
+      const EERegister128 &target,
+      EERegister128 *hiResult,
+      EERegister128 *loResult) const;
+    void advancePackedDivideContinuation();
+    void startPackedDivideOperation(
+      PackedDivideOperation operation,
+      const EERegister128 &source,
+      const EERegister128 &target,
+      const EERegister128 &hiResult,
+      const EERegister128 &loResult);
     void advancePackedMACContinuation();
     void startPackedMACOperation(
       PackedMACOperation operation,

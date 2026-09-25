@@ -182,6 +182,13 @@ namespace
           RESOURCE_HI | RESOURCE_LO |
           RESOURCE_HI1 | RESOURCE_LO1;
         break;
+      case EEOperation::ParallelDivideWord:
+      case EEOperation::ParallelDivideUnsignedWord:
+        dependencies.gprReads = source | target;
+        dependencies.specialWrites =
+          RESOURCE_HI | RESOURCE_LO |
+          RESOURCE_HI1 | RESOURCE_LO1;
+        break;
       case EEOperation::ParallelMultiplyAddWord:
       case EEOperation::ParallelMultiplyAddUnsignedWord:
       case EEOperation::ParallelMultiplySubtractWord:
@@ -1589,6 +1596,11 @@ namespace
         EEOperation::ParallelMultiplyWord,
         0
       };
+      result[0x0d] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelDivideWord,
+        REGISTER_DESTINATION_MASK
+      };
       result[0x00] = {
         DecodeKind::Direct,
         EEOperation::ParallelMultiplyAddWord,
@@ -1736,6 +1748,11 @@ namespace
         DecodeKind::Direct,
         EEOperation::ParallelMultiplyUnsignedWord,
         0
+      };
+      result[0x0d] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelDivideUnsignedWord,
+        REGISTER_DESTINATION_MASK
       };
       result[0x00] = {
         DecodeKind::Direct,
@@ -2567,6 +2584,8 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelMultiplySubtractHalfword:
     case EEOperation::ParallelHorizontalMultiplyAddHalfword:
     case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
+    case EEOperation::ParallelDivideWord:
+    case EEOperation::ParallelDivideUnsignedWord:
       return {
         EEInstructionCategory::WideOperate,
         PIPE_0,
@@ -2688,6 +2707,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::ParallelHorizontalMultiplyAddHalfword:
     case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
       return EEExecutionFamily::PackedMultiply;
+    case EEOperation::ParallelDivideWord:
+    case EEOperation::ParallelDivideUnsignedWord:
+      return EEExecutionFamily::PackedDivide;
     case EEOperation::ParallelAddByte:
     case EEOperation::ParallelAddHalfword:
     case EEOperation::ParallelAddWord:
@@ -2916,6 +2938,8 @@ EEExecutionDispatch executionDispatchFor(
       return EEExecutionDispatch::ManagedCOP1;
     case EEExecutionFamily::PackedMultiply:
       return EEExecutionDispatch::PackedMACContinuation;
+    case EEExecutionFamily::PackedDivide:
+      return EEExecutionDispatch::PackedDivideContinuation;
     case EEExecutionFamily::COP2Memory:
     case EEExecutionFamily::COP2VectorMove:
     case EEExecutionFamily::COP2ControlMove:
