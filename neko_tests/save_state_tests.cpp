@@ -172,6 +172,8 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET = 2198;
   constexpr std::size_t
+    SIMPLE_EE_PACKED_DIVIDE_ORDER_OFFSET = 2199;
+  constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_SOURCE_LOW_OFFSET = 2207;
   constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET = 2239;
@@ -1049,6 +1051,71 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
     REQUIRE(
       invalid[SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET] == 0);
     invalid[SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET] = 1;
+    requireRejected(std::move(invalid));
+  }
+}
+
+TEST_CASE("Invalid paired packed divide states are rejected")
+{
+  NekoSystem source;
+  EECore &sourceCore = source.eeCore();
+  sourceCore.setGeneralRegister(1, {7, 9});
+  sourceCore.setGeneralRegister(2, {3, 4});
+  sourceCore.setGeneralRegister(5, {11, 0});
+  sourceCore.setGeneralRegister(6, {13, 0});
+  source.eeBus().write32(
+    0,
+    packedMACInstruction(0x09, 1, 2, 0, 0x0d));
+  source.eeBus().write32(
+    4,
+    (UINT32_C(5) << 21) |
+      (UINT32_C(6) << 16) |
+      (UINT32_C(7) << 11) |
+      UINT32_C(0x21));
+  sourceCore.startExecution(0);
+  source.clockMasterCycle();
+  const std::vector<std::uint8_t> valid =
+    source.saveState();
+  REQUIRE(valid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] == 1);
+  REQUIRE(valid[SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET] == 1);
+
+  NekoSystem destination;
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+  const auto requireRejected =
+    [&destination, &before](
+      std::vector<std::uint8_t> invalid)
+    {
+      updateChecksum(&invalid);
+      REQUIRE_THROWS(destination.loadState(invalid));
+      REQUIRE(destination.saveState() == before);
+    };
+
+  SECTION("Paired program orders are adjacent")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_PACKED_DIVIDE_ORDER_OFFSET,
+      2);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("The divide has not advanced before the younger continuation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[
+      SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET] = 36;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("The younger continuation cannot access HI LO")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU32(
+      &invalid,
+      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      packedMACInstruction(0x09, 0, 0, 7, 0x09));
     requireRejected(std::move(invalid));
   }
 }

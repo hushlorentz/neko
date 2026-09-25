@@ -1875,6 +1875,201 @@ TEST_CASE("EE packed divide continuation survives save-state restore")
   REQUIRE(core.lo1() == 2);
 }
 
+TEST_CASE("EE packed divide timing and interlocks")
+{
+  SECTION("Independent A-stage work does not lengthen divide latency")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    setWord(&core, 5, 11);
+    setWord(&core, 6, 13);
+    core.setHI(UINT64_C(0x1111));
+    core.setLO(UINT64_C(0x2222));
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      registerInstruction(0x21, 5, 6, 7));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(7).low == 0);
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(7).low == 24);
+
+    system.runMasterCycles(35);
+    REQUIRE(core.hi() == UINT64_C(0x1111));
+    REQUIRE(core.lo() == UINT64_C(0x2222));
+
+    system.clockMasterCycle();
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("A paired younger A-stage continuation survives save restore")
+  {
+    NekoSystem original;
+    EECore &core = original.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    setWord(&core, 5, 11);
+    setWord(&core, 6, 13);
+    original.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    original.eeBus().write32(
+      4,
+      registerInstruction(0x21, 5, 6, 7));
+    core.startExecution(0);
+    original.clockMasterCycle();
+    REQUIRE(core.generalRegister(7).low == 0);
+
+    const std::vector<std::uint8_t> state =
+      original.saveState();
+    NekoSystem restored;
+    restored.loadState(state);
+    REQUIRE(restored.saveState() == state);
+    REQUIRE(restored.eeCore().stateHash() == core.stateHash());
+
+    original.runMasterCycles(37);
+    restored.runMasterCycles(37);
+
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(core.generalRegister(7).low == 24);
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("Back-to-back packed divides start 37 cycles apart")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    core.setGeneralRegister(3, {20, 30});
+    core.setGeneralRegister(4, {6, 7});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x09, 3, 4, 0, 0x0d));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(36);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.lo1() == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() >= 8);
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+
+    system.runMasterCycles(36);
+
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.lo1() == 2);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.hi() == 2);
+    REQUIRE(core.lo() == 3);
+    REQUIRE(core.hi1() == 2);
+    REQUIRE(core.lo1() == 4);
+  }
+
+  SECTION("A younger A-stage pair does not delay the next divide")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    core.setGeneralRegister(3, {20, 30});
+    core.setGeneralRegister(4, {6, 7});
+    setWord(&core, 5, 11);
+    setWord(&core, 6, 13);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      registerInstruction(0x21, 5, 6, 7));
+    system.eeBus().write32(
+      8,
+      mmiInstruction(0x09, 3, 4, 0, 0x0d));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(7).low == 24);
+    REQUIRE(core.programCounter() == 8);
+
+    system.runMasterCycles(35);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.lo1() == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.programCounter() >= 12);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.lo1() == 2);
+
+    system.runMasterCycles(36);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.lo1() == 2);
+
+    system.clockMasterCycle();
+    REQUIRE(core.lo() == 3);
+    REQUIRE(core.lo1() == 4);
+  }
+
+  SECTION("A full-width LO writer waits and follows divide retirement")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    core.setGeneralRegister(
+      5,
+      {UINT64_C(0x123456789abcdef0),
+       UINT64_C(0xfedcba9876543210)});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x29, 5, 0, 0, 0x09));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(36);
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.lo1() == 0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo() == UINT64_C(0x123456789abcdef0));
+    REQUIRE(core.lo1() == UINT64_C(0xfedcba9876543210));
+  }
+}
+
 TEST_CASE("EE packed broadcast word divide execution")
 {
   SECTION("PDIVBW broadcasts a signed halfword divisor across four words")
@@ -1933,6 +2128,7 @@ TEST_CASE("EE packed broadcast word divide execution")
     REQUIRE(core.hi() == 0);
     REQUIRE(core.lo1() == UINT64_C(0x80000001ffffffff));
     REQUIRE(core.hi1() == 0);
+    REQUIRE(core.exceptionPending() == false);
   }
 
   SECTION("PDIVBW rejects a zero low-halfword divisor")

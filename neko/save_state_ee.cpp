@@ -1347,6 +1347,8 @@ void NekoSaveStateCodec::readEECore(
     "EE younger A-stage continuation state is inconsistent");
   bool packedMACPrecedesYoungerAStage = true;
   bool packedMACYoungerPairReachable = true;
+  bool packedDividePrecedesYoungerAStage = true;
+  bool packedDivideYoungerPairReachable = true;
   if (core->youngerAStageContinuation.active)
   {
     for (const EECore::InFlightPackedMACOperation &operation :
@@ -1372,6 +1374,16 @@ void NekoSaveStateCodec::readEECore(
         operation.programOrder ==
           core->youngerAStageContinuation.programOrder - 1;
     }
+    if (core->packedDivideContinuation.active)
+    {
+      packedDividePrecedesYoungerAStage =
+        core->packedDivideContinuation.programOrder <
+          core->youngerAStageContinuation.programOrder;
+      packedDivideYoungerPairReachable =
+        core->packedDivideContinuation.remainingCycles == 37 &&
+        core->packedDivideContinuation.programOrder ==
+          core->youngerAStageContinuation.programOrder - 1;
+    }
   }
   require(
     !core->youngerAStageContinuation.active ||
@@ -1380,12 +1392,15 @@ void NekoSaveStateCodec::readEECore(
        !core->branchDelayPending &&
        !core->pendingMac0.active &&
        !core->pendingMac1.active &&
-       !core->packedDivideContinuation.active &&
        packedMACPrecedesYoungerAStage &&
        packedMACYoungerPairReachable &&
+       packedDividePrecedesYoungerAStage &&
+       packedDivideYoungerPairReachable &&
        !core->packedMACContinuationBlocks(
          core->youngerAStageContinuation.instruction) &&
        !core->packedMACBlocksScalarMAC(
+         core->youngerAStageContinuation.instruction) &&
+       !core->packedDivideContinuationBlocks(
          core->youngerAStageContinuation.instruction)),
     "EE younger A-stage continuation conflicts with other state");
   require(

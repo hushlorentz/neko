@@ -2040,6 +2040,7 @@ void EECore::clock()
   if (youngerAStageContinuation.active)
   {
     advancePackedMACContinuation();
+    advancePackedDivideContinuation();
     executeYoungerAStageContinuation();
     return;
   }

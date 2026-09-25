@@ -1528,7 +1528,7 @@ continuation state before a live consumer exists.
       local reference-emulator implementations agree on that behavior
 - [x] Implement signed broadcast `PDIVBW` over all four source words using the
       low halfword divisor and the resolved remainder-extension policy
-- [ ] Model 37-cycle latency and 37-cycle throughput with asynchronous HI/LO
+- [x] Model 37-cycle latency and 37-cycle throughput with asynchronous HI/LO
       interlocks and no architectural arithmetic exception
 - [ ] Enforce manual-defined operand-shape restrictions and the milestone's
       deterministic policy for otherwise undefined zero-divisor results
