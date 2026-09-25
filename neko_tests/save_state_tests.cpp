@@ -176,6 +176,8 @@ namespace
   constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_SOURCE_LOW_OFFSET = 2207;
   constexpr std::size_t
+    SIMPLE_EE_PACKED_DIVIDE_TARGET_LOW_OFFSET = 2223;
+  constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET = 2239;
   constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET = 2271;
@@ -1012,6 +1014,16 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
       &invalid,
       SIMPLE_EE_PACKED_DIVIDE_SOURCE_LOW_OFFSET,
       UINT64_C(0x0000000080000000));
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("Captured divisors remain nonzero")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU64(
+      &invalid,
+      SIMPLE_EE_PACKED_DIVIDE_TARGET_LOW_OFFSET,
+      0);
     requireRejected(std::move(invalid));
   }
 

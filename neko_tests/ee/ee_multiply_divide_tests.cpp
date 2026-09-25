@@ -1875,6 +1875,111 @@ TEST_CASE("EE packed divide continuation survives save-state restore")
   REQUIRE(core.lo1() == 2);
 }
 
+TEST_CASE("EE packed divide undefined inputs stop atomically")
+{
+  struct Contract
+  {
+    const char *label;
+    std::uint32_t instruction;
+    EERegister128 source;
+    EERegister128 target;
+  };
+  const Contract contracts[] = {
+    {
+      "PDIVW source low half is not word-shaped",
+      mmiInstruction(0x09, 1, 2, 0, 0x0d),
+      {UINT64_C(0x0000000080000000), 9},
+      {3, 4}
+    },
+    {
+      "PDIVW source high half is not word-shaped",
+      mmiInstruction(0x09, 1, 2, 0, 0x0d),
+      {7, UINT64_C(0x0000000080000000)},
+      {3, 4}
+    },
+    {
+      "PDIVW target low half is not word-shaped",
+      mmiInstruction(0x09, 1, 2, 0, 0x0d),
+      {7, 9},
+      {UINT64_C(0x0000000080000000), 4}
+    },
+    {
+      "PDIVW target high half is not word-shaped",
+      mmiInstruction(0x09, 1, 2, 0, 0x0d),
+      {7, 9},
+      {3, UINT64_C(0x0000000080000000)}
+    },
+    {
+      "PDIVUW source is not word-shaped",
+      mmiInstruction(0x29, 1, 2, 0, 0x0d),
+      {UINT64_C(0x0000000080000000), 9},
+      {3, 4}
+    },
+    {
+      "PDIVUW target is not word-shaped",
+      mmiInstruction(0x29, 1, 2, 0, 0x0d),
+      {7, 9},
+      {3, UINT64_C(0x0000000080000000)}
+    },
+    {
+      "PDIVW low divisor is zero",
+      mmiInstruction(0x09, 1, 2, 0, 0x0d),
+      {7, 9},
+      {0, 4}
+    },
+    {
+      "PDIVW high divisor is zero",
+      mmiInstruction(0x09, 1, 2, 0, 0x0d),
+      {7, 9},
+      {3, 0}
+    },
+    {
+      "PDIVUW low divisor is zero",
+      mmiInstruction(0x29, 1, 2, 0, 0x0d),
+      {7, 9},
+      {0, 4}
+    },
+    {
+      "PDIVUW high divisor is zero",
+      mmiInstruction(0x29, 1, 2, 0, 0x0d),
+      {7, 9},
+      {3, 0}
+    },
+    {
+      "PDIVBW low halfword divisor is zero",
+      mmiInstruction(0x09, 1, 2, 0, 0x1d),
+      {UINT64_C(0x00000007fffffff9),
+       UINT64_C(0x7fffffff80000000)},
+      {UINT64_C(0x123456789abc0000),
+       UINT64_C(0xffffffffffffffff)}
+    }
+  };
+
+  for (const Contract &contract : contracts)
+  {
+    INFO(contract.label);
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, contract.source);
+    core.setGeneralRegister(2, contract.target);
+    core.setHI(UINT64_C(0x1111222233334444));
+    core.setLO(UINT64_C(0x5555666677778888));
+    core.setHI1(UINT64_C(0x9999aaaabbbbcccc));
+    core.setLO1(UINT64_C(0xddddeeeeffff0000));
+
+    runToCompletion(&system, contract.instruction, 1);
+
+    REQUIRE(core.executionState() == EEExecutionState::Halted);
+    REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.exceptionPending() == false);
+    REQUIRE(core.hi() == UINT64_C(0x1111222233334444));
+    REQUIRE(core.lo() == UINT64_C(0x5555666677778888));
+    REQUIRE(core.hi1() == UINT64_C(0x9999aaaabbbbcccc));
+    REQUIRE(core.lo1() == UINT64_C(0xddddeeeeffff0000));
+  }
+}
+
 TEST_CASE("EE packed divide timing and interlocks")
 {
   SECTION("Independent A-stage work does not lengthen divide latency")

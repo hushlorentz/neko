@@ -1530,7 +1530,7 @@ continuation state before a live consumer exists.
       low halfword divisor and the resolved remainder-extension policy
 - [x] Model 37-cycle latency and 37-cycle throughput with asynchronous HI/LO
       interlocks and no architectural arithmetic exception
-- [ ] Enforce manual-defined operand-shape restrictions and the milestone's
+- [x] Enforce manual-defined operand-shape restrictions and the milestone's
       deterministic policy for otherwise undefined zero-divisor results
 - [ ] Cover signed minimum divided by minus one, signed remainder rules,
       unsigned high-bit inputs, all four broadcast lanes, scalar/packed MAC
