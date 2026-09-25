@@ -2815,6 +2815,73 @@ TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
   REQUIRE(eventIndex == events.size());
 }
 
+TEST_CASE("EE packed halfword MAC overlap traces and hashes are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setGeneralRegister(
+        1,
+        {UINT64_C(0x0004000300020001),
+         UINT64_C(0x0008000700060005)});
+      core.setGeneralRegister(
+        2,
+        {UINT64_C(0x0005000400030002),
+         UINT64_C(0x0009000800070006)});
+      system->eeBus().write32(
+        0,
+        nestedMmiInstruction(0x09, 0x11, 1, 2, 3));
+      system->eeBus().write32(
+        4,
+        nestedMmiInstruction(0x09, 0x10, 1, 2, 4));
+      system->eeBus().write32(8, UINT32_C(0xbc000000));
+      core.startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+  for (std::uint8_t cycle = 0; cycle < 7; ++cycle)
+  {
+    first.clockMasterCycle();
+    second.clockMasterCycle();
+    REQUIRE(
+      first.eeCore().stateHash() ==
+      second.eeCore().stateHash());
+    REQUIRE(first.traceHash() == second.traceHash());
+  }
+
+  REQUIRE(
+    first.eeCore().generalRegister(3) ==
+    EERegister128{UINT64_C(0x0000002000000008),
+                  UINT64_C(0x0000008000000048)});
+  REQUIRE(
+    first.eeCore().generalRegister(4) ==
+    EERegister128{UINT64_C(0x0000002c0000000a),
+                  UINT64_C(0x000000b800000066)});
+  REQUIRE(first.eeCore().lo() == UINT64_C(0x0000000c0000000a));
+  REQUIRE(first.eeCore().hi1() == UINT64_C(0x00000090000000b8));
+
+  std::vector<EEOperation> issuedOperations;
+  for (const NekoTraceEvent &event : eeTrace(first))
+  {
+    if (event.type == NekoTraceEventType::InstructionIssued)
+    {
+      issuedOperations.push_back(
+        static_cast<EEOperation>(event.value2));
+    }
+  }
+  REQUIRE(
+    issuedOperations ==
+    std::vector<EEOperation>{
+      EEOperation::ParallelHorizontalMultiplyAddHalfword,
+      EEOperation::ParallelMultiplyAddHalfword
+    });
+}
+
 TEST_CASE("EE packed rearrangement traces and hashes are deterministic")
 {
   const auto prepare =

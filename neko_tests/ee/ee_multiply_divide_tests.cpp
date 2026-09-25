@@ -693,6 +693,87 @@ TEST_CASE("EE packed halfword multiply execution")
                   UINT64_C(0xffff8001fffffffa)});
 }
 
+TEST_CASE("EE packed halfword MAC extrema and aliases")
+{
+  SECTION("PMULTH handles signed halfword extrema")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const EERegister128 extrema = {
+      UINT64_C(0x7fff80007fff8000),
+      UINT64_C(0x7fff80007fff8000)
+    };
+    core.setGeneralRegister(1, extrema);
+    core.setGeneralRegister(2, extrema);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 3, 0x1c));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(core.lo() == UINT64_C(0x3fff000140000000));
+    REQUIRE(core.hi() == UINT64_C(0x3fff000140000000));
+    REQUIRE(core.lo1() == UINT64_C(0x3fff000140000000));
+    REQUIRE(core.hi1() == UINT64_C(0x3fff000140000000));
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{UINT64_C(0x4000000040000000),
+                    UINT64_C(0x4000000040000000)});
+  }
+
+  SECTION("PHMADH captures a source destination alias")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x0004000300020001),
+       UINT64_C(0x0008000700060005)});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x0005000400030002),
+       UINT64_C(0x0009000800070006)});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 1, 0x11));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(
+      core.generalRegister(1) ==
+      EERegister128{UINT64_C(0x0000002000000008),
+                    UINT64_C(0x0000008000000048)});
+  }
+
+  SECTION("A zero destination still commits PHMSBH HI LO words")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x0004000300020001),
+       UINT64_C(0x0008000700060005)});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x0005000400030002),
+       UINT64_C(0x0009000800070006)});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x15));
+    core.startExecution(0);
+
+    system.runMasterCycles(5);
+
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+    REQUIRE(core.lo() == UINT64_C(0xfffffff900000004));
+    REQUIRE(core.hi() == UINT64_C(0xffffffeb00000008));
+    REQUIRE(core.lo1() == UINT64_C(0xffffffd50000000c));
+    REQUIRE(core.hi1() == UINT64_C(0xffffffb700000010));
+  }
+}
+
 TEST_CASE("EE packed halfword multiply accumulate execution")
 {
   SECTION("PMADDH adds products modulo 32 bits")
@@ -860,6 +941,40 @@ TEST_CASE("EE packed horizontal halfword MAC execution")
       EERegister128{UINT64_C(0x0000000800000004),
                     UINT64_C(0x000000100000000c)});
   }
+}
+
+TEST_CASE("EE horizontal packed MAC interlocks HI LO consumers")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    1,
+    {UINT64_C(0x0004000300020001),
+     UINT64_C(0x0008000700060005)});
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0x0005000400030002),
+     UINT64_C(0x0009000800070006)});
+  system.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 3, 0x11));
+  system.eeBus().write32(
+    4,
+    mmiInstruction(0x09, 0, 0, 7, 0x08));
+  core.startExecution(0);
+
+  system.clockMasterCycle();
+  system.runMasterCycles(3);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(7) == EERegister128{});
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.generalRegister(7) ==
+    EERegister128{UINT64_C(0x0000001400000020),
+                  UINT64_C(0x0000004800000080)});
 }
 
 TEST_CASE("EE packed word MAC operations require word-valued lanes")
@@ -1185,6 +1300,40 @@ TEST_CASE("EE packed halfword MAC continuation survives save-state restore")
     originalCore.generalRegister(3) ==
     EERegister128{UINT64_C(0x0000000100000011),
                   UINT64_C(0x0000000300000035)});
+}
+
+TEST_CASE("EE horizontal packed MAC continuation survives save-state restore")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setGeneralRegister(
+    1,
+    {UINT64_C(0x0004000300020001),
+     UINT64_C(0x0008000700060005)});
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0x0005000400030002),
+     UINT64_C(0x0009000800070006)});
+  original.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 3, 0x15));
+  core.startExecution(0);
+  original.clockMasterCycle();
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(restored.eeCore().stateHash() == core.stateHash());
+
+  original.runMasterCycles(4);
+  restored.runMasterCycles(4);
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(core.lo() == UINT64_C(0xfffffff900000004));
+  REQUIRE(core.hi1() == UINT64_C(0xffffffb700000010));
 }
 
 TEST_CASE("EE delayed packed MAC overlap survives save-state restore")

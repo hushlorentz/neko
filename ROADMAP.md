@@ -1512,9 +1512,9 @@ continuation state before a live consumer exists.
       and the resolved policy for undefined HI/LO words
 - [x] Reuse the packed-MAC latency, throughput, occupancy, ordering, and
       persistence owner without duplicating a halfword-specific lifecycle
-- [ ] Cover signed extrema, modulo accumulation, horizontal lane sentinels,
+- [x] Cover signed extrema, modulo accumulation, horizontal lane sentinels,
       aliases, interlocks, overlap, traces, hashes, and save/resume
-- [ ] Complete an independent review of packed halfword MAC behavior
+- [x] Complete an independent review of packed halfword MAC behavior
 
 ### Packed Divide Operations
 
