@@ -184,6 +184,7 @@ namespace
         break;
       case EEOperation::ParallelDivideWord:
       case EEOperation::ParallelDivideUnsignedWord:
+      case EEOperation::ParallelDivideBroadcastWord:
         dependencies.gprReads = source | target;
         dependencies.specialWrites =
           RESOURCE_HI | RESOURCE_LO |
@@ -1601,6 +1602,11 @@ namespace
         EEOperation::ParallelDivideWord,
         REGISTER_DESTINATION_MASK
       };
+      result[0x1d] = {
+        DecodeKind::Direct,
+        EEOperation::ParallelDivideBroadcastWord,
+        REGISTER_DESTINATION_MASK
+      };
       result[0x00] = {
         DecodeKind::Direct,
         EEOperation::ParallelMultiplyAddWord,
@@ -2586,6 +2592,7 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::ParallelHorizontalMultiplySubtractHalfword:
     case EEOperation::ParallelDivideWord:
     case EEOperation::ParallelDivideUnsignedWord:
+    case EEOperation::ParallelDivideBroadcastWord:
       return {
         EEInstructionCategory::WideOperate,
         PIPE_0,
@@ -2709,6 +2716,7 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
       return EEExecutionFamily::PackedMultiply;
     case EEOperation::ParallelDivideWord:
     case EEOperation::ParallelDivideUnsignedWord:
+    case EEOperation::ParallelDivideBroadcastWord:
       return EEExecutionFamily::PackedDivide;
     case EEOperation::ParallelAddByte:
     case EEOperation::ParallelAddHalfword:

@@ -1003,7 +1003,7 @@ void NekoSaveStateCodec::readEECore(
     readEnum<EECore::PackedDivideOperation>(
       reader,
       static_cast<std::uint8_t>(
-        EECore::PackedDivideOperation::DivideUnsignedWord),
+        EECore::PackedDivideOperation::DivideBroadcastWord),
       "EE packed divide operation");
   core->packedDivideContinuation.programOrder =
     reader->readU64();

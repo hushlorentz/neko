@@ -253,6 +253,7 @@ enum class EEOperation : std::uint8_t
   ParallelHorizontalMultiplySubtractHalfword,
   ParallelDivideWord,
   ParallelDivideUnsignedWord,
+  ParallelDivideBroadcastWord,
   Count
 };
 

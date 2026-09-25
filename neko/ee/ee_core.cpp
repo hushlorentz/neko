@@ -2636,6 +2636,7 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return executePackedMultiply(instruction, address);
     case EEOperation::ParallelDivideWord:
     case EEOperation::ParallelDivideUnsignedWord:
+    case EEOperation::ParallelDivideBroadcastWord:
       return executePackedDivide(instruction, address);
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
@@ -3854,6 +3855,9 @@ EEInstructionExecutionOutcome EECore::executePackedDivide(
     case EEOperation::ParallelDivideUnsignedWord:
       operation = PackedDivideOperation::DivideUnsignedWord;
       break;
+    case EEOperation::ParallelDivideBroadcastWord:
+      operation = PackedDivideOperation::DivideBroadcastWord;
+      break;
     default:
       throw std::logic_error(
         "EE packed divide handler received an incompatible operation.");
@@ -3863,10 +3867,11 @@ EEInstructionExecutionOutcome EECore::executePackedDivide(
     generalRegisters[instruction.sourceRegister];
   const EERegister128 target =
     generalRegisters[instruction.targetRegister];
-  if (!isWordValue(source.low) ||
-      !isWordValue(source.high) ||
-      !isWordValue(target.low) ||
-      !isWordValue(target.high))
+  if (operation != PackedDivideOperation::DivideBroadcastWord &&
+      (!isWordValue(source.low) ||
+       !isWordValue(source.high) ||
+       !isWordValue(target.low) ||
+       !isWordValue(target.high)))
   {
     haltUndefinedOperation(address, instruction.raw);
     return EEInstructionExecutionOutcome::Halted;
@@ -5939,7 +5944,9 @@ bool EECore::multiplyDivideContinuationBlocks(
     packedDivideContinuationBlocks(instruction) ||
     ((instruction.operation == EEOperation::ParallelDivideWord ||
       instruction.operation ==
-        EEOperation::ParallelDivideUnsignedWord) &&
+        EEOperation::ParallelDivideUnsignedWord ||
+      instruction.operation ==
+        EEOperation::ParallelDivideBroadcastWord) &&
      (pendingMac0.active ||
       pendingMac1.active ||
       packedMACContinuationActive() ||
@@ -6357,9 +6364,43 @@ bool EECore::computePackedDivideResults(
   EERegister128 *loResult) const
 {
   if (operation != PackedDivideOperation::DivideWord &&
-      operation != PackedDivideOperation::DivideUnsignedWord)
+      operation != PackedDivideOperation::DivideUnsignedWord &&
+      operation != PackedDivideOperation::DivideBroadcastWord)
   {
     return false;
+  }
+  if (operation == PackedDivideOperation::DivideBroadcastWord)
+  {
+    const std::uint16_t divisorWord =
+      static_cast<std::uint16_t>(target.low);
+    if (divisorWord == 0)
+    {
+      return false;
+    }
+    const std::int64_t divisor =
+      static_cast<std::int16_t>(divisorWord);
+    std::array<std::uint32_t, 4> quotients = {};
+    std::array<std::uint32_t, 4> remainders = {};
+    for (std::uint8_t lane = 0; lane < 4; ++lane)
+    {
+      const std::uint32_t dividendWord =
+        packedWord(source, lane);
+      if (dividendWord == UINT32_C(0x80000000) &&
+          divisor == -1)
+      {
+        quotients[lane] = dividendWord;
+        continue;
+      }
+      const std::int64_t dividend =
+        signedWord(dividendWord);
+      quotients[lane] = static_cast<std::uint32_t>(
+        dividend / divisor);
+      remainders[lane] = static_cast<std::uint32_t>(
+        dividend % divisor);
+    }
+    *hiResult = packWords(remainders);
+    *loResult = packWords(quotients);
+    return true;
   }
   const std::uint64_t dividends[] = {
     source.low,
@@ -6433,7 +6474,7 @@ bool EECore::packedDivideContinuationStateValid() const
   }
   if (operation.operation < PackedDivideOperation::DivideWord ||
       operation.operation >
-        PackedDivideOperation::DivideUnsignedWord ||
+        PackedDivideOperation::DivideBroadcastWord ||
       operation.programOrder == 0 ||
       operation.programOrder > nextEEProgramOrder ||
       (operation.programOrder == nextEEProgramOrder &&

@@ -663,6 +663,7 @@ TEST_CASE("Every EE operation has complete shared metadata")
           };
         case EEOperation::ParallelDivideWord:
         case EEOperation::ParallelDivideUnsignedWord:
+        case EEOperation::ParallelDivideBroadcastWord:
           return ExpectedExecutionClassification{
             EEExecutionFamily::PackedDivide,
             EEExecutionDispatch::PackedDivideContinuation
@@ -1799,11 +1800,13 @@ TEST_CASE("EE packed word divide decoder and dependencies")
   struct Contract
   {
     std::uint8_t primaryFunction;
+    std::uint8_t nestedFunction;
     EEOperation operation;
   };
   const Contract contracts[] = {
-    {0x09, EEOperation::ParallelDivideWord},
-    {0x29, EEOperation::ParallelDivideUnsignedWord}
+    {0x09, 0x0d, EEOperation::ParallelDivideWord},
+    {0x29, 0x0d, EEOperation::ParallelDivideUnsignedWord},
+    {0x09, 0x1d, EEOperation::ParallelDivideBroadcastWord}
   };
 
   for (const Contract &contract : contracts)
@@ -1816,7 +1819,7 @@ TEST_CASE("EE packed word divide decoder and dependencies")
           1,
           2,
           0,
-          0x0d));
+          contract.nestedFunction));
     const EEInstructionDependencies dependencies =
       eeInstructionDependencies(decoded);
 
@@ -1849,6 +1852,11 @@ TEST_CASE("EE packed word divide decoder and dependencies")
     decodeEEInstruction(
       UINT32_C(0x70000000) |
       registerInstruction(0x29, 1, 2, 3, 0x0d)),
+    EEInstructionDecodeError);
+  REQUIRE_THROWS_AS(
+    decodeEEInstruction(
+      UINT32_C(0x70000000) |
+      registerInstruction(0x09, 1, 2, 3, 0x1d)),
     EEInstructionDecodeError);
 }
 
@@ -3103,7 +3111,7 @@ TEST_CASE("EE nested MMI tables classify every encoding")
   const NestedTableContract contracts[] = {
     {0x08, UINT32_C(0x3000f800), UINT32_C(0xcfff07ff)},
     {0x28, UINT32_C(0xf088fb01), UINT32_C(0x0f7704fe)},
-    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xdc3f771d)},
+    {0x09, UINT32_C(0x03c088e2), UINT32_C(0xfc3f771d)},
     {0x29, UINT32_C(0xb3f388f6), UINT32_C(0x4c0c7709)}
   };
   const auto requireDecodeFailure =
@@ -3282,7 +3290,8 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
      true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 1, 2, 0, 0x1d),
-     destinationMask},
+     destinationMask,
+     true},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 1, 2, 0, 0x0d),
      destinationMask,

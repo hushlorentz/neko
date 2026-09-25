@@ -1875,6 +1875,127 @@ TEST_CASE("EE packed divide continuation survives save-state restore")
   REQUIRE(core.lo1() == 2);
 }
 
+TEST_CASE("EE packed broadcast word divide execution")
+{
+  SECTION("PDIVBW broadcasts a signed halfword divisor across four words")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x00000007fffffff9),
+       UINT64_C(0x7fffffff80000000)});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x123456789abcfffd),
+       UINT64_C(0xfedcba9876543210)});
+    core.setHI(UINT64_C(0x1111));
+    core.setLO(UINT64_C(0x2222));
+    core.setHI1(UINT64_C(0x3333));
+    core.setLO1(UINT64_C(0x4444));
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x1d));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(36);
+
+    REQUIRE(core.hi() == UINT64_C(0x1111));
+    REQUIRE(core.lo() == UINT64_C(0x2222));
+    REQUIRE(core.hi1() == UINT64_C(0x3333));
+    REQUIRE(core.lo1() == UINT64_C(0x4444));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.lo() == UINT64_C(0xfffffffe00000002));
+    REQUIRE(core.hi() == UINT64_C(0x00000001ffffffff));
+    REQUIRE(core.lo1() == UINT64_C(0xd55555562aaaaaaa));
+    REQUIRE(core.hi1() == UINT64_C(0x00000001fffffffe));
+  }
+
+  SECTION("PDIVBW handles signed minimum divided by negative one per lane")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0xffffffff80000000),
+       UINT64_C(0x7fffffff00000001)});
+    core.setGeneralRegister(2, {UINT64_C(0xffff), 0});
+
+    runToCompletion(
+      &system,
+      mmiInstruction(0x09, 1, 2, 0, 0x1d),
+      37);
+
+    REQUIRE(core.lo() == UINT64_C(0x0000000180000000));
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo1() == UINT64_C(0x80000001ffffffff));
+    REQUIRE(core.hi1() == 0);
+  }
+
+  SECTION("PDIVBW rejects a zero low-halfword divisor")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(
+      1,
+      {UINT64_C(0x00000007fffffff9),
+       UINT64_C(0x7fffffff80000000)});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x123456789abc0000),
+       UINT64_C(0xffffffffffffffff)});
+
+    runToCompletion(
+      &system,
+      mmiInstruction(0x09, 1, 2, 0, 0x1d),
+      1);
+
+    REQUIRE(core.executionState() == EEExecutionState::Halted);
+    REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+    REQUIRE(core.programCounter() == 0);
+  }
+}
+
+TEST_CASE("EE packed broadcast divide survives save-state restore")
+{
+  NekoSystem original;
+  EECore &core = original.eeCore();
+  core.setGeneralRegister(
+    1,
+    {UINT64_C(0x00000007fffffff9),
+     UINT64_C(0x7fffffff80000000)});
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0x123456789abcfffd),
+     UINT64_C(0xfedcba9876543210)});
+  original.eeBus().write32(
+    0,
+    mmiInstruction(0x09, 1, 2, 0, 0x1d));
+  core.startExecution(0);
+  original.runMasterCycles(10);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  REQUIRE(original.saveState() == state);
+
+  NekoSystem restored;
+  restored.loadState(state);
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(restored.eeCore().stateHash() == core.stateHash());
+
+  original.runMasterCycles(28);
+  restored.runMasterCycles(28);
+
+  REQUIRE(original.saveState() == restored.saveState());
+  REQUIRE(core.lo() == UINT64_C(0xfffffffe00000002));
+  REQUIRE(core.hi() == UINT64_C(0x00000001ffffffff));
+  REQUIRE(core.lo1() == UINT64_C(0xd55555562aaaaaaa));
+  REQUIRE(core.hi1() == UINT64_C(0x00000001fffffffe));
+}
+
 TEST_CASE("EE HI LO and shift amount transfers")
 {
   NekoSystem system;

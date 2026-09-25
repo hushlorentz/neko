@@ -542,7 +542,8 @@ class EECore final : public ClockedComponent
     {
       None,
       DivideWord,
-      DivideUnsignedWord
+      DivideUnsignedWord,
+      DivideBroadcastWord
     };
 
     enum class COP1ScoreboardQuery : std::uint8_t

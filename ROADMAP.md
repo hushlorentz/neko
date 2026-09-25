@@ -1526,7 +1526,7 @@ continuation state before a live consumer exists.
       pseudocode/diagram specifying sign extension; use sign extension because
       the four formal assignments, the dataflow diagram, and all three approved
       local reference-emulator implementations agree on that behavior
-- [ ] Implement signed broadcast `PDIVBW` over all four source words using the
+- [x] Implement signed broadcast `PDIVBW` over all four source words using the
       low halfword divisor and the resolved remainder-extension policy
 - [ ] Model 37-cycle latency and 37-cycle throughput with asynchronous HI/LO
       interlocks and no architectural arithmetic exception
