@@ -1532,7 +1532,7 @@ continuation state before a live consumer exists.
       interlocks and no architectural arithmetic exception
 - [x] Enforce manual-defined operand-shape restrictions and the milestone's
       deterministic policy for otherwise undefined zero-divisor results
-- [ ] Cover signed minimum divided by minus one, signed remainder rules,
+- [x] Cover signed minimum divided by minus one, signed remainder rules,
       unsigned high-bit inputs, all four broadcast lanes, scalar/packed MAC
       conflicts, interrupts, halt/resume, traces, hashes, and save/resume
 - [ ] Complete an independent review of packed divide behavior

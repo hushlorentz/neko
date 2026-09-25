@@ -2815,6 +2815,77 @@ TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
   REQUIRE(eventIndex == events.size());
 }
 
+TEST_CASE("EE packed divide traces and hashes are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setGeneralRegister(
+        1,
+        {UINT64_C(0x00000007fffffff9),
+         UINT64_C(0x7fffffff80000000)});
+      core.setGeneralRegister(
+        2,
+        {UINT64_C(0x123456789abcfffd),
+         UINT64_C(0xfedcba9876543210)});
+      system->eeBus().write32(
+        0,
+        nestedMmiInstruction(0x09, 0x1d, 1, 2, 0));
+      system->eeBus().write32(4, UINT32_C(0xbc000000));
+      core.startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+  const std::uint64_t initialHash =
+    first.eeCore().stateHash();
+  std::array<std::uint64_t, 38> stateHashes = {};
+  for (std::size_t cycle = 0; cycle < stateHashes.size(); ++cycle)
+  {
+    first.clockMasterCycle();
+    second.clockMasterCycle();
+    stateHashes[cycle] = first.eeCore().stateHash();
+    REQUIRE(
+      first.eeCore().stateHash() ==
+      second.eeCore().stateHash());
+    REQUIRE(first.traceHash() == second.traceHash());
+  }
+
+  REQUIRE(stateHashes[0] != initialHash);
+  REQUIRE(first.eeCore().lo() == UINT64_C(0xfffffffe00000002));
+  REQUIRE(first.eeCore().hi() == UINT64_C(0x00000001ffffffff));
+  REQUIRE(first.eeCore().lo1() == UINT64_C(0xd55555562aaaaaaa));
+  REQUIRE(first.eeCore().hi1() == UINT64_C(0x00000001fffffffe));
+  REQUIRE(
+    first.eeCore().stopReason() ==
+    EEStopReason::UnsupportedInstruction);
+
+  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  REQUIRE(events.size() == stateHashes.size() + 1);
+  REQUIRE(events[0].masterCycle == 1);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[0].value0 == 0);
+  REQUIRE(
+    events[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::ParallelDivideBroadcastWord));
+  for (std::size_t cycle = 0; cycle < stateHashes.size(); ++cycle)
+  {
+    const NekoTraceEvent &snapshot = events[cycle + 1];
+    REQUIRE(snapshot.masterCycle == cycle + 1);
+    REQUIRE(
+      snapshot.type ==
+      NekoTraceEventType::StateSnapshot);
+    REQUIRE(snapshot.value0 == stateHashes[cycle]);
+  }
+}
+
 TEST_CASE("EE packed halfword MAC overlap traces and hashes are deterministic")
 {
   const auto prepare =

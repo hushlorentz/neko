@@ -2297,6 +2297,285 @@ TEST_CASE("EE packed broadcast divide survives save-state restore")
   REQUIRE(core.hi1() == UINT64_C(0x00000001fffffffe));
 }
 
+TEST_CASE("EE packed divide conflicts with scalar and packed MAC work")
+{
+  SECTION("An older scalar MAC retires before packed divide starts")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setWord(&core, 1, 4);
+    setWord(&core, 2, 5);
+    core.setGeneralRegister(3, {7, 9});
+    core.setGeneralRegister(4, {3, 4});
+    system.eeBus().write32(
+      0,
+      registerInstruction(0x18, 1, 2, 5));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x09, 3, 4, 0, 0x0d));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(3);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+    REQUIRE(core.lo() == 20);
+    REQUIRE(core.generalRegister(5).low == 20);
+
+    system.runMasterCycles(37);
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("An older packed MAC retires before packed divide starts")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {4, 5});
+    core.setGeneralRegister(2, {5, 7});
+    core.setGeneralRegister(3, {7, 9});
+    core.setGeneralRegister(4, {3, 4});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 5, 0x0c));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x09, 3, 4, 0, 0x0d));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(3);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(5) == EERegister128{20, 35});
+
+    system.runMasterCycles(37);
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("Packed divide retires before a younger scalar MAC starts")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    setWord(&core, 3, 4);
+    setWord(&core, 4, 5);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      registerInstruction(0x18, 3, 4, 5));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(36);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.lo1() == 2);
+
+    system.runMasterCycles(4);
+    REQUIRE(core.lo() == 20);
+    REQUIRE(core.generalRegister(5).low == 20);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("Packed divide rejects a same-cycle younger MAC1 continuation")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    setWord(&core, 3, 4);
+    setWord(&core, 4, 5);
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      UINT32_C(0x70000000) |
+        registerInstruction(0x18, 3, 4, 5));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 4);
+
+    system.runMasterCycles(36);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.lo1() == 0);
+
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.lo1() == 2);
+
+    system.runMasterCycles(4);
+    REQUIRE(core.lo1() == 20);
+    REQUIRE(core.generalRegister(5).low == 20);
+    REQUIRE(core.lo() == 2);
+  }
+
+  SECTION("Packed divide retires before a younger packed MAC starts")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {7, 9});
+    core.setGeneralRegister(2, {3, 4});
+    core.setGeneralRegister(3, {4, 5});
+    core.setGeneralRegister(4, {5, 7});
+    system.eeBus().write32(
+      0,
+      mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    system.eeBus().write32(
+      4,
+      mmiInstruction(0x09, 3, 4, 5, 0x0c));
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+    system.runMasterCycles(36);
+    REQUIRE(core.programCounter() == 4);
+
+    system.clockMasterCycle();
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.lo1() == 2);
+
+    system.runMasterCycles(4);
+    REQUIRE(core.generalRegister(5) == EERegister128{20, 35});
+    REQUIRE(core.lo() == 20);
+    REQUIRE(core.lo1() == 35);
+  }
+}
+
+TEST_CASE("EE packed divide lifecycle is explicit")
+{
+  const auto preparePackedDivide =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setGeneralRegister(1, {7, 9});
+      core.setGeneralRegister(2, {3, 4});
+      system->eeBus().write32(
+        0,
+        mmiInstruction(0x09, 1, 2, 0, 0x0d));
+    };
+
+  SECTION("Accepted work crosses interrupt entry")
+  {
+    constexpr std::uint32_t INTC_ENABLED_STATUS =
+      EECOP0Status::INTERRUPT_ENABLE |
+      EECOP0Status::MASTER_INTERRUPT_ENABLE |
+      EECOP0Status::INTC_MASK;
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedDivide(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+    system.interruptController().setSource(
+      EEInterruptSource::VIF0,
+      true);
+    system.interruptController().toggleMask(
+      EEInterruptSource::mask(EEInterruptSource::VIF0));
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      INTC_ENABLED_STATUS);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::Interrupt);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.lo1() == 0);
+
+    system.interruptController().acknowledge(
+      EEInterruptSource::mask(EEInterruptSource::VIF0));
+    system.runMasterCycles(37);
+
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("Host halt freezes and exact resume preserves accepted work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedDivide(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+
+    core.haltExecution();
+    system.runMasterCycles(40);
+
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.lo1() == 0);
+
+    core.startExecution(core.programCounter());
+    system.runMasterCycles(37);
+
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("Fresh execution restart discards accepted work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedDivide(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+    core.haltExecution();
+    for (std::uint32_t address = 0x100;
+         address < 0x1a0;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+
+    core.startExecution(0x100);
+    system.runMasterCycles(40);
+
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.hi1() == 0);
+    REQUIRE(core.lo1() == 0);
+  }
+
+  SECTION("External PC mutation preserves accepted work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedDivide(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+    for (std::uint32_t address = 0x100;
+         address < 0x1a0;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+
+    core.setProgramCounter(0x100);
+    system.runMasterCycles(37);
+
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+    REQUIRE(core.programCounter() >= 0x190);
+  }
+}
+
 TEST_CASE("EE HI LO and shift amount transfers")
 {
   NekoSystem system;
