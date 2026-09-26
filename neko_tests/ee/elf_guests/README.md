@@ -36,6 +36,13 @@ The fixtures exercise:
 - `vu_macro_arithmetic.elf`: pipelined VU0 `VADD`/`VSUB` macro arithmetic
 - `vu_macro_families.elf`: VU0 macro multiply, min/max, conversion, movement,
   and integer arithmetic families
+- `mmi_arithmetic.elf`: self-checking packed wrapping and saturating arithmetic,
+  equality and signed comparison, min/max, absolute value, and leading-count
+  semantics
+- `mmi_permutations.elf`: self-checking packed interleave, pack, copy,
+  exchange, pixel-format, immediate/variable shift, and SA funnel behavior
+- `mmi_hilo.elf`: self-checking packed word and halfword multiply/accumulate,
+  full-width HI/LO transfers, signed parallel divide, and broadcast divide
 - `rotation_vu1.elf`: guest-configured VIF1 DMA uploads a VU1 transform,
   unpacks a rotated triangle and GIF packet, starts it through `MSCAL`, and
   renders through `XGKICK` and GIF PATH1
@@ -49,6 +56,11 @@ The current binaries were generated with:
 
 - `mips64r5900el-ps2-elf-gcc` 15.2.0
 - GNU Binutils 2.45.1
+
+The MMI guests were independently authored from the EE Core Instruction Set
+Manual version 3.1 instruction definitions and checked-in Neko architectural
+contracts. They do not depend on reference-emulator source or external
+generated test programs.
 
 Regenerate them from the repository root:
 
@@ -80,6 +92,9 @@ f15ea0eed6405daad9b672575db828e686987be85dabd73cc05bdb0798c4b386  cop2_control.e
 d19d78bccfe393bcacc222a82cdd06954e5c7fd4b897fc105ed475dacde986f7  vcallms.elf
 7fd2baf8ba09bc8c43dff19d6fa0d8e48cff9f182911dbf0334a8fd673aa5c2d  vu_macro_arithmetic.elf
 f09d304e80cc06bef0648a2012b6fd18767c85f43db582c2079d8f02f2b96d88  vu_macro_families.elf
+91c851939773bb6f68d668dd601cb129ab185bf52a5c574a3e2684115621aa5d  mmi_arithmetic.elf
+0e5d197364a3306ecb06a0498da4ba3ec3c6afd4fcd4e7be30512c7bfc77eb49  mmi_permutations.elf
+da095898984d0346ea34e3bb8cf05e669e4ab8f89915f898509d3bb1c00ff5cd  mmi_hilo.elf
 15a69f9505959eb2be7c52f38a525465ac26ce3d55b353e8a23eda6d91478adf  rotation_vu1.elf
 40ceb21e5e43c654098b08ea7c81e74a287048a8272cbbd8abb0d3c4eb61a403  point_sprite.elf
 ```

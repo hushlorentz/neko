@@ -142,6 +142,18 @@ verify_ee_elf_fixture(
   vu_macro_families.elf
   f09d304e80cc06bef0648a2012b6fd18767c85f43db582c2079d8f02f2b96d88
 )
+verify_ee_elf_fixture(
+  mmi_arithmetic.elf
+  91c851939773bb6f68d668dd601cb129ab185bf52a5c574a3e2684115621aa5d
+)
+verify_ee_elf_fixture(
+  mmi_permutations.elf
+  0e5d197364a3306ecb06a0498da4ba3ec3c6afd4fcd4e7be30512c7bfc77eb49
+)
+verify_ee_elf_fixture(
+  mmi_hilo.elf
+  da095898984d0346ea34e3bb8cf05e669e4ab8f89915f898509d3bb1c00ff5cd
+)
 
 verify_fixture(
   integer_fill.bin

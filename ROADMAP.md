@@ -1539,7 +1539,7 @@ continuation state before a live consumer exists.
 
 ### MMI Guest Integration and Final Conformance Audit
 
-- [ ] Add independently authored PS2DEV semantic guests for packed arithmetic
+- [x] Add independently authored PS2DEV semantic guests for packed arithmetic
       and comparisons, shifts and permutations, and HI/LO multiply/divide
       behavior; record fixture provenance and generated hashes
 - [ ] Add a mixed MMI guest that exercises ordinary `O` pairs, every Wide

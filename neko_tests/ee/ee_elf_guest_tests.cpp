@@ -89,6 +89,39 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
   }
 }
 
+TEST_CASE("PS2DEV MMI semantic guests complete successfully")
+{
+  struct GuestExpectation
+  {
+    const char *fileName;
+    std::uint64_t instructions;
+  };
+  const GuestExpectation guests[] = {
+    {"mmi_arithmetic.elf", 126},
+    {"mmi_permutations.elf", 194},
+    {"mmi_hilo.elf", 283}
+  };
+
+  for (const GuestExpectation &guest : guests)
+  {
+    CAPTURE(guest.fileName);
+    NekoSystem system;
+    const EEGuestExecutionResult result =
+      system.runELF(readGuest(guest.fileName), 2048);
+    CAPTURE(neko_frontend::formatELFRun(result));
+
+    REQUIRE(result.outcome == EEGuestOutcome::Completed);
+    REQUIRE(result.exitCode == 0);
+    REQUIRE(
+      result.execution.instructions ==
+      guest.instructions);
+    REQUIRE_FALSE(result.execution.cycleLimitReached);
+    REQUIRE(
+      result.execution.programCounter ==
+      EEGuestRuntime::RETURN_ADDRESS);
+  }
+}
+
 TEST_CASE("PS2DEV COP1 semantic capstone integrates pipeline behavior")
 {
   NekoSystem system;
