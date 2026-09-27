@@ -1561,7 +1561,7 @@ continuation state before a live consumer exists.
       baseline
 - [x] Complete an independent final review of the full MMI milestone and
       resolve every concrete finding
-- [ ] Reconcile `PROJECT.md`, run the complete optimized AddressSanitizer
+- [x] Reconcile `PROJECT.md`, run the complete optimized AddressSanitizer
       check, and run the macOS leak check before closing the milestone
 
 ## Milestone 7: EE Virtual Memory and Memory-System Foundation
