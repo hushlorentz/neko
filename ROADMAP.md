@@ -1556,7 +1556,7 @@ continuation state before a live consumer exists.
 - [x] Exhaustively reject every reserved primary MMI and nested
       MMI0/MMI1/MMI2/MMI3 encoding, invalid `PMFHL` format, and nonzero
       fixed-field combination
-- [ ] Run the complete optimized repository check and compare representative
+- [x] Run the complete optimized repository check and compare representative
       trace, state, guest-output, and save-state hashes with the pre-MMI
       baseline
 - [ ] Complete an independent final review of the full MMI milestone and
