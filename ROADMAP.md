@@ -1545,7 +1545,7 @@ continuation state before a live consumer exists.
 - [x] Add a mixed MMI guest that exercises ordinary `O` pairs, every Wide
       Operate `Y` pairing, SA ordering, scalar/packed MAC interlocks, and
       asynchronous completion
-- [ ] Assert guest registers, full-width HI/LO and SA state, memory outputs,
+- [x] Assert guest registers, full-width HI/LO and SA state, memory outputs,
       instruction counts, stop reasons, deterministic traces, and state hashes
 - [ ] Round-trip save states with two overlapping packed MAC operations and
       with a packed divide in flight; verify byte-identical consecutive saves

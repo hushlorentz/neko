@@ -156,7 +156,7 @@ verify_ee_elf_fixture(
 )
 verify_ee_elf_fixture(
   mmi_mixed.elf
-  cb416b79609aa867d528b63eac3c48bfbf09a06c3e2e0d78726d46de640e1d13
+  9c9e40aa9533e632a2d6745786ba036b49fe66025981df45e2f2f4323f9aabe6
 )
 
 verify_fixture(

@@ -122,22 +122,122 @@ TEST_CASE("PS2DEV MMI semantic guests complete successfully")
   }
 }
 
-TEST_CASE("PS2DEV mixed MMI guest integrates timing and interlocks")
+TEST_CASE("PS2DEV mixed MMI guest exposes deterministic host state")
 {
-  NekoSystem system;
-  const EEGuestExecutionResult result =
-    system.runELF(readGuest("mmi_mixed.elf"), 4096);
-  CAPTURE(neko_frontend::formatELFRun(result));
+  const std::vector<std::uint8_t> guest =
+    readGuest("mmi_mixed.elf");
+  NekoSystem first;
+  NekoSystem second;
+  first.startTrace();
+  second.startTrace();
 
-  REQUIRE(result.outcome == EEGuestOutcome::Completed);
-  REQUIRE(result.exitCode == 0);
-  REQUIRE(result.execution.instructions == 331);
-  REQUIRE(result.execution.masterCycles == 256);
-  REQUIRE(result.execution.eeCycles == 256);
-  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  const EEGuestExecutionResult firstResult =
+    first.runELF(guest, 4096);
+  const EEGuestExecutionResult secondResult =
+    second.runELF(guest, 4096);
+  CAPTURE(neko_frontend::formatELFRun(firstResult));
+
+  const auto requireExecution =
+    [](const EEGuestExecutionResult &result)
+    {
+      REQUIRE(result.outcome == EEGuestOutcome::Completed);
+      REQUIRE(result.exitCode == 0);
+      REQUIRE(result.execution.instructions == 343);
+      REQUIRE(result.execution.masterCycles == 266);
+      REQUIRE(result.execution.eeCycles == 266);
+      REQUIRE_FALSE(result.execution.cycleLimitReached);
+      REQUIRE(
+        result.execution.state ==
+        EEExecutionState::Halted);
+      REQUIRE(
+        result.execution.stopReason ==
+        EEStopReason::HostHalt);
+      REQUIRE(
+        result.execution.programCounter ==
+        EEGuestRuntime::RETURN_ADDRESS);
+      REQUIRE(
+        result.execution.pendingException ==
+        EEException::None);
+      REQUIRE(result.execution.exceptionAddress == 0);
+    };
+  requireExecution(firstResult);
+  requireExecution(secondResult);
+
+  REQUIRE(first.trace().size() == second.trace().size());
+  REQUIRE_FALSE(first.trace().empty());
+  REQUIRE(first.traceHash() != 0);
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(first.eeCore().stateHash() != 0);
   REQUIRE(
-    result.execution.programCounter ==
-    EEGuestRuntime::RETURN_ADDRESS);
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+
+  const auto requireArchitecturalState =
+    [](NekoSystem *system)
+    {
+      const EECore &core = system->eeCore();
+      REQUIRE(
+        core.generalRegister(6) ==
+        EERegister128{UINT64_C(16), UINT64_C(0)});
+      REQUIRE(
+        core.generalRegister(7) ==
+        EERegister128{UINT64_C(3), UINT64_C(0)});
+      REQUIRE(
+        core.generalRegister(10) ==
+        EERegister128{
+          UINT64_C(0x0f0f00000f000f00),
+          UINT64_C(0x1030507000000000)});
+      REQUIRE(
+        core.generalRegister(13) ==
+        EERegister128{UINT64_C(2), UINT64_C(2)});
+      REQUIRE(
+        core.generalRegister(14) ==
+        EERegister128{UINT64_C(1), UINT64_C(1)});
+      REQUIRE(core.generalRegister(15).low == 5);
+      REQUIRE(core.generalRegister(16).low == 7);
+      REQUIRE(core.generalRegister(17).low == 11);
+      REQUIRE(core.generalRegister(18).low == 13);
+      REQUIRE(core.hi() == 1);
+      REQUIRE(core.lo() == 2);
+      REQUIRE(core.hi1() == 1);
+      REQUIRE(core.lo1() == 2);
+      REQUIRE(core.shiftAmount() == 16);
+      REQUIRE(core.stopReason() == EEStopReason::HostHalt);
+
+      const std::uint32_t outputAddress =
+        static_cast<std::uint32_t>(
+          core.generalRegister(19).low);
+      REQUIRE(outputAddress != 0);
+      REQUIRE(
+        system->eeBus().readQuadword(outputAddress) ==
+        GIFQuadword{
+          UINT32_C(0x0f000f00),
+          UINT32_C(0x0f0f0000),
+          UINT32_C(0x00000000),
+          UINT32_C(0x10305070)});
+      REQUIRE(
+        system->eeBus().readQuadword(outputAddress + 16) ==
+        GIFQuadword{
+          UINT32_C(0x00000002),
+          UINT32_C(0x00000000),
+          UINT32_C(0x00000002),
+          UINT32_C(0x00000000)});
+      REQUIRE(
+        system->eeBus().readQuadword(outputAddress + 32) ==
+        GIFQuadword{
+          UINT32_C(0x00000001),
+          UINT32_C(0x00000000),
+          UINT32_C(0x00000001),
+          UINT32_C(0x00000000)});
+      REQUIRE(system->eeBus().read32(outputAddress + 48) == 16);
+      REQUIRE(system->eeBus().read32(outputAddress + 52) == 3);
+      REQUIRE(system->eeBus().read32(outputAddress + 56) == 5);
+      REQUIRE(system->eeBus().read32(outputAddress + 60) == 7);
+      REQUIRE(system->eeBus().read32(outputAddress + 64) == 11);
+      REQUIRE(system->eeBus().read32(outputAddress + 68) == 13);
+    };
+  requireArchitecturalState(&first);
+  requireArchitecturalState(&second);
 }
 
 TEST_CASE("PS2DEV COP1 semantic capstone integrates pipeline behavior")

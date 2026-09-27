@@ -141,6 +141,20 @@ _start:
   check_qword $13, divide_quotient, 28
   check_qword $14, divide_remainder, 29
 
+  # Publish execution-derived results for host-side conformance checks.
+  lui $19, %hi(outputs)
+  addiu $19, $19, %lo(outputs)
+  sq $10, 0($19)
+  sq $13, 16($19)
+  sq $14, 32($19)
+  mfsa $6
+  sw $6, 48($19)
+  sw $7, 52($19)
+  sw $15, 56($19)
+  sw $16, 60($19)
+  sw $17, 64($19)
+  sw $18, 68($19)
+
   or $v0, $zero, $zero
 fail:
   jr $ra
@@ -188,3 +202,5 @@ divide_remainder:
   .word 0x00000001, 0x00000000, 0x00000001, 0x00000000
 scratch:
   .space 16
+outputs:
+  .space 80
