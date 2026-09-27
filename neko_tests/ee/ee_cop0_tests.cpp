@@ -19,6 +19,15 @@ namespace
       (static_cast<std::uint32_t>(cop0Register) << 11);
   }
 
+  std::uint32_t cop0OperationInstruction(
+    std::uint8_t function)
+  {
+    return
+      (UINT32_C(0x10) << 26) |
+      (UINT32_C(0x10) << 21) |
+      function;
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -27,6 +36,297 @@ namespace
     system->eeCore().startExecution(0);
     system->clockMasterCycle();
   }
+}
+
+TEST_CASE("EE TLB management operations decode canonically")
+{
+  const struct
+  {
+    std::uint8_t function;
+    EEOperation operation;
+  } contracts[] = {
+    {0x01, EEOperation::ReadIndexedTLBEntry},
+    {0x02, EEOperation::WriteIndexedTLBEntry},
+    {0x06, EEOperation::WriteRandomTLBEntry},
+    {0x08, EEOperation::ProbeTLB}
+  };
+
+  for (const auto &contract : contracts)
+  {
+    REQUIRE(
+      decodeEEInstruction(
+        cop0OperationInstruction(contract.function)).operation ==
+      contract.operation);
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(
+        cop0OperationInstruction(contract.function) |
+        (UINT32_C(1) << 6)),
+      "Reserved EE instruction encoding.");
+  }
+}
+
+TEST_CASE("EE TLB indexed writes and reads use canonical entries")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const std::uint32_t pageMask = EECOP0PageMask::SIZE_16_KIB;
+  const std::uint32_t entryHi = UINT32_C(0x12347e5a);
+  const std::uint32_t entryLo0 = UINT32_C(0x801234ff);
+  const std::uint32_t entryLo1 = UINT32_C(0x001abcff);
+  core.setCOP0Register(EECOP0Register::Index, 5);
+  core.setCOP0Register(EECOP0Register::PageMask, pageMask);
+  core.setCOP0Register(EECOP0Register::EntryHi, entryHi);
+  core.setCOP0Register(EECOP0Register::EntryLo0, entryLo0);
+  core.setCOP0Register(EECOP0Register::EntryLo1, entryLo1);
+
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x02));
+
+  const EETLBEntry &entry = core.tlbEntry(5);
+  REQUIRE(entry.pageMask == pageMask);
+  REQUIRE(
+    entry.entryHi ==
+    (entryHi & EECOP0EntryHi::IMPLEMENTED_MASK & ~pageMask));
+  REQUIRE(
+    entry.evenPage.value ==
+    (entryLo0 &
+     EECOP0EntryLo::ENTRY_LO_0_IMPLEMENTED_MASK &
+     ~(pageMask >> 7)));
+  REQUIRE(
+    entry.oddPage.value ==
+    (entryLo1 &
+     EECOP0EntryLo::ENTRY_LO_1_IMPLEMENTED_MASK &
+     ~(pageMask >> 7)));
+  REQUIRE(entry.global());
+  REQUIRE(entry.evenPage.scratchpad());
+  REQUIRE_FALSE(entry.oddPage.scratchpad());
+
+  core.setCOP0Register(EECOP0Register::PageMask, 0);
+  core.setCOP0Register(EECOP0Register::EntryHi, 0);
+  core.setCOP0Register(EECOP0Register::EntryLo0, 0);
+  core.setCOP0Register(EECOP0Register::EntryLo1, 0);
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x01));
+
+  REQUIRE(
+    core.cop0Register(EECOP0Register::PageMask) ==
+    entry.pageMask);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryHi) ==
+    entry.entryHi);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryLo0) ==
+    entry.evenPage.value);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryLo1) ==
+    entry.oddPage.value);
+}
+
+TEST_CASE("EE TLB entries select pages using their page mask")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(EECOP0Register::Index, 3);
+  core.setCOP0Register(
+    EECOP0Register::PageMask,
+    EECOP0PageMask::SIZE_16_KIB);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x1234002a));
+  core.setCOP0Register(
+    EECOP0Register::EntryLo0,
+    UINT32_C(0x80010007));
+  core.setCOP0Register(
+    EECOP0Register::EntryLo1,
+    UINT32_C(0x00020007));
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x02));
+
+  const EETLBEntry &entry = core.tlbEntry(3);
+  REQUIRE(entry.matches(UINT32_C(0x12340000), 0xff));
+  REQUIRE(
+    &entry.pageForAddress(UINT32_C(0x12340000)) ==
+    &entry.evenPage);
+  REQUIRE(
+    &entry.pageForAddress(UINT32_C(0x12344000)) ==
+    &entry.oddPage);
+  REQUIRE(
+    entry.pageForAddress(UINT32_C(0x12340000)).
+      scratchpad());
+  REQUIRE_FALSE(
+    entry.pageForAddress(UINT32_C(0x12344000)).
+      scratchpad());
+
+  const struct
+  {
+    std::uint32_t pageMask;
+    std::uint32_t oddPageBit;
+  } pageSizes[] = {
+    {EECOP0PageMask::SIZE_4_KIB, UINT32_C(0x00001000)},
+    {EECOP0PageMask::SIZE_16_KIB, UINT32_C(0x00004000)},
+    {EECOP0PageMask::SIZE_64_KIB, UINT32_C(0x00010000)},
+    {EECOP0PageMask::SIZE_256_KIB, UINT32_C(0x00040000)},
+    {EECOP0PageMask::SIZE_1_MIB, UINT32_C(0x00100000)},
+    {EECOP0PageMask::SIZE_4_MIB, UINT32_C(0x00400000)},
+    {EECOP0PageMask::SIZE_16_MIB, UINT32_C(0x01000000)}
+  };
+  for (const auto &pageSize : pageSizes)
+  {
+    const EETLBEntry sizedEntry = {
+      pageSize.pageMask,
+      0,
+      {1},
+      {2}
+    };
+    REQUIRE(&sizedEntry.pageForAddress(0) == &sizedEntry.evenPage);
+    REQUIRE(
+      &sizedEntry.pageForAddress(pageSize.oddPageBit) ==
+      &sizedEntry.oddPage);
+  }
+}
+
+TEST_CASE("EE TLB probes honor ASIDs and combined global state")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+
+  const auto writeEntry =
+    [&system, &core](
+      std::uint32_t index,
+      std::uint32_t asid,
+      bool global)
+    {
+      core.setCOP0Register(EECOP0Register::Index, index);
+      core.setCOP0Register(EECOP0Register::PageMask, 0);
+      core.setCOP0Register(
+        EECOP0Register::EntryHi,
+        UINT32_C(0x23456000) | asid);
+      core.setCOP0Register(
+        EECOP0Register::EntryLo0,
+        UINT32_C(0x00010006) |
+        static_cast<std::uint32_t>(global));
+      core.setCOP0Register(
+        EECOP0Register::EntryLo1,
+        UINT32_C(0x00020006) |
+        static_cast<std::uint32_t>(global));
+      runInstruction(
+        &system,
+        cop0OperationInstruction(0x02));
+    };
+
+  writeEntry(7, 0x2a, false);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x2345602b));
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x08));
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Index) ==
+    EECOP0Index::PROBE_FAILURE);
+
+  writeEntry(7, 0x2a, true);
+  writeEntry(2, 0x3c, true);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x234560ff));
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x08));
+  REQUIRE(core.cop0Register(EECOP0Register::Index) == 2);
+}
+
+TEST_CASE("EE TLB writes use indexed and random selectors")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(EECOP0Register::Index, 63);
+  core.setCOP0Register(EECOP0Register::PageMask, 0);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x11110001));
+  core.setCOP0Register(
+    EECOP0Register::EntryLo0,
+    UINT32_C(0x00010006));
+  core.setCOP0Register(
+    EECOP0Register::EntryLo1,
+    UINT32_C(0x00020006));
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x02));
+  REQUIRE(core.tlbEntry(47) == EETLBEntry{});
+
+  core.setCOP0Register(EECOP0Register::Random, 11);
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x06));
+  REQUIRE(
+    core.tlbEntry(11).entryHi ==
+    UINT32_C(0x11110001));
+  REQUIRE(core.cop0Register(EECOP0Register::Random) == 10);
+
+  core.setCOP0Register(EECOP0Register::Index, 63);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x22222002));
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x01));
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryHi) ==
+    UINT32_C(0x22222002));
+}
+
+TEST_CASE("EE TLB operations require COP0 usability")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE);
+  core.setCOP0Register(EECOP0Register::Index, 4);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x12345001));
+
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x02));
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::CoprocessorUnusable);
+  REQUIRE(core.tlbEntry(4) == EETLBEntry{});
+}
+
+TEST_CASE("EE TLB entries reset deterministically and affect hashes")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const std::uint64_t resetHash = core.stateHash();
+
+  for (std::size_t index = 0;
+       index < EEMemorySystem::TLB_ENTRY_COUNT;
+       ++index)
+  {
+    REQUIRE(core.tlbEntry(index) == EETLBEntry{});
+  }
+
+  core.setTLBEntry(
+    17,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x1234402a),
+      {UINT32_C(0x00010007)},
+      {UINT32_C(0x00020007)}
+    });
+  REQUIRE(core.stateHash() != resetHash);
+
+  core.reset();
+  REQUIRE(core.stateHash() == resetHash);
 }
 
 TEST_CASE("EE COP0 register transfers decode canonically")
@@ -214,36 +514,53 @@ TEST_CASE("EE MTC0 applies register-specific write policies")
 
   SECTION("Read-only registers ignore guest writes")
   {
-    NekoSystem system;
-    EECore &core = system.eeCore();
-    core.setCOP0Register(EECOP0Register::Random, 17);
-    core.setCOP0Register(
-      EECOP0Register::BadVAddr,
-      UINT32_C(0x12345678));
-    core.setCOP0Register(
-      EECOP0Register::Cause,
-      UINT32_C(0x80008030));
-    core.setGeneralRegister(2, {0, 0});
-    const EECOP0Register registers[] = {
-      EECOP0Register::Random,
-      EECOP0Register::BadVAddr,
-      EECOP0Register::Cause
-    };
-
-    for (const EECOP0Register registerIndex : registers)
+    SECTION("Random follows only normal retirement sequencing")
     {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(EECOP0Register::Random, 17);
+      core.setGeneralRegister(2, {0, 0});
       runInstruction(
         &system,
-        cop0TransferInstruction(0x04, 2, registerIndex));
+        cop0TransferInstruction(
+          0x04,
+          2,
+          EECOP0Register::Random));
+      REQUIRE(core.cop0Register(EECOP0Register::Random) == 16);
     }
 
-    REQUIRE(core.cop0Register(EECOP0Register::Random) == 17);
-    REQUIRE(
-      core.cop0Register(EECOP0Register::BadVAddr) ==
-      UINT32_C(0x12345678));
-    REQUIRE(
-      core.cop0Register(EECOP0Register::Cause) ==
-      UINT32_C(0x80008030));
+    SECTION("BadVAddr and Cause remain unchanged")
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::BadVAddr,
+        UINT32_C(0x12345678));
+      core.setCOP0Register(
+        EECOP0Register::Cause,
+        UINT32_C(0x80008030));
+      core.setGeneralRegister(2, {0, 0});
+
+      runInstruction(
+        &system,
+        cop0TransferInstruction(
+          0x04,
+          2,
+          EECOP0Register::BadVAddr));
+      runInstruction(
+        &system,
+        cop0TransferInstruction(
+          0x04,
+          2,
+          EECOP0Register::Cause));
+
+      REQUIRE(
+        core.cop0Register(EECOP0Register::BadVAddr) ==
+        UINT32_C(0x12345678));
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Cause) ==
+        UINT32_C(0x80008030));
+    }
   }
 }
 
@@ -265,7 +582,26 @@ TEST_CASE("EE MTC0 Wired writes reset Random atomically")
   REQUIRE(core.cop0Register(EECOP0Register::Wired) == 7);
   REQUIRE(
     core.cop0Register(EECOP0Register::Random) ==
+    EECOP0Random::RESET - 1);
+}
+
+TEST_CASE("EE Random advances through the Wired replacement range")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(EECOP0Register::Wired, 5);
+  core.setCOP0Register(EECOP0Register::Random, 6);
+
+  runInstruction(&system, 0);
+  REQUIRE(core.cop0Register(EECOP0Register::Random) == 5);
+  runInstruction(&system, 0);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Random) ==
     EECOP0Random::RESET);
+  runInstruction(&system, 0);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Random) ==
+    EECOP0Random::RESET - 1);
 }
 
 TEST_CASE("EE MTC0 rejects unsupported values without mutation")

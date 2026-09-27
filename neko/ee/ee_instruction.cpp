@@ -119,6 +119,10 @@ namespace
       case EEOperation::SystemCall:
       case EEOperation::Breakpoint:
       case EEOperation::ExceptionReturn:
+      case EEOperation::ReadIndexedTLBEntry:
+      case EEOperation::WriteIndexedTLBEntry:
+      case EEOperation::WriteRandomTLBEntry:
+      case EEOperation::ProbeTLB:
       case EEOperation::Jump:
         break;
       case EEOperation::MoveWordFromCOP0:
@@ -1935,15 +1939,33 @@ namespace
 
     const bool fixedFieldsAreZero =
       (instruction->raw & UINT32_C(0x001fffc0)) == 0;
+    if (!fixedFieldsAreZero)
+    {
+      reject(DecodeKind::Reserved);
+    }
+    switch (instruction->function)
+    {
+      case 0x01:
+        instruction->operation =
+          EEOperation::ReadIndexedTLBEntry;
+        return;
+      case 0x02:
+        instruction->operation =
+          EEOperation::WriteIndexedTLBEntry;
+        return;
+      case 0x06:
+        instruction->operation =
+          EEOperation::WriteRandomTLBEntry;
+        return;
+      case 0x08:
+        instruction->operation = EEOperation::ProbeTLB;
+        return;
+    }
     const bool deferredOperation =
-      instruction->function == 0x01 ||
-      instruction->function == 0x02 ||
-      instruction->function == 0x06 ||
-      instruction->function == 0x08 ||
       instruction->function == 0x38 ||
       instruction->function == 0x39;
     reject(
-      fixedFieldsAreZero && deferredOperation
+      deferredOperation
         ? DecodeKind::Unsupported
         : DecodeKind::Reserved);
   }
@@ -2358,6 +2380,10 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
       };
     case EEOperation::MoveWordFromCOP0:
     case EEOperation::MoveWordToCOP0:
+    case EEOperation::ReadIndexedTLBEntry:
+    case EEOperation::WriteIndexedTLBEntry:
+    case EEOperation::WriteRandomTLBEntry:
+    case EEOperation::ProbeTLB:
       return {
         EEInstructionCategory::COP0,
         PIPE_1,
@@ -2685,6 +2711,11 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::MoveWordFromCOP0:
     case EEOperation::MoveWordToCOP0:
       return EEExecutionFamily::COP0RegisterMove;
+    case EEOperation::ReadIndexedTLBEntry:
+    case EEOperation::WriteIndexedTLBEntry:
+    case EEOperation::WriteRandomTLBEntry:
+    case EEOperation::ProbeTLB:
+      return EEExecutionFamily::COP0TLBOperation;
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:

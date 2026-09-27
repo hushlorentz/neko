@@ -2156,6 +2156,7 @@ void EECore::executeYoungerAStageContinuation()
   switch (execution)
   {
     case EEInstructionExecutionOutcome::Completed:
+      memorySystem.retireInstruction();
       return;
     case EEInstructionExecutionOutcome::Faulted:
     case EEInstructionExecutionOutcome::Halted:
@@ -2295,6 +2296,7 @@ EEIssueMemberOutcome EECore::executeIssueMember(
   switch (execution)
   {
     case EEInstructionExecutionOutcome::Completed:
+      memorySystem.retireInstruction();
       break;
     case EEInstructionExecutionOutcome::Delayed:
       return EEIssueMemberOutcome::Stalled;
@@ -2473,6 +2475,11 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::MoveWordFromCOP0:
     case EEOperation::MoveWordToCOP0:
       return executeCOP0RegisterMove(instruction, address);
+    case EEOperation::ReadIndexedTLBEntry:
+    case EEOperation::WriteIndexedTLBEntry:
+    case EEOperation::WriteRandomTLBEntry:
+    case EEOperation::ProbeTLB:
+      return executeCOP0TLBOperation(instruction, address);
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -4990,6 +4997,35 @@ EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
            instruction.raw)
     ? EEInstructionExecutionOutcome::Completed
     : EEInstructionExecutionOutcome::Rejected;
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP0TLBOperation(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  if (!requireCOP0Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+  switch (instruction.operation)
+  {
+    case EEOperation::ReadIndexedTLBEntry:
+      memorySystem.readIndexedTLBEntry();
+      break;
+    case EEOperation::WriteIndexedTLBEntry:
+      memorySystem.writeIndexedTLBEntry();
+      break;
+    case EEOperation::WriteRandomTLBEntry:
+      memorySystem.writeRandomTLBEntry();
+      break;
+    case EEOperation::ProbeTLB:
+      memorySystem.probeTLB();
+      break;
+    default:
+      throw std::logic_error(
+        "EE COP0 TLB handler received an incompatible operation.");
+  }
+  return EEInstructionExecutionOutcome::Completed;
 }
 
 EEInstructionExecutionOutcome EECore::executeCOP1RegisterMove(
@@ -9245,6 +9281,16 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(
     &hash,
     memorySystem.cop0Register(EECOP0Register::TagHi));
+  for (std::size_t index = 0;
+       index < EEMemorySystem::TLB_ENTRY_COUNT;
+       ++index)
+  {
+    const EETLBEntry &entry = memorySystem.tlbEntry(index);
+    hashEEStateValue(&hash, entry.pageMask);
+    hashEEStateValue(&hash, entry.entryHi);
+    hashEEStateValue(&hash, entry.evenPage.value);
+    hashEEStateValue(&hash, entry.oddPage.value);
+  }
   hashEEStateValue(
     &hash,
     static_cast<std::uint8_t>(exception));
@@ -9705,6 +9751,18 @@ std::uint32_t EECore::cop0Register(
   }
   throw std::out_of_range(
     "EE COP0 register is not implemented.");
+}
+
+const EETLBEntry &EECore::tlbEntry(std::size_t index) const
+{
+  return memorySystem.tlbEntry(index);
+}
+
+void EECore::setTLBEntry(
+  std::size_t index,
+  const EETLBEntry &entry)
+{
+  memorySystem.setTLBEntry(index, entry);
 }
 
 void EECore::setCOP0Register(

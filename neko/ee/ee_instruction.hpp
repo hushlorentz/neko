@@ -256,6 +256,10 @@ enum class EEOperation : std::uint8_t
   ParallelDivideBroadcastWord,
   MoveWordFromCOP0,
   MoveWordToCOP0,
+  ReadIndexedTLBEntry,
+  WriteIndexedTLBEntry,
+  WriteRandomTLBEntry,
+  ProbeTLB,
   Count
 };
 
@@ -371,6 +375,7 @@ enum class EEExecutionFamily : std::uint8_t
   ExceptionReturn,
   SoftwareException,
   COP0RegisterMove,
+  COP0TLBOperation,
   COP1RegisterMove,
   COP1Divider,
   COP1StagedOperation,

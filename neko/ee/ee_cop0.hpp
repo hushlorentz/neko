@@ -41,6 +41,13 @@ namespace EECOP0Random
 
 namespace EECOP0EntryLo
 {
+  constexpr std::uint32_t GLOBAL = UINT32_C(1);
+  constexpr std::uint32_t VALID = UINT32_C(1) << 1;
+  constexpr std::uint32_t DIRTY = UINT32_C(1) << 2;
+  constexpr std::uint32_t CACHE_MODE_MASK = UINT32_C(0x7) << 3;
+  constexpr std::uint32_t PHYSICAL_FRAME_MASK =
+    UINT32_C(0x000fffff) << 6;
+  constexpr std::uint32_t SCRATCHPAD = UINT32_C(1) << 31;
   constexpr std::uint32_t ENTRY_LO_0_IMPLEMENTED_MASK =
     UINT32_C(0x83ffffff);
   constexpr std::uint32_t ENTRY_LO_1_IMPLEMENTED_MASK =
@@ -77,6 +84,9 @@ namespace EECOP0Wired
 
 namespace EECOP0EntryHi
 {
+  constexpr std::uint32_t ASID_MASK = UINT32_C(0xff);
+  constexpr std::uint32_t VIRTUAL_PAGE_MASK =
+    UINT32_C(0xffffe000);
   constexpr std::uint32_t IMPLEMENTED_MASK =
     UINT32_C(0xffffe0ff);
 }

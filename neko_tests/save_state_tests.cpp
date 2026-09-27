@@ -22,10 +22,10 @@ namespace
   constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
   constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
-    VERSION_28_PREPARED_STATE_SIZE = 37800736;
+    VERSION_29_PREPARED_STATE_SIZE = 37801504;
   constexpr std::uint64_t
-    VERSION_28_PREPARED_STATE_HASH =
-      UINT64_C(0x8c6de3213d5562c9);
+    VERSION_29_PREPARED_STATE_HASH =
+      UINT64_C(0xeaa71c11fdd78bc5);
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
@@ -181,7 +181,10 @@ namespace
     SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET = 2239;
   constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET = 2271;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2341;
+  constexpr std::size_t PREPARED_EE_COP0_RANDOM_OFFSET = 2293;
+  constexpr std::size_t PREPARED_EE_COP0_WIRED_OFFSET = 2313;
+  constexpr std::size_t PREPARED_EE_TLB_OFFSET = 2333;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 3109;
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -445,6 +448,14 @@ namespace
     system->eeCore().setCOP0Register(
       EECOP0Register::TagHi,
       UINT32_C(0x89abcdef));
+    system->eeCore().setTLBEntry(
+      47,
+      {
+        EECOP0PageMask::SIZE_64_KIB,
+        UINT32_C(0x812000aa),
+        {UINT32_C(0x80120007)},
+        {UINT32_C(0x001a0007)}
+      });
     system->gsDisplay().configureTiming({3, 7});
     system->masterClockScheduler().registerComponent(
       system->gifPathArbiter(),
@@ -719,7 +730,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 28 save-state layout is byte-stable")
+TEST_CASE("Version 29 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -734,14 +745,14 @@ TEST_CASE("Version 28 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 28);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 29);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_28_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_29_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_28_PREPARED_STATE_HASH);
+    VERSION_29_PREPARED_STATE_HASH);
 }
 
 TEST_CASE("Invalid packed MAC continuation states are rejected")
@@ -1607,6 +1618,14 @@ TEST_CASE("Active system save states round trip and continue identically")
   REQUIRE(
     restored.eeCore().cop0Register(EECOP0Register::TagHi) ==
     UINT32_C(0x89abcdef));
+  REQUIRE(
+    restored.eeCore().tlbEntry(47) ==
+    EETLBEntry{
+      EECOP0PageMask::SIZE_64_KIB,
+      UINT32_C(0x812000aa),
+      {UINT32_C(0x80120007)},
+      {UINT32_C(0x001a0007)}
+    });
 
   original.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
   restored.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
@@ -2807,6 +2826,19 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[EE_COP1_POST_TARGET_COUNT_OFFSET] = 1;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[PREPARED_EE_COP0_RANDOM_OFFSET] = 6;
+  invalid[PREPARED_EE_COP0_WIRED_OFFSET] = 7;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[PREPARED_EE_TLB_OFFSET + 1] = 0x20;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

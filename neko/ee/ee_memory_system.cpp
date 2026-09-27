@@ -19,6 +19,108 @@ namespace
     }
     return false;
   }
+
+  EETLBEntry canonicalTLBEntry(
+    std::uint32_t pageMask,
+    std::uint32_t entryHi,
+    std::uint32_t entryLo0,
+    std::uint32_t entryLo1)
+  {
+    const std::uint32_t canonicalPageMask =
+      pageMask & EECOP0PageMask::IMPLEMENTED_MASK;
+    if (!supportedPageMask(canonicalPageMask))
+    {
+      throw std::invalid_argument(
+        "EE TLB PageMask encoding is unsupported.");
+    }
+    const std::uint32_t physicalFrameIgnoredMask =
+      canonicalPageMask >> 7;
+    std::uint32_t evenPage =
+      entryLo0 &
+      EECOP0EntryLo::ENTRY_LO_0_IMPLEMENTED_MASK &
+      ~physicalFrameIgnoredMask;
+    std::uint32_t oddPage =
+      entryLo1 &
+      EECOP0EntryLo::ENTRY_LO_1_IMPLEMENTED_MASK &
+      ~physicalFrameIgnoredMask;
+    const bool global =
+      (evenPage & EECOP0EntryLo::GLOBAL) != 0 &&
+      (oddPage & EECOP0EntryLo::GLOBAL) != 0;
+    evenPage &= ~EECOP0EntryLo::GLOBAL;
+    oddPage &= ~EECOP0EntryLo::GLOBAL;
+    if (global)
+    {
+      evenPage |= EECOP0EntryLo::GLOBAL;
+      oddPage |= EECOP0EntryLo::GLOBAL;
+    }
+    return {
+      canonicalPageMask,
+      entryHi &
+        EECOP0EntryHi::IMPLEMENTED_MASK &
+        ~canonicalPageMask,
+      {evenPage},
+      {oddPage}
+    };
+  }
+}
+
+bool EETLBPage::valid() const
+{
+  return (value & EECOP0EntryLo::VALID) != 0;
+}
+
+bool EETLBPage::dirty() const
+{
+  return (value & EECOP0EntryLo::DIRTY) != 0;
+}
+
+bool EETLBPage::scratchpad() const
+{
+  return (value & EECOP0EntryLo::SCRATCHPAD) != 0;
+}
+
+bool operator==(const EETLBPage &left, const EETLBPage &right)
+{
+  return left.value == right.value;
+}
+
+bool EETLBEntry::global() const
+{
+  return
+    (evenPage.value & EECOP0EntryLo::GLOBAL) != 0 &&
+    (oddPage.value & EECOP0EntryLo::GLOBAL) != 0;
+}
+
+bool EETLBEntry::matches(
+  std::uint32_t virtualAddress,
+  std::uint8_t asid) const
+{
+  const std::uint32_t virtualPageComparisonMask =
+    ~(pageMask | UINT32_C(0x1fff));
+  return
+    (virtualAddress & virtualPageComparisonMask) ==
+      (entryHi & virtualPageComparisonMask) &&
+    (global() ||
+     (entryHi & EECOP0EntryHi::ASID_MASK) == asid);
+}
+
+const EETLBPage &EETLBEntry::pageForAddress(
+  std::uint32_t virtualAddress) const
+{
+  const std::uint32_t oddPageBit =
+    (pageMask + UINT32_C(0x2000)) >> 1;
+  return (virtualAddress & oddPageBit) == 0
+    ? evenPage
+    : oddPage;
+}
+
+bool operator==(const EETLBEntry &left, const EETLBEntry &right)
+{
+  return
+    left.pageMask == right.pageMask &&
+    left.entryHi == right.entryHi &&
+    left.evenPage == right.evenPage &&
+    left.oddPage == right.oddPage;
 }
 
 void EEMemorySystem::reset()
@@ -34,6 +136,113 @@ void EEMemorySystem::reset()
   cop0Config = EECOP0Config::RESET;
   cop0TagLo = 0;
   cop0TagHi = 0;
+  tlbEntries.fill({});
+}
+
+const EETLBEntry &EEMemorySystem::tlbEntry(
+  std::size_t index) const
+{
+  if (index >= tlbEntries.size())
+  {
+    throw std::out_of_range("EE TLB entry index is out of range.");
+  }
+  return tlbEntries[index];
+}
+
+void EEMemorySystem::setTLBEntry(
+  std::size_t index,
+  const EETLBEntry &entry)
+{
+  if (index >= tlbEntries.size())
+  {
+    throw std::out_of_range("EE TLB entry index is out of range.");
+  }
+  tlbEntries[index] = canonicalTLBEntry(
+    entry.pageMask,
+    entry.entryHi,
+    entry.evenPage.value,
+    entry.oddPage.value);
+}
+
+EETLBEntry EEMemorySystem::currentTLBEntry() const
+{
+  return canonicalTLBEntry(
+    cop0PageMask,
+    cop0EntryHi,
+    cop0EntryLo0,
+    cop0EntryLo1);
+}
+
+void EEMemorySystem::readIndexedTLBEntry()
+{
+  const std::uint32_t index =
+    cop0Index & EECOP0Index::INDEX_MASK;
+  if (index >= tlbEntries.size())
+  {
+    return;
+  }
+  const EETLBEntry &entry = tlbEntries[index];
+  cop0PageMask = entry.pageMask;
+  cop0EntryHi = entry.entryHi;
+  cop0EntryLo0 = entry.evenPage.value;
+  cop0EntryLo1 = entry.oddPage.value;
+}
+
+void EEMemorySystem::writeTLBEntry(std::uint32_t index)
+{
+  if (index >= tlbEntries.size())
+  {
+    return;
+  }
+  tlbEntries[index] = currentTLBEntry();
+}
+
+void EEMemorySystem::writeIndexedTLBEntry()
+{
+  writeTLBEntry(cop0Index & EECOP0Index::INDEX_MASK);
+}
+
+void EEMemorySystem::writeRandomTLBEntry()
+{
+  writeTLBEntry(cop0Random);
+}
+
+void EEMemorySystem::probeTLB()
+{
+  const std::uint8_t asid =
+    static_cast<std::uint8_t>(
+      cop0EntryHi & EECOP0EntryHi::ASID_MASK);
+  const std::uint32_t virtualAddress =
+    cop0EntryHi & EECOP0EntryHi::VIRTUAL_PAGE_MASK;
+  for (std::size_t index = 0;
+       index < tlbEntries.size();
+       ++index)
+  {
+    if (tlbEntries[index].matches(virtualAddress, asid))
+    {
+      cop0Index = static_cast<std::uint32_t>(index);
+      return;
+    }
+  }
+  cop0Index = EECOP0Index::PROBE_FAILURE;
+}
+
+void EEMemorySystem::retireInstruction()
+{
+  if (cop0Random <= cop0Wired)
+  {
+    cop0Random = EECOP0Random::RESET;
+    return;
+  }
+  --cop0Random;
+}
+
+bool EEMemorySystem::replacementStateValid() const
+{
+  return
+    cop0Wired <= EECOP0Wired::MAXIMUM &&
+    cop0Random >= cop0Wired &&
+    cop0Random <= EECOP0Random::MAXIMUM;
 }
 
 std::uint32_t EEMemorySystem::cop0Register(

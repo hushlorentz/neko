@@ -350,6 +350,14 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::COP0RegisterMove,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::ReadIndexedTLBEntry:
+        case EEOperation::WriteIndexedTLBEntry:
+        case EEOperation::WriteRandomTLBEntry:
+        case EEOperation::ProbeTLB:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP0TLBOperation,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::MoveWordFromCOP1:
         case EEOperation::MoveWordToCOP1:
         case EEOperation::MoveControlWordFromCOP1:
@@ -1613,7 +1621,7 @@ TEST_CASE("EE ERET instruction decoding")
     decodeEEInstruction(UINT32_C(0x42000058)),
     "Reserved EE instruction encoding.");
   REQUIRE_THROWS_WITH(
-    decodeEEInstruction(UINT32_C(0x42000001)),
+    decodeEEInstruction(UINT32_C(0x42000038)),
     "Unsupported EE instruction encoding.");
   REQUIRE_THROWS_WITH(
     decodeEEInstruction(UINT32_C(0x40000001)),

@@ -230,6 +230,17 @@ void NekoSaveStateCodec::writeEECore(
     writer->writeU32(
       core.memorySystem.cop0Register(registerIndex));
   }
+  for (std::size_t index = 0;
+       index < EEMemorySystem::TLB_ENTRY_COUNT;
+       ++index)
+  {
+    const EETLBEntry &entry =
+      core.memorySystem.tlbEntry(index);
+    writer->writeU32(entry.pageMask);
+    writer->writeU32(entry.entryHi);
+    writer->writeU32(entry.evenPage.value);
+    writer->writeU32(entry.oddPage.value);
+  }
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1063,6 +1074,28 @@ void NekoSaveStateCodec::readEECore(
       core->memorySystem.setCOP0Register(
         registerIndex,
         reader->readU32());
+    }
+    catch (const std::invalid_argument &error)
+    {
+      throw std::runtime_error(error.what());
+    }
+  }
+  require(
+    core->memorySystem.replacementStateValid(),
+    "EE TLB Random/Wired replacement state is invalid");
+  for (std::size_t index = 0;
+       index < EEMemorySystem::TLB_ENTRY_COUNT;
+       ++index)
+  {
+    const EETLBEntry entry = {
+      reader->readU32(),
+      reader->readU32(),
+      {reader->readU32()},
+      {reader->readU32()}
+    };
+    try
+    {
+      core->memorySystem.setTLBEntry(index, entry);
     }
     catch (const std::invalid_argument &error)
     {

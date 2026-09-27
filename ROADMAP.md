@@ -1665,7 +1665,7 @@ creating parallel ownership.
       including low-word transfer/sign-extension behavior, COP0 usability,
       documented update ordering, register-specific masks, and register-zero
       behavior.
-- [ ] Implement `TLBR`, `TLBWI`, `TLBWR`, and `TLBP` against one typed
+- [x] Implement `TLBR`, `TLBWI`, `TLBWR`, and `TLBP` against one typed
       48-entry TLB store, including `Index` probe-failure state, `Random` and
       `Wired` interaction, global mappings, ASIDs, supported page masks,
       even/odd page selection, scratchpad selection, and deterministic handling

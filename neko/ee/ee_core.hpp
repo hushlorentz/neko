@@ -369,6 +369,10 @@ class EECore final : public ClockedComponent
     void setCOP0Register(
       EECOP0Register registerIndex,
       std::uint32_t value);
+    const EETLBEntry &tlbEntry(std::size_t index) const;
+    void setTLBEntry(
+      std::size_t index,
+      const EETLBEntry &entry);
 
     bool exceptionPending() const;
     EEException pendingException() const;
@@ -1329,6 +1333,9 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction,
       std::uint32_t address);
     EEInstructionExecutionOutcome executeCOP0RegisterMove(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP0TLBOperation(
       const EEInstruction &instruction,
       std::uint32_t address);
     EEInstructionExecutionOutcome executeCOP1Divider(
