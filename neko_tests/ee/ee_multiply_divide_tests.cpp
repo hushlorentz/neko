@@ -1214,7 +1214,7 @@ TEST_CASE("EE packed word MAC lifecycle is explicit")
   }
 }
 
-TEST_CASE("EE packed MAC continuation survives save-state restore")
+TEST_CASE("EE overlapping packed MAC continuations survive save-state restore")
 {
   NekoSystem original;
   EECore &originalCore = original.eeCore();
@@ -1229,7 +1229,13 @@ TEST_CASE("EE packed MAC continuation survives save-state restore")
     4,
     mmiInstruction(0x09, 5, 6, 4, 0x00));
   originalCore.startExecution(0);
-  original.runMasterCycles(3);
+
+  original.clockMasterCycle();
+  REQUIRE(originalCore.programCounter() == 4);
+  original.clockMasterCycle();
+  REQUIRE(originalCore.programCounter() == 4);
+  original.clockMasterCycle();
+  REQUIRE(originalCore.programCounter() == 8);
   REQUIRE(originalCore.generalRegister(3) == EERegister128{});
   REQUIRE(originalCore.generalRegister(4) == EERegister128{});
 
@@ -1240,12 +1246,16 @@ TEST_CASE("EE packed MAC continuation survives save-state restore")
   REQUIRE(repeatedSaveMatches);
 
   NekoSystem restored;
+  restored.eeCore().setGeneralRegister(
+    31,
+    {UINT64_MAX, UINT64_MAX});
   restored.loadState(state);
   const std::vector<std::uint8_t> restoredState =
     restored.saveState();
   const bool restoredSaveMatches =
     restoredState == state;
   REQUIRE(restoredSaveMatches);
+  REQUIRE(restored.saveState() == restoredState);
   REQUIRE(
     restored.eeCore().stateHash() ==
     originalCore.stateHash());
@@ -1260,6 +1270,14 @@ TEST_CASE("EE packed MAC continuation survives save-state restore")
   REQUIRE(originalCore.generalRegister(4) == EERegister128{10, 17});
   REQUIRE(originalCore.lo() == 10);
   REQUIRE(originalCore.lo1() == 17);
+  REQUIRE(
+    restored.eeCore().generalRegister(3) ==
+    EERegister128{8, 15});
+  REQUIRE(
+    restored.eeCore().generalRegister(4) ==
+    EERegister128{10, 17});
+  REQUIRE(restored.eeCore().lo() == 10);
+  REQUIRE(restored.eeCore().lo1() == 17);
 }
 
 TEST_CASE("EE packed halfword MAC continuation survives save-state restore")
@@ -1853,17 +1871,30 @@ TEST_CASE("EE packed divide continuation survives save-state restore")
   original.eeBus().write32(
     0,
     mmiInstruction(0x09, 1, 2, 0, 0x0d));
+  original.eeBus().write32(
+    4,
+    mmiInstruction(0x09, 0, 0, 7, 0x09));
   core.startExecution(0);
   original.runMasterCycles(3);
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(7) == EERegister128{});
 
   const std::vector<std::uint8_t> state =
     original.saveState();
   REQUIRE(original.saveState() == state);
 
   NekoSystem restored;
+  restored.eeCore().setGeneralRegister(
+    31,
+    {UINT64_MAX, UINT64_MAX});
   restored.loadState(state);
-  REQUIRE(restored.saveState() == state);
-  REQUIRE(restored.eeCore().stateHash() == core.stateHash());
+  const std::vector<std::uint8_t> restoredState =
+    restored.saveState();
+  REQUIRE(restoredState == state);
+  REQUIRE(restored.saveState() == restoredState);
+  EECore &restoredCore = restored.eeCore();
+  REQUIRE(restoredCore.stateHash() == core.stateHash());
 
   original.runMasterCycles(35);
   restored.runMasterCycles(35);
@@ -1873,6 +1904,22 @@ TEST_CASE("EE packed divide continuation survives save-state restore")
   REQUIRE(core.lo() == UINT64_C(0xfffffffffffffffe));
   REQUIRE(core.hi1() == 1);
   REQUIRE(core.lo1() == 2);
+  REQUIRE(
+    core.generalRegister(7) ==
+    EERegister128{
+      UINT64_C(0xfffffffffffffffe),
+      UINT64_C(2)});
+  REQUIRE(restoredCore.hi() == UINT64_MAX);
+  REQUIRE(
+    restoredCore.lo() ==
+    UINT64_C(0xfffffffffffffffe));
+  REQUIRE(restoredCore.hi1() == 1);
+  REQUIRE(restoredCore.lo1() == 2);
+  REQUIRE(
+    restoredCore.generalRegister(7) ==
+    EERegister128{
+      UINT64_C(0xfffffffffffffffe),
+      UINT64_C(2)});
 }
 
 TEST_CASE("EE packed divide undefined inputs stop atomically")

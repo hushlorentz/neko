@@ -1547,7 +1547,7 @@ continuation state before a live consumer exists.
       asynchronous completion
 - [x] Assert guest registers, full-width HI/LO and SA state, memory outputs,
       instruction counts, stop reasons, deterministic traces, and state hashes
-- [ ] Round-trip save states with two overlapping packed MAC operations and
+- [x] Round-trip save states with two overlapping packed MAC operations and
       with a packed divide in flight; verify byte-identical consecutive saves
       after reconciliation
 - [ ] Audit all 91 MMI semantic operations for decode, operands, lane order,
