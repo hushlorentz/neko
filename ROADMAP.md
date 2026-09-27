@@ -1559,7 +1559,7 @@ continuation state before a live consumer exists.
 - [x] Run the complete optimized repository check and compare representative
       trace, state, guest-output, and save-state hashes with the pre-MMI
       baseline
-- [ ] Complete an independent final review of the full MMI milestone and
+- [x] Complete an independent final review of the full MMI milestone and
       resolve every concrete finding
 - [ ] Reconcile `PROJECT.md`, run the complete optimized AddressSanitizer
       check, and run the macOS leak check before closing the milestone
