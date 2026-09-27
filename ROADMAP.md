@@ -1577,39 +1577,218 @@ timing and arbitration policy. Extend the existing COP0, exception, EE bus,
 trace, state-hash, and transactional persistence boundaries rather than
 creating parallel ownership.
 
-- [ ] Audit the local SCEI manuals and expand this milestone into independently
-      reviewable blocks and items before implementation. Inventory the required
-      COP0 state and instructions, segment and page rules, ITLB/DTLB behavior,
-      exception priority and vectors, scratchpad mapping, cache organization
-      and operations, dependency and issue effects, persistence and trace
-      surfaces, guest fixtures, unresolved evidence, and final validation.
-      Define the state owner, focused method boundaries, dependency direction,
-      derived-versus-serialized lookup state, performance-sensitive paths, and
-      the boundary between functional behavior and replaceable contention
-      timing.
-- [ ] Implement the required COP0 translation state and complete TLB-management
-      instruction behavior with exhaustive encoding and reserved-field
-      validation.
-- [ ] Route EE instruction fetches and data accesses through one functional
-      segment and TLB translation authority, including ASIDs, global mappings,
-      supported page sizes, even/odd pages, and access permissions.
-- [ ] Implement precise refill, invalid, modified, address, and bus exception
-      behavior with correct COP0 side effects, vectors, branch-delay ownership,
-      two-wide issue boundaries, and cancellation of younger work.
-- [ ] Add EE scratchpad storage and mapping with explicit CPU, DMA, aliasing,
-      hashing, reset, and persistence contracts derived from the manuals.
-- [ ] Implement the documented guest-visible instruction-cache and data-cache
-      organization and maintenance behavior while isolating uncertain refill,
-      contention, and arbitration timing behind replaceable policy.
-- [ ] Extend structured traces, canonical state hashes, transactional save
-      states, malformed-state rejection, and deterministic halt/resume,
-      restart, interrupt, and exception continuation across the memory system.
-- [ ] Add independently authored semantic and integration guests covering
-      translation, page sizes, ASIDs, permissions, TLB management, exceptions,
-      scratchpad access, cache maintenance, aliases, and self-modifying code.
-- [ ] Complete exhaustive conformance, optimized and sanitizer validation,
-      macOS leak checking, and independent final review, then use a bounded
-      BIOS-startup experiment to identify the next concrete system dependency.
+### Evidence and Architecture Plan
+
+- [x] Audit the local SCEI manuals and expand this milestone into independently
+      reviewable blocks and items before implementation. The primary evidence
+      is the EE Core User's Manual version 3.1 pages 23-25, 42-44, and 54-65;
+      the EE Core Instruction Set Manual version 3.1 instruction definitions,
+      exception lists, and encoding tables through page 379; and the EE Kernel
+      Overview and Reference release 2.7 memory-map, cache-coherency,
+      `ExpandScratchPad`, and cache-maintenance descriptions.
+- [ ] Resolve the remaining manual-evidence gates before implementing the
+      affected behavior: exact bitfields, writable masks, and reset values for
+      `Index`, `Random`, `EntryLo0`, `EntryLo1`, `Context`, `PageMask`,
+      `Wired`, `EntryHi`, `Status`, `Cause`, `Config`, `TagLo`, and `TagHi`,
+      including the mode, exception/error-level, bootstrap-vector, COP0
+      usability, and exception-reporting fields needed by this milestone;
+      complete virtual segment privilege and cache-attribute tables; TLB
+      probe/write duplicate and replacement rules; refill/invalid/modified
+      exception priority, vectors, and register side effects; and the complete
+      `CACHE` operation encoding and corner-case matrix. Search all local SCEI
+      manuals first and pause for approval before consulting secondary sources.
+- [ ] Establish one CPU-side EE memory-system owner between `EECore` and
+      `EEBus`. It owns translation-related COP0 state, 48 even/odd TLB entry
+      pairs, derived ITLB/DTLB lookup state, instruction and data caches,
+      scratchpad RAM, and any functional memory continuations. `EECore` owns
+      instruction issue and precise exception entry; `EEBus` remains the
+      physical-address interconnect and device/main-memory owner.
+- [ ] Define typed fetch, load, store, prefetch, and cache-maintenance requests
+      and results carrying virtual address, access kind, width, privilege,
+      translation outcome, physical address, cache attribute, and fault
+      metadata. Remove direct guest virtual-address interpretation from
+      `EEBus`; debugger, loader, and host inspection paths remain explicit
+      physical or privileged interfaces.
+- [ ] Serialize architecturally visible COP0/MMU state, all 48 TLB entries,
+      scratchpad bytes, cache data/tag/state/LRF/lock bits, and any in-flight
+      operation whose completion can change later architectural behavior.
+      Rebuild pure ITLB/DTLB lookup accelerators from the architectural TLB
+      after reset or load only while their residency and replacement state
+      cannot affect guest behavior, timing, traces, or hashes; otherwise treat
+      that state as a deterministic persistence surface.
+- [ ] Keep translation lookup, cache hit paths, and aligned memory access
+      allocation-free. Isolate refill duration, writeback scheduling, CPU/DMA
+      scratchpad arbitration, non-blocking-load timing, hit-under-miss timing,
+      and system-bus contention behind replaceable policy; do not label an
+      emulator scheduling choice as measured hardware timing.
+
+### COP0 and TLB Management
+
+- [ ] Add the required translation and cache-control COP0 registers with
+      manual-backed reset values, fixed bits, writable masks, checked accessors,
+      canonical hashing, and direct state tests.
+- [ ] Add `MFC0` and `MTC0` through a focused COP0 register-transfer family,
+      including low-word transfer/sign-extension behavior, COP0 usability,
+      documented update ordering, register-specific masks, and register-zero
+      behavior.
+- [ ] Implement `TLBR`, `TLBWI`, `TLBWR`, and `TLBP` against one typed
+      48-entry TLB store, including `Index` probe-failure state, `Random` and
+      `Wired` interaction, global mappings, ASIDs, supported page masks,
+      even/odd page selection, scratchpad selection, and deterministic handling
+      of manual-defined undefined cases.
+- [ ] Add complete primary/COP0/C0 encoding coverage for the new operations,
+      every required-zero field, reserved table cells, and every remaining
+      manual-listed COP0 operation without weakening the existing `ERET`
+      boundary. Explicitly schedule or defer breakpoint/performance operations
+      and `BC0F`, `BC0FL`, `BC0T`, `BC0TL`, `EI`, and `DI`; do not conflate a
+      valid unsupported operation with a reserved encoding.
+- [ ] Cover COP0/TLB instruction issue categories, pairing restrictions,
+      branch-delay legality, `SYNC.P` visibility, exception cancellation, reset,
+      repeated execution, traces, and deterministic state hashes.
+- [ ] Complete an independent review of the COP0 and TLB-management block.
+
+### Functional Address Translation
+
+- [ ] Implement one segment classifier for User, Supervisor, Kernel, and
+      exception-level accesses, including mapped and direct segments, segment
+      protection, cache attributes, 32-bit virtual/physical address behavior,
+      and the existing KSEG aliases.
+- [ ] Implement full-associative architectural TLB matching for all 48
+      even/odd pairs, ASID/global selection, all seven documented page sizes,
+      valid/dirty permissions, physical frame construction, and scratchpad
+      selection.
+- [ ] Add two-entry ITLB and four-entry DTLB lookup accelerators with
+      deterministic refill/replacement behavior once the local evidence gate is
+      resolved. Treat them as derived acceleration state only while their exact
+      contents cannot affect behavior, timing, traces, or hashes; do not expose
+      accelerator hit/miss state diagnostically without also preserving its
+      deterministic continuation.
+- [ ] Route both front-end instruction candidates and every byte, halfword,
+      word, doubleword, quadword, COP1, and COP2 data access through the shared
+      translation authority while preserving alignment checks and merge-load
+      semantics at their existing owners.
+- [ ] Cover segment boundaries, privilege modes, ASIDs, global entries,
+      page-size boundaries, even/odd selection, aliases, permissions, lookup
+      replacement, and instruction/data path consistency.
+- [ ] Complete an independent review of functional translation.
+
+### Precise Memory Exceptions
+
+- [ ] Add TLB modified, load/fetch refill or invalid, and store refill or
+      invalid exception types and codes, and distinguish refill from invalid
+      internally even where the architectural exception code is shared.
+- [ ] Update `BadVAddr`, `Context`, and `EntryHi` exactly as required for each
+      translation fault, select refill/general/bootstrap vectors correctly, and
+      preserve nested exception-level behavior.
+- [ ] Keep translation and cache lookup side-effect free until program-order
+      fault selection. Have `EECore` commit all exception-visible COP0 updates
+      atomically through one focused memory-system method so speculative or
+      younger faults cannot mutate architectural state.
+- [ ] Define and test exception priority among alignment, segment protection,
+      translation, cache, and physical bus failures for every access width and
+      direction.
+- [ ] Integrate fetch and data faults with the existing two-wide issue model:
+      the older fault prevents younger acceptance, a younger fault preserves
+      older completion, branch-delay ownership remains exact, and all younger
+      delayed work is cancelled without discarding older work.
+- [ ] Cover faults from ordinary integer, merge, COP1, and COP2 memory
+      operations, interrupt boundaries, `ERET`, host halt/resume, and external
+      PC redirection.
+- [ ] Complete an independent review of precise memory exceptions.
+
+### Scratchpad RAM and DMA Visibility
+
+- [ ] Add 16 KiB of 128-bit-organized scratchpad storage with 16 KiB mapped
+      pages selected by the TLB scratchpad bit and addressed by virtual bits
+      `13:0`.
+- [ ] Route CPU scratchpad loads and stores through the same typed memory
+      requests as cached data accesses while keeping scratchpad uncached and
+      untagged.
+- [ ] Add explicit physical scratchpad access for the DMAC, including
+      toSPR/fromSPR address handling, shared visibility, bounds, alignment, and
+      deterministic CPU/DMA arbitration separated from functional correctness.
+- [ ] Implement guest-visible DMAC channels 8 (`fromSPR`) and 9 (`toSPR`) with
+      their mapped `CHCR`, `MADR`, `QWC`, `SADR`, and channel-specific `TADR`
+      surfaces, supported normal/interleave transfer modes, completion and
+      interrupt state, and integration with the existing DMAC controller.
+      Isolate exact burst, cycle-steal, and bus-priority timing behind the
+      replaceable arbitration policy.
+- [ ] Cover CPU and DMA aliases, read/write widths, overlapping access,
+      reset, hashing, save/restore, malformed states, and the documented lack
+      of automatic cache or scratchpad snooping.
+- [ ] Complete an independent review of scratchpad and DMA integration.
+
+### Guest-Visible Cache Foundation
+
+- [ ] Add the 16 KiB two-way instruction cache and 8 KiB two-way data cache
+      with 64-byte lines, virtual indices, physical tags, documented tag state,
+      and reset-invalid behavior.
+- [ ] Implement cached instruction fetch, data read/write allocation,
+      write-back, dirty eviction, missed-quadword-first sequential refill,
+      instruction-cache restart after full refill, and data-cache early restart
+      as functional operations independent of unresolved bus timing.
+- [ ] Implement the documented LRF replacement algorithm, invalid-way
+      preference, data-cache line locking, and deterministic policy for
+      manual-defined undefined locking cases.
+- [ ] Add `CACHE`, `PREF`, `Config`, `TagLo`, and `TagHi` behavior after their
+      evidence gates are resolved, including every supported cache operation,
+      no-op/ignored prefetch faults, cache enable controls, tag/data access, and
+      exhaustive encoding validation.
+- [ ] Preserve uncached and uncached-accelerated attributes functionally,
+      ordering accesses through the existing `SYNC`/`SYNC.L` boundary while
+      deferring UCAB throughput and exact bus timing to replaceable policy.
+- [ ] Cover physical aliases, instruction/data incoherence, self-modifying
+      code, writeback/invalidate behavior, DMA coherency workflows, locking,
+      replacement, refill order, cache-disabled operation, and cache-line
+      boundary cases.
+- [ ] Complete an independent review of guest-visible cache behavior.
+
+### Determinism, Persistence, and Diagnostics
+
+- [ ] Extend memory traces to retain the virtual address and report translated
+      physical address, access kind, cache attribute, cache hit/miss or
+      scratchpad route, and precise translation/bus failure without losing the
+      existing instruction-level memory event contract. Keep pure ITLB/DTLB
+      accelerator residency out of the trace unless it becomes a preserved
+      deterministic surface.
+- [ ] Include all architectural memory-system state in canonical hashes and
+      versioned transactional save states. Reject malformed TLB page masks,
+      impossible cache tag/state combinations, invalid replacement/lock state,
+      inconsistent in-flight operations, and payload-size mismatches before
+      committing any state.
+- [ ] Prove byte-identical consecutive saves, save/load into a dirty
+      destination, deterministic trace/state hashes, and identical completion
+      across TLB faults, cache refills/writebacks, scratchpad accesses,
+      interrupts, host halts, and execution restarts.
+- [ ] Add focused diagnostic assertions or trace events only where translation,
+      cache, or arbitration failures would otherwise be materially ambiguous;
+      keep ship hot paths allocation-free and avoid broad per-access logging.
+- [ ] Complete an independent review of deterministic observation and
+      persistence.
+
+### Guest Conformance and Milestone Closure
+
+- [ ] Add independently authored PS2DEV guests for COP0/TLB management,
+      mapped translation across every page size, ASID/global behavior,
+      permissions and precise exceptions, scratchpad CPU/DMA visibility, cache
+      maintenance, aliases, and self-modifying code.
+- [ ] Pin guest result blocks, architectural registers, memory/cache outcomes,
+      exception metadata, instruction/cycle totals where documented,
+      deterministic trace/state hashes, fixture provenance, and generated ELF
+      hashes without making PS2DEV a normal build dependency.
+- [ ] Add exhaustive host-side conformance matrices for segment boundaries,
+      all TLB entries and supported masks, every cache set/way/state transition,
+      malformed save states, reset/restart behavior, and unchanged direct-mapped
+      guest behavior.
+- [ ] Run the complete optimized repository check and compare representative
+      pre-milestone guest output, trace shape, state hashes, and save-state
+      changes with an explicit explanation for every intentional difference.
+- [ ] Complete an independent final review of the full memory-system milestone,
+      resolve every concrete finding, run the optimized AddressSanitizer and
+      native macOS leak checks, reconcile `PROJECT.md`, and close the milestone.
+- [ ] Run a bounded BIOS-startup experiment only after conformance closure and
+      use the first unsupported architectural dependency to plan the next
+      milestone without folding speculative BIOS work into this one.
 
 ## Milestone 8: IOP Execution and Platform Foundation
 
