@@ -3132,13 +3132,15 @@ TEST_CASE("EE nested MMI tables classify every encoding")
 
   for (const NestedTableContract &contract : contracts)
   {
+    REQUIRE(
+      (contract.reservedMask & contract.enabledMask) == 0);
+    REQUIRE(
+      (contract.reservedMask | contract.enabledMask) ==
+      UINT32_MAX);
     for (std::uint8_t nestedFunction = 0;
          nestedFunction < 32;
          ++nestedFunction)
     {
-      const bool reserved =
-        (contract.reservedMask &
-         (UINT32_C(1) << nestedFunction)) != 0;
       const std::uint32_t instruction =
         UINT32_C(0x70000000) |
         registerInstruction(
@@ -3155,9 +3157,7 @@ TEST_CASE("EE nested MMI tables classify every encoding")
       }
       requireDecodeFailure(
         instruction,
-        reserved
-          ? EEInstructionDecodeFailure::Reserved
-          : EEInstructionDecodeFailure::Unsupported);
+        EEInstructionDecodeFailure::Reserved);
     }
   }
 }
@@ -3189,147 +3189,155 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
         REQUIRE(error.failure() == expected);
       }
     };
+  const auto requireFixedBitsReserved =
+    [&requireDecodeFailure](
+      std::uint32_t instruction,
+      std::uint32_t requiredZeroMask)
+    {
+      for (std::uint8_t bit = 0; bit < 32; ++bit)
+      {
+        const std::uint32_t mask =
+          UINT32_C(1) << bit;
+        if ((requiredZeroMask & mask) != 0)
+        {
+          requireDecodeFailure(
+            instruction | mask,
+            EEInstructionDecodeFailure::Reserved);
+        }
+      }
+      requireDecodeFailure(
+        instruction | requiredZeroMask,
+        EEInstructionDecodeFailure::Reserved);
+    };
   struct FixedFieldContract
   {
     std::uint32_t instruction;
     std::uint32_t requiredZeroMask;
-    bool enabled = false;
   };
   const FixedFieldContract contracts[] = {
     {UINT32_C(0x70000000) |
+       registerInstruction(0x00, 1, 2, 3, 0),
+     shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x01, 1, 2, 3, 0),
+     shiftMask},
+    {UINT32_C(0x70000000) |
        registerInstruction(0x04, 1, 0, 3, 0),
-     targetMask | shiftMask,
-     true},
+     targetMask | shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x10, 0, 0, 3, 0),
+     sourceMask | targetMask | shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x11, 1, 0, 0, 0),
+     targetMask | destinationMask | shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x12, 0, 0, 3, 0),
+     sourceMask | targetMask | shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x13, 1, 0, 0, 0),
+     targetMask | destinationMask | shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x18, 1, 2, 3, 0),
+     shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x19, 1, 2, 3, 0),
+     shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x1a, 1, 2, 0, 0),
+     destinationMask | shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x1b, 1, 2, 0, 0),
+     destinationMask | shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x20, 1, 2, 3, 0),
+     shiftMask},
+    {UINT32_C(0x70000000) |
+       registerInstruction(0x21, 1, 2, 3, 0),
+     shiftMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x31, 1, 0, 0, 0),
-     targetMask | destinationMask | shiftMask,
-     true},
+     targetMask | destinationMask | shiftMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x34, 0, 2, 3, 7),
-     sourceMask | shiftHighMask,
-     true},
+     sourceMask | shiftHighMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x36, 0, 2, 3, 7),
-     sourceMask | shiftHighMask,
-     true},
+     sourceMask | shiftHighMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x37, 0, 2, 3, 7),
-     sourceMask | shiftHighMask,
-     true},
+     sourceMask | shiftHighMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x3c, 0, 2, 3, 7),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x3e, 0, 2, 3, 7),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x3f, 0, 2, 3, 7),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x28, 0, 2, 3, 0x01),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x28, 0, 2, 3, 0x05),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 0, 2, 3, 0x1b),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 0, 2, 3, 0x1a),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 0, 2, 3, 0x1e),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 2, 3, 0x1a),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 2, 3, 0x1e),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x08, 0, 2, 3, 0x1e),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x08, 0, 2, 3, 0x1f),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 2, 3, 0x1b),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 2, 3, 0x1f),
-     sourceMask,
-     true},
+     sourceMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 0, 3, 0x08),
-     sourceMask | targetMask,
-     true},
+     sourceMask | targetMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 0, 0, 3, 0x09),
-     sourceMask | targetMask,
-     true},
+     sourceMask | targetMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 1, 0, 0, 0x08),
-     targetMask | destinationMask,
-     true},
+     targetMask | destinationMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 1, 0, 0, 0x09),
-     targetMask | destinationMask,
-     true},
+     targetMask | destinationMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 1, 2, 0, 0x1d),
-     destinationMask,
-     true},
+     destinationMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x29, 1, 2, 0, 0x0d),
-     destinationMask,
-     true},
+     destinationMask},
     {UINT32_C(0x70000000) |
        registerInstruction(0x09, 1, 2, 0, 0x0d),
-     destinationMask,
-     true}
-  };
-  const std::uint32_t fields[] = {
-    sourceMask,
-    targetMask,
-    destinationMask,
-    shiftMask
+     destinationMask}
   };
 
   for (const FixedFieldContract &contract : contracts)
   {
-    if (contract.enabled)
-    {
-      REQUIRE_NOTHROW(
-        decodeEEInstruction(contract.instruction));
-    }
-    else
-    {
-      requireDecodeFailure(
-        contract.instruction,
-        EEInstructionDecodeFailure::Unsupported);
-    }
-    for (const std::uint32_t field : fields)
-    {
-      if ((contract.requiredZeroMask & field) != 0)
-      {
-        requireDecodeFailure(
-          contract.instruction | field,
-          EEInstructionDecodeFailure::Reserved);
-      }
-    }
+    REQUIRE_NOTHROW(
+      decodeEEInstruction(contract.instruction));
+    requireFixedBitsReserved(
+      contract.instruction,
+      contract.requiredZeroMask);
   }
 
   for (std::uint8_t format = 0; format < 32; ++format)
@@ -3340,22 +3348,15 @@ TEST_CASE("EE MMI decoder validates fixed fields and formats")
     if (format < 5)
     {
       REQUIRE_NOTHROW(decodeEEInstruction(instruction));
+      requireFixedBitsReserved(
+        instruction,
+        sourceMask | targetMask);
       continue;
     }
     requireDecodeFailure(
       instruction,
-      format < 5
-        ? EEInstructionDecodeFailure::Unsupported
-        : EEInstructionDecodeFailure::Reserved);
+      EEInstructionDecodeFailure::Reserved);
   }
-  requireDecodeFailure(
-    UINT32_C(0x70000000) |
-      registerInstruction(0x30, 1, 0, 3, 0),
-    EEInstructionDecodeFailure::Reserved);
-  requireDecodeFailure(
-    UINT32_C(0x70000000) |
-      registerInstruction(0x30, 0, 1, 3, 0),
-    EEInstructionDecodeFailure::Reserved);
 
   bool definedPrimaryFunctions[64] = {};
   for (const std::uint8_t function : {

@@ -1553,7 +1553,7 @@ continuation state before a live consumer exists.
 - [x] Audit all 91 MMI semantic operations for decode, operands, lane order,
       arithmetic edge cases, routing, dependencies, timing, exceptions,
       tracing, reset, halt/resume, hashing, and persistence coverage
-- [ ] Exhaustively reject every reserved primary MMI and nested
+- [x] Exhaustively reject every reserved primary MMI and nested
       MMI0/MMI1/MMI2/MMI3 encoding, invalid `PMFHL` format, and nonzero
       fixed-field combination
 - [ ] Run the complete optimized repository check and compare representative
