@@ -1,3 +1,5 @@
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "catch.hpp"
@@ -3406,6 +3408,130 @@ TEST_CASE("EE trapping and undefined integer operations")
       core.stopReason() ==
       EEStopReason::UndefinedOperation);
     REQUIRE(core.programCounter() == 0);
+  }
+}
+
+TEST_CASE("Every MMI semantic operation decodes and enters execution")
+{
+  constexpr std::size_t MMI_SEMANTIC_OPERATION_COUNT =
+    static_cast<std::size_t>(EEOperation::ParallelNor) -
+      static_cast<std::size_t>(EEOperation::ParallelAnd) + 1 +
+    static_cast<std::size_t>(
+      EEOperation::ParallelDivideBroadcastWord) -
+      static_cast<std::size_t>(
+        EEOperation::ParallelCompareEqualByte) + 1;
+  static_assert(
+    MMI_SEMANTIC_OPERATION_COUNT == 91,
+    "MMI semantic operation inventory changed");
+
+  const auto isMMISemanticOperation =
+    [](EEOperation operation)
+    {
+      return
+        (operation >= EEOperation::ParallelAnd &&
+         operation <= EEOperation::ParallelNor) ||
+        (operation >=
+           EEOperation::ParallelCompareEqualByte &&
+         operation <=
+           EEOperation::ParallelDivideBroadcastWord);
+    };
+  std::array<std::uint32_t, EE_OPERATION_COUNT> encodings = {};
+  std::array<bool, EE_OPERATION_COUNT> discovered = {};
+  std::size_t discoveredCount = 0;
+
+  for (int registerMask = 7; registerMask >= 0; --registerMask)
+  {
+    const std::uint8_t source =
+      (registerMask & 4) != 0 ? 1 : 0;
+    const std::uint8_t target =
+      (registerMask & 2) != 0 ? 2 : 0;
+    const std::uint8_t destination =
+      (registerMask & 1) != 0 ? 3 : 0;
+    for (std::uint8_t function = 0; function < 64; ++function)
+    {
+      for (std::uint8_t shiftAmount = 0;
+           shiftAmount < 32;
+           ++shiftAmount)
+      {
+        const std::uint32_t encoding =
+          UINT32_C(0x70000000) |
+          registerInstruction(
+            function,
+            source,
+            target,
+            destination,
+            shiftAmount);
+        try
+        {
+          const EEOperation operation =
+            decodeEEInstruction(encoding).operation;
+          if (!isMMISemanticOperation(operation))
+          {
+            continue;
+          }
+          const std::size_t index =
+            static_cast<std::size_t>(operation);
+          if (!discovered[index])
+          {
+            encodings[index] = encoding;
+            discovered[index] = true;
+            ++discoveredCount;
+          }
+        }
+        catch (const EEInstructionDecodeError &)
+        {
+        }
+      }
+    }
+  }
+
+  REQUIRE(discoveredCount == MMI_SEMANTIC_OPERATION_COUNT);
+  for (std::size_t index = 0;
+       index < EE_OPERATION_COUNT;
+       ++index)
+  {
+    const EEOperation operation =
+      static_cast<EEOperation>(index);
+    if (!isMMISemanticOperation(operation))
+    {
+      continue;
+    }
+    INFO(
+      "operation index " << index <<
+      ", encoding " << encodings[index]);
+    REQUIRE(discovered[index]);
+
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {8, 8});
+    core.setGeneralRegister(2, {2, 2});
+    system.eeBus().write32(0, encodings[index]);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.acceptanceRecordsThisCycle().size() != 0);
+    REQUIRE(core.acceptanceRecordsThisCycle()[0].address == 0);
+    REQUIRE(core.clockActive());
+    REQUIRE(core.pendingException() == EEException::None);
+
+    system.runMasterCycles(40);
+
+    REQUIRE(core.clockActive());
+    REQUIRE(core.pendingException() == EEException::None);
+    const EEExecutionDispatch dispatch =
+      eeOperationMetadata(operation).executionDispatch;
+    if (dispatch == EEExecutionDispatch::PackedMACContinuation)
+    {
+      REQUIRE(core.generalRegister(3) != EERegister128{});
+    }
+    if (dispatch == EEExecutionDispatch::PackedDivideContinuation)
+    {
+      const bool resultCommitted =
+        core.lo() != 0 ||
+        core.lo1() != 0;
+      REQUIRE(resultCommitted);
+    }
   }
 }
 

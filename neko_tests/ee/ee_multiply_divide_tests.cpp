@@ -2608,6 +2608,34 @@ TEST_CASE("EE packed divide lifecycle is explicit")
         mmiInstruction(0x09, 1, 2, 0, 0x0d));
     };
 
+  SECTION("Accepted work crosses synchronous exception entry")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedDivide(&system);
+    system.eeBus().write32(4, UINT32_C(0x0000000c));
+    for (std::uint32_t address = EEExceptionVector::GENERAL;
+         address < EEExceptionVector::GENERAL + 0xa0;
+         address += 4)
+    {
+      system.eeBus().write32(address, 0);
+    }
+    core.startExecution(0);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(core.pendingException() == EEException::SystemCall);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.lo1() == 0);
+
+    system.runMasterCycles(37);
+
+    REQUIRE(core.hi() == 1);
+    REQUIRE(core.lo() == 2);
+    REQUIRE(core.hi1() == 1);
+    REQUIRE(core.lo1() == 2);
+  }
+
   SECTION("Accepted work crosses interrupt entry")
   {
     constexpr std::uint32_t INTC_ENABLED_STATUS =
@@ -2665,6 +2693,24 @@ TEST_CASE("EE packed divide lifecycle is explicit")
     REQUIRE(core.lo() == 2);
     REQUIRE(core.hi1() == 1);
     REQUIRE(core.lo1() == 2);
+  }
+
+  SECTION("Reset discards accepted work")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    preparePackedDivide(&system);
+    core.startExecution(0);
+    system.clockMasterCycle();
+
+    core.reset();
+
+    EECore baseline;
+    REQUIRE(core.stateHash() == baseline.stateHash());
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo() == 0);
+    REQUIRE(core.hi1() == 0);
+    REQUIRE(core.lo1() == 0);
   }
 
   SECTION("Fresh execution restart discards accepted work")

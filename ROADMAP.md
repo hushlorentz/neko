@@ -1550,7 +1550,7 @@ continuation state before a live consumer exists.
 - [x] Round-trip save states with two overlapping packed MAC operations and
       with a packed divide in flight; verify byte-identical consecutive saves
       after reconciliation
-- [ ] Audit all 91 MMI semantic operations for decode, operands, lane order,
+- [x] Audit all 91 MMI semantic operations for decode, operands, lane order,
       arithmetic edge cases, routing, dependencies, timing, exceptions,
       tracing, reset, halt/resume, hashing, and persistence coverage
 - [ ] Exhaustively reject every reserved primary MMI and nested
