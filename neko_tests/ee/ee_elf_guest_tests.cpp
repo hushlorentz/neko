@@ -122,6 +122,24 @@ TEST_CASE("PS2DEV MMI semantic guests complete successfully")
   }
 }
 
+TEST_CASE("PS2DEV mixed MMI guest integrates timing and interlocks")
+{
+  NekoSystem system;
+  const EEGuestExecutionResult result =
+    system.runELF(readGuest("mmi_mixed.elf"), 4096);
+  CAPTURE(neko_frontend::formatELFRun(result));
+
+  REQUIRE(result.outcome == EEGuestOutcome::Completed);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(result.execution.instructions == 331);
+  REQUIRE(result.execution.masterCycles == 256);
+  REQUIRE(result.execution.eeCycles == 256);
+  REQUIRE_FALSE(result.execution.cycleLimitReached);
+  REQUIRE(
+    result.execution.programCounter ==
+    EEGuestRuntime::RETURN_ADDRESS);
+}
+
 TEST_CASE("PS2DEV COP1 semantic capstone integrates pipeline behavior")
 {
   NekoSystem system;

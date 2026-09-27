@@ -1542,7 +1542,7 @@ continuation state before a live consumer exists.
 - [x] Add independently authored PS2DEV semantic guests for packed arithmetic
       and comparisons, shifts and permutations, and HI/LO multiply/divide
       behavior; record fixture provenance and generated hashes
-- [ ] Add a mixed MMI guest that exercises ordinary `O` pairs, every Wide
+- [x] Add a mixed MMI guest that exercises ordinary `O` pairs, every Wide
       Operate `Y` pairing, SA ordering, scalar/packed MAC interlocks, and
       asynchronous completion
 - [ ] Assert guest registers, full-width HI/LO and SA state, memory outputs,

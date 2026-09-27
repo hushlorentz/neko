@@ -154,6 +154,10 @@ verify_ee_elf_fixture(
   mmi_hilo.elf
   da095898984d0346ea34e3bb8cf05e669e4ab8f89915f898509d3bb1c00ff5cd
 )
+verify_ee_elf_fixture(
+  mmi_mixed.elf
+  cb416b79609aa867d528b63eac3c48bfbf09a06c3e2e0d78726d46de640e1d13
+)
 
 verify_fixture(
   integer_fill.bin

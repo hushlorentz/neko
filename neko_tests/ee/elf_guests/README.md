@@ -43,6 +43,8 @@ The fixtures exercise:
   exchange, pixel-format, immediate/variable shift, and SA funnel behavior
 - `mmi_hilo.elf`: self-checking packed word and halfword multiply/accumulate,
   full-width HI/LO transfers, signed parallel divide, and broadcast divide
+- `mmi_mixed.elf`: self-checking ordinary and Wide issue pairs, SA ordering,
+  scalar/packed MAC interlocks, and asynchronous packed-divide completion
 - `rotation_vu1.elf`: guest-configured VIF1 DMA uploads a VU1 transform,
   unpacks a rotated triangle and GIF packet, starts it through `MSCAL`, and
   renders through `XGKICK` and GIF PATH1
@@ -95,6 +97,7 @@ f09d304e80cc06bef0648a2012b6fd18767c85f43db582c2079d8f02f2b96d88  vu_macro_famil
 91c851939773bb6f68d668dd601cb129ab185bf52a5c574a3e2684115621aa5d  mmi_arithmetic.elf
 0e5d197364a3306ecb06a0498da4ba3ec3c6afd4fcd4e7be30512c7bfc77eb49  mmi_permutations.elf
 da095898984d0346ea34e3bb8cf05e669e4ab8f89915f898509d3bb1c00ff5cd  mmi_hilo.elf
+cb416b79609aa867d528b63eac3c48bfbf09a06c3e2e0d78726d46de640e1d13  mmi_mixed.elf
 15a69f9505959eb2be7c52f38a525465ac26ce3d55b353e8a23eda6d91478adf  rotation_vu1.elf
 40ceb21e5e43c654098b08ea7c81e74a287048a8272cbbd8abb0d3c4eb61a403  point_sprite.elf
 ```
