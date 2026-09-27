@@ -1586,37 +1586,71 @@ creating parallel ownership.
       exception lists, and encoding tables through page 379; and the EE Kernel
       Overview and Reference release 2.7 memory-map, cache-coherency,
       `ExpandScratchPad`, and cache-maintenance descriptions.
-- [ ] Resolve the remaining manual-evidence gates before implementing the
-      affected behavior: exact bitfields, writable masks, and reset values for
-      `Index`, `Random`, `EntryLo0`, `EntryLo1`, `Context`, `PageMask`,
-      `Wired`, `EntryHi`, `Status`, `Cause`, `Config`, `TagLo`, and `TagHi`,
-      including the mode, exception/error-level, bootstrap-vector, COP0
-      usability, and exception-reporting fields needed by this milestone;
-      complete virtual segment privilege and cache-attribute tables; TLB
-      probe/write duplicate and replacement rules; refill/invalid/modified
-      exception priority, vectors, and register side effects; and the complete
-      `CACHE` operation encoding and corner-case matrix. Search all local SCEI
-      manuals first and pause for approval before consulting secondary sources.
-- [ ] Establish one CPU-side EE memory-system owner between `EECore` and
-      `EEBus`. It owns translation-related COP0 state, 48 even/odd TLB entry
+- [x] Resolve the TLB-entry field layout and supported page-mask encodings:
+      `Index.P`, the 48-entry index width, `EntryLo0/1` G/V/D/C/PFN fields,
+      `EntryLo0.S`, `EntryHi` VPN2/ASID, and the seven page sizes from 4 KiB
+      through 16 MiB. The local SCEI manuals remain primary; the approved Sony
+      PS2 Linux sources and local reference implementations corroborate the
+      fields that the manuals name but do not diagram.
+- [x] Resolve the cache-array `CACHE` operation encodings, including I-cache
+      index load/store tag/data, index/hit invalidation and fill, and D-cache
+      index load/store tag/data, writeback/invalidation, and hit operations.
+      Preserve other encodings as unsupported until their behavior is
+      resolved. The local cache manual defines the behavior and indexing
+      rules; approved PS2 system software and emulator sources corroborate the
+      operation numbers.
+- [x] Classify writable masks and reset values for `Index`, `Random`,
+      `EntryLo0`, `EntryLo1`, `Context`, `PageMask`, `Wired`, `EntryHi`,
+      `Status`, `Cause`, `Config`, `TagLo`, and `TagHi`, including the mode,
+      exception/error-level, bootstrap-vector, COP0-usability, interrupt, and
+      exception-reporting fields required by this milestone. Use exact
+      manual- or system-software-backed values where available and record
+      deterministic conservative policies for architecturally undefined or
+      undocumented fields rather than presenting emulator behavior as
+      hardware fact.
+- [x] Complete the virtual-segment privilege and cache-attribute table,
+      including User, Supervisor, and Kernel access, direct-mapped KSEG
+      behavior, TLB-selected cached/uncached/uncached-accelerated attributes,
+      and segment-protection faults.
+- [x] Classify TLB probe/write duplicate-match behavior, `Random`/`Wired`
+      sequencing and replacement, invalid index behavior, and the exact
+      architecturally visible relationship between the 48-entry TLB and the
+      two-entry ITLB/four-entry DTLB accelerators. Duplicate matches and exact
+      `Random` clocking remain undocumented, so use the deterministic policies
+      recorded in `PROJECT.md`.
+- [x] Resolve refill/invalid/modified exception priority, vector selection,
+      nested-EXL behavior, and atomic `BadVAddr`, `Context`, `EntryHi`,
+      `Cause`, `EPC`, and `Status` side effects for instruction and data
+      accesses.
+- [x] Classify the remaining `CACHE` corner cases: hit-status reporting,
+      `TagLo`/`TagHi` transfer details, invalid/dirty/locked-line effects,
+      required `SYNC` ordering, branch-predictor maintenance encodings, and
+      behavior for invalid addresses or reserved cache attributes. Preserve
+      undocumented branch-predictor, `TagHi`, and reserved-attribute behavior
+      as explicit unsupported/provisional boundaries.
+- [x] Establish one CPU-side EE memory-system owner between `EECore` and
+      `EEBus`. It owns `Index`, `Random`, `EntryLo0/1`, `Context`, `PageMask`,
+      `Wired`, `EntryHi`, `Config`, `TagLo`, `TagHi`, 48 even/odd TLB entry
       pairs, derived ITLB/DTLB lookup state, instruction and data caches,
       scratchpad RAM, and any functional memory continuations. `EECore` owns
-      instruction issue and precise exception entry; `EEBus` remains the
-      physical-address interconnect and device/main-memory owner.
-- [ ] Define typed fetch, load, store, prefetch, and cache-maintenance requests
+      `BadVAddr`, Count/Compare, Status, Cause, EPC/ErrorEPC, instruction issue,
+      and precise exception entry; `EEBus` remains the physical-address
+      interconnect and device/main-memory owner.
+- [x] Define typed fetch, load, store, prefetch, and cache-maintenance requests
       and results carrying virtual address, access kind, width, privilege,
       translation outcome, physical address, cache attribute, and fault
       metadata. Remove direct guest virtual-address interpretation from
       `EEBus`; debugger, loader, and host inspection paths remain explicit
       physical or privileged interfaces.
-- [ ] Serialize architecturally visible COP0/MMU state, all 48 TLB entries,
+- [x] Define persistence for architecturally visible COP0/MMU state and all 48
+      architectural TLB entries,
       scratchpad bytes, cache data/tag/state/LRF/lock bits, and any in-flight
       operation whose completion can change later architectural behavior.
       Rebuild pure ITLB/DTLB lookup accelerators from the architectural TLB
       after reset or load only while their residency and replacement state
       cannot affect guest behavior, timing, traces, or hashes; otherwise treat
       that state as a deterministic persistence surface.
-- [ ] Keep translation lookup, cache hit paths, and aligned memory access
+- [x] Require translation lookup, cache hit paths, and aligned memory access
       allocation-free. Isolate refill duration, writeback scheduling, CPU/DMA
       scratchpad arbitration, non-blocking-load timing, hit-under-miss timing,
       and system-bus contention behind replaceable policy; do not label an
@@ -1658,11 +1692,10 @@ creating parallel ownership.
       valid/dirty permissions, physical frame construction, and scratchpad
       selection.
 - [ ] Add two-entry ITLB and four-entry DTLB lookup accelerators with
-      deterministic refill/replacement behavior once the local evidence gate is
-      resolved. Treat them as derived acceleration state only while their exact
-      contents cannot affect behavior, timing, traces, or hashes; do not expose
-      accelerator hit/miss state diagnostically without also preserving its
-      deterministic continuation.
+      deterministic derived-cache behavior. Treat them as derived acceleration
+      state only while their exact contents cannot affect behavior, timing,
+      traces, or hashes; do not expose accelerator hit/miss state diagnostically
+      without also preserving its deterministic continuation.
 - [ ] Route both front-end instruction candidates and every byte, halfword,
       word, doubleword, quadword, COP1, and COP2 data access through the shared
       translation authority while preserving alignment checks and merge-load
@@ -1678,12 +1711,13 @@ creating parallel ownership.
       invalid exception types and codes, and distinguish refill from invalid
       internally even where the architectural exception code is shared.
 - [ ] Update `BadVAddr`, `Context`, and `EntryHi` exactly as required for each
-      translation fault, select refill/general/bootstrap vectors correctly, and
-      preserve nested exception-level behavior.
+      translation fault by implementing the researched refill/general/bootstrap
+      vector and nested exception-level contract.
 - [ ] Keep translation and cache lookup side-effect free until program-order
-      fault selection. Have `EECore` commit all exception-visible COP0 updates
-      atomically through one focused memory-system method so speculative or
-      younger faults cannot mutate architectural state.
+      fault selection. Have `EECore::enterException()` commit its
+      exception-owned fields and invoke one focused memory-system method for
+      `Context` and `EntryHi` within the same atomic transaction, so
+      speculative or younger faults cannot mutate architectural state.
 - [ ] Define and test exception priority among alignment, segment protection,
       translation, cache, and physical bus failures for every access width and
       direction.
