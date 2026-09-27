@@ -14,6 +14,9 @@ class EEMemorySystem final
     void setCOP0Register(
       EECOP0Register registerIndex,
       std::uint32_t value);
+    EECOP0WriteResult writeCOP0Register(
+      EECOP0Register registerIndex,
+      std::uint32_t value);
 
   private:
     std::uint32_t cop0Index = 0;

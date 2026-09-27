@@ -1661,7 +1661,7 @@ creating parallel ownership.
 - [x] Add the required translation and cache-control COP0 registers with
       manual-backed reset values, fixed bits, writable masks, checked accessors,
       canonical hashing, and direct state tests.
-- [ ] Add `MFC0` and `MTC0` through a focused COP0 register-transfer family,
+- [x] Add `MFC0` and `MTC0` through a focused COP0 register-transfer family,
       including low-word transfer/sign-extension behavior, COP0 usability,
       documented update ordering, register-specific masks, and register-zero
       behavior.

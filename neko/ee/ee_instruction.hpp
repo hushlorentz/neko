@@ -254,6 +254,8 @@ enum class EEOperation : std::uint8_t
   ParallelDivideWord,
   ParallelDivideUnsignedWord,
   ParallelDivideBroadcastWord,
+  MoveWordFromCOP0,
+  MoveWordToCOP0,
   Count
 };
 
@@ -368,6 +370,7 @@ enum class EEExecutionFamily : std::uint8_t
   PipelineSynchronization,
   ExceptionReturn,
   SoftwareException,
+  COP0RegisterMove,
   COP1RegisterMove,
   COP1Divider,
   COP1StagedOperation,

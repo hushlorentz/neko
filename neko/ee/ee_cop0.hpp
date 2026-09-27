@@ -27,8 +27,10 @@ enum class EECOP0Register : std::uint8_t
 
 namespace EECOP0Index
 {
+  constexpr std::uint32_t INDEX_MASK = UINT32_C(0x0000003f);
+  constexpr std::uint32_t PROBE_FAILURE = UINT32_C(1) << 31;
   constexpr std::uint32_t IMPLEMENTED_MASK =
-    UINT32_C(0x8000003f);
+    PROBE_FAILURE | INDEX_MASK;
 }
 
 namespace EECOP0Random
@@ -47,8 +49,12 @@ namespace EECOP0EntryLo
 
 namespace EECOP0Context
 {
+  constexpr std::uint32_t BAD_VPN2_MASK =
+    UINT32_C(0x007ffff0);
+  constexpr std::uint32_t PTE_BASE_MASK =
+    UINT32_C(0xff800000);
   constexpr std::uint32_t IMPLEMENTED_MASK =
-    UINT32_C(0xfffffff0);
+    PTE_BASE_MASK | BAD_VPN2_MASK;
 }
 
 namespace EECOP0PageMask
@@ -77,10 +83,17 @@ namespace EECOP0EntryHi
 
 namespace EECOP0Status
 {
+  constexpr std::uint32_t IMPLEMENTED_MASK =
+    UINT32_C(0xf0c79c1f);
+  constexpr std::uint32_t SOFTWARE_WRITABLE_MASK =
+    UINT32_C(0xf0c39c1f);
   constexpr std::uint32_t RESET = UINT32_C(0x70400004);
   constexpr std::uint32_t INTERRUPT_ENABLE = UINT32_C(1);
   constexpr std::uint32_t EXCEPTION_LEVEL = UINT32_C(1) << 1;
   constexpr std::uint32_t ERROR_LEVEL = UINT32_C(1) << 2;
+  constexpr std::uint32_t PRIVILEGE_MASK = UINT32_C(0x3) << 3;
+  constexpr std::uint32_t SUPERVISOR_MODE = UINT32_C(1) << 3;
+  constexpr std::uint32_t USER_MODE = UINT32_C(2) << 3;
   constexpr std::uint32_t INTC_MASK = UINT32_C(1) << 10;
   constexpr std::uint32_t DMAC_MASK = UINT32_C(1) << 11;
   constexpr std::uint32_t MASTER_INTERRUPT_ENABLE =
@@ -88,6 +101,7 @@ namespace EECOP0Status
   constexpr std::uint32_t CACHE_HIT = UINT32_C(1) << 18;
   constexpr std::uint32_t BOOTSTRAP_EXCEPTION_VECTOR =
     UINT32_C(1) << 22;
+  constexpr std::uint32_t COP0_USABLE = UINT32_C(1) << 28;
   constexpr std::uint32_t COP1_USABLE = UINT32_C(1) << 29;
 }
 
@@ -126,5 +140,11 @@ namespace EECOP0TagLo
     UINT32_C(1) << 4;
   constexpr std::uint32_t LOCK = UINT32_C(1) << 3;
 }
+
+enum class EECOP0WriteResult : std::uint8_t
+{
+  Succeeded,
+  UnsupportedValue
+};
 
 #endif

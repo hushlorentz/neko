@@ -136,3 +136,68 @@ void EEMemorySystem::setCOP0Register(
         "EE memory-system COP0 register is not owned.");
   }
 }
+
+EECOP0WriteResult EEMemorySystem::writeCOP0Register(
+  EECOP0Register registerIndex,
+  std::uint32_t value)
+{
+  switch (registerIndex)
+  {
+    case EECOP0Register::Index:
+      cop0Index =
+        (cop0Index & EECOP0Index::PROBE_FAILURE) |
+        (value & EECOP0Index::INDEX_MASK);
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::Random:
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::EntryLo0:
+      cop0EntryLo0 =
+        value & EECOP0EntryLo::ENTRY_LO_0_IMPLEMENTED_MASK;
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::EntryLo1:
+      cop0EntryLo1 =
+        value & EECOP0EntryLo::ENTRY_LO_1_IMPLEMENTED_MASK;
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::Context:
+      cop0Context =
+        (cop0Context & EECOP0Context::BAD_VPN2_MASK) |
+        (value & EECOP0Context::PTE_BASE_MASK);
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::PageMask:
+    {
+      const std::uint32_t canonicalValue =
+        value & EECOP0PageMask::IMPLEMENTED_MASK;
+      if (!supportedPageMask(canonicalValue))
+      {
+        return EECOP0WriteResult::UnsupportedValue;
+      }
+      cop0PageMask = canonicalValue;
+      return EECOP0WriteResult::Succeeded;
+    }
+    case EECOP0Register::Wired:
+      if (value > EECOP0Wired::MAXIMUM)
+      {
+        return EECOP0WriteResult::UnsupportedValue;
+      }
+      cop0Wired = value;
+      cop0Random = EECOP0Random::RESET;
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::EntryHi:
+      cop0EntryHi = value & EECOP0EntryHi::IMPLEMENTED_MASK;
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::Config:
+      cop0Config =
+        EECOP0Config::FIXED |
+        (value & EECOP0Config::WRITABLE_MASK);
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::TagLo:
+      cop0TagLo = value & EECOP0TagLo::IMPLEMENTED_MASK;
+      return EECOP0WriteResult::Succeeded;
+    case EECOP0Register::TagHi:
+      cop0TagHi = value;
+      return EECOP0WriteResult::Succeeded;
+    default:
+      throw std::out_of_range(
+        "EE memory-system COP0 register is not owned.");
+  }
+}

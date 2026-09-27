@@ -2470,6 +2470,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::SystemCall:
     case EEOperation::Breakpoint:
       return executeSoftwareException(instruction, address);
+    case EEOperation::MoveWordFromCOP0:
+    case EEOperation::MoveWordToCOP0:
+      return executeCOP0RegisterMove(instruction, address);
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -4950,6 +4953,45 @@ EEInstructionExecutionOutcome EECore::executeSoftwareException(
   return EEInstructionExecutionOutcome::Faulted;
 }
 
+EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  if (instruction.operation != EEOperation::MoveWordFromCOP0 &&
+      instruction.operation != EEOperation::MoveWordToCOP0)
+  {
+    throw std::logic_error(
+      "EE COP0-register-move handler received an incompatible "
+      "operation.");
+  }
+  if (!requireCOP0Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+
+  const EECOP0Register registerIndex =
+    static_cast<EECOP0Register>(
+      instruction.destinationRegister);
+  if (instruction.operation == EEOperation::MoveWordFromCOP0)
+  {
+    writeWord(
+      instruction.targetRegister,
+      cop0Register(registerIndex));
+    return EEInstructionExecutionOutcome::Completed;
+  }
+
+  const std::uint32_t value =
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.targetRegister].low);
+  return writeGuestCOP0Register(
+           registerIndex,
+           value,
+           address,
+           instruction.raw)
+    ? EEInstructionExecutionOutcome::Completed
+    : EEInstructionExecutionOutcome::Rejected;
+}
+
 EEInstructionExecutionOutcome EECore::executeCOP1RegisterMove(
   const EEInstruction &instruction,
   std::uint32_t address)
@@ -5913,6 +5955,82 @@ bool EECore::requireCOP1Usable(
     instruction,
     ExceptionCoprocessor::COP1));
   return false;
+}
+
+bool EECore::requireCOP0Usable(
+  std::uint32_t address,
+  std::uint32_t instruction)
+{
+  const std::uint32_t exceptionLevel =
+    EECOP0Status::EXCEPTION_LEVEL |
+    EECOP0Status::ERROR_LEVEL;
+  const bool kernelMode =
+    (cop0Status & exceptionLevel) != 0 ||
+    (cop0Status & EECOP0Status::PRIVILEGE_MASK) == 0;
+  if (kernelMode ||
+      (cop0Status & EECOP0Status::COP0_USABLE) != 0)
+  {
+    return true;
+  }
+  enterException(makeExceptionTransitionRequest(
+    EEException::CoprocessorUnusable,
+    address,
+    address,
+    instruction,
+    ExceptionCoprocessor::COP0));
+  return false;
+}
+
+bool EECore::writeGuestCOP0Register(
+  EECOP0Register registerIndex,
+  std::uint32_t value,
+  std::uint32_t address,
+  std::uint32_t instruction)
+{
+  switch (registerIndex)
+  {
+    case EECOP0Register::Index:
+    case EECOP0Register::Random:
+    case EECOP0Register::EntryLo0:
+    case EECOP0Register::EntryLo1:
+    case EECOP0Register::Context:
+    case EECOP0Register::PageMask:
+    case EECOP0Register::Wired:
+    case EECOP0Register::EntryHi:
+    case EECOP0Register::Config:
+    case EECOP0Register::TagLo:
+    case EECOP0Register::TagHi:
+      if (memorySystem.writeCOP0Register(
+            registerIndex,
+            value) == EECOP0WriteResult::UnsupportedValue)
+      {
+        haltUndefinedOperation(address, instruction);
+        return false;
+      }
+      return true;
+    case EECOP0Register::BadVAddr:
+    case EECOP0Register::Cause:
+      return true;
+    case EECOP0Register::Count:
+      cop0Count = value;
+      return true;
+    case EECOP0Register::Compare:
+      cop0Compare = value;
+      return true;
+    case EECOP0Register::Status:
+      cop0Status =
+        (cop0Status & ~EECOP0Status::SOFTWARE_WRITABLE_MASK) |
+        (value & EECOP0Status::SOFTWARE_WRITABLE_MASK);
+      return true;
+    case EECOP0Register::EPC:
+      cop0EPC = value;
+      return true;
+    case EECOP0Register::ErrorEPC:
+      cop0ErrorEPC = value;
+      return true;
+  }
+  throw std::logic_error(
+    "EE guest COP0 write reached an unimplemented register.");
 }
 
 void EECore::haltUndefinedOperation(

@@ -344,6 +344,12 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::SoftwareException,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::MoveWordFromCOP0:
+        case EEOperation::MoveWordToCOP0:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP0RegisterMove,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::MoveWordFromCOP1:
         case EEOperation::MoveWordToCOP1:
         case EEOperation::MoveControlWordFromCOP1:
@@ -1559,7 +1565,7 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
       decodeEEInstruction(UINT32_C(0xbc000000)),
       "Unsupported EE instruction encoding.");
     REQUIRE_THROWS_WITH(
-      decodeEEInstruction(UINT32_C(0x40000000)),
+      decodeEEInstruction(UINT32_C(0x40003800)),
       "Unsupported EE instruction encoding.");
   }
 

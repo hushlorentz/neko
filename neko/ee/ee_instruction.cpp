@@ -4,6 +4,7 @@
 #include <initializer_list>
 #include <stdexcept>
 
+#include "ee_cop0.hpp"
 #include "vpu_instruction.hpp"
 
 namespace
@@ -55,6 +56,33 @@ namespace
 
   bool updatesCOP1ArithmeticFlags(EEOperation operation);
 
+  bool implementedCOP0Register(std::uint8_t index)
+  {
+    switch (static_cast<EECOP0Register>(index))
+    {
+      case EECOP0Register::Index:
+      case EECOP0Register::Random:
+      case EECOP0Register::EntryLo0:
+      case EECOP0Register::EntryLo1:
+      case EECOP0Register::Context:
+      case EECOP0Register::PageMask:
+      case EECOP0Register::Wired:
+      case EECOP0Register::BadVAddr:
+      case EECOP0Register::Count:
+      case EECOP0Register::EntryHi:
+      case EECOP0Register::Compare:
+      case EECOP0Register::Status:
+      case EECOP0Register::Cause:
+      case EECOP0Register::EPC:
+      case EECOP0Register::Config:
+      case EECOP0Register::TagLo:
+      case EECOP0Register::TagHi:
+      case EECOP0Register::ErrorEPC:
+        return true;
+    }
+    return false;
+  }
+
   std::uint32_t registerMask(std::uint8_t index)
   {
     return index == 0 ? 0 : UINT32_C(1) << index;
@@ -92,6 +120,12 @@ namespace
       case EEOperation::Breakpoint:
       case EEOperation::ExceptionReturn:
       case EEOperation::Jump:
+        break;
+      case EEOperation::MoveWordFromCOP0:
+        dependencies.gprWrites = target;
+        break;
+      case EEOperation::MoveWordToCOP0:
+        dependencies.gprReads = target;
         break;
       case EEOperation::ShiftLeftLogicalWord:
       case EEOperation::ShiftRightLogicalWord:
@@ -1872,10 +1906,20 @@ namespace
     if (instruction->sourceRegister == 0x00 ||
         instruction->sourceRegister == 0x04)
     {
-      reject(
-        (instruction->raw & UINT32_C(0x000007ff)) == 0
-          ? DecodeKind::Unsupported
-          : DecodeKind::Reserved);
+      if ((instruction->raw & UINT32_C(0x000007ff)) != 0)
+      {
+        reject(DecodeKind::Reserved);
+      }
+      if (!implementedCOP0Register(
+            instruction->destinationRegister))
+      {
+        reject(DecodeKind::Unsupported);
+      }
+      instruction->operation =
+        instruction->sourceRegister == 0x00
+          ? EEOperation::MoveWordFromCOP0
+          : EEOperation::MoveWordToCOP0;
+      return;
     }
     if (instruction->sourceRegister == 0x08)
     {
@@ -2312,6 +2356,14 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
         0,
         PHYSICAL_I1
       };
+    case EEOperation::MoveWordFromCOP0:
+    case EEOperation::MoveWordToCOP0:
+      return {
+        EEInstructionCategory::COP0,
+        PIPE_1,
+        0,
+        PHYSICAL_I1
+      };
     case EEOperation::MoveFromShiftAmount:
     case EEOperation::MoveToShiftAmount:
     case EEOperation::MoveByteCountToShiftAmount:
@@ -2630,6 +2682,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::SystemCall:
     case EEOperation::Breakpoint:
       return EEExecutionFamily::SoftwareException;
+    case EEOperation::MoveWordFromCOP0:
+    case EEOperation::MoveWordToCOP0:
+      return EEExecutionFamily::COP0RegisterMove;
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:

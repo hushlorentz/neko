@@ -548,6 +548,7 @@ class EECore final : public ClockedComponent
     enum class ExceptionCoprocessor : std::uint8_t
     {
       None,
+      COP0,
       COP1
     };
 
@@ -1327,6 +1328,9 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeCOP1RegisterMove(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP0RegisterMove(
+      const EEInstruction &instruction,
+      std::uint32_t address);
     EEInstructionExecutionOutcome executeCOP1Divider(
       const EEInstruction &instruction,
       std::uint32_t address);
@@ -1383,6 +1387,14 @@ class EECore final : public ClockedComponent
       std::uint32_t address,
       std::uint32_t instruction);
     bool requireCOP1Usable(
+      std::uint32_t address,
+      std::uint32_t instruction);
+    bool requireCOP0Usable(
+      std::uint32_t address,
+      std::uint32_t instruction);
+    bool writeGuestCOP0Register(
+      EECOP0Register registerIndex,
+      std::uint32_t value,
       std::uint32_t address,
       std::uint32_t instruction);
     void setCOP1Condition(bool condition);
