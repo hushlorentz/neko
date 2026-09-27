@@ -22,10 +22,10 @@ namespace
   constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
   constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
-    VERSION_27_PREPARED_STATE_SIZE = 37800692;
+    VERSION_28_PREPARED_STATE_SIZE = 37800736;
   constexpr std::uint64_t
-    VERSION_27_PREPARED_STATE_HASH =
-      UINT64_C(0x4a8e8d5e750f83f5);
+    VERSION_28_PREPARED_STATE_HASH =
+      UINT64_C(0x8c6de3213d5562c9);
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
@@ -181,7 +181,7 @@ namespace
     SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET = 2239;
   constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET = 2271;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2297;
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 2341;
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -416,6 +416,35 @@ namespace
     system->eeCore().setCOP0Register(
       EECOP0Register::ErrorEPC,
       UINT32_C(0xbfc00000));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::Index,
+      UINT32_C(0x8000002f));
+    system->eeCore().setCOP0Register(EECOP0Register::Random, 41);
+    system->eeCore().setCOP0Register(
+      EECOP0Register::EntryLo0,
+      UINT32_C(0x80123457));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::EntryLo1,
+      UINT32_C(0x001abcdf));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::Context,
+      UINT32_C(0x92345670));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::PageMask,
+      EECOP0PageMask::SIZE_64_KIB);
+    system->eeCore().setCOP0Register(EECOP0Register::Wired, 7);
+    system->eeCore().setCOP0Register(
+      EECOP0Register::EntryHi,
+      UINT32_C(0x812340aa));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::Config,
+      EECOP0Config::DATA_CACHE_ENABLE);
+    system->eeCore().setCOP0Register(
+      EECOP0Register::TagLo,
+      UINT32_C(0x12345078));
+    system->eeCore().setCOP0Register(
+      EECOP0Register::TagHi,
+      UINT32_C(0x89abcdef));
     system->gsDisplay().configureTiming({3, 7});
     system->masterClockScheduler().registerComponent(
       system->gifPathArbiter(),
@@ -690,7 +719,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 27 save-state layout is byte-stable")
+TEST_CASE("Version 28 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -705,14 +734,14 @@ TEST_CASE("Version 27 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 27);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 28);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_27_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_28_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_27_PREPARED_STATE_HASH);
+    VERSION_28_PREPARED_STATE_HASH);
 }
 
 TEST_CASE("Invalid packed MAC continuation states are rejected")
@@ -1546,6 +1575,38 @@ TEST_CASE("Active system save states round trip and continue identically")
   REQUIRE(
     restored.eeCore().cop0Register(EECOP0Register::ErrorEPC) ==
     UINT32_C(0xbfc00000));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Index) ==
+    UINT32_C(0x8000002f));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Random) == 41);
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::EntryLo0) ==
+    UINT32_C(0x80123457));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::EntryLo1) ==
+    UINT32_C(0x001abcdf));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Context) ==
+    UINT32_C(0x92345670));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::PageMask) ==
+    EECOP0PageMask::SIZE_64_KIB);
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Wired) == 7);
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::EntryHi) ==
+    UINT32_C(0x812340aa));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::Config) ==
+    (EECOP0Config::FIXED |
+     EECOP0Config::DATA_CACHE_ENABLE));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::TagLo) ==
+    UINT32_C(0x12345078));
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::TagHi) ==
+    UINT32_C(0x89abcdef));
 
   original.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
   restored.eeBus().write64(EEMemoryMap::GS_BUSDIR, 0);
@@ -2757,7 +2818,7 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE(system.saveState() == before);
 
   invalid = before;
-  invalid.back() = 2;
+  invalid[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 2;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

@@ -7,7 +7,9 @@
 #include <stdexcept>
 
 #include "clocked_component.hpp"
+#include "ee_cop0.hpp"
 #include "ee_instruction.hpp"
+#include "ee_memory_system.hpp"
 
 class EEBus;
 class VPU;
@@ -225,45 +227,6 @@ enum class EEStopReason : std::uint8_t
   ExecutionException,
   UndefinedOperation
 };
-
-enum class EECOP0Register : std::uint8_t
-{
-  BadVAddr = 8,
-  Count = 9,
-  Compare = 11,
-  Status = 12,
-  Cause = 13,
-  EPC = 14,
-  ErrorEPC = 30
-};
-
-namespace EECOP0Status
-{
-  constexpr std::uint32_t RESET = UINT32_C(0x70400004);
-  constexpr std::uint32_t INTERRUPT_ENABLE = UINT32_C(1);
-  constexpr std::uint32_t EXCEPTION_LEVEL = UINT32_C(1) << 1;
-  constexpr std::uint32_t ERROR_LEVEL = UINT32_C(1) << 2;
-  constexpr std::uint32_t INTC_MASK = UINT32_C(1) << 10;
-  constexpr std::uint32_t DMAC_MASK = UINT32_C(1) << 11;
-  constexpr std::uint32_t MASTER_INTERRUPT_ENABLE =
-    UINT32_C(1) << 16;
-  constexpr std::uint32_t BOOTSTRAP_EXCEPTION_VECTOR =
-    UINT32_C(1) << 22;
-  constexpr std::uint32_t COP1_USABLE = UINT32_C(1) << 29;
-}
-
-namespace EECOP0Cause
-{
-  constexpr std::uint32_t EXCEPTION_CODE_MASK =
-    UINT32_C(0x1f) << 2;
-  constexpr std::uint32_t INTC_PENDING = UINT32_C(1) << 10;
-  constexpr std::uint32_t DMAC_PENDING = UINT32_C(1) << 11;
-  constexpr std::uint32_t BRANCH_DELAY = UINT32_C(1) << 31;
-  constexpr std::uint32_t COPROCESSOR_ERROR_MASK =
-    UINT32_C(0x3) << 28;
-  constexpr std::uint32_t COPROCESSOR_1 =
-    UINT32_C(1) << 28;
-}
 
 namespace EECOP1Control
 {
@@ -1118,6 +1081,7 @@ class EECore final : public ClockedComponent
     std::uint32_t cop0Cause = 0;
     std::uint32_t cop0EPC = 0;
     std::uint32_t cop0ErrorEPC = 0;
+    EEMemorySystem memorySystem;
     EEBus *bus = nullptr;
     VPU *vu0 = nullptr;
     VPU *vu1 = nullptr;

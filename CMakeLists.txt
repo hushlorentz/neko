@@ -63,6 +63,7 @@ add_library(neko_core
     neko/ee/ee_core.cpp
     neko/ee/ee_elf_loader.cpp
     neko/ee/ee_instruction.cpp
+    neko/ee/ee_memory_system.cpp
     neko/ee/gif_dmac_channel.cpp
     neko/ee/interrupt_controller.cpp
     neko/ee/vif1_dmac_channel.cpp

@@ -360,6 +360,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.cop0EPC;
   destination->eeCoreComponent.cop0ErrorEPC =
     source->eeCoreComponent.cop0ErrorEPC;
+  destination->eeCoreComponent.memorySystem =
+    source->eeCoreComponent.memorySystem;
   destination->eeCoreComponent.exception =
     source->eeCoreComponent.exception;
   destination->eeCoreComponent.faultAddress =

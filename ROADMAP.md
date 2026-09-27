@@ -1658,7 +1658,7 @@ creating parallel ownership.
 
 ### COP0 and TLB Management
 
-- [ ] Add the required translation and cache-control COP0 registers with
+- [x] Add the required translation and cache-control COP0 registers with
       manual-backed reset values, fixed bits, writable masks, checked accessors,
       canonical hashing, and direct state tests.
 - [ ] Add `MFC0` and `MTC0` through a focused COP0 register-transfer family,

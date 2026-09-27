@@ -212,6 +212,24 @@ void NekoSaveStateCodec::writeEECore(
     core.packedDivideContinuation.loResult.high);
   writer->writeU8(
     core.packedDivideContinuation.remainingCycles);
+  const EECOP0Register memoryRegisters[] = {
+    EECOP0Register::Index,
+    EECOP0Register::Random,
+    EECOP0Register::EntryLo0,
+    EECOP0Register::EntryLo1,
+    EECOP0Register::Context,
+    EECOP0Register::PageMask,
+    EECOP0Register::Wired,
+    EECOP0Register::EntryHi,
+    EECOP0Register::Config,
+    EECOP0Register::TagLo,
+    EECOP0Register::TagHi
+  };
+  for (const EECOP0Register registerIndex : memoryRegisters)
+  {
+    writer->writeU32(
+      core.memorySystem.cop0Register(registerIndex));
+  }
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1025,6 +1043,32 @@ void NekoSaveStateCodec::readEECore(
     reader->readU64();
   core->packedDivideContinuation.remainingCycles =
     reader->readU8();
+  const EECOP0Register memoryRegisters[] = {
+    EECOP0Register::Index,
+    EECOP0Register::Random,
+    EECOP0Register::EntryLo0,
+    EECOP0Register::EntryLo1,
+    EECOP0Register::Context,
+    EECOP0Register::PageMask,
+    EECOP0Register::Wired,
+    EECOP0Register::EntryHi,
+    EECOP0Register::Config,
+    EECOP0Register::TagLo,
+    EECOP0Register::TagHi
+  };
+  for (const EECOP0Register registerIndex : memoryRegisters)
+  {
+    try
+    {
+      core->memorySystem.setCOP0Register(
+        registerIndex,
+        reader->readU32());
+    }
+    catch (const std::invalid_argument &error)
+    {
+      throw std::runtime_error(error.what());
+    }
+  }
   require(
     core->packedDivideContinuationStateValid(),
     "EE packed divide continuation state is invalid");

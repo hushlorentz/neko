@@ -1205,6 +1205,7 @@ void EECore::reset()
   cop0Cause = 0;
   cop0EPC = 0;
   cop0ErrorEPC = 0;
+  memorySystem.reset();
   exception = EEException::None;
   faultAddress = 0;
   state = EEExecutionState::Halted;
@@ -9095,6 +9096,39 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, cop0ErrorEPC);
   hashEEStateValue(
     &hash,
+    memorySystem.cop0Register(EECOP0Register::Index));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::Random));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::EntryLo0));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::EntryLo1));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::Context));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::PageMask));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::Wired));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::EntryHi));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::Config));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::TagLo));
+  hashEEStateValue(
+    &hash,
+    memorySystem.cop0Register(EECOP0Register::TagHi));
+  hashEEStateValue(
+    &hash,
     static_cast<std::uint8_t>(exception));
   hashEEStateValue(&hash, faultAddress);
   hashEEStateValue(&hash, static_cast<std::uint8_t>(state));
@@ -9524,6 +9558,18 @@ std::uint32_t EECore::cop0Register(
 {
   switch (registerIndex)
   {
+    case EECOP0Register::Index:
+    case EECOP0Register::Random:
+    case EECOP0Register::EntryLo0:
+    case EECOP0Register::EntryLo1:
+    case EECOP0Register::Context:
+    case EECOP0Register::PageMask:
+    case EECOP0Register::Wired:
+    case EECOP0Register::EntryHi:
+    case EECOP0Register::Config:
+    case EECOP0Register::TagLo:
+    case EECOP0Register::TagHi:
+      return memorySystem.cop0Register(registerIndex);
     case EECOP0Register::BadVAddr:
       return cop0BadVAddr;
     case EECOP0Register::Count:
@@ -9549,6 +9595,19 @@ void EECore::setCOP0Register(
 {
   switch (registerIndex)
   {
+    case EECOP0Register::Index:
+    case EECOP0Register::Random:
+    case EECOP0Register::EntryLo0:
+    case EECOP0Register::EntryLo1:
+    case EECOP0Register::Context:
+    case EECOP0Register::PageMask:
+    case EECOP0Register::Wired:
+    case EECOP0Register::EntryHi:
+    case EECOP0Register::Config:
+    case EECOP0Register::TagLo:
+    case EECOP0Register::TagHi:
+      memorySystem.setCOP0Register(registerIndex, value);
+      return;
     case EECOP0Register::BadVAddr:
       cop0BadVAddr = value;
       return;
