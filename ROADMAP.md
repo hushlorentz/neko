@@ -1676,7 +1676,7 @@ creating parallel ownership.
       boundary. Explicitly schedule or defer breakpoint/performance operations
       and `BC0F`, `BC0FL`, `BC0T`, `BC0TL`, `EI`, and `DI`; do not conflate a
       valid unsupported operation with a reserved encoding.
-- [ ] Cover COP0/TLB instruction issue categories, pairing restrictions,
+- [x] Cover COP0/TLB instruction issue categories, pairing restrictions,
       branch-delay legality, `SYNC.P` visibility, exception cancellation, reset,
       repeated execution, traces, and deterministic state hashes.
 - [ ] Complete an independent review of the COP0 and TLB-management block.

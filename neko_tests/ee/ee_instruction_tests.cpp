@@ -44,6 +44,20 @@ namespace
       (static_cast<std::uint32_t>(function) << 16) |
       immediate;
   }
+
+  std::uint32_t cop0Instruction(
+    std::uint8_t rs,
+    std::uint8_t rt,
+    std::uint8_t rd,
+    std::uint16_t low)
+  {
+    return
+      (UINT32_C(0x10) << 26) |
+      (static_cast<std::uint32_t>(rs) << 21) |
+      (static_cast<std::uint32_t>(rt) << 16) |
+      (static_cast<std::uint32_t>(rd) << 11) |
+      low;
+  }
 }
 
 TEST_CASE("EE instruction field decoding")
@@ -239,6 +253,22 @@ TEST_CASE("EE instruction routing classification")
 
   SECTION("Coprocessor categories expose every required physical pipe")
   {
+    for (const EEOperation operation : {
+           EEOperation::MoveWordFromCOP0,
+           EEOperation::MoveWordToCOP0,
+           EEOperation::ReadIndexedTLBEntry,
+           EEOperation::WriteIndexedTLBEntry,
+           EEOperation::WriteRandomTLBEntry,
+           EEOperation::ProbeTLB})
+    {
+      requireRouting(
+        operation,
+        EEInstructionCategory::COP0,
+        false,
+        true,
+        0,
+        physical(EEPhysicalPipeline::I1));
+    }
     requireRouting(
       EEOperation::MoveSingleCOP1,
       EEInstructionCategory::COP1Move,
@@ -1179,6 +1209,57 @@ TEST_CASE("EE two-wide issue selection")
         .instructionCount == 1);
   }
 
+  SECTION("COP0 work pairs only with independent Pipe-0 work")
+  {
+    const EEInstruction alu =
+      decodeEEInstruction(
+        immediateInstruction(0x09, 0, 3, 1));
+    const EEInstruction mtc0 =
+      decodeEEInstruction(
+        cop0Instruction(4, 2, 12, 0));
+    const EEInstruction mfc0 =
+      decodeEEInstruction(
+        cop0Instruction(0, 2, 12, 0));
+    const EEInstruction tlbwi =
+      decodeEEInstruction(
+        cop0Instruction(16, 0, 0, 0x02));
+
+    const EEIssueSelection olderCOP0 =
+      selectEEIssuePair(mtc0, alu);
+    REQUIRE(olderCOP0.instructionCount == 2);
+    REQUIRE(
+      olderCOP0.assignment.olderPipe ==
+      EELogicalPipe::Pipe1);
+    REQUIRE(
+      olderCOP0.assignment.youngerPipe ==
+      EELogicalPipe::Pipe0);
+
+    const EEIssueSelection youngerCOP0 =
+      selectEEIssuePair(alu, tlbwi);
+    REQUIRE(youngerCOP0.instructionCount == 2);
+    REQUIRE(
+      youngerCOP0.assignment.olderPipe ==
+      EELogicalPipe::Pipe0);
+    REQUIRE(
+      youngerCOP0.assignment.youngerPipe ==
+      EELogicalPipe::Pipe1);
+
+    REQUIRE(
+      selectEEIssuePair(mtc0, tlbwi).
+        instructionCount == 1);
+    REQUIRE(
+      selectEEIssuePair(
+        decodeEEInstruction(
+          immediateInstruction(0x09, 0, 2, 1)),
+        mfc0).instructionCount == 1);
+    REQUIRE(
+      selectEEIssuePair(
+        mfc0,
+        decodeEEInstruction(
+          immediateInstruction(0x09, 2, 3, 1))).
+        instructionCount == 1);
+  }
+
   SECTION("FCR31 condition aliases prevent same-pair issue")
   {
     REQUIRE(
@@ -1429,9 +1510,28 @@ TEST_CASE("EE delay-slot legality is centralized")
     decodeEEInstruction(
       UINT32_C(0x70000000) |
       registerInstruction(0x28, 1, 2, 3, 0x1b));
+  const EEInstruction cop0Instructions[] = {
+    decodeEEInstruction(cop0Instruction(0, 2, 12, 0)),
+    decodeEEInstruction(cop0Instruction(4, 2, 12, 0)),
+    decodeEEInstruction(cop0Instruction(16, 0, 0, 0x01)),
+    decodeEEInstruction(cop0Instruction(16, 0, 0, 0x02)),
+    decodeEEInstruction(cop0Instruction(16, 0, 0, 0x06)),
+    decodeEEInstruction(cop0Instruction(16, 0, 0, 0x08))
+  };
 
   REQUIRE(isEEDelaySlotInstructionLegal(branch, alu));
   REQUIRE(isEEDelaySlotInstructionLegal(likely, funnelShift));
+  for (const EEInstruction &instruction : cop0Instructions)
+  {
+    REQUIRE(
+      isEEDelaySlotInstructionLegal(
+        branch,
+        instruction));
+    REQUIRE(
+      isEEDelaySlotInstructionLegal(
+        likely,
+        instruction));
+  }
   REQUIRE(
     isEEDelaySlotInstructionLegal(
       branch,
@@ -1633,19 +1733,6 @@ TEST_CASE("EE ERET instruction decoding")
 
 TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
 {
-  const auto cop0Instruction =
-    [](std::uint8_t rs,
-       std::uint8_t rt,
-       std::uint8_t rd,
-       std::uint16_t low)
-    {
-      return
-        (UINT32_C(0x10) << 26) |
-        (static_cast<std::uint32_t>(rs) << 21) |
-        (static_cast<std::uint32_t>(rt) << 16) |
-        (static_cast<std::uint32_t>(rd) << 11) |
-        low;
-    };
   const auto requireUnsupported =
     [](std::uint32_t raw)
     {

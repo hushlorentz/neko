@@ -92,6 +92,15 @@ namespace
         floatingPointRegister) << 11);
   }
 
+  std::uint32_t cop0OperationInstruction(
+    std::uint8_t function)
+  {
+    return
+      (UINT32_C(0x10) << 26) |
+      (UINT32_C(0x10) << 21) |
+      function;
+  }
+
   std::vector<NekoTraceEvent> eeTrace(
     const NekoSystem &system)
   {
@@ -544,6 +553,128 @@ TEST_CASE("EE regression traces describe issued work")
   REQUIRE(events[9].type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events[9].value0 == core.stateHash());
   REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+}
+
+TEST_CASE("EE COP0 TLB traces and state hashes are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      core.setCOP0Register(EECOP0Register::Index, 5);
+      core.setCOP0Register(
+        EECOP0Register::EntryHi,
+        UINT32_C(0x1234402a));
+      core.setCOP0Register(
+        EECOP0Register::EntryLo0,
+        UINT32_C(0x00010007));
+      core.setCOP0Register(
+        EECOP0Register::EntryLo1,
+        UINT32_C(0x00020007));
+      system->eeBus().write32(
+        0,
+        cop0OperationInstruction(0x02));
+      system->eeBus().write32(
+        4,
+        cop0OperationInstruction(0x08));
+      system->eeBus().write32(
+        8,
+        cop0OperationInstruction(0x01));
+      core.startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+
+  first.runMasterCycles(3);
+  second.runMasterCycles(3);
+
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(first.saveState() == second.saveState());
+
+  std::vector<NekoTraceEvent> issued;
+  std::vector<NekoTraceEvent> snapshots;
+  for (const NekoTraceEvent &event : eeTrace(first))
+  {
+    if (event.type == NekoTraceEventType::InstructionIssued)
+    {
+      issued.push_back(event);
+    }
+    else if (event.type == NekoTraceEventType::StateSnapshot)
+    {
+      snapshots.push_back(event);
+    }
+  }
+  REQUIRE(issued.size() == 3);
+  REQUIRE(snapshots.size() == 3);
+  const EEOperation operations[] = {
+    EEOperation::WriteIndexedTLBEntry,
+    EEOperation::ProbeTLB,
+    EEOperation::ReadIndexedTLBEntry
+  };
+  for (std::size_t index = 0; index < issued.size(); ++index)
+  {
+    REQUIRE(issued[index].masterCycle == index + 1);
+    REQUIRE(issued[index].value0 == index * 4);
+    REQUIRE(
+      issued[index].value2 ==
+      static_cast<std::uint8_t>(operations[index]));
+    REQUIRE(issued[index].value3 == 0);
+    REQUIRE(snapshots[index].masterCycle == index + 1);
+  }
+  REQUIRE(
+    snapshots.back().value0 ==
+    first.eeCore().stateHash());
+}
+
+TEST_CASE("EE faulting COP0 traces expose issue and exception entry")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE);
+  core.setCOP0Register(EECOP0Register::Index, 4);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x1234402a));
+  system.eeBus().write32(
+    0,
+    cop0OperationInstruction(0x02));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.clockMasterCycle();
+
+  const std::vector<NekoTraceEvent> events = eeTrace(system);
+  REQUIRE(events.size() == 3);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[0].value0 == 0);
+  REQUIRE(
+    events[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::WriteIndexedTLBEntry));
+  REQUIRE(
+    events[1].type ==
+    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(
+    events[1].value0 ==
+    static_cast<std::uint8_t>(
+      EEException::CoprocessorUnusable));
+  REQUIRE(events[1].value1 == 0);
+  REQUIRE(
+    events[2].type ==
+    NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[2].value0 == core.stateHash());
+  REQUIRE(core.tlbEntry(4) == EETLBEntry{});
 }
 
 TEST_CASE("EE regression traces identify COP1 divider branch hazards")

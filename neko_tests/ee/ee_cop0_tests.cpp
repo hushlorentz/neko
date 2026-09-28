@@ -28,6 +28,19 @@ namespace
       function;
   }
 
+  std::uint32_t immediateInstruction(
+    std::uint8_t opcode,
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint16_t immediate)
+  {
+    return
+      (static_cast<std::uint32_t>(opcode) << 26) |
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      immediate;
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -282,24 +295,265 @@ TEST_CASE("EE TLB writes use indexed and random selectors")
 
 TEST_CASE("EE TLB operations require COP0 usability")
 {
+  for (const std::uint8_t function :
+       {UINT8_C(0x01), UINT8_C(0x02),
+        UINT8_C(0x06), UINT8_C(0x08)})
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setTLBEntry(
+      4,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x45678033),
+        {UINT32_C(0x00030007)},
+        {UINT32_C(0x00040007)}
+      });
+    core.setTLBEntry(
+      EECOP0Random::RESET,
+      {
+        EECOP0PageMask::SIZE_16_KIB,
+        UINT32_C(0x56780044),
+        {UINT32_C(0x00050007)},
+        {UINT32_C(0x00060007)}
+      });
+    core.setCOP0Register(EECOP0Register::Index, 4);
+    core.setCOP0Register(
+      EECOP0Register::PageMask,
+      EECOP0PageMask::SIZE_64_KIB);
+    core.setCOP0Register(
+      EECOP0Register::EntryHi,
+      UINT32_C(0x12340022));
+    core.setCOP0Register(
+      EECOP0Register::EntryLo0,
+      UINT32_C(0x00010007));
+    core.setCOP0Register(
+      EECOP0Register::EntryLo1,
+      UINT32_C(0x00020007));
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    const EETLBEntry indexedBefore = core.tlbEntry(4);
+    const EETLBEntry randomBefore =
+      core.tlbEntry(EECOP0Random::RESET);
+    const std::uint32_t indexBefore =
+      core.cop0Register(EECOP0Register::Index);
+    const std::uint32_t randomBeforeValue =
+      core.cop0Register(EECOP0Register::Random);
+    const std::uint32_t pageMaskBefore =
+      core.cop0Register(EECOP0Register::PageMask);
+    const std::uint32_t entryHiBefore =
+      core.cop0Register(EECOP0Register::EntryHi);
+    const std::uint32_t entryLo0Before =
+      core.cop0Register(EECOP0Register::EntryLo0);
+    const std::uint32_t entryLo1Before =
+      core.cop0Register(EECOP0Register::EntryLo1);
+
+    runInstruction(
+      &system,
+      cop0OperationInstruction(function));
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::CoprocessorUnusable);
+    REQUIRE(core.tlbEntry(4) == indexedBefore);
+    REQUIRE(
+      core.tlbEntry(EECOP0Random::RESET) ==
+      randomBefore);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::Index) ==
+      indexBefore);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::Random) ==
+      randomBeforeValue);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::PageMask) ==
+      pageMaskBefore);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EntryHi) ==
+      entryHiBefore);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EntryLo0) ==
+      entryLo0Before);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EntryLo1) ==
+      entryLo1Before);
+  }
+}
+
+TEST_CASE("EE COP0 faults preserve precise two-wide issue")
+{
+  const std::uint32_t tlbwi = cop0OperationInstruction(0x02);
+  const std::uint32_t add =
+    immediateInstruction(0x09, 0, 3, 7);
+
+  SECTION("An older COP0 fault cancels the younger instruction")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.setCOP0Register(EECOP0Register::Index, 4);
+    core.setCOP0Register(
+      EECOP0Register::EntryHi,
+      UINT32_C(0x12345001));
+    system.eeBus().write32(0, tlbwi);
+    system.eeBus().write32(4, add);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::CoprocessorUnusable);
+    REQUIRE(core.exceptionAddress() == 0);
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.tlbEntry(4) == EETLBEntry{});
+    REQUIRE(
+      core.cop0Register(EECOP0Register::Random) ==
+      EECOP0Random::RESET);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+  }
+
+  SECTION("A younger COP0 fault preserves the older instruction")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.setCOP0Register(EECOP0Register::Index, 4);
+    core.setCOP0Register(
+      EECOP0Register::EntryHi,
+      UINT32_C(0x12345001));
+    system.eeBus().write32(0, add);
+    system.eeBus().write32(4, tlbwi);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(3).low == 7);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::CoprocessorUnusable);
+    REQUIRE(core.exceptionAddress() == 4);
+    REQUIRE(core.tlbEntry(4) == EETLBEntry{});
+    REQUIRE(
+      core.cop0Register(EECOP0Register::Random) ==
+      EECOP0Random::RESET - 1);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+    REQUIRE(core.acceptanceRecordsThisCycle()[0].address == 0);
+  }
+}
+
+TEST_CASE("EE TLB operations execute in branch delay slots")
+{
   NekoSystem system;
   EECore &core = system.eeCore();
-  core.setCOP0Register(
-    EECOP0Register::Status,
-    EECOP0Status::USER_MODE);
-  core.setCOP0Register(EECOP0Register::Index, 4);
+  core.setCOP0Register(EECOP0Register::Index, 6);
   core.setCOP0Register(
     EECOP0Register::EntryHi,
-    UINT32_C(0x12345001));
+    UINT32_C(0x1234402a));
+  core.setCOP0Register(
+    EECOP0Register::EntryLo0,
+    UINT32_C(0x00010007));
+  core.setCOP0Register(
+    EECOP0Register::EntryLo1,
+    UINT32_C(0x00020007));
+  system.eeBus().write32(
+    0,
+    immediateInstruction(0x04, 0, 0, 1));
+  system.eeBus().write32(
+    4,
+    cop0OperationInstruction(0x02));
+  core.startExecution(0);
 
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.tlbEntry(6).entryHi ==
+    UINT32_C(0x1234402a));
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+  REQUIRE(
+    core.acceptanceRecordsThisCycle()[1].mode ==
+    EEAcceptanceMode::DelaySlot);
+}
+
+TEST_CASE("EE SYNC.P preserves completed COP0 visibility")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const std::uint32_t value = UINT32_C(0x1234402a);
+  core.setGeneralRegister(2, {value, UINT64_MAX});
+  core.setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
+  system.eeBus().write32(
+    0,
+    cop0TransferInstruction(
+      0x04,
+      2,
+      EECOP0Register::EntryHi));
+  system.eeBus().write32(4, UINT32_C(0x0000040f));
+  system.eeBus().write32(
+    8,
+    cop0TransferInstruction(
+      0x00,
+      3,
+      EECOP0Register::EntryHi));
+  core.startExecution(0);
+
+  system.runMasterCycles(3);
+
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryHi) ==
+    value);
+  REQUIRE(core.generalRegister(3).low == value);
+  REQUIRE(core.generalRegister(3).high == UINT64_MAX);
+  REQUIRE(core.programCounter() == 12);
+}
+
+TEST_CASE("EE TLB execution resets and repeats deterministically")
+{
+  const auto prepareEntry =
+    [](EECore *core)
+    {
+      core->setCOP0Register(EECOP0Register::Index, 9);
+      core->setCOP0Register(
+        EECOP0Register::PageMask,
+        EECOP0PageMask::SIZE_16_KIB);
+      core->setCOP0Register(
+        EECOP0Register::EntryHi,
+        UINT32_C(0x1234402a));
+      core->setCOP0Register(
+        EECOP0Register::EntryLo0,
+        UINT32_C(0x00010007));
+      core->setCOP0Register(
+        EECOP0Register::EntryLo1,
+        UINT32_C(0x00020007));
+    };
+
+  NekoSystem system;
+  prepareEntry(&system.eeCore());
   runInstruction(
     &system,
     cop0OperationInstruction(0x02));
+  const EETLBEntry expected = system.eeCore().tlbEntry(9);
+  const std::uint64_t expectedHash =
+    system.eeCore().stateHash();
 
+  system.reset();
+  REQUIRE(system.eeCore().tlbEntry(9) == EETLBEntry{});
   REQUIRE(
-    core.pendingException() ==
-    EEException::CoprocessorUnusable);
-  REQUIRE(core.tlbEntry(4) == EETLBEntry{});
+    system.eeCore().cop0Register(EECOP0Register::Random) ==
+    EECOP0Random::RESET);
+
+  prepareEntry(&system.eeCore());
+  runInstruction(
+    &system,
+    cop0OperationInstruction(0x02));
+  REQUIRE(system.eeCore().tlbEntry(9) == expected);
+  REQUIRE(system.eeCore().stateHash() == expectedHash);
 }
 
 TEST_CASE("EE TLB entries reset deterministically and affect hashes")
