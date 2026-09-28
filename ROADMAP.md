@@ -1679,7 +1679,7 @@ creating parallel ownership.
 - [x] Cover COP0/TLB instruction issue categories, pairing restrictions,
       branch-delay legality, `SYNC.P` visibility, exception cancellation, reset,
       repeated execution, traces, and deterministic state hashes.
-- [ ] Complete an independent review of the COP0 and TLB-management block.
+- [x] Complete an independent review of the COP0 and TLB-management block.
 
 ### Functional Address Translation
 
