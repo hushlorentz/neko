@@ -123,6 +123,100 @@ bool operator==(const EETLBEntry &left, const EETLBEntry &right)
     left.oddPage == right.oddPage;
 }
 
+EECacheRoute EEMemorySystem::cacheRoute(std::uint8_t attribute)
+{
+  switch (attribute)
+  {
+    case 2:
+      return EECacheRoute::Uncached;
+    case 3:
+      return EECacheRoute::CachedNoncoherent;
+    case 7:
+      return EECacheRoute::UncachedAccelerated;
+    default:
+      return EECacheRoute::Unsupported;
+  }
+}
+
+EEAddressTranslationResult
+EEMemorySystem::translateInstructionAddress(
+  std::uint32_t virtualAddress,
+  const EEAddressTranslationContext &context) const
+{
+  return classifyAddress(virtualAddress, false, context);
+}
+
+EEAddressTranslationResult EEMemorySystem::translateDataAddress(
+  std::uint32_t virtualAddress,
+  EEDataAccessDirection direction,
+  const EEAddressTranslationContext &context) const
+{
+  return classifyAddress(
+    virtualAddress,
+    direction == EEDataAccessDirection::Store,
+    context);
+}
+
+EEAddressTranslationResult EEMemorySystem::classifyAddress(
+  std::uint32_t virtualAddress,
+  bool store,
+  const EEAddressTranslationContext &context)
+{
+  const EEPrivilegeMode privilege =
+    context.exceptionLevel || context.errorLevel
+      ? EEPrivilegeMode::Kernel
+      : context.privilege;
+  const auto addressError = [&]() {
+    return EEAddressTranslationResult{
+      store
+        ? EEAddressTranslationOutcome::AddressErrorStore
+        : EEAddressTranslationOutcome::AddressErrorLoadOrFetch,
+      virtualAddress,
+      0,
+      EECacheRoute::Unsupported
+    };
+  };
+  const auto tlbLookup = [&]() {
+    return EEAddressTranslationResult{
+      EEAddressTranslationOutcome::TLBLookup,
+      virtualAddress,
+      0,
+      EECacheRoute::TLBSelected
+    };
+  };
+
+  if (virtualAddress < UINT32_C(0x80000000))
+  {
+    return tlbLookup();
+  }
+  if (virtualAddress < UINT32_C(0xc0000000))
+  {
+    if (privilege != EEPrivilegeMode::Kernel)
+    {
+      return addressError();
+    }
+    const bool cached =
+      virtualAddress < UINT32_C(0xa0000000);
+    return {
+      EEAddressTranslationOutcome::Translated,
+      virtualAddress,
+      virtualAddress & UINT32_C(0x1fffffff),
+      cached
+        ? EECacheRoute::CachedNoncoherent
+        : EECacheRoute::Uncached
+    };
+  }
+  if (virtualAddress < UINT32_C(0xe0000000))
+  {
+    return privilege == EEPrivilegeMode::User
+      ? addressError()
+      : tlbLookup();
+  }
+  return privilege == EEPrivilegeMode::Kernel
+    ? tlbLookup()
+    : addressError();
+}
+
 void EEMemorySystem::reset()
 {
   cop0Index = 0;

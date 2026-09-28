@@ -1683,7 +1683,7 @@ creating parallel ownership.
 
 ### Functional Address Translation
 
-- [ ] Add typed, allocation-free instruction and data translation entry points
+- [x] Add typed, allocation-free instruction and data translation entry points
       to `EEMemorySystem`, then implement one side-effect-free segment
       classifier for User, Supervisor, Kernel, and `EXL`/`ERL` accesses.
       Cover mapped and direct segments, segment protection, cache attributes,

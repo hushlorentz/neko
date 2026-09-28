@@ -35,11 +35,65 @@ struct EETLBEntry
 
 bool operator==(const EETLBEntry &left, const EETLBEntry &right);
 
+enum class EEPrivilegeMode : std::uint8_t
+{
+  Kernel,
+  Supervisor,
+  User
+};
+
+struct EEAddressTranslationContext
+{
+  EEPrivilegeMode privilege = EEPrivilegeMode::Kernel;
+  bool exceptionLevel = false;
+  bool errorLevel = false;
+};
+
+enum class EEDataAccessDirection : std::uint8_t
+{
+  Load,
+  Store
+};
+
+enum class EEAddressTranslationOutcome : std::uint8_t
+{
+  Translated,
+  TLBLookup,
+  AddressErrorLoadOrFetch,
+  AddressErrorStore
+};
+
+enum class EECacheRoute : std::uint8_t
+{
+  Uncached,
+  CachedNoncoherent,
+  UncachedAccelerated,
+  TLBSelected,
+  Unsupported
+};
+
+struct EEAddressTranslationResult
+{
+  EEAddressTranslationOutcome outcome =
+    EEAddressTranslationOutcome::TLBLookup;
+  std::uint32_t virtualAddress = 0;
+  std::uint32_t physicalAddress = 0;
+  EECacheRoute cacheRoute = EECacheRoute::TLBSelected;
+};
+
 class EEMemorySystem final
 {
   public:
     static constexpr std::size_t TLB_ENTRY_COUNT = 48;
 
+    static EECacheRoute cacheRoute(std::uint8_t attribute);
+    EEAddressTranslationResult translateInstructionAddress(
+      std::uint32_t virtualAddress,
+      const EEAddressTranslationContext &context) const;
+    EEAddressTranslationResult translateDataAddress(
+      std::uint32_t virtualAddress,
+      EEDataAccessDirection direction,
+      const EEAddressTranslationContext &context) const;
     void reset();
     std::uint32_t cop0Register(
       EECOP0Register registerIndex) const;
@@ -61,6 +115,10 @@ class EEMemorySystem final
     bool replacementStateValid() const;
 
   private:
+    static EEAddressTranslationResult classifyAddress(
+      std::uint32_t virtualAddress,
+      bool store,
+      const EEAddressTranslationContext &context);
     EETLBEntry currentTLBEntry() const;
     void writeTLBEntry(std::uint32_t index);
 
