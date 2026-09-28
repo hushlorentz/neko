@@ -154,6 +154,27 @@ TEST_CASE("EE aligned word faults are precise")
     REQUIRE(core.generalRegister(2).low == 0x1234);
   }
 
+  SECTION("Alignment faults take priority over TLB faults")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    setRegister(&core, 1, UINT32_C(0x00400102));
+    setRegister(&core, 2, UINT32_C(0x1234));
+
+    system.eeBus().write32(
+      0,
+      memoryInstruction(0x23, 1, 2, 0));
+    core.startExecution(EEMemoryMap::KSEG0_BASE);
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == UINT32_C(0x00400102));
+    REQUIRE(core.generalRegister(2).low == UINT32_C(0x1234));
+  }
+
   SECTION("A misaligned word store performs no partial write")
   {
     NekoSystem system;

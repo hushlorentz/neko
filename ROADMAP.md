@@ -1708,7 +1708,7 @@ creating parallel ownership.
       translation while preserving alignment priority, merge semantics,
       delayed COP1 fault provenance, FIFO stalls, device access, and existing
       issue ownership.
-- [ ] Complete the functional-translation conformance matrix for segment
+- [x] Complete the functional-translation conformance matrix for segment
       boundaries, privilege and exception modes, ASIDs, global entries, all
       page sizes and boundaries, even/odd selection, physical aliases,
       permissions, accelerator replacement, and instruction/data consistency.

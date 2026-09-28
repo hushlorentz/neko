@@ -127,6 +127,75 @@ TEST_CASE("EE exception levels use kernel segment privilege")
   }
 }
 
+TEST_CASE("EE exception modes preserve segment routing boundaries")
+{
+  EEMemorySystem memorySystem;
+  const EEAddressTranslationContext exl =
+    context(EEPrivilegeMode::User, true, false);
+  const EEAddressTranslationContext erl =
+    context(EEPrivilegeMode::User, false, true);
+
+  requireTLBRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0x00000000),
+      exl),
+    UINT32_C(0x00000000));
+  requireTLBRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0x7fffffff),
+      exl),
+    UINT32_C(0x7fffffff));
+  requireDirectRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0x80000000),
+      exl),
+    UINT32_C(0x80000000),
+    UINT32_C(0x00000000),
+    EECacheRoute::CachedNoncoherent);
+  requireTLBRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0xc0000000),
+      exl),
+    UINT32_C(0xc0000000));
+  requireTLBRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0xe0000000),
+      exl),
+    UINT32_C(0xe0000000));
+
+  requireDirectRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0x00000000),
+      erl),
+    UINT32_C(0x00000000),
+    UINT32_C(0x00000000),
+    EECacheRoute::Uncached);
+  requireDirectRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0x7fffffff),
+      erl),
+    UINT32_C(0x7fffffff),
+    UINT32_C(0x7fffffff),
+    EECacheRoute::Uncached);
+  requireDirectRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0xa0000000),
+      erl),
+    UINT32_C(0xa0000000),
+    UINT32_C(0x00000000),
+    EECacheRoute::Uncached);
+  requireTLBRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0xc0000000),
+      erl),
+    UINT32_C(0xc0000000));
+  requireTLBRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0xe0000000),
+      erl),
+    UINT32_C(0xe0000000));
+}
+
 TEST_CASE("EE error level makes kuseg unmapped and uncached")
 {
   EEMemorySystem memorySystem;
@@ -332,12 +401,47 @@ TEST_CASE("EE architectural TLB translation selects ASIDs and global entries")
       {UINT32_C(0x0001001f)},
       {UINT32_C(0x0001401f)}
     });
+  memorySystem.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x0000002b));
   const EEAddressTranslationResult global =
     memorySystem.translateInstructionAddress(
       UINT32_C(0x12344123),
       context(EEPrivilegeMode::User));
   REQUIRE(global.outcome == EEAddressTranslationOutcome::Translated);
   REQUIRE(global.physicalAddress == UINT32_C(0x00400123));
+
+  const auto requireASIDSensitive =
+    [&memorySystem]()
+    {
+      for (const std::uint32_t address :
+           {UINT32_C(0x12344123), UINT32_C(0x12345123)})
+      {
+        REQUIRE(
+          memorySystem.translateInstructionAddress(
+            address,
+            context(EEPrivilegeMode::User)).outcome ==
+          EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+      }
+    };
+  memorySystem.setTLBEntry(
+    7,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x1234402a),
+      {UINT32_C(0x0001001f)},
+      {UINT32_C(0x0001401e)}
+    });
+  requireASIDSensitive();
+  memorySystem.setTLBEntry(
+    7,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x1234402a),
+      {UINT32_C(0x0001001e)},
+      {UINT32_C(0x0001401f)}
+    });
+  requireASIDSensitive();
 }
 
 TEST_CASE("EE architectural TLB translation uses the lowest duplicate index")
@@ -721,4 +825,78 @@ TEST_CASE("EE derived accelerators preserve lowest-index overlapping matches")
   REQUIRE(
     overlapping.physicalAddress ==
     UINT32_C(0x00700100));
+}
+
+TEST_CASE(
+  "EE instruction and data translation remain consistent beyond accelerator capacity")
+{
+  EEMemorySystem memorySystem;
+  constexpr std::size_t mappingCount =
+    EEMemorySystem::DTLB_ENTRY_COUNT + 2;
+  const EEAddressTranslationContext user =
+    context(EEPrivilegeMode::User);
+
+  for (std::size_t index = 0; index < mappingCount; ++index)
+  {
+    const std::uint32_t virtualBase =
+      UINT32_C(0x10000000) +
+      static_cast<std::uint32_t>(index) * UINT32_C(0x2000);
+    const std::uint32_t physicalBase =
+      UINT32_C(0x00100000) +
+      static_cast<std::uint32_t>(index) * UINT32_C(0x2000);
+    memorySystem.setTLBEntry(
+      index,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        virtualBase,
+        {(physicalBase >> 6) | UINT32_C(0x1f)},
+        {((physicalBase + UINT32_C(0x1000)) >> 6) |
+         UINT32_C(0x1f)}
+      });
+  }
+
+  const auto requireMapping =
+    [&memorySystem, &user](std::size_t index)
+    {
+      const std::uint32_t virtualAddress =
+        UINT32_C(0x10000120) +
+        static_cast<std::uint32_t>(index) * UINT32_C(0x2000);
+      const std::uint32_t physicalAddress =
+        UINT32_C(0x00100120) +
+        static_cast<std::uint32_t>(index) * UINT32_C(0x2000);
+      const EEAddressTranslationResult instruction =
+        memorySystem.translateInstructionAddress(
+          virtualAddress,
+          user);
+      const EEAddressTranslationResult load =
+        memorySystem.translateDataAddress(
+          virtualAddress,
+          EEDataAccessDirection::Load,
+          user);
+      const EEAddressTranslationResult store =
+        memorySystem.translateDataAddress(
+          virtualAddress,
+          EEDataAccessDirection::Store,
+          user);
+
+      for (const EEAddressTranslationResult *result :
+           {&instruction, &load, &store})
+      {
+        REQUIRE(
+          result->outcome ==
+          EEAddressTranslationOutcome::Translated);
+        REQUIRE(result->virtualAddress == virtualAddress);
+        REQUIRE(result->physicalAddress == physicalAddress);
+        REQUIRE(result->tlbIndex == index);
+      }
+    };
+
+  for (std::size_t index = 0; index < mappingCount; ++index)
+  {
+    requireMapping(index);
+  }
+  for (std::size_t index = mappingCount; index-- > 0;)
+  {
+    requireMapping(index);
+  }
 }
