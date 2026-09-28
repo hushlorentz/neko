@@ -1631,6 +1631,189 @@ TEST_CASE("EE ERET instruction decoding")
     "Reserved EE instruction encoding.");
 }
 
+TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
+{
+  const auto cop0Instruction =
+    [](std::uint8_t rs,
+       std::uint8_t rt,
+       std::uint8_t rd,
+       std::uint16_t low)
+    {
+      return
+        (UINT32_C(0x10) << 26) |
+        (static_cast<std::uint32_t>(rs) << 21) |
+        (static_cast<std::uint32_t>(rt) << 16) |
+        (static_cast<std::uint32_t>(rd) << 11) |
+        low;
+    };
+  const auto requireUnsupported =
+    [](std::uint32_t raw)
+    {
+      REQUIRE_THROWS_WITH(
+        decodeEEInstruction(raw),
+        "Unsupported EE instruction encoding.");
+    };
+  const auto requireReserved =
+    [](std::uint32_t raw)
+    {
+      REQUIRE_THROWS_WITH(
+        decodeEEInstruction(raw),
+        "Reserved EE instruction encoding.");
+    };
+
+  SECTION("Every non-reserved COP0 instruction class is explicit")
+  {
+    for (std::uint8_t rs = 0; rs < 32; ++rs)
+    {
+      if (rs == 0 || rs == 4)
+      {
+        const EEInstruction instruction =
+          decodeEEInstruction(
+            cop0Instruction(rs, 2, 12, 0));
+        REQUIRE(
+          instruction.operation ==
+          (rs == 0
+             ? EEOperation::MoveWordFromCOP0
+             : EEOperation::MoveWordToCOP0));
+      }
+      else if (rs == 8)
+      {
+        for (std::uint8_t rt = 0; rt < 4; ++rt)
+        {
+          requireUnsupported(
+            cop0Instruction(rs, rt, 0, 0x3456));
+        }
+      }
+      else if (rs == 16)
+      {
+        REQUIRE(
+          decodeEEInstruction(
+            cop0Instruction(rs, 0, 0, 0x01)).
+            operation ==
+          EEOperation::ReadIndexedTLBEntry);
+      }
+      else
+      {
+        requireReserved(cop0Instruction(rs, 0, 0, 0));
+      }
+    }
+  }
+
+  SECTION("Breakpoint register transfers are valid deferred operations")
+  {
+    const std::uint16_t selectors[] = {
+      0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07
+    };
+    for (std::uint8_t rs : {UINT8_C(0), UINT8_C(4)})
+    {
+      for (std::uint16_t selector : selectors)
+      {
+        requireUnsupported(
+          cop0Instruction(rs, 2, 24, selector));
+      }
+      requireReserved(cop0Instruction(rs, 2, 24, 0x01));
+      requireReserved(cop0Instruction(rs, 2, 24, 0x08));
+    }
+  }
+
+  SECTION("Performance register transfers validate counter selectors")
+  {
+    for (std::uint8_t rs : {UINT8_C(0), UINT8_C(4)})
+    {
+      for (std::uint16_t selector :
+           {UINT16_C(0), UINT16_C(1), UINT16_C(3)})
+      {
+        requireUnsupported(
+          cop0Instruction(rs, 2, 25, selector));
+      }
+      requireReserved(cop0Instruction(rs, 2, 25, 0x02));
+      requireReserved(cop0Instruction(rs, 2, 25, 0x05));
+      requireReserved(cop0Instruction(rs, 2, 25, 0x40));
+    }
+  }
+
+  SECTION("BC0 has four valid deferred branch forms")
+  {
+    for (std::uint8_t rt = 0; rt < 32; ++rt)
+    {
+      const std::uint32_t raw =
+        cop0Instruction(8, rt, 0, 0x3456);
+      if (rt < 4)
+      {
+        requireUnsupported(raw);
+      }
+      else
+      {
+        requireReserved(raw);
+      }
+    }
+  }
+
+  SECTION("C0 covers every operation cell and fixed-zero field")
+  {
+    for (std::uint8_t function = 0; function < 64; ++function)
+    {
+      const std::uint32_t raw =
+        cop0Instruction(16, 0, 0, function);
+      switch (function)
+      {
+        case 0x01:
+          REQUIRE(
+            decodeEEInstruction(raw).operation ==
+            EEOperation::ReadIndexedTLBEntry);
+          break;
+        case 0x02:
+          REQUIRE(
+            decodeEEInstruction(raw).operation ==
+            EEOperation::WriteIndexedTLBEntry);
+          break;
+        case 0x06:
+          REQUIRE(
+            decodeEEInstruction(raw).operation ==
+            EEOperation::WriteRandomTLBEntry);
+          break;
+        case 0x08:
+          REQUIRE(
+            decodeEEInstruction(raw).operation ==
+            EEOperation::ProbeTLB);
+          break;
+        case 0x18:
+          REQUIRE(
+            decodeEEInstruction(raw).operation ==
+            EEOperation::ExceptionReturn);
+          break;
+        case 0x38:
+        case 0x39:
+          requireUnsupported(raw);
+          break;
+        default:
+          requireReserved(raw);
+          break;
+      }
+    }
+
+    for (std::uint32_t nonzeroFixedField :
+         {UINT32_C(1) << 6,
+          UINT32_C(1) << 16,
+          UINT32_C(1) << 20})
+    {
+      for (std::uint8_t function :
+           {UINT8_C(0x01),
+            UINT8_C(0x02),
+            UINT8_C(0x06),
+            UINT8_C(0x08),
+            UINT8_C(0x18),
+            UINT8_C(0x38),
+            UINT8_C(0x39)})
+      {
+        requireReserved(
+          cop0Instruction(16, 0, 0, function) |
+          nonzeroFixedField);
+      }
+    }
+  }
+}
+
 TEST_CASE("EE multiply divide and SA decoder tables")
 {
   struct Contract

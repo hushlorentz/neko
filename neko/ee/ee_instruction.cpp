@@ -83,6 +83,40 @@ namespace
     return false;
   }
 
+  DecodeKind cop0RegisterTransferKind(
+    const EEInstruction &instruction)
+  {
+    const std::uint32_t selector =
+      instruction.raw & UINT32_C(0x000007ff);
+    if (instruction.destinationRegister == 24)
+    {
+      if ((selector & ~UINT32_C(0x7)) != 0 ||
+          selector == 1)
+      {
+        return DecodeKind::Reserved;
+      }
+      return DecodeKind::Unsupported;
+    }
+    if (instruction.destinationRegister == 25)
+    {
+      if (selector == 0 ||
+          selector == 1 ||
+          selector == 3)
+      {
+        return DecodeKind::Unsupported;
+      }
+      return DecodeKind::Reserved;
+    }
+    if (selector != 0)
+    {
+      return DecodeKind::Reserved;
+    }
+    return implementedCOP0Register(
+             instruction.destinationRegister)
+      ? DecodeKind::Direct
+      : DecodeKind::Unsupported;
+  }
+
   std::uint32_t registerMask(std::uint8_t index)
   {
     return index == 0 ? 0 : UINT32_C(1) << index;
@@ -1910,14 +1944,11 @@ namespace
     if (instruction->sourceRegister == 0x00 ||
         instruction->sourceRegister == 0x04)
     {
-      if ((instruction->raw & UINT32_C(0x000007ff)) != 0)
+      const DecodeKind kind =
+        cop0RegisterTransferKind(*instruction);
+      if (kind != DecodeKind::Direct)
       {
-        reject(DecodeKind::Reserved);
-      }
-      if (!implementedCOP0Register(
-            instruction->destinationRegister))
-      {
-        reject(DecodeKind::Unsupported);
+        reject(kind);
       }
       instruction->operation =
         instruction->sourceRegister == 0x00

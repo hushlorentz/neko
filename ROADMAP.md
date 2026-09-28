@@ -1670,7 +1670,7 @@ creating parallel ownership.
       `Wired` interaction, global mappings, ASIDs, supported page masks,
       even/odd page selection, scratchpad selection, and deterministic handling
       of manual-defined undefined cases.
-- [ ] Add complete primary/COP0/C0 encoding coverage for the new operations,
+- [x] Add complete primary/COP0/C0 encoding coverage for the new operations,
       every required-zero field, reserved table cells, and every remaining
       manual-listed COP0 operation without weakening the existing `ERET`
       boundary. Explicitly schedule or defer breakpoint/performance operations
