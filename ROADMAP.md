@@ -1683,27 +1683,39 @@ creating parallel ownership.
 
 ### Functional Address Translation
 
-- [ ] Implement one segment classifier for User, Supervisor, Kernel, and
-      exception-level accesses, including mapped and direct segments, segment
-      protection, cache attributes, 32-bit virtual/physical address behavior,
-      and the existing KSEG aliases.
-- [ ] Implement full-associative architectural TLB matching for all 48
-      even/odd pairs, ASID/global selection, all seven documented page sizes,
-      valid/dirty permissions, physical frame construction, and scratchpad
-      selection.
-- [ ] Add two-entry ITLB and four-entry DTLB lookup accelerators with
-      deterministic derived-cache behavior. Treat them as derived acceleration
-      state only while their exact contents cannot affect behavior, timing,
-      traces, or hashes; do not expose accelerator hit/miss state diagnostically
-      without also preserving its deterministic continuation.
-- [ ] Route both front-end instruction candidates and every byte, halfword,
-      word, doubleword, quadword, COP1, and COP2 data access through the shared
-      translation authority while preserving alignment checks and merge-load
-      semantics at their existing owners.
-- [ ] Cover segment boundaries, privilege modes, ASIDs, global entries,
-      page-size boundaries, even/odd selection, aliases, permissions, lookup
-      replacement, and instruction/data path consistency.
-- [ ] Complete an independent review of functional translation.
+- [ ] Add typed, allocation-free instruction and data translation entry points
+      to `EEMemorySystem`, then implement one side-effect-free segment
+      classifier for User, Supervisor, Kernel, and `EXL`/`ERL` accesses.
+      Cover mapped and direct segments, segment protection, cache attributes,
+      32-bit virtual/physical address behavior, the existing KSEG aliases,
+      unsupported cache attributes, and alignment-before-translation ownership
+      at the existing `EECore` access families.
+- [ ] Implement full-associative architectural translation against all 48
+      canonical even/odd TLB pairs, including lowest-index deterministic
+      duplicate selection, ASID/global matching, all seven documented page
+      sizes, even/odd selection, valid/dirty permissions, physical frame
+      construction, scratchpad selection, and typed refill/invalid/modified
+      fault metadata without mutating exception-owned state. Add the two-entry
+      ITLB and four-entry DTLB only after the architectural path is covered;
+      keep their replacement deterministic and their contents derived,
+      untraced, unhashed, and unserialized while residency cannot affect
+      guest-visible behavior or continuation.
+- [ ] Route both front-end instruction candidates and the public fetch path
+      through the instruction translation entry point, then migrate byte,
+      halfword, word, doubleword, quadword, merge, COP1, and COP2 accesses
+      family by family through the typed data path. Make `EEBus` guest traffic
+      physical-address-only and remove its implicit KSEG and application-alias
+      translation while preserving alignment priority, merge semantics,
+      delayed COP1 fault provenance, FIFO stalls, device access, and existing
+      issue ownership.
+- [ ] Complete the functional-translation conformance matrix for segment
+      boundaries, privilege and exception modes, ASIDs, global entries, all
+      page sizes and boundaries, even/odd selection, physical aliases,
+      permissions, accelerator replacement, and instruction/data consistency.
+      Verify unchanged version-29 persistence and canonical hashes for derived
+      accelerators, run focused, optimized, and sanitizer validation, complete
+      an independent review of the typed/TLB foundation, and complete a final
+      independent review after full access-path integration.
 
 ### Precise Memory Exceptions
 
