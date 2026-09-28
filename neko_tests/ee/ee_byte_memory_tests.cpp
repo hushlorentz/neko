@@ -65,7 +65,7 @@ TEST_CASE("EE signed and unsigned byte loads")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
-    setRegister(&core, 1, 0x20000100);
+    setRegister(&core, 1, 0x80000100);
     setRegister(&core, 2, UINT64_MAX);
     REQUIRE(system.eeBus().writeData8(0x100, 0xfe));
 

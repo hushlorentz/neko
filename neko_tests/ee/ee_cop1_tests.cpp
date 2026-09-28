@@ -4,6 +4,7 @@
 
 #include "catch.hpp"
 #include "ee_core.hpp"
+#include "ee_test_utils.hpp"
 #include "ee_instruction.hpp"
 #include "floating_point_ops.hpp"
 #include "neko_system.hpp"
@@ -116,6 +117,7 @@ TEST_CASE("EE issue readiness observes cross-cycle COP1 producers")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   bus.write32(
     0,
     cop1SingleInstruction(0x00, 1, 3, 2));
@@ -149,6 +151,7 @@ TEST_CASE("EE issue readiness preserves COP1 memory exception order")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   bus.write32(
     0,
     cop1MemoryInstruction(0x31, 1, 2, 0));
@@ -176,6 +179,7 @@ TEST_CASE("EE accepts delayed COP1 work before completion")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
   core.setFloatingPointRegister(2, UINT32_C(0x40000000));
   bus.write32(
@@ -221,6 +225,7 @@ TEST_CASE("EE stepping counts delayed COP1 admission")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
   core.setFloatingPointRegister(2, UINT32_C(0x40000000));
   system.eeBus().write32(
@@ -1160,6 +1165,7 @@ TEST_CASE(
       core.setCOP0Register(
         EECOP0Register::Status,
         EECOP0Status::COP1_USABLE);
+      mapLowKusegForTest(&core);
       core.setGeneralRegister(
         1,
         {
@@ -3615,6 +3621,7 @@ TEST_CASE("EE COP1 branch delay-slot exceptions preserve branch ownership")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setCOP1ControlRegister(
       31,
       contract.conditionBit
@@ -5969,6 +5976,7 @@ TEST_CASE(
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
     core.setFloatingPointRegister(3, UINT32_C(0x40000000));
     system.eeBus().write32(
@@ -6763,6 +6771,7 @@ TEST_CASE("Every EE COP1 divider result crosses exception entry")
       EECOP0Register::Status,
       EECOP0Status::RESET &
         ~EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, vector.fs);
     core.setFloatingPointRegister(3, vector.ft);
     system.eeBus().write32(
@@ -6812,6 +6821,7 @@ TEST_CASE("EE staged COP1 add work crosses exception entry")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
     core.setFloatingPointRegister(3, UINT32_C(0x40000000));
     system.eeBus().write32(
@@ -6845,6 +6855,7 @@ TEST_CASE("EE staged COP1 add work crosses exception entry")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
     core.setFloatingPointRegister(3, UINT32_C(0x40000000));
     system.eeBus().write32(
@@ -6878,6 +6889,7 @@ TEST_CASE("EE staged COP1 multiply work crosses exception entry")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setFloatingPointRegister(2, UINT32_C(0x40000000));
   core.setFloatingPointRegister(3, UINT32_C(0x40400000));
   system.eeBus().write32(
@@ -6913,6 +6925,7 @@ TEST_CASE("EE staged COP1 accumulator add work crosses exception entry")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, UINT32_C(0x3f800000));
     core.setFloatingPointRegister(3, UINT32_C(0x40000000));
     system.eeBus().write32(
@@ -6949,6 +6962,7 @@ TEST_CASE("EE staged COP1 compound flags cross exception entry")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setFloatingPointAccumulator(UINT32_C(0x40000000));
   core.setFloatingPointRegister(2, UINT32_C(0x80800000));
   core.setFloatingPointRegister(3, UINT32_C(0x3f000000));
@@ -7005,6 +7019,7 @@ TEST_CASE("EE staged unary and min/max work crosses exception entry")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, vector.fs);
     core.setFloatingPointRegister(3, vector.ft);
     system.eeBus().write32(
@@ -7049,6 +7064,7 @@ TEST_CASE(
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, UINT32_C(0x4f000000));
     system.eeBus().write32(
       0,
@@ -7086,6 +7102,7 @@ TEST_CASE(
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setCOP1ControlRegister(
       31,
       EECOP1Control::CAUSE_MASK |
@@ -7131,6 +7148,7 @@ TEST_CASE(
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
     core.setFloatingPointRegister(3, UINT32_C(0x40000000));
     system.eeBus().write32(
@@ -7158,6 +7176,7 @@ TEST_CASE(
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(5, {UINT64_C(0x12345678), 0});
     core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
     core.setFloatingPointRegister(3, UINT32_C(0x40000000));
@@ -7187,6 +7206,7 @@ TEST_CASE("EE interrupt entry preserves older COP1 work")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
   core.setFloatingPointRegister(3, UINT32_C(0x40000000));
   system.eeBus().write32(
@@ -7290,6 +7310,7 @@ TEST_CASE("EE interrupt preserves a COP1 Y pair and flushes blocked issue")
   core.setCOP0Register(
     EECOP0Register::Status,
     COP1_INTC_ENABLED_STATUS);
+  mapLowKusegForTest(&core);
   core.setFloatingPointRegister(2, UINT32_C(0x40000000));
   core.setFloatingPointRegister(3, UINT32_C(0x40400000));
   core.setFloatingPointRegister(6, UINT32_C(0x3f000000));
@@ -7345,6 +7366,7 @@ TEST_CASE("EE ERET preserves a handler-issued COP1 Y pair")
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE |
       EECOP0Status::EXCEPTION_LEVEL);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(EECOP0Register::EPC, 0x100);
   core.setGeneralRegister(5, {UINT32_C(0x89abcdef), 0});
   core.setFloatingPointRegister(2, UINT32_C(0x40000000));
@@ -7436,6 +7458,7 @@ TEST_CASE("EE ERET preserves handler-issued COP1 work")
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE |
       EECOP0Status::EXCEPTION_LEVEL);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(EECOP0Register::EPC, 0x100);
   core.setFloatingPointRegister(2, UINT32_C(0x40c00000));
   core.setFloatingPointRegister(3, UINT32_C(0x40000000));
@@ -7503,6 +7526,7 @@ TEST_CASE("EE ERET preserves every staged COP1 destination class")
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE |
         EECOP0Status::EXCEPTION_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setFloatingPointRegister(2, UINT32_C(0x40000000));
     core.setFloatingPointRegister(3, UINT32_C(0x40400000));
@@ -7559,6 +7583,7 @@ TEST_CASE("EE exceptions preserve older write-side COP1 Moves")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(2, {UINT64_C(0x89abcdef), 0});
     system.eeBus().write32(
       0,
@@ -7586,6 +7611,7 @@ TEST_CASE("EE exceptions preserve older write-side COP1 Moves")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(
       2,
       {EECOP1Control::STATUS_WRITABLE_MASK, 0});
@@ -7618,6 +7644,7 @@ TEST_CASE("EE exceptions preserve older write-side COP1 Moves")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
     system.eeBus().write32(
       0,
@@ -7648,6 +7675,7 @@ TEST_CASE("EE COP1 memory side effects precede younger exceptions")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     REQUIRE(
       system.eeBus().writeData32(
@@ -7679,6 +7707,7 @@ TEST_CASE("EE COP1 memory side effects precede younger exceptions")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
     system.eeBus().write32(
@@ -7702,6 +7731,91 @@ TEST_CASE("EE COP1 memory side effects precede younger exceptions")
   }
 }
 
+TEST_CASE("EE COP1 memory operations use data translation")
+{
+  SECTION("LWC1 reads the translated physical address")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {UINT32_C(0x00400100), 0});
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x89abcdef)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001f)},
+        {UINT32_C(0x0000001f)}
+      });
+    core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.floatingPointRegister(3) ==
+      UINT32_C(0x89abcdef));
+    REQUIRE(core.pendingException() == EEException::None);
+  }
+
+  SECTION("SWC1 writes the translated physical address")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {UINT32_C(0x00400100), 0});
+    core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x39, 1, 3, 0));
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001f)},
+        {UINT32_C(0x0000001f)}
+      });
+    core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+    system.runMasterCycles(4);
+
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x89abcdef));
+    REQUIRE(core.pendingException() == EEException::None);
+  }
+
+  SECTION("A translation fault retains the virtual address")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {UINT32_C(0x00400100), 0});
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x31, 1, 3, 0));
+    core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(core.pendingException() == EEException::DataBusErrorLoad);
+    REQUIRE(core.exceptionAddress() == UINT32_C(0x00400100));
+  }
+}
+
 TEST_CASE("EE interrupts respect COP1 memory exception ordering")
 {
   SECTION("A successful load commits after interrupt entry")
@@ -7711,6 +7825,7 @@ TEST_CASE("EE interrupts respect COP1 memory exception ordering")
     core.setCOP0Register(
       EECOP0Register::Status,
       COP1_INTC_ENABLED_STATUS);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     REQUIRE(
       system.eeBus().writeData32(
@@ -7743,6 +7858,7 @@ TEST_CASE("EE interrupts respect COP1 memory exception ordering")
     core.setCOP0Register(
       EECOP0Register::Status,
       COP1_INTC_ENABLED_STATUS);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
     system.eeBus().write32(
@@ -7771,6 +7887,7 @@ TEST_CASE("EE interrupts respect COP1 memory exception ordering")
     core.setCOP0Register(
       EECOP0Register::Status,
       COP1_INTC_ENABLED_STATUS);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(
       1,
       {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
@@ -7799,6 +7916,7 @@ TEST_CASE("EE interrupts respect COP1 memory exception ordering")
     core.setCOP0Register(
       EECOP0Register::Status,
       COP1_INTC_ENABLED_STATUS);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(
       1,
       {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
@@ -7828,6 +7946,7 @@ TEST_CASE("EE ERET preserves handler-issued COP1 Moves and loads")
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE |
         EECOP0Status::EXCEPTION_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setGeneralRegister(2, {UINT64_C(0x89abcdef), 0});
     system.eeBus().write32(
@@ -7859,6 +7978,7 @@ TEST_CASE("EE ERET preserves handler-issued COP1 Moves and loads")
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE |
         EECOP0Status::EXCEPTION_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setGeneralRegister(
       2,
@@ -7895,6 +8015,7 @@ TEST_CASE("EE ERET preserves handler-issued COP1 Moves and loads")
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE |
         EECOP0Status::EXCEPTION_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
     system.eeBus().write32(
@@ -7926,6 +8047,7 @@ TEST_CASE("EE ERET preserves handler-issued COP1 Moves and loads")
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE |
         EECOP0Status::EXCEPTION_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setGeneralRegister(1, {0x200, 0});
     REQUIRE(
@@ -7961,6 +8083,7 @@ TEST_CASE("EE ERET preserves handler-issued COP1 Moves and loads")
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE |
         EECOP0Status::EXCEPTION_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setGeneralRegister(1, {0x200, 0});
     core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
@@ -9869,6 +9992,7 @@ TEST_CASE("EE SYNC.L waits for a preceding LWC1 writeback")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {0x100, 0});
   REQUIRE(
     system.eeBus().writeData32(
@@ -9903,6 +10027,7 @@ TEST_CASE("EE SYNC.P need not wait for a pending LWC1 writeback")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {0x100, 0});
   REQUIRE(
     system.eeBus().writeData32(
@@ -10400,6 +10525,7 @@ TEST_CASE("EE COP1 alignment faults identify branch delay slots")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {0x102, 0});
   system.eeBus().write32(
     0,
@@ -10423,6 +10549,7 @@ TEST_CASE("EE COP1 alignment faults identify branch delay slots")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.clearPendingException();
   core.setProgramCounter(0);
   core.startExecution(0);
@@ -10446,6 +10573,7 @@ TEST_CASE(
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {0x102, 0});
   original.eeBus().write32(
     0,
@@ -10482,6 +10610,7 @@ TEST_CASE("EE COP1 deferred faults preserve nested exception ownership")
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE |
       EECOP0Status::EXCEPTION_LEVEL);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(
     EECOP0Register::EPC,
     UINT32_C(0x80001234));
@@ -10727,6 +10856,7 @@ TEST_CASE("Every canonical EE COP1 opcode requires Status CU1")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(
       EECOP0Register::Cause,
       UINT32_C(0xc0000000));

@@ -127,6 +127,19 @@ TEST_CASE("EE exception levels use kernel segment privilege")
   }
 }
 
+TEST_CASE("EE error level makes kuseg unmapped and uncached")
+{
+  EEMemorySystem memorySystem;
+
+  requireDirectRoute(
+    memorySystem.classifyInstructionAddress(
+      UINT32_C(0x01234567),
+      context(EEPrivilegeMode::User, false, true)),
+    UINT32_C(0x01234567),
+    UINT32_C(0x01234567),
+    EECacheRoute::Uncached);
+}
+
 TEST_CASE("EE kernel direct segments select physical aliases and cache routes")
 {
   EEMemorySystem memorySystem;

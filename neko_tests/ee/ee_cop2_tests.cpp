@@ -231,6 +231,43 @@ TEST_CASE("EE LQC2 and SQC2 bridge RAM and VU0 registers")
   REQUIRE(stored.high == expected.high);
 }
 
+TEST_CASE("EE COP2 memory accesses use translated physical addresses")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const EEQuadword expected = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  core.setGeneralRegister(1, {UINT32_C(0x00400100), 0});
+  REQUIRE(system.eeBus().writeData128(0x100, expected));
+  system.eeBus().write32(
+    0,
+    cop2MemoryInstruction(0x36, 1, 5, 0));
+  system.eeBus().write32(
+    4,
+    cop2MemoryInstruction(0x3e, 1, 5, 0x100));
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000001f)}
+    });
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+  system.clockMasterCycle();
+  system.clockMasterCycle();
+
+  EEQuadword stored = {};
+  REQUIRE(system.eeBus().readData128(0x200, &stored));
+  REQUIRE(stored.low == expected.low);
+  REQUIRE(stored.high == expected.high);
+  REQUIRE(core.pendingException() == EEException::None);
+}
+
 TEST_CASE("EE COP2 quadword memory accesses require alignment")
 {
   SECTION("LQC2 preserves its destination on address error")

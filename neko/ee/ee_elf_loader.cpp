@@ -237,29 +237,19 @@ EEELFLoadResult loadEEELF(
          index < segment.fileSize;
          ++index)
     {
-      const bool written = bus->writeData8(
+      bus->write8(
         segment.virtualAddress + index,
         image[
           static_cast<std::size_t>(segment.fileOffset) +
           index]);
-      if (!written)
-      {
-        throw std::logic_error(
-          "Validated ELF segment could not be written.");
-      }
     }
     for (std::uint32_t index = segment.fileSize;
          index < segment.memorySize;
          ++index)
     {
-      const bool written = bus->writeData8(
+      bus->write8(
         segment.virtualAddress + index,
         0);
-      if (!written)
-      {
-        throw std::logic_error(
-          "Validated ELF BSS could not be written.");
-      }
     }
   }
 

@@ -61,11 +61,11 @@ TEST_CASE("EE signed and unsigned halfword loads")
       UINT64_C(0xfeedfacecafebeef));
   }
 
-  SECTION("LHU zero extends through a RAM alias")
+  SECTION("LHU zero extends through a kernel alias")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
-    setRegister(&core, 1, 0x20000100);
+    setRegister(&core, 1, 0x80000100);
     setRegister(&core, 2, UINT64_MAX);
     REQUIRE(system.eeBus().writeData16(0x100, 0xfedc));
 

@@ -87,6 +87,38 @@ TEST_CASE("EE aligned doubleword stores use GPR bits 63 through 0")
   }
 }
 
+TEST_CASE("EE aligned doubleword loads use translated physical addresses")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x00400108);
+  setRegister(&core, 1, virtualAddress);
+  REQUIRE(
+    system.eeBus().writeData64(
+      0x108,
+      UINT64_C(0x8877665544332211)));
+  system.eeBus().write32(
+    0,
+    memoryInstruction(0x37, 1, 2, 0));
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000001f)}
+    });
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.generalRegister(2).low ==
+    UINT64_C(0x8877665544332211));
+  REQUIRE(core.pendingException() == EEException::None);
+}
+
 TEST_CASE("EE aligned doubleword faults are precise")
 {
   SECTION("A misaligned load preserves its destination")

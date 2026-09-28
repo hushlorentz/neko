@@ -2,6 +2,7 @@
 
 #include "catch.hpp"
 #include "ee_core.hpp"
+#include "ee_test_utils.hpp"
 #include "neko_system.hpp"
 
 namespace
@@ -179,6 +180,7 @@ TEST_CASE("EE branch issue groups execute resolved delay slots")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     setLow(&core, 1, 0x101);
     const std::uint32_t program[] = {
       immediateInstruction(0x04, 0, 0, 2),

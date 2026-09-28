@@ -160,7 +160,7 @@ EEAddressTranslationResult EEMemorySystem::classifyDataAddress(
 EEAddressTranslationResult
 EEMemorySystem::translateInstructionAddress(
   std::uint32_t virtualAddress,
-  const EEAddressTranslationContext &context)
+  const EEAddressTranslationContext &context) const
 {
   const EEAddressTranslationResult classification =
     classifyInstructionAddress(virtualAddress, context);
@@ -172,7 +172,7 @@ EEMemorySystem::translateInstructionAddress(
 EEAddressTranslationResult EEMemorySystem::translateDataAddress(
   std::uint32_t virtualAddress,
   EEDataAccessDirection direction,
-  const EEAddressTranslationContext &context)
+  const EEAddressTranslationContext &context) const
 {
   const bool store = direction == EEDataAccessDirection::Store;
   const EEAddressTranslationResult classification =
@@ -218,6 +218,18 @@ EEAddressTranslationResult EEMemorySystem::classifyAddress(
 
   if (virtualAddress < UINT32_C(0x80000000))
   {
+    if (context.errorLevel)
+    {
+      return {
+        EEAddressTranslationOutcome::Translated,
+        virtualAddress,
+        virtualAddress,
+        EECacheRoute::Uncached,
+        2,
+        EEAddressRoute::MainBus,
+        0xff
+      };
+    }
     return tlbLookup();
   }
   if (virtualAddress < UINT32_C(0xc0000000))
@@ -254,7 +266,7 @@ EEAddressTranslationResult EEMemorySystem::classifyAddress(
 EEAddressTranslationResult EEMemorySystem::translateMappedAddress(
   std::uint32_t virtualAddress,
   bool store,
-  bool instruction)
+  bool instruction) const
 {
   const std::size_t index =
     matchingTLBEntry(virtualAddress, instruction);
@@ -357,7 +369,7 @@ EEAddressTranslationResult EEMemorySystem::translateMappedAddress(
 
 std::size_t EEMemorySystem::matchingTLBEntry(
   std::uint32_t virtualAddress,
-  bool instruction)
+  bool instruction) const
 {
   const std::uint8_t asid =
     static_cast<std::uint8_t>(

@@ -2,6 +2,7 @@
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
+#include "ee_test_utils.hpp"
 #include "gif_dmac_channel.hpp"
 #include "neko_system.hpp"
 
@@ -64,6 +65,7 @@ TEST_CASE("EE INTC delivery obeys all COP0 enable gates")
     system.eeCore().setCOP0Register(
       EECOP0Register::Status,
       status);
+    mapLowKusegForTest(&system.eeCore());
     system.eeBus().write32(0, 0);
     system.eeCore().startExecution(0);
 
@@ -85,6 +87,7 @@ TEST_CASE("EE takes an enabled INTC line before the next instruction")
   core.setCOP0Register(
     EECOP0Register::Status,
     INTC_ENABLED_STATUS);
+  mapLowKusegForTest(&core);
   system.eeBus().write32(0, 0);
   core.startExecution(0);
 
@@ -121,6 +124,7 @@ TEST_CASE("EE ERET exposes a pending interrupt at the next boundary")
     EECOP0Register::Status,
     INTC_ENABLED_STATUS |
       EECOP0Status::EXCEPTION_LEVEL);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(EECOP0Register::EPC, 0x100);
   system.eeBus().write32(
     EEExceptionVector::GENERAL,
@@ -149,6 +153,7 @@ TEST_CASE("EE interrupts wait for a complete branch issue group")
   core.setCOP0Register(
     EECOP0Register::Status,
     INTC_ENABLED_STATUS);
+  mapLowKusegForTest(&core);
   system.eeBus().write32(
     0,
     (UINT32_C(0x04) << 26) | 2);
@@ -176,6 +181,7 @@ TEST_CASE("EE interrupts preserve both in-flight MAC pipelines")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {3, 0});
   core.setGeneralRegister(2, {4, 0});
   core.setGeneralRegister(4, {5, 0});
@@ -191,6 +197,7 @@ TEST_CASE("EE interrupts preserve both in-flight MAC pipelines")
   core.setCOP0Register(
     EECOP0Register::Status,
     INTC_ENABLED_STATUS);
+  mapLowKusegForTest(&core);
   system.clockMasterCycle();
 
   REQUIRE(core.pendingException() == EEException::Interrupt);
@@ -215,6 +222,7 @@ TEST_CASE("EE observes DMAC completion at the next instruction boundary")
   core.setCOP0Register(
     EECOP0Register::Status,
     DMAC_ENABLED_STATUS);
+  mapLowKusegForTest(&core);
   bus.write32(
     EEMemoryMap::D_STAT,
     DMACStatus::CHANNEL_2_MASK);
@@ -255,6 +263,7 @@ TEST_CASE("EE interrupt lines survive save-state restoration")
   original.eeCore().setCOP0Register(
     EECOP0Register::Status,
     INTC_ENABLED_STATUS);
+  mapLowKusegForTest(&original.eeCore());
   original.eeBus().write32(0, 0);
   original.eeCore().startExecution(0);
 

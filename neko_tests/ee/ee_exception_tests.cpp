@@ -1,6 +1,7 @@
 #include <cstdint>
 
 #include "catch.hpp"
+#include "ee_test_utils.hpp"
 #include "neko_system.hpp"
 
 namespace
@@ -44,6 +45,7 @@ TEST_CASE("EE exceptions enter the general vector through COP0")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(
     EECOP0Register::Cause,
     UINT32_C(0xc000ff7c));
@@ -97,6 +99,7 @@ TEST_CASE("EE exception entry replaces coprocessor attribution")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   system.eeBus().write32(
     0,
     (UINT32_C(0x11) << 26) |
@@ -114,6 +117,7 @@ TEST_CASE("EE exception entry replaces coprocessor attribution")
     EECOP0Cause::COPROCESSOR_1);
 
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setProgramCounter(0x100);
   core.enterInterruptException();
 
@@ -132,6 +136,7 @@ TEST_CASE("EE bootstrap and interrupt vectors follow Status BEV")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(0, UINT32_C(0x0000000c));
     core.startExecution(0);
 
@@ -147,6 +152,7 @@ TEST_CASE("EE bootstrap and interrupt vectors follow Status BEV")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     core.setProgramCounter(0x80001000);
 
     core.enterInterruptException();
@@ -158,6 +164,7 @@ TEST_CASE("EE bootstrap and interrupt vectors follow Status BEV")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+    mapLowKusegForTest(&core);
     core.setProgramCounter(0x80002000);
     core.enterInterruptException();
 
@@ -174,6 +181,7 @@ TEST_CASE("Nested EE exceptions preserve EPC and use the general vector")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::EXCEPTION_LEVEL);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(EECOP0Register::EPC, 0x80001234);
   core.setCOP0Register(
     EECOP0Register::Cause,
@@ -203,6 +211,7 @@ TEST_CASE("EE ERET returns through the active exception level")
     core.setCOP0Register(
       EECOP0Register::Status,
       preserved | EECOP0Status::EXCEPTION_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setCOP0Register(
       EECOP0Register::ErrorEPC,
@@ -237,6 +246,7 @@ TEST_CASE("EE ERET returns through the active exception level")
       EECOP0Register::Status,
       EECOP0Status::EXCEPTION_LEVEL |
         EECOP0Status::ERROR_LEVEL);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::EPC, 0x100);
     core.setCOP0Register(EECOP0Register::ErrorEPC, 0x200);
     system.eeBus().write32(0, UINT32_C(0x42000018));
@@ -258,6 +268,7 @@ TEST_CASE("EE ERET is undefined in a branch delay slot")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::EXCEPTION_LEVEL);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(EECOP0Register::EPC, 0x100);
   system.eeBus().write32(
     0,
@@ -283,6 +294,7 @@ TEST_CASE("EE delay-slot exceptions identify the restartable branch")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x101, 0});
     system.eeBus().write32(
       0,
@@ -323,6 +335,7 @@ TEST_CASE("EE delay-slot exceptions identify the restartable branch")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(
       0,
       immediateInstruction(0x14, 0, 0, 2));
@@ -344,6 +357,7 @@ TEST_CASE("First-level non-delay exceptions clear stale Cause BD")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(
     EECOP0Register::Cause,
     EECOP0Cause::BRANCH_DELAY);
@@ -366,6 +380,7 @@ TEST_CASE("EE address exceptions update BadVAddr")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(
       EECOP0Register::BadVAddr,
       UINT32_C(0xdeadbeef));
@@ -393,6 +408,7 @@ TEST_CASE("EE address exceptions update BadVAddr")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x101, 0});
     system.eeBus().write32(
       0,
@@ -418,6 +434,7 @@ TEST_CASE("EE bus errors use their architectural Cause codes")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     core.startExecution(UINT32_C(0x02000000));
 
     system.clockMasterCycle();
@@ -433,6 +450,7 @@ TEST_CASE("EE bus errors use their architectural Cause codes")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(
       EECOP0Register::BadVAddr,
       UINT32_C(0xdeadbeef));
@@ -481,6 +499,7 @@ TEST_CASE("EE reserved, syscall, and breakpoint instructions enter exceptions")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(0, contract.instruction);
     core.startExecution(0);
 

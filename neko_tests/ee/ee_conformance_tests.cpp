@@ -4,6 +4,7 @@
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
+#include "ee_test_utils.hpp"
 #include "neko_system.hpp"
 
 namespace
@@ -61,6 +62,7 @@ namespace
   {
     EECore &core = system->eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     const std::uint32_t program[] = {
       immediateInstruction(0x19, 0, 1, 0x100),
       immediateInstruction(0x0d, 0, 2, 7),
@@ -131,6 +133,7 @@ TEST_CASE("EE arithmetic conformance program")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   const std::uint32_t program[] = {
     immediateInstruction(0x09, 0, 1, 7),
     immediateInstruction(0x09, 0, 2, 0xfffd),
@@ -164,6 +167,7 @@ TEST_CASE("EE delay-slot conformance program")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   const std::uint32_t program[] = {
     immediateInstruction(0x04, 0, 0, 2),
     immediateInstruction(0x0d, 0, 2, 1),
@@ -193,6 +197,7 @@ TEST_CASE("EE memory conformance program")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {0x100, 0});
   core.setGeneralRegister(
     2,
@@ -253,6 +258,7 @@ TEST_CASE("EE exception conformance program")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {0x7fffffff, 0});
   core.setGeneralRegister(2, {1, 0});
   core.setGeneralRegister(
@@ -308,6 +314,7 @@ TEST_CASE("EE interrupt return conformance program")
     EECOP0Status::INTERRUPT_ENABLE |
       EECOP0Status::MASTER_INTERRUPT_ENABLE |
       EECOP0Status::INTC_MASK);
+  mapLowKusegForTest(&core);
   const std::uint32_t program[] = {
     immediateInstruction(0x0d, 0, 1, 1),
     UINT32_C(0x0000000c)
@@ -412,6 +419,7 @@ TEST_CASE("In-flight EE save states resume identically")
     original.eeCore().setCOP0Register(
       EECOP0Register::Status,
       0);
+    mapLowKusegForTest(&original.eeCore());
     const std::uint32_t program[] = {
       UINT32_C(0x0c000003),
       immediateInstruction(0x19, 31, 3, 0),

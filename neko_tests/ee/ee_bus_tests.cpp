@@ -60,9 +60,9 @@ TEST_CASE("EE Main Memory Map Tests")
   REQUIRE(bus.read32(0xa0000100) == 0x12345678);
 
   std::uint8_t byte = 0;
-  REQUIRE(bus.readData8(0x20000101, &byte));
+  REQUIRE(bus.readData8(0x00000101, &byte));
   REQUIRE(byte == 0x56);
-  REQUIRE(bus.writeData8(0xa0000102, 0xab));
+  REQUIRE(bus.writeData8(0x00000102, 0xab));
   REQUIRE(bus.readData8(0x00000102, &byte));
   REQUIRE(byte == 0xab);
   REQUIRE_FALSE(
@@ -70,8 +70,8 @@ TEST_CASE("EE Main Memory Map Tests")
   REQUIRE_FALSE(
     bus.writeData8(EEMemoryMap::MAIN_MEMORY_SIZE, 0));
   std::uint16_t halfword = 0;
-  REQUIRE(bus.writeData16(0x30000104, 0x89ab));
-  REQUIRE(bus.readData16(0x80000104, &halfword));
+  REQUIRE(bus.writeData16(0x00000104, 0x89ab));
+  REQUIRE(bus.readData16(0x00000104, &halfword));
   REQUIRE(halfword == 0x89ab);
   REQUIRE_THROWS_WITH(
     bus.readData16(0x105, &halfword),
@@ -79,8 +79,8 @@ TEST_CASE("EE Main Memory Map Tests")
   REQUIRE_FALSE(
     bus.readData16(EEMemoryMap::MAIN_MEMORY_SIZE, &halfword));
   std::uint32_t word = 0;
-  REQUIRE(bus.writeData32(0x20000108, UINT32_C(0x89abcdef)));
-  REQUIRE(bus.readData32(0xa0000108, &word));
+  REQUIRE(bus.writeData32(0x00000108, UINT32_C(0x89abcdef)));
+  REQUIRE(bus.readData32(0x00000108, &word));
   REQUIRE(word == UINT32_C(0x89abcdef));
   REQUIRE_THROWS_WITH(
     bus.writeData32(0x10a, 0),
@@ -90,9 +90,9 @@ TEST_CASE("EE Main Memory Map Tests")
   std::uint64_t doubleword = 0;
   REQUIRE(
     bus.writeData64(
-      0x30000110,
+      0x00000110,
       UINT64_C(0x0123456789abcdef)));
-  REQUIRE(bus.readData64(0x80000110, &doubleword));
+  REQUIRE(bus.readData64(0x00000110, &doubleword));
   REQUIRE(doubleword == UINT64_C(0x0123456789abcdef));
   REQUIRE_THROWS_WITH(
     bus.readData64(0x114, &doubleword),
@@ -105,9 +105,9 @@ TEST_CASE("EE Main Memory Map Tests")
     UINT64_C(0x7766554433221100),
     UINT64_C(0xffeeddccbbaa9988)
   };
-  REQUIRE(bus.writeData128(0x20000120, storedQuadword));
+  REQUIRE(bus.writeData128(0x00000120, storedQuadword));
   EEQuadword loadedQuadword;
-  REQUIRE(bus.readData128(0xa0000120, &loadedQuadword));
+  REQUIRE(bus.readData128(0x00000120, &loadedQuadword));
   REQUIRE(loadedQuadword.low == storedQuadword.low);
   REQUIRE(loadedQuadword.high == storedQuadword.high);
   REQUIRE_THROWS_WITH(
@@ -148,18 +148,18 @@ TEST_CASE("EE direct-mapped kernel segments cover the system map")
     UINT32_C(0x12345678));
 
   REQUIRE(bus.writeData32(
-    EEMemoryMap::KSEG0_BASE + EEMemoryMap::INTC_MASK,
+    EEMemoryMap::INTC_MASK,
     EEInterruptSource::mask(EEInterruptSource::VIF0)));
   std::uint32_t interruptMask = 0;
   REQUIRE(bus.readData32(
-    EEMemoryMap::KSEG1_BASE + EEMemoryMap::INTC_MASK,
+    EEMemoryMap::INTC_MASK,
     &interruptMask));
   REQUIRE(
     interruptMask ==
     EEInterruptSource::mask(EEInterruptSource::VIF0));
 
   REQUIRE(bus.writeData64(
-    EEMemoryMap::KSEG1_BASE + EEMemoryMap::GS_BUSDIR,
+    EEMemoryMap::GS_BUSDIR,
     1));
   REQUIRE(system.gs().hostInterfaceReversed());
   std::uint64_t busDirection = 0;
@@ -172,7 +172,7 @@ TEST_CASE("EE direct-mapped kernel segments cover the system map")
     1);
 
   REQUIRE(bus.writeData128(
-    EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
+    EEMemoryMap::VIF0_FIFO,
     EEQuadword{}));
   REQUIRE(system.vif0().fifoQuadwordCount() == 1);
   REQUIRE(bus.writeQuadword(
@@ -187,6 +187,28 @@ TEST_CASE("EE direct-mapped kernel segments cover the system map")
   REQUIRE_THROWS_WITH(
     bus.read32(EEMemoryMap::KSEG2_BASE),
     "EE bus read from an unmapped address.");
+}
+
+TEST_CASE("EE guest bus accesses require physical addresses")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+
+  bus.write32(0x100, UINT32_C(0x12345678));
+
+  std::uint32_t value = 0;
+  REQUIRE_FALSE(bus.readInstruction32(0x80000100, &value));
+  REQUIRE_FALSE(bus.readData32(0x20000100, &value));
+  REQUIRE_FALSE(bus.readData32(0xa0000100, &value));
+  REQUIRE_FALSE(
+    bus.writeData32(
+      EEMemoryMap::KSEG0_BASE + EEMemoryMap::INTC_MASK,
+      EEInterruptSource::mask(EEInterruptSource::VIF0)));
+
+  bus.write8(EEMemoryMap::KSEG0_BASE + 0x100, 0xab);
+  std::uint8_t byte = 0;
+  REQUIRE(bus.readData8(0x100, &byte));
+  REQUIRE(byte == 0xab);
 }
 
 TEST_CASE("EE guest device accesses enforce register contracts")
@@ -267,7 +289,7 @@ TEST_CASE("EE guest VIF FIFO stores are atomic and backpressured")
 
   REQUIRE(
     bus.writeGuestData128(
-      EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF0_FIFO,
+      EEMemoryMap::VIF0_FIFO,
       interruptedNops) ==
     EEDataWriteResult::Completed);
   bus.advanceGuestFIFOs();
@@ -294,7 +316,7 @@ TEST_CASE("EE guest VIF FIFO stores are atomic and backpressured")
   REQUIRE(system.vif0().wordsIngested() == 32);
 }
 
-TEST_CASE("EE SQ retries a full guest FIFO without raising an exception")
+TEST_CASE("EE SQ retries a translated full FIFO without an exception")
 {
   NekoSystem system;
   EEBus &bus = system.eeBus();
@@ -317,7 +339,8 @@ TEST_CASE("EE SQ retries a full guest FIFO without raising an exception")
       EEDataWriteResult::Completed);
   }
 
-  core.setGeneralRegister(1, {EEMemoryMap::VIF0_FIFO, 0});
+  constexpr std::uint32_t virtualFIFO = UINT32_C(0x00400000);
+  core.setGeneralRegister(1, {virtualFIFO, 0});
   core.setGeneralRegister(
     2,
     {
@@ -327,16 +350,28 @@ TEST_CASE("EE SQ retries a full guest FIFO without raising an exception")
   bus.write32(
     0,
     immediateInstruction(0x1f, 1, 2));
-  core.startExecution(0);
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      virtualFIFO,
+      {
+        (EEMemoryMap::VIF0_FIFO >> 6) |
+        UINT32_C(0x1f)
+      },
+      {UINT32_C(0x1f)}
+    });
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
 
   system.clockMasterCycle();
-  REQUIRE(core.programCounter() == 0);
+  REQUIRE(core.programCounter() == EEMemoryMap::KSEG0_BASE);
   REQUIRE(core.pendingException() == EEException::None);
   REQUIRE(system.vif0().fifoQuadwordCount() == 8);
 
   bus.write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
   system.clockMasterCycle();
-  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.programCounter() == EEMemoryMap::KSEG0_BASE + 4);
   REQUIRE(core.pendingException() == EEException::None);
   REQUIRE(system.vif0().fifoQuadwordCount() == 1);
 }

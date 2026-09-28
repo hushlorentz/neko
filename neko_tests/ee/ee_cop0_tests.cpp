@@ -2,6 +2,7 @@
 
 #include "catch.hpp"
 #include "ee_core.hpp"
+#include "ee_test_utils.hpp"
 #include "ee_instruction.hpp"
 #include "neko_system.hpp"
 
@@ -333,6 +334,7 @@ TEST_CASE("EE TLB operations require COP0 usability")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::USER_MODE);
+    mapLowKusegForTest(&core);
     const EETLBEntry indexedBefore = core.tlbEntry(4);
     const EETLBEntry randomBefore =
       core.tlbEntry(EECOP0Random::RESET);
@@ -394,6 +396,7 @@ TEST_CASE("EE COP0 faults preserve precise two-wide issue")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::USER_MODE);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::Index, 4);
     core.setCOP0Register(
       EECOP0Register::EntryHi,
@@ -423,6 +426,7 @@ TEST_CASE("EE COP0 faults preserve precise two-wide issue")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::USER_MODE);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(EECOP0Register::Index, 4);
     core.setCOP0Register(
       EECOP0Register::EntryHi,
@@ -752,6 +756,7 @@ TEST_CASE("EE MTC0 applies register-specific write policies")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::CACHE_HIT);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(2, {UINT32_MAX, 0});
 
     runInstruction(
@@ -918,6 +923,7 @@ TEST_CASE("EE COP0 transfers require kernel mode or CU0")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::USER_MODE);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(
       EECOP0Register::TagHi,
       UINT32_C(0x12345678));
@@ -950,6 +956,7 @@ TEST_CASE("EE COP0 transfers require kernel mode or CU0")
       EECOP0Register::Status,
       EECOP0Status::USER_MODE |
       EECOP0Status::COP0_USABLE);
+    mapLowKusegForTest(&core);
     core.setCOP0Register(
       EECOP0Register::TagHi,
       UINT32_C(0x12345678));

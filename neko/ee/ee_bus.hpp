@@ -152,6 +152,9 @@ class EEBus
     bool guestData128WriteReady(
       std::uint32_t address) const;
     void advanceGuestFIFOs();
+    void write8(
+      std::uint32_t address,
+      std::uint8_t value);
     std::uint32_t read32(std::uint32_t address) const;
     void write32(
       std::uint32_t address,

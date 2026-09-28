@@ -114,6 +114,42 @@ TEST_CASE("EE LDR follows every little-endian byte position")
   }
 }
 
+TEST_CASE("EE doubleword merge stores use translated physical addresses")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x00400106);
+  setRegister(&core, 1, virtualAddress);
+  setRegister(
+    &core,
+    2,
+    UINT64_C(0x11223344a1b2c3d4));
+  REQUIRE(
+    system.eeBus().writeData64(
+      0x100,
+      UINT64_C(0x77665544ccbbaa99)));
+  system.eeBus().write32(
+    0,
+    memoryInstruction(0x2c, 1, 2, 0));
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000001f)}
+    });
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+  system.clockMasterCycle();
+
+  std::uint64_t stored = 0;
+  REQUIRE(system.eeBus().readData64(0x100, &stored));
+  REQUIRE(stored == UINT64_C(0x7711223344a1b2c3));
+  REQUIRE(core.pendingException() == EEException::None);
+}
+
 TEST_CASE("EE SDL follows every little-endian byte position")
 {
   const std::array<std::uint64_t, 8> expected = {{

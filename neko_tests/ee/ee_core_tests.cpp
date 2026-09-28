@@ -6,6 +6,7 @@
 #include "catch.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
+#include "ee_test_utils.hpp"
 #include "floating_point_ops.hpp"
 #include "ee_instruction.hpp"
 #include "neko_system.hpp"
@@ -1843,7 +1844,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     EECore &core = system.eeCore();
     core.setCOP0Register(
       EECOP0Register::Status,
-      EECOP0Status::COP1_USABLE);
+      EECOP0Status::RESET | EECOP0Status::COP1_USABLE);
     core.setFloatingPointRegister(
       1,
       UINT32_C(0x3f800000));
@@ -1878,6 +1879,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(0, UINT32_C(0x0000000c));
     system.eeBus().write32(4, UINT32_C(0x24020007));
     core.startExecution(0);
@@ -1909,6 +1911,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     NekoSystem system;
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(0, UINT32_C(0x24020007));
     system.eeBus().write32(4, UINT32_C(0x0000000c));
     core.startExecution(0);
@@ -2039,6 +2042,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
     core.setFloatingPointRegister(2, UINT32_C(0x40000000));
     system.eeBus().write32(0, UINT32_C(0x460208c0));
@@ -2355,6 +2359,32 @@ TEST_CASE("EE Core instruction fetching")
     REQUIRE_FALSE(core.exceptionPending());
   }
 
+  SECTION("Mapped instructions are fetched through the TLB")
+  {
+    constexpr std::uint32_t virtualAddress = UINT32_C(0x00400100);
+    bus.write32(0x100, UINT32_C(0x01234567));
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001f)},
+        {UINT32_C(0x0000001f)}
+      });
+    core.setProgramCounter(virtualAddress);
+
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE(result.succeeded);
+    REQUIRE(result.address == virtualAddress);
+    REQUIRE(result.instruction == UINT32_C(0x01234567));
+    REQUIRE(core.programCounter() == virtualAddress + 4);
+  }
+
   SECTION("Misaligned instruction addresses raise AdEL")
   {
     core.setProgramCounter(0x102);
@@ -2424,6 +2454,7 @@ TEST_CASE("EE Core instruction fetching")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(
       1,
       UINT32_C(0x3f800000));
@@ -2483,6 +2514,33 @@ TEST_CASE("EE Core instruction fetching")
     core.setProgramCounter(0);
     REQUIRE(core.fetchInstruction().succeeded);
   }
+}
+
+TEST_CASE("EE front end translates mapped instruction candidates")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x00400100);
+
+  system.eeBus().write32(0x100, UINT32_C(0x24020007));
+  system.eeBus().write32(0x104, 0);
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000001f)}
+    });
+  core.startExecution(virtualAddress);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.generalRegister(2).low == 7);
+  REQUIRE(core.pendingException() == EEException::None);
 }
 
 TEST_CASE("EE Core scheduled execution")
@@ -2612,6 +2670,7 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
     bus.write32(0, UINT32_C(0x44020800));
     bus.write32(4, UINT32_C(0x24030002));
@@ -2638,6 +2697,7 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     bus.write32(0, UINT32_C(0x44020800));
     bus.write32(4, UINT32_C(0x46031000));
     core.startExecution(0);
@@ -2672,6 +2732,7 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     bus.write32(0, UINT32_C(0x46031000));
     bus.write32(4, UINT32_C(0x44040800));
     core.startExecution(0);
@@ -2709,6 +2770,7 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     bus.write32(
       0,
@@ -2742,6 +2804,7 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     bus.write32(
       0,
@@ -2775,6 +2838,7 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     bus.write32(0, UINT32_C(0x46031000));
     bus.write32(
@@ -2808,6 +2872,7 @@ TEST_CASE("EE Core scheduled execution")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     bus.write32(0, UINT32_C(0x46031000));
     bus.write32(
@@ -3333,6 +3398,7 @@ TEST_CASE("EE issue candidates are independent of selection policy")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setFloatingPointRegister(
       1,
       UINT32_C(0x3f800000));

@@ -85,7 +85,13 @@ void NekoSaveStateCodec::writeEECore(
     core.youngerAStageContinuation.instruction.raw);
   writer->writeU32(
     core.youngerAStageContinuation.address);
-  for (std::size_t index = 0; index < 4; ++index)
+  writer->writeU8(
+    static_cast<std::uint8_t>(
+      core.issueLatch.translationOutcome));
+  writer->writeU8(
+    static_cast<std::uint8_t>(
+      core.stagingLatch.translationOutcome));
+  for (std::size_t index = 0; index < 2; ++index)
   {
     writer->writeU8(0);
   }
@@ -342,7 +348,7 @@ void NekoSaveStateCodec::readEECore(
     readEnum<EECore::IssueLatchFailure>(
       reader,
       static_cast<std::uint8_t>(
-        EECore::IssueLatchFailure::UnsupportedInstruction),
+        EECore::IssueLatchFailure::TranslationError),
       "EE decoded issue-latch failure");
   core->stagingLatch.valid =
     reader->readBool("EE staging-latch flag");
@@ -350,7 +356,7 @@ void NekoSaveStateCodec::readEECore(
     readEnum<EECore::IssueLatchFailure>(
       reader,
       static_cast<std::uint8_t>(
-        EECore::IssueLatchFailure::UnsupportedInstruction),
+        EECore::IssueLatchFailure::TranslationError),
       "EE staging-latch failure");
   core->stagingLatch.address = reader->readU32();
   const std::uint32_t stagingInstruction =
@@ -361,7 +367,19 @@ void NekoSaveStateCodec::readEECore(
     reader->readU32();
   const std::uint32_t youngerAStageAddress =
     reader->readU32();
-  for (std::size_t index = 0; index < 4; ++index)
+  core->issueLatch.translationOutcome =
+    readEnum<EEAddressTranslationOutcome>(
+      reader,
+      static_cast<std::uint8_t>(
+        EEAddressTranslationOutcome::UnsupportedCacheAttribute),
+      "EE issue-latch translation outcome");
+  core->stagingLatch.translationOutcome =
+    readEnum<EEAddressTranslationOutcome>(
+      reader,
+      static_cast<std::uint8_t>(
+        EEAddressTranslationOutcome::UnsupportedCacheAttribute),
+      "EE staging-latch translation outcome");
+  for (std::size_t index = 0; index < 2; ++index)
   {
     require(
       reader->readU8() == 0,
@@ -1260,6 +1278,25 @@ void NekoSaveStateCodec::readEECore(
     [](EECore::DecodedIssueLatch *latch,
        std::uint32_t instruction)
     {
+      const auto translationFailureValid =
+        [](EEAddressTranslationOutcome outcome)
+        {
+          switch (outcome)
+          {
+            case EEAddressTranslationOutcome::AddressErrorLoadOrFetch:
+            case EEAddressTranslationOutcome::TLBRefillLoadOrFetch:
+            case EEAddressTranslationOutcome::TLBInvalidLoadOrFetch:
+            case EEAddressTranslationOutcome::
+              UnsupportedScratchpadInstruction:
+            case EEAddressTranslationOutcome::
+              UnsupportedScratchpadPageSize:
+            case EEAddressTranslationOutcome::
+              UnsupportedCacheAttribute:
+              return true;
+            default:
+              return false;
+          }
+        };
       latch->instruction = {};
       if (!latch->valid)
       {
@@ -1267,7 +1304,9 @@ void NekoSaveStateCodec::readEECore(
           latch->address == 0 &&
             instruction == 0 &&
             latch->failure ==
-              EECore::IssueLatchFailure::None,
+              EECore::IssueLatchFailure::None &&
+            latch->translationOutcome ==
+              EEAddressTranslationOutcome::Translated,
           "EE inactive issue latch contains state");
         return;
       }
@@ -1275,7 +1314,9 @@ void NekoSaveStateCodec::readEECore(
       if (latch->failure == EECore::IssueLatchFailure::None)
       {
         require(
-          (latch->address & 3) == 0,
+          (latch->address & 3) == 0 &&
+            latch->translationOutcome ==
+              EEAddressTranslationOutcome::Translated,
           "EE decoded issue latch address is invalid");
         latch->instruction =
           decodeEEInstruction(instruction);
@@ -1287,20 +1328,39 @@ void NekoSaveStateCodec::readEECore(
             EECore::IssueLatchFailure::AddressError)
       {
         require(
-          (latch->address & 3) != 0 && instruction == 0,
+          (latch->address & 3) != 0 &&
+            instruction == 0 &&
+            latch->translationOutcome ==
+              EEAddressTranslationOutcome::Translated,
           "EE address-error issue latch is inconsistent");
+        return;
+      }
+      if (latch->failure ==
+            EECore::IssueLatchFailure::TranslationError)
+      {
+        require(
+          (latch->address & 3) == 0 &&
+            instruction == 0 &&
+            translationFailureValid(
+              latch->translationOutcome),
+          "EE translation-error issue latch is inconsistent");
         return;
       }
       if (latch->failure == EECore::IssueLatchFailure::BusError)
       {
         require(
-          (latch->address & 3) == 0 && instruction == 0,
+          (latch->address & 3) == 0 &&
+            instruction == 0 &&
+            latch->translationOutcome ==
+              EEAddressTranslationOutcome::Translated,
           "EE bus-error issue latch is inconsistent");
         return;
       }
 
       require(
-        (latch->address & 3) == 0,
+        (latch->address & 3) == 0 &&
+          latch->translationOutcome ==
+            EEAddressTranslationOutcome::Translated,
         "EE decode-failure issue latch address is invalid");
       bool matchingDecodeFailure = false;
       try

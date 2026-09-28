@@ -17,13 +17,18 @@ namespace
     0x1fffffff;
   constexpr std::uint32_t VIF_STALL_CANCEL = 1u << 3;
 
-  std::uint32_t directMappedPhysicalAddress(
+  std::uint32_t hostPhysicalAddress(
     std::uint32_t address)
   {
     if (address >= EEMemoryMap::KSEG0_BASE &&
         address < EEMemoryMap::KSEG2_BASE)
     {
       return address & EE_PHYSICAL_ADDRESS_MASK;
+    }
+    const std::uint32_t segment = address & 0xf0000000;
+    if (segment == 0x20000000 || segment == 0x30000000)
+    {
+      return address & 0x0fffffff;
     }
     return address;
   }
@@ -97,19 +102,12 @@ bool EEBus::mainMemoryAddress(
   std::size_t width,
   std::uint32_t *physicalAddress) const
 {
-  std::uint32_t physical =
-    directMappedPhysicalAddress(address);
-  const std::uint32_t segment = address & 0xf0000000;
-  if (segment == 0x20000000 || segment == 0x30000000)
-  {
-    physical = address & 0x0fffffff;
-  }
-  if (physical >= mainMemory.size() ||
-      width > mainMemory.size() - physical)
+  if (address >= mainMemory.size() ||
+      width > mainMemory.size() - address)
   {
     return false;
   }
-  *physicalAddress = physical;
+  *physicalAddress = address;
   return true;
 }
 
@@ -118,7 +116,10 @@ bool EEBus::isMainMemoryRange(
   std::size_t width) const
 {
   std::uint32_t physicalAddress = 0;
-  return mainMemoryAddress(address, width, &physicalAddress);
+  return mainMemoryAddress(
+    hostPhysicalAddress(address),
+    width,
+    &physicalAddress);
 }
 
 void EEBus::attachDMACController(DMACController *dmac)
@@ -464,7 +465,6 @@ EEDataWriteResult EEBus::writeGuestData128(
     address,
     16,
     "EE quadword store must be naturally aligned.");
-  address = directMappedPhysicalAddress(address);
 
   const GIFQuadword quadword = {{
     static_cast<std::uint32_t>(value.low),
@@ -509,7 +509,6 @@ EEDataWriteResult EEBus::writeGuestData128(
 bool EEBus::guestData128WriteReady(
   std::uint32_t address) const
 {
-  address = directMappedPhysicalAddress(address);
   if (address == EEMemoryMap::VIF0_FIFO)
   {
     return
@@ -542,7 +541,6 @@ bool EEBus::readMapped32(
   std::uint32_t address,
   std::uint32_t *value) const
 {
-  address = directMappedPhysicalAddress(address);
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 4, &physicalAddress))
   {
@@ -638,7 +636,6 @@ bool EEBus::writeMapped32(
   std::uint32_t value,
   bool checkedGuestAccess)
 {
-  address = directMappedPhysicalAddress(address);
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 4, &physicalAddress))
   {
@@ -800,6 +797,7 @@ std::uint32_t EEBus::read32(std::uint32_t address) const
     address,
     4,
     "EE bus 32-bit access must be naturally aligned.");
+  address = hostPhysicalAddress(address);
   std::uint32_t value = 0;
   if (readMapped32(address, &value))
   {
@@ -807,6 +805,19 @@ std::uint32_t EEBus::read32(std::uint32_t address) const
   }
   throw std::out_of_range(
     "EE bus read from an unmapped address.");
+}
+
+void EEBus::write8(
+  std::uint32_t address,
+  std::uint8_t value)
+{
+  address = hostPhysicalAddress(address);
+  if (writeData8(address, value))
+  {
+    return;
+  }
+  throw std::out_of_range(
+    "EE bus write to an unmapped address.");
 }
 
 void EEBus::write32(
@@ -817,6 +828,7 @@ void EEBus::write32(
     address,
     4,
     "EE bus 32-bit access must be naturally aligned.");
+  address = hostPhysicalAddress(address);
   if (writeMapped32(address, value, false))
   {
     return;
@@ -829,7 +841,6 @@ bool EEBus::readMapped64(
   std::uint32_t address,
   std::uint64_t *value) const
 {
-  address = directMappedPhysicalAddress(address);
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 8, &physicalAddress))
   {
@@ -863,7 +874,6 @@ bool EEBus::writeMapped64(
   std::uint64_t value,
   bool checkedGuestAccess)
 {
-  address = directMappedPhysicalAddress(address);
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 8, &physicalAddress))
   {
@@ -927,7 +937,7 @@ std::uint64_t EEBus::read64(std::uint32_t address)
     address,
     8,
     "EE bus 64-bit access must be naturally aligned.");
-  address = directMappedPhysicalAddress(address);
+  address = hostPhysicalAddress(address);
   if (address == EEMemoryMap::GS_BUSDIR)
   {
     return gsComponent->hostInterfaceReversed() ? 1 : 0;
@@ -950,11 +960,11 @@ void EEBus::write64(
     address,
     8,
     "EE bus 64-bit access must be naturally aligned.");
+  address = hostPhysicalAddress(address);
   if (writeMapped64(address, value, false))
   {
     return;
   }
-  address = directMappedPhysicalAddress(address);
   write32(address, static_cast<std::uint32_t>(value));
   write32(address + 4, static_cast<std::uint32_t>(value >> 32));
 }
@@ -965,7 +975,7 @@ GIFQuadword EEBus::readQuadword(std::uint32_t address) const
     address,
     16,
     "EE bus quadword access must be naturally aligned.");
-  address = directMappedPhysicalAddress(address);
+  address = hostPhysicalAddress(address);
   GIFQuadword value = {};
   for (std::size_t index = 0; index < value.size(); ++index)
   {
@@ -983,7 +993,7 @@ bool EEBus::writeQuadword(
     address,
     16,
     "EE bus quadword access must be naturally aligned.");
-  address = directMappedPhysicalAddress(address);
+  address = hostPhysicalAddress(address);
   if (address == EEMemoryMap::VIF0_FIFO ||
       address == EEMemoryMap::VIF1_FIFO)
   {

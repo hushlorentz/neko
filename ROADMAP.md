@@ -1700,7 +1700,7 @@ creating parallel ownership.
       keep their replacement deterministic and their contents derived,
       untraced, unhashed, and unserialized while residency cannot affect
       guest-visible behavior or continuation.
-- [ ] Route both front-end instruction candidates and the public fetch path
+- [x] Route both front-end instruction candidates and the public fetch path
       through the instruction translation entry point, then migrate byte,
       halfword, word, doubleword, quadword, merge, COP1, and COP2 accesses
       family by family through the typed data path. Make `EEBus` guest traffic

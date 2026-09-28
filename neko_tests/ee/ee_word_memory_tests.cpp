@@ -68,7 +68,7 @@ TEST_CASE("EE signed and unsigned aligned word loads")
   {
     NekoSystem system;
     EECore &core = system.eeCore();
-    setRegister(&core, 1, 0x30000100);
+    setRegister(&core, 1, 0x80000100);
     setRegister(&core, 2, UINT64_MAX);
     REQUIRE(
       system.eeBus().writeData32(
@@ -100,6 +100,38 @@ TEST_CASE("EE aligned word stores use the low 32 bits")
   std::uint32_t value = 0;
   REQUIRE(system.eeBus().readData32(0x104, &value));
   REQUIRE(value == UINT32_C(0x89abcdef));
+}
+
+TEST_CASE("EE aligned word loads use translated physical addresses")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x00400100);
+  setRegister(&core, 1, virtualAddress);
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x89abcdef)));
+  system.eeBus().write32(
+    0,
+    memoryInstruction(0x27, 1, 2, 0));
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    0);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000001f)}
+    });
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.generalRegister(2).low == UINT32_C(0x89abcdef));
+  REQUIRE(core.pendingException() == EEException::None);
 }
 
 TEST_CASE("EE aligned word faults are precise")

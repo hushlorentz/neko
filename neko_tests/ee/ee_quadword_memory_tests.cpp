@@ -110,6 +110,38 @@ TEST_CASE("EE LQ and SQ mask the low effective-address bits")
   REQUIRE(value.high == UINT64_C(0xfedcba9876543210));
 }
 
+TEST_CASE("EE quadword loads use translated physical addresses")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x0040011f);
+  const EEQuadword expected = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  core.setGeneralRegister(1, {virtualAddress, 0});
+  REQUIRE(system.eeBus().writeData128(0x110, expected));
+  system.eeBus().write32(
+    0,
+    memoryInstruction(0x1e, 1, 2, 0));
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000001f)}
+    });
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+  system.clockMasterCycle();
+
+  REQUIRE(core.generalRegister(2).low == expected.low);
+  REQUIRE(core.generalRegister(2).high == expected.high);
+  REQUIRE(core.pendingException() == EEException::None);
+}
+
 TEST_CASE("EE quadword faults preserve architectural state")
 {
   SECTION("An unmapped LQ preserves its destination")

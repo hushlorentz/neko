@@ -6,6 +6,7 @@
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
+#include "ee/ee_test_utils.hpp"
 #include "floating_point_ops.hpp"
 #include "gif_dmac_channel.hpp"
 #include "neko_system.hpp"
@@ -2417,6 +2418,7 @@ TEST_CASE("Blocked dual EE front ends survive save-state restore")
   originalCore.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&originalCore);
   originalCore.setFloatingPointRegister(
     1,
     UINT32_C(0x3f800000));
@@ -2469,6 +2471,113 @@ TEST_CASE("Blocked dual EE front ends survive save-state restore")
     restored.eeCore().generalRegister(5).low ==
     UINT32_C(0x40400000));
   REQUIRE(restored.eeCore().generalRegister(6).low == 2);
+}
+
+TEST_CASE("Deferred EE fetch translation faults survive save-state restore")
+{
+  constexpr std::uint32_t virtualFIFO = UINT32_C(0x00600000);
+  std::uint32_t instructionAddress = 0;
+  std::uint32_t faultAddress = 0;
+  std::uint32_t status = 0;
+  EEException expectedException = EEException::None;
+  EETLBEntry instructionMapping;
+  SECTION("TLB invalid")
+  {
+    instructionAddress = UINT32_C(0x00400ffc);
+    faultAddress = UINT32_C(0x00401000);
+    expectedException = EEException::InstructionBusError;
+    instructionMapping = {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x1f)},
+      {}
+    };
+  }
+  SECTION("User segment address error")
+  {
+    instructionAddress = UINT32_C(0x7ffffffc);
+    faultAddress = UINT32_C(0x80000000);
+    status = EECOP0Status::USER_MODE;
+    expectedException = EEException::AddressErrorLoadOrFetch;
+    instructionMapping = {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x7fffe000),
+      {},
+      {UINT32_C(0x1f)}
+    };
+  }
+  const EEQuadword interruptedNops = {
+    UINT64_C(0x0000000080000000),
+    0
+  };
+
+  NekoSystem original;
+  EECore &originalCore = original.eeCore();
+  EEBus &originalBus = original.eeBus();
+  REQUIRE(
+    originalBus.writeGuestData128(
+      EEMemoryMap::VIF0_FIFO,
+      interruptedNops) ==
+    EEDataWriteResult::Completed);
+  originalBus.advanceGuestFIFOs();
+  for (std::size_t index = 0; index < 7; ++index)
+  {
+    REQUIRE(
+      originalBus.writeGuestData128(
+        EEMemoryMap::VIF0_FIFO,
+        {}) == EEDataWriteResult::Completed);
+  }
+  originalCore.setGeneralRegister(
+    1,
+    {virtualFIFO, 0});
+  originalCore.setGeneralRegister(
+    2,
+    {});
+  originalBus.write32(
+    UINT32_C(0x00000ffc),
+    (UINT32_C(0x1f) << 26) |
+      (UINT32_C(1) << 21) |
+      (UINT32_C(2) << 16));
+  originalCore.setCOP0Register(EECOP0Register::Status, status);
+  originalCore.setTLBEntry(0, instructionMapping);
+  originalCore.setTLBEntry(
+    1,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      virtualFIFO,
+      {
+        (EEMemoryMap::VIF0_FIFO >> 6) |
+        UINT32_C(0x1f)
+      },
+      {}
+    });
+  originalCore.startExecution(instructionAddress);
+
+  original.clockMasterCycle();
+  REQUIRE(originalCore.programCounter() == instructionAddress);
+  REQUIRE(originalCore.pendingException() == EEException::None);
+
+  const std::vector<std::uint8_t> state = original.saveState();
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(state));
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(originalCore.stateHash() == restored.eeCore().stateHash());
+
+  originalBus.write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
+  restored.eeBus().write32(EEMemoryMap::VIF0_FBRST, 1u << 3);
+  original.runMasterCycles(2);
+  restored.runMasterCycles(2);
+
+  REQUIRE(
+    originalCore.pendingException() ==
+    expectedException);
+  REQUIRE(
+    restored.eeCore().pendingException() ==
+    expectedException);
+  REQUIRE(originalCore.exceptionAddress() == faultAddress);
+  REQUIRE(
+    restored.eeCore().exceptionAddress() == faultAddress);
+  REQUIRE(original.saveState() == restored.saveState());
 }
 
 TEST_CASE("EE byte data faults survive save states")

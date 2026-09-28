@@ -107,6 +107,42 @@ TEST_CASE("EE LWR preserves or sign extends its upper word")
   }
 }
 
+TEST_CASE("EE word merge accesses use translated physical addresses")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x00400102);
+  setRegister(&core, 1, virtualAddress);
+  setRegister(
+    &core,
+    2,
+    UINT64_C(0x11223344a1b2c3d4));
+  REQUIRE(
+    system.eeBus().writeData32(
+      0x100,
+      UINT32_C(0x80302010)));
+  system.eeBus().write32(
+    0,
+    memoryInstruction(0x22, 1, 2, 0));
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000001f)}
+    });
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.generalRegister(2).low ==
+    UINT64_C(0x00000000302010d4));
+  REQUIRE(core.pendingException() == EEException::None);
+}
+
 TEST_CASE("EE SWL follows every little-endian byte position")
 {
   const std::array<std::uint32_t, 4> expected = {{

@@ -115,11 +115,11 @@ class EEMemorySystem final
       const EEAddressTranslationContext &context) const;
     EEAddressTranslationResult translateInstructionAddress(
       std::uint32_t virtualAddress,
-      const EEAddressTranslationContext &context);
+      const EEAddressTranslationContext &context) const;
     EEAddressTranslationResult translateDataAddress(
       std::uint32_t virtualAddress,
       EEDataAccessDirection direction,
-      const EEAddressTranslationContext &context);
+      const EEAddressTranslationContext &context) const;
     void reset();
     std::uint32_t cop0Register(
       EECOP0Register registerIndex) const;
@@ -154,10 +154,10 @@ class EEMemorySystem final
     EEAddressTranslationResult translateMappedAddress(
       std::uint32_t virtualAddress,
       bool store,
-      bool instruction);
+      bool instruction) const;
     std::size_t matchingTLBEntry(
       std::uint32_t virtualAddress,
-      bool instruction);
+      bool instruction) const;
     void invalidateTLBAccelerators();
     EETLBEntry currentTLBEntry() const;
     void writeTLBEntry(std::uint32_t index);
@@ -174,10 +174,10 @@ class EEMemorySystem final
     std::uint32_t cop0TagLo = 0;
     std::uint32_t cop0TagHi = 0;
     std::array<EETLBEntry, TLB_ENTRY_COUNT> tlbEntries = {};
-    std::array<TLBAcceleratorEntry, ITLB_ENTRY_COUNT> itlb = {};
-    std::array<TLBAcceleratorEntry, DTLB_ENTRY_COUNT> dtlb = {};
-    std::size_t nextITLBReplacement = 0;
-    std::size_t nextDTLBReplacement = 0;
+    mutable std::array<TLBAcceleratorEntry, ITLB_ENTRY_COUNT> itlb = {};
+    mutable std::array<TLBAcceleratorEntry, DTLB_ENTRY_COUNT> dtlb = {};
+    mutable std::size_t nextITLBReplacement = 0;
+    mutable std::size_t nextDTLBReplacement = 0;
 };
 
 #endif

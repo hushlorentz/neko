@@ -458,17 +458,19 @@ class EECore final : public ClockedComponent
 
     enum class IssueLatchFailure : std::uint8_t
     {
-      None,
-      AddressError,
-      BusError,
-      ReservedInstruction,
-      UnsupportedInstruction
+      None = 0,
+      AddressError = 1,
+      BusError = 2,
+      ReservedInstruction = 3,
+      UnsupportedInstruction = 4,
+      TranslationError = 5
     };
 
     enum class FrontEndFetchFailure : std::uint8_t
     {
       None,
       AddressError,
+      TranslationError,
       BusError
     };
 
@@ -842,6 +844,8 @@ class EECore final : public ClockedComponent
       std::uint32_t address = 0;
       EEInstruction instruction;
       IssueLatchFailure failure = IssueLatchFailure::None;
+      EEAddressTranslationOutcome translationOutcome =
+        EEAddressTranslationOutcome::Translated;
     };
 
     struct YoungerAStageContinuation
@@ -858,6 +862,8 @@ class EECore final : public ClockedComponent
       std::uint32_t instruction = 0;
       FrontEndFetchFailure failure =
         FrontEndFetchFailure::None;
+      EEAddressTranslationOutcome translationOutcome =
+        EEAddressTranslationOutcome::Translated;
     };
 
     struct IssueCandidates
@@ -1183,8 +1189,21 @@ class EECore final : public ClockedComponent
       bool alreadyExceptionLevel) const;
     void setInterruptLines(bool intc, bool dmac);
     bool interruptDeliverable() const;
-    FrontEndFetchResult fetchIssueCandidate(
+    EEAddressTranslationContext addressTranslationContext() const;
+    EEAddressTranslationResult translateInstructionAddress(
       std::uint32_t address) const;
+    EEAddressTranslationResult translateDataAddress(
+      std::uint32_t address,
+      EEDataAccessDirection direction) const;
+    static bool mainBusTranslationSucceeded(
+      const EEAddressTranslationResult &translation);
+    static EEException instructionTranslationException(
+      EEAddressTranslationOutcome outcome);
+    static EEException dataTranslationException(
+      EEAddressTranslationOutcome outcome,
+      EEDataAccessDirection direction);
+    FrontEndFetchResult fetchIssueCandidate(
+      std::uint32_t address);
     static DecodedIssueLatch decodeIssueCandidate(
       const FrontEndFetchResult &fetch);
     void ensureIssueLatch();

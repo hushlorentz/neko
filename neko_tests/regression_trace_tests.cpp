@@ -3,6 +3,7 @@
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
+#include "ee/ee_test_utils.hpp"
 #include "floating_point_ops.hpp"
 #include "neko_system.hpp"
 #include "regression_trace.hpp"
@@ -170,6 +171,7 @@ namespace
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     core.setGeneralRegister(1, {0x100, 0});
     core.setGeneralRegister(5, {UINT32_C(0x3f800000), 0});
     core.setFloatingPointRegister(2, UINT32_C(0x7f800000));
@@ -478,6 +480,7 @@ TEST_CASE("EE regression traces describe issued work")
     2,
     {UINT64_C(0x11223344), 0});
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   system.eeBus().write32(
     0,
     immediateInstruction(0x2b, 1, 2, 0x100));
@@ -640,6 +643,7 @@ TEST_CASE("EE faulting COP0 traces expose issue and exception entry")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::USER_MODE);
+  mapLowKusegForTest(&core);
   core.setCOP0Register(EECOP0Register::Index, 4);
   core.setCOP0Register(
     EECOP0Register::EntryHi,
@@ -689,6 +693,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(
       32,
       immediateInstruction(0x04, 0, 0, 2));
@@ -720,6 +725,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
       core.setCOP0Register(
         EECOP0Register::Status,
         EECOP0Status::COP1_USABLE);
+      mapLowKusegForTest(&core);
       system.eeBus().write32(
         0,
         immediateInstruction(0x05, 0, 0, 4));
@@ -758,6 +764,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
       core.setCOP0Register(
         EECOP0Register::Status,
         EECOP0Status::COP1_USABLE);
+      mapLowKusegForTest(&core);
       system.eeBus().write32(
         0,
         immediateInstruction(0x04, 0, 0, 3));
@@ -797,6 +804,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
       core.setCOP0Register(
         EECOP0Register::Status,
         EECOP0Status::COP1_USABLE);
+      mapLowKusegForTest(&core);
       system.eeBus().write32(0, divide);
       system.eeBus().write32(
         8,
@@ -828,6 +836,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(
       0,
       immediateInstruction(0x14, 0, 1, 3));
@@ -856,6 +865,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(0x100, UINT32_C(0x3f800000));
     system.eeBus().write32(
       0,
@@ -886,6 +896,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(
       0,
       immediateInstruction(0x04, 0, 0, 3));
@@ -925,6 +936,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::COP1_USABLE);
+    mapLowKusegForTest(&core);
     system.eeBus().write32(
       0,
       immediateInstruction(0x04, 0, 0, 3));
@@ -963,6 +975,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
       core.setCOP0Register(
         EECOP0Register::Status,
         EECOP0Status::COP1_USABLE);
+      mapLowKusegForTest(&core);
       system.eeBus().write32(
         0,
         immediateInstruction(0x04, 0, 0, 2));
@@ -996,6 +1009,7 @@ TEST_CASE("EE regression traces identify COP1 divider branch hazards")
       core.setCOP0Register(
         EECOP0Register::Status,
         EECOP0Status::COP1_USABLE);
+      mapLowKusegForTest(&core);
       system.eeBus().write32(
         0,
         cop1SingleInstruction(
@@ -1021,6 +1035,7 @@ TEST_CASE("COP1 divider hazard context survives save and reset")
   original.eeCore().setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&original.eeCore());
   original.eeBus().write32(
     0,
     immediateInstruction(0x05, 0, 0, 4));
@@ -1046,6 +1061,7 @@ TEST_CASE("COP1 divider hazard context survives save and reset")
   restored.eeCore().setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&restored.eeCore());
   restored.eeBus().write32(0, divide);
   restored.eeCore().startExecution(0);
   restored.clearTrace();
@@ -1061,6 +1077,7 @@ TEST_CASE("External EE PC mutation clears COP1 divider branch context")
   original.eeCore().setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&original.eeCore());
   original.eeBus().write32(
     0,
     immediateInstruction(0x05, 0, 0, 4));
@@ -1092,6 +1109,7 @@ TEST_CASE("EE regression traces identify interrupt delivery")
     EECOP0Status::INTERRUPT_ENABLE |
       EECOP0Status::MASTER_INTERRUPT_ENABLE |
       EECOP0Status::INTC_MASK);
+  mapLowKusegForTest(&core);
   system.eeBus().write32(0, 0);
   core.startExecution(0);
   system.startTrace();
@@ -1924,6 +1942,7 @@ TEST_CASE("EE regression traces retain failed memory attempts")
   NekoSystem system;
   EECore &core = system.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(
     1,
     {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
@@ -3336,6 +3355,7 @@ TEST_CASE("Older COP1 memory work does not partially enter an issue group")
   core.setCOP0Register(
     EECOP0Register::Status,
     EECOP0Status::COP1_USABLE);
+  mapLowKusegForTest(&core);
   core.setGeneralRegister(1, {0x100, 0});
   std::uint8_t opcode = 0;
   SECTION("LWC1")
