@@ -1690,7 +1690,7 @@ creating parallel ownership.
       32-bit virtual/physical address behavior, the existing KSEG aliases,
       unsupported cache attributes, and alignment-before-translation ownership
       at the existing `EECore` access families.
-- [ ] Implement full-associative architectural translation against all 48
+- [x] Implement full-associative architectural translation against all 48
       canonical even/odd TLB pairs, including lowest-index deterministic
       duplicate selection, ASID/global matching, all seven documented page
       sizes, even/odd selection, valid/dirty permissions, physical frame

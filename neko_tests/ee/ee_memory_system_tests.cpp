@@ -12,6 +12,12 @@ static_assert(
   std::is_trivially_copyable<
     EEAddressTranslationResult>::value,
   "EE translation result must remain trivially copyable.");
+static_assert(
+  EEMemorySystem::ITLB_ENTRY_COUNT == 2,
+  "The EE ITLB capacity must remain architectural.");
+static_assert(
+  EEMemorySystem::DTLB_ENTRY_COUNT == 4,
+  "The EE DTLB capacity must remain architectural.");
 
 namespace
 {
@@ -88,7 +94,7 @@ TEST_CASE("EE segment classification follows privilege boundaries")
   for (const auto &testCase : cases)
   {
     const EEAddressTranslationResult result =
-      memorySystem.translateInstructionAddress(
+      memorySystem.classifyInstructionAddress(
         testCase.address,
         context(testCase.privilege));
     REQUIRE(result.outcome == testCase.outcome);
@@ -105,14 +111,14 @@ TEST_CASE("EE exception levels use kernel segment privilege")
          EEPrivilegeMode::Supervisor})
   {
     requireDirectRoute(
-      memorySystem.translateInstructionAddress(
+      memorySystem.classifyInstructionAddress(
         UINT32_C(0x81234567),
         context(privilege, true, false)),
       UINT32_C(0x81234567),
       UINT32_C(0x01234567),
       EECacheRoute::CachedNoncoherent);
     requireDirectRoute(
-      memorySystem.translateInstructionAddress(
+      memorySystem.classifyInstructionAddress(
         UINT32_C(0xa1234567),
         context(privilege, false, true)),
       UINT32_C(0xa1234567),
@@ -128,40 +134,40 @@ TEST_CASE("EE kernel direct segments select physical aliases and cache routes")
     context(EEPrivilegeMode::Kernel);
 
   requireDirectRoute(
-    memorySystem.translateInstructionAddress(
+    memorySystem.classifyInstructionAddress(
       UINT32_C(0x80000000),
       kernel),
     UINT32_C(0x80000000),
     UINT32_C(0x00000000),
     EECacheRoute::CachedNoncoherent);
   requireDirectRoute(
-    memorySystem.translateInstructionAddress(
+    memorySystem.classifyInstructionAddress(
       UINT32_C(0x9fffffff),
       kernel),
     UINT32_C(0x9fffffff),
     UINT32_C(0x1fffffff),
     EECacheRoute::CachedNoncoherent);
   requireDirectRoute(
-    memorySystem.translateInstructionAddress(
+    memorySystem.classifyInstructionAddress(
       UINT32_C(0xa0000000),
       kernel),
     UINT32_C(0xa0000000),
     UINT32_C(0x00000000),
     EECacheRoute::Uncached);
   requireDirectRoute(
-    memorySystem.translateInstructionAddress(
+    memorySystem.classifyInstructionAddress(
       UINT32_C(0xbfffffff),
       kernel),
     UINT32_C(0xbfffffff),
     UINT32_C(0x1fffffff),
     EECacheRoute::Uncached);
   requireTLBRoute(
-    memorySystem.translateInstructionAddress(
+    memorySystem.classifyInstructionAddress(
       UINT32_C(0xc0000000),
       kernel),
     UINT32_C(0xc0000000));
   requireTLBRoute(
-    memorySystem.translateInstructionAddress(
+    memorySystem.classifyInstructionAddress(
       UINT32_C(0xffffffff),
       kernel),
     UINT32_C(0xffffffff));
@@ -174,7 +180,7 @@ TEST_CASE("EE data segment faults retain the access direction")
     context(EEPrivilegeMode::User);
 
   const EEAddressTranslationResult load =
-    memorySystem.translateDataAddress(
+    memorySystem.classifyDataAddress(
       UINT32_C(0x80000000),
       EEDataAccessDirection::Load,
       user);
@@ -184,7 +190,7 @@ TEST_CASE("EE data segment faults retain the access direction")
   REQUIRE(load.virtualAddress == UINT32_C(0x80000000));
 
   const EEAddressTranslationResult store =
-    memorySystem.translateDataAddress(
+    memorySystem.classifyDataAddress(
       UINT32_C(0x80000000),
       EEDataAccessDirection::Store,
       user);
@@ -201,13 +207,13 @@ TEST_CASE("EE mapped application aliases require TLB translation")
     context(EEPrivilegeMode::User);
 
   requireTLBRoute(
-    memorySystem.translateDataAddress(
+    memorySystem.classifyDataAddress(
       UINT32_C(0x20000000),
       EEDataAccessDirection::Load,
       user),
     UINT32_C(0x20000000));
   requireTLBRoute(
-    memorySystem.translateDataAddress(
+    memorySystem.classifyDataAddress(
       UINT32_C(0x30000000),
       EEDataAccessDirection::Store,
       user),
@@ -255,7 +261,7 @@ TEST_CASE("EE segment classification does not mutate MMU state")
   memorySystem.setTLBEntry(9, entry);
 
   const EEAddressTranslationResult result =
-    memorySystem.translateDataAddress(
+    memorySystem.classifyDataAddress(
       UINT32_C(0x81234567),
       EEDataAccessDirection::Store,
       context(EEPrivilegeMode::Kernel));
@@ -267,4 +273,439 @@ TEST_CASE("EE segment classification does not mutate MMU state")
     memorySystem.cop0Register(EECOP0Register::EntryHi) ==
     UINT32_C(0x1234405a));
   REQUIRE(memorySystem.tlbEntry(9) == entry);
+}
+
+TEST_CASE("EE architectural TLB translation selects ASIDs and global entries")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.setTLBEntry(
+    7,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x1234402a),
+      {UINT32_C(0x0001001e)},
+      {UINT32_C(0x0001401e)}
+    });
+  memorySystem.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x0000002b));
+
+  const EEAddressTranslationResult wrongASID =
+    memorySystem.translateInstructionAddress(
+      UINT32_C(0x12344123),
+      context(EEPrivilegeMode::User));
+  REQUIRE(
+    wrongASID.outcome ==
+    EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+
+  memorySystem.setCOP0Register(
+    EECOP0Register::EntryHi,
+    UINT32_C(0x0000002a));
+  const EEAddressTranslationResult matchingASID =
+    memorySystem.translateInstructionAddress(
+      UINT32_C(0x12344123),
+      context(EEPrivilegeMode::User));
+  requireDirectRoute(
+    matchingASID,
+    UINT32_C(0x12344123),
+    UINT32_C(0x00400123),
+    EECacheRoute::CachedNoncoherent);
+
+  memorySystem.setTLBEntry(
+    7,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x1234402a),
+      {UINT32_C(0x0001001f)},
+      {UINT32_C(0x0001401f)}
+    });
+  const EEAddressTranslationResult global =
+    memorySystem.translateInstructionAddress(
+      UINT32_C(0x12344123),
+      context(EEPrivilegeMode::User));
+  REQUIRE(global.outcome == EEAddressTranslationOutcome::Translated);
+  REQUIRE(global.physicalAddress == UINT32_C(0x00400123));
+}
+
+TEST_CASE("EE architectural TLB translation uses the lowest duplicate index")
+{
+  EEMemorySystem memorySystem;
+  const EETLBEntry higher{
+    EECOP0PageMask::SIZE_4_KIB,
+    UINT32_C(0x23456044),
+    {UINT32_C(0x0002401f)},
+    {UINT32_C(0x0002801f)}
+  };
+  const EETLBEntry lower{
+    EECOP0PageMask::SIZE_4_KIB,
+    UINT32_C(0x23456044),
+    {UINT32_C(0x0001c01f)},
+    {UINT32_C(0x0002001f)}
+  };
+  memorySystem.setTLBEntry(20, higher);
+  memorySystem.setTLBEntry(3, lower);
+
+  const EEAddressTranslationResult result =
+    memorySystem.translateDataAddress(
+      UINT32_C(0x23456111),
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User));
+
+  REQUIRE(result.outcome == EEAddressTranslationOutcome::Translated);
+  REQUIRE(result.physicalAddress == UINT32_C(0x00700111));
+  REQUIRE(result.tlbIndex == 3);
+}
+
+TEST_CASE("EE architectural TLB translation covers every page size")
+{
+  const struct
+  {
+    std::uint32_t pageMask;
+    std::uint32_t pageSize;
+  } pageSizes[] = {
+    {EECOP0PageMask::SIZE_4_KIB, UINT32_C(0x00001000)},
+    {EECOP0PageMask::SIZE_16_KIB, UINT32_C(0x00004000)},
+    {EECOP0PageMask::SIZE_64_KIB, UINT32_C(0x00010000)},
+    {EECOP0PageMask::SIZE_256_KIB, UINT32_C(0x00040000)},
+    {EECOP0PageMask::SIZE_1_MIB, UINT32_C(0x00100000)},
+    {EECOP0PageMask::SIZE_4_MIB, UINT32_C(0x00400000)},
+    {EECOP0PageMask::SIZE_16_MIB, UINT32_C(0x01000000)}
+  };
+
+  for (const auto &pageSize : pageSizes)
+  {
+    EEMemorySystem memorySystem;
+    const std::uint32_t virtualBase = UINT32_C(0x40000000);
+    const std::uint32_t physicalBase = UINT32_C(0x10000000);
+    memorySystem.setTLBEntry(
+      4,
+      {
+        pageSize.pageMask,
+        virtualBase,
+        {((physicalBase >> 12) << 6) | UINT32_C(0x1e)},
+        {(((physicalBase + pageSize.pageSize) >> 12) << 6) |
+         UINT32_C(0x1e)}
+      });
+
+    const std::uint32_t offset = pageSize.pageSize - 1;
+    const EEAddressTranslationResult even =
+      memorySystem.translateDataAddress(
+        virtualBase + offset,
+        EEDataAccessDirection::Load,
+        context(EEPrivilegeMode::User));
+    REQUIRE(even.outcome == EEAddressTranslationOutcome::Translated);
+    REQUIRE(even.physicalAddress == physicalBase + offset);
+
+    const EEAddressTranslationResult odd =
+      memorySystem.translateDataAddress(
+        virtualBase + pageSize.pageSize + offset,
+        EEDataAccessDirection::Load,
+        context(EEPrivilegeMode::User));
+    REQUIRE(odd.outcome == EEAddressTranslationOutcome::Translated);
+    REQUIRE(
+      odd.physicalAddress ==
+      physicalBase + pageSize.pageSize + offset);
+
+    const EEAddressTranslationResult outside =
+      memorySystem.translateDataAddress(
+        virtualBase + pageSize.pageSize * 2,
+        EEDataAccessDirection::Load,
+        context(EEPrivilegeMode::User));
+    REQUIRE(
+      outside.outcome ==
+      EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+  }
+}
+
+TEST_CASE("EE architectural TLB translation reports permission faults")
+{
+  EEMemorySystem memorySystem;
+  const std::uint32_t address = UINT32_C(0x34567000);
+  memorySystem.setTLBEntry(
+    5,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      address,
+      {UINT32_C(0x00040018)},
+      {UINT32_C(0x00050018)}
+    });
+
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBInvalidLoadOrFetch);
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Store,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBInvalidStore);
+
+  memorySystem.setTLBEntry(
+    5,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      address,
+      {UINT32_C(0x0004001a)},
+      {UINT32_C(0x0005001a)}
+    });
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::Translated);
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Store,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBModified);
+}
+
+TEST_CASE("EE architectural TLB translation distinguishes refill direction")
+{
+  EEMemorySystem memorySystem;
+  const std::uint32_t address = UINT32_C(0x76543000);
+
+  REQUIRE(
+    memorySystem.translateInstructionAddress(
+      address,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Store,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBRefillStore);
+}
+
+TEST_CASE("EE architectural TLB translation selects mapped cache routes")
+{
+  const struct
+  {
+    std::uint8_t attribute;
+    EECacheRoute route;
+  } cacheRoutes[] = {
+    {2, EECacheRoute::Uncached},
+    {3, EECacheRoute::CachedNoncoherent},
+    {7, EECacheRoute::UncachedAccelerated}
+  };
+
+  for (const auto &cacheRoute : cacheRoutes)
+  {
+    EEMemorySystem memorySystem;
+    memorySystem.setTLBEntry(
+      2,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x45678000),
+        {
+          UINT32_C(0x00010006) |
+          (static_cast<std::uint32_t>(cacheRoute.attribute) << 3)
+        },
+        {UINT32_C(0x0001401e)}
+      });
+
+    const EEAddressTranslationResult result =
+      memorySystem.translateDataAddress(
+        UINT32_C(0x45678123),
+        EEDataAccessDirection::Load,
+        context(EEPrivilegeMode::User));
+    REQUIRE(result.outcome == EEAddressTranslationOutcome::Translated);
+    REQUIRE(result.cacheAttribute == cacheRoute.attribute);
+    REQUIRE(result.cacheRoute == cacheRoute.route);
+  }
+}
+
+TEST_CASE("EE architectural TLB translation preserves unsupported attributes")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.setTLBEntry(
+    6,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x45678000),
+      {UINT32_C(0x00010006)},
+      {UINT32_C(0x00014006)}
+    });
+
+  const EEAddressTranslationResult result =
+    memorySystem.translateDataAddress(
+      UINT32_C(0x45678123),
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User));
+  REQUIRE(
+    result.outcome ==
+    EEAddressTranslationOutcome::UnsupportedCacheAttribute);
+  REQUIRE(result.cacheAttribute == 0);
+  REQUIRE(result.cacheRoute == EECacheRoute::Unsupported);
+  REQUIRE(result.physicalAddress == UINT32_C(0x00400123));
+}
+
+TEST_CASE("EE architectural TLB translation selects scratchpad")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.setTLBEntry(
+    8,
+    {
+      EECOP0PageMask::SIZE_16_KIB,
+      UINT32_C(0x50000000),
+      {EECOP0EntryLo::SCRATCHPAD | UINT32_C(0x00000006)},
+      {UINT32_C(0x0007001e)}
+    });
+
+  const EEAddressTranslationResult result =
+    memorySystem.translateDataAddress(
+      UINT32_C(0x50003210),
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User));
+  REQUIRE(result.outcome == EEAddressTranslationOutcome::Translated);
+  REQUIRE(result.route == EEAddressRoute::Scratchpad);
+  REQUIRE(result.physicalAddress == UINT32_C(0x00003210));
+  REQUIRE(result.cacheRoute == EECacheRoute::Uncached);
+}
+
+TEST_CASE("EE instruction translation rejects scratchpad mappings")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.setTLBEntry(
+    8,
+    {
+      EECOP0PageMask::SIZE_16_KIB,
+      UINT32_C(0x50000000),
+      {
+        EECOP0EntryLo::SCRATCHPAD |
+        UINT32_C(0x0001001e)
+      },
+      {UINT32_C(0x0001401e)}
+    });
+
+  const EEAddressTranslationResult result =
+    memorySystem.translateInstructionAddress(
+      UINT32_C(0x50003210),
+      context(EEPrivilegeMode::User));
+  REQUIRE(
+    result.outcome ==
+    EEAddressTranslationOutcome::UnsupportedScratchpadInstruction);
+  REQUIRE(result.route == EEAddressRoute::Scratchpad);
+  REQUIRE(result.physicalAddress == UINT32_C(0x00003210));
+}
+
+TEST_CASE("EE translation rejects non-16 KiB scratchpad mappings")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.setTLBEntry(
+    9,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x51000000),
+      {
+        EECOP0EntryLo::SCRATCHPAD |
+        UINT32_C(0x0001001e)
+      },
+      {UINT32_C(0x0001401e)}
+    });
+
+  const EEAddressTranslationResult result =
+    memorySystem.translateDataAddress(
+      UINT32_C(0x51000210),
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User));
+  REQUIRE(
+    result.outcome ==
+    EEAddressTranslationOutcome::UnsupportedScratchpadPageSize);
+  REQUIRE(result.route == EEAddressRoute::Scratchpad);
+  REQUIRE(result.physicalAddress == 0);
+}
+
+TEST_CASE("EE derived translation accelerators invalidate on TLB changes")
+{
+  EEMemorySystem memorySystem;
+  const std::uint32_t address = UINT32_C(0x60000120);
+  memorySystem.setTLBEntry(
+    1,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x60000000),
+      {UINT32_C(0x0000401e)},
+      {UINT32_C(0x0000801e)}
+    });
+
+  REQUIRE(
+    memorySystem.translateInstructionAddress(
+      address,
+      context(EEPrivilegeMode::User)).physicalAddress ==
+    UINT32_C(0x00100120));
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User)).physicalAddress ==
+    UINT32_C(0x00100120));
+
+  memorySystem.setTLBEntry(
+    1,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x60000000),
+      {UINT32_C(0x0000c01e)},
+      {UINT32_C(0x0001001e)}
+    });
+  REQUIRE(
+    memorySystem.translateInstructionAddress(
+      address,
+      context(EEPrivilegeMode::User)).physicalAddress ==
+    UINT32_C(0x00300120));
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User)).physicalAddress ==
+    UINT32_C(0x00300120));
+}
+
+TEST_CASE("EE derived accelerators preserve lowest-index overlapping matches")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.setTLBEntry(
+    20,
+    {
+      EECOP0PageMask::SIZE_16_KIB,
+      UINT32_C(0x70000000),
+      {UINT32_C(0x0001401f)},
+      {UINT32_C(0x0001801f)}
+    });
+  memorySystem.setTLBEntry(
+    3,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x70000000),
+      {UINT32_C(0x0001c01f)},
+      {UINT32_C(0x0002001f)}
+    });
+
+  const EEAddressTranslationResult largeOnly =
+    memorySystem.translateInstructionAddress(
+      UINT32_C(0x70002100),
+      context(EEPrivilegeMode::User));
+  REQUIRE(largeOnly.tlbIndex == 20);
+
+  const EEAddressTranslationResult overlapping =
+    memorySystem.translateInstructionAddress(
+      UINT32_C(0x70000100),
+      context(EEPrivilegeMode::User));
+  REQUIRE(overlapping.tlbIndex == 3);
+  REQUIRE(
+    overlapping.physicalAddress ==
+    UINT32_C(0x00700100));
 }

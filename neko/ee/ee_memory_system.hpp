@@ -60,7 +60,15 @@ enum class EEAddressTranslationOutcome : std::uint8_t
   Translated,
   TLBLookup,
   AddressErrorLoadOrFetch,
-  AddressErrorStore
+  AddressErrorStore,
+  TLBRefillLoadOrFetch,
+  TLBRefillStore,
+  TLBInvalidLoadOrFetch,
+  TLBInvalidStore,
+  TLBModified,
+  UnsupportedScratchpadInstruction,
+  UnsupportedScratchpadPageSize,
+  UnsupportedCacheAttribute
 };
 
 enum class EECacheRoute : std::uint8_t
@@ -72,6 +80,12 @@ enum class EECacheRoute : std::uint8_t
   Unsupported
 };
 
+enum class EEAddressRoute : std::uint8_t
+{
+  MainBus,
+  Scratchpad
+};
+
 struct EEAddressTranslationResult
 {
   EEAddressTranslationOutcome outcome =
@@ -79,21 +93,33 @@ struct EEAddressTranslationResult
   std::uint32_t virtualAddress = 0;
   std::uint32_t physicalAddress = 0;
   EECacheRoute cacheRoute = EECacheRoute::TLBSelected;
+  std::uint8_t cacheAttribute = 0;
+  EEAddressRoute route = EEAddressRoute::MainBus;
+  std::uint8_t tlbIndex = 0xff;
 };
 
 class EEMemorySystem final
 {
   public:
     static constexpr std::size_t TLB_ENTRY_COUNT = 48;
+    static constexpr std::size_t ITLB_ENTRY_COUNT = 2;
+    static constexpr std::size_t DTLB_ENTRY_COUNT = 4;
 
     static EECacheRoute cacheRoute(std::uint8_t attribute);
-    EEAddressTranslationResult translateInstructionAddress(
+    EEAddressTranslationResult classifyInstructionAddress(
       std::uint32_t virtualAddress,
       const EEAddressTranslationContext &context) const;
-    EEAddressTranslationResult translateDataAddress(
+    EEAddressTranslationResult classifyDataAddress(
       std::uint32_t virtualAddress,
       EEDataAccessDirection direction,
       const EEAddressTranslationContext &context) const;
+    EEAddressTranslationResult translateInstructionAddress(
+      std::uint32_t virtualAddress,
+      const EEAddressTranslationContext &context);
+    EEAddressTranslationResult translateDataAddress(
+      std::uint32_t virtualAddress,
+      EEDataAccessDirection direction,
+      const EEAddressTranslationContext &context);
     void reset();
     std::uint32_t cop0Register(
       EECOP0Register registerIndex) const;
@@ -115,10 +141,24 @@ class EEMemorySystem final
     bool replacementStateValid() const;
 
   private:
+    struct TLBAcceleratorEntry
+    {
+      bool valid = false;
+      std::uint8_t tlbIndex = 0;
+    };
+
     static EEAddressTranslationResult classifyAddress(
       std::uint32_t virtualAddress,
       bool store,
       const EEAddressTranslationContext &context);
+    EEAddressTranslationResult translateMappedAddress(
+      std::uint32_t virtualAddress,
+      bool store,
+      bool instruction);
+    std::size_t matchingTLBEntry(
+      std::uint32_t virtualAddress,
+      bool instruction);
+    void invalidateTLBAccelerators();
     EETLBEntry currentTLBEntry() const;
     void writeTLBEntry(std::uint32_t index);
 
@@ -134,6 +174,10 @@ class EEMemorySystem final
     std::uint32_t cop0TagLo = 0;
     std::uint32_t cop0TagHi = 0;
     std::array<EETLBEntry, TLB_ENTRY_COUNT> tlbEntries = {};
+    std::array<TLBAcceleratorEntry, ITLB_ENTRY_COUNT> itlb = {};
+    std::array<TLBAcceleratorEntry, DTLB_ENTRY_COUNT> dtlb = {};
+    std::size_t nextITLBReplacement = 0;
+    std::size_t nextDTLBReplacement = 0;
 };
 
 #endif

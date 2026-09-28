@@ -139,14 +139,14 @@ EECacheRoute EEMemorySystem::cacheRoute(std::uint8_t attribute)
 }
 
 EEAddressTranslationResult
-EEMemorySystem::translateInstructionAddress(
+EEMemorySystem::classifyInstructionAddress(
   std::uint32_t virtualAddress,
   const EEAddressTranslationContext &context) const
 {
   return classifyAddress(virtualAddress, false, context);
 }
 
-EEAddressTranslationResult EEMemorySystem::translateDataAddress(
+EEAddressTranslationResult EEMemorySystem::classifyDataAddress(
   std::uint32_t virtualAddress,
   EEDataAccessDirection direction,
   const EEAddressTranslationContext &context) const
@@ -155,6 +155,31 @@ EEAddressTranslationResult EEMemorySystem::translateDataAddress(
     virtualAddress,
     direction == EEDataAccessDirection::Store,
     context);
+}
+
+EEAddressTranslationResult
+EEMemorySystem::translateInstructionAddress(
+  std::uint32_t virtualAddress,
+  const EEAddressTranslationContext &context)
+{
+  const EEAddressTranslationResult classification =
+    classifyInstructionAddress(virtualAddress, context);
+  return classification.outcome == EEAddressTranslationOutcome::TLBLookup
+    ? translateMappedAddress(virtualAddress, false, true)
+    : classification;
+}
+
+EEAddressTranslationResult EEMemorySystem::translateDataAddress(
+  std::uint32_t virtualAddress,
+  EEDataAccessDirection direction,
+  const EEAddressTranslationContext &context)
+{
+  const bool store = direction == EEDataAccessDirection::Store;
+  const EEAddressTranslationResult classification =
+    classifyDataAddress(virtualAddress, direction, context);
+  return classification.outcome == EEAddressTranslationOutcome::TLBLookup
+    ? translateMappedAddress(virtualAddress, store, false)
+    : classification;
 }
 
 EEAddressTranslationResult EEMemorySystem::classifyAddress(
@@ -173,7 +198,10 @@ EEAddressTranslationResult EEMemorySystem::classifyAddress(
         : EEAddressTranslationOutcome::AddressErrorLoadOrFetch,
       virtualAddress,
       0,
-      EECacheRoute::Unsupported
+      EECacheRoute::Unsupported,
+      0,
+      EEAddressRoute::MainBus,
+      0xff
     };
   };
   const auto tlbLookup = [&]() {
@@ -181,7 +209,10 @@ EEAddressTranslationResult EEMemorySystem::classifyAddress(
       EEAddressTranslationOutcome::TLBLookup,
       virtualAddress,
       0,
-      EECacheRoute::TLBSelected
+      EECacheRoute::TLBSelected,
+      0,
+      EEAddressRoute::MainBus,
+      0xff
     };
   };
 
@@ -203,7 +234,10 @@ EEAddressTranslationResult EEMemorySystem::classifyAddress(
       virtualAddress & UINT32_C(0x1fffffff),
       cached
         ? EECacheRoute::CachedNoncoherent
-        : EECacheRoute::Uncached
+        : EECacheRoute::Uncached,
+      static_cast<std::uint8_t>(cached ? 3 : 2),
+      EEAddressRoute::MainBus,
+      0xff
     };
   }
   if (virtualAddress < UINT32_C(0xe0000000))
@@ -215,6 +249,194 @@ EEAddressTranslationResult EEMemorySystem::classifyAddress(
   return privilege == EEPrivilegeMode::Kernel
     ? tlbLookup()
     : addressError();
+}
+
+EEAddressTranslationResult EEMemorySystem::translateMappedAddress(
+  std::uint32_t virtualAddress,
+  bool store,
+  bool instruction)
+{
+  const std::size_t index =
+    matchingTLBEntry(virtualAddress, instruction);
+  if (index == tlbEntries.size())
+  {
+    return {
+      store
+        ? EEAddressTranslationOutcome::TLBRefillStore
+        : EEAddressTranslationOutcome::TLBRefillLoadOrFetch,
+      virtualAddress,
+      0,
+      EECacheRoute::TLBSelected,
+      0,
+      EEAddressRoute::MainBus,
+      0xff
+    };
+  }
+
+  const EETLBEntry &entry = tlbEntries[index];
+  const EETLBPage &page = entry.pageForAddress(virtualAddress);
+  const std::uint8_t resultIndex =
+    static_cast<std::uint8_t>(index);
+  if (!page.valid())
+  {
+    return {
+      store
+        ? EEAddressTranslationOutcome::TLBInvalidStore
+        : EEAddressTranslationOutcome::TLBInvalidLoadOrFetch,
+      virtualAddress,
+      0,
+      EECacheRoute::TLBSelected,
+      0,
+      EEAddressRoute::MainBus,
+      resultIndex
+    };
+  }
+  if (store && !page.dirty())
+  {
+    return {
+      EEAddressTranslationOutcome::TLBModified,
+      virtualAddress,
+      0,
+      EECacheRoute::TLBSelected,
+      0,
+      EEAddressRoute::MainBus,
+      resultIndex
+    };
+  }
+
+  const std::uint8_t cacheAttribute =
+    static_cast<std::uint8_t>(
+      (page.value & EECOP0EntryLo::CACHE_MODE_MASK) >> 3);
+  if (page.scratchpad())
+  {
+    if (entry.pageMask != EECOP0PageMask::SIZE_16_KIB)
+    {
+      return {
+        EEAddressTranslationOutcome::UnsupportedScratchpadPageSize,
+        virtualAddress,
+        0,
+        EECacheRoute::Uncached,
+        cacheAttribute,
+        EEAddressRoute::Scratchpad,
+        resultIndex
+      };
+    }
+    return {
+      instruction
+        ? EEAddressTranslationOutcome::
+            UnsupportedScratchpadInstruction
+        : EEAddressTranslationOutcome::Translated,
+      virtualAddress,
+      virtualAddress & UINT32_C(0x00003fff),
+      EECacheRoute::Uncached,
+      cacheAttribute,
+      EEAddressRoute::Scratchpad,
+      resultIndex
+    };
+  }
+
+  const std::uint32_t pageSize =
+    (entry.pageMask + UINT32_C(0x2000)) >> 1;
+  const std::uint32_t pageOffsetMask = pageSize - 1;
+  const std::uint32_t physicalAddress =
+    ((page.value & EECOP0EntryLo::PHYSICAL_FRAME_MASK) << 6) |
+    (virtualAddress & pageOffsetMask);
+  const EECacheRoute route = cacheRoute(cacheAttribute);
+  return {
+    route == EECacheRoute::Unsupported
+      ? EEAddressTranslationOutcome::UnsupportedCacheAttribute
+      : EEAddressTranslationOutcome::Translated,
+    virtualAddress,
+    physicalAddress,
+    route,
+    cacheAttribute,
+    EEAddressRoute::MainBus,
+    resultIndex
+  };
+}
+
+std::size_t EEMemorySystem::matchingTLBEntry(
+  std::uint32_t virtualAddress,
+  bool instruction)
+{
+  const std::uint8_t asid =
+    static_cast<std::uint8_t>(
+      cop0EntryHi & EECOP0EntryHi::ASID_MASK);
+  auto findAccelerated =
+    [&](auto &accelerator) -> std::size_t {
+      for (TLBAcceleratorEntry &cached : accelerator)
+      {
+        if (cached.valid &&
+            tlbEntries[cached.tlbIndex].matches(
+              virtualAddress,
+              asid))
+        {
+          for (std::size_t index = 0;
+               index < cached.tlbIndex;
+               ++index)
+          {
+            if (tlbEntries[index].matches(virtualAddress, asid))
+            {
+              cached.tlbIndex =
+                static_cast<std::uint8_t>(index);
+              break;
+            }
+          }
+          return cached.tlbIndex;
+        }
+      }
+      return tlbEntries.size();
+    };
+  const std::size_t accelerated =
+    instruction ? findAccelerated(itlb) : findAccelerated(dtlb);
+  if (accelerated != tlbEntries.size())
+  {
+    return accelerated;
+  }
+
+  std::size_t matched = tlbEntries.size();
+  for (std::size_t index = 0;
+       index < tlbEntries.size();
+       ++index)
+  {
+    if (tlbEntries[index].matches(virtualAddress, asid))
+    {
+      matched = index;
+      break;
+    }
+  }
+  if (matched == tlbEntries.size())
+  {
+    return matched;
+  }
+
+  if (instruction)
+  {
+    itlb[nextITLBReplacement] = {
+      true,
+      static_cast<std::uint8_t>(matched)
+    };
+    nextITLBReplacement =
+      (nextITLBReplacement + 1) % itlb.size();
+  }
+  else
+  {
+    dtlb[nextDTLBReplacement] = {
+      true,
+      static_cast<std::uint8_t>(matched)
+    };
+    nextDTLBReplacement =
+      (nextDTLBReplacement + 1) % dtlb.size();
+  }
+  return matched;
+}
+
+void EEMemorySystem::invalidateTLBAccelerators()
+{
+  itlb.fill({});
+  dtlb.fill({});
+  nextITLBReplacement = 0;
+  nextDTLBReplacement = 0;
 }
 
 void EEMemorySystem::reset()
@@ -231,6 +453,7 @@ void EEMemorySystem::reset()
   cop0TagLo = 0;
   cop0TagHi = 0;
   tlbEntries.fill({});
+  invalidateTLBAccelerators();
 }
 
 const EETLBEntry &EEMemorySystem::tlbEntry(
@@ -256,6 +479,7 @@ void EEMemorySystem::setTLBEntry(
     entry.entryHi,
     entry.evenPage.value,
     entry.oddPage.value);
+  invalidateTLBAccelerators();
 }
 
 EETLBEntry EEMemorySystem::currentTLBEntry() const
@@ -289,6 +513,7 @@ void EEMemorySystem::writeTLBEntry(std::uint32_t index)
     return;
   }
   tlbEntries[index] = currentTLBEntry();
+  invalidateTLBAccelerators();
 }
 
 void EEMemorySystem::writeIndexedTLBEntry()
