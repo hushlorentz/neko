@@ -1739,7 +1739,7 @@ creating parallel ownership.
       and physical bus failure. Cover fetch plus byte, halfword, word,
       doubleword, quadword, and merge data accesses in both applicable
       directions without permitting a lower-priority stage to mutate state.
-- [ ] Integrate instruction translation faults with public fetch and the
+- [x] Integrate instruction translation faults with public fetch and the
       two-wide issue/staging front end. An older fetch fault prevents younger
       acceptance, a younger fetch fault waits for older completion,
       branch-delay ownership remains exact, and exception entry cancels only

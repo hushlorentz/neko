@@ -2543,6 +2543,366 @@ TEST_CASE("EE front end translates mapped instruction candidates")
   REQUIRE(core.pendingException() == EEException::None);
 }
 
+TEST_CASE("EE public fetch reports precise TLB outcomes without entering an exception")
+{
+  constexpr std::uint32_t faultAddress = UINT32_C(0x00400100);
+  constexpr std::uint32_t initialBadVAddr = UINT32_C(0x11112222);
+  constexpr std::uint32_t initialContext = UINT32_C(0xabc00000);
+  constexpr std::uint32_t initialEntryHi = UINT32_C(0x1234402a);
+  constexpr std::uint32_t initialCause = UINT32_C(0x40008000);
+  constexpr std::uint32_t initialEPC = UINT32_C(0x87654320);
+
+  const auto requireRecordedFault =
+    [&](const EECore &core, EEException expected)
+    {
+      REQUIRE(core.pendingException() == expected);
+      REQUIRE(core.exceptionAddress() == faultAddress);
+      REQUIRE(core.programCounter() == faultAddress);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::BadVAddr) ==
+        initialBadVAddr);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Context) ==
+        initialContext);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::EntryHi) ==
+        initialEntryHi);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Cause) ==
+        initialCause);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::EPC) ==
+        initialEPC);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Status) ==
+        EECOP0Status::USER_MODE);
+    };
+
+  SECTION("A missing mapping records a refill")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.setCOP0Register(
+      EECOP0Register::BadVAddr,
+      initialBadVAddr);
+    core.setCOP0Register(
+      EECOP0Register::Context,
+      initialContext);
+    core.setCOP0Register(
+      EECOP0Register::EntryHi,
+      initialEntryHi);
+    core.setCOP0Register(EECOP0Register::Cause, initialCause);
+    core.setCOP0Register(EECOP0Register::EPC, initialEPC);
+    core.setProgramCounter(faultAddress);
+
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE_FALSE(result.succeeded);
+    REQUIRE(result.address == faultAddress);
+    REQUIRE(result.instruction == 0);
+    requireRecordedFault(
+      core,
+      EEException::TLBRefillLoadOrFetch);
+  }
+
+  SECTION("A matching invalid page records an invalid fault")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001d)},
+        {UINT32_C(0x0000001f)}
+      });
+    core.setCOP0Register(
+      EECOP0Register::BadVAddr,
+      initialBadVAddr);
+    core.setCOP0Register(
+      EECOP0Register::Context,
+      initialContext);
+    core.setCOP0Register(
+      EECOP0Register::EntryHi,
+      initialEntryHi);
+    core.setCOP0Register(EECOP0Register::Cause, initialCause);
+    core.setCOP0Register(EECOP0Register::EPC, initialEPC);
+    core.setProgramCounter(faultAddress);
+
+    const EEInstructionFetchResult result =
+      core.fetchInstruction();
+
+    REQUIRE_FALSE(result.succeeded);
+    REQUIRE(result.address == faultAddress);
+    REQUIRE(result.instruction == 0);
+    requireRecordedFault(
+      core,
+      EEException::TLBInvalidLoadOrFetch);
+  }
+}
+
+TEST_CASE("EE front end selects precise TLB fetch faults in program order")
+{
+  constexpr std::uint32_t olderAddress = UINT32_C(0x00401ffc);
+  constexpr std::uint32_t faultAddress = UINT32_C(0x00402000);
+  constexpr std::uint32_t initialBadVAddr = UINT32_C(0x11112222);
+  constexpr std::uint32_t initialContext = UINT32_C(0xabc00000);
+  constexpr std::uint32_t initialEntryHi = UINT32_C(0x1234402a);
+
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000005f)}
+    });
+  core.setCOP0Register(
+    EECOP0Register::BadVAddr,
+    initialBadVAddr);
+  core.setCOP0Register(
+    EECOP0Register::Context,
+    initialContext);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    initialEntryHi);
+  system.eeBus().write32(0x1ffc, UINT32_C(0x24020001));
+  core.startExecution(olderAddress);
+
+  system.clockMasterCycle();
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(core.generalRegister(2).low == 1);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+  REQUIRE(
+    core.acceptanceRecordsThisCycle()[0].address ==
+    olderAddress);
+  REQUIRE(core.programCounter() == faultAddress);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::BadVAddr) ==
+    initialBadVAddr);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Context) ==
+    initialContext);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryHi) ==
+    initialEntryHi);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::TLBRefillLoadOrFetch);
+  REQUIRE(core.exceptionAddress() == faultAddress);
+  REQUIRE(core.programCounter() == EEExceptionVector::REFILL);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EPC) ==
+    faultAddress);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) == 0);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::BadVAddr) ==
+    faultAddress);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Context) ==
+    ((initialContext & EECOP0Context::PTE_BASE_MASK) |
+     ((faultAddress >> 9) &
+      EECOP0Context::BAD_VPN2_MASK)));
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryHi) ==
+    ((faultAddress & EECOP0EntryHi::VIRTUAL_PAGE_MASK) |
+     (initialEntryHi &
+      ~EECOP0EntryHi::VIRTUAL_PAGE_MASK)));
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+  REQUIRE(core.generalRegister(2).low == 1);
+}
+
+TEST_CASE("EE front end does not accept past an older TLB fetch fault")
+{
+  constexpr std::uint32_t faultAddress = UINT32_C(0x00400ffc);
+
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001d)},
+      {UINT32_C(0x0000005f)}
+    });
+  system.eeBus().write32(0x1000, UINT32_C(0x24020001));
+  core.startExecution(faultAddress);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::TLBInvalidLoadOrFetch);
+  REQUIRE(core.exceptionAddress() == faultAddress);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EPC) ==
+    faultAddress);
+  REQUIRE(core.programCounter() == EEExceptionVector::GENERAL);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+  REQUIRE(core.generalRegister(2).low == 0);
+  REQUIRE_FALSE(core.hasLastInstruction());
+}
+
+TEST_CASE("EE delay-slot TLB fetch faults retain branch ownership")
+{
+  constexpr std::uint32_t branchAddress = UINT32_C(0x00401ffc);
+  constexpr std::uint32_t delaySlotAddress = UINT32_C(0x00402000);
+
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000005f)}
+    });
+  system.eeBus().write32(0x1ffc, UINT32_C(0x10000001));
+  core.startExecution(branchAddress);
+
+  system.clockMasterCycle();
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+  REQUIRE(
+    core.acceptanceRecordsThisCycle()[0].address ==
+    branchAddress);
+  REQUIRE(
+    core.acceptanceRecordsThisCycle()[0].mode ==
+    EEAcceptanceMode::Ordinary);
+  REQUIRE(core.programCounter() == delaySlotAddress);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::TLBRefillLoadOrFetch);
+  REQUIRE(core.exceptionAddress() == delaySlotAddress);
+  REQUIRE(core.programCounter() == EEExceptionVector::REFILL);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EPC) ==
+    branchAddress);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) != 0);
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+}
+
+TEST_CASE("EE TLB fetch exception preserves older delayed work")
+{
+  constexpr std::uint32_t olderAddress = UINT32_C(0x00401ffc);
+  constexpr std::uint32_t faultAddress = UINT32_C(0x00402000);
+  constexpr std::uint32_t initialBadVAddr = UINT32_C(0x11112222);
+  constexpr std::uint32_t initialContext = UINT32_C(0xabc00000);
+  constexpr std::uint32_t initialEntryHi = UINT32_C(0x1234402a);
+  constexpr std::uint32_t initialCause = UINT32_C(0x40008000);
+  constexpr std::uint32_t initialEPC = UINT32_C(0x87654320);
+
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE |
+      EECOP0Status::COP1_USABLE);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x00400000),
+      {UINT32_C(0x0000001f)},
+      {UINT32_C(0x0000005f)}
+    });
+  core.setCOP0Register(
+    EECOP0Register::BadVAddr,
+    initialBadVAddr);
+  core.setCOP0Register(
+    EECOP0Register::Context,
+    initialContext);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    initialEntryHi);
+  core.setCOP0Register(EECOP0Register::Cause, initialCause);
+  core.setCOP0Register(EECOP0Register::EPC, initialEPC);
+  core.setFloatingPointRegister(1, UINT32_C(0x3f800000));
+  core.setFloatingPointRegister(2, UINT32_C(0x40000000));
+  system.eeBus().write32(0x1ffc, UINT32_C(0x460208c0));
+  for (std::uint32_t address = 0; address < 0x40; address += 4)
+  {
+    system.eeBus().write32(address, 0);
+  }
+  core.startExecution(olderAddress);
+
+  system.clockMasterCycle();
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+  REQUIRE(
+    core.acceptanceRecordsThisCycle()[0].address ==
+    olderAddress);
+  REQUIRE(core.floatingPointRegister(3) == 0);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::BadVAddr) ==
+    initialBadVAddr);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Context) ==
+    initialContext);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryHi) ==
+    initialEntryHi);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Cause) ==
+    initialCause);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EPC) ==
+    initialEPC);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::TLBRefillLoadOrFetch);
+  REQUIRE(core.exceptionAddress() == faultAddress);
+  REQUIRE(core.programCounter() == EEExceptionVector::REFILL);
+  REQUIRE(core.floatingPointRegister(3) == 0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x40400000));
+  REQUIRE(core.hasLastInstruction());
+  REQUIRE(
+    core.lastInstructionAddress() >=
+    EEExceptionVector::REFILL);
+}
+
 TEST_CASE("EE Core scheduled execution")
 {
   NekoSystem system;
