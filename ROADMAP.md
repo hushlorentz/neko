@@ -1753,7 +1753,7 @@ creating parallel ownership.
       Preserve older completion, cancel faulting and younger delayed work,
       retain branch-delay provenance, and prevent younger front-end, COP1, or
       interrupt ownership from overtaking the oldest memory exception.
-- [ ] Cover exception-state lifecycle boundaries including interrupt delivery,
+- [x] Cover exception-state lifecycle boundaries including interrupt delivery,
       `ERET`, host halt/resume, external PC redirection, reset, and
       transactional save/restore. Verify deterministic hashes and byte-stable
       saves without introducing new persistent state beyond the expanded

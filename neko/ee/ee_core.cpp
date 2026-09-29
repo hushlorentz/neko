@@ -2136,15 +2136,15 @@ void EECore::startExecution(std::uint32_t startAddress)
   const ExecutionStartMode mode =
     executionStartMode(startAddress);
   pc = startAddress;
-  clearPendingException();
   state = EEExecutionState::Running;
   haltReason = EEStopReason::None;
   if (mode == ExecutionStartMode::Restart)
   {
+    clearPendingException();
     resetExecutionContinuation();
+    rejectedInstructionValue = 0;
   }
   executingProgramOrder = 0;
-  rejectedInstructionValue = 0;
   exceptionEnteredThisCycle = false;
 }
 
