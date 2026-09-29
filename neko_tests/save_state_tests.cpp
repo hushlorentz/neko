@@ -43,6 +43,7 @@ namespace
     SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET = 960;
   constexpr std::size_t
     SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET = 964;
+  constexpr std::size_t SIMPLE_EE_EXCEPTION_OFFSET = 864;
   constexpr std::size_t SIMPLE_EE_EXECUTION_STATE_OFFSET = 869;
   constexpr std::size_t SIMPLE_EE_STOP_REASON_OFFSET = 870;
   constexpr std::size_t
@@ -1972,6 +1973,20 @@ TEST_CASE("EE fetch exceptions survive save states")
   REQUIRE(restored.eeCore().fetchInstruction().succeeded);
 }
 
+TEST_CASE("EE save states reject unknown expanded exception values")
+{
+  NekoSystem source;
+  std::vector<std::uint8_t> state = source.saveState();
+  state[SIMPLE_EE_EXCEPTION_OFFSET] =
+    static_cast<std::uint8_t>(EEException::TLBModified) + 1;
+  updateChecksum(&state);
+
+  NekoSystem destination;
+  REQUIRE_THROWS_WITH(
+    destination.loadState(state),
+    "Invalid Neko save state: EE exception is outside its enum.");
+}
+
 TEST_CASE("Running EE scheduler state survives save states")
 {
   NekoSystem original;
@@ -2485,7 +2500,7 @@ TEST_CASE("Deferred EE fetch translation faults survive save-state restore")
   {
     instructionAddress = UINT32_C(0x00400ffc);
     faultAddress = UINT32_C(0x00401000);
-    expectedException = EEException::InstructionBusError;
+    expectedException = EEException::TLBInvalidLoadOrFetch;
     instructionMapping = {
       EECOP0PageMask::SIZE_4_KIB,
       UINT32_C(0x00400000),

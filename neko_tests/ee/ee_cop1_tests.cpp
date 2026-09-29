@@ -7811,7 +7811,9 @@ TEST_CASE("EE COP1 memory operations use data translation")
 
     system.runMasterCycles(4);
 
-    REQUIRE(core.pendingException() == EEException::DataBusErrorLoad);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
     REQUIRE(core.exceptionAddress() == UINT32_C(0x00400100));
   }
 }
@@ -7890,7 +7892,11 @@ TEST_CASE("EE interrupts respect COP1 memory exception ordering")
     mapLowKusegForTest(&core);
     core.setGeneralRegister(
       1,
-      {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+      {
+        EEMemoryMap::KSEG0_BASE +
+          EEMemoryMap::MAIN_MEMORY_SIZE,
+        0
+      });
     core.setFloatingPointRegister(3, UINT32_C(0x12345678));
     system.eeBus().write32(
       0,
@@ -7919,7 +7925,11 @@ TEST_CASE("EE interrupts respect COP1 memory exception ordering")
     mapLowKusegForTest(&core);
     core.setGeneralRegister(
       1,
-      {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+      {
+        EEMemoryMap::KSEG0_BASE +
+          EEMemoryMap::MAIN_MEMORY_SIZE,
+        0
+      });
     core.setFloatingPointRegister(3, UINT32_C(0x89abcdef));
     system.eeBus().write32(
       0,

@@ -1341,11 +1341,17 @@ bool EECore::mainBusTranslationSucceeded(
 EEException EECore::instructionTranslationException(
   EEAddressTranslationOutcome outcome)
 {
-  return
-    outcome ==
-      EEAddressTranslationOutcome::AddressErrorLoadOrFetch
-      ? EEException::AddressErrorLoadOrFetch
-      : EEException::InstructionBusError;
+  switch (outcome)
+  {
+    case EEAddressTranslationOutcome::AddressErrorLoadOrFetch:
+      return EEException::AddressErrorLoadOrFetch;
+    case EEAddressTranslationOutcome::TLBRefillLoadOrFetch:
+      return EEException::TLBRefillLoadOrFetch;
+    case EEAddressTranslationOutcome::TLBInvalidLoadOrFetch:
+      return EEException::TLBInvalidLoadOrFetch;
+    default:
+      return EEException::InstructionBusError;
+  }
 }
 
 EEException EECore::dataTranslationException(
@@ -1360,6 +1366,27 @@ EEException EECore::dataTranslationException(
   if (outcome == EEAddressTranslationOutcome::AddressErrorStore)
   {
     return EEException::AddressErrorStore;
+  }
+  if (outcome ==
+      EEAddressTranslationOutcome::TLBRefillLoadOrFetch)
+  {
+    return EEException::TLBRefillLoadOrFetch;
+  }
+  if (outcome == EEAddressTranslationOutcome::TLBInvalidLoadOrFetch)
+  {
+    return EEException::TLBInvalidLoadOrFetch;
+  }
+  if (outcome == EEAddressTranslationOutcome::TLBRefillStore)
+  {
+    return EEException::TLBRefillStore;
+  }
+  if (outcome == EEAddressTranslationOutcome::TLBInvalidStore)
+  {
+    return EEException::TLBInvalidStore;
+  }
+  if (outcome == EEAddressTranslationOutcome::TLBModified)
+  {
+    return EEException::TLBModified;
   }
   return direction == EEDataAccessDirection::Store
     ? EEException::DataBusErrorStore
@@ -9566,6 +9593,14 @@ std::uint8_t EECore::exceptionCode(EEException type)
   {
     case EEException::Interrupt:
       return EEExceptionCode::INTERRUPT;
+    case EEException::TLBModified:
+      return EEExceptionCode::TLB_MODIFIED;
+    case EEException::TLBRefillLoadOrFetch:
+    case EEException::TLBInvalidLoadOrFetch:
+      return EEExceptionCode::TLB_LOAD_OR_FETCH;
+    case EEException::TLBRefillStore:
+    case EEException::TLBInvalidStore:
+      return EEExceptionCode::TLB_STORE;
     case EEException::AddressErrorLoadOrFetch:
       return EEExceptionCode::ADDRESS_ERROR_LOAD_OR_FETCH;
     case EEException::AddressErrorStore:

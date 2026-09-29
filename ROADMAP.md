@@ -1719,7 +1719,7 @@ creating parallel ownership.
 
 ### Precise Memory Exceptions
 
-- [ ] Add distinct internal TLB modified, load/fetch refill, load/fetch invalid,
+- [x] Add distinct internal TLB modified, load/fetch refill, load/fetch invalid,
       store refill, and store invalid exception types. Map refill and invalid
       to their shared architectural Cause codes without losing the distinction
       needed for vector selection, diagnostics, hashing, or save-state

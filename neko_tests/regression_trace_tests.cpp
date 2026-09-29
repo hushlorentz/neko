@@ -1945,7 +1945,11 @@ TEST_CASE("EE regression traces retain failed memory attempts")
   mapLowKusegForTest(&core);
   core.setGeneralRegister(
     1,
-    {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+    {
+      EEMemoryMap::KSEG0_BASE +
+        EEMemoryMap::MAIN_MEMORY_SIZE,
+      0
+    });
   system.eeBus().write32(
     0,
     immediateInstruction(0x23, 1, 2, 0));
@@ -1962,7 +1966,8 @@ TEST_CASE("EE regression traces retain failed memory attempts")
   REQUIRE(events[1].type == NekoTraceEventType::MemoryAccess);
   REQUIRE(
     events[1].value0 ==
-    EEMemoryMap::MAIN_MEMORY_SIZE);
+    EEMemoryMap::KSEG0_BASE +
+      EEMemoryMap::MAIN_MEMORY_SIZE);
   REQUIRE(events[1].value1 == 0);
   REQUIRE(events[1].value3 == 4);
   REQUIRE(

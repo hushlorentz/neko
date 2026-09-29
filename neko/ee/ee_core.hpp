@@ -50,7 +50,12 @@ enum class EEException : std::uint8_t
   ReservedInstruction,
   SystemCall,
   Breakpoint,
-  CoprocessorUnusable
+  CoprocessorUnusable,
+  TLBRefillLoadOrFetch,
+  TLBInvalidLoadOrFetch,
+  TLBRefillStore,
+  TLBInvalidStore,
+  TLBModified
 };
 
 struct EEInstructionFetchResult
@@ -271,6 +276,9 @@ namespace EECOP1Control
 namespace EEExceptionCode
 {
   constexpr std::uint8_t INTERRUPT = 0;
+  constexpr std::uint8_t TLB_MODIFIED = 1;
+  constexpr std::uint8_t TLB_LOAD_OR_FETCH = 2;
+  constexpr std::uint8_t TLB_STORE = 3;
   constexpr std::uint8_t ADDRESS_ERROR_LOAD_OR_FETCH = 4;
   constexpr std::uint8_t ADDRESS_ERROR_STORE = 5;
   constexpr std::uint8_t INSTRUCTION_BUS_ERROR = 6;

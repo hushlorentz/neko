@@ -14,6 +14,10 @@ static_assert(
   static_cast<std::uint8_t>(
     EEOperation::ReciprocalSquareRootSingleCOP1) == 143,
   "Version-26 RSQRT.S save-state ordinal changed.");
+static_assert(
+  static_cast<std::uint8_t>(
+    EEException::CoprocessorUnusable) == 11,
+  "Version-29 EE exception ordinals changed.");
 
 void NekoSaveStateCodec::writeEECore(
   SaveStateWriter *writer,
@@ -281,7 +285,7 @@ void NekoSaveStateCodec::readEECore(
   core->exception = readEnum<EEException>(
     reader,
     static_cast<std::uint8_t>(
-      EEException::CoprocessorUnusable),
+      EEException::TLBModified),
     "EE exception");
   core->faultAddress = reader->readU32();
   core->state = readEnum<EEExecutionState>(

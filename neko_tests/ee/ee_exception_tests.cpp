@@ -427,6 +427,165 @@ TEST_CASE("EE address exceptions update BadVAddr")
   }
 }
 
+TEST_CASE("EE TLB translation faults retain their architectural kind")
+{
+  constexpr std::uint32_t instructionAddress =
+    EEMemoryMap::KSEG0_BASE;
+  constexpr std::uint32_t dataAddress = UINT32_C(0x00400000);
+  const auto requireException =
+    [](const EECore &core,
+       EEException expected,
+       std::uint8_t expectedCode)
+    {
+      REQUIRE(core.pendingException() == expected);
+      REQUIRE(exceptionCode(core) == expectedCode);
+    };
+
+  SECTION("A fetch no-match records TLB refill load or fetch")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.startExecution(dataAddress);
+
+    system.clockMasterCycle();
+
+    requireException(
+      core,
+      EEException::TLBRefillLoadOrFetch,
+      EEExceptionCode::TLB_LOAD_OR_FETCH);
+  }
+
+  SECTION("A fetch invalid match records TLB invalid load or fetch")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        dataAddress,
+        {},
+        {}
+      });
+    core.startExecution(dataAddress);
+
+    system.clockMasterCycle();
+
+    requireException(
+      core,
+      EEException::TLBInvalidLoadOrFetch,
+      EEExceptionCode::TLB_LOAD_OR_FETCH);
+  }
+
+  SECTION("Refill and invalid remain distinct in hashes and save states")
+  {
+    NekoSystem refill;
+    refill.eeCore().setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    refill.eeCore().startExecution(dataAddress);
+    refill.clockMasterCycle();
+
+    NekoSystem invalid;
+    invalid.eeCore().setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    invalid.eeCore().setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        dataAddress,
+        {},
+        {}
+      });
+    invalid.eeCore().startExecution(dataAddress);
+    invalid.clockMasterCycle();
+    invalid.eeCore().setTLBEntry(0, {});
+
+    REQUIRE(
+      exceptionCode(refill.eeCore()) ==
+      exceptionCode(invalid.eeCore()));
+    REQUIRE(
+      refill.eeCore().stateHash() !=
+      invalid.eeCore().stateHash());
+    REQUIRE(refill.saveState() != invalid.saveState());
+
+    NekoSystem restored;
+    restored.loadState(invalid.saveState());
+    REQUIRE(
+      restored.eeCore().pendingException() ==
+      EEException::TLBInvalidLoadOrFetch);
+    REQUIRE(restored.saveState() == invalid.saveState());
+  }
+
+  const auto runStore =
+    [instructionAddress, dataAddress](
+      const EETLBPage *page,
+      EEException expected,
+      std::uint8_t expectedCode)
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(EECOP0Register::Status, 0);
+      if (page != nullptr)
+      {
+        core.setTLBEntry(
+          0,
+          {
+            EECOP0PageMask::SIZE_4_KIB,
+            dataAddress,
+            *page,
+            {}
+          });
+      }
+      core.setGeneralRegister(1, {dataAddress, 0});
+      system.eeBus().write32(
+        0,
+        immediateInstruction(0x2b, 1, 0, 0));
+      core.startExecution(instructionAddress);
+      system.clockMasterCycle();
+      INFO(
+        "actual exception " <<
+        static_cast<unsigned>(core.pendingException()) <<
+        ", expected " <<
+        static_cast<unsigned>(expected));
+      REQUIRE(core.pendingException() == expected);
+      REQUIRE(exceptionCode(core) == expectedCode);
+    };
+
+  SECTION("A store no-match records TLB refill store")
+  {
+    runStore(
+      nullptr,
+      EEException::TLBRefillStore,
+      EEExceptionCode::TLB_STORE);
+  }
+
+  SECTION("A store invalid match records TLB invalid store")
+  {
+    const EETLBPage invalid = {};
+    runStore(
+      &invalid,
+      EEException::TLBInvalidStore,
+      EEExceptionCode::TLB_STORE);
+  }
+
+  SECTION("A store read-only match records TLB modified")
+  {
+    const EETLBPage readOnly = {UINT32_C(0x0000001a)};
+    runStore(
+      &readOnly,
+      EEException::TLBModified,
+      EEExceptionCode::TLB_MODIFIED);
+  }
+}
+
 TEST_CASE("EE bus errors use their architectural Cause codes")
 {
   SECTION("An instruction bus error records IBE")
@@ -435,7 +594,9 @@ TEST_CASE("EE bus errors use their architectural Cause codes")
     EECore &core = system.eeCore();
     core.setCOP0Register(EECOP0Register::Status, 0);
     mapLowKusegForTest(&core);
-    core.startExecution(UINT32_C(0x02000000));
+    core.startExecution(
+      EEMemoryMap::KSEG0_BASE +
+        EEMemoryMap::MAIN_MEMORY_SIZE);
 
     system.clockMasterCycle();
 
@@ -454,7 +615,13 @@ TEST_CASE("EE bus errors use their architectural Cause codes")
     core.setCOP0Register(
       EECOP0Register::BadVAddr,
       UINT32_C(0xdeadbeef));
-    core.setGeneralRegister(1, {EEMemoryMap::MAIN_MEMORY_SIZE, 0});
+    core.setGeneralRegister(
+      1,
+      {
+        EEMemoryMap::KSEG0_BASE +
+          EEMemoryMap::MAIN_MEMORY_SIZE,
+        0
+      });
     system.eeBus().write32(
       0,
       (UINT32_C(0x23) << 26) |
