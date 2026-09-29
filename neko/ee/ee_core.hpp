@@ -292,8 +292,11 @@ namespace EEExceptionCode
 
 namespace EEExceptionVector
 {
+  constexpr std::uint32_t REFILL = UINT32_C(0x80000000);
   constexpr std::uint32_t GENERAL = UINT32_C(0x80000180);
   constexpr std::uint32_t INTERRUPT = UINT32_C(0x80000200);
+  constexpr std::uint32_t BOOTSTRAP_REFILL =
+    UINT32_C(0xbfc00200);
   constexpr std::uint32_t BOOTSTRAP_GENERAL =
     UINT32_C(0xbfc00380);
   constexpr std::uint32_t BOOTSTRAP_INTERRUPT =

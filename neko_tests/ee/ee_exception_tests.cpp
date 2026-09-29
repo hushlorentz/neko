@@ -174,6 +174,109 @@ TEST_CASE("EE bootstrap and interrupt vectors follow Status BEV")
   }
 }
 
+TEST_CASE("EE TLB exceptions select refill and general vectors")
+{
+  constexpr std::uint32_t instructionAddress =
+    EEMemoryMap::KSEG0_BASE;
+  constexpr std::uint32_t dataAddress = UINT32_C(0x00400000);
+
+  SECTION("A first-level fetch no-match uses the normal refill vector")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.startExecution(dataAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(core.programCounter() == EEExceptionVector::REFILL);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == dataAddress);
+  }
+
+  SECTION("A first-level store no-match uses the bootstrap refill vector")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x2b, 1, 0, 0));
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::TLBRefillStore);
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::BOOTSTRAP_REFILL);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      instructionAddress);
+  }
+
+  SECTION("A first-level invalid match uses the normal general vector")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        dataAddress,
+        {},
+        {}
+      });
+    core.startExecution(dataAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBInvalidLoadOrFetch);
+    REQUIRE(core.programCounter() == EEExceptionVector::GENERAL);
+  }
+
+  SECTION("A first-level modified match uses the bootstrap general vector")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        dataAddress,
+        {UINT32_C(0x0001001a)},
+        {}
+      });
+    core.setGeneralRegister(1, {dataAddress, 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x2b, 1, 0, 0));
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::TLBModified);
+    REQUIRE(
+      core.programCounter() ==
+      EEExceptionVector::BOOTSTRAP_GENERAL);
+  }
+}
+
 TEST_CASE("Nested EE exceptions preserve EPC and use the general vector")
 {
   NekoSystem system;
@@ -196,6 +299,58 @@ TEST_CASE("Nested EE exceptions preserve EPC and use the general vector")
       EECOP0Cause::BRANCH_DELAY) != 0);
   REQUIRE(core.programCounter() == EEExceptionVector::GENERAL);
   REQUIRE(exceptionCode(core) == EEExceptionCode::INTERRUPT);
+}
+
+TEST_CASE("Nested EE TLB refill uses the general vector and newest fault state")
+{
+  constexpr std::uint32_t faultAddress = UINT32_C(0x12345abc);
+  constexpr std::uint32_t preservedEPC = UINT32_C(0x80001234);
+  constexpr std::uint32_t initialContext = UINT32_C(0xabd23450);
+  constexpr std::uint32_t initialEntryHi = UINT32_C(0x89abc05a);
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::EXCEPTION_LEVEL |
+      EECOP0Status::BOOTSTRAP_EXCEPTION_VECTOR);
+  core.setCOP0Register(EECOP0Register::EPC, preservedEPC);
+  core.setCOP0Register(
+    EECOP0Register::Cause,
+    EECOP0Cause::BRANCH_DELAY);
+  core.setCOP0Register(
+    EECOP0Register::Context,
+    initialContext);
+  core.setCOP0Register(
+    EECOP0Register::EntryHi,
+    initialEntryHi);
+  core.startExecution(faultAddress);
+
+  system.clockMasterCycle();
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::TLBRefillLoadOrFetch);
+  REQUIRE(
+    core.programCounter() ==
+    EEExceptionVector::BOOTSTRAP_GENERAL);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == preservedEPC);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Cause) &
+      EECOP0Cause::BRANCH_DELAY) != 0);
+  REQUIRE(
+    exceptionCode(core) ==
+    EEExceptionCode::TLB_LOAD_OR_FETCH);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::BadVAddr) ==
+    faultAddress);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::Context) ==
+    ((initialContext & EECOP0Context::PTE_BASE_MASK) |
+     ((faultAddress >> 9) & EECOP0Context::BAD_VPN2_MASK)));
+  REQUIRE(
+    core.cop0Register(EECOP0Register::EntryHi) ==
+    ((faultAddress & EECOP0EntryHi::VIRTUAL_PAGE_MASK) |
+     (initialEntryHi & ~EECOP0EntryHi::VIRTUAL_PAGE_MASK)));
 }
 
 TEST_CASE("EE ERET returns through the active exception level")
@@ -289,6 +444,33 @@ TEST_CASE("EE ERET is undefined in a branch delay slot")
 
 TEST_CASE("EE delay-slot exceptions identify the restartable branch")
 {
+  SECTION("A TLB refill uses the refill vector and restartable branch")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    mapLowKusegForTest(&core);
+    core.setGeneralRegister(1, {UINT32_C(0x00400000), 0});
+    system.eeBus().write32(
+      0,
+      immediateInstruction(0x04, 0, 0, 2));
+    system.eeBus().write32(
+      4,
+      immediateInstruction(0x21, 1, 2, 0));
+    core.startExecution(0);
+
+    system.runMasterCycles(1);
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+    REQUIRE(
+      (core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) != 0);
+    REQUIRE(core.programCounter() == EEExceptionVector::REFILL);
+  }
+
   SECTION("A data fault sets BD and points EPC at the branch")
   {
     NekoSystem system;

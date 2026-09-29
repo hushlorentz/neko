@@ -9659,15 +9659,31 @@ std::uint32_t EECore::exceptionVector(
   const bool interrupt =
     type == EEException::Interrupt &&
     !alreadyExceptionLevel;
+  const bool refill =
+    !alreadyExceptionLevel &&
+    (type == EEException::TLBRefillLoadOrFetch ||
+     type == EEException::TLBRefillStore);
   if (bootstrap)
   {
-    return interrupt
-      ? EEExceptionVector::BOOTSTRAP_INTERRUPT
-      : EEExceptionVector::BOOTSTRAP_GENERAL;
+    if (refill)
+    {
+      return EEExceptionVector::BOOTSTRAP_REFILL;
+    }
+    if (interrupt)
+    {
+      return EEExceptionVector::BOOTSTRAP_INTERRUPT;
+    }
+    return EEExceptionVector::BOOTSTRAP_GENERAL;
   }
-  return interrupt
-    ? EEExceptionVector::INTERRUPT
-    : EEExceptionVector::GENERAL;
+  if (refill)
+  {
+    return EEExceptionVector::REFILL;
+  }
+  if (interrupt)
+  {
+    return EEExceptionVector::INTERRUPT;
+  }
+  return EEExceptionVector::GENERAL;
 }
 
 void EECore::setInterruptLines(bool intc, bool dmac)

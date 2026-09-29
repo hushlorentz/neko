@@ -1729,7 +1729,7 @@ creating parallel ownership.
       that commits `Context.BadVPN2` and `EntryHi.VPN2` while preserving ASID
       and reserved state, and have `EECore::enterException()` coordinate that
       mutation atomically with `BadVAddr`, Cause, EPC/BD, and Status updates.
-- [ ] Implement the researched vector contract: first-level no-match refill
+- [x] Implement the researched vector contract: first-level no-match refill
       uses the normal or bootstrap refill vector, Invalid and Modified use the
       corresponding general vector, and every nested-EXL memory exception uses
       the general vector without replacing EPC or BD while still updating the
