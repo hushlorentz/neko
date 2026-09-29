@@ -1758,7 +1758,7 @@ creating parallel ownership.
       transactional save/restore. Verify deterministic hashes and byte-stable
       saves without introducing new persistent state beyond the expanded
       exception and existing continuation metadata.
-- [ ] Run focused and complete optimized validation, run the optimized
+- [x] Run focused and complete optimized validation, run the optimized
       AddressSanitizer check, and complete an independent read-only review of
       precise memory exceptions. Resolve every concrete finding before closing
       the block.
