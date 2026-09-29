@@ -1734,7 +1734,7 @@ creating parallel ownership.
       corresponding general vector, and every nested-EXL memory exception uses
       the general vector without replacing EPC or BD while still updating the
       newest Cause and address-related registers.
-- [ ] Define and test the priority chain from alignment through segment
+- [x] Define and test the priority chain from alignment through segment
       protection, TLB translation and permissions, unsupported cache routing,
       and physical bus failure. Cover fetch plus byte, halfword, word,
       doubleword, quadword, and merge data accesses in both applicable
