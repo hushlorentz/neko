@@ -1719,28 +1719,49 @@ creating parallel ownership.
 
 ### Precise Memory Exceptions
 
-- [ ] Add TLB modified, load/fetch refill or invalid, and store refill or
-      invalid exception types and codes, and distinguish refill from invalid
-      internally even where the architectural exception code is shared.
-- [ ] Update `BadVAddr`, `Context`, and `EntryHi` exactly as required for each
-      translation fault by implementing the researched refill/general/bootstrap
-      vector and nested exception-level contract.
-- [ ] Keep translation and cache lookup side-effect free until program-order
-      fault selection. Have `EECore::enterException()` commit its
-      exception-owned fields and invoke one focused memory-system method for
-      `Context` and `EntryHi` within the same atomic transaction, so
-      speculative or younger faults cannot mutate architectural state.
-- [ ] Define and test exception priority among alignment, segment protection,
-      translation, cache, and physical bus failures for every access width and
-      direction.
-- [ ] Integrate fetch and data faults with the existing two-wide issue model:
-      the older fault prevents younger acceptance, a younger fault preserves
-      older completion, branch-delay ownership remains exact, and all younger
-      delayed work is cancelled without discarding older work.
-- [ ] Cover faults from ordinary integer, merge, COP1, and COP2 memory
-      operations, interrupt boundaries, `ERET`, host halt/resume, and external
-      PC redirection.
-- [ ] Complete an independent review of precise memory exceptions.
+- [ ] Add distinct internal TLB modified, load/fetch refill, load/fetch invalid,
+      store refill, and store invalid exception types. Map refill and invalid
+      to their shared architectural Cause codes without losing the distinction
+      needed for vector selection, diagnostics, hashing, or save-state
+      validation.
+- [ ] Keep translation and later cache lookup side-effect free until
+      program-order fault selection. Add one focused `EEMemorySystem` method
+      that commits `Context.BadVPN2` and `EntryHi.VPN2` while preserving ASID
+      and reserved state, and have `EECore::enterException()` coordinate that
+      mutation atomically with `BadVAddr`, Cause, EPC/BD, and Status updates.
+- [ ] Implement the researched vector contract: first-level no-match refill
+      uses the normal or bootstrap refill vector, Invalid and Modified use the
+      corresponding general vector, and every nested-EXL memory exception uses
+      the general vector without replacing EPC or BD while still updating the
+      newest Cause and address-related registers.
+- [ ] Define and test the priority chain from alignment through segment
+      protection, TLB translation and permissions, unsupported cache routing,
+      and physical bus failure. Cover fetch plus byte, halfword, word,
+      doubleword, quadword, and merge data accesses in both applicable
+      directions without permitting a lower-priority stage to mutate state.
+- [ ] Integrate instruction translation faults with public fetch and the
+      two-wide issue/staging front end. An older fetch fault prevents younger
+      acceptance, a younger fetch fault waits for older completion,
+      branch-delay ownership remains exact, and exception entry cancels only
+      younger continuation.
+- [ ] Integrate immediate data faults across ordinary integer, merge, and COP2
+      memory operations. Preserve the older-fault/younger-fault issue contract,
+      virtual fault address, direction-specific Cause code, trace outcome, and
+      absence of cache, bus, register, or memory mutation after the selected
+      fault.
+- [ ] Integrate delayed COP1 load/store faults through global program order.
+      Preserve older completion, cancel faulting and younger delayed work,
+      retain branch-delay provenance, and prevent younger front-end, COP1, or
+      interrupt ownership from overtaking the oldest memory exception.
+- [ ] Cover exception-state lifecycle boundaries including interrupt delivery,
+      `ERET`, host halt/resume, external PC redirection, reset, and
+      transactional save/restore. Verify deterministic hashes and byte-stable
+      saves without introducing new persistent state beyond the expanded
+      exception and existing continuation metadata.
+- [ ] Run focused and complete optimized validation, run the optimized
+      AddressSanitizer check, and complete an independent read-only review of
+      precise memory exceptions. Resolve every concrete finding before closing
+      the block.
 
 ### Scratchpad RAM and DMA Visibility
 
