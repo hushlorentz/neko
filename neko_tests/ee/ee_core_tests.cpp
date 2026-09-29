@@ -1104,6 +1104,27 @@ struct EECoreTestAccess
   }
 };
 
+static bool hasFailedEEMemoryTrace(
+  const NekoSystem &system,
+  std::uint32_t address,
+  std::uint8_t width,
+  bool write)
+{
+  const std::uint64_t expectedFlags =
+    width | (write ? NekoEETraceMemory::WRITE : 0);
+  return std::any_of(
+    system.trace().begin(),
+    system.trace().end(),
+    [address, expectedFlags](const NekoTraceEvent &event)
+    {
+      return
+        event.subsystem == NekoTraceSubsystem::EE &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 == address &&
+        event.value3 == expectedFlags;
+    });
+}
+
 TEST_CASE(
   "EE architectural events are produced independently of trace collection")
 {
@@ -2541,6 +2562,397 @@ TEST_CASE("EE front end translates mapped instruction candidates")
 
   REQUIRE(core.generalRegister(2).low == 7);
   REQUIRE(core.pendingException() == EEException::None);
+}
+
+TEST_CASE("EE immediate integer TLB faults preserve architectural state")
+{
+  constexpr std::uint32_t instructionAddress =
+    EEMemoryMap::KSEG0_BASE;
+  constexpr std::uint32_t dataAddress = UINT32_C(0x00400100);
+  constexpr std::uint64_t destination =
+    UINT64_C(0x1122334455667788);
+
+  SECTION("A load invalid fault preserves its destination")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001d)},
+        {UINT32_C(0x0000001f)}
+      });
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setGeneralRegister(2, {destination, UINT64_MAX});
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x23) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16));
+    system.startTrace();
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBInvalidLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_LOAD_OR_FETCH);
+    REQUIRE(core.generalRegister(2).low == destination);
+    REQUIRE(core.generalRegister(2).high == UINT64_MAX);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+    REQUIRE(
+      hasFailedEEMemoryTrace(
+        system,
+        dataAddress,
+        4,
+        false));
+  }
+
+  SECTION("A store modified fault preserves memory")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001b)},
+        {UINT32_C(0x0000001b)}
+      });
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setGeneralRegister(2, {UINT32_C(0xdeadbeef), 0});
+    system.eeBus().write32(0x100, UINT32_C(0x12345678));
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x2b) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16));
+    system.startTrace();
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::TLBModified);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_MODIFIED);
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x12345678));
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+    REQUIRE(
+      hasFailedEEMemoryTrace(
+        system,
+        dataAddress,
+        4,
+        true));
+  }
+}
+
+TEST_CASE("EE immediate merge TLB faults retain effective addresses")
+{
+  constexpr std::uint32_t instructionAddress =
+    EEMemoryMap::KSEG0_BASE;
+  constexpr std::uint32_t dataAddress = UINT32_C(0x00400103);
+  constexpr std::uint32_t alignedAddress =
+    dataAddress & ~UINT32_C(3);
+  constexpr std::uint64_t destination =
+    UINT64_C(0x1122334455667788);
+
+  SECTION("A merge load refill preserves its destination")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setGeneralRegister(2, {destination, UINT64_MAX});
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x22) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16));
+    system.startTrace();
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_LOAD_OR_FETCH);
+    REQUIRE(core.generalRegister(2).low == destination);
+    REQUIRE(core.generalRegister(2).high == UINT64_MAX);
+    REQUIRE(
+      hasFailedEEMemoryTrace(
+        system,
+        alignedAddress,
+        4,
+        false));
+  }
+
+  SECTION("A merge store invalid fault preserves memory")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001d)},
+        {UINT32_C(0x0000001f)}
+      });
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setGeneralRegister(2, {UINT32_C(0xdeadbeef), 0});
+    system.eeBus().write32(0x100, UINT32_C(0x12345678));
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x2a) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16));
+    system.startTrace();
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::TLBInvalidStore);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_STORE);
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x12345678));
+    REQUIRE(
+      hasFailedEEMemoryTrace(
+        system,
+        alignedAddress,
+        4,
+        true));
+  }
+}
+
+TEST_CASE("EE immediate COP2 TLB faults preserve vector and memory state")
+{
+  constexpr std::uint32_t instructionAddress =
+    EEMemoryMap::KSEG0_BASE;
+  constexpr std::uint32_t dataAddress = UINT32_C(0x00400100);
+
+  SECTION("LQC2 refill preserves its destination vector")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    system.vu0().loadFPRegisterBits(3, 1, 2, 3, 4);
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x36) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(3) << 16));
+    system.startTrace();
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_LOAD_OR_FETCH);
+    const FPRegister *vector = system.vu0().fpRegisterValue(3);
+    REQUIRE(vector->x.bits() == 1);
+    REQUIRE(vector->y.bits() == 2);
+    REQUIRE(vector->z.bits() == 3);
+    REQUIRE(vector->w.bits() == 4);
+    REQUIRE(
+      hasFailedEEMemoryTrace(
+        system,
+        dataAddress,
+        16,
+        false));
+  }
+
+  SECTION("SQC2 modified preserves memory")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001b)},
+        {UINT32_C(0x0000001b)}
+      });
+    core.setGeneralRegister(1, {dataAddress, 0});
+    system.vu0().loadFPRegisterBits(
+      3,
+      UINT32_C(0x11111111),
+      UINT32_C(0x22222222),
+      UINT32_C(0x33333333),
+      UINT32_C(0x44444444));
+    const EEQuadword initial = {
+      UINT64_C(0x7766554433221100),
+      UINT64_C(0xffeeddccbbaa9988)
+    };
+    REQUIRE(system.eeBus().writeData128(0x100, initial));
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x3e) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(3) << 16));
+    system.startTrace();
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::TLBModified);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_MODIFIED);
+    EEQuadword stored;
+    REQUIRE(system.eeBus().readData128(0x100, &stored));
+    REQUIRE(stored.low == initial.low);
+    REQUIRE(stored.high == initial.high);
+    REQUIRE(
+      hasFailedEEMemoryTrace(
+        system,
+        dataAddress,
+        16,
+        true));
+  }
+}
+
+TEST_CASE("EE immediate TLB data faults obey two-wide program order")
+{
+  constexpr std::uint32_t dataAddress = UINT32_C(0x00400100);
+
+  SECTION("An older load fault cancels its younger partner")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x1122334455667788), UINT64_MAX});
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x23) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16));
+    system.eeBus().write32(4, UINT32_C(0x24030001));
+    system.startTrace();
+    core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.lastIssueSelection().instructionCount == 2);
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::Concurrent);
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_LOAD_OR_FETCH);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      EEMemoryMap::KSEG0_BASE);
+    REQUIRE(core.generalRegister(2).low ==
+      UINT64_C(0x1122334455667788));
+    REQUIRE(core.generalRegister(2).high == UINT64_MAX);
+    REQUIRE(core.generalRegister(3).low == 0);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+  }
+
+  SECTION("A younger store fault preserves its older partner")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setGeneralRegister(2, {UINT32_C(0xdeadbeef), 0});
+    system.eeBus().write32(0, UINT32_C(0x24030001));
+    system.eeBus().write32(
+      4,
+      (UINT32_C(0x2b) << 26) |
+        (UINT32_C(1) << 21) |
+        (UINT32_C(2) << 16));
+    system.startTrace();
+    core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.lastIssueSelection().instructionCount == 2);
+    REQUIRE(
+      core.lastIssueSelection().pairing ==
+      EEIssuePairing::Concurrent);
+    REQUIRE(core.pendingException() == EEException::TLBRefillStore);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_STORE);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      EEMemoryMap::KSEG0_BASE + 4);
+    REQUIRE(core.generalRegister(3).low == 1);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0].address ==
+      EEMemoryMap::KSEG0_BASE);
+    REQUIRE(
+      hasFailedEEMemoryTrace(
+        system,
+        dataAddress,
+        4,
+        true));
+  }
 }
 
 TEST_CASE("EE public fetch reports precise TLB outcomes without entering an exception")

@@ -22,19 +22,21 @@ namespace
     const char *name;
     std::uint8_t loadOpcode;
     std::uint8_t storeOpcode;
+    std::uint8_t width;
     std::uint32_t effectiveOffset;
     std::uint32_t alignmentMask;
+    std::uint32_t traceAlignmentMask;
     bool masksToQuadword;
   };
 
   constexpr MemoryAccessContract ACCESS_CONTRACTS[] = {
-    {"byte", 0x20, 0x28, 0, 0, false},
-    {"halfword", 0x21, 0x29, 0, 1, false},
-    {"word", 0x23, 0x2b, 0, 3, false},
-    {"doubleword", 0x37, 0x3f, 0, 7, false},
-    {"quadword", 0x1e, 0x1f, 7, 0, true},
-    {"word merge", 0x22, 0x2e, 1, 0, false},
-    {"doubleword merge", 0x1a, 0x2d, 3, 0, false}
+    {"byte", 0x20, 0x28, 1, 0, 0, 0, false},
+    {"halfword", 0x21, 0x29, 2, 0, 1, 1, false},
+    {"word", 0x23, 0x2b, 4, 0, 3, 3, false},
+    {"doubleword", 0x37, 0x3f, 8, 0, 7, 7, false},
+    {"quadword", 0x1e, 0x1f, 16, 7, 0, 0x0f, true},
+    {"word merge", 0x22, 0x2e, 4, 1, 0, 3, false},
+    {"doubleword merge", 0x1a, 0x2d, 8, 3, 0, 7, false}
   };
 
   std::uint32_t memoryInstruction(
@@ -140,11 +142,33 @@ namespace
         store ? contract.storeOpcode : contract.loadOpcode,
         1,
         2));
+    system->startTrace();
     core.startExecution(
       mappedInstructionFetch
         ? 0
         : EEMemoryMap::KSEG0_BASE);
     system->clockMasterCycle();
+  }
+
+  bool hasFailedMemoryTrace(
+    const NekoSystem &system,
+    std::uint32_t address,
+    std::uint8_t width,
+    bool store)
+  {
+    const std::uint64_t expectedFlags =
+      width | (store ? NekoEETraceMemory::WRITE : 0);
+    for (const NekoTraceEvent &event : system.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::EE &&
+          event.type == NekoTraceEventType::MemoryAccess &&
+          event.value0 == address &&
+          event.value3 == expectedFlags)
+      {
+        return true;
+      }
+    }
+    return false;
   }
 
   void requireNoDataMutation(
@@ -290,6 +314,29 @@ namespace
       core.pendingException() ==
       expectedException(stage, store));
     REQUIRE(core.exceptionAddress() == expectedFaultAddress);
+    if (stage == DataFaultStage::TLBRefill ||
+        stage == DataFaultStage::TLBInvalid ||
+        stage == DataFaultStage::TLBModified)
+    {
+      const std::uint8_t expectedCause =
+        stage == DataFaultStage::TLBModified
+          ? EEExceptionCode::TLB_MODIFIED
+          : (store
+              ? EEExceptionCode::TLB_STORE
+              : EEExceptionCode::TLB_LOAD_OR_FETCH);
+      REQUIRE(
+        ((core.cop0Register(EECOP0Register::Cause) &
+          EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+        expectedCause);
+      const std::uint32_t expectedTraceAddress =
+        virtualAddress & ~contract.traceAlignmentMask;
+      REQUIRE(
+        hasFailedMemoryTrace(
+          system,
+          expectedTraceAddress,
+          contract.width,
+          store));
+    }
     if (stage == DataFaultStage::SegmentProtection ||
         stage == DataFaultStage::UnsupportedCache ||
         stage == DataFaultStage::PhysicalBus)

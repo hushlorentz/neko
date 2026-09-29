@@ -1744,7 +1744,7 @@ creating parallel ownership.
       acceptance, a younger fetch fault waits for older completion,
       branch-delay ownership remains exact, and exception entry cancels only
       younger continuation.
-- [ ] Integrate immediate data faults across ordinary integer, merge, and COP2
+- [x] Integrate immediate data faults across ordinary integer, merge, and COP2
       memory operations. Preserve the older-fault/younger-fault issue contract,
       virtual fault address, direction-specific Cause code, trace outcome, and
       absence of cache, bus, register, or memory mutation after the selected
