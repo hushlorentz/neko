@@ -677,6 +677,17 @@ void EEMemorySystem::setCOP0Register(
   }
 }
 
+void EEMemorySystem::commitTLBExceptionAddress(
+  std::uint32_t virtualAddress)
+{
+  cop0Context =
+    (cop0Context & ~EECOP0Context::BAD_VPN2_MASK) |
+    ((virtualAddress >> 9) & EECOP0Context::BAD_VPN2_MASK);
+  cop0EntryHi =
+    (cop0EntryHi & ~EECOP0EntryHi::VIRTUAL_PAGE_MASK) |
+    (virtualAddress & EECOP0EntryHi::VIRTUAL_PAGE_MASK);
+}
+
 EECOP0WriteResult EEMemorySystem::writeCOP0Register(
   EECOP0Register registerIndex,
   std::uint32_t value)

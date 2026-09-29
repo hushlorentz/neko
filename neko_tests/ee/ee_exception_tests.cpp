@@ -432,13 +432,29 @@ TEST_CASE("EE TLB translation faults retain their architectural kind")
   constexpr std::uint32_t instructionAddress =
     EEMemoryMap::KSEG0_BASE;
   constexpr std::uint32_t dataAddress = UINT32_C(0x00400000);
+  constexpr std::uint32_t initialContext = UINT32_C(0xabd23450);
+  constexpr std::uint32_t initialEntryHi = UINT32_C(0x89abc05a);
   const auto requireException =
-    [](const EECore &core,
+    [dataAddress, initialContext, initialEntryHi](
+       const EECore &core,
        EEException expected,
        std::uint8_t expectedCode)
     {
       REQUIRE(core.pendingException() == expected);
       REQUIRE(exceptionCode(core) == expectedCode);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::BadVAddr) ==
+        dataAddress);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Context) ==
+        ((initialContext & EECOP0Context::PTE_BASE_MASK) |
+         ((dataAddress >> 9) &
+          EECOP0Context::BAD_VPN2_MASK)));
+      REQUIRE(
+        core.cop0Register(EECOP0Register::EntryHi) ==
+        ((dataAddress & EECOP0EntryHi::VIRTUAL_PAGE_MASK) |
+         (initialEntryHi &
+          ~EECOP0EntryHi::VIRTUAL_PAGE_MASK)));
     };
 
   SECTION("A fetch no-match records TLB refill load or fetch")
@@ -448,6 +464,12 @@ TEST_CASE("EE TLB translation faults retain their architectural kind")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::USER_MODE);
+    core.setCOP0Register(
+      EECOP0Register::Context,
+      initialContext);
+    core.setCOP0Register(
+      EECOP0Register::EntryHi,
+      initialEntryHi);
     core.startExecution(dataAddress);
 
     system.clockMasterCycle();
@@ -465,11 +487,18 @@ TEST_CASE("EE TLB translation faults retain their architectural kind")
     core.setCOP0Register(
       EECOP0Register::Status,
       EECOP0Status::USER_MODE);
+    core.setCOP0Register(
+      EECOP0Register::Context,
+      initialContext);
+    core.setCOP0Register(
+      EECOP0Register::EntryHi,
+      initialEntryHi);
     core.setTLBEntry(
       0,
       {
         EECOP0PageMask::SIZE_4_KIB,
-        dataAddress,
+        dataAddress |
+          (initialEntryHi & EECOP0EntryHi::ASID_MASK),
         {},
         {}
       });
@@ -525,7 +554,7 @@ TEST_CASE("EE TLB translation faults retain their architectural kind")
   }
 
   const auto runStore =
-    [instructionAddress, dataAddress](
+    [instructionAddress, dataAddress, initialContext, initialEntryHi](
       const EETLBPage *page,
       EEException expected,
       std::uint8_t expectedCode)
@@ -533,13 +562,20 @@ TEST_CASE("EE TLB translation faults retain their architectural kind")
       NekoSystem system;
       EECore &core = system.eeCore();
       core.setCOP0Register(EECOP0Register::Status, 0);
+      core.setCOP0Register(
+        EECOP0Register::Context,
+        initialContext);
+      core.setCOP0Register(
+        EECOP0Register::EntryHi,
+        initialEntryHi);
       if (page != nullptr)
       {
         core.setTLBEntry(
           0,
           {
             EECOP0PageMask::SIZE_4_KIB,
-            dataAddress,
+            dataAddress |
+              (initialEntryHi & EECOP0EntryHi::ASID_MASK),
             *page,
             {}
           });
@@ -557,6 +593,19 @@ TEST_CASE("EE TLB translation faults retain their architectural kind")
         static_cast<unsigned>(expected));
       REQUIRE(core.pendingException() == expected);
       REQUIRE(exceptionCode(core) == expectedCode);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::BadVAddr) ==
+        dataAddress);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Context) ==
+        ((initialContext & EECOP0Context::PTE_BASE_MASK) |
+         ((dataAddress >> 9) &
+          EECOP0Context::BAD_VPN2_MASK)));
+      REQUIRE(
+        core.cop0Register(EECOP0Register::EntryHi) ==
+        ((dataAddress & EECOP0EntryHi::VIRTUAL_PAGE_MASK) |
+         (initialEntryHi &
+          ~EECOP0EntryHi::VIRTUAL_PAGE_MASK)));
     };
 
   SECTION("A store no-match records TLB refill store")

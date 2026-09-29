@@ -1724,7 +1724,7 @@ creating parallel ownership.
       to their shared architectural Cause codes without losing the distinction
       needed for vector selection, diagnostics, hashing, or save-state
       validation.
-- [ ] Keep translation and later cache lookup side-effect free until
+- [x] Keep translation and later cache lookup side-effect free until
       program-order fault selection. Add one focused `EEMemorySystem` method
       that commits `Context.BadVPN2` and `EntryHi.VPN2` while preserving ASID
       and reserved state, and have `EECore::enterException()` coordinate that

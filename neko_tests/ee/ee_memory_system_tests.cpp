@@ -606,6 +606,65 @@ TEST_CASE("EE architectural TLB translation distinguishes refill direction")
     EEAddressTranslationOutcome::TLBRefillStore);
 }
 
+TEST_CASE("EE TLB translation defers exception-register mutation")
+{
+  EEMemorySystem memorySystem;
+  constexpr std::uint32_t address = UINT32_C(0x34567abc);
+  constexpr std::uint32_t initialContext = UINT32_C(0xabd23450);
+  constexpr std::uint32_t initialEntryHi = UINT32_C(0x89abc05a);
+  memorySystem.setCOP0Register(
+    EECOP0Register::Context,
+    initialContext);
+  memorySystem.setCOP0Register(
+    EECOP0Register::EntryHi,
+    initialEntryHi);
+
+  REQUIRE(
+    memorySystem.translateInstructionAddress(
+      address,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::Context) ==
+    initialContext);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::EntryHi) ==
+    initialEntryHi);
+
+  memorySystem.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      (address & EECOP0EntryHi::VIRTUAL_PAGE_MASK) |
+        (initialEntryHi & EECOP0EntryHi::ASID_MASK),
+      {UINT32_C(0x0001001a)},
+      {UINT32_C(0x0001001a)}
+    });
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      address,
+      EEDataAccessDirection::Store,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBModified);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::Context) ==
+    initialContext);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::EntryHi) ==
+    initialEntryHi);
+
+  memorySystem.commitTLBExceptionAddress(address);
+
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::Context) ==
+    ((initialContext & EECOP0Context::PTE_BASE_MASK) |
+     ((address >> 9) & EECOP0Context::BAD_VPN2_MASK)));
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::EntryHi) ==
+    ((address & EECOP0EntryHi::VIRTUAL_PAGE_MASK) |
+     (initialEntryHi & ~EECOP0EntryHi::VIRTUAL_PAGE_MASK)));
+}
+
 TEST_CASE("EE architectural TLB translation selects mapped cache routes")
 {
   const struct

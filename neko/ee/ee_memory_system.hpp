@@ -126,6 +126,7 @@ class EEMemorySystem final
     void setCOP0Register(
       EECOP0Register registerIndex,
       std::uint32_t value);
+    void commitTLBExceptionAddress(std::uint32_t virtualAddress);
     EECOP0WriteResult writeCOP0Register(
       EECOP0Register registerIndex,
       std::uint32_t value);

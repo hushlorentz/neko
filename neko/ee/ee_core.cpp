@@ -156,6 +156,21 @@ namespace
   constexpr std::uint8_t DIVIDE_LATENCY = 37;
   constexpr std::uint8_t PACKED_MAC_INITIATION_CYCLES = 2;
 
+  bool isTLBException(EEException exception)
+  {
+    switch (exception)
+    {
+      case EEException::TLBRefillLoadOrFetch:
+      case EEException::TLBInvalidLoadOrFetch:
+      case EEException::TLBRefillStore:
+      case EEException::TLBInvalidStore:
+      case EEException::TLBModified:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   std::uint32_t updatedCOP1Status(
     std::uint32_t status,
     std::uint8_t affectedFlags,
@@ -9513,7 +9528,14 @@ void EECore::enterException(
     cop0Cause |= EECOP0Cause::COPROCESSOR_1;
   }
   cop0Status |= EECOP0Status::EXCEPTION_LEVEL;
-  if (request.type == EEException::AddressErrorLoadOrFetch ||
+  if (isTLBException(request.type))
+  {
+    cop0BadVAddr = request.faultAddress;
+    memorySystem.commitTLBExceptionAddress(
+      request.faultAddress);
+  }
+  else if (
+      request.type == EEException::AddressErrorLoadOrFetch ||
       request.type == EEException::AddressErrorStore)
   {
     cop0BadVAddr = request.faultAddress;
