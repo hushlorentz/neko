@@ -1749,7 +1749,7 @@ creating parallel ownership.
       virtual fault address, direction-specific Cause code, trace outcome, and
       absence of cache, bus, register, or memory mutation after the selected
       fault.
-- [ ] Integrate delayed COP1 load/store faults through global program order.
+- [x] Integrate delayed COP1 load/store faults through global program order.
       Preserve older completion, cancel faulting and younger delayed work,
       retain branch-delay provenance, and prevent younger front-end, COP1, or
       interrupt ownership from overtaking the oldest memory exception.

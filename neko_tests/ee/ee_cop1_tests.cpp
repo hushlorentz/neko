@@ -7946,6 +7946,203 @@ TEST_CASE("EE interrupts respect COP1 memory exception ordering")
   }
 }
 
+TEST_CASE("EE delayed COP1 TLB faults preserve global program order")
+{
+  constexpr std::uint32_t instructionAddress =
+    EEMemoryMap::KSEG0_BASE;
+  constexpr std::uint32_t dataAddress = UINT32_C(0x00400100);
+
+  SECTION(
+    "A store fault cancels younger work before interrupt ownership")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      COP1_INTC_ENABLED_STATUS);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setFloatingPointRegister(5, UINT32_C(0x22222222));
+    core.setFloatingPointRegister(6, UINT32_C(0x89abcdef));
+    core.setFloatingPointRegister(7, UINT32_C(0x3f800000));
+    core.setFloatingPointRegister(8, UINT32_C(0x40000000));
+    core.setTLBEntry(
+      0,
+      {
+        EECOP0PageMask::SIZE_4_KIB,
+        UINT32_C(0x00400000),
+        {UINT32_C(0x0000001b)},
+        {UINT32_C(0x0000001b)}
+      });
+    REQUIRE(
+      system.eeBus().writeData32(
+        0x100,
+        UINT32_C(0x12345678)));
+    system.eeBus().write32(
+      0,
+      cop1MemoryInstruction(0x39, 1, 6, 0));
+    system.eeBus().write32(
+      4,
+      cop1SingleInstruction(0x00, 7, 5, 8));
+    system.eeBus().write32(8, UINT32_C(0x24090001));
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::StoreWordFromCOP1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[1]
+        .instruction.operation ==
+      EEOperation::AddSingleCOP1);
+    assertCOP1TestInterrupt(&system);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+    REQUIRE(core.programCounter() == instructionAddress + 8);
+
+    system.runMasterCycles(3);
+
+    REQUIRE(core.pendingException() == EEException::TLBModified);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_MODIFIED);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      instructionAddress);
+    REQUIRE(core.floatingPointRegister(5) == UINT32_C(0x22222222));
+    REQUIRE(core.generalRegister(9).low == 0);
+    std::uint32_t stored = 0;
+    REQUIRE(system.eeBus().readData32(0x100, &stored));
+    REQUIRE(stored == UINT32_C(0x12345678));
+
+    system.runMasterCycles(COP1_ADD_SUB_PIPELINE_CYCLES);
+
+    REQUIRE(core.pendingException() == EEException::TLBModified);
+    REQUIRE(core.floatingPointRegister(5) == UINT32_C(0x22222222));
+    REQUIRE(core.generalRegister(9).low == 0);
+    REQUIRE(
+      core.programCounter() !=
+      EEExceptionVector::GENERAL);
+  }
+
+  SECTION("A load fault preserves older delayed COP1 completion")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      COP1_INTC_ENABLED_STATUS);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x40800000));
+    core.setFloatingPointRegister(3, UINT32_C(0x40000000));
+    core.setFloatingPointRegister(4, UINT32_C(0x11111111));
+    core.setFloatingPointRegister(6, UINT32_C(0x89abcdef));
+    system.eeBus().write32(
+      0,
+      cop1SingleInstruction(0x03, 2, 4, 3));
+    system.eeBus().write32(
+      4,
+      cop1MemoryInstruction(0x31, 1, 6, 0));
+    system.eeBus().write32(8, UINT32_C(0x24090001));
+    core.startExecution(instructionAddress);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[0]
+        .instruction.operation ==
+      EEOperation::DivideSingleCOP1);
+    REQUIRE(
+      core.acceptanceRecordsThisCycle()[1]
+        .instruction.operation ==
+      EEOperation::LoadWordToCOP1);
+    assertCOP1TestInterrupt(&system);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+    REQUIRE(core.programCounter() == instructionAddress + 8);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      instructionAddress + 4);
+    REQUIRE(core.floatingPointRegister(4) == UINT32_C(0x11111111));
+    REQUIRE(core.floatingPointRegister(6) == UINT32_C(0x89abcdef));
+    REQUIRE(core.generalRegister(9).low == 0);
+
+    system.runMasterCycles(COP1_DIV_SQRT_LATENCY);
+
+    REQUIRE(
+      core.floatingPointRegister(4) ==
+      UINT32_C(0x40000000));
+    REQUIRE(core.floatingPointRegister(6) == UINT32_C(0x89abcdef));
+    REQUIRE(core.generalRegister(9).low == 0);
+  }
+
+  SECTION("A load fault retains branch-delay provenance")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::COP1_USABLE);
+    core.setGeneralRegister(1, {dataAddress, 0});
+    core.setFloatingPointRegister(2, UINT32_C(0x12345678));
+    system.eeBus().write32(
+      0,
+      (UINT32_C(0x04) << 26) |
+        UINT32_C(1));
+    system.eeBus().write32(
+      4,
+      cop1MemoryInstruction(0x31, 1, 2, 0));
+    core.startExecution(instructionAddress);
+
+    system.runMasterCycles(4);
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(core.exceptionAddress() == dataAddress);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      dataAddress);
+    REQUIRE(
+      ((core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::EXCEPTION_CODE_MASK) >> 2) ==
+      EEExceptionCode::TLB_LOAD_OR_FETCH);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EPC) ==
+      instructionAddress);
+    REQUIRE(
+      (core.cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) != 0);
+    REQUIRE(
+      core.floatingPointRegister(2) ==
+      UINT32_C(0x12345678));
+  }
+}
+
 TEST_CASE("EE ERET preserves handler-issued COP1 Moves and loads")
 {
   SECTION("MTC1 commits after returning")
