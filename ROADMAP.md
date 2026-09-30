@@ -1765,24 +1765,39 @@ creating parallel ownership.
 
 ### Scratchpad RAM and DMA Visibility
 
-- [ ] Add 16 KiB of 128-bit-organized scratchpad storage with 16 KiB mapped
-      pages selected by the TLB scratchpad bit and addressed by virtual bits
-      `13:0`.
-- [ ] Route CPU scratchpad loads and stores through the same typed memory
-      requests as cached data accesses while keeping scratchpad uncached and
-      untagged.
-- [ ] Add explicit physical scratchpad access for the DMAC, including
-      toSPR/fromSPR address handling, shared visibility, bounds, alignment, and
-      deterministic CPU/DMA arbitration separated from functional correctness.
-- [ ] Implement guest-visible DMAC channels 8 (`fromSPR`) and 9 (`toSPR`) with
-      their mapped `CHCR`, `MADR`, `QWC`, `SADR`, and channel-specific `TADR`
-      surfaces, supported normal/interleave transfer modes, completion and
-      interrupt state, and integration with the existing DMAC controller.
-      Isolate exact burst, cycle-steal, and bus-priority timing behind the
-      replaceable arbitration policy.
-- [ ] Cover CPU and DMA aliases, read/write widths, overlapping access,
-      reset, hashing, save/restore, malformed states, and the documented lack
-      of automatic cache or scratchpad snooping.
+- [ ] Add memory-system-owned 16 KiB scratchpad storage, organized as 1024
+      qwords, with checked byte-through-qword access addressed by bits `13:0`.
+      Keep the storage untagged, uncached, fixed-capacity, and allocation-free.
+- [ ] Route CPU scalar and merge loads/stores through the typed scratchpad
+      result without bypassing alignment, translation, exception, trace, or
+      program-order ownership.
+- [ ] Route CPU GPR/COP2 quadwords and delayed COP1 loads/stores through the
+      same scratchpad boundary, including FIFO-readiness separation and
+      precise-fault behavior.
+- [ ] Add explicit qword-aligned physical scratchpad access for the DMAC and a
+      functional CPU/DMA access policy. Preserve shared visibility and bounds
+      now; keep alternate-cycle arbitration, DMA priority, burst timing, and
+      cycle stealing behind a replaceable timing policy.
+- [ ] Add guest-visible channel-8 (`fromSPR`) and channel-9 (`toSPR`) register
+      owners with mapped `CHCR`, `MADR`, `QWC`, `SADR`, channel-specific
+      `TADR`, stopped-register write rules, and integration with `D_CTRL`,
+      `D_STAT`, reset, and system scheduling.
+- [ ] Implement normal-mode `fromSPR` and `toSPR` qword transfers with physical
+      main-bus addressing, SPR address wrapping, retry without consumption,
+      completion state, and channel interrupts.
+- [ ] Add `D_SQWC` and supported interleave-mode transfers in both directions,
+      including transfer/skip progression, register visibility, completion,
+      and deterministic rejection of unsupported channel modes. Keep exact
+      burst, release-cycle, and bus-priority timing deferred to the timing
+      policy.
+- [ ] Add canonical hashing and transactional persistence for scratchpad bytes,
+      common interleave state, channel registers, and active transfer
+      continuation. Cover malformed-state rejection and byte-stable
+      save/restore.
+- [ ] Complete the CPU/DMA integration matrix for aliases, every implemented
+      width, overlapping access, reset, repeated execution, physical DMA
+      behavior, VU-memory normal-mode endpoints, and the documented lack of
+      automatic cache or scratchpad snooping.
 - [ ] Complete an independent review of scratchpad and DMA integration.
 
 ### Guest-Visible Cache Foundation
