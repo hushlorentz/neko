@@ -1800,7 +1800,7 @@ creating parallel ownership.
       automatic cache or scratchpad snooping.
 - [x] Complete an independent review of scratchpad and DMA integration.
 
-### Guest-Visible Cache Foundation
+### Guest-Visible Cache Access Foundation
 
 - [x] Add fixed-capacity cache-array types owned by `EEMemorySystem`: a 16 KiB
       two-way instruction cache and 8 KiB two-way data cache with 64-byte
@@ -1830,6 +1830,11 @@ creating parallel ownership.
       Preserve clean locked-line writes without setting Dirty, exclude a locked
       way when the other way is available, and define the all-ways-locked miss
       policy explicitly.
+- [ ] Complete an independent review of ordinary cached fetch, load, store,
+      writeback, replacement, locking, aliases, and DMA visibility.
+
+### Cache Maintenance, Ordering, and Conformance
+
 - [ ] Decode and dispatch `CACHE` and implement the supported instruction-cache
       index tag/data transfer, index invalidation/fill, and hit invalidation
       operations. Preserve direct index/way selection, translated hit lookup,
@@ -1853,9 +1858,9 @@ creating parallel ownership.
       self-modifying code, writeback/invalidate workflows, DMA coherence
       workflows, cache-line boundaries, reset, repeated execution, and
       cache-enable transitions.
-- [ ] Complete risk-based independent reviews after the normal cached-access
-      integration and after cache-maintenance instruction integration, then a
-      final read-only review of the complete guest-visible cache block.
+- [ ] Complete a risk-based independent review after cache-maintenance
+      instruction integration, then a final read-only review of the complete
+      cache-maintenance, ordering, and conformance block.
 
 ### Determinism, Persistence, and Diagnostics
 
