@@ -24,6 +24,18 @@ static_assert(
 static_assert(
   EEMemorySystem::SCRATCHPAD_QWORD_COUNT == 1024,
   "The EE scratchpad organization must remain architectural.");
+static_assert(
+  EEMemorySystem::CACHE_LINE_SIZE == 64,
+  "EE cache lines must remain 64 bytes.");
+static_assert(
+  EEMemorySystem::CACHE_WAY_COUNT == 2,
+  "EE caches must remain two-way set associative.");
+static_assert(
+  EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT == 128,
+  "The EE instruction cache must remain 16 KiB.");
+static_assert(
+  EEMemorySystem::DATA_CACHE_SET_COUNT == 64,
+  "The EE data cache must remain 8 KiB.");
 
 namespace
 {
@@ -175,6 +187,82 @@ TEST_CASE("EE scratchpad reset clears its fixed storage")
   std::uint64_t value = UINT64_MAX;
   REQUIRE(memorySystem.readScratchpad64(0x1230, &value));
   REQUIRE(value == 0);
+}
+
+TEST_CASE("EE cache arrays reset to deterministic invalid lines")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.reset();
+
+  for (std::size_t set = 0;
+       set < EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT;
+       ++set)
+  {
+    for (std::size_t way = 0;
+         way < EEMemorySystem::CACHE_WAY_COUNT;
+         ++way)
+    {
+      const EECacheLine &line =
+        memorySystem.instructionCacheLine(set, way);
+      REQUIRE(line.physicalTag == 0);
+      REQUIRE_FALSE(line.valid);
+      REQUIRE_FALSE(line.dirty);
+      REQUIRE_FALSE(line.leastRecentlyFilled);
+      REQUIRE_FALSE(line.locked);
+      for (const std::uint8_t byte : line.data)
+      {
+        REQUIRE(byte == 0);
+      }
+    }
+  }
+
+  for (std::size_t set = 0;
+       set < EEMemorySystem::DATA_CACHE_SET_COUNT;
+       ++set)
+  {
+    for (std::size_t way = 0;
+         way < EEMemorySystem::CACHE_WAY_COUNT;
+         ++way)
+    {
+      const EECacheLine &line =
+        memorySystem.dataCacheLine(set, way);
+      REQUIRE(line.physicalTag == 0);
+      REQUIRE_FALSE(line.valid);
+      REQUIRE_FALSE(line.dirty);
+      REQUIRE_FALSE(line.leastRecentlyFilled);
+      REQUIRE_FALSE(line.locked);
+      for (const std::uint8_t byte : line.data)
+      {
+        REQUIRE(byte == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE cache inspection rejects invalid sets and ways")
+{
+  EEMemorySystem memorySystem;
+
+  REQUIRE_THROWS_AS(
+    memorySystem.instructionCacheLine(
+      EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT,
+      0),
+    std::out_of_range);
+  REQUIRE_THROWS_AS(
+    memorySystem.instructionCacheLine(
+      0,
+      EEMemorySystem::CACHE_WAY_COUNT),
+    std::out_of_range);
+  REQUIRE_THROWS_AS(
+    memorySystem.dataCacheLine(
+      EEMemorySystem::DATA_CACHE_SET_COUNT,
+      0),
+    std::out_of_range);
+  REQUIRE_THROWS_AS(
+    memorySystem.dataCacheLine(
+      0,
+      EEMemorySystem::CACHE_WAY_COUNT),
+    std::out_of_range);
 }
 
 TEST_CASE("EE functional scratchpad policy grants CPU and DMAC access")

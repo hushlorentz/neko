@@ -742,6 +742,8 @@ void EEMemorySystem::reset()
   cop0TagLo = 0;
   cop0TagHi = 0;
   tlbEntries.fill({});
+  instructionCache.fill({});
+  dataCache.fill({});
   scratchpad.fill({});
   invalidateTLBAccelerators();
 }
@@ -852,6 +854,32 @@ bool EEMemorySystem::replacementStateValid() const
     cop0Wired <= EECOP0Wired::MAXIMUM &&
     cop0Random >= cop0Wired &&
     cop0Random <= EECOP0Random::MAXIMUM;
+}
+
+const EECacheLine &EEMemorySystem::instructionCacheLine(
+  std::size_t set,
+  std::size_t way) const
+{
+  if (set >= instructionCache.size() ||
+      way >= instructionCache[set].size())
+  {
+    throw std::out_of_range(
+      "EE instruction-cache line index is out of range.");
+  }
+  return instructionCache[set][way];
+}
+
+const EECacheLine &EEMemorySystem::dataCacheLine(
+  std::size_t set,
+  std::size_t way) const
+{
+  if (set >= dataCache.size() ||
+      way >= dataCache[set].size())
+  {
+    throw std::out_of_range(
+      "EE data-cache line index is out of range.");
+  }
+  return dataCache[set][way];
 }
 
 std::uint32_t EEMemorySystem::cop0Register(

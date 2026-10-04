@@ -128,12 +128,29 @@ struct EEAddressTranslationResult
   std::uint8_t tlbIndex = 0xff;
 };
 
+struct EECacheLine
+{
+  static constexpr std::size_t DATA_SIZE = 64;
+
+  std::array<std::uint8_t, DATA_SIZE> data = {};
+  std::uint32_t physicalTag = 0;
+  bool valid = false;
+  bool dirty = false;
+  bool leastRecentlyFilled = false;
+  bool locked = false;
+};
+
 class EEMemorySystem final
 {
   public:
     static constexpr std::size_t TLB_ENTRY_COUNT = 48;
     static constexpr std::size_t ITLB_ENTRY_COUNT = 2;
     static constexpr std::size_t DTLB_ENTRY_COUNT = 4;
+    static constexpr std::size_t CACHE_LINE_SIZE =
+      EECacheLine::DATA_SIZE;
+    static constexpr std::size_t CACHE_WAY_COUNT = 2;
+    static constexpr std::size_t INSTRUCTION_CACHE_SET_COUNT = 128;
+    static constexpr std::size_t DATA_CACHE_SET_COUNT = 64;
     static constexpr std::size_t SCRATCHPAD_SIZE = 16 * 1024;
     static constexpr std::size_t SCRATCHPAD_QWORD_COUNT =
       SCRATCHPAD_SIZE / 16;
@@ -209,6 +226,12 @@ class EEMemorySystem final
     void probeTLB();
     void retireInstruction();
     bool replacementStateValid() const;
+    const EECacheLine &instructionCacheLine(
+      std::size_t set,
+      std::size_t way) const;
+    const EECacheLine &dataCacheLine(
+      std::size_t set,
+      std::size_t way) const;
 
   private:
     friend class EECore;
@@ -249,6 +272,12 @@ class EEMemorySystem final
     std::uint32_t cop0TagLo = 0;
     std::uint32_t cop0TagHi = 0;
     std::array<EETLBEntry, TLB_ENTRY_COUNT> tlbEntries = {};
+    std::array<
+      std::array<EECacheLine, CACHE_WAY_COUNT>,
+      INSTRUCTION_CACHE_SET_COUNT> instructionCache = {};
+    std::array<
+      std::array<EECacheLine, CACHE_WAY_COUNT>,
+      DATA_CACHE_SET_COUNT> dataCache = {};
     std::array<EEQuadword, SCRATCHPAD_QWORD_COUNT> scratchpad = {};
     EEScratchpadAccessPolicy scratchpadAccessPolicy;
     mutable std::array<TLBAcceleratorEntry, ITLB_ENTRY_COUNT> itlb = {};

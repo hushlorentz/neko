@@ -1802,28 +1802,57 @@ creating parallel ownership.
 
 ### Guest-Visible Cache Foundation
 
-- [ ] Add the 16 KiB two-way instruction cache and 8 KiB two-way data cache
-      with 64-byte lines, virtual indices, physical tags, documented tag state,
-      and reset-invalid behavior.
-- [ ] Implement cached instruction fetch, data read/write allocation,
-      write-back, dirty eviction, missed-quadword-first sequential refill,
-      instruction-cache restart after full refill, and data-cache early restart
-      as functional operations independent of unresolved bus timing.
-- [ ] Implement the documented LRF replacement algorithm, invalid-way
-      preference, data-cache line locking, and deterministic policy for
-      manual-defined undefined locking cases.
-- [ ] Add `CACHE`, `PREF`, `Config`, `TagLo`, and `TagHi` behavior after their
-      evidence gates are resolved, including every supported cache operation,
-      no-op/ignored prefetch faults, cache enable controls, tag/data access, and
-      exhaustive encoding validation.
-- [ ] Preserve uncached and uncached-accelerated attributes functionally,
-      ordering accesses through the existing `SYNC`/`SYNC.L` boundary while
-      deferring UCAB throughput and exact bus timing to replaceable policy.
-- [ ] Cover physical aliases, instruction/data incoherence, self-modifying
-      code, writeback/invalidate behavior, DMA coherency workflows, locking,
-      replacement, refill order, cache-disabled operation, and cache-line
-      boundary cases.
-- [ ] Complete an independent review of guest-visible cache behavior.
+- [x] Add fixed-capacity cache-array types owned by `EEMemorySystem`: a 16 KiB
+      two-way instruction cache and 8 KiB two-way data cache with 64-byte
+      lines, virtual indices, physical tags, documented valid/dirty/LRF/lock
+      metadata, checked inspection helpers, and reset-invalid behavior.
+- [ ] Establish focused typed cache access results and internal line
+      fill/writeback helpers without creating a second memory owner. Keep
+      functional accesses synchronous and allocation-free for now, preserve
+      the existing precise-fault selection boundary, and leave refill duration,
+      non-blocking loads, hit-under-miss, and shared-bus timing behind a future
+      replaceable policy.
+- [ ] Route cached instruction fetch through the instruction cache, including
+      physical-tag lookup, missed-quadword-first sequential refill, full-line
+      completion before restart, instruction-cache enable control, physical
+      aliases, and instruction/data incoherence.
+- [ ] Route cached data loads through the data cache for every implemented
+      scalar, merge, COP1, COP2, and quadword path. Implement hit extraction,
+      missed-quadword-first allocation, functional early restart, line-boundary
+      handling, and cache-disabled behavior without bypassing translation,
+      device readiness, trace ownership, or precise exceptions.
+- [ ] Route cached data stores through write allocation and write-back state,
+      including partial-width and merge updates, dirty eviction, physical bus
+      writeback, self-alias behavior, and absence of automatic DMA coherence.
+- [ ] Implement invalid-way preference, the documented LRF replacement
+      transitions, data-cache line locking, and the deterministic policy for
+      manual-defined undefined cases where replacement candidates are locked.
+- [ ] Decode and dispatch `CACHE` and implement the supported instruction-cache
+      index tag/data transfer, index invalidation/fill, and hit invalidation
+      operations. Preserve direct index/way selection, translated hit lookup,
+      `TagLo` transfer, `Status.CH` ownership, and explicit rejection of
+      unsupported branch-predictor operations.
+- [ ] Implement the supported data-cache `CACHE` operations for index tag/data
+      transfer, index writeback/invalidation, and hit
+      writeback/invalidation. Preserve dirty/valid/lock/LRF transitions,
+      writeback failures, translated hit faults, no-mutation misses, and the
+      documented lack of inferred `TagHi` array effects.
+- [ ] Decode and implement `PREF`, including ignored addressing exceptions,
+      no-op behavior for uncached targets, cached allocation behavior, hint
+      validation, and interaction with `Config` cache-enable controls. Add
+      exhaustive `CACHE`/`PREF` encoding validation.
+- [ ] Preserve uncached and uncached-accelerated traffic as physical-bus
+      accesses with no implicit cache snooping. Keep `SYNC`/`SYNC.L` as the
+      functional software ordering boundary while deferring UCAB throughput
+      and exact bus contention timing.
+- [ ] Complete the guest-visible cache conformance matrix for refill order,
+      replacement, locking, physical aliases, separate I/D visibility,
+      self-modifying code, writeback/invalidate workflows, DMA coherence
+      workflows, cache-line boundaries, reset, repeated execution, and
+      cache-enable transitions.
+- [ ] Complete risk-based independent reviews after the normal cached-access
+      integration and after cache-maintenance instruction integration, then a
+      final read-only review of the complete guest-visible cache block.
 
 ### Determinism, Persistence, and Diagnostics
 
