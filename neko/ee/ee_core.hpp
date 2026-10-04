@@ -14,6 +14,7 @@
 class EEBus;
 class VPU;
 struct EECoreTestAccess;
+enum class EEDataWriteResult : std::uint8_t;
 
 struct EERegister128
 {
@@ -1222,6 +1223,9 @@ class EECore final : public ClockedComponent
     bool readTranslatedData(
       const EEAddressTranslationResult &translation,
       std::uint64_t *value) const;
+    bool readTranslatedData(
+      const EEAddressTranslationResult &translation,
+      EEQuadword *value) const;
     bool writeTranslatedData(
       const EEAddressTranslationResult &translation,
       std::uint8_t value);
@@ -1234,6 +1238,9 @@ class EECore final : public ClockedComponent
     bool writeTranslatedData(
       const EEAddressTranslationResult &translation,
       std::uint64_t value);
+    EEDataWriteResult writeTranslatedData(
+      const EEAddressTranslationResult &translation,
+      const EEQuadword &value);
     static EEException instructionTranslationException(
       EEAddressTranslationOutcome outcome);
     static EEException dataTranslationException(

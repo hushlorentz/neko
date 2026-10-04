@@ -267,3 +267,117 @@ TEST_CASE("EE doubleword merge accesses route through scratchpad storage")
   REQUIRE(system.eeBus().readData64(0x208, &busValue));
   REQUIRE(busValue == UINT64_C(0x8877665544332211));
 }
+
+TEST_CASE("EE GPR quadword accesses route through scratchpad storage")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  mapScratchpad(&core);
+  const EERegister128 expected = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  const EEQuadword busSentinel = {
+    UINT64_C(0x0123456789abcdef),
+    UINT64_C(0xfedcba9876543210)
+  };
+  REQUIRE(system.eeBus().writeData128(0x300, busSentinel));
+
+  core.setGeneralRegister(
+    1,
+    {SCRATCHPAD_VIRTUAL_BASE + 0x30f, 0});
+  core.setGeneralRegister(2, expected);
+  runMemoryInstruction(&system, 0x1f);
+
+  EEQuadword busValue = {};
+  REQUIRE(system.eeBus().readData128(0x300, &busValue));
+  REQUIRE(busValue.low == busSentinel.low);
+  REQUIRE(busValue.high == busSentinel.high);
+
+  core.setGeneralRegister(2, {});
+  runMemoryInstruction(&system, 0x1e);
+  REQUIRE(core.generalRegister(2) == expected);
+}
+
+TEST_CASE("EE COP2 quadword accesses route through scratchpad storage")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  mapScratchpad(&core);
+  const EEQuadword busSentinel = {
+    UINT64_C(0x0123456789abcdef),
+    UINT64_C(0xfedcba9876543210)
+  };
+  REQUIRE(system.eeBus().writeData128(0x320, busSentinel));
+
+  core.setGeneralRegister(
+    1,
+    {SCRATCHPAD_VIRTUAL_BASE + 0x320, 0});
+  system.vu0().loadFPRegisterBits(
+    3,
+    UINT32_C(0x33221100),
+    UINT32_C(0x77665544),
+    UINT32_C(0xbbaa9988),
+    UINT32_C(0xffeeddcc));
+  runInstruction(
+    &system,
+    memoryInstruction(0x3e, 1, 3, 0));
+
+  EEQuadword busValue = {};
+  REQUIRE(system.eeBus().readData128(0x320, &busValue));
+  REQUIRE(busValue.low == busSentinel.low);
+  REQUIRE(busValue.high == busSentinel.high);
+
+  system.vu0().loadFPRegisterBits(4, 0, 0, 0, 0);
+  runInstruction(
+    &system,
+    memoryInstruction(0x36, 1, 4, 0));
+  const FPRegister *loaded = system.vu0().fpRegisterValue(4);
+  REQUIRE(loaded->x.bits() == UINT32_C(0x33221100));
+  REQUIRE(loaded->y.bits() == UINT32_C(0x77665544));
+  REQUIRE(loaded->z.bits() == UINT32_C(0xbbaa9988));
+  REQUIRE(loaded->w.bits() == UINT32_C(0xffeeddcc));
+}
+
+TEST_CASE("EE delayed COP1 memory accesses route through scratchpad storage")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  mapScratchpad(&core);
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE);
+  REQUIRE(
+    system.eeBus().writeData64(
+      0x340,
+      UINT64_C(0x01234567deadbeef)));
+
+  setRegister(&core, 1, SCRATCHPAD_VIRTUAL_BASE + 0x340);
+  setRegister(&core, 2, UINT32_C(0x89abcdef));
+  runMemoryInstruction(&system, 0x2b);
+
+  core.setFloatingPointRegister(3, 0);
+  runInstruction(
+    &system,
+    memoryInstruction(0x31, 1, 3, 0));
+  REQUIRE(core.floatingPointRegister(3) == 0);
+  system.runMasterCycles(3);
+  REQUIRE(
+    core.floatingPointRegister(3) ==
+    UINT32_C(0x89abcdef));
+
+  core.setFloatingPointRegister(4, UINT32_C(0x76543210));
+  runInstruction(
+    &system,
+    memoryInstruction(0x39, 1, 4, 4));
+  system.runMasterCycles(3);
+  setRegister(&core, 2, 0);
+  runMemoryInstruction(&system, 0x27, 4);
+  REQUIRE(
+    core.generalRegister(2).low ==
+    UINT32_C(0x76543210));
+
+  std::uint64_t busValue = 0;
+  REQUIRE(system.eeBus().readData64(0x340, &busValue));
+  REQUIRE(busValue == UINT64_C(0x01234567deadbeef));
+}

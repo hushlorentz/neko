@@ -1415,6 +1415,19 @@ bool EECore::readTranslatedData(
         value);
 }
 
+bool EECore::readTranslatedData(
+  const EEAddressTranslationResult &translation,
+  EEQuadword *value) const
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.readScratchpad128(
+        translation.physicalAddress,
+        value)
+    : attachedBus().readData128(
+        translation.physicalAddress,
+        value);
+}
+
 bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint8_t value)
@@ -1465,6 +1478,23 @@ bool EECore::writeTranslatedData(
     : attachedBus().writeData64(
         translation.physicalAddress,
         value);
+}
+
+EEDataWriteResult EECore::writeTranslatedData(
+  const EEAddressTranslationResult &translation,
+  const EEQuadword &value)
+{
+  if (translation.route == EEAddressRoute::Scratchpad)
+  {
+    return memorySystem.writeScratchpad128(
+        translation.physicalAddress,
+        value)
+      ? EEDataWriteResult::Completed
+      : EEDataWriteResult::Failed;
+  }
+  return attachedBus().writeGuestData128(
+    translation.physicalAddress,
+    value);
 }
 
 EEException EECore::instructionTranslationException(
@@ -5288,7 +5318,7 @@ EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
       : EEDataAccessDirection::Load;
   const EEAddressTranslationResult translation =
     translateDataAddress(dataAddress, direction);
-  if (!mainBusTranslationSucceeded(translation))
+  if (!dataTranslationSucceeded(translation))
   {
     recordMemoryTrace(
       dataAddress,
@@ -5312,8 +5342,8 @@ EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
     const EERegister128 &value =
       generalRegisters[instruction.targetRegister];
     const EEDataWriteResult writeResult =
-      attachedBus().writeGuestData128(
-        translation.physicalAddress,
+      writeTranslatedData(
+        translation,
         {value.low, value.high});
     const bool succeeded =
       writeResult == EEDataWriteResult::Completed;
@@ -5342,8 +5372,8 @@ EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
 
   EEQuadword value = {};
   const bool succeeded =
-    attachedBus().readData128(
-      translation.physicalAddress,
+    readTranslatedData(
+      translation,
       &value);
   recordMemoryTrace(
     dataAddress,
@@ -5821,7 +5851,7 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
       : EEDataAccessDirection::Load;
   const EEAddressTranslationResult translation =
     translateDataAddress(dataAddress, direction);
-  if (!mainBusTranslationSucceeded(translation))
+  if (!dataTranslationSucceeded(translation))
   {
     recordMemoryTrace(
       dataAddress,
@@ -5847,8 +5877,8 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
       *attachedVU0().fpRegisterValue(
         instruction.targetRegister));
     const EEDataWriteResult writeResult =
-      attachedBus().writeGuestData128(
-        translation.physicalAddress,
+      writeTranslatedData(
+        translation,
         {value.low, value.high});
     const bool succeeded =
       writeResult == EEDataWriteResult::Completed;
@@ -5877,8 +5907,8 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
 
   EEQuadword value = {};
   const bool succeeded =
-    attachedBus().readData128(
-      translation.physicalAddress,
+    readTranslatedData(
+      translation,
       &value);
   recordMemoryTrace(
     dataAddress,
@@ -7855,7 +7885,7 @@ bool EECore::drainInFlightCOP1()
             translateDataAddress(
               oldest->memoryAddress,
               EEDataAccessDirection::Load);
-          if (!mainBusTranslationSucceeded(translation))
+          if (!dataTranslationSucceeded(translation))
           {
             recordMemoryTrace(
               oldest->memoryAddress,
@@ -7873,8 +7903,8 @@ bool EECore::drainInFlightCOP1()
           }
           std::uint32_t value = 0;
           const bool succeeded =
-            attachedBus().readData32(
-              translation.physicalAddress,
+            readTranslatedData(
+              translation,
               &value);
           recordMemoryTrace(
             oldest->memoryAddress,
@@ -7911,7 +7941,7 @@ bool EECore::drainInFlightCOP1()
             translateDataAddress(
               oldest->memoryAddress,
               EEDataAccessDirection::Store);
-          if (!mainBusTranslationSucceeded(translation))
+          if (!dataTranslationSucceeded(translation))
           {
             recordMemoryTrace(
               oldest->memoryAddress,
@@ -7928,8 +7958,8 @@ bool EECore::drainInFlightCOP1()
                 oldest->memoryAddress));
           }
           const bool succeeded =
-            attachedBus().writeData32(
-              translation.physicalAddress,
+            writeTranslatedData(
+              translation,
               oldest->capturedMemoryValue);
           recordMemoryTrace(
             oldest->memoryAddress,
@@ -8442,7 +8472,7 @@ EECore::advanceMemoryCOP1Operation(
           translateDataAddress(
             operation->memoryAddress,
             EEDataAccessDirection::Load);
-        if (!mainBusTranslationSucceeded(translation))
+        if (!dataTranslationSucceeded(translation))
         {
           recordMemoryTrace(
             operation->memoryAddress,
@@ -8460,8 +8490,8 @@ EECore::advanceMemoryCOP1Operation(
         }
         std::uint32_t value = 0;
         const bool succeeded =
-          attachedBus().readData32(
-            translation.physicalAddress,
+          readTranslatedData(
+            translation,
             &value);
         recordMemoryTrace(
           operation->memoryAddress,
@@ -8497,7 +8527,7 @@ EECore::advanceMemoryCOP1Operation(
           translateDataAddress(
             operation->memoryAddress,
             EEDataAccessDirection::Store);
-        if (!mainBusTranslationSucceeded(translation))
+        if (!dataTranslationSucceeded(translation))
         {
           recordMemoryTrace(
             operation->memoryAddress,
@@ -8514,8 +8544,8 @@ EECore::advanceMemoryCOP1Operation(
           return COP1OperationAdvanceOutcome::Faulted;
         }
         const bool succeeded =
-          attachedBus().writeData32(
-            translation.physicalAddress,
+          writeTranslatedData(
+            translation,
             operation->capturedMemoryValue);
         recordMemoryTrace(
           operation->memoryAddress,

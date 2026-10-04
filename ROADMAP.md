@@ -1771,7 +1771,7 @@ creating parallel ownership.
 - [x] Route CPU scalar and merge loads/stores through the typed scratchpad
       result without bypassing alignment, translation, exception, trace, or
       program-order ownership.
-- [ ] Route CPU GPR/COP2 quadwords and delayed COP1 loads/stores through the
+- [x] Route CPU GPR/COP2 quadwords and delayed COP1 loads/stores through the
       same scratchpad boundary, including FIFO-readiness separation and
       precise-fault behavior.
 - [ ] Add explicit qword-aligned physical scratchpad access for the DMAC and a
