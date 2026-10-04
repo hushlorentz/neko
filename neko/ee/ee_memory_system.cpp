@@ -204,6 +204,29 @@ namespace
       (static_cast<std::uint32_t>(
         line.data[offset + 3]) << 24);
   }
+
+  template<typename Value>
+  void storeLittleEndian(
+    std::array<std::uint8_t, 16> *data,
+    Value value)
+  {
+    for (std::size_t index = 0; index < sizeof(Value); ++index)
+    {
+      (*data)[index] =
+        static_cast<std::uint8_t>(value >> (index * 8));
+    }
+  }
+
+  void copyCacheLoad(
+    EEDataCacheLoadResult *result,
+    const EECacheLine &line,
+    std::size_t offset)
+  {
+    for (std::size_t index = 0; index < result->width; ++index)
+    {
+      result->data[index] = line.data[offset + index];
+    }
+  }
 }
 
 bool EETLBPage::valid() const
@@ -1061,6 +1084,25 @@ std::size_t EEMemorySystem::instructionCacheVictim(
     : 0;
 }
 
+std::size_t EEMemorySystem::dataCacheVictim(
+  std::size_t set) const
+{
+  const auto &ways = dataCache[set];
+  if (!ways[0].valid)
+  {
+    return 0;
+  }
+  if (!ways[1].valid)
+  {
+    return 1;
+  }
+  return
+    ways[0].leastRecentlyFilled ^
+      ways[1].leastRecentlyFilled
+    ? 1
+    : 0;
+}
+
 EEInstructionCacheFetchResult EEMemorySystem::fetchInstruction(
   const EEBus &bus,
   const EEAddressTranslationResult &translation)
@@ -1132,6 +1174,152 @@ EEInstructionCacheFetchResult EEMemorySystem::fetchInstruction(
   result.instruction = loadCacheWord(
     instructionCache[result.set][victim],
     translation.physicalAddress & (CACHE_LINE_SIZE - 1));
+  return result;
+}
+
+EEDataCacheLoadResult EEMemorySystem::loadData(
+  const EEBus &bus,
+  const EEAddressTranslationResult &translation,
+  std::size_t width)
+{
+  if (translation.outcome !=
+        EEAddressTranslationOutcome::Translated ||
+      translation.route != EEAddressRoute::MainBus)
+  {
+    throw std::invalid_argument(
+      "EE cached load requires a main-bus translation.");
+  }
+  if (width != 1 && width != 2 && width != 4 &&
+      width != 8 && width != 16)
+  {
+    throw std::invalid_argument(
+      "EE cached load width is unsupported.");
+  }
+  if ((translation.physicalAddress & (width - 1)) != 0 ||
+      (translation.physicalAddress &
+       (CACHE_LINE_SIZE - 1)) >
+        CACHE_LINE_SIZE - width)
+  {
+    throw std::invalid_argument(
+      "EE cached load must be naturally aligned within one line.");
+  }
+
+  EEDataCacheLoadResult result;
+  result.width = static_cast<std::uint8_t>(width);
+  const std::uint32_t lineBaseAddress =
+    translation.physicalAddress &
+    ~static_cast<std::uint32_t>(CACHE_LINE_SIZE - 1);
+  if (translation.cacheRoute !=
+        EECacheRoute::CachedNoncoherent ||
+      (cop0Config & EECOP0Config::DATA_CACHE_ENABLE) == 0 ||
+      !bus.isMainMemoryRange(
+        lineBaseAddress,
+        CACHE_LINE_SIZE))
+  {
+    bool succeeded = false;
+    switch (width)
+    {
+      case 1:
+      {
+        std::uint8_t value = 0;
+        succeeded = bus.readData8(
+          translation.physicalAddress,
+          &value);
+        storeLittleEndian(&result.data, value);
+        break;
+      }
+      case 2:
+      {
+        std::uint16_t value = 0;
+        succeeded = bus.readData16(
+          translation.physicalAddress,
+          &value);
+        storeLittleEndian(&result.data, value);
+        break;
+      }
+      case 4:
+      {
+        std::uint32_t value = 0;
+        succeeded = bus.readData32(
+          translation.physicalAddress,
+          &value);
+        storeLittleEndian(&result.data, value);
+        break;
+      }
+      case 8:
+      {
+        std::uint64_t value = 0;
+        succeeded = bus.readData64(
+          translation.physicalAddress,
+          &value);
+        storeLittleEndian(&result.data, value);
+        break;
+      }
+      case 16:
+      {
+        EEQuadword value = {};
+        succeeded = bus.readData128(
+          translation.physicalAddress,
+          &value);
+        storeLittleEndian(&result.data, value.low);
+        for (std::size_t index = 0; index < 8; ++index)
+        {
+          result.data[index + 8] =
+            static_cast<std::uint8_t>(
+              value.high >> (index * 8));
+        }
+        break;
+      }
+    }
+    if (succeeded)
+    {
+      result.outcome = EEDataCacheLoadOutcome::Completed;
+    }
+    return result;
+  }
+
+  result.set = static_cast<std::uint8_t>(
+    (translation.virtualAddress >> 6) &
+    (DATA_CACHE_SET_COUNT - 1));
+  const std::uint32_t physicalTag =
+    translation.physicalAddress &
+    EECacheLine::PHYSICAL_TAG_MASK;
+  const std::size_t lineOffset =
+    translation.physicalAddress & (CACHE_LINE_SIZE - 1);
+  for (std::size_t way = 0;
+       way < CACHE_WAY_COUNT;
+       ++way)
+  {
+    const EECacheLine &line = dataCache[result.set][way];
+    if (line.valid && line.physicalTag == physicalTag)
+    {
+      result.outcome = EEDataCacheLoadOutcome::Completed;
+      result.source = EEDataCacheLoadSource::Hit;
+      result.way = static_cast<std::uint8_t>(way);
+      copyCacheLoad(&result, line, lineOffset);
+      return result;
+    }
+  }
+
+  result.source = EEDataCacheLoadSource::Refilled;
+  const std::size_t victim = dataCacheVictim(result.set);
+  result.way = static_cast<std::uint8_t>(victim);
+  const EECacheLineFillResult fill =
+    fillCacheLine(bus, translation.physicalAddress);
+  if (fill.outcome != EECacheLineTransferOutcome::Completed)
+  {
+    return result;
+  }
+
+  EECacheLine candidate = fill.line;
+  candidate.leastRecentlyFilled =
+    !dataCache[result.set][victim].leastRecentlyFilled;
+  dataCache[result.set][victim] = candidate;
+  result.outcome = EEDataCacheLoadOutcome::Completed;
+  copyCacheLoad(
+    &result,
+    dataCache[result.set][victim],
+    lineOffset);
   return result;
 }
 

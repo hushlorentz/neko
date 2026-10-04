@@ -195,6 +195,31 @@ struct EEInstructionCacheFetchResult
   std::uint8_t way = 0xff;
 };
 
+enum class EEDataCacheLoadOutcome : std::uint8_t
+{
+  Completed,
+  PhysicalBusError
+};
+
+enum class EEDataCacheLoadSource : std::uint8_t
+{
+  Bypassed,
+  Hit,
+  Refilled
+};
+
+struct EEDataCacheLoadResult
+{
+  EEDataCacheLoadOutcome outcome =
+    EEDataCacheLoadOutcome::PhysicalBusError;
+  EEDataCacheLoadSource source =
+    EEDataCacheLoadSource::Bypassed;
+  std::array<std::uint8_t, 16> data = {};
+  std::uint8_t width = 0;
+  std::uint8_t set = 0xff;
+  std::uint8_t way = 0xff;
+};
+
 class EEMemorySystem final
 {
   public:
@@ -327,7 +352,12 @@ class EEMemorySystem final
     EEInstructionCacheFetchResult fetchInstruction(
       const EEBus &bus,
       const EEAddressTranslationResult &translation);
+    EEDataCacheLoadResult loadData(
+      const EEBus &bus,
+      const EEAddressTranslationResult &translation,
+      std::size_t width);
     std::size_t instructionCacheVictim(std::size_t set) const;
+    std::size_t dataCacheVictim(std::size_t set) const;
 
     std::uint32_t cop0Index = 0;
     std::uint32_t cop0Random = EECOP0Random::RESET;

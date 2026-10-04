@@ -23,10 +23,10 @@ namespace
   constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
   constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
-    VERSION_30_PREPARED_STATE_SIZE = 37817936;
+    VERSION_31_PREPARED_STATE_SIZE = 37845584;
   constexpr std::uint64_t
-    VERSION_30_PREPARED_STATE_HASH =
-      UINT64_C(0xf03cea5483147e6b);
+    VERSION_31_PREPARED_STATE_HASH =
+      UINT64_C(0x1d210794e3d0a8ec);
   constexpr std::size_t SPR_DMA_STATE_SIZE = 16432;
   constexpr std::size_t SPR_DMA_SCRATCHPAD_SIZE = 16384;
   constexpr std::size_t SPR_DMA_CHANNEL_SIZE = 22;
@@ -195,7 +195,14 @@ namespace
   constexpr std::size_t PREPARED_EE_COP0_RANDOM_OFFSET = 2293;
   constexpr std::size_t PREPARED_EE_COP0_WIRED_OFFSET = 2313;
   constexpr std::size_t PREPARED_EE_TLB_OFFSET = 2333;
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET = 3109;
+  constexpr std::size_t EE_CACHE_LINE_STATE_SIZE = 72;
+  constexpr std::size_t EE_CACHE_STATE_SIZE =
+    EE_CACHE_LINE_STATE_SIZE *
+    EEMemorySystem::CACHE_WAY_COUNT *
+    (EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT +
+     EEMemorySystem::DATA_CACHE_SET_COUNT);
+  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET =
+    3109 + EE_CACHE_STATE_SIZE;
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -741,7 +748,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 30 save-state layout is byte-stable")
+TEST_CASE("Version 31 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -756,14 +763,14 @@ TEST_CASE("Version 30 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 30);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 31);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_30_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_31_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_30_PREPARED_STATE_HASH);
+    VERSION_31_PREPARED_STATE_HASH);
 }
 
 TEST_CASE("Scratchpad and SPR DMAC state participate in canonical hashes")

@@ -302,7 +302,7 @@ void NekoSaveStateCodec::writeSystem(
   SaveStateWriter *writer,
   const NekoSystem &system)
 {
-  // The version-30 extension remains appended after this stable payload.
+  // Component order remains stable across versioned payload extensions.
   writer->writeU16(system.inputState.buttons);
   writer->writeU8(system.inputState.leftStickX);
   writer->writeU8(system.inputState.leftStickY);

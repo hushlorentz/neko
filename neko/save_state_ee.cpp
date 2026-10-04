@@ -251,6 +251,33 @@ void NekoSaveStateCodec::writeEECore(
     writer->writeU32(entry.evenPage.value);
     writer->writeU32(entry.oddPage.value);
   }
+  const auto writeCacheLine =
+    [writer](const EECacheLine &line)
+    {
+      for (const std::uint8_t byte : line.data)
+      {
+        writer->writeU8(byte);
+      }
+      writer->writeU32(line.physicalTag);
+      writer->writeBool(line.valid);
+      writer->writeBool(line.dirty);
+      writer->writeBool(line.leastRecentlyFilled);
+      writer->writeBool(line.locked);
+    };
+  for (const auto &set : core.memorySystem.instructionCache)
+  {
+    for (const EECacheLine &line : set)
+    {
+      writeCacheLine(line);
+    }
+  }
+  for (const auto &set : core.memorySystem.dataCache)
+  {
+    for (const EECacheLine &line : set)
+    {
+      writeCacheLine(line);
+    }
+  }
 }
 
 void NekoSaveStateCodec::readEECore(
@@ -1122,6 +1149,43 @@ void NekoSaveStateCodec::readEECore(
     catch (const std::invalid_argument &error)
     {
       throw std::runtime_error(error.what());
+    }
+  }
+  const auto readCacheLine =
+    [reader](EECacheLine *line, bool instruction)
+    {
+      for (std::uint8_t &byte : line->data)
+      {
+        byte = reader->readU8();
+      }
+      line->physicalTag = reader->readU32();
+      line->valid = reader->readBool("EE cache valid flag");
+      line->dirty = reader->readBool("EE cache dirty flag");
+      line->leastRecentlyFilled =
+        reader->readBool("EE cache LRF flag");
+      line->locked = reader->readBool("EE cache lock flag");
+      require(
+        (line->physicalTag & ~EECacheLine::PHYSICAL_TAG_MASK) == 0,
+        "EE cache physical tag is invalid");
+      require(
+        line->valid || (!line->dirty && !line->locked),
+        "EE invalid cache line has active state");
+      require(
+        !instruction || (!line->dirty && !line->locked),
+        "EE instruction-cache line has data-cache state");
+    };
+  for (auto &set : core->memorySystem.instructionCache)
+  {
+    for (EECacheLine &line : set)
+    {
+      readCacheLine(&line, true);
+    }
+  }
+  for (auto &set : core->memorySystem.dataCache)
+  {
+    for (EECacheLine &line : set)
+    {
+      readCacheLine(&line, false);
     }
   }
   require(

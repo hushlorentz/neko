@@ -1226,6 +1226,21 @@ class EECore final : public ClockedComponent
     bool readTranslatedData(
       const EEAddressTranslationResult &translation,
       EEQuadword *value) const;
+    bool loadTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint8_t *value);
+    bool loadTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint16_t *value);
+    bool loadTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint32_t *value);
+    bool loadTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint64_t *value);
+    bool loadTranslatedData(
+      const EEAddressTranslationResult &translation,
+      EEQuadword *value);
     bool writeTranslatedData(
       const EEAddressTranslationResult &translation,
       std::uint8_t value);

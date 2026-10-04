@@ -37,6 +37,33 @@ struct EEMemorySystemTestAccess
   {
     return memorySystem->fetchInstruction(bus, translation);
   }
+
+  static EEDataCacheLoadResult loadData(
+    EEMemorySystem *memorySystem,
+    const EEBus &bus,
+    const EEAddressTranslationResult &translation,
+    std::size_t width)
+  {
+    return memorySystem->loadData(bus, translation, width);
+  }
+
+  static void setInstructionCacheLine(
+    EEMemorySystem *memorySystem,
+    std::size_t set,
+    std::size_t way,
+    const EECacheLine &line)
+  {
+    memorySystem->instructionCache[set][way] = line;
+  }
+
+  static void setDataCacheLine(
+    EEMemorySystem *memorySystem,
+    std::size_t set,
+    std::size_t way,
+    const EECacheLine &line)
+  {
+    memorySystem->dataCache[set][way] = line;
+  }
 };
 
 static_assert(
@@ -55,6 +82,10 @@ static_assert(
   std::is_trivially_copyable<
     EECacheLineFillResult>::value,
   "EE cache-line fill results must remain trivially copyable.");
+static_assert(
+  std::is_trivially_copyable<
+    EEDataCacheLoadResult>::value,
+  "EE data-cache load results must remain trivially copyable.");
 static_assert(
   EEMemorySystem::ITLB_ENTRY_COUNT == 2,
   "The EE ITLB capacity must remain architectural.");
@@ -126,6 +157,17 @@ namespace
       EEAddressRoute::MainBus,
       0xff
     };
+  }
+
+  EEAddressTranslationResult dataTranslation(
+    std::uint32_t virtualAddress,
+    std::uint32_t physicalAddress,
+    EECacheRoute cacheRoute = EECacheRoute::CachedNoncoherent)
+  {
+    return instructionTranslation(
+      virtualAddress,
+      physicalAddress,
+      cacheRoute);
   }
 }
 
@@ -693,6 +735,325 @@ TEST_CASE("EE instruction cache keeps virtual aliases incoherent")
       system.eeBus(),
       firstAlias).instruction ==
     UINT32_C(0x11111111));
+}
+
+TEST_CASE("EE data cache bypasses disabled and uncached loads")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  const EEAddressTranslationResult cached =
+    dataTranslation(0x80000100, 0x100);
+  const EEAddressTranslationResult uncached =
+    dataTranslation(
+      0xa0000100,
+      0x100,
+      EECacheRoute::Uncached);
+
+  system.eeBus().write32(0x100, UINT32_C(0x11111111));
+  EEDataCacheLoadResult result =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      cached,
+      4);
+  REQUIRE(result.outcome == EEDataCacheLoadOutcome::Completed);
+  REQUIRE(result.source == EEDataCacheLoadSource::Bypassed);
+  REQUIRE(result.width == 4);
+  REQUIRE(result.data[0] == 0x11);
+  REQUIRE(result.data[3] == 0x11);
+
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  system.eeBus().write32(0x100, UINT32_C(0x22222222));
+  result =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      uncached,
+      4);
+  REQUIRE(result.source == EEDataCacheLoadSource::Bypassed);
+  REQUIRE(result.data[0] == 0x22);
+  REQUIRE(result.data[3] == 0x22);
+
+  const std::size_t set = (cached.virtualAddress >> 6) & 0x3f;
+  REQUIRE_FALSE(memorySystem.dataCacheLine(set, 0).valid);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(set, 1).valid);
+}
+
+TEST_CASE("EE data cache bypasses mapped devices")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  system.eeBus().writeData32(
+    EEMemoryMap::INTC_MASK,
+    UINT32_C(0x00000003));
+
+  const EEDataCacheLoadResult result =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      dataTranslation(
+        EEMemoryMap::KSEG0_BASE + EEMemoryMap::INTC_MASK,
+        EEMemoryMap::INTC_MASK),
+      4);
+
+  REQUIRE(result.outcome == EEDataCacheLoadOutcome::Completed);
+  REQUIRE(result.source == EEDataCacheLoadSource::Bypassed);
+  REQUIRE(result.data[0] == 0x03);
+  const std::size_t set =
+    ((EEMemoryMap::KSEG0_BASE + EEMemoryMap::INTC_MASK) >> 6) &
+    (EEMemorySystem::DATA_CACHE_SET_COUNT - 1);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(set, 0).valid);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(set, 1).valid);
+}
+
+TEST_CASE("EE data cache refills then returns physical-tag hits")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  const EEAddressTranslationResult translation =
+    dataTranslation(0x8000012c, 0x12c);
+  system.eeBus().write32(0x12c, UINT32_C(0x44332211));
+
+  EEDataCacheLoadResult result =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      translation,
+      4);
+  REQUIRE(result.outcome == EEDataCacheLoadOutcome::Completed);
+  REQUIRE(result.source == EEDataCacheLoadSource::Refilled);
+  REQUIRE(result.set == 4);
+  REQUIRE(result.way == 0);
+  REQUIRE(result.data[0] == 0x11);
+  REQUIRE(result.data[1] == 0x22);
+  REQUIRE(result.data[2] == 0x33);
+  REQUIRE(result.data[3] == 0x44);
+
+  system.eeBus().write32(0x12c, UINT32_C(0x88776655));
+  result =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      translation,
+      4);
+  REQUIRE(result.source == EEDataCacheLoadSource::Hit);
+  REQUIRE(result.data[0] == 0x11);
+  REQUIRE(result.data[3] == 0x44);
+}
+
+TEST_CASE("EE data cache handles every aligned width at line edges")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    system.eeBus().write8(
+      UINT32_C(0x200) + offset,
+      static_cast<std::uint8_t>(offset));
+  }
+
+  struct LoadCase
+  {
+    std::uint32_t offset;
+    std::size_t width;
+  };
+  constexpr LoadCase cases[] = {
+    {63, 1},
+    {62, 2},
+    {60, 4},
+    {56, 8},
+    {48, 16}
+  };
+  for (const LoadCase loadCase : cases)
+  {
+    const EEDataCacheLoadResult result =
+      EEMemorySystemTestAccess::loadData(
+        &memorySystem,
+        system.eeBus(),
+        dataTranslation(
+          UINT32_C(0x80000200) + loadCase.offset,
+          UINT32_C(0x200) + loadCase.offset),
+        loadCase.width);
+    REQUIRE(result.outcome == EEDataCacheLoadOutcome::Completed);
+    REQUIRE(result.width == loadCase.width);
+    for (std::size_t index = 0;
+         index < loadCase.width;
+         ++index)
+    {
+      REQUIRE(
+        result.data[index] ==
+        loadCase.offset + index);
+    }
+  }
+}
+
+TEST_CASE("EE data cache uses virtual indices with physical tags")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  const EEAddressTranslationResult firstAlias =
+    dataTranslation(0x00400100, 0x100);
+  const EEAddressTranslationResult secondAlias =
+    dataTranslation(0x00400900, 0x100);
+
+  system.eeBus().write32(0x100, UINT32_C(0x11111111));
+  REQUIRE(
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      firstAlias,
+      4).data[0] == 0x11);
+
+  system.eeBus().write32(0x100, UINT32_C(0x22222222));
+  REQUIRE(
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      secondAlias,
+      4).data[0] == 0x22);
+  REQUIRE(
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      firstAlias,
+      4).data[0] == 0x11);
+}
+
+TEST_CASE("EE data cache invalid physical loads do not mutate lines")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  const EEAddressTranslationResult translation =
+    dataTranslation(
+      UINT32_C(0x82000000),
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+
+  const EEDataCacheLoadResult result =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      translation,
+      4);
+
+  REQUIRE(
+    result.outcome ==
+    EEDataCacheLoadOutcome::PhysicalBusError);
+  REQUIRE(result.source == EEDataCacheLoadSource::Bypassed);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(0, 0).valid);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(0, 1).valid);
+}
+
+TEST_CASE("EE data cache follows invalid-way preference and LRF")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x80000100);
+  constexpr std::uint32_t physicalAddresses[] = {
+    UINT32_C(0x00000100),
+    UINT32_C(0x00001100),
+    UINT32_C(0x00002100),
+    UINT32_C(0x00003100)
+  };
+
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    system.eeBus().write32(
+      physicalAddresses[index],
+      static_cast<std::uint32_t>(index + 1));
+    const EEDataCacheLoadResult result =
+      EEMemorySystemTestAccess::loadData(
+        &memorySystem,
+        system.eeBus(),
+        dataTranslation(
+          virtualAddress,
+          physicalAddresses[index]),
+        4);
+    REQUIRE(result.source == EEDataCacheLoadSource::Refilled);
+    REQUIRE(result.way == index % 2);
+  }
+
+  const EECacheLine &way0 =
+    memorySystem.dataCacheLine(4, 0);
+  const EECacheLine &way1 =
+    memorySystem.dataCacheLine(4, 1);
+  REQUIRE(way0.physicalTag == UINT32_C(0x2000));
+  REQUIRE(way1.physicalTag == UINT32_C(0x3000));
+  REQUIRE_FALSE(way0.leastRecentlyFilled);
+  REQUIRE_FALSE(way1.leastRecentlyFilled);
+}
+
+TEST_CASE("EE cache contents participate in hashes and save states")
+{
+  NekoSystem original;
+  const std::uint64_t initialHash =
+    original.eeCore().stateHash();
+  EECacheLine instructionLine;
+  instructionLine.physicalTag = UINT32_C(0x12345000);
+  instructionLine.valid = true;
+  instructionLine.leastRecentlyFilled = true;
+  instructionLine.data[7] = 0xa5;
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &original.eeMemorySystem(),
+    3,
+    1,
+    instructionLine);
+  EECacheLine dataLine;
+  dataLine.physicalTag = UINT32_C(0x23456000);
+  dataLine.valid = true;
+  dataLine.dirty = true;
+  dataLine.locked = true;
+  dataLine.data[11] = 0x5a;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &original.eeMemorySystem(),
+    5,
+    0,
+    dataLine);
+
+  REQUIRE(original.eeCore().stateHash() != initialHash);
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  REQUIRE(
+    restored.eeMemorySystem().instructionCacheLine(3, 1).data[7] ==
+    0xa5);
+  REQUIRE(
+    restored.eeMemorySystem().instructionCacheLine(3, 1).physicalTag ==
+    instructionLine.physicalTag);
+  REQUIRE(
+    restored.eeMemorySystem().instructionCacheLine(3, 1).valid);
+  REQUIRE(
+    restored.eeMemorySystem()
+      .instructionCacheLine(3, 1).leastRecentlyFilled);
+  REQUIRE(
+    restored.eeMemorySystem().dataCacheLine(5, 0).data[11] ==
+    0x5a);
+  REQUIRE(
+    restored.eeMemorySystem().dataCacheLine(5, 0).physicalTag ==
+    dataLine.physicalTag);
+  REQUIRE(restored.eeMemorySystem().dataCacheLine(5, 0).valid);
+  REQUIRE(restored.eeMemorySystem().dataCacheLine(5, 0).dirty);
+  REQUIRE(restored.eeMemorySystem().dataCacheLine(5, 0).locked);
+  REQUIRE(restored.eeCore().stateHash() == original.eeCore().stateHash());
+  REQUIRE(restored.saveState() == original.saveState());
 }
 
 TEST_CASE("EE functional scratchpad policy grants CPU and DMAC access")
