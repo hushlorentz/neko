@@ -1035,6 +1035,81 @@ TEST_CASE("EE data cache follows invalid-way preference and LRF")
   REQUIRE_FALSE(way1.leastRecentlyFilled);
 }
 
+TEST_CASE("EE data cache excludes a single locked replacement way")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  EECacheLine locked;
+  locked.physicalTag = UINT32_C(0x00000000);
+  locked.valid = true;
+  locked.locked = true;
+  locked.data[0] = 0x11;
+  EECacheLine unlocked;
+  unlocked.physicalTag = UINT32_C(0x00001000);
+  unlocked.valid = true;
+  unlocked.dirty = true;
+  unlocked.data[0] = 0x22;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    locked);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    1,
+    unlocked);
+
+  EEDataCacheLoadResult load =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      dataTranslation(0x80000100, 0x2100),
+      1);
+  REQUIRE(load.outcome == EEDataCacheLoadOutcome::Completed);
+  REQUIRE(load.source == EEDataCacheLoadSource::Refilled);
+  REQUIRE(load.way == 1);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).locked);
+  REQUIRE(
+    memorySystem.dataCacheLine(4, 0).physicalTag ==
+    UINT32_C(0x00000000));
+  std::uint8_t writtenBack = 0;
+  REQUIRE(system.eeBus().readData8(0x1100, &writtenBack));
+  REQUIRE(writtenBack == 0x22);
+
+  locked.physicalTag = UINT32_C(0x00003000);
+  locked.leastRecentlyFilled = true;
+  unlocked = {};
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    unlocked);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    1,
+    locked);
+
+  const EEDataCacheStoreResult store =
+    EEMemorySystemTestAccess::storeData(
+      &memorySystem,
+      &system.eeBus(),
+      dataTranslation(0x80000100, 0x5100),
+      storeBytes(0x5a),
+      1);
+  REQUIRE(store.outcome == EEDataCacheStoreOutcome::Completed);
+  REQUIRE(store.source == EEDataCacheStoreSource::Allocated);
+  REQUIRE(store.way == 0);
+  REQUIRE(memorySystem.dataCacheLine(4, 1).locked);
+  REQUIRE(
+    memorySystem.dataCacheLine(4, 1).physicalTag ==
+    UINT32_C(0x00003000));
+}
+
 TEST_CASE("EE cache contents participate in hashes and save states")
 {
   NekoSystem original;
@@ -1248,6 +1323,125 @@ TEST_CASE("EE data cache store hits update every supported width")
       REQUIRE(loaded.data[byte] == data[byte]);
     }
   }
+}
+
+TEST_CASE("EE locked data-cache store hits do not set Dirty")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  EECacheLine line;
+  line.physicalTag = UINT32_C(0x00000000);
+  line.valid = true;
+  line.locked = true;
+  line.data[0] = 0x11;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    line);
+
+  const EEDataCacheStoreResult result =
+    EEMemorySystemTestAccess::storeData(
+      &memorySystem,
+      &system.eeBus(),
+      dataTranslation(0x80000100, 0x100),
+      storeBytes(0x5a),
+      1);
+
+  REQUIRE(result.outcome == EEDataCacheStoreOutcome::Completed);
+  REQUIRE(result.source == EEDataCacheStoreSource::Hit);
+  REQUIRE(result.way == 0);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).data[0] == 0x5a);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).locked);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(4, 0).dirty);
+  std::uint8_t backingValue = 0xff;
+  REQUIRE(system.eeBus().readData8(0x100, &backingValue));
+  REQUIRE(backingValue == 0);
+
+  line.data[0] = 0x5a;
+  line.dirty = true;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    line);
+  REQUIRE(
+    EEMemorySystemTestAccess::storeData(
+      &memorySystem,
+      &system.eeBus(),
+      dataTranslation(0x80000100, 0x100),
+      storeBytes(0xa5),
+      1).outcome ==
+    EEDataCacheStoreOutcome::Completed);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).data[0] == 0xa5);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).dirty);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).locked);
+}
+
+TEST_CASE("EE all-locked data-cache misses bypass without replacement")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  EECacheLine way0;
+  way0.physicalTag = UINT32_C(0x00000000);
+  way0.valid = true;
+  way0.locked = true;
+  way0.data[0] = 0x11;
+  EECacheLine way1;
+  way1.physicalTag = UINT32_C(0x00001000);
+  way1.valid = true;
+  way1.locked = true;
+  way1.data[0] = 0x22;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    way0);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    1,
+    way1);
+  system.eeBus().write8(0x2100, 0x33);
+
+  const EEDataCacheLoadResult load =
+    EEMemorySystemTestAccess::loadData(
+      &memorySystem,
+      system.eeBus(),
+      dataTranslation(0x80000100, 0x2100),
+      1);
+  REQUIRE(load.outcome == EEDataCacheLoadOutcome::Completed);
+  REQUIRE(load.source == EEDataCacheLoadSource::Bypassed);
+  REQUIRE(load.data[0] == 0x33);
+
+  const EEDataCacheStoreResult store =
+    EEMemorySystemTestAccess::storeData(
+      &memorySystem,
+      &system.eeBus(),
+      dataTranslation(0x80000100, 0x2100),
+      storeBytes(0x44),
+      1);
+  REQUIRE(store.outcome == EEDataCacheStoreOutcome::Completed);
+  REQUIRE(store.source == EEDataCacheStoreSource::Bypassed);
+  std::uint8_t backingValue = 0;
+  REQUIRE(system.eeBus().readData8(0x2100, &backingValue));
+  REQUIRE(backingValue == 0x44);
+  REQUIRE(
+    memorySystem.dataCacheLine(4, 0).physicalTag ==
+    way0.physicalTag);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).data[0] == 0x11);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).locked);
+  REQUIRE(
+    memorySystem.dataCacheLine(4, 1).physicalTag ==
+    way1.physicalTag);
+  REQUIRE(memorySystem.dataCacheLine(4, 1).data[0] == 0x22);
+  REQUIRE(memorySystem.dataCacheLine(4, 1).locked);
 }
 
 TEST_CASE("EE dirty data-cache eviction writes back before replacement")

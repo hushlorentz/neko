@@ -387,7 +387,9 @@ class EEMemorySystem final
       const std::array<std::uint8_t, 16> &data,
       std::size_t width);
     std::size_t instructionCacheVictim(std::size_t set) const;
-    std::size_t dataCacheVictim(std::size_t set) const;
+    bool dataCacheVictim(
+      std::size_t set,
+      std::size_t *way) const;
 
     std::uint32_t cop0Index = 0;
     std::uint32_t cop0Random = EECOP0Random::RESET;

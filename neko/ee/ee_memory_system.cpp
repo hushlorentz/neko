@@ -621,7 +621,10 @@ EEDataCacheStoreResult EEMemorySystem::storeData(
         data.begin(),
         width,
         line.data.begin() + lineOffset);
-      line.dirty = true;
+      if (!line.locked)
+      {
+        line.dirty = true;
+      }
       result.outcome = EEDataCacheStoreOutcome::Completed;
       result.source = EEDataCacheStoreSource::Hit;
       result.way = static_cast<std::uint8_t>(way);
@@ -630,7 +633,17 @@ EEDataCacheStoreResult EEMemorySystem::storeData(
   }
 
   result.source = EEDataCacheStoreSource::Allocated;
-  const std::size_t victim = dataCacheVictim(result.set);
+  std::size_t victim = 0;
+  if (!dataCacheVictim(result.set, &victim))
+  {
+    EEAddressTranslationResult bypass = translation;
+    bypass.cacheRoute = EECacheRoute::Uncached;
+    return storeData(
+      bus,
+      bypass,
+      data,
+      width);
+  }
   result.way = static_cast<std::uint8_t>(victim);
   const EECacheLineFillResult fill =
     fillCacheLine(*bus, translation.physicalAddress);
@@ -1276,23 +1289,46 @@ std::size_t EEMemorySystem::instructionCacheVictim(
     : 0;
 }
 
-std::size_t EEMemorySystem::dataCacheVictim(
-  std::size_t set) const
+bool EEMemorySystem::dataCacheVictim(
+  std::size_t set,
+  std::size_t *way) const
 {
+  if (way == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE data-cache victim selection requires an output.");
+  }
   const auto &ways = dataCache[set];
+  if (ways[0].locked)
+  {
+    if (ways[1].locked)
+    {
+      return false;
+    }
+    *way = 1;
+    return true;
+  }
+  if (ways[1].locked)
+  {
+    *way = 0;
+    return true;
+  }
   if (!ways[0].valid)
   {
-    return 0;
+    *way = 0;
+    return true;
   }
   if (!ways[1].valid)
   {
-    return 1;
+    *way = 1;
+    return true;
   }
-  return
+  *way =
     ways[0].leastRecentlyFilled ^
       ways[1].leastRecentlyFilled
     ? 1
     : 0;
+  return true;
 }
 
 EEInstructionCacheFetchResult EEMemorySystem::fetchInstruction(
@@ -1494,7 +1530,13 @@ EEDataCacheLoadResult EEMemorySystem::loadData(
   }
 
   result.source = EEDataCacheLoadSource::Refilled;
-  const std::size_t victim = dataCacheVictim(result.set);
+  std::size_t victim = 0;
+  if (!dataCacheVictim(result.set, &victim))
+  {
+    EEAddressTranslationResult bypass = translation;
+    bypass.cacheRoute = EECacheRoute::Uncached;
+    return loadData(bus, bypass, width);
+  }
   result.way = static_cast<std::uint8_t>(victim);
   const EECacheLineFillResult fill =
     fillCacheLine(bus, translation.physicalAddress);

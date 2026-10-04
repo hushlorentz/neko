@@ -1825,7 +1825,7 @@ creating parallel ownership.
 - [x] Route cached data stores through write allocation and write-back state,
       including partial-width and merge updates, dirty eviction, physical bus
       writeback, self-alias behavior, and absence of automatic DMA coherence.
-- [ ] Implement data-cache line locking and the deterministic policy for
+- [x] Implement data-cache line locking and the deterministic policy for
       manual-defined undefined cases where replacement candidates are locked.
       Preserve clean locked-line writes without setting Dirty, exclude a locked
       way when the other way is available, and define the all-ways-locked miss
