@@ -277,6 +277,10 @@ bool EEMemorySystem::readScratchpad8(
   std::uint32_t offset,
   std::uint8_t *value) const
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return readScratchpadValue(scratchpad, offset, value);
 }
 
@@ -284,6 +288,10 @@ bool EEMemorySystem::writeScratchpad8(
   std::uint32_t offset,
   std::uint8_t value)
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return writeScratchpadValue(&scratchpad, offset, value);
 }
 
@@ -291,6 +299,10 @@ bool EEMemorySystem::readScratchpad16(
   std::uint32_t offset,
   std::uint16_t *value) const
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return readScratchpadValue(scratchpad, offset, value);
 }
 
@@ -298,6 +310,10 @@ bool EEMemorySystem::writeScratchpad16(
   std::uint32_t offset,
   std::uint16_t value)
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return writeScratchpadValue(&scratchpad, offset, value);
 }
 
@@ -305,6 +321,10 @@ bool EEMemorySystem::readScratchpad32(
   std::uint32_t offset,
   std::uint32_t *value) const
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return readScratchpadValue(scratchpad, offset, value);
 }
 
@@ -312,6 +332,10 @@ bool EEMemorySystem::writeScratchpad32(
   std::uint32_t offset,
   std::uint32_t value)
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return writeScratchpadValue(&scratchpad, offset, value);
 }
 
@@ -319,6 +343,10 @@ bool EEMemorySystem::readScratchpad64(
   std::uint32_t offset,
   std::uint64_t *value) const
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return readScratchpadValue(scratchpad, offset, value);
 }
 
@@ -326,6 +354,10 @@ bool EEMemorySystem::writeScratchpad64(
   std::uint32_t offset,
   std::uint64_t value)
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   return writeScratchpadValue(&scratchpad, offset, value);
 }
 
@@ -337,6 +369,10 @@ bool EEMemorySystem::readScratchpad128(
   {
     throw std::invalid_argument(
       "EE scratchpad quadword load requires an output value.");
+  }
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
   }
   if (!scratchpadRange(offset, 16))
   {
@@ -353,6 +389,10 @@ bool EEMemorySystem::writeScratchpad128(
   std::uint32_t offset,
   const EEQuadword &value)
 {
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::CPU))
+  {
+    return false;
+  }
   if (!scratchpadRange(offset, 16))
   {
     return false;
@@ -360,6 +400,63 @@ bool EEMemorySystem::writeScratchpad128(
   writeScratchpadValue(&scratchpad, offset, value.low);
   writeScratchpadValue(&scratchpad, offset + 8, value.high);
   return true;
+}
+
+EEScratchpadAccessResult EEMemorySystem::readScratchpadDMA128(
+  std::uint32_t physicalAddress,
+  EEQuadword *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE DMAC scratchpad load requires an output value.");
+  }
+  if ((physicalAddress & 0x0f) != 0 ||
+      !scratchpadRange(physicalAddress, 16))
+  {
+    return EEScratchpadAccessResult::InvalidAddress;
+  }
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::DMAC))
+  {
+    return EEScratchpadAccessResult::Wait;
+  }
+  EEQuadword result = {};
+  readScratchpadValue(scratchpad, physicalAddress, &result.low);
+  readScratchpadValue(
+    scratchpad,
+    physicalAddress + 8,
+    &result.high);
+  *value = result;
+  return EEScratchpadAccessResult::Completed;
+}
+
+EEScratchpadAccessResult EEMemorySystem::writeScratchpadDMA128(
+  std::uint32_t physicalAddress,
+  const EEQuadword &value)
+{
+  if ((physicalAddress & 0x0f) != 0 ||
+      !scratchpadRange(physicalAddress, 16))
+  {
+    return EEScratchpadAccessResult::InvalidAddress;
+  }
+  if (!scratchpadAccessGranted(EEScratchpadAccessClient::DMAC))
+  {
+    return EEScratchpadAccessResult::Wait;
+  }
+  writeScratchpadValue(&scratchpad, physicalAddress, value.low);
+  writeScratchpadValue(
+    &scratchpad,
+    physicalAddress + 8,
+    value.high);
+  return EEScratchpadAccessResult::Completed;
+}
+
+bool EEMemorySystem::scratchpadAccessGranted(
+  EEScratchpadAccessClient client) const
+{
+  return
+    scratchpadAccessPolicy.decision(client) ==
+    EEScratchpadAccessDecision::Granted;
 }
 
 EEAddressTranslationResult EEMemorySystem::classifyAddress(

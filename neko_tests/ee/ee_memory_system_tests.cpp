@@ -177,6 +177,102 @@ TEST_CASE("EE scratchpad reset clears its fixed storage")
   REQUIRE(value == 0);
 }
 
+TEST_CASE("EE functional scratchpad policy grants CPU and DMAC access")
+{
+  EEScratchpadAccessPolicy policy;
+
+  REQUIRE(
+    policy.decision(EEScratchpadAccessClient::CPU) ==
+    EEScratchpadAccessDecision::Granted);
+  REQUIRE(
+    policy.decision(EEScratchpadAccessClient::DMAC) ==
+    EEScratchpadAccessDecision::Granted);
+}
+
+TEST_CASE("EE DMAC scratchpad qword access shares CPU-visible storage")
+{
+  EEMemorySystem memorySystem;
+  const EEQuadword cpuValue = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  const EEQuadword dmacValue = {
+    UINT64_C(0x0123456789abcdef),
+    UINT64_C(0xfedcba9876543210)
+  };
+
+  REQUIRE(memorySystem.writeScratchpad128(0x100, cpuValue));
+  EEQuadword loaded = {};
+  REQUIRE(
+    memorySystem.readScratchpadDMA128(0x100, &loaded) ==
+    EEScratchpadAccessResult::Completed);
+  REQUIRE(loaded.low == cpuValue.low);
+  REQUIRE(loaded.high == cpuValue.high);
+
+  REQUIRE(
+    memorySystem.writeScratchpadDMA128(0x100, dmacValue) ==
+    EEScratchpadAccessResult::Completed);
+  REQUIRE(memorySystem.readScratchpad128(0x100, &loaded));
+  REQUIRE(loaded.low == dmacValue.low);
+  REQUIRE(loaded.high == dmacValue.high);
+}
+
+TEST_CASE("EE DMAC scratchpad qword access enforces physical bounds")
+{
+  EEMemorySystem memorySystem;
+  const std::uint32_t lastAddress =
+    static_cast<std::uint32_t>(
+      EEMemorySystem::SCRATCHPAD_SIZE - 16);
+  const EEQuadword original = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  REQUIRE(memorySystem.writeScratchpad128(0x100, original));
+  REQUIRE(
+    memorySystem.writeScratchpadDMA128(lastAddress, original) ==
+    EEScratchpadAccessResult::Completed);
+  EEQuadword boundaryValue = {};
+  REQUIRE(
+    memorySystem.readScratchpadDMA128(
+      lastAddress,
+      &boundaryValue) ==
+    EEScratchpadAccessResult::Completed);
+  REQUIRE(boundaryValue.low == original.low);
+  REQUIRE(boundaryValue.high == original.high);
+
+  for (const std::uint32_t address : {
+         UINT32_C(0x101),
+         lastAddress + 1,
+         static_cast<std::uint32_t>(
+           EEMemorySystem::SCRATCHPAD_SIZE),
+         UINT32_C(0x10000)})
+  {
+    EEQuadword loaded = {
+      UINT64_C(0x5a5a5a5a5a5a5a5a),
+      UINT64_C(0x5a5a5a5a5a5a5a5a)
+    };
+    REQUIRE(
+      memorySystem.readScratchpadDMA128(address, &loaded) ==
+      EEScratchpadAccessResult::InvalidAddress);
+    REQUIRE(loaded.low == UINT64_C(0x5a5a5a5a5a5a5a5a));
+    REQUIRE(loaded.high == UINT64_C(0x5a5a5a5a5a5a5a5a));
+    REQUIRE(
+      memorySystem.writeScratchpadDMA128(address, {}) ==
+      EEScratchpadAccessResult::InvalidAddress);
+  }
+
+  EEQuadword loaded = {};
+  REQUIRE(memorySystem.readScratchpad128(0x100, &loaded));
+  REQUIRE(loaded.low == original.low);
+  REQUIRE(loaded.high == original.high);
+  REQUIRE(memorySystem.readScratchpad128(lastAddress, &loaded));
+  REQUIRE(loaded.low == original.low);
+  REQUIRE(loaded.high == original.high);
+  REQUIRE_THROWS_AS(
+    memorySystem.readScratchpadDMA128(0x100, nullptr),
+    std::invalid_argument);
+}
+
 TEST_CASE("EE segment classification follows privilege boundaries")
 {
   EEMemorySystem memorySystem;

@@ -1774,7 +1774,7 @@ creating parallel ownership.
 - [x] Route CPU GPR/COP2 quadwords and delayed COP1 loads/stores through the
       same scratchpad boundary, including FIFO-readiness separation and
       precise-fault behavior.
-- [ ] Add explicit qword-aligned physical scratchpad access for the DMAC and a
+- [x] Add explicit qword-aligned physical scratchpad access for the DMAC and a
       functional CPU/DMA access policy. Preserve shared visibility and bounds
       now; keep alternate-cycle arbitration, DMA priority, burst timing, and
       cycle stealing behind a replaceable timing policy.

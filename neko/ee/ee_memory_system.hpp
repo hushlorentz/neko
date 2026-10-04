@@ -87,6 +87,35 @@ enum class EEAddressRoute : std::uint8_t
   Scratchpad
 };
 
+enum class EEScratchpadAccessClient : std::uint8_t
+{
+  CPU,
+  DMAC
+};
+
+enum class EEScratchpadAccessDecision : std::uint8_t
+{
+  Granted,
+  Wait
+};
+
+enum class EEScratchpadAccessResult : std::uint8_t
+{
+  Completed,
+  Wait,
+  InvalidAddress
+};
+
+class EEScratchpadAccessPolicy final
+{
+  public:
+    constexpr EEScratchpadAccessDecision decision(
+      EEScratchpadAccessClient) const
+    {
+      return EEScratchpadAccessDecision::Granted;
+    }
+};
+
 struct EEAddressTranslationResult
 {
   EEAddressTranslationOutcome outcome =
@@ -154,6 +183,12 @@ class EEMemorySystem final
     bool writeScratchpad128(
       std::uint32_t offset,
       const EEQuadword &value);
+    EEScratchpadAccessResult readScratchpadDMA128(
+      std::uint32_t physicalAddress,
+      EEQuadword *value) const;
+    EEScratchpadAccessResult writeScratchpadDMA128(
+      std::uint32_t physicalAddress,
+      const EEQuadword &value);
     void reset();
     std::uint32_t cop0Register(
       EECOP0Register registerIndex) const;
@@ -196,6 +231,8 @@ class EEMemorySystem final
     void invalidateTLBAccelerators();
     EETLBEntry currentTLBEntry() const;
     void writeTLBEntry(std::uint32_t index);
+    bool scratchpadAccessGranted(
+      EEScratchpadAccessClient client) const;
 
     std::uint32_t cop0Index = 0;
     std::uint32_t cop0Random = EECOP0Random::RESET;
@@ -210,6 +247,7 @@ class EEMemorySystem final
     std::uint32_t cop0TagHi = 0;
     std::array<EETLBEntry, TLB_ENTRY_COUNT> tlbEntries = {};
     std::array<EEQuadword, SCRATCHPAD_QWORD_COUNT> scratchpad = {};
+    EEScratchpadAccessPolicy scratchpadAccessPolicy;
     mutable std::array<TLBAcceleratorEntry, ITLB_ENTRY_COUNT> itlb = {};
     mutable std::array<TLBAcceleratorEntry, DTLB_ENTRY_COUNT> dtlb = {};
     mutable std::size_t nextITLBReplacement = 0;
