@@ -1798,7 +1798,7 @@ creating parallel ownership.
       width, overlapping access, reset, repeated execution, physical DMA
       behavior, VU-memory normal-mode endpoints, and the documented lack of
       automatic cache or scratchpad snooping.
-- [ ] Complete an independent review of scratchpad and DMA integration.
+- [x] Complete an independent review of scratchpad and DMA integration.
 
 ### Guest-Visible Cache Foundation
 
