@@ -1118,11 +1118,17 @@ void NekoSaveStateCodec::readEECore(
   };
   for (const EECOP0Register registerIndex : memoryRegisters)
   {
+    const std::uint32_t value = reader->readU32();
+    if (registerIndex == EECOP0Register::TagLo)
+    {
+      core->memorySystem.cop0TagLo = value;
+      continue;
+    }
     try
     {
       core->memorySystem.setCOP0Register(
         registerIndex,
-        reader->readU32());
+        value);
     }
     catch (const std::invalid_argument &error)
     {
@@ -1167,19 +1173,6 @@ void NekoSaveStateCodec::readEECore(
       require(
         (line->physicalTag & ~EECacheLine::PHYSICAL_TAG_MASK) == 0,
         "EE cache physical tag is invalid");
-      require(
-        line->valid || (!line->dirty && !line->locked),
-        "EE invalid cache line has active state");
-      bool canonicalInvalidPayload =
-        line->physicalTag == 0;
-      for (const std::uint8_t byte : line->data)
-      {
-        canonicalInvalidPayload &=
-          byte == 0;
-      }
-      require(
-        line->valid || canonicalInvalidPayload,
-        "EE invalid cache line has noncanonical payload");
       require(
         !instruction || (!line->dirty && !line->locked),
         "EE instruction-cache line has data-cache state");

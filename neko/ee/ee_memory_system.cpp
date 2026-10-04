@@ -1305,6 +1305,11 @@ EECacheMaintenanceResult EEMemorySystem::maintainCache(
     case EECacheOperation::InstructionHitInvalidate:
     case EECacheOperation::InstructionFill:
       return maintainInstructionCacheAddressed(bus, request);
+    case EECacheOperation::DataIndexLoadTag:
+    case EECacheOperation::DataIndexLoadData:
+    case EECacheOperation::DataIndexStoreTag:
+    case EECacheOperation::DataIndexStoreData:
+      return maintainDataCacheIndex(request);
     default:
       break;
   }
@@ -1457,6 +1462,62 @@ EEMemorySystem::maintainInstructionCacheAddressed(
   instructionCache[set][victim] = candidate;
   result.outcome = EECacheMaintenanceOutcome::Completed;
   return result;
+}
+
+EECacheMaintenanceResult EEMemorySystem::maintainDataCacheIndex(
+  const EECacheMaintenanceRequest &request)
+{
+  EECacheMaintenanceResult result;
+  result.translation.virtualAddress =
+    request.virtualAddress;
+  const std::size_t set =
+    (request.virtualAddress >> 6) &
+    (DATA_CACHE_SET_COUNT - 1);
+  const std::size_t way =
+    request.virtualAddress & (CACHE_WAY_COUNT - 1);
+  EECacheLine &line = dataCache[set][way];
+  const std::size_t wordOffset =
+    request.virtualAddress & (CACHE_LINE_SIZE - 4);
+
+  switch (request.operation)
+  {
+    case EECacheOperation::DataIndexLoadTag:
+      cop0TagLo =
+        line.physicalTag |
+        (line.dirty ? EECOP0TagLo::DIRTY : 0) |
+        (line.valid ? EECOP0TagLo::VALID : 0) |
+        (line.leastRecentlyFilled
+          ? EECOP0TagLo::LEAST_RECENTLY_FILLED
+          : 0) |
+        (line.locked ? EECOP0TagLo::LOCK : 0);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    case EECacheOperation::DataIndexLoadData:
+      cop0TagLo = loadCacheWord(line, wordOffset);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    case EECacheOperation::DataIndexStoreTag:
+      line.physicalTag =
+        cop0TagLo & EECacheLine::PHYSICAL_TAG_MASK;
+      line.dirty =
+        (cop0TagLo & EECOP0TagLo::DIRTY) != 0;
+      line.valid =
+        (cop0TagLo & EECOP0TagLo::VALID) != 0;
+      line.leastRecentlyFilled =
+        (cop0TagLo &
+          EECOP0TagLo::LEAST_RECENTLY_FILLED) != 0;
+      line.locked =
+        (cop0TagLo & EECOP0TagLo::LOCK) != 0;
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    case EECacheOperation::DataIndexStoreData:
+      storeCacheWord(&line, wordOffset, cop0TagLo);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    default:
+      throw std::invalid_argument(
+        "EE data-cache index operation is invalid.");
+  }
 }
 
 std::size_t EEMemorySystem::instructionCacheVictim(

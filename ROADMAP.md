@@ -1849,7 +1849,7 @@ creating parallel ownership.
       invalidation. Preserve atomic fills, refill failures, direct index
       selection, translated physical-tag lookup, precise hit-operation faults,
       hit/miss `Status.CH`, and no-mutation misses.
-- [ ] Implement data-cache index load/store tag and data operations. Preserve
+- [x] Implement data-cache index load/store tag and data operations. Preserve
       direct virtual-index and address-bit way selection, 32-bit `TagLo`
       data-word transfer, dirty/valid/lock/LRF fields, unchanged `Status.CH`,
       and the lack of inferred `TagHi` array effects.

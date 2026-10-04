@@ -439,6 +439,38 @@ TEST_CASE("EE CACHE index operations preserve Status CH")
   REQUIRE(
     (core.cop0Register(EECOP0Register::Status) &
       EECOP0Status::CACHE_HIT) != 0);
+
+  core.setCOP0Register(
+    EECOP0Register::TagLo,
+    UINT32_C(0x12345000) |
+      EECOP0TagLo::DIRTY |
+      EECOP0TagLo::VALID |
+      EECOP0TagLo::LEAST_RECENTLY_FILLED |
+      EECOP0TagLo::LOCK);
+  core.setCOP0Register(
+    EECOP0Register::TagHi,
+    UINT32_C(0x89abcdef));
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x12, 0x0001));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::TagHi) ==
+    UINT32_C(0x89abcdef));
+  const std::size_t set =
+    (UINT32_C(0x80001001) >> 6) &
+    (EEMemorySystem::DATA_CACHE_SET_COUNT - 1);
+  const EECacheLine &line =
+    system.eeMemorySystem().dataCacheLine(set, 1);
+  REQUIRE(line.physicalTag == UINT32_C(0x12345000));
+  REQUIRE(line.valid);
+  REQUIRE(line.dirty);
+  REQUIRE(line.leastRecentlyFilled);
+  REQUIRE(line.locked);
 }
 
 TEST_CASE("EE CACHE instruction fill and hit invalidate update CH precisely")
