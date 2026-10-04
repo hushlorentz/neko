@@ -1822,11 +1822,14 @@ creating parallel ownership.
       missed-quadword-first allocation, functional early restart, line-boundary
       handling, and cache-disabled behavior without bypassing translation,
       device readiness, trace ownership, or precise exceptions.
-- [ ] Route cached data stores through write allocation and write-back state,
+- [x] Route cached data stores through write allocation and write-back state,
       including partial-width and merge updates, dirty eviction, physical bus
       writeback, self-alias behavior, and absence of automatic DMA coherence.
 - [ ] Implement data-cache line locking and the deterministic policy for
       manual-defined undefined cases where replacement candidates are locked.
+      Preserve clean locked-line writes without setting Dirty, exclude a locked
+      way when the other way is available, and define the all-ways-locked miss
+      policy explicitly.
 - [ ] Decode and dispatch `CACHE` and implement the supported instruction-cache
       index tag/data transfer, index invalidation/fill, and hit invalidation
       operations. Preserve direct index/way selection, translated hit lookup,
@@ -1867,6 +1870,17 @@ creating parallel ownership.
       impossible cache tag/state combinations, invalid replacement/lock state,
       inconsistent in-flight operations, and payload-size mismatches before
       committing any state.
+- [ ] Add a schema-aware save-state inspector and semantic differ driven by
+      the authoritative codec rather than a duplicated parser. Give
+      `SaveStateWriter` and `SaveStateReader` an optional diagnostic observer
+      with scoped component, field, and array-element paths; report each
+      field's byte range and decoded value; support inspect, diff, and
+      field-location workflows; and include field paths and offsets in decode
+      failures. Replace fragile hard-coded corruption-test offsets with
+      path-based mutation helpers while retaining whole-container byte-count
+      and fingerprint fixtures. Keep the observer disabled outside diagnostic
+      and test workflows so ordinary save/load behavior and allocation costs
+      remain unchanged.
 - [ ] Prove byte-identical consecutive saves, save/load into a dirty
       destination, deterministic trace/state hashes, and identical completion
       across TLB faults, cache refills/writebacks, scratchpad accesses,

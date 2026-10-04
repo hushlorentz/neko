@@ -950,6 +950,14 @@ struct EECoreTestAccess
     return core->executeCOP2Memory(instruction, 0);
   }
 
+  static const EECacheLine &dataCacheLine(
+    const EECore &core,
+    std::size_t set,
+    std::size_t way)
+  {
+    return core.memorySystem.dataCacheLine(set, way);
+  }
+
   static EEInstructionExecutionOutcome executeCOP2ControlMove(
     EECore *core,
     const EEInstruction &instruction)
@@ -1372,6 +1380,87 @@ TEST_CASE("EE focused handlers reject incompatible operations")
       "EE word-shift handler received an incompatible operation.");
     REQUIRE(core.executionState() == EEExecutionState::Running);
     REQUIRE(core.stopReason() == EEStopReason::None);
+  }
+
+  SECTION("Store instruction families use dirty data-cache state")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Config,
+      EECOP0Config::DATA_CACHE_ENABLE);
+    core.setGeneralRegister(1, {UINT32_C(0x80000100), 0});
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x00000000aabbccdd), 0});
+
+    EEInstruction instruction;
+    instruction.operation = EEOperation::StoreWord;
+    instruction.sourceRegister = 1;
+    instruction.targetRegister = 2;
+    REQUIRE(
+      EECoreTestAccess::executeWordMemory(&core, instruction) ==
+      EEInstructionExecutionOutcome::Completed);
+    REQUIRE(system.eeBus().read32(0x100) == 0);
+    REQUIRE(EECoreTestAccess::dataCacheLine(core, 4, 0).dirty);
+
+    core.setGeneralRegister(
+      2,
+      {UINT64_C(0x0000000011223344), 0});
+    instruction.operation = EEOperation::StoreWordRight;
+    instruction.immediate = 1;
+    REQUIRE(
+      EECoreTestAccess::executeWordMergeMemory(
+        &core,
+        instruction) ==
+      EEInstructionExecutionOutcome::Completed);
+    instruction = {};
+    instruction.operation = EEOperation::LoadWordUnsigned;
+    instruction.sourceRegister = 1;
+    instruction.targetRegister = 3;
+    REQUIRE(
+      EECoreTestAccess::executeWordMemory(&core, instruction) ==
+      EEInstructionExecutionOutcome::Completed);
+    REQUIRE(
+      core.generalRegister(3).low ==
+      UINT64_C(0x223344dd));
+    REQUIRE(system.eeBus().read32(0x100) == 0);
+
+    core.setGeneralRegister(1, {UINT32_C(0x80000140), 0});
+    core.setGeneralRegister(
+      4,
+      {UINT64_C(0x0123456789abcdef),
+       UINT64_C(0xfedcba9876543210)});
+    instruction = {};
+    instruction.operation = EEOperation::StoreQuadword;
+    instruction.sourceRegister = 1;
+    instruction.targetRegister = 4;
+    REQUIRE(
+      EECoreTestAccess::executeQuadwordMemory(
+        &core,
+        instruction) ==
+      EEInstructionExecutionOutcome::Completed);
+    instruction.operation = EEOperation::LoadQuadword;
+    instruction.targetRegister = 5;
+    REQUIRE(
+      EECoreTestAccess::executeQuadwordMemory(
+        &core,
+        instruction) ==
+      EEInstructionExecutionOutcome::Completed);
+    REQUIRE(
+      core.generalRegister(5) ==
+      core.generalRegister(4));
+
+    core.setGeneralRegister(1, {UINT32_C(0x80000180), 0});
+    instruction = {};
+    instruction.operation = EEOperation::StoreQuadwordFromCOP2;
+    instruction.sourceRegister = 1;
+    instruction.targetRegister = 2;
+    REQUIRE(
+      EECoreTestAccess::executeCOP2Memory(&core, instruction) ==
+      EEInstructionExecutionOutcome::Completed);
+    REQUIRE(EECoreTestAccess::dataCacheLine(core, 6, 0).dirty);
+    REQUIRE(system.eeBus().read64(0x180) == 0);
   }
 
   SECTION("Scalar memory rejects before bus or register effects")

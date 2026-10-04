@@ -220,6 +220,31 @@ struct EEDataCacheLoadResult
   std::uint8_t way = 0xff;
 };
 
+enum class EEDataCacheStoreOutcome : std::uint8_t
+{
+  Completed,
+  Stalled,
+  PhysicalBusError
+};
+
+enum class EEDataCacheStoreSource : std::uint8_t
+{
+  Bypassed,
+  Hit,
+  Allocated
+};
+
+struct EEDataCacheStoreResult
+{
+  EEDataCacheStoreOutcome outcome =
+    EEDataCacheStoreOutcome::PhysicalBusError;
+  EEDataCacheStoreSource source =
+    EEDataCacheStoreSource::Bypassed;
+  bool evictedDirty = false;
+  std::uint8_t set = 0xff;
+  std::uint8_t way = 0xff;
+};
+
 class EEMemorySystem final
 {
   public:
@@ -353,8 +378,13 @@ class EEMemorySystem final
       const EEBus &bus,
       const EEAddressTranslationResult &translation);
     EEDataCacheLoadResult loadData(
-      const EEBus &bus,
+      EEBus &bus,
       const EEAddressTranslationResult &translation,
+      std::size_t width);
+    EEDataCacheStoreResult storeData(
+      EEBus *bus,
+      const EEAddressTranslationResult &translation,
+      const std::array<std::uint8_t, 16> &data,
       std::size_t width);
     std::size_t instructionCacheVictim(std::size_t set) const;
     std::size_t dataCacheVictim(std::size_t set) const;

@@ -10096,6 +10096,31 @@ TEST_CASE("EE LWC1 and SWC1 transfer raw words through memory")
   REQUIRE(stored == UINT32_C(0x76543210));
 }
 
+TEST_CASE("EE SWC1 completes into dirty data-cache state")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  core.setGeneralRegister(1, {UINT32_C(0x80000100), 0});
+  core.setFloatingPointRegister(4, UINT32_C(0x76543210));
+  runInstruction(
+    &system,
+    cop1MemoryInstruction(0x39, 1, 4, 0));
+
+  system.runMasterCycles(COP1_MEMORY_PIPELINE_CYCLES);
+
+  REQUIRE(system.eeBus().read32(0x100) == 0);
+  runInstruction(
+    &system,
+    cop1MemoryInstruction(0x31, 1, 5, 0));
+  system.runMasterCycles(COP1_MEMORY_PIPELINE_CYCLES);
+  REQUIRE(
+    core.floatingPointRegister(5) ==
+    UINT32_C(0x76543210));
+}
+
 TEST_CASE("EE LWC1 stalls an immediate dependent FPR use")
 {
   NekoSystem system;

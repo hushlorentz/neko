@@ -476,6 +476,198 @@ bool EEMemorySystem::writeScratchpad128(
   return true;
 }
 
+EEDataCacheStoreResult EEMemorySystem::storeData(
+  EEBus *bus,
+  const EEAddressTranslationResult &translation,
+  const std::array<std::uint8_t, 16> &data,
+  std::size_t width)
+{
+  if (bus == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE cached store requires a bus.");
+  }
+  if (translation.outcome !=
+        EEAddressTranslationOutcome::Translated ||
+      translation.route != EEAddressRoute::MainBus)
+  {
+    throw std::invalid_argument(
+      "EE cached store requires a main-bus translation.");
+  }
+  if (width != 1 && width != 2 && width != 4 &&
+      width != 8 && width != 16)
+  {
+    throw std::invalid_argument(
+      "EE cached store width is unsupported.");
+  }
+  if ((translation.physicalAddress & (width - 1)) != 0 ||
+      (translation.physicalAddress &
+       (CACHE_LINE_SIZE - 1)) >
+        CACHE_LINE_SIZE - width)
+  {
+    throw std::invalid_argument(
+      "EE cached store must be naturally aligned within one line.");
+  }
+
+  EEDataCacheStoreResult result;
+  const std::uint32_t lineBaseAddress =
+    translation.physicalAddress &
+    ~static_cast<std::uint32_t>(CACHE_LINE_SIZE - 1);
+  if (translation.cacheRoute !=
+        EECacheRoute::CachedNoncoherent ||
+      (cop0Config & EECOP0Config::DATA_CACHE_ENABLE) == 0 ||
+      !bus->isMainMemoryRange(
+        lineBaseAddress,
+        CACHE_LINE_SIZE))
+  {
+    bool succeeded = false;
+    switch (width)
+    {
+      case 1:
+        succeeded = bus->writeData8(
+          translation.physicalAddress,
+          data[0]);
+        break;
+      case 2:
+      {
+        const std::uint16_t value =
+          static_cast<std::uint16_t>(data[0]) |
+          static_cast<std::uint16_t>(data[1] << 8);
+        succeeded = bus->writeData16(
+          translation.physicalAddress,
+          value);
+        break;
+      }
+      case 4:
+      {
+        std::uint32_t value = 0;
+        for (std::size_t index = 0; index < 4; ++index)
+        {
+          value |=
+            static_cast<std::uint32_t>(data[index]) <<
+            (index * 8);
+        }
+        succeeded = bus->writeData32(
+          translation.physicalAddress,
+          value);
+        break;
+      }
+      case 8:
+      {
+        std::uint64_t value = 0;
+        for (std::size_t index = 0; index < 8; ++index)
+        {
+          value |=
+            static_cast<std::uint64_t>(data[index]) <<
+            (index * 8);
+        }
+        succeeded = bus->writeData64(
+          translation.physicalAddress,
+          value);
+        break;
+      }
+      case 16:
+      {
+        EEQuadword value = {};
+        for (std::size_t index = 0; index < 8; ++index)
+        {
+          value.low |=
+            static_cast<std::uint64_t>(data[index]) <<
+            (index * 8);
+          value.high |=
+            static_cast<std::uint64_t>(data[index + 8]) <<
+            (index * 8);
+        }
+        switch (
+          bus->writeGuestData128(
+            translation.physicalAddress,
+            value))
+        {
+          case EEDataWriteResult::Completed:
+            succeeded = true;
+            break;
+          case EEDataWriteResult::Stalled:
+            result.outcome = EEDataCacheStoreOutcome::Stalled;
+            return result;
+          case EEDataWriteResult::Failed:
+            break;
+        }
+        break;
+      }
+    }
+    if (succeeded)
+    {
+      result.outcome = EEDataCacheStoreOutcome::Completed;
+    }
+    return result;
+  }
+
+  result.set = static_cast<std::uint8_t>(
+    (translation.virtualAddress >> 6) &
+    (DATA_CACHE_SET_COUNT - 1));
+  const std::uint32_t physicalTag =
+    translation.physicalAddress &
+    EECacheLine::PHYSICAL_TAG_MASK;
+  const std::size_t lineOffset =
+    translation.physicalAddress & (CACHE_LINE_SIZE - 1);
+  for (std::size_t way = 0;
+       way < CACHE_WAY_COUNT;
+       ++way)
+  {
+    EECacheLine &line = dataCache[result.set][way];
+    if (line.valid && line.physicalTag == physicalTag)
+    {
+      std::copy_n(
+        data.begin(),
+        width,
+        line.data.begin() + lineOffset);
+      line.dirty = true;
+      result.outcome = EEDataCacheStoreOutcome::Completed;
+      result.source = EEDataCacheStoreSource::Hit;
+      result.way = static_cast<std::uint8_t>(way);
+      return result;
+    }
+  }
+
+  result.source = EEDataCacheStoreSource::Allocated;
+  const std::size_t victim = dataCacheVictim(result.set);
+  result.way = static_cast<std::uint8_t>(victim);
+  const EECacheLineFillResult fill =
+    fillCacheLine(*bus, translation.physicalAddress);
+  if (fill.outcome != EECacheLineTransferOutcome::Completed)
+  {
+    return result;
+  }
+
+  const EECacheLine &oldLine = dataCache[result.set][victim];
+  result.evictedDirty = oldLine.valid && oldLine.dirty;
+  if (result.evictedDirty)
+  {
+    const EECacheLineTransferResult writeback =
+      writeBackDataCacheLine(
+        bus,
+        result.set,
+        oldLine);
+    if (writeback.outcome !=
+        EECacheLineTransferOutcome::Completed)
+    {
+      return result;
+    }
+  }
+
+  EECacheLine candidate = fill.line;
+  candidate.leastRecentlyFilled =
+    !oldLine.leastRecentlyFilled;
+  std::copy_n(
+    data.begin(),
+    width,
+    candidate.data.begin() + lineOffset);
+  candidate.dirty = true;
+  dataCache[result.set][victim] = candidate;
+  result.outcome = EEDataCacheStoreOutcome::Completed;
+  return result;
+}
+
 EEScratchpadAccessResult EEMemorySystem::readScratchpadDMA128(
   std::uint32_t physicalAddress,
   EEQuadword *value) const
@@ -1178,7 +1370,7 @@ EEInstructionCacheFetchResult EEMemorySystem::fetchInstruction(
 }
 
 EEDataCacheLoadResult EEMemorySystem::loadData(
-  const EEBus &bus,
+  EEBus &bus,
   const EEAddressTranslationResult &translation,
   std::size_t width)
 {
@@ -1311,9 +1503,25 @@ EEDataCacheLoadResult EEMemorySystem::loadData(
     return result;
   }
 
+  const EECacheLine &oldLine =
+    dataCache[result.set][victim];
+  if (oldLine.valid && oldLine.dirty)
+  {
+    const EECacheLineTransferResult writeback =
+      writeBackDataCacheLine(
+        &bus,
+        result.set,
+        oldLine);
+    if (writeback.outcome !=
+        EECacheLineTransferOutcome::Completed)
+    {
+      return result;
+    }
+  }
+
   EECacheLine candidate = fill.line;
   candidate.leastRecentlyFilled =
-    !dataCache[result.set][victim].leastRecentlyFilled;
+    !oldLine.leastRecentlyFilled;
   dataCache[result.set][victim] = candidate;
   result.outcome = EEDataCacheLoadOutcome::Completed;
   copyCacheLoad(

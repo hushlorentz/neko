@@ -14,6 +14,24 @@ constexpr std::size_t EECore::GENERAL_REGISTER_COUNT;
 constexpr std::size_t EECore::FLOATING_POINT_REGISTER_COUNT;
 constexpr std::size_t EEAcceptanceRecords::CAPACITY;
 
+namespace
+{
+  std::array<std::uint8_t, 16> cacheStoreData(
+    std::uint64_t low,
+    std::uint64_t high = 0)
+  {
+    std::array<std::uint8_t, 16> data = {};
+    for (std::size_t index = 0; index < 8; ++index)
+    {
+      data[index] =
+        static_cast<std::uint8_t>(low >> (index * 8));
+      data[index + 8] =
+        static_cast<std::uint8_t>(high >> (index * 8));
+    }
+    return data;
+  }
+}
+
 bool EEShiftAmountOrderingWindow::historyBitsValid(
   std::uint8_t accesses,
   std::uint8_t reads)
@@ -1556,52 +1574,72 @@ bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint8_t value)
 {
-  return translation.route == EEAddressRoute::Scratchpad
-    ? memorySystem.writeScratchpad8(
-        translation.physicalAddress,
-        value)
-    : attachedBus().writeData8(
+  if (translation.route == EEAddressRoute::Scratchpad)
+  {
+    return memorySystem.writeScratchpad8(
         translation.physicalAddress,
         value);
+  }
+  return
+    memorySystem.storeData(
+      &attachedBus(),
+      translation,
+      cacheStoreData(value),
+      1).outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint16_t value)
 {
-  return translation.route == EEAddressRoute::Scratchpad
-    ? memorySystem.writeScratchpad16(
-        translation.physicalAddress,
-        value)
-    : attachedBus().writeData16(
+  if (translation.route == EEAddressRoute::Scratchpad)
+  {
+    return memorySystem.writeScratchpad16(
         translation.physicalAddress,
         value);
+  }
+  return
+    memorySystem.storeData(
+      &attachedBus(),
+      translation,
+      cacheStoreData(value),
+      2).outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint32_t value)
 {
-  return translation.route == EEAddressRoute::Scratchpad
-    ? memorySystem.writeScratchpad32(
-        translation.physicalAddress,
-        value)
-    : attachedBus().writeData32(
+  if (translation.route == EEAddressRoute::Scratchpad)
+  {
+    return memorySystem.writeScratchpad32(
         translation.physicalAddress,
         value);
+  }
+  return
+    memorySystem.storeData(
+      &attachedBus(),
+      translation,
+      cacheStoreData(value),
+      4).outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint64_t value)
 {
-  return translation.route == EEAddressRoute::Scratchpad
-    ? memorySystem.writeScratchpad64(
-        translation.physicalAddress,
-        value)
-    : attachedBus().writeData64(
+  if (translation.route == EEAddressRoute::Scratchpad)
+  {
+    return memorySystem.writeScratchpad64(
         translation.physicalAddress,
         value);
+  }
+  return
+    memorySystem.storeData(
+      &attachedBus(),
+      translation,
+      cacheStoreData(value),
+      8).outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 EEDataWriteResult EECore::writeTranslatedData(
@@ -1616,9 +1654,23 @@ EEDataWriteResult EECore::writeTranslatedData(
       ? EEDataWriteResult::Completed
       : EEDataWriteResult::Failed;
   }
-  return attachedBus().writeGuestData128(
-    translation.physicalAddress,
-    value);
+  const EEDataCacheStoreResult result =
+    memorySystem.storeData(
+      &attachedBus(),
+      translation,
+      cacheStoreData(value.low, value.high),
+      16);
+  switch (result.outcome)
+  {
+    case EEDataCacheStoreOutcome::Completed:
+      return EEDataWriteResult::Completed;
+    case EEDataCacheStoreOutcome::Stalled:
+      return EEDataWriteResult::Stalled;
+    case EEDataCacheStoreOutcome::PhysicalBusError:
+      return EEDataWriteResult::Failed;
+  }
+  throw std::logic_error(
+    "Unknown EE data-cache store outcome.");
 }
 
 EEException EECore::instructionTranslationException(
@@ -5030,9 +5082,7 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
   }
   std::uint32_t memory = 0;
   const bool readSucceeded =
-    store
-      ? readTranslatedData(translation, &memory)
-      : loadTranslatedData(translation, &memory);
+    loadTranslatedData(translation, &memory);
   recordMemoryTrace(
     alignedAddress,
     4,
@@ -5305,9 +5355,7 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
   }
   std::uint64_t memory = 0;
   const bool readSucceeded =
-    store
-      ? readTranslatedData(translation, &memory)
-      : loadTranslatedData(translation, &memory);
+    loadTranslatedData(translation, &memory);
   recordMemoryTrace(
     alignedAddress,
     8,
