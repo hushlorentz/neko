@@ -2406,6 +2406,27 @@ TEST_CASE("EE Core instruction fetching")
     REQUIRE(core.programCounter() == virtualAddress + 4);
   }
 
+  SECTION("Cached public and staged fetches share instruction-cache state")
+  {
+    core.setCOP0Register(
+      EECOP0Register::Config,
+      EECOP0Config::INSTRUCTION_CACHE_ENABLE);
+    bus.write32(0, UINT32_C(0x24020001));
+    bus.write32(4, 0);
+    core.setProgramCounter(EEMemoryMap::KSEG0_BASE);
+
+    const EEInstructionFetchResult initial =
+      core.fetchInstruction();
+    REQUIRE(initial.succeeded);
+    REQUIRE(initial.instruction == UINT32_C(0x24020001));
+
+    bus.write32(0, UINT32_C(0x24020002));
+    core.startExecution(EEMemoryMap::KSEG0_BASE);
+    system.clockMasterCycle();
+
+    REQUIRE(core.generalRegister(2).low == 1);
+  }
+
   SECTION("Misaligned instruction addresses raise AdEL")
   {
     core.setProgramCounter(0x102);

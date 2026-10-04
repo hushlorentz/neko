@@ -1812,10 +1812,11 @@ creating parallel ownership.
       the existing precise-fault selection boundary, and leave refill duration,
       non-blocking loads, hit-under-miss, and shared-bus timing behind a future
       replaceable policy.
-- [ ] Route cached instruction fetch through the instruction cache, including
+- [x] Route cached instruction fetch through the instruction cache, including
       physical-tag lookup, missed-quadword-first sequential refill, full-line
-      completion before restart, instruction-cache enable control, physical
-      aliases, and instruction/data incoherence.
+      completion before restart, instruction-cache enable control, invalid-way
+      preference, instruction-cache LRF replacement, physical aliases, and
+      instruction/data incoherence.
 - [ ] Route cached data loads through the data cache for every implemented
       scalar, merge, COP1, COP2, and quadword path. Implement hit extraction,
       missed-quadword-first allocation, functional early restart, line-boundary
@@ -1824,8 +1825,8 @@ creating parallel ownership.
 - [ ] Route cached data stores through write allocation and write-back state,
       including partial-width and merge updates, dirty eviction, physical bus
       writeback, self-alias behavior, and absence of automatic DMA coherence.
-- [ ] Implement invalid-way preference, the documented LRF replacement
-      transitions, data-cache line locking, and the deterministic policy for
+- [ ] Implement data-cache invalid-way preference, documented LRF replacement
+      transitions, line locking, and the deterministic policy for
       manual-defined undefined cases where replacement candidates are locked.
 - [ ] Decode and dispatch `CACHE` and implement the supported instruction-cache
       index tag/data transfer, index invalidation/fill, and hit invalidation

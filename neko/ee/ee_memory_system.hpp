@@ -171,6 +171,30 @@ struct EECacheLineFillResult
   std::uint8_t quadwordsTransferred = 0;
 };
 
+enum class EEInstructionCacheFetchOutcome : std::uint8_t
+{
+  Completed,
+  PhysicalBusError
+};
+
+enum class EEInstructionCacheFetchSource : std::uint8_t
+{
+  Bypassed,
+  Hit,
+  Refilled
+};
+
+struct EEInstructionCacheFetchResult
+{
+  EEInstructionCacheFetchOutcome outcome =
+    EEInstructionCacheFetchOutcome::PhysicalBusError;
+  EEInstructionCacheFetchSource source =
+    EEInstructionCacheFetchSource::Bypassed;
+  std::uint32_t instruction = 0;
+  std::uint8_t set = 0xff;
+  std::uint8_t way = 0xff;
+};
+
 class EEMemorySystem final
 {
   public:
@@ -300,6 +324,10 @@ class EEMemorySystem final
       EEBus *bus,
       std::size_t set,
       const EECacheLine &line) const;
+    EEInstructionCacheFetchResult fetchInstruction(
+      const EEBus &bus,
+      const EEAddressTranslationResult &translation);
+    std::size_t instructionCacheVictim(std::size_t set) const;
 
     std::uint32_t cop0Index = 0;
     std::uint32_t cop0Random = EECOP0Random::RESET;

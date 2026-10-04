@@ -29,6 +29,14 @@ struct EEMemorySystemTestAccess
   {
     return memorySystem.writeBackDataCacheLine(bus, set, line);
   }
+
+  static EEInstructionCacheFetchResult fetchInstruction(
+    EEMemorySystem *memorySystem,
+    const EEBus &bus,
+    const EEAddressTranslationResult &translation)
+  {
+    return memorySystem->fetchInstruction(bus, translation);
+  }
 };
 
 static_assert(
@@ -101,6 +109,23 @@ namespace
     REQUIRE(result.virtualAddress == virtualAddress);
     REQUIRE(result.physicalAddress == physicalAddress);
     REQUIRE(result.cacheRoute == cacheRoute);
+  }
+
+  EEAddressTranslationResult instructionTranslation(
+    std::uint32_t virtualAddress,
+    std::uint32_t physicalAddress,
+    EECacheRoute cacheRoute = EECacheRoute::CachedNoncoherent)
+  {
+    return {
+      EEAddressTranslationOutcome::Translated,
+      virtualAddress,
+      physicalAddress,
+      cacheRoute,
+      static_cast<std::uint8_t>(
+        cacheRoute == EECacheRoute::CachedNoncoherent ? 3 : 2),
+      EEAddressRoute::MainBus,
+      0xff
+    };
   }
 }
 
@@ -474,6 +499,200 @@ TEST_CASE("EE cache writeback separates clean and invalid state errors")
       EEMemorySystem::DATA_CACHE_SET_COUNT,
       line),
     std::out_of_range);
+}
+
+TEST_CASE("EE instruction cache bypasses disabled and uncached accesses")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  const EEAddressTranslationResult cached =
+    instructionTranslation(0x80000100, 0x100);
+  const EEAddressTranslationResult uncached =
+    instructionTranslation(
+      0xa0000100,
+      0x100,
+      EECacheRoute::Uncached);
+
+  system.eeBus().write32(0x100, UINT32_C(0x11111111));
+  EEInstructionCacheFetchResult result =
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      cached);
+  REQUIRE(
+    result.outcome ==
+    EEInstructionCacheFetchOutcome::Completed);
+  REQUIRE(
+    result.source ==
+    EEInstructionCacheFetchSource::Bypassed);
+  REQUIRE(result.instruction == UINT32_C(0x11111111));
+
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE);
+  system.eeBus().write32(0x100, UINT32_C(0x22222222));
+  result =
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      uncached);
+  REQUIRE(
+    result.source ==
+    EEInstructionCacheFetchSource::Bypassed);
+  REQUIRE(result.instruction == UINT32_C(0x22222222));
+
+  const std::size_t set = (cached.virtualAddress >> 6) & 0x7f;
+  REQUIRE_FALSE(memorySystem.instructionCacheLine(set, 0).valid);
+  REQUIRE_FALSE(memorySystem.instructionCacheLine(set, 1).valid);
+}
+
+TEST_CASE("EE instruction cache refills then returns physical-tag hits")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE);
+  const EEAddressTranslationResult translation =
+    instructionTranslation(0x8000012c, 0x12c);
+  system.eeBus().write32(0x12c, UINT32_C(0x11111111));
+
+  EEInstructionCacheFetchResult result =
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      translation);
+  REQUIRE(
+    result.outcome ==
+    EEInstructionCacheFetchOutcome::Completed);
+  REQUIRE(
+    result.source ==
+    EEInstructionCacheFetchSource::Refilled);
+  REQUIRE(result.instruction == UINT32_C(0x11111111));
+  REQUIRE(result.set == 4);
+  REQUIRE(result.way == 0);
+
+  system.eeBus().write32(0x12c, UINT32_C(0x22222222));
+  result =
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      translation);
+  REQUIRE(
+    result.source ==
+    EEInstructionCacheFetchSource::Hit);
+  REQUIRE(result.instruction == UINT32_C(0x11111111));
+  REQUIRE(result.set == 4);
+  REQUIRE(result.way == 0);
+}
+
+TEST_CASE("EE instruction cache refill failure leaves its victim unchanged")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE);
+  const EEAddressTranslationResult translation =
+    instructionTranslation(
+      UINT32_C(0x82000000),
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+
+  const EEInstructionCacheFetchResult result =
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      translation);
+
+  REQUIRE(
+    result.outcome ==
+    EEInstructionCacheFetchOutcome::PhysicalBusError);
+  REQUIRE(
+    result.source ==
+    EEInstructionCacheFetchSource::Refilled);
+  REQUIRE_FALSE(memorySystem.instructionCacheLine(0, 0).valid);
+  REQUIRE_FALSE(memorySystem.instructionCacheLine(0, 1).valid);
+}
+
+TEST_CASE("EE instruction cache prefers invalid ways then follows LRF")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE);
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x80000100);
+  constexpr std::uint32_t physicalAddresses[] = {
+    UINT32_C(0x00000100),
+    UINT32_C(0x00001100),
+    UINT32_C(0x00002100),
+    UINT32_C(0x00003100)
+  };
+
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    system.eeBus().write32(
+      physicalAddresses[index],
+      static_cast<std::uint32_t>(index + 1));
+    const EEInstructionCacheFetchResult result =
+      EEMemorySystemTestAccess::fetchInstruction(
+        &memorySystem,
+        system.eeBus(),
+        instructionTranslation(
+          virtualAddress,
+          physicalAddresses[index]));
+    REQUIRE(
+      result.source ==
+      EEInstructionCacheFetchSource::Refilled);
+    REQUIRE(result.way == index % 2);
+    REQUIRE(
+      result.instruction ==
+      static_cast<std::uint32_t>(index + 1));
+  }
+
+  const EECacheLine &way0 =
+    memorySystem.instructionCacheLine(4, 0);
+  const EECacheLine &way1 =
+    memorySystem.instructionCacheLine(4, 1);
+  REQUIRE(way0.physicalTag == UINT32_C(0x2000));
+  REQUIRE(way1.physicalTag == UINT32_C(0x3000));
+  REQUIRE_FALSE(way0.leastRecentlyFilled);
+  REQUIRE_FALSE(way1.leastRecentlyFilled);
+}
+
+TEST_CASE("EE instruction cache keeps virtual aliases incoherent")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE);
+  const EEAddressTranslationResult firstAlias =
+    instructionTranslation(0x00400100, 0x100);
+  const EEAddressTranslationResult secondAlias =
+    instructionTranslation(0x00401100, 0x100);
+
+  system.eeBus().write32(0x100, UINT32_C(0x11111111));
+  REQUIRE(
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      firstAlias).instruction ==
+    UINT32_C(0x11111111));
+
+  system.eeBus().write32(0x100, UINT32_C(0x22222222));
+  REQUIRE(
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      secondAlias).instruction ==
+    UINT32_C(0x22222222));
+  REQUIRE(
+    EEMemorySystemTestAccess::fetchInstruction(
+      &memorySystem,
+      system.eeBus(),
+      firstAlias).instruction ==
+    UINT32_C(0x11111111));
 }
 
 TEST_CASE("EE functional scratchpad policy grants CPU and DMAC access")

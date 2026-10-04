@@ -190,6 +190,20 @@ namespace
     }
     return value;
   }
+
+  std::uint32_t loadCacheWord(
+    const EECacheLine &line,
+    std::size_t offset)
+  {
+    return
+      line.data[offset] |
+      (static_cast<std::uint32_t>(
+        line.data[offset + 1]) << 8) |
+      (static_cast<std::uint32_t>(
+        line.data[offset + 2]) << 16) |
+      (static_cast<std::uint32_t>(
+        line.data[offset + 3]) << 24);
+  }
 }
 
 bool EETLBPage::valid() const
@@ -1025,6 +1039,99 @@ EECacheLineTransferResult EEMemorySystem::writeBackDataCacheLine(
     }
     ++result.quadwordsTransferred;
   }
+  return result;
+}
+
+std::size_t EEMemorySystem::instructionCacheVictim(
+  std::size_t set) const
+{
+  const auto &ways = instructionCache[set];
+  if (!ways[0].valid)
+  {
+    return 0;
+  }
+  if (!ways[1].valid)
+  {
+    return 1;
+  }
+  return
+    ways[0].leastRecentlyFilled ^
+      ways[1].leastRecentlyFilled
+    ? 1
+    : 0;
+}
+
+EEInstructionCacheFetchResult EEMemorySystem::fetchInstruction(
+  const EEBus &bus,
+  const EEAddressTranslationResult &translation)
+{
+  if (translation.outcome !=
+        EEAddressTranslationOutcome::Translated ||
+      translation.route != EEAddressRoute::MainBus ||
+      (translation.physicalAddress & 3) != 0)
+  {
+    throw std::invalid_argument(
+      "EE cache fetch requires an aligned main-bus translation.");
+  }
+
+  EEInstructionCacheFetchResult result;
+  if (translation.cacheRoute !=
+        EECacheRoute::CachedNoncoherent ||
+      (cop0Config &
+       EECOP0Config::INSTRUCTION_CACHE_ENABLE) == 0)
+  {
+    if (bus.readInstruction32(
+          translation.physicalAddress,
+          &result.instruction))
+    {
+      result.outcome =
+        EEInstructionCacheFetchOutcome::Completed;
+    }
+    return result;
+  }
+
+  result.set = static_cast<std::uint8_t>(
+    (translation.virtualAddress >> 6) &
+    (INSTRUCTION_CACHE_SET_COUNT - 1));
+  const std::uint32_t physicalTag =
+    translation.physicalAddress &
+    EECacheLine::PHYSICAL_TAG_MASK;
+  for (std::size_t way = 0;
+       way < CACHE_WAY_COUNT;
+       ++way)
+  {
+    const EECacheLine &line = instructionCache[result.set][way];
+    if (line.valid && line.physicalTag == physicalTag)
+    {
+      result.outcome =
+        EEInstructionCacheFetchOutcome::Completed;
+      result.source = EEInstructionCacheFetchSource::Hit;
+      result.way = static_cast<std::uint8_t>(way);
+      result.instruction = loadCacheWord(
+        line,
+        translation.physicalAddress & (CACHE_LINE_SIZE - 1));
+      return result;
+    }
+  }
+
+  result.source = EEInstructionCacheFetchSource::Refilled;
+  const std::size_t victim = instructionCacheVictim(result.set);
+  result.way = static_cast<std::uint8_t>(victim);
+  const EECacheLineFillResult fill =
+    fillCacheLine(bus, translation.physicalAddress);
+  if (fill.outcome != EECacheLineTransferOutcome::Completed)
+  {
+    return result;
+  }
+
+  EECacheLine candidate = fill.line;
+  candidate.leastRecentlyFilled =
+    !instructionCache[result.set][victim].leastRecentlyFilled;
+  instructionCache[result.set][victim] = candidate;
+  result.outcome = EEInstructionCacheFetchOutcome::Completed;
+  result.instruction = loadCacheWord(
+    instructionCache[result.set][victim],
+    translation.physicalAddress & (CACHE_LINE_SIZE - 1));
   return result;
 }
 

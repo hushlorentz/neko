@@ -1577,10 +1577,10 @@ EEInstructionFetchResult EECore::fetchInstruction()
       address);
   }
 
-  std::uint32_t instruction = 0;
-  if (!attachedBus().readInstruction32(
-        translation.physicalAddress,
-        &instruction))
+  const EEInstructionCacheFetchResult fetch =
+    memorySystem.fetchInstruction(attachedBus(), translation);
+  if (fetch.outcome !=
+      EEInstructionCacheFetchOutcome::Completed)
   {
     return raiseFetchException(
       EEException::InstructionBusError,
@@ -1588,7 +1588,7 @@ EEInstructionFetchResult EECore::fetchInstruction()
   }
 
   pc += 4;
-  return {true, address, instruction};
+  return {true, address, fetch.instruction};
 }
 
 EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
@@ -1615,10 +1615,10 @@ EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
     };
   }
 
-  std::uint32_t instruction = 0;
-  if (!attachedBus().readInstruction32(
-        translation.physicalAddress,
-        &instruction))
+  const EEInstructionCacheFetchResult fetch =
+    memorySystem.fetchInstruction(attachedBus(), translation);
+  if (fetch.outcome !=
+      EEInstructionCacheFetchOutcome::Completed)
   {
     return {
       address,
@@ -1629,7 +1629,7 @@ EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
 
   return {
     address,
-    instruction,
+    fetch.instruction,
     FrontEndFetchFailure::None
   };
 }
