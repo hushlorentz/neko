@@ -1806,7 +1806,7 @@ creating parallel ownership.
       two-way instruction cache and 8 KiB two-way data cache with 64-byte
       lines, virtual indices, physical tags, documented valid/dirty/LRF/lock
       metadata, checked inspection helpers, and reset-invalid behavior.
-- [ ] Establish focused typed cache access results and internal line
+- [x] Establish focused typed cache access results and internal line
       fill/writeback helpers without creating a second memory owner. Keep
       functional accesses synchronous and allocation-free for now, preserve
       the existing precise-fault selection boundary, and leave refill duration,

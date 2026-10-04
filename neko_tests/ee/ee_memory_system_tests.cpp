@@ -3,6 +3,33 @@
 
 #include "catch.hpp"
 #include "ee_memory_system.hpp"
+#include "neko_system.hpp"
+
+struct EEMemorySystemTestAccess
+{
+  static std::array<std::uint8_t, 4> cacheLineRefillOrder(
+    std::uint32_t physicalAddress)
+  {
+    return EEMemorySystem::cacheLineRefillOrder(physicalAddress);
+  }
+
+  static EECacheLineFillResult fillCacheLine(
+    const EEMemorySystem &memorySystem,
+    const EEBus &bus,
+    std::uint32_t physicalAddress)
+  {
+    return memorySystem.fillCacheLine(bus, physicalAddress);
+  }
+
+  static EECacheLineTransferResult writeBackDataCacheLine(
+    const EEMemorySystem &memorySystem,
+    EEBus *bus,
+    std::size_t set,
+    const EECacheLine &line)
+  {
+    return memorySystem.writeBackDataCacheLine(bus, set, line);
+  }
+};
 
 static_assert(
   std::is_trivially_copyable<
@@ -12,6 +39,14 @@ static_assert(
   std::is_trivially_copyable<
     EEAddressTranslationResult>::value,
   "EE translation result must remain trivially copyable.");
+static_assert(
+  std::is_trivially_copyable<
+    EECacheLineTransferResult>::value,
+  "EE cache-line transfer results must remain trivially copyable.");
+static_assert(
+  std::is_trivially_copyable<
+    EECacheLineFillResult>::value,
+  "EE cache-line fill results must remain trivially copyable.");
 static_assert(
   EEMemorySystem::ITLB_ENTRY_COUNT == 2,
   "The EE ITLB capacity must remain architectural.");
@@ -262,6 +297,182 @@ TEST_CASE("EE cache inspection rejects invalid sets and ways")
     memorySystem.dataCacheLine(
       0,
       EEMemorySystem::CACHE_WAY_COUNT),
+    std::out_of_range);
+}
+
+TEST_CASE("EE cache refill order starts with the missed quadword")
+{
+  REQUIRE(
+    EEMemorySystemTestAccess::cacheLineRefillOrder(0x1000) ==
+    std::array<std::uint8_t, 4>{0, 1, 2, 3});
+  REQUIRE(
+    EEMemorySystemTestAccess::cacheLineRefillOrder(0x1010) ==
+    std::array<std::uint8_t, 4>{1, 2, 3, 0});
+  REQUIRE(
+    EEMemorySystemTestAccess::cacheLineRefillOrder(0x1020) ==
+    std::array<std::uint8_t, 4>{2, 3, 0, 1});
+  REQUIRE(
+    EEMemorySystemTestAccess::cacheLineRefillOrder(0x1030) ==
+    std::array<std::uint8_t, 4>{3, 0, 1, 2});
+}
+
+TEST_CASE("EE cache line fill returns a complete candidate")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    system.eeBus().write8(
+      UINT32_C(0x1240) + offset,
+      static_cast<std::uint8_t>(offset ^ 0xa5));
+  }
+
+  const EECacheLineFillResult result =
+    EEMemorySystemTestAccess::fillCacheLine(
+      memorySystem,
+      system.eeBus(),
+      UINT32_C(0x126c));
+
+  REQUIRE(result.outcome == EECacheLineTransferOutcome::Completed);
+  REQUIRE(result.lineBaseAddress == UINT32_C(0x1240));
+  REQUIRE(result.firstQuadword == 2);
+  REQUIRE(result.quadwordsTransferred == 4);
+  REQUIRE(result.line.physicalTag == UINT32_C(0x1000));
+  REQUIRE(result.line.valid);
+  REQUIRE_FALSE(result.line.dirty);
+  REQUIRE_FALSE(result.line.leastRecentlyFilled);
+  REQUIRE_FALSE(result.line.locked);
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    REQUIRE(
+      result.line.data[offset] ==
+      static_cast<std::uint8_t>(offset ^ 0xa5));
+  }
+}
+
+TEST_CASE("EE cache line fill reports physical bus errors atomically")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+
+  const EECacheLineFillResult result =
+    EEMemorySystemTestAccess::fillCacheLine(
+      memorySystem,
+      system.eeBus(),
+      EEMemoryMap::MAIN_MEMORY_SIZE);
+
+  REQUIRE(
+    result.outcome ==
+    EECacheLineTransferOutcome::PhysicalBusError);
+  REQUIRE(
+    result.lineBaseAddress ==
+    EEMemoryMap::MAIN_MEMORY_SIZE);
+  REQUIRE(result.firstQuadword == 0);
+  REQUIRE(result.quadwordsTransferred == 0);
+  REQUIRE_FALSE(result.line.valid);
+  for (const std::uint8_t byte : result.line.data)
+  {
+    REQUIRE(byte == 0);
+  }
+}
+
+TEST_CASE("EE dirty cache line writeback uses its physical tag and set")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  EECacheLine line;
+  line.physicalTag = UINT32_C(0x3000);
+  line.valid = true;
+  line.dirty = true;
+  line.leastRecentlyFilled = true;
+  line.locked = true;
+  for (std::size_t offset = 0; offset < line.data.size(); ++offset)
+  {
+    line.data[offset] =
+      static_cast<std::uint8_t>((offset * 3) ^ 0x5a);
+  }
+
+  const EECacheLineTransferResult result =
+    EEMemorySystemTestAccess::writeBackDataCacheLine(
+      memorySystem,
+      &system.eeBus(),
+      5,
+      line);
+
+  REQUIRE(result.outcome == EECacheLineTransferOutcome::Completed);
+  REQUIRE(result.lineBaseAddress == UINT32_C(0x3140));
+  REQUIRE(result.firstQuadword == 0);
+  REQUIRE(result.quadwordsTransferred == 4);
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    std::uint8_t byte = 0;
+    REQUIRE(
+      system.eeBus().readData8(
+        UINT32_C(0x3140) + offset,
+        &byte));
+    REQUIRE(
+      byte ==
+      static_cast<std::uint8_t>((offset * 3) ^ 0x5a));
+  }
+  REQUIRE(line.valid);
+  REQUIRE(line.dirty);
+  REQUIRE(line.leastRecentlyFilled);
+  REQUIRE(line.locked);
+}
+
+TEST_CASE("EE cache writeback separates clean and invalid state errors")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  EECacheLine line;
+
+  EECacheLineTransferResult result =
+    EEMemorySystemTestAccess::writeBackDataCacheLine(
+      memorySystem,
+      &system.eeBus(),
+      0,
+      line);
+  REQUIRE(result.outcome == EECacheLineTransferOutcome::Completed);
+  REQUIRE(result.quadwordsTransferred == 0);
+
+  line.valid = true;
+  line.dirty = true;
+  line.physicalTag = 1;
+  result =
+    EEMemorySystemTestAccess::writeBackDataCacheLine(
+      memorySystem,
+      &system.eeBus(),
+      0,
+      line);
+  REQUIRE(
+    result.outcome ==
+    EECacheLineTransferOutcome::InvalidLineState);
+
+  line.physicalTag = EEMemoryMap::MAIN_MEMORY_SIZE;
+  result =
+    EEMemorySystemTestAccess::writeBackDataCacheLine(
+      memorySystem,
+      &system.eeBus(),
+      0,
+      line);
+  REQUIRE(
+    result.outcome ==
+    EECacheLineTransferOutcome::PhysicalBusError);
+  REQUIRE(result.quadwordsTransferred == 0);
+
+  REQUIRE_THROWS_AS(
+    EEMemorySystemTestAccess::writeBackDataCacheLine(
+      memorySystem,
+      nullptr,
+      0,
+      line),
+    std::invalid_argument);
+  REQUIRE_THROWS_AS(
+    EEMemorySystemTestAccess::writeBackDataCacheLine(
+      memorySystem,
+      &system.eeBus(),
+      EEMemorySystem::DATA_CACHE_SET_COUNT,
+      line),
     std::out_of_range);
 }
 

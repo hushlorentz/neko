@@ -2,6 +2,8 @@
 
 #include <stdexcept>
 
+#include "ee_bus.hpp"
+
 namespace
 {
   bool supportedPageMask(std::uint32_t value)
@@ -152,6 +154,41 @@ namespace
         static_cast<std::uint8_t>(value >> (index * 8)));
     }
     return true;
+  }
+
+  void storeCacheQuadword(
+    EECacheLine *line,
+    std::uint8_t quadwordIndex,
+    const EEQuadword &value)
+  {
+    const std::size_t offset = quadwordIndex * 16;
+    for (std::size_t index = 0; index < 8; ++index)
+    {
+      line->data[offset + index] =
+        static_cast<std::uint8_t>(value.low >> (index * 8));
+      line->data[offset + 8 + index] =
+        static_cast<std::uint8_t>(value.high >> (index * 8));
+    }
+  }
+
+  EEQuadword loadCacheQuadword(
+    const EECacheLine &line,
+    std::uint8_t quadwordIndex)
+  {
+    const std::size_t offset = quadwordIndex * 16;
+    EEQuadword value = {};
+    for (std::size_t index = 0; index < 8; ++index)
+    {
+      value.low |=
+        static_cast<std::uint64_t>(
+          line.data[offset + index]) <<
+        (index * 8);
+      value.high |=
+        static_cast<std::uint64_t>(
+          line.data[offset + 8 + index]) <<
+        (index * 8);
+    }
+    return value;
   }
 }
 
@@ -880,6 +917,115 @@ const EECacheLine &EEMemorySystem::dataCacheLine(
       "EE data-cache line index is out of range.");
   }
   return dataCache[set][way];
+}
+
+std::array<std::uint8_t, 4>
+EEMemorySystem::cacheLineRefillOrder(
+  std::uint32_t physicalAddress)
+{
+  const std::uint8_t first =
+    static_cast<std::uint8_t>((physicalAddress >> 4) & 3);
+  return {
+    first,
+    static_cast<std::uint8_t>((first + 1) & 3),
+    static_cast<std::uint8_t>((first + 2) & 3),
+    static_cast<std::uint8_t>((first + 3) & 3)
+  };
+}
+
+EECacheLineFillResult EEMemorySystem::fillCacheLine(
+  const EEBus &bus,
+  std::uint32_t physicalAddress) const
+{
+  EECacheLineFillResult result;
+  result.lineBaseAddress =
+    physicalAddress &
+    ~static_cast<std::uint32_t>(CACHE_LINE_SIZE - 1);
+  result.firstQuadword =
+    static_cast<std::uint8_t>((physicalAddress >> 4) & 3);
+  if (!bus.isMainMemoryRange(
+        result.lineBaseAddress,
+        CACHE_LINE_SIZE))
+  {
+    return result;
+  }
+
+  EECacheLine candidate;
+  for (const std::uint8_t quadwordIndex :
+       cacheLineRefillOrder(physicalAddress))
+  {
+    EEQuadword value = {};
+    if (!bus.readData128(
+          result.lineBaseAddress + quadwordIndex * 16,
+          &value))
+    {
+      return result;
+    }
+    storeCacheQuadword(&candidate, quadwordIndex, value);
+    ++result.quadwordsTransferred;
+  }
+
+  candidate.physicalTag =
+    result.lineBaseAddress & EECacheLine::PHYSICAL_TAG_MASK;
+  candidate.valid = true;
+  result.outcome = EECacheLineTransferOutcome::Completed;
+  result.line = candidate;
+  return result;
+}
+
+EECacheLineTransferResult EEMemorySystem::writeBackDataCacheLine(
+  EEBus *bus,
+  std::size_t set,
+  const EECacheLine &line) const
+{
+  if (bus == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE cache writeback requires a physical bus.");
+  }
+  if (set >= DATA_CACHE_SET_COUNT)
+  {
+    throw std::out_of_range(
+      "EE data-cache writeback set is out of range.");
+  }
+
+  EECacheLineTransferResult result;
+  result.outcome = EECacheLineTransferOutcome::Completed;
+  result.lineBaseAddress =
+    line.physicalTag |
+    static_cast<std::uint32_t>(set * CACHE_LINE_SIZE);
+  if (!line.valid || !line.dirty)
+  {
+    return result;
+  }
+  if ((line.physicalTag & ~EECacheLine::PHYSICAL_TAG_MASK) != 0)
+  {
+    result.outcome = EECacheLineTransferOutcome::InvalidLineState;
+    return result;
+  }
+  if (!bus->isMainMemoryRange(
+        result.lineBaseAddress,
+        CACHE_LINE_SIZE))
+  {
+    result.outcome = EECacheLineTransferOutcome::PhysicalBusError;
+    return result;
+  }
+
+  for (std::uint8_t quadwordIndex = 0;
+       quadwordIndex < 4;
+       ++quadwordIndex)
+  {
+    if (!bus->writeData128(
+          result.lineBaseAddress + quadwordIndex * 16,
+          loadCacheQuadword(line, quadwordIndex)))
+    {
+      result.outcome =
+        EECacheLineTransferOutcome::PhysicalBusError;
+      return result;
+    }
+    ++result.quadwordsTransferred;
+  }
+  return result;
 }
 
 std::uint32_t EEMemorySystem::cop0Register(

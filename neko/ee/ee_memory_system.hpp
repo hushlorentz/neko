@@ -8,6 +8,9 @@
 #include "ee_cop0.hpp"
 #include "ee_types.hpp"
 
+class EEBus;
+struct EEMemorySystemTestAccess;
+
 struct EETLBPage
 {
   std::uint32_t value = 0;
@@ -131,6 +134,8 @@ struct EEAddressTranslationResult
 struct EECacheLine
 {
   static constexpr std::size_t DATA_SIZE = 64;
+  static constexpr std::uint32_t PHYSICAL_TAG_MASK =
+    UINT32_C(0xfffff000);
 
   std::array<std::uint8_t, DATA_SIZE> data = {};
   std::uint32_t physicalTag = 0;
@@ -138,6 +143,32 @@ struct EECacheLine
   bool dirty = false;
   bool leastRecentlyFilled = false;
   bool locked = false;
+};
+
+enum class EECacheLineTransferOutcome : std::uint8_t
+{
+  Completed,
+  PhysicalBusError,
+  InvalidLineState
+};
+
+struct EECacheLineTransferResult
+{
+  EECacheLineTransferOutcome outcome =
+    EECacheLineTransferOutcome::PhysicalBusError;
+  std::uint32_t lineBaseAddress = 0;
+  std::uint8_t firstQuadword = 0;
+  std::uint8_t quadwordsTransferred = 0;
+};
+
+struct EECacheLineFillResult
+{
+  EECacheLineTransferOutcome outcome =
+    EECacheLineTransferOutcome::PhysicalBusError;
+  EECacheLine line;
+  std::uint32_t lineBaseAddress = 0;
+  std::uint8_t firstQuadword = 0;
+  std::uint8_t quadwordsTransferred = 0;
 };
 
 class EEMemorySystem final
@@ -236,6 +267,7 @@ class EEMemorySystem final
   private:
     friend class EECore;
     friend class NekoSaveStateCodec;
+    friend struct EEMemorySystemTestAccess;
 
     struct TLBAcceleratorEntry
     {
@@ -259,6 +291,15 @@ class EEMemorySystem final
     void writeTLBEntry(std::uint32_t index);
     bool scratchpadAccessGranted(
       EEScratchpadAccessClient client) const;
+    static std::array<std::uint8_t, 4> cacheLineRefillOrder(
+      std::uint32_t physicalAddress);
+    EECacheLineFillResult fillCacheLine(
+      const EEBus &bus,
+      std::uint32_t physicalAddress) const;
+    EECacheLineTransferResult writeBackDataCacheLine(
+      EEBus *bus,
+      std::size_t set,
+      const EECacheLine &line) const;
 
     std::uint32_t cop0Index = 0;
     std::uint32_t cop0Random = EECOP0Random::RESET;
