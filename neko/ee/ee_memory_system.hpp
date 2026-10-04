@@ -245,6 +245,51 @@ struct EEDataCacheStoreResult
   std::uint8_t way = 0xff;
 };
 
+enum class EECacheOperation : std::uint8_t
+{
+  InstructionIndexLoadTag = 0x00,
+  InstructionIndexLoadData = 0x01,
+  InstructionIndexStoreTag = 0x04,
+  InstructionIndexStoreData = 0x05,
+  InstructionIndexInvalidate = 0x07,
+  InstructionHitInvalidate = 0x0b,
+  InstructionFill = 0x0e,
+  DataIndexLoadTag = 0x10,
+  DataIndexLoadData = 0x11,
+  DataIndexStoreTag = 0x12,
+  DataIndexStoreData = 0x13,
+  DataIndexWriteBackInvalidate = 0x14,
+  DataIndexInvalidate = 0x16,
+  DataHitWriteBackInvalidate = 0x18,
+  DataHitInvalidate = 0x1a,
+  DataHitWriteBack = 0x1c
+};
+
+struct EECacheMaintenanceRequest
+{
+  EECacheOperation operation =
+    EECacheOperation::InstructionIndexLoadTag;
+  std::uint32_t virtualAddress = 0;
+  EEAddressTranslationContext translationContext;
+};
+
+enum class EECacheMaintenanceOutcome : std::uint8_t
+{
+  Completed,
+  AddressTranslationFailure,
+  PhysicalBusError,
+  UnsupportedOperation
+};
+
+struct EECacheMaintenanceResult
+{
+  EECacheMaintenanceOutcome outcome =
+    EECacheMaintenanceOutcome::UnsupportedOperation;
+  EEAddressTranslationResult translation;
+  bool cacheHitStatusValid = false;
+  bool cacheHit = false;
+};
+
 class EEMemorySystem final
 {
   public:
@@ -386,6 +431,9 @@ class EEMemorySystem final
       const EEAddressTranslationResult &translation,
       const std::array<std::uint8_t, 16> &data,
       std::size_t width);
+    EECacheMaintenanceResult maintainCache(
+      EEBus *bus,
+      const EECacheMaintenanceRequest &request);
     std::size_t instructionCacheVictim(std::size_t set) const;
     bool dataCacheVictim(
       std::size_t set,

@@ -2959,6 +2959,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::WriteRandomTLBEntry:
     case EEOperation::ProbeTLB:
       return executeCOP0TLBOperation(instruction, address);
+    case EEOperation::CacheMaintenance:
+      return executeCacheMaintenance(instruction, address);
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -5694,6 +5696,78 @@ EEInstructionExecutionOutcome EECore::executeCOP0TLBOperation(
         "EE COP0 TLB handler received an incompatible operation.");
   }
   return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeCacheMaintenance(
+  const EEInstruction &instruction,
+  std::uint32_t address)
+{
+  if (instruction.operation !=
+      EEOperation::CacheMaintenance)
+  {
+    throw std::logic_error(
+      "EE cache-maintenance handler received an incompatible "
+      "operation.");
+  }
+  if (!requireCOP0Usable(address, instruction.raw))
+  {
+    return EEInstructionExecutionOutcome::Faulted;
+  }
+
+  const EECacheMaintenanceResult result =
+    memorySystem.maintainCache(
+      bus,
+      cacheMaintenanceRequest(instruction));
+
+  if (result.outcome ==
+        EECacheMaintenanceOutcome::Completed &&
+      result.cacheHitStatusValid)
+  {
+    if (result.cacheHit)
+    {
+      cop0Status |= EECOP0Status::CACHE_HIT;
+    }
+    else
+    {
+      cop0Status &= ~EECOP0Status::CACHE_HIT;
+    }
+  }
+
+  switch (result.outcome)
+  {
+    case EECacheMaintenanceOutcome::Completed:
+      return EEInstructionExecutionOutcome::Completed;
+    case EECacheMaintenanceOutcome::UnsupportedOperation:
+      haltUndefinedOperation(address, instruction.raw);
+      return EEInstructionExecutionOutcome::Halted;
+    case EECacheMaintenanceOutcome::AddressTranslationFailure:
+    case EECacheMaintenanceOutcome::PhysicalBusError:
+      throw std::logic_error(
+        "EE cache maintenance returned an unimplemented "
+        "failure outcome.");
+  }
+  throw std::logic_error(
+    "EE cache maintenance returned an invalid outcome.");
+}
+
+EECacheMaintenanceRequest EECore::cacheMaintenanceRequest(
+  const EEInstruction &instruction) const
+{
+  if (instruction.operation !=
+      EEOperation::CacheMaintenance)
+  {
+    throw std::logic_error(
+      "EE cache-maintenance request requires a CACHE "
+      "instruction.");
+  }
+  return {
+    static_cast<EECacheOperation>(
+      instruction.targetRegister),
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate)),
+    addressTranslationContext()
+  };
 }
 
 EEInstructionExecutionOutcome EECore::executeCOP1RegisterMove(

@@ -1270,6 +1270,22 @@ EECacheLineTransferResult EEMemorySystem::writeBackDataCacheLine(
   return result;
 }
 
+EECacheMaintenanceResult EEMemorySystem::maintainCache(
+  EEBus *bus,
+  const EECacheMaintenanceRequest &request)
+{
+  if (bus == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE cache maintenance requires a bus.");
+  }
+
+  EECacheMaintenanceResult result;
+  result.translation.virtualAddress =
+    request.virtualAddress;
+  return result;
+}
+
 std::size_t EEMemorySystem::instructionCacheVictim(
   std::size_t set) const
 {

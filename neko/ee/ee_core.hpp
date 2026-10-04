@@ -1416,6 +1416,11 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeCOP0TLBOperation(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeCacheMaintenance(
+      const EEInstruction &instruction,
+      std::uint32_t address);
+    EECacheMaintenanceRequest cacheMaintenanceRequest(
+      const EEInstruction &instruction) const;
     EEInstructionExecutionOutcome executeCOP1Divider(
       const EEInstruction &instruction,
       std::uint32_t address);

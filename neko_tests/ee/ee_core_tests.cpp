@@ -784,6 +784,13 @@ struct EECoreTestAccess
     return core->executeInstruction(instruction, 0);
   }
 
+  static EECacheMaintenanceRequest cacheMaintenanceRequest(
+    const EECore &core,
+    const EEInstruction &instruction)
+  {
+    return core.cacheMaintenanceRequest(instruction);
+  }
+
   static EEInstructionExecutionOutcome executeWordShift(
     EECore *core,
     const EEInstruction &instruction)
@@ -1740,6 +1747,38 @@ TEST_CASE("EE instruction execution reports explicit outcomes")
   }
 }
 
+TEST_CASE("EE CACHE dispatch preserves the typed request contract")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE |
+      EECOP0Status::COP0_USABLE);
+  core.setGeneralRegister(2, {UINT32_C(0x00001000), 0});
+  const EEInstruction instruction =
+    decodeEEInstruction(
+      (UINT32_C(0x2f) << 26) |
+      (UINT32_C(2) << 21) |
+      (UINT32_C(0x14) << 16) |
+      UINT32_C(0xffc0));
+
+  const EECacheMaintenanceRequest request =
+    EECoreTestAccess::cacheMaintenanceRequest(
+      core,
+      instruction);
+
+  REQUIRE(
+    request.operation ==
+    EECacheOperation::DataIndexWriteBackInvalidate);
+  REQUIRE(request.virtualAddress == UINT32_C(0x00000fc0));
+  REQUIRE(
+    request.translationContext.privilege ==
+    EEPrivilegeMode::User);
+  REQUIRE_FALSE(request.translationContext.exceptionLevel);
+  REQUIRE_FALSE(request.translationContext.errorLevel);
+}
+
 TEST_CASE("EE acceptance records preserve issue-group order")
 {
   EEAcceptanceRecords records;
@@ -2116,7 +2155,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     NekoSystem system;
     EECore &core = system.eeCore();
     system.eeBus().write32(0, UINT32_C(0x24020007));
-    system.eeBus().write32(4, UINT32_C(0xbc000000));
+    system.eeBus().write32(4, UINT32_C(0x40003800));
     core.startExecution(0);
 
     const EEIssueGroupExecutionResult result =
@@ -2141,7 +2180,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
       core.stopReason() ==
       EEStopReason::UnsupportedInstruction);
     REQUIRE(core.programCounter() == 4);
-    REQUIRE(core.rejectedInstruction() == 0xbc000000);
+    REQUIRE(core.rejectedInstruction() == 0x40003800);
     REQUIRE(core.lastInstructionAddress() == 0);
   }
 
@@ -4168,7 +4207,7 @@ TEST_CASE("EE Core scheduled execution")
 
   SECTION("Deferred instruction families stop explicitly")
   {
-    bus.write32(0, UINT32_C(0xbc000000));
+    bus.write32(0, UINT32_C(0x40003800));
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -4181,13 +4220,13 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(
       core.stopReason() ==
       EEStopReason::UnsupportedInstruction);
-    REQUIRE(core.rejectedInstruction() == 0xbc000000);
+    REQUIRE(core.rejectedInstruction() == 0x40003800);
   }
 
   SECTION("A synchronous stop does not replace prior acceptance")
   {
     bus.write32(0, 0);
-    bus.write32(4, UINT32_C(0xbc000000));
+    bus.write32(4, UINT32_C(0x40003800));
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -4206,7 +4245,7 @@ TEST_CASE("EE Core scheduled execution")
       EEStopReason::UnsupportedInstruction);
     REQUIRE(core.lastInstructionAddress() == 0);
     REQUIRE(core.lastInstruction().operation == EEOperation::Nop);
-    REQUIRE(core.rejectedInstruction() == 0xbc000000);
+    REQUIRE(core.rejectedInstruction() == 0x40003800);
   }
 
   SECTION("A synchronous exception produces no acceptance")

@@ -104,6 +104,39 @@ TEST_CASE("EE instruction field decoding")
     REQUIRE(instruction.immediate == 0xfffc);
   }
 
+  SECTION("CACHE decodes every supported operation")
+  {
+    for (const std::uint8_t operation : {
+           UINT8_C(0x00), UINT8_C(0x01),
+           UINT8_C(0x04), UINT8_C(0x05),
+           UINT8_C(0x07), UINT8_C(0x0b),
+           UINT8_C(0x0e), UINT8_C(0x10),
+           UINT8_C(0x11), UINT8_C(0x12),
+           UINT8_C(0x13), UINT8_C(0x14),
+           UINT8_C(0x16), UINT8_C(0x18),
+           UINT8_C(0x1a), UINT8_C(0x1c)})
+    {
+      const EEInstruction instruction =
+        decodeEEInstruction(
+          immediateInstruction(
+            0x2f,
+            3,
+            operation,
+            0xffc0));
+
+      REQUIRE(
+        instruction.operation ==
+        EEOperation::CacheMaintenance);
+      REQUIRE(instruction.sourceRegister == 3);
+      REQUIRE(instruction.targetRegister == operation);
+      REQUIRE(instruction.immediate == 0xffc0);
+      const EEInstructionDependencies dependencies =
+        eeInstructionDependencies(instruction);
+      REQUIRE(dependencies.gprReads == (UINT32_C(1) << 3));
+      REQUIRE(dependencies.gprWrites == 0);
+    }
+  }
+
   SECTION("SYNC stype selects load-store or pipeline synchronization")
   {
     for (std::uint8_t stype = 0; stype < 16; ++stype)
@@ -213,6 +246,13 @@ TEST_CASE("EE instruction routing classification")
       0,
       physical(EEPhysicalPipeline::LoadStore));
     requireRouting(
+      EEOperation::CacheMaintenance,
+      EEInstructionCategory::LoadStore,
+      false,
+      true,
+      0,
+      physical(EEPhysicalPipeline::LoadStore));
+    requireRouting(
       EEOperation::ExceptionReturn,
       EEInstructionCategory::ExceptionReturn,
       false,
@@ -309,7 +349,7 @@ TEST_CASE("EE instruction routing classification")
 
   SECTION("Every implemented operation has a complete classification")
   {
-    for (std::uint8_t value = 0;
+    for (std::size_t value = 0;
          value < EE_OPERATION_COUNT;
          ++value)
     {
@@ -386,6 +426,11 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::ProbeTLB:
           return ExpectedExecutionClassification{
             EEExecutionFamily::COP0TLBOperation,
+            EEExecutionDispatch::Immediate
+          };
+        case EEOperation::CacheMaintenance:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::CacheMaintenance,
             EEExecutionDispatch::Immediate
           };
         case EEOperation::MoveWordFromCOP1:
@@ -965,7 +1010,7 @@ TEST_CASE("Every EE operation has complete shared metadata")
       .cop1ResultDestination ==
     EECOP1ResultDestination::Condition);
 
-  for (std::uint8_t value = 0;
+  for (std::size_t value = 0;
        value < EE_OPERATION_COUNT;
        ++value)
   {
@@ -992,7 +1037,8 @@ TEST_CASE("Every EE operation has complete shared metadata")
       metadata.executionDispatch ==
       expectedExecution.dispatch);
     if (metadata.routing.category ==
-        EEInstructionCategory::LoadStore)
+          EEInstructionCategory::LoadStore &&
+        operation != EEOperation::CacheMaintenance)
     {
       REQUIRE(
         metadata.memoryAccess != EEMemoryAccess::None);
@@ -1670,11 +1716,63 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
   SECTION("Deferred valid instruction families are rejected explicitly")
   {
     REQUIRE_THROWS_WITH(
-      decodeEEInstruction(UINT32_C(0xbc000000)),
-      "Unsupported EE instruction encoding.");
-    REQUIRE_THROWS_WITH(
       decodeEEInstruction(UINT32_C(0x40003800)),
       "Unsupported EE instruction encoding.");
+  }
+
+  SECTION("CACHE distinguishes branch-target and reserved operations")
+  {
+    for (const std::uint8_t operation :
+         {UINT8_C(0x02), UINT8_C(0x06),
+          UINT8_C(0x0a), UINT8_C(0x0c)})
+    {
+      REQUIRE_THROWS_WITH(
+        decodeEEInstruction(
+          immediateInstruction(
+            0x2f,
+            1,
+            operation,
+            0)),
+        "Unsupported EE instruction encoding.");
+    }
+
+    for (std::uint8_t operation = 0;
+         operation < 32;
+         ++operation)
+    {
+      switch (operation)
+      {
+        case 0x00:
+        case 0x01:
+        case 0x02:
+        case 0x04:
+        case 0x05:
+        case 0x06:
+        case 0x07:
+        case 0x0a:
+        case 0x0b:
+        case 0x0c:
+        case 0x0e:
+        case 0x10:
+        case 0x11:
+        case 0x12:
+        case 0x13:
+        case 0x14:
+        case 0x16:
+        case 0x18:
+        case 0x1a:
+        case 0x1c:
+          continue;
+      }
+      REQUIRE_THROWS_WITH(
+        decodeEEInstruction(
+          immediateInstruction(
+            0x2f,
+            1,
+            operation,
+            0)),
+        "Reserved EE instruction encoding.");
+    }
   }
 
   SECTION("Reserved SPECIAL functions are distinguished")

@@ -61,6 +61,14 @@ struct EEMemorySystemTestAccess
       width);
   }
 
+  static EECacheMaintenanceResult maintainCache(
+    EEMemorySystem *memorySystem,
+    EEBus *bus,
+    const EECacheMaintenanceRequest &request)
+  {
+    return memorySystem->maintainCache(bus, request);
+  }
+
   static void setInstructionCacheLine(
     EEMemorySystem *memorySystem,
     std::size_t set,
@@ -104,6 +112,14 @@ static_assert(
   std::is_trivially_copyable<
     EEDataCacheStoreResult>::value,
   "EE data-cache store results must remain trivially copyable.");
+static_assert(
+  std::is_trivially_copyable<
+    EECacheMaintenanceRequest>::value,
+  "EE cache-maintenance requests must remain trivially copyable.");
+static_assert(
+  std::is_trivially_copyable<
+    EECacheMaintenanceResult>::value,
+  "EE cache-maintenance results must remain trivially copyable.");
 static_assert(
   EEMemorySystem::ITLB_ENTRY_COUNT == 2,
   "The EE ITLB capacity must remain architectural.");
@@ -372,6 +388,32 @@ TEST_CASE("EE cache arrays reset to deterministic invalid lines")
       }
     }
   }
+}
+
+TEST_CASE("EE cache maintenance has a typed unsupported foundation")
+{
+  NekoSystem system;
+  EEMemorySystem &memorySystem = system.eeMemorySystem();
+  const EECacheMaintenanceRequest request{
+    EECacheOperation::InstructionIndexLoadTag,
+    UINT32_C(0x81234567),
+    {}
+  };
+
+  const EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      &system.eeBus(),
+      request);
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::UnsupportedOperation);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  REQUIRE_FALSE(result.cacheHit);
+  REQUIRE(
+    result.translation.virtualAddress ==
+    request.virtualAddress);
 }
 
 TEST_CASE("EE cache inspection rejects invalid sets and ways")

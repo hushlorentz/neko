@@ -1,10 +1,11 @@
 #ifndef EE_INSTRUCTION_HPP
 #define EE_INSTRUCTION_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 
-enum class EEOperation : std::uint8_t
+enum class EEOperation : std::uint16_t
 {
   Nop,
   ShiftLeftLogicalWord,
@@ -260,11 +261,12 @@ enum class EEOperation : std::uint8_t
   WriteIndexedTLBEntry,
   WriteRandomTLBEntry,
   ProbeTLB,
+  CacheMaintenance,
   Count
 };
 
-constexpr std::uint8_t EE_OPERATION_COUNT =
-  static_cast<std::uint8_t>(EEOperation::Count);
+constexpr std::size_t EE_OPERATION_COUNT =
+  static_cast<std::size_t>(EEOperation::Count);
 
 enum class EEInstructionCategory : std::uint8_t
 {
@@ -376,6 +378,7 @@ enum class EEExecutionFamily : std::uint8_t
   SoftwareException,
   COP0RegisterMove,
   COP0TLBOperation,
+  CacheMaintenance,
   COP1RegisterMove,
   COP1Divider,
   COP1StagedOperation,

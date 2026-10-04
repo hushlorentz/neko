@@ -2893,7 +2893,7 @@ TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
       system->eeBus().write32(
         8,
         nestedMmiInstruction(0x09, 0x0c, 7, 8, 9));
-      system->eeBus().write32(12, UINT32_C(0xbc000000));
+      system->eeBus().write32(12, UINT32_C(0x40003800));
       core.startExecution(0);
       system->startTrace();
     };
@@ -2987,7 +2987,7 @@ TEST_CASE("EE packed divide traces and hashes are deterministic")
       system->eeBus().write32(
         0,
         nestedMmiInstruction(0x09, 0x1d, 1, 2, 0));
-      system->eeBus().write32(4, UINT32_C(0xbc000000));
+      system->eeBus().write32(4, UINT32_C(0x40003800));
       core.startExecution(0);
       system->startTrace();
     };
@@ -3061,7 +3061,7 @@ TEST_CASE("EE packed halfword MAC overlap traces and hashes are deterministic")
       system->eeBus().write32(
         4,
         nestedMmiInstruction(0x09, 0x10, 1, 2, 4));
-      system->eeBus().write32(8, UINT32_C(0xbc000000));
+      system->eeBus().write32(8, UINT32_C(0x40003800));
       core.startExecution(0);
       system->startTrace();
     };

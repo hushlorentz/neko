@@ -35,7 +35,8 @@ namespace
     Mmi3,
     Cop0,
     Cop1,
-    Cop2
+    Cop2,
+    Cache
   };
 
   struct DecodeEntry
@@ -158,6 +159,9 @@ namespace
       case EEOperation::WriteRandomTLBEntry:
       case EEOperation::ProbeTLB:
       case EEOperation::Jump:
+        break;
+      case EEOperation::CacheMaintenance:
+        dependencies.gprReads = source;
         break;
       case EEOperation::MoveWordFromCOP0:
         dependencies.gprWrites = target;
@@ -786,6 +790,7 @@ namespace
     table[0x10].kind = DecodeKind::Cop0;
     table[0x11].kind = DecodeKind::Cop1;
     table[0x12].kind = DecodeKind::Cop2;
+    table[0x2f].kind = DecodeKind::Cache;
     table[0x1c].kind = DecodeKind::Mmi;
     table[0x13].kind = DecodeKind::Reserved;
     table[0x1d].kind = DecodeKind::Reserved;
@@ -2388,6 +2393,7 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::StoreDoublewordRight:
     case EEOperation::LoadQuadword:
     case EEOperation::StoreQuadword:
+    case EEOperation::CacheMaintenance:
       return {
         EEInstructionCategory::LoadStore,
         PIPE_1,
@@ -2747,6 +2753,8 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::WriteRandomTLBEntry:
     case EEOperation::ProbeTLB:
       return EEExecutionFamily::COP0TLBOperation;
+    case EEOperation::CacheMaintenance:
+      return EEExecutionFamily::CacheMaintenance;
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -3278,7 +3286,7 @@ operationMetadataTable()
       std::array<
         EEOperationMetadata,
         EE_OPERATION_COUNT> result = {};
-      for (std::uint8_t value = 0;
+      for (std::size_t value = 0;
            value < EE_OPERATION_COUNT;
            ++value)
       {
@@ -3294,7 +3302,7 @@ operationMetadataTable()
 const EEOperationMetadata &eeOperationMetadata(
   EEOperation operation)
 {
-  if (static_cast<std::uint8_t>(operation) >=
+  if (static_cast<std::size_t>(operation) >=
       EE_OPERATION_COUNT)
   {
     throw std::invalid_argument(
@@ -3302,7 +3310,7 @@ const EEOperationMetadata &eeOperationMetadata(
   }
 
   return operationMetadataTable()[
-    static_cast<std::uint8_t>(operation)];
+    static_cast<std::size_t>(operation)];
 }
 
 EEIssuePairPolicy eeIssuePairPolicy(
@@ -3489,7 +3497,7 @@ EECOP1DividerTiming cop1DividerTiming(
 
 EEInstructionRouting eeInstructionRouting(EEOperation operation)
 {
-  if (static_cast<std::uint8_t>(operation) >=
+  if (static_cast<std::size_t>(operation) >=
       EE_OPERATION_COUNT)
   {
     throw std::invalid_argument(
@@ -3814,6 +3822,38 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
   {
     applyCop2(&instruction);
     return instruction;
+  }
+  if (primary.kind == DecodeKind::Cache)
+  {
+    switch (instruction.targetRegister)
+    {
+      case 0x00:
+      case 0x01:
+      case 0x04:
+      case 0x05:
+      case 0x07:
+      case 0x0b:
+      case 0x0e:
+      case 0x10:
+      case 0x11:
+      case 0x12:
+      case 0x13:
+      case 0x14:
+      case 0x16:
+      case 0x18:
+      case 0x1a:
+      case 0x1c:
+        instruction.operation =
+          EEOperation::CacheMaintenance;
+        return instruction;
+      case 0x02:
+      case 0x06:
+      case 0x0a:
+      case 0x0c:
+        reject(DecodeKind::Unsupported);
+      default:
+        reject(DecodeKind::Reserved);
+    }
   }
 
   applyEntry(primary, &instruction);

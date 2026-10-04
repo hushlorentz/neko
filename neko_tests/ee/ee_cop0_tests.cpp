@@ -42,6 +42,18 @@ namespace
       immediate;
   }
 
+  std::uint32_t cacheInstruction(
+    std::uint8_t source,
+    std::uint8_t operation,
+    std::uint16_t immediate)
+  {
+    return immediateInstruction(
+      0x2f,
+      source,
+      operation,
+      immediate);
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -381,6 +393,51 @@ TEST_CASE("EE TLB operations require COP0 usability")
       core.cop0Register(EECOP0Register::EntryLo1) ==
       entryLo1Before);
   }
+}
+
+TEST_CASE("EE CACHE requires COP0 usability before dispatch")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE |
+      EECOP0Status::CACHE_HIT);
+  mapLowKusegForTest(&core);
+  core.setGeneralRegister(2, {UINT32_C(0x12340000), 0});
+
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x00, 0x0040));
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::CoprocessorUnusable);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
+}
+
+TEST_CASE("EE CACHE preserves Status CH without a completed hit result")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    core.cop0Register(EECOP0Register::Status) |
+      EECOP0Status::CACHE_HIT);
+  core.setGeneralRegister(2, {UINT32_C(0x80001000), 0});
+
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x00, 0x0040));
+
+  REQUIRE(
+    core.stopReason() ==
+    EEStopReason::UndefinedOperation);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
 }
 
 TEST_CASE("EE COP0 faults preserve precise two-wide issue")

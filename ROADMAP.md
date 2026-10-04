@@ -1835,20 +1835,36 @@ creating parallel ownership.
 
 ### Cache Maintenance, Ordering, and Conformance
 
-- [ ] Decode and dispatch `CACHE` and implement the supported instruction-cache
-      index tag/data transfer, index invalidation/fill, and hit invalidation
-      operations. Preserve direct index/way selection, translated hit lookup,
-      `TagLo` transfer, `Status.CH` ownership, and explicit rejection of
-      unsupported branch-predictor operations.
-- [ ] Implement the supported data-cache `CACHE` operations for index tag/data
-      transfer, index writeback/invalidation, and hit
-      writeback/invalidation. Preserve dirty/valid/lock/LRF transitions,
-      writeback failures, translated hit faults, no-mutation misses, and the
-      documented lack of inferred `TagHi` array effects.
-- [ ] Decode and implement `PREF`, including ignored addressing exceptions,
-      no-op behavior for uncached targets, cached allocation behavior, hint
-      validation, and interaction with `Config` cache-enable controls. Add
-      exhaustive `CACHE`/`PREF` encoding validation.
+- [x] Add `CACHE` decode, instruction metadata, and one typed cache-maintenance
+      request/result boundary between `EECore` and `EEMemorySystem`. Recognize
+      every researched cache-operation value, reject reserved encodings, keep
+      branch-predictor operations valid-but-unsupported, preserve COP0
+      usability and issue ordering, and let `EECore` commit `Status.CH` only
+      from completed hit operations.
+- [ ] Implement instruction-cache index load/store tag and data operations.
+      Preserve direct virtual-index and address-bit way selection, 32-bit
+      `TagLo` data-word transfer, documented tag/LRF/valid fields, unchanged
+      `Status.CH`, and the lack of inferred `TagHi` array effects.
+- [ ] Implement instruction-cache index invalidation/fill and translated hit
+      invalidation. Preserve atomic fills, refill failures, direct index
+      selection, translated physical-tag lookup, precise hit-operation faults,
+      hit/miss `Status.CH`, and no-mutation misses.
+- [ ] Implement data-cache index load/store tag and data operations. Preserve
+      direct virtual-index and address-bit way selection, 32-bit `TagLo`
+      data-word transfer, dirty/valid/lock/LRF fields, unchanged `Status.CH`,
+      and the lack of inferred `TagHi` array effects.
+- [ ] Implement data-cache index writeback/invalidation operations. Preserve
+      dirty/valid/lock/LRF transitions, writeback-before-mutation, complete
+      line preservation on failure, direct index selection, and no
+      translation requirement.
+- [ ] Implement translated data-cache hit writeback/invalidation operations.
+      Preserve precise hit-operation faults, physical-tag lookup, hit/miss
+      `Status.CH`, writeback failures, no-mutation misses, and the documented
+      dirty/valid/lock/LRF transitions.
+- [ ] Add `PREF` decode, metadata, and exhaustive `CACHE`/`PREF` encoding
+      validation, then implement ignored addressing exceptions, no-op behavior
+      for uncached targets, cached allocation behavior, hint validation, and
+      interaction with `Config` cache-enable controls.
 - [ ] Preserve uncached and uncached-accelerated traffic as physical-bus
       accesses with no implicit cache snooping. Keep `SYNC`/`SYNC.L` as the
       functional software ordering boundary while deferring UCAB throughput

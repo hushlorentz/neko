@@ -64,7 +64,7 @@ TEST_CASE("EE bounded execution reports architectural stops")
 {
   NekoSystem system;
   system.eeBus().write32(0, 0);
-  system.eeBus().write32(4, UINT32_C(0xbc000000));
+  system.eeBus().write32(4, UINT32_C(0x40003800));
   system.eeCore().startExecution(0);
 
   const EEExecutionResult result = system.runEE(20);
