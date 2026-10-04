@@ -1785,7 +1785,7 @@ creating parallel ownership.
 - [x] Implement normal-mode `fromSPR` and `toSPR` qword transfers with physical
       main-bus addressing, SPR address wrapping, retry without consumption,
       completion state, and channel interrupts.
-- [ ] Add `D_SQWC` and supported interleave-mode transfers in both directions,
+- [x] Add `D_SQWC` and supported interleave-mode transfers in both directions,
       including transfer/skip progression, register visibility, completion,
       and deterministic rejection of unsupported channel modes. Keep exact
       burst, release-cycle, and bus-priority timing deferred to the timing

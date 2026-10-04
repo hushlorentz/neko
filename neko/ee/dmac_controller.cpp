@@ -38,6 +38,34 @@ void DMACController::writeStatus(std::uint32_t value)
   statusMaskRegister ^= value & MASKS;
 }
 
+std::uint32_t DMACController::interleaveSize() const
+{
+  return interleaveSizeRegister;
+}
+
+void DMACController::writeInterleaveSize(
+  std::uint32_t value)
+{
+  interleaveSizeRegister =
+    value &
+    (DMACInterleave::SKIP_MASK |
+     DMACInterleave::TRANSFER_MASK);
+}
+
+std::uint8_t DMACController::interleaveSkipQWC() const
+{
+  return static_cast<std::uint8_t>(
+    interleaveSizeRegister &
+    DMACInterleave::SKIP_MASK);
+}
+
+std::uint8_t DMACController::interleaveTransferQWC() const
+{
+  return static_cast<std::uint8_t>(
+    (interleaveSizeRegister &
+     DMACInterleave::TRANSFER_MASK) >> 16);
+}
+
 bool DMACController::enabled() const
 {
   return

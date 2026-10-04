@@ -44,7 +44,7 @@ class ScratchpadDMACChannel : public ClockedComponent
 
     void requireStopped() const;
     void requireTagAddress() const;
-    void transferNormalQuadword();
+    void transferQuadword(bool interleave);
     void completeTransfer();
     const char *name() const;
 
@@ -57,6 +57,7 @@ class ScratchpadDMACChannel : public ClockedComponent
     std::uint32_t quadwordCountRegister = 0;
     std::uint32_t tagAddressRegister = 0;
     std::uint32_t scratchpadAddressRegister = 0;
+    std::uint16_t interleaveQuadwordsRemaining = 0;
 };
 
 #endif

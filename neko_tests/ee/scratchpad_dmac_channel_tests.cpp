@@ -32,6 +32,7 @@ TEST_CASE("Scratchpad DMAC registers are guest-visible")
   REQUIRE(EEMemoryMap::D9_QWC == UINT32_C(0x1000d420));
   REQUIRE(EEMemoryMap::D9_TADR == UINT32_C(0x1000d430));
   REQUIRE(EEMemoryMap::D9_SADR == UINT32_C(0x1000d480));
+  REQUIRE(EEMemoryMap::D_SQWC == UINT32_C(0x1000e030));
 
   bus.write32(
     EEMemoryMap::D8_CHCR,
@@ -76,6 +77,37 @@ TEST_CASE("Scratchpad DMAC registers are guest-visible")
   REQUIRE(bus.read32(EEMemoryMap::D9_QWC) == 0x4321);
   REQUIRE(bus.read32(EEMemoryMap::D9_TADR) == 0xfffffff0);
   REQUIRE(bus.read32(EEMemoryMap::D9_SADR) == 0x1670);
+
+  bus.write32(
+    EEMemoryMap::D_SQWC,
+    UINT32_C(0xffffffff));
+  REQUIRE(
+    bus.read32(EEMemoryMap::D_SQWC) ==
+    UINT32_C(0x00ff00ff));
+}
+
+TEST_CASE("Scratchpad DMAC rejects unsupported channel modes")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+
+  REQUIRE_THROWS_WITH(
+    bus.write32(
+      EEMemoryMap::D8_CHCR,
+      DMACChannelControl::CHAIN_MODE),
+    "fromSPR DMAC supports only normal and interleave modes.");
+  REQUIRE_THROWS_WITH(
+    bus.write32(
+      EEMemoryMap::D9_CHCR,
+      DMACChannelControl::MODE_MASK),
+    "toSPR DMAC supports only normal and interleave modes.");
+  REQUIRE_FALSE(
+    bus.writeData32(
+      EEMemoryMap::D9_CHCR,
+      DMACChannelControl::CHAIN_MODE |
+        DMACChannelControl::START));
+  REQUIRE(bus.read32(EEMemoryMap::D8_CHCR) == 0);
+  REQUIRE(bus.read32(EEMemoryMap::D9_CHCR) == 0);
 }
 
 TEST_CASE("Scratchpad DMAC active registers only accept STR changes")
@@ -119,7 +151,7 @@ TEST_CASE("Scratchpad DMAC active registers only accept STR changes")
   REQUIRE(bus.writeData32(EEMemoryMap::D9_CHCR, 0));
 }
 
-TEST_CASE("Scratchpad DMAC clocks are gated and inert")
+TEST_CASE("Scratchpad DMAC interleave clocks are D_CTRL gated")
 {
   NekoSystem system;
   EEBus &bus = system.eeBus();
@@ -133,8 +165,6 @@ TEST_CASE("Scratchpad DMAC clocks are gated and inert")
       DMACChannelControl::START);
 
   REQUIRE_FALSE(system.fromScratchpadDMAC().clockActive());
-  bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
-  REQUIRE(system.fromScratchpadDMAC().clockActive());
 
   system.runMasterCycles(3);
 
@@ -148,6 +178,201 @@ TEST_CASE("Scratchpad DMAC clocks are gated and inert")
   REQUIRE(
     (bus.read32(EEMemoryMap::D_STAT) &
      DMACStatus::CHANNEL_8) == 0);
+}
+
+TEST_CASE("fromSPR interleave mode transfers and skips main memory")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  EEMemorySystem &memory = system.eeMemorySystem();
+  const EEQuadword source[] = {
+    {UINT64_C(0x0000000000000001), UINT64_C(0x10)},
+    {UINT64_C(0x0000000000000002), UINT64_C(0x20)},
+    {UINT64_C(0x0000000000000003), UINT64_C(0x30)},
+    {UINT64_C(0x0000000000000004), UINT64_C(0x40)}
+  };
+  const std::uint32_t sourceAddresses[] = {
+    0x3fd0,
+    0x3fe0,
+    0x3ff0,
+    0
+  };
+  for (std::uint32_t index = 0; index < 4; ++index)
+  {
+    REQUIRE(
+      memory.writeScratchpadDMA128(
+        sourceAddresses[index],
+        source[index]) ==
+      EEScratchpadAccessResult::Completed);
+  }
+  bus.write32(
+    EEMemoryMap::D_SQWC,
+    (2u << 16) | 2u);
+  bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+  bus.write32(EEMemoryMap::D8_MADR, 0x100);
+  bus.write32(EEMemoryMap::D8_QWC, 4);
+  bus.write32(EEMemoryMap::D8_SADR, 0x3fd0);
+  bus.write32(
+    EEMemoryMap::D8_CHCR,
+    DMACChannelControl::INTERLEAVE_MODE |
+      DMACChannelControl::START);
+
+  system.clockMasterCycle();
+  REQUIRE(bus.read32(EEMemoryMap::D8_MADR) == 0x110);
+  REQUIRE(bus.read32(EEMemoryMap::D8_QWC) == 3);
+  REQUIRE(bus.read32(EEMemoryMap::D8_SADR) == 0x3fe0);
+
+  bus.write32(EEMemoryMap::D_CTRL, 0);
+  system.runMasterCycles(2);
+  REQUIRE(bus.read32(EEMemoryMap::D8_MADR) == 0x110);
+  REQUIRE(bus.read32(EEMemoryMap::D8_QWC) == 3);
+  REQUIRE(bus.read32(EEMemoryMap::D8_SADR) == 0x3fe0);
+
+  bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+  system.clockMasterCycle();
+  REQUIRE(bus.read32(EEMemoryMap::D8_MADR) == 0x140);
+  REQUIRE(bus.read32(EEMemoryMap::D8_QWC) == 2);
+  REQUIRE(bus.read32(EEMemoryMap::D8_SADR) == 0x3ff0);
+
+  system.runMasterCycles(2);
+
+  REQUIRE(bus.read32(EEMemoryMap::D8_MADR) == 0x180);
+  REQUIRE(bus.read32(EEMemoryMap::D8_QWC) == 0);
+  REQUIRE(bus.read32(EEMemoryMap::D8_SADR) == 0x10);
+  REQUIRE_FALSE(system.fromScratchpadDMAC().active());
+  REQUIRE(
+    (bus.read32(EEMemoryMap::D_STAT) &
+     DMACStatus::CHANNEL_8) != 0);
+
+  const std::uint32_t destinationAddresses[] = {
+    0x100,
+    0x110,
+    0x140,
+    0x150
+  };
+  for (std::uint32_t index = 0; index < 4; ++index)
+  {
+    EEQuadword destination = {};
+    REQUIRE(
+      bus.readDMAC128(
+        destinationAddresses[index],
+        &destination));
+    requireQuadword(destination, source[index]);
+  }
+  for (const std::uint32_t skippedAddress : {
+    0x120u,
+    0x130u,
+    0x160u,
+    0x170u})
+  {
+    EEQuadword skipped = {};
+    REQUIRE(bus.readDMAC128(skippedAddress, &skipped));
+    requireQuadword(skipped, EEQuadword{});
+  }
+}
+
+TEST_CASE("toSPR interleave mode skips main-memory source rows")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  EEMemorySystem &memory = system.eeMemorySystem();
+  const std::uint32_t sourceAddresses[] = {
+    0x200,
+    0x210,
+    0x240,
+    0x250
+  };
+  const EEQuadword source[] = {
+    {UINT64_C(0x1111111111111111), UINT64_C(0x10)},
+    {UINT64_C(0x2222222222222222), UINT64_C(0x20)},
+    {UINT64_C(0x3333333333333333), UINT64_C(0x30)},
+    {UINT64_C(0x4444444444444444), UINT64_C(0x40)}
+  };
+  for (std::uint32_t index = 0; index < 4; ++index)
+  {
+    REQUIRE(
+      bus.writeDMAC128(
+        sourceAddresses[index],
+        source[index]));
+  }
+  bus.write32(
+    EEMemoryMap::D_STAT,
+    DMACStatus::CHANNEL_9_MASK);
+  bus.write32(
+    EEMemoryMap::D_SQWC,
+    (2u << 16) | 2u);
+  bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+  bus.write32(EEMemoryMap::D9_MADR, 0x200);
+  bus.write32(EEMemoryMap::D9_QWC, 4);
+  bus.write32(EEMemoryMap::D9_SADR, 0);
+  bus.write32(
+    EEMemoryMap::D9_CHCR,
+    DMACChannelControl::INTERLEAVE_MODE |
+      DMACChannelControl::START);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(bus.read32(EEMemoryMap::D9_MADR) == 0x280);
+  REQUIRE(bus.read32(EEMemoryMap::D9_QWC) == 0);
+  REQUIRE(bus.read32(EEMemoryMap::D9_SADR) == 0x40);
+  REQUIRE_FALSE(system.toScratchpadDMAC().active());
+  REQUIRE(system.interruptPending());
+  for (std::uint32_t index = 0; index < 4; ++index)
+  {
+    EEQuadword destination = {};
+    REQUIRE(
+      memory.readScratchpadDMA128(
+        index * 16,
+        &destination) ==
+      EEScratchpadAccessResult::Completed);
+    requireQuadword(destination, source[index]);
+  }
+}
+
+TEST_CASE("Zero D_SQWC fields use contiguous transfer semantics")
+{
+  for (const std::uint32_t interleaveSize : {
+    UINT32_C(0x00000003),
+    UINT32_C(0x00020000)})
+  {
+    NekoSystem system;
+    EEBus &bus = system.eeBus();
+    EEMemorySystem &memory = system.eeMemorySystem();
+    const EEQuadword source[] = {
+      {UINT64_C(0x0123456789abcdef), UINT64_C(0x10)},
+      {UINT64_C(0xfedcba9876543210), UINT64_C(0x20)}
+    };
+    REQUIRE(
+      memory.writeScratchpadDMA128(0, source[0]) ==
+      EEScratchpadAccessResult::Completed);
+    REQUIRE(
+      memory.writeScratchpadDMA128(0x10, source[1]) ==
+      EEScratchpadAccessResult::Completed);
+    bus.write32(EEMemoryMap::D_SQWC, interleaveSize);
+    bus.write32(
+      EEMemoryMap::D_CTRL,
+      DMACControl::DMA_ENABLE);
+    bus.write32(EEMemoryMap::D8_MADR, 0x300);
+    bus.write32(EEMemoryMap::D8_QWC, 2);
+    bus.write32(EEMemoryMap::D8_SADR, 0);
+    bus.write32(
+      EEMemoryMap::D8_CHCR,
+      DMACChannelControl::INTERLEAVE_MODE |
+        DMACChannelControl::START);
+
+    system.runMasterCycles(2);
+
+    REQUIRE(bus.read32(EEMemoryMap::D8_MADR) == 0x320);
+    for (std::uint32_t index = 0; index < 2; ++index)
+    {
+      EEQuadword destination = {};
+      REQUIRE(
+        bus.readDMAC128(
+          0x300 + index * 16,
+          &destination));
+      requireQuadword(destination, source[index]);
+    }
+  }
 }
 
 TEST_CASE("fromSPR normal mode transfers qwords and wraps SADR")
@@ -266,34 +491,43 @@ TEST_CASE("toSPR normal mode transfers qwords and wraps SADR")
   REQUIRE(system.interruptPending());
 }
 
-TEST_CASE("Scratchpad DMAC zero-length normal transfers complete")
+TEST_CASE("Scratchpad DMAC zero-length transfers complete")
 {
   for (const ScratchpadDMACChannelKind kind : {
     ScratchpadDMACChannelKind::FromScratchpad,
     ScratchpadDMACChannelKind::ToScratchpad})
   {
-    NekoSystem system;
-    EEBus &bus = system.eeBus();
-    const bool fromScratchpad =
-      kind == ScratchpadDMACChannelKind::FromScratchpad;
-    const std::uint32_t channelControl =
-      fromScratchpad ?
-        EEMemoryMap::D8_CHCR :
-        EEMemoryMap::D9_CHCR;
-    const std::uint32_t channelStatus =
-      fromScratchpad ?
-        DMACStatus::CHANNEL_8 :
-        DMACStatus::CHANNEL_9;
+    for (const std::uint32_t mode : {
+      0u,
+      DMACChannelControl::INTERLEAVE_MODE})
+    {
+      NekoSystem system;
+      EEBus &bus = system.eeBus();
+      const bool fromScratchpad =
+        kind == ScratchpadDMACChannelKind::FromScratchpad;
+      const std::uint32_t channelControl =
+        fromScratchpad ?
+          EEMemoryMap::D8_CHCR :
+          EEMemoryMap::D9_CHCR;
+      const std::uint32_t channelStatus =
+        fromScratchpad ?
+          DMACStatus::CHANNEL_8 :
+          DMACStatus::CHANNEL_9;
 
-    bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
-    bus.write32(channelControl, DMACChannelControl::START);
-    system.clockMasterCycle();
+      bus.write32(
+        EEMemoryMap::D_CTRL,
+        DMACControl::DMA_ENABLE);
+      bus.write32(
+        channelControl,
+        mode | DMACChannelControl::START);
+      system.clockMasterCycle();
 
-    REQUIRE((bus.read32(channelControl) &
-             DMACChannelControl::START) == 0);
-    REQUIRE(
-      (bus.read32(EEMemoryMap::D_STAT) &
-       channelStatus) != 0);
+      REQUIRE((bus.read32(channelControl) &
+               DMACChannelControl::START) == 0);
+      REQUIRE(
+        (bus.read32(EEMemoryMap::D_STAT) &
+         channelStatus) != 0);
+    }
   }
 }
 
@@ -414,6 +648,9 @@ TEST_CASE("Scratchpad DMAC registers and status reset with the system")
   NekoSystem system;
   system.eeBus().write32(EEMemoryMap::D8_MADR, 0x1000);
   system.eeBus().write32(EEMemoryMap::D9_TADR, 0x2000);
+  system.eeBus().write32(
+    EEMemoryMap::D_SQWC,
+    UINT32_C(0x00120034));
   system.dmacController().signalChannelCompletion(
     DMACStatus::CHANNEL_8);
   system.eeBus().write32(
@@ -431,6 +668,7 @@ TEST_CASE("Scratchpad DMAC registers and status reset with the system")
   REQUIRE(system.eeBus().read32(EEMemoryMap::D9_QWC) == 0);
   REQUIRE(system.eeBus().read32(EEMemoryMap::D9_TADR) == 0);
   REQUIRE(system.eeBus().read32(EEMemoryMap::D9_SADR) == 0);
+  REQUIRE(system.eeBus().read32(EEMemoryMap::D_SQWC) == 0);
   REQUIRE(
     (system.eeBus().read32(EEMemoryMap::D_STAT) &
      (DMACStatus::CHANNEL_8 |

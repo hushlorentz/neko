@@ -20,6 +20,12 @@ namespace DMACStatus
   constexpr std::uint32_t CHANNEL_9_MASK = 1u << 25;
 }
 
+namespace DMACInterleave
+{
+  constexpr std::uint32_t SKIP_MASK = 0xff;
+  constexpr std::uint32_t TRANSFER_MASK = 0xffu << 16;
+}
+
 class DMACController
 {
   public:
@@ -27,6 +33,10 @@ class DMACController
     void writeControl(std::uint32_t value);
     std::uint32_t status() const;
     void writeStatus(std::uint32_t value);
+    std::uint32_t interleaveSize() const;
+    void writeInterleaveSize(std::uint32_t value);
+    std::uint8_t interleaveSkipQWC() const;
+    std::uint8_t interleaveTransferQWC() const;
     bool enabled() const;
     void signalChannelCompletion(std::uint32_t channel);
     bool interruptPending() const;
@@ -37,6 +47,7 @@ class DMACController
     std::uint32_t controlRegister = 0;
     std::uint32_t statusRegister = 0;
     std::uint32_t statusMaskRegister = 0;
+    std::uint32_t interleaveSizeRegister = 0;
 };
 
 #endif

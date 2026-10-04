@@ -68,6 +68,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t D9_SADR = 0x1000d480;
   constexpr std::uint32_t D_CTRL = 0x1000e000;
   constexpr std::uint32_t D_STAT = 0x1000e010;
+  constexpr std::uint32_t D_SQWC = 0x1000e030;
 
   constexpr std::uint32_t INTC_STAT = 0x1000f000;
   constexpr std::uint32_t INTC_MASK = 0x1000f010;

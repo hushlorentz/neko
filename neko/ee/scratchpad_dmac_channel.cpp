@@ -60,9 +60,7 @@ bool ScratchpadDMACChannel::clockActive() const
 
 void ScratchpadDMACChannel::clock()
 {
-  if (!clockActive() ||
-      (channelControlRegister &
-       DMACChannelControl::MODE_MASK) != 0)
+  if (!clockActive())
   {
     return;
   }
@@ -71,7 +69,13 @@ void ScratchpadDMACChannel::clock()
     completeTransfer();
     return;
   }
-  transferNormalQuadword();
+  const bool interleave =
+    (channelControlRegister &
+     DMACChannelControl::MODE_MASK) ==
+    DMACChannelControl::INTERLEAVE_MODE &&
+    dmacController->interleaveTransferQWC() != 0 &&
+    dmacController->interleaveSkipQWC() != 0;
+  transferQuadword(interleave);
 }
 
 bool ScratchpadDMACChannel::active() const
@@ -95,6 +99,16 @@ void ScratchpadDMACChannel::writeChannelControl(
       std::string(name()) +
       " DMAC CHCR contains unsupported bits.");
   }
+  const std::uint32_t mode =
+    value & DMACChannelControl::MODE_MASK;
+  if (mode != 0 &&
+      mode != DMACChannelControl::INTERLEAVE_MODE)
+  {
+    throw std::invalid_argument(
+      std::string(name()) +
+      " DMAC supports only normal and interleave modes.");
+  }
+  const bool wasActive = active();
   if (active())
   {
     const std::uint32_t changedFields =
@@ -108,6 +122,18 @@ void ScratchpadDMACChannel::writeChannelControl(
     }
   }
   channelControlRegister = value;
+  if (!wasActive && active() &&
+      mode == DMACChannelControl::INTERLEAVE_MODE &&
+      dmacController->interleaveTransferQWC() != 0 &&
+      dmacController->interleaveSkipQWC() != 0)
+  {
+    interleaveQuadwordsRemaining =
+      dmacController->interleaveTransferQWC();
+  }
+  else if (!active() || mode == 0)
+  {
+    interleaveQuadwordsRemaining = 0;
+  }
 }
 
 std::uint32_t ScratchpadDMACChannel::memoryAddress() const
@@ -161,7 +187,8 @@ void ScratchpadDMACChannel::writeScratchpadAddress(
     value & SCRATCHPAD_ADDRESS_MASK;
 }
 
-void ScratchpadDMACChannel::transferNormalQuadword()
+void ScratchpadDMACChannel::transferQuadword(
+  bool interleave)
 {
   EEQuadword value = {};
   if (channelKind ==
@@ -223,6 +250,32 @@ void ScratchpadDMACChannel::transferNormalQuadword()
     (scratchpadAddressRegister + 16) &
     SCRATCHPAD_ADDRESS_MASK;
   --quadwordCountRegister;
+  if (interleave)
+  {
+    if (interleaveQuadwordsRemaining == 0)
+    {
+      interleaveQuadwordsRemaining =
+        dmacController->interleaveTransferQWC();
+    }
+    --interleaveQuadwordsRemaining;
+    if (interleaveQuadwordsRemaining == 0)
+    {
+      memoryAddressRegister =
+        (memoryAddressRegister +
+         static_cast<std::uint32_t>(
+           dmacController->interleaveSkipQWC()) * 16) &
+        MEMORY_ADDRESS_MASK;
+      if (quadwordCountRegister != 0)
+      {
+        interleaveQuadwordsRemaining =
+          dmacController->interleaveTransferQWC();
+      }
+    }
+  }
+  else
+  {
+    interleaveQuadwordsRemaining = 0;
+  }
   if (quadwordCountRegister == 0)
   {
     completeTransfer();
@@ -232,6 +285,7 @@ void ScratchpadDMACChannel::transferNormalQuadword()
 void ScratchpadDMACChannel::completeTransfer()
 {
   channelControlRegister &= ~DMACChannelControl::START;
+  interleaveQuadwordsRemaining = 0;
   dmacController->signalChannelCompletion(
     channelKind ==
       ScratchpadDMACChannelKind::FromScratchpad ?
