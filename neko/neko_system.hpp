@@ -135,6 +135,8 @@ class NekoSystem
     const GSDisplay &gsDisplay() const;
     EEBus &eeBus();
     const EEBus &eeBus() const;
+    EEMemorySystem &eeMemorySystem();
+    const EEMemorySystem &eeMemorySystem() const;
     EEInterruptController &interruptController();
     const EEInterruptController &interruptController() const;
     void clockMasterCycle();

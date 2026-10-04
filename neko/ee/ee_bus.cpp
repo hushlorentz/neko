@@ -512,6 +512,42 @@ bool EEBus::writeData128(
     EEDataWriteResult::Completed;
 }
 
+bool EEBus::readDMAC128(
+  std::uint32_t physicalAddress,
+  EEQuadword *value) const
+{
+  return readData128(physicalAddress, value);
+}
+
+bool EEBus::writeDMAC128(
+  std::uint32_t physicalAddress,
+  const EEQuadword &value)
+{
+  requireAlignment(
+    physicalAddress,
+    16,
+    "EE DMAC quadword store must be naturally aligned.");
+
+  std::uint32_t mainMemoryOffset = 0;
+  if (!mainMemoryAddress(
+       physicalAddress,
+       16,
+       &mainMemoryOffset))
+  {
+    return false;
+  }
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    mainMemory[mainMemoryOffset + index] =
+     static_cast<std::uint8_t>(
+       value.low >> (index * 8));
+    mainMemory[mainMemoryOffset + 8 + index] =
+     static_cast<std::uint8_t>(
+       value.high >> (index * 8));
+  }
+  return true;
+}
+
 EEDataWriteResult EEBus::writeGuestData128(
   std::uint32_t address,
   const EEQuadword &value)

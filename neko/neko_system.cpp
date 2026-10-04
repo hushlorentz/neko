@@ -29,10 +29,14 @@ NekoSystem::NekoSystem() :
     &dmacControllerComponent),
   fromScratchpadDMACComponent(
     ScratchpadDMACChannelKind::FromScratchpad,
-    &dmacControllerComponent),
+    &dmacControllerComponent,
+    &eeBusComponent,
+    &eeCoreComponent.memorySystem),
   toScratchpadDMACComponent(
     ScratchpadDMACChannelKind::ToScratchpad,
-    &dmacControllerComponent),
+    &dmacControllerComponent,
+    &eeBusComponent,
+    &eeCoreComponent.memorySystem),
   gsDisplayComponent(&gsComponent)
 {
   masterClock.registerComponent(eeCoreComponent, 1);
@@ -446,6 +450,16 @@ EEBus &NekoSystem::eeBus()
 const EEBus &NekoSystem::eeBus() const
 {
   return eeBusComponent;
+}
+
+EEMemorySystem &NekoSystem::eeMemorySystem()
+{
+  return eeCoreComponent.memorySystem;
+}
+
+const EEMemorySystem &NekoSystem::eeMemorySystem() const
+{
+  return eeCoreComponent.memorySystem;
 }
 
 EEInterruptController &NekoSystem::interruptController()

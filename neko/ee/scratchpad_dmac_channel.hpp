@@ -6,6 +6,8 @@
 #include "clocked_component.hpp"
 
 class DMACController;
+class EEBus;
+class EEMemorySystem;
 
 enum class ScratchpadDMACChannelKind : std::uint8_t
 {
@@ -18,7 +20,9 @@ class ScratchpadDMACChannel : public ClockedComponent
   public:
     ScratchpadDMACChannel(
       ScratchpadDMACChannelKind kind,
-      DMACController *controller);
+      DMACController *controller,
+      EEBus *bus,
+      EEMemorySystem *memorySystem);
 
     bool clockActive() const override;
     void clock() override;
@@ -40,10 +44,14 @@ class ScratchpadDMACChannel : public ClockedComponent
 
     void requireStopped() const;
     void requireTagAddress() const;
+    void transferNormalQuadword();
+    void completeTransfer();
     const char *name() const;
 
     ScratchpadDMACChannelKind channelKind;
     DMACController *dmacController;
+    EEBus *eeBus;
+    EEMemorySystem *eeMemorySystem;
     std::uint32_t channelControlRegister = 0;
     std::uint32_t memoryAddressRegister = 0;
     std::uint32_t quadwordCountRegister = 0;

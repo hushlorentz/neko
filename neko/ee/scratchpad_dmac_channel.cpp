@@ -3,6 +3,8 @@
 
 #include "dmac_channel_state.hpp"
 #include "dmac_controller.hpp"
+#include "ee_bus.hpp"
+#include "ee_memory_system.hpp"
 #include "scratchpad_dmac_channel.hpp"
 
 namespace
@@ -23,9 +25,13 @@ namespace
 
 ScratchpadDMACChannel::ScratchpadDMACChannel(
   ScratchpadDMACChannelKind kind,
-  DMACController *controller) :
+  DMACController *controller,
+  EEBus *bus,
+  EEMemorySystem *memorySystem) :
   channelKind(kind),
-  dmacController(controller)
+  dmacController(controller),
+  eeBus(bus),
+  eeMemorySystem(memorySystem)
 {
   if (channelKind !=
         ScratchpadDMACChannelKind::FromScratchpad &&
@@ -40,6 +46,11 @@ ScratchpadDMACChannel::ScratchpadDMACChannel(
     throw std::invalid_argument(
       "Scratchpad DMAC channel requires a controller.");
   }
+  if (eeBus == nullptr || eeMemorySystem == nullptr)
+  {
+    throw std::invalid_argument(
+      "Scratchpad DMAC channel requires memory components.");
+  }
 }
 
 bool ScratchpadDMACChannel::clockActive() const
@@ -49,6 +60,18 @@ bool ScratchpadDMACChannel::clockActive() const
 
 void ScratchpadDMACChannel::clock()
 {
+  if (!clockActive() ||
+      (channelControlRegister &
+       DMACChannelControl::MODE_MASK) != 0)
+  {
+    return;
+  }
+  if (quadwordCountRegister == 0)
+  {
+    completeTransfer();
+    return;
+  }
+  transferNormalQuadword();
 }
 
 bool ScratchpadDMACChannel::active() const
@@ -136,6 +159,84 @@ void ScratchpadDMACChannel::writeScratchpadAddress(
   requireStopped();
   scratchpadAddressRegister =
     value & SCRATCHPAD_ADDRESS_MASK;
+}
+
+void ScratchpadDMACChannel::transferNormalQuadword()
+{
+  EEQuadword value = {};
+  if (channelKind ==
+      ScratchpadDMACChannelKind::FromScratchpad)
+  {
+    const EEScratchpadAccessResult scratchpadResult =
+      eeMemorySystem->readScratchpadDMA128(
+        scratchpadAddressRegister,
+        &value);
+    if (scratchpadResult ==
+        EEScratchpadAccessResult::Wait)
+    {
+      return;
+    }
+    if (scratchpadResult !=
+        EEScratchpadAccessResult::Completed)
+    {
+      throw std::out_of_range(
+        "fromSPR DMAC scratchpad address is invalid.");
+    }
+    if (!eeBus->writeDMAC128(
+          memoryAddressRegister,
+          value))
+    {
+      throw std::out_of_range(
+        "fromSPR DMAC main-bus address is invalid.");
+    }
+  }
+  else
+  {
+    if (!eeBus->readDMAC128(
+          memoryAddressRegister,
+          &value))
+    {
+      throw std::out_of_range(
+        "toSPR DMAC main-bus address is invalid.");
+    }
+    const EEScratchpadAccessResult scratchpadResult =
+      eeMemorySystem->writeScratchpadDMA128(
+        scratchpadAddressRegister,
+        value);
+    if (scratchpadResult ==
+        EEScratchpadAccessResult::Wait)
+    {
+      return;
+    }
+    if (scratchpadResult !=
+        EEScratchpadAccessResult::Completed)
+    {
+      throw std::out_of_range(
+        "toSPR DMAC scratchpad address is invalid.");
+    }
+  }
+
+  memoryAddressRegister =
+    (memoryAddressRegister + 16) &
+    MEMORY_ADDRESS_MASK;
+  scratchpadAddressRegister =
+    (scratchpadAddressRegister + 16) &
+    SCRATCHPAD_ADDRESS_MASK;
+  --quadwordCountRegister;
+  if (quadwordCountRegister == 0)
+  {
+    completeTransfer();
+  }
+}
+
+void ScratchpadDMACChannel::completeTransfer()
+{
+  channelControlRegister &= ~DMACChannelControl::START;
+  dmacController->signalChannelCompletion(
+    channelKind ==
+      ScratchpadDMACChannelKind::FromScratchpad ?
+      DMACStatus::CHANNEL_8 :
+      DMACStatus::CHANNEL_9);
 }
 
 void ScratchpadDMACChannel::requireStopped() const

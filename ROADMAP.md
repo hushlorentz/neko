@@ -1782,7 +1782,7 @@ creating parallel ownership.
       owners with mapped `CHCR`, `MADR`, `QWC`, `SADR`, channel-specific
       `TADR`, stopped-register write rules, and integration with `D_CTRL`,
       `D_STAT`, reset, and system scheduling.
-- [ ] Implement normal-mode `fromSPR` and `toSPR` qword transfers with physical
+- [x] Implement normal-mode `fromSPR` and `toSPR` qword transfers with physical
       main-bus addressing, SPR address wrapping, retry without consumption,
       completion state, and channel interrupts.
 - [ ] Add `D_SQWC` and supported interleave-mode transfers in both directions,

@@ -155,6 +155,12 @@ class EEBus
     bool writeData128(
       std::uint32_t address,
       const EEQuadword &value);
+    bool readDMAC128(
+      std::uint32_t physicalAddress,
+      EEQuadword *value) const;
+    bool writeDMAC128(
+      std::uint32_t physicalAddress,
+      const EEQuadword &value);
     EEDataWriteResult writeGuestData128(
       std::uint32_t address,
       const EEQuadword &value);
