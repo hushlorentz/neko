@@ -205,6 +205,18 @@ namespace
         line.data[offset + 3]) << 24);
   }
 
+  void storeCacheWord(
+    EECacheLine *line,
+    std::size_t offset,
+    std::uint32_t value)
+  {
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+      line->data[offset + index] =
+        static_cast<std::uint8_t>(value >> (index * 8));
+    }
+  }
+
   template<typename Value>
   void storeLittleEndian(
     std::array<std::uint8_t, 16> *data,
@@ -1274,6 +1286,17 @@ EECacheMaintenanceResult EEMemorySystem::maintainCache(
   EEBus *bus,
   const EECacheMaintenanceRequest &request)
 {
+  switch (request.operation)
+  {
+    case EECacheOperation::InstructionIndexLoadTag:
+    case EECacheOperation::InstructionIndexLoadData:
+    case EECacheOperation::InstructionIndexStoreTag:
+    case EECacheOperation::InstructionIndexStoreData:
+      return maintainInstructionCacheIndex(request);
+    default:
+      break;
+  }
+
   if (bus == nullptr)
   {
     throw std::invalid_argument(
@@ -1284,6 +1307,64 @@ EECacheMaintenanceResult EEMemorySystem::maintainCache(
   result.translation.virtualAddress =
     request.virtualAddress;
   return result;
+}
+
+EECacheMaintenanceResult
+EEMemorySystem::maintainInstructionCacheIndex(
+  const EECacheMaintenanceRequest &request)
+{
+  EECacheMaintenanceResult result;
+  result.translation.virtualAddress =
+    request.virtualAddress;
+  const std::size_t instructionSet =
+    (request.virtualAddress >> 6) &
+    (INSTRUCTION_CACHE_SET_COUNT - 1);
+  const std::size_t way =
+    request.virtualAddress & (CACHE_WAY_COUNT - 1);
+  EECacheLine &instructionLine =
+    instructionCache[instructionSet][way];
+  const std::size_t wordOffset =
+    request.virtualAddress & (CACHE_LINE_SIZE - 4);
+
+  switch (request.operation)
+  {
+    case EECacheOperation::InstructionIndexLoadTag:
+      cop0TagLo =
+        instructionLine.physicalTag |
+        (instructionLine.valid ? EECOP0TagLo::VALID : 0) |
+        (instructionLine.leastRecentlyFilled
+          ? EECOP0TagLo::LEAST_RECENTLY_FILLED
+          : 0);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    case EECacheOperation::InstructionIndexLoadData:
+      cop0TagLo =
+        loadCacheWord(instructionLine, wordOffset);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    case EECacheOperation::InstructionIndexStoreTag:
+      instructionLine.physicalTag =
+        cop0TagLo & UINT32_C(0xfffff000);
+      instructionLine.valid =
+        (cop0TagLo & EECOP0TagLo::VALID) != 0;
+      instructionLine.dirty = false;
+      instructionLine.leastRecentlyFilled =
+        (cop0TagLo &
+          EECOP0TagLo::LEAST_RECENTLY_FILLED) != 0;
+      instructionLine.locked = false;
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    case EECacheOperation::InstructionIndexStoreData:
+      storeCacheWord(
+        &instructionLine,
+        wordOffset,
+        cop0TagLo);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    default:
+      throw std::invalid_argument(
+        "EE instruction-cache index operation is invalid.");
+  }
 }
 
 std::size_t EEMemorySystem::instructionCacheVictim(

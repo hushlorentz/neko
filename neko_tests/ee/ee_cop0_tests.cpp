@@ -418,7 +418,7 @@ TEST_CASE("EE CACHE requires COP0 usability before dispatch")
       EECOP0Status::CACHE_HIT) != 0);
 }
 
-TEST_CASE("EE CACHE preserves Status CH without a completed hit result")
+TEST_CASE("EE CACHE index operations preserve Status CH")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -434,7 +434,8 @@ TEST_CASE("EE CACHE preserves Status CH without a completed hit result")
 
   REQUIRE(
     core.stopReason() ==
-    EEStopReason::UndefinedOperation);
+    EEStopReason::None);
+  REQUIRE_FALSE(core.exceptionPending());
   REQUIRE(
     (core.cop0Register(EECOP0Register::Status) &
       EECOP0Status::CACHE_HIT) != 0);

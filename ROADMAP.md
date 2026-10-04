@@ -1841,7 +1841,7 @@ creating parallel ownership.
       branch-predictor operations valid-but-unsupported, preserve COP0
       usability and issue ordering, and let `EECore` commit `Status.CH` only
       from completed hit operations.
-- [ ] Implement instruction-cache index load/store tag and data operations.
+- [x] Implement instruction-cache index load/store tag and data operations.
       Preserve direct virtual-index and address-bit way selection, 32-bit
       `TagLo` data-word transfer, documented tag/LRF/valid fields, unchanged
       `Status.CH`, and the lack of inferred `TagHi` array effects.

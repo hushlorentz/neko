@@ -390,12 +390,12 @@ TEST_CASE("EE cache arrays reset to deterministic invalid lines")
   }
 }
 
-TEST_CASE("EE cache maintenance has a typed unsupported foundation")
+TEST_CASE("EE unimplemented cache maintenance remains explicitly unsupported")
 {
   NekoSystem system;
   EEMemorySystem &memorySystem = system.eeMemorySystem();
   const EECacheMaintenanceRequest request{
-    EECacheOperation::InstructionIndexLoadTag,
+    EECacheOperation::InstructionFill,
     UINT32_C(0x81234567),
     {}
   };
@@ -414,6 +414,232 @@ TEST_CASE("EE cache maintenance has a typed unsupported foundation")
   REQUIRE(
     result.translation.virtualAddress ==
     request.virtualAddress);
+}
+
+TEST_CASE("EE instruction-cache index tag operations transfer TagLo state")
+{
+  EEMemorySystem memorySystem;
+  constexpr std::size_t set = 0x35;
+  constexpr std::size_t way = 1;
+  constexpr std::uint32_t address =
+    UINT32_C(0xa0000000) |
+    static_cast<std::uint32_t>(set << 6) |
+    UINT32_C(1);
+  EECacheLine line;
+  line.physicalTag = UINT32_C(0x12345000);
+  line.valid = true;
+  line.dirty = true;
+  line.leastRecentlyFilled = true;
+  line.locked = true;
+  line.data[7] = 0xa5;
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    way,
+    line);
+  EECacheLine otherWay;
+  otherWay.physicalTag = UINT32_C(0x77777000);
+  otherWay.data[7] = 0x3c;
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    0,
+    otherWay);
+  memorySystem.setCOP0Register(
+    EECOP0Register::TagHi,
+    UINT32_C(0x89abcdef));
+
+  EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionIndexLoadTag,
+        address,
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::TagLo) ==
+    (line.physicalTag |
+     EECOP0TagLo::VALID |
+     EECOP0TagLo::LEAST_RECENTLY_FILLED));
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::TagHi) ==
+    UINT32_C(0x89abcdef));
+  REQUIRE(
+    memorySystem.instructionCacheLine(set, way).data[7] ==
+    0xa5);
+
+  memorySystem.setCOP0Register(
+    EECOP0Register::TagLo,
+    UINT32_C(0xabcde000) |
+      EECOP0TagLo::DIRTY |
+      EECOP0TagLo::VALID |
+      EECOP0TagLo::LEAST_RECENTLY_FILLED |
+      EECOP0TagLo::LOCK);
+  result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionIndexStoreTag,
+        address,
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  const EECacheLine stored =
+    memorySystem.instructionCacheLine(set, way);
+  REQUIRE(stored.physicalTag == UINT32_C(0xabcde000));
+  REQUIRE(stored.valid);
+  REQUIRE_FALSE(stored.dirty);
+  REQUIRE(stored.leastRecentlyFilled);
+  REQUIRE_FALSE(stored.locked);
+  REQUIRE(stored.data[7] == 0xa5);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::TagHi) ==
+    UINT32_C(0x89abcdef));
+  const EECacheLine &unchangedOtherWay =
+    memorySystem.instructionCacheLine(set, 0);
+  REQUIRE(
+    unchangedOtherWay.physicalTag ==
+    otherWay.physicalTag);
+  REQUIRE(unchangedOtherWay.valid == otherWay.valid);
+  REQUIRE(unchangedOtherWay.data[7] == otherWay.data[7]);
+
+  memorySystem.setCOP0Register(
+    EECOP0Register::TagLo,
+    UINT32_C(0x2468a000) | EECOP0TagLo::VALID);
+  result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionIndexStoreTag,
+        address & ~UINT32_C(1),
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE(
+    memorySystem.instructionCacheLine(set, 0).physicalTag ==
+    UINT32_C(0x2468a000));
+  REQUIRE(
+    memorySystem.instructionCacheLine(set, 0).valid);
+  const EECacheLine &unchangedWayOne =
+    memorySystem.instructionCacheLine(set, way);
+  REQUIRE(
+    unchangedWayOne.physicalTag ==
+    stored.physicalTag);
+  REQUIRE(unchangedWayOne.valid == stored.valid);
+  REQUIRE(
+    unchangedWayOne.leastRecentlyFilled ==
+    stored.leastRecentlyFilled);
+  REQUIRE(unchangedWayOne.data[7] == stored.data[7]);
+}
+
+TEST_CASE("EE instruction-cache index data operations transfer one word")
+{
+  EEMemorySystem memorySystem;
+  constexpr std::size_t sourceSet = 0x12;
+  constexpr std::size_t targetSet = 0x67;
+  constexpr std::size_t way = 1;
+  constexpr std::size_t wordOffset = 0x2c;
+  EECacheLine source;
+  source.physicalTag = UINT32_C(0x11111000);
+  source.valid = true;
+  source.leastRecentlyFilled = true;
+  source.data[wordOffset] = 0xef;
+  source.data[wordOffset + 1] = 0xbe;
+  source.data[wordOffset + 2] = 0xad;
+  source.data[wordOffset + 3] = 0xde;
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    sourceSet,
+    way,
+    source);
+  EECacheLine target;
+  target.physicalTag = UINT32_C(0x22222000);
+  target.valid = true;
+  target.leastRecentlyFilled = false;
+  target.data.fill(0x5a);
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    targetSet,
+    way,
+    target);
+  memorySystem.setCOP0Register(
+    EECOP0Register::TagHi,
+    UINT32_C(0x76543210));
+
+  const std::uint32_t sourceAddress =
+    UINT32_C(0xb0000000) |
+    static_cast<std::uint32_t>(sourceSet << 6) |
+    wordOffset |
+    UINT32_C(3);
+  EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionIndexLoadData,
+        sourceAddress,
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::TagLo) ==
+    UINT32_C(0xdeadbeef));
+
+  const std::uint32_t targetAddress =
+    UINT32_C(0xc0000000) |
+    static_cast<std::uint32_t>(targetSet << 6) |
+    wordOffset |
+    UINT32_C(1);
+  result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionIndexStoreData,
+        targetAddress,
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  const EECacheLine &stored =
+    memorySystem.instructionCacheLine(targetSet, way);
+  REQUIRE(stored.data[wordOffset] == 0xef);
+  REQUIRE(stored.data[wordOffset + 1] == 0xbe);
+  REQUIRE(stored.data[wordOffset + 2] == 0xad);
+  REQUIRE(stored.data[wordOffset + 3] == 0xde);
+  REQUIRE(stored.data[wordOffset - 1] == 0x5a);
+  REQUIRE(stored.data[wordOffset + 4] == 0x5a);
+  REQUIRE(stored.physicalTag == target.physicalTag);
+  REQUIRE(stored.valid == target.valid);
+  REQUIRE(
+    stored.leastRecentlyFilled ==
+    target.leastRecentlyFilled);
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::TagHi) ==
+    UINT32_C(0x76543210));
 }
 
 TEST_CASE("EE cache inspection rejects invalid sets and ways")
