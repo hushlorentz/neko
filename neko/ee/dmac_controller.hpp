@@ -43,6 +43,7 @@ class DMACController
 
   private:
     friend class NekoSaveStateCodec;
+    friend class NekoSystem;
 
     std::uint32_t controlRegister = 0;
     std::uint32_t statusRegister = 0;

@@ -426,7 +426,7 @@ TEST_CASE("Neko Subsystem Regression Trace Tests")
   REQUIRE(firstFrame.videoHash == secondFrame.videoHash);
   REQUIRE(firstFrame.videoHash == nekoFrameHash(firstFrame.video));
   REQUIRE(firstFrame.eeStateHash == secondFrame.eeStateHash);
-  REQUIRE(firstFrame.eeStateHash == first.eeCore().stateHash());
+  REQUIRE(firstFrame.eeStateHash == first.eeStateHash());
   REQUIRE(first.traceHash() == second.traceHash());
   REQUIRE(first.trace().size() == second.trace().size());
   REQUIRE(first.trace().size() >= 6);

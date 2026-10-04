@@ -23,10 +23,19 @@ namespace
   constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
   constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
-    VERSION_29_PREPARED_STATE_SIZE = 37801504;
+    VERSION_30_PREPARED_STATE_SIZE = 37817936;
   constexpr std::uint64_t
-    VERSION_29_PREPARED_STATE_HASH =
-      UINT64_C(0xeaa71c11fdd78bc5);
+    VERSION_30_PREPARED_STATE_HASH =
+      UINT64_C(0xf03cea5483147e6b);
+  constexpr std::size_t SPR_DMA_STATE_SIZE = 16432;
+  constexpr std::size_t SPR_DMA_SCRATCHPAD_SIZE = 16384;
+  constexpr std::size_t SPR_DMA_CHANNEL_SIZE = 22;
+  constexpr std::size_t SPR_DMA_SQWC_OFFSET_FROM_END =
+    4 + 2 * SPR_DMA_CHANNEL_SIZE;
+  constexpr std::size_t SPR_DMA_FROM_OFFSET_FROM_END =
+    2 * SPR_DMA_CHANNEL_SIZE;
+  constexpr std::size_t SPR_DMA_TO_OFFSET_FROM_END =
+    SPR_DMA_CHANNEL_SIZE;
   constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
   constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
   constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
@@ -732,7 +741,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 29 save-state layout is byte-stable")
+TEST_CASE("Version 30 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -747,14 +756,255 @@ TEST_CASE("Version 29 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 29);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 30);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_29_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_30_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_29_PREPARED_STATE_HASH);
+    VERSION_30_PREPARED_STATE_HASH);
+}
+
+TEST_CASE("Scratchpad and SPR DMAC state participate in canonical hashes")
+{
+  NekoSystem scratchpad;
+  const std::uint64_t initialCoreHash =
+    scratchpad.eeCore().stateHash();
+  const std::uint64_t initialSystemHash =
+    scratchpad.eeStateHash();
+  REQUIRE(
+    scratchpad.eeMemorySystem().writeScratchpad8(
+      0x37,
+      0xa5));
+  REQUIRE(scratchpad.eeCore().stateHash() != initialCoreHash);
+  REQUIRE(scratchpad.eeStateHash() != initialSystemHash);
+
+  NekoSystem common;
+  const std::uint64_t commonHash = common.eeStateHash();
+  common.dmacController().writeInterleaveSize(
+    3 | (5u << 16));
+  REQUIRE(common.eeStateHash() != commonHash);
+
+  NekoSystem channel;
+  const std::uint64_t channelHash = channel.eeStateHash();
+  channel.fromScratchpadDMAC().writeMemoryAddress(0x100);
+  REQUIRE(channel.eeStateHash() != channelHash);
+
+  NekoSystem continuation;
+  continuation.dmacController().writeControl(
+    DMACControl::DMA_ENABLE);
+  continuation.dmacController().writeInterleaveSize(
+    1 | (2u << 16));
+  continuation.fromScratchpadDMAC().writeMemoryAddress(0);
+  continuation.fromScratchpadDMAC().writeQuadwordCount(3);
+  continuation.fromScratchpadDMAC().writeScratchpadAddress(0);
+  continuation.fromScratchpadDMAC().writeChannelControl(
+    DMACChannelControl::INTERLEAVE_MODE |
+    DMACChannelControl::START);
+  const std::uint64_t beforeTransfer =
+    continuation.eeStateHash();
+  continuation.fromScratchpadDMAC().clock();
+  REQUIRE(continuation.eeStateHash() != beforeTransfer);
+
+  NekoSystem longerChunk;
+  longerChunk.dmacController().writeInterleaveSize(
+    1 | (2u << 16));
+  longerChunk.fromScratchpadDMAC().writeQuadwordCount(3);
+  longerChunk.fromScratchpadDMAC().writeChannelControl(
+    DMACChannelControl::INTERLEAVE_MODE |
+    DMACChannelControl::START);
+
+  NekoSystem shorterChunk;
+  shorterChunk.dmacController().writeInterleaveSize(
+    1 | (1u << 16));
+  shorterChunk.fromScratchpadDMAC().writeQuadwordCount(3);
+  shorterChunk.fromScratchpadDMAC().writeChannelControl(
+    DMACChannelControl::INTERLEAVE_MODE |
+    DMACChannelControl::START);
+  shorterChunk.dmacController().writeInterleaveSize(
+    1 | (2u << 16));
+  REQUIRE(
+    shorterChunk.eeStateHash() !=
+    longerChunk.eeStateHash());
+}
+
+TEST_CASE("Scratchpad and SPR DMAC continuation survive save-state restore")
+{
+  NekoSystem original;
+  REQUIRE(
+    original.eeMemorySystem().writeScratchpad128(
+      0,
+      {UINT64_C(0x0123456789abcdef),
+       UINT64_C(0xfedcba9876543210)}));
+  REQUIRE(
+    original.eeMemorySystem().writeScratchpad128(
+      16,
+      {UINT64_C(0x1122334455667788),
+       UINT64_C(0x8877665544332211)}));
+  original.dmacController().writeControl(
+    DMACControl::DMA_ENABLE);
+  original.dmacController().writeInterleaveSize(
+    1 | (2u << 16));
+  original.dmacController().writeStatus(
+    DMACStatus::CHANNEL_8_MASK |
+    DMACStatus::CHANNEL_9_MASK);
+
+  ScratchpadDMACChannel &from =
+    original.fromScratchpadDMAC();
+  from.writeMemoryAddress(0);
+  from.writeQuadwordCount(3);
+  from.writeScratchpadAddress(0);
+  from.writeChannelControl(
+    DMACChannelControl::INTERLEAVE_MODE |
+    DMACChannelControl::START);
+  from.clock();
+
+  ScratchpadDMACChannel &to =
+    original.toScratchpadDMAC();
+  to.writeMemoryAddress(0x100);
+  to.writeQuadwordCount(4);
+  to.writeTagAddress(0x200);
+  to.writeScratchpadAddress(0x3ff0);
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+
+  EEQuadword scratchpad0 = {};
+  EEQuadword scratchpad1 = {};
+  REQUIRE(
+    restored.eeMemorySystem().readScratchpad128(
+      0,
+      &scratchpad0));
+  REQUIRE(
+    restored.eeMemorySystem().readScratchpad128(
+      16,
+      &scratchpad1));
+  REQUIRE(
+    scratchpad0.low ==
+    UINT64_C(0x0123456789abcdef));
+  REQUIRE(
+    scratchpad0.high ==
+    UINT64_C(0xfedcba9876543210));
+  REQUIRE(
+    scratchpad1.low ==
+    UINT64_C(0x1122334455667788));
+  REQUIRE(
+    scratchpad1.high ==
+    UINT64_C(0x8877665544332211));
+  REQUIRE(
+    restored.dmacController().interleaveSize() ==
+    original.dmacController().interleaveSize());
+  REQUIRE(
+    restored.dmacController().status() ==
+    original.dmacController().status());
+  REQUIRE(
+    restored.fromScratchpadDMAC().channelControl() ==
+    from.channelControl());
+  REQUIRE(
+    restored.fromScratchpadDMAC().memoryAddress() ==
+    from.memoryAddress());
+  REQUIRE(
+    restored.fromScratchpadDMAC().quadwordCount() ==
+    from.quadwordCount());
+  REQUIRE(
+    restored.fromScratchpadDMAC().scratchpadAddress() ==
+    from.scratchpadAddress());
+  REQUIRE(
+    restored.toScratchpadDMAC().tagAddress() ==
+    to.tagAddress());
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  REQUIRE(restored.saveState() == state);
+
+  original.fromScratchpadDMAC().clock();
+  restored.fromScratchpadDMAC().clock();
+  REQUIRE(restored.saveState() == original.saveState());
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+}
+
+TEST_CASE("Malformed SPR DMA save states are rejected transactionally")
+{
+  NekoSystem source;
+  const std::vector<std::uint8_t> valid = source.saveState();
+  REQUIRE(valid.size() >= SPR_DMA_STATE_SIZE);
+
+  NekoSystem destination;
+  destination.eeBus().write32(0x40, UINT32_C(0x89abcdef));
+  const std::vector<std::uint8_t> before =
+    destination.saveState();
+
+  const auto requireRejected =
+    [&](std::vector<std::uint8_t> invalid)
+    {
+      updateChecksum(&invalid);
+      REQUIRE_THROWS(destination.loadState(invalid));
+      REQUIRE(destination.saveState() == before);
+    };
+
+  SECTION("reserved D_SQWC bits")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU32(
+      &invalid,
+      invalid.size() - SPR_DMA_SQWC_OFFSET_FROM_END,
+      UINT32_C(0x00000100));
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("unsupported fromSPR mode")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU32(
+      &invalid,
+      invalid.size() -
+        SPR_DMA_FROM_OFFSET_FROM_END,
+      DMACChannelControl::CHAIN_MODE);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("fromSPR tag address")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU32(
+      &invalid,
+      invalid.size() -
+        SPR_DMA_FROM_OFFSET_FROM_END + 12,
+      0x10);
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("inactive interleave continuation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    invalid[
+      invalid.size() -
+      SPR_DMA_FROM_OFFSET_FROM_END + 20] = 1;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("out-of-range interleave continuation")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    const std::size_t continuationOffset =
+      invalid.size() -
+      SPR_DMA_FROM_OFFSET_FROM_END + 20;
+    invalid[continuationOffset] = 0;
+    invalid[continuationOffset + 1] = 1;
+    requireRejected(std::move(invalid));
+  }
+
+  SECTION("misaligned toSPR memory address")
+  {
+    std::vector<std::uint8_t> invalid = valid;
+    writeU32(
+      &invalid,
+      invalid.size() -
+        SPR_DMA_TO_OFFSET_FROM_END + 4,
+      1);
+    requireRejected(std::move(invalid));
+  }
 }
 
 TEST_CASE("Invalid packed MAC continuation states are rejected")

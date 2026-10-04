@@ -3,6 +3,26 @@
 
 #include "neko_system.hpp"
 
+namespace
+{
+  constexpr std::uint64_t STATE_FNV_OFFSET_BASIS =
+    UINT64_C(14695981039346656037);
+  constexpr std::uint64_t STATE_FNV_PRIME =
+    UINT64_C(1099511628211);
+
+  void hashStateValue(
+    std::uint64_t *hash,
+    std::uint64_t value)
+  {
+    for (std::uint8_t index = 0; index < 8; ++index)
+    {
+      *hash ^= static_cast<std::uint8_t>(
+        value >> (index * 8));
+      *hash *= STATE_FNV_PRIME;
+    }
+  }
+}
+
 NekoSystem::NekoSystem() :
   vu0Component(VPUType::VU0),
   vu1Component(VPUType::VU1),
@@ -117,9 +137,57 @@ NekoFrameResult NekoSystem::runFrame()
     gsDisplayComponent.presentationBoundaryCount();
   result.video = videoOutput();
   result.videoHash = nekoFrameHash(result.video);
-  result.eeStateHash = eeCoreComponent.stateHash();
+  result.eeStateHash = eeStateHash();
   result.audio = audioOutput();
   return result;
+}
+
+std::uint64_t NekoSystem::eeStateHash() const
+{
+  std::uint64_t hash = STATE_FNV_OFFSET_BASIS;
+  hashStateValue(&hash, eeCoreComponent.stateHash());
+  hashStateValue(
+    &hash,
+    dmacControllerComponent.controlRegister);
+  hashStateValue(
+    &hash,
+    dmacControllerComponent.statusRegister &
+      (DMACStatus::CHANNEL_8 |
+       DMACStatus::CHANNEL_9));
+  hashStateValue(
+    &hash,
+    dmacControllerComponent.statusMaskRegister &
+      (DMACStatus::CHANNEL_8_MASK |
+       DMACStatus::CHANNEL_9_MASK));
+  hashStateValue(
+    &hash,
+    dmacControllerComponent.interleaveSizeRegister);
+
+  const auto hashChannel =
+    [&hash](const ScratchpadDMACChannel &channel)
+    {
+      hashStateValue(
+        &hash,
+        channel.channelControlRegister);
+      hashStateValue(
+        &hash,
+        channel.memoryAddressRegister);
+      hashStateValue(
+        &hash,
+        channel.quadwordCountRegister);
+      hashStateValue(
+        &hash,
+        channel.tagAddressRegister);
+      hashStateValue(
+        &hash,
+        channel.scratchpadAddressRegister);
+      hashStateValue(
+        &hash,
+        channel.interleaveQuadwordsRemaining);
+    };
+  hashChannel(fromScratchpadDMACComponent);
+  hashChannel(toScratchpadDMACComponent);
+  return hash;
 }
 
 GSPresentation NekoSystem::videoOutput() const

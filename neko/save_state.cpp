@@ -4,6 +4,22 @@
 
 namespace
 {
+  constexpr std::uint32_t SPR_MEMORY_ADDRESS_MASK =
+    UINT32_C(0x7ffffff0);
+  constexpr std::uint32_t SPR_TAG_ADDRESS_MASK =
+    UINT32_C(0xfffffff0);
+  constexpr std::uint32_t SPR_QWC_MASK = UINT32_C(0xffff);
+  constexpr std::uint32_t SPR_ADDRESS_MASK =
+    UINT32_C(0x3ff0);
+  constexpr std::uint32_t SPR_CHANNEL_CONTROL_WRITABLE =
+    DMACChannelControl::FROM_MEMORY |
+    DMACChannelControl::MODE_MASK |
+    DMACChannelControl::ADDRESS_STACK_MASK |
+    DMACChannelControl::TAG_TRANSFER_ENABLE |
+    DMACChannelControl::TAG_INTERRUPT_ENABLE |
+    DMACChannelControl::START |
+    DMACChannelControl::TAG_MASK;
+
   class SaveStateContainerWriter
   {
     public:
@@ -148,6 +164,111 @@ FPRegister readFPRegister(SaveStateReader *reader)
   return value;
 }
 
+void NekoSaveStateCodec::writeScratchpadDMAState(
+  SaveStateWriter *writer,
+  const NekoSystem &system)
+{
+  for (const EEQuadword &value :
+       system.eeCoreComponent.memorySystem.scratchpad)
+  {
+    writer->writeU64(value.low);
+    writer->writeU64(value.high);
+  }
+  writer->writeU32(
+    system.dmacControllerComponent.interleaveSizeRegister);
+
+  const auto writeChannel =
+    [writer](const ScratchpadDMACChannel &channel)
+    {
+      writer->writeU32(channel.channelControlRegister);
+      writer->writeU32(channel.memoryAddressRegister);
+      writer->writeU32(channel.quadwordCountRegister);
+      writer->writeU32(channel.tagAddressRegister);
+      writer->writeU32(channel.scratchpadAddressRegister);
+      writer->writeU16(
+        channel.interleaveQuadwordsRemaining);
+    };
+  writeChannel(system.fromScratchpadDMACComponent);
+  writeChannel(system.toScratchpadDMACComponent);
+}
+
+void NekoSaveStateCodec::readScratchpadDMAState(
+  SaveStateReader *reader,
+  NekoSystem *system)
+{
+  for (EEQuadword &value :
+       system->eeCoreComponent.memorySystem.scratchpad)
+  {
+    value.low = reader->readU64();
+    value.high = reader->readU64();
+  }
+
+  DMACController &controller =
+    system->dmacControllerComponent;
+  controller.interleaveSizeRegister = reader->readU32();
+  require(
+    (controller.interleaveSizeRegister &
+     ~(DMACInterleave::SKIP_MASK |
+       DMACInterleave::TRANSFER_MASK)) == 0,
+    "DMAC interleave size is invalid");
+
+  const auto readChannel =
+    [reader](
+      ScratchpadDMACChannel *channel,
+      bool tagAddressSupported)
+    {
+      channel->channelControlRegister = reader->readU32();
+      channel->memoryAddressRegister = reader->readU32();
+      channel->quadwordCountRegister = reader->readU32();
+      channel->tagAddressRegister = reader->readU32();
+      channel->scratchpadAddressRegister =
+        reader->readU32();
+      channel->interleaveQuadwordsRemaining =
+        reader->readU16();
+
+      const std::uint32_t mode =
+        channel->channelControlRegister &
+        DMACChannelControl::MODE_MASK;
+      require(
+        (channel->channelControlRegister &
+         ~SPR_CHANNEL_CONTROL_WRITABLE) == 0 &&
+        (mode == 0 ||
+         mode == DMACChannelControl::INTERLEAVE_MODE),
+        "SPR DMAC channel control is invalid");
+      require(
+        (channel->memoryAddressRegister &
+         ~SPR_MEMORY_ADDRESS_MASK) == 0,
+        "SPR DMAC memory address is invalid");
+      require(
+        channel->quadwordCountRegister <= SPR_QWC_MASK,
+        "SPR DMAC qword count is invalid");
+      require(
+        (channel->tagAddressRegister &
+         ~SPR_TAG_ADDRESS_MASK) == 0 &&
+        (tagAddressSupported ||
+         channel->tagAddressRegister == 0),
+        "SPR DMAC tag address is invalid");
+      require(
+        (channel->scratchpadAddressRegister &
+         ~SPR_ADDRESS_MASK) == 0,
+        "SPR DMAC scratchpad address is invalid");
+      require(
+        channel->interleaveQuadwordsRemaining <= 0xff,
+        "SPR DMAC interleave continuation is invalid");
+      require(
+        channel->interleaveQuadwordsRemaining == 0 ||
+        (channel->active() &&
+         mode == DMACChannelControl::INTERLEAVE_MODE),
+        "SPR DMAC interleave continuation is inconsistent");
+    };
+  readChannel(
+    &system->fromScratchpadDMACComponent,
+    false);
+  readChannel(
+    &system->toScratchpadDMACComponent,
+    true);
+}
+
 std::vector<std::uint8_t> NekoSaveStateCodec::save(
   const NekoSystem &system)
 {
@@ -181,7 +302,7 @@ void NekoSaveStateCodec::writeSystem(
   SaveStateWriter *writer,
   const NekoSystem &system)
 {
-  // Version 27 payload order is part of the on-disk compatibility contract.
+  // The version-30 extension remains appended after this stable payload.
   writer->writeU16(system.inputState.buttons);
   writer->writeU8(system.inputState.leftStickX);
   writer->writeU8(system.inputState.leftStickY);
@@ -210,6 +331,7 @@ void NekoSaveStateCodec::writeSystem(
     system.dmacControllerComponent);
   writeVIF1DMAC(writer, system.vif1DMACComponent);
   writeGSDisplay(writer, system.gsDisplayComponent);
+  writeScratchpadDMAState(writer, system);
 }
 
 void NekoSaveStateCodec::readSystem(
@@ -260,6 +382,7 @@ void NekoSaveStateCodec::readSystem(
     &system->dmacControllerComponent);
   readVIF1DMAC(reader, &system->vif1DMACComponent);
   readGSDisplay(reader, &system->gsDisplayComponent);
+  readScratchpadDMAState(reader, system);
 }
 
 void NekoSaveStateCodec::validateSystem(
@@ -537,6 +660,32 @@ void NekoSaveStateCodec::commitSystem(
     source->dmacControllerComponent.statusRegister;
   destination->dmacControllerComponent.statusMaskRegister =
     source->dmacControllerComponent.statusMaskRegister;
+  destination->dmacControllerComponent.interleaveSizeRegister =
+    source->dmacControllerComponent.interleaveSizeRegister;
+
+  const auto commitScratchpadChannel =
+    [](ScratchpadDMACChannel *destinationChannel,
+       const ScratchpadDMACChannel &sourceChannel)
+    {
+      destinationChannel->channelControlRegister =
+        sourceChannel.channelControlRegister;
+      destinationChannel->memoryAddressRegister =
+        sourceChannel.memoryAddressRegister;
+      destinationChannel->quadwordCountRegister =
+        sourceChannel.quadwordCountRegister;
+      destinationChannel->tagAddressRegister =
+        sourceChannel.tagAddressRegister;
+      destinationChannel->scratchpadAddressRegister =
+        sourceChannel.scratchpadAddressRegister;
+      destinationChannel->interleaveQuadwordsRemaining =
+        sourceChannel.interleaveQuadwordsRemaining;
+    };
+  commitScratchpadChannel(
+    &destination->fromScratchpadDMACComponent,
+    source->fromScratchpadDMACComponent);
+  commitScratchpadChannel(
+    &destination->toScratchpadDMACComponent,
+    source->toScratchpadDMACComponent);
 
   VIF1DMACChannel &vif1DMAC =
     destination->vif1DMACComponent;

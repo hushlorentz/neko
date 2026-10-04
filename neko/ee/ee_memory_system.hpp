@@ -211,6 +211,9 @@ class EEMemorySystem final
     bool replacementStateValid() const;
 
   private:
+    friend class EECore;
+    friend class NekoSaveStateCodec;
+
     struct TLBAcceleratorEntry
     {
       bool valid = false;

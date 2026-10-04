@@ -1790,7 +1790,7 @@ creating parallel ownership.
       and deterministic rejection of unsupported channel modes. Keep exact
       burst, release-cycle, and bus-priority timing deferred to the timing
       policy.
-- [ ] Add canonical hashing and transactional persistence for scratchpad bytes,
+- [x] Add canonical hashing and transactional persistence for scratchpad bytes,
       common interleave state, channel registers, and active transfer
       continuation. Cover malformed-state rejection and byte-stable
       save/restore.

@@ -9922,6 +9922,11 @@ std::uint64_t EECore::stateHash() const
     hashEEStateValue(&hash, entry.evenPage.value);
     hashEEStateValue(&hash, entry.oddPage.value);
   }
+  for (const EEQuadword &value : memorySystem.scratchpad)
+  {
+    hashEEStateValue(&hash, value.low);
+    hashEEStateValue(&hash, value.high);
+  }
   hashEEStateValue(
     &hash,
     static_cast<std::uint8_t>(exception));

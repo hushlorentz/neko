@@ -41,6 +41,7 @@ class ScratchpadDMACChannel : public ClockedComponent
 
   private:
     friend class NekoSaveStateCodec;
+    friend class NekoSystem;
 
     void requireStopped() const;
     void requireTagAddress() const;

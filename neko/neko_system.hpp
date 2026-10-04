@@ -98,6 +98,7 @@ class NekoSystem
     bool traceEnabled() const;
     const std::vector<NekoTraceEvent> &trace() const;
     std::uint64_t traceHash() const;
+    std::uint64_t eeStateHash() const;
 
     EECore &eeCore();
     const EECore &eeCore() const;
