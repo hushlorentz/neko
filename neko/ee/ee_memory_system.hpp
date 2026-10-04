@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "ee_cop0.hpp"
+#include "ee_types.hpp"
 
 struct EETLBPage
 {
@@ -104,6 +105,9 @@ class EEMemorySystem final
     static constexpr std::size_t TLB_ENTRY_COUNT = 48;
     static constexpr std::size_t ITLB_ENTRY_COUNT = 2;
     static constexpr std::size_t DTLB_ENTRY_COUNT = 4;
+    static constexpr std::size_t SCRATCHPAD_SIZE = 16 * 1024;
+    static constexpr std::size_t SCRATCHPAD_QWORD_COUNT =
+      SCRATCHPAD_SIZE / 16;
 
     static EECacheRoute cacheRoute(std::uint8_t attribute);
     EEAddressTranslationResult classifyInstructionAddress(
@@ -120,6 +124,36 @@ class EEMemorySystem final
       std::uint32_t virtualAddress,
       EEDataAccessDirection direction,
       const EEAddressTranslationContext &context) const;
+    bool readScratchpad8(
+      std::uint32_t offset,
+      std::uint8_t *value) const;
+    bool writeScratchpad8(
+      std::uint32_t offset,
+      std::uint8_t value);
+    bool readScratchpad16(
+      std::uint32_t offset,
+      std::uint16_t *value) const;
+    bool writeScratchpad16(
+      std::uint32_t offset,
+      std::uint16_t value);
+    bool readScratchpad32(
+      std::uint32_t offset,
+      std::uint32_t *value) const;
+    bool writeScratchpad32(
+      std::uint32_t offset,
+      std::uint32_t value);
+    bool readScratchpad64(
+      std::uint32_t offset,
+      std::uint64_t *value) const;
+    bool writeScratchpad64(
+      std::uint32_t offset,
+      std::uint64_t value);
+    bool readScratchpad128(
+      std::uint32_t offset,
+      EEQuadword *value) const;
+    bool writeScratchpad128(
+      std::uint32_t offset,
+      const EEQuadword &value);
     void reset();
     std::uint32_t cop0Register(
       EECOP0Register registerIndex) const;
@@ -175,6 +209,7 @@ class EEMemorySystem final
     std::uint32_t cop0TagLo = 0;
     std::uint32_t cop0TagHi = 0;
     std::array<EETLBEntry, TLB_ENTRY_COUNT> tlbEntries = {};
+    std::array<EEQuadword, SCRATCHPAD_QWORD_COUNT> scratchpad = {};
     mutable std::array<TLBAcceleratorEntry, ITLB_ENTRY_COUNT> itlb = {};
     mutable std::array<TLBAcceleratorEntry, DTLB_ENTRY_COUNT> dtlb = {};
     mutable std::size_t nextITLBReplacement = 0;

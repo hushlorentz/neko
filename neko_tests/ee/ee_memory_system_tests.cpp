@@ -18,6 +18,12 @@ static_assert(
 static_assert(
   EEMemorySystem::DTLB_ENTRY_COUNT == 4,
   "The EE DTLB capacity must remain architectural.");
+static_assert(
+  EEMemorySystem::SCRATCHPAD_SIZE == 16 * 1024,
+  "The EE scratchpad capacity must remain architectural.");
+static_assert(
+  EEMemorySystem::SCRATCHPAD_QWORD_COUNT == 1024,
+  "The EE scratchpad organization must remain architectural.");
 
 namespace
 {
@@ -49,6 +55,126 @@ namespace
     REQUIRE(result.physicalAddress == physicalAddress);
     REQUIRE(result.cacheRoute == cacheRoute);
   }
+}
+
+TEST_CASE("EE scratchpad provides checked little-endian access")
+{
+  EEMemorySystem memorySystem;
+  const EEQuadword quadword = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+
+  REQUIRE(memorySystem.writeScratchpad128(0x100, quadword));
+
+  std::uint8_t byte = 0;
+  std::uint16_t halfword = 0;
+  std::uint32_t word = 0;
+  std::uint64_t doubleword = 0;
+  EEQuadword loadedQuadword = {};
+  REQUIRE(memorySystem.readScratchpad8(0x10f, &byte));
+  REQUIRE(byte == 0xff);
+  REQUIRE(memorySystem.readScratchpad16(0x10e, &halfword));
+  REQUIRE(halfword == 0xffee);
+  REQUIRE(memorySystem.readScratchpad32(0x10c, &word));
+  REQUIRE(word == UINT32_C(0xffeeddcc));
+  REQUIRE(memorySystem.readScratchpad64(0x108, &doubleword));
+  REQUIRE(doubleword == UINT64_C(0xffeeddccbbaa9988));
+  REQUIRE(memorySystem.readScratchpad128(0x100, &loadedQuadword));
+  REQUIRE(loadedQuadword.low == quadword.low);
+  REQUIRE(loadedQuadword.high == quadword.high);
+
+  REQUIRE(memorySystem.writeScratchpad8(0x100, 0xaa));
+  REQUIRE(memorySystem.writeScratchpad16(0x102, 0xbbcc));
+  REQUIRE(memorySystem.writeScratchpad32(0x104, UINT32_C(0xddeeff00)));
+  REQUIRE(
+    memorySystem.writeScratchpad64(
+      0x108,
+      UINT64_C(0x1122334455667788)));
+  REQUIRE(memorySystem.readScratchpad128(0x100, &loadedQuadword));
+  REQUIRE(
+    loadedQuadword.low ==
+    UINT64_C(0xddeeff00bbcc11aa));
+  REQUIRE(
+    loadedQuadword.high ==
+    UINT64_C(0x1122334455667788));
+}
+
+TEST_CASE("EE scratchpad rejects ranges outside its fixed capacity")
+{
+  EEMemorySystem memorySystem;
+  const EEQuadword lastQuadword = {
+    UINT64_C(0x0123456789abcdef),
+    UINT64_C(0xfedcba9876543210)
+  };
+  REQUIRE(
+    memorySystem.writeScratchpad128(
+      EEMemorySystem::SCRATCHPAD_SIZE - 16,
+      lastQuadword));
+
+  std::uint8_t byte = 0x5a;
+  std::uint16_t halfword = 0x5a5a;
+  std::uint32_t word = UINT32_C(0x5a5a5a5a);
+  std::uint64_t doubleword = UINT64_C(0x5a5a5a5a5a5a5a5a);
+  EEQuadword quadword = {
+    UINT64_C(0x5a5a5a5a5a5a5a5a),
+    UINT64_C(0x5a5a5a5a5a5a5a5a)
+  };
+  REQUIRE_FALSE(
+    memorySystem.readScratchpad8(
+      EEMemorySystem::SCRATCHPAD_SIZE,
+      &byte));
+  REQUIRE_FALSE(
+    memorySystem.readScratchpad16(
+      EEMemorySystem::SCRATCHPAD_SIZE - 1,
+      &halfword));
+  REQUIRE_FALSE(
+    memorySystem.readScratchpad32(
+      EEMemorySystem::SCRATCHPAD_SIZE - 3,
+      &word));
+  REQUIRE_FALSE(
+    memorySystem.readScratchpad64(
+      EEMemorySystem::SCRATCHPAD_SIZE - 7,
+      &doubleword));
+  REQUIRE_FALSE(
+    memorySystem.readScratchpad128(
+      EEMemorySystem::SCRATCHPAD_SIZE - 15,
+      &quadword));
+  REQUIRE(byte == 0x5a);
+  REQUIRE(halfword == 0x5a5a);
+  REQUIRE(word == UINT32_C(0x5a5a5a5a));
+  REQUIRE(doubleword == UINT64_C(0x5a5a5a5a5a5a5a5a));
+  REQUIRE(quadword.low == UINT64_C(0x5a5a5a5a5a5a5a5a));
+  REQUIRE(quadword.high == UINT64_C(0x5a5a5a5a5a5a5a5a));
+
+  REQUIRE_FALSE(
+    memorySystem.writeScratchpad16(
+      EEMemorySystem::SCRATCHPAD_SIZE - 1,
+      0));
+  REQUIRE_FALSE(
+    memorySystem.writeScratchpad128(
+      EEMemorySystem::SCRATCHPAD_SIZE - 15,
+      {}));
+  REQUIRE(memorySystem.readScratchpad128(
+    EEMemorySystem::SCRATCHPAD_SIZE - 16,
+    &quadword));
+  REQUIRE(quadword.low == lastQuadword.low);
+  REQUIRE(quadword.high == lastQuadword.high);
+}
+
+TEST_CASE("EE scratchpad reset clears its fixed storage")
+{
+  EEMemorySystem memorySystem;
+  REQUIRE(
+    memorySystem.writeScratchpad64(
+      0x1230,
+      UINT64_C(0x0123456789abcdef)));
+
+  memorySystem.reset();
+
+  std::uint64_t value = UINT64_MAX;
+  REQUIRE(memorySystem.readScratchpad64(0x1230, &value));
+  REQUIRE(value == 0);
 }
 
 TEST_CASE("EE segment classification follows privilege boundaries")

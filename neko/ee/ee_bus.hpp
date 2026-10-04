@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "ee_types.hpp"
 #include "gif.hpp"
 
 class EEInterruptController;
@@ -81,12 +82,6 @@ namespace EEVIFStatus
   constexpr std::uint32_t INTERRUPT_STALL = 1u << 10;
   constexpr std::uint32_t INTERRUPT = 1u << 11;
 }
-
-struct EEQuadword
-{
-  std::uint64_t low = 0;
-  std::uint64_t high = 0;
-};
 
 enum class EEDataWriteResult : std::uint8_t
 {

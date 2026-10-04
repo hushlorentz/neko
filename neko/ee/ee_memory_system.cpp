@@ -62,6 +62,97 @@ namespace
       {oddPage}
     };
   }
+
+  bool scratchpadRange(
+    std::uint32_t offset,
+    std::size_t width)
+  {
+    return
+      offset < EEMemorySystem::SCRATCHPAD_SIZE &&
+      width <= EEMemorySystem::SCRATCHPAD_SIZE - offset;
+  }
+
+  std::uint8_t scratchpadByte(
+    const std::array<
+      EEQuadword,
+      EEMemorySystem::SCRATCHPAD_QWORD_COUNT> &scratchpad,
+    std::uint32_t offset)
+  {
+    const EEQuadword &quadword = scratchpad[offset / 16];
+    const std::size_t byteIndex = offset % 16;
+    const std::uint64_t half =
+      byteIndex < 8 ? quadword.low : quadword.high;
+    return static_cast<std::uint8_t>(
+      half >> ((byteIndex % 8) * 8));
+  }
+
+  void setScratchpadByte(
+    std::array<
+      EEQuadword,
+      EEMemorySystem::SCRATCHPAD_QWORD_COUNT> *scratchpad,
+    std::uint32_t offset,
+    std::uint8_t value)
+  {
+    EEQuadword &quadword = (*scratchpad)[offset / 16];
+    const std::size_t byteIndex = offset % 16;
+    std::uint64_t &half =
+      byteIndex < 8 ? quadword.low : quadword.high;
+    const std::size_t shift = (byteIndex % 8) * 8;
+    half =
+      (half & ~(UINT64_C(0xff) << shift)) |
+      (static_cast<std::uint64_t>(value) << shift);
+  }
+
+  template<typename Value>
+  bool readScratchpadValue(
+    const std::array<
+      EEQuadword,
+      EEMemorySystem::SCRATCHPAD_QWORD_COUNT> &scratchpad,
+    std::uint32_t offset,
+    Value *value)
+  {
+    if (value == nullptr)
+    {
+      throw std::invalid_argument(
+        "EE scratchpad load requires an output value.");
+    }
+    if (!scratchpadRange(offset, sizeof(Value)))
+    {
+      return false;
+    }
+    Value result = 0;
+    for (std::size_t index = 0; index < sizeof(Value); ++index)
+    {
+      result |=
+        static_cast<Value>(
+          scratchpadByte(scratchpad, offset + index)) <<
+        (index * 8);
+    }
+    *value = result;
+    return true;
+  }
+
+  template<typename Value>
+  bool writeScratchpadValue(
+    std::array<
+      EEQuadword,
+      EEMemorySystem::SCRATCHPAD_QWORD_COUNT> *scratchpad,
+    std::uint32_t offset,
+    Value value)
+  {
+    if (!scratchpadRange(offset, sizeof(Value)))
+    {
+      return false;
+    }
+    for (std::size_t index = 0; index < sizeof(Value); ++index)
+    {
+      setScratchpadByte(
+        scratchpad,
+        offset + index,
+        static_cast<std::uint8_t>(value >> (index * 8)));
+    }
+    return true;
+  }
 }
 
 bool EETLBPage::valid() const
@@ -180,6 +271,95 @@ EEAddressTranslationResult EEMemorySystem::translateDataAddress(
   return classification.outcome == EEAddressTranslationOutcome::TLBLookup
     ? translateMappedAddress(virtualAddress, store, false)
     : classification;
+}
+
+bool EEMemorySystem::readScratchpad8(
+  std::uint32_t offset,
+  std::uint8_t *value) const
+{
+  return readScratchpadValue(scratchpad, offset, value);
+}
+
+bool EEMemorySystem::writeScratchpad8(
+  std::uint32_t offset,
+  std::uint8_t value)
+{
+  return writeScratchpadValue(&scratchpad, offset, value);
+}
+
+bool EEMemorySystem::readScratchpad16(
+  std::uint32_t offset,
+  std::uint16_t *value) const
+{
+  return readScratchpadValue(scratchpad, offset, value);
+}
+
+bool EEMemorySystem::writeScratchpad16(
+  std::uint32_t offset,
+  std::uint16_t value)
+{
+  return writeScratchpadValue(&scratchpad, offset, value);
+}
+
+bool EEMemorySystem::readScratchpad32(
+  std::uint32_t offset,
+  std::uint32_t *value) const
+{
+  return readScratchpadValue(scratchpad, offset, value);
+}
+
+bool EEMemorySystem::writeScratchpad32(
+  std::uint32_t offset,
+  std::uint32_t value)
+{
+  return writeScratchpadValue(&scratchpad, offset, value);
+}
+
+bool EEMemorySystem::readScratchpad64(
+  std::uint32_t offset,
+  std::uint64_t *value) const
+{
+  return readScratchpadValue(scratchpad, offset, value);
+}
+
+bool EEMemorySystem::writeScratchpad64(
+  std::uint32_t offset,
+  std::uint64_t value)
+{
+  return writeScratchpadValue(&scratchpad, offset, value);
+}
+
+bool EEMemorySystem::readScratchpad128(
+  std::uint32_t offset,
+  EEQuadword *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE scratchpad quadword load requires an output value.");
+  }
+  if (!scratchpadRange(offset, 16))
+  {
+    return false;
+  }
+  EEQuadword result = {};
+  readScratchpadValue(scratchpad, offset, &result.low);
+  readScratchpadValue(scratchpad, offset + 8, &result.high);
+  *value = result;
+  return true;
+}
+
+bool EEMemorySystem::writeScratchpad128(
+  std::uint32_t offset,
+  const EEQuadword &value)
+{
+  if (!scratchpadRange(offset, 16))
+  {
+    return false;
+  }
+  writeScratchpadValue(&scratchpad, offset, value.low);
+  writeScratchpadValue(&scratchpad, offset + 8, value.high);
+  return true;
 }
 
 EEAddressTranslationResult EEMemorySystem::classifyAddress(
@@ -465,6 +645,7 @@ void EEMemorySystem::reset()
   cop0TagLo = 0;
   cop0TagHi = 0;
   tlbEntries.fill({});
+  scratchpad.fill({});
   invalidateTLBAccelerators();
 }
 

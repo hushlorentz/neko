@@ -1765,7 +1765,7 @@ creating parallel ownership.
 
 ### Scratchpad RAM and DMA Visibility
 
-- [ ] Add memory-system-owned 16 KiB scratchpad storage, organized as 1024
+- [x] Add memory-system-owned 16 KiB scratchpad storage, organized as 1024
       qwords, with checked byte-through-qword access addressed by bits `13:0`.
       Keep the storage untagged, uncached, fixed-capacity, and allocation-free.
 - [ ] Route CPU scalar and merge loads/stores through the typed scratchpad
