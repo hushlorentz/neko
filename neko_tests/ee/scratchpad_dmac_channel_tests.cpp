@@ -610,6 +610,170 @@ TEST_CASE("Scratchpad DMAC uses physical main-bus addresses")
   REQUIRE(
     toScratchpadBus.read32(EEMemoryMap::D9_SADR) == 0);
   REQUIRE(toScratchpadSystem.toScratchpadDMAC().active());
+
+  for (const std::uint32_t alias : {
+    UINT32_C(0x80000100),
+    UINT32_C(0xa0000100),
+    UINT32_C(0x20000100),
+    UINT32_C(0x30000100)})
+  {
+    EEQuadword value = {};
+    REQUIRE_FALSE(bus.readDMAC128(alias, &value));
+    REQUIRE_FALSE(bus.writeDMAC128(alias, scratchpad));
+  }
+}
+
+TEST_CASE("Scratchpad DMAC normal mode reaches VU data-memory mappings")
+{
+  struct Endpoint
+  {
+    std::uint32_t address;
+    VPU &(NekoSystem::*vpu)();
+    std::size_t qwordIndex;
+  };
+  const Endpoint endpoints[] = {
+    {UINT32_C(0x11004030), &NekoSystem::vu0, 3},
+    {UINT32_C(0x11005040), &NekoSystem::vu0, 4},
+    {UINT32_C(0x1100c050), &NekoSystem::vu1, 5}
+  };
+
+  for (const Endpoint &endpoint : endpoints)
+  {
+    NekoSystem system;
+    EEBus &bus = system.eeBus();
+    EEMemorySystem &memory = system.eeMemorySystem();
+    VPU &vpu = (system.*endpoint.vpu)();
+    const EEQuadword fromScratchpad = {
+      UINT64_C(0x7766554433221100),
+      UINT64_C(0xffeeddccbbaa9988)
+    };
+    const EEQuadword toScratchpad = {
+      UINT64_C(0x0123456789abcdef),
+      UINT64_C(0xfedcba9876543210)
+    };
+    REQUIRE(
+      memory.writeScratchpadDMA128(
+        0,
+        fromScratchpad) ==
+      EEScratchpadAccessResult::Completed);
+    bus.write32(
+      EEMemoryMap::D_CTRL,
+      DMACControl::DMA_ENABLE);
+    bus.write32(EEMemoryMap::D8_MADR, endpoint.address);
+    bus.write32(EEMemoryMap::D8_QWC, 1);
+    bus.write32(EEMemoryMap::D8_SADR, 0);
+    bus.write32(
+      EEMemoryMap::D8_CHCR,
+      DMACChannelControl::START);
+
+    system.clockMasterCycle();
+
+    const std::array<std::uint32_t, 4> vuValue =
+      vpu.readDataQuadword(endpoint.qwordIndex);
+    REQUIRE(vuValue[0] == UINT32_C(0x33221100));
+    REQUIRE(vuValue[1] == UINT32_C(0x77665544));
+    REQUIRE(vuValue[2] == UINT32_C(0xbbaa9988));
+    REQUIRE(vuValue[3] == UINT32_C(0xffeeddcc));
+
+    vpu.writeDataQuadword(
+      endpoint.qwordIndex,
+      {
+        UINT32_C(0x89abcdef),
+        UINT32_C(0x01234567),
+        UINT32_C(0x76543210),
+        UINT32_C(0xfedcba98)
+      });
+    bus.write32(EEMemoryMap::D9_MADR, endpoint.address);
+    bus.write32(EEMemoryMap::D9_QWC, 1);
+    bus.write32(EEMemoryMap::D9_SADR, 0x10);
+    bus.write32(
+      EEMemoryMap::D9_CHCR,
+      DMACChannelControl::START);
+
+    system.clockMasterCycle();
+
+    EEQuadword scratchpad = {};
+    REQUIRE(
+      memory.readScratchpadDMA128(
+        0x10,
+        &scratchpad) ==
+      EEScratchpadAccessResult::Completed);
+    requireQuadword(scratchpad, toScratchpad);
+  }
+}
+
+TEST_CASE("Scratchpad DMAC VU endpoints reject interleave mode")
+{
+  for (const ScratchpadDMACChannelKind kind : {
+    ScratchpadDMACChannelKind::FromScratchpad,
+    ScratchpadDMACChannelKind::ToScratchpad})
+  {
+    NekoSystem system;
+    EEBus &bus = system.eeBus();
+    EEMemorySystem &memory = system.eeMemorySystem();
+    const bool fromScratchpad =
+      kind == ScratchpadDMACChannelKind::FromScratchpad;
+    const EEQuadword sentinel = {
+      UINT64_C(0x0123456789abcdef),
+      UINT64_C(0xfedcba9876543210)
+    };
+    system.vu0().writeDataQuadword(
+      0,
+      {
+        UINT32_C(0x89abcdef),
+        UINT32_C(0x01234567),
+        UINT32_C(0x76543210),
+        UINT32_C(0xfedcba98)
+      });
+    REQUIRE(
+      memory.writeScratchpadDMA128(0, sentinel) ==
+      EEScratchpadAccessResult::Completed);
+    bus.write32(
+      EEMemoryMap::D_SQWC,
+      1 | (1u << 16));
+    bus.write32(
+      EEMemoryMap::D_CTRL,
+      DMACControl::DMA_ENABLE);
+    bus.write32(
+      fromScratchpad ?
+        EEMemoryMap::D8_MADR :
+        EEMemoryMap::D9_MADR,
+      UINT32_C(0x11004000));
+    bus.write32(
+      fromScratchpad ?
+        EEMemoryMap::D8_QWC :
+        EEMemoryMap::D9_QWC,
+      1);
+    bus.write32(
+      fromScratchpad ?
+        EEMemoryMap::D8_SADR :
+        EEMemoryMap::D9_SADR,
+      0);
+    bus.write32(
+      fromScratchpad ?
+        EEMemoryMap::D8_CHCR :
+        EEMemoryMap::D9_CHCR,
+      DMACChannelControl::INTERLEAVE_MODE |
+        DMACChannelControl::START);
+
+    REQUIRE_THROWS_WITH(
+      system.clockMasterCycle(),
+      "SPR DMAC VU memory endpoints require normal mode.");
+
+    EEQuadword unchangedScratchpad = {};
+    REQUIRE(
+      memory.readScratchpadDMA128(
+        0,
+        &unchangedScratchpad) ==
+      EEScratchpadAccessResult::Completed);
+    requireQuadword(unchangedScratchpad, sentinel);
+    const std::array<std::uint32_t, 4> unchangedVU =
+      system.vu0().readDataQuadword(0);
+    REQUIRE(unchangedVU[0] == UINT32_C(0x89abcdef));
+    REQUIRE(unchangedVU[1] == UINT32_C(0x01234567));
+    REQUIRE(unchangedVU[2] == UINT32_C(0x76543210));
+    REQUIRE(unchangedVU[3] == UINT32_C(0xfedcba98));
+  }
 }
 
 TEST_CASE("Scratchpad DMAC status bits drive the DMAC interrupt")

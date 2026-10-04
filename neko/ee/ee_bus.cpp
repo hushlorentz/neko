@@ -11,6 +11,7 @@
 #include "scratchpad_dmac_channel.hpp"
 #include "vif.hpp"
 #include "vif1_dmac_channel.hpp"
+#include "vpu.hpp"
 
 namespace
 {
@@ -136,6 +137,22 @@ void EEBus::attachDMACController(DMACController *dmac)
       "EE bus DMAC controller is already attached.");
   }
   dmacController = dmac;
+}
+
+void EEBus::attachVectorUnits(VPU *vu0, VPU *vu1)
+{
+  if (vu0 == nullptr || vu1 == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires non-null vector units.");
+  }
+  if (vu0Component != nullptr || vu1Component != nullptr)
+  {
+    throw std::logic_error(
+      "EE bus vector units are already attached.");
+  }
+  vu0Component = vu0;
+  vu1Component = vu1;
 }
 
 void EEBus::attachGIFDMACChannel(GIFDMACChannel *gifDMAC)
@@ -545,6 +562,126 @@ bool EEBus::writeDMAC128(
      static_cast<std::uint8_t>(
        value.high >> (index * 8));
   }
+  return true;
+}
+
+bool EEBus::vuDataMemoryAddress(
+  std::uint32_t address,
+  VPU **vpu,
+  std::size_t *quadwordIndex) const
+{
+  if (address >= EEMemoryMap::VU0_DATA_MEMORY_BASE &&
+      address < EEMemoryMap::VU0_DATA_MEMORY_END)
+  {
+    if (vu0Component == nullptr)
+    {
+      throw std::logic_error(
+        "EE bus VU0 is not attached.");
+    }
+    *vpu = vu0Component;
+    *quadwordIndex =
+      ((address - EEMemoryMap::VU0_DATA_MEMORY_BASE) &
+       UINT32_C(0x0fff)) /
+      16;
+    return true;
+  }
+  if (address >= EEMemoryMap::VU1_DATA_MEMORY_BASE &&
+      address < EEMemoryMap::VU1_DATA_MEMORY_END)
+  {
+    if (vu1Component == nullptr)
+    {
+      throw std::logic_error(
+        "EE bus VU1 is not attached.");
+    }
+    *vpu = vu1Component;
+    *quadwordIndex =
+      (address - EEMemoryMap::VU1_DATA_MEMORY_BASE) /
+      16;
+    return true;
+  }
+  return false;
+}
+
+bool EEBus::readScratchpadDMAC128(
+  std::uint32_t physicalAddress,
+  EEScratchpadDMACMode mode,
+  EEQuadword *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "SPR DMAC quadword load requires an output value.");
+  }
+  requireAlignment(
+    physicalAddress,
+    16,
+    "SPR DMAC quadword load must be naturally aligned.");
+  if (readDMAC128(physicalAddress, value))
+  {
+    return true;
+  }
+
+  VPU *vpu = nullptr;
+  std::size_t quadwordIndex = 0;
+  if (!vuDataMemoryAddress(
+        physicalAddress,
+        &vpu,
+        &quadwordIndex))
+  {
+    return false;
+  }
+  if (mode != EEScratchpadDMACMode::Normal)
+  {
+    throw std::invalid_argument(
+      "SPR DMAC VU memory endpoints require normal mode.");
+  }
+  const std::array<std::uint32_t, 4> words =
+    vpu->readDataQuadword(quadwordIndex);
+  value->low =
+    static_cast<std::uint64_t>(words[0]) |
+    (static_cast<std::uint64_t>(words[1]) << 32);
+  value->high =
+    static_cast<std::uint64_t>(words[2]) |
+    (static_cast<std::uint64_t>(words[3]) << 32);
+  return true;
+}
+
+bool EEBus::writeScratchpadDMAC128(
+  std::uint32_t physicalAddress,
+  EEScratchpadDMACMode mode,
+  const EEQuadword &value)
+{
+  requireAlignment(
+    physicalAddress,
+    16,
+    "SPR DMAC quadword store must be naturally aligned.");
+  if (writeDMAC128(physicalAddress, value))
+  {
+    return true;
+  }
+
+  VPU *vpu = nullptr;
+  std::size_t quadwordIndex = 0;
+  if (!vuDataMemoryAddress(
+        physicalAddress,
+        &vpu,
+        &quadwordIndex))
+  {
+    return false;
+  }
+  if (mode != EEScratchpadDMACMode::Normal)
+  {
+    throw std::invalid_argument(
+      "SPR DMAC VU memory endpoints require normal mode.");
+  }
+  vpu->writeDataQuadword(
+    quadwordIndex,
+    {
+      static_cast<std::uint32_t>(value.low),
+      static_cast<std::uint32_t>(value.low >> 32),
+      static_cast<std::uint32_t>(value.high),
+      static_cast<std::uint32_t>(value.high >> 32)
+    });
   return true;
 }
 

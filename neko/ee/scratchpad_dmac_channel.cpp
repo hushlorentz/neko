@@ -191,6 +191,11 @@ void ScratchpadDMACChannel::transferQuadword(
   bool interleave)
 {
   EEQuadword value = {};
+  const EEScratchpadDMACMode mode =
+    (channelControlRegister &
+     DMACChannelControl::MODE_MASK) == 0 ?
+      EEScratchpadDMACMode::Normal :
+      EEScratchpadDMACMode::Interleave;
   if (channelKind ==
       ScratchpadDMACChannelKind::FromScratchpad)
   {
@@ -209,8 +214,9 @@ void ScratchpadDMACChannel::transferQuadword(
       throw std::out_of_range(
         "fromSPR DMAC scratchpad address is invalid.");
     }
-    if (!eeBus->writeDMAC128(
+    if (!eeBus->writeScratchpadDMAC128(
           memoryAddressRegister,
+          mode,
           value))
     {
       throw std::out_of_range(
@@ -219,8 +225,9 @@ void ScratchpadDMACChannel::transferQuadword(
   }
   else
   {
-    if (!eeBus->readDMAC128(
+    if (!eeBus->readScratchpadDMAC128(
           memoryAddressRegister,
+          mode,
           &value))
     {
       throw std::out_of_range(

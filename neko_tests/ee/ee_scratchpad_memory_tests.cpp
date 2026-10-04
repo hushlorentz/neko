@@ -9,6 +9,8 @@ namespace
 {
   constexpr std::uint32_t SCRATCHPAD_VIRTUAL_BASE =
     UINT32_C(0x50000000);
+  constexpr std::uint32_t SECOND_SCRATCHPAD_ALIAS =
+    UINT32_C(0x60000000);
 
   std::uint32_t memoryInstruction(
     std::uint8_t opcode,
@@ -33,14 +35,17 @@ namespace
       {low, UINT64_C(0xfeedfacecafebeef)});
   }
 
-  void mapScratchpad(EECore *core)
+  void mapScratchpad(
+    EECore *core,
+    std::size_t index = 0,
+    std::uint32_t virtualBase = SCRATCHPAD_VIRTUAL_BASE)
   {
     core->setCOP0Register(EECOP0Register::Status, 0);
     core->setTLBEntry(
-      0,
+      index,
       {
         EECOP0PageMask::SIZE_16_KIB,
-        SCRATCHPAD_VIRTUAL_BASE,
+        virtualBase,
         {
           EECOP0EntryLo::SCRATCHPAD |
           EECOP0EntryLo::DIRTY |
@@ -380,4 +385,180 @@ TEST_CASE("EE delayed COP1 memory accesses route through scratchpad storage")
   std::uint64_t busValue = 0;
   REQUIRE(system.eeBus().readData64(0x340, &busValue));
   REQUIRE(busValue == UINT64_C(0x01234567deadbeef));
+}
+
+TEST_CASE("EE scratchpad aliases and SPR DMA share overlapping storage")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  EEBus &bus = system.eeBus();
+  mapScratchpad(&core);
+  mapScratchpad(&core, 1, SECOND_SCRATCHPAD_ALIAS);
+  REQUIRE(
+    bus.writeData64(
+      0x180,
+      UINT64_C(0xfedcba9876543210)));
+
+  setRegister(&core, 1, SCRATCHPAD_VIRTUAL_BASE + 0x180);
+  setRegister(&core, 2, UINT64_C(0x0123456789abcdef));
+  runMemoryInstruction(&system, 0x3f);
+
+  setRegister(
+    &core,
+    1,
+    SECOND_SCRATCHPAD_ALIAS + 0x180);
+  setRegister(&core, 2, 0);
+  runMemoryInstruction(&system, 0x37);
+  REQUIRE(
+    core.generalRegister(2).low ==
+    UINT64_C(0x0123456789abcdef));
+
+  std::uint64_t mainMemory = 0;
+  REQUIRE(bus.readData64(0x180, &mainMemory));
+  REQUIRE(mainMemory == UINT64_C(0xfedcba9876543210));
+
+  bus.write32(
+    EEMemoryMap::D_CTRL,
+    DMACControl::DMA_ENABLE);
+  bus.write32(EEMemoryMap::D8_MADR, 0x200);
+  bus.write32(EEMemoryMap::D8_QWC, 1);
+  bus.write32(EEMemoryMap::D8_SADR, 0x180);
+  bus.write32(
+    EEMemoryMap::D8_CHCR,
+    DMACChannelControl::START);
+  system.clockMasterCycle();
+
+  EEQuadword transferred = {};
+  REQUIRE(bus.readDMAC128(0x200, &transferred));
+  REQUIRE(
+    transferred.low ==
+    UINT64_C(0x0123456789abcdef));
+
+  const EEQuadword replacement = {
+    UINT64_C(0x8877665544332211),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  REQUIRE(bus.writeDMAC128(0x300, replacement));
+  bus.write32(EEMemoryMap::D9_MADR, 0x300);
+  bus.write32(EEMemoryMap::D9_QWC, 1);
+  bus.write32(EEMemoryMap::D9_SADR, 0x180);
+  bus.write32(
+    EEMemoryMap::D9_CHCR,
+    DMACChannelControl::START);
+  system.clockMasterCycle();
+
+  setRegister(&core, 1, SCRATCHPAD_VIRTUAL_BASE + 0x180);
+  setRegister(&core, 2, 0);
+  runMemoryInstruction(&system, 0x37);
+  REQUIRE(core.generalRegister(2).low == replacement.low);
+  REQUIRE(bus.readData64(0x180, &mainMemory));
+  REQUIRE(mainMemory == UINT64_C(0xfedcba9876543210));
+}
+
+TEST_CASE("EE scratchpad aliases expose every implemented access width")
+{
+  struct ScalarAccess
+  {
+    std::uint8_t storeOpcode;
+    std::uint8_t loadOpcode;
+    std::uint16_t offset;
+    std::uint64_t value;
+  };
+  const ScalarAccess accesses[] = {
+    {0x28, 0x24, 0x100, UINT64_C(0x5a)},
+    {0x29, 0x25, 0x102, UINT64_C(0xa55a)},
+    {0x2b, 0x27, 0x104, UINT64_C(0x89abcdef)},
+    {0x3f, 0x37, 0x108, UINT64_C(0x0123456789abcdef)}
+  };
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  mapScratchpad(&core);
+  mapScratchpad(&core, 1, SECOND_SCRATCHPAD_ALIAS);
+
+  for (const ScalarAccess &access : accesses)
+  {
+    setRegister(
+      &core,
+      1,
+      SCRATCHPAD_VIRTUAL_BASE + access.offset);
+    setRegister(&core, 2, access.value);
+    runMemoryInstruction(&system, access.storeOpcode);
+    setRegister(
+      &core,
+      1,
+      SECOND_SCRATCHPAD_ALIAS + access.offset);
+    setRegister(&core, 2, 0);
+    runMemoryInstruction(&system, access.loadOpcode);
+    REQUIRE(core.generalRegister(2).low == access.value);
+  }
+
+  const EERegister128 quadword = {
+    UINT64_C(0x7766554433221100),
+    UINT64_C(0xffeeddccbbaa9988)
+  };
+  core.setGeneralRegister(
+    1,
+    {SCRATCHPAD_VIRTUAL_BASE + 0x20f, 0});
+  core.setGeneralRegister(2, quadword);
+  runMemoryInstruction(&system, 0x1f);
+  core.setGeneralRegister(
+    1,
+    {SECOND_SCRATCHPAD_ALIAS + 0x20f, 0});
+  core.setGeneralRegister(2, {});
+  runMemoryInstruction(&system, 0x1e);
+  REQUIRE(core.generalRegister(2) == quadword);
+}
+
+TEST_CASE("EE scratchpad CPU and DMA execution repeats after reset")
+{
+  const auto execute =
+    [](NekoSystem *system)
+    {
+      EECore &core = system->eeCore();
+      EEBus &bus = system->eeBus();
+      mapScratchpad(&core);
+      setRegister(
+        &core,
+        1,
+        SCRATCHPAD_VIRTUAL_BASE + 0x220);
+      setRegister(
+        &core,
+        2,
+        UINT64_C(0x0123456789abcdef));
+      runMemoryInstruction(system, 0x3f);
+      bus.write32(
+        EEMemoryMap::D_CTRL,
+        DMACControl::DMA_ENABLE);
+      bus.write32(EEMemoryMap::D8_MADR, 0x400);
+      bus.write32(EEMemoryMap::D8_QWC, 1);
+      bus.write32(EEMemoryMap::D8_SADR, 0x220);
+      bus.write32(
+        EEMemoryMap::D8_CHCR,
+        DMACChannelControl::START);
+      system->clockMasterCycle();
+    };
+
+  NekoSystem system;
+  execute(&system);
+  const std::vector<std::uint8_t> firstState =
+    system.saveState();
+  const std::uint64_t firstHash = system.eeStateHash();
+  EEQuadword firstDestination = {};
+  REQUIRE(
+    system.eeBus().readDMAC128(
+      0x400,
+      &firstDestination));
+
+  system.reset();
+  execute(&system);
+
+  EEQuadword secondDestination = {};
+  REQUIRE(
+    system.eeBus().readDMAC128(
+      0x400,
+      &secondDestination));
+  REQUIRE(secondDestination.low == firstDestination.low);
+  REQUIRE(secondDestination.high == firstDestination.high);
+  REQUIRE(system.eeStateHash() == firstHash);
+  REQUIRE(system.saveState() == firstState);
 }

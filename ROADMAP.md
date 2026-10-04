@@ -1794,7 +1794,7 @@ creating parallel ownership.
       common interleave state, channel registers, and active transfer
       continuation. Cover malformed-state rejection and byte-stable
       save/restore.
-- [ ] Complete the CPU/DMA integration matrix for aliases, every implemented
+- [x] Complete the CPU/DMA integration matrix for aliases, every implemented
       width, overlapping access, reset, repeated execution, physical DMA
       behavior, VU-memory normal-mode endpoints, and the documented lack of
       automatic cache or scratchpad snooping.

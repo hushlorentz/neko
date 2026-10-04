@@ -17,11 +17,20 @@ class GSDisplay;
 class ScratchpadDMACChannel;
 class VIF;
 class VIF1DMACChannel;
+class VPU;
 
 namespace EEMemoryMap
 {
   constexpr std::uint32_t MAIN_MEMORY_SIZE =
     32 * 1024 * 1024;
+  constexpr std::uint32_t VU0_DATA_MEMORY_BASE =
+    UINT32_C(0x11004000);
+  constexpr std::uint32_t VU0_DATA_MEMORY_END =
+    UINT32_C(0x11008000);
+  constexpr std::uint32_t VU1_DATA_MEMORY_BASE =
+    UINT32_C(0x1100c000);
+  constexpr std::uint32_t VU1_DATA_MEMORY_END =
+    UINT32_C(0x11010000);
   constexpr std::uint32_t KSEG0_BASE = UINT32_C(0x80000000);
   constexpr std::uint32_t KSEG1_BASE = UINT32_C(0xa0000000);
   constexpr std::uint32_t KSEG2_BASE = UINT32_C(0xc0000000);
@@ -101,6 +110,12 @@ enum class EEDataWriteResult : std::uint8_t
   Failed
 };
 
+enum class EEScratchpadDMACMode : std::uint8_t
+{
+  Normal,
+  Interleave
+};
+
 class EEBus
 {
   public:
@@ -118,6 +133,7 @@ class EEBus
       ScratchpadDMACChannel *fromScratchpadDMAC);
     void attachToScratchpadDMACChannel(
       ScratchpadDMACChannel *toScratchpadDMAC);
+    void attachVectorUnits(VPU *vu0, VPU *vu1);
     void attachGSDisplay(GSDisplay *gsDisplay);
     bool isMainMemoryRange(
       std::uint32_t address,
@@ -161,6 +177,14 @@ class EEBus
       EEQuadword *value) const;
     bool writeDMAC128(
       std::uint32_t physicalAddress,
+      const EEQuadword &value);
+    bool readScratchpadDMAC128(
+      std::uint32_t physicalAddress,
+      EEScratchpadDMACMode mode,
+      EEQuadword *value) const;
+    bool writeScratchpadDMAC128(
+      std::uint32_t physicalAddress,
+      EEScratchpadDMACMode mode,
       const EEQuadword &value);
     EEDataWriteResult writeGuestData128(
       std::uint32_t address,
@@ -211,6 +235,10 @@ class EEBus
     VIF1DMACChannel &attachedVIF1DMAC() const;
     ScratchpadDMACChannel &attachedFromScratchpadDMAC() const;
     ScratchpadDMACChannel &attachedToScratchpadDMAC() const;
+    bool vuDataMemoryAddress(
+      std::uint32_t address,
+      VPU **vpu,
+      std::size_t *quadwordIndex) const;
     GSDisplay &attachedGSDisplay() const;
 
     VIF *vif0Component;
@@ -224,6 +252,8 @@ class EEBus
     VIF1DMACChannel *vif1DMACChannel = nullptr;
     ScratchpadDMACChannel *fromScratchpadDMACChannel = nullptr;
     ScratchpadDMACChannel *toScratchpadDMACChannel = nullptr;
+    VPU *vu0Component = nullptr;
+    VPU *vu1Component = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;
     std::vector<std::uint8_t> mainMemory;
 };

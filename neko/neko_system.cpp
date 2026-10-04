@@ -71,6 +71,9 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(
     vu1Component,
     VU_CLOCK_PERIOD);
+  eeBusComponent.attachVectorUnits(
+    &vu0Component,
+    &vu1Component);
   eeBusComponent.attachDMACController(
     &dmacControllerComponent);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
