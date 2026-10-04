@@ -217,6 +217,14 @@ namespace
     }
   }
 
+  void invalidateInstructionCacheLine(EECacheLine *line)
+  {
+    const bool leastRecentlyFilled =
+      line->leastRecentlyFilled;
+    *line = {};
+    line->leastRecentlyFilled = leastRecentlyFilled;
+  }
+
   template<typename Value>
   void storeLittleEndian(
     std::array<std::uint8_t, 16> *data,
@@ -1292,7 +1300,11 @@ EECacheMaintenanceResult EEMemorySystem::maintainCache(
     case EECacheOperation::InstructionIndexLoadData:
     case EECacheOperation::InstructionIndexStoreTag:
     case EECacheOperation::InstructionIndexStoreData:
+    case EECacheOperation::InstructionIndexInvalidate:
       return maintainInstructionCacheIndex(request);
+    case EECacheOperation::InstructionHitInvalidate:
+    case EECacheOperation::InstructionFill:
+      return maintainInstructionCacheAddressed(bus, request);
     default:
       break;
   }
@@ -1361,10 +1373,90 @@ EEMemorySystem::maintainInstructionCacheIndex(
         cop0TagLo);
       result.outcome = EECacheMaintenanceOutcome::Completed;
       return result;
+    case EECacheOperation::InstructionIndexInvalidate:
+      invalidateInstructionCacheLine(&instructionLine);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
     default:
       throw std::invalid_argument(
         "EE instruction-cache index operation is invalid.");
   }
+}
+
+EECacheMaintenanceResult
+EEMemorySystem::maintainInstructionCacheAddressed(
+  EEBus *bus,
+  const EECacheMaintenanceRequest &request)
+{
+  EECacheMaintenanceResult result;
+  result.translation = translateDataAddress(
+    request.virtualAddress,
+    EEDataAccessDirection::Load,
+    request.translationContext);
+  if (result.translation.outcome !=
+      EEAddressTranslationOutcome::Translated)
+  {
+    result.outcome =
+      EECacheMaintenanceOutcome::AddressTranslationFailure;
+    return result;
+  }
+  if (result.translation.route != EEAddressRoute::MainBus)
+  {
+    result.outcome = EECacheMaintenanceOutcome::PhysicalBusError;
+    return result;
+  }
+
+  const std::size_t set =
+    (request.virtualAddress >> 6) &
+    (INSTRUCTION_CACHE_SET_COUNT - 1);
+  const std::uint32_t physicalTag =
+    result.translation.physicalAddress &
+    EECacheLine::PHYSICAL_TAG_MASK;
+  if (request.operation ==
+      EECacheOperation::InstructionHitInvalidate)
+  {
+    result.cacheHitStatusValid = true;
+    for (std::size_t way = 0;
+         way < CACHE_WAY_COUNT;
+         ++way)
+    {
+      EECacheLine &line = instructionCache[set][way];
+      if (line.valid && line.physicalTag == physicalTag)
+      {
+        invalidateInstructionCacheLine(&line);
+        result.cacheHit = true;
+        break;
+      }
+    }
+    result.outcome = EECacheMaintenanceOutcome::Completed;
+    return result;
+  }
+  if (request.operation != EECacheOperation::InstructionFill)
+  {
+    throw std::invalid_argument(
+      "EE addressed instruction-cache operation is invalid.");
+  }
+  if (bus == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE instruction-cache fill requires a bus.");
+  }
+
+  const std::size_t victim = instructionCacheVictim(set);
+  const EECacheLineFillResult fill =
+    fillCacheLine(*bus, result.translation.physicalAddress);
+  if (fill.outcome != EECacheLineTransferOutcome::Completed)
+  {
+    result.outcome = EECacheMaintenanceOutcome::PhysicalBusError;
+    return result;
+  }
+
+  EECacheLine candidate = fill.line;
+  candidate.leastRecentlyFilled =
+    !instructionCache[set][victim].leastRecentlyFilled;
+  instructionCache[set][victim] = candidate;
+  result.outcome = EECacheMaintenanceOutcome::Completed;
+  return result;
 }
 
 std::size_t EEMemorySystem::instructionCacheVictim(

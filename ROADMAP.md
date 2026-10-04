@@ -1845,7 +1845,7 @@ creating parallel ownership.
       Preserve direct virtual-index and address-bit way selection, 32-bit
       `TagLo` data-word transfer, documented tag/LRF/valid fields, unchanged
       `Status.CH`, and the lack of inferred `TagHi` array effects.
-- [ ] Implement instruction-cache index invalidation/fill and translated hit
+- [x] Implement instruction-cache index invalidation/fill and translated hit
       invalidation. Preserve atomic fills, refill failures, direct index
       selection, translated physical-tag lookup, precise hit-operation faults,
       hit/miss `Status.CH`, and no-mutation misses.

@@ -5741,10 +5741,19 @@ EEInstructionExecutionOutcome EECore::executeCacheMaintenance(
       haltUndefinedOperation(address, instruction.raw);
       return EEInstructionExecutionOutcome::Halted;
     case EECacheMaintenanceOutcome::AddressTranslationFailure:
+      return raiseDataAccessException(
+        dataTranslationException(
+          result.translation.outcome,
+          EEDataAccessDirection::Load),
+        address,
+        result.translation.virtualAddress,
+        instruction.raw);
     case EECacheMaintenanceOutcome::PhysicalBusError:
-      throw std::logic_error(
-        "EE cache maintenance returned an unimplemented "
-        "failure outcome.");
+      return raiseDataAccessException(
+        EEException::DataBusErrorLoad,
+        address,
+        result.translation.virtualAddress,
+        instruction.raw);
   }
   throw std::logic_error(
     "EE cache maintenance returned an invalid outcome.");

@@ -441,6 +441,118 @@ TEST_CASE("EE CACHE index operations preserve Status CH")
       EECOP0Status::CACHE_HIT) != 0);
 }
 
+TEST_CASE("EE CACHE instruction fill and hit invalidate update CH precisely")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t target = UINT32_C(0x80001000);
+  constexpr std::size_t set =
+    (target >> 6) &
+    (EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT - 1);
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    core.cop0Register(EECOP0Register::Status) |
+      EECOP0Status::CACHE_HIT);
+  core.setCOP0Register(
+    EECOP0Register::TagHi,
+    UINT32_C(0x12345678));
+  core.setGeneralRegister(2, {target, 0});
+  system.eeBus().write32(
+    UINT32_C(0x1000),
+    UINT32_C(0x24020007));
+
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x0e, 0));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
+  REQUIRE(
+    core.cop0Register(EECOP0Register::TagHi) ==
+    UINT32_C(0x12345678));
+  REQUIRE(
+    system.eeMemorySystem().instructionCacheLine(set, 0).valid);
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    core.cop0Register(EECOP0Register::Status) &
+      ~EECOP0Status::CACHE_HIT);
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x0b, 0));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
+
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x0b, 0));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) == 0);
+}
+
+TEST_CASE("EE CACHE addressed operations fault before CH update")
+{
+  for (const std::uint8_t operation : {0x0b, 0x0e})
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setCOP0Register(
+      EECOP0Register::Status,
+      EECOP0Status::USER_MODE |
+        EECOP0Status::COP0_USABLE |
+        EECOP0Status::CACHE_HIT);
+    mapLowKusegForTest(&core);
+    core.setGeneralRegister(2, {UINT32_C(0x00010000), 0});
+
+    runInstruction(
+      &system,
+      cacheInstruction(2, operation, 0));
+
+    REQUIRE(
+      core.pendingException() ==
+      EEException::TLBRefillLoadOrFetch);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::BadVAddr) ==
+      UINT32_C(0x00010000));
+    REQUIRE(
+      (core.cop0Register(EECOP0Register::Status) &
+        EECOP0Status::CACHE_HIT) != 0);
+  }
+}
+
+TEST_CASE("EE CACHE instruction fill reports a load bus error")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t target =
+    EEMemoryMap::KSEG0_BASE +
+    EEMemoryMap::MAIN_MEMORY_SIZE;
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    core.cop0Register(EECOP0Register::Status) |
+      EECOP0Status::CACHE_HIT);
+  core.setGeneralRegister(2, {target, 0});
+
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x0e, 0));
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::DataBusErrorLoad);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
+}
+
 TEST_CASE("EE COP0 faults preserve precise two-wide issue")
 {
   const std::uint32_t tlbwi = cop0OperationInstruction(0x02);

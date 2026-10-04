@@ -395,7 +395,7 @@ TEST_CASE("EE unimplemented cache maintenance remains explicitly unsupported")
   NekoSystem system;
   EEMemorySystem &memorySystem = system.eeMemorySystem();
   const EECacheMaintenanceRequest request{
-    EECacheOperation::InstructionFill,
+    EECacheOperation::DataIndexLoadTag,
     UINT32_C(0x81234567),
     {}
   };
@@ -640,6 +640,279 @@ TEST_CASE("EE instruction-cache index data operations transfer one word")
   REQUIRE(
     memorySystem.cop0Register(EECOP0Register::TagHi) ==
     UINT32_C(0x76543210));
+}
+
+TEST_CASE("EE instruction-cache index invalidate clears only the selected line")
+{
+  EEMemorySystem memorySystem;
+  constexpr std::size_t set = 0x2a;
+  constexpr std::size_t way = 1;
+  EECacheLine selected;
+  selected.physicalTag = UINT32_C(0x12345000);
+  selected.valid = true;
+  selected.leastRecentlyFilled = true;
+  selected.data.fill(0xa5);
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    way,
+    selected);
+  EECacheLine other;
+  other.physicalTag = UINT32_C(0x6789a000);
+  other.valid = true;
+  other.data[3] = 0x5a;
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    0,
+    other);
+
+  const EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionIndexInvalidate,
+        static_cast<std::uint32_t>(set << 6) |
+          static_cast<std::uint32_t>(way),
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  const EECacheLine &invalidated =
+    memorySystem.instructionCacheLine(set, way);
+  REQUIRE_FALSE(invalidated.valid);
+  REQUIRE(invalidated.physicalTag == 0);
+  REQUIRE(invalidated.leastRecentlyFilled);
+  for (const std::uint8_t byte : invalidated.data)
+  {
+    REQUIRE(byte == 0);
+  }
+  const EECacheLine &unchanged =
+    memorySystem.instructionCacheLine(set, 0);
+  REQUIRE(unchanged.physicalTag == other.physicalTag);
+  REQUIRE(unchanged.valid);
+  REQUIRE(unchanged.data[3] == other.data[3]);
+}
+
+TEST_CASE("EE instruction-cache fill translates and installs atomically")
+{
+  NekoSystem system;
+  EEMemorySystem &memorySystem = system.eeMemorySystem();
+  constexpr std::uint32_t virtualAddress =
+    UINT32_C(0x8000126c);
+  constexpr std::size_t set =
+    (virtualAddress >> 6) &
+    (EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT - 1);
+  EECacheLine way0;
+  way0.physicalTag = UINT32_C(0x4000);
+  way0.valid = true;
+  way0.leastRecentlyFilled = true;
+  way0.data.fill(0x11);
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    0,
+    way0);
+  EECacheLine way1;
+  way1.physicalTag = UINT32_C(0x5000);
+  way1.valid = true;
+  way1.leastRecentlyFilled = true;
+  way1.data.fill(0x22);
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    1,
+    way1);
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    system.eeBus().write8(
+      UINT32_C(0x1240) + offset,
+      static_cast<std::uint8_t>(offset ^ 0xc3));
+  }
+
+  EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        EECacheOperation::InstructionFill,
+        virtualAddress,
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE(
+    result.translation.outcome ==
+    EEAddressTranslationOutcome::Translated);
+  REQUIRE(
+    result.translation.physicalAddress ==
+    UINT32_C(0x126c));
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  const EECacheLine &filled =
+    memorySystem.instructionCacheLine(set, 0);
+  REQUIRE(filled.physicalTag == UINT32_C(0x1000));
+  REQUIRE(filled.valid);
+  REQUIRE_FALSE(filled.leastRecentlyFilled);
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    REQUIRE(
+      filled.data[offset] ==
+      static_cast<std::uint8_t>(offset ^ 0xc3));
+  }
+  REQUIRE(
+    memorySystem.instructionCacheLine(set, 1).physicalTag ==
+    way1.physicalTag);
+
+  const EECacheLine beforeFailure =
+    memorySystem.instructionCacheLine(set, 0);
+  result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        EECacheOperation::InstructionFill,
+        EEMemoryMap::KSEG0_BASE +
+          EEMemoryMap::MAIN_MEMORY_SIZE +
+          static_cast<std::uint32_t>(set << 6),
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::PhysicalBusError);
+  const EECacheLine &preserved =
+    memorySystem.instructionCacheLine(set, 0);
+  REQUIRE(
+    preserved.physicalTag ==
+    beforeFailure.physicalTag);
+  REQUIRE(preserved.valid == beforeFailure.valid);
+  REQUIRE(
+    preserved.leastRecentlyFilled ==
+    beforeFailure.leastRecentlyFilled);
+  REQUIRE(preserved.data == beforeFailure.data);
+}
+
+TEST_CASE("EE instruction-cache hit invalidate reports hit and miss")
+{
+  EEMemorySystem memorySystem;
+  constexpr std::uint32_t virtualAddress = UINT32_C(0x80003210);
+  constexpr std::size_t set =
+    (virtualAddress >> 6) &
+    (EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT - 1);
+  EECacheLine matching;
+  matching.physicalTag = UINT32_C(0x3000);
+  matching.valid = true;
+  matching.leastRecentlyFilled = true;
+  matching.data.fill(0x7e);
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    1,
+    matching);
+  EECacheLine other;
+  other.physicalTag = UINT32_C(0x9000);
+  other.valid = true;
+  other.data[9] = 0x4d;
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    set,
+    0,
+    other);
+
+  EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionHitInvalidate,
+        virtualAddress,
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE(result.cacheHitStatusValid);
+  REQUIRE(result.cacheHit);
+  const EECacheLine &invalidated =
+    memorySystem.instructionCacheLine(set, 1);
+  REQUIRE_FALSE(invalidated.valid);
+  REQUIRE(invalidated.physicalTag == 0);
+  REQUIRE(invalidated.leastRecentlyFilled);
+  REQUIRE(
+    memorySystem.instructionCacheLine(set, 0).physicalTag ==
+    other.physicalTag);
+
+  result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::InstructionHitInvalidate,
+        virtualAddress,
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE(result.cacheHitStatusValid);
+  REQUIRE_FALSE(result.cacheHit);
+  REQUIRE(
+    memorySystem.instructionCacheLine(set, 0).data[9] ==
+    other.data[9]);
+}
+
+TEST_CASE("EE instruction-cache addressed operations preserve faults")
+{
+  EEMemorySystem memorySystem;
+  EECacheLine line;
+  line.physicalTag = UINT32_C(0x1000);
+  line.valid = true;
+  line.data[0] = 0xa5;
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem,
+    0,
+    0,
+    line);
+  const EEAddressTranslationContext userContext{
+    EEPrivilegeMode::User,
+    false,
+    false
+  };
+
+  for (const EECacheOperation operation : {
+         EECacheOperation::InstructionFill,
+         EECacheOperation::InstructionHitInvalidate})
+  {
+    const EECacheMaintenanceResult result =
+      EEMemorySystemTestAccess::maintainCache(
+        &memorySystem,
+        nullptr,
+        {
+          operation,
+          UINT32_C(0x00010000),
+          userContext
+        });
+
+    REQUIRE(
+      result.outcome ==
+      EECacheMaintenanceOutcome::AddressTranslationFailure);
+    REQUIRE(
+      result.translation.outcome ==
+      EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+    REQUIRE_FALSE(result.cacheHitStatusValid);
+    REQUIRE(memorySystem.instructionCacheLine(0, 0).valid);
+    REQUIRE(
+      memorySystem.instructionCacheLine(0, 0).data[0] ==
+      0xa5);
+  }
 }
 
 TEST_CASE("EE cache inspection rejects invalid sets and ways")
