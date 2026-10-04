@@ -1778,7 +1778,7 @@ creating parallel ownership.
       functional CPU/DMA access policy. Preserve shared visibility and bounds
       now; keep alternate-cycle arbitration, DMA priority, burst timing, and
       cycle stealing behind a replaceable timing policy.
-- [ ] Add guest-visible channel-8 (`fromSPR`) and channel-9 (`toSPR`) register
+- [x] Add guest-visible channel-8 (`fromSPR`) and channel-9 (`toSPR`) register
       owners with mapped `CHCR`, `MADR`, `QWC`, `SADR`, channel-specific
       `TADR`, stopped-register write rules, and integration with `D_CTRL`,
       `D_STAT`, reset, and system scheduling.

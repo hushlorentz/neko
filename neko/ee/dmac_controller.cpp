@@ -26,10 +26,14 @@ void DMACController::writeStatus(std::uint32_t value)
 {
   constexpr std::uint32_t CHANNELS =
     DMACStatus::CHANNEL_1 |
-    DMACStatus::CHANNEL_2;
+    DMACStatus::CHANNEL_2 |
+    DMACStatus::CHANNEL_8 |
+    DMACStatus::CHANNEL_9;
   constexpr std::uint32_t MASKS =
     DMACStatus::CHANNEL_1_MASK |
-    DMACStatus::CHANNEL_2_MASK;
+    DMACStatus::CHANNEL_2_MASK |
+    DMACStatus::CHANNEL_8_MASK |
+    DMACStatus::CHANNEL_9_MASK;
   statusRegister &= ~(value & CHANNELS);
   statusMaskRegister ^= value & MASKS;
 }
@@ -45,9 +49,12 @@ void DMACController::signalChannelCompletion(
 {
   constexpr std::uint32_t CHANNELS =
     DMACStatus::CHANNEL_1 |
-    DMACStatus::CHANNEL_2;
+    DMACStatus::CHANNEL_2 |
+    DMACStatus::CHANNEL_8 |
+    DMACStatus::CHANNEL_9;
   if ((channel & CHANNELS) == 0 ||
-      (channel & ~CHANNELS) != 0)
+      (channel & ~CHANNELS) != 0 ||
+      (channel & (channel - 1)) != 0)
   {
     throw std::invalid_argument(
       "Invalid DMAC completion channel.");
@@ -57,13 +64,13 @@ void DMACController::signalChannelCompletion(
 
 bool DMACController::interruptPending() const
 {
-  const bool vif1 =
-    (statusRegister & DMACStatus::CHANNEL_1) != 0 &&
-    (statusMaskRegister &
-     DMACStatus::CHANNEL_1_MASK) != 0;
-  const bool gif =
-    (statusRegister & DMACStatus::CHANNEL_2) != 0 &&
-    (statusMaskRegister &
-     DMACStatus::CHANNEL_2_MASK) != 0;
-  return vif1 || gif;
+  constexpr std::uint32_t CHANNELS =
+    DMACStatus::CHANNEL_1 |
+    DMACStatus::CHANNEL_2 |
+    DMACStatus::CHANNEL_8 |
+    DMACStatus::CHANNEL_9;
+  return
+    (statusRegister &
+     (statusMaskRegister >> 16) &
+     CHANNELS) != 0;
 }

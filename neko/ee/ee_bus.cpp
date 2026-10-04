@@ -8,6 +8,7 @@
 #include "gs.hpp"
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
+#include "scratchpad_dmac_channel.hpp"
 #include "vif.hpp"
 #include "vif1_dmac_channel.hpp"
 
@@ -168,6 +169,38 @@ void EEBus::attachVIF1DMACChannel(
   vif1DMACChannel = vif1DMAC;
 }
 
+void EEBus::attachFromScratchpadDMACChannel(
+  ScratchpadDMACChannel *fromScratchpadDMAC)
+{
+  if (fromScratchpadDMAC == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires a non-null fromSPR DMAC channel.");
+  }
+  if (fromScratchpadDMACChannel != nullptr)
+  {
+    throw std::logic_error(
+      "EE bus fromSPR DMAC channel is already attached.");
+  }
+  fromScratchpadDMACChannel = fromScratchpadDMAC;
+}
+
+void EEBus::attachToScratchpadDMACChannel(
+  ScratchpadDMACChannel *toScratchpadDMAC)
+{
+  if (toScratchpadDMAC == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires a non-null toSPR DMAC channel.");
+  }
+  if (toScratchpadDMACChannel != nullptr)
+  {
+    throw std::logic_error(
+      "EE bus toSPR DMAC channel is already attached.");
+  }
+  toScratchpadDMACChannel = toScratchpadDMAC;
+}
+
 void EEBus::attachGSDisplay(GSDisplay *gsDisplay)
 {
   if (gsDisplay == nullptr)
@@ -237,6 +270,28 @@ VIF1DMACChannel &EEBus::attachedVIF1DMAC() const
       "EE bus VIF1 DMAC channel is not attached.");
   }
   return *vif1DMACChannel;
+}
+
+ScratchpadDMACChannel &
+EEBus::attachedFromScratchpadDMAC() const
+{
+  if (fromScratchpadDMACChannel == nullptr)
+  {
+    throw std::logic_error(
+      "EE bus fromSPR DMAC channel is not attached.");
+  }
+  return *fromScratchpadDMACChannel;
+}
+
+ScratchpadDMACChannel &
+EEBus::attachedToScratchpadDMAC() const
+{
+  if (toScratchpadDMACChannel == nullptr)
+  {
+    throw std::logic_error(
+      "EE bus toSPR DMAC channel is not attached.");
+  }
+  return *toScratchpadDMACChannel;
 }
 
 GSDisplay &EEBus::attachedGSDisplay() const
@@ -614,6 +669,33 @@ bool EEBus::readMapped32(
     case EEMemoryMap::D2_ASR1:
       *value = attachedGIFDMAC().addressStack(1);
       return true;
+    case EEMemoryMap::D8_CHCR:
+      *value = attachedFromScratchpadDMAC().channelControl();
+      return true;
+    case EEMemoryMap::D8_MADR:
+      *value = attachedFromScratchpadDMAC().memoryAddress();
+      return true;
+    case EEMemoryMap::D8_QWC:
+      *value = attachedFromScratchpadDMAC().quadwordCount();
+      return true;
+    case EEMemoryMap::D8_SADR:
+      *value = attachedFromScratchpadDMAC().scratchpadAddress();
+      return true;
+    case EEMemoryMap::D9_CHCR:
+      *value = attachedToScratchpadDMAC().channelControl();
+      return true;
+    case EEMemoryMap::D9_MADR:
+      *value = attachedToScratchpadDMAC().memoryAddress();
+      return true;
+    case EEMemoryMap::D9_QWC:
+      *value = attachedToScratchpadDMAC().quadwordCount();
+      return true;
+    case EEMemoryMap::D9_TADR:
+      *value = attachedToScratchpadDMAC().tagAddress();
+      return true;
+    case EEMemoryMap::D9_SADR:
+      *value = attachedToScratchpadDMAC().scratchpadAddress();
+      return true;
     case EEMemoryMap::D_CTRL:
       *value = attachedDMACController().control();
       return true;
@@ -765,6 +847,78 @@ bool EEBus::writeMapped32(
       return performDeviceWrite(
         checkedGuestAccess,
         [&]() { dmac.writeAddressStack(1, value); });
+    }
+    case EEMemoryMap::D8_CHCR:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedFromScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeChannelControl(value); });
+    }
+    case EEMemoryMap::D8_MADR:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedFromScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeMemoryAddress(value); });
+    }
+    case EEMemoryMap::D8_QWC:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedFromScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeQuadwordCount(value); });
+    }
+    case EEMemoryMap::D8_SADR:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedFromScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeScratchpadAddress(value); });
+    }
+    case EEMemoryMap::D9_CHCR:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedToScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeChannelControl(value); });
+    }
+    case EEMemoryMap::D9_MADR:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedToScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeMemoryAddress(value); });
+    }
+    case EEMemoryMap::D9_QWC:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedToScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeQuadwordCount(value); });
+    }
+    case EEMemoryMap::D9_TADR:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedToScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeTagAddress(value); });
+    }
+    case EEMemoryMap::D9_SADR:
+    {
+      ScratchpadDMACChannel &dmac =
+        attachedToScratchpadDMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeScratchpadAddress(value); });
     }
     case EEMemoryMap::D_CTRL:
     {

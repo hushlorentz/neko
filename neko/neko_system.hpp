@@ -19,6 +19,7 @@
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
 #include "regression_trace.hpp"
+#include "scratchpad_dmac_channel.hpp"
 #include "system_interfaces.hpp"
 #include "vif.hpp"
 #include "vif1_dmac_channel.hpp"
@@ -126,6 +127,10 @@ class NekoSystem
     const GIFDMACChannel &gifDMAC() const;
     VIF1DMACChannel &vif1DMAC();
     const VIF1DMACChannel &vif1DMAC() const;
+    ScratchpadDMACChannel &fromScratchpadDMAC();
+    const ScratchpadDMACChannel &fromScratchpadDMAC() const;
+    ScratchpadDMACChannel &toScratchpadDMAC();
+    const ScratchpadDMACChannel &toScratchpadDMAC() const;
     GSDisplay &gsDisplay();
     const GSDisplay &gsDisplay() const;
     EEBus &eeBus();
@@ -162,6 +167,8 @@ class NekoSystem
     DMACController dmacControllerComponent;
     GIFDMACChannel gifDMACComponent;
     VIF1DMACChannel vif1DMACComponent;
+    ScratchpadDMACChannel fromScratchpadDMACComponent;
+    ScratchpadDMACChannel toScratchpadDMACComponent;
     GSDisplay gsDisplayComponent;
     NekoInputState inputState;
     bool collectingTrace = false;

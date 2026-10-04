@@ -27,6 +27,12 @@ NekoSystem::NekoSystem() :
   vif1DMACComponent(
     &eeBusComponent,
     &dmacControllerComponent),
+  fromScratchpadDMACComponent(
+    ScratchpadDMACChannelKind::FromScratchpad,
+    &dmacControllerComponent),
+  toScratchpadDMACComponent(
+    ScratchpadDMACChannelKind::ToScratchpad,
+    &dmacControllerComponent),
   gsDisplayComponent(&gsComponent)
 {
   masterClock.registerComponent(eeCoreComponent, 1);
@@ -45,6 +51,10 @@ NekoSystem::NekoSystem() :
     &dmacControllerComponent);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
   eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
+  eeBusComponent.attachFromScratchpadDMACChannel(
+    &fromScratchpadDMACComponent);
+  eeBusComponent.attachToScratchpadDMACChannel(
+    &toScratchpadDMACComponent);
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   eeCoreComponent.attachVU0(&vu0Component);
@@ -52,6 +62,8 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(gifDMACComponent, 1);
   masterClock.registerComponent(vif1DMACComponent, 1);
   masterClock.registerComponent(gsDisplayComponent, 1);
+  masterClock.registerComponent(fromScratchpadDMACComponent, 1);
+  masterClock.registerComponent(toScratchpadDMACComponent, 1);
 }
 
 void NekoSystem::reset()
@@ -392,6 +404,28 @@ VIF1DMACChannel &NekoSystem::vif1DMAC()
 const VIF1DMACChannel &NekoSystem::vif1DMAC() const
 {
   return vif1DMACComponent;
+}
+
+ScratchpadDMACChannel &NekoSystem::fromScratchpadDMAC()
+{
+  return fromScratchpadDMACComponent;
+}
+
+const ScratchpadDMACChannel &
+NekoSystem::fromScratchpadDMAC() const
+{
+  return fromScratchpadDMACComponent;
+}
+
+ScratchpadDMACChannel &NekoSystem::toScratchpadDMAC()
+{
+  return toScratchpadDMACComponent;
+}
+
+const ScratchpadDMACChannel &
+NekoSystem::toScratchpadDMAC() const
+{
+  return toScratchpadDMACComponent;
 }
 
 GSDisplay &NekoSystem::gsDisplay()

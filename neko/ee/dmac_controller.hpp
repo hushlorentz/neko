@@ -12,8 +12,12 @@ namespace DMACStatus
 {
   constexpr std::uint32_t CHANNEL_1 = 1u << 1;
   constexpr std::uint32_t CHANNEL_2 = 1u << 2;
+  constexpr std::uint32_t CHANNEL_8 = 1u << 8;
+  constexpr std::uint32_t CHANNEL_9 = 1u << 9;
   constexpr std::uint32_t CHANNEL_1_MASK = 1u << 17;
   constexpr std::uint32_t CHANNEL_2_MASK = 1u << 18;
+  constexpr std::uint32_t CHANNEL_8_MASK = 1u << 24;
+  constexpr std::uint32_t CHANNEL_9_MASK = 1u << 25;
 }
 
 class DMACController

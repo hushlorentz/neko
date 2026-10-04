@@ -22,6 +22,7 @@ namespace DMACChannelControl
   constexpr std::uint32_t FROM_MEMORY = 1u;
   constexpr std::uint32_t MODE_MASK = 3u << 2;
   constexpr std::uint32_t CHAIN_MODE = 1u << 2;
+  constexpr std::uint32_t INTERLEAVE_MODE = 2u << 2;
   constexpr std::uint32_t ADDRESS_STACK_MASK = 3u << 4;
   constexpr std::uint32_t TAG_TRANSFER_ENABLE = 1u << 6;
   constexpr std::uint32_t TAG_INTERRUPT_ENABLE = 1u << 7;

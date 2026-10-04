@@ -587,9 +587,27 @@ void NekoSaveStateCodec::writeMasterClock(
   const NekoSystem &system)
 {
   writer->writeU64(system.masterClock.masterCycle);
-  writer->writeSize(system.masterClock.components.size());
+  std::size_t serializedComponentCount = 0;
   for (const auto &scheduled : system.masterClock.components)
   {
+    if (scheduled.component !=
+          &system.fromScratchpadDMACComponent &&
+        scheduled.component !=
+          &system.toScratchpadDMACComponent)
+    {
+      ++serializedComponentCount;
+    }
+  }
+  writer->writeSize(serializedComponentCount);
+  for (const auto &scheduled : system.masterClock.components)
+  {
+    if (scheduled.component ==
+          &system.fromScratchpadDMACComponent ||
+        scheduled.component ==
+          &system.toScratchpadDMACComponent)
+    {
+      continue;
+    }
     writer->writeU8(componentID(
       system,
       scheduled.component));
@@ -604,7 +622,7 @@ void NekoSaveStateCodec::readMasterClock(
   std::vector<ScheduledComponentState> *schedule)
 {
   constexpr std::array<ScheduledComponentState, 6>
-    REQUIRED_COMPONENTS = {{
+    LEGACY_COMPONENTS = {{
       {6, 1, 0},
       {1, NekoSystem::VU_CLOCK_PERIOD, 0},
       {2, NekoSystem::VU_CLOCK_PERIOD, 0},
@@ -612,20 +630,31 @@ void NekoSaveStateCodec::readMasterClock(
       {7, 1, 0},
       {5, 1, 0}
     }};
+  constexpr std::array<ScheduledComponentState, 2>
+    SCRATCHPAD_DMAC_COMPONENTS = {{
+      {8, 1, 0},
+      {9, 1, 0}
+    }};
 
   clock->masterCycle = reader->readU64();
   const std::uint32_t count = reader->readU32();
   require(
-    count == REQUIRED_COMPONENTS.size() ||
-      count == REQUIRED_COMPONENTS.size() + 1,
+    count == LEGACY_COMPONENTS.size() ||
+      count == LEGACY_COMPONENTS.size() + 1 ||
+      count ==
+        LEGACY_COMPONENTS.size() +
+        SCRATCHPAD_DMAC_COMPONENTS.size() ||
+      count ==
+        LEGACY_COMPONENTS.size() +
+        SCRATCHPAD_DMAC_COMPONENTS.size() + 1,
     "master-clock component count is invalid");
-  std::array<bool, 8> used = {};
+  std::array<bool, 10> used = {};
   schedule->clear();
   schedule->reserve(count);
   for (std::uint32_t index = 0; index < count; ++index)
   {
     const std::uint8_t id = reader->readU8();
-    require(id >= 1 && id <= 7, "clock component ID is invalid");
+    require(id >= 1 && id <= 9, "clock component ID is invalid");
     require(!used[id], "clock component ID is duplicated");
     used[id] = true;
     const std::uint64_t period = reader->readU64();
@@ -640,23 +669,49 @@ void NekoSaveStateCodec::readMasterClock(
   }
 
   for (std::size_t index = 0;
-       index < REQUIRED_COMPONENTS.size();
+       index < LEGACY_COMPONENTS.size();
        ++index)
   {
     const ScheduledComponentState &actual =
       (*schedule)[index];
     const ScheduledComponentState &expected =
-      REQUIRED_COMPONENTS[index];
+      LEGACY_COMPONENTS[index];
     require(
       actual.id == expected.id &&
         actual.period == expected.period &&
         actual.phase == expected.phase,
       "master-clock component schedule is invalid");
   }
-  if (schedule->size() > REQUIRED_COMPONENTS.size())
+  const bool hasScratchpadDMAC =
+    schedule->size() >=
+      LEGACY_COMPONENTS.size() +
+      SCRATCHPAD_DMAC_COMPONENTS.size();
+  if (hasScratchpadDMAC)
   {
-    require(
-      schedule->back().id == 3,
+    for (std::size_t index = 0;
+         index < SCRATCHPAD_DMAC_COMPONENTS.size();
+         ++index)
+    {
+      const ScheduledComponentState &actual =
+        (*schedule)[LEGACY_COMPONENTS.size() + index];
+      const ScheduledComponentState &expected =
+        SCRATCHPAD_DMAC_COMPONENTS[index];
+      require(
+        actual.id == expected.id &&
+          actual.period == expected.period &&
+          actual.phase == expected.phase,
+        "scratchpad DMAC component schedule is invalid");
+    }
+  }
+  const bool hasOptionalArbiter =
+    schedule->size() ==
+      LEGACY_COMPONENTS.size() + 1 ||
+    schedule->size() ==
+      LEGACY_COMPONENTS.size() +
+      SCRATCHPAD_DMAC_COMPONENTS.size() + 1;
+  if (hasOptionalArbiter)
+  {
+    require(schedule->back().id == 3,
       "optional master-clock component is invalid");
   }
 }
@@ -693,6 +748,14 @@ std::uint8_t NekoSaveStateCodec::componentID(
   {
     return 7;
   }
+  if (component == &system.fromScratchpadDMACComponent)
+  {
+    return 8;
+  }
+  if (component == &system.toScratchpadDMACComponent)
+  {
+    return 9;
+  }
   throw std::runtime_error(
     "Cannot save a host-owned master-clock component.");
 }
@@ -717,6 +780,10 @@ ClockedComponent *NekoSaveStateCodec::componentForID(
       return &system->eeCoreComponent;
     case 7:
       return &system->vif1DMACComponent;
+    case 8:
+      return &system->fromScratchpadDMACComponent;
+    case 9:
+      return &system->toScratchpadDMACComponent;
     default:
       SaveStateReader::invalid("clock component ID is invalid");
   }
@@ -729,14 +796,56 @@ NekoSaveStateCodec::reconcileMasterClockSchedule(
   NekoSystem *destination)
 {
   std::vector<MasterClockScheduler::ScheduledComponent> result;
-  result.reserve(source.size());
+  result.reserve(source.size() + 2);
+  const auto hasComponent =
+    [&](std::uint8_t id)
+    {
+      for (const ScheduledComponentState &scheduled : source)
+      {
+        if (scheduled.id == id)
+        {
+          return true;
+        }
+      }
+      return false;
+    };
+  const bool hasFromScratchpadDMAC = hasComponent(8);
+  const bool hasToScratchpadDMAC = hasComponent(9);
+  const auto appendScratchpadDMAC =
+    [&]()
+    {
+      if (!hasFromScratchpadDMAC)
+      {
+        result.push_back({
+          &destination->fromScratchpadDMACComponent,
+          1,
+          0
+        });
+      }
+      if (!hasToScratchpadDMAC)
+      {
+        result.push_back({
+          &destination->toScratchpadDMACComponent,
+          1,
+          0
+        });
+      }
+    };
   for (const ScheduledComponentState &scheduled : source)
   {
+    if (scheduled.id == 3)
+    {
+      appendScratchpadDMAC();
+    }
     result.push_back({
       componentForID(destination, scheduled.id),
       scheduled.period,
       scheduled.phase
     });
+  }
+  if (source.empty() || source.back().id != 3)
+  {
+    appendScratchpadDMAC();
   }
   return result;
 }

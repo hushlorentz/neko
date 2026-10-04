@@ -14,6 +14,7 @@ class GIFDMACChannel;
 class GIFPath3Transfer;
 class GS;
 class GSDisplay;
+class ScratchpadDMACChannel;
 class VIF;
 class VIF1DMACChannel;
 
@@ -56,6 +57,15 @@ namespace EEMemoryMap
   constexpr std::uint32_t D2_TADR = 0x1000a030;
   constexpr std::uint32_t D2_ASR0 = 0x1000a040;
   constexpr std::uint32_t D2_ASR1 = 0x1000a050;
+  constexpr std::uint32_t D8_CHCR = 0x1000d000;
+  constexpr std::uint32_t D8_MADR = 0x1000d010;
+  constexpr std::uint32_t D8_QWC = 0x1000d020;
+  constexpr std::uint32_t D8_SADR = 0x1000d080;
+  constexpr std::uint32_t D9_CHCR = 0x1000d400;
+  constexpr std::uint32_t D9_MADR = 0x1000d410;
+  constexpr std::uint32_t D9_QWC = 0x1000d420;
+  constexpr std::uint32_t D9_TADR = 0x1000d430;
+  constexpr std::uint32_t D9_SADR = 0x1000d480;
   constexpr std::uint32_t D_CTRL = 0x1000e000;
   constexpr std::uint32_t D_STAT = 0x1000e010;
 
@@ -103,6 +113,10 @@ class EEBus
     void attachDMACController(DMACController *dmac);
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
     void attachVIF1DMACChannel(VIF1DMACChannel *vif1DMAC);
+    void attachFromScratchpadDMACChannel(
+      ScratchpadDMACChannel *fromScratchpadDMAC);
+    void attachToScratchpadDMACChannel(
+      ScratchpadDMACChannel *toScratchpadDMAC);
     void attachGSDisplay(GSDisplay *gsDisplay);
     bool isMainMemoryRange(
       std::uint32_t address,
@@ -188,6 +202,8 @@ class EEBus
     DMACController &attachedDMACController() const;
     GIFDMACChannel &attachedGIFDMAC() const;
     VIF1DMACChannel &attachedVIF1DMAC() const;
+    ScratchpadDMACChannel &attachedFromScratchpadDMAC() const;
+    ScratchpadDMACChannel &attachedToScratchpadDMAC() const;
     GSDisplay &attachedGSDisplay() const;
 
     VIF *vif0Component;
@@ -199,6 +215,8 @@ class EEBus
     DMACController *dmacController = nullptr;
     GIFDMACChannel *gifDMACChannel = nullptr;
     VIF1DMACChannel *vif1DMACChannel = nullptr;
+    ScratchpadDMACChannel *fromScratchpadDMACChannel = nullptr;
+    ScratchpadDMACChannel *toScratchpadDMACChannel = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;
     std::vector<std::uint8_t> mainMemory;
 };
