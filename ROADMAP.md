@@ -1830,7 +1830,7 @@ creating parallel ownership.
       Preserve clean locked-line writes without setting Dirty, exclude a locked
       way when the other way is available, and define the all-ways-locked miss
       policy explicitly.
-- [ ] Complete an independent review of ordinary cached fetch, load, store,
+- [x] Complete an independent review of ordinary cached fetch, load, store,
       writeback, replacement, locking, aliases, and DMA visibility.
 
 ### Cache Maintenance, Ordering, and Conformance

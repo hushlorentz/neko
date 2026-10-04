@@ -1170,6 +1170,16 @@ void NekoSaveStateCodec::readEECore(
       require(
         line->valid || (!line->dirty && !line->locked),
         "EE invalid cache line has active state");
+      bool canonicalInvalidPayload =
+        line->physicalTag == 0;
+      for (const std::uint8_t byte : line->data)
+      {
+        canonicalInvalidPayload &=
+          byte == 0;
+      }
+      require(
+        line->valid || canonicalInvalidPayload,
+        "EE invalid cache line has noncanonical payload");
       require(
         !instruction || (!line->dirty && !line->locked),
         "EE instruction-cache line has data-cache state");

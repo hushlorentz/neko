@@ -203,6 +203,8 @@ namespace
      EEMemorySystem::DATA_CACHE_SET_COUNT);
   constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET =
     3109 + EE_CACHE_STATE_SIZE;
+  constexpr std::size_t PREPARED_EE_CACHE_OFFSET =
+    PREPARED_MAIN_MEMORY_SIZE_OFFSET - EE_CACHE_STATE_SIZE;
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -3220,6 +3222,21 @@ TEST_CASE("Invalid save states are rejected transactionally")
 
   invalid = before;
   invalid[PREPARED_EE_TLB_OFFSET + 1] = 0x20;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[PREPARED_EE_CACHE_OFFSET] = 1;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[
+    PREPARED_EE_CACHE_OFFSET +
+    EECacheLine::DATA_SIZE +
+    1] = 0x10;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
