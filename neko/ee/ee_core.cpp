@@ -1353,6 +1353,120 @@ bool EECore::mainBusTranslationSucceeded(
     translation.route == EEAddressRoute::MainBus;
 }
 
+bool EECore::dataTranslationSucceeded(
+  const EEAddressTranslationResult &translation)
+{
+  return
+    translation.outcome ==
+      EEAddressTranslationOutcome::Translated &&
+    (translation.route == EEAddressRoute::MainBus ||
+     translation.route == EEAddressRoute::Scratchpad);
+}
+
+bool EECore::readTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint8_t *value) const
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.readScratchpad8(
+        translation.physicalAddress,
+        value)
+    : attachedBus().readData8(
+        translation.physicalAddress,
+        value);
+}
+
+bool EECore::readTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint16_t *value) const
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.readScratchpad16(
+        translation.physicalAddress,
+        value)
+    : attachedBus().readData16(
+        translation.physicalAddress,
+        value);
+}
+
+bool EECore::readTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint32_t *value) const
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.readScratchpad32(
+        translation.physicalAddress,
+        value)
+    : attachedBus().readData32(
+        translation.physicalAddress,
+        value);
+}
+
+bool EECore::readTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint64_t *value) const
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.readScratchpad64(
+        translation.physicalAddress,
+        value)
+    : attachedBus().readData64(
+        translation.physicalAddress,
+        value);
+}
+
+bool EECore::writeTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint8_t value)
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.writeScratchpad8(
+        translation.physicalAddress,
+        value)
+    : attachedBus().writeData8(
+        translation.physicalAddress,
+        value);
+}
+
+bool EECore::writeTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint16_t value)
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.writeScratchpad16(
+        translation.physicalAddress,
+        value)
+    : attachedBus().writeData16(
+        translation.physicalAddress,
+        value);
+}
+
+bool EECore::writeTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint32_t value)
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.writeScratchpad32(
+        translation.physicalAddress,
+        value)
+    : attachedBus().writeData32(
+        translation.physicalAddress,
+        value);
+}
+
+bool EECore::writeTranslatedData(
+  const EEAddressTranslationResult &translation,
+  std::uint64_t value)
+{
+  return translation.route == EEAddressRoute::Scratchpad
+    ? memorySystem.writeScratchpad64(
+        translation.physicalAddress,
+        value)
+    : attachedBus().writeData64(
+        translation.physicalAddress,
+        value);
+}
+
 EEException EECore::instructionTranslationException(
   EEAddressTranslationOutcome outcome)
 {
@@ -4407,7 +4521,7 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
         translateDataAddress(
           dataAddress,
           EEDataAccessDirection::Load);
-      if (!mainBusTranslationSucceeded(translation))
+      if (!dataTranslationSucceeded(translation))
       {
         recordMemoryTrace(
           dataAddress,
@@ -4425,9 +4539,7 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
       }
       std::uint8_t value = 0;
       const bool succeeded =
-        attachedBus().readData8(
-          translation.physicalAddress,
-          &value);
+        readTranslatedData(translation, &value);
       recordMemoryTrace(
         dataAddress,
         1,
@@ -4456,7 +4568,7 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
         translateDataAddress(
           dataAddress,
           EEDataAccessDirection::Store);
-      if (!mainBusTranslationSucceeded(translation))
+      if (!dataTranslationSucceeded(translation))
       {
         recordMemoryTrace(
           dataAddress,
@@ -4476,9 +4588,7 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
         static_cast<std::uint8_t>(
           generalRegisters[instruction.targetRegister].low);
       const bool succeeded =
-        attachedBus().writeData8(
-          translation.physicalAddress,
-          value);
+        writeTranslatedData(translation, value);
       recordMemoryTrace(
         dataAddress,
         1,
@@ -4540,7 +4650,7 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
       : EEDataAccessDirection::Load;
   const EEAddressTranslationResult translation =
     translateDataAddress(dataAddress, direction);
-  if (!mainBusTranslationSucceeded(translation))
+  if (!dataTranslationSucceeded(translation))
   {
     recordMemoryTrace(
       dataAddress,
@@ -4564,9 +4674,7 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
       static_cast<std::uint16_t>(
         generalRegisters[instruction.targetRegister].low);
     const bool succeeded =
-      attachedBus().writeData16(
-        translation.physicalAddress,
-        value);
+      writeTranslatedData(translation, value);
     recordMemoryTrace(
       dataAddress,
       2,
@@ -4586,9 +4694,7 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
 
   std::uint16_t value = 0;
   const bool succeeded =
-    attachedBus().readData16(
-      translation.physicalAddress,
-      &value);
+    readTranslatedData(translation, &value);
   recordMemoryTrace(
     dataAddress,
     2,
@@ -4649,7 +4755,7 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
       : EEDataAccessDirection::Load;
   const EEAddressTranslationResult translation =
     translateDataAddress(dataAddress, direction);
-  if (!mainBusTranslationSucceeded(translation))
+  if (!dataTranslationSucceeded(translation))
   {
     recordMemoryTrace(
       dataAddress,
@@ -4673,9 +4779,7 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
       static_cast<std::uint32_t>(
         generalRegisters[instruction.targetRegister].low);
     const bool succeeded =
-      attachedBus().writeData32(
-        translation.physicalAddress,
-        value);
+      writeTranslatedData(translation, value);
     recordMemoryTrace(
       dataAddress,
       4,
@@ -4695,9 +4799,7 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
 
   std::uint32_t value = 0;
   const bool succeeded =
-    attachedBus().readData32(
-      translation.physicalAddress,
-      &value);
+    readTranslatedData(translation, &value);
   recordMemoryTrace(
     dataAddress,
     4,
@@ -4754,7 +4856,7 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
       : EEDataAccessDirection::Load;
   const EEAddressTranslationResult translation =
     translateDataAddress(alignedAddress, direction);
-  if (!mainBusTranslationSucceeded(translation))
+  if (!dataTranslationSucceeded(translation))
   {
     recordMemoryTrace(
       alignedAddress,
@@ -4774,9 +4876,7 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
   }
   std::uint32_t memory = 0;
   const bool readSucceeded =
-    attachedBus().readData32(
-      translation.physicalAddress,
-      &memory);
+    readTranslatedData(translation, &memory);
   recordMemoryTrace(
     alignedAddress,
     4,
@@ -4878,9 +4978,7 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
     }
   }
   const bool writeSucceeded =
-    attachedBus().writeData32(
-      translation.physicalAddress,
-      memory);
+    writeTranslatedData(translation, memory);
   recordMemoryTrace(
     alignedAddress,
     4,
@@ -4935,7 +5033,7 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
       : EEDataAccessDirection::Load;
   const EEAddressTranslationResult translation =
     translateDataAddress(dataAddress, direction);
-  if (!mainBusTranslationSucceeded(translation))
+  if (!dataTranslationSucceeded(translation))
   {
     recordMemoryTrace(
       dataAddress,
@@ -4958,9 +5056,7 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
     const std::uint64_t value =
       generalRegisters[instruction.targetRegister].low;
     const bool succeeded =
-      attachedBus().writeData64(
-        translation.physicalAddress,
-        value);
+      writeTranslatedData(translation, value);
     recordMemoryTrace(
       dataAddress,
       8,
@@ -4980,9 +5076,7 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
 
   std::uint64_t value = 0;
   const bool succeeded =
-    attachedBus().readData64(
-      translation.physicalAddress,
-      &value);
+    readTranslatedData(translation, &value);
   recordMemoryTrace(
     dataAddress,
     8,
@@ -5035,7 +5129,7 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
       : EEDataAccessDirection::Load;
   const EEAddressTranslationResult translation =
     translateDataAddress(alignedAddress, direction);
-  if (!mainBusTranslationSucceeded(translation))
+  if (!dataTranslationSucceeded(translation))
   {
     recordMemoryTrace(
       alignedAddress,
@@ -5055,9 +5149,7 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
   }
   std::uint64_t memory = 0;
   const bool readSucceeded =
-    attachedBus().readData64(
-      translation.physicalAddress,
-      &memory);
+    readTranslatedData(translation, &memory);
   recordMemoryTrace(
     alignedAddress,
     8,
@@ -5150,9 +5242,7 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
     }
   }
   const bool writeSucceeded =
-    attachedBus().writeData64(
-      translation.physicalAddress,
-      memory);
+    writeTranslatedData(translation, memory);
   recordMemoryTrace(
     alignedAddress,
     8,

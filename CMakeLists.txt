@@ -210,6 +210,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_interrupt_delivery_tests.cpp
     neko_tests/ee/ee_memory_exception_priority_tests.cpp
     neko_tests/ee/ee_memory_system_tests.cpp
+    neko_tests/ee/ee_scratchpad_memory_tests.cpp
     neko_tests/ee/ee_multiply_divide_tests.cpp
     neko_tests/ee/ee_quadword_memory_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp

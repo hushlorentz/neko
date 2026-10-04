@@ -1208,6 +1208,32 @@ class EECore final : public ClockedComponent
       EEDataAccessDirection direction) const;
     static bool mainBusTranslationSucceeded(
       const EEAddressTranslationResult &translation);
+    static bool dataTranslationSucceeded(
+      const EEAddressTranslationResult &translation);
+    bool readTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint8_t *value) const;
+    bool readTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint16_t *value) const;
+    bool readTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint32_t *value) const;
+    bool readTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint64_t *value) const;
+    bool writeTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint8_t value);
+    bool writeTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint16_t value);
+    bool writeTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint32_t value);
+    bool writeTranslatedData(
+      const EEAddressTranslationResult &translation,
+      std::uint64_t value);
     static EEException instructionTranslationException(
       EEAddressTranslationOutcome outcome);
     static EEException dataTranslationException(
