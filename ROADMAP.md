@@ -1857,7 +1857,7 @@ creating parallel ownership.
       dirty/valid/lock/LRF transitions, writeback-before-mutation, complete
       line preservation on failure, direct index selection, and no
       translation requirement.
-- [ ] Implement translated data-cache hit writeback/invalidation operations.
+- [x] Implement translated data-cache hit writeback/invalidation operations.
       Preserve precise hit-operation faults, physical-tag lookup, hit/miss
       `Status.CH`, writeback failures, no-mutation misses, and the documented
       dirty/valid/lock/LRF transitions.

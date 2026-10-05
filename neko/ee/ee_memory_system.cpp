@@ -1312,6 +1312,10 @@ EECacheMaintenanceResult EEMemorySystem::maintainCache(
     case EECacheOperation::DataIndexWriteBackInvalidate:
     case EECacheOperation::DataIndexInvalidate:
       return maintainDataCacheIndex(bus, request);
+    case EECacheOperation::DataHitWriteBackInvalidate:
+    case EECacheOperation::DataHitInvalidate:
+    case EECacheOperation::DataHitWriteBack:
+      return maintainDataCacheAddressed(bus, request);
     default:
       break;
   }
@@ -1540,6 +1544,87 @@ EECacheMaintenanceResult EEMemorySystem::maintainDataCacheIndex(
       throw std::invalid_argument(
         "EE data-cache index operation is invalid.");
   }
+}
+
+EECacheMaintenanceResult
+EEMemorySystem::maintainDataCacheAddressed(
+  EEBus *bus,
+  const EECacheMaintenanceRequest &request)
+{
+  EECacheMaintenanceResult result;
+  result.translation = translateDataAddress(
+    request.virtualAddress,
+    EEDataAccessDirection::Load,
+    request.translationContext);
+  if (result.translation.outcome !=
+      EEAddressTranslationOutcome::Translated)
+  {
+    result.outcome =
+      EECacheMaintenanceOutcome::AddressTranslationFailure;
+    return result;
+  }
+  if (result.translation.route != EEAddressRoute::MainBus)
+  {
+    result.outcome = EECacheMaintenanceOutcome::PhysicalBusError;
+    return result;
+  }
+
+  const std::size_t set =
+    (request.virtualAddress >> 6) &
+    (DATA_CACHE_SET_COUNT - 1);
+  const std::uint32_t physicalTag =
+    result.translation.physicalAddress &
+    EECacheLine::PHYSICAL_TAG_MASK;
+  result.cacheHitStatusValid = true;
+  for (std::size_t way = 0;
+       way < CACHE_WAY_COUNT;
+       ++way)
+  {
+    EECacheLine &line = dataCache[set][way];
+    if (!line.valid || line.physicalTag != physicalTag)
+    {
+      continue;
+    }
+
+    result.cacheHit = true;
+    if (request.operation ==
+        EECacheOperation::DataHitInvalidate)
+    {
+      invalidateCacheLine(&line);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    }
+
+    const EECacheLineTransferResult writeback =
+      writeBackDataCacheLine(bus, set, line);
+    if (writeback.outcome !=
+        EECacheLineTransferOutcome::Completed)
+    {
+      result.outcome =
+        EECacheMaintenanceOutcome::PhysicalBusError;
+      return result;
+    }
+    if (request.operation ==
+        EECacheOperation::DataHitWriteBackInvalidate)
+    {
+      invalidateCacheLine(&line);
+    }
+    else if (request.operation ==
+             EECacheOperation::DataHitWriteBack)
+    {
+      line.dirty = false;
+    }
+    else
+    {
+      throw std::invalid_argument(
+        "EE addressed data-cache operation is invalid.");
+    }
+    result.outcome = EECacheMaintenanceOutcome::Completed;
+    return result;
+  }
+
+  result.outcome = EECacheMaintenanceOutcome::Completed;
+  return result;
 }
 
 std::size_t EEMemorySystem::instructionCacheVictim(

@@ -530,9 +530,54 @@ TEST_CASE("EE CACHE instruction fill and hit invalidate update CH precisely")
       EECOP0Status::CACHE_HIT) == 0);
 }
 
+TEST_CASE("EE CACHE data hit operations update CH precisely")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t target = UINT32_C(0x80003210);
+  constexpr std::size_t set =
+    (target >> 6) &
+    (EEMemorySystem::DATA_CACHE_SET_COUNT - 1);
+  core.setGeneralRegister(2, {target, 0});
+  core.setCOP0Register(
+    EECOP0Register::TagLo,
+    UINT32_C(0x3000) |
+      EECOP0TagLo::VALID |
+      EECOP0TagLo::DIRTY |
+      EECOP0TagLo::LOCK);
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x12, 0));
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    core.cop0Register(EECOP0Register::Status) &
+      ~EECOP0Status::CACHE_HIT);
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x1a, 0));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
+  REQUIRE_FALSE(
+    system.eeMemorySystem().dataCacheLine(set, 0).valid);
+
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x1a, 0));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) == 0);
+}
+
 TEST_CASE("EE CACHE addressed operations fault before CH update")
 {
-  for (const std::uint8_t operation : {0x0b, 0x0e})
+  for (const std::uint8_t operation : {
+         0x0b, 0x0e, 0x18, 0x1a, 0x1c})
   {
     NekoSystem system;
     EECore &core = system.eeCore();
@@ -583,6 +628,53 @@ TEST_CASE("EE CACHE instruction fill reports a load bus error")
   REQUIRE(
     (core.cop0Register(EECOP0Register::Status) &
       EECOP0Status::CACHE_HIT) != 0);
+}
+
+TEST_CASE("EE CACHE data hit writeback faults before CH or line mutation")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t target =
+    EEMemoryMap::KSEG0_BASE +
+    EEMemoryMap::MAIN_MEMORY_SIZE;
+  constexpr std::size_t set =
+    (target >> 6) &
+    (EEMemorySystem::DATA_CACHE_SET_COUNT - 1);
+  core.setGeneralRegister(2, {target, 0});
+  core.setCOP0Register(
+    EECOP0Register::TagLo,
+    EEMemoryMap::MAIN_MEMORY_SIZE |
+      EECOP0TagLo::DIRTY |
+      EECOP0TagLo::VALID |
+      EECOP0TagLo::LEAST_RECENTLY_FILLED |
+      EECOP0TagLo::LOCK);
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x12, 0));
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    core.cop0Register(EECOP0Register::Status) &
+      ~EECOP0Status::CACHE_HIT);
+  runInstruction(
+    &system,
+    cacheInstruction(2, 0x18, 0));
+
+  REQUIRE(
+    core.pendingException() ==
+    EEException::DataBusErrorLoad);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) == 0);
+  const EECacheLine &preserved =
+    system.eeMemorySystem().dataCacheLine(set, 0);
+  REQUIRE(
+    preserved.physicalTag ==
+    EEMemoryMap::MAIN_MEMORY_SIZE);
+  REQUIRE(preserved.valid);
+  REQUIRE(preserved.dirty);
+  REQUIRE(preserved.leastRecentlyFilled);
+  REQUIRE(preserved.locked);
 }
 
 TEST_CASE("EE COP0 faults preserve precise two-wide issue")
