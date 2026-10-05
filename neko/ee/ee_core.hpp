@@ -1421,6 +1421,10 @@ class EECore final : public ClockedComponent
       std::uint32_t address);
     EECacheMaintenanceRequest cacheMaintenanceRequest(
       const EEInstruction &instruction) const;
+    EEInstructionExecutionOutcome executePrefetch(
+      const EEInstruction &instruction);
+    EEPrefetchRequest prefetchRequest(
+      const EEInstruction &instruction) const;
     EEInstructionExecutionOutcome executeCOP1Divider(
       const EEInstruction &instruction,
       std::uint32_t address);

@@ -161,6 +161,7 @@ namespace
       case EEOperation::Jump:
         break;
       case EEOperation::CacheMaintenance:
+      case EEOperation::Prefetch:
         dependencies.gprReads = source;
         break;
       case EEOperation::MoveWordFromCOP0:
@@ -859,6 +860,7 @@ namespace
     direct(&table, 0x2d, EEOperation::StoreDoublewordRight);
     direct(&table, 0x2e, EEOperation::StoreWordRight);
     direct(&table, 0x31, EEOperation::LoadWordToCOP1);
+    direct(&table, 0x33, EEOperation::Prefetch);
     direct(&table, 0x37, EEOperation::LoadDoubleword);
     direct(&table, 0x36, EEOperation::LoadQuadwordToCOP2);
     direct(&table, 0x39, EEOperation::StoreWordFromCOP1);
@@ -2394,6 +2396,7 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::LoadQuadword:
     case EEOperation::StoreQuadword:
     case EEOperation::CacheMaintenance:
+    case EEOperation::Prefetch:
       return {
         EEInstructionCategory::LoadStore,
         PIPE_1,
@@ -2755,6 +2758,8 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
       return EEExecutionFamily::COP0TLBOperation;
     case EEOperation::CacheMaintenance:
       return EEExecutionFamily::CacheMaintenance;
+    case EEOperation::Prefetch:
+      return EEExecutionFamily::Prefetch;
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -3102,6 +3107,7 @@ EEMemoryAccess memoryAccessFor(EEOperation operation)
     case EEOperation::LoadQuadword:
     case EEOperation::LoadWordToCOP1:
     case EEOperation::LoadQuadwordToCOP2:
+    case EEOperation::Prefetch:
       return EEMemoryAccess::Load;
     case EEOperation::StoreByte:
     case EEOperation::StoreHalfword:

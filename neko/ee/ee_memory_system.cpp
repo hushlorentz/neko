@@ -1930,6 +1930,109 @@ EEDataCacheLoadResult EEMemorySystem::loadData(
   return result;
 }
 
+EEPrefetchResult EEMemorySystem::prefetchData(
+  EEBus *bus,
+  const EEPrefetchRequest &request)
+{
+  if (bus == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE prefetch requires a bus.");
+  }
+  if (request.hint >= 32)
+  {
+    throw std::invalid_argument(
+      "EE prefetch hint is outside the instruction field.");
+  }
+
+  EEPrefetchResult result;
+  result.translation = translateDataAddress(
+    request.virtualAddress,
+    EEDataAccessDirection::Load,
+    request.translationContext);
+  if (result.translation.outcome !=
+        EEAddressTranslationOutcome::Translated ||
+      result.translation.route != EEAddressRoute::MainBus ||
+      result.translation.cacheRoute !=
+        EECacheRoute::CachedNoncoherent ||
+      (cop0Config & EECOP0Config::DATA_CACHE_ENABLE) == 0)
+  {
+    return result;
+  }
+
+  const std::uint32_t lineBaseAddress =
+    result.translation.physicalAddress &
+    ~static_cast<std::uint32_t>(CACHE_LINE_SIZE - 1);
+  if (!bus->isMainMemoryRange(
+        lineBaseAddress,
+        CACHE_LINE_SIZE))
+  {
+    return result;
+  }
+
+  result.set = static_cast<std::uint8_t>(
+    (request.virtualAddress >> 6) &
+    (DATA_CACHE_SET_COUNT - 1));
+  const std::uint32_t physicalTag =
+    result.translation.physicalAddress &
+    EECacheLine::PHYSICAL_TAG_MASK;
+  for (std::size_t way = 0;
+       way < CACHE_WAY_COUNT;
+       ++way)
+  {
+    const EECacheLine &line = dataCache[result.set][way];
+    if (line.valid && line.physicalTag == physicalTag)
+    {
+      result.outcome = EEPrefetchOutcome::Hit;
+      result.way = static_cast<std::uint8_t>(way);
+      return result;
+    }
+  }
+
+  std::size_t victim = 0;
+  if (!dataCacheVictim(result.set, &victim))
+  {
+    return result;
+  }
+  result.way = static_cast<std::uint8_t>(victim);
+  const EECacheLine &oldLine =
+    dataCache[result.set][victim];
+  result.evictedDirty = oldLine.valid && oldLine.dirty;
+  if (result.evictedDirty)
+  {
+    const EECacheLineTransferResult writeback =
+      writeBackDataCacheLine(
+        bus,
+        result.set,
+        oldLine);
+    if (writeback.outcome !=
+        EECacheLineTransferOutcome::Completed)
+    {
+      result.outcome =
+        EEPrefetchOutcome::SuppressedTransferFailure;
+      result.transferOutcome = writeback.outcome;
+      return result;
+    }
+  }
+
+  const EECacheLineFillResult fill =
+    fillCacheLine(*bus, result.translation.physicalAddress);
+  if (fill.outcome != EECacheLineTransferOutcome::Completed)
+  {
+    result.outcome =
+      EEPrefetchOutcome::SuppressedTransferFailure;
+    result.transferOutcome = fill.outcome;
+    return result;
+  }
+
+  EECacheLine candidate = fill.line;
+  candidate.leastRecentlyFilled =
+    !oldLine.leastRecentlyFilled;
+  dataCache[result.set][victim] = candidate;
+  result.outcome = EEPrefetchOutcome::Allocated;
+  return result;
+}
+
 std::uint32_t EEMemorySystem::cop0Register(
   EECOP0Register registerIndex) const
 {

@@ -245,6 +245,32 @@ struct EEDataCacheStoreResult
   std::uint8_t way = 0xff;
 };
 
+struct EEPrefetchRequest
+{
+  std::uint32_t virtualAddress = 0;
+  std::uint8_t hint = 0;
+  EEAddressTranslationContext translationContext;
+};
+
+enum class EEPrefetchOutcome : std::uint8_t
+{
+  Ignored,
+  Hit,
+  Allocated,
+  SuppressedTransferFailure
+};
+
+struct EEPrefetchResult
+{
+  EEPrefetchOutcome outcome = EEPrefetchOutcome::Ignored;
+  EEAddressTranslationResult translation;
+  EECacheLineTransferOutcome transferOutcome =
+    EECacheLineTransferOutcome::Completed;
+  bool evictedDirty = false;
+  std::uint8_t set = 0xff;
+  std::uint8_t way = 0xff;
+};
+
 enum class EECacheOperation : std::uint8_t
 {
   InstructionIndexLoadTag = 0x00,
@@ -431,6 +457,9 @@ class EEMemorySystem final
       const EEAddressTranslationResult &translation,
       const std::array<std::uint8_t, 16> &data,
       std::size_t width);
+    EEPrefetchResult prefetchData(
+      EEBus *bus,
+      const EEPrefetchRequest &request);
     EECacheMaintenanceResult maintainCache(
       EEBus *bus,
       const EECacheMaintenanceRequest &request);

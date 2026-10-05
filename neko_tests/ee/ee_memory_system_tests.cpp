@@ -61,6 +61,14 @@ struct EEMemorySystemTestAccess
       width);
   }
 
+  static EEPrefetchResult prefetchData(
+    EEMemorySystem *memorySystem,
+    EEBus *bus,
+    const EEPrefetchRequest &request)
+  {
+    return memorySystem->prefetchData(bus, request);
+  }
+
   static EECacheMaintenanceResult maintainCache(
     EEMemorySystem *memorySystem,
     EEBus *bus,
@@ -112,6 +120,14 @@ static_assert(
   std::is_trivially_copyable<
     EEDataCacheStoreResult>::value,
   "EE data-cache store results must remain trivially copyable.");
+static_assert(
+  std::is_trivially_copyable<
+    EEPrefetchRequest>::value,
+  "EE prefetch requests must remain trivially copyable.");
+static_assert(
+  std::is_trivially_copyable<
+    EEPrefetchResult>::value,
+  "EE prefetch results must remain trivially copyable.");
 static_assert(
   std::is_trivially_copyable<
     EECacheMaintenanceRequest>::value,
@@ -2899,6 +2915,260 @@ TEST_CASE("EE data-cache load refill writes back a dirty victim")
   std::uint8_t value = 0;
   REQUIRE(system.eeBus().readData8(physicalAddresses[0], &value));
   REQUIRE(value == 0x5a);
+}
+
+TEST_CASE("EE PREF ignores unavailable prefetch targets")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  const auto prefetch =
+    [&system, &memorySystem](
+      std::uint32_t virtualAddress,
+      std::uint8_t hint = 0,
+      EEPrivilegeMode privilege = EEPrivilegeMode::Kernel)
+    {
+      return EEMemorySystemTestAccess::prefetchData(
+        &memorySystem,
+        &system.eeBus(),
+        {virtualAddress, hint, context(privilege)});
+    };
+
+  EEPrefetchResult result = prefetch(UINT32_C(0x80000100));
+  REQUIRE(result.outcome == EEPrefetchOutcome::Ignored);
+  REQUIRE(
+    result.translation.outcome ==
+    EEAddressTranslationOutcome::Translated);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(4, 0).valid);
+
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  result = prefetch(UINT32_C(0xa0000100));
+  REQUIRE(result.outcome == EEPrefetchOutcome::Ignored);
+  REQUIRE(
+    result.translation.cacheRoute ==
+    EECacheRoute::Uncached);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(4, 0).valid);
+
+  result = prefetch(
+    UINT32_C(0x00010000),
+    31,
+    EEPrivilegeMode::User);
+  REQUIRE(result.outcome == EEPrefetchOutcome::Ignored);
+  REQUIRE(
+    result.translation.outcome ==
+    EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+
+  result = prefetch(
+    UINT32_C(0x80000100),
+    0,
+    EEPrivilegeMode::User);
+  REQUIRE(result.outcome == EEPrefetchOutcome::Ignored);
+  REQUIRE(
+    result.translation.outcome ==
+    EEAddressTranslationOutcome::AddressErrorLoadOrFetch);
+
+  memorySystem.setTLBEntry(
+    2,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x45678000),
+      {
+        UINT32_C(0x00010006) |
+        (UINT32_C(7) << 3)
+      },
+      {UINT32_C(0x0001401e)}
+    });
+  result = prefetch(
+    UINT32_C(0x45678100),
+    0,
+    EEPrivilegeMode::User);
+  REQUIRE(result.outcome == EEPrefetchOutcome::Ignored);
+  REQUIRE(
+    result.translation.cacheRoute ==
+    EECacheRoute::UncachedAccelerated);
+
+  memorySystem.setTLBEntry(
+    8,
+    {
+      EECOP0PageMask::SIZE_16_KIB,
+      UINT32_C(0x50000000),
+      {EECOP0EntryLo::SCRATCHPAD | UINT32_C(0x00000006)},
+      {UINT32_C(0x0007001e)}
+    });
+  result = prefetch(
+    UINT32_C(0x50003210),
+    0,
+    EEPrivilegeMode::User);
+  REQUIRE(result.outcome == EEPrefetchOutcome::Ignored);
+  REQUIRE(result.translation.route == EEAddressRoute::Scratchpad);
+
+  EECacheLine locked0;
+  locked0.physicalTag = UINT32_C(0x00001000);
+  locked0.valid = true;
+  locked0.locked = true;
+  EECacheLine locked1;
+  locked1.physicalTag = UINT32_C(0x00002000);
+  locked1.valid = true;
+  locked1.locked = true;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    locked0);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    1,
+    locked1);
+  result = prefetch(UINT32_C(0x80003100));
+  REQUIRE(result.outcome == EEPrefetchOutcome::Ignored);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).locked);
+  REQUIRE(memorySystem.dataCacheLine(4, 1).locked);
+
+  REQUIRE_THROWS_WITH(
+    prefetch(UINT32_C(0x80000100), 32),
+    "EE prefetch hint is outside the instruction field.");
+}
+
+TEST_CASE("EE PREF allocates clean lines and treats reserved hints identically")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    REQUIRE(
+      system.eeBus().writeData8(
+        UINT32_C(0x100) + offset,
+        static_cast<std::uint8_t>(offset ^ 0x5a)));
+  }
+
+  EEPrefetchResult result =
+    EEMemorySystemTestAccess::prefetchData(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        UINT32_C(0x8000012c),
+        31,
+        context(EEPrivilegeMode::Kernel)
+      });
+  REQUIRE(result.outcome == EEPrefetchOutcome::Allocated);
+  REQUIRE(result.set == 4);
+  REQUIRE(result.way == 0);
+  REQUIRE_FALSE(result.evictedDirty);
+  const EECacheLine &allocated =
+    memorySystem.dataCacheLine(4, 0);
+  REQUIRE(allocated.valid);
+  REQUIRE_FALSE(allocated.dirty);
+  REQUIRE_FALSE(allocated.locked);
+  REQUIRE(allocated.leastRecentlyFilled);
+  REQUIRE(allocated.physicalTag == 0);
+  for (std::size_t offset = 0; offset < allocated.data.size(); ++offset)
+  {
+    REQUIRE(
+      allocated.data[offset] ==
+      static_cast<std::uint8_t>(offset ^ 0x5a));
+  }
+
+  system.eeBus().writeData8(UINT32_C(0x12c), 0xff);
+  result =
+    EEMemorySystemTestAccess::prefetchData(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        UINT32_C(0x8000012c),
+        1,
+        context(EEPrivilegeMode::Kernel)
+      });
+  REQUIRE(result.outcome == EEPrefetchOutcome::Hit);
+  REQUIRE(result.set == 4);
+  REQUIRE(result.way == 0);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).data[0x2c] == 0x76);
+}
+
+TEST_CASE("EE PREF writes back dirty victims atomically")
+{
+  NekoSystem system;
+  EEMemorySystem memorySystem;
+  memorySystem.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  EECacheLine dirty;
+  dirty.physicalTag = UINT32_C(0x00001000);
+  dirty.valid = true;
+  dirty.dirty = true;
+  dirty.data[0] = 0x5a;
+  EECacheLine other;
+  other.physicalTag = UINT32_C(0x00002000);
+  other.valid = true;
+  other.data[0] = 0xa5;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    dirty);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    1,
+    other);
+  system.eeBus().writeData8(UINT32_C(0x3100), 0x11);
+
+  EEPrefetchResult result =
+    EEMemorySystemTestAccess::prefetchData(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        UINT32_C(0x80003100),
+        0,
+        context(EEPrivilegeMode::Kernel)
+      });
+  REQUIRE(result.outcome == EEPrefetchOutcome::Allocated);
+  REQUIRE(result.evictedDirty);
+  REQUIRE(result.way == 0);
+  std::uint8_t writtenBack = 0;
+  REQUIRE(system.eeBus().readData8(0x1100, &writtenBack));
+  REQUIRE(writtenBack == 0x5a);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).data[0] == 0x11);
+  REQUIRE_FALSE(memorySystem.dataCacheLine(4, 0).dirty);
+
+  dirty.physicalTag = 1;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    0,
+    dirty);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    4,
+    1,
+    other);
+  result =
+    EEMemorySystemTestAccess::prefetchData(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        UINT32_C(0x80003100),
+        0,
+        context(EEPrivilegeMode::Kernel)
+      });
+  REQUIRE(
+    result.outcome ==
+    EEPrefetchOutcome::SuppressedTransferFailure);
+  REQUIRE(
+    result.transferOutcome ==
+    EECacheLineTransferOutcome::InvalidLineState);
+  REQUIRE(result.evictedDirty);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).physicalTag == 1);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).data[0] == 0x5a);
+  REQUIRE(memorySystem.dataCacheLine(4, 0).dirty);
+  REQUIRE(
+    memorySystem.dataCacheLine(4, 1).physicalTag ==
+    UINT32_C(0x00002000));
+  REQUIRE(memorySystem.dataCacheLine(4, 1).data[0] == 0xa5);
 }
 
 TEST_CASE("EE failed dirty writeback preserves data-cache ways")

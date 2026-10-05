@@ -1861,7 +1861,7 @@ creating parallel ownership.
       Preserve precise hit-operation faults, physical-tag lookup, hit/miss
       `Status.CH`, writeback failures, no-mutation misses, and the documented
       dirty/valid/lock/LRF transitions.
-- [ ] Add `PREF` decode, metadata, and exhaustive `CACHE`/`PREF` encoding
+- [x] Add `PREF` decode, metadata, and exhaustive `CACHE`/`PREF` encoding
       validation, then implement ignored addressing exceptions, no-op behavior
       for uncached targets, cached allocation behavior, hint validation, and
       interaction with `Config` cache-enable controls.

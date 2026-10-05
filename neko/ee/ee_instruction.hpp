@@ -262,6 +262,7 @@ enum class EEOperation : std::uint16_t
   WriteRandomTLBEntry,
   ProbeTLB,
   CacheMaintenance,
+  Prefetch,
   Count
 };
 
@@ -379,6 +380,7 @@ enum class EEExecutionFamily : std::uint8_t
   COP0RegisterMove,
   COP0TLBOperation,
   CacheMaintenance,
+  Prefetch,
   COP1RegisterMove,
   COP1Divider,
   COP1StagedOperation,

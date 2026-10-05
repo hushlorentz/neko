@@ -54,6 +54,18 @@ namespace
       immediate);
   }
 
+  std::uint32_t prefetchInstruction(
+    std::uint8_t source,
+    std::uint8_t hint,
+    std::uint16_t immediate)
+  {
+    return immediateInstruction(
+      0x33,
+      source,
+      hint,
+      immediate);
+  }
+
   void runInstruction(
     NekoSystem *system,
     std::uint32_t instruction)
@@ -675,6 +687,55 @@ TEST_CASE("EE CACHE data hit writeback faults before CH or line mutation")
   REQUIRE(preserved.dirty);
   REQUIRE(preserved.leastRecentlyFilled);
   REQUIRE(preserved.locked);
+}
+
+TEST_CASE("EE PREF suppresses faults and does not require COP0 usability")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    (core.cop0Register(EECOP0Register::Status) &
+       ~EECOP0Status::COP0_USABLE) |
+      EECOP0Status::CACHE_HIT);
+  core.setGeneralRegister(
+    2,
+    {UINT32_C(0x80000140), 0});
+  system.eeBus().writeData8(0x100, 0x5a);
+
+  runInstruction(
+    &system,
+    prefetchInstruction(2, 31, 0xffc0));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(core.stopReason() == EEStopReason::None);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
+  const EECacheLine &line =
+    system.eeMemorySystem().dataCacheLine(4, 0);
+  REQUIRE(line.valid);
+  REQUIRE_FALSE(line.dirty);
+  REQUIRE(line.data[0] == 0x5a);
+
+  mapLowKusegForTest(&core);
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE |
+      EECOP0Status::CACHE_HIT);
+  core.setGeneralRegister(2, {UINT32_C(0x00010000), 0});
+  runInstruction(
+    &system,
+    prefetchInstruction(2, 0, 0));
+
+  REQUIRE_FALSE(core.exceptionPending());
+  REQUIRE(core.stopReason() == EEStopReason::None);
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::CACHE_HIT) != 0);
 }
 
 TEST_CASE("EE COP0 faults preserve precise two-wide issue")

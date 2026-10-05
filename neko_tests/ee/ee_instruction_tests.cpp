@@ -137,6 +137,29 @@ TEST_CASE("EE instruction field decoding")
     }
   }
 
+  SECTION("PREF decodes every hint value")
+  {
+    for (std::uint8_t hint = 0; hint < 32; ++hint)
+    {
+      const EEInstruction instruction =
+        decodeEEInstruction(
+          immediateInstruction(
+            0x33,
+            3,
+            hint,
+            0xffc0));
+
+      REQUIRE(instruction.operation == EEOperation::Prefetch);
+      REQUIRE(instruction.sourceRegister == 3);
+      REQUIRE(instruction.targetRegister == hint);
+      REQUIRE(instruction.immediate == 0xffc0);
+      const EEInstructionDependencies dependencies =
+        eeInstructionDependencies(instruction);
+      REQUIRE(dependencies.gprReads == (UINT32_C(1) << 3));
+      REQUIRE(dependencies.gprWrites == 0);
+    }
+  }
+
   SECTION("SYNC stype selects load-store or pipeline synchronization")
   {
     for (std::uint8_t stype = 0; stype < 16; ++stype)
@@ -247,6 +270,13 @@ TEST_CASE("EE instruction routing classification")
       physical(EEPhysicalPipeline::LoadStore));
     requireRouting(
       EEOperation::CacheMaintenance,
+      EEInstructionCategory::LoadStore,
+      false,
+      true,
+      0,
+      physical(EEPhysicalPipeline::LoadStore));
+    requireRouting(
+      EEOperation::Prefetch,
       EEInstructionCategory::LoadStore,
       false,
       true,
@@ -431,6 +461,11 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::CacheMaintenance:
           return ExpectedExecutionClassification{
             EEExecutionFamily::CacheMaintenance,
+            EEExecutionDispatch::Immediate
+          };
+        case EEOperation::Prefetch:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::Prefetch,
             EEExecutionDispatch::Immediate
           };
         case EEOperation::MoveWordFromCOP1:
@@ -1112,7 +1147,7 @@ TEST_CASE("Every EE operation has complete shared metadata")
     "Unknown EE operation metadata.");
   REQUIRE_THROWS_WITH(
     eeOperationMetadata(
-      static_cast<EEOperation>(UINT8_MAX)),
+      static_cast<EEOperation>(UINT16_MAX)),
     "Unknown EE operation metadata.");
 
   EEInstruction invalidInstruction;

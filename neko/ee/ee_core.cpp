@@ -2961,6 +2961,8 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
       return executeCOP0TLBOperation(instruction, address);
     case EEOperation::CacheMaintenance:
       return executeCacheMaintenance(instruction, address);
+    case EEOperation::Prefetch:
+      return executePrefetch(instruction);
     case EEOperation::MoveWordFromCOP1:
     case EEOperation::MoveWordToCOP1:
     case EEOperation::MoveControlWordFromCOP1:
@@ -5775,6 +5777,37 @@ EECacheMaintenanceRequest EECore::cacheMaintenanceRequest(
     static_cast<std::uint32_t>(
       generalRegisters[instruction.sourceRegister].low +
       signExtend16(instruction.immediate)),
+    addressTranslationContext()
+  };
+}
+
+EEInstructionExecutionOutcome EECore::executePrefetch(
+  const EEInstruction &instruction)
+{
+  if (instruction.operation != EEOperation::Prefetch)
+  {
+    throw std::logic_error(
+      "EE prefetch handler received an incompatible operation.");
+  }
+  memorySystem.prefetchData(
+    bus,
+    prefetchRequest(instruction));
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEPrefetchRequest EECore::prefetchRequest(
+  const EEInstruction &instruction) const
+{
+  if (instruction.operation != EEOperation::Prefetch)
+  {
+    throw std::logic_error(
+      "EE prefetch request requires a PREF instruction.");
+  }
+  return {
+    static_cast<std::uint32_t>(
+      generalRegisters[instruction.sourceRegister].low +
+      signExtend16(instruction.immediate)),
+    instruction.targetRegister,
     addressTranslationContext()
   };
 }
