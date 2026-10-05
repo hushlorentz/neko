@@ -1869,7 +1869,7 @@ creating parallel ownership.
       accesses with no implicit cache snooping. Keep `SYNC`/`SYNC.L` as the
       functional software ordering boundary while deferring UCAB throughput
       and exact bus contention timing.
-- [ ] Complete the guest-visible cache conformance matrix for refill order,
+- [x] Complete the guest-visible cache conformance matrix for refill order,
       replacement, locking, physical aliases, separate I/D visibility,
       self-modifying code, writeback/invalidate workflows, DMA coherence
       workflows, cache-line boundaries, reset, repeated execution, and

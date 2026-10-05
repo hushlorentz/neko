@@ -738,6 +738,187 @@ TEST_CASE("EE PREF suppresses faults and does not require COP0 usability")
       EECOP0Status::CACHE_HIT) != 0);
 }
 
+TEST_CASE("EE CACHE makes self-modifying code visible explicitly")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t target = UINT32_C(0x80001000);
+  constexpr std::uint32_t original =
+    (UINT32_C(0x09) << 26) |
+    (UINT32_C(2) << 16) |
+    UINT32_C(1);
+  constexpr std::uint32_t replacement =
+    (UINT32_C(0x09) << 26) |
+    (UINT32_C(2) << 16) |
+    UINT32_C(2);
+  const auto executeTarget = [&system, &core]()
+  {
+    core.setGeneralRegister(2, {});
+    core.startExecution(target);
+    system.clockMasterCycle();
+    REQUIRE_FALSE(core.exceptionPending());
+    return core.generalRegister(2).low;
+  };
+
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE |
+      EECOP0Config::DATA_CACHE_ENABLE);
+  system.eeBus().write32(0x1000, original);
+  REQUIRE(executeTarget() == 1);
+
+  core.setGeneralRegister(3, {target, 0});
+  core.setGeneralRegister(4, {replacement, 0});
+  runInstruction(
+    &system,
+    immediateInstruction(0x2b, 3, 4, 0));
+  REQUIRE(system.eeBus().read32(0x1000) == original);
+  REQUIRE(executeTarget() == 1);
+
+  runInstruction(
+    &system,
+    cacheInstruction(3, 0x18, 0));
+  REQUIRE(system.eeBus().read32(0x1000) == replacement);
+  REQUIRE(executeTarget() == 1);
+
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  REQUIRE(executeTarget() == 2);
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE |
+      EECOP0Config::DATA_CACHE_ENABLE);
+  REQUIRE(executeTarget() == 1);
+
+  runInstruction(
+    &system,
+    cacheInstruction(3, 0x0b, 0));
+  REQUIRE(executeTarget() == 2);
+}
+
+TEST_CASE("EE CACHE coordinates explicit DMA coherence workflows")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t target = UINT32_C(0x80000200);
+  constexpr std::uint32_t cachedValue = UINT32_C(0x11223344);
+  constexpr std::uint32_t dmaValue = UINT32_C(0x55667788);
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  core.setGeneralRegister(3, {target, 0});
+  core.setGeneralRegister(4, {cachedValue, 0});
+
+  runInstruction(
+    &system,
+    immediateInstruction(0x2b, 3, 4, 0));
+  EEQuadword transferred = {};
+  REQUIRE(system.eeBus().readDMAC128(0x200, &transferred));
+  REQUIRE(transferred.low == 0);
+
+  runInstruction(
+    &system,
+    cacheInstruction(3, 0x1c, 0));
+  REQUIRE(system.eeBus().readDMAC128(0x200, &transferred));
+  REQUIRE(
+    static_cast<std::uint32_t>(transferred.low) ==
+    cachedValue);
+
+  REQUIRE(
+    system.eeBus().writeDMAC128(
+      0x200,
+      {dmaValue, 0}));
+  runInstruction(
+    &system,
+    immediateInstruction(0x23, 3, 5, 0));
+  REQUIRE(core.generalRegister(5).low == cachedValue);
+
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    0);
+  runInstruction(
+    &system,
+    immediateInstruction(0x23, 3, 6, 0));
+  REQUIRE(core.generalRegister(6).low == dmaValue);
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  runInstruction(
+    &system,
+    immediateInstruction(0x23, 3, 7, 0));
+  REQUIRE(core.generalRegister(7).low == cachedValue);
+
+  runInstruction(
+    &system,
+    cacheInstruction(3, 0x1a, 0));
+  runInstruction(
+    &system,
+    immediateInstruction(0x23, 3, 8, 0));
+  REQUIRE(core.generalRegister(8).low == dmaValue);
+}
+
+TEST_CASE("EE CACHE locking repeats deterministically across reset")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::size_t set = 4;
+  const auto exercise = [&system, &core]()
+  {
+    core.setCOP0Register(
+      EECOP0Register::Config,
+      EECOP0Config::DATA_CACHE_ENABLE);
+    core.setCOP0Register(
+      EECOP0Register::TagLo,
+      EECOP0TagLo::VALID |
+        EECOP0TagLo::LOCK);
+    core.setGeneralRegister(
+      2,
+      {UINT32_C(0x80000100), 0});
+    runInstruction(
+      &system,
+      cacheInstruction(2, 0x12, 0));
+
+    system.eeBus().write32(0x1100, UINT32_C(0x11111111));
+    core.setGeneralRegister(
+      3,
+      {UINT32_C(0x80001100), 0});
+    runInstruction(
+      &system,
+      immediateInstruction(0x23, 3, 4, 0));
+    system.eeBus().write32(0x2100, UINT32_C(0x22222222));
+    core.setGeneralRegister(
+      3,
+      {UINT32_C(0x80002100), 0});
+    runInstruction(
+      &system,
+      immediateInstruction(0x23, 3, 5, 0));
+
+    const EECacheLine &locked =
+      system.eeMemorySystem().dataCacheLine(set, 0);
+    const EECacheLine &replaceable =
+      system.eeMemorySystem().dataCacheLine(set, 1);
+    REQUIRE(locked.valid);
+    REQUIRE(locked.locked);
+    REQUIRE(locked.physicalTag == 0);
+    REQUIRE(replaceable.valid);
+    REQUIRE_FALSE(replaceable.locked);
+    REQUIRE(
+      replaceable.physicalTag ==
+      UINT32_C(0x00002000));
+    REQUIRE(core.generalRegister(4).low == UINT32_C(0x11111111));
+    REQUIRE(core.generalRegister(5).low == UINT32_C(0x22222222));
+  };
+
+  exercise();
+  system.reset();
+  REQUIRE_FALSE(
+    system.eeMemorySystem().dataCacheLine(set, 0).valid);
+  REQUIRE_FALSE(
+    system.eeMemorySystem().dataCacheLine(set, 1).valid);
+  exercise();
+}
+
 TEST_CASE("EE COP0 faults preserve precise two-wide issue")
 {
   const std::uint32_t tlbwi = cop0OperationInstruction(0x02);
