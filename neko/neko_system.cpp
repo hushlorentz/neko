@@ -21,6 +21,122 @@ namespace
       *hash *= STATE_FNV_PRIME;
     }
   }
+
+}
+
+NekoEETraceMemory::AccessKind NekoSystem::traceMemoryAccessKind(
+  EECore::MemoryAccessKind kind)
+{
+  switch (kind)
+  {
+    case EECore::MemoryAccessKind::InstructionFetch:
+      return NekoEETraceMemory::AccessKind::InstructionFetch;
+    case EECore::MemoryAccessKind::DataLoad:
+      return NekoEETraceMemory::AccessKind::DataLoad;
+    case EECore::MemoryAccessKind::DataStore:
+      return NekoEETraceMemory::AccessKind::DataStore;
+  }
+  throw std::logic_error("Unknown EE memory access kind.");
+}
+
+NekoEETraceMemory::TranslationOutcome
+NekoSystem::traceMemoryTranslationOutcome(
+  EEAddressTranslationOutcome outcome)
+{
+  using TraceOutcome = NekoEETraceMemory::TranslationOutcome;
+  switch (outcome)
+  {
+    case EEAddressTranslationOutcome::Translated:
+      return TraceOutcome::Translated;
+    case EEAddressTranslationOutcome::TLBLookup:
+      return TraceOutcome::TLBLookup;
+    case EEAddressTranslationOutcome::AddressErrorLoadOrFetch:
+      return TraceOutcome::AddressErrorLoadOrFetch;
+    case EEAddressTranslationOutcome::AddressErrorStore:
+      return TraceOutcome::AddressErrorStore;
+    case EEAddressTranslationOutcome::TLBRefillLoadOrFetch:
+      return TraceOutcome::TLBRefillLoadOrFetch;
+    case EEAddressTranslationOutcome::TLBRefillStore:
+      return TraceOutcome::TLBRefillStore;
+    case EEAddressTranslationOutcome::TLBInvalidLoadOrFetch:
+      return TraceOutcome::TLBInvalidLoadOrFetch;
+    case EEAddressTranslationOutcome::TLBInvalidStore:
+      return TraceOutcome::TLBInvalidStore;
+    case EEAddressTranslationOutcome::TLBModified:
+      return TraceOutcome::TLBModified;
+    case EEAddressTranslationOutcome::UnsupportedScratchpadInstruction:
+      return TraceOutcome::UnsupportedScratchpadInstruction;
+    case EEAddressTranslationOutcome::UnsupportedScratchpadPageSize:
+      return TraceOutcome::UnsupportedScratchpadPageSize;
+    case EEAddressTranslationOutcome::UnsupportedCacheAttribute:
+      return TraceOutcome::UnsupportedCacheAttribute;
+  }
+  throw std::logic_error(
+    "Unknown EE memory translation outcome.");
+}
+
+NekoEETraceMemory::CacheRoute NekoSystem::traceMemoryCacheRoute(
+  EECacheRoute route)
+{
+  using TraceRoute = NekoEETraceMemory::CacheRoute;
+  switch (route)
+  {
+    case EECacheRoute::Uncached:
+      return TraceRoute::Uncached;
+    case EECacheRoute::CachedNoncoherent:
+      return TraceRoute::CachedNoncoherent;
+    case EECacheRoute::UncachedAccelerated:
+      return TraceRoute::UncachedAccelerated;
+    case EECacheRoute::TLBSelected:
+      return TraceRoute::TLBSelected;
+    case EECacheRoute::Unsupported:
+      return TraceRoute::Unsupported;
+  }
+  throw std::logic_error("Unknown EE memory cache route.");
+}
+
+NekoEETraceMemory::CacheAccess NekoSystem::traceMemoryCacheAccess(
+  EECore::MemoryCacheAccess access)
+{
+  using TraceAccess = NekoEETraceMemory::CacheAccess;
+  switch (access)
+  {
+    case EECore::MemoryCacheAccess::NotAccessed:
+      return TraceAccess::NotAccessed;
+    case EECore::MemoryCacheAccess::Bypassed:
+      return TraceAccess::Bypassed;
+    case EECore::MemoryCacheAccess::Hit:
+      return TraceAccess::Hit;
+    case EECore::MemoryCacheAccess::Miss:
+      return TraceAccess::Miss;
+    case EECore::MemoryCacheAccess::Refilled:
+      return TraceAccess::Refilled;
+    case EECore::MemoryCacheAccess::Allocated:
+      return TraceAccess::Allocated;
+  }
+  throw std::logic_error("Unknown EE memory cache access.");
+}
+
+NekoEETraceMemory::TransferOutcome
+NekoSystem::traceMemoryTransferOutcome(
+  EECore::MemoryTransferOutcome outcome)
+{
+  using TraceOutcome = NekoEETraceMemory::TransferOutcome;
+  switch (outcome)
+  {
+    case EECore::MemoryTransferOutcome::NotAttempted:
+      return TraceOutcome::NotAttempted;
+    case EECore::MemoryTransferOutcome::Completed:
+      return TraceOutcome::Completed;
+    case EECore::MemoryTransferOutcome::Stalled:
+      return TraceOutcome::Stalled;
+    case EECore::MemoryTransferOutcome::PhysicalBusError:
+      return TraceOutcome::PhysicalBusError;
+    case EECore::MemoryTransferOutcome::DeviceNotReady:
+      return TraceOutcome::DeviceNotReady;
+  }
+  throw std::logic_error(
+    "Unknown EE memory transfer outcome.");
 }
 
 NekoSystem::NekoSystem() :
@@ -770,16 +886,26 @@ void NekoSystem::publishCycleTrace(
         value0 = memory.virtualAddress;
         value1 = memory.low;
         value2 = memory.high;
-        value3 =
-          memory.width |
-          (memory.kind ==
-              EECore::MemoryAccessKind::DataStore
-            ? UINT64_C(1) << 8
-            : 0) |
-          (memory.transferOutcome ==
-              EECore::MemoryTransferOutcome::Completed
-            ? UINT64_C(1) << 9
-            : 0);
+        value3 = nekoPackEEMemoryTraceMetadata({
+          memory.physicalAddress,
+          memory.width,
+          traceMemoryAccessKind(memory.kind),
+          traceMemoryTranslationOutcome(
+            memory.translationOutcome),
+          traceMemoryCacheRoute(memory.cacheRoute),
+          memory.cacheAttribute,
+          memory.addressRoute == EEAddressRoute::Scratchpad,
+          memory.translationOutcome ==
+              EEAddressTranslationOutcome::Translated ||
+            memory.translationOutcome ==
+              EEAddressTranslationOutcome::
+                UnsupportedScratchpadInstruction ||
+            memory.translationOutcome ==
+              EEAddressTranslationOutcome::
+                UnsupportedCacheAttribute,
+          traceMemoryCacheAccess(memory.cacheAccess),
+          traceMemoryTransferOutcome(
+            memory.transferOutcome)});
         break;
       }
       case EECore::CycleEventKind::ExceptionEntered:

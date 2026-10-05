@@ -52,6 +52,98 @@ namespace NekoEETraceMemory
   constexpr std::uint64_t WIDTH_MASK = UINT64_C(0xff);
   constexpr std::uint64_t WRITE = UINT64_C(1) << 8;
   constexpr std::uint64_t SUCCEEDED = UINT64_C(1) << 9;
+  constexpr std::uint64_t LEGACY_MASK =
+    WIDTH_MASK | WRITE | SUCCEEDED;
+  constexpr std::uint8_t ACCESS_KIND_SHIFT = 10;
+  constexpr std::uint64_t ACCESS_KIND_MASK =
+    UINT64_C(0x3) << ACCESS_KIND_SHIFT;
+  constexpr std::uint8_t TRANSLATION_OUTCOME_SHIFT = 12;
+  constexpr std::uint64_t TRANSLATION_OUTCOME_MASK =
+    UINT64_C(0xf) << TRANSLATION_OUTCOME_SHIFT;
+  constexpr std::uint8_t CACHE_ROUTE_SHIFT = 16;
+  constexpr std::uint64_t CACHE_ROUTE_MASK =
+    UINT64_C(0x7) << CACHE_ROUTE_SHIFT;
+  constexpr std::uint8_t CACHE_ACCESS_SHIFT = 19;
+  constexpr std::uint64_t CACHE_ACCESS_MASK =
+    UINT64_C(0x7) << CACHE_ACCESS_SHIFT;
+  constexpr std::uint8_t TRANSFER_OUTCOME_SHIFT = 22;
+  constexpr std::uint64_t TRANSFER_OUTCOME_MASK =
+    UINT64_C(0x7) << TRANSFER_OUTCOME_SHIFT;
+  constexpr std::uint64_t SCRATCHPAD_ROUTE =
+    UINT64_C(1) << 25;
+  constexpr std::uint64_t PHYSICAL_ADDRESS_VALID =
+    UINT64_C(1) << 26;
+  constexpr std::uint8_t CACHE_ATTRIBUTE_SHIFT = 27;
+  constexpr std::uint64_t CACHE_ATTRIBUTE_MASK =
+    UINT64_C(0x7) << CACHE_ATTRIBUTE_SHIFT;
+  constexpr std::uint8_t PHYSICAL_ADDRESS_SHIFT = 32;
+
+  enum class AccessKind : std::uint8_t
+  {
+    InstructionFetch,
+    DataLoad,
+    DataStore
+  };
+
+  enum class TranslationOutcome : std::uint8_t
+  {
+    Translated,
+    TLBLookup,
+    AddressErrorLoadOrFetch,
+    AddressErrorStore,
+    TLBRefillLoadOrFetch,
+    TLBRefillStore,
+    TLBInvalidLoadOrFetch,
+    TLBInvalidStore,
+    TLBModified,
+    UnsupportedScratchpadInstruction,
+    UnsupportedScratchpadPageSize,
+    UnsupportedCacheAttribute
+  };
+
+  enum class CacheRoute : std::uint8_t
+  {
+    Uncached,
+    CachedNoncoherent,
+    UncachedAccelerated,
+    TLBSelected,
+    Unsupported
+  };
+
+  enum class CacheAccess : std::uint8_t
+  {
+    NotAccessed,
+    Bypassed,
+    Hit,
+    Miss,
+    Refilled,
+    Allocated
+  };
+
+  enum class TransferOutcome : std::uint8_t
+  {
+    NotAttempted,
+    Completed,
+    Stalled,
+    PhysicalBusError,
+    DeviceNotReady
+  };
+
+  struct Metadata
+  {
+    std::uint32_t physicalAddress = 0;
+    std::uint8_t width = 0;
+    AccessKind accessKind = AccessKind::InstructionFetch;
+    TranslationOutcome translationOutcome =
+      TranslationOutcome::TLBLookup;
+    CacheRoute cacheRoute = CacheRoute::TLBSelected;
+    std::uint8_t cacheAttribute = 0;
+    bool scratchpadRoute = false;
+    bool physicalAddressValid = false;
+    CacheAccess cacheAccess = CacheAccess::NotAccessed;
+    TransferOutcome transferOutcome =
+      TransferOutcome::NotAttempted;
+  };
 }
 
 namespace NekoEETraceCOP1Interlock
@@ -129,5 +221,7 @@ struct NekoTraceEvent
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(
   const std::vector<NekoTraceEvent> &events);
+std::uint64_t nekoPackEEMemoryTraceMetadata(
+  const NekoEETraceMemory::Metadata &metadata);
 
 #endif

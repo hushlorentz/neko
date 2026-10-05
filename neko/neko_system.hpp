@@ -204,6 +204,19 @@ class NekoSystem
     void publishCycleTrace(
       std::uint64_t cycle,
       const CycleObservationSnapshot &beforeCycle);
+    static NekoEETraceMemory::AccessKind
+      traceMemoryAccessKind(EECore::MemoryAccessKind kind);
+    static NekoEETraceMemory::TranslationOutcome
+      traceMemoryTranslationOutcome(
+        EEAddressTranslationOutcome outcome);
+    static NekoEETraceMemory::CacheRoute
+      traceMemoryCacheRoute(EECacheRoute route);
+    static NekoEETraceMemory::CacheAccess
+      traceMemoryCacheAccess(
+        EECore::MemoryCacheAccess access);
+    static NekoEETraceMemory::TransferOutcome
+      traceMemoryTransferOutcome(
+        EECore::MemoryTransferOutcome outcome);
     void appendTrace(
       std::uint64_t cycle,
       NekoTraceSubsystem subsystem,

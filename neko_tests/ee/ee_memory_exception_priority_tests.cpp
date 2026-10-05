@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 
 #include "catch.hpp"
@@ -154,7 +155,8 @@ namespace
     const NekoSystem &system,
     std::uint32_t address,
     std::uint8_t width,
-    bool store)
+    bool store,
+    NekoEETraceMemory::TranslationOutcome expectedOutcome)
   {
     const std::uint64_t expectedFlags =
       width | (store ? NekoEETraceMemory::WRITE : 0);
@@ -163,7 +165,12 @@ namespace
       if (event.subsystem == NekoTraceSubsystem::EE &&
           event.type == NekoTraceEventType::MemoryAccess &&
           event.value0 == address &&
-          event.value3 == expectedFlags)
+          (event.value3 & NekoEETraceMemory::LEGACY_MASK) ==
+            expectedFlags &&
+          ((event.value3 &
+            NekoEETraceMemory::TRANSLATION_OUTCOME_MASK) >>
+            NekoEETraceMemory::TRANSLATION_OUTCOME_SHIFT) ==
+            static_cast<std::uint8_t>(expectedOutcome))
       {
         return true;
       }
@@ -330,12 +337,28 @@ namespace
         expectedCause);
       const std::uint32_t expectedTraceAddress =
         virtualAddress & ~contract.traceAlignmentMask;
+      const NekoEETraceMemory::TranslationOutcome
+        expectedTraceOutcome =
+          stage == DataFaultStage::TLBModified
+            ? NekoEETraceMemory::TranslationOutcome::TLBModified
+            : stage == DataFaultStage::TLBInvalid
+              ? (store
+                  ? NekoEETraceMemory::TranslationOutcome::
+                      TLBInvalidStore
+                  : NekoEETraceMemory::TranslationOutcome::
+                      TLBInvalidLoadOrFetch)
+              : (store
+                  ? NekoEETraceMemory::TranslationOutcome::
+                      TLBRefillStore
+                  : NekoEETraceMemory::TranslationOutcome::
+                      TLBRefillLoadOrFetch);
       REQUIRE(
         hasFailedMemoryTrace(
           system,
           expectedTraceAddress,
           contract.width,
-          store));
+          store,
+          expectedTraceOutcome));
     }
     if (stage == DataFaultStage::SegmentProtection ||
         stage == DataFaultStage::UnsupportedCache ||
@@ -355,6 +378,30 @@ namespace
       REQUIRE(
         core.cop0Register(EECOP0Register::BadVAddr) ==
         expectedFaultAddress);
+    }
+    if (stage == DataFaultStage::UnsupportedCache)
+    {
+      const std::uint32_t expectedTraceAddress =
+        virtualAddress & ~contract.traceAlignmentMask;
+      const auto trace = std::find_if(
+        system.trace().begin(),
+        system.trace().end(),
+        [expectedTraceAddress](const NekoTraceEvent &event)
+        {
+          return
+            event.type == NekoTraceEventType::MemoryAccess &&
+            event.value0 == expectedTraceAddress &&
+            ((event.value3 &
+              NekoEETraceMemory::TRANSLATION_OUTCOME_MASK) >>
+              NekoEETraceMemory::TRANSLATION_OUTCOME_SHIFT) ==
+              static_cast<std::uint8_t>(
+                NekoEETraceMemory::TranslationOutcome::
+                  UnsupportedCacheAttribute);
+        });
+      REQUIRE(trace != system.trace().end());
+      REQUIRE(
+        (trace->value3 &
+          NekoEETraceMemory::PHYSICAL_ADDRESS_VALID) != 0);
     }
     requireNoDataMutation(system, store);
   }
@@ -506,6 +553,17 @@ TEST_CASE("EE aligned data faults precede translation for every scalar width")
       REQUIRE(
         core.exceptionAddress() ==
         (DATA_VIRTUAL_BASE | 1));
+      REQUIRE(
+        hasFailedMemoryTrace(
+          system,
+          DATA_VIRTUAL_BASE | 1,
+          contract.width,
+          store,
+          store
+            ? NekoEETraceMemory::TranslationOutcome::
+                AddressErrorStore
+            : NekoEETraceMemory::TranslationOutcome::
+                AddressErrorLoadOrFetch));
       requireMemorySystemSentinels(core);
       requireNoDataMutation(system, store);
     }

@@ -116,6 +116,36 @@ namespace
     return events;
   }
 
+  std::uint64_t traceField(
+    std::uint64_t metadata,
+    std::uint64_t mask,
+    std::uint8_t shift)
+  {
+    return (metadata & mask) >> shift;
+  }
+
+  std::vector<NekoTraceEvent> eeTraceWithoutFetches(
+    const NekoSystem &system)
+  {
+    std::vector<NekoTraceEvent> events;
+    for (const NekoTraceEvent &event : eeTrace(system))
+    {
+      if (
+        event.type == NekoTraceEventType::MemoryAccess &&
+        traceField(
+          event.value3,
+          NekoEETraceMemory::ACCESS_KIND_MASK,
+          NekoEETraceMemory::ACCESS_KIND_SHIFT) ==
+          static_cast<std::uint8_t>(
+            NekoEETraceMemory::AccessKind::InstructionFetch))
+      {
+        continue;
+      }
+      events.push_back(event);
+    }
+    return events;
+  }
+
   std::vector<NekoTraceEvent> cop1DividerHazards(
     const NekoSystem &system)
   {
@@ -127,6 +157,7 @@ namespace
       {
         events.push_back(event);
       }
+
     }
     return events;
   }
@@ -379,6 +410,108 @@ namespace
   }
 }
 
+TEST_CASE("EE memory trace metadata fields encode exhaustively")
+{
+  using namespace NekoEETraceMemory;
+
+  for (std::uint8_t value = 0;
+       value <= static_cast<std::uint8_t>(AccessKind::DataStore);
+       ++value)
+  {
+    Metadata metadata;
+    metadata.accessKind = static_cast<AccessKind>(value);
+    const std::uint64_t packed =
+      nekoPackEEMemoryTraceMetadata(metadata);
+    REQUIRE(
+      traceField(packed, ACCESS_KIND_MASK, ACCESS_KIND_SHIFT) ==
+      value);
+  }
+  for (std::uint8_t value = 0;
+       value <= static_cast<std::uint8_t>(
+         TranslationOutcome::UnsupportedCacheAttribute);
+       ++value)
+  {
+    Metadata metadata;
+    metadata.translationOutcome =
+      static_cast<TranslationOutcome>(value);
+    const std::uint64_t packed =
+      nekoPackEEMemoryTraceMetadata(metadata);
+    REQUIRE(
+      traceField(
+        packed,
+        TRANSLATION_OUTCOME_MASK,
+        TRANSLATION_OUTCOME_SHIFT) == value);
+  }
+  for (std::uint8_t value = 0;
+       value <= static_cast<std::uint8_t>(CacheRoute::Unsupported);
+       ++value)
+  {
+    Metadata metadata;
+    metadata.cacheRoute = static_cast<CacheRoute>(value);
+    const std::uint64_t packed =
+      nekoPackEEMemoryTraceMetadata(metadata);
+    REQUIRE(
+      traceField(packed, CACHE_ROUTE_MASK, CACHE_ROUTE_SHIFT) ==
+      value);
+  }
+  for (std::uint8_t value = 0;
+       value <= static_cast<std::uint8_t>(CacheAccess::Allocated);
+       ++value)
+  {
+    Metadata metadata;
+    metadata.cacheAccess = static_cast<CacheAccess>(value);
+    const std::uint64_t packed =
+      nekoPackEEMemoryTraceMetadata(metadata);
+    REQUIRE(
+      traceField(packed, CACHE_ACCESS_MASK, CACHE_ACCESS_SHIFT) ==
+      value);
+  }
+  for (std::uint8_t value = 0;
+       value <= static_cast<std::uint8_t>(
+         TransferOutcome::DeviceNotReady);
+       ++value)
+  {
+    Metadata metadata;
+    metadata.transferOutcome =
+      static_cast<TransferOutcome>(value);
+    const std::uint64_t packed =
+      nekoPackEEMemoryTraceMetadata(metadata);
+    REQUIRE(
+      traceField(
+        packed,
+        TRANSFER_OUTCOME_MASK,
+        TRANSFER_OUTCOME_SHIFT) == value);
+  }
+
+  Metadata metadata;
+  metadata.physicalAddress = UINT32_C(0x89abcdef);
+  metadata.width = 16;
+  metadata.accessKind = AccessKind::DataStore;
+  metadata.translationOutcome = TranslationOutcome::Translated;
+  metadata.cacheRoute = CacheRoute::CachedNoncoherent;
+  metadata.cacheAttribute = 7;
+  metadata.scratchpadRoute = true;
+  metadata.physicalAddressValid = true;
+  metadata.cacheAccess = CacheAccess::Refilled;
+  metadata.transferOutcome = TransferOutcome::Completed;
+  const std::uint64_t packed =
+    nekoPackEEMemoryTraceMetadata(metadata);
+  REQUIRE((packed & WIDTH_MASK) == 16);
+  REQUIRE((packed & WRITE) != 0);
+  REQUIRE((packed & SUCCEEDED) != 0);
+  REQUIRE((packed & SCRATCHPAD_ROUTE) != 0);
+  REQUIRE((packed & PHYSICAL_ADDRESS_VALID) != 0);
+  REQUIRE(
+    traceField(
+      packed,
+      CACHE_ATTRIBUTE_MASK,
+      CACHE_ATTRIBUTE_SHIFT) == 7);
+  REQUIRE(
+    static_cast<std::uint32_t>(
+      packed >> PHYSICAL_ADDRESS_SHIFT) ==
+    UINT32_C(0x89abcdef));
+}
+
 TEST_CASE("Neko Frame Hash Tests")
 {
   const NekoFrameResult aggregateCompatible = {
@@ -480,6 +613,10 @@ TEST_CASE("EE regression traces describe issued work")
     2,
     {UINT64_C(0x11223344), 0});
   core.setCOP0Register(EECOP0Register::Status, 0);
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE |
+      EECOP0Config::DATA_CACHE_ENABLE);
   mapLowKusegForTest(&core);
   system.eeBus().write32(
     0,
@@ -494,7 +631,8 @@ TEST_CASE("EE regression traces describe issued work")
 
   system.runMasterCycles(3);
 
-  const std::vector<NekoTraceEvent> events = eeTrace(system);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(system);
   REQUIRE(events.size() == 10);
 
   REQUIRE(events[0].masterCycle == 1);
@@ -513,10 +651,62 @@ TEST_CASE("EE regression traces describe issued work")
   REQUIRE(events[1].value1 == UINT64_C(0x11223344));
   REQUIRE(events[1].value2 == 0);
   REQUIRE(
-    events[1].value3 ==
+    (events[1].value3 & NekoEETraceMemory::LEGACY_MASK) ==
     (UINT64_C(4) |
      NekoEETraceMemory::WRITE |
      NekoEETraceMemory::SUCCEEDED));
+  REQUIRE(
+    traceField(
+      events[1].value3,
+      NekoEETraceMemory::TRANSLATION_OUTCOME_MASK,
+      NekoEETraceMemory::TRANSLATION_OUTCOME_SHIFT) ==
+      static_cast<std::uint8_t>(
+        NekoEETraceMemory::TranslationOutcome::Translated));
+  REQUIRE(
+    traceField(
+      events[1].value3,
+      NekoEETraceMemory::CACHE_ACCESS_MASK,
+      NekoEETraceMemory::CACHE_ACCESS_SHIFT) ==
+      static_cast<std::uint8_t>(
+        NekoEETraceMemory::CacheAccess::Allocated));
+  REQUIRE(
+    static_cast<std::uint32_t>(
+      events[1].value3 >>
+      NekoEETraceMemory::PHYSICAL_ADDRESS_SHIFT) == 0x100);
+
+  std::vector<NekoTraceEvent> fetches;
+  for (const NekoTraceEvent &event : eeTrace(system))
+  {
+    if (
+      event.type == NekoTraceEventType::MemoryAccess &&
+      traceField(
+        event.value3,
+        NekoEETraceMemory::ACCESS_KIND_MASK,
+        NekoEETraceMemory::ACCESS_KIND_SHIFT) ==
+        static_cast<std::uint8_t>(
+          NekoEETraceMemory::AccessKind::InstructionFetch))
+    {
+      fetches.push_back(event);
+    }
+  }
+  REQUIRE(fetches.size() == 5);
+  REQUIRE(
+    traceField(
+      fetches[0].value3,
+      NekoEETraceMemory::CACHE_ACCESS_MASK,
+      NekoEETraceMemory::CACHE_ACCESS_SHIFT) ==
+      static_cast<std::uint8_t>(
+        NekoEETraceMemory::CacheAccess::Refilled));
+  for (std::size_t index = 1; index < fetches.size(); ++index)
+  {
+    REQUIRE(
+      traceField(
+        fetches[index].value3,
+        NekoEETraceMemory::CACHE_ACCESS_MASK,
+        NekoEETraceMemory::CACHE_ACCESS_SHIFT) ==
+        static_cast<std::uint8_t>(
+          NekoEETraceMemory::CacheAccess::Hit));
+  }
 
   REQUIRE(events[2].type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events[2].masterCycle == 1);
@@ -656,7 +846,8 @@ TEST_CASE("EE faulting COP0 traces expose issue and exception entry")
 
   system.clockMasterCycle();
 
-  const std::vector<NekoTraceEvent> events = eeTrace(system);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(system);
   REQUIRE(events.size() == 3);
   REQUIRE(
     events[0].type ==
@@ -1116,7 +1307,8 @@ TEST_CASE("EE regression traces identify interrupt delivery")
 
   system.clockMasterCycle();
 
-  const std::vector<NekoTraceEvent> events = eeTrace(system);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(system);
   REQUIRE(events.size() == 3);
   REQUIRE(events[0].masterCycle == 1);
   REQUIRE(
@@ -1153,7 +1345,7 @@ TEST_CASE(
   REQUIRE(traced.saveState() == untraced.saveState());
 
   std::vector<NekoTraceEvent> completionEvents;
-  for (const NekoTraceEvent &event : eeTrace(traced))
+  for (const NekoTraceEvent &event : eeTraceWithoutFetches(traced))
   {
     if (event.masterCycle == 9)
     {
@@ -1264,7 +1456,7 @@ TEST_CASE("EE COP1 dividers retire through the shared S-stage contract")
     system.runMasterCycles(vector.latency + 1);
 
     std::vector<NekoTraceEvent> pipelineEvents;
-    for (const NekoTraceEvent &event : eeTrace(system))
+    for (const NekoTraceEvent &event : eeTraceWithoutFetches(system))
     {
       if (event.type ==
             NekoTraceEventType::COP1StageTransition ||
@@ -1803,7 +1995,7 @@ TEST_CASE("EE COP1 overlapping ALU results retire in program order")
 
   std::vector<NekoTraceEvent> cycleSix;
   std::vector<NekoTraceEvent> retirements;
-  for (const NekoTraceEvent &event : eeTrace(system))
+  for (const NekoTraceEvent &event : eeTraceWithoutFetches(system))
   {
     if (event.masterCycle == 6)
     {
@@ -1958,26 +2150,50 @@ TEST_CASE("EE regression traces retain failed memory attempts")
 
   system.clockMasterCycle();
 
-  const std::vector<NekoTraceEvent> events = eeTrace(system);
-  REQUIRE(events.size() == 4);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(system);
+  const auto dataMemory = std::find_if(
+    events.begin(),
+    events.end(),
+    [](const NekoTraceEvent &event)
+    {
+      return
+        event.type == NekoTraceEventType::MemoryAccess &&
+        traceField(
+          event.value3,
+          NekoEETraceMemory::ACCESS_KIND_MASK,
+          NekoEETraceMemory::ACCESS_KIND_SHIFT) ==
+          static_cast<std::uint8_t>(
+            NekoEETraceMemory::AccessKind::DataLoad);
+    });
+  REQUIRE(dataMemory != events.end());
   REQUIRE(
-    events[0].type ==
-    NekoTraceEventType::InstructionIssued);
-  REQUIRE(events[1].type == NekoTraceEventType::MemoryAccess);
-  REQUIRE(
-    events[1].value0 ==
+    dataMemory->value0 ==
     EEMemoryMap::KSEG0_BASE +
       EEMemoryMap::MAIN_MEMORY_SIZE);
-  REQUIRE(events[1].value1 == 0);
-  REQUIRE(events[1].value3 == 4);
+  REQUIRE(dataMemory->value1 == 0);
   REQUIRE(
-    events[2].type ==
-    NekoTraceEventType::ExceptionEntered);
+    (dataMemory->value3 & NekoEETraceMemory::LEGACY_MASK) == 4);
   REQUIRE(
-    events[2].value0 ==
+    traceField(
+      dataMemory->value3,
+      NekoEETraceMemory::TRANSFER_OUTCOME_MASK,
+      NekoEETraceMemory::TRANSFER_OUTCOME_SHIFT) ==
+      static_cast<std::uint8_t>(
+        NekoEETraceMemory::TransferOutcome::PhysicalBusError));
+  const auto exception = std::find_if(
+    events.begin(),
+    events.end(),
+    [](const NekoTraceEvent &event)
+    {
+      return event.type == NekoTraceEventType::ExceptionEntered;
+    });
+  REQUIRE(exception != events.end());
+  REQUIRE(
+    exception->value0 ==
     static_cast<std::uint8_t>(EEException::DataBusErrorLoad));
-  REQUIRE(events[3].type == NekoTraceEventType::StateSnapshot);
-  REQUIRE(events[3].value0 == core.stateHash());
+  REQUIRE(events.back().type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events.back().value0 == core.stateHash());
 }
 
 TEST_CASE("EE COP1 memory transfers produce structured traces")
@@ -2003,7 +2219,14 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
   std::vector<NekoTraceEvent> retirementEvents;
   for (const NekoTraceEvent &event : events)
   {
-    if (event.type == NekoTraceEventType::MemoryAccess)
+    if (
+      event.type == NekoTraceEventType::MemoryAccess &&
+      traceField(
+        event.value3,
+        NekoEETraceMemory::ACCESS_KIND_MASK,
+        NekoEETraceMemory::ACCESS_KIND_SHIFT) ==
+        static_cast<std::uint8_t>(
+          NekoEETraceMemory::AccessKind::DataLoad))
     {
       memoryEvents.push_back(event);
     }
@@ -2020,17 +2243,24 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
     }
   }
 
-  REQUIRE(events[0].type == NekoTraceEventType::InstructionIssued);
-  REQUIRE(events[0].value1 == instruction);
+  const auto issued = std::find_if(
+    events.begin(),
+    events.end(),
+    [](const NekoTraceEvent &event)
+    {
+      return event.type == NekoTraceEventType::InstructionIssued;
+    });
+  REQUIRE(issued != events.end());
+  REQUIRE(issued->value1 == instruction);
   REQUIRE(memoryEvents.size() == 1);
   REQUIRE(memoryEvents[0].masterCycle == 3);
   REQUIRE(memoryEvents[0].value0 == 0x100);
   REQUIRE(memoryEvents[0].value1 == UINT32_C(0x89abcdef));
   REQUIRE(memoryEvents[0].value2 == 0);
   REQUIRE(
-    memoryEvents[0].value3 ==
-    (UINT64_C(4) |
-     NekoEETraceMemory::SUCCEEDED));
+    (memoryEvents[0].value3 &
+     NekoEETraceMemory::LEGACY_MASK) ==
+    (UINT64_C(4) | NekoEETraceMemory::SUCCEEDED));
   std::size_t memoryEventIndex = events.size();
   std::size_t memoryTransitionIndex = events.size();
   for (std::size_t index = 0;
@@ -2039,7 +2269,13 @@ TEST_CASE("EE COP1 memory transfers produce structured traces")
   {
     if (events[index].masterCycle == 3 &&
         events[index].type ==
-          NekoTraceEventType::MemoryAccess)
+          NekoTraceEventType::MemoryAccess &&
+        traceField(
+          events[index].value3,
+          NekoEETraceMemory::ACCESS_KIND_MASK,
+          NekoEETraceMemory::ACCESS_KIND_SHIFT) ==
+          static_cast<std::uint8_t>(
+            NekoEETraceMemory::AccessKind::DataLoad))
     {
       memoryEventIndex = index;
     }
@@ -2795,7 +3031,8 @@ TEST_CASE("EE state snapshots include in-flight execution")
   const std::uint64_t issuedStateHash = core.stateHash();
   system.clockMasterCycle();
 
-  const std::vector<NekoTraceEvent> events = eeTrace(system);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(system);
   REQUIRE(events.size() == 4);
   REQUIRE(
     events[0].type ==
@@ -2856,7 +3093,8 @@ TEST_CASE("EE packed arithmetic traces and hashes are deterministic")
     second.eeCore().stateHash());
   REQUIRE(first.traceHash() == second.traceHash());
 
-  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
   REQUIRE(events.size() == 2);
   REQUIRE(
     events[0].type ==
@@ -2936,7 +3174,8 @@ TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
     first.eeCore().stopReason() ==
     EEStopReason::UnsupportedInstruction);
 
-  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
   const std::array<std::uint64_t, 3> issueCycles = {1, 3, 5};
   const std::array<std::uint64_t, 3> issueAddresses = {0, 4, 8};
   std::size_t eventIndex = 0;
@@ -3019,7 +3258,8 @@ TEST_CASE("EE packed divide traces and hashes are deterministic")
     first.eeCore().stopReason() ==
     EEStopReason::UnsupportedInstruction);
 
-  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
   REQUIRE(events.size() == stateHashes.size() + 1);
   REQUIRE(events[0].masterCycle == 1);
   REQUIRE(
@@ -3152,7 +3392,8 @@ TEST_CASE("EE packed rearrangement traces and hashes are deterministic")
     second.eeCore().stateHash());
   REQUIRE(first.traceHash() == second.traceHash());
 
-  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
   REQUIRE(events.size() == 2);
   REQUIRE(
     events[0].type ==
@@ -3206,7 +3447,8 @@ TEST_CASE("EE packed copy traces and hashes are deterministic")
     second.eeCore().stateHash());
   REQUIRE(first.traceHash() == second.traceHash());
 
-  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
   REQUIRE(events.size() == 2);
   REQUIRE(
     events[0].type ==
@@ -3267,7 +3509,8 @@ TEST_CASE("EE funnel shift traces and hashes are deterministic")
     second.eeCore().stateHash());
   REQUIRE(first.traceHash() == second.traceHash());
 
-  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
   REQUIRE(events.size() == 2);
   REQUIRE(
     events[0].type ==
@@ -3337,7 +3580,8 @@ TEST_CASE("EE parallel HI LO transfer traces and hashes are deterministic")
     second.eeCore().stateHash());
   REQUIRE(first.traceHash() == second.traceHash());
 
-  const std::vector<NekoTraceEvent> events = eeTrace(first);
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
   REQUIRE(events.size() == 2);
   REQUIRE(
     events[0].type ==

@@ -32,6 +32,39 @@ std::uint64_t nekoFrameHash(
   return hash;
 }
 
+std::uint64_t nekoPackEEMemoryTraceMetadata(
+  const NekoEETraceMemory::Metadata &metadata)
+{
+  using namespace NekoEETraceMemory;
+  return
+    metadata.width |
+    (metadata.accessKind == AccessKind::DataStore ? WRITE : 0) |
+    (metadata.transferOutcome == TransferOutcome::Completed
+      ? SUCCEEDED
+      : 0) |
+    (static_cast<std::uint64_t>(metadata.accessKind) <<
+      ACCESS_KIND_SHIFT) |
+    (static_cast<std::uint64_t>(
+      metadata.translationOutcome) <<
+      TRANSLATION_OUTCOME_SHIFT) |
+    (static_cast<std::uint64_t>(metadata.cacheRoute) <<
+      CACHE_ROUTE_SHIFT) |
+    (static_cast<std::uint64_t>(metadata.cacheAccess) <<
+      CACHE_ACCESS_SHIFT) |
+    (static_cast<std::uint64_t>(
+      metadata.transferOutcome) <<
+      TRANSFER_OUTCOME_SHIFT) |
+    (metadata.scratchpadRoute ? SCRATCHPAD_ROUTE : 0) |
+    (metadata.physicalAddressValid
+      ? PHYSICAL_ADDRESS_VALID
+      : 0) |
+    (static_cast<std::uint64_t>(
+      metadata.cacheAttribute & 0x7) <<
+      CACHE_ATTRIBUTE_SHIFT) |
+    (static_cast<std::uint64_t>(metadata.physicalAddress) <<
+      PHYSICAL_ADDRESS_SHIFT);
+}
+
 std::uint64_t nekoTraceHash(
   const std::vector<NekoTraceEvent> &events)
 {

@@ -1700,6 +1700,18 @@ class EECore final : public ClockedComponent
       std::uint32_t target,
       std::uint32_t address);
     void recordCycleEvent(const CycleEvent &event);
+    static MemoryAccessObservation memoryObservation(
+      const EEAddressTranslationResult &translation,
+      std::uint8_t width,
+      MemoryAccessKind kind);
+    static MemoryCacheAccess memoryCacheAccess(
+      EEInstructionCacheFetchSource source);
+    static MemoryCacheAccess memoryCacheAccess(
+      EEDataCacheLoadSource source);
+    static MemoryCacheAccess memoryCacheAccess(
+      EEDataCacheStoreSource source);
+    void recordMemoryTrace(
+      const MemoryAccessObservation &observation);
     void recordMemoryTrace(
       std::uint32_t address,
       std::uint8_t width,

@@ -1450,19 +1450,38 @@ bool EECore::loadTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint8_t *value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 1, MemoryAccessKind::DataLoad);
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.readScratchpad8(
+    const bool succeeded = memorySystem.readScratchpad8(
       translation.physicalAddress,
       value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    observation.low = succeeded ? *value : 0;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 1);
+  observation.cacheAccess = memoryCacheAccess(result.source);
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
+    if (observation.cacheAccess == MemoryCacheAccess::Refilled)
+    {
+      observation.cacheAccess = MemoryCacheAccess::Miss;
+    }
+    observation.transferOutcome =
+      MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
     return false;
   }
   *value = result.data[0];
+  observation.transferOutcome = MemoryTransferOutcome::Completed;
+  observation.low = *value;
+  recordMemoryTrace(observation);
   return true;
 }
 
@@ -1470,21 +1489,40 @@ bool EECore::loadTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint16_t *value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 2, MemoryAccessKind::DataLoad);
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.readScratchpad16(
+    const bool succeeded = memorySystem.readScratchpad16(
       translation.physicalAddress,
       value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    observation.low = succeeded ? *value : 0;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 2);
+  observation.cacheAccess = memoryCacheAccess(result.source);
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
+    if (observation.cacheAccess == MemoryCacheAccess::Refilled)
+    {
+      observation.cacheAccess = MemoryCacheAccess::Miss;
+    }
+    observation.transferOutcome =
+      MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
     return false;
   }
   *value =
     result.data[0] |
     (static_cast<std::uint16_t>(result.data[1]) << 8);
+  observation.transferOutcome = MemoryTransferOutcome::Completed;
+  observation.low = *value;
+  recordMemoryTrace(observation);
   return true;
 }
 
@@ -1492,16 +1530,32 @@ bool EECore::loadTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint32_t *value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 4, MemoryAccessKind::DataLoad);
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.readScratchpad32(
+    const bool succeeded = memorySystem.readScratchpad32(
       translation.physicalAddress,
       value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    observation.low = succeeded ? *value : 0;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 4);
+  observation.cacheAccess = memoryCacheAccess(result.source);
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
+    if (observation.cacheAccess == MemoryCacheAccess::Refilled)
+    {
+      observation.cacheAccess = MemoryCacheAccess::Miss;
+    }
+    observation.transferOutcome =
+      MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
     return false;
   }
   *value = 0;
@@ -1511,6 +1565,9 @@ bool EECore::loadTranslatedData(
       static_cast<std::uint32_t>(result.data[index]) <<
       (index * 8);
   }
+  observation.transferOutcome = MemoryTransferOutcome::Completed;
+  observation.low = *value;
+  recordMemoryTrace(observation);
   return true;
 }
 
@@ -1518,16 +1575,32 @@ bool EECore::loadTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint64_t *value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 8, MemoryAccessKind::DataLoad);
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.readScratchpad64(
+    const bool succeeded = memorySystem.readScratchpad64(
       translation.physicalAddress,
       value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    observation.low = succeeded ? *value : 0;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 8);
+  observation.cacheAccess = memoryCacheAccess(result.source);
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
+    if (observation.cacheAccess == MemoryCacheAccess::Refilled)
+    {
+      observation.cacheAccess = MemoryCacheAccess::Miss;
+    }
+    observation.transferOutcome =
+      MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
     return false;
   }
   *value = 0;
@@ -1537,6 +1610,9 @@ bool EECore::loadTranslatedData(
       static_cast<std::uint64_t>(result.data[index]) <<
       (index * 8);
   }
+  observation.transferOutcome = MemoryTransferOutcome::Completed;
+  observation.low = *value;
+  recordMemoryTrace(observation);
   return true;
 }
 
@@ -1544,16 +1620,33 @@ bool EECore::loadTranslatedData(
   const EEAddressTranslationResult &translation,
   EEQuadword *value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 16, MemoryAccessKind::DataLoad);
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.readScratchpad128(
+    const bool succeeded = memorySystem.readScratchpad128(
       translation.physicalAddress,
       value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    observation.low = succeeded ? value->low : 0;
+    observation.high = succeeded ? value->high : 0;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 16);
+  observation.cacheAccess = memoryCacheAccess(result.source);
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
+    if (observation.cacheAccess == MemoryCacheAccess::Refilled)
+    {
+      observation.cacheAccess = MemoryCacheAccess::Miss;
+    }
+    observation.transferOutcome =
+      MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
     return false;
   }
   value->low = 0;
@@ -1567,6 +1660,10 @@ bool EECore::loadTranslatedData(
       static_cast<std::uint64_t>(result.data[index + 8]) <<
       (index * 8);
   }
+  observation.transferOutcome = MemoryTransferOutcome::Completed;
+  observation.low = value->low;
+  observation.high = value->high;
+  recordMemoryTrace(observation);
   return true;
 }
 
@@ -1574,83 +1671,180 @@ bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint8_t value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 1, MemoryAccessKind::DataStore);
+  observation.low = value;
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.writeScratchpad8(
+    const bool succeeded = memorySystem.writeScratchpad8(
         translation.physicalAddress,
         value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
-  return
+  const EEDataCacheStoreResult result =
     memorySystem.storeData(
       &attachedBus(),
       translation,
       cacheStoreData(value),
-      1).outcome == EEDataCacheStoreOutcome::Completed;
+      1);
+  observation.cacheAccess = memoryCacheAccess(result.source);
+  if (result.outcome != EEDataCacheStoreOutcome::Completed &&
+      observation.cacheAccess == MemoryCacheAccess::Allocated)
+  {
+    observation.cacheAccess = MemoryCacheAccess::Miss;
+  }
+  observation.transferOutcome =
+    result.outcome == EEDataCacheStoreOutcome::Completed
+      ? MemoryTransferOutcome::Completed
+      : result.outcome == EEDataCacheStoreOutcome::Stalled
+        ? MemoryTransferOutcome::Stalled
+        : MemoryTransferOutcome::PhysicalBusError;
+  recordMemoryTrace(observation);
+  return result.outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint16_t value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 2, MemoryAccessKind::DataStore);
+  observation.low = value;
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.writeScratchpad16(
+    const bool succeeded = memorySystem.writeScratchpad16(
         translation.physicalAddress,
         value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
-  return
+  const EEDataCacheStoreResult result =
     memorySystem.storeData(
       &attachedBus(),
       translation,
       cacheStoreData(value),
-      2).outcome == EEDataCacheStoreOutcome::Completed;
+      2);
+  observation.cacheAccess = memoryCacheAccess(result.source);
+  if (result.outcome != EEDataCacheStoreOutcome::Completed &&
+      observation.cacheAccess == MemoryCacheAccess::Allocated)
+  {
+    observation.cacheAccess = MemoryCacheAccess::Miss;
+  }
+  observation.transferOutcome =
+    result.outcome == EEDataCacheStoreOutcome::Completed
+      ? MemoryTransferOutcome::Completed
+      : result.outcome == EEDataCacheStoreOutcome::Stalled
+        ? MemoryTransferOutcome::Stalled
+        : MemoryTransferOutcome::PhysicalBusError;
+  recordMemoryTrace(observation);
+  return result.outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint32_t value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 4, MemoryAccessKind::DataStore);
+  observation.low = value;
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.writeScratchpad32(
+    const bool succeeded = memorySystem.writeScratchpad32(
         translation.physicalAddress,
         value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
-  return
+  const EEDataCacheStoreResult result =
     memorySystem.storeData(
       &attachedBus(),
       translation,
       cacheStoreData(value),
-      4).outcome == EEDataCacheStoreOutcome::Completed;
+      4);
+  observation.cacheAccess = memoryCacheAccess(result.source);
+  if (result.outcome != EEDataCacheStoreOutcome::Completed &&
+      observation.cacheAccess == MemoryCacheAccess::Allocated)
+  {
+    observation.cacheAccess = MemoryCacheAccess::Miss;
+  }
+  observation.transferOutcome =
+    result.outcome == EEDataCacheStoreOutcome::Completed
+      ? MemoryTransferOutcome::Completed
+      : result.outcome == EEDataCacheStoreOutcome::Stalled
+        ? MemoryTransferOutcome::Stalled
+        : MemoryTransferOutcome::PhysicalBusError;
+  recordMemoryTrace(observation);
+  return result.outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 bool EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   std::uint64_t value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 8, MemoryAccessKind::DataStore);
+  observation.low = value;
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.writeScratchpad64(
+    const bool succeeded = memorySystem.writeScratchpad64(
         translation.physicalAddress,
         value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
+    return succeeded;
   }
-  return
+  const EEDataCacheStoreResult result =
     memorySystem.storeData(
       &attachedBus(),
       translation,
       cacheStoreData(value),
-      8).outcome == EEDataCacheStoreOutcome::Completed;
+      8);
+  observation.cacheAccess = memoryCacheAccess(result.source);
+  if (result.outcome != EEDataCacheStoreOutcome::Completed &&
+      observation.cacheAccess == MemoryCacheAccess::Allocated)
+  {
+    observation.cacheAccess = MemoryCacheAccess::Miss;
+  }
+  observation.transferOutcome =
+    result.outcome == EEDataCacheStoreOutcome::Completed
+      ? MemoryTransferOutcome::Completed
+      : result.outcome == EEDataCacheStoreOutcome::Stalled
+        ? MemoryTransferOutcome::Stalled
+        : MemoryTransferOutcome::PhysicalBusError;
+  recordMemoryTrace(observation);
+  return result.outcome == EEDataCacheStoreOutcome::Completed;
 }
 
 EEDataWriteResult EECore::writeTranslatedData(
   const EEAddressTranslationResult &translation,
   const EEQuadword &value)
 {
+  MemoryAccessObservation observation =
+    memoryObservation(translation, 16, MemoryAccessKind::DataStore);
+  observation.low = value.low;
+  observation.high = value.high;
   if (translation.route == EEAddressRoute::Scratchpad)
   {
-    return memorySystem.writeScratchpad128(
+    const bool succeeded = memorySystem.writeScratchpad128(
         translation.physicalAddress,
-        value)
+        value);
+    observation.transferOutcome = succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
+    return succeeded
       ? EEDataWriteResult::Completed
       : EEDataWriteResult::Failed;
   }
@@ -1660,13 +1854,28 @@ EEDataWriteResult EECore::writeTranslatedData(
       translation,
       cacheStoreData(value.low, value.high),
       16);
+  observation.cacheAccess = memoryCacheAccess(result.source);
+  if (result.outcome != EEDataCacheStoreOutcome::Completed &&
+      observation.cacheAccess == MemoryCacheAccess::Allocated)
+  {
+    observation.cacheAccess = MemoryCacheAccess::Miss;
+  }
   switch (result.outcome)
   {
     case EEDataCacheStoreOutcome::Completed:
+      observation.transferOutcome =
+        MemoryTransferOutcome::Completed;
+      recordMemoryTrace(observation);
       return EEDataWriteResult::Completed;
     case EEDataCacheStoreOutcome::Stalled:
+      observation.transferOutcome =
+        MemoryTransferOutcome::Stalled;
+      recordMemoryTrace(observation);
       return EEDataWriteResult::Stalled;
     case EEDataCacheStoreOutcome::PhysicalBusError:
+      observation.transferOutcome =
+        MemoryTransferOutcome::PhysicalBusError;
+      recordMemoryTrace(observation);
       return EEDataWriteResult::Failed;
   }
   throw std::logic_error(
@@ -1739,6 +1948,15 @@ EEInstructionFetchResult EECore::fetchInstruction()
   const std::uint32_t address = pc;
   if ((address & 3) != 0)
   {
+    EEAddressTranslationResult translation;
+    translation.virtualAddress = address;
+    translation.outcome =
+      EEAddressTranslationOutcome::AddressErrorLoadOrFetch;
+    recordMemoryTrace(
+      memoryObservation(
+        translation,
+        4,
+        MemoryAccessKind::InstructionFetch));
     return raiseFetchException(
       EEException::AddressErrorLoadOrFetch,
       address);
@@ -1748,6 +1966,11 @@ EEInstructionFetchResult EECore::fetchInstruction()
     translateInstructionAddress(address);
   if (!mainBusTranslationSucceeded(translation))
   {
+    recordMemoryTrace(
+      memoryObservation(
+        translation,
+        4,
+        MemoryAccessKind::InstructionFetch));
     return raiseFetchException(
       instructionTranslationException(translation.outcome),
       address);
@@ -1755,14 +1978,30 @@ EEInstructionFetchResult EECore::fetchInstruction()
 
   const EEInstructionCacheFetchResult fetch =
     memorySystem.fetchInstruction(attachedBus(), translation);
+  MemoryAccessObservation observation =
+    memoryObservation(
+      translation,
+      4,
+      MemoryAccessKind::InstructionFetch);
+  observation.cacheAccess = memoryCacheAccess(fetch.source);
   if (fetch.outcome !=
       EEInstructionCacheFetchOutcome::Completed)
   {
+    if (observation.cacheAccess == MemoryCacheAccess::Refilled)
+    {
+      observation.cacheAccess = MemoryCacheAccess::Miss;
+    }
+    observation.transferOutcome =
+      MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
     return raiseFetchException(
       EEException::InstructionBusError,
       address);
   }
 
+  observation.transferOutcome = MemoryTransferOutcome::Completed;
+  observation.low = fetch.instruction;
+  recordMemoryTrace(observation);
   pc += 4;
   return {true, address, fetch.instruction};
 }
@@ -1772,6 +2011,15 @@ EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
 {
   if ((address & 3) != 0)
   {
+    EEAddressTranslationResult translation;
+    translation.virtualAddress = address;
+    translation.outcome =
+      EEAddressTranslationOutcome::AddressErrorLoadOrFetch;
+    recordMemoryTrace(
+      memoryObservation(
+        translation,
+        4,
+        MemoryAccessKind::InstructionFetch));
     return {
       address,
       0,
@@ -1783,6 +2031,11 @@ EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
     translateInstructionAddress(address);
   if (!mainBusTranslationSucceeded(translation))
   {
+    recordMemoryTrace(
+      memoryObservation(
+        translation,
+        4,
+        MemoryAccessKind::InstructionFetch));
     return {
       address,
       0,
@@ -1793,9 +2046,22 @@ EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
 
   const EEInstructionCacheFetchResult fetch =
     memorySystem.fetchInstruction(attachedBus(), translation);
+  MemoryAccessObservation observation =
+    memoryObservation(
+      translation,
+      4,
+      MemoryAccessKind::InstructionFetch);
+  observation.cacheAccess = memoryCacheAccess(fetch.source);
   if (fetch.outcome !=
       EEInstructionCacheFetchOutcome::Completed)
   {
+    if (observation.cacheAccess == MemoryCacheAccess::Refilled)
+    {
+      observation.cacheAccess = MemoryCacheAccess::Miss;
+    }
+    observation.transferOutcome =
+      MemoryTransferOutcome::PhysicalBusError;
+    recordMemoryTrace(observation);
     return {
       address,
       0,
@@ -1803,6 +2069,9 @@ EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
     };
   }
 
+  observation.transferOutcome = MemoryTransferOutcome::Completed;
+  observation.low = fetch.instruction;
+  recordMemoryTrace(observation);
   return {
     address,
     fetch.instruction,
@@ -4750,12 +5019,6 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
       std::uint8_t value = 0;
       const bool succeeded =
         loadTranslatedData(translation, &value);
-      recordMemoryTrace(
-        dataAddress,
-        1,
-        MemoryAccessDirection::Read,
-        memoryAccessOutcome(succeeded),
-        succeeded ? value : 0);
       if (!succeeded)
       {
         return raiseDataAccessException(
@@ -4799,12 +5062,6 @@ EEInstructionExecutionOutcome EECore::executeByteMemory(
           generalRegisters[instruction.targetRegister].low);
       const bool succeeded =
         writeTranslatedData(translation, value);
-      recordMemoryTrace(
-        dataAddress,
-        1,
-        MemoryAccessDirection::Write,
-        memoryAccessOutcome(succeeded),
-        value);
       if (!succeeded)
       {
         return raiseDataAccessException(
@@ -4846,6 +5103,14 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
     instruction.operation == EEOperation::StoreHalfword;
   if ((dataAddress & 1) != 0)
   {
+    recordMemoryTrace(
+      dataAddress,
+      2,
+      store
+        ? MemoryAccessDirection::Write
+        : MemoryAccessDirection::Read,
+      MemoryAccessOutcome::Failed,
+      0);
     return raiseDataAccessException(
       store
         ? EEException::AddressErrorStore
@@ -4885,12 +5150,6 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
         generalRegisters[instruction.targetRegister].low);
     const bool succeeded =
       writeTranslatedData(translation, value);
-    recordMemoryTrace(
-      dataAddress,
-      2,
-      MemoryAccessDirection::Write,
-      memoryAccessOutcome(succeeded),
-      value);
     if (!succeeded)
     {
       return raiseDataAccessException(
@@ -4905,12 +5164,6 @@ EEInstructionExecutionOutcome EECore::executeHalfwordMemory(
   std::uint16_t value = 0;
   const bool succeeded =
     loadTranslatedData(translation, &value);
-  recordMemoryTrace(
-    dataAddress,
-    2,
-    MemoryAccessDirection::Read,
-    memoryAccessOutcome(succeeded),
-    succeeded ? value : 0);
   if (!succeeded)
   {
     return raiseDataAccessException(
@@ -4951,6 +5204,14 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
     instruction.operation == EEOperation::StoreWord;
   if ((dataAddress & 3) != 0)
   {
+    recordMemoryTrace(
+      dataAddress,
+      4,
+      store
+        ? MemoryAccessDirection::Write
+        : MemoryAccessDirection::Read,
+      MemoryAccessOutcome::Failed,
+      0);
     return raiseDataAccessException(
       store
         ? EEException::AddressErrorStore
@@ -4990,12 +5251,6 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
         generalRegisters[instruction.targetRegister].low);
     const bool succeeded =
       writeTranslatedData(translation, value);
-    recordMemoryTrace(
-      dataAddress,
-      4,
-      MemoryAccessDirection::Write,
-      memoryAccessOutcome(succeeded),
-      value);
     if (!succeeded)
     {
       return raiseDataAccessException(
@@ -5010,12 +5265,6 @@ EEInstructionExecutionOutcome EECore::executeWordMemory(
   std::uint32_t value = 0;
   const bool succeeded =
     loadTranslatedData(translation, &value);
-  recordMemoryTrace(
-    dataAddress,
-    4,
-    MemoryAccessDirection::Read,
-    memoryAccessOutcome(succeeded),
-    succeeded ? value : 0);
   if (!succeeded)
   {
     return raiseDataAccessException(
@@ -5087,12 +5336,6 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
   std::uint32_t memory = 0;
   const bool readSucceeded =
     loadTranslatedData(translation, &memory);
-  recordMemoryTrace(
-    alignedAddress,
-    4,
-    MemoryAccessDirection::Read,
-    memoryAccessOutcome(readSucceeded),
-    readSucceeded ? memory : 0);
   if (!readSucceeded)
   {
     return raiseDataAccessException(
@@ -5189,12 +5432,6 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
   }
   const bool writeSucceeded =
     writeTranslatedData(translation, memory);
-  recordMemoryTrace(
-    alignedAddress,
-    4,
-    MemoryAccessDirection::Write,
-    memoryAccessOutcome(writeSucceeded),
-    memory);
   if (!writeSucceeded)
   {
     return raiseDataAccessException(
@@ -5229,6 +5466,14 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
     instruction.operation == EEOperation::StoreDoubleword;
   if ((dataAddress & 7) != 0)
   {
+    recordMemoryTrace(
+      dataAddress,
+      8,
+      store
+        ? MemoryAccessDirection::Write
+        : MemoryAccessDirection::Read,
+      MemoryAccessOutcome::Failed,
+      0);
     return raiseDataAccessException(
       store
         ? EEException::AddressErrorStore
@@ -5267,12 +5512,6 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
       generalRegisters[instruction.targetRegister].low;
     const bool succeeded =
       writeTranslatedData(translation, value);
-    recordMemoryTrace(
-      dataAddress,
-      8,
-      MemoryAccessDirection::Write,
-      memoryAccessOutcome(succeeded),
-      value);
     if (!succeeded)
     {
       return raiseDataAccessException(
@@ -5287,12 +5526,6 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMemory(
   std::uint64_t value = 0;
   const bool succeeded =
     loadTranslatedData(translation, &value);
-  recordMemoryTrace(
-    dataAddress,
-    8,
-    MemoryAccessDirection::Read,
-    memoryAccessOutcome(succeeded),
-    succeeded ? value : 0);
   if (!succeeded)
   {
     return raiseDataAccessException(
@@ -5360,12 +5593,6 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
   std::uint64_t memory = 0;
   const bool readSucceeded =
     loadTranslatedData(translation, &memory);
-  recordMemoryTrace(
-    alignedAddress,
-    8,
-    MemoryAccessDirection::Read,
-    memoryAccessOutcome(readSucceeded),
-    readSucceeded ? memory : 0);
   if (!readSucceeded)
   {
     return raiseDataAccessException(
@@ -5453,12 +5680,6 @@ EEInstructionExecutionOutcome EECore::executeDoublewordMergeMemory(
   }
   const bool writeSucceeded =
     writeTranslatedData(translation, memory);
-  recordMemoryTrace(
-    alignedAddress,
-    8,
-    MemoryAccessDirection::Write,
-    memoryAccessOutcome(writeSucceeded),
-    memory);
   if (!writeSucceeded)
   {
     return raiseDataAccessException(
@@ -5527,13 +5748,6 @@ EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
         {value.low, value.high});
     const bool succeeded =
       writeResult == EEDataWriteResult::Completed;
-    recordMemoryTrace(
-      dataAddress,
-      16,
-      MemoryAccessDirection::Write,
-      memoryAccessOutcome(succeeded),
-      value.low,
-      value.high);
     if (writeResult == EEDataWriteResult::Stalled)
     {
       pc = address;
@@ -5555,13 +5769,6 @@ EEInstructionExecutionOutcome EECore::executeQuadwordMemory(
     loadTranslatedData(
       translation,
       &value);
-  recordMemoryTrace(
-    dataAddress,
-    16,
-    MemoryAccessDirection::Read,
-    memoryAccessOutcome(succeeded),
-    succeeded ? value.low : 0,
-    succeeded ? value.high : 0);
   if (!succeeded)
   {
     return raiseDataAccessException(
@@ -6122,6 +6329,14 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
     instruction.operation == EEOperation::StoreQuadwordFromCOP2;
   if ((dataAddress & 0x0f) != 0)
   {
+    recordMemoryTrace(
+      dataAddress,
+      16,
+      store
+        ? MemoryAccessDirection::Write
+        : MemoryAccessDirection::Read,
+      MemoryAccessOutcome::Failed,
+      0);
     return raiseDataAccessException(
       store
         ? EEException::AddressErrorStore
@@ -6174,13 +6389,6 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
         {value.low, value.high});
     const bool succeeded =
       writeResult == EEDataWriteResult::Completed;
-    recordMemoryTrace(
-      dataAddress,
-      16,
-      MemoryAccessDirection::Write,
-      memoryAccessOutcome(succeeded),
-      value.low,
-      value.high);
     if (writeResult == EEDataWriteResult::Stalled)
     {
       pc = address;
@@ -6202,13 +6410,6 @@ EEInstructionExecutionOutcome EECore::executeCOP2Memory(
     loadTranslatedData(
       translation,
       &value);
-  recordMemoryTrace(
-    dataAddress,
-    16,
-    MemoryAccessDirection::Read,
-    memoryAccessOutcome(succeeded),
-    succeeded ? value.low : 0,
-    succeeded ? value.high : 0);
   if (!succeeded)
   {
     return raiseDataAccessException(
@@ -8161,6 +8362,14 @@ bool EECore::drainInFlightCOP1()
       }
       if ((oldest->memoryAddress & 3) != 0)
       {
+        recordMemoryTrace(
+          oldest->memoryAddress,
+          4,
+          isLoadOperation(oldest->instruction.operation)
+            ? MemoryAccessDirection::Read
+            : MemoryAccessDirection::Write,
+          MemoryAccessOutcome::Failed,
+          0);
         return finishFailure(
           raiseCOP1DataAccessException(
             *oldest,
@@ -8198,12 +8407,6 @@ bool EECore::drainInFlightCOP1()
             loadTranslatedData(
               translation,
               &value);
-          recordMemoryTrace(
-            oldest->memoryAddress,
-            4,
-            MemoryAccessDirection::Read,
-            memoryAccessOutcome(succeeded),
-            succeeded ? value : 0);
           if (!succeeded)
           {
             return finishFailure(
@@ -8253,12 +8456,6 @@ bool EECore::drainInFlightCOP1()
             writeTranslatedData(
               translation,
               oldest->capturedMemoryValue);
-          recordMemoryTrace(
-            oldest->memoryAddress,
-            4,
-            MemoryAccessDirection::Write,
-            memoryAccessOutcome(succeeded),
-            oldest->capturedMemoryValue);
           if (!succeeded)
           {
             return finishFailure(
@@ -8750,6 +8947,14 @@ EECore::advanceMemoryCOP1Operation(
     case COP1PipelineStage::T:
       if ((operation->memoryAddress & 3) != 0)
       {
+        recordMemoryTrace(
+          operation->memoryAddress,
+          4,
+          load
+            ? MemoryAccessDirection::Read
+            : MemoryAccessDirection::Write,
+          MemoryAccessOutcome::Failed,
+          0);
         raiseCOP1DataAccessException(
           *operation,
           load
@@ -8785,12 +8990,6 @@ EECore::advanceMemoryCOP1Operation(
           loadTranslatedData(
             translation,
             &value);
-        recordMemoryTrace(
-          operation->memoryAddress,
-          4,
-          MemoryAccessDirection::Read,
-          memoryAccessOutcome(succeeded),
-          succeeded ? value : 0);
         if (!succeeded)
         {
           raiseCOP1DataAccessException(
@@ -8839,12 +9038,6 @@ EECore::advanceMemoryCOP1Operation(
           writeTranslatedData(
             translation,
             operation->capturedMemoryValue);
-        recordMemoryTrace(
-          operation->memoryAddress,
-          4,
-          MemoryAccessDirection::Write,
-          memoryAccessOutcome(succeeded),
-          operation->capturedMemoryValue);
         if (!succeeded)
         {
           raiseCOP1DataAccessException(
@@ -9816,6 +10009,80 @@ void EECore::recordCycleEvent(
   cycleEvents[cycleEventCount++] = event;
 }
 
+EECore::MemoryAccessObservation EECore::memoryObservation(
+  const EEAddressTranslationResult &translation,
+  std::uint8_t width,
+  MemoryAccessKind kind)
+{
+  return {
+    translation.virtualAddress,
+    translation.physicalAddress,
+    width,
+    kind,
+    translation.outcome,
+    translation.cacheRoute,
+    translation.cacheAttribute,
+    translation.route,
+    MemoryCacheAccess::NotAccessed,
+    MemoryTransferOutcome::NotAttempted,
+    0,
+    0};
+}
+
+EECore::MemoryCacheAccess EECore::memoryCacheAccess(
+  EEInstructionCacheFetchSource source)
+{
+  switch (source)
+  {
+    case EEInstructionCacheFetchSource::Bypassed:
+      return MemoryCacheAccess::Bypassed;
+    case EEInstructionCacheFetchSource::Hit:
+      return MemoryCacheAccess::Hit;
+    case EEInstructionCacheFetchSource::Refilled:
+      return MemoryCacheAccess::Refilled;
+  }
+  throw std::logic_error(
+    "Unknown EE instruction-cache fetch source.");
+}
+
+EECore::MemoryCacheAccess EECore::memoryCacheAccess(
+  EEDataCacheLoadSource source)
+{
+  switch (source)
+  {
+    case EEDataCacheLoadSource::Bypassed:
+      return MemoryCacheAccess::Bypassed;
+    case EEDataCacheLoadSource::Hit:
+      return MemoryCacheAccess::Hit;
+    case EEDataCacheLoadSource::Refilled:
+      return MemoryCacheAccess::Refilled;
+  }
+  throw std::logic_error(
+    "Unknown EE data-cache load source.");
+}
+
+EECore::MemoryCacheAccess EECore::memoryCacheAccess(
+  EEDataCacheStoreSource source)
+{
+  switch (source)
+  {
+    case EEDataCacheStoreSource::Bypassed:
+      return MemoryCacheAccess::Bypassed;
+    case EEDataCacheStoreSource::Hit:
+      return MemoryCacheAccess::Hit;
+    case EEDataCacheStoreSource::Allocated:
+      return MemoryCacheAccess::Allocated;
+  }
+  throw std::logic_error(
+    "Unknown EE data-cache store source.");
+}
+
+void EECore::recordMemoryTrace(
+  const MemoryAccessObservation &observation)
+{
+  recordCycleEvent(observation);
+}
+
 void EECore::recordMemoryTrace(
   std::uint32_t address,
   std::uint8_t width,
@@ -9824,23 +10091,36 @@ void EECore::recordMemoryTrace(
   std::uint64_t low,
   std::uint64_t high)
 {
-  recordCycleEvent(MemoryAccessObservation{
-    address,
-    0,
+  const EEDataAccessDirection dataDirection =
+    direction == MemoryAccessDirection::Write
+      ? EEDataAccessDirection::Store
+      : EEDataAccessDirection::Load;
+  EEAddressTranslationResult translation;
+  if ((address & (width - 1)) != 0)
+  {
+    translation.virtualAddress = address;
+    translation.outcome =
+      direction == MemoryAccessDirection::Write
+        ? EEAddressTranslationOutcome::AddressErrorStore
+        : EEAddressTranslationOutcome::AddressErrorLoadOrFetch;
+  }
+  else
+  {
+    translation = translateDataAddress(address, dataDirection);
+  }
+  MemoryAccessObservation observation = memoryObservation(
+    translation,
     width,
     direction == MemoryAccessDirection::Write
       ? MemoryAccessKind::DataStore
-      : MemoryAccessKind::DataLoad,
-    EEAddressTranslationOutcome::TLBLookup,
-    EECacheRoute::TLBSelected,
-    0,
-    EEAddressRoute::MainBus,
-    MemoryCacheAccess::NotAccessed,
+      : MemoryAccessKind::DataLoad);
+  observation.transferOutcome =
     outcome == MemoryAccessOutcome::Succeeded
       ? MemoryTransferOutcome::Completed
-      : MemoryTransferOutcome::NotAttempted,
-    low,
-    high});
+      : MemoryTransferOutcome::NotAttempted;
+  observation.low = low;
+  observation.high = high;
+  recordMemoryTrace(observation);
 }
 
 EECore::MemoryAccessOutcome EECore::memoryAccessOutcome(

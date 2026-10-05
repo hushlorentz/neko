@@ -102,7 +102,15 @@ namespace
           event.type == NekoTraceEventType::MemoryAccess &&
           event.value0 == address &&
           event.value1 == value &&
-          event.value3 == flags;
+          (event.value3 & NekoEETraceMemory::SCRATCHPAD_ROUTE) != 0 &&
+          (event.value3 &
+            NekoEETraceMemory::PHYSICAL_ADDRESS_VALID) != 0 &&
+          static_cast<std::uint32_t>(
+            event.value3 >>
+            NekoEETraceMemory::PHYSICAL_ADDRESS_SHIFT) ==
+            (address & UINT32_C(0x3fff)) &&
+          (event.value3 & NekoEETraceMemory::LEGACY_MASK) ==
+            flags;
       });
   }
 }

@@ -112,29 +112,37 @@ struct EECoreTestAccess
     std::uint32_t address,
     EEOperation operation)
   {
-    return
-      index < core.cycleEventCount &&
-      core.cycleEvents[index].kind ==
-        EECore::CycleEventKind::InstructionIssued &&
-      core.cycleEvents[index].payload.instructionIssued.address ==
-        address &&
-      core.cycleEvents[index].payload.instructionIssued.operation ==
-        operation;
+    std::size_t issueIndex = 0;
+    for (std::size_t eventIndex = 0;
+         eventIndex < core.cycleEventCount;
+         ++eventIndex)
+    {
+      if (core.cycleEvents[eventIndex].kind !=
+          EECore::CycleEventKind::InstructionIssued)
+      {
+        continue;
+      }
+      if (issueIndex++ != index)
+      {
+        continue;
+      }
+      return
+        core.cycleEvents[eventIndex]
+            .payload.instructionIssued.address == address &&
+        core.cycleEvents[eventIndex]
+            .payload.instructionIssued.operation == operation;
+    }
+    return false;
   }
 
   static bool cycleEventsStartWithInstructionIssue(
     const EECore &core)
   {
-    return
-      core.cycleEventCount == 1 &&
-      core.cycleEvents[0].kind ==
-        EECore::CycleEventKind::InstructionIssued &&
-      core.cycleEvents[0].payload.instructionIssued.address == 0 &&
-      core.cycleEvents[0].payload.instructionIssued.instruction == 0 &&
-      core.cycleEvents[0].payload.instructionIssued.operation ==
-        EEOperation::Nop &&
-      core.cycleEvents[0].payload.instructionIssued.mode ==
-        EEAcceptanceMode::Ordinary;
+    return instructionIssueEventMatches(
+      core,
+      0,
+      0,
+      EEOperation::Nop);
   }
 
   static bool fillCycleEventCapacityInOrder(EECore *core)
@@ -1181,7 +1189,8 @@ static bool hasFailedEEMemoryTrace(
         event.subsystem == NekoTraceSubsystem::EE &&
         event.type == NekoTraceEventType::MemoryAccess &&
         event.value0 == address &&
-        event.value3 == expectedFlags;
+        (event.value3 & NekoEETraceMemory::LEGACY_MASK) ==
+          expectedFlags;
     });
 }
 

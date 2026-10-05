@@ -1888,14 +1888,14 @@ creating parallel ownership.
       attribute, main-bus/scratchpad route, cache bypass/hit/refill/allocation
       result, and precise translation or physical-bus failure. Keep pure
       ITLB/DTLB accelerator residency out of the observation contract.
-- [ ] Route instruction fetch and every implemented immediate or delayed data
+- [x] Route instruction fetch and every implemented immediate or delayed data
       access through the observation record without changing issue, exception,
       retry, or device-readiness ownership. Pack it into the existing
       instruction-level trace event shape with explicit masks and exhaustive
       encoding tests, then prove deterministic trace hashes across aliases,
       TLB faults, cache hits/refills/writebacks, scratchpad accesses, and bus
       failures.
-- [ ] Complete a focused independent review of the memory-observation schema,
+- [x] Complete a focused independent review of the memory-observation schema,
       routing coverage, and trace compatibility before changing persistence
       diagnostics.
 
