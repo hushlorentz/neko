@@ -2123,7 +2123,7 @@ void EEMemorySystem::setCOP0Register(
         (value & EECOP0Config::WRITABLE_MASK);
       return;
     case EECOP0Register::TagLo:
-      cop0TagLo = value & EECOP0TagLo::IMPLEMENTED_MASK;
+      cop0TagLo = value;
       return;
     case EECOP0Register::TagHi:
       cop0TagHi = value;
@@ -2199,7 +2199,7 @@ EECOP0WriteResult EEMemorySystem::writeCOP0Register(
         (value & EECOP0Config::WRITABLE_MASK);
       return EECOP0WriteResult::Succeeded;
     case EECOP0Register::TagLo:
-      cop0TagLo = value & EECOP0TagLo::IMPLEMENTED_MASK;
+      cop0TagLo = value;
       return EECOP0WriteResult::Succeeded;
     case EECOP0Register::TagHi:
       cop0TagHi = value;

@@ -485,6 +485,63 @@ TEST_CASE("EE CACHE index operations preserve Status CH")
   REQUIRE(line.locked);
 }
 
+TEST_CASE("EE CACHE index store data accepts a full guest word")
+{
+  constexpr std::uint32_t value = UINT32_C(0xdeadbeef);
+  constexpr std::uint32_t address = UINT32_C(0x8000012d);
+  constexpr std::size_t set = 4;
+  constexpr std::size_t way = 1;
+  constexpr std::size_t wordOffset = 0x2c;
+
+  SECTION("Instruction cache")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, {value, 0});
+    runInstruction(
+      &system,
+      cop0TransferInstruction(
+        0x04,
+        2,
+        EECOP0Register::TagLo));
+    core.setGeneralRegister(3, {address, 0});
+    runInstruction(
+      &system,
+      cacheInstruction(3, 0x05, 0));
+
+    const EECacheLine &line =
+      system.eeMemorySystem().instructionCacheLine(set, way);
+    REQUIRE(line.data[wordOffset] == 0xef);
+    REQUIRE(line.data[wordOffset + 1] == 0xbe);
+    REQUIRE(line.data[wordOffset + 2] == 0xad);
+    REQUIRE(line.data[wordOffset + 3] == 0xde);
+  }
+
+  SECTION("Data cache")
+  {
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(2, {value, 0});
+    runInstruction(
+      &system,
+      cop0TransferInstruction(
+        0x04,
+        2,
+        EECOP0Register::TagLo));
+    core.setGeneralRegister(3, {address, 0});
+    runInstruction(
+      &system,
+      cacheInstruction(3, 0x13, 0));
+
+    const EECacheLine &line =
+      system.eeMemorySystem().dataCacheLine(set, way);
+    REQUIRE(line.data[wordOffset] == 0xef);
+    REQUIRE(line.data[wordOffset + 1] == 0xbe);
+    REQUIRE(line.data[wordOffset + 2] == 0xad);
+    REQUIRE(line.data[wordOffset + 3] == 0xde);
+  }
+}
+
 TEST_CASE("EE CACHE instruction fill and hit invalidate update CH precisely")
 {
   NekoSystem system;
@@ -1630,7 +1687,7 @@ TEST_CASE("EE COP0 translation and cache registers canonicalize state")
     (EECOP0Config::WRITABLE_MASK | EECOP0Config::FIXED));
   REQUIRE(
     core.cop0Register(EECOP0Register::TagLo) ==
-    EECOP0TagLo::IMPLEMENTED_MASK);
+    UINT32_MAX);
   REQUIRE(
     core.cop0Register(EECOP0Register::TagHi) ==
     UINT32_MAX);

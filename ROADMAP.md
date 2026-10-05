@@ -1874,7 +1874,7 @@ creating parallel ownership.
       self-modifying code, writeback/invalidate workflows, DMA coherence
       workflows, cache-line boundaries, reset, repeated execution, and
       cache-enable transitions.
-- [ ] Complete a risk-based independent review after cache-maintenance
+- [x] Complete a risk-based independent review after cache-maintenance
       instruction integration, then a final read-only review of the complete
       cache-maintenance, ordering, and conformance block.
 
