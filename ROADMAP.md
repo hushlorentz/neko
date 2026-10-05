@@ -1901,7 +1901,7 @@ creating parallel ownership.
 
 #### Memory-State Hashing and Transactional Validation
 
-- [ ] Audit every architectural and continuation field owned by
+- [x] Audit every architectural and continuation field owned by
       `EEMemorySystem`, `EECore`, and scratchpad DMA against canonical hashes
       and the versioned payload. Add any missing state without serializing
       derived ITLB/DTLB residency or transient observations.
