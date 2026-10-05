@@ -9824,11 +9824,21 @@ void EECore::recordMemoryTrace(
   std::uint64_t low,
   std::uint64_t high)
 {
-  recordCycleEvent(MemoryAccessEvent{
+  recordCycleEvent(MemoryAccessObservation{
     address,
+    0,
     width,
-    direction,
-    outcome,
+    direction == MemoryAccessDirection::Write
+      ? MemoryAccessKind::DataStore
+      : MemoryAccessKind::DataLoad,
+    EEAddressTranslationOutcome::TLBLookup,
+    EECacheRoute::TLBSelected,
+    0,
+    EEAddressRoute::MainBus,
+    MemoryCacheAccess::NotAccessed,
+    outcome == MemoryAccessOutcome::Succeeded
+      ? MemoryTransferOutcome::Completed
+      : MemoryTransferOutcome::NotAttempted,
     low,
     high});
 }

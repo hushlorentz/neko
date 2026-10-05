@@ -50,6 +50,46 @@ struct EEIssuePreview
 
 struct EECoreTestAccess
 {
+  static bool memoryObservationSchemaIsFixedState()
+  {
+    static_assert(
+      std::is_trivially_copyable<
+        EECore::MemoryAccessObservation>::value,
+      "EE memory observations must remain allocation-free fixed state.");
+
+    const EECore::MemoryAccessObservation observation = {
+      UINT32_C(0x81234568),
+      UINT32_C(0x01234568),
+      8,
+      EECore::MemoryAccessKind::DataStore,
+      EEAddressTranslationOutcome::Translated,
+      EECacheRoute::CachedNoncoherent,
+      3,
+      EEAddressRoute::MainBus,
+      EECore::MemoryCacheAccess::Allocated,
+      EECore::MemoryTransferOutcome::Completed,
+      UINT64_C(0x0123456789abcdef),
+      UINT64_C(0xfedcba9876543210)
+    };
+    return
+      observation.virtualAddress == UINT32_C(0x81234568) &&
+      observation.physicalAddress == UINT32_C(0x01234568) &&
+      observation.width == 8 &&
+      observation.kind == EECore::MemoryAccessKind::DataStore &&
+      observation.translationOutcome ==
+        EEAddressTranslationOutcome::Translated &&
+      observation.cacheRoute ==
+        EECacheRoute::CachedNoncoherent &&
+      observation.cacheAttribute == 3 &&
+      observation.addressRoute == EEAddressRoute::MainBus &&
+      observation.cacheAccess ==
+        EECore::MemoryCacheAccess::Allocated &&
+      observation.transferOutcome ==
+        EECore::MemoryTransferOutcome::Completed &&
+      observation.low == UINT64_C(0x0123456789abcdef) &&
+      observation.high == UINT64_C(0xfedcba9876543210);
+  }
+
   static bool youngerAStageContinuationActive(
     const EECore &core)
   {
@@ -1118,6 +1158,11 @@ struct EECoreTestAccess
         dividerCyclesBefore;
   }
 };
+
+TEST_CASE("EE memory observation schema is allocation-free fixed state")
+{
+  REQUIRE(EECoreTestAccess::memoryObservationSchemaIsFixedState());
+}
 
 static bool hasFailedEEMemoryTrace(
   const NekoSystem &system,

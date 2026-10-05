@@ -764,20 +764,20 @@ void NekoSystem::publishCycleTrace(
       }
       case EECore::CycleEventKind::MemoryAccess:
       {
-        const EECore::MemoryAccessEvent &memory =
+        const EECore::MemoryAccessObservation &memory =
           event.payload.memoryAccess;
         type = NekoTraceEventType::MemoryAccess;
-        value0 = memory.address;
+        value0 = memory.virtualAddress;
         value1 = memory.low;
         value2 = memory.high;
         value3 =
           memory.width |
-          (memory.direction ==
-              EECore::MemoryAccessDirection::Write
+          (memory.kind ==
+              EECore::MemoryAccessKind::DataStore
             ? UINT64_C(1) << 8
             : 0) |
-          (memory.outcome ==
-              EECore::MemoryAccessOutcome::Succeeded
+          (memory.transferOutcome ==
+              EECore::MemoryTransferOutcome::Completed
             ? UINT64_C(1) << 9
             : 0);
         break;

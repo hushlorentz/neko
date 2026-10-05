@@ -545,6 +545,32 @@ class EECore final : public ClockedComponent
       Succeeded
     };
 
+    enum class MemoryAccessKind : std::uint8_t
+    {
+      InstructionFetch,
+      DataLoad,
+      DataStore
+    };
+
+    enum class MemoryCacheAccess : std::uint8_t
+    {
+      NotAccessed,
+      Bypassed,
+      Hit,
+      Miss,
+      Refilled,
+      Allocated
+    };
+
+    enum class MemoryTransferOutcome : std::uint8_t
+    {
+      NotAttempted,
+      Completed,
+      Stalled,
+      PhysicalBusError,
+      DeviceNotReady
+    };
+
     enum class BranchOutcome : std::uint8_t
     {
       NotTaken,
@@ -597,12 +623,18 @@ class EECore final : public ClockedComponent
       BranchMode mode;
     };
 
-    struct MemoryAccessEvent
+    struct MemoryAccessObservation
     {
-      std::uint32_t address;
+      std::uint32_t virtualAddress;
+      std::uint32_t physicalAddress;
       std::uint8_t width;
-      MemoryAccessDirection direction;
-      MemoryAccessOutcome outcome;
+      MemoryAccessKind kind;
+      EEAddressTranslationOutcome translationOutcome;
+      EECacheRoute cacheRoute;
+      std::uint8_t cacheAttribute;
+      EEAddressRoute addressRoute;
+      MemoryCacheAccess cacheAccess;
+      MemoryTransferOutcome transferOutcome;
       std::uint64_t low;
       std::uint64_t high;
     };
@@ -694,7 +726,7 @@ class EECore final : public ClockedComponent
     {
       InstructionIssuedEvent instructionIssued;
       BranchScheduledEvent branchScheduled;
-      MemoryAccessEvent memoryAccess;
+      MemoryAccessObservation memoryAccess;
       ExceptionEnteredEvent exceptionEntered;
       InterruptDeliveredEvent interruptDelivered;
       COP1LoadInterlockEvent cop1LoadInterlock;
@@ -716,7 +748,7 @@ class EECore final : public ClockedComponent
       }
 
       CycleEventPayload(
-        const MemoryAccessEvent &event) :
+        const MemoryAccessObservation &event) :
         memoryAccess(event)
       {
       }
@@ -791,7 +823,7 @@ class EECore final : public ClockedComponent
       }
 
       CycleEvent(
-        const MemoryAccessEvent &event) :
+        const MemoryAccessObservation &event) :
         kind(CycleEventKind::MemoryAccess),
         payload(event)
       {

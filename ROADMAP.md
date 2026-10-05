@@ -1880,37 +1880,70 @@ creating parallel ownership.
 
 ### Determinism, Persistence, and Diagnostics
 
-- [ ] Extend memory traces to retain the virtual address and report translated
-      physical address, access kind, cache attribute, cache hit/miss or
-      scratchpad route, and precise translation/bus failure without losing the
-      existing instruction-level memory event contract. Keep pure ITLB/DTLB
-      accelerator residency out of the trace unless it becomes a preserved
-      deterministic surface.
-- [ ] Include all architectural memory-system state in canonical hashes and
-      versioned transactional save states. Reject malformed TLB page masks,
-      impossible cache tag/state combinations, invalid replacement/lock state,
-      inconsistent in-flight operations, and payload-size mismatches before
-      committing any state.
-- [ ] Add a schema-aware save-state inspector and semantic differ driven by
-      the authoritative codec rather than a duplicated parser. Give
-      `SaveStateWriter` and `SaveStateReader` an optional diagnostic observer
-      with scoped component, field, and array-element paths; report each
-      field's byte range and decoded value; support inspect, diff, and
-      field-location workflows; and include field paths and offsets in decode
-      failures. Replace fragile hard-coded corruption-test offsets with
-      path-based mutation helpers while retaining whole-container byte-count
-      and fingerprint fixtures. Keep the observer disabled outside diagnostic
-      and test workflows so ordinary save/load behavior and allocation costs
-      remain unchanged.
+#### Memory Observation Contract
+
+- [x] Define one allocation-free typed memory-observation record at the
+      `EECore` memory boundary. Retain the original virtual address and data
+      payload while adding translated physical address, access kind, cache
+      attribute, main-bus/scratchpad route, cache bypass/hit/refill/allocation
+      result, and precise translation or physical-bus failure. Keep pure
+      ITLB/DTLB accelerator residency out of the observation contract.
+- [ ] Route instruction fetch and every implemented immediate or delayed data
+      access through the observation record without changing issue, exception,
+      retry, or device-readiness ownership. Pack it into the existing
+      instruction-level trace event shape with explicit masks and exhaustive
+      encoding tests, then prove deterministic trace hashes across aliases,
+      TLB faults, cache hits/refills/writebacks, scratchpad accesses, and bus
+      failures.
+- [ ] Complete a focused independent review of the memory-observation schema,
+      routing coverage, and trace compatibility before changing persistence
+      diagnostics.
+
+#### Memory-State Hashing and Transactional Validation
+
+- [ ] Audit every architectural and continuation field owned by
+      `EEMemorySystem`, `EECore`, and scratchpad DMA against canonical hashes
+      and the versioned payload. Add any missing state without serializing
+      derived ITLB/DTLB residency or transient observations.
+- [ ] Centralize pure memory-state invariants shared by runtime assertions and
+      save-state rejection. Reject malformed TLB page masks, impossible cache
+      tag/state combinations, invalid replacement/lock state, inconsistent
+      memory continuation, and payload-size mismatches before commit while
+      preserving transactional load and the current format when no new
+      serialized state is required.
 - [ ] Prove byte-identical consecutive saves, save/load into a dirty
-      destination, deterministic trace/state hashes, and identical completion
-      across TLB faults, cache refills/writebacks, scratchpad accesses,
-      interrupts, host halts, and execution restarts.
+      destination, deterministic state hashes, and identical completion across
+      TLB faults, cache refills/writebacks, scratchpad DMA, interrupts, host
+      halts, and execution restarts.
+
+#### Schema-Aware Save-State Diagnostics
+
+- [ ] Add an optional diagnostic observer to `SaveStateWriter` and
+      `SaveStateReader` with scoped component, field, and array-element paths.
+      Drive it from the authoritative codec, report each field's byte range,
+      type, and decoded value, and include the active field path and offset in
+      decode failures. Keep the observer absent from ordinary save/load hot
+      paths and preserve the single-payload-allocation transaction.
+- [ ] Build inspect, semantic-diff, and field-location workflows over the
+      observed codec schema without adding a second parser. Define stable
+      diagnostic value formatting, distinguish container from payload offsets,
+      and cover large byte arrays without requiring per-byte retained metadata
+      unless explicitly requested.
+- [ ] Replace fragile hard-coded corruption-test offsets with path-based
+      location and mutation helpers while retaining whole-container byte-count
+      and fingerprint fixtures as independent layout guards.
+
+#### Deterministic Diagnostic Closure
+
 - [ ] Add focused diagnostic assertions or trace events only where translation,
-      cache, or arbitration failures would otherwise be materially ambiguous;
-      keep ship hot paths allocation-free and avoid broad per-access logging.
-- [ ] Complete an independent review of deterministic observation and
-      persistence.
+      cache, persistence, or arbitration failures remain materially ambiguous.
+      Keep ship hot paths allocation-free and avoid broad per-access logging.
+- [ ] Run the complete deterministic continuation matrix for traces, hashes,
+      consecutive saves, dirty-destination loads, faults, refills/writebacks,
+      scratchpad accesses, interrupts, host halts, and restarts.
+- [ ] Complete an independent final review of deterministic observation,
+      memory-state persistence, schema diagnostics, and transactional failure
+      behavior.
 
 ### Guest Conformance and Milestone Closure
 
