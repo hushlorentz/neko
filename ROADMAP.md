@@ -1865,7 +1865,7 @@ creating parallel ownership.
       validation, then implement ignored addressing exceptions, no-op behavior
       for uncached targets, cached allocation behavior, hint validation, and
       interaction with `Config` cache-enable controls.
-- [ ] Preserve uncached and uncached-accelerated traffic as physical-bus
+- [x] Preserve uncached and uncached-accelerated traffic as physical-bus
       accesses with no implicit cache snooping. Keep `SYNC`/`SYNC.L` as the
       functional software ordering boundary while deferring UCAB throughput
       and exact bus contention timing.

@@ -125,6 +125,99 @@ TEST_CASE("EE synchronization instructions execute scalarly")
   REQUIRE(pipeline.programCounter == 8);
 }
 
+TEST_CASE("EE SYNC preserves non-cached ordering without cache snooping")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t cachedAddress = UINT32_C(0x80000100);
+  constexpr std::uint32_t uncachedAddress = UINT32_C(0xa0000100);
+  constexpr std::uint32_t acceleratedAddress =
+    UINT32_C(0x30000100);
+  constexpr std::uint32_t initial = UINT32_C(0x11111111);
+  constexpr std::uint32_t cached = UINT32_C(0x22222222);
+  constexpr std::uint32_t uncached = UINT32_C(0x33333333);
+  constexpr std::uint32_t accelerated = UINT32_C(0x44444444);
+
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    0);
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  core.setTLBEntry(
+    0,
+    {
+      EECOP0PageMask::SIZE_4_KIB,
+      UINT32_C(0x30000000),
+      {UINT32_C(0x0000003f)},
+      {UINT32_C(0x0000003f)}
+    });
+  core.setGeneralRegister(1, {cachedAddress, 0});
+  core.setGeneralRegister(2, {uncachedAddress, 0});
+  core.setGeneralRegister(3, {acceleratedAddress, 0});
+  core.setGeneralRegister(4, {cached, 0});
+  core.setGeneralRegister(5, {uncached, 0});
+  core.setGeneralRegister(6, {accelerated, 0});
+  REQUIRE(
+    system.eeMemorySystem()
+      .translateDataAddress(
+        acceleratedAddress,
+        EEDataAccessDirection::Load,
+        {EEPrivilegeMode::Kernel, false, false})
+      .cacheRoute ==
+    EECacheRoute::UncachedAccelerated);
+  system.eeBus().write32(0x100, initial);
+  system.eeBus().write32(
+    0,
+    immediateInstruction(0x2b, 1, 4, 0));
+  system.eeBus().write32(4, UINT32_C(0x0000000f));
+  system.eeBus().write32(
+    8,
+    immediateInstruction(0x23, 3, 7, 0));
+  system.eeBus().write32(
+    12,
+    immediateInstruction(0x2b, 2, 5, 0));
+  system.eeBus().write32(16, UINT32_C(0x0000000f));
+  system.eeBus().write32(
+    20,
+    immediateInstruction(0x23, 1, 8, 0));
+  system.eeBus().write32(
+    24,
+    immediateInstruction(0x2b, 3, 6, 0));
+  system.eeBus().write32(28, UINT32_C(0x0000000f));
+  system.eeBus().write32(
+    32,
+    immediateInstruction(0x23, 2, 9, 0));
+  core.startExecution(EEMemoryMap::KSEG0_BASE);
+
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(system.eeBus().read32(0x100) == initial);
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(core.generalRegister(7).low == initial);
+
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(system.eeBus().read32(0x100) == uncached);
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(core.generalRegister(8).low == cached);
+
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(system.eeBus().read32(0x100) == accelerated);
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(system.stepEEInstruction(1).instructions == 1);
+  REQUIRE(core.generalRegister(9).low == accelerated);
+
+  const EECacheLine &line =
+    system.eeMemorySystem().dataCacheLine(4, 0);
+  REQUIRE(line.valid);
+  REQUIRE(line.dirty);
+  REQUIRE(line.data[0] == 0x22);
+  REQUIRE(line.data[1] == 0x22);
+  REQUIRE(line.data[2] == 0x22);
+  REQUIRE(line.data[3] == 0x22);
+}
+
 TEST_CASE("EE SYNC.P does not wait for integer multiply completion")
 {
   NekoSystem system;
