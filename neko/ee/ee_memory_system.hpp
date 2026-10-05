@@ -440,6 +440,7 @@ class EEMemorySystem final
       EEBus *bus,
       const EECacheMaintenanceRequest &request);
     EECacheMaintenanceResult maintainDataCacheIndex(
+      EEBus *bus,
       const EECacheMaintenanceRequest &request);
     std::size_t instructionCacheVictim(std::size_t set) const;
     bool dataCacheVictim(

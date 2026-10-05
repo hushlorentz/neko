@@ -395,7 +395,7 @@ TEST_CASE("EE unimplemented cache maintenance remains explicitly unsupported")
   NekoSystem system;
   EEMemorySystem &memorySystem = system.eeMemorySystem();
   const EECacheMaintenanceRequest request{
-    EECacheOperation::DataIndexWriteBackInvalidate,
+    EECacheOperation::DataHitWriteBackInvalidate,
     UINT32_C(0x81234567),
     {}
   };
@@ -414,6 +414,180 @@ TEST_CASE("EE unimplemented cache maintenance remains explicitly unsupported")
   REQUIRE(
     result.translation.virtualAddress ==
     request.virtualAddress);
+}
+
+TEST_CASE("EE data-cache index invalidate clears only the selected line")
+{
+  EEMemorySystem memorySystem;
+  constexpr std::size_t set = 0x2d;
+  constexpr std::size_t way = 1;
+  EECacheLine selected;
+  selected.physicalTag = UINT32_C(0x12345000);
+  selected.valid = true;
+  selected.dirty = true;
+  selected.leastRecentlyFilled = true;
+  selected.locked = true;
+  selected.data.fill(0xa5);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    set,
+    way,
+    selected);
+  EECacheLine other;
+  other.physicalTag = UINT32_C(0x6789a000);
+  other.valid = true;
+  other.dirty = true;
+  other.locked = true;
+  other.data[3] = 0x5a;
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    set,
+    0,
+    other);
+
+  const EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      nullptr,
+      {
+        EECacheOperation::DataIndexInvalidate,
+        UINT32_C(0x00010000) |
+          static_cast<std::uint32_t>(set << 6) |
+          static_cast<std::uint32_t>(way),
+        {EEPrivilegeMode::User, false, false}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  const EECacheLine &invalidated =
+    memorySystem.dataCacheLine(set, way);
+  REQUIRE(invalidated.physicalTag == 0);
+  REQUIRE_FALSE(invalidated.valid);
+  REQUIRE_FALSE(invalidated.dirty);
+  REQUIRE(invalidated.leastRecentlyFilled);
+  REQUIRE_FALSE(invalidated.locked);
+  for (const std::uint8_t byte : invalidated.data)
+  {
+    REQUIRE(byte == 0);
+  }
+  const EECacheLine &unchanged =
+    memorySystem.dataCacheLine(set, 0);
+  REQUIRE(unchanged.physicalTag == other.physicalTag);
+  REQUIRE(unchanged.valid);
+  REQUIRE(unchanged.dirty);
+  REQUIRE(unchanged.locked);
+  REQUIRE(unchanged.data[3] == other.data[3]);
+}
+
+TEST_CASE("EE data-cache index writeback invalidates after completion")
+{
+  NekoSystem system;
+  EEMemorySystem &memorySystem = system.eeMemorySystem();
+  constexpr std::size_t set = 0x15;
+  constexpr std::size_t way = 1;
+  constexpr std::uint32_t physicalTag = UINT32_C(0x3000);
+  constexpr std::uint32_t lineAddress =
+    physicalTag + static_cast<std::uint32_t>(set << 6);
+  EECacheLine line;
+  line.physicalTag = physicalTag;
+  line.valid = true;
+  line.dirty = true;
+  line.leastRecentlyFilled = true;
+  line.locked = true;
+  for (std::size_t offset = 0; offset < line.data.size(); ++offset)
+  {
+    line.data[offset] =
+      static_cast<std::uint8_t>((offset * 5) ^ 0x96);
+  }
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    set,
+    way,
+    line);
+
+  const EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        EECacheOperation::DataIndexWriteBackInvalidate,
+        UINT32_C(0x00020000) |
+          static_cast<std::uint32_t>(set << 6) |
+          static_cast<std::uint32_t>(way),
+        {EEPrivilegeMode::User, false, false}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::Completed);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  for (std::uint32_t offset = 0; offset < 64; ++offset)
+  {
+    std::uint8_t byte = 0;
+    REQUIRE(system.eeBus().readData8(lineAddress + offset, &byte));
+    REQUIRE(
+      byte ==
+      static_cast<std::uint8_t>((offset * 5) ^ 0x96));
+  }
+  const EECacheLine &invalidated =
+    memorySystem.dataCacheLine(set, way);
+  REQUIRE(invalidated.physicalTag == 0);
+  REQUIRE_FALSE(invalidated.valid);
+  REQUIRE_FALSE(invalidated.dirty);
+  REQUIRE(invalidated.leastRecentlyFilled);
+  REQUIRE_FALSE(invalidated.locked);
+  for (const std::uint8_t byte : invalidated.data)
+  {
+    REQUIRE(byte == 0);
+  }
+}
+
+TEST_CASE("EE data-cache index writeback failure preserves the complete line")
+{
+  NekoSystem system;
+  EEMemorySystem &memorySystem = system.eeMemorySystem();
+  constexpr std::size_t set = 0x3f;
+  constexpr std::size_t way = 0;
+  EECacheLine line;
+  line.physicalTag = EEMemoryMap::MAIN_MEMORY_SIZE;
+  line.valid = true;
+  line.dirty = true;
+  line.leastRecentlyFilled = true;
+  line.locked = true;
+  line.data.fill(0x6d);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem,
+    set,
+    way,
+    line);
+
+  const EECacheMaintenanceResult result =
+    EEMemorySystemTestAccess::maintainCache(
+      &memorySystem,
+      &system.eeBus(),
+      {
+        EECacheOperation::DataIndexWriteBackInvalidate,
+        static_cast<std::uint32_t>(set << 6) |
+          static_cast<std::uint32_t>(way),
+        {}
+      });
+
+  REQUIRE(
+    result.outcome ==
+    EECacheMaintenanceOutcome::PhysicalBusError);
+  REQUIRE_FALSE(result.cacheHitStatusValid);
+  const EECacheLine &preserved =
+    memorySystem.dataCacheLine(set, way);
+  REQUIRE(preserved.physicalTag == line.physicalTag);
+  REQUIRE(preserved.valid == line.valid);
+  REQUIRE(preserved.dirty == line.dirty);
+  REQUIRE(
+    preserved.leastRecentlyFilled ==
+    line.leastRecentlyFilled);
+  REQUIRE(preserved.locked == line.locked);
+  REQUIRE(preserved.data == line.data);
 }
 
 TEST_CASE("EE instruction-cache index tag operations transfer TagLo state")

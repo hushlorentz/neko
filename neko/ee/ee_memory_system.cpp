@@ -217,7 +217,7 @@ namespace
     }
   }
 
-  void invalidateInstructionCacheLine(EECacheLine *line)
+  void invalidateCacheLine(EECacheLine *line)
   {
     const bool leastRecentlyFilled =
       line->leastRecentlyFilled;
@@ -1309,7 +1309,9 @@ EECacheMaintenanceResult EEMemorySystem::maintainCache(
     case EECacheOperation::DataIndexLoadData:
     case EECacheOperation::DataIndexStoreTag:
     case EECacheOperation::DataIndexStoreData:
-      return maintainDataCacheIndex(request);
+    case EECacheOperation::DataIndexWriteBackInvalidate:
+    case EECacheOperation::DataIndexInvalidate:
+      return maintainDataCacheIndex(bus, request);
     default:
       break;
   }
@@ -1379,7 +1381,7 @@ EEMemorySystem::maintainInstructionCacheIndex(
       result.outcome = EECacheMaintenanceOutcome::Completed;
       return result;
     case EECacheOperation::InstructionIndexInvalidate:
-      invalidateInstructionCacheLine(&instructionLine);
+      invalidateCacheLine(&instructionLine);
       result.outcome = EECacheMaintenanceOutcome::Completed;
       return result;
     default:
@@ -1428,7 +1430,7 @@ EEMemorySystem::maintainInstructionCacheAddressed(
       EECacheLine &line = instructionCache[set][way];
       if (line.valid && line.physicalTag == physicalTag)
       {
-        invalidateInstructionCacheLine(&line);
+        invalidateCacheLine(&line);
         result.cacheHit = true;
         break;
       }
@@ -1465,6 +1467,7 @@ EEMemorySystem::maintainInstructionCacheAddressed(
 }
 
 EECacheMaintenanceResult EEMemorySystem::maintainDataCacheIndex(
+  EEBus *bus,
   const EECacheMaintenanceRequest &request)
 {
   EECacheMaintenanceResult result;
@@ -1512,6 +1515,25 @@ EECacheMaintenanceResult EEMemorySystem::maintainDataCacheIndex(
       return result;
     case EECacheOperation::DataIndexStoreData:
       storeCacheWord(&line, wordOffset, cop0TagLo);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    case EECacheOperation::DataIndexWriteBackInvalidate:
+    {
+      const EECacheLineTransferResult writeback =
+        writeBackDataCacheLine(bus, set, line);
+      if (writeback.outcome !=
+          EECacheLineTransferOutcome::Completed)
+      {
+        result.outcome =
+          EECacheMaintenanceOutcome::PhysicalBusError;
+        return result;
+      }
+      invalidateCacheLine(&line);
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      return result;
+    }
+    case EECacheOperation::DataIndexInvalidate:
+      invalidateCacheLine(&line);
       result.outcome = EECacheMaintenanceOutcome::Completed;
       return result;
     default:

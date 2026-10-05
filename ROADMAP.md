@@ -1853,7 +1853,7 @@ creating parallel ownership.
       direct virtual-index and address-bit way selection, 32-bit `TagLo`
       data-word transfer, dirty/valid/lock/LRF fields, unchanged `Status.CH`,
       and the lack of inferred `TagHi` array effects.
-- [ ] Implement data-cache index writeback/invalidation operations. Preserve
+- [x] Implement data-cache index writeback/invalidation operations. Preserve
       dirty/valid/lock/LRF transitions, writeback-before-mutation, complete
       line preservation on failure, direct index selection, and no
       translation requirement.
