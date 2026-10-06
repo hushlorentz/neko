@@ -635,6 +635,7 @@ class EECore final : public ClockedComponent
       EEAddressRoute addressRoute;
       MemoryCacheAccess cacheAccess;
       MemoryTransferOutcome transferOutcome;
+      EEMemoryTransferFailurePhase failurePhase;
       std::uint64_t low;
       std::uint64_t high;
     };

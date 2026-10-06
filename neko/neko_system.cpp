@@ -139,6 +139,26 @@ NekoSystem::traceMemoryTransferOutcome(
     "Unknown EE memory transfer outcome.");
 }
 
+NekoEETraceMemory::FailurePhase
+NekoSystem::traceMemoryFailurePhase(
+  EEMemoryTransferFailurePhase phase)
+{
+  using TracePhase = NekoEETraceMemory::FailurePhase;
+  switch (phase)
+  {
+    case EEMemoryTransferFailurePhase::None:
+      return TracePhase::None;
+    case EEMemoryTransferFailurePhase::Direct:
+      return TracePhase::Direct;
+    case EEMemoryTransferFailurePhase::Refill:
+      return TracePhase::Refill;
+    case EEMemoryTransferFailurePhase::Writeback:
+      return TracePhase::Writeback;
+  }
+  throw std::logic_error(
+    "Unknown EE memory transfer failure phase.");
+}
+
 NekoSystem::NekoSystem() :
   vu0Component(VPUType::VU0),
   vu1Component(VPUType::VU1),
@@ -905,7 +925,8 @@ void NekoSystem::publishCycleTrace(
                 UnsupportedCacheAttribute,
           traceMemoryCacheAccess(memory.cacheAccess),
           traceMemoryTransferOutcome(
-            memory.transferOutcome)});
+            memory.transferOutcome),
+          traceMemoryFailurePhase(memory.failurePhase)});
         break;
       }
       case EECore::CycleEventKind::ExceptionEntered:

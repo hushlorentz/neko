@@ -102,6 +102,27 @@ namespace
       function;
   }
 
+  std::uint32_t cacheInstruction(
+    std::uint8_t source,
+    std::uint8_t operation,
+    std::uint16_t immediate)
+  {
+    return immediateInstruction(
+      0x2f,
+      source,
+      operation,
+      immediate);
+  }
+
+  void runInstruction(
+    NekoSystem *system,
+    std::uint32_t instruction)
+  {
+    system->eeBus().write32(0, instruction);
+    system->eeCore().startExecution(0);
+    system->clockMasterCycle();
+  }
+
   std::vector<NekoTraceEvent> eeTrace(
     const NekoSystem &system)
   {
@@ -482,6 +503,21 @@ TEST_CASE("EE memory trace metadata fields encode exhaustively")
         TRANSFER_OUTCOME_MASK,
         TRANSFER_OUTCOME_SHIFT) == value);
   }
+  for (std::uint8_t value = 0;
+       value <= static_cast<std::uint8_t>(
+         FailurePhase::Writeback);
+       ++value)
+  {
+    Metadata metadata;
+    metadata.failurePhase = static_cast<FailurePhase>(value);
+    const std::uint64_t packed =
+      nekoPackEEMemoryTraceMetadata(metadata);
+    REQUIRE(
+      traceField(
+        packed,
+        FAILURE_PHASE_MASK,
+        FAILURE_PHASE_SHIFT) == value);
+  }
 
   Metadata metadata;
   metadata.physicalAddress = UINT32_C(0x89abcdef);
@@ -494,6 +530,7 @@ TEST_CASE("EE memory trace metadata fields encode exhaustively")
   metadata.physicalAddressValid = true;
   metadata.cacheAccess = CacheAccess::Refilled;
   metadata.transferOutcome = TransferOutcome::Completed;
+  metadata.failurePhase = FailurePhase::Writeback;
   const std::uint64_t packed =
     nekoPackEEMemoryTraceMetadata(metadata);
   REQUIRE((packed & WIDTH_MASK) == 16);
@@ -506,6 +543,12 @@ TEST_CASE("EE memory trace metadata fields encode exhaustively")
       packed,
       CACHE_ATTRIBUTE_MASK,
       CACHE_ATTRIBUTE_SHIFT) == 7);
+  REQUIRE(
+    traceField(
+      packed,
+      FAILURE_PHASE_MASK,
+      FAILURE_PHASE_SHIFT) ==
+      static_cast<std::uint8_t>(FailurePhase::Writeback));
   REQUIRE(
     static_cast<std::uint32_t>(
       packed >> PHYSICAL_ADDRESS_SHIFT) ==
@@ -2181,6 +2224,13 @@ TEST_CASE("EE regression traces retain failed memory attempts")
       NekoEETraceMemory::TRANSFER_OUTCOME_SHIFT) ==
       static_cast<std::uint8_t>(
         NekoEETraceMemory::TransferOutcome::PhysicalBusError));
+  REQUIRE(
+    traceField(
+      dataMemory->value3,
+      NekoEETraceMemory::FAILURE_PHASE_MASK,
+      NekoEETraceMemory::FAILURE_PHASE_SHIFT) ==
+      static_cast<std::uint8_t>(
+        NekoEETraceMemory::FailurePhase::Direct));
   const auto exception = std::find_if(
     events.begin(),
     events.end(),
@@ -2194,6 +2244,74 @@ TEST_CASE("EE regression traces retain failed memory attempts")
     static_cast<std::uint8_t>(EEException::DataBusErrorLoad));
   REQUIRE(events.back().type == NekoTraceEventType::StateSnapshot);
   REQUIRE(events.back().value0 == core.stateHash());
+}
+
+TEST_CASE("EE memory traces distinguish writeback failures")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  constexpr std::uint32_t dataAddress =
+    EEMemoryMap::KSEG0_BASE + UINT32_C(0x2100);
+  constexpr std::uint32_t indexAddress = UINT32_C(0x100);
+
+  core.setCOP0Register(
+    EECOP0Register::Config,
+    EECOP0Config::DATA_CACHE_ENABLE);
+  core.setCOP0Register(
+    EECOP0Register::TagLo,
+    EEMemoryMap::MAIN_MEMORY_SIZE |
+      EECOP0TagLo::DIRTY |
+      EECOP0TagLo::VALID);
+  core.setGeneralRegister(1, {indexAddress, 0});
+  runInstruction(
+    &system,
+    cacheInstruction(1, 0x12, 0));
+  core.setCOP0Register(
+    EECOP0Register::TagLo,
+    UINT32_C(0x00001000) |
+      EECOP0TagLo::VALID);
+  core.setGeneralRegister(1, {indexAddress | 1, 0});
+  runInstruction(
+    &system,
+    cacheInstruction(1, 0x12, 0));
+
+  core.clearPendingException();
+  core.setGeneralRegister(1, {dataAddress, 0});
+  system.eeBus().write32(
+    0,
+    immediateInstruction(0x23, 1, 2, 0));
+  core.startExecution(0);
+  system.startTrace();
+
+  system.clockMasterCycle();
+
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(system);
+  const auto dataMemory = std::find_if(
+    events.begin(),
+    events.end(),
+    [](const NekoTraceEvent &event)
+    {
+      return event.type == NekoTraceEventType::MemoryAccess;
+    });
+  REQUIRE(dataMemory != events.end());
+  REQUIRE(
+    traceField(
+      dataMemory->value3,
+      NekoEETraceMemory::TRANSFER_OUTCOME_MASK,
+      NekoEETraceMemory::TRANSFER_OUTCOME_SHIFT) ==
+      static_cast<std::uint8_t>(
+        NekoEETraceMemory::TransferOutcome::PhysicalBusError));
+  REQUIRE(
+    traceField(
+      dataMemory->value3,
+      NekoEETraceMemory::FAILURE_PHASE_MASK,
+      NekoEETraceMemory::FAILURE_PHASE_SHIFT) ==
+      static_cast<std::uint8_t>(
+        NekoEETraceMemory::FailurePhase::Writeback));
+  REQUIRE(
+    core.pendingException() ==
+    EEException::DataBusErrorLoad);
 }
 
 TEST_CASE("EE COP1 memory transfers produce structured traces")

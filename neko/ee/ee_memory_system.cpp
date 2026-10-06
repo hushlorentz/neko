@@ -620,6 +620,11 @@ EEDataCacheStoreResult EEMemorySystem::storeData(
     {
       result.outcome = EEDataCacheStoreOutcome::Completed;
     }
+    else if (result.outcome != EEDataCacheStoreOutcome::Stalled)
+    {
+      result.failurePhase =
+        EEMemoryTransferFailurePhase::Direct;
+    }
     return result;
   }
 
@@ -670,6 +675,8 @@ EEDataCacheStoreResult EEMemorySystem::storeData(
     fillCacheLine(*bus, translation.physicalAddress);
   if (fill.outcome != EECacheLineTransferOutcome::Completed)
   {
+    result.failurePhase =
+      EEMemoryTransferFailurePhase::Refill;
     return result;
   }
 
@@ -685,6 +692,8 @@ EEDataCacheStoreResult EEMemorySystem::storeData(
     if (writeback.outcome !=
         EECacheLineTransferOutcome::Completed)
     {
+      result.failurePhase =
+        EEMemoryTransferFailurePhase::Writeback;
       return result;
     }
   }
@@ -1860,6 +1869,11 @@ EEInstructionCacheFetchResult EEMemorySystem::fetchInstruction(
       result.outcome =
         EEInstructionCacheFetchOutcome::Completed;
     }
+    else
+    {
+      result.failurePhase =
+        EEMemoryTransferFailurePhase::Direct;
+    }
     return result;
   }
 
@@ -1894,6 +1908,8 @@ EEInstructionCacheFetchResult EEMemorySystem::fetchInstruction(
     fillCacheLine(bus, translation.physicalAddress);
   if (fill.outcome != EECacheLineTransferOutcome::Completed)
   {
+    result.failurePhase =
+      EEMemoryTransferFailurePhase::Refill;
     return result;
   }
 
@@ -2006,6 +2022,11 @@ EEDataCacheLoadResult EEMemorySystem::loadData(
     {
       result.outcome = EEDataCacheLoadOutcome::Completed;
     }
+    else
+    {
+      result.failurePhase =
+        EEMemoryTransferFailurePhase::Direct;
+    }
     return result;
   }
 
@@ -2045,6 +2066,8 @@ EEDataCacheLoadResult EEMemorySystem::loadData(
     fillCacheLine(bus, translation.physicalAddress);
   if (fill.outcome != EECacheLineTransferOutcome::Completed)
   {
+    result.failurePhase =
+      EEMemoryTransferFailurePhase::Refill;
     return result;
   }
 
@@ -2060,6 +2083,8 @@ EEDataCacheLoadResult EEMemorySystem::loadData(
     if (writeback.outcome !=
         EECacheLineTransferOutcome::Completed)
     {
+      result.failurePhase =
+        EEMemoryTransferFailurePhase::Writeback;
       return result;
     }
   }

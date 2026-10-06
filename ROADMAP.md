@@ -1953,9 +1953,11 @@ creating parallel ownership.
 
 #### Deterministic Diagnostic Closure
 
-- [ ] Add focused diagnostic assertions or trace events only where translation,
-      cache, persistence, or arbitration failures remain materially ambiguous.
-      Keep ship hot paths allocation-free and avoid broad per-access logging.
+- [x] Audit representative translation, cache, persistence, and arbitration
+      failures against the existing assertions, structured traces, and
+      save-state diagnostics. Add a focused diagnostic only for a demonstrated
+      ambiguity; otherwise retain the current surfaces explicitly. Keep ship
+      hot paths allocation-free and avoid broad per-access logging.
 - [ ] Run the complete deterministic continuation matrix for traces, hashes,
       consecutive saves, dirty-destination loads, faults, refills/writebacks,
       scratchpad accesses, interrupts, host halts, and restarts.

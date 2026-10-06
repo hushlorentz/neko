@@ -76,6 +76,9 @@ namespace NekoEETraceMemory
   constexpr std::uint8_t CACHE_ATTRIBUTE_SHIFT = 27;
   constexpr std::uint64_t CACHE_ATTRIBUTE_MASK =
     UINT64_C(0x7) << CACHE_ATTRIBUTE_SHIFT;
+  constexpr std::uint8_t FAILURE_PHASE_SHIFT = 30;
+  constexpr std::uint64_t FAILURE_PHASE_MASK =
+    UINT64_C(0x3) << FAILURE_PHASE_SHIFT;
   constexpr std::uint8_t PHYSICAL_ADDRESS_SHIFT = 32;
 
   enum class AccessKind : std::uint8_t
@@ -129,6 +132,14 @@ namespace NekoEETraceMemory
     DeviceNotReady
   };
 
+  enum class FailurePhase : std::uint8_t
+  {
+    None,
+    Direct,
+    Refill,
+    Writeback
+  };
+
   struct Metadata
   {
     std::uint32_t physicalAddress = 0;
@@ -143,6 +154,7 @@ namespace NekoEETraceMemory
     CacheAccess cacheAccess = CacheAccess::NotAccessed;
     TransferOutcome transferOutcome =
       TransferOutcome::NotAttempted;
+    FailurePhase failurePhase = FailurePhase::None;
   };
 }
 

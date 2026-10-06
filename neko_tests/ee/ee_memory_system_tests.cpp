@@ -2494,6 +2494,9 @@ TEST_CASE("EE data cache invalid physical loads do not mutate lines")
     result.outcome ==
     EEDataCacheLoadOutcome::PhysicalBusError);
   REQUIRE(result.source == EEDataCacheLoadSource::Bypassed);
+  REQUIRE(
+    result.failurePhase ==
+    EEMemoryTransferFailurePhase::Direct);
   REQUIRE_FALSE(memorySystem.dataCacheLine(0, 0).valid);
   REQUIRE_FALSE(memorySystem.dataCacheLine(0, 1).valid);
 }
@@ -3330,6 +3333,9 @@ TEST_CASE("EE failed dirty writeback preserves data-cache ways")
     result.outcome ==
     EEDataCacheStoreOutcome::PhysicalBusError);
   REQUIRE(result.source == EEDataCacheStoreSource::Allocated);
+  REQUIRE(
+    result.failurePhase ==
+    EEMemoryTransferFailurePhase::Writeback);
   REQUIRE(result.evictedDirty);
   const EECacheLine &preservedInvalid =
     memorySystem.dataCacheLine(4, 0);

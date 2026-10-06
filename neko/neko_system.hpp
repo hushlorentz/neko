@@ -217,6 +217,9 @@ class NekoSystem
     static NekoEETraceMemory::TransferOutcome
       traceMemoryTransferOutcome(
         EECore::MemoryTransferOutcome outcome);
+    static NekoEETraceMemory::FailurePhase
+      traceMemoryFailurePhase(
+        EEMemoryTransferFailurePhase phase);
     void appendTrace(
       std::uint64_t cycle,
       NekoTraceSubsystem subsystem,

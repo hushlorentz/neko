@@ -68,6 +68,7 @@ struct EECoreTestAccess
       EEAddressRoute::MainBus,
       EECore::MemoryCacheAccess::Allocated,
       EECore::MemoryTransferOutcome::Completed,
+      EEMemoryTransferFailurePhase::None,
       UINT64_C(0x0123456789abcdef),
       UINT64_C(0xfedcba9876543210)
     };
@@ -86,6 +87,8 @@ struct EECoreTestAccess
         EECore::MemoryCacheAccess::Allocated &&
       observation.transferOutcome ==
         EECore::MemoryTransferOutcome::Completed &&
+      observation.failurePhase ==
+        EEMemoryTransferFailurePhase::None &&
       observation.low == UINT64_C(0x0123456789abcdef) &&
       observation.high == UINT64_C(0xfedcba9876543210);
   }

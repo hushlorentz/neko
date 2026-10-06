@@ -1467,6 +1467,7 @@ bool EECore::loadTranslatedData(
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 1);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
     if (observation.cacheAccess == MemoryCacheAccess::Refilled)
@@ -1506,6 +1507,7 @@ bool EECore::loadTranslatedData(
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 2);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
     if (observation.cacheAccess == MemoryCacheAccess::Refilled)
@@ -1547,6 +1549,7 @@ bool EECore::loadTranslatedData(
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 4);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
     if (observation.cacheAccess == MemoryCacheAccess::Refilled)
@@ -1592,6 +1595,7 @@ bool EECore::loadTranslatedData(
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 8);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
     if (observation.cacheAccess == MemoryCacheAccess::Refilled)
@@ -1638,6 +1642,7 @@ bool EECore::loadTranslatedData(
   const EEDataCacheLoadResult result =
     memorySystem.loadData(attachedBus(), translation, 16);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheLoadOutcome::Completed)
   {
     if (observation.cacheAccess == MemoryCacheAccess::Refilled)
@@ -1692,6 +1697,7 @@ bool EECore::writeTranslatedData(
       cacheStoreData(value),
       1);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheStoreOutcome::Completed &&
       observation.cacheAccess == MemoryCacheAccess::Allocated)
   {
@@ -1732,6 +1738,7 @@ bool EECore::writeTranslatedData(
       cacheStoreData(value),
       2);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheStoreOutcome::Completed &&
       observation.cacheAccess == MemoryCacheAccess::Allocated)
   {
@@ -1772,6 +1779,7 @@ bool EECore::writeTranslatedData(
       cacheStoreData(value),
       4);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheStoreOutcome::Completed &&
       observation.cacheAccess == MemoryCacheAccess::Allocated)
   {
@@ -1812,6 +1820,7 @@ bool EECore::writeTranslatedData(
       cacheStoreData(value),
       8);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheStoreOutcome::Completed &&
       observation.cacheAccess == MemoryCacheAccess::Allocated)
   {
@@ -1855,6 +1864,7 @@ EEDataWriteResult EECore::writeTranslatedData(
       cacheStoreData(value.low, value.high),
       16);
   observation.cacheAccess = memoryCacheAccess(result.source);
+  observation.failurePhase = result.failurePhase;
   if (result.outcome != EEDataCacheStoreOutcome::Completed &&
       observation.cacheAccess == MemoryCacheAccess::Allocated)
   {
@@ -1984,6 +1994,7 @@ EEInstructionFetchResult EECore::fetchInstruction()
       4,
       MemoryAccessKind::InstructionFetch);
   observation.cacheAccess = memoryCacheAccess(fetch.source);
+  observation.failurePhase = fetch.failurePhase;
   if (fetch.outcome !=
       EEInstructionCacheFetchOutcome::Completed)
   {
@@ -2052,6 +2063,7 @@ EECore::FrontEndFetchResult EECore::fetchIssueCandidate(
       4,
       MemoryAccessKind::InstructionFetch);
   observation.cacheAccess = memoryCacheAccess(fetch.source);
+  observation.failurePhase = fetch.failurePhase;
   if (fetch.outcome !=
       EEInstructionCacheFetchOutcome::Completed)
   {
@@ -10025,6 +10037,7 @@ EECore::MemoryAccessObservation EECore::memoryObservation(
     translation.route,
     MemoryCacheAccess::NotAccessed,
     MemoryTransferOutcome::NotAttempted,
+    EEMemoryTransferFailurePhase::None,
     0,
     0};
 }

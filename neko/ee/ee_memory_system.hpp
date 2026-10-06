@@ -152,6 +152,14 @@ enum class EECacheLineTransferOutcome : std::uint8_t
   InvalidLineState
 };
 
+enum class EEMemoryTransferFailurePhase : std::uint8_t
+{
+  None,
+  Direct,
+  Refill,
+  Writeback
+};
+
 struct EECacheLineTransferResult
 {
   EECacheLineTransferOutcome outcome =
@@ -190,6 +198,8 @@ struct EEInstructionCacheFetchResult
     EEInstructionCacheFetchOutcome::PhysicalBusError;
   EEInstructionCacheFetchSource source =
     EEInstructionCacheFetchSource::Bypassed;
+  EEMemoryTransferFailurePhase failurePhase =
+    EEMemoryTransferFailurePhase::None;
   std::uint32_t instruction = 0;
   std::uint8_t set = 0xff;
   std::uint8_t way = 0xff;
@@ -214,6 +224,8 @@ struct EEDataCacheLoadResult
     EEDataCacheLoadOutcome::PhysicalBusError;
   EEDataCacheLoadSource source =
     EEDataCacheLoadSource::Bypassed;
+  EEMemoryTransferFailurePhase failurePhase =
+    EEMemoryTransferFailurePhase::None;
   std::array<std::uint8_t, 16> data = {};
   std::uint8_t width = 0;
   std::uint8_t set = 0xff;
@@ -240,6 +252,8 @@ struct EEDataCacheStoreResult
     EEDataCacheStoreOutcome::PhysicalBusError;
   EEDataCacheStoreSource source =
     EEDataCacheStoreSource::Bypassed;
+  EEMemoryTransferFailurePhase failurePhase =
+    EEMemoryTransferFailurePhase::None;
   bool evictedDirty = false;
   std::uint8_t set = 0xff;
   std::uint8_t way = 0xff;

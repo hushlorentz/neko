@@ -61,6 +61,8 @@ std::uint64_t nekoPackEEMemoryTraceMetadata(
     (static_cast<std::uint64_t>(
       metadata.cacheAttribute & 0x7) <<
       CACHE_ATTRIBUTE_SHIFT) |
+    (static_cast<std::uint64_t>(metadata.failurePhase) <<
+      FAILURE_PHASE_SHIFT) |
     (static_cast<std::uint64_t>(metadata.physicalAddress) <<
       PHYSICAL_ADDRESS_SHIFT);
 }
