@@ -1,25 +1,10 @@
 #include "save_state_internal.hpp"
 
+#include <cassert>
 #include <deque>
 
 namespace
 {
-  constexpr std::uint32_t SPR_MEMORY_ADDRESS_MASK =
-    UINT32_C(0x7ffffff0);
-  constexpr std::uint32_t SPR_TAG_ADDRESS_MASK =
-    UINT32_C(0xfffffff0);
-  constexpr std::uint32_t SPR_QWC_MASK = UINT32_C(0xffff);
-  constexpr std::uint32_t SPR_ADDRESS_MASK =
-    UINT32_C(0x3ff0);
-  constexpr std::uint32_t SPR_CHANNEL_CONTROL_WRITABLE =
-    DMACChannelControl::FROM_MEMORY |
-    DMACChannelControl::MODE_MASK |
-    DMACChannelControl::ADDRESS_STACK_MASK |
-    DMACChannelControl::TAG_TRANSFER_ENABLE |
-    DMACChannelControl::TAG_INTERRUPT_ENABLE |
-    DMACChannelControl::START |
-    DMACChannelControl::TAG_MASK;
-
   class SaveStateContainerWriter
   {
     public:
@@ -180,6 +165,7 @@ void NekoSaveStateCodec::writeScratchpadDMAState(
   const auto writeChannel =
     [writer](const ScratchpadDMACChannel &channel)
     {
+      assert(channel.stateValid());
       writer->writeU32(channel.channelControlRegister);
       writer->writeU32(channel.memoryAddressRegister);
       writer->writeU32(channel.quadwordCountRegister);
@@ -226,40 +212,32 @@ void NekoSaveStateCodec::readScratchpadDMAState(
       channel->interleaveQuadwordsRemaining =
         reader->readU16();
 
-      const std::uint32_t mode =
-        channel->channelControlRegister &
-        DMACChannelControl::MODE_MASK;
       require(
-        (channel->channelControlRegister &
-         ~SPR_CHANNEL_CONTROL_WRITABLE) == 0 &&
-        (mode == 0 ||
-         mode == DMACChannelControl::INTERLEAVE_MODE),
+        channel->channelControlStateValid(),
         "SPR DMAC channel control is invalid");
       require(
-        (channel->memoryAddressRegister &
-         ~SPR_MEMORY_ADDRESS_MASK) == 0,
+        channel->memoryAddressStateValid(),
         "SPR DMAC memory address is invalid");
       require(
-        channel->quadwordCountRegister <= SPR_QWC_MASK,
+        channel->quadwordCountStateValid(),
         "SPR DMAC qword count is invalid");
       require(
-        (channel->tagAddressRegister &
-         ~SPR_TAG_ADDRESS_MASK) == 0 &&
-        (tagAddressSupported ||
-         channel->tagAddressRegister == 0),
+        channel->tagAddressStateValid() &&
+          (tagAddressSupported ||
+           channel->tagAddressRegister == 0),
         "SPR DMAC tag address is invalid");
       require(
-        (channel->scratchpadAddressRegister &
-         ~SPR_ADDRESS_MASK) == 0,
+        channel->scratchpadAddressStateValid(),
         "SPR DMAC scratchpad address is invalid");
       require(
         channel->interleaveQuadwordsRemaining <= 0xff,
         "SPR DMAC interleave continuation is invalid");
       require(
-        channel->interleaveQuadwordsRemaining == 0 ||
-        (channel->active() &&
-         mode == DMACChannelControl::INTERLEAVE_MODE),
+        channel->interleaveContinuationStateValid(),
         "SPR DMAC interleave continuation is inconsistent");
+      require(
+        channel->stateValid(),
+        "SPR DMAC state is invalid");
     };
   readChannel(
     &system->fromScratchpadDMACComponent,

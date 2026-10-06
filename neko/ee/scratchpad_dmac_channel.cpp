@@ -1,3 +1,4 @@
+#include <cassert>
 #include <stdexcept>
 #include <string>
 
@@ -134,6 +135,7 @@ void ScratchpadDMACChannel::writeChannelControl(
   {
     interleaveQuadwordsRemaining = 0;
   }
+  assert(stateValid());
 }
 
 std::uint32_t ScratchpadDMACChannel::memoryAddress() const
@@ -146,6 +148,7 @@ void ScratchpadDMACChannel::writeMemoryAddress(
 {
   requireStopped();
   memoryAddressRegister = value & MEMORY_ADDRESS_MASK;
+  assert(stateValid());
 }
 
 std::uint32_t ScratchpadDMACChannel::quadwordCount() const
@@ -158,6 +161,7 @@ void ScratchpadDMACChannel::writeQuadwordCount(
 {
   requireStopped();
   quadwordCountRegister = value & QWC_MASK;
+  assert(stateValid());
 }
 
 std::uint32_t ScratchpadDMACChannel::tagAddress() const
@@ -172,6 +176,7 @@ void ScratchpadDMACChannel::writeTagAddress(
   requireTagAddress();
   requireStopped();
   tagAddressRegister = value & TAG_ADDRESS_MASK;
+  assert(stateValid());
 }
 
 std::uint32_t ScratchpadDMACChannel::scratchpadAddress() const
@@ -185,6 +190,7 @@ void ScratchpadDMACChannel::writeScratchpadAddress(
   requireStopped();
   scratchpadAddressRegister =
     value & SCRATCHPAD_ADDRESS_MASK;
+  assert(stateValid());
 }
 
 void ScratchpadDMACChannel::transferQuadword(
@@ -287,6 +293,7 @@ void ScratchpadDMACChannel::transferQuadword(
   {
     completeTransfer();
   }
+  assert(stateValid());
 }
 
 void ScratchpadDMACChannel::completeTransfer()
@@ -298,6 +305,63 @@ void ScratchpadDMACChannel::completeTransfer()
       ScratchpadDMACChannelKind::FromScratchpad ?
       DMACStatus::CHANNEL_8 :
       DMACStatus::CHANNEL_9);
+  assert(stateValid());
+}
+
+bool ScratchpadDMACChannel::channelControlStateValid() const
+{
+  const std::uint32_t mode =
+    channelControlRegister & DMACChannelControl::MODE_MASK;
+  return
+    (channelControlRegister & ~CHANNEL_CONTROL_WRITABLE) == 0 &&
+    (mode == 0 ||
+     mode == DMACChannelControl::INTERLEAVE_MODE);
+}
+
+bool ScratchpadDMACChannel::memoryAddressStateValid() const
+{
+  return (memoryAddressRegister & ~MEMORY_ADDRESS_MASK) == 0;
+}
+
+bool ScratchpadDMACChannel::quadwordCountStateValid() const
+{
+  return quadwordCountRegister <= QWC_MASK;
+}
+
+bool ScratchpadDMACChannel::tagAddressStateValid() const
+{
+  return
+    (tagAddressRegister & ~TAG_ADDRESS_MASK) == 0 &&
+    (channelKind == ScratchpadDMACChannelKind::ToScratchpad ||
+     tagAddressRegister == 0);
+}
+
+bool ScratchpadDMACChannel::scratchpadAddressStateValid() const
+{
+  return
+    (scratchpadAddressRegister & ~SCRATCHPAD_ADDRESS_MASK) == 0;
+}
+
+bool ScratchpadDMACChannel::interleaveContinuationStateValid() const
+{
+  return
+    interleaveQuadwordsRemaining <= 0xff &&
+    (interleaveQuadwordsRemaining == 0 ||
+     (active() &&
+      (channelControlRegister &
+       DMACChannelControl::MODE_MASK) ==
+        DMACChannelControl::INTERLEAVE_MODE));
+}
+
+bool ScratchpadDMACChannel::stateValid() const
+{
+  return
+    channelControlStateValid() &&
+    memoryAddressStateValid() &&
+    quadwordCountStateValid() &&
+    tagAddressStateValid() &&
+    scratchpadAddressStateValid() &&
+    interleaveContinuationStateValid();
 }
 
 void ScratchpadDMACChannel::requireStopped() const

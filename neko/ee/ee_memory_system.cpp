@@ -1,5 +1,6 @@
 #include "ee_memory_system.hpp"
 
+#include <cassert>
 #include <stdexcept>
 
 #include "ee_bus.hpp"
@@ -1070,6 +1071,7 @@ void EEMemorySystem::setTLBEntry(
     entry.entryHi,
     entry.evenPage.value,
     entry.oddPage.value);
+  assert(tlbEntryStateValid(tlbEntries[index]));
   invalidateTLBAccelerators();
 }
 
@@ -1142,9 +1144,90 @@ void EEMemorySystem::retireInstruction()
   if (cop0Random <= cop0Wired)
   {
     cop0Random = EECOP0Random::RESET;
+    assert(replacementStateValid());
     return;
   }
   --cop0Random;
+  assert(replacementStateValid());
+}
+
+bool EEMemorySystem::cop0RegisterStateValid(
+  EECOP0Register registerIndex,
+  std::uint32_t value)
+{
+  switch (registerIndex)
+  {
+    case EECOP0Register::Index:
+      return (value & ~EECOP0Index::IMPLEMENTED_MASK) == 0;
+    case EECOP0Register::Random:
+      return value <= EECOP0Random::MAXIMUM;
+    case EECOP0Register::EntryLo0:
+      return
+        (value &
+         ~EECOP0EntryLo::ENTRY_LO_0_IMPLEMENTED_MASK) == 0;
+    case EECOP0Register::EntryLo1:
+      return
+        (value &
+         ~EECOP0EntryLo::ENTRY_LO_1_IMPLEMENTED_MASK) == 0;
+    case EECOP0Register::Context:
+      return (value & ~EECOP0Context::IMPLEMENTED_MASK) == 0;
+    case EECOP0Register::PageMask:
+      return pageMaskStateValid(value);
+    case EECOP0Register::Wired:
+      return value <= EECOP0Wired::MAXIMUM;
+    case EECOP0Register::EntryHi:
+      return (value & ~EECOP0EntryHi::IMPLEMENTED_MASK) == 0;
+    case EECOP0Register::Config:
+      return
+        (value &
+         ~(EECOP0Config::FIXED |
+           EECOP0Config::WRITABLE_MASK)) == 0 &&
+        (value & EECOP0Config::FIXED) ==
+          EECOP0Config::FIXED;
+    case EECOP0Register::TagLo:
+    case EECOP0Register::TagHi:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool EEMemorySystem::pageMaskStateValid(std::uint32_t value)
+{
+  return
+    (value & ~EECOP0PageMask::IMPLEMENTED_MASK) == 0 &&
+    supportedPageMask(value);
+}
+
+bool EEMemorySystem::tlbEntryStateValid(
+  const EETLBEntry &entry)
+{
+  if (!pageMaskStateValid(entry.pageMask))
+  {
+    return false;
+  }
+  try
+  {
+    return
+      canonicalTLBEntry(
+        entry.pageMask,
+        entry.entryHi,
+        entry.evenPage.value,
+        entry.oddPage.value) == entry;
+  }
+  catch (const std::invalid_argument &)
+  {
+    return false;
+  }
+}
+
+bool EEMemorySystem::cacheLineStateValid(
+  const EECacheLine &line,
+  bool instruction)
+{
+  return
+    (line.physicalTag & ~EECacheLine::PHYSICAL_TAG_MASK) == 0 &&
+    (!instruction || (!line.dirty && !line.locked));
 }
 
 bool EEMemorySystem::replacementStateValid() const
@@ -1153,6 +1236,69 @@ bool EEMemorySystem::replacementStateValid() const
     cop0Wired <= EECOP0Wired::MAXIMUM &&
     cop0Random >= cop0Wired &&
     cop0Random <= EECOP0Random::MAXIMUM;
+}
+
+bool EEMemorySystem::stateValid() const
+{
+  if (!cop0RegisterStateValid(EECOP0Register::Index, cop0Index) ||
+      !cop0RegisterStateValid(EECOP0Register::Random, cop0Random) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::EntryLo0,
+        cop0EntryLo0) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::EntryLo1,
+        cop0EntryLo1) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::Context,
+        cop0Context) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::PageMask,
+        cop0PageMask) ||
+      !cop0RegisterStateValid(EECOP0Register::Wired, cop0Wired) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::EntryHi,
+        cop0EntryHi) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::Config,
+        cop0Config) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::TagLo,
+        cop0TagLo) ||
+      !cop0RegisterStateValid(
+        EECOP0Register::TagHi,
+        cop0TagHi) ||
+      !replacementStateValid())
+  {
+    return false;
+  }
+  for (const EETLBEntry &entry : tlbEntries)
+  {
+    if (!tlbEntryStateValid(entry))
+    {
+      return false;
+    }
+  }
+  for (const auto &set : instructionCache)
+  {
+    for (const EECacheLine &line : set)
+    {
+      if (!cacheLineStateValid(line, true))
+      {
+        return false;
+      }
+    }
+  }
+  for (const auto &set : dataCache)
+  {
+    for (const EECacheLine &line : set)
+    {
+      if (!cacheLineStateValid(line, false))
+      {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 const EECacheLine &EEMemorySystem::instructionCacheLine(

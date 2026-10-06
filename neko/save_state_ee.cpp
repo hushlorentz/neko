@@ -1,5 +1,7 @@
 #include "save_state_internal.hpp"
 
+#include <cassert>
+
 #include "floating_point_ops.hpp"
 
 static_assert(
@@ -23,6 +25,7 @@ void NekoSaveStateCodec::writeEECore(
   SaveStateWriter *writer,
   const EECore &core)
 {
+  assert(core.memorySystem.stateValid());
   for (const EERegister128 &value : core.generalRegisters)
   {
     writer->writeU64(value.low);
@@ -1119,6 +1122,11 @@ void NekoSaveStateCodec::readEECore(
   for (const EECOP0Register registerIndex : memoryRegisters)
   {
     const std::uint32_t value = reader->readU32();
+    require(
+      EEMemorySystem::cop0RegisterStateValid(
+        registerIndex,
+        value),
+      "EE memory-system COP0 register state is invalid");
     if (registerIndex == EECOP0Register::TagLo)
     {
       core->memorySystem.cop0TagLo = value;
@@ -1148,6 +1156,12 @@ void NekoSaveStateCodec::readEECore(
       {reader->readU32()},
       {reader->readU32()}
     };
+    require(
+      EEMemorySystem::pageMaskStateValid(entry.pageMask),
+      "EE TLB PageMask state is invalid");
+    require(
+      EEMemorySystem::tlbEntryStateValid(entry),
+      "EE TLB entry state is invalid");
     try
     {
       core->memorySystem.setTLBEntry(index, entry);
@@ -1171,11 +1185,10 @@ void NekoSaveStateCodec::readEECore(
         reader->readBool("EE cache LRF flag");
       line->locked = reader->readBool("EE cache lock flag");
       require(
-        (line->physicalTag & ~EECacheLine::PHYSICAL_TAG_MASK) == 0,
-        "EE cache physical tag is invalid");
-      require(
-        !instruction || (!line->dirty && !line->locked),
-        "EE instruction-cache line has data-cache state");
+        EEMemorySystem::cacheLineStateValid(*line, instruction),
+        instruction
+          ? "EE instruction-cache line state is invalid"
+          : "EE data-cache line state is invalid");
     };
   for (auto &set : core->memorySystem.instructionCache)
   {
@@ -1191,6 +1204,9 @@ void NekoSaveStateCodec::readEECore(
       readCacheLine(&line, false);
     }
   }
+  require(
+    core->memorySystem.stateValid(),
+    "EE memory-system state is invalid");
   require(
     core->packedDivideContinuationStateValid(),
     "EE packed divide continuation state is invalid");

@@ -48,6 +48,13 @@ class ScratchpadDMACChannel : public ClockedComponent
     void transferQuadword(bool interleave);
     void completeTransfer();
     const char *name() const;
+    bool channelControlStateValid() const;
+    bool memoryAddressStateValid() const;
+    bool quadwordCountStateValid() const;
+    bool tagAddressStateValid() const;
+    bool scratchpadAddressStateValid() const;
+    bool interleaveContinuationStateValid() const;
+    bool stateValid() const;
 
     ScratchpadDMACChannelKind channelKind;
     DMACController *dmacController;

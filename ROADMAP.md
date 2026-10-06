@@ -1905,7 +1905,7 @@ creating parallel ownership.
       `EEMemorySystem`, `EECore`, and scratchpad DMA against canonical hashes
       and the versioned payload. Add any missing state without serializing
       derived ITLB/DTLB residency or transient observations.
-- [ ] Centralize pure memory-state invariants shared by runtime assertions and
+- [x] Centralize pure memory-state invariants shared by runtime assertions and
       save-state rejection. Reject malformed TLB page masks, impossible cache
       tag/state combinations, invalid replacement/lock state, inconsistent
       memory continuation, and payload-size mismatches before commit while

@@ -192,10 +192,21 @@ namespace
     SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET = 2239;
   constexpr std::size_t
     SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET = 2271;
+  constexpr std::size_t PREPARED_EE_COP0_INDEX_OFFSET = 2289;
   constexpr std::size_t PREPARED_EE_COP0_RANDOM_OFFSET = 2293;
+  constexpr std::size_t PREPARED_EE_COP0_ENTRY_LO_0_OFFSET = 2297;
+  constexpr std::size_t PREPARED_EE_COP0_ENTRY_LO_1_OFFSET = 2301;
+  constexpr std::size_t PREPARED_EE_COP0_CONTEXT_OFFSET = 2305;
+  constexpr std::size_t PREPARED_EE_COP0_PAGE_MASK_OFFSET = 2309;
   constexpr std::size_t PREPARED_EE_COP0_WIRED_OFFSET = 2313;
+  constexpr std::size_t PREPARED_EE_COP0_ENTRY_HI_OFFSET = 2317;
+  constexpr std::size_t PREPARED_EE_COP0_CONFIG_OFFSET = 2321;
   constexpr std::size_t PREPARED_EE_TLB_OFFSET = 2333;
   constexpr std::size_t EE_CACHE_LINE_STATE_SIZE = 72;
+  constexpr std::size_t
+    PREPARED_EE_FIRST_INSTRUCTION_CACHE_OFFSET =
+      PREPARED_EE_TLB_OFFSET +
+      EEMemorySystem::TLB_ENTRY_COUNT * 16;
   constexpr std::size_t EE_CACHE_STATE_SIZE =
     EE_CACHE_LINE_STATE_SIZE *
     EEMemorySystem::CACHE_WAY_COUNT *
@@ -3218,8 +3229,51 @@ TEST_CASE("Invalid save states are rejected transactionally")
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);
 
+  struct InvalidMemoryRegisterBit
+  {
+    std::size_t offset;
+    std::uint8_t mask;
+  };
+  const InvalidMemoryRegisterBit invalidMemoryRegisterBits[] = {
+    {PREPARED_EE_COP0_INDEX_OFFSET + 3, 0x40},
+    {PREPARED_EE_COP0_ENTRY_LO_0_OFFSET + 3, 0x04},
+    {PREPARED_EE_COP0_ENTRY_LO_1_OFFSET + 3, 0x80},
+    {PREPARED_EE_COP0_CONTEXT_OFFSET, 0x01},
+    {PREPARED_EE_COP0_ENTRY_HI_OFFSET + 1, 0x01},
+    {PREPARED_EE_COP0_CONFIG_OFFSET, 0x01}
+  };
+  for (const InvalidMemoryRegisterBit &invalidBit :
+       invalidMemoryRegisterBits)
+  {
+    invalid = before;
+    REQUIRE((invalid[invalidBit.offset] & invalidBit.mask) == 0);
+    invalid[invalidBit.offset] |= invalidBit.mask;
+    updateChecksum(&invalid);
+    REQUIRE_THROWS(system.loadState(invalid));
+    REQUIRE(system.saveState() == before);
+  }
+
+  invalid = before;
+  invalid[PREPARED_EE_COP0_PAGE_MASK_OFFSET + 3] |= 0x80;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
   invalid = before;
   invalid[PREPARED_EE_TLB_OFFSET + 1] = 0x20;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[PREPARED_EE_TLB_OFFSET + 3] |= 0x80;
+  updateChecksum(&invalid);
+  REQUIRE_THROWS(system.loadState(invalid));
+  REQUIRE(system.saveState() == before);
+
+  invalid = before;
+  invalid[
+    PREPARED_EE_FIRST_INSTRUCTION_CACHE_OFFSET + 69] = 1;
   updateChecksum(&invalid);
   REQUIRE_THROWS(system.loadState(invalid));
   REQUIRE(system.saveState() == before);

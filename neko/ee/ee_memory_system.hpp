@@ -401,7 +401,16 @@ class EEMemorySystem final
     void writeRandomTLBEntry();
     void probeTLB();
     void retireInstruction();
+    static bool cop0RegisterStateValid(
+      EECOP0Register registerIndex,
+      std::uint32_t value);
+    static bool pageMaskStateValid(std::uint32_t value);
+    static bool tlbEntryStateValid(const EETLBEntry &entry);
+    static bool cacheLineStateValid(
+      const EECacheLine &line,
+      bool instruction);
     bool replacementStateValid() const;
+    bool stateValid() const;
     const EECacheLine &instructionCacheLine(
       std::size_t set,
       std::size_t way) const;
