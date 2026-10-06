@@ -15,40 +15,68 @@ namespace
     SaveStateWriter *writer,
     const LowerInstruction &instruction)
   {
-    writer->writeU8(
+    auto scope = writer->scope("pendingLowerInstruction");
+    writer->writeFieldU8(
+      "unit",
       static_cast<std::uint8_t>(instruction.unit));
-    writer->writeU32(instruction.opCode);
-    writer->writeU8(instruction.sourceRegister1);
-    writer->writeU8(instruction.sourceRegister2);
-    writer->writeU8(instruction.destinationRegister);
-    writer->writeU8(instruction.integerDestinationRegister);
-    writer->writeU8(instruction.destinationFieldMask);
-    writer->writeU8(instruction.sourceFieldMask1);
-    writer->writeU8(instruction.sourceFieldMask2);
-    writer->writeU16(
+    writer->writeFieldU32("opCode", instruction.opCode);
+    writer->writeFieldU8("sourceRegister1", instruction.sourceRegister1);
+    writer->writeFieldU8("sourceRegister2", instruction.sourceRegister2);
+    writer->writeFieldU8(
+      "destinationRegister",
+      instruction.destinationRegister);
+    writer->writeFieldU8(
+      "integerDestinationRegister",
+      instruction.integerDestinationRegister);
+    writer->writeFieldU8(
+      "destinationFieldMask",
+      instruction.destinationFieldMask);
+    writer->writeFieldU8(
+      "sourceFieldMask1",
+      instruction.sourceFieldMask1);
+    writer->writeFieldU8(
+      "sourceFieldMask2",
+      instruction.sourceFieldMask2);
+    writer->writeFieldU16(
+      "immediate",
       static_cast<std::uint16_t>(instruction.immediate));
-    writer->writeU32(instruction.immediateBits);
+    writer->writeFieldU32("immediateBits", instruction.immediateBits);
   }
 
   LowerInstruction readLowerInstruction(
     SaveStateReader *reader)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
+    auto scope = reader->scope("pendingLowerInstruction");
     LowerInstruction instruction;
     instruction.unit = readEnum<LowerExecutionUnit>(
       reader,
       static_cast<std::uint8_t>(LowerExecutionUnit::Branch),
-      "VU lower execution unit");
-    instruction.opCode = reader->readU32();
-    instruction.sourceRegister1 = reader->readU8();
-    instruction.sourceRegister2 = reader->readU8();
-    instruction.destinationRegister = reader->readU8();
-    instruction.integerDestinationRegister = reader->readU8();
-    instruction.destinationFieldMask = reader->readU8();
-    instruction.sourceFieldMask1 = reader->readU8();
-    instruction.sourceFieldMask2 = reader->readU8();
+      "unit");
+    instruction.opCode = reader->readFieldU32("opCode");
+    instruction.sourceRegister1 =
+      reader->readFieldU8("sourceRegister1");
+    instruction.sourceRegister2 =
+      reader->readFieldU8("sourceRegister2");
+    instruction.destinationRegister =
+      reader->readFieldU8("destinationRegister");
+    instruction.integerDestinationRegister =
+      reader->readFieldU8("integerDestinationRegister");
+    instruction.destinationFieldMask =
+      reader->readFieldU8("destinationFieldMask");
+    instruction.sourceFieldMask1 =
+      reader->readFieldU8("sourceFieldMask1");
+    instruction.sourceFieldMask2 =
+      reader->readFieldU8("sourceFieldMask2");
     instruction.immediate =
-      static_cast<std::int16_t>(reader->readU16());
-    instruction.immediateBits = reader->readU32();
+      static_cast<std::int16_t>(
+        reader->readFieldU16("immediate"));
+    instruction.immediateBits =
+      reader->readFieldU32("immediateBits");
     require(
       instruction.sourceRegister1 <= VPU_REGISTER_VF31 &&
       instruction.sourceRegister2 <= VPU_REGISTER_VF31 &&
@@ -67,45 +95,49 @@ namespace
     SaveStateWriter *writer,
     const VIFCommand &command)
   {
-    writer->writeU8(
+    auto scope = writer->scope("streamCommand");
+    writer->writeFieldU8(
+      "kind",
       static_cast<std::uint8_t>(command.kind));
-    writer->writeU8(
+    writer->writeFieldU8(
+      "unpackFormat",
       static_cast<std::uint8_t>(command.unpackFormat));
-    writer->writeU32(command.raw);
-    writer->writeU16(command.immediate);
-    writer->writeU16(command.count);
-    writer->writeU16(command.address);
-    writer->writeU8(command.encodedCount);
-    writer->writeU8(command.command);
-    writer->writeBool(command.interrupt);
-    writer->writeBool(command.masked);
-    writer->writeBool(command.unsignedData);
-    writer->writeBool(command.addTops);
+    writer->writeFieldU32("raw", command.raw);
+    writer->writeFieldU16("immediate", command.immediate);
+    writer->writeFieldU16("count", command.count);
+    writer->writeFieldU16("address", command.address);
+    writer->writeFieldU8("encodedCount", command.encodedCount);
+    writer->writeFieldU8("command", command.command);
+    writer->writeFieldBool("interrupt", command.interrupt);
+    writer->writeFieldBool("masked", command.masked);
+    writer->writeFieldBool("unsignedData", command.unsignedData);
+    writer->writeFieldBool("addTops", command.addTops);
   }
 
   VIFCommand readVIFCommand(SaveStateReader *reader)
   {
+    auto scope = reader->scope("streamCommand");
     VIFCommand command;
     command.kind = readEnum<VIFCommandKind>(
       reader,
       static_cast<std::uint8_t>(VIFCommandKind::UNPACK),
-      "VIF command kind");
+      "kind");
     command.unpackFormat = readEnum<VIFUnpackFormat>(
       reader,
       static_cast<std::uint8_t>(VIFUnpackFormat::V4_5),
-      "VIF UNPACK format");
-    command.raw = reader->readU32();
-    command.immediate = reader->readU16();
-    command.count = reader->readU16();
-    command.address = reader->readU16();
-    command.encodedCount = reader->readU8();
-    command.command = reader->readU8();
-    command.interrupt = reader->readBool("VIF command interrupt");
-    command.masked = reader->readBool("VIF command mask");
+      "unpackFormat");
+    command.raw = reader->readFieldU32("raw");
+    command.immediate = reader->readFieldU16("immediate");
+    command.count = reader->readFieldU16("count");
+    command.address = reader->readFieldU16("address");
+    command.encodedCount = reader->readFieldU8("encodedCount");
+    command.command = reader->readFieldU8("command");
+    command.interrupt = reader->readFieldBool("interrupt");
+    command.masked = reader->readFieldBool("masked");
     command.unsignedData =
-      reader->readBool("VIF command unsigned flag");
+      reader->readFieldBool("unsignedData");
     command.addTops =
-      reader->readBool("VIF command TOPS flag");
+      reader->readFieldBool("addTops");
     return command;
   }
 
@@ -115,75 +147,148 @@ void NekoSaveStateCodec::writeVPU(
   SaveStateWriter *writer,
   const VPU &vpu)
 {
-  writer->writeU8(static_cast<std::uint8_t>(vpu.type));
-  writer->writeByteVector(vpu.microMem);
-  writer->writeByteVector(vpu.vuMem);
-  writer->writeU8(vpu.state);
-  writer->writeU32(vpu.cycles);
-  writer->writeU8(vpu.mode);
-  writer->writeBool(vpu.macroIssueNeedsAdvance);
-  writer->writeBool(vpu.macroTransferStallPending);
-  writer->writeU16(vpu.microMemPC);
-  writer->writeU16(vpu.terminationPositionCounter);
-  writer->writeBool(vpu.terminationPositionValid);
-  writer->writeBool(vpu.endDelaySlotPending);
-  writer->writeBool(vpu.branchDelaySlotPending);
-  writer->writeBool(vpu.pendingBranchTaken);
-  writer->writeU16(vpu.pendingBranchTarget);
-  writer->writeBool(vpu.pendingBranchLinkValid);
-  writer->writeU8(vpu.pendingBranchLinkRegister);
-  writer->writeU16(vpu.pendingBranchLinkValue);
-  writer->writeBool(vpu.terminationRequested);
-  writer->writeBool(vpu.haltAfterDrain);
-  writer->writeBool(vpu.dEnabled);
-  writer->writeBool(vpu.tEnabled);
-  writer->writeBool(vpu.xgkickWaiting);
-  writer->writeBool(vpu.xgkickTransferStarted);
-  writer->writeBool(vpu.dBitStop);
-  writer->writeBool(vpu.tBitStop);
-  writer->writeBool(vpu.forceBreakStop);
-  writer->writeBool(vpu.cop2WriteInterlockReleased);
+  writer->writeFieldU8("type", static_cast<std::uint8_t>(vpu.type));
+  writer->writeFieldByteVector("microMem", vpu.microMem);
+  writer->writeFieldByteVector("vuMem", vpu.vuMem);
+  writer->writeFieldU8("state", vpu.state);
+  writer->writeFieldU32("cycles", vpu.cycles);
+  writer->writeFieldU8("mode", vpu.mode);
+  writer->writeFieldBool(
+    "macroIssueNeedsAdvance",
+    vpu.macroIssueNeedsAdvance);
+  writer->writeFieldBool(
+    "macroTransferStallPending",
+    vpu.macroTransferStallPending);
+  writer->writeFieldU16("microMemPC", vpu.microMemPC);
+  writer->writeFieldU16(
+    "terminationPositionCounter",
+    vpu.terminationPositionCounter);
+  writer->writeFieldBool(
+    "terminationPositionValid",
+    vpu.terminationPositionValid);
+  writer->writeFieldBool("endDelaySlotPending", vpu.endDelaySlotPending);
+  writer->writeFieldBool(
+    "branchDelaySlotPending",
+    vpu.branchDelaySlotPending);
+  writer->writeFieldBool("pendingBranchTaken", vpu.pendingBranchTaken);
+  writer->writeFieldU16("pendingBranchTarget", vpu.pendingBranchTarget);
+  writer->writeFieldBool(
+    "pendingBranchLinkValid",
+    vpu.pendingBranchLinkValid);
+  writer->writeFieldU8(
+    "pendingBranchLinkRegister",
+    vpu.pendingBranchLinkRegister);
+  writer->writeFieldU16(
+    "pendingBranchLinkValue",
+    vpu.pendingBranchLinkValue);
+  writer->writeFieldBool(
+    "terminationRequested",
+    vpu.terminationRequested);
+  writer->writeFieldBool("haltAfterDrain", vpu.haltAfterDrain);
+  writer->writeFieldBool("dEnabled", vpu.dEnabled);
+  writer->writeFieldBool("tEnabled", vpu.tEnabled);
+  writer->writeFieldBool("xgkickWaiting", vpu.xgkickWaiting);
+  writer->writeFieldBool(
+    "xgkickTransferStarted",
+    vpu.xgkickTransferStarted);
+  writer->writeFieldBool("dBitStop", vpu.dBitStop);
+  writer->writeFieldBool("tBitStop", vpu.tBitStop);
+  writer->writeFieldBool("forceBreakStop", vpu.forceBreakStop);
+  writer->writeFieldBool(
+    "cop2WriteInterlockReleased",
+    vpu.cop2WriteInterlockReleased);
 
-  writer->writeSize(vpu.fpRegisters.size());
-  for (const FPRegister &value : vpu.fpRegisters)
+  writer->writeFieldSize("fpRegisterCount", vpu.fpRegisters.size());
   {
-    writeFPRegister(writer, value);
+    auto registers = writer->scope("fpRegisters");
+    for (std::size_t index = 0;
+         index < vpu.fpRegisters.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writeFPRegister(writer, vpu.fpRegisters[index]);
+    }
   }
-  writer->writeSize(vpu.intRegisters.size());
-  for (std::uint16_t value : vpu.intRegisters)
+  writer->writeFieldSize("intRegisterCount", vpu.intRegisters.size());
   {
-    writer->writeU16(value);
+    auto registers = writer->scope("intRegisters");
+    for (std::size_t index = 0;
+         index < vpu.intRegisters.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU16("value", vpu.intRegisters[index]);
+    }
   }
-  writer->writeU32(vpu.iRegister.bits());
-  writer->writeU32(vpu.qRegister.bits());
-  writer->writeU32(vpu.pRegister.bits());
-  writer->writeU32(vpu.rRegister);
-  writer->writeU16(vpu.cmsarRegister);
-  writer->writeU16(vpu.MACFlags);
-  writer->writeU16(vpu.statusFlags);
-  writeFPRegister(writer, vpu.accumulator);
-  writer->writeU64(vpu.clippingFlags);
+  writer->writeFieldU32("iRegister", vpu.iRegister.bits());
+  writer->writeFieldU32("qRegister", vpu.qRegister.bits());
+  writer->writeFieldU32("pRegister", vpu.pRegister.bits());
+  writer->writeFieldU32("rRegister", vpu.rRegister);
+  writer->writeFieldU16("cmsarRegister", vpu.cmsarRegister);
+  writer->writeFieldU16("macFlags", vpu.MACFlags);
+  writer->writeFieldU16("statusFlags", vpu.statusFlags);
+  {
+    auto accumulator = writer->scope("accumulator");
+    writeFPRegister(writer, vpu.accumulator);
+  }
+  writer->writeFieldU64("clippingFlags", vpu.clippingFlags);
   writeOrchestrator(writer, vpu.orchestrator);
-  writeFPRegister(writer, vpu.virtualDestRegister);
-  writeFPRegister(writer, vpu.accumulatorForwardValue);
-  writer->writeU8(vpu.pendingAccumulatorWrites);
-  writer->writeBool(vpu.accumulatorForwardValid);
+  {
+    auto field = writer->scope("virtualDestRegister");
+    writeFPRegister(writer, vpu.virtualDestRegister);
+  }
+  {
+    auto field = writer->scope("accumulatorForwardValue");
+    writeFPRegister(writer, vpu.accumulatorForwardValue);
+  }
+  writer->writeFieldU8(
+    "pendingAccumulatorWrites",
+    vpu.pendingAccumulatorWrites);
+  writer->writeFieldBool(
+    "accumulatorForwardValid",
+    vpu.accumulatorForwardValid);
   writeLowerInstruction(writer, vpu.pendingLowerInstruction);
-  writer->writeU16(vpu.pendingLowerInstructionAddress);
-  writer->writeBool(vpu.lowerInstructionPending);
-  writer->writeBool(vpu.pendingLowerInstructionReady);
-  writer->writeBool(vpu.pendingLowerWritebackDiscarded);
-  for (std::uint8_t value : vpu.pendingIntegerWrites)
+  writer->writeFieldU16(
+    "pendingLowerInstructionAddress",
+    vpu.pendingLowerInstructionAddress);
+  writer->writeFieldBool(
+    "lowerInstructionPending",
+    vpu.lowerInstructionPending);
+  writer->writeFieldBool(
+    "pendingLowerInstructionReady",
+    vpu.pendingLowerInstructionReady);
+  writer->writeFieldBool(
+    "pendingLowerWritebackDiscarded",
+    vpu.pendingLowerWritebackDiscarded);
   {
-    writer->writeU8(value);
+    auto values = writer->scope("pendingIntegerWrites");
+    for (std::size_t index = 0;
+         index < vpu.pendingIntegerWrites.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU8("count", vpu.pendingIntegerWrites[index]);
+    }
   }
-  for (std::uint8_t value : vpu.pendingIALUWrites)
   {
-    writer->writeU8(value);
+    auto values = writer->scope("pendingIALUWrites");
+    for (std::size_t index = 0;
+         index < vpu.pendingIALUWrites.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU8("count", vpu.pendingIALUWrites[index]);
+    }
   }
-  for (std::uint16_t value : vpu.bypassedIntegerValues)
   {
-    writer->writeU16(value);
+    auto values = writer->scope("bypassedIntegerValues");
+    for (std::size_t index = 0;
+         index < vpu.bypassedIntegerValues.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU16("value", vpu.bypassedIntegerValues[index]);
+    }
   }
 }
 
@@ -192,112 +297,165 @@ void NekoSaveStateCodec::readVPU(
   VPU *vpu,
   PipelineListIndices *pipelineLists)
 {
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
   const VPUType type = readEnum<VPUType>(
     reader,
     static_cast<std::uint8_t>(VPUType::VU1),
-    "VU type");
+    "type");
   require(type == vpu->type, "VU type does not match its slot");
-  vpu->microMem = reader->readByteVector(
-    vpu->microMem.size(),
-    "VU micro memory");
-  vpu->vuMem = reader->readByteVector(
-    vpu->vuMem.size(),
-    "VU data memory");
-  vpu->state = reader->readU8();
-  vpu->cycles = reader->readU32();
-  vpu->mode = reader->readU8();
+  vpu->microMem =
+    reader->readFieldByteVector("microMem", vpu->microMem.size());
+  vpu->vuMem =
+    reader->readFieldByteVector("vuMem", vpu->vuMem.size());
+  vpu->state = reader->readFieldU8("state");
+  vpu->cycles = reader->readFieldU32("cycles");
+  vpu->mode = reader->readFieldU8("mode");
   vpu->macroIssueNeedsAdvance =
-    reader->readBool("VU macro issue-advance flag");
+    reader->readFieldBool("macroIssueNeedsAdvance");
   vpu->macroTransferStallPending =
-    reader->readBool("VU macro transfer-stall flag");
-  vpu->microMemPC = reader->readU16();
-  vpu->terminationPositionCounter = reader->readU16();
+    reader->readFieldBool("macroTransferStallPending");
+  vpu->microMemPC = reader->readFieldU16("microMemPC");
+  vpu->terminationPositionCounter =
+    reader->readFieldU16("terminationPositionCounter");
   vpu->terminationPositionValid =
-    reader->readBool("VU termination-position flag");
+    reader->readFieldBool("terminationPositionValid");
   vpu->endDelaySlotPending =
-    reader->readBool("VU end-delay flag");
+    reader->readFieldBool("endDelaySlotPending");
   vpu->branchDelaySlotPending =
-    reader->readBool("VU branch-delay flag");
+    reader->readFieldBool("branchDelaySlotPending");
   vpu->pendingBranchTaken =
-    reader->readBool("VU pending-branch flag");
-  vpu->pendingBranchTarget = reader->readU16();
+    reader->readFieldBool("pendingBranchTaken");
+  vpu->pendingBranchTarget =
+    reader->readFieldU16("pendingBranchTarget");
   vpu->pendingBranchLinkValid =
-    reader->readBool("VU branch-link flag");
-  vpu->pendingBranchLinkRegister = reader->readU8();
-  vpu->pendingBranchLinkValue = reader->readU16();
+    reader->readFieldBool("pendingBranchLinkValid");
+  vpu->pendingBranchLinkRegister =
+    reader->readFieldU8("pendingBranchLinkRegister");
+  vpu->pendingBranchLinkValue =
+    reader->readFieldU16("pendingBranchLinkValue");
   vpu->terminationRequested =
-    reader->readBool("VU termination-request flag");
+    reader->readFieldBool("terminationRequested");
   vpu->haltAfterDrain =
-    reader->readBool("VU halt-after-drain flag");
-  vpu->dEnabled = reader->readBool("VU D-bit enable");
-  vpu->tEnabled = reader->readBool("VU T-bit enable");
+    reader->readFieldBool("haltAfterDrain");
+  vpu->dEnabled = reader->readFieldBool("dEnabled");
+  vpu->tEnabled = reader->readFieldBool("tEnabled");
   vpu->xgkickWaiting =
-    reader->readBool("VU XGKICK wait flag");
+    reader->readFieldBool("xgkickWaiting");
   vpu->xgkickTransferStarted =
-    reader->readBool("VU XGKICK start flag");
+    reader->readFieldBool("xgkickTransferStarted");
   vpu->dBitStop =
-    reader->readBool("VU D-bit stop flag");
+    reader->readFieldBool("dBitStop");
   vpu->tBitStop =
-    reader->readBool("VU T-bit stop flag");
+    reader->readFieldBool("tBitStop");
   vpu->forceBreakStop =
-    reader->readBool("VU force-break stop flag");
+    reader->readFieldBool("forceBreakStop");
   vpu->cop2WriteInterlockReleased =
-    reader->readBool("VU COP2 write-interlock flag");
+    reader->readFieldBool("cop2WriteInterlockReleased");
 
-  const std::uint32_t fpRegisterCount = reader->readU32();
+  const std::uint32_t fpRegisterCount =
+    reader->readFieldU32("fpRegisterCount");
   require(
     fpRegisterCount == vpu->fpRegisters.size(),
     "VU floating-point register count is invalid");
-  for (FPRegister &value : vpu->fpRegisters)
   {
-    value = readFPRegister(reader);
+    auto registers = reader->scope("fpRegisters");
+    for (std::size_t index = 0;
+         index < vpu->fpRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vpu->fpRegisters[index] = readFPRegister(reader);
+    }
   }
-  const std::uint32_t intRegisterCount = reader->readU32();
+  const std::uint32_t intRegisterCount =
+    reader->readFieldU32("intRegisterCount");
   require(
     intRegisterCount == vpu->intRegisters.size(),
     "VU integer register count is invalid");
-  for (std::uint16_t &value : vpu->intRegisters)
   {
-    value = reader->readU16();
+    auto registers = reader->scope("intRegisters");
+    for (std::size_t index = 0;
+         index < vpu->intRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vpu->intRegisters[index] = reader->readFieldU16("value");
+    }
   }
-  vpu->iRegister.setBits(reader->readU32());
-  vpu->qRegister.setBits(reader->readU32());
-  vpu->pRegister.setBits(reader->readU32());
-  vpu->rRegister = reader->readU32();
-  vpu->cmsarRegister = reader->readU16();
-  vpu->MACFlags = reader->readU16();
-  vpu->statusFlags = reader->readU16();
-  vpu->accumulator = readFPRegister(reader);
-  vpu->clippingFlags = reader->readU64();
+  vpu->iRegister.setBits(reader->readFieldU32("iRegister"));
+  vpu->qRegister.setBits(reader->readFieldU32("qRegister"));
+  vpu->pRegister.setBits(reader->readFieldU32("pRegister"));
+  vpu->rRegister = reader->readFieldU32("rRegister");
+  vpu->cmsarRegister = reader->readFieldU16("cmsarRegister");
+  vpu->MACFlags = reader->readFieldU16("macFlags");
+  vpu->statusFlags = reader->readFieldU16("statusFlags");
+  {
+    auto accumulator = reader->scope("accumulator");
+    vpu->accumulator = readFPRegister(reader);
+  }
+  vpu->clippingFlags = reader->readFieldU64("clippingFlags");
   readOrchestrator(
     reader,
     &vpu->orchestrator,
     pipelineLists);
-  vpu->virtualDestRegister = readFPRegister(reader);
-  vpu->accumulatorForwardValue = readFPRegister(reader);
-  vpu->pendingAccumulatorWrites = reader->readU8();
+  {
+    auto field = reader->scope("virtualDestRegister");
+    vpu->virtualDestRegister = readFPRegister(reader);
+  }
+  {
+    auto field = reader->scope("accumulatorForwardValue");
+    vpu->accumulatorForwardValue = readFPRegister(reader);
+  }
+  vpu->pendingAccumulatorWrites =
+    reader->readFieldU8("pendingAccumulatorWrites");
   vpu->accumulatorForwardValid =
-    reader->readBool("VU accumulator-forward flag");
+    reader->readFieldBool("accumulatorForwardValid");
   vpu->pendingLowerInstruction =
     readLowerInstruction(reader);
-  vpu->pendingLowerInstructionAddress = reader->readU16();
+  vpu->pendingLowerInstructionAddress =
+    reader->readFieldU16("pendingLowerInstructionAddress");
   vpu->lowerInstructionPending =
-    reader->readBool("VU lower-pending flag");
+    reader->readFieldBool("lowerInstructionPending");
   vpu->pendingLowerInstructionReady =
-    reader->readBool("VU lower-ready flag");
+    reader->readFieldBool("pendingLowerInstructionReady");
   vpu->pendingLowerWritebackDiscarded =
-    reader->readBool("VU lower-discard flag");
-  for (std::uint8_t &value : vpu->pendingIntegerWrites)
+    reader->readFieldBool("pendingLowerWritebackDiscarded");
   {
-    value = reader->readU8();
+    auto values = reader->scope("pendingIntegerWrites");
+    for (std::size_t index = 0;
+         index < vpu->pendingIntegerWrites.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vpu->pendingIntegerWrites[index] =
+        reader->readFieldU8("count");
+    }
   }
-  for (std::uint8_t &value : vpu->pendingIALUWrites)
   {
-    value = reader->readU8();
+    auto values = reader->scope("pendingIALUWrites");
+    for (std::size_t index = 0;
+         index < vpu->pendingIALUWrites.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vpu->pendingIALUWrites[index] =
+        reader->readFieldU8("count");
+    }
   }
-  for (std::uint16_t &value : vpu->bypassedIntegerValues)
   {
-    value = reader->readU16();
+    auto values = reader->scope("bypassedIntegerValues");
+    for (std::size_t index = 0;
+         index < vpu->bypassedIntegerValues.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vpu->bypassedIntegerValues[index] =
+        reader->readFieldU16("value");
+    }
   }
 
   require(
@@ -456,98 +614,183 @@ void NekoSaveStateCodec::writePipeline(
   SaveStateWriter *writer,
   const Pipeline &pipeline)
 {
-  writer->writeU8(pipeline.type);
-  writer->writeU16(pipeline.opCode);
-  writer->writeU32(
+  writer->writeFieldU8("type", pipeline.type);
+  writer->writeFieldU16("opCode", pipeline.opCode);
+  writer->writeFieldU32(
+    "intResult",
     static_cast<std::uint32_t>(pipeline.intResult));
-  writeFPRegister(writer, pipeline.fpResult);
-  writeFPRegister(writer, pipeline.flagResult);
-  writeFPRegister(writer, pipeline.operationResult);
-  writeFPRegister(writer, pipeline.accumulatorValue);
-  writeFPRegister(writer, pipeline.sourceValue1);
-  writeFPRegister(writer, pipeline.sourceValue2);
-  writer->writeU8(pipeline.ignoredResultFields);
-  writer->writeU8(pipeline.srcReg1);
-  writer->writeU8(pipeline.srcReg2);
-  writer->writeU8(pipeline.destReg);
-  writer->writeU8(pipeline.integerDestReg);
-  writer->writeU8(pipeline.destFieldMask);
-  writer->writeU8(pipeline.srcReg1FieldMask);
-  writer->writeU8(pipeline.srcReg2FieldMask);
-  writer->writeU16(pipeline.instructionAddress);
-  writer->writeU16(pipeline.memoryAddress);
-  writer->writeU16(
+  {
+    auto field = writer->scope("fpResult");
+    writeFPRegister(writer, pipeline.fpResult);
+  }
+  {
+    auto field = writer->scope("flagResult");
+    writeFPRegister(writer, pipeline.flagResult);
+  }
+  {
+    auto field = writer->scope("operationResult");
+    writeFPRegister(writer, pipeline.operationResult);
+  }
+  {
+    auto field = writer->scope("accumulatorValue");
+    writeFPRegister(writer, pipeline.accumulatorValue);
+  }
+  {
+    auto field = writer->scope("sourceValue1");
+    writeFPRegister(writer, pipeline.sourceValue1);
+  }
+  {
+    auto field = writer->scope("sourceValue2");
+    writeFPRegister(writer, pipeline.sourceValue2);
+  }
+  writer->writeFieldU8(
+    "ignoredResultFields",
+    pipeline.ignoredResultFields);
+  writer->writeFieldU8("srcReg1", pipeline.srcReg1);
+  writer->writeFieldU8("srcReg2", pipeline.srcReg2);
+  writer->writeFieldU8("destReg", pipeline.destReg);
+  writer->writeFieldU8("integerDestReg", pipeline.integerDestReg);
+  writer->writeFieldU8("destFieldMask", pipeline.destFieldMask);
+  writer->writeFieldU8(
+    "srcReg1FieldMask",
+    pipeline.srcReg1FieldMask);
+  writer->writeFieldU8(
+    "srcReg2FieldMask",
+    pipeline.srcReg2FieldMask);
+  writer->writeFieldU16(
+    "instructionAddress",
+    pipeline.instructionAddress);
+  writer->writeFieldU16("memoryAddress", pipeline.memoryAddress);
+  writer->writeFieldU16(
+    "immediate",
     static_cast<std::uint16_t>(pipeline.immediate));
-  writer->writeU32(pipeline.immediateBits);
-  writer->writeU32(pipeline.scalarResultBits);
-  writer->writeU8(pipeline.scalarResultFlags);
-  writer->writeU16(pipeline.intSourceValue1);
-  writer->writeU16(pipeline.intSourceValue2);
-  writer->writeBool(pipeline.intSource1Sampled);
-  writer->writeBool(pipeline.intSource2Sampled);
-  writer->writeBool(pipeline.vectorSourcesSampled);
-  writer->writeBool(pipeline.xgkickStarted);
-  writer->writeBool(
+  writer->writeFieldU32("immediateBits", pipeline.immediateBits);
+  writer->writeFieldU32(
+    "scalarResultBits",
+    pipeline.scalarResultBits);
+  writer->writeFieldU8(
+    "scalarResultFlags",
+    pipeline.scalarResultFlags);
+  writer->writeFieldU16(
+    "intSourceValue1",
+    pipeline.intSourceValue1);
+  writer->writeFieldU16(
+    "intSourceValue2",
+    pipeline.intSourceValue2);
+  writer->writeFieldBool(
+    "intSource1Sampled",
+    pipeline.intSource1Sampled);
+  writer->writeFieldBool(
+    "intSource2Sampled",
+    pipeline.intSource2Sampled);
+  writer->writeFieldBool(
+    "vectorSourcesSampled",
+    pipeline.vectorSourcesSampled);
+  writer->writeFieldBool("xgkickStarted", pipeline.xgkickStarted);
+  writer->writeFieldBool(
+    "discardWriteback",
     pipeline.writebackDisposition ==
       VUPipelineWritebackDisposition::Discard);
-  writer->writeU8(
+  writer->writeFieldU8(
+    "currentStage",
     static_cast<std::uint8_t>(pipeline.currentStage));
-  writer->writeU8(pipeline.currentStageIndex);
-  writer->writeU8(pipeline.executionStageCount);
-  writer->writeBool(pipeline.complete);
+  writer->writeFieldU8(
+    "currentStageIndex",
+    pipeline.currentStageIndex);
+  writer->writeFieldU8(
+    "executionStageCount",
+    pipeline.executionStageCount);
+  writer->writeFieldBool("complete", pipeline.complete);
 }
 
 void NekoSaveStateCodec::readPipeline(
   SaveStateReader *reader,
   Pipeline *pipeline)
 {
-  pipeline->type = reader->readU8();
-  pipeline->opCode = reader->readU16();
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
+  pipeline->type = reader->readFieldU8("type");
+  pipeline->opCode = reader->readFieldU16("opCode");
   pipeline->intResult =
-    static_cast<std::int32_t>(reader->readU32());
-  pipeline->fpResult = readFPRegister(reader);
-  pipeline->flagResult = readFPRegister(reader);
-  pipeline->operationResult = readFPRegister(reader);
-  pipeline->accumulatorValue = readFPRegister(reader);
-  pipeline->sourceValue1 = readFPRegister(reader);
-  pipeline->sourceValue2 = readFPRegister(reader);
-  pipeline->ignoredResultFields = reader->readU8();
-  pipeline->srcReg1 = reader->readU8();
-  pipeline->srcReg2 = reader->readU8();
-  pipeline->destReg = reader->readU8();
-  pipeline->integerDestReg = reader->readU8();
-  pipeline->destFieldMask = reader->readU8();
-  pipeline->srcReg1FieldMask = reader->readU8();
-  pipeline->srcReg2FieldMask = reader->readU8();
-  pipeline->instructionAddress = reader->readU16();
-  pipeline->memoryAddress = reader->readU16();
+    static_cast<std::int32_t>(reader->readFieldU32("intResult"));
+  {
+    auto field = reader->scope("fpResult");
+    pipeline->fpResult = readFPRegister(reader);
+  }
+  {
+    auto field = reader->scope("flagResult");
+    pipeline->flagResult = readFPRegister(reader);
+  }
+  {
+    auto field = reader->scope("operationResult");
+    pipeline->operationResult = readFPRegister(reader);
+  }
+  {
+    auto field = reader->scope("accumulatorValue");
+    pipeline->accumulatorValue = readFPRegister(reader);
+  }
+  {
+    auto field = reader->scope("sourceValue1");
+    pipeline->sourceValue1 = readFPRegister(reader);
+  }
+  {
+    auto field = reader->scope("sourceValue2");
+    pipeline->sourceValue2 = readFPRegister(reader);
+  }
+  pipeline->ignoredResultFields =
+    reader->readFieldU8("ignoredResultFields");
+  pipeline->srcReg1 = reader->readFieldU8("srcReg1");
+  pipeline->srcReg2 = reader->readFieldU8("srcReg2");
+  pipeline->destReg = reader->readFieldU8("destReg");
+  pipeline->integerDestReg =
+    reader->readFieldU8("integerDestReg");
+  pipeline->destFieldMask =
+    reader->readFieldU8("destFieldMask");
+  pipeline->srcReg1FieldMask =
+    reader->readFieldU8("srcReg1FieldMask");
+  pipeline->srcReg2FieldMask =
+    reader->readFieldU8("srcReg2FieldMask");
+  pipeline->instructionAddress =
+    reader->readFieldU16("instructionAddress");
+  pipeline->memoryAddress =
+    reader->readFieldU16("memoryAddress");
   pipeline->immediate =
-    static_cast<std::int16_t>(reader->readU16());
-  pipeline->immediateBits = reader->readU32();
-  pipeline->scalarResultBits = reader->readU32();
-  pipeline->scalarResultFlags = reader->readU8();
-  pipeline->intSourceValue1 = reader->readU16();
-  pipeline->intSourceValue2 = reader->readU16();
+    static_cast<std::int16_t>(reader->readFieldU16("immediate"));
+  pipeline->immediateBits =
+    reader->readFieldU32("immediateBits");
+  pipeline->scalarResultBits =
+    reader->readFieldU32("scalarResultBits");
+  pipeline->scalarResultFlags =
+    reader->readFieldU8("scalarResultFlags");
+  pipeline->intSourceValue1 =
+    reader->readFieldU16("intSourceValue1");
+  pipeline->intSourceValue2 =
+    reader->readFieldU16("intSourceValue2");
   pipeline->intSource1Sampled =
-    reader->readBool("VU pipeline source-1 sample flag");
+    reader->readFieldBool("intSource1Sampled");
   pipeline->intSource2Sampled =
-    reader->readBool("VU pipeline source-2 sample flag");
+    reader->readFieldBool("intSource2Sampled");
   pipeline->vectorSourcesSampled =
-    reader->readBool("VU pipeline vector-source sample flag");
+    reader->readFieldBool("vectorSourcesSampled");
   pipeline->xgkickStarted =
-    reader->readBool("VU pipeline XGKICK flag");
+    reader->readFieldBool("xgkickStarted");
   pipeline->writebackDisposition =
-    reader->readBool("VU pipeline discard flag")
+    reader->readFieldBool("discardWriteback")
       ? VUPipelineWritebackDisposition::Discard
       : VUPipelineWritebackDisposition::Commit;
   pipeline->currentStage = readEnum<VUPipelineStage>(
     reader,
     static_cast<std::uint8_t>(VUPipelineStage::P),
-    "VU pipeline stage");
-  pipeline->currentStageIndex = reader->readU8();
-  pipeline->executionStageCount = reader->readU8();
+    "currentStage");
+  pipeline->currentStageIndex =
+    reader->readFieldU8("currentStageIndex");
+  pipeline->executionStageCount =
+    reader->readFieldU8("executionStageCount");
   pipeline->complete =
-    reader->readBool("VU pipeline completion flag");
+    reader->readFieldBool("complete");
 
   require(
     pipeline->type <= VPU_PIPELINE_TYPE_VIF_CONTROL,
@@ -577,23 +820,40 @@ void NekoSaveStateCodec::writeOrchestrator(
   SaveStateWriter *writer,
   const PipelineOrchestrator &orchestrator)
 {
-  writer->writeBool(orchestrator.stalling);
-  writer->writeSize(orchestrator.pipelines.size());
-  for (const Pipeline &pipeline : orchestrator.pipelines)
+  auto scope = writer->scope("orchestrator");
+  writer->writeFieldBool("stalling", orchestrator.stalling);
+  writer->writeFieldSize(
+    "pipelineCount",
+    orchestrator.pipelines.size());
   {
-    writePipeline(writer, pipeline);
+    auto pipelines = writer->scope("pipelines");
+    for (std::size_t index = 0;
+         index < orchestrator.pipelines.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writePipeline(writer, orchestrator.pipelines[index]);
+    }
   }
   const std::list<Pipeline *> *lists[] = {
     &orchestrator.executing,
     &orchestrator.waiting,
     &orchestrator.pool
   };
-  for (const std::list<Pipeline *> *list : lists)
+  const char *listNames[] = {
+    "executing",
+    "waiting",
+    "pool"
+  };
+  for (std::size_t listIndex = 0; listIndex < 3; ++listIndex)
   {
-    writer->writeSize(list->size());
-    for (const Pipeline *pipeline : *list)
+    auto listScope = writer->scope(listNames[listIndex]);
+    writer->writeFieldSize("count", lists[listIndex]->size());
+    std::size_t elementIndex = 0;
+    for (const Pipeline *pipeline : *lists[listIndex])
     {
-      writer->writeU8(pipelineIndex(
+      auto element = writer->element(elementIndex++);
+      writer->writeFieldU8("pipelineIndex", pipelineIndex(
         orchestrator,
         pipeline));
     }
@@ -605,15 +865,28 @@ void NekoSaveStateCodec::readOrchestrator(
   PipelineOrchestrator *orchestrator,
   PipelineListIndices *pipelineLists)
 {
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
+  auto scope = reader->scope("orchestrator");
   orchestrator->stalling =
-    reader->readBool("VU orchestrator stall flag");
-  const std::uint32_t pipelineCount = reader->readU32();
+    reader->readFieldBool("stalling");
+  const std::uint32_t pipelineCount =
+    reader->readFieldU32("pipelineCount");
   require(
     pipelineCount == orchestrator->pipelines.size(),
     "VU pipeline-array size is invalid");
-  for (Pipeline &pipeline : orchestrator->pipelines)
   {
-    readPipeline(reader, &pipeline);
+    auto pipelines = reader->scope("pipelines");
+    for (std::size_t index = 0;
+         index < orchestrator->pipelines.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      readPipeline(reader, &orchestrator->pipelines[index]);
+    }
   }
 
   std::array<bool, MAX_PIPELINES> used = {};
@@ -622,15 +895,25 @@ void NekoSaveStateCodec::readOrchestrator(
     list.clear();
   }
   std::size_t membershipCount = 0;
-  for (std::vector<std::uint8_t> &list : *pipelineLists)
+  const char *listNames[] = {
+    "executing",
+    "waiting",
+    "pool"
+  };
+  for (std::size_t listIndex = 0; listIndex < 3; ++listIndex)
   {
-    const std::uint32_t count = reader->readU32();
+    auto listScope = reader->scope(listNames[listIndex]);
+    std::vector<std::uint8_t> &list =
+      (*pipelineLists)[listIndex];
+    const std::uint32_t count = reader->readFieldU32("count");
     require(count <= MAX_PIPELINES, "VU pipeline-list size is invalid");
     list.reserve(count);
     membershipCount += count;
     for (std::uint32_t index = 0; index < count; ++index)
     {
-      const std::uint8_t pipeline = reader->readU8();
+      auto element = reader->element(index);
+      const std::uint8_t pipeline =
+        reader->readFieldU8("pipelineIndex");
       require(
         pipeline < MAX_PIPELINES,
         "VU pipeline-list index is invalid");
@@ -687,49 +970,88 @@ void NekoSaveStateCodec::writeVIF(
   SaveStateWriter *writer,
   const VIF &vif)
 {
-  writer->writeU8(static_cast<std::uint8_t>(vif.type));
-  writer->writeU16(vif.cycleRegister);
-  writer->writeU8(vif.modeRegister);
-  writer->writeU32(vif.maskRegister);
-  for (std::uint32_t value : vif.rowRegisters)
+  writer->writeFieldU8("type", static_cast<std::uint8_t>(vif.type));
+  writer->writeFieldU16("cycleRegister", vif.cycleRegister);
+  writer->writeFieldU8("modeRegister", vif.modeRegister);
+  writer->writeFieldU32("maskRegister", vif.maskRegister);
   {
-    writer->writeU32(value);
+    auto registers = writer->scope("rowRegisters");
+    for (std::size_t index = 0;
+         index < vif.rowRegisters.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32("value", vif.rowRegisters[index]);
+    }
   }
-  for (std::uint32_t value : vif.columnRegisters)
   {
-    writer->writeU32(value);
+    auto registers = writer->scope("columnRegisters");
+    for (std::size_t index = 0;
+         index < vif.columnRegisters.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32("value", vif.columnRegisters[index]);
+    }
   }
-  writer->writeU16(vif.topRegister);
-  writer->writeU16(vif.itopRegister);
-  writer->writeU16(vif.itopsRegister);
-  writer->writeU16(vif.baseRegister);
-  writer->writeU16(vif.offsetRegister);
-  writer->writeU16(vif.topsRegister);
-  writer->writeU16(vif.markRegister);
-  writer->writeBool(vif.dbf);
-  writer->writeBool(vif.path3Mask);
-  writer->writeBool(vif.markFlag);
-  writer->writeBool(vif.interruptFlag);
-  writer->writeU32(vif.codeRegister);
+  writer->writeFieldU16("topRegister", vif.topRegister);
+  writer->writeFieldU16("itopRegister", vif.itopRegister);
+  writer->writeFieldU16("itopsRegister", vif.itopsRegister);
+  writer->writeFieldU16("baseRegister", vif.baseRegister);
+  writer->writeFieldU16("offsetRegister", vif.offsetRegister);
+  writer->writeFieldU16("topsRegister", vif.topsRegister);
+  writer->writeFieldU16("markRegister", vif.markRegister);
+  writer->writeFieldBool("dbf", vif.dbf);
+  writer->writeFieldBool("path3Mask", vif.path3Mask);
+  writer->writeFieldBool("markFlag", vif.markFlag);
+  writer->writeFieldBool("interruptFlag", vif.interruptFlag);
+  writer->writeFieldU32("codeRegister", vif.codeRegister);
   writeVIFCommand(writer, vif.streamCommand);
-  writer->writeU32(vif.streamPayloadWordCount);
-  writer->writeU32(vif.streamPayloadWordsRemaining);
-  writer->writeU64(vif.streamWordsIngested);
-  writer->writeU32(vif.mpgLowerInstruction);
-  writer->writeBool(vif.mpgLowerInstructionPending);
-  for (std::uint32_t value : vif.directQuadword)
+  writer->writeFieldU32(
+    "streamPayloadWordCount",
+    vif.streamPayloadWordCount);
+  writer->writeFieldU32(
+    "streamPayloadWordsRemaining",
+    vif.streamPayloadWordsRemaining);
+  writer->writeFieldU64(
+    "streamWordsIngested",
+    vif.streamWordsIngested);
+  writer->writeFieldU32(
+    "mpgLowerInstruction",
+    vif.mpgLowerInstruction);
+  writer->writeFieldBool(
+    "mpgLowerInstructionPending",
+    vif.mpgLowerInstructionPending);
   {
-    writer->writeU32(value);
+    auto values = writer->scope("directQuadword");
+    for (std::size_t index = 0;
+         index < vif.directQuadword.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32("value", vif.directQuadword[index]);
+    }
   }
-  writer->writeSize(vif.unpackPayload.size());
-  for (std::uint32_t value : vif.unpackPayload)
+  writer->writeFieldSize("unpackPayloadCount", vif.unpackPayload.size());
   {
-    writer->writeU32(value);
+    auto values = writer->scope("unpackPayload");
+    for (std::size_t index = 0;
+         index < vif.unpackPayload.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32("value", vif.unpackPayload[index]);
+    }
   }
-  writer->writeSize(vif.fifoWords.size());
-  for (std::uint32_t value : vif.fifoWords)
+  writer->writeFieldSize("fifoWordCount", vif.fifoWords.size());
   {
-    writer->writeU32(value);
+    auto words = writer->scope("fifoWords");
+    std::size_t index = 0;
+    for (std::uint32_t value : vif.fifoWords)
+    {
+      auto element = writer->element(index++);
+      writer->writeFieldU32("value", value);
+    }
   }
 }
 
@@ -737,68 +1059,106 @@ void NekoSaveStateCodec::readVIF(
   SaveStateReader *reader,
   VIF *vif)
 {
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
   const VIFType type = readEnum<VIFType>(
     reader,
     static_cast<std::uint8_t>(VIFType::VIF1),
-    "VIF type");
+    "type");
   require(type == vif->type, "VIF type does not match its slot");
-  vif->cycleRegister = reader->readU16();
-  vif->modeRegister = reader->readU8();
-  vif->maskRegister = reader->readU32();
-  for (std::uint32_t &value : vif->rowRegisters)
+  vif->cycleRegister = reader->readFieldU16("cycleRegister");
+  vif->modeRegister = reader->readFieldU8("modeRegister");
+  vif->maskRegister = reader->readFieldU32("maskRegister");
   {
-    value = reader->readU32();
+    auto registers = reader->scope("rowRegisters");
+    for (std::size_t index = 0;
+         index < vif->rowRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vif->rowRegisters[index] = reader->readFieldU32("value");
+    }
   }
-  for (std::uint32_t &value : vif->columnRegisters)
   {
-    value = reader->readU32();
+    auto registers = reader->scope("columnRegisters");
+    for (std::size_t index = 0;
+         index < vif->columnRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vif->columnRegisters[index] =
+        reader->readFieldU32("value");
+    }
   }
-  vif->topRegister = reader->readU16();
-  vif->itopRegister = reader->readU16();
-  vif->itopsRegister = reader->readU16();
-  vif->baseRegister = reader->readU16();
-  vif->offsetRegister = reader->readU16();
-  vif->topsRegister = reader->readU16();
-  vif->markRegister = reader->readU16();
-  vif->dbf = reader->readBool("VIF double-buffer flag");
-  vif->path3Mask = reader->readBool("VIF PATH3 mask");
-  vif->markFlag = reader->readBool("VIF mark flag");
-  vif->interruptFlag = reader->readBool("VIF interrupt flag");
-  vif->codeRegister = reader->readU32();
+  vif->topRegister = reader->readFieldU16("topRegister");
+  vif->itopRegister = reader->readFieldU16("itopRegister");
+  vif->itopsRegister = reader->readFieldU16("itopsRegister");
+  vif->baseRegister = reader->readFieldU16("baseRegister");
+  vif->offsetRegister = reader->readFieldU16("offsetRegister");
+  vif->topsRegister = reader->readFieldU16("topsRegister");
+  vif->markRegister = reader->readFieldU16("markRegister");
+  vif->dbf = reader->readFieldBool("dbf");
+  vif->path3Mask = reader->readFieldBool("path3Mask");
+  vif->markFlag = reader->readFieldBool("markFlag");
+  vif->interruptFlag = reader->readFieldBool("interruptFlag");
+  vif->codeRegister = reader->readFieldU32("codeRegister");
   vif->streamCommand = readVIFCommand(reader);
-  vif->streamPayloadWordCount = reader->readU32();
-  vif->streamPayloadWordsRemaining = reader->readU32();
-  vif->streamWordsIngested = reader->readU64();
-  vif->mpgLowerInstruction = reader->readU32();
+  vif->streamPayloadWordCount =
+    reader->readFieldU32("streamPayloadWordCount");
+  vif->streamPayloadWordsRemaining =
+    reader->readFieldU32("streamPayloadWordsRemaining");
+  vif->streamWordsIngested =
+    reader->readFieldU64("streamWordsIngested");
+  vif->mpgLowerInstruction =
+    reader->readFieldU32("mpgLowerInstruction");
   vif->mpgLowerInstructionPending =
-    reader->readBool("VIF MPG half-instruction flag");
-  for (std::uint32_t &value : vif->directQuadword)
+    reader->readFieldBool("mpgLowerInstructionPending");
   {
-    value = reader->readU32();
+    auto values = reader->scope("directQuadword");
+    for (std::size_t index = 0;
+         index < vif->directQuadword.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      vif->directQuadword[index] = reader->readFieldU32("value");
+    }
   }
-  const std::uint32_t unpackCount = reader->readU32();
+  const std::uint32_t unpackCount =
+    reader->readFieldU32("unpackPayloadCount");
   require(
     unpackCount <= MAX_VIF_UNPACK_WORDS,
     "VIF UNPACK payload size is invalid");
   std::vector<std::uint32_t> unpackPayload;
   unpackPayload.reserve(unpackCount);
-  for (std::uint32_t index = 0;
-       index < unpackCount;
-       ++index)
   {
-    unpackPayload.push_back(reader->readU32());
+    auto values = reader->scope("unpackPayload");
+    for (std::uint32_t index = 0;
+         index < unpackCount;
+         ++index)
+    {
+      auto element = reader->element(index);
+      unpackPayload.push_back(reader->readFieldU32("value"));
+    }
   }
   vif->unpackPayload.swap(unpackPayload);
-  const std::uint32_t fifoWordCount = reader->readU32();
+  const std::uint32_t fifoWordCount =
+    reader->readFieldU32("fifoWordCount");
   require(
     fifoWordCount <= vif->fifoCapacity() * 4,
     "VIF FIFO size is invalid");
   std::deque<std::uint32_t> fifoWords;
-  for (std::uint32_t index = 0;
-       index < fifoWordCount;
-       ++index)
   {
-    fifoWords.push_back(reader->readU32());
+    auto words = reader->scope("fifoWords");
+    for (std::uint32_t index = 0;
+         index < fifoWordCount;
+         ++index)
+    {
+      auto element = reader->element(index);
+      fifoWords.push_back(reader->readFieldU32("value"));
+    }
   }
   vif->fifoWords.swap(fifoWords);
 

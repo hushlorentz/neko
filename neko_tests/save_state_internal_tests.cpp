@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -60,6 +61,59 @@ namespace
 
       std::vector<RetainedSaveStateField> fields;
   };
+
+  struct CompactSaveStateField
+  {
+    std::string path;
+    SaveStateFieldKind kind = SaveStateFieldKind::U8;
+    std::size_t containerOffset = 0;
+    bool hasPayloadOffset = false;
+    std::size_t payloadOffset = 0;
+    std::size_t size = 0;
+    std::uint64_t scalarValue = 0;
+    std::uint64_t byteHash = SAVE_STATE_FNV_OFFSET_BASIS;
+  };
+
+  class CompactSaveStateObserver final :
+    public SaveStateObserver
+  {
+    public:
+      void observe(
+        const SaveStateFieldObservation &field) override
+      {
+        CompactSaveStateField compact;
+        compact.path = field.path;
+        compact.kind = field.kind;
+        compact.containerOffset = field.containerOffset;
+        compact.hasPayloadOffset = field.hasPayloadOffset;
+        compact.payloadOffset = field.payloadOffset;
+        compact.size = field.size;
+        compact.scalarValue = field.scalarValue;
+        for (std::size_t index = 0;
+             index < field.size && field.bytes != nullptr;
+             ++index)
+        {
+          compact.byteHash ^= field.bytes[index];
+          compact.byteHash *= SAVE_STATE_FNV_PRIME;
+        }
+        fields.push_back(std::move(compact));
+      }
+
+      std::vector<CompactSaveStateField> fields;
+  };
+
+  void sortFields(
+    std::vector<CompactSaveStateField> *fields)
+  {
+    std::stable_sort(
+      fields->begin(),
+      fields->end(),
+      [](const CompactSaveStateField &left,
+         const CompactSaveStateField &right)
+      {
+        return left.containerOffset < right.containerOffset;
+      });
+  }
 }
 
 TEST_CASE("Save-state field observers receive scoped paths and ranges")
@@ -274,4 +328,189 @@ TEST_CASE("Unobserved named save-state writes preserve encoded bytes")
   }
 
   REQUIRE(named.finish() == unnamed.finish());
+}
+
+TEST_CASE("Complete save-state codec exposes one matching schema")
+{
+  NekoSystem source;
+  CompactSaveStateObserver writeObserver;
+  const std::vector<std::uint8_t> state =
+    NekoSaveStateCodec::save(source, &writeObserver);
+
+  NekoSystem restored;
+  CompactSaveStateObserver readObserver;
+  NekoSaveStateCodec::load(
+    &restored,
+    state,
+    &readObserver);
+
+  sortFields(&writeObserver.fields);
+  sortFields(&readObserver.fields);
+  REQUIRE(writeObserver.fields.size() ==
+          readObserver.fields.size());
+
+  std::size_t expectedOffset = 0;
+  bool observedPayload = false;
+  for (std::size_t index = 0;
+       index < writeObserver.fields.size();
+       ++index)
+  {
+    const CompactSaveStateField &written =
+      writeObserver.fields[index];
+    const CompactSaveStateField &read =
+      readObserver.fields[index];
+    INFO("Field index: " << index);
+    INFO("Written path: " << written.path);
+    INFO("Read path: " << read.path);
+    REQUIRE_FALSE(written.path.empty());
+    REQUIRE(written.containerOffset == expectedOffset);
+    expectedOffset += written.size;
+    REQUIRE(read.path == written.path);
+    REQUIRE(read.kind == written.kind);
+    REQUIRE(read.containerOffset == written.containerOffset);
+    REQUIRE(read.hasPayloadOffset == written.hasPayloadOffset);
+    REQUIRE(read.payloadOffset == written.payloadOffset);
+    REQUIRE(read.size == written.size);
+    REQUIRE(read.scalarValue == written.scalarValue);
+    REQUIRE(read.byteHash == written.byteHash);
+    if (written.hasPayloadOffset)
+    {
+      observedPayload = true;
+      REQUIRE(
+        written.containerOffset ==
+        SAVE_STATE_HEADER_SIZE + written.payloadOffset);
+    }
+  }
+
+  REQUIRE(expectedOffset == state.size());
+  REQUIRE(observedPayload);
+  REQUIRE(writeObserver.fields.front().path == "container.magic");
+  REQUIRE(writeObserver.fields[1].path == "container.version");
+  REQUIRE(
+    std::any_of(
+      writeObserver.fields.begin(),
+      writeObserver.fields.end(),
+      [](const CompactSaveStateField &field)
+      {
+        return field.path == "system.input.buttons";
+      }));
+  REQUIRE(
+    std::any_of(
+      writeObserver.fields.begin(),
+      writeObserver.fields.end(),
+      [](const CompactSaveStateField &field)
+      {
+        return field.path ==
+          "system.eeBus.mainMemory.bytes";
+      }));
+}
+
+TEST_CASE("Component decode failures report complete schema locations")
+{
+  NekoSystem source;
+  CompactSaveStateObserver observer;
+  std::vector<std::uint8_t> state =
+    NekoSaveStateCodec::save(source, &observer);
+
+  const auto findField =
+    [&](const std::string &path) -> const CompactSaveStateField &
+    {
+      const auto field = std::find_if(
+        observer.fields.begin(),
+        observer.fields.end(),
+        [&](const CompactSaveStateField &candidate)
+        {
+          return candidate.path == path;
+        });
+      REQUIRE(field != observer.fields.end());
+      return *field;
+    };
+
+  const CompactSaveStateField &checksumField =
+    findField("container.checksum");
+  const auto updateChecksum = [&]()
+  {
+    std::uint64_t checksum = SAVE_STATE_FNV_OFFSET_BASIS;
+    for (std::size_t index = SAVE_STATE_HEADER_SIZE;
+         index < state.size();
+         ++index)
+    {
+      checksum ^= state[index];
+      checksum *= SAVE_STATE_FNV_PRIME;
+    }
+    for (std::size_t index = 0;
+         index < checksumField.size;
+         ++index)
+    {
+      state[checksumField.containerOffset + index] =
+        static_cast<std::uint8_t>(checksum >> (index * 8));
+    }
+  };
+
+  SECTION("Direct enum decoding reports its field")
+  {
+    const CompactSaveStateField &type =
+      findField("system.vu0.type");
+    state[type.containerOffset] = 0xff;
+    updateChecksum();
+
+    NekoSystem destination;
+    try
+    {
+      NekoSaveStateCodec::load(&destination, state);
+      FAIL("Expected an invalid VU type.");
+    }
+    catch (const std::invalid_argument &error)
+    {
+      const std::string message = error.what();
+      REQUIRE(
+        message.find("system.vu0.type") !=
+        std::string::npos);
+      REQUIRE(
+        message.find(
+          "container offset " +
+          std::to_string(type.containerOffset)) !=
+        std::string::npos);
+      REQUIRE(type.hasPayloadOffset);
+      REQUIRE(
+        message.find(
+          "payload offset " +
+          std::to_string(type.payloadOffset)) !=
+        std::string::npos);
+    }
+  }
+
+  SECTION("Per-field validation retains the offending field")
+  {
+    const CompactSaveStateField &flags =
+      findField(
+        "system.vu0.fpRegisters[0].xResultFlags");
+    state[flags.containerOffset] = 0x10;
+    updateChecksum();
+
+    NekoSystem destination;
+    REQUIRE_THROWS_WITH(
+      NekoSaveStateCodec::load(&destination, state),
+      "Invalid Neko save state at "
+      "system.vu0.fpRegisters[0].xResultFlags at "
+      "container offset " +
+      std::to_string(flags.containerOffset) +
+      ", payload offset " +
+      std::to_string(flags.payloadOffset) +
+      ": VU floating-point result flags are invalid.");
+  }
+
+  SECTION("Aggregate validation does not blame an unrelated leaf")
+  {
+    const CompactSaveStateField &path3Mask =
+      findField("system.vif1.path3Mask");
+    state[path3Mask.containerOffset] = 1;
+    updateChecksum();
+
+    NekoSystem destination;
+    REQUIRE_THROWS_WITH(
+      NekoSaveStateCodec::load(&destination, state),
+      "Invalid Neko save state: "
+      "VIF1 and GIF PATH3 mask state disagree.");
+  }
 }

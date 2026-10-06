@@ -52,6 +52,8 @@ class SaveStateObserver
 {
   public:
     virtual ~SaveStateObserver() = default;
+    // Patched fields may be reported after later encoded ranges.
+    // Consumers that need byte order must sort by containerOffset.
     virtual void observe(
       const SaveStateFieldObservation &field) = 0;
 };
@@ -315,6 +317,20 @@ class SaveStateWriter
         value ? 1 : 0);
     }
 
+    void writeFieldSize(
+      const char *name,
+      std::size_t value)
+    {
+      if (value > std::numeric_limits<std::uint32_t>::max())
+      {
+        throw std::runtime_error(
+          "Neko save-state container is too large.");
+      }
+      writeFieldU32(
+        name,
+        static_cast<std::uint32_t>(value));
+    }
+
     void writeBytes(
       const std::uint8_t *values,
       std::size_t count)
@@ -342,11 +358,37 @@ class SaveStateWriter
         values);
     }
 
+    template<typename Function>
+    void writeFieldRange(
+      const char *name,
+      Function writeRange)
+    {
+      const std::size_t start = size();
+      writeRange();
+      const std::size_t count = size() - start;
+      observe(
+        name,
+        SaveStateFieldKind::Bytes,
+        start,
+        count,
+        0,
+        count == 0 ? nullptr : bytes.data() + start);
+    }
+
     void writeByteVector(
       const std::vector<std::uint8_t> &values)
     {
       writeSize(values.size());
       writeBytes(values.data(), values.size());
+    }
+
+    void writeFieldByteVector(
+      const char *name,
+      const std::vector<std::uint8_t> &values)
+    {
+      auto field = scope(name);
+      writeFieldSize("size", values.size());
+      writeFieldBytes("bytes", values.data(), values.size());
     }
 
     void writeSize(std::size_t value)
@@ -376,6 +418,20 @@ class SaveStateWriter
           static_cast<std::uint8_t>(
             value >> (index * 8));
       }
+    }
+
+    void patchFieldU64(
+      const char *name,
+      std::size_t offset,
+      std::uint64_t value)
+    {
+      patchU64(offset, value);
+      observeScalar(
+        name,
+        SaveStateFieldKind::U64,
+        offset,
+        sizeof(value),
+        value);
     }
 
     std::uint64_t checksumFrom(std::size_t offset) const
@@ -598,6 +654,11 @@ class SaveStateReader
       }
     }
 
+    void clearFieldContext()
+    {
+      clearActiveField();
+    }
+
     void readFieldBytes(
       const char *name,
       std::uint8_t *values,
@@ -612,6 +673,32 @@ class SaveStateReader
         std::copy(source, source + count, values);
       }
       position += count;
+      observe(
+        name,
+        SaveStateFieldKind::Bytes,
+        start,
+        count,
+        0,
+        source);
+    }
+
+    template<typename Function>
+    void readFieldRange(
+      const char *name,
+      std::size_t count,
+      Function readRange)
+    {
+      const std::size_t start = beginField(name);
+      requireAvailable(count);
+      const std::uint8_t *source =
+        count == 0 ? nullptr : bytes.data() + position;
+      const std::size_t expectedEnd = position + count;
+      readRange();
+      beginField(name);
+      if (position != expectedEnd)
+      {
+        invalidCurrent("decoder consumed an invalid byte count");
+      }
       observe(
         name,
         SaveStateFieldKind::Bytes,
@@ -648,6 +735,20 @@ class SaveStateReader
       return result;
     }
 
+    std::vector<std::uint8_t> readFieldByteVector(
+      const char *name,
+      std::size_t expectedSize)
+    {
+      auto field = scope(name);
+      const std::uint32_t fieldSize = readFieldU32("size");
+      requireField(
+        fieldSize == expectedSize,
+        "size does not match the expected value");
+      std::vector<std::uint8_t> result(fieldSize);
+      readFieldBytes("bytes", result.data(), result.size());
+      return result;
+    }
+
     void expectBytes(
       const std::uint8_t *expected,
       std::size_t count,
@@ -665,10 +766,40 @@ class SaveStateReader
       position += count;
     }
 
+    void expectFieldBytes(
+      const char *name,
+      const std::uint8_t *expected,
+      std::size_t count)
+    {
+      const std::size_t start = beginField(name);
+      requireAvailable(count);
+      const std::uint8_t *source =
+        count == 0 ? nullptr : bytes.data() + position;
+      if (!std::equal(
+            expected,
+            expected + count,
+            bytes.begin() + position))
+      {
+        invalidCurrent("value does not match");
+      }
+      position += count;
+      observe(
+        name,
+        SaveStateFieldKind::Bytes,
+        start,
+        count,
+        0,
+        source);
+    }
+
     void requireEnd() const
     {
       if (position != bytes.size())
       {
+        if (activeFieldName != nullptr)
+        {
+          invalidCurrent("trailing data is present");
+        }
         invalid("trailing data is present");
       }
     }
@@ -840,12 +971,10 @@ Enum readEnum(
   std::uint8_t maximum,
   const char *name)
 {
-  const std::uint8_t value = reader->readU8();
-  if (value > maximum)
-  {
-    SaveStateReader::invalid(
-      std::string(name) + " is outside its enum");
-  }
+  const std::uint8_t value = reader->readFieldU8(name);
+  reader->requireField(
+    value <= maximum,
+    "value is outside its enum");
   return static_cast<Enum>(value);
 }
 
@@ -859,10 +988,12 @@ class NekoSaveStateCodec
 {
   public:
     static std::vector<std::uint8_t> save(
-      const NekoSystem &system);
+      const NekoSystem &system,
+      SaveStateObserver *observer = nullptr);
     static void load(
       NekoSystem *system,
-      const std::vector<std::uint8_t> &state);
+      const std::vector<std::uint8_t> &state,
+      SaveStateObserver *observer = nullptr);
 
   private:
     using PipelineLists =
@@ -916,7 +1047,9 @@ class NekoSaveStateCodec
       SaveStateReader *reader,
       NekoSystem *system,
       DecodedTopology *topology);
-    static void validateSystem(const NekoSystem &system);
+    static void validateSystem(
+      SaveStateReader *reader,
+      const NekoSystem &system);
     static SystemReconciliation reconcileSystem(
       const NekoSystem &source,
       const DecodedTopology &topology,

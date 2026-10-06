@@ -1924,7 +1924,7 @@ creating parallel ownership.
       payload-relative byte ranges; and path-aware reader failures. Prove that
       an absent observer preserves ordinary save/load allocation behavior,
       bytes, and transaction structure.
-- [ ] Route the complete container and version-31 payload codec through the
+- [x] Route the complete container and version-31 payload codec through the
       observer-aware primitives. Report every authoritative field's path,
       range, type, and decoded value, include the active field path and offset
       in decode failures, retain large byte arrays as ranges by default, and

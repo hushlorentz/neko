@@ -8,16 +8,23 @@ namespace
   class SaveStateContainerWriter
   {
     public:
-      SaveStateContainerWriter()
+      explicit SaveStateContainerWriter(
+        SaveStateObserver *observer) :
+        writer(observer)
       {
-        writer.writeBytes(
-          SAVE_STATE_MAGIC,
-          sizeof(SAVE_STATE_MAGIC));
-        writer.writeU32(SAVE_STATE_VERSION);
-        payloadLengthOffset = writer.size();
-        writer.writeU64(0);
-        checksumOffset = writer.size();
-        writer.writeU64(0);
+        {
+          auto container = writer.scope("container");
+          writer.writeFieldBytes(
+            "magic",
+            SAVE_STATE_MAGIC,
+            sizeof(SAVE_STATE_MAGIC));
+          writer.writeFieldU32("version", SAVE_STATE_VERSION);
+          payloadLengthOffset = writer.size();
+          writer.writeU64(0);
+          checksumOffset = writer.size();
+          writer.writeU64(0);
+        }
+        writer.setPayloadOrigin(SAVE_STATE_HEADER_SIZE);
       }
 
       SaveStateWriter *payload()
@@ -27,12 +34,17 @@ namespace
 
       std::vector<std::uint8_t> finish()
       {
-        writer.patchU64(
-          payloadLengthOffset,
-          writer.size() - SAVE_STATE_HEADER_SIZE);
-        writer.patchU64(
-          checksumOffset,
-          writer.checksumFrom(SAVE_STATE_HEADER_SIZE));
+        {
+          auto container = writer.scope("container");
+          writer.patchFieldU64(
+            "payloadLength",
+            payloadLengthOffset,
+            writer.size() - SAVE_STATE_HEADER_SIZE);
+          writer.patchFieldU64(
+            "checksum",
+            checksumOffset,
+            writer.checksumFrom(SAVE_STATE_HEADER_SIZE));
+        }
         return writer.finish();
       }
 
@@ -46,32 +58,35 @@ namespace
   {
     public:
       explicit SaveStateContainerReader(
-        const std::vector<std::uint8_t> &state) :
-        reader(state)
+        const std::vector<std::uint8_t> &state,
+        SaveStateObserver *observer) :
+        reader(state, observer)
       {
-        reader.expectBytes(
-          SAVE_STATE_MAGIC,
-          sizeof(SAVE_STATE_MAGIC),
-          "magic");
-        const std::uint32_t version = reader.readU32();
-        if (version != SAVE_STATE_VERSION)
         {
-          SaveStateReader::invalid("version is incompatible");
-        }
-        const std::uint64_t payloadLength = reader.readU64();
-        const std::uint64_t expectedChecksum =
-          reader.readU64();
-        if (payloadLength != reader.size() - reader.offset())
-        {
-          SaveStateReader::invalid(
+          auto container = reader.scope("container");
+          reader.expectFieldBytes(
+            "magic",
+            SAVE_STATE_MAGIC,
+            sizeof(SAVE_STATE_MAGIC));
+          const std::uint32_t version =
+            reader.readFieldU32("version");
+          reader.requireField(
+            version == SAVE_STATE_VERSION,
+            "version is incompatible");
+          const std::uint64_t payloadLength =
+            reader.readFieldU64("payloadLength");
+          reader.requireField(
+            payloadLength ==
+              reader.size() - SAVE_STATE_HEADER_SIZE,
             "payload length does not match the input");
-        }
-        if (expectedChecksum !=
-            reader.checksumFrom(reader.offset()))
-        {
-          SaveStateReader::invalid(
+          const std::uint64_t expectedChecksum =
+            reader.readFieldU64("checksum");
+          reader.requireField(
+            expectedChecksum ==
+              reader.checksumFrom(SAVE_STATE_HEADER_SIZE),
             "payload checksum does not match");
         }
+        reader.setPayloadOrigin(SAVE_STATE_HEADER_SIZE);
       }
 
       SaveStateReader *payload()
@@ -119,31 +134,37 @@ void writeFPRegister(
   SaveStateWriter *writer,
   const FPRegister &value)
 {
-  writer->writeU32(value.x.bits());
-  writer->writeU32(value.y.bits());
-  writer->writeU32(value.z.bits());
-  writer->writeU32(value.w.bits());
-  writer->writeU8(value.xResultFlags);
-  writer->writeU8(value.yResultFlags);
-  writer->writeU8(value.zResultFlags);
-  writer->writeU8(value.wResultFlags);
+  writer->writeFieldU32("x", value.x.bits());
+  writer->writeFieldU32("y", value.y.bits());
+  writer->writeFieldU32("z", value.z.bits());
+  writer->writeFieldU32("w", value.w.bits());
+  writer->writeFieldU8("xResultFlags", value.xResultFlags);
+  writer->writeFieldU8("yResultFlags", value.yResultFlags);
+  writer->writeFieldU8("zResultFlags", value.zResultFlags);
+  writer->writeFieldU8("wResultFlags", value.wResultFlags);
 }
 
 FPRegister readFPRegister(SaveStateReader *reader)
 {
   FPRegister value;
-  value.x.setBits(reader->readU32());
-  value.y.setBits(reader->readU32());
-  value.z.setBits(reader->readU32());
-  value.w.setBits(reader->readU32());
-  value.xResultFlags = reader->readU8();
-  value.yResultFlags = reader->readU8();
-  value.zResultFlags = reader->readU8();
-  value.wResultFlags = reader->readU8();
-  require(
-    (value.xResultFlags & ~0x0f) == 0 &&
-    (value.yResultFlags & ~0x0f) == 0 &&
-    (value.zResultFlags & ~0x0f) == 0 &&
+  value.x.setBits(reader->readFieldU32("x"));
+  value.y.setBits(reader->readFieldU32("y"));
+  value.z.setBits(reader->readFieldU32("z"));
+  value.w.setBits(reader->readFieldU32("w"));
+  value.xResultFlags = reader->readFieldU8("xResultFlags");
+  reader->requireField(
+    (value.xResultFlags & ~0x0f) == 0,
+    "VU floating-point result flags are invalid");
+  value.yResultFlags = reader->readFieldU8("yResultFlags");
+  reader->requireField(
+    (value.yResultFlags & ~0x0f) == 0,
+    "VU floating-point result flags are invalid");
+  value.zResultFlags = reader->readFieldU8("zResultFlags");
+  reader->requireField(
+    (value.zResultFlags & ~0x0f) == 0,
+    "VU floating-point result flags are invalid");
+  value.wResultFlags = reader->readFieldU8("wResultFlags");
+  reader->requireField(
     (value.wResultFlags & ~0x0f) == 0,
     "VU floating-point result flags are invalid");
   return value;
@@ -153,46 +174,78 @@ void NekoSaveStateCodec::writeScratchpadDMAState(
   SaveStateWriter *writer,
   const NekoSystem &system)
 {
-  for (const EEQuadword &value :
-       system.eeCoreComponent.memorySystem.scratchpad)
-  {
-    writer->writeU64(value.low);
-    writer->writeU64(value.high);
-  }
-  writer->writeU32(
+  writer->writeFieldRange(
+    "scratchpad",
+    [&]()
+    {
+      for (const EEQuadword &value :
+           system.eeCoreComponent.memorySystem.scratchpad)
+      {
+        writer->writeU64(value.low);
+        writer->writeU64(value.high);
+      }
+    });
+  writer->writeFieldU32(
+    "interleaveSizeRegister",
     system.dmacControllerComponent.interleaveSizeRegister);
 
   const auto writeChannel =
-    [writer](const ScratchpadDMACChannel &channel)
+    [writer](
+      const char *name,
+      const ScratchpadDMACChannel &channel)
     {
+      auto channelScope = writer->scope(name);
       assert(channel.stateValid());
-      writer->writeU32(channel.channelControlRegister);
-      writer->writeU32(channel.memoryAddressRegister);
-      writer->writeU32(channel.quadwordCountRegister);
-      writer->writeU32(channel.tagAddressRegister);
-      writer->writeU32(channel.scratchpadAddressRegister);
-      writer->writeU16(
+      writer->writeFieldU32(
+        "channelControlRegister",
+        channel.channelControlRegister);
+      writer->writeFieldU32(
+        "memoryAddressRegister",
+        channel.memoryAddressRegister);
+      writer->writeFieldU32(
+        "quadwordCountRegister",
+        channel.quadwordCountRegister);
+      writer->writeFieldU32(
+        "tagAddressRegister",
+        channel.tagAddressRegister);
+      writer->writeFieldU32(
+        "scratchpadAddressRegister",
+        channel.scratchpadAddressRegister);
+      writer->writeFieldU16(
+        "interleaveQuadwordsRemaining",
         channel.interleaveQuadwordsRemaining);
     };
-  writeChannel(system.fromScratchpadDMACComponent);
-  writeChannel(system.toScratchpadDMACComponent);
+  writeChannel(
+    "fromScratchpadChannel",
+    system.fromScratchpadDMACComponent);
+  writeChannel(
+    "toScratchpadChannel",
+    system.toScratchpadDMACComponent);
 }
 
 void NekoSaveStateCodec::readScratchpadDMAState(
   SaveStateReader *reader,
   NekoSystem *system)
 {
-  for (EEQuadword &value :
-       system->eeCoreComponent.memorySystem.scratchpad)
-  {
-    value.low = reader->readU64();
-    value.high = reader->readU64();
-  }
+  reader->readFieldRange(
+    "scratchpad",
+    system->eeCoreComponent.memorySystem.scratchpad.size() *
+      sizeof(std::uint64_t) * 2,
+    [&]()
+    {
+      for (EEQuadword &value :
+           system->eeCoreComponent.memorySystem.scratchpad)
+      {
+        value.low = reader->readU64();
+        value.high = reader->readU64();
+      }
+    });
 
   DMACController &controller =
     system->dmacControllerComponent;
-  controller.interleaveSizeRegister = reader->readU32();
-  require(
+  controller.interleaveSizeRegister =
+    reader->readFieldU32("interleaveSizeRegister");
+  reader->requireField(
     (controller.interleaveSizeRegister &
      ~(DMACInterleave::SKIP_MASK |
        DMACInterleave::TRANSFER_MASK)) == 0,
@@ -200,73 +253,86 @@ void NekoSaveStateCodec::readScratchpadDMAState(
 
   const auto readChannel =
     [reader](
+      const char *name,
       ScratchpadDMACChannel *channel,
       bool tagAddressSupported)
     {
-      channel->channelControlRegister = reader->readU32();
-      channel->memoryAddressRegister = reader->readU32();
-      channel->quadwordCountRegister = reader->readU32();
-      channel->tagAddressRegister = reader->readU32();
+      auto channelScope = reader->scope(name);
+      channel->channelControlRegister =
+        reader->readFieldU32("channelControlRegister");
+      channel->memoryAddressRegister =
+        reader->readFieldU32("memoryAddressRegister");
+      channel->quadwordCountRegister =
+        reader->readFieldU32("quadwordCountRegister");
+      channel->tagAddressRegister =
+        reader->readFieldU32("tagAddressRegister");
       channel->scratchpadAddressRegister =
-        reader->readU32();
+        reader->readFieldU32("scratchpadAddressRegister");
       channel->interleaveQuadwordsRemaining =
-        reader->readU16();
+        reader->readFieldU16("interleaveQuadwordsRemaining");
 
-      require(
+      reader->requireField(
         channel->channelControlStateValid(),
         "SPR DMAC channel control is invalid");
-      require(
+      reader->requireField(
         channel->memoryAddressStateValid(),
         "SPR DMAC memory address is invalid");
-      require(
+      reader->requireField(
         channel->quadwordCountStateValid(),
         "SPR DMAC qword count is invalid");
-      require(
+      reader->requireField(
         channel->tagAddressStateValid() &&
           (tagAddressSupported ||
            channel->tagAddressRegister == 0),
         "SPR DMAC tag address is invalid");
-      require(
+      reader->requireField(
         channel->scratchpadAddressStateValid(),
         "SPR DMAC scratchpad address is invalid");
-      require(
+      reader->requireField(
         channel->interleaveQuadwordsRemaining <= 0xff,
         "SPR DMAC interleave continuation is invalid");
-      require(
+      reader->requireField(
         channel->interleaveContinuationStateValid(),
         "SPR DMAC interleave continuation is inconsistent");
-      require(
+      reader->requireField(
         channel->stateValid(),
         "SPR DMAC state is invalid");
     };
   readChannel(
+    "fromScratchpadChannel",
     &system->fromScratchpadDMACComponent,
     false);
   readChannel(
+    "toScratchpadChannel",
     &system->toScratchpadDMACComponent,
     true);
 }
 
 std::vector<std::uint8_t> NekoSaveStateCodec::save(
-  const NekoSystem &system)
+  const NekoSystem &system,
+  SaveStateObserver *observer)
 {
-  SaveStateContainerWriter container;
+  SaveStateContainerWriter container(observer);
   writeSystem(container.payload(), system);
   return container.finish();
 }
 
 void NekoSaveStateCodec::load(
   NekoSystem *system,
-  const std::vector<std::uint8_t> &state)
+  const std::vector<std::uint8_t> &state,
+  SaveStateObserver *observer)
 {
-  SaveStateContainerReader container(state);
+  SaveStateContainerReader container(state, observer);
   SystemLoadTransaction transaction;
   readSystem(
     container.payload(),
     &transaction.parsed,
     &transaction.decodedTopology);
   container.requireEnd();
-  validateSystem(transaction.parsed);
+  container.payload()->clearFieldContext();
+  validateSystem(
+    container.payload(),
+    transaction.parsed);
 
   transaction.reconciliation =
     reconcileSystem(
@@ -280,36 +346,94 @@ void NekoSaveStateCodec::writeSystem(
   SaveStateWriter *writer,
   const NekoSystem &system)
 {
+  auto root = writer->scope("system");
   // Component order remains stable across versioned payload extensions.
-  writer->writeU16(system.inputState.buttons);
-  writer->writeU8(system.inputState.leftStickX);
-  writer->writeU8(system.inputState.leftStickY);
-  writer->writeU8(system.inputState.rightStickX);
-  writer->writeU8(system.inputState.rightStickY);
-
-  writeMasterClock(writer, system);
-  writeEECore(writer, system.eeCoreComponent);
-  writer->writeU32(
-    system.interruptControllerComponent.statusRegister);
-  writer->writeU32(
-    system.interruptControllerComponent.maskRegister);
-  writer->writeByteVector(system.eeBusComponent.mainMemory);
-  writeVPU(writer, system.vu0Component);
-  writeVPU(writer, system.vu1Component);
-  writeVIF(writer, system.vif0Component);
-  writeVIF(writer, system.vif1Component);
-  writeGIFDecoder(writer, system.gifDecoderComponent);
-  writeGIFArbiter(writer, system.gifPathArbiterComponent);
-  writeGIFPath1(writer, system.gifPath1Component);
-  writeGIFPath3(writer, system.gifPath3Component);
-  writeGS(writer, system.gsComponent);
-  writeDMAC(
-    writer,
-    system.gifDMACComponent,
-    system.dmacControllerComponent);
-  writeVIF1DMAC(writer, system.vif1DMACComponent);
-  writeGSDisplay(writer, system.gsDisplayComponent);
-  writeScratchpadDMAState(writer, system);
+  {
+    auto input = writer->scope("input");
+    writer->writeFieldU16("buttons", system.inputState.buttons);
+    writer->writeFieldU8("leftStickX", system.inputState.leftStickX);
+    writer->writeFieldU8("leftStickY", system.inputState.leftStickY);
+    writer->writeFieldU8("rightStickX", system.inputState.rightStickX);
+    writer->writeFieldU8("rightStickY", system.inputState.rightStickY);
+  }
+  {
+    auto component = writer->scope("masterClock");
+    writeMasterClock(writer, system);
+  }
+  {
+    auto component = writer->scope("eeCore");
+    writeEECore(writer, system.eeCoreComponent);
+  }
+  {
+    auto component = writer->scope("interruptController");
+    writer->writeFieldU32(
+      "statusRegister",
+      system.interruptControllerComponent.statusRegister);
+    writer->writeFieldU32(
+      "maskRegister",
+      system.interruptControllerComponent.maskRegister);
+  }
+  {
+    auto component = writer->scope("eeBus");
+    writer->writeFieldByteVector(
+      "mainMemory",
+      system.eeBusComponent.mainMemory);
+  }
+  {
+    auto component = writer->scope("vu0");
+    writeVPU(writer, system.vu0Component);
+  }
+  {
+    auto component = writer->scope("vu1");
+    writeVPU(writer, system.vu1Component);
+  }
+  {
+    auto component = writer->scope("vif0");
+    writeVIF(writer, system.vif0Component);
+  }
+  {
+    auto component = writer->scope("vif1");
+    writeVIF(writer, system.vif1Component);
+  }
+  {
+    auto component = writer->scope("gifDecoder");
+    writeGIFDecoder(writer, system.gifDecoderComponent);
+  }
+  {
+    auto component = writer->scope("gifArbiter");
+    writeGIFArbiter(writer, system.gifPathArbiterComponent);
+  }
+  {
+    auto component = writer->scope("gifPath1");
+    writeGIFPath1(writer, system.gifPath1Component);
+  }
+  {
+    auto component = writer->scope("gifPath3");
+    writeGIFPath3(writer, system.gifPath3Component);
+  }
+  {
+    auto component = writer->scope("gs");
+    writeGS(writer, system.gsComponent);
+  }
+  {
+    auto component = writer->scope("gifDMAC");
+    writeDMAC(
+      writer,
+      system.gifDMACComponent,
+      system.dmacControllerComponent);
+  }
+  {
+    auto component = writer->scope("vif1DMAC");
+    writeVIF1DMAC(writer, system.vif1DMACComponent);
+  }
+  {
+    auto component = writer->scope("gsDisplay");
+    writeGSDisplay(writer, system.gsDisplayComponent);
+  }
+  {
+    auto component = writer->scope("scratchpadDMA");
+    writeScratchpadDMAState(writer, system);
+  }
 }
 
 void NekoSaveStateCodec::readSystem(
@@ -317,64 +441,110 @@ void NekoSaveStateCodec::readSystem(
   NekoSystem *system,
   DecodedTopology *topology)
 {
-  system->inputState.buttons = reader->readU16();
-  system->inputState.leftStickX = reader->readU8();
-  system->inputState.leftStickY = reader->readU8();
-  system->inputState.rightStickX = reader->readU8();
-  system->inputState.rightStickY = reader->readU8();
-
-  readMasterClock(
-    reader,
-    &system->masterClock,
-    &topology->schedule);
-  readEECore(
-    reader,
-    &system->eeCoreComponent,
-    &topology->dividerOccupancy);
-  system->interruptControllerComponent.statusRegister =
-    reader->readU32();
-  system->interruptControllerComponent.maskRegister =
-    reader->readU32();
-  system->eeBusComponent.mainMemory =
-    reader->readByteVector(
-      EEMemoryMap::MAIN_MEMORY_SIZE,
-      "EE main memory");
-  readVPU(
-    reader,
-    &system->vu0Component,
-    &topology->vu0PipelineLists);
-  readVPU(
-    reader,
-    &system->vu1Component,
-    &topology->vu1PipelineLists);
-  readVIF(reader, &system->vif0Component);
-  readVIF(reader, &system->vif1Component);
-  readGIFDecoder(reader, &system->gifDecoderComponent);
-  readGIFArbiter(reader, &system->gifPathArbiterComponent);
-  readGIFPath1(reader, &system->gifPath1Component);
-  readGIFPath3(reader, &system->gifPath3Component);
-  readGS(reader, &system->gsComponent);
-  readDMAC(
-    reader,
-    &system->gifDMACComponent,
-    &system->dmacControllerComponent);
-  readVIF1DMAC(reader, &system->vif1DMACComponent);
-  readGSDisplay(reader, &system->gsDisplayComponent);
-  readScratchpadDMAState(reader, system);
+  auto root = reader->scope("system");
+  {
+    auto input = reader->scope("input");
+    system->inputState.buttons = reader->readFieldU16("buttons");
+    system->inputState.leftStickX = reader->readFieldU8("leftStickX");
+    system->inputState.leftStickY = reader->readFieldU8("leftStickY");
+    system->inputState.rightStickX = reader->readFieldU8("rightStickX");
+    system->inputState.rightStickY = reader->readFieldU8("rightStickY");
+  }
+  {
+    auto component = reader->scope("masterClock");
+    readMasterClock(reader, &system->masterClock, &topology->schedule);
+  }
+  {
+    auto component = reader->scope("eeCore");
+    readEECore(
+      reader,
+      &system->eeCoreComponent,
+      &topology->dividerOccupancy);
+  }
+  {
+    auto component = reader->scope("interruptController");
+    system->interruptControllerComponent.statusRegister =
+      reader->readFieldU32("statusRegister");
+    system->interruptControllerComponent.maskRegister =
+      reader->readFieldU32("maskRegister");
+  }
+  {
+    auto component = reader->scope("eeBus");
+    system->eeBusComponent.mainMemory =
+      reader->readFieldByteVector(
+        "mainMemory",
+        EEMemoryMap::MAIN_MEMORY_SIZE);
+  }
+  {
+    auto component = reader->scope("vu0");
+    readVPU(reader, &system->vu0Component, &topology->vu0PipelineLists);
+  }
+  {
+    auto component = reader->scope("vu1");
+    readVPU(reader, &system->vu1Component, &topology->vu1PipelineLists);
+  }
+  {
+    auto component = reader->scope("vif0");
+    readVIF(reader, &system->vif0Component);
+  }
+  {
+    auto component = reader->scope("vif1");
+    readVIF(reader, &system->vif1Component);
+  }
+  {
+    auto component = reader->scope("gifDecoder");
+    readGIFDecoder(reader, &system->gifDecoderComponent);
+  }
+  {
+    auto component = reader->scope("gifArbiter");
+    readGIFArbiter(reader, &system->gifPathArbiterComponent);
+  }
+  {
+    auto component = reader->scope("gifPath1");
+    readGIFPath1(reader, &system->gifPath1Component);
+  }
+  {
+    auto component = reader->scope("gifPath3");
+    readGIFPath3(reader, &system->gifPath3Component);
+  }
+  {
+    auto component = reader->scope("gs");
+    readGS(reader, &system->gsComponent);
+  }
+  {
+    auto component = reader->scope("gifDMAC");
+    readDMAC(
+      reader,
+      &system->gifDMACComponent,
+      &system->dmacControllerComponent);
+  }
+  {
+    auto component = reader->scope("vif1DMAC");
+    readVIF1DMAC(reader, &system->vif1DMACComponent);
+  }
+  {
+    auto component = reader->scope("gsDisplay");
+    readGSDisplay(reader, &system->gsDisplayComponent);
+  }
+  {
+    auto component = reader->scope("scratchpadDMA");
+    readScratchpadDMAState(reader, system);
+  }
 }
 
 void NekoSaveStateCodec::validateSystem(
+  SaveStateReader *reader,
   const NekoSystem &system)
 {
-  require(
+  reader->requireField(
     system.vu0Component.type == VPUType::VU0 &&
     system.vu1Component.type == VPUType::VU1,
     "VU identities do not match the system wiring");
-  require(
+  reader->requireField(
     system.vif0Component.type == VIFType::VIF0 &&
     system.vif1Component.type == VIFType::VIF1,
     "VIF identities do not match the system wiring");
-  require(
+  reader->requireField(
     system.vif1Component.path3Mask ==
       system.gifPathArbiterComponent.vifPath3Mask,
     "VIF1 and GIF PATH3 mask state disagree");
@@ -382,12 +552,12 @@ void NekoSaveStateCodec::validateSystem(
   {
     const GIFDecoderState &suspended =
       system.gifPathArbiterComponent.suspendedPath3State;
-    require(
+    reader->requireField(
       suspended.activePacket &&
       !suspended.waitingForTag &&
       suspended.tag.format == GIFDataFormat::Image,
       "suspended PATH3 state is invalid");
-    require(
+    reader->requireField(
       system.gifPathArbiterComponent.queuedPaths[2],
       "interrupted PATH3 is not queued");
   }
@@ -713,7 +883,7 @@ void NekoSaveStateCodec::writeMasterClock(
   SaveStateWriter *writer,
   const NekoSystem &system)
 {
-  writer->writeU64(system.masterClock.masterCycle);
+  writer->writeFieldU64("masterCycle", system.masterClock.masterCycle);
   std::size_t serializedComponentCount = 0;
   for (const auto &scheduled : system.masterClock.components)
   {
@@ -725,7 +895,9 @@ void NekoSaveStateCodec::writeMasterClock(
       ++serializedComponentCount;
     }
   }
-  writer->writeSize(serializedComponentCount);
+  writer->writeFieldSize("componentCount", serializedComponentCount);
+  auto components = writer->scope("components");
+  std::size_t serializedIndex = 0;
   for (const auto &scheduled : system.masterClock.components)
   {
     if (scheduled.component ==
@@ -735,11 +907,12 @@ void NekoSaveStateCodec::writeMasterClock(
     {
       continue;
     }
-    writer->writeU8(componentID(
-      system,
-      scheduled.component));
-    writer->writeU64(scheduled.period);
-    writer->writeU64(scheduled.phase);
+    auto component = writer->element(serializedIndex++);
+    writer->writeFieldU8(
+      "id",
+      componentID(system, scheduled.component));
+    writer->writeFieldU64("period", scheduled.period);
+    writer->writeFieldU64("phase", scheduled.phase);
   }
 }
 
@@ -763,9 +936,10 @@ void NekoSaveStateCodec::readMasterClock(
       {9, 1, 0}
     }};
 
-  clock->masterCycle = reader->readU64();
-  const std::uint32_t count = reader->readU32();
-  require(
+  clock->masterCycle = reader->readFieldU64("masterCycle");
+  const std::uint32_t count =
+    reader->readFieldU32("componentCount");
+  reader->requireField(
     count == LEGACY_COMPONENTS.size() ||
       count == LEGACY_COMPONENTS.size() + 1 ||
       count ==
@@ -778,16 +952,26 @@ void NekoSaveStateCodec::readMasterClock(
   std::array<bool, 10> used = {};
   schedule->clear();
   schedule->reserve(count);
+  auto components = reader->scope("components");
   for (std::uint32_t index = 0; index < count; ++index)
   {
-    const std::uint8_t id = reader->readU8();
-    require(id >= 1 && id <= 9, "clock component ID is invalid");
-    require(!used[id], "clock component ID is duplicated");
+    auto component = reader->element(index);
+    const std::uint8_t id = reader->readFieldU8("id");
+    reader->requireField(
+      id >= 1 && id <= 9,
+      "clock component ID is invalid");
+    reader->requireField(
+      !used[id],
+      "clock component ID is duplicated");
     used[id] = true;
-    const std::uint64_t period = reader->readU64();
-    const std::uint64_t phase = reader->readU64();
-    require(period != 0, "clock period is zero");
-    require(phase < period, "clock phase is outside its period");
+    const std::uint64_t period =
+      reader->readFieldU64("period");
+    reader->requireField(period != 0, "clock period is zero");
+    const std::uint64_t phase =
+      reader->readFieldU64("phase");
+    reader->requireField(
+      phase < period,
+      "clock phase is outside its period");
     schedule->push_back({
       id,
       period,
@@ -803,7 +987,7 @@ void NekoSaveStateCodec::readMasterClock(
       (*schedule)[index];
     const ScheduledComponentState &expected =
       LEGACY_COMPONENTS[index];
-    require(
+    reader->requireField(
       actual.id == expected.id &&
         actual.period == expected.period &&
         actual.phase == expected.phase,
@@ -823,7 +1007,7 @@ void NekoSaveStateCodec::readMasterClock(
         (*schedule)[LEGACY_COMPONENTS.size() + index];
       const ScheduledComponentState &expected =
         SCRATCHPAD_DMAC_COMPONENTS[index];
-      require(
+      reader->requireField(
         actual.id == expected.id &&
           actual.period == expected.period &&
           actual.phase == expected.phase,
@@ -838,7 +1022,7 @@ void NekoSaveStateCodec::readMasterClock(
       SCRATCHPAD_DMAC_COMPONENTS.size() + 1;
   if (hasOptionalArbiter)
   {
-    require(schedule->back().id == 3,
+    reader->requireField(schedule->back().id == 3,
       "optional master-clock component is invalid");
   }
 }

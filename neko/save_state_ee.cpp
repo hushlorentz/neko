@@ -26,205 +26,328 @@ void NekoSaveStateCodec::writeEECore(
   const EECore &core)
 {
   assert(core.memorySystem.stateValid());
-  for (const EERegister128 &value : core.generalRegisters)
   {
-    writer->writeU64(value.low);
-    writer->writeU64(value.high);
-  }
-  for (const std::uint32_t value : core.floatingPointRegisters)
-  {
-    writer->writeU32(value);
-  }
-  writer->writeU32(core.floatingPointAccumulatorRegister);
-  writer->writeU32(core.cop1StatusRegister);
-  writer->writeU32(core.pc);
-  writer->writeU64(core.hiRegister);
-  writer->writeU64(core.loRegister);
-  writer->writeU64(core.hi1Register);
-  writer->writeU64(core.lo1Register);
-  writer->writeU32(core.saRegister);
-  writer->writeU32(core.cop0BadVAddr);
-  writer->writeU32(core.cop0Count);
-  writer->writeU32(core.cop0Compare);
-  writer->writeU32(core.cop0Status);
-  writer->writeU32(core.cop0Cause);
-  writer->writeU32(core.cop0EPC);
-  writer->writeU32(core.cop0ErrorEPC);
-  writer->writeU8(
-    static_cast<std::uint8_t>(core.exception));
-  writer->writeU32(core.faultAddress);
-  writer->writeU8(
-    static_cast<std::uint8_t>(core.state));
-  writer->writeU8(
-    static_cast<std::uint8_t>(core.haltReason));
-  writer->writeU64(core.cycles);
-  writer->writeBool(core.lastInstructionValid);
-  writer->writeU32(core.lastAddress);
-  writer->writeU32(core.lastDecodedInstruction.raw);
-  writer->writeU32(core.rejectedInstructionValue);
-  const auto writePending =
-    [writer](const EECore::PendingMultiplyDivide &operation)
+    auto registers = writer->scope("generalRegisters");
+    for (std::size_t index = 0;
+         index < core.generalRegisters.size();
+         ++index)
     {
-      writer->writeBool(operation.active);
-      writer->writeU8(operation.remainingCycles);
-      writer->writeU64(operation.hiResult);
-      writer->writeU64(operation.loResult);
-      writer->writeBool(
+      auto element = writer->element(index);
+      writer->writeFieldU64("low", core.generalRegisters[index].low);
+      writer->writeFieldU64("high", core.generalRegisters[index].high);
+    }
+  }
+  {
+    auto registers = writer->scope("floatingPointRegisters");
+    for (std::size_t index = 0;
+         index < core.floatingPointRegisters.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32("bits", core.floatingPointRegisters[index]);
+    }
+  }
+  writer->writeFieldU32(
+    "floatingPointAccumulatorRegister",
+    core.floatingPointAccumulatorRegister);
+  writer->writeFieldU32("cop1StatusRegister", core.cop1StatusRegister);
+  writer->writeFieldU32("pc", core.pc);
+  writer->writeFieldU64("hiRegister", core.hiRegister);
+  writer->writeFieldU64("loRegister", core.loRegister);
+  writer->writeFieldU64("hi1Register", core.hi1Register);
+  writer->writeFieldU64("lo1Register", core.lo1Register);
+  writer->writeFieldU32("saRegister", core.saRegister);
+  writer->writeFieldU32("cop0BadVAddr", core.cop0BadVAddr);
+  writer->writeFieldU32("cop0Count", core.cop0Count);
+  writer->writeFieldU32("cop0Compare", core.cop0Compare);
+  writer->writeFieldU32("cop0Status", core.cop0Status);
+  writer->writeFieldU32("cop0Cause", core.cop0Cause);
+  writer->writeFieldU32("cop0EPC", core.cop0EPC);
+  writer->writeFieldU32("cop0ErrorEPC", core.cop0ErrorEPC);
+  writer->writeFieldU8(
+    "exception",
+    static_cast<std::uint8_t>(core.exception));
+  writer->writeFieldU32("faultAddress", core.faultAddress);
+  writer->writeFieldU8(
+    "state",
+    static_cast<std::uint8_t>(core.state));
+  writer->writeFieldU8(
+    "haltReason",
+    static_cast<std::uint8_t>(core.haltReason));
+  writer->writeFieldU64("cycles", core.cycles);
+  writer->writeFieldBool(
+    "lastInstructionValid",
+    core.lastInstructionValid);
+  writer->writeFieldU32("lastAddress", core.lastAddress);
+  writer->writeFieldU32(
+    "lastInstruction",
+    core.lastDecodedInstruction.raw);
+  writer->writeFieldU32(
+    "rejectedInstructionValue",
+    core.rejectedInstructionValue);
+  const auto writePending =
+    [writer](
+      const char *name,
+      const EECore::PendingMultiplyDivide &operation)
+    {
+      auto pending = writer->scope(name);
+      writer->writeFieldBool("active", operation.active);
+      writer->writeFieldU8(
+        "remainingCycles",
+        operation.remainingCycles);
+      writer->writeFieldU64("hiResult", operation.hiResult);
+      writer->writeFieldU64("loResult", operation.loResult);
+      writer->writeFieldBool(
+        "writesGeneralRegister",
         operation.resultDestination ==
           EECore::MACResultDestination::HIAndLOAndGPR);
-      writer->writeU8(operation.generalRegister);
-      writer->writeU64(operation.generalRegisterResult);
+      writer->writeFieldU8(
+        "generalRegister",
+        operation.generalRegister);
+      writer->writeFieldU64(
+        "generalRegisterResult",
+        operation.generalRegisterResult);
     };
-  writePending(core.pendingMac0);
-  writePending(core.pendingMac1);
-  writer->writeU8(
+  writePending("pendingMac0", core.pendingMac0);
+  writePending("pendingMac1", core.pendingMac1);
+  writer->writeFieldU8(
+    "issueLatchFailure",
     static_cast<std::uint8_t>(
       core.issueLatch.failure));
-  writer->writeBool(core.stagingLatch.valid);
-  writer->writeU8(
+  writer->writeFieldBool("stagingLatchValid", core.stagingLatch.valid);
+  writer->writeFieldU8(
+    "stagingLatchFailure",
     static_cast<std::uint8_t>(
       core.stagingLatch.failure));
-  writer->writeU32(core.stagingLatch.address);
-  writer->writeU32(core.stagingLatch.instruction.raw);
-  writer->writeBool(
+  writer->writeFieldU32("stagingLatchAddress", core.stagingLatch.address);
+  writer->writeFieldU32(
+    "stagingLatchInstruction",
+    core.stagingLatch.instruction.raw);
+  writer->writeFieldBool(
+    "youngerAStageActive",
     core.youngerAStageContinuation.active);
-  writer->writeU32(
+  writer->writeFieldU32(
+    "youngerAStageInstruction",
     core.youngerAStageContinuation.instruction.raw);
-  writer->writeU32(
+  writer->writeFieldU32(
+    "youngerAStageAddress",
     core.youngerAStageContinuation.address);
-  writer->writeU8(
+  writer->writeFieldU8(
+    "issueLatchTranslationOutcome",
     static_cast<std::uint8_t>(
       core.issueLatch.translationOutcome));
-  writer->writeU8(
+  writer->writeFieldU8(
+    "stagingLatchTranslationOutcome",
     static_cast<std::uint8_t>(
       core.stagingLatch.translationOutcome));
-  for (std::size_t index = 0; index < 2; ++index)
   {
-    writer->writeU8(0);
+    auto reserved = writer->scope("reservedFrontEnd");
+    for (std::size_t index = 0; index < 2; ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU8("value", 0);
+    }
   }
   const EECore::COP1DividerOccupancy dividerOccupancy =
     core.derivedCOP1DividerOccupancy();
-  writer->writeU8(dividerOccupancy.initiationCycles);
-  writer->writeU8(
-    static_cast<std::uint8_t>(
-      dividerOccupancy.operation));
-  writer->writeBool(false);
-  writer->writeU8(
-    core.shiftAmountOrdering.accessHistory());
-  writer->writeU8(
-    core.shiftAmountOrdering.readHistory());
-  writer->writeBool(core.branchDelayPending);
-  writer->writeU32(core.branchDelayTarget);
-  writer->writeU32(core.branchInstructionAddress);
-  writer->writeBool(core.branchDelayFromLikely);
-  writer->writeBool(core.branchDelayTaken);
-  writer->writeU8(core.cop1DividerPostDelayInstructions);
-  writer->writeU32(core.cop1DividerPostDelayBranchAddress);
-  writer->writeU32(core.cop1DividerPostDelayTargetAddress);
-  writer->writeBool(core.cop1DividerPostDelayTaken);
-  writer->writeU8(core.cop1DividerPostTargetInstructions);
-  writer->writeU32(core.cop1DividerPostTargetAddress);
-  writer->writeBool(core.issueLatch.valid);
-  writer->writeU32(core.issueLatch.address);
-  writer->writeU32(core.issueLatch.instruction.raw);
-  writer->writeU64(core.nextEEProgramOrder);
-  for (const EECore::InFlightCOP1Operation &operation :
-       core.inFlightCOP1Operations)
   {
+    auto divider = writer->scope("dividerOccupancy");
+    writer->writeFieldU8(
+      "initiationCycles",
+      dividerOccupancy.initiationCycles);
+    writer->writeFieldU8(
+      "operation",
+      static_cast<std::uint8_t>(dividerOccupancy.operation));
+  }
+  writer->writeFieldBool("retiredCOP1OperateResource", false);
+  writer->writeFieldU8(
+    "shiftAmountAccessHistory",
+    core.shiftAmountOrdering.accessHistory());
+  writer->writeFieldU8(
+    "shiftAmountReadHistory",
+    core.shiftAmountOrdering.readHistory());
+  writer->writeFieldBool("branchDelayPending", core.branchDelayPending);
+  writer->writeFieldU32("branchDelayTarget", core.branchDelayTarget);
+  writer->writeFieldU32(
+    "branchInstructionAddress",
+    core.branchInstructionAddress);
+  writer->writeFieldBool(
+    "branchDelayFromLikely",
+    core.branchDelayFromLikely);
+  writer->writeFieldBool("branchDelayTaken", core.branchDelayTaken);
+  writer->writeFieldU8(
+    "cop1DividerPostDelayInstructions",
+    core.cop1DividerPostDelayInstructions);
+  writer->writeFieldU32(
+    "cop1DividerPostDelayBranchAddress",
+    core.cop1DividerPostDelayBranchAddress);
+  writer->writeFieldU32(
+    "cop1DividerPostDelayTargetAddress",
+    core.cop1DividerPostDelayTargetAddress);
+  writer->writeFieldBool(
+    "cop1DividerPostDelayTaken",
+    core.cop1DividerPostDelayTaken);
+  writer->writeFieldU8(
+    "cop1DividerPostTargetInstructions",
+    core.cop1DividerPostTargetInstructions);
+  writer->writeFieldU32(
+    "cop1DividerPostTargetAddress",
+    core.cop1DividerPostTargetAddress);
+  writer->writeFieldBool("issueLatchValid", core.issueLatch.valid);
+  writer->writeFieldU32("issueLatchAddress", core.issueLatch.address);
+  writer->writeFieldU32(
+    "issueLatchInstruction",
+    core.issueLatch.instruction.raw);
+  writer->writeFieldU64("nextProgramOrder", core.nextEEProgramOrder);
+  {
+    auto operations = writer->scope("inFlightCOP1Operations");
+    for (std::size_t index = 0;
+         index < core.inFlightCOP1Operations.size();
+         ++index)
+  {
+    auto element = writer->element(index);
+    const EECore::InFlightCOP1Operation &operation =
+      core.inFlightCOP1Operations[index];
     const bool memoryOperation =
       operation.active &&
       isCOP1MemoryMoveOperation(
         operation.instruction.operation);
-    writer->writeBool(operation.active);
-    writer->writeU64(operation.programOrder);
-    writer->writeU8(
+    writer->writeFieldBool("active", operation.active);
+    writer->writeFieldU64("programOrder", operation.programOrder);
+    writer->writeFieldU8(
+      "stage",
       static_cast<std::uint8_t>(operation.stage));
-    writer->writeU32(operation.instructionAddress);
-    writer->writeU32(operation.instruction.raw);
-    writer->writeU32(operation.capturedFS);
-    writer->writeU32(operation.capturedFT);
-    writer->writeU32(operation.capturedAccumulator);
+    writer->writeFieldU32(
+      "instructionAddress",
+      operation.instructionAddress);
+    writer->writeFieldU32("instruction", operation.instruction.raw);
+    writer->writeFieldU32("capturedFS", operation.capturedFS);
+    writer->writeFieldU32("capturedFT", operation.capturedFT);
+    writer->writeFieldU32(
+      "capturedAccumulator",
+      operation.capturedAccumulator);
     // Memory operations use otherwise-unused result slots for
     // branch-delay fault provenance without changing version-24 layout.
-    writer->writeU32(
+    writer->writeFieldU32(
+      "serializedControl",
       memoryOperation
         ? operation.branchAddress
         : operation.capturedControl);
-    writer->writeU64(operation.capturedGPR);
-    writer->writeU32(operation.memoryAddress);
-    writer->writeU32(operation.capturedMemoryValue);
-    writer->writeU8(operation.destination.mask);
-    writer->writeU8(operation.destination.fprRegister);
-    writer->writeU8(operation.destination.gprRegister);
-    writer->writeU32(operation.rawResult);
-    writer->writeU8(operation.affectedFlags);
-    writer->writeU8(operation.raisedFlags);
-    writer->writeU8(operation.raisedStickyFlags);
-    writer->writeBool(
+    writer->writeFieldU64("capturedGPR", operation.capturedGPR);
+    writer->writeFieldU32("memoryAddress", operation.memoryAddress);
+    writer->writeFieldU32(
+      "capturedMemoryValue",
+      operation.capturedMemoryValue);
+    writer->writeFieldU8("destinationMask", operation.destination.mask);
+    writer->writeFieldU8(
+      "destinationFPR",
+      operation.destination.fprRegister);
+    writer->writeFieldU8(
+      "destinationGPR",
+      operation.destination.gprRegister);
+    writer->writeFieldU32("rawResult", operation.rawResult);
+    writer->writeFieldU8("affectedFlags", operation.affectedFlags);
+    writer->writeFieldU8("raisedFlags", operation.raisedFlags);
+    writer->writeFieldU8(
+      "raisedStickyFlags",
+      operation.raisedStickyFlags);
+    writer->writeFieldBool(
+      "serializedCondition",
       memoryOperation
         ? operation.branchDelaySlot
         : operation.conditionResult);
-    writer->writeU8(operation.remainingCycles);
-  }
-  writer->writeU8(
-    core.packedMACContinuation.initiationCycles);
-  const EECore::PackedMACProgramOrderView packedOrder =
-    core.packedMACProgramOrder();
-  for (std::size_t orderIndex = 0;
-       orderIndex < EECore::PackedMACContinuation::CAPACITY;
-       ++orderIndex)
-  {
-    EECore::InFlightPackedMACOperation operation;
-    if (orderIndex < packedOrder.size())
-    {
-      operation =
-        core.packedMACContinuation.operations[
-          packedOrder[orderIndex]];
+    writer->writeFieldU8(
+      "remainingCycles",
+      operation.remainingCycles);
     }
-    writer->writeBool(operation.active);
-    writer->writeU8(
-      static_cast<std::uint8_t>(operation.operation));
-    writer->writeU64(operation.programOrder);
-    writer->writeU64(operation.source.low);
-    writer->writeU64(operation.source.high);
-    writer->writeU64(operation.target.low);
-    writer->writeU64(operation.target.high);
-    writer->writeU64(operation.hiResult.low);
-    writer->writeU64(operation.hiResult.high);
-    writer->writeU64(operation.loResult.low);
-    writer->writeU64(operation.loResult.high);
-    writer->writeU8(operation.destinationRegister);
-    writer->writeU64(
-      operation.generalRegisterResult.low);
-    writer->writeU64(
-      operation.generalRegisterResult.high);
-    writer->writeU8(operation.remainingCycles);
   }
-  writer->writeBool(
-    core.packedDivideContinuation.active);
-  writer->writeU8(
-    static_cast<std::uint8_t>(
-      core.packedDivideContinuation.operation));
-  writer->writeU64(
-    core.packedDivideContinuation.programOrder);
-  writer->writeU64(
-    core.packedDivideContinuation.source.low);
-  writer->writeU64(
-    core.packedDivideContinuation.source.high);
-  writer->writeU64(
-    core.packedDivideContinuation.target.low);
-  writer->writeU64(
-    core.packedDivideContinuation.target.high);
-  writer->writeU64(
-    core.packedDivideContinuation.hiResult.low);
-  writer->writeU64(
-    core.packedDivideContinuation.hiResult.high);
-  writer->writeU64(
-    core.packedDivideContinuation.loResult.low);
-  writer->writeU64(
-    core.packedDivideContinuation.loResult.high);
-  writer->writeU8(
-    core.packedDivideContinuation.remainingCycles);
+  {
+    auto continuation = writer->scope("packedMACContinuation");
+    writer->writeFieldU8(
+      "initiationCycles",
+      core.packedMACContinuation.initiationCycles);
+    const EECore::PackedMACProgramOrderView packedOrder =
+      core.packedMACProgramOrder();
+    auto operations = writer->scope("operations");
+    for (std::size_t orderIndex = 0;
+         orderIndex < EECore::PackedMACContinuation::CAPACITY;
+         ++orderIndex)
+    {
+      auto element = writer->element(orderIndex);
+      EECore::InFlightPackedMACOperation operation;
+      if (orderIndex < packedOrder.size())
+      {
+        operation =
+          core.packedMACContinuation.operations[
+            packedOrder[orderIndex]];
+      }
+      writer->writeFieldBool("active", operation.active);
+      writer->writeFieldU8(
+        "operation",
+        static_cast<std::uint8_t>(operation.operation));
+      writer->writeFieldU64("programOrder", operation.programOrder);
+      writer->writeFieldU64("sourceLow", operation.source.low);
+      writer->writeFieldU64("sourceHigh", operation.source.high);
+      writer->writeFieldU64("targetLow", operation.target.low);
+      writer->writeFieldU64("targetHigh", operation.target.high);
+      writer->writeFieldU64("hiResultLow", operation.hiResult.low);
+      writer->writeFieldU64("hiResultHigh", operation.hiResult.high);
+      writer->writeFieldU64("loResultLow", operation.loResult.low);
+      writer->writeFieldU64("loResultHigh", operation.loResult.high);
+      writer->writeFieldU8(
+        "destinationRegister",
+        operation.destinationRegister);
+      writer->writeFieldU64(
+        "generalRegisterResultLow",
+        operation.generalRegisterResult.low);
+      writer->writeFieldU64(
+        "generalRegisterResultHigh",
+        operation.generalRegisterResult.high);
+      writer->writeFieldU8(
+        "remainingCycles",
+        operation.remainingCycles);
+    }
+  }
+  {
+    auto continuation = writer->scope("packedDivideContinuation");
+    writer->writeFieldBool(
+      "active",
+      core.packedDivideContinuation.active);
+    writer->writeFieldU8(
+      "operation",
+      static_cast<std::uint8_t>(
+        core.packedDivideContinuation.operation));
+    writer->writeFieldU64(
+      "programOrder",
+      core.packedDivideContinuation.programOrder);
+    writer->writeFieldU64(
+      "sourceLow",
+      core.packedDivideContinuation.source.low);
+    writer->writeFieldU64(
+      "sourceHigh",
+      core.packedDivideContinuation.source.high);
+    writer->writeFieldU64(
+      "targetLow",
+      core.packedDivideContinuation.target.low);
+    writer->writeFieldU64(
+      "targetHigh",
+      core.packedDivideContinuation.target.high);
+    writer->writeFieldU64(
+      "hiResultLow",
+      core.packedDivideContinuation.hiResult.low);
+    writer->writeFieldU64(
+      "hiResultHigh",
+      core.packedDivideContinuation.hiResult.high);
+    writer->writeFieldU64(
+      "loResultLow",
+      core.packedDivideContinuation.loResult.low);
+    writer->writeFieldU64(
+      "loResultHigh",
+      core.packedDivideContinuation.loResult.high);
+    writer->writeFieldU8(
+      "remainingCycles",
+      core.packedDivideContinuation.remainingCycles);
+  }
   const EECOP0Register memoryRegisters[] = {
     EECOP0Register::Index,
     EECOP0Register::Random,
@@ -238,47 +361,79 @@ void NekoSaveStateCodec::writeEECore(
     EECOP0Register::TagLo,
     EECOP0Register::TagHi
   };
-  for (const EECOP0Register registerIndex : memoryRegisters)
   {
-    writer->writeU32(
-      core.memorySystem.cop0Register(registerIndex));
+    auto registers = writer->scope("memoryRegisters");
+    for (std::size_t index = 0;
+         index < sizeof(memoryRegisters) / sizeof(memoryRegisters[0]);
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32(
+        "value",
+        core.memorySystem.cop0Register(memoryRegisters[index]));
+    }
   }
-  for (std::size_t index = 0;
-       index < EEMemorySystem::TLB_ENTRY_COUNT;
-       ++index)
   {
-    const EETLBEntry &entry =
-      core.memorySystem.tlbEntry(index);
-    writer->writeU32(entry.pageMask);
-    writer->writeU32(entry.entryHi);
-    writer->writeU32(entry.evenPage.value);
-    writer->writeU32(entry.oddPage.value);
+    auto entries = writer->scope("tlbEntries");
+    for (std::size_t index = 0;
+         index < EEMemorySystem::TLB_ENTRY_COUNT;
+         ++index)
+    {
+      auto element = writer->element(index);
+      const EETLBEntry &entry =
+        core.memorySystem.tlbEntry(index);
+      writer->writeFieldU32("pageMask", entry.pageMask);
+      writer->writeFieldU32("entryHi", entry.entryHi);
+      writer->writeFieldU32("evenPage", entry.evenPage.value);
+      writer->writeFieldU32("oddPage", entry.oddPage.value);
+    }
   }
   const auto writeCacheLine =
     [writer](const EECacheLine &line)
     {
-      for (const std::uint8_t byte : line.data)
-      {
-        writer->writeU8(byte);
-      }
-      writer->writeU32(line.physicalTag);
-      writer->writeBool(line.valid);
-      writer->writeBool(line.dirty);
-      writer->writeBool(line.leastRecentlyFilled);
-      writer->writeBool(line.locked);
+      writer->writeFieldBytes(
+        "data",
+        line.data.data(),
+        line.data.size());
+      writer->writeFieldU32("physicalTag", line.physicalTag);
+      writer->writeFieldBool("valid", line.valid);
+      writer->writeFieldBool("dirty", line.dirty);
+      writer->writeFieldBool(
+        "leastRecentlyFilled",
+        line.leastRecentlyFilled);
+      writer->writeFieldBool("locked", line.locked);
     };
-  for (const auto &set : core.memorySystem.instructionCache)
   {
-    for (const EECacheLine &line : set)
+    auto cache = writer->scope("instructionCache");
+    for (std::size_t setIndex = 0;
+         setIndex < core.memorySystem.instructionCache.size();
+         ++setIndex)
     {
-      writeCacheLine(line);
+      auto set = writer->element(setIndex);
+      for (std::size_t way = 0;
+           way < core.memorySystem.instructionCache[setIndex].size();
+           ++way)
+      {
+        auto line = writer->element(way);
+        writeCacheLine(
+          core.memorySystem.instructionCache[setIndex][way]);
+      }
     }
   }
-  for (const auto &set : core.memorySystem.dataCache)
   {
-    for (const EECacheLine &line : set)
+    auto cache = writer->scope("dataCache");
+    for (std::size_t setIndex = 0;
+         setIndex < core.memorySystem.dataCache.size();
+         ++setIndex)
     {
-      writeCacheLine(line);
+      auto set = writer->element(setIndex);
+      for (std::size_t way = 0;
+           way < core.memorySystem.dataCache[setIndex].size();
+           ++way)
+      {
+        auto line = writer->element(way);
+        writeCacheLine(core.memorySystem.dataCache[setIndex][way]);
+      }
     }
   }
 }
@@ -288,67 +443,95 @@ void NekoSaveStateCodec::readEECore(
   EECore *core,
   EECore::COP1DividerOccupancy *dividerOccupancy)
 {
-  for (EERegister128 &value : core->generalRegisters)
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
   {
-    value.low = reader->readU64();
-    value.high = reader->readU64();
+    auto registers = reader->scope("generalRegisters");
+    for (std::size_t index = 0;
+         index < core->generalRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      core->generalRegisters[index].low =
+        reader->readFieldU64("low");
+      core->generalRegisters[index].high =
+        reader->readFieldU64("high");
+    }
   }
-  for (std::uint32_t &value : core->floatingPointRegisters)
   {
-    value = reader->readU32();
+    auto registers = reader->scope("floatingPointRegisters");
+    for (std::size_t index = 0;
+         index < core->floatingPointRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      core->floatingPointRegisters[index] =
+        reader->readFieldU32("bits");
+    }
   }
-  core->floatingPointAccumulatorRegister = reader->readU32();
-  core->cop1StatusRegister = reader->readU32();
-  core->pc = reader->readU32();
-  core->hiRegister = reader->readU64();
-  core->loRegister = reader->readU64();
-  core->hi1Register = reader->readU64();
-  core->lo1Register = reader->readU64();
-  core->saRegister = reader->readU32();
-  core->cop0BadVAddr = reader->readU32();
-  core->cop0Count = reader->readU32();
-  core->cop0Compare = reader->readU32();
-  core->cop0Status = reader->readU32();
-  core->cop0Cause = reader->readU32();
-  core->cop0EPC = reader->readU32();
-  core->cop0ErrorEPC = reader->readU32();
+  core->floatingPointAccumulatorRegister =
+    reader->readFieldU32("floatingPointAccumulatorRegister");
+  core->cop1StatusRegister =
+    reader->readFieldU32("cop1StatusRegister");
+  core->pc = reader->readFieldU32("pc");
+  core->hiRegister = reader->readFieldU64("hiRegister");
+  core->loRegister = reader->readFieldU64("loRegister");
+  core->hi1Register = reader->readFieldU64("hi1Register");
+  core->lo1Register = reader->readFieldU64("lo1Register");
+  core->saRegister = reader->readFieldU32("saRegister");
+  core->cop0BadVAddr = reader->readFieldU32("cop0BadVAddr");
+  core->cop0Count = reader->readFieldU32("cop0Count");
+  core->cop0Compare = reader->readFieldU32("cop0Compare");
+  core->cop0Status = reader->readFieldU32("cop0Status");
+  core->cop0Cause = reader->readFieldU32("cop0Cause");
+  core->cop0EPC = reader->readFieldU32("cop0EPC");
+  core->cop0ErrorEPC = reader->readFieldU32("cop0ErrorEPC");
   core->exception = readEnum<EEException>(
     reader,
     static_cast<std::uint8_t>(
       EEException::TLBModified),
-    "EE exception");
-  core->faultAddress = reader->readU32();
+    "exception");
+  core->faultAddress = reader->readFieldU32("faultAddress");
   core->state = readEnum<EEExecutionState>(
     reader,
     static_cast<std::uint8_t>(
       EEExecutionState::Running),
-    "EE execution state");
+    "state");
   core->haltReason = readEnum<EEStopReason>(
     reader,
     static_cast<std::uint8_t>(
       EEStopReason::UndefinedOperation),
-    "EE stop reason");
-  core->cycles = reader->readU64();
+    "haltReason");
+  core->cycles = reader->readFieldU64("cycles");
   core->lastInstructionValid =
-    reader->readBool("EE last instruction flag");
-  core->lastAddress = reader->readU32();
-  const std::uint32_t lastInstruction = reader->readU32();
-  core->rejectedInstructionValue = reader->readU32();
+    reader->readFieldBool("lastInstructionValid");
+  core->lastAddress = reader->readFieldU32("lastAddress");
+  const std::uint32_t lastInstruction =
+    reader->readFieldU32("lastInstruction");
+  core->rejectedInstructionValue =
+    reader->readFieldU32("rejectedInstructionValue");
   const auto readPending =
-    [reader](
+    [reader, &require](
       EECore::PendingMultiplyDivide *operation,
-      const char *label)
+      const char *name)
     {
-      operation->active = reader->readBool(label);
-      operation->remainingCycles = reader->readU8();
-      operation->hiResult = reader->readU64();
-      operation->loResult = reader->readU64();
+      auto pending = reader->scope(name);
+      operation->active = reader->readFieldBool("active");
+      operation->remainingCycles =
+        reader->readFieldU8("remainingCycles");
+      operation->hiResult = reader->readFieldU64("hiResult");
+      operation->loResult = reader->readFieldU64("loResult");
       operation->resultDestination =
-        reader->readBool(label)
+        reader->readFieldBool("writesGeneralRegister")
           ? EECore::MACResultDestination::HIAndLOAndGPR
           : EECore::MACResultDestination::HIAndLO;
-      operation->generalRegister = reader->readU8();
-      operation->generalRegisterResult = reader->readU64();
+      operation->generalRegister =
+        reader->readFieldU8("generalRegister");
+      operation->generalRegisterResult =
+        reader->readFieldU64("generalRegisterResult");
       require(
         EECore::pendingMultiplyDivideLatencyValid(*operation),
         "EE pending multiply/divide latency is invalid");
@@ -361,10 +544,10 @@ void NekoSaveStateCodec::readEECore(
     };
   readPending(
     &core->pendingMac0,
-    "EE MAC0 pending flag");
+    "pendingMac0");
   readPending(
     &core->pendingMac1,
-    "EE MAC1 pending flag");
+    "pendingMac1");
   if (core->pendingMac0.active &&
       core->pendingMac1.active)
   {
@@ -383,45 +566,55 @@ void NekoSaveStateCodec::readEECore(
       reader,
       static_cast<std::uint8_t>(
         EECore::IssueLatchFailure::TranslationError),
-      "EE decoded issue-latch failure");
+      "issueLatchFailure");
   core->stagingLatch.valid =
-    reader->readBool("EE staging-latch flag");
+    reader->readFieldBool("stagingLatchValid");
   core->stagingLatch.failure =
     readEnum<EECore::IssueLatchFailure>(
       reader,
       static_cast<std::uint8_t>(
         EECore::IssueLatchFailure::TranslationError),
-      "EE staging-latch failure");
-  core->stagingLatch.address = reader->readU32();
+      "stagingLatchFailure");
+  core->stagingLatch.address =
+    reader->readFieldU32("stagingLatchAddress");
   const std::uint32_t stagingInstruction =
-    reader->readU32();
+    reader->readFieldU32("stagingLatchInstruction");
   const bool youngerAStageActive =
-    reader->readBool("EE younger A-stage continuation flag");
+    reader->readFieldBool("youngerAStageActive");
   const std::uint32_t youngerAStageInstruction =
-    reader->readU32();
+    reader->readFieldU32("youngerAStageInstruction");
   const std::uint32_t youngerAStageAddress =
-    reader->readU32();
+    reader->readFieldU32("youngerAStageAddress");
   core->issueLatch.translationOutcome =
     readEnum<EEAddressTranslationOutcome>(
       reader,
       static_cast<std::uint8_t>(
         EEAddressTranslationOutcome::UnsupportedCacheAttribute),
-      "EE issue-latch translation outcome");
+      "issueLatchTranslationOutcome");
   core->stagingLatch.translationOutcome =
     readEnum<EEAddressTranslationOutcome>(
       reader,
       static_cast<std::uint8_t>(
         EEAddressTranslationOutcome::UnsupportedCacheAttribute),
-      "EE staging-latch translation outcome");
-  for (std::size_t index = 0; index < 2; ++index)
+      "stagingLatchTranslationOutcome");
   {
-    require(
-      reader->readU8() == 0,
-      "EE reserved front-end state is not empty");
+    auto reserved = reader->scope("reservedFrontEnd");
+    for (std::size_t index = 0; index < 2; ++index)
+    {
+      auto element = reader->element(index);
+      require(
+        reader->readFieldU8("value") == 0,
+        "EE reserved front-end state is not empty");
+    }
   }
-  dividerOccupancy->initiationCycles = reader->readU8();
-  dividerOccupancy->operation =
-    static_cast<EEOperation>(reader->readU8());
+  {
+    auto divider = reader->scope("dividerOccupancy");
+    dividerOccupancy->initiationCycles =
+      reader->readFieldU8("initiationCycles");
+    dividerOccupancy->operation =
+      static_cast<EEOperation>(
+        reader->readFieldU8("operation"));
+  }
   require(
     EECore::cop1DividerInitiationIntervalValid(
       *dividerOccupancy),
@@ -435,14 +628,14 @@ void NekoSaveStateCodec::readEECore(
       *dividerOccupancy),
     "EE COP1 divider operation state is inconsistent");
   const bool retiredCOP1OperateResource =
-    reader->readBool("retired EE COP1 operate resource flag");
+    reader->readFieldBool("retiredCOP1OperateResource");
   require(
     !retiredCOP1OperateResource,
     "retired EE COP1 operate resource state is not empty");
   const std::uint8_t recentShiftAmountAccesses =
-    reader->readU8();
+    reader->readFieldU8("shiftAmountAccessHistory");
   const std::uint8_t recentShiftAmountReads =
-    reader->readU8();
+    reader->readFieldU8("shiftAmountReadHistory");
   require(
     EEShiftAmountOrderingWindow::historyBitsValid(
       recentShiftAmountAccesses,
@@ -457,62 +650,92 @@ void NekoSaveStateCodec::readEECore(
     recentShiftAmountAccesses,
     recentShiftAmountReads);
   core->branchDelayPending =
-    reader->readBool("EE branch delay flag");
-  core->branchDelayTarget = reader->readU32();
-  core->branchInstructionAddress = reader->readU32();
+    reader->readFieldBool("branchDelayPending");
+  core->branchDelayTarget =
+    reader->readFieldU32("branchDelayTarget");
+  core->branchInstructionAddress =
+    reader->readFieldU32("branchInstructionAddress");
   core->branchDelayFromLikely =
-    reader->readBool("EE branch-likely delay flag");
+    reader->readFieldBool("branchDelayFromLikely");
   core->branchDelayTaken =
-    reader->readBool("EE branch taken flag");
-  core->cop1DividerPostDelayInstructions = reader->readU8();
-  core->cop1DividerPostDelayBranchAddress = reader->readU32();
-  core->cop1DividerPostDelayTargetAddress = reader->readU32();
+    reader->readFieldBool("branchDelayTaken");
+  core->cop1DividerPostDelayInstructions =
+    reader->readFieldU8("cop1DividerPostDelayInstructions");
+  core->cop1DividerPostDelayBranchAddress =
+    reader->readFieldU32("cop1DividerPostDelayBranchAddress");
+  core->cop1DividerPostDelayTargetAddress =
+    reader->readFieldU32("cop1DividerPostDelayTargetAddress");
   core->cop1DividerPostDelayTaken =
-    reader->readBool("EE COP1 post-delay taken flag");
-  core->cop1DividerPostTargetInstructions = reader->readU8();
-  core->cop1DividerPostTargetAddress = reader->readU32();
+    reader->readFieldBool("cop1DividerPostDelayTaken");
+  core->cop1DividerPostTargetInstructions =
+    reader->readFieldU8("cop1DividerPostTargetInstructions");
+  core->cop1DividerPostTargetAddress =
+    reader->readFieldU32("cop1DividerPostTargetAddress");
   core->issueLatch.valid =
-    reader->readBool("EE decoded issue-latch flag");
-  core->issueLatch.address = reader->readU32();
-  const std::uint32_t issueInstruction = reader->readU32();
-  core->nextEEProgramOrder = reader->readU64();
+    reader->readFieldBool("issueLatchValid");
+  core->issueLatch.address =
+    reader->readFieldU32("issueLatchAddress");
+  const std::uint32_t issueInstruction =
+    reader->readFieldU32("issueLatchInstruction");
+  core->nextEEProgramOrder =
+    reader->readFieldU64("nextProgramOrder");
   require(
     core->nextEEProgramOrder != 0,
     "EE program-order counter is invalid");
   core->executingProgramOrder = 0;
-  for (EECore::InFlightCOP1Operation &operation :
-       core->inFlightCOP1Operations)
   {
+    auto operations = reader->scope("inFlightCOP1Operations");
+    for (std::size_t index = 0;
+         index < core->inFlightCOP1Operations.size();
+         ++index)
+  {
+    auto element = reader->element(index);
+    EECore::InFlightCOP1Operation &operation =
+      core->inFlightCOP1Operations[index];
     operation = {};
     operation.active =
-      reader->readBool("EE in-flight COP1 operation flag");
-    operation.programOrder = reader->readU64();
+      reader->readFieldBool("active");
+    operation.programOrder =
+      reader->readFieldU64("programOrder");
     operation.stage =
       readEnum<EECore::COP1PipelineStage>(
         reader,
         static_cast<std::uint8_t>(
           EECore::COP1PipelineStage::S2),
-        "EE COP1 pipeline stage");
-    operation.instructionAddress = reader->readU32();
-    const std::uint32_t instruction = reader->readU32();
-    operation.capturedFS = reader->readU32();
-    operation.capturedFT = reader->readU32();
-    operation.capturedAccumulator = reader->readU32();
+        "stage");
+    operation.instructionAddress =
+      reader->readFieldU32("instructionAddress");
+    const std::uint32_t instruction =
+      reader->readFieldU32("instruction");
+    operation.capturedFS = reader->readFieldU32("capturedFS");
+    operation.capturedFT = reader->readFieldU32("capturedFT");
+    operation.capturedAccumulator =
+      reader->readFieldU32("capturedAccumulator");
     const std::uint32_t serializedControl =
-      reader->readU32();
-    operation.capturedGPR = reader->readU64();
-    operation.memoryAddress = reader->readU32();
-    operation.capturedMemoryValue = reader->readU32();
-    operation.destination.mask = reader->readU8();
-    operation.destination.fprRegister = reader->readU8();
-    operation.destination.gprRegister = reader->readU8();
-    operation.rawResult = reader->readU32();
-    operation.affectedFlags = reader->readU8();
-    operation.raisedFlags = reader->readU8();
-    operation.raisedStickyFlags = reader->readU8();
+      reader->readFieldU32("serializedControl");
+    operation.capturedGPR =
+      reader->readFieldU64("capturedGPR");
+    operation.memoryAddress =
+      reader->readFieldU32("memoryAddress");
+    operation.capturedMemoryValue =
+      reader->readFieldU32("capturedMemoryValue");
+    operation.destination.mask =
+      reader->readFieldU8("destinationMask");
+    operation.destination.fprRegister =
+      reader->readFieldU8("destinationFPR");
+    operation.destination.gprRegister =
+      reader->readFieldU8("destinationGPR");
+    operation.rawResult = reader->readFieldU32("rawResult");
+    operation.affectedFlags =
+      reader->readFieldU8("affectedFlags");
+    operation.raisedFlags =
+      reader->readFieldU8("raisedFlags");
+    operation.raisedStickyFlags =
+      reader->readFieldU8("raisedStickyFlags");
     const bool serializedCondition =
-      reader->readBool("EE COP1 condition result");
-    operation.remainingCycles = reader->readU8();
+      reader->readFieldBool("serializedCondition");
+    operation.remainingCycles =
+      reader->readFieldU8("remainingCycles");
 
     constexpr std::uint8_t destinationMask =
       EECore::COP1_DESTINATION_FPR |
@@ -1039,34 +1262,51 @@ void NekoSaveStateCodec::readEECore(
         "EE inactive COP1 operation contains state");
     }
   }
+  }
   core->packedMACContinuation = {};
-  core->packedMACContinuation.initiationCycles =
-    reader->readU8();
-  for (EECore::InFlightPackedMACOperation &operation :
-       core->packedMACContinuation.operations)
   {
-    operation.active =
-      reader->readBool("EE packed MAC operation flag");
-    operation.operation =
-      readEnum<EECore::PackedMACOperation>(
-        reader,
-        static_cast<std::uint8_t>(
-          EECore::PackedMACOperation::
-            HorizontalMultiplySubtractHalfword),
-        "EE packed MAC operation");
-    operation.programOrder = reader->readU64();
-    operation.source.low = reader->readU64();
-    operation.source.high = reader->readU64();
-    operation.target.low = reader->readU64();
-    operation.target.high = reader->readU64();
-    operation.hiResult.low = reader->readU64();
-    operation.hiResult.high = reader->readU64();
-    operation.loResult.low = reader->readU64();
-    operation.loResult.high = reader->readU64();
-    operation.destinationRegister = reader->readU8();
-    operation.generalRegisterResult.low = reader->readU64();
-    operation.generalRegisterResult.high = reader->readU64();
-    operation.remainingCycles = reader->readU8();
+    auto continuation = reader->scope("packedMACContinuation");
+    core->packedMACContinuation.initiationCycles =
+      reader->readFieldU8("initiationCycles");
+    auto operations = reader->scope("operations");
+    for (std::size_t index = 0;
+         index < core->packedMACContinuation.operations.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      EECore::InFlightPackedMACOperation &operation =
+        core->packedMACContinuation.operations[index];
+      operation.active = reader->readFieldBool("active");
+      operation.operation =
+        readEnum<EECore::PackedMACOperation>(
+          reader,
+          static_cast<std::uint8_t>(
+            EECore::PackedMACOperation::
+              HorizontalMultiplySubtractHalfword),
+          "operation");
+      operation.programOrder =
+        reader->readFieldU64("programOrder");
+      operation.source.low = reader->readFieldU64("sourceLow");
+      operation.source.high = reader->readFieldU64("sourceHigh");
+      operation.target.low = reader->readFieldU64("targetLow");
+      operation.target.high = reader->readFieldU64("targetHigh");
+      operation.hiResult.low =
+        reader->readFieldU64("hiResultLow");
+      operation.hiResult.high =
+        reader->readFieldU64("hiResultHigh");
+      operation.loResult.low =
+        reader->readFieldU64("loResultLow");
+      operation.loResult.high =
+        reader->readFieldU64("loResultHigh");
+      operation.destinationRegister =
+        reader->readFieldU8("destinationRegister");
+      operation.generalRegisterResult.low =
+        reader->readFieldU64("generalRegisterResultLow");
+      operation.generalRegisterResult.high =
+        reader->readFieldU64("generalRegisterResultHigh");
+      operation.remainingCycles =
+        reader->readFieldU8("remainingCycles");
+    }
   }
   require(
     !core->packedMACContinuation.operations[1].active ||
@@ -1078,34 +1318,37 @@ void NekoSaveStateCodec::readEECore(
     core->packedMACContinuationStateValid(),
     "EE packed MAC continuation state is invalid");
   core->packedDivideContinuation = {};
-  core->packedDivideContinuation.active =
-    reader->readBool("EE packed divide operation flag");
-  core->packedDivideContinuation.operation =
-    readEnum<EECore::PackedDivideOperation>(
-      reader,
-      static_cast<std::uint8_t>(
-        EECore::PackedDivideOperation::DivideBroadcastWord),
-      "EE packed divide operation");
-  core->packedDivideContinuation.programOrder =
-    reader->readU64();
-  core->packedDivideContinuation.source.low =
-    reader->readU64();
-  core->packedDivideContinuation.source.high =
-    reader->readU64();
-  core->packedDivideContinuation.target.low =
-    reader->readU64();
-  core->packedDivideContinuation.target.high =
-    reader->readU64();
-  core->packedDivideContinuation.hiResult.low =
-    reader->readU64();
-  core->packedDivideContinuation.hiResult.high =
-    reader->readU64();
-  core->packedDivideContinuation.loResult.low =
-    reader->readU64();
-  core->packedDivideContinuation.loResult.high =
-    reader->readU64();
-  core->packedDivideContinuation.remainingCycles =
-    reader->readU8();
+  {
+    auto continuation = reader->scope("packedDivideContinuation");
+    core->packedDivideContinuation.active =
+      reader->readFieldBool("active");
+    core->packedDivideContinuation.operation =
+      readEnum<EECore::PackedDivideOperation>(
+        reader,
+        static_cast<std::uint8_t>(
+          EECore::PackedDivideOperation::DivideBroadcastWord),
+        "operation");
+    core->packedDivideContinuation.programOrder =
+      reader->readFieldU64("programOrder");
+    core->packedDivideContinuation.source.low =
+      reader->readFieldU64("sourceLow");
+    core->packedDivideContinuation.source.high =
+      reader->readFieldU64("sourceHigh");
+    core->packedDivideContinuation.target.low =
+      reader->readFieldU64("targetLow");
+    core->packedDivideContinuation.target.high =
+      reader->readFieldU64("targetHigh");
+    core->packedDivideContinuation.hiResult.low =
+      reader->readFieldU64("hiResultLow");
+    core->packedDivideContinuation.hiResult.high =
+      reader->readFieldU64("hiResultHigh");
+    core->packedDivideContinuation.loResult.low =
+      reader->readFieldU64("loResultLow");
+    core->packedDivideContinuation.loResult.high =
+      reader->readFieldU64("loResultHigh");
+    core->packedDivideContinuation.remainingCycles =
+      reader->readFieldU8("remainingCycles");
+  }
   const EECOP0Register memoryRegisters[] = {
     EECOP0Register::Index,
     EECOP0Register::Random,
@@ -1119,89 +1362,124 @@ void NekoSaveStateCodec::readEECore(
     EECOP0Register::TagLo,
     EECOP0Register::TagHi
   };
-  for (const EECOP0Register registerIndex : memoryRegisters)
   {
-    const std::uint32_t value = reader->readU32();
-    require(
-      EEMemorySystem::cop0RegisterStateValid(
-        registerIndex,
-        value),
-      "EE memory-system COP0 register state is invalid");
-    if (registerIndex == EECOP0Register::TagLo)
+    auto registers = reader->scope("memoryRegisters");
+    for (std::size_t index = 0;
+         index < sizeof(memoryRegisters) / sizeof(memoryRegisters[0]);
+         ++index)
     {
-      core->memorySystem.cop0TagLo = value;
-      continue;
-    }
-    try
-    {
-      core->memorySystem.setCOP0Register(
-        registerIndex,
-        value);
-    }
-    catch (const std::invalid_argument &error)
-    {
-      throw std::runtime_error(error.what());
+      auto element = reader->element(index);
+      const EECOP0Register registerIndex = memoryRegisters[index];
+      const std::uint32_t value =
+        reader->readFieldU32("value");
+      require(
+        EEMemorySystem::cop0RegisterStateValid(
+          registerIndex,
+          value),
+        "EE memory-system COP0 register state is invalid");
+      if (registerIndex == EECOP0Register::TagLo)
+      {
+        core->memorySystem.cop0TagLo = value;
+        continue;
+      }
+      try
+      {
+        core->memorySystem.setCOP0Register(
+          registerIndex,
+          value);
+      }
+      catch (const std::invalid_argument &error)
+      {
+        throw std::runtime_error(error.what());
+      }
     }
   }
   require(
     core->memorySystem.replacementStateValid(),
     "EE TLB Random/Wired replacement state is invalid");
-  for (std::size_t index = 0;
-       index < EEMemorySystem::TLB_ENTRY_COUNT;
-       ++index)
   {
-    const EETLBEntry entry = {
-      reader->readU32(),
-      reader->readU32(),
-      {reader->readU32()},
-      {reader->readU32()}
-    };
-    require(
-      EEMemorySystem::pageMaskStateValid(entry.pageMask),
-      "EE TLB PageMask state is invalid");
-    require(
-      EEMemorySystem::tlbEntryStateValid(entry),
-      "EE TLB entry state is invalid");
-    try
+    auto entries = reader->scope("tlbEntries");
+    for (std::size_t index = 0;
+         index < EEMemorySystem::TLB_ENTRY_COUNT;
+         ++index)
     {
-      core->memorySystem.setTLBEntry(index, entry);
-    }
-    catch (const std::invalid_argument &error)
-    {
-      throw std::runtime_error(error.what());
+      auto element = reader->element(index);
+      const EETLBEntry entry = {
+        reader->readFieldU32("pageMask"),
+        reader->readFieldU32("entryHi"),
+        {reader->readFieldU32("evenPage")},
+        {reader->readFieldU32("oddPage")}
+      };
+      require(
+        EEMemorySystem::pageMaskStateValid(entry.pageMask),
+        "EE TLB PageMask state is invalid");
+      require(
+        EEMemorySystem::tlbEntryStateValid(entry),
+        "EE TLB entry state is invalid");
+      try
+      {
+        core->memorySystem.setTLBEntry(index, entry);
+      }
+      catch (const std::invalid_argument &error)
+      {
+        throw std::runtime_error(error.what());
+      }
     }
   }
   const auto readCacheLine =
-    [reader](EECacheLine *line, bool instruction)
+    [reader, &require](EECacheLine *line, bool instruction)
     {
-      for (std::uint8_t &byte : line->data)
-      {
-        byte = reader->readU8();
-      }
-      line->physicalTag = reader->readU32();
-      line->valid = reader->readBool("EE cache valid flag");
-      line->dirty = reader->readBool("EE cache dirty flag");
+      reader->readFieldBytes(
+        "data",
+        line->data.data(),
+        line->data.size());
+      line->physicalTag =
+        reader->readFieldU32("physicalTag");
+      line->valid = reader->readFieldBool("valid");
+      line->dirty = reader->readFieldBool("dirty");
       line->leastRecentlyFilled =
-        reader->readBool("EE cache LRF flag");
-      line->locked = reader->readBool("EE cache lock flag");
+        reader->readFieldBool("leastRecentlyFilled");
+      line->locked = reader->readFieldBool("locked");
       require(
         EEMemorySystem::cacheLineStateValid(*line, instruction),
         instruction
           ? "EE instruction-cache line state is invalid"
           : "EE data-cache line state is invalid");
     };
-  for (auto &set : core->memorySystem.instructionCache)
   {
-    for (EECacheLine &line : set)
+    auto cache = reader->scope("instructionCache");
+    for (std::size_t setIndex = 0;
+         setIndex < core->memorySystem.instructionCache.size();
+         ++setIndex)
     {
-      readCacheLine(&line, true);
+      auto set = reader->element(setIndex);
+      for (std::size_t way = 0;
+           way < core->memorySystem.instructionCache[setIndex].size();
+           ++way)
+      {
+        auto line = reader->element(way);
+        readCacheLine(
+          &core->memorySystem.instructionCache[setIndex][way],
+          true);
+      }
     }
   }
-  for (auto &set : core->memorySystem.dataCache)
   {
-    for (EECacheLine &line : set)
+    auto cache = reader->scope("dataCache");
+    for (std::size_t setIndex = 0;
+         setIndex < core->memorySystem.dataCache.size();
+         ++setIndex)
     {
-      readCacheLine(&line, false);
+      auto set = reader->element(setIndex);
+      for (std::size_t way = 0;
+           way < core->memorySystem.dataCache[setIndex].size();
+           ++way)
+      {
+        auto line = reader->element(way);
+        readCacheLine(
+          &core->memorySystem.dataCache[setIndex][way],
+          false);
+      }
     }
   }
   require(
@@ -1362,7 +1640,7 @@ void NekoSaveStateCodec::readEECore(
       decodeEEInstruction(lastInstruction);
   }
   const auto restoreIssueLatch =
-    [](EECore::DecodedIssueLatch *latch,
+    [&require](EECore::DecodedIssueLatch *latch,
        std::uint32_t instruction)
     {
       const auto translationFailureValid =

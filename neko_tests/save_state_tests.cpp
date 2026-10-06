@@ -2297,7 +2297,9 @@ TEST_CASE("EE save states reject unknown expanded exception values")
   NekoSystem destination;
   REQUIRE_THROWS_WITH(
     destination.loadState(state),
-    "Invalid Neko save state: EE exception is outside its enum.");
+    "Invalid Neko save state at system.eeCore.exception at "
+    "container offset 864, payload offset 836: "
+    "value is outside its enum.");
 }
 
 TEST_CASE("Running EE scheduler state survives save states")

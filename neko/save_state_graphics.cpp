@@ -9,30 +9,39 @@ namespace
     SaveStateWriter *writer,
     const GIFTag &tag)
   {
-    writer->writeU16(tag.loopCount);
-    writer->writeBool(tag.endOfPacket);
-    writer->writeBool(tag.primitiveEnabled);
-    writer->writeU16(tag.primitive);
-    writer->writeU8(static_cast<std::uint8_t>(tag.format));
-    writer->writeU8(tag.registerCount);
-    writer->writeU64(tag.registers);
+    writer->writeFieldU16("loopCount", tag.loopCount);
+    writer->writeFieldBool("endOfPacket", tag.endOfPacket);
+    writer->writeFieldBool(
+      "primitiveEnabled",
+      tag.primitiveEnabled);
+    writer->writeFieldU16("primitive", tag.primitive);
+    writer->writeFieldU8(
+      "format",
+      static_cast<std::uint8_t>(tag.format));
+    writer->writeFieldU8("registerCount", tag.registerCount);
+    writer->writeFieldU64("registers", tag.registers);
   }
 
   GIFTag readGIFTag(SaveStateReader *reader)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
     GIFTag tag;
-    tag.loopCount = reader->readU16();
+    tag.loopCount = reader->readFieldU16("loopCount");
     tag.endOfPacket =
-      reader->readBool("GIF tag end-of-packet flag");
+      reader->readFieldBool("endOfPacket");
     tag.primitiveEnabled =
-      reader->readBool("GIF tag primitive flag");
-    tag.primitive = reader->readU16();
+      reader->readFieldBool("primitiveEnabled");
+    tag.primitive = reader->readFieldU16("primitive");
     tag.format = readEnum<GIFDataFormat>(
       reader,
       static_cast<std::uint8_t>(GIFDataFormat::Disabled),
-      "GIF data format");
-    tag.registerCount = reader->readU8();
-    tag.registers = reader->readU64();
+      "format");
+    tag.registerCount = reader->readFieldU8("registerCount");
+    tag.registers = reader->readFieldU64("registers");
     require(tag.loopCount <= 0x7fff, "GIF loop count is invalid");
     require(tag.primitive <= 0x07ff, "GIF primitive is invalid");
     require(
@@ -45,31 +54,49 @@ namespace
     SaveStateWriter *writer,
     const GIFDecoderState &state)
   {
-    writeGIFTag(writer, state.tag);
-    writer->writeBool(state.waitingForTag);
-    writer->writeBool(state.activePacket);
-    writer->writeU32(state.remainingQuadwords);
-    writer->writeU32(state.remainingRegisterValues);
-    writer->writeU16(state.currentLoop);
-    writer->writeU8(state.currentRegister);
-    writer->writeU32(state.qValue);
+    {
+      auto tag = writer->scope("tag");
+      writeGIFTag(writer, state.tag);
+    }
+    writer->writeFieldBool("waitingForTag", state.waitingForTag);
+    writer->writeFieldBool("activePacket", state.activePacket);
+    writer->writeFieldU32(
+      "remainingQuadwords",
+      state.remainingQuadwords);
+    writer->writeFieldU32(
+      "remainingRegisterValues",
+      state.remainingRegisterValues);
+    writer->writeFieldU16("currentLoop", state.currentLoop);
+    writer->writeFieldU8("currentRegister", state.currentRegister);
+    writer->writeFieldU32("qValue", state.qValue);
   }
 
   GIFDecoderState readGIFDecoderState(
     SaveStateReader *reader,
     const char *name)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
     GIFDecoderState state;
-    state.tag = readGIFTag(reader);
+    {
+      auto tag = reader->scope("tag");
+      state.tag = readGIFTag(reader);
+    }
     state.waitingForTag =
-      reader->readBool("GIF decoder waiting flag");
+      reader->readFieldBool("waitingForTag");
     state.activePacket =
-      reader->readBool("GIF decoder packet flag");
-    state.remainingQuadwords = reader->readU32();
-    state.remainingRegisterValues = reader->readU32();
-    state.currentLoop = reader->readU16();
-    state.currentRegister = reader->readU8();
-    state.qValue = reader->readU32();
+      reader->readFieldBool("activePacket");
+    state.remainingQuadwords =
+      reader->readFieldU32("remainingQuadwords");
+    state.remainingRegisterValues =
+      reader->readFieldU32("remainingRegisterValues");
+    state.currentLoop = reader->readFieldU16("currentLoop");
+    state.currentRegister =
+      reader->readFieldU8("currentRegister");
+    state.qValue = reader->readFieldU32("qValue");
     require(
       state.remainingQuadwords <= MAX_GIF_REGISTER_VALUES &&
       state.remainingRegisterValues <= MAX_GIF_REGISTER_VALUES,
@@ -98,39 +125,55 @@ namespace
     SaveStateWriter *writer,
     const GSPrimitive &primitive)
   {
-    writer->writeU8(
+    writer->writeFieldU8(
+      "type",
       static_cast<std::uint8_t>(primitive.type));
-    writer->writeBool(primitive.gouraudShading);
-    writer->writeBool(primitive.textureMapping);
-    writer->writeBool(primitive.fogging);
-    writer->writeBool(primitive.alphaBlending);
-    writer->writeBool(primitive.antialiasing);
-    writer->writeBool(primitive.fixedTextureCoordinates);
-    writer->writeU8(primitive.context);
-    writer->writeBool(primitive.fixedFragmentValue);
+    writer->writeFieldBool(
+      "gouraudShading",
+      primitive.gouraudShading);
+    writer->writeFieldBool(
+      "textureMapping",
+      primitive.textureMapping);
+    writer->writeFieldBool("fogging", primitive.fogging);
+    writer->writeFieldBool(
+      "alphaBlending",
+      primitive.alphaBlending);
+    writer->writeFieldBool("antialiasing", primitive.antialiasing);
+    writer->writeFieldBool(
+      "fixedTextureCoordinates",
+      primitive.fixedTextureCoordinates);
+    writer->writeFieldU8("context", primitive.context);
+    writer->writeFieldBool(
+      "fixedFragmentValue",
+      primitive.fixedFragmentValue);
   }
 
   GSPrimitive readGSPrimitive(SaveStateReader *reader)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
     GSPrimitive primitive;
     primitive.type = readEnum<GSPrimitiveType>(
       reader,
       static_cast<std::uint8_t>(GSPrimitiveType::Sprite),
-      "GS primitive type");
+      "type");
     primitive.gouraudShading =
-      reader->readBool("GS Gouraud-shading flag");
+      reader->readFieldBool("gouraudShading");
     primitive.textureMapping =
-      reader->readBool("GS texture-mapping flag");
-    primitive.fogging = reader->readBool("GS fog flag");
+      reader->readFieldBool("textureMapping");
+    primitive.fogging = reader->readFieldBool("fogging");
     primitive.alphaBlending =
-      reader->readBool("GS alpha-blending flag");
+      reader->readFieldBool("alphaBlending");
     primitive.antialiasing =
-      reader->readBool("GS antialiasing flag");
+      reader->readFieldBool("antialiasing");
     primitive.fixedTextureCoordinates =
-      reader->readBool("GS fixed-texture flag");
-    primitive.context = reader->readU8();
+      reader->readFieldBool("fixedTextureCoordinates");
+    primitive.context = reader->readFieldU8("context");
     primitive.fixedFragmentValue =
-      reader->readBool("GS fixed-fragment flag");
+      reader->readFieldBool("fixedFragmentValue");
     require(primitive.context < 2, "GS context is invalid");
     return primitive;
   }
@@ -139,21 +182,21 @@ namespace
     SaveStateWriter *writer,
     const GSColor &color)
   {
-    writer->writeU8(color.red);
-    writer->writeU8(color.green);
-    writer->writeU8(color.blue);
-    writer->writeU8(color.alpha);
-    writer->writeU32(color.q);
+    writer->writeFieldU8("red", color.red);
+    writer->writeFieldU8("green", color.green);
+    writer->writeFieldU8("blue", color.blue);
+    writer->writeFieldU8("alpha", color.alpha);
+    writer->writeFieldU32("q", color.q);
   }
 
   GSColor readGSColor(SaveStateReader *reader)
   {
     GSColor color;
-    color.red = reader->readU8();
-    color.green = reader->readU8();
-    color.blue = reader->readU8();
-    color.alpha = reader->readU8();
-    color.q = reader->readU32();
+    color.red = reader->readFieldU8("red");
+    color.green = reader->readFieldU8("green");
+    color.blue = reader->readFieldU8("blue");
+    color.alpha = reader->readFieldU8("alpha");
+    color.q = reader->readFieldU32("q");
     return color;
   }
 
@@ -161,18 +204,18 @@ namespace
     SaveStateWriter *writer,
     const GSVertexCoordinate &vertex)
   {
-    writer->writeU16(vertex.x);
-    writer->writeU16(vertex.y);
-    writer->writeU32(vertex.z);
+    writer->writeFieldU16("x", vertex.x);
+    writer->writeFieldU16("y", vertex.y);
+    writer->writeFieldU32("z", vertex.z);
   }
 
   GSVertexCoordinate readGSVertex(
     SaveStateReader *reader)
   {
     GSVertexCoordinate vertex;
-    vertex.x = reader->readU16();
-    vertex.y = reader->readU16();
-    vertex.z = reader->readU32();
+    vertex.x = reader->readFieldU16("x");
+    vertex.y = reader->readFieldU16("y");
+    vertex.z = reader->readFieldU32("z");
     return vertex;
   }
 
@@ -180,20 +223,20 @@ namespace
     SaveStateWriter *writer,
     const GSTextureCoordinate &coordinate)
   {
-    writer->writeU32(coordinate.s);
-    writer->writeU32(coordinate.t);
-    writer->writeU16(coordinate.u);
-    writer->writeU16(coordinate.v);
+    writer->writeFieldU32("s", coordinate.s);
+    writer->writeFieldU32("t", coordinate.t);
+    writer->writeFieldU16("u", coordinate.u);
+    writer->writeFieldU16("v", coordinate.v);
   }
 
   GSTextureCoordinate readGSTextureCoordinate(
     SaveStateReader *reader)
   {
     GSTextureCoordinate coordinate;
-    coordinate.s = reader->readU32();
-    coordinate.t = reader->readU32();
-    coordinate.u = reader->readU16();
-    coordinate.v = reader->readU16();
+    coordinate.s = reader->readFieldU32("s");
+    coordinate.t = reader->readFieldU32("t");
+    coordinate.u = reader->readFieldU16("u");
+    coordinate.v = reader->readFieldU16("v");
     return coordinate;
   }
 
@@ -201,19 +244,22 @@ namespace
     SaveStateWriter *writer,
     const GSFrame &frame)
   {
-    writer->writeU16(frame.basePointer);
-    writer->writeU8(frame.width);
-    writer->writeU8(frame.pixelStorageMode);
-    writer->writeU32(frame.drawingMask);
+    writer->writeFieldU16("basePointer", frame.basePointer);
+    writer->writeFieldU8("width", frame.width);
+    writer->writeFieldU8(
+      "pixelStorageMode",
+      frame.pixelStorageMode);
+    writer->writeFieldU32("drawingMask", frame.drawingMask);
   }
 
   GSFrame readGSFrame(SaveStateReader *reader)
   {
     GSFrame frame;
-    frame.basePointer = reader->readU16();
-    frame.width = reader->readU8();
-    frame.pixelStorageMode = reader->readU8();
-    frame.drawingMask = reader->readU32();
+    frame.basePointer = reader->readFieldU16("basePointer");
+    frame.width = reader->readFieldU8("width");
+    frame.pixelStorageMode =
+      reader->readFieldU8("pixelStorageMode");
+    frame.drawingMask = reader->readFieldU32("drawingMask");
     return frame;
   }
 
@@ -221,19 +267,19 @@ namespace
     SaveStateWriter *writer,
     const GSScissor &scissor)
   {
-    writer->writeU16(scissor.x0);
-    writer->writeU16(scissor.x1);
-    writer->writeU16(scissor.y0);
-    writer->writeU16(scissor.y1);
+    writer->writeFieldU16("x0", scissor.x0);
+    writer->writeFieldU16("x1", scissor.x1);
+    writer->writeFieldU16("y0", scissor.y0);
+    writer->writeFieldU16("y1", scissor.y1);
   }
 
   GSScissor readGSScissor(SaveStateReader *reader)
   {
     GSScissor scissor;
-    scissor.x0 = reader->readU16();
-    scissor.x1 = reader->readU16();
-    scissor.y0 = reader->readU16();
-    scissor.y1 = reader->readU16();
+    scissor.x0 = reader->readFieldU16("x0");
+    scissor.x1 = reader->readFieldU16("x1");
+    scissor.y0 = reader->readFieldU16("y0");
+    scissor.y1 = reader->readFieldU16("y1");
     return scissor;
   }
 
@@ -241,15 +287,15 @@ namespace
     SaveStateWriter *writer,
     const GSXYOffset &offset)
   {
-    writer->writeU16(offset.x);
-    writer->writeU16(offset.y);
+    writer->writeFieldU16("x", offset.x);
+    writer->writeFieldU16("y", offset.y);
   }
 
   GSXYOffset readGSXYOffset(SaveStateReader *reader)
   {
     GSXYOffset offset;
-    offset.x = reader->readU16();
-    offset.y = reader->readU16();
+    offset.x = reader->readFieldU16("x");
+    offset.y = reader->readFieldU16("y");
     return offset;
   }
 
@@ -257,31 +303,45 @@ namespace
     SaveStateWriter *writer,
     const GSTest &test)
   {
-    writer->writeBool(test.alphaTestEnabled);
-    writer->writeU8(test.alphaTest);
-    writer->writeU8(test.alphaReference);
-    writer->writeU8(test.alphaFail);
-    writer->writeBool(test.destinationAlphaTestEnabled);
-    writer->writeBool(test.destinationAlphaMode);
-    writer->writeBool(test.depthTestEnabled);
-    writer->writeU8(test.depthTest);
+    writer->writeFieldBool(
+      "alphaTestEnabled",
+      test.alphaTestEnabled);
+    writer->writeFieldU8("alphaTest", test.alphaTest);
+    writer->writeFieldU8("alphaReference", test.alphaReference);
+    writer->writeFieldU8("alphaFail", test.alphaFail);
+    writer->writeFieldBool(
+      "destinationAlphaTestEnabled",
+      test.destinationAlphaTestEnabled);
+    writer->writeFieldBool(
+      "destinationAlphaMode",
+      test.destinationAlphaMode);
+    writer->writeFieldBool(
+      "depthTestEnabled",
+      test.depthTestEnabled);
+    writer->writeFieldU8("depthTest", test.depthTest);
   }
 
   GSTest readGSTest(SaveStateReader *reader)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
     GSTest test;
     test.alphaTestEnabled =
-      reader->readBool("GS alpha-test flag");
-    test.alphaTest = reader->readU8();
-    test.alphaReference = reader->readU8();
-    test.alphaFail = reader->readU8();
+      reader->readFieldBool("alphaTestEnabled");
+    test.alphaTest = reader->readFieldU8("alphaTest");
+    test.alphaReference =
+      reader->readFieldU8("alphaReference");
+    test.alphaFail = reader->readFieldU8("alphaFail");
     test.destinationAlphaTestEnabled =
-      reader->readBool("GS destination-alpha-test flag");
+      reader->readFieldBool("destinationAlphaTestEnabled");
     test.destinationAlphaMode =
-      reader->readBool("GS destination-alpha mode");
+      reader->readFieldBool("destinationAlphaMode");
     test.depthTestEnabled =
-      reader->readBool("GS depth-test flag");
-    test.depthTest = reader->readU8();
+      reader->readFieldBool("depthTestEnabled");
+    test.depthTest = reader->readFieldU8("depthTest");
     require(
       test.alphaTest <= 7 &&
       test.alphaFail <= 3 &&
@@ -294,21 +354,26 @@ namespace
     SaveStateWriter *writer,
     const GSAlpha &alpha)
   {
-    writer->writeU8(alpha.source);
-    writer->writeU8(alpha.destination);
-    writer->writeU8(alpha.alpha);
-    writer->writeU8(alpha.result);
-    writer->writeU8(alpha.fixedAlpha);
+    writer->writeFieldU8("source", alpha.source);
+    writer->writeFieldU8("destination", alpha.destination);
+    writer->writeFieldU8("alpha", alpha.alpha);
+    writer->writeFieldU8("result", alpha.result);
+    writer->writeFieldU8("fixedAlpha", alpha.fixedAlpha);
   }
 
   GSAlpha readGSAlpha(SaveStateReader *reader)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
     GSAlpha alpha;
-    alpha.source = reader->readU8();
-    alpha.destination = reader->readU8();
-    alpha.alpha = reader->readU8();
-    alpha.result = reader->readU8();
-    alpha.fixedAlpha = reader->readU8();
+    alpha.source = reader->readFieldU8("source");
+    alpha.destination = reader->readFieldU8("destination");
+    alpha.alpha = reader->readFieldU8("alpha");
+    alpha.result = reader->readFieldU8("result");
+    alpha.fixedAlpha = reader->readFieldU8("fixedAlpha");
     require(
       alpha.source <= 3 &&
       alpha.destination <= 3 &&
@@ -322,18 +387,21 @@ namespace
     SaveStateWriter *writer,
     const GSDepthBuffer &depth)
   {
-    writer->writeU16(depth.basePointer);
-    writer->writeU8(depth.pixelStorageMode);
-    writer->writeBool(depth.drawingMasked);
+    writer->writeFieldU16("basePointer", depth.basePointer);
+    writer->writeFieldU8(
+      "pixelStorageMode",
+      depth.pixelStorageMode);
+    writer->writeFieldBool("drawingMasked", depth.drawingMasked);
   }
 
   GSDepthBuffer readGSDepthBuffer(SaveStateReader *reader)
   {
     GSDepthBuffer depth;
-    depth.basePointer = reader->readU16();
-    depth.pixelStorageMode = reader->readU8();
+    depth.basePointer = reader->readFieldU16("basePointer");
+    depth.pixelStorageMode =
+      reader->readFieldU8("pixelStorageMode");
     depth.drawingMasked =
-      reader->readBool("GS depth-mask flag");
+      reader->readFieldBool("drawingMasked");
     return depth;
   }
 
@@ -341,32 +409,52 @@ namespace
     SaveStateWriter *writer,
     const GSTexture &texture)
   {
-    writer->writeU16(texture.basePointer);
-    writer->writeU8(texture.bufferWidth);
-    writer->writeU8(texture.pixelStorageMode);
-    writer->writeU8(texture.widthExponent);
-    writer->writeU8(texture.heightExponent);
-    writer->writeBool(texture.rgba);
-    writer->writeU8(texture.function);
-    writer->writeU8(texture.maximumMipLevel);
-    writer->writeBool(texture.magnificationLinear);
-    writer->writeU8(texture.minificationFilter);
+    writer->writeFieldU16("basePointer", texture.basePointer);
+    writer->writeFieldU8("bufferWidth", texture.bufferWidth);
+    writer->writeFieldU8(
+      "pixelStorageMode",
+      texture.pixelStorageMode);
+    writer->writeFieldU8("widthExponent", texture.widthExponent);
+    writer->writeFieldU8(
+      "heightExponent",
+      texture.heightExponent);
+    writer->writeFieldBool("rgba", texture.rgba);
+    writer->writeFieldU8("function", texture.function);
+    writer->writeFieldU8(
+      "maximumMipLevel",
+      texture.maximumMipLevel);
+    writer->writeFieldBool(
+      "magnificationLinear",
+      texture.magnificationLinear);
+    writer->writeFieldU8(
+      "minificationFilter",
+      texture.minificationFilter);
   }
 
   GSTexture readGSTexture(SaveStateReader *reader)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
     GSTexture texture;
-    texture.basePointer = reader->readU16();
-    texture.bufferWidth = reader->readU8();
-    texture.pixelStorageMode = reader->readU8();
-    texture.widthExponent = reader->readU8();
-    texture.heightExponent = reader->readU8();
-    texture.rgba = reader->readBool("GS texture RGBA flag");
-    texture.function = reader->readU8();
-    texture.maximumMipLevel = reader->readU8();
+    texture.basePointer = reader->readFieldU16("basePointer");
+    texture.bufferWidth = reader->readFieldU8("bufferWidth");
+    texture.pixelStorageMode =
+      reader->readFieldU8("pixelStorageMode");
+    texture.widthExponent =
+      reader->readFieldU8("widthExponent");
+    texture.heightExponent =
+      reader->readFieldU8("heightExponent");
+    texture.rgba = reader->readFieldBool("rgba");
+    texture.function = reader->readFieldU8("function");
+    texture.maximumMipLevel =
+      reader->readFieldU8("maximumMipLevel");
     texture.magnificationLinear =
-      reader->readBool("GS texture magnification flag");
-    texture.minificationFilter = reader->readU8();
+      reader->readFieldBool("magnificationLinear");
+    texture.minificationFilter =
+      reader->readFieldU8("minificationFilter");
     require(
       texture.widthExponent <= 15 &&
       texture.heightExponent <= 15 &&
@@ -381,14 +469,16 @@ namespace
     SaveStateWriter *writer,
     const GSTextureClamp &clamp)
   {
-    writer->writeU8(
+    writer->writeFieldU8(
+      "horizontal",
       static_cast<std::uint8_t>(clamp.horizontal));
-    writer->writeU8(
+    writer->writeFieldU8(
+      "vertical",
       static_cast<std::uint8_t>(clamp.vertical));
-    writer->writeU16(clamp.minimumU);
-    writer->writeU16(clamp.maximumU);
-    writer->writeU16(clamp.minimumV);
-    writer->writeU16(clamp.maximumV);
+    writer->writeFieldU16("minimumU", clamp.minimumU);
+    writer->writeFieldU16("maximumU", clamp.maximumU);
+    writer->writeFieldU16("minimumV", clamp.minimumV);
+    writer->writeFieldU16("maximumV", clamp.maximumV);
   }
 
   GSTextureClamp readGSTextureClamp(
@@ -399,16 +489,16 @@ namespace
       reader,
       static_cast<std::uint8_t>(
         GSTextureWrapMode::RegionRepeat),
-      "GS horizontal texture wrap mode");
+      "horizontal");
     clamp.vertical = readEnum<GSTextureWrapMode>(
       reader,
       static_cast<std::uint8_t>(
         GSTextureWrapMode::RegionRepeat),
-      "GS vertical texture wrap mode");
-    clamp.minimumU = reader->readU16();
-    clamp.maximumU = reader->readU16();
-    clamp.minimumV = reader->readU16();
-    clamp.maximumV = reader->readU16();
+      "vertical");
+    clamp.minimumU = reader->readFieldU16("minimumU");
+    clamp.maximumU = reader->readFieldU16("maximumU");
+    clamp.minimumV = reader->readFieldU16("minimumV");
+    clamp.maximumV = reader->readFieldU16("maximumV");
     return clamp;
   }
 
@@ -416,30 +506,78 @@ namespace
     SaveStateWriter *writer,
     const GSContext &context)
   {
-    writeGSFrame(writer, context.frame);
-    writeGSScissor(writer, context.scissor);
-    writeGSXYOffset(writer, context.offset);
-    writeGSTest(writer, context.test);
-    writeGSAlpha(writer, context.alpha);
-    writer->writeBool(context.forceAlphaBit);
-    writeGSDepthBuffer(writer, context.depthBuffer);
-    writeGSTexture(writer, context.texture);
-    writeGSTextureClamp(writer, context.textureClamp);
+    {
+      auto field = writer->scope("frame");
+      writeGSFrame(writer, context.frame);
+    }
+    {
+      auto field = writer->scope("scissor");
+      writeGSScissor(writer, context.scissor);
+    }
+    {
+      auto field = writer->scope("offset");
+      writeGSXYOffset(writer, context.offset);
+    }
+    {
+      auto field = writer->scope("test");
+      writeGSTest(writer, context.test);
+    }
+    {
+      auto field = writer->scope("alpha");
+      writeGSAlpha(writer, context.alpha);
+    }
+    writer->writeFieldBool("forceAlphaBit", context.forceAlphaBit);
+    {
+      auto field = writer->scope("depthBuffer");
+      writeGSDepthBuffer(writer, context.depthBuffer);
+    }
+    {
+      auto field = writer->scope("texture");
+      writeGSTexture(writer, context.texture);
+    }
+    {
+      auto field = writer->scope("textureClamp");
+      writeGSTextureClamp(writer, context.textureClamp);
+    }
   }
 
   GSContext readGSContext(SaveStateReader *reader)
   {
     GSContext context;
-    context.frame = readGSFrame(reader);
-    context.scissor = readGSScissor(reader);
-    context.offset = readGSXYOffset(reader);
-    context.test = readGSTest(reader);
-    context.alpha = readGSAlpha(reader);
+    {
+      auto field = reader->scope("frame");
+      context.frame = readGSFrame(reader);
+    }
+    {
+      auto field = reader->scope("scissor");
+      context.scissor = readGSScissor(reader);
+    }
+    {
+      auto field = reader->scope("offset");
+      context.offset = readGSXYOffset(reader);
+    }
+    {
+      auto field = reader->scope("test");
+      context.test = readGSTest(reader);
+    }
+    {
+      auto field = reader->scope("alpha");
+      context.alpha = readGSAlpha(reader);
+    }
     context.forceAlphaBit =
-      reader->readBool("GS force-alpha flag");
-    context.depthBuffer = readGSDepthBuffer(reader);
-    context.texture = readGSTexture(reader);
-    context.textureClamp = readGSTextureClamp(reader);
+      reader->readFieldBool("forceAlphaBit");
+    {
+      auto field = reader->scope("depthBuffer");
+      context.depthBuffer = readGSDepthBuffer(reader);
+    }
+    {
+      auto field = reader->scope("texture");
+      context.texture = readGSTexture(reader);
+    }
+    {
+      auto field = reader->scope("textureClamp");
+      context.textureClamp = readGSTextureClamp(reader);
+    }
     return context;
   }
 
@@ -447,48 +585,77 @@ namespace
     SaveStateWriter *writer,
     const GSImageTransfer &transfer)
   {
-    writer->writeU16(transfer.sourceBasePointer);
-    writer->writeU8(transfer.sourceBufferWidth);
-    writer->writeU8(transfer.sourcePixelStorageMode);
-    writer->writeU16(transfer.destinationBasePointer);
-    writer->writeU8(transfer.destinationBufferWidth);
-    writer->writeU8(transfer.destinationPixelStorageMode);
-    writer->writeU16(transfer.sourceX);
-    writer->writeU16(transfer.sourceY);
-    writer->writeU16(transfer.destinationX);
-    writer->writeU16(transfer.destinationY);
-    writer->writeU16(transfer.width);
-    writer->writeU16(transfer.height);
-    writer->writeU32(transfer.transferredPixels);
-    writer->writeU8(
+    writer->writeFieldU16(
+      "sourceBasePointer",
+      transfer.sourceBasePointer);
+    writer->writeFieldU8(
+      "sourceBufferWidth",
+      transfer.sourceBufferWidth);
+    writer->writeFieldU8(
+      "sourcePixelStorageMode",
+      transfer.sourcePixelStorageMode);
+    writer->writeFieldU16(
+      "destinationBasePointer",
+      transfer.destinationBasePointer);
+    writer->writeFieldU8(
+      "destinationBufferWidth",
+      transfer.destinationBufferWidth);
+    writer->writeFieldU8(
+      "destinationPixelStorageMode",
+      transfer.destinationPixelStorageMode);
+    writer->writeFieldU16("sourceX", transfer.sourceX);
+    writer->writeFieldU16("sourceY", transfer.sourceY);
+    writer->writeFieldU16("destinationX", transfer.destinationX);
+    writer->writeFieldU16("destinationY", transfer.destinationY);
+    writer->writeFieldU16("width", transfer.width);
+    writer->writeFieldU16("height", transfer.height);
+    writer->writeFieldU32(
+      "transferredPixels",
+      transfer.transferredPixels);
+    writer->writeFieldU8(
+      "direction",
       static_cast<std::uint8_t>(transfer.direction));
-    writer->writeBool(transfer.active);
+    writer->writeFieldBool("active", transfer.active);
   }
 
   GSImageTransfer readGSImageTransfer(
     SaveStateReader *reader)
   {
+    const auto require =
+      [reader](bool condition, const std::string &detail)
+      {
+        reader->requireField(condition, detail);
+      };
     GSImageTransfer transfer;
-    transfer.sourceBasePointer = reader->readU16();
-    transfer.sourceBufferWidth = reader->readU8();
-    transfer.sourcePixelStorageMode = reader->readU8();
-    transfer.destinationBasePointer = reader->readU16();
-    transfer.destinationBufferWidth = reader->readU8();
-    transfer.destinationPixelStorageMode = reader->readU8();
-    transfer.sourceX = reader->readU16();
-    transfer.sourceY = reader->readU16();
-    transfer.destinationX = reader->readU16();
-    transfer.destinationY = reader->readU16();
-    transfer.width = reader->readU16();
-    transfer.height = reader->readU16();
-    transfer.transferredPixels = reader->readU32();
+    transfer.sourceBasePointer =
+      reader->readFieldU16("sourceBasePointer");
+    transfer.sourceBufferWidth =
+      reader->readFieldU8("sourceBufferWidth");
+    transfer.sourcePixelStorageMode =
+      reader->readFieldU8("sourcePixelStorageMode");
+    transfer.destinationBasePointer =
+      reader->readFieldU16("destinationBasePointer");
+    transfer.destinationBufferWidth =
+      reader->readFieldU8("destinationBufferWidth");
+    transfer.destinationPixelStorageMode =
+      reader->readFieldU8("destinationPixelStorageMode");
+    transfer.sourceX = reader->readFieldU16("sourceX");
+    transfer.sourceY = reader->readFieldU16("sourceY");
+    transfer.destinationX =
+      reader->readFieldU16("destinationX");
+    transfer.destinationY =
+      reader->readFieldU16("destinationY");
+    transfer.width = reader->readFieldU16("width");
+    transfer.height = reader->readFieldU16("height");
+    transfer.transferredPixels =
+      reader->readFieldU32("transferredPixels");
     transfer.direction = readEnum<GSImageTransferDirection>(
       reader,
       static_cast<std::uint8_t>(
         GSImageTransferDirection::Deactivated),
-      "GS image-transfer direction");
+      "direction");
     transfer.active =
-      reader->readBool("GS image-transfer active flag");
+      reader->readFieldBool("active");
     const std::uint64_t pixelCount =
       static_cast<std::uint64_t>(transfer.width) *
       transfer.height;
@@ -536,64 +703,95 @@ void NekoSaveStateCodec::writeGIFArbiter(
   SaveStateWriter *writer,
   const GIFPathArbiter &arbiter)
 {
-  writer->writeU8(
+  writer->writeFieldU8(
+    "currentPath",
     static_cast<std::uint8_t>(arbiter.currentPath));
-  for (bool queued : arbiter.queuedPaths)
   {
-    writer->writeBool(queued);
+    auto paths = writer->scope("queuedPaths");
+    for (std::size_t index = 0;
+         index < arbiter.queuedPaths.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldBool("queued", arbiter.queuedPaths[index]);
+    }
   }
-  writer->writeBool(arbiter.vifPath3Mask);
-  writer->writeBool(arbiter.modePath3Mask);
-  writer->writeBool(arbiter.intermittentPath3);
-  writer->writeBool(arbiter.timedTransfers);
-  writer->writeBool(arbiter.interruptedPath3);
-  writer->writeBool(
+  writer->writeFieldBool("vifPath3Mask", arbiter.vifPath3Mask);
+  writer->writeFieldBool("modePath3Mask", arbiter.modePath3Mask);
+  writer->writeFieldBool(
+    "intermittentPath3",
+    arbiter.intermittentPath3);
+  writer->writeFieldBool("timedTransfers", arbiter.timedTransfers);
+  writer->writeFieldBool(
+    "interruptedPath3",
+    arbiter.interruptedPath3);
+  writer->writeFieldBool(
+    "interruptQueuedPath2",
     arbiter.queuedPath2Interruption ==
     GIFPath3InterruptionPolicy::Interrupt);
-  writer->writeU8(arbiter.path3ImageSliceQuadwords);
-  writer->writeU16(arbiter.path3Count);
-  writer->writeU16(arbiter.path3Tag);
-  writer->writeU8(arbiter.remainingIdleCycles);
-  writeGIFDecoderState(
-    writer,
-    arbiter.suspendedPath3State);
+  writer->writeFieldU8(
+    "path3ImageSliceQuadwords",
+    arbiter.path3ImageSliceQuadwords);
+  writer->writeFieldU16("path3Count", arbiter.path3Count);
+  writer->writeFieldU16("path3Tag", arbiter.path3Tag);
+  writer->writeFieldU8(
+    "remainingIdleCycles",
+    arbiter.remainingIdleCycles);
+  {
+    auto state = writer->scope("suspendedPath3State");
+    writeGIFDecoderState(writer, arbiter.suspendedPath3State);
+  }
 }
 
 void NekoSaveStateCodec::readGIFArbiter(
   SaveStateReader *reader,
   GIFPathArbiter *arbiter)
 {
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
   arbiter->currentPath = readEnum<GIFPath>(
     reader,
     static_cast<std::uint8_t>(GIFPath::Path3),
-    "GIF active path");
-  for (std::size_t index = 0;
-       index < arbiter->queuedPaths.size();
-       ++index)
+    "currentPath");
   {
-    arbiter->queuedPaths[index] =
-      reader->readBool("GIF queued-path flag");
+    auto paths = reader->scope("queuedPaths");
+    for (std::size_t index = 0;
+         index < arbiter->queuedPaths.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      arbiter->queuedPaths[index] =
+        reader->readFieldBool("queued");
+    }
   }
   arbiter->vifPath3Mask =
-    reader->readBool("GIF VIF PATH3 mask");
+    reader->readFieldBool("vifPath3Mask");
   arbiter->modePath3Mask =
-    reader->readBool("GIF mode PATH3 mask");
+    reader->readFieldBool("modePath3Mask");
   arbiter->intermittentPath3 =
-    reader->readBool("GIF intermittent-mode flag");
+    reader->readFieldBool("intermittentPath3");
   arbiter->timedTransfers =
-    reader->readBool("GIF timing-mode flag");
+    reader->readFieldBool("timedTransfers");
   arbiter->interruptedPath3 =
-    reader->readBool("GIF PATH3 interruption flag");
+    reader->readFieldBool("interruptedPath3");
   arbiter->queuedPath2Interruption =
-    reader->readBool("GIF PATH2 interruption flag") ?
+    reader->readFieldBool("interruptQueuedPath2") ?
       GIFPath3InterruptionPolicy::Interrupt :
       GIFPath3InterruptionPolicy::Defer;
-  arbiter->path3ImageSliceQuadwords = reader->readU8();
-  arbiter->path3Count = reader->readU16();
-  arbiter->path3Tag = reader->readU16();
-  arbiter->remainingIdleCycles = reader->readU8();
-  arbiter->suspendedPath3State =
-    readGIFDecoderState(reader, "suspended GIF PATH3 decoder");
+  arbiter->path3ImageSliceQuadwords =
+    reader->readFieldU8("path3ImageSliceQuadwords");
+  arbiter->path3Count = reader->readFieldU16("path3Count");
+  arbiter->path3Tag = reader->readFieldU16("path3Tag");
+  arbiter->remainingIdleCycles =
+    reader->readFieldU8("remainingIdleCycles");
+  {
+    auto state = reader->scope("suspendedPath3State");
+    arbiter->suspendedPath3State =
+      readGIFDecoderState(reader, "suspended GIF PATH3 decoder");
+  }
   require(
     arbiter->path3ImageSliceQuadwords <= 7,
     "GIF PATH3 image-slice count is invalid");
@@ -606,19 +804,27 @@ void NekoSaveStateCodec::writeGIFPath1(
   SaveStateWriter *writer,
   const GIFPath1Transfer &path)
 {
-  writer->writeBool(path.active);
-  writer->writeU16(path.qwordAddress);
-  writer->writeU64(path.transferredQuadwords);
+  writer->writeFieldBool("active", path.active);
+  writer->writeFieldU16("qwordAddress", path.qwordAddress);
+  writer->writeFieldU64(
+    "transferredQuadwords",
+    path.transferredQuadwords);
 }
 
 void NekoSaveStateCodec::readGIFPath1(
   SaveStateReader *reader,
   GIFPath1Transfer *path)
 {
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
   path->active =
-    reader->readBool("GIF PATH1 active flag");
-  path->qwordAddress = reader->readU16();
-  path->transferredQuadwords = reader->readU64();
+    reader->readFieldBool("active");
+  path->qwordAddress = reader->readFieldU16("qwordAddress");
+  path->transferredQuadwords =
+    reader->readFieldU64("transferredQuadwords");
   require(
     path->qwordAddress <
       path->vpu->dataMemorySize() / 16,
@@ -629,15 +835,27 @@ void NekoSaveStateCodec::writeGIFPath3(
   SaveStateWriter *writer,
   const GIFPath3Transfer &path)
 {
-  writer->writeU64(path.submissionAttempts);
-  writer->writeU64(path.transferredQuadwords);
-  writer->writeU64(path.completedPackets);
-  writer->writeSize(path.guestFIFO.size());
-  for (const GIFQuadword &quadword : path.guestFIFO)
+  writer->writeFieldU64(
+    "submissionAttempts",
+    path.submissionAttempts);
+  writer->writeFieldU64(
+    "transferredQuadwords",
+    path.transferredQuadwords);
+  writer->writeFieldU64("completedPackets", path.completedPackets);
+  writer->writeFieldSize("fifoCount", path.guestFIFO.size());
   {
-    for (std::uint32_t word : quadword)
+    auto fifo = writer->scope("guestFIFO");
+    std::size_t quadwordIndex = 0;
+    for (const GIFQuadword &quadword : path.guestFIFO)
     {
-      writer->writeU32(word);
+      auto quadwordElement = writer->element(quadwordIndex++);
+      for (std::size_t wordIndex = 0;
+           wordIndex < quadword.size();
+           ++wordIndex)
+      {
+        auto wordElement = writer->element(wordIndex);
+        writer->writeFieldU32("value", quadword[wordIndex]);
+      }
     }
   }
 }
@@ -646,20 +864,36 @@ void NekoSaveStateCodec::readGIFPath3(
   SaveStateReader *reader,
   GIFPath3Transfer *path)
 {
-  path->submissionAttempts = reader->readU64();
-  path->transferredQuadwords = reader->readU64();
-  path->completedPackets = reader->readU64();
-  const std::uint32_t fifoCount = reader->readU32();
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
+  path->submissionAttempts =
+    reader->readFieldU64("submissionAttempts");
+  path->transferredQuadwords =
+    reader->readFieldU64("transferredQuadwords");
+  path->completedPackets =
+    reader->readFieldU64("completedPackets");
+  const std::uint32_t fifoCount =
+    reader->readFieldU32("fifoCount");
   require(fifoCount <= 16, "GIF FIFO size is invalid");
   std::deque<GIFQuadword> guestFIFO;
-  for (std::uint32_t index = 0; index < fifoCount; ++index)
   {
-    GIFQuadword quadword = {};
-    for (std::uint32_t &word : quadword)
+    auto fifo = reader->scope("guestFIFO");
+    for (std::uint32_t index = 0; index < fifoCount; ++index)
     {
-      word = reader->readU32();
+      auto quadwordElement = reader->element(index);
+      GIFQuadword quadword = {};
+      for (std::size_t wordIndex = 0;
+           wordIndex < quadword.size();
+           ++wordIndex)
+      {
+        auto wordElement = reader->element(wordIndex);
+        quadword[wordIndex] = reader->readFieldU32("value");
+      }
+      guestFIFO.push_back(quadword);
     }
-    guestFIFO.push_back(quadword);
   }
   path->guestFIFO.swap(guestFIFO);
   require(
@@ -671,114 +905,235 @@ void NekoSaveStateCodec::writeGS(
   SaveStateWriter *writer,
   const GS &gs)
 {
-  writer->writeSize(gs.registers.size());
-  for (std::uint64_t value : gs.registers)
+  writer->writeFieldSize("registerCount", gs.registers.size());
   {
-    writer->writeU64(value);
+    auto registers = writer->scope("registers");
+    for (std::size_t index = 0;
+         index < gs.registers.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU64("value", gs.registers[index]);
+    }
   }
-  writeGSPrimitive(writer, gs.primitiveRegister);
-  writeGSColor(writer, gs.colorRegister);
-  writeGSVertex(writer, gs.vertexRegister);
-  writeGSTextureCoordinate(
-    writer,
-    gs.textureCoordinateRegister);
-  for (const GSVertexCoordinate &vertex :
-       gs.primitiveVertices)
   {
-    writeGSVertex(writer, vertex);
+    auto field = writer->scope("primitiveRegister");
+    writeGSPrimitive(writer, gs.primitiveRegister);
   }
-  for (const GSColor &color : gs.primitiveColors)
   {
-    writeGSColor(writer, color);
+    auto field = writer->scope("colorRegister");
+    writeGSColor(writer, gs.colorRegister);
   }
-  for (const GSTextureCoordinate &coordinate :
-       gs.primitiveTextureCoordinates)
   {
-    writeGSTextureCoordinate(writer, coordinate);
+    auto field = writer->scope("vertexRegister");
+    writeGSVertex(writer, gs.vertexRegister);
   }
-  writer->writeU64(gs.primitiveVertexCount);
-  writer->writeU64(gs.renderedPoints);
-  writer->writeU64(gs.renderedLines);
-  writer->writeU64(gs.renderedSprites);
-  writer->writeU64(gs.renderedTriangles);
-  writer->writeU64(gs.writtenPixels);
-  for (const GSContext &context : gs.contexts)
   {
-    writeGSContext(writer, context);
+    auto field = writer->scope("textureCoordinateRegister");
+    writeGSTextureCoordinate(
+      writer,
+      gs.textureCoordinateRegister);
   }
-  writeGSImageTransfer(writer, gs.transfer);
-  writer->writeBool(gs.reverseHostInterface);
-  writer->writeBool(gs.perPixelAlphaBlending);
-  writer->writeSize(gs.localMemory.size());
-  for (std::uint32_t value : gs.localMemory)
   {
-    writer->writeU32(value);
+    auto vertices = writer->scope("primitiveVertices");
+    for (std::size_t index = 0;
+         index < gs.primitiveVertices.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writeGSVertex(writer, gs.primitiveVertices[index]);
+    }
   }
+  {
+    auto colors = writer->scope("primitiveColors");
+    for (std::size_t index = 0;
+         index < gs.primitiveColors.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writeGSColor(writer, gs.primitiveColors[index]);
+    }
+  }
+  {
+    auto coordinates =
+      writer->scope("primitiveTextureCoordinates");
+    for (std::size_t index = 0;
+         index < gs.primitiveTextureCoordinates.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writeGSTextureCoordinate(
+        writer,
+        gs.primitiveTextureCoordinates[index]);
+    }
+  }
+  writer->writeFieldU64(
+    "primitiveVertexCount",
+    gs.primitiveVertexCount);
+  writer->writeFieldU64("renderedPoints", gs.renderedPoints);
+  writer->writeFieldU64("renderedLines", gs.renderedLines);
+  writer->writeFieldU64("renderedSprites", gs.renderedSprites);
+  writer->writeFieldU64(
+    "renderedTriangles",
+    gs.renderedTriangles);
+  writer->writeFieldU64("writtenPixels", gs.writtenPixels);
+  {
+    auto contexts = writer->scope("contexts");
+    for (std::size_t index = 0;
+         index < gs.contexts.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writeGSContext(writer, gs.contexts[index]);
+    }
+  }
+  {
+    auto transfer = writer->scope("transfer");
+    writeGSImageTransfer(writer, gs.transfer);
+  }
+  writer->writeFieldBool(
+    "reverseHostInterface",
+    gs.reverseHostInterface);
+  writer->writeFieldBool(
+    "perPixelAlphaBlending",
+    gs.perPixelAlphaBlending);
+  writer->writeFieldSize("localMemorySize", gs.localMemory.size());
+  writer->writeFieldRange(
+    "localMemory",
+    [&]()
+    {
+      for (std::uint32_t value : gs.localMemory)
+      {
+        writer->writeU32(value);
+      }
+    });
 }
 
 void NekoSaveStateCodec::readGS(
   SaveStateReader *reader,
   GS *gs)
 {
-  const std::uint32_t registerCount = reader->readU32();
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
+  const std::uint32_t registerCount =
+    reader->readFieldU32("registerCount");
   require(
     registerCount == gs->registers.size(),
     "GS register-file size is invalid");
-  for (std::uint64_t &value : gs->registers)
   {
-    value = reader->readU64();
+    auto registers = reader->scope("registers");
+    for (std::size_t index = 0;
+         index < gs->registers.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      gs->registers[index] = reader->readFieldU64("value");
+    }
   }
-  gs->primitiveRegister = readGSPrimitive(reader);
-  gs->colorRegister = readGSColor(reader);
-  gs->vertexRegister = readGSVertex(reader);
-  gs->textureCoordinateRegister =
-    readGSTextureCoordinate(reader);
-  for (GSVertexCoordinate &vertex : gs->primitiveVertices)
   {
-    vertex = readGSVertex(reader);
+    auto field = reader->scope("primitiveRegister");
+    gs->primitiveRegister = readGSPrimitive(reader);
   }
-  for (GSColor &color : gs->primitiveColors)
   {
-    color = readGSColor(reader);
+    auto field = reader->scope("colorRegister");
+    gs->colorRegister = readGSColor(reader);
   }
-  for (GSTextureCoordinate &coordinate :
-       gs->primitiveTextureCoordinates)
   {
-    coordinate = readGSTextureCoordinate(reader);
+    auto field = reader->scope("vertexRegister");
+    gs->vertexRegister = readGSVertex(reader);
+  }
+  {
+    auto field = reader->scope("textureCoordinateRegister");
+    gs->textureCoordinateRegister =
+      readGSTextureCoordinate(reader);
+  }
+  {
+    auto vertices = reader->scope("primitiveVertices");
+    for (std::size_t index = 0;
+         index < gs->primitiveVertices.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      gs->primitiveVertices[index] = readGSVertex(reader);
+    }
+  }
+  {
+    auto colors = reader->scope("primitiveColors");
+    for (std::size_t index = 0;
+         index < gs->primitiveColors.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      gs->primitiveColors[index] = readGSColor(reader);
+    }
+  }
+  {
+    auto coordinates =
+      reader->scope("primitiveTextureCoordinates");
+    for (std::size_t index = 0;
+         index < gs->primitiveTextureCoordinates.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      gs->primitiveTextureCoordinates[index] =
+        readGSTextureCoordinate(reader);
+    }
   }
   const std::uint64_t primitiveVertexCount =
-    reader->readU64();
+    reader->readFieldU64("primitiveVertexCount");
   require(
     primitiveVertexCount <= gs->primitiveVertices.size(),
     "GS primitive queue size is invalid");
   gs->primitiveVertexCount =
     static_cast<std::size_t>(primitiveVertexCount);
-  gs->renderedPoints = reader->readU64();
-  gs->renderedLines = reader->readU64();
-  gs->renderedSprites = reader->readU64();
-  gs->renderedTriangles = reader->readU64();
-  gs->writtenPixels = reader->readU64();
-  for (GSContext &context : gs->contexts)
+  gs->renderedPoints = reader->readFieldU64("renderedPoints");
+  gs->renderedLines = reader->readFieldU64("renderedLines");
+  gs->renderedSprites =
+    reader->readFieldU64("renderedSprites");
+  gs->renderedTriangles =
+    reader->readFieldU64("renderedTriangles");
+  gs->writtenPixels = reader->readFieldU64("writtenPixels");
   {
-    context = readGSContext(reader);
+    auto contexts = reader->scope("contexts");
+    for (std::size_t index = 0;
+         index < gs->contexts.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      gs->contexts[index] = readGSContext(reader);
+    }
   }
-  gs->transfer = readGSImageTransfer(reader);
+  {
+    auto transfer = reader->scope("transfer");
+    gs->transfer = readGSImageTransfer(reader);
+  }
   gs->reverseHostInterface =
-    reader->readBool("GS BUSDIR flag");
+    reader->readFieldBool("reverseHostInterface");
   gs->perPixelAlphaBlending =
-    reader->readBool("GS per-pixel alpha flag");
-  const std::uint32_t localMemorySize = reader->readU32();
+    reader->readFieldBool("perPixelAlphaBlending");
+  const std::uint32_t localMemorySize =
+    reader->readFieldU32("localMemorySize");
   require(
     localMemorySize == gs->localMemory.size(),
     "GS local-memory size is invalid");
   std::vector<std::uint32_t> localMemory;
   localMemory.reserve(localMemorySize);
-  for (std::uint32_t index = 0;
-       index < localMemorySize;
-       ++index)
-  {
-    localMemory.push_back(reader->readU32());
-  }
+  reader->readFieldRange(
+    "localMemory",
+    static_cast<std::size_t>(localMemorySize) *
+      sizeof(std::uint32_t),
+    [&]()
+    {
+      for (std::uint32_t index = 0;
+           index < localMemorySize;
+           ++index)
+      {
+        localMemory.push_back(reader->readU32());
+      }
+    });
   gs->localMemory.swap(localMemory);
 }
 
@@ -821,21 +1176,49 @@ void NekoSaveStateCodec::writeDMAC(
   const DMACController &controller)
 {
   const DMACChannelState &state = channel.channelState;
-  writer->writeU32(state.channelControlRegister);
-  writer->writeU32(state.memoryAddressRegister);
-  writer->writeU32(state.quadwordCountRegister);
-  writer->writeU32(state.tagAddressRegister);
-  for (std::uint32_t value : state.addressStackRegisters)
+  writer->writeFieldU32(
+    "channelControlRegister",
+    state.channelControlRegister);
+  writer->writeFieldU32(
+    "memoryAddressRegister",
+    state.memoryAddressRegister);
+  writer->writeFieldU32(
+    "quadwordCountRegister",
+    state.quadwordCountRegister);
+  writer->writeFieldU32(
+    "tagAddressRegister",
+    state.tagAddressRegister);
   {
-    writer->writeU32(value);
+    auto addresses = writer->scope("addressStackRegisters");
+    for (std::size_t index = 0;
+         index < state.addressStackRegisters.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32(
+        "value",
+        state.addressStackRegisters[index]);
+    }
   }
-  writer->writeU32(controller.controlRegister);
-  writer->writeU32(controller.statusRegister);
-  writer->writeU32(controller.statusMaskRegister);
-  writer->writeBool(state.terminateAfterPacket);
-  writer->writeBool(channel.path3Stalled);
-  writer->writeU8(state.addressStackDepth);
-  writer->writeU64(channel.transferredQuadwords);
+  writer->writeFieldU32(
+    "controllerControlRegister",
+    controller.controlRegister);
+  writer->writeFieldU32(
+    "controllerStatusRegister",
+    controller.statusRegister);
+  writer->writeFieldU32(
+    "controllerStatusMaskRegister",
+    controller.statusMaskRegister);
+  writer->writeFieldBool(
+    "terminateAfterPacket",
+    state.terminateAfterPacket);
+  writer->writeFieldBool("path3Stalled", channel.path3Stalled);
+  writer->writeFieldU8(
+    "addressStackDepth",
+    state.addressStackDepth);
+  writer->writeFieldU64(
+    "transferredQuadwords",
+    channel.transferredQuadwords);
 }
 
 void NekoSaveStateCodec::readDMAC(
@@ -843,24 +1226,45 @@ void NekoSaveStateCodec::readDMAC(
   GIFDMACChannel *channel,
   DMACController *controller)
 {
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
   DMACChannelState &state = channel->channelState;
-  state.channelControlRegister = reader->readU32();
-  state.memoryAddressRegister = reader->readU32();
-  state.quadwordCountRegister = reader->readU32();
-  state.tagAddressRegister = reader->readU32();
-  for (std::uint32_t &value : state.addressStackRegisters)
+  state.channelControlRegister =
+    reader->readFieldU32("channelControlRegister");
+  state.memoryAddressRegister =
+    reader->readFieldU32("memoryAddressRegister");
+  state.quadwordCountRegister =
+    reader->readFieldU32("quadwordCountRegister");
+  state.tagAddressRegister =
+    reader->readFieldU32("tagAddressRegister");
   {
-    value = reader->readU32();
+    auto addresses = reader->scope("addressStackRegisters");
+    for (std::size_t index = 0;
+         index < state.addressStackRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      state.addressStackRegisters[index] =
+        reader->readFieldU32("value");
+    }
   }
-  controller->controlRegister = reader->readU32();
-  controller->statusRegister = reader->readU32();
-  controller->statusMaskRegister = reader->readU32();
+  controller->controlRegister =
+    reader->readFieldU32("controllerControlRegister");
+  controller->statusRegister =
+    reader->readFieldU32("controllerStatusRegister");
+  controller->statusMaskRegister =
+    reader->readFieldU32("controllerStatusMaskRegister");
   state.terminateAfterPacket =
-    reader->readBool("GIF DMAC termination flag");
+    reader->readFieldBool("terminateAfterPacket");
   channel->path3Stalled =
-    reader->readBool("GIF DMAC PATH3 stall flag");
-  state.addressStackDepth = reader->readU8();
-  channel->transferredQuadwords = reader->readU64();
+    reader->readFieldBool("path3Stalled");
+  state.addressStackDepth =
+    reader->readFieldU8("addressStackDepth");
+  channel->transferredQuadwords =
+    reader->readFieldU64("transferredQuadwords");
 
   const std::uint32_t writableControl =
     GIFDMACChannelControl::FROM_MEMORY |
@@ -922,39 +1326,79 @@ void NekoSaveStateCodec::writeVIF1DMAC(
   const VIF1DMACChannel &dmac)
 {
   const DMACChannelState &state = dmac.channelState;
-  writer->writeU32(state.channelControlRegister);
-  writer->writeU32(state.memoryAddressRegister);
-  writer->writeU32(state.quadwordCountRegister);
-  writer->writeU32(state.tagAddressRegister);
-  for (std::uint32_t address : state.addressStackRegisters)
+  writer->writeFieldU32(
+    "channelControlRegister",
+    state.channelControlRegister);
+  writer->writeFieldU32(
+    "memoryAddressRegister",
+    state.memoryAddressRegister);
+  writer->writeFieldU32(
+    "quadwordCountRegister",
+    state.quadwordCountRegister);
+  writer->writeFieldU32(
+    "tagAddressRegister",
+    state.tagAddressRegister);
   {
-    writer->writeU32(address);
+    auto addresses = writer->scope("addressStackRegisters");
+    for (std::size_t index = 0;
+         index < state.addressStackRegisters.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      writer->writeFieldU32(
+        "value",
+        state.addressStackRegisters[index]);
+    }
   }
-  writer->writeBool(state.terminateAfterPacket);
-  writer->writeBool(dmac.vif1Stalled);
-  writer->writeU8(state.addressStackDepth);
-  writer->writeU64(dmac.transferredQuadwords);
+  writer->writeFieldBool(
+    "terminateAfterPacket",
+    state.terminateAfterPacket);
+  writer->writeFieldBool("vif1Stalled", dmac.vif1Stalled);
+  writer->writeFieldU8(
+    "addressStackDepth",
+    state.addressStackDepth);
+  writer->writeFieldU64(
+    "transferredQuadwords",
+    dmac.transferredQuadwords);
 }
 
 void NekoSaveStateCodec::readVIF1DMAC(
   SaveStateReader *reader,
   VIF1DMACChannel *dmac)
 {
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
   DMACChannelState &state = dmac->channelState;
-  state.channelControlRegister = reader->readU32();
-  state.memoryAddressRegister = reader->readU32();
-  state.quadwordCountRegister = reader->readU32();
-  state.tagAddressRegister = reader->readU32();
-  for (std::uint32_t &address : state.addressStackRegisters)
+  state.channelControlRegister =
+    reader->readFieldU32("channelControlRegister");
+  state.memoryAddressRegister =
+    reader->readFieldU32("memoryAddressRegister");
+  state.quadwordCountRegister =
+    reader->readFieldU32("quadwordCountRegister");
+  state.tagAddressRegister =
+    reader->readFieldU32("tagAddressRegister");
   {
-    address = reader->readU32();
+    auto addresses = reader->scope("addressStackRegisters");
+    for (std::size_t index = 0;
+         index < state.addressStackRegisters.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      state.addressStackRegisters[index] =
+        reader->readFieldU32("value");
+    }
   }
   state.terminateAfterPacket =
-    reader->readBool("VIF1 DMAC termination flag");
+    reader->readFieldBool("terminateAfterPacket");
   dmac->vif1Stalled =
-    reader->readBool("VIF1 DMAC stall flag");
-  state.addressStackDepth = reader->readU8();
-  dmac->transferredQuadwords = reader->readU64();
+    reader->readFieldBool("vif1Stalled");
+  state.addressStackDepth =
+    reader->readFieldU8("addressStackDepth");
+  dmac->transferredQuadwords =
+    reader->readFieldU64("transferredQuadwords");
 
   const std::uint32_t writableControl =
     GIFDMACChannelControl::FROM_MEMORY |
@@ -1003,78 +1447,139 @@ void NekoSaveStateCodec::writeGSDisplay(
   SaveStateWriter *writer,
   const GSDisplay &display)
 {
-  writer->writeSize(display.circuits.size());
-  for (const GSDisplay::Circuit &circuit : display.circuits)
+  writer->writeFieldSize("circuitCount", display.circuits.size());
   {
-    writer->writeU16(circuit.basePointer);
-    writer->writeU8(circuit.bufferWidth);
-    writer->writeU8(circuit.pixelStorageMode);
-    writer->writeU16(circuit.sourceX);
-    writer->writeU16(circuit.sourceY);
-    writer->writeU8(circuit.horizontalMagnification);
-    writer->writeU8(circuit.verticalMagnification);
-    writer->writeU16(circuit.displayWidth);
-    writer->writeU16(circuit.displayHeight);
+    auto circuits = writer->scope("circuits");
+    for (std::size_t index = 0;
+         index < display.circuits.size();
+         ++index)
+    {
+      auto element = writer->element(index);
+      const GSDisplay::Circuit &circuit =
+        display.circuits[index];
+      writer->writeFieldU16("basePointer", circuit.basePointer);
+      writer->writeFieldU8("bufferWidth", circuit.bufferWidth);
+      writer->writeFieldU8(
+        "pixelStorageMode",
+        circuit.pixelStorageMode);
+      writer->writeFieldU16("sourceX", circuit.sourceX);
+      writer->writeFieldU16("sourceY", circuit.sourceY);
+      writer->writeFieldU8(
+        "horizontalMagnification",
+        circuit.horizontalMagnification);
+      writer->writeFieldU8(
+        "verticalMagnification",
+        circuit.verticalMagnification);
+      writer->writeFieldU16("displayWidth", circuit.displayWidth);
+      writer->writeFieldU16(
+        "displayHeight",
+        circuit.displayHeight);
+    }
   }
-  writer->writeU64(display.videoTiming.activeCycles);
-  writer->writeU64(display.videoTiming.totalCycles);
-  writer->writeU64(display.modeRegister);
-  writer->writeU64(display.syncModeRegister);
-  writer->writeU64(display.backgroundColor);
-  writer->writeU64(display.interruptMaskRegister);
-  writer->writeU64(display.cycleInFrame);
-  writer->writeU64(display.frameBoundaries);
-  writer->writeBool(display.verticalBlank);
-  writer->writeBool(display.oddField);
-  writer->writeBool(display.vsyncInterrupt);
-  writer->writeBool(display.verticalBlankStarted);
-  writer->writeBool(display.verticalBlankEnded);
+  writer->writeFieldU64(
+    "activeCycles",
+    display.videoTiming.activeCycles);
+  writer->writeFieldU64(
+    "totalCycles",
+    display.videoTiming.totalCycles);
+  writer->writeFieldU64("modeRegister", display.modeRegister);
+  writer->writeFieldU64(
+    "syncModeRegister",
+    display.syncModeRegister);
+  writer->writeFieldU64(
+    "backgroundColor",
+    display.backgroundColor);
+  writer->writeFieldU64(
+    "interruptMaskRegister",
+    display.interruptMaskRegister);
+  writer->writeFieldU64("cycleInFrame", display.cycleInFrame);
+  writer->writeFieldU64(
+    "frameBoundaries",
+    display.frameBoundaries);
+  writer->writeFieldBool("verticalBlank", display.verticalBlank);
+  writer->writeFieldBool("oddField", display.oddField);
+  writer->writeFieldBool(
+    "vsyncInterrupt",
+    display.vsyncInterrupt);
+  writer->writeFieldBool(
+    "verticalBlankStarted",
+    display.verticalBlankStarted);
+  writer->writeFieldBool(
+    "verticalBlankEnded",
+    display.verticalBlankEnded);
 }
 
 void NekoSaveStateCodec::readGSDisplay(
   SaveStateReader *reader,
   GSDisplay *display)
 {
-  const std::uint32_t circuitCount = reader->readU32();
+  const auto require =
+    [reader](bool condition, const std::string &detail)
+    {
+      reader->requireField(condition, detail);
+    };
+  const std::uint32_t circuitCount =
+    reader->readFieldU32("circuitCount");
   require(
     circuitCount == display->circuits.size(),
     "GS display-circuit count is invalid");
-  for (GSDisplay::Circuit &circuit : display->circuits)
   {
-    circuit.basePointer = reader->readU16();
-    circuit.bufferWidth = reader->readU8();
-    circuit.pixelStorageMode = reader->readU8();
-    circuit.sourceX = reader->readU16();
-    circuit.sourceY = reader->readU16();
-    circuit.horizontalMagnification = reader->readU8();
-    circuit.verticalMagnification = reader->readU8();
-    circuit.displayWidth = reader->readU16();
-    circuit.displayHeight = reader->readU16();
-    require(
-      circuit.horizontalMagnification >= 1 &&
-      circuit.horizontalMagnification <= 16 &&
-      circuit.verticalMagnification >= 1 &&
-      circuit.verticalMagnification <= 4,
-      "GS display-circuit geometry is invalid");
+    auto circuits = reader->scope("circuits");
+    for (std::size_t index = 0;
+         index < display->circuits.size();
+         ++index)
+    {
+      auto element = reader->element(index);
+      GSDisplay::Circuit &circuit = display->circuits[index];
+      circuit.basePointer =
+        reader->readFieldU16("basePointer");
+      circuit.bufferWidth =
+        reader->readFieldU8("bufferWidth");
+      circuit.pixelStorageMode =
+        reader->readFieldU8("pixelStorageMode");
+      circuit.sourceX = reader->readFieldU16("sourceX");
+      circuit.sourceY = reader->readFieldU16("sourceY");
+      circuit.horizontalMagnification =
+        reader->readFieldU8("horizontalMagnification");
+      circuit.verticalMagnification =
+        reader->readFieldU8("verticalMagnification");
+      circuit.displayWidth =
+        reader->readFieldU16("displayWidth");
+      circuit.displayHeight =
+        reader->readFieldU16("displayHeight");
+      require(
+        circuit.horizontalMagnification >= 1 &&
+        circuit.horizontalMagnification <= 16 &&
+        circuit.verticalMagnification >= 1 &&
+        circuit.verticalMagnification <= 4,
+        "GS display-circuit geometry is invalid");
+    }
   }
-  display->videoTiming.activeCycles = reader->readU64();
-  display->videoTiming.totalCycles = reader->readU64();
-  display->modeRegister = reader->readU64();
-  display->syncModeRegister = reader->readU64();
-  display->backgroundColor = reader->readU64();
-  display->interruptMaskRegister = reader->readU64();
-  display->cycleInFrame = reader->readU64();
-  display->frameBoundaries = reader->readU64();
+  display->videoTiming.activeCycles =
+    reader->readFieldU64("activeCycles");
+  display->videoTiming.totalCycles =
+    reader->readFieldU64("totalCycles");
+  display->modeRegister = reader->readFieldU64("modeRegister");
+  display->syncModeRegister =
+    reader->readFieldU64("syncModeRegister");
+  display->backgroundColor =
+    reader->readFieldU64("backgroundColor");
+  display->interruptMaskRegister =
+    reader->readFieldU64("interruptMaskRegister");
+  display->cycleInFrame =
+    reader->readFieldU64("cycleInFrame");
+  display->frameBoundaries =
+    reader->readFieldU64("frameBoundaries");
   display->verticalBlank =
-    reader->readBool("GS vertical-blank flag");
+    reader->readFieldBool("verticalBlank");
   display->oddField =
-    reader->readBool("GS odd-field flag");
+    reader->readFieldBool("oddField");
   display->vsyncInterrupt =
-    reader->readBool("GS VSYNC interrupt flag");
+    reader->readFieldBool("vsyncInterrupt");
   display->verticalBlankStarted =
-    reader->readBool("GS vertical-blank-start event");
+    reader->readFieldBool("verticalBlankStarted");
   display->verticalBlankEnded =
-    reader->readBool("GS vertical-blank-end event");
+    reader->readFieldBool("verticalBlankEnded");
   require(
     display->videoTiming.activeCycles != 0 &&
     display->videoTiming.activeCycles <
