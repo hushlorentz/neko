@@ -1958,7 +1958,7 @@ creating parallel ownership.
       save-state diagnostics. Add a focused diagnostic only for a demonstrated
       ambiguity; otherwise retain the current surfaces explicitly. Keep ship
       hot paths allocation-free and avoid broad per-access logging.
-- [ ] Run the complete deterministic continuation matrix for traces, hashes,
+- [x] Run the complete deterministic continuation matrix for traces, hashes,
       consecutive saves, dirty-destination loads, faults, refills/writebacks,
       scratchpad accesses, interrupts, host halts, and restarts.
 - [ ] Complete an independent final review of deterministic observation,
