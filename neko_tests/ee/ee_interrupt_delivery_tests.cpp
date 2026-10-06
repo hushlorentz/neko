@@ -267,10 +267,19 @@ TEST_CASE("EE interrupt lines survive save-state restoration")
   original.eeBus().write32(0, 0);
   original.eeCore().startExecution(0);
 
+  const std::vector<std::uint8_t> checkpoint =
+    original.saveState();
   NekoSystem restored;
-  restored.loadState(original.saveState());
+  restored.loadState(checkpoint);
+  REQUIRE(restored.saveState() == checkpoint);
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+
+  original.clockMasterCycle();
   restored.clockMasterCycle();
 
+  REQUIRE(
+    original.eeCore().pendingException() ==
+    EEException::Interrupt);
   REQUIRE(
     restored.eeCore().pendingException() ==
     EEException::Interrupt);
@@ -278,4 +287,6 @@ TEST_CASE("EE interrupt lines survive save-state restoration")
     restored.eeCore().programCounter() ==
     EEExceptionVector::INTERRUPT);
   REQUIRE(restored.eeCore().cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(restored.saveState() == original.saveState());
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
 }

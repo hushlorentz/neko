@@ -2267,6 +2267,126 @@ TEST_CASE("EE data cache refills then returns physical-tag hits")
   REQUIRE(result.data[3] == 0x44);
 }
 
+TEST_CASE("EE cache boundaries continue identically after save-state restore")
+{
+  SECTION("A pending data-cache refill")
+  {
+    NekoSystem original;
+    original.eeMemorySystem().setCOP0Register(
+      EECOP0Register::Config,
+      EECOP0Config::DATA_CACHE_ENABLE);
+    const EEAddressTranslationResult translation =
+      dataTranslation(0x8000012c, 0x12c);
+    original.eeBus().write32(
+      0x12c,
+      UINT32_C(0x44332211));
+
+    const std::vector<std::uint8_t> checkpoint =
+      original.saveState();
+    NekoSystem restored;
+    restored.loadState(checkpoint);
+
+    const EEDataCacheLoadResult originalResult =
+      EEMemorySystemTestAccess::loadData(
+        &original.eeMemorySystem(),
+        original.eeBus(),
+        translation,
+        4);
+    const EEDataCacheLoadResult restoredResult =
+      EEMemorySystemTestAccess::loadData(
+        &restored.eeMemorySystem(),
+        restored.eeBus(),
+        translation,
+        4);
+
+    REQUIRE(
+      originalResult.outcome ==
+      EEDataCacheLoadOutcome::Completed);
+    REQUIRE(
+      restoredResult.outcome ==
+      originalResult.outcome);
+    REQUIRE(
+      restoredResult.source ==
+      originalResult.source);
+    REQUIRE(restoredResult.data == originalResult.data);
+    REQUIRE(restored.saveState() == original.saveState());
+    REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  }
+
+  SECTION("A refill that evicts a dirty line")
+  {
+    NekoSystem original;
+    original.eeMemorySystem().setCOP0Register(
+      EECOP0Register::Config,
+      EECOP0Config::DATA_CACHE_ENABLE);
+    constexpr std::uint32_t virtualAddress =
+      UINT32_C(0x80000100);
+    constexpr std::uint32_t physicalAddresses[] = {
+      UINT32_C(0x00000100),
+      UINT32_C(0x00001100),
+      UINT32_C(0x00002100)
+    };
+
+    for (std::size_t index = 0; index < 2; ++index)
+    {
+      const EEDataCacheStoreResult result =
+        EEMemorySystemTestAccess::storeData(
+          &original.eeMemorySystem(),
+          &original.eeBus(),
+          dataTranslation(
+            virtualAddress,
+            physicalAddresses[index]),
+          storeBytes(index + 1),
+          1);
+      REQUIRE(
+        result.outcome ==
+        EEDataCacheStoreOutcome::Completed);
+      REQUIRE_FALSE(result.evictedDirty);
+    }
+
+    const std::vector<std::uint8_t> checkpoint =
+      original.saveState();
+    NekoSystem restored;
+    restored.loadState(checkpoint);
+
+    const auto completeEviction =
+      [virtualAddress, &physicalAddresses](
+        NekoSystem *system)
+      {
+        return EEMemorySystemTestAccess::storeData(
+          &system->eeMemorySystem(),
+          &system->eeBus(),
+          dataTranslation(
+            virtualAddress,
+            physicalAddresses[2]),
+          storeBytes(3),
+          1);
+      };
+    const EEDataCacheStoreResult originalResult =
+      completeEviction(&original);
+    const EEDataCacheStoreResult restoredResult =
+      completeEviction(&restored);
+
+    REQUIRE(originalResult.evictedDirty);
+    REQUIRE(
+      restoredResult.outcome ==
+      originalResult.outcome);
+    REQUIRE(
+      restoredResult.source ==
+      originalResult.source);
+    REQUIRE(
+      restoredResult.evictedDirty ==
+      originalResult.evictedDirty);
+    REQUIRE(
+      restored.eeBus().read32(physicalAddresses[0]) ==
+      original.eeBus().read32(physicalAddresses[0]));
+    REQUIRE(
+      restored.eeBus().read32(physicalAddresses[0]) == 1);
+    REQUIRE(restored.saveState() == original.saveState());
+    REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  }
+}
+
 TEST_CASE("EE data cache handles every aligned width at line edges")
 {
   NekoSystem system;

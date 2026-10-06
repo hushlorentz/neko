@@ -667,14 +667,59 @@ TEST_CASE("Neko save states are canonical and deterministic")
 {
   NekoSystem first;
   NekoSystem second;
+  NekoSystem dirtyDestination;
   prepareInFlightSystem(&first);
   prepareInFlightSystem(&second);
+  prepareSuspendedPath3(&dirtyDestination);
+  dirtyDestination.setInput({0x5aa5, 4, 3, 2, 1});
+  dirtyDestination.eeCore().setGeneralRegister(
+    1,
+    {UINT64_C(0xaaaaaaaa55555555),
+     UINT64_C(0x55555555aaaaaaaa)});
+  dirtyDestination.eeCore().setProgramCounter(0xbfc00000);
+  dirtyDestination.eeMemorySystem().writeScratchpad64(
+    0x1230,
+    UINT64_C(0x0f1e2d3c4b5a6978));
+  dirtyDestination.eeBus().write32(
+    0x4000,
+    UINT32_C(0x89abcdef));
+  dirtyDestination.interruptController().setSource(
+    EEInterruptSource::VU1,
+    true);
+  dirtyDestination.vu0().writeMicroInstruction(
+    0,
+    VPU_LOWER_NOP,
+    VPU_E_BIT | VPU_NOP);
+  dirtyDestination.vu0().startMicroMode();
+  dirtyDestination.vif1().ingestWord(
+    vifCode(VIFCommandEncoding::STROW));
+  dirtyDestination.vif1().ingestWord(0xaaaaaaaa);
+  dirtyDestination.dmacController().writeControl(
+    DMACControl::DMA_ENABLE);
+  dirtyDestination.fromScratchpadDMAC().writeMemoryAddress(
+    0x4000);
+  dirtyDestination.fromScratchpadDMAC().writeQuadwordCount(2);
+  dirtyDestination.fromScratchpadDMAC().writeScratchpadAddress(
+    0x120);
+  dirtyDestination.fromScratchpadDMAC().writeChannelControl(
+    DMACChannelControl::START);
+  dirtyDestination.eeCore().startExecution(0xbfc00000);
 
   const std::vector<std::uint8_t> firstState =
     first.saveState();
 
   REQUIRE(firstState == first.saveState());
   REQUIRE(firstState == second.saveState());
+  REQUIRE(firstState != dirtyDestination.saveState());
+
+  dirtyDestination.loadState(firstState);
+  REQUIRE(dirtyDestination.saveState() == firstState);
+  REQUIRE(
+    dirtyDestination.eeCore().stateHash() ==
+    first.eeCore().stateHash());
+  REQUIRE(
+    dirtyDestination.eeStateHash() ==
+    first.eeStateHash());
 
   std::size_t traceCount = 0;
   first.vu1().setTraceCallback(

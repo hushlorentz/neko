@@ -1911,7 +1911,7 @@ creating parallel ownership.
       memory continuation, and payload-size mismatches before commit while
       preserving transactional load and the current format when no new
       serialized state is required.
-- [ ] Prove byte-identical consecutive saves, save/load into a dirty
+- [x] Prove byte-identical consecutive saves, save/load into a dirty
       destination, deterministic state hashes, and identical completion across
       TLB faults, cache refills/writebacks, scratchpad DMA, interrupts, host
       halts, and execution restarts.
