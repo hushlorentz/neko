@@ -23,6 +23,14 @@ dependency rather than estimated completion date.
   behavior-preserving, proportionate, and protected by existing or focused
   tests. Record larger or unrelated cleanup instead of expanding scope
   silently.
+- Before closing each milestone, perform a bounded architecture and
+  maintainability review of the completed work and its immediate integration
+  boundaries. Consolidate duplicated ownership and interfaces, replace
+  behavioral boolean parameters and mixed-purpose methods where justified,
+  retain booleans that directly represent hardware state, and use SOLID
+  principles as heuristics without adding speculative abstraction or
+  indirection. Validate accepted repairs before the final independent
+  correctness review.
 - Keep emulated hardware deterministic and separate from user interfaces.
 - Preserve raw guest data and avoid relying on host floating-point behavior.
 - Add optimization only after profiling demonstrates a need.
@@ -1982,6 +1990,13 @@ creating parallel ownership.
 - [ ] Run the complete optimized repository check and compare representative
       pre-milestone guest output, trace shape, state hashes, and save-state
       changes with an explicit explanation for every intentional difference.
+- [ ] Complete the milestone architecture and maintainability review. Inspect
+      the EE memory-system implementation and immediate integration boundaries
+      for duplicated ownership or validation, consolidatable interfaces,
+      behavioral boolean parameters, mixed-purpose methods, dependency
+      direction, and provisional structures whose replacement trigger has
+      arrived. Apply only bounded behavior-preserving repairs, validate them,
+      and record larger follow-up work explicitly.
 - [ ] Complete an independent final review of the full memory-system milestone,
       resolve every concrete finding, run the optimized AddressSanitizer and
       native macOS leak checks, reconcile `PROJECT.md`, and close the milestone.
@@ -2208,6 +2223,10 @@ compatibility policy into a frontend.
   and its architectural direction. Name the state owner, method boundaries,
   dependencies, extension strategy, save-state and trace effects, hot paths,
   and regression surfaces.
+- Before closing every milestone, include a bounded architecture and
+  maintainability review after conformance is green and before the final
+  independent correctness review. Validate accepted repairs and record
+  out-of-scope restructuring rather than silently extending the milestone.
 - Decide explicitly whether the work receives a durable extensible boundary or
   a minimal isolated implementation. Do not leave an accidental intermediate
   design: document why the minimal form is sufficient and what concrete future
