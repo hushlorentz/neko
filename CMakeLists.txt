@@ -238,6 +238,8 @@ add_executable(neko_tests
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp
     neko_tests/save_state_internal_tests.cpp
+    neko_tests/save_state_mutation.cpp
+    neko_tests/save_state_mutation_tests.cpp
     neko_tests/save_state_tests.cpp
     neko_tests/save_state_command_tests.cpp
     neko_tests/regression_trace_tests.cpp

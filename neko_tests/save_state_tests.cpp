@@ -10,6 +10,7 @@
 #include "floating_point_ops.hpp"
 #include "gif_dmac_channel.hpp"
 #include "neko_system.hpp"
+#include "save_state_mutation.hpp"
 #include "vif_command.hpp"
 #include "vpu_opcodes.hpp"
 #include "vpu_register_ids.hpp"
@@ -17,203 +18,13 @@
 
 namespace
 {
-  constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
-  constexpr std::size_t SAVE_STATE_CHECKSUM_OFFSET = 20;
+  constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
-  constexpr std::size_t MASTER_CLOCK_FIRST_COMPONENT_OFFSET = 46;
-  constexpr std::size_t MASTER_CLOCK_COMPONENT_SIZE = 17;
   constexpr std::size_t
     VERSION_31_PREPARED_STATE_SIZE = 37845584;
   constexpr std::uint64_t
     VERSION_31_PREPARED_STATE_HASH =
       UINT64_C(0x1d210794e3d0a8ec);
-  constexpr std::size_t SPR_DMA_STATE_SIZE = 16432;
-  constexpr std::size_t SPR_DMA_SCRATCHPAD_SIZE = 16384;
-  constexpr std::size_t SPR_DMA_CHANNEL_SIZE = 22;
-  constexpr std::size_t SPR_DMA_SQWC_OFFSET_FROM_END =
-    4 + 2 * SPR_DMA_CHANNEL_SIZE;
-  constexpr std::size_t SPR_DMA_FROM_OFFSET_FROM_END =
-    2 * SPR_DMA_CHANNEL_SIZE;
-  constexpr std::size_t SPR_DMA_TO_OFFSET_FROM_END =
-    SPR_DMA_CHANNEL_SIZE;
-  constexpr std::size_t PREPARED_EE_GPR_ZERO_HIGH_OFFSET = 173;
-  constexpr std::size_t PREPARED_EE_FCR31_OFFSET = 809;
-  constexpr std::size_t EE_COP1_DIVIDER_INITIATION_OFFSET = 972;
-  constexpr std::size_t EE_COP1_DIVIDER_OPERATION_OFFSET = 973;
-  constexpr std::size_t
-    SIMPLE_EE_COP1_DIVIDER_INITIATION_OFFSET = 955;
-  constexpr std::size_t
-    SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET = 956;
-  constexpr std::size_t
-    SIMPLE_EE_RETIRED_COP1_OPERATE_RESOURCE_OFFSET = 957;
-  constexpr std::size_t
-    SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET = 959;
-  constexpr std::size_t
-    SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET = 960;
-  constexpr std::size_t
-    SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET = 964;
-  constexpr std::size_t SIMPLE_EE_EXCEPTION_OFFSET = 864;
-  constexpr std::size_t SIMPLE_EE_EXECUTION_STATE_OFFSET = 869;
-  constexpr std::size_t SIMPLE_EE_STOP_REASON_OFFSET = 870;
-  constexpr std::size_t
-    SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET = 893;
-  constexpr std::size_t
-    SIMPLE_EE_PENDING_MAC0_GENERAL_REGISTER_OFFSET = 911;
-  constexpr std::size_t
-    SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET = 921;
-  constexpr std::size_t
-    SIMPLE_EE_PENDING_MAC1_ACTIVE_OFFSET = 920;
-  constexpr std::size_t
-    SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET = 939;
-  constexpr std::size_t
-    SIMPLE_EE_NEXT_PROGRAM_ORDER_OFFSET = 1012;
-  constexpr std::size_t
-    PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET = 1003;
-  constexpr std::size_t EE_COP1_POST_DELAY_COUNT_OFFSET = 1005;
-  constexpr std::size_t EE_COP1_POST_DELAY_ADDRESS_OFFSET = 1006;
-  constexpr std::size_t EE_COP1_POST_DELAY_TARGET_OFFSET = 1010;
-  constexpr std::size_t EE_COP1_POST_DELAY_TAKEN_OFFSET = 1014;
-  constexpr std::size_t EE_COP1_POST_TARGET_COUNT_OFFSET = 1015;
-  constexpr std::size_t EE_COP1_POST_TARGET_ADDRESS_OFFSET = 1016;
-  constexpr std::size_t EE_ISSUE_LATCH_ADDRESS_OFFSET = 1021;
-  constexpr std::size_t EE_NEXT_PROGRAM_ORDER_OFFSET = 1029;
-  constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET = 1037;
-  constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET = 1038;
-  constexpr std::size_t EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET = 1046;
-  constexpr std::size_t
-    EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET = 1047;
-  constexpr std::size_t
-    EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1051;
-  constexpr std::size_t
-    EE_FIRST_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET = 1071;
-  constexpr std::size_t
-    EE_FIRST_IN_FLIGHT_COP1_MEMORY_ADDRESS_OFFSET = 1079;
-  constexpr std::size_t
-    EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1087;
-  constexpr std::size_t
-    EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1088;
-  constexpr std::size_t
-    EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1098;
-  constexpr std::size_t
-    EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1150;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1070;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1071;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET = 1073;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET = 1078;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CONDITION_OFFSET = 1080;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET = 1021;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET = 1029;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1034;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET = 1038;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_ACC_OFFSET = 1046;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_STICKY_FLAGS_OFFSET = 1079;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1081;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ACTIVE_OFFSET = 1082;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET = 1083;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET = 1091;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ADDRESS_OFFSET = 1092;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET = 1096;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET = 1116;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET = 1132;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET = 1133;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_GPR_OFFSET = 1134;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET = 1143;
-  constexpr std::size_t
-    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_ORDER_OFFSET = 1145;
-  constexpr std::size_t
-    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_STAGE_OFFSET = 1153;
-  constexpr std::size_t
-    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET = 1162;
-  constexpr std::size_t
-    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_RAW_RESULT_OFFSET = 1197;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET = 2012;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_ACTIVE_OFFSET = 2013;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_OPERATION_OFFSET = 2014;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_ORDER_OFFSET = 2015;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_SOURCE_LOW_OFFSET = 2023;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_HI_LOW_OFFSET = 2055;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_LO_LOW_OFFSET = 2071;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_DESTINATION_OFFSET = 2087;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_RESULT_LOW_OFFSET = 2088;
-  constexpr std::size_t
-    SIMPLE_EE_FIRST_PACKED_MAC_REMAINING_CYCLES_OFFSET = 2104;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET = 2107;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_PACKED_MAC_ACTIVE_OFFSET = 2105;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_PACKED_MAC_DESTINATION_OFFSET = 2179;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_PACKED_MAC_LO_LOW_OFFSET = 2163;
-  constexpr std::size_t
-    SIMPLE_EE_SECOND_PACKED_MAC_RESULT_LOW_OFFSET = 2180;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET = 2197;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET = 2198;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_DIVIDE_ORDER_OFFSET = 2199;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_DIVIDE_SOURCE_LOW_OFFSET = 2207;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_DIVIDE_TARGET_LOW_OFFSET = 2223;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET = 2239;
-  constexpr std::size_t
-    SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET = 2271;
-  constexpr std::size_t PREPARED_EE_COP0_INDEX_OFFSET = 2289;
-  constexpr std::size_t PREPARED_EE_COP0_RANDOM_OFFSET = 2293;
-  constexpr std::size_t PREPARED_EE_COP0_ENTRY_LO_0_OFFSET = 2297;
-  constexpr std::size_t PREPARED_EE_COP0_ENTRY_LO_1_OFFSET = 2301;
-  constexpr std::size_t PREPARED_EE_COP0_CONTEXT_OFFSET = 2305;
-  constexpr std::size_t PREPARED_EE_COP0_PAGE_MASK_OFFSET = 2309;
-  constexpr std::size_t PREPARED_EE_COP0_WIRED_OFFSET = 2313;
-  constexpr std::size_t PREPARED_EE_COP0_ENTRY_HI_OFFSET = 2317;
-  constexpr std::size_t PREPARED_EE_COP0_CONFIG_OFFSET = 2321;
-  constexpr std::size_t PREPARED_EE_TLB_OFFSET = 2333;
-  constexpr std::size_t EE_CACHE_LINE_STATE_SIZE = 72;
-  constexpr std::size_t
-    PREPARED_EE_FIRST_INSTRUCTION_CACHE_OFFSET =
-      PREPARED_EE_TLB_OFFSET +
-      EEMemorySystem::TLB_ENTRY_COUNT * 16;
-  constexpr std::size_t EE_CACHE_STATE_SIZE =
-    EE_CACHE_LINE_STATE_SIZE *
-    EEMemorySystem::CACHE_WAY_COUNT *
-    (EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT +
-     EEMemorySystem::DATA_CACHE_SET_COUNT);
-  constexpr std::size_t PREPARED_MAIN_MEMORY_SIZE_OFFSET =
-    3109 + EE_CACHE_STATE_SIZE;
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -245,7 +56,7 @@ namespace
     const std::vector<std::uint8_t> &expected)
   {
     REQUIRE(actual.size() == expected.size());
-    std::size_t mismatch = SAVE_STATE_HEADER_SIZE;
+    std::size_t mismatch = TEST_SAVE_STATE_HEADER_SIZE;
     while (mismatch < actual.size() &&
            actual[mismatch] == expected[mismatch])
     {
@@ -255,16 +66,9 @@ namespace
     REQUIRE(mismatch == actual.size());
   }
 
-  void updateChecksum(std::vector<std::uint8_t> *state)
+  void updateChecksum(SaveStateMutation *state)
   {
-    const std::uint64_t checksum =
-      hashBytes(*state, SAVE_STATE_HEADER_SIZE);
-    for (std::size_t index = 0; index < 8; ++index)
-    {
-      (*state)[SAVE_STATE_CHECKSUM_OFFSET + index] =
-        static_cast<std::uint8_t>(
-          checksum >> (index * 8));
-    }
+    state->refreshChecksum();
   }
 
   void writeU32(
@@ -289,6 +93,22 @@ namespace
       (*state)[offset + index] =
         static_cast<std::uint8_t>(value >> (index * 8));
     }
+  }
+
+  void writeU32(
+    SaveStateMutation *state,
+    const std::string &path,
+    std::uint32_t value)
+  {
+    state->writeScalar(path, value);
+  }
+
+  void writeU64(
+    SaveStateMutation *state,
+    const std::string &path,
+    std::uint64_t value)
+  {
+    state->writeScalar(path, value);
   }
 
   std::uint32_t cop1TransferInstruction(
@@ -812,7 +632,7 @@ TEST_CASE("Version 31 save-state layout is byte-stable")
   const std::uint8_t magic[] = {
     'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
   };
-  REQUIRE(state.size() >= SAVE_STATE_HEADER_SIZE);
+  REQUIRE(state.size() >= TEST_SAVE_STATE_HEADER_SIZE);
   for (std::size_t index = 0;
        index < sizeof(magic);
        ++index)
@@ -991,7 +811,6 @@ TEST_CASE("Malformed SPR DMA save states are rejected transactionally")
 {
   NekoSystem source;
   const std::vector<std::uint8_t> valid = source.saveState();
-  REQUIRE(valid.size() >= SPR_DMA_STATE_SIZE);
 
   NekoSystem destination;
   destination.eeBus().write32(0x40, UINT32_C(0x89abcdef));
@@ -999,7 +818,7 @@ TEST_CASE("Malformed SPR DMA save states are rejected transactionally")
     destination.saveState();
 
   const auto requireRejected =
-    [&](std::vector<std::uint8_t> invalid)
+    [&](SaveStateMutation invalid)
     {
       updateChecksum(&invalid);
       REQUIRE_THROWS(destination.loadState(invalid));
@@ -1008,63 +827,58 @@ TEST_CASE("Malformed SPR DMA save states are rejected transactionally")
 
   SECTION("reserved D_SQWC bits")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU32(
       &invalid,
-      invalid.size() - SPR_DMA_SQWC_OFFSET_FROM_END,
+      "system.scratchpadDMA.interleaveSizeRegister",
       UINT32_C(0x00000100));
     requireRejected(std::move(invalid));
   }
 
   SECTION("unsupported fromSPR mode")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU32(
       &invalid,
-      invalid.size() -
-        SPR_DMA_FROM_OFFSET_FROM_END,
+      "system.scratchpadDMA.fromScratchpadChannel.channelControlRegister",
       DMACChannelControl::CHAIN_MODE);
     requireRejected(std::move(invalid));
   }
 
   SECTION("fromSPR tag address")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU32(
       &invalid,
-      invalid.size() -
-        SPR_DMA_FROM_OFFSET_FROM_END + 12,
+      "system.scratchpadDMA.fromScratchpadChannel.tagAddressRegister",
       0x10);
     requireRejected(std::move(invalid));
   }
 
   SECTION("inactive interleave continuation")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     invalid[
-      invalid.size() -
-      SPR_DMA_FROM_OFFSET_FROM_END + 20] = 1;
+      "system.scratchpadDMA.fromScratchpadChannel.interleaveQuadwordsRemaining"] =
+        1;
     requireRejected(std::move(invalid));
   }
 
   SECTION("out-of-range interleave continuation")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    const std::size_t continuationOffset =
-      invalid.size() -
-      SPR_DMA_FROM_OFFSET_FROM_END + 20;
-    invalid[continuationOffset] = 0;
-    invalid[continuationOffset + 1] = 1;
+    SaveStateMutation invalid(valid);
+    invalid.writeScalar(
+      "system.scratchpadDMA.fromScratchpadChannel.interleaveQuadwordsRemaining",
+      UINT16_C(0x0100));
     requireRejected(std::move(invalid));
   }
 
   SECTION("misaligned toSPR memory address")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU32(
       &invalid,
-      invalid.size() -
-        SPR_DMA_TO_OFFSET_FROM_END + 4,
+      "system.scratchpadDMA.toScratchpadChannel.memoryAddressRegister",
       1);
     requireRejected(std::move(invalid));
   }
@@ -1096,7 +910,7 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     destination.saveState();
   const auto requireRejected =
     [&destination, &before](
-      std::vector<std::uint8_t> invalid)
+      SaveStateMutation invalid)
     {
       updateChecksum(&invalid);
       REQUIRE_THROWS(destination.loadState(invalid));
@@ -1107,204 +921,200 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
 
   SECTION("Initiation occupancy is bounded")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET] = 3;
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.packedMACContinuation.initiationCycles"] = 3;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Initiation occupancy matches the newest latency")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET] = 1;
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.packedMACContinuation.initiationCycles"] = 1;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Active operations require a supported operation")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_FIRST_PACKED_MAC_OPERATION_OFFSET] = 0;
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.packedMACContinuation.operations[0].operation"] = 0;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Active operations require unique program order")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[1].programOrder",
       1);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Active operations precede the next program order")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[1].programOrder",
       3);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Serialized operations are already program ordered")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_FIRST_PACKED_MAC_ORDER_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[0].programOrder",
       2);
     writeU64(
       &invalid,
-      SIMPLE_EE_SECOND_PACKED_MAC_ORDER_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[1].programOrder",
       1);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Captured operands remain word-valued")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_FIRST_PACKED_MAC_SOURCE_LOW_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[0].sourceLow",
       UINT64_C(0x0000000080000000));
     requireRejected(std::move(invalid));
   }
 
   SECTION("HI and LO results match the pending GPR result")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_FIRST_PACKED_MAC_HI_LOW_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[0].hiResultLow",
       1);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Multiply results match the captured operands")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_FIRST_PACKED_MAC_LO_LOW_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[0].loResultLow",
       9);
     writeU64(
       &invalid,
-      SIMPLE_EE_FIRST_PACKED_MAC_RESULT_LOW_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[0].generalRegisterResultLow",
       9);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Accumulation results match the forwarded accumulator")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_SECOND_PACKED_MAC_LO_LOW_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[1].loResultLow",
       11);
     writeU64(
       &invalid,
-      SIMPLE_EE_SECOND_PACKED_MAC_RESULT_LOW_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[1].generalRegisterResultLow",
       11);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Pending latency is nonzero")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     invalid[
-      SIMPLE_EE_FIRST_PACKED_MAC_REMAINING_CYCLES_OFFSET] = 0;
+      "system.eeCore.packedMACContinuation.operations[0].remainingCycles"] = 0;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Destination registers are in range")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_FIRST_PACKED_MAC_DESTINATION_OFFSET] =
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.packedMACContinuation.operations[0].destinationRegister"] =
       32;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Overlapping destinations are distinct")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_SECOND_PACKED_MAC_DESTINATION_OFFSET] =
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.packedMACContinuation.operations[1].destinationRegister"] =
       3;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Packed and scalar continuations cannot overlap")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] =
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.pendingMac0.remainingCycles"] =
       4;
-    invalid[
-      SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET - 1] = 1;
+    invalid["system.eeCore.pendingMac0.active"] = 1;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Packed work rejects a restored younger MAC1 continuation")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.youngerAStageActive"] = 1;
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      "system.eeCore.youngerAStageInstruction",
       UINT32_C(0x70853018));
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      "system.eeCore.youngerAStageAddress",
       8);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Packed work rejects a conflicting younger ALU continuation")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.youngerAStageActive"] = 1;
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      "system.eeCore.youngerAStageInstruction",
       UINT32_C(0x00603821));
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      "system.eeCore.youngerAStageAddress",
       8);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Packed work precedes an unrelated younger continuation")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.youngerAStageActive"] = 1;
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      "system.eeCore.youngerAStageInstruction",
       UINT32_C(0x01003821));
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      "system.eeCore.youngerAStageAddress",
       8);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Packed and younger continuations share an acceptance boundary")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_PACKED_MAC_INITIATION_OFFSET] = 0;
-    std::fill(
-      invalid.begin() +
-        SIMPLE_EE_SECOND_PACKED_MAC_ACTIVE_OFFSET,
-      invalid.begin() +
-        SIMPLE_EE_SECOND_PACKED_MAC_ACTIVE_OFFSET + 92,
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.packedMACContinuation.initiationCycles"] = 0;
+    invalid.fillPrefix(
+      "system.eeCore.packedMACContinuation.operations[1].",
       0);
-    invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] = 1;
+    invalid["system.eeCore.youngerAStageActive"] = 1;
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      "system.eeCore.youngerAStageInstruction",
       UINT32_C(0x01003821));
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_ADDRESS_OFFSET,
+      "system.eeCore.youngerAStageAddress",
       8);
     requireRejected(std::move(invalid));
   }
@@ -1312,13 +1122,12 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
   SECTION("Inactive slots contain no payload")
   {
     NekoSystem inactive;
-    std::vector<std::uint8_t> invalid =
-      inactive.saveState();
+    SaveStateMutation invalid(inactive.saveState());
     REQUIRE(
-      invalid[SIMPLE_EE_FIRST_PACKED_MAC_ACTIVE_OFFSET] == 0);
+      invalid["system.eeCore.packedMACContinuation.operations[0].active"] == 0);
     writeU64(
       &invalid,
-      SIMPLE_EE_FIRST_PACKED_MAC_SOURCE_LOW_OFFSET,
+      "system.eeCore.packedMACContinuation.operations[0].sourceLow",
       1);
     requireRejected(std::move(invalid));
   }
@@ -1341,14 +1150,17 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
   sourceCore.haltExecution();
   const std::vector<std::uint8_t> valid =
     source.saveState();
-  REQUIRE(valid[SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET] == 1);
+  const SaveStateMutation validState(valid);
+  REQUIRE(
+    validState.readByte(
+      "system.eeCore.packedDivideContinuation.active") == 1);
 
   NekoSystem destination;
   const std::vector<std::uint8_t> before =
     destination.saveState();
   const auto requireRejected =
     [&destination, &before](
-      std::vector<std::uint8_t> invalid)
+      SaveStateMutation invalid)
     {
       updateChecksum(&invalid);
       REQUIRE_THROWS(destination.loadState(invalid));
@@ -1357,55 +1169,54 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
 
   SECTION("Active work requires a supported operation")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET] = 0;
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.packedDivideContinuation.operation"] = 0;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Captured operands remain word-valued")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_PACKED_DIVIDE_SOURCE_LOW_OFFSET,
+      "system.eeCore.packedDivideContinuation.sourceLow",
       UINT64_C(0x0000000080000000));
     requireRejected(std::move(invalid));
   }
 
   SECTION("Captured divisors remain nonzero")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_PACKED_DIVIDE_TARGET_LOW_OFFSET,
+      "system.eeCore.packedDivideContinuation.targetLow",
       0);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Serialized results match the captured operands")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_PACKED_DIVIDE_HI_LOW_OFFSET,
+      "system.eeCore.packedDivideContinuation.hiResultLow",
       0);
     requireRejected(std::move(invalid));
   }
 
   SECTION("Pending latency is nonzero")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     invalid[
-      SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET] = 0;
+      "system.eeCore.packedDivideContinuation.remainingCycles"] = 0;
     requireRejected(std::move(invalid));
   }
 
   SECTION("Packed divide and scalar work cannot overlap")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[
-      SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET - 1] = 1;
-    invalid[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] =
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.pendingMac0.active"] = 1;
+    invalid["system.eeCore.pendingMac0.remainingCycles"] =
       4;
     requireRejected(std::move(invalid));
   }
@@ -1413,11 +1224,10 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
   SECTION("Inactive continuations contain no payload")
   {
     NekoSystem inactive;
-    std::vector<std::uint8_t> invalid =
-      inactive.saveState();
+    SaveStateMutation invalid(inactive.saveState());
     REQUIRE(
-      invalid[SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET] == 0);
-    invalid[SIMPLE_EE_PACKED_DIVIDE_OPERATION_OFFSET] = 1;
+      invalid["system.eeCore.packedDivideContinuation.active"] == 0);
+    invalid["system.eeCore.packedDivideContinuation.operation"] = 1;
     requireRejected(std::move(invalid));
   }
 }
@@ -1443,15 +1253,20 @@ TEST_CASE("Invalid paired packed divide states are rejected")
   source.clockMasterCycle();
   const std::vector<std::uint8_t> valid =
     source.saveState();
-  REQUIRE(valid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] == 1);
-  REQUIRE(valid[SIMPLE_EE_PACKED_DIVIDE_ACTIVE_OFFSET] == 1);
+  const SaveStateMutation validState(valid);
+  REQUIRE(
+    validState.readByte(
+      "system.eeCore.youngerAStageActive") == 1);
+  REQUIRE(
+    validState.readByte(
+      "system.eeCore.packedDivideContinuation.active") == 1);
 
   NekoSystem destination;
   const std::vector<std::uint8_t> before =
     destination.saveState();
   const auto requireRejected =
     [&destination, &before](
-      std::vector<std::uint8_t> invalid)
+      SaveStateMutation invalid)
     {
       updateChecksum(&invalid);
       REQUIRE_THROWS(destination.loadState(invalid));
@@ -1460,28 +1275,28 @@ TEST_CASE("Invalid paired packed divide states are rejected")
 
   SECTION("Paired program orders are adjacent")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
-      SIMPLE_EE_PACKED_DIVIDE_ORDER_OFFSET,
+      "system.eeCore.packedDivideContinuation.programOrder",
       2);
     requireRejected(std::move(invalid));
   }
 
   SECTION("The divide has not advanced before the younger continuation")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     invalid[
-      SIMPLE_EE_PACKED_DIVIDE_REMAINING_CYCLES_OFFSET] = 36;
+      "system.eeCore.packedDivideContinuation.remainingCycles"] = 36;
     requireRejected(std::move(invalid));
   }
 
   SECTION("The younger continuation cannot access HI LO")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     writeU32(
       &invalid,
-      SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET,
+      "system.eeCore.youngerAStageInstruction",
       packedMACInstruction(0x09, 0, 0, 7, 0x09));
     requireRejected(std::move(invalid));
   }
@@ -1609,32 +1424,32 @@ TEST_CASE("In-flight EE COP1 memory-source state is canonical")
 {
   NekoSystem source;
   prepareInFlightSystem(&source);
-  std::vector<std::uint8_t> state = source.saveState();
-  writeU64(&state, EE_NEXT_PROGRAM_ORDER_OFFSET, 2);
-  state[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
-  writeU64(&state, EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET, 1);
-  state[EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] = COP1_STAGE_T;
-  writeU32(&state, EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET, 4);
+  SaveStateMutation state(source.saveState());
+  writeU64(&state, "system.eeCore.nextProgramOrder", 2);
+  state["system.eeCore.inFlightCOP1Operations[0].active"] = 1;
+  writeU64(&state, "system.eeCore.inFlightCOP1Operations[0].programOrder", 1);
+  state["system.eeCore.inFlightCOP1Operations[0].stage"] = COP1_STAGE_T;
+  writeU32(&state, "system.eeCore.inFlightCOP1Operations[0].instructionAddress", 4);
   writeU32(
     &state,
-    EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[0].instruction",
     UINT32_C(0xc4430000));
   writeU64(
     &state,
-    EE_FIRST_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[0].capturedGPR",
     0x100);
   writeU32(
     &state,
-    EE_FIRST_IN_FLIGHT_COP1_MEMORY_ADDRESS_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[0].memoryAddress",
     0x100);
-  state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] = 1;
-  state[EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 3;
+  state["system.eeCore.inFlightCOP1Operations[0].destinationMask"] = 1;
+  state["system.eeCore.inFlightCOP1Operations[0].destinationFPR"] = 3;
   updateChecksum(&state);
 
   NekoSystem restored;
   restored.loadState(state);
 
-  REQUIRE(restored.saveState() == state);
+  REQUIRE(restored.saveState() == state.bytes());
   REQUIRE(
     restored.eeCore().stateHash() !=
     source.eeCore().stateHash());
@@ -1677,28 +1492,28 @@ TEST_CASE("COP1 Move waits when an older Operate enters T")
   source.clockMasterCycle();
   sourceCore.haltExecution();
 
-  std::vector<std::uint8_t> state = source.saveState();
+  SaveStateMutation state(source.saveState());
   const std::uint32_t moveInstruction =
     cop1TransferInstruction(0x00, 5, 7);
-  writeU64(&state, SIMPLE_EE_NEXT_PROGRAM_ORDER_OFFSET, 3);
-  state[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
+  writeU64(&state, "system.eeCore.nextProgramOrder", 3);
+  state["system.eeCore.inFlightCOP1Operations[1].active"] = 1;
   writeU64(
     &state,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].programOrder",
     2);
   writeU32(
     &state,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ADDRESS_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].instructionAddress",
     4);
   writeU32(
     &state,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].instruction",
     moveInstruction);
   state[
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+    "system.eeCore.inFlightCOP1Operations[1].destinationMask"] =
       1 << 4;
   state[
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_GPR_OFFSET] = 5;
+    "system.eeCore.inFlightCOP1Operations[1].destinationGPR"] = 5;
   updateChecksum(&state);
 
   NekoSystem restored;
@@ -1763,27 +1578,27 @@ TEST_CASE("Older CFC1 ignores younger restored FCR31 producers")
   source.clockMasterCycle();
   sourceCore.haltExecution();
 
-  std::vector<std::uint8_t> state = source.saveState();
-  writeU64(&state, SIMPLE_EE_NEXT_PROGRAM_ORDER_OFFSET, 3);
-  state[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 1;
+  SaveStateMutation state(source.saveState());
+  writeU64(&state, "system.eeCore.nextProgramOrder", 3);
+  state["system.eeCore.inFlightCOP1Operations[1].active"] = 1;
   writeU64(
     &state,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].programOrder",
     2);
   writeU32(
     &state,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ADDRESS_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].instructionAddress",
     4);
   writeU32(
     &state,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].instruction",
     cop1TransferInstruction(0x06, 6, 31));
   writeU64(
     &state,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_CAPTURED_GPR_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].capturedGPR",
     EECOP1Control::CONDITION);
   state[
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+    "system.eeCore.inFlightCOP1Operations[1].destinationMask"] =
       1 << 2;
   updateChecksum(&state);
 
@@ -1806,9 +1621,9 @@ TEST_CASE("Older CFC1 ignores younger restored FCR31 producers")
 TEST_CASE("Retired COP1 occupancy state is rejected")
 {
   NekoSystem source;
-  std::vector<std::uint8_t> invalid = source.saveState();
+  SaveStateMutation invalid(source.saveState());
   invalid[
-    SIMPLE_EE_RETIRED_COP1_OPERATE_RESOURCE_OFFSET] = 1;
+    "system.eeCore.retiredCOP1OperateResource"] = 1;
   updateChecksum(&invalid);
 
   NekoSystem destination;
@@ -2063,15 +1878,15 @@ TEST_CASE("Malformed EE younger A-stage state is rejected")
   SECTION("Inactive continuation cannot contain an instruction")
   {
     NekoSystem source;
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_YOUNGER_A_STAGE_INSTRUCTION_OFFSET] = 1;
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.youngerAStageInstruction"] = 1;
     updateChecksum(&invalid);
 
     NekoSystem destination;
     const std::vector<std::uint8_t> before =
       destination.saveState();
     REQUIRE(
-      invalid[SIMPLE_EE_YOUNGER_A_STAGE_ACTIVE_OFFSET] ==
+      invalid["system.eeCore.youngerAStageActive"] ==
       0);
     REQUIRE_THROWS(destination.loadState(invalid));
     REQUIRE(destination.saveState() == before);
@@ -2095,9 +1910,9 @@ TEST_CASE("Malformed EE younger A-stage state is rejected")
     core.startExecution(0);
     source.clockMasterCycle();
 
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_PENDING_MAC1_ACTIVE_OFFSET] = 1;
-    invalid[SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] = 4;
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.pendingMac1.active"] = 1;
+    invalid["system.eeCore.pendingMac1.remainingCycles"] = 4;
     updateChecksum(&invalid);
 
     NekoSystem destination;
@@ -2289,8 +2104,8 @@ TEST_CASE("EE fetch exceptions survive save states")
 TEST_CASE("EE save states reject unknown expanded exception values")
 {
   NekoSystem source;
-  std::vector<std::uint8_t> state = source.saveState();
-  state[SIMPLE_EE_EXCEPTION_OFFSET] =
+  SaveStateMutation state(source.saveState());
+  state["system.eeCore.exception"] =
     static_cast<std::uint8_t>(EEException::TLBModified) + 1;
   updateChecksum(&state);
 
@@ -2558,19 +2373,20 @@ TEST_CASE("Staggered EE MAC pipelines survive save states")
   originalCore.startExecution(0);
 
   original.runMasterCycles(2);
-  const std::vector<std::uint8_t> state =
-    original.saveState();
+  const SaveStateMutation state(original.saveState());
 
   REQUIRE(
-    state[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] ==
+    state.readByte(
+      "system.eeCore.pendingMac0.remainingCycles") ==
     3);
   REQUIRE(
-    state[SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] ==
+    state.readByte(
+      "system.eeCore.pendingMac1.remainingCycles") ==
     4);
 
   NekoSystem restored;
   REQUIRE_NOTHROW(restored.loadState(state));
-  REQUIRE(restored.saveState() == state);
+  REQUIRE(restored.saveState() == state.bytes());
 
   original.runMasterCycles(4);
   restored.runMasterCycles(4);
@@ -2661,25 +2477,30 @@ TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
   source.clockMasterCycle();
   const std::vector<std::uint8_t> valid =
     source.saveState();
+  const SaveStateMutation validState(valid);
 
   REQUIRE(
-    valid[SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] ==
+    validState.readByte(
+      "system.eeCore.pendingMac0.remainingCycles") ==
     4);
   REQUIRE(
-    valid[SIMPLE_EE_PENDING_MAC1_REMAINING_CYCLES_OFFSET] ==
+    validState.readByte(
+      "system.eeCore.pendingMac1.remainingCycles") ==
     4);
   REQUIRE(
-    valid[SIMPLE_EE_PENDING_MAC0_GENERAL_REGISTER_OFFSET] ==
+    validState.readByte(
+      "system.eeCore.pendingMac0.generalRegister") ==
     3);
   REQUIRE(
-    valid[SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET] ==
+    validState.readByte(
+      "system.eeCore.pendingMac1.generalRegister") ==
     6);
 
   SECTION("multiply latency cannot exceed four cycles")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     invalid[
-      SIMPLE_EE_PENDING_MAC0_REMAINING_CYCLES_OFFSET] = 5;
+      "system.eeCore.pendingMac0.remainingCycles"] = 5;
     updateChecksum(&invalid);
     NekoSystem destination;
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -2687,9 +2508,9 @@ TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
 
   SECTION("multiply destinations must remain independent")
   {
-    std::vector<std::uint8_t> invalid = valid;
+    SaveStateMutation invalid(valid);
     invalid[
-      SIMPLE_EE_PENDING_MAC1_GENERAL_REGISTER_OFFSET] = 3;
+      "system.eeCore.pendingMac1.generalRegister"] = 3;
     updateChecksum(&invalid);
     NekoSystem destination;
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -2697,10 +2518,10 @@ TEST_CASE("Unreachable concurrent EE MAC save states are rejected")
 
   SECTION("fetch halts cannot retain both pipelines")
   {
-    std::vector<std::uint8_t> invalid = valid;
-    invalid[SIMPLE_EE_EXECUTION_STATE_OFFSET] =
+    SaveStateMutation invalid(valid);
+    invalid["system.eeCore.state"] =
       static_cast<std::uint8_t>(EEExecutionState::Halted);
-    invalid[SIMPLE_EE_STOP_REASON_OFFSET] =
+    invalid["system.eeCore.haltReason"] =
       static_cast<std::uint8_t>(
         EEStopReason::FetchException);
     updateChecksum(&invalid);
@@ -3148,194 +2969,184 @@ TEST_CASE("Invalid save states are rejected transactionally")
   const std::vector<std::uint8_t> before =
     system.saveState();
 
-  std::vector<std::uint8_t> invalid = before;
-  invalid[0] ^= 0xff;
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  const auto requireRawRejected =
+    [&](const std::vector<std::uint8_t> &invalid)
+    {
+      REQUIRE_THROWS(system.loadState(invalid));
+      REQUIRE(system.saveState() == before);
+    };
+  const auto requireRejected =
+    [&](SaveStateMutation invalid)
+    {
+      updateChecksum(&invalid);
+      REQUIRE_THROWS(system.loadState(invalid));
+      REQUIRE(system.saveState() == before);
+    };
 
-  invalid = before;
-  invalid[8] = 13;
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  SaveStateMutation invalid(before);
+  invalid["container.magic"] ^= 0xff;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[12] ^= 1;
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["container.version"] = 13;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid.resize(invalid.size() - 1);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["container.payloadLength"] ^= 1;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid.push_back(0);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  std::vector<std::uint8_t> invalidBytes = before;
+  invalidBytes.resize(invalidBytes.size() - 1);
+  requireRawRejected(invalidBytes);
 
-  invalid = before;
-  invalid[46] = 0xff;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalidBytes = before;
+  invalidBytes.push_back(0);
+  requireRawRejected(invalidBytes);
 
-  invalid = before;
-  for (std::size_t index = 0;
-       index < MASTER_CLOCK_COMPONENT_SIZE;
-       ++index)
-  {
-    const std::size_t first =
-      MASTER_CLOCK_FIRST_COMPONENT_OFFSET + index;
-    const std::size_t second =
-      first + MASTER_CLOCK_COMPONENT_SIZE;
-    const std::uint8_t value = invalid[first];
-    invalid[first] = invalid[second];
-    invalid[second] = value;
-  }
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.masterClock.components[0].id"] = 0xff;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[PREPARED_EE_GPR_ZERO_HIGH_OFFSET] ^= 1;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid.swapFields(
+    "system.masterClock.components[0].id",
+    "system.masterClock.components[1].id");
+  invalid.swapFields(
+    "system.masterClock.components[0].period",
+    "system.masterClock.components[1].period");
+  invalid.swapFields(
+    "system.masterClock.components[0].phase",
+    "system.masterClock.components[1].phase");
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[PREPARED_EE_FCR31_OFFSET] |= 1;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.generalRegisters[0].high"] ^= 1;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_COP1_DIVIDER_INITIATION_OFFSET] = 1;
-  invalid[EE_COP1_DIVIDER_OPERATION_OFFSET] =
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.cop1StatusRegister"] |= 1;
+  requireRejected(std::move(invalid));
+
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.dividerOccupancy.initiationCycles"] = 1;
+  invalid["system.eeCore.dividerOccupancy.operation"] =
     static_cast<std::uint8_t>(
       EEOperation::DivideSingleCOP1);
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[PREPARED_EE_BRANCH_DELAY_LIKELY_OFFSET] = 1;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.branchDelayFromLikely"] = 1;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_COP1_POST_DELAY_COUNT_OFFSET] = 3;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.cop1DividerPostDelayInstructions"] = 3;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_ISSUE_LATCH_ADDRESS_OFFSET] = 4;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.issueLatchAddress"] = 4;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_FIRST_IN_FLIGHT_COP1_ADDRESS_OFFSET] = 4;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.inFlightCOP1Operations[0].instructionAddress"] = 4;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_COP1_POST_DELAY_ADDRESS_OFFSET] = 4;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.cop1DividerPostDelayBranchAddress"] = 4;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_COP1_POST_DELAY_TARGET_OFFSET] = 4;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.cop1DividerPostDelayTargetAddress"] = 4;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_COP1_POST_DELAY_COUNT_OFFSET] = 2;
-  invalid[EE_COP1_POST_DELAY_TARGET_OFFSET] = 4;
-  invalid[EE_COP1_POST_DELAY_TAKEN_OFFSET] = 1;
-  invalid[EE_COP1_POST_TARGET_COUNT_OFFSET] = 1;
-  invalid[EE_COP1_POST_TARGET_ADDRESS_OFFSET] = 4;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.cop1DividerPostDelayInstructions"] = 2;
+  invalid["system.eeCore.cop1DividerPostDelayTargetAddress"] = 4;
+  invalid["system.eeCore.cop1DividerPostDelayTaken"] = 1;
+  invalid["system.eeCore.cop1DividerPostTargetInstructions"] = 1;
+  invalid["system.eeCore.cop1DividerPostTargetAddress"] = 4;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_COP1_POST_TARGET_COUNT_OFFSET] = 1;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.cop1DividerPostTargetInstructions"] = 1;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[PREPARED_EE_COP0_RANDOM_OFFSET] = 6;
-  invalid[PREPARED_EE_COP0_WIRED_OFFSET] = 7;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.memoryRegisters[1].value"] = 6;
+  invalid["system.eeCore.memoryRegisters[6].value"] = 7;
+  requireRejected(std::move(invalid));
 
   struct InvalidMemoryRegisterBit
   {
-    std::size_t offset;
+    const char *path;
+    std::size_t byteOffset;
     std::uint8_t mask;
   };
   const InvalidMemoryRegisterBit invalidMemoryRegisterBits[] = {
-    {PREPARED_EE_COP0_INDEX_OFFSET + 3, 0x40},
-    {PREPARED_EE_COP0_ENTRY_LO_0_OFFSET + 3, 0x04},
-    {PREPARED_EE_COP0_ENTRY_LO_1_OFFSET + 3, 0x80},
-    {PREPARED_EE_COP0_CONTEXT_OFFSET, 0x01},
-    {PREPARED_EE_COP0_ENTRY_HI_OFFSET + 1, 0x01},
-    {PREPARED_EE_COP0_CONFIG_OFFSET, 0x01}
+    {"system.eeCore.memoryRegisters[0].value", 3, 0x40},
+    {"system.eeCore.memoryRegisters[2].value", 3, 0x04},
+    {"system.eeCore.memoryRegisters[3].value", 3, 0x80},
+    {"system.eeCore.memoryRegisters[4].value", 0, 0x01},
+    {"system.eeCore.memoryRegisters[7].value", 1, 0x01},
+    {"system.eeCore.memoryRegisters[8].value", 0, 0x01}
   };
   for (const InvalidMemoryRegisterBit &invalidBit :
        invalidMemoryRegisterBits)
   {
-    invalid = before;
-    REQUIRE((invalid[invalidBit.offset] & invalidBit.mask) == 0);
-    invalid[invalidBit.offset] |= invalidBit.mask;
-    updateChecksum(&invalid);
-    REQUIRE_THROWS(system.loadState(invalid));
-    REQUIRE(system.saveState() == before);
+    invalid = SaveStateMutation(before);
+    REQUIRE(
+      (invalid.readByte(
+         invalidBit.path,
+         invalidBit.byteOffset) &
+       invalidBit.mask) == 0);
+    invalid.writeByte(
+      invalidBit.path,
+      invalidBit.byteOffset,
+      invalid.readByte(
+        invalidBit.path,
+        invalidBit.byteOffset) |
+        invalidBit.mask);
+    requireRejected(std::move(invalid));
   }
 
-  invalid = before;
-  invalid[PREPARED_EE_COP0_PAGE_MASK_OFFSET + 3] |= 0x80;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid.writeByte(
+    "system.eeCore.memoryRegisters[5].value",
+    3,
+    invalid.readByte(
+      "system.eeCore.memoryRegisters[5].value",
+      3) |
+      0x80);
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[PREPARED_EE_TLB_OFFSET + 1] = 0x20;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid.writeByte(
+    "system.eeCore.tlbEntries[0].pageMask",
+    1,
+    0x20);
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[PREPARED_EE_TLB_OFFSET + 3] |= 0x80;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid.writeByte(
+    "system.eeCore.tlbEntries[0].pageMask",
+    3,
+    invalid.readByte(
+      "system.eeCore.tlbEntries[0].pageMask",
+      3) |
+      0x80);
+  requireRejected(std::move(invalid));
 
-  invalid = before;
+  invalid = SaveStateMutation(before);
   invalid[
-    PREPARED_EE_FIRST_INSTRUCTION_CACHE_OFFSET + 69] = 1;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+    "system.eeCore.instructionCache[0][0].dirty"] = 1;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[PREPARED_MAIN_MEMORY_SIZE_OFFSET] ^= 1;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeBus.mainMemory.size"] ^= 1;
+  requireRejected(std::move(invalid));
 
-  invalid = before;
-  invalid[EE_FIRST_IN_FLIGHT_COP1_ACTIVE_OFFSET] = 2;
-  updateChecksum(&invalid);
-  REQUIRE_THROWS(system.loadState(invalid));
-  REQUIRE(system.saveState() == before);
+  invalid = SaveStateMutation(before);
+  invalid["system.eeCore.inFlightCOP1Operations[0].active"] = 2;
+  requireRejected(std::move(invalid));
 }
 
 TEST_CASE("In-flight COP1 load save states are internally consistent")
@@ -3360,9 +3171,9 @@ TEST_CASE("In-flight COP1 load save states are internally consistent")
 
   SECTION("The destination matches the instruction")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] = 4;
+      "system.eeCore.inFlightCOP1Operations[0].destinationFPR"] = 4;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -3371,8 +3182,8 @@ TEST_CASE("In-flight COP1 load save states are internally consistent")
 
   SECTION("A pending load remains in R")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.inFlightCOP1Operations[0].stage"] =
       COP1_STAGE_S1;
     updateChecksum(&invalid);
 
@@ -3382,9 +3193,9 @@ TEST_CASE("In-flight COP1 load save states are internally consistent")
 
   SECTION("A pending load has no synthetic countdown")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] = 1;
+      "system.eeCore.inFlightCOP1Operations[0].remainingCycles"] = 1;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -3423,9 +3234,9 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("Divider occupancy requires a pending result")
   {
-    std::vector<std::uint8_t> invalid = before;
-    invalid[SIMPLE_EE_COP1_DIVIDER_INITIATION_OFFSET] = 1;
-    invalid[SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET] =
+    SaveStateMutation invalid(before);
+    invalid["system.eeCore.dividerOccupancy.initiationCycles"] = 1;
+    invalid["system.eeCore.dividerOccupancy.operation"] =
       static_cast<std::uint8_t>(
         EEOperation::DivideSingleCOP1);
     updateChecksum(&invalid);
@@ -3436,19 +3247,19 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("Overlapping results require distinct destinations")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     REQUIRE(
       invalid[
-        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] ==
+        "system.eeCore.inFlightCOP1Operations[0].destinationFPR"] ==
       4);
     REQUIRE(
       invalid[
-        SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] ==
+        "system.eeCore.inFlightCOP1Operations[1].destinationFPR"] ==
       5);
     invalid[
-      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[1].destinationFPR"] =
       invalid[
-        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET];
+        "system.eeCore.inFlightCOP1Operations[0].destinationFPR"];
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -3457,9 +3268,9 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("A result cannot raise invalid and division by zero together")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].raisedFlags"] =
       FP_FLAG_I_BIT | FP_FLAG_D_BIT;
     updateChecksum(&invalid);
 
@@ -3484,11 +3295,10 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
     squareRootSource.clockMasterCycle();
     squareRootSource.eeCore().haltExecution();
 
-    std::vector<std::uint8_t> invalid =
-      squareRootSource.saveState();
+    SaveStateMutation invalid(squareRootSource.saveState());
     writeU32(
       &invalid,
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET,
+      "system.eeCore.inFlightCOP1Operations[0].capturedFS",
       UINT32_C(0xdeadbeef));
     updateChecksum(&invalid);
 
@@ -3498,11 +3308,11 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("A transient S1 result cannot be restored")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.inFlightCOP1Operations[0].stage"] =
       COP1_STAGE_S1;
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].remainingCycles"] =
       0;
     updateChecksum(&invalid);
 
@@ -3512,9 +3322,9 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("A result cannot contain a forged raw value")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^= 1;
+      "system.eeCore.inFlightCOP1Operations[0].rawResult"] ^= 1;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -3523,9 +3333,9 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("A permitted flag must still match the captured operands")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].raisedFlags"] =
         FP_FLAG_D_BIT;
     updateChecksum(&invalid);
 
@@ -3535,10 +3345,10 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("Overlapping results require unique program order")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     writeU64(
       &invalid,
-      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+      "system.eeCore.inFlightCOP1Operations[1].programOrder",
       1);
     updateChecksum(&invalid);
 
@@ -3548,14 +3358,14 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("The older overlapping result must complete first")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     writeU64(
       &invalid,
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_ORDER_OFFSET,
+      "system.eeCore.inFlightCOP1Operations[0].programOrder",
       8);
     writeU64(
       &invalid,
-      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+      "system.eeCore.inFlightCOP1Operations[1].programOrder",
       1);
     updateChecksum(&invalid);
 
@@ -3565,8 +3375,8 @@ TEST_CASE("Invalid pending COP1 divider states are rejected")
 
   SECTION("Divider occupancy names the newest result")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_COP1_DIVIDER_OPERATION_OFFSET] =
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.dividerOccupancy.operation"] =
       static_cast<std::uint8_t>(
         EEOperation::DivideSingleCOP1);
     updateChecksum(&invalid);
@@ -3607,8 +3417,8 @@ TEST_CASE("Every malformed COP1 divider result is rejected")
     source.clockMasterCycle();
     source.eeCore().haltExecution();
 
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.inFlightCOP1Operations[0].rawResult"] ^=
       1;
     updateChecksum(&invalid);
 
@@ -3646,8 +3456,8 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
            COP1_STAGE_S1,
            COP1_STAGE_S2})
     {
-      std::vector<std::uint8_t> invalid = source.saveState();
-      invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+      SaveStateMutation invalid(source.saveState());
+      invalid["system.eeCore.inFlightCOP1Operations[0].stage"] =
         stage;
       updateChecksum(&invalid);
 
@@ -3669,10 +3479,9 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
     stagedSource.runMasterCycles(2);
     stagedSource.eeCore().haltExecution();
 
-    std::vector<std::uint8_t> invalid =
-      stagedSource.saveState();
+    SaveStateMutation invalid(stagedSource.saveState());
     invalid[
-      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[1].stage"] =
       COP1_STAGE_S1;
     updateChecksum(&invalid);
 
@@ -3682,8 +3491,8 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
 
   SECTION("A Z-stage result must match its captured operands")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.inFlightCOP1Operations[0].rawResult"] ^=
       1;
     updateChecksum(&invalid);
 
@@ -3707,10 +3516,9 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
     rSource.clockMasterCycle();
     rSource.eeCore().haltExecution();
 
-    std::vector<std::uint8_t> invalid =
-      rSource.saveState();
+    SaveStateMutation invalid(rSource.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET] = 1;
+      "system.eeCore.inFlightCOP1Operations[0].capturedFS"] = 1;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -3719,9 +3527,9 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
 
   SECTION("A Z-stage result must carry its computed flags")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_FLAGS_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].raisedFlags"] =
         FP_FLAG_UNDERFLOW;
     updateChecksum(&invalid);
 
@@ -3731,9 +3539,9 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
 
   SECTION("The destination must match the encoded fd")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].destinationFPR"] =
         5;
     updateChecksum(&invalid);
 
@@ -3743,10 +3551,10 @@ TEST_CASE("Invalid staged COP1 add states are rejected")
 
   SECTION("Unmigrated COP1 operations cannot be restored in flight")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     writeU32(
       &invalid,
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+      "system.eeCore.inFlightCOP1Operations[0].instruction",
       cop1SingleInstruction(0x06, 2, 4, 0));
     updateChecksum(&invalid);
 
@@ -3768,8 +3576,8 @@ TEST_CASE("Invalid staged COP1 unary results are rejected")
   source.runMasterCycles(5);
   source.eeCore().haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+  SaveStateMutation invalid(source.saveState());
+  invalid["system.eeCore.inFlightCOP1Operations[0].rawResult"] ^=
     1;
   updateChecksum(&invalid);
 
@@ -3802,8 +3610,8 @@ TEST_CASE("Invalid staged COP1 multiply results are rejected")
 
   SECTION("The Z-stage result must match its captured operands")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.inFlightCOP1Operations[0].rawResult"] ^=
       1;
     updateChecksum(&invalid);
 
@@ -3813,9 +3621,9 @@ TEST_CASE("Invalid staged COP1 multiply results are rejected")
 
   SECTION("MULA must name ACC and FCR31 as its destinations")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].destinationMask"] =
         1;
     updateChecksum(&invalid);
 
@@ -3852,9 +3660,9 @@ TEST_CASE("Invalid staged COP1 accumulator add results are rejected")
 
     SECTION("The Z-stage result must match its captured operands")
     {
-      std::vector<std::uint8_t> invalid = source.saveState();
+      SaveStateMutation invalid(source.saveState());
       invalid[
-        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^= 1;
+        "system.eeCore.inFlightCOP1Operations[0].rawResult"] ^= 1;
       updateChecksum(&invalid);
 
       REQUIRE_THROWS(destination.loadState(invalid));
@@ -3863,9 +3671,9 @@ TEST_CASE("Invalid staged COP1 accumulator add results are rejected")
 
     SECTION("The instruction must name ACC and FCR31 as destinations")
     {
-      std::vector<std::uint8_t> invalid = source.saveState();
+      SaveStateMutation invalid(source.saveState());
       invalid[
-        SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+        "system.eeCore.inFlightCOP1Operations[0].destinationMask"] =
           1;
       updateChecksum(&invalid);
 
@@ -3899,9 +3707,9 @@ TEST_CASE("Invalid staged COP1 compound results are rejected")
 
   SECTION("The Z-stage result must match all captured operands")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CAPTURED_ACC_OFFSET] ^= 1;
+      "system.eeCore.inFlightCOP1Operations[0].capturedAccumulator"] ^= 1;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -3910,9 +3718,9 @@ TEST_CASE("Invalid staged COP1 compound results are rejected")
 
   SECTION("The Z-stage result must carry product sticky flags")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAISED_STICKY_FLAGS_OFFSET] = 0;
+      "system.eeCore.inFlightCOP1Operations[0].raisedStickyFlags"] = 0;
     updateChecksum(&invalid);
 
     REQUIRE_THROWS(destination.loadState(invalid));
@@ -3921,9 +3729,9 @@ TEST_CASE("Invalid staged COP1 compound results are rejected")
 
   SECTION("MADDA must name ACC and FCR31 as its destinations")
   {
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_DESTINATION_MASK_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].destinationMask"] =
         1;
     updateChecksum(&invalid);
 
@@ -3948,8 +3756,8 @@ TEST_CASE("Invalid staged COP1 min/max results are rejected")
   source.runMasterCycles(5);
   source.eeCore().haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] =
+  SaveStateMutation invalid(source.saveState());
+  invalid["system.eeCore.inFlightCOP1Operations[0].rawResult"] =
     1;
   updateChecksum(&invalid);
 
@@ -3973,8 +3781,8 @@ TEST_CASE("Invalid staged COP1 conversion results are rejected")
   source.runMasterCycles(5);
   source.eeCore().haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_RAW_RESULT_OFFSET] ^=
+  SaveStateMutation invalid(source.saveState());
+  invalid["system.eeCore.inFlightCOP1Operations[0].rawResult"] ^=
     1;
   updateChecksum(&invalid);
 
@@ -4001,9 +3809,9 @@ TEST_CASE("Invalid staged COP1 comparison results are rejected")
   source.runMasterCycles(5);
   source.eeCore().haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
+  SaveStateMutation invalid(source.saveState());
   invalid[
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_CONDITION_OFFSET] ^= 1;
+    "system.eeCore.inFlightCOP1Operations[0].serializedCondition"] ^= 1;
   updateChecksum(&invalid);
 
   NekoSystem destination;
@@ -4076,11 +3884,11 @@ TEST_CASE("Unreachable COP1 load 1S states are rejected")
     source.clockMasterCycle();
     source.eeCore().haltExecution();
 
-    std::vector<std::uint8_t> invalid = source.saveState();
-    invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    SaveStateMutation invalid(source.saveState());
+    invalid["system.eeCore.inFlightCOP1Operations[0].stage"] =
       COP1_STAGE_S1;
     invalid[
-      SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[0].remainingCycles"] =
       0;
     updateChecksum(&invalid);
 
@@ -4111,20 +3919,20 @@ TEST_CASE("Unreachable COP1 load 1S states are rejected")
     source.runMasterCycles(3);
     core.haltExecution();
 
-    std::vector<std::uint8_t> invalid = source.saveState();
+    SaveStateMutation invalid(source.saveState());
     writeU32(
       &invalid,
-      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+      "system.eeCore.inFlightCOP1Operations[1].instruction",
       (UINT32_C(0x31) << 26) |
         (UINT32_C(1) << 21) |
         (UINT32_C(4) << 16));
     invalid[
-      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_DESTINATION_FPR_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[1].destinationFPR"] =
       4;
-    invalid[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+    invalid["system.eeCore.inFlightCOP1Operations[1].stage"] =
       COP1_STAGE_S1;
     invalid[
-      SIMPLE_EE_SECOND_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+      "system.eeCore.inFlightCOP1Operations[1].remainingCycles"] =
       0;
     updateChecksum(&invalid);
 
@@ -4199,10 +4007,10 @@ TEST_CASE("Dependent staged COP1 1S overlap is rejected")
   source.runMasterCycles(7);
   core.haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
+  SaveStateMutation invalid(source.saveState());
   writeU32(
     &invalid,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_INSTRUCTION_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].instruction",
     (UINT32_C(0x11) << 26) |
       (UINT32_C(0x14) << 21) |
       (UINT32_C(4) << 11) |
@@ -4238,10 +4046,10 @@ TEST_CASE("Premature staged COP1 1S overlap is rejected")
   source.runMasterCycles(7);
   core.haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[SIMPLE_EE_COP1_DIVIDER_INITIATION_OFFSET] = 7;
+  SaveStateMutation invalid(source.saveState());
+  invalid["system.eeCore.dividerOccupancy.initiationCycles"] = 7;
   invalid[
-    SIMPLE_EE_FIRST_IN_FLIGHT_COP1_REMAINING_CYCLES_OFFSET] =
+    "system.eeCore.inFlightCOP1Operations[0].remainingCycles"] =
     8;
   updateChecksum(&invalid);
 
@@ -4281,10 +4089,10 @@ TEST_CASE("Out-of-order staged COP1 1S overlap is rejected")
   source.runMasterCycles(7);
   core.haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+  SaveStateMutation invalid(source.saveState());
+  invalid["system.eeCore.inFlightCOP1Operations[1].stage"] =
     COP1_STAGE_Z;
-  invalid[SIMPLE_EE_THIRD_IN_FLIGHT_COP1_STAGE_OFFSET] =
+  invalid["system.eeCore.inFlightCOP1Operations[2].stage"] =
     COP1_STAGE_S1;
   updateChecksum(&invalid);
 
@@ -4308,10 +4116,10 @@ TEST_CASE("Staged COP1 pipeline order is validated")
   source.runMasterCycles(2);
   source.eeCore().haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
-  invalid[SIMPLE_EE_FIRST_IN_FLIGHT_COP1_STAGE_OFFSET] =
+  SaveStateMutation invalid(source.saveState());
+  invalid["system.eeCore.inFlightCOP1Operations[0].stage"] =
     COP1_STAGE_X;
-  invalid[SIMPLE_EE_SECOND_IN_FLIGHT_COP1_STAGE_OFFSET] =
+  invalid["system.eeCore.inFlightCOP1Operations[1].stage"] =
     COP1_STAGE_Y;
   updateChecksum(&invalid);
 
@@ -4350,14 +4158,14 @@ TEST_CASE("Staged COP1 1S cannot follow two active dividers")
   source.runMasterCycles(8);
   core.haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
+  SaveStateMutation invalid(source.saveState());
   writeU64(
     &invalid,
-    SIMPLE_EE_SECOND_IN_FLIGHT_COP1_ORDER_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[1].programOrder",
     3);
   writeU64(
     &invalid,
-    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_ORDER_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[2].programOrder",
     2);
   updateChecksum(&invalid);
 
@@ -4393,17 +4201,29 @@ TEST_CASE("Staged COP1 1S validates forwarded operands")
       (UINT32_C(7) << 6) |
       UINT32_C(0x20));
   core.startExecution(0);
-  source.runMasterCycles(11);
+  source.runMasterCycles(9);
   core.haltExecution();
 
-  std::vector<std::uint8_t> invalid = source.saveState();
+  SaveStateMutation invalid(source.saveState());
+  REQUIRE(
+    invalid[
+      "system.eeCore.inFlightCOP1Operations[1].stage"] ==
+    COP1_STAGE_S1);
+  REQUIRE(
+    invalid[
+      "system.eeCore.inFlightCOP1Operations[2].active"] ==
+    1);
+  REQUIRE(
+    invalid[
+      "system.eeCore.inFlightCOP1Operations[2].stage"] ==
+    COP1_STAGE_Y);
   writeU32(
     &invalid,
-    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_CAPTURED_FS_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[2].capturedFS",
     3);
   writeU32(
     &invalid,
-    SIMPLE_EE_THIRD_IN_FLIGHT_COP1_RAW_RESULT_OFFSET,
+    "system.eeCore.inFlightCOP1Operations[2].rawResult",
     UINT32_C(0x40400000));
   updateChecksum(&invalid);
 

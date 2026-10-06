@@ -1941,9 +1941,15 @@ creating parallel ownership.
 - [x] Expose inspect, semantic-diff, and field-location workflows through
       `neko save-state inspect|diff|locate`, with explicit opt-in byte expansion
       for selected ranges and focused command-line contract coverage.
-- [ ] Replace fragile hard-coded corruption-test offsets with path-based
-      location and mutation helpers while retaining whole-container byte-count
-      and fingerprint fixtures as independent layout guards.
+- [x] Add a path-based save-state mutation helper for tests that resolves
+      exact codec fields, bounds mutations to their encoded ranges, and
+      refreshes the container checksum without embedding layout offsets.
+- [x] Migrate malformed-state and transactional-load tests from hard-coded
+      byte offsets to exact schema paths across container, system, EE
+      continuation, cache/TLB, graphics, and DMA state.
+- [x] Remove obsolete corruption offsets while retaining the version field,
+      whole-container byte count, and fingerprint fixtures as independent
+      layout guards.
 
 #### Deterministic Diagnostic Closure
 
