@@ -107,9 +107,6 @@ target_include_directories(neko_core
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/math
 )
 
-add_executable(neko neko/main.cpp)
-target_link_libraries(neko PRIVATE neko_core)
-
 add_library(neko_demo_support
     neko_demo/primitive_scene.cpp
     neko_demo/rotation_vu1.cpp
@@ -181,6 +178,7 @@ target_link_libraries(neko_perf PRIVATE neko_core)
 
 add_library(neko_diagnostics
     neko_diagnostics/gif_diagnostics.cpp
+    neko_diagnostics/save_state_diagnostics.cpp
     neko_diagnostics/vpu_program_runner.cpp
 )
 target_include_directories(neko_diagnostics
@@ -188,6 +186,18 @@ target_include_directories(neko_diagnostics
         ${CMAKE_CURRENT_SOURCE_DIR}/neko_diagnostics
 )
 target_link_libraries(neko_diagnostics PUBLIC neko_core)
+
+add_library(neko_cli_support
+    neko_cli/save_state_commands.cpp
+)
+target_include_directories(neko_cli_support
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko_cli
+)
+target_link_libraries(neko_cli_support PUBLIC neko_diagnostics)
+
+add_executable(neko neko/main.cpp)
+target_link_libraries(neko PRIVATE neko_cli_support)
 
 add_executable(neko_tests
     neko_tests/main.cpp
@@ -229,8 +239,10 @@ add_executable(neko_tests
     neko_tests/neko_system_tests.cpp
     neko_tests/save_state_internal_tests.cpp
     neko_tests/save_state_tests.cpp
+    neko_tests/save_state_command_tests.cpp
     neko_tests/regression_trace_tests.cpp
     neko_tests/system_interface_tests.cpp
+    neko_tests/save_state_diagnostics_tests.cpp
     neko_tests/gif/gif_tests.cpp
     neko_tests/gif/gif_path_arbiter_tests.cpp
     neko_tests/gif/gif_path1_tests.cpp
@@ -315,6 +327,7 @@ add_executable(neko_tests
 target_include_directories(neko_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/neko_tests
     ${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/vpu/opcode_tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/neko_cli
 )
 target_compile_definitions(neko_tests PRIVATE
     NEKO_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/neko_tests/vpu/integration"
@@ -325,6 +338,7 @@ target_link_libraries(
     PRIVATE
         neko_demo_support
         neko_desktop_support
+        neko_cli_support
         neko_diagnostics
         neko_frontend_support
 )

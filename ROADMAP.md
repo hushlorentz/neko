@@ -1929,11 +1929,18 @@ creating parallel ownership.
       range, type, and decoded value, include the active field path and offset
       in decode failures, retain large byte arrays as ranges by default, and
       preserve the single-payload-allocation transaction and byte layout.
-- [ ] Build inspect, semantic-diff, and field-location workflows over the
-      observed codec schema without adding a second parser. Define stable
-      diagnostic value formatting, distinguish container from payload offsets,
-      and cover large byte arrays without requiring per-byte retained metadata
-      unless explicitly requested.
+- [x] Add a retained save-state diagnostic schema in `neko_diagnostics` that
+      consumes codec observations, sorts patched fields by container offset,
+      defines stable scalar and byte-range formatting, distinguishes container
+      from payload offsets, and hashes large ranges without retaining their
+      bytes by default.
+- [x] Build exact-path field location and semantic-diff operations over the
+      retained schema without adding a second parser. Report additions,
+      removals, metadata changes, scalar changes, and byte-range changes in
+      deterministic path order.
+- [x] Expose inspect, semantic-diff, and field-location workflows through
+      `neko save-state inspect|diff|locate`, with explicit opt-in byte expansion
+      for selected ranges and focused command-line contract coverage.
 - [ ] Replace fragile hard-coded corruption-test offsets with path-based
       location and mutation helpers while retaining whole-container byte-count
       and fingerprint fixtures as independent layout guards.

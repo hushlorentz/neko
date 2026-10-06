@@ -33,6 +33,26 @@ The basic `neko` executable is located at:
 - macOS/Linux: `./out/build/neko`
 - Windows with Visual Studio: `.\out\build\Release\neko.exe`
 
+## Save-State Diagnostics
+
+Inspect the authoritative versioned schema of a save-state file:
+
+```sh
+./out/build/neko save-state inspect state.neko
+```
+
+Locate one exact schema path or compare two states semantically:
+
+```sh
+./out/build/neko save-state locate state.neko system.input.buttons
+./out/build/neko save-state diff before.neko after.neko
+```
+
+Byte ranges show their size and FNV-1a hash by default. Add
+`--bytes <path>` to `inspect` or `diff`, or `--bytes` to `locate`, to include
+the selected range's bytes. Invalid files and arguments return status 2;
+missing fields and states with semantic differences return status 1.
+
 ## Tests
 
 Run the complete optimized, assertion-enabled test and repository check:
