@@ -1918,12 +1918,17 @@ creating parallel ownership.
 
 #### Schema-Aware Save-State Diagnostics
 
-- [ ] Add an optional diagnostic observer to `SaveStateWriter` and
-      `SaveStateReader` with scoped component, field, and array-element paths.
-      Drive it from the authoritative codec, report each field's byte range,
-      type, and decoded value, and include the active field path and offset in
-      decode failures. Keep the observer absent from ordinary save/load hot
-      paths and preserve the single-payload-allocation transaction.
+- [x] Establish the optional diagnostic-observer contract in
+      `SaveStateWriter` and `SaveStateReader`. Define scoped component, field,
+      and array-element paths; scalar and byte-range value kinds; absolute and
+      payload-relative byte ranges; and path-aware reader failures. Prove that
+      an absent observer preserves ordinary save/load allocation behavior,
+      bytes, and transaction structure.
+- [ ] Route the complete container and version-31 payload codec through the
+      observer-aware primitives. Report every authoritative field's path,
+      range, type, and decoded value, include the active field path and offset
+      in decode failures, retain large byte arrays as ranges by default, and
+      preserve the single-payload-allocation transaction and byte layout.
 - [ ] Build inspect, semantic-diff, and field-location workflows over the
       observed codec schema without adding a second parser. Define stable
       diagnostic value formatting, distinguish container from payload offsets,

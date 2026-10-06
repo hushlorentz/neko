@@ -25,12 +25,196 @@ constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
 constexpr std::size_t SAVE_STATE_RESERVE_BYTES =
   EEMemoryMap::MAIN_MEMORY_SIZE + 5 * 1024 * 1024;
 
+enum class SaveStateFieldKind : std::uint8_t
+{
+  U8,
+  U16,
+  U32,
+  U64,
+  Boolean,
+  Bytes
+};
+
+struct SaveStateFieldObservation
+{
+  std::string path;
+  SaveStateFieldKind kind = SaveStateFieldKind::U8;
+  std::size_t containerOffset = 0;
+  bool hasPayloadOffset = false;
+  std::size_t payloadOffset = 0;
+  std::size_t size = 0;
+  std::uint64_t scalarValue = 0;
+  // The byte view is valid only during SaveStateObserver::observe().
+  const std::uint8_t *bytes = nullptr;
+};
+
+class SaveStateObserver
+{
+  public:
+    virtual ~SaveStateObserver() = default;
+    virtual void observe(
+      const SaveStateFieldObservation &field) = 0;
+};
+
+class SaveStatePathState
+{
+  public:
+    static constexpr std::size_t MAX_DEPTH = 32;
+
+    void pushName(const char *name)
+    {
+      requireCapacity();
+      segments[depth].name = name;
+      segments[depth].index = 0;
+      segments[depth].isIndex = false;
+      ++depth;
+    }
+
+    void pushIndex(std::size_t index)
+    {
+      requireCapacity();
+      segments[depth].name = nullptr;
+      segments[depth].index = index;
+      segments[depth].isIndex = true;
+      ++depth;
+    }
+
+    void pop()
+    {
+      if (depth == 0)
+      {
+        throw std::logic_error(
+          "Save-state diagnostic path scope is unbalanced.");
+      }
+      --depth;
+    }
+
+    std::string format(const char *leaf = nullptr) const
+    {
+      std::string result;
+      for (std::size_t index = 0; index < depth; ++index)
+      {
+        const Segment &segment = segments[index];
+        if (segment.isIndex)
+        {
+          result += "[";
+          result += std::to_string(segment.index);
+          result += "]";
+        }
+        else
+        {
+          if (!result.empty())
+          {
+            result += ".";
+          }
+          result += segment.name;
+        }
+      }
+      if (leaf != nullptr)
+      {
+        if (!result.empty())
+        {
+          result += ".";
+        }
+        result += leaf;
+      }
+      return result;
+    }
+
+  private:
+    struct Segment
+    {
+      const char *name = nullptr;
+      std::size_t index = 0;
+      bool isIndex = false;
+    };
+
+    void requireCapacity() const
+    {
+      if (depth == segments.size())
+      {
+        throw std::logic_error(
+          "Save-state diagnostic path is too deep.");
+      }
+    }
+
+    std::array<Segment, MAX_DEPTH> segments = {};
+    std::size_t depth = 0;
+};
+
+class SaveStatePathScope
+{
+  public:
+    SaveStatePathScope(
+      SaveStatePathState *path,
+      const char *name) :
+      state(path)
+    {
+      state->pushName(name);
+    }
+
+    SaveStatePathScope(
+      SaveStatePathState *path,
+      std::size_t index) :
+      state(path)
+    {
+      state->pushIndex(index);
+    }
+
+    SaveStatePathScope(const SaveStatePathScope &) = delete;
+    SaveStatePathScope &operator=(
+      const SaveStatePathScope &) = delete;
+
+    SaveStatePathScope(SaveStatePathScope &&other) noexcept :
+      state(other.state)
+    {
+      other.state = nullptr;
+    }
+
+    SaveStatePathScope &operator=(
+      SaveStatePathScope &&other) = delete;
+
+    ~SaveStatePathScope()
+    {
+      if (state != nullptr)
+      {
+        state->pop();
+      }
+    }
+
+  private:
+    SaveStatePathState *state = nullptr;
+};
+
 class SaveStateWriter
 {
   public:
-    SaveStateWriter()
+    explicit SaveStateWriter(
+      SaveStateObserver *fieldObserver = nullptr) :
+      observer(fieldObserver)
     {
       bytes.reserve(SAVE_STATE_RESERVE_BYTES);
+    }
+
+    SaveStateWriter(const SaveStateWriter &) = delete;
+    SaveStateWriter &operator=(const SaveStateWriter &) = delete;
+    SaveStateWriter(SaveStateWriter &&) = delete;
+    SaveStateWriter &operator=(SaveStateWriter &&) = delete;
+
+    SaveStatePathScope scope(const char *name)
+    {
+      return SaveStatePathScope(&path, name);
+    }
+
+    SaveStatePathScope element(std::size_t index)
+    {
+      return SaveStatePathScope(&path, index);
+    }
+
+    void setPayloadOrigin(std::size_t offset)
+    {
+      payloadOrigin = offset;
+      hasPayloadOrigin = true;
     }
 
     void writeU8(std::uint8_t value)
@@ -61,6 +245,76 @@ class SaveStateWriter
       writeU8(value ? 1 : 0);
     }
 
+    void writeFieldU8(
+      const char *name,
+      std::uint8_t value)
+    {
+      const std::size_t start = size();
+      writeU8(value);
+      observeScalar(
+        name,
+        SaveStateFieldKind::U8,
+        start,
+        sizeof(value),
+        value);
+    }
+
+    void writeFieldU16(
+      const char *name,
+      std::uint16_t value)
+    {
+      const std::size_t start = size();
+      writeU16(value);
+      observeScalar(
+        name,
+        SaveStateFieldKind::U16,
+        start,
+        sizeof(value),
+        value);
+    }
+
+    void writeFieldU32(
+      const char *name,
+      std::uint32_t value)
+    {
+      const std::size_t start = size();
+      writeU32(value);
+      observeScalar(
+        name,
+        SaveStateFieldKind::U32,
+        start,
+        sizeof(value),
+        value);
+    }
+
+    void writeFieldU64(
+      const char *name,
+      std::uint64_t value)
+    {
+      const std::size_t start = size();
+      writeU64(value);
+      observeScalar(
+        name,
+        SaveStateFieldKind::U64,
+        start,
+        sizeof(value),
+        value);
+    }
+
+    void writeFieldBool(
+      const char *name,
+      bool value)
+    {
+      const std::size_t start = size();
+      writeBool(value);
+      observeScalar(
+        name,
+        SaveStateFieldKind::Boolean,
+        start,
+        1,
+        value ? 1 : 0);
+    }
+
     void writeBytes(
       const std::uint8_t *values,
       std::size_t count)
@@ -70,6 +324,22 @@ class SaveStateWriter
         return;
       }
       bytes.insert(bytes.end(), values, values + count);
+    }
+
+    void writeFieldBytes(
+      const char *name,
+      const std::uint8_t *values,
+      std::size_t count)
+    {
+      const std::size_t start = size();
+      writeBytes(values, count);
+      observe(
+        name,
+        SaveStateFieldKind::Bytes,
+        start,
+        count,
+        0,
+        values);
     }
 
     void writeByteVector(
@@ -138,43 +408,217 @@ class SaveStateWriter
     }
 
   private:
+    void observeScalar(
+      const char *name,
+      SaveStateFieldKind kind,
+      std::size_t start,
+      std::size_t fieldSize,
+      std::uint64_t value)
+    {
+      observe(
+        name,
+        kind,
+        start,
+        fieldSize,
+        value,
+        nullptr);
+    }
+
+    void observe(
+      const char *name,
+      SaveStateFieldKind kind,
+      std::size_t start,
+      std::size_t fieldSize,
+      std::uint64_t value,
+      const std::uint8_t *fieldBytes)
+    {
+      if (observer == nullptr)
+      {
+        return;
+      }
+      SaveStateFieldObservation field;
+      field.path = path.format(name);
+      field.kind = kind;
+      field.containerOffset = start;
+      field.hasPayloadOffset =
+        hasPayloadOrigin && start >= payloadOrigin;
+      if (field.hasPayloadOffset)
+      {
+        field.payloadOffset = start - payloadOrigin;
+      }
+      field.size = fieldSize;
+      field.scalarValue = value;
+      field.bytes = fieldBytes;
+      observer->observe(field);
+    }
+
     std::vector<std::uint8_t> bytes;
+    SaveStateObserver *observer = nullptr;
+    SaveStatePathState path;
+    std::size_t payloadOrigin = 0;
+    bool hasPayloadOrigin = false;
 };
 
 class SaveStateReader
 {
   public:
     explicit SaveStateReader(
-      const std::vector<std::uint8_t> &input) :
-      bytes(input)
+      const std::vector<std::uint8_t> &input,
+      SaveStateObserver *fieldObserver = nullptr) :
+      bytes(input),
+      observer(fieldObserver)
     {
+    }
+
+    SaveStateReader(const SaveStateReader &) = delete;
+    SaveStateReader &operator=(const SaveStateReader &) = delete;
+    SaveStateReader(SaveStateReader &&) = delete;
+    SaveStateReader &operator=(SaveStateReader &&) = delete;
+
+    SaveStatePathScope scope(const char *name)
+    {
+      return SaveStatePathScope(&path, name);
+    }
+
+    SaveStatePathScope element(std::size_t index)
+    {
+      return SaveStatePathScope(&path, index);
+    }
+
+    void setPayloadOrigin(std::size_t offset)
+    {
+      payloadOrigin = offset;
+      hasPayloadOrigin = true;
     }
 
     std::uint8_t readU8()
     {
-      requireAvailable(1);
-      return bytes[position++];
+      clearActiveField();
+      return readRawU8();
     }
 
     std::uint16_t readU16()
     {
-      const std::uint16_t low = readU8();
-      return low |
-        (static_cast<std::uint16_t>(readU8()) << 8);
+      clearActiveField();
+      return readRawU16();
     }
 
     std::uint32_t readU32()
     {
-      const std::uint32_t low = readU16();
-      return low |
-        (static_cast<std::uint32_t>(readU16()) << 16);
+      clearActiveField();
+      return readRawU32();
     }
 
     std::uint64_t readU64()
     {
-      const std::uint64_t low = readU32();
-      return low |
-        (static_cast<std::uint64_t>(readU32()) << 32);
+      clearActiveField();
+      return readRawU64();
+    }
+
+    std::uint8_t readFieldU8(const char *name)
+    {
+      const std::size_t start = beginField(name);
+      const std::uint8_t value = readRawU8();
+      observeScalar(
+        name,
+        SaveStateFieldKind::U8,
+        start,
+        sizeof(value),
+        value);
+      return value;
+    }
+
+    std::uint16_t readFieldU16(const char *name)
+    {
+      const std::size_t start = beginField(name);
+      const std::uint16_t value = readRawU16();
+      observeScalar(
+        name,
+        SaveStateFieldKind::U16,
+        start,
+        sizeof(value),
+        value);
+      return value;
+    }
+
+    std::uint32_t readFieldU32(const char *name)
+    {
+      const std::size_t start = beginField(name);
+      const std::uint32_t value = readRawU32();
+      observeScalar(
+        name,
+        SaveStateFieldKind::U32,
+        start,
+        sizeof(value),
+        value);
+      return value;
+    }
+
+    std::uint64_t readFieldU64(const char *name)
+    {
+      const std::size_t start = beginField(name);
+      const std::uint64_t value = readRawU64();
+      observeScalar(
+        name,
+        SaveStateFieldKind::U64,
+        start,
+        sizeof(value),
+        value);
+      return value;
+    }
+
+    bool readFieldBool(const char *name)
+    {
+      const std::size_t start = beginField(name);
+      const std::uint8_t value = readRawU8();
+      if (value > 1)
+      {
+        invalidCurrent("value is not a boolean");
+      }
+      observeScalar(
+        name,
+        SaveStateFieldKind::Boolean,
+        start,
+        1,
+        value);
+      return value != 0;
+    }
+
+    void requireField(
+      bool condition,
+      const std::string &detail) const
+    {
+      if (!condition)
+      {
+        if (activeFieldName != nullptr)
+        {
+          invalidCurrent(detail);
+        }
+        invalid(detail);
+      }
+    }
+
+    void readFieldBytes(
+      const char *name,
+      std::uint8_t *values,
+      std::size_t count)
+    {
+      const std::size_t start = beginField(name);
+      requireAvailable(count);
+      const std::uint8_t *source =
+        count == 0 ? nullptr : bytes.data() + position;
+      if (count != 0)
+      {
+        std::copy(source, source + count, values);
+      }
+      position += count;
+      observe(
+        name,
+        SaveStateFieldKind::Bytes,
+        start,
+        count,
+        0,
+        source);
     }
 
     bool readBool(const char *name)
@@ -209,6 +653,7 @@ class SaveStateReader
       std::size_t count,
       const char *name)
     {
+      clearActiveField();
       requireAvailable(count);
       if (!std::equal(
             expected,
@@ -263,15 +708,128 @@ class SaveStateReader
     }
 
   private:
+    std::uint8_t readRawU8()
+    {
+      requireAvailable(1);
+      return bytes[position++];
+    }
+
+    std::uint16_t readRawU16()
+    {
+      const std::uint16_t low = readRawU8();
+      return low |
+        (static_cast<std::uint16_t>(readRawU8()) << 8);
+    }
+
+    std::uint32_t readRawU32()
+    {
+      const std::uint32_t low = readRawU16();
+      return low |
+        (static_cast<std::uint32_t>(readRawU16()) << 16);
+    }
+
+    std::uint64_t readRawU64()
+    {
+      const std::uint64_t low = readRawU32();
+      return low |
+        (static_cast<std::uint64_t>(readRawU32()) << 32);
+    }
+
+    std::size_t beginField(const char *name)
+    {
+      activePath = path;
+      activeFieldName = name;
+      activeFieldOffset = position;
+      return position;
+    }
+
+    void clearActiveField()
+    {
+      activeFieldName = nullptr;
+    }
+
+    void observeScalar(
+      const char *name,
+      SaveStateFieldKind kind,
+      std::size_t start,
+      std::size_t fieldSize,
+      std::uint64_t value)
+    {
+      observe(
+        name,
+        kind,
+        start,
+        fieldSize,
+        value,
+        nullptr);
+    }
+
+    void observe(
+      const char *name,
+      SaveStateFieldKind kind,
+      std::size_t start,
+      std::size_t fieldSize,
+      std::uint64_t value,
+      const std::uint8_t *fieldBytes)
+    {
+      if (observer == nullptr)
+      {
+        return;
+      }
+      SaveStateFieldObservation field;
+      field.path = path.format(name);
+      field.kind = kind;
+      field.containerOffset = start;
+      field.hasPayloadOffset =
+        hasPayloadOrigin && start >= payloadOrigin;
+      if (field.hasPayloadOffset)
+      {
+        field.payloadOffset = start - payloadOrigin;
+      }
+      field.size = fieldSize;
+      field.scalarValue = value;
+      field.bytes = fieldBytes;
+      observer->observe(field);
+    }
+
+    [[noreturn]] void invalidCurrent(
+      const std::string &detail) const
+    {
+      std::string location = activePath.format(activeFieldName);
+      location += " at container offset ";
+      location += std::to_string(activeFieldOffset);
+      if (hasPayloadOrigin &&
+          activeFieldOffset >= payloadOrigin)
+      {
+        location += ", payload offset ";
+        location += std::to_string(
+          activeFieldOffset - payloadOrigin);
+      }
+      throw std::invalid_argument(
+        "Invalid Neko save state at " +
+        location + ": " + detail + ".");
+    }
+
     void requireAvailable(std::size_t count) const
     {
       if (count > bytes.size() - position)
       {
+        if (activeFieldName != nullptr)
+        {
+          invalidCurrent("data is truncated");
+        }
         invalid("data is truncated");
       }
     }
 
     const std::vector<std::uint8_t> &bytes;
+    SaveStateObserver *observer = nullptr;
+    SaveStatePathState path;
+    SaveStatePathState activePath;
+    const char *activeFieldName = nullptr;
+    std::size_t activeFieldOffset = 0;
+    std::size_t payloadOrigin = 0;
+    bool hasPayloadOrigin = false;
     std::size_t position = 0;
 };
 

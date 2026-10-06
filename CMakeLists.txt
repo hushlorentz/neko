@@ -227,6 +227,7 @@ add_executable(neko_tests
     neko_tests/ee/interrupt_controller_tests.cpp
     neko_tests/fp_register_tests.cpp
     neko_tests/neko_system_tests.cpp
+    neko_tests/save_state_internal_tests.cpp
     neko_tests/save_state_tests.cpp
     neko_tests/regression_trace_tests.cpp
     neko_tests/system_interface_tests.cpp
