@@ -162,6 +162,64 @@ TEST_CASE("EE TLB indexed writes and reads use canonical entries")
     entry.oddPage.value);
 }
 
+TEST_CASE("EE decoded indexed TLB operations address every entry")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+
+  for (std::size_t index = 0;
+       index < EEMemorySystem::TLB_ENTRY_COUNT;
+       ++index)
+  {
+    CAPTURE(index);
+    const std::uint32_t entryHi =
+      UINT32_C(0x10000000) |
+      (static_cast<std::uint32_t>(index) << 13) |
+      static_cast<std::uint32_t>(index);
+    const std::uint32_t entryLo0 =
+      (static_cast<std::uint32_t>(index + 1) << 6) |
+      EECOP0EntryLo::GLOBAL |
+      EECOP0EntryLo::VALID |
+      EECOP0EntryLo::DIRTY;
+    const std::uint32_t entryLo1 =
+      (static_cast<std::uint32_t>(index + 49) << 6) |
+      EECOP0EntryLo::GLOBAL |
+      EECOP0EntryLo::VALID;
+
+    core.setCOP0Register(
+      EECOP0Register::Index,
+      static_cast<std::uint32_t>(index));
+    core.setCOP0Register(EECOP0Register::PageMask, 0);
+    core.setCOP0Register(EECOP0Register::EntryHi, entryHi);
+    core.setCOP0Register(EECOP0Register::EntryLo0, entryLo0);
+    core.setCOP0Register(EECOP0Register::EntryLo1, entryLo1);
+    runInstruction(
+      &system,
+      cop0OperationInstruction(0x02));
+
+    core.setCOP0Register(EECOP0Register::PageMask, UINT32_MAX);
+    core.setCOP0Register(EECOP0Register::EntryHi, UINT32_MAX);
+    core.setCOP0Register(EECOP0Register::EntryLo0, UINT32_MAX);
+    core.setCOP0Register(EECOP0Register::EntryLo1, UINT32_MAX);
+    runInstruction(
+      &system,
+      cop0OperationInstruction(0x01));
+
+    REQUIRE(core.cop0Register(EECOP0Register::PageMask) == 0);
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EntryHi) ==
+      (entryHi & EECOP0EntryHi::IMPLEMENTED_MASK));
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EntryLo0) ==
+      (entryLo0 &
+       EECOP0EntryLo::ENTRY_LO_0_IMPLEMENTED_MASK));
+    REQUIRE(
+      core.cop0Register(EECOP0Register::EntryLo1) ==
+      (entryLo1 &
+       EECOP0EntryLo::ENTRY_LO_1_IMPLEMENTED_MASK));
+  }
+}
+
 TEST_CASE("EE TLB entries select pages using their page mask")
 {
   NekoSystem system;

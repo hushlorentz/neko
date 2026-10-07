@@ -406,6 +406,101 @@ TEST_CASE("EE cache arrays reset to deterministic invalid lines")
   }
 }
 
+TEST_CASE("EE cache index tag operations address every set and way")
+{
+  EEMemorySystem memorySystem;
+
+  for (std::size_t set = 0;
+       set < EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT;
+       ++set)
+  {
+    for (std::size_t way = 0;
+         way < EEMemorySystem::CACHE_WAY_COUNT;
+         ++way)
+    {
+      CAPTURE(set);
+      CAPTURE(way);
+      const std::uint32_t physicalTag =
+        static_cast<std::uint32_t>(
+          (1 + set * EEMemorySystem::CACHE_WAY_COUNT + way) <<
+          12);
+      memorySystem.setCOP0Register(
+        EECOP0Register::TagLo,
+        physicalTag |
+          EECOP0TagLo::VALID |
+          (way == 0
+             ? 0
+             : EECOP0TagLo::LEAST_RECENTLY_FILLED));
+
+      const EECacheMaintenanceResult result =
+        EEMemorySystemTestAccess::maintainCache(
+          &memorySystem,
+          nullptr,
+          {
+            EECacheOperation::InstructionIndexStoreTag,
+            static_cast<std::uint32_t>((set << 6) | way),
+            {}
+          });
+
+      REQUIRE(
+        result.outcome ==
+        EECacheMaintenanceOutcome::Completed);
+      const EECacheLine &line =
+        memorySystem.instructionCacheLine(set, way);
+      REQUIRE(line.physicalTag == physicalTag);
+      REQUIRE(line.valid);
+      REQUIRE(line.leastRecentlyFilled == (way != 0));
+    }
+  }
+
+  for (std::size_t set = 0;
+       set < EEMemorySystem::DATA_CACHE_SET_COUNT;
+       ++set)
+  {
+    for (std::size_t way = 0;
+         way < EEMemorySystem::CACHE_WAY_COUNT;
+         ++way)
+    {
+      CAPTURE(set);
+      CAPTURE(way);
+      const std::uint32_t physicalTag =
+        static_cast<std::uint32_t>(
+          (1 + set * EEMemorySystem::CACHE_WAY_COUNT + way) <<
+          12);
+      memorySystem.setCOP0Register(
+        EECOP0Register::TagLo,
+        physicalTag |
+          EECOP0TagLo::DIRTY |
+          EECOP0TagLo::VALID |
+          EECOP0TagLo::LOCK |
+          (way == 0
+             ? 0
+             : EECOP0TagLo::LEAST_RECENTLY_FILLED));
+
+      const EECacheMaintenanceResult result =
+        EEMemorySystemTestAccess::maintainCache(
+          &memorySystem,
+          nullptr,
+          {
+            EECacheOperation::DataIndexStoreTag,
+            static_cast<std::uint32_t>((set << 6) | way),
+            {EEPrivilegeMode::User, false, false}
+          });
+
+      REQUIRE(
+        result.outcome ==
+        EECacheMaintenanceOutcome::Completed);
+      const EECacheLine &line =
+        memorySystem.dataCacheLine(set, way);
+      REQUIRE(line.physicalTag == physicalTag);
+      REQUIRE(line.dirty);
+      REQUIRE(line.valid);
+      REQUIRE(line.locked);
+      REQUIRE(line.leastRecentlyFilled == (way != 0));
+    }
+  }
+}
+
 TEST_CASE("EE unimplemented cache maintenance remains explicitly unsupported")
 {
   NekoSystem system;

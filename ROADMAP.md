@@ -1986,7 +1986,7 @@ fixtures rather than architectural state; no save-state version or production
 trace extension is expected unless the coverage audit demonstrates a real
 observability gap.
 
-- [ ] Audit the completed host conformance coverage against the closure
+- [x] Audit the completed host conformance coverage against the closure
       contract. Map segment boundaries, all 48 TLB entries, all supported page
       masks, ASID/global matching, permissions and exception priority, every
       cache set/way/state transition, scratchpad CPU/DMA visibility, malformed
