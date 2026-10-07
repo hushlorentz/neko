@@ -2016,7 +2016,7 @@ observability gap.
       exact regeneration command, and generated ELF SHA-256. Keep committed
       ELFs optional to regenerate and keep PS2DEV out of normal build
       dependencies.
-- [ ] Run the focused guest and host conformance tests, then the complete
+- [x] Run the focused guest and host conformance tests, then the complete
       optimized repository check. Compare representative pre-milestone guest
       output, public trace encoding, canonical state hashes, and version-31
       save-state bytes or semantic diffs, with an explicit explanation for
