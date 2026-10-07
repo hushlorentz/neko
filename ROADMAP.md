@@ -2005,7 +2005,7 @@ observability gap.
       channel-8/channel-9 normal and interleave DMA visibility, completion and
       interrupt state, address wrapping, and the documented absence of
       automatic cache coherence.
-- [ ] Add an independently authored cache-workflow guest covering instruction
+- [x] Add an independently authored cache-workflow guest covering instruction
       and data cache maintenance, physical and virtual aliases, writeback and
       invalidation, line locking, DMA visibility, cache-enable transitions,
       and self-modifying code.

@@ -550,6 +550,170 @@ TEST_CASE("PS2DEV scratchpad DMA guest composes CPU and channel visibility")
   requireArchitecturalState(&second);
 }
 
+TEST_CASE("PS2DEV cache guest composes maintenance and coherence workflows")
+{
+  const std::vector<std::uint8_t> guest =
+    readGuest("cache_workflow.elf");
+  NekoSystem first;
+  NekoSystem second;
+  first.startTrace();
+  second.startTrace();
+
+  const EEGuestExecutionResult firstResult =
+    first.runELF(guest, 4096);
+  const EEGuestExecutionResult secondResult =
+    second.runELF(guest, 4096);
+  CAPTURE(neko_frontend::formatELFRun(firstResult));
+  CAPTURE(neko_frontend::formatELFRun(secondResult));
+
+  const auto requireExecution =
+    [](const EEGuestExecutionResult &result)
+    {
+      REQUIRE(result.outcome == EEGuestOutcome::Completed);
+      REQUIRE(result.exitCode == 0);
+      REQUIRE_FALSE(result.execution.cycleLimitReached);
+      REQUIRE(
+        result.execution.programCounter ==
+        EEGuestRuntime::RETURN_ADDRESS);
+      REQUIRE(
+        result.execution.pendingException ==
+        EEException::None);
+    };
+  requireExecution(firstResult);
+  requireExecution(secondResult);
+
+  REQUIRE(first.traceHash() != 0);
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
+
+  const auto requireArchitecturalState =
+    [](NekoSystem *system)
+    {
+      const std::uint32_t outputAddress =
+        static_cast<std::uint32_t>(
+          system->eeCore().generalRegister(19).low);
+      REQUIRE(outputAddress != 0);
+
+      const std::uint32_t expected[] = {
+        UINT32_C(0x33334444),
+        UINT32_C(0x11112222),
+        UINT32_C(0x33334444),
+        UINT32_C(0x33334444),
+        UINT32_C(0x55556666),
+        UINT32_C(0x33334444),
+        UINT32_C(0x55556666),
+        UINT32_C(0xa1a2a3a4),
+        UINT32_C(0xb1b2b3b4),
+        UINT32_C(0x00000000),
+        EECOP0TagLo::VALID | EECOP0TagLo::LOCK,
+        UINT32_C(0x00002000) | EECOP0TagLo::VALID,
+        1,
+        1,
+        1,
+        1,
+        2,
+        1,
+        2,
+        1,
+        2
+      };
+      for (std::size_t index = 0;
+           index < sizeof(expected) / sizeof(expected[0]);
+           ++index)
+      {
+        CAPTURE(index);
+        REQUIRE(
+          system->eeBus().read32(
+            outputAddress +
+            static_cast<std::uint32_t>(index * 4)) ==
+          expected[index]);
+      }
+
+      const std::uint32_t dmaTargetAddress =
+        system->eeBus().read32(outputAddress + 84);
+      const std::uint32_t functionAddress =
+        system->eeBus().read32(outputAddress + 88);
+      const std::uint32_t firstAlias =
+        system->eeBus().read32(outputAddress + 92);
+      const std::uint32_t secondAlias =
+        system->eeBus().read32(outputAddress + 96);
+      REQUIRE(
+        system->eeBus().read32(dmaTargetAddress) ==
+        UINT32_C(0x55556666));
+      REQUIRE(
+        system->eeBus().read32(functionAddress) ==
+        UINT32_C(0x24030002));
+
+      EEMemorySystem &memory = system->eeMemorySystem();
+      const std::size_t dataSet =
+        (dmaTargetAddress >> 6) &
+        (EEMemorySystem::DATA_CACHE_SET_COUNT - 1);
+      bool foundDataLine = false;
+      for (std::size_t way = 0;
+           way < EEMemorySystem::CACHE_WAY_COUNT;
+           ++way)
+      {
+        const EECacheLine &line =
+          memory.dataCacheLine(dataSet, way);
+        if (line.valid &&
+            line.physicalTag ==
+              (dmaTargetAddress &
+               EECacheLine::PHYSICAL_TAG_MASK))
+        {
+          REQUIRE_FALSE(line.dirty);
+          foundDataLine = true;
+        }
+      }
+      REQUIRE(foundDataLine);
+
+      const EECacheLine &locked =
+        memory.dataCacheLine(4, 0);
+      REQUIRE(locked.valid);
+      REQUIRE(locked.locked);
+      REQUIRE_FALSE(locked.dirty);
+      REQUIRE(locked.physicalTag == 0);
+      const EECacheLine &replaceable =
+        memory.dataCacheLine(4, 1);
+      REQUIRE(replaceable.valid);
+      REQUIRE_FALSE(replaceable.locked);
+      REQUIRE(
+        replaceable.physicalTag ==
+        UINT32_C(0x00002000));
+
+      const std::size_t firstSet =
+        (firstAlias >> 6) &
+        (EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT - 1);
+      const std::size_t secondSet =
+        (secondAlias >> 6) &
+        (EEMemorySystem::INSTRUCTION_CACHE_SET_COUNT - 1);
+      REQUIRE(firstSet != secondSet);
+      const auto requireInstructionAlias =
+        [&](std::size_t set)
+        {
+          bool found = false;
+          for (std::size_t way = 0;
+               way < EEMemorySystem::CACHE_WAY_COUNT;
+               ++way)
+          {
+            const EECacheLine &line =
+              memory.instructionCacheLine(set, way);
+            if (line.valid &&
+                line.physicalTag ==
+                  (functionAddress &
+                   EECacheLine::PHYSICAL_TAG_MASK))
+            {
+              found = true;
+            }
+          }
+          REQUIRE(found);
+        };
+      requireInstructionAlias(firstSet);
+      requireInstructionAlias(secondSet);
+    };
+  requireArchitecturalState(&first);
+  requireArchitecturalState(&second);
+}
+
 TEST_CASE("PS2DEV MMI semantic guests complete successfully")
 {
   struct GuestExpectation

@@ -99,6 +99,10 @@ verify_ee_elf_fixture(
   4f38a5563699150aa454f80620b8cf6453c159e43bc317f1353defa7bcecb40c
 )
 verify_ee_elf_fixture(
+  cache_workflow.elf
+  cf5bcdccb279f1e5c795f12c6e783c1cd7011aa2b4f171d428a96b119e0caf13
+)
+verify_ee_elf_fixture(
   cop1_semantics.elf
   9478e2dd9230a4215cfd5ab2c3ae420cb39cd5313e5eb51b9544cda0a1e987cf
 )
