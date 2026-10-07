@@ -358,6 +358,198 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
   requireArchitecturalState(&second);
 }
 
+TEST_CASE("PS2DEV scratchpad DMA guest composes CPU and channel visibility")
+{
+  const std::vector<std::uint8_t> guest =
+    readGuest("scratchpad_dma.elf");
+  NekoSystem first;
+  NekoSystem second;
+  first.startTrace();
+  second.startTrace();
+
+  const EEGuestExecutionResult firstResult =
+    first.runELF(guest, 4096);
+  const EEGuestExecutionResult secondResult =
+    second.runELF(guest, 4096);
+  CAPTURE(neko_frontend::formatELFRun(firstResult));
+  CAPTURE(neko_frontend::formatELFRun(secondResult));
+
+  const auto requireExecution =
+    [](const EEGuestExecutionResult &result)
+    {
+      REQUIRE(result.outcome == EEGuestOutcome::Completed);
+      REQUIRE(result.exitCode == 0);
+      REQUIRE_FALSE(result.execution.cycleLimitReached);
+      REQUIRE(
+        result.execution.programCounter ==
+        EEGuestRuntime::RETURN_ADDRESS);
+      REQUIRE(
+        result.execution.pendingException ==
+        EEException::None);
+    };
+  requireExecution(firstResult);
+  requireExecution(secondResult);
+
+  REQUIRE(first.traceHash() != 0);
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
+
+  const auto requireQuadword =
+    [](const EEQuadword &actual,
+       std::uint64_t expectedLow,
+       std::uint64_t expectedHigh)
+    {
+      REQUIRE(actual.low == expectedLow);
+      REQUIRE(actual.high == expectedHigh);
+    };
+  const auto requireArchitecturalState =
+    [&](NekoSystem *system)
+    {
+      const std::uint32_t outputAddress =
+        static_cast<std::uint32_t>(
+          system->eeCore().generalRegister(19).low);
+      REQUIRE(outputAddress != 0);
+
+      const std::uint32_t expected[] = {
+        UINT32_C(0x89abcdef),
+        UINT32_C(0x00000000),
+        UINT32_C(0x00000000),
+        UINT32_C(0x00000010),
+        UINT32_C(0x03000100),
+        UINT32_C(0x00000000),
+        UINT32_C(0x00000000),
+        UINT32_C(0x00000010),
+        UINT32_C(0x03000300),
+        UINT32_C(0x00000080),
+        UINT32_C(0x00000140),
+        UINT32_C(0x00000080),
+        UINT32_C(0x00000240),
+        UINT32_C(0x11112222),
+        UINT32_C(0xbbbbcccc),
+        UINT32_C(0x03000300)
+      };
+      for (std::size_t index = 0;
+           index < sizeof(expected) / sizeof(expected[0]);
+           ++index)
+      {
+        CAPTURE(index);
+        REQUIRE(
+          system->eeBus().read32(
+            outputAddress +
+            static_cast<std::uint32_t>(index * 4)) ==
+          expected[index]);
+      }
+
+      const std::uint32_t normalFromAddress =
+        system->eeBus().read32(outputAddress + 64);
+      const std::uint32_t normalToAddress =
+        system->eeBus().read32(outputAddress + 68);
+      const std::uint32_t interleaveFromAddress =
+        system->eeBus().read32(outputAddress + 72);
+      const std::uint32_t interleaveToAddress =
+        system->eeBus().read32(outputAddress + 76);
+      const std::uint32_t coherenceAddress =
+        system->eeBus().read32(outputAddress + 80);
+      REQUIRE(
+        system->eeBus().read32(outputAddress + 84) ==
+        UINT32_C(0x03000100));
+
+      EEQuadword value = {};
+      REQUIRE(system->eeBus().readDMAC128(
+        normalFromAddress, &value));
+      requireQuadword(
+        value,
+        UINT64_C(0x0123456789abcdef),
+        UINT64_C(0xfedcba9876543210));
+      REQUIRE(system->eeBus().readDMAC128(
+        normalFromAddress + 16, &value));
+      requireQuadword(
+        value,
+        UINT64_C(0x1111222233334444),
+        UINT64_C(0xaaaabbbbccccdddd));
+
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress, &value));
+      requireQuadword(value, UINT64_C(0x10), UINT64_C(0x100));
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress + 16, &value));
+      requireQuadword(value, UINT64_C(0x20), UINT64_C(0x200));
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress + 32, &value));
+      requireQuadword(value, 0, 0);
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress + 48, &value));
+      requireQuadword(value, 0, 0);
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress + 64, &value));
+      requireQuadword(value, UINT64_C(0x30), UINT64_C(0x300));
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress + 80, &value));
+      requireQuadword(value, UINT64_C(0x40), UINT64_C(0x400));
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress + 96, &value));
+      requireQuadword(value, 0, 0);
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveFromAddress + 112, &value));
+      requireQuadword(value, 0, 0);
+
+      REQUIRE(system->eeBus().readDMAC128(
+        coherenceAddress, &value));
+      requireQuadword(
+        value,
+        UINT64_C(0x9999aaaabbbbcccc),
+        UINT64_C(0xddddeeeeffff0000));
+
+      EEMemorySystem &memory = system->eeMemorySystem();
+      REQUIRE(
+        memory.readScratchpadDMA128(0x3ff0, &value) ==
+        EEScratchpadAccessResult::Completed);
+      requireQuadword(
+        value,
+        UINT64_C(0x8877665544332211),
+        UINT64_C(0xffeeddccbbaa9988));
+      REQUIRE(
+        memory.readScratchpadDMA128(0, &value) ==
+        EEScratchpadAccessResult::Completed);
+      requireQuadword(
+        value,
+        UINT64_C(0x1020304050607080),
+        UINT64_C(0x90a0b0c0d0e0f000));
+      REQUIRE(system->eeBus().readDMAC128(
+        normalToAddress, &value));
+      requireQuadword(
+        value,
+        UINT64_C(0x8877665544332211),
+        UINT64_C(0xffeeddccbbaa9988));
+      REQUIRE(
+        memory.readScratchpadDMA128(0x200, &value) ==
+        EEScratchpadAccessResult::Completed);
+      requireQuadword(value, UINT64_C(0x50), UINT64_C(0x500));
+      REQUIRE(
+        memory.readScratchpadDMA128(0x210, &value) ==
+        EEScratchpadAccessResult::Completed);
+      requireQuadword(value, UINT64_C(0x60), UINT64_C(0x600));
+      REQUIRE(
+        memory.readScratchpadDMA128(0x220, &value) ==
+        EEScratchpadAccessResult::Completed);
+      requireQuadword(value, UINT64_C(0x70), UINT64_C(0x700));
+      REQUIRE(
+        memory.readScratchpadDMA128(0x230, &value) ==
+        EEScratchpadAccessResult::Completed);
+      requireQuadword(value, UINT64_C(0x80), UINT64_C(0x800));
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveToAddress, &value));
+      requireQuadword(value, UINT64_C(0x50), UINT64_C(0x500));
+      REQUIRE(system->eeBus().readDMAC128(
+        interleaveToAddress + 80, &value));
+      requireQuadword(value, UINT64_C(0x80), UINT64_C(0x800));
+
+      REQUIRE(system->interruptPending());
+    };
+  requireArchitecturalState(&first);
+  requireArchitecturalState(&second);
+}
+
 TEST_CASE("PS2DEV MMI semantic guests complete successfully")
 {
   struct GuestExpectation

@@ -2001,7 +2001,7 @@ observability gap.
       supported page size, even/odd boundaries, ASID and global mappings,
       load/store permissions, and precise refill/invalid/modified exception
       metadata through a guest exception handler.
-- [ ] Add an independently authored scratchpad guest covering CPU accesses,
+- [x] Add an independently authored scratchpad guest covering CPU accesses,
       channel-8/channel-9 normal and interleave DMA visibility, completion and
       interrupt state, address wrapping, and the documented absence of
       automatic cache coherence.

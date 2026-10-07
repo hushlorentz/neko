@@ -95,6 +95,10 @@ verify_ee_elf_fixture(
   c8ea5bea13f38058be6b4d7f9dc57babfa474d8c77810c11cf5e3776d31162fd
 )
 verify_ee_elf_fixture(
+  scratchpad_dma.elf
+  4f38a5563699150aa454f80620b8cf6453c159e43bc317f1353defa7bcecb40c
+)
+verify_ee_elf_fixture(
   cop1_semantics.elf
   9478e2dd9230a4215cfd5ab2c3ae420cb39cd5313e5eb51b9544cda0a1e987cf
 )

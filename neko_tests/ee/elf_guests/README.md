@@ -18,6 +18,9 @@ The fixtures exercise:
 - `mapped_memory.elf`: all seven page sizes and even/odd boundaries, ASID and
   combined-global matching, and guest-handled refill, invalid, and modified
   exceptions with precise COP0 metadata
+- `scratchpad_dma.elf`: CPU-visible scratchpad accesses, channel-8/channel-9
+  normal and interleave transfers, SADR wrapping, completion interrupts, and
+  deliberately unsnooped cached main-memory aliases
 - `cop1_semantics.elf`: scalar semantic capstone integrating raw results,
   `FCR31`, forwarding, branching, and concurrent Operate/Move issue
 - `cop1_transfer_memory.elf`: raw COP1 register transfers, moves, loads, stores,
@@ -89,6 +92,7 @@ d1aaa13f446f6f04d0f16eb929ced8d5f74d39bc0bc099ee158158c386940d8f  branches.elf
 df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20  vif1_dma.elf
 85167683099a0454bf207e2085d5858a5bfbff8c42651016e46cd568c69b9afd  cop0_tlb_management.elf
 c8ea5bea13f38058be6b4d7f9dc57babfa474d8c77810c11cf5e3776d31162fd  mapped_memory.elf
+4f38a5563699150aa454f80620b8cf6453c159e43bc317f1353defa7bcecb40c  scratchpad_dma.elf
 9478e2dd9230a4215cfd5ab2c3ae420cb39cd5313e5eb51b9544cda0a1e987cf  cop1_semantics.elf
 7203bc4bde83e64f41fe9dafe88c1992ee4ec5b21e052df3d8321270ea9a223f  cop1_transfer_memory.elf
 05655052ceeb43a33457433795b6144ef4da47c2b6e6dd2106ef8192a0154470  cop1_control_state.elf
