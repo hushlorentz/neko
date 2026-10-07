@@ -2009,7 +2009,7 @@ observability gap.
       and data cache maintenance, physical and virtual aliases, writeback and
       invalidation, line locking, DMA visibility, cache-enable transitions,
       and self-modifying code.
-- [ ] For each guest, pin the host-readable result block, relevant
+- [x] For each guest, pin the host-readable result block, relevant
       architectural and exception registers, memory/cache outcomes,
       instruction totals and cycle totals only where the current functional
       model defines them, deterministic trace/state hashes, source provenance,

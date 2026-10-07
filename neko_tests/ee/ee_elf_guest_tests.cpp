@@ -15,6 +15,8 @@ namespace
   {
     EEELFLoadResult load;
     std::uint64_t masterCycles = 0;
+    std::uint64_t eeCycles = 0;
+    std::uint64_t instructions = 0;
     bool returned = false;
     bool cycleLimitReached = false;
   };
@@ -49,6 +51,8 @@ namespace
     result.load = system->loadELF(image);
     EECore &core = system->eeCore();
     core.startExecution(result.load.entryPoint);
+    const std::uint64_t startingEECycles =
+      core.elapsedCycles();
 
     while (core.clockActive() &&
            result.masterCycles < maxMasterCycles)
@@ -62,8 +66,12 @@ namespace
       }
       system->clockMasterCycle();
       ++result.masterCycles;
+      result.instructions +=
+        core.acceptanceRecordsThisCycle().instructionCount();
     }
 
+    result.eeCycles =
+      core.elapsedCycles() - startingEECycles;
     result.cycleLimitReached =
       core.clockActive() &&
       result.masterCycles == maxMasterCycles;
@@ -147,7 +155,16 @@ TEST_CASE("PS2DEV COP0 TLB guest exposes decoded management results")
     {
       REQUIRE(result.outcome == EEGuestOutcome::Completed);
       REQUIRE(result.exitCode == 0);
+      REQUIRE(result.execution.instructions == 179);
+      REQUIRE(result.execution.masterCycles == 117);
+      REQUIRE(result.execution.eeCycles == 117);
       REQUIRE_FALSE(result.execution.cycleLimitReached);
+      REQUIRE(
+        result.execution.state ==
+        EEExecutionState::Halted);
+      REQUIRE(
+        result.execution.stopReason ==
+        EEStopReason::HostHalt);
       REQUIRE(
         result.execution.programCounter ==
         EEGuestRuntime::RETURN_ADDRESS);
@@ -158,8 +175,13 @@ TEST_CASE("PS2DEV COP0 TLB guest exposes decoded management results")
   requireExecution(firstResult);
   requireExecution(secondResult);
 
-  REQUIRE(first.traceHash() != 0);
+  REQUIRE(
+    first.traceHash() ==
+    UINT64_C(0x988fadce67f7fbdf));
   REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    UINT64_C(0x305c9ae7160ffef7));
   REQUIRE(
     first.eeCore().stateHash() ==
     second.eeCore().stateHash());
@@ -250,7 +272,16 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
       REQUIRE(
         system.eeCore().programCounter() ==
         EEGuestRuntime::RETURN_ADDRESS);
+      REQUIRE(result.instructions == 675);
+      REQUIRE(result.masterCycles == 468);
+      REQUIRE(result.eeCycles == 468);
       REQUIRE(system.eeCore().generalRegister(2).low == 0);
+      REQUIRE(
+        system.eeCore().executionState() ==
+        EEExecutionState::Halted);
+      REQUIRE(
+        system.eeCore().stopReason() ==
+        EEStopReason::HostHalt);
       REQUIRE(
         system.eeCore().pendingException() ==
         EEException::None);
@@ -258,16 +289,41 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
   requireExecution(first, firstResult);
   requireExecution(second, secondResult);
 
-  REQUIRE(first.traceHash() != 0);
+  REQUIRE(
+    first.traceHash() ==
+    UINT64_C(0xf4062652d037c75b));
   REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    UINT64_C(0xb8d9a6e29cb820d3));
   REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
 
   const auto requireArchitecturalState =
     [](NekoSystem *system)
     {
+      const EECore &core = system->eeCore();
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Cause) ==
+        EEExceptionCode::TLB_MODIFIED * 4);
+      REQUIRE(
+        core.cop0Register(EECOP0Register::BadVAddr) ==
+        UINT32_C(0x34000800));
+      REQUIRE(
+        core.cop0Register(EECOP0Register::Context) ==
+        UINT32_C(0x001a0000));
+      REQUIRE(
+        core.cop0Register(EECOP0Register::EntryHi) ==
+        UINT32_C(0x34000000));
+      REQUIRE(
+        core.cop0Register(EECOP0Register::EPC) ==
+        UINT32_C(0x00100844));
+      REQUIRE(
+        (core.cop0Register(EECOP0Register::Status) &
+         EECOP0Status::EXCEPTION_LEVEL) == 0);
+
       const std::uint32_t outputAddress =
         static_cast<std::uint32_t>(
-          system->eeCore().generalRegister(19).low);
+          core.generalRegister(19).low);
       REQUIRE(outputAddress != 0);
 
       const std::uint32_t expectedLoads[] = {
@@ -302,6 +358,7 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
       }
 
       REQUIRE(system->eeBus().read32(outputAddress + 64) == 3);
+      REQUIRE(system->eeBus().read32(outputAddress + 140) == 2);
       REQUIRE(
         system->eeBus().read32(outputAddress + 144) ==
         UINT32_C(0xd17d00aa));
@@ -379,7 +436,16 @@ TEST_CASE("PS2DEV scratchpad DMA guest composes CPU and channel visibility")
     {
       REQUIRE(result.outcome == EEGuestOutcome::Completed);
       REQUIRE(result.exitCode == 0);
+      REQUIRE(result.execution.instructions == 349);
+      REQUIRE(result.execution.masterCycles == 221);
+      REQUIRE(result.execution.eeCycles == 221);
       REQUIRE_FALSE(result.execution.cycleLimitReached);
+      REQUIRE(
+        result.execution.state ==
+        EEExecutionState::Halted);
+      REQUIRE(
+        result.execution.stopReason ==
+        EEStopReason::HostHalt);
       REQUIRE(
         result.execution.programCounter ==
         EEGuestRuntime::RETURN_ADDRESS);
@@ -390,8 +456,13 @@ TEST_CASE("PS2DEV scratchpad DMA guest composes CPU and channel visibility")
   requireExecution(firstResult);
   requireExecution(secondResult);
 
-  REQUIRE(first.traceHash() != 0);
+  REQUIRE(
+    first.traceHash() ==
+    UINT64_C(0x1de1ee8474272cfd));
   REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    UINT64_C(0xd0a1a74dd37a0325));
   REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
 
   const auto requireQuadword =
@@ -571,7 +642,16 @@ TEST_CASE("PS2DEV cache guest composes maintenance and coherence workflows")
     {
       REQUIRE(result.outcome == EEGuestOutcome::Completed);
       REQUIRE(result.exitCode == 0);
+      REQUIRE(result.execution.instructions == 349);
+      REQUIRE(result.execution.masterCycles == 222);
+      REQUIRE(result.execution.eeCycles == 222);
       REQUIRE_FALSE(result.execution.cycleLimitReached);
+      REQUIRE(
+        result.execution.state ==
+        EEExecutionState::Halted);
+      REQUIRE(
+        result.execution.stopReason ==
+        EEStopReason::HostHalt);
       REQUIRE(
         result.execution.programCounter ==
         EEGuestRuntime::RETURN_ADDRESS);
@@ -582,8 +662,13 @@ TEST_CASE("PS2DEV cache guest composes maintenance and coherence workflows")
   requireExecution(firstResult);
   requireExecution(secondResult);
 
-  REQUIRE(first.traceHash() != 0);
+  REQUIRE(
+    first.traceHash() ==
+    UINT64_C(0xe5570564a4467923));
   REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    UINT64_C(0x19e2d2e0c2e86323));
   REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
 
   const auto requireArchitecturalState =

@@ -80,6 +80,20 @@ the local SCEI cache, TLB, and DMA definitions plus the audited Neko contracts
 recorded in `PROJECT.md`. They do not depend on reference-emulator source or
 external generated test programs.
 
+Their host acceptance contract pins the complete result blocks and relevant
+architectural state, plus these deterministic execution values:
+
+| Guest | Result bytes | Instructions | Master/EE cycles | Trace hash | EE state hash |
+|---|---:|---:|---:|---:|---:|
+| `cop0_tlb_management` | 64 | 179 | 117 | `0x988fadce67f7fbdf` | `0x305c9ae7160ffef7` |
+| `mapped_memory` | 148 | 675 | 468 | `0xf4062652d037c75b` | `0xb8d9a6e29cb820d3` |
+| `scratchpad_dma` | 88 | 349 | 221 | `0x1de1ee8474272cfd` | `0xd0a1a74dd37a0325` |
+| `cache_workflow` | 100 | 349 | 222 | `0xe5570564a4467923` | `0x19e2d2e0c2e86323` |
+
+The cycle totals are regression values for Neko's current synchronous
+functional model. They are not claims about PS2 refill, writeback, DMA
+arbitration, or shared-bus timing.
+
 Regenerate them from the repository root:
 
 ```sh
