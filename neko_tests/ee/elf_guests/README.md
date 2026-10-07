@@ -87,6 +87,21 @@ source local_integration/ps2dev-env.sh
 neko_tests/ee/elf_guests/build.sh
 ```
 
+Pass one or more guest names to regenerate only selected fixtures:
+
+```sh
+neko_tests/ee/elf_guests/build.sh cache_workflow mapped_memory
+```
+
+Regenerate one fixture, print its SHA-256, rebuild the optimized test binary,
+and run its focused Catch2 test with:
+
+```sh
+neko_tests/ee/elf_guests/check.sh \
+  cache_workflow \
+  "PS2DEV cache guest composes maintenance and coherence workflows"
+```
+
 Expected SHA-256 hashes:
 
 ```text
