@@ -87,6 +87,10 @@ verify_ee_elf_fixture(
   df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20
 )
 verify_ee_elf_fixture(
+  cop0_tlb_management.elf
+  85167683099a0454bf207e2085d5858a5bfbff8c42651016e46cd568c69b9afd
+)
+verify_ee_elf_fixture(
   cop1_semantics.elf
   9478e2dd9230a4215cfd5ab2c3ae420cb39cd5313e5eb51b9544cda0a1e987cf
 )

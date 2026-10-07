@@ -1993,7 +1993,7 @@ observability gap.
       save states, reset/restart, and unchanged direct-mapped behavior to
       existing tests. Add only missing host cases and record the exact guest
       behaviors that still need end-to-end evidence.
-- [ ] Add an independently authored COP0/TLB-management guest covering
+- [x] Add an independently authored COP0/TLB-management guest covering
       `MFC0`/`MTC0`, `TLBP`, `TLBR`, `TLBWI`, `TLBWR`, `Random`/`Wired`, and
       deterministic probe/read/write result blocks through ordinary decoded
       execution.

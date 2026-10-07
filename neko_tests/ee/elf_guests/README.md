@@ -12,6 +12,9 @@ The fixtures exercise:
 - `mmio.elf`: 32-bit INTC/DMAC registers and a 64-bit GS privileged write
 - `fifo.elf`: 128-bit `SQ` writes to the VIF0, VIF1, and GIF FIFOs
 - `vif1_dma.elf`: guest-configured VIF1 DMA completion and interrupt status
+- `cop0_tlb_management.elf`: decoded `MFC0`/`MTC0`, indexed and random TLB
+  writes, indexed reads, ASID and global probes, and deterministic
+  `Random`/`Wired` result publication
 - `cop1_semantics.elf`: scalar semantic capstone integrating raw results,
   `FCR31`, forwarding, branching, and concurrent Operate/Move issue
 - `cop1_transfer_memory.elf`: raw COP1 register transfers, moves, loads, stores,
@@ -81,6 +84,7 @@ d1aaa13f446f6f04d0f16eb929ced8d5f74d39bc0bc099ee158158c386940d8f  branches.elf
 6cee1dbb9db0d422882d981a351516d6ac8e170e88736a89ef26f9ff3ecd0488  mmio.elf
 0649d2f7dd8dd396ff1f45d4fa962b1bed53044a9972dbc97f7e3fb846161fae  fifo.elf
 df6b2b4ff832f6fe4b9d701306e6077673d85d6daea2b319dcc0fb8af12fef20  vif1_dma.elf
+85167683099a0454bf207e2085d5858a5bfbff8c42651016e46cd568c69b9afd  cop0_tlb_management.elf
 9478e2dd9230a4215cfd5ab2c3ae420cb39cd5313e5eb51b9544cda0a1e987cf  cop1_semantics.elf
 7203bc4bde83e64f41fe9dafe88c1992ee4ec5b21e052df3d8321270ea9a223f  cop1_transfer_memory.elf
 05655052ceeb43a33457433795b6144ef4da47c2b6e6dd2106ef8192a0154470  cop1_control_state.elf

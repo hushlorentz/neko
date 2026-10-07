@@ -89,6 +89,106 @@ TEST_CASE("PS2DEV scalar EE ELF guests complete successfully")
   }
 }
 
+TEST_CASE("PS2DEV COP0 TLB guest exposes decoded management results")
+{
+  const std::vector<std::uint8_t> guest =
+    readGuest("cop0_tlb_management.elf");
+  NekoSystem first;
+  NekoSystem second;
+  first.startTrace();
+  second.startTrace();
+
+  const EEGuestExecutionResult firstResult =
+    first.runELF(guest, 1024);
+  const EEGuestExecutionResult secondResult =
+    second.runELF(guest, 1024);
+  CAPTURE(neko_frontend::formatELFRun(firstResult));
+
+  const auto requireExecution =
+    [](const EEGuestExecutionResult &result)
+    {
+      REQUIRE(result.outcome == EEGuestOutcome::Completed);
+      REQUIRE(result.exitCode == 0);
+      REQUIRE_FALSE(result.execution.cycleLimitReached);
+      REQUIRE(
+        result.execution.programCounter ==
+        EEGuestRuntime::RETURN_ADDRESS);
+      REQUIRE(
+        result.execution.pendingException ==
+        EEException::None);
+    };
+  requireExecution(firstResult);
+  requireExecution(secondResult);
+
+  REQUIRE(first.traceHash() != 0);
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+
+  const auto requireArchitecturalState =
+    [](NekoSystem *system)
+    {
+      const EECore &core = system->eeCore();
+      const std::uint32_t outputAddress =
+        static_cast<std::uint32_t>(
+          core.generalRegister(19).low);
+      REQUIRE(outputAddress != 0);
+
+      const std::uint32_t expected[] = {
+        47,
+        47,
+        EECOP0PageMask::SIZE_16_KIB,
+        UINT32_C(0x1234002a),
+        UINT32_C(0x0001001e),
+        UINT32_C(0x0002001a),
+        5,
+        EECOP0Index::PROBE_FAILURE,
+        6,
+        47,
+        EECOP0PageMask::SIZE_64_KIB,
+        UINT32_C(0x34000033),
+        UINT32_C(0x0003001f),
+        UINT32_C(0x0004001b),
+        47,
+        47
+      };
+      for (std::size_t index = 0;
+           index < sizeof(expected) / sizeof(expected[0]);
+           ++index)
+      {
+        CAPTURE(index);
+        REQUIRE(
+          system->eeBus().read32(
+            outputAddress +
+            static_cast<std::uint32_t>(index * 4)) ==
+          expected[index]);
+      }
+
+      const EETLBEntry &indexed = core.tlbEntry(5);
+      REQUIRE(
+        indexed.pageMask ==
+        EECOP0PageMask::SIZE_16_KIB);
+      REQUIRE(indexed.entryHi == UINT32_C(0x1234002a));
+      REQUIRE(indexed.evenPage.value == UINT32_C(0x0001001e));
+      REQUIRE(indexed.oddPage.value == UINT32_C(0x0002001a));
+
+      const EETLBEntry &global = core.tlbEntry(6);
+      REQUIRE(global.global());
+      REQUIRE(global.entryHi == UINT32_C(0x23456011));
+
+      const EETLBEntry &random = core.tlbEntry(47);
+      REQUIRE(
+        random.pageMask ==
+        EECOP0PageMask::SIZE_64_KIB);
+      REQUIRE(random.entryHi == UINT32_C(0x34000033));
+      REQUIRE(random.evenPage.value == UINT32_C(0x0003001f));
+      REQUIRE(random.oddPage.value == UINT32_C(0x0004001b));
+    };
+  requireArchitecturalState(&first);
+  requireArchitecturalState(&second);
+}
+
 TEST_CASE("PS2DEV MMI semantic guests complete successfully")
 {
   struct GuestExpectation
