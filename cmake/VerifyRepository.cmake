@@ -91,6 +91,10 @@ verify_ee_elf_fixture(
   85167683099a0454bf207e2085d5858a5bfbff8c42651016e46cd568c69b9afd
 )
 verify_ee_elf_fixture(
+  mapped_memory.elf
+  c8ea5bea13f38058be6b4d7f9dc57babfa474d8c77810c11cf5e3776d31162fd
+)
+verify_ee_elf_fixture(
   cop1_semantics.elf
   9478e2dd9230a4215cfd5ab2c3ae420cb39cd5313e5eb51b9544cda0a1e987cf
 )

@@ -1997,7 +1997,7 @@ observability gap.
       `MFC0`/`MTC0`, `TLBP`, `TLBR`, `TLBWI`, `TLBWR`, `Random`/`Wired`, and
       deterministic probe/read/write result blocks through ordinary decoded
       execution.
-- [ ] Add an independently authored mapped-memory guest covering every
+- [x] Add an independently authored mapped-memory guest covering every
       supported page size, even/odd boundaries, ASID and global mappings,
       load/store permissions, and precise refill/invalid/modified exception
       metadata through a guest exception handler.

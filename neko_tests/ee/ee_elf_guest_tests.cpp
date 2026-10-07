@@ -11,6 +11,14 @@
 
 namespace
 {
+  struct ExceptionHandlingGuestResult
+  {
+    EEELFLoadResult load;
+    std::uint64_t masterCycles = 0;
+    bool returned = false;
+    bool cycleLimitReached = false;
+  };
+
   std::string guestPath(const std::string &fileName)
   {
     return
@@ -30,6 +38,36 @@ namespace
     return std::vector<std::uint8_t>(
       std::istreambuf_iterator<char>(input),
       std::istreambuf_iterator<char>());
+  }
+
+  ExceptionHandlingGuestResult runExceptionHandlingGuest(
+    NekoSystem *system,
+    const std::vector<std::uint8_t> &image,
+    std::uint64_t maxMasterCycles)
+  {
+    ExceptionHandlingGuestResult result;
+    result.load = system->loadELF(image);
+    EECore &core = system->eeCore();
+    core.startExecution(result.load.entryPoint);
+
+    while (core.clockActive() &&
+           result.masterCycles < maxMasterCycles)
+    {
+      if (core.programCounter() ==
+          EEGuestRuntime::RETURN_ADDRESS)
+      {
+        core.haltExecution();
+        result.returned = true;
+        break;
+      }
+      system->clockMasterCycle();
+      ++result.masterCycles;
+    }
+
+    result.cycleLimitReached =
+      core.clockActive() &&
+      result.masterCycles == maxMasterCycles;
+    return result;
   }
 
   void uploadVectorCopyProgram(VPU *vpu)
@@ -184,6 +222,137 @@ TEST_CASE("PS2DEV COP0 TLB guest exposes decoded management results")
       REQUIRE(random.entryHi == UINT32_C(0x34000033));
       REQUIRE(random.evenPage.value == UINT32_C(0x0003001f));
       REQUIRE(random.oddPage.value == UINT32_C(0x0004001b));
+    };
+  requireArchitecturalState(&first);
+  requireArchitecturalState(&second);
+}
+
+TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
+{
+  const std::vector<std::uint8_t> guest =
+    readGuest("mapped_memory.elf");
+  NekoSystem first;
+  NekoSystem second;
+  first.startTrace();
+  second.startTrace();
+
+  const ExceptionHandlingGuestResult firstResult =
+    runExceptionHandlingGuest(&first, guest, 4096);
+  const ExceptionHandlingGuestResult secondResult =
+    runExceptionHandlingGuest(&second, guest, 4096);
+
+  const auto requireExecution =
+    [](const NekoSystem &system,
+       const ExceptionHandlingGuestResult &result)
+    {
+      REQUIRE(result.returned);
+      REQUIRE_FALSE(result.cycleLimitReached);
+      REQUIRE(
+        system.eeCore().programCounter() ==
+        EEGuestRuntime::RETURN_ADDRESS);
+      REQUIRE(system.eeCore().generalRegister(2).low == 0);
+      REQUIRE(
+        system.eeCore().pendingException() ==
+        EEException::None);
+    };
+  requireExecution(first, firstResult);
+  requireExecution(second, secondResult);
+
+  REQUIRE(first.traceHash() != 0);
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
+
+  const auto requireArchitecturalState =
+    [](NekoSystem *system)
+    {
+      const std::uint32_t outputAddress =
+        static_cast<std::uint32_t>(
+          system->eeCore().generalRegister(19).low);
+      REQUIRE(outputAddress != 0);
+
+      const std::uint32_t expectedLoads[] = {
+        UINT32_C(0x04040001),
+        UINT32_C(0x04040002),
+        UINT32_C(0x16160001),
+        UINT32_C(0x16160002),
+        UINT32_C(0x64640001),
+        UINT32_C(0x64640002),
+        UINT32_C(0x02560001),
+        UINT32_C(0x02560002),
+        UINT32_C(0x10010001),
+        UINT32_C(0x10010002),
+        UINT32_C(0x40040001),
+        UINT32_C(0x40040002),
+        UINT32_C(0x16100001),
+        UINT32_C(0x16100002),
+        UINT32_C(0xa51d0042),
+        UINT32_C(0x610b0043)
+      };
+      for (std::size_t index = 0;
+           index <
+             sizeof(expectedLoads) / sizeof(expectedLoads[0]);
+           ++index)
+      {
+        CAPTURE(index);
+        REQUIRE(
+          system->eeBus().read32(
+            outputAddress +
+            static_cast<std::uint32_t>(index * 4)) ==
+          expectedLoads[index]);
+      }
+
+      REQUIRE(system->eeBus().read32(outputAddress + 64) == 3);
+      REQUIRE(
+        system->eeBus().read32(outputAddress + 144) ==
+        UINT32_C(0xd17d00aa));
+
+      struct ExceptionExpectation
+      {
+        std::uint32_t vectorMarker;
+        std::uint32_t cause;
+        std::uint32_t badVirtualAddress;
+        std::uint32_t context;
+        std::uint32_t entryHi;
+        std::uint32_t epc;
+      };
+      const ExceptionExpectation exceptions[] = {
+        {1, EEExceptionCode::TLB_LOAD_OR_FETCH * 4,
+         UINT32_C(0x28000800), UINT32_C(0x00140000),
+         UINT32_C(0x28000043), UINT32_C(0x001006b0)},
+        {2, EEExceptionCode::TLB_LOAD_OR_FETCH * 4,
+         UINT32_C(0x32000800), UINT32_C(0x00190000),
+         UINT32_C(0x32000000), UINT32_C(0x00100778)},
+        {2, EEExceptionCode::TLB_MODIFIED * 4,
+         UINT32_C(0x34000800), UINT32_C(0x001a0000),
+         UINT32_C(0x34000000), UINT32_C(0x00100840)}
+      };
+      for (std::size_t index = 0;
+           index < sizeof(exceptions) / sizeof(exceptions[0]);
+           ++index)
+      {
+        CAPTURE(index);
+        const std::uint32_t recordAddress =
+          outputAddress + 68 +
+          static_cast<std::uint32_t>(index * 24);
+        REQUIRE(
+          system->eeBus().read32(recordAddress) ==
+          exceptions[index].vectorMarker);
+        REQUIRE(
+          system->eeBus().read32(recordAddress + 4) ==
+          exceptions[index].cause);
+        REQUIRE(
+          system->eeBus().read32(recordAddress + 8) ==
+          exceptions[index].badVirtualAddress);
+        REQUIRE(
+          system->eeBus().read32(recordAddress + 12) ==
+          exceptions[index].context);
+        REQUIRE(
+          system->eeBus().read32(recordAddress + 16) ==
+          exceptions[index].entryHi);
+        REQUIRE(
+          system->eeBus().read32(recordAddress + 20) ==
+          exceptions[index].epc);
+      }
     };
   requireArchitecturalState(&first);
   requireArchitecturalState(&second);
