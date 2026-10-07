@@ -102,6 +102,15 @@ neko_tests/ee/elf_guests/check.sh \
   "PS2DEV cache guest composes maintenance and coherence workflows"
 ```
 
+Inspect one fixture's program headers, relevant sections, and selected symbols
+without modifying it:
+
+```sh
+neko_tests/ee/elf_guests/inspect.sh \
+  cache_workflow \
+  _start self_modify_target dma_target dma_replacement outputs
+```
+
 Expected SHA-256 hashes:
 
 ```text
