@@ -1975,21 +1975,52 @@ creating parallel ownership.
 
 ### Guest Conformance and Milestone Closure
 
-- [ ] Add independently authored PS2DEV guests for COP0/TLB management,
-      mapped translation across every page size, ASID/global behavior,
-      permissions and precise exceptions, scratchpad CPU/DMA visibility, cache
-      maintenance, aliases, and self-modifying code.
-- [ ] Pin guest result blocks, architectural registers, memory/cache outcomes,
-      exception metadata, instruction/cycle totals where documented,
-      deterministic trace/state hashes, fixture provenance, and generated ELF
-      hashes without making PS2DEV a normal build dependency.
-- [ ] Add exhaustive host-side conformance matrices for segment boundaries,
-      all TLB entries and supported masks, every cache set/way/state transition,
-      malformed save states, reset/restart behavior, and unchanged direct-mapped
-      guest behavior.
-- [ ] Run the complete optimized repository check and compare representative
-      pre-milestone guest output, trace shape, state hashes, and save-state
-      changes with an explicit explanation for every intentional difference.
+Close the milestone with independently authored guest evidence over the
+already-complete host conformance foundation. This block adds no second memory
+owner or guest-only execution path: guests configure hardware through ordinary
+COP0, load/store, `CACHE`, DMAC, exception, and return-to-host interfaces.
+`EECore` remains the owner of issue and precise exceptions,
+`EEMemorySystem` remains the sole translation/cache/scratchpad owner, and
+`EEBus` remains physical-only. Guest result blocks and committed ELFs are test
+fixtures rather than architectural state; no save-state version or production
+trace extension is expected unless the coverage audit demonstrates a real
+observability gap.
+
+- [ ] Audit the completed host conformance coverage against the closure
+      contract. Map segment boundaries, all 48 TLB entries, all supported page
+      masks, ASID/global matching, permissions and exception priority, every
+      cache set/way/state transition, scratchpad CPU/DMA visibility, malformed
+      save states, reset/restart, and unchanged direct-mapped behavior to
+      existing tests. Add only missing host cases and record the exact guest
+      behaviors that still need end-to-end evidence.
+- [ ] Add an independently authored COP0/TLB-management guest covering
+      `MFC0`/`MTC0`, `TLBP`, `TLBR`, `TLBWI`, `TLBWR`, `Random`/`Wired`, and
+      deterministic probe/read/write result blocks through ordinary decoded
+      execution.
+- [ ] Add an independently authored mapped-memory guest covering every
+      supported page size, even/odd boundaries, ASID and global mappings,
+      load/store permissions, and precise refill/invalid/modified exception
+      metadata through a guest exception handler.
+- [ ] Add an independently authored scratchpad guest covering CPU accesses,
+      channel-8/channel-9 normal and interleave DMA visibility, completion and
+      interrupt state, address wrapping, and the documented absence of
+      automatic cache coherence.
+- [ ] Add an independently authored cache-workflow guest covering instruction
+      and data cache maintenance, physical and virtual aliases, writeback and
+      invalidation, line locking, DMA visibility, cache-enable transitions,
+      and self-modifying code.
+- [ ] For each guest, pin the host-readable result block, relevant
+      architectural and exception registers, memory/cache outcomes,
+      instruction totals and cycle totals only where the current functional
+      model defines them, deterministic trace/state hashes, source provenance,
+      exact regeneration command, and generated ELF SHA-256. Keep committed
+      ELFs optional to regenerate and keep PS2DEV out of normal build
+      dependencies.
+- [ ] Run the focused guest and host conformance tests, then the complete
+      optimized repository check. Compare representative pre-milestone guest
+      output, public trace encoding, canonical state hashes, and version-31
+      save-state bytes or semantic diffs, with an explicit explanation for
+      every intentional difference.
 - [ ] Complete the milestone architecture and maintainability review. Inspect
       the EE memory-system implementation and immediate integration boundaries
       for duplicated ownership or validation, consolidatable interfaces,
