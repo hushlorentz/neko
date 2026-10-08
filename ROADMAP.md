@@ -2109,15 +2109,30 @@ explicit evidence-closure step before implementation.
       precise-exception, TLB, cache, reset, bootstrap, and programmer-visible
       pipeline contracts. Derivative-only registers remain excluded, and SCEI
       evidence is still required for retail IOP memory and platform behavior.
-- [ ] Produce a source-linked R3000A contract matrix covering instruction
+- [x] Produce a source-linked R3000A contract matrix covering instruction
       encodings, integer arithmetic, multiply/divide, branches and delay slots,
       loads/stores and any delayed-result rules, COP0 registers, exceptions,
       interrupt entry, reset, address aliases, cache behavior, and undefined
       cases. Classify each row as implemented in this milestone, deliberately
-      deferred, or blocked on evidence.
+      deferred, or blocked on evidence. The matrix now pins the complete
+      common integer and exception floor while excluding synthetic assembler
+      operations, optional coprocessors, derivative-only CP0 registers, and
+      unproven TLB/cache facilities. It also establishes delayed normal loads
+      and CP0 reads, the merge-load bypass, EPC/BD ownership, the KU/IE stack,
+      and `RFE`, while explicitly blocking implementation-specific values and
+      undefined-result policy from being guessed.
+- [ ] Resolve the retail IOP CPU implementation profile before fixing
+      privileged-state or cache interfaces: `PRId`, common COP0 writable masks
+      and fixed bits, TLB presence or absence, cache geometry and
+      software-visible isolation behavior, write-buffer observability, and the
+      mapping or cache relationship of the documented 1 KiB scratchpad.
+      Define deterministic policies for architecturally undefined divide,
+      branch-in-delay-slot, unsupported-TLB, and CP0-hazard cases without
+      presenting emulator choices as measured hardware.
 - [ ] Resolve the retail IOP RAM size, reset vector, ROM relationship, and
-      physical memory aliases from approved evidence before fixing those values
-      in `IOPCore` or `IOPBus` production interfaces.
+      physical memory aliases, including the documented 1 KiB scratchpad's
+      address, from approved evidence before fixing those values in `IOPCore`
+      or `IOPBus` production interfaces.
 - [ ] Resolve the software-visible IOP INTC and timer physical register maps,
       reset values, writable masks, acknowledgement behavior, and interrupt
       cause assignments from approved evidence before fixing those values in
