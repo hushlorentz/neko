@@ -231,9 +231,15 @@ NekoSystem::NekoSystem() :
 
 void NekoSystem::reset()
 {
+  const std::vector<std::uint8_t> bootROM =
+    eeBusComponent.bootROM;
   // Reset all pointer-linked hardware as one coherent machine.
   this->~NekoSystem();
   new (this) NekoSystem();
+  if (!bootROM.empty())
+  {
+    eeBusComponent.installBootROM(bootROM);
+  }
 }
 
 void NekoSystem::setInput(const NekoInputState &input)
@@ -436,6 +442,22 @@ EEGuestExecutionResult NekoSystem::runELF(
     result.outcome = EEGuestOutcome::Stopped;
   }
   return result;
+}
+
+EEExecutionResult NekoSystem::runBIOS(
+  const std::vector<std::uint8_t> &image,
+  std::uint64_t maxMasterCycles)
+{
+  if (eeCoreComponent.executionState() !=
+      EEExecutionState::Halted)
+  {
+    throw std::logic_error(
+      "A BIOS cannot be loaded while the EE is running.");
+  }
+  reset();
+  eeBusComponent.installBootROM(image);
+  eeCoreComponent.startExecution(EEReset::VECTOR);
+  return runEE(maxMasterCycles);
 }
 
 void NekoSystem::startTrace()

@@ -2031,9 +2031,15 @@ observability gap.
 - [x] Complete an independent final review of the full memory-system milestone,
       resolve every concrete finding, run the optimized AddressSanitizer and
       native macOS leak checks, reconcile `PROJECT.md`, and close the milestone.
-- [ ] Run a bounded BIOS-startup experiment only after conformance closure and
+- [x] Run a bounded BIOS-startup experiment only after conformance closure and
       use the first unsupported architectural dependency to plan the next
       milestone without folding speculative BIOS work into this one.
+      The experiment maps an explicit 4 MiB read-only Boot ROM at physical
+      `0x1fc00000`, starts the EE at reset vector `0xbfc00000`, and exposes a
+      bounded `--bios <path> --cycles <count>` diagnostic run. The supplied
+      US BIOS stopped deterministically before retiring its first instruction:
+      `0x401a7800`, an `MFC0` read of COP0 register 15 (`PRId`), which is not
+      yet implemented.
 
 ## Milestone 8: IOP Execution and Platform Foundation
 
@@ -2047,7 +2053,10 @@ a prerequisite for validating the processor and platform contracts.
       instruction and encoding surface, COP0 and exception behavior, memory
       map, reset state, INTC, timers, DMA, clock relationship to the EE,
       persistence and trace requirements, guest fixtures, unresolved evidence,
-      and final validation. Define ownership and the boundary between the IOP
+      and final validation. Include the EE COP0 `PRId` read identified by the
+      bounded BIOS experiment as a concrete startup prerequisite, without
+      extrapolating further BIOS requirements. Define ownership and the
+      boundary between the IOP
       core, IOP bus, common platform devices, and later SIF/device work.
 - [ ] Implement and exhaustively audit the R3000A execution core, privileged
       state, precise exceptions, delay slots, and deterministic run control.

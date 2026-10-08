@@ -339,6 +339,29 @@ TEST_CASE("EE bounded execution handles a zero cycle budget")
   REQUIRE(result.programCounter == 0);
 }
 
+TEST_CASE("EE BIOS execution starts at the reset vector")
+{
+  NekoSystem system;
+  std::vector<std::uint8_t> image(
+    EEMemoryMap::BOOT_ROM_SIZE,
+    0);
+
+  const EEExecutionResult result =
+    system.runBIOS(image, 1);
+
+  REQUIRE(result.masterCycles == 1);
+  REQUIRE(result.cycleLimitReached);
+  REQUIRE(result.state == EEExecutionState::Running);
+  REQUIRE(result.pendingException == EEException::None);
+  REQUIRE(system.eeCore().lastInstructionAddress() ==
+    EEReset::VECTOR);
+
+  system.reset();
+  REQUIRE(
+    system.eeBus().read32(EEMemoryMap::BOOT_ROM_BASE) ==
+    0);
+}
+
 TEST_CASE("EE execution control reports an already halted core")
 {
   NekoSystem system;

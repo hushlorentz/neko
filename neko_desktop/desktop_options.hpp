@@ -8,6 +8,7 @@
 namespace neko_desktop
 {
   constexpr std::uint64_t DEFAULT_ELF_CYCLE_LIMIT = 1000000;
+  constexpr std::uint64_t DEFAULT_BIOS_CYCLE_LIMIT = 1000000;
 
   enum class DesktopScene
   {
@@ -26,6 +27,8 @@ namespace neko_desktop
     int frameLimit = 0;
     std::string elfPath;
     std::uint64_t elfCycleLimit = DEFAULT_ELF_CYCLE_LIMIT;
+    std::string biosPath;
+    std::uint64_t biosCycleLimit = DEFAULT_BIOS_CYCLE_LIMIT;
   };
 
   DesktopOptions parseDesktopOptions(

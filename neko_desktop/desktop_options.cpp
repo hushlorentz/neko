@@ -6,7 +6,8 @@ namespace
 {
   const char *USAGE =
     "Usage: neko_desktop [--scene <name>] [--frames <count>] "
-    "| --elf <path> [--cycles <count>]";
+    "| --elf <path> [--cycles <count>] "
+    "| --bios <path> [--cycles <count>]";
 
   std::uint64_t parsePositiveInteger(
     const std::string &text,
@@ -127,10 +128,27 @@ neko_desktop::parseDesktopOptions(
     else if (argument == "--cycles" &&
              index + 1 < arguments.size())
     {
-      options.elfCycleLimit = parsePositiveInteger(
+      const std::uint64_t cycleLimit = parsePositiveInteger(
         arguments[++index],
-        "ELF cycle limit must be positive.");
+        "Execution cycle limit must be positive.");
+      options.elfCycleLimit = cycleLimit;
+      options.biosCycleLimit = cycleLimit;
       cyclesSpecified = true;
+    }
+    else if (argument == "--bios" &&
+             index + 1 < arguments.size())
+    {
+      if (!options.biosPath.empty())
+      {
+        throw std::invalid_argument(
+          "Only one BIOS path may be specified.");
+      }
+      options.biosPath = arguments[++index];
+      if (options.biosPath.empty())
+      {
+        throw std::invalid_argument(
+          "BIOS path must not be empty.");
+      }
     }
     else
     {
@@ -146,8 +164,22 @@ neko_desktop::parseDesktopOptions(
   }
   if (options.elfPath.empty() && cyclesSpecified)
   {
+    if (options.biosPath.empty())
+    {
+      throw std::invalid_argument(
+        "--cycles requires --elf or --bios.");
+    }
+  }
+  if (!options.elfPath.empty() && !options.biosPath.empty())
+  {
     throw std::invalid_argument(
-      "--cycles requires --elf.");
+      "ELF and BIOS execution modes are mutually exclusive.");
+  }
+  if (!options.biosPath.empty() &&
+      (sceneSpecified || options.frameLimit != 0))
+  {
+    throw std::invalid_argument(
+      "BIOS execution cannot be combined with a scene or frame limit.");
   }
   return options;
 }

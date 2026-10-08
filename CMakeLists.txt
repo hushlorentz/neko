@@ -127,6 +127,7 @@ target_include_directories(neko_desktop_support
 )
 
 add_library(neko_frontend_support
+    neko_frontend/bios_runner.cpp
     neko_frontend/elf_runner.cpp
 )
 target_include_directories(neko_frontend_support

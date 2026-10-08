@@ -92,6 +92,9 @@ class NekoSystem
     EEGuestExecutionResult runELF(
       const std::vector<std::uint8_t> &image,
       std::uint64_t maxMasterCycles);
+    EEExecutionResult runBIOS(
+      const std::vector<std::uint8_t> &image,
+      std::uint64_t maxMasterCycles);
     void startTrace();
     void stopTrace();
     void clearTrace();

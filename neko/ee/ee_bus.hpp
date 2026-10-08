@@ -15,6 +15,7 @@ class GIFPath3Transfer;
 class GS;
 class GSDisplay;
 class ScratchpadDMACChannel;
+class NekoSystem;
 class VIF;
 class VIF1DMACChannel;
 class VPU;
@@ -23,6 +24,12 @@ namespace EEMemoryMap
 {
   constexpr std::uint32_t MAIN_MEMORY_SIZE =
     32 * 1024 * 1024;
+  constexpr std::uint32_t BOOT_ROM_BASE =
+    UINT32_C(0x1fc00000);
+  constexpr std::uint32_t BOOT_ROM_SIZE =
+    4 * 1024 * 1024;
+  constexpr std::uint32_t BOOT_ROM_END =
+    BOOT_ROM_BASE + BOOT_ROM_SIZE;
   constexpr std::uint32_t VU0_DATA_MEMORY_BASE =
     UINT32_C(0x11004000);
   constexpr std::uint32_t VU0_DATA_MEMORY_END =
@@ -135,6 +142,8 @@ class EEBus
       ScratchpadDMACChannel *toScratchpadDMAC);
     void attachVectorUnits(VPU *vu0, VPU *vu1);
     void attachGSDisplay(GSDisplay *gsDisplay);
+    void installBootROM(
+      const std::vector<std::uint8_t> &image);
     bool isMainMemoryRange(
       std::uint32_t address,
       std::size_t width) const;
@@ -210,11 +219,16 @@ class EEBus
 
   private:
     friend class NekoSaveStateCodec;
+    friend class NekoSystem;
 
     bool mainMemoryAddress(
       std::uint32_t address,
       std::size_t width,
       std::uint32_t *physicalAddress) const;
+    bool bootROMAddress(
+      std::uint32_t address,
+      std::size_t width,
+      std::uint32_t *offset) const;
     bool readMapped32(
       std::uint32_t address,
       std::uint32_t *value) const;
@@ -256,6 +270,7 @@ class EEBus
     VPU *vu1Component = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;
     std::vector<std::uint8_t> mainMemory;
+    std::vector<std::uint8_t> bootROM;
 };
 
 #endif

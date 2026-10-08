@@ -11,6 +11,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "bios_runner.hpp"
 #include "desktop_options.hpp"
 #include "elf_runner.hpp"
 #include "primitive_scene.hpp"
@@ -96,6 +97,15 @@ namespace
         neko_frontend::runELFFile(
           options.elfPath,
           options.elfCycleLimit);
+      std::cout << report.diagnostic << '\n';
+      return report.hostExitCode;
+    }
+    if (!options.biosPath.empty())
+    {
+      const neko_frontend::BIOSRunReport report =
+        neko_frontend::runBIOSFile(
+          options.biosPath,
+          options.biosCycleLimit);
       std::cout << report.diagnostic << '\n';
       return report.hostExitCode;
     }

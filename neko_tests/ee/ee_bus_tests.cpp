@@ -189,6 +189,58 @@ TEST_CASE("EE direct-mapped kernel segments cover the system map")
     "EE bus read from an unmapped address.");
 }
 
+TEST_CASE("EE Boot ROM is fixed-size and read-only")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  std::vector<std::uint8_t> image(
+    EEMemoryMap::BOOT_ROM_SIZE,
+    0);
+  image[0] = 0x78;
+  image[1] = 0x56;
+  image[2] = 0x34;
+  image[3] = 0x12;
+  image[EEMemoryMap::BOOT_ROM_SIZE - 1] = 0xab;
+
+  REQUIRE_THROWS_WITH(
+    bus.installBootROM(
+      std::vector<std::uint8_t>(
+        EEMemoryMap::BOOT_ROM_SIZE - 1,
+        0)),
+    "EE Boot ROM image must be exactly 4 MiB.");
+
+  bus.installBootROM(image);
+
+  std::uint32_t instruction = 0;
+  REQUIRE(bus.readInstruction32(
+    EEMemoryMap::BOOT_ROM_BASE,
+    &instruction));
+  REQUIRE(instruction == UINT32_C(0x12345678));
+  REQUIRE(bus.readData32(
+    EEMemoryMap::BOOT_ROM_BASE,
+    &instruction));
+  REQUIRE(instruction == UINT32_C(0x12345678));
+  std::uint8_t byte = 0;
+  REQUIRE(bus.readData8(
+    EEMemoryMap::BOOT_ROM_END - 1,
+    &byte));
+  REQUIRE(byte == 0xab);
+
+  REQUIRE_FALSE(bus.writeData8(
+    EEMemoryMap::BOOT_ROM_BASE,
+    0xff));
+  REQUIRE_FALSE(bus.writeData32(
+    EEMemoryMap::BOOT_ROM_BASE,
+    0));
+  REQUIRE_THROWS_WITH(
+    bus.write32(EEMemoryMap::BOOT_ROM_BASE, 0),
+    "EE bus write to a read-only address.");
+  REQUIRE(
+    bus.read32(EEMemoryMap::KSEG1_BASE +
+      EEMemoryMap::BOOT_ROM_BASE) ==
+    UINT32_C(0x12345678));
+}
+
 TEST_CASE("EE guest bus accesses require physical addresses")
 {
   NekoSystem system;
