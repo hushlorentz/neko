@@ -2067,11 +2067,14 @@ explicit evidence-closure step before implementation.
       `IOPBus` as the physical interconnect and RAM/ROM owner, focused INTC and
       timer components as device-state owners, and `NekoSystem` plus the master
       scheduler as the cross-component integration boundary.
-- [ ] Resolve the EE COP0 register-15 `PRId` contract exposed by the BIOS
+- [x] Resolve the EE COP0 register-15 `PRId` contract exposed by the BIOS
       experiment. The local EE manual proves that the read-only register
-      exists but does not state its value; search all remaining approved local
-      material, then pause for approval before consulting secondary evidence
-      if the value remains unresolved.
+      exists but does not state its value. Approved secondary evidence resolves
+      the retail value as `0x00002e20`: a NetBSD boot log captured it from real
+      PlayStation 2 hardware as R5900 implementation `0x2e`, revision `2.0`,
+      NetBSD's MIPS identifiers assign implementation `0x2e` to the Toshiba
+      R5900, and the local DobieStation and PCSX2 references independently use
+      the same complete constant.
 - [ ] Add focused `MFC0 PRId` tests, implement the smallest read-only constant
       through the existing EE COP0 boundary, and verify reset, guest writes,
       sign extension, traces, hashes, and save-state compatibility. Rerun the
