@@ -2074,10 +2074,12 @@ unresolved hardware questions are maintained in `PROJECT.md`.
 - [x] Resolve the retail IOP CPU identity and privileged-state profile
       before fixing privileged-state interfaces, including COP0, TLB presence,
       write-buffer visibility, reset policy, and undefined-edge behavior.
-- [ ] Resolve the remaining retail IOP cache and scratchpad implementation
-      profile before fixing cache interfaces, including cache capacities and
-      whether the documented 1 KiB scratchpad supports relocation.
-- [ ] Resolve the retail IOP RAM size, reset vector, ROM relationship, and
+- [x] Resolve the published-evidence limits for the retail IOP cache and
+      scratchpad profile. Preserve the proven cache behavior and separate
+      1 KiB scratchpad, reject uncorroborated programmable relocation, and
+      keep exact cache capacities behind locally replaceable constants rather
+      than blocking on unavailable retail-hardware measurements.
+- [x] Resolve the retail IOP RAM size, reset vector, ROM relationship, and
       physical memory aliases, including the documented 1 KiB scratchpad's
       address, from approved evidence before fixing those values in `IOPCore`
       or `IOPBus` production interfaces.
