@@ -2050,101 +2050,33 @@ prerequisite for validating processor and platform contracts. Real DMA
 channels remain with the SIF, SPU2, CD/DVD, and other endpoint milestones
 rather than introducing endpoint-free policy here.
 
-The local SCEI corpus establishes that the IOP is based on the PlayStation
-R3000 CPU, runs from a 36.864 MHz system clock, has 20 interrupt causes and six
-hardware timers, uses relocatable R3000-format IRX modules, and communicates
-with the EE through three SIF DMA channels and signal lines. It does not
-provide a complete raw R3000A instruction/COP0 specification, exact retail IOP
-physical register map, or the EE `PRId` value. Those contracts require an
-explicit evidence-closure step before implementation.
+Detailed evidence, architectural ownership, implementation profiles, and
+unresolved hardware questions are maintained in `PROJECT.md`.
 
 ### Evidence Closure and EE Startup Prerequisite
 
 - [x] Audit the local manuals and split Milestone 8 into independently
       reviewable evidence, CPU, memory, exception, platform-device,
-      integration, persistence, conformance, and review blocks. Define
-      `IOPCore` as owner of architectural CPU state and precise exceptions,
-      `IOPBus` as the physical interconnect and RAM/ROM owner, focused INTC and
-      timer components as device-state owners, and `NekoSystem` plus the master
-      scheduler as the cross-component integration boundary.
+      integration, persistence, conformance, and review blocks, with explicit
+      component ownership and dependency direction.
 - [x] Resolve the EE COP0 register-15 `PRId` contract exposed by the BIOS
-      experiment. The local EE manual proves that the read-only register
-      exists but does not state its value. Approved secondary evidence resolves
-      the retail value as `0x00002e20`: a NetBSD boot log captured it from real
-      PlayStation 2 hardware as R5900 implementation `0x2e`, revision `2.0`,
-      NetBSD's MIPS identifiers assign implementation `0x2e` to the Toshiba
-      R5900, and the local DobieStation and PCSX2 references independently use
-      the same complete constant.
+      experiment from approved evidence.
 - [x] Add focused `MFC0 PRId` tests, implement the smallest read-only constant
-      through the existing EE COP0 boundary, and verify reset, guest writes,
-      word-transfer semantics, traces, hashes, and save-state compatibility.
-      Rerun the bounded BIOS experiment once and record the next dependency
-      without implementing it in this block. `PRId` is exposed as the fixed
-      `0x00002e20` value without mutable, hashed, or serialized state; guest
-      writes complete without changing it and `MFC0` uses the established
-      signed-word GPR transfer, whose negative-word sign extension has
-      independent COP0 coverage. The complete optimized check passes 136,663
-      assertions in 1,004 test cases. One 1,000,000-cycle BIOS run advanced to
-      `master_cycles=20`, `instructions=23`, then reported a precise data-store
-      bus error for `SW` instruction `0xac620000` at virtual `0xb000f500`
-      (physical `0x1000f500`). Static BIOS inspection proves that the store
-      writes `0xffffffff`. Approved secondary comparisons place the address at
-      the base of the EE DMAC extended-control window but define no functional
-      register there: NetBSD, DobieStation, PCSX2, and Play identify the live
-      extended controls at `0x1000f520` and `0x1000f590`, while the reference
-      emulators tolerate or ignore the `0x1000f500` write. This is therefore a
-      reserved or unnamed EE MMIO compatibility access, not an IOP or SIF
-      register and not evidence for IOP reset, ROM, or startup behavior. Its
-      exact hardware semantics remain undocumented; explicit access policy is
-      deferred to the Milestone 9 BIOS-integration audit rather than inferred
-      or implemented here.
+      through the existing EE COP0 boundary, validate it, and rerun the bounded
+      BIOS experiment once. Record the resulting reserved EE MMIO compatibility
+      access for the Milestone 9 BIOS-integration audit.
 - [x] Establish an approved authoritative R3000A instruction and privileged
-      architecture source. The local SCEI SDK documents R3000 object and module
-      formats and broad PlayStation-CPU compatibility, but is insufficient to
-      define every opcode, COP0 bit, exception transition, cache behavior, and
-      reset value safely. The 1994 IDT *R30xx Family Software Reference
-      Manual*, Revision 1.0, is now pinned locally by SHA-256 and extracted for
-      search. IDT scopes it to R3000A-compatible integrated processors; it
-      provides complete MIPS-I machine-instruction references plus CP0,
-      precise-exception, TLB, cache, reset, bootstrap, and programmer-visible
-      pipeline contracts. Derivative-only registers remain excluded, and SCEI
-      evidence is still required for retail IOP memory and platform behavior.
+      architecture source and pin it locally with provenance and integrity
+      metadata.
 - [x] Produce a source-linked R3000A contract matrix covering instruction
-      encodings, integer arithmetic, multiply/divide, branches and delay slots,
-      loads/stores and any delayed-result rules, COP0 registers, exceptions,
-      interrupt entry, reset, address aliases, cache behavior, and undefined
-      cases. Classify each row as implemented in this milestone, deliberately
-      deferred, or blocked on evidence. The matrix now pins the complete
-      common integer and exception floor while excluding synthetic assembler
-      operations, optional coprocessors, derivative-only CP0 registers, and
-      unproven TLB/cache facilities. It also establishes delayed normal loads
-      and CP0 reads, the merge-load bypass, EPC/BD ownership, the KU/IE stack,
-      and `RFE`, while explicitly blocking implementation-specific values and
-      undefined-result policy from being guessed.
+      behavior, privileged state, exceptions, reset, memory, caches, and
+      undefined cases, classified as implemented, deferred, or evidence-gated.
 - [x] Resolve the retail IOP CPU identity and privileged-state profile
-      before fixing privileged-state interfaces: `PRId`, common COP0 writable
-      masks and fixed bits, TLB absence, write-buffer observability, and
-      deterministic policies for architecturally undefined divide,
-      branch-in-delay-slot, unsupported-TLB, and CP0-hazard cases. The selected
-      profile is the PlayStation-compatible, non-TLB R3000A variant with
-      read-only `PRId = 0x0000001f`; common CP0 state is limited to
-      `BadVAddr`, `Status`, `Cause`, `EPC`, and `PRId`. `Status.TS` is fixed set,
-      `Cause` exposes only its software interrupt-pending bits to guest writes,
-      and reset deterministically initializes the otherwise undefined cache
-      isolation state to inactive. Undefined division uses a stable
-      two's-complement quotient/remainder policy, a control transfer in a delay
-      slot raises `RI`, unsupported TLB operations raise `RI`, `MFC0` uses the
-      architectural delayed-result slot, and `MTC0` takes effect at retirement.
+      before fixing privileged-state interfaces, including COP0, TLB presence,
+      write-buffer visibility, reset policy, and undefined-edge behavior.
 - [ ] Resolve the remaining retail IOP cache and scratchpad implementation
-      profile before fixing cache interfaces. The family contract proves
-      direct-mapped, write-through separate caches with 4-byte D-cache lines,
-      16-byte I-cache lines, `Status.IsC`/`SwC` isolation and swapping, and a
-      four-entry write buffer; SCEI proves that both caches are
-      software-visible and that a separate 1 KiB zero-wait-state scratchpad
-      exists. Approved sources do not yet prove the I-cache or D-cache
-      capacities, and only one reference models a programmable scratchpad base
-      register at `0xfffe0144`. Do not freeze cache capacities or scratchpad
-      remapping from emulator assumptions.
+      profile before fixing cache interfaces, including cache capacities and
+      whether the documented 1 KiB scratchpad supports relocation.
 - [ ] Resolve the retail IOP RAM size, reset vector, ROM relationship, and
       physical memory aliases, including the documented 1 KiB scratchpad's
       address, from approved evidence before fixing those values in `IOPCore`
