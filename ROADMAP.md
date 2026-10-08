@@ -2087,23 +2087,41 @@ explicit evidence-closure step before implementation.
       assertions in 1,004 test cases. One 1,000,000-cycle BIOS run advanced to
       `master_cycles=20`, `instructions=23`, then reported a precise data-store
       bus error for `SW` instruction `0xac620000` at virtual `0xb000f500`
-      (physical `0x1000f500`). The next dependency is the presently unmapped
-      EE physical register and store behavior at that address; its exact
-      hardware owner remains evidence-gated and was not inferred or added.
-- [ ] Establish an approved authoritative R3000A instruction and privileged
+      (physical `0x1000f500`). Static BIOS inspection proves that the store
+      writes `0xffffffff`. Approved secondary comparisons place the address at
+      the base of the EE DMAC extended-control window but define no functional
+      register there: NetBSD, DobieStation, PCSX2, and Play identify the live
+      extended controls at `0x1000f520` and `0x1000f590`, while the reference
+      emulators tolerate or ignore the `0x1000f500` write. This is therefore a
+      reserved or unnamed EE MMIO compatibility access, not an IOP or SIF
+      register and not evidence for IOP reset, ROM, or startup behavior. Its
+      exact hardware semantics remain undocumented; explicit access policy is
+      deferred to the Milestone 9 BIOS-integration audit rather than inferred
+      or implemented here.
+- [x] Establish an approved authoritative R3000A instruction and privileged
       architecture source. The local SCEI SDK documents R3000 object and module
       formats and broad PlayStation-CPU compatibility, but is insufficient to
       define every opcode, COP0 bit, exception transition, cache behavior, and
-      reset value safely.
+      reset value safely. The 1994 IDT *R30xx Family Software Reference
+      Manual*, Revision 1.0, is now pinned locally by SHA-256 and extracted for
+      search. IDT scopes it to R3000A-compatible integrated processors; it
+      provides complete MIPS-I machine-instruction references plus CP0,
+      precise-exception, TLB, cache, reset, bootstrap, and programmer-visible
+      pipeline contracts. Derivative-only registers remain excluded, and SCEI
+      evidence is still required for retail IOP memory and platform behavior.
 - [ ] Produce a source-linked R3000A contract matrix covering instruction
       encodings, integer arithmetic, multiply/divide, branches and delay slots,
       loads/stores and any delayed-result rules, COP0 registers, exceptions,
       interrupt entry, reset, address aliases, cache behavior, and undefined
       cases. Classify each row as implemented in this milestone, deliberately
       deferred, or blocked on evidence.
-- [ ] Resolve the retail IOP RAM size, reset vector, ROM relationship, physical
-      memory aliases, and software-visible INTC/timer register map from approved
-      evidence before fixing those values in production interfaces.
+- [ ] Resolve the retail IOP RAM size, reset vector, ROM relationship, and
+      physical memory aliases from approved evidence before fixing those values
+      in `IOPCore` or `IOPBus` production interfaces.
+- [ ] Resolve the software-visible IOP INTC and timer physical register maps,
+      reset values, writable masks, acknowledgement behavior, and interrupt
+      cause assignments from approved evidence before fixing those values in
+      platform-device interfaces.
 
 ### IOP Core and Physical-Memory Foundation
 
@@ -2239,7 +2257,10 @@ required hardware.
       before implementation. Inventory SIF registers and FIFOs, EE and IOP DMA
       channels, reset and boot sequencing, interrupt behavior, clock ordering,
       BIOS observability, persistence, diagnostics, unresolved evidence, and
-      the exact bounded startup target.
+      the exact bounded startup target. Include an explicit EE reserved-MMIO
+      policy for the BIOS's `0xffffffff` store to physical `0x1000f500`, an
+      unnamed slot at the base of the DMAC extended-control window; do not
+      promote it to a functional register without stronger evidence.
 - [ ] Implement SIF communication and the required EE-side and IOP-side DMA,
       interrupt, backpressure, retry, and reset behavior.
 - [ ] Define deterministic EE/IOP scheduling and whole-system continuation
