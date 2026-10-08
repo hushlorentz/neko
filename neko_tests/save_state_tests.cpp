@@ -807,6 +807,32 @@ TEST_CASE("Scratchpad and SPR DMAC continuation survive save-state restore")
   REQUIRE(restored.eeStateHash() == original.eeStateHash());
 }
 
+TEST_CASE("DMAC bus-error status survives save-state restore")
+{
+  NekoSystem original;
+  const std::uint64_t initialHash = original.eeStateHash();
+  original.dmacController().signalBusError(
+    DMACStatus::CHANNEL_8);
+
+  REQUIRE(original.eeStateHash() != initialHash);
+  REQUIRE(original.dmacController().interruptPending());
+  REQUIRE(
+    original.dmacController().status() ==
+    (DMACStatus::CHANNEL_8 | DMACStatus::BUS_ERROR));
+
+  const std::vector<std::uint8_t> state =
+    original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+
+  REQUIRE(restored.dmacController().interruptPending());
+  REQUIRE(
+    restored.dmacController().status() ==
+    original.dmacController().status());
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  REQUIRE(restored.saveState() == state);
+}
+
 TEST_CASE("Malformed SPR DMA save states are rejected transactionally")
 {
   NekoSystem source;

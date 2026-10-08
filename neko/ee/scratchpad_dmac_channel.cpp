@@ -225,8 +225,8 @@ void ScratchpadDMACChannel::transferQuadword(
           mode,
           value))
     {
-      throw std::out_of_range(
-        "fromSPR DMAC main-bus address is invalid.");
+      interruptForBusError();
+      return;
     }
   }
   else
@@ -236,8 +236,8 @@ void ScratchpadDMACChannel::transferQuadword(
           mode,
           &value))
     {
-      throw std::out_of_range(
-        "toSPR DMAC main-bus address is invalid.");
+      interruptForBusError();
+      return;
     }
     const EEScratchpadAccessResult scratchpadResult =
       eeMemorySystem->writeScratchpadDMA128(
@@ -301,6 +301,18 @@ void ScratchpadDMACChannel::completeTransfer()
   channelControlRegister &= ~DMACChannelControl::START;
   interleaveQuadwordsRemaining = 0;
   dmacController->signalChannelCompletion(
+    channelKind ==
+      ScratchpadDMACChannelKind::FromScratchpad ?
+      DMACStatus::CHANNEL_8 :
+      DMACStatus::CHANNEL_9);
+  assert(stateValid());
+}
+
+void ScratchpadDMACChannel::interruptForBusError()
+{
+  channelControlRegister &= ~DMACChannelControl::START;
+  interleaveQuadwordsRemaining = 0;
+  dmacController->signalBusError(
     channelKind ==
       ScratchpadDMACChannelKind::FromScratchpad ?
       DMACStatus::CHANNEL_8 :

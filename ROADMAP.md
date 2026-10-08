@@ -2028,7 +2028,7 @@ observability gap.
       direction, and provisional structures whose replacement trigger has
       arrived. Apply only bounded behavior-preserving repairs, validate them,
       and record larger follow-up work explicitly.
-- [ ] Complete an independent final review of the full memory-system milestone,
+- [x] Complete an independent final review of the full memory-system milestone,
       resolve every concrete finding, run the optimized AddressSanitizer and
       native macOS leak checks, reconcile `PROJECT.md`, and close the milestone.
 - [ ] Run a bounded BIOS-startup experiment only after conformance closure and

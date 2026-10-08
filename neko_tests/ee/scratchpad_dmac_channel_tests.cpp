@@ -550,9 +550,7 @@ TEST_CASE("Scratchpad DMAC uses physical main-bus addresses")
   bus.write32(EEMemoryMap::D8_SADR, 0);
   bus.write32(EEMemoryMap::D8_CHCR, DMACChannelControl::START);
 
-  REQUIRE_THROWS_WITH(
-    system.clockMasterCycle(),
-    "fromSPR DMAC main-bus address is invalid.");
+  system.clockMasterCycle();
 
   EEQuadword mainMemory = {};
   REQUIRE(bus.readDMAC128(0x100, &mainMemory));
@@ -560,7 +558,17 @@ TEST_CASE("Scratchpad DMAC uses physical main-bus addresses")
   REQUIRE(bus.read32(EEMemoryMap::D8_MADR) == 0x20000100);
   REQUIRE(bus.read32(EEMemoryMap::D8_QWC) == 1);
   REQUIRE(bus.read32(EEMemoryMap::D8_SADR) == 0);
-  REQUIRE(system.fromScratchpadDMAC().active());
+  REQUIRE_FALSE(system.fromScratchpadDMAC().active());
+  REQUIRE(
+    (bus.read32(EEMemoryMap::D_STAT) &
+     (DMACStatus::CHANNEL_8 | DMACStatus::BUS_ERROR)) ==
+    (DMACStatus::CHANNEL_8 | DMACStatus::BUS_ERROR));
+  REQUIRE(system.interruptPending());
+
+  bus.write32(EEMemoryMap::D_STAT, DMACStatus::CHANNEL_8);
+  REQUIRE(system.interruptPending());
+  bus.write32(EEMemoryMap::D_STAT, DMACStatus::BUS_ERROR);
+  REQUIRE_FALSE(system.interruptPending());
 
   NekoSystem toScratchpadSystem;
   EEBus &toScratchpadBus = toScratchpadSystem.eeBus();
@@ -591,9 +599,7 @@ TEST_CASE("Scratchpad DMAC uses physical main-bus addresses")
     EEMemoryMap::D9_CHCR,
     DMACChannelControl::START);
 
-  REQUIRE_THROWS_WITH(
-    toScratchpadSystem.clockMasterCycle(),
-    "toSPR DMAC main-bus address is invalid.");
+  toScratchpadSystem.clockMasterCycle();
 
   EEQuadword unchangedScratchpad = {};
   REQUIRE(
@@ -609,7 +615,12 @@ TEST_CASE("Scratchpad DMAC uses physical main-bus addresses")
     toScratchpadBus.read32(EEMemoryMap::D9_QWC) == 1);
   REQUIRE(
     toScratchpadBus.read32(EEMemoryMap::D9_SADR) == 0);
-  REQUIRE(toScratchpadSystem.toScratchpadDMAC().active());
+  REQUIRE_FALSE(toScratchpadSystem.toScratchpadDMAC().active());
+  REQUIRE(
+    (toScratchpadBus.read32(EEMemoryMap::D_STAT) &
+     (DMACStatus::CHANNEL_9 | DMACStatus::BUS_ERROR)) ==
+    (DMACStatus::CHANNEL_9 | DMACStatus::BUS_ERROR));
+  REQUIRE(toScratchpadSystem.interruptPending());
 
   for (const std::uint32_t alias : {
     UINT32_C(0x80000100),
@@ -805,6 +816,10 @@ TEST_CASE("Scratchpad DMAC status bits drive the DMAC interrupt")
     controller.signalChannelCompletion(
       DMACStatus::CHANNEL_8 | DMACStatus::CHANNEL_9),
     "Invalid DMAC completion channel.");
+  REQUIRE_THROWS_WITH(
+    controller.signalBusError(
+      DMACStatus::CHANNEL_8 | DMACStatus::CHANNEL_9),
+    "Invalid DMAC bus-error channel.");
 }
 
 TEST_CASE("Scratchpad DMAC registers and status reset with the system")
@@ -817,6 +832,8 @@ TEST_CASE("Scratchpad DMAC registers and status reset with the system")
     UINT32_C(0x00120034));
   system.dmacController().signalChannelCompletion(
     DMACStatus::CHANNEL_8);
+  system.dmacController().signalBusError(
+    DMACStatus::CHANNEL_9);
   system.eeBus().write32(
     EEMemoryMap::D_STAT,
     DMACStatus::CHANNEL_8_MASK);
@@ -837,6 +854,7 @@ TEST_CASE("Scratchpad DMAC registers and status reset with the system")
     (system.eeBus().read32(EEMemoryMap::D_STAT) &
      (DMACStatus::CHANNEL_8 |
       DMACStatus::CHANNEL_9 |
+      DMACStatus::BUS_ERROR |
       DMACStatus::CHANNEL_8_MASK |
       DMACStatus::CHANNEL_9_MASK)) == 0);
 }

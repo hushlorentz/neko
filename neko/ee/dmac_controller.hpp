@@ -14,6 +14,7 @@ namespace DMACStatus
   constexpr std::uint32_t CHANNEL_2 = 1u << 2;
   constexpr std::uint32_t CHANNEL_8 = 1u << 8;
   constexpr std::uint32_t CHANNEL_9 = 1u << 9;
+  constexpr std::uint32_t BUS_ERROR = 1u << 15;
   constexpr std::uint32_t CHANNEL_1_MASK = 1u << 17;
   constexpr std::uint32_t CHANNEL_2_MASK = 1u << 18;
   constexpr std::uint32_t CHANNEL_8_MASK = 1u << 24;
@@ -39,6 +40,7 @@ class DMACController
     std::uint8_t interleaveTransferQWC() const;
     bool enabled() const;
     void signalChannelCompletion(std::uint32_t channel);
+    void signalBusError(std::uint32_t channel);
     bool interruptPending() const;
 
   private:

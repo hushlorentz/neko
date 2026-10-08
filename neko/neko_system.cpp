@@ -292,7 +292,8 @@ std::uint64_t NekoSystem::eeStateHash() const
     &hash,
     dmacControllerComponent.statusRegister &
       (DMACStatus::CHANNEL_8 |
-       DMACStatus::CHANNEL_9));
+       DMACStatus::CHANNEL_9 |
+       DMACStatus::BUS_ERROR));
   hashStateValue(
     &hash,
     dmacControllerComponent.statusMaskRegister &

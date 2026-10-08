@@ -47,6 +47,7 @@ class ScratchpadDMACChannel : public ClockedComponent
     void requireTagAddress() const;
     void transferQuadword(bool interleave);
     void completeTransfer();
+    void interruptForBusError();
     const char *name() const;
     bool channelControlStateValid() const;
     bool memoryAddressStateValid() const;
