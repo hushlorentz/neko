@@ -102,6 +102,18 @@ namespace
       function;
   }
 
+  std::uint32_t cop0TransferInstruction(
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint8_t registerIndex)
+  {
+    return
+      (UINT32_C(0x10) << 26) |
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(registerIndex) << 11);
+  }
+
   std::uint32_t cacheInstruction(
     std::uint8_t source,
     std::uint8_t operation,
@@ -867,6 +879,64 @@ TEST_CASE("EE COP0 TLB traces and state hashes are deterministic")
   REQUIRE(
     snapshots.back().value0 ==
     first.eeCore().stateHash());
+}
+
+TEST_CASE("EE PRId traces hashes and save states are deterministic")
+{
+  const auto prepare =
+    [](NekoSystem *system)
+    {
+      system->eeBus().write32(
+        0,
+        cop0TransferInstruction(0, 26, 15));
+      system->eeCore().startExecution(0);
+      system->startTrace();
+    };
+
+  NekoSystem first;
+  NekoSystem second;
+  prepare(&first);
+  prepare(&second);
+
+  first.clockMasterCycle();
+  second.clockMasterCycle();
+
+  REQUIRE(
+    first.eeCore().generalRegister(26).low ==
+    EECOP0PRId::VALUE);
+  REQUIRE(
+    first.eeCore().cop0Register(EECOP0Register::PRId) ==
+    EECOP0PRId::VALUE);
+  REQUIRE(
+    first.eeCore().stateHash() ==
+    second.eeCore().stateHash());
+  REQUIRE(first.traceHash() == second.traceHash());
+  REQUIRE(first.saveState() == second.saveState());
+
+  const std::vector<NekoTraceEvent> events =
+    eeTraceWithoutFetches(first);
+  REQUIRE(events.size() == 2);
+  REQUIRE(
+    events[0].type ==
+    NekoTraceEventType::InstructionIssued);
+  REQUIRE(events[0].value0 == 0);
+  REQUIRE(events[0].value1 == UINT32_C(0x401a7800));
+  REQUIRE(
+    events[0].value2 ==
+    static_cast<std::uint8_t>(
+      EEOperation::MoveWordFromCOP0));
+  REQUIRE(
+    events[1].type ==
+    NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[1].value0 == first.eeCore().stateHash());
+
+  const std::vector<std::uint8_t> state = first.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+  REQUIRE(
+    restored.eeCore().cop0Register(EECOP0Register::PRId) ==
+    EECOP0PRId::VALUE);
+  REQUIRE(restored.saveState() == state);
 }
 
 TEST_CASE("EE faulting COP0 traces expose issue and exception entry")

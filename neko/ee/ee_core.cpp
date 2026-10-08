@@ -7071,6 +7071,7 @@ bool EECore::writeGuestCOP0Register(
       return true;
     case EECOP0Register::BadVAddr:
     case EECOP0Register::Cause:
+    case EECOP0Register::PRId:
       return true;
     case EECOP0Register::Count:
       cop0Count = value;
@@ -11008,6 +11009,8 @@ std::uint32_t EECore::cop0Register(
       return cop0Cause;
     case EECOP0Register::EPC:
       return cop0EPC;
+    case EECOP0Register::PRId:
+      return EECOP0PRId::VALUE;
     case EECOP0Register::ErrorEPC:
       return cop0ErrorEPC;
   }
@@ -11063,6 +11066,8 @@ void EECore::setCOP0Register(
       return;
     case EECOP0Register::EPC:
       cop0EPC = value;
+      return;
+    case EECOP0Register::PRId:
       return;
     case EECOP0Register::ErrorEPC:
       cop0ErrorEPC = value;

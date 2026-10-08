@@ -75,6 +75,7 @@ namespace
       case EECOP0Register::Status:
       case EECOP0Register::Cause:
       case EECOP0Register::EPC:
+      case EECOP0Register::PRId:
       case EECOP0Register::Config:
       case EECOP0Register::TagLo:
       case EECOP0Register::TagHi:

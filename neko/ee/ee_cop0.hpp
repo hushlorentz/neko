@@ -19,6 +19,7 @@ enum class EECOP0Register : std::uint8_t
   Status = 12,
   Cause = 13,
   EPC = 14,
+  PRId = 15,
   Config = 16,
   TagLo = 28,
   TagHi = 29,
@@ -126,6 +127,11 @@ namespace EECOP0Cause
     UINT32_C(0x3) << 28;
   constexpr std::uint32_t COPROCESSOR_1 =
     UINT32_C(1) << 28;
+}
+
+namespace EECOP0PRId
+{
+  constexpr std::uint32_t VALUE = UINT32_C(0x00002e20);
 }
 
 namespace EECOP0Config

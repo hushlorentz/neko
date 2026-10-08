@@ -3521,6 +3521,54 @@ TEST_CASE("EE TLB fetch exception preserves older delayed work")
     EEExceptionVector::REFILL);
 }
 
+TEST_CASE("EE PRId is fixed across reset and guest register moves")
+{
+  EECore resetCore;
+  REQUIRE(
+    resetCore.cop0Register(EECOP0Register::PRId) ==
+    EECOP0PRId::VALUE);
+  const std::uint64_t resetHash = resetCore.stateHash();
+
+  resetCore.setCOP0Register(
+    EECOP0Register::PRId,
+    UINT32_C(0xffffffff));
+  REQUIRE(
+    resetCore.cop0Register(EECOP0Register::PRId) ==
+    EECOP0PRId::VALUE);
+  REQUIRE(resetCore.stateHash() == resetHash);
+
+  resetCore.reset();
+  REQUIRE(
+    resetCore.cop0Register(EECOP0Register::PRId) ==
+    EECOP0PRId::VALUE);
+
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setGeneralRegister(
+    2,
+    {UINT64_C(0xffffffffffffffff), 0});
+  core.setGeneralRegister(
+    3,
+    {
+      UINT64_C(0xffffffffffffffff),
+      UINT64_C(0x0123456789abcdef)
+    });
+  system.eeBus().write32(0, UINT32_C(0x40827800));
+  system.eeBus().write32(4, UINT32_C(0x40037800));
+  core.startExecution(0);
+
+  system.runMasterCycles(4);
+
+  REQUIRE(
+    core.cop0Register(EECOP0Register::PRId) ==
+    EECOP0PRId::VALUE);
+  REQUIRE(core.generalRegister(3).low == EECOP0PRId::VALUE);
+  REQUIRE(
+    core.generalRegister(3).high ==
+    UINT64_C(0x0123456789abcdef));
+  REQUIRE(core.stopReason() == EEStopReason::None);
+}
+
 TEST_CASE("EE Core scheduled execution")
 {
   NekoSystem system;

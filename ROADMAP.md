@@ -2075,11 +2075,21 @@ explicit evidence-closure step before implementation.
       NetBSD's MIPS identifiers assign implementation `0x2e` to the Toshiba
       R5900, and the local DobieStation and PCSX2 references independently use
       the same complete constant.
-- [ ] Add focused `MFC0 PRId` tests, implement the smallest read-only constant
+- [x] Add focused `MFC0 PRId` tests, implement the smallest read-only constant
       through the existing EE COP0 boundary, and verify reset, guest writes,
-      sign extension, traces, hashes, and save-state compatibility. Rerun the
-      bounded BIOS experiment once and record the next dependency without
-      implementing it in this block.
+      word-transfer semantics, traces, hashes, and save-state compatibility.
+      Rerun the bounded BIOS experiment once and record the next dependency
+      without implementing it in this block. `PRId` is exposed as the fixed
+      `0x00002e20` value without mutable, hashed, or serialized state; guest
+      writes complete without changing it and `MFC0` uses the established
+      signed-word GPR transfer, whose negative-word sign extension has
+      independent COP0 coverage. The complete optimized check passes 136,663
+      assertions in 1,004 test cases. One 1,000,000-cycle BIOS run advanced to
+      `master_cycles=20`, `instructions=23`, then reported a precise data-store
+      bus error for `SW` instruction `0xac620000` at virtual `0xb000f500`
+      (physical `0x1000f500`). The next dependency is the presently unmapped
+      EE physical register and store behavior at that address; its exact
+      hardware owner remains evidence-gated and was not inferred or added.
 - [ ] Establish an approved authoritative R3000A instruction and privileged
       architecture source. The local SCEI SDK documents R3000 object and module
       formats and broad PlayStation-CPU compatibility, but is insufficient to
