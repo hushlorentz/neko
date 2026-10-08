@@ -2045,25 +2045,173 @@ observability gap.
 
 Build an independently testable IOP subsystem around the R3000A execution
 core, privileged state, memory map, interrupts, timers, and the minimum common
-DMA infrastructure required by authored IOP programs. Do not make BIOS progress
-a prerequisite for validating the processor and platform contracts.
+platform required by authored IOP programs. Do not make BIOS progress a
+prerequisite for validating processor and platform contracts. Real DMA
+channels remain with the SIF, SPU2, CD/DVD, and other endpoint milestones
+rather than introducing endpoint-free policy here.
 
-- [ ] Audit the local SCEI manuals and expand this milestone into independently
-      reviewable blocks and items before implementation. Inventory the R3000A
-      instruction and encoding surface, COP0 and exception behavior, memory
-      map, reset state, INTC, timers, DMA, clock relationship to the EE,
-      persistence and trace requirements, guest fixtures, unresolved evidence,
-      and final validation. Include the EE COP0 `PRId` read identified by the
-      bounded BIOS experiment as a concrete startup prerequisite, without
-      extrapolating further BIOS requirements. Define ownership and the
-      boundary between the IOP
-      core, IOP bus, common platform devices, and later SIF/device work.
-- [ ] Implement and exhaustively audit the R3000A execution core, privileged
-      state, precise exceptions, delay slots, and deterministic run control.
-- [ ] Add the IOP memory map, interrupt controller, timers, and the minimum DMA
-      foundation needed for isolated platform tests.
-- [ ] Add deterministic traces, hashes, transactional persistence, semantic
-      guests, optimized and sanitizer validation, and independent final review.
+The local SCEI corpus establishes that the IOP is based on the PlayStation
+R3000 CPU, runs from a 36.864 MHz system clock, has 20 interrupt causes and six
+hardware timers, uses relocatable R3000-format IRX modules, and communicates
+with the EE through three SIF DMA channels and signal lines. It does not
+provide a complete raw R3000A instruction/COP0 specification, exact retail IOP
+physical register map, or the EE `PRId` value. Those contracts require an
+explicit evidence-closure step before implementation.
+
+### Evidence Closure and EE Startup Prerequisite
+
+- [x] Audit the local manuals and split Milestone 8 into independently
+      reviewable evidence, CPU, memory, exception, platform-device,
+      integration, persistence, conformance, and review blocks. Define
+      `IOPCore` as owner of architectural CPU state and precise exceptions,
+      `IOPBus` as the physical interconnect and RAM/ROM owner, focused INTC and
+      timer components as device-state owners, and `NekoSystem` plus the master
+      scheduler as the cross-component integration boundary.
+- [ ] Resolve the EE COP0 register-15 `PRId` contract exposed by the BIOS
+      experiment. The local EE manual proves that the read-only register
+      exists but does not state its value; search all remaining approved local
+      material, then pause for approval before consulting secondary evidence
+      if the value remains unresolved.
+- [ ] Add focused `MFC0 PRId` tests, implement the smallest read-only constant
+      through the existing EE COP0 boundary, and verify reset, guest writes,
+      sign extension, traces, hashes, and save-state compatibility. Rerun the
+      bounded BIOS experiment once and record the next dependency without
+      implementing it in this block.
+- [ ] Establish an approved authoritative R3000A instruction and privileged
+      architecture source. The local SCEI SDK documents R3000 object and module
+      formats and broad PlayStation-CPU compatibility, but is insufficient to
+      define every opcode, COP0 bit, exception transition, cache behavior, and
+      reset value safely.
+- [ ] Produce a source-linked R3000A contract matrix covering instruction
+      encodings, integer arithmetic, multiply/divide, branches and delay slots,
+      loads/stores and any delayed-result rules, COP0 registers, exceptions,
+      interrupt entry, reset, address aliases, cache behavior, and undefined
+      cases. Classify each row as implemented in this milestone, deliberately
+      deferred, or blocked on evidence.
+- [ ] Resolve the retail IOP RAM size, reset vector, ROM relationship, physical
+      memory aliases, and software-visible INTC/timer register map from approved
+      evidence before fixing those values in production interfaces.
+
+### IOP Core and Physical-Memory Foundation
+
+- [ ] Add fixed-width IOP architectural types and one `IOPCore` owner for the
+      program counter, 32 GPRs, HI/LO, approved COP0 state, branch/delay
+      continuation, pending exception, execution state, stop reason, and cycle
+      count. Reset every deterministic field explicitly and expose checked
+      read-only inspection for tests and diagnostics.
+- [ ] Add one `IOPBus` physical-address boundary with approved RAM and ROM
+      ranges, little-endian scalar access, alignment checks, read-only ROM
+      behavior, and explicit host loading/inspection methods. Guest traffic
+      must not gain a host shortcut or silently wrap unmapped addresses.
+- [ ] Connect `IOPCore` instruction fetch and data access only through
+      `IOPBus`. Return typed success or address/bus-failure outcomes so the core
+      remains the sole owner of precise exception selection and architectural
+      commit.
+- [ ] Add a bounded host runner for independently authored IOP programs with
+      explicit entry point, stack/return contract where appropriate, master
+      cycle budget, instruction total, stop reason, exception metadata, and
+      final PC. Keep IRX relocation and kernel module linking outside the CPU
+      and bus hardware classes.
+
+### R3000A Decode and Integer Execution
+
+- [ ] Implement table-driven decode with a complete supported/reserved/
+      valid-but-deferred encoding audit. Pin every opcode and nested function
+      field before adding execution behavior.
+- [ ] Implement logical, shift, comparison, immediate, upper-immediate, and
+      move-style integer operations with explicit 32-bit wrapping and no host
+      signed-overflow dependence.
+- [ ] Implement trapping and non-trapping add/subtract behavior with precise
+      destination preservation on overflow.
+- [ ] Implement multiply/divide and HI/LO transfer behavior, including all
+      approved divide-by-zero, signed-minimum, latency, and overwrite rules.
+- [ ] Implement jumps, links, conditional branches, and the single branch
+      delay slot with explicit continuation state. Pin taken/not-taken, link
+      address, register aliases, branch-in-delay-slot policy, and exception
+      provenance.
+- [ ] Complete an independent review of decode, arithmetic, HI/LO, and control
+      flow before memory and privileged behavior build on those contracts.
+
+### Loads, Stores, COP0, and Precise Exceptions
+
+- [ ] Implement aligned byte, halfword, and word loads/stores plus approved
+      unaligned merge operations through typed `IOPBus` requests. Pin
+      sign/zero extension, partial-word merge behavior, register zero, address
+      wrapping, and any architecturally visible load-delay continuation.
+- [ ] Implement the approved IOP COP0 register set, writable masks, fixed bits,
+      reset values, transfer instructions, and privilege behavior without
+      inheriting EE-specific register semantics.
+- [ ] Implement precise Address Error, instruction/data Bus Error, System Call,
+      Breakpoint, Reserved Instruction, Arithmetic Overflow, and interrupt
+      transitions. Preserve delay-slot EPC/BD ownership and the oldest
+      architectural fault.
+- [ ] Implement the approved return-from-exception operation and interrupt
+      enable stack semantics, including nested exception behavior and
+      instruction-boundary interrupt delivery.
+- [ ] Decide cache scope only from approved R3000A/IOP evidence. If cache
+      contents or isolation are software-visible, give them a focused owner and
+      persistence contract; otherwise document the exact abstraction and the
+      evidence that makes it sufficient.
+- [ ] Complete focused exception-priority, reset/restart, host-resume, and
+      independent correctness review before adding platform interrupts.
+
+### IOP Interrupt Controller
+
+- [ ] Define one `IOPInterruptController` owner for the 20 documented causes,
+      per-cause masking, master enable, pending-state arbitration, reset,
+      hashing, and persistence. Resolve exact cause assignments and MMIO
+      semantics from approved evidence before implementation.
+- [ ] Route timer and future device sources into the controller through typed
+      source methods rather than allowing devices to modify CPU COP0 state or
+      MMIO storage directly.
+- [ ] Map the controller through `IOPBus` and deliver its aggregate line to
+      `IOPCore` only at the architecturally defined boundary. Pin simultaneous
+      causes, masking, acknowledgement, repeated assertion, and exception
+      ordering.
+
+### IOP Timers and Clock Integration
+
+- [ ] Add six focused timer-counter owners matching the documented widths,
+      system/pixel/H-blank/V-blank sources, gate modes, prescalers, target and
+      overflow events, interrupt generation, reset, hashing, and persistence.
+      Resolve raw mode-register encodings and acknowledgement semantics before
+      implementation.
+- [ ] Derive timer inputs from typed scheduler/display timing signals; timer
+      code must not inspect GS internals or frontend wall-clock time.
+- [ ] Register `IOPCore` at the documented 36.864 MHz rate, exactly one IOP
+      cycle per eight 294.912 MHz master cycles. Define deterministic phase and
+      same-cycle ordering among IOP execution, timer transitions, INTC
+      assertion, and EE-side components.
+- [ ] Pin timer target/overflow coincidence, gate edges, prescaler phase,
+      simultaneous interrupts, reset while active, and save/load continuation
+      without claiming undocumented hardware contention timing.
+
+### Persistence, Diagnostics, and IOP Conformance
+
+- [ ] Extend canonical hashes and the transactional save-state schema with all
+      guest-visible IOP core, bus-memory, INTC, timer, scheduler-phase, and
+      in-flight continuation state. Immutable external ROM bytes remain
+      configuration and require an explicit compatibility identity rather than
+      silent embedding.
+- [ ] Add structured IOP instruction, memory, exception, interrupt, timer, and
+      state-transition trace events through the existing stable trace
+      transport. Keep tracing observational and allocation-free on execution
+      hot paths.
+- [ ] Add independently authored semantic programs covering decode, arithmetic,
+      control flow, loads/stores, COP0, exceptions, INTC delivery, timers,
+      reset, deterministic repetition, and save-state continuation. Use a
+      maintained host fixture boundary; do not make PS2 BIOS progress or IRX
+      kernel services the conformance oracle.
+- [ ] Run focused tests followed by the complete optimized repository check.
+      Compare repeated-run instruction totals, cycle totals where modeled,
+      traces, hashes, and byte-identical save-state continuation.
+- [ ] Complete the bounded architecture and maintainability review. Inspect
+      CPU/bus/device ownership, duplicated decode or exception policy,
+      behavioral booleans, mixed-purpose methods, scheduler dependency
+      direction, and provisional structures whose replacement trigger arrived.
+- [ ] Complete an independent final review, resolve every concrete finding,
+      run the optimized AddressSanitizer and native macOS leak checks,
+      reconcile `PROJECT.md`, and close Milestone 8.
 
 ## Milestone 9: EE-IOP Interconnect and Deterministic BIOS Startup
 
