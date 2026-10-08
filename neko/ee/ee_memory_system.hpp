@@ -59,6 +59,19 @@ enum class EEDataAccessDirection : std::uint8_t
   Store
 };
 
+enum class EETranslationAccess : std::uint8_t
+{
+  InstructionFetch,
+  DataLoad,
+  DataStore
+};
+
+enum class EECacheKind : std::uint8_t
+{
+  Instruction,
+  Data
+};
+
 enum class EEAddressTranslationOutcome : std::uint8_t
 {
   Translated,
@@ -422,7 +435,7 @@ class EEMemorySystem final
     static bool tlbEntryStateValid(const EETLBEntry &entry);
     static bool cacheLineStateValid(
       const EECacheLine &line,
-      bool instruction);
+      EECacheKind kind);
     bool replacementStateValid() const;
     bool stateValid() const;
     const EECacheLine &instructionCacheLine(
@@ -445,15 +458,14 @@ class EEMemorySystem final
 
     static EEAddressTranslationResult classifyAddress(
       std::uint32_t virtualAddress,
-      bool store,
+      EETranslationAccess access,
       const EEAddressTranslationContext &context);
     EEAddressTranslationResult translateMappedAddress(
       std::uint32_t virtualAddress,
-      bool store,
-      bool instruction) const;
+      EETranslationAccess access) const;
     std::size_t matchingTLBEntry(
       std::uint32_t virtualAddress,
-      bool instruction) const;
+      EETranslationAccess access) const;
     void invalidateTLBAccelerators();
     EETLBEntry currentTLBEntry() const;
     void writeTLBEntry(std::uint32_t index);

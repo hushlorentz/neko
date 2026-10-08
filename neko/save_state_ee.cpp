@@ -1427,7 +1427,7 @@ void NekoSaveStateCodec::readEECore(
     }
   }
   const auto readCacheLine =
-    [reader, &require](EECacheLine *line, bool instruction)
+    [reader, &require](EECacheLine *line, EECacheKind kind)
     {
       reader->readFieldBytes(
         "data",
@@ -1441,8 +1441,8 @@ void NekoSaveStateCodec::readEECore(
         reader->readFieldBool("leastRecentlyFilled");
       line->locked = reader->readFieldBool("locked");
       require(
-        EEMemorySystem::cacheLineStateValid(*line, instruction),
-        instruction
+        EEMemorySystem::cacheLineStateValid(*line, kind),
+        kind == EECacheKind::Instruction
           ? "EE instruction-cache line state is invalid"
           : "EE data-cache line state is invalid");
     };
@@ -1460,7 +1460,7 @@ void NekoSaveStateCodec::readEECore(
         auto line = reader->element(way);
         readCacheLine(
           &core->memorySystem.instructionCache[setIndex][way],
-          true);
+          EECacheKind::Instruction);
       }
     }
   }
@@ -1478,7 +1478,7 @@ void NekoSaveStateCodec::readEECore(
         auto line = reader->element(way);
         readCacheLine(
           &core->memorySystem.dataCache[setIndex][way],
-          false);
+          EECacheKind::Data);
       }
     }
   }

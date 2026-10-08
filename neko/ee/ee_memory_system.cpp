@@ -329,7 +329,10 @@ EEMemorySystem::classifyInstructionAddress(
   std::uint32_t virtualAddress,
   const EEAddressTranslationContext &context) const
 {
-  return classifyAddress(virtualAddress, false, context);
+  return classifyAddress(
+    virtualAddress,
+    EETranslationAccess::InstructionFetch,
+    context);
 }
 
 EEAddressTranslationResult EEMemorySystem::classifyDataAddress(
@@ -339,7 +342,9 @@ EEAddressTranslationResult EEMemorySystem::classifyDataAddress(
 {
   return classifyAddress(
     virtualAddress,
-    direction == EEDataAccessDirection::Store,
+    direction == EEDataAccessDirection::Store
+      ? EETranslationAccess::DataStore
+      : EETranslationAccess::DataLoad,
     context);
 }
 
@@ -351,7 +356,9 @@ EEMemorySystem::translateInstructionAddress(
   const EEAddressTranslationResult classification =
     classifyInstructionAddress(virtualAddress, context);
   return classification.outcome == EEAddressTranslationOutcome::TLBLookup
-    ? translateMappedAddress(virtualAddress, false, true)
+    ? translateMappedAddress(
+        virtualAddress,
+        EETranslationAccess::InstructionFetch)
     : classification;
 }
 
@@ -360,11 +367,14 @@ EEAddressTranslationResult EEMemorySystem::translateDataAddress(
   EEDataAccessDirection direction,
   const EEAddressTranslationContext &context) const
 {
-  const bool store = direction == EEDataAccessDirection::Store;
   const EEAddressTranslationResult classification =
     classifyDataAddress(virtualAddress, direction, context);
   return classification.outcome == EEAddressTranslationOutcome::TLBLookup
-    ? translateMappedAddress(virtualAddress, store, false)
+    ? translateMappedAddress(
+        virtualAddress,
+        direction == EEDataAccessDirection::Store
+          ? EETranslationAccess::DataStore
+          : EETranslationAccess::DataLoad)
     : classification;
 }
 
@@ -770,9 +780,10 @@ bool EEMemorySystem::scratchpadAccessGranted(
 
 EEAddressTranslationResult EEMemorySystem::classifyAddress(
   std::uint32_t virtualAddress,
-  bool store,
+  EETranslationAccess access,
   const EEAddressTranslationContext &context)
 {
+  const bool store = access == EETranslationAccess::DataStore;
   const EEPrivilegeMode privilege =
     context.exceptionLevel || context.errorLevel
       ? EEPrivilegeMode::Kernel
@@ -851,11 +862,13 @@ EEAddressTranslationResult EEMemorySystem::classifyAddress(
 
 EEAddressTranslationResult EEMemorySystem::translateMappedAddress(
   std::uint32_t virtualAddress,
-  bool store,
-  bool instruction) const
+  EETranslationAccess access) const
 {
+  const bool store = access == EETranslationAccess::DataStore;
+  const bool instruction =
+    access == EETranslationAccess::InstructionFetch;
   const std::size_t index =
-    matchingTLBEntry(virtualAddress, instruction);
+    matchingTLBEntry(virtualAddress, access);
   if (index == tlbEntries.size())
   {
     return {
@@ -955,8 +968,10 @@ EEAddressTranslationResult EEMemorySystem::translateMappedAddress(
 
 std::size_t EEMemorySystem::matchingTLBEntry(
   std::uint32_t virtualAddress,
-  bool instruction) const
+  EETranslationAccess access) const
 {
+  const bool instruction =
+    access == EETranslationAccess::InstructionFetch;
   const std::uint8_t asid =
     static_cast<std::uint8_t>(
       cop0EntryHi & EECOP0EntryHi::ASID_MASK);
@@ -1232,11 +1247,12 @@ bool EEMemorySystem::tlbEntryStateValid(
 
 bool EEMemorySystem::cacheLineStateValid(
   const EECacheLine &line,
-  bool instruction)
+  EECacheKind kind)
 {
   return
     (line.physicalTag & ~EECacheLine::PHYSICAL_TAG_MASK) == 0 &&
-    (!instruction || (!line.dirty && !line.locked));
+    (kind != EECacheKind::Instruction ||
+     (!line.dirty && !line.locked));
 }
 
 bool EEMemorySystem::replacementStateValid() const
@@ -1291,7 +1307,9 @@ bool EEMemorySystem::stateValid() const
   {
     for (const EECacheLine &line : set)
     {
-      if (!cacheLineStateValid(line, true))
+      if (!cacheLineStateValid(
+            line,
+            EECacheKind::Instruction))
       {
         return false;
       }
@@ -1301,7 +1319,7 @@ bool EEMemorySystem::stateValid() const
   {
     for (const EECacheLine &line : set)
     {
-      if (!cacheLineStateValid(line, false))
+      if (!cacheLineStateValid(line, EECacheKind::Data))
       {
         return false;
       }
