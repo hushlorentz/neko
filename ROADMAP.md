@@ -2121,14 +2121,30 @@ explicit evidence-closure step before implementation.
       and CP0 reads, the merge-load bypass, EPC/BD ownership, the KU/IE stack,
       and `RFE`, while explicitly blocking implementation-specific values and
       undefined-result policy from being guessed.
-- [ ] Resolve the retail IOP CPU implementation profile before fixing
-      privileged-state or cache interfaces: `PRId`, common COP0 writable masks
-      and fixed bits, TLB presence or absence, cache geometry and
-      software-visible isolation behavior, write-buffer observability, and the
-      mapping or cache relationship of the documented 1 KiB scratchpad.
-      Define deterministic policies for architecturally undefined divide,
-      branch-in-delay-slot, unsupported-TLB, and CP0-hazard cases without
-      presenting emulator choices as measured hardware.
+- [x] Resolve the retail IOP CPU identity and privileged-state profile
+      before fixing privileged-state interfaces: `PRId`, common COP0 writable
+      masks and fixed bits, TLB absence, write-buffer observability, and
+      deterministic policies for architecturally undefined divide,
+      branch-in-delay-slot, unsupported-TLB, and CP0-hazard cases. The selected
+      profile is the PlayStation-compatible, non-TLB R3000A variant with
+      read-only `PRId = 0x0000001f`; common CP0 state is limited to
+      `BadVAddr`, `Status`, `Cause`, `EPC`, and `PRId`. `Status.TS` is fixed set,
+      `Cause` exposes only its software interrupt-pending bits to guest writes,
+      and reset deterministically initializes the otherwise undefined cache
+      isolation state to inactive. Undefined division uses a stable
+      two's-complement quotient/remainder policy, a control transfer in a delay
+      slot raises `RI`, unsupported TLB operations raise `RI`, `MFC0` uses the
+      architectural delayed-result slot, and `MTC0` takes effect at retirement.
+- [ ] Resolve the remaining retail IOP cache and scratchpad implementation
+      profile before fixing cache interfaces. The family contract proves
+      direct-mapped, write-through separate caches with 4-byte D-cache lines,
+      16-byte I-cache lines, `Status.IsC`/`SwC` isolation and swapping, and a
+      four-entry write buffer; SCEI proves that both caches are
+      software-visible and that a separate 1 KiB zero-wait-state scratchpad
+      exists. Approved sources do not yet prove the I-cache or D-cache
+      capacities, and only one reference models a programmable scratchpad base
+      register at `0xfffe0144`. Do not freeze cache capacities or scratchpad
+      remapping from emulator assumptions.
 - [ ] Resolve the retail IOP RAM size, reset vector, ROM relationship, and
       physical memory aliases, including the documented 1 KiB scratchpad's
       address, from approved evidence before fixing those values in `IOPCore`
