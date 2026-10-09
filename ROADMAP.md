@@ -2102,7 +2102,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       checks, typed mapped/read-only/unmapped outcomes, and explicit host
       loading/inspection methods. Guest traffic must not gain a host shortcut
       or silently wrap addresses outside the approved RAM mirror.
-- [ ] Connect `IOPCore` instruction fetch and data access only through
+- [x] Connect `IOPCore` instruction fetch and data access only through
       `IOPBus`. Give the core one side-effect-free virtual-segment classifier
       for the selected kuseg/kseg0/kseg1/kseg2 policy and typed cached,
       uncached, protection, alignment, and bus outcomes. Keep the core as the

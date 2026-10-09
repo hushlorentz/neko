@@ -38,6 +38,56 @@ enum class IOPException : std::uint8_t
   ArithmeticOverflow
 };
 
+enum class IOPAddressOutcome : std::uint8_t
+{
+  Translated,
+  ProtectionFailure
+};
+
+enum class IOPCacheRoute : std::uint8_t
+{
+  None,
+  Cached,
+  Uncached
+};
+
+enum class IOPAccessOutcome : std::uint8_t
+{
+  Completed,
+  ProtectionFailure,
+  Misaligned,
+  ReadOnly,
+  Unmapped
+};
+
+struct IOPAddressClassification
+{
+  IOPAddressOutcome outcome =
+    IOPAddressOutcome::ProtectionFailure;
+  IOPAddress virtualAddress = 0;
+  IOPAddress physicalAddress = 0;
+  IOPCacheRoute cacheRoute = IOPCacheRoute::None;
+};
+
+struct IOPMemoryReadResult
+{
+  IOPAccessOutcome outcome = IOPAccessOutcome::Unmapped;
+  IOPException exception = IOPException::None;
+  IOPAddress virtualAddress = 0;
+  IOPAddress physicalAddress = 0;
+  IOPCacheRoute cacheRoute = IOPCacheRoute::None;
+  IOPWord value = 0;
+};
+
+struct IOPMemoryWriteResult
+{
+  IOPAccessOutcome outcome = IOPAccessOutcome::Unmapped;
+  IOPException exception = IOPException::None;
+  IOPAddress virtualAddress = 0;
+  IOPAddress physicalAddress = 0;
+  IOPCacheRoute cacheRoute = IOPCacheRoute::None;
+};
+
 enum class IOPDelayedResultSource : std::uint8_t
 {
   None,
@@ -84,6 +134,8 @@ namespace IOPCOP0
 
 namespace IOPCOP0Status
 {
+  constexpr IOPWord CURRENT_USER_MODE =
+    UINT32_C(1) << 1;
   constexpr IOPWord TLB_SHUTDOWN =
     UINT32_C(1) << 21;
   constexpr IOPWord BOOT_EXCEPTION_VECTORS =

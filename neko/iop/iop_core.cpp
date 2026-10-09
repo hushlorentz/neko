@@ -2,6 +2,32 @@
 
 #include <stdexcept>
 
+#include "iop_bus.hpp"
+
+namespace
+{
+  bool isAligned(IOPAddress address, std::size_t width)
+  {
+    return (address & (width - 1)) == 0;
+  }
+
+  IOPAccessOutcome accessOutcome(IOPBusStatus status)
+  {
+    switch (status)
+    {
+      case IOPBusStatus::Completed:
+        return IOPAccessOutcome::Completed;
+      case IOPBusStatus::Misaligned:
+        return IOPAccessOutcome::Misaligned;
+      case IOPBusStatus::ReadOnly:
+        return IOPAccessOutcome::ReadOnly;
+      case IOPBusStatus::Unmapped:
+        return IOPAccessOutcome::Unmapped;
+    }
+    throw std::logic_error("Unknown IOP bus status.");
+  }
+}
+
 IOPCore::IOPCore()
 {
   reset();
@@ -25,6 +51,229 @@ void IOPCore::reset()
   state = IOPExecutionState::Halted;
   haltReason = IOPStopReason::None;
   cycles = 0;
+}
+
+void IOPCore::attachBus(IOPBus *attached)
+{
+  bus = attached;
+}
+
+IOPAddressClassification IOPCore::classifyAddress(
+  IOPAddress virtualAddress) const
+{
+  const bool userMode =
+    (cop0.status & IOPCOP0Status::CURRENT_USER_MODE) != 0;
+  if (userMode && virtualAddress >= UINT32_C(0x80000000))
+  {
+    return {
+      IOPAddressOutcome::ProtectionFailure,
+      virtualAddress,
+      0,
+      IOPCacheRoute::None
+    };
+  }
+
+  if (virtualAddress < UINT32_C(0x80000000))
+  {
+    return {
+      IOPAddressOutcome::Translated,
+      virtualAddress,
+      virtualAddress,
+      IOPCacheRoute::Cached
+    };
+  }
+  if (virtualAddress < UINT32_C(0xa0000000))
+  {
+    return {
+      IOPAddressOutcome::Translated,
+      virtualAddress,
+      virtualAddress & UINT32_C(0x1fffffff),
+      IOPCacheRoute::Cached
+    };
+  }
+  if (virtualAddress < UINT32_C(0xc0000000))
+  {
+    return {
+      IOPAddressOutcome::Translated,
+      virtualAddress,
+      virtualAddress & UINT32_C(0x1fffffff),
+      IOPCacheRoute::Uncached
+    };
+  }
+  return {
+    IOPAddressOutcome::Translated,
+    virtualAddress,
+    virtualAddress,
+    IOPCacheRoute::Uncached
+  };
+}
+
+IOPMemoryReadResult IOPCore::fetchInstruction() const
+{
+  return readMemory(pc, sizeof(IOPWord), true);
+}
+
+IOPMemoryReadResult IOPCore::readData8(
+  IOPAddress virtualAddress) const
+{
+  return readMemory(virtualAddress, sizeof(std::uint8_t), false);
+}
+
+IOPMemoryReadResult IOPCore::readData16(
+  IOPAddress virtualAddress) const
+{
+  return readMemory(virtualAddress, sizeof(std::uint16_t), false);
+}
+
+IOPMemoryReadResult IOPCore::readData32(
+  IOPAddress virtualAddress) const
+{
+  return readMemory(virtualAddress, sizeof(IOPWord), false);
+}
+
+IOPMemoryWriteResult IOPCore::writeData8(
+  IOPAddress virtualAddress,
+  std::uint8_t value)
+{
+  return writeMemory(
+    virtualAddress,
+    sizeof(value),
+    static_cast<IOPWord>(value));
+}
+
+IOPMemoryWriteResult IOPCore::writeData16(
+  IOPAddress virtualAddress,
+  std::uint16_t value)
+{
+  return writeMemory(
+    virtualAddress,
+    sizeof(value),
+    static_cast<IOPWord>(value));
+}
+
+IOPMemoryWriteResult IOPCore::writeData32(
+  IOPAddress virtualAddress,
+  IOPWord value)
+{
+  return writeMemory(virtualAddress, sizeof(value), value);
+}
+
+IOPBus &IOPCore::attachedBus() const
+{
+  if (bus == nullptr)
+  {
+    throw std::logic_error("IOP Core bus is not attached.");
+  }
+  return *bus;
+}
+
+IOPMemoryReadResult IOPCore::readMemory(
+  IOPAddress virtualAddress,
+  std::size_t width,
+  bool instructionFetch) const
+{
+  IOPBus &physicalBus = attachedBus();
+  const IOPAddressClassification classification =
+    classifyAddress(virtualAddress);
+  IOPMemoryReadResult result;
+  result.virtualAddress = virtualAddress;
+  result.physicalAddress = classification.physicalAddress;
+  result.cacheRoute = classification.cacheRoute;
+
+  if (classification.outcome == IOPAddressOutcome::ProtectionFailure)
+  {
+    result.outcome = IOPAccessOutcome::ProtectionFailure;
+    result.exception = IOPException::AddressErrorLoadOrFetch;
+    return result;
+  }
+  if (!isAligned(virtualAddress, width))
+  {
+    result.outcome = IOPAccessOutcome::Misaligned;
+    result.exception = IOPException::AddressErrorLoadOrFetch;
+    return result;
+  }
+
+  IOPBusReadResult busResult;
+  switch (width)
+  {
+    case sizeof(std::uint8_t):
+      busResult = physicalBus.read8(classification.physicalAddress);
+      break;
+    case sizeof(std::uint16_t):
+      busResult = physicalBus.read16(classification.physicalAddress);
+      break;
+    case sizeof(IOPWord):
+      busResult = physicalBus.read32(classification.physicalAddress);
+      break;
+    default:
+      throw std::logic_error("Unsupported IOP memory read width.");
+  }
+
+  result.outcome = accessOutcome(busResult.status);
+  result.value = busResult.value;
+  if (result.outcome != IOPAccessOutcome::Completed)
+  {
+    result.exception = instructionFetch
+      ? IOPException::InstructionBusError
+      : IOPException::DataBusError;
+  }
+  return result;
+}
+
+IOPMemoryWriteResult IOPCore::writeMemory(
+  IOPAddress virtualAddress,
+  std::size_t width,
+  IOPWord value)
+{
+  IOPBus &physicalBus = attachedBus();
+  const IOPAddressClassification classification =
+    classifyAddress(virtualAddress);
+  IOPMemoryWriteResult result;
+  result.virtualAddress = virtualAddress;
+  result.physicalAddress = classification.physicalAddress;
+  result.cacheRoute = classification.cacheRoute;
+
+  if (classification.outcome == IOPAddressOutcome::ProtectionFailure)
+  {
+    result.outcome = IOPAccessOutcome::ProtectionFailure;
+    result.exception = IOPException::AddressErrorStore;
+    return result;
+  }
+  if (!isAligned(virtualAddress, width))
+  {
+    result.outcome = IOPAccessOutcome::Misaligned;
+    result.exception = IOPException::AddressErrorStore;
+    return result;
+  }
+
+  IOPBusWriteResult busResult;
+  switch (width)
+  {
+    case sizeof(std::uint8_t):
+      busResult = physicalBus.write8(
+        classification.physicalAddress,
+        static_cast<std::uint8_t>(value));
+      break;
+    case sizeof(std::uint16_t):
+      busResult = physicalBus.write16(
+        classification.physicalAddress,
+        static_cast<std::uint16_t>(value));
+      break;
+    case sizeof(IOPWord):
+      busResult = physicalBus.write32(
+        classification.physicalAddress,
+        value);
+      break;
+    default:
+      throw std::logic_error("Unsupported IOP memory write width.");
+  }
+
+  result.outcome = accessOutcome(busResult.status);
+  if (result.outcome != IOPAccessOutcome::Completed)
+  {
+    result.exception = IOPException::DataBusError;
+  }
+  return result;
 }
 
 IOPAddress IOPCore::programCounter() const
