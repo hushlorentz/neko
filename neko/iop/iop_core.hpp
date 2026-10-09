@@ -28,6 +28,16 @@ enum class IOPInstructionCompletion : std::uint8_t
   Retired
 };
 
+enum class IOPHILOAccessEffect : std::uint8_t
+{
+  None,
+  ReadHI,
+  ReadLO,
+  WriteHI,
+  WriteLO,
+  WritePair
+};
+
 struct IOPDestinationEffect
 {
   IOPWriteEffect kind = IOPWriteEffect::None;
@@ -52,11 +62,20 @@ struct IOPInstructionEffects
   IOPDestinationEffect destination;
   IOPValueEffect hi;
   IOPValueEffect lo;
+  IOPHILOAccessEffect hiLoAccess = IOPHILOAccessEffect::None;
   IOPControlFlowRequest controlFlow;
   IOPPendingException exception;
   IOPInstructionCompletion completion =
     IOPInstructionCompletion::Halted;
   IOPStopReason stopReason = IOPStopReason::ExecutionException;
+};
+
+struct IOPHILOState
+{
+  std::uint8_t hiWriteHazardInstructions = 0;
+  std::uint8_t loWriteHazardInstructions = 0;
+  bool unreadMultiplyDivideHI = false;
+  bool unreadMultiplyDivideLO = false;
 };
 
 class IOPCore final
@@ -141,6 +160,7 @@ class IOPCore final
       writableGeneralRegisters = {};
     IOPWord hiRegister = 0;
     IOPWord loRegister = 0;
+    IOPHILOState hiLoState;
     IOPCOP0State cop0;
     IOPBranchContinuation branch;
     IOPDelayedResultContinuation delayedResult;

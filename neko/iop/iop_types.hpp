@@ -20,6 +20,7 @@ enum class IOPStopReason : std::uint8_t
   HostHalt,
   FetchFailure,
   ReservedInstruction,
+  UndefinedOperation,
   ExecutionException
 };
 

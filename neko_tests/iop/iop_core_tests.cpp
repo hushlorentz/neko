@@ -79,6 +79,7 @@ struct IOPCoreTestAccess
     }
     core->hiRegister = UINT32_C(0x89abcdef);
     core->loRegister = UINT32_C(0xfedcba98);
+    core->hiLoState = {2, 2, true, true};
     core->cop0.badVirtualAddress = UINT32_C(0x10203040);
     core->cop0.status = UINT32_C(0xffffffff);
     core->cop0.cause = UINT32_C(0xffffffff);
@@ -113,6 +114,29 @@ struct IOPCoreTestAccess
     IOPWord value)
   {
     core->setGeneralRegister(index, value);
+  }
+
+  static void setHI(IOPCore *core, IOPWord value)
+  {
+    core->hiRegister = value;
+  }
+
+  static void setLO(IOPCore *core, IOPWord value)
+  {
+    core->loRegister = value;
+  }
+
+  static void setHILOState(IOPCore *core)
+  {
+    core->hiLoState = {2, 2, true, true};
+  }
+
+  static bool hiLoStateIsClear(const IOPCore &core)
+  {
+    return core.hiLoState.hiWriteHazardInstructions == 0 &&
+      core.hiLoState.loWriteHazardInstructions == 0 &&
+      !core.hiLoState.unreadMultiplyDivideHI &&
+      !core.hiLoState.unreadMultiplyDivideLO;
   }
 
   static void setProgramCounter(
@@ -175,6 +199,7 @@ TEST_CASE("IOP core reset establishes deterministic architectural state")
   }
   REQUIRE(core.hi() == 0);
   REQUIRE(core.lo() == 0);
+  REQUIRE(IOPCoreTestAccess::hiLoStateIsClear(core));
   REQUIRE(core.badVirtualAddress() == 0);
   REQUIRE(
     core.status() ==
@@ -451,6 +476,7 @@ TEST_CASE("IOP instruction boundary starts and retires canonical NOP",
   IOPBus bus;
   IOPCore core;
   core.attachBus(&bus);
+  IOPCoreTestAccess::setHILOState(&core);
   const std::uint8_t nop[] = {0, 0, 0, 0};
   REQUIRE(
     bus.loadPhysical(0x100, nop, sizeof(nop)) ==
@@ -459,6 +485,7 @@ TEST_CASE("IOP instruction boundary starts and retires canonical NOP",
   core.startExecution(0x80000100);
   REQUIRE(core.executionState() == IOPExecutionState::Running);
   REQUIRE(core.stopReason() == IOPStopReason::None);
+  REQUIRE(IOPCoreTestAccess::hiLoStateIsClear(core));
 
   core.stepInstruction();
 
@@ -535,7 +562,7 @@ TEST_CASE("IOP instruction boundary does not retire unavailable semantics",
   "[iop][execution]")
 {
   const std::uint8_t unavailableInstructions[][4] = {
-    {0x18, 0x00, 0x22, 0x00},
+    {0x08, 0x00, 0x20, 0x00},
     {0, 0, 0, 0x44}
   };
   for (const auto &instruction : unavailableInstructions)
@@ -1110,4 +1137,337 @@ TEST_CASE("IOP overflow is raised even when the destination is register zero",
   REQUIRE(
     core.exception().kind ==
     IOPException::ArithmeticOverflow);
+}
+
+TEST_CASE("IOP transfers values through HI and LO",
+  "[iop][execution][hilo]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setHI(&core, UINT32_C(0xaaaaaaaa));
+  IOPCoreTestAccess::setLO(&core, UINT32_C(0xbbbbbbbb));
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    1,
+    UINT32_C(0x12345678));
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    2,
+    UINT32_C(0x9abcdef0));
+  loadInstruction(&bus, 0, registerInstruction(0x11, 1, 0, 0));
+  loadInstruction(&bus, 4, registerInstruction(0x10, 0, 0, 3));
+  loadInstruction(&bus, 8, 0);
+  loadInstruction(&bus, 12, 0);
+  loadInstruction(&bus, 16, registerInstruction(0x13, 2, 0, 0));
+  loadInstruction(&bus, 20, registerInstruction(0x12, 0, 0, 4));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  REQUIRE(core.hi() == UINT32_C(0x12345678));
+  REQUIRE(core.lo() == UINT32_C(0xbbbbbbbb));
+
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(3) == UINT32_C(0x12345678));
+
+  core.stepInstruction();
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.hi() == UINT32_C(0x12345678));
+  REQUIRE(core.lo() == UINT32_C(0x9abcdef0));
+
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(4) == UINT32_C(0x9abcdef0));
+  REQUIRE(core.retiredInstructions() == 6);
+}
+
+TEST_CASE("IOP signed and unsigned multiplication populate HI and LO",
+  "[iop][execution][hilo]")
+{
+  struct MultiplyCase
+  {
+    std::uint8_t function;
+    IOPWord source;
+    IOPWord target;
+    IOPWord expectedHI;
+    IOPWord expectedLO;
+  };
+  const MultiplyCase cases[] = {
+    {
+      0x18,
+      UINT32_C(0xfffffffe),
+      3,
+      UINT32_C(0xffffffff),
+      UINT32_C(0xfffffffa)
+    },
+    {
+      0x18,
+      UINT32_C(0x80000000),
+      UINT32_C(0xffffffff),
+      0,
+      UINT32_C(0x80000000)
+    },
+    {
+      0x19,
+      UINT32_C(0xffffffff),
+      2,
+      1,
+      UINT32_C(0xfffffffe)
+    }
+  };
+
+  for (const MultiplyCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.target);
+    loadInstruction(
+      &bus,
+      0,
+      registerInstruction(test.function, 1, 2, 0));
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.hi() == test.expectedHI);
+    REQUIRE(core.lo() == test.expectedLO);
+    REQUIRE(core.retiredInstructions() == 1);
+  }
+}
+
+TEST_CASE("IOP division populates quotient and remainder without host UB",
+  "[iop][execution][hilo]")
+{
+  struct DivideCase
+  {
+    std::uint8_t function;
+    IOPWord dividend;
+    IOPWord divisor;
+    IOPWord expectedHI;
+    IOPWord expectedLO;
+  };
+  const DivideCase cases[] = {
+    {0x1a, UINT32_C(0xfffffff9), 3,
+      UINT32_C(0xffffffff), UINT32_C(0xfffffffe)},
+    {0x1a, 7, UINT32_C(0xfffffffd), 1,
+      UINT32_C(0xfffffffe)},
+    {0x1a, UINT32_C(0xfffffff9), UINT32_C(0xfffffffd),
+      UINT32_C(0xffffffff), 2},
+    {0x1b, UINT32_C(0xffffffff), 2, 1,
+      UINT32_C(0x7fffffff)},
+    {0x1a, 7, 0, 7, UINT32_C(0xffffffff)},
+    {0x1a, UINT32_C(0xfffffff9), 0,
+      UINT32_C(0xfffffff9), 1},
+    {0x1b, UINT32_C(0x89abcdef), 0,
+      UINT32_C(0x89abcdef), UINT32_C(0xffffffff)},
+    {0x1a, UINT32_C(0x80000000), UINT32_C(0xffffffff),
+      0, UINT32_C(0x80000000)}
+  };
+
+  for (const DivideCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.dividend);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.divisor);
+    loadInstruction(
+      &bus,
+      0,
+      registerInstruction(test.function, 1, 2, 0));
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.hi() == test.expectedHI);
+    REQUIRE(core.lo() == test.expectedLO);
+    REQUIRE(core.executionState() == IOPExecutionState::Running);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == IOPException::None);
+  }
+}
+
+TEST_CASE("IOP multiply results are functionally interlocked for immediate reads",
+  "[iop][execution][hilo]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
+  loadInstruction(&bus, 0, registerInstruction(0x18, 1, 2, 0));
+  loadInstruction(&bus, 4, registerInstruction(0x12, 0, 0, 3));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  core.stepInstruction();
+
+  REQUIRE(core.generalRegister(3) == 42);
+  REQUIRE(core.retiredInstructions() == 2);
+  REQUIRE(core.elapsedCycles() == 2);
+}
+
+TEST_CASE("IOP rejects HI and LO writes in the post-read hazard window",
+  "[iop][execution][hilo]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setHI(&core, UINT32_C(0x11111111));
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    1,
+    UINT32_C(0x22222222));
+  loadInstruction(&bus, 0, registerInstruction(0x10, 0, 0, 3));
+  loadInstruction(&bus, 4, 0);
+  loadInstruction(&bus, 8, registerInstruction(0x11, 1, 0, 0));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  core.stepInstruction();
+  core.stepInstruction();
+
+  REQUIRE(core.hi() == UINT32_C(0x11111111));
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.executionState() == IOPExecutionState::Halted);
+  REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
+  REQUIRE(core.retiredInstructions() == 2);
+  REQUIRE(core.exception().kind == IOPException::None);
+}
+
+TEST_CASE("IOP permits HI and LO writes after two separation instructions",
+  "[iop][execution][hilo]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    1,
+    UINT32_C(0x12345678));
+  loadInstruction(&bus, 0, registerInstruction(0x12, 0, 0, 3));
+  loadInstruction(&bus, 4, 0);
+  loadInstruction(&bus, 8, 0);
+  loadInstruction(&bus, 12, registerInstruction(0x11, 1, 0, 0));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  core.stepInstruction();
+  core.stepInstruction();
+  core.stepInstruction();
+
+  REQUIRE(core.hi() == UINT32_C(0x12345678));
+  REQUIRE(core.executionState() == IOPExecutionState::Running);
+  REQUIRE(core.retiredInstructions() == 4);
+}
+
+TEST_CASE("IOP HI and LO read hazards permit cross-register writes",
+  "[iop][execution][hilo]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    1,
+    UINT32_C(0x12345678));
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    2,
+    UINT32_C(0x9abcdef0));
+  loadInstruction(&bus, 0, registerInstruction(0x10, 0, 0, 3));
+  loadInstruction(&bus, 4, registerInstruction(0x13, 1, 0, 0));
+  loadInstruction(&bus, 8, registerInstruction(0x12, 0, 0, 4));
+  loadInstruction(&bus, 12, registerInstruction(0x11, 2, 0, 0));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.lo() == UINT32_C(0x12345678));
+
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.hi() == UINT32_C(0x9abcdef0));
+  REQUIRE(core.executionState() == IOPExecutionState::Running);
+  REQUIRE(core.retiredInstructions() == 4);
+}
+
+TEST_CASE("IOP rejects overwriting an unread multiply divide result",
+  "[iop][execution][hilo]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    3,
+    UINT32_C(0x12345678));
+  loadInstruction(&bus, 0, registerInstruction(0x18, 1, 2, 0));
+  loadInstruction(&bus, 4, registerInstruction(0x11, 3, 0, 0));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  REQUIRE(core.hi() == 0);
+  REQUIRE(core.lo() == 42);
+
+  core.stepInstruction();
+
+  REQUIRE(core.hi() == 0);
+  REQUIRE(core.lo() == 42);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.executionState() == IOPExecutionState::Halted);
+  REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
+  REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP preserves unread multiply divide halves independently",
+  "[iop][execution][hilo]")
+{
+  struct HalfReadCase
+  {
+    std::uint8_t readFunction;
+    std::uint8_t writeFunction;
+  };
+  const HalfReadCase cases[] = {
+    {0x10, 0x13},
+    {0x12, 0x11}
+  };
+
+  for (const HalfReadCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
+    IOPCoreTestAccess::setGeneralRegister(
+      &core,
+      3,
+      UINT32_C(0x12345678));
+    loadInstruction(&bus, 0, registerInstruction(0x18, 1, 2, 0));
+    loadInstruction(
+      &bus,
+      4,
+      registerInstruction(test.readFunction, 0, 0, 4));
+    loadInstruction(
+      &bus,
+      8,
+      registerInstruction(test.writeFunction, 3, 0, 0));
+    core.startExecution(0);
+
+    core.stepInstruction();
+    core.stepInstruction();
+    core.stepInstruction();
+
+    REQUIRE(core.hi() == 0);
+    REQUIRE(core.lo() == 42);
+    REQUIRE(core.programCounter() == 8);
+    REQUIRE(core.executionState() == IOPExecutionState::Halted);
+    REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
+    REQUIRE(core.retiredInstructions() == 2);
+  }
 }

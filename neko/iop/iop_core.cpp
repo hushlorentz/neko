@@ -61,6 +61,70 @@ namespace
     return (((left ^ right) & (left ^ result)) & SIGN_BIT) != 0;
   }
 
+  std::uint64_t signedMagnitude(IOPWord value)
+  {
+    return (value & UINT32_C(0x80000000)) == 0
+      ? value
+      : static_cast<std::uint64_t>(IOPWord(0) - value);
+  }
+
+  std::uint64_t signedProduct(IOPWord left, IOPWord right)
+  {
+    const std::uint64_t magnitude =
+      signedMagnitude(left) * signedMagnitude(right);
+    const bool negative =
+      ((left ^ right) & UINT32_C(0x80000000)) != 0;
+    return negative ? UINT64_C(0) - magnitude : magnitude;
+  }
+
+  struct IOPHILOResult
+  {
+    IOPWord hi = 0;
+    IOPWord lo = 0;
+  };
+
+  IOPHILOResult signedDivision(IOPWord dividend, IOPWord divisor)
+  {
+    if (divisor == 0)
+    {
+      return {
+        dividend,
+        (dividend & UINT32_C(0x80000000)) == 0
+          ? UINT32_C(0xffffffff)
+          : 1
+      };
+    }
+    if (dividend == UINT32_C(0x80000000) &&
+        divisor == UINT32_C(0xffffffff))
+    {
+      return {0, UINT32_C(0x80000000)};
+    }
+
+    const IOPWord quotientMagnitude = static_cast<IOPWord>(
+      signedMagnitude(dividend) / signedMagnitude(divisor));
+    const IOPWord remainderMagnitude = static_cast<IOPWord>(
+      signedMagnitude(dividend) % signedMagnitude(divisor));
+    const bool quotientNegative =
+      ((dividend ^ divisor) & UINT32_C(0x80000000)) != 0;
+    const bool remainderNegative =
+      (dividend & UINT32_C(0x80000000)) != 0;
+    return {
+      remainderNegative
+        ? IOPWord(0) - remainderMagnitude
+        : remainderMagnitude,
+      quotientNegative
+        ? IOPWord(0) - quotientMagnitude
+        : quotientMagnitude
+    };
+  }
+
+  IOPHILOResult unsignedDivision(IOPWord dividend, IOPWord divisor)
+  {
+    return divisor == 0
+      ? IOPHILOResult{dividend, UINT32_C(0xffffffff)}
+      : IOPHILOResult{dividend % divisor, dividend / divisor};
+  }
+
   IOPWord arithmeticShiftRight(IOPWord value, std::uint8_t amount)
   {
     const std::uint8_t shift = amount & 0x1f;
@@ -107,6 +171,58 @@ namespace
     effects.stopReason = IOPStopReason::ExecutionException;
     return effects;
   }
+
+  IOPInstructionEffects undefinedOperationEffects()
+  {
+    IOPInstructionEffects effects;
+    effects.stopReason = IOPStopReason::UndefinedOperation;
+    return effects;
+  }
+
+  IOPInstructionEffects hiLoReadEffects(
+    IOPHILOAccessEffect access,
+    std::uint8_t destination,
+    IOPWord value)
+  {
+    IOPInstructionEffects effects =
+      destinationEffects(destination, value);
+    effects.hiLoAccess = access;
+    return effects;
+  }
+
+  IOPInstructionEffects hiLoWriteEffects(
+    IOPHILOAccessEffect access,
+    IOPWord hi,
+    IOPWord lo)
+  {
+    IOPInstructionEffects effects = retiredEffects();
+    effects.hiLoAccess = access;
+    if (access == IOPHILOAccessEffect::WriteHI ||
+        access == IOPHILOAccessEffect::WritePair)
+    {
+      effects.hi = {IOPWriteEffect::Write, hi};
+    }
+    if (access == IOPHILOAccessEffect::WriteLO ||
+        access == IOPHILOAccessEffect::WritePair)
+    {
+      effects.lo = {IOPWriteEffect::Write, lo};
+    }
+    return effects;
+  }
+
+  bool pairWriteIsUndefined(const IOPHILOState &state)
+  {
+    return state.hiWriteHazardInstructions != 0 ||
+      state.loWriteHazardInstructions != 0 ||
+      state.unreadMultiplyDivideHI ||
+      state.unreadMultiplyDivideLO;
+  }
+
+  bool hasUnreadMultiplyDivideResult(const IOPHILOState &state)
+  {
+    return state.unreadMultiplyDivideHI ||
+      state.unreadMultiplyDivideLO;
+  }
 }
 
 IOPCore::IOPCore()
@@ -120,6 +236,7 @@ void IOPCore::reset()
   writableGeneralRegisters.fill(0);
   hiRegister = 0;
   loRegister = 0;
+  hiLoState = {};
   cop0.badVirtualAddress = 0;
   cop0.status =
     IOPCOP0Status::BOOT_EXCEPTION_VECTORS |
@@ -145,6 +262,7 @@ void IOPCore::startExecution(IOPAddress entryPoint)
   pc = entryPoint;
   branch = {};
   delayedResult = {};
+  hiLoState = {};
   pendingException = {};
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
@@ -252,6 +370,68 @@ IOPInstructionEffects IOPCore::instructionEffects(
       return destinationEffects(
         instruction.destinationRegister,
         source - target);
+    case IOPOperation::MoveFromHI:
+      return hiLoReadEffects(
+        IOPHILOAccessEffect::ReadHI,
+        instruction.destinationRegister,
+        hiRegister);
+    case IOPOperation::MoveToHI:
+      if (hiLoState.hiWriteHazardInstructions != 0 ||
+          hasUnreadMultiplyDivideResult(hiLoState))
+      {
+        return undefinedOperationEffects();
+      }
+      return hiLoWriteEffects(
+        IOPHILOAccessEffect::WriteHI,
+        source,
+        0);
+    case IOPOperation::MoveFromLO:
+      return hiLoReadEffects(
+        IOPHILOAccessEffect::ReadLO,
+        instruction.destinationRegister,
+        loRegister);
+    case IOPOperation::MoveToLO:
+      if (hiLoState.loWriteHazardInstructions != 0 ||
+          hasUnreadMultiplyDivideResult(hiLoState))
+      {
+        return undefinedOperationEffects();
+      }
+      return hiLoWriteEffects(
+        IOPHILOAccessEffect::WriteLO,
+        0,
+        source);
+    case IOPOperation::Multiply:
+    case IOPOperation::MultiplyUnsigned:
+    {
+      if (pairWriteIsUndefined(hiLoState))
+      {
+        return undefinedOperationEffects();
+      }
+      const std::uint64_t result =
+        instruction.operation == IOPOperation::Multiply
+          ? signedProduct(source, target)
+          : static_cast<std::uint64_t>(source) * target;
+      return hiLoWriteEffects(
+        IOPHILOAccessEffect::WritePair,
+        static_cast<IOPWord>(result >> 32),
+        static_cast<IOPWord>(result));
+    }
+    case IOPOperation::Divide:
+    case IOPOperation::DivideUnsigned:
+    {
+      if (pairWriteIsUndefined(hiLoState))
+      {
+        return undefinedOperationEffects();
+      }
+      const IOPHILOResult result =
+        instruction.operation == IOPOperation::Divide
+          ? signedDivision(source, target)
+          : unsignedDivision(source, target);
+      return hiLoWriteEffects(
+        IOPHILOAccessEffect::WritePair,
+        result.hi,
+        result.lo);
+    }
     case IOPOperation::And:
       return destinationEffects(
         instruction.destinationRegister,
@@ -392,6 +572,36 @@ void IOPCore::commitInstructionEffects(
   if (effects.lo.kind == IOPWriteEffect::Write)
   {
     loRegister = effects.lo.value;
+  }
+  if (hiLoState.hiWriteHazardInstructions != 0)
+  {
+    --hiLoState.hiWriteHazardInstructions;
+  }
+  if (hiLoState.loWriteHazardInstructions != 0)
+  {
+    --hiLoState.loWriteHazardInstructions;
+  }
+  switch (effects.hiLoAccess)
+  {
+    case IOPHILOAccessEffect::ReadHI:
+      hiLoState.hiWriteHazardInstructions = 2;
+      hiLoState.unreadMultiplyDivideHI = false;
+      break;
+    case IOPHILOAccessEffect::ReadLO:
+      hiLoState.loWriteHazardInstructions = 2;
+      hiLoState.unreadMultiplyDivideLO = false;
+      break;
+    case IOPHILOAccessEffect::WritePair:
+      hiLoState.unreadMultiplyDivideHI = true;
+      hiLoState.unreadMultiplyDivideLO = true;
+      break;
+    case IOPHILOAccessEffect::WriteHI:
+    case IOPHILOAccessEffect::WriteLO:
+      hiLoState.unreadMultiplyDivideHI = false;
+      hiLoState.unreadMultiplyDivideLO = false;
+      break;
+    case IOPHILOAccessEffect::None:
+      break;
   }
 
   switch (effects.controlFlow.kind)

@@ -2130,7 +2130,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       and no host signed-overflow dependence.
 - [x] Implement trapping and non-trapping add/subtract behavior with precise
       destination preservation on overflow.
-- [ ] Implement multiply/divide and HI/LO transfer behavior, including all
+- [x] Implement multiply/divide and HI/LO transfer behavior, including all
       approved divide-by-zero, signed-minimum, interlock, and overwrite rules.
       Keep any deterministic functional completion schedule isolated and do
       not claim undocumented cycle-exact IOP latency.
