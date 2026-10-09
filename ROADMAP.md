@@ -2143,7 +2143,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       cycle budget, instruction total, stop reason, exception metadata, and
       final PC. Keep IRX relocation and kernel module linking outside the CPU
       and bus hardware classes.
-- [ ] Complete an independent review of decode, arithmetic, HI/LO, and control
+- [x] Complete an independent review of decode, arithmetic, HI/LO, and control
       flow plus the host-runner boundary before memory and privileged behavior
       build on those contracts.
 
