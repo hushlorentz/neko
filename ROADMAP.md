@@ -2096,7 +2096,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       count. Keep not-yet-executable continuations inactive but structurally
       valid, reset every deterministic field explicitly, and expose checked
       read-only inspection for tests and diagnostics.
-- [ ] Add one `IOPBus` physical-address boundary with the approved 2 MiB RAM
+- [x] Add one `IOPBus` physical-address boundary with the approved 2 MiB RAM
       and four-way low mirror, immutable shared 4 MiB ROM view, and distinct
       fixed 1 KiB scratchpad. Provide little-endian scalar access, alignment
       checks, typed mapped/read-only/unmapped outcomes, and explicit host
