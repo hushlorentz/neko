@@ -2083,7 +2083,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       physical memory aliases, including the documented 1 KiB scratchpad's
       address, from approved evidence before fixing those values in `IOPCore`
       or `IOPBus` production interfaces.
-- [ ] Resolve the software-visible IOP INTC and timer physical register maps,
+- [x] Resolve the software-visible IOP INTC and timer physical register maps,
       reset values, writable masks, acknowledgement behavior, and interrupt
       cause assignments from approved evidence before fixing those values in
       platform-device interfaces.
