@@ -2114,16 +2114,26 @@ unresolved hardware questions are maintained in `PROJECT.md`.
 
 ### R3000A Decode and Integer Execution
 
-- [ ] Implement table-driven decode with a complete supported/reserved/
-      valid-but-deferred encoding audit. Pin every opcode and nested function
-      field before adding execution behavior.
-- [ ] Implement logical, shift, comparison, immediate, upper-immediate, and
-      move-style integer operations with explicit 32-bit wrapping and no host
-      signed-overflow dependence.
+- [x] Add one fixed-size decoded-instruction representation and table-driven
+      primary/SPECIAL/REGIMM/COP0 classification with a complete
+      supported/reserved/valid-but-deferred encoding audit. Pin every opcode,
+      nested function field, and required-zero field before adding execution
+      behavior.
+- [ ] Add one instruction-boundary fetch/decode/effect/commit path in
+      `IOPCore`. Keep decode pure, represent destination/HI/LO/control-flow/
+      exception effects explicitly, protect register zero at the final write
+      gate, and advance PC, retired-instruction count, and functional cycle
+      count in one owner. Do not add data-memory or privileged execution yet.
+- [ ] Implement NOP, logical, fixed and variable shift, comparison,
+      immediate, and upper-immediate integer operations with explicit 32-bit
+      wrapping, five-bit variable shift amounts, correct immediate extension,
+      and no host signed-overflow dependence.
 - [ ] Implement trapping and non-trapping add/subtract behavior with precise
       destination preservation on overflow.
 - [ ] Implement multiply/divide and HI/LO transfer behavior, including all
-      approved divide-by-zero, signed-minimum, latency, and overwrite rules.
+      approved divide-by-zero, signed-minimum, interlock, and overwrite rules.
+      Keep any deterministic functional completion schedule isolated and do
+      not claim undocumented cycle-exact IOP latency.
 - [ ] Implement jumps, links, conditional branches, and the single branch
       delay slot with explicit continuation state. Pin taken/not-taken, link
       address, register aliases, branch-in-delay-slot policy, and exception
