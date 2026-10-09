@@ -88,7 +88,13 @@ class IOPCore final
 
     void reset();
     void attachBus(IOPBus *bus);
+    bool hasAttachedBus() const;
+    void prepareFreshExecution(
+      IOPAddress entryPoint,
+      IOPAddress stackPointer,
+      IOPAddress returnAddress);
     void startExecution(IOPAddress entryPoint);
+    void haltExecution();
     void stepInstruction();
 
     IOPAddressClassification classifyAddress(

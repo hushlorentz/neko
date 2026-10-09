@@ -92,6 +92,7 @@ add_library(neko_core
     neko/iop/iop_bus.cpp
     neko/iop/iop_core.cpp
     neko/iop/iop_instruction.cpp
+    neko/iop/iop_program_runner.cpp
     neko/math/float.cpp
     neko/math/floating_point_ops.cpp
 )
@@ -270,6 +271,7 @@ add_executable(neko_tests
     neko_tests/iop/iop_bus_tests.cpp
     neko_tests/iop/iop_core_tests.cpp
     neko_tests/iop/iop_instruction_tests.cpp
+    neko_tests/iop/iop_program_runner_tests.cpp
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
     neko_tests/vif/vif_path2_tests.cpp

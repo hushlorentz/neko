@@ -328,6 +328,22 @@ void IOPCore::attachBus(IOPBus *attached)
   bus = attached;
 }
 
+bool IOPCore::hasAttachedBus() const
+{
+  return bus != nullptr;
+}
+
+void IOPCore::prepareFreshExecution(
+  IOPAddress entryPoint,
+  IOPAddress stackPointer,
+  IOPAddress returnAddress)
+{
+  reset();
+  pc = entryPoint;
+  setGeneralRegister(29, stackPointer);
+  setGeneralRegister(31, returnAddress);
+}
+
 void IOPCore::startExecution(IOPAddress entryPoint)
 {
   pc = entryPoint;
@@ -337,6 +353,12 @@ void IOPCore::startExecution(IOPAddress entryPoint)
   pendingException = {};
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
+}
+
+void IOPCore::haltExecution()
+{
+  state = IOPExecutionState::Halted;
+  haltReason = IOPStopReason::HostHalt;
 }
 
 void IOPCore::stepInstruction()

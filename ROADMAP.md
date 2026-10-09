@@ -2138,7 +2138,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       delay slot with explicit continuation state. Pin taken/not-taken, link
       address, register aliases, branch-in-delay-slot policy, and exception
       provenance.
-- [ ] Add a bounded host runner for independently authored IOP programs with
+- [x] Add a bounded host runner for independently authored IOP programs with
       explicit entry point, stack/return contract where appropriate, master
       cycle budget, instruction total, stop reason, exception metadata, and
       final PC. Keep IRX relocation and kernel module linking outside the CPU
