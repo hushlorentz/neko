@@ -43,6 +43,24 @@ namespace
     return (left ^ SIGN_BIT) < (right ^ SIGN_BIT);
   }
 
+  bool additionOverflows(
+    IOPWord left,
+    IOPWord right,
+    IOPWord result)
+  {
+    constexpr IOPWord SIGN_BIT = UINT32_C(0x80000000);
+    return ((~(left ^ right) & (left ^ result)) & SIGN_BIT) != 0;
+  }
+
+  bool subtractionOverflows(
+    IOPWord left,
+    IOPWord right,
+    IOPWord result)
+  {
+    constexpr IOPWord SIGN_BIT = UINT32_C(0x80000000);
+    return (((left ^ right) & (left ^ result)) & SIGN_BIT) != 0;
+  }
+
   IOPWord arithmeticShiftRight(IOPWord value, std::uint8_t amount)
   {
     const std::uint8_t shift = amount & 0x1f;
@@ -79,6 +97,14 @@ namespace
       destination,
       value
     };
+    return effects;
+  }
+
+  IOPInstructionEffects arithmeticOverflowEffects()
+  {
+    IOPInstructionEffects effects;
+    effects.exception.kind = IOPException::ArithmeticOverflow;
+    effects.stopReason = IOPStopReason::ExecutionException;
     return effects;
   }
 }
@@ -200,6 +226,32 @@ IOPInstructionEffects IOPCore::instructionEffects(
         arithmeticShiftRight(
           target,
           static_cast<std::uint8_t>(source)));
+    case IOPOperation::Add:
+    {
+      const IOPWord result = source + target;
+      return additionOverflows(source, target, result)
+        ? arithmeticOverflowEffects()
+        : destinationEffects(
+            instruction.destinationRegister,
+            result);
+    }
+    case IOPOperation::AddUnsigned:
+      return destinationEffects(
+        instruction.destinationRegister,
+        source + target);
+    case IOPOperation::Subtract:
+    {
+      const IOPWord result = source - target;
+      return subtractionOverflows(source, target, result)
+        ? arithmeticOverflowEffects()
+        : destinationEffects(
+            instruction.destinationRegister,
+            result);
+    }
+    case IOPOperation::SubtractUnsigned:
+      return destinationEffects(
+        instruction.destinationRegister,
+        source - target);
     case IOPOperation::And:
       return destinationEffects(
         instruction.destinationRegister,
@@ -238,6 +290,21 @@ IOPInstructionEffects IOPCore::instructionEffects(
         source < signExtendedImmediate(instruction.immediate)
           ? 1
           : 0);
+    case IOPOperation::AddImmediate:
+    {
+      const IOPWord immediate =
+        signExtendedImmediate(instruction.immediate);
+      const IOPWord result = source + immediate;
+      return additionOverflows(source, immediate, result)
+        ? arithmeticOverflowEffects()
+        : destinationEffects(
+            instruction.targetRegister,
+            result);
+    }
+    case IOPOperation::AddImmediateUnsigned:
+      return destinationEffects(
+        instruction.targetRegister,
+        source + signExtendedImmediate(instruction.immediate));
     case IOPOperation::AndImmediate:
       return destinationEffects(
         instruction.targetRegister,

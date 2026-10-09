@@ -2128,7 +2128,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       immediate, and upper-immediate integer operations with explicit 32-bit
       wrapping, five-bit variable shift amounts, correct immediate extension,
       and no host signed-overflow dependence.
-- [ ] Implement trapping and non-trapping add/subtract behavior with precise
+- [x] Implement trapping and non-trapping add/subtract behavior with precise
       destination preservation on overflow.
 - [ ] Implement multiply/divide and HI/LO transfer behavior, including all
       approved divide-by-zero, signed-minimum, interlock, and overwrite rules.

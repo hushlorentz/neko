@@ -535,7 +535,7 @@ TEST_CASE("IOP instruction boundary does not retire unavailable semantics",
   "[iop][execution]")
 {
   const std::uint8_t unavailableInstructions[][4] = {
-    {0x21, 0x18, 0x22, 0x00},
+    {0x18, 0x00, 0x22, 0x00},
     {0, 0, 0, 0x44}
   };
   for (const auto &instruction : unavailableInstructions)
@@ -905,4 +905,209 @@ TEST_CASE("IOP integer results cannot modify general register zero",
 
   REQUIRE(core.generalRegister(0) == 0);
   REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP executes wrapping register and immediate arithmetic",
+  "[iop][execution][integer][arithmetic]")
+{
+  struct ArithmeticCase
+  {
+    std::uint32_t instruction;
+    IOPWord source;
+    IOPWord target;
+    IOPWord expected;
+  };
+  const ArithmeticCase cases[] = {
+    {
+      registerInstruction(0x21, 1, 2, 3),
+      UINT32_C(0xffffffff),
+      1,
+      0
+    },
+    {
+      registerInstruction(0x23, 1, 2, 3),
+      0,
+      1,
+      UINT32_C(0xffffffff)
+    },
+    {
+      immediateInstruction(0x09, 1, 3, UINT16_C(0xffff)),
+      0,
+      0,
+      UINT32_C(0xffffffff)
+    },
+    {
+      immediateInstruction(0x09, 1, 3, 1),
+      UINT32_C(0x7fffffff),
+      0,
+      UINT32_C(0x80000000)
+    }
+  };
+
+  for (const ArithmeticCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.target);
+    loadInstruction(&bus, 0, test.instruction);
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.generalRegister(3) == test.expected);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.executionState() == IOPExecutionState::Running);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == IOPException::None);
+  }
+}
+
+TEST_CASE("IOP executes non-overflowing trapping arithmetic",
+  "[iop][execution][integer][arithmetic]")
+{
+  struct ArithmeticCase
+  {
+    std::uint32_t instruction;
+    IOPWord source;
+    IOPWord target;
+    IOPWord expected;
+  };
+  const ArithmeticCase cases[] = {
+    {
+      registerInstruction(0x20, 1, 2, 3),
+      UINT32_C(0x7ffffffe),
+      1,
+      UINT32_C(0x7fffffff)
+    },
+    {
+      registerInstruction(0x22, 1, 2, 3),
+      UINT32_C(0x80000001),
+      1,
+      UINT32_C(0x80000000)
+    },
+    {
+      immediateInstruction(0x08, 1, 3, UINT16_C(0xffff)),
+      0,
+      0,
+      UINT32_C(0xffffffff)
+    }
+  };
+
+  for (const ArithmeticCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.target);
+    loadInstruction(&bus, 0, test.instruction);
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.generalRegister(3) == test.expected);
+    REQUIRE(core.executionState() == IOPExecutionState::Running);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == IOPException::None);
+  }
+}
+
+TEST_CASE("IOP trapping arithmetic preserves its destination on overflow",
+  "[iop][execution][integer][arithmetic]")
+{
+  struct OverflowCase
+  {
+    std::uint32_t instruction;
+    IOPWord source;
+    IOPWord target;
+  };
+  const OverflowCase cases[] = {
+    {
+      registerInstruction(0x20, 1, 2, 3),
+      UINT32_C(0x7fffffff),
+      1
+    },
+    {
+      registerInstruction(0x20, 1, 2, 3),
+      UINT32_C(0x80000000),
+      UINT32_C(0xffffffff)
+    },
+    {
+      registerInstruction(0x22, 1, 2, 3),
+      UINT32_C(0x80000000),
+      1
+    },
+    {
+      registerInstruction(0x22, 1, 2, 3),
+      UINT32_C(0x7fffffff),
+      UINT32_C(0xffffffff)
+    },
+    {
+      immediateInstruction(0x08, 1, 3, 1),
+      UINT32_C(0x7fffffff),
+      0
+    },
+    {
+      immediateInstruction(0x08, 1, 3, UINT16_C(0xffff)),
+      UINT32_C(0x80000000),
+      0
+    }
+  };
+
+  for (const OverflowCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.target);
+    IOPCoreTestAccess::setGeneralRegister(
+      &core,
+      3,
+      UINT32_C(0x12345678));
+    loadInstruction(&bus, 0, test.instruction);
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(
+      core.generalRegister(3) ==
+      UINT32_C(0x12345678));
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.executionState() == IOPExecutionState::Halted);
+    REQUIRE(core.stopReason() == IOPStopReason::ExecutionException);
+    REQUIRE(core.retiredInstructions() == 0);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(
+      core.exception().kind ==
+      IOPException::ArithmeticOverflow);
+  }
+}
+
+TEST_CASE("IOP overflow is raised even when the destination is register zero",
+  "[iop][execution][integer][arithmetic]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    1,
+    UINT32_C(0x7fffffff));
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 1);
+  loadInstruction(
+    &bus,
+    0,
+    registerInstruction(0x20, 1, 2, 0));
+  core.startExecution(0);
+
+  core.stepInstruction();
+
+  REQUIRE(core.generalRegister(0) == 0);
+  REQUIRE(core.retiredInstructions() == 0);
+  REQUIRE(
+    core.exception().kind ==
+    IOPException::ArithmeticOverflow);
 }
