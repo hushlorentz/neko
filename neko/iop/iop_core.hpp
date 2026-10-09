@@ -19,6 +19,7 @@ enum class IOPControlFlowEffect : std::uint8_t
 {
   Hold,
   Sequential,
+  ScheduleBranch,
   SetProgramCounter
 };
 

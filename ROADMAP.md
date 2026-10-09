@@ -2134,7 +2134,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       approved divide-by-zero, signed-minimum, interlock, and overwrite rules.
       Keep any deterministic functional completion schedule isolated and do
       not claim undocumented cycle-exact IOP latency.
-- [ ] Implement jumps, links, conditional branches, and the single branch
+- [x] Implement jumps, links, conditional branches, and the single branch
       delay slot with explicit continuation state. Pin taken/not-taken, link
       address, register aliases, branch-in-delay-slot policy, and exception
       provenance.

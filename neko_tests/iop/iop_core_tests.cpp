@@ -7,6 +7,7 @@
 #include "catch.hpp"
 #include "iop_bus.hpp"
 #include "iop_core.hpp"
+#include "iop_instruction.hpp"
 
 namespace
 {
@@ -36,6 +37,15 @@ namespace
       (static_cast<std::uint32_t>(source) << 21) |
       (static_cast<std::uint32_t>(target) << 16) |
       immediate;
+  }
+
+  constexpr std::uint32_t jumpInstruction(
+    std::uint8_t opcode,
+    std::uint32_t target)
+  {
+    return
+      (static_cast<std::uint32_t>(opcode) << 26) |
+      (target & UINT32_C(0x03ffffff));
   }
 
   void loadInstruction(
@@ -168,13 +178,15 @@ struct IOPCoreTestAccess
       effects);
   }
 
-  static void setPendingContinuations(IOPCore *core)
+  static IOPInstructionEffects instructionEffects(
+    const IOPCore &core,
+    IOPWord raw)
   {
-    core->branch = {
-      true,
-      UINT32_C(0x100),
-      UINT32_C(0x200)
-    };
+    return core.instructionEffects(decodeIOPInstruction(raw));
+  }
+
+  static void setDelayedResultContinuation(IOPCore *core)
+  {
     core->delayedResult = {
       IOPDelayedResultSource::Load,
       1,
@@ -562,7 +574,7 @@ TEST_CASE("IOP instruction boundary does not retire unavailable semantics",
   "[iop][execution]")
 {
   const std::uint8_t unavailableInstructions[][4] = {
-    {0x08, 0x00, 0x20, 0x00},
+    {0x0c, 0x00, 0x00, 0x00},
     {0, 0, 0, 0x44}
   };
   for (const auto &instruction : unavailableInstructions)
@@ -698,12 +710,12 @@ TEST_CASE("IOP effect commit rejects incomplete retirement atomically",
   REQUIRE(core.retiredInstructions() == 0);
 }
 
-TEST_CASE("IOP instruction boundary rejects unimplemented continuations",
+TEST_CASE("IOP instruction boundary rejects an unimplemented delayed result",
   "[iop][execution]")
 {
   IOPCore core;
   core.startExecution(0x100);
-  IOPCoreTestAccess::setPendingContinuations(&core);
+  IOPCoreTestAccess::setDelayedResultContinuation(&core);
 
   IOPInstructionEffects effects;
   effects.controlFlow.kind = IOPControlFlowEffect::Sequential;
@@ -717,7 +729,7 @@ TEST_CASE("IOP instruction boundary rejects unimplemented continuations",
       effects),
     "IOP continuation commit is not implemented.");
   REQUIRE(core.programCounter() == 0x100);
-  REQUIRE(core.branchContinuation().active);
+  REQUIRE_FALSE(core.branchContinuation().active);
   REQUIRE(
     core.delayedResultContinuation().source ==
     IOPDelayedResultSource::Load);
@@ -1470,4 +1482,367 @@ TEST_CASE("IOP preserves unread multiply divide halves independently",
     REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
     REQUIRE(core.retiredInstructions() == 2);
   }
+}
+
+TEST_CASE("IOP conditional branches always execute one delay slot",
+  "[iop][execution][branch]")
+{
+  struct BranchCase
+  {
+    IOPWord instruction;
+    IOPWord source;
+    IOPWord target;
+    bool taken;
+    bool links;
+  };
+  const BranchCase cases[] = {
+    {immediateInstruction(0x04, 1, 2, 2), 5, 5, true, false},
+    {immediateInstruction(0x04, 1, 2, 2), 5, 6, false, false},
+    {immediateInstruction(0x05, 1, 2, 2), 5, 6, true, false},
+    {immediateInstruction(0x05, 1, 2, 2), 5, 5, false, false},
+    {immediateInstruction(0x06, 1, 0, 2), 0, 0, true, false},
+    {immediateInstruction(0x06, 1, 0, 2), 1, 0, false, false},
+    {immediateInstruction(0x07, 1, 0, 2), 1, 0, true, false},
+    {immediateInstruction(0x07, 1, 0, 2), 0, 0, false, false},
+    {immediateInstruction(0x01, 1, 0x00, 2),
+      UINT32_C(0xffffffff), 0, true, false},
+    {immediateInstruction(0x01, 1, 0x00, 2),
+      0, 0, false, false},
+    {immediateInstruction(0x01, 1, 0x01, 2),
+      0, 0, true, false},
+    {immediateInstruction(0x01, 1, 0x01, 2),
+      UINT32_C(0xffffffff), 0, false, false},
+    {immediateInstruction(0x01, 1, 0x10, 2),
+      UINT32_C(0x80000000), 0, true, true},
+    {immediateInstruction(0x01, 1, 0x10, 2),
+      0, 0, false, true},
+    {immediateInstruction(0x01, 1, 0x11, 2),
+      0, 0, true, true},
+    {immediateInstruction(0x01, 1, 0x11, 2),
+      UINT32_C(0x80000000), 0, false, true}
+  };
+
+  for (const BranchCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.target);
+    IOPCoreTestAccess::setGeneralRegister(
+      &core,
+      31,
+      UINT32_C(0xaaaaaaaa));
+    loadInstruction(&bus, 0, test.instruction);
+    loadInstruction(
+      &bus,
+      4,
+      immediateInstruction(0x09, 0, 3, 7));
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.branchContinuation().active);
+    REQUIRE(core.branchContinuation().instructionAddress == 0);
+    REQUIRE(
+      core.branchContinuation().targetAddress ==
+      (test.taken ? 12 : 8));
+    REQUIRE(
+      core.generalRegister(31) ==
+      (test.links ? 8 : UINT32_C(0xaaaaaaaa)));
+
+    core.stepInstruction();
+
+    REQUIRE(core.generalRegister(3) == 7);
+    REQUIRE(
+      core.programCounter() ==
+      (test.taken ? 12 : 8));
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.retiredInstructions() == 2);
+  }
+}
+
+TEST_CASE("IOP relative branches sign extend their shifted displacement",
+  "[iop][execution][branch]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 1);
+  loadInstruction(
+    &bus,
+    4,
+    immediateInstruction(0x04, 1, 1, UINT16_C(0xfffe)));
+  core.startExecution(4);
+
+  core.stepInstruction();
+
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.branchContinuation().instructionAddress == 4);
+  REQUIRE(core.branchContinuation().targetAddress == 0);
+}
+
+TEST_CASE("IOP absolute jumps link and retire through their delay slot",
+  "[iop][execution][branch]")
+{
+  struct JumpCase
+  {
+    std::uint8_t opcode;
+    bool links;
+  };
+  const JumpCase cases[] = {
+    {0x02, false},
+    {0x03, true}
+  };
+
+  for (const JumpCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(
+      &core,
+      31,
+      UINT32_C(0xaaaaaaaa));
+    loadInstruction(&bus, 0, jumpInstruction(test.opcode, 3));
+    loadInstruction(
+      &bus,
+      4,
+      immediateInstruction(0x09, 0, 2, 9));
+    core.startExecution(0);
+
+    core.stepInstruction();
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.branchContinuation().targetAddress == 12);
+    REQUIRE(
+      core.generalRegister(31) ==
+      (test.links ? 8 : UINT32_C(0xaaaaaaaa)));
+
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 9);
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE_FALSE(core.branchContinuation().active);
+  }
+}
+
+TEST_CASE("IOP absolute jumps use the delay slot region and wrapping link",
+  "[iop][execution][branch]")
+{
+  SECTION("delay slot selects the target region")
+  {
+    IOPCore core;
+    IOPCoreTestAccess::setProgramCounter(
+      &core,
+      UINT32_C(0x0ffffffc));
+
+    const IOPInstructionEffects effects =
+      IOPCoreTestAccess::instructionEffects(
+        core,
+        jumpInstruction(0x02, 1));
+
+    REQUIRE(
+      effects.controlFlow.kind ==
+      IOPControlFlowEffect::ScheduleBranch);
+    REQUIRE(
+      effects.controlFlow.target ==
+      UINT32_C(0x10000004));
+  }
+
+  SECTION("link arithmetic wraps to 32 bits")
+  {
+    IOPCore core;
+    IOPCoreTestAccess::setProgramCounter(
+      &core,
+      UINT32_C(0xfffffffc));
+
+    const IOPInstructionEffects effects =
+      IOPCoreTestAccess::instructionEffects(
+        core,
+        jumpInstruction(0x03, 1));
+
+    REQUIRE(effects.destination.kind == IOPWriteEffect::Write);
+    REQUIRE(effects.destination.destination == 31);
+    REQUIRE(effects.destination.value == 4);
+    REQUIRE(effects.controlFlow.target == 4);
+  }
+}
+
+TEST_CASE("IOP register jumps capture their source before link writes",
+  "[iop][execution][branch]")
+{
+  SECTION("JR")
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 16);
+    loadInstruction(&bus, 0, registerInstruction(0x08, 1, 0, 0));
+    loadInstruction(&bus, 4, 0);
+    core.startExecution(0);
+
+    core.stepInstruction();
+    REQUIRE(core.branchContinuation().targetAddress == 16);
+    core.stepInstruction();
+    REQUIRE(core.programCounter() == 16);
+  }
+
+  SECTION("JALR source destination alias")
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 5, 16);
+    loadInstruction(&bus, 0, registerInstruction(0x09, 5, 0, 5));
+    loadInstruction(&bus, 4, 0);
+    core.startExecution(0);
+
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(5) == 8);
+    REQUIRE(core.branchContinuation().targetAddress == 16);
+    core.stepInstruction();
+    REQUIRE(core.programCounter() == 16);
+  }
+}
+
+TEST_CASE("IOP conditional link aliases use the pre-link source value",
+  "[iop][execution][branch]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    31,
+    UINT32_C(0x80000000));
+  loadInstruction(
+    &bus,
+    0,
+    immediateInstruction(0x01, 31, 0x11, 2));
+  core.startExecution(0);
+
+  core.stepInstruction();
+
+  REQUIRE(core.generalRegister(31) == 8);
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.branchContinuation().targetAddress == 8);
+}
+
+TEST_CASE("IOP JALR rejects an invalid target before its delay slot",
+  "[iop][execution][branch]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 3);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    5,
+    UINT32_C(0xaaaaaaaa));
+  loadInstruction(&bus, 0, registerInstruction(0x09, 1, 0, 5));
+  core.startExecution(0);
+
+  core.stepInstruction();
+
+  REQUIRE(core.programCounter() == 0);
+  REQUIRE(core.generalRegister(5) == UINT32_C(0xaaaaaaaa));
+  REQUIRE_FALSE(core.branchContinuation().active);
+  REQUIRE(core.executionState() == IOPExecutionState::Halted);
+  REQUIRE(core.stopReason() == IOPStopReason::ExecutionException);
+  REQUIRE(
+    core.exception().kind ==
+    IOPException::AddressErrorLoadOrFetch);
+  REQUIRE(core.exception().badVirtualAddress == 3);
+  REQUIRE_FALSE(core.exception().inBranchDelaySlot);
+  REQUIRE(core.retiredInstructions() == 0);
+}
+
+TEST_CASE("IOP JR misalignment faults when the target is fetched",
+  "[iop][execution][branch]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 3);
+  loadInstruction(&bus, 0, registerInstruction(0x08, 1, 0, 0));
+  loadInstruction(&bus, 4, 0);
+  core.startExecution(0);
+
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.programCounter() == 3);
+  REQUIRE_FALSE(core.branchContinuation().active);
+
+  core.stepInstruction();
+
+  REQUIRE(core.programCounter() == 3);
+  REQUIRE(core.executionState() == IOPExecutionState::Halted);
+  REQUIRE(core.stopReason() == IOPStopReason::FetchFailure);
+  REQUIRE(
+    core.exception().kind ==
+    IOPException::AddressErrorLoadOrFetch);
+  REQUIRE(core.exception().badVirtualAddress == 3);
+  REQUIRE_FALSE(core.exception().inBranchDelaySlot);
+  REQUIRE(core.retiredInstructions() == 2);
+}
+
+TEST_CASE("IOP rejects a control transfer in a branch delay slot",
+  "[iop][execution][branch]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    31,
+    UINT32_C(0xaaaaaaaa));
+  loadInstruction(&bus, 0, jumpInstruction(0x02, 3));
+  loadInstruction(&bus, 4, jumpInstruction(0x03, 4));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  core.stepInstruction();
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(31) == UINT32_C(0xaaaaaaaa));
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.branchContinuation().instructionAddress == 0);
+  REQUIRE(core.branchContinuation().targetAddress == 12);
+  REQUIRE(core.executionState() == IOPExecutionState::Halted);
+  REQUIRE(core.stopReason() == IOPStopReason::ReservedInstruction);
+  REQUIRE(core.exception().kind == IOPException::ReservedInstruction);
+  REQUIRE(core.exception().inBranchDelaySlot);
+  REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP exceptions in a delay slot preserve branch provenance",
+  "[iop][execution][branch]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    1,
+    UINT32_C(0x7fffffff));
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 1);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    3,
+    UINT32_C(0xaaaaaaaa));
+  loadInstruction(&bus, 0, jumpInstruction(0x02, 3));
+  loadInstruction(&bus, 4, registerInstruction(0x20, 1, 2, 3));
+  core.startExecution(0);
+
+  core.stepInstruction();
+  core.stepInstruction();
+
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.generalRegister(3) == UINT32_C(0xaaaaaaaa));
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.branchContinuation().instructionAddress == 0);
+  REQUIRE(core.exception().kind == IOPException::ArithmeticOverflow);
+  REQUIRE(core.exception().inBranchDelaySlot);
+  REQUIRE(core.retiredInstructions() == 1);
 }

@@ -172,6 +172,23 @@ namespace
     return effects;
   }
 
+  IOPInstructionEffects reservedInstructionEffects()
+  {
+    IOPInstructionEffects effects;
+    effects.exception.kind = IOPException::ReservedInstruction;
+    effects.stopReason = IOPStopReason::ReservedInstruction;
+    return effects;
+  }
+
+  IOPInstructionEffects addressErrorEffects(IOPAddress address)
+  {
+    IOPInstructionEffects effects;
+    effects.exception.kind = IOPException::AddressErrorLoadOrFetch;
+    effects.exception.badVirtualAddress = address;
+    effects.stopReason = IOPStopReason::ExecutionException;
+    return effects;
+  }
+
   IOPInstructionEffects undefinedOperationEffects()
   {
     IOPInstructionEffects effects;
@@ -208,6 +225,60 @@ namespace
       effects.lo = {IOPWriteEffect::Write, lo};
     }
     return effects;
+  }
+
+  IOPInstructionEffects branchEffects(IOPAddress target)
+  {
+    IOPInstructionEffects effects = retiredEffects();
+    effects.controlFlow.kind = IOPControlFlowEffect::ScheduleBranch;
+    effects.controlFlow.target = target;
+    return effects;
+  }
+
+  IOPInstructionEffects branchLinkEffects(
+    IOPAddress target,
+    std::uint8_t destination,
+    IOPAddress link)
+  {
+    IOPInstructionEffects effects =
+      destinationEffects(destination, link);
+    effects.controlFlow.kind = IOPControlFlowEffect::ScheduleBranch;
+    effects.controlFlow.target = target;
+    return effects;
+  }
+
+  IOPAddress conditionalBranchTarget(
+    IOPAddress instructionAddress,
+    std::uint16_t immediate,
+    bool taken)
+  {
+    const IOPAddress delaySlot =
+      instructionAddress + sizeof(IOPWord);
+    return taken
+      ? delaySlot + (signExtendedImmediate(immediate) << 2)
+      : delaySlot + sizeof(IOPWord);
+  }
+
+  bool isControlTransfer(IOPOperation operation)
+  {
+    switch (operation)
+    {
+      case IOPOperation::JumpRegister:
+      case IOPOperation::JumpAndLinkRegister:
+      case IOPOperation::BranchLessThanZero:
+      case IOPOperation::BranchGreaterThanOrEqualZero:
+      case IOPOperation::BranchLessThanZeroAndLink:
+      case IOPOperation::BranchGreaterThanOrEqualZeroAndLink:
+      case IOPOperation::Jump:
+      case IOPOperation::JumpAndLink:
+      case IOPOperation::BranchEqual:
+      case IOPOperation::BranchNotEqual:
+      case IOPOperation::BranchLessThanOrEqualZero:
+      case IOPOperation::BranchGreaterThanZero:
+        return true;
+      default:
+        return false;
+    }
   }
 
   bool pairWriteIsUndefined(const IOPHILOState &state)
@@ -297,12 +368,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
   switch (decoded.disposition)
   {
     case IOPDecodeDisposition::Reserved:
-    {
-      IOPInstructionEffects effects;
-      effects.exception.kind = IOPException::ReservedInstruction;
-      effects.stopReason = IOPStopReason::ReservedInstruction;
-      return effects;
-    }
+      return reservedInstructionEffects();
     case IOPDecodeDisposition::ValidButDeferred:
       return {};
     case IOPDecodeDisposition::Supported:
@@ -310,6 +376,10 @@ IOPInstructionEffects IOPCore::instructionEffects(
   }
 
   const IOPInstruction &instruction = decoded.instruction;
+  if (branch.active && isControlTransfer(instruction.operation))
+  {
+    return reservedInstructionEffects();
+  }
   const IOPWord source =
     generalRegister(instruction.sourceRegister);
   const IOPWord target =
@@ -344,6 +414,19 @@ IOPInstructionEffects IOPCore::instructionEffects(
         arithmeticShiftRight(
           target,
           static_cast<std::uint8_t>(source)));
+    case IOPOperation::JumpRegister:
+      return branchEffects(source);
+    case IOPOperation::JumpAndLinkRegister:
+      if ((source & 3) != 0 ||
+          classifyAddress(source).outcome !=
+            IOPAddressOutcome::Translated)
+      {
+        return addressErrorEffects(source);
+      }
+      return branchLinkEffects(
+        source,
+        instruction.destinationRegister,
+        pc + 2 * sizeof(IOPWord));
     case IOPOperation::Add:
     {
       const IOPWord result = source + target;
@@ -456,6 +539,70 @@ IOPInstructionEffects IOPCore::instructionEffects(
       return destinationEffects(
         instruction.destinationRegister,
         source < target ? 1 : 0);
+    case IOPOperation::BranchLessThanZero:
+      return branchEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          (source & UINT32_C(0x80000000)) != 0));
+    case IOPOperation::BranchGreaterThanOrEqualZero:
+      return branchEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          (source & UINT32_C(0x80000000)) == 0));
+    case IOPOperation::BranchLessThanZeroAndLink:
+      return branchLinkEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          (source & UINT32_C(0x80000000)) != 0),
+        31,
+        pc + 2 * sizeof(IOPWord));
+    case IOPOperation::BranchGreaterThanOrEqualZeroAndLink:
+      return branchLinkEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          (source & UINT32_C(0x80000000)) == 0),
+        31,
+        pc + 2 * sizeof(IOPWord));
+    case IOPOperation::Jump:
+      return branchEffects(
+        ((pc + sizeof(IOPWord)) & UINT32_C(0xf0000000)) |
+        (instruction.target << 2));
+    case IOPOperation::JumpAndLink:
+      return branchLinkEffects(
+        ((pc + sizeof(IOPWord)) & UINT32_C(0xf0000000)) |
+          (instruction.target << 2),
+        31,
+        pc + 2 * sizeof(IOPWord));
+    case IOPOperation::BranchEqual:
+      return branchEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          source == target));
+    case IOPOperation::BranchNotEqual:
+      return branchEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          source != target));
+    case IOPOperation::BranchLessThanOrEqualZero:
+      return branchEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          source == 0 ||
+          (source & UINT32_C(0x80000000)) != 0));
+    case IOPOperation::BranchGreaterThanZero:
+      return branchEffects(
+        conditionalBranchTarget(
+          pc,
+          instruction.immediate,
+          source != 0 &&
+          (source & UINT32_C(0x80000000)) == 0));
     case IOPOperation::SetLessThanImmediate:
       return destinationEffects(
         instruction.targetRegister,
@@ -520,8 +667,7 @@ void IOPCore::commitInstructionEffects(
   IOPAddress instructionAddress,
   const IOPInstructionEffects &effects)
 {
-  if (branch.active ||
-      delayedResult.source != IOPDelayedResultSource::None)
+  if (delayedResult.source != IOPDelayedResultSource::None)
   {
     throw std::logic_error(
       "IOP continuation commit is not implemented.");
@@ -545,9 +691,11 @@ void IOPCore::commitInstructionEffects(
   }
   ++cycles;
 
+  const bool inBranchDelaySlot = branch.active;
   if (effects.exception.kind != IOPException::None)
   {
     pendingException = effects.exception;
+    pendingException.inBranchDelaySlot = inBranchDelaySlot;
     state = IOPExecutionState::Halted;
     haltReason = effects.stopReason;
     return;
@@ -607,6 +755,22 @@ void IOPCore::commitInstructionEffects(
   switch (effects.controlFlow.kind)
   {
     case IOPControlFlowEffect::Sequential:
+      if (inBranchDelaySlot)
+      {
+        pc = branch.targetAddress;
+        branch = {};
+      }
+      else
+      {
+        pc = instructionAddress + sizeof(IOPWord);
+      }
+      break;
+    case IOPControlFlowEffect::ScheduleBranch:
+      branch = {
+        true,
+        instructionAddress,
+        effects.controlFlow.target
+      };
       pc = instructionAddress + sizeof(IOPWord);
       break;
     case IOPControlFlowEffect::SetProgramCounter:
