@@ -89,6 +89,7 @@ add_library(neko_core
     neko/ee/vpu/vpu_lower_instruction.cpp
     neko/ee/vpu/pipelines/vpu_pipeline.cpp
     neko/ee/vpu/pipelines/vpu_pipeline_orchestrator.cpp
+    neko/iop/iop_core.cpp
     neko/math/float.cpp
     neko/math/floating_point_ops.cpp
 )
@@ -104,6 +105,7 @@ target_include_directories(neko_core
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vif
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vpu
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/ee/vpu/pipelines
+        ${CMAKE_CURRENT_SOURCE_DIR}/neko/iop
         ${CMAKE_CURRENT_SOURCE_DIR}/neko/math
 )
 
@@ -263,6 +265,7 @@ add_executable(neko_tests
     neko_tests/gs/gs_textured_rasterizer_tests.cpp
     neko_tests/gs/gs_vif_vu1_integration_tests.cpp
     neko_tests/math/floating_point_tests.cpp
+    neko_tests/iop/iop_core_tests.cpp
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
     neko_tests/vif/vif_path2_tests.cpp

@@ -2090,24 +2090,27 @@ unresolved hardware questions are maintained in `PROJECT.md`.
 
 ### IOP Core and Physical-Memory Foundation
 
-- [ ] Add fixed-width IOP architectural types and one `IOPCore` owner for the
+- [x] Add fixed-width IOP architectural types and one `IOPCore` owner for the
       program counter, 32 GPRs, HI/LO, approved COP0 state, branch/delay
       continuation, pending exception, execution state, stop reason, and cycle
-      count. Reset every deterministic field explicitly and expose checked
+      count. Keep not-yet-executable continuations inactive but structurally
+      valid, reset every deterministic field explicitly, and expose checked
       read-only inspection for tests and diagnostics.
-- [ ] Add one `IOPBus` physical-address boundary with approved RAM and ROM
-      ranges, little-endian scalar access, alignment checks, read-only ROM
-      behavior, and explicit host loading/inspection methods. Guest traffic
-      must not gain a host shortcut or silently wrap unmapped addresses.
+- [ ] Add one `IOPBus` physical-address boundary with the approved 2 MiB RAM
+      and four-way low mirror, immutable shared 4 MiB ROM view, and distinct
+      fixed 1 KiB scratchpad. Provide little-endian scalar access, alignment
+      checks, typed mapped/read-only/unmapped outcomes, and explicit host
+      loading/inspection methods. Guest traffic must not gain a host shortcut
+      or silently wrap addresses outside the approved RAM mirror.
 - [ ] Connect `IOPCore` instruction fetch and data access only through
-      `IOPBus`. Return typed success or address/bus-failure outcomes so the core
-      remains the sole owner of precise exception selection and architectural
-      commit.
-- [ ] Add a bounded host runner for independently authored IOP programs with
-      explicit entry point, stack/return contract where appropriate, master
-      cycle budget, instruction total, stop reason, exception metadata, and
-      final PC. Keep IRX relocation and kernel module linking outside the CPU
-      and bus hardware classes.
+      `IOPBus`. Give the core one side-effect-free virtual-segment classifier
+      for the selected kuseg/kseg0/kseg1/kseg2 policy and typed cached,
+      uncached, protection, alignment, and bus outcomes. Keep the core as the
+      sole owner of precise exception selection and architectural commit; do
+      not allocate cache contents or claim cache timing in this block.
+- [ ] Complete an independent review of IOP state ownership, reset invariants,
+      virtual/physical dependency direction, physical range boundaries, and
+      host-versus-guest memory access before decode builds on them.
 
 ### R3000A Decode and Integer Execution
 
@@ -2125,8 +2128,14 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       delay slot with explicit continuation state. Pin taken/not-taken, link
       address, register aliases, branch-in-delay-slot policy, and exception
       provenance.
+- [ ] Add a bounded host runner for independently authored IOP programs with
+      explicit entry point, stack/return contract where appropriate, master
+      cycle budget, instruction total, stop reason, exception metadata, and
+      final PC. Keep IRX relocation and kernel module linking outside the CPU
+      and bus hardware classes.
 - [ ] Complete an independent review of decode, arithmetic, HI/LO, and control
-      flow before memory and privileged behavior build on those contracts.
+      flow plus the host-runner boundary before memory and privileged behavior
+      build on those contracts.
 
 ### Loads, Stores, COP0, and Precise Exceptions
 
