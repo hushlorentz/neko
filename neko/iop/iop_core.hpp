@@ -9,6 +9,56 @@
 class IOPBus;
 struct IOPCoreTestAccess;
 
+enum class IOPWriteEffect : std::uint8_t
+{
+  None,
+  Write
+};
+
+enum class IOPControlFlowEffect : std::uint8_t
+{
+  Hold,
+  Sequential,
+  SetProgramCounter
+};
+
+enum class IOPInstructionCompletion : std::uint8_t
+{
+  Halted,
+  Retired
+};
+
+struct IOPDestinationEffect
+{
+  IOPWriteEffect kind = IOPWriteEffect::None;
+  std::uint8_t destination = 0;
+  IOPWord value = 0;
+};
+
+struct IOPValueEffect
+{
+  IOPWriteEffect kind = IOPWriteEffect::None;
+  IOPWord value = 0;
+};
+
+struct IOPControlFlowRequest
+{
+  IOPControlFlowEffect kind = IOPControlFlowEffect::Hold;
+  IOPAddress target = 0;
+};
+
+struct IOPInstructionEffects
+{
+  IOPDestinationEffect destination;
+  IOPValueEffect hi;
+  IOPValueEffect lo;
+  IOPControlFlowRequest controlFlow;
+  IOPPendingException exception;
+  IOPInstructionCompletion completion =
+    IOPInstructionCompletion::Halted;
+  IOPStopReason stopReason = IOPStopReason::ExecutionException;
+};
+
 class IOPCore final
 {
   public:
@@ -18,6 +68,8 @@ class IOPCore final
 
     void reset();
     void attachBus(IOPBus *bus);
+    void startExecution(IOPAddress entryPoint);
+    void stepInstruction();
 
     IOPAddressClassification classifyAddress(
       IOPAddress virtualAddress) const;
@@ -58,10 +110,18 @@ class IOPCore final
     IOPExecutionState executionState() const;
     IOPStopReason stopReason() const;
     IOPCycleCount elapsedCycles() const;
+    std::uint64_t retiredInstructions() const;
 
   private:
     friend struct IOPCoreTestAccess;
 
+    static IOPInstructionEffects instructionEffects(
+      const struct IOPDecodeResult &decoded);
+    static IOPInstructionEffects fetchFailureEffects(
+      const IOPMemoryReadResult &fetch);
+    void commitInstructionEffects(
+      IOPAddress instructionAddress,
+      const IOPInstructionEffects &effects);
     void setGeneralRegister(
       std::size_t index,
       IOPWord value);
@@ -88,6 +148,7 @@ class IOPCore final
     IOPExecutionState state = IOPExecutionState::Halted;
     IOPStopReason haltReason = IOPStopReason::None;
     IOPCycleCount cycles = 0;
+    std::uint64_t retiredInstructionTotal = 0;
 };
 
 #endif

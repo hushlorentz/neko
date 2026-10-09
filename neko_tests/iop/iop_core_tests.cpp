@@ -56,6 +56,8 @@ struct IOPCoreTestAccess
     core->state = IOPExecutionState::Running;
     core->haltReason = IOPStopReason::ExecutionException;
     core->cycles = UINT64_C(0x123456789abcdef0);
+    core->retiredInstructionTotal =
+      UINT64_C(0x0fedcba987654321);
   }
 
   static void setGeneralRegister(
@@ -83,6 +85,30 @@ struct IOPCoreTestAccess
     {
       core->cop0.status &= ~IOPCOP0Status::CURRENT_USER_MODE;
     }
+  }
+
+  static void commitInstructionEffects(
+    IOPCore *core,
+    IOPAddress instructionAddress,
+    const IOPInstructionEffects &effects)
+  {
+    core->commitInstructionEffects(
+      instructionAddress,
+      effects);
+  }
+
+  static void setPendingContinuations(IOPCore *core)
+  {
+    core->branch = {
+      true,
+      UINT32_C(0x100),
+      UINT32_C(0x200)
+    };
+    core->delayedResult = {
+      IOPDelayedResultSource::Load,
+      1,
+      UINT32_C(0x12345678)
+    };
   }
 };
 
@@ -127,6 +153,7 @@ TEST_CASE("IOP core reset establishes deterministic architectural state")
   REQUIRE(core.executionState() == IOPExecutionState::Halted);
   REQUIRE(core.stopReason() == IOPStopReason::None);
   REQUIRE(core.elapsedCycles() == 0);
+  REQUIRE(core.retiredInstructions() == 0);
 }
 
 TEST_CASE("IOP core inspection rejects an invalid register index")
@@ -369,4 +396,257 @@ TEST_CASE("IOP core rejects memory access without an attached bus")
   REQUIRE_THROWS_WITH(
     core.writeData8(0, 0),
     "IOP Core bus is not attached.");
+}
+
+TEST_CASE("IOP instruction boundary starts and retires canonical NOP",
+  "[iop][execution]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  const std::uint8_t nop[] = {0, 0, 0, 0};
+  REQUIRE(
+    bus.loadPhysical(0x100, nop, sizeof(nop)) ==
+    IOPBusStatus::Completed);
+
+  core.startExecution(0x80000100);
+  REQUIRE(core.executionState() == IOPExecutionState::Running);
+  REQUIRE(core.stopReason() == IOPStopReason::None);
+
+  core.stepInstruction();
+
+  REQUIRE(core.programCounter() == 0x80000104);
+  REQUIRE(core.executionState() == IOPExecutionState::Running);
+  REQUIRE(core.stopReason() == IOPStopReason::None);
+  REQUIRE(core.elapsedCycles() == 1);
+  REQUIRE(core.retiredInstructions() == 1);
+  REQUIRE(core.exception().kind == IOPException::None);
+}
+
+TEST_CASE("IOP instruction boundary rejects stepping while halted",
+  "[iop][execution]")
+{
+  IOPCore core;
+
+  REQUIRE_THROWS_WITH(
+    core.stepInstruction(),
+    "IOP Core cannot step while halted.");
+  REQUIRE(core.elapsedCycles() == 0);
+  REQUIRE(core.retiredInstructions() == 0);
+}
+
+TEST_CASE("IOP instruction boundary records fetch and decode failures",
+  "[iop][execution]")
+{
+  SECTION("Fetch failure")
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    core.startExecution(2);
+
+    core.stepInstruction();
+
+    REQUIRE(core.programCounter() == 2);
+    REQUIRE(core.executionState() == IOPExecutionState::Halted);
+    REQUIRE(core.stopReason() == IOPStopReason::FetchFailure);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.retiredInstructions() == 0);
+    REQUIRE(
+      core.exception().kind ==
+      IOPException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exception().badVirtualAddress == 2);
+  }
+
+  SECTION("Reserved instruction")
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const std::uint8_t reserved[] = {0, 0, 0, 0xfc};
+    REQUIRE(
+      bus.loadPhysical(0, reserved, sizeof(reserved)) ==
+      IOPBusStatus::Completed);
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.executionState() == IOPExecutionState::Halted);
+    REQUIRE(
+      core.stopReason() ==
+      IOPStopReason::ReservedInstruction);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.retiredInstructions() == 0);
+    REQUIRE(
+      core.exception().kind ==
+      IOPException::ReservedInstruction);
+  }
+}
+
+TEST_CASE("IOP instruction boundary does not retire unavailable semantics",
+  "[iop][execution]")
+{
+  const std::uint8_t unavailableInstructions[][4] = {
+    {0x21, 0x18, 0x22, 0x00},
+    {0, 0, 0, 0x44}
+  };
+  for (const auto &instruction : unavailableInstructions)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(
+      bus.loadPhysical(0, instruction, sizeof(instruction)) ==
+      IOPBusStatus::Completed);
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.executionState() == IOPExecutionState::Halted);
+    REQUIRE(core.stopReason() == IOPStopReason::ExecutionException);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.retiredInstructions() == 0);
+    REQUIRE(core.exception().kind == IOPException::None);
+  }
+}
+
+TEST_CASE("IOP effect commit owns architectural writes and fault suppression",
+  "[iop][execution]")
+{
+  IOPCore core;
+  core.startExecution(0x100);
+
+  IOPInstructionEffects effects;
+  effects.destination = {
+    IOPWriteEffect::Write,
+    0,
+    UINT32_C(0xffffffff)
+  };
+  effects.hi = {
+    IOPWriteEffect::Write,
+    UINT32_C(0x12345678)
+  };
+  effects.lo = {
+    IOPWriteEffect::Write,
+    UINT32_C(0x9abcdef0)
+  };
+  effects.controlFlow = {
+    IOPControlFlowEffect::Sequential,
+    0
+  };
+  effects.completion =
+    IOPInstructionCompletion::Retired;
+
+  IOPCoreTestAccess::commitInstructionEffects(
+    &core,
+    0x100,
+    effects);
+
+  REQUIRE(core.generalRegister(0) == 0);
+  REQUIRE(core.hi() == UINT32_C(0x12345678));
+  REQUIRE(core.lo() == UINT32_C(0x9abcdef0));
+  REQUIRE(core.programCounter() == 0x104);
+  REQUIRE(core.retiredInstructions() == 1);
+
+  effects.destination.destination = 1;
+  effects.destination.value = UINT32_C(0x87654321);
+  effects.hi.value = UINT32_C(0x11111111);
+  effects.lo.value = UINT32_C(0x22222222);
+  effects.exception = {
+    IOPException::ArithmeticOverflow,
+    UINT32_C(0x200),
+    false,
+    0
+  };
+  effects.stopReason = IOPStopReason::ExecutionException;
+
+  IOPCoreTestAccess::commitInstructionEffects(
+    &core,
+    0x104,
+    effects);
+
+  REQUIRE(core.generalRegister(1) == 0);
+  REQUIRE(core.hi() == UINT32_C(0x12345678));
+  REQUIRE(core.lo() == UINT32_C(0x9abcdef0));
+  REQUIRE(core.programCounter() == 0x104);
+  REQUIRE(core.retiredInstructions() == 1);
+  REQUIRE(core.elapsedCycles() == 2);
+  REQUIRE(
+    core.exception().kind ==
+    IOPException::ArithmeticOverflow);
+}
+
+TEST_CASE("IOP sequential commit wraps the 32-bit program counter",
+  "[iop][execution]")
+{
+  IOPCore core;
+  core.startExecution(UINT32_C(0xfffffffc));
+
+  IOPInstructionEffects effects;
+  effects.controlFlow.kind = IOPControlFlowEffect::Sequential;
+  effects.completion = IOPInstructionCompletion::Retired;
+  effects.stopReason = IOPStopReason::None;
+  IOPCoreTestAccess::commitInstructionEffects(
+    &core,
+    UINT32_C(0xfffffffc),
+    effects);
+
+  REQUIRE(core.programCounter() == 0);
+  REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP effect commit rejects incomplete retirement atomically",
+  "[iop][execution]")
+{
+  IOPCore core;
+  core.startExecution(0x100);
+
+  IOPInstructionEffects effects;
+  effects.destination = {
+    IOPWriteEffect::Write,
+    1,
+    UINT32_C(0x12345678)
+  };
+  effects.completion = IOPInstructionCompletion::Retired;
+  effects.stopReason = IOPStopReason::None;
+
+  REQUIRE_THROWS_WITH(
+    IOPCoreTestAccess::commitInstructionEffects(
+      &core,
+      0x100,
+      effects),
+    "Retired IOP instruction has no control-flow effect.");
+  REQUIRE(core.generalRegister(1) == 0);
+  REQUIRE(core.programCounter() == 0x100);
+  REQUIRE(core.elapsedCycles() == 0);
+  REQUIRE(core.retiredInstructions() == 0);
+}
+
+TEST_CASE("IOP instruction boundary rejects unimplemented continuations",
+  "[iop][execution]")
+{
+  IOPCore core;
+  core.startExecution(0x100);
+  IOPCoreTestAccess::setPendingContinuations(&core);
+
+  IOPInstructionEffects effects;
+  effects.controlFlow.kind = IOPControlFlowEffect::Sequential;
+  effects.completion = IOPInstructionCompletion::Retired;
+  effects.stopReason = IOPStopReason::None;
+
+  REQUIRE_THROWS_WITH(
+    IOPCoreTestAccess::commitInstructionEffects(
+      &core,
+      0x100,
+      effects),
+    "IOP continuation commit is not implemented.");
+  REQUIRE(core.programCounter() == 0x100);
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(
+    core.delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  REQUIRE(core.elapsedCycles() == 0);
+  REQUIRE(core.retiredInstructions() == 0);
 }

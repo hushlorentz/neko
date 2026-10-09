@@ -2119,7 +2119,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       supported/reserved/valid-but-deferred encoding audit. Pin every opcode,
       nested function field, and required-zero field before adding execution
       behavior.
-- [ ] Add one instruction-boundary fetch/decode/effect/commit path in
+- [x] Add one instruction-boundary fetch/decode/effect/commit path in
       `IOPCore`. Keep decode pure, represent destination/HI/LO/control-flow/
       exception effects explicitly, protect register zero at the final write
       gate, and advance PC, retired-instruction count, and functional cycle

@@ -1,8 +1,10 @@
 #include "iop_core.hpp"
 
+#include <limits>
 #include <stdexcept>
 
 #include "iop_bus.hpp"
+#include "iop_instruction.hpp"
 
 namespace
 {
@@ -51,11 +53,156 @@ void IOPCore::reset()
   state = IOPExecutionState::Halted;
   haltReason = IOPStopReason::None;
   cycles = 0;
+  retiredInstructionTotal = 0;
 }
 
 void IOPCore::attachBus(IOPBus *attached)
 {
   bus = attached;
+}
+
+void IOPCore::startExecution(IOPAddress entryPoint)
+{
+  pc = entryPoint;
+  branch = {};
+  delayedResult = {};
+  pendingException = {};
+  state = IOPExecutionState::Running;
+  haltReason = IOPStopReason::None;
+}
+
+void IOPCore::stepInstruction()
+{
+  if (state != IOPExecutionState::Running)
+  {
+    throw std::logic_error(
+      "IOP Core cannot step while halted.");
+  }
+
+  const IOPAddress instructionAddress = pc;
+  const IOPMemoryReadResult fetch = fetchInstruction();
+  if (fetch.outcome != IOPAccessOutcome::Completed)
+  {
+    commitInstructionEffects(
+      instructionAddress,
+      fetchFailureEffects(fetch));
+    return;
+  }
+
+  commitInstructionEffects(
+    instructionAddress,
+    instructionEffects(decodeIOPInstruction(fetch.value)));
+}
+
+IOPInstructionEffects IOPCore::instructionEffects(
+  const IOPDecodeResult &decoded)
+{
+  IOPInstructionEffects effects;
+  switch (decoded.disposition)
+  {
+    case IOPDecodeDisposition::Reserved:
+      effects.exception.kind = IOPException::ReservedInstruction;
+      effects.stopReason = IOPStopReason::ReservedInstruction;
+      return effects;
+    case IOPDecodeDisposition::ValidButDeferred:
+      return effects;
+    case IOPDecodeDisposition::Supported:
+      break;
+  }
+
+  if (decoded.instruction.operation == IOPOperation::Nop)
+  {
+    effects.controlFlow.kind =
+      IOPControlFlowEffect::Sequential;
+    effects.completion = IOPInstructionCompletion::Retired;
+    effects.stopReason = IOPStopReason::None;
+  }
+  return effects;
+}
+
+IOPInstructionEffects IOPCore::fetchFailureEffects(
+  const IOPMemoryReadResult &fetch)
+{
+  IOPInstructionEffects effects;
+  effects.exception.kind = fetch.exception;
+  effects.exception.badVirtualAddress = fetch.virtualAddress;
+  effects.stopReason = IOPStopReason::FetchFailure;
+  return effects;
+}
+
+void IOPCore::commitInstructionEffects(
+  IOPAddress instructionAddress,
+  const IOPInstructionEffects &effects)
+{
+  if (branch.active ||
+      delayedResult.source != IOPDelayedResultSource::None)
+  {
+    throw std::logic_error(
+      "IOP continuation commit is not implemented.");
+  }
+  if (effects.completion == IOPInstructionCompletion::Retired &&
+      effects.controlFlow.kind == IOPControlFlowEffect::Hold)
+  {
+    throw std::logic_error(
+      "Retired IOP instruction has no control-flow effect.");
+  }
+  if (cycles == std::numeric_limits<IOPCycleCount>::max())
+  {
+    throw std::overflow_error("IOP cycle count overflow.");
+  }
+  if (effects.completion == IOPInstructionCompletion::Retired &&
+      retiredInstructionTotal ==
+        std::numeric_limits<std::uint64_t>::max())
+  {
+    throw std::overflow_error(
+      "IOP retired instruction count overflow.");
+  }
+  ++cycles;
+
+  if (effects.exception.kind != IOPException::None)
+  {
+    pendingException = effects.exception;
+    state = IOPExecutionState::Halted;
+    haltReason = effects.stopReason;
+    return;
+  }
+  if (effects.completion == IOPInstructionCompletion::Halted)
+  {
+    state = IOPExecutionState::Halted;
+    haltReason = effects.stopReason;
+    return;
+  }
+
+  if (effects.destination.kind == IOPWriteEffect::Write)
+  {
+    setGeneralRegister(
+      effects.destination.destination,
+      effects.destination.value);
+  }
+  if (effects.hi.kind == IOPWriteEffect::Write)
+  {
+    hiRegister = effects.hi.value;
+  }
+  if (effects.lo.kind == IOPWriteEffect::Write)
+  {
+    loRegister = effects.lo.value;
+  }
+
+  switch (effects.controlFlow.kind)
+  {
+    case IOPControlFlowEffect::Sequential:
+      pc = instructionAddress + sizeof(IOPWord);
+      break;
+    case IOPControlFlowEffect::SetProgramCounter:
+      pc = effects.controlFlow.target;
+      break;
+    case IOPControlFlowEffect::Hold:
+      break;
+  }
+
+  ++retiredInstructionTotal;
+  state = IOPExecutionState::Running;
+  haltReason = IOPStopReason::None;
 }
 
 IOPAddressClassification IOPCore::classifyAddress(
@@ -375,4 +522,9 @@ IOPStopReason IOPCore::stopReason() const
 IOPCycleCount IOPCore::elapsedCycles() const
 {
   return cycles;
+}
+
+std::uint64_t IOPCore::retiredInstructions() const
+{
+  return retiredInstructionTotal;
 }
