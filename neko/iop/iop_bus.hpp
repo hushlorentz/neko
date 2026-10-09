@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "boot_rom.hpp"
 #include "iop_types.hpp"
 
 enum class IOPBusStatus : std::uint8_t
@@ -36,7 +37,7 @@ class IOPBus final
     static constexpr std::size_t RAM_SIZE = 2 * 1024 * 1024;
     static constexpr std::size_t RAM_MIRROR_COUNT = 4;
     static constexpr std::size_t SCRATCHPAD_SIZE = 1024;
-    static constexpr std::size_t ROM_SIZE = 4 * 1024 * 1024;
+    static constexpr std::size_t ROM_SIZE = BootROMImage::SIZE;
     static constexpr IOPAddress RAM_BASE = 0x00000000;
     static constexpr IOPAddress SCRATCHPAD_BASE = 0x1f800000;
     static constexpr IOPAddress ROM_BASE = 0x1fc00000;
@@ -46,9 +47,9 @@ class IOPBus final
     // Clears RAM and scratchpad; the installed ROM view is configuration.
     void reset();
 
-    // Accepts only a non-null image of exactly ROM_SIZE bytes.
+    // The shared image owns an immutable copy of its source bytes.
     bool installRom(
-      std::shared_ptr<const std::vector<std::uint8_t>> image);
+      std::shared_ptr<const BootROMImage> image);
 
     IOPBusReadResult read8(IOPAddress address) const;
     IOPBusReadResult read16(IOPAddress address) const;
@@ -96,7 +97,7 @@ class IOPBus final
 
     std::vector<std::uint8_t> ram;
     std::array<std::uint8_t, SCRATCHPAD_SIZE> scratchpad = {};
-    std::shared_ptr<const std::vector<std::uint8_t>> rom;
+    std::shared_ptr<const BootROMImage> rom;
 };
 
 #endif

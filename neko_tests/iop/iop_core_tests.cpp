@@ -293,9 +293,9 @@ TEST_CASE("IOP core data access preserves routes and selects typed failures")
   IOPCore core;
   core.attachBus(&bus);
   REQUIRE(bus.installRom(
-    std::make_shared<std::vector<std::uint8_t>>(
+    BootROMImage::create(std::vector<std::uint8_t>(
       IOPBus::ROM_SIZE,
-      static_cast<std::uint8_t>(0))));
+      static_cast<std::uint8_t>(0)))));
 
   const auto cachedStore =
     core.writeData32(0x80000200, UINT32_C(0x89abcdef));

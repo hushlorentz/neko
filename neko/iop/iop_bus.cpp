@@ -31,7 +31,7 @@ void IOPBus::reset()
 }
 
 bool IOPBus::installRom(
-  std::shared_ptr<const std::vector<std::uint8_t>> image)
+  std::shared_ptr<const BootROMImage> image)
 {
   if (image == nullptr || image->size() != ROM_SIZE)
   {

@@ -13,17 +13,17 @@ static_assert(
 
 namespace
 {
-  std::shared_ptr<const std::vector<std::uint8_t>> makeRom()
+  std::shared_ptr<const BootROMImage> makeRom()
   {
-    auto rom = std::make_shared<std::vector<std::uint8_t>>(
+    std::vector<std::uint8_t> bytes(
       IOPBus::ROM_SIZE,
       static_cast<std::uint8_t>(0));
-    (*rom)[0] = 0x78;
-    (*rom)[1] = 0x56;
-    (*rom)[2] = 0x34;
-    (*rom)[3] = 0x12;
-    rom->back() = 0xa5;
-    return rom;
+    bytes[0] = 0x78;
+    bytes[1] = 0x56;
+    bytes[2] = 0x34;
+    bytes[3] = 0x12;
+    bytes.back() = 0xa5;
+    return BootROMImage::create(bytes);
   }
 }
 
@@ -112,13 +112,31 @@ TEST_CASE("IOP bus ROM is unmapped until installed then read-only",
   REQUIRE((*rom)[0] == 0x78);
 }
 
+TEST_CASE("IOP bus ROM cannot change through a surviving mutable alias",
+  "[iop][bus]")
+{
+  IOPBus bus;
+  std::vector<std::uint8_t> mutableSource(
+    IOPBus::ROM_SIZE,
+    static_cast<std::uint8_t>(0));
+  mutableSource[0] = 0x12;
+  const auto installedRom = BootROMImage::create(mutableSource);
+
+  REQUIRE(bus.installRom(installedRom));
+  REQUIRE(bus.read8(IOPBus::ROM_BASE).value == 0x12);
+
+  mutableSource[0] = 0x34;
+
+  REQUIRE(bus.read8(IOPBus::ROM_BASE).value == 0x12);
+}
+
 TEST_CASE("IOP bus rejects malformed ROM images", "[iop][bus]")
 {
   IOPBus bus;
 
   REQUIRE_FALSE(bus.installRom(nullptr));
-  REQUIRE_FALSE(bus.installRom(
-    std::make_shared<std::vector<std::uint8_t>>(16)));
+  REQUIRE_FALSE(BootROMImage::create(
+    std::vector<std::uint8_t>(16)));
   REQUIRE(bus.read8(0x1fc00000).status == IOPBusStatus::Unmapped);
 }
 

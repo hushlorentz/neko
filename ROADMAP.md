@@ -2108,7 +2108,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       uncached, protection, alignment, and bus outcomes. Keep the core as the
       sole owner of precise exception selection and architectural commit; do
       not allocate cache contents or claim cache timing in this block.
-- [ ] Complete an independent review of IOP state ownership, reset invariants,
+- [x] Complete an independent review of IOP state ownership, reset invariants,
       virtual/physical dependency direction, physical range boundaries, and
       host-versus-guest memory access before decode builds on them.
 
