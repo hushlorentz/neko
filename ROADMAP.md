@@ -2124,7 +2124,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       exception effects explicitly, protect register zero at the final write
       gate, and advance PC, retired-instruction count, and functional cycle
       count in one owner. Do not add data-memory or privileged execution yet.
-- [ ] Implement NOP, logical, fixed and variable shift, comparison,
+- [x] Implement NOP, logical, fixed and variable shift, comparison,
       immediate, and upper-immediate integer operations with explicit 32-bit
       wrapping, five-bit variable shift amounts, correct immediate extension,
       and no host signed-overflow dependence.

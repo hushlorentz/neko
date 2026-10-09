@@ -8,6 +8,53 @@
 #include "iop_bus.hpp"
 #include "iop_core.hpp"
 
+namespace
+{
+  constexpr std::uint32_t registerInstruction(
+    std::uint8_t function,
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint8_t destination,
+    std::uint8_t shiftAmount = 0)
+  {
+    return
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      (static_cast<std::uint32_t>(destination) << 11) |
+      (static_cast<std::uint32_t>(shiftAmount) << 6) |
+      function;
+  }
+
+  constexpr std::uint32_t immediateInstruction(
+    std::uint8_t opcode,
+    std::uint8_t source,
+    std::uint8_t target,
+    std::uint16_t immediate)
+  {
+    return
+      (static_cast<std::uint32_t>(opcode) << 26) |
+      (static_cast<std::uint32_t>(source) << 21) |
+      (static_cast<std::uint32_t>(target) << 16) |
+      immediate;
+  }
+
+  void loadInstruction(
+    IOPBus *bus,
+    IOPAddress address,
+    std::uint32_t instruction)
+  {
+    const std::uint8_t bytes[] = {
+      static_cast<std::uint8_t>(instruction),
+      static_cast<std::uint8_t>(instruction >> 8),
+      static_cast<std::uint8_t>(instruction >> 16),
+      static_cast<std::uint8_t>(instruction >> 24)
+    };
+    REQUIRE(
+      bus->loadPhysical(address, bytes, sizeof(bytes)) ==
+      IOPBusStatus::Completed);
+  }
+}
+
 static_assert(
   std::is_final<IOPCore>::value,
   "IOP instruction execution must remain concrete and non-overridable.");
@@ -649,4 +696,213 @@ TEST_CASE("IOP instruction boundary rejects unimplemented continuations",
     IOPDelayedResultSource::Load);
   REQUIRE(core.elapsedCycles() == 0);
   REQUIRE(core.retiredInstructions() == 0);
+}
+
+TEST_CASE("IOP executes fixed and variable logical shifts",
+  "[iop][execution][integer]")
+{
+  struct ShiftCase
+  {
+    std::uint32_t instruction;
+    IOPWord source;
+    IOPWord shift;
+    IOPWord expected;
+  };
+  const ShiftCase cases[] = {
+    {
+      registerInstruction(0x00, 0, 1, 3, 4),
+      UINT32_C(0x12345678),
+      0,
+      UINT32_C(0x23456780)
+    },
+    {
+      registerInstruction(0x02, 0, 1, 3, 4),
+      UINT32_C(0x92345678),
+      0,
+      UINT32_C(0x09234567)
+    },
+    {
+      registerInstruction(0x03, 0, 1, 3, 4),
+      UINT32_C(0x92345678),
+      0,
+      UINT32_C(0xf9234567)
+    },
+    {
+      registerInstruction(0x04, 2, 1, 3),
+      UINT32_C(0x12345678),
+      36,
+      UINT32_C(0x23456780)
+    },
+    {
+      registerInstruction(0x06, 2, 1, 3),
+      UINT32_C(0x92345678),
+      36,
+      UINT32_C(0x09234567)
+    },
+    {
+      registerInstruction(0x07, 2, 1, 3),
+      UINT32_C(0x92345678),
+      36,
+      UINT32_C(0xf9234567)
+    },
+    {
+      registerInstruction(0x03, 0, 1, 3, 0),
+      UINT32_C(0x80000000),
+      0,
+      UINT32_C(0x80000000)
+    },
+    {
+      registerInstruction(0x00, 0, 1, 3, 31),
+      1,
+      0,
+      UINT32_C(0x80000000)
+    },
+    {
+      registerInstruction(0x02, 0, 1, 3, 31),
+      UINT32_C(0x80000000),
+      0,
+      1
+    },
+    {
+      registerInstruction(0x03, 0, 1, 3, 31),
+      UINT32_C(0x80000000),
+      0,
+      UINT32_C(0xffffffff)
+    }
+  };
+
+  for (const ShiftCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.shift);
+    loadInstruction(&bus, 0, test.instruction);
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.generalRegister(3) == test.expected);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.retiredInstructions() == 1);
+  }
+}
+
+TEST_CASE("IOP executes register logical and comparison operations",
+  "[iop][execution][integer]")
+{
+  struct RegisterCase
+  {
+    std::uint8_t function;
+    IOPWord source;
+    IOPWord target;
+    IOPWord expected;
+  };
+  const RegisterCase cases[] = {
+    {0x24, UINT32_C(0xff00ff00), UINT32_C(0x0f0f0f0f),
+      UINT32_C(0x0f000f00)},
+    {0x25, UINT32_C(0xff00ff00), UINT32_C(0x0f0f0f0f),
+      UINT32_C(0xff0fff0f)},
+    {0x26, UINT32_C(0xff00ff00), UINT32_C(0x0f0f0f0f),
+      UINT32_C(0xf00ff00f)},
+    {0x27, UINT32_C(0xff00ff00), UINT32_C(0x0f0f0f0f),
+      UINT32_C(0x00f000f0)},
+    {0x2a, UINT32_C(0xffffffff), 0, 1},
+    {0x2a, UINT32_C(0x80000000), UINT32_C(0x7fffffff), 1},
+    {0x2a, UINT32_C(0x7fffffff), UINT32_C(0x80000000), 0},
+    {0x2b, UINT32_C(0xffffffff), 0, 0},
+    {0x2b, 0, UINT32_C(0xffffffff), 1}
+  };
+
+  for (const RegisterCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.target);
+    loadInstruction(
+      &bus,
+      0,
+      registerInstruction(test.function, 1, 2, 3));
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.generalRegister(3) == test.expected);
+    REQUIRE(core.retiredInstructions() == 1);
+  }
+}
+
+TEST_CASE("IOP executes logical comparison and upper immediates",
+  "[iop][execution][integer]")
+{
+  struct ImmediateCase
+  {
+    std::uint8_t opcode;
+    IOPWord source;
+    std::uint16_t immediate;
+    IOPWord expected;
+  };
+  const ImmediateCase cases[] = {
+    {0x0a, 0, UINT16_C(0xffff), 0},
+    {0x0a, UINT32_C(0xffffffff), 1, 1},
+    {0x0b, 0, UINT16_C(0xffff), 1},
+    {0x0b, UINT32_C(0xffffffff), UINT16_C(0xffff), 0},
+    {0x0c, UINT32_C(0xffff00ff), UINT16_C(0x0ff0),
+      UINT32_C(0x000000f0)},
+    {0x0d, UINT32_C(0xffff0000), UINT16_C(0x00ff),
+      UINT32_C(0xffff00ff)},
+    {0x0e, UINT32_C(0xffff0000), UINT16_C(0xffff),
+      UINT32_C(0xffffffff)},
+    {0x0f, UINT32_C(0xffffffff), UINT16_C(0x89ab),
+      UINT32_C(0x89ab0000)}
+  };
+
+  for (const ImmediateCase &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.source);
+    const std::uint8_t sourceRegister =
+      test.opcode == 0x0f ? 0 : 1;
+    loadInstruction(
+      &bus,
+      0,
+      immediateInstruction(
+        test.opcode,
+        sourceRegister,
+        3,
+        test.immediate));
+    core.startExecution(0);
+
+    core.stepInstruction();
+
+    REQUIRE(core.generalRegister(3) == test.expected);
+    REQUIRE(core.retiredInstructions() == 1);
+  }
+}
+
+TEST_CASE("IOP integer results cannot modify general register zero",
+  "[iop][execution][integer]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(
+    &core,
+    1,
+    UINT32_C(0xffffffff));
+  loadInstruction(
+    &bus,
+    0,
+    immediateInstruction(0x0e, 1, 0, UINT16_C(0xffff)));
+  core.startExecution(0);
+
+  core.stepInstruction();
+
+  REQUIRE(core.generalRegister(0) == 0);
+  REQUIRE(core.retiredInstructions() == 1);
 }

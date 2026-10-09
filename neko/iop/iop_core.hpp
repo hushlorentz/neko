@@ -115,8 +115,8 @@ class IOPCore final
   private:
     friend struct IOPCoreTestAccess;
 
-    static IOPInstructionEffects instructionEffects(
-      const struct IOPDecodeResult &decoded);
+    IOPInstructionEffects instructionEffects(
+      const struct IOPDecodeResult &decoded) const;
     static IOPInstructionEffects fetchFailureEffects(
       const IOPMemoryReadResult &fetch);
     void commitInstructionEffects(

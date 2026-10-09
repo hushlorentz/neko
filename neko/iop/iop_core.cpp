@@ -28,6 +28,59 @@ namespace
     }
     throw std::logic_error("Unknown IOP bus status.");
   }
+
+  IOPWord signExtendedImmediate(std::uint16_t immediate)
+  {
+    const IOPWord value = immediate;
+    return (value & UINT32_C(0x00008000)) != 0
+      ? value | UINT32_C(0xffff0000)
+      : value;
+  }
+
+  bool signedLessThan(IOPWord left, IOPWord right)
+  {
+    constexpr IOPWord SIGN_BIT = UINT32_C(0x80000000);
+    return (left ^ SIGN_BIT) < (right ^ SIGN_BIT);
+  }
+
+  IOPWord arithmeticShiftRight(IOPWord value, std::uint8_t amount)
+  {
+    const std::uint8_t shift = amount & 0x1f;
+    if (shift == 0)
+    {
+      return value;
+    }
+
+    const IOPWord shifted = value >> shift;
+    if ((value & UINT32_C(0x80000000)) == 0)
+    {
+      return shifted;
+    }
+    return shifted |
+      (UINT32_MAX << (32 - shift));
+  }
+
+  IOPInstructionEffects retiredEffects()
+  {
+    IOPInstructionEffects effects;
+    effects.controlFlow.kind = IOPControlFlowEffect::Sequential;
+    effects.completion = IOPInstructionCompletion::Retired;
+    effects.stopReason = IOPStopReason::None;
+    return effects;
+  }
+
+  IOPInstructionEffects destinationEffects(
+    std::uint8_t destination,
+    IOPWord value)
+  {
+    IOPInstructionEffects effects = retiredEffects();
+    effects.destination = {
+      IOPWriteEffect::Write,
+      destination,
+      value
+    };
+    return effects;
+  }
 }
 
 IOPCore::IOPCore()
@@ -95,29 +148,115 @@ void IOPCore::stepInstruction()
 }
 
 IOPInstructionEffects IOPCore::instructionEffects(
-  const IOPDecodeResult &decoded)
+  const IOPDecodeResult &decoded) const
 {
-  IOPInstructionEffects effects;
   switch (decoded.disposition)
   {
     case IOPDecodeDisposition::Reserved:
+    {
+      IOPInstructionEffects effects;
       effects.exception.kind = IOPException::ReservedInstruction;
       effects.stopReason = IOPStopReason::ReservedInstruction;
       return effects;
+    }
     case IOPDecodeDisposition::ValidButDeferred:
-      return effects;
+      return {};
     case IOPDecodeDisposition::Supported:
       break;
   }
 
-  if (decoded.instruction.operation == IOPOperation::Nop)
+  const IOPInstruction &instruction = decoded.instruction;
+  const IOPWord source =
+    generalRegister(instruction.sourceRegister);
+  const IOPWord target =
+    generalRegister(instruction.targetRegister);
+  switch (instruction.operation)
   {
-    effects.controlFlow.kind =
-      IOPControlFlowEffect::Sequential;
-    effects.completion = IOPInstructionCompletion::Retired;
-    effects.stopReason = IOPStopReason::None;
+    case IOPOperation::Nop:
+      return retiredEffects();
+    case IOPOperation::ShiftLeftLogical:
+      return destinationEffects(
+        instruction.destinationRegister,
+        target << instruction.shiftAmount);
+    case IOPOperation::ShiftRightLogical:
+      return destinationEffects(
+        instruction.destinationRegister,
+        target >> instruction.shiftAmount);
+    case IOPOperation::ShiftRightArithmetic:
+      return destinationEffects(
+        instruction.destinationRegister,
+        arithmeticShiftRight(target, instruction.shiftAmount));
+    case IOPOperation::ShiftLeftLogicalVariable:
+      return destinationEffects(
+        instruction.destinationRegister,
+        target << (source & 0x1f));
+    case IOPOperation::ShiftRightLogicalVariable:
+      return destinationEffects(
+        instruction.destinationRegister,
+        target >> (source & 0x1f));
+    case IOPOperation::ShiftRightArithmeticVariable:
+      return destinationEffects(
+        instruction.destinationRegister,
+        arithmeticShiftRight(
+          target,
+          static_cast<std::uint8_t>(source)));
+    case IOPOperation::And:
+      return destinationEffects(
+        instruction.destinationRegister,
+        source & target);
+    case IOPOperation::Or:
+      return destinationEffects(
+        instruction.destinationRegister,
+        source | target);
+    case IOPOperation::Xor:
+      return destinationEffects(
+        instruction.destinationRegister,
+        source ^ target);
+    case IOPOperation::Nor:
+      return destinationEffects(
+        instruction.destinationRegister,
+        ~(source | target));
+    case IOPOperation::SetLessThan:
+      return destinationEffects(
+        instruction.destinationRegister,
+        signedLessThan(source, target) ? 1 : 0);
+    case IOPOperation::SetLessThanUnsigned:
+      return destinationEffects(
+        instruction.destinationRegister,
+        source < target ? 1 : 0);
+    case IOPOperation::SetLessThanImmediate:
+      return destinationEffects(
+        instruction.targetRegister,
+        signedLessThan(
+          source,
+          signExtendedImmediate(instruction.immediate))
+          ? 1
+          : 0);
+    case IOPOperation::SetLessThanImmediateUnsigned:
+      return destinationEffects(
+        instruction.targetRegister,
+        source < signExtendedImmediate(instruction.immediate)
+          ? 1
+          : 0);
+    case IOPOperation::AndImmediate:
+      return destinationEffects(
+        instruction.targetRegister,
+        source & instruction.immediate);
+    case IOPOperation::OrImmediate:
+      return destinationEffects(
+        instruction.targetRegister,
+        source | instruction.immediate);
+    case IOPOperation::XorImmediate:
+      return destinationEffects(
+        instruction.targetRegister,
+        source ^ instruction.immediate);
+    case IOPOperation::LoadUpperImmediate:
+      return destinationEffects(
+        instruction.targetRegister,
+        static_cast<IOPWord>(instruction.immediate) << 16);
+    default:
+      return {};
   }
-  return effects;
 }
 
 IOPInstructionEffects IOPCore::fetchFailureEffects(
