@@ -785,6 +785,9 @@ IOPInstructionEffects IOPCore::instructionEffects(
       return destinationEffects(
         instruction.targetRegister,
         static_cast<IOPWord>(instruction.immediate) << 16);
+    case IOPOperation::MoveFromCOP0:
+    case IOPOperation::MoveToCOP0:
+      return cop0TransferEffects(instruction, target);
     case IOPOperation::LoadByte:
     case IOPOperation::LoadByteUnsigned:
     case IOPOperation::LoadHalfword:
@@ -891,6 +894,89 @@ IOPInstructionEffects IOPCore::wordMergeLoadEffects(
   return delayedLoadEffects(instruction.targetRegister, value);
 }
 
+IOPInstructionEffects IOPCore::cop0TransferEffects(
+  const IOPInstruction &instruction,
+  IOPWord target) const
+{
+  if ((cop0.status & IOPCOP0Status::CURRENT_USER_MODE) != 0 &&
+      (cop0.status & IOPCOP0Status::COP0_USABLE) == 0)
+  {
+    IOPInstructionEffects effects;
+    effects.exception.kind = IOPException::CoprocessorUnusable;
+    return effects;
+  }
+
+  IOPWord value = 0;
+  IOPCOP0WriteTarget writeTarget = IOPCOP0WriteTarget::None;
+  switch (instruction.destinationRegister)
+  {
+    case 8:
+      value = cop0.badVirtualAddress;
+      break;
+    case 12:
+      value = (cop0.status & IOPCOP0Status::READ_MASK) |
+        IOPCOP0Status::TLB_SHUTDOWN;
+      writeTarget = IOPCOP0WriteTarget::Status;
+      break;
+    case 13:
+      value = cop0.cause & IOPCOP0Cause::READ_MASK;
+      writeTarget = IOPCOP0WriteTarget::Cause;
+      break;
+    case 14:
+      value = cop0.exceptionProgramCounter;
+      writeTarget = IOPCOP0WriteTarget::ExceptionProgramCounter;
+      break;
+    case 15:
+      value = IOPCOP0::PROCESSOR_REVISION;
+      break;
+    default:
+      return reservedInstructionEffects();
+  }
+
+  IOPInstructionEffects effects = retiredEffects();
+  if (instruction.operation == IOPOperation::MoveFromCOP0)
+  {
+    if (instruction.targetRegister != 0)
+    {
+      effects.delayedResult = {
+        IOPDelayedResultSource::COP0Transfer,
+        instruction.targetRegister,
+        value
+      };
+    }
+  }
+  else
+  {
+    effects.cop0Write = {writeTarget, target};
+  }
+  return effects;
+}
+
+void IOPCore::commitCOP0Write(const IOPCOP0WriteRequest &request)
+{
+  switch (request.target)
+  {
+    case IOPCOP0WriteTarget::None:
+      break;
+    case IOPCOP0WriteTarget::Status:
+      cop0.status =
+        (request.value & IOPCOP0Status::WRITE_MASK) |
+        (cop0.status & IOPCOP0Status::CACHE_PROBE_RESULT) |
+        (cop0.status & ~request.value & IOPCOP0Status::PARITY_ERROR) |
+        IOPCOP0Status::TLB_SHUTDOWN;
+      break;
+    case IOPCOP0WriteTarget::Cause:
+      cop0.cause =
+        (cop0.cause & IOPCOP0Cause::READ_MASK &
+          ~IOPCOP0Cause::SOFTWARE_INTERRUPT_PENDING) |
+        (request.value & IOPCOP0Cause::SOFTWARE_INTERRUPT_PENDING);
+      break;
+    case IOPCOP0WriteTarget::ExceptionProgramCounter:
+      cop0.exceptionProgramCounter = request.value;
+      break;
+  }
+}
+
 void IOPCore::commitInstructionEffects(
   IOPAddress instructionAddress,
   const IOPInstructionEffects &effects)
@@ -974,6 +1060,7 @@ void IOPCore::commitInstructionEffects(
       effects.destination.destination,
       effects.destination.value);
   }
+  commitCOP0Write(effects.cop0Write);
   delayedResult = effects.delayedResult;
   if (effects.hi.kind == IOPWriteEffect::Write)
   {

@@ -49,6 +49,16 @@ namespace
       (target & UINT32_C(0x03ffffff));
   }
 
+  constexpr std::uint32_t cop0TransferInstruction(
+    std::uint8_t selector,
+    std::uint8_t target,
+    std::uint8_t cop0Register)
+  {
+    return immediateInstruction(
+      0x10, selector, target,
+      static_cast<std::uint16_t>(cop0Register) << 11);
+  }
+
   void loadInstruction(
     IOPBus *bus,
     IOPAddress address,
@@ -213,7 +223,441 @@ struct IOPCoreTestAccess
       UINT32_C(0x12345678)
     };
   }
+
+  static void setCOP0State(IOPCore *core, const IOPCOP0State &value)
+  {
+    core->cop0 = value;
+  }
 };
+
+TEST_CASE("IOP MFC0 reads only the approved common register fields with a delay",
+  "[iop][execution][cop0]")
+{
+  struct ReadCase
+  {
+    std::uint8_t index;
+    IOPWord expected;
+  };
+  for (const ReadCase test : {
+         ReadCase{8, 0x12345679},
+         ReadCase{12, 0xf27fff3f},
+         ReadCase{13, 0xb000ff7c},
+         ReadCase{14, 0x89abcdef},
+         ReadCase{15, 0x1f}})
+  {
+    INFO("COP0 register " << static_cast<unsigned>(test.index));
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(
+      &core, {0x12345679, UINT32_MAX, UINT32_MAX, 0x89abcdef});
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+    loadInstruction(&bus, 0, cop0TransferInstruction(0, 2, test.index));
+    loadInstruction(&bus, 4, registerInstruction(0x21, 2, 0, 3));
+    loadInstruction(&bus, 8, registerInstruction(0x21, 2, 0, 4));
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.generalRegister(2) == 0xaabbccdd);
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::COP0Transfer);
+    REQUIRE(core.delayedResultContinuation().destination == 2);
+    REQUIRE(core.delayedResultContinuation().value == test.expected);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(3) == 0xaabbccdd);
+    REQUIRE(core.generalRegister(2) == test.expected);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(4) == test.expected);
+  }
+}
+
+TEST_CASE("IOP MTC0 status preserves fixed and read only bits and clears parity on one",
+  "[iop][execution][cop0]")
+{
+  for (unsigned bit = 0; bit < 34; ++bit)
+  {
+    const IOPWord value = bit < 32
+      ? IOPWord(1) << bit
+      : (bit == 32 ? UINT32_MAX : 0);
+    for (const IOPWord previous : {IOPWord(0x00380000), IOPWord(0xf27fff3f)})
+    {
+      INFO("write " << value << " over " << previous);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setCOP0State(&core, {0, previous, 0, 0});
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
+      loadInstruction(&bus, 0, cop0TransferInstruction(4, 2, 12));
+      core.startExecution(0);
+      core.stepInstruction();
+      const IOPWord expected =
+        (value & 0xf247ff3f) |
+        (previous & 0x00080000) |
+        (previous & ~value & 0x00100000) |
+        0x00200000;
+      REQUIRE(core.status() == expected);
+      REQUIRE(core.retiredInstructions() == 1);
+      REQUIRE(core.exception().kind == IOPException::None);
+    }
+  }
+}
+
+TEST_CASE("IOP MTC0 cause changes only software pending interrupts",
+  "[iop][execution][cop0]")
+{
+  for (unsigned bit = 0; bit < 34; ++bit)
+  {
+    const IOPWord value = bit < 32
+      ? IOPWord(1) << bit
+      : (bit == 32 ? UINT32_MAX : 0);
+    for (const IOPWord previous : {IOPWord(0), IOPWord(0xb000ff7c)})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setCOP0State(&core, {0, 0x00600000, previous, 0});
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
+      loadInstruction(&bus, 0, cop0TransferInstruction(4, 2, 13));
+      core.startExecution(0);
+      core.stepInstruction();
+      REQUIRE(core.cause() == ((previous & ~IOPWord(0x300)) | (value & 0x300)));
+      REQUIRE(core.retiredInstructions() == 1);
+    }
+  }
+}
+
+TEST_CASE("IOP MTC0 EPC accepts all bits while BadVAddr and PRId ignore writes",
+  "[iop][execution][cop0]")
+{
+  for (const std::uint8_t index : {8, 14, 15})
+  {
+    for (const IOPWord value : {IOPWord(0), IOPWord(0x89abcdef), UINT32_MAX})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setCOP0State(&core, {0x12345679, 0x00600000, 0, 0x10203041});
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
+      loadInstruction(&bus, 0, cop0TransferInstruction(4, 2, index));
+      core.startExecution(0);
+      core.stepInstruction();
+      REQUIRE(core.retiredInstructions() == 1);
+      REQUIRE(core.badVirtualAddress() == 0x12345679);
+      REQUIRE(core.processorRevision() == 0x1f);
+      REQUIRE(core.exceptionProgramCounter() == (index == 14 ? value : 0x10203041));
+    }
+  }
+}
+
+TEST_CASE("IOP COP0 transfers require CU0 only in user mode",
+  "[iop][execution][cop0]")
+{
+  for (const bool user : {false, true})
+  {
+    for (const bool usable : {false, true})
+    {
+      for (const std::uint8_t selector : {0, 4})
+      {
+        for (const std::uint8_t index : {8, 12, 13, 14, 15, 7})
+        {
+          IOPBus bus;
+          IOPCore core;
+          core.attachBus(&bus);
+          const IOPWord status = 0x00600000 |
+            (user ? 2 : 0) | (usable ? 0x10000000 : 0);
+          IOPCoreTestAccess::setCOP0State(&core, {0, status, 0, 0});
+          IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x12345678);
+          loadInstruction(&bus, 0, cop0TransferInstruction(selector, 2, index));
+          core.startExecution(0);
+          core.stepInstruction();
+          const IOPException expected = user && !usable
+            ? IOPException::CoprocessorUnusable
+            : (index == 7 ? IOPException::ReservedInstruction : IOPException::None);
+          REQUIRE(core.exception().kind == expected);
+          REQUIRE(core.exception().coprocessor == 0);
+          REQUIRE(core.retiredInstructions() == (expected == IOPException::None ? 1 : 0));
+          if (expected != IOPException::None)
+          {
+            REQUIRE(core.status() == status);
+            REQUIRE(core.generalRegister(2) == 0x12345678);
+            REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP unsupported COP0 register transfers raise RI even with register zero",
+  "[iop][execution][cop0]")
+{
+  for (std::uint8_t index = 0; index < 32; ++index)
+  {
+    if (index == 8 || index == 12 || index == 13 || index == 14 || index == 15)
+    {
+      continue;
+    }
+    for (const std::uint8_t selector : {0, 4})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      loadInstruction(&bus, 0, cop0TransferInstruction(selector, 0, index));
+      core.startExecution(0);
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::ReservedInstruction);
+      REQUIRE(core.stopReason() == IOPStopReason::ReservedInstruction);
+      REQUIRE(core.programCounter() == 0);
+      REQUIRE(core.retiredInstructions() == 0);
+    }
+  }
+}
+
+TEST_CASE("IOP MTC0 captures the old GPR before a preceding delayed load writes back",
+  "[iop][execution][cop0]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0x89abcdef).status == IOPBusStatus::Completed);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x12345679);
+  loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
+  loadInstruction(&bus, 4, cop0TransferInstruction(4, 2, 14));
+  loadInstruction(&bus, 8, cop0TransferInstruction(0, 3, 14));
+  loadInstruction(&bus, 12, 0);
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.exceptionProgramCounter() == 0x12345679);
+  REQUIRE(core.generalRegister(2) == 0x89abcdef);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(3) == 0x12345679);
+}
+
+TEST_CASE("IOP MFC0 zero and overlapping destinations follow delayed result ordering",
+  "[iop][execution][cop0]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  loadInstruction(&bus, 0, cop0TransferInstruction(0, 0, 15));
+  loadInstruction(&bus, 4, cop0TransferInstruction(0, 2, 15));
+  loadInstruction(&bus, 8, immediateInstruction(0x09, 0, 2, 7));
+  loadInstruction(&bus, 12, cop0TransferInstruction(0, 2, 15));
+  loadInstruction(&bus, 16, cop0TransferInstruction(0, 2, 12));
+  loadInstruction(&bus, 20, 0);
+  core.startExecution(0);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(0) == 0);
+  REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 7);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0x1f);
+  REQUIRE(core.delayedResultContinuation().value == 0x00600000);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0x00600000);
+}
+
+TEST_CASE("IOP MFC0 survives host pause and completes before a younger fault",
+  "[iop][execution][cop0]")
+{
+  for (const bool fetchFault : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPAddress start = fetchFault ? 0x007ffffc : 0;
+    loadInstruction(&bus, start, cop0TransferInstruction(0, 2, 15));
+    if (!fetchFault)
+    {
+      loadInstruction(&bus, 4, UINT32_MAX);
+    }
+    core.startExecution(start);
+    core.stepInstruction();
+    core.haltExecution();
+    core.resumeExecution();
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::COP0Transfer);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0x1f);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind ==
+      (fetchFault ? IOPException::InstructionBusError : IOPException::ReservedInstruction));
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+  }
+}
+
+TEST_CASE("IOP COP0 transfers retire normally in branch delay slots",
+  "[iop][execution][cop0]")
+{
+  for (const std::uint8_t selector : {0, 4})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x12345679);
+    loadInstruction(&bus, 0, immediateInstruction(4, 0, 0, 3));
+    loadInstruction(&bus, 4, cop0TransferInstruction(selector, 2, selector == 0 ? 15 : 14));
+    loadInstruction(&bus, 16, registerInstruction(0x21, 2, 0, 3));
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.programCounter() == 16);
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.retiredInstructions() == 2);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(3) == 0x12345679);
+    REQUIRE(core.generalRegister(2) == (selector == 0 ? 0x1f : 0x12345679));
+    REQUIRE(core.exceptionProgramCounter() == (selector == 4 ? 0x12345679 : 0));
+  }
+}
+
+TEST_CASE("IOP MTC0 status privilege changes apply at the next instruction boundary",
+  "[iop][execution][cop0]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x00600002);
+  loadInstruction(&bus, 0, cop0TransferInstruction(4, 2, 12));
+  loadInstruction(&bus, 4, cop0TransferInstruction(0, 3, 15));
+  core.startExecution(0);
+  core.stepInstruction();
+  REQUIRE(core.status() == 0x00600002);
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::CoprocessorUnusable);
+  REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP COP0 effect construction is pure and exception commit suppresses writes",
+  "[iop][execution][cop0]")
+{
+  IOPCore core;
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+  const IOPInstructionEffects read = IOPCoreTestAccess::instructionEffects(
+    core, cop0TransferInstruction(0, 2, 15));
+  REQUIRE(read.delayedResult.source == IOPDelayedResultSource::COP0Transfer);
+  REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+  IOPInstructionEffects write = IOPCoreTestAccess::instructionEffects(
+    core, cop0TransferInstruction(4, 2, 14));
+  REQUIRE(write.completion == IOPInstructionCompletion::Retired);
+  REQUIRE(core.exceptionProgramCounter() == 0);
+  write.exception.kind = IOPException::CoprocessorUnusable;
+  IOPCoreTestAccess::commitInstructionEffects(&core, 0, write);
+  REQUIRE(core.exceptionProgramCounter() == 0);
+  REQUIRE(core.retiredInstructions() == 0);
+}
+
+TEST_CASE("IOP MFC0 captures CP0 before a following MTC0 and does not forward address operands",
+  "[iop][execution][cop0]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x00600000, 0, 0x200});
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x100);
+  IOPCoreTestAccess::setGeneralRegister(&core, 3, 0x300);
+  REQUIRE(bus.write32(0x100, 0x12345678).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x200, 0x89abcdef).status == IOPBusStatus::Completed);
+  loadInstruction(&bus, 0, cop0TransferInstruction(0, 2, 14));
+  loadInstruction(&bus, 4, immediateInstruction(0x23, 2, 4, 0));
+  loadInstruction(&bus, 8, cop0TransferInstruction(0, 5, 14));
+  loadInstruction(&bus, 12, cop0TransferInstruction(4, 3, 14));
+  loadInstruction(&bus, 16, cop0TransferInstruction(0, 6, 14));
+  loadInstruction(&bus, 20, 0);
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0x200);
+  REQUIRE(core.delayedResultContinuation().value == 0x12345678);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(4) == 0x12345678);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(5) == 0x200);
+  REQUIRE(core.exceptionProgramCounter() == 0x300);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(6) == 0x300);
+}
+
+TEST_CASE("IOP denied COP0 transfer in a delay slot preserves branch provenance",
+  "[iop][execution][cop0]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x12345678);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x00600002, 0, 0});
+  loadInstruction(&bus, 0, immediateInstruction(4, 0, 0, 3));
+  loadInstruction(&bus, 4, cop0TransferInstruction(4, 2, 14));
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::CoprocessorUnusable);
+  REQUIRE(core.exception().inBranchDelaySlot);
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.branchContinuation().instructionAddress == 0);
+  REQUIRE(core.branchContinuation().targetAddress == 16);
+  REQUIRE(core.exceptionProgramCounter() == 0);
+  REQUIRE(core.generalRegister(2) == 0x12345678);
+  REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+  REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP MTC0 register zero and user transition affect the following fetch",
+  "[iop][execution][cop0]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 2);
+  loadInstruction(&bus, 0, cop0TransferInstruction(4, 0, 12));
+  loadInstruction(&bus, 4, cop0TransferInstruction(4, 0, 14));
+  loadInstruction(&bus, 8, cop0TransferInstruction(4, 2, 12));
+  core.startExecution(0x80000000);
+  core.stepInstruction();
+  REQUIRE(core.status() == 0x00200000);
+  core.stepInstruction();
+  REQUIRE(core.exceptionProgramCounter() == 0);
+  core.stepInstruction();
+  REQUIRE(core.status() == 0x00200002);
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::AddressErrorLoadOrFetch);
+  REQUIRE(core.exception().badVirtualAddress == 0x8000000c);
+  REQUIRE(core.retiredInstructions() == 3);
+}
+
+TEST_CASE("IOP reset and explicit restart discard pending MFC0 results",
+  "[iop][execution][cop0]")
+{
+  for (const bool reset : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    loadInstruction(&bus, 0, cop0TransferInstruction(0, 2, 15));
+    loadInstruction(&bus, 4, 0);
+    core.startExecution(0);
+    core.stepInstruction();
+    if (reset)
+    {
+      core.reset();
+    }
+    core.startExecution(4);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    REQUIRE(core.status() == 0x00600000);
+    REQUIRE(core.cause() == 0);
+    REQUIRE(core.badVirtualAddress() == 0);
+    REQUIRE(core.exceptionProgramCounter() == 0);
+    REQUIRE(core.processorRevision() == 0x1f);
+  }
+}
 
 TEST_CASE("IOP core reset establishes deterministic architectural state")
 {

@@ -75,6 +75,20 @@ struct IOPStoreRequest
   std::uint8_t byteEnable = 0;
 };
 
+enum class IOPCOP0WriteTarget : std::uint8_t
+{
+  None,
+  Status,
+  Cause,
+  ExceptionProgramCounter
+};
+
+struct IOPCOP0WriteRequest
+{
+  IOPCOP0WriteTarget target = IOPCOP0WriteTarget::None;
+  IOPWord value = 0;
+};
+
 struct IOPInstructionEffects
 {
   IOPDestinationEffect destination;
@@ -84,6 +98,7 @@ struct IOPInstructionEffects
   IOPControlFlowRequest controlFlow;
   IOPDelayedResultContinuation delayedResult;
   IOPStoreRequest store;
+  IOPCOP0WriteRequest cop0Write;
   IOPPendingException exception;
   IOPInstructionCompletion completion =
     IOPInstructionCompletion::Halted;
@@ -171,6 +186,10 @@ class IOPCore final
       const struct IOPInstruction &instruction,
       IOPWord base,
       IOPWord target) const;
+    IOPInstructionEffects cop0TransferEffects(
+      const struct IOPInstruction &instruction,
+      IOPWord target) const;
+    void commitCOP0Write(const IOPCOP0WriteRequest &request);
     void commitInstructionEffects(
       IOPAddress instructionAddress,
       const IOPInstructionEffects &effects);

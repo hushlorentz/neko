@@ -153,12 +153,27 @@ namespace IOPCOP0
 
 namespace IOPCOP0Status
 {
+  constexpr IOPWord COP0_USABLE =
+    UINT32_C(1) << 28;
   constexpr IOPWord CURRENT_USER_MODE =
     UINT32_C(1) << 1;
+  constexpr IOPWord CACHE_PROBE_RESULT =
+    UINT32_C(1) << 19;
+  constexpr IOPWord PARITY_ERROR =
+    UINT32_C(1) << 20;
   constexpr IOPWord TLB_SHUTDOWN =
     UINT32_C(1) << 21;
   constexpr IOPWord BOOT_EXCEPTION_VECTORS =
     UINT32_C(1) << 22;
+  constexpr IOPWord READ_MASK = UINT32_C(0xf27fff3f);
+  constexpr IOPWord WRITE_MASK = UINT32_C(0xf247ff3f);
+}
+
+namespace IOPCOP0Cause
+{
+  constexpr IOPWord READ_MASK = UINT32_C(0xb000ff7c);
+  constexpr IOPWord SOFTWARE_INTERRUPT_PENDING =
+    UINT32_C(0x00000300);
 }
 
 namespace IOPReset

@@ -2161,7 +2161,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
 - [x] Implement little-endian `LWL`/`LWR` and `SWL`/`SWR` merges. Pin every
       byte offset, paired-load bypass, overlapping destinations, partial-store
       access boundaries, and fault atomicity.
-- [ ] Implement the approved IOP COP0 register set, writable masks, fixed bits,
+- [x] Implement the approved IOP COP0 register set, writable masks, fixed bits,
       reset values, transfer instructions, and privilege behavior without
       inheriting EE-specific register semantics.
 - [ ] Implement precise synchronous exception entry for Address Error,
