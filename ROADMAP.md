@@ -2172,8 +2172,15 @@ unresolved hardware questions are maintained in `PROJECT.md`.
 - [x] Implement the approved return-from-exception operation and interrupt
       enable stack semantics, including nested exception behavior and
       instruction-boundary interrupt delivery.
-- [ ] Complete focused exception-priority, reset/restart, host-resume, and
+- [x] Complete focused exception-priority, reset/restart, host-resume, and
       independent correctness review before adding platform interrupts.
+
+Authored IOP guests can now combine aligned and unaligned memory access,
+delayed loads and COP0 transfers, precise exception handlers, and `JR`/`RFE`
+return. Typed CPU interrupt inputs are ready for later platform integration.
+The core remains the sole exception/retirement owner, while the physical bus
+retains storage and byte-enabled write ownership. Functional caches, INTC,
+timers, and persistence/trace integration remain separate blocks.
 
 ### IOP Guest-Visible Cache Foundation
 

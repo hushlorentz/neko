@@ -297,6 +297,44 @@ TEST_CASE("IOP program runner allows JR RFE return without an artificial stop",
   REQUIRE(result.exception.kind == IOPException::None);
 }
 
+TEST_CASE("IOP fresh runner invocations discard prior faults rejected stores and input levels",
+  "[iop][runner][conformance]")
+{
+  for (const bool store : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    loadInstruction(&bus, 0, immediateInstruction(0x0f, 0, 1, 0xa080));
+    loadInstruction(&bus, 4, immediateInstruction(store ? 0x2b : 0x23, 1, 0, 0));
+    IOPProgramRunConfig config;
+    config.maxMasterCycles = 16;
+    const auto first = runIOPProgram(&core, config);
+    REQUIRE(first.outcome == (store ? IOPProgramOutcome::Stopped : IOPProgramOutcome::Exception));
+    REQUIRE(first.instructions == 1);
+    REQUIRE(first.iopCycles == 2);
+    core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+    loadInstruction(&bus, 0, 0);
+    loadInstruction(&bus, 4, registerInstruction(8, 31, 0, 0));
+    loadInstruction(&bus, 8, 0);
+    config.maxMasterCycles = 24;
+    const auto second = runIOPProgram(&core, config);
+    REQUIRE(second.outcome == IOPProgramOutcome::Completed);
+    REQUIRE(second.instructions == 3);
+    REQUIRE(second.iopCycles == 3);
+    REQUIRE(second.masterCycles == 24);
+    REQUIRE(second.programCounter == config.returnAddress);
+    REQUIRE(second.stopReason == IOPStopReason::HostHalt);
+    REQUIRE(second.exception.kind == IOPException::None);
+    REQUIRE(second.storeFailure.width == IOPStoreWidth::None);
+    REQUIRE(core.cause() == 0);
+    REQUIRE(core.exceptionProgramCounter() == 0);
+    REQUIRE(core.generalRegister(1) == 0);
+    REQUIRE(first.exception.kind == (store ? IOPException::None : IOPException::DataBusError));
+    REQUIRE(first.storeFailure.width == (store ? IOPStoreWidth::Word : IOPStoreWidth::None));
+  }
+}
+
 TEST_CASE("IOP program runner rejects a missing core",
   "[iop][runner]")
 {

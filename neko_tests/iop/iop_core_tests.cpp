@@ -1423,6 +1423,220 @@ TEST_CASE("IOP syscall handler returns through delayed EPC read JR and RFE",
   REQUIRE(core.elapsedCycles() == 7);
 }
 
+TEST_CASE("IOP masked pending interrupts preserve address fault priority over physical rejection",
+  "[iop][execution][conformance]")
+{
+  for (const bool globallyEnabled : {false, true})
+  {
+    for (const bool user : {false, true})
+    {
+      for (const std::uint8_t opcode : {0x21, 0x25, 0x23, 0x29, 0x2b})
+      {
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        const IOPAddress address = user ? 0x80800001 : 0x00800001;
+        const IOPWord originalStatus = 0x00200000 | (user ? 2 : 0) |
+          (globallyEnabled ? 1 : 0x500);
+        IOPCoreTestAccess::setCOP0State(
+          &core, {0x12345679, originalStatus, 0x100, 0x300});
+        core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+        IOPCoreTestAccess::setGeneralRegister(&core, 1, address);
+        IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+        loadInstruction(&bus, 0x100, immediateInstruction(opcode, 1, 2, 0));
+        core.startExecution(0x100);
+        const bool store = opcode == 0x29 || opcode == 0x2b;
+        const IOPAccessOutcome expectedOutcome = user
+          ? IOPAccessOutcome::ProtectionFailure
+          : IOPAccessOutcome::Misaligned;
+        if (store)
+        {
+          REQUIRE(core.writeData32(address, 0).outcome == expectedOutcome);
+        }
+        else
+        {
+          REQUIRE(core.readData32(address).outcome == expectedOutcome);
+        }
+        core.stepInstruction();
+        REQUIRE(core.exception().kind == (store
+          ? IOPException::AddressErrorStore : IOPException::AddressErrorLoadOrFetch));
+        REQUIRE(core.exception().badVirtualAddress == address);
+        REQUIRE(core.badVirtualAddress() == address);
+        REQUIRE(core.cause() == (store ? 0x514 : 0x510));
+        REQUIRE(core.exceptionProgramCounter() == 0x100);
+        REQUIRE(core.generalRegister(2) == 0xaabbccdd);
+        REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
+        REQUIRE(core.retiredInstructions() == 0);
+        REQUIRE(core.elapsedCycles() == 1);
+      }
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setCOP0State(
+        &core, {0, 0x00200000 | (user ? 2u : 0) |
+          (globallyEnabled ? 1u : 0x500), 0x100, 0});
+      core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+      const IOPAddress entry = user ? 0x80800002 : 0x00800002;
+      core.startExecution(entry);
+      REQUIRE(core.fetchInstruction().outcome == (user
+        ? IOPAccessOutcome::ProtectionFailure : IOPAccessOutcome::Misaligned));
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::AddressErrorLoadOrFetch);
+      REQUIRE(core.badVirtualAddress() == entry);
+      REQUIRE(core.exceptionProgramCounter() == entry);
+      REQUIRE(core.cause() == 0x510);
+    }
+  }
+}
+
+TEST_CASE("IOP interrupts arriving during host pauses preserve pending work until resume",
+  "[iop][execution][conformance]")
+{
+  for (const IOPOperation operation : {
+         IOPOperation::LoadWord, IOPOperation::MoveFromCOP0, IOPOperation::BranchEqual})
+  {
+    for (const bool deassert : {false, true})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0x200, 0x12345678).status == IOPBusStatus::Completed);
+      IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200401, 0, 0x300});
+      const bool branch = operation == IOPOperation::BranchEqual;
+      loadInstruction(&bus, 0x100, branch
+        ? immediateInstruction(4, 0, 0, 7)
+        : operation == IOPOperation::LoadWord
+          ? immediateInstruction(0x23, 0, 2, 0x200)
+          : cop0TransferInstruction(0, 2, 15));
+      loadInstruction(&bus, 0x104, immediateInstruction(9, 0, 3, 7));
+      core.startExecution(0x100);
+      core.stepInstruction();
+      core.haltExecution();
+      core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+      if (deassert)
+      {
+        core.setInterruptInput(IOPInterruptInput::Hardware0, false);
+      }
+      REQUIRE_THROWS_AS(core.stepInstruction(), std::logic_error);
+      REQUIRE(core.elapsedCycles() == 1);
+      REQUIRE(core.retiredInstructions() == 1);
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.exceptionProgramCounter() == 0x300);
+      REQUIRE(core.generalRegister(2) == 0);
+      REQUIRE(core.branchContinuation().active == branch);
+      REQUIRE((core.delayedResultContinuation().source != IOPDelayedResultSource::None) ==
+        !branch);
+      core.resumeExecution();
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.programCounter() == 0x104);
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == (deassert ? IOPException::None : IOPException::Interrupt));
+      REQUIRE(core.generalRegister(2) == (branch ? 0
+        : operation == IOPOperation::LoadWord ? 0x12345678 : 0x1f));
+      REQUIRE(core.generalRegister(3) == (deassert ? 7 : 0));
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+      REQUIRE_FALSE(core.branchContinuation().active);
+      REQUIRE(core.retiredInstructions() == (deassert ? 2 : 1));
+      REQUIRE(core.elapsedCycles() == 2);
+      REQUIRE(core.programCounter() == (deassert
+        ? (branch ? 0x120 : 0x108) : 0x80000080));
+      if (!deassert)
+      {
+        REQUIRE(core.exception().inBranchDelaySlot == branch);
+        REQUIRE(core.exceptionProgramCounter() == (branch ? 0x100 : 0x104));
+        REQUIRE(core.cause() == (branch ? 0x80000400 : 0x400));
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP restart reset and fresh preparation clear actual exception entry events",
+  "[iop][execution][conformance]")
+{
+  enum class Restart
+  {
+    Execution,
+    Reset,
+    Fresh
+  };
+  for (const IOPException exception : {
+         IOPException::AddressErrorLoadOrFetch, IOPException::CoprocessorUnusable,
+         IOPException::SystemCall, IOPException::Interrupt})
+  {
+    for (const Restart restart : {Restart::Execution, Restart::Reset, Restart::Fresh})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setCOP0State(&core, {0x12345679, 0x00200403, 0, 0x300});
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, 3);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      loadInstruction(&bus, 0x100, immediateInstruction(4, 0, 0, 7));
+      loadInstruction(&bus, 0x104,
+        exception == IOPException::AddressErrorLoadOrFetch
+          ? immediateInstruction(0x23, 1, 2, 0)
+          : exception == IOPException::CoprocessorUnusable ? 0x48000000 : 0x0000000c);
+      loadInstruction(&bus, 0x200, 0);
+      core.startExecution(0x100);
+      core.stepInstruction();
+      if (exception == IOPException::Interrupt)
+      {
+        core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+      }
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == exception);
+      REQUIRE(core.exception().inBranchDelaySlot);
+      core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+      const IOPWord savedStatus = core.status();
+      const IOPWord savedCause = core.cause();
+      const IOPAddress savedAddress = core.badVirtualAddress();
+      switch (restart)
+      {
+        case Restart::Execution:
+          core.startExecution(0x200);
+          break;
+        case Restart::Reset:
+          core.reset();
+          REQUIRE(core.programCounter() == IOPReset::VECTOR);
+          break;
+        case Restart::Fresh:
+          core.prepareFreshExecution(0x200, 0x1230, 0x4560);
+          REQUIRE(core.programCounter() == 0x200);
+          REQUIRE(core.generalRegister(29) == 0x1230);
+          REQUIRE(core.generalRegister(31) == 0x4560);
+          break;
+      }
+      REQUIRE(core.hasAttachedBus());
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.exception().badVirtualAddress == 0);
+      REQUIRE_FALSE(core.exception().inBranchDelaySlot);
+      REQUIRE(core.exception().coprocessor == 0);
+      REQUIRE_FALSE(core.branchContinuation().active);
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+      REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
+      const bool preservesState = restart == Restart::Execution;
+      REQUIRE(core.status() == (preservesState ? savedStatus : 0x00600000));
+      REQUIRE(core.cause() == (preservesState ? savedCause : 0));
+      REQUIRE(core.badVirtualAddress() == (preservesState ? savedAddress : 0));
+      REQUIRE(core.exceptionProgramCounter() == (preservesState ? 0x100 : 0));
+      REQUIRE(core.generalRegister(2) == (preservesState ? 0xaabbccdd : 0));
+      REQUIRE(core.elapsedCycles() == (preservesState ? 2 : 0));
+      REQUIRE(core.retiredInstructions() == (preservesState ? 1 : 0));
+      REQUIRE(core.stopReason() == IOPStopReason::None);
+      REQUIRE(core.executionState() ==
+        (preservesState ? IOPExecutionState::Running : IOPExecutionState::Halted));
+      if (!preservesState)
+      {
+        core.startExecution(0x200);
+      }
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.programCounter() == 0x204);
+      REQUIRE(bus.read32(0x100).value == immediateInstruction(4, 0, 0, 7));
+    }
+  }
+}
+
 TEST_CASE("IOP core reset establishes deterministic architectural state")
 {
   IOPCore core;
