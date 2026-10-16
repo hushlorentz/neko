@@ -104,6 +104,7 @@ struct IOPStoreFailure
   IOPStoreWidth width = IOPStoreWidth::None;
   IOPWord value = 0;
   IOPMemoryWriteResult access;
+  std::uint8_t mergeByteEnable = 0;
 };
 
 enum class IOPDelayedResultSource : std::uint8_t

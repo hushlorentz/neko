@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <stdexcept>
 #include <utility>
 
 namespace
@@ -189,6 +190,41 @@ IOPBusWriteResult IOPBus::write16(IOPAddress address, std::uint16_t value)
 IOPBusWriteResult IOPBus::write32(IOPAddress address, IOPWord value)
 {
   return writeScalar(address, 4, value);
+}
+
+IOPBusWriteResult IOPBus::writeMasked32(
+  IOPAddress address,
+  IOPWord value,
+  std::uint8_t byteEnable)
+{
+  if (byteEnable == 0 || (byteEnable & 0xf0) != 0)
+  {
+    throw std::invalid_argument(
+      "IOP word write requires a nonzero four-bit byte enable.");
+  }
+  if (!isAligned(address, sizeof(IOPWord)))
+  {
+    return {IOPBusStatus::Misaligned};
+  }
+  const Location location = locate(address, sizeof(IOPWord));
+  if (location.region == Region::Unmapped)
+  {
+    return {IOPBusStatus::Unmapped};
+  }
+  if (location.region == Region::Rom)
+  {
+    return {IOPBusStatus::ReadOnly};
+  }
+
+  std::uint8_t *bytes = writableBytes(location);
+  for (std::uint8_t lane = 0; lane < sizeof(IOPWord); ++lane)
+  {
+    if ((byteEnable & (1 << lane)) != 0)
+    {
+      bytes[lane] = static_cast<std::uint8_t>(value >> (8 * lane));
+    }
+  }
+  return {IOPBusStatus::Completed};
 }
 
 IOPBusStatus IOPBus::loadPhysical(

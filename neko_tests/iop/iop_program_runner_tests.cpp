@@ -279,3 +279,28 @@ TEST_CASE("IOP program runner reports rejected stores without a guest exception"
   REQUIRE(result.storeFailure.access.cacheRoute == IOPCacheRoute::Uncached);
   REQUIRE(result.storeFailure.access.exception == IOPException::None);
 }
+
+TEST_CASE("IOP program runner preserves merge store byte enables",
+  "[iop][runner][merge]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  loadInstruction(&bus, 0, immediateInstruction(0x0f, 0, 1, 0xbfc0));
+  loadInstruction(&bus, 4, immediateInstruction(0x0f, 0, 2, 0xaabb));
+  loadInstruction(&bus, 8, immediateInstruction(0x0d, 2, 2, 0xccdd));
+  loadInstruction(&bus, 12, immediateInstruction(0x2a, 1, 2, 1));
+  IOPProgramRunConfig config;
+  config.maxMasterCycles = 40;
+  const auto result = runIOPProgram(&core, config);
+  REQUIRE(result.outcome == IOPProgramOutcome::Stopped);
+  REQUIRE(result.exception.kind == IOPException::None);
+  REQUIRE(result.stopReason == IOPStopReason::StoreFailure);
+  REQUIRE(result.instructions == 3);
+  REQUIRE(result.programCounter == 12);
+  REQUIRE(result.storeFailure.width == IOPStoreWidth::Word);
+  REQUIRE(result.storeFailure.value == 0xaabb);
+  REQUIRE(result.storeFailure.mergeByteEnable == 3);
+  REQUIRE(result.storeFailure.access.virtualAddress == 0xbfc00001);
+  REQUIRE(result.storeFailure.access.physicalAddress == 0x1fc00001);
+}

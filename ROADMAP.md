@@ -2158,7 +2158,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       `IOPBus` requests. Preserve store order and pin the approved write-buffer
       abstraction and bus-failure policy without inventing precise EE-style
       store bus errors.
-- [ ] Implement little-endian `LWL`/`LWR` and `SWL`/`SWR` merges. Pin every
+- [x] Implement little-endian `LWL`/`LWR` and `SWL`/`SWR` merges. Pin every
       byte offset, paired-load bypass, overlapping destinations, partial-store
       access boundaries, and fault atomicity.
 - [ ] Implement the approved IOP COP0 register set, writable masks, fixed bits,

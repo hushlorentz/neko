@@ -164,6 +164,22 @@ namespace
     return effects;
   }
 
+  IOPInstructionEffects delayedLoadEffects(
+    std::uint8_t destination,
+    IOPWord value)
+  {
+    IOPInstructionEffects effects = retiredEffects();
+    if (destination != 0)
+    {
+      effects.delayedResult = {
+        IOPDelayedResultSource::Load,
+        destination,
+        value
+      };
+    }
+    return effects;
+  }
+
   IOPInstructionEffects arithmeticOverflowEffects()
   {
     IOPInstructionEffects effects;
@@ -194,21 +210,64 @@ namespace
     switch (instruction.operation)
     {
       case IOPOperation::StoreByte:
-        effects.store.width = IOPStoreWidth::Byte;
+        effects.store.operation = IOPStoreOperation::Byte;
         effects.store.value = value & 0xff;
         break;
       case IOPOperation::StoreHalfword:
-        effects.store.width = IOPStoreWidth::Halfword;
+        effects.store.operation = IOPStoreOperation::Halfword;
         effects.store.value = value & 0xffff;
         break;
       case IOPOperation::StoreWord:
-        effects.store.width = IOPStoreWidth::Word;
+        effects.store.operation = IOPStoreOperation::Word;
         effects.store.value = value;
         break;
       default:
         throw std::logic_error("Unsupported IOP aligned store.");
     }
     return effects;
+  }
+
+  IOPInstructionEffects wordMergeStoreEffects(
+    const IOPInstruction &instruction,
+    IOPWord base,
+    IOPWord value)
+  {
+    IOPInstructionEffects effects = retiredEffects();
+    effects.store.operation = IOPStoreOperation::MaskedWord;
+    effects.store.virtualAddress =
+      base + signExtendedImmediate(instruction.immediate);
+    const std::uint8_t offset = effects.store.virtualAddress & 3;
+    switch (instruction.operation)
+    {
+      case IOPOperation::StoreWordLeft:
+        effects.store.value = value >> (8 * (3 - offset));
+        effects.store.byteEnable = 0xf >> (3 - offset);
+        break;
+      case IOPOperation::StoreWordRight:
+        effects.store.value = value << (8 * offset);
+        effects.store.byteEnable = (0xf << offset) & 0xf;
+        break;
+      default:
+        throw std::logic_error("Unsupported IOP word merge store.");
+    }
+    return effects;
+  }
+
+  IOPStoreWidth storeAccessWidth(IOPStoreOperation operation)
+  {
+    switch (operation)
+    {
+      case IOPStoreOperation::None:
+        return IOPStoreWidth::None;
+      case IOPStoreOperation::Byte:
+        return IOPStoreWidth::Byte;
+      case IOPStoreOperation::Halfword:
+        return IOPStoreWidth::Halfword;
+      case IOPStoreOperation::Word:
+      case IOPStoreOperation::MaskedWord:
+        return IOPStoreWidth::Word;
+    }
+    throw std::logic_error("Unsupported IOP store operation.");
   }
 
   IOPInstructionEffects reservedInstructionEffects()
@@ -732,10 +791,16 @@ IOPInstructionEffects IOPCore::instructionEffects(
     case IOPOperation::LoadHalfwordUnsigned:
     case IOPOperation::LoadWord:
       return alignedLoadEffects(instruction, source);
+    case IOPOperation::LoadWordLeft:
+    case IOPOperation::LoadWordRight:
+      return wordMergeLoadEffects(instruction, source, target);
     case IOPOperation::StoreByte:
     case IOPOperation::StoreHalfword:
     case IOPOperation::StoreWord:
       return alignedStoreEffects(instruction, source, target);
+    case IOPOperation::StoreWordLeft:
+    case IOPOperation::StoreWordRight:
+      return wordMergeStoreEffects(instruction, source, target);
     default:
       return {};
   }
@@ -781,16 +846,49 @@ IOPInstructionEffects IOPCore::alignedLoadEffects(
     value = signExtendedImmediate(
       static_cast<std::uint16_t>(value));
   }
-  IOPInstructionEffects effects = retiredEffects();
-  if (instruction.targetRegister != 0)
+  return delayedLoadEffects(instruction.targetRegister, value);
+}
+
+IOPInstructionEffects IOPCore::wordMergeLoadEffects(
+  const IOPInstruction &instruction,
+  IOPWord base,
+  IOPWord target) const
+{
+  const IOPAddress address =
+    base + signExtendedImmediate(instruction.immediate);
+  IOPMemoryReadResult read = readData32(address & ~IOPAddress(3));
+  if (read.outcome != IOPAccessOutcome::Completed)
   {
-    effects.delayedResult = {
-      IOPDelayedResultSource::Load,
-      instruction.targetRegister,
-      value
-    };
+    read.virtualAddress = address;
+    return memoryReadFailureEffects(read, IOPStopReason::ExecutionException);
   }
-  return effects;
+  if (delayedResult.source == IOPDelayedResultSource::Load &&
+      delayedResult.destination == instruction.targetRegister)
+  {
+    target = delayedResult.value;
+  }
+  const std::uint8_t offset = address & 3;
+  IOPWord value = 0;
+  switch (instruction.operation)
+  {
+    case IOPOperation::LoadWordLeft:
+    {
+      const std::uint8_t shift = 8 * (3 - offset);
+      const IOPWord mask = UINT32_MAX << shift;
+      value = (target & ~mask) | (read.value << shift);
+      break;
+    }
+    case IOPOperation::LoadWordRight:
+    {
+      const std::uint8_t shift = 8 * offset;
+      const IOPWord mask = UINT32_MAX >> shift;
+      value = (target & ~mask) | (read.value >> shift);
+      break;
+    }
+    default:
+      throw std::logic_error("Unsupported IOP word merge load.");
+  }
+  return delayedLoadEffects(instruction.targetRegister, value);
 }
 
 void IOPCore::commitInstructionEffects(
@@ -820,7 +918,7 @@ void IOPCore::commitInstructionEffects(
   IOPPendingException selectedException = effects.exception;
   if (effects.completion == IOPInstructionCompletion::Retired &&
       selectedException.kind == IOPException::None &&
-      effects.store.width != IOPStoreWidth::None)
+      effects.store.operation != IOPStoreOperation::None)
   {
     const IOPMemoryWriteResult write = writeStore(effects.store);
     if (write.exception != IOPException::None)
@@ -831,9 +929,10 @@ void IOPCore::commitInstructionEffects(
     else if (write.outcome != IOPAccessOutcome::Completed)
     {
       rejectedStore = {
-        effects.store.width,
+        storeAccessWidth(effects.store.operation),
         effects.store.value,
-        write
+        write,
+        effects.store.byteEnable
       };
       state = IOPExecutionState::Halted;
       haltReason = IOPStopReason::StoreFailure;
@@ -857,7 +956,7 @@ void IOPCore::commitInstructionEffects(
     pendingException = selectedException;
     pendingException.inBranchDelaySlot = inBranchDelaySlot;
     state = IOPExecutionState::Halted;
-    haltReason = effects.store.width != IOPStoreWidth::None
+    haltReason = effects.store.operation != IOPStoreOperation::None
       ? IOPStopReason::ExecutionException
       : effects.stopReason;
     return;
@@ -1051,22 +1150,47 @@ IOPMemoryWriteResult IOPCore::writeData32(
 IOPMemoryWriteResult IOPCore::writeStore(
   const IOPStoreRequest &request)
 {
-  switch (request.width)
+  switch (request.operation)
   {
-    case IOPStoreWidth::Byte:
+    case IOPStoreOperation::Byte:
       return writeData8(
         request.virtualAddress,
         static_cast<std::uint8_t>(request.value));
-    case IOPStoreWidth::Halfword:
+    case IOPStoreOperation::Halfword:
       return writeData16(
         request.virtualAddress,
         static_cast<std::uint16_t>(request.value));
-    case IOPStoreWidth::Word:
+    case IOPStoreOperation::Word:
       return writeData32(request.virtualAddress, request.value);
-    case IOPStoreWidth::None:
+    case IOPStoreOperation::MaskedWord:
+      return writeMaskedStore(request);
+    case IOPStoreOperation::None:
       break;
   }
   throw std::logic_error("Unsupported IOP store width.");
+}
+
+IOPMemoryWriteResult IOPCore::writeMaskedStore(
+  const IOPStoreRequest &request)
+{
+  const IOPAddressClassification classification =
+    classifyAddress(request.virtualAddress);
+  IOPMemoryWriteResult result;
+  result.virtualAddress = request.virtualAddress;
+  result.physicalAddress = classification.physicalAddress;
+  result.cacheRoute = classification.cacheRoute;
+  if (classification.outcome == IOPAddressOutcome::ProtectionFailure)
+  {
+    result.outcome = IOPAccessOutcome::ProtectionFailure;
+    result.exception = IOPException::AddressErrorStore;
+    return result;
+  }
+  const IOPBusWriteResult write = attachedBus().writeMasked32(
+    classification.physicalAddress & ~IOPAddress(3),
+    request.value,
+    request.byteEnable);
+  result.outcome = accessOutcome(write.status);
+  return result;
 }
 
 IOPBus &IOPCore::attachedBus() const

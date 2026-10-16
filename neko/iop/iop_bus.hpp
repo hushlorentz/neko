@@ -57,6 +57,10 @@ class IOPBus final
     IOPBusWriteResult write8(IOPAddress address, std::uint8_t value);
     IOPBusWriteResult write16(IOPAddress address, std::uint16_t value);
     IOPBusWriteResult write32(IOPAddress address, IOPWord value);
+    IOPBusWriteResult writeMasked32(
+      IOPAddress address,
+      IOPWord value,
+      std::uint8_t byteEnable);
 
     // Host-only physical access. A range must lie wholly inside one RAM
     // alias, the scratchpad, or (inspection only) the installed ROM.

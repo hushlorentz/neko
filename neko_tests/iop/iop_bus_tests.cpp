@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -191,4 +192,47 @@ TEST_CASE("IOP bus reset clears storage and preserves ROM", "[iop][bus]")
   REQUIRE(bus.read32(0x40).value == 0);
   REQUIRE(bus.read32(0x1f800010).value == 0);
   REQUIRE(bus.read32(0x1fc00000).value == UINT32_C(0x12345678));
+}
+
+TEST_CASE("IOP bus masked word writes touch only enabled byte lanes",
+  "[iop][bus][merge]")
+{
+  IOPBus bus;
+  const IOPAddress addresses[] = {0x100, 0x200100, 0x7ffffc, 0x1f8003fc};
+  const std::uint8_t before[] = {0x11, 0x22, 0x33, 0x44};
+  const std::uint8_t after[] = {0xdd, 0xcc, 0xbb, 0xaa};
+  for (const auto address : addresses)
+  {
+    for (std::uint8_t mask = 1; mask < 16; ++mask)
+    {
+      REQUIRE(bus.write32(address, 0x44332211).status == IOPBusStatus::Completed);
+      REQUIRE(bus.writeMasked32(address, 0xaabbccdd, mask).status ==
+        IOPBusStatus::Completed);
+      for (std::uint8_t lane = 0; lane < 4; ++lane)
+      {
+        REQUIRE(bus.read8(address + lane).value ==
+          ((mask & (1 << lane)) != 0 ? after[lane] : before[lane]));
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP bus masked writes validate before mutating storage",
+  "[iop][bus][merge]")
+{
+  IOPBus bus;
+  REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+  for (const std::uint8_t mask : {std::uint8_t(0), std::uint8_t(0x10), std::uint8_t(0xff)})
+  {
+    REQUIRE_THROWS_AS(bus.writeMasked32(0x100, 0, mask), std::invalid_argument);
+  }
+  REQUIRE(bus.writeMasked32(0x101, 0, 1).status == IOPBusStatus::Misaligned);
+  REQUIRE(bus.writeMasked32(0x800000, 0, 0xf).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.writeMasked32(0x1f800400, 0, 1).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.writeMasked32(0xfffffffc, 0, 0xf).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.writeMasked32(IOPBus::ROM_BASE, 0, 1).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.installRom(makeRom()));
+  REQUIRE(bus.writeMasked32(IOPBus::ROM_BASE, 0, 0xf).status == IOPBusStatus::ReadOnly);
+  REQUIRE(bus.read32(IOPBus::ROM_BASE).value == 0x12345678);
+  REQUIRE(bus.read32(0x100).value == 0x44332211);
 }

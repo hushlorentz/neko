@@ -58,11 +58,21 @@ struct IOPControlFlowRequest
   IOPAddress target = 0;
 };
 
+enum class IOPStoreOperation : std::uint8_t
+{
+  None,
+  Byte,
+  Halfword,
+  Word,
+  MaskedWord
+};
+
 struct IOPStoreRequest
 {
-  IOPStoreWidth width = IOPStoreWidth::None;
+  IOPStoreOperation operation = IOPStoreOperation::None;
   IOPAddress virtualAddress = 0;
   IOPWord value = 0;
+  std::uint8_t byteEnable = 0;
 };
 
 struct IOPInstructionEffects
@@ -157,6 +167,10 @@ class IOPCore final
     IOPInstructionEffects alignedLoadEffects(
       const struct IOPInstruction &instruction,
       IOPWord base) const;
+    IOPInstructionEffects wordMergeLoadEffects(
+      const struct IOPInstruction &instruction,
+      IOPWord base,
+      IOPWord target) const;
     void commitInstructionEffects(
       IOPAddress instructionAddress,
       const IOPInstructionEffects &effects);
@@ -173,6 +187,8 @@ class IOPCore final
       std::size_t width,
       IOPWord value);
     IOPMemoryWriteResult writeStore(
+      const IOPStoreRequest &request);
+    IOPMemoryWriteResult writeMaskedStore(
       const IOPStoreRequest &request);
 
     IOPBus *bus = nullptr;

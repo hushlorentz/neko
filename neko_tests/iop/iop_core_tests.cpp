@@ -121,6 +121,7 @@ struct IOPCoreTestAccess
       UINT32_C(0x1fc00000),
       IOPCacheRoute::Uncached
     };
+    core->rejectedStore.mergeByteEnable = 7;
     core->state = IOPExecutionState::Running;
     core->haltReason = IOPStopReason::ExecutionException;
     core->cycles = UINT64_C(0x123456789abcdef0);
@@ -254,6 +255,7 @@ TEST_CASE("IOP core reset establishes deterministic architectural state")
   REQUIRE(core.exception().coprocessor == 0);
   REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
   REQUIRE(core.storeFailure().value == 0);
+  REQUIRE(core.storeFailure().mergeByteEnable == 0);
   REQUIRE(core.storeFailure().access.virtualAddress == 0);
   REQUIRE(core.storeFailure().access.physicalAddress == 0);
   REQUIRE(core.storeFailure().access.cacheRoute == IOPCacheRoute::None);
@@ -2563,7 +2565,7 @@ TEST_CASE("IOP store effects do not mutate memory before commit admission",
   IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x12345678);
   const auto effects = IOPCoreTestAccess::instructionEffects(
     core, immediateInstruction(0x2b, 0, 1, 0x100));
-  REQUIRE(effects.store.width == IOPStoreWidth::Word);
+  REQUIRE(effects.store.operation == IOPStoreOperation::Word);
   REQUIRE(effects.store.virtualAddress == 0x100);
   REQUIRE(effects.store.value == 0x12345678);
   REQUIRE(bus.read32(0x100).value == 0);
@@ -2773,5 +2775,528 @@ TEST_CASE("IOP counter overflow rejects store commit before memory mutation",
     REQUIRE(core.programCounter() == 0);
     REQUIRE(core.elapsedCycles() == cycles);
     REQUIRE(core.retiredInstructions() == instructions);
+  }
+}
+
+TEST_CASE("IOP merge loads select little endian byte lanes and delay writeback",
+  "[iop][execution][merge]")
+{
+  const IOPWord left[] = {
+    0x11bbccdd, 0x2211ccdd, 0x332211dd, 0x44332211
+  };
+  const IOPWord right[] = {
+    0x44332211, 0xaa443322, 0xaabb4433, 0xaabbcc44
+  };
+  for (const std::uint8_t opcode : {std::uint8_t(0x22), std::uint8_t(0x26)})
+  {
+    for (std::uint16_t offset = 0; offset < 4; ++offset)
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      loadInstruction(&bus, 0,
+        immediateInstruction(opcode, 0, 2, 0x100 + offset));
+      loadInstruction(&bus, 4, registerInstruction(0x21, 2, 0, 3));
+      loadInstruction(&bus, 8, registerInstruction(0x21, 2, 0, 4));
+      core.startExecution(0);
+      core.stepInstruction();
+      const IOPWord expected = opcode == 0x22 ? left[offset] : right[offset];
+      REQUIRE(core.generalRegister(2) == 0xaabbccdd);
+      REQUIRE(core.delayedResultContinuation().value == expected);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(3) == 0xaabbccdd);
+      REQUIRE(core.generalRegister(2) == expected);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(4) == expected);
+      REQUIRE(core.retiredInstructions() == 3);
+    }
+  }
+}
+
+TEST_CASE("IOP paired merge loads bypass in either order across word boundaries",
+  "[iop][execution][merge]")
+{
+  const std::uint8_t data[] = {0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0};
+  for (std::uint16_t offset = 0; offset < 4; ++offset)
+  {
+    for (const bool leftFirst : {false, true})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.loadPhysical(0x100, data, sizeof(data)) == IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      const IOPWord left = immediateInstruction(0x22, 0, 2, 0x103 + offset);
+      const IOPWord right = immediateInstruction(0x26, 0, 2, 0x100 + offset);
+      loadInstruction(&bus, 0, leftFirst ? left : right);
+      loadInstruction(&bus, 4, leftFirst ? right : left);
+      loadInstruction(&bus, 8, 0);
+      core.startExecution(0);
+      core.stepInstruction();
+      const IOPWord partial = core.delayedResultContinuation().value;
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(2) == partial);
+      IOPWord expected = 0;
+      for (std::uint8_t byte = 0; byte < 4; ++byte)
+      {
+        expected |= static_cast<IOPWord>(data[offset + byte]) << (8 * byte);
+      }
+      REQUIRE(core.delayedResultContinuation().value == expected);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(2) == expected);
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    }
+  }
+}
+
+TEST_CASE("IOP merge load bypass accepts preceding scalar loads only for matching destinations",
+  "[iop][execution][merge]")
+{
+  for (const std::uint8_t destination : {std::uint8_t(1), std::uint8_t(2)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+    loadInstruction(&bus, 0, immediateInstruction(0x23, 0, destination, 0x100));
+    loadInstruction(&bus, 4, immediateInstruction(0x22, 0, 2, 0x100));
+    loadInstruction(&bus, 8, 0);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) ==
+      (destination == 2 ? 0x11332211 : 0x11bbccdd));
+  }
+}
+
+TEST_CASE("IOP merge load destination bypass never forwards the address base",
+  "[iop][execution][merge]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x200, 0x300).status == IOPBusStatus::Completed);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x100);
+  loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 1, 0x200));
+  loadInstruction(&bus, 4, immediateInstruction(0x22, 1, 1, 0));
+  loadInstruction(&bus, 8, 0);
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(1) == 0x300);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(1) == 0x11000300);
+}
+
+TEST_CASE("IOP merge stores write exactly the selected little endian lanes",
+  "[iop][execution][merge]")
+{
+  const IOPWord left[] = {
+    0x443322aa, 0x4433aabb, 0x44aabbcc, 0xaabbccdd
+  };
+  const IOPWord right[] = {
+    0xaabbccdd, 0xbbccdd11, 0xccdd2211, 0xdd332211
+  };
+  for (const std::uint8_t opcode : {std::uint8_t(0x2a), std::uint8_t(0x2e)})
+  {
+    for (std::uint16_t offset = 0; offset < 4; ++offset)
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0xfc, 0xdeadbeef).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x104, 0x12345678).status == IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      loadInstruction(&bus, 0,
+        immediateInstruction(opcode, 0, 2, 0x100 + offset));
+      core.startExecution(0);
+      core.stepInstruction();
+      REQUIRE(bus.read32(0x100).value ==
+        (opcode == 0x2a ? left[offset] : right[offset]));
+      REQUIRE(bus.read32(0xfc).value == 0xdeadbeef);
+      REQUIRE(bus.read32(0x104).value == 0x12345678);
+      REQUIRE(core.retiredInstructions() == 1);
+      REQUIRE(core.exception().kind == IOPException::None);
+    }
+  }
+}
+
+TEST_CASE("IOP paired merge stores preserve surrounding bytes in either order",
+  "[iop][execution][merge]")
+{
+  for (std::uint16_t offset = 0; offset < 4; ++offset)
+  {
+    for (const bool leftFirst : {false, true})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      const std::uint8_t sentinels[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+      REQUIRE(bus.loadPhysical(0x100, sentinels, sizeof(sentinels)) == IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      const auto left = immediateInstruction(0x2a, 0, 2, 0x103 + offset);
+      const auto right = immediateInstruction(0x2e, 0, 2, 0x100 + offset);
+      loadInstruction(&bus, 0, leftFirst ? left : right);
+      loadInstruction(&bus, 4, leftFirst ? right : left);
+      core.startExecution(0);
+      core.stepInstruction();
+      core.stepInstruction();
+      const std::uint8_t source[] = {0xdd, 0xcc, 0xbb, 0xaa};
+      for (std::uint16_t byte = 0; byte < 8; ++byte)
+      {
+        const auto expected = byte >= offset && byte < offset + 4
+          ? source[byte - offset] : sentinels[byte];
+        REQUIRE(bus.read8(0x100 + byte).value == expected);
+      }
+      REQUIRE(core.retiredInstructions() == 2);
+    }
+  }
+}
+
+TEST_CASE(
+  "IOP merge bypass handles scalar loads and overlapping merge sequences",
+  "[iop][execution][merge]")
+{
+  struct LoadCase
+  {
+    std::uint8_t opcode;
+    std::uint16_t address;
+    IOPWord value;
+  };
+  const LoadCase loads[] = {{0x20, 0x104, 0xffffffef},
+    {0x24, 0x104, 0xef},
+    {0x21, 0x104, 0xffffcdef},
+    {0x25, 0x104, 0xcdef},
+    {0x23, 0x104, 0x89abcdef},
+    {0x22, 0x105, 0xcdefccdd},
+    {0x26, 0x106, 0xaabb89ab}};
+  for (const auto &load : loads)
+  {
+    for (const std::uint8_t opcode : {std::uint8_t(0x22), std::uint8_t(0x26)})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x104, 0x89abcdef).status == IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      loadInstruction(
+        &bus, 0, immediateInstruction(load.opcode, 0, 2, load.address));
+      loadInstruction(&bus,
+        4,
+        immediateInstruction(opcode, 0, 2, opcode == 0x22 ? 0x101 : 0x102));
+      loadInstruction(&bus, 8, 0);
+      core.startExecution(0);
+      core.stepInstruction();
+      REQUIRE(core.delayedResultContinuation().value == load.value);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(2) == load.value);
+      const IOPWord expected = opcode == 0x22
+                                 ? (load.value & 0xffff) | 0x22110000
+                                 : (load.value & 0xffff0000) | 0x4433;
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(2) == expected);
+    }
+  }
+}
+
+TEST_CASE("IOP merge accesses wrap signed offsets through physical aliases",
+  "[iop][execution][merge]")
+{
+  struct AddressCase
+  {
+    IOPAddress base;
+    std::uint16_t offset;
+    IOPAddress physical;
+  };
+  const AddressCase addresses[] = {{0x104, 0xfffc, 0x100},
+    {0xfffffff0, 0x110, 0x100},
+    {0xa0200100, 0, 0x100},
+    {0x807ffc, 0x8000, 0x7ffffc},
+    {0x9f800400, 0xfffc, 0x1f8003fc}};
+  const IOPWord leftLoads[] = {0x11bbccdd, 0x2211ccdd, 0x332211dd, 0x44332211};
+  const IOPWord rightLoads[] = {0x44332211, 0xaa443322, 0xaabb4433, 0xaabbcc44};
+  const IOPWord leftStores[] = {0x443322aa, 0x4433aabb, 0x44aabbcc, 0xaabbccdd};
+  const IOPWord rightStores[] = {
+    0xaabbccdd, 0xbbccdd11, 0xccdd2211, 0xdd332211};
+  for (const auto &address : addresses)
+  {
+    for (std::uint16_t offset = 0; offset < 4; ++offset)
+    {
+      for (const std::uint8_t opcode : {std::uint8_t(0x22),
+             std::uint8_t(0x26),
+             std::uint8_t(0x2a),
+             std::uint8_t(0x2e)})
+      {
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        REQUIRE(bus.write32(address.physical, 0x44332211).status ==
+                IOPBusStatus::Completed);
+        IOPCoreTestAccess::setGeneralRegister(&core, 1, address.base);
+        IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+        loadInstruction(
+          &bus, 0, immediateInstruction(opcode, 1, 2, address.offset + offset));
+        loadInstruction(&bus, 4, 0);
+        core.startExecution(0);
+        core.stepInstruction();
+        core.stepInstruction();
+        if (opcode == 0x22 || opcode == 0x26)
+        {
+          REQUIRE(core.generalRegister(2) ==
+                  (opcode == 0x22 ? leftLoads[offset] : rightLoads[offset]));
+        }
+        else
+        {
+          REQUIRE(bus.read32(address.physical).value ==
+                  (opcode == 0x2a ? leftStores[offset] : rightStores[offset]));
+        }
+        REQUIRE(core.retiredInstructions() == 2);
+        REQUIRE(core.exception().kind == IOPException::None);
+      }
+    }
+  }
+}
+
+TEST_CASE(
+  "IOP merge faults retain original addresses and precise branch ownership",
+  "[iop][execution][merge]")
+{
+  for (const bool userMode : {false, true})
+  {
+    for (std::uint16_t offset = 0; offset < 4; ++offset)
+    {
+      for (const std::uint8_t opcode : {std::uint8_t(0x22),
+             std::uint8_t(0x26),
+             std::uint8_t(0x2a),
+             std::uint8_t(0x2e)})
+      {
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        const IOPAddress base = userMode ? 0x80000100 : 0xa0800000;
+        IOPCoreTestAccess::setGeneralRegister(&core, 3, base);
+        IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+        IOPCoreTestAccess::setUserMode(&core, userMode);
+        loadInstruction(&bus, 0, jumpInstruction(0x02, 4));
+        loadInstruction(&bus, 4, immediateInstruction(opcode, 3, 2, offset));
+        core.startExecution(0);
+        core.stepInstruction();
+        IOPCoreTestAccess::setDelayedResultContinuation(&core);
+        core.stepInstruction();
+        REQUIRE(core.programCounter() == 4);
+        REQUIRE(core.retiredInstructions() == 1);
+        REQUIRE(core.branchContinuation().instructionAddress == 0);
+        REQUIRE(core.generalRegister(2) == 0xaabbccdd);
+        const bool store = opcode == 0x2a || opcode == 0x2e;
+        if (!userMode && store)
+        {
+          const auto &failure = core.storeFailure();
+          REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+          REQUIRE(core.exception().kind == IOPException::None);
+          REQUIRE(core.generalRegister(1) == 0);
+          REQUIRE(core.delayedResultContinuation().source ==
+                  IOPDelayedResultSource::Load);
+          REQUIRE(failure.width == IOPStoreWidth::Word);
+          REQUIRE(
+            failure.mergeByteEnable ==
+            (opcode == 0x2a ? 0xf >> (3 - offset) : (0xf << offset) & 0xf));
+          REQUIRE(failure.value == (opcode == 0x2a
+                                       ? 0xaabbccdd >> (8 * (3 - offset))
+                                       : IOPWord(0xaabbccdd) << (8 * offset)));
+          REQUIRE(failure.access.virtualAddress == base + offset);
+          REQUIRE(failure.access.physicalAddress == 0x800000 + offset);
+          REQUIRE(failure.access.outcome == IOPAccessOutcome::Unmapped);
+        }
+        else
+        {
+          REQUIRE(core.exception().kind ==
+                  (userMode ? (store ? IOPException::AddressErrorStore
+                                     : IOPException::AddressErrorLoadOrFetch)
+                            : IOPException::DataBusError));
+          REQUIRE(core.exception().badVirtualAddress == base + offset);
+          REQUIRE(core.exception().inBranchDelaySlot);
+          REQUIRE(core.generalRegister(1) == 0x12345678);
+          REQUIRE(core.delayedResultContinuation().source ==
+                  IOPDelayedResultSource::None);
+          REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE(
+  "IOP merge pairs keep an older successful partial access on a later fault",
+  "[iop][execution][merge]")
+{
+  for (const bool store : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(
+      bus.write32(0x7ffffc, 0x44332211).status == IOPBusStatus::Completed);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x7ffffe);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+    loadInstruction(
+      &bus, 0, immediateInstruction(store ? 0x2e : 0x26, 1, 2, 0));
+    loadInstruction(
+      &bus, 4, immediateInstruction(store ? 0x2a : 0x22, 1, 2, 3));
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    if (store)
+    {
+      REQUIRE(bus.read32(0x7ffffc).value == 0xccdd2211);
+      REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(core.storeFailure().access.virtualAddress == 0x800001);
+    }
+    else
+    {
+      REQUIRE(core.generalRegister(2) == 0xaabb4433);
+      REQUIRE(core.exception().kind == IOPException::DataBusError);
+      REQUIRE(core.exception().badVirtualAddress == 0x800001);
+      REQUIRE(core.delayedResultContinuation().source ==
+              IOPDelayedResultSource::None);
+    }
+  }
+}
+
+TEST_CASE("IOP merge stores use old delayed data and address operands",
+  "[iop][execution][merge]")
+{
+  for (const std::uint8_t destination : {std::uint8_t(1), std::uint8_t(2)})
+  {
+    for (const std::uint8_t opcode : {std::uint8_t(0x2a), std::uint8_t(0x2e)})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0x200, 0x300).status == IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x101);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      loadInstruction(
+        &bus, 0, immediateInstruction(0x23, 0, destination, 0x200));
+      loadInstruction(&bus, 4, immediateInstruction(opcode, 1, 2, 0));
+      core.startExecution(0);
+      core.stepInstruction();
+      core.stepInstruction();
+      REQUIRE(
+        bus.read32(0x100).value == (opcode == 0x2a ? 0xaabb : 0xbbccdd00));
+      REQUIRE(bus.read32(0x300).value == 0);
+      REQUIRE(core.generalRegister(destination) == 0x300);
+    }
+  }
+}
+
+TEST_CASE("IOP merge operations protect register zero without skipping faults",
+  "[iop][execution][merge]")
+{
+  for (const std::uint8_t opcode : {std::uint8_t(0x22),
+         std::uint8_t(0x26),
+         std::uint8_t(0x2a),
+         std::uint8_t(0x2e)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+    loadInstruction(&bus, 0, immediateInstruction(opcode, 0, 0, 0x101));
+    loadInstruction(&bus, 4, 0);
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(0) == 0);
+    REQUIRE(
+      core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    REQUIRE(bus.read32(0x100).value == (opcode == 0x2a    ? 0x44330000
+                                         : opcode == 0x2e ? 0x11
+                                                          : 0x44332211));
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x800001);
+    loadInstruction(&bus, 8, immediateInstruction(opcode, 1, 0, 0));
+    core.stepInstruction();
+    REQUIRE(core.executionState() == IOPExecutionState::Halted);
+    REQUIRE(core.retiredInstructions() == 2);
+  }
+}
+
+TEST_CASE("IOP paused merge pairs retain bypass and branch state",
+  "[iop][execution][merge]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x104, 0x88776655).status == IOPBusStatus::Completed);
+  loadInstruction(&bus, 0, jumpInstruction(0x02, 4));
+  loadInstruction(&bus, 4, immediateInstruction(0x22, 0, 2, 0x104));
+  loadInstruction(&bus, 16, immediateInstruction(0x26, 0, 2, 0x101));
+  loadInstruction(&bus, 20, 0);
+  core.startExecution(0);
+  core.stepInstruction();
+  core.haltExecution();
+  core.resumeExecution();
+  core.stepInstruction();
+  core.haltExecution();
+  core.resumeExecution();
+  core.stepInstruction();
+  REQUIRE(core.delayedResultContinuation().value == 0x55443322);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0x55443322);
+  REQUIRE_FALSE(core.branchContinuation().active);
+}
+
+TEST_CASE(
+  "IOP merge accesses stay within the last ROM word", "[iop][execution][merge]")
+{
+  const auto rom =
+    BootROMImage::create(std::vector<std::uint8_t>(IOPBus::ROM_SIZE, 0x5a));
+  const IOPWord left[] = {0x5abbccdd, 0x5a5accdd, 0x5a5a5add, 0x5a5a5a5a};
+  const IOPWord right[] = {0x5a5a5a5a, 0xaa5a5a5a, 0xaabb5a5a, 0xaabbcc5a};
+  for (const std::uint8_t opcode : {std::uint8_t(0x22),
+         std::uint8_t(0x26),
+         std::uint8_t(0x2a),
+         std::uint8_t(0x2e)})
+  {
+    for (std::uint16_t offset = 0; offset < 4; ++offset)
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.installRom(rom));
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, 0xbffffffc);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      loadInstruction(&bus, 0, immediateInstruction(opcode, 1, 2, offset));
+      loadInstruction(&bus, 4, 0);
+      core.startExecution(0);
+      core.stepInstruction();
+      if (opcode == 0x22 || opcode == 0x26)
+      {
+        core.stepInstruction();
+        REQUIRE(core.generalRegister(2) ==
+                (opcode == 0x22 ? left[offset] : right[offset]));
+      }
+      else
+      {
+        REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+        REQUIRE(
+          core.storeFailure().access.outcome == IOPAccessOutcome::ReadOnly);
+        REQUIRE(
+          core.storeFailure().access.virtualAddress == 0xbffffffc + offset);
+        REQUIRE(
+          core.storeFailure().access.physicalAddress == 0x1ffffffc + offset);
+        core.startExecution(4);
+        REQUIRE(core.storeFailure().mergeByteEnable == 0);
+      }
+      REQUIRE(bus.read32(0x1ffffffc).value == 0x5a5a5a5a);
+    }
   }
 }
