@@ -21,7 +21,8 @@ enum class IOPStopReason : std::uint8_t
   FetchFailure,
   ReservedInstruction,
   UndefinedOperation,
-  ExecutionException
+  ExecutionException,
+  StoreFailure
 };
 
 enum class IOPException : std::uint8_t
@@ -87,6 +88,22 @@ struct IOPMemoryWriteResult
   IOPAddress virtualAddress = 0;
   IOPAddress physicalAddress = 0;
   IOPCacheRoute cacheRoute = IOPCacheRoute::None;
+};
+
+enum class IOPStoreWidth : std::uint8_t
+{
+  None = 0,
+  Byte = 1,
+  Halfword = 2,
+  Word = 4
+};
+
+struct IOPStoreFailure
+{
+  // None means no rejected physical write has been recorded.
+  IOPStoreWidth width = IOPStoreWidth::None;
+  IOPWord value = 0;
+  IOPMemoryWriteResult access;
 };
 
 enum class IOPDelayedResultSource : std::uint8_t

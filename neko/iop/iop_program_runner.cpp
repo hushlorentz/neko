@@ -67,6 +67,7 @@ IOPProgramRunResult runIOPProgram(
   result.stopReason = core->stopReason();
   result.programCounter = core->programCounter();
   result.exception = core->exception();
+  result.storeFailure = core->storeFailure();
   result.exitCode =
     core->generalRegister(
       IOPProgramRuntime::EXIT_CODE_REGISTER);

@@ -249,3 +249,33 @@ TEST_CASE("IOP program runner rejects an unattached bus before mutation",
   REQUIRE(core.executionState() == IOPExecutionState::Halted);
   REQUIRE(core.stopReason() == IOPStopReason::None);
 }
+
+TEST_CASE("IOP program runner reports rejected stores without a guest exception",
+  "[iop][runner][store]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  loadInstruction(&bus, 0, immediateInstruction(0x0f, 0, 1, 0xa080));
+  loadInstruction(&bus, 4, immediateInstruction(0x2b, 1, 0, 0));
+
+  IOPProgramRunConfig config;
+  config.maxMasterCycles = 32;
+  const IOPProgramRunResult result = runIOPProgram(&core, config);
+  REQUIRE(result.outcome == IOPProgramOutcome::Stopped);
+  REQUIRE(result.state == IOPExecutionState::Halted);
+  REQUIRE(result.stopReason == IOPStopReason::StoreFailure);
+  REQUIRE(result.programCounter == 4);
+  REQUIRE(result.instructions == 1);
+  REQUIRE(result.iopCycles == 2);
+  REQUIRE(result.masterCycles == 16);
+  REQUIRE_FALSE(result.cycleLimitReached);
+  REQUIRE(result.exception.kind == IOPException::None);
+  REQUIRE(result.storeFailure.width == IOPStoreWidth::Word);
+  REQUIRE(result.storeFailure.value == 0);
+  REQUIRE(result.storeFailure.access.outcome == IOPAccessOutcome::Unmapped);
+  REQUIRE(result.storeFailure.access.virtualAddress == 0xa0800000);
+  REQUIRE(result.storeFailure.access.physicalAddress == 0x800000);
+  REQUIRE(result.storeFailure.access.cacheRoute == IOPCacheRoute::Uncached);
+  REQUIRE(result.storeFailure.access.exception == IOPException::None);
+}

@@ -2154,7 +2154,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       sign/zero extension, the one-instruction load delay, destination-write
       conflicts, register zero, wrapping addresses, faults, branches,
       reset, and host pause/resume.
-- [ ] Implement aligned byte, halfword, and word stores through typed
+- [x] Implement aligned byte, halfword, and word stores through typed
       `IOPBus` requests. Preserve store order and pin the approved write-buffer
       abstraction and bus-failure policy without inventing precise EE-style
       store bus errors.

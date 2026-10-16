@@ -46,6 +46,7 @@ struct IOPProgramRunResult
   IOPStopReason stopReason = IOPStopReason::None;
   IOPAddress programCounter = 0;
   IOPPendingException exception;
+  IOPStoreFailure storeFailure;
   IOPProgramOutcome outcome = IOPProgramOutcome::Stopped;
   IOPWord exitCode = 0;
 };

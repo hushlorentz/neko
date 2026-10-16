@@ -1,5 +1,6 @@
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -111,6 +112,15 @@ struct IOPCoreTestAccess
       true,
       2
     };
+    core->rejectedStore.width = IOPStoreWidth::Word;
+    core->rejectedStore.value = UINT32_C(0x89abcdef);
+    core->rejectedStore.access = {
+      IOPAccessOutcome::ReadOnly,
+      IOPException::None,
+      UINT32_C(0xbfc00000),
+      UINT32_C(0x1fc00000),
+      IOPCacheRoute::Uncached
+    };
     core->state = IOPExecutionState::Running;
     core->haltReason = IOPStopReason::ExecutionException;
     core->cycles = UINT64_C(0x123456789abcdef0);
@@ -154,6 +164,15 @@ struct IOPCoreTestAccess
     IOPAddress address)
   {
     core->pc = address;
+  }
+
+  static void setCounters(
+    IOPCore *core,
+    IOPCycleCount cycles,
+    std::uint64_t instructions)
+  {
+    core->cycles = cycles;
+    core->retiredInstructionTotal = instructions;
   }
 
   static void setUserMode(IOPCore *core, bool enabled)
@@ -233,6 +252,13 @@ TEST_CASE("IOP core reset establishes deterministic architectural state")
   REQUIRE(core.exception().badVirtualAddress == 0);
   REQUIRE_FALSE(core.exception().inBranchDelaySlot);
   REQUIRE(core.exception().coprocessor == 0);
+  REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
+  REQUIRE(core.storeFailure().value == 0);
+  REQUIRE(core.storeFailure().access.virtualAddress == 0);
+  REQUIRE(core.storeFailure().access.physicalAddress == 0);
+  REQUIRE(core.storeFailure().access.cacheRoute == IOPCacheRoute::None);
+  REQUIRE(core.storeFailure().access.exception == IOPException::None);
+  REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
 
   REQUIRE(core.executionState() == IOPExecutionState::Halted);
   REQUIRE(core.stopReason() == IOPStopReason::None);
@@ -448,7 +474,11 @@ TEST_CASE("IOP core data access preserves routes and selects typed failures")
 
   const auto readOnlyStore = core.writeData32(0xbfc00000, 0);
   REQUIRE(readOnlyStore.outcome == IOPAccessOutcome::ReadOnly);
-  REQUIRE(readOnlyStore.exception == IOPException::DataBusError);
+  REQUIRE(readOnlyStore.exception == IOPException::None);
+  const auto unmappedStore = core.writeData8(0x00800000, 0);
+  REQUIRE(unmappedStore.outcome == IOPAccessOutcome::Unmapped);
+  REQUIRE(unmappedStore.exception == IOPException::None);
+  REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
 }
 
 TEST_CASE("IOP core data protection distinguishes load and store exceptions")
@@ -2282,4 +2312,466 @@ TEST_CASE("IOP deferred semantics preserve a pending load for inspection",
   REQUIRE(core.executionState() == IOPExecutionState::Halted);
   REQUIRE(core.retiredInstructions() == 1);
   REQUIRE(core.programCounter() == 4);
+}
+
+TEST_CASE("IOP aligned stores truncate to little endian byte lanes",
+  "[iop][execution][store]")
+{
+  struct StoreCase
+  {
+    std::uint8_t opcode;
+    std::uint16_t offset;
+    IOPWord expected;
+  };
+  const StoreCase cases[] = {
+    {0x28, 0, 0x443322ef},
+    {0x28, 1, 0x4433ef11},
+    {0x28, 2, 0x44ef2211},
+    {0x28, 3, 0xef332211},
+    {0x29, 0, 0x4433cdef},
+    {0x29, 2, 0xcdef2211},
+    {0x2b, 0, 0x89abcdef}
+  };
+  for (const auto &test : cases)
+  {
+    INFO("opcode " << unsigned(test.opcode) << " offset " << test.offset);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0xfc, 0xaaaaaaaa).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x104, 0xbbbbbbbb).status == IOPBusStatus::Completed);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x100);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+    loadInstruction(&bus, 0,
+      immediateInstruction(test.opcode, 1, 2, test.offset));
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(bus.read32(0x100).value == test.expected);
+    REQUIRE(bus.read32(0xfc).value == 0xaaaaaaaa);
+    REQUIRE(bus.read32(0x104).value == 0xbbbbbbbb);
+    REQUIRE(core.generalRegister(1) == 0x100);
+    REQUIRE(core.generalRegister(2) == 0x89abcdef);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.executionState() == IOPExecutionState::Running);
+    REQUIRE(core.stopReason() == IOPStopReason::None);
+    REQUIRE(core.exception().kind == IOPException::None);
+  }
+}
+
+TEST_CASE("IOP stores sign extend offsets and wrap effective addresses",
+  "[iop][execution][store]")
+{
+  struct AddressCase
+  {
+    IOPAddress base;
+    std::uint16_t offset;
+    IOPAddress physical;
+  };
+  const AddressCase cases[] = {
+    {0x104, 0xfffc, 0x100},
+    {0xfffffff0, 0x110, 0x100},
+    {0x807ffc, 0x8000, 0x7ffffc},
+    {0x80000104, 0xfffc, 0x100},
+    {0xa0200104, 0xfffc, 0x100},
+    {0x9f800400, 0xfffc, 0x1f8003fc}
+  };
+  for (const auto &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.base);
+    loadInstruction(&bus, 0,
+      immediateInstruction(0x2b, 1, 1, test.offset));
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(bus.read32(test.physical).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(test.physical).value == test.base);
+    REQUIRE(core.generalRegister(1) == test.base);
+    REQUIRE(core.retiredInstructions() == 1);
+  }
+}
+
+TEST_CASE("IOP stores complete in order before cached and uncached reads",
+  "[iop][execution][store]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x80000100);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x11223344);
+  IOPCoreTestAccess::setGeneralRegister(&core, 3, 0xabcdefaa);
+  IOPCoreTestAccess::setGeneralRegister(&core, 4, 0xa0200100);
+  loadInstruction(&bus, 0, immediateInstruction(0x2b, 1, 2, 0));
+  loadInstruction(&bus, 4, immediateInstruction(0x28, 1, 3, 1));
+  loadInstruction(&bus, 8, immediateInstruction(0x29, 1, 3, 2));
+  loadInstruction(&bus, 12, immediateInstruction(0x23, 4, 5, 0));
+  loadInstruction(&bus, 16, 0);
+  loadInstruction(&bus, 20, immediateInstruction(0x23, 1, 6, 0));
+  loadInstruction(&bus, 24, 0);
+  core.startExecution(0);
+  core.stepInstruction();
+  REQUIRE(bus.read32(0x100).value == 0x11223344);
+  core.stepInstruction();
+  REQUIRE(bus.read32(0x100).value == 0x1122aa44);
+  core.stepInstruction();
+  REQUIRE(bus.read32(0x100).value == 0xefaaaa44);
+  for (int index = 0; index < 4; ++index)
+  {
+    core.stepInstruction();
+  }
+  REQUIRE(core.generalRegister(5) == 0xefaaaa44);
+  REQUIRE(core.generalRegister(6) == 0xefaaaa44);
+  REQUIRE(core.retiredInstructions() == 7);
+}
+
+TEST_CASE("IOP stores capture old load delay base and data operands",
+  "[iop][execution][store]")
+{
+  for (const std::uint8_t destination : {std::uint8_t(1), std::uint8_t(2)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x200, 0x300).status == IOPBusStatus::Completed);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x100);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xabcdef01);
+    loadInstruction(&bus, 0,
+      immediateInstruction(0x23, 0, destination, 0x200));
+    loadInstruction(&bus, 4, immediateInstruction(0x2b, 1, 2, 0));
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(bus.read32(0x100).value == 0xabcdef01);
+    REQUIRE(bus.read32(0x300).value == 0);
+    REQUIRE(core.generalRegister(destination) == 0x300);
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    REQUIRE(core.retiredInstructions() == 2);
+  }
+}
+
+TEST_CASE("IOP stores from register zero still access memory",
+  "[iop][execution][store]")
+{
+  for (const std::uint8_t opcode : {
+    std::uint8_t(0x28), std::uint8_t(0x29), std::uint8_t(0x2b)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0xffffffff).status == IOPBusStatus::Completed);
+    loadInstruction(&bus, 0, immediateInstruction(opcode, 0, 0, 0x100));
+    core.startExecution(0);
+    core.stepInstruction();
+    const IOPWord expected = opcode == 0x28
+      ? 0xffffff00 : opcode == 0x29 ? 0xffff0000 : 0;
+    REQUIRE(bus.read32(0x100).value == expected);
+    REQUIRE(core.generalRegister(0) == 0);
+    REQUIRE(core.retiredInstructions() == 1);
+  }
+}
+
+TEST_CASE("IOP store address faults preserve memory and complete older loads",
+  "[iop][execution][store]")
+{
+  struct FaultCase
+  {
+    std::uint8_t opcode;
+    IOPAddress address;
+    bool userMode;
+  };
+  const FaultCase cases[] = {
+    {0x29, 0x101, false},
+    {0x2b, 0x101, false},
+    {0x2b, 0x102, false},
+    {0x2b, 0x103, false},
+    {0x28, 0x80000100, true},
+    {0x29, 0xa0000100, true},
+    {0x2b, 0x80000102, true}
+  };
+  for (const auto &test : cases)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0x12345678).status == IOPBusStatus::Completed);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.address);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xffffffff);
+    IOPCoreTestAccess::setUserMode(&core, test.userMode);
+    loadInstruction(&bus, 0, immediateInstruction(test.opcode, 1, 2, 0));
+    core.startExecution(0);
+    IOPCoreTestAccess::setDelayedResultContinuation(&core);
+    core.stepInstruction();
+    REQUIRE(bus.read32(0x100).value == 0x12345678);
+    REQUIRE(core.generalRegister(1) == 0x12345678);
+    REQUIRE(core.generalRegister(2) == 0xffffffff);
+    REQUIRE(core.exception().kind == IOPException::AddressErrorStore);
+    REQUIRE(core.exception().badVirtualAddress == test.address);
+    REQUIRE(core.executionState() == IOPExecutionState::Halted);
+    REQUIRE(core.stopReason() == IOPStopReason::ExecutionException);
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.retiredInstructions() == 0);
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+  }
+}
+
+TEST_CASE("IOP stores in branch delay slots commit or preserve fault provenance",
+  "[iop][execution][store]")
+{
+  for (const std::uint16_t offset : {
+    std::uint16_t(0x100), std::uint16_t(0x102)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xabcdef01);
+    loadInstruction(&bus, 0, jumpInstruction(0x02, 4));
+    loadInstruction(&bus, 4, immediateInstruction(0x2b, 0, 2, offset));
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    if (offset == 0x100)
+    {
+      REQUIRE(bus.read32(0x100).value == 0xabcdef01);
+      REQUIRE(core.programCounter() == 16);
+      REQUIRE_FALSE(core.branchContinuation().active);
+      REQUIRE(core.retiredInstructions() == 2);
+    }
+    else
+    {
+      REQUIRE(bus.read32(0x100).value == 0);
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.exception().kind == IOPException::AddressErrorStore);
+      REQUIRE(core.exception().inBranchDelaySlot);
+      REQUIRE(core.branchContinuation().instructionAddress == 0);
+      REQUIRE(core.retiredInstructions() == 1);
+    }
+  }
+}
+
+TEST_CASE("IOP store effects do not mutate memory before commit admission",
+  "[iop][execution][store]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x12345678);
+  const auto effects = IOPCoreTestAccess::instructionEffects(
+    core, immediateInstruction(0x2b, 0, 1, 0x100));
+  REQUIRE(effects.store.width == IOPStoreWidth::Word);
+  REQUIRE(effects.store.virtualAddress == 0x100);
+  REQUIRE(effects.store.value == 0x12345678);
+  REQUIRE(bus.read32(0x100).value == 0);
+  REQUIRE(core.elapsedCycles() == 0);
+  REQUIRE(core.retiredInstructions() == 0);
+
+  IOPInstructionEffects invalid = effects;
+  invalid.completion = IOPInstructionCompletion::Retired;
+  invalid.controlFlow.kind = IOPControlFlowEffect::Hold;
+  REQUIRE_THROWS_AS(
+    IOPCoreTestAccess::commitInstructionEffects(&core, 0, invalid),
+    std::logic_error);
+  REQUIRE(bus.read32(0x100).value == 0);
+
+  IOPInstructionEffects fault = effects;
+  fault.exception.kind = IOPException::AddressErrorStore;
+  IOPCoreTestAccess::commitInstructionEffects(&core, 0, fault);
+  REQUIRE(bus.read32(0x100).value == 0);
+  REQUIRE(core.exception().kind == IOPException::AddressErrorStore);
+}
+
+TEST_CASE("IOP rejected physical stores stop with typed nonexception diagnostics",
+  "[iop][execution][store]")
+{
+  struct WidthCase
+  {
+    std::uint8_t opcode;
+    IOPStoreWidth width;
+    IOPWord value;
+  };
+  const WidthCase widths[] = {
+    {0x28, IOPStoreWidth::Byte, 0xef},
+    {0x29, IOPStoreWidth::Halfword, 0xcdef},
+    {0x2b, IOPStoreWidth::Word, 0x89abcdef}
+  };
+  for (const auto &test : widths)
+  {
+    for (const bool installRom : {false, true})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      if (installRom)
+      {
+        REQUIRE(bus.installRom(BootROMImage::create(
+          std::vector<std::uint8_t>(IOPBus::ROM_SIZE, 0x5a))));
+      }
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, 0xbfc00000);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+      loadInstruction(&bus, 0, immediateInstruction(test.opcode, 1, 2, 0));
+      core.startExecution(0);
+      IOPCoreTestAccess::setDelayedResultContinuation(&core);
+      const IOPWord originalStatus = core.status();
+      core.stepInstruction();
+
+      const IOPStoreFailure &failure = core.storeFailure();
+      REQUIRE(failure.width == test.width);
+      REQUIRE(failure.value == test.value);
+      REQUIRE(failure.access.virtualAddress == 0xbfc00000);
+      REQUIRE(failure.access.physicalAddress == 0x1fc00000);
+      REQUIRE(failure.access.cacheRoute == IOPCacheRoute::Uncached);
+      REQUIRE(failure.access.outcome ==
+        (installRom ? IOPAccessOutcome::ReadOnly : IOPAccessOutcome::Unmapped));
+      REQUIRE(failure.access.exception == IOPException::None);
+      REQUIRE(core.executionState() == IOPExecutionState::Halted);
+      REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(core.programCounter() == 0);
+      REQUIRE(core.retiredInstructions() == 0);
+      REQUIRE(core.elapsedCycles() == 1);
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.badVirtualAddress() == 0);
+      REQUIRE(core.status() == originalStatus);
+      REQUIRE(core.cause() == 0);
+      REQUIRE(core.exceptionProgramCounter() == 0);
+      REQUIRE(core.generalRegister(1) == 0xbfc00000);
+      REQUIRE(core.delayedResultContinuation().source ==
+        IOPDelayedResultSource::Load);
+      REQUIRE(core.delayedResultContinuation().value == 0x12345678);
+      if (installRom)
+      {
+        REQUIRE(bus.read32(IOPBus::ROM_BASE).value == 0x5a5a5a5a);
+      }
+      REQUIRE_THROWS_AS(core.resumeExecution(), std::logic_error);
+      core.haltExecution();
+      REQUIRE_THROWS_AS(core.resumeExecution(), std::logic_error);
+    }
+  }
+}
+
+TEST_CASE("IOP unmapped store boundaries never wrap into writable storage",
+  "[iop][execution][store]")
+{
+  for (const IOPAddress address : {
+    UINT32_C(0xa0800000), UINT32_C(0x9f800400), UINT32_C(0xfffffffc)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0x12345678).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x1ffffc, 0x44332211).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x1f8003fc, 0x88776655).status == IOPBusStatus::Completed);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, address);
+    loadInstruction(&bus, 0, immediateInstruction(0x2b, 1, 0, 0));
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.storeFailure().access.virtualAddress == address);
+    REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(bus.read32(0x100).value == 0x12345678);
+    REQUIRE(bus.read32(0x1ffffc).value == 0x44332211);
+    REQUIRE(bus.read32(0x1f8003fc).value == 0x88776655);
+  }
+}
+
+TEST_CASE("IOP rejected stores retain branch continuation for inspection",
+  "[iop][execution][store]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 0xa0800000);
+  loadInstruction(&bus, 0, jumpInstruction(0x02, 4));
+  loadInstruction(&bus, 4, immediateInstruction(0x2b, 1, 0, 0));
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.retiredInstructions() == 1);
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.branchContinuation().instructionAddress == 0);
+  REQUIRE(core.branchContinuation().targetAddress == 16);
+}
+
+TEST_CASE("IOP reset and fresh starts clear rejected store diagnostics",
+  "[iop][execution][store]")
+{
+  for (const int restart : {0, 1, 2})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0xa0800000);
+    loadInstruction(&bus, 0, immediateInstruction(0x2b, 1, 0, 0));
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(core.storeFailure().width == IOPStoreWidth::Word);
+    switch (restart)
+    {
+      case 0:
+        core.reset();
+        break;
+      case 1:
+        core.startExecution(4);
+        break;
+      case 2:
+        core.prepareFreshExecution(4, 0x100, 0x200);
+        break;
+    }
+    REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
+    REQUIRE(core.storeFailure().value == 0);
+    REQUIRE(core.storeFailure().access.virtualAddress == 0);
+    REQUIRE(core.storeFailure().access.physicalAddress == 0);
+    REQUIRE(core.storeFailure().access.cacheRoute == IOPCacheRoute::None);
+    REQUIRE(core.storeFailure().access.exception == IOPException::None);
+  }
+}
+
+TEST_CASE("IOP store and subsequent fetch are ordered in the uncached model",
+  "[iop][execution][store]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  const IOPWord replacement = immediateInstruction(0x09, 0, 2, 7);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, replacement);
+  loadInstruction(&bus, 0, immediateInstruction(0x2b, 0, 1, 4));
+  loadInstruction(&bus, 4, 0xffffffff);
+  core.startExecution(0xa0000000);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 7);
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.retiredInstructions() == 2);
+}
+
+TEST_CASE("IOP counter overflow rejects store commit before memory mutation",
+  "[iop][execution][store]")
+{
+  for (const bool cycleOverflow : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x12345678);
+    loadInstruction(&bus, 0, immediateInstruction(0x2b, 0, 1, 0x100));
+    core.startExecution(0);
+    const auto cycles = cycleOverflow
+      ? std::numeric_limits<IOPCycleCount>::max() : 0;
+    const auto instructions = cycleOverflow
+      ? 0 : std::numeric_limits<std::uint64_t>::max();
+    IOPCoreTestAccess::setCounters(&core, cycles, instructions);
+    REQUIRE_THROWS_AS(core.stepInstruction(), std::overflow_error);
+    REQUIRE(bus.read32(0x100).value == 0);
+    REQUIRE(core.programCounter() == 0);
+    REQUIRE(core.elapsedCycles() == cycles);
+    REQUIRE(core.retiredInstructions() == instructions);
+  }
 }

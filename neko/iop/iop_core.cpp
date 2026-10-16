@@ -183,6 +183,34 @@ namespace
     return effects;
   }
 
+  IOPInstructionEffects alignedStoreEffects(
+    const IOPInstruction &instruction,
+    IOPWord base,
+    IOPWord value)
+  {
+    IOPInstructionEffects effects = retiredEffects();
+    effects.store.virtualAddress =
+      base + signExtendedImmediate(instruction.immediate);
+    switch (instruction.operation)
+    {
+      case IOPOperation::StoreByte:
+        effects.store.width = IOPStoreWidth::Byte;
+        effects.store.value = value & 0xff;
+        break;
+      case IOPOperation::StoreHalfword:
+        effects.store.width = IOPStoreWidth::Halfword;
+        effects.store.value = value & 0xffff;
+        break;
+      case IOPOperation::StoreWord:
+        effects.store.width = IOPStoreWidth::Word;
+        effects.store.value = value;
+        break;
+      default:
+        throw std::logic_error("Unsupported IOP aligned store.");
+    }
+    return effects;
+  }
+
   IOPInstructionEffects reservedInstructionEffects()
   {
     IOPInstructionEffects effects;
@@ -328,6 +356,7 @@ void IOPCore::reset()
   branch = {};
   delayedResult = {};
   pendingException = {};
+  rejectedStore = {};
   state = IOPExecutionState::Halted;
   haltReason = IOPStopReason::None;
   cycles = 0;
@@ -362,6 +391,7 @@ void IOPCore::startExecution(IOPAddress entryPoint)
   delayedResult = {};
   hiLoState = {};
   pendingException = {};
+  rejectedStore = {};
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
 }
@@ -376,10 +406,12 @@ void IOPCore::resumeExecution()
 {
   if (state != IOPExecutionState::Halted ||
       haltReason != IOPStopReason::HostHalt ||
-      pendingException.kind != IOPException::None)
+      pendingException.kind != IOPException::None ||
+      rejectedStore.width != IOPStoreWidth::None)
   {
     throw std::logic_error(
-      "IOP Core can resume only after a host halt without an exception.");
+      "IOP Core can resume only after a host halt without an exception "
+      "or rejected store.");
   }
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
@@ -700,6 +732,10 @@ IOPInstructionEffects IOPCore::instructionEffects(
     case IOPOperation::LoadHalfwordUnsigned:
     case IOPOperation::LoadWord:
       return alignedLoadEffects(instruction, source);
+    case IOPOperation::StoreByte:
+    case IOPOperation::StoreHalfword:
+    case IOPOperation::StoreWord:
+      return alignedStoreEffects(instruction, source, target);
     default:
       return {};
   }
@@ -781,8 +817,31 @@ void IOPCore::commitInstructionEffects(
   ++cycles;
 
   const bool inBranchDelaySlot = branch.active;
+  IOPPendingException selectedException = effects.exception;
+  if (effects.completion == IOPInstructionCompletion::Retired &&
+      selectedException.kind == IOPException::None &&
+      effects.store.width != IOPStoreWidth::None)
+  {
+    const IOPMemoryWriteResult write = writeStore(effects.store);
+    if (write.exception != IOPException::None)
+    {
+      selectedException.kind = write.exception;
+      selectedException.badVirtualAddress = write.virtualAddress;
+    }
+    else if (write.outcome != IOPAccessOutcome::Completed)
+    {
+      rejectedStore = {
+        effects.store.width,
+        effects.store.value,
+        write
+      };
+      state = IOPExecutionState::Halted;
+      haltReason = IOPStopReason::StoreFailure;
+      return;
+    }
+  }
   if (effects.completion == IOPInstructionCompletion::Retired ||
-      effects.exception.kind != IOPException::None)
+      selectedException.kind != IOPException::None)
   {
     // Sources were captured before older writeback; younger writes win.
     if (delayedResult.source != IOPDelayedResultSource::None)
@@ -793,12 +852,14 @@ void IOPCore::commitInstructionEffects(
       delayedResult = {};
     }
   }
-  if (effects.exception.kind != IOPException::None)
+  if (selectedException.kind != IOPException::None)
   {
-    pendingException = effects.exception;
+    pendingException = selectedException;
     pendingException.inBranchDelaySlot = inBranchDelaySlot;
     state = IOPExecutionState::Halted;
-    haltReason = effects.stopReason;
+    haltReason = effects.store.width != IOPStoreWidth::None
+      ? IOPStopReason::ExecutionException
+      : effects.stopReason;
     return;
   }
   if (effects.completion == IOPInstructionCompletion::Halted)
@@ -987,6 +1048,27 @@ IOPMemoryWriteResult IOPCore::writeData32(
   return writeMemory(virtualAddress, sizeof(value), value);
 }
 
+IOPMemoryWriteResult IOPCore::writeStore(
+  const IOPStoreRequest &request)
+{
+  switch (request.width)
+  {
+    case IOPStoreWidth::Byte:
+      return writeData8(
+        request.virtualAddress,
+        static_cast<std::uint8_t>(request.value));
+    case IOPStoreWidth::Halfword:
+      return writeData16(
+        request.virtualAddress,
+        static_cast<std::uint16_t>(request.value));
+    case IOPStoreWidth::Word:
+      return writeData32(request.virtualAddress, request.value);
+    case IOPStoreWidth::None:
+      break;
+  }
+  throw std::logic_error("Unsupported IOP store width.");
+}
+
 IOPBus &IOPCore::attachedBus() const
 {
   if (bus == nullptr)
@@ -1098,10 +1180,6 @@ IOPMemoryWriteResult IOPCore::writeMemory(
   }
 
   result.outcome = accessOutcome(busResult.status);
-  if (result.outcome != IOPAccessOutcome::Completed)
-  {
-    result.exception = IOPException::DataBusError;
-  }
   return result;
 }
 
@@ -1172,6 +1250,11 @@ IOPAddress IOPCore::exceptionProgramCounter() const
 IOPWord IOPCore::processorRevision() const
 {
   return IOPCOP0::PROCESSOR_REVISION;
+}
+
+const IOPStoreFailure &IOPCore::storeFailure() const
+{
+  return rejectedStore;
 }
 
 const IOPBranchContinuation &

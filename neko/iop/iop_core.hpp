@@ -58,6 +58,13 @@ struct IOPControlFlowRequest
   IOPAddress target = 0;
 };
 
+struct IOPStoreRequest
+{
+  IOPStoreWidth width = IOPStoreWidth::None;
+  IOPAddress virtualAddress = 0;
+  IOPWord value = 0;
+};
+
 struct IOPInstructionEffects
 {
   IOPDestinationEffect destination;
@@ -66,6 +73,7 @@ struct IOPInstructionEffects
   IOPHILOAccessEffect hiLoAccess = IOPHILOAccessEffect::None;
   IOPControlFlowRequest controlFlow;
   IOPDelayedResultContinuation delayedResult;
+  IOPStoreRequest store;
   IOPPendingException exception;
   IOPInstructionCompletion completion =
     IOPInstructionCompletion::Halted;
@@ -134,6 +142,7 @@ class IOPCore final
     const IOPDelayedResultContinuation &
       delayedResultContinuation() const;
     const IOPPendingException &exception() const;
+    const IOPStoreFailure &storeFailure() const;
 
     IOPExecutionState executionState() const;
     IOPStopReason stopReason() const;
@@ -163,6 +172,8 @@ class IOPCore final
       IOPAddress virtualAddress,
       std::size_t width,
       IOPWord value);
+    IOPMemoryWriteResult writeStore(
+      const IOPStoreRequest &request);
 
     IOPBus *bus = nullptr;
     IOPAddress pc = IOPReset::VECTOR;
@@ -175,6 +186,7 @@ class IOPCore final
     IOPBranchContinuation branch;
     IOPDelayedResultContinuation delayedResult;
     IOPPendingException pendingException;
+    IOPStoreFailure rejectedStore;
     IOPExecutionState state = IOPExecutionState::Halted;
     IOPStopReason haltReason = IOPStopReason::None;
     IOPCycleCount cycles = 0;
