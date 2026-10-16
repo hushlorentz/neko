@@ -207,18 +207,19 @@ TEST_CASE("IOP program runner reports non-exception execution stops",
   IOPBus bus;
   IOPCore core;
   core.attachBus(&bus);
-  loadInstruction(&bus, 0, UINT32_C(0x42000010));
+  loadInstruction(&bus, 0, registerInstruction(0x10, 0, 0, 2));
+  loadInstruction(&bus, 4, registerInstruction(0x11, 0, 0, 0));
 
   IOPProgramRunConfig config;
-  config.maxMasterCycles = 8;
+  config.maxMasterCycles = 16;
   const IOPProgramRunResult result =
     runIOPProgram(&core, config);
 
-  REQUIRE(result.masterCycles == 8);
-  REQUIRE(result.iopCycles == 1);
-  REQUIRE(result.instructions == 0);
+  REQUIRE(result.masterCycles == 16);
+  REQUIRE(result.iopCycles == 2);
+  REQUIRE(result.instructions == 1);
   REQUIRE(result.state == IOPExecutionState::Halted);
-  REQUIRE(result.stopReason == IOPStopReason::ExecutionException);
+  REQUIRE(result.stopReason == IOPStopReason::UndefinedOperation);
   REQUIRE(result.exception.kind == IOPException::None);
   REQUIRE(result.outcome == IOPProgramOutcome::Stopped);
 }
@@ -246,6 +247,54 @@ TEST_CASE("IOP program runner stops after architectural entry before fetching th
   REQUIRE(core.exceptionProgramCounter() == 0);
   REQUIRE(core.cause() == 0x20);
   REQUIRE_NOTHROW(core.resumeExecution());
+}
+
+TEST_CASE("IOP program runner stops at a software interrupt without fetching its vector",
+  "[iop][runner][interrupt]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  loadInstruction(&bus, 0, immediateInstruction(9, 0, 1, 0x101));
+  loadInstruction(&bus, 4, immediateInstruction(0x10, 4, 1, 12 << 11));
+  loadInstruction(&bus, 8, immediateInstruction(0x10, 4, 1, 13 << 11));
+  loadInstruction(&bus, 12, immediateInstruction(9, 0, 2, 7));
+  IOPProgramRunConfig config;
+  config.maxMasterCycles = 32;
+  config.returnAddress = 0x80000080;
+  const auto result = runIOPProgram(&core, config);
+  REQUIRE(result.outcome == IOPProgramOutcome::Exception);
+  REQUIRE(result.masterCycles == 32);
+  REQUIRE(result.iopCycles == 4);
+  REQUIRE(result.instructions == 3);
+  REQUIRE_FALSE(result.cycleLimitReached);
+  REQUIRE(result.programCounter == 0x80000080);
+  REQUIRE(result.stopReason == IOPStopReason::HostHalt);
+  REQUIRE(result.exception.kind == IOPException::Interrupt);
+  REQUIRE(result.exitCode == 0);
+  REQUIRE(core.exceptionProgramCounter() == 12);
+  REQUIRE(core.cause() == 0x100);
+  REQUIRE_NOTHROW(core.resumeExecution());
+}
+
+TEST_CASE("IOP program runner allows JR RFE return without an artificial stop",
+  "[iop][runner][rfe][interrupt]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  loadInstruction(&bus, 0, registerInstruction(8, 31, 0, 0));
+  loadInstruction(&bus, 4, 0x42000010);
+  IOPProgramRunConfig config;
+  config.maxMasterCycles = 16;
+  const auto result = runIOPProgram(&core, config);
+  REQUIRE(result.outcome == IOPProgramOutcome::Completed);
+  REQUIRE(result.masterCycles == 16);
+  REQUIRE(result.iopCycles == 2);
+  REQUIRE(result.instructions == 2);
+  REQUIRE_FALSE(result.cycleLimitReached);
+  REQUIRE(result.programCounter == config.returnAddress);
+  REQUIRE(result.exception.kind == IOPException::None);
 }
 
 TEST_CASE("IOP program runner rejects a missing core",

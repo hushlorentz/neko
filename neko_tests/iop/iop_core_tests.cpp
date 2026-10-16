@@ -250,7 +250,10 @@ TEST_CASE("IOP MFC0 reads only the approved common register fields with a delay"
     IOPCore core;
     core.attachBus(&bus);
     IOPCoreTestAccess::setCOP0State(
-      &core, {0x12345679, UINT32_MAX, UINT32_MAX, 0x89abcdef});
+      &core, {0x12345679,
+        test.index == 13 ? UINT32_MAX & ~IOPWord(1) : UINT32_MAX,
+        test.index == 13 ? UINT32_MAX : UINT32_MAX & ~IOPWord(0xff00),
+        0x89abcdef});
     IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
     loadInstruction(&bus, 0, cop0TransferInstruction(0, 2, test.index));
     loadInstruction(&bus, 4, registerInstruction(0x21, 2, 0, 3));
@@ -915,7 +918,7 @@ TEST_CASE("IOP coprocessor admission traps denied operations but preserves enabl
   "[iop][execution][exception-entry]")
 {
   for (const IOPWord instruction : {
-         IOPWord(0x42000010), IOPWord(0x44000000), IOPWord(0x48000000)})
+         IOPWord(0x44000000), IOPWord(0x48000000)})
   {
     for (const bool usable : {false, true})
     {
@@ -939,6 +942,485 @@ TEST_CASE("IOP coprocessor admission traps denied operations but preserves enabl
         (usable ? 0 : 0x2c | (IOPWord(coprocessor) << 28)));
     }
   }
+}
+
+TEST_CASE("IOP RFE pops every KU IE stack pattern without restoring EPC",
+  "[iop][execution][rfe][interrupt]")
+{
+  for (IOPWord stack = 0; stack < 64; ++stack)
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPWord originalStatus = 0xf27f0000 | stack;
+    IOPCoreTestAccess::setCOP0State(
+      &core, {0x12345679, originalStatus, 0x90000030, 0x80000300});
+    loadInstruction(&bus, 0x100, 0x42000010);
+    core.startExecution(0x100);
+    const auto effects = IOPCoreTestAccess::instructionEffects(core, 0x42000010);
+    REQUIRE(core.status() == originalStatus);
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(effects.exception.kind == IOPException::None);
+    core.stepInstruction();
+    REQUIRE(core.status() ==
+      ((originalStatus & ~IOPWord(0xf)) | ((stack >> 2) & 0xf)));
+    REQUIRE(core.cause() == 0x90000030);
+    REQUIRE(core.exceptionProgramCounter() == 0x80000300);
+    REQUIRE(core.badVirtualAddress() == 0x12345679);
+    REQUIRE(core.programCounter() == 0x104);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.executionState() == IOPExecutionState::Running);
+  }
+}
+
+TEST_CASE("IOP RFE uses common CU0 admission and suppresses denied stack changes",
+  "[iop][execution][rfe][interrupt]")
+{
+  for (const bool user : {false, true})
+  {
+    for (const bool usable : {false, true})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      const IOPWord originalStatus =
+        0x0060003c | (user ? 2 : 0) | (usable ? 0x10000000 : 0);
+      IOPCoreTestAccess::setCOP0State(&core, {0, originalStatus, 0, 0x300});
+      loadInstruction(&bus, 0x100, 0x42000010);
+      core.startExecution(0x100);
+      core.stepInstruction();
+      const bool denied = user && !usable;
+      REQUIRE(core.exception().kind ==
+        (denied ? IOPException::CoprocessorUnusable : IOPException::None));
+      REQUIRE(core.status() == (denied
+        ? (originalStatus & ~IOPWord(0x3f)) | ((originalStatus & 0xf) << 2)
+        : (originalStatus & ~IOPWord(0xf)) | ((originalStatus >> 2) & 0xf)));
+      REQUIRE(core.programCounter() == (denied ? 0xbfc00180 : 0x104));
+      REQUIRE(core.exceptionProgramCounter() == (denied ? 0x100 : 0x300));
+      REQUIRE(core.retiredInstructions() == (denied ? 0 : 1));
+    }
+  }
+}
+
+TEST_CASE("IOP software interrupt admission requires matching IM IP and IEc",
+  "[iop][execution][interrupt]")
+{
+  for (IOPWord pending = 0; pending < 4; ++pending)
+  {
+    for (IOPWord mask = 0; mask < 4; ++mask)
+    {
+      for (const bool enabled : {false, true})
+      {
+        for (const bool bootstrap : {false, true})
+        {
+          IOPBus bus;
+          IOPCore core;
+          core.attachBus(&bus);
+          const IOPWord originalStatus = 0x00200002 |
+            (bootstrap ? 0x00400000 : 0) | (mask << 8) | (enabled ? 1 : 0);
+          IOPCoreTestAccess::setCOP0State(
+            &core, {0x12345679, originalStatus, pending << 8, 0x300});
+          loadInstruction(&bus, 0x100, immediateInstruction(9, 0, 2, 7));
+          core.startExecution(0x100);
+          core.stepInstruction();
+          const bool admitted = enabled && (pending & mask) != 0;
+          REQUIRE(core.exception().kind ==
+            (admitted ? IOPException::Interrupt : IOPException::None));
+          REQUIRE(core.generalRegister(2) == (admitted ? 0 : 7));
+          REQUIRE(core.retiredInstructions() == (admitted ? 0 : 1));
+          REQUIRE(core.elapsedCycles() == 1);
+          REQUIRE(core.programCounter() ==
+            (admitted ? (bootstrap ? 0xbfc00180 : 0x80000080) : 0x104));
+          REQUIRE(core.exceptionProgramCounter() == (admitted ? 0x100 : 0x300));
+          REQUIRE(core.cause() == (pending << 8));
+          REQUIRE(core.badVirtualAddress() == 0x12345679);
+          REQUIRE(core.status() == (admitted
+            ? (originalStatus & ~IOPWord(0x3f)) | ((originalStatus & 0xf) << 2)
+            : originalStatus));
+          REQUIRE(core.executionState() == IOPExecutionState::Running);
+          REQUIRE(core.stopReason() == IOPStopReason::None);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP interrupt entry completes older delayed values without executing the next instruction",
+  "[iop][execution][interrupt]")
+{
+  for (const bool cop0Read : {false, true})
+  {
+    for (const IOPWord follower : {
+           immediateInstruction(9, 0, 2, 7),
+           immediateInstruction(0x2b, 0, 2, 0x200),
+           cop0TransferInstruction(4, 2, 14),
+           registerInstruction(0x11, 2, 0, 0),
+           IOPWord(0x42000010), IOPWord(0xffffffff)})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0x200, 0x12345678).status == IOPBusStatus::Completed);
+      loadInstruction(&bus, 0x100, cop0Read
+        ? cop0TransferInstruction(0, 2, 15)
+        : immediateInstruction(0x23, 0, 2, 0x200));
+      loadInstruction(&bus, 0x104, follower);
+      IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200101, 0, 0});
+      core.startExecution(0x100);
+      core.stepInstruction();
+      IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200101, 0x100, 0});
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::Interrupt);
+      REQUIRE(core.generalRegister(2) == (cop0Read ? 0x1f : 0x12345678));
+      REQUIRE(core.hi() == 0);
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+      REQUIRE(bus.read32(0x200).value == 0x12345678);
+      REQUIRE(core.exceptionProgramCounter() == 0x104);
+      REQUIRE(core.programCounter() == 0x80000080);
+      REQUIRE(core.retiredInstructions() == 1);
+      REQUIRE(core.elapsedCycles() == 2);
+    }
+  }
+}
+
+TEST_CASE("IOP JR RFE restores user mode before the target fetch and interrupt boundary",
+  "[iop][execution][rfe][interrupt]")
+{
+  for (const bool pending : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core, {0, 0x0020010c, pending ? 0x100u : 0, 0x200});
+    IOPCoreTestAccess::setGeneralRegister(&core, 26, 0x200);
+    loadInstruction(&bus, 0x80, registerInstruction(8, 26, 0, 0));
+    loadInstruction(&bus, 0x84, 0x42000010);
+    loadInstruction(&bus, 0x200, immediateInstruction(9, 0, 2, 7));
+    core.startExecution(0x80000080);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.status() == 0x00200103);
+    REQUIRE(core.programCounter() == 0x200);
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.retiredInstructions() == 2);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind ==
+      (pending ? IOPException::Interrupt : IOPException::None));
+    REQUIRE(core.generalRegister(2) == (pending ? 0 : 7));
+    REQUIRE(core.programCounter() == (pending ? 0x80000080 : 0x204));
+    REQUIRE(core.exceptionProgramCounter() == 0x200);
+    REQUIRE((core.cause() & 0x80000000) == 0);
+  }
+}
+
+TEST_CASE("IOP hardware interrupt inputs preserve unrelated Cause fields and mask independently",
+  "[iop][execution][interrupt]")
+{
+  const IOPInterruptInput inputs[] = {
+    IOPInterruptInput::Hardware0, IOPInterruptInput::Hardware1,
+    IOPInterruptInput::Hardware2, IOPInterruptInput::Hardware3,
+    IOPInterruptInput::Hardware4, IOPInterruptInput::Hardware5
+  };
+  for (std::uint8_t pending = 0; pending < 6; ++pending)
+  {
+    for (std::uint8_t enabled = 0; enabled < 6; ++enabled)
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      const IOPWord pendingBit = IOPWord(1) << (10 + pending);
+      const IOPWord enabledBit = IOPWord(1) << (10 + enabled);
+      IOPCoreTestAccess::setCOP0State(
+        &core, {0, 0x00200001 | enabledBit, 0xb0000330, 0x200});
+      core.setInterruptInput(inputs[pending], true);
+      REQUIRE(core.cause() == (0xb0000330 | pendingBit));
+      REQUIRE(core.executionState() == IOPExecutionState::Halted);
+      REQUIRE(core.exception().kind == IOPException::None);
+      core.setInterruptInput(inputs[pending], true);
+      REQUIRE(core.cause() == (0xb0000330 | pendingBit));
+      loadInstruction(&bus, 0x100, 0);
+      core.startExecution(0x100);
+      core.stepInstruction();
+      const bool admitted = pending == enabled;
+      REQUIRE(core.exception().kind ==
+        (admitted ? IOPException::Interrupt : IOPException::None));
+      REQUIRE(core.retiredInstructions() == (admitted ? 0 : 1));
+      REQUIRE(core.cause() == ((admitted ? 0x300 : 0xb0000330) | pendingBit));
+      core.setInterruptInput(inputs[pending], false);
+      REQUIRE(core.cause() == (admitted ? 0x300 : 0xb0000330));
+    }
+  }
+}
+
+TEST_CASE("IOP live hardware levels survive guest Cause writes and host pauses",
+  "[iop][execution][interrupt]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+  core.setInterruptInput(IOPInterruptInput::Hardware5, true);
+  REQUIRE(core.cause() == 0x8400);
+  REQUIRE_THROWS_AS(
+    core.setInterruptInput(static_cast<IOPInterruptInput>(6), true),
+    std::out_of_range);
+  REQUIRE(core.cause() == 0x8400);
+  loadInstruction(&bus, 0x100, cop0TransferInstruction(4, 2, 13));
+  loadInstruction(&bus, 0x104, cop0TransferInstruction(0, 3, 13));
+  loadInstruction(&bus, 0x108, 0);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xffffffff);
+  core.startExecution(0x100);
+  core.stepInstruction();
+  REQUIRE(core.cause() == 0x8700);
+  core.haltExecution();
+  core.setInterruptInput(IOPInterruptInput::Hardware0, false);
+  REQUIRE(core.cause() == 0x8300);
+  REQUIRE_NOTHROW(core.resumeExecution());
+  core.stepInstruction();
+  core.setInterruptInput(IOPInterruptInput::Hardware5, false);
+  REQUIRE(core.cause() == 0x300);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(3) == 0x8300);
+  core.setInterruptInput(IOPInterruptInput::Hardware3, true);
+  core.reset();
+  REQUIRE(core.cause() == 0);
+  REQUIRE(core.exception().kind == IOPException::None);
+  core.setInterruptInput(IOPInterruptInput::Hardware1, true);
+  core.prepareFreshExecution(0x100, 0x200, 0x300);
+  REQUIRE(core.cause() == 0);
+}
+
+TEST_CASE("IOP MTC0 changes interrupt eligibility at the following boundary",
+  "[iop][execution][interrupt]")
+{
+  struct WriteCase
+  {
+    std::uint8_t index;
+    IOPWord status;
+    IOPWord cause;
+    IOPWord value;
+  };
+  for (const WriteCase test : {
+         WriteCase{12, 0x00200100, 0x100, 0x00200101},
+         WriteCase{12, 0x00200001, 0x100, 0x00200101},
+         WriteCase{13, 0x00200101, 0, 0x100}})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core, {0, test.status, test.cause, 0});
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, test.value);
+    loadInstruction(&bus, 0x100, cop0TransferInstruction(4, 2, test.index));
+    loadInstruction(&bus, 0x104, immediateInstruction(9, 0, 3, 7));
+    core.startExecution(0x100);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.programCounter() == 0x104);
+    REQUIRE(core.retiredInstructions() == 1);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == 0x104);
+    REQUIRE(core.generalRegister(3) == 0);
+    REQUIRE(core.retiredInstructions() == 1);
+  }
+}
+
+TEST_CASE("IOP interrupts cancel taken and untaken delay slots with branch EPC BD",
+  "[iop][execution][interrupt]")
+{
+  for (const bool taken : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    loadInstruction(&bus, 0x100, immediateInstruction(taken ? 4 : 5, 0, 0, 7));
+    loadInstruction(&bus, 0x104, immediateInstruction(9, 0, 2, 7));
+    IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200401, 0, 0});
+    core.startExecution(0x100);
+    core.stepInstruction();
+    core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exception().inBranchDelaySlot);
+    REQUIRE(core.cause() == 0x80000400);
+    REQUIRE(core.exceptionProgramCounter() == 0x100);
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.branchContinuation().targetAddress == 0);
+    REQUIRE(core.generalRegister(2) == 0);
+    REQUIRE(core.retiredInstructions() == 1);
+    core.haltExecution();
+    core.resumeExecution();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.programCounter() == 0x80000084);
+    REQUIRE(core.retiredInstructions() == 2);
+  }
+}
+
+TEST_CASE("IOP accepted boundary interrupts precede unattempted fetch faults",
+  "[iop][execution][interrupt]")
+{
+  for (const IOPAddress entry : {0x102u, 0x800000u, 0x80000100u})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core, {0x12345679, 0x00200103, 0x100, 0});
+    core.startExecution(entry);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == entry);
+    REQUIRE(core.cause() == 0x100);
+    REQUIRE(core.badVirtualAddress() == 0x12345679);
+    REQUIRE(core.programCounter() == 0x80000080);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.retiredInstructions() == 0);
+  }
+}
+
+TEST_CASE("IOP RFE preserves completed prior accesses and older delayed writeback",
+  "[iop][execution][rfe][interrupt]")
+{
+  for (const std::uint8_t opcode : {0x23, 0x2b, 0x10})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core, {0, 0x0020000c, 0, 0x300});
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x80000200);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x12345678);
+    REQUIRE(bus.write32(0x200, 0xabcdef01).status == IOPBusStatus::Completed);
+    loadInstruction(&bus, 0x100, opcode == 0x10
+      ? cop0TransferInstruction(0, 2, 15)
+      : immediateInstruction(opcode, 1, 2, 0));
+    loadInstruction(&bus, 0x104, 0x42000010);
+    core.startExecution(0x80000100);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.status() == 0x00200003);
+    REQUIRE(core.generalRegister(2) ==
+      (opcode == 0x23 ? 0xabcdef01 : opcode == 0x10 ? 0x1f : 0x12345678));
+    REQUIRE(bus.read32(0x200).value == (opcode == 0x2b ? 0x12345678 : 0xabcdef01));
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    REQUIRE(core.programCounter() == 0x80000108);
+    REQUIRE(core.retiredInstructions() == 2);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::AddressErrorLoadOrFetch);
+    REQUIRE(core.exceptionProgramCounter() == 0x80000108);
+  }
+}
+
+TEST_CASE("IOP nested exception stack restores only through successive RFE instructions",
+  "[iop][execution][rfe][interrupt]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200003, 0, 0});
+  loadInstruction(&bus, 0x100, 0x0000000c);
+  loadInstruction(&bus, 0x80, 0x0000000d);
+  core.startExecution(0x100);
+  core.stepInstruction();
+  REQUIRE(core.status() == 0x0020000c);
+  core.stepInstruction();
+  REQUIRE(core.status() == 0x00200030);
+  REQUIRE(core.exceptionProgramCounter() == 0x80000080);
+  loadInstruction(&bus, 0x80, 0x42000010);
+  loadInstruction(&bus, 0x84, 0x42000010);
+  core.stepInstruction();
+  REQUIRE(core.status() == 0x0020003c);
+  core.stepInstruction();
+  REQUIRE(core.status() == 0x0020003f);
+  REQUIRE(core.exceptionProgramCounter() == 0x80000080);
+  REQUIRE(core.cause() == 0x24);
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.retiredInstructions() == 2);
+}
+
+TEST_CASE("IOP RFE effect does not pop the stack when a fault suppresses retirement",
+  "[iop][execution][rfe][interrupt]")
+{
+  IOPCore core;
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x0020000c, 0, 0});
+  core.startExecution(0x100);
+  auto effects = IOPCoreTestAccess::instructionEffects(core, 0x42000010);
+  effects.exception.kind = IOPException::ReservedInstruction;
+  IOPCoreTestAccess::commitInstructionEffects(&core, 0x100, effects);
+  REQUIRE(core.status() == 0x00200030);
+  REQUIRE(core.exception().kind == IOPException::ReservedInstruction);
+  REQUIRE(core.retiredInstructions() == 0);
+}
+
+TEST_CASE("IOP asserted interrupt levels retrigger after return until deasserted",
+  "[iop][execution][rfe][interrupt]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200403, 0, 0});
+  IOPCoreTestAccess::setGeneralRegister(&core, 26, 0x100);
+  loadInstruction(&bus, 0x80, registerInstruction(8, 26, 0, 0));
+  loadInstruction(&bus, 0x84, 0x42000010);
+  loadInstruction(&bus, 0x100, immediateInstruction(9, 0, 2, 7));
+  core.setInterruptInput(IOPInterruptInput::Hardware0, true);
+  core.startExecution(0x100);
+  for (const bool deassert : {false, true})
+  {
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == 0x100);
+    REQUIRE(core.cause() == 0x400);
+    if (deassert)
+    {
+      core.setInterruptInput(IOPInterruptInput::Hardware0, false);
+    }
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(core.status() == 0x00200403);
+    REQUIRE(core.generalRegister(2) == 0);
+  }
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.generalRegister(2) == 7);
+  REQUIRE(core.retiredInstructions() == 5);
+  REQUIRE(core.elapsedCycles() == 7);
+}
+
+TEST_CASE("IOP syscall handler returns through delayed EPC read JR and RFE",
+  "[iop][execution][rfe][interrupt]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200003, 0, 0});
+  loadInstruction(&bus, 0x100, 0x0000000c);
+  loadInstruction(&bus, 0x104, immediateInstruction(9, 0, 2, 7));
+  loadInstruction(&bus, 0x80, cop0TransferInstruction(0, 26, 14));
+  loadInstruction(&bus, 0x84, 0);
+  loadInstruction(&bus, 0x88, immediateInstruction(9, 26, 26, 4));
+  loadInstruction(&bus, 0x8c, registerInstruction(8, 26, 0, 0));
+  loadInstruction(&bus, 0x90, 0x42000010);
+  core.startExecution(0x100);
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::SystemCall);
+  for (int instruction = 0; instruction < 5; ++instruction)
+  {
+    core.stepInstruction();
+  }
+  REQUIRE(core.programCounter() == 0x104);
+  REQUIRE(core.status() == 0x00200003);
+  REQUIRE(core.exceptionProgramCounter() == 0x100);
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE_FALSE(core.branchContinuation().active);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 7);
+  REQUIRE(core.retiredInstructions() == 6);
+  REQUIRE(core.elapsedCycles() == 7);
 }
 
 TEST_CASE("IOP core reset establishes deterministic architectural state")
@@ -1334,7 +1816,7 @@ TEST_CASE("IOP instruction boundary does not retire unavailable semantics",
   "[iop][execution]")
 {
   const std::uint8_t unavailableInstructions[][4] = {
-    {0x10, 0x00, 0x00, 0x42},
+    {0, 0, 0, 0x48},
     {0, 0, 0, 0x44}
   };
   for (const auto &instruction : unavailableInstructions)
@@ -1342,7 +1824,7 @@ TEST_CASE("IOP instruction boundary does not retire unavailable semantics",
     IOPBus bus;
     IOPCore core;
     core.attachBus(&bus);
-    IOPCoreTestAccess::setCOP0State(&core, {0, 0x20600000, 0, 0});
+    IOPCoreTestAccess::setCOP0State(&core, {0, 0x60600000, 0, 0});
     REQUIRE(
       bus.loadPhysical(0, instruction, sizeof(instruction)) ==
       IOPBusStatus::Completed);
@@ -3040,9 +3522,10 @@ TEST_CASE("IOP deferred semantics preserve a pending load for inspection",
   IOPBus bus;
   IOPCore core;
   core.attachBus(&bus);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x20600000, 0, 0});
   REQUIRE(bus.write32(0x100, 0xabcdef01).status == IOPBusStatus::Completed);
   loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
-  loadInstruction(&bus, 4, 0x42000010);
+  loadInstruction(&bus, 4, 0x44000000);
   core.startExecution(0);
   core.stepInstruction();
   core.stepInstruction();

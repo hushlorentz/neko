@@ -38,6 +38,16 @@ enum class IOPException : std::uint8_t
   ArithmeticOverflow
 };
 
+enum class IOPInterruptInput : std::uint8_t
+{
+  Hardware0,
+  Hardware1,
+  Hardware2,
+  Hardware3,
+  Hardware4,
+  Hardware5
+};
+
 enum class IOPAddressOutcome : std::uint8_t
 {
   Translated,
@@ -151,6 +161,8 @@ namespace IOPCOP0
 
 namespace IOPCOP0Status
 {
+  constexpr IOPWord INTERRUPT_ENABLE = UINT32_C(1);
+  constexpr IOPWord INTERRUPT_MASK = UINT32_C(0x0000ff00);
   constexpr IOPWord COP0_USABLE =
     UINT32_C(1) << 28;
   constexpr IOPWord CURRENT_USER_MODE =
@@ -171,6 +183,7 @@ namespace IOPCOP0Cause
 {
   constexpr IOPWord BRANCH_DELAY = UINT32_C(1) << 31;
   constexpr IOPWord INTERRUPT_PENDING = UINT32_C(0x0000ff00);
+  constexpr IOPWord HARDWARE_INTERRUPT_PENDING = UINT32_C(0x0000fc00);
   constexpr IOPWord READ_MASK = UINT32_C(0xb000ff7c);
   constexpr IOPWord SOFTWARE_INTERRUPT_PENDING =
     UINT32_C(0x00000300);

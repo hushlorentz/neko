@@ -2169,7 +2169,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
       Instruction, Coprocessor Unusable, and Arithmetic Overflow. Preserve
       older delayed results, destination suppression, delay-slot EPC/BD,
       KU/IE stacking, and BEV-selected vectors.
-- [ ] Implement the approved return-from-exception operation and interrupt
+- [x] Implement the approved return-from-exception operation and interrupt
       enable stack semantics, including nested exception behavior and
       instruction-boundary interrupt delivery.
 - [ ] Complete focused exception-priority, reset/restart, host-resume, and

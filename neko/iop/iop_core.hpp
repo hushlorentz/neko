@@ -79,6 +79,7 @@ enum class IOPCOP0WriteTarget : std::uint8_t
 {
   None,
   Status,
+  StatusStack,
   Cause,
   ExceptionProgramCounter
 };
@@ -131,6 +132,7 @@ class IOPCore final
     void haltExecution();
     void resumeExecution();
     void stepInstruction();
+    void setInterruptInput(IOPInterruptInput input, bool asserted);
 
     IOPAddressClassification classifyAddress(
       IOPAddress virtualAddress) const;
@@ -191,6 +193,7 @@ class IOPCore final
       const struct IOPInstruction &instruction,
       IOPWord target) const;
     void commitCOP0Write(const IOPCOP0WriteRequest &request);
+    bool interruptDeliverable() const;
     void enterException(
       IOPAddress instructionAddress,
       const IOPExceptionRecord &exception);

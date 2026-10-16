@@ -187,10 +187,12 @@ namespace
     return effects;
   }
 
-  IOPWord synchronousExceptionCode(IOPException exception)
+  IOPWord exceptionCode(IOPException exception)
   {
     switch (exception)
     {
+      case IOPException::Interrupt:
+        return 0;
       case IOPException::AddressErrorLoadOrFetch:
         return 4;
       case IOPException::AddressErrorStore:
@@ -210,8 +212,7 @@ namespace
       case IOPException::ArithmeticOverflow:
         return 12;
       case IOPException::None:
-      case IOPException::Interrupt:
-        throw std::logic_error("Invalid synchronous IOP exception.");
+        throw std::logic_error("Invalid IOP exception.");
     }
     throw std::logic_error("Unknown IOP exception.");
   }
@@ -508,6 +509,13 @@ void IOPCore::stepInstruction()
 
   enteredException = {};
   const IOPAddress instructionAddress = pc;
+  if (interruptDeliverable())
+  {
+    IOPInstructionEffects effects;
+    effects.exception.kind = IOPException::Interrupt;
+    commitInstructionEffects(instructionAddress, effects);
+    return;
+  }
   const IOPMemoryReadResult fetch = fetchInstruction();
   if (fetch.outcome != IOPAccessOutcome::Completed)
   {
@@ -838,6 +846,15 @@ IOPInstructionEffects IOPCore::instructionEffects(
     case IOPOperation::MoveFromCOP0:
     case IOPOperation::MoveToCOP0:
       return cop0TransferEffects(instruction, target);
+    case IOPOperation::ReturnFromException:
+    {
+      IOPInstructionEffects effects = retiredEffects();
+      effects.cop0Write = {
+        IOPCOP0WriteTarget::StatusStack,
+        (cop0.status >> 2) & 0xf
+      };
+      return effects;
+    }
     case IOPOperation::LoadByte:
     case IOPOperation::LoadByteUnsigned:
     case IOPOperation::LoadHalfword:
@@ -1006,6 +1023,9 @@ void IOPCore::commitCOP0Write(const IOPCOP0WriteRequest &request)
         (cop0.status & ~request.value & IOPCOP0Status::PARITY_ERROR) |
         IOPCOP0Status::TLB_SHUTDOWN;
       break;
+    case IOPCOP0WriteTarget::StatusStack:
+      cop0.status = (cop0.status & ~IOPWord(0xf)) | (request.value & 0xf);
+      break;
     case IOPCOP0WriteTarget::Cause:
       cop0.cause =
         (cop0.cause & IOPCOP0Cause::READ_MASK &
@@ -1018,11 +1038,28 @@ void IOPCore::commitCOP0Write(const IOPCOP0WriteRequest &request)
   }
 }
 
+void IOPCore::setInterruptInput(IOPInterruptInput input, bool asserted)
+{
+  const std::uint8_t index = static_cast<std::uint8_t>(input);
+  if (index >= 6)
+  {
+    throw std::out_of_range("IOP hardware interrupt input is out of range.");
+  }
+  const IOPWord mask = IOPWord(1) << (10 + index);
+  cop0.cause = (cop0.cause & ~mask) | (asserted ? mask : 0);
+}
+
+bool IOPCore::interruptDeliverable() const
+{
+  return (cop0.status & IOPCOP0Status::INTERRUPT_ENABLE) != 0 &&
+    (cop0.status & cop0.cause & IOPCOP0Status::INTERRUPT_MASK) != 0;
+}
+
 void IOPCore::enterException(
   IOPAddress instructionAddress,
   const IOPExceptionRecord &exception)
 {
-  const IOPWord code = synchronousExceptionCode(exception.kind);
+  const IOPWord code = exceptionCode(exception.kind);
   enteredException = exception;
   enteredException.inBranchDelaySlot = branch.active;
   cop0.exceptionProgramCounter = branch.active
