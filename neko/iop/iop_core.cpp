@@ -184,18 +184,44 @@ namespace
   {
     IOPInstructionEffects effects;
     effects.exception.kind = IOPException::ArithmeticOverflow;
-    effects.stopReason = IOPStopReason::ExecutionException;
     return effects;
   }
 
+  IOPWord synchronousExceptionCode(IOPException exception)
+  {
+    switch (exception)
+    {
+      case IOPException::AddressErrorLoadOrFetch:
+        return 4;
+      case IOPException::AddressErrorStore:
+        return 5;
+      case IOPException::InstructionBusError:
+        return 6;
+      case IOPException::DataBusError:
+        return 7;
+      case IOPException::SystemCall:
+        return 8;
+      case IOPException::Breakpoint:
+        return 9;
+      case IOPException::ReservedInstruction:
+        return 10;
+      case IOPException::CoprocessorUnusable:
+        return 11;
+      case IOPException::ArithmeticOverflow:
+        return 12;
+      case IOPException::None:
+      case IOPException::Interrupt:
+        throw std::logic_error("Invalid synchronous IOP exception.");
+    }
+    throw std::logic_error("Unknown IOP exception.");
+  }
+
   IOPInstructionEffects memoryReadFailureEffects(
-    const IOPMemoryReadResult &read,
-    IOPStopReason stopReason)
+    const IOPMemoryReadResult &read)
   {
     IOPInstructionEffects effects;
     effects.exception.kind = read.exception;
     effects.exception.badVirtualAddress = read.virtualAddress;
-    effects.stopReason = stopReason;
     return effects;
   }
 
@@ -274,7 +300,6 @@ namespace
   {
     IOPInstructionEffects effects;
     effects.exception.kind = IOPException::ReservedInstruction;
-    effects.stopReason = IOPStopReason::ReservedInstruction;
     return effects;
   }
 
@@ -283,7 +308,6 @@ namespace
     IOPInstructionEffects effects;
     effects.exception.kind = IOPException::AddressErrorLoadOrFetch;
     effects.exception.badVirtualAddress = address;
-    effects.stopReason = IOPStopReason::ExecutionException;
     return effects;
   }
 
@@ -414,7 +438,7 @@ void IOPCore::reset()
   cop0.exceptionProgramCounter = 0;
   branch = {};
   delayedResult = {};
-  pendingException = {};
+  enteredException = {};
   rejectedStore = {};
   state = IOPExecutionState::Halted;
   haltReason = IOPStopReason::None;
@@ -449,7 +473,7 @@ void IOPCore::startExecution(IOPAddress entryPoint)
   branch = {};
   delayedResult = {};
   hiLoState = {};
-  pendingException = {};
+  enteredException = {};
   rejectedStore = {};
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
@@ -465,12 +489,10 @@ void IOPCore::resumeExecution()
 {
   if (state != IOPExecutionState::Halted ||
       haltReason != IOPStopReason::HostHalt ||
-      pendingException.kind != IOPException::None ||
       rejectedStore.width != IOPStoreWidth::None)
   {
     throw std::logic_error(
-      "IOP Core can resume only after a host halt without an exception "
-      "or rejected store.");
+      "IOP Core can resume only after a host halt without a rejected store.");
   }
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
@@ -484,13 +506,14 @@ void IOPCore::stepInstruction()
       "IOP Core cannot step while halted.");
   }
 
+  enteredException = {};
   const IOPAddress instructionAddress = pc;
   const IOPMemoryReadResult fetch = fetchInstruction();
   if (fetch.outcome != IOPAccessOutcome::Completed)
   {
     commitInstructionEffects(
       instructionAddress,
-      memoryReadFailureEffects(fetch, IOPStopReason::FetchFailure));
+      memoryReadFailureEffects(fetch));
     return;
   }
 
@@ -502,17 +525,34 @@ void IOPCore::stepInstruction()
 IOPInstructionEffects IOPCore::instructionEffects(
   const IOPDecodeResult &decoded) const
 {
-  switch (decoded.disposition)
+  if (decoded.disposition == IOPDecodeDisposition::Reserved)
   {
-    case IOPDecodeDisposition::Reserved:
-      return reservedInstructionEffects();
-    case IOPDecodeDisposition::ValidButDeferred:
-      return {};
-    case IOPDecodeDisposition::Supported:
-      break;
+    return reservedInstructionEffects();
   }
-
   const IOPInstruction &instruction = decoded.instruction;
+  const bool cop0Operation = instruction.opcode == 0x10;
+  const bool otherCoprocessorOperation =
+    instruction.operation == IOPOperation::CoprocessorOperation ||
+    instruction.operation == IOPOperation::LoadWordToCoprocessor ||
+    instruction.operation == IOPOperation::StoreWordFromCoprocessor;
+  if (cop0Operation || otherCoprocessorOperation)
+  {
+    const std::uint8_t coprocessor = instruction.opcode & 3;
+    const bool kernelCOP0 = cop0Operation &&
+      (cop0.status & IOPCOP0Status::CURRENT_USER_MODE) == 0;
+    if (!kernelCOP0 &&
+        (cop0.status & (IOPWord(1) << (28 + coprocessor))) == 0)
+    {
+      IOPInstructionEffects effects;
+      effects.exception.kind = IOPException::CoprocessorUnusable;
+      effects.exception.coprocessor = coprocessor;
+      return effects;
+    }
+  }
+  if (decoded.disposition == IOPDecodeDisposition::ValidButDeferred)
+  {
+    return {};
+  }
   if (branch.active && isControlTransfer(instruction.operation))
   {
     return reservedInstructionEffects();
@@ -525,6 +565,16 @@ IOPInstructionEffects IOPCore::instructionEffects(
   {
     case IOPOperation::Nop:
       return retiredEffects();
+    case IOPOperation::SystemCall:
+    case IOPOperation::Breakpoint:
+    {
+      IOPInstructionEffects effects;
+      effects.exception.kind =
+        instruction.operation == IOPOperation::SystemCall
+          ? IOPException::SystemCall
+          : IOPException::Breakpoint;
+      return effects;
+    }
     case IOPOperation::ShiftLeftLogical:
       return destinationEffects(
         instruction.destinationRegister,
@@ -834,8 +884,7 @@ IOPInstructionEffects IOPCore::alignedLoadEffects(
   }
   if (read.outcome != IOPAccessOutcome::Completed)
   {
-    return memoryReadFailureEffects(
-      read, IOPStopReason::ExecutionException);
+    return memoryReadFailureEffects(read);
   }
 
   IOPWord value = read.value;
@@ -863,7 +912,7 @@ IOPInstructionEffects IOPCore::wordMergeLoadEffects(
   if (read.outcome != IOPAccessOutcome::Completed)
   {
     read.virtualAddress = address;
-    return memoryReadFailureEffects(read, IOPStopReason::ExecutionException);
+    return memoryReadFailureEffects(read);
   }
   if (delayedResult.source == IOPDelayedResultSource::Load &&
       delayedResult.destination == instruction.targetRegister)
@@ -898,14 +947,6 @@ IOPInstructionEffects IOPCore::cop0TransferEffects(
   const IOPInstruction &instruction,
   IOPWord target) const
 {
-  if ((cop0.status & IOPCOP0Status::CURRENT_USER_MODE) != 0 &&
-      (cop0.status & IOPCOP0Status::COP0_USABLE) == 0)
-  {
-    IOPInstructionEffects effects;
-    effects.exception.kind = IOPException::CoprocessorUnusable;
-    return effects;
-  }
-
   IOPWord value = 0;
   IOPCOP0WriteTarget writeTarget = IOPCOP0WriteTarget::None;
   switch (instruction.destinationRegister)
@@ -977,6 +1018,41 @@ void IOPCore::commitCOP0Write(const IOPCOP0WriteRequest &request)
   }
 }
 
+void IOPCore::enterException(
+  IOPAddress instructionAddress,
+  const IOPExceptionRecord &exception)
+{
+  const IOPWord code = synchronousExceptionCode(exception.kind);
+  enteredException = exception;
+  enteredException.inBranchDelaySlot = branch.active;
+  cop0.exceptionProgramCounter = branch.active
+    ? branch.instructionAddress
+    : instructionAddress;
+  cop0.cause =
+    (cop0.cause & IOPCOP0Cause::INTERRUPT_PENDING) |
+    (code << 2) |
+    (branch.active ? IOPCOP0Cause::BRANCH_DELAY : 0);
+  if (exception.kind == IOPException::CoprocessorUnusable)
+  {
+    cop0.cause |= IOPWord(exception.coprocessor & 3) << 28;
+  }
+  if (exception.kind == IOPException::AddressErrorLoadOrFetch ||
+      exception.kind == IOPException::AddressErrorStore)
+  {
+    cop0.badVirtualAddress = exception.badVirtualAddress;
+  }
+  cop0.status =
+    (cop0.status & ~IOPWord(0x3f)) |
+    ((cop0.status & 0xf) << 2);
+  pc = (cop0.status & IOPCOP0Status::BOOT_EXCEPTION_VECTORS) != 0
+    ? IOPExceptionVector::BOOT_GENERAL
+    : IOPExceptionVector::GENERAL;
+  branch = {};
+  delayedResult = {};
+  state = IOPExecutionState::Running;
+  haltReason = IOPStopReason::None;
+}
+
 void IOPCore::commitInstructionEffects(
   IOPAddress instructionAddress,
   const IOPInstructionEffects &effects)
@@ -1001,7 +1077,7 @@ void IOPCore::commitInstructionEffects(
   ++cycles;
 
   const bool inBranchDelaySlot = branch.active;
-  IOPPendingException selectedException = effects.exception;
+  IOPExceptionRecord selectedException = effects.exception;
   if (effects.completion == IOPInstructionCompletion::Retired &&
       selectedException.kind == IOPException::None &&
       effects.store.operation != IOPStoreOperation::None)
@@ -1039,12 +1115,7 @@ void IOPCore::commitInstructionEffects(
   }
   if (selectedException.kind != IOPException::None)
   {
-    pendingException = selectedException;
-    pendingException.inBranchDelaySlot = inBranchDelaySlot;
-    state = IOPExecutionState::Halted;
-    haltReason = effects.store.operation != IOPStoreOperation::None
-      ? IOPStopReason::ExecutionException
-      : effects.stopReason;
+    enterException(instructionAddress, selectedException);
     return;
   }
   if (effects.completion == IOPInstructionCompletion::Halted)
@@ -1480,9 +1551,9 @@ IOPCore::delayedResultContinuation() const
   return delayedResult;
 }
 
-const IOPPendingException &IOPCore::exception() const
+const IOPExceptionRecord &IOPCore::exception() const
 {
-  return pendingException;
+  return enteredException;
 }
 
 IOPExecutionState IOPCore::executionState() const

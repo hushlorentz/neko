@@ -45,13 +45,14 @@ struct IOPProgramRunResult
   IOPExecutionState state = IOPExecutionState::Halted;
   IOPStopReason stopReason = IOPStopReason::None;
   IOPAddress programCounter = 0;
-  IOPPendingException exception;
+  IOPExceptionRecord exception;
   IOPStoreFailure storeFailure;
   IOPProgramOutcome outcome = IOPProgramOutcome::Stopped;
   IOPWord exitCode = 0;
 };
 
 // Program bytes must already be installed through IOPBus host loading.
+// Stops at exception entry; the core can resume at the selected handler vector.
 IOPProgramRunResult runIOPProgram(
   IOPCore *core,
   const IOPProgramRunConfig &config);

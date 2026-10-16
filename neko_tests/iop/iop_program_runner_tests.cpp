@@ -192,8 +192,9 @@ TEST_CASE("IOP program runner preserves stop and exception diagnostics",
   REQUIRE(result.instructions == 0);
   REQUIRE_FALSE(result.cycleLimitReached);
   REQUIRE(result.state == IOPExecutionState::Halted);
-  REQUIRE(result.stopReason == IOPStopReason::ReservedInstruction);
-  REQUIRE(result.programCounter == 0);
+  REQUIRE(result.stopReason == IOPStopReason::HostHalt);
+  REQUIRE(result.programCounter == 0xbfc00180);
+  REQUIRE(core.exceptionProgramCounter() == 0);
   REQUIRE(result.exception.kind == IOPException::ReservedInstruction);
   REQUIRE(result.exception.badVirtualAddress == 0);
   REQUIRE_FALSE(result.exception.inBranchDelaySlot);
@@ -206,7 +207,7 @@ TEST_CASE("IOP program runner reports non-exception execution stops",
   IOPBus bus;
   IOPCore core;
   core.attachBus(&bus);
-  loadInstruction(&bus, 0, UINT32_C(0x0000000c));
+  loadInstruction(&bus, 0, UINT32_C(0x42000010));
 
   IOPProgramRunConfig config;
   config.maxMasterCycles = 8;
@@ -220,6 +221,31 @@ TEST_CASE("IOP program runner reports non-exception execution stops",
   REQUIRE(result.stopReason == IOPStopReason::ExecutionException);
   REQUIRE(result.exception.kind == IOPException::None);
   REQUIRE(result.outcome == IOPProgramOutcome::Stopped);
+}
+
+TEST_CASE("IOP program runner stops after architectural entry before fetching the vector",
+  "[iop][runner][exception-entry]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  loadInstruction(&bus, 0, 0x0000000c);
+  IOPProgramRunConfig config;
+  config.maxMasterCycles = 80;
+  config.returnAddress = 0xbfc00180;
+  const auto result = runIOPProgram(&core, config);
+  REQUIRE(result.outcome == IOPProgramOutcome::Exception);
+  REQUIRE(result.masterCycles == 8);
+  REQUIRE(result.iopCycles == 1);
+  REQUIRE(result.instructions == 0);
+  REQUIRE_FALSE(result.cycleLimitReached);
+  REQUIRE(result.state == IOPExecutionState::Halted);
+  REQUIRE(result.stopReason == IOPStopReason::HostHalt);
+  REQUIRE(result.programCounter == 0xbfc00180);
+  REQUIRE(result.exception.kind == IOPException::SystemCall);
+  REQUIRE(core.exceptionProgramCounter() == 0);
+  REQUIRE(core.cause() == 0x20);
+  REQUIRE_NOTHROW(core.resumeExecution());
 }
 
 TEST_CASE("IOP program runner rejects a missing core",

@@ -51,6 +51,11 @@ IOPProgramRunResult runIOPProgram(
     }
     core->stepInstruction();
     masterCycles += IOPProgramRuntime::MASTER_CYCLE_PERIOD;
+    if (core->exception().kind != IOPException::None)
+    {
+      core->haltExecution();
+      break;
+    }
   }
 
   IOPProgramRunResult result;

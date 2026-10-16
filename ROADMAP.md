@@ -2164,7 +2164,7 @@ unresolved hardware questions are maintained in `PROJECT.md`.
 - [x] Implement the approved IOP COP0 register set, writable masks, fixed bits,
       reset values, transfer instructions, and privilege behavior without
       inheriting EE-specific register semantics.
-- [ ] Implement precise synchronous exception entry for Address Error,
+- [x] Implement precise synchronous exception entry for Address Error,
       instruction/load Bus Error, System Call, Breakpoint, Reserved
       Instruction, Coprocessor Unusable, and Arithmetic Overflow. Preserve
       older delayed results, destination suppression, delay-slot EPC/BD,

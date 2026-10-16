@@ -18,8 +18,6 @@ enum class IOPStopReason : std::uint8_t
 {
   None,
   HostHalt,
-  FetchFailure,
-  ReservedInstruction,
   UndefinedOperation,
   ExecutionException,
   StoreFailure
@@ -129,7 +127,7 @@ struct IOPDelayedResultContinuation
   IOPWord value = 0;
 };
 
-struct IOPPendingException
+struct IOPExceptionRecord
 {
   IOPException kind = IOPException::None;
   IOPAddress badVirtualAddress = 0;
@@ -171,9 +169,17 @@ namespace IOPCOP0Status
 
 namespace IOPCOP0Cause
 {
+  constexpr IOPWord BRANCH_DELAY = UINT32_C(1) << 31;
+  constexpr IOPWord INTERRUPT_PENDING = UINT32_C(0x0000ff00);
   constexpr IOPWord READ_MASK = UINT32_C(0xb000ff7c);
   constexpr IOPWord SOFTWARE_INTERRUPT_PENDING =
     UINT32_C(0x00000300);
+}
+
+namespace IOPExceptionVector
+{
+  constexpr IOPAddress GENERAL = UINT32_C(0x80000080);
+  constexpr IOPAddress BOOT_GENERAL = UINT32_C(0xbfc00180);
 }
 
 namespace IOPReset

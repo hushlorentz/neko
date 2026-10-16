@@ -99,7 +99,7 @@ struct IOPInstructionEffects
   IOPDelayedResultContinuation delayedResult;
   IOPStoreRequest store;
   IOPCOP0WriteRequest cop0Write;
-  IOPPendingException exception;
+  IOPExceptionRecord exception;
   IOPInstructionCompletion completion =
     IOPInstructionCompletion::Halted;
   IOPStopReason stopReason = IOPStopReason::ExecutionException;
@@ -166,7 +166,8 @@ class IOPCore final
       branchContinuation() const;
     const IOPDelayedResultContinuation &
       delayedResultContinuation() const;
-    const IOPPendingException &exception() const;
+    // Entry event from the last step, cleared when the next step begins.
+    const IOPExceptionRecord &exception() const;
     const IOPStoreFailure &storeFailure() const;
 
     IOPExecutionState executionState() const;
@@ -190,6 +191,9 @@ class IOPCore final
       const struct IOPInstruction &instruction,
       IOPWord target) const;
     void commitCOP0Write(const IOPCOP0WriteRequest &request);
+    void enterException(
+      IOPAddress instructionAddress,
+      const IOPExceptionRecord &exception);
     void commitInstructionEffects(
       IOPAddress instructionAddress,
       const IOPInstructionEffects &effects);
@@ -220,7 +224,7 @@ class IOPCore final
     IOPCOP0State cop0;
     IOPBranchContinuation branch;
     IOPDelayedResultContinuation delayedResult;
-    IOPPendingException pendingException;
+    IOPExceptionRecord enteredException;
     IOPStoreFailure rejectedStore;
     IOPExecutionState state = IOPExecutionState::Halted;
     IOPStopReason haltReason = IOPStopReason::None;
