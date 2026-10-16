@@ -2149,26 +2149,45 @@ unresolved hardware questions are maintained in `PROJECT.md`.
 
 ### Loads, Stores, COP0, and Precise Exceptions
 
-- [ ] Implement aligned byte, halfword, and word loads/stores plus approved
-      unaligned merge operations through typed `IOPBus` requests. Pin
-      sign/zero extension, partial-word merge behavior, register zero, address
-      wrapping, and any architecturally visible load-delay continuation.
+- [x] Implement aligned byte, halfword, and word loads through typed
+      `IOPBus` requests and the existing delayed-result continuation. Pin
+      sign/zero extension, the one-instruction load delay, destination-write
+      conflicts, register zero, wrapping addresses, faults, branches,
+      reset, and host pause/resume.
+- [ ] Implement aligned byte, halfword, and word stores through typed
+      `IOPBus` requests. Preserve store order and pin the approved write-buffer
+      abstraction and bus-failure policy without inventing precise EE-style
+      store bus errors.
+- [ ] Implement little-endian `LWL`/`LWR` and `SWL`/`SWR` merges. Pin every
+      byte offset, paired-load bypass, overlapping destinations, partial-store
+      access boundaries, and fault atomicity.
 - [ ] Implement the approved IOP COP0 register set, writable masks, fixed bits,
       reset values, transfer instructions, and privilege behavior without
       inheriting EE-specific register semantics.
-- [ ] Implement precise Address Error, instruction/data Bus Error, System Call,
-      Breakpoint, Reserved Instruction, Arithmetic Overflow, and interrupt
-      transitions. Preserve delay-slot EPC/BD ownership and the oldest
-      architectural fault.
+- [ ] Implement precise synchronous exception entry for Address Error,
+      instruction/load Bus Error, System Call, Breakpoint, Reserved
+      Instruction, Coprocessor Unusable, and Arithmetic Overflow. Preserve
+      older delayed results, destination suppression, delay-slot EPC/BD,
+      KU/IE stacking, and BEV-selected vectors.
 - [ ] Implement the approved return-from-exception operation and interrupt
       enable stack semantics, including nested exception behavior and
       instruction-boundary interrupt delivery.
-- [ ] Decide cache scope only from approved R3000A/IOP evidence. If cache
-      contents or isolation are software-visible, give them a focused owner and
-      persistence contract; otherwise document the exact abstraction and the
-      evidence that makes it sufficient.
 - [ ] Complete focused exception-priority, reset/restart, host-resume, and
       independent correctness review before adding platform interrupts.
+
+### IOP Guest-Visible Cache Foundation
+
+- [ ] Audit the approved cache profile and define one focused cache owner,
+      locally replaceable provisional geometry, access routing, reset,
+      inspection, hashing, and persistence contracts before implementation.
+- [ ] Implement functional instruction/data cache access, write-through
+      ordering, stale CPU/DMA visibility, and uncached bypass without claiming
+      undocumented refill or contention timing.
+- [ ] Implement software-visible `Status.IsC`/`SwC` isolation, cache probing,
+      and isolated partial-store invalidation through the same cache owner.
+- [ ] Complete focused cache-maintenance, alias, fault, reset, and
+      continuation conformance plus independent correctness review before
+      platform integration.
 
 ### IOP Interrupt Controller
 

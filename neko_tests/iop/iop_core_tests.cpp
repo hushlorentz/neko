@@ -710,8 +710,8 @@ TEST_CASE("IOP effect commit rejects incomplete retirement atomically",
   REQUIRE(core.retiredInstructions() == 0);
 }
 
-TEST_CASE("IOP instruction boundary rejects an unimplemented delayed result",
-  "[iop][execution]")
+TEST_CASE("IOP instruction boundary publishes an older delayed result",
+  "[iop][execution][load]")
 {
   IOPCore core;
   core.startExecution(0x100);
@@ -722,19 +722,18 @@ TEST_CASE("IOP instruction boundary rejects an unimplemented delayed result",
   effects.completion = IOPInstructionCompletion::Retired;
   effects.stopReason = IOPStopReason::None;
 
-  REQUIRE_THROWS_WITH(
-    IOPCoreTestAccess::commitInstructionEffects(
-      &core,
-      0x100,
-      effects),
-    "IOP continuation commit is not implemented.");
-  REQUIRE(core.programCounter() == 0x100);
+  IOPCoreTestAccess::commitInstructionEffects(
+    &core,
+    0x100,
+    effects);
+  REQUIRE(core.programCounter() == 0x104);
+  REQUIRE(core.generalRegister(1) == UINT32_C(0x12345678));
   REQUIRE_FALSE(core.branchContinuation().active);
   REQUIRE(
     core.delayedResultContinuation().source ==
-    IOPDelayedResultSource::Load);
-  REQUIRE(core.elapsedCycles() == 0);
-  REQUIRE(core.retiredInstructions() == 0);
+    IOPDelayedResultSource::None);
+  REQUIRE(core.elapsedCycles() == 1);
+  REQUIRE(core.retiredInstructions() == 1);
 }
 
 TEST_CASE("IOP executes fixed and variable logical shifts",
@@ -1845,4 +1844,442 @@ TEST_CASE("IOP exceptions in a delay slot preserve branch provenance",
   REQUIRE(core.exception().kind == IOPException::ArithmeticOverflow);
   REQUIRE(core.exception().inBranchDelaySlot);
   REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP aligned loads extend little endian data after one instruction",
+  "[iop][execution][load]")
+{
+  struct LoadCase
+  {
+    std::uint8_t opcode;
+    std::uint16_t offset;
+    IOPWord expected;
+  };
+  const LoadCase cases[] = {
+    {0x20, 0, 0},
+    {0x20, 1, 0x7f},
+    {0x20, 2, UINT32_C(0xffffff80)},
+    {0x20, 3, UINT32_C(0xffffffff)},
+    {0x24, 0, 0},
+    {0x24, 1, 0x7f},
+    {0x24, 2, 0x80},
+    {0x24, 3, 0xff},
+    {0x21, 0, 0x7f00},
+    {0x21, 2, UINT32_C(0xffffff80)},
+    {0x25, 0, 0x7f00},
+    {0x25, 2, 0xff80},
+    {0x23, 0, UINT32_C(0xff807f00)}
+  };
+  for (const auto &test : cases)
+  {
+    INFO("opcode " << unsigned(test.opcode) << " offset " << test.offset);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const std::uint8_t data[] = {0, 0x7f, 0x80, 0xff};
+    REQUIRE(bus.loadPhysical(0x100, data, sizeof(data)) ==
+      IOPBusStatus::Completed);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x100);
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x1234);
+    loadInstruction(&bus, 0,
+      immediateInstruction(test.opcode, 1, 2, test.offset));
+    loadInstruction(&bus, 4, registerInstruction(0x21, 2, 0, 3));
+    loadInstruction(&bus, 8, registerInstruction(0x21, 2, 0, 4));
+    core.startExecution(0);
+
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0x1234);
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::Load);
+    REQUIRE(core.delayedResultContinuation().destination == 2);
+    REQUIRE(core.delayedResultContinuation().value == test.expected);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(3) == 0x1234);
+    REQUIRE(core.generalRegister(2) == test.expected);
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    REQUIRE(core.delayedResultContinuation().destination == 0);
+    REQUIRE(core.delayedResultContinuation().value == 0);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(4) == test.expected);
+    REQUIRE(core.programCounter() == 12);
+    REQUIRE(core.retiredInstructions() == 3);
+    REQUIRE(core.elapsedCycles() == 3);
+    REQUIRE(core.exception().kind == IOPException::None);
+  }
+}
+
+TEST_CASE("IOP loads sign extend offsets and wrap effective addresses",
+  "[iop][execution][load]")
+{
+  struct AddressCase
+  {
+    IOPAddress base;
+    std::uint16_t offset;
+    IOPAddress physical;
+  };
+  const AddressCase cases[] = {
+    {0x104, 0xfffc, 0x100},
+    {UINT32_C(0xfffffff0), 0x110, 0x100},
+    {0x807ffc, 0x8000, 0x7ffffc},
+    {0x80000104, 0xfffc, 0x100},
+    {0xa0200104, 0xfffc, 0x100},
+    {0x9f800004, 0xfffc, 0x1f800000}
+  };
+  for (const auto &test : cases)
+  {
+    INFO("base " << test.base);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(test.physical, 0x89abcdef).status ==
+      IOPBusStatus::Completed);
+    loadInstruction(&bus, 0,
+      immediateInstruction(0x23, 1, 1, test.offset));
+    loadInstruction(&bus, 4, 0);
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, test.base);
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(1) == test.base);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(1) == 0x89abcdef);
+  }
+}
+
+TEST_CASE("IOP consecutive loads retain separate delayed destinations",
+  "[iop][execution][load]")
+{
+  for (const std::uint8_t destination : {std::uint8_t(2), std::uint8_t(3)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0x11111111).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x104, 0x22222222).status ==
+      IOPBusStatus::Completed);
+    loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
+    loadInstruction(&bus, 4,
+      immediateInstruction(0x23, 0, destination, 0x104));
+    loadInstruction(&bus, 8, registerInstruction(0x21, 2, 0, 4));
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0x11111111);
+    REQUIRE(core.delayedResultContinuation().destination == destination);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(4) == 0x11111111);
+    REQUIRE(core.generalRegister(destination) == 0x22222222);
+  }
+}
+
+TEST_CASE("IOP younger destination writes win over older delayed loads",
+  "[iop][execution][load]")
+{
+  for (const IOPWord instruction : {
+    immediateInstruction(0x09, 2, 2, 1),
+    jumpInstruction(0x03, 3)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const std::uint8_t destination =
+      instruction == jumpInstruction(0x03, 3) ? 31 : 2;
+    IOPCoreTestAccess::setGeneralRegister(&core, destination, 0x40);
+    REQUIRE(bus.write32(0x100, 0x12345678).status ==
+      IOPBusStatus::Completed);
+    loadInstruction(&bus, 0,
+      immediateInstruction(0x23, 0, destination, 0x100));
+    loadInstruction(&bus, 4, instruction);
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(destination) ==
+      (destination == 31 ? 12 : 0x41));
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+  }
+}
+
+TEST_CASE("IOP load faults suppress the result and preserve original address",
+  "[iop][execution][load]")
+{
+  struct FaultCase
+  {
+    std::uint8_t opcode;
+    IOPAddress address;
+    IOPException exception;
+    bool userMode;
+  };
+  const FaultCase cases[] = {
+    {0x21, 0x101, IOPException::AddressErrorLoadOrFetch, false},
+    {0x25, 0x101, IOPException::AddressErrorLoadOrFetch, false},
+    {0x23, 0x102, IOPException::AddressErrorLoadOrFetch, false},
+    {0x23, 0x103, IOPException::AddressErrorLoadOrFetch, false},
+    {0x20, 0x800000, IOPException::DataBusError, false},
+    {0x24, 0x800000, IOPException::DataBusError, false},
+    {0x21, 0x800000, IOPException::DataBusError, false},
+    {0x25, 0x800000, IOPException::DataBusError, false},
+    {0x23, 0x800000, IOPException::DataBusError, false},
+    {0x23, 0x80000100, IOPException::AddressErrorLoadOrFetch, true}
+  };
+  for (const auto &test : cases)
+  {
+    for (const std::uint8_t destination : {std::uint8_t(0), std::uint8_t(2)})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, test.address);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x1234);
+      IOPCoreTestAccess::setUserMode(&core, test.userMode);
+      loadInstruction(&bus, 0,
+        immediateInstruction(test.opcode, 1, destination, 0));
+      core.startExecution(0);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(2) == 0x1234);
+      REQUIRE(core.generalRegister(0) == 0);
+      REQUIRE(core.delayedResultContinuation().source ==
+        IOPDelayedResultSource::None);
+      REQUIRE(core.exception().kind == test.exception);
+      REQUIRE(core.exception().badVirtualAddress == test.address);
+      REQUIRE(core.stopReason() == IOPStopReason::ExecutionException);
+      REQUIRE(core.executionState() == IOPExecutionState::Halted);
+      REQUIRE(core.programCounter() == 0);
+      REQUIRE(core.retiredInstructions() == 0);
+    }
+  }
+}
+
+TEST_CASE("IOP older loads complete before younger execution or fetch faults",
+  "[iop][execution][load]")
+{
+  for (const IOPWord follower : {
+    immediateInstruction(0x23, 0, 2, 3),
+    registerInstruction(0x20, 3, 4, 2),
+    UINT32_C(0xffffffff)})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0x12345678).status ==
+      IOPBusStatus::Completed);
+    IOPCoreTestAccess::setGeneralRegister(&core, 3, 0x7fffffff);
+    IOPCoreTestAccess::setGeneralRegister(&core, 4, 1);
+    loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
+    loadInstruction(&bus, 4, follower);
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0x12345678);
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    REQUIRE(core.exception().kind != IOPException::None);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.programCounter() == 4);
+  }
+
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0xabcdef01).status == IOPBusStatus::Completed);
+  loadInstruction(&bus, 0x7ffffc,
+    immediateInstruction(0x23, 0, 2, 0x100));
+  core.startExecution(0x7ffffc);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0xabcdef01);
+  REQUIRE(core.exception().kind == IOPException::InstructionBusError);
+  REQUIRE(core.programCounter() == 0x800000);
+  REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP load delay composes with branch capture and target execution",
+  "[iop][execution][load]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 1).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x104, 0xabcdef01).status == IOPBusStatus::Completed);
+  loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
+  loadInstruction(&bus, 4, immediateInstruction(0x04, 2, 0, 2));
+  loadInstruction(&bus, 8, immediateInstruction(0x23, 0, 3, 0x104));
+  loadInstruction(&bus, 16, registerInstruction(0x21, 3, 0, 4));
+  loadInstruction(&bus, 20, registerInstruction(0x21, 3, 0, 5));
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 1);
+  REQUIRE(core.branchContinuation().targetAddress == 16);
+  core.stepInstruction();
+  REQUIRE(core.programCounter() == 16);
+  REQUIRE_FALSE(core.branchContinuation().active);
+  REQUIRE(core.generalRegister(3) == 0);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(4) == 0);
+  REQUIRE(core.generalRegister(3) == 0xabcdef01);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(5) == 0xabcdef01);
+}
+
+TEST_CASE("IOP faulting delay slot loads preserve branch provenance",
+  "[iop][execution][load]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  loadInstruction(&bus, 0, jumpInstruction(0x02, 4));
+  loadInstruction(&bus, 4, immediateInstruction(0x23, 0, 2, 3));
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::AddressErrorLoadOrFetch);
+  REQUIRE(core.exception().badVirtualAddress == 3);
+  REQUIRE(core.exception().inBranchDelaySlot);
+  REQUIRE(core.branchContinuation().instructionAddress == 0);
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.retiredInstructions() == 1);
+}
+
+TEST_CASE("IOP successful loads to register zero cannot change it",
+  "[iop][execution][load]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0xffffffff).status == IOPBusStatus::Completed);
+  loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 0, 0x100));
+  loadInstruction(&bus, 4, immediateInstruction(0x09, 0, 1, 1));
+  core.startExecution(0);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(0) == 0);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(0) == 0);
+  REQUIRE(core.generalRegister(1) == 1);
+  REQUIRE(core.retiredInstructions() == 2);
+}
+
+TEST_CASE("IOP delayed loads preserve the next load's old base",
+  "[iop][execution][load]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0x200).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x104, 0x12345678).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x204, 0xabcdef01).status == IOPBusStatus::Completed);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x100);
+  loadInstruction(&bus, 0, immediateInstruction(0x23, 1, 1, 0));
+  loadInstruction(&bus, 4, immediateInstruction(0x23, 1, 2, 4));
+  loadInstruction(&bus, 8, 0);
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(1) == 0x200);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0x12345678);
+}
+
+TEST_CASE("IOP host resume preserves delayed loads and branch continuation",
+  "[iop][execution][load]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0xabcdef01).status == IOPBusStatus::Completed);
+  loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
+  loadInstruction(&bus, 4, jumpInstruction(0x02, 4));
+  loadInstruction(&bus, 8, immediateInstruction(0x23, 0, 3, 0x100));
+  loadInstruction(&bus, 16, registerInstruction(0x21, 3, 0, 4));
+  core.startExecution(0);
+  core.stepInstruction();
+  core.haltExecution();
+  REQUIRE(core.generalRegister(2) == 0);
+  REQUIRE(core.delayedResultContinuation().value == 0xabcdef01);
+  core.resumeExecution();
+  REQUIRE(core.elapsedCycles() == 1);
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0xabcdef01);
+  core.haltExecution();
+  core.resumeExecution();
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.branchContinuation().instructionAddress == 4);
+  core.stepInstruction();
+  REQUIRE(core.programCounter() == 16);
+  core.haltExecution();
+  core.resumeExecution();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(4) == 0);
+  REQUIRE(core.generalRegister(3) == 0xabcdef01);
+  REQUIRE(core.elapsedCycles() == 4);
+  REQUIRE(core.retiredInstructions() == 4);
+}
+
+TEST_CASE("IOP resume requires a host halt without a pending exception",
+  "[iop][execution][load]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE_THROWS_AS(core.resumeExecution(), std::logic_error);
+  core.startExecution(0);
+  REQUIRE_THROWS_AS(core.resumeExecution(), std::logic_error);
+  loadInstruction(&bus, 0, 0xffffffff);
+  core.stepInstruction();
+  REQUIRE_THROWS_AS(core.resumeExecution(), std::logic_error);
+  core.haltExecution();
+  REQUIRE_THROWS_AS(core.resumeExecution(), std::logic_error);
+  REQUIRE(core.exception().kind == IOPException::ReservedInstruction);
+  REQUIRE(core.programCounter() == 0);
+  REQUIRE(core.retiredInstructions() == 0);
+}
+
+TEST_CASE("IOP reset and explicit restart discard delayed load state",
+  "[iop][execution][load]")
+{
+  for (const bool reset : {false, true})
+  {
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x100, 0xabcdef01).status == IOPBusStatus::Completed);
+    loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
+    loadInstruction(&bus, 4, 0);
+    core.startExecution(0);
+    core.stepInstruction();
+    if (reset)
+    {
+      core.reset();
+    }
+    core.startExecution(4);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0);
+    REQUIRE(core.delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    REQUIRE(core.delayedResultContinuation().destination == 0);
+    REQUIRE(core.delayedResultContinuation().value == 0);
+  }
+}
+
+TEST_CASE("IOP deferred semantics preserve a pending load for inspection",
+  "[iop][execution][load]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(0x100, 0xabcdef01).status == IOPBusStatus::Completed);
+  loadInstruction(&bus, 0, immediateInstruction(0x23, 0, 2, 0x100));
+  loadInstruction(&bus, 4, 0x44000000);
+  core.startExecution(0);
+  core.stepInstruction();
+  core.stepInstruction();
+  REQUIRE(core.generalRegister(2) == 0);
+  REQUIRE(core.delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  REQUIRE(core.delayedResultContinuation().value == 0xabcdef01);
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.executionState() == IOPExecutionState::Halted);
+  REQUIRE(core.retiredInstructions() == 1);
+  REQUIRE(core.programCounter() == 4);
 }

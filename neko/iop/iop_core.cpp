@@ -172,6 +172,17 @@ namespace
     return effects;
   }
 
+  IOPInstructionEffects memoryReadFailureEffects(
+    const IOPMemoryReadResult &read,
+    IOPStopReason stopReason)
+  {
+    IOPInstructionEffects effects;
+    effects.exception.kind = read.exception;
+    effects.exception.badVirtualAddress = read.virtualAddress;
+    effects.stopReason = stopReason;
+    return effects;
+  }
+
   IOPInstructionEffects reservedInstructionEffects()
   {
     IOPInstructionEffects effects;
@@ -361,6 +372,19 @@ void IOPCore::haltExecution()
   haltReason = IOPStopReason::HostHalt;
 }
 
+void IOPCore::resumeExecution()
+{
+  if (state != IOPExecutionState::Halted ||
+      haltReason != IOPStopReason::HostHalt ||
+      pendingException.kind != IOPException::None)
+  {
+    throw std::logic_error(
+      "IOP Core can resume only after a host halt without an exception.");
+  }
+  state = IOPExecutionState::Running;
+  haltReason = IOPStopReason::None;
+}
+
 void IOPCore::stepInstruction()
 {
   if (state != IOPExecutionState::Running)
@@ -375,7 +399,7 @@ void IOPCore::stepInstruction()
   {
     commitInstructionEffects(
       instructionAddress,
-      fetchFailureEffects(fetch));
+      memoryReadFailureEffects(fetch, IOPStopReason::FetchFailure));
     return;
   }
 
@@ -670,18 +694,66 @@ IOPInstructionEffects IOPCore::instructionEffects(
       return destinationEffects(
         instruction.targetRegister,
         static_cast<IOPWord>(instruction.immediate) << 16);
+    case IOPOperation::LoadByte:
+    case IOPOperation::LoadByteUnsigned:
+    case IOPOperation::LoadHalfword:
+    case IOPOperation::LoadHalfwordUnsigned:
+    case IOPOperation::LoadWord:
+      return alignedLoadEffects(instruction, source);
     default:
       return {};
   }
 }
 
-IOPInstructionEffects IOPCore::fetchFailureEffects(
-  const IOPMemoryReadResult &fetch)
+IOPInstructionEffects IOPCore::alignedLoadEffects(
+  const IOPInstruction &instruction,
+  IOPWord base) const
 {
-  IOPInstructionEffects effects;
-  effects.exception.kind = fetch.exception;
-  effects.exception.badVirtualAddress = fetch.virtualAddress;
-  effects.stopReason = IOPStopReason::FetchFailure;
+  const IOPAddress address =
+    base + signExtendedImmediate(instruction.immediate);
+  IOPMemoryReadResult read;
+  switch (instruction.operation)
+  {
+    case IOPOperation::LoadByte:
+    case IOPOperation::LoadByteUnsigned:
+      read = readData8(address);
+      break;
+    case IOPOperation::LoadHalfword:
+    case IOPOperation::LoadHalfwordUnsigned:
+      read = readData16(address);
+      break;
+    case IOPOperation::LoadWord:
+      read = readData32(address);
+      break;
+    default:
+      throw std::logic_error("Unsupported IOP aligned load.");
+  }
+  if (read.outcome != IOPAccessOutcome::Completed)
+  {
+    return memoryReadFailureEffects(
+      read, IOPStopReason::ExecutionException);
+  }
+
+  IOPWord value = read.value;
+  if (instruction.operation == IOPOperation::LoadByte &&
+      (value & 0x80) != 0)
+  {
+    value |= UINT32_C(0xffffff00);
+  }
+  else if (instruction.operation == IOPOperation::LoadHalfword)
+  {
+    value = signExtendedImmediate(
+      static_cast<std::uint16_t>(value));
+  }
+  IOPInstructionEffects effects = retiredEffects();
+  if (instruction.targetRegister != 0)
+  {
+    effects.delayedResult = {
+      IOPDelayedResultSource::Load,
+      instruction.targetRegister,
+      value
+    };
+  }
   return effects;
 }
 
@@ -689,11 +761,6 @@ void IOPCore::commitInstructionEffects(
   IOPAddress instructionAddress,
   const IOPInstructionEffects &effects)
 {
-  if (delayedResult.source != IOPDelayedResultSource::None)
-  {
-    throw std::logic_error(
-      "IOP continuation commit is not implemented.");
-  }
   if (effects.completion == IOPInstructionCompletion::Retired &&
       effects.controlFlow.kind == IOPControlFlowEffect::Hold)
   {
@@ -714,6 +781,18 @@ void IOPCore::commitInstructionEffects(
   ++cycles;
 
   const bool inBranchDelaySlot = branch.active;
+  if (effects.completion == IOPInstructionCompletion::Retired ||
+      effects.exception.kind != IOPException::None)
+  {
+    // Sources were captured before older writeback; younger writes win.
+    if (delayedResult.source != IOPDelayedResultSource::None)
+    {
+      setGeneralRegister(
+        delayedResult.destination,
+        delayedResult.value);
+      delayedResult = {};
+    }
+  }
   if (effects.exception.kind != IOPException::None)
   {
     pendingException = effects.exception;
@@ -735,6 +814,7 @@ void IOPCore::commitInstructionEffects(
       effects.destination.destination,
       effects.destination.value);
   }
+  delayedResult = effects.delayedResult;
   if (effects.hi.kind == IOPWriteEffect::Write)
   {
     hiRegister = effects.hi.value;

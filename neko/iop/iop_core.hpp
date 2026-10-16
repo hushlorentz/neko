@@ -65,6 +65,7 @@ struct IOPInstructionEffects
   IOPValueEffect lo;
   IOPHILOAccessEffect hiLoAccess = IOPHILOAccessEffect::None;
   IOPControlFlowRequest controlFlow;
+  IOPDelayedResultContinuation delayedResult;
   IOPPendingException exception;
   IOPInstructionCompletion completion =
     IOPInstructionCompletion::Halted;
@@ -95,6 +96,7 @@ class IOPCore final
       IOPAddress returnAddress);
     void startExecution(IOPAddress entryPoint);
     void haltExecution();
+    void resumeExecution();
     void stepInstruction();
 
     IOPAddressClassification classifyAddress(
@@ -143,8 +145,9 @@ class IOPCore final
 
     IOPInstructionEffects instructionEffects(
       const struct IOPDecodeResult &decoded) const;
-    static IOPInstructionEffects fetchFailureEffects(
-      const IOPMemoryReadResult &fetch);
+    IOPInstructionEffects alignedLoadEffects(
+      const struct IOPInstruction &instruction,
+      IOPWord base) const;
     void commitInstructionEffects(
       IOPAddress instructionAddress,
       const IOPInstructionEffects &effects);
