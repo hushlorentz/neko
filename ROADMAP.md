@@ -2184,17 +2184,37 @@ timers, and persistence/trace integration remain separate blocks.
 
 ### IOP Guest-Visible Cache Foundation
 
-- [ ] Audit the approved cache profile and define one focused cache owner,
+- [x] Audit the approved cache profile and define one focused cache owner,
       locally replaceable provisional geometry, access routing, reset,
       inspection, hashing, and persistence contracts before implementation.
-- [ ] Implement functional instruction/data cache access, write-through
-      ordering, stale CPU/DMA visibility, and uncached bypass without claiming
-      undocumented refill or contention timing.
+- [ ] Add fixed-capacity instruction/data cache storage and typed access
+      boundaries with checked read-only inspection and deterministic reset.
+      Define explicit unsupported-mode admission before execution routing can
+      encounter not-yet-implemented `IsC`/`SwC` combinations, and account for
+      ROM reconfiguration on an unchanged bus.
+      Complete an independent ownership and routing review before execution
+      uses the new storage.
+- [ ] Implement cached instruction fetch, uncached bypass, physical aliases,
+      stale-code visibility, and atomic failed-fill behavior without claiming
+      undocumented refill or contention timing. Complete focused review.
+- [ ] Implement cached data loads through the same owner, preserving delayed
+      writeback, merge-load semantics, physical-route boundaries, and precise
+      fault selection. Complete focused review.
+- [ ] Implement write-through stores and byte-enabled merges with ordered
+      physical admission, cache-hit updates, documented miss behavior, and
+      stale external-write visibility. Complete focused atomicity review;
+      actual DMA endpoints remain with their device milestones.
 - [ ] Implement software-visible `Status.IsC`/`SwC` isolation, cache probing,
       and isolated partial-store invalidation through the same cache owner.
+      Complete focused review of normal and swapped access paths.
 - [ ] Complete focused cache-maintenance, alias, fault, reset, and
-      continuation conformance plus independent correctness review before
-      platform integration.
+      continuation conformance, including repeated deterministic execution
+      and host pause/resume across active branch and delayed-result state.
+      Hash/save-state and trace integration remain in the milestone's
+      Persistence, Diagnostics, and IOP Conformance block.
+- [ ] Complete the block-wide independent correctness review and optimized
+      AddressSanitizer check, reconcile `PROJECT.md`, and close the block
+      before platform integration.
 
 ### IOP Interrupt Controller
 
