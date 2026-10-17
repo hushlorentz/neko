@@ -12,6 +12,7 @@
 #include "iop_cache.hpp"
 #include "iop_core.hpp"
 #include "iop_interrupt_controller.hpp"
+#include "iop_timers.hpp"
 
 struct IOPCacheTestAccess
 {
@@ -236,6 +237,123 @@ namespace
     std::vector<std::uint8_t> bytes(IOPBus::ROM_SIZE, 0);
     bytes[0] = firstByte;
     return BootROMImage::create(bytes);
+  }
+}
+
+TEST_CASE("IOP timer MMIO bypass stays live across aliases and cache bank swapping",
+  "[iop][cache][timer]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (std::size_t index = 0; index < 6; ++index)
+    {
+      const IOPAddress base = index < 3 ?
+        0x1f801100 + static_cast<IOPAddress>(index * 16) :
+        0x1f801480 + static_cast<IOPAddress>((index - 3) * 16);
+      for (IOPAddress alias : {0u, 0x80000000u, 0xa0000000u})
+      {
+        CAPTURE(index);
+        CAPTURE(alias);
+        CAPTURE(swapped);
+        IOPBus bus;
+        IOPTimers timers;
+        bus.attachTimers(&timers);
+        timers.writeMode(index, 0x10);
+        timers.writeTarget(index, 1);
+        REQUIRE(timers.advance({true, false, {}}).count == 1);
+        IOPCore core;
+        core.attachBus(&bus);
+        IOPCacheTestAccess::seed(&core);
+        IOPCacheTestAccess::setStatus(&core,
+          swapped ? IOPCOP0Status::CACHES_SWAPPED : 0);
+        const IOPCache before = core.cache();
+        const IOPAddress address = (base | alias) + 4;
+        REQUIRE(core.readData8(address).outcome == IOPAccessOutcome::Unmapped);
+        REQUIRE(core.readData16(address + 2).outcome == IOPAccessOutcome::Unmapped);
+        REQUIRE(core.writeData8(address, 0).outcome == IOPAccessOutcome::Unmapped);
+        REQUIRE(core.writeData32(address + 1, 0).outcome ==
+          IOPAccessOutcome::Misaligned);
+        REQUIRE(timers.counter(index).mode == 0x0810);
+        REQUIRE(core.writeData32(base | alias, 0x12345678).outcome ==
+          IOPAccessOutcome::Completed);
+        REQUIRE(timers.counter(index).mode == 0x0810);
+        const auto mode = core.readData16(address);
+        REQUIRE(mode.outcome == IOPAccessOutcome::Completed);
+        REQUIRE(mode.physicalAddress == base + 4);
+        REQUIRE(mode.value == 0x0810);
+        REQUIRE(timers.counter(index).mode == 0x0410);
+        REQUIRE(core.readData32(address).value == 0x0410);
+        REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
+        REQUIRE(timers.counter(index).count == 0);
+        requireUnchangedCache(core.cache(), before);
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP timer MMIO cache isolation cannot acknowledge or create later device hits",
+  "[iop][cache][timer]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (IOPAddress mode : {0x1f801104u, 0x9f801104u, 0xbf801104u,
+         0x1f801484u, 0x9f801484u, 0xbf801484u})
+    {
+      CAPTURE(mode);
+      CAPTURE(swapped);
+      const std::size_t index = (mode & 0xfff) == 0x104 ? 0 : 3;
+      IOPBus bus;
+      IOPTimers timers;
+      bus.attachTimers(&timers);
+      timers.writeMode(index, 0x10);
+      timers.writeTarget(index, 1);
+      timers.advance({true, false, {}});
+      IOPCore core;
+      core.attachBus(&bus);
+      const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+      IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+      REQUIRE(core.writeData32(mode, 0x11223344).outcome == IOPAccessOutcome::Completed);
+      REQUIRE(core.readData32(mode).value == 0x11223344);
+      REQUIRE(timers.counter(index).mode == 0x0810);
+      const IOPCache before = core.cache();
+      IOPCacheTestAccess::setStatus(&core, swap);
+      REQUIRE(core.readData32(mode).value == 0x0810);
+      REQUIRE(core.readData32(mode).value == 0x0410);
+      requireUnchangedCache(core.cache(), before);
+    }
+  }
+}
+
+TEST_CASE("IOP timer MMIO protection and instruction fetch precede data cache policy",
+  "[iop][cache][timer]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (IOPAddress address : {0x9f801104u, 0xbf801104u, 0x9f801484u, 0xbf801484u})
+    {
+      const std::size_t index = (address & 0xfff) == 0x104 ? 0 : 3;
+      IOPBus bus;
+      IOPTimers timers;
+      bus.attachTimers(&timers);
+      timers.writeMode(index, 0x10);
+      timers.writeTarget(index, 1);
+      timers.advance({true, false, {}});
+      IOPCore core;
+      core.attachBus(&bus);
+      core.startExecution(address);
+      IOPCacheTestAccess::seed(&core);
+      const IOPCache before = core.cache();
+      const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+      IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CURRENT_USER_MODE);
+      REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::ProtectionFailure);
+      REQUIRE(core.readData32(address).outcome == IOPAccessOutcome::ProtectionFailure);
+      REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::ProtectionFailure);
+      REQUIRE(timers.counter(index).mode == 0x0810);
+      IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+      REQUIRE(core.fetchInstruction().value == 0x0810);
+      REQUIRE(core.fetchInstruction().value == 0x0410);
+      requireUnchangedCache(core.cache(), before);
+    }
   }
 }
 

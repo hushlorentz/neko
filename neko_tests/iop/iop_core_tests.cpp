@@ -10,6 +10,7 @@
 #include "iop_core.hpp"
 #include "iop_instruction.hpp"
 #include "iop_interrupt_controller.hpp"
+#include "iop_timers.hpp"
 
 namespace
 {
@@ -1203,6 +1204,136 @@ TEST_CASE("IOP INTC deassertion is resampled without consuming controller state"
     REQUIRE(core.cause() == 0);
     REQUIRE(core.exception().kind == IOPException::None);
     REQUIRE(core.retiredInstructions() == 2);
+  }
+}
+
+TEST_CASE("IOP timer MMIO decoded stores and loads preserve mode and load delay semantics",
+  "[iop][execution][timer]")
+{
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    const IOPAddress physical = index < 3 ?
+      0x1f801100 + static_cast<IOPAddress>(index * 16) :
+      0x1f801480 + static_cast<IOPAddress>((index - 3) * 16);
+    for (IOPAddress alias : {0u, 0x80000000u, 0xa0000000u})
+    {
+      CAPTURE(index);
+      CAPTURE(alias);
+      IOPBus bus;
+      IOPTimers timers;
+      IOPInterruptController interrupts;
+      bus.attachTimers(&timers);
+      bus.attachInterruptController(&interrupts);
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, physical | alias);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+      IOPCoreTestAccess::setGeneralRegister(&core, 3, 0x89abcdee);
+      IOPCoreTestAccess::setGeneralRegister(&core, 4, 0x10);
+      const IOPWord instructions[] = {
+        immediateInstruction(0x29, 1, 4, 4), // SH mode
+        immediateInstruction(0x2b, 1, 2, 8), // SW target
+        immediateInstruction(0x2b, 1, 3, 0), // SW count
+        immediateInstruction(0x23, 1, 5, 4), // LW mode
+        0,
+        immediateInstruction(0x25, 1, 6, 0), // LHU count
+        0,
+        immediateInstruction(0x23, 1, 7, 8), // LW target
+        0
+      };
+      for (std::size_t instruction = 0; instruction < 9; ++instruction)
+      {
+        loadInstruction(&bus, static_cast<IOPAddress>(instruction * 4),
+          instructions[instruction]);
+      }
+      core.startExecution(0);
+      for (unsigned int instruction = 0; instruction < 3; ++instruction)
+      {
+        core.stepInstruction();
+      }
+      REQUIRE(core.retiredInstructions() == 3);
+      const auto requests = timers.advance({true, false, {}});
+      REQUIRE(requests.count == 1);
+      REQUIRE(requests.sources[0] == IOPTimers::capabilities(index).interruptSource);
+      interrupts.assertSource(requests.sources[0]);
+      const IOPWord pending = interrupts.status();
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(5) == 0);
+      REQUIRE(timers.counter(index).mode == 0x0410);
+      REQUIRE_FALSE(timers.counter(index).oneShotConsumed);
+      REQUIRE_FALSE(timers.counter(index).pulseReleasePending);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(5) == 0x0810);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(6) == 0);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(6) == 0xcdef);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(7) == 0);
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(7) == (index < 3 ? 0xcdef : 0x89abcdef));
+      REQUIRE(core.retiredInstructions() == 9);
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(interrupts.status() == pending);
+    }
+  }
+}
+
+TEST_CASE("IOP timer MMIO decoded merge stores never read a rejected mode register",
+  "[iop][execution][merge][timer]")
+{
+  for (IOPAddress physical : {0x1f801104u, 0x1f801484u})
+  {
+    for (IOPAddress alias : {0u, 0x80000000u, 0xa0000000u})
+    {
+      for (std::uint8_t opcode : {std::uint8_t{0x2a}, std::uint8_t{0x2e}})
+      {
+        for (std::uint16_t offset = 0; offset < 4; ++offset)
+        {
+          CAPTURE(physical);
+          CAPTURE(alias);
+          CAPTURE(opcode);
+          CAPTURE(offset);
+          const std::size_t index = physical == 0x1f801104 ? 0 : 3;
+          IOPBus bus;
+          IOPTimers timers;
+          bus.attachTimers(&timers);
+          timers.writeMode(index, 0x10);
+          timers.writeTarget(index, 1);
+          timers.advance({true, false, {}});
+          const auto before = timers.counter(index);
+          IOPCore core;
+          core.attachBus(&bus);
+          IOPCoreTestAccess::setGeneralRegister(&core, 1, physical | alias);
+          IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+          loadInstruction(&bus, 0, immediateInstruction(opcode, 1, 2, offset));
+          core.startExecution(0);
+          core.stepInstruction();
+          const bool fullMask = opcode == 0x2a ? offset == 3 : offset == 0;
+          if (fullMask)
+          {
+            REQUIRE(core.retiredInstructions() == 1);
+            REQUIRE(timers.counter(index).mode == ((0x89abcdef & 0x63ff) | 0x0400));
+            REQUIRE(timers.counter(index).count == 0);
+          }
+          else
+          {
+            REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+            REQUIRE(core.retiredInstructions() == 0);
+            REQUIRE(core.exception().kind == IOPException::None);
+            REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+            REQUIRE(core.storeFailure().access.virtualAddress ==
+              ((physical | alias) + offset));
+            REQUIRE(core.storeFailure().mergeByteEnable ==
+              (opcode == 0x2a ? 0xf >> (3 - offset) : (0xf << offset) & 0xf));
+            REQUIRE(timers.counter(index).count == before.count);
+            REQUIRE(timers.counter(index).mode == before.mode);
+            REQUIRE(timers.counter(index).oneShotConsumed == before.oneShotConsumed);
+            REQUIRE(timers.counter(index).pulseReleasePending == before.pulseReleasePending);
+          }
+        }
+      }
+    }
   }
 }
 

@@ -11,6 +11,7 @@
 #include "iop_types.hpp"
 
 class IOPInterruptController;
+class IOPTimers;
 
 enum class IOPBusStatus : std::uint8_t
 {
@@ -62,6 +63,8 @@ class IOPBus final
     void reset();
     // The caller owns the controller and must keep it alive while attached.
     void attachInterruptController(IOPInterruptController *interrupts);
+    // The caller owns the timers and must keep them alive while attached.
+    void attachTimers(IOPTimers *timers);
     // Side-effect-free aggregate level; an absent controller drives no level.
     bool interruptControllerPending() const;
 
@@ -79,7 +82,7 @@ class IOPBus final
     IOPBusWriteResult write8(IOPAddress address, std::uint8_t value);
     IOPBusWriteResult write16(IOPAddress address, std::uint16_t value);
     IOPBusWriteResult write32(IOPAddress address, IOPWord value);
-    // INTC rejects partial masks with Unmapped, without a device read.
+    // Devices reject partial masks with Unmapped, without a device read.
     IOPBusWriteResult writeMasked32(
       IOPAddress address,
       IOPWord value,
@@ -97,10 +100,19 @@ class IOPBus final
       std::size_t count) const;
 
   private:
+    enum class Device : std::uint8_t
+    {
+      None,
+      InterruptController,
+      Timer
+    };
+
     struct Location
     {
       IOPBusRegion region = IOPBusRegion::Unmapped;
       std::size_t offset = 0;
+      Device device = Device::None;
+      std::size_t deviceIndex = 0;
     };
 
     Location locate(IOPAddress address, std::size_t count) const;
@@ -113,15 +125,30 @@ class IOPBus final
       IOPAddress address,
       std::size_t width,
       IOPWord value);
-    IOPBusReadResult readInterruptRegister(IOPAddress address);
+    IOPBusReadResult readDeviceRegister(
+      const Location &location,
+      std::size_t width);
+    IOPBusWriteResult writeDeviceRegister(
+      const Location &location,
+      std::size_t width,
+      IOPWord value);
+    IOPBusReadResult readTimerRegister(
+      const Location &location,
+      std::size_t width);
+    IOPBusWriteResult writeTimerRegister(
+      const Location &location,
+      std::size_t width,
+      IOPWord value);
+    IOPBusReadResult readInterruptRegister(std::size_t offset);
     IOPBusWriteResult writeInterruptRegister(
-      IOPAddress address,
+      std::size_t offset,
       IOPWord value);
 
     std::vector<std::uint8_t> ram;
     std::array<std::uint8_t, SCRATCHPAD_SIZE> scratchpad = {};
     std::shared_ptr<const BootROMImage> rom;
     IOPInterruptController *interruptController = nullptr;
+    IOPTimers *timers = nullptr;
 };
 
 #endif

@@ -9,6 +9,7 @@
 #include "catch.hpp"
 #include "iop_bus.hpp"
 #include "iop_interrupt_controller.hpp"
+#include "iop_timers.hpp"
 
 static_assert(
   std::is_final<IOPBus>::value,
@@ -16,6 +17,48 @@ static_assert(
 
 namespace
 {
+  const std::array<IOPAddress, 6> timerBases = {{
+    0x1f801100, 0x1f801110, 0x1f801120,
+    0x1f801480, 0x1f801490, 0x1f8014a0
+  }};
+
+  void requireTimersEqual(const IOPTimers &actual, const IOPTimers &expected)
+  {
+    REQUIRE(actual.gateLevels().horizontalBlank ==
+      expected.gateLevels().horizontalBlank);
+    REQUIRE(actual.gateLevels().verticalBlank ==
+      expected.gateLevels().verticalBlank);
+    for (std::size_t index = 0; index < 6; ++index)
+    {
+      const auto &state = actual.counter(index);
+      const auto &before = expected.counter(index);
+      REQUIRE(state.count == before.count);
+      REQUIRE(state.mode == before.mode);
+      REQUIRE(state.target == before.target);
+      REQUIRE(state.prescalerRemainder == before.prescalerRemainder);
+      REQUIRE(state.gateWaiting == before.gateWaiting);
+      REQUIRE(state.oneShotConsumed == before.oneShotConsumed);
+      REQUIRE(state.pulseReleasePending == before.pulseReleasePending);
+    }
+  }
+
+  IOPTimers activeTimers()
+  {
+    IOPTimers timers;
+    for (std::size_t index = 0; index < 6; ++index)
+    {
+      timers.writeMode(index, 0x30);
+      timers.writeCount(index, 0xffffffff);
+    }
+    REQUIRE(timers.advance({true, false, {true, true}}).count == 6);
+    for (std::size_t index = 0; index < 6; ++index)
+    {
+      timers.writeCount(index, static_cast<IOPWord>(0x12345678 + index));
+      timers.writeTarget(index, static_cast<IOPWord>(0x89abcdef + index));
+    }
+    return timers;
+  }
+
   std::shared_ptr<const BootROMImage> makeRom()
   {
     std::vector<std::uint8_t> bytes(
@@ -446,4 +489,296 @@ TEST_CASE("IOP bus INTC attachment and bus reset preserve external device state"
   REQUIRE(bus.read32(0x1f801070).value == 0);
   REQUIRE(bus.read32(0x1f801074).value == 0);
   REQUIRE(bus.read32(0x1f801078).value == 0);
+}
+
+TEST_CASE("IOP timer MMIO word routes use all six independent counter profiles",
+  "[iop][bus][timer]")
+{
+  IOPBus bus;
+  for (IOPAddress base : timerBases)
+  {
+    for (IOPAddress offset : {0u, 4u, 8u})
+    {
+      REQUIRE(bus.regionForRange(base + offset, 4) == IOPBusRegion::Mmio);
+      REQUIRE(bus.read32(base + offset).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(base + offset, 1).status == IOPBusStatus::Unmapped);
+    }
+  }
+  IOPTimers timers;
+  bus.attachTimers(&timers);
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    CAPTURE(index);
+    const IOPAddress base = timerBases[index];
+    const IOPWord mask = index < 3 ? 0xffff : 0xffffffff;
+    REQUIRE(bus.write32(base, 0x12345678).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(base + 8, 0x89abcdef).status == IOPBusStatus::Completed);
+    const auto count = bus.read32(base);
+    const auto target = bus.read32(base + 8);
+    REQUIRE(count.status == IOPBusStatus::Completed);
+    REQUIRE(count.value == (0x12345678 & mask));
+    REQUIRE(target.status == IOPBusStatus::Completed);
+    REQUIRE(target.value == (0x89abcdef & mask));
+    REQUIRE(bus.write32(base + 4, 0xffffffff).status == IOPBusStatus::Completed);
+    const auto mode = bus.read32(base + 4);
+    REQUIRE(mode.status == IOPBusStatus::Completed);
+    REQUIRE(mode.value == 0x67ff);
+    REQUIRE(timers.counter(index).count == 0);
+    REQUIRE(timers.counter(index).target == (0x89abcdef & mask));
+    REQUIRE(timers.counter(index).gateWaiting ==
+      (index == 0 || index == 1 || index == 3));
+  }
+}
+
+TEST_CASE("IOP timer MMIO halfword admission follows the approved shared subset",
+  "[iop][bus][timer]")
+{
+  IOPBus bus;
+  IOPTimers timers = activeTimers();
+  bus.attachTimers(&timers);
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    for (IOPAddress offset : {0u, 8u})
+    {
+      CAPTURE(index);
+      CAPTURE(offset);
+      const IOPAddress address = timerBases[index] + offset;
+      const IOPWord value = offset == 0 ?
+        timers.counter(index).count : timers.counter(index).target;
+      const IOPTimers before = timers;
+      const auto low = bus.read16(address);
+      REQUIRE(low.status == IOPBusStatus::Completed);
+      REQUIRE(low.value == (value & 0xffff));
+      const auto high = bus.read16(address + 2);
+      REQUIRE(high.status ==
+        (index < 3 ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
+      REQUIRE(high.value == (index < 3 ? 0 : value >> 16));
+      requireTimersEqual(timers, before);
+      REQUIRE(bus.write16(address + 2, 0x9876).status == IOPBusStatus::Unmapped);
+      requireTimersEqual(timers, before);
+      const auto write = bus.write16(address, 0x9876);
+      REQUIRE(write.status ==
+        (index < 3 ? IOPBusStatus::Completed : IOPBusStatus::Unmapped));
+      IOPTimers expected = before;
+      if (index < 3)
+      {
+        if (offset == 0)
+        {
+          expected.writeCount(index, 0x9876);
+        }
+        else
+        {
+          expected.writeTarget(index, 0x9876);
+        }
+      }
+      requireTimersEqual(timers, expected);
+    }
+  }
+}
+
+TEST_CASE("IOP timer MMIO mode accesses acknowledge exactly one selected owner",
+  "[iop][bus][timer]")
+{
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    for (std::size_t width : {2u, 4u})
+    {
+      CAPTURE(index);
+      CAPTURE(width);
+      IOPBus bus;
+      IOPTimers timers = activeTimers();
+      IOPTimers expected = timers;
+      IOPInterruptController interrupts;
+      interrupts.assertSource(IOPTimers::capabilities(index).interruptSource);
+      const IOPWord pending = interrupts.status();
+      bus.attachTimers(&timers);
+      bus.attachInterruptController(&interrupts);
+      const IOPAddress address = timerBases[index] + 4;
+      const auto read = width == 2 ? bus.read16(address) : bus.read32(address);
+      REQUIRE(read.status == IOPBusStatus::Completed);
+      REQUIRE(read.value == 0x1830);
+      REQUIRE(expected.readMode(index) == 0x1830);
+      requireTimersEqual(timers, expected);
+      REQUIRE(bus.read16(address).value == 0x0430);
+      REQUIRE(interrupts.status() == pending);
+      const auto write = width == 2 ?
+        bus.write16(address, 0xffff) : bus.write32(address, 0xffffffff);
+      REQUIRE(write.status == IOPBusStatus::Completed);
+      expected.writeMode(index, 0xffff);
+      requireTimersEqual(timers, expected);
+      REQUIRE(interrupts.status() == pending);
+    }
+  }
+}
+
+TEST_CASE("IOP timer MMIO rejected widths offsets and masks are atomic",
+  "[iop][bus][timer]")
+{
+  IOPBus bus;
+  IOPTimers timers = activeTimers();
+  const IOPTimers before = timers;
+  bus.attachTimers(&timers);
+  for (IOPAddress base : timerBases)
+  {
+    for (IOPAddress offset = 0; offset < 12; ++offset)
+    {
+      const IOPAddress address = base + offset;
+      CAPTURE(address);
+      const auto byte = bus.read8(address);
+      REQUIRE(byte.status == IOPBusStatus::Unmapped);
+      REQUIRE(byte.value == 0);
+      REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+      if ((address & 1) != 0)
+      {
+        REQUIRE(bus.read16(address).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Misaligned);
+      }
+      if ((address & 3) != 0)
+      {
+        REQUIRE(bus.read32(address).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.writeMasked32(address, 0, 0xf).status ==
+          IOPBusStatus::Misaligned);
+      }
+      requireTimersEqual(timers, before);
+    }
+    REQUIRE(bus.read16(base + 6).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(base + 6).value == 0);
+    REQUIRE(bus.write16(base + 6, 0xffff).status == IOPBusStatus::Unmapped);
+    for (IOPAddress offset : {0u, 4u, 8u})
+    {
+      const IOPAddress address = base + offset;
+      for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+      {
+        REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+        requireTimersEqual(timers, before);
+      }
+      for (std::uint8_t mask : {std::uint8_t{0}, std::uint8_t{0x10}, std::uint8_t{0xff}})
+      {
+        REQUIRE_THROWS_AS(bus.writeMasked32(address, 0, mask), std::invalid_argument);
+        requireTimersEqual(timers, before);
+      }
+    }
+    requireTimersEqual(timers, before);
+  }
+}
+
+TEST_CASE("IOP timer MMIO full masks are direct word writes without a mode read",
+  "[iop][bus][timer]")
+{
+  IOPBus bus;
+  IOPTimers timers = activeTimers();
+  bus.attachTimers(&timers);
+  IOPTimers expected = timers;
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    for (IOPAddress offset : {0u, 8u, 4u})
+    {
+      REQUIRE(bus.writeMasked32(timerBases[index] + offset, 0xa5fa3333, 0xf).status ==
+        IOPBusStatus::Completed);
+      if (offset == 0)
+      {
+        expected.writeCount(index, 0xa5fa3333);
+      }
+      else if (offset == 8)
+      {
+        expected.writeTarget(index, 0xa5fa3333);
+      }
+      else
+      {
+        expected.writeMode(index, 0xa5fa3333);
+      }
+      requireTimersEqual(timers, expected);
+    }
+  }
+}
+
+TEST_CASE("IOP timer MMIO physical ranges and host helpers exclude holes and aliases",
+  "[iop][bus][timer]")
+{
+  IOPBus bus;
+  IOPTimers timers = activeTimers();
+  bus.attachTimers(&timers);
+  const IOPTimers before = timers;
+  const IOPBus &inspection = bus;
+  std::array<std::uint8_t, 16> bytes;
+  bytes.fill(0xa5);
+  const auto oldBytes = bytes;
+  for (IOPAddress base : timerBases)
+  {
+    for (IOPAddress offset = 0; offset < 12; ++offset)
+    {
+      const IOPAddress address = base + offset;
+      REQUIRE(inspection.regionForRange(address, 0) == IOPBusRegion::Mmio);
+      REQUIRE(inspection.regionForRange(address, 1) == IOPBusRegion::Mmio);
+      for (std::size_t count : {0u, 1u, 4u, 12u, 16u})
+      {
+        REQUIRE(bus.loadPhysical(address, bytes.data(), count) == IOPBusStatus::Unmapped);
+        REQUIRE(inspection.inspectPhysical(address, bytes.data(), count) ==
+          IOPBusStatus::Unmapped);
+        REQUIRE(bytes == oldBytes);
+      }
+    }
+    REQUIRE(inspection.regionForRange(base, 12) == IOPBusRegion::Mmio);
+    REQUIRE(inspection.regionForRange(base, 13) == IOPBusRegion::Unmapped);
+    REQUIRE(inspection.regionForRange(base + 8, 4) == IOPBusRegion::Mmio);
+    REQUIRE(inspection.regionForRange(base + 8, 5) == IOPBusRegion::Unmapped);
+    for (IOPAddress address : {base + 12, base | 0x80000000, base | 0xa0000000})
+    {
+      REQUIRE(inspection.regionForRange(address, 4) == IOPBusRegion::Unmapped);
+      REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.writeMasked32(address, 0, 0xf).status == IOPBusStatus::Unmapped);
+    }
+  }
+  for (IOPAddress address : {0x1f8010fcu, 0x1f801130u, 0x1f80147cu,
+       0x1f8014b0u, 0x1f8014c0u, 0x1f8014c4u, 0x1f8014c8u})
+  {
+    REQUIRE(inspection.regionForRange(address, 4) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  requireTimersEqual(timers, before);
+}
+
+TEST_CASE("IOP timer MMIO attachment and resets preserve independent owners",
+  "[iop][bus][timer]")
+{
+  IOPBus bus;
+  IOPTimers first = activeTimers();
+  IOPTimers second;
+  const IOPTimers before = first;
+  IOPInterruptController interrupts;
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  bus.attachInterruptController(&interrupts);
+  bus.attachTimers(&first);
+  REQUIRE(bus.write32(0x100, 0xffffffff).status == IOPBusStatus::Completed);
+  bus.reset();
+  REQUIRE(bus.read32(0x100).value == 0);
+  requireTimersEqual(first, before);
+  REQUIRE(interrupts.status() == 0x10);
+  REQUIRE(bus.read32(timerBases[0]).value == before.counter(0).count);
+  bus.attachTimers(nullptr);
+  for (IOPAddress base : timerBases)
+  {
+    REQUIRE(bus.regionForRange(base, 12) == IOPBusRegion::Mmio);
+    REQUIRE(bus.read16(base + 4).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(base + 4, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base + 4, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeMasked32(base + 4, 0, 0xf).status == IOPBusStatus::Unmapped);
+  }
+  requireTimersEqual(first, before);
+  bus.attachTimers(&second);
+  REQUIRE(bus.write16(timerBases[0], 0x1234).status == IOPBusStatus::Completed);
+  REQUIRE(second.counter(0).count == 0x1234);
+  requireTimersEqual(first, before);
+  second.reset();
+  REQUIRE(bus.read32(timerBases[0]).value == 0);
+  bus.attachTimers(&first);
+  REQUIRE(bus.read32(timerBases[0]).value == before.counter(0).count);
+  interrupts.reset();
+  requireTimersEqual(first, before);
+  REQUIRE(bus.write32(IOPBus::INTC_MASK, 0xffffffff).status == IOPBusStatus::Completed);
+  REQUIRE(interrupts.mask() == IOPInterruptController::SOURCE_MASK);
 }

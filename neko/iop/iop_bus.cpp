@@ -1,5 +1,6 @@
 #include "iop_bus.hpp"
 #include "iop_interrupt_controller.hpp"
+#include "iop_timers.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -8,6 +9,11 @@
 
 namespace
 {
+  constexpr std::array<IOPAddress, IOPTimers::COUNTER_COUNT> timerBases = {{
+    0x1f801100, 0x1f801110, 0x1f801120,
+    0x1f801480, 0x1f801490, 0x1f8014a0
+  }};
+
   bool isAligned(IOPAddress address, std::size_t width)
   {
     return (address & (width - 1)) == 0;
@@ -38,6 +44,11 @@ void IOPBus::reset()
 void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
 {
   interruptController = interrupts;
+}
+
+void IOPBus::attachTimers(IOPTimers *attachedTimers)
+{
+  timers = attachedTimers;
 }
 
 bool IOPBus::interruptControllerPending() const
@@ -105,7 +116,18 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   if (first >= INTC_STAT &&
       last < static_cast<std::uint64_t>(INTC_CTRL) + sizeof(IOPWord))
   {
-    return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - INTC_STAT)};
+    return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - INTC_STAT),
+      Device::InterruptController};
+  }
+
+  for (std::size_t index = 0; index < timerBases.size(); ++index)
+  {
+    if (first >= timerBases[index] &&
+        last < static_cast<std::uint64_t>(timerBases[index]) + 12)
+    {
+      return {IOPBusRegion::Mmio,
+        static_cast<std::size_t>(first - timerBases[index]), Device::Timer, index};
+    }
   }
 
   return {};
@@ -160,7 +182,7 @@ IOPBusReadResult IOPBus::readScalar(IOPAddress address, std::size_t width)
   }
   if (location.region == IOPBusRegion::Mmio)
   {
-    return width == sizeof(IOPWord) ? readInterruptRegister(address) : result;
+    return readDeviceRegister(location, width);
   }
 
   const std::uint8_t *bytes = readableBytes(location);
@@ -196,8 +218,7 @@ IOPBusWriteResult IOPBus::writeScalar(
   }
   if (location.region == IOPBusRegion::Mmio)
   {
-    return width == sizeof(IOPWord)
-      ? writeInterruptRegister(address, value) : result;
+    return writeDeviceRegister(location, width, value);
   }
 
   std::uint8_t *bytes = writableBytes(location);
@@ -265,7 +286,7 @@ IOPBusWriteResult IOPBus::writeMasked32(
   if (location.region == IOPBusRegion::Mmio)
   {
     return byteEnable == 0xf
-      ? writeInterruptRegister(address, value)
+      ? writeDeviceRegister(location, sizeof(IOPWord), value)
       : IOPBusWriteResult{IOPBusStatus::Unmapped};
   }
 
@@ -280,41 +301,148 @@ IOPBusWriteResult IOPBus::writeMasked32(
   return {IOPBusStatus::Completed};
 }
 
-IOPBusReadResult IOPBus::readInterruptRegister(IOPAddress address)
+IOPBusReadResult IOPBus::readDeviceRegister(
+  const Location &location,
+  std::size_t width)
+{
+  switch (location.device)
+  {
+    case Device::InterruptController:
+      return width == sizeof(IOPWord)
+        ? readInterruptRegister(location.offset) : IOPBusReadResult{};
+    case Device::Timer:
+      return readTimerRegister(location, width);
+    case Device::None:
+      return {};
+  }
+  return {};
+}
+
+IOPBusWriteResult IOPBus::writeDeviceRegister(
+  const Location &location,
+  std::size_t width,
+  IOPWord value)
+{
+  switch (location.device)
+  {
+    case Device::InterruptController:
+      return width == sizeof(IOPWord)
+        ? writeInterruptRegister(location.offset, value) : IOPBusWriteResult{};
+    case Device::Timer:
+      return writeTimerRegister(location, width, value);
+    case Device::None:
+      return {};
+  }
+  return {};
+}
+
+IOPBusReadResult IOPBus::readTimerRegister(
+  const Location &location,
+  std::size_t width)
+{
+  if (timers == nullptr || (width != 2 && width != 4))
+  {
+    return {};
+  }
+
+  const std::size_t registerOffset = location.offset & ~std::size_t{3};
+  const std::size_t halfOffset = location.offset & 3;
+  if (halfOffset != 0 &&
+      (registerOffset == 4 ||
+       IOPTimers::capabilities(location.deviceIndex).counterBits != 32))
+  {
+    return {};
+  }
+
+  IOPWord value = 0;
+  switch (registerOffset)
+  {
+    case 0:
+      value = timers->counter(location.deviceIndex).count;
+      break;
+    case 4:
+      value = timers->readMode(location.deviceIndex);
+      break;
+    case 8:
+      value = timers->counter(location.deviceIndex).target;
+      break;
+    default:
+      return {};
+  }
+  if (width == 2)
+  {
+    value = (value >> (8 * halfOffset)) & 0xffff;
+  }
+  return {IOPBusStatus::Completed, value};
+}
+
+IOPBusWriteResult IOPBus::writeTimerRegister(
+  const Location &location,
+  std::size_t width,
+  IOPWord value)
+{
+  if (timers == nullptr || (width != 2 && width != 4))
+  {
+    return {};
+  }
+  if (width == 2 && location.offset != 4 &&
+      IOPTimers::capabilities(location.deviceIndex).counterBits != 16)
+  {
+    return {};
+  }
+
+  switch (location.offset)
+  {
+    case 0:
+      timers->writeCount(location.deviceIndex, value);
+      break;
+    case 4:
+      timers->writeMode(location.deviceIndex, value);
+      break;
+    case 8:
+      timers->writeTarget(location.deviceIndex, value);
+      break;
+    default:
+      return {};
+  }
+  return {IOPBusStatus::Completed};
+}
+
+IOPBusReadResult IOPBus::readInterruptRegister(std::size_t offset)
 {
   if (interruptController == nullptr)
   {
     return {};
   }
-  switch (address)
+  switch (offset)
   {
-    case INTC_STAT:
+    case 0:
       return {IOPBusStatus::Completed, interruptController->status()};
-    case INTC_MASK:
+    case 4:
       return {IOPBusStatus::Completed, interruptController->mask()};
-    case INTC_CTRL:
+    case 8:
       return {IOPBusStatus::Completed, interruptController->readControl()};
   }
   return {};
 }
 
 IOPBusWriteResult IOPBus::writeInterruptRegister(
-  IOPAddress address,
+  std::size_t offset,
   IOPWord value)
 {
   if (interruptController == nullptr)
   {
     return {};
   }
-  switch (address)
+  switch (offset)
   {
-    case INTC_STAT:
+    case 0:
       interruptController->writeStatus(value);
       break;
-    case INTC_MASK:
+    case 4:
       interruptController->writeMask(value);
       break;
-    case INTC_CTRL:
+    case 8:
       interruptController->writeControl(value);
       break;
     default:

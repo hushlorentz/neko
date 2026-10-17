@@ -2268,7 +2268,7 @@ timers, and persistence/trace integration remain separate blocks.
       simultaneous events; emit typed timer causes for the existing INTC
       owner without coupling timers to COP0 or GS. Complete focused timing
       and interrupt review.
-- [ ] Map count, mode, and target through `IOPBus`, assessing supported widths
+- [x] Map count, mode, and target through `IOPBus`, assessing supported widths
       and byte enables against the evidence before selecting any provisional
       admission policy. Preserve cache bypass, storage-only host inspection,
       rejected-access atomicity, and independent attachment/reset. Leave
