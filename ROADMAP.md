@@ -2230,7 +2230,7 @@ timers, and persistence/trace integration remain separate blocks.
       widths and byte enables against the approved evidence before selecting
       a locally replaceable policy for any gap. Keep unresolved `0x1f80107c`
       unmapped and pin side-effecting reads and rejected-access atomicity.
-- [ ] Deliver only the aggregate controller level to `IOPCore` hardware
+- [x] Deliver only the aggregate controller level to `IOPCore` hardware
       input 0 (`Cause.IP2`) before existing instruction-boundary interrupt
       admission. Preserve core-owned COP0 masks, precise exception priority,
       delayed writeback, and branch-delay provenance. Keep timer/device

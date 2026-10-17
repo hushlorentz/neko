@@ -9,6 +9,7 @@
 #include "iop_bus.hpp"
 #include "iop_core.hpp"
 #include "iop_instruction.hpp"
+#include "iop_interrupt_controller.hpp"
 
 namespace
 {
@@ -104,6 +105,7 @@ struct IOPCoreTestAccess
     core->cop0.badVirtualAddress = UINT32_C(0x10203040);
     core->cop0.status = UINT32_C(0xffffffff);
     core->cop0.cause = UINT32_C(0xffffffff);
+    core->directInterruptInputs = IOPCOP0Cause::HARDWARE_INTERRUPT_PENDING;
     core->cop0.exceptionProgramCounter =
       UINT32_C(0x50607080);
     core->branch = {
@@ -227,6 +229,12 @@ struct IOPCoreTestAccess
   static void setCOP0State(IOPCore *core, const IOPCOP0State &value)
   {
     core->cop0 = value;
+    for (std::uint8_t input = 0; input < 6; ++input)
+    {
+      core->setInterruptInput(
+        static_cast<IOPInterruptInput>(input),
+        (value.cause & (IOPWord(1) << (10 + input))) != 0);
+    }
   }
 };
 
@@ -1117,6 +1125,329 @@ TEST_CASE("IOP JR RFE restores user mode before the target fetch and interrupt b
     REQUIRE(core.programCounter() == (pending ? 0x80000080 : 0x204));
     REQUIRE(core.exceptionProgramCounter() == 0x200);
     REQUIRE((core.cause() & 0x80000000) == 0);
+  }
+}
+
+TEST_CASE("IOP INTC aggregate uses only Hardware0 and preserves every masking layer",
+  "[iop][execution][interrupt][intc]")
+{
+  for (const bool sourceEnabled : {false, true})
+  {
+    for (const bool masterEnabled : {false, true})
+    {
+      for (const bool cpuEnabled : {false, true})
+      {
+        for (const bool inputEnabled : {false, true})
+        {
+          CAPTURE(sourceEnabled);
+          CAPTURE(masterEnabled);
+          CAPTURE(cpuEnabled);
+          CAPTURE(inputEnabled);
+          IOPBus bus;
+          IOPInterruptController interrupts;
+          bus.attachInterruptController(&interrupts);
+          IOPCore core;
+          core.attachBus(&bus);
+          IOPCoreTestAccess::setCOP0State(&core,
+            {0, 0x00200000 | (cpuEnabled ? 1u : 0) |
+              (inputEnabled ? 0x400u : 0), 0xb0008230, 0x200});
+          interrupts.assertSource(IOPInterruptSource::Timer0);
+          interrupts.writeMask(sourceEnabled ? 0x10 : 0);
+          interrupts.writeControl(masterEnabled ? 1 : 0);
+          loadInstruction(&bus, 0x100, immediateInstruction(9, 0, 2, 7));
+          core.startExecution(0x100);
+          core.stepInstruction();
+          const bool pending = sourceEnabled && masterEnabled;
+          const bool admitted = pending && cpuEnabled && inputEnabled;
+          REQUIRE(core.exception().kind ==
+            (admitted ? IOPException::Interrupt : IOPException::None));
+          REQUIRE(core.cause() ==
+            ((admitted ? 0x8200u : 0xb0008230u) | (pending ? 0x400u : 0)));
+          REQUIRE(core.generalRegister(2) == (admitted ? 0 : 7));
+          REQUIRE(core.retiredInstructions() == (admitted ? 0 : 1));
+          REQUIRE(core.elapsedCycles() == 1);
+          REQUIRE(core.exceptionProgramCounter() == (admitted ? 0x100 : 0x200));
+          REQUIRE(interrupts.status() == 0x10);
+          REQUIRE(interrupts.control() == (masterEnabled ? 1 : 0));
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP INTC deassertion is resampled without consuming controller state",
+  "[iop][execution][interrupt][intc]")
+{
+  for (const IOPAddress address :
+       {IOPBus::INTC_STAT, IOPBus::INTC_MASK, IOPBus::INTC_CTRL})
+  {
+    CAPTURE(address);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    bus.attachInterruptController(&interrupts);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200400, 0, 0});
+    interrupts.assertSource(IOPInterruptSource::Timer0);
+    interrupts.writeMask(0x10);
+    interrupts.writeControl(1);
+    loadInstruction(&bus, 0x100, 0);
+    loadInstruction(&bus, 0x104, 0);
+    core.startExecution(0x100);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0x400);
+    REQUIRE(interrupts.status() == 0x10);
+    REQUIRE(interrupts.control() == 1);
+    REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Completed);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.retiredInstructions() == 2);
+  }
+}
+
+TEST_CASE("IOP guest INTC enabling stores become eligible at the following boundary",
+  "[iop][execution][interrupt][intc]")
+{
+  for (const IOPAddress address : {IOPBus::INTC_MASK, IOPBus::INTC_CTRL})
+  {
+    CAPTURE(address);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    bus.attachInterruptController(&interrupts);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200401, 0, 0});
+    IOPCoreTestAccess::setGeneralRegister(&core, 1, address);
+    IOPCoreTestAccess::setGeneralRegister(
+      &core, 2, address == IOPBus::INTC_MASK ? 0x10 : 1);
+    interrupts.assertSource(IOPInterruptSource::Timer0);
+    interrupts.writeMask(address == IOPBus::INTC_MASK ? 0 : 0x10);
+    interrupts.writeControl(address == IOPBus::INTC_CTRL ? 0 : 1);
+    loadInstruction(&bus, 0x100, immediateInstruction(0x2b, 1, 2, 0));
+    loadInstruction(&bus, 0x104, immediateInstruction(9, 0, 3, 7));
+    core.startExecution(0x100);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.cause() == 0);
+    REQUIRE(interrupts.interruptPending());
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == 0x104);
+    REQUIRE(core.cause() == 0x400);
+    REQUIRE(core.generalRegister(3) == 0);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.elapsedCycles() == 2);
+  }
+}
+
+TEST_CASE("IOP guest INTC control read clears the sampled line before CPU reenable",
+  "[iop][execution][interrupt][intc]")
+{
+  IOPBus bus;
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200400, 0, 0});
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, IOPBus::INTC_CTRL);
+  IOPCoreTestAccess::setGeneralRegister(&core, 3, 0x00200401);
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.writeMask(0x10);
+  interrupts.writeControl(1);
+  loadInstruction(&bus, 0x100, immediateInstruction(0x23, 1, 2, 0));
+  loadInstruction(&bus, 0x104, cop0TransferInstruction(4, 3, 12));
+  loadInstruction(&bus, 0x108, immediateInstruction(9, 0, 4, 7));
+  core.startExecution(0x100);
+  core.stepInstruction();
+  REQUIRE(core.cause() == 0x400);
+  REQUIRE(interrupts.control() == 0);
+  REQUIRE(core.generalRegister(2) == 0);
+  core.stepInstruction();
+  REQUIRE(core.cause() == 0);
+  REQUIRE(core.generalRegister(2) == 1);
+  REQUIRE(core.status() == 0x00200401);
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.generalRegister(4) == 7);
+  REQUIRE(core.retiredInstructions() == 3);
+  REQUIRE(interrupts.status() == 0x10);
+}
+
+TEST_CASE("IOP INTC admission precedes fetch faults and side effecting MMIO fetch",
+  "[iop][execution][interrupt][intc]")
+{
+  for (const IOPAddress entry :
+       {0x102u, 0x800000u, 0x80000100u, 0xbf801078u})
+  {
+    CAPTURE(entry);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    bus.attachInterruptController(&interrupts);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core,
+      {0x12345679, entry == 0x80000100 ? 0x00200403u : 0x00200401u, 0, 0x200});
+    interrupts.assertSource(IOPInterruptSource::Timer0);
+    interrupts.writeMask(0x10);
+    interrupts.writeControl(1);
+    core.startExecution(entry);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == entry);
+    REQUIRE(core.cause() == 0x400);
+    REQUIRE(core.badVirtualAddress() == 0x12345679);
+    REQUIRE(core.programCounter() == 0x80000080);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.retiredInstructions() == 0);
+    REQUIRE(interrupts.status() == 0x10);
+    REQUIRE(interrupts.control() == 1);
+  }
+}
+
+TEST_CASE("IOP INTC admission preserves delayed writeback and branch provenance",
+  "[iop][execution][interrupt][intc]")
+{
+  for (const IOPOperation operation : {
+       IOPOperation::LoadWord, IOPOperation::MoveFromCOP0,
+       IOPOperation::BranchEqual, IOPOperation::BranchNotEqual})
+  {
+    CAPTURE(static_cast<unsigned>(operation));
+    const bool branch = operation == IOPOperation::BranchEqual ||
+      operation == IOPOperation::BranchNotEqual;
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    bus.attachInterruptController(&interrupts);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200401, 0, 0});
+    IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+    REQUIRE(bus.write32(0x200, 0x12345678).status == IOPBusStatus::Completed);
+    loadInstruction(&bus, 0x100, branch
+      ? immediateInstruction(operation == IOPOperation::BranchEqual ? 4 : 5, 0, 0, 7)
+      : operation == IOPOperation::LoadWord
+        ? immediateInstruction(0x23, 0, 2, 0x200)
+        : cop0TransferInstruction(0, 2, 15));
+    loadInstruction(&bus, 0x104, 0x0000000c);
+    core.startExecution(0x100);
+    core.stepInstruction();
+    REQUIRE(core.branchContinuation().active == branch);
+    REQUIRE((core.delayedResultContinuation().source != IOPDelayedResultSource::None) ==
+      !branch);
+    core.haltExecution();
+    interrupts.assertSource(IOPInterruptSource::Timer0);
+    interrupts.writeMask(0x10);
+    interrupts.writeControl(1);
+    REQUIRE_THROWS_AS(core.stepInstruction(), std::logic_error);
+    REQUIRE(core.cause() == 0);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.branchContinuation().active == branch);
+    REQUIRE((core.delayedResultContinuation().source != IOPDelayedResultSource::None) ==
+      !branch);
+    core.resumeExecution();
+    REQUIRE(core.cause() == 0);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exception().inBranchDelaySlot == branch);
+    REQUIRE(core.exceptionProgramCounter() == (branch ? 0x100 : 0x104));
+    REQUIRE(core.cause() == (branch ? 0x80000400 : 0x400));
+    REQUIRE(core.generalRegister(2) == (branch ? 0xaabbccdd :
+      operation == IOPOperation::LoadWord ? 0x12345678 : 0x1f));
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.elapsedCycles() == 2);
+    REQUIRE(interrupts.interruptPending());
+  }
+}
+
+TEST_CASE("IOP direct pin levels survive INTC attachment changes without stale aggregates",
+  "[iop][execution][interrupt][intc]")
+{
+  for (const bool direct : {false, true})
+  {
+    CAPTURE(direct);
+    IOPBus bus;
+    IOPBus otherBus;
+    IOPInterruptController interrupts;
+    IOPInterruptController replacement;
+    IOPCore core;
+    core.attachBus(&bus);
+    core.setInterruptInput(IOPInterruptInput::Hardware0, direct);
+    core.setInterruptInput(IOPInterruptInput::Hardware5, true);
+    interrupts.assertSource(IOPInterruptSource::Timer0);
+    interrupts.writeMask(0x10);
+    interrupts.writeControl(1);
+    for (IOPAddress address = 0x100; address <= 0x114; address += 4)
+    {
+      loadInstruction(&bus, address, 0);
+      loadInstruction(&otherBus, address, 0);
+    }
+    bus.attachInterruptController(&interrupts);
+    core.startExecution(0x100);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0x8400);
+    core.setInterruptInput(IOPInterruptInput::Hardware0, false);
+    REQUIRE(core.cause() == 0x8400);
+    core.setInterruptInput(IOPInterruptInput::Hardware0, direct);
+    bus.attachInterruptController(nullptr);
+    core.stepInstruction();
+    const IOPWord directPending = 0x8000 | (direct ? 0x400 : 0);
+    REQUIRE(core.cause() == directPending);
+    bus.attachInterruptController(&interrupts);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0x8400);
+    bus.attachInterruptController(&replacement);
+    core.stepInstruction();
+    REQUIRE(core.cause() == directPending);
+    bus.attachInterruptController(&interrupts);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0x8400);
+    core.attachBus(&otherBus);
+    core.stepInstruction();
+    REQUIRE(core.cause() == directPending);
+    REQUIRE(interrupts.status() == 0x10);
+    REQUIRE(interrupts.control() == 1);
+  }
+}
+
+TEST_CASE("IOP reset clears direct pins but resamples an independently owned INTC",
+  "[iop][execution][interrupt][intc]")
+{
+  for (const bool fresh : {false, true})
+  {
+    CAPTURE(fresh);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    bus.attachInterruptController(&interrupts);
+    IOPCore core;
+    core.attachBus(&bus);
+    interrupts.assertSource(IOPInterruptSource::Timer0);
+    interrupts.writeMask(0x10);
+    interrupts.writeControl(1);
+    core.setInterruptInput(IOPInterruptInput::Hardware5, true);
+    loadInstruction(&bus, 0x100, 0);
+    core.startExecution(0x100);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0x8400);
+    if (fresh)
+    {
+      core.prepareFreshExecution(0x100, 0x200, 0x300);
+    }
+    else
+    {
+      core.reset();
+    }
+    REQUIRE(core.cause() == 0);
+    REQUIRE(interrupts.interruptPending());
+    core.startExecution(0x100);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0x400);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(interrupts.control() == 1);
   }
 }
 

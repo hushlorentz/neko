@@ -40,6 +40,11 @@ void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
   interruptController = interrupts;
 }
 
+bool IOPBus::interruptControllerPending() const
+{
+  return interruptController != nullptr && interruptController->interruptPending();
+}
+
 bool IOPBus::installRom(
   std::shared_ptr<const BootROMImage> image)
 {

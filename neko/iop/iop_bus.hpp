@@ -62,6 +62,8 @@ class IOPBus final
     void reset();
     // The caller owns the controller and must keep it alive while attached.
     void attachInterruptController(IOPInterruptController *interrupts);
+    // Side-effect-free aggregate level; an absent controller drives no level.
+    bool interruptControllerPending() const;
 
     // The shared image owns an immutable copy of its source bytes.
     bool installRom(

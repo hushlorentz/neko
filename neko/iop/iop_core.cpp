@@ -438,6 +438,7 @@ void IOPCore::reset()
     IOPCOP0Status::BOOT_EXCEPTION_VECTORS |
     IOPCOP0Status::TLB_SHUTDOWN;
   cop0.cause = 0;
+  directInterruptInputs = 0;
   cop0.exceptionProgramCounter = 0;
   branch = {};
   delayedResult = {};
@@ -520,6 +521,7 @@ void IOPCore::stepInstruction()
 
   enteredException = {};
   const IOPAddress instructionAddress = pc;
+  synchronizeInterruptInputs();
   if (interruptDeliverable())
   {
     IOPInstructionEffects effects;
@@ -1057,7 +1059,20 @@ void IOPCore::setInterruptInput(IOPInterruptInput input, bool asserted)
     throw std::out_of_range("IOP hardware interrupt input is out of range.");
   }
   const IOPWord mask = IOPWord(1) << (10 + index);
-  cop0.cause = (cop0.cause & ~mask) | (asserted ? mask : 0);
+  directInterruptInputs =
+    (directInterruptInputs & ~mask) | (asserted ? mask : 0);
+  synchronizeInterruptInputs();
+}
+
+void IOPCore::synchronizeInterruptInputs()
+{
+  IOPWord pending = directInterruptInputs;
+  if (bus != nullptr && bus->interruptControllerPending())
+  {
+    pending |= IOPWord(1) << 10;
+  }
+  cop0.cause =
+    (cop0.cause & ~IOPCOP0Cause::HARDWARE_INTERRUPT_PENDING) | pending;
 }
 
 bool IOPCore::interruptDeliverable() const

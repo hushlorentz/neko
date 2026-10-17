@@ -134,6 +134,7 @@ class IOPCore final
     void haltExecution();
     void resumeExecution();
     void stepInstruction();
+    // Direct pin levels are independent of the bus controller's Hardware0 level.
     void setInterruptInput(IOPInterruptInput input, bool asserted);
 
     IOPAddressClassification classifyAddress(
@@ -197,6 +198,7 @@ class IOPCore final
       const struct IOPInstruction &instruction,
       IOPWord target) const;
     void commitCOP0Write(const IOPCOP0WriteRequest &request);
+    void synchronizeInterruptInputs();
     bool interruptDeliverable() const;
     void enterException(
       IOPAddress instructionAddress,
@@ -236,6 +238,7 @@ class IOPCore final
     IOPWord loRegister = 0;
     IOPHILOState hiLoState;
     IOPCOP0State cop0;
+    IOPWord directInterruptInputs = 0;
     IOPBranchContinuation branch;
     IOPDelayedResultContinuation delayedResult;
     IOPExceptionRecord enteredException;
