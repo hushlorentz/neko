@@ -2218,17 +2218,31 @@ timers, and persistence/trace integration remain separate blocks.
 
 ### IOP Interrupt Controller
 
-- [ ] Define one `IOPInterruptController` owner for the 20 documented causes,
-      per-cause masking, master enable, pending-state arbitration, reset,
-      hashing, and persistence. Resolve exact cause assignments and MMIO
-      semantics from approved evidence before implementation.
-- [ ] Route timer and future device sources into the controller through typed
-      source methods rather than allowing devices to modify CPU COP0 state or
-      MMIO storage directly.
-- [ ] Map the controller through `IOPBus` and deliver its aggregate line to
-      `IOPCore` only at the architecturally defined boundary. Pin simultaneous
-      causes, masking, acknowledgement, repeated assertion, and exception
-      ordering.
+- [x] Add one fixed-capacity `IOPInterruptController` owner using the approved
+      26-cause retail profile (extending SCEI's 20 baseline causes), typed
+      source assertion, write-zero-to-clear status, direct per-cause masking,
+      read-to-clear master enable, derived aggregate output, deterministic
+      reset, and read-only inspection. Pin every cause assignment and register
+      transition; define the later hash/save-state contract without adding
+      schema or trace integration here. Complete focused ownership review.
+- [ ] Map the three approved registers through `IOPBus`, preserving physical
+      decode, cache bypass, and host-inspection boundaries. Assess access
+      widths and byte enables against the approved evidence before selecting
+      a locally replaceable policy for any gap. Keep unresolved `0x1f80107c`
+      unmapped and pin side-effecting reads and rejected-access atomicity.
+- [ ] Deliver only the aggregate controller level to `IOPCore` hardware
+      input 0 (`Cause.IP2`) before existing instruction-boundary interrupt
+      admission. Preserve core-owned COP0 masks, precise exception priority,
+      delayed writeback, and branch-delay provenance. Keep timer/device
+      producers typed; actual timers and scheduler attachment remain later
+      work. Complete focused integration review.
+- [ ] Add guest-visible conformance for simultaneous causes, independent
+      masks, master-control acknowledgement, repeated assertion, exception
+      ordering, reset, and deterministic host pause/resume without duplicating
+      existing CPU-only interrupt tests.
+- [ ] Complete the block-wide independent correctness review and optimized
+      AddressSanitizer check, reconcile `PROJECT.md`, and close the block
+      before timer and clock integration.
 
 ### IOP Timers and Clock Integration
 
