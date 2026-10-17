@@ -95,6 +95,7 @@ add_library(neko_core
     neko/iop/iop_instruction.cpp
     neko/iop/iop_interrupt_controller.cpp
     neko/iop/iop_program_runner.cpp
+    neko/iop/iop_timers.cpp
     neko/math/float.cpp
     neko/math/floating_point_ops.cpp
 )
@@ -276,6 +277,7 @@ add_executable(neko_tests
     neko_tests/iop/iop_instruction_tests.cpp
     neko_tests/iop/iop_interrupt_controller_tests.cpp
     neko_tests/iop/iop_program_runner_tests.cpp
+    neko_tests/iop/iop_timers_tests.cpp
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
     neko_tests/vif/vif_path2_tests.cpp

@@ -2253,7 +2253,7 @@ timers, and persistence/trace integration remain separate blocks.
       count/target-write effects, and target/overflow coincidence. Obtain
       approval before consulting additional secondary evidence; register every
       remaining provisional choice and its local replacement boundary.
-- [ ] Add one fixed-capacity `IOPTimers` owner containing six independent
+- [x] Add one fixed-capacity `IOPTimers` owner containing six independent
       counter states and a canonical capability table. Pin widths, register
       masks, source/gate/prescaler selection, side-effecting mode access versus
       const inspection, deterministic reset, and invalid-index atomicity.
