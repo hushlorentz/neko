@@ -18,6 +18,14 @@ enum class IOPBusStatus : std::uint8_t
   Unmapped
 };
 
+enum class IOPBusRegion : std::uint8_t
+{
+  Unmapped,
+  Ram,
+  Scratchpad,
+  Rom
+};
+
 struct IOPBusReadResult
 {
   IOPBusStatus status = IOPBusStatus::Unmapped;
@@ -50,6 +58,9 @@ class IOPBus final
     // The shared image owns an immutable copy of its source bytes.
     bool installRom(
       std::shared_ptr<const BootROMImage> image);
+    const std::shared_ptr<const BootROMImage> &romIdentity() const;
+    // A zero-length range queries the addressed byte, like host inspection.
+    IOPBusRegion regionForRange(IOPAddress address, std::size_t count) const;
 
     IOPBusReadResult read8(IOPAddress address) const;
     IOPBusReadResult read16(IOPAddress address) const;
@@ -74,17 +85,9 @@ class IOPBus final
       std::size_t count) const;
 
   private:
-    enum class Region : std::uint8_t
-    {
-      Unmapped,
-      Ram,
-      Scratchpad,
-      Rom
-    };
-
     struct Location
     {
-      Region region = Region::Unmapped;
+      IOPBusRegion region = IOPBusRegion::Unmapped;
       std::size_t offset = 0;
     };
 

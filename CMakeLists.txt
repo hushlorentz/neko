@@ -90,6 +90,7 @@ add_library(neko_core
     neko/ee/vpu/pipelines/vpu_pipeline.cpp
     neko/ee/vpu/pipelines/vpu_pipeline_orchestrator.cpp
     neko/iop/iop_bus.cpp
+    neko/iop/iop_cache.cpp
     neko/iop/iop_core.cpp
     neko/iop/iop_instruction.cpp
     neko/iop/iop_program_runner.cpp
@@ -269,6 +270,7 @@ add_executable(neko_tests
     neko_tests/gs/gs_vif_vu1_integration_tests.cpp
     neko_tests/math/floating_point_tests.cpp
     neko_tests/iop/iop_bus_tests.cpp
+    neko_tests/iop/iop_cache_tests.cpp
     neko_tests/iop/iop_core_tests.cpp
     neko_tests/iop/iop_instruction_tests.cpp
     neko_tests/iop/iop_program_runner_tests.cpp

@@ -2187,7 +2187,7 @@ timers, and persistence/trace integration remain separate blocks.
 - [x] Audit the approved cache profile and define one focused cache owner,
       locally replaceable provisional geometry, access routing, reset,
       inspection, hashing, and persistence contracts before implementation.
-- [ ] Add fixed-capacity instruction/data cache storage and typed access
+- [x] Add fixed-capacity instruction/data cache storage and typed access
       boundaries with checked read-only inspection and deterministic reset.
       Define explicit unsupported-mode admission before execution routing can
       encounter not-yet-implemented `IsC`/`SwC` combinations, and account for

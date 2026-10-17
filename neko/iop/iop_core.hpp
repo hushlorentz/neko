@@ -3,7 +3,9 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 
+#include "iop_cache.hpp"
 #include "iop_types.hpp"
 
 class IOPBus;
@@ -136,13 +138,13 @@ class IOPCore final
 
     IOPAddressClassification classifyAddress(
       IOPAddress virtualAddress) const;
-    IOPMemoryReadResult fetchInstruction() const;
+    IOPMemoryReadResult fetchInstruction();
     IOPMemoryReadResult readData8(
-      IOPAddress virtualAddress) const;
+      IOPAddress virtualAddress);
     IOPMemoryReadResult readData16(
-      IOPAddress virtualAddress) const;
+      IOPAddress virtualAddress);
     IOPMemoryReadResult readData32(
-      IOPAddress virtualAddress) const;
+      IOPAddress virtualAddress);
     IOPMemoryWriteResult writeData8(
       IOPAddress virtualAddress,
       std::uint8_t value);
@@ -163,6 +165,7 @@ class IOPCore final
     IOPWord cause() const;
     IOPAddress exceptionProgramCounter() const;
     IOPWord processorRevision() const;
+    const IOPCache &cache() const;
 
     const IOPBranchContinuation &
       branchContinuation() const;
@@ -179,16 +182,17 @@ class IOPCore final
 
   private:
     friend struct IOPCoreTestAccess;
+    friend struct IOPCacheTestAccess;
 
     IOPInstructionEffects instructionEffects(
-      const struct IOPDecodeResult &decoded) const;
+      const struct IOPDecodeResult &decoded);
     IOPInstructionEffects alignedLoadEffects(
       const struct IOPInstruction &instruction,
-      IOPWord base) const;
+      IOPWord base);
     IOPInstructionEffects wordMergeLoadEffects(
       const struct IOPInstruction &instruction,
       IOPWord base,
-      IOPWord target) const;
+      IOPWord target);
     IOPInstructionEffects cop0TransferEffects(
       const struct IOPInstruction &instruction,
       IOPWord target) const;
@@ -204,10 +208,11 @@ class IOPCore final
       std::size_t index,
       IOPWord value);
     IOPBus &attachedBus() const;
+    void synchronizeCacheConfiguration(IOPBus &physicalBus);
     IOPMemoryReadResult readMemory(
       IOPAddress virtualAddress,
       std::size_t width,
-      bool instructionFetch) const;
+      IOPCacheAccess access);
     IOPMemoryWriteResult writeMemory(
       IOPAddress virtualAddress,
       std::size_t width,
@@ -218,6 +223,8 @@ class IOPCore final
       const IOPStoreRequest &request);
 
     IOPBus *bus = nullptr;
+    IOPCache caches;
+    std::shared_ptr<const BootROMImage> cacheRomIdentity;
     IOPAddress pc = IOPReset::VECTOR;
     std::array<IOPWord, GENERAL_REGISTER_COUNT - 1>
       writableGeneralRegisters = {};

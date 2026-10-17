@@ -43,9 +43,25 @@ bool IOPBus::installRom(
   return true;
 }
 
+const std::shared_ptr<const BootROMImage> &IOPBus::romIdentity() const
+{
+  return rom;
+}
+
+IOPBusRegion IOPBus::regionForRange(
+  IOPAddress address,
+  std::size_t count) const
+{
+  return locate(address, count).region;
+}
+
 IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
 {
   const std::uint64_t first = address;
+  if (count > UINT64_C(0x100000000) - first)
+  {
+    return {};
+  }
   const std::uint64_t last = first + (count == 0 ? 0 : count - 1);
 
   const std::uint64_t ramEnd =
@@ -56,20 +72,20 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     {
       return {};
     }
-    return {Region::Ram, static_cast<std::size_t>(first % RAM_SIZE)};
+    return {IOPBusRegion::Ram, static_cast<std::size_t>(first % RAM_SIZE)};
   }
 
   if (first >= SCRATCHPAD_BASE &&
       last < static_cast<std::uint64_t>(SCRATCHPAD_BASE) + SCRATCHPAD_SIZE)
   {
-    return {Region::Scratchpad,
+    return {IOPBusRegion::Scratchpad,
       static_cast<std::size_t>(first - SCRATCHPAD_BASE)};
   }
 
   if (rom != nullptr && first >= ROM_BASE &&
       last < static_cast<std::uint64_t>(ROM_BASE) + ROM_SIZE)
   {
-    return {Region::Rom, static_cast<std::size_t>(first - ROM_BASE)};
+    return {IOPBusRegion::Rom, static_cast<std::size_t>(first - ROM_BASE)};
   }
 
   return {};
@@ -79,13 +95,13 @@ const std::uint8_t *IOPBus::readableBytes(const Location &location) const
 {
   switch (location.region)
   {
-    case Region::Ram:
+    case IOPBusRegion::Ram:
       return ram.data() + location.offset;
-    case Region::Scratchpad:
+    case IOPBusRegion::Scratchpad:
       return scratchpad.data() + location.offset;
-    case Region::Rom:
+    case IOPBusRegion::Rom:
       return rom->data() + location.offset;
-    case Region::Unmapped:
+    case IOPBusRegion::Unmapped:
       break;
   }
   return nullptr;
@@ -95,12 +111,12 @@ std::uint8_t *IOPBus::writableBytes(const Location &location)
 {
   switch (location.region)
   {
-    case Region::Ram:
+    case IOPBusRegion::Ram:
       return ram.data() + location.offset;
-    case Region::Scratchpad:
+    case IOPBusRegion::Scratchpad:
       return scratchpad.data() + location.offset;
-    case Region::Rom:
-    case Region::Unmapped:
+    case IOPBusRegion::Rom:
+    case IOPBusRegion::Unmapped:
       break;
   }
   return nullptr;
@@ -116,7 +132,7 @@ IOPBusReadResult IOPBus::readScalar(IOPAddress address, std::size_t width) const
   }
 
   const Location location = locate(address, width);
-  if (location.region == Region::Unmapped)
+  if (location.region == IOPBusRegion::Unmapped)
   {
     return result;
   }
@@ -143,11 +159,11 @@ IOPBusWriteResult IOPBus::writeScalar(
   }
 
   const Location location = locate(address, width);
-  if (location.region == Region::Unmapped)
+  if (location.region == IOPBusRegion::Unmapped)
   {
     return result;
   }
-  if (location.region == Region::Rom)
+  if (location.region == IOPBusRegion::Rom)
   {
     result.status = IOPBusStatus::ReadOnly;
     return result;
@@ -207,11 +223,11 @@ IOPBusWriteResult IOPBus::writeMasked32(
     return {IOPBusStatus::Misaligned};
   }
   const Location location = locate(address, sizeof(IOPWord));
-  if (location.region == Region::Unmapped)
+  if (location.region == IOPBusRegion::Unmapped)
   {
     return {IOPBusStatus::Unmapped};
   }
-  if (location.region == Region::Rom)
+  if (location.region == IOPBusRegion::Rom)
   {
     return {IOPBusStatus::ReadOnly};
   }
@@ -234,11 +250,11 @@ IOPBusStatus IOPBus::loadPhysical(
 {
   assert(count == 0 || bytes != nullptr);
   const Location location = locate(address, count);
-  if (location.region == Region::Unmapped)
+  if (location.region == IOPBusRegion::Unmapped)
   {
     return IOPBusStatus::Unmapped;
   }
-  if (location.region == Region::Rom)
+  if (location.region == IOPBusRegion::Rom)
   {
     return IOPBusStatus::ReadOnly;
   }
@@ -254,7 +270,7 @@ IOPBusStatus IOPBus::inspectPhysical(
 {
   assert(count == 0 || bytes != nullptr);
   const Location location = locate(address, count);
-  if (location.region == Region::Unmapped)
+  if (location.region == IOPBusRegion::Unmapped)
   {
     return IOPBusStatus::Unmapped;
   }

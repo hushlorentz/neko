@@ -209,7 +209,7 @@ struct IOPCoreTestAccess
   }
 
   static IOPInstructionEffects instructionEffects(
-    const IOPCore &core,
+    IOPCore &core,
     IOPWord raw)
   {
     return core.instructionEffects(decodeIOPInstruction(raw));

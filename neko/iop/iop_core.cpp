@@ -426,6 +426,8 @@ IOPCore::IOPCore()
 
 void IOPCore::reset()
 {
+  caches.reset();
+  cacheRomIdentity = bus != nullptr ? bus->romIdentity() : nullptr;
   pc = IOPReset::VECTOR;
   writableGeneralRegisters.fill(0);
   hiRegister = 0;
@@ -449,7 +451,16 @@ void IOPCore::reset()
 
 void IOPCore::attachBus(IOPBus *attached)
 {
+  if (bus != attached)
+  {
+    caches.reset();
+    cacheRomIdentity = nullptr;
+  }
   bus = attached;
+  if (bus != nullptr)
+  {
+    synchronizeCacheConfiguration(*bus);
+  }
 }
 
 bool IOPCore::hasAttachedBus() const
@@ -531,7 +542,7 @@ void IOPCore::stepInstruction()
 }
 
 IOPInstructionEffects IOPCore::instructionEffects(
-  const IOPDecodeResult &decoded) const
+  const IOPDecodeResult &decoded)
 {
   if (decoded.disposition == IOPDecodeDisposition::Reserved)
   {
@@ -878,7 +889,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
 
 IOPInstructionEffects IOPCore::alignedLoadEffects(
   const IOPInstruction &instruction,
-  IOPWord base) const
+  IOPWord base)
 {
   const IOPAddress address =
     base + signExtendedImmediate(instruction.immediate);
@@ -921,7 +932,7 @@ IOPInstructionEffects IOPCore::alignedLoadEffects(
 IOPInstructionEffects IOPCore::wordMergeLoadEffects(
   const IOPInstruction &instruction,
   IOPWord base,
-  IOPWord target) const
+  IOPWord target)
 {
   const IOPAddress address =
     base + signExtendedImmediate(instruction.immediate);
@@ -1292,27 +1303,29 @@ IOPAddressClassification IOPCore::classifyAddress(
   };
 }
 
-IOPMemoryReadResult IOPCore::fetchInstruction() const
+IOPMemoryReadResult IOPCore::fetchInstruction()
 {
-  return readMemory(pc, sizeof(IOPWord), true);
+  return readMemory(pc, sizeof(IOPWord), IOPCacheAccess::InstructionFetch);
 }
 
 IOPMemoryReadResult IOPCore::readData8(
-  IOPAddress virtualAddress) const
+  IOPAddress virtualAddress)
 {
-  return readMemory(virtualAddress, sizeof(std::uint8_t), false);
+  return readMemory(
+    virtualAddress, sizeof(std::uint8_t), IOPCacheAccess::DataLoad);
 }
 
 IOPMemoryReadResult IOPCore::readData16(
-  IOPAddress virtualAddress) const
+  IOPAddress virtualAddress)
 {
-  return readMemory(virtualAddress, sizeof(std::uint16_t), false);
+  return readMemory(
+    virtualAddress, sizeof(std::uint16_t), IOPCacheAccess::DataLoad);
 }
 
 IOPMemoryReadResult IOPCore::readData32(
-  IOPAddress virtualAddress) const
+  IOPAddress virtualAddress)
 {
-  return readMemory(virtualAddress, sizeof(IOPWord), false);
+  return readMemory(virtualAddress, sizeof(IOPWord), IOPCacheAccess::DataLoad);
 }
 
 IOPMemoryWriteResult IOPCore::writeData8(
@@ -1380,7 +1393,9 @@ IOPMemoryWriteResult IOPCore::writeMaskedStore(
     result.exception = IOPException::AddressErrorStore;
     return result;
   }
-  const IOPBusWriteResult write = attachedBus().writeMasked32(
+  IOPBus &physicalBus = attachedBus();
+  synchronizeCacheConfiguration(physicalBus);
+  const IOPBusWriteResult write = physicalBus.writeMasked32(
     classification.physicalAddress & ~IOPAddress(3),
     request.value,
     request.byteEnable);
@@ -1397,10 +1412,24 @@ IOPBus &IOPCore::attachedBus() const
   return *bus;
 }
 
+void IOPCore::synchronizeCacheConfiguration(IOPBus &physicalBus)
+{
+  if (cacheRomIdentity != physicalBus.romIdentity())
+  {
+    caches.reset();
+    cacheRomIdentity = physicalBus.romIdentity();
+  }
+}
+
+const IOPCache &IOPCore::cache() const
+{
+  return caches;
+}
+
 IOPMemoryReadResult IOPCore::readMemory(
   IOPAddress virtualAddress,
   std::size_t width,
-  bool instructionFetch) const
+  IOPCacheAccess access)
 {
   IOPBus &physicalBus = attachedBus();
   const IOPAddressClassification classification =
@@ -1423,6 +1452,7 @@ IOPMemoryReadResult IOPCore::readMemory(
     return result;
   }
 
+  synchronizeCacheConfiguration(physicalBus);
   IOPBusReadResult busResult;
   switch (width)
   {
@@ -1443,7 +1473,7 @@ IOPMemoryReadResult IOPCore::readMemory(
   result.value = busResult.value;
   if (result.outcome != IOPAccessOutcome::Completed)
   {
-    result.exception = instructionFetch
+    result.exception = access == IOPCacheAccess::InstructionFetch
       ? IOPException::InstructionBusError
       : IOPException::DataBusError;
   }
@@ -1476,6 +1506,7 @@ IOPMemoryWriteResult IOPCore::writeMemory(
     return result;
   }
 
+  synchronizeCacheConfiguration(physicalBus);
   IOPBusWriteResult busResult;
   switch (width)
   {
