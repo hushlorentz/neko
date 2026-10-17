@@ -20,8 +20,7 @@ enum class IOPStopReason : std::uint8_t
   HostHalt,
   UndefinedOperation,
   ExecutionException,
-  StoreFailure,
-  UnsupportedCacheMode
+  StoreFailure
 };
 
 enum class IOPException : std::uint8_t
@@ -68,8 +67,7 @@ enum class IOPAccessOutcome : std::uint8_t
   ProtectionFailure,
   Misaligned,
   ReadOnly,
-  Unmapped,
-  UnsupportedCacheMode
+  Unmapped
 };
 
 struct IOPAddressClassification

@@ -221,11 +221,6 @@ namespace
     const IOPMemoryReadResult &read)
   {
     IOPInstructionEffects effects;
-    if (read.outcome == IOPAccessOutcome::UnsupportedCacheMode)
-    {
-      effects.stopReason = IOPStopReason::UnsupportedCacheMode;
-      return effects;
-    }
     effects.exception.kind = read.exception;
     effects.exception.badVirtualAddress = read.virtualAddress;
     return effects;
@@ -1136,12 +1131,6 @@ void IOPCore::commitInstructionEffects(
       effects.store.operation != IOPStoreOperation::None)
   {
     const IOPMemoryWriteResult write = writeStore(effects.store);
-    if (write.outcome == IOPAccessOutcome::UnsupportedCacheMode)
-    {
-      state = IOPExecutionState::Halted;
-      haltReason = IOPStopReason::UnsupportedCacheMode;
-      return;
-    }
     if (write.exception != IOPException::None)
     {
       selectedException.kind = write.exception;
@@ -1409,9 +1398,12 @@ IOPMemoryWriteResult IOPCore::writeMaskedStore(
   aligned.physicalAddress &= ~IOPAddress(3);
   const auto plan = planCacheAccess(
     IOPCacheAccess::DataStore, aligned, sizeof(IOPWord));
-  if (plan.disposition == IOPCacheAccessDisposition::UnsupportedMode)
+  if (plan.disposition == IOPCacheAccessDisposition::Isolated)
   {
-    result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
+    synchronizeCacheConfiguration(physicalBus);
+    caches.commitIndexedStore(
+      plan.bank, aligned.physicalAddress, request.value, request.byteEnable);
+    result.outcome = IOPAccessOutcome::Completed;
     return result;
   }
   const IOPBusWriteResult write = physicalBus.writeMasked32(
@@ -1424,8 +1416,8 @@ IOPMemoryWriteResult IOPCore::writeMaskedStore(
     synchronizeCacheConfiguration(physicalBus);
     if (plan.disposition == IOPCacheAccessDisposition::Cache)
     {
-      caches.commitDataStore(
-        aligned.physicalAddress, request.value, request.byteEnable);
+      caches.commitStore(
+        plan.bank, aligned.physicalAddress, request.value, request.byteEnable);
     }
   }
   return result;
@@ -1495,31 +1487,26 @@ IOPMemoryReadResult IOPCore::readMemory(
   }
 
   const auto plan = planCacheAccess(access, classification, width);
-  if (plan.disposition == IOPCacheAccessDisposition::UnsupportedMode)
-  {
-    result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
-    return result;
-  }
   synchronizeCacheConfiguration(physicalBus);
   IOPBusReadResult busResult;
-  if (plan.disposition == IOPCacheAccessDisposition::Cache)
+  if (plan.disposition == IOPCacheAccessDisposition::Isolated)
   {
-    if (access == IOPCacheAccess::InstructionFetch)
+    const auto read = caches.readIsolatedWord(
+      plan.bank, classification.physicalAddress & ~IOPAddress(3));
+    if (read.probe == IOPCacheProbe::Miss)
     {
-      busResult = caches.readInstruction(
-        physicalBus, classification.physicalAddress);
+      cop0.status |= IOPCOP0Status::CACHE_PROBE_RESULT;
     }
     else
     {
-      busResult = caches.readDataWord(
-        physicalBus, classification.physicalAddress & ~IOPAddress(3));
-      if (busResult.status == IOPBusStatus::Completed)
-      {
-        const auto shift = (classification.physicalAddress & 3) * 8;
-        const IOPWord mask = UINT32_MAX >> ((sizeof(IOPWord) - width) * 8);
-        busResult.value = (busResult.value >> shift) & mask;
-      }
+      cop0.status &= ~IOPCOP0Status::CACHE_PROBE_RESULT;
     }
+    busResult = {IOPBusStatus::Completed, read.value};
+  }
+  else if (plan.disposition == IOPCacheAccessDisposition::Cache)
+  {
+    busResult = caches.readWord(
+      plan.bank, physicalBus, classification.physicalAddress & ~IOPAddress(3));
   }
   else
   {
@@ -1537,6 +1524,13 @@ IOPMemoryReadResult IOPCore::readMemory(
       default:
         throw std::logic_error("Unsupported IOP memory read width.");
     }
+  }
+  if (plan.disposition != IOPCacheAccessDisposition::Bypass &&
+      busResult.status == IOPBusStatus::Completed)
+  {
+    const auto shift = (classification.physicalAddress & 3) * 8;
+    const IOPWord mask = UINT32_MAX >> ((sizeof(IOPWord) - width) * 8);
+    busResult.value = (busResult.value >> shift) & mask;
   }
 
   result.outcome = accessOutcome(busResult.status);
@@ -1578,9 +1572,16 @@ IOPMemoryWriteResult IOPCore::writeMemory(
 
   const auto plan = planCacheAccess(
     IOPCacheAccess::DataStore, classification, width);
-  if (plan.disposition == IOPCacheAccessDisposition::UnsupportedMode)
+  const unsigned offset = classification.physicalAddress & 3;
+  const auto byteEnable =
+    static_cast<std::uint8_t>(((1u << width) - 1) << offset);
+  const IOPAddress physicalWord = classification.physicalAddress & ~IOPAddress(3);
+  if (plan.disposition == IOPCacheAccessDisposition::Isolated)
   {
-    result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
+    synchronizeCacheConfiguration(physicalBus);
+    caches.commitIndexedStore(
+      plan.bank, physicalWord, value << (8 * offset), byteEnable);
+    result.outcome = IOPAccessOutcome::Completed;
     return result;
   }
   IOPBusWriteResult busResult;
@@ -1611,12 +1612,8 @@ IOPMemoryWriteResult IOPCore::writeMemory(
     synchronizeCacheConfiguration(physicalBus);
     if (plan.disposition == IOPCacheAccessDisposition::Cache)
     {
-      const unsigned offset = classification.physicalAddress & 3;
-      const auto byteEnable =
-        static_cast<std::uint8_t>(((1u << width) - 1) << offset);
-      caches.commitDataStore(
-        classification.physicalAddress & ~IOPAddress(3),
-        value << (8 * offset), byteEnable);
+      caches.commitStore(
+        plan.bank, physicalWord, value << (8 * offset), byteEnable);
     }
   }
   return result;

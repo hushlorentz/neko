@@ -31,13 +31,13 @@ enum class IOPCacheAccessDisposition : std::uint8_t
 {
   Bypass,
   Cache,
-  UnsupportedMode
+  Isolated
 };
 
 struct IOPCacheAccessPlan
 {
   IOPCacheAccessDisposition disposition =
-    IOPCacheAccessDisposition::UnsupportedMode;
+    IOPCacheAccessDisposition::Bypass;
   IOPCacheBank bank = IOPCacheBank::Data;
 };
 
@@ -48,6 +48,18 @@ struct IOPCacheLocation
   std::size_t byteOffset = 0;
   IOPAddress physicalTag = 0;
   IOPAddress lineBaseAddress = 0;
+};
+
+enum class IOPCacheProbe : std::uint8_t
+{
+  Hit,
+  Miss
+};
+
+struct IOPCacheProbeResult
+{
+  IOPWord value = 0;
+  IOPCacheProbe probe = IOPCacheProbe::Miss;
 };
 
 template<std::size_t WordCount>
@@ -78,15 +90,23 @@ class IOPCache final
     const IOPInstructionCacheLine &instructionLine(std::size_t index) const;
     const IOPDataCacheLine &dataLine(std::size_t index) const;
 
-    // The core admits aligned cached physical words before these boundaries.
-    IOPBusReadResult readInstruction(
+    // The core admits aligned physical words before these boundaries.
+    IOPBusReadResult readWord(
+      IOPCacheBank bank,
       IOPBus &bus,
       IOPAddress physicalAddress);
-    IOPBusReadResult readDataWord(
-      IOPBus &bus,
-      IOPAddress physicalAddress);
+    IOPCacheProbeResult readIsolatedWord(
+      IOPCacheBank bank,
+      IOPAddress physicalAddress) const;
     // Commit only after physical completion; value is already lane-positioned.
-    void commitDataStore(
+    void commitStore(
+      IOPCacheBank bank,
+      IOPAddress physicalAddress,
+      IOPWord value,
+      std::uint8_t byteEnable);
+    // Indexed stores write one full word or invalidate on a partial mask.
+    void commitIndexedStore(
+      IOPCacheBank bank,
       IOPAddress physicalAddress,
       IOPWord value,
       std::uint8_t byteEnable);

@@ -2189,9 +2189,9 @@ timers, and persistence/trace integration remain separate blocks.
       inspection, hashing, and persistence contracts before implementation.
 - [x] Add fixed-capacity instruction/data cache storage and typed access
       boundaries with checked read-only inspection and deterministic reset.
-      Define explicit unsupported-mode admission before execution routing can
-      encounter not-yet-implemented `IsC`/`SwC` combinations, and account for
-      ROM reconfiguration on an unchanged bus.
+      Define typed cache-mode admission and physical-region eligibility before
+      execution routing, and account for ROM reconfiguration on an unchanged
+      bus.
       Complete an independent ownership and routing review before execution
       uses the new storage.
 - [x] Implement cached instruction fetch, uncached bypass, physical aliases,
@@ -2204,7 +2204,7 @@ timers, and persistence/trace integration remain separate blocks.
       physical admission, cache-hit updates, documented miss behavior, and
       stale external-write visibility. Complete focused atomicity review;
       actual DMA endpoints remain with their device milestones.
-- [ ] Implement software-visible `Status.IsC`/`SwC` isolation, cache probing,
+- [x] Implement software-visible `Status.IsC`/`SwC` isolation, cache probing,
       and isolated partial-store invalidation through the same cache owner.
       Complete focused review of normal and swapped access paths.
 - [ ] Complete focused cache-maintenance, alias, fault, reset, and

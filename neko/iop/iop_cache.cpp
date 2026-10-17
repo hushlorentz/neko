@@ -17,6 +17,45 @@ static_assert((IOPCache::DATA_SIZE & (IOPCache::DATA_SIZE - 1)) == 0,
 
 namespace
 {
+  void validateStore(IOPAddress physicalAddress, std::uint8_t byteEnable)
+  {
+    if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0 ||
+        byteEnable == 0 || (byteEnable & 0xf0) != 0)
+    {
+      throw std::invalid_argument(
+        "IOP cache store requires an aligned word and nonzero four-bit byte enable.");
+    }
+  }
+
+  template<std::size_t WordCount>
+  IOPCacheProbeResult probeLine(
+    const IOPCacheLocation &address,
+    const IOPCacheLine<WordCount> &line)
+  {
+    return {line.words[address.wordIndex],
+      line.valid && line.physicalTag == address.physicalTag
+        ? IOPCacheProbe::Hit : IOPCacheProbe::Miss};
+  }
+
+  template<std::size_t WordCount>
+  void storeIndexedLine(
+    const IOPCacheLocation &address,
+    IOPCacheLine<WordCount> &line,
+    IOPWord value,
+    std::uint8_t byteEnable)
+  {
+    if (byteEnable == 0xf)
+    {
+      line.words[address.wordIndex] = value;
+      line.physicalTag = address.physicalTag;
+      line.valid = true;
+    }
+    else
+    {
+      line.valid = false;
+    }
+  }
+
   template<std::size_t WordCount>
   IOPBusReadResult readLine(
     IOPBus &bus,
@@ -69,34 +108,66 @@ const IOPDataCacheLine &IOPCache::dataLine(std::size_t index) const
   return dataLines.at(index);
 }
 
-IOPBusReadResult IOPCache::readInstruction(
+IOPBusReadResult IOPCache::readWord(
+  IOPCacheBank bank,
   IOPBus &bus,
   IOPAddress physicalAddress)
 {
-  const auto address = location(IOPCacheBank::Instruction, physicalAddress);
-  return readLine(bus, physicalAddress, address, instructionLines[address.lineIndex]);
-}
-
-IOPBusReadResult IOPCache::readDataWord(
-  IOPBus &bus,
-  IOPAddress physicalAddress)
-{
-  const auto address = location(IOPCacheBank::Data, physicalAddress);
+  const auto address = location(bank, physicalAddress);
+  if (bank == IOPCacheBank::Instruction)
+  {
+    return readLine(bus, physicalAddress, address, instructionLines[address.lineIndex]);
+  }
   return readLine(bus, physicalAddress, address, dataLines[address.lineIndex]);
 }
 
-void IOPCache::commitDataStore(
+IOPCacheProbeResult IOPCache::readIsolatedWord(
+  IOPCacheBank bank,
+  IOPAddress physicalAddress) const
+{
+  if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0)
+  {
+    throw std::invalid_argument("IOP cache probe requires an aligned word.");
+  }
+  const auto address = location(bank, physicalAddress);
+  if (bank == IOPCacheBank::Instruction)
+  {
+    return probeLine(address, instructionLines[address.lineIndex]);
+  }
+  return probeLine(address, dataLines[address.lineIndex]);
+}
+
+void IOPCache::commitIndexedStore(
+  IOPCacheBank bank,
   IOPAddress physicalAddress,
   IOPWord value,
   std::uint8_t byteEnable)
 {
-  if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0 ||
-      byteEnable == 0 || (byteEnable & 0xf0) != 0)
+  validateStore(physicalAddress, byteEnable);
+  const auto address = location(bank, physicalAddress);
+  if (bank == IOPCacheBank::Instruction)
   {
-    throw std::invalid_argument(
-      "IOP cache store requires an aligned word and nonzero four-bit byte enable.");
+    storeIndexedLine(address, instructionLines[address.lineIndex], value, byteEnable);
   }
-  const auto address = location(IOPCacheBank::Data, physicalAddress);
+  else
+  {
+    storeIndexedLine(address, dataLines[address.lineIndex], value, byteEnable);
+  }
+}
+
+void IOPCache::commitStore(
+  IOPCacheBank bank,
+  IOPAddress physicalAddress,
+  IOPWord value,
+  std::uint8_t byteEnable)
+{
+  if (bank == IOPCacheBank::Instruction)
+  {
+    commitIndexedStore(bank, physicalAddress, value, byteEnable);
+    return;
+  }
+  validateStore(physicalAddress, byteEnable);
+  const auto address = location(bank, physicalAddress);
   auto &line = dataLines[address.lineIndex];
   if (byteEnable == 0xf)
   {
@@ -191,9 +262,9 @@ IOPCacheAccessPlan IOPCache::planAccess(
     ? IOPCacheBank::Instruction : IOPCacheBank::Data;
   const bool eligible = route == IOPCacheRoute::Cached &&
     (region == IOPBusRegion::Ram || region == IOPBusRegion::Rom);
-  if ((!fetch && control.isolated) || (eligible && control.swapped))
+  if (!fetch && control.isolated)
   {
-    return {IOPCacheAccessDisposition::UnsupportedMode, bank};
+    return {IOPCacheAccessDisposition::Isolated, bank};
   }
   return {
     eligible ? IOPCacheAccessDisposition::Cache
