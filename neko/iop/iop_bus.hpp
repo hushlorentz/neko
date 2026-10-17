@@ -100,6 +100,7 @@ class IOPBus final
       std::size_t count) const;
 
   private:
+    friend class NekoSaveStateCodec;
     enum class Device : std::uint8_t
     {
       None,

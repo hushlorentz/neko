@@ -324,6 +324,11 @@ void NekoSaveStateCodec::load(
 {
   SaveStateContainerReader container(state, observer);
   SystemLoadTransaction transaction;
+  if (system->iopBusComponent.romIdentity() != nullptr)
+  {
+    transaction.parsed.iopBusComponent.installRom(
+      system->iopBusComponent.romIdentity());
+  }
   readSystem(
     container.payload(),
     &transaction.parsed,
@@ -333,6 +338,17 @@ void NekoSaveStateCodec::load(
   validateSystem(
     container.payload(),
     transaction.parsed);
+  const auto &iopConfiguration = transaction.decodedTopology.iopConfiguration;
+  const auto &iopROM = system->iopBusComponent.romIdentity();
+  require(
+    iopConfiguration.romPresent == (iopROM != nullptr),
+    "IOP external ROM presence is incompatible");
+  require(
+    iopConfiguration.romFingerprint ==
+      (iopROM != nullptr ? iopROM->fingerprint() : 0),
+    "IOP external ROM fingerprint is incompatible");
+  transaction.parsed.iopCoreComponent.cacheRomIdentity =
+    iopConfiguration.cacheRomSynchronized ? iopROM : nullptr;
 
   transaction.reconciliation =
     reconcileSystem(
@@ -340,6 +356,21 @@ void NekoSaveStateCodec::load(
       transaction.decodedTopology,
       system);
   commitSystem(system, &transaction);
+}
+
+void NekoSaveStateCodec::inspect(
+  const std::vector<std::uint8_t> &state, SaveStateObserver *observer)
+{
+  SaveStateContainerReader container(state, observer);
+  SystemLoadTransaction transaction;
+  readSystem(
+    container.payload(), &transaction.parsed, &transaction.decodedTopology);
+  container.requireEnd();
+  container.payload()->clearFieldContext();
+  validateSystem(container.payload(), transaction.parsed);
+  // Validate pointer topology without committing or requiring external ROM bytes.
+  transaction.reconciliation = reconcileSystem(
+    transaction.parsed, transaction.decodedTopology, &transaction.parsed);
 }
 
 void NekoSaveStateCodec::writeSystem(
@@ -433,6 +464,10 @@ void NekoSaveStateCodec::writeSystem(
   {
     auto component = writer->scope("scratchpadDMA");
     writeScratchpadDMAState(writer, system);
+  }
+  {
+    auto component = writer->scope("iop");
+    writeIOP(writer, system);
   }
 }
 
@@ -530,6 +565,10 @@ void NekoSaveStateCodec::readSystem(
     auto component = reader->scope("scratchpadDMA");
     readScratchpadDMAState(reader, system);
   }
+  {
+    auto component = reader->scope("iop");
+    readIOP(reader, system, &topology->iopConfiguration);
+  }
 }
 
 void NekoSaveStateCodec::validateSystem(
@@ -592,6 +631,7 @@ void NekoSaveStateCodec::commitSystem(
   NekoSystem *source = &transaction->parsed;
   SystemReconciliation *reconciliation =
     &transaction->reconciliation;
+  commitIOP(destination, source);
   destination->inputState = source->inputState;
   destination->masterClock.masterCycle =
     source->masterClock.masterCycle;

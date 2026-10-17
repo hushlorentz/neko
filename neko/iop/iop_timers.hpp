@@ -125,6 +125,7 @@ class IOPTimers final
     static const IOPTimerCapabilities &capabilities(std::size_t index);
 
   private:
+    friend class NekoSaveStateCodec;
     friend struct IOPTimersTestAccess;
 
     std::array<IOPTimerCounterState, COUNTER_COUNT> counters = {};

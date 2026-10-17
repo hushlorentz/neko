@@ -227,12 +227,16 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(gsDisplayComponent, 1);
   masterClock.registerComponent(fromScratchpadDMACComponent, 1);
   masterClock.registerComponent(toScratchpadDMACComponent, 1);
+  iopBusComponent.attachInterruptController(&iopInterruptControllerComponent);
+  iopBusComponent.attachTimers(&iopTimersComponent);
+  iopCoreComponent.attachBus(&iopBusComponent);
 }
 
 void NekoSystem::reset()
 {
   const std::vector<std::uint8_t> bootROM =
     eeBusComponent.bootROM;
+  const auto iopROM = iopBusComponent.romIdentity();
   // Reset all pointer-linked hardware as one coherent machine.
   this->~NekoSystem();
   new (this) NekoSystem();
@@ -240,6 +244,61 @@ void NekoSystem::reset()
   {
     eeBusComponent.installBootROM(bootROM);
   }
+  if (iopROM != nullptr)
+  {
+    iopBusComponent.installRom(iopROM);
+    iopCoreComponent.attachBus(&iopBusComponent);
+  }
+}
+
+IOPCore &NekoSystem::iopCore()
+{
+  return iopCoreComponent;
+}
+
+const IOPCore &NekoSystem::iopCore() const
+{
+  return iopCoreComponent;
+}
+
+IOPBus &NekoSystem::iopBus()
+{
+  return iopBusComponent;
+}
+
+const IOPBus &NekoSystem::iopBus() const
+{
+  return iopBusComponent;
+}
+
+IOPInterruptController &NekoSystem::iopInterruptController()
+{
+  return iopInterruptControllerComponent;
+}
+
+const IOPInterruptController &NekoSystem::iopInterruptController() const
+{
+  return iopInterruptControllerComponent;
+}
+
+IOPTimers &NekoSystem::iopTimers()
+{
+  return iopTimersComponent;
+}
+
+const IOPTimers &NekoSystem::iopTimers() const
+{
+  return iopTimersComponent;
+}
+
+IOPTimerTiming &NekoSystem::iopTimerTiming()
+{
+  return iopTimerTimingComponent;
+}
+
+const IOPTimerTiming &NekoSystem::iopTimerTiming() const
+{
+  return iopTimerTimingComponent;
 }
 
 void NekoSystem::setInput(const NekoInputState &input)

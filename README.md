@@ -52,6 +52,8 @@ Byte ranges show their size and FNV-1a hash by default. Add
 `--bytes <path>` to `inspect` or `diff`, or `--bytes` to `locate`, to include
 the selected range's bytes. Invalid files and arguments return status 2;
 missing fields and states with semantic differences return status 1.
+Inspection does not require external ROM files. Restoring a machine snapshot
+requires matching IOP ROM configuration; ROM bytes are not embedded for the IOP.
 
 ## Tests
 

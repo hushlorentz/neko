@@ -2282,9 +2282,13 @@ timers, and persistence/trace integration remain separate blocks.
       future IOP persistence fields; persist new live display timing state
       immediately so existing machine save/load remains complete. Complete
       focused architecture/timing review.
-- [ ] Extend canonical hashes and the transactional save-state schema with all
+- [x] Extend canonical hashes and the transactional save-state schema with all
       guest-visible IOP core, cache, bus-memory, INTC, timer, scheduler-phase,
-      and in-flight continuation state. Include cache tags, validity, and all
+      and in-flight continuation state. Establish dormant `NekoSystem`
+      ownership, internal attachment, and reset here so whole-machine
+      persistence has a concrete boundary; leave master-clock execution and
+      shared EE/IOP BIOS configuration to the next item.
+      Include cache tags, validity, and all
       payload words even in invalid lines, cache profile/dimensions, and
       core-owned `Status.CM` under the completed cache contract.
       Immutable external ROM bytes remain
@@ -2292,7 +2296,7 @@ timers, and persistence/trace integration remain separate blocks.
       silent embedding. Land this coverage with or before whole-machine IOP
       attachment, never leaving a machine whose save state silently drops
       running IOP state. Complete focused persistence review.
-- [ ] Attach the IOP owners in `NekoSystem` and schedule `IOPCore` at the
+- [ ] Schedule the persisted IOP owners in `NekoSystem` at the
       documented 36.864 MHz rate, exactly one IOP cycle per eight
       294.912 MHz master cycles. Define phase and same-cycle ordering among
       display inputs, timer transitions, INTC assertion, IOP admission, and

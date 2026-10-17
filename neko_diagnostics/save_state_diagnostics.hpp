@@ -52,6 +52,7 @@ struct SaveStateDifference
   SaveStateDiagnosticField right;
 };
 
+// Validates snapshot structure without restoring or requiring external ROM bytes.
 SaveStateDiagnosticSnapshot inspectSaveState(
   const std::vector<std::uint8_t> &state,
   const SaveStateDiagnosticOptions &options = {});

@@ -37,14 +37,33 @@ class BootROMImage final
       return bytes[index];
     }
 
+    // Deterministic compatibility fingerprint, not a cryptographic signature.
+    std::uint64_t fingerprint() const
+    {
+      return contentFingerprint;
+    }
+
   private:
     explicit BootROMImage(
       const std::vector<std::uint8_t> &source) :
-      bytes(source)
+      bytes(source),
+      contentFingerprint(hashBytes(source))
     {
     }
 
     const std::vector<std::uint8_t> bytes;
+    const std::uint64_t contentFingerprint;
+
+    static std::uint64_t hashBytes(const std::vector<std::uint8_t> &source)
+    {
+      std::uint64_t hash = UINT64_C(14695981039346656037);
+      for (const auto byte : source)
+      {
+        hash ^= byte;
+        hash *= UINT64_C(1099511628211);
+      }
+      return hash;
+    }
 };
 
 #endif

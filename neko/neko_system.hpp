@@ -19,6 +19,8 @@
 #include "gs.hpp"
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
+#include "iop_core.hpp"
+#include "iop_timer_timing.hpp"
 #include "regression_trace.hpp"
 #include "scratchpad_dmac_channel.hpp"
 #include "system_interfaces.hpp"
@@ -103,6 +105,18 @@ class NekoSystem
     const std::vector<NekoTraceEvent> &trace() const;
     std::uint64_t traceHash() const;
     std::uint64_t eeStateHash() const;
+    std::uint64_t iopStateHash() const;
+
+    IOPCore &iopCore();
+    const IOPCore &iopCore() const;
+    IOPBus &iopBus();
+    const IOPBus &iopBus() const;
+    IOPInterruptController &iopInterruptController();
+    const IOPInterruptController &iopInterruptController() const;
+    IOPTimers &iopTimers();
+    const IOPTimers &iopTimers() const;
+    IOPTimerTiming &iopTimerTiming();
+    const IOPTimerTiming &iopTimerTiming() const;
 
     EECore &eeCore();
     const EECore &eeCore() const;
@@ -177,6 +191,11 @@ class NekoSystem
     ScratchpadDMACChannel fromScratchpadDMACComponent;
     ScratchpadDMACChannel toScratchpadDMACComponent;
     GSDisplay gsDisplayComponent;
+    IOPBus iopBusComponent;
+    IOPCore iopCoreComponent;
+    IOPInterruptController iopInterruptControllerComponent;
+    IOPTimers iopTimersComponent;
+    IOPTimerTiming iopTimerTimingComponent;
     NekoInputState inputState;
     bool collectingTrace = false;
     std::vector<NekoTraceEvent> traceEvents;

@@ -245,8 +245,7 @@ SaveStateDiagnosticSnapshot inspectSaveState(
   const SaveStateDiagnosticOptions &options)
 {
   RetainingObserver observer(options);
-  NekoSystem system;
-  NekoSaveStateCodec::load(&system, state, &observer);
+  NekoSaveStateCodec::inspect(state, &observer);
   std::stable_sort(
     observer.fields.begin(),
     observer.fields.end(),

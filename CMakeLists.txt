@@ -74,6 +74,7 @@ add_library(neko_core
     neko/save_state.cpp
     neko/save_state_ee.cpp
     neko/save_state_graphics.cpp
+    neko/save_state_iop.cpp
     neko/save_state_vu.cpp
     neko/ee/gif/gif.cpp
     neko/ee/gif/gif_path_arbiter.cpp
@@ -280,6 +281,7 @@ add_executable(neko_tests
     neko_tests/iop/iop_program_runner_tests.cpp
     neko_tests/iop/iop_timers_tests.cpp
     neko_tests/iop/iop_timer_timing_tests.cpp
+    neko_tests/iop/iop_save_state_tests.cpp
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
     neko_tests/vif/vif_path2_tests.cpp

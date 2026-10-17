@@ -122,6 +122,7 @@ class IOPCache final
       IOPBusRegion region);
 
   private:
+    friend class NekoSaveStateCodec;
     friend struct IOPCacheTestAccess;
 
     std::array<IOPInstructionCacheLine, INSTRUCTION_LINE_COUNT>

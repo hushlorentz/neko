@@ -17,6 +17,7 @@ class IOPTimerTiming final
     std::uint16_t pixelPhase() const;
 
   private:
+    friend class NekoSaveStateCodec;
     std::uint16_t phase = 0;
 };
 

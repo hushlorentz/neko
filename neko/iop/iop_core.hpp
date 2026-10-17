@@ -182,6 +182,7 @@ class IOPCore final
     std::uint64_t retiredInstructions() const;
 
   private:
+    friend class NekoSaveStateCodec;
     friend struct IOPCoreTestAccess;
     friend struct IOPCacheTestAccess;
 

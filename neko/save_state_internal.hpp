@@ -16,14 +16,14 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 32;
+constexpr std::uint32_t SAVE_STATE_VERSION = 33;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
 constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
   UINT64_C(1099511628211);
 constexpr std::size_t SAVE_STATE_RESERVE_BYTES =
-  EEMemoryMap::MAIN_MEMORY_SIZE + 5 * 1024 * 1024;
+  EEMemoryMap::MAIN_MEMORY_SIZE + IOPBus::RAM_SIZE + 5 * 1024 * 1024;
 
 enum class SaveStateFieldKind : std::uint8_t
 {
@@ -994,8 +994,29 @@ class NekoSaveStateCodec
       NekoSystem *system,
       const std::vector<std::uint8_t> &state,
       SaveStateObserver *observer = nullptr);
+    static std::uint64_t hashIOP(const NekoSystem &system);
+    static void inspect(
+      const std::vector<std::uint8_t> &state, SaveStateObserver *observer);
 
   private:
+    struct IOPConfiguration
+    {
+      bool romPresent = false;
+      std::uint64_t romFingerprint = 0;
+      bool cacheRomSynchronized = true;
+    };
+
+    template<typename Writer>
+    static void writeIOPState(Writer *writer, const NekoSystem &system);
+    static void writeIOP(SaveStateWriter *writer, const NekoSystem &system);
+    static void readIOP(
+      SaveStateReader *reader, NekoSystem *system,
+      IOPConfiguration *configuration);
+    static void readIOPCore(
+      SaveStateReader *reader, IOPCore *core, bool *cacheRomSynchronized);
+    static void readIOPCache(SaveStateReader *reader, IOPCache *cache);
+    static void readIOPTimers(SaveStateReader *reader, IOPTimers *timers);
+    static void commitIOP(NekoSystem *destination, NekoSystem *source) noexcept;
     using PipelineLists =
       std::array<std::list<Pipeline *>, 3>;
     using PipelineListIndices =
@@ -1014,6 +1035,7 @@ class NekoSaveStateCodec
       PipelineListIndices vu1PipelineLists;
       EECore::COP1DividerOccupancy dividerOccupancy;
       std::vector<ScheduledComponentState> schedule;
+      IOPConfiguration iopConfiguration;
     };
 
     struct SystemReconciliation

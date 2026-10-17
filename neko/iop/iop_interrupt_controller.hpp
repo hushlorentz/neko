@@ -55,6 +55,7 @@ class IOPInterruptController final
     bool interruptPending() const;
 
   private:
+    friend class NekoSaveStateCodec;
     IOPWord statusRegister = 0;
     IOPWord maskRegister = 0;
     IOPWord controlRegister = 0;
