@@ -37,7 +37,7 @@ TEST_CASE("Neko System Interface Tests")
   SECTION("Frame execution stops at the next presentation boundary")
   {
     NekoSystem system;
-    system.gsDisplay().configureTiming({2, 3});
+    system.gsDisplay().configureTiming({2, 3, {1, 2, 1}});
     system.gs().writeDisplayPSMCT32(
       0, 1, 0, 0, 0xff332211);
     system.eeBus().write64(

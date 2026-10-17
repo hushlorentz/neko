@@ -869,6 +869,7 @@ void NekoSaveStateCodec::commitSystem(
   display.interruptMaskRegister =
     sourceDisplay.interruptMaskRegister;
   display.cycleInFrame = sourceDisplay.cycleInFrame;
+  display.horizontalPhase = sourceDisplay.horizontalPhase;
   display.frameBoundaries = sourceDisplay.frameBoundaries;
   display.verticalBlank = sourceDisplay.verticalBlank;
   display.oddField = sourceDisplay.oddField;

@@ -3,9 +3,18 @@
 
 #include "gs.hpp"
 #include "gs_display.hpp"
+#include "clock_rates.hpp"
 
 namespace
 {
+  GSDisplayHorizontalTiming horizontalTimingForPixels(std::uint64_t pixels)
+  {
+    const std::uint64_t lineUnits = pixels * PS2Clock::IOP_PIXEL_PERIOD;
+    // Provisional PAL-derived active fraction; see PROJECT.md policy registry.
+    return {lineUnits * 3949, lineUnits * 4719,
+      static_cast<std::uint64_t>(PS2Clock::IOP_PIXEL_INCREMENT) * 4719};
+  }
+
   constexpr std::uint8_t COMPONENTS_PER_PIXEL = 4;
 
   std::uint8_t component(
@@ -14,6 +23,45 @@ namespace
   {
     return static_cast<std::uint8_t>(pixel >> shift);
   }
+}
+
+GSDisplayHorizontalTiming GSDisplayHorizontalTiming::ntsc()
+{
+  return horizontalTimingForPixels(858);
+}
+
+GSDisplayHorizontalTiming GSDisplayHorizontalTiming::pal()
+{
+  return horizontalTimingForPixels(864);
+}
+
+bool GSDisplayHorizontalTiming::isValid() const
+{
+  return activeUnits != 0 && activeUnits < totalUnits &&
+    unitsPerMasterCycle != 0 && unitsPerMasterCycle <= activeUnits &&
+    unitsPerMasterCycle <= totalUnits - activeUnits;
+}
+
+bool GSDisplayTiming::isValid() const
+{
+  return activeCycles != 0 && activeCycles < totalCycles && horizontal.isValid();
+}
+
+bool GSDisplayHorizontalTiming::isReachablePhase(std::uint64_t phase) const
+{
+  if (!isValid() || phase >= totalUnits)
+  {
+    return false;
+  }
+  std::uint64_t divisor = totalUnits;
+  std::uint64_t remainder = unitsPerMasterCycle;
+  while (remainder != 0)
+  {
+    const std::uint64_t next = divisor % remainder;
+    divisor = remainder;
+    remainder = next;
+  }
+  return phase % divisor == 0;
 }
 
 GSDisplay::GSDisplay(GS *gs) :
@@ -33,6 +81,7 @@ bool GSDisplay::clockActive() const
 
 void GSDisplay::clock()
 {
+  advanceHorizontalPhase();
   ++cycleInFrame;
   if (!verticalBlank &&
       cycleInFrame == videoTiming.activeCycles)
@@ -54,13 +103,27 @@ void GSDisplay::clock()
   }
 }
 
+void GSDisplay::advanceHorizontalPhase()
+{
+  const auto &horizontal = videoTiming.horizontal;
+  const std::uint64_t untilWrap =
+    horizontal.totalUnits - horizontal.unitsPerMasterCycle;
+  if (horizontalPhase >= untilWrap)
+  {
+    horizontalPhase -= untilWrap;
+  }
+  else
+  {
+    horizontalPhase += horizontal.unitsPerMasterCycle;
+  }
+}
+
 void GSDisplay::configureTiming(const GSDisplayTiming &timing)
 {
-  if (timing.activeCycles == 0 ||
-      timing.activeCycles >= timing.totalCycles)
+  if (!timing.isValid())
   {
     throw std::invalid_argument(
-      "GS display timing requires active cycles before total cycles.");
+      "GS display timing requires valid vertical and horizontal intervals.");
   }
   if (cycleInFrame != 0)
   {
@@ -68,6 +131,7 @@ void GSDisplay::configureTiming(const GSDisplayTiming &timing)
       "GS display timing can change only at a frame boundary.");
   }
   videoTiming = timing;
+  horizontalPhase = 0;
 }
 
 void GSDisplay::writePrivilegedRegister(
@@ -204,6 +268,11 @@ GSPresentation GSDisplay::presentation() const
 bool GSDisplay::inVerticalBlank() const
 {
   return verticalBlank;
+}
+
+bool GSDisplay::inHorizontalBlank() const
+{
+  return horizontalPhase >= videoTiming.horizontal.activeUnits;
 }
 
 bool GSDisplay::interruptPending() const

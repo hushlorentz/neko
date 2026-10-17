@@ -2273,13 +2273,15 @@ timers, and persistence/trace integration remain separate blocks.
       admission policy. Preserve cache bypass, storage-only host inspection,
       rejected-access atomicity, and independent attachment/reset. Leave
       `TC_HOLD` and `0x1f8014c0` unmapped. Add decoded guest MMIO coverage.
-- [ ] Add a typed deterministic timing producer for the fixed 13.5 MHz IOP
+- [x] Add a typed deterministic timing producer for the fixed 13.5 MHz IOP
       pixel clock and display blanking inputs. Reuse the existing display
       owner for V-blank; define the missing H-blank boundary and supported
       timing profiles without inspecting GS internals from timer code,
       inventing frontend wall-clock dependencies, or consuming an edge twice.
       Specify rational-clock phase, edge ordering, configuration, reset, and
-      future persistence fields. Complete focused architecture/timing review.
+      future IOP persistence fields; persist new live display timing state
+      immediately so existing machine save/load remains complete. Complete
+      focused architecture/timing review.
 - [ ] Extend canonical hashes and the transactional save-state schema with all
       guest-visible IOP core, cache, bus-memory, INTC, timer, scheduler-phase,
       and in-flight continuation state. Include cache tags, validity, and all

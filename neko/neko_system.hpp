@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "clock_scheduler.hpp"
+#include "clock_rates.hpp"
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
@@ -67,7 +68,7 @@ struct EEGuestExecutionResult
 class NekoSystem
 {
   public:
-    static constexpr std::uint64_t EE_CLOCK_HZ = 294912000;
+    static constexpr std::uint64_t EE_CLOCK_HZ = PS2Clock::MASTER_HZ;
     static constexpr std::uint64_t VU_CLOCK_HZ = 147456000;
     static constexpr std::uint64_t VU_CLOCK_PERIOD =
       EE_CLOCK_HZ / VU_CLOCK_HZ;

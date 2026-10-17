@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_31_PREPARED_STATE_SIZE = 37845584;
+    VERSION_32_PREPARED_STATE_SIZE = 37845616;
   constexpr std::uint64_t
-    VERSION_31_PREPARED_STATE_HASH =
-      UINT64_C(0x1d210794e3d0a8ec);
+    VERSION_32_PREPARED_STATE_HASH =
+      UINT64_C(0x431a1ef59371302b);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -305,7 +305,7 @@ namespace
         {UINT32_C(0x80120007)},
         {UINT32_C(0x001a0007)}
       });
-    system->gsDisplay().configureTiming({3, 7});
+    system->gsDisplay().configureTiming({3, 7, {1, 2, 1}});
     system->masterClockScheduler().registerComponent(
       system->gifPathArbiter(),
       3,
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 31 save-state layout is byte-stable")
+TEST_CASE("Version 32 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,80 @@ TEST_CASE("Version 31 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 31);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 32);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  REQUIRE(state.size() == VERSION_31_PREPARED_STATE_SIZE);
+  REQUIRE(state.size() == VERSION_32_PREPARED_STATE_SIZE);
   REQUIRE(
     hashBytes(state) ==
-    VERSION_31_PREPARED_STATE_HASH);
+    VERSION_32_PREPARED_STATE_HASH);
+}
+
+TEST_CASE("Horizontal display timing save-state continuation preserves rational phase",
+  "[save-state][timing]")
+{
+  NekoSystem original;
+  original.gsDisplay().configureTiming({3, 5, {3, 7, 2}});
+  original.runMasterCycles(5);
+  REQUIRE(original.gsDisplay().inHorizontalBlank());
+  NekoSystem restored;
+  const auto saved = original.saveState();
+  restored.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  for (unsigned int cycle = 0; cycle < 30; ++cycle)
+  {
+    original.runMasterCycles(1);
+    restored.runMasterCycles(1);
+    REQUIRE(restored.gsDisplay().inHorizontalBlank() ==
+      original.gsDisplay().inHorizontalBlank());
+    REQUIRE(restored.gsDisplay().inVerticalBlank() ==
+      original.gsDisplay().inVerticalBlank());
+  }
+  REQUIRE(restored.saveState() == original.saveState());
+  restored.reset();
+  REQUIRE_FALSE(restored.gsDisplay().inHorizontalBlank());
+  REQUIRE_FALSE(restored.gsDisplay().inVerticalBlank());
+}
+
+TEST_CASE("Invalid horizontal display timing save states are rejected transactionally",
+  "[save-state][timing]")
+{
+  NekoSystem source;
+  source.gsDisplay().configureTiming({3, 5, {3, 7, 2}});
+  source.runMasterCycles(5);
+  const auto valid = source.saveState();
+  NekoSystem destination;
+  const auto before = destination.saveState();
+  const char *fields[] = {
+    "horizontalActiveUnits", "horizontalTotalUnits",
+    "horizontalUnitsPerMasterCycle", "horizontalPhase"
+  };
+  for (const auto field : fields)
+  {
+    SaveStateMutation invalid(valid);
+    writeU64(&invalid, std::string("system.gsDisplay.") + field,
+      std::string(field) == "horizontalPhase" ? 7 : 0);
+    updateChecksum(&invalid);
+    REQUIRE_THROWS(destination.loadState(invalid));
+    REQUIRE(destination.saveState() == before);
+  }
+
+}
+
+TEST_CASE("Horizontal display timing rejects unreachable rational phases transactionally",
+  "[save-state][timing]")
+{
+  NekoSystem source;
+  source.gsDisplay().configureTiming({3, 5, {4, 8, 2}});
+  source.runMasterCycles(5);
+  SaveStateMutation invalid(source.saveState());
+  writeU64(&invalid, "system.gsDisplay.horizontalPhase", 1);
+  updateChecksum(&invalid);
+  NekoSystem destination;
+  const auto before = destination.saveState();
+  REQUIRE_THROWS(destination.loadState(invalid));
+  REQUIRE(destination.saveState() == before);
 }
 
 TEST_CASE("Scratchpad and SPR DMAC state participate in canonical hashes")

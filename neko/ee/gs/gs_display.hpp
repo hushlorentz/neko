@@ -48,6 +48,20 @@ namespace GSDisplayPrivilegedRegister
   constexpr std::uint8_t IMR = 0x41;
 }
 
+struct GSDisplayHorizontalTiming
+{
+  // Rational master-cycle units; a line is totalUnits / unitsPerMasterCycle.
+  std::uint64_t activeUnits = 0;
+  std::uint64_t totalUnits = 0;
+  std::uint64_t unitsPerMasterCycle = 0;
+
+  // Horizontal profiles only; blank duty is provisional, not measured fidelity.
+  static GSDisplayHorizontalTiming ntsc();
+  static GSDisplayHorizontalTiming pal();
+  bool isValid() const;
+  bool isReachablePhase(std::uint64_t phase) const;
+};
+
 struct GSDisplayTiming
 {
   static constexpr std::uint64_t NTSC_ACTIVE_CYCLES = 4498390;
@@ -55,6 +69,20 @@ struct GSDisplayTiming
 
   std::uint64_t activeCycles = NTSC_ACTIVE_CYCLES;
   std::uint64_t totalCycles = NTSC_TOTAL_CYCLES;
+  GSDisplayHorizontalTiming horizontal = GSDisplayHorizontalTiming::ntsc();
+
+  GSDisplayTiming() = default;
+  GSDisplayTiming(
+    std::uint64_t active,
+    std::uint64_t total,
+    const GSDisplayHorizontalTiming &horizontalTiming) :
+    activeCycles(active),
+    totalCycles(total),
+    horizontal(horizontalTiming)
+  {
+  }
+
+  bool isValid() const;
 };
 
 struct GSPresentation
@@ -71,6 +99,7 @@ class GSDisplay : public ClockedComponent
 
     bool clockActive() const override;
     void clock() override;
+    // Frame-boundary reconfiguration restarts horizontal phase in active display.
     void configureTiming(const GSDisplayTiming &timing);
 
     void writePrivilegedRegister(
@@ -81,6 +110,7 @@ class GSDisplay : public ClockedComponent
     GSPresentation presentation() const;
 
     bool inVerticalBlank() const;
+    bool inHorizontalBlank() const;
     bool interruptPending() const;
     bool takeVerticalBlankStart();
     bool takeVerticalBlankEnd();
@@ -103,6 +133,7 @@ class GSDisplay : public ClockedComponent
     };
 
     void decodeFrame(std::size_t index, std::uint64_t value);
+    void advanceHorizontalPhase();
     void decodeDisplay(std::size_t index, std::uint64_t value);
     std::uint32_t circuitPixel(
       std::size_t index,
@@ -118,6 +149,7 @@ class GSDisplay : public ClockedComponent
     std::uint64_t backgroundColor = 0;
     std::uint64_t interruptMaskRegister = GSInterruptMask::ALL;
     std::uint64_t cycleInFrame = 0;
+    std::uint64_t horizontalPhase = 0;
     std::uint64_t frameBoundaries = 0;
     bool verticalBlank = false;
     bool oddField = false;

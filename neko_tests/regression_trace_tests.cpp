@@ -418,7 +418,7 @@ namespace
 
   void prepareRegressionFrame(NekoSystem *system)
   {
-    system->gsDisplay().configureTiming({4, 6});
+    system->gsDisplay().configureTiming({4, 6, {1, 2, 1}});
     system->gs().writeDisplayPSMCT32(
       0, 1, 0, 0, 0xff332211);
     system->eeBus().write64(

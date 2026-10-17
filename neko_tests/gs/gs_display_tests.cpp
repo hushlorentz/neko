@@ -1,8 +1,11 @@
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
+#include "gs.hpp"
 #include "gs_display.hpp"
 #include "neko_system.hpp"
 
@@ -89,7 +92,7 @@ TEST_CASE("GS Vertical Blank Timing Tests")
 {
   NekoSystem system;
   EEBus &bus = system.eeBus();
-  system.gsDisplay().configureTiming({3, 5});
+  system.gsDisplay().configureTiming({3, 5, {1, 2, 1}});
   bus.write32(
     EEMemoryMap::INTC_MASK,
     EEInterruptSource::mask(EEInterruptSource::GS));
@@ -123,4 +126,99 @@ TEST_CASE("GS Vertical Blank Timing Tests")
     (bus.read32(EEMemoryMap::INTC_STAT) &
      EEInterruptSource::mask(
        EEInterruptSource::VBLANK_END)) != 0);
+}
+
+TEST_CASE("GS horizontal timing profiles use exact line periods and provisional blank duty",
+  "[gs][timing]")
+{
+  for (const bool pal : {false, true})
+  {
+    GS gs;
+    GSDisplay display(&gs);
+    if (pal)
+    {
+      GSDisplayTiming timing;
+      timing.horizontal = GSDisplayHorizontalTiming::pal();
+      display.configureTiming(timing);
+    }
+    const std::uint64_t pixels = pal ? 864 : 858;
+    bool previous = false;
+    unsigned int starts = 0;
+    unsigned int ends = 0;
+    REQUIRE_FALSE(display.inHorizontalBlank());
+    for (std::uint64_t cycle = 1; cycle <= 50000; ++cycle)
+    {
+      display.clock();
+      const std::uint64_t phase =
+        cycle * 375 * 18876 % (pixels * 8192 * 18876);
+      const bool blank = phase >= pixels * 8192 * 15796;
+      REQUIRE(display.inHorizontalBlank() == blank);
+      starts += blank && !previous;
+      ends += !blank && previous;
+      previous = blank;
+      REQUIRE_FALSE(display.inVerticalBlank());
+    }
+    REQUIRE(starts == 2);
+    REQUIRE(ends == 2);
+  }
+}
+
+TEST_CASE("GS horizontal phase continues across vertical boundaries and reconfigures explicitly",
+  "[gs][timing]")
+{
+  GS gs;
+  GSDisplay display(&gs);
+  display.configureTiming({3, 5, {3, 7, 2}});
+  for (std::uint64_t cycle = 1; cycle <= 100; ++cycle)
+  {
+    display.clock();
+    REQUIRE(display.inHorizontalBlank() == (cycle * 2 % 7 >= 3));
+    REQUIRE(display.inVerticalBlank() == (cycle % 5 >= 3));
+    REQUIRE(display.takeVerticalBlankStart() == (cycle % 5 == 3));
+    REQUIRE_FALSE(display.takeVerticalBlankStart());
+    REQUIRE(display.takeVerticalBlankEnd() == (cycle % 5 == 0));
+    REQUIRE_FALSE(display.takeVerticalBlankEnd());
+  }
+  REQUIRE(display.presentationBoundaryCount() == 20);
+  display.configureTiming({2, 4, {1, 2, 1}});
+  REQUIRE_FALSE(display.inHorizontalBlank());
+  display.clock();
+  REQUIRE(display.inHorizontalBlank());
+  REQUIRE_THROWS_AS(display.configureTiming({2, 4, {1, 2, 1}}),
+    std::logic_error);
+}
+
+TEST_CASE("GS horizontal timing rejects invalid waveforms atomically and avoids phase overflow",
+  "[gs][timing]")
+{
+  const GSDisplayHorizontalTiming invalid[] = {
+    {0, 2, 1}, {2, 2, 1}, {3, 2, 1}, {1, 2, 0},
+    {1, 3, 2}, {2, 3, 2}, {1, 2, 3}
+  };
+  GS gs;
+  for (const auto &horizontal : invalid)
+  {
+    GSDisplay display(&gs);
+    display.configureTiming({3, 5, {3, 7, 2}});
+    const auto before = display;
+    REQUIRE_THROWS_AS(display.configureTiming({2, 4, horizontal}),
+      std::invalid_argument);
+    auto expected = before;
+    for (unsigned int cycle = 0; cycle < 20; ++cycle)
+    {
+      display.clock();
+      expected.clock();
+      REQUIRE(display.inHorizontalBlank() == expected.inHorizontalBlank());
+      REQUIRE(display.inVerticalBlank() == expected.inVerticalBlank());
+    }
+  }
+  GSDisplay display(&gs);
+  const std::uint64_t maximum = std::numeric_limits<std::uint64_t>::max();
+  display.configureTiming({3, 5, {maximum / 2, maximum, maximum / 2}});
+  display.clock();
+  REQUIRE(display.inHorizontalBlank());
+  display.clock();
+  REQUIRE(display.inHorizontalBlank());
+  display.clock();
+  REQUIRE_FALSE(display.inHorizontalBlank());
 }

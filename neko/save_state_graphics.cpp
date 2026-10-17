@@ -1483,6 +1483,13 @@ void NekoSaveStateCodec::writeGSDisplay(
   writer->writeFieldU64(
     "totalCycles",
     display.videoTiming.totalCycles);
+  writer->writeFieldU64(
+    "horizontalActiveUnits", display.videoTiming.horizontal.activeUnits);
+  writer->writeFieldU64(
+    "horizontalTotalUnits", display.videoTiming.horizontal.totalUnits);
+  writer->writeFieldU64(
+    "horizontalUnitsPerMasterCycle",
+    display.videoTiming.horizontal.unitsPerMasterCycle);
   writer->writeFieldU64("modeRegister", display.modeRegister);
   writer->writeFieldU64(
     "syncModeRegister",
@@ -1494,6 +1501,7 @@ void NekoSaveStateCodec::writeGSDisplay(
     "interruptMaskRegister",
     display.interruptMaskRegister);
   writer->writeFieldU64("cycleInFrame", display.cycleInFrame);
+  writer->writeFieldU64("horizontalPhase", display.horizontalPhase);
   writer->writeFieldU64(
     "frameBoundaries",
     display.frameBoundaries);
@@ -1560,6 +1568,12 @@ void NekoSaveStateCodec::readGSDisplay(
     reader->readFieldU64("activeCycles");
   display->videoTiming.totalCycles =
     reader->readFieldU64("totalCycles");
+  display->videoTiming.horizontal.activeUnits =
+    reader->readFieldU64("horizontalActiveUnits");
+  display->videoTiming.horizontal.totalUnits =
+    reader->readFieldU64("horizontalTotalUnits");
+  display->videoTiming.horizontal.unitsPerMasterCycle =
+    reader->readFieldU64("horizontalUnitsPerMasterCycle");
   display->modeRegister = reader->readFieldU64("modeRegister");
   display->syncModeRegister =
     reader->readFieldU64("syncModeRegister");
@@ -1569,6 +1583,8 @@ void NekoSaveStateCodec::readGSDisplay(
     reader->readFieldU64("interruptMaskRegister");
   display->cycleInFrame =
     reader->readFieldU64("cycleInFrame");
+  display->horizontalPhase =
+    reader->readFieldU64("horizontalPhase");
   display->frameBoundaries =
     reader->readFieldU64("frameBoundaries");
   display->verticalBlank =
@@ -1582,14 +1598,15 @@ void NekoSaveStateCodec::readGSDisplay(
   display->verticalBlankEnded =
     reader->readFieldBool("verticalBlankEnded");
   require(
-    display->videoTiming.activeCycles != 0 &&
-    display->videoTiming.activeCycles <
-      display->videoTiming.totalCycles,
+    display->videoTiming.isValid(),
     "GS display timing is invalid");
   require(
     display->cycleInFrame <
       display->videoTiming.totalCycles,
     "GS display cycle is invalid");
+  require(
+    display->videoTiming.horizontal.isReachablePhase(display->horizontalPhase),
+    "GS display horizontal phase is invalid");
   require(
     (display->modeRegister & ~UINT64_C(0xffff)) == 0 &&
     (display->syncModeRegister & ~UINT64_C(0x0f)) == 0 &&
