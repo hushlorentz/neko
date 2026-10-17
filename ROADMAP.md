@@ -2246,28 +2246,67 @@ timers, and persistence/trace integration remain separate blocks.
 
 ### IOP Timers and Clock Integration
 
-- [ ] Add six focused timer-counter owners matching the documented widths,
-      system/pixel/H-blank/V-blank sources, gate modes, prescalers, target and
-      overflow events, interrupt generation, reset, hashing, and persistence.
-      Resolve raw mode-register encodings and acknowledgement semantics before
-      implementation.
-- [ ] Derive timer inputs from typed scheduler/display timing signals; timer
-      code must not inspect GS internals or frontend wall-clock time.
-- [ ] Register `IOPCore` at the documented 36.864 MHz rate, exactly one IOP
-      cycle per eight 294.912 MHz master cycles. Define deterministic phase and
-      same-cycle ordering among IOP execution, timer transitions, INTC
-      assertion, and EE-side components.
-- [ ] Pin timer target/overflow coincidence, gate edges, prescaler phase,
-      simultaneous interrupts, reset while active, and save/load continuation
-      without claiming undocumented hardware contention timing.
-
-### Persistence, Diagnostics, and IOP Conformance
-
+- [x] Close the timer execution contract against the local SCEI manuals and
+      approved raw-register profile before production changes. Resolve gate
+      polarity and raw mode mapping, ungated-counter stop behavior, mode
+      read/write rearming, one-shot/repeat and pulse/toggle transitions,
+      count/target-write effects, and target/overflow coincidence. Obtain
+      approval before consulting additional secondary evidence; register every
+      remaining provisional choice and its local replacement boundary.
+- [ ] Add one fixed-capacity `IOPTimers` owner containing six independent
+      counter states and a canonical capability table. Pin widths, register
+      masks, source/gate/prescaler selection, side-effecting mode access versus
+      const inspection, deterministic reset, and invalid-index atomicity.
+      Include the canonical prescaler, gate-wait, one-shot, and pulse-release
+      state needed for complete register/reset lifecycle semantics; pulse and
+      gate inputs begin advancing that state in the following item.
+      Keep physical decode, clock generation, and CPU exception policy outside
+      the owner. Complete focused ownership review.
+- [ ] Implement counter progression from typed system/pixel/H-blank pulses and
+      H-blank/V-blank gate transitions. Cover target and natural overflow,
+      prescaler remainder, gate lifecycle, interrupt request/rearm state, and
+      simultaneous events; emit typed timer causes for the existing INTC
+      owner without coupling timers to COP0 or GS. Complete focused timing
+      and interrupt review.
+- [ ] Map count, mode, and target through `IOPBus`, assessing supported widths
+      and byte enables against the evidence before selecting any provisional
+      admission policy. Preserve cache bypass, storage-only host inspection,
+      rejected-access atomicity, and independent attachment/reset. Leave
+      `TC_HOLD` and `0x1f8014c0` unmapped. Add decoded guest MMIO coverage.
+- [ ] Add a typed deterministic timing producer for the fixed 13.5 MHz IOP
+      pixel clock and display blanking inputs. Reuse the existing display
+      owner for V-blank; define the missing H-blank boundary and supported
+      timing profiles without inspecting GS internals from timer code,
+      inventing frontend wall-clock dependencies, or consuming an edge twice.
+      Specify rational-clock phase, edge ordering, configuration, reset, and
+      future persistence fields. Complete focused architecture/timing review.
 - [ ] Extend canonical hashes and the transactional save-state schema with all
-      guest-visible IOP core, bus-memory, INTC, timer, scheduler-phase, and
-      in-flight continuation state. Immutable external ROM bytes remain
+      guest-visible IOP core, cache, bus-memory, INTC, timer, scheduler-phase,
+      and in-flight continuation state. Include cache tags, validity, and all
+      payload words even in invalid lines, cache profile/dimensions, and
+      core-owned `Status.CM` under the completed cache contract.
+      Immutable external ROM bytes remain
       configuration and require an explicit compatibility identity rather than
-      silent embedding.
+      silent embedding. Land this coverage with or before whole-machine IOP
+      attachment, never leaving a machine whose save state silently drops
+      running IOP state. Complete focused persistence review.
+- [ ] Attach the IOP owners in `NekoSystem` and schedule `IOPCore` at the
+      documented 36.864 MHz rate, exactly one IOP cycle per eight
+      294.912 MHz master cycles. Define phase and same-cycle ordering among
+      display inputs, timer transitions, INTC assertion, IOP admission, and
+      existing EE-side components. Preserve reset, shared immutable BIOS
+      configuration, and existing EE-only workflows; do not automatically
+      start BIOS execution. Complete focused system-integration review.
+- [ ] Add end-to-end timer/CPU conformance for target/overflow coincidence,
+      gate edges, prescaler phase, simultaneous interrupts, independent INTC
+      acknowledgement, halted CPU versus advancing devices, reset while
+      active, deterministic repetition, and save/load continuation. Do not
+      claim undocumented retail contention or interrupt-pulse timing.
+- [ ] Complete the block-wide independent correctness review and optimized
+      AddressSanitizer check, reconcile `PROJECT.md`, and close the block.
+
+### Diagnostics and IOP Conformance
+
 - [ ] Add structured IOP instruction, memory, exception, interrupt, timer, and
       state-transition trace events through the existing stable trace
       transport. Keep tracing observational and allocation-free on execution
