@@ -76,6 +76,161 @@ namespace
     result.divisor = decodeDivisor(capability.prescaler, mode);
     return result;
   }
+
+  bool gateLevel(IOPTimerGate gate, const IOPTimerGateLevels &levels)
+  {
+    switch (gate)
+    {
+      case IOPTimerGate::None:
+        return false;
+      case IOPTimerGate::HBlank:
+        return levels.horizontalBlank;
+      case IOPTimerGate::VBlank:
+        return levels.verticalBlank;
+    }
+    throw std::logic_error("Unknown IOP timer gate.");
+  }
+
+  void clearCounter(IOPTimerCounterState &state)
+  {
+    state.count = 0;
+    state.prescalerRemainder = 0;
+  }
+
+  void applyGateTransition(
+    IOPTimerCounterState &state, IOPTimerGateMode mode,
+    bool previousBlank, bool currentBlank)
+  {
+    switch (mode)
+    {
+      case IOPTimerGateMode::CountInBlank:
+        if (previousBlank != currentBlank)
+        {
+          clearCounter(state);
+          if (currentBlank)
+          {
+            state.gateWaiting = false;
+          }
+        }
+        if (!currentBlank)
+        {
+          clearCounter(state);
+        }
+        break;
+      case IOPTimerGateMode::ClearOnBlankEnd:
+        if (previousBlank && !currentBlank)
+        {
+          clearCounter(state);
+        }
+        break;
+      case IOPTimerGateMode::StartOnBlankEnd:
+        if (previousBlank && !currentBlank)
+        {
+          state.gateWaiting = false;
+        }
+        break;
+      case IOPTimerGateMode::FreeRunning:
+      case IOPTimerGateMode::CountOutsideBlank:
+      case IOPTimerGateMode::Stopped:
+        break;
+    }
+  }
+
+  bool countingEnabled(
+    const IOPTimerCounterState &state, IOPTimerGateMode mode, bool blank)
+  {
+    switch (mode)
+    {
+      case IOPTimerGateMode::FreeRunning:
+      case IOPTimerGateMode::ClearOnBlankEnd:
+        return true;
+      case IOPTimerGateMode::CountOutsideBlank:
+        return !blank;
+      case IOPTimerGateMode::CountInBlank:
+        return !state.gateWaiting && blank;
+      case IOPTimerGateMode::StartOnBlankEnd:
+        return !state.gateWaiting;
+      case IOPTimerGateMode::Stopped:
+        return false;
+    }
+    throw std::logic_error("Unknown IOP timer gate mode.");
+  }
+
+  bool sourcePulse(
+    IOPTimerSource source, const IOPTimerTimingSample &sample,
+    const IOPTimerGateLevels &previous)
+  {
+    switch (source)
+    {
+      case IOPTimerSource::System:
+        return sample.systemClockPulse;
+      case IOPTimerSource::Pixel:
+        return sample.pixelClockPulse;
+      case IOPTimerSource::HBlank:
+        return !previous.horizontalBlank && sample.gates.horizontalBlank;
+    }
+    throw std::logic_error("Unknown IOP timer source.");
+  }
+
+  void releasePulse(IOPTimerCounterState &state)
+  {
+    if (state.pulseReleasePending)
+    {
+      state.mode |= IOPTimerMode::REQUEST_IDLE;
+      state.pulseReleasePending = false;
+    }
+  }
+
+  IOPWord advanceCounter(
+    IOPTimerCounterState &state, const IOPTimerCapabilities &capability,
+    std::uint16_t divisor)
+  {
+    ++state.prescalerRemainder;
+    if (state.prescalerRemainder < divisor)
+    {
+      return 0;
+    }
+    state.prescalerRemainder = 0;
+    const IOPWord mask = counterMask(capability);
+    const bool overflow = state.count == mask;
+    state.count = (state.count + 1) & mask;
+    const bool target = state.count == state.target;
+    const IOPWord events =
+      (overflow ? IOPTimerMode::OVERFLOW_REACHED : 0) |
+      (target ? IOPTimerMode::TARGET_REACHED : 0);
+    state.mode |= events;
+    if (target && (state.mode & IOPTimerMode::RESET_ON_TARGET) != 0)
+    {
+      clearCounter(state);
+    }
+    return events;
+  }
+
+  bool requestInterrupt(IOPTimerCounterState &state, IOPWord events)
+  {
+    const bool qualifies =
+      ((events & IOPTimerMode::TARGET_REACHED) != 0 &&
+        (state.mode & IOPTimerMode::INTERRUPT_ON_TARGET) != 0) ||
+      ((events & IOPTimerMode::OVERFLOW_REACHED) != 0 &&
+        (state.mode & IOPTimerMode::INTERRUPT_ON_OVERFLOW) != 0);
+    const bool repeat = (state.mode & IOPTimerMode::REPEAT_INTERRUPT) != 0;
+    if (!qualifies || (!repeat && state.oneShotConsumed))
+    {
+      return false;
+    }
+    if (!repeat)
+    {
+      state.oneShotConsumed = true;
+    }
+    if ((state.mode & IOPTimerMode::TOGGLE_INTERRUPT) != 0)
+    {
+      state.mode ^= IOPTimerMode::REQUEST_IDLE;
+      return (state.mode & IOPTimerMode::REQUEST_IDLE) == 0;
+    }
+    state.mode &= ~IOPTimerMode::REQUEST_IDLE;
+    state.pulseReleasePending = true;
+    return true;
+  }
 }
 
 void IOPTimers::reset()
@@ -119,6 +274,41 @@ IOPWord IOPTimers::readMode(std::size_t index)
   state.oneShotConsumed = false;
   state.pulseReleasePending = false;
   return value;
+}
+
+IOPTimers::InterruptRequests IOPTimers::advance(
+  const IOPTimerTimingSample &sample)
+{
+  // Release only older requests, before this sample can create another one.
+  if (sample.systemClockPulse)
+  {
+    for (auto &state : counters)
+    {
+      releasePulse(state);
+    }
+  }
+  InterruptRequests requests;
+  for (std::size_t index = 0; index < COUNTER_COUNT; ++index)
+  {
+    auto &state = counters[index];
+    const auto &capability = timerCapabilities[index];
+    const auto selected = decodeConfiguration(capability, state.mode);
+    const bool currentBlank = gateLevel(capability.gate, sample.gates);
+    applyGateTransition(state, selected.gateMode,
+      gateLevel(capability.gate, blanking), currentBlank);
+    if (!countingEnabled(state, selected.gateMode, currentBlank) ||
+      !sourcePulse(selected.source, sample, blanking))
+    {
+      continue;
+    }
+    const IOPWord events = advanceCounter(state, capability, selected.divisor);
+    if (requestInterrupt(state, events))
+    {
+      requests.sources[requests.count++] = capability.interruptSource;
+    }
+  }
+  blanking = sample.gates;
+  return requests;
 }
 
 const IOPTimerCounterState &IOPTimers::counter(std::size_t index) const

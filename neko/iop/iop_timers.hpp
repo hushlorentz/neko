@@ -91,16 +91,32 @@ struct IOPTimerGateLevels
   bool verticalBlank = false;
 };
 
+struct IOPTimerTimingSample
+{
+  bool systemClockPulse = false;
+  bool pixelClockPulse = false;
+  // Complete levels for this sample; H-blank starts also supply its clock.
+  IOPTimerGateLevels gates;
+};
+
 class IOPTimers final
 {
   public:
     static constexpr std::size_t COUNTER_COUNT = 6;
+
+    struct InterruptRequests
+    {
+      // Only the first count entries are valid, ordered by timer index.
+      std::array<IOPInterruptSource, COUNTER_COUNT> sources = {};
+      std::size_t count = 0;
+    };
 
     void reset();
     void writeCount(std::size_t index, IOPWord value);
     void writeTarget(std::size_t index, IOPWord value);
     void writeMode(std::size_t index, IOPWord value);
     IOPWord readMode(std::size_t index);
+    InterruptRequests advance(const IOPTimerTimingSample &sample);
 
     // Inspection does not perform the guest mode-register acknowledgement.
     const IOPTimerCounterState &counter(std::size_t index) const;

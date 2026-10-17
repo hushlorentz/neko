@@ -2262,7 +2262,7 @@ timers, and persistence/trace integration remain separate blocks.
       gate inputs begin advancing that state in the following item.
       Keep physical decode, clock generation, and CPU exception policy outside
       the owner. Complete focused ownership review.
-- [ ] Implement counter progression from typed system/pixel/H-blank pulses and
+- [x] Implement counter progression from typed system/pixel/H-blank pulses and
       H-blank/V-blank gate transitions. Cover target and natural overflow,
       prescaler remainder, gate lifecycle, interrupt request/rearm state, and
       simultaneous events; emit typed timer causes for the existing INTC
