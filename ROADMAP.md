@@ -2212,7 +2212,7 @@ timers, and persistence/trace integration remain separate blocks.
       and host pause/resume across active branch and delayed-result state.
       Hash/save-state and trace integration remain in the milestone's
       Persistence, Diagnostics, and IOP Conformance block.
-- [ ] Complete the block-wide independent correctness review and optimized
+- [x] Complete the block-wide independent correctness review and optimized
       AddressSanitizer check, reconcile `PROJECT.md`, and close the block
       before platform integration.
 
