@@ -2236,7 +2236,7 @@ timers, and persistence/trace integration remain separate blocks.
       delayed writeback, and branch-delay provenance. Keep timer/device
       producers typed; actual timers and scheduler attachment remain later
       work. Complete focused integration review.
-- [ ] Add guest-visible conformance for simultaneous causes, independent
+- [x] Add guest-visible conformance for simultaneous causes, independent
       masks, master-control acknowledgement, repeated assertion, exception
       ordering, reset, and deterministic host pause/resume without duplicating
       existing CPU-only interrupt tests.

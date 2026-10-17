@@ -2722,6 +2722,152 @@ TEST_CASE("IOP cached continuation outcomes repeat identically across host pause
   }
 }
 
+TEST_CASE("IOP INTC handler execution repeats identically across host pauses and cache bank swapping",
+  "[iop][cache][interrupt][intc][conformance]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (const bool firstIsBranch : {false, true})
+    {
+      IOPBus baselineBus;
+      IOPBus pausedBus;
+      IOPInterruptController baselineInterrupts;
+      IOPInterruptController pausedInterrupts;
+      baselineBus.attachInterruptController(&baselineInterrupts);
+      pausedBus.attachInterruptController(&pausedInterrupts);
+      IOPCore baseline;
+      IOPCore paused;
+      baseline.attachBus(&baselineBus);
+      paused.attachBus(&pausedBus);
+      IOPCore repeatedResult;
+      std::vector<std::uint8_t> baselineMemory(0x250);
+      std::vector<std::uint8_t> pausedMemory(baselineMemory.size());
+      for (unsigned repetition = 0; repetition < 3; ++repetition)
+      {
+        CAPTURE(swapped);
+        CAPTURE(firstIsBranch);
+        CAPTURE(repetition);
+        const auto setup = [&](IOPCore &core, IOPBus &bus,
+                               IOPInterruptController &interrupts)
+        {
+          interrupts.reset();
+          bus.reset();
+          core.prepareFreshExecution(0x80000100, 0, 0);
+          requireClear(core.cache());
+          interrupts.writeMask(0x02000010);
+          interrupts.writeControl(1);
+          IOPCacheTestAccess::setStatus(&core, 0x00200401 |
+            (swapped ? IOPCOP0Status::CACHES_SWAPPED : 0));
+          IOPCacheTestAccess::setGeneralRegister(&core, 1, IOPBus::INTC_CTRL);
+          IOPCacheTestAccess::setGeneralRegister(&core, 2, IOPBus::INTC_STAT);
+          IOPCacheTestAccess::setGeneralRegister(&core, 3, 0x80000240);
+          IOPCacheTestAccess::setGeneralRegister(&core, 7, 0x77);
+          const IOPWord program[] = {
+            firstIsBranch ? 0x10000007u : 0x8c270000u,
+            0xac670000,
+            0x08000048,
+            0
+          };
+          const IOPWord handler[] = {
+            0xac400000,
+            0x401a7000,
+            0,
+            0x03400008,
+            0x42000010
+          };
+          for (std::size_t index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+          {
+            REQUIRE(bus.write32(0x100 + 4 * index, program[index]).status ==
+              IOPBusStatus::Completed);
+          }
+          for (std::size_t index = 0; index < sizeof(handler) / sizeof(handler[0]); ++index)
+          {
+            REQUIRE(bus.write32(0x80 + 4 * index, handler[index]).status ==
+              IOPBusStatus::Completed);
+          }
+          REQUIRE(bus.write32(0x120, 0x24080009).status == IOPBusStatus::Completed);
+          core.startExecution(0x80000100);
+        };
+        setup(baseline, baselineBus, baselineInterrupts);
+        setup(paused, pausedBus, pausedInterrupts);
+        for (unsigned step = 0; step < 12; ++step)
+        {
+          CAPTURE(step);
+          const bool pause = repetition == 0 || (repetition == 1 && step % 2 != 0) ||
+            step == 1 || step == 6;
+          if (pause)
+          {
+            paused.haltExecution();
+          }
+          if (step == 1)
+          {
+            REQUIRE(baseline.branchContinuation().active == firstIsBranch);
+            REQUIRE(baseline.delayedResultContinuation().source ==
+              (firstIsBranch ? IOPDelayedResultSource::None : IOPDelayedResultSource::Load));
+            REQUIRE(paused.cause() == 0);
+            for (IOPInterruptController *interrupts :
+                 {&baselineInterrupts, &pausedInterrupts})
+            {
+              interrupts->assertSource(IOPInterruptSource::Timer0);
+              interrupts->assertSource(IOPInterruptSource::FireWireDMA);
+              interrupts->assertSource(IOPInterruptSource::Timer0);
+              interrupts->writeControl(1);
+            }
+          }
+          if (pause)
+          {
+            REQUIRE_THROWS_AS(paused.stepInstruction(), std::logic_error);
+            REQUIRE(paused.elapsedCycles() == baseline.elapsedCycles());
+            REQUIRE(paused.retiredInstructions() == baseline.retiredInstructions());
+            paused.resumeExecution();
+          }
+          requireSameCoreState(paused, baseline);
+          baseline.stepInstruction();
+          paused.stepInstruction();
+          requireSameCoreState(paused, baseline);
+          REQUIRE(pausedInterrupts.status() == baselineInterrupts.status());
+          REQUIRE(pausedInterrupts.mask() == baselineInterrupts.mask());
+          REQUIRE(pausedInterrupts.control() == baselineInterrupts.control());
+          REQUIRE(pausedInterrupts.interruptPending() == baselineInterrupts.interruptPending());
+          REQUIRE(baselineBus.inspectPhysical(0, baselineMemory.data(),
+            baselineMemory.size()) == IOPBusStatus::Completed);
+          REQUIRE(pausedBus.inspectPhysical(0, pausedMemory.data(),
+            pausedMemory.size()) == IOPBusStatus::Completed);
+          REQUIRE(pausedMemory == baselineMemory);
+          if (step == 1)
+          {
+            REQUIRE(baseline.exception().kind == IOPException::Interrupt);
+            REQUIRE(baseline.exception().inBranchDelaySlot == firstIsBranch);
+            REQUIRE(baseline.exceptionProgramCounter() ==
+              (firstIsBranch ? 0x80000100 : 0x80000104));
+            REQUIRE(baselineInterrupts.status() == 0x02000010);
+          }
+          else
+          {
+            REQUIRE(baseline.exception().kind == IOPException::None);
+          }
+        }
+        REQUIRE(baseline.programCounter() == (firstIsBranch ? 0x8000012c : 0x80000128));
+        REQUIRE(baseline.generalRegister(7) == (firstIsBranch ? 0x77 : 1));
+        REQUIRE(baseline.generalRegister(8) == 9);
+        REQUIRE(baselineBus.read32(0x240).value == (firstIsBranch ? 0x77 : 1));
+        REQUIRE(baselineInterrupts.status() == 0);
+        REQUIRE(baselineInterrupts.mask() == 0x02000010);
+        REQUIRE(baselineInterrupts.control() == 1);
+        REQUIRE(baseline.cause() == (firstIsBranch ? IOPCOP0Cause::BRANCH_DELAY : 0));
+        REQUIRE(baseline.elapsedCycles() == 12);
+        REQUIRE(baseline.retiredInstructions() == 11);
+        if (repetition != 0)
+        {
+          requireSameCoreState(baseline, repeatedResult);
+        }
+        // Inspection-only snapshot; the independently owned devices are not copied.
+        repeatedResult = baseline;
+      }
+    }
+  }
+}
+
 TEST_CASE("IOP restart discards real continuations but only fresh execution and reset clear caches",
   "[iop][cache][conformance]")
 {

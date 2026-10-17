@@ -1451,6 +1451,358 @@ TEST_CASE("IOP reset clears direct pins but resamples an independently owned INT
   }
 }
 
+TEST_CASE("IOP guest handler independently masks and acknowledges simultaneous INTC causes",
+  "[iop][execution][interrupt][intc][conformance]")
+{
+  constexpr IOPWord first = 0x10;
+  constexpr IOPWord second = 0x02000000;
+  constexpr IOPWord third = 0x10000;
+  IOPBus bus;
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, IOPBus::INTC_STAT);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, first);
+  IOPCoreTestAccess::setGeneralRegister(&core, 3, 1);
+  IOPCoreTestAccess::setGeneralRegister(&core, 6, 0x00200401);
+  IOPCoreTestAccess::setGeneralRegister(&core, 12, second);
+  IOPCoreTestAccess::setGeneralRegister(&core, 14, third);
+  const IOPWord program[] = {
+    immediateInstruction(0x2b, 1, 2, 4),
+    immediateInstruction(0x2b, 1, 3, 8),
+    immediateInstruction(0x23, 1, 4, 0),
+    immediateInstruction(0x23, 1, 5, 4),
+    0,
+    cop0TransferInstruction(4, 6, 12),
+    immediateInstruction(9, 0, 7, 7),
+    immediateInstruction(0x2b, 1, 12, 4),
+    immediateInstruction(9, 0, 13, 9),
+    immediateInstruction(0x2b, 1, 14, 4),
+    immediateInstruction(9, 0, 15, 11),
+    immediateInstruction(0x2b, 1, 2, 4),
+    immediateInstruction(9, 0, 16, 13)
+  };
+  const IOPWord handler[] = {
+    immediateInstruction(0x23, 1, 8, 0),
+    immediateInstruction(0x23, 1, 9, 4),
+    0,
+    registerInstruction(0x24, 8, 9, 10),
+    registerInstruction(0x27, 10, 0, 11),
+    immediateInstruction(0x2b, 1, 11, 0),
+    cop0TransferInstruction(0, 26, 14),
+    0,
+    registerInstruction(8, 26, 0, 0),
+    0x42000010
+  };
+  for (std::size_t index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+  {
+    loadInstruction(&bus, 0x100 + 4 * index, program[index]);
+  }
+  for (std::size_t index = 0; index < sizeof(handler) / sizeof(handler[0]); ++index)
+  {
+    loadInstruction(&bus, 0x80 + 4 * index, handler[index]);
+  }
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.assertSource(IOPInterruptSource::FireWireDMA);
+  interrupts.assertSource(IOPInterruptSource::Timer5);
+  core.startExecution(0x100);
+  for (unsigned step = 0; step < 6; ++step)
+  {
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::None);
+  }
+  REQUIRE(core.generalRegister(4) == (first | second | third));
+  REQUIRE(core.generalRegister(5) == first);
+  const auto service = [&](IOPAddress restart, IOPWord pending, IOPWord mask)
+  {
+    CAPTURE(restart);
+    CAPTURE(pending);
+    CAPTURE(mask);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == restart);
+    REQUIRE(core.cause() == 0x400);
+    REQUIRE(interrupts.status() == pending);
+    for (unsigned step = 0; step < 10; ++step)
+    {
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+    }
+    REQUIRE(core.generalRegister(8) == pending);
+    REQUIRE(core.generalRegister(9) == mask);
+    REQUIRE(core.generalRegister(10) == (pending & mask));
+    REQUIRE(interrupts.status() == (pending & ~mask));
+    REQUIRE(interrupts.mask() == mask);
+    REQUIRE(interrupts.control() == 1);
+    REQUIRE(core.cause() == 0);
+    REQUIRE(core.status() == 0x00200401);
+    REQUIRE(core.programCounter() == restart);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::None);
+  };
+  service(0x118, first | second | third, first);
+  REQUIRE(core.generalRegister(7) == 7);
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(interrupts.mask() == second);
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  REQUIRE(interrupts.status() == (first | second | third));
+  service(0x120, first | second | third, second);
+  REQUIRE(core.generalRegister(13) == 9);
+  core.stepInstruction();
+  service(0x128, first | third, third);
+  REQUIRE(core.generalRegister(15) == 11);
+  core.stepInstruction();
+  service(0x130, first, first);
+  REQUIRE(core.generalRegister(16) == 13);
+  REQUIRE(interrupts.status() == 0);
+  REQUIRE(core.retiredInstructions() == 53);
+  REQUIRE(core.elapsedCycles() == 57);
+}
+
+TEST_CASE("IOP guest master acknowledgement gates but does not acknowledge pending sources",
+  "[iop][execution][interrupt][intc][conformance]")
+{
+  IOPBus bus;
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setCOP0State(&core, {0, 0x00200401, 0, 0});
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, IOPBus::INTC_STAT);
+  IOPCoreTestAccess::setGeneralRegister(&core, 2, 1);
+  IOPCoreTestAccess::setGeneralRegister(&core, 3, 0x10010);
+  const IOPWord program[] = {
+    immediateInstruction(0x2b, 1, 3, 4),
+    immediateInstruction(0x2b, 1, 2, 8),
+    immediateInstruction(9, 0, 7, 7),
+    immediateInstruction(0x2b, 1, 2, 8),
+    immediateInstruction(9, 0, 8, 9),
+    immediateInstruction(0x2b, 1, 0, 0),
+    immediateInstruction(0x2b, 1, 2, 8),
+    immediateInstruction(9, 0, 9, 11)
+  };
+  const IOPWord handler[] = {
+    cop0TransferInstruction(4, 0, 13),
+    immediateInstruction(0x23, 1, 4, 8),
+    immediateInstruction(0x23, 1, 5, 8),
+    immediateInstruction(0x23, 1, 6, 0),
+    0,
+    cop0TransferInstruction(0, 26, 14),
+    0,
+    registerInstruction(8, 26, 0, 0),
+    0x42000010
+  };
+  for (std::size_t index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+  {
+    loadInstruction(&bus, 0x100 + 4 * index, program[index]);
+  }
+  for (std::size_t index = 0; index < sizeof(handler) / sizeof(handler[0]); ++index)
+  {
+    loadInstruction(&bus, 0x80 + 4 * index, handler[index]);
+  }
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.assertSource(IOPInterruptSource::Timer5);
+  core.startExecution(0x100);
+  core.stepInstruction();
+  core.stepInstruction();
+  for (const IOPAddress restart : {0x108u, 0x110u})
+  {
+    CAPTURE(restart);
+    const IOPWord pending = restart == 0x108 ? 0x10010 : 0x02010010;
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == restart);
+    core.stepInstruction();
+    REQUIRE(core.cause() == 0x400);
+    REQUIRE(interrupts.status() == pending);
+    core.stepInstruction();
+    REQUIRE(interrupts.control() == 0);
+    REQUIRE(core.cause() == 0x400);
+    for (unsigned step = 0; step < 7; ++step)
+    {
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+    }
+    REQUIRE(core.generalRegister(4) == 1);
+    REQUIRE(core.generalRegister(5) == 0);
+    REQUIRE(core.generalRegister(6) == pending);
+    REQUIRE(interrupts.status() == pending);
+    REQUIRE(interrupts.mask() == 0x10010);
+    REQUIRE(core.cause() == 0);
+    REQUIRE(core.programCounter() == restart);
+    REQUIRE(core.status() == 0x00200401);
+    core.stepInstruction();
+    if (restart == 0x108)
+    {
+      REQUIRE(core.generalRegister(7) == 7);
+      interrupts.assertSource(IOPInterruptSource::Timer0);
+      interrupts.assertSource(IOPInterruptSource::FireWireDMA);
+      core.stepInstruction();
+    }
+  }
+  REQUIRE(core.generalRegister(8) == 9);
+  core.stepInstruction();
+  REQUIRE(interrupts.status() == 0);
+  core.stepInstruction();
+  REQUIRE(interrupts.control() == 1);
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.generalRegister(9) == 11);
+  REQUIRE(core.retiredInstructions() == 26);
+  REQUIRE(core.elapsedCycles() == 28);
+}
+
+TEST_CASE("IOP guest RFE retriggers an unacknowledged INTC level until selective status clear",
+  "[iop][execution][interrupt][intc][conformance]")
+{
+  IOPBus bus;
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  IOPCore core;
+  core.attachBus(&bus);
+  IOPCoreTestAccess::setGeneralRegister(&core, 1, IOPBus::INTC_STAT);
+  IOPCoreTestAccess::setGeneralRegister(&core, 3, 1);
+  IOPCoreTestAccess::setGeneralRegister(&core, 4, 1);
+  IOPCoreTestAccess::setGeneralRegister(&core, 5, 0x00200401);
+  loadInstruction(&bus, 0x100, immediateInstruction(0x2b, 1, 3, 4));
+  loadInstruction(&bus, 0x104, immediateInstruction(0x2b, 1, 4, 8));
+  loadInstruction(&bus, 0x108, cop0TransferInstruction(4, 5, 12));
+  loadInstruction(&bus, 0x10c, immediateInstruction(9, 0, 6, 7));
+  loadInstruction(&bus, 0x80, immediateInstruction(9, 2, 2, 0xffff));
+  loadInstruction(&bus, 0x84, immediateInstruction(0x2b, 1, 2, 0));
+  loadInstruction(&bus, 0x88, cop0TransferInstruction(0, 26, 14));
+  loadInstruction(&bus, 0x8c, 0);
+  loadInstruction(&bus, 0x90, registerInstruction(8, 26, 0, 0));
+  loadInstruction(&bus, 0x94, 0x42000010);
+  interrupts.assertSource(IOPInterruptSource::VBlankStart);
+  interrupts.assertSource(IOPInterruptSource::Timer5);
+  core.startExecution(0x100);
+  for (unsigned step = 0; step < 3; ++step)
+  {
+    core.stepInstruction();
+  }
+  for (const bool acknowledge : {false, true})
+  {
+    CAPTURE(acknowledge);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::Interrupt);
+    REQUIRE(core.exceptionProgramCounter() == 0x10c);
+    REQUIRE(core.generalRegister(6) == 0);
+    for (unsigned step = 0; step < 6; ++step)
+    {
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+    }
+    REQUIRE(core.programCounter() == 0x10c);
+    REQUIRE(core.status() == 0x00200401);
+    REQUIRE(interrupts.status() == (acknowledge ? 0x10000 : 0x10001));
+    REQUIRE(interrupts.mask() == 1);
+    REQUIRE(interrupts.control() == 1);
+    REQUIRE(core.cause() == (acknowledge ? 0 : 0x400));
+  }
+  core.stepInstruction();
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.generalRegister(6) == 7);
+  REQUIRE(core.retiredInstructions() == 16);
+  REQUIRE(core.elapsedCycles() == 18);
+}
+
+TEST_CASE("IOP complete reset clears active INTC execution in every owner reset order",
+  "[iop][execution][interrupt][intc][conformance]")
+{
+  enum class Owner { Core, Bus, Controller };
+  const Owner orders[][3] = {
+    {Owner::Core, Owner::Bus, Owner::Controller},
+    {Owner::Core, Owner::Controller, Owner::Bus},
+    {Owner::Bus, Owner::Core, Owner::Controller},
+    {Owner::Bus, Owner::Controller, Owner::Core},
+    {Owner::Controller, Owner::Core, Owner::Bus},
+    {Owner::Controller, Owner::Bus, Owner::Core}
+  };
+  for (const auto &order : orders)
+  {
+    for (const bool branch : {false, true})
+    {
+      CAPTURE(static_cast<unsigned>(order[0]));
+      CAPTURE(static_cast<unsigned>(order[1]));
+      CAPTURE(branch);
+      IOPBus bus;
+      IOPInterruptController interrupts;
+      bus.attachInterruptController(&interrupts);
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, IOPBus::INTC_CTRL);
+      interrupts.assertSource(IOPInterruptSource::Timer0);
+      interrupts.writeMask(0x10);
+      interrupts.writeControl(1);
+      loadInstruction(&bus, 0x100, branch
+        ? immediateInstruction(4, 0, 0, 7)
+        : immediateInstruction(0x23, 1, 2, 0));
+      REQUIRE(bus.write32(0x200, 0x12345678).status == IOPBusStatus::Completed);
+      core.startExecution(0x100);
+      core.stepInstruction();
+      REQUIRE(core.branchContinuation().active == branch);
+      REQUIRE(core.delayedResultContinuation().source ==
+        (branch ? IOPDelayedResultSource::None : IOPDelayedResultSource::Load));
+      core.haltExecution();
+      interrupts.assertSource(IOPInterruptSource::Timer5);
+      interrupts.writeControl(1);
+      core.setInterruptInput(IOPInterruptInput::Hardware5, true);
+      REQUIRE(core.cause() == 0x8400);
+      for (Owner owner : order)
+      {
+        switch (owner)
+        {
+          case Owner::Core: core.reset(); break;
+          case Owner::Bus: bus.reset(); break;
+          case Owner::Controller: interrupts.reset(); break;
+        }
+      }
+      REQUIRE(core.executionState() == IOPExecutionState::Halted);
+      REQUIRE(core.programCounter() == IOPReset::VECTOR);
+      REQUIRE(core.cause() == 0);
+      REQUIRE(core.elapsedCycles() == 0);
+      REQUIRE(core.retiredInstructions() == 0);
+      REQUIRE_FALSE(core.branchContinuation().active);
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+      REQUIRE(bus.read32(0x100).value == 0);
+      REQUIRE(bus.read32(0x200).value == 0);
+      for (const IOPAddress address :
+           {IOPBus::INTC_STAT, IOPBus::INTC_MASK, IOPBus::INTC_CTRL})
+      {
+        const auto read = bus.read32(address);
+        REQUIRE(read.status == IOPBusStatus::Completed);
+        REQUIRE(read.value == 0);
+      }
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, IOPBus::INTC_STAT);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x10);
+      IOPCoreTestAccess::setGeneralRegister(&core, 3, 1);
+      IOPCoreTestAccess::setGeneralRegister(&core, 4, 0x00200401);
+      loadInstruction(&bus, 0x100, immediateInstruction(0x2b, 1, 2, 4));
+      loadInstruction(&bus, 0x104, immediateInstruction(0x2b, 1, 3, 8));
+      loadInstruction(&bus, 0x108, cop0TransferInstruction(4, 4, 12));
+      loadInstruction(&bus, 0x10c, immediateInstruction(9, 0, 5, 7));
+      core.startExecution(0x100);
+      for (unsigned step = 0; step < 4; ++step)
+      {
+        core.stepInstruction();
+        REQUIRE(core.exception().kind == IOPException::None);
+        REQUIRE(core.cause() == 0);
+      }
+      REQUIRE(core.generalRegister(5) == 7);
+      interrupts.assertSource(IOPInterruptSource::Timer0);
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::Interrupt);
+      REQUIRE(core.exceptionProgramCounter() == 0x110);
+      REQUIRE(core.cause() == 0x400);
+      REQUIRE(interrupts.status() == 0x10);
+    }
+  }
+}
+
 TEST_CASE("IOP hardware interrupt inputs preserve unrelated Cause fields and mask independently",
   "[iop][execution][interrupt]")
 {
