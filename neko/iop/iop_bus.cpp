@@ -1,4 +1,5 @@
 #include "iop_bus.hpp"
+#include "iop_interrupt_controller.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -20,6 +21,9 @@ constexpr std::size_t IOPBus::ROM_SIZE;
 constexpr IOPAddress IOPBus::RAM_BASE;
 constexpr IOPAddress IOPBus::SCRATCHPAD_BASE;
 constexpr IOPAddress IOPBus::ROM_BASE;
+constexpr IOPAddress IOPBus::INTC_STAT;
+constexpr IOPAddress IOPBus::INTC_MASK;
+constexpr IOPAddress IOPBus::INTC_CTRL;
 
 IOPBus::IOPBus() : ram(RAM_SIZE, 0)
 {
@@ -29,6 +33,11 @@ void IOPBus::reset()
 {
   std::fill(ram.begin(), ram.end(), static_cast<std::uint8_t>(0));
   scratchpad.fill(0);
+}
+
+void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
+{
+  interruptController = interrupts;
 }
 
 bool IOPBus::installRom(
@@ -88,6 +97,12 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     return {IOPBusRegion::Rom, static_cast<std::size_t>(first - ROM_BASE)};
   }
 
+  if (first >= INTC_STAT &&
+      last < static_cast<std::uint64_t>(INTC_CTRL) + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - INTC_STAT)};
+  }
+
   return {};
 }
 
@@ -102,6 +117,7 @@ const std::uint8_t *IOPBus::readableBytes(const Location &location) const
     case IOPBusRegion::Rom:
       return rom->data() + location.offset;
     case IOPBusRegion::Unmapped:
+    case IOPBusRegion::Mmio:
       break;
   }
   return nullptr;
@@ -117,12 +133,13 @@ std::uint8_t *IOPBus::writableBytes(const Location &location)
       return scratchpad.data() + location.offset;
     case IOPBusRegion::Rom:
     case IOPBusRegion::Unmapped:
+    case IOPBusRegion::Mmio:
       break;
   }
   return nullptr;
 }
 
-IOPBusReadResult IOPBus::readScalar(IOPAddress address, std::size_t width) const
+IOPBusReadResult IOPBus::readScalar(IOPAddress address, std::size_t width)
 {
   IOPBusReadResult result;
   if (!isAligned(address, width))
@@ -135,6 +152,10 @@ IOPBusReadResult IOPBus::readScalar(IOPAddress address, std::size_t width) const
   if (location.region == IOPBusRegion::Unmapped)
   {
     return result;
+  }
+  if (location.region == IOPBusRegion::Mmio)
+  {
+    return width == sizeof(IOPWord) ? readInterruptRegister(address) : result;
   }
 
   const std::uint8_t *bytes = readableBytes(location);
@@ -168,6 +189,11 @@ IOPBusWriteResult IOPBus::writeScalar(
     result.status = IOPBusStatus::ReadOnly;
     return result;
   }
+  if (location.region == IOPBusRegion::Mmio)
+  {
+    return width == sizeof(IOPWord)
+      ? writeInterruptRegister(address, value) : result;
+  }
 
   std::uint8_t *bytes = writableBytes(location);
   for (std::size_t index = 0; index < width; ++index)
@@ -178,17 +204,17 @@ IOPBusWriteResult IOPBus::writeScalar(
   return result;
 }
 
-IOPBusReadResult IOPBus::read8(IOPAddress address) const
+IOPBusReadResult IOPBus::read8(IOPAddress address)
 {
   return readScalar(address, 1);
 }
 
-IOPBusReadResult IOPBus::read16(IOPAddress address) const
+IOPBusReadResult IOPBus::read16(IOPAddress address)
 {
   return readScalar(address, 2);
 }
 
-IOPBusReadResult IOPBus::read32(IOPAddress address) const
+IOPBusReadResult IOPBus::read32(IOPAddress address)
 {
   return readScalar(address, 4);
 }
@@ -231,6 +257,12 @@ IOPBusWriteResult IOPBus::writeMasked32(
   {
     return {IOPBusStatus::ReadOnly};
   }
+  if (location.region == IOPBusRegion::Mmio)
+  {
+    return byteEnable == 0xf
+      ? writeInterruptRegister(address, value)
+      : IOPBusWriteResult{IOPBusStatus::Unmapped};
+  }
 
   std::uint8_t *bytes = writableBytes(location);
   for (std::uint8_t lane = 0; lane < sizeof(IOPWord); ++lane)
@@ -243,6 +275,49 @@ IOPBusWriteResult IOPBus::writeMasked32(
   return {IOPBusStatus::Completed};
 }
 
+IOPBusReadResult IOPBus::readInterruptRegister(IOPAddress address)
+{
+  if (interruptController == nullptr)
+  {
+    return {};
+  }
+  switch (address)
+  {
+    case INTC_STAT:
+      return {IOPBusStatus::Completed, interruptController->status()};
+    case INTC_MASK:
+      return {IOPBusStatus::Completed, interruptController->mask()};
+    case INTC_CTRL:
+      return {IOPBusStatus::Completed, interruptController->readControl()};
+  }
+  return {};
+}
+
+IOPBusWriteResult IOPBus::writeInterruptRegister(
+  IOPAddress address,
+  IOPWord value)
+{
+  if (interruptController == nullptr)
+  {
+    return {};
+  }
+  switch (address)
+  {
+    case INTC_STAT:
+      interruptController->writeStatus(value);
+      break;
+    case INTC_MASK:
+      interruptController->writeMask(value);
+      break;
+    case INTC_CTRL:
+      interruptController->writeControl(value);
+      break;
+    default:
+      return {};
+  }
+  return {IOPBusStatus::Completed};
+}
+
 IOPBusStatus IOPBus::loadPhysical(
   IOPAddress address,
   const std::uint8_t *bytes,
@@ -250,7 +325,8 @@ IOPBusStatus IOPBus::loadPhysical(
 {
   assert(count == 0 || bytes != nullptr);
   const Location location = locate(address, count);
-  if (location.region == IOPBusRegion::Unmapped)
+  if (location.region == IOPBusRegion::Unmapped ||
+      location.region == IOPBusRegion::Mmio)
   {
     return IOPBusStatus::Unmapped;
   }
@@ -270,7 +346,8 @@ IOPBusStatus IOPBus::inspectPhysical(
 {
   assert(count == 0 || bytes != nullptr);
   const Location location = locate(address, count);
-  if (location.region == IOPBusRegion::Unmapped)
+  if (location.region == IOPBusRegion::Unmapped ||
+      location.region == IOPBusRegion::Mmio)
   {
     return IOPBusStatus::Unmapped;
   }

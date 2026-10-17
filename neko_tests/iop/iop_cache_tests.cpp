@@ -11,6 +11,7 @@
 #include "iop_bus.hpp"
 #include "iop_cache.hpp"
 #include "iop_core.hpp"
+#include "iop_interrupt_controller.hpp"
 
 struct IOPCacheTestAccess
 {
@@ -238,6 +239,131 @@ namespace
   }
 }
 
+TEST_CASE("IOP cache bypass keeps INTC traffic live across aliases and bank swapping",
+  "[iop][cache][intc]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (IOPAddress controlAddress : {0x1f801078u, 0x9f801078u, 0xbf801078u})
+    {
+      CAPTURE(swapped);
+      CAPTURE(controlAddress);
+      IOPBus bus;
+      IOPInterruptController interrupts;
+      bus.attachInterruptController(&interrupts);
+      interrupts.assertSource(IOPInterruptSource::Timer0);
+      interrupts.writeMask(0x10);
+      interrupts.writeControl(1);
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCacheTestAccess::seed(&core);
+      IOPCacheTestAccess::setStatus(&core,
+        swapped ? IOPCOP0Status::CACHES_SWAPPED : 0);
+      const IOPCache before = core.cache();
+
+      const auto status = core.readData32(controlAddress - 8);
+      REQUIRE(status.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(status.value == 0x10);
+      REQUIRE(core.writeData32(controlAddress - 4, 0xffffffff).outcome ==
+        IOPAccessOutcome::Completed);
+      REQUIRE(interrupts.mask() == 0x03ffffff);
+      REQUIRE(core.writeData32(controlAddress - 8, 0).outcome ==
+        IOPAccessOutcome::Completed);
+      REQUIRE(interrupts.status() == 0);
+
+      const auto byte = core.readData8(controlAddress);
+      REQUIRE(byte.outcome == IOPAccessOutcome::Unmapped);
+      REQUIRE(byte.exception == IOPException::DataBusError);
+      REQUIRE(core.readData16(controlAddress + 2).outcome == IOPAccessOutcome::Unmapped);
+      REQUIRE(core.writeData8(controlAddress, 0).outcome == IOPAccessOutcome::Unmapped);
+      REQUIRE(core.writeData16(controlAddress, 0).outcome == IOPAccessOutcome::Unmapped);
+      REQUIRE(core.readData32(controlAddress + 1).outcome == IOPAccessOutcome::Misaligned);
+      REQUIRE(core.writeData32(controlAddress + 1, 0).outcome ==
+        IOPAccessOutcome::Misaligned);
+      REQUIRE(interrupts.control() == 1);
+      const auto control = core.readData32(controlAddress);
+      REQUIRE(control.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(control.physicalAddress == 0x1f801078);
+      REQUIRE(control.value == 1);
+      REQUIRE(interrupts.control() == 0);
+      REQUIRE(core.readData32(controlAddress).value == 0);
+      requireUnchangedCache(core.cache(), before);
+    }
+  }
+}
+
+TEST_CASE("IOP cache isolation prevents INTC side effects and cannot create MMIO cache hits",
+  "[iop][cache][intc]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (IOPAddress address : {0x1f801078u, 0x9f801078u, 0xbf801078u})
+    {
+      CAPTURE(swapped);
+      CAPTURE(address);
+      IOPBus bus;
+      IOPInterruptController interrupts;
+      bus.attachInterruptController(&interrupts);
+      interrupts.writeControl(1);
+      IOPCore core;
+      core.attachBus(&bus);
+      const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+      IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CACHE_ISOLATED | swap);
+      REQUIRE(core.writeData32(address, 0x11223344).outcome ==
+        IOPAccessOutcome::Completed);
+      REQUIRE(core.readData32(address).value == 0x11223344);
+      REQUIRE(interrupts.control() == 1);
+      const IOPCache before = core.cache();
+
+      IOPCacheTestAccess::setStatus(&core, swap);
+      const auto read = core.readData32(address);
+      REQUIRE(read.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(read.value == 1);
+      REQUIRE(interrupts.control() == 0);
+      REQUIRE(core.writeData32(address, 1).outcome == IOPAccessOutcome::Completed);
+      REQUIRE(interrupts.control() == 1);
+      requireUnchangedCache(core.cache(), before);
+    }
+  }
+}
+
+TEST_CASE("IOP INTC fetch routing preserves protection before device side effects",
+  "[iop][cache][intc]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (IOPAddress address : {0x9f801078u, 0xbf801078u})
+    {
+      CAPTURE(swapped);
+      CAPTURE(address);
+      IOPBus bus;
+      IOPInterruptController interrupts;
+      bus.attachInterruptController(&interrupts);
+      interrupts.writeControl(1);
+      IOPCore core;
+      core.attachBus(&bus);
+      core.startExecution(address);
+      IOPCacheTestAccess::seed(&core);
+      const IOPCache before = core.cache();
+      const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+      IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CURRENT_USER_MODE);
+      REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::ProtectionFailure);
+      REQUIRE(core.readData32(address).outcome == IOPAccessOutcome::ProtectionFailure);
+      REQUIRE(core.writeData32(address, 0).outcome == IOPAccessOutcome::ProtectionFailure);
+      REQUIRE(interrupts.control() == 1);
+      requireUnchangedCache(core.cache(), before);
+
+      IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+      const auto fetch = core.fetchInstruction();
+      REQUIRE(fetch.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(fetch.value == 1);
+      REQUIRE(interrupts.control() == 0);
+      REQUIRE(core.fetchInstruction().value == 0);
+      requireUnchangedCache(core.cache(), before);
+    }
+  }
+}
+
 TEST_CASE("IOP cache geometry keeps two distinct provisional physical banks",
   "[iop][cache]")
 {
@@ -335,7 +461,7 @@ TEST_CASE("IOP cache access planning prioritizes isolation and selects physical 
   };
   const IOPBusRegion regions[] = {
     IOPBusRegion::Unmapped, IOPBusRegion::Ram,
-    IOPBusRegion::Scratchpad, IOPBusRegion::Rom
+    IOPBusRegion::Scratchpad, IOPBusRegion::Rom, IOPBusRegion::Mmio
   };
   for (const auto access : accesses)
   {

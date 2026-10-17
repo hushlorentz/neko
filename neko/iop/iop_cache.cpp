@@ -252,6 +252,7 @@ IOPCacheAccessPlan IOPCache::planAccess(
     case IOPBusRegion::Ram:
     case IOPBusRegion::Scratchpad:
     case IOPBusRegion::Rom:
+    case IOPBusRegion::Mmio:
       break;
     default:
       throw std::invalid_argument("Unknown IOP physical region.");

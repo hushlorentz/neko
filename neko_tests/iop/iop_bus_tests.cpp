@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -7,6 +8,7 @@
 
 #include "catch.hpp"
 #include "iop_bus.hpp"
+#include "iop_interrupt_controller.hpp"
 
 static_assert(
   std::is_final<IOPBus>::value,
@@ -235,4 +237,213 @@ TEST_CASE("IOP bus masked writes validate before mutating storage",
   REQUIRE(bus.writeMasked32(IOPBus::ROM_BASE, 0, 0xf).status == IOPBusStatus::ReadOnly);
   REQUIRE(bus.read32(IOPBus::ROM_BASE).value == 0x12345678);
   REQUIRE(bus.read32(0x100).value == 0x44332211);
+}
+
+TEST_CASE("IOP bus INTC word routes use the attached controller",
+  "[iop][bus][intc]")
+{
+  REQUIRE(IOPBus::INTC_STAT == 0x1f801070);
+  REQUIRE(IOPBus::INTC_MASK == 0x1f801074);
+  REQUIRE(IOPBus::INTC_CTRL == 0x1f801078);
+  IOPBus bus;
+  for (IOPAddress address : {0x1f801070u, 0x1f801074u, 0x1f801078u})
+  {
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeMasked32(address, 1, 0xf).status == IOPBusStatus::Unmapped);
+  }
+
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.assertSource(IOPInterruptSource::FireWireDMA);
+  const auto status = bus.read32(0x1f801070);
+  REQUIRE(status.status == IOPBusStatus::Completed);
+  REQUIRE(status.value == 0x02000010);
+  REQUIRE(bus.write32(0x1f801074, 0xffffffff).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(0x1f801074).value == 0x03ffffff);
+  REQUIRE_FALSE(interrupts.interruptPending());
+  REQUIRE(bus.write32(0x1f801078, 0xffffffff).status == IOPBusStatus::Completed);
+  REQUIRE(interrupts.control() == 1);
+  REQUIRE(interrupts.interruptPending());
+  REQUIRE(bus.write32(0x1f801070, ~IOPWord(0x10)).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(0x1f801070).value == 0x02000000);
+  REQUIRE(interrupts.interruptPending());
+
+  const auto control = bus.read32(0x1f801078);
+  REQUIRE(control.status == IOPBusStatus::Completed);
+  REQUIRE(control.value == 1);
+  REQUIRE_FALSE(interrupts.interruptPending());
+  REQUIRE(interrupts.status() == 0x02000000);
+  REQUIRE(interrupts.mask() == 0x03ffffff);
+  REQUIRE(bus.read32(0x1f801078).value == 0);
+  REQUIRE(bus.write32(0x1f801078, 0xfffffffe).status == IOPBusStatus::Completed);
+  REQUIRE(interrupts.control() == 0);
+}
+
+TEST_CASE("IOP bus INTC rejects narrow and misaligned accesses without side effects",
+  "[iop][bus][intc]")
+{
+  IOPBus bus;
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.writeMask(0x10);
+  interrupts.writeControl(1);
+
+  for (IOPAddress base : {0x1f801070u, 0x1f801074u, 0x1f801078u})
+  {
+    for (IOPAddress offset = 0; offset < 4; ++offset)
+    {
+      const IOPAddress address = base + offset;
+      CAPTURE(address);
+      const auto byte = bus.read8(address);
+      REQUIRE(byte.status == IOPBusStatus::Unmapped);
+      REQUIRE(byte.value == 0);
+      REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+      const auto halfword = bus.read16(address);
+      REQUIRE(halfword.status == ((offset & 1) == 0
+        ? IOPBusStatus::Unmapped : IOPBusStatus::Misaligned));
+      REQUIRE(halfword.value == 0);
+      REQUIRE(bus.write16(address, 0).status == ((offset & 1) == 0
+        ? IOPBusStatus::Unmapped : IOPBusStatus::Misaligned));
+      if (offset != 0)
+      {
+        REQUIRE(bus.read32(address).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.writeMasked32(address, 0, 0xf).status ==
+          IOPBusStatus::Misaligned);
+      }
+      REQUIRE(interrupts.status() == 0x10);
+      REQUIRE(interrupts.mask() == 0x10);
+      REQUIRE(interrupts.control() == 1);
+      REQUIRE(interrupts.interruptPending());
+    }
+  }
+}
+
+TEST_CASE("IOP bus INTC accepts only full-byte-mask stores",
+  "[iop][bus][intc]")
+{
+  IOPBus bus;
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.writeMask(0x10);
+  interrupts.writeControl(1);
+
+  for (IOPAddress address : {0x1f801070u, 0x1f801074u, 0x1f801078u})
+  {
+    for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+    {
+      CAPTURE(address);
+      CAPTURE(mask);
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+      REQUIRE(interrupts.status() == 0x10);
+      REQUIRE(interrupts.mask() == 0x10);
+      REQUIRE(interrupts.control() == 1);
+    }
+    for (std::uint8_t mask : {std::uint8_t(0), std::uint8_t(0x10),
+         std::uint8_t(0xff)})
+    {
+      REQUIRE_THROWS_AS(bus.writeMasked32(address, 0, mask), std::invalid_argument);
+      REQUIRE(interrupts.status() == 0x10);
+      REQUIRE(interrupts.mask() == 0x10);
+      REQUIRE(interrupts.control() == 1);
+    }
+  }
+
+  REQUIRE(bus.writeMasked32(0x1f801074, 0xffffffff, 0xf).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(interrupts.mask() == 0x03ffffff);
+  REQUIRE(bus.writeMasked32(0x1f801078, 0, 0xf).status == IOPBusStatus::Completed);
+  REQUIRE(interrupts.control() == 0);
+  REQUIRE(interrupts.status() == 0x10);
+  REQUIRE(bus.writeMasked32(0x1f801070, 0, 0xf).status == IOPBusStatus::Completed);
+  REQUIRE(interrupts.status() == 0);
+}
+
+TEST_CASE("IOP bus INTC decode stays physical and host helpers stay storage-only",
+  "[iop][bus][intc]")
+{
+  IOPBus bus;
+  IOPInterruptController interrupts;
+  bus.attachInterruptController(&interrupts);
+  interrupts.assertSource(IOPInterruptSource::Timer0);
+  interrupts.writeMask(0x10);
+  interrupts.writeControl(1);
+  std::array<std::uint8_t, 16> bytes;
+  bytes.fill(0xa5);
+  const auto before = bytes;
+  const IOPBus &inspection = bus;
+
+  for (IOPAddress address = 0x1f801070; address < 0x1f80107c; ++address)
+  {
+    REQUIRE(inspection.regionForRange(address, 0) == IOPBusRegion::Mmio);
+    REQUIRE(inspection.regionForRange(address, 1) == IOPBusRegion::Mmio);
+    for (std::size_t count : {0u, 1u, 4u, 12u, 16u})
+    {
+      REQUIRE(bus.loadPhysical(address, bytes.data(), count) == IOPBusStatus::Unmapped);
+      REQUIRE(inspection.inspectPhysical(address, bytes.data(), count) ==
+        IOPBusStatus::Unmapped);
+      REQUIRE(bytes == before);
+      REQUIRE(interrupts.status() == 0x10);
+      REQUIRE(interrupts.mask() == 0x10);
+      REQUIRE(interrupts.control() == 1);
+    }
+  }
+  REQUIRE(inspection.regionForRange(0x1f801070, 12) == IOPBusRegion::Mmio);
+  REQUIRE(inspection.regionForRange(0x1f801070, 13) == IOPBusRegion::Unmapped);
+  REQUIRE(inspection.regionForRange(0x1f801078, 4) == IOPBusRegion::Mmio);
+  REQUIRE(inspection.regionForRange(0x1f801078, 5) == IOPBusRegion::Unmapped);
+
+  for (IOPAddress address : {0x1f80106cu, 0x1f80107cu, 0x1f801080u,
+       0x9f801070u, 0xbf801070u})
+  {
+    REQUIRE(inspection.regionForRange(address, 4) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeMasked32(address, 0, 0xf).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE(interrupts.status() == 0x10);
+  REQUIRE(interrupts.mask() == 0x10);
+  REQUIRE(interrupts.control() == 1);
+}
+
+TEST_CASE("IOP bus INTC attachment and bus reset preserve external device state",
+  "[iop][bus][intc]")
+{
+  IOPBus bus;
+  IOPInterruptController first;
+  IOPInterruptController second;
+  first.assertSource(IOPInterruptSource::Timer0);
+  first.writeMask(0x10);
+  first.writeControl(1);
+  second.assertSource(IOPInterruptSource::FireWireDMA);
+  bus.attachInterruptController(&first);
+  bus.reset();
+  REQUIRE(first.status() == 0x10);
+  REQUIRE(first.mask() == 0x10);
+  REQUIRE(first.control() == 1);
+  REQUIRE(bus.read32(0x1f801070).value == 0x10);
+
+  bus.attachInterruptController(nullptr);
+  REQUIRE(bus.regionForRange(0x1f801078, 4) == IOPBusRegion::Mmio);
+  REQUIRE(bus.read32(0x1f801078).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.write32(0x1f801070, 0).status == IOPBusStatus::Unmapped);
+  REQUIRE(first.status() == 0x10);
+  REQUIRE(first.control() == 1);
+  bus.attachInterruptController(&second);
+  REQUIRE(bus.read32(0x1f801070).value == 0x02000000);
+  REQUIRE(first.status() == 0x10);
+  REQUIRE(first.mask() == 0x10);
+  REQUIRE(first.control() == 1);
+  REQUIRE(bus.write32(0x1f801070, 0).status == IOPBusStatus::Completed);
+  REQUIRE(second.status() == 0);
+
+  bus.attachInterruptController(&first);
+  first.reset();
+  REQUIRE(bus.read32(0x1f801070).value == 0);
+  REQUIRE(bus.read32(0x1f801074).value == 0);
+  REQUIRE(bus.read32(0x1f801078).value == 0);
 }

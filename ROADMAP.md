@@ -2225,7 +2225,7 @@ timers, and persistence/trace integration remain separate blocks.
       reset, and read-only inspection. Pin every cause assignment and register
       transition; define the later hash/save-state contract without adding
       schema or trace integration here. Complete focused ownership review.
-- [ ] Map the three approved registers through `IOPBus`, preserving physical
+- [x] Map the three approved registers through `IOPBus`, preserving physical
       decode, cache bypass, and host-inspection boundaries. Assess access
       widths and byte enables against the approved evidence before selecting
       a locally replaceable policy for any gap. Keep unresolved `0x1f80107c`

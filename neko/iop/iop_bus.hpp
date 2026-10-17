@@ -10,6 +10,8 @@
 #include "boot_rom.hpp"
 #include "iop_types.hpp"
 
+class IOPInterruptController;
+
 enum class IOPBusStatus : std::uint8_t
 {
   Completed,
@@ -23,7 +25,8 @@ enum class IOPBusRegion : std::uint8_t
   Unmapped,
   Ram,
   Scratchpad,
-  Rom
+  Rom,
+  Mmio
 };
 
 struct IOPBusReadResult
@@ -49,11 +52,16 @@ class IOPBus final
     static constexpr IOPAddress RAM_BASE = 0x00000000;
     static constexpr IOPAddress SCRATCHPAD_BASE = 0x1f800000;
     static constexpr IOPAddress ROM_BASE = 0x1fc00000;
+    static constexpr IOPAddress INTC_STAT = 0x1f801070;
+    static constexpr IOPAddress INTC_MASK = 0x1f801074;
+    static constexpr IOPAddress INTC_CTRL = 0x1f801078;
 
     IOPBus();
 
-    // Clears RAM and scratchpad; the installed ROM view is configuration.
+    // Clears RAM and scratchpad, not attached devices or ROM configuration.
     void reset();
+    // The caller owns the controller and must keep it alive while attached.
+    void attachInterruptController(IOPInterruptController *interrupts);
 
     // The shared image owns an immutable copy of its source bytes.
     bool installRom(
@@ -62,12 +70,14 @@ class IOPBus final
     // A zero-length range queries the addressed byte, like host inspection.
     IOPBusRegion regionForRange(IOPAddress address, std::size_t count) const;
 
-    IOPBusReadResult read8(IOPAddress address) const;
-    IOPBusReadResult read16(IOPAddress address) const;
-    IOPBusReadResult read32(IOPAddress address) const;
+    // Guest reads may consume device state. INTC supports word access only.
+    IOPBusReadResult read8(IOPAddress address);
+    IOPBusReadResult read16(IOPAddress address);
+    IOPBusReadResult read32(IOPAddress address);
     IOPBusWriteResult write8(IOPAddress address, std::uint8_t value);
     IOPBusWriteResult write16(IOPAddress address, std::uint16_t value);
     IOPBusWriteResult write32(IOPAddress address, IOPWord value);
+    // INTC rejects partial masks with Unmapped, without a device read.
     IOPBusWriteResult writeMasked32(
       IOPAddress address,
       IOPWord value,
@@ -96,15 +106,20 @@ class IOPBus final
     std::uint8_t *writableBytes(const Location &location);
     IOPBusReadResult readScalar(
       IOPAddress address,
-      std::size_t width) const;
+      std::size_t width);
     IOPBusWriteResult writeScalar(
       IOPAddress address,
       std::size_t width,
+      IOPWord value);
+    IOPBusReadResult readInterruptRegister(IOPAddress address);
+    IOPBusWriteResult writeInterruptRegister(
+      IOPAddress address,
       IOPWord value);
 
     std::vector<std::uint8_t> ram;
     std::array<std::uint8_t, SCRATCHPAD_SIZE> scratchpad = {};
     std::shared_ptr<const BootROMImage> rom;
+    IOPInterruptController *interruptController = nullptr;
 };
 
 #endif
