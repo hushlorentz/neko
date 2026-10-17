@@ -20,7 +20,8 @@ enum class IOPStopReason : std::uint8_t
   HostHalt,
   UndefinedOperation,
   ExecutionException,
-  StoreFailure
+  StoreFailure,
+  UnsupportedCacheMode
 };
 
 enum class IOPException : std::uint8_t
@@ -67,7 +68,8 @@ enum class IOPAccessOutcome : std::uint8_t
   ProtectionFailure,
   Misaligned,
   ReadOnly,
-  Unmapped
+  Unmapped,
+  UnsupportedCacheMode
 };
 
 struct IOPAddressClassification
@@ -167,6 +169,10 @@ namespace IOPCOP0Status
     UINT32_C(1) << 28;
   constexpr IOPWord CURRENT_USER_MODE =
     UINT32_C(1) << 1;
+  constexpr IOPWord CACHE_ISOLATED =
+    UINT32_C(1) << 16;
+  constexpr IOPWord CACHES_SWAPPED =
+    UINT32_C(1) << 17;
   constexpr IOPWord CACHE_PROBE_RESULT =
     UINT32_C(1) << 19;
   constexpr IOPWord PARITY_ERROR =

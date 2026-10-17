@@ -78,6 +78,11 @@ class IOPCache final
     const IOPInstructionCacheLine &instructionLine(std::size_t index) const;
     const IOPDataCacheLine &dataLine(std::size_t index) const;
 
+    // The core admits cached physical fetches before entering this boundary.
+    IOPBusReadResult readInstruction(
+      IOPBus &bus,
+      IOPAddress physicalAddress);
+
     static IOPCacheLocation location(
       IOPCacheBank bank,
       IOPAddress physicalAddress);

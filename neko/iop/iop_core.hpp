@@ -208,6 +208,10 @@ class IOPCore final
       std::size_t index,
       IOPWord value);
     IOPBus &attachedBus() const;
+    IOPCacheAccessPlan planCacheAccess(
+      IOPCacheAccess access,
+      const IOPAddressClassification &classification,
+      std::size_t width) const;
     void synchronizeCacheConfiguration(IOPBus &physicalBus);
     IOPMemoryReadResult readMemory(
       IOPAddress virtualAddress,

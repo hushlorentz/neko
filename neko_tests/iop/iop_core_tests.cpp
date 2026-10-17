@@ -255,10 +255,12 @@ TEST_CASE("IOP MFC0 reads only the approved common register fields with a delay"
         test.index == 13 ? UINT32_MAX : UINT32_MAX & ~IOPWord(0xff00),
         0x89abcdef});
     IOPCoreTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
-    loadInstruction(&bus, 0, cop0TransferInstruction(0, 2, test.index));
-    loadInstruction(&bus, 4, registerInstruction(0x21, 2, 0, 3));
-    loadInstruction(&bus, 8, registerInstruction(0x21, 2, 0, 4));
-    core.startExecution(0);
+    // Scratchpad fetch permits testing every Status bit independently of SwC.
+    const IOPAddress code = IOPBus::SCRATCHPAD_BASE;
+    loadInstruction(&bus, code, cop0TransferInstruction(0, 2, test.index));
+    loadInstruction(&bus, code + 4, registerInstruction(0x21, 2, 0, 3));
+    loadInstruction(&bus, code + 8, registerInstruction(0x21, 2, 0, 4));
+    core.startExecution(code);
     core.stepInstruction();
     REQUIRE(core.retiredInstructions() == 1);
     REQUIRE(core.generalRegister(2) == 0xaabbccdd);
@@ -291,8 +293,9 @@ TEST_CASE("IOP MTC0 status preserves fixed and read only bits and clears parity 
       core.attachBus(&bus);
       IOPCoreTestAccess::setCOP0State(&core, {0, previous, 0, 0});
       IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
-      loadInstruction(&bus, 0, cop0TransferInstruction(4, 2, 12));
-      core.startExecution(0);
+      loadInstruction(&bus, IOPBus::SCRATCHPAD_BASE,
+        cop0TransferInstruction(4, 2, 12));
+      core.startExecution(IOPBus::SCRATCHPAD_BASE);
       core.stepInstruction();
       const IOPWord expected =
         (value & 0xf247ff3f) |
@@ -955,11 +958,12 @@ TEST_CASE("IOP RFE pops every KU IE stack pattern without restoring EPC",
     const IOPWord originalStatus = 0xf27f0000 | stack;
     IOPCoreTestAccess::setCOP0State(
       &core, {0x12345679, originalStatus, 0x90000030, 0x80000300});
-    loadInstruction(&bus, 0x100, 0x42000010);
-    core.startExecution(0x100);
+    const IOPAddress code = IOPBus::SCRATCHPAD_BASE;
+    loadInstruction(&bus, code, 0x42000010);
+    core.startExecution(code);
     const auto effects = IOPCoreTestAccess::instructionEffects(core, 0x42000010);
     REQUIRE(core.status() == originalStatus);
-    REQUIRE(core.programCounter() == 0x100);
+    REQUIRE(core.programCounter() == code);
     REQUIRE(effects.exception.kind == IOPException::None);
     core.stepInstruction();
     REQUIRE(core.status() ==
@@ -967,7 +971,7 @@ TEST_CASE("IOP RFE pops every KU IE stack pattern without restoring EPC",
     REQUIRE(core.cause() == 0x90000030);
     REQUIRE(core.exceptionProgramCounter() == 0x80000300);
     REQUIRE(core.badVirtualAddress() == 0x12345679);
-    REQUIRE(core.programCounter() == 0x104);
+    REQUIRE(core.programCounter() == code + 4);
     REQUIRE(core.retiredInstructions() == 1);
     REQUIRE(core.elapsedCycles() == 1);
     REQUIRE(core.exception().kind == IOPException::None);
@@ -1331,6 +1335,8 @@ TEST_CASE("IOP nested exception stack restores only through successive RFE instr
   REQUIRE(core.exceptionProgramCounter() == 0x80000080);
   loadInstruction(&bus, 0x80, 0x42000010);
   loadInstruction(&bus, 0x84, 0x42000010);
+  // The host patch does not snoop the cached breakpoint handler.
+  IOPCoreTestAccess::setProgramCounter(&core, 0xa0000080);
   core.stepInstruction();
   REQUIRE(core.status() == 0x0020003c);
   core.stepInstruction();
@@ -4654,6 +4660,7 @@ TEST_CASE("IOP merge operations protect register zero without skipping faults",
     REQUIRE(bus.write32(0x100, 0x44332211).status == IOPBusStatus::Completed);
     loadInstruction(&bus, 0, immediateInstruction(opcode, 0, 0, 0x101));
     loadInstruction(&bus, 4, 0);
+    loadInstruction(&bus, 8, immediateInstruction(opcode, 1, 0, 0));
     core.startExecution(0);
     core.stepInstruction();
     core.stepInstruction();
@@ -4664,7 +4671,6 @@ TEST_CASE("IOP merge operations protect register zero without skipping faults",
                                          : opcode == 0x2e ? 0x11
                                                           : 0x44332211));
     IOPCoreTestAccess::setGeneralRegister(&core, 1, 0x800001);
-    loadInstruction(&bus, 8, immediateInstruction(opcode, 1, 0, 0));
     core.stepInstruction();
     const bool store = opcode == 0x2a || opcode == 0x2e;
     REQUIRE(core.executionState() ==

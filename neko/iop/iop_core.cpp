@@ -221,6 +221,11 @@ namespace
     const IOPMemoryReadResult &read)
   {
     IOPInstructionEffects effects;
+    if (read.outcome == IOPAccessOutcome::UnsupportedCacheMode)
+    {
+      effects.stopReason = IOPStopReason::UnsupportedCacheMode;
+      return effects;
+    }
     effects.exception.kind = read.exception;
     effects.exception.badVirtualAddress = read.virtualAddress;
     return effects;
@@ -1131,6 +1136,12 @@ void IOPCore::commitInstructionEffects(
       effects.store.operation != IOPStoreOperation::None)
   {
     const IOPMemoryWriteResult write = writeStore(effects.store);
+    if (write.outcome == IOPAccessOutcome::UnsupportedCacheMode)
+    {
+      state = IOPExecutionState::Halted;
+      haltReason = IOPStopReason::UnsupportedCacheMode;
+      return;
+    }
     if (write.exception != IOPException::None)
     {
       selectedException.kind = write.exception;
@@ -1394,6 +1405,14 @@ IOPMemoryWriteResult IOPCore::writeMaskedStore(
     return result;
   }
   IOPBus &physicalBus = attachedBus();
+  auto aligned = classification;
+  aligned.physicalAddress &= ~IOPAddress(3);
+  if (planCacheAccess(IOPCacheAccess::DataStore, aligned, sizeof(IOPWord))
+      .disposition == IOPCacheAccessDisposition::UnsupportedMode)
+  {
+    result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
+    return result;
+  }
   synchronizeCacheConfiguration(physicalBus);
   const IOPBusWriteResult write = physicalBus.writeMasked32(
     classification.physicalAddress & ~IOPAddress(3),
@@ -1410,6 +1429,20 @@ IOPBus &IOPCore::attachedBus() const
     throw std::logic_error("IOP Core bus is not attached.");
   }
   return *bus;
+}
+
+IOPCacheAccessPlan IOPCore::planCacheAccess(
+  IOPCacheAccess access,
+  const IOPAddressClassification &classification,
+  std::size_t width) const
+{
+  const IOPCacheControl control = {
+    (cop0.status & IOPCOP0Status::CACHE_ISOLATED) != 0,
+    (cop0.status & IOPCOP0Status::CACHES_SWAPPED) != 0
+  };
+  return IOPCache::planAccess(
+    access, control, classification.cacheRoute,
+    attachedBus().regionForRange(classification.physicalAddress, width));
 }
 
 void IOPCore::synchronizeCacheConfiguration(IOPBus &physicalBus)
@@ -1452,21 +1485,36 @@ IOPMemoryReadResult IOPCore::readMemory(
     return result;
   }
 
+  const auto plan = planCacheAccess(access, classification, width);
+  if (plan.disposition == IOPCacheAccessDisposition::UnsupportedMode)
+  {
+    result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
+    return result;
+  }
   synchronizeCacheConfiguration(physicalBus);
   IOPBusReadResult busResult;
-  switch (width)
+  if (access == IOPCacheAccess::InstructionFetch &&
+      plan.disposition == IOPCacheAccessDisposition::Cache)
   {
-    case sizeof(std::uint8_t):
-      busResult = physicalBus.read8(classification.physicalAddress);
-      break;
-    case sizeof(std::uint16_t):
-      busResult = physicalBus.read16(classification.physicalAddress);
-      break;
-    case sizeof(IOPWord):
-      busResult = physicalBus.read32(classification.physicalAddress);
-      break;
-    default:
-      throw std::logic_error("Unsupported IOP memory read width.");
+    busResult = caches.readInstruction(
+      physicalBus, classification.physicalAddress);
+  }
+  else
+  {
+    switch (width)
+    {
+      case sizeof(std::uint8_t):
+        busResult = physicalBus.read8(classification.physicalAddress);
+        break;
+      case sizeof(std::uint16_t):
+        busResult = physicalBus.read16(classification.physicalAddress);
+        break;
+      case sizeof(IOPWord):
+        busResult = physicalBus.read32(classification.physicalAddress);
+        break;
+      default:
+        throw std::logic_error("Unsupported IOP memory read width.");
+    }
   }
 
   result.outcome = accessOutcome(busResult.status);
@@ -1506,6 +1554,12 @@ IOPMemoryWriteResult IOPCore::writeMemory(
     return result;
   }
 
+  if (planCacheAccess(IOPCacheAccess::DataStore, classification, width)
+      .disposition == IOPCacheAccessDisposition::UnsupportedMode)
+  {
+    result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
+    return result;
+  }
   synchronizeCacheConfiguration(physicalBus);
   IOPBusWriteResult busResult;
   switch (width)

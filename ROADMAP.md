@@ -2194,7 +2194,7 @@ timers, and persistence/trace integration remain separate blocks.
       ROM reconfiguration on an unchanged bus.
       Complete an independent ownership and routing review before execution
       uses the new storage.
-- [ ] Implement cached instruction fetch, uncached bypass, physical aliases,
+- [x] Implement cached instruction fetch, uncached bypass, physical aliases,
       stale-code visibility, and atomic failed-fill behavior without claiming
       undocumented refill or contention timing. Complete focused review.
 - [ ] Implement cached data loads through the same owner, preserving delayed

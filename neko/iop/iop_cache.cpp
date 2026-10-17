@@ -32,6 +32,39 @@ const IOPDataCacheLine &IOPCache::dataLine(std::size_t index) const
   return dataLines.at(index);
 }
 
+IOPBusReadResult IOPCache::readInstruction(
+  IOPBus &bus,
+  IOPAddress physicalAddress)
+{
+  if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0)
+  {
+    return {IOPBusStatus::Misaligned, 0};
+  }
+  const auto address = location(IOPCacheBank::Instruction, physicalAddress);
+  auto &line = instructionLines[address.lineIndex];
+  if (line.valid && line.physicalTag == address.physicalTag)
+  {
+    return {IOPBusStatus::Completed, line.words[address.wordIndex]};
+  }
+
+  line.valid = false;
+  IOPInstructionCacheLine candidate;
+  candidate.physicalTag = address.physicalTag;
+  for (std::size_t word = 0; word < candidate.words.size(); ++word)
+  {
+    const auto read = bus.read32(address.lineBaseAddress +
+      static_cast<IOPAddress>(word * sizeof(IOPWord)));
+    if (read.status != IOPBusStatus::Completed)
+    {
+      return read;
+    }
+    candidate.words[word] = read.value;
+  }
+  candidate.valid = true;
+  line = candidate;
+  return {IOPBusStatus::Completed, line.words[address.wordIndex]};
+}
+
 IOPCacheLocation IOPCache::location(
   IOPCacheBank bank,
   IOPAddress physicalAddress)
