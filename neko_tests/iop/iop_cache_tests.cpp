@@ -159,6 +159,54 @@ namespace
     }
   }
 
+  void requireSameCoreState(const IOPCore &actual, const IOPCore &expected)
+  {
+    for (std::size_t index = 0; index < IOPCore::GENERAL_REGISTER_COUNT; ++index)
+    {
+      CAPTURE(index);
+      REQUIRE(actual.generalRegister(index) == expected.generalRegister(index));
+    }
+    REQUIRE(actual.programCounter() == expected.programCounter());
+    REQUIRE(actual.hi() == expected.hi());
+    REQUIRE(actual.lo() == expected.lo());
+    REQUIRE(actual.status() == expected.status());
+    REQUIRE(actual.cause() == expected.cause());
+    REQUIRE(actual.badVirtualAddress() == expected.badVirtualAddress());
+    REQUIRE(actual.exceptionProgramCounter() == expected.exceptionProgramCounter());
+    REQUIRE(actual.processorRevision() == expected.processorRevision());
+    REQUIRE(actual.executionState() == expected.executionState());
+    REQUIRE(actual.stopReason() == expected.stopReason());
+    REQUIRE(actual.elapsedCycles() == expected.elapsedCycles());
+    REQUIRE(actual.retiredInstructions() == expected.retiredInstructions());
+    const auto &branch = actual.branchContinuation();
+    const auto &expectedBranch = expected.branchContinuation();
+    REQUIRE(branch.active == expectedBranch.active);
+    REQUIRE(branch.instructionAddress == expectedBranch.instructionAddress);
+    REQUIRE(branch.targetAddress == expectedBranch.targetAddress);
+    const auto &delayed = actual.delayedResultContinuation();
+    const auto &expectedDelayed = expected.delayedResultContinuation();
+    REQUIRE(delayed.source == expectedDelayed.source);
+    REQUIRE(delayed.destination == expectedDelayed.destination);
+    REQUIRE(delayed.value == expectedDelayed.value);
+    REQUIRE(actual.exception().kind == expected.exception().kind);
+    REQUIRE(actual.exception().badVirtualAddress ==
+      expected.exception().badVirtualAddress);
+    REQUIRE(actual.exception().inBranchDelaySlot ==
+      expected.exception().inBranchDelaySlot);
+    REQUIRE(actual.exception().coprocessor == expected.exception().coprocessor);
+    const auto &failure = actual.storeFailure();
+    const auto &expectedFailure = expected.storeFailure();
+    REQUIRE(failure.width == expectedFailure.width);
+    REQUIRE(failure.value == expectedFailure.value);
+    REQUIRE(failure.mergeByteEnable == expectedFailure.mergeByteEnable);
+    REQUIRE(failure.access.outcome == expectedFailure.access.outcome);
+    REQUIRE(failure.access.exception == expectedFailure.access.exception);
+    REQUIRE(failure.access.virtualAddress == expectedFailure.access.virtualAddress);
+    REQUIRE(failure.access.physicalAddress == expectedFailure.access.physicalAddress);
+    REQUIRE(failure.access.cacheRoute == expectedFailure.access.cacheRoute);
+    requireUnchangedCache(actual.cache(), expected.cache());
+  }
+
   void requireSeeded(const IOPCache &cache)
   {
     for (std::size_t index = 0;
@@ -2311,6 +2359,7 @@ TEST_CASE("IOP swapped bypass fetch preserves banks and ordinary bus fault selec
       IOPAccessOutcome::Completed);
     requireSeeded(core.cache());
   }
+
   core.startExecution(0x00800000);
   const auto fetch = core.fetchInstruction();
   REQUIRE(fetch.outcome == IOPAccessOutcome::Unmapped);
@@ -2319,4 +2368,378 @@ TEST_CASE("IOP swapped bypass fetch preserves banks and ordinary bus fault selec
   REQUIRE(load.outcome == IOPAccessOutcome::Unmapped);
   REQUIRE(load.exception == IOPException::DataBusError);
   requireSeeded(core.cache());
+}
+
+TEST_CASE("IOP cache invalidation through aliases and RAM mirrors maintains only the selected bank",
+  "[iop][cache][conformance]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (IOPAddress word = 0; word < IOPCache::INSTRUCTION_LINE_WORDS; ++word)
+    {
+      const IOPAddress physical = 0x220 + word * 4;
+      for (const IOPAddress alias :
+           {physical, physical | 0x80000000u, physical | 0xa0000000u,
+            physical + static_cast<IOPAddress>(IOPBus::RAM_SIZE)})
+      {
+        CAPTURE(swapped);
+        CAPTURE(word);
+        CAPTURE(alias);
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        REQUIRE(bus.write32(physical, 0x11223344).status == IOPBusStatus::Completed);
+        core.startExecution(physical | 0x80000000u);
+        REQUIRE(core.fetchInstruction().value == 0x11223344);
+        REQUIRE(core.readData32(physical).value == 0x11223344);
+        const std::uint8_t replacement[] = {0x88, 0x77, 0x66, 0x55};
+        REQUIRE(bus.loadPhysical(physical, replacement, sizeof(replacement)) ==
+          IOPBusStatus::Completed);
+        const auto before = core.cache();
+        const auto bank = swapped ? IOPCacheBank::Instruction : IOPCacheBank::Data;
+        const auto location = IOPCache::location(bank, physical);
+        IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CACHE_ISOLATED |
+          IOPCOP0Status::CACHE_PROBE_RESULT |
+          (swapped ? IOPCOP0Status::CACHES_SWAPPED : 0));
+        REQUIRE(core.writeData8(alias, 0).outcome == IOPAccessOutcome::Completed);
+        if (swapped)
+        {
+          requireIndexedStore(core.cache().instructionLine(location.lineIndex),
+            before.instructionLine(location.lineIndex), location, 0, 1);
+          requireUnchangedCache(core.cache(), before, IOPCache::DATA_LINE_COUNT,
+            location.lineIndex);
+        }
+        else
+        {
+          requireIndexedStore(core.cache().dataLine(location.lineIndex),
+            before.dataLine(location.lineIndex), location, 0, 1);
+          requireUnchangedCache(core.cache(), before, location.lineIndex);
+        }
+        REQUIRE(bus.read32(physical).value == 0x55667788);
+        IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CACHE_PROBE_RESULT);
+        REQUIRE(core.fetchInstruction().value == (swapped ? 0x55667788u : 0x11223344u));
+        REQUIRE(core.readData32(physical).value == (swapped ? 0x11223344u : 0x55667788u));
+        REQUIRE(core.status() == IOPCOP0Status::CACHE_PROBE_RESULT);
+        REQUIRE(core.elapsedCycles() == 0);
+        REQUIRE(core.retiredInstructions() == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP cached continuation outcomes repeat identically across host pause and resume",
+  "[iop][cache][conformance]")
+{
+  const auto rom = makeRom(0x12);
+  for (unsigned mode = 0; mode < 4; ++mode)
+  {
+    const bool isolated = (mode & 1) != 0;
+    const IOPWord controls = (isolated ? IOPCOP0Status::CACHE_ISOLATED : 0) |
+      ((mode & 2) != 0 ? IOPCOP0Status::CACHES_SWAPPED : 0);
+    for (const bool firstIsBranch : {false, true})
+    {
+      for (unsigned endpoint = 0; endpoint < 3; ++endpoint)
+      {
+        IOPBus baselineBus;
+        IOPBus pausedBus;
+        REQUIRE(baselineBus.installRom(rom));
+        REQUIRE(pausedBus.installRom(rom));
+        IOPCore baseline;
+        IOPCore paused;
+        baseline.attachBus(&baselineBus);
+        paused.attachBus(&pausedBus);
+        IOPCache repeatedCache;
+        for (unsigned repetition = 0; repetition < 3; ++repetition)
+        {
+          CAPTURE(mode);
+          CAPTURE(firstIsBranch);
+          CAPTURE(endpoint);
+          CAPTURE(repetition);
+          const IOPAddress destination = endpoint == 0 ? 0x80000240
+            : endpoint == 1 ? 0x9fc00040 : 0x80000201;
+          const auto setup = [&](IOPCore &core, IOPBus &bus)
+          {
+            bus.reset();
+            core.prepareFreshExecution(0x80000100, 0, 0);
+            requireClear(core.cache());
+            REQUIRE_FALSE(core.branchContinuation().active);
+            REQUIRE(core.delayedResultContinuation().source ==
+              IOPDelayedResultSource::None);
+            REQUIRE(core.elapsedCycles() == 0);
+            REQUIRE(core.retiredInstructions() == 0);
+            REQUIRE(bus.write32(0x100, firstIsBranch ? 0x10000003 : 0x8c070200).status ==
+              IOPBusStatus::Completed);
+            REQUIRE(bus.write32(0x104, 0xac220000).status == IOPBusStatus::Completed);
+            REQUIRE(bus.write32(0x200, 0x11223344).status == IOPBusStatus::Completed);
+            IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::TLB_SHUTDOWN |
+              controls | IOPCOP0Status::CACHE_PROBE_RESULT);
+            if (isolated)
+            {
+              REQUIRE(core.writeData32(0x200, 0x11223344).outcome ==
+                IOPAccessOutcome::Completed);
+            }
+            else
+            {
+              REQUIRE(core.readData32(0x200).value == 0x11223344);
+            }
+            REQUIRE(bus.write32(0x200, 0x55667788).status == IOPBusStatus::Completed);
+            IOPCacheTestAccess::setGeneralRegister(&core, 1, destination);
+            IOPCacheTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+            IOPCacheTestAccess::setGeneralRegister(&core, 7, 0x77);
+            core.startExecution(0x80000100);
+            core.stepInstruction();
+            REQUIRE(core.programCounter() == 0x80000104);
+            REQUIRE(core.branchContinuation().active == firstIsBranch);
+            REQUIRE(core.delayedResultContinuation().source ==
+              (firstIsBranch ? IOPDelayedResultSource::None : IOPDelayedResultSource::Load));
+            REQUIRE(core.generalRegister(7) == 0x77);
+            REQUIRE(core.fetchInstruction().value == 0xac220000);
+          };
+          setup(baseline, baselineBus);
+          setup(paused, pausedBus);
+          requireSameCoreState(paused, baseline);
+          const auto beforeStore = baseline.cache();
+          paused.haltExecution();
+          REQUIRE(paused.stopReason() == IOPStopReason::HostHalt);
+          REQUIRE_THROWS_AS(paused.stepInstruction(), std::logic_error);
+          REQUIRE(paused.elapsedCycles() == 1);
+          requireUnchangedCache(paused.cache(), beforeStore);
+          paused.resumeExecution();
+          requireSameCoreState(paused, baseline);
+          baseline.stepInstruction();
+          paused.stepInstruction();
+          requireSameCoreState(paused, baseline);
+          const bool rejected = endpoint == 1 && !isolated;
+          const bool faulted = endpoint == 2;
+          REQUIRE(baseline.elapsedCycles() == 2);
+          REQUIRE(baseline.retiredInstructions() == (rejected || faulted ? 1 : 2));
+          REQUIRE(baseline.status() == (IOPCOP0Status::TLB_SHUTDOWN | controls |
+            (firstIsBranch || !isolated ? IOPCOP0Status::CACHE_PROBE_RESULT : 0)));
+          REQUIRE(baseline.generalRegister(7) ==
+            (firstIsBranch || rejected ? 0x77u : 0x11223344u));
+          REQUIRE(baseline.branchContinuation().active == (firstIsBranch && rejected));
+          REQUIRE(baseline.delayedResultContinuation().source ==
+            (!firstIsBranch && rejected ? IOPDelayedResultSource::Load
+                                       : IOPDelayedResultSource::None));
+          REQUIRE(baseline.executionState() == (rejected ? IOPExecutionState::Halted
+                                                       : IOPExecutionState::Running));
+          REQUIRE(baseline.stopReason() == (rejected ? IOPStopReason::StoreFailure
+                                                   : IOPStopReason::None));
+          REQUIRE(baseline.exception().kind == (faulted ? IOPException::AddressErrorStore
+                                                       : IOPException::None));
+          REQUIRE(baseline.exception().inBranchDelaySlot == (faulted && firstIsBranch));
+          REQUIRE(baseline.programCounter() == (faulted ? IOPExceptionVector::GENERAL
+            : rejected ? 0x80000104u : firstIsBranch ? 0x80000110u : 0x80000108u));
+          if (faulted)
+          {
+            REQUIRE(baseline.exceptionProgramCounter() ==
+              (firstIsBranch ? 0x80000100u : 0x80000104u));
+            REQUIRE(baseline.badVirtualAddress() == destination);
+          }
+          if (rejected)
+          {
+            REQUIRE(baseline.storeFailure().width == IOPStoreWidth::Word);
+            REQUIRE(baseline.storeFailure().value == 0x89abcdef);
+            REQUIRE(baseline.storeFailure().access.outcome == IOPAccessOutcome::ReadOnly);
+            REQUIRE(baseline.storeFailure().access.virtualAddress == destination);
+            REQUIRE_THROWS_AS(baseline.resumeExecution(), std::logic_error);
+            REQUIRE_THROWS_AS(paused.resumeExecution(), std::logic_error);
+            requireSameCoreState(paused, baseline);
+            REQUIRE(baseline.executionState() == IOPExecutionState::Halted);
+          }
+          else
+          {
+            REQUIRE(baseline.storeFailure().width == IOPStoreWidth::None);
+          }
+          if (rejected || faulted)
+          {
+            requireUnchangedCache(baseline.cache(), beforeStore);
+          }
+          else
+          {
+            const auto bank = (mode & 2) != 0 ? IOPCacheBank::Instruction
+                                            : IOPCacheBank::Data;
+            const auto location = IOPCache::location(bank, destination & 0x1fffffff);
+            if (bank == IOPCacheBank::Instruction)
+            {
+              requireIndexedStore(baseline.cache().instructionLine(location.lineIndex),
+                beforeStore.instructionLine(location.lineIndex), location, 0x89abcdef, 0xf);
+              requireUnchangedCache(baseline.cache(), beforeStore,
+                IOPCache::DATA_LINE_COUNT, location.lineIndex);
+            }
+            else
+            {
+              requireIndexedStore(baseline.cache().dataLine(location.lineIndex),
+                beforeStore.dataLine(location.lineIndex), location, 0x89abcdef, 0xf);
+              requireUnchangedCache(baseline.cache(), beforeStore, location.lineIndex);
+            }
+          }
+          REQUIRE(baselineBus.read32(0x240).value ==
+            (endpoint == 0 && !isolated ? 0x89abcdefu : 0));
+          REQUIRE(baselineBus.read32(0x200).value == 0x55667788);
+          REQUIRE(baselineBus.read32(IOPBus::ROM_BASE + 0x40).value == 0);
+          std::vector<std::uint8_t> baselineMemory(0x250);
+          std::vector<std::uint8_t> pausedMemory(baselineMemory.size());
+          REQUIRE(baselineBus.inspectPhysical(0, baselineMemory.data(),
+            baselineMemory.size()) == IOPBusStatus::Completed);
+          REQUIRE(pausedBus.inspectPhysical(0, pausedMemory.data(),
+            pausedMemory.size()) == IOPBusStatus::Completed);
+          REQUIRE(pausedMemory == baselineMemory);
+          if (repetition != 0)
+          {
+            requireUnchangedCache(baseline.cache(), repeatedCache);
+          }
+          repeatedCache = baseline.cache();
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP restart discards real continuations but only fresh execution and reset clear caches",
+  "[iop][cache][conformance]")
+{
+  for (unsigned mode = 0; mode < 4; ++mode)
+  {
+    for (const bool firstIsBranch : {false, true})
+    {
+      for (const bool freshExecution : {false, true})
+      {
+        CAPTURE(mode);
+        CAPTURE(firstIsBranch);
+        CAPTURE(freshExecution);
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        REQUIRE(bus.write32(0x100, firstIsBranch ? 0x10000003 : 0x8c070200).status ==
+          IOPBusStatus::Completed);
+        REQUIRE(bus.write32(0x200, 0x11223344).status == IOPBusStatus::Completed);
+        IOPCacheTestAccess::seed(&core);
+        const IOPWord controls = ((mode & 1) != 0 ? IOPCOP0Status::CACHE_ISOLATED : 0) |
+          ((mode & 2) != 0 ? IOPCOP0Status::CACHES_SWAPPED : 0);
+        IOPCacheTestAccess::setStatus(&core, controls);
+        for (unsigned restart = 0; restart < 2; ++restart)
+        {
+          core.startExecution(0xa0000100);
+          core.stepInstruction();
+          REQUIRE(core.branchContinuation().active == firstIsBranch);
+          REQUIRE(core.delayedResultContinuation().source ==
+            (firstIsBranch ? IOPDelayedResultSource::None : IOPDelayedResultSource::Load));
+          const auto caches = core.cache();
+          core.haltExecution();
+          const auto status = core.status();
+          core.startExecution(0xa0000100);
+          REQUIRE_FALSE(core.branchContinuation().active);
+          REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+          REQUIRE(core.generalRegister(7) == 0);
+          REQUIRE(core.status() == status);
+          REQUIRE(core.elapsedCycles() == restart + 1);
+          REQUIRE(core.retiredInstructions() == restart + 1);
+          requireUnchangedCache(core.cache(), caches);
+        }
+        core.stepInstruction();
+        REQUIRE(core.branchContinuation().active == firstIsBranch);
+        REQUIRE(core.delayedResultContinuation().source ==
+          (firstIsBranch ? IOPDelayedResultSource::None : IOPDelayedResultSource::Load));
+        if (freshExecution)
+        {
+          core.prepareFreshExecution(0x80000300, 0x1230, 0x4560);
+        }
+        else
+        {
+          core.reset();
+        }
+        requireClear(core.cache());
+        REQUIRE(core.programCounter() == (freshExecution ? 0x80000300u : IOPReset::VECTOR));
+        REQUIRE(core.generalRegister(29) == (freshExecution ? 0x1230 : 0));
+        REQUIRE(core.generalRegister(31) == (freshExecution ? 0x4560 : 0));
+        REQUIRE(core.generalRegister(7) == 0);
+        REQUIRE_FALSE(core.branchContinuation().active);
+        REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+        REQUIRE(core.status() ==
+          (IOPCOP0Status::BOOT_EXCEPTION_VECTORS | IOPCOP0Status::TLB_SHUTDOWN));
+        REQUIRE(core.executionState() == IOPExecutionState::Halted);
+        REQUIRE(core.stopReason() == IOPStopReason::None);
+        REQUIRE(core.elapsedCycles() == 0);
+        REQUIRE(core.retiredInstructions() == 0);
+        REQUIRE(bus.read32(0x200).value == 0x11223344);
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP exception entry and JR RFE return preserve cache controls and stale payloads",
+  "[iop][cache][conformance]")
+{
+  for (unsigned mode = 0; mode < 4; ++mode)
+  {
+    for (const bool firstIsBranch : {false, true})
+    {
+      CAPTURE(mode);
+      CAPTURE(firstIsBranch);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0x200, 0x11223344).status == IOPBusStatus::Completed);
+      core.startExecution(0x80000200);
+      REQUIRE(core.fetchInstruction().value == 0x11223344);
+      REQUIRE(core.readData32(0x200).value == 0x11223344);
+      REQUIRE(bus.write32(0x200, 0x55667788).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x100, firstIsBranch ? 0x10000003 : 0x8c070200).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x104, 0x0000000c).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x80, 0x00200008).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x84, 0x42000010).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x300, 0).status == IOPBusStatus::Completed);
+      const IOPWord controls = ((mode & 1) != 0 ? IOPCOP0Status::CACHE_ISOLATED : 0) |
+        ((mode & 2) != 0 ? IOPCOP0Status::CACHES_SWAPPED : 0);
+      const IOPWord initialStatus = IOPCOP0Status::TLB_SHUTDOWN | controls |
+        IOPCOP0Status::CACHE_PROBE_RESULT | 0x15;
+      IOPCacheTestAccess::setStatus(&core, initialStatus);
+      IOPCacheTestAccess::setGeneralRegister(&core, 1, 0x80000300);
+      IOPCacheTestAccess::setGeneralRegister(&core, 7, 0x77);
+      core.startExecution(0xa0000100);
+      core.stepInstruction();
+      REQUIRE(core.branchContinuation().active == firstIsBranch);
+      REQUIRE(core.delayedResultContinuation().source ==
+        (firstIsBranch ? IOPDelayedResultSource::None : IOPDelayedResultSource::Load));
+      const auto statusBeforeException = core.status();
+      const auto beforeException = core.cache();
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::SystemCall);
+      REQUIRE(core.exception().inBranchDelaySlot == firstIsBranch);
+      REQUIRE(core.exceptionProgramCounter() == (firstIsBranch ? 0xa0000100u : 0xa0000104u));
+      REQUIRE(core.cause() == ((firstIsBranch ? IOPCOP0Cause::BRANCH_DELAY : 0) | (8u << 2)));
+      REQUIRE(core.status() == ((statusBeforeException & ~IOPWord(0x3f)) | 0x14));
+      REQUIRE(core.programCounter() == IOPExceptionVector::GENERAL);
+      REQUIRE(core.generalRegister(7) == (firstIsBranch ? 0x77u : 0x11223344u));
+      REQUIRE_FALSE(core.branchContinuation().active);
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+      requireUnchangedCache(core.cache(), beforeException);
+      REQUIRE(core.fetchInstruction().value == 0x00200008);
+      const auto beforeJR = core.cache();
+      core.stepInstruction();
+      REQUIRE(core.branchContinuation().active);
+      REQUIRE(core.branchContinuation().targetAddress == 0x80000300);
+      requireUnchangedCache(core.cache(), beforeJR);
+      REQUIRE(core.fetchInstruction().value == 0x42000010);
+      const auto beforeRFE = core.cache();
+      core.haltExecution();
+      core.resumeExecution();
+      core.stepInstruction();
+      REQUIRE(core.programCounter() == 0x80000300);
+      REQUIRE(core.status() == statusBeforeException);
+      REQUIRE_FALSE(core.branchContinuation().active);
+      requireUnchangedCache(core.cache(), beforeRFE);
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.elapsedCycles() == 5);
+      REQUIRE(core.retiredInstructions() == 4);
+      IOPCacheTestAccess::setStatus(&core, 0);
+      core.startExecution(0x80000200);
+      REQUIRE(core.fetchInstruction().value == 0x11223344);
+      REQUIRE(core.readData32(0x200).value == 0x11223344);
+      REQUIRE(bus.read32(0x200).value == 0x55667788);
+    }
+  }
 }

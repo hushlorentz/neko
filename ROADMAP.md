@@ -2207,7 +2207,7 @@ timers, and persistence/trace integration remain separate blocks.
 - [x] Implement software-visible `Status.IsC`/`SwC` isolation, cache probing,
       and isolated partial-store invalidation through the same cache owner.
       Complete focused review of normal and swapped access paths.
-- [ ] Complete focused cache-maintenance, alias, fault, reset, and
+- [x] Complete focused cache-maintenance, alias, fault, reset, and
       continuation conformance, including repeated deterministic execution
       and host pause/resume across active branch and delayed-result state.
       Hash/save-state and trace integration remain in the milestone's
