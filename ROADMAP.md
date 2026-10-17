@@ -2200,7 +2200,7 @@ timers, and persistence/trace integration remain separate blocks.
 - [x] Implement cached data loads through the same owner, preserving delayed
       writeback, merge-load semantics, physical-route boundaries, and precise
       fault selection. Complete focused review.
-- [ ] Implement write-through stores and byte-enabled merges with ordered
+- [x] Implement write-through stores and byte-enabled merges with ordered
       physical admission, cache-hit updates, documented miss behavior, and
       stale external-write visibility. Complete focused atomicity review;
       actual DMA endpoints remain with their device milestones.

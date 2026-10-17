@@ -85,6 +85,41 @@ IOPBusReadResult IOPCache::readDataWord(
   return readLine(bus, physicalAddress, address, dataLines[address.lineIndex]);
 }
 
+void IOPCache::commitDataStore(
+  IOPAddress physicalAddress,
+  IOPWord value,
+  std::uint8_t byteEnable)
+{
+  if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0 ||
+      byteEnable == 0 || (byteEnable & 0xf0) != 0)
+  {
+    throw std::invalid_argument(
+      "IOP cache store requires an aligned word and nonzero four-bit byte enable.");
+  }
+  const auto address = location(IOPCacheBank::Data, physicalAddress);
+  auto &line = dataLines[address.lineIndex];
+  if (byteEnable == 0xf)
+  {
+    line.words[0] = value;
+    line.physicalTag = address.physicalTag;
+    line.valid = true;
+    return;
+  }
+  if (!line.valid || line.physicalTag != address.physicalTag)
+  {
+    return;
+  }
+  IOPWord mask = 0;
+  for (unsigned lane = 0; lane < sizeof(IOPWord); ++lane)
+  {
+    if ((byteEnable & (1u << lane)) != 0)
+    {
+      mask |= IOPWord(0xff) << (8 * lane);
+    }
+  }
+  line.words[0] = (line.words[0] & ~mask) | (value & mask);
+}
+
 IOPCacheLocation IOPCache::location(
   IOPCacheBank bank,
   IOPAddress physicalAddress)

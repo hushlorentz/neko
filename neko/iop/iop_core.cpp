@@ -1407,18 +1407,27 @@ IOPMemoryWriteResult IOPCore::writeMaskedStore(
   IOPBus &physicalBus = attachedBus();
   auto aligned = classification;
   aligned.physicalAddress &= ~IOPAddress(3);
-  if (planCacheAccess(IOPCacheAccess::DataStore, aligned, sizeof(IOPWord))
-      .disposition == IOPCacheAccessDisposition::UnsupportedMode)
+  const auto plan = planCacheAccess(
+    IOPCacheAccess::DataStore, aligned, sizeof(IOPWord));
+  if (plan.disposition == IOPCacheAccessDisposition::UnsupportedMode)
   {
     result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
     return result;
   }
-  synchronizeCacheConfiguration(physicalBus);
   const IOPBusWriteResult write = physicalBus.writeMasked32(
-    classification.physicalAddress & ~IOPAddress(3),
+    aligned.physicalAddress,
     request.value,
     request.byteEnable);
   result.outcome = accessOutcome(write.status);
+  if (write.status == IOPBusStatus::Completed)
+  {
+    synchronizeCacheConfiguration(physicalBus);
+    if (plan.disposition == IOPCacheAccessDisposition::Cache)
+    {
+      caches.commitDataStore(
+        aligned.physicalAddress, request.value, request.byteEnable);
+    }
+  }
   return result;
 }
 
@@ -1567,13 +1576,13 @@ IOPMemoryWriteResult IOPCore::writeMemory(
     return result;
   }
 
-  if (planCacheAccess(IOPCacheAccess::DataStore, classification, width)
-      .disposition == IOPCacheAccessDisposition::UnsupportedMode)
+  const auto plan = planCacheAccess(
+    IOPCacheAccess::DataStore, classification, width);
+  if (plan.disposition == IOPCacheAccessDisposition::UnsupportedMode)
   {
     result.outcome = IOPAccessOutcome::UnsupportedCacheMode;
     return result;
   }
-  synchronizeCacheConfiguration(physicalBus);
   IOPBusWriteResult busResult;
   switch (width)
   {
@@ -1597,6 +1606,19 @@ IOPMemoryWriteResult IOPCore::writeMemory(
   }
 
   result.outcome = accessOutcome(busResult.status);
+  if (busResult.status == IOPBusStatus::Completed)
+  {
+    synchronizeCacheConfiguration(physicalBus);
+    if (plan.disposition == IOPCacheAccessDisposition::Cache)
+    {
+      const unsigned offset = classification.physicalAddress & 3;
+      const auto byteEnable =
+        static_cast<std::uint8_t>(((1u << width) - 1) << offset);
+      caches.commitDataStore(
+        classification.physicalAddress & ~IOPAddress(3),
+        value << (8 * offset), byteEnable);
+    }
+  }
   return result;
 }
 

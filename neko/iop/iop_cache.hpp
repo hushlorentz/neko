@@ -85,6 +85,11 @@ class IOPCache final
     IOPBusReadResult readDataWord(
       IOPBus &bus,
       IOPAddress physicalAddress);
+    // Commit only after physical completion; value is already lane-positioned.
+    void commitDataStore(
+      IOPAddress physicalAddress,
+      IOPWord value,
+      std::uint8_t byteEnable);
 
     static IOPCacheLocation location(
       IOPCacheBank bank,
