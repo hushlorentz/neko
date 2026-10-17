@@ -2240,7 +2240,7 @@ timers, and persistence/trace integration remain separate blocks.
       masks, master-control acknowledgement, repeated assertion, exception
       ordering, reset, and deterministic host pause/resume without duplicating
       existing CPU-only interrupt tests.
-- [ ] Complete the block-wide independent correctness review and optimized
+- [x] Complete the block-wide independent correctness review and optimized
       AddressSanitizer check, reconcile `PROJECT.md`, and close the block
       before timer and clock integration.
 
