@@ -1493,11 +1493,24 @@ IOPMemoryReadResult IOPCore::readMemory(
   }
   synchronizeCacheConfiguration(physicalBus);
   IOPBusReadResult busResult;
-  if (access == IOPCacheAccess::InstructionFetch &&
-      plan.disposition == IOPCacheAccessDisposition::Cache)
+  if (plan.disposition == IOPCacheAccessDisposition::Cache)
   {
-    busResult = caches.readInstruction(
-      physicalBus, classification.physicalAddress);
+    if (access == IOPCacheAccess::InstructionFetch)
+    {
+      busResult = caches.readInstruction(
+        physicalBus, classification.physicalAddress);
+    }
+    else
+    {
+      busResult = caches.readDataWord(
+        physicalBus, classification.physicalAddress & ~IOPAddress(3));
+      if (busResult.status == IOPBusStatus::Completed)
+      {
+        const auto shift = (classification.physicalAddress & 3) * 8;
+        const IOPWord mask = UINT32_MAX >> ((sizeof(IOPWord) - width) * 8);
+        busResult.value = (busResult.value >> shift) & mask;
+      }
+    }
   }
   else
   {

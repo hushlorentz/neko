@@ -1878,13 +1878,14 @@ TEST_CASE("IOP core data access preserves routes and selects typed failures")
   REQUIRE(uncachedLoad.cacheRoute == IOPCacheRoute::Uncached);
   REQUIRE(uncachedLoad.value == UINT32_C(0x89abcdef));
 
+  // Observe physical store completion independently of cached visibility.
   const auto byteStore = core.writeData8(0x201, 0x5a);
   REQUIRE(byteStore.outcome == IOPAccessOutcome::Completed);
-  REQUIRE(core.readData8(0x201).value == 0x5a);
+  REQUIRE(core.readData8(0xa0000201).value == 0x5a);
 
   const auto halfwordStore = core.writeData16(0x202, 0x1357);
   REQUIRE(halfwordStore.outcome == IOPAccessOutcome::Completed);
-  REQUIRE(core.readData16(0x202).value == 0x1357);
+  REQUIRE(core.readData16(0xa0000202).value == 0x1357);
 
   const auto misalignedLoad = core.readData32(0x202);
   REQUIRE(misalignedLoad.outcome == IOPAccessOutcome::Misaligned);

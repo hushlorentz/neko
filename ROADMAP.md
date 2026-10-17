@@ -2197,7 +2197,7 @@ timers, and persistence/trace integration remain separate blocks.
 - [x] Implement cached instruction fetch, uncached bypass, physical aliases,
       stale-code visibility, and atomic failed-fill behavior without claiming
       undocumented refill or contention timing. Complete focused review.
-- [ ] Implement cached data loads through the same owner, preserving delayed
+- [x] Implement cached data loads through the same owner, preserving delayed
       writeback, merge-load semantics, physical-route boundaries, and precise
       fault selection. Complete focused review.
 - [ ] Implement write-through stores and byte-enabled merges with ordered

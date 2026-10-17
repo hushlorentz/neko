@@ -15,6 +15,43 @@ static_assert((IOPCache::INSTRUCTION_SIZE &
 static_assert((IOPCache::DATA_SIZE & (IOPCache::DATA_SIZE - 1)) == 0,
   "IOP data-cache geometry must be a power of two.");
 
+namespace
+{
+  template<std::size_t WordCount>
+  IOPBusReadResult readLine(
+    IOPBus &bus,
+    IOPAddress physicalAddress,
+    const IOPCacheLocation &address,
+    IOPCacheLine<WordCount> &line)
+  {
+    if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0)
+    {
+      return {IOPBusStatus::Misaligned, 0};
+    }
+    if (line.valid && line.physicalTag == address.physicalTag)
+    {
+      return {IOPBusStatus::Completed, line.words[address.wordIndex]};
+    }
+
+    line.valid = false;
+    IOPCacheLine<WordCount> candidate;
+    candidate.physicalTag = address.physicalTag;
+    for (std::size_t word = 0; word < candidate.words.size(); ++word)
+    {
+      const auto read = bus.read32(address.lineBaseAddress +
+        static_cast<IOPAddress>(word * sizeof(IOPWord)));
+      if (read.status != IOPBusStatus::Completed)
+      {
+        return read;
+      }
+      candidate.words[word] = read.value;
+    }
+    candidate.valid = true;
+    line = candidate;
+    return {IOPBusStatus::Completed, line.words[address.wordIndex]};
+  }
+}
+
 void IOPCache::reset()
 {
   instructionLines = {};
@@ -36,33 +73,16 @@ IOPBusReadResult IOPCache::readInstruction(
   IOPBus &bus,
   IOPAddress physicalAddress)
 {
-  if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0)
-  {
-    return {IOPBusStatus::Misaligned, 0};
-  }
   const auto address = location(IOPCacheBank::Instruction, physicalAddress);
-  auto &line = instructionLines[address.lineIndex];
-  if (line.valid && line.physicalTag == address.physicalTag)
-  {
-    return {IOPBusStatus::Completed, line.words[address.wordIndex]};
-  }
+  return readLine(bus, physicalAddress, address, instructionLines[address.lineIndex]);
+}
 
-  line.valid = false;
-  IOPInstructionCacheLine candidate;
-  candidate.physicalTag = address.physicalTag;
-  for (std::size_t word = 0; word < candidate.words.size(); ++word)
-  {
-    const auto read = bus.read32(address.lineBaseAddress +
-      static_cast<IOPAddress>(word * sizeof(IOPWord)));
-    if (read.status != IOPBusStatus::Completed)
-    {
-      return read;
-    }
-    candidate.words[word] = read.value;
-  }
-  candidate.valid = true;
-  line = candidate;
-  return {IOPBusStatus::Completed, line.words[address.wordIndex]};
+IOPBusReadResult IOPCache::readDataWord(
+  IOPBus &bus,
+  IOPAddress physicalAddress)
+{
+  const auto address = location(IOPCacheBank::Data, physicalAddress);
+  return readLine(bus, physicalAddress, address, dataLines[address.lineIndex]);
 }
 
 IOPCacheLocation IOPCache::location(
