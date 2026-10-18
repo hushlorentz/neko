@@ -277,6 +277,7 @@ add_executable(neko_tests
     neko_tests/iop/iop_cache_tests.cpp
     neko_tests/iop/iop_core_tests.cpp
     neko_tests/iop/iop_instruction_tests.cpp
+    neko_tests/iop/iop_observation_tests.cpp
     neko_tests/iop/iop_interrupt_controller_tests.cpp
     neko_tests/iop/iop_program_runner_tests.cpp
     neko_tests/iop/iop_timers_tests.cpp

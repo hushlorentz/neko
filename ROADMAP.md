@@ -1537,7 +1537,7 @@ remain with their owning milestones.
 
 - [x] Define/test append-only IOP trace identities and CPU, memory, timer, and
       INTC payload encodings through the existing stable transport.
-- [ ] Add/review fixed-capacity CPU instruction, retirement, branch, memory,
+- [x] Add/review fixed-capacity CPU instruction, retirement, branch, memory,
       exception, interrupt, and execution-state observations, including failed
       accesses and delayed-result/delay-slot boundaries.
 - [ ] Add/review timer and INTC observations with deterministic master-cycle

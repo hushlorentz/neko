@@ -25,6 +25,12 @@ enum class IOPControlFlowEffect : std::uint8_t
   SetProgramCounter
 };
 
+enum class IOPBranchOutcome : std::uint8_t
+{
+  NotTaken,
+  Taken
+};
+
 enum class IOPInstructionCompletion : std::uint8_t
 {
   Halted,
@@ -58,6 +64,7 @@ struct IOPControlFlowRequest
 {
   IOPControlFlowEffect kind = IOPControlFlowEffect::Hold;
   IOPAddress target = 0;
+  IOPBranchOutcome branchOutcome = IOPBranchOutcome::Taken;
 };
 
 enum class IOPStoreOperation : std::uint8_t
@@ -182,9 +189,159 @@ class IOPCore final
     std::uint64_t retiredInstructions() const;
 
   private:
+    friend class NekoSystem;
     friend class NekoSaveStateCodec;
     friend struct IOPCoreTestAccess;
     friend struct IOPCacheTestAccess;
+    friend struct IOPObservationTestAccess;
+
+    enum class StepEventKind : std::uint8_t
+    {
+      InstructionIssued,
+      InstructionRetired,
+      BranchScheduled,
+      MemoryAccess,
+      ExceptionEntered,
+      InterruptDelivered,
+      StateChanged
+    };
+
+    enum class MemoryAccessKind : std::uint8_t
+    {
+      InstructionFetch,
+      DataLoad,
+      DataStore
+    };
+
+    struct InstructionIssuedEvent
+    {
+      IOPAddress address = 0;
+      IOPWord instruction = 0;
+      bool inBranchDelaySlot = false;
+    };
+
+    struct InstructionRetiredEvent
+    {
+      IOPAddress address = 0;
+      IOPAddress nextAddress = 0;
+      std::uint64_t instructions = 0;
+      IOPCycleCount cycles = 0;
+    };
+
+    struct BranchScheduledEvent
+    {
+      IOPAddress address = 0;
+      IOPAddress target = 0;
+      IOPBranchOutcome outcome = IOPBranchOutcome::NotTaken;
+    };
+
+    struct MemoryAccessEvent
+    {
+      MemoryAccessKind kind = MemoryAccessKind::InstructionFetch;
+      IOPAddress virtualAddress = 0;
+      IOPAddress physicalAddress = 0;
+      IOPWord value = 0;
+      IOPAccessOutcome outcome = IOPAccessOutcome::Unmapped;
+      IOPCacheRoute cacheRoute = IOPCacheRoute::None;
+      std::uint8_t width = 0;
+      std::uint8_t byteEnable = 0;
+      bool physicalAddressValid = false;
+    };
+
+    struct ExceptionEnteredEvent
+    {
+      IOPAddress epc = 0;
+      IOPAddress vector = 0;
+      IOPWord cause = 0;
+    };
+
+    struct InterruptDeliveredEvent
+    {
+      IOPAddress address = 0;
+      IOPWord status = 0;
+      IOPWord cause = 0;
+      IOPAddress vector = 0;
+    };
+
+    struct StateChangedEvent
+    {
+      IOPExecutionState before = IOPExecutionState::Halted;
+      IOPExecutionState after = IOPExecutionState::Halted;
+      IOPStopReason reason = IOPStopReason::None;
+      IOPAddress address = 0;
+    };
+
+    union StepEventPayload
+    {
+      InstructionIssuedEvent instructionIssued;
+      InstructionRetiredEvent instructionRetired;
+      BranchScheduledEvent branchScheduled;
+      MemoryAccessEvent memoryAccess;
+      ExceptionEnteredEvent exceptionEntered;
+      InterruptDeliveredEvent interruptDelivered;
+      StateChangedEvent stateChanged;
+
+      StepEventPayload(const InstructionIssuedEvent &event) :
+        instructionIssued(event) {}
+      StepEventPayload(const InstructionRetiredEvent &event) :
+        instructionRetired(event) {}
+      StepEventPayload(const BranchScheduledEvent &event) :
+        branchScheduled(event) {}
+      StepEventPayload(const MemoryAccessEvent &event) :
+        memoryAccess(event) {}
+      StepEventPayload(const ExceptionEnteredEvent &event) :
+        exceptionEntered(event) {}
+      StepEventPayload(const InterruptDeliveredEvent &event) :
+        interruptDelivered(event) {}
+      StepEventPayload(const StateChangedEvent &event) :
+        stateChanged(event) {}
+    };
+
+    struct StepEvent
+    {
+      StepEvent() :
+        kind(StepEventKind::InstructionIssued),
+        payload(InstructionIssuedEvent{}) {}
+      StepEvent(const InstructionIssuedEvent &event) :
+        kind(StepEventKind::InstructionIssued), payload(event) {}
+      StepEvent(const InstructionRetiredEvent &event) :
+        kind(StepEventKind::InstructionRetired), payload(event) {}
+      StepEvent(const BranchScheduledEvent &event) :
+        kind(StepEventKind::BranchScheduled), payload(event) {}
+      StepEvent(const MemoryAccessEvent &event) :
+        kind(StepEventKind::MemoryAccess), payload(event) {}
+      StepEvent(const ExceptionEnteredEvent &event) :
+        kind(StepEventKind::ExceptionEntered), payload(event) {}
+      StepEvent(const InterruptDeliveredEvent &event) :
+        kind(StepEventKind::InterruptDelivered), payload(event) {}
+      StepEvent(const StateChangedEvent &event) :
+        kind(StepEventKind::StateChanged), payload(event) {}
+
+      StepEventKind kind;
+      StepEventPayload payload;
+    };
+
+    // Fetch + issue + data access/branch + retirement/exception/halt.
+    // Interrupt admission has no fetch or issue and produces only two events.
+    static constexpr std::size_t STEP_EVENT_CAPACITY = 4;
+    std::array<StepEvent, STEP_EVENT_CAPACITY> stepEvents = {};
+    std::size_t stepEventCount = 0;
+    bool observationsEnabled = false;
+
+    void enableObservations();
+    void disableObservations();
+    void clearObservations();
+    void recordStepEvent(const StepEvent &event);
+    void recordMemoryRead(
+      const IOPMemoryReadResult &result,
+      std::uint8_t width,
+      MemoryAccessKind kind);
+    void recordMemoryStore(
+      const IOPStoreRequest &request,
+      const IOPMemoryWriteResult &result);
+    void transitionExecution(
+      IOPExecutionState nextState,
+      IOPStopReason reason);
 
     IOPInstructionEffects instructionEffects(
       const struct IOPDecodeResult &decoded);

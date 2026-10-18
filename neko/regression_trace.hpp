@@ -366,6 +366,7 @@ struct NekoTraceEvent
 // IOP payloads (value0, value1, value2, value3). Producers zero currently
 // unassigned words/bits; consumers ignore them to permit future extensions.
 // InstructionIssued: instruction PC, raw opcode, reserved, instruction flags.
+//   Describes a successfully fetched attempt, including invalid/deferred opcodes.
 // InstructionRetired: instruction PC, next PC, retired total, IOP cycle total.
 // BranchScheduled: branch PC, selected target, taken (bit 0), reserved.
 // MemoryAccess: virtual address, raw transferred value, reserved, memory metadata.

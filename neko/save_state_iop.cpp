@@ -533,8 +533,11 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional IOP timer commit must not throw.");
   destination->iopBusComponent.ram.swap(source->iopBusComponent.ram);
   destination->iopBusComponent.scratchpad = source->iopBusComponent.scratchpad;
+  const bool observationsEnabled = destination->iopCoreComponent.observationsEnabled;
   destination->iopCoreComponent = source->iopCoreComponent;
   destination->iopCoreComponent.bus = &destination->iopBusComponent;
+  destination->iopCoreComponent.observationsEnabled = observationsEnabled;
+  destination->iopCoreComponent.clearObservations();
   destination->iopBusComponent.interruptController =
     &destination->iopInterruptControllerComponent;
   destination->iopBusComponent.timers = &destination->iopTimersComponent;

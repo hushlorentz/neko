@@ -350,36 +350,35 @@ namespace
     return effects;
   }
 
-  IOPInstructionEffects branchEffects(IOPAddress target)
+  IOPInstructionEffects branchEffects(const IOPControlFlowRequest &request)
   {
     IOPInstructionEffects effects = retiredEffects();
-    effects.controlFlow.kind = IOPControlFlowEffect::ScheduleBranch;
-    effects.controlFlow.target = target;
+    effects.controlFlow = request;
     return effects;
   }
 
   IOPInstructionEffects branchLinkEffects(
-    IOPAddress target,
+    const IOPControlFlowRequest &request,
     std::uint8_t destination,
     IOPAddress link)
   {
     IOPInstructionEffects effects =
       destinationEffects(destination, link);
-    effects.controlFlow.kind = IOPControlFlowEffect::ScheduleBranch;
-    effects.controlFlow.target = target;
+    effects.controlFlow = request;
     return effects;
   }
 
-  IOPAddress conditionalBranchTarget(
+  IOPControlFlowRequest conditionalBranchRequest(
     IOPAddress instructionAddress,
     std::uint16_t immediate,
-    bool taken)
+    IOPBranchOutcome outcome)
   {
     const IOPAddress delaySlot =
       instructionAddress + sizeof(IOPWord);
-    return taken
+    const IOPAddress target = outcome == IOPBranchOutcome::Taken
       ? delaySlot + (signExtendedImmediate(immediate) << 2)
       : delaySlot + sizeof(IOPWord);
+    return {IOPControlFlowEffect::ScheduleBranch, target, outcome};
   }
 
   bool isControlTransfer(IOPOperation operation)
@@ -424,8 +423,90 @@ IOPCore::IOPCore()
   reset();
 }
 
+void IOPCore::enableObservations()
+{
+  clearObservations();
+  observationsEnabled = true;
+}
+
+void IOPCore::disableObservations()
+{
+  clearObservations();
+  observationsEnabled = false;
+}
+
+void IOPCore::clearObservations()
+{
+  stepEventCount = 0;
+}
+
+void IOPCore::recordStepEvent(const StepEvent &event)
+{
+  if (!observationsEnabled)
+  {
+    return;
+  }
+  if (stepEventCount >= stepEvents.size())
+  {
+    throw std::logic_error("IOP step observation capacity exceeded.");
+  }
+  stepEvents[stepEventCount++] = event;
+}
+
+void IOPCore::recordMemoryRead(
+  const IOPMemoryReadResult &result,
+  std::uint8_t width,
+  MemoryAccessKind kind)
+{
+  recordStepEvent(MemoryAccessEvent{
+    kind, result.virtualAddress, result.physicalAddress,
+    result.outcome == IOPAccessOutcome::Completed ? result.value : 0,
+    result.outcome, result.cacheRoute, width, 0,
+    result.cacheRoute != IOPCacheRoute::None});
+}
+
+void IOPCore::recordMemoryStore(
+  const IOPStoreRequest &request,
+  const IOPMemoryWriteResult &result)
+{
+  if (!observationsEnabled)
+  {
+    return;
+  }
+  const auto width = static_cast<std::uint8_t>(storeAccessWidth(request.operation));
+  const bool merge = request.operation == IOPStoreOperation::MaskedWord;
+  const IOPAddress addressMask = merge ? ~IOPAddress(3) : UINT32_MAX;
+  const auto byteEnable = merge ? request.byteEnable :
+    isAligned(request.virtualAddress, width)
+      ? static_cast<std::uint8_t>(((1u << width) - 1) <<
+          (request.virtualAddress & 3))
+      : std::uint8_t(0);
+  const IOPWord value = request.value & (UINT32_MAX >> ((4 - width) * 8));
+  recordStepEvent(MemoryAccessEvent{
+    MemoryAccessKind::DataStore,
+    result.virtualAddress & addressMask,
+    result.physicalAddress & addressMask, value,
+    result.outcome, result.cacheRoute, width, byteEnable,
+    result.cacheRoute != IOPCacheRoute::None});
+}
+
+void IOPCore::transitionExecution(
+  IOPExecutionState nextState,
+  IOPStopReason reason)
+{
+  const auto previousState = state;
+  const auto previousReason = haltReason;
+  state = nextState;
+  haltReason = reason;
+  if (previousState != state || previousReason != haltReason)
+  {
+    recordStepEvent(StateChangedEvent{previousState, state, haltReason, pc});
+  }
+}
+
 void IOPCore::reset()
 {
+  clearObservations();
   caches.reset();
   cacheRomIdentity = bus != nullptr ? bus->romIdentity() : nullptr;
   pc = IOPReset::VECTOR;
@@ -454,6 +535,7 @@ void IOPCore::attachBus(IOPBus *attached)
 {
   if (bus != attached)
   {
+    clearObservations();
     caches.reset();
     cacheRomIdentity = nullptr;
   }
@@ -482,20 +564,20 @@ void IOPCore::prepareFreshExecution(
 
 void IOPCore::startExecution(IOPAddress entryPoint)
 {
+  clearObservations();
   pc = entryPoint;
   branch = {};
   delayedResult = {};
   hiLoState = {};
   enteredException = {};
   rejectedStore = {};
-  state = IOPExecutionState::Running;
-  haltReason = IOPStopReason::None;
+  transitionExecution(IOPExecutionState::Running, IOPStopReason::None);
 }
 
 void IOPCore::haltExecution()
 {
-  state = IOPExecutionState::Halted;
-  haltReason = IOPStopReason::HostHalt;
+  clearObservations();
+  transitionExecution(IOPExecutionState::Halted, IOPStopReason::HostHalt);
 }
 
 void IOPCore::resumeExecution()
@@ -507,8 +589,8 @@ void IOPCore::resumeExecution()
     throw std::logic_error(
       "IOP Core can resume only after a host halt without a rejected store.");
   }
-  state = IOPExecutionState::Running;
-  haltReason = IOPStopReason::None;
+  clearObservations();
+  transitionExecution(IOPExecutionState::Running, IOPStopReason::None);
 }
 
 void IOPCore::stepInstruction()
@@ -519,6 +601,7 @@ void IOPCore::stepInstruction()
       "IOP Core cannot step while halted.");
   }
 
+  clearObservations();
   enteredException = {};
   const IOPAddress instructionAddress = pc;
   synchronizeInterruptInputs();
@@ -530,6 +613,7 @@ void IOPCore::stepInstruction()
     return;
   }
   const IOPMemoryReadResult fetch = fetchInstruction();
+  recordMemoryRead(fetch, sizeof(IOPWord), MemoryAccessKind::InstructionFetch);
   if (fetch.outcome != IOPAccessOutcome::Completed)
   {
     commitInstructionEffects(
@@ -538,6 +622,8 @@ void IOPCore::stepInstruction()
     return;
   }
 
+  recordStepEvent(InstructionIssuedEvent{
+    instructionAddress, fetch.value, branch.active});
   commitInstructionEffects(
     instructionAddress,
     instructionEffects(decodeIOPInstruction(fetch.value)));
@@ -623,7 +709,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
           target,
           static_cast<std::uint8_t>(source)));
     case IOPOperation::JumpRegister:
-      return branchEffects(source);
+      return branchEffects({IOPControlFlowEffect::ScheduleBranch, source});
     case IOPOperation::JumpAndLinkRegister:
       if ((source & 3) != 0 ||
           classifyAddress(source).outcome !=
@@ -632,7 +718,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
         return addressErrorEffects(source);
       }
       return branchLinkEffects(
-        source,
+        {IOPControlFlowEffect::ScheduleBranch, source},
         instruction.destinationRegister,
         pc + 2 * sizeof(IOPWord));
     case IOPOperation::Add:
@@ -749,68 +835,74 @@ IOPInstructionEffects IOPCore::instructionEffects(
         source < target ? 1 : 0);
     case IOPOperation::BranchLessThanZero:
       return branchEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          (source & UINT32_C(0x80000000)) != 0));
+          (source & UINT32_C(0x80000000)) != 0
+            ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken));
     case IOPOperation::BranchGreaterThanOrEqualZero:
       return branchEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          (source & UINT32_C(0x80000000)) == 0));
+          (source & UINT32_C(0x80000000)) == 0
+            ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken));
     case IOPOperation::BranchLessThanZeroAndLink:
       return branchLinkEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          (source & UINT32_C(0x80000000)) != 0),
+          (source & UINT32_C(0x80000000)) != 0
+            ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken),
         31,
         pc + 2 * sizeof(IOPWord));
     case IOPOperation::BranchGreaterThanOrEqualZeroAndLink:
       return branchLinkEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          (source & UINT32_C(0x80000000)) == 0),
+          (source & UINT32_C(0x80000000)) == 0
+            ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken),
         31,
         pc + 2 * sizeof(IOPWord));
     case IOPOperation::Jump:
       return branchEffects(
-        ((pc + sizeof(IOPWord)) & UINT32_C(0xf0000000)) |
-        (instruction.target << 2));
+        {IOPControlFlowEffect::ScheduleBranch,
+          ((pc + static_cast<IOPAddress>(sizeof(IOPWord))) & UINT32_C(0xf0000000)) |
+            (instruction.target << 2)});
     case IOPOperation::JumpAndLink:
       return branchLinkEffects(
-        ((pc + sizeof(IOPWord)) & UINT32_C(0xf0000000)) |
-          (instruction.target << 2),
+        {IOPControlFlowEffect::ScheduleBranch,
+          ((pc + static_cast<IOPAddress>(sizeof(IOPWord))) & UINT32_C(0xf0000000)) |
+            (instruction.target << 2)},
         31,
         pc + 2 * sizeof(IOPWord));
     case IOPOperation::BranchEqual:
       return branchEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          source == target));
+          source == target ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken));
     case IOPOperation::BranchNotEqual:
       return branchEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          source != target));
+          source != target ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken));
     case IOPOperation::BranchLessThanOrEqualZero:
       return branchEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          source == 0 ||
-          (source & UINT32_C(0x80000000)) != 0));
+          (source == 0 || (source & UINT32_C(0x80000000)) != 0)
+            ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken));
     case IOPOperation::BranchGreaterThanZero:
       return branchEffects(
-        conditionalBranchTarget(
+        conditionalBranchRequest(
           pc,
           instruction.immediate,
-          source != 0 &&
-          (source & UINT32_C(0x80000000)) == 0));
+          (source != 0 && (source & UINT32_C(0x80000000)) == 0)
+            ? IOPBranchOutcome::Taken : IOPBranchOutcome::NotTaken));
     case IOPOperation::SetLessThanImmediate:
       return destinationEffects(
         instruction.targetRegister,
@@ -896,22 +988,27 @@ IOPInstructionEffects IOPCore::alignedLoadEffects(
   const IOPAddress address =
     base + signExtendedImmediate(instruction.immediate);
   IOPMemoryReadResult read;
+  std::uint8_t width = 0;
   switch (instruction.operation)
   {
     case IOPOperation::LoadByte:
     case IOPOperation::LoadByteUnsigned:
+      width = sizeof(std::uint8_t);
       read = readData8(address);
       break;
     case IOPOperation::LoadHalfword:
     case IOPOperation::LoadHalfwordUnsigned:
+      width = sizeof(std::uint16_t);
       read = readData16(address);
       break;
     case IOPOperation::LoadWord:
+      width = sizeof(IOPWord);
       read = readData32(address);
       break;
     default:
       throw std::logic_error("Unsupported IOP aligned load.");
   }
+  recordMemoryRead(read, width, MemoryAccessKind::DataLoad);
   if (read.outcome != IOPAccessOutcome::Completed)
   {
     return memoryReadFailureEffects(read);
@@ -939,6 +1036,7 @@ IOPInstructionEffects IOPCore::wordMergeLoadEffects(
   const IOPAddress address =
     base + signExtendedImmediate(instruction.immediate);
   IOPMemoryReadResult read = readData32(address & ~IOPAddress(3));
+  recordMemoryRead(read, sizeof(IOPWord), MemoryAccessKind::DataLoad);
   if (read.outcome != IOPAccessOutcome::Completed)
   {
     read.virtualAddress = address;
@@ -1086,6 +1184,7 @@ void IOPCore::enterException(
   const IOPExceptionRecord &exception)
 {
   const IOPWord code = exceptionCode(exception.kind);
+  const IOPWord previousStatus = cop0.status;
   enteredException = exception;
   enteredException.inBranchDelaySlot = branch.active;
   cop0.exceptionProgramCounter = branch.active
@@ -1114,6 +1213,13 @@ void IOPCore::enterException(
   delayedResult = {};
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
+  if (exception.kind == IOPException::Interrupt)
+  {
+    recordStepEvent(InterruptDeliveredEvent{
+      instructionAddress, previousStatus, cop0.cause, pc});
+  }
+  recordStepEvent(ExceptionEnteredEvent{
+    cop0.exceptionProgramCounter, pc, cop0.cause});
 }
 
 void IOPCore::commitInstructionEffects(
@@ -1159,8 +1265,7 @@ void IOPCore::commitInstructionEffects(
         write,
         effects.store.byteEnable
       };
-      state = IOPExecutionState::Halted;
-      haltReason = IOPStopReason::StoreFailure;
+      transitionExecution(IOPExecutionState::Halted, IOPStopReason::StoreFailure);
       return;
     }
   }
@@ -1183,8 +1288,7 @@ void IOPCore::commitInstructionEffects(
   }
   if (effects.completion == IOPInstructionCompletion::Halted)
   {
-    state = IOPExecutionState::Halted;
-    haltReason = effects.stopReason;
+    transitionExecution(IOPExecutionState::Halted, effects.stopReason);
     return;
   }
 
@@ -1255,6 +1359,9 @@ void IOPCore::commitInstructionEffects(
         effects.controlFlow.target
       };
       pc = instructionAddress + sizeof(IOPWord);
+      recordStepEvent(BranchScheduledEvent{
+        instructionAddress, effects.controlFlow.target,
+        effects.controlFlow.branchOutcome});
       break;
     case IOPControlFlowEffect::SetProgramCounter:
       pc = effects.controlFlow.target;
@@ -1266,6 +1373,8 @@ void IOPCore::commitInstructionEffects(
   ++retiredInstructionTotal;
   state = IOPExecutionState::Running;
   haltReason = IOPStopReason::None;
+  recordStepEvent(InstructionRetiredEvent{
+    instructionAddress, pc, retiredInstructionTotal, cycles});
 }
 
 IOPAddressClassification IOPCore::classifyAddress(
@@ -1373,24 +1482,32 @@ IOPMemoryWriteResult IOPCore::writeData32(
 IOPMemoryWriteResult IOPCore::writeStore(
   const IOPStoreRequest &request)
 {
+  IOPMemoryWriteResult result;
   switch (request.operation)
   {
     case IOPStoreOperation::Byte:
-      return writeData8(
+      result = writeData8(
         request.virtualAddress,
         static_cast<std::uint8_t>(request.value));
+      break;
     case IOPStoreOperation::Halfword:
-      return writeData16(
+      result = writeData16(
         request.virtualAddress,
         static_cast<std::uint16_t>(request.value));
-    case IOPStoreOperation::Word:
-      return writeData32(request.virtualAddress, request.value);
-    case IOPStoreOperation::MaskedWord:
-      return writeMaskedStore(request);
-    case IOPStoreOperation::None:
       break;
+    case IOPStoreOperation::Word:
+      result = writeData32(request.virtualAddress, request.value);
+      break;
+    case IOPStoreOperation::MaskedWord:
+      result = writeMaskedStore(request);
+      break;
+    case IOPStoreOperation::None:
+      throw std::logic_error("Unsupported IOP store width.");
+    default:
+      throw std::logic_error("Unknown IOP store operation.");
   }
-  throw std::logic_error("Unsupported IOP store width.");
+  recordMemoryStore(request, result);
+  return result;
 }
 
 IOPMemoryWriteResult IOPCore::writeMaskedStore(
