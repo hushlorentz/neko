@@ -1531,7 +1531,7 @@ remain with their owning milestones.
       acknowledgement, halted CPU versus advancing devices, reset while
       active, deterministic repetition, and save/load continuation. Do not
       claim undocumented retail contention or interrupt-pulse timing.
-- [ ] Complete independent block review and optimized AddressSanitizer checks
+- [x] Complete independent block review and optimized AddressSanitizer checks
 
 ### Diagnostics and IOP Conformance
 

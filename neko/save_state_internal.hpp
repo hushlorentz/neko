@@ -16,7 +16,7 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 33;
+constexpr std::uint32_t SAVE_STATE_VERSION = 34;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
@@ -999,12 +999,22 @@ class NekoSaveStateCodec
       const std::vector<std::uint8_t> &state, SaveStateObserver *observer);
 
   private:
+    struct ROMConfiguration
+    {
+      bool present = false;
+      std::uint64_t fingerprint = 0;
+    };
+
     struct IOPConfiguration
     {
-      bool romPresent = false;
-      std::uint64_t romFingerprint = 0;
+      ROMConfiguration rom;
       bool cacheRomSynchronized = true;
     };
+
+    static ROMConfiguration readROMConfiguration(SaveStateReader *reader);
+    static void validateROMConfiguration(
+      const ROMConfiguration &configuration,
+      const std::shared_ptr<const BootROMImage> &rom, const char *cpu);
 
     template<typename Writer>
     static void writeIOPState(Writer *writer, const NekoSystem &system);
@@ -1035,6 +1045,7 @@ class NekoSaveStateCodec
       PipelineListIndices vu1PipelineLists;
       EECore::COP1DividerOccupancy dividerOccupancy;
       std::vector<ScheduledComponentState> schedule;
+      ROMConfiguration eeROMConfiguration;
       IOPConfiguration iopConfiguration;
     };
 

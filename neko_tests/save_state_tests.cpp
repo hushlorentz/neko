@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_33_PREPARED_STATE_SIZE = 39951857;
+    VERSION_34_PREPARED_STATE_SIZE = 39951866;
   constexpr std::uint64_t
-    VERSION_33_PREPARED_STATE_HASH =
-      UINT64_C(0x461276422229e98d);
+    VERSION_34_PREPARED_STATE_HASH =
+      UINT64_C(0x716f5b9833b507a5);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 33 save-state layout is byte-stable")
+TEST_CASE("Version 34 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,121 @@ TEST_CASE("Version 33 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 33);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 34);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_33_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_34_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_33_PREPARED_STATE_HASH);
+    VERSION_34_PREPARED_STATE_HASH);
+}
+
+TEST_CASE("Save-state ROM compatibility preserves independent bus configurations",
+  "[save-state][rom]")
+{
+  std::vector<std::uint8_t> eeBytes(BootROMImage::SIZE, 0);
+  eeBytes[0] = 7;
+  eeBytes[2] = 2;
+  eeBytes[3] = 0x24; // addiu r2, r0, 7
+  std::vector<std::uint8_t> iopBytes(BootROMImage::SIZE, 0);
+  iopBytes[0] = 9;
+  iopBytes[2] = 3;
+  iopBytes[3] = 0x24; // addiu r3, r0, 9
+  for (unsigned installed = 0; installed < 4; ++installed)
+  {
+    CAPTURE(installed);
+    NekoSystem original;
+    NekoSystem restored;
+    if ((installed & 1) != 0)
+    {
+      original.eeBus().installBootROM(eeBytes);
+      original.eeCore().startExecution(0xbfc00000);
+      restored.eeBus().installBootROM(eeBytes);
+      REQUIRE(restored.eeBus().bootROMIdentity() !=
+        original.eeBus().bootROMIdentity());
+    }
+    if ((installed & 2) != 0)
+    {
+      REQUIRE(original.iopBus().installRom(BootROMImage::create(iopBytes)));
+      original.iopCore().startExecution(0xbfc00000);
+      REQUIRE(restored.iopBus().installRom(BootROMImage::create(iopBytes)));
+      REQUIRE(restored.iopBus().romIdentity() != original.iopBus().romIdentity());
+    }
+    original.runMasterCycles(9);
+    const auto state = original.saveState();
+    REQUIRE_NOTHROW(inspectSaveState(state));
+    const auto eeIdentity = restored.eeBus().bootROMIdentity();
+    const auto iopIdentity = restored.iopBus().romIdentity();
+    restored.runMasterCycles(3);
+    restored.loadState(state);
+    REQUIRE(restored.eeBus().bootROMIdentity() == eeIdentity);
+    REQUIRE(restored.iopBus().romIdentity() == iopIdentity);
+    requireStateBytesEqual(restored.saveState(), state);
+    original.runMasterCycles(17);
+    restored.runMasterCycles(17);
+    REQUIRE(restored.eeCore().generalRegister(2).low ==
+      ((installed & 1) != 0 ? 7 : 0));
+    REQUIRE(restored.iopCore().generalRegister(3) ==
+      ((installed & 2) != 0 ? 9 : 0));
+    REQUIRE(restored.eeStateHash() == original.eeStateHash());
+    REQUIRE(restored.iopStateHash() == original.iopStateHash());
+    requireStateBytesEqual(restored.saveState(), original.saveState());
+  }
+}
+
+TEST_CASE("Save-state ROM compatibility rejects EE presence mismatches atomically",
+  "[save-state][rom]")
+{
+  const std::vector<std::uint8_t> bytes(BootROMImage::SIZE, 0);
+  for (bool sourcePresent : {false, true})
+  {
+    CAPTURE(sourcePresent);
+    NekoSystem original;
+    NekoSystem restored;
+    if (sourcePresent)
+    {
+      original.eeBus().installBootROM(bytes);
+    }
+    else
+    {
+      restored.eeBus().installBootROM(bytes);
+    }
+    const auto state = original.saveState();
+    restored.eeBus().write32(0x100, 0xdeadbeef);
+    restored.runMasterCycles(19);
+    const auto before = restored.saveState();
+    const auto eeHash = restored.eeStateHash();
+    const auto iopHash = restored.iopStateHash();
+    REQUIRE_THROWS_AS(restored.loadState(state), std::invalid_argument);
+    requireStateBytesEqual(restored.saveState(), before);
+    REQUIRE(restored.eeStateHash() == eeHash);
+    REQUIRE(restored.iopStateHash() == iopHash);
+  }
+}
+
+TEST_CASE("Save-state ROM metadata rejects malformed and previous-schema states",
+  "[save-state][rom]")
+{
+  NekoSystem system;
+  const auto before = system.saveState();
+  const std::vector<std::pair<std::string, std::uint64_t>> mutations = {
+    {"system.eeBus.romPresent", 2},
+    {"system.eeBus.romFingerprint", 1},
+    {"system.iop.bus.romPresent", 2},
+    {"system.iop.bus.romFingerprint", 1},
+    {"container.version", 33}
+  };
+  for (const auto &mutation : mutations)
+  {
+    CAPTURE(mutation.first);
+    SaveStateMutation invalid(before);
+    invalid.writeScalar(mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(system.loadState(invalid), std::invalid_argument);
+    requireStateBytesEqual(system.saveState(), before);
+  }
 }
 
 TEST_CASE("Horizontal display timing save-state continuation preserves rational phase",

@@ -813,3 +813,29 @@ TEST_CASE("IOP system restores shared BIOS configuration into destination identi
   REQUIRE(original.iopStateHash() == restored.iopStateHash());
   REQUIRE(original.saveState() == restored.saveState());
 }
+
+TEST_CASE("IOP system rejects restore with a mismatched EE BIOS atomically",
+  "[iop][system][save-state][rom]")
+{
+  std::vector<std::uint8_t> bytes(BootROMImage::SIZE, 0);
+  bytes[0] = 0x12;
+  NekoSystem original;
+  original.installBootROM(bytes);
+  const auto state = original.saveState();
+  NekoSystem restored;
+  restored.installBootROM(bytes);
+  bytes[0] = 0x13;
+  restored.eeBus().installBootROM(bytes);
+  instruction(&restored, 0x100, 0xdeadbeef);
+  restored.runMasterCycles(19);
+  REQUIRE(restored.eeBus().read32(EEMemoryMap::BOOT_ROM_BASE) == 0x13);
+  REQUIRE(restored.iopCore().readData32(0xbfc00000).value == 0x12);
+  const auto before = restored.saveState();
+  const auto eeHash = restored.eeStateHash();
+  const auto iopHash = restored.iopStateHash();
+  REQUIRE_THROWS_AS(restored.loadState(state), std::invalid_argument);
+  const bool unchanged = restored.saveState() == before;
+  REQUIRE(unchanged);
+  REQUIRE(restored.eeStateHash() == eeHash);
+  REQUIRE(restored.iopStateHash() == iopHash);
+}

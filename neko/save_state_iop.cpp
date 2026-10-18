@@ -248,14 +248,10 @@ void NekoSaveStateCodec::readIOP(
   {
     auto scope = reader->scope("bus");
     auto &bus = system->iopBusComponent;
-    configuration->romPresent = reader->readFieldBool("romPresent");
+    configuration->rom = readROMConfiguration(reader);
     reader->requireField(
-      configuration->romPresent || configuration->cacheRomSynchronized,
+      configuration->rom.present || configuration->cacheRomSynchronized,
       "IOP cache has a pending ROM replacement without an external image");
-    configuration->romFingerprint = reader->readFieldU64("romFingerprint");
-    reader->requireField(
-      configuration->romPresent || configuration->romFingerprint == 0,
-      "absent IOP ROM contains a fingerprint");
     bus.ram = reader->readFieldByteVector("ram", IOPBus::RAM_SIZE);
     reader->readFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());

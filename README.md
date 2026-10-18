@@ -53,7 +53,9 @@ Byte ranges show their size and FNV-1a hash by default. Add
 the selected range's bytes. Invalid files and arguments return status 2;
 missing fields and states with semantic differences return status 1.
 Inspection does not require external ROM files. Restoring a machine snapshot
-requires matching IOP ROM configuration; ROM bytes are not embedded for the IOP.
+requires matching EE and IOP ROM presence and contents independently; ROM bytes
+are not embedded. Only the current save-state schema is accepted; schema 34
+does not load schema-33 snapshots.
 
 ## Tests
 

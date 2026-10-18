@@ -338,15 +338,12 @@ void NekoSaveStateCodec::load(
   validateSystem(
     container.payload(),
     transaction.parsed);
+  validateROMConfiguration(
+    transaction.decodedTopology.eeROMConfiguration,
+    system->eeBusComponent.bootROMIdentity(), "EE");
   const auto &iopConfiguration = transaction.decodedTopology.iopConfiguration;
   const auto &iopROM = system->iopBusComponent.romIdentity();
-  require(
-    iopConfiguration.romPresent == (iopROM != nullptr),
-    "IOP external ROM presence is incompatible");
-  require(
-    iopConfiguration.romFingerprint ==
-      (iopROM != nullptr ? iopROM->fingerprint() : 0),
-    "IOP external ROM fingerprint is incompatible");
+  validateROMConfiguration(iopConfiguration.rom, iopROM, "IOP");
   transaction.parsed.iopCoreComponent.cacheRomIdentity =
     iopConfiguration.cacheRomSynchronized ? iopROM : nullptr;
 
@@ -356,6 +353,28 @@ void NekoSaveStateCodec::load(
       transaction.decodedTopology,
       system);
   commitSystem(system, &transaction);
+}
+
+NekoSaveStateCodec::ROMConfiguration
+NekoSaveStateCodec::readROMConfiguration(SaveStateReader *reader)
+{
+  ROMConfiguration configuration;
+  configuration.present = reader->readFieldBool("romPresent");
+  configuration.fingerprint = reader->readFieldU64("romFingerprint");
+  reader->requireField(
+    configuration.present || configuration.fingerprint == 0,
+    "absent ROM contains a fingerprint");
+  return configuration;
+}
+
+void NekoSaveStateCodec::validateROMConfiguration(
+  const ROMConfiguration &configuration,
+  const std::shared_ptr<const BootROMImage> &rom, const char *cpu)
+{
+  require(configuration.present == (rom != nullptr),
+    std::string(cpu) + " external ROM presence is incompatible");
+  require(configuration.fingerprint == (rom != nullptr ? rom->fingerprint() : 0),
+    std::string(cpu) + " external ROM fingerprint is incompatible");
 }
 
 void NekoSaveStateCodec::inspect(
@@ -409,6 +428,10 @@ void NekoSaveStateCodec::writeSystem(
     writer->writeFieldByteVector(
       "mainMemory",
       system.eeBusComponent.mainMemory);
+    const auto &rom = system.eeBusComponent.bootROMIdentity();
+    writer->writeFieldBool("romPresent", rom != nullptr);
+    writer->writeFieldU64(
+      "romFingerprint", rom != nullptr ? rom->fingerprint() : 0);
   }
   {
     auto component = writer->scope("vu0");
@@ -509,6 +532,7 @@ void NekoSaveStateCodec::readSystem(
       reader->readFieldByteVector(
         "mainMemory",
         EEMemoryMap::MAIN_MEMORY_SIZE);
+    topology->eeROMConfiguration = readROMConfiguration(reader);
   }
   {
     auto component = reader->scope("vu0");
