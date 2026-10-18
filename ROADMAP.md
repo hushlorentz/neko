@@ -1544,7 +1544,7 @@ remain with their owning milestones.
       publication, preserving device/CPU order and distinct same-cycle changes.
 - [x] Prove tracing observational across disabled/enabled collection, reset,
       stop/start/clear, and save/load; retain existing EE-only trace encodings.
-- [ ] Establish shared host-authored semantic fixtures using the existing IOP
+- [x] Establish shared host-authored semantic fixtures using the existing IOP
       runner; cover decode, arithmetic, control flow, loads/stores, and COP0
       without a BIOS, IRX services, or an external compiler as the oracle.
 - [ ] Add whole-system exception/INTC/timer programs with reset, deterministic

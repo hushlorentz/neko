@@ -283,6 +283,8 @@ add_executable(neko_tests
     neko_tests/iop/iop_trace_lifecycle_tests.cpp
     neko_tests/iop/iop_interrupt_controller_tests.cpp
     neko_tests/iop/iop_program_runner_tests.cpp
+    neko_tests/iop/iop_semantic_fixtures.cpp
+    neko_tests/iop/iop_semantic_tests.cpp
     neko_tests/iop/iop_timers_tests.cpp
     neko_tests/iop/iop_timer_timing_tests.cpp
     neko_tests/iop/iop_save_state_tests.cpp
