@@ -423,9 +423,10 @@ IOPCore::IOPCore()
   reset();
 }
 
-void IOPCore::enableObservations()
+void IOPCore::enableObservations(IOPObservationOrder *order)
 {
   clearObservations();
+  observationOrder = order;
   observationsEnabled = true;
 }
 
@@ -433,6 +434,7 @@ void IOPCore::disableObservations()
 {
   clearObservations();
   observationsEnabled = false;
+  observationOrder = nullptr;
 }
 
 void IOPCore::clearObservations()
@@ -450,7 +452,10 @@ void IOPCore::recordStepEvent(const StepEvent &event)
   {
     throw std::logic_error("IOP step observation capacity exceeded.");
   }
-  stepEvents[stepEventCount++] = event;
+  stepEvents[stepEventCount] = event;
+  stepEvents[stepEventCount].sequence =
+    observationOrder != nullptr ? observationOrder->next++ : stepEventCount;
+  ++stepEventCount;
 }
 
 void IOPCore::recordMemoryRead(

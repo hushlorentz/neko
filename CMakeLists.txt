@@ -70,6 +70,7 @@ add_library(neko_core
     neko/ee/vif1_dmac_channel.cpp
     neko/fp_register.cpp
     neko/neko_system.cpp
+    neko/neko_system_iop_trace.cpp
     neko/regression_trace.cpp
     neko/save_state.cpp
     neko/save_state_ee.cpp
@@ -278,6 +279,7 @@ add_executable(neko_tests
     neko_tests/iop/iop_core_tests.cpp
     neko_tests/iop/iop_instruction_tests.cpp
     neko_tests/iop/iop_observation_tests.cpp
+    neko_tests/iop/iop_trace_tests.cpp
     neko_tests/iop/iop_interrupt_controller_tests.cpp
     neko_tests/iop/iop_program_runner_tests.cpp
     neko_tests/iop/iop_timers_tests.cpp

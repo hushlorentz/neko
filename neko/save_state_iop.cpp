@@ -534,15 +534,32 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.ram.swap(source->iopBusComponent.ram);
   destination->iopBusComponent.scratchpad = source->iopBusComponent.scratchpad;
   const bool observationsEnabled = destination->iopCoreComponent.observationsEnabled;
+  auto *const observationOrder = destination->iopCoreComponent.observationOrder;
   destination->iopCoreComponent = source->iopCoreComponent;
   destination->iopCoreComponent.bus = &destination->iopBusComponent;
   destination->iopCoreComponent.observationsEnabled = observationsEnabled;
+  destination->iopCoreComponent.observationOrder = observationOrder;
   destination->iopCoreComponent.clearObservations();
   destination->iopBusComponent.interruptController =
     &destination->iopInterruptControllerComponent;
   destination->iopBusComponent.timers = &destination->iopTimersComponent;
+  const bool interruptObservationsEnabled =
+    destination->iopInterruptControllerComponent.observationsEnabled;
+  const bool timerObservationsEnabled =
+    destination->iopTimersComponent.observationsEnabled;
+  auto *const interruptObservationOrder =
+    destination->iopInterruptControllerComponent.observationOrder;
+  auto *const timerObservationOrder = destination->iopTimersComponent.observationOrder;
   destination->iopInterruptControllerComponent =
     source->iopInterruptControllerComponent;
+  destination->iopInterruptControllerComponent.observationsEnabled =
+    interruptObservationsEnabled;
+  destination->iopInterruptControllerComponent.observationOrder =
+    interruptObservationOrder;
+  destination->iopInterruptControllerComponent.clearObservations();
   destination->iopTimersComponent = source->iopTimersComponent;
+  destination->iopTimersComponent.observationsEnabled = timerObservationsEnabled;
+  destination->iopTimersComponent.observationOrder = timerObservationOrder;
+  destination->iopTimersComponent.clearObservations();
   destination->iopTimerTimingComponent = source->iopTimerTimingComponent;
 }

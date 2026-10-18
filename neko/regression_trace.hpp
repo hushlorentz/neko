@@ -380,7 +380,10 @@ struct NekoTraceEvent
 //   snapshots, targets (before in bits 31:0, after in bits 63:32). Snapshot mode
 //   is raw mode, not the guest read value with its synthesized request-idle bit.
 // Producers map private types to these public encodings; NekoSystem supplies
-// the master-cycle timestamp.
+// the post-clock master-cycle timestamp and preserves IOP mutation order.
+// IOP records follow existing non-display cycle records and precede the final
+// PresentationBoundary marker. Collection covers scheduled cycles, not direct
+// host setup or execution-control calls between cycles.
 
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(

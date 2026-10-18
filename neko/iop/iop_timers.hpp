@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "iop_interrupt_controller.hpp"
+#include "iop_observation.hpp"
 #include "iop_types.hpp"
 
 namespace IOPTimerMode
@@ -125,8 +126,56 @@ class IOPTimers final
     static const IOPTimerCapabilities &capabilities(std::size_t index);
 
   private:
+    friend class NekoSystem;
     friend class NekoSaveStateCodec;
     friend struct IOPTimersTestAccess;
+    friend struct IOPDeviceObservationTestAccess;
+
+    enum class Register : std::uint8_t
+    {
+      None,
+      Count,
+      Mode,
+      Target
+    };
+
+    enum EventFlag : std::uint8_t
+    {
+      TargetReached = 1 << 0,
+      OverflowReached = 1 << 1,
+      InterruptRequested = 1 << 2,
+      PulseReleased = 1 << 3,
+      GateChanged = 1 << 4,
+      ModeAcknowledged = 1 << 5,
+      RegisterWritten = 1 << 6
+    };
+
+    struct Observation
+    {
+      std::size_t index = 0;
+      IOPTimerCounterState before;
+      IOPTimerCounterState after;
+      IOPTimerTimingSample sample;
+      IOPTimerGateLevels gatesBefore;
+      Register registerKind = Register::None;
+      std::uint8_t flags = 0;
+      std::size_t sequence = 0;
+    };
+
+    // Six older pulse releases, six counter/gate events, CPU fetch + data MMIO.
+    static constexpr std::size_t OBSERVATION_CAPACITY = 2 * COUNTER_COUNT + 2;
+    std::array<Observation, OBSERVATION_CAPACITY> observations = {};
+    std::size_t observationCount = 0;
+    bool observationsEnabled = false;
+    IOPObservationOrder *observationOrder = nullptr;
+
+    void enableObservations(IOPObservationOrder *order = nullptr);
+    void disableObservations();
+    void clearObservations();
+    void recordObservation(const Observation &observation);
+    void recordRegisterAccess(
+      std::size_t index, const IOPTimerCounterState &before,
+      Register registerKind, EventFlag flag);
 
     std::array<IOPTimerCounterState, COUNTER_COUNT> counters = {};
     IOPTimerGateLevels blanking;

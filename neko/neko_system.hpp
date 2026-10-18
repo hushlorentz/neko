@@ -230,6 +230,12 @@ class NekoSystem
     void publishCycleTrace(
       std::uint64_t cycle,
       const CycleObservationSnapshot &beforeCycle);
+    void publishIOPTrace(std::uint64_t cycle);
+    void publishIOPCPUTrace(std::uint64_t cycle, const IOPCore::StepEvent &event);
+    void publishIOPTimerTrace(
+      std::uint64_t cycle, const IOPTimers::Observation &event);
+    void publishIOPInterruptTrace(
+      std::uint64_t cycle, const IOPInterruptController::Observation &event);
     static NekoEETraceMemory::AccessKind
       traceMemoryAccessKind(EECore::MemoryAccessKind kind);
     static NekoEETraceMemory::TranslationOutcome

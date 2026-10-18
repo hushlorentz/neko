@@ -235,23 +235,75 @@ namespace
 
 void IOPTimers::reset()
 {
+  clearObservations();
   counters = {};
   blanking = {};
 }
 
+void IOPTimers::enableObservations(IOPObservationOrder *order)
+{
+  clearObservations();
+  observationOrder = order;
+  observationsEnabled = true;
+}
+
+void IOPTimers::disableObservations()
+{
+  clearObservations();
+  observationsEnabled = false;
+  observationOrder = nullptr;
+}
+
+void IOPTimers::clearObservations()
+{
+  observationCount = 0;
+}
+
+void IOPTimers::recordObservation(const Observation &observation)
+{
+  if (!observationsEnabled)
+  {
+    return;
+  }
+  if (observationCount >= observations.size())
+  {
+    throw std::logic_error("IOP timer observation capacity exceeded.");
+  }
+  observations[observationCount] = observation;
+  observations[observationCount].sequence =
+    observationOrder != nullptr ? observationOrder->next++ : observationCount;
+  ++observationCount;
+}
+
+void IOPTimers::recordRegisterAccess(
+  std::size_t index, const IOPTimerCounterState &before,
+  Register registerKind, EventFlag flag)
+{
+  recordObservation({
+    index, before, counters[index], {false, false, blanking}, blanking,
+    registerKind, flag});
+}
+
 void IOPTimers::writeCount(std::size_t index, IOPWord value)
 {
-  counters.at(index).count = value & counterMask(capabilities(index));
+  auto &state = counters.at(index);
+  const auto before = state;
+  state.count = value & counterMask(capabilities(index));
+  recordRegisterAccess(index, before, Register::Count, RegisterWritten);
 }
 
 void IOPTimers::writeTarget(std::size_t index, IOPWord value)
 {
-  counters.at(index).target = value & counterMask(capabilities(index));
+  auto &state = counters.at(index);
+  const auto before = state;
+  state.target = value & counterMask(capabilities(index));
+  recordRegisterAccess(index, before, Register::Target, RegisterWritten);
 }
 
 void IOPTimers::writeMode(std::size_t index, IOPWord value)
 {
   auto &state = counters.at(index);
+  const auto before = state;
   const IOPWord mode =
     (value & IOPTimerMode::WRITABLE_MASK) | IOPTimerMode::REQUEST_IDLE;
   const auto selected = decodeConfiguration(capabilities(index), mode);
@@ -263,16 +315,19 @@ void IOPTimers::writeMode(std::size_t index, IOPWord value)
     selected.gateMode == IOPTimerGateMode::StartOnBlankEnd;
   state.oneShotConsumed = false;
   state.pulseReleasePending = false;
+  recordRegisterAccess(index, before, Register::Mode, RegisterWritten);
 }
 
 IOPWord IOPTimers::readMode(std::size_t index)
 {
   auto &state = counters.at(index);
+  const auto before = state;
   const IOPWord value = state.mode;
   state.mode =
     (state.mode & ~IOPTimerMode::EVENT_MASK) | IOPTimerMode::REQUEST_IDLE;
   state.oneShotConsumed = false;
   state.pulseReleasePending = false;
+  recordRegisterAccess(index, before, Register::Mode, ModeAcknowledged);
   return value;
 }
 
@@ -282,29 +337,51 @@ IOPTimers::InterruptRequests IOPTimers::advance(
   // Release only older requests, before this sample can create another one.
   if (sample.systemClockPulse)
   {
-    for (auto &state : counters)
+    for (std::size_t index = 0; index < COUNTER_COUNT; ++index)
     {
+      auto &state = counters[index];
+      const auto before = state;
       releasePulse(state);
+      if (before.pulseReleasePending)
+      {
+        recordObservation({
+          index, before, state, sample, blanking, Register::None, PulseReleased});
+      }
     }
   }
   InterruptRequests requests;
   for (std::size_t index = 0; index < COUNTER_COUNT; ++index)
   {
     auto &state = counters[index];
+    const auto before = state;
     const auto &capability = timerCapabilities[index];
     const auto selected = decodeConfiguration(capability, state.mode);
     const bool currentBlank = gateLevel(capability.gate, sample.gates);
+    const bool gateChanged =
+      gateLevel(capability.gate, blanking) != currentBlank;
     applyGateTransition(state, selected.gateMode,
       gateLevel(capability.gate, blanking), currentBlank);
-    if (!countingEnabled(state, selected.gateMode, currentBlank) ||
-      !sourcePulse(selected.source, sample, blanking))
+    IOPWord events = 0;
+    bool interruptRequested = false;
+    if (countingEnabled(state, selected.gateMode, currentBlank) &&
+        sourcePulse(selected.source, sample, blanking))
     {
-      continue;
+      events = advanceCounter(state, capability, selected.divisor);
+      interruptRequested = requestInterrupt(state, events);
+      if (interruptRequested)
+      {
+        requests.sources[requests.count++] = capability.interruptSource;
+      }
     }
-    const IOPWord events = advanceCounter(state, capability, selected.divisor);
-    if (requestInterrupt(state, events))
+    if (events != 0 || gateChanged)
     {
-      requests.sources[requests.count++] = capability.interruptSource;
+      const auto flags = static_cast<std::uint8_t>(
+        ((events & IOPTimerMode::TARGET_REACHED) != 0 ? TargetReached : 0) |
+        ((events & IOPTimerMode::OVERFLOW_REACHED) != 0 ? OverflowReached : 0) |
+        (interruptRequested ? InterruptRequested : 0) |
+        (gateChanged ? GateChanged : 0));
+      recordObservation({
+        index, before, state, sample, blanking, Register::None, flags});
     }
   }
   blanking = sample.gates;

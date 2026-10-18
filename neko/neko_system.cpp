@@ -846,6 +846,27 @@ NekoSystem::captureCycleObservation() const
 
 void NekoSystem::clockMasterCycle()
 {
+  // Disarm even when a device, CPU invariant, or trace allocation throws.
+  struct ObservationScope
+  {
+    IOPCore &core;
+    IOPTimers &timers;
+    IOPInterruptController &interrupts;
+    IOPObservationOrder order;
+    ~ObservationScope()
+    {
+      core.disableObservations();
+      timers.disableObservations();
+      interrupts.disableObservations();
+    }
+  } observationScope{iopCoreComponent, iopTimersComponent,
+      iopInterruptControllerComponent};
+  if (collectingTrace)
+  {
+    iopCoreComponent.enableObservations(&observationScope.order);
+    iopTimersComponent.enableObservations(&observationScope.order);
+    iopInterruptControllerComponent.enableObservations(&observationScope.order);
+  }
   const bool iopClockPulse =
     masterClock.currentCycle() % PS2Clock::IOP_CLOCK_PERIOD ==
       PS2Clock::IOP_CLOCK_PHASE;
@@ -1279,6 +1300,7 @@ void NekoSystem::publishCycleTrace(
       interruptControllerComponent.status(),
       interruptControllerComponent.mask());
   }
+  publishIOPTrace(cycle);
   if (gsDisplayComponent.presentationBoundaryCount() !=
       beforeCycle.presentationBoundary)
   {

@@ -1540,7 +1540,7 @@ remain with their owning milestones.
 - [x] Add/review fixed-capacity CPU instruction, retirement, branch, memory,
       exception, interrupt, and execution-state observations, including failed
       accesses and delayed-result/delay-slot boundaries.
-- [ ] Add/review timer and INTC observations with deterministic master-cycle
+- [x] Add/review timer and INTC observations with deterministic master-cycle
       publication, preserving device/CPU order and distinct same-cycle changes.
 - [ ] Prove tracing observational across disabled/enabled collection, reset,
       stop/start/clear, and save/load; retain existing EE-only trace encodings.

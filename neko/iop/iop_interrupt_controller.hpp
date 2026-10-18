@@ -1,9 +1,12 @@
 #ifndef IOP_INTERRUPT_CONTROLLER_HPP
 #define IOP_INTERRUPT_CONTROLLER_HPP
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "iop_types.hpp"
+#include "iop_observation.hpp"
 
 enum class IOPInterruptSource : std::uint8_t
 {
@@ -55,7 +58,31 @@ class IOPInterruptController final
     bool interruptPending() const;
 
   private:
+    friend class NekoSystem;
     friend class NekoSaveStateCodec;
+    friend struct IOPDeviceObservationTestAccess;
+
+    struct Observation
+    {
+      IOPWord status = 0;
+      IOPWord mask = 0;
+      IOPWord control = 0;
+      std::size_t sequence = 0;
+    };
+
+    // At most six timer assertions followed by CPU fetch + data MMIO.
+    static constexpr std::size_t OBSERVATION_CAPACITY = 8;
+    std::array<Observation, OBSERVATION_CAPACITY> observations = {};
+    std::size_t observationCount = 0;
+    bool observationsEnabled = false;
+    IOPObservationOrder *observationOrder = nullptr;
+
+    void enableObservations(IOPObservationOrder *order = nullptr);
+    void disableObservations();
+    void clearObservations();
+    Observation snapshot() const;
+    void recordTransition(const Observation &before);
+
     IOPWord statusRegister = 0;
     IOPWord maskRegister = 0;
     IOPWord controlRegister = 0;
