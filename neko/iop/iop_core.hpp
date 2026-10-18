@@ -359,6 +359,8 @@ class IOPCore final
       const struct IOPInstruction &instruction,
       IOPWord target) const;
     void commitCOP0Write(const IOPCOP0WriteRequest &request);
+    // Called on every retirement, including non-HI/LO instructions.
+    void commitHILOEffects(const IOPInstructionEffects &effects);
     void synchronizeInterruptInputs();
     bool interruptDeliverable() const;
     void enterException(

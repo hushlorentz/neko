@@ -1552,7 +1552,7 @@ remain with their owning milestones.
 - [x] Run focused tests followed by the complete optimized repository check.
       Compare repeated-run instruction totals, cycle totals where modeled,
       traces, hashes, and byte-identical save-state continuation.
-- [ ] Complete the bounded architecture and maintainability review. Inspect
+- [x] Complete the bounded architecture and maintainability review. Inspect
       CPU/bus/device ownership, decode/exception policy, and scheduler boundaries.
 - [ ] Complete an independent final review, resolve every concrete finding,
       and run optimized AddressSanitizer and native macOS leak checks.

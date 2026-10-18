@@ -1154,6 +1154,48 @@ void IOPCore::commitCOP0Write(const IOPCOP0WriteRequest &request)
   }
 }
 
+void IOPCore::commitHILOEffects(const IOPInstructionEffects &effects)
+{
+  if (effects.hi.kind == IOPWriteEffect::Write)
+  {
+    hiRegister = effects.hi.value;
+  }
+  if (effects.lo.kind == IOPWriteEffect::Write)
+  {
+    loRegister = effects.lo.value;
+  }
+  if (hiLoState.hiWriteHazardInstructions != 0)
+  {
+    --hiLoState.hiWriteHazardInstructions;
+  }
+  if (hiLoState.loWriteHazardInstructions != 0)
+  {
+    --hiLoState.loWriteHazardInstructions;
+  }
+  switch (effects.hiLoAccess)
+  {
+    case IOPHILOAccessEffect::ReadHI:
+      hiLoState.hiWriteHazardInstructions = 2;
+      hiLoState.unreadMultiplyDivideHI = false;
+      break;
+    case IOPHILOAccessEffect::ReadLO:
+      hiLoState.loWriteHazardInstructions = 2;
+      hiLoState.unreadMultiplyDivideLO = false;
+      break;
+    case IOPHILOAccessEffect::WritePair:
+      hiLoState.unreadMultiplyDivideHI = true;
+      hiLoState.unreadMultiplyDivideLO = true;
+      break;
+    case IOPHILOAccessEffect::WriteHI:
+    case IOPHILOAccessEffect::WriteLO:
+      hiLoState.unreadMultiplyDivideHI = false;
+      hiLoState.unreadMultiplyDivideLO = false;
+      break;
+    case IOPHILOAccessEffect::None:
+      break;
+  }
+}
+
 void IOPCore::setInterruptInput(IOPInterruptInput input, bool asserted)
 {
   const std::uint8_t index = static_cast<std::uint8_t>(input);
@@ -1305,44 +1347,7 @@ void IOPCore::commitInstructionEffects(
   }
   commitCOP0Write(effects.cop0Write);
   delayedResult = effects.delayedResult;
-  if (effects.hi.kind == IOPWriteEffect::Write)
-  {
-    hiRegister = effects.hi.value;
-  }
-  if (effects.lo.kind == IOPWriteEffect::Write)
-  {
-    loRegister = effects.lo.value;
-  }
-  if (hiLoState.hiWriteHazardInstructions != 0)
-  {
-    --hiLoState.hiWriteHazardInstructions;
-  }
-  if (hiLoState.loWriteHazardInstructions != 0)
-  {
-    --hiLoState.loWriteHazardInstructions;
-  }
-  switch (effects.hiLoAccess)
-  {
-    case IOPHILOAccessEffect::ReadHI:
-      hiLoState.hiWriteHazardInstructions = 2;
-      hiLoState.unreadMultiplyDivideHI = false;
-      break;
-    case IOPHILOAccessEffect::ReadLO:
-      hiLoState.loWriteHazardInstructions = 2;
-      hiLoState.unreadMultiplyDivideLO = false;
-      break;
-    case IOPHILOAccessEffect::WritePair:
-      hiLoState.unreadMultiplyDivideHI = true;
-      hiLoState.unreadMultiplyDivideLO = true;
-      break;
-    case IOPHILOAccessEffect::WriteHI:
-    case IOPHILOAccessEffect::WriteLO:
-      hiLoState.unreadMultiplyDivideHI = false;
-      hiLoState.unreadMultiplyDivideLO = false;
-      break;
-    case IOPHILOAccessEffect::None:
-      break;
-  }
+  commitHILOEffects(effects);
 
   switch (effects.controlFlow.kind)
   {
