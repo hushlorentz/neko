@@ -18,7 +18,10 @@ enum class NekoTraceSubsystem : std::uint8_t
   InterruptController,
   Display,
   Input,
-  EE
+  EE,
+  IOP = 11,
+  IOPTimers = 12,
+  IOPInterruptController = 13
 };
 
 enum class NekoTraceEventType : std::uint8_t
@@ -38,8 +41,138 @@ enum class NekoTraceEventType : std::uint8_t
   COP1ResourceInterlock,
   COP1DividerHazard,
   COP1StageTransition,
-  COP1Retired
+  COP1Retired,
+  InstructionRetired = 16,
+  TimerEvent = 17
 };
+
+namespace NekoIOPTraceInstruction
+{
+  constexpr std::uint64_t DELAY_SLOT = UINT64_C(1);
+}
+
+namespace NekoIOPTraceState
+{
+  enum class Execution : std::uint8_t
+  {
+    Halted = 0,
+    Running = 1
+  };
+
+  enum class StopReason : std::uint8_t
+  {
+    None = 0,
+    HostHalt = 1,
+    UndefinedOperation = 2,
+    ExecutionException = 3,
+    StoreFailure = 4
+  };
+}
+
+namespace NekoIOPTraceMemory
+{
+  constexpr std::uint64_t WIDTH_MASK = UINT64_C(0xff);
+  constexpr std::uint64_t WRITE = UINT64_C(1) << 8;
+  constexpr std::uint64_t SUCCEEDED = UINT64_C(1) << 9;
+  constexpr std::uint8_t ACCESS_KIND_SHIFT = 10;
+  constexpr std::uint64_t ACCESS_KIND_MASK =
+    UINT64_C(0x3) << ACCESS_KIND_SHIFT;
+  constexpr std::uint8_t OUTCOME_SHIFT = 12;
+  constexpr std::uint64_t OUTCOME_MASK =
+    UINT64_C(0x7) << OUTCOME_SHIFT;
+  constexpr std::uint8_t CACHE_ROUTE_SHIFT = 15;
+  constexpr std::uint64_t CACHE_ROUTE_MASK =
+    UINT64_C(0x3) << CACHE_ROUTE_SHIFT;
+  constexpr std::uint64_t PHYSICAL_ADDRESS_VALID = UINT64_C(1) << 17;
+  constexpr std::uint8_t BYTE_ENABLE_SHIFT = 18;
+  constexpr std::uint64_t BYTE_ENABLE_MASK =
+    UINT64_C(0xf) << BYTE_ENABLE_SHIFT;
+  constexpr std::uint8_t PHYSICAL_ADDRESS_SHIFT = 32;
+
+  enum class AccessKind : std::uint8_t
+  {
+    InstructionFetch = 0,
+    DataLoad = 1,
+    DataStore = 2
+  };
+
+  enum class Outcome : std::uint8_t
+  {
+    Completed = 0,
+    ProtectionFailure = 1,
+    Misaligned = 2,
+    ReadOnly = 3,
+    Unmapped = 4
+  };
+
+  enum class CacheRoute : std::uint8_t
+  {
+    None = 0,
+    Cached = 1,
+    Uncached = 2
+  };
+
+  struct Metadata
+  {
+    std::uint32_t physicalAddress = 0;
+    std::uint8_t width = 0;
+    AccessKind accessKind = AccessKind::InstructionFetch;
+    Outcome outcome = Outcome::Unmapped;
+    CacheRoute cacheRoute = CacheRoute::None;
+    bool physicalAddressValid = false;
+    // Byte positions within the containing word; encoder clears these for reads.
+    std::uint8_t byteEnable = 0;
+  };
+}
+
+namespace NekoIOPTraceTimer
+{
+  constexpr std::uint64_t COUNT_MASK = UINT64_C(0xffffffff);
+  constexpr std::uint8_t MODE_SHIFT = 32;
+  constexpr std::uint64_t MODE_MASK = UINT64_C(0xffff) << MODE_SHIFT;
+  constexpr std::uint8_t PRESCALER_SHIFT = 48;
+  constexpr std::uint64_t PRESCALER_MASK =
+    UINT64_C(0xff) << PRESCALER_SHIFT;
+  constexpr std::uint64_t GATE_WAITING = UINT64_C(1) << 56;
+  constexpr std::uint64_t ONE_SHOT_CONSUMED = UINT64_C(1) << 57;
+  constexpr std::uint64_t PULSE_RELEASE_PENDING = UINT64_C(1) << 58;
+
+  constexpr std::uint64_t INDEX_MASK = UINT64_C(0xff);
+  constexpr std::uint64_t TARGET_REACHED = UINT64_C(1) << 8;
+  constexpr std::uint64_t OVERFLOW_REACHED = UINT64_C(1) << 9;
+  constexpr std::uint64_t INTERRUPT_REQUESTED = UINT64_C(1) << 10;
+  constexpr std::uint64_t PULSE_RELEASED = UINT64_C(1) << 11;
+  constexpr std::uint64_t GATE_CHANGED = UINT64_C(1) << 12;
+  constexpr std::uint64_t MODE_ACKNOWLEDGED = UINT64_C(1) << 13;
+  constexpr std::uint64_t REGISTER_WRITTEN = UINT64_C(1) << 14;
+  constexpr std::uint64_t SYSTEM_PULSE = UINT64_C(1) << 16;
+  constexpr std::uint64_t PIXEL_PULSE = UINT64_C(1) << 17;
+  constexpr std::uint64_t HBLANK_BEFORE = UINT64_C(1) << 18;
+  constexpr std::uint64_t HBLANK_AFTER = UINT64_C(1) << 19;
+  constexpr std::uint64_t VBLANK_BEFORE = UINT64_C(1) << 20;
+  constexpr std::uint64_t VBLANK_AFTER = UINT64_C(1) << 21;
+  constexpr std::uint8_t REGISTER_SHIFT = 22;
+  constexpr std::uint64_t REGISTER_MASK = UINT64_C(0x3) << REGISTER_SHIFT;
+
+  enum class Register : std::uint8_t
+  {
+    None = 0,
+    Count = 1,
+    Mode = 2,
+    Target = 3
+  };
+
+  struct CounterSnapshot
+  {
+    std::uint32_t count = 0;
+    std::uint16_t mode = 0;
+    // Largest supported divisor is 256, so its remainder fits in eight bits.
+    std::uint8_t prescalerRemainder = 0;
+    bool gateWaiting = false;
+    bool oneShotConsumed = false;
+    bool pulseReleasePending = false;
+  };
+}
 
 namespace NekoEETraceBranch
 {
@@ -230,10 +363,32 @@ struct NekoTraceEvent
   std::uint64_t value3 = 0;
 };
 
+// IOP payloads (value0, value1, value2, value3). Producers zero currently
+// unassigned words/bits; consumers ignore them to permit future extensions.
+// InstructionIssued: instruction PC, raw opcode, reserved, instruction flags.
+// InstructionRetired: instruction PC, next PC, retired total, IOP cycle total.
+// BranchScheduled: branch PC, selected target, taken (bit 0), reserved.
+// MemoryAccess: virtual address, raw transferred value, reserved, memory metadata.
+//   Merge accesses use the aligned containing word and actual store byte enables.
+//   Failed reads carry zero value; failed stores retain the attempted value.
+// ExceptionEntered: architectural ExcCode, EPC, selected vector, committed Cause.
+// InterruptDelivered: interrupted PC, pre-entry Status, committed Cause, vector.
+// StateChanged: old execution state, new execution state, stop reason, current PC.
+// IOPInterruptController/InterruptChanged: I_STAT, I_MASK, I_CTRL, aggregate pending.
+// IOPTimers/TimerEvent: index/event/input/register metadata, before/after counter
+//   snapshots, targets (before in bits 31:0, after in bits 63:32). Snapshot mode
+//   is raw mode, not the guest read value with its synthesized request-idle bit.
+// Producers map private types to these public encodings; NekoSystem supplies
+// the master-cycle timestamp.
+
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(
   const std::vector<NekoTraceEvent> &events);
 std::uint64_t nekoPackEEMemoryTraceMetadata(
   const NekoEETraceMemory::Metadata &metadata);
+std::uint64_t nekoPackIOPMemoryTraceMetadata(
+  const NekoIOPTraceMemory::Metadata &metadata);
+std::uint64_t nekoPackIOPTimerTraceSnapshot(
+  const NekoIOPTraceTimer::CounterSnapshot &snapshot);
 
 #endif

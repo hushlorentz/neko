@@ -1535,15 +1535,20 @@ remain with their owning milestones.
 
 ### Diagnostics and IOP Conformance
 
-- [ ] Add structured IOP instruction, memory, exception, interrupt, timer, and
-      state-transition trace events through the existing stable trace
-      transport. Keep tracing observational and allocation-free on execution
-      hot paths.
-- [ ] Add independently authored semantic programs covering decode, arithmetic,
-      control flow, loads/stores, COP0, exceptions, INTC delivery, timers,
-      reset, deterministic repetition, and save-state continuation. Use a
-      maintained host fixture boundary; do not make PS2 BIOS progress or IRX
-      kernel services the conformance oracle.
+- [x] Define/test append-only IOP trace identities and CPU, memory, timer, and
+      INTC payload encodings through the existing stable transport.
+- [ ] Add/review fixed-capacity CPU instruction, retirement, branch, memory,
+      exception, interrupt, and execution-state observations, including failed
+      accesses and delayed-result/delay-slot boundaries.
+- [ ] Add/review timer and INTC observations with deterministic master-cycle
+      publication, preserving device/CPU order and distinct same-cycle changes.
+- [ ] Prove tracing observational across disabled/enabled collection, reset,
+      stop/start/clear, and save/load; retain existing EE-only trace encodings.
+- [ ] Establish shared host-authored semantic fixtures using the existing IOP
+      runner; cover decode, arithmetic, control flow, loads/stores, and COP0
+      without a BIOS, IRX services, or an external compiler as the oracle.
+- [ ] Add whole-system exception/INTC/timer programs with reset, deterministic
+      repetition, and mid-execution save-state continuation.
 - [ ] Run focused tests followed by the complete optimized repository check.
       Compare repeated-run instruction totals, cycle totals where modeled,
       traces, hashes, and byte-identical save-state continuation.

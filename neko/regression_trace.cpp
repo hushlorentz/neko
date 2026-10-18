@@ -67,6 +67,40 @@ std::uint64_t nekoPackEEMemoryTraceMetadata(
       PHYSICAL_ADDRESS_SHIFT);
 }
 
+std::uint64_t nekoPackIOPMemoryTraceMetadata(
+  const NekoIOPTraceMemory::Metadata &metadata)
+{
+  using namespace NekoIOPTraceMemory;
+  return
+    metadata.width |
+    (metadata.accessKind == AccessKind::DataStore ? WRITE : 0) |
+    (metadata.outcome == Outcome::Completed ? SUCCEEDED : 0) |
+    (static_cast<std::uint64_t>(metadata.accessKind) << ACCESS_KIND_SHIFT) |
+    (static_cast<std::uint64_t>(metadata.outcome) << OUTCOME_SHIFT) |
+    (static_cast<std::uint64_t>(metadata.cacheRoute) << CACHE_ROUTE_SHIFT) |
+    (metadata.physicalAddressValid ? PHYSICAL_ADDRESS_VALID : 0) |
+    (metadata.accessKind == AccessKind::DataStore
+      ? static_cast<std::uint64_t>(metadata.byteEnable & 0xf) << BYTE_ENABLE_SHIFT
+      : 0) |
+    (metadata.physicalAddressValid
+      ? static_cast<std::uint64_t>(metadata.physicalAddress) <<
+          PHYSICAL_ADDRESS_SHIFT
+      : 0);
+}
+
+std::uint64_t nekoPackIOPTimerTraceSnapshot(
+  const NekoIOPTraceTimer::CounterSnapshot &snapshot)
+{
+  using namespace NekoIOPTraceTimer;
+  return
+    snapshot.count |
+    (static_cast<std::uint64_t>(snapshot.mode) << MODE_SHIFT) |
+    (static_cast<std::uint64_t>(snapshot.prescalerRemainder) << PRESCALER_SHIFT) |
+    (snapshot.gateWaiting ? GATE_WAITING : 0) |
+    (snapshot.oneShotConsumed ? ONE_SHOT_CONSUMED : 0) |
+    (snapshot.pulseReleasePending ? PULSE_RELEASE_PENDING : 0);
+}
+
 std::uint64_t nekoTraceHash(
   const std::vector<NekoTraceEvent> &events)
 {

@@ -443,6 +443,203 @@ namespace
   }
 }
 
+TEST_CASE("IOP trace identities extend the stable transport",
+  "[iop][trace][schema]")
+{
+  const NekoTraceSubsystem existingSubsystems[] = {
+    NekoTraceSubsystem::VU0, NekoTraceSubsystem::VU1,
+    NekoTraceSubsystem::VIF0, NekoTraceSubsystem::VIF1,
+    NekoTraceSubsystem::GIF, NekoTraceSubsystem::GIFDMAC,
+    NekoTraceSubsystem::GS, NekoTraceSubsystem::InterruptController,
+    NekoTraceSubsystem::Display, NekoTraceSubsystem::Input,
+    NekoTraceSubsystem::EE
+  };
+  for (std::size_t index = 0; index < 11; ++index)
+  {
+    REQUIRE(static_cast<std::uint8_t>(existingSubsystems[index]) == index);
+  }
+  const NekoTraceEventType existingTypes[] = {
+    NekoTraceEventType::Progress, NekoTraceEventType::StateChanged,
+    NekoTraceEventType::TransferCompleted,
+    NekoTraceEventType::InterruptChanged,
+    NekoTraceEventType::PresentationBoundary,
+    NekoTraceEventType::InstructionIssued,
+    NekoTraceEventType::BranchScheduled, NekoTraceEventType::MemoryAccess,
+    NekoTraceEventType::ExceptionEntered,
+    NekoTraceEventType::InterruptDelivered, NekoTraceEventType::StateSnapshot,
+    NekoTraceEventType::COP1LoadInterlock,
+    NekoTraceEventType::COP1ResourceInterlock,
+    NekoTraceEventType::COP1DividerHazard,
+    NekoTraceEventType::COP1StageTransition, NekoTraceEventType::COP1Retired
+  };
+  for (std::size_t index = 0; index < 16; ++index)
+  {
+    REQUIRE(static_cast<std::uint8_t>(existingTypes[index]) == index);
+  }
+  REQUIRE(static_cast<std::uint8_t>(NekoTraceSubsystem::IOP) == 11);
+  REQUIRE(static_cast<std::uint8_t>(NekoTraceSubsystem::IOPTimers) == 12);
+  REQUIRE(
+    static_cast<std::uint8_t>(NekoTraceSubsystem::IOPInterruptController) == 13);
+  REQUIRE(
+    static_cast<std::uint8_t>(NekoTraceEventType::InstructionRetired) == 16);
+  REQUIRE(static_cast<std::uint8_t>(NekoTraceEventType::TimerEvent) == 17);
+}
+
+TEST_CASE("IOP memory trace metadata preserves addresses and access outcomes",
+  "[iop][trace][schema]")
+{
+  using namespace NekoIOPTraceMemory;
+  for (std::uint8_t kind = 0; kind < 3; ++kind)
+  {
+    for (std::uint8_t outcome = 0; outcome < 5; ++outcome)
+    {
+      for (std::uint8_t route = 0; route < 3; ++route)
+      {
+        for (const std::uint8_t width : {1, 2, 4})
+        {
+          Metadata metadata;
+          metadata.width = width;
+          metadata.accessKind = static_cast<AccessKind>(kind);
+          metadata.outcome = static_cast<Outcome>(outcome);
+          metadata.cacheRoute = static_cast<CacheRoute>(route);
+          const auto packed = nekoPackIOPMemoryTraceMetadata(metadata);
+          REQUIRE((packed & WIDTH_MASK) == width);
+          REQUIRE(traceField(packed, ACCESS_KIND_MASK, ACCESS_KIND_SHIFT) == kind);
+          REQUIRE(traceField(packed, OUTCOME_MASK, OUTCOME_SHIFT) == outcome);
+          REQUIRE(traceField(packed, CACHE_ROUTE_MASK, CACHE_ROUTE_SHIFT) == route);
+          REQUIRE(((packed & WRITE) != 0) == (kind == 2));
+          REQUIRE(((packed & SUCCEEDED) != 0) == (outcome == 0));
+          REQUIRE((packed & PHYSICAL_ADDRESS_VALID) == 0);
+          REQUIRE((packed >> PHYSICAL_ADDRESS_SHIFT) == 0);
+          REQUIRE((packed & BYTE_ENABLE_MASK) == 0);
+          REQUIRE((packed & UINT64_C(0xffc00000)) == 0);
+        }
+      }
+    }
+  }
+
+  Metadata metadata;
+  metadata.physicalAddress = UINT32_C(0x1f801104);
+  metadata.width = 4;
+  metadata.accessKind = AccessKind::DataStore;
+  metadata.outcome = Outcome::Completed;
+  metadata.cacheRoute = CacheRoute::Uncached;
+  metadata.physicalAddressValid = true;
+  metadata.byteEnable = 0xf;
+  REQUIRE(
+    nekoPackIOPMemoryTraceMetadata(metadata) ==
+    UINT64_C(0x1f801104003f0b04));
+  metadata.outcome = Outcome::Unmapped;
+  metadata.byteEnable = 5;
+  REQUIRE(
+    nekoPackIOPMemoryTraceMetadata(metadata) ==
+    UINT64_C(0x1f80110400174904));
+  metadata.physicalAddressValid = false;
+  REQUIRE(
+    (nekoPackIOPMemoryTraceMetadata(metadata) >>
+      PHYSICAL_ADDRESS_SHIFT) == 0);
+  metadata.byteEnable = 0xff;
+  REQUIRE(
+    traceField(
+      nekoPackIOPMemoryTraceMetadata(metadata),
+      BYTE_ENABLE_MASK,
+      BYTE_ENABLE_SHIFT) == 0xf);
+  for (const AccessKind kind :
+       {AccessKind::InstructionFetch, AccessKind::DataLoad})
+  {
+    metadata.accessKind = kind;
+    REQUIRE(
+      (nekoPackIOPMemoryTraceMetadata(metadata) & BYTE_ENABLE_MASK) == 0);
+  }
+}
+
+TEST_CASE("IOP timer trace snapshots encode complete counter continuation",
+  "[iop][trace][schema]")
+{
+  using namespace NekoIOPTraceTimer;
+  CounterSnapshot snapshot;
+  REQUIRE(nekoPackIOPTimerTraceSnapshot(snapshot) == 0);
+  snapshot.count = UINT32_C(0x89abcdef);
+  snapshot.mode = 0x1c51;
+  snapshot.prescalerRemainder = 0xa5;
+  for (std::uint8_t flags = 0; flags < 8; ++flags)
+  {
+    snapshot.gateWaiting = (flags & 1) != 0;
+    snapshot.oneShotConsumed = (flags & 2) != 0;
+    snapshot.pulseReleasePending = (flags & 4) != 0;
+    const auto packed = nekoPackIOPTimerTraceSnapshot(snapshot);
+    REQUIRE(
+      packed ==
+      (UINT64_C(0x00a51c5189abcdef) |
+        (std::uint64_t(flags) << 56)));
+    REQUIRE((packed & COUNT_MASK) == snapshot.count);
+    REQUIRE(traceField(packed, MODE_MASK, MODE_SHIFT) == snapshot.mode);
+    REQUIRE(
+      traceField(packed, PRESCALER_MASK, PRESCALER_SHIFT) ==
+      snapshot.prescalerRemainder);
+    REQUIRE(((packed & GATE_WAITING) != 0) == snapshot.gateWaiting);
+    REQUIRE(((packed & ONE_SHOT_CONSUMED) != 0) == snapshot.oneShotConsumed);
+    REQUIRE(
+      ((packed & PULSE_RELEASE_PENDING) != 0) ==
+      snapshot.pulseReleasePending);
+  }
+  snapshot.count = UINT32_MAX;
+  snapshot.mode = UINT16_MAX;
+  snapshot.prescalerRemainder = UINT8_MAX;
+  REQUIRE(
+    nekoPackIOPTimerTraceSnapshot(snapshot) ==
+    UINT64_C(0x07ffffffffffffff));
+}
+
+TEST_CASE("IOP trace flags and state codes have stable independent fields",
+  "[iop][trace][schema]")
+{
+  REQUIRE(NekoIOPTraceInstruction::DELAY_SLOT == 1);
+  REQUIRE(
+    static_cast<std::uint8_t>(NekoIOPTraceState::Execution::Halted) == 0);
+  REQUIRE(
+    static_cast<std::uint8_t>(NekoIOPTraceState::Execution::Running) == 1);
+  const NekoIOPTraceState::StopReason reasons[] = {
+    NekoIOPTraceState::StopReason::None,
+    NekoIOPTraceState::StopReason::HostHalt,
+    NekoIOPTraceState::StopReason::UndefinedOperation,
+    NekoIOPTraceState::StopReason::ExecutionException,
+    NekoIOPTraceState::StopReason::StoreFailure
+  };
+  for (std::size_t index = 0; index < 5; ++index)
+  {
+    REQUIRE(static_cast<std::uint8_t>(reasons[index]) == index);
+  }
+
+  using namespace NekoIOPTraceTimer;
+  REQUIRE(INDEX_MASK == 0xff);
+  const std::uint64_t eventFlags[] = {
+    TARGET_REACHED, OVERFLOW_REACHED, INTERRUPT_REQUESTED,
+    PULSE_RELEASED, GATE_CHANGED, MODE_ACKNOWLEDGED, REGISTER_WRITTEN
+  };
+  for (std::size_t index = 0; index < 7; ++index)
+  {
+    REQUIRE(eventFlags[index] == (UINT64_C(1) << (8 + index)));
+  }
+  const std::uint64_t inputFlags[] = {
+    SYSTEM_PULSE, PIXEL_PULSE, HBLANK_BEFORE,
+    HBLANK_AFTER, VBLANK_BEFORE, VBLANK_AFTER
+  };
+  for (std::size_t index = 0; index < 6; ++index)
+  {
+    REQUIRE(inputFlags[index] == (UINT64_C(1) << (16 + index)));
+  }
+  REQUIRE(REGISTER_SHIFT == 22);
+  REQUIRE(REGISTER_MASK == UINT64_C(0x00c00000));
+  const Register registers[] = {
+    Register::None, Register::Count, Register::Mode, Register::Target
+  };
+  for (std::size_t index = 0; index < 4; ++index)
+  {
+    REQUIRE(static_cast<std::uint8_t>(registers[index]) == index);
+  }
+}
+
 TEST_CASE("EE memory trace metadata fields encode exhaustively")
 {
   using namespace NekoEETraceMemory;
