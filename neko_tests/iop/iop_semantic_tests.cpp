@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <array>
 #include <set>
 
 #include "catch.hpp"
@@ -31,45 +30,7 @@ namespace
     REQUIRE(result.exception.inBranchDelaySlot == expected.exception.inBranchDelaySlot);
     REQUIRE(result.exception.coprocessor == expected.exception.coprocessor);
     REQUIRE(result.storeFailure.width == IOPStoreWidth::None);
-    REQUIRE(core.elapsedCycles() == expected.cycles);
-    REQUIRE(core.retiredInstructions() == expected.instructions);
-    REQUIRE(core.programCounter() == expected.programCounter);
-    REQUIRE(core.status() == expected.status);
-    REQUIRE(core.cause() == expected.cause);
-    REQUIRE(core.exceptionProgramCounter() == expected.exceptionProgramCounter);
-    REQUIRE(core.badVirtualAddress() == expected.exception.badVirtualAddress);
-    REQUIRE(core.hi() == expected.hi);
-    REQUIRE(core.lo() == expected.lo);
-    REQUIRE_FALSE(core.branchContinuation().active);
-    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
-
-    std::array<IOPWord, IOPCore::GENERAL_REGISTER_COUNT> registers = {};
-    registers[29] = fixture.config.stackPointer;
-    registers[31] = fixture.config.returnAddress;
-    for (const auto &value : expected.registers)
-    {
-      registers.at(value.index) = value.value;
-    }
-    for (std::size_t index = 0; index < registers.size(); ++index)
-    {
-      CAPTURE(index);
-      REQUIRE(core.generalRegister(index) == registers[index]);
-    }
-    for (const auto &initial : fixture.initialMemory)
-    {
-      CAPTURE(initial.address);
-      const auto changed = std::find_if(
-        expected.changedMemory.begin(), expected.changedMemory.end(),
-        [&initial](const IOPSemanticFixtures::MemoryWord &word)
-        {
-          return word.address == initial.address;
-        });
-      const IOPWord value = changed == expected.changedMemory.end()
-        ? initial.value : changed->value;
-      const auto actual = bus.read32(initial.address);
-      REQUIRE(actual.status == IOPBusStatus::Completed);
-      REQUIRE(actual.value == value);
-    }
+    IOPSemanticFixtures::requireState(bus, core, fixture);
   }
 }
 

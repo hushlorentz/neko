@@ -1547,7 +1547,7 @@ remain with their owning milestones.
 - [x] Establish shared host-authored semantic fixtures using the existing IOP
       runner; cover decode, arithmetic, control flow, loads/stores, and COP0
       without a BIOS, IRX services, or an external compiler as the oracle.
-- [ ] Add whole-system exception/INTC/timer programs with reset, deterministic
+- [x] Add whole-system exception/INTC/timer programs with reset, deterministic
       repetition, and mid-execution save-state continuation.
 - [ ] Run focused tests followed by the complete optimized repository check.
       Compare repeated-run instruction totals, cycle totals where modeled,

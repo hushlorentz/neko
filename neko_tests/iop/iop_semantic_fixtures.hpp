@@ -9,6 +9,7 @@
 #include "iop_program_runner.hpp"
 
 class IOPBus;
+class IOPCore;
 
 namespace IOPSemanticFixtures
 {
@@ -66,6 +67,7 @@ namespace IOPSemanticFixtures
 
   const std::array<Fixture, 8> &all();
   void load(IOPBus &bus, const Fixture &fixture);
+  void requireState(IOPBus &bus, const IOPCore &core, const Fixture &fixture);
 }
 
 #endif

@@ -289,6 +289,7 @@ add_executable(neko_tests
     neko_tests/iop/iop_timer_timing_tests.cpp
     neko_tests/iop/iop_save_state_tests.cpp
     neko_tests/iop/iop_system_tests.cpp
+    neko_tests/iop/iop_system_program_tests.cpp
     neko_tests/vif/vif_tests.cpp
     neko_tests/vif/vif_execution_tests.cpp
     neko_tests/vif/vif_path2_tests.cpp
