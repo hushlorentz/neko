@@ -107,6 +107,7 @@ class NekoSystem
     const std::vector<NekoTraceEvent> &trace() const;
     std::uint64_t traceHash() const;
     std::uint64_t eeStateHash() const;
+    // Hashes IOP state and its scheduling phase, not the complete machine.
     std::uint64_t iopStateHash() const;
 
     IOPCore &iopCore();

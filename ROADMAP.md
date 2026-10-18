@@ -1554,7 +1554,7 @@ remain with their owning milestones.
       traces, hashes, and byte-identical save-state continuation.
 - [x] Complete the bounded architecture and maintainability review. Inspect
       CPU/bus/device ownership, decode/exception policy, and scheduler boundaries.
-- [ ] Complete an independent final review, resolve every concrete finding,
+- [x] Complete an independent final review, resolve every concrete finding,
       and run optimized AddressSanitizer and native macOS leak checks.
 
 ## Milestone 9: EE-IOP Interconnect and Deterministic BIOS Startup
