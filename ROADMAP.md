@@ -1526,7 +1526,7 @@ remain with their owning milestones.
 - [x] Schedule IOP at one cycle per eight master cycles with deterministic
       device/CPU ordering, shared immutable BIOS configuration, and EE-only
       startup compatibility; complete integration review
-- [ ] Add end-to-end timer/CPU conformance for target/overflow coincidence,
+- [x] Add end-to-end timer/CPU conformance for target/overflow coincidence,
       gate edges, prescaler phase, simultaneous interrupts, independent INTC
       acknowledgement, halted CPU versus advancing devices, reset while
       active, deterministic repetition, and save/load continuation. Do not
