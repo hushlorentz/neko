@@ -1542,7 +1542,7 @@ remain with their owning milestones.
       accesses and delayed-result/delay-slot boundaries.
 - [x] Add/review timer and INTC observations with deterministic master-cycle
       publication, preserving device/CPU order and distinct same-cycle changes.
-- [ ] Prove tracing observational across disabled/enabled collection, reset,
+- [x] Prove tracing observational across disabled/enabled collection, reset,
       stop/start/clear, and save/load; retain existing EE-only trace encodings.
 - [ ] Establish shared host-authored semantic fixtures using the existing IOP
       runner; cover decode, arithmetic, control flow, loads/stores, and COP0
