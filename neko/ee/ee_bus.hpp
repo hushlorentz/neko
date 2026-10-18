@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "boot_rom.hpp"
 #include "ee_types.hpp"
 #include "gif.hpp"
 
@@ -144,6 +145,9 @@ class EEBus
     void attachGSDisplay(GSDisplay *gsDisplay);
     void installBootROM(
       const std::vector<std::uint8_t> &image);
+    void installBootROM(
+      const std::shared_ptr<const BootROMImage> &image);
+    const std::shared_ptr<const BootROMImage> &bootROMIdentity() const;
     bool isMainMemoryRange(
       std::uint32_t address,
       std::size_t width) const;
@@ -270,7 +274,7 @@ class EEBus
     VPU *vu1Component = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;
     std::vector<std::uint8_t> mainMemory;
-    std::vector<std::uint8_t> bootROM;
+    std::shared_ptr<const BootROMImage> bootROM;
 };
 
 #endif

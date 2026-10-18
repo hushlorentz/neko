@@ -42,7 +42,7 @@ namespace
   }
 }
 
-TEST_CASE("IOP persistence owns dormant attached machine components")
+TEST_CASE("IOP persistence owns attached devices while the CPU remains halted")
 {
   NekoSystem system;
   const auto initial = system.iopStateHash();
@@ -50,9 +50,9 @@ TEST_CASE("IOP persistence owns dormant attached machine components")
   REQUIRE(system.iopCore().executionState() == IOPExecutionState::Halted);
   system.runMasterCycles(80);
   REQUIRE(system.iopCore().elapsedCycles() == 0);
-  REQUIRE(system.iopTimers().counter(0).count == 0);
-  REQUIRE(system.iopTimerTiming().pixelPhase() == 0);
-  REQUIRE(system.iopStateHash() == initial);
+  REQUIRE(system.iopTimers().counter(0).count == 10);
+  REQUIRE(system.iopTimerTiming().pixelPhase() == 5424);
+  REQUIRE(system.iopStateHash() != initial);
   system.iopInterruptController().writeMask(0x10);
   system.iopInterruptController().writeControl(1);
   system.iopInterruptController().assertSource(IOPInterruptSource::Timer0);

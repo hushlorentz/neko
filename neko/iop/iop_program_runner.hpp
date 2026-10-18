@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "clock_rates.hpp"
 #include "iop_types.hpp"
 
 class IOPCore;
@@ -13,7 +14,7 @@ namespace IOPProgramRuntime
   constexpr IOPAddress STACK_POINTER = UINT32_C(0x00200000);
   constexpr IOPAddress RETURN_ADDRESS = UINT32_C(0xfffffffc);
   constexpr std::size_t EXIT_CODE_REGISTER = 2;
-  constexpr std::uint64_t MASTER_CYCLE_PERIOD = 8;
+  constexpr std::uint64_t MASTER_CYCLE_PERIOD = PS2Clock::IOP_CLOCK_PERIOD;
 }
 
 enum class IOPProgramOutcome : std::uint8_t

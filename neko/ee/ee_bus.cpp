@@ -118,15 +118,15 @@ bool EEBus::bootROMAddress(
   std::size_t width,
   std::uint32_t *offset) const
 {
-  if (bootROM.empty() ||
+  if (bootROM == nullptr ||
       address < EEMemoryMap::BOOT_ROM_BASE)
   {
     return false;
   }
   const std::uint32_t candidate =
     address - EEMemoryMap::BOOT_ROM_BASE;
-  if (candidate >= bootROM.size() ||
-      width > bootROM.size() - candidate)
+  if (candidate >= bootROM->size() ||
+      width > bootROM->size() - candidate)
   {
     return false;
   }
@@ -142,7 +142,22 @@ void EEBus::installBootROM(
     throw std::invalid_argument(
       "EE Boot ROM image must be exactly 4 MiB.");
   }
+  installBootROM(BootROMImage::create(image));
+}
+
+void EEBus::installBootROM(
+  const std::shared_ptr<const BootROMImage> &image)
+{
+  if (image == nullptr)
+  {
+    throw std::invalid_argument("EE Boot ROM image must not be null.");
+  }
   bootROM = image;
+}
+
+const std::shared_ptr<const BootROMImage> &EEBus::bootROMIdentity() const
+{
+  return bootROM;
 }
 
 bool EEBus::isMainMemoryRange(
@@ -368,24 +383,24 @@ bool EEBus::readInstruction32(
     "EE instruction fetch must be word-aligned.");
 
   std::uint32_t physicalAddress = 0;
-  const std::vector<std::uint8_t> *storage = &mainMemory;
+  const std::uint8_t *storage = mainMemory.data();
   if (!mainMemoryAddress(address, 4, &physicalAddress))
   {
     if (!bootROMAddress(address, 4, &physicalAddress))
     {
       return false;
     }
-    storage = &bootROM;
+    storage = bootROM->data();
   }
 
   *instruction =
-    (*storage)[physicalAddress] |
+    storage[physicalAddress] |
     (static_cast<std::uint32_t>(
-      (*storage)[physicalAddress + 1]) << 8) |
+      storage[physicalAddress + 1]) << 8) |
     (static_cast<std::uint32_t>(
-      (*storage)[physicalAddress + 2]) << 16) |
+      storage[physicalAddress + 2]) << 16) |
     (static_cast<std::uint32_t>(
-      (*storage)[physicalAddress + 3]) << 24);
+      storage[physicalAddress + 3]) << 24);
   return true;
 }
 
@@ -408,7 +423,7 @@ bool EEBus::readData8(
   {
     return false;
   }
-  *value = bootROM[physicalAddress];
+  *value = (*bootROM)[physicalAddress];
   return true;
 }
 
@@ -439,19 +454,19 @@ bool EEBus::readData16(
     2,
     "EE halfword load must be naturally aligned.");
   std::uint32_t physicalAddress = 0;
-  const std::vector<std::uint8_t> *storage = &mainMemory;
+  const std::uint8_t *storage = mainMemory.data();
   if (!mainMemoryAddress(address, 2, &physicalAddress))
   {
     if (!bootROMAddress(address, 2, &physicalAddress))
     {
       return false;
     }
-    storage = &bootROM;
+    storage = bootROM->data();
   }
   *value =
-    (*storage)[physicalAddress] |
+    storage[physicalAddress] |
     (static_cast<std::uint16_t>(
-      (*storage)[physicalAddress + 1]) << 8);
+      storage[physicalAddress + 1]) << 8);
   return true;
 }
 
@@ -547,14 +562,14 @@ bool EEBus::readData128(
     16,
     "EE quadword load must be naturally aligned.");
   std::uint32_t physicalAddress = 0;
-  const std::vector<std::uint8_t> *storage = &mainMemory;
+  const std::uint8_t *storage = mainMemory.data();
   if (!mainMemoryAddress(address, 16, &physicalAddress))
   {
     if (!bootROMAddress(address, 16, &physicalAddress))
     {
       return false;
     }
-    storage = &bootROM;
+    storage = bootROM->data();
   }
   value->low = 0;
   value->high = 0;
@@ -562,11 +577,11 @@ bool EEBus::readData128(
   {
     value->low |=
       static_cast<std::uint64_t>(
-        (*storage)[physicalAddress + index]) <<
+        storage[physicalAddress + index]) <<
       (index * 8);
     value->high |=
       static_cast<std::uint64_t>(
-        (*storage)[physicalAddress + 8 + index]) <<
+        storage[physicalAddress + 8 + index]) <<
       (index * 8);
   }
   return true;
@@ -837,13 +852,13 @@ bool EEBus::readMapped32(
   if (bootROMAddress(address, 4, &physicalAddress))
   {
     *value =
-      bootROM[physicalAddress] |
+      (*bootROM)[physicalAddress] |
       (static_cast<std::uint32_t>(
-        bootROM[physicalAddress + 1]) << 8) |
+        (*bootROM)[physicalAddress + 1]) << 8) |
       (static_cast<std::uint32_t>(
-        bootROM[physicalAddress + 2]) << 16) |
+        (*bootROM)[physicalAddress + 2]) << 16) |
       (static_cast<std::uint32_t>(
-        bootROM[physicalAddress + 3]) << 24);
+        (*bootROM)[physicalAddress + 3]) << 24);
     return true;
   }
 
@@ -1274,7 +1289,7 @@ bool EEBus::readMapped64(
     {
       *value |=
         static_cast<std::uint64_t>(
-          bootROM[physicalAddress + index]) <<
+          (*bootROM)[physicalAddress + index]) <<
         (index * 8);
     }
     return true;

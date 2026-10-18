@@ -2296,13 +2296,16 @@ timers, and persistence/trace integration remain separate blocks.
       silent embedding. Land this coverage with or before whole-machine IOP
       attachment, never leaving a machine whose save state silently drops
       running IOP state. Complete focused persistence review.
-- [ ] Schedule the persisted IOP owners in `NekoSystem` at the
+- [x] Schedule the persisted IOP owners in `NekoSystem` at the
       documented 36.864 MHz rate, exactly one IOP cycle per eight
       294.912 MHz master cycles. Define phase and same-cycle ordering among
       display inputs, timer transitions, INTC assertion, IOP admission, and
       existing EE-side components. Preserve reset, shared immutable BIOS
       configuration, and existing EE-only workflows; do not automatically
       start BIOS execution. Complete focused system-integration review.
+      Phase-zero admission follows post-display timer/request advancement;
+      halted CPUs do not freeze devices. Shared BIOS installation requires
+      both CPUs halted; the bounded BIOS diagnostic still starts only the EE.
 - [ ] Add end-to-end timer/CPU conformance for target/overflow coincidence,
       gate edges, prescaler phase, simultaneous interrupts, independent INTC
       acknowledgement, halted CPU versus advancing devices, reset while

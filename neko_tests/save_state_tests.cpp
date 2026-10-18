@@ -24,7 +24,7 @@ namespace
     VERSION_33_PREPARED_STATE_SIZE = 39951857;
   constexpr std::uint64_t
     VERSION_33_PREPARED_STATE_HASH =
-      UINT64_C(0x9edc736f03fb4e09);
+      UINT64_C(0x461276422229e98d);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;

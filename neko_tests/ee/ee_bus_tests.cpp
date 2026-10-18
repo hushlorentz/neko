@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <memory>
+#include <stdexcept>
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
@@ -210,12 +212,31 @@ TEST_CASE("EE Boot ROM is fixed-size and read-only")
     "EE Boot ROM image must be exactly 4 MiB.");
 
   bus.installBootROM(image);
+  const auto identity = bus.bootROMIdentity();
+  REQUIRE(identity != nullptr);
+  REQUIRE(system.iopBus().romIdentity() == nullptr);
+  REQUIRE_THROWS_AS(
+    bus.installBootROM(std::shared_ptr<const BootROMImage>{}),
+    std::invalid_argument);
+  REQUIRE(bus.bootROMIdentity() == identity);
 
   std::uint32_t instruction = 0;
   REQUIRE(bus.readInstruction32(
     EEMemoryMap::BOOT_ROM_BASE,
     &instruction));
   REQUIRE(instruction == UINT32_C(0x12345678));
+  std::uint16_t halfword = 0;
+  REQUIRE(bus.readData16(EEMemoryMap::BOOT_ROM_BASE, &halfword));
+  REQUIRE(halfword == 0x5678);
+  REQUIRE(bus.readData16(EEMemoryMap::BOOT_ROM_END - 2, &halfword));
+  REQUIRE(halfword == 0xab00);
+  std::uint64_t doubleword = 0;
+  REQUIRE(bus.readData64(EEMemoryMap::BOOT_ROM_BASE, &doubleword));
+  REQUIRE(doubleword == UINT64_C(0x12345678));
+  EEQuadword quadword{};
+  REQUIRE(bus.readData128(EEMemoryMap::BOOT_ROM_BASE, &quadword));
+  REQUIRE(quadword.low == UINT64_C(0x12345678));
+  REQUIRE(quadword.high == 0);
   REQUIRE(bus.readData32(
     EEMemoryMap::BOOT_ROM_BASE,
     &instruction));
@@ -238,6 +259,13 @@ TEST_CASE("EE Boot ROM is fixed-size and read-only")
   REQUIRE(
     bus.read32(EEMemoryMap::KSEG1_BASE +
       EEMemoryMap::BOOT_ROM_BASE) ==
+    UINT32_C(0x12345678));
+  image[0] = 0;
+  REQUIRE(bus.read32(EEMemoryMap::BOOT_ROM_BASE) == UINT32_C(0x12345678));
+  system.reset();
+  REQUIRE(system.eeBus().bootROMIdentity() == identity);
+  REQUIRE(system.iopBus().romIdentity() == nullptr);
+  REQUIRE(system.eeBus().read32(EEMemoryMap::BOOT_ROM_BASE) ==
     UINT32_C(0x12345678));
 }
 

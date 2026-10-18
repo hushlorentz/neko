@@ -5,8 +5,8 @@
 namespace
 {
   constexpr std::uint32_t IOP_CACHE_PROFILE = 1;
-  constexpr std::uint64_t IOP_CLOCK_PERIOD = 8;
-  constexpr std::uint64_t IOP_CLOCK_PHASE = 0;
+  using PS2Clock::IOP_CLOCK_PERIOD;
+  using PS2Clock::IOP_CLOCK_PHASE;
 
   // The codec's field traversal also feeds an allocation-free canonical hash.
   class IOPStateHashWriter

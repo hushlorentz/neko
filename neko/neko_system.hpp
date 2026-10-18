@@ -83,6 +83,8 @@ class NekoSystem
     NekoSystem &operator=(NekoSystem &&) = delete;
 
     void reset();
+    // Requires both CPUs halted; installs shared bytes without resetting or starting.
+    void installBootROM(const std::vector<std::uint8_t> &image);
     void setInput(const NekoInputState &input);
     const NekoInputState &input() const;
     NekoFrameResult runFrame();
@@ -217,6 +219,7 @@ class NekoSystem
 
     void latchComponentInterrupts();
     void publishEEInterruptLines();
+    void advanceIOPTimers(bool systemClockPulse);
     CycleObservationSnapshot
       captureCycleObservation() const;
     EEExecutionResult makeEEExecutionResult(

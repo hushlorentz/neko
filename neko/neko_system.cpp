@@ -234,13 +234,12 @@ NekoSystem::NekoSystem() :
 
 void NekoSystem::reset()
 {
-  const std::vector<std::uint8_t> bootROM =
-    eeBusComponent.bootROM;
+  const auto bootROM = eeBusComponent.bootROMIdentity();
   const auto iopROM = iopBusComponent.romIdentity();
   // Reset all pointer-linked hardware as one coherent machine.
   this->~NekoSystem();
   new (this) NekoSystem();
-  if (!bootROM.empty())
+  if (bootROM != nullptr)
   {
     eeBusComponent.installBootROM(bootROM);
   }
@@ -249,6 +248,23 @@ void NekoSystem::reset()
     iopBusComponent.installRom(iopROM);
     iopCoreComponent.attachBus(&iopBusComponent);
   }
+}
+
+void NekoSystem::installBootROM(const std::vector<std::uint8_t> &image)
+{
+  if (eeCoreComponent.executionState() != EEExecutionState::Halted ||
+      iopCoreComponent.executionState() != IOPExecutionState::Halted)
+  {
+    throw std::logic_error(
+      "A BIOS cannot be loaded while either CPU is running.");
+  }
+  const auto rom = BootROMImage::create(image);
+  if (rom == nullptr)
+  {
+    throw std::invalid_argument("Boot ROM image must be exactly 4 MiB.");
+  }
+  eeBusComponent.installBootROM(rom);
+  iopBusComponent.installRom(rom);
 }
 
 IOPCore &NekoSystem::iopCore()
@@ -507,14 +523,8 @@ EEExecutionResult NekoSystem::runBIOS(
   const std::vector<std::uint8_t> &image,
   std::uint64_t maxMasterCycles)
 {
-  if (eeCoreComponent.executionState() !=
-      EEExecutionState::Halted)
-  {
-    throw std::logic_error(
-      "A BIOS cannot be loaded while the EE is running.");
-  }
+  installBootROM(image);
   reset();
-  eeBusComponent.installBootROM(image);
   eeCoreComponent.startExecution(EEReset::VECTOR);
   return runEE(maxMasterCycles);
 }
@@ -803,6 +813,19 @@ void NekoSystem::publishEEInterruptLines()
     dmacControllerComponent.interruptPending());
 }
 
+void NekoSystem::advanceIOPTimers(bool systemClockPulse)
+{
+  const auto sample = iopTimerTimingComponent.advance(
+    systemClockPulse,
+    {gsDisplayComponent.inHorizontalBlank(),
+      gsDisplayComponent.inVerticalBlank()});
+  const auto requests = iopTimersComponent.advance(sample);
+  for (std::size_t index = 0; index < requests.count; ++index)
+  {
+    iopInterruptControllerComponent.assertSource(requests.sources[index]);
+  }
+}
+
 NekoSystem::CycleObservationSnapshot
 NekoSystem::captureCycleObservation() const
 {
@@ -823,6 +846,9 @@ NekoSystem::captureCycleObservation() const
 
 void NekoSystem::clockMasterCycle()
 {
+  const bool iopClockPulse =
+    masterClock.currentCycle() % PS2Clock::IOP_CLOCK_PERIOD ==
+      PS2Clock::IOP_CLOCK_PHASE;
   latchComponentInterrupts();
   publishEEInterruptLines();
   eeBusComponent.advanceGuestFIFOs();
@@ -834,6 +860,12 @@ void NekoSystem::clockMasterCycle()
   masterClock.clock();
   latchComponentInterrupts();
   publishEEInterruptLines();
+  advanceIOPTimers(iopClockPulse);
+  if (iopClockPulse &&
+      iopCoreComponent.executionState() == IOPExecutionState::Running)
+  {
+    iopCoreComponent.stepInstruction();
+  }
   if (collectingTrace)
   {
     publishCycleTrace(

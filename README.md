@@ -2,7 +2,7 @@
 
 Neko is an experimental, deterministic PlayStation 2 emulator written in
 C++14. It is under active development and currently focuses on independently
-tested EE, VU, VIF, GIF, GS, tracing, save-state, and ELF-loading foundations.
+tested EE, IOP, VU, VIF, GIF, GS, tracing, save-state, and ELF-loading foundations.
 It does not yet boot commercial games or complete PlayStation 2 BIOS startup.
 
 See [ROADMAP.md](ROADMAP.md) for implementation status and planned work.
@@ -130,9 +130,10 @@ Run a legally dumped 4 MiB PlayStation 2 BIOS as a bounded startup diagnostic:
 ```
 
 The BIOS image remains external and is never embedded in Neko. The command
-prints the first execution stop, including the final PC, rejected instruction,
-and pending exception. This is an architecture-development diagnostic, not a
-complete BIOS boot path.
+installs the image for both processors but starts only the EE; the IOP remains
+halted while its timers advance. It prints the first execution stop, including
+the final PC, rejected instruction, and pending exception. This is an
+architecture-development diagnostic, not a complete BIOS boot path.
 
 Generate tiny synthetic guests for CLI diagnostics:
 
