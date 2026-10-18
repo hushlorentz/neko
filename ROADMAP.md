@@ -1549,7 +1549,7 @@ remain with their owning milestones.
       without a BIOS, IRX services, or an external compiler as the oracle.
 - [x] Add whole-system exception/INTC/timer programs with reset, deterministic
       repetition, and mid-execution save-state continuation.
-- [ ] Run focused tests followed by the complete optimized repository check.
+- [x] Run focused tests followed by the complete optimized repository check.
       Compare repeated-run instruction totals, cycle totals where modeled,
       traces, hashes, and byte-identical save-state continuation.
 - [ ] Complete the bounded architecture and maintainability review. Inspect
