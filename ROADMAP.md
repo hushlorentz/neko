@@ -4,36 +4,8 @@ This is a living plan for evolving Neko from its current Vector Unit foundation
 into a deterministic PlayStation 2 emulation core. Tasks are ordered by
 dependency rather than estimated completion date.
 
-## Guiding Principles
-
-- Keep a cycle-oriented interpreter as the reference implementation.
-- Prefer documented hardware behavior and independently verified test vectors.
-- Add functionality with red-green TDD: first demonstrate the missing behavior
-  with a failing test, then implement it and run the full regression suite.
-- Plan hardware behavior and code architecture together. Before starting a new
-  milestone or block, identify the intended owner, extension points, state
-  lifecycle, dependency direction, persistence impact, observation boundary,
-  and performance-sensitive paths.
-- Prefer an architecture that supports the foreseeable adjacent hardware work.
-  When evidence is insufficient to justify that structure, implement the
-  smallest isolated behavior and record the condition that should trigger a
-  later generalization.
-- Apply the Boy Scout rule within the active change boundary: leave encountered
-  code clearer and safer when the improvement is well understood,
-  behavior-preserving, proportionate, and protected by existing or focused
-  tests. Record larger or unrelated cleanup instead of expanding scope
-  silently.
-- Before closing each milestone, perform a bounded architecture and
-  maintainability review of the completed work and its immediate integration
-  boundaries. Consolidate duplicated ownership and interfaces, replace
-  behavioral boolean parameters and mixed-purpose methods where justified,
-  retain booleans that directly represent hardware state, and use SOLID
-  principles as heuristics without adding speculative abstraction or
-  indirection. Validate accepted repairs before the final independent
-  correctness review.
-- Keep emulated hardware deterministic and separate from user interfaces.
-- Preserve raw guest data and avoid relying on host floating-point behavior.
-- Add optimization only after profiling demonstrates a need.
+The reference core remains cycle-oriented, deterministic, manual-backed, and
+independent of frontends. Optimization follows correctness and profiling.
 
 ## Current Foundation
 
@@ -72,11 +44,6 @@ It fills a requested number of data-memory qwords with a supplied 32-bit value.
 - [x] Implement Force Break and verify its state and pipeline behavior
 
 ### Manual Timing Conformance Pass
-
-Complete this focused pass before expanding the lower execution unit. Derive
-cycle expectations from the VU manual and assert observable issue, writeback,
-PC, register, flag, and trace behavior rather than internal container or stage
-implementation details.
 
 - [x] Verify independent FMAC instructions issue every cycle without stalls
 - [x] Verify dependent instructions wait through S-stage writeback
@@ -138,15 +105,7 @@ Complete the branch-sensitive timing and hazard work before adding `IBNE`.
 - [x] Execute from address zero with a cycle budget
 - [x] Compare the final VU memory with hand-defined expected qwords
 
-External source and generated fixtures require a license review before being
-committed. The expected output should be defined independently of the emulator.
-The external program has passed locally; the committed integration fixture will
-use independently authored source and expected output.
-
 ### Integration Harness and Diagnostics
-
-Build a thin reusable diagnostic layer before the integration programs become
-complex, without making a full debugger a prerequisite:
 
 - [x] Add a reusable program runner with a cycle budget and final checks for
       execution state, PC, termination position, cycle count, and data memory
@@ -158,14 +117,7 @@ complex, without making a full debugger a prerequisite:
 - [x] Keep tracing disabled during normal passing runs and make diagnostic
       output available on demand or after a failure
 
-Add richer events such as branch decisions, stall reasons, memory accesses, and
-pipeline-stage transitions only when a failing integration test demonstrates a
-specific observability gap.
-
 ### Original Integration Suite
-
-Prefer several focused programs with attributable failures, followed by one
-capstone program that proves the components work together:
 
 - [x] `integer_fill.asm`: exercise `ILW`, `IADD`, `ISUBIU`, `MFIR`, `SQI`,
       backward `IBNE`, and a meaningful branch delay slot while generating
@@ -185,19 +137,6 @@ capstone program that proves the components work together:
 - [x] Add a capstone vector kernel that loads input vectors, applies a scale and
       bias, clamps the results, and stores them while overlapping memory,
       integer, branch, and upper-pipeline work
-
-Build these in the order: integer fill, lane masks, branch paths, vector math,
-then the dual-issue capstone. Initially use exactly representable floating-point
-inputs such as integers, halves, and powers of two.
-
-Each committed fixture should include:
-
-- Independently authored assembly source
-- Its generated raw microprogram binary
-- The assembler version and exact regeneration command
-- A host-side oracle written independently from the assembly
-- Expected output memory and termination PC
-- An exact expected cycle count where timing is stable
 
 ## Milestone 2: VU Execution Accuracy
 
@@ -242,9 +181,6 @@ Raw arithmetic and fixed-point conversions are bit-oriented.
 
 ### Floating-Point Diagnostics
 
-Add arithmetic observability after the operation model is stable and before
-floating-point assembly integration:
-
 - [x] Add optional structured FMAC trace data through the existing callback,
       including per-lane raw multiply results, accumulator inputs, final
       results, exception flags, and ignored-result fields
@@ -284,20 +220,7 @@ floating-point assembly integration:
       hazards, and integration coverage for every architecturally meaningful
       VU0/VU1 microinstruction and deterministic rejection of every reserved
       encoding
-  - All 59 upper mnemonics are covered by 95 concrete opcodes after expanding
-    the twelve `bc` families.
-  - All 67 lower instructions without VIF state dependencies are implemented;
-    `LOI` uses the upper I-bit path, while `XTOP` and `XITOP` remain assigned to
-    the Milestone 3 VIF TOP/ITOP work.
-  - Fixed-zero and fixed-destination fields are validated for upper scalar,
-    `NOP`, `CLIP`, and outer-product encodings and for lower branch, flag,
-    synchronization, transfer, square-root, and external-control encodings.
-
 ### Lower Data Movement and Special State
-
-Keep instructions with external subsystem dependencies in their owning
-milestones rather than grouping every non-arithmetic operation as a
-"special-register transfer."
 
 - [x] Implement `MFIR`
 - [x] Complete basic register movement with `MTIR`, `MOVE`, and `MR32`
@@ -309,10 +232,6 @@ milestones rather than grouping every non-arithmetic operation as a
       `RXOR`
 
 ### VU1 P Pipeline and Elementary Function Unit
-
-Implement this as a sequence of independently reviewable blocks. Preserve the
-documented absence of automatic P-register data-dependency stalls: software
-must use `WAITP` when it needs a pending EFU result.
 
 - [x] Audit all EFU encodings, source-field rules, VU1-only restrictions,
       throughput/latency values, and exceptional-result behavior against the
@@ -334,10 +253,6 @@ must use `WAITP` when it needs a pending EFU result.
       using the documented VU approximation algorithm
 
 ### VU1 Elementary Function Unit Conformance
-
-Lock down the completed EFU implementation against the official instruction
-reference with deterministic raw-bit expectations. Keep each group independently
-reviewable and avoid host-library values as the source of truth.
 
 - [x] Add fixed bit-level reference vectors for `ESUM`, `ESADD`, `ESQRT`, and
       `ERSQRT` across representative valid-domain inputs
@@ -400,9 +315,7 @@ reviewable and avoid host-library values as the source of truth.
 
 ### PATH3 Transport and Arbitration
 
-Build and verify the GIF-side PATH3 boundary before introducing the EE DMAC.
-The transport in this milestone is driven by a host-side qword producer; real
-GIF DMA channel wiring belongs to Milestone 4.
+Establish host-fed PATH3 transport before EE DMAC integration in Milestone 4.
 
 - [x] Add a host-fed PATH3 qword transport with explicit ready/stall results,
       partial submission support, and counters for attempted and transferred
@@ -464,9 +377,6 @@ GIF DMA channel wiring belongs to Milestone 4.
 - [x] Add textured, blended, and depth-tested scenes as GS support expands
 
 ### Graphics Path Diagnostics Foundation
-
-Keep graphics diagnostics opt-in and outside `neko_core`, building on the
-existing event and runner infrastructure:
 
 - [x] Add a structured GIF/GS trace in `neko_diagnostics` that decodes GIFtags
       (`NLOOP`, `EOP`, `FLG`, `NREG`, and descriptors), path ownership, and GS
@@ -547,10 +457,6 @@ existing event and runner infrastructure:
 
 ### Guest ELF Loading Foundation
 
-Load small freestanding scalar programs before expanding the remaining EE
-coprocessor and multimedia families. Let real guest requirements drive that
-work instead of implementing every deferred instruction speculatively:
-
 - [x] Load PS2 ELF program segments into EE memory with validated addresses,
       sizes, permissions, BSS initialization, and entry-point setup
 - [x] Define the initial bare-metal guest runtime contract, including reset
@@ -564,9 +470,6 @@ work instead of implementing every deferred instruction speculatively:
       homebrew ELFs as the first real guests
 
 ### Guest MMIO and DMA Foundation
-
-Allow loaded guests to drive the existing hardware through EE instructions
-rather than host-side setup:
 
 - [x] Extend checked EE data accesses from RAM into mapped device registers
       with explicit access-width, alignment, read/write, and side-effect
@@ -609,9 +512,6 @@ rather than host-side setup:
 - [x] Convert the POINT/SPRITE demo into an independently authored guest
       program that submits its drawing work through emulated hardware
 
-The emulation core must not open windows, poll host controllers, sleep, or print
-directly. Frontends provide those services through callbacks and buffers.
-
 ## Milestone 5: EE COP1
 
 Implement the R5900 floating-point coprocessor from the official EE Core
@@ -623,9 +523,6 @@ than delegating architectural results to host floating-point defaults.
 - [x] Reconcile all 34 concrete COP1 mnemonics in the official instruction
       table with their encodings, fixed fields, operand roles, and reserved
       patterns
-  - The official `MIN.S` instruction page incorrectly prints function `0x30`.
-    Appendix table 7.4.3 and PS2DEV Binutils 2.45.1 agree on `0x29`; `0x30`
-    encodes `C.F.S`.
 - [x] Define the architectural contract for 32 32-bit FPRs, the 32-bit ACC,
       read-only FCR0, writable FCR31 fields, and reserved FCR1-FCR30
 - [x] Define deterministic reset values for architecturally undefined COP1
@@ -719,59 +616,6 @@ than delegating architectural results to host floating-point defaults.
 
 ### Division and Square Root
 
-The local SCEI corpus defines C1 stage routing, `1S` result availability, `2S`
-architectural writeback, and issue-category hazards, but does not publish
-numeric latency or initiation intervals for these three instructions. Use an
-isolated provisional policy of `8/7` cycles for `DIV.S` and `SQRT.S`, and
-`14/13` cycles for `RSQRT.S` (latency/initiation interval), pending targeted
-hardware measurement. Do not present these values as documented EE behavior.
-
-The GNUPro EE Tools User's Guide also documents a separate hardware pipeline
-bug: `DIV.S`, `SQRT.S`, and `RSQRT.S` must not be placed in a branch delay
-slot, within two instructions after a branch delay slot, or within two
-instructions after a branch target. The failure effect is undocumented, so
-detect and diagnose these placements without inventing a stall, exception, or
-corrupted result.
-
-`DIV.S` uses the quotient sign for zero and saturation results. A zero
-denominator produces signed maximum; `0/0` raises only current/sticky `I`,
-while nonzero-over-zero raises only current/sticky `D`. Its instruction
-definition names only `I` and `D` as affected flags, so ordinary division
-clears current `I` and `D` while preserving current `O` and `U`; exponent
-overflow and underflow still saturate or flush without changing `O` or `U`.
-
-`SQRT.S` reads `ft` and requires its encoded `fs` field to be zero. Negative
-nonzero inputs produce `sqrt(abs(ft))` and raise current/sticky `I`; negative
-zero and exponent-zero negative encodings preserve a negative-zero result
-without raising `I`. The instruction explicitly clears current `D` alongside
-updating `I`, while preserving current and sticky `O` and `U`.
-
-`RSQRT.S` treats a zero `ft` radicand as division by zero regardless of the
-numerator, so even `0/sqrt(0)` raises current/sticky `D` rather than `I`.
-Negative nonzero radicands use their absolute value and raise current/sticky
-`I`. Saturation and zero results use the sign of `fs/sqrt(ft)`, including the
-sign of a zero radicand. Like `DIV.S`, exponent overflow and underflow change
-the result without changing `O` or `U`.
-
-The provisional timing policy is isolated from execution state. An operation
-issued in cycle `N` may issue another divider operation in cycle `N+7` for
-`DIV.S`/`SQRT.S`, or `N+13` for `RSQRT.S`; its result and `I`/`D` flag updates
-retire at the start of cycle `N+8` or `N+14`, respectively. Two result slots
-represent the one-cycle overlap implied by those latency/interval pairs.
-Unrelated instructions continue while results are pending. Reads or writes of
-a pending destination, plus `CFC1` or `CTC1` access to `FCR31`, interlock until
-retirement; a dependent instruction may issue on the retirement cycle.
-Pending slots, divider occupancy, and branch-proximity diagnostic context
-participate in reset, state hashing, and save-state version 21. Divider work
-continues through exception entry and host
-halt/resume, while the ELF runner drains outstanding results before reporting
-guest return. The branch diagnostic is observational: successfully issued
-divider operations emit a deterministic trace event when they occupy a branch
-delay slot, either of the next two executed instruction positions after the
-delay slot, or either of the first two executed positions at a taken target.
-Stalls do not consume those windows, annulled likely slots establish the same
-post-delay window, and no undocumented execution failure is modeled.
-
 - [x] Exhaustively audit the local manuals and toolchain documentation for
       numeric timing and branch-adjacent pipeline restrictions
 - [x] Implement `DIV.S`, including signed saturation for division by zero and
@@ -790,33 +634,6 @@ post-delay window, and no undocumented execution failure is modeled.
       diagnostic for the documented GNUPro pipeline-bug regions
 - [x] Complete cross-operation raw-bit, flag, overlap, timing, drain,
       save-resume, and legal/hazardous branch-placement validation
-
-This block completes the initial EE COP1 divider unit. Neko can now execute all
-three scalar divider operations with manual-backed raw results and flags,
-continue independent EE work while results are pending, enforce result and
-control-register dependencies, overlap every operation pairing under the
-replaceable timing policy, and preserve in-flight work through exceptions,
-host suspension, save states, and ELF return. Regression traces can also
-identify every documented branch-adjacent hazardous placement without
-changing guest execution. Later pipeline work can replace the provisional
-latencies without changing the arithmetic, continuation, or diagnostic
-contracts established here.
-
-The EE Core User's Manual defines two distinct layers that must not be
-implemented as one change. The C1 pipeline establishes operand fetch in `T`,
-multiply work in `X/Y`, ALU and conversion work in `Y/Z`, result availability
-in `1S`, architectural FPR/FCR31 writeback in `2S`, and S/W-to-`2T`
-bypassing. Separately, the EE fetches two instructions, buffers an unissued
-instruction between `Q` and `R`, assigns instructions to logical Pipe 0 or
-Pipe 1, and applies the pair restrictions in Table 1-3.
-
-Neko currently issues at most one EE instruction per cycle. Most COP1
-operations write architectural state during that issue call; only `LWC1` and
-the divider unit have explicit pending state. The existing one-cycle
-Operate-to-Move interlock approximates Table 1-3's `Y` combination in scalar
-execution, but it is not a substitute for concurrent issue. Implement the
-manual-backed C1 visibility model first, then add a general EE two-wide issue
-foundation before enabling COP1 instruction pairs.
 
 ### C1 Pipeline State and Scoreboard Foundation
 
@@ -860,9 +677,6 @@ foundation before enabling COP1 instruction pairs.
 
 ### Representative C1 ALU Pipeline
 
-Prove one complete Operate path before scaling the stage machinery across the
-remaining families:
-
 - [x] Move `ADD.S` and `SUB.S` through `1T` operand selection, immutable `2T`
       capture, their documented `Y/Z` work, `1S` result availability, and `2S`
       architectural writeback
@@ -876,9 +690,6 @@ remaining families:
       migrating another operation family
 
 ### C1 Unary and Min/Max Migration
-
-Reuse the reviewed ALU path for operations that do not introduce a new
-accumulator or condition-result contract:
 
 - [x] Migrate `ABS.S` and `NEG.S` through their documented stages, preserving
       signed-zero and raw extended-finite behavior
@@ -902,11 +713,7 @@ accumulator or condition-result contract:
 
 ### C1 Multiply and Accumulator Migration
 
-- [x] Resolve ACC operand capture, forwarding, and commit timing: after the
-      local manuals and approved secondary sources left the boundaries
-      undefined, adopt an isolated provisional policy of immutable `2T`
-      capture, `1S` availability with S-to-`2T` bypass, and `2S` architectural
-      commit, pending stronger documentation or hardware measurement
+- [x] Define a replaceable ACC capture, forwarding, and commit timing policy
 - [x] Migrate `MUL.S` and `MULA.S` through captured `T` operands, documented
       `X/Y` multiply work, and ordered FPR or ACC result delivery
 - [x] Migrate accumulator add/subtract and compound
@@ -1098,15 +905,9 @@ accumulator or condition-result contract:
 - [x] Catalogue duplicated policy and weak control vocabulary, including
       instruction-family classification, program-order traversal, cancellation,
       derived occupancy, save-state reachability, and boolean mode parameters
-- [x] Identify methods where large conditional or switch-driven control flow
-      mixes independent policies, and classify each branch set by the invariant
-      it should own before extracting code
-- [x] Treat focused method purpose as mandatory while allowing a component
-      class to retain several closely related hardware responsibilities when it
-      remains the clearest owner of their shared state and sequencing
-- [x] Distinguish behavioral boolean parameters from ordinary state and
-      enablement flags; prioritize only the booleans that make call-site intent
-      or architectural outcomes ambiguous
+- [x] Identify mixed-policy methods and classify their extraction boundaries
+- [x] Audit focused method purpose without fragmenting coherent hardware owners
+- [x] Identify ambiguous behavioral booleans separately from hardware-state flags
 - [x] Rank the findings by correctness risk, change amplification, and
       obstruction to MMI work rather than by file size alone
 - [x] Record justified non-refactors where direct ownership, fixed-capacity
@@ -1254,44 +1055,22 @@ accumulator or condition-result contract:
 - [x] Audit `NekoSystem` construction, clock ordering, interrupt
       synchronization, run control, guest outcome classification, tracing, and
       frontend-facing output as distinct responsibilities
-- [x] Keep hardware ownership and deterministic master-cycle sequencing in one
-      explicit orchestration boundary
-- [x] Extract host-control or observation helpers only where they can remain
-      consumers of core state rather than alternate hardware owners
+- [x] Confirm system-owned hardware and deterministic master-cycle sequencing
+- [x] Separate host-control/observation helpers without duplicating hardware owners
 - [x] Audit VU issue, pipeline orchestration, execution units, writeback,
       flags, and macro/micro coordination for duplicated lifecycle policy
-- [x] Replace positional VU pipeline admission and behavioral booleans with a
-      typed request covering upper and lower issue context, operands, timing
-      family, writeback disposition, and provenance separately from the
-      architectural micro address
-- [x] Centralize shared VU continuation transitions behind explicit fresh
-      start, macro-to-micro handoff, micro-to-macro takeover, Force Break,
-      control-reset, and execution-failure policies while preserving which
-      transitions cancel pipeline membership
-- [x] Split the VU orchestrator callback bridge and post-update paired-lower
-      release into focused family-owned transitions while preserving callback
-      order, XGKICK readiness side effects, pending write accounting, flags,
-      forwarding, and trace publication
+- [x] Replace positional VU admission and behavioral booleans with typed requests
+- [x] Centralize VU start, handoff/takeover, Force Break, reset, and failure policy
+- [x] Separate VU callbacks and paired-lower release into focused transitions
 - [x] Audit GS register handling, transfer, primitive assembly, rasterization,
       texture sampling, and presentation for boundaries with independent
       invariants
-- [x] Separate GS vertex-queue assembly from drawing-kick and rasterizer
-      dispatch behind an explicit submission result while preserving XYZ2
-      versus XYZ3 behavior, strip/fan carry state, primitive counters, and
-      serialized continuation
+- [x] Separate GS vertex assembly from drawing-kick and rasterizer dispatch
 - [x] Audit EEBus, DMA, VIF, and GIF transport for duplicated address,
       readiness, transfer-completion, or arbitration policy
-- [x] Move common DMAC control, status, channel-completion, and interrupt
-      ownership out of the GIF channel while preserving register behavior,
-      master-cycle ordering, and version-24 save-state bytes
-- [x] Centralize the duplicated GIF/VIF1 normal and source-chain register,
-      tag, address-stack, termination, and completion transitions in one
-      fixed-state DMAC policy while retaining channel-specific tag delivery,
-      sink backpressure, counters, and completion signalling
-- [x] Replace the GIF PATH3 interruption Boolean with a typed policy that
-      distinguishes DIRECT-style interruption from DIRECTHL-style deferral
-      without changing queued requests, intermittent IMAGE slicing, masks, or
-      producer retry behavior
+- [x] Move common DMAC control, status, completion, and interrupts out of GIF
+- [x] Share GIF/VIF1 normal and source-chain lifecycle without merging endpoints
+- [x] Replace the PATH3 interruption Boolean with typed DIRECT/DIRECTHL policy
 - [x] Verify CLI, ELF, frame, trace, reset, and save-state workflows remain
       behaviorally identical after the selected boundary changes
 
@@ -1303,76 +1082,28 @@ accumulator or condition-result contract:
       trace, state, framebuffer, and save-state hashes with the baseline
 - [x] Complete an independent read-only review of the resulting architecture
       and resolve concrete correctness or maintainability findings
-- [x] Reconcile `PROJECT.md` with the durable contracts and justified
-      deferrals, then confirm the architecture is ready for the MMI milestone
+- [x] Record durable contracts/deferrals and confirm readiness for MMI
 
 ## Milestone 6: EE Multimedia Extensions
 
-Implement the 91 currently missing MMI semantic operations defined by the
-official EE manuals. `LQ`, `SQ`, `MFSA`, `MTSA`, `MTSAB`, and `MTSAH`, plus
-the twelve scalar multiply/divide operations encoded in the primary MMI class,
-are existing prerequisites rather than duplicate work in this milestone.
-
-Primary sources:
-
-- EE Core User's Manual version 3.1, pages 18-22 and 50-52, for physical and
-  logical pipe routing, `O`/`X`/`Y` issue combinations, 128-bit register use,
-  multimedia families, and multiply/divide latency and throughput.
-- EE Core Instruction Set Manual version 3.1, pages 156-282 and 373-377, for
-  instruction semantics, operand restrictions, fixed fields, nested
-  MMI0/MMI1/MMI2/MMI3 encodings, format selectors, and reserved encodings.
+Implement and validate the 91 MMI semantic operations beyond the existing
+scalar multiply/divide, memory, and SA-register prerequisites.
 
 ### MMI Audit and Architecture Contract
 
-- [x] Inventory all 91 missing semantic operations and classify them into
-      wrapping arithmetic, saturating arithmetic, comparison/selection,
-      logical, shift/funnel, permutation/format, HI/LO transfer, packed word
-      multiply/accumulate, packed halfword multiply/accumulate, and packed
-      divide families
-- [x] Reconcile the instruction inventory with the encoding appendix: direct
-      MMI functions plus the complete MMI0, MMI1, MMI2, and MMI3 tables,
-      including all reserved cells and fixed-zero operand fields
-- [x] Confirm that `LQ`, `SQ`, `MFSA`, `MTSA`, `MTSAB`, and `MTSAH` already
-      provide the required memory and SA-register prerequisites
-- [x] Confirm that ordinary 128-bit MMI operations are Wide Operate
-      instructions issued on logical Pipe 0 through both I0 and I1, completing
-      in the integer A stage, while Table 1-3 `Y` pairings admit a younger
-      LZC, ALU, or MAC1 operation with a one-cycle resource stall
-- [x] Confirm packed multiply/accumulate latency 4 and throughput 2, and packed
-      divide latency and throughput 37, with asynchronous HI/LO interlocks
-- [x] Define `EECore` as the owner of MMI state and continuation, using the
-      existing 128-bit GPR and combined HI/HI1/LO/LO1 architectural state
-      rather than sharing VU execution policy
-- [x] Choose a dedicated fixed-capacity, program-ordered packed-MAC
-      continuation boundary instead of coupling one instruction across the
-      independent scalar MAC0 and MAC1 slots; reserve a single save-state
-      version transition for the first durable MMI continuation state
-- [x] Preserve the existing deterministic undefined-operation stop for
-      manual-undefined operand shapes and divide-by-zero cases without
-      inventing an architectural exception
-- [x] Record the two unresolved instruction-level manual questions separately:
-      undefined HI/LO words after `PHMADH`/`PHMSBH`, and contradictory
-      `PDIVBW` remainder extension; keep those operations blocked until each
-      policy is resolved from approved evidence
-- [x] Expand the milestone into independently reviewable implementation,
-      timing, persistence, guest-integration, and final-conformance blocks
-- [x] Complete an independent read-only review of the audit, architecture
-      contract, and milestone decomposition before implementing MMI
+- [x] Inventory and classify all 91 missing semantic operations
+- [x] Reconcile direct/nested encodings, reserved cells, and fixed fields
+- [x] Confirm existing quadword-memory and SA-register prerequisites
+- [x] Resolve Wide routing and younger LZC/ALU/MAC1 `Y` pairing
+- [x] Resolve packed multiply/divide timing and asynchronous HI/LO interlocks
+- [x] Define core-owned MMI state using existing GPR and HI/LO storage
+- [x] Define dedicated packed-MAC continuation and its persistence boundary
+- [x] Define deterministic stops for manual-undefined operands and zero divisors
+- [x] Identify evidence gaps for `PHMADH`/`PHMSBH` and `PDIVBW`
+- [x] Define reviewable implementation, integration, and conformance blocks
+- [x] Complete an independent audit and architecture review
 
 ### Nested Decode, Metadata, and Wide-Issue Foundation
-
-For every MMI operation enabled in the family blocks below, the enabling
-change must add its `EEOperation`, dependencies, routing, `EEExecutionFamily`,
-and continuation/dispatch metadata together and keep the exhaustive metadata
-tests green. Deferred encodings remain unsupported; do not add unclassified
-operation placeholders ahead of their semantic implementation. Ordinary
-128-bit MMI operations route as Wide Operate on logical Pipe 0 through both I0
-and I1; `PLZCW` uses the existing LZC category. Existing SA operations and
-quadword memory instructions retain their current routing. The first enabled
-Wide operation must also implement the typed one-cycle `Y` continuation and
-its acceptance, dependency, exception, branch-delay, trace, reset,
-halt/resume, hash, and transactional save-state contracts; do not add dormant
-continuation state before a live consumer exists.
 
 - [x] Add explicit nested MMI0, MMI1, MMI2, and MMI3 decode tables while
       preserving the existing primary MMI table for direct functions and
@@ -1529,11 +1260,7 @@ continuation state before a live consumer exists.
 - [x] Implement signed `PDIVW` and unsigned `PDIVUW` over the low word of each
       64-bit half, storing sign-extended quotient and remainder results in the
       corresponding LO and HI halves
-- [x] Before implementing `PDIVBW`, resolve the instruction page's conflict
-      between prose specifying zero-extended 16-bit remainders and
-      pseudocode/diagram specifying sign extension; use sign extension because
-      the four formal assignments, the dataflow diagram, and all three approved
-      local reference-emulator implementations agree on that behavior
+- [x] Resolve the `PDIVBW` remainder-extension conflict before implementation
 - [x] Implement signed broadcast `PDIVBW` over all four source words using the
       low halfword divisor and the resolved remainder-extension policy
 - [x] Model 37-cycle latency and 37-cycle throughput with asynchronous HI/LO
@@ -1569,750 +1296,242 @@ continuation state before a live consumer exists.
       baseline
 - [x] Complete an independent final review of the full MMI milestone and
       resolve every concrete finding
-- [x] Reconcile `PROJECT.md`, run the complete optimized AddressSanitizer
-      check, and run the macOS leak check before closing the milestone
+- [x] Complete optimized AddressSanitizer and macOS leak checks
 
 ## Milestone 7: EE Virtual Memory and Memory-System Foundation
 
-Build the functional EE memory-system foundation required for realistic
-privileged software and later BIOS startup. Cover TLB-managed translation,
-scratchpad mapping, guest-visible cache behavior, precise exceptions,
-deterministic continuation, and conformance without presenting unresolved
-whole-system contention timing as measured hardware behavior.
-
-Keep functional translation and cache correctness separate from replaceable
-timing and arbitration policy. Extend the existing COP0, exception, EE bus,
-trace, state-hash, and transactional persistence boundaries rather than
-creating parallel ownership.
+Support privileged EE software with TLB translation, scratchpad RAM,
+guest-visible caches, precise exceptions, and deterministic continuation.
+Exact whole-system contention timing remains outside this milestone.
 
 ### Evidence and Architecture Plan
 
-- [x] Audit the local SCEI manuals and expand this milestone into independently
-      reviewable blocks and items before implementation. The primary evidence
-      is the EE Core User's Manual version 3.1 pages 23-25, 42-44, and 54-65;
-      the EE Core Instruction Set Manual version 3.1 instruction definitions,
-      exception lists, and encoding tables through page 379; and the EE Kernel
-      Overview and Reference release 2.7 memory-map, cache-coherency,
-      `ExpandScratchPad`, and cache-maintenance descriptions.
-- [x] Resolve the TLB-entry field layout and supported page-mask encodings:
-      `Index.P`, the 48-entry index width, `EntryLo0/1` G/V/D/C/PFN fields,
-      `EntryLo0.S`, `EntryHi` VPN2/ASID, and the seven page sizes from 4 KiB
-      through 16 MiB. The local SCEI manuals remain primary; the approved Sony
-      PS2 Linux sources and local reference implementations corroborate the
-      fields that the manuals name but do not diagram.
-- [x] Resolve the cache-array `CACHE` operation encodings, including I-cache
-      index load/store tag/data, index/hit invalidation and fill, and D-cache
-      index load/store tag/data, writeback/invalidation, and hit operations.
-      Preserve other encodings as unsupported until their behavior is
-      resolved. The local cache manual defines the behavior and indexing
-      rules; approved PS2 system software and emulator sources corroborate the
-      operation numbers.
-- [x] Classify writable masks and reset values for `Index`, `Random`,
-      `EntryLo0`, `EntryLo1`, `Context`, `PageMask`, `Wired`, `EntryHi`,
-      `Status`, `Cause`, `Config`, `TagLo`, and `TagHi`, including the mode,
-      exception/error-level, bootstrap-vector, COP0-usability, interrupt, and
-      exception-reporting fields required by this milestone. Use exact
-      manual- or system-software-backed values where available and record
-      deterministic conservative policies for architecturally undefined or
-      undocumented fields rather than presenting emulator behavior as
-      hardware fact.
-- [x] Complete the virtual-segment privilege and cache-attribute table,
-      including User, Supervisor, and Kernel access, direct-mapped KSEG
-      behavior, TLB-selected cached/uncached/uncached-accelerated attributes,
-      and segment-protection faults.
-- [x] Classify TLB probe/write duplicate-match behavior, `Random`/`Wired`
-      sequencing and replacement, invalid index behavior, and the exact
-      architecturally visible relationship between the 48-entry TLB and the
-      two-entry ITLB/four-entry DTLB accelerators. Duplicate matches and exact
-      `Random` clocking remain undocumented, so use the deterministic policies
-      recorded in `PROJECT.md`.
-- [x] Resolve refill/invalid/modified exception priority, vector selection,
-      nested-EXL behavior, and atomic `BadVAddr`, `Context`, `EntryHi`,
-      `Cause`, `EPC`, and `Status` side effects for instruction and data
-      accesses.
-- [x] Classify the remaining `CACHE` corner cases: hit-status reporting,
-      `TagLo`/`TagHi` transfer details, invalid/dirty/locked-line effects,
-      required `SYNC` ordering, branch-predictor maintenance encodings, and
-      behavior for invalid addresses or reserved cache attributes. Preserve
-      undocumented branch-predictor, `TagHi`, and reserved-attribute behavior
-      as explicit unsupported/provisional boundaries.
-- [x] Establish one CPU-side EE memory-system owner between `EECore` and
-      `EEBus`. It owns `Index`, `Random`, `EntryLo0/1`, `Context`, `PageMask`,
-      `Wired`, `EntryHi`, `Config`, `TagLo`, `TagHi`, 48 even/odd TLB entry
-      pairs, derived ITLB/DTLB lookup state, instruction and data caches,
-      scratchpad RAM, and any functional memory continuations. `EECore` owns
-      `BadVAddr`, Count/Compare, Status, Cause, EPC/ErrorEPC, instruction issue,
-      and precise exception entry; `EEBus` remains the physical-address
-      interconnect and device/main-memory owner.
-- [x] Define typed fetch, load, store, prefetch, and cache-maintenance requests
-      and results carrying virtual address, access kind, width, privilege,
-      translation outcome, physical address, cache attribute, and fault
-      metadata. Remove direct guest virtual-address interpretation from
-      `EEBus`; debugger, loader, and host inspection paths remain explicit
-      physical or privileged interfaces.
-- [x] Define persistence for architecturally visible COP0/MMU state and all 48
-      architectural TLB entries,
-      scratchpad bytes, cache data/tag/state/LRF/lock bits, and any in-flight
-      operation whose completion can change later architectural behavior.
-      Rebuild pure ITLB/DTLB lookup accelerators from the architectural TLB
-      after reset or load only while their residency and replacement state
-      cannot affect guest behavior, timing, traces, or hashes; otherwise treat
-      that state as a deterministic persistence surface.
-- [x] Require translation lookup, cache hit paths, and aligned memory access
-      allocation-free. Isolate refill duration, writeback scheduling, CPU/DMA
-      scratchpad arbitration, non-blocking-load timing, hit-under-miss timing,
-      and system-bus contention behind replaceable policy; do not label an
-      emulator scheduling choice as measured hardware timing.
+- [x] Audit the local manuals and define independently reviewable blocks
+- [x] Resolve the 48-entry TLB layout and seven supported page sizes
+- [x] Resolve instruction/data cache-array operation encodings
+- [x] Classify COP0 writable masks, fixed bits, reset values, and evidence gaps
+- [x] Define virtual-segment privileges, cache attributes, and protection faults
+- [x] Define TLB probe/replacement behavior and derived ITLB/DTLB accelerators
+- [x] Resolve memory-exception priority, vectors, and architectural side effects
+- [x] Classify cache-maintenance corner cases and unsupported behavior
+- [x] Establish `EEMemorySystem` ownership of translation, caches, and scratchpad
+      while retaining core-owned exceptions and a physical-only bus
+- [x] Define typed fetch, data, prefetch, and cache-maintenance boundaries
+- [x] Define persistence for COP0/MMU, TLB, scratchpad, caches, and continuations
+- [x] Keep memory hot paths allocation-free and timing policies replaceable
 
 ### COP0 and TLB Management
 
-- [x] Add the required translation and cache-control COP0 registers with
-      manual-backed reset values, fixed bits, writable masks, checked accessors,
-      canonical hashing, and direct state tests.
-- [x] Add `MFC0` and `MTC0` through a focused COP0 register-transfer family,
-      including low-word transfer/sign-extension behavior, COP0 usability,
-      documented update ordering, register-specific masks, and register-zero
-      behavior.
-- [x] Implement `TLBR`, `TLBWI`, `TLBWR`, and `TLBP` against one typed
-      48-entry TLB store, including `Index` probe-failure state, `Random` and
-      `Wired` interaction, global mappings, ASIDs, supported page masks,
-      even/odd page selection, scratchpad selection, and deterministic handling
-      of manual-defined undefined cases.
-- [x] Add complete primary/COP0/C0 encoding coverage for the new operations,
-      every required-zero field, reserved table cells, and every remaining
-      manual-listed COP0 operation without weakening the existing `ERET`
-      boundary. Explicitly schedule or defer breakpoint/performance operations
-      and `BC0F`, `BC0FL`, `BC0T`, `BC0TL`, `EI`, and `DI`; do not conflate a
-      valid unsupported operation with a reserved encoding.
-- [x] Cover COP0/TLB instruction issue categories, pairing restrictions,
-      branch-delay legality, `SYNC.P` visibility, exception cancellation, reset,
-      repeated execution, traces, and deterministic state hashes.
-- [x] Complete an independent review of the COP0 and TLB-management block.
+- [x] Add translation/cache-control COP0 registers with masks, reset, and hashing
+- [x] Implement `MFC0`/`MTC0` transfer, usability, and update-order semantics
+- [x] Implement `TLBR`, `TLBWI`, `TLBWR`, and `TLBP` across all 48 TLB entries
+- [x] Audit COP0 encodings, fixed fields, reserved cells, and valid deferred work
+- [x] Cover issue/pairing, delay slots, visibility, exceptions, reset, and hashes
+- [x] Complete an independent COP0/TLB-management review
 
 ### Functional Address Translation
 
-- [x] Add typed, allocation-free instruction and data translation entry points
-      to `EEMemorySystem`, then implement one side-effect-free segment
-      classifier for User, Supervisor, Kernel, and `EXL`/`ERL` accesses.
-      Cover mapped and direct segments, segment protection, cache attributes,
-      32-bit virtual/physical address behavior, the existing KSEG aliases,
-      unsupported cache attributes, and alignment-before-translation ownership
-      at the existing `EECore` access families.
-- [x] Implement full-associative architectural translation against all 48
-      canonical even/odd TLB pairs, including lowest-index deterministic
-      duplicate selection, ASID/global matching, all seven documented page
-      sizes, even/odd selection, valid/dirty permissions, physical frame
-      construction, scratchpad selection, and typed refill/invalid/modified
-      fault metadata without mutating exception-owned state. Add the two-entry
-      ITLB and four-entry DTLB only after the architectural path is covered;
-      keep their replacement deterministic and their contents derived,
-      untraced, unhashed, and unserialized while residency cannot affect
-      guest-visible behavior or continuation.
-- [x] Route both front-end instruction candidates and the public fetch path
-      through the instruction translation entry point, then migrate byte,
-      halfword, word, doubleword, quadword, merge, COP1, and COP2 accesses
-      family by family through the typed data path. Make `EEBus` guest traffic
-      physical-address-only and remove its implicit KSEG and application-alias
-      translation while preserving alignment priority, merge semantics,
-      delayed COP1 fault provenance, FIFO stalls, device access, and existing
-      issue ownership.
-- [x] Complete the functional-translation conformance matrix for segment
-      boundaries, privilege and exception modes, ASIDs, global entries, all
-      page sizes and boundaries, even/odd selection, physical aliases,
-      permissions, accelerator replacement, and instruction/data consistency.
-      Verify unchanged version-29 persistence and canonical hashes for derived
-      accelerators, run focused, optimized, and sanitizer validation, complete
-      an independent review of the typed/TLB foundation, and complete a final
-      independent review after full access-path integration.
+- [x] Add typed translation and segment classification for all privilege modes
+- [x] Implement full TLB translation, permissions, faults, and derived ITLB/DTLB
+      acceleration across all supported page sizes and mapping types
+- [x] Route public/front-end fetch and every data-access family through
+      translation; remove virtual-address interpretation from `EEBus`
+- [x] Complete translation conformance, persistence compatibility, optimized and
+      sanitizer checks, and independent foundation/integration reviews
 
 ### Precise Memory Exceptions
 
-- [x] Add distinct internal TLB modified, load/fetch refill, load/fetch invalid,
-      store refill, and store invalid exception types. Map refill and invalid
-      to their shared architectural Cause codes without losing the distinction
-      needed for vector selection, diagnostics, hashing, or save-state
-      validation.
-- [x] Keep translation and later cache lookup side-effect free until
-      program-order fault selection. Add one focused `EEMemorySystem` method
-      that commits `Context.BadVPN2` and `EntryHi.VPN2` while preserving ASID
-      and reserved state, and have `EECore::enterException()` coordinate that
-      mutation atomically with `BadVAddr`, Cause, EPC/BD, and Status updates.
-- [x] Implement the researched vector contract: first-level no-match refill
-      uses the normal or bootstrap refill vector, Invalid and Modified use the
-      corresponding general vector, and every nested-EXL memory exception uses
-      the general vector without replacing EPC or BD while still updating the
-      newest Cause and address-related registers.
-- [x] Define and test the priority chain from alignment through segment
-      protection, TLB translation and permissions, unsupported cache routing,
-      and physical bus failure. Cover fetch plus byte, halfword, word,
-      doubleword, quadword, and merge data accesses in both applicable
-      directions without permitting a lower-priority stage to mutate state.
-- [x] Integrate instruction translation faults with public fetch and the
-      two-wide issue/staging front end. An older fetch fault prevents younger
-      acceptance, a younger fetch fault waits for older completion,
-      branch-delay ownership remains exact, and exception entry cancels only
-      younger continuation.
-- [x] Integrate immediate data faults across ordinary integer, merge, and COP2
-      memory operations. Preserve the older-fault/younger-fault issue contract,
-      virtual fault address, direction-specific Cause code, trace outcome, and
-      absence of cache, bus, register, or memory mutation after the selected
-      fault.
-- [x] Integrate delayed COP1 load/store faults through global program order.
-      Preserve older completion, cancel faulting and younger delayed work,
-      retain branch-delay provenance, and prevent younger front-end, COP1, or
-      interrupt ownership from overtaking the oldest memory exception.
-- [x] Cover exception-state lifecycle boundaries including interrupt delivery,
-      `ERET`, host halt/resume, external PC redirection, reset, and
-      transactional save/restore. Verify deterministic hashes and byte-stable
-      saves without introducing new persistent state beyond the expanded
-      exception and existing continuation metadata.
-- [x] Run focused and complete optimized validation, run the optimized
-      AddressSanitizer check, and complete an independent read-only review of
-      precise memory exceptions. Resolve every concrete finding before closing
-      the block.
+- [x] Distinguish TLB modified, refill, and invalid faults internally
+- [x] Commit selected memory-fault register updates atomically through `EECore`
+- [x] Implement refill/general vectors, bootstrap selection, and nested exceptions
+- [x] Cover alignment, protection, translation, cache, and bus-fault priority
+- [x] Integrate precise fetch faults with public fetch and two-wide issue
+- [x] Integrate integer, merge, and COP2 data faults without partial effects
+- [x] Integrate delayed COP1 faults with ordered completion and cancellation
+- [x] Cover interrupts, `ERET`, halt/restart, reset, and deterministic save/restore
+- [x] Complete optimized/sanitizer validation and independent exception review
 
 ### Scratchpad RAM and DMA Visibility
 
-- [x] Add memory-system-owned 16 KiB scratchpad storage, organized as 1024
-      qwords, with checked byte-through-qword access addressed by bits `13:0`.
-      Keep the storage untagged, uncached, fixed-capacity, and allocation-free.
-- [x] Route CPU scalar and merge loads/stores through the typed scratchpad
-      result without bypassing alignment, translation, exception, trace, or
-      program-order ownership.
-- [x] Route CPU GPR/COP2 quadwords and delayed COP1 loads/stores through the
-      same scratchpad boundary, including FIFO-readiness separation and
-      precise-fault behavior.
-- [x] Add explicit qword-aligned physical scratchpad access for the DMAC and a
-      functional CPU/DMA access policy. Preserve shared visibility and bounds
-      now; keep alternate-cycle arbitration, DMA priority, burst timing, and
-      cycle stealing behind a replaceable timing policy.
-- [x] Add guest-visible channel-8 (`fromSPR`) and channel-9 (`toSPR`) register
-      owners with mapped `CHCR`, `MADR`, `QWC`, `SADR`, channel-specific
-      `TADR`, stopped-register write rules, and integration with `D_CTRL`,
-      `D_STAT`, reset, and system scheduling.
-- [x] Implement normal-mode `fromSPR` and `toSPR` qword transfers with physical
-      main-bus addressing, SPR address wrapping, retry without consumption,
-      completion state, and channel interrupts.
-- [x] Add `D_SQWC` and supported interleave-mode transfers in both directions,
-      including transfer/skip progression, register visibility, completion,
-      and deterministic rejection of unsupported channel modes. Keep exact
-      burst, release-cycle, and bus-priority timing deferred to the timing
-      policy.
-- [x] Add canonical hashing and transactional persistence for scratchpad bytes,
-      common interleave state, channel registers, and active transfer
-      continuation. Cover malformed-state rejection and byte-stable
-      save/restore.
-- [x] Complete the CPU/DMA integration matrix for aliases, every implemented
-      width, overlapping access, reset, repeated execution, physical DMA
-      behavior, VU-memory normal-mode endpoints, and the documented lack of
-      automatic cache or scratchpad snooping.
-- [x] Complete an independent review of scratchpad and DMA integration.
+- [x] Add fixed-capacity 16 KiB scratchpad storage and checked scalar/qword access
+- [x] Route scalar and merge accesses through the scratchpad boundary
+- [x] Route GPR/COP2 quadwords and delayed COP1 accesses through the same boundary
+- [x] Add physical DMAC scratchpad access with functional CPU/DMA visibility
+- [x] Map channel-8/channel-9 registers and integrate common DMAC control/reset
+- [x] Implement normal `fromSPR`/`toSPR` transfers, wrapping, retry, and interrupts
+- [x] Implement `D_SQWC` interleave transfers and reject unsupported channel modes
+- [x] Add scratchpad/DMA hashing and transactional continuation persistence
+- [x] Complete CPU/DMA width, alias, overlap, reset, and non-coherence conformance
+- [x] Complete an independent scratchpad/DMA review
 
 ### Guest-Visible Cache Access Foundation
 
-- [x] Add fixed-capacity cache-array types owned by `EEMemorySystem`: a 16 KiB
-      two-way instruction cache and 8 KiB two-way data cache with 64-byte
-      lines, virtual indices, physical tags, documented valid/dirty/LRF/lock
-      metadata, checked inspection helpers, and reset-invalid behavior.
-- [x] Establish focused typed cache access results and internal line
-      fill/writeback helpers without creating a second memory owner. Keep
-      functional accesses synchronous and allocation-free for now, preserve
-      the existing precise-fault selection boundary, and leave refill duration,
-      non-blocking loads, hit-under-miss, and shared-bus timing behind a future
-      replaceable policy.
-- [x] Route cached instruction fetch through the instruction cache, including
-      physical-tag lookup, missed-quadword-first sequential refill, full-line
-      completion before restart, instruction-cache enable control, invalid-way
-      preference, instruction-cache LRF replacement, physical aliases, and
-      instruction/data incoherence.
-- [x] Route cached data loads through the data cache for every implemented
-      scalar, merge, COP1, COP2, and quadword path. Implement hit extraction,
-      missed-quadword-first allocation, functional early restart, line-boundary
-      handling, and cache-disabled behavior without bypassing translation,
-      device readiness, trace ownership, or precise exceptions.
-- [x] Route cached data stores through write allocation and write-back state,
-      including partial-width and merge updates, dirty eviction, physical bus
-      writeback, self-alias behavior, and absence of automatic DMA coherence.
-- [x] Implement data-cache line locking and the deterministic policy for
-      manual-defined undefined cases where replacement candidates are locked.
-      Preserve clean locked-line writes without setting Dirty, exclude a locked
-      way when the other way is available, and define the all-ways-locked miss
-      policy explicitly.
-- [x] Complete an independent review of ordinary cached fetch, load, store,
-      writeback, replacement, locking, aliases, and DMA visibility.
+- [x] Add fixed-capacity 16 KiB instruction and 8 KiB data caches with inspection
+- [x] Define typed cache access, synchronous refill/writeback, and fault boundaries
+- [x] Implement cached fetch, refill, replacement, enable control, and aliases
+- [x] Implement cached loads for every access family, including early restart
+- [x] Implement write allocation, partial stores, dirty eviction, and writeback
+- [x] Implement line locking and a replaceable all-ways-locked miss policy
+- [x] Complete an independent cache-access and DMA-visibility review
 
 ### Cache Maintenance, Ordering, and Conformance
 
-- [x] Add `CACHE` decode, instruction metadata, and one typed cache-maintenance
-      request/result boundary between `EECore` and `EEMemorySystem`. Recognize
-      every researched cache-operation value, reject reserved encodings, keep
-      branch-predictor operations valid-but-unsupported, preserve COP0
-      usability and issue ordering, and let `EECore` commit `Status.CH` only
-      from completed hit operations.
-- [x] Implement instruction-cache index load/store tag and data operations.
-      Preserve direct virtual-index and address-bit way selection, 32-bit
-      `TagLo` data-word transfer, documented tag/LRF/valid fields, unchanged
-      `Status.CH`, and the lack of inferred `TagHi` array effects.
-- [x] Implement instruction-cache index invalidation/fill and translated hit
-      invalidation. Preserve atomic fills, refill failures, direct index
-      selection, translated physical-tag lookup, precise hit-operation faults,
-      hit/miss `Status.CH`, and no-mutation misses.
-- [x] Implement data-cache index load/store tag and data operations. Preserve
-      direct virtual-index and address-bit way selection, 32-bit `TagLo`
-      data-word transfer, dirty/valid/lock/LRF fields, unchanged `Status.CH`,
-      and the lack of inferred `TagHi` array effects.
-- [x] Implement data-cache index writeback/invalidation operations. Preserve
-      dirty/valid/lock/LRF transitions, writeback-before-mutation, complete
-      line preservation on failure, direct index selection, and no
-      translation requirement.
-- [x] Implement translated data-cache hit writeback/invalidation operations.
-      Preserve precise hit-operation faults, physical-tag lookup, hit/miss
-      `Status.CH`, writeback failures, no-mutation misses, and the documented
-      dirty/valid/lock/LRF transitions.
-- [x] Add `PREF` decode, metadata, and exhaustive `CACHE`/`PREF` encoding
-      validation, then implement ignored addressing exceptions, no-op behavior
-      for uncached targets, cached allocation behavior, hint validation, and
-      interaction with `Config` cache-enable controls.
-- [x] Preserve uncached and uncached-accelerated traffic as physical-bus
-      accesses with no implicit cache snooping. Keep `SYNC`/`SYNC.L` as the
-      functional software ordering boundary while deferring UCAB throughput
-      and exact bus contention timing.
-- [x] Complete the guest-visible cache conformance matrix for refill order,
-      replacement, locking, physical aliases, separate I/D visibility,
-      self-modifying code, writeback/invalidate workflows, DMA coherence
-      workflows, cache-line boundaries, reset, repeated execution, and
-      cache-enable transitions.
-- [x] Complete a risk-based independent review after cache-maintenance
-      instruction integration, then a final read-only review of the complete
-      cache-maintenance, ordering, and conformance block.
+- [x] Add typed `CACHE` decode/admission; keep branch-predictor work unsupported
+- [x] Implement instruction-cache index tag/data load and store
+- [x] Implement instruction-cache index fill/invalidate and translated invalidate
+- [x] Implement data-cache index tag/data load and store
+- [x] Implement atomic data-cache index writeback/invalidate
+- [x] Implement translated data-cache hit writeback/invalidate and precise faults
+- [x] Implement `PREF` and exhaustively validate `CACHE`/`PREF` encodings
+- [x] Preserve uncached access and `SYNC`/`SYNC.L` ordering without cache snooping
+- [x] Complete cache, self-modifying-code, DMA-coherence, and lifecycle conformance
+- [x] Complete independent instruction-integration and final block reviews
 
 ### Determinism, Persistence, and Diagnostics
 
 #### Memory Observation Contract
 
-- [x] Define one allocation-free typed memory-observation record at the
-      `EECore` memory boundary. Retain the original virtual address and data
-      payload while adding translated physical address, access kind, cache
-      attribute, main-bus/scratchpad route, cache bypass/hit/refill/allocation
-      result, and precise translation or physical-bus failure. Keep pure
-      ITLB/DTLB accelerator residency out of the observation contract.
-- [x] Route instruction fetch and every implemented immediate or delayed data
-      access through the observation record without changing issue, exception,
-      retry, or device-readiness ownership. Pack it into the existing
-      instruction-level trace event shape with explicit masks and exhaustive
-      encoding tests, then prove deterministic trace hashes across aliases,
-      TLB faults, cache hits/refills/writebacks, scratchpad accesses, and bus
-      failures.
-- [x] Complete a focused independent review of the memory-observation schema,
-      routing coverage, and trace compatibility before changing persistence
-      diagnostics.
+- [x] Define typed virtual/physical memory observations with routing and faults
+- [x] Observe all fetch/data paths through versioned, encoding-tested traces
+      without changing execution behavior
+- [x] Complete an independent observation-schema and trace-compatibility review
 
 #### Memory-State Hashing and Transactional Validation
 
-- [x] Audit every architectural and continuation field owned by
-      `EEMemorySystem`, `EECore`, and scratchpad DMA against canonical hashes
-      and the versioned payload. Add any missing state without serializing
-      derived ITLB/DTLB residency or transient observations.
-- [x] Centralize pure memory-state invariants shared by runtime assertions and
-      save-state rejection. Reject malformed TLB page masks, impossible cache
-      tag/state combinations, invalid replacement/lock state, inconsistent
-      memory continuation, and payload-size mismatches before commit while
-      preserving transactional load and the current format when no new
-      serialized state is required.
-- [x] Prove byte-identical consecutive saves, save/load into a dirty
-      destination, deterministic state hashes, and identical completion across
-      TLB faults, cache refills/writebacks, scratchpad DMA, interrupts, host
-      halts, and execution restarts.
+- [x] Audit memory/core/DMA state against canonical hashes and persistence
+- [x] Share memory-state invariants and reject malformed state before commit
+- [x] Prove deterministic saves, dirty-destination loads, and continuation across
+      faults, cache transfers, DMA, interrupts, halts, and restarts
 
 #### Schema-Aware Save-State Diagnostics
 
-- [x] Establish the optional diagnostic-observer contract in
-      `SaveStateWriter` and `SaveStateReader`. Define scoped component, field,
-      and array-element paths; scalar and byte-range value kinds; absolute and
-      payload-relative byte ranges; and path-aware reader failures. Prove that
-      an absent observer preserves ordinary save/load allocation behavior,
-      bytes, and transaction structure.
-- [x] Route the complete container and version-31 payload codec through the
-      observer-aware primitives. Report every authoritative field's path,
-      range, type, and decoded value, include the active field path and offset
-      in decode failures, retain large byte arrays as ranges by default, and
-      preserve the single-payload-allocation transaction and byte layout.
-- [x] Add a retained save-state diagnostic schema in `neko_diagnostics` that
-      consumes codec observations, sorts patched fields by container offset,
-      defines stable scalar and byte-range formatting, distinguishes container
-      from payload offsets, and hashes large ranges without retaining their
-      bytes by default.
-- [x] Build exact-path field location and semantic-diff operations over the
-      retained schema without adding a second parser. Report additions,
-      removals, metadata changes, scalar changes, and byte-range changes in
-      deterministic path order.
-- [x] Expose inspect, semantic-diff, and field-location workflows through
-      `neko save-state inspect|diff|locate`, with explicit opt-in byte expansion
-      for selected ranges and focused command-line contract coverage.
-- [x] Add a path-based save-state mutation helper for tests that resolves
-      exact codec fields, bounds mutations to their encoded ranges, and
-      refreshes the container checksum without embedding layout offsets.
-- [x] Migrate malformed-state and transactional-load tests from hard-coded
-      byte offsets to exact schema paths across container, system, EE
-      continuation, cache/TLB, graphics, and DMA state.
-- [x] Remove obsolete corruption offsets while retaining the version field,
-      whole-container byte count, and fingerprint fixtures as independent
-      layout guards.
+- [x] Add optional codec observers with field paths, byte ranges, and decode errors
+      while preserving unobserved save/load behavior
+- [x] Observe the complete container/payload without changing bytes or transactions
+- [x] Retain a diagnostic schema with stable formatting and hashed large ranges
+- [x] Add exact-path lookup and deterministic semantic diff without a second parser
+- [x] Expose `neko save-state inspect|diff|locate` with opt-in byte expansion
+- [x] Add bounded, path-based test mutation with checksum repair
+- [x] Migrate malformed-state and transactional-load tests to schema paths
+- [x] Remove corruption offsets while retaining independent layout guards
 
 #### Deterministic Diagnostic Closure
 
-- [x] Audit representative translation, cache, persistence, and arbitration
-      failures against the existing assertions, structured traces, and
-      save-state diagnostics. Add a focused diagnostic only for a demonstrated
-      ambiguity; otherwise retain the current surfaces explicitly. Keep ship
-      hot paths allocation-free and avoid broad per-access logging.
-- [x] Run the complete deterministic continuation matrix for traces, hashes,
-      consecutive saves, dirty-destination loads, faults, refills/writebacks,
-      scratchpad accesses, interrupts, host halts, and restarts.
-- [x] Complete an independent final review of deterministic observation,
-      memory-state persistence, schema diagnostics, and transactional failure
-      behavior.
+- [x] Audit memory-system failures for demonstrated diagnostic gaps
+- [x] Complete deterministic trace, hash, save/load, and lifecycle conformance
+- [x] Complete an independent observation, persistence, and diagnostics review
 
 ### Guest Conformance and Milestone Closure
 
-Close the milestone with independently authored guest evidence over the
-already-complete host conformance foundation. This block adds no second memory
-owner or guest-only execution path: guests configure hardware through ordinary
-COP0, load/store, `CACHE`, DMAC, exception, and return-to-host interfaces.
-`EECore` remains the owner of issue and precise exceptions,
-`EEMemorySystem` remains the sole translation/cache/scratchpad owner, and
-`EEBus` remains physical-only. Guest result blocks and committed ELFs are test
-fixtures rather than architectural state; no save-state version or production
-trace extension is expected unless the coverage audit demonstrates a real
-observability gap.
+Validate the completed memory system with independently authored guests and a
+bounded BIOS experiment.
 
-- [x] Audit the completed host conformance coverage against the closure
-      contract. Map segment boundaries, all 48 TLB entries, all supported page
-      masks, ASID/global matching, permissions and exception priority, every
-      cache set/way/state transition, scratchpad CPU/DMA visibility, malformed
-      save states, reset/restart, and unchanged direct-mapped behavior to
-      existing tests. Add only missing host cases and record the exact guest
-      behaviors that still need end-to-end evidence.
-- [x] Add an independently authored COP0/TLB-management guest covering
-      `MFC0`/`MTC0`, `TLBP`, `TLBR`, `TLBWI`, `TLBWR`, `Random`/`Wired`, and
-      deterministic probe/read/write result blocks through ordinary decoded
-      execution.
-- [x] Add an independently authored mapped-memory guest covering every
-      supported page size, even/odd boundaries, ASID and global mappings,
-      load/store permissions, and precise refill/invalid/modified exception
-      metadata through a guest exception handler.
-- [x] Add an independently authored scratchpad guest covering CPU accesses,
-      channel-8/channel-9 normal and interleave DMA visibility, completion and
-      interrupt state, address wrapping, and the documented absence of
-      automatic cache coherence.
-- [x] Add an independently authored cache-workflow guest covering instruction
-      and data cache maintenance, physical and virtual aliases, writeback and
-      invalidation, line locking, DMA visibility, cache-enable transitions,
-      and self-modifying code.
-- [x] For each guest, pin the host-readable result block, relevant
-      architectural and exception registers, memory/cache outcomes,
-      instruction totals and cycle totals only where the current functional
-      model defines them, deterministic trace/state hashes, source provenance,
-      exact regeneration command, and generated ELF SHA-256. Keep committed
-      ELFs optional to regenerate and keep PS2DEV out of normal build
-      dependencies.
-- [x] Run the focused guest and host conformance tests, then the complete
-      optimized repository check. Compare representative pre-milestone guest
-      output, public trace encoding, canonical state hashes, and version-31
-      save-state bytes or semantic diffs, with an explicit explanation for
-      every intentional difference.
-- [x] Complete the milestone architecture and maintainability review. Inspect
-      the EE memory-system implementation and immediate integration boundaries
-      for duplicated ownership or validation, consolidatable interfaces,
-      behavioral boolean parameters, mixed-purpose methods, dependency
-      direction, and provisional structures whose replacement trigger has
-      arrived. Apply only bounded behavior-preserving repairs, validate them,
-      and record larger follow-up work explicitly.
-- [x] Complete an independent final review of the full memory-system milestone,
-      resolve every concrete finding, run the optimized AddressSanitizer and
-      native macOS leak checks, reconcile `PROJECT.md`, and close the milestone.
-- [x] Run a bounded BIOS-startup experiment only after conformance closure and
-      use the first unsupported architectural dependency to plan the next
-      milestone without folding speculative BIOS work into this one.
-      The experiment maps an explicit 4 MiB read-only Boot ROM at physical
-      `0x1fc00000`, starts the EE at reset vector `0xbfc00000`, and exposes a
-      bounded `--bios <path> --cycles <count>` diagnostic run. The supplied
-      US BIOS stopped deterministically before retiring its first instruction:
-      `0x401a7800`, an `MFC0` read of COP0 register 15 (`PRId`), which is not
-      yet implemented.
+- [x] Audit host conformance and identify missing end-to-end guest evidence
+- [x] Add a COP0/TLB-management guest with probe/read/write result blocks
+- [x] Add a mapped-memory guest covering page sizes, mappings, permissions,
+      and precise exceptions through a guest handler
+- [x] Add a scratchpad guest covering CPU, normal/interleave DMA, and interrupts
+- [x] Add a cache-workflow guest covering maintenance, aliases, locking,
+      DMA visibility, cache controls, and self-modifying code
+- [x] Pin guest results, deterministic hashes, provenance, and regeneration;
+      keep PS2DEV optional for ordinary builds
+- [x] Complete optimized conformance and pre-milestone compatibility comparisons
+- [x] Complete the memory-system architecture and maintainability review
+- [x] Complete independent final review, sanitizer, and native leak checks
+- [x] Add a bounded `--bios` startup diagnostic and use its first unsupported
+      dependency to scope the next milestone
 
 ## Milestone 8: IOP Execution and Platform Foundation
 
-Build an independently testable IOP subsystem around the R3000A execution
-core, privileged state, memory map, interrupts, timers, and the minimum common
-platform required by authored IOP programs. Do not make BIOS progress a
-prerequisite for validating processor and platform contracts. Real DMA
-channels remain with the SIF, SPU2, CD/DVD, and other endpoint milestones
-rather than introducing endpoint-free policy here.
-
-Detailed evidence, architectural ownership, implementation profiles, and
-unresolved hardware questions are maintained in `PROJECT.md`.
+Build an independently testable R3000A IOP subsystem with memory, caches,
+exceptions, interrupts, timers, and persistence. BIOS startup and endpoint DMA
+remain with their owning milestones.
 
 ### Evidence Closure and EE Startup Prerequisite
 
-- [x] Audit the local manuals and split Milestone 8 into independently
-      reviewable evidence, CPU, memory, exception, platform-device,
-      integration, persistence, conformance, and review blocks, with explicit
-      component ownership and dependency direction.
-- [x] Resolve the EE COP0 register-15 `PRId` contract exposed by the BIOS
-      experiment from approved evidence.
-- [x] Add focused `MFC0 PRId` tests, implement the smallest read-only constant
-      through the existing EE COP0 boundary, validate it, and rerun the bounded
-      BIOS experiment once. Record the resulting reserved EE MMIO compatibility
-      access for the Milestone 9 BIOS-integration audit.
-- [x] Establish an approved authoritative R3000A instruction and privileged
-      architecture source and pin it locally with provenance and integrity
-      metadata.
-- [x] Produce a source-linked R3000A contract matrix covering instruction
-      behavior, privileged state, exceptions, reset, memory, caches, and
-      undefined cases, classified as implemented, deferred, or evidence-gated.
-- [x] Resolve the retail IOP CPU identity and privileged-state profile
-      before fixing privileged-state interfaces, including COP0, TLB presence,
-      write-buffer visibility, reset policy, and undefined-edge behavior.
-- [x] Resolve the published-evidence limits for the retail IOP cache and
-      scratchpad profile. Preserve the proven cache behavior and separate
-      1 KiB scratchpad, reject uncorroborated programmable relocation, and
-      keep exact cache capacities behind locally replaceable constants rather
-      than blocking on unavailable retail-hardware measurements.
-- [x] Resolve the retail IOP RAM size, reset vector, ROM relationship, and
-      physical memory aliases, including the documented 1 KiB scratchpad's
-      address, from approved evidence before fixing those values in `IOPCore`
-      or `IOPBus` production interfaces.
-- [x] Resolve the software-visible IOP INTC and timer physical register maps,
-      reset values, writable masks, acknowledgement behavior, and interrupt
-      cause assignments from approved evidence before fixing those values in
-      platform-device interfaces.
+- [x] Audit the local manuals and define reviewable IOP blocks and ownership
+- [x] Resolve the EE `PRId` contract exposed by the BIOS experiment
+- [x] Implement/test read-only EE `PRId`; rerun the bounded BIOS experiment and
+      defer its reserved-MMIO dependency to Milestone 9
+- [x] Archive an authoritative R3000A architecture source with provenance
+- [x] Produce a source-linked R3000A contract and deferred-work matrix
+- [x] Resolve the retail CPU, COP0, reset, and privileged-state profile
+- [x] Define the cache/scratchpad profile and replaceable provisional geometry
+- [x] Resolve RAM, reset vector, shared ROM, scratchpad, and physical aliases
+- [x] Resolve INTC/timer register maps, reset, masks, acknowledgements, and causes
 
 ### IOP Core and Physical-Memory Foundation
 
-- [x] Add fixed-width IOP architectural types and one `IOPCore` owner for the
-      program counter, 32 GPRs, HI/LO, approved COP0 state, branch/delay
-      continuation, pending exception, execution state, stop reason, and cycle
-      count. Keep not-yet-executable continuations inactive but structurally
-      valid, reset every deterministic field explicitly, and expose checked
-      read-only inspection for tests and diagnostics.
-- [x] Add one `IOPBus` physical-address boundary with the approved 2 MiB RAM
-      and four-way low mirror, immutable shared 4 MiB ROM view, and distinct
-      fixed 1 KiB scratchpad. Provide little-endian scalar access, alignment
-      checks, typed mapped/read-only/unmapped outcomes, and explicit host
-      loading/inspection methods. Guest traffic must not gain a host shortcut
-      or silently wrap addresses outside the approved RAM mirror.
-- [x] Connect `IOPCore` instruction fetch and data access only through
-      `IOPBus`. Give the core one side-effect-free virtual-segment classifier
-      for the selected kuseg/kseg0/kseg1/kseg2 policy and typed cached,
-      uncached, protection, alignment, and bus outcomes. Keep the core as the
-      sole owner of precise exception selection and architectural commit; do
-      not allocate cache contents or claim cache timing in this block.
-- [x] Complete an independent review of IOP state ownership, reset invariants,
-      virtual/physical dependency direction, physical range boundaries, and
-      host-versus-guest memory access before decode builds on them.
+- [x] Add `IOPCore` architectural state, continuations, reset, and inspection
+- [x] Add typed `IOPBus` access to RAM/mirrors, shared immutable ROM, and scratchpad
+- [x] Connect core fetch/data access through segment classification and the bus,
+      retaining core-owned exceptions and commit
+- [x] Complete an independent state-ownership and memory-boundary review
 
 ### R3000A Decode and Integer Execution
 
-- [x] Add one fixed-size decoded-instruction representation and table-driven
-      primary/SPECIAL/REGIMM/COP0 classification with a complete
-      supported/reserved/valid-but-deferred encoding audit. Pin every opcode,
-      nested function field, and required-zero field before adding execution
-      behavior.
-- [x] Add one instruction-boundary fetch/decode/effect/commit path in
-      `IOPCore`. Keep decode pure, represent destination/HI/LO/control-flow/
-      exception effects explicitly, protect register zero at the final write
-      gate, and advance PC, retired-instruction count, and functional cycle
-      count in one owner. Do not add data-memory or privileged execution yet.
-- [x] Implement NOP, logical, fixed and variable shift, comparison,
-      immediate, and upper-immediate integer operations with explicit 32-bit
-      wrapping, five-bit variable shift amounts, correct immediate extension,
-      and no host signed-overflow dependence.
-- [x] Implement trapping and non-trapping add/subtract behavior with precise
-      destination preservation on overflow.
-- [x] Implement multiply/divide and HI/LO transfer behavior, including all
-      approved divide-by-zero, signed-minimum, interlock, and overwrite rules.
-      Keep any deterministic functional completion schedule isolated and do
-      not claim undocumented cycle-exact IOP latency.
-- [x] Implement jumps, links, conditional branches, and the single branch
-      delay slot with explicit continuation state. Pin taken/not-taken, link
-      address, register aliases, branch-in-delay-slot policy, and exception
-      provenance.
-- [x] Add a bounded host runner for independently authored IOP programs with
-      explicit entry point, stack/return contract where appropriate, master
-      cycle budget, instruction total, stop reason, exception metadata, and
-      final PC. Keep IRX relocation and kernel module linking outside the CPU
-      and bus hardware classes.
-- [x] Complete an independent review of decode, arithmetic, HI/LO, and control
-      flow plus the host-runner boundary before memory and privileged behavior
-      build on those contracts.
+- [x] Add fixed-size decode and audit supported, reserved, and deferred encodings
+- [x] Add the core fetch/decode/effect/commit path and execution accounting
+- [x] Implement NOP, logical, shift, comparison, and immediate operations
+- [x] Implement trapping/non-trapping add/subtract and precise overflow
+- [x] Implement multiply/divide, HI/LO transfers, interlocks, and edge cases
+- [x] Implement jumps, links, branches, and precise delay-slot continuation
+- [x] Add a bounded host runner with result/exception metadata; defer IRX linking
+- [x] Complete an independent decode, execution, control-flow, and runner review
 
 ### Loads, Stores, COP0, and Precise Exceptions
 
-- [x] Implement aligned byte, halfword, and word loads through typed
-      `IOPBus` requests and the existing delayed-result continuation. Pin
-      sign/zero extension, the one-instruction load delay, destination-write
-      conflicts, register zero, wrapping addresses, faults, branches,
-      reset, and host pause/resume.
-- [x] Implement aligned byte, halfword, and word stores through typed
-      `IOPBus` requests. Preserve store order and pin the approved write-buffer
-      abstraction and bus-failure policy without inventing precise EE-style
-      store bus errors.
-- [x] Implement little-endian `LWL`/`LWR` and `SWL`/`SWR` merges. Pin every
-      byte offset, paired-load bypass, overlapping destinations, partial-store
-      access boundaries, and fault atomicity.
-- [x] Implement the approved IOP COP0 register set, writable masks, fixed bits,
-      reset values, transfer instructions, and privilege behavior without
-      inheriting EE-specific register semantics.
-- [x] Implement precise synchronous exception entry for Address Error,
-      instruction/load Bus Error, System Call, Breakpoint, Reserved
-      Instruction, Coprocessor Unusable, and Arithmetic Overflow. Preserve
-      older delayed results, destination suppression, delay-slot EPC/BD,
-      KU/IE stacking, and BEV-selected vectors.
-- [x] Implement the approved return-from-exception operation and interrupt
-      enable stack semantics, including nested exception behavior and
-      instruction-boundary interrupt delivery.
-- [x] Complete focused exception-priority, reset/restart, host-resume, and
-      independent correctness review before adding platform interrupts.
-
-Authored IOP guests can now combine aligned and unaligned memory access,
-delayed loads and COP0 transfers, precise exception handlers, and `JR`/`RFE`
-return. Typed CPU interrupt inputs are ready for later platform integration.
-The core remains the sole exception/retirement owner, while the physical bus
-retains storage and byte-enabled write ownership. Functional caches, INTC,
-timers, and persistence/trace integration remain separate blocks.
+- [x] Implement aligned loads, extension, one-instruction delay, and write conflicts
+- [x] Implement aligned stores with ordered admission and IOP bus-failure policy
+- [x] Implement `LWL`/`LWR` and `SWL`/`SWR`, bypass, and fault atomicity
+- [x] Implement IOP COP0 registers, masks, reset, transfers, and privilege
+- [x] Implement precise synchronous exceptions, delay-slot metadata, and vectors
+- [x] Implement `RFE`, KU/IE stacking, nested exceptions, and interrupt admission
+- [x] Complete exception/lifecycle conformance and independent correctness review
 
 ### IOP Guest-Visible Cache Foundation
 
-- [x] Audit the approved cache profile and define one focused cache owner,
-      locally replaceable provisional geometry, access routing, reset,
-      inspection, hashing, and persistence contracts before implementation.
-- [x] Add fixed-capacity instruction/data cache storage and typed access
-      boundaries with checked read-only inspection and deterministic reset.
-      Define typed cache-mode admission and physical-region eligibility before
-      execution routing, and account for ROM reconfiguration on an unchanged
-      bus.
-      Complete an independent ownership and routing review before execution
-      uses the new storage.
-- [x] Implement cached instruction fetch, uncached bypass, physical aliases,
-      stale-code visibility, and atomic failed-fill behavior without claiming
-      undocumented refill or contention timing. Complete focused review.
-- [x] Implement cached data loads through the same owner, preserving delayed
-      writeback, merge-load semantics, physical-route boundaries, and precise
-      fault selection. Complete focused review.
-- [x] Implement write-through stores and byte-enabled merges with ordered
-      physical admission, cache-hit updates, documented miss behavior, and
-      stale external-write visibility. Complete focused atomicity review;
-      actual DMA endpoints remain with their device milestones.
-- [x] Implement software-visible `Status.IsC`/`SwC` isolation, cache probing,
-      and isolated partial-store invalidation through the same cache owner.
-      Complete focused review of normal and swapped access paths.
-- [x] Complete focused cache-maintenance, alias, fault, reset, and
-      continuation conformance, including repeated deterministic execution
-      and host pause/resume across active branch and delayed-result state.
-      Hash/save-state and trace integration remain in the milestone's
-      Persistence, Diagnostics, and IOP Conformance block.
-- [x] Complete the block-wide independent correctness review and optimized
-      AddressSanitizer check, reconcile `PROJECT.md`, and close the block
-      before platform integration.
+- [x] Define cache ownership, provisional geometry, routing, and lifecycle
+- [x] Add fixed-capacity storage, typed admission, reset, and ROM reconfiguration;
+      complete an independent ownership/routing review
+- [x] Implement/review cached fetch, bypass, aliases, stale code, and failed fills
+- [x] Implement/review cached loads with delayed results, merges, and precise faults
+- [x] Implement/review ordered write-through stores, merges, and external visibility
+- [x] Implement/review `Status.IsC`/`SwC`, probing, and isolated invalidation
+- [x] Complete cache/alias/fault/lifecycle conformance; defer persistence and traces
+      to their integration blocks
+- [x] Complete independent block review and optimized AddressSanitizer checks
 
 ### IOP Interrupt Controller
 
-- [x] Add one fixed-capacity `IOPInterruptController` owner using the approved
-      26-cause retail profile (extending SCEI's 20 baseline causes), typed
-      source assertion, write-zero-to-clear status, direct per-cause masking,
-      read-to-clear master enable, derived aggregate output, deterministic
-      reset, and read-only inspection. Pin every cause assignment and register
-      transition; define the later hash/save-state contract without adding
-      schema or trace integration here. Complete focused ownership review.
-- [x] Map the three approved registers through `IOPBus`, preserving physical
-      decode, cache bypass, and host-inspection boundaries. Assess access
-      widths and byte enables against the approved evidence before selecting
-      a locally replaceable policy for any gap. Keep unresolved `0x1f80107c`
-      unmapped and pin side-effecting reads and rejected-access atomicity.
-- [x] Deliver only the aggregate controller level to `IOPCore` hardware
-      input 0 (`Cause.IP2`) before existing instruction-boundary interrupt
-      admission. Preserve core-owned COP0 masks, precise exception priority,
-      delayed writeback, and branch-delay provenance. Keep timer/device
-      producers typed; actual timers and scheduler attachment remain later
-      work. Complete focused integration review.
-- [x] Add guest-visible conformance for simultaneous causes, independent
-      masks, master-control acknowledgement, repeated assertion, exception
-      ordering, reset, and deterministic host pause/resume without duplicating
-      existing CPU-only interrupt tests.
-- [x] Complete the block-wide independent correctness review and optimized
-      AddressSanitizer check, reconcile `PROJECT.md`, and close the block
-      before timer and clock integration.
+- [x] Add/review the 26-cause controller, masks, acknowledgement, reset, and output
+- [x] Map INTC registers with side-effecting reads and atomic access rejection
+- [x] Connect/review aggregate delivery through `Cause.IP2` and core-owned admission
+- [x] Add guest conformance for concurrent causes, masks, acknowledgement,
+      exception ordering, reset, and pause/resume
+- [x] Complete independent block review and optimized AddressSanitizer checks
 
 ### IOP Timers and Clock Integration
 
-- [x] Close the timer execution contract against the local SCEI manuals and
-      approved raw-register profile before production changes. Resolve gate
-      polarity and raw mode mapping, ungated-counter stop behavior, mode
-      read/write rearming, one-shot/repeat and pulse/toggle transitions,
-      count/target-write effects, and target/overflow coincidence. Obtain
-      approval before consulting additional secondary evidence; register every
-      remaining provisional choice and its local replacement boundary.
-- [x] Add one fixed-capacity `IOPTimers` owner containing six independent
-      counter states and a canonical capability table. Pin widths, register
-      masks, source/gate/prescaler selection, side-effecting mode access versus
-      const inspection, deterministic reset, and invalid-index atomicity.
-      Include the canonical prescaler, gate-wait, one-shot, and pulse-release
-      state needed for complete register/reset lifecycle semantics; pulse and
-      gate inputs begin advancing that state in the following item.
-      Keep physical decode, clock generation, and CPU exception policy outside
-      the owner. Complete focused ownership review.
-- [x] Implement counter progression from typed system/pixel/H-blank pulses and
-      H-blank/V-blank gate transitions. Cover target and natural overflow,
-      prescaler remainder, gate lifecycle, interrupt request/rearm state, and
-      simultaneous events; emit typed timer causes for the existing INTC
-      owner without coupling timers to COP0 or GS. Complete focused timing
-      and interrupt review.
-- [x] Map count, mode, and target through `IOPBus`, assessing supported widths
-      and byte enables against the evidence before selecting any provisional
-      admission policy. Preserve cache bypass, storage-only host inspection,
-      rejected-access atomicity, and independent attachment/reset. Leave
-      `TC_HOLD` and `0x1f8014c0` unmapped. Add decoded guest MMIO coverage.
-- [x] Add a typed deterministic timing producer for the fixed 13.5 MHz IOP
-      pixel clock and display blanking inputs. Reuse the existing display
-      owner for V-blank; define the missing H-blank boundary and supported
-      timing profiles without inspecting GS internals from timer code,
-      inventing frontend wall-clock dependencies, or consuming an edge twice.
-      Specify rational-clock phase, edge ordering, configuration, reset, and
-      future IOP persistence fields; persist new live display timing state
-      immediately so existing machine save/load remains complete. Complete
-      focused architecture/timing review.
-- [x] Extend canonical hashes and the transactional save-state schema with all
-      guest-visible IOP core, cache, bus-memory, INTC, timer, scheduler-phase,
-      and in-flight continuation state. Establish dormant `NekoSystem`
-      ownership, internal attachment, and reset here so whole-machine
-      persistence has a concrete boundary; leave master-clock execution and
-      shared EE/IOP BIOS configuration to the next item.
-      Include cache tags, validity, and all
-      payload words even in invalid lines, cache profile/dimensions, and
-      core-owned `Status.CM` under the completed cache contract.
-      Immutable external ROM bytes remain
-      configuration and require an explicit compatibility identity rather than
-      silent embedding. Land this coverage with or before whole-machine IOP
-      attachment, never leaving a machine whose save state silently drops
-      running IOP state. Complete focused persistence review.
-- [x] Schedule the persisted IOP owners in `NekoSystem` at the
-      documented 36.864 MHz rate, exactly one IOP cycle per eight
-      294.912 MHz master cycles. Define phase and same-cycle ordering among
-      display inputs, timer transitions, INTC assertion, IOP admission, and
-      existing EE-side components. Preserve reset, shared immutable BIOS
-      configuration, and existing EE-only workflows; do not automatically
-      start BIOS execution. Complete focused system-integration review.
-      Phase-zero admission follows post-display timer/request advancement;
-      halted CPUs do not freeze devices. Shared BIOS installation requires
-      both CPUs halted; the bounded BIOS diagnostic still starts only the EE.
+- [x] Resolve timer modes, gates, rearming, writes, and coincident-event contracts
+- [x] Add/review six fixed-capacity counters, register lifecycle, and inspection
+- [x] Implement/review typed clock/gate progression, prescalers, target/overflow,
+      and interrupt requests to INTC
+- [x] Map count/mode/target with atomic MMIO admission and decoded guest coverage;
+      leave unsupported hold registers unmapped
+- [x] Add/review deterministic pixel/display timing, edge ordering, reset,
+      and persistence
+- [x] Persist/hash complete IOP state and continuations with ROM compatibility,
+      system ownership, and transactional loading; complete persistence review
+- [x] Schedule IOP at one cycle per eight master cycles with deterministic
+      device/CPU ordering, shared immutable BIOS configuration, and EE-only
+      startup compatibility; complete integration review
 - [ ] Add end-to-end timer/CPU conformance for target/overflow coincidence,
       gate edges, prescaler phase, simultaneous interrupts, independent INTC
       acknowledgement, halted CPU versus advancing devices, reset while
       active, deterministic repetition, and save/load continuation. Do not
       claim undocumented retail contention or interrupt-pulse timing.
-- [ ] Complete the block-wide independent correctness review and optimized
-      AddressSanitizer check, reconcile `PROJECT.md`, and close the block.
+- [ ] Complete independent block review and optimized AddressSanitizer checks
 
 ### Diagnostics and IOP Conformance
 
@@ -2329,12 +1548,9 @@ timers, and persistence/trace integration remain separate blocks.
       Compare repeated-run instruction totals, cycle totals where modeled,
       traces, hashes, and byte-identical save-state continuation.
 - [ ] Complete the bounded architecture and maintainability review. Inspect
-      CPU/bus/device ownership, duplicated decode or exception policy,
-      behavioral booleans, mixed-purpose methods, scheduler dependency
-      direction, and provisional structures whose replacement trigger arrived.
+      CPU/bus/device ownership, decode/exception policy, and scheduler boundaries.
 - [ ] Complete an independent final review, resolve every concrete finding,
-      run the optimized AddressSanitizer and native macOS leak checks,
-      reconcile `PROJECT.md`, and close Milestone 8.
+      and run optimized AddressSanitizer and native macOS leak checks.
 
 ## Milestone 9: EE-IOP Interconnect and Deterministic BIOS Startup
 
@@ -2344,15 +1560,9 @@ deterministic startup sequence. Treat the BIOS as an integration workload and
 stop at explicit missing-device boundaries rather than silently stubbing
 required hardware.
 
-- [ ] Audit the local SCEI manuals and the completed EE/IOP contracts, then
-      expand this milestone into independently reviewable blocks and items
-      before implementation. Inventory SIF registers and FIFOs, EE and IOP DMA
-      channels, reset and boot sequencing, interrupt behavior, clock ordering,
-      BIOS observability, persistence, diagnostics, unresolved evidence, and
-      the exact bounded startup target. Include an explicit EE reserved-MMIO
-      policy for the BIOS's `0xffffffff` store to physical `0x1000f500`, an
-      unnamed slot at the base of the DMAC extended-control window; do not
-      promote it to a functional register without stronger evidence.
+- [ ] Audit SIF/DMA, boot/reset, interrupt/timing, persistence, and diagnostic
+      contracts; define reviewable blocks and a bounded BIOS startup target.
+      Include the BIOS's reserved EE MMIO access at physical `0x1000f500`.
 - [ ] Implement SIF communication and the required EE-side and IOP-side DMA,
       interrupt, backpressure, retry, and reset behavior.
 - [ ] Define deterministic EE/IOP scheduling and whole-system continuation
@@ -2524,37 +1734,3 @@ compatibility policy into a frontend.
 - [ ] Compare every optimized execution path continuously against the
       cycle-oriented interpreter, including the floating-point integration
       corpus
-
-## Maintaining This File
-
-- Use **milestone** for a major independently complete capability, **block** for
-  an independently reviewable stage within a milestone, and **item** for a
-  concrete testable checklist entry within a block.
-- Keep distant milestones intentionally high-level. Before starting a block,
-  review its items and expand the work into additional milestones, blocks, or
-  items when the newly available evidence requires it.
-- Before beginning a new milestone or block, record both its hardware contract
-  and its architectural direction. Name the state owner, method boundaries,
-  dependencies, extension strategy, save-state and trace effects, hot paths,
-  and regression surfaces.
-- Before closing every milestone, include a bounded architecture and
-  maintainability review after conformance is green and before the final
-  independent correctness review. Validate accepted repairs and record
-  out-of-scope restructuring rather than silently extending the milestone.
-- Decide explicitly whether the work receives a durable extensible boundary or
-  a minimal isolated implementation. Do not leave an accidental intermediate
-  design: document why the minimal form is sufficient and what concrete future
-  requirement would justify refactoring it.
-- Place each item where its prerequisites are implemented. If work depends on a
-  later feature, move the item into that later block instead of leaving a
-  placeholder that says to complete it when the prerequisite arrives.
-- Check off work only after tests demonstrate the expected behavior.
-- After completing each roadmap subsection or substantial implementation
-  block, run `cmake -P cmake/Sanitize.cmake` before moving to the next block.
-- Run the sanitizer workflow immediately after changes to ownership, lifetime,
-  allocation, or container invalidation behavior.
-- At milestone completion on macOS, run
-  `cmake -P cmake/LeakCheck.cmake` for the complete native leak check.
-- Add newly discovered prerequisites to the milestone they block.
-- Record major architectural decisions in the relevant section.
-- Keep immediate work near the top and long-term ideas intentionally broad.
