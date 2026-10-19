@@ -1598,7 +1598,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Compose the SIF owner/router into `NekoSystem`, persist/hash the new
       state transactionally, and append opt-in register/signal observations
       without changing existing trace identities.
-- [ ] Add two-CPU register/signal conformance, acknowledgement, active reset,
+- [x] Add two-CPU register/signal conformance, acknowledgement, active reset,
       and restore coverage; complete independent review and sanitizer checks.
 
 ### Boot Lifecycle and Bounded Startup Diagnostics
