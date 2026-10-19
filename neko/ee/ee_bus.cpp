@@ -10,6 +10,7 @@
 #include "interrupt_controller.hpp"
 #include "scratchpad_dmac_channel.hpp"
 #include "sif.hpp"
+#include "sif1_dmac_channel.hpp"
 #include "vif.hpp"
 #include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
@@ -28,7 +29,9 @@ namespace
 
   bool fullWordOnlyAddress(std::uint32_t address)
   {
-    return sifApertureAddress(address) || address == EEMemoryMap::RESERVED_F500;
+    return sifApertureAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
+      address == EEMemoryMap::D6_CHCR || address == EEMemoryMap::D6_MADR ||
+      address == EEMemoryMap::D6_QWC || address == EEMemoryMap::D6_TADR;
   }
 
   void requireSplitWordAccess(std::uint32_t address)
@@ -275,6 +278,19 @@ void EEBus::attachVIF1DMACChannel(
   vif1DMACChannel = vif1DMAC;
 }
 
+void EEBus::attachSIF1DMACChannel(SIF1DMACChannel *sif1DMAC)
+{
+  if (sif1DMAC == nullptr)
+  {
+    throw std::invalid_argument("EE bus requires a non-null SIF1 DMAC channel.");
+  }
+  if (sif1DMACChannel != nullptr)
+  {
+    throw std::logic_error("EE bus SIF1 DMAC channel is already attached.");
+  }
+  sif1DMACChannel = sif1DMAC;
+}
+
 void EEBus::attachFromScratchpadDMACChannel(
   ScratchpadDMACChannel *fromScratchpadDMAC)
 {
@@ -376,6 +392,15 @@ VIF1DMACChannel &EEBus::attachedVIF1DMAC() const
       "EE bus VIF1 DMAC channel is not attached.");
   }
   return *vif1DMACChannel;
+}
+
+SIF1DMACChannel &EEBus::attachedSIF1DMAC() const
+{
+  if (sif1DMACChannel == nullptr)
+  {
+    throw std::logic_error("EE bus SIF1 DMAC channel is not attached.");
+  }
+  return *sif1DMACChannel;
 }
 
 ScratchpadDMACChannel &
@@ -975,6 +1000,18 @@ bool EEBus::readMapped32(
     case EEMemoryMap::D2_ASR1:
       *value = attachedGIFDMAC().addressStack(1);
       return true;
+    case EEMemoryMap::D6_CHCR:
+      *value = attachedSIF1DMAC().channelControl();
+      return true;
+    case EEMemoryMap::D6_MADR:
+      *value = attachedSIF1DMAC().memoryAddress();
+      return true;
+    case EEMemoryMap::D6_QWC:
+      *value = attachedSIF1DMAC().quadwordCount();
+      return true;
+    case EEMemoryMap::D6_TADR:
+      *value = attachedSIF1DMAC().tagAddress();
+      return true;
     case EEMemoryMap::D8_CHCR:
       *value = attachedFromScratchpadDMAC().channelControl();
       return true;
@@ -1183,6 +1220,34 @@ bool EEBus::writeMapped32(
       return performDeviceWrite(
         checkedGuestAccess,
         [&]() { dmac.writeAddressStack(1, value); });
+    }
+    case EEMemoryMap::D6_CHCR:
+    {
+      SIF1DMACChannel &dmac = attachedSIF1DMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeChannelControl(value); });
+    }
+    case EEMemoryMap::D6_MADR:
+    {
+      SIF1DMACChannel &dmac = attachedSIF1DMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeMemoryAddress(value); });
+    }
+    case EEMemoryMap::D6_QWC:
+    {
+      SIF1DMACChannel &dmac = attachedSIF1DMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeQuadwordCount(value); });
+    }
+    case EEMemoryMap::D6_TADR:
+    {
+      SIF1DMACChannel &dmac = attachedSIF1DMAC();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeTagAddress(value); });
     }
     case EEMemoryMap::D8_CHCR:
     {

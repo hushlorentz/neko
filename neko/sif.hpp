@@ -56,6 +56,14 @@ enum class SIFDirection : std::uint8_t
   SIF1
 };
 
+enum class SIFEEDMAEvent : std::uint8_t
+{
+  Start,
+  Complete,
+  BusError,
+  Abort
+};
+
 enum class SIFTransferOutcome : std::uint8_t
 {
   Completed,
@@ -72,6 +80,7 @@ class SIF final
 {
   public:
     static constexpr std::size_t WORD_CAPACITY = 32;
+    static constexpr std::uint32_t CONTROL_STATE_MASK = 0x61f0;
 
     SIF();
     void reset();
@@ -83,6 +92,7 @@ class SIF final
     std::uint32_t iopDoorbell() const;
     SIFWriteResult writeIOPDoorbell(std::uint32_t value);
     std::uint32_t control() const;
+    void applyEEDMAEvent(SIFDirection direction, SIFEEDMAEvent event);
 
     SIFTransferOutcome pushSIF1Quadword(const SIFQuadword &words);
     SIFTransferOutcome pushSIF0Prologue(const SIFQuadword &words);

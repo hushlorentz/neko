@@ -195,6 +195,7 @@ NekoSystem::NekoSystem() :
     &eeCoreComponent.memorySystem),
   gsDisplayComponent(&gsComponent),
   iopDMAControllerComponent(iopInterruptControllerComponent),
+  sif1DMACComponent(dmacControllerComponent, sifComponent),
   sifInterruptRouterComponent(
     interruptControllerComponent, iopInterruptControllerComponent)
 {
@@ -217,6 +218,7 @@ NekoSystem::NekoSystem() :
     &dmacControllerComponent);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
   eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
+  eeBusComponent.attachSIF1DMACChannel(&sif1DMACComponent);
   eeBusComponent.attachFromScratchpadDMACChannel(
     &fromScratchpadDMACComponent);
   eeBusComponent.attachToScratchpadDMACChannel(
@@ -398,13 +400,15 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(
     &hash,
     dmacControllerComponent.statusRegister &
-      (DMACStatus::CHANNEL_8 |
+      (DMACStatus::CHANNEL_6 |
+       DMACStatus::CHANNEL_8 |
        DMACStatus::CHANNEL_9 |
        DMACStatus::BUS_ERROR));
   hashStateValue(
     &hash,
     dmacControllerComponent.statusMaskRegister &
-      (DMACStatus::CHANNEL_8_MASK |
+      (DMACStatus::CHANNEL_6_MASK |
+       DMACStatus::CHANNEL_8_MASK |
        DMACStatus::CHANNEL_9_MASK));
   hashStateValue(
     &hash,
@@ -434,6 +438,7 @@ std::uint64_t NekoSystem::eeStateHash() const
     };
   hashChannel(fromScratchpadDMACComponent);
   hashChannel(toScratchpadDMACComponent);
+  hashStateValue(&hash, sif1DMACComponent.stateHash());
   return hash;
 }
 
@@ -790,6 +795,16 @@ const GIFDMACChannel &NekoSystem::gifDMAC() const
 VIF1DMACChannel &NekoSystem::vif1DMAC()
 {
   return vif1DMACComponent;
+}
+
+SIF1DMACChannel &NekoSystem::sif1DMAC()
+{
+  return sif1DMACComponent;
+}
+
+const SIF1DMACChannel &NekoSystem::sif1DMAC() const
+{
+  return sif1DMACComponent;
 }
 
 const VIF1DMACChannel &NekoSystem::vif1DMAC() const

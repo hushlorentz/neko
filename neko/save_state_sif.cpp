@@ -71,7 +71,7 @@ void NekoSaveStateCodec::readSIF(SaveStateReader *reader, SIF *sif)
   sif->msflag = reader->readFieldU32("msflag");
   sif->smflag = reader->readFieldU32("smflag");
   sif->controlRegister = reader->readFieldU32("control");
-  reader->requireField((sif->controlRegister & ~UINT32_C(0x21f0)) == 0,
+  reader->requireField((sif->controlRegister & ~SIF::CONTROL_STATE_MASK) == 0,
     "SIF control contains unsupported bits");
   sif->iopDoorbellRegister = reader->readFieldU32("iopDoorbell");
   for (const auto direction : {SIFDirection::SIF0, SIFDirection::SIF1})
@@ -112,4 +112,75 @@ void NekoSaveStateCodec::commitSIF(SIF *destination, const SIF &source) noexcept
   *destination = source;
   destination->observationOrder = order;
   destination->observationCount = 0;
+}
+
+std::uint64_t SIF1DMACChannel::stateHash() const
+{
+  return NekoSaveStateCodec::hashSIF1DMAC(*this);
+}
+
+std::uint64_t NekoSaveStateCodec::hashSIF1DMAC(const SIF1DMACChannel &channel)
+{
+  SaveStateHashWriter writer;
+  writeSIF1DMACState(&writer, channel);
+  return writer.value();
+}
+
+template<typename Writer>
+void NekoSaveStateCodec::writeSIF1DMACState(
+  Writer *writer, const SIF1DMACChannel &channel)
+{
+  const auto &state = channel.channelState;
+  writer->writeFieldU32("channelControlRegister", state.channelControlRegister);
+  writer->writeFieldU32("memoryAddressRegister", state.memoryAddressRegister);
+  writer->writeFieldU32("quadwordCountRegister", state.quadwordCountRegister);
+  writer->writeFieldU32("tagAddressRegister", state.tagAddressRegister);
+  writer->writeFieldBool("terminateAfterPacket", state.terminateAfterPacket);
+}
+
+void NekoSaveStateCodec::writeSIF1DMAC(
+  SaveStateWriter *writer, const NekoSystem &system)
+{
+  const auto &channel = system.sif1DMACComponent;
+  if (system.eeBusComponent.sif1DMACChannel != &channel ||
+      &channel.dmacController != &system.dmacControllerComponent ||
+      &channel.sifComponent != &system.sifComponent)
+  {
+    throw std::logic_error("Cannot persist SIF1 DMA with foreign machine wiring.");
+  }
+  writeSIF1DMACState(writer, channel);
+}
+
+void NekoSaveStateCodec::readSIF1DMAC(
+  SaveStateReader *reader, SIF1DMACChannel *channel)
+{
+  auto &state = channel->channelState;
+  state.channelControlRegister = reader->readFieldU32("channelControlRegister");
+  reader->requireField(
+    DMACChannelControl::validSIF1Control(state.channelControlRegister),
+    "SIF1 DMAC channel control or active TTE is invalid");
+  state.memoryAddressRegister = reader->readFieldU32("memoryAddressRegister");
+  reader->requireField((state.memoryAddressRegister & 0xf) == 0,
+    "SIF1 DMAC memory address is unaligned");
+  state.quadwordCountRegister = reader->readFieldU32("quadwordCountRegister");
+  reader->requireField(state.quadwordCountRegister <= 0xffff,
+    "SIF1 DMAC qword count is invalid");
+  state.tagAddressRegister = reader->readFieldU32("tagAddressRegister");
+  reader->requireField((state.tagAddressRegister & 0xf) == 0,
+    "SIF1 DMAC tag address is unaligned");
+  state.terminateAfterPacket = reader->readFieldBool("terminateAfterPacket");
+  reader->requireField(!state.terminateAfterPacket,
+    "SIF1 DMAC tag continuation requires an implemented sender engine");
+}
+
+void NekoSaveStateCodec::commitSIF1DMAC(
+  SIF1DMACChannel *destination, const SIF1DMACChannel &source) noexcept
+{
+  auto &state = destination->channelState;
+  const auto &sourceState = source.channelState;
+  state.channelControlRegister = sourceState.channelControlRegister;
+  state.memoryAddressRegister = sourceState.memoryAddressRegister;
+  state.quadwordCountRegister = sourceState.quadwordCountRegister;
+  state.tagAddressRegister = sourceState.tagAddressRegister;
+  state.terminateAfterPacket = sourceState.terminateAfterPacket;
 }

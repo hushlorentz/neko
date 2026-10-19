@@ -17,6 +17,7 @@ bool SIFRegisterMap::decodeOffset(std::uint32_t offset, SIFRegister &reg)
 }
 
 constexpr std::size_t SIF::WORD_CAPACITY;
+constexpr std::uint32_t SIF::CONTROL_STATE_MASK;
 constexpr std::uint8_t SIF::END;
 
 SIF::SIF()
@@ -204,6 +205,25 @@ void SIF::recordWrite(ObservationPort port, SIFRegister reg, std::uint32_t value
 std::uint32_t SIF::control() const
 {
   return controlRegister;
+}
+
+void SIF::applyEEDMAEvent(SIFDirection direction, SIFEEDMAEvent event)
+{
+  const auto index = directionIndex(direction);
+  const std::uint32_t startBit = 1u << (13 + index);
+  const std::uint32_t terminalMask = startBit | (1u << (5 + index));
+  switch (event)
+  {
+    case SIFEEDMAEvent::Start:
+      controlRegister |= startBit;
+      return;
+    case SIFEEDMAEvent::Complete:
+    case SIFEEDMAEvent::BusError:
+    case SIFEEDMAEvent::Abort:
+      controlRegister &= ~terminalMask;
+      return;
+  }
+  throw std::out_of_range("Unsupported EE SIF DMA event.");
 }
 
 std::size_t SIF::directionIndex(SIFDirection direction)

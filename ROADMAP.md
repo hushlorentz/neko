@@ -1622,7 +1622,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add focused IOP DMA control/interrupt ownership for the first endpoint;
       map common controls and channel-10 register/start admission without dummy
       engines; include reset, hashing, and save/load from the first state.
-- [ ] Extend existing EE DMAC ownership for channel 6 and source-chain state;
+- [x] Extend existing EE DMAC ownership for channel 6 and source-chain state;
       include CTRL lifecycle effects and persistence, reusing valid shared
       transitions rather than parallel policy.
 - [ ] Implement EE source admission and SIF framing, including physical

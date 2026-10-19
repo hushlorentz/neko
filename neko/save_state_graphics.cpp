@@ -1304,12 +1304,14 @@ void NekoSaveStateCodec::readDMAC(
     (controller->statusRegister &
      ~(DMACStatus::CHANNEL_1 |
        DMACStatus::CHANNEL_2 |
+       DMACStatus::CHANNEL_6 |
        DMACStatus::CHANNEL_8 |
        DMACStatus::CHANNEL_9 |
        DMACStatus::BUS_ERROR)) == 0 &&
     (controller->statusMaskRegister &
      ~(DMACStatus::CHANNEL_1_MASK |
        DMACStatus::CHANNEL_2_MASK |
+       DMACStatus::CHANNEL_6_MASK |
        DMACStatus::CHANNEL_8_MASK |
        DMACStatus::CHANNEL_9_MASK)) == 0,
     "DMAC status is invalid");

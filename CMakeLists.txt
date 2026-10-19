@@ -58,6 +58,7 @@ endif()
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/ee/dmac_channel_state.cpp
+    neko/ee/sif1_dmac_channel.cpp
     neko/ee/dmac_controller.cpp
     neko/ee/ee_bus.cpp
     neko/ee/ee_core.cpp
@@ -225,6 +226,7 @@ add_executable(neko_tests
     neko_tests/boot_lifecycle_tests.cpp
     neko_tests/boot_conformance_tests.cpp
     neko_tests/iop/iop_dma_tests.cpp
+    neko_tests/ee/sif1_dmac_channel_tests.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp

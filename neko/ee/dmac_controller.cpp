@@ -7,11 +7,13 @@ namespace
   constexpr std::uint32_t CHANNELS =
     DMACStatus::CHANNEL_1 |
     DMACStatus::CHANNEL_2 |
+    DMACStatus::CHANNEL_6 |
     DMACStatus::CHANNEL_8 |
     DMACStatus::CHANNEL_9;
   constexpr std::uint32_t MASKS =
     DMACStatus::CHANNEL_1_MASK |
     DMACStatus::CHANNEL_2_MASK |
+    DMACStatus::CHANNEL_6_MASK |
     DMACStatus::CHANNEL_8_MASK |
     DMACStatus::CHANNEL_9_MASK;
 

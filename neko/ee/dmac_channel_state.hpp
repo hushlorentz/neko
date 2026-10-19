@@ -28,7 +28,14 @@ namespace DMACChannelControl
   constexpr std::uint32_t TAG_INTERRUPT_ENABLE = 1u << 7;
   constexpr std::uint32_t START = 1u << 8;
   constexpr std::uint32_t TAG_MASK = UINT32_C(0xffff0000);
+  bool validSIF1Control(std::uint32_t value);
 }
+
+enum class DMACSourceChainProfile : std::uint8_t
+{
+  VIFGIF,
+  SIF1
+};
 
 enum class DMACChannelDirectionPolicy : std::uint8_t
 {
@@ -53,7 +60,8 @@ class DMACChannelState
   public:
     DMACChannelState(
       const char *channelName,
-      DMACChannelDirectionPolicy directionPolicy);
+      DMACChannelDirectionPolicy directionPolicy,
+      DMACSourceChainProfile sourceProfile = DMACSourceChainProfile::VIFGIF);
 
     bool active() const;
     bool normalMode() const;
@@ -91,6 +99,7 @@ class DMACChannelState
 
     const char *name;
     DMACChannelDirectionPolicy direction;
+    DMACSourceChainProfile profile;
     std::uint32_t channelControlRegister = 0;
     std::uint32_t memoryAddressRegister = 0;
     std::uint32_t quadwordCountRegister = 0;

@@ -7,6 +7,7 @@
 #include "clock_scheduler.hpp"
 #include "clock_rates.hpp"
 #include "dmac_controller.hpp"
+#include "sif1_dmac_channel.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
 #include "ee_elf_loader.hpp"
@@ -190,6 +191,8 @@ class NekoSystem
     const GIFDMACChannel &gifDMAC() const;
     VIF1DMACChannel &vif1DMAC();
     const VIF1DMACChannel &vif1DMAC() const;
+    SIF1DMACChannel &sif1DMAC();
+    const SIF1DMACChannel &sif1DMAC() const;
     ScratchpadDMACChannel &fromScratchpadDMAC();
     const ScratchpadDMACChannel &fromScratchpadDMAC() const;
     ScratchpadDMACChannel &toScratchpadDMAC();
@@ -243,6 +246,7 @@ class NekoSystem
     IOPTimers iopTimersComponent;
     IOPTimerTiming iopTimerTimingComponent;
     SIF sifComponent;
+    SIF1DMACChannel sif1DMACComponent;
     SIFInterruptRouter sifInterruptRouterComponent;
     NekoInputState inputState;
     bool collectingTrace = false;

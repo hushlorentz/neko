@@ -19,16 +19,31 @@ namespace
     DMACChannelControl::TAG_MASK;
 }
 
+bool DMACChannelControl::validSIF1Control(std::uint32_t value)
+{
+  const auto mode = value & MODE_MASK;
+  return (value & ~CHANNEL_CONTROL_WRITABLE) == 0 &&
+    (mode == 0 || mode == CHAIN_MODE) &&
+    ((value & START) == 0 || (value & TAG_TRANSFER_ENABLE) == 0);
+}
+
 DMACChannelState::DMACChannelState(
   const char *channelName,
-  DMACChannelDirectionPolicy directionPolicy) :
+  DMACChannelDirectionPolicy directionPolicy,
+  DMACSourceChainProfile sourceProfile) :
   name(channelName),
-  direction(directionPolicy)
+  direction(directionPolicy),
+  profile(sourceProfile)
 {
   if (name == nullptr)
   {
     throw std::invalid_argument(
       "DMAC channel state requires a name.");
+  }
+  if (profile != DMACSourceChainProfile::VIFGIF &&
+      profile != DMACSourceChainProfile::SIF1)
+  {
+    throw std::invalid_argument("Unsupported DMAC source-chain profile.");
   }
 }
 
@@ -66,6 +81,11 @@ std::uint32_t DMACChannelState::channelControl() const
 DMACControlWriteEffect
 DMACChannelState::writeChannelControl(std::uint32_t value)
 {
+  if (profile == DMACSourceChainProfile::SIF1 &&
+      !DMACChannelControl::validSIF1Control(value))
+  {
+    throw std::invalid_argument("Unsupported SIF1 DMAC control or TTE start.");
+  }
   if ((value & ~CHANNEL_CONTROL_WRITABLE) != 0)
   {
     throw std::invalid_argument(
@@ -111,7 +131,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
   }
 
   const std::uint8_t requestedStackDepth =
-    static_cast<std::uint8_t>(
+    profile == DMACSourceChainProfile::SIF1 ? 0 : static_cast<std::uint8_t>(
       (value &
        DMACChannelControl::ADDRESS_STACK_MASK) >> 4);
   if (requestedStackDepth > addressStackRegisters.size())
@@ -162,7 +182,8 @@ void DMACChannelState::writeTagAddress(std::uint32_t value)
 std::uint32_t DMACChannelState::addressStack(
   std::size_t index) const
 {
-  if (index >= addressStackRegisters.size())
+  if (profile == DMACSourceChainProfile::SIF1 ||
+      index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
       std::string(name) +
@@ -176,7 +197,8 @@ void DMACChannelState::writeAddressStack(
   std::uint32_t value)
 {
   requireStopped();
-  if (index >= addressStackRegisters.size())
+  if (profile == DMACSourceChainProfile::SIF1 ||
+      index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
       std::string(name) +
@@ -209,7 +231,7 @@ DMACChannelState::acceptSourceChainTag(
   std::uint32_t low,
   std::uint32_t high)
 {
-  if ((high & SPR_BIT) != 0)
+  if (profile == DMACSourceChainProfile::VIFGIF && (high & SPR_BIT) != 0)
   {
     throw std::invalid_argument(
       std::string(name) +
@@ -225,7 +247,8 @@ DMACChannelState::acceptSourceChainTag(
     currentTagAddress + 16;
   const std::uint32_t afterInlineData =
     inlineDataAddress + count * 16;
-  const std::uint32_t tagAddress = high & ADDRESS_MASK;
+  const std::uint32_t tagAddress = high &
+    (profile == DMACSourceChainProfile::SIF1 ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
 
   channelControlRegister =
     (channelControlRegister &
@@ -236,6 +259,12 @@ DMACChannelState::acceptSourceChainTag(
     (low & TAG_IRQ) != 0 &&
     (channelControlRegister &
      DMACChannelControl::TAG_INTERRUPT_ENABLE) != 0;
+
+  if (profile == DMACSourceChainProfile::SIF1 &&
+      (id == DMACTagID::Call || id == DMACTagID::Return))
+  {
+    return DMACChannelTransition::Complete;
+  }
 
   switch (id)
   {
@@ -317,13 +346,14 @@ std::uint32_t DMACChannelState::decodeAddress(
   std::uint32_t value,
   const char *registerName) const
 {
-  if ((value & SPR_BIT) != 0)
+  if (profile == DMACSourceChainProfile::VIFGIF && (value & SPR_BIT) != 0)
   {
     throw std::invalid_argument(
       std::string(name) + " DMAC " + registerName +
       " does not support scratchpad memory.");
   }
-  return value & ADDRESS_MASK;
+  return value &
+    (profile == DMACSourceChainProfile::SIF1 ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
 }
 
 void DMACChannelState::updateAddressStackField()

@@ -496,6 +496,10 @@ void NekoSaveStateCodec::writeSystem(
     auto component = writer->scope("sif");
     writeSIF(writer, system);
   }
+  {
+    auto component = writer->scope("sif1DMAC");
+    writeSIF1DMAC(writer, system);
+  }
 }
 
 void NekoSaveStateCodec::readSystem(
@@ -601,6 +605,10 @@ void NekoSaveStateCodec::readSystem(
     auto component = reader->scope("sif");
     readSIF(reader, &system->sifComponent);
   }
+  {
+    auto component = reader->scope("sif1DMAC");
+    readSIF1DMAC(reader, &system->sif1DMACComponent);
+  }
 }
 
 void NekoSaveStateCodec::validateSystem(
@@ -665,6 +673,7 @@ void NekoSaveStateCodec::commitSystem(
     &transaction->reconciliation;
   commitIOP(destination, source);
   commitSIF(&destination->sifComponent, source->sifComponent);
+  commitSIF1DMAC(&destination->sif1DMACComponent, source->sif1DMACComponent);
   destination->inputState = source->inputState;
   destination->masterClock.masterCycle =
     source->masterClock.masterCycle;
