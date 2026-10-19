@@ -1582,7 +1582,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       partial-packet behavior, and atomic backpressure/retry boundaries.
 - [x] Resolve IOP SIF DMA channel controls, tag/count semantics, priority
       enables, completion flags, and aggregate interrupt acknowledgement.
-- [ ] Classify bounded BIOS startup prerequisites, including reserved EE MMIO
+- [x] Classify bounded BIOS startup prerequisites, including reserved EE MMIO
       at `0x1000f500`; separate reserved-access policy from functional controls.
 - [ ] Pin cross-clock visibility and lifecycle contracts; register adopted
       provisional policies and complete independent architecture review.
