@@ -8,12 +8,12 @@
 
 struct IOPDeviceObservationTestAccess
 {
-  static void enable(IOPTimers &timers, IOPObservationOrder *order = nullptr)
+  static void enable(IOPTimers &timers, NekoObservationOrder *order = nullptr)
   {
     timers.enableObservations(order);
   }
   static void enable(IOPInterruptController &interrupts,
-    IOPObservationOrder *order = nullptr)
+    NekoObservationOrder *order = nullptr)
   {
     interrupts.enableObservations(order);
   }
@@ -33,11 +33,11 @@ struct IOPDeviceObservationTestAccess
   {
     return interrupts.observationsEnabled;
   }
-  static IOPObservationOrder *order(const IOPTimers &timers)
+  static NekoObservationOrder *order(const IOPTimers &timers)
   {
     return timers.observationOrder;
   }
-  static IOPObservationOrder *order(const IOPInterruptController &interrupts)
+  static NekoObservationOrder *order(const IOPInterruptController &interrupts)
   {
     return interrupts.observationOrder;
   }
@@ -510,7 +510,7 @@ TEST_CASE("IOP device observation capacities retain every sample and CPU access"
     timers.writeMode(index, 0x58);
   }
   timers.advance({true, false, {}});
-  IOPObservationOrder order;
+  NekoObservationOrder order;
   Access::enable(timers, &order);
   Access::enable(interrupts, &order);
   const auto requests = timers.advance({true, false, {}});
@@ -559,7 +559,7 @@ TEST_CASE("IOP device observation journals remain transactional nonpersistent st
   using Access = IOPDeviceObservationTestAccess;
   NekoSystem system;
   const auto state = system.saveState();
-  IOPObservationOrder order;
+  NekoObservationOrder order;
   Access::enable(system.iopTimers(), &order);
   Access::enable(system.iopInterruptController(), &order);
   system.iopTimers().writeCount(0, 1);

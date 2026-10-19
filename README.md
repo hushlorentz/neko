@@ -54,8 +54,8 @@ the selected range's bytes. Invalid files and arguments return status 2;
 missing fields and states with semantic differences return status 1.
 Inspection does not require external ROM files. Restoring a machine snapshot
 requires matching EE and IOP ROM presence and contents independently; ROM bytes
-are not embedded. Only the current save-state schema is accepted; schema 34
-does not load schema-33 snapshots.
+are not embedded. Only the current save-state schema is accepted; schema 35
+does not load older snapshots.
 
 ## Tests
 

@@ -78,6 +78,7 @@ add_library(neko_core
     neko/save_state_ee.cpp
     neko/save_state_graphics.cpp
     neko/save_state_iop.cpp
+    neko/save_state_sif.cpp
     neko/save_state_vu.cpp
     neko/ee/gif/gif.cpp
     neko/ee/gif/gif_path_arbiter.cpp
@@ -253,6 +254,7 @@ add_executable(neko_tests
     neko_tests/sif_tests.cpp
     neko_tests/sif_bus_tests.cpp
     neko_tests/sif_interrupt_tests.cpp
+    neko_tests/sif_system_tests.cpp
     neko_tests/neko_system_tests.cpp
     neko_tests/save_state_internal_tests.cpp
     neko_tests/save_state_mutation.cpp

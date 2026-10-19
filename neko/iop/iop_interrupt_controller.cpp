@@ -13,7 +13,7 @@ void IOPInterruptController::reset()
   controlRegister = 0;
 }
 
-void IOPInterruptController::enableObservations(IOPObservationOrder *order)
+void IOPInterruptController::enableObservations(NekoObservationOrder *order)
 {
   clearObservations();
   observationOrder = order;

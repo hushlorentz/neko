@@ -6,7 +6,7 @@
 #include <cstdint>
 
 #include "iop_interrupt_controller.hpp"
-#include "iop_observation.hpp"
+#include "observation_order.hpp"
 #include "iop_types.hpp"
 
 namespace IOPTimerMode
@@ -167,9 +167,9 @@ class IOPTimers final
     std::array<Observation, OBSERVATION_CAPACITY> observations = {};
     std::size_t observationCount = 0;
     bool observationsEnabled = false;
-    IOPObservationOrder *observationOrder = nullptr;
+    NekoObservationOrder *observationOrder = nullptr;
 
-    void enableObservations(IOPObservationOrder *order = nullptr);
+    void enableObservations(NekoObservationOrder *order = nullptr);
     void disableObservations();
     void clearObservations();
     void recordObservation(const Observation &observation);

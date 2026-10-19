@@ -21,7 +21,8 @@ enum class NekoTraceSubsystem : std::uint8_t
   EE,
   IOP = 11,
   IOPTimers = 12,
-  IOPInterruptController = 13
+  IOPInterruptController = 13,
+  SIF = 14
 };
 
 enum class NekoTraceEventType : std::uint8_t
@@ -43,8 +44,23 @@ enum class NekoTraceEventType : std::uint8_t
   COP1StageTransition,
   COP1Retired,
   InstructionRetired = 16,
-  TimerEvent = 17
+  TimerEvent = 17,
+  RegisterWrite = 18,
+  SignalRequested = 19
 };
+
+namespace NekoSIFTrace
+{
+  enum class Side : std::uint8_t { EE = 0, IOP = 1 };
+  enum class Register : std::uint8_t
+  {
+    MSCOM = 0, SMCOM = 1, MSFLAG = 2, SMFLAG = 3, CTRL = 4, IOPDoorbell = 5
+  };
+  enum class Outcome : std::uint8_t { Completed = 0, UnsupportedControl = 1 };
+  enum class Signal : std::uint8_t { RequestIOP = 1, RequestEE = 2 };
+  constexpr std::uint8_t SIDE_SHIFT = 8;
+  constexpr std::uint8_t OUTCOME_SHIFT = 16;
+}
 
 namespace NekoIOPTraceInstruction
 {
@@ -384,6 +400,15 @@ struct NekoTraceEvent
 // IOP records follow existing non-display cycle records and precede the final
 // PresentationBoundary marker. Collection covers scheduled cycles, not direct
 // host setup or execution-control calls between cycles.
+//
+// SIF/RegisterWrite: register | side << 8 | outcome << 16, submitted word,
+//   canonical word before, canonical word after (no synthesized read bits).
+//   Includes accepted no-ops and unsupported CTRL commands; rejected widths or
+//   addresses remain CPU memory failures, not SIF register operations.
+// SIF/SignalRequested: signal, originating register metadata, submitted word, 0.
+//   Emitted for each request, even if destination INTC status already coalesced.
+// SIF records share mutation ordering with IOP CPU/device records. Collection
+//   observes scheduled writes only; inspection and register polling add no noise.
 
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(

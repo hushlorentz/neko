@@ -492,6 +492,10 @@ void NekoSaveStateCodec::writeSystem(
     auto component = writer->scope("iop");
     writeIOP(writer, system);
   }
+  {
+    auto component = writer->scope("sif");
+    writeSIF(writer, system);
+  }
 }
 
 void NekoSaveStateCodec::readSystem(
@@ -593,6 +597,10 @@ void NekoSaveStateCodec::readSystem(
     auto component = reader->scope("iop");
     readIOP(reader, system, &topology->iopConfiguration);
   }
+  {
+    auto component = reader->scope("sif");
+    readSIF(reader, &system->sifComponent);
+  }
 }
 
 void NekoSaveStateCodec::validateSystem(
@@ -656,6 +664,7 @@ void NekoSaveStateCodec::commitSystem(
   SystemReconciliation *reconciliation =
     &transaction->reconciliation;
   commitIOP(destination, source);
+  commitSIF(&destination->sifComponent, source->sifComponent);
   destination->inputState = source->inputState;
   destination->masterClock.masterCycle =
     source->masterClock.masterCycle;

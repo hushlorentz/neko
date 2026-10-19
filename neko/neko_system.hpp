@@ -23,6 +23,7 @@
 #include "iop_timer_timing.hpp"
 #include "regression_trace.hpp"
 #include "scratchpad_dmac_channel.hpp"
+#include "sif_interrupt_router.hpp"
 #include "system_interfaces.hpp"
 #include "vif.hpp"
 #include "vif1_dmac_channel.hpp"
@@ -109,6 +110,10 @@ class NekoSystem
     std::uint64_t eeStateHash() const;
     // Hashes IOP state and its scheduling phase, not the complete machine.
     std::uint64_t iopStateHash() const;
+    // Shared interconnect state only; destination INTC latches remain separate.
+    std::uint64_t sifStateHash() const;
+    SIF &sif();
+    const SIF &sif() const;
 
     IOPCore &iopCore();
     const IOPCore &iopCore() const;
@@ -199,6 +204,8 @@ class NekoSystem
     IOPInterruptController iopInterruptControllerComponent;
     IOPTimers iopTimersComponent;
     IOPTimerTiming iopTimerTimingComponent;
+    SIF sifComponent;
+    SIFInterruptRouter sifInterruptRouterComponent;
     NekoInputState inputState;
     bool collectingTrace = false;
     std::vector<NekoTraceEvent> traceEvents;
@@ -231,7 +238,8 @@ class NekoSystem
     void publishCycleTrace(
       std::uint64_t cycle,
       const CycleObservationSnapshot &beforeCycle);
-    void publishIOPTrace(std::uint64_t cycle);
+    void publishIOPAndSIFTrace(std::uint64_t cycle);
+    void publishSIFTrace(std::uint64_t cycle, const SIF::Observation &event);
     void publishIOPCPUTrace(std::uint64_t cycle, const IOPCore::StepEvent &event);
     void publishIOPTimerTrace(
       std::uint64_t cycle, const IOPTimers::Observation &event);

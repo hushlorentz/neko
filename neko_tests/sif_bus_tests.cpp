@@ -50,15 +50,8 @@ namespace
 
   struct Fixture
   {
-    SIF sif;
-    SignalRecorder signals{sif};
     NekoSystem system;
-
-    Fixture()
-    {
-      system.eeBus().attachSIF(&sif, &signals);
-      system.iopBus().attachSIF(&sif, &signals);
-    }
+    SIF &sif = system.sif();
   };
 
   void seed(SIF &sif)
@@ -220,36 +213,40 @@ TEST_CASE("SIF bus register views share one state owner", "[sif][bus]")
   REQUIRE(iop.write32(IOP_BASE + 0x40, 0x30).status ==
     IOPBusStatus::Completed);
   REQUIRE(fixture.sif.control() == 0x2000);
-  REQUIRE(fixture.signals.eeRequests == 0);
-  REQUIRE(fixture.signals.iopRequests == 0);
-  REQUIRE(fixture.signals.emptyRequests == 0);
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
 }
 
 TEST_CASE("SIF bus trigger effects are delivered once after mutation", "[sif][bus]")
 {
-  Fixture fixture;
-  auto &ee = fixture.system.eeBus();
-  auto &iop = fixture.system.iopBus();
+  NekoSystem system;
+  SIF sif;
+  SignalRecorder signals(sif);
+  EEBus ee(&system.vif0(), &system.vif1(), &system.gifRegisters(),
+    &system.gifPath3(), &system.gs(), &system.interruptController());
+  IOPBus iop;
+  ee.attachSIF(&sif, &signals);
+  iop.attachSIF(&sif, &signals);
   for (std::size_t repeat = 1; repeat <= 3; ++repeat)
   {
     REQUIRE(ee.writeData32(EE_BASE + 0x40, 0x40100));
-    REQUIRE(fixture.signals.iopRequests == repeat);
-    REQUIRE(fixture.signals.controlSeen == 0x100);
+    REQUIRE(signals.iopRequests == repeat);
+    REQUIRE(signals.controlSeen == 0x100);
     REQUIRE(iop.write32(IOP_DOORBELL, 0xabcdef03).status ==
       IOPBusStatus::Completed);
-    REQUIRE(fixture.signals.eeRequests == repeat);
-    REQUIRE(fixture.signals.doorbellSeen == 0xabcdef03);
+    REQUIRE(signals.eeRequests == repeat);
+    REQUIRE(signals.doorbellSeen == 0xabcdef03);
     REQUIRE(iop.read32(IOP_DOORBELL).status == IOPBusStatus::Completed);
     REQUIRE(iop.read32(IOP_DOORBELL).value == 0xabcdef03);
   }
   REQUIRE(iop.write32(IOP_DOORBELL, 0).status == IOPBusStatus::Completed);
   REQUIRE(ee.writeData32(EE_BASE + 0x40, 0));
-  REQUIRE(fixture.signals.eeRequests == 3);
-  REQUIRE(fixture.signals.iopRequests == 3);
-  REQUIRE(fixture.signals.emptyRequests == 0);
-  REQUIRE(fixture.system.interruptController().status() == 0);
-  REQUIRE(fixture.system.iopInterruptController().status() == 0);
-  REQUIRE(fixture.system.masterClockScheduler().currentCycle() == 0);
+  REQUIRE(signals.eeRequests == 3);
+  REQUIRE(signals.iopRequests == 3);
+  REQUIRE(signals.emptyRequests == 0);
+  REQUIRE(system.interruptController().status() == 0);
+  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(system.masterClockScheduler().currentCycle() == 0);
 }
 
 TEST_CASE("SIF bus decode rejects padding auxiliary words and shadow aliases",
@@ -285,8 +282,8 @@ TEST_CASE("SIF bus decode rejects padding auxiliary words and shadow aliases",
       IOPBusStatus::Unmapped);
   }
   requireUnchanged(fixture.sif, before);
-  REQUIRE(fixture.signals.eeRequests == 0);
-  REQUIRE(fixture.signals.iopRequests == 0);
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
 }
 
 TEST_CASE("SIF bus narrow and EE wide accesses reject without effects", "[sif][bus]")
@@ -336,8 +333,8 @@ TEST_CASE("SIF bus narrow and EE wide accesses reject without effects", "[sif][b
   REQUIRE(iop.write16(IOP_DOORBELL, 2).status == IOPBusStatus::Unmapped);
   REQUIRE(iop.read32(IOP_DOORBELL + 4).status == IOPBusStatus::Unmapped);
   requireUnchanged(fixture.sif, before);
-  REQUIRE(fixture.signals.eeRequests == 0);
-  REQUIRE(fixture.signals.iopRequests == 0);
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
 }
 
 TEST_CASE("SIF bus host wide fallbacks cannot commit a first word", "[sif][bus]")
@@ -357,8 +354,8 @@ TEST_CASE("SIF bus host wide fallbacks cannot commit a first word", "[sif][bus]"
   }
   REQUIRE_THROWS_AS(ee.write64(0xb000f240, 0x40100), std::out_of_range);
   requireUnchanged(fixture.sif, before);
-  REQUIRE(fixture.signals.eeRequests == 0);
-  REQUIRE(fixture.signals.iopRequests == 0);
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
 }
 
 TEST_CASE("SIF bus partial IOP byte enables reject before register commands", "[sif][bus]")
@@ -377,12 +374,12 @@ TEST_CASE("SIF bus partial IOP byte enables reject before register commands", "[
     }
   }
   requireUnchanged(fixture.sif, before);
-  REQUIRE(fixture.signals.eeRequests == 0);
-  REQUIRE(fixture.signals.iopRequests == 0);
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
   REQUIRE(fixture.system.iopBus().writeMasked32(IOP_DOORBELL, 0x1234567b, 0xf).status ==
     IOPBusStatus::Completed);
   REQUIRE(fixture.sif.iopDoorbell() == 0x1234567b);
-  REQUIRE(fixture.signals.eeRequests == 1);
+  REQUIRE(fixture.system.interruptController().status() == 2);
 }
 
 TEST_CASE("SIF bus combined unsupported EE CTRL commands reject all effects",
@@ -398,7 +395,7 @@ TEST_CASE("SIF bus combined unsupported EE CTRL commands reject all effects",
       std::invalid_argument);
     requireUnchanged(fixture.sif, before);
   }
-  REQUIRE(fixture.signals.iopRequests == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
 }
 
 TEST_CASE("SIF bus alignment and physical-only boundaries precede devices",
@@ -439,25 +436,28 @@ TEST_CASE("SIF bus attachments require one owner and a live signal receiver",
   NekoSystem system;
   SIF sif;
   SignalRecorder signals(sif);
+  EEBus ee(&system.vif0(), &system.vif1(), &system.gifRegisters(),
+    &system.gifPath3(), &system.gs(), &system.interruptController());
+  IOPBus iop;
   std::uint32_t value = 0x12345678;
-  REQUIRE_FALSE(system.eeBus().readData32(EE_BASE, &value));
+  REQUIRE_FALSE(ee.readData32(EE_BASE, &value));
   REQUIRE(value == 0x12345678);
-  REQUIRE_FALSE(system.eeBus().writeData32(EE_BASE, 0xffffffff));
-  REQUIRE(system.iopBus().read32(IOP_BASE).status == IOPBusStatus::Unmapped);
-  REQUIRE(system.iopBus().write32(IOP_DOORBELL, 2).status == IOPBusStatus::Unmapped);
-  REQUIRE_THROWS_AS(system.eeBus().attachSIF(nullptr, &signals), std::invalid_argument);
-  REQUIRE_THROWS_AS(system.eeBus().attachSIF(&sif, nullptr), std::invalid_argument);
-  REQUIRE_THROWS_AS(system.iopBus().attachSIF(nullptr, &signals), std::invalid_argument);
-  REQUIRE_THROWS_AS(system.iopBus().attachSIF(&sif, nullptr), std::invalid_argument);
-  system.eeBus().attachSIF(&sif, &signals);
-  system.iopBus().attachSIF(&sif, &signals);
-  REQUIRE_THROWS_AS(system.eeBus().attachSIF(&sif, &signals), std::logic_error);
-  REQUIRE_THROWS_AS(system.iopBus().attachSIF(&sif, &signals), std::logic_error);
+  REQUIRE_FALSE(ee.writeData32(EE_BASE, 0xffffffff));
+  REQUIRE(iop.read32(IOP_BASE).status == IOPBusStatus::Unmapped);
+  REQUIRE(iop.write32(IOP_DOORBELL, 2).status == IOPBusStatus::Unmapped);
+  REQUIRE_THROWS_AS(ee.attachSIF(nullptr, &signals), std::invalid_argument);
+  REQUIRE_THROWS_AS(ee.attachSIF(&sif, nullptr), std::invalid_argument);
+  REQUIRE_THROWS_AS(iop.attachSIF(nullptr, &signals), std::invalid_argument);
+  REQUIRE_THROWS_AS(iop.attachSIF(&sif, nullptr), std::invalid_argument);
+  ee.attachSIF(&sif, &signals);
+  iop.attachSIF(&sif, &signals);
+  REQUIRE_THROWS_AS(ee.attachSIF(&sif, &signals), std::logic_error);
+  REQUIRE_THROWS_AS(iop.attachSIF(&sif, &signals), std::logic_error);
   seed(sif);
   const SIF before = sif;
-  system.iopBus().reset();
+  iop.reset();
   requireUnchanged(sif, before);
-  REQUIRE(system.iopBus().read32(IOP_BASE).value == before.readIOP(SIFRegister::MSCOM));
+  REQUIRE(iop.read32(IOP_BASE).value == before.readIOP(SIFRegister::MSCOM));
   REQUIRE(signals.eeRequests == 0);
   REQUIRE(signals.iopRequests == 0);
 }
@@ -482,7 +482,7 @@ TEST_CASE("SIF bus guest aliases reach the canonical views", "[sif][bus][guest]"
   prepareIOP(fixture, 0x2b, 0xbf801450, 0x80000002);
   fixture.system.iopCore().stepInstruction();
   REQUIRE(fixture.sif.iopDoorbell() == 0x80000002);
-  REQUIRE(fixture.signals.eeRequests == 1);
+  REQUIRE(fixture.system.interruptController().status() == 2);
 }
 
 TEST_CASE("SIF bus EE merge stores reject partial lanes before any command",
@@ -508,7 +508,7 @@ TEST_CASE("SIF bus EE merge stores reject partial lanes before any command",
       REQUIRE(fixture.system.eeCore().pendingException() == EEException::DataBusErrorStore);
       REQUIRE(fixture.system.eeCore().exceptionAddress() == 0xb000f240 + lane);
       requireUnchanged(fixture.sif, before);
-      REQUIRE(fixture.signals.iopRequests == 0);
+      REQUIRE(fixture.system.iopInterruptController().status() == 0);
       requireSingleEEWordStore(fixture, false, 0);
     }
   }
@@ -520,14 +520,14 @@ TEST_CASE("SIF bus full EE merge stores issue one direct word command",
   Fixture fixture;
   for (std::uint8_t opcode : {0x2a, 0x2e})
   {
-    const auto before = fixture.signals.iopRequests;
+    fixture.system.iopInterruptController().writeStatus(~UINT32_C(2));
     fixture.system.clearTrace();
     fixture.system.startTrace();
     executeEE(fixture, opcode, 0xb000f240, 0x40100, opcode == 0x2a ? 3 : 0);
     fixture.system.stopTrace();
     REQUIRE(fixture.system.eeCore().pendingException() == EEException::None);
     REQUIRE(fixture.sif.control() == 0x100);
-    REQUIRE(fixture.signals.iopRequests == before + 1);
+    REQUIRE(fixture.system.iopInterruptController().status() == 2);
     requireSingleEEWordStore(fixture, true, 0x40100);
   }
 }
@@ -550,7 +550,7 @@ TEST_CASE("SIF bus IOP merge byte enables preserve whole-word-only commands",
         seed(fixture.sif);
         SIF expected = fixture.sif;
         const bool fullWord = lane == (opcode == 0x2a ? 3 : 0);
-        const auto requestsBefore = fixture.signals.eeRequests;
+        fixture.system.interruptController().acknowledge(2);
         if (fullWord)
         {
           if (address == 0xbf801450)
@@ -577,9 +577,9 @@ TEST_CASE("SIF bus IOP merge byte enables preserve whole-word-only commands",
           REQUIRE(core.storeFailure().mergeByteEnable == mask);
         }
         requireUnchanged(fixture.sif, expected);
-        REQUIRE(fixture.signals.eeRequests ==
-          requestsBefore + (fullWord && address == 0xbf801450 ? 1 : 0));
-        REQUIRE(fixture.signals.iopRequests == 0);
+        REQUIRE(fixture.system.interruptController().status() ==
+          (fullWord && address == 0xbf801450 ? 2 : 0));
+        REQUIRE(fixture.system.iopInterruptController().status() == 0);
       }
     }
   }
@@ -622,6 +622,6 @@ TEST_CASE("SIF bus rejected guest accesses retain CPU failure contracts",
     }
     requireUnchanged(fixture.sif, before);
   }
-  REQUIRE(fixture.signals.eeRequests == 0);
-  REQUIRE(fixture.signals.iopRequests == 0);
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
 }

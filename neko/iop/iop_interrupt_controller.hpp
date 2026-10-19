@@ -6,7 +6,7 @@
 #include <cstdint>
 
 #include "iop_types.hpp"
-#include "iop_observation.hpp"
+#include "observation_order.hpp"
 
 enum class IOPInterruptSource : std::uint8_t
 {
@@ -76,9 +76,9 @@ class IOPInterruptController final
     std::array<Observation, OBSERVATION_CAPACITY> observations = {};
     std::size_t observationCount = 0;
     bool observationsEnabled = false;
-    IOPObservationOrder *observationOrder = nullptr;
+    NekoObservationOrder *observationOrder = nullptr;
 
-    void enableObservations(IOPObservationOrder *order = nullptr);
+    void enableObservations(NekoObservationOrder *order = nullptr);
     void disableObservations();
     void clearObservations();
     Observation snapshot() const;

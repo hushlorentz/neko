@@ -65,14 +65,16 @@ namespace
   }
 }
 
-void NekoSystem::publishIOPTrace(std::uint64_t cycle)
+void NekoSystem::publishIOPAndSIFTrace(std::uint64_t cycle)
 {
   std::size_t cpuIndex = 0;
   std::size_t timerIndex = 0;
   std::size_t interruptIndex = 0;
+  std::size_t sifIndex = 0;
   while (cpuIndex < iopCoreComponent.stepEventCount ||
          timerIndex < iopTimersComponent.observationCount ||
-         interruptIndex < iopInterruptControllerComponent.observationCount)
+         interruptIndex < iopInterruptControllerComponent.observationCount ||
+         sifIndex < sifComponent.observationCount)
   {
     constexpr auto absent = std::numeric_limits<std::size_t>::max();
     const auto cpuSequence = cpuIndex < iopCoreComponent.stepEventCount
@@ -83,7 +85,14 @@ void NekoSystem::publishIOPTrace(std::uint64_t cycle)
       interruptIndex < iopInterruptControllerComponent.observationCount
         ? iopInterruptControllerComponent.observations[interruptIndex].sequence
         : absent;
-    if (cpuSequence < timerSequence && cpuSequence < interruptSequence)
+    const auto sifSequence = sifIndex < sifComponent.observationCount
+      ? sifComponent.observations[sifIndex].sequence : absent;
+    if (sifSequence < cpuSequence && sifSequence < timerSequence &&
+        sifSequence < interruptSequence)
+    {
+      publishSIFTrace(cycle, sifComponent.observations[sifIndex++]);
+    }
+    else if (cpuSequence < timerSequence && cpuSequence < interruptSequence)
     {
       publishIOPCPUTrace(cycle, iopCoreComponent.stepEvents[cpuIndex++]);
     }
@@ -96,6 +105,47 @@ void NekoSystem::publishIOPTrace(std::uint64_t cycle)
       publishIOPInterruptTrace(
         cycle, iopInterruptControllerComponent.observations[interruptIndex++]);
     }
+  }
+}
+
+void NekoSystem::publishSIFTrace(
+  std::uint64_t cycle, const SIF::Observation &event)
+{
+  using Register = NekoSIFTrace::Register;
+  Register reg;
+  if (event.port == SIF::ObservationPort::IOPDoorbell)
+  {
+    reg = Register::IOPDoorbell;
+  }
+  else
+  {
+    switch (event.reg)
+    {
+      case SIFRegister::MSCOM: reg = Register::MSCOM; break;
+      case SIFRegister::SMCOM: reg = Register::SMCOM; break;
+      case SIFRegister::MSFLAG: reg = Register::MSFLAG; break;
+      case SIFRegister::SMFLAG: reg = Register::SMFLAG; break;
+      case SIFRegister::CTRL: reg = Register::CTRL; break;
+      default: throw std::logic_error("Unknown SIF trace register.");
+    }
+  }
+  const auto side = event.port == SIF::ObservationPort::EE
+    ? NekoSIFTrace::Side::EE : NekoSIFTrace::Side::IOP;
+  const auto outcome = event.result.outcome == SIFWriteOutcome::Completed
+    ? NekoSIFTrace::Outcome::Completed
+    : NekoSIFTrace::Outcome::UnsupportedControl;
+  const std::uint64_t metadata = static_cast<std::uint64_t>(reg) |
+    (static_cast<std::uint64_t>(side) << NekoSIFTrace::SIDE_SHIFT) |
+    (static_cast<std::uint64_t>(outcome) << NekoSIFTrace::OUTCOME_SHIFT);
+  appendTrace(cycle, NekoTraceSubsystem::SIF, NekoTraceEventType::RegisterWrite,
+    metadata, event.value, event.before, event.after);
+  if (event.result.signal != SIFSignal::None)
+  {
+    const auto signal = event.result.signal == SIFSignal::RequestIOP
+      ? NekoSIFTrace::Signal::RequestIOP : NekoSIFTrace::Signal::RequestEE;
+    appendTrace(cycle, NekoTraceSubsystem::SIF,
+      NekoTraceEventType::SignalRequested,
+      static_cast<std::uint64_t>(signal), metadata, event.value);
   }
 }
 

@@ -16,7 +16,7 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 34;
+constexpr std::uint32_t SAVE_STATE_VERSION = 35;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
@@ -24,6 +24,52 @@ constexpr std::uint64_t SAVE_STATE_FNV_PRIME =
   UINT64_C(1099511628211);
 constexpr std::size_t SAVE_STATE_RESERVE_BYTES =
   EEMemoryMap::MAIN_MEMORY_SIZE + IOPBus::RAM_SIZE + 5 * 1024 * 1024;
+
+// Reuses codec field traversal for allocation-free canonical component hashes.
+class SaveStateHashWriter
+{
+  public:
+    struct Scope {};
+    Scope scope(const char *) { return {}; }
+    Scope element(std::size_t) { return {}; }
+
+    void writeFieldU8(const char *, std::uint8_t value) { scalar(value, 1); }
+    void writeFieldU16(const char *, std::uint16_t value) { scalar(value, 2); }
+    void writeFieldU32(const char *, std::uint32_t value) { scalar(value, 4); }
+    void writeFieldU64(const char *, std::uint64_t value) { scalar(value, 8); }
+    void writeFieldBool(const char *, bool value) { scalar(value ? 1 : 0, 1); }
+    void writeFieldSize(const char *, std::size_t value) { scalar(value, 4); }
+
+    void writeFieldBytes(
+      const char *, const std::uint8_t *bytes, std::size_t count)
+    {
+      for (std::size_t index = 0; index < count; ++index)
+      {
+        scalar(bytes[index], 1);
+      }
+    }
+
+    void writeFieldByteVector(
+      const char *name, const std::vector<std::uint8_t> &bytes)
+    {
+      writeFieldSize(name, bytes.size());
+      writeFieldBytes(name, bytes.data(), bytes.size());
+    }
+
+    std::uint64_t value() const { return hash; }
+
+  private:
+    void scalar(std::uint64_t value, unsigned bytes)
+    {
+      for (unsigned index = 0; index < bytes; ++index)
+      {
+        hash ^= static_cast<std::uint8_t>(value >> (index * 8));
+        hash *= SAVE_STATE_FNV_PRIME;
+      }
+    }
+
+    std::uint64_t hash = SAVE_STATE_FNV_OFFSET_BASIS;
+};
 
 enum class SaveStateFieldKind : std::uint8_t
 {
@@ -995,6 +1041,7 @@ class NekoSaveStateCodec
       const std::vector<std::uint8_t> &state,
       SaveStateObserver *observer = nullptr);
     static std::uint64_t hashIOP(const NekoSystem &system);
+    static std::uint64_t hashSIF(const NekoSystem &system);
     static void inspect(
       const std::vector<std::uint8_t> &state, SaveStateObserver *observer);
 
@@ -1027,6 +1074,11 @@ class NekoSaveStateCodec
     static void readIOPCache(SaveStateReader *reader, IOPCache *cache);
     static void readIOPTimers(SaveStateReader *reader, IOPTimers *timers);
     static void commitIOP(NekoSystem *destination, NekoSystem *source) noexcept;
+    template<typename Writer>
+    static void writeSIFState(Writer *writer, const SIF &sif);
+    static void writeSIF(SaveStateWriter *writer, const NekoSystem &system);
+    static void readSIF(SaveStateReader *reader, SIF *sif);
+    static void commitSIF(SIF *destination, const SIF &source) noexcept;
     using PipelineLists =
       std::array<std::list<Pipeline *>, 3>;
     using PipelineListIndices =

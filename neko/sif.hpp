@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "observation_order.hpp"
+
 using SIFQuadword = std::array<std::uint32_t, 4>;
 
 enum class SIFRegister : std::uint8_t
@@ -98,6 +100,33 @@ class SIF final
     std::size_t sif0PackingCursor() const;
 
   private:
+    friend class NekoSystem;
+    friend class NekoSaveStateCodec;
+
+    enum class ObservationPort : std::uint8_t { EE, IOP, IOPDoorbell };
+    struct Observation
+    {
+      ObservationPort port;
+      SIFRegister reg;
+      std::uint32_t value;
+      std::uint32_t before;
+      std::uint32_t after;
+      SIFWriteResult result;
+      std::size_t sequence;
+    };
+
+    // At most two EE instructions and one IOP instruction write in a cycle.
+    static constexpr std::size_t OBSERVATION_CAPACITY = 3;
+    std::array<Observation, OBSERVATION_CAPACITY> observations = {};
+    std::size_t observationCount = 0;
+    NekoObservationOrder *observationOrder = nullptr;
+    void enableObservations(NekoObservationOrder *order);
+    void disableObservations();
+    void recordWrite(ObservationPort port, SIFRegister reg, std::uint32_t value,
+      std::uint32_t before, std::uint32_t after, SIFWriteResult result);
+    SIFWriteResult mutateEE(SIFRegister reg, std::uint32_t value);
+    SIFWriteResult mutateIOP(SIFRegister reg, std::uint32_t value);
+
     static constexpr std::uint8_t END = WORD_CAPACITY;
 
     struct Stream

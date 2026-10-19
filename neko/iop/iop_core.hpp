@@ -6,7 +6,7 @@
 #include <memory>
 
 #include "iop_cache.hpp"
-#include "iop_observation.hpp"
+#include "observation_order.hpp"
 #include "iop_types.hpp"
 
 class IOPBus;
@@ -329,9 +329,9 @@ class IOPCore final
     std::array<StepEvent, STEP_EVENT_CAPACITY> stepEvents = {};
     std::size_t stepEventCount = 0;
     bool observationsEnabled = false;
-    IOPObservationOrder *observationOrder = nullptr;
+    NekoObservationOrder *observationOrder = nullptr;
 
-    void enableObservations(IOPObservationOrder *order = nullptr);
+    void enableObservations(NekoObservationOrder *order = nullptr);
     void disableObservations();
     void clearObservations();
     void recordStepEvent(const StepEvent &event);

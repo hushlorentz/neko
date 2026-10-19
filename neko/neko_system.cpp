@@ -193,7 +193,9 @@ NekoSystem::NekoSystem() :
     &dmacControllerComponent,
     &eeBusComponent,
     &eeCoreComponent.memorySystem),
-  gsDisplayComponent(&gsComponent)
+  gsDisplayComponent(&gsComponent),
+  sifInterruptRouterComponent(
+    interruptControllerComponent, iopInterruptControllerComponent)
 {
   masterClock.registerComponent(eeCoreComponent, 1);
   vif0Component.attachVPU(&vu0Component);
@@ -230,6 +232,8 @@ NekoSystem::NekoSystem() :
   iopBusComponent.attachInterruptController(&iopInterruptControllerComponent);
   iopBusComponent.attachTimers(&iopTimersComponent);
   iopCoreComponent.attachBus(&iopBusComponent);
+  eeBusComponent.attachSIF(&sifComponent, &sifInterruptRouterComponent);
+  iopBusComponent.attachSIF(&sifComponent, &sifInterruptRouterComponent);
 }
 
 void NekoSystem::reset()
@@ -574,6 +578,16 @@ EECore &NekoSystem::eeCore()
   return eeCoreComponent;
 }
 
+SIF &NekoSystem::sif()
+{
+  return sifComponent;
+}
+
+const SIF &NekoSystem::sif() const
+{
+  return sifComponent;
+}
+
 const EECore &NekoSystem::eeCore() const
 {
   return eeCoreComponent;
@@ -852,20 +866,23 @@ void NekoSystem::clockMasterCycle()
     IOPCore &core;
     IOPTimers &timers;
     IOPInterruptController &interrupts;
-    IOPObservationOrder order;
+    SIF &sif;
+    NekoObservationOrder order;
     ~ObservationScope()
     {
       core.disableObservations();
       timers.disableObservations();
       interrupts.disableObservations();
+      sif.disableObservations();
     }
   } observationScope{iopCoreComponent, iopTimersComponent,
-      iopInterruptControllerComponent};
+      iopInterruptControllerComponent, sifComponent};
   if (collectingTrace)
   {
     iopCoreComponent.enableObservations(&observationScope.order);
     iopTimersComponent.enableObservations(&observationScope.order);
     iopInterruptControllerComponent.enableObservations(&observationScope.order);
+    sifComponent.enableObservations(&observationScope.order);
   }
   const bool iopClockPulse =
     masterClock.currentCycle() % PS2Clock::IOP_CLOCK_PERIOD ==
@@ -1300,7 +1317,7 @@ void NekoSystem::publishCycleTrace(
       interruptControllerComponent.status(),
       interruptControllerComponent.mask());
   }
-  publishIOPTrace(cycle);
+  publishIOPAndSIFTrace(cycle);
   if (gsDisplayComponent.presentationBoundaryCount() !=
       beforeCycle.presentationBoundary)
   {

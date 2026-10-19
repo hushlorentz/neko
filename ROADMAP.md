@@ -1595,7 +1595,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       reject unsupported accesses atomically without broad MMIO fallbacks.
 - [x] Route resolved SBUS signals through the existing interrupt controllers,
       separately from DMA completion, masks, and CPU exception admission.
-- [ ] Compose the SIF owner/router into `NekoSystem`, persist/hash the new
+- [x] Compose the SIF owner/router into `NekoSystem`, persist/hash the new
       state transactionally, and append opt-in register/signal observations
       without changing existing trace identities.
 - [ ] Add two-CPU register/signal conformance, acknowledgement, active reset,

@@ -8,51 +8,6 @@ namespace
   using PS2Clock::IOP_CLOCK_PERIOD;
   using PS2Clock::IOP_CLOCK_PHASE;
 
-  // The codec's field traversal also feeds an allocation-free canonical hash.
-  class IOPStateHashWriter
-  {
-    public:
-      struct Scope {};
-      Scope scope(const char *) { return {}; }
-      Scope element(std::size_t) { return {}; }
-
-      void writeFieldU8(const char *, std::uint8_t value) { scalar(value, 1); }
-      void writeFieldU16(const char *, std::uint16_t value) { scalar(value, 2); }
-      void writeFieldU32(const char *, std::uint32_t value) { scalar(value, 4); }
-      void writeFieldU64(const char *, std::uint64_t value) { scalar(value, 8); }
-      void writeFieldBool(const char *, bool value) { scalar(value ? 1 : 0, 1); }
-      void writeFieldSize(const char *, std::size_t value) { scalar(value, 4); }
-
-      void writeFieldBytes(
-        const char *, const std::uint8_t *bytes, std::size_t count)
-      {
-        for (std::size_t index = 0; index < count; ++index)
-        {
-          scalar(bytes[index], 1);
-        }
-      }
-
-      void writeFieldByteVector(
-        const char *name, const std::vector<std::uint8_t> &bytes)
-      {
-        writeFieldSize(name, bytes.size());
-        writeFieldBytes(name, bytes.data(), bytes.size());
-      }
-
-      std::uint64_t value() const { return hash; }
-
-    private:
-      void scalar(std::uint64_t value, unsigned bytes)
-      {
-        for (unsigned index = 0; index < bytes; ++index)
-        {
-          hash ^= static_cast<std::uint8_t>(value >> (index * 8));
-          hash *= SAVE_STATE_FNV_PRIME;
-        }
-      }
-
-      std::uint64_t hash = SAVE_STATE_FNV_OFFSET_BASIS;
-  };
 }
 
 std::uint64_t NekoSystem::iopStateHash() const
@@ -62,7 +17,7 @@ std::uint64_t NekoSystem::iopStateHash() const
 
 std::uint64_t NekoSaveStateCodec::hashIOP(const NekoSystem &system)
 {
-  IOPStateHashWriter writer;
+  SaveStateHashWriter writer;
   writeIOPState(&writer, system);
   writer.writeFieldU64(
     "masterClockPhase", system.masterClock.currentCycle() % IOP_CLOCK_PERIOD);

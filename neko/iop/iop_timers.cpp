@@ -240,7 +240,7 @@ void IOPTimers::reset()
   blanking = {};
 }
 
-void IOPTimers::enableObservations(IOPObservationOrder *order)
+void IOPTimers::enableObservations(NekoObservationOrder *order)
 {
   clearObservations();
   observationOrder = order;

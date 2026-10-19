@@ -1,5 +1,6 @@
 #include "sif.hpp"
 
+#include <cassert>
 #include <stdexcept>
 
 bool SIFRegisterMap::decodeOffset(std::uint32_t offset, SIFRegister &reg)
@@ -40,6 +41,8 @@ void SIF::reset()
   freeHead = 0;
   packingLatch = {};
   packingCursor = 0;
+  observationCount = 0;
+  observationOrder = nullptr;
 }
 
 std::uint32_t SIF::readRegister(SIFRegister reg) const
@@ -69,6 +72,18 @@ std::uint32_t SIF::readIOP(SIFRegister reg) const
 
 SIFWriteResult SIF::writeEE(SIFRegister reg, std::uint32_t value)
 {
+  if (observationOrder == nullptr)
+  {
+    return mutateEE(reg, value);
+  }
+  const auto before = readRegister(reg);
+  const auto result = mutateEE(reg, value);
+  recordWrite(ObservationPort::EE, reg, value, before, readRegister(reg), result);
+  return result;
+}
+
+SIFWriteResult SIF::mutateEE(SIFRegister reg, std::uint32_t value)
+{
   switch (reg)
   {
     case SIFRegister::MSCOM:
@@ -95,6 +110,18 @@ SIFWriteResult SIF::writeEE(SIFRegister reg, std::uint32_t value)
 }
 
 SIFWriteResult SIF::writeIOP(SIFRegister reg, std::uint32_t value)
+{
+  if (observationOrder == nullptr)
+  {
+    return mutateIOP(reg, value);
+  }
+  const auto before = readRegister(reg);
+  const auto result = mutateIOP(reg, value);
+  recordWrite(ObservationPort::IOP, reg, value, before, readRegister(reg), result);
+  return result;
+}
+
+SIFWriteResult SIF::mutateIOP(SIFRegister reg, std::uint32_t value)
 {
   switch (reg)
   {
@@ -137,9 +164,41 @@ std::uint32_t SIF::iopDoorbell() const
 
 SIFWriteResult SIF::writeIOPDoorbell(std::uint32_t value)
 {
+  const auto before = iopDoorbellRegister;
   iopDoorbellRegister = value;
-  return {SIFWriteOutcome::Completed,
+  const SIFWriteResult result{SIFWriteOutcome::Completed,
     (value & 2) != 0 ? SIFSignal::RequestEE : SIFSignal::None};
+  recordWrite(ObservationPort::IOPDoorbell, SIFRegister::CTRL, value,
+    before, iopDoorbellRegister, result);
+  return result;
+}
+
+void SIF::enableObservations(NekoObservationOrder *order)
+{
+  assert(order != nullptr);
+  observationCount = 0;
+  observationOrder = order;
+}
+
+void SIF::disableObservations()
+{
+  observationCount = 0;
+  observationOrder = nullptr;
+}
+
+void SIF::recordWrite(ObservationPort port, SIFRegister reg, std::uint32_t value,
+  std::uint32_t before, std::uint32_t after, SIFWriteResult result)
+{
+  if (observationOrder == nullptr)
+  {
+    return;
+  }
+  if (observationCount == observations.size())
+  {
+    throw std::logic_error("SIF observation capacity exceeded.");
+  }
+  observations[observationCount++] =
+    {port, reg, value, before, after, result, observationOrder->next++};
 }
 
 std::uint32_t SIF::control() const

@@ -423,7 +423,7 @@ IOPCore::IOPCore()
   reset();
 }
 
-void IOPCore::enableObservations(IOPObservationOrder *order)
+void IOPCore::enableObservations(NekoObservationOrder *order)
 {
   clearObservations();
   observationOrder = order;

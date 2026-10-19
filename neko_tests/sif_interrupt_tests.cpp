@@ -19,16 +19,11 @@ namespace
 
   struct Fixture
   {
-    SIF sif;
     NekoSystem system;
+    SIF &sif = system.sif();
     SIFInterruptRouter router{
       system.interruptController(), system.iopInterruptController()};
 
-    Fixture()
-    {
-      system.eeBus().attachSIF(&sif, &router);
-      system.iopBus().attachSIF(&sif, &router);
-    }
   };
 
   void requestIOP(Fixture &fixture)
