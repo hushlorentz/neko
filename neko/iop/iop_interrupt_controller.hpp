@@ -70,7 +70,8 @@ class IOPInterruptController final
       std::size_t sequence = 0;
     };
 
-    // At most six timer assertions followed by CPU fetch + data MMIO.
+    // Six timers, an EE SBUS request, and one IOP INTC transition.
+    // A side-effecting INTC_CTRL fetch cannot decode to a memory instruction.
     static constexpr std::size_t OBSERVATION_CAPACITY = 8;
     std::array<Observation, OBSERVATION_CAPACITY> observations = {};
     std::size_t observationCount = 0;

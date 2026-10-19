@@ -1593,10 +1593,11 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       fixed-capacity transport storage, checked inspection, and reset.
 - [x] Map resolved MMIO widths and side effects through both physical buses;
       reject unsupported accesses atomically without broad MMIO fallbacks.
-- [ ] Route resolved SBUS signals through the existing interrupt controllers,
+- [x] Route resolved SBUS signals through the existing interrupt controllers,
       separately from DMA completion, masks, and CPU exception admission.
-- [ ] Persist/hash the new state transactionally and append opt-in register/
-      signal observations without changing existing trace identities.
+- [ ] Compose the SIF owner/router into `NekoSystem`, persist/hash the new
+      state transactionally, and append opt-in register/signal observations
+      without changing existing trace identities.
 - [ ] Add two-CPU register/signal conformance, acknowledgement, active reset,
       and restore coverage; complete independent review and sanitizer checks.
 
