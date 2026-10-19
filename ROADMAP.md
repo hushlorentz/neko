@@ -1584,7 +1584,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       enables, completion flags, and aggregate interrupt acknowledgement.
 - [x] Classify bounded BIOS startup prerequisites, including reserved EE MMIO
       at `0x1000f500`; separate reserved-access policy from functional controls.
-- [ ] Pin cross-clock visibility and lifecycle contracts; register adopted
+- [x] Pin cross-clock visibility and lifecycle contracts; register adopted
       provisional policies and complete independent architecture review.
 
 ### SIF Registers and Signal Foundation
