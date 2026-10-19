@@ -1613,7 +1613,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add an on-demand/budget-boundary startup summary for both CPUs, SIF,
       implemented DMA, and interrupts; report unsupported accesses and waits
       without side-effecting diagnostic reads or per-poll logging.
-- [ ] Cover one CPU halted/faulted while devices and its peer advance, budget
+- [x] Cover one CPU halted/faulted while devices and its peer advance, budget
       exhaustion, reset, repetition, and restore; complete independent review
       and sanitizer checks.
 

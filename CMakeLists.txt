@@ -221,6 +221,7 @@ add_executable(neko_tests
     neko_tests/elf_runner_tests.cpp
     neko_tests/dual_cpu_bios_tests.cpp
     neko_tests/boot_lifecycle_tests.cpp
+    neko_tests/boot_conformance_tests.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp
