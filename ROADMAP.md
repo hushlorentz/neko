@@ -1565,19 +1565,130 @@ deterministic startup sequence. Treat the BIOS as an integration workload and
 stop at explicit missing-device boundaries rather than silently stubbing
 required hardware.
 
-- [ ] Audit SIF/DMA, boot/reset, interrupt/timing, persistence, and diagnostic
-      contracts; define reviewable blocks and a bounded BIOS startup target.
-      Include the BIOS's reserved EE MMIO access at physical `0x1000f500`.
-- [ ] Implement SIF communication and the required EE-side and IOP-side DMA,
-      interrupt, backpressure, retry, and reset behavior.
-- [ ] Define deterministic EE/IOP scheduling and whole-system continuation
-      across exceptions, interrupts, reset, halt, save states, and tracing.
-      Cover cross-component clock ratios, interrupt and DMA completion ordering,
-      and reset or restart while EE, IOP, SIF, and DMA work is active.
-- [ ] Advance the BIOS to the selected startup boundary and record every
-      missing hardware dependency that should shape the next milestone.
-- [ ] Complete repeated-run, trace, hash, save-state, optimized, sanitizer,
-      leak, and independent-review validation.
+The target is the first guest-executed EE-IOP BIOS startup request/response,
+with independently authored guests proving bidirectional DMA. A browser,
+game boot, and host-implemented SIF CMD/RPC services are outside this milestone.
+An earlier unsupported dependency is a scope checkpoint, not completion.
+
+### Evidence Closure and Interconnect Contract
+
+- [x] Audit local SCEI manuals and approved local secondary sources; assess
+      dependencies and split the milestone into reviewable blocks.
+- [x] Select the BIOS startup target, state owners, extension boundaries,
+      diagnostic direction, and risk-based validation/review plan.
+- [ ] Resolve source-linked SIF register views, widths, masks, reset values,
+      signal/interrupt acknowledgements, and boot-control semantics.
+- [ ] Resolve SIF stream/tag framing, word/qword conversion, FIFO capacity,
+      partial-packet behavior, and atomic backpressure/retry boundaries.
+- [ ] Resolve IOP SIF DMA channel controls, tag/count semantics, priority
+      enables, completion flags, and aggregate interrupt acknowledgement.
+- [ ] Classify bounded BIOS startup prerequisites, including reserved EE MMIO
+      at `0x1000f500`; separate reserved-access policy from functional controls.
+- [ ] Pin cross-clock visibility and lifecycle contracts; register adopted
+      provisional policies and complete independent architecture review.
+
+### SIF Registers and Signal Foundation
+
+- [ ] Add one shared SIF state owner with typed EE/IOP register views,
+      fixed-capacity transport storage, checked inspection, and reset.
+- [ ] Map resolved MMIO widths and side effects through both physical buses;
+      reject unsupported accesses atomically without broad MMIO fallbacks.
+- [ ] Route resolved SBUS signals through the existing interrupt controllers,
+      separately from DMA completion, masks, and CPU exception admission.
+- [ ] Persist/hash the new state transactionally and append opt-in register/
+      signal observations without changing existing trace identities.
+- [ ] Add two-CPU register/signal conformance, acknowledgement, active reset,
+      and restore coverage; complete independent review and sanitizer checks.
+
+### Boot Lifecycle and Bounded Startup Diagnostics
+
+- [ ] Implement/test the resolved startup prerequisites, including the exact
+      reserved-access policy at `0x1000f500`; leave unrelated MMIO unsupported.
+- [ ] Add an explicit dual-CPU BIOS startup/run boundary with shared ROM and a
+      master-cycle budget; preserve existing EE-only startup behavior.
+- [ ] Separate whole-machine reset, host CPU halt/resume, and any evidenced
+      guest boot/reset operation, with explicit affected-device scope.
+- [ ] Add an on-demand/budget-boundary startup summary for both CPUs, SIF,
+      DMA, and interrupts; report unsupported accesses and waits without
+      side-effecting diagnostic reads or per-poll logging.
+- [ ] Cover one CPU halted/faulted while devices and its peer advance, budget
+      exhaustion, reset, repetition, and restore; complete independent review
+      and sanitizer checks.
+
+### SIF1: EE-to-IOP DMA
+
+- [ ] Add focused IOP DMA control/interrupt ownership for the first endpoint;
+      map required common controls and channel 10 without dummy device engines.
+- [ ] Extend existing EE DMAC ownership for channel 6 and source-chain state;
+      reuse shared transitions only where their invariants apply.
+- [ ] Implement EE source admission, SIF framing, and IOP destination writes
+      through physical DMA boundaries without CPU cache snooping, including
+      resolved scratchpad-source addressing.
+- [ ] Implement resolved tag/count/termination behavior, backpressure, and
+      retry; failed admission must not consume data or advance continuation.
+- [ ] Publish endpoint-local completion through EE DMAC and IOP DMA/INTC;
+      distinguish sender completion from receiver drain and rearming.
+- [ ] Persist/hash partial transfers and append bounded transfer/wait/completion
+      observations; cover reset and save/load at each acceptance boundary.
+- [ ] Add authored EE-to-IOP guest conformance and regress existing DMA paths;
+      complete independent review and sanitizer checks.
+
+### SIF0: IOP-to-EE DMA
+
+- [ ] Extend IOP DMA ownership for channel 9 source tags and EE DMAC ownership
+      for channel 5 destination-chain state without duplicating common control.
+- [ ] Implement IOP source admission, transmitted EE tags, word/qword packing,
+      and EE physical destinations, including resolved scratchpad addressing.
+- [ ] Implement destination tags, zero/partial packets, termination, and
+      backpressure/retry with explicit policy for unresolved residual data.
+- [ ] Route endpoint-local completion, masks, acknowledgements, and receiver
+      rearming independently of SIF1 and SBUS signals.
+- [ ] Persist/hash framing and accepted continuation; cover partial tags,
+      partial qwords, cached aliases, active reset, and save/load.
+- [ ] Add authored IOP-to-EE guest conformance and bounded observations;
+      complete independent review and sanitizer checks.
+
+### Cross-Channel Scheduling and Lifecycle Conformance
+
+- [ ] Integrate both directions into the existing 8:1 master/IOP schedule;
+      define CPU/device admission, transfer visibility, and interrupt ordering
+      without claiming undocumented retail bus timing.
+- [ ] Exercise simultaneous directions, unequal producer/consumer progress,
+      full/empty transport, receiver-late start, channel disable/restart,
+      and independent completion/INTC acknowledgement.
+- [ ] Cover same-cycle CPU/DMA memory overlap, exceptions, interrupts, CPU
+      halt/resume, whole-machine reset, and evidenced guest-reset scope.
+- [ ] Prove repeated-run equivalence, observational tracing, canonical combined
+      state comparison, and byte-identical restore at active transfer boundaries;
+      reject malformed cross-owner continuation without destination mutation.
+- [ ] Complete independent cross-component review and optimized sanitizer checks.
+
+### Deterministic BIOS Startup Boundary
+
+- [ ] Pin the supplied BIOS identity, cycle budget, and exact guest-produced
+      request/response checkpoint; retain ROM bytes outside tracked fixtures.
+- [ ] Advance both CPUs through real startup/SIF execution without fabricated
+      readiness, RPC responses, skipped instructions, or generic device stubs.
+- [ ] Triage each earlier stop against the approved contract; explicitly review
+      scope before adding prerequisite hardware or moving the target.
+- [ ] Demonstrate the selected handshake, then record the first out-of-scope
+      device dependency with CPU/access/wait evidence for Milestone 10 or its
+      owning later milestone.
+- [ ] Reproduce the BIOS checkpoint and boundary across bounded repetitions,
+      trace modes, and save/load; retain authored BIOS-free regressions for
+      every implemented prerequisite.
+- [ ] Complete independent startup/integration review and sanitizer checks.
+
+### Milestone Conformance and Closure
+
+- [ ] Complete the authored two-CPU transport/lifecycle matrix and the complete
+      optimized repository check, preserving existing EE/IOP/graphics workflows.
+- [ ] Complete the bounded architecture and maintainability review of shared
+      ownership, DMA transitions, scheduling, reset, diagnostics, and persistence.
+- [ ] Reconcile provisional policies and the BIOS dependency record; expand
+      Milestone 10 only from demonstrated boot-service needs.
+- [ ] Complete independent final review, resolve concrete findings, and run
+      optimized AddressSanitizer and native macOS leak checks.
 
 ## Milestone 10: Boot Services, Media, and Input
 
