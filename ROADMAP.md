@@ -1576,8 +1576,8 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       dependencies and split the milestone into reviewable blocks.
 - [x] Select the BIOS startup target, state owners, extension boundaries,
       diagnostic direction, and risk-based validation/review plan.
-- [ ] Resolve source-linked SIF register views, widths, masks, reset values,
-      signal/interrupt acknowledgements, and boot-control semantics.
+- [x] Resolve source-linked normal-mode SIF register views, widths, masks,
+      reset values, signal/interrupt acknowledgements, and boot-control semantics.
 - [ ] Resolve SIF stream/tag framing, word/qword conversion, FIFO capacity,
       partial-packet behavior, and atomic backpressure/retry boundaries.
 - [ ] Resolve IOP SIF DMA channel controls, tag/count semantics, priority
