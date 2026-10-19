@@ -16,11 +16,24 @@ enum class SIFRegister : std::uint8_t
   CTRL
 };
 
+namespace SIFRegisterMap
+{
+  constexpr std::uint32_t APERTURE_SIZE = 0x80;
+  bool decodeOffset(std::uint32_t offset, SIFRegister &reg);
+}
+
 enum class SIFSignal : std::uint8_t
 {
   None,
   RequestIOP,
   RequestEE
+};
+
+class SIFSignalReceiver
+{
+  public:
+    virtual ~SIFSignalReceiver() = default;
+    virtual void requestSIFSignal(SIFSignal signal) noexcept = 0;
 };
 
 enum class SIFWriteOutcome : std::uint8_t

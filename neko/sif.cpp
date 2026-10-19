@@ -2,6 +2,19 @@
 
 #include <stdexcept>
 
+bool SIFRegisterMap::decodeOffset(std::uint32_t offset, SIFRegister &reg)
+{
+  switch (offset)
+  {
+    case 0x00: reg = SIFRegister::MSCOM; return true;
+    case 0x10: reg = SIFRegister::SMCOM; return true;
+    case 0x20: reg = SIFRegister::MSFLAG; return true;
+    case 0x30: reg = SIFRegister::SMFLAG; return true;
+    case 0x40: reg = SIFRegister::CTRL; return true;
+    default: return false;
+  }
+}
+
 constexpr std::size_t SIF::WORD_CAPACITY;
 constexpr std::uint8_t SIF::END;
 

@@ -1591,7 +1591,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 - [x] Add one shared SIF state owner with typed EE/IOP register views,
       fixed-capacity transport storage, checked inspection, and reset.
-- [ ] Map resolved MMIO widths and side effects through both physical buses;
+- [x] Map resolved MMIO widths and side effects through both physical buses;
       reject unsupported accesses atomically without broad MMIO fallbacks.
 - [ ] Route resolved SBUS signals through the existing interrupt controllers,
       separately from DMA completion, masks, and CPU exception admission.

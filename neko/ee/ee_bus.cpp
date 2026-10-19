@@ -9,6 +9,7 @@
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
 #include "scratchpad_dmac_channel.hpp"
+#include "sif.hpp"
 #include "vif.hpp"
 #include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
@@ -18,6 +19,20 @@ namespace
   constexpr std::uint32_t EE_PHYSICAL_ADDRESS_MASK =
     0x1fffffff;
   constexpr std::uint32_t VIF_STALL_CANCEL = 1u << 3;
+
+  bool sifApertureAddress(std::uint32_t address)
+  {
+    return address >= EEMemoryMap::SIF_BASE &&
+      address < EEMemoryMap::SIF_BASE + SIFRegisterMap::APERTURE_SIZE;
+  }
+
+  void requireSplitWordAccess(std::uint32_t address)
+  {
+    if (sifApertureAddress(address))
+    {
+      throw std::out_of_range("SIF supports full 32-bit accesses only.");
+    }
+  }
 
   std::uint32_t hostPhysicalAddress(
     std::uint32_t address)
@@ -169,6 +184,28 @@ bool EEBus::isMainMemoryRange(
     hostPhysicalAddress(address),
     width,
     &physicalAddress);
+}
+
+void EEBus::attachSIF(SIF *sif, SIFSignalReceiver *signals)
+{
+  if (sif == nullptr || signals == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires a non-null SIF owner and signal receiver.");
+  }
+  if (sifComponent != nullptr)
+  {
+    throw std::logic_error("EE bus SIF is already attached.");
+  }
+  sifComponent = sif;
+  sifSignals = signals;
+}
+
+EEWordMergeStorePolicy EEBus::wordMergeStorePolicy(std::uint32_t address) const
+{
+  return sifApertureAddress(address)
+    ? EEWordMergeStorePolicy::FullWordOnly
+    : EEWordMergeStorePolicy::ReadModifyWrite;
 }
 
 void EEBus::attachDMACController(DMACController *dmac)
@@ -862,6 +899,18 @@ bool EEBus::readMapped32(
     return true;
   }
 
+  if (sifApertureAddress(address))
+  {
+    SIFRegister reg;
+    if (sifComponent == nullptr ||
+        !SIFRegisterMap::decodeOffset(address - EEMemoryMap::SIF_BASE, reg))
+    {
+      return false;
+    }
+    *value = sifComponent->readEE(reg);
+    return true;
+  }
+
   switch (address)
   {
     case EEMemoryMap::VIF0_STAT:
@@ -980,6 +1029,30 @@ bool EEBus::writeMapped32(
     {
       mainMemory[physicalAddress + index] =
         static_cast<std::uint8_t>(value >> (index * 8));
+    }
+    return true;
+  }
+
+  if (sifApertureAddress(address))
+  {
+    SIFRegister reg;
+    if (sifComponent == nullptr ||
+        !SIFRegisterMap::decodeOffset(address - EEMemoryMap::SIF_BASE, reg))
+    {
+      return false;
+    }
+    const SIFWriteResult result = sifComponent->writeEE(reg, value);
+    if (result.outcome != SIFWriteOutcome::Completed)
+    {
+      if (checkedGuestAccess)
+      {
+        return false;
+      }
+      throw std::invalid_argument("Unsupported SIF CTRL PS1-mode operation.");
+    }
+    if (result.signal != SIFSignal::None)
+    {
+      sifSignals->requestSIFSignal(result.signal);
     }
     return true;
   }
@@ -1378,6 +1451,7 @@ std::uint64_t EEBus::read64(std::uint32_t address)
     8,
     "EE bus 64-bit access must be naturally aligned.");
   address = hostPhysicalAddress(address);
+  requireSplitWordAccess(address);
   if (address == EEMemoryMap::GS_BUSDIR)
   {
     return gsComponent->hostInterfaceReversed() ? 1 : 0;
@@ -1401,6 +1475,7 @@ void EEBus::write64(
     8,
     "EE bus 64-bit access must be naturally aligned.");
   address = hostPhysicalAddress(address);
+  requireSplitWordAccess(address);
   if (writeMapped64(address, value, false))
   {
     return;
@@ -1416,6 +1491,7 @@ GIFQuadword EEBus::readQuadword(std::uint32_t address) const
     16,
     "EE bus quadword access must be naturally aligned.");
   address = hostPhysicalAddress(address);
+  requireSplitWordAccess(address);
   GIFQuadword value = {};
   for (std::size_t index = 0; index < value.size(); ++index)
   {

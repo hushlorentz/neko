@@ -1,6 +1,7 @@
 #include "iop_bus.hpp"
 #include "iop_interrupt_controller.hpp"
 #include "iop_timers.hpp"
+#include "sif.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -30,6 +31,8 @@ constexpr IOPAddress IOPBus::ROM_BASE;
 constexpr IOPAddress IOPBus::INTC_STAT;
 constexpr IOPAddress IOPBus::INTC_MASK;
 constexpr IOPAddress IOPBus::INTC_CTRL;
+constexpr IOPAddress IOPBus::SIF_BASE;
+constexpr IOPAddress IOPBus::SIF_DOORBELL;
 
 IOPBus::IOPBus() : ram(RAM_SIZE, 0)
 {
@@ -54,6 +57,21 @@ void IOPBus::attachTimers(IOPTimers *attachedTimers)
 bool IOPBus::interruptControllerPending() const
 {
   return interruptController != nullptr && interruptController->interruptPending();
+}
+
+void IOPBus::attachSIF(SIF *sif, SIFSignalReceiver *signals)
+{
+  if (sif == nullptr || signals == nullptr)
+  {
+    throw std::invalid_argument(
+      "IOP bus requires a non-null SIF owner and signal receiver.");
+  }
+  if (sifComponent != nullptr)
+  {
+    throw std::logic_error("IOP bus SIF is already attached.");
+  }
+  sifComponent = sif;
+  sifSignals = signals;
 }
 
 bool IOPBus::installRom(
@@ -118,6 +136,19 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - INTC_STAT),
       Device::InterruptController};
+  }
+
+  if (first >= SIF_BASE &&
+      last < static_cast<std::uint64_t>(SIF_BASE) + SIFRegisterMap::APERTURE_SIZE)
+  {
+    return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - SIF_BASE),
+      Device::SIFRegisters};
+  }
+  if (first >= SIF_DOORBELL &&
+      last < static_cast<std::uint64_t>(SIF_DOORBELL) + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - SIF_DOORBELL),
+      Device::SIFDoorbell};
   }
 
   for (std::size_t index = 0; index < timerBases.size(); ++index)
@@ -312,6 +343,9 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? readInterruptRegister(location.offset) : IOPBusReadResult{};
     case Device::Timer:
       return readTimerRegister(location, width);
+    case Device::SIFRegisters:
+    case Device::SIFDoorbell:
+      return readSIFRegister(location, width);
     case Device::None:
       return {};
   }
@@ -330,10 +364,69 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         ? writeInterruptRegister(location.offset, value) : IOPBusWriteResult{};
     case Device::Timer:
       return writeTimerRegister(location, width, value);
+    case Device::SIFRegisters:
+    case Device::SIFDoorbell:
+      return writeSIFRegister(location, width, value);
     case Device::None:
       return {};
   }
   return {};
+}
+
+IOPBusReadResult IOPBus::readSIFRegister(
+  const Location &location,
+  std::size_t width)
+{
+  if (sifComponent == nullptr || width != sizeof(IOPWord))
+  {
+    return {};
+  }
+  if (location.device == Device::SIFDoorbell)
+  {
+    return {IOPBusStatus::Completed, sifComponent->iopDoorbell()};
+  }
+  SIFRegister reg;
+  if (!SIFRegisterMap::decodeOffset(
+        static_cast<std::uint32_t>(location.offset), reg))
+  {
+    return {};
+  }
+  return {IOPBusStatus::Completed, sifComponent->readIOP(reg)};
+}
+
+IOPBusWriteResult IOPBus::writeSIFRegister(
+  const Location &location,
+  std::size_t width,
+  IOPWord value)
+{
+  if (sifComponent == nullptr || width != sizeof(IOPWord))
+  {
+    return {};
+  }
+  SIFWriteResult result;
+  if (location.device == Device::SIFDoorbell)
+  {
+    result = sifComponent->writeIOPDoorbell(value);
+  }
+  else
+  {
+    SIFRegister reg;
+    if (!SIFRegisterMap::decodeOffset(
+          static_cast<std::uint32_t>(location.offset), reg))
+    {
+      return {};
+    }
+    result = sifComponent->writeIOP(reg, value);
+  }
+  if (result.outcome != SIFWriteOutcome::Completed)
+  {
+    return {};
+  }
+  if (result.signal != SIFSignal::None)
+  {
+    sifSignals->requestSIFSignal(result.signal);
+  }
+  return {IOPBusStatus::Completed};
 }
 
 IOPBusReadResult IOPBus::readTimerRegister(

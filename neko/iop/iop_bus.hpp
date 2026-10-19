@@ -12,6 +12,8 @@
 
 class IOPInterruptController;
 class IOPTimers;
+class SIF;
+class SIFSignalReceiver;
 
 enum class IOPBusStatus : std::uint8_t
 {
@@ -56,6 +58,8 @@ class IOPBus final
     static constexpr IOPAddress INTC_STAT = 0x1f801070;
     static constexpr IOPAddress INTC_MASK = 0x1f801074;
     static constexpr IOPAddress INTC_CTRL = 0x1f801078;
+    static constexpr IOPAddress SIF_BASE = 0x1d000000;
+    static constexpr IOPAddress SIF_DOORBELL = 0x1f801450;
 
     IOPBus();
 
@@ -65,6 +69,8 @@ class IOPBus final
     void attachInterruptController(IOPInterruptController *interrupts);
     // The caller owns the timers and must keep them alive while attached.
     void attachTimers(IOPTimers *timers);
+    // The caller keeps both the shared owner and signal receiver alive.
+    void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     // Side-effect-free aggregate level; an absent controller drives no level.
     bool interruptControllerPending() const;
 
@@ -105,7 +111,9 @@ class IOPBus final
     {
       None,
       InterruptController,
-      Timer
+      Timer,
+      SIFRegisters,
+      SIFDoorbell
     };
 
     struct Location
@@ -140,6 +148,13 @@ class IOPBus final
       const Location &location,
       std::size_t width,
       IOPWord value);
+    IOPBusReadResult readSIFRegister(
+      const Location &location,
+      std::size_t width);
+    IOPBusWriteResult writeSIFRegister(
+      const Location &location,
+      std::size_t width,
+      IOPWord value);
     IOPBusReadResult readInterruptRegister(std::size_t offset);
     IOPBusWriteResult writeInterruptRegister(
       std::size_t offset,
@@ -150,6 +165,8 @@ class IOPBus final
     std::shared_ptr<const BootROMImage> rom;
     IOPInterruptController *interruptController = nullptr;
     IOPTimers *timers = nullptr;
+    SIF *sifComponent = nullptr;
+    SIFSignalReceiver *sifSignals = nullptr;
 };
 
 #endif

@@ -16,6 +16,8 @@ class GIFPath3Transfer;
 class GS;
 class GSDisplay;
 class ScratchpadDMACChannel;
+class SIF;
+class SIFSignalReceiver;
 class NekoSystem;
 class VIF;
 class VIF1DMACChannel;
@@ -44,6 +46,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t KSEG2_BASE = UINT32_C(0xc0000000);
 
   constexpr std::uint32_t GIF_BASE = 0x10003000;
+  constexpr std::uint32_t SIF_BASE = 0x1000f200;
   constexpr std::uint32_t GIF_MODE = GIF_BASE + 0x10;
   constexpr std::uint32_t GIF_STAT = GIF_BASE + 0x20;
   constexpr std::uint32_t GIF_P3CNT = GIF_BASE + 0x90;
@@ -118,6 +121,12 @@ enum class EEDataWriteResult : std::uint8_t
   Failed
 };
 
+enum class EEWordMergeStorePolicy : std::uint8_t
+{
+  ReadModifyWrite,
+  FullWordOnly
+};
+
 enum class EEScratchpadDMACMode : std::uint8_t
 {
   Normal,
@@ -143,6 +152,8 @@ class EEBus
       ScratchpadDMACChannel *toScratchpadDMAC);
     void attachVectorUnits(VPU *vu0, VPU *vu1);
     void attachGSDisplay(GSDisplay *gsDisplay);
+    // The caller keeps both the shared owner and signal receiver alive.
+    void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     void installBootROM(
       const std::vector<std::uint8_t> &image);
     void installBootROM(
@@ -173,6 +184,8 @@ class EEBus
     bool writeData32(
       std::uint32_t address,
       std::uint32_t value);
+    // Physical byte-enable policy, not a probe for a mapped register.
+    EEWordMergeStorePolicy wordMergeStorePolicy(std::uint32_t address) const;
     bool readData64(
       std::uint32_t address,
       std::uint64_t *value) const;
@@ -273,6 +286,8 @@ class EEBus
     VPU *vu0Component = nullptr;
     VPU *vu1Component = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;
+    SIF *sifComponent = nullptr;
+    SIFSignalReceiver *sifSignals = nullptr;
     std::vector<std::uint8_t> mainMemory;
     std::shared_ptr<const BootROMImage> bootROM;
 };

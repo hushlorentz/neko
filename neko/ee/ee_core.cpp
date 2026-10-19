@@ -5345,6 +5345,34 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
       dataAddress,
       instruction.raw);
   }
+  const std::uint8_t byteOffset = dataAddress & 3;
+  if (store && translation.route == EEAddressRoute::MainBus &&
+      attachedBus().wordMergeStorePolicy(translation.physicalAddress) ==
+        EEWordMergeStorePolicy::FullWordOnly)
+  {
+    const bool fullWord = instruction.operation == EEOperation::StoreWordLeft
+      ? byteOffset == 3 : byteOffset == 0;
+    if (!fullWord)
+    {
+      MemoryAccessObservation observation =
+        memoryObservation(translation, 4, MemoryAccessKind::DataStore);
+      observation.low = static_cast<std::uint32_t>(target);
+      observation.cacheAccess = MemoryCacheAccess::Bypassed;
+      observation.transferOutcome = MemoryTransferOutcome::PhysicalBusError;
+      observation.failurePhase = EEMemoryTransferFailurePhase::Direct;
+      recordMemoryTrace(observation);
+    }
+    if (fullWord &&
+        writeTranslatedData(translation, static_cast<std::uint32_t>(target)))
+    {
+      return EEInstructionExecutionOutcome::Completed;
+    }
+    return raiseDataAccessException(
+      EEException::DataBusErrorStore,
+      address,
+      dataAddress,
+      instruction.raw);
+  }
   std::uint32_t memory = 0;
   const bool readSucceeded =
     loadTranslatedData(translation, &memory);
@@ -5359,7 +5387,6 @@ EEInstructionExecutionOutcome EECore::executeWordMergeMemory(
       instruction.raw);
   }
 
-  const std::uint8_t byteOffset = dataAddress & 3;
   if (!store)
   {
     std::uint32_t result =
