@@ -57,6 +57,9 @@ requires matching EE and IOP ROM presence and contents independently; ROM bytes
 are not embedded. Only the current save-state schema is accepted; schema 35
 does not load older snapshots.
 
+Host-side dual-CPU startup snapshots and opt-in bounded-run summaries are
+available through the [startup diagnostics API](neko_diagnostics/startup_diagnostics.md).
+
 ## Tests
 
 Run the complete optimized, assertion-enabled test and repository check:

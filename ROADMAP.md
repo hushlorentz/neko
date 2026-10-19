@@ -1610,7 +1610,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       master-cycle budget; preserve existing EE-only startup behavior.
 - [x] Define/test whole-machine reset and host CPU halt/resume scopes;
       keep unevidenced guest reset and mode operations explicitly unsupported.
-- [ ] Add an on-demand/budget-boundary startup summary for both CPUs, SIF,
+- [x] Add an on-demand/budget-boundary startup summary for both CPUs, SIF,
       implemented DMA, and interrupts; report unsupported accesses and waits
       without side-effecting diagnostic reads or per-poll logging.
 - [ ] Cover one CPU halted/faulted while devices and its peer advance, budget

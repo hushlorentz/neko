@@ -194,6 +194,7 @@ target_link_libraries(neko_perf PRIVATE neko_core)
 add_library(neko_diagnostics
     neko_diagnostics/gif_diagnostics.cpp
     neko_diagnostics/save_state_diagnostics.cpp
+    neko_diagnostics/startup_diagnostics.cpp
     neko_diagnostics/vpu_program_runner.cpp
 )
 target_include_directories(neko_diagnostics
@@ -268,6 +269,7 @@ add_executable(neko_tests
     neko_tests/regression_trace_tests.cpp
     neko_tests/system_interface_tests.cpp
     neko_tests/save_state_diagnostics_tests.cpp
+    neko_tests/startup_diagnostics_tests.cpp
     neko_tests/gif/gif_tests.cpp
     neko_tests/gif/gif_path_arbiter_tests.cpp
     neko_tests/gif/gif_path1_tests.cpp
