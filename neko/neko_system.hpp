@@ -42,6 +42,26 @@ struct EEExecutionResult
   std::uint32_t exceptionAddress = 0;
 };
 
+struct IOPExecutionResult
+{
+  std::uint64_t iopCycles = 0;
+  std::uint64_t instructions = 0;
+  IOPExecutionState state = IOPExecutionState::Halted;
+  IOPStopReason stopReason = IOPStopReason::None;
+  std::uint32_t programCounter = 0;
+  IOPExceptionRecord exception;
+  IOPStoreFailure storeFailure;
+};
+
+struct DualCPUExecutionResult
+{
+  std::uint64_t masterCycles = 0;
+  bool cycleLimitReached = false;
+  // Per-call progress. The EE budget fields describe the shared run boundary.
+  EEExecutionResult ee;
+  IOPExecutionResult iop;
+};
+
 namespace EEGuestRuntime
 {
   constexpr std::uint32_t STACK_POINTER =
@@ -100,6 +120,14 @@ class NekoSystem
       std::uint64_t maxMasterCycles);
     EEExecutionResult runBIOS(
       const std::vector<std::uint8_t> &image,
+      std::uint64_t maxMasterCycles);
+    // Requires both CPUs halted; validates, cold-resets, and releases both at c=0.
+    DualCPUExecutionResult runDualCPUBIOS(
+      const std::vector<std::uint8_t> &image,
+      std::uint64_t maxMasterCycles);
+    // Continues existing state, including guest exception handlers. Either CPU
+    // halted takes precedence over the budget; returning does not halt its peer.
+    DualCPUExecutionResult runDualCPU(
       std::uint64_t maxMasterCycles);
     void startTrace();
     void stopTrace();

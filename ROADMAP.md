@@ -1606,7 +1606,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Admit/test only exact full-word writes to reserved `0x1000f500` as a
       stateless no-op; reject reads, other widths, partial lanes, and unrelated
       MMIO without adding conditional startup devices.
-- [ ] Add an explicit dual-CPU BIOS startup/run boundary with shared ROM and a
+- [x] Add an explicit dual-CPU BIOS startup/run boundary with shared ROM and a
       master-cycle budget; preserve existing EE-only startup behavior.
 - [ ] Define/test whole-machine reset and host CPU halt/resume scopes;
       keep unevidenced guest reset and mode operations explicitly unsupported.

@@ -218,6 +218,7 @@ add_executable(neko_tests
     neko_tests/main.cpp
     neko_tests/desktop_options_tests.cpp
     neko_tests/elf_runner_tests.cpp
+    neko_tests/dual_cpu_bios_tests.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp

@@ -533,6 +533,58 @@ EEExecutionResult NekoSystem::runBIOS(
   return runEE(maxMasterCycles);
 }
 
+DualCPUExecutionResult NekoSystem::runDualCPUBIOS(
+  const std::vector<std::uint8_t> &image,
+  std::uint64_t maxMasterCycles)
+{
+  installBootROM(image);
+  reset();
+  eeCoreComponent.startExecution(EEReset::VECTOR);
+  iopCoreComponent.startExecution(IOPReset::VECTOR);
+  return runDualCPU(maxMasterCycles);
+}
+
+DualCPUExecutionResult NekoSystem::runDualCPU(
+  std::uint64_t maxMasterCycles)
+{
+  const std::uint64_t startingEECycles =
+    eeCoreComponent.elapsedCycles();
+  const std::uint64_t startingIOPCycles =
+    iopCoreComponent.elapsedCycles();
+  const std::uint64_t startingIOPInstructions =
+    iopCoreComponent.retiredInstructions();
+  std::uint64_t masterCycles = 0;
+  std::uint64_t instructions = 0;
+  while (eeCoreComponent.clockActive() &&
+         iopCoreComponent.executionState() == IOPExecutionState::Running &&
+         masterCycles < maxMasterCycles)
+  {
+    clockMasterCycle();
+    ++masterCycles;
+    instructions +=
+      eeCoreComponent.acceptanceRecords.instructionCount();
+  }
+
+  DualCPUExecutionResult result;
+  result.masterCycles = masterCycles;
+  result.cycleLimitReached =
+    eeCoreComponent.clockActive() &&
+    iopCoreComponent.executionState() == IOPExecutionState::Running &&
+    masterCycles == maxMasterCycles;
+  result.ee = makeEEExecutionResult(
+    masterCycles, startingEECycles, instructions, result.cycleLimitReached);
+  result.iop = {
+    iopCoreComponent.elapsedCycles() - startingIOPCycles,
+    iopCoreComponent.retiredInstructions() - startingIOPInstructions,
+    iopCoreComponent.executionState(),
+    iopCoreComponent.stopReason(),
+    iopCoreComponent.programCounter(),
+    iopCoreComponent.exception(),
+    iopCoreComponent.storeFailure()
+  };
+  return result;
+}
+
 void NekoSystem::startTrace()
 {
   traceEvents.clear();
