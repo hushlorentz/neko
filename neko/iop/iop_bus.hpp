@@ -11,6 +11,8 @@
 #include "iop_types.hpp"
 
 class IOPInterruptController;
+class IOPDMAController;
+class IOPSIF1DMAChannel;
 class IOPTimers;
 class SIF;
 class SIFSignalReceiver;
@@ -69,6 +71,8 @@ class IOPBus final
     void attachInterruptController(IOPInterruptController *interrupts);
     // The caller owns the timers and must keep them alive while attached.
     void attachTimers(IOPTimers *timers);
+    // The caller keeps both DMA owners alive.
+    void attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1);
     // The caller keeps both the shared owner and signal receiver alive.
     void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     // Side-effect-free aggregate level; an absent controller drives no level.
@@ -111,6 +115,8 @@ class IOPBus final
     {
       None,
       InterruptController,
+      DMAController,
+      SIF1DMA,
       Timer,
       SIFRegisters,
       SIFDoorbell
@@ -148,6 +154,8 @@ class IOPBus final
       const Location &location,
       std::size_t width,
       IOPWord value);
+    IOPBusReadResult readDMARegister(const Location &location);
+    IOPBusWriteResult writeDMARegister(const Location &location, IOPWord value);
     IOPBusReadResult readSIFRegister(
       const Location &location,
       std::size_t width);
@@ -165,6 +173,8 @@ class IOPBus final
     std::shared_ptr<const BootROMImage> rom;
     IOPInterruptController *interruptController = nullptr;
     IOPTimers *timers = nullptr;
+    IOPDMAController *dmaController = nullptr;
+    IOPSIF1DMAChannel *sif1DMA = nullptr;
     SIF *sifComponent = nullptr;
     SIFSignalReceiver *sifSignals = nullptr;
 };

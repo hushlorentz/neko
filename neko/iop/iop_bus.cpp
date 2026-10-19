@@ -1,5 +1,7 @@
 #include "iop_bus.hpp"
 #include "iop_interrupt_controller.hpp"
+#include "iop_dma_controller.hpp"
+#include "iop_sif1_dma_channel.hpp"
 #include "iop_timers.hpp"
 #include "sif.hpp"
 
@@ -14,6 +16,10 @@ namespace
     0x1f801100, 0x1f801110, 0x1f801120,
     0x1f801480, 0x1f801490, 0x1f8014a0
   }};
+  constexpr std::array<IOPAddress, 2> dmaBankBases = {{
+    0x1f8010f0, 0x1f801570
+  }};
+  constexpr IOPAddress sif1DMABase = 0x1f801530;
 
   bool isAligned(IOPAddress address, std::size_t width)
   {
@@ -52,6 +58,20 @@ void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
 void IOPBus::attachTimers(IOPTimers *attachedTimers)
 {
   timers = attachedTimers;
+}
+
+void IOPBus::attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1)
+{
+  if (controller == nullptr || sif1 == nullptr)
+  {
+    throw std::invalid_argument("IOP bus requires non-null DMA owners.");
+  }
+  if (dmaController != nullptr)
+  {
+    throw std::logic_error("IOP bus DMA is already attached.");
+  }
+  dmaController = controller;
+  sif1DMA = sif1;
 }
 
 bool IOPBus::interruptControllerPending() const
@@ -159,6 +179,23 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       return {IOPBusRegion::Mmio,
         static_cast<std::size_t>(first - timerBases[index]), Device::Timer, index};
     }
+  }
+
+  for (std::size_t index = 0; index < dmaBankBases.size(); ++index)
+  {
+    if (first >= dmaBankBases[index] &&
+        last < static_cast<std::uint64_t>(dmaBankBases[index]) + 8)
+    {
+      return {IOPBusRegion::Mmio,
+        static_cast<std::size_t>(first - dmaBankBases[index]),
+        Device::DMAController, index};
+    }
+  }
+  if (first >= sif1DMABase &&
+      last < static_cast<std::uint64_t>(sif1DMABase) + 12)
+  {
+    return {IOPBusRegion::Mmio,
+      static_cast<std::size_t>(first - sif1DMABase), Device::SIF1DMA};
   }
 
   return {};
@@ -341,6 +378,10 @@ IOPBusReadResult IOPBus::readDeviceRegister(
     case Device::InterruptController:
       return width == sizeof(IOPWord)
         ? readInterruptRegister(location.offset) : IOPBusReadResult{};
+    case Device::DMAController:
+    case Device::SIF1DMA:
+      return width == sizeof(IOPWord) ? readDMARegister(location)
+        : IOPBusReadResult{};
     case Device::Timer:
       return readTimerRegister(location, width);
     case Device::SIFRegisters:
@@ -362,6 +403,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::InterruptController:
       return width == sizeof(IOPWord)
         ? writeInterruptRegister(location.offset, value) : IOPBusWriteResult{};
+    case Device::DMAController:
+    case Device::SIF1DMA:
+      return width == sizeof(IOPWord) ? writeDMARegister(location, value)
+        : IOPBusWriteResult{};
     case Device::Timer:
       return writeTimerRegister(location, width, value);
     case Device::SIFRegisters:
@@ -369,6 +414,75 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return writeSIFRegister(location, width, value);
     case Device::None:
       return {};
+  }
+  return {};
+}
+
+IOPBusReadResult IOPBus::readDMARegister(const Location &location)
+{
+  if (location.device == Device::DMAController && dmaController != nullptr)
+  {
+    const auto bank = static_cast<IOPDMABank>(location.deviceIndex);
+    switch (location.offset)
+    {
+      case 0:
+        return {IOPBusStatus::Completed, dmaController->priority(bank)};
+      case 4:
+        return {IOPBusStatus::Completed, dmaController->interruptStatus(bank)};
+    }
+  }
+  if (location.device == Device::SIF1DMA && sif1DMA != nullptr)
+  {
+    switch (location.offset)
+    {
+      case 0:
+        return {IOPBusStatus::Completed, sif1DMA->memoryAddress()};
+      case 4:
+        return {IOPBusStatus::Completed, sif1DMA->blockControl()};
+      case 8:
+        return {IOPBusStatus::Completed, sif1DMA->channelControl()};
+    }
+  }
+  return {};
+}
+
+IOPBusWriteResult IOPBus::writeDMARegister(
+  const Location &location, IOPWord value)
+{
+  if (location.device == Device::DMAController && dmaController != nullptr)
+  {
+    const auto bank = static_cast<IOPDMABank>(location.deviceIndex);
+    switch (location.offset)
+    {
+      case 0:
+        dmaController->writePriority(bank, value);
+        return {IOPBusStatus::Completed};
+      case 4:
+        dmaController->writeInterrupt(bank, value);
+        return {IOPBusStatus::Completed};
+    }
+  }
+  if (location.device == Device::SIF1DMA && sif1DMA != nullptr)
+  {
+    IOPDMAWriteOutcome result;
+    switch (location.offset)
+    {
+      case 0:
+        result = sif1DMA->writeMemoryAddress(value);
+        break;
+      case 4:
+        result = sif1DMA->writeBlockControl(value);
+        break;
+      case 8:
+        result = sif1DMA->writeChannelControl(value);
+        break;
+      default:
+        return {};
+    }
+    if (result == IOPDMAWriteOutcome::Completed)
+    {
+      return {IOPBusStatus::Completed};
+    }
   }
   return {};
 }

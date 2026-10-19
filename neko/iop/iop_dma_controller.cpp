@@ -1,0 +1,104 @@
+#include "iop_dma_controller.hpp"
+
+#include <stdexcept>
+
+IOPDMAController::IOPDMAController(IOPInterruptController &controller) :
+  interrupts(controller)
+{
+}
+
+std::size_t IOPDMAController::bankIndex(IOPDMABank bank)
+{
+  switch (bank)
+  {
+    case IOPDMABank::Primary:
+      return 0;
+    case IOPDMABank::Secondary:
+      return 1;
+  }
+  throw std::out_of_range("Unsupported IOP DMA bank.");
+}
+
+std::uint8_t IOPDMAController::channelSlot(IOPDMAChannel channel)
+{
+  switch (channel)
+  {
+    case IOPDMAChannel::SIF1:
+      return 3;
+  }
+  throw std::out_of_range("Unsupported IOP DMA channel.");
+}
+
+IOPWord IOPDMAController::priority(IOPDMABank bank) const
+{
+  return banks[bankIndex(bank)].priority;
+}
+
+void IOPDMAController::writePriority(IOPDMABank bank, IOPWord value)
+{
+  banks[bankIndex(bank)].priority = value;
+}
+
+std::uint8_t IOPDMAController::activeFlags(std::size_t index) const
+{
+  const auto &bank = banks[index];
+  const auto mask = static_cast<std::uint8_t>((bank.control >> 16) & 0x7f);
+  // Selected SIF slots bypass their stored masks in the provisional profile.
+  const auto effectiveMask = index == 1 ? mask | 0x0c : mask;
+  return static_cast<std::uint8_t>(bank.flags & effectiveMask);
+}
+
+IOPWord IOPDMAController::interruptStatus(IOPDMABank selected) const
+{
+  const auto index = bankIndex(selected);
+  const auto &bank = banks[index];
+  const bool summary = (bank.control & 0x8000) != 0 ||
+    ((bank.control & 0x800000) != 0 && activeFlags(index) != 0);
+  return bank.control | (static_cast<IOPWord>(bank.flags) << 24) |
+    (summary ? UINT32_C(0x80000000) : 0);
+}
+
+void IOPDMAController::writeInterrupt(IOPDMABank selected, IOPWord value)
+{
+  auto &bank = banks[bankIndex(selected)];
+  bank.control = value & 0x00ffffff;
+  bank.flags &= static_cast<std::uint8_t>(~((value >> 24) & 0x7f));
+  publishInterrupt();
+}
+
+bool IOPDMAController::channelEnabled(IOPDMAChannel channel) const
+{
+  return (banks[1].priority & (IOPWord{8} << (4 * channelSlot(channel)))) != 0;
+}
+
+std::uint8_t IOPDMAController::channelPriority(IOPDMAChannel channel) const
+{
+  return static_cast<std::uint8_t>(
+    (banks[1].priority >> (4 * channelSlot(channel))) & 7);
+}
+
+void IOPDMAController::signalChannelCompletion(IOPDMAChannel channel)
+{
+  banks[1].flags |= static_cast<std::uint8_t>(1 << channelSlot(channel));
+  publishInterrupt();
+}
+
+bool IOPDMAController::interruptPending() const
+{
+  for (std::size_t index = 0; index < banks.size(); ++index)
+  {
+    if ((banks[index].control & 0x8000) != 0 || activeFlags(index) != 0)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+void IOPDMAController::publishInterrupt()
+{
+  if (interruptPending())
+  {
+    interrupts.assertSource(IOPInterruptSource::DMAC);
+  }
+}

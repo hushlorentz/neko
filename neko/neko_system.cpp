@@ -194,6 +194,7 @@ NekoSystem::NekoSystem() :
     &eeBusComponent,
     &eeCoreComponent.memorySystem),
   gsDisplayComponent(&gsComponent),
+  iopDMAControllerComponent(iopInterruptControllerComponent),
   sifInterruptRouterComponent(
     interruptControllerComponent, iopInterruptControllerComponent)
 {
@@ -231,6 +232,7 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(toScratchpadDMACComponent, 1);
   iopBusComponent.attachInterruptController(&iopInterruptControllerComponent);
   iopBusComponent.attachTimers(&iopTimersComponent);
+  iopBusComponent.attachDMA(&iopDMAControllerComponent, &iopSIF1DMAComponent);
   iopCoreComponent.attachBus(&iopBusComponent);
   eeBusComponent.attachSIF(&sifComponent, &sifInterruptRouterComponent);
   iopBusComponent.attachSIF(&sifComponent, &sifInterruptRouterComponent);
@@ -269,6 +271,26 @@ void NekoSystem::installBootROM(const std::vector<std::uint8_t> &image)
   }
   eeBusComponent.installBootROM(rom);
   iopBusComponent.installRom(rom);
+}
+
+IOPDMAController &NekoSystem::iopDMAController()
+{
+  return iopDMAControllerComponent;
+}
+
+const IOPDMAController &NekoSystem::iopDMAController() const
+{
+  return iopDMAControllerComponent;
+}
+
+IOPSIF1DMAChannel &NekoSystem::iopSIF1DMAC()
+{
+  return iopSIF1DMAComponent;
+}
+
+const IOPSIF1DMAChannel &NekoSystem::iopSIF1DMAC() const
+{
+  return iopSIF1DMAComponent;
 }
 
 IOPCore &NekoSystem::iopCore()

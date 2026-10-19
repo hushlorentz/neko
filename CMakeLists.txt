@@ -97,9 +97,11 @@ add_library(neko_core
     neko/iop/iop_bus.cpp
     neko/iop/iop_cache.cpp
     neko/iop/iop_core.cpp
+    neko/iop/iop_dma_controller.cpp
     neko/iop/iop_instruction.cpp
     neko/iop/iop_interrupt_controller.cpp
     neko/iop/iop_program_runner.cpp
+    neko/iop/iop_sif1_dma_channel.cpp
     neko/iop/iop_timers.cpp
     neko/iop/iop_timer_timing.cpp
     neko/math/float.cpp
@@ -222,6 +224,7 @@ add_executable(neko_tests
     neko_tests/dual_cpu_bios_tests.cpp
     neko_tests/boot_lifecycle_tests.cpp
     neko_tests/boot_conformance_tests.cpp
+    neko_tests/iop/iop_dma_tests.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_core_tests.cpp
     neko_tests/ee/ee_conformance_tests.cpp

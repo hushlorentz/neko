@@ -1619,19 +1619,23 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### SIF1: EE-to-IOP DMA
 
-- [ ] Add focused IOP DMA control/interrupt ownership for the first endpoint;
-      map required common controls and channel 10 without dummy device engines.
+- [x] Add focused IOP DMA control/interrupt ownership for the first endpoint;
+      map common controls and channel-10 register/start admission without dummy
+      engines; include reset, hashing, and save/load from the first state.
 - [ ] Extend existing EE DMAC ownership for channel 6 and source-chain state;
-      reuse shared transitions only where their invariants apply.
-- [ ] Implement EE source admission, SIF framing, and IOP destination writes
-      through physical DMA boundaries without CPU cache snooping, including
-      resolved scratchpad-source addressing.
-- [ ] Implement resolved tag/count/termination behavior, backpressure, and
-      retry; failed admission must not consume data or advance continuation.
-- [ ] Publish endpoint-local completion through EE DMAC and IOP DMA/INTC;
-      distinguish sender completion from receiver drain and rearming.
-- [ ] Persist/hash partial transfers and append bounded transfer/wait/completion
-      observations; cover reset and save/load at each acceptance boundary.
+      include CTRL lifecycle effects and persistence, reusing valid shared
+      transitions rather than parallel policy.
+- [ ] Implement EE source admission and SIF framing, including physical
+      scratchpad sources, tag/count/termination, atomic backpressure/retry,
+      persistence, and EE-phase scheduling with local completion/error effects.
+- [ ] Implement IOP header/payload admission and physical destination writes
+      without cache snooping; include count/termination, atomic retry,
+      persistence, and IOP-phase scheduling with local completion effects.
+- [ ] Cover endpoint completion through EE DMAC and IOP DMA/INTC; distinguish
+      sender completion from receiver drain, independent acknowledgement,
+      masks, and rearming.
+- [ ] Append bounded transfer/wait/completion observations; cover reset,
+      save/load, and malformed partial state at each acceptance boundary.
 - [ ] Add authored EE-to-IOP guest conformance and regress existing DMA paths;
       complete independent review and sanitizer checks.
 

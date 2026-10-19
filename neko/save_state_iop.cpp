@@ -38,7 +38,11 @@ void NekoSaveStateCodec::writeIOPState(
   const IOPBus &bus = system.iopBusComponent;
   if (core.bus != &bus ||
       bus.interruptController != &system.iopInterruptControllerComponent ||
-      bus.timers != &system.iopTimersComponent)
+      bus.timers != &system.iopTimersComponent ||
+      bus.dmaController != &system.iopDMAControllerComponent ||
+      bus.sif1DMA != &system.iopSIF1DMAComponent ||
+      &system.iopDMAControllerComponent.interrupts !=
+        &system.iopInterruptControllerComponent)
   {
     throw std::logic_error("Cannot persist an IOP with foreign machine wiring.");
   }
@@ -184,6 +188,26 @@ void NekoSaveStateCodec::writeIOPState(
     auto scope = writer->scope("timing");
     writer->writeFieldU16("pixelPhase", system.iopTimerTimingComponent.phase);
   }
+  {
+    auto scope = writer->scope("dmaController");
+    auto banks = writer->scope("banks");
+    for (std::size_t index = 0;
+         index < system.iopDMAControllerComponent.banks.size(); ++index)
+    {
+      auto bank = writer->element(index);
+      const auto &state = system.iopDMAControllerComponent.banks[index];
+      writer->writeFieldU32("priority", state.priority);
+      writer->writeFieldU32("control", state.control);
+      writer->writeFieldU8("flags", state.flags);
+    }
+  }
+  {
+    auto scope = writer->scope("sif1DMA");
+    const auto &channel = system.iopSIF1DMAComponent;
+    writer->writeFieldU32("memoryAddress", channel.memoryAddressRegister);
+    writer->writeFieldU32("blockControl", channel.blockControlRegister);
+    writer->writeFieldU32("channelControl", channel.channelControlRegister);
+  }
 }
 
 void NekoSaveStateCodec::readIOP(
@@ -236,6 +260,40 @@ void NekoSaveStateCodec::readIOP(
     reader->requireField(
       system->iopTimerTimingComponent.phase < PS2Clock::IOP_PIXEL_PERIOD,
       "IOP pixel phase is outside its rational period");
+  }
+  {
+    auto scope = reader->scope("dmaController");
+    auto banks = reader->scope("banks");
+    for (std::size_t index = 0;
+         index < system->iopDMAControllerComponent.banks.size(); ++index)
+    {
+      auto bank = reader->element(index);
+      auto &state = system->iopDMAControllerComponent.banks[index];
+      state.priority = reader->readFieldU32("priority");
+      state.control = reader->readFieldU32("control");
+      reader->requireField(
+        (state.control & 0xff000000) == 0,
+        "IOP DMA interrupt control contains non-control bits");
+      state.flags = reader->readFieldU8("flags");
+      const auto implemented = index == 1
+        ? 1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF1) : 0;
+      reader->requireField(
+        (state.flags & ~implemented) == 0,
+        "IOP DMA completion flags contain unimplemented channels");
+    }
+  }
+  {
+    auto scope = reader->scope("sif1DMA");
+    auto &channel = system->iopSIF1DMAComponent;
+    channel.memoryAddressRegister = reader->readFieldU32("memoryAddress");
+    reader->requireField(
+      IOPSIF1DMAChannel::validMemoryAddress(channel.memoryAddressRegister),
+      "IOP SIF1 DMA address is unaligned or exceeds 24 bits");
+    channel.blockControlRegister = reader->readFieldU32("blockControl");
+    channel.channelControlRegister = reader->readFieldU32("channelControl");
+    reader->requireField(
+      IOPSIF1DMAChannel::validChannelControl(channel.channelControlRegister),
+      "IOP SIF1 DMA channel control is outside the supported profile");
   }
 }
 
@@ -486,6 +544,8 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional IOP core commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPTimers>::value,
     "Transactional IOP timer commit must not throw.");
+  static_assert(std::is_nothrow_copy_assignable<IOPSIF1DMAChannel>::value,
+    "Transactional IOP SIF1 DMA commit must not throw.");
   destination->iopBusComponent.ram.swap(source->iopBusComponent.ram);
   destination->iopBusComponent.scratchpad = source->iopBusComponent.scratchpad;
   const bool observationsEnabled = destination->iopCoreComponent.observationsEnabled;
@@ -498,6 +558,9 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.interruptController =
     &destination->iopInterruptControllerComponent;
   destination->iopBusComponent.timers = &destination->iopTimersComponent;
+  destination->iopBusComponent.dmaController =
+    &destination->iopDMAControllerComponent;
+  destination->iopBusComponent.sif1DMA = &destination->iopSIF1DMAComponent;
   const bool interruptObservationsEnabled =
     destination->iopInterruptControllerComponent.observationsEnabled;
   const bool timerObservationsEnabled =
@@ -517,4 +580,7 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopTimersComponent.observationOrder = timerObservationOrder;
   destination->iopTimersComponent.clearObservations();
   destination->iopTimerTimingComponent = source->iopTimerTimingComponent;
+  destination->iopDMAControllerComponent.banks =
+    source->iopDMAControllerComponent.banks;
+  destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;
 }

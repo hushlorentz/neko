@@ -20,6 +20,8 @@
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
 #include "iop_core.hpp"
+#include "iop_dma_controller.hpp"
+#include "iop_sif1_dma_channel.hpp"
 #include "iop_timer_timing.hpp"
 #include "regression_trace.hpp"
 #include "scratchpad_dmac_channel.hpp"
@@ -151,6 +153,10 @@ class NekoSystem
     const IOPBus &iopBus() const;
     IOPInterruptController &iopInterruptController();
     const IOPInterruptController &iopInterruptController() const;
+    IOPDMAController &iopDMAController();
+    const IOPDMAController &iopDMAController() const;
+    IOPSIF1DMAChannel &iopSIF1DMAC();
+    const IOPSIF1DMAChannel &iopSIF1DMAC() const;
     IOPTimers &iopTimers();
     const IOPTimers &iopTimers() const;
     IOPTimerTiming &iopTimerTiming();
@@ -232,6 +238,8 @@ class NekoSystem
     IOPBus iopBusComponent;
     IOPCore iopCoreComponent;
     IOPInterruptController iopInterruptControllerComponent;
+    IOPDMAController iopDMAControllerComponent;
+    IOPSIF1DMAChannel iopSIF1DMAComponent;
     IOPTimers iopTimersComponent;
     IOPTimerTiming iopTimerTimingComponent;
     SIF sifComponent;
