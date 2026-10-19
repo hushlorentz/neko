@@ -1589,7 +1589,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### SIF Registers and Signal Foundation
 
-- [ ] Add one shared SIF state owner with typed EE/IOP register views,
+- [x] Add one shared SIF state owner with typed EE/IOP register views,
       fixed-capacity transport storage, checked inspection, and reset.
 - [ ] Map resolved MMIO widths and side effects through both physical buses;
       reject unsupported accesses atomically without broad MMIO fallbacks.

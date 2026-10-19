@@ -72,6 +72,7 @@ add_library(neko_core
     neko/neko_system.cpp
     neko/neko_system_iop_trace.cpp
     neko/regression_trace.cpp
+    neko/sif.cpp
     neko/save_state.cpp
     neko/save_state_ee.cpp
     neko/save_state_graphics.cpp
@@ -248,6 +249,7 @@ add_executable(neko_tests
     neko_tests/ee/vif1_dmac_channel_tests.cpp
     neko_tests/ee/interrupt_controller_tests.cpp
     neko_tests/fp_register_tests.cpp
+    neko_tests/sif_tests.cpp
     neko_tests/neko_system_tests.cpp
     neko_tests/save_state_internal_tests.cpp
     neko_tests/save_state_mutation.cpp
