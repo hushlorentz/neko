@@ -92,6 +92,7 @@ namespace EEMemoryMap
 
   constexpr std::uint32_t INTC_STAT = 0x1000f000;
   constexpr std::uint32_t INTC_MASK = 0x1000f010;
+  constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
 
   constexpr std::uint32_t GS_BUSDIR = 0x12001040;
   constexpr std::uint32_t GS_PMODE = 0x12000000;

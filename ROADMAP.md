@@ -1603,15 +1603,16 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### Boot Lifecycle and Bounded Startup Diagnostics
 
-- [ ] Implement/test the resolved startup prerequisites, including the exact
-      reserved-access policy at `0x1000f500`; leave unrelated MMIO unsupported.
+- [x] Admit/test only exact full-word writes to reserved `0x1000f500` as a
+      stateless no-op; reject reads, other widths, partial lanes, and unrelated
+      MMIO without adding conditional startup devices.
 - [ ] Add an explicit dual-CPU BIOS startup/run boundary with shared ROM and a
       master-cycle budget; preserve existing EE-only startup behavior.
-- [ ] Separate whole-machine reset, host CPU halt/resume, and any evidenced
-      guest boot/reset operation, with explicit affected-device scope.
+- [ ] Define/test whole-machine reset and host CPU halt/resume scopes;
+      keep unevidenced guest reset and mode operations explicitly unsupported.
 - [ ] Add an on-demand/budget-boundary startup summary for both CPUs, SIF,
-      DMA, and interrupts; report unsupported accesses and waits without
-      side-effecting diagnostic reads or per-poll logging.
+      implemented DMA, and interrupts; report unsupported accesses and waits
+      without side-effecting diagnostic reads or per-poll logging.
 - [ ] Cover one CPU halted/faulted while devices and its peer advance, budget
       exhaustion, reset, repetition, and restore; complete independent review
       and sanitizer checks.

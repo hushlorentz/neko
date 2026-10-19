@@ -240,6 +240,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_multiply_divide_tests.cpp
     neko_tests/ee/ee_quadword_memory_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp
+    neko_tests/ee/ee_reserved_mmio_tests.cpp
     neko_tests/ee/ee_byte_memory_tests.cpp
     neko_tests/ee/ee_halfword_memory_tests.cpp
     neko_tests/ee/ee_word_memory_tests.cpp

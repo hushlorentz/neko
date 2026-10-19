@@ -26,11 +26,16 @@ namespace
       address < EEMemoryMap::SIF_BASE + SIFRegisterMap::APERTURE_SIZE;
   }
 
+  bool fullWordOnlyAddress(std::uint32_t address)
+  {
+    return sifApertureAddress(address) || address == EEMemoryMap::RESERVED_F500;
+  }
+
   void requireSplitWordAccess(std::uint32_t address)
   {
-    if (sifApertureAddress(address))
+    if (fullWordOnlyAddress(address))
     {
-      throw std::out_of_range("SIF supports full 32-bit accesses only.");
+      throw std::out_of_range("EE bus address supports full 32-bit accesses only.");
     }
   }
 
@@ -203,7 +208,7 @@ void EEBus::attachSIF(SIF *sif, SIFSignalReceiver *signals)
 
 EEWordMergeStorePolicy EEBus::wordMergeStorePolicy(std::uint32_t address) const
 {
-  return sifApertureAddress(address)
+  return fullWordOnlyAddress(address)
     ? EEWordMergeStorePolicy::FullWordOnly
     : EEWordMergeStorePolicy::ReadModifyWrite;
 }
@@ -1059,6 +1064,9 @@ bool EEBus::writeMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::RESERVED_F500:
+      // Provisional exact-word no-op, not a DMA hold or peer-reset register.
+      return true;
     case EEMemoryMap::VIF0_FBRST:
       if ((value & ~VIF_STALL_CANCEL) != 0)
       {
