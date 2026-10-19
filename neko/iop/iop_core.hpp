@@ -131,6 +131,7 @@ class IOPCore final
 
     IOPCore();
 
+    // Core-local initialization, not an in-system guest hardware reset.
     void reset();
     void attachBus(IOPBus *bus);
     bool hasAttachedBus() const;
@@ -138,8 +139,10 @@ class IOPCore final
       IOPAddress entryPoint,
       IOPAddress stackPointer,
       IOPAddress returnAddress);
+    // Restarts continuation even at the current PC; use resumeExecution to resume.
     void startExecution(IOPAddress entryPoint);
     void haltExecution();
+    // Requires a host halt without a rejected store; preserves continuation.
     void resumeExecution();
     void stepInstruction();
     // Direct pin levels are independent of the bus controller's Hardware0 level.

@@ -1608,7 +1608,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       MMIO without adding conditional startup devices.
 - [x] Add an explicit dual-CPU BIOS startup/run boundary with shared ROM and a
       master-cycle budget; preserve existing EE-only startup behavior.
-- [ ] Define/test whole-machine reset and host CPU halt/resume scopes;
+- [x] Define/test whole-machine reset and host CPU halt/resume scopes;
       keep unevidenced guest reset and mode operations explicitly unsupported.
 - [ ] Add an on-demand/budget-boundary startup summary for both CPUs, SIF,
       implemented DMA, and interrupts; report unsupported accesses and waits

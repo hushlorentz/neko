@@ -103,6 +103,8 @@ class NekoSystem
     NekoSystem(NekoSystem &&) = delete;
     NekoSystem &operator=(NekoSystem &&) = delete;
 
+    // Between completed master cycles only. Clears mutable state and tracing,
+    // preserves external ROM identities, and leaves both CPUs halted.
     void reset();
     // Requires both CPUs halted; installs shared bytes without resetting or starting.
     void installBootROM(const std::vector<std::uint8_t> &image);

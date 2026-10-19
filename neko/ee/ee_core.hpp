@@ -315,12 +315,15 @@ class EECore final : public ClockedComponent
     static constexpr std::size_t GENERAL_REGISTER_COUNT = 32;
     static constexpr std::size_t FLOATING_POINT_REGISTER_COUNT = 32;
 
+    // Core-local initialization, not an in-system guest hardware reset.
     void reset();
     void attachBus(EEBus *bus);
     void attachVU0(VPU *vu0);
     void attachVU1(VPU *vu1);
     EEInstructionFetchResult fetchInstruction();
+    // Same-PC start after HostHalt resumes; other starts discard continuation.
     void startExecution(std::uint32_t startAddress);
+    // Stops CPU execution without canceling accepted work or halting devices.
     void haltExecution();
     void enterInterruptException();
     bool clockActive() const override;
