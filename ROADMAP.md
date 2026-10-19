@@ -1578,7 +1578,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       diagnostic direction, and risk-based validation/review plan.
 - [x] Resolve source-linked normal-mode SIF register views, widths, masks,
       reset values, signal/interrupt acknowledgements, and boot-control semantics.
-- [ ] Resolve SIF stream/tag framing, word/qword conversion, FIFO capacity,
+- [x] Resolve SIF stream/tag framing, word/qword conversion, FIFO capacity,
       partial-packet behavior, and atomic backpressure/retry boundaries.
 - [ ] Resolve IOP SIF DMA channel controls, tag/count semantics, priority
       enables, completion flags, and aggregate interrupt acknowledgement.
