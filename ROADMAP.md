@@ -1580,7 +1580,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       reset values, signal/interrupt acknowledgements, and boot-control semantics.
 - [x] Resolve SIF stream/tag framing, word/qword conversion, FIFO capacity,
       partial-packet behavior, and atomic backpressure/retry boundaries.
-- [ ] Resolve IOP SIF DMA channel controls, tag/count semantics, priority
+- [x] Resolve IOP SIF DMA channel controls, tag/count semantics, priority
       enables, completion flags, and aggregate interrupt acknowledgement.
 - [ ] Classify bounded BIOS startup prerequisites, including reserved EE MMIO
       at `0x1000f500`; separate reserved-access policy from functional controls.
