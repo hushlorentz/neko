@@ -1,6 +1,7 @@
 #include <stdexcept>
 
 #include "dmac_controller.hpp"
+#include "sif1_dmac_channel.hpp"
 
 namespace
 {
@@ -86,6 +87,19 @@ bool DMACController::enabled() const
 {
   return
     (controlRegister & DMACControl::DMA_ENABLE) != 0;
+}
+
+SIF1DMABeatOutcome DMACController::clockSIF(SIF1DMACChannel &sif1)
+{
+  if (&sif1.dmacController != this)
+  {
+    throw std::invalid_argument("SIF grant requires this channel's DMAC controller.");
+  }
+  if (!enabled() || !sif1.active())
+  {
+    return SIF1DMABeatOutcome::Wait;
+  }
+  return sif1.transferBeat();
 }
 
 void DMACController::signalChannelCompletion(

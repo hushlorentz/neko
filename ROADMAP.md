@@ -1625,7 +1625,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Extend existing EE DMAC ownership for channel 6 and source-chain state;
       include CTRL lifecycle effects and persistence, reusing valid shared
       transitions rather than parallel policy.
-- [ ] Implement EE source admission and SIF framing, including physical
+- [x] Implement EE source admission and SIF framing, including physical
       scratchpad sources, tag/count/termination, atomic backpressure/retry,
       persistence, and EE-phase scheduling with local completion/error effects.
 - [ ] Implement IOP header/payload admission and physical destination writes

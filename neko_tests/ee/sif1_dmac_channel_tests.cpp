@@ -29,6 +29,36 @@ namespace
     return DMACChannelState("SIF1", DMACChannelDirectionPolicy::Unrestricted,
       DMACSourceChainProfile::SIF1);
   }
+
+  void writeSource(NekoSystem &system, std::uint32_t address,
+    const SIFQuadword &words)
+  {
+    const EEQuadword value = {
+      static_cast<std::uint64_t>(words[0]) |
+        (static_cast<std::uint64_t>(words[1]) << 32),
+      static_cast<std::uint64_t>(words[2]) |
+        (static_cast<std::uint64_t>(words[3]) << 32)};
+    if ((address & 0x80000000) != 0)
+    {
+      REQUIRE(system.eeMemorySystem().writeScratchpadDMA128(
+        address & 0x3ff0, value) == EEScratchpadAccessResult::Completed);
+    }
+    else
+    {
+      REQUIRE(system.eeBus().writeDMAC128(address, value));
+    }
+  }
+
+  void requireStream(const NekoSystem &system,
+    const std::vector<std::uint32_t> &expected)
+  {
+    REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index)
+    {
+      CAPTURE(index);
+      REQUIRE(system.sif().wordAt(SIFDirection::SIF1, index) == expected[index]);
+    }
+  }
 }
 
 TEST_CASE("EE SIF1 registers retain aligned physical and scratchpad state",
@@ -63,6 +93,7 @@ TEST_CASE("EE SIF1 registers retain aligned physical and scratchpad state",
   REQUIRE_THROWS_AS(channel.writeChannelControl(START), std::logic_error);
   channel.writeChannelControl(START | 0x31);
   requireState(system, before);
+  system.dmacController().writeControl(0);
   system.runMasterCycles(17);
   REQUIRE(channel.active());
   REQUIRE(channel.memoryAddress() == 0x80001230);
@@ -425,5 +456,530 @@ TEST_CASE("EE SIF1 malformed snapshots reject transactionally",
     corrupt.refreshChecksum();
     REQUIRE_THROWS_AS(destination.loadState(corrupt.bytes()), std::invalid_argument);
     requireState(destination, before);
+  }
+}
+
+TEST_CASE("EE SIF1 normal sender moves one physical qword per enabled EE phase",
+  "[ee][sif1][dma][sender]")
+{
+  NekoSystem system;
+  auto &channel = system.sif1DMAC();
+  writeSource(system, 0x1000, {{1, 2, 3, 4}});
+  writeSource(system, 0x1010, {{5, 6, 7, 8}});
+  channel.writeMemoryAddress(0x1000);
+  channel.writeQuadwordCount(2);
+  channel.writeChannelControl(0x100);
+  system.runMasterCycles(1);
+  requireStream(system, {});
+  REQUIRE(channel.quadwordCount() == 2);
+  system.dmacController().writeControl(1);
+  system.runMasterCycles(1);
+  requireStream(system, {1, 2, 3, 4});
+  REQUIRE(channel.memoryAddress() == 0x1010);
+  REQUIRE(channel.quadwordCount() == 1);
+  REQUIRE(channel.active());
+  REQUIRE(system.dmacController().status() == 0);
+  system.runMasterCycles(1);
+  requireStream(system, {1, 2, 3, 4, 5, 6, 7, 8});
+  REQUIRE(channel.memoryAddress() == 0x1020);
+  REQUIRE(channel.quadwordCount() == 0);
+  REQUIRE_FALSE(channel.active());
+  REQUIRE(system.dmacController().status() == CHANNEL_6);
+  REQUIRE(system.sif().control() == 0);
+  REQUIRE_FALSE(system.dmacController().interruptPending());
+  REQUIRE(system.iopDMAController().interruptPending() == false);
+  REQUIRE(system.iopInterruptController().status() == 0);
+  system.runMasterCycles(8);
+  requireStream(system, {1, 2, 3, 4, 5, 6, 7, 8});
+}
+
+TEST_CASE("EE SIF1 source tags and payload consume distinct bounded grants",
+  "[ee][sif1][dma][sender]")
+{
+  for (const auto id : {0u, 1u, 2u, 3u, 4u, 7u})
+  {
+    CAPTURE(id);
+    NekoSystem system;
+    auto &channel = system.sif1DMAC();
+    writeSource(system, 0x1000, {{(id << 28) | 1, 0x2000, 0xdead, 0xbeef}});
+    writeSource(system, 0x1010, {{1, 2, 3, 4}});
+    writeSource(system, 0x2000, {{5, 6, 7, 8}});
+    const auto nextTag = id == 2 ? 0x2000u :
+      id == 1 || id == 7 ? 0x1020u : 0x1010u;
+    channel.writeTagAddress(0x1000);
+    channel.writeChannelControl(START);
+    system.dmacController().writeControl(1);
+    system.runMasterCycles(1);
+    requireStream(system, {});
+    REQUIRE(channel.active());
+    REQUIRE(channel.quadwordCount() == 1);
+    REQUIRE(channel.tagAddress() == nextTag);
+    REQUIRE((channel.channelControl() & 0xffff0000) == (id << 28));
+    system.runMasterCycles(1);
+    const bool referenced = id == 0 || id == 3 || id == 4;
+    requireStream(system, referenced ? std::vector<std::uint32_t>{5, 6, 7, 8} :
+      std::vector<std::uint32_t>{1, 2, 3, 4});
+    REQUIRE(channel.active() == (id != 0 && id != 7));
+    REQUIRE(channel.quadwordCount() == 0);
+    REQUIRE(channel.memoryAddress() == (referenced ? 0x2010u : 0x1020u));
+  }
+}
+
+TEST_CASE("EE SIF1 source chains follow references jumps and inline packets",
+  "[ee][sif1][dma][sender]")
+{
+  NekoSystem system;
+  writeSource(system, 0x1000, {{0x30000001, 0x3000, 0, 0}});
+  writeSource(system, 0x1010, {{0x20000001, 0x2000, 0, 0}});
+  writeSource(system, 0x1020, {{5, 6, 7, 8}});
+  writeSource(system, 0x2000, {{0x10000001, 0, 0, 0}});
+  writeSource(system, 0x2010, {{9, 10, 11, 12}});
+  writeSource(system, 0x2020, {{0x70000001, 0, 0, 0}});
+  writeSource(system, 0x2030, {{13, 14, 15, 16}});
+  writeSource(system, 0x3000, {{1, 2, 3, 4}});
+  system.sif1DMAC().writeTagAddress(0x1000);
+  system.sif1DMAC().writeChannelControl(START);
+  system.dmacController().writeControl(1);
+  system.runMasterCycles(8);
+  requireStream(system, {1, 2, 3, 4, 5, 6, 7, 8,
+    9, 10, 11, 12, 13, 14, 15, 16});
+  REQUIRE_FALSE(system.sif1DMAC().active());
+  REQUIRE(system.sif1DMAC().tagAddress() == 0x2040);
+  REQUIRE(system.dmacController().status() == CHANNEL_6);
+}
+
+TEST_CASE("EE SIF1 zero and undefined tags complete locally without stream capacity",
+  "[ee][sif1][dma][sender]")
+{
+  for (const auto id : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u})
+  {
+    CAPTURE(id);
+    NekoSystem system;
+    auto &channel = system.sif1DMAC();
+    for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
+    {
+      REQUIRE(system.sif().pushSIF0Prologue({{1, 2, 3, 4}}) ==
+        SIFTransferOutcome::Completed);
+    }
+    const bool undefined = id == 5 || id == 6;
+    writeSource(system, 0x1000, {{(id << 28) | (undefined ? 3u : 0u),
+      0x2000, 0xdead, 0xbeef}});
+    channel.writeMemoryAddress(0x3000);
+    channel.writeTagAddress(0x1000);
+    channel.writeChannelControl(START | 0x30);
+    system.dmacController().writeControl(1);
+    system.runMasterCycles(1);
+    requireStream(system, {});
+    REQUIRE(system.sif().freeWordCount() == 0);
+    const bool terminal = id == 0 || id == 7 || undefined;
+    REQUIRE(channel.active() == !terminal);
+    REQUIRE(system.dmacController().status() == (terminal ? CHANNEL_6 : 0));
+    REQUIRE((channel.channelControl() & 0xffff0030) == ((id << 28) | 0x30));
+    if (undefined)
+    {
+      REQUIRE(channel.tagAddress() == 0x1000);
+      REQUIRE(channel.memoryAddress() == 0x3000);
+      REQUIRE(channel.quadwordCount() == 3);
+    }
+  }
+
+  NekoSystem system;
+  system.sif1DMAC().writeMemoryAddress(0x10000000);
+  system.sif1DMAC().writeChannelControl(0x100);
+  system.runMasterCycles(1);
+  REQUIRE(system.sif1DMAC().active());
+  system.dmacController().writeControl(1);
+  system.runMasterCycles(1);
+  REQUIRE_FALSE(system.sif1DMAC().active());
+  REQUIRE(system.dmacController().status() == CHANNEL_6);
+}
+
+TEST_CASE("EE SIF1 TIE terminates after its packet but not at tag acceptance",
+  "[ee][sif1][dma][sender]")
+{
+  for (const auto tie : {0u, 0x80u})
+  {
+    NekoSystem system;
+    writeSource(system, 0x1000, {{0x9c000001, 0, 0, 0}});
+    writeSource(system, 0x1010, {{1, 2, 3, 4}});
+    writeSource(system, 0x1020, {{0x70000000, 0, 0, 0}});
+    system.sif1DMAC().writeTagAddress(0x1000);
+    system.sif1DMAC().writeChannelControl(START | tie);
+    system.dmacController().writeControl(1);
+    system.runMasterCycles(1);
+    REQUIRE(system.sif1DMAC().active());
+    REQUIRE(system.dmacController().status() == 0);
+    system.runMasterCycles(1);
+    requireStream(system, {1, 2, 3, 4});
+    REQUIRE(system.sif1DMAC().active() == (tie == 0));
+    REQUIRE(system.sif1DMAC().tagAddress() == 0x1020);
+    REQUIRE((system.sif1DMAC().channelControl() & 0xffff0000) == 0x9c000000);
+    if (tie == 0)
+    {
+      system.runMasterCycles(1);
+    }
+    REQUIRE_FALSE(system.sif1DMAC().active());
+    REQUIRE(system.dmacController().status() == CHANNEL_6);
+  }
+}
+
+TEST_CASE("EE SIF1 payload waits atomically for four shared free words and retries once",
+  "[ee][sif1][dma][sender]")
+{
+  NekoSystem system;
+  auto &channel = system.sif1DMAC();
+  for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
+  {
+    REQUIRE(system.sif().pushSIF0Prologue({{index, index, index, index}}) ==
+      SIFTransferOutcome::Completed);
+  }
+  writeSource(system, 0x1000, {{0x70000001, 0, 0, 0}});
+  writeSource(system, 0x1010, {{1, 2, 3, 4}});
+  channel.writeTagAddress(0x1000);
+  channel.writeChannelControl(START);
+  system.dmacController().writeControl(1);
+  system.runMasterCycles(1);
+  REQUIRE(channel.quadwordCount() == 1);
+  for (unsigned freeWords = 0; freeWords < 4; ++freeWords)
+  {
+    CAPTURE(freeWords);
+    const auto channelHash = channel.stateHash();
+    const auto sifHash = system.sifStateHash();
+    system.runMasterCycles(2);
+    REQUIRE(channel.stateHash() == channelHash);
+    REQUIRE(system.sifStateHash() == sifHash);
+    REQUIRE(system.dmacController().status() == 0);
+    REQUIRE(system.sif().consumeWords(SIFDirection::SIF0, 1) ==
+      SIFTransferOutcome::Completed);
+  }
+  writeSource(system, 0x1010, {{5, 6, 7, 8}});
+  system.runMasterCycles(1);
+  requireStream(system, {5, 6, 7, 8});
+  REQUIRE(system.sif().freeWordCount() == 0);
+  REQUIRE_FALSE(channel.active());
+  REQUIRE(system.dmacController().status() == CHANNEL_6);
+  system.runMasterCycles(1);
+  requireStream(system, {5, 6, 7, 8});
+}
+
+TEST_CASE("EE SIF1 long packets stream without fitting entirely in the FIFO",
+  "[ee][sif1][dma][sender]")
+{
+  NekoSystem system;
+  for (std::uint32_t index = 0; index < 10; ++index)
+  {
+    writeSource(system, 0x1000 + index * 16,
+      {{index * 4, index * 4 + 1, index * 4 + 2, index * 4 + 3}});
+  }
+  system.sif1DMAC().writeMemoryAddress(0x1000);
+  system.sif1DMAC().writeQuadwordCount(10);
+  system.sif1DMAC().writeChannelControl(0x100);
+  system.dmacController().writeControl(1);
+  system.runMasterCycles(9);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 32);
+  REQUIRE(system.sif1DMAC().quadwordCount() == 2);
+  for (std::uint32_t index = 0; index < 10; ++index)
+  {
+    SIFQuadword words = {};
+    REQUIRE(system.sif().peekWords(SIFDirection::SIF1, words, 4) ==
+      SIFTransferOutcome::Completed);
+    const SIFQuadword expected = {{index * 4, index * 4 + 1,
+      index * 4 + 2, index * 4 + 3}};
+    REQUIRE(words == expected);
+    REQUIRE(system.sif().consumeWords(SIFDirection::SIF1, 4) ==
+      SIFTransferOutcome::Completed);
+    system.runMasterCycles(1);
+  }
+  REQUIRE_FALSE(system.sif1DMAC().active());
+  requireStream(system, {});
+  REQUIRE(system.sif1DMAC().memoryAddress() == 0x10a0);
+}
+
+TEST_CASE("EE SIF1 DMA reads physical scratchpad tags and payload using its low 14 bits",
+  "[ee][sif1][dma][sender]")
+{
+  NekoSystem system;
+  writeSource(system, 0x80003ff0, {{0x70000002, 0, 0, 0}});
+  writeSource(system, 0x80000000, {{1, 2, 3, 4}});
+  writeSource(system, 0x80000010, {{5, 6, 7, 8}});
+  system.sif1DMAC().writeTagAddress(0x80003ff0);
+  system.sif1DMAC().writeChannelControl(START);
+  system.dmacController().writeControl(1);
+  system.runMasterCycles(1);
+  REQUIRE(system.sif1DMAC().memoryAddress() == 0x80004000);
+  REQUIRE(system.sif1DMAC().tagAddress() == 0x80004020);
+  system.runMasterCycles(2);
+  requireStream(system, {1, 2, 3, 4, 5, 6, 7, 8});
+  REQUIRE_FALSE(system.sif1DMAC().active());
+  REQUIRE(system.sif1DMAC().memoryAddress() == 0x80004020);
+  REQUIRE(system.dmacController().status() == CHANNEL_6);
+
+  system.sif1DMAC().writeTagAddress(0x1000);
+  writeSource(system, 0x1000, {{1, 0x81230010, 0, 0}});
+  system.sif1DMAC().writeChannelControl(START);
+  system.runMasterCycles(2);
+  requireStream(system, {1, 2, 3, 4, 5, 6, 7, 8, 5, 6, 7, 8});
+  REQUIRE(system.sif1DMAC().memoryAddress() == 0x81230020);
+}
+
+TEST_CASE("EE SIF1 invalid physical sources terminate with local CIS and BEIS only",
+  "[ee][sif1][dma][sender]")
+{
+  for (const auto address : {0x02000000u, 0x20001000u, 0x70000000u,
+    EEMemoryMap::SIF_BASE, EEMemoryMap::VU0_DATA_MEMORY_BASE,
+    EEMemoryMap::BOOT_ROM_BASE})
+  {
+    for (const auto chain : {false, true})
+    {
+      CAPTURE(address);
+      CAPTURE(chain);
+      NekoSystem system;
+      auto &channel = system.sif1DMAC();
+      REQUIRE(system.sif().pushSIF1Quadword({{1, 2, 3, 4}}) ==
+        SIFTransferOutcome::Completed);
+      channel.writeMemoryAddress(address);
+      channel.writeTagAddress(address);
+      channel.writeQuadwordCount(chain ? 0 : 1);
+      channel.writeChannelControl((chain ? START : 0x100) | 0xabcd0000);
+      system.dmacController().writeControl(1);
+      system.runMasterCycles(1);
+      REQUIRE_FALSE(channel.active());
+      REQUIRE(channel.memoryAddress() == address);
+      REQUIRE(channel.tagAddress() == address);
+      REQUIRE(channel.quadwordCount() == (chain ? 0 : 1));
+      REQUIRE((channel.channelControl() & 0xffff0000) == 0xabcd0000);
+      REQUIRE(system.dmacController().status() == (CHANNEL_6 | DMACStatus::BUS_ERROR));
+      REQUIRE(system.dmacController().interruptPending());
+      REQUIRE(system.sif().control() == 0);
+      requireStream(system, {1, 2, 3, 4});
+      REQUIRE(system.iopInterruptController().status() == 0);
+    }
+  }
+}
+
+TEST_CASE("EE SIF1 accepted terminal packet survives pause restore and source bus error",
+  "[ee][sif1][dma][sender][save-state]")
+{
+  NekoSystem original;
+  const auto last = EEMemoryMap::MAIN_MEMORY_SIZE - 16;
+  writeSource(original, 0x1000, {{2, last, 0, 0}});
+  writeSource(original, last, {{1, 2, 3, 4}});
+  original.sif1DMAC().writeTagAddress(0x1000);
+  original.sif1DMAC().writeChannelControl(START);
+  original.dmacController().writeControl(1);
+  original.runMasterCycles(1);
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  IOPTraceTest::requireMachine(restored, original);
+  original.startTrace();
+  restored.startTrace();
+  original.runMasterCycles(1);
+  restored.runMasterCycles(1);
+  IOPTraceTest::requireMachine(restored, original);
+  requireStream(original, {1, 2, 3, 4});
+  REQUIRE(original.sif1DMAC().active());
+  original.dmacController().writeControl(0);
+  original.runMasterCycles(3);
+  REQUIRE(original.sif1DMAC().quadwordCount() == 1);
+  REQUIRE(original.sif1DMAC().active());
+  restored.loadState(original.saveState());
+  original.clearTrace();
+  restored.clearTrace();
+  original.dmacController().writeControl(1);
+  restored.dmacController().writeControl(1);
+  original.runMasterCycles(1);
+  restored.runMasterCycles(1);
+  IOPTraceTest::requireMachine(restored, original);
+  IOPTraceTest::requireEvents(restored.trace(), original.trace());
+  REQUIRE_FALSE(original.sif1DMAC().active());
+  REQUIRE(original.sif1DMAC().memoryAddress() == EEMemoryMap::MAIN_MEMORY_SIZE);
+  REQUIRE(original.sif1DMAC().quadwordCount() == 1);
+  REQUIRE(original.dmacController().status() == (CHANNEL_6 | DMACStatus::BUS_ERROR));
+  requireStream(original, {1, 2, 3, 4});
+}
+
+TEST_CASE("EE SIF1 stalled terminal continuation restores and abort preserves queued data",
+  "[ee][sif1][dma][sender][save-state]")
+{
+  NekoSystem original;
+  for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
+  {
+    REQUIRE(original.sif().pushSIF1Quadword({{1, 2, 3, 4}}) ==
+      SIFTransferOutcome::Completed);
+  }
+  writeSource(original, 0x1000, {{0x70000001, 0, 0, 0}});
+  writeSource(original, 0x1010, {{5, 6, 7, 8}});
+  original.sif1DMAC().writeTagAddress(0x1000);
+  original.sif1DMAC().writeChannelControl(START);
+  original.dmacController().writeControl(1);
+  original.runMasterCycles(2);
+  REQUIRE(original.sif1DMAC().quadwordCount() == 1);
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  IOPTraceTest::requireMachine(restored, original);
+  for (auto *system : {&original, &restored})
+  {
+    REQUIRE(system->sif().consumeWords(SIFDirection::SIF1, 4) ==
+      SIFTransferOutcome::Completed);
+    system->runMasterCycles(1);
+    REQUIRE_FALSE(system->sif1DMAC().active());
+    REQUIRE(system->sif().wordCount(SIFDirection::SIF1) == 32);
+    REQUIRE(system->sif().wordAt(SIFDirection::SIF1, 28) == 5);
+  }
+  IOPTraceTest::requireMachine(restored, original);
+  original.dmacController().writeStatus(CHANNEL_6);
+  original.sif1DMAC().writeMemoryAddress(0x1010);
+  original.sif1DMAC().writeQuadwordCount(1);
+  original.sif1DMAC().writeChannelControl(0x100);
+  original.runMasterCycles(1);
+  original.sif1DMAC().writeChannelControl(0);
+  REQUIRE(original.sif1DMAC().quadwordCount() == 1);
+  REQUIRE(original.sif().wordCount(SIFDirection::SIF1) == 32);
+  REQUIRE(original.dmacController().status() == 0);
+  restored.loadState(original.saveState());
+  original.reset();
+  restored.reset();
+  IOPTraceTest::requireMachine(restored, original);
+  NekoSystem fresh;
+  IOPTraceTest::requireMachine(original, fresh);
+}
+
+TEST_CASE("EE SIF1 address progression retains SPR across the 31-bit address boundary",
+  "[ee][sif1][dma][sender]")
+{
+  for (const auto chain : {false, true})
+  {
+    CAPTURE(chain);
+    NekoSystem system;
+    writeSource(system, 0xfffffff0,
+      chain ? SIFQuadword{{0x70000001, 0, 0, 0}} : SIFQuadword{{1, 2, 3, 4}});
+    writeSource(system, 0x80000000, {{5, 6, 7, 8}});
+    system.sif1DMAC().writeMemoryAddress(0xfffffff0);
+    system.sif1DMAC().writeTagAddress(0xfffffff0);
+    system.sif1DMAC().writeQuadwordCount(chain ? 0 : 2);
+    system.sif1DMAC().writeChannelControl(chain ? START : 0x100);
+    system.dmacController().writeControl(1);
+    system.runMasterCycles(1);
+    REQUIRE(system.sif1DMAC().memoryAddress() == 0x80000000);
+    if (chain)
+    {
+      REQUIRE(system.sif1DMAC().tagAddress() == 0x80000010);
+    }
+    system.runMasterCycles(1);
+    requireStream(system, chain ? std::vector<std::uint32_t>{5, 6, 7, 8} :
+      std::vector<std::uint32_t>{1, 2, 3, 4, 5, 6, 7, 8});
+    REQUIRE(system.sif1DMAC().memoryAddress() == 0x80000010);
+    REQUIRE_FALSE(system.sif1DMAC().active());
+    REQUIRE(system.dmacController().status() == CHANNEL_6);
+  }
+}
+
+TEST_CASE("EE SIF1 persistence rejects impossible terminal packet continuations",
+  "[ee][sif1][dma][sender][save-state]")
+{
+  NekoSystem source;
+  writeSource(source, 0x1000, {{0x70000001, 0, 0, 0}});
+  source.sif1DMAC().writeTagAddress(0x1000);
+  source.sif1DMAC().writeChannelControl(START);
+  source.dmacController().writeControl(1);
+  source.runMasterCycles(1);
+  REQUIRE(source.sif1DMAC().quadwordCount() == 1);
+  NekoSystem destination;
+  const auto before = destination.saveState();
+  struct InvalidField
+  {
+    const char *path;
+    std::uint32_t value;
+  };
+  for (const auto field : {
+    InvalidField{"system.sif1DMAC.channelControlRegister", 0x70000004},
+    InvalidField{"system.sif1DMAC.channelControlRegister", 0x70000100},
+    InvalidField{"system.sif1DMAC.channelControlRegister", 0x10000104},
+    InvalidField{"system.sif1DMAC.channelControlRegister", 0xd0000184},
+    InvalidField{"system.sif1DMAC.channelControlRegister", 0xe0000184},
+    InvalidField{"system.sif1DMAC.quadwordCountRegister", 0}})
+  {
+    CAPTURE(field.path);
+    CAPTURE(field.value);
+    SaveStateMutation corrupt(source.saveState());
+    corrupt.writeScalar(field.path, field.value);
+    corrupt.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(corrupt.bytes()), std::invalid_argument);
+    requireState(destination, before);
+  }
+}
+
+TEST_CASE("EE SIF1 grants follow legacy DMA writes and publish local completion immediately",
+  "[ee][sif1][dma][sender]")
+{
+  NekoSystem system;
+  writeSource(system, 0x80000000, {{1, 2, 3, 4}});
+  auto &fromSPR = system.fromScratchpadDMAC();
+  fromSPR.writeMemoryAddress(0x1000);
+  fromSPR.writeQuadwordCount(1);
+  fromSPR.writeScratchpadAddress(0);
+  fromSPR.writeChannelControl(0x100);
+  system.sif1DMAC().writeMemoryAddress(0x1000);
+  system.sif1DMAC().writeQuadwordCount(1);
+  system.sif1DMAC().writeChannelControl(0x100);
+  system.dmacController().writeControl(1);
+  system.dmacController().writeStatus(CHANNEL_6_MASK);
+  system.clockMasterCycle();
+  requireStream(system, {1, 2, 3, 4});
+  REQUIRE_FALSE(fromSPR.active());
+  REQUIRE_FALSE(system.sif1DMAC().active());
+  REQUIRE(system.dmacController().status() ==
+    (CHANNEL_6_MASK | CHANNEL_6 | DMACStatus::CHANNEL_8));
+  REQUIRE(system.interruptPending());
+}
+
+TEST_CASE("EE SIF1 grants return explicit wait accepted and terminal fault outcomes",
+  "[ee][sif1][dma][sender]")
+{
+  NekoSystem system;
+  auto &controller = system.dmacController();
+  auto &channel = system.sif1DMAC();
+  REQUIRE(controller.clockSIF(channel) == SIF1DMABeatOutcome::Wait);
+  channel.writeChannelControl(0x100);
+  REQUIRE(controller.clockSIF(channel) == SIF1DMABeatOutcome::Wait);
+  controller.writeControl(1);
+  REQUIRE(controller.clockSIF(channel) == SIF1DMABeatOutcome::Completed);
+  channel.writeMemoryAddress(0x02000000);
+  channel.writeQuadwordCount(1);
+  channel.writeChannelControl(0x100);
+  REQUIRE(controller.clockSIF(channel) == SIF1DMABeatOutcome::BusError);
+  REQUIRE_FALSE(channel.active());
+  DMACController foreign;
+  const auto before = system.saveState();
+  REQUIRE_THROWS_AS(foreign.clockSIF(channel), std::invalid_argument);
+  requireState(system, before);
+}
+
+TEST_CASE("EE SIF1 accepted tag and payload boundaries replay identically at every phase",
+  "[ee][sif1][dma][sender][save-state]")
+{
+  for (unsigned prefix = 0; prefix <= 8; ++prefix)
+  {
+    CAPTURE(prefix);
+    NekoSystem original;
+    writeSource(original, 0x1000, {{0x10000001, 0, 0, 0}});
+    writeSource(original, 0x1010, {{1, 2, 3, 4}});
+    writeSource(original, 0x1020, {{0x70000002, 0, 0, 0}});
+    writeSource(original, 0x1030, {{5, 6, 7, 8}});
+    writeSource(original, 0x1040, {{9, 10, 11, 12}});
+    original.sif1DMAC().writeTagAddress(0x1000);
+    original.sif1DMAC().writeChannelControl(START);
+    original.dmacController().writeControl(1);
+    original.runMasterCycles(prefix);
+    NekoSystem restored;
+    restored.loadState(original.saveState());
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(9);
+    restored.runMasterCycles(9);
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    requireStream(original, {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+    REQUIRE_FALSE(original.sif1DMAC().active());
   }
 }

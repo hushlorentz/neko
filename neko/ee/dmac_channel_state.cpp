@@ -216,7 +216,7 @@ DMACChannelTransition DMACChannelState::acceptQuadword()
       std::string(name) +
       " DMAC cannot accept a qword with zero QWC.");
   }
-  memoryAddressRegister += 16;
+  memoryAddressRegister = advanceSourceAddress(memoryAddressRegister, 16);
   --quadwordCountRegister;
   if (quadwordCountRegister == 0 &&
       (terminateAfterPacket || normalMode()))
@@ -244,9 +244,9 @@ DMACChannelState::acceptSourceChainTag(
     (low >> 28) & 0x07);
   const std::uint32_t count = low & QWC_MASK;
   const std::uint32_t inlineDataAddress =
-    currentTagAddress + 16;
+    advanceSourceAddress(currentTagAddress, 16);
   const std::uint32_t afterInlineData =
-    inlineDataAddress + count * 16;
+    advanceSourceAddress(inlineDataAddress, count * 16);
   const std::uint32_t tagAddress = high &
     (profile == DMACSourceChainProfile::SIF1 ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
 
@@ -270,7 +270,7 @@ DMACChannelState::acceptSourceChainTag(
   {
     case DMACTagID::ReferenceEnd:
       memoryAddressRegister = tagAddress;
-      tagAddressRegister = currentTagAddress + 16;
+      tagAddressRegister = inlineDataAddress;
       terminateAfterPacket = true;
       break;
     case DMACTagID::Count:
@@ -284,7 +284,7 @@ DMACChannelState::acceptSourceChainTag(
     case DMACTagID::Reference:
     case DMACTagID::ReferenceStall:
       memoryAddressRegister = tagAddress;
-      tagAddressRegister = currentTagAddress + 16;
+      tagAddressRegister = inlineDataAddress;
       break;
     case DMACTagID::Call:
       if (addressStackDepth >= addressStackRegisters.size())
@@ -362,4 +362,14 @@ void DMACChannelState::updateAddressStackField()
     (channelControlRegister &
      ~DMACChannelControl::ADDRESS_STACK_MASK) |
     (static_cast<std::uint32_t>(addressStackDepth) << 4);
+}
+
+std::uint32_t DMACChannelState::advanceSourceAddress(
+  std::uint32_t address, std::uint32_t bytes) const
+{
+  if (profile == DMACSourceChainProfile::SIF1)
+  {
+    return (address & SPR_BIT) | ((address + bytes) & ADDRESS_MASK);
+  }
+  return address + bytes;
 }

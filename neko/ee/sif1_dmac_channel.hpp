@@ -4,12 +4,23 @@
 #include "dmac_channel_state.hpp"
 
 class DMACController;
+class EEBus;
+class EEMemorySystem;
 class SIF;
+struct EEQuadword;
+
+enum class SIF1DMABeatOutcome : std::uint8_t
+{
+  Completed,
+  Wait,
+  BusError
+};
 
 class SIF1DMACChannel final
 {
   public:
-    SIF1DMACChannel(DMACController &controller, SIF &sif);
+    SIF1DMACChannel(DMACController &controller, SIF &sif,
+      EEBus &bus, EEMemorySystem &memory);
     SIF1DMACChannel(const SIF1DMACChannel &) = delete;
     SIF1DMACChannel &operator=(const SIF1DMACChannel &) = delete;
 
@@ -26,10 +37,21 @@ class SIF1DMACChannel final
     std::uint64_t stateHash() const;
 
   private:
+    friend class DMACController;
     friend class NekoSaveStateCodec;
+
+    SIF1DMABeatOutcome transferBeat();
+    SIF1DMABeatOutcome transferQuadword();
+    SIF1DMABeatOutcome readSourceChainTag();
+    SIF1DMABeatOutcome readSourceQuadword(
+      std::uint32_t address, EEQuadword *value) const;
+    void completeTransfer();
+    void interruptForBusError();
 
     DMACController &dmacController;
     SIF &sifComponent;
+    EEBus &eeBus;
+    EEMemorySystem &eeMemorySystem;
     DMACChannelState channelState;
 };
 

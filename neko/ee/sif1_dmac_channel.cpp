@@ -1,11 +1,16 @@
 #include "sif1_dmac_channel.hpp"
 
 #include "dmac_controller.hpp"
+#include "ee_bus.hpp"
+#include "ee_memory_system.hpp"
 #include "sif.hpp"
 
-SIF1DMACChannel::SIF1DMACChannel(DMACController &controller, SIF &sif) :
+SIF1DMACChannel::SIF1DMACChannel(DMACController &controller, SIF &sif,
+  EEBus &bus, EEMemorySystem &memory) :
   dmacController(controller),
   sifComponent(sif),
+  eeBus(bus),
+  eeMemorySystem(memory),
   channelState("SIF1", DMACChannelDirectionPolicy::Unrestricted,
     DMACSourceChainProfile::SIF1)
 {
@@ -71,4 +76,102 @@ std::uint32_t SIF1DMACChannel::tagAddress() const
 void SIF1DMACChannel::writeTagAddress(std::uint32_t value)
 {
   channelState.writeTagAddress(value);
+}
+
+SIF1DMABeatOutcome SIF1DMACChannel::transferBeat()
+{
+  if (channelState.hasPendingQuadword())
+  {
+    return transferQuadword();
+  }
+  if (channelState.normalMode())
+  {
+    completeTransfer();
+    return SIF1DMABeatOutcome::Completed;
+  }
+  return readSourceChainTag();
+}
+
+SIF1DMABeatOutcome SIF1DMACChannel::readSourceQuadword(
+  std::uint32_t address, EEQuadword *value) const
+{
+  if ((address & 0x80000000) != 0)
+  {
+    const auto result = eeMemorySystem.readScratchpadDMA128(
+      address & (EEMemorySystem::SCRATCHPAD_SIZE - 1), value);
+    if (result == EEScratchpadAccessResult::Wait)
+    {
+      return SIF1DMABeatOutcome::Wait;
+    }
+    return result == EEScratchpadAccessResult::Completed
+      ? SIF1DMABeatOutcome::Completed : SIF1DMABeatOutcome::BusError;
+  }
+  if (address >= EEMemoryMap::MAIN_MEMORY_SIZE ||
+      !eeBus.readDMAC128(address, value))
+  {
+    return SIF1DMABeatOutcome::BusError;
+  }
+  return SIF1DMABeatOutcome::Completed;
+}
+
+SIF1DMABeatOutcome SIF1DMACChannel::transferQuadword()
+{
+  EEQuadword value = {};
+  const auto result = readSourceQuadword(channelState.memoryAddress(), &value);
+  if (result != SIF1DMABeatOutcome::Completed)
+  {
+    if (result == SIF1DMABeatOutcome::BusError)
+    {
+      interruptForBusError();
+    }
+    return result;
+  }
+  const SIFQuadword words = {{
+    static_cast<std::uint32_t>(value.low),
+    static_cast<std::uint32_t>(value.low >> 32),
+    static_cast<std::uint32_t>(value.high),
+    static_cast<std::uint32_t>(value.high >> 32)}};
+  if (sifComponent.pushSIF1Quadword(words) == SIFTransferOutcome::Wait)
+  {
+    return SIF1DMABeatOutcome::Wait;
+  }
+  if (channelState.acceptQuadword() == DMACChannelTransition::Complete)
+  {
+    completeTransfer();
+  }
+  return SIF1DMABeatOutcome::Completed;
+}
+
+SIF1DMABeatOutcome SIF1DMACChannel::readSourceChainTag()
+{
+  EEQuadword tag = {};
+  const auto result = readSourceQuadword(channelState.tagAddress(), &tag);
+  if (result != SIF1DMABeatOutcome::Completed)
+  {
+    if (result == SIF1DMABeatOutcome::BusError)
+    {
+      interruptForBusError();
+    }
+    return result;
+  }
+  if (channelState.acceptSourceChainTag(static_cast<std::uint32_t>(tag.low),
+        static_cast<std::uint32_t>(tag.low >> 32)) == DMACChannelTransition::Complete)
+  {
+    completeTransfer();
+  }
+  return SIF1DMABeatOutcome::Completed;
+}
+
+void SIF1DMACChannel::completeTransfer()
+{
+  channelState.completeTransfer();
+  dmacController.signalChannelCompletion(DMACStatus::CHANNEL_6);
+  sifComponent.applyEEDMAEvent(SIFDirection::SIF1, SIFEEDMAEvent::Complete);
+}
+
+void SIF1DMACChannel::interruptForBusError()
+{
+  channelState.completeTransfer();
+  dmacController.signalBusError(DMACStatus::CHANNEL_6);
+  sifComponent.applyEEDMAEvent(SIFDirection::SIF1, SIFEEDMAEvent::BusError);
 }

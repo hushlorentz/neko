@@ -144,7 +144,9 @@ void NekoSaveStateCodec::writeSIF1DMAC(
   const auto &channel = system.sif1DMACComponent;
   if (system.eeBusComponent.sif1DMACChannel != &channel ||
       &channel.dmacController != &system.dmacControllerComponent ||
-      &channel.sifComponent != &system.sifComponent)
+      &channel.sifComponent != &system.sifComponent ||
+      &channel.eeBus != &system.eeBusComponent ||
+      &channel.eeMemorySystem != &system.eeCoreComponent.memorySystem)
   {
     throw std::logic_error("Cannot persist SIF1 DMA with foreign machine wiring.");
   }
@@ -169,8 +171,14 @@ void NekoSaveStateCodec::readSIF1DMAC(
   reader->requireField((state.tagAddressRegister & 0xf) == 0,
     "SIF1 DMAC tag address is unaligned");
   state.terminateAfterPacket = reader->readFieldBool("terminateAfterPacket");
-  reader->requireField(!state.terminateAfterPacket,
-    "SIF1 DMAC tag continuation requires an implemented sender engine");
+  const auto tagID = (state.channelControlRegister >> 28) & 7;
+  const bool tagInterrupt =
+    (state.channelControlRegister & 0x80000000) != 0 &&
+    (state.channelControlRegister & DMACChannelControl::TAG_INTERRUPT_ENABLE) != 0;
+  reader->requireField(!state.terminateAfterPacket ||
+    (state.active() && !state.normalMode() && state.hasPendingQuadword() &&
+      tagID != 5 && tagID != 6 && (tagID == 0 || tagID == 7 || tagInterrupt)),
+    "SIF1 DMAC terminal continuation is invalid");
 }
 
 void NekoSaveStateCodec::commitSIF1DMAC(

@@ -95,6 +95,8 @@ class DMACChannelState
     std::uint32_t decodeAddress(
       std::uint32_t value,
       const char *registerName) const;
+    std::uint32_t advanceSourceAddress(
+      std::uint32_t address, std::uint32_t bytes) const;
     void updateAddressStackField();
 
     const char *name;

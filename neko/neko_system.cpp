@@ -195,7 +195,8 @@ NekoSystem::NekoSystem() :
     &eeCoreComponent.memorySystem),
   gsDisplayComponent(&gsComponent),
   iopDMAControllerComponent(iopInterruptControllerComponent),
-  sif1DMACComponent(dmacControllerComponent, sifComponent),
+  sif1DMACComponent(dmacControllerComponent, sifComponent,
+    eeBusComponent, eeCoreComponent.memorySystem),
   sifInterruptRouterComponent(
     interruptControllerComponent, iopInterruptControllerComponent)
 {
@@ -985,6 +986,7 @@ void NekoSystem::clockMasterCycle()
     beforeCycle = captureCycleObservation();
   }
   masterClock.clock();
+  dmacControllerComponent.clockSIF(sif1DMACComponent);
   latchComponentInterrupts();
   publishEEInterruptLines();
   advanceIOPTimers(iopClockPulse);

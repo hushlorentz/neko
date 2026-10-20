@@ -3,6 +3,9 @@
 
 #include <cstdint>
 
+class SIF1DMACChannel;
+enum class SIF1DMABeatOutcome : std::uint8_t;
+
 namespace DMACControl
 {
   constexpr std::uint32_t DMA_ENABLE = 1u;
@@ -41,6 +44,7 @@ class DMACController
     std::uint8_t interleaveSkipQWC() const;
     std::uint8_t interleaveTransferQWC() const;
     bool enabled() const;
+    SIF1DMABeatOutcome clockSIF(SIF1DMACChannel &sif1);
     void signalChannelCompletion(std::uint32_t channel);
     void signalBusError(std::uint32_t channel);
     bool interruptPending() const;
