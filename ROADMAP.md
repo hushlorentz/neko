@@ -1631,7 +1631,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement IOP header/payload admission and physical destination writes
       without cache snooping; include count/termination, atomic retry,
       persistence, and IOP-phase scheduling with local completion effects.
-- [ ] Cover endpoint completion through EE DMAC and IOP DMA/INTC; distinguish
+- [x] Cover endpoint completion through EE DMAC and IOP DMA/INTC; distinguish
       sender completion from receiver drain, independent acknowledgement,
       masks, and rearming.
 - [ ] Append bounded transfer/wait/completion observations; cover reset,
