@@ -22,6 +22,26 @@ namespace
     }
   }
 
+  NekoTraceEvent sifDMABeat(NekoSIFDMATrace::Endpoint endpoint,
+    NekoSIFDMATrace::Kind kind, std::uint32_t address,
+    std::uint32_t remaining, std::size_t queued)
+  {
+    return {0, NekoTraceSubsystem::SIF, NekoTraceEventType::DMABeat,
+      static_cast<std::uint64_t>(endpoint) |
+        (static_cast<std::uint64_t>(kind) << NekoSIFDMATrace::KIND_SHIFT),
+      address, remaining, queued};
+  }
+
+  void finishSIFDMABeat(NekoTraceEvent &event, NekoSIFDMATrace::Outcome outcome,
+    NekoSIFDMATrace::Failure failure, std::uint32_t remaining, std::size_t queued)
+  {
+    event.value0 |=
+      (static_cast<std::uint64_t>(outcome) << NekoSIFDMATrace::OUTCOME_SHIFT) |
+      (static_cast<std::uint64_t>(failure) << NekoSIFDMATrace::FAILURE_SHIFT);
+    event.value2 |= static_cast<std::uint64_t>(remaining) << 32;
+    event.value3 |= static_cast<std::uint64_t>(queued) << 32;
+  }
+
 }
 
 NekoEETraceMemory::AccessKind NekoSystem::traceMemoryAccessKind(
@@ -948,6 +968,95 @@ NekoSystem::captureCycleObservation() const
   };
 }
 
+void NekoSystem::clockSIF1Sender(
+  NekoObservationOrder &order, SIFDMAObservations &events)
+{
+  if (!collectingTrace || !sif1DMACComponent.transferEnabled())
+  {
+    dmacControllerComponent.clockSIF(sif1DMACComponent);
+    return;
+  }
+  namespace Trace = NekoSIFDMATrace;
+  Trace::Kind kind;
+  switch (sif1DMACComponent.nextBeatKind())
+  {
+    case SIF1DMABeatKind::SourceTag: kind = Trace::Kind::SourceTag; break;
+    case SIF1DMABeatKind::Payload: kind = Trace::Kind::Payload; break;
+    case SIF1DMABeatKind::Completion: kind = Trace::Kind::Completion; break;
+    default: throw std::logic_error("Unknown SIF1 DMA trace beat kind.");
+  }
+  auto &observation = events.entries[events.count++];
+  observation.sequence = order.next++;
+  observation.event = sifDMABeat(Trace::Endpoint::EE, kind,
+    kind == Trace::Kind::SourceTag ? sif1DMACComponent.tagAddress() :
+      sif1DMACComponent.memoryAddress(),
+    sif1DMACComponent.quadwordCount(), sifComponent.wordCount(SIFDirection::SIF1));
+  const auto result = dmacControllerComponent.clockSIF(sif1DMACComponent);
+  Trace::Outcome outcome;
+  switch (result)
+  {
+    case SIF1DMABeatOutcome::Completed:
+      outcome = sif1DMACComponent.active() ?
+        Trace::Outcome::Accepted : Trace::Outcome::Completed;
+      break;
+    case SIF1DMABeatOutcome::Wait: outcome = Trace::Outcome::Wait; break;
+    case SIF1DMABeatOutcome::BusError: outcome = Trace::Outcome::Rejected; break;
+    default: throw std::logic_error("Unknown SIF1 DMA trace outcome.");
+  }
+  finishSIFDMABeat(observation.event, outcome,
+    result == SIF1DMABeatOutcome::BusError ? Trace::Failure::SourceBus :
+      Trace::Failure::None,
+    sif1DMACComponent.quadwordCount(), sifComponent.wordCount(SIFDirection::SIF1));
+}
+
+IOPDMABeatResult NekoSystem::clockSIF1Receiver(
+  NekoObservationOrder &order, SIFDMAObservations &events)
+{
+  if (!collectingTrace || !iopSIF1DMAComponent.active() ||
+      !iopDMAControllerComponent.channelEnabled(IOPDMAChannel::SIF1))
+  {
+    return iopDMAControllerComponent.clockSIF(
+      iopSIF1DMAComponent, iopBusComponent, sifComponent);
+  }
+  namespace Trace = NekoSIFDMATrace;
+  const auto kind = iopSIF1DMAComponent.remainingWords() == 0 ?
+    Trace::Kind::Header : Trace::Kind::Payload;
+  auto &observation = events.entries[events.count++];
+  // Reserve before the grant can publish completion to the IOP INTC journal.
+  observation.sequence = order.next++;
+  observation.event = sifDMABeat(Trace::Endpoint::IOP, kind,
+    iopSIF1DMAComponent.memoryAddress(), iopSIF1DMAComponent.remainingWords(),
+    sifComponent.wordCount(SIFDirection::SIF1));
+  const auto result = iopDMAControllerComponent.clockSIF(
+    iopSIF1DMAComponent, iopBusComponent, sifComponent);
+  Trace::Outcome outcome;
+  switch (result.outcome)
+  {
+    case IOPDMABeatOutcome::Accepted: outcome = Trace::Outcome::Accepted; break;
+    case IOPDMABeatOutcome::Completed: outcome = Trace::Outcome::Completed; break;
+    case IOPDMABeatOutcome::Wait: outcome = Trace::Outcome::Wait; break;
+    case IOPDMABeatOutcome::Rejected: outcome = Trace::Outcome::Rejected; break;
+    default: throw std::logic_error("Unknown IOP DMA trace outcome.");
+  }
+  Trace::Failure failure;
+  switch (result.failure)
+  {
+    case IOPDMAFailure::None: failure = Trace::Failure::None; break;
+    case IOPDMAFailure::UnalignedHeader:
+      failure = Trace::Failure::UnalignedHeader; break;
+    case IOPDMAFailure::DestinationWrite:
+      failure = Trace::Failure::DestinationWrite; break;
+    default: throw std::logic_error("Unknown IOP DMA trace failure.");
+  }
+  if (result.outcome != IOPDMABeatOutcome::Wait)
+  {
+    observation.event.value1 = result.address;
+  }
+  finishSIFDMABeat(observation.event, outcome, failure,
+    iopSIF1DMAComponent.remainingWords(), sifComponent.wordCount(SIFDirection::SIF1));
+  return result;
+}
+
 void NekoSystem::clockMasterCycle()
 {
   // Disarm even when a device, CPU invariant, or trace allocation throws.
@@ -967,6 +1076,7 @@ void NekoSystem::clockMasterCycle()
     }
   } observationScope{iopCoreComponent, iopTimersComponent,
       iopInterruptControllerComponent, sifComponent};
+  SIFDMAObservations dmaObservations;
   if (collectingTrace)
   {
     iopCoreComponent.enableObservations(&observationScope.order);
@@ -986,16 +1096,20 @@ void NekoSystem::clockMasterCycle()
     beforeCycle = captureCycleObservation();
   }
   masterClock.clock();
-  dmacControllerComponent.clockSIF(sif1DMACComponent);
+  clockSIF1Sender(observationScope.order, dmaObservations);
   latchComponentInterrupts();
   publishEEInterruptLines();
   advanceIOPTimers(iopClockPulse);
   if (iopClockPulse)
   {
-    const auto transfer = iopDMAControllerComponent.clockSIF(
-      iopSIF1DMAComponent, iopBusComponent, sifComponent);
+    const auto transfer = clockSIF1Receiver(observationScope.order, dmaObservations);
     if (transfer.outcome == IOPDMABeatOutcome::Rejected)
     {
+      if (collectingTrace)
+      {
+        publishCycleTrace(masterClock.currentCycle(), beforeCycle, dmaObservations);
+      }
+      eeCoreComponent.cycleEventCount = 0;
       throw IOPDMATransferError(transfer);
     }
   }
@@ -1008,7 +1122,7 @@ void NekoSystem::clockMasterCycle()
   {
     publishCycleTrace(
       masterClock.currentCycle(),
-      beforeCycle);
+      beforeCycle, dmaObservations);
   }
   eeCoreComponent.cycleEventCount = 0;
 }
@@ -1106,7 +1220,8 @@ EEExecutionResult NekoSystem::makeEEExecutionResult(
 
 void NekoSystem::publishCycleTrace(
   std::uint64_t cycle,
-  const CycleObservationSnapshot &beforeCycle)
+  const CycleObservationSnapshot &beforeCycle,
+  const SIFDMAObservations &dma)
 {
   for (std::size_t index = 0;
        index < eeCoreComponent.cycleEventCount;
@@ -1417,7 +1532,7 @@ void NekoSystem::publishCycleTrace(
       interruptControllerComponent.status(),
       interruptControllerComponent.mask());
   }
-  publishIOPAndSIFTrace(cycle);
+  publishIOPAndSIFTrace(cycle, dma);
   if (gsDisplayComponent.presentationBoundaryCount() !=
       beforeCycle.presentationBoundary)
   {

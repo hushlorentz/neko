@@ -1634,7 +1634,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Cover endpoint completion through EE DMAC and IOP DMA/INTC; distinguish
       sender completion from receiver drain, independent acknowledgement,
       masks, and rearming.
-- [ ] Append bounded transfer/wait/completion observations; cover reset,
+- [x] Append bounded transfer/wait/completion observations; cover reset,
       save/load, and malformed partial state at each acceptance boundary.
 - [ ] Add authored EE-to-IOP guest conformance and regress existing DMA paths;
       complete independent review and sanitizer checks.

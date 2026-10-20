@@ -65,16 +65,19 @@ namespace
   }
 }
 
-void NekoSystem::publishIOPAndSIFTrace(std::uint64_t cycle)
+void NekoSystem::publishIOPAndSIFTrace(
+  std::uint64_t cycle, const SIFDMAObservations &dma)
 {
   std::size_t cpuIndex = 0;
   std::size_t timerIndex = 0;
   std::size_t interruptIndex = 0;
   std::size_t sifIndex = 0;
+  std::size_t dmaIndex = 0;
   while (cpuIndex < iopCoreComponent.stepEventCount ||
          timerIndex < iopTimersComponent.observationCount ||
          interruptIndex < iopInterruptControllerComponent.observationCount ||
-         sifIndex < sifComponent.observationCount)
+         sifIndex < sifComponent.observationCount ||
+         dmaIndex < dma.count)
   {
     constexpr auto absent = std::numeric_limits<std::size_t>::max();
     const auto cpuSequence = cpuIndex < iopCoreComponent.stepEventCount
@@ -87,7 +90,16 @@ void NekoSystem::publishIOPAndSIFTrace(std::uint64_t cycle)
         : absent;
     const auto sifSequence = sifIndex < sifComponent.observationCount
       ? sifComponent.observations[sifIndex].sequence : absent;
-    if (sifSequence < cpuSequence && sifSequence < timerSequence &&
+    const auto dmaSequence = dmaIndex < dma.count
+      ? dma.entries[dmaIndex].sequence : absent;
+    if (dmaSequence < cpuSequence && dmaSequence < timerSequence &&
+        dmaSequence < interruptSequence && dmaSequence < sifSequence)
+    {
+      const auto &event = dma.entries[dmaIndex++].event;
+      appendTrace(cycle, event.subsystem, event.type,
+        event.value0, event.value1, event.value2, event.value3);
+    }
+    else if (sifSequence < cpuSequence && sifSequence < timerSequence &&
         sifSequence < interruptSequence)
     {
       publishSIFTrace(cycle, sifComponent.observations[sifIndex++]);

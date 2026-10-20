@@ -16,6 +16,13 @@ enum class SIF1DMABeatOutcome : std::uint8_t
   BusError
 };
 
+enum class SIF1DMABeatKind : std::uint8_t
+{
+  SourceTag,
+  Payload,
+  Completion
+};
+
 class SIF1DMACChannel final
 {
   public:
@@ -26,6 +33,7 @@ class SIF1DMACChannel final
 
     bool active() const;
     bool transferEnabled() const;
+    SIF1DMABeatKind nextBeatKind() const;
     std::uint32_t channelControl() const;
     void writeChannelControl(std::uint32_t value);
     std::uint32_t memoryAddress() const;

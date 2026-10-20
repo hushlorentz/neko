@@ -1,6 +1,7 @@
 #ifndef NEKO_SYSTEM_HPP
 #define NEKO_SYSTEM_HPP
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -267,6 +268,21 @@ class NekoSystem
       std::uint64_t presentationBoundary;
     };
 
+    struct SIFDMAObservation
+    {
+      NekoTraceEvent event;
+      std::size_t sequence = 0;
+    };
+
+    struct SIFDMAObservations
+    {
+      std::array<SIFDMAObservation, 2> entries = {};
+      std::size_t count = 0;
+    };
+
+    void clockSIF1Sender(NekoObservationOrder &order, SIFDMAObservations &events);
+    IOPDMABeatResult clockSIF1Receiver(
+      NekoObservationOrder &order, SIFDMAObservations &events);
     void latchComponentInterrupts();
     void publishEEInterruptLines();
     void advanceIOPTimers(bool systemClockPulse);
@@ -279,8 +295,10 @@ class NekoSystem
       bool cycleLimitReached) const;
     void publishCycleTrace(
       std::uint64_t cycle,
-      const CycleObservationSnapshot &beforeCycle);
-    void publishIOPAndSIFTrace(std::uint64_t cycle);
+      const CycleObservationSnapshot &beforeCycle,
+      const SIFDMAObservations &dma);
+    void publishIOPAndSIFTrace(
+      std::uint64_t cycle, const SIFDMAObservations &dma);
     void publishSIFTrace(std::uint64_t cycle, const SIF::Observation &event);
     void publishIOPCPUTrace(std::uint64_t cycle, const IOPCore::StepEvent &event);
     void publishIOPTimerTrace(

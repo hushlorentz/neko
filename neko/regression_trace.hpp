@@ -46,7 +46,8 @@ enum class NekoTraceEventType : std::uint8_t
   InstructionRetired = 16,
   TimerEvent = 17,
   RegisterWrite = 18,
-  SignalRequested = 19
+  SignalRequested = 19,
+  DMABeat = 20
 };
 
 namespace NekoSIFTrace
@@ -60,6 +61,26 @@ namespace NekoSIFTrace
   enum class Signal : std::uint8_t { RequestIOP = 1, RequestEE = 2 };
   constexpr std::uint8_t SIDE_SHIFT = 8;
   constexpr std::uint8_t OUTCOME_SHIFT = 16;
+}
+
+namespace NekoSIFDMATrace
+{
+  enum class Endpoint : std::uint8_t { EE = 0, IOP = 1 };
+  enum class Kind : std::uint8_t
+  {
+    SourceTag = 0, Header = 1, Payload = 2, Completion = 3
+  };
+  enum class Outcome : std::uint8_t
+  {
+    Accepted = 0, Wait = 1, Completed = 2, Rejected = 3
+  };
+  enum class Failure : std::uint8_t
+  {
+    None = 0, SourceBus = 1, UnalignedHeader = 2, DestinationWrite = 3
+  };
+  constexpr std::uint8_t KIND_SHIFT = 8;
+  constexpr std::uint8_t OUTCOME_SHIFT = 16;
+  constexpr std::uint8_t FAILURE_SHIFT = 24;
 }
 
 namespace NekoIOPTraceInstruction
@@ -409,6 +430,17 @@ struct NekoTraceEvent
 //   Emitted for each request, even if destination INTC status already coalesced.
 // SIF records share mutation ordering with IOP CPU/device records. Collection
 //   observes scheduled writes only; inspection and register polling add no noise.
+// SIF/DMABeat: endpoint | kind << 8 | outcome << 16 | failure << 24,
+//   attempted address (including the EE SPR selector), remaining count
+//   (before in bits 31:0, after in bits 63:32), SIF1 queued-word count (same pair).
+//   Remaining count is EE QWC or IOP packet words. A source-tag grant does not
+//   enqueue its tag. Completion is endpoint-local, not peer drain.
+//   At most one EE and one IOP record per cycle, only for eligible grants;
+//   waits are per grant, not per host read or disabled/idle channel.
+//   A waiting header uses current IOP MADR until a complete header is available.
+//   Rejected IOP grants publish the executed cycle prefix before throwing,
+//   without admitting the IOP instruction. Records precede completion-produced
+//   IOP INTC changes and same-pulse IOP instruction/interrupt observations.
 
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(

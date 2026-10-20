@@ -1,5 +1,7 @@
 #include "sif1_dmac_channel.hpp"
 
+#include <stdexcept>
+
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
 #include "ee_memory_system.hpp"
@@ -78,18 +80,32 @@ void SIF1DMACChannel::writeTagAddress(std::uint32_t value)
   channelState.writeTagAddress(value);
 }
 
-SIF1DMABeatOutcome SIF1DMACChannel::transferBeat()
+SIF1DMABeatKind SIF1DMACChannel::nextBeatKind() const
 {
   if (channelState.hasPendingQuadword())
   {
-    return transferQuadword();
+    return SIF1DMABeatKind::Payload;
   }
   if (channelState.normalMode())
   {
-    completeTransfer();
-    return SIF1DMABeatOutcome::Completed;
+    return SIF1DMABeatKind::Completion;
   }
-  return readSourceChainTag();
+  return SIF1DMABeatKind::SourceTag;
+}
+
+SIF1DMABeatOutcome SIF1DMACChannel::transferBeat()
+{
+  switch (nextBeatKind())
+  {
+    case SIF1DMABeatKind::Payload:
+      return transferQuadword();
+    case SIF1DMABeatKind::SourceTag:
+      return readSourceChainTag();
+    case SIF1DMABeatKind::Completion:
+      completeTransfer();
+      return SIF1DMABeatOutcome::Completed;
+  }
+  throw std::logic_error("Unknown SIF1 DMA beat kind.");
 }
 
 SIF1DMABeatOutcome SIF1DMACChannel::readSourceQuadword(
