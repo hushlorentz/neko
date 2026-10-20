@@ -56,7 +56,9 @@ ScratchpadDMACChannel::ScratchpadDMACChannel(
 
 bool ScratchpadDMACChannel::clockActive() const
 {
-  return active() && dmacController->enabled();
+  return active() && dmacController->channelEnabled(
+    channelKind == ScratchpadDMACChannelKind::FromScratchpad ?
+      DMACStatus::CHANNEL_8 : DMACStatus::CHANNEL_9);
 }
 
 void ScratchpadDMACChannel::clock()

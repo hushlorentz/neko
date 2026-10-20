@@ -23,7 +23,7 @@ GIFDMACChannel::GIFDMACChannel(
 bool GIFDMACChannel::clockActive() const
 {
   return
-    dmacController->enabled() &&
+    dmacController->channelEnabled(DMACStatus::CHANNEL_2) &&
     channelState.active();
 }
 
@@ -138,6 +138,7 @@ void GIFDMACChannel::readSourceChainTag()
   const std::uint32_t currentTagAddress =
     channelState.tagAddress();
   const GIFQuadword tag = eeBus->readQuadword(currentTagAddress);
+  const auto priority = DMACController::decodeTagPriority(tag[0]);
   if (channelState.tagTransferEnabled() &&
       !eeBus->writeQuadword(EEMemoryMap::GIF_FIFO, tag))
   {
@@ -148,8 +149,9 @@ void GIFDMACChannel::readSourceChainTag()
   {
     ++transferredQuadwords;
   }
-  if (channelState.acceptSourceChainTag(tag[0], tag[1]) ==
-      DMACChannelTransition::Complete)
+  const auto transition = channelState.acceptSourceChainTag(tag[0], tag[1]);
+  dmacController->applyTagPriority(priority);
+  if (transition == DMACChannelTransition::Complete)
   {
     completeTransfer();
   }

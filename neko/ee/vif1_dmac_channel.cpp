@@ -24,7 +24,7 @@ VIF1DMACChannel::VIF1DMACChannel(
 bool VIF1DMACChannel::clockActive() const
 {
   return
-    dmacController->enabled() &&
+    dmacController->channelEnabled(DMACStatus::CHANNEL_1) &&
     channelState.active();
 }
 
@@ -162,6 +162,7 @@ void VIF1DMACChannel::readSourceChainTag()
   const std::uint32_t currentTagAddress =
     channelState.tagAddress();
   const GIFQuadword tag = eeBus->readQuadword(currentTagAddress);
+  const auto priority = DMACController::decodeTagPriority(tag[0]);
   if (channelState.tagTransferEnabled() &&
       !submitTag(currentTagAddress))
   {
@@ -172,8 +173,9 @@ void VIF1DMACChannel::readSourceChainTag()
   {
     ++transferredQuadwords;
   }
-  if (channelState.acceptSourceChainTag(tag[0], tag[1]) ==
-      DMACChannelTransition::Complete)
+  const auto transition = channelState.acceptSourceChainTag(tag[0], tag[1]);
+  dmacController->applyTagPriority(priority);
+  if (transition == DMACChannelTransition::Complete)
   {
     completeTransfer();
   }

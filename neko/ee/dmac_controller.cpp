@@ -58,6 +58,43 @@ void DMACController::writeStatus(std::uint32_t value)
   statusMaskRegister ^= value & MASKS;
 }
 
+std::uint32_t DMACController::priorityControl() const
+{
+  return priorityControlRegister;
+}
+
+void DMACController::writePriorityControl(std::uint32_t value)
+{
+  priorityControlRegister = value & DMACPriority::WRITABLE_MASK;
+}
+
+DMACTagPriority DMACController::decodeTagPriority(std::uint32_t tag)
+{
+  switch ((tag >> 26) & 3)
+  {
+    case 0: return DMACTagPriority::Unchanged;
+    case 2: return DMACTagPriority::Disable;
+    case 3: return DMACTagPriority::Enable;
+    default: throw std::invalid_argument("DMAC tag PCE=01 is reserved.");
+  }
+}
+
+void DMACController::applyTagPriority(DMACTagPriority priority)
+{
+  switch (priority)
+  {
+    case DMACTagPriority::Unchanged:
+      return;
+    case DMACTagPriority::Disable:
+      priorityControlRegister &= ~DMACPriority::ENABLE;
+      return;
+    case DMACTagPriority::Enable:
+      priorityControlRegister |= DMACPriority::ENABLE;
+      return;
+  }
+  throw std::invalid_argument("Invalid DMAC tag priority control.");
+}
+
 std::uint32_t DMACController::interleaveSize() const
 {
   return interleaveSizeRegister;
@@ -92,13 +129,24 @@ bool DMACController::enabled() const
     (controlRegister & DMACControl::DMA_ENABLE) != 0;
 }
 
+bool DMACController::channelEnabled(std::uint32_t channel) const
+{
+  if (!validChannel(channel))
+  {
+    throw std::invalid_argument("Invalid DMAC priority channel.");
+  }
+  return enabled() &&
+    ((priorityControlRegister & DMACPriority::ENABLE) == 0 ||
+     (priorityControlRegister & (channel << 16)) != 0);
+}
+
 SIF1DMABeatOutcome DMACController::clockSIF(SIF1DMACChannel &sif1)
 {
   if (&sif1.dmacController != this)
   {
     throw std::invalid_argument("SIF grant requires this channel's DMAC controller.");
   }
-  if (!enabled() || !sif1.active())
+  if (!sif1.transferEnabled())
   {
     return SIF1DMABeatOutcome::Wait;
   }
@@ -111,7 +159,7 @@ SIF0DMABeatOutcome DMACController::clockSIF(SIF0DMACChannel &sif0)
   {
     throw std::invalid_argument("SIF grant requires this channel's DMAC controller.");
   }
-  if (!enabled() || !sif0.active())
+  if (!sif0.transferEnabled())
   {
     return SIF0DMABeatOutcome::Wait;
   }

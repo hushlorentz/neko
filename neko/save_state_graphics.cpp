@@ -1209,6 +1209,9 @@ void NekoSaveStateCodec::writeDMAC(
   writer->writeFieldU32(
     "controllerStatusMaskRegister",
     controller.statusMaskRegister);
+  writer->writeFieldU32(
+    "controllerPriorityControlRegister",
+    controller.priorityControlRegister);
   writer->writeFieldBool(
     "terminateAfterPacket",
     state.terminateAfterPacket);
@@ -1257,6 +1260,11 @@ void NekoSaveStateCodec::readDMAC(
     reader->readFieldU32("controllerStatusRegister");
   controller->statusMaskRegister =
     reader->readFieldU32("controllerStatusMaskRegister");
+  controller->priorityControlRegister =
+    reader->readFieldU32("controllerPriorityControlRegister");
+  reader->requireField(
+    (controller->priorityControlRegister & ~DMACPriority::WRITABLE_MASK) == 0,
+    "DMAC priority control is invalid");
   state.terminateAfterPacket =
     reader->readFieldBool("terminateAfterPacket");
   channel->path3Stalled =

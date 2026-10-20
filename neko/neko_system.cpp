@@ -434,6 +434,9 @@ std::uint64_t NekoSystem::eeStateHash() const
     dmacControllerComponent.controlRegister);
   hashStateValue(
     &hash,
+    dmacControllerComponent.priorityControlRegister);
+  hashStateValue(
+    &hash,
     dmacControllerComponent.statusRegister &
       (DMACStatus::CHANNEL_6 |
        DMACStatus::CHANNEL_8 |

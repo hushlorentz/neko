@@ -605,10 +605,13 @@ TEST_CASE("EE SIF1 TIE terminates after its packet but not at tag acceptance",
     writeSource(system, 0x1020, {{0x70000000, 0, 0, 0}});
     system.sif1DMAC().writeTagAddress(0x1000);
     system.sif1DMAC().writeChannelControl(START | tie);
+    system.dmacController().writePriorityControl(1u << 22);
     system.dmacController().writeControl(1);
     system.runMasterCycles(1);
     REQUIRE(system.sif1DMAC().active());
     REQUIRE(system.dmacController().status() == 0);
+    REQUIRE(system.dmacController().priorityControl() ==
+      (DMACPriority::ENABLE | (1u << 22)));
     system.runMasterCycles(1);
     requireStream(system, {1, 2, 3, 4});
     REQUIRE(system.sif1DMAC().active() == (tie == 0));

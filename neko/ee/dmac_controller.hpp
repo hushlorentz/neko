@@ -36,6 +36,22 @@ namespace DMACInterleave
   constexpr std::uint32_t TRANSFER_MASK = 0xffu << 16;
 }
 
+namespace DMACPriority
+{
+  constexpr std::uint32_t COP_CONTROL_MASK = 0x3ff;
+  constexpr std::uint32_t CHANNEL_ENABLE_MASK = 0x3ffu << 16;
+  constexpr std::uint32_t ENABLE = UINT32_C(0x80000000);
+  constexpr std::uint32_t WRITABLE_MASK =
+    COP_CONTROL_MASK | CHANNEL_ENABLE_MASK | ENABLE;
+}
+
+enum class DMACTagPriority : std::uint8_t
+{
+  Unchanged,
+  Disable,
+  Enable
+};
+
 class DMACController
 {
   public:
@@ -43,11 +59,16 @@ class DMACController
     void writeControl(std::uint32_t value);
     std::uint32_t status() const;
     void writeStatus(std::uint32_t value);
+    std::uint32_t priorityControl() const;
+    void writePriorityControl(std::uint32_t value);
+    static DMACTagPriority decodeTagPriority(std::uint32_t tag);
+    void applyTagPriority(DMACTagPriority priority);
     std::uint32_t interleaveSize() const;
     void writeInterleaveSize(std::uint32_t value);
     std::uint8_t interleaveSkipQWC() const;
     std::uint8_t interleaveTransferQWC() const;
     bool enabled() const;
+    bool channelEnabled(std::uint32_t channel) const;
     SIF1DMABeatOutcome clockSIF(SIF1DMACChannel &sif1);
     // One explicitly requested normal receiver grant; no peer stepping.
     SIF0DMABeatOutcome clockSIF(SIF0DMACChannel &sif0);
@@ -62,6 +83,7 @@ class DMACController
     std::uint32_t controlRegister = 0;
     std::uint32_t statusRegister = 0;
     std::uint32_t statusMaskRegister = 0;
+    std::uint32_t priorityControlRegister = 0;
     std::uint32_t interleaveSizeRegister = 0;
 };
 

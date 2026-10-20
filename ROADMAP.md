@@ -1648,8 +1648,15 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement IOP source admission, transmitted EE tags, word/qword packing,
       and normal-mode EE physical destinations, including resolved scratchpad
       addressing, through checked single-channel grants.
+- [x] Add common EE DMAC priority eligibility through `D_PCR` and accepted-tag
+      PCE controls across implemented channels, including atomic retry,
+      reset, hashing, and transactional persistence.
+- [ ] Add common `D_STADR`, `D_CTRL.STS/STD`, and `D_STAT.SIS` stall control
+      across implemented producers and drains, including normal transfers,
+      source-chain REFS packets, slice admission, and resumable persistence.
 - [ ] Implement destination tags, zero/partial packets, termination, and
-      backpressure/retry with explicit policy for unresolved residual data.
+      backpressure/retry using common priority/stall control, including CNTS
+      publication and explicit policy for unresolved residual data.
 - [ ] Route endpoint-local completion, masks, acknowledgements, and receiver
       rearming independently of SIF1 and SBUS signals; integrate both SIF0
       endpoints into the existing common-controller scheduling boundaries.

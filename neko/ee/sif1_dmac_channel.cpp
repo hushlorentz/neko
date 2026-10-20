@@ -25,7 +25,7 @@ bool SIF1DMACChannel::active() const
 
 bool SIF1DMACChannel::transferEnabled() const
 {
-  return active() && dmacController.enabled();
+  return active() && dmacController.channelEnabled(DMACStatus::CHANNEL_6);
 }
 
 std::uint32_t SIF1DMACChannel::channelControl() const
@@ -170,8 +170,12 @@ SIF1DMABeatOutcome SIF1DMACChannel::readSourceChainTag()
     }
     return result;
   }
-  if (channelState.acceptSourceChainTag(static_cast<std::uint32_t>(tag.low),
-        static_cast<std::uint32_t>(tag.low >> 32)) == DMACChannelTransition::Complete)
+  const auto low = static_cast<std::uint32_t>(tag.low);
+  const auto priority = DMACController::decodeTagPriority(low);
+  const auto transition = channelState.acceptSourceChainTag(low,
+    static_cast<std::uint32_t>(tag.low >> 32));
+  dmacController.applyTagPriority(priority);
+  if (transition == DMACChannelTransition::Complete)
   {
     completeTransfer();
   }

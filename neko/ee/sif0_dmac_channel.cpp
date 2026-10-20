@@ -26,7 +26,7 @@ bool SIF0DMACChannel::active() const
 
 bool SIF0DMACChannel::transferEnabled() const
 {
-  return active() && dmacController.enabled();
+  return active() && dmacController.channelEnabled(DMACStatus::CHANNEL_5);
 }
 
 std::uint32_t SIF0DMACChannel::channelControl() const

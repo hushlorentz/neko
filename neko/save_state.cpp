@@ -899,6 +899,8 @@ void NekoSaveStateCodec::commitSystem(
     source->dmacControllerComponent.statusRegister;
   destination->dmacControllerComponent.statusMaskRegister =
     source->dmacControllerComponent.statusMaskRegister;
+  destination->dmacControllerComponent.priorityControlRegister =
+    source->dmacControllerComponent.priorityControlRegister;
   destination->dmacControllerComponent.interleaveSizeRegister =
     source->dmacControllerComponent.interleaveSizeRegister;
 
