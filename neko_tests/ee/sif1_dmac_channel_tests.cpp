@@ -27,7 +27,7 @@ namespace
   DMACChannelState sifState()
   {
     return DMACChannelState("SIF1", DMACChannelDirectionPolicy::Unrestricted,
-      DMACSourceChainProfile::SIF1);
+      DMACChannelProfile::SIF1);
   }
 
   void writeSource(NekoSystem &system, std::uint32_t address,
@@ -224,7 +224,7 @@ TEST_CASE("EE SIF1 uses shared source transitions without acquiring address stac
   REQUIRE_THROWS_AS(state.addressStack(0), std::out_of_range);
   REQUIRE_THROWS_AS(
     DMACChannelState("bad", DMACChannelDirectionPolicy::Unrestricted,
-      static_cast<DMACSourceChainProfile>(2)), std::invalid_argument);
+      static_cast<DMACChannelProfile>(3)), std::invalid_argument);
 }
 
 TEST_CASE("EE SIF1 source transitions retain tag fields and honor zero counts and TIE",
@@ -296,7 +296,7 @@ TEST_CASE("EE SIF1 exact MMIO mapping excludes nonexistent registers and wider s
   REQUIRE(system.sif1DMAC().memoryAddress() == 0);
   REQUIRE(system.sif1DMAC().quadwordCount() == 0);
   REQUIRE(system.sif1DMAC().tagAddress() == 0);
-  for (const auto address : {0x1000c440u, 0x1000c450u, 0x1000c480u, 0x1000c000u})
+  for (const auto address : {0x1000c440u, 0x1000c450u, 0x1000c480u, 0x1000c030u})
   {
     REQUIRE_FALSE(bus.readData32(address, &word));
     REQUIRE_FALSE(bus.writeData32(address, 0xffffffff));

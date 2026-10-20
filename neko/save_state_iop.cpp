@@ -41,6 +41,7 @@ void NekoSaveStateCodec::writeIOPState(
       bus.timers != &system.iopTimersComponent ||
       bus.dmaController != &system.iopDMAControllerComponent ||
       bus.sif1DMA != &system.iopSIF1DMAComponent ||
+      bus.sif0DMA != &system.iopSIF0DMAComponent ||
       &system.iopDMAControllerComponent.interrupts !=
         &system.iopInterruptControllerComponent)
   {
@@ -204,11 +205,19 @@ void NekoSaveStateCodec::writeIOPState(
   {
     auto scope = writer->scope("sif1DMA");
     const auto &channel = system.iopSIF1DMAComponent;
-    writer->writeFieldU32("memoryAddress", channel.memoryAddressRegister);
-    writer->writeFieldU32("blockControl", channel.blockControlRegister);
-    writer->writeFieldU32("channelControl", channel.channelControlRegister);
+    writer->writeFieldU32("memoryAddress", channel.registers.memoryAddressRegister);
+    writer->writeFieldU32("blockControl", channel.registers.blockControlRegister);
+    writer->writeFieldU32("channelControl", channel.registers.channelControlRegister);
     writer->writeFieldU32("remainingWords", channel.packetWordsRemaining);
     writer->writeFieldBool("terminal", channel.packetTerminal);
+  }
+  {
+    auto scope = writer->scope("sif0DMA");
+    const auto &channel = system.iopSIF0DMAComponent;
+    writer->writeFieldU32("memoryAddress", channel.registers.memoryAddressRegister);
+    writer->writeFieldU32("blockControl", channel.registers.blockControlRegister);
+    writer->writeFieldU32("channelControl", channel.registers.channelControlRegister);
+    writer->writeFieldU32("tagAddress", channel.tagAddressRegister);
   }
 }
 
@@ -278,7 +287,8 @@ void NekoSaveStateCodec::readIOP(
         "IOP DMA interrupt control contains non-control bits");
       state.flags = reader->readFieldU8("flags");
       const auto implemented = index == 1
-        ? 1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF1) : 0;
+        ? (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF0)) |
+          (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF1)) : 0;
       reader->requireField(
         (state.flags & ~implemented) == 0,
         "IOP DMA completion flags contain unimplemented channels");
@@ -287,19 +297,35 @@ void NekoSaveStateCodec::readIOP(
   {
     auto scope = reader->scope("sif1DMA");
     auto &channel = system->iopSIF1DMAComponent;
-    channel.memoryAddressRegister = reader->readFieldU32("memoryAddress");
+    channel.registers.memoryAddressRegister = reader->readFieldU32("memoryAddress");
     reader->requireField(
-      IOPSIF1DMAChannel::validMemoryAddress(channel.memoryAddressRegister),
+      IOPSIF1DMAChannel::validMemoryAddress(channel.registers.memoryAddressRegister),
       "IOP SIF1 DMA address is unaligned or exceeds 24 bits");
-    channel.blockControlRegister = reader->readFieldU32("blockControl");
-    channel.channelControlRegister = reader->readFieldU32("channelControl");
+    channel.registers.blockControlRegister = reader->readFieldU32("blockControl");
+    channel.registers.channelControlRegister = reader->readFieldU32("channelControl");
     reader->requireField(
-      IOPSIF1DMAChannel::validChannelControl(channel.channelControlRegister),
+      IOPSIF1DMAChannel::validChannelControl(channel.registers.channelControlRegister),
       "IOP SIF1 DMA channel control is outside the supported profile");
     channel.packetWordsRemaining = reader->readFieldU32("remainingWords");
     channel.packetTerminal = reader->readFieldBool("terminal");
     reader->requireField(channel.validContinuation(),
       "IOP SIF1 DMA packet continuation is incompatible with channel state");
+  }
+  {
+    auto scope = reader->scope("sif0DMA");
+    auto &channel = system->iopSIF0DMAComponent;
+    channel.registers.memoryAddressRegister = reader->readFieldU32("memoryAddress");
+    reader->requireField(
+      IOPDMAChannelState::validMemoryAddress(channel.registers.memoryAddressRegister),
+      "IOP SIF0 DMA address is unaligned or exceeds 24 bits");
+    channel.registers.blockControlRegister = reader->readFieldU32("blockControl");
+    channel.registers.channelControlRegister = reader->readFieldU32("channelControl");
+    reader->requireField(IOPDMAChannelState::validChannelControl(
+      channel.registers.channelControlRegister, IOPDMAChannelProfile::SIF0Source),
+      "IOP SIF0 DMA channel control is outside the supported profile");
+    channel.tagAddressRegister = reader->readFieldU32("tagAddress");
+    reader->requireField(IOPDMAChannelState::validMemoryAddress(channel.tagAddressRegister),
+      "IOP SIF0 DMA tag address is unaligned or exceeds 24 bits");
   }
 }
 
@@ -552,6 +578,8 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional IOP timer commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF1DMAChannel>::value,
     "Transactional IOP SIF1 DMA commit must not throw.");
+  static_assert(std::is_nothrow_copy_assignable<IOPSIF0DMAChannel>::value,
+    "Transactional IOP SIF0 DMA commit must not throw.");
   destination->iopBusComponent.ram.swap(source->iopBusComponent.ram);
   destination->iopBusComponent.scratchpad = source->iopBusComponent.scratchpad;
   const bool observationsEnabled = destination->iopCoreComponent.observationsEnabled;
@@ -567,6 +595,7 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.dmaController =
     &destination->iopDMAControllerComponent;
   destination->iopBusComponent.sif1DMA = &destination->iopSIF1DMAComponent;
+  destination->iopBusComponent.sif0DMA = &destination->iopSIF0DMAComponent;
   const bool interruptObservationsEnabled =
     destination->iopInterruptControllerComponent.observationsEnabled;
   const bool timerObservationsEnabled =
@@ -589,4 +618,5 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopDMAControllerComponent.banks =
     source->iopDMAControllerComponent.banks;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;
+  destination->iopSIF0DMAComponent = source->iopSIF0DMAComponent;
 }

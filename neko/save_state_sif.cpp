@@ -192,3 +192,64 @@ void NekoSaveStateCodec::commitSIF1DMAC(
   state.tagAddressRegister = sourceState.tagAddressRegister;
   state.terminateAfterPacket = sourceState.terminateAfterPacket;
 }
+
+std::uint64_t SIF0DMACChannel::stateHash() const
+{
+  return NekoSaveStateCodec::hashSIF0DMAC(*this);
+}
+
+std::uint64_t NekoSaveStateCodec::hashSIF0DMAC(const SIF0DMACChannel &channel)
+{
+  SaveStateHashWriter writer;
+  writeSIF0DMACState(&writer, channel);
+  return writer.value();
+}
+
+template<typename Writer>
+void NekoSaveStateCodec::writeSIF0DMACState(
+  Writer *writer, const SIF0DMACChannel &channel)
+{
+  const auto &state = channel.channelState;
+  writer->writeFieldU32("channelControlRegister", state.channelControlRegister);
+  writer->writeFieldU32("memoryAddressRegister", state.memoryAddressRegister);
+  writer->writeFieldU32("quadwordCountRegister", state.quadwordCountRegister);
+}
+
+void NekoSaveStateCodec::writeSIF0DMAC(
+  SaveStateWriter *writer, const NekoSystem &system)
+{
+  const auto &channel = system.sif0DMACComponent;
+  if (system.eeBusComponent.sif0DMACChannel != &channel ||
+      &channel.dmacController != &system.dmacControllerComponent ||
+      &channel.sifComponent != &system.sifComponent)
+  {
+    throw std::logic_error("Cannot persist SIF0 DMA with foreign machine wiring.");
+  }
+  writeSIF0DMACState(writer, channel);
+}
+
+void NekoSaveStateCodec::readSIF0DMAC(
+  SaveStateReader *reader, SIF0DMACChannel *channel)
+{
+  auto &state = channel->channelState;
+  state.channelControlRegister = reader->readFieldU32("channelControlRegister");
+  reader->requireField(
+    DMACChannelControl::validSIF0Control(state.channelControlRegister),
+    "SIF0 DMAC channel control is invalid");
+  state.memoryAddressRegister = reader->readFieldU32("memoryAddressRegister");
+  reader->requireField((state.memoryAddressRegister & 0xf) == 0,
+    "SIF0 DMAC memory address is unaligned");
+  state.quadwordCountRegister = reader->readFieldU32("quadwordCountRegister");
+  reader->requireField(state.quadwordCountRegister <= 0xffff,
+    "SIF0 DMAC qword count is invalid");
+}
+
+void NekoSaveStateCodec::commitSIF0DMAC(
+  SIF0DMACChannel *destination, const SIF0DMACChannel &source) noexcept
+{
+  auto &state = destination->channelState;
+  const auto &sourceState = source.channelState;
+  state.channelControlRegister = sourceState.channelControlRegister;
+  state.memoryAddressRegister = sourceState.memoryAddressRegister;
+  state.quadwordCountRegister = sourceState.quadwordCountRegister;
+}

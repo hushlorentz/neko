@@ -1304,6 +1304,7 @@ void NekoSaveStateCodec::readDMAC(
     (controller->statusRegister &
      ~(DMACStatus::CHANNEL_1 |
        DMACStatus::CHANNEL_2 |
+       DMACStatus::CHANNEL_5 |
        DMACStatus::CHANNEL_6 |
        DMACStatus::CHANNEL_8 |
        DMACStatus::CHANNEL_9 |
@@ -1311,6 +1312,7 @@ void NekoSaveStateCodec::readDMAC(
     (controller->statusMaskRegister &
      ~(DMACStatus::CHANNEL_1_MASK |
        DMACStatus::CHANNEL_2_MASK |
+       DMACStatus::CHANNEL_5_MASK |
        DMACStatus::CHANNEL_6_MASK |
        DMACStatus::CHANNEL_8_MASK |
        DMACStatus::CHANNEL_9_MASK)) == 0,

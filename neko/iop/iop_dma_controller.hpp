@@ -20,6 +20,7 @@ enum class IOPDMABank : std::uint8_t
 
 enum class IOPDMAChannel : std::uint8_t
 {
+  SIF0 = 9,
   SIF1 = 10
 };
 

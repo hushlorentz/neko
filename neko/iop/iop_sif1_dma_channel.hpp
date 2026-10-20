@@ -2,14 +2,7 @@
 #define IOP_SIF1_DMA_CHANNEL_HPP
 
 #include "iop_dma_controller.hpp"
-
-enum class IOPDMAWriteOutcome : std::uint8_t
-{
-  Completed,
-  UnsupportedControl,
-  ActiveTransfer,
-  UnalignedAddress
-};
+#include "iop_dma_channel_state.hpp"
 
 class IOPSIF1DMAChannel final
 {
@@ -42,9 +35,7 @@ class IOPSIF1DMAChannel final
     IOPDMABeatResult transferBeat(IOPBus &bus, SIF &sif);
     void clearContinuation();
 
-    IOPWord memoryAddressRegister = 0;
-    IOPWord blockControlRegister = 0;
-    IOPWord channelControlRegister = 0;
+    IOPDMAChannelState registers;
     IOPWord packetWordsRemaining = 0;
     bool packetTerminal = false;
 };

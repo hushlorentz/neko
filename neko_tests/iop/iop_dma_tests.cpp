@@ -32,7 +32,7 @@ namespace
   }
 }
 
-TEST_CASE("IOP DMA common controls retain words and decode only channel 10",
+TEST_CASE("IOP DMA common controls retain words and decode implemented channels",
   "[iop][dma]")
 {
   IOPInterruptController interrupts;
@@ -61,7 +61,7 @@ TEST_CASE("IOP DMA common controls retain words and decode only channel 10",
   REQUIRE(interrupts.status() == 0);
   REQUIRE_THROWS_AS(dma.priority(static_cast<IOPDMABank>(2)), std::out_of_range);
   REQUIRE_THROWS_AS(
-    dma.signalChannelCompletion(static_cast<IOPDMAChannel>(9)), std::out_of_range);
+    dma.signalChannelCompletion(static_cast<IOPDMAChannel>(8)), std::out_of_range);
   REQUIRE(interrupts.status() == 0);
 }
 
@@ -217,7 +217,7 @@ TEST_CASE("IOP DMA MMIO admits exact words and rejects unsupported boundaries at
   }
   const auto before = system.saveState();
   for (const IOPAddress address : {
-    0x1f8010f8u, 0x1f801520u, 0x1f801524u, 0x1f801528u, 0x1f80152cu,
+    0x1f8010f8u, 0x1f80151cu,
     0x1f80153cu, 0x1f801560u, 0x1f801578u, 0x1f80157cu, 0x1f801580u})
   {
     REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
@@ -355,7 +355,7 @@ TEST_CASE("IOP DMA malformed persistence rejects before destination mutation",
   for (const auto field : {
     InvalidField{"system.iop.dmaController.banks[0].control", 0x01000000},
     InvalidField{"system.iop.dmaController.banks[0].flags", 1},
-    InvalidField{"system.iop.dmaController.banks[1].flags", 4},
+    InvalidField{"system.iop.dmaController.banks[1].flags", 2},
     InvalidField{"system.iop.sif1DMA.memoryAddress", 0x01000000},
     InvalidField{"system.iop.sif1DMA.memoryAddress", 1},
     InvalidField{"system.iop.sif1DMA.channelControl", 0x01000000},

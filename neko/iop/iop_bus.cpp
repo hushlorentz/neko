@@ -2,6 +2,7 @@
 #include "iop_interrupt_controller.hpp"
 #include "iop_dma_controller.hpp"
 #include "iop_sif1_dma_channel.hpp"
+#include "iop_sif0_dma_channel.hpp"
 #include "iop_timers.hpp"
 #include "sif.hpp"
 
@@ -20,6 +21,7 @@ namespace
     0x1f8010f0, 0x1f801570
   }};
   constexpr IOPAddress sif1DMABase = 0x1f801530;
+  constexpr IOPAddress sif0DMABase = 0x1f801520;
 
   bool isAligned(IOPAddress address, std::size_t width)
   {
@@ -60,7 +62,8 @@ void IOPBus::attachTimers(IOPTimers *attachedTimers)
   timers = attachedTimers;
 }
 
-void IOPBus::attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1)
+void IOPBus::attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1,
+  IOPSIF0DMAChannel *sif0)
 {
   if (controller == nullptr || sif1 == nullptr)
   {
@@ -72,6 +75,7 @@ void IOPBus::attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1)
   }
   dmaController = controller;
   sif1DMA = sif1;
+  sif0DMA = sif0;
 }
 
 bool IOPBus::interruptControllerPending() const
@@ -190,6 +194,12 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         static_cast<std::size_t>(first - dmaBankBases[index]),
         Device::DMAController, index};
     }
+  }
+  if (first >= sif0DMABase &&
+      last < static_cast<std::uint64_t>(sif0DMABase) + 16)
+  {
+    return {IOPBusRegion::Mmio,
+      static_cast<std::size_t>(first - sif0DMABase), Device::SIF0DMA};
   }
   if (first >= sif1DMABase &&
       last < static_cast<std::uint64_t>(sif1DMABase) + 12)
@@ -380,6 +390,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? readInterruptRegister(location.offset) : IOPBusReadResult{};
     case Device::DMAController:
     case Device::SIF1DMA:
+    case Device::SIF0DMA:
       return width == sizeof(IOPWord) ? readDMARegister(location)
         : IOPBusReadResult{};
     case Device::Timer:
@@ -405,6 +416,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         ? writeInterruptRegister(location.offset, value) : IOPBusWriteResult{};
     case Device::DMAController:
     case Device::SIF1DMA:
+    case Device::SIF0DMA:
       return width == sizeof(IOPWord) ? writeDMARegister(location, value)
         : IOPBusWriteResult{};
     case Device::Timer:
@@ -420,6 +432,20 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 
 IOPBusReadResult IOPBus::readDMARegister(const Location &location)
 {
+  if (location.device == Device::SIF0DMA && sif0DMA != nullptr)
+  {
+    switch (location.offset)
+    {
+      case 0:
+        return {IOPBusStatus::Completed, sif0DMA->memoryAddress()};
+      case 4:
+        return {IOPBusStatus::Completed, sif0DMA->blockControl()};
+      case 8:
+        return {IOPBusStatus::Completed, sif0DMA->channelControl()};
+      case 12:
+        return {IOPBusStatus::Completed, sif0DMA->tagAddress()};
+    }
+  }
   if (location.device == Device::DMAController && dmaController != nullptr)
   {
     const auto bank = static_cast<IOPDMABank>(location.deviceIndex);
@@ -449,6 +475,29 @@ IOPBusReadResult IOPBus::readDMARegister(const Location &location)
 IOPBusWriteResult IOPBus::writeDMARegister(
   const Location &location, IOPWord value)
 {
+  if (location.device == Device::SIF0DMA && sif0DMA != nullptr)
+  {
+    IOPDMAWriteOutcome result;
+    switch (location.offset)
+    {
+      case 0:
+        result = sif0DMA->writeMemoryAddress(value);
+        break;
+      case 4:
+        result = sif0DMA->writeBlockControl(value);
+        break;
+      case 8:
+        result = sif0DMA->writeChannelControl(value);
+        break;
+      case 12:
+        result = sif0DMA->writeTagAddress(value);
+        break;
+      default:
+        return {};
+    }
+    return result == IOPDMAWriteOutcome::Completed ?
+      IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+  }
   if (location.device == Device::DMAController && dmaController != nullptr)
   {
     const auto bank = static_cast<IOPDMABank>(location.deviceIndex);

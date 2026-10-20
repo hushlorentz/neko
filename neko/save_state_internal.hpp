@@ -16,7 +16,7 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 38;
+constexpr std::uint32_t SAVE_STATE_VERSION = 39;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
@@ -1043,6 +1043,7 @@ class NekoSaveStateCodec
     static std::uint64_t hashIOP(const NekoSystem &system);
     static std::uint64_t hashSIF(const NekoSystem &system);
     static std::uint64_t hashSIF1DMAC(const SIF1DMACChannel &channel);
+    static std::uint64_t hashSIF0DMAC(const SIF0DMACChannel &channel);
     static void inspect(
       const std::vector<std::uint8_t> &state, SaveStateObserver *observer);
 
@@ -1086,6 +1087,12 @@ class NekoSaveStateCodec
     static void readSIF1DMAC(SaveStateReader *reader, SIF1DMACChannel *channel);
     static void commitSIF1DMAC(
       SIF1DMACChannel *destination, const SIF1DMACChannel &source) noexcept;
+    template<typename Writer>
+    static void writeSIF0DMACState(Writer *writer, const SIF0DMACChannel &channel);
+    static void writeSIF0DMAC(SaveStateWriter *writer, const NekoSystem &system);
+    static void readSIF0DMAC(SaveStateReader *reader, SIF0DMACChannel *channel);
+    static void commitSIF0DMAC(
+      SIF0DMACChannel *destination, const SIF0DMACChannel &source) noexcept;
     using PipelineLists =
       std::array<std::list<Pipeline *>, 3>;
     using PipelineListIndices =

@@ -14,7 +14,7 @@ SIF1DMACChannel::SIF1DMACChannel(DMACController &controller, SIF &sif,
   eeBus(bus),
   eeMemorySystem(memory),
   channelState("SIF1", DMACChannelDirectionPolicy::Unrestricted,
-    DMACSourceChainProfile::SIF1)
+    DMACChannelProfile::SIF1)
 {
 }
 

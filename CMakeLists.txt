@@ -58,6 +58,7 @@ endif()
 add_library(neko_core
     neko/clock/clock_scheduler.cpp
     neko/ee/dmac_channel_state.cpp
+    neko/ee/sif0_dmac_channel.cpp
     neko/ee/sif1_dmac_channel.cpp
     neko/ee/dmac_controller.cpp
     neko/ee/ee_bus.cpp
@@ -99,6 +100,8 @@ add_library(neko_core
     neko/iop/iop_cache.cpp
     neko/iop/iop_core.cpp
     neko/iop/iop_dma_controller.cpp
+    neko/iop/iop_dma_channel_state.cpp
+    neko/iop/iop_sif0_dma_channel.cpp
     neko/iop/iop_instruction.cpp
     neko/iop/iop_interrupt_controller.cpp
     neko/iop/iop_program_runner.cpp
@@ -270,6 +273,7 @@ add_executable(neko_tests
     neko_tests/sif_interrupt_tests.cpp
     neko_tests/sif_system_tests.cpp
     neko_tests/sif_conformance_tests.cpp
+    neko_tests/sif0_foundation_tests.cpp
     neko_tests/neko_system_tests.cpp
     neko_tests/save_state_internal_tests.cpp
     neko_tests/save_state_mutation.cpp

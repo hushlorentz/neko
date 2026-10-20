@@ -42,6 +42,8 @@ std::uint8_t IOPDMAController::channelSlot(IOPDMAChannel channel)
 {
   switch (channel)
   {
+    case IOPDMAChannel::SIF0:
+      return 2;
     case IOPDMAChannel::SIF1:
       return 3;
   }

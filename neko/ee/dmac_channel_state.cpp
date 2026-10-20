@@ -21,29 +21,35 @@ namespace
 
 bool DMACChannelControl::validSIF1Control(std::uint32_t value)
 {
+  return validSIF0Control(value) &&
+    ((value & START) == 0 || (value & TAG_TRANSFER_ENABLE) == 0);
+}
+
+bool DMACChannelControl::validSIF0Control(std::uint32_t value)
+{
   const auto mode = value & MODE_MASK;
   return (value & ~CHANNEL_CONTROL_WRITABLE) == 0 &&
-    (mode == 0 || mode == CHAIN_MODE) &&
-    ((value & START) == 0 || (value & TAG_TRANSFER_ENABLE) == 0);
+    (mode == 0 || mode == CHAIN_MODE);
 }
 
 DMACChannelState::DMACChannelState(
   const char *channelName,
   DMACChannelDirectionPolicy directionPolicy,
-  DMACSourceChainProfile sourceProfile) :
+  DMACChannelProfile channelProfile) :
   name(channelName),
   direction(directionPolicy),
-  profile(sourceProfile)
+  profile(channelProfile)
 {
   if (name == nullptr)
   {
     throw std::invalid_argument(
       "DMAC channel state requires a name.");
   }
-  if (profile != DMACSourceChainProfile::VIFGIF &&
-      profile != DMACSourceChainProfile::SIF1)
+  if (profile != DMACChannelProfile::VIFGIF &&
+      profile != DMACChannelProfile::SIF1 &&
+      profile != DMACChannelProfile::SIF0)
   {
-    throw std::invalid_argument("Unsupported DMAC source-chain profile.");
+    throw std::invalid_argument("Unsupported DMAC channel profile.");
   }
 }
 
@@ -81,10 +87,15 @@ std::uint32_t DMACChannelState::channelControl() const
 DMACControlWriteEffect
 DMACChannelState::writeChannelControl(std::uint32_t value)
 {
-  if (profile == DMACSourceChainProfile::SIF1 &&
+  if (profile == DMACChannelProfile::SIF1 &&
       !DMACChannelControl::validSIF1Control(value))
   {
     throw std::invalid_argument("Unsupported SIF1 DMAC control or TTE start.");
+  }
+  if (profile == DMACChannelProfile::SIF0 &&
+      !DMACChannelControl::validSIF0Control(value))
+  {
+    throw std::invalid_argument("Unsupported SIF0 DMAC control.");
   }
   if ((value & ~CHANNEL_CONTROL_WRITABLE) != 0)
   {
@@ -106,7 +117,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
   {
     throw std::invalid_argument(
       std::string(name) +
-      " DMAC supports only normal and source-chain modes.");
+      " DMAC supports only normal and chain modes.");
   }
 
   if (active())
@@ -131,7 +142,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
   }
 
   const std::uint8_t requestedStackDepth =
-    profile == DMACSourceChainProfile::SIF1 ? 0 : static_cast<std::uint8_t>(
+    profile != DMACChannelProfile::VIFGIF ? 0 : static_cast<std::uint8_t>(
       (value &
        DMACChannelControl::ADDRESS_STACK_MASK) >> 4);
   if (requestedStackDepth > addressStackRegisters.size())
@@ -176,13 +187,17 @@ std::uint32_t DMACChannelState::tagAddress() const
 void DMACChannelState::writeTagAddress(std::uint32_t value)
 {
   requireStopped();
+  if (profile == DMACChannelProfile::SIF0)
+  {
+    throw std::logic_error("SIF0 has no source tag-address register.");
+  }
   tagAddressRegister = decodeAddress(value, "TADR");
 }
 
 std::uint32_t DMACChannelState::addressStack(
   std::size_t index) const
 {
-  if (profile == DMACSourceChainProfile::SIF1 ||
+  if (profile != DMACChannelProfile::VIFGIF ||
       index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
@@ -197,7 +212,7 @@ void DMACChannelState::writeAddressStack(
   std::uint32_t value)
 {
   requireStopped();
-  if (profile == DMACSourceChainProfile::SIF1 ||
+  if (profile != DMACChannelProfile::VIFGIF ||
       index >= addressStackRegisters.size())
   {
     throw std::out_of_range(
@@ -216,7 +231,7 @@ DMACChannelTransition DMACChannelState::acceptQuadword()
       std::string(name) +
       " DMAC cannot accept a qword with zero QWC.");
   }
-  memoryAddressRegister = advanceSourceAddress(memoryAddressRegister, 16);
+  memoryAddressRegister = advanceAddress(memoryAddressRegister, 16);
   --quadwordCountRegister;
   if (quadwordCountRegister == 0 &&
       (terminateAfterPacket || normalMode()))
@@ -231,7 +246,11 @@ DMACChannelState::acceptSourceChainTag(
   std::uint32_t low,
   std::uint32_t high)
 {
-  if (profile == DMACSourceChainProfile::VIFGIF && (high & SPR_BIT) != 0)
+  if (profile == DMACChannelProfile::SIF0)
+  {
+    throw std::logic_error("SIF0 cannot accept source-chain tags.");
+  }
+  if (profile == DMACChannelProfile::VIFGIF && (high & SPR_BIT) != 0)
   {
     throw std::invalid_argument(
       std::string(name) +
@@ -244,11 +263,11 @@ DMACChannelState::acceptSourceChainTag(
     (low >> 28) & 0x07);
   const std::uint32_t count = low & QWC_MASK;
   const std::uint32_t inlineDataAddress =
-    advanceSourceAddress(currentTagAddress, 16);
+    advanceAddress(currentTagAddress, 16);
   const std::uint32_t afterInlineData =
-    advanceSourceAddress(inlineDataAddress, count * 16);
+    advanceAddress(inlineDataAddress, count * 16);
   const std::uint32_t tagAddress = high &
-    (profile == DMACSourceChainProfile::SIF1 ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
+    (profile == DMACChannelProfile::SIF1 ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
 
   channelControlRegister =
     (channelControlRegister &
@@ -260,7 +279,7 @@ DMACChannelState::acceptSourceChainTag(
     (channelControlRegister &
      DMACChannelControl::TAG_INTERRUPT_ENABLE) != 0;
 
-  if (profile == DMACSourceChainProfile::SIF1 &&
+  if (profile == DMACChannelProfile::SIF1 &&
       (id == DMACTagID::Call || id == DMACTagID::Return))
   {
     return DMACChannelTransition::Complete;
@@ -346,14 +365,14 @@ std::uint32_t DMACChannelState::decodeAddress(
   std::uint32_t value,
   const char *registerName) const
 {
-  if (profile == DMACSourceChainProfile::VIFGIF && (value & SPR_BIT) != 0)
+  if (profile == DMACChannelProfile::VIFGIF && (value & SPR_BIT) != 0)
   {
     throw std::invalid_argument(
       std::string(name) + " DMAC " + registerName +
       " does not support scratchpad memory.");
   }
   return value &
-    (profile == DMACSourceChainProfile::SIF1 ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
+    (profile != DMACChannelProfile::VIFGIF ? UINT32_C(0xfffffff0) : ADDRESS_MASK);
 }
 
 void DMACChannelState::updateAddressStackField()
@@ -364,10 +383,10 @@ void DMACChannelState::updateAddressStackField()
     (static_cast<std::uint32_t>(addressStackDepth) << 4);
 }
 
-std::uint32_t DMACChannelState::advanceSourceAddress(
+std::uint32_t DMACChannelState::advanceAddress(
   std::uint32_t address, std::uint32_t bytes) const
 {
-  if (profile == DMACSourceChainProfile::SIF1)
+  if (profile != DMACChannelProfile::VIFGIF)
   {
     return (address & SPR_BIT) | ((address + bytes) & ADDRESS_MASK);
   }

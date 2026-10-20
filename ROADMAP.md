@@ -1641,15 +1641,17 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### SIF0: IOP-to-EE DMA
 
-- [ ] Extend IOP DMA ownership for channel 9 source tags and EE DMAC ownership
-      for channel 5 destination-chain state without duplicating common control.
+- [x] Extend IOP DMA ownership for channel 9 source tags and EE DMAC ownership
+      for channel 5 destination-chain state without duplicating common control;
+      map register/start admission and include reset, hashing, and transactional
+      persistence from the first state, without adding transfer engines.
 - [ ] Implement IOP source admission, transmitted EE tags, word/qword packing,
       and EE physical destinations, including resolved scratchpad addressing.
 - [ ] Implement destination tags, zero/partial packets, termination, and
       backpressure/retry with explicit policy for unresolved residual data.
 - [ ] Route endpoint-local completion, masks, acknowledgements, and receiver
       rearming independently of SIF1 and SBUS signals.
-- [ ] Persist/hash framing and accepted continuation; cover partial tags,
+- [ ] Extend persistence/hashing for framing and accepted continuation; cover partial tags,
       partial qwords, cached aliases, active reset, and save/load.
 - [ ] Add authored IOP-to-EE guest conformance and bounded observations;
       complete independent review and sanitizer checks.

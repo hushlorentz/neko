@@ -9,6 +9,7 @@
 #include "clock_rates.hpp"
 #include "dmac_controller.hpp"
 #include "sif1_dmac_channel.hpp"
+#include "sif0_dmac_channel.hpp"
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
 #include "ee_elf_loader.hpp"
@@ -24,6 +25,7 @@
 #include "iop_core.hpp"
 #include "iop_dma_controller.hpp"
 #include "iop_sif1_dma_channel.hpp"
+#include "iop_sif0_dma_channel.hpp"
 #include "iop_timer_timing.hpp"
 #include "regression_trace.hpp"
 #include "scratchpad_dmac_channel.hpp"
@@ -159,6 +161,8 @@ class NekoSystem
     const IOPDMAController &iopDMAController() const;
     IOPSIF1DMAChannel &iopSIF1DMAC();
     const IOPSIF1DMAChannel &iopSIF1DMAC() const;
+    IOPSIF0DMAChannel &iopSIF0DMAC();
+    const IOPSIF0DMAChannel &iopSIF0DMAC() const;
     IOPTimers &iopTimers();
     const IOPTimers &iopTimers() const;
     IOPTimerTiming &iopTimerTiming();
@@ -194,6 +198,8 @@ class NekoSystem
     const VIF1DMACChannel &vif1DMAC() const;
     SIF1DMACChannel &sif1DMAC();
     const SIF1DMACChannel &sif1DMAC() const;
+    SIF0DMACChannel &sif0DMAC();
+    const SIF0DMACChannel &sif0DMAC() const;
     ScratchpadDMACChannel &fromScratchpadDMAC();
     const ScratchpadDMACChannel &fromScratchpadDMAC() const;
     ScratchpadDMACChannel &toScratchpadDMAC();
@@ -244,10 +250,12 @@ class NekoSystem
     IOPInterruptController iopInterruptControllerComponent;
     IOPDMAController iopDMAControllerComponent;
     IOPSIF1DMAChannel iopSIF1DMAComponent;
+    IOPSIF0DMAChannel iopSIF0DMAComponent;
     IOPTimers iopTimersComponent;
     IOPTimerTiming iopTimerTimingComponent;
     SIF sifComponent;
     SIF1DMACChannel sif1DMACComponent;
+    SIF0DMACChannel sif0DMACComponent;
     SIFInterruptRouter sifInterruptRouterComponent;
     NekoInputState inputState;
     bool collectingTrace = false;

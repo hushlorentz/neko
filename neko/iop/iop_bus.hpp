@@ -13,6 +13,7 @@
 class IOPInterruptController;
 class IOPDMAController;
 class IOPSIF1DMAChannel;
+class IOPSIF0DMAChannel;
 class IOPTimers;
 class SIF;
 class SIFSignalReceiver;
@@ -71,8 +72,9 @@ class IOPBus final
     void attachInterruptController(IOPInterruptController *interrupts);
     // The caller owns the timers and must keep them alive while attached.
     void attachTimers(IOPTimers *timers);
-    // The caller keeps both DMA owners alive.
-    void attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1);
+    // The caller keeps the attached DMA owners alive.
+    void attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1,
+      IOPSIF0DMAChannel *sif0 = nullptr);
     // The caller keeps both the shared owner and signal receiver alive.
     void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     // Side-effect-free aggregate level; an absent controller drives no level.
@@ -122,6 +124,7 @@ class IOPBus final
       InterruptController,
       DMAController,
       SIF1DMA,
+      SIF0DMA,
       Timer,
       SIFRegisters,
       SIFDoorbell
@@ -180,6 +183,7 @@ class IOPBus final
     IOPTimers *timers = nullptr;
     IOPDMAController *dmaController = nullptr;
     IOPSIF1DMAChannel *sif1DMA = nullptr;
+    IOPSIF0DMAChannel *sif0DMA = nullptr;
     SIF *sifComponent = nullptr;
     SIFSignalReceiver *sifSignals = nullptr;
 };

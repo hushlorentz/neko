@@ -13,6 +13,7 @@ class DMACController;
 class GIFRegisters;
 class GIFDMACChannel;
 class SIF1DMACChannel;
+class SIF0DMACChannel;
 class GIFPath3Transfer;
 class GS;
 class GSDisplay;
@@ -74,6 +75,9 @@ namespace EEMemoryMap
   constexpr std::uint32_t D1_ASR1 = 0x10009050;
   constexpr std::uint32_t D2_CHCR = 0x1000a000;
   constexpr std::uint32_t D6_CHCR = 0x1000c400;
+  constexpr std::uint32_t D5_CHCR = 0x1000c000;
+  constexpr std::uint32_t D5_MADR = 0x1000c010;
+  constexpr std::uint32_t D5_QWC = 0x1000c020;
   constexpr std::uint32_t D6_MADR = 0x1000c410;
   constexpr std::uint32_t D6_QWC = 0x1000c420;
   constexpr std::uint32_t D6_TADR = 0x1000c430;
@@ -153,6 +157,7 @@ class EEBus
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
     void attachVIF1DMACChannel(VIF1DMACChannel *vif1DMAC);
     void attachSIF1DMACChannel(SIF1DMACChannel *sif1DMAC);
+    void attachSIF0DMACChannel(SIF0DMACChannel *sif0DMAC);
     void attachFromScratchpadDMACChannel(
       ScratchpadDMACChannel *fromScratchpadDMAC);
     void attachToScratchpadDMACChannel(
@@ -272,6 +277,7 @@ class EEBus
     GIFDMACChannel &attachedGIFDMAC() const;
     VIF1DMACChannel &attachedVIF1DMAC() const;
     SIF1DMACChannel &attachedSIF1DMAC() const;
+    SIF0DMACChannel &attachedSIF0DMAC() const;
     ScratchpadDMACChannel &attachedFromScratchpadDMAC() const;
     ScratchpadDMACChannel &attachedToScratchpadDMAC() const;
     bool vuDataMemoryAddress(
@@ -290,6 +296,7 @@ class EEBus
     GIFDMACChannel *gifDMACChannel = nullptr;
     VIF1DMACChannel *vif1DMACChannel = nullptr;
     SIF1DMACChannel *sif1DMACChannel = nullptr;
+    SIF0DMACChannel *sif0DMACChannel = nullptr;
     ScratchpadDMACChannel *fromScratchpadDMACChannel = nullptr;
     ScratchpadDMACChannel *toScratchpadDMACChannel = nullptr;
     VPU *vu0Component = nullptr;

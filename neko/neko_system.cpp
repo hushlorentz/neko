@@ -217,6 +217,7 @@ NekoSystem::NekoSystem() :
   iopDMAControllerComponent(iopInterruptControllerComponent),
   sif1DMACComponent(dmacControllerComponent, sifComponent,
     eeBusComponent, eeCoreComponent.memorySystem),
+  sif0DMACComponent(dmacControllerComponent, sifComponent),
   sifInterruptRouterComponent(
     interruptControllerComponent, iopInterruptControllerComponent)
 {
@@ -240,6 +241,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
   eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
   eeBusComponent.attachSIF1DMACChannel(&sif1DMACComponent);
+  eeBusComponent.attachSIF0DMACChannel(&sif0DMACComponent);
   eeBusComponent.attachFromScratchpadDMACChannel(
     &fromScratchpadDMACComponent);
   eeBusComponent.attachToScratchpadDMACChannel(
@@ -255,7 +257,8 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(toScratchpadDMACComponent, 1);
   iopBusComponent.attachInterruptController(&iopInterruptControllerComponent);
   iopBusComponent.attachTimers(&iopTimersComponent);
-  iopBusComponent.attachDMA(&iopDMAControllerComponent, &iopSIF1DMAComponent);
+  iopBusComponent.attachDMA(
+    &iopDMAControllerComponent, &iopSIF1DMAComponent, &iopSIF0DMAComponent);
   iopCoreComponent.attachBus(&iopBusComponent);
   eeBusComponent.attachSIF(&sifComponent, &sifInterruptRouterComponent);
   iopBusComponent.attachSIF(&sifComponent, &sifInterruptRouterComponent);
@@ -314,6 +317,16 @@ IOPSIF1DMAChannel &NekoSystem::iopSIF1DMAC()
 const IOPSIF1DMAChannel &NekoSystem::iopSIF1DMAC() const
 {
   return iopSIF1DMAComponent;
+}
+
+IOPSIF0DMAChannel &NekoSystem::iopSIF0DMAC()
+{
+  return iopSIF0DMAComponent;
+}
+
+const IOPSIF0DMAChannel &NekoSystem::iopSIF0DMAC() const
+{
+  return iopSIF0DMAComponent;
 }
 
 IOPCore &NekoSystem::iopCore()
@@ -460,6 +473,7 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashChannel(fromScratchpadDMACComponent);
   hashChannel(toScratchpadDMACComponent);
   hashStateValue(&hash, sif1DMACComponent.stateHash());
+  hashStateValue(&hash, sif0DMACComponent.stateHash());
   return hash;
 }
 
@@ -826,6 +840,16 @@ SIF1DMACChannel &NekoSystem::sif1DMAC()
 const SIF1DMACChannel &NekoSystem::sif1DMAC() const
 {
   return sif1DMACComponent;
+}
+
+SIF0DMACChannel &NekoSystem::sif0DMAC()
+{
+  return sif0DMACComponent;
+}
+
+const SIF0DMACChannel &NekoSystem::sif0DMAC() const
+{
+  return sif0DMACComponent;
 }
 
 const VIF1DMACChannel &NekoSystem::vif1DMAC() const

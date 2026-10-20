@@ -11,17 +11,17 @@ namespace
 
 IOPWord IOPSIF1DMAChannel::memoryAddress() const
 {
-  return memoryAddressRegister;
+  return registers.memoryAddressRegister;
 }
 
 IOPWord IOPSIF1DMAChannel::blockControl() const
 {
-  return blockControlRegister;
+  return registers.blockControlRegister;
 }
 
 IOPWord IOPSIF1DMAChannel::channelControl() const
 {
-  return channelControlRegister;
+  return registers.channelControlRegister;
 }
 
 IOPWord IOPSIF1DMAChannel::remainingWords() const
@@ -36,18 +36,18 @@ bool IOPSIF1DMAChannel::terminalPacket() const
 
 bool IOPSIF1DMAChannel::active() const
 {
-  return (channelControlRegister & TRANSFER_REQUEST) != 0;
+  return registers.active();
 }
 
 bool IOPSIF1DMAChannel::validMemoryAddress(IOPWord value)
 {
-  return (value & ~IOPWord{0x00fffffc}) == 0;
+  return IOPDMAChannelState::validMemoryAddress(value);
 }
 
 bool IOPSIF1DMAChannel::validChannelControl(IOPWord value)
 {
-  return (value & ~IOPWord{0x01000701}) == 0 &&
-    ((value & TRANSFER_REQUEST) == 0 || (value & 0x601) == 0x400);
+  return IOPDMAChannelState::validChannelControl(
+    value, IOPDMAChannelProfile::SIF1Receiver);
 }
 
 bool IOPSIF1DMAChannel::validContinuation() const
@@ -86,7 +86,7 @@ IOPSIF1DMAChannel::PreparedBeat IOPSIF1DMAChannel::prepareBeat(
   }
   else
   {
-    result.address = memoryAddressRegister;
+    result.address = registers.memoryAddressRegister;
     result.status = bus.dmaWriteStatus(result.address);
     if (result.status != IOPBusStatus::Completed)
     {
@@ -128,13 +128,13 @@ IOPDMABeatResult IOPSIF1DMAChannel::transferBeat(IOPBus &bus, SIF &sif)
   const auto consumed = sif.consumeWords(SIFDirection::SIF1, header ? 4 : 1);
   assert(consumed == SIFTransferOutcome::Completed);
   (void)consumed;
-  memoryAddressRegister = header ?
-    result.address : (memoryAddressRegister + 4) & 0x00ffffff;
+  registers.memoryAddressRegister = header ?
+    result.address : (registers.memoryAddressRegister + 4) & 0x00ffffff;
   packetWordsRemaining = beat.remainingWords;
   packetTerminal = packetWordsRemaining != 0 && beat.terminal;
   if (result.outcome == IOPDMABeatOutcome::Completed)
   {
-    channelControlRegister &= ~TRANSFER_REQUEST;
+    registers.channelControlRegister &= ~TRANSFER_REQUEST;
     clearContinuation();
   }
   return result;
@@ -148,44 +148,26 @@ void IOPSIF1DMAChannel::clearContinuation()
 
 IOPDMAWriteOutcome IOPSIF1DMAChannel::writeMemoryAddress(IOPWord value)
 {
-  if (active())
-  {
-    return IOPDMAWriteOutcome::ActiveTransfer;
-  }
-  const auto address = value & 0x00ffffff;
-  if (!validMemoryAddress(address))
-  {
-    return IOPDMAWriteOutcome::UnalignedAddress;
-  }
-  memoryAddressRegister = address;
-  return IOPDMAWriteOutcome::Completed;
+  return registers.writeAddress(registers.memoryAddressRegister, value);
 }
 
 IOPDMAWriteOutcome IOPSIF1DMAChannel::writeBlockControl(IOPWord value)
 {
-  if (active())
-  {
-    return IOPDMAWriteOutcome::ActiveTransfer;
-  }
-  blockControlRegister = value;
-  return IOPDMAWriteOutcome::Completed;
+  return registers.writeBlockControl(value);
 }
 
 IOPDMAWriteOutcome IOPSIF1DMAChannel::writeChannelControl(IOPWord value)
 {
-  if (!validChannelControl(value))
+  const bool wasActive = active();
+  const auto result = registers.writeChannelControl(
+    value, IOPDMAChannelProfile::SIF1Receiver);
+  if (result != IOPDMAWriteOutcome::Completed)
   {
-    return IOPDMAWriteOutcome::UnsupportedControl;
+    return result;
   }
-  if (active() && value != channelControlRegister &&
-      value != (channelControlRegister & ~TRANSFER_REQUEST))
-  {
-    return IOPDMAWriteOutcome::ActiveTransfer;
-  }
-  if (!active() || (value & TRANSFER_REQUEST) == 0)
+  if (!wasActive || !active())
   {
     clearContinuation();
   }
-  channelControlRegister = value;
   return IOPDMAWriteOutcome::Completed;
 }

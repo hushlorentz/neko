@@ -29,12 +29,14 @@ namespace DMACChannelControl
   constexpr std::uint32_t START = 1u << 8;
   constexpr std::uint32_t TAG_MASK = UINT32_C(0xffff0000);
   bool validSIF1Control(std::uint32_t value);
+  bool validSIF0Control(std::uint32_t value);
 }
 
-enum class DMACSourceChainProfile : std::uint8_t
+enum class DMACChannelProfile : std::uint8_t
 {
   VIFGIF,
-  SIF1
+  SIF1,
+  SIF0
 };
 
 enum class DMACChannelDirectionPolicy : std::uint8_t
@@ -61,7 +63,7 @@ class DMACChannelState
     DMACChannelState(
       const char *channelName,
       DMACChannelDirectionPolicy directionPolicy,
-      DMACSourceChainProfile sourceProfile = DMACSourceChainProfile::VIFGIF);
+      DMACChannelProfile channelProfile = DMACChannelProfile::VIFGIF);
 
     bool active() const;
     bool normalMode() const;
@@ -95,13 +97,13 @@ class DMACChannelState
     std::uint32_t decodeAddress(
       std::uint32_t value,
       const char *registerName) const;
-    std::uint32_t advanceSourceAddress(
+    std::uint32_t advanceAddress(
       std::uint32_t address, std::uint32_t bytes) const;
     void updateAddressStackField();
 
     const char *name;
     DMACChannelDirectionPolicy direction;
-    DMACSourceChainProfile profile;
+    DMACChannelProfile profile;
     std::uint32_t channelControlRegister = 0;
     std::uint32_t memoryAddressRegister = 0;
     std::uint32_t quadwordCountRegister = 0;
