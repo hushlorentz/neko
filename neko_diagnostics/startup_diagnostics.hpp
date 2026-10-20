@@ -86,6 +86,21 @@ struct StartupEEInterruptSummary
   bool pending = false;
 };
 
+struct StartupIOPDMASummary
+{
+  std::array<IOPWord, 2> priority = {};
+  std::array<IOPWord, 2> interruptStatus = {};
+  bool interruptPending = false;
+  IOPWord control = 0;
+  IOPWord memoryAddress = 0;
+  IOPWord blockControl = 0;
+  IOPWord remainingWords = 0;
+  bool terminal = false;
+  bool enabled = false;
+  // Side-effect-free next grant, not a retained previous-attempt result.
+  IOPDMABeatResult nextBeat;
+};
+
 struct StartupIOPInterruptSummary
 {
   std::uint32_t status = 0;
@@ -101,6 +116,7 @@ struct StartupSummary
   StartupIOPSummary iop;
   StartupSIFSummary sif;
   StartupDMACSummary dmac;
+  StartupIOPDMASummary iopDMA;
   StartupEEInterruptSummary eeInterrupts;
   StartupIOPInterruptSummary iopInterrupts;
 };

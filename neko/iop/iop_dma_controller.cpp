@@ -1,6 +1,25 @@
 #include "iop_dma_controller.hpp"
 
 #include <stdexcept>
+#include <string>
+
+#include "iop_sif1_dma_channel.hpp"
+
+IOPDMATransferError::IOPDMATransferError(const IOPDMABeatResult &result) :
+  std::runtime_error("IOP SIF1 DMA rejected " +
+    std::string(result.failure == IOPDMAFailure::UnalignedHeader ?
+      "unaligned header" : "physical destination write") +
+    " at address " + std::to_string(result.address) +
+    " with value " + std::to_string(result.value) +
+    " (bus status " + std::to_string(static_cast<unsigned>(result.status)) + ")."),
+  rejectedBeat(result)
+{
+}
+
+const IOPDMABeatResult &IOPDMATransferError::result() const
+{
+  return rejectedBeat;
+}
 
 IOPDMAController::IOPDMAController(IOPInterruptController &controller) :
   interrupts(controller)
@@ -75,6 +94,43 @@ std::uint8_t IOPDMAController::channelPriority(IOPDMAChannel channel) const
 {
   return static_cast<std::uint8_t>(
     (banks[1].priority >> (4 * channelSlot(channel))) & 7);
+}
+
+void IOPDMAController::validateSIFWiring(
+  const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const
+{
+  if (bus.dmaController != this || bus.sif1DMA != &channel ||
+      bus.sifComponent != &sif)
+  {
+    throw std::invalid_argument("IOP SIF DMA grant requires the attached owners.");
+  }
+}
+
+IOPDMABeatResult IOPDMAController::inspectSIF(
+  const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const
+{
+  validateSIFWiring(channel, bus, sif);
+  if (!channelEnabled(IOPDMAChannel::SIF1) || !channel.active())
+  {
+    return {};
+  }
+  return channel.prepareBeat(bus, sif).result;
+}
+
+IOPDMABeatResult IOPDMAController::clockSIF(
+  IOPSIF1DMAChannel &channel, IOPBus &bus, SIF &sif)
+{
+  validateSIFWiring(channel, bus, sif);
+  if (!channelEnabled(IOPDMAChannel::SIF1) || !channel.active())
+  {
+    return {};
+  }
+  const auto result = channel.transferBeat(bus, sif);
+  if (result.outcome == IOPDMABeatOutcome::Completed)
+  {
+    signalChannelCompletion(IOPDMAChannel::SIF1);
+  }
+  return result;
 }
 
 void IOPDMAController::signalChannelCompletion(IOPDMAChannel channel)

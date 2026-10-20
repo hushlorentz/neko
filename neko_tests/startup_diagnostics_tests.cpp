@@ -379,6 +379,11 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"("clock_eligible":false,"last_transfer_stalled":false},)"
     R"({"channel":9,"control":0,"madr":0,"qwc":0,"tadr":0,"sadr":0,)"
     R"("clock_eligible":false,"last_transfer_stalled":false}]},)"
+    R"("iop_dma":{"priority":[0,0],"interrupt_status":[0,0],)"
+    R"("interrupt_pending":false,"sif1":{"channel":10,"control":0,"madr":0,)"
+    R"("bcr":0,"remaining_words":0,"terminal":false,"enabled":false,)"
+    R"("next_beat":{"outcome":"wait","failure":"none","address":0,)"
+    R"("value":0,"bus_status":"completed"}}},)"
     R"("ee_interrupts":{"status":0,"mask":0,"pending":false},)"
     R"("iop_interrupts":{"status":0,"mask":0,"control":0,"pending":false}})";
   REQUIRE(output.str() ==
@@ -403,6 +408,62 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
   summary.ee.stopReason = static_cast<EEStopReason>(255);
   std::ostringstream invalid;
   REQUIRE_THROWS_AS(writeStartupSummaryJsonLine(invalid, summary),
+    std::invalid_argument);
+  REQUIRE(invalid.str().empty());
+}
+
+TEST_CASE("Startup IOP DMA inspection reports current packet waits and rejection without mutation",
+  "[startup-diagnostics][receiver]")
+{
+  NekoSystem system;
+  REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x01000400) ==
+    IOPDMAWriteOutcome::Completed);
+  auto snapshot = inspectStartup(system);
+  REQUIRE(snapshot.iopDMA.control == 0x01000400);
+  REQUIRE_FALSE(snapshot.iopDMA.enabled);
+  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Wait);
+  system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x8000);
+  snapshot = inspectStartup(system);
+  REQUIRE(snapshot.iopDMA.enabled);
+  REQUIRE(snapshot.iopDMA.remainingWords == 0);
+  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Wait);
+  REQUIRE(system.sif().pushSIF1Quadword({{0x80800000, 4, 0, 0}}) ==
+    SIFTransferOutcome::Completed);
+  snapshot = inspectStartup(system);
+  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Accepted);
+  system.clockMasterCycle();
+  snapshot = inspectStartup(system);
+  REQUIRE(snapshot.iopDMA.remainingWords == 4);
+  REQUIRE(snapshot.iopDMA.terminal);
+  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Wait);
+  REQUIRE(system.sif().pushSIF1Quadword({{0x11223344, 2, 3, 4}}) ==
+    SIFTransferOutcome::Completed);
+  system.startTrace();
+  const auto before = system.saveState();
+  const auto hash = system.traceHash();
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    snapshot = inspectStartup(system);
+    REQUIRE(snapshot.iopDMA.memoryAddress == 0x800000);
+    REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Rejected);
+    REQUIRE(snapshot.iopDMA.nextBeat.failure == IOPDMAFailure::DestinationWrite);
+    REQUIRE(snapshot.iopDMA.nextBeat.address == 0x800000);
+    REQUIRE(snapshot.iopDMA.nextBeat.value == 0x11223344);
+    REQUIRE(snapshot.iopDMA.nextBeat.status == IOPBusStatus::Unmapped);
+    std::ostringstream output;
+    writeStartupSummaryJsonLine(output, snapshot);
+    REQUIRE(output.str().find(
+      "\"next_beat\":{\"outcome\":\"rejected\",\"failure\":\"destination_write\","
+      "\"address\":8388608,\"value\":287454020,\"bus_status\":\"unmapped\"}") !=
+      std::string::npos);
+    const bool unchanged = system.saveState() == before;
+    REQUIRE(unchanged);
+    REQUIRE(system.traceEnabled());
+    REQUIRE(system.traceHash() == hash);
+  }
+  snapshot.iopDMA.nextBeat.failure = static_cast<IOPDMAFailure>(255);
+  std::ostringstream invalid;
+  REQUIRE_THROWS_AS(writeStartupSummaryJsonLine(invalid, snapshot),
     std::invalid_argument);
   REQUIRE(invalid.str().empty());
 }

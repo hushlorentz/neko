@@ -226,6 +226,7 @@ add_executable(neko_tests
     neko_tests/boot_lifecycle_tests.cpp
     neko_tests/boot_conformance_tests.cpp
     neko_tests/iop/iop_dma_tests.cpp
+    neko_tests/iop/iop_sif1_dma_tests.cpp
     neko_tests/ee/sif1_dmac_channel_tests.cpp
     neko_tests/clock/clock_scheduler_tests.cpp
     neko_tests/ee/ee_core_tests.cpp

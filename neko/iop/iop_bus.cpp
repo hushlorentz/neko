@@ -658,6 +658,36 @@ IOPBusWriteResult IOPBus::writeInterruptRegister(
   return {IOPBusStatus::Completed};
 }
 
+IOPBusStatus IOPBus::dmaWriteStatus(IOPAddress address) const
+{
+  if ((address & 3) != 0)
+  {
+    return IOPBusStatus::Misaligned;
+  }
+  const auto region = locate(address, sizeof(IOPWord)).region;
+  if (region == IOPBusRegion::Ram)
+  {
+    return IOPBusStatus::Completed;
+  }
+  return region == IOPBusRegion::Rom ?
+    IOPBusStatus::ReadOnly : IOPBusStatus::Unmapped;
+}
+
+IOPBusWriteResult IOPBus::writeDMAC32(IOPAddress address, IOPWord value)
+{
+  const auto status = dmaWriteStatus(address);
+  if (status != IOPBusStatus::Completed)
+  {
+    return {status};
+  }
+  auto *bytes = writableBytes(locate(address, sizeof(IOPWord)));
+  for (std::size_t byte = 0; byte < sizeof(IOPWord); ++byte)
+  {
+    bytes[byte] = static_cast<std::uint8_t>(value >> (8 * byte));
+  }
+  return {IOPBusStatus::Completed};
+}
+
 IOPBusStatus IOPBus::loadPhysical(
   IOPAddress address,
   const std::uint8_t *bytes,

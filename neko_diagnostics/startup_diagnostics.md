@@ -53,6 +53,9 @@ The snapshot contains:
 - EE/IOP INTC latches, masks, request outputs, and IOP control enable.
   DMAC and EE INTC request outputs remain separate; these are not claims that
   the CPU has admitted an interrupt.
+- Both IOP DMA banks' priority/interrupt words and aggregate request, plus
+  channel 10's control, MADR, BCR, packet remainder, terminal bit, enable, and
+  side-effect-free next-beat inspection.
 
 Run progress is **per call**: EE instruction counts are accepted instructions,
 IOP instruction counts are retired instructions. Snapshot cycle/retirement
@@ -64,8 +67,25 @@ controller-gated. `lastTransferStalled` is the retained last-attempt flag for
 VIF1/GIF; it may remain set after the controller is disabled or the sink changes.
 Scratchpad channels do not expose a last-stall flag. SIF counts show
 empty/full/partially occupied storage, not a decoded guest wait reason.
+For IOP SIF1, zero `remainingWords` means awaiting a four-word header while TR
+is set; a nonzero remainder means payload. `nextBeat` is the result of a
+hypothetical grant now, not the last attempted beat or a promise of an IOP
+clock pulse. `wait` with TR clear or enable clear is channel/controller gating;
+otherwise it means insufficient header/payload words. `accepted` is one
+nonterminal grant, `completed` is a terminal grant, and `rejected` identifies
+an unaligned header or invalid RAM destination. Address, value, and bus status
+describe that available header word or 32-bit physical payload write; they are
+zero/default when waiting. Header acceptance does not prevalidate payload
+memory, and inspection never performs a write or consumes queued words.
+
 There is no inferred polling-loop detection, deadlock verdict, synthetic
-readiness, placeholder IOP DMA state, or per-poll log.
+readiness, placeholder IOP DMA state, or per-poll log. Scheduled IOP SIF1
+rejections throw `IOPDMATransferError`, carrying the typed channel, cause,
+physical address, word, and bus status. The rejected beat changes neither RAM,
+stream, continuation, nor completion status; earlier phases of that master
+cycle are not rolled back. This is not a fabricated guest DMA bus exception
+or a retained failure latch. Callers can inspect the still-pending beat after
+the error.
 
 An unsupported EE instruction is a host stop, whereas an EE rejected bus
 access can enter a running guest exception handler. IOP rejected physical

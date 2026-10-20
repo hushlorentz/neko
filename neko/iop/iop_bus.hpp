@@ -98,6 +98,10 @@ class IOPBus final
       IOPWord value,
       std::uint8_t byteEnable);
 
+    // DMA sees physical RAM aliases only, without device or CPU cache access.
+    IOPBusStatus dmaWriteStatus(IOPAddress address) const;
+    IOPBusWriteResult writeDMAC32(IOPAddress address, IOPWord value);
+
     // Host-only physical access. A range must lie wholly inside one RAM
     // alias, the scratchpad, or (inspection only) the installed ROM.
     IOPBusStatus loadPhysical(
@@ -111,6 +115,7 @@ class IOPBus final
 
   private:
     friend class NekoSaveStateCodec;
+    friend class IOPDMAController;
     enum class Device : std::uint8_t
     {
       None,

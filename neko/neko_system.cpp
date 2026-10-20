@@ -990,6 +990,15 @@ void NekoSystem::clockMasterCycle()
   latchComponentInterrupts();
   publishEEInterruptLines();
   advanceIOPTimers(iopClockPulse);
+  if (iopClockPulse)
+  {
+    const auto transfer = iopDMAControllerComponent.clockSIF(
+      iopSIF1DMAComponent, iopBusComponent, sifComponent);
+    if (transfer.outcome == IOPDMABeatOutcome::Rejected)
+    {
+      throw IOPDMATransferError(transfer);
+    }
+  }
   if (iopClockPulse &&
       iopCoreComponent.executionState() == IOPExecutionState::Running)
   {

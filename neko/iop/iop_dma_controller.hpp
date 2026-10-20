@@ -4,8 +4,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 
+#include "iop_bus.hpp"
 #include "iop_interrupt_controller.hpp"
+
+class IOPSIF1DMAChannel;
+class SIF;
 
 enum class IOPDMABank : std::uint8_t
 {
@@ -16,6 +21,41 @@ enum class IOPDMABank : std::uint8_t
 enum class IOPDMAChannel : std::uint8_t
 {
   SIF1 = 10
+};
+
+enum class IOPDMABeatOutcome : std::uint8_t
+{
+  Accepted,
+  Completed, // Accepted terminal beat, not merely an individual word.
+  Wait,
+  Rejected
+};
+
+enum class IOPDMAFailure : std::uint8_t
+{
+  None,
+  UnalignedHeader,
+  DestinationWrite
+};
+
+struct IOPDMABeatResult
+{
+  IOPDMABeatOutcome outcome = IOPDMABeatOutcome::Wait;
+  IOPDMAChannel channel = IOPDMAChannel::SIF1;
+  IOPDMAFailure failure = IOPDMAFailure::None;
+  IOPAddress address = 0;
+  IOPWord value = 0;
+  IOPBusStatus status = IOPBusStatus::Completed;
+};
+
+class IOPDMATransferError final : public std::runtime_error
+{
+  public:
+    explicit IOPDMATransferError(const IOPDMABeatResult &result);
+    const IOPDMABeatResult &result() const;
+
+  private:
+    IOPDMABeatResult rejectedBeat;
 };
 
 class IOPDMAController final
@@ -31,6 +71,9 @@ class IOPDMAController final
     void writeInterrupt(IOPDMABank bank, IOPWord value);
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
+    IOPDMABeatResult inspectSIF(
+      const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
+    IOPDMABeatResult clockSIF(IOPSIF1DMAChannel &channel, IOPBus &bus, SIF &sif);
     void signalChannelCompletion(IOPDMAChannel channel);
     // Derived DMA request, not the independently acknowledged INTC latch.
     bool interruptPending() const;
@@ -48,6 +91,8 @@ class IOPDMAController final
     static std::size_t bankIndex(IOPDMABank bank);
     static std::uint8_t channelSlot(IOPDMAChannel channel);
     std::uint8_t activeFlags(std::size_t index) const;
+    void validateSIFWiring(
+      const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
     void publishInterrupt();
 
     IOPInterruptController &interrupts;

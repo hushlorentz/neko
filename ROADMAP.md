@@ -1628,7 +1628,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement EE source admission and SIF framing, including physical
       scratchpad sources, tag/count/termination, atomic backpressure/retry,
       persistence, and EE-phase scheduling with local completion/error effects.
-- [ ] Implement IOP header/payload admission and physical destination writes
+- [x] Implement IOP header/payload admission and physical destination writes
       without cache snooping; include count/termination, atomic retry,
       persistence, and IOP-phase scheduling with local completion effects.
 - [ ] Cover endpoint completion through EE DMAC and IOP DMA/INTC; distinguish

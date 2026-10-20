@@ -34,6 +34,9 @@ namespace
     "completed", "protection_failure", "misaligned", "read_only", "unmapped"
   };
   const char *const cacheRoutes[] = {"none", "cached", "uncached"};
+  const char *const dmaOutcomes[] = {"accepted", "completed", "wait", "rejected"};
+  const char *const dmaFailures[] = {"none", "unaligned_header", "destination_write"};
+  const char *const busStatuses[] = {"completed", "misaligned", "read_only", "unmapped"};
 
   template<typename Enum, std::size_t N>
   const char *enumName(Enum value, const char *const (&names)[N])
@@ -163,8 +166,26 @@ namespace
         << ",\"last_transfer_stalled\":"
         << jsonBoolean(channel.lastTransferStalled) << "}";
     }
+    const auto &iopDMA = summary.iopDMA;
+    const auto &beat = iopDMA.nextBeat;
     output
-      << "]},\"ee_interrupts\":{\"status\":" << summary.eeInterrupts.status
+      << "]},\"iop_dma\":{\"priority\":[" << iopDMA.priority[0]
+      << "," << iopDMA.priority[1]
+      << "],\"interrupt_status\":[" << iopDMA.interruptStatus[0]
+      << "," << iopDMA.interruptStatus[1]
+      << "],\"interrupt_pending\":" << jsonBoolean(iopDMA.interruptPending)
+      << ",\"sif1\":{\"channel\":10,\"control\":" << iopDMA.control
+      << ",\"madr\":" << iopDMA.memoryAddress
+      << ",\"bcr\":" << iopDMA.blockControl
+      << ",\"remaining_words\":" << iopDMA.remainingWords
+      << ",\"terminal\":" << jsonBoolean(iopDMA.terminal)
+      << ",\"enabled\":" << jsonBoolean(iopDMA.enabled)
+      << ",\"next_beat\":{\"outcome\":\"" << enumName(beat.outcome, dmaOutcomes)
+      << "\",\"failure\":\"" << enumName(beat.failure, dmaFailures)
+      << "\",\"address\":" << beat.address
+      << ",\"value\":" << beat.value
+      << ",\"bus_status\":\"" << enumName(beat.status, busStatuses)
+      << "\"}}},\"ee_interrupts\":{\"status\":" << summary.eeInterrupts.status
       << ",\"mask\":" << summary.eeInterrupts.mask
       << ",\"pending\":" << jsonBoolean(summary.eeInterrupts.pending)
       << "},\"iop_interrupts\":{\"status\":" << summary.iopInterrupts.status
@@ -228,6 +249,17 @@ StartupSummary inspectStartup(const NekoSystem &system)
   summary.dmac.channels[3] = {
     9, to.channelControl(), to.memoryAddress(), to.quadwordCount(),
     to.tagAddress(), to.scratchpadAddress(), to.clockActive(), false
+  };
+  const auto &iopDMA = system.iopDMAController();
+  const auto &receiver = system.iopSIF1DMAC();
+  summary.iopDMA = {
+    {{iopDMA.priority(IOPDMABank::Primary), iopDMA.priority(IOPDMABank::Secondary)}},
+    {{iopDMA.interruptStatus(IOPDMABank::Primary),
+      iopDMA.interruptStatus(IOPDMABank::Secondary)}},
+    iopDMA.interruptPending(), receiver.channelControl(), receiver.memoryAddress(),
+    receiver.blockControl(), receiver.remainingWords(), receiver.terminalPacket(),
+    iopDMA.channelEnabled(IOPDMAChannel::SIF1),
+    iopDMA.inspectSIF(receiver, system.iopBus(), sif)
   };
   const auto &eeInterrupts = system.interruptController();
   summary.eeInterrupts = {

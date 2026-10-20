@@ -207,6 +207,8 @@ void NekoSaveStateCodec::writeIOPState(
     writer->writeFieldU32("memoryAddress", channel.memoryAddressRegister);
     writer->writeFieldU32("blockControl", channel.blockControlRegister);
     writer->writeFieldU32("channelControl", channel.channelControlRegister);
+    writer->writeFieldU32("remainingWords", channel.packetWordsRemaining);
+    writer->writeFieldBool("terminal", channel.packetTerminal);
   }
 }
 
@@ -294,6 +296,10 @@ void NekoSaveStateCodec::readIOP(
     reader->requireField(
       IOPSIF1DMAChannel::validChannelControl(channel.channelControlRegister),
       "IOP SIF1 DMA channel control is outside the supported profile");
+    channel.packetWordsRemaining = reader->readFieldU32("remainingWords");
+    channel.packetTerminal = reader->readFieldBool("terminal");
+    reader->requireField(channel.validContinuation(),
+      "IOP SIF1 DMA packet continuation is incompatible with channel state");
   }
 }
 
