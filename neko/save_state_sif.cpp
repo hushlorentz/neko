@@ -221,7 +221,9 @@ void NekoSaveStateCodec::writeSIF0DMAC(
   const auto &channel = system.sif0DMACComponent;
   if (system.eeBusComponent.sif0DMACChannel != &channel ||
       &channel.dmacController != &system.dmacControllerComponent ||
-      &channel.sifComponent != &system.sifComponent)
+      &channel.sifComponent != &system.sifComponent ||
+      &channel.eeBus != &system.eeBusComponent ||
+      &channel.eeMemorySystem != &system.eeCoreComponent.memorySystem)
   {
     throw std::logic_error("Cannot persist SIF0 DMA with foreign machine wiring.");
   }

@@ -5,6 +5,8 @@
 
 class SIF1DMACChannel;
 enum class SIF1DMABeatOutcome : std::uint8_t;
+class SIF0DMACChannel;
+enum class SIF0DMABeatOutcome : std::uint8_t;
 
 namespace DMACControl
 {
@@ -47,6 +49,8 @@ class DMACController
     std::uint8_t interleaveTransferQWC() const;
     bool enabled() const;
     SIF1DMABeatOutcome clockSIF(SIF1DMACChannel &sif1);
+    // One explicitly requested normal receiver grant; no peer stepping.
+    SIF0DMABeatOutcome clockSIF(SIF0DMACChannel &sif0);
     void signalChannelCompletion(std::uint32_t channel);
     void signalBusError(std::uint32_t channel);
     bool interruptPending() const;

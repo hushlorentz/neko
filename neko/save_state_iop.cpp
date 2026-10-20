@@ -218,6 +218,8 @@ void NekoSaveStateCodec::writeIOPState(
     writer->writeFieldU32("blockControl", channel.registers.blockControlRegister);
     writer->writeFieldU32("channelControl", channel.registers.channelControlRegister);
     writer->writeFieldU32("tagAddress", channel.tagAddressRegister);
+    writer->writeFieldU32("remainingWords", channel.packetWordsRemaining);
+    writer->writeFieldBool("terminal", channel.packetTerminal);
   }
 }
 
@@ -326,6 +328,10 @@ void NekoSaveStateCodec::readIOP(
     channel.tagAddressRegister = reader->readFieldU32("tagAddress");
     reader->requireField(IOPDMAChannelState::validMemoryAddress(channel.tagAddressRegister),
       "IOP SIF0 DMA tag address is unaligned or exceeds 24 bits");
+    channel.packetWordsRemaining = reader->readFieldU32("remainingWords");
+    channel.packetTerminal = reader->readFieldBool("terminal");
+    reader->requireField(channel.validContinuation(),
+      "IOP SIF0 DMA packet continuation is incompatible with channel state");
   }
 }
 

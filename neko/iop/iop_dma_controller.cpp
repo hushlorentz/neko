@@ -4,11 +4,28 @@
 #include <string>
 
 #include "iop_sif1_dma_channel.hpp"
+#include "iop_sif0_dma_channel.hpp"
+
+namespace
+{
+  const char *failureDescription(IOPDMAFailure failure)
+  {
+    switch (failure)
+    {
+      case IOPDMAFailure::None: return "unspecified transfer";
+      case IOPDMAFailure::UnalignedHeader: return "unaligned header";
+      case IOPDMAFailure::DestinationWrite: return "physical destination write";
+      case IOPDMAFailure::DescriptorRead: return "physical descriptor read";
+      case IOPDMAFailure::SourceRead: return "physical source read";
+    }
+    throw std::logic_error("Unknown IOP DMA failure.");
+  }
+}
 
 IOPDMATransferError::IOPDMATransferError(const IOPDMABeatResult &result) :
-  std::runtime_error("IOP SIF1 DMA rejected " +
-    std::string(result.failure == IOPDMAFailure::UnalignedHeader ?
-      "unaligned header" : "physical destination write") +
+  std::runtime_error(std::string("IOP ") +
+    (result.channel == IOPDMAChannel::SIF0 ? "SIF0" : "SIF1") + " DMA rejected " +
+    failureDescription(result.failure) +
     " at address " + std::to_string(result.address) +
     " with value " + std::to_string(result.value) +
     " (bus status " + std::to_string(static_cast<unsigned>(result.status)) + ")."),
@@ -139,6 +156,47 @@ void IOPDMAController::signalChannelCompletion(IOPDMAChannel channel)
 {
   banks[1].flags |= static_cast<std::uint8_t>(1 << channelSlot(channel));
   publishInterrupt();
+}
+
+void IOPDMAController::validateSIFWiring(
+  const IOPSIF0DMAChannel &channel, const IOPBus &bus, const SIF &sif) const
+{
+  if (bus.dmaController != this || bus.sif0DMA != &channel ||
+      bus.sifComponent != &sif)
+  {
+    throw std::invalid_argument("IOP SIF DMA grant requires the attached owners.");
+  }
+}
+
+IOPDMABeatResult IOPDMAController::inspectSIF(
+  const IOPSIF0DMAChannel &channel, const IOPBus &bus, const SIF &sif) const
+{
+  validateSIFWiring(channel, bus, sif);
+  if (!channelEnabled(IOPDMAChannel::SIF0) || !channel.active())
+  {
+    IOPDMABeatResult result;
+    result.channel = IOPDMAChannel::SIF0;
+    return result;
+  }
+  return channel.prepareBeat(bus, sif).result;
+}
+
+IOPDMABeatResult IOPDMAController::clockSIF(
+  IOPSIF0DMAChannel &channel, IOPBus &bus, SIF &sif)
+{
+  validateSIFWiring(channel, bus, sif);
+  if (!channelEnabled(IOPDMAChannel::SIF0) || !channel.active())
+  {
+    IOPDMABeatResult result;
+    result.channel = IOPDMAChannel::SIF0;
+    return result;
+  }
+  const auto result = channel.transferBeat(bus, sif);
+  if (result.outcome == IOPDMABeatOutcome::Completed)
+  {
+    signalChannelCompletion(IOPDMAChannel::SIF0);
+  }
+  return result;
 }
 
 bool IOPDMAController::interruptPending() const

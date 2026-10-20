@@ -217,7 +217,8 @@ NekoSystem::NekoSystem() :
   iopDMAControllerComponent(iopInterruptControllerComponent),
   sif1DMACComponent(dmacControllerComponent, sifComponent,
     eeBusComponent, eeCoreComponent.memorySystem),
-  sif0DMACComponent(dmacControllerComponent, sifComponent),
+  sif0DMACComponent(dmacControllerComponent, sifComponent,
+    eeBusComponent, eeCoreComponent.memorySystem),
   sifInterruptRouterComponent(
     interruptControllerComponent, iopInterruptControllerComponent)
 {

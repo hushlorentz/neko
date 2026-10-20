@@ -5,11 +5,22 @@
 
 class DMACController;
 class SIF;
+class EEBus;
+class EEMemorySystem;
+struct EEQuadword;
+
+enum class SIF0DMABeatOutcome : std::uint8_t
+{
+  Completed,
+  Wait,
+  BusError
+};
 
 class SIF0DMACChannel final
 {
   public:
-    SIF0DMACChannel(DMACController &controller, SIF &sif);
+    SIF0DMACChannel(DMACController &controller, SIF &sif,
+      EEBus &bus, EEMemorySystem &memory);
     SIF0DMACChannel(const SIF0DMACChannel &) = delete;
     SIF0DMACChannel &operator=(const SIF0DMACChannel &) = delete;
 
@@ -25,9 +36,18 @@ class SIF0DMACChannel final
 
   private:
     friend class NekoSaveStateCodec;
+    friend class DMACController;
+
+    SIF0DMABeatOutcome transferBeat();
+    SIF0DMABeatOutcome writeDestinationQuadword(
+      std::uint32_t address, const EEQuadword &value);
+    void completeTransfer();
+    void interruptForBusError();
 
     DMACController &dmacController;
     SIF &sifComponent;
+    EEBus &eeBus;
+    EEMemorySystem &eeMemorySystem;
     DMACChannelState channelState;
 };
 

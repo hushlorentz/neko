@@ -707,6 +707,26 @@ IOPBusWriteResult IOPBus::writeInterruptRegister(
   return {IOPBusStatus::Completed};
 }
 
+IOPBusReadResult IOPBus::readDMAC32(IOPAddress address) const
+{
+  if ((address & 3) != 0)
+  {
+    return {IOPBusStatus::Misaligned, 0};
+  }
+  const auto location = locate(address, sizeof(IOPWord));
+  if (location.region != IOPBusRegion::Ram)
+  {
+    return {};
+  }
+  const auto *bytes = readableBytes(location);
+  IOPWord value = 0;
+  for (std::size_t byte = 0; byte < sizeof(IOPWord); ++byte)
+  {
+    value |= static_cast<IOPWord>(bytes[byte]) << (8 * byte);
+  }
+  return {IOPBusStatus::Completed, value};
+}
+
 IOPBusStatus IOPBus::dmaWriteStatus(IOPAddress address) const
 {
   if ((address & 3) != 0)

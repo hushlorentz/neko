@@ -10,6 +10,7 @@
 #include "iop_interrupt_controller.hpp"
 
 class IOPSIF1DMAChannel;
+class IOPSIF0DMAChannel;
 class SIF;
 
 enum class IOPDMABank : std::uint8_t
@@ -36,7 +37,9 @@ enum class IOPDMAFailure : std::uint8_t
 {
   None,
   UnalignedHeader,
-  DestinationWrite
+  DestinationWrite,
+  DescriptorRead,
+  SourceRead
 };
 
 struct IOPDMABeatResult
@@ -75,6 +78,10 @@ class IOPDMAController final
     IOPDMABeatResult inspectSIF(
       const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
     IOPDMABeatResult clockSIF(IOPSIF1DMAChannel &channel, IOPBus &bus, SIF &sif);
+    IOPDMABeatResult inspectSIF(
+      const IOPSIF0DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
+    // One explicitly requested source grant; automatic arbitration is separate.
+    IOPDMABeatResult clockSIF(IOPSIF0DMAChannel &channel, IOPBus &bus, SIF &sif);
     void signalChannelCompletion(IOPDMAChannel channel);
     // Derived DMA request, not the independently acknowledged INTC latch.
     bool interruptPending() const;
@@ -94,6 +101,8 @@ class IOPDMAController final
     std::uint8_t activeFlags(std::size_t index) const;
     void validateSIFWiring(
       const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
+    void validateSIFWiring(
+      const IOPSIF0DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
     void publishInterrupt();
 
     IOPInterruptController &interrupts;

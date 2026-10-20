@@ -263,7 +263,7 @@ TEST_CASE("SIF0 register owners reject source-chain policy and preserve peer sta
   REQUIRE(system.iopSIF1DMAC().channelControl() == peerIOP);
 }
 
-TEST_CASE("SIF0 register foundations persist without transfer or lifecycle replay",
+TEST_CASE("SIF0 register owners restore without lifecycle replay or implicit grants",
   "[sif0][dma][foundation][save-state]")
 {
   NekoSystem original;

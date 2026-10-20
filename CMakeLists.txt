@@ -274,6 +274,7 @@ add_executable(neko_tests
     neko_tests/sif_system_tests.cpp
     neko_tests/sif_conformance_tests.cpp
     neko_tests/sif0_foundation_tests.cpp
+    neko_tests/sif0_engine_tests.cpp
     neko_tests/neko_system_tests.cpp
     neko_tests/save_state_internal_tests.cpp
     neko_tests/save_state_mutation.cpp

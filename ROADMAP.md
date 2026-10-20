@@ -1645,12 +1645,14 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       for channel 5 destination-chain state without duplicating common control;
       map register/start admission and include reset, hashing, and transactional
       persistence from the first state, without adding transfer engines.
-- [ ] Implement IOP source admission, transmitted EE tags, word/qword packing,
-      and EE physical destinations, including resolved scratchpad addressing.
+- [x] Implement IOP source admission, transmitted EE tags, word/qword packing,
+      and normal-mode EE physical destinations, including resolved scratchpad
+      addressing, through checked single-channel grants.
 - [ ] Implement destination tags, zero/partial packets, termination, and
       backpressure/retry with explicit policy for unresolved residual data.
 - [ ] Route endpoint-local completion, masks, acknowledgements, and receiver
-      rearming independently of SIF1 and SBUS signals.
+      rearming independently of SIF1 and SBUS signals; integrate both SIF0
+      endpoints into the existing common-controller scheduling boundaries.
 - [ ] Extend persistence/hashing for framing and accepted continuation; cover partial tags,
       partial qwords, cached aliases, active reset, and save/load.
 - [ ] Add authored IOP-to-EE guest conformance and bounded observations;

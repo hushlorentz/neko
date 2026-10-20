@@ -101,6 +101,7 @@ class IOPBus final
       std::uint8_t byteEnable);
 
     // DMA sees physical RAM aliases only, without device or CPU cache access.
+    IOPBusReadResult readDMAC32(IOPAddress address) const;
     IOPBusStatus dmaWriteStatus(IOPAddress address) const;
     IOPBusWriteResult writeDMAC32(IOPAddress address, IOPWord value);
 
