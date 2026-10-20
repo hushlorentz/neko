@@ -1636,7 +1636,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       masks, and rearming.
 - [x] Append bounded transfer/wait/completion observations; cover reset,
       save/load, and malformed partial state at each acceptance boundary.
-- [ ] Add authored EE-to-IOP guest conformance and regress existing DMA paths;
+- [x] Add authored EE-to-IOP guest conformance and regress existing DMA paths;
       complete independent review and sanitizer checks.
 
 ### SIF0: IOP-to-EE DMA
