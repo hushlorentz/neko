@@ -17,6 +17,13 @@ enum class DMACTagID : std::uint8_t
   End = 7
 };
 
+enum class DMACDestinationTagID : std::uint8_t
+{
+  CountStall = 0,
+  Count = 1,
+  End = 7
+};
+
 namespace DMACChannelControl
 {
   constexpr std::uint32_t FROM_MEMORY = 1u;
@@ -72,6 +79,8 @@ class DMACChannelState
     bool sliceInProgress() const;
     std::uint8_t nextSliceQuadwords() const;
     bool sliceStateValid() const;
+    bool destinationPacketStateValid() const;
+    bool publishesDestinationStallAddress() const;
 
     std::uint32_t channelControl() const;
     DMACControlWriteEffect writeChannelControl(
@@ -89,6 +98,9 @@ class DMACChannelState
 
     DMACChannelTransition acceptQuadword();
     DMACChannelTransition acceptSourceChainTag(
+      std::uint32_t low,
+      std::uint32_t high);
+    DMACChannelTransition acceptDestinationChainTag(
       std::uint32_t low,
       std::uint32_t high);
     void completeTransfer();
@@ -113,6 +125,7 @@ class DMACChannelState
     std::uint32_t tagAddressRegister = 0;
     std::array<std::uint32_t, 2> addressStackRegisters = {};
     bool terminateAfterPacket = false;
+    bool destinationPacketAccepted = false;
     std::uint8_t addressStackDepth = 0;
     std::uint8_t sliceQuadwordsRemaining = 0;
 };

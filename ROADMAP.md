@@ -1654,7 +1654,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add common `D_STADR`, `D_CTRL.STS/STD`, and `D_STAT.SIS` stall control
       across implemented producers and drains, including normal transfers,
       source-chain REFS packets, slice admission, and resumable persistence.
-- [ ] Implement destination tags, zero/partial packets, termination, and
+- [x] Implement destination tags, zero/partial packets, termination, and
       backpressure/retry using common priority/stall control, including CNTS
       publication and explicit policy for unresolved residual data.
 - [ ] Route endpoint-local completion, masks, acknowledgements, and receiver

@@ -507,7 +507,7 @@ TEST_CASE("SIF0 checked endpoints stream a packet larger than shared capacity",
   REQUIRE(restored.iopDMAController().interruptStatus(BANK) == 0x04000000);
 }
 
-TEST_CASE("SIF0 checked grants reject foreign owners and unimplemented chain work",
+TEST_CASE("SIF0 checked grants reject foreign owners and empty chains wait",
   "[sif0][dma][engine]")
 {
   NekoSystem system;
@@ -523,7 +523,7 @@ TEST_CASE("SIF0 checked grants reject foreign owners and unimplemented chain wor
   system.sif0DMAC().writeChannelControl(0x104);
   system.dmacController().writeControl(1);
   const auto armed = system.saveState();
-  REQUIRE_THROWS_AS(destinationBeat(system), std::logic_error);
+  REQUIRE(destinationBeat(system) == SIF0DMABeatOutcome::Wait);
   requireState(system, armed);
 }
 

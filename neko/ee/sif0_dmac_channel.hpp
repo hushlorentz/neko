@@ -39,6 +39,8 @@ class SIF0DMACChannel final
     friend class DMACController;
 
     SIF0DMABeatOutcome transferBeat();
+    SIF0DMABeatOutcome receiveDestinationTag();
+    SIF0DMABeatOutcome transferPayloadQuadword();
     SIF0DMABeatOutcome writeDestinationQuadword(
       std::uint32_t address, const EEQuadword &value);
     void completeTransfer();

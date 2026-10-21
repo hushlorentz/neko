@@ -1,7 +1,6 @@
 #include "sif0_dmac_channel.hpp"
 
 #include <cassert>
-#include <stdexcept>
 
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
@@ -95,15 +94,43 @@ SIF0DMABeatOutcome SIF0DMACChannel::writeDestinationQuadword(
 
 SIF0DMABeatOutcome SIF0DMACChannel::transferBeat()
 {
-  if (!channelState.normalMode())
-  {
-    throw std::logic_error("SIF0 destination-chain tag handling is not implemented.");
-  }
   if (!channelState.hasPendingQuadword())
   {
+    if (!channelState.normalMode())
+    {
+      return receiveDestinationTag();
+    }
     completeTransfer();
     return SIF0DMABeatOutcome::Completed;
   }
+  return transferPayloadQuadword();
+}
+
+SIF0DMABeatOutcome SIF0DMACChannel::receiveDestinationTag()
+{
+  SIFQuadword words = {};
+  if (sifComponent.peekWords(SIFDirection::SIF0, words, 4) ==
+      SIFTransferOutcome::Wait)
+  {
+    return SIF0DMABeatOutcome::Wait;
+  }
+  const auto priority = DMACController::decodeTagPriority(words[0]);
+  auto nextState = channelState;
+  const auto transition = nextState.acceptDestinationChainTag(words[0], words[1]);
+  const auto consumed = sifComponent.consumeWords(SIFDirection::SIF0, 4);
+  assert(consumed == SIFTransferOutcome::Completed);
+  (void)consumed;
+  channelState = nextState;
+  dmacController.applyTagPriority(priority);
+  if (transition == DMACChannelTransition::Complete)
+  {
+    completeTransfer();
+  }
+  return SIF0DMABeatOutcome::Completed;
+}
+
+SIF0DMABeatOutcome SIF0DMACChannel::transferPayloadQuadword()
+{
   SIFQuadword words = {};
   if (sifComponent.peekWords(SIFDirection::SIF0, words, 4) ==
       SIFTransferOutcome::Wait)
@@ -127,9 +154,13 @@ SIF0DMABeatOutcome SIF0DMACChannel::transferBeat()
   const auto consumed = sifComponent.consumeWords(SIFDirection::SIF0, 4);
   assert(consumed == SIFTransferOutcome::Completed);
   (void)consumed;
+  const bool publishStall = channelState.publishesDestinationStallAddress();
   const auto transition = channelState.acceptQuadword();
-  dmacController.publishStallAddress(DMACStatus::CHANNEL_5,
-    channelState.memoryAddress());
+  if (publishStall)
+  {
+    dmacController.publishStallAddress(DMACStatus::CHANNEL_5,
+      channelState.memoryAddress());
+  }
   if (transition == DMACChannelTransition::Complete)
   {
     completeTransfer();

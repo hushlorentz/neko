@@ -217,6 +217,8 @@ void NekoSaveStateCodec::writeSIF0DMACState(
   writer->writeFieldU32("channelControlRegister", state.channelControlRegister);
   writer->writeFieldU32("memoryAddressRegister", state.memoryAddressRegister);
   writer->writeFieldU32("quadwordCountRegister", state.quadwordCountRegister);
+  writer->writeFieldBool("terminateAfterPacket", state.terminateAfterPacket);
+  writer->writeFieldBool("destinationPacketAccepted", state.destinationPacketAccepted);
 }
 
 void NekoSaveStateCodec::writeSIF0DMAC(
@@ -248,6 +250,10 @@ void NekoSaveStateCodec::readSIF0DMAC(
   state.quadwordCountRegister = reader->readFieldU32("quadwordCountRegister");
   reader->requireField(state.quadwordCountRegister <= 0xffff,
     "SIF0 DMAC qword count is invalid");
+  state.terminateAfterPacket = reader->readFieldBool("terminateAfterPacket");
+  state.destinationPacketAccepted = reader->readFieldBool("destinationPacketAccepted");
+  reader->requireField(state.destinationPacketStateValid(),
+    "SIF0 DMAC destination packet continuation is invalid");
 }
 
 void NekoSaveStateCodec::commitSIF0DMAC(
@@ -258,4 +264,6 @@ void NekoSaveStateCodec::commitSIF0DMAC(
   state.channelControlRegister = sourceState.channelControlRegister;
   state.memoryAddressRegister = sourceState.memoryAddressRegister;
   state.quadwordCountRegister = sourceState.quadwordCountRegister;
+  state.terminateAfterPacket = sourceState.terminateAfterPacket;
+  state.destinationPacketAccepted = sourceState.destinationPacketAccepted;
 }

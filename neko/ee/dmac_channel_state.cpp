@@ -138,6 +138,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
     channelControlRegister &=
       ~DMACChannelControl::START;
     terminateAfterPacket = false;
+    destinationPacketAccepted = false;
     sliceQuadwordsRemaining = 0;
     return DMACControlWriteEffect::ResetContinuation;
   }
@@ -155,6 +156,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
   channelControlRegister = value;
   addressStackDepth = requestedStackDepth;
   terminateAfterPacket = false;
+  destinationPacketAccepted = false;
   sliceQuadwordsRemaining = 0;
   return DMACControlWriteEffect::ResetContinuation;
 }
@@ -246,6 +248,32 @@ bool DMACChannelState::sliceStateValid() const
      sliceQuadwordsRemaining == nextSliceQuadwords());
 }
 
+bool DMACChannelState::destinationPacketStateValid() const
+{
+  if (!destinationPacketAccepted)
+  {
+    return !terminateAfterPacket;
+  }
+  const auto id = static_cast<DMACDestinationTagID>(
+    (channelControlRegister >> 28) & 7);
+  const bool tagInterrupt =
+    (channelControlRegister & TAG_IRQ) != 0 &&
+    (channelControlRegister & DMACChannelControl::TAG_INTERRUPT_ENABLE) != 0;
+  return profile == DMACChannelProfile::SIF0 &&
+    active() && !normalMode() && hasPendingQuadword() &&
+    ((channelControlRegister >> 26) & 3) != 1 &&
+    (id == DMACDestinationTagID::CountStall ||
+     id == DMACDestinationTagID::Count || id == DMACDestinationTagID::End) &&
+    terminateAfterPacket == (id == DMACDestinationTagID::End || tagInterrupt);
+}
+
+bool DMACChannelState::publishesDestinationStallAddress() const
+{
+  return normalMode() || (destinationPacketAccepted &&
+    ((channelControlRegister >> 28) & 7) ==
+      static_cast<std::uint32_t>(DMACDestinationTagID::CountStall));
+}
+
 DMACChannelTransition DMACChannelState::acceptQuadword()
 {
   if (quadwordCountRegister == 0)
@@ -264,6 +292,10 @@ DMACChannelTransition DMACChannelState::acceptQuadword()
   }
   memoryAddressRegister = advanceAddress(memoryAddressRegister, 16);
   --quadwordCountRegister;
+  if (quadwordCountRegister == 0)
+  {
+    destinationPacketAccepted = false;
+  }
   if (quadwordCountRegister == 0 &&
       (terminateAfterPacket || normalMode()))
   {
@@ -376,11 +408,37 @@ DMACChannelState::acceptSourceChainTag(
       DMACChannelTransition::Continue;
 }
 
+DMACChannelTransition DMACChannelState::acceptDestinationChainTag(
+  std::uint32_t low, std::uint32_t high)
+{
+  if (profile != DMACChannelProfile::SIF0 ||
+      !active() || normalMode() || hasPendingQuadword())
+  {
+    throw std::logic_error("DMAC destination tag requires an empty active SIF0 chain.");
+  }
+  const auto id = static_cast<DMACDestinationTagID>((low >> 28) & 7);
+  const bool defined =
+    id == DMACDestinationTagID::CountStall ||
+    id == DMACDestinationTagID::Count || id == DMACDestinationTagID::End;
+  channelControlRegister =
+    (channelControlRegister & ~DMACChannelControl::TAG_MASK) |
+    (low & DMACChannelControl::TAG_MASK);
+  memoryAddressRegister = high & UINT32_C(0xfffffff0);
+  quadwordCountRegister = low & QWC_MASK;
+  destinationPacketAccepted = defined && hasPendingQuadword();
+  terminateAfterPacket = id == DMACDestinationTagID::End ||
+    ((low & TAG_IRQ) != 0 &&
+     (channelControlRegister & DMACChannelControl::TAG_INTERRUPT_ENABLE) != 0);
+  return !defined || (!hasPendingQuadword() && terminateAfterPacket) ?
+    DMACChannelTransition::Complete : DMACChannelTransition::Continue;
+}
+
 void DMACChannelState::completeTransfer()
 {
   channelControlRegister &=
     ~DMACChannelControl::START;
   terminateAfterPacket = false;
+  destinationPacketAccepted = false;
   sliceQuadwordsRemaining = 0;
 }
 
