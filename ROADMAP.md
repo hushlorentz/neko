@@ -1662,7 +1662,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       endpoints into the existing common-controller scheduling boundaries.
 - [x] Audit framing and accepted-continuation persistence/hashing; cover
       partial tags, partial qwords, cached aliases, active reset, and save/load.
-- [ ] Add authored IOP-to-EE guest conformance and bounded observations;
+- [x] Add authored IOP-to-EE guest conformance and bounded observations;
       complete independent review and sanitizer checks.
 
 ### Cross-Channel Scheduling and Lifecycle Conformance
