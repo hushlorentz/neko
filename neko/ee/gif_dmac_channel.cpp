@@ -117,6 +117,10 @@ GIFDMACChannel::transferredQuadwordCount() const
 
 void GIFDMACChannel::transferQuadword()
 {
+  if (!dmacController->admitDrainSlice(DMACStatus::CHANNEL_2, channelState))
+  {
+    return;
+  }
   const GIFQuadword quadword =
     eeBus->readQuadword(channelState.memoryAddress());
   if (!eeBus->writeQuadword(EEMemoryMap::GIF_FIFO, quadword))

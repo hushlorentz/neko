@@ -1,6 +1,7 @@
 #include <stdexcept>
 
 #include "dmac_controller.hpp"
+#include "dmac_channel_state.hpp"
 #include "sif1_dmac_channel.hpp"
 #include "sif0_dmac_channel.hpp"
 
@@ -37,12 +38,67 @@ std::uint32_t DMACController::control() const
 
 void DMACController::writeControl(std::uint32_t value)
 {
-  if ((value & ~DMACControl::DMA_ENABLE) != 0)
+  if (!validControl(value))
   {
     throw std::invalid_argument(
-      "Only D_CTRL.DMAE is implemented.");
+      "Unsupported D_CTRL fields or excluded SIF0-source/SIF1-drain pair.");
   }
   controlRegister = value;
+}
+
+bool DMACController::validControl(std::uint32_t value)
+{
+  return (value & ~DMACControl::WRITABLE_MASK) == 0 &&
+    !((value & DMACControl::STALL_SOURCE_MASK) == (1u << 4) &&
+      (value & DMACControl::STALL_DRAIN_MASK) == (3u << 6));
+}
+
+std::uint32_t DMACController::stallAddress() const
+{
+  return stallAddressRegister;
+}
+
+void DMACController::writeStallAddress(std::uint32_t value)
+{
+  stallAddressRegister = value & 0x7ffffff0;
+}
+
+void DMACController::publishStallAddress(
+  std::uint32_t channel, std::uint32_t address)
+{
+  const auto source = (controlRegister & DMACControl::STALL_SOURCE_MASK) >> 4;
+  if ((source == 1 && channel == DMACStatus::CHANNEL_5) ||
+      (source == 2 && channel == DMACStatus::CHANNEL_8))
+  {
+    writeStallAddress(address);
+  }
+}
+
+bool DMACController::admitDrainSlice(
+  std::uint32_t channel, const DMACChannelState &state)
+{
+  const auto drain = (controlRegister & DMACControl::STALL_DRAIN_MASK) >> 6;
+  const bool selected =
+    (drain == 1 && channel == DMACStatus::CHANNEL_1) ||
+    (drain == 2 && channel == DMACStatus::CHANNEL_2) ||
+    (drain == 3 && channel == DMACStatus::CHANNEL_6);
+  if (!selected || !state.hasPendingQuadword() || state.sliceInProgress() ||
+      (!state.normalMode() &&
+       ((state.channelControl() >> 28) & 7) !=
+         static_cast<std::uint32_t>(DMACTagID::ReferenceStall)))
+  {
+    return true;
+  }
+  // Provisional boundary policy: compare the actual aligned slice, not
+  // eight qwords beyond a short or unaligned packet (EEUSER pp. 30, 38).
+  const auto end = static_cast<std::uint64_t>(state.memoryAddress() & 0x7ffffff0) +
+    static_cast<std::uint32_t>(state.nextSliceQuadwords()) * 16;
+  if (end > stallAddressRegister)
+  {
+    statusRegister |= DMACStatus::STALL;
+    return false;
+  }
+  return true;
 }
 
 std::uint32_t DMACController::status() const
@@ -53,9 +109,9 @@ std::uint32_t DMACController::status() const
 void DMACController::writeStatus(std::uint32_t value)
 {
   constexpr std::uint32_t STATUSES =
-    CHANNELS | DMACStatus::BUS_ERROR;
+    CHANNELS | DMACStatus::BUS_ERROR | DMACStatus::STALL;
   statusRegister &= ~(value & STATUSES);
-  statusMaskRegister ^= value & MASKS;
+  statusMaskRegister ^= value & (MASKS | DMACStatus::STALL_MASK);
 }
 
 std::uint32_t DMACController::priorityControl() const
@@ -193,5 +249,5 @@ bool DMACController::interruptPending() const
     (statusRegister & DMACStatus::BUS_ERROR) != 0 ||
     (statusRegister &
      (statusMaskRegister >> 16) &
-     CHANNELS) != 0;
+     (CHANNELS | DMACStatus::STALL)) != 0;
 }

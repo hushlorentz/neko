@@ -265,6 +265,12 @@ void ScratchpadDMACChannel::transferQuadword(
     (scratchpadAddressRegister + 16) &
     SCRATCHPAD_ADDRESS_MASK;
   --quadwordCountRegister;
+  if (channelKind == ScratchpadDMACChannelKind::FromScratchpad && mode ==
+      EEScratchpadDMACMode::Normal)
+  {
+    dmacController->publishStallAddress(DMACStatus::CHANNEL_8,
+      memoryAddressRegister);
+  }
   if (interleave)
   {
     if (interleaveQuadwordsRemaining == 0)

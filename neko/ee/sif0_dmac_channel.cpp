@@ -127,7 +127,10 @@ SIF0DMABeatOutcome SIF0DMACChannel::transferBeat()
   const auto consumed = sifComponent.consumeWords(SIFDirection::SIF0, 4);
   assert(consumed == SIFTransferOutcome::Completed);
   (void)consumed;
-  if (channelState.acceptQuadword() == DMACChannelTransition::Complete)
+  const auto transition = channelState.acceptQuadword();
+  dmacController.publishStallAddress(DMACStatus::CHANNEL_5,
+    channelState.memoryAddress());
+  if (transition == DMACChannelTransition::Complete)
   {
     completeTransfer();
   }

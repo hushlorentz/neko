@@ -4,6 +4,7 @@
 #include <cstdint>
 
 class SIF1DMACChannel;
+class DMACChannelState;
 enum class SIF1DMABeatOutcome : std::uint8_t;
 class SIF0DMACChannel;
 enum class SIF0DMABeatOutcome : std::uint8_t;
@@ -11,6 +12,10 @@ enum class SIF0DMABeatOutcome : std::uint8_t;
 namespace DMACControl
 {
   constexpr std::uint32_t DMA_ENABLE = 1u;
+  constexpr std::uint32_t STALL_SOURCE_MASK = 3u << 4;
+  constexpr std::uint32_t STALL_DRAIN_MASK = 3u << 6;
+  constexpr std::uint32_t WRITABLE_MASK =
+    DMA_ENABLE | STALL_SOURCE_MASK | STALL_DRAIN_MASK;
 }
 
 namespace DMACStatus
@@ -22,6 +27,8 @@ namespace DMACStatus
   constexpr std::uint32_t CHANNEL_8 = 1u << 8;
   constexpr std::uint32_t CHANNEL_9 = 1u << 9;
   constexpr std::uint32_t BUS_ERROR = 1u << 15;
+  constexpr std::uint32_t STALL = 1u << 13;
+  constexpr std::uint32_t STALL_MASK = 1u << 29;
   constexpr std::uint32_t CHANNEL_1_MASK = 1u << 17;
   constexpr std::uint32_t CHANNEL_2_MASK = 1u << 18;
   constexpr std::uint32_t CHANNEL_5_MASK = 1u << 21;
@@ -61,6 +68,11 @@ class DMACController
     void writeStatus(std::uint32_t value);
     std::uint32_t priorityControl() const;
     void writePriorityControl(std::uint32_t value);
+    std::uint32_t stallAddress() const;
+    void writeStallAddress(std::uint32_t value);
+    void publishStallAddress(std::uint32_t channel, std::uint32_t address);
+    bool admitDrainSlice(std::uint32_t channel, const DMACChannelState &state);
+    static bool validControl(std::uint32_t value);
     static DMACTagPriority decodeTagPriority(std::uint32_t tag);
     void applyTagPriority(DMACTagPriority priority);
     std::uint32_t interleaveSize() const;
@@ -84,6 +96,7 @@ class DMACController
     std::uint32_t statusRegister = 0;
     std::uint32_t statusMaskRegister = 0;
     std::uint32_t priorityControlRegister = 0;
+    std::uint32_t stallAddressRegister = 0;
     std::uint32_t interleaveSizeRegister = 0;
 };
 

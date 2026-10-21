@@ -354,7 +354,7 @@ TEST_CASE("EE guest device accesses enforce register contracts")
   REQUIRE(word == 0x1230);
   REQUIRE_THROWS_WITH(
     bus.write32(EEMemoryMap::D_CTRL, 2),
-    "Only D_CTRL.DMAE is implemented.");
+    "Unsupported D_CTRL fields or excluded SIF0-source/SIF1-drain pair.");
 }
 
 TEST_CASE("EE guest VIF FIFO stores are atomic and backpressured")

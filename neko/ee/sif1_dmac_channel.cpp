@@ -132,6 +132,10 @@ SIF1DMABeatOutcome SIF1DMACChannel::readSourceQuadword(
 
 SIF1DMABeatOutcome SIF1DMACChannel::transferQuadword()
 {
+  if (!dmacController.admitDrainSlice(DMACStatus::CHANNEL_6, channelState))
+  {
+    return SIF1DMABeatOutcome::Wait;
+  }
   EEQuadword value = {};
   const auto result = readSourceQuadword(channelState.memoryAddress(), &value);
   if (result != SIF1DMABeatOutcome::Completed)

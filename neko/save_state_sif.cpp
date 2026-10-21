@@ -131,6 +131,7 @@ void NekoSaveStateCodec::writeSIF1DMACState(
   Writer *writer, const SIF1DMACChannel &channel)
 {
   const auto &state = channel.channelState;
+  writer->writeFieldU8("sliceQuadwordsRemaining", state.sliceQuadwordsRemaining);
   writer->writeFieldU32("channelControlRegister", state.channelControlRegister);
   writer->writeFieldU32("memoryAddressRegister", state.memoryAddressRegister);
   writer->writeFieldU32("quadwordCountRegister", state.quadwordCountRegister);
@@ -157,6 +158,7 @@ void NekoSaveStateCodec::readSIF1DMAC(
   SaveStateReader *reader, SIF1DMACChannel *channel)
 {
   auto &state = channel->channelState;
+  state.sliceQuadwordsRemaining = reader->readFieldU8("sliceQuadwordsRemaining");
   state.channelControlRegister = reader->readFieldU32("channelControlRegister");
   reader->requireField(
     DMACChannelControl::validSIF1Control(state.channelControlRegister),
@@ -167,6 +169,7 @@ void NekoSaveStateCodec::readSIF1DMAC(
   state.quadwordCountRegister = reader->readFieldU32("quadwordCountRegister");
   reader->requireField(state.quadwordCountRegister <= 0xffff,
     "SIF1 DMAC qword count is invalid");
+  reader->requireField(state.sliceStateValid(), "SIF1 DMAC slice continuation is invalid");
   state.tagAddressRegister = reader->readFieldU32("tagAddressRegister");
   reader->requireField((state.tagAddressRegister & 0xf) == 0,
     "SIF1 DMAC tag address is unaligned");
@@ -191,6 +194,7 @@ void NekoSaveStateCodec::commitSIF1DMAC(
   state.quadwordCountRegister = sourceState.quadwordCountRegister;
   state.tagAddressRegister = sourceState.tagAddressRegister;
   state.terminateAfterPacket = sourceState.terminateAfterPacket;
+  state.sliceQuadwordsRemaining = sourceState.sliceQuadwordsRemaining;
 }
 
 std::uint64_t SIF0DMACChannel::stateHash() const

@@ -1212,6 +1212,8 @@ void NekoSaveStateCodec::writeDMAC(
   writer->writeFieldU32(
     "controllerPriorityControlRegister",
     controller.priorityControlRegister);
+  writer->writeFieldU32("controllerStallAddressRegister", controller.stallAddressRegister);
+  writer->writeFieldU8("sliceQuadwordsRemaining", state.sliceQuadwordsRemaining);
   writer->writeFieldBool(
     "terminateAfterPacket",
     state.terminateAfterPacket);
@@ -1265,6 +1267,12 @@ void NekoSaveStateCodec::readDMAC(
   reader->requireField(
     (controller->priorityControlRegister & ~DMACPriority::WRITABLE_MASK) == 0,
     "DMAC priority control is invalid");
+  controller->stallAddressRegister =
+    reader->readFieldU32("controllerStallAddressRegister");
+  reader->requireField((controller->stallAddressRegister & ~UINT32_C(0x7ffffff0)) == 0,
+    "DMAC stall address is invalid");
+  state.sliceQuadwordsRemaining = reader->readFieldU8("sliceQuadwordsRemaining");
+  reader->requireField(state.sliceStateValid(), "GIF DMAC slice continuation is invalid");
   state.terminateAfterPacket =
     reader->readFieldBool("terminateAfterPacket");
   channel->path3Stalled =
@@ -1305,8 +1313,7 @@ void NekoSaveStateCodec::readDMAC(
       "GIF DMAC address is invalid");
   }
   require(
-    controller->controlRegister <=
-      DMACControl::DMA_ENABLE,
+    DMACController::validControl(controller->controlRegister),
     "DMAC global control is invalid");
   require(
     (controller->statusRegister &
@@ -1316,14 +1323,16 @@ void NekoSaveStateCodec::readDMAC(
        DMACStatus::CHANNEL_6 |
        DMACStatus::CHANNEL_8 |
        DMACStatus::CHANNEL_9 |
-       DMACStatus::BUS_ERROR)) == 0 &&
+       DMACStatus::BUS_ERROR |
+       DMACStatus::STALL)) == 0 &&
     (controller->statusMaskRegister &
      ~(DMACStatus::CHANNEL_1_MASK |
        DMACStatus::CHANNEL_2_MASK |
        DMACStatus::CHANNEL_5_MASK |
        DMACStatus::CHANNEL_6_MASK |
        DMACStatus::CHANNEL_8_MASK |
-       DMACStatus::CHANNEL_9_MASK)) == 0,
+       DMACStatus::CHANNEL_9_MASK |
+       DMACStatus::STALL_MASK)) == 0,
     "DMAC status is invalid");
   require(
     state.addressStackDepth <=
@@ -1339,6 +1348,7 @@ void NekoSaveStateCodec::writeVIF1DMAC(
   const VIF1DMACChannel &dmac)
 {
   const DMACChannelState &state = dmac.channelState;
+  writer->writeFieldU8("sliceQuadwordsRemaining", state.sliceQuadwordsRemaining);
   writer->writeFieldU32(
     "channelControlRegister",
     state.channelControlRegister);
@@ -1385,6 +1395,7 @@ void NekoSaveStateCodec::readVIF1DMAC(
       reader->requireField(condition, detail);
     };
   DMACChannelState &state = dmac->channelState;
+  state.sliceQuadwordsRemaining = reader->readFieldU8("sliceQuadwordsRemaining");
   state.channelControlRegister =
     reader->readFieldU32("channelControlRegister");
   state.memoryAddressRegister =
@@ -1435,6 +1446,7 @@ void NekoSaveStateCodec::readVIF1DMAC(
   require(
     state.quadwordCountRegister <= 0xffff,
     "VIF1 DMAC qword count is invalid");
+  reader->requireField(state.sliceStateValid(), "VIF1 DMAC slice continuation is invalid");
   const std::uint32_t addresses[] = {
     state.memoryAddressRegister,
     state.tagAddressRegister,

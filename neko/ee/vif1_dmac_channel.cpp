@@ -143,6 +143,10 @@ bool VIF1DMACChannel::submitTag(std::uint32_t address)
 
 void VIF1DMACChannel::transferQuadword()
 {
+  if (!dmacController->admitDrainSlice(DMACStatus::CHANNEL_1, channelState))
+  {
+    return;
+  }
   if (!submitQuadword(channelState.memoryAddress()))
   {
     vif1Stalled = true;

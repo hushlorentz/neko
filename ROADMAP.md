@@ -1651,7 +1651,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add common EE DMAC priority eligibility through `D_PCR` and accepted-tag
       PCE controls across implemented channels, including atomic retry,
       reset, hashing, and transactional persistence.
-- [ ] Add common `D_STADR`, `D_CTRL.STS/STD`, and `D_STAT.SIS` stall control
+- [x] Add common `D_STADR`, `D_CTRL.STS/STD`, and `D_STAT.SIS` stall control
       across implemented producers and drains, including normal transfers,
       source-chain REFS packets, slice admission, and resumable persistence.
 - [ ] Implement destination tags, zero/partial packets, termination, and

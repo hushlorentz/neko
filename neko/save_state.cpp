@@ -887,6 +887,8 @@ void NekoSaveStateCodec::commitSystem(
     sourceDMAC.channelState.addressStackRegisters;
   dmac.channelState.terminateAfterPacket =
     sourceDMAC.channelState.terminateAfterPacket;
+  dmac.channelState.sliceQuadwordsRemaining =
+    sourceDMAC.channelState.sliceQuadwordsRemaining;
   dmac.path3Stalled = sourceDMAC.path3Stalled;
   dmac.channelState.addressStackDepth =
     sourceDMAC.channelState.addressStackDepth;
@@ -901,6 +903,8 @@ void NekoSaveStateCodec::commitSystem(
     source->dmacControllerComponent.statusMaskRegister;
   destination->dmacControllerComponent.priorityControlRegister =
     source->dmacControllerComponent.priorityControlRegister;
+  destination->dmacControllerComponent.stallAddressRegister =
+    source->dmacControllerComponent.stallAddressRegister;
   destination->dmacControllerComponent.interleaveSizeRegister =
     source->dmacControllerComponent.interleaveSizeRegister;
 
@@ -944,6 +948,8 @@ void NekoSaveStateCodec::commitSystem(
     sourceVIF1DMAC.channelState.addressStackRegisters;
   vif1DMAC.channelState.terminateAfterPacket =
     sourceVIF1DMAC.channelState.terminateAfterPacket;
+  vif1DMAC.channelState.sliceQuadwordsRemaining =
+    sourceVIF1DMAC.channelState.sliceQuadwordsRemaining;
   vif1DMAC.vif1Stalled = sourceVIF1DMAC.vif1Stalled;
   vif1DMAC.channelState.addressStackDepth =
     sourceVIF1DMAC.channelState.addressStackDepth;

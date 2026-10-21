@@ -138,6 +138,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
     channelControlRegister &=
       ~DMACChannelControl::START;
     terminateAfterPacket = false;
+    sliceQuadwordsRemaining = 0;
     return DMACControlWriteEffect::ResetContinuation;
   }
 
@@ -154,6 +155,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
   channelControlRegister = value;
   addressStackDepth = requestedStackDepth;
   terminateAfterPacket = false;
+  sliceQuadwordsRemaining = 0;
   return DMACControlWriteEffect::ResetContinuation;
 }
 
@@ -223,6 +225,27 @@ void DMACChannelState::writeAddressStack(
     decodeAddress(value, "ASR");
 }
 
+bool DMACChannelState::sliceInProgress() const
+{
+  return sliceQuadwordsRemaining != 0;
+}
+
+std::uint8_t DMACChannelState::nextSliceQuadwords() const
+{
+  const auto toBoundary = 8u - ((memoryAddressRegister >> 4) & 7);
+  return static_cast<std::uint8_t>(
+    quadwordCountRegister < toBoundary ? quadwordCountRegister : toBoundary);
+}
+
+bool DMACChannelState::sliceStateValid() const
+{
+  return sliceQuadwordsRemaining == 0 ||
+    (profile != DMACChannelProfile::SIF0 && active() && hasPendingQuadword() &&
+     (memoryAddressRegister & 0x7f) != 0 &&
+     sliceQuadwordsRemaining < 8 &&
+     sliceQuadwordsRemaining == nextSliceQuadwords());
+}
+
 DMACChannelTransition DMACChannelState::acceptQuadword()
 {
   if (quadwordCountRegister == 0)
@@ -230,6 +253,14 @@ DMACChannelTransition DMACChannelState::acceptQuadword()
     throw std::logic_error(
       std::string(name) +
       " DMAC cannot accept a qword with zero QWC.");
+  }
+  if (profile != DMACChannelProfile::SIF0)
+  {
+    if (sliceQuadwordsRemaining == 0)
+    {
+      sliceQuadwordsRemaining = nextSliceQuadwords();
+    }
+    --sliceQuadwordsRemaining;
   }
   memoryAddressRegister = advanceAddress(memoryAddressRegister, 16);
   --quadwordCountRegister;
@@ -274,6 +305,7 @@ DMACChannelState::acceptSourceChainTag(
      ~DMACChannelControl::TAG_MASK) |
     (low & DMACChannelControl::TAG_MASK);
   quadwordCountRegister = count;
+  sliceQuadwordsRemaining = 0;
   terminateAfterPacket =
     (low & TAG_IRQ) != 0 &&
     (channelControlRegister &
@@ -349,6 +381,7 @@ void DMACChannelState::completeTransfer()
   channelControlRegister &=
     ~DMACChannelControl::START;
   terminateAfterPacket = false;
+  sliceQuadwordsRemaining = 0;
 }
 
 void DMACChannelState::requireStopped() const

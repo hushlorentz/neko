@@ -69,6 +69,9 @@ class DMACChannelState
     bool normalMode() const;
     bool tagTransferEnabled() const;
     bool hasPendingQuadword() const;
+    bool sliceInProgress() const;
+    std::uint8_t nextSliceQuadwords() const;
+    bool sliceStateValid() const;
 
     std::uint32_t channelControl() const;
     DMACControlWriteEffect writeChannelControl(
@@ -111,6 +114,7 @@ class DMACChannelState
     std::array<std::uint32_t, 2> addressStackRegisters = {};
     bool terminateAfterPacket = false;
     std::uint8_t addressStackDepth = 0;
+    std::uint8_t sliceQuadwordsRemaining = 0;
 };
 
 #endif

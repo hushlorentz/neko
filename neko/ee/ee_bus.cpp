@@ -1085,6 +1085,9 @@ bool EEBus::readMapped32(
     case EEMemoryMap::D_SQWC:
       *value = attachedDMACController().interleaveSize();
       return true;
+    case EEMemoryMap::D_STADR:
+      *value = attachedDMACController().stallAddress();
+      return true;
     case EEMemoryMap::INTC_STAT:
       *value = interruptController->status();
       return true;
@@ -1394,6 +1397,13 @@ bool EEBus::writeMapped32(
       return performDeviceWrite(
         checkedGuestAccess,
         [&]() { dmac.writeInterleaveSize(value); });
+    }
+    case EEMemoryMap::D_STADR:
+    {
+      DMACController &dmac = attachedDMACController();
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { dmac.writeStallAddress(value); });
     }
     case EEMemoryMap::INTC_STAT:
       interruptController->acknowledge(value);

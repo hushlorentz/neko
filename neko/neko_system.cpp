@@ -435,12 +435,14 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(
     &hash,
     dmacControllerComponent.priorityControlRegister);
+  hashStateValue(&hash, dmacControllerComponent.stallAddressRegister);
   hashStateValue(
     &hash,
     dmacControllerComponent.statusRegister &
       (DMACStatus::CHANNEL_6 |
        DMACStatus::CHANNEL_8 |
        DMACStatus::CHANNEL_9 |
+       DMACStatus::STALL |
        DMACStatus::BUS_ERROR));
   hashStateValue(
     &hash,
@@ -448,6 +450,8 @@ std::uint64_t NekoSystem::eeStateHash() const
       (DMACStatus::CHANNEL_6_MASK |
        DMACStatus::CHANNEL_8_MASK |
        DMACStatus::CHANNEL_9_MASK));
+  hashStateValue(&hash,
+    dmacControllerComponent.statusMaskRegister & DMACStatus::STALL_MASK);
   hashStateValue(
     &hash,
     dmacControllerComponent.interleaveSizeRegister);
