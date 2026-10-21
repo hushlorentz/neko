@@ -1667,9 +1667,9 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### Cross-Channel Scheduling and Lifecycle Conformance
 
-- [ ] Integrate both directions into the existing 8:1 master/IOP schedule;
-      define CPU/device admission, transfer visibility, and interrupt ordering
-      without claiming undocumented retail bus timing.
+- [x] Audit the integrated 8:1 master/IOP schedule and pin both directions'
+      CPU/device admission, same-cycle transfer visibility, and interrupt
+      ordering with focused regressions, without claiming retail bus timing.
 - [ ] Exercise simultaneous directions, unequal producer/consumer progress,
       full/empty transport, receiver-late start, channel disable/restart,
       and independent completion/INTC acknowledgement.

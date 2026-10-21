@@ -694,3 +694,232 @@ TEST_CASE("Either SIF completion fits the full timer SBUS and acknowledgement tr
     REQUIRE(system.iopCore().retiredInstructions() == 5);
   }
 }
+
+TEST_CASE("Bidirectional SIF grants retain exact shared master and IOP phases",
+  "[sif][scheduling][cross-channel]")
+{
+  NekoSystem system;
+  source(system);
+  receiver(system);
+  eeSender(system);
+  iopReceiver(system);
+  system.iopDMAController().writePriority(BANK, 0x8800);
+  system.startTrace();
+  system.clockMasterCycle();
+  IOPTraceTest::requireEvents(beats(system), {
+    beat(1, 2 | (4 << 8) | (1 << 16), 0x3000, 0, 0, 0, 0),
+    beat(1, 2 << 8, 0x5000, 2, 1, 0, 4),
+    beat(1, 3, 0x1000, 0, 4, 0, 4)});
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 4);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 4);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
+
+  system.clearTrace();
+  system.clockMasterCycle();
+  IOPTraceTest::requireEvents(beats(system), {
+    beat(2, 2 | (4 << 8), 0x3000, 0, 1, 4, 0)});
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  system.clearTrace();
+  system.clockMasterCycle();
+  IOPTraceTest::requireEvents(beats(system), {
+    beat(3, (2 << 8) | (2 << 16), 0x5010, 1, 0, 4, 8)});
+  REQUIRE(system.dmacController().status() == DMACStatus::CHANNEL_6);
+  REQUIRE(system.iopDMAController().interruptStatus(BANK) == 0);
+
+  system.runMasterCycles(5);
+  REQUIRE(system.masterClockScheduler().currentCycle() == 8);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
+  system.clearTrace();
+  system.clockMasterCycle();
+  IOPTraceTest::requireEvents(beats(system), {
+    beat(9, 2 | (2 << 8) | (1 << 16), 0x3000, 1, 1, 0, 0),
+    beat(9, 1 | (1 << 8), 0x6000, 0, 4, 8, 4)});
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+}
+
+TEST_CASE("SIF1 output is visible to the same-pulse IOP grant without a second EE beat",
+  "[sif][scheduling][cross-channel]")
+{
+  NekoSystem system;
+  source(system);
+  receiver(system);
+  eeSender(system);
+  iopReceiver(system);
+  system.iopDMAController().writePriority(BANK, 0x8900);
+  system.clockMasterCycle();
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 0);
+  REQUIRE(system.sif1DMAC().quadwordCount() == 1);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 0);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 0);
+  system.clockMasterCycle();
+  REQUIRE_FALSE(system.sif1DMAC().active());
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 4);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+}
+
+TEST_CASE("SIF shared capacity freed by EE is available to the same-pulse IOP source",
+  "[sif][scheduling][cross-channel]")
+{
+  NekoSystem system;
+  source(system);
+  for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
+    push(system, DATA);
+  system.sif0DMAC().writeMemoryAddress(0x3000);
+  system.sif0DMAC().writeQuadwordCount(1);
+  system.sif0DMAC().writeChannelControl(START);
+  system.dmacController().writeControl(1);
+  REQUIRE(system.sif().freeWordCount() == 0);
+  system.clockMasterCycle();
+  requireData(system);
+  REQUIRE_FALSE(system.sif0DMAC().active());
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == SIF::WORD_CAPACITY);
+  REQUIRE(system.sif().wordAt(SIFDirection::SIF0, SIF::WORD_CAPACITY - 4) ==
+    0x70000001);
+  REQUIRE(system.sif().wordAt(SIFDirection::SIF0, SIF::WORD_CAPACITY - 3) == 0x3000);
+}
+
+TEST_CASE("EE guest SIF starts participate in the current master-cycle grant",
+  "[sif][scheduling][cross-channel]")
+{
+  for (const bool receive : {false, true})
+  {
+    CAPTURE(receive);
+    NekoSystem system;
+    if (receive)
+    {
+      push(system, DATA);
+      system.sif0DMAC().writeMemoryAddress(0x3000);
+      system.sif0DMAC().writeQuadwordCount(1);
+    }
+    else
+    {
+      eeSender(system, 1);
+      system.sif1DMAC().writeChannelControl(0);
+      iopReceiver(system);
+      system.iopDMAController().writePriority(BANK, 0x8000);
+    }
+    system.dmacController().writeControl(1);
+    REQUIRE(system.eeBus().writeData32(0, 0xac220000)); // sw r2, 0(r1)
+    system.eeCore().setGeneralRegister(1,
+      {0xa0000000 | (receive ? EEMemoryMap::D5_CHCR : EEMemoryMap::D6_CHCR), 0});
+    system.eeCore().setGeneralRegister(2, {START, 0});
+    system.eeCore().startExecution(0xa0000000);
+    system.clockMasterCycle();
+    REQUIRE(system.eeCore().pendingException() == EEException::None);
+    REQUIRE(system.dmacController().status() ==
+      (receive ? DMACStatus::CHANNEL_5 : DMACStatus::CHANNEL_6));
+    if (receive)
+    {
+      requireData(system);
+      REQUIRE_FALSE(system.sif0DMAC().active());
+    }
+    else
+    {
+      REQUIRE_FALSE(system.sif1DMAC().active());
+      REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+      REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 0);
+    }
+  }
+}
+
+TEST_CASE("IOP guest SIF starts wait for the next phase-zero grant without callback DMA",
+  "[sif][scheduling][cross-channel]")
+{
+  for (const bool send : {false, true})
+  {
+    CAPTURE(send);
+    NekoSystem system;
+    if (send)
+    {
+      source(system);
+      REQUIRE(system.iopSIF0DMAC().writeChannelControl(0x401) ==
+        IOPDMAWriteOutcome::Completed);
+      receiver(system);
+    }
+    else
+    {
+      eeSender(system);
+      system.iopDMAController().writePriority(BANK, 0x8000);
+    }
+    const IOPWord program[] = {
+      0x3c01bf80,                         // lui r1, 0xbf80
+      send ? 0x34211528u : 0x34211538u,   // ori r1, r1, channel CHCR
+      0x3c020100,                         // lui r2, 0x0100
+      send ? 0x34420401u : 0x34420400u,   // ori r2, r2, direction/mode
+      0xac220000};                        // sw r2, 0(r1)
+    for (unsigned index = 0; index < 5; ++index)
+      writeIOP(system, index * 4, program[index]);
+    system.iopCore().startExecution(0xa0000000);
+    system.runMasterCycles(32);
+    REQUIRE(system.iopCore().retiredInstructions() == 4);
+    system.clockMasterCycle();
+    REQUIRE(system.iopCore().retiredInstructions() == 5);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopSIF0DMAC().remainingWords() == 0);
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
+    REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 0);
+    REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == (send ? 0 : 8));
+    REQUIRE(system.iopDMAController().interruptStatus(BANK) == 0);
+    system.runMasterCycles(7);
+    REQUIRE(system.iopSIF0DMAC().remainingWords() == 0);
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
+    system.clockMasterCycle();
+    REQUIRE(system.iopSIF0DMAC().remainingWords() == (send ? 4 : 0));
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == (send ? 0 : 4));
+    REQUIRE(system.sif0DMAC().quadwordCount() == 0);
+    if (send)
+    {
+      REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 4);
+      system.clockMasterCycle();
+      REQUIRE(system.sif0DMAC().quadwordCount() == 1);
+      REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 0);
+    }
+  }
+}
+
+TEST_CASE("SIF0 completions publish before IOP admission and after EE admission",
+  "[sif][scheduling][cross-channel]")
+{
+  NekoSystem system;
+  writeIOP(system, 0, 0x34010401); // ori r1, r0, IEc | IM2
+  writeIOP(system, 4, 0x40816000); // mtc0 r1, Status
+  system.iopCore().startExecution(0xa0000000);
+  system.runMasterCycles(16);
+  system.iopInterruptController().writeMask(8);
+  system.iopInterruptController().writeControl(1);
+  source(system, 0, 0x70000000);
+  push(system, DATA);
+  system.sif0DMAC().writeMemoryAddress(0x3000);
+  system.sif0DMAC().writeQuadwordCount(1);
+  system.sif0DMAC().writeChannelControl(START);
+  system.dmacController().writeControl(1);
+  system.dmacController().writeStatus(DMACStatus::CHANNEL_5_MASK);
+  system.eeCore().setCOP0Register(EECOP0Register::Status,
+    EECOP0Status::INTERRUPT_ENABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE |
+      EECOP0Status::DMAC_MASK);
+  system.eeCore().startExecution(0xa0000000);
+  const auto nextIOP = system.iopCore().programCounter();
+  const auto retiredIOP = system.iopCore().retiredInstructions();
+  system.clockMasterCycle();
+  requireData(system);
+  REQUIRE_FALSE(system.sif0DMAC().active());
+  REQUIRE_FALSE(system.iopSIF0DMAC().active());
+  REQUIRE(system.dmacController().status() ==
+    (DMACStatus::CHANNEL_5_MASK | DMACStatus::CHANNEL_5));
+  REQUIRE(system.iopDMAController().interruptStatus(BANK) == 0x04000000);
+  REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
+  REQUIRE(system.iopCore().exceptionProgramCounter() == nextIOP);
+  REQUIRE(system.iopCore().retiredInstructions() == retiredIOP);
+  REQUIRE(system.eeCore().pendingException() == EEException::None);
+  REQUIRE((system.eeCore().cop0Register(EECOP0Register::Cause) &
+    EECOP0Cause::DMAC_PENDING) != 0);
+  const auto nextEE = system.eeCore().programCounter();
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().pendingException() == EEException::Interrupt);
+  REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == nextEE);
+  REQUIRE(system.iopCore().retiredInstructions() == retiredIOP);
+}
