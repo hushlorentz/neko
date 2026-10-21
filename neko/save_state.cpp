@@ -907,6 +907,8 @@ void NekoSaveStateCodec::commitSystem(
     source->dmacControllerComponent.stallAddressRegister;
   destination->dmacControllerComponent.interleaveSizeRegister =
     source->dmacControllerComponent.interleaveSizeRegister;
+  destination->dmacControllerComponent.sifNextDirection =
+    source->dmacControllerComponent.sifNextDirection;
 
   const auto commitScratchpadChannel =
     [](ScratchpadDMACChannel *destinationChannel,

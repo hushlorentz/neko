@@ -1213,6 +1213,7 @@ void NekoSaveStateCodec::writeDMAC(
     "controllerPriorityControlRegister",
     controller.priorityControlRegister);
   writer->writeFieldU32("controllerStallAddressRegister", controller.stallAddressRegister);
+  writer->writeFieldU8("sifNextDirection", static_cast<std::uint8_t>(controller.sifNextDirection));
   writer->writeFieldU8("sliceQuadwordsRemaining", state.sliceQuadwordsRemaining);
   writer->writeFieldBool(
     "terminateAfterPacket",
@@ -1271,6 +1272,10 @@ void NekoSaveStateCodec::readDMAC(
     reader->readFieldU32("controllerStallAddressRegister");
   reader->requireField((controller->stallAddressRegister & ~UINT32_C(0x7ffffff0)) == 0,
     "DMAC stall address is invalid");
+  const auto nextDirection = reader->readFieldU8("sifNextDirection");
+  reader->requireField(nextDirection <= static_cast<std::uint8_t>(SIFDirection::SIF1),
+    "EE SIF arbitration cursor is invalid");
+  controller->sifNextDirection = static_cast<SIFDirection>(nextDirection);
   state.sliceQuadwordsRemaining = reader->readFieldU8("sliceQuadwordsRemaining");
   reader->requireField(state.sliceStateValid(), "GIF DMAC slice continuation is invalid");
   state.terminateAfterPacket =

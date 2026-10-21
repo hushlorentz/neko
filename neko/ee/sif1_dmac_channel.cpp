@@ -104,6 +104,8 @@ SIF1DMABeatOutcome SIF1DMACChannel::transferBeat()
     case SIF1DMABeatKind::Completion:
       completeTransfer();
       return SIF1DMABeatOutcome::Completed;
+    case SIF1DMABeatKind::DestinationTag:
+      break;
   }
   throw std::logic_error("Unknown SIF1 DMA beat kind.");
 }

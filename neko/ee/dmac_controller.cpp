@@ -196,6 +196,12 @@ bool DMACController::channelEnabled(std::uint32_t channel) const
      (priorityControlRegister & (channel << 16)) != 0);
 }
 
+std::array<SIFDirection, 2> DMACController::sifGrantOrder() const
+{
+  return {{sifNextDirection, sifNextDirection == SIFDirection::SIF0 ?
+    SIFDirection::SIF1 : SIFDirection::SIF0}};
+}
+
 SIF1DMABeatOutcome DMACController::clockSIF(SIF1DMACChannel &sif1)
 {
   if (&sif1.dmacController != this)
@@ -206,7 +212,12 @@ SIF1DMABeatOutcome DMACController::clockSIF(SIF1DMACChannel &sif1)
   {
     return SIF1DMABeatOutcome::Wait;
   }
-  return sif1.transferBeat();
+  const auto result = sif1.transferBeat();
+  if (result != SIF1DMABeatOutcome::Wait)
+  {
+    sifNextDirection = SIFDirection::SIF0;
+  }
+  return result;
 }
 
 SIF0DMABeatOutcome DMACController::clockSIF(SIF0DMACChannel &sif0)
@@ -219,7 +230,12 @@ SIF0DMABeatOutcome DMACController::clockSIF(SIF0DMACChannel &sif0)
   {
     return SIF0DMABeatOutcome::Wait;
   }
-  return sif0.transferBeat();
+  const auto result = sif0.transferBeat();
+  if (result != SIF0DMABeatOutcome::Wait)
+  {
+    sifNextDirection = SIFDirection::SIF1;
+  }
+  return result;
 }
 
 void DMACController::signalChannelCompletion(

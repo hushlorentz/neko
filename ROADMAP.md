@@ -1657,11 +1657,11 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement destination tags, zero/partial packets, termination, and
       backpressure/retry using common priority/stall control, including CNTS
       publication and explicit policy for unresolved residual data.
-- [ ] Route endpoint-local completion, masks, acknowledgements, and receiver
+- [x] Route endpoint-local completion, masks, acknowledgements, and receiver
       rearming independently of SIF1 and SBUS signals; integrate both SIF0
       endpoints into the existing common-controller scheduling boundaries.
-- [ ] Extend persistence/hashing for framing and accepted continuation; cover partial tags,
-      partial qwords, cached aliases, active reset, and save/load.
+- [ ] Audit framing and accepted-continuation persistence/hashing; cover
+      partial tags, partial qwords, cached aliases, active reset, and save/load.
 - [ ] Add authored IOP-to-EE guest conformance and bounded observations;
       complete independent review and sanitizer checks.
 

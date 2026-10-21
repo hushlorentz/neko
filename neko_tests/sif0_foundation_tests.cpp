@@ -263,7 +263,7 @@ TEST_CASE("SIF0 register owners reject source-chain policy and preserve peer sta
   REQUIRE(system.iopSIF1DMAC().channelControl() == peerIOP);
 }
 
-TEST_CASE("SIF0 register owners restore without lifecycle replay or implicit grants",
+TEST_CASE("Disabled SIF0 register owners restore without lifecycle replay or grants",
   "[sif0][dma][foundation][save-state]")
 {
   NekoSystem original;
@@ -288,8 +288,6 @@ TEST_CASE("SIF0 register owners restore without lifecycle replay or implicit gra
   REQUIRE(original.eeStateHash() != eeHash);
   REQUIRE(original.iopStateHash() != iopHash);
   const auto sifHash = original.sifStateHash();
-  original.dmacController().writeControl(1);
-  original.iopDMAController().writePriority(IOPDMABank::Secondary, 0x800);
   original.runMasterCycles(17);
   REQUIRE(original.sifStateHash() == sifHash);
   REQUIRE(original.eeBus().read32(EE_QWC) == 3);

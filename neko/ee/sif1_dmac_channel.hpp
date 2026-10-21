@@ -9,20 +9,6 @@ class EEMemorySystem;
 class SIF;
 struct EEQuadword;
 
-enum class SIF1DMABeatOutcome : std::uint8_t
-{
-  Completed,
-  Wait,
-  BusError
-};
-
-enum class SIF1DMABeatKind : std::uint8_t
-{
-  SourceTag,
-  Payload,
-  Completion
-};
-
 class SIF1DMACChannel final
 {
   public:

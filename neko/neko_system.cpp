@@ -1,3 +1,4 @@
+#include <cassert>
 #include <new>
 #include <stdexcept>
 
@@ -436,10 +437,12 @@ std::uint64_t NekoSystem::eeStateHash() const
     &hash,
     dmacControllerComponent.priorityControlRegister);
   hashStateValue(&hash, dmacControllerComponent.stallAddressRegister);
+  hashStateValue(&hash, static_cast<std::uint8_t>(dmacControllerComponent.sifNextDirection));
   hashStateValue(
     &hash,
     dmacControllerComponent.statusRegister &
-      (DMACStatus::CHANNEL_6 |
+      (DMACStatus::CHANNEL_5 |
+       DMACStatus::CHANNEL_6 |
        DMACStatus::CHANNEL_8 |
        DMACStatus::CHANNEL_9 |
        DMACStatus::STALL |
@@ -447,7 +450,8 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(
     &hash,
     dmacControllerComponent.statusMaskRegister &
-      (DMACStatus::CHANNEL_6_MASK |
+      (DMACStatus::CHANNEL_5_MASK |
+       DMACStatus::CHANNEL_6_MASK |
        DMACStatus::CHANNEL_8_MASK |
        DMACStatus::CHANNEL_9_MASK));
   hashStateValue(&hash,
@@ -1000,67 +1004,127 @@ NekoSystem::captureCycleObservation() const
   };
 }
 
-void NekoSystem::clockSIF1Sender(
+void NekoSystem::clockEESIF(
   NekoObservationOrder &order, SIFDMAObservations &events)
 {
-  if (!collectingTrace || !sif1DMACComponent.transferEnabled())
+  for (const auto direction : dmacControllerComponent.sifGrantOrder())
   {
-    dmacControllerComponent.clockSIF(sif1DMACComponent);
-    return;
+    if (clockEESIFChannel(direction, order, events) != EESIFDMABeatOutcome::Wait)
+    {
+      break;
+    }
+  }
+}
+
+EESIFDMABeatOutcome NekoSystem::clockEESIFChannel(SIFDirection direction,
+  NekoObservationOrder &order, SIFDMAObservations &events)
+{
+  const bool receiver = direction == SIFDirection::SIF0;
+  const auto grant = [&]()
+  {
+    return receiver ? dmacControllerComponent.clockSIF(sif0DMACComponent) :
+      dmacControllerComponent.clockSIF(sif1DMACComponent);
+  };
+  const auto remaining = [&]()
+  {
+    return receiver ? sif0DMACComponent.quadwordCount() : sif1DMACComponent.quadwordCount();
+  };
+  const bool enabled = receiver ?
+    sif0DMACComponent.transferEnabled() : sif1DMACComponent.transferEnabled();
+  if (!collectingTrace || !enabled)
+  {
+    return grant();
   }
   namespace Trace = NekoSIFDMATrace;
+  const auto nextKind = receiver ?
+    sif0DMACComponent.nextBeatKind() : sif1DMACComponent.nextBeatKind();
   Trace::Kind kind;
-  switch (sif1DMACComponent.nextBeatKind())
+  switch (nextKind)
   {
-    case SIF1DMABeatKind::SourceTag: kind = Trace::Kind::SourceTag; break;
-    case SIF1DMABeatKind::Payload: kind = Trace::Kind::Payload; break;
-    case SIF1DMABeatKind::Completion: kind = Trace::Kind::Completion; break;
-    default: throw std::logic_error("Unknown SIF1 DMA trace beat kind.");
+    case EESIFDMABeatKind::SourceTag: kind = Trace::Kind::SourceTag; break;
+    case EESIFDMABeatKind::DestinationTag: kind = Trace::Kind::DestinationTag; break;
+    case EESIFDMABeatKind::Payload: kind = Trace::Kind::Payload; break;
+    case EESIFDMABeatKind::Completion: kind = Trace::Kind::Completion; break;
+    default: throw std::logic_error("Unknown EE SIF DMA trace beat kind.");
   }
+  assert(events.count < events.entries.size());
   auto &observation = events.entries[events.count++];
   observation.sequence = order.next++;
-  observation.event = sifDMABeat(Trace::Endpoint::EE, kind,
+  observation.event = sifDMABeat(receiver ? Trace::Endpoint::EESIF0 : Trace::Endpoint::EE, kind,
     kind == Trace::Kind::SourceTag ? sif1DMACComponent.tagAddress() :
-      sif1DMACComponent.memoryAddress(),
-    sif1DMACComponent.quadwordCount(), sifComponent.wordCount(SIFDirection::SIF1));
-  const auto result = dmacControllerComponent.clockSIF(sif1DMACComponent);
+      receiver ? sif0DMACComponent.memoryAddress() : sif1DMACComponent.memoryAddress(),
+    remaining(), sifComponent.wordCount(direction));
+  const auto result = grant();
   Trace::Outcome outcome;
   switch (result)
   {
-    case SIF1DMABeatOutcome::Completed:
-      outcome = sif1DMACComponent.active() ?
+    case EESIFDMABeatOutcome::Completed:
+      outcome = (receiver ? sif0DMACComponent.active() : sif1DMACComponent.active()) ?
         Trace::Outcome::Accepted : Trace::Outcome::Completed;
       break;
-    case SIF1DMABeatOutcome::Wait: outcome = Trace::Outcome::Wait; break;
-    case SIF1DMABeatOutcome::BusError: outcome = Trace::Outcome::Rejected; break;
-    default: throw std::logic_error("Unknown SIF1 DMA trace outcome.");
+    case EESIFDMABeatOutcome::Wait: outcome = Trace::Outcome::Wait; break;
+    case EESIFDMABeatOutcome::BusError: outcome = Trace::Outcome::Rejected; break;
+    default: throw std::logic_error("Unknown EE SIF DMA trace outcome.");
+  }
+  if (kind == Trace::Kind::DestinationTag && result == EESIFDMABeatOutcome::Completed)
+  {
+    observation.event.value1 = sif0DMACComponent.memoryAddress();
   }
   finishSIFDMABeat(observation.event, outcome,
-    result == SIF1DMABeatOutcome::BusError ? Trace::Failure::SourceBus :
+    result == EESIFDMABeatOutcome::BusError ?
+      (receiver ? Trace::Failure::DestinationBus : Trace::Failure::SourceBus) :
       Trace::Failure::None,
-    sif1DMACComponent.quadwordCount(), sifComponent.wordCount(SIFDirection::SIF1));
+    remaining(), sifComponent.wordCount(direction));
+  return result;
 }
 
-IOPDMABeatResult NekoSystem::clockSIF1Receiver(
+IOPDMABeatResult NekoSystem::clockIOPSIF(
   NekoObservationOrder &order, SIFDMAObservations &events)
 {
-  if (!collectingTrace || !iopSIF1DMAComponent.active() ||
-      !iopDMAControllerComponent.channelEnabled(IOPDMAChannel::SIF1))
+  IOPDMABeatResult result;
+  for (const auto channel : iopDMAControllerComponent.sifGrantOrder())
   {
-    return iopDMAControllerComponent.clockSIF(
-      iopSIF1DMAComponent, iopBusComponent, sifComponent);
+    result = clockIOPSIFChannel(channel, order, events);
+    if (result.outcome != IOPDMABeatOutcome::Wait)
+    {
+      break;
+    }
+  }
+  return result;
+}
+
+IOPDMABeatResult NekoSystem::clockIOPSIFChannel(IOPDMAChannel channel,
+  NekoObservationOrder &order, SIFDMAObservations &events)
+{
+  const bool source = channel == IOPDMAChannel::SIF0;
+  const auto grant = [&]()
+  {
+    return source ? iopDMAControllerComponent.clockSIF(
+      iopSIF0DMAComponent, iopBusComponent, sifComponent) :
+      iopDMAControllerComponent.clockSIF(iopSIF1DMAComponent, iopBusComponent, sifComponent);
+  };
+  const auto remaining = [&]()
+  {
+    return source ? iopSIF0DMAComponent.remainingWords() : iopSIF1DMAComponent.remainingWords();
+  };
+  const bool active = source ? iopSIF0DMAComponent.active() : iopSIF1DMAComponent.active();
+  if (!collectingTrace || !active || !iopDMAControllerComponent.channelEnabled(channel))
+  {
+    return grant();
   }
   namespace Trace = NekoSIFDMATrace;
-  const auto kind = iopSIF1DMAComponent.remainingWords() == 0 ?
-    Trace::Kind::Header : Trace::Kind::Payload;
+  const auto kind = remaining() == 0 ?
+    (source ? Trace::Kind::SourceTag : Trace::Kind::Header) : Trace::Kind::Payload;
+  const auto direction = source ? SIFDirection::SIF0 : SIFDirection::SIF1;
+  assert(events.count < events.entries.size());
   auto &observation = events.entries[events.count++];
   // Reserve before the grant can publish completion to the IOP INTC journal.
   observation.sequence = order.next++;
-  observation.event = sifDMABeat(Trace::Endpoint::IOP, kind,
-    iopSIF1DMAComponent.memoryAddress(), iopSIF1DMAComponent.remainingWords(),
-    sifComponent.wordCount(SIFDirection::SIF1));
-  const auto result = iopDMAControllerComponent.clockSIF(
-    iopSIF1DMAComponent, iopBusComponent, sifComponent);
+  observation.event = sifDMABeat(source ? Trace::Endpoint::IOPSIF0 : Trace::Endpoint::IOP, kind,
+    source ? (kind == Trace::Kind::SourceTag ? iopSIF0DMAComponent.tagAddress() :
+      iopSIF0DMAComponent.memoryAddress()) : iopSIF1DMAComponent.memoryAddress(),
+    remaining(), sifComponent.wordCount(direction));
+  const auto result = grant();
   Trace::Outcome outcome;
   switch (result.outcome)
   {
@@ -1078,6 +1142,8 @@ IOPDMABeatResult NekoSystem::clockSIF1Receiver(
       failure = Trace::Failure::UnalignedHeader; break;
     case IOPDMAFailure::DestinationWrite:
       failure = Trace::Failure::DestinationWrite; break;
+    case IOPDMAFailure::DescriptorRead: failure = Trace::Failure::DescriptorRead; break;
+    case IOPDMAFailure::SourceRead: failure = Trace::Failure::SourceRead; break;
     default: throw std::logic_error("Unknown IOP DMA trace failure.");
   }
   if (result.outcome != IOPDMABeatOutcome::Wait)
@@ -1085,7 +1151,7 @@ IOPDMABeatResult NekoSystem::clockSIF1Receiver(
     observation.event.value1 = result.address;
   }
   finishSIFDMABeat(observation.event, outcome, failure,
-    iopSIF1DMAComponent.remainingWords(), sifComponent.wordCount(SIFDirection::SIF1));
+    remaining(), sifComponent.wordCount(direction));
   return result;
 }
 
@@ -1128,13 +1194,13 @@ void NekoSystem::clockMasterCycle()
     beforeCycle = captureCycleObservation();
   }
   masterClock.clock();
-  clockSIF1Sender(observationScope.order, dmaObservations);
+  clockEESIF(observationScope.order, dmaObservations);
   latchComponentInterrupts();
   publishEEInterruptLines();
   advanceIOPTimers(iopClockPulse);
   if (iopClockPulse)
   {
-    const auto transfer = clockSIF1Receiver(observationScope.order, dmaObservations);
+    const auto transfer = clockIOPSIF(observationScope.order, dmaObservations);
     if (transfer.outcome == IOPDMABeatOutcome::Rejected)
     {
       if (collectingTrace)

@@ -75,12 +75,13 @@ class IOPDMAController final
     void writeInterrupt(IOPDMABank bank, IOPWord value);
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
+    std::array<IOPDMAChannel, 2> sifGrantOrder() const;
     IOPDMABeatResult inspectSIF(
       const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
     IOPDMABeatResult clockSIF(IOPSIF1DMAChannel &channel, IOPBus &bus, SIF &sif);
     IOPDMABeatResult inspectSIF(
       const IOPSIF0DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
-    // One explicitly requested source grant; automatic arbitration is separate.
+    // One explicitly requested endpoint grant; no peer stepping.
     IOPDMABeatResult clockSIF(IOPSIF0DMAChannel &channel, IOPBus &bus, SIF &sif);
     void signalChannelCompletion(IOPDMAChannel channel);
     // Derived DMA request, not the independently acknowledged INTC latch.
@@ -107,6 +108,7 @@ class IOPDMAController final
 
     IOPInterruptController &interrupts;
     std::array<Bank, 2> banks = {};
+    IOPDMAChannel sifNextChannel = IOPDMAChannel::SIF0;
 };
 
 #endif

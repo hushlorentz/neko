@@ -522,6 +522,7 @@ TEST_CASE("IOP device observation capacities retain every sample and CPU access"
   }
   timers.readMode(0);
   timers.writeCount(0, 0);
+  interrupts.assertSource(IOPInterruptSource::DMAC);
   interrupts.writeMask(0x1c070);
   interrupts.writeControl(1);
   REQUIRE(Access::count(timers) == Access::timerCapacity());

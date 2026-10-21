@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_43_PREPARED_STATE_SIZE = 39952007;
+    VERSION_44_PREPARED_STATE_SIZE = 39952009;
   constexpr std::uint64_t
-    VERSION_43_PREPARED_STATE_HASH =
-      UINT64_C(0x19e7c8e787b4fa4f);
+    VERSION_44_PREPARED_STATE_HASH =
+      UINT64_C(0x1d02829de0631940);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 43 save-state layout is byte-stable")
+TEST_CASE("Version 44 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,14 @@ TEST_CASE("Version 43 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 43);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 44);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_43_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_44_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_43_PREPARED_STATE_HASH);
+    VERSION_44_PREPARED_STATE_HASH);
 }
 
 TEST_CASE("Save-state ROM compatibility preserves independent bus configurations",

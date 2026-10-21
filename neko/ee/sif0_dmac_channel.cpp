@@ -28,6 +28,16 @@ bool SIF0DMACChannel::transferEnabled() const
   return active() && dmacController.channelEnabled(DMACStatus::CHANNEL_5);
 }
 
+EESIFDMABeatKind SIF0DMACChannel::nextBeatKind() const
+{
+  if (channelState.hasPendingQuadword())
+  {
+    return EESIFDMABeatKind::Payload;
+  }
+  return channelState.normalMode() ?
+    EESIFDMABeatKind::Completion : EESIFDMABeatKind::DestinationTag;
+}
+
 std::uint32_t SIF0DMACChannel::channelControl() const
 {
   return channelState.channelControl();

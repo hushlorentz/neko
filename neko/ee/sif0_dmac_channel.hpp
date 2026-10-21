@@ -9,13 +9,6 @@ class EEBus;
 class EEMemorySystem;
 struct EEQuadword;
 
-enum class SIF0DMABeatOutcome : std::uint8_t
-{
-  Completed,
-  Wait,
-  BusError
-};
-
 class SIF0DMACChannel final
 {
   public:
@@ -26,6 +19,7 @@ class SIF0DMACChannel final
 
     bool active() const;
     bool transferEnabled() const;
+    EESIFDMABeatKind nextBeatKind() const;
     std::uint32_t channelControl() const;
     void writeChannelControl(std::uint32_t value);
     std::uint32_t memoryAddress() const;

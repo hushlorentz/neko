@@ -65,10 +65,10 @@ namespace NekoSIFTrace
 
 namespace NekoSIFDMATrace
 {
-  enum class Endpoint : std::uint8_t { EE = 0, IOP = 1 };
+  enum class Endpoint : std::uint8_t { EE = 0, IOP = 1, EESIF0 = 2, IOPSIF0 = 3 };
   enum class Kind : std::uint8_t
   {
-    SourceTag = 0, Header = 1, Payload = 2, Completion = 3
+    SourceTag = 0, Header = 1, Payload = 2, Completion = 3, DestinationTag = 4
   };
   enum class Outcome : std::uint8_t
   {
@@ -76,7 +76,8 @@ namespace NekoSIFDMATrace
   };
   enum class Failure : std::uint8_t
   {
-    None = 0, SourceBus = 1, UnalignedHeader = 2, DestinationWrite = 3
+    None = 0, SourceBus = 1, UnalignedHeader = 2, DestinationWrite = 3,
+    DestinationBus = 4, DescriptorRead = 5, SourceRead = 6
   };
   constexpr std::uint8_t KIND_SHIFT = 8;
   constexpr std::uint8_t OUTCOME_SHIFT = 16;
@@ -432,10 +433,12 @@ struct NekoTraceEvent
 //   observes scheduled writes only; inspection and register polling add no noise.
 // SIF/DMABeat: endpoint | kind << 8 | outcome << 16 | failure << 24,
 //   attempted address (including the EE SPR selector), remaining count
-//   (before in bits 31:0, after in bits 63:32), SIF1 queued-word count (same pair).
-//   Remaining count is EE QWC or IOP packet words. A source-tag grant does not
-//   enqueue its tag. Completion is endpoint-local, not peer drain.
-//   At most one EE and one IOP record per cycle, only for eligible grants;
+//   (before in bits 31:0, after in bits 63:32), directional queue count (same pair).
+//   Remaining count is EE QWC or IOP packet words. EE source-tag grants do not
+//   enqueue tags; IOP source-tag grants enqueue the full EE prologue.
+//   Completion is endpoint-local, not peer drain.
+//   At most two EE and two IOP attempts per cycle, only for eligible grants;
+//   a waiting candidate may be bypassed, but only one transition per side accepts.
 //   waits are per grant, not per host read or disabled/idle channel.
 //   A waiting header uses current IOP MADR until a complete header is available.
 //   Rejected IOP grants publish the executed cycle prefix before throwing,

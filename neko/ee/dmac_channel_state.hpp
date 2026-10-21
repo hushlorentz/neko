@@ -5,6 +5,25 @@
 #include <cstddef>
 #include <cstdint>
 
+enum class EESIFDMABeatOutcome : std::uint8_t
+{
+  Completed,
+  Wait,
+  BusError
+};
+
+enum class EESIFDMABeatKind : std::uint8_t
+{
+  SourceTag,
+  Payload,
+  Completion,
+  DestinationTag
+};
+
+using SIF0DMABeatOutcome = EESIFDMABeatOutcome;
+using SIF1DMABeatOutcome = EESIFDMABeatOutcome;
+using SIF1DMABeatKind = EESIFDMABeatKind;
+
 enum class DMACTagID : std::uint8_t
 {
   ReferenceEnd = 0,

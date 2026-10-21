@@ -284,12 +284,15 @@ class NekoSystem
 
     struct SIFDMAObservations
     {
-      std::array<SIFDMAObservation, 2> entries = {};
+      std::array<SIFDMAObservation, 4> entries = {};
       std::size_t count = 0;
     };
 
-    void clockSIF1Sender(NekoObservationOrder &order, SIFDMAObservations &events);
-    IOPDMABeatResult clockSIF1Receiver(
+    void clockEESIF(NekoObservationOrder &order, SIFDMAObservations &events);
+    EESIFDMABeatOutcome clockEESIFChannel(SIFDirection direction,
+      NekoObservationOrder &order, SIFDMAObservations &events);
+    IOPDMABeatResult clockIOPSIF(NekoObservationOrder &order, SIFDMAObservations &events);
+    IOPDMABeatResult clockIOPSIFChannel(IOPDMAChannel channel,
       NekoObservationOrder &order, SIFDMAObservations &events);
     void latchComponentInterrupts();
     void publishEEInterruptLines();

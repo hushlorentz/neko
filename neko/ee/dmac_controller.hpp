@@ -1,13 +1,14 @@
 #ifndef DMAC_CONTROLLER_HPP
 #define DMAC_CONTROLLER_HPP
 
+#include <array>
 #include <cstdint>
 
+#include "dmac_channel_state.hpp"
+#include "sif.hpp"
+
 class SIF1DMACChannel;
-class DMACChannelState;
-enum class SIF1DMABeatOutcome : std::uint8_t;
 class SIF0DMACChannel;
-enum class SIF0DMABeatOutcome : std::uint8_t;
 
 namespace DMACControl
 {
@@ -81,8 +82,9 @@ class DMACController
     std::uint8_t interleaveTransferQWC() const;
     bool enabled() const;
     bool channelEnabled(std::uint32_t channel) const;
+    std::array<SIFDirection, 2> sifGrantOrder() const;
     SIF1DMABeatOutcome clockSIF(SIF1DMACChannel &sif1);
-    // One explicitly requested normal receiver grant; no peer stepping.
+    // One explicitly requested endpoint grant; no peer stepping.
     SIF0DMABeatOutcome clockSIF(SIF0DMACChannel &sif0);
     void signalChannelCompletion(std::uint32_t channel);
     void signalBusError(std::uint32_t channel);
@@ -98,6 +100,7 @@ class DMACController
     std::uint32_t priorityControlRegister = 0;
     std::uint32_t stallAddressRegister = 0;
     std::uint32_t interleaveSizeRegister = 0;
+    SIFDirection sifNextDirection = SIFDirection::SIF0;
 };
 
 #endif

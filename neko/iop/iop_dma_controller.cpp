@@ -115,6 +115,17 @@ std::uint8_t IOPDMAController::channelPriority(IOPDMAChannel channel) const
     (banks[1].priority >> (4 * channelSlot(channel))) & 7);
 }
 
+std::array<IOPDMAChannel, 2> IOPDMAController::sifGrantOrder() const
+{
+  const auto sourcePriority = channelPriority(IOPDMAChannel::SIF0);
+  const auto receiverPriority = channelPriority(IOPDMAChannel::SIF1);
+  const bool sourceFirst = sourcePriority < receiverPriority ||
+    (sourcePriority == receiverPriority && sifNextChannel == IOPDMAChannel::SIF0);
+  return sourceFirst ?
+    std::array<IOPDMAChannel, 2>{{IOPDMAChannel::SIF0, IOPDMAChannel::SIF1}} :
+    std::array<IOPDMAChannel, 2>{{IOPDMAChannel::SIF1, IOPDMAChannel::SIF0}};
+}
+
 void IOPDMAController::validateSIFWiring(
   const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const
 {
@@ -145,6 +156,11 @@ IOPDMABeatResult IOPDMAController::clockSIF(
     return {};
   }
   const auto result = channel.transferBeat(bus, sif);
+  if (result.outcome == IOPDMABeatOutcome::Accepted ||
+      result.outcome == IOPDMABeatOutcome::Completed)
+  {
+    sifNextChannel = IOPDMAChannel::SIF0;
+  }
   if (result.outcome == IOPDMABeatOutcome::Completed)
   {
     signalChannelCompletion(IOPDMAChannel::SIF1);
@@ -192,6 +208,11 @@ IOPDMABeatResult IOPDMAController::clockSIF(
     return result;
   }
   const auto result = channel.transferBeat(bus, sif);
+  if (result.outcome == IOPDMABeatOutcome::Accepted ||
+      result.outcome == IOPDMABeatOutcome::Completed)
+  {
+    sifNextChannel = IOPDMAChannel::SIF1;
+  }
   if (result.outcome == IOPDMABeatOutcome::Completed)
   {
     signalChannelCompletion(IOPDMAChannel::SIF0);
