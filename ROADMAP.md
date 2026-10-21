@@ -1660,7 +1660,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Route endpoint-local completion, masks, acknowledgements, and receiver
       rearming independently of SIF1 and SBUS signals; integrate both SIF0
       endpoints into the existing common-controller scheduling boundaries.
-- [ ] Audit framing and accepted-continuation persistence/hashing; cover
+- [x] Audit framing and accepted-continuation persistence/hashing; cover
       partial tags, partial qwords, cached aliases, active reset, and save/load.
 - [ ] Add authored IOP-to-EE guest conformance and bounded observations;
       complete independent review and sanitizer checks.
