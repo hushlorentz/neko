@@ -1,3 +1,4 @@
+#include "bios_startup_command.hpp"
 #include "save_state_commands.hpp"
 
 #include <iostream>
@@ -6,11 +7,11 @@
 
 int main(int argumentCount, const char *argumentValues[])
 {
-  if (argumentCount < 2 ||
-      std::string(argumentValues[1]) != "save-state")
+  if (argumentCount < 2)
   {
     std::cerr <<
-      "Usage: neko save-state <inspect|locate|diff> ...\n";
+      "Usage: neko save-state <inspect|locate|diff> ...\n"
+      "       neko bios-startup <file> --cycles <count>\n";
     return 2;
   }
 
@@ -19,8 +20,15 @@ int main(int argumentCount, const char *argumentValues[])
   {
     arguments.emplace_back(argumentValues[index]);
   }
-  return neko_cli::runSaveStateCommand(
-    arguments,
-    std::cout,
-    std::cerr);
+  const std::string command = argumentValues[1];
+  if (command == "save-state")
+  {
+    return neko_cli::runSaveStateCommand(arguments, std::cout, std::cerr);
+  }
+  if (command == "bios-startup")
+  {
+    return neko_cli::runBIOSStartupCommand(arguments, std::cout, std::cerr);
+  }
+  std::cerr << "Unknown command: " << command << '\n';
+  return 2;
 }

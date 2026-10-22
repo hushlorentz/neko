@@ -60,6 +60,19 @@ does not load older snapshots.
 Host-side dual-CPU startup snapshots and opt-in bounded-run summaries are
 available through the [startup diagnostics API](neko_diagnostics/startup_diagnostics.md).
 
+Run a bounded dual-CPU cold-start diagnostic with an external, legally dumped
+4 MiB BIOS:
+
+```sh
+./out/check/neko bios-startup path/to/bios.bin --cycles 1000000
+```
+
+This headless command releases both reset-vector CPUs and emits JSON lines
+identifying the ROM and reporting the actual startup state. Status 0 means
+the master-cycle ceiling was reached, 1 means a CPU host stop, and 2 means
+an argument, file, or runtime error. None establishes a successful BIOS
+handshake or boot. A zero ceiling releases both CPUs without executing.
+
 ## Tests
 
 Run the complete optimized, assertion-enabled test and repository check:

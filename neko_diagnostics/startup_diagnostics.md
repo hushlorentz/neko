@@ -116,3 +116,31 @@ normal ostream error reporting. Unknown serialized enum values throw
 allocates only when explicitly requested; inspection uses fixed-size values.
 Nothing is automatically printed or attached to core runner results, and
 the existing EE-only `--bios` frontend is unchanged.
+
+## Headless discovery command
+
+`neko bios-startup <file> --cycles <count>` wraps the cold-start API without
+changing its execution policy. The ceiling is required and accepts an unsigned
+64-bit decimal integer, including zero. The image must be exactly 4 MiB.
+Both CPUs start at their reset vectors with the ordinary reset state and
+shared ROM; no guest registers, RAM, readiness flags, or replies are seeded.
+
+The first JSON line has `type: "bios_startup_input"`, `rom_bytes`,
+`rom_fnv1a64` (a fixed-width hexadecimal compatibility fingerprint, **not a
+cryptographic digest**), `max_master_cycles`, and
+`start: "cold_dual_reset_vectors"`. The second is the existing
+`startup_run_summary`. No ROM bytes or filenames are included.
+
+Status 0 means budget exhaustion (including a zero-budget release), not
+successful startup; status 1 means the runner returned a CPU host stop.
+Status 2 reports invalid arguments, file errors, or runtime/output errors
+on stderr. A runtime exception need not produce a summary. Guest exception
+handlers still execute under the existing runner policy: the ending snapshot
+is retained state, not the first rejected-access history or proof of deadlock.
+No tracing or per-cycle inspection is enabled by this command.
+
+The snapshot's DMA inventory remains the subset described above; it does
+not enumerate EE SIF0/SIF1 or IOP SIF0 engines. Use the owners' inspection APIs
+and existing ordered traces when those details are needed. The command does
+not infer an exact guest request/response checkpoint from ending register
+values.

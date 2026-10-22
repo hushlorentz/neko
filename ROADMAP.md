@@ -1682,8 +1682,27 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### Deterministic BIOS Startup Boundary
 
-- [ ] Pin the supplied BIOS identity, cycle budget, and exact guest-produced
-      request/response checkpoint; retain ROM bytes outside tracked fixtures.
+- [x] Pin the supplied BIOS identity, bounded discovery budget, and cold-start
+      configuration; record the first CPU stop or budget-boundary state without
+      claiming a handshake. Retain ROM bytes outside tracked fixtures.
+- [ ] Add opt-in ordered BIOS trace export with an explicit collection limit
+      and truncation reporting, preserving startup, budgets, and guest
+      exception-handler execution.
+- [ ] Decode the first failed access/rejected instruction with CPU, instruction,
+      delay-slot, address/route, and exception context; retain available evidence
+      on runtime errors and identify incomplete-cycle prefixes.
+- [ ] Complete side-effect-free SIF snapshots for EE DMA5/6 and IOP DMA9/10,
+      including continuation, common-controller eligibility, and arbitration
+      state without inferring readiness or deadlock.
+- [ ] Add BIOS-free diagnostic regressions for attribution, ordering, limits,
+      errors, and observational equivalence; complete independent review and
+      the optimized repository check before dependency classification.
+- [ ] Classify discovered pre-handshake dependencies against the approved
+      contract; obtain scope approval and split prerequisite work into testable
+      items before extending hardware.
+- [ ] Pin the exact guest-produced request/peer-response checkpoint, including
+      flags or packets and CPU PCs; keep the handshake target incomplete until
+      its guest behavior is identified.
 - [ ] Advance both CPUs through real startup/SIF execution without fabricated
       readiness, RPC responses, skipped instructions, or generic device stubs.
 - [ ] Triage each earlier stop against the approved contract; explicitly review

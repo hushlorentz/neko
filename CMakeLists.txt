@@ -210,6 +210,7 @@ target_include_directories(neko_diagnostics
 target_link_libraries(neko_diagnostics PUBLIC neko_core)
 
 add_library(neko_cli_support
+    neko_cli/bios_startup_command.cpp
     neko_cli/save_state_commands.cpp
 )
 target_include_directories(neko_cli_support
@@ -226,6 +227,7 @@ add_executable(neko_tests
     neko_tests/desktop_options_tests.cpp
     neko_tests/elf_runner_tests.cpp
     neko_tests/dual_cpu_bios_tests.cpp
+    neko_tests/bios_startup_command_tests.cpp
     neko_tests/boot_lifecycle_tests.cpp
     neko_tests/boot_conformance_tests.cpp
     neko_tests/iop/iop_dma_tests.cpp
