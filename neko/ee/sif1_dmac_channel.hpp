@@ -20,6 +20,7 @@ class SIF1DMACChannel final
     bool active() const;
     bool transferEnabled() const;
     SIF1DMABeatKind nextBeatKind() const;
+    DMACChannelContinuation continuation() const;
     std::uint32_t channelControl() const;
     void writeChannelControl(std::uint32_t value);
     std::uint32_t memoryAddress() const;

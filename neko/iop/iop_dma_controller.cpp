@@ -126,6 +126,11 @@ std::array<IOPDMAChannel, 2> IOPDMAController::sifGrantOrder() const
     std::array<IOPDMAChannel, 2>{{IOPDMAChannel::SIF1, IOPDMAChannel::SIF0}};
 }
 
+IOPDMAChannel IOPDMAController::sifTieBreakChannel() const
+{
+  return sifNextChannel;
+}
+
 void IOPDMAController::validateSIFWiring(
   const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const
 {

@@ -49,25 +49,30 @@ The snapshot contains:
 - EE rejected-instruction and retained exception metadata; the IOP's last-step
   exception entry event and retained rejected physical-store details.
 - Canonical SIF mailboxes, flags, raw CTRL, IOP doorbell, directional word
-  counts, shared free-word count, and SIF0 packing cursor.
-- EE DMAC control/status/interleave size and interrupt output, plus implemented
-  channels 1 (VIF1), 2 (GIF), 8 (fromSPR), and 9 (toSPR).
+  counts, shared free-word count, and SIF0 packing cursor/latch.
+- EE DMAC control/status/interleave size, priority control, stall address,
+  interrupt output, and SIF grant order, plus implemented channels 1 (VIF1),
+  2 (GIF), 5 (SIF0), 6 (SIF1), 8 (fromSPR), and 9 (toSPR).
 - EE/IOP INTC latches, masks, request outputs, and IOP control enable.
   DMAC and EE INTC request outputs remain separate; these are not claims that
   the CPU has admitted an interrupt.
-- Both IOP DMA banks' priority/interrupt words and aggregate request, plus
-  channel 10's control, MADR, BCR, packet remainder, terminal bit, enable, and
-  side-effect-free next-beat inspection.
+- Both IOP DMA banks' priority/interrupt words and aggregate request, effective
+  SIF grant order and retained tie-break channel, plus channels 9 (SIF0) and
+  10 (SIF1): control, MADR, BCR, applicable TADR, packet remainder, terminal bit,
+  active/enable state, priority, and side-effect-free next-beat inspection.
 
 Run progress is **per call**: EE instruction counts are accepted instructions,
 IOP instruction counts are retired instructions. Snapshot cycle/retirement
 counts are **absolute**, not per-call deltas.
 
-`clockEligible` reports a DMA owner's `clockActive()` condition, not guaranteed
+`clockEligible` reports a DMA owner's clock eligibility (`clockActive()` for
+the existing non-SIF engines, `transferEnabled()` for EE SIF), not guaranteed
 progress or sink readiness. An asserted channel START with DMA disabled is
-controller-gated. `lastTransferStalled` is the retained last-attempt flag for
+controller-gated. EE SIF additionally distinguishes active START from the
+common controller's channel enable, including D_PCR gating.
+`lastTransferStalled` is the retained last-attempt flag for
 VIF1/GIF; it may remain set after the controller is disabled or the sink changes.
-Scratchpad channels do not expose a last-stall flag. SIF counts show
+Scratchpad and SIF channels do not expose a last-stall flag. SIF counts show
 empty/full/partially occupied storage, not a decoded guest wait reason.
 For IOP SIF1, zero `remainingWords` means awaiting a four-word header while TR
 is set; a nonzero remainder means payload. `nextBeat` is the result of a
@@ -77,8 +82,40 @@ otherwise it means insufficient header/payload words. `accepted` is one
 nonterminal grant, `completed` is a terminal grant, and `rejected` identifies
 an unaligned header or invalid RAM destination. Address, value, and bus status
 describe that available header word or 32-bit physical payload write; they are
-zero/default when waiting. Header acceptance does not prevalidate payload
-memory, and inspection never performs a write or consumes queued words.
+zero/default when the receiver is waiting. Header acceptance does not
+prevalidate payload memory, and inspection never performs a write or consumes
+queued words.
+
+EE SIF snapshots include the owner's structural `nextBeatKind` (source tag,
+destination tag, payload, or completion) and a copied `DMACChannelContinuation`.
+The terminal field is the retained terminate-after-packet flag, not a new
+completion prediction; normal transfers also end when QWC reaches zero.
+SIF0 exposes whether its destination packet was accepted, distinguishing it
+from preloaded QWC before a tag. SIF1 exposes the remaining QWC of an already
+admitted stall slice. These facts are not reconstructed from retained CHCR
+tag bits, and they reset with their owner's existing completion/abort rules.
+Neither structural beat kind nor eligibility validates an EE address or
+predicts a transport, scratchpad, or stall-control grant.
+
+For IOP SIF0, zero `remainingWords` selects the six-word descriptor/prologue
+phase; otherwise the endpoint is sending individual payload words.
+`nextBeat` uses the common controller's existing const inspection path for
+both IOP channels. A source rejection identifies a descriptor read, unaligned
+source address, or payload read. A source wait may retain attempted RAM
+address/value evidence because source validation precedes transport admission;
+it need not have zero fields. Inspection does not advance TADR, consume a
+descriptor, write memory, change continuation, or latch completion/interrupts.
+BCR remains a raw stored register, not the packet remainder.
+
+Grant orders are the existing owners' candidate order at inspection time,
+including gated or inactive endpoints, not two promised grants. The scheduler
+accepts at most one EE SIF grant per master cycle and one IOP SIF grant per IOP
+pulse. The EE order reflects its rotating preference; the IOP order applies
+channel priority first, then its retained tie breaker. The separately reported
+IOP tie-break channel can therefore differ from the first candidate while
+priorities are unequal. No polling, readiness, arbitration victory, or deadlock
+is inferred from these values. SIF0's packing latch is included because its
+retained lanes determine final partial-quadword fill.
 
 There is no inferred polling-loop detection, deadlock verdict, synthetic
 readiness, placeholder IOP DMA state, or per-poll log. Scheduled IOP SIF1
@@ -107,10 +144,24 @@ Run records have `type: "startup_run_summary"`, `run`, and `snapshot`.
 named accepted/retired instruction counts. Enum names are lowercase strings;
 store width is in bytes. An absent IOP store failure is JSON `null`.
 
-The DMA array order is 1, 2, 8, 9. Channel 8 has no TADR; only channels 8/9
-have SADR. These absent JSON registers are `null` (the corresponding C++
-snapshot fields are zero and not applicable). No unimplemented channel is
-reported as an idle engine.
+The DMA array order is 1, 2, 8, 9, 5, 6, preserving the earlier four indices.
+Channels 5/8 have no TADR; only channels 8/9 have SADR. These absent JSON
+registers are `null` (the corresponding C++ snapshot fields are zero and not
+applicable). No unimplemented channel is reported as an idle engine.
+EE channels 5/6 add a `sif` object with `active`, `enabled`, `next_beat_kind`,
+and `continuation` (`terminal`, `destination_packet_accepted`,
+`slice_qwc_remaining`). The destination-packet flag is null on SIF1, the slice
+remainder is null on SIF0, and `last_transfer_stalled` is null on both.
+
+`dmac` adds `priority_control`, `stall_address`, and `sif_grant_order` (direction
+names). `iop_dma` adds `sif0` beside the existing `sif1`, `sif_grant_order`
+(channel numbers), and `sif_tie_break_channel`. Each endpoint includes its
+registers, `remaining_words`, `terminal`, `active`, `enabled`, `priority`, and
+`next_beat`; TADR is null on channel 10. `sif` adds `packing_latch`, four words
+in lane order. These are additive JSON fields and endpoints; the record types
+and existing field meanings remain unchanged. In C++, the former flat IOP
+channel-10 fields now live under `StartupIOPDMASummary::sif1`; `sif0` has the
+same focused channel-summary type.
 
 Writers preserve the destination stream's formatting and locale, and use
 normal ostream error reporting. Unknown named snapshot enum values throw
@@ -144,11 +195,9 @@ handlers still execute under the existing runner policy: the ending snapshot
 is retained state, not the first rejected-access history or proof of deadlock.
 No tracing is enabled unless `--trace-events` is supplied.
 
-The snapshot's DMA inventory remains the subset described above; it does
-not enumerate EE SIF0/SIF1 or IOP SIF0 engines. Use the owners' inspection APIs
-and existing ordered traces when those details are needed. The command does
-not infer an exact guest request/response checkpoint from ending register
-values.
+The snapshot includes all four implemented SIF DMA endpoints and their common
+controller evidence. It does not infer an exact guest request/response
+checkpoint from ending register values.
 
 ## Bounded trace export
 

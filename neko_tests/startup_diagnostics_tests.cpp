@@ -92,6 +92,7 @@ TEST_CASE("Startup inspection preserves live state including side-effecting regi
     REQUIRE(summary.sif.sif1Words == 4);
     REQUIRE(summary.sif.freeWords == 23);
     REQUIRE(summary.sif.packingCursor == 1);
+    REQUIRE((summary.sif.packingLatch == SIFQuadword{{9, 6, 7, 8}}));
     REQUIRE(summary.eeInterrupts.status == 2);
     REQUIRE(summary.eeInterrupts.mask == 2);
     REQUIRE(summary.eeInterrupts.pending);
@@ -103,7 +104,7 @@ TEST_CASE("Startup inspection preserves live state including side-effecting regi
       (DMACStatus::CHANNEL_8 | DMACStatus::CHANNEL_8_MASK));
     REQUIRE(summary.dmac.interleaveSize == 0x00020003);
     REQUIRE(summary.dmac.interruptPending);
-    REQUIRE(summary.dmac.channels.size() == 4);
+    REQUIRE(summary.dmac.channels.size() == 6);
     REQUIRE(summary.dmac.channels[0].channel == 1);
     REQUIRE(summary.dmac.channels[1].channel == 2);
     const auto &from = summary.dmac.channels[2];
@@ -369,8 +370,10 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"("delay_slot":false,"coprocessor":0},"store_failure":null,)"
     R"("status":0,"cause":0,"epc":0,"bad_vaddr":0},"sif":{"mscom":0,"smcom":0,)"
     R"("msflag":0,"smflag":0,"control":0,"iop_doorbell":0,"sif0_words":0,)"
-    R"("sif1_words":0,"free_words":0,"packing_cursor":0},"dmac":{"control":0,)"
-    R"("status":0,"interleave_size":0,"interrupt_pending":false,"channels":[)"
+    R"("sif1_words":0,"free_words":0,"packing_cursor":0,"packing_latch":[0,0,0,0]},)"
+    R"("dmac":{"control":0,)"
+    R"("status":0,"interleave_size":0,"interrupt_pending":false,)"
+    R"("priority_control":0,"stall_address":0,"sif_grant_order":["sif0","sif1"],"channels":[)"
     R"({"channel":1,"control":0,"madr":0,"qwc":0,"tadr":0,"sadr":null,)"
     R"("clock_eligible":false,"last_transfer_stalled":false},)"
     R"({"channel":2,"control":0,"madr":0,"qwc":0,"tadr":0,"sadr":null,)"
@@ -378,10 +381,24 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"({"channel":8,"control":0,"madr":0,"qwc":0,"tadr":null,"sadr":0,)"
     R"("clock_eligible":false,"last_transfer_stalled":false},)"
     R"({"channel":9,"control":0,"madr":0,"qwc":0,"tadr":0,"sadr":0,)"
-    R"("clock_eligible":false,"last_transfer_stalled":false}]},)"
+    R"("clock_eligible":false,"last_transfer_stalled":false},)"
+    R"({"channel":5,"control":0,"madr":0,"qwc":0,"tadr":null,"sadr":null,)"
+    R"("clock_eligible":false,"last_transfer_stalled":null,"sif":{"active":false,)"
+    R"("enabled":false,"next_beat_kind":"completion","continuation":{"terminal":false,)"
+    R"("destination_packet_accepted":false,"slice_qwc_remaining":null}}},)"
+    R"({"channel":6,"control":0,"madr":0,"qwc":0,"tadr":0,"sadr":null,)"
+    R"("clock_eligible":false,"last_transfer_stalled":null,"sif":{"active":false,)"
+    R"("enabled":false,"next_beat_kind":"completion","continuation":{"terminal":false,)"
+    R"("destination_packet_accepted":null,"slice_qwc_remaining":0}}}]},)"
     R"("iop_dma":{"priority":[0,0],"interrupt_status":[0,0],)"
-    R"("interrupt_pending":false,"sif1":{"channel":10,"control":0,"madr":0,)"
-    R"("bcr":0,"remaining_words":0,"terminal":false,"enabled":false,)"
+    R"("interrupt_pending":false,"sif_grant_order":[9,10],"sif_tie_break_channel":9,)"
+    R"("sif0":{"channel":9,"control":0,"madr":0,"bcr":0,"tadr":0,"remaining_words":0,)"
+    R"("terminal":false,"active":false,"enabled":false,"priority":0,)"
+    R"("next_beat":{"outcome":"wait","failure":"none","address":0,)"
+    R"("value":0,"bus_status":"completed"}},)"
+    R"("sif1":{"channel":10,"control":0,"madr":0,)"
+    R"("bcr":0,"tadr":null,"remaining_words":0,"terminal":false,"active":false,)"
+    R"("enabled":false,"priority":0,)"
     R"("next_beat":{"outcome":"wait","failure":"none","address":0,)"
     R"("value":0,"bus_status":"completed"}}},)"
     R"("ee_interrupts":{"status":0,"mask":0,"pending":false},)"
@@ -419,23 +436,23 @@ TEST_CASE("Startup IOP DMA inspection reports current packet waits and rejection
   REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x01000400) ==
     IOPDMAWriteOutcome::Completed);
   auto snapshot = inspectStartup(system);
-  REQUIRE(snapshot.iopDMA.control == 0x01000400);
-  REQUIRE_FALSE(snapshot.iopDMA.enabled);
-  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Wait);
+  REQUIRE(snapshot.iopDMA.sif1.control == 0x01000400);
+  REQUIRE_FALSE(snapshot.iopDMA.sif1.enabled);
+  REQUIRE(snapshot.iopDMA.sif1.nextBeat.outcome == IOPDMABeatOutcome::Wait);
   system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x8000);
   snapshot = inspectStartup(system);
-  REQUIRE(snapshot.iopDMA.enabled);
-  REQUIRE(snapshot.iopDMA.remainingWords == 0);
-  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Wait);
+  REQUIRE(snapshot.iopDMA.sif1.enabled);
+  REQUIRE(snapshot.iopDMA.sif1.remainingWords == 0);
+  REQUIRE(snapshot.iopDMA.sif1.nextBeat.outcome == IOPDMABeatOutcome::Wait);
   REQUIRE(system.sif().pushSIF1Quadword({{0x80800000, 4, 0, 0}}) ==
     SIFTransferOutcome::Completed);
   snapshot = inspectStartup(system);
-  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Accepted);
+  REQUIRE(snapshot.iopDMA.sif1.nextBeat.outcome == IOPDMABeatOutcome::Accepted);
   system.clockMasterCycle();
   snapshot = inspectStartup(system);
-  REQUIRE(snapshot.iopDMA.remainingWords == 4);
-  REQUIRE(snapshot.iopDMA.terminal);
-  REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Wait);
+  REQUIRE(snapshot.iopDMA.sif1.remainingWords == 4);
+  REQUIRE(snapshot.iopDMA.sif1.terminal);
+  REQUIRE(snapshot.iopDMA.sif1.nextBeat.outcome == IOPDMABeatOutcome::Wait);
   REQUIRE(system.sif().pushSIF1Quadword({{0x11223344, 2, 3, 4}}) ==
     SIFTransferOutcome::Completed);
   system.startTrace();
@@ -444,12 +461,12 @@ TEST_CASE("Startup IOP DMA inspection reports current packet waits and rejection
   for (unsigned repeat = 0; repeat < 2; ++repeat)
   {
     snapshot = inspectStartup(system);
-    REQUIRE(snapshot.iopDMA.memoryAddress == 0x800000);
-    REQUIRE(snapshot.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Rejected);
-    REQUIRE(snapshot.iopDMA.nextBeat.failure == IOPDMAFailure::DestinationWrite);
-    REQUIRE(snapshot.iopDMA.nextBeat.address == 0x800000);
-    REQUIRE(snapshot.iopDMA.nextBeat.value == 0x11223344);
-    REQUIRE(snapshot.iopDMA.nextBeat.status == IOPBusStatus::Unmapped);
+    REQUIRE(snapshot.iopDMA.sif1.memoryAddress == 0x800000);
+    REQUIRE(snapshot.iopDMA.sif1.nextBeat.outcome == IOPDMABeatOutcome::Rejected);
+    REQUIRE(snapshot.iopDMA.sif1.nextBeat.failure == IOPDMAFailure::DestinationWrite);
+    REQUIRE(snapshot.iopDMA.sif1.nextBeat.address == 0x800000);
+    REQUIRE(snapshot.iopDMA.sif1.nextBeat.value == 0x11223344);
+    REQUIRE(snapshot.iopDMA.sif1.nextBeat.status == IOPBusStatus::Unmapped);
     std::ostringstream output;
     writeStartupSummaryJsonLine(output, snapshot);
     REQUIRE(output.str().find(
@@ -461,9 +478,311 @@ TEST_CASE("Startup IOP DMA inspection reports current packet waits and rejection
     REQUIRE(system.traceEnabled());
     REQUIRE(system.traceHash() == hash);
   }
-  snapshot.iopDMA.nextBeat.failure = static_cast<IOPDMAFailure>(255);
+  snapshot.iopDMA.sif1.nextBeat.failure = static_cast<IOPDMAFailure>(255);
   std::ostringstream invalid;
   REQUIRE_THROWS_AS(writeStartupSummaryJsonLine(invalid, snapshot),
     std::invalid_argument);
   REQUIRE(invalid.str().empty());
+}
+
+TEST_CASE("Startup SIF snapshots enumerate all endpoints and controller gates",
+  "[startup-diagnostics][sif-snapshot]")
+{
+  NekoSystem system;
+  system.sif0DMAC().writeMemoryAddress(0x80002000);
+  system.sif0DMAC().writeQuadwordCount(2);
+  system.sif0DMAC().writeChannelControl(DMACChannelControl::START);
+  system.sif1DMAC().writeMemoryAddress(0x3000);
+  system.sif1DMAC().writeQuadwordCount(3);
+  system.sif1DMAC().writeTagAddress(0x80003000);
+  system.sif1DMAC().writeChannelControl(DMACChannelControl::START);
+  system.dmacController().writeControl(DMACControl::DMA_ENABLE);
+  system.dmacController().writePriorityControl(
+    DMACPriority::ENABLE | (DMACStatus::CHANNEL_5 << 16));
+  system.dmacController().writeStallAddress(0x4560);
+  REQUIRE(system.iopSIF0DMAC().writeTagAddress(0x1000) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF0DMAC().writeBlockControl(0xabcd) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF0DMAC().writeChannelControl(0x01000401) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF1DMAC().writeMemoryAddress(0x2000) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x01000400) ==
+    IOPDMAWriteOutcome::Completed);
+  system.iopDMAController().writePriority(IOPDMABank::Secondary, 0xb500);
+  const auto summary = inspectStartup(system);
+  REQUIRE(summary.dmac.channels.size() == 6);
+  REQUIRE(summary.dmac.channels[4].sif.active);
+  REQUIRE(summary.dmac.channels[4].sif.enabled);
+  REQUIRE(summary.dmac.channels[4].clockEligible);
+  REQUIRE(summary.dmac.channels[4].sif.nextBeatKind == EESIFDMABeatKind::Payload);
+  REQUIRE_FALSE(summary.dmac.channels[5].sif.enabled);
+  REQUIRE_FALSE(summary.dmac.channels[5].clockEligible);
+  REQUIRE(summary.iopDMA.sif0.active);
+  REQUIRE_FALSE(summary.iopDMA.sif0.enabled);
+  REQUIRE(summary.iopDMA.sif0.nextBeat.channel == IOPDMAChannel::SIF0);
+  REQUIRE(summary.iopDMA.sif1.enabled);
+  REQUIRE(summary.iopDMA.sif1.nextBeat.channel == IOPDMAChannel::SIF1);
+  std::ostringstream output;
+  writeStartupSummaryJsonLine(output, summary);
+  const auto json = output.str();
+  REQUIRE(json.find("\"priority_control\":2149580800,\"stall_address\":17760,"
+    "\"sif_grant_order\":[\"sif0\",\"sif1\"]") != std::string::npos);
+  REQUIRE(json.find("\"channel\":5,\"control\":256,\"madr\":2147491840,"
+    "\"qwc\":2,\"tadr\":null,\"sadr\":null,\"clock_eligible\":true,"
+    "\"last_transfer_stalled\":null,\"sif\":{\"active\":true,\"enabled\":true") !=
+    std::string::npos);
+  REQUIRE(json.find("\"channel\":6,\"control\":256,\"madr\":12288,"
+    "\"qwc\":3,\"tadr\":2147495936,\"sadr\":null,\"clock_eligible\":false,"
+    "\"last_transfer_stalled\":null,\"sif\":{\"active\":true,\"enabled\":false") !=
+    std::string::npos);
+  REQUIRE(json.find("\"sif_grant_order\":[10,9],\"sif_tie_break_channel\":9,"
+    "\"sif0\":{\"channel\":9") != std::string::npos);
+  REQUIRE(json.find("\"tadr\":4096,\"remaining_words\":0,\"terminal\":false,"
+    "\"active\":true,\"enabled\":false,\"priority\":5") != std::string::npos);
+  REQUIRE(json.find("\"tadr\":null,\"remaining_words\":0,\"terminal\":false,"
+    "\"active\":true,\"enabled\":true,\"priority\":3") != std::string::npos);
+}
+
+TEST_CASE("Startup EE SIF snapshots expose accepted packets and in-flight slices",
+  "[startup-diagnostics][sif-snapshot]")
+{
+  NekoSystem system;
+  REQUIRE(system.sif().pushSIF0Prologue({{0x70000002, 0x4000, 0, 0}}) ==
+    SIFTransferOutcome::Completed);
+  system.sif0DMAC().writeChannelControl(
+    DMACChannelControl::START | DMACChannelControl::CHAIN_MODE);
+  REQUIRE(system.eeBus().writeDMAC128(0x1000, {0x70000003, 0}));
+  system.sif1DMAC().writeTagAddress(0x1000);
+  system.sif1DMAC().writeChannelControl(
+    DMACChannelControl::START | DMACChannelControl::CHAIN_MODE);
+  system.dmacController().writeControl(DMACControl::DMA_ENABLE);
+  REQUIRE(system.dmacController().clockSIF(system.sif0DMAC()) ==
+    EESIFDMABeatOutcome::Completed);
+  REQUIRE(inspectStartup(system).dmac.sifGrantOrder[0] == SIFDirection::SIF1);
+  REQUIRE(system.dmacController().clockSIF(system.sif1DMAC()) ==
+    EESIFDMABeatOutcome::Completed);
+  REQUIRE(system.dmacController().clockSIF(system.sif1DMAC()) ==
+    EESIFDMABeatOutcome::Completed);
+  const auto summary = inspectStartup(system);
+  REQUIRE(summary.dmac.channels[4].sif.continuation.destinationPacketAccepted);
+  REQUIRE(summary.dmac.channels[4].sif.continuation.terminateAfterPacket);
+  REQUIRE(summary.dmac.channels[5].sif.continuation.terminateAfterPacket);
+  REQUIRE(summary.dmac.channels[5].sif.continuation.sliceQuadwordsRemaining == 2);
+  std::ostringstream output;
+  writeStartupSummaryJsonLine(output, summary);
+  REQUIRE(output.str().find("\"next_beat_kind\":\"payload\","
+    "\"continuation\":{\"terminal\":true,\"destination_packet_accepted\":true,"
+    "\"slice_qwc_remaining\":null}") != std::string::npos);
+  REQUIRE(output.str().find("\"next_beat_kind\":\"payload\","
+    "\"continuation\":{\"terminal\":true,\"destination_packet_accepted\":null,"
+    "\"slice_qwc_remaining\":2}") != std::string::npos);
+}
+
+TEST_CASE("Startup IOP SIF0 snapshots decode rejected descriptor and payload reads",
+  "[startup-diagnostics][sif-snapshot]")
+{
+  for (const bool descriptor : {true, false})
+  {
+    CAPTURE(descriptor);
+    NekoSystem system;
+    if (!descriptor)
+    {
+      const IOPWord words[] = {0x80800000, 1, 0x70000001, 0x4000, 0, 0};
+      for (unsigned index = 0; index < 6; ++index)
+      {
+        REQUIRE(system.iopBus().write32(0x1000 + index * 4, words[index]).status ==
+          IOPBusStatus::Completed);
+      }
+    }
+    REQUIRE(system.iopSIF0DMAC().writeTagAddress(descriptor ? 0x800000 : 0x1000) ==
+      IOPDMAWriteOutcome::Completed);
+    REQUIRE(system.iopSIF0DMAC().writeChannelControl(0x01000401) ==
+      IOPDMAWriteOutcome::Completed);
+    system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x800);
+    if (!descriptor)
+    {
+      REQUIRE(system.iopDMAController().clockSIF(
+        system.iopSIF0DMAC(), system.iopBus(), system.sif()).outcome ==
+          IOPDMABeatOutcome::Accepted);
+    }
+    const auto snapshot = inspectStartup(system);
+    REQUIRE(snapshot.iopDMA.sif0.nextBeat.outcome == IOPDMABeatOutcome::Rejected);
+    REQUIRE(snapshot.iopDMA.sif0.nextBeat.status == IOPBusStatus::Unmapped);
+    REQUIRE(snapshot.iopDMA.sif0.nextBeat.failure == (descriptor ?
+      IOPDMAFailure::DescriptorRead : IOPDMAFailure::SourceRead));
+    REQUIRE(snapshot.iopDMA.sif0.remainingWords == (descriptor ? 0 : 1));
+    REQUIRE(snapshot.iopDMA.sif0.terminal == !descriptor);
+    std::ostringstream output;
+    writeStartupSummaryJsonLine(output, snapshot);
+    const auto expected = std::string("\"next_beat\":{\"outcome\":\"rejected\","
+      "\"failure\":\"") + (descriptor ? "descriptor_read" : "source_read") +
+      "\",\"address\":8388608";
+    REQUIRE(output.str().find(expected) != std::string::npos);
+  }
+}
+
+TEST_CASE("Startup SIF arbitration separates effective priority from the retained tie breaker",
+  "[startup-diagnostics][sif-snapshot]")
+{
+  NekoSystem system;
+  REQUIRE(system.iopSIF0DMAC().writeChannelControl(0x01000401) ==
+    IOPDMAWriteOutcome::Completed);
+  system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x8800);
+  REQUIRE(inspectStartup(system).iopDMA.sifGrantOrder[0] == IOPDMAChannel::SIF0);
+  REQUIRE(system.iopDMAController().clockSIF(
+    system.iopSIF0DMAC(), system.iopBus(), system.sif()).outcome ==
+      IOPDMABeatOutcome::Accepted);
+  REQUIRE(inspectStartup(system).iopDMA.sifGrantOrder[0] == IOPDMAChannel::SIF1);
+  system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x9800);
+  std::ostringstream output;
+  writeStartupSummaryJsonLine(output, inspectStartup(system));
+  REQUIRE(output.str().find("\"sif_grant_order\":[9,10],"
+    "\"sif_tie_break_channel\":10") != std::string::npos);
+  system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x8800);
+  REQUIRE(inspectStartup(system).iopDMA.sifGrantOrder[0] == IOPDMAChannel::SIF1);
+}
+
+TEST_CASE("Startup SIF snapshots distinguish controller eligibility from transport progress",
+  "[startup-diagnostics][sif-snapshot]")
+{
+  NekoSystem system;
+  system.sif0DMAC().writeQuadwordCount(1);
+  system.sif0DMAC().writeChannelControl(DMACChannelControl::START);
+  system.sif1DMAC().writeMemoryAddress(0x1000);
+  system.sif1DMAC().writeQuadwordCount(1);
+  system.sif1DMAC().writeChannelControl(DMACChannelControl::START);
+  system.dmacController().writeControl(DMACControl::DMA_ENABLE);
+  REQUIRE(system.iopBus().write32(0x1000, 0x80003000).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopSIF0DMAC().writeTagAddress(0x1000) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF0DMAC().writeChannelControl(0x01000401) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x01000400) ==
+    IOPDMAWriteOutcome::Completed);
+  system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x8800);
+  for (unsigned index = 0; index < 8; ++index)
+  {
+    REQUIRE(system.sif().pushSIF1Quadword({{0x80002000, 4, 0, 0}}) ==
+      SIFTransferOutcome::Completed);
+  }
+  const auto summary = inspectStartup(system);
+  REQUIRE(summary.sif.freeWords == 0);
+  REQUIRE(summary.sif.sif0Words == 0);
+  REQUIRE(summary.dmac.channels[4].clockEligible);
+  REQUIRE(summary.dmac.channels[5].clockEligible);
+  REQUIRE(summary.iopDMA.sif0.active);
+  REQUIRE(summary.iopDMA.sif0.enabled);
+  REQUIRE(summary.iopDMA.sif0.nextBeat.outcome == IOPDMABeatOutcome::Wait);
+  REQUIRE(summary.iopDMA.sif0.nextBeat.address == 0x1000);
+  REQUIRE(summary.iopDMA.sif0.nextBeat.value == 0x80003000);
+  REQUIRE(summary.iopDMA.sif1.nextBeat.outcome == IOPDMABeatOutcome::Accepted);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 32);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
+}
+
+TEST_CASE("Startup SIF inspection preserves live continuations trace controls and future execution",
+  "[startup-diagnostics][sif-snapshot][persistence]")
+{
+  NekoSystem system;
+  const IOPWord descriptor[] = {0x80003000, 5, 0x70000002, 0x4000, 0, 0};
+  for (unsigned index = 0; index < 6; ++index)
+  {
+    REQUIRE(system.iopBus().write32(0x1000 + index * 4, descriptor[index]).status ==
+      IOPBusStatus::Completed);
+  }
+  REQUIRE(system.iopSIF0DMAC().writeTagAddress(0x1000) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF0DMAC().writeChannelControl(0x01000401) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x01000400) ==
+    IOPDMAWriteOutcome::Completed);
+  system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x8800);
+  REQUIRE(system.eeBus().writeDMAC128(0x1000, {UINT64_C(4) << 32 | 0x80002000, 0}));
+  REQUIRE(system.eeBus().writeDMAC128(0x1010, {1, 2}));
+  system.sif1DMAC().writeMemoryAddress(0x1000);
+  system.sif1DMAC().writeQuadwordCount(2);
+  system.sif1DMAC().writeChannelControl(DMACChannelControl::START);
+  system.sif0DMAC().writeChannelControl(
+    DMACChannelControl::START | DMACChannelControl::CHAIN_MODE);
+  system.dmacController().writeControl(DMACControl::DMA_ENABLE);
+  system.startTrace(2);
+  system.clockMasterCycle();
+  REQUIRE(system.dmacController().clockSIF(system.sif0DMAC()) ==
+    EESIFDMABeatOutcome::Completed);
+  REQUIRE(system.iopDMAController().clockSIF(
+    system.iopSIF1DMAC(), system.iopBus(), system.sif()).outcome ==
+      IOPDMABeatOutcome::Accepted);
+  const auto before = system.saveState();
+  const auto hash = system.traceHash();
+  const auto traceSize = system.trace().size();
+  REQUIRE(system.traceTruncated());
+  std::string first;
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    const auto snapshot = inspectStartup(system);
+    REQUIRE(snapshot.dmac.channels[4].sif.continuation.destinationPacketAccepted);
+    REQUIRE(snapshot.dmac.channels[4].sif.continuation.terminateAfterPacket);
+    REQUIRE(snapshot.dmac.channels[5].sif.continuation.sliceQuadwordsRemaining == 1);
+    REQUIRE(snapshot.iopDMA.sif0.remainingWords == 5);
+    REQUIRE(snapshot.iopDMA.sif0.terminal);
+    REQUIRE(snapshot.iopDMA.sif0.tagAddress == 0x1010);
+    REQUIRE(snapshot.iopDMA.sif1.remainingWords == 4);
+    REQUIRE(snapshot.iopDMA.sif1.terminal);
+    std::ostringstream output;
+    writeStartupSummaryJsonLine(output, snapshot);
+    if (repeat == 0)
+    {
+      first = output.str();
+    }
+    else
+    {
+      REQUIRE(output.str() == first);
+    }
+  }
+  const bool unchanged = system.saveState() == before;
+  REQUIRE(unchanged);
+  REQUIRE(system.traceEnabled());
+  REQUIRE(system.traceEventLimit() == 2);
+  REQUIRE(system.traceTruncated());
+  REQUIRE(system.trace().size() == traceSize);
+  REQUIRE(system.traceHash() == hash);
+  NekoSystem reference;
+  reference.loadState(before);
+  system.startTrace(1000);
+  reference.startTrace(1000);
+  system.runMasterCycles(17);
+  reference.runMasterCycles(17);
+  requireSameState(system, reference);
+}
+
+TEST_CASE("Startup SIF writers reject unknown named state without emitting partial records",
+  "[startup-diagnostics][sif-snapshot]")
+{
+  StartupSummary summary;
+  SECTION("EE grant order")
+  {
+    summary.dmac.sifGrantOrder[1] = static_cast<SIFDirection>(255);
+  }
+  SECTION("EE next beat")
+  {
+    summary.dmac.channels[4].sif.nextBeatKind = static_cast<EESIFDMABeatKind>(255);
+  }
+  SECTION("IOP grant order")
+  {
+    summary.iopDMA.sifGrantOrder[0] = static_cast<IOPDMAChannel>(8);
+  }
+  SECTION("IOP tie breaker")
+  {
+    summary.iopDMA.sifTieBreakChannel = static_cast<IOPDMAChannel>(255);
+  }
+  SECTION("IOP source failure")
+  {
+    summary.iopDMA.sif0.nextBeat.failure = static_cast<IOPDMAFailure>(255);
+  }
+  std::ostringstream output;
+  REQUIRE_THROWS_AS(writeStartupSummaryJsonLine(output, summary), std::invalid_argument);
+  REQUIRE(output.str().empty());
 }

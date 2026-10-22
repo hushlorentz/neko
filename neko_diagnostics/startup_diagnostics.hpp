@@ -54,6 +54,15 @@ struct StartupSIFSummary
   std::size_t sif1Words = 0;
   std::size_t freeWords = 0;
   std::size_t packingCursor = 0;
+  SIFQuadword packingLatch = {};
+};
+
+struct StartupEESIFSummary
+{
+  bool active = false;
+  bool enabled = false;
+  EESIFDMABeatKind nextBeatKind = EESIFDMABeatKind::Completion;
+  DMACChannelContinuation continuation;
 };
 
 struct StartupDMACChannelSummary
@@ -62,13 +71,15 @@ struct StartupDMACChannelSummary
   std::uint32_t control = 0;
   std::uint32_t memoryAddress = 0;
   std::uint32_t quadwordCount = 0;
-  // Absent on channel 8 (zero here, JSON null).
+  // Absent on channels 5/8 (zero here, JSON null).
   std::uint32_t tagAddress = 0;
-  // Only channels 8/9; zero here and JSON null on channels 1/2.
+  // Only channels 8/9; zero here and JSON null elsewhere.
   std::uint32_t scratchpadAddress = 0;
   bool clockEligible = false;
   // Retained last-attempt flag for channels 1/2, not current sink readiness.
   bool lastTransferStalled = false;
+  // Only channels 5/6; not serialized on other channels.
+  StartupEESIFSummary sif;
 };
 
 struct StartupDMACSummary
@@ -77,7 +88,11 @@ struct StartupDMACSummary
   std::uint32_t status = 0;
   std::uint32_t interleaveSize = 0;
   bool interruptPending = false;
-  std::array<StartupDMACChannelSummary, 4> channels = {};
+  std::uint32_t priorityControl = 0;
+  std::uint32_t stallAddress = 0;
+  std::array<SIFDirection, 2> sifGrantOrder = {{SIFDirection::SIF0, SIFDirection::SIF1}};
+  // Preserve existing indices and append the SIF endpoints.
+  std::array<StartupDMACChannelSummary, 6> channels = {{{1}, {2}, {8}, {9}, {5}, {6}}};
 };
 
 struct StartupEEInterruptSummary
@@ -87,19 +102,36 @@ struct StartupEEInterruptSummary
   bool pending = false;
 };
 
+struct StartupIOPDMAChannelSummary
+{
+  explicit StartupIOPDMAChannelSummary(IOPDMAChannel channel) :
+    nextBeat{IOPDMABeatOutcome::Wait, channel}
+  {
+  }
+
+  IOPWord control = 0;
+  IOPWord memoryAddress = 0;
+  IOPWord blockControl = 0;
+  // Only channel 9 (zero here and JSON null on channel 10).
+  IOPWord tagAddress = 0;
+  IOPWord remainingWords = 0;
+  bool terminal = false;
+  bool active = false;
+  bool enabled = false;
+  std::uint8_t priority = 0;
+  // Side-effect-free next grant, not a retained previous-attempt result.
+  IOPDMABeatResult nextBeat;
+};
+
 struct StartupIOPDMASummary
 {
   std::array<IOPWord, 2> priority = {};
   std::array<IOPWord, 2> interruptStatus = {};
   bool interruptPending = false;
-  IOPWord control = 0;
-  IOPWord memoryAddress = 0;
-  IOPWord blockControl = 0;
-  IOPWord remainingWords = 0;
-  bool terminal = false;
-  bool enabled = false;
-  // Side-effect-free next grant, not a retained previous-attempt result.
-  IOPDMABeatResult nextBeat;
+  std::array<IOPDMAChannel, 2> sifGrantOrder = {{IOPDMAChannel::SIF0, IOPDMAChannel::SIF1}};
+  IOPDMAChannel sifTieBreakChannel = IOPDMAChannel::SIF0;
+  StartupIOPDMAChannelSummary sif0{IOPDMAChannel::SIF0};
+  StartupIOPDMAChannelSummary sif1{IOPDMAChannel::SIF1};
 };
 
 struct StartupIOPInterruptSummary

@@ -23,6 +23,11 @@ bool SIF0DMACChannel::active() const
   return channelState.active();
 }
 
+DMACChannelContinuation SIF0DMACChannel::continuation() const
+{
+  return channelState.continuation();
+}
+
 bool SIF0DMACChannel::transferEnabled() const
 {
   return active() && dmacController.channelEnabled(DMACStatus::CHANNEL_5);

@@ -305,7 +305,7 @@ TEST_CASE("Startup runtime evidence is an incomplete prefix without a fabricated
     REQUIRE(error.startup.ee.cycles == 1);
     REQUIRE(error.startup.iop.retiredInstructions == 0);
     REQUIRE(error.startup.sif.sif1Words == 4);
-    REQUIRE(error.startup.iopDMA.nextBeat.outcome == IOPDMABeatOutcome::Rejected);
+    REQUIRE(error.startup.iopDMA.sif1.nextBeat.outcome == IOPDMABeatOutcome::Rejected);
     const auto failure = firstStartupFailure(system.trace());
     REQUIRE(failure.found == traced);
     if (failure.found)

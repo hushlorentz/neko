@@ -60,6 +60,11 @@ bool DMACChannelState::active() const
      DMACChannelControl::START) != 0;
 }
 
+DMACChannelContinuation DMACChannelState::continuation() const
+{
+  return {terminateAfterPacket, destinationPacketAccepted, sliceQuadwordsRemaining};
+}
+
 bool DMACChannelState::normalMode() const
 {
   return

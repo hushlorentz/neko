@@ -76,6 +76,7 @@ class IOPDMAController final
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;
+    IOPDMAChannel sifTieBreakChannel() const;
     IOPDMABeatResult inspectSIF(
       const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
     IOPDMABeatResult clockSIF(IOPSIF1DMAChannel &channel, IOPBus &bus, SIF &sif);

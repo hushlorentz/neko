@@ -35,8 +35,14 @@ namespace
   };
   const char *const cacheRoutes[] = {"none", "cached", "uncached"};
   const char *const dmaOutcomes[] = {"accepted", "completed", "wait", "rejected"};
-  const char *const dmaFailures[] = {"none", "unaligned_header", "destination_write"};
+  const char *const dmaFailures[] = {
+    "none", "unaligned_header", "destination_write", "descriptor_read", "source_read"
+  };
   const char *const busStatuses[] = {"completed", "misaligned", "read_only", "unmapped"};
+  const char *const sifDirections[] = {"sif0", "sif1"};
+  const char *const eeBeatKinds[] = {
+    "source_tag", "payload", "completion", "destination_tag"
+  };
 
   template<typename Enum, std::size_t N>
   const char *enumName(Enum value, const char *const (&names)[N])
@@ -52,6 +58,92 @@ namespace
   const char *jsonBoolean(bool value)
   {
     return value ? "true" : "false";
+  }
+
+  unsigned iopChannelNumber(IOPDMAChannel channel)
+  {
+    switch (channel)
+    {
+      case IOPDMAChannel::SIF0: return 9;
+      case IOPDMAChannel::SIF1: return 10;
+    }
+    throw std::invalid_argument("Unknown startup diagnostic IOP DMA channel.");
+  }
+
+  void writeEESIF(std::ostream &output, const StartupDMACChannelSummary &channel)
+  {
+    const auto &sif = channel.sif;
+    output << "{\"active\":" << jsonBoolean(sif.active)
+      << ",\"enabled\":" << jsonBoolean(sif.enabled)
+      << ",\"next_beat_kind\":\"" << enumName(sif.nextBeatKind, eeBeatKinds)
+      << "\",\"continuation\":{\"terminal\":"
+      << jsonBoolean(sif.continuation.terminateAfterPacket)
+      << ",\"destination_packet_accepted\":";
+    if (channel.channel == 5)
+    {
+      output << jsonBoolean(sif.continuation.destinationPacketAccepted);
+    }
+    else
+    {
+      output << "null";
+    }
+    output << ",\"slice_qwc_remaining\":";
+    if (channel.channel == 6)
+    {
+      output << static_cast<unsigned>(sif.continuation.sliceQuadwordsRemaining);
+    }
+    else
+    {
+      output << "null";
+    }
+    output << "}}";
+  }
+
+  void writeIOPSIF(std::ostream &output,
+    const StartupIOPDMAChannelSummary &channel, IOPDMAChannel id)
+  {
+    const auto &beat = channel.nextBeat;
+    output << "{\"channel\":" << iopChannelNumber(id)
+      << ",\"control\":" << channel.control
+      << ",\"madr\":" << channel.memoryAddress
+      << ",\"bcr\":" << channel.blockControl
+      << ",\"tadr\":";
+    if (id == IOPDMAChannel::SIF0)
+    {
+      output << channel.tagAddress;
+    }
+    else
+    {
+      output << "null";
+    }
+    output << ",\"remaining_words\":" << channel.remainingWords
+      << ",\"terminal\":" << jsonBoolean(channel.terminal)
+      << ",\"active\":" << jsonBoolean(channel.active)
+      << ",\"enabled\":" << jsonBoolean(channel.enabled)
+      << ",\"priority\":" << static_cast<unsigned>(channel.priority)
+      << ",\"next_beat\":{\"outcome\":\"" << enumName(beat.outcome, dmaOutcomes)
+      << "\",\"failure\":\"" << enumName(beat.failure, dmaFailures)
+      << "\",\"address\":" << beat.address
+      << ",\"value\":" << beat.value
+      << ",\"bus_status\":\"" << enumName(beat.status, busStatuses) << "\"}}";
+  }
+
+  template<typename Channel>
+  StartupIOPDMAChannelSummary inspectIOPSIF(
+    const NekoSystem &system, const Channel &channel, IOPDMAChannel id)
+  {
+    const auto &controller = system.iopDMAController();
+    StartupIOPDMAChannelSummary summary(id);
+    summary.control = channel.channelControl();
+    summary.memoryAddress = channel.memoryAddress();
+    summary.blockControl = channel.blockControl();
+    summary.remainingWords = channel.remainingWords();
+    summary.terminal = channel.terminalPacket();
+    summary.active = channel.active();
+    summary.enabled = controller.channelEnabled(id);
+    summary.priority = controller.channelPriority(id);
+    summary.nextBeat = controller.inspectSIF(channel, system.iopBus(), system.sif());
+    return summary;
   }
 
   void writeStoreFailure(std::ostream &output, const IOPStoreFailure &failure)
@@ -125,12 +217,19 @@ namespace
       << ",\"sif0_words\":" << sif.sif0Words
       << ",\"sif1_words\":" << sif.sif1Words
       << ",\"free_words\":" << sif.freeWords
-      << ",\"packing_cursor\":" << sif.packingCursor << "}"
+      << ",\"packing_cursor\":" << sif.packingCursor
+      << ",\"packing_latch\":[" << sif.packingLatch[0]
+      << "," << sif.packingLatch[1] << "," << sif.packingLatch[2]
+      << "," << sif.packingLatch[3] << "]}"
       << ",\"dmac\":{\"control\":" << dma.control
       << ",\"status\":" << dma.status
       << ",\"interleave_size\":" << dma.interleaveSize
       << ",\"interrupt_pending\":" << jsonBoolean(dma.interruptPending)
-      << ",\"channels\":[";
+      << ",\"priority_control\":" << dma.priorityControl
+      << ",\"stall_address\":" << dma.stallAddress
+      << ",\"sif_grant_order\":[\"" << enumName(dma.sifGrantOrder[0], sifDirections)
+      << "\",\"" << enumName(dma.sifGrantOrder[1], sifDirections)
+      << "\"],\"channels\":[";
     for (std::size_t index = 0; index < dma.channels.size(); ++index)
     {
       if (index != 0)
@@ -144,7 +243,7 @@ namespace
         << ",\"madr\":" << channel.memoryAddress
         << ",\"qwc\":" << channel.quadwordCount
         << ",\"tadr\":";
-      if (channel.channel == 8)
+      if (channel.channel == 5 || channel.channel == 8)
       {
         output << "null";
       }
@@ -161,31 +260,34 @@ namespace
       {
         output << "null";
       }
-      output
-        << ",\"clock_eligible\":" << jsonBoolean(channel.clockEligible)
-        << ",\"last_transfer_stalled\":"
-        << jsonBoolean(channel.lastTransferStalled) << "}";
+      output << ",\"clock_eligible\":" << jsonBoolean(channel.clockEligible)
+        << ",\"last_transfer_stalled\":";
+      if (channel.channel == 5 || channel.channel == 6)
+      {
+        output << "null,\"sif\":";
+        writeEESIF(output, channel);
+      }
+      else
+      {
+        output << jsonBoolean(channel.lastTransferStalled);
+      }
+      output << "}";
     }
     const auto &iopDMA = summary.iopDMA;
-    const auto &beat = iopDMA.nextBeat;
     output
       << "]},\"iop_dma\":{\"priority\":[" << iopDMA.priority[0]
       << "," << iopDMA.priority[1]
       << "],\"interrupt_status\":[" << iopDMA.interruptStatus[0]
       << "," << iopDMA.interruptStatus[1]
       << "],\"interrupt_pending\":" << jsonBoolean(iopDMA.interruptPending)
-      << ",\"sif1\":{\"channel\":10,\"control\":" << iopDMA.control
-      << ",\"madr\":" << iopDMA.memoryAddress
-      << ",\"bcr\":" << iopDMA.blockControl
-      << ",\"remaining_words\":" << iopDMA.remainingWords
-      << ",\"terminal\":" << jsonBoolean(iopDMA.terminal)
-      << ",\"enabled\":" << jsonBoolean(iopDMA.enabled)
-      << ",\"next_beat\":{\"outcome\":\"" << enumName(beat.outcome, dmaOutcomes)
-      << "\",\"failure\":\"" << enumName(beat.failure, dmaFailures)
-      << "\",\"address\":" << beat.address
-      << ",\"value\":" << beat.value
-      << ",\"bus_status\":\"" << enumName(beat.status, busStatuses)
-      << "\"}}},\"ee_interrupts\":{\"status\":" << summary.eeInterrupts.status
+      << ",\"sif_grant_order\":[" << iopChannelNumber(iopDMA.sifGrantOrder[0])
+      << "," << iopChannelNumber(iopDMA.sifGrantOrder[1])
+      << "],\"sif_tie_break_channel\":" << iopChannelNumber(iopDMA.sifTieBreakChannel)
+      << ",\"sif0\":";
+    writeIOPSIF(output, iopDMA.sif0, IOPDMAChannel::SIF0);
+    output << ",\"sif1\":";
+    writeIOPSIF(output, iopDMA.sif1, IOPDMAChannel::SIF1);
+    output << "},\"ee_interrupts\":{\"status\":" << summary.eeInterrupts.status
       << ",\"mask\":" << summary.eeInterrupts.mask
       << ",\"pending\":" << jsonBoolean(summary.eeInterrupts.pending)
       << "},\"iop_interrupts\":{\"status\":" << summary.iopInterrupts.status
@@ -223,13 +325,17 @@ StartupSummary inspectStartup(const NekoSystem &system)
     sif.readEE(SIFRegister::MSCOM), sif.readEE(SIFRegister::SMCOM),
     sif.readEE(SIFRegister::MSFLAG), sif.readEE(SIFRegister::SMFLAG), sif.control(),
     sif.iopDoorbell(), sif.wordCount(SIFDirection::SIF0),
-    sif.wordCount(SIFDirection::SIF1), sif.freeWordCount(), sif.sif0PackingCursor()
+    sif.wordCount(SIFDirection::SIF1), sif.freeWordCount(), sif.sif0PackingCursor(),
+    sif.sif0PackingLatch()
   };
   const auto &dma = system.dmacController();
   summary.dmac.control = dma.control();
   summary.dmac.status = dma.status();
   summary.dmac.interleaveSize = dma.interleaveSize();
   summary.dmac.interruptPending = dma.interruptPending();
+  summary.dmac.priorityControl = dma.priorityControl();
+  summary.dmac.stallAddress = dma.stallAddress();
+  summary.dmac.sifGrantOrder = dma.sifGrantOrder();
   const auto &vif = system.vif1DMAC();
   summary.dmac.channels[0] = {
     1, vif.channelControl(), vif.memoryAddress(), vif.quadwordCount(),
@@ -250,17 +356,32 @@ StartupSummary inspectStartup(const NekoSystem &system)
     9, to.channelControl(), to.memoryAddress(), to.quadwordCount(),
     to.tagAddress(), to.scratchpadAddress(), to.clockActive(), false
   };
-  const auto &iopDMA = system.iopDMAController();
-  const auto &receiver = system.iopSIF1DMAC();
-  summary.iopDMA = {
-    {{iopDMA.priority(IOPDMABank::Primary), iopDMA.priority(IOPDMABank::Secondary)}},
-    {{iopDMA.interruptStatus(IOPDMABank::Primary),
-      iopDMA.interruptStatus(IOPDMABank::Secondary)}},
-    iopDMA.interruptPending(), receiver.channelControl(), receiver.memoryAddress(),
-    receiver.blockControl(), receiver.remainingWords(), receiver.terminalPacket(),
-    iopDMA.channelEnabled(IOPDMAChannel::SIF1),
-    iopDMA.inspectSIF(receiver, system.iopBus(), sif)
+  const auto &eeReceiver = system.sif0DMAC();
+  summary.dmac.channels[4] = {
+    5, eeReceiver.channelControl(), eeReceiver.memoryAddress(), eeReceiver.quadwordCount(),
+    0, 0, eeReceiver.transferEnabled(), false,
+    {eeReceiver.active(), dma.channelEnabled(DMACStatus::CHANNEL_5),
+      eeReceiver.nextBeatKind(), eeReceiver.continuation()}
   };
+  const auto &eeSource = system.sif1DMAC();
+  summary.dmac.channels[5] = {
+    6, eeSource.channelControl(), eeSource.memoryAddress(), eeSource.quadwordCount(),
+    eeSource.tagAddress(), 0, eeSource.transferEnabled(), false,
+    {eeSource.active(), dma.channelEnabled(DMACStatus::CHANNEL_6),
+      eeSource.nextBeatKind(), eeSource.continuation()}
+  };
+  const auto &iopDMA = system.iopDMAController();
+  summary.iopDMA.priority =
+    {{iopDMA.priority(IOPDMABank::Primary), iopDMA.priority(IOPDMABank::Secondary)}};
+  summary.iopDMA.interruptStatus = {{
+    iopDMA.interruptStatus(IOPDMABank::Primary),
+    iopDMA.interruptStatus(IOPDMABank::Secondary)}};
+  summary.iopDMA.interruptPending = iopDMA.interruptPending();
+  summary.iopDMA.sifGrantOrder = iopDMA.sifGrantOrder();
+  summary.iopDMA.sifTieBreakChannel = iopDMA.sifTieBreakChannel();
+  summary.iopDMA.sif0 = inspectIOPSIF(system, system.iopSIF0DMAC(), IOPDMAChannel::SIF0);
+  summary.iopDMA.sif0.tagAddress = system.iopSIF0DMAC().tagAddress();
+  summary.iopDMA.sif1 = inspectIOPSIF(system, system.iopSIF1DMAC(), IOPDMAChannel::SIF1);
   const auto &eeInterrupts = system.interruptController();
   summary.eeInterrupts = {
     eeInterrupts.status(), eeInterrupts.mask(), eeInterrupts.interruptPending()

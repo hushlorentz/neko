@@ -83,6 +83,13 @@ enum class DMACChannelTransition : std::uint8_t
   Complete
 };
 
+struct DMACChannelContinuation
+{
+  bool terminateAfterPacket = false;
+  bool destinationPacketAccepted = false;
+  std::uint8_t sliceQuadwordsRemaining = 0;
+};
+
 class DMACChannelState
 {
   public:
@@ -100,6 +107,7 @@ class DMACChannelState
     bool sliceStateValid() const;
     bool destinationPacketStateValid() const;
     bool publishesDestinationStallAddress() const;
+    DMACChannelContinuation continuation() const;
 
     std::uint32_t channelControl() const;
     DMACControlWriteEffect writeChannelControl(
