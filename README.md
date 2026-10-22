@@ -92,7 +92,31 @@ cmake -P cmake/Check.cmake
 ```
 
 The check uses an isolated `out/check` directory and works with single- and
-multi-configuration CMake generators.
+multi-configuration CMake generators. Checks build with four jobs by default
+and run the complete suite in four process shards with separate working
+directories. Set `NEKO_CHECK_JOBS` (1-64) to change the concurrency, including
+fully serial validation:
+
+```sh
+cmake -DNEKO_CHECK_JOBS=1 -P cmake/Check.cmake
+```
+
+`CMAKE_BUILD_PARALLEL_LEVEL`, when set, overrides build concurrency only.
+For ordinary configured builds, `-DNEKO_TEST_JOBS=<count>` controls the shards
+used by the `check` target and registered with CTest.
+
+Run focused tests or collect a complete timing/assertion profile:
+
+```sh
+./out/check/neko_tests "[test-runner]"
+./out/check/neko_tests --reporter profile --out out/check/test-profile.txt
+```
+
+The profile lists every test case and source file, sorted by elapsed time,
+with assertion totals. Profiling runs serially unless `--shard-count <count>`
+and `--shard-index <zero-based-index>` explicitly select one shard.
+With multi-configuration generators, use `out/check/Debug/neko_tests`
+instead (and append `.exe` on Windows).
 
 Run the memory-safety workflow:
 
@@ -101,7 +125,7 @@ cmake -P cmake/Sanitize.cmake
 ```
 
 This runs the complete optimized, assertion-enabled test suite with
-AddressSanitizer.
+AddressSanitizer, using the same concurrency controls.
 
 At milestone completion on macOS, run the complete test suite with the native
 `leaks` tool:

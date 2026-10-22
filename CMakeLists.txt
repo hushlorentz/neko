@@ -224,6 +224,7 @@ target_link_libraries(neko PRIVATE neko_cli_support)
 
 add_executable(neko_tests
     neko_tests/main.cpp
+    neko_tests/test_runner_tests.cpp
     neko_tests/desktop_options_tests.cpp
     neko_tests/elf_runner_tests.cpp
     neko_tests/dual_cpu_bios_tests.cpp
@@ -411,14 +412,36 @@ target_link_libraries(
 )
 
 enable_testing()
-add_test(NAME neko_tests COMMAND neko_tests)
+include(cmake/CheckJobs.cmake)
+set(NEKO_TEST_JOBS 4 CACHE STRING "Parallel test shards (1-64)")
+neko_validate_test_jobs(NEKO_TEST_JOBS)
+math(EXPR LAST_TEST_SHARD "${NEKO_TEST_JOBS} - 1")
+foreach(SHARD RANGE 0 ${LAST_TEST_SHARD})
+    set(SHARD_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-shards/${SHARD}/$<CONFIG>")
+    file(GENERATE OUTPUT "${SHARD_DIRECTORY}/.workdir" CONTENT "")
+    add_test(
+        NAME neko_tests.${SHARD}
+        COMMAND neko_tests
+            --shard-count ${NEKO_TEST_JOBS}
+            --shard-index ${SHARD}
+    )
+    set_tests_properties(
+        neko_tests.${SHARD}
+        PROPERTIES WORKING_DIRECTORY "${SHARD_DIRECTORY}"
+    )
+endforeach()
 
 add_custom_target(check
-    COMMAND $<TARGET_FILE:neko_tests>
+    COMMAND
+        ${CMAKE_CTEST_COMMAND}
+        --output-on-failure
+        --parallel ${NEKO_TEST_JOBS}
+        --build-config $<CONFIG>
     COMMAND
         ${CMAKE_COMMAND}
         -P
         ${CMAKE_CURRENT_SOURCE_DIR}/cmake/VerifyRepository.cmake
     DEPENDS neko_tests
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     USES_TERMINAL
 )

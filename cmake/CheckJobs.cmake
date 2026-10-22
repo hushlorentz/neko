@@ -1,0 +1,18 @@
+function(neko_validate_test_jobs name)
+  if(NOT "${${name}}" MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "${name} must be an integer from 1 through 64")
+  endif()
+  if(${name} GREATER 64)
+    message(FATAL_ERROR "${name} must be an integer from 1 through 64")
+  endif()
+endfunction()
+
+if(NOT DEFINED NEKO_CHECK_JOBS)
+  set(NEKO_CHECK_JOBS 4)
+endif()
+neko_validate_test_jobs(NEKO_CHECK_JOBS)
+
+set(NEKO_BUILD_PARALLEL_ARGS)
+if("$ENV{CMAKE_BUILD_PARALLEL_LEVEL}" STREQUAL "")
+  set(NEKO_BUILD_PARALLEL_ARGS --parallel "${NEKO_CHECK_JOBS}")
+endif()

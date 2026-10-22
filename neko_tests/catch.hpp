@@ -306,6 +306,8 @@ namespace Catch {
     };
 
     bool matchTest( TestCase const& testCase, TestSpec const& testSpec, IConfig const& config );
+    bool isTestInShard( std::string const& name, unsigned int count, unsigned int index );
+    bool parseTestShardNumber( std::string const& text, unsigned int& value );
     std::vector<TestCase> filterTests( std::vector<TestCase> const& testCases, TestSpec const& testSpec, IConfig const& config );
     std::vector<TestCase> const& getAllTestCasesSorted( IConfig const& config );
 
@@ -1623,9 +1625,10 @@ namespace Catch {
         uint64_t m_nanoseconds = 0;
     public:
         void start();
-        auto getElapsedNanoseconds() const -> unsigned int;
-        auto getElapsedMicroseconds() const -> unsigned int;
-        auto getElapsedMilliseconds() const -> unsigned int;
+        // Neko: retain long test durations instead of wrapping at 4.3 seconds.
+        auto getElapsedNanoseconds() const -> uint64_t;
+        auto getElapsedMicroseconds() const -> uint64_t;
+        auto getElapsedMilliseconds() const -> uint64_t;
         auto getElapsedSeconds() const -> double;
     };
 
@@ -2913,6 +2916,8 @@ namespace Catch {
         virtual TestSpec const& testSpec() const = 0;
         virtual RunTests::InWhatOrder runOrder() const = 0;
         virtual unsigned int rngSeed() const = 0;
+        virtual unsigned int shardCount() const = 0;
+        virtual unsigned int shardIndex() const = 0;
         virtual int benchmarkResolutionMultiple() const = 0;
         virtual UseColour::YesOrNo useColour() const = 0;
         virtual std::vector<std::string> const& getSectionsToRun() const = 0;
@@ -3016,6 +3021,9 @@ namespace Catch {
 
         int abortAfter = -1;
         unsigned int rngSeed = 0;
+        // Neko: isolated process shards, selected without rewriting test filters.
+        unsigned int shardCount = 1;
+        unsigned int shardIndex = 0;
         int benchmarkResolutionMultiple = 100;
 
         Verbosity verbosity = Verbosity::Normal;
@@ -3066,6 +3074,8 @@ namespace Catch {
         ShowDurations::OrNot showDurations() const override;
         RunTests::InWhatOrder runOrder() const override;
         unsigned int rngSeed() const override;
+        unsigned int shardCount() const override;
+        unsigned int shardIndex() const override;
         int benchmarkResolutionMultiple() const override;
         UseColour::YesOrNo useColour() const override;
         bool shouldDebugBreak() const override;
@@ -5640,6 +5650,16 @@ namespace Catch {
                 config.rngSeed = static_cast<unsigned int>( std::time(nullptr) );
                 return ParserResult::ok( ParseResultType::Matched );
             };
+        auto const setShardCount = [&]( std::string const& value ) {
+                if( !parseTestShardNumber( value, config.shardCount ) )
+                    return ParserResult::runtimeError( "Shard count must be an integer from 1 through 64" );
+                return ParserResult::ok( ParseResultType::Matched );
+            };
+        auto const setShardIndex = [&]( std::string const& value ) {
+                if( !parseTestShardNumber( value, config.shardIndex ) )
+                    return ParserResult::runtimeError( "Shard index must be an integer from 0 through 63" );
+                return ParserResult::ok( ParseResultType::Matched );
+            };
         auto const setColourUsage = [&]( std::string const& useColour ) {
                     auto mode = toLower( useColour );
 
@@ -5744,6 +5764,12 @@ namespace Catch {
             | Opt( setRngSeed, "'time'|number" )
                 ["--rng-seed"]
                 ( "set a specific seed for random numbers" )
+            | Opt( setShardCount, "count" )
+                ["--shard-count"]
+                ( "split matching tests into this many process shards (1-64)" )
+            | Opt( setShardIndex, "index" )
+                ["--shard-index"]
+                ( "run this zero-based process shard" )
             | Opt( setColourUsage, "yes|no" )
                 ["--use-colour"]
                 ( "should output be colourised" )
@@ -5816,6 +5842,9 @@ namespace Catch {
     :   m_data( data ),
         m_stream( openStream() )
     {
+        CATCH_ENFORCE( data.shardCount >= 1 && data.shardCount <= 64 &&
+                       data.shardIndex < data.shardCount,
+                       "Invalid test shard: count must be 1-64 and index less than count" );
         if( !data.testsOrTags.empty() ) {
             TestSpecParser parser( ITagAliasRegistry::get() );
             for( auto const& testOrTags : data.testsOrTags )
@@ -5851,6 +5880,8 @@ namespace Catch {
     ShowDurations::OrNot Config::showDurations() const { return m_data.showDurations; }
     RunTests::InWhatOrder Config::runOrder() const     { return m_data.runOrder; }
     unsigned int Config::rngSeed() const               { return m_data.rngSeed; }
+    unsigned int Config::shardCount() const            { return m_data.shardCount; }
+    unsigned int Config::shardIndex() const            { return m_data.shardIndex; }
     int Config::benchmarkResolutionMultiple() const    { return m_data.benchmarkResolutionMultiple; }
     UseColour::YesOrNo Config::useColour() const       { return m_data.useColour; }
     bool Config::shouldDebugBreak() const              { return m_data.shouldDebugBreak; }
@@ -8973,8 +9004,36 @@ namespace Catch {
         }
         return sorted;
     }
+    bool parseTestShardNumber( std::string const& text, unsigned int& value ) {
+        if( text.empty() )
+            return false;
+        unsigned int parsed = 0;
+        for( char digit : text ) {
+            if( digit < '0' || digit > '9' )
+                return false;
+            parsed = parsed * 10 + static_cast<unsigned int>( digit - '0' );
+            if( parsed > 64 )
+                return false;
+        }
+        value = parsed;
+        return true;
+    }
+    bool isTestInShard( std::string const& name, unsigned int count, unsigned int index ) {
+        CATCH_ENFORCE( count >= 1 && count <= 64 && index < count,
+                       "Invalid test shard: count must be 1-64 and index less than count" );
+        if( count == 1 )
+            return true;
+        // A specified byte hash is independent of registration order, RNG and std::hash.
+        uint64_t hash = UINT64_C(14695981039346656037);
+        for( unsigned char byte : name ) {
+            hash ^= byte;
+            hash *= UINT64_C(1099511628211);
+        }
+        return hash % count == index;
+    }
     bool matchTest( TestCase const& testCase, TestSpec const& testSpec, IConfig const& config ) {
-        return testSpec.matches( testCase ) && ( config.allowThrows() || !testCase.throws() );
+        return testSpec.matches( testCase ) && ( config.allowThrows() || !testCase.throws() ) &&
+               isTestInShard( testCase.name, config.shardCount(), config.shardIndex() );
     }
 
     void enforceNoDuplicateTestCases( std::vector<TestCase> const& functions ) {
@@ -9488,7 +9547,7 @@ namespace Catch {
 namespace Catch {
 
     auto getCurrentNanosecondsSinceEpoch() -> uint64_t {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::high_resolution_clock::now().time_since_epoch() ).count();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now().time_since_epoch() ).count();
     }
 
     auto estimateClockResolution() -> uint64_t {
@@ -9520,14 +9579,14 @@ namespace Catch {
     void Timer::start() {
        m_nanoseconds = getCurrentNanosecondsSinceEpoch();
     }
-    auto Timer::getElapsedNanoseconds() const -> unsigned int {
-        return static_cast<unsigned int>(getCurrentNanosecondsSinceEpoch() - m_nanoseconds);
+    auto Timer::getElapsedNanoseconds() const -> uint64_t {
+        return getCurrentNanosecondsSinceEpoch() - m_nanoseconds;
     }
-    auto Timer::getElapsedMicroseconds() const -> unsigned int {
-        return static_cast<unsigned int>(getElapsedNanoseconds()/1000);
+    auto Timer::getElapsedMicroseconds() const -> uint64_t {
+        return getElapsedNanoseconds()/1000;
     }
-    auto Timer::getElapsedMilliseconds() const -> unsigned int {
-        return static_cast<unsigned int>(getElapsedMicroseconds()/1000);
+    auto Timer::getElapsedMilliseconds() const -> uint64_t {
+        return getElapsedMicroseconds()/1000;
     }
     auto Timer::getElapsedSeconds() const -> double {
         return getElapsedMicroseconds()/1000000.0;

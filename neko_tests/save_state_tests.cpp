@@ -1118,29 +1118,29 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
       REQUIRE(unchanged);
     };
 
-  SECTION("Initiation occupancy is bounded")
   {
+    INFO("Initiation occupancy is bounded");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.packedMACContinuation.initiationCycles"] = 3;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Initiation occupancy matches the newest latency")
   {
+    INFO("Initiation occupancy matches the newest latency");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.packedMACContinuation.initiationCycles"] = 1;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Active operations require a supported operation")
   {
+    INFO("Active operations require a supported operation");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.packedMACContinuation.operations[0].operation"] = 0;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Active operations require unique program order")
   {
+    INFO("Active operations require unique program order");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1149,8 +1149,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Active operations precede the next program order")
   {
+    INFO("Active operations precede the next program order");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1159,8 +1159,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Serialized operations are already program ordered")
   {
+    INFO("Serialized operations are already program ordered");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1173,8 +1173,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Captured operands remain word-valued")
   {
+    INFO("Captured operands remain word-valued");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1183,8 +1183,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("HI and LO results match the pending GPR result")
   {
+    INFO("HI and LO results match the pending GPR result");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1193,8 +1193,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Multiply results match the captured operands")
   {
+    INFO("Multiply results match the captured operands");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1207,8 +1207,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Accumulation results match the forwarded accumulator")
   {
+    INFO("Accumulation results match the forwarded accumulator");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1221,32 +1221,32 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Pending latency is nonzero")
   {
+    INFO("Pending latency is nonzero");
     SaveStateMutation invalid(valid);
     invalid[
       "system.eeCore.packedMACContinuation.operations[0].remainingCycles"] = 0;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Destination registers are in range")
   {
+    INFO("Destination registers are in range");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.packedMACContinuation.operations[0].destinationRegister"] =
       32;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Overlapping destinations are distinct")
   {
+    INFO("Overlapping destinations are distinct");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.packedMACContinuation.operations[1].destinationRegister"] =
       3;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Packed and scalar continuations cannot overlap")
   {
+    INFO("Packed and scalar continuations cannot overlap");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.pendingMac0.remainingCycles"] =
       4;
@@ -1254,8 +1254,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Packed work rejects a restored younger MAC1 continuation")
   {
+    INFO("Packed work rejects a restored younger MAC1 continuation");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.youngerAStageActive"] = 1;
     writeU32(
@@ -1269,8 +1269,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Packed work rejects a conflicting younger ALU continuation")
   {
+    INFO("Packed work rejects a conflicting younger ALU continuation");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.youngerAStageActive"] = 1;
     writeU32(
@@ -1284,8 +1284,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Packed work precedes an unrelated younger continuation")
   {
+    INFO("Packed work precedes an unrelated younger continuation");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.youngerAStageActive"] = 1;
     writeU32(
@@ -1299,8 +1299,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Packed and younger continuations share an acceptance boundary")
   {
+    INFO("Packed and younger continuations share an acceptance boundary");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.packedMACContinuation.initiationCycles"] = 0;
     invalid.fillPrefix(
@@ -1318,8 +1318,8 @@ TEST_CASE("Invalid packed MAC continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Inactive slots contain no payload")
   {
+    INFO("Inactive slots contain no payload");
     NekoSystem inactive;
     SaveStateMutation invalid(inactive.saveState());
     REQUIRE(
@@ -1366,15 +1366,15 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
       REQUIRE(destination.saveState() == before);
     };
 
-  SECTION("Active work requires a supported operation")
   {
+    INFO("Active work requires a supported operation");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.packedDivideContinuation.operation"] = 0;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Captured operands remain word-valued")
   {
+    INFO("Captured operands remain word-valued");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1383,8 +1383,8 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Captured divisors remain nonzero")
   {
+    INFO("Captured divisors remain nonzero");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1393,8 +1393,8 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Serialized results match the captured operands")
   {
+    INFO("Serialized results match the captured operands");
     SaveStateMutation invalid(valid);
     writeU64(
       &invalid,
@@ -1403,16 +1403,16 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Pending latency is nonzero")
   {
+    INFO("Pending latency is nonzero");
     SaveStateMutation invalid(valid);
     invalid[
       "system.eeCore.packedDivideContinuation.remainingCycles"] = 0;
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Packed divide and scalar work cannot overlap")
   {
+    INFO("Packed divide and scalar work cannot overlap");
     SaveStateMutation invalid(valid);
     invalid["system.eeCore.pendingMac0.active"] = 1;
     invalid["system.eeCore.pendingMac0.remainingCycles"] =
@@ -1420,8 +1420,8 @@ TEST_CASE("Invalid packed divide continuation states are rejected")
     requireRejected(std::move(invalid));
   }
 
-  SECTION("Inactive continuations contain no payload")
   {
+    INFO("Inactive continuations contain no payload");
     NekoSystem inactive;
     SaveStateMutation invalid(inactive.saveState());
     REQUIRE(

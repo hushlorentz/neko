@@ -8,6 +8,7 @@ get_filename_component(
   ABSOLUTE
 )
 set(BUILD_DIRECTORY "${REPOSITORY_ROOT}/out/leaks")
+include("${CMAKE_CURRENT_LIST_DIR}/CheckJobs.cmake")
 
 function(run_checked)
   execute_process(
@@ -42,6 +43,7 @@ run_checked(
   neko_tests
   --config
   Debug
+  ${NEKO_BUILD_PARALLEL_ARGS}
 )
 
 set(TEST_EXECUTABLE "${BUILD_DIRECTORY}/neko_tests")

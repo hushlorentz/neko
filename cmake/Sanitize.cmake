@@ -4,6 +4,7 @@ get_filename_component(
   ABSOLUTE
 )
 set(BUILD_DIRECTORY "${REPOSITORY_ROOT}/out/sanitize")
+include("${CMAKE_CURRENT_LIST_DIR}/CheckJobs.cmake")
 
 function(run_checked)
   execute_process(
@@ -29,6 +30,7 @@ run_checked(
   NEKO_ENABLE_SANITIZERS=ON
   -D
   NEKO_OPTIMIZE_CHECKS=ON
+  "-DNEKO_TEST_JOBS=${NEKO_CHECK_JOBS}"
 )
 run_checked(
   "${CMAKE_COMMAND}"
@@ -38,4 +40,5 @@ run_checked(
   check
   --config
   Debug
+  ${NEKO_BUILD_PARALLEL_ARGS}
 )

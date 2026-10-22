@@ -4,6 +4,7 @@ get_filename_component(
   ABSOLUTE
 )
 set(BUILD_DIRECTORY "${REPOSITORY_ROOT}/out/check")
+include("${CMAKE_CURRENT_LIST_DIR}/CheckJobs.cmake")
 
 function(run_checked)
   execute_process(
@@ -27,6 +28,7 @@ run_checked(
   CMAKE_BUILD_TYPE=Debug
   -D
   NEKO_OPTIMIZE_CHECKS=ON
+  "-DNEKO_TEST_JOBS=${NEKO_CHECK_JOBS}"
 )
 run_checked(
   "${CMAKE_COMMAND}"
@@ -36,4 +38,5 @@ run_checked(
   check
   --config
   Debug
+  ${NEKO_BUILD_PARALLEL_ARGS}
 )
