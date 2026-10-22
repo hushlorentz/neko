@@ -1673,7 +1673,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Exercise simultaneous directions, unequal producer/consumer progress,
       full/empty transport, receiver-late start, channel disable/restart,
       and independent completion/INTC acknowledgement.
-- [ ] Cover same-cycle CPU/DMA memory overlap, exceptions, interrupts, CPU
+- [x] Cover same-cycle CPU/DMA memory overlap, exceptions, interrupts, CPU
       halt/resume, whole-machine reset, and evidenced guest-reset scope.
 - [ ] Prove repeated-run equivalence, observational tracing, canonical combined
       state comparison, and byte-identical restore at active transfer boundaries;

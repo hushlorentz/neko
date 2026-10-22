@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 #include "catch.hpp"
@@ -1345,6 +1346,414 @@ TEST_CASE("Empty SIF receivers wait without completion until both producers star
   REQUIRE(system.dmacController().sifGrantOrder()[0] == SIFDirection::SIF0);
   REQUIRE(system.iopDMAController().sifGrantOrder()[0] == IOPDMAChannel::SIF0);
   bidirectionalPackets(system, 64, 64);
+  drainBidirectional(system);
+  requireBidirectionalPayloads(system, 64, 64);
+}
+
+TEST_CASE("EE uncached accesses precede a same-cycle SIF0 destination write",
+  "[sif][cross-channel][lifecycle][overlap]")
+{
+  for (const bool store : {false, true})
+  {
+    CAPTURE(store);
+    NekoSystem system;
+    bidirectionalPackets(system, 4, 4);
+    receiver(system);
+    iopReceiver(system);
+    REQUIRE(system.eeBus().writeData32(0x3000, 0x3333));
+    REQUIRE(system.eeBus().writeData32(0x800, store ? 0xac220000 : 0x8c230000));
+    system.eeCore().setGeneralRegister(1, {0xa0003000, 0});
+    system.eeCore().setGeneralRegister(2, {0x7777, 0});
+    system.runMasterCycles(65);
+    REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 4);
+    REQUIRE(system.sif0DMAC().quadwordCount() == 1);
+    REQUIRE(system.eeBus().read32(0x3000) == 0x3333);
+    system.eeCore().startExecution(0xa0000800);
+    system.clockMasterCycle();
+    REQUIRE(system.eeCore().pendingException() == EEException::None);
+    REQUIRE(system.eeCore().acceptanceRecordsThisCycle().size() == 1);
+    if (!store) REQUIRE(system.eeCore().generalRegister(3).low == 0x3333);
+    requireData(system);
+    drainBidirectional(system);
+    requireBidirectionalPayloads(system, 4, 4);
+  }
+}
+
+TEST_CASE("EE uncached store feeds the same-cycle SIF1 source beat",
+  "[sif][cross-channel][lifecycle][overlap]")
+{
+  NekoSystem system;
+  bidirectionalPackets(system, 4, 4);
+  receiver(system);
+  iopReceiver(system);
+  REQUIRE(system.eeBus().writeData32(0x800, 0xac220000)); // sw r2, 0(r1)
+  system.eeCore().setGeneralRegister(1, {0xa0005010, 0});
+  system.eeCore().setGeneralRegister(2, {0x7777, 0});
+  system.runMasterCycles(2);
+  REQUIRE(system.sif1DMAC().memoryAddress() == 0x5010);
+  REQUIRE(system.sif1DMAC().quadwordCount() == 1);
+  system.eeCore().startExecution(0xa0000800);
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().acceptanceRecordsThisCycle().size() == 1);
+  REQUIRE_FALSE(system.sif1DMAC().active());
+  REQUIRE(system.sif().wordAt(SIFDirection::SIF1, 4) == 0x7777);
+  drainBidirectional(system);
+  requireData(system);
+  for (unsigned index = 0; index < 4; ++index)
+    REQUIRE(system.iopBus().read32(0x6000 + 4 * index).value ==
+      (index == 0 ? 0x7777 : 0x10000000 + index));
+}
+
+TEST_CASE("IOP uncached accesses follow a same-pulse SIF1 destination write",
+  "[sif][cross-channel][lifecycle][overlap]")
+{
+  for (const bool store : {false, true})
+  {
+    CAPTURE(store);
+    NekoSystem system;
+    bidirectionalPackets(system, 4, 4);
+    receiver(system);
+    iopReceiver(system);
+    writeIOP(system, 0x6000, 0x3333);
+    writeIOP(system, 0x800, 0x3c01a000); // lui r1, 0xa000
+    writeIOP(system, 0x804, 0x34027777); // ori r2, r0, 0x7777
+    writeIOP(system, 0x808, 0);
+    writeIOP(system, 0x80c, store ? 0xac226000 : 0x8c236000);
+    system.iopCore().startExecution(0xa0000800);
+    system.runMasterCycles(24);
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+    REQUIRE(system.iopBus().read32(0x6000).value == 0x3333);
+    system.clockMasterCycle();
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == 3);
+    REQUIRE(system.iopCore().retiredInstructions() == 4);
+    REQUIRE(system.iopBus().read32(0x6000).value == (store ? 0x7777 : 0x10000000));
+    if (!store)
+    {
+      REQUIRE(system.iopCore().generalRegister(3) == 0);
+      REQUIRE(system.iopCore().delayedResultContinuation().source ==
+        IOPDelayedResultSource::Load);
+      REQUIRE(system.iopCore().delayedResultContinuation().value == 0x10000000);
+      system.runMasterCycles(8);
+      REQUIRE(system.iopCore().generalRegister(3) == 0x10000000);
+    }
+    drainBidirectional(system);
+    requireData(system);
+    for (unsigned index = 1; index < 4; ++index)
+      REQUIRE(system.iopBus().read32(0x6000 + 4 * index).value == 0x10000000 + index);
+  }
+}
+
+TEST_CASE("IOP uncached stores cannot change an accepted SIF0 word but feed later beats",
+  "[sif][cross-channel][lifecycle][overlap]")
+{
+  NekoSystem system;
+  bidirectionalPackets(system, 4, 4);
+  receiver(system);
+  iopReceiver(system);
+  writeIOP(system, 0x800, 0x3c01a000); // lui r1, 0xa000
+  writeIOP(system, 0x804, 0x34027777); // ori r2, r0, 0x7777
+  writeIOP(system, 0x808, 0xac222000); // sw r2, 0x2000(r1)
+  writeIOP(system, 0x80c, 0xac222004); // sw r2, 0x2004(r1)
+  system.iopCore().startExecution(0xa0000800);
+  system.runMasterCycles(16);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  system.clockMasterCycle();
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 3);
+  REQUIRE(system.iopBus().read32(0x2000).value == 0x7777);
+  REQUIRE(system.sif().wordAt(SIFDirection::SIF0, 0) == 1);
+  system.runMasterCycles(8);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 3);
+  REQUIRE(system.iopBus().read32(0x2004).value == 0x7777);
+  drainBidirectional(system);
+  EEQuadword value = {};
+  REQUIRE(system.eeBus().readDMAC128(0x3000, &value));
+  REQUIRE(value.low == UINT64_C(0x0000777700000001));
+  REQUIRE(value.high == UINT64_C(0x0000000400000003));
+}
+
+TEST_CASE("Bidirectional SIF DMA survives precise guest delay-slot exceptions on both CPUs",
+  "[sif][cross-channel][lifecycle][exception]")
+{
+  NekoSystem system;
+  bidirectionalPackets(system, 64, 64);
+  receiver(system);
+  iopReceiver(system);
+  writeIOP(system, 0x800, 0x34010000); // ori r1, r0, 0
+  writeIOP(system, 0x804, 0x40816000); // mtc0 r1, Status
+  writeIOP(system, 0x808, 0x10000001); // beq r0, r0, 0x810
+  writeIOP(system, 0x80c, 0x0000000c); // syscall
+  writeIOP(system, 0x80, 0x24070066); // addiu r7, r0, 0x66
+  REQUIRE(system.eeBus().writeData32(0x800, 0x08000204)); // j 0xa0000810
+  REQUIRE(system.eeBus().writeData32(0x804, 0x0000000c)); // syscall
+  REQUIRE(system.eeBus().writeData32(0x180, 0x24070077));
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  system.iopCore().startExecution(0xa0000800);
+  system.runMasterCycles(23);
+  system.eeCore().startExecution(0xa0000800);
+  system.clockMasterCycle();
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().pendingException() == EEException::SystemCall);
+  REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000800);
+  REQUIRE((system.eeCore().cop0Register(EECOP0Register::Cause) &
+    EECOP0Cause::BRANCH_DELAY) != 0);
+  REQUIRE(system.iopCore().exception().kind == IOPException::SystemCall);
+  REQUIRE(system.iopCore().exceptionProgramCounter() == 0xa0000808);
+  REQUIRE((system.iopCore().cause() & IOPCOP0Cause::BRANCH_DELAY) != 0);
+  REQUIRE(system.eeCore().executionState() == EEExecutionState::Running);
+  REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 63);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 63);
+  drainBidirectional(system);
+  requireBidirectionalPayloads(system, 64, 64);
+  REQUIRE(system.eeCore().generalRegister(7).low == 0x77);
+  REQUIRE(system.iopCore().generalRegister(7) == 0x66);
+}
+
+TEST_CASE("Host halt and resume preserve CPU continuations while both SIF directions drain",
+  "[sif][cross-channel][lifecycle][halt]")
+{
+  for (const unsigned checkpoint : {1u, 9u, 17u})
+    for (unsigned halted = 1; halted <= 3; ++halted)
+    {
+      CAPTURE(checkpoint);
+      CAPTURE(halted);
+      NekoSystem system;
+      bidirectionalPackets(system, 64, 64);
+      receiver(system);
+      iopReceiver(system);
+      REQUIRE(system.eeBus().writeData32(0x800, 0x0c000204)); // jal 0xa0000810
+      REQUIRE(system.eeBus().writeData32(0x804, 0x37e40000)); // ori r4, r31, 0
+      REQUIRE(system.eeBus().writeData32(0x80c, 0x2406dead));
+      REQUIRE(system.eeBus().writeData32(0x810, 0x24050055));
+      writeIOP(system, 0x800, 0x8c032000); // lw r3, 0x2000(r0)
+      writeIOP(system, 0x804, 0x10000002); // beq r0, r0, 0x810
+      writeIOP(system, 0x808, 0x8c042004); // lw r4, 0x2004(r0)
+      writeIOP(system, 0x80c, 0x2406dead);
+      writeIOP(system, 0x810, 0x00803821); // addu r7, r4, r0
+      writeIOP(system, 0x814, 0x00804021); // addu r8, r4, r0
+      system.iopCore().startExecution(0xa0000800);
+      system.runMasterCycles(checkpoint - 1);
+      system.eeCore().startExecution(0xa0000800);
+      system.clockMasterCycle();
+      if (checkpoint == 9)
+        REQUIRE(system.iopCore().branchContinuation().active);
+      else
+        REQUIRE(system.iopCore().delayedResultContinuation().source ==
+          IOPDelayedResultSource::Load);
+      const auto eePC = system.eeCore().programCounter();
+      const auto iopPC = system.iopCore().programCounter();
+      const auto eeCycles = system.eeCore().elapsedCycles();
+      const auto iopCycles = system.iopCore().elapsedCycles();
+      if ((halted & 1) != 0) system.eeCore().haltExecution();
+      if ((halted & 2) != 0) system.iopCore().haltExecution();
+      drainBidirectional(system);
+      requireBidirectionalPayloads(system, 64, 64);
+      if ((halted & 1) != 0)
+      {
+        REQUIRE(system.eeCore().programCounter() == eePC);
+        REQUIRE(system.eeCore().elapsedCycles() == eeCycles);
+        system.eeCore().startExecution(eePC);
+      }
+      else REQUIRE(system.eeCore().elapsedCycles() > eeCycles);
+      if ((halted & 2) != 0)
+      {
+        REQUIRE(system.iopCore().programCounter() == iopPC);
+        REQUIRE(system.iopCore().elapsedCycles() == iopCycles);
+        system.iopCore().resumeExecution();
+      }
+      else REQUIRE(system.iopCore().elapsedCycles() > iopCycles);
+      system.runMasterCycles(40);
+      REQUIRE(system.eeCore().generalRegister(4).low ==
+        system.eeCore().generalRegister(31).low);
+      REQUIRE(static_cast<std::uint32_t>(system.eeCore().generalRegister(4).low) ==
+        0xa0000808);
+      REQUIRE(system.eeCore().generalRegister(5).low == 0x55);
+      REQUIRE(system.eeCore().generalRegister(6).low == 0);
+      REQUIRE(system.iopCore().generalRegister(3) == 1);
+      REQUIRE(system.iopCore().generalRegister(4) == 2);
+      REQUIRE(system.iopCore().generalRegister(6) == 0);
+      REQUIRE(system.iopCore().generalRegister(7) == 0);
+      REQUIRE(system.iopCore().generalRegister(8) == 2);
+    }
+}
+
+TEST_CASE("SIF completions pending during host halt enter on CPU resume without losing an older load",
+  "[sif][cross-channel][lifecycle][interrupt]")
+{
+  NekoSystem system;
+  bidirectionalPackets(system, 64, 64);
+  receiver(system);
+  iopReceiver(system);
+  writeIOP(system, 0x800, 0x34010401); // ori r1, r0, IEc | IM2
+  writeIOP(system, 0x804, 0x40816000); // mtc0 r1, Status
+  writeIOP(system, 0x808, 0x8c032000); // lw r3, 0x2000(r0)
+  system.iopCore().startExecution(0xa0000800);
+  system.eeCore().startExecution(0xa0000800);
+  system.runMasterCycles(17);
+  REQUIRE(system.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  const auto eePC = system.eeCore().programCounter();
+  const auto iopPC = system.iopCore().programCounter();
+  const auto iopRetired = system.iopCore().retiredInstructions();
+  system.eeCore().haltExecution();
+  system.iopCore().haltExecution();
+  system.dmacController().writeStatus(DMACStatus::CHANNEL_5_MASK |
+    DMACStatus::CHANNEL_6_MASK);
+  system.eeCore().setCOP0Register(EECOP0Register::Status,
+    EECOP0Status::INTERRUPT_ENABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE |
+      EECOP0Status::DMAC_MASK);
+  system.iopInterruptController().writeMask(8);
+  system.iopInterruptController().writeControl(1);
+  drainBidirectional(system);
+  REQUIRE(system.dmacController().interruptPending());
+  REQUIRE(system.iopInterruptController().interruptPending());
+  REQUIRE(system.iopCore().generalRegister(3) == 0);
+  REQUIRE(system.iopCore().delayedResultContinuation().value == 1);
+  system.eeCore().startExecution(eePC);
+  system.iopCore().resumeExecution();
+  const auto untilIOPPulse =
+    (8 - system.masterClockScheduler().currentCycle() % 8) % 8 + 1;
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().pendingException() == EEException::Interrupt);
+  REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == eePC);
+  system.runMasterCycles(untilIOPPulse - 1);
+  REQUIRE(system.iopCore().exception().kind == IOPException::Interrupt);
+  REQUIRE(system.iopCore().exceptionProgramCounter() == iopPC);
+  REQUIRE(system.iopCore().retiredInstructions() == iopRetired);
+  REQUIRE(system.iopCore().generalRegister(3) == 1);
+  REQUIRE(system.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::None);
+}
+
+TEST_CASE("CPU execution failures do not abort bidirectional SIF or the running peer",
+  "[sif][cross-channel][lifecycle][failure]")
+{
+  for (const bool failEE : {false, true})
+  {
+    CAPTURE(failEE);
+    NekoSystem system;
+    bidirectionalPackets(system, 64, 64);
+    receiver(system);
+    iopReceiver(system);
+    REQUIRE(system.eeBus().writeData32(0x800, failEE ? 0x40003800 : 0));
+    writeIOP(system, 0x800, failEE ? 0 : 0x3c011000);
+    writeIOP(system, 0x804, failEE ? 0 : 0xac200000);
+    system.eeCore().startExecution(0xa0000800);
+    system.iopCore().startExecution(0xa0000800);
+    system.runMasterCycles(9);
+    REQUIRE(system.eeCore().stopReason() ==
+      (failEE ? EEStopReason::UnsupportedInstruction : EEStopReason::None));
+    REQUIRE(system.iopCore().stopReason() ==
+      (failEE ? IOPStopReason::None : IOPStopReason::StoreFailure));
+    const auto eePC = system.eeCore().programCounter();
+    const auto iopPC = system.iopCore().programCounter();
+    const auto eeCycles = system.eeCore().elapsedCycles();
+    const auto iopCycles = system.iopCore().elapsedCycles();
+    drainBidirectional(system);
+    requireBidirectionalPayloads(system, 64, 64);
+    if (failEE)
+    {
+      REQUIRE(system.eeCore().programCounter() == eePC);
+      REQUIRE(system.eeCore().elapsedCycles() == eeCycles);
+      REQUIRE(system.iopCore().elapsedCycles() > iopCycles);
+    }
+    else
+    {
+      REQUIRE(system.iopCore().programCounter() == iopPC);
+      REQUIRE(system.iopCore().elapsedCycles() == iopCycles);
+      REQUIRE(system.eeCore().elapsedCycles() > eeCycles);
+      REQUIRE_THROWS_AS(system.iopCore().resumeExecution(), std::logic_error);
+    }
+  }
+}
+
+TEST_CASE("Whole-machine reset cancels combined SIF continuations and pending completions",
+  "[sif][cross-channel][lifecycle][reset]")
+{
+  for (unsigned checkpoint = 0; checkpoint < 3; ++checkpoint)
+  {
+    CAPTURE(checkpoint);
+    NekoSystem system;
+    std::vector<std::uint8_t> rom(BootROMImage::SIZE, 0);
+    rom.back() = 0xab;
+    system.installBootROM(rom);
+    const auto identity = system.eeBus().bootROMIdentity();
+    bidirectionalPackets(system, 64, 64);
+    if (checkpoint != 1) receiver(system);
+    iopReceiver(system);
+    REQUIRE(system.eeBus().writeData32(0x800, 0x08000200)); // j 0xa0000800
+    writeIOP(system, 0x800, 0x08000200);
+    system.eeCore().startExecution(0xa0000800);
+    system.iopCore().startExecution(0xa0000800);
+    system.startTrace();
+    system.runMasterCycles(checkpoint == 0 ? 25 : 2048);
+    if (checkpoint == 0)
+    {
+      REQUIRE(system.sif().sif0PackingCursor() == 1);
+      REQUIRE(system.iopSIF0DMAC().remainingWords() == 63);
+      REQUIRE(system.iopSIF1DMAC().remainingWords() == 63);
+    }
+    else if (checkpoint == 1)
+    {
+      REQUIRE(system.sif().freeWordCount() == 0);
+      REQUIRE(system.iopSIF0DMAC().active());
+    }
+    else
+    {
+      requireBidirectionalPayloads(system, 64, 64);
+    }
+    system.reset();
+    NekoSystem fresh;
+    fresh.installBootROM(rom);
+    fresh.reset();
+    REQUIRE(system.eeBus().bootROMIdentity() == identity);
+    REQUIRE(system.iopBus().romIdentity() == identity);
+    REQUIRE(system.trace().empty());
+    REQUIRE_FALSE(system.traceEnabled());
+    REQUIRE(system.masterClockScheduler().currentCycle() == 0);
+    REQUIRE(system.saveState() == fresh.saveState());
+    system.runMasterCycles(64);
+    fresh.runMasterCycles(64);
+    REQUIRE(system.saveState() == fresh.saveState());
+    bidirectionalPackets(system, 64, 64);
+    receiver(system);
+    iopReceiver(system);
+    drainBidirectional(system);
+    requireBidirectionalPayloads(system, 64, 64);
+  }
+}
+
+TEST_CASE("Unsupported guest reset requests reject atomically without resetting active SIF peers",
+  "[sif][cross-channel][lifecycle][reset][guest]")
+{
+  NekoSystem system;
+  bidirectionalPackets(system, 64, 64);
+  receiver(system);
+  iopReceiver(system);
+  system.runMasterCycles(17);
+  const auto before = system.saveState();
+  for (const std::uint32_t command : {0x80000u, 0xc0000u, 0xc0100u, 0xffffffffu})
+  {
+    CAPTURE(command);
+    REQUIRE_FALSE(system.eeBus().writeData32(0x1000f240, command));
+    REQUIRE(system.saveState() == before);
+  }
+  REQUIRE(system.eeBus().writeData32(0x800, 0xac220000)); // sw r2, 0(r1)
+  system.eeCore().setGeneralRegister(1, {0xb000f240, 0});
+  system.eeCore().setGeneralRegister(2, {0xc0100, 0});
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  system.eeCore().startExecution(0xa0000800);
+  const auto transport = system.sifStateHash();
+  const auto sourceAddress = system.iopSIF0DMAC().memoryAddress();
+  const auto destinationAddress = system.iopSIF1DMAC().memoryAddress();
+  system.clockMasterCycle();
+  REQUIRE(system.eeCore().pendingException() == EEException::DataBusErrorStore);
+  REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000800);
+  REQUIRE(system.masterClockScheduler().currentCycle() == 18);
+  REQUIRE(system.sifStateHash() == transport);
+  REQUIRE(system.iopSIF0DMAC().memoryAddress() == sourceAddress);
+  REQUIRE(system.iopSIF1DMAC().memoryAddress() == destinationAddress);
+  REQUIRE(system.iopInterruptController().status() == 0);
   drainBidirectional(system);
   requireBidirectionalPayloads(system, 64, 64);
 }
