@@ -1697,16 +1697,23 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add BIOS-free diagnostic regressions for attribution, ordering, limits,
       errors, and observational equivalence; complete independent review and
       the optimized repository check before dependency classification.
-- [ ] Classify discovered pre-handshake dependencies against the approved
+- [x] Classify discovered pre-handshake dependencies against the approved
       contract; obtain scope approval and split prerequisite work into testable
       items before extending hardware.
+- [ ] Repair EE cached installed-ROM fills across instruction/data and related
+      CACHE/PREF paths; retain immutable backing, MMIO rejection, and atomic
+      failure behavior with authored BIOS-free regressions.
+- [ ] Add the approved exact-word IOP SSBUS configuration profile at
+      `0x1f801010`, with bounded access admission, reset/readback, canonical
+      hashing, atomic save/load, and authored BIOS-free regressions.
+- [ ] Repeat bounded discovery after each prerequisite; reclassify earlier
+      stops against the approved contract before further hardware extension
+      or any change to the handshake target.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.
 - [ ] Advance both CPUs through real startup/SIF execution without fabricated
       readiness, RPC responses, skipped instructions, or generic device stubs.
-- [ ] Triage each earlier stop against the approved contract; explicitly review
-      scope before adding prerequisite hardware or moving the target.
 - [ ] Demonstrate the selected handshake, then record the first out-of-scope
       device dependency with CPU/access/wait evidence for Milestone 10 or its
       owning later milestone.
