@@ -89,16 +89,17 @@ int neko_cli::runBIOSStartupCommand(
         "Trace event ceiling must be an unsigned 64-bit decimal integer.") : 0;
     const auto image = loadFile(arguments[0]);
     NekoSystem system;
-    StartupRunSummary report;
+    system.runDualCPUBIOS(image, 0);
     if (traceRequested)
     {
-      system.runDualCPUBIOS(image, 0);
       system.startTrace(traceLimit);
-      report = runDualCPUWithStartupSummary(system, budget);
     }
-    else
+    const auto evidence = runDualCPUWithStartupEvidence(system, budget);
+    const auto *runtimeError = evidence.outcome == StartupRunOutcome::RuntimeError ?
+      &evidence.error : nullptr;
+    if (runtimeError != nullptr)
     {
-      report = runDualCPUBIOSWithStartupSummary(system, image, budget);
+      error << runtimeError->message << '\n';
     }
 
     std::ostringstream record;
@@ -110,18 +111,32 @@ int neko_cli::runBIOSStartupCommand(
       system.eeBus().bootROMIdentity()->fingerprint() <<
       std::dec << "\",\"max_master_cycles\":" << budget <<
       ",\"start\":\"cold_dual_reset_vectors\"}\n";
-    writeStartupRunSummaryJsonLine(record, report);
+    if (runtimeError != nullptr)
+    {
+      writeStartupRuntimeErrorJsonLine(record, *runtimeError);
+    }
+    else
+    {
+      writeStartupRunSummaryJsonLine(record, evidence.completed);
+    }
     output << record.str();
     if (traceRequested)
     {
       writeStartupTraceJsonLines(output, system);
+      writeStartupFirstFailureJsonLine(output, system,
+        runtimeError != nullptr ? StartupExecutionBoundary::IncompleteCycle :
+          StartupExecutionBoundary::CompleteCycle);
     }
     output.flush();
     if (!output)
     {
       throw std::runtime_error("Cannot write BIOS startup report.");
     }
-    return report.execution.cycleLimitReached ? 0 : 1;
+    if (runtimeError != nullptr)
+    {
+      return 2;
+    }
+    return evidence.completed.execution.cycleLimitReached ? 0 : 1;
   }
   catch (const std::exception &exception)
   {

@@ -288,6 +288,50 @@ StartupRunSummary runDualCPUBIOSWithStartupSummary(
   return {execution, inspectStartup(system)};
 }
 
+StartupRunEvidence runDualCPUWithStartupEvidence(
+  NekoSystem &system, std::uint64_t maxMasterCycles)
+{
+  DualCPUExecutionResult execution;
+  try
+  {
+    execution = system.runDualCPU(maxMasterCycles);
+  }
+  catch (const std::exception &error)
+  {
+    return {StartupRunOutcome::RuntimeError, {}, {error.what(), inspectStartup(system)}};
+  }
+  return {StartupRunOutcome::Completed, {execution, inspectStartup(system)}, {}};
+}
+
+void writeStartupRuntimeErrorJsonLine(
+  std::ostream &output, const StartupRuntimeError &error)
+{
+  std::ostringstream json;
+  json.imbue(std::locale::classic());
+  json << "{\"type\":\"startup_runtime_error\","
+    "\"execution_boundary\":\"incomplete_cycle\",\"run\":null,\"message\":\"";
+  constexpr char hex[] = "0123456789abcdef";
+  for (const unsigned char character : error.message)
+  {
+    if (character == '"' || character == '\\')
+    {
+      json << '\\' << static_cast<char>(character);
+    }
+    else if (character < 0x20)
+    {
+      json << "\\u00" << hex[character >> 4] << hex[character & 15];
+    }
+    else
+    {
+      json << static_cast<char>(character);
+    }
+  }
+  json << "\",\"snapshot\":";
+  writeSnapshot(json, error.startup);
+  json << "}\n";
+  emitJson(output, json);
+}
+
 void writeStartupSummaryJsonLine(
   std::ostream &output, const StartupSummary &summary)
 {

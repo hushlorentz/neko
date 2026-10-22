@@ -20,6 +20,26 @@ namespace
     }
     return image;
   }
+
+  std::vector<std::uint8_t> rejectedDMAROM()
+  {
+    auto image = discoveryROM();
+    const std::vector<std::uint32_t> program = {
+      0x3c01bf80, 0x34211500, // IOP DMA register base
+      0x3c020080, 0xac22002c, // unmapped SIF0 descriptor at 0x800000
+      0x3c020100, 0x34420401, 0xac220028, // start channel 9
+      0x34020800, 0xac220070 // enable channel 9 in DPCR2
+    };
+    for (std::size_t index = 0; index < program.size(); ++index)
+    {
+      for (std::size_t byte = 0; byte < 4; ++byte)
+      {
+        image[index * 4 + byte] =
+          static_cast<std::uint8_t>(program[index] >> (8 * byte));
+      }
+    }
+    return image;
+  }
 }
 
 TEST_CASE("BIOS startup command reproduces the dual runner and identifies its input",
@@ -275,6 +295,9 @@ TEST_CASE("BIOS startup command exports an exact bounded ordered trace prefix",
           ",\"values\":[" << event.value0 << ',' << event.value1 << ',' <<
           event.value2 << ',' << event.value3 << "]}\n";
       }
+      expected << "{\"type\":\"startup_first_failure\",\"trace_truncated\":"
+        << (limit < total ? "true" : "false")
+        << ",\"execution_boundary\":\"complete_cycle\",\"failure\":null}\n";
       REQUIRE(output.str() == expected.str());
     }
   }
@@ -366,4 +389,87 @@ TEST_CASE("BIOS startup command reports failures while exporting trace records",
   REQUIRE(buffer.str().find("\"type\":\"trace_event\"") == std::string::npos);
   REQUIRE(error.str().find("Cannot write BIOS startup report") !=
     std::string::npos);
+}
+
+TEST_CASE("BIOS startup command attributes captured faults without stopping handlers",
+  "[bios-startup-command][startup-failure]")
+{
+  const auto image = discoveryROM(0x8c020001); // lw v0, 1(zero)
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "17", "--trace-events", "10000"},
+    [&](const std::string &) { return image; }, output, error) == 0);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().find("\"type\":\"startup_first_failure\"") !=
+    std::string::npos);
+  REQUIRE(output.str().find("\"kind\":\"memory_access\",\"cpu\":\"ee\"") !=
+    std::string::npos);
+  REQUIRE(output.str().find("\"pc\":3217031168,\"bits\":2348941313") !=
+    std::string::npos);
+  REQUIRE(output.str().find("\"virtual_address\":1,\"physical_address\":null") !=
+    std::string::npos);
+}
+
+TEST_CASE("BIOS startup command retains runtime error evidence and an incomplete boundary",
+  "[bios-startup-command][startup-failure]")
+{
+  const auto image = rejectedDMAROM();
+  for (const std::string limit : {"", "0", "1", "10000"})
+  {
+    CAPTURE(limit);
+    const bool traced = !limit.empty();
+    std::vector<std::string> arguments = {"authored.bin", "--cycles", "100"};
+    if (traced)
+    {
+      arguments.insert(arguments.end(), {"--trace-events", limit});
+    }
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runBIOSStartupCommand(arguments,
+      [&](const std::string &) { return image; }, output, error) == 2);
+    REQUIRE(error.str().find("IOP SIF0 DMA rejected") != std::string::npos);
+    REQUIRE(output.str().find("\"type\":\"bios_startup_input\"") !=
+      std::string::npos);
+    REQUIRE(output.str().find("\"type\":\"startup_runtime_error\"") !=
+      std::string::npos);
+    REQUIRE(output.str().find("\"execution_boundary\":\"incomplete_cycle\"") !=
+      std::string::npos);
+    REQUIRE(output.str().find("\"type\":\"startup_run_summary\"") ==
+      std::string::npos);
+    REQUIRE((output.str().find("\"type\":\"startup_trace_summary\"") !=
+      std::string::npos) == traced);
+  }
+}
+
+TEST_CASE("BIOS runtime errors remain visible when report output also fails",
+  "[bios-startup-command][startup-failure]")
+{
+  const auto image = rejectedDMAROM();
+  std::ostringstream output;
+  output.setstate(std::ios::badbit);
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "100", "--trace-events", "10000"},
+    [&](const std::string &) { return image; }, output, error) == 2);
+  REQUIRE(error.str().find("IOP SIF0 DMA rejected") != std::string::npos);
+  REQUIRE(error.str().find("Cannot write BIOS startup report") != std::string::npos);
+}
+
+TEST_CASE("BIOS first failure reports missing context rather than inferring it past the cap",
+  "[bios-startup-command][startup-failure]")
+{
+  const auto image = discoveryROM(0x8c020001);
+  for (const std::string limit : {"0", "1"})
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "17", "--trace-events", limit},
+      [&](const std::string &) { return image; }, output, error) == 0);
+    REQUIRE(error.str().empty());
+    REQUIRE(output.str().find("\"type\":\"startup_first_failure\","
+      "\"trace_truncated\":true,\"execution_boundary\":\"complete_cycle\","
+      "\"failure\":null") != std::string::npos);
+  }
 }

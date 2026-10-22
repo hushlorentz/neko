@@ -1424,6 +1424,22 @@ void NekoSystem::publishCycleTrace(
         value3 = exception.cause;
         break;
       }
+      case EECore::CycleEventKind::FaultContext:
+      {
+        const auto &fault = event.payload.faultContext;
+        type = NekoTraceEventType::FaultContext;
+        value0 = fault.address;
+        value1 = fault.instruction;
+        value2 = fault.delaySlot ? fault.branchAddress : 0;
+        value3 =
+          (fault.instructionAvailable ? NekoEETraceFault::INSTRUCTION_AVAILABLE : 0) |
+          (fault.delaySlot ? NekoEETraceFault::DELAY_SLOT : 0) |
+          (fault.stopReason != EEStopReason::None ?
+            NekoEETraceFault::HOST_REJECTION : 0) |
+          (static_cast<std::uint64_t>(fault.stopReason) <<
+            NekoEETraceFault::STOP_REASON_SHIFT);
+        break;
+      }
       case EECore::CycleEventKind::InterruptDelivered:
       {
         const EECore::InterruptDeliveredEvent &interrupt =

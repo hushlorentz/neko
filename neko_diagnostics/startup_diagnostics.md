@@ -35,8 +35,10 @@ precedence remain unchanged. A stop does not halt the peer or cancel devices.
 reads. In particular, it does not perform the IOP INTC control-register read
 that would clear its enable latch. It does not advance clocks, acknowledge
 interrupts, drain SIF data, enable/consume trace collection, or mutate caches.
-Calls must be serialized between completed master cycles, not made from an
-in-cycle observation callback or concurrently with execution.
+Calls must be serialized between completed master cycles or after synchronous
+execution has unwound, not made from an in-cycle observation callback or
+concurrently with execution. Inspection after an execution error describes a
+possibly incomplete cycle, not a completed boundary.
 
 ## Meaning and limits
 
@@ -135,7 +137,9 @@ cryptographic digest**), `max_master_cycles`, and
 Status 0 means budget exhaustion (including a zero-budget release), not
 successful startup; status 1 means the runner returned a CPU host stop.
 Status 2 reports invalid arguments, file errors, or runtime/output errors
-on stderr. A runtime exception need not produce a summary. Guest exception
+on stderr. After successful BIOS admission, an execution exception retains the
+input record and emits `startup_runtime_error` instead of a successful
+`startup_run_summary`. Guest exception
 handlers still execute under the existing runner policy: the ending snapshot
 is retained state, not the first rejected-access history or proof of deadlock.
 No tracing is enabled unless `--trace-events` is supplied.
@@ -163,7 +167,7 @@ The event above illustrates the record shape, not a particular BIOS result.
 `subsystem` and `event_type` are the stable numeric identities from
 `regression_trace.hpp`; `values` contains its four raw payload words.
 Numbers are decimal, including 64-bit words: consumers must retain integer
-precision. No instruction decoding or first-failure inference is performed.
+precision. A decoded `startup_first_failure` record follows the raw events.
 
 The collector retains the earliest events, never a rolling window. Truncation
 means at least one event was omitted, not merely that the collection reached
@@ -178,8 +182,11 @@ It does not preallocate the requested ceiling, shrink previously allocated
 vector capacity, or impose a byte budget. Enabled tracing still incurs normal
 observation costs after the prefix fills. Output is formatted one record at a
 time after execution rather than building another complete trace in memory.
-Runtime-exception evidence capture remains separate work; a runtime exception
-can still return status 2 without exporting the retained prefix.
+Runtime errors export the retained prefix when tracing was requested. This is
+best-effort reporting: allocation, inspection, or output failure can still
+prevent some evidence from being emitted. The original execution error is
+written to stderr before formatting/output, so a later output error does not
+replace it.
 
 The same boundary is available to host tools:
 
@@ -201,3 +208,105 @@ truncation. Whole-machine reset clears all of them (disabled, ceiling zero).
 Save states exclude capture controls/history; loading preserves the
 destination's controls, retained events, and truncation. Trace hashes hash
 retained events only, so equal hashes alone do not establish equal coverage.
+
+## First captured failure
+
+`firstStartupFailure(trace)` performs a read-only, linear scan of the retained
+ordered events and returns fixed-size evidence. `found == false` means no
+qualifying failure was captured, **not** that execution was fault-free. The
+writer `writeStartupFirstFailureJsonLine(output, system, boundary)` emits:
+
+- `type: "startup_first_failure"`, `trace_truncated`, `execution_boundary`
+  (`complete_cycle` or `incomplete_cycle`), and nullable `failure`.
+- A failure's `kind` (`memory_access`, `instruction_rejection`, or
+  `dma_rejection`), nullable `cpu`, zero-based `event_index`, and `master_cycle`.
+  Selection preserves collection order, including equal timestamps; it does
+  not claim a new global bus ordering between independently collected owners.
+- Nullable `instruction`: `pc`, nullable raw `bits`, nullable `delay_slot`,
+  and nullable `branch_pc`. These are originating instruction facts, not a
+  reread of guest memory or a substitution of the ending PC.
+- Nullable `access`: access kind, virtual and nullable resolved physical
+  address, byte width, write flag, and two raw data words. EE accesses include
+  translation outcome, cache route/access/attribute, scratchpad selection,
+  transfer outcome, and failure phase. IOP accesses include outcome, cache
+  route, and merge byte enables. Failed reads' raw data are not valid values.
+- Nullable `dma`: endpoint, beat kind, rejection cause, and attempted address.
+  This address retains any EE scratchpad selector; it is not a CPU virtual
+  address. DMA rejection never receives a CPU instruction attribution.
+- Nullable `exception`: architectural `code`, `vector`, `cause`, and either
+  EE `fault_address` or IOP `epc`. Nullable `rejection_reason` distinguishes
+  unsupported/undefined host instructions from a guest instruction exception.
+
+Qualifying events are failed EE translation/physical transfers, failed IOP
+accesses, reserved/unusable instruction exceptions, undefined/unsupported
+instruction host stops, and rejected SIF DMA beats. EE stalls/device waits,
+successful accesses, interrupts, deliberate syscall/breakpoint traps, and
+normal DMA waits/completion are not failures for this selection. A captured
+fetch failure can be speculative and need not ever become a guest exception.
+No selected failure establishes an emulator defect or changes guest-handler
+execution.
+
+EE trace event 21, `FaultContext`, is an append-only extension emitted just
+before a non-interrupt exception entry, or alone at an instruction host stop.
+Its words are originating PC, opcode, branch PC, and flags (`instruction
+available` bit 0, `delay slot` bit 1, `host rejection` bit 2, EE stop reason in
+bits 8-15). Fetch faults have no available opcode. The context comes from the
+actual transition request, including delayed COP1 ownership; retained COP0
+EPC/BD can describe an older nested exception and is not used to reconstruct
+the origin. Existing event identities and payloads are unchanged, but faulting
+traces gain records and therefore different event counts/hashes.
+
+Data-fault association uses the same-cycle transition following that memory
+attempt, without crossing another CPU issue/access/retirement. Fetch context
+is associated only when a same-cycle transition identifies that exact unfetched
+PC; a prefetched fault resolved later remains unattributed rather than guessing
+whether intervening control flow discarded it. IOP attempt context comes from
+the captured step's instruction-issued event; failed fetches have only their
+attempted PC until an entry supplies delay context. For IOP memory faults and
+instruction rejections in a captured delay slot, that entry's EPC supplies the
+branch PC. Missing/capped context is
+JSON `null`, not zero/false. C++ availability fields explicitly distinguish
+these cases. The bounded collector can end between a memory attempt, its
+context, and exception entry; no analysis runs beyond that prefix.
+
+## Runtime-error evidence
+
+After admission, host tools can use the opt-in error-capturing wrapper:
+
+```cpp
+system.runDualCPUBIOS(romBytes, 0); // Admission errors still throw.
+system.startTrace(10000);
+const auto evidence = runDualCPUWithStartupEvidence(system, 1000000);
+if (evidence.outcome == StartupRunOutcome::RuntimeError)
+{
+  writeStartupRuntimeErrorJsonLine(std::cout, evidence.error);
+  writeStartupTraceJsonLines(std::cout, system);
+  writeStartupFirstFailureJsonLine(
+    std::cout, system, StartupExecutionBoundary::IncompleteCycle);
+}
+else
+{
+  writeStartupRunSummaryJsonLine(std::cout, evidence.completed);
+}
+```
+
+Only the `StartupRunEvidence` member selected by `outcome` is valid. The older
+summary wrappers still propagate execution exceptions unchanged. Error
+capture delegates to the original runner; it does not retry, step extra
+cycles, halt the peer, or roll back completed effects.
+
+`startup_runtime_error` contains a JSON-escaped `message`, `snapshot`,
+`execution_boundary: "incomplete_cycle"`, and `run: null`. There is deliberately
+no completed-cycle delta or fabricated normal execution result: a scheduler
+clock can advance before later phases fail, or an earlier phase can throw
+before the clock advances. Snapshot CPU/clock counters retain their owner
+meanings and do not certify completion of the failing cycle. Message escaping
+preserves UTF-8 text and escapes JSON control characters, quotes, and backslashes.
+
+The raw trace contains only events already published at the throw. Rejected
+scheduled IOP DMA grants publish the executed prefix before throwing, without
+admitting that pulse's IOP instruction. Other exceptions can leave unpublished
+in-cycle observations; the last retained timestamp is not proof that every
+phase of that cycle ran. Capture truncation and execution incompleteness are
+independent. Nothing enables tracing implicitly, and successful no-trace
+command output remains the original two lines.

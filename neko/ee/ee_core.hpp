@@ -410,7 +410,8 @@ class EECore final : public ClockedComponent
       COP1ResourceInterlock,
       COP1DividerHazard,
       COP1StageTransition,
-      COP1Retired
+      COP1Retired,
+      FaultContext
     };
 
     enum class COP1Dependency : std::uint8_t
@@ -651,6 +652,16 @@ class EECore final : public ClockedComponent
       std::uint32_t cause;
     };
 
+    struct FaultContextEvent
+    {
+      std::uint32_t address;
+      std::uint32_t instruction;
+      std::uint32_t branchAddress;
+      bool instructionAvailable;
+      bool delaySlot;
+      EEStopReason stopReason;
+    };
+
     struct InterruptDeliveredEvent
     {
       std::uint32_t instructionAddress;
@@ -724,6 +735,7 @@ class EECore final : public ClockedComponent
       std::uint32_t branchAddress = 0;
       ExceptionCoprocessor coprocessor =
         ExceptionCoprocessor::None;
+      bool instructionAvailable = true;
     };
 
     union CycleEventPayload
@@ -738,6 +750,12 @@ class EECore final : public ClockedComponent
       COP1DividerHazardEvent cop1DividerHazard;
       COP1StageTransitionEvent cop1StageTransition;
       COP1RetiredEvent cop1Retired;
+      FaultContextEvent faultContext;
+
+      CycleEventPayload(const FaultContextEvent &event) :
+        faultContext(event)
+      {
+      }
 
       CycleEventPayload(
         const InstructionIssuedEvent &event) :
@@ -802,6 +820,12 @@ class EECore final : public ClockedComponent
 
     struct CycleEvent
     {
+      CycleEvent(const FaultContextEvent &event) :
+        kind(CycleEventKind::FaultContext),
+        payload(event)
+      {
+      }
+
       CycleEvent() :
         kind(CycleEventKind::InstructionIssued),
         payload(InstructionIssuedEvent{
@@ -1190,10 +1214,10 @@ class EECore final : public ClockedComponent
     static constexpr std::size_t CYCLE_EVENT_CAPACITY =
       MAX_COP1_CYCLE_EVENTS + MAX_FRONT_END_CYCLE_EVENTS;
     static_assert(
-      MAX_FRONT_END_CYCLE_EVENTS >= 8,
+      MAX_FRONT_END_CYCLE_EVENTS >= 9,
       "EE cycle event capacity must hold two issued "
       "instructions, branch or memory effects, divider "
-      "diagnostics, and interrupt or exception entry.");
+      "diagnostics, fault context, and interrupt or exception entry.");
     std::array<CycleEvent, CYCLE_EVENT_CAPACITY>
       cycleEvents = {};
     std::size_t cycleEventCount = 0;

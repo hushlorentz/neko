@@ -1688,7 +1688,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add opt-in ordered BIOS trace export with an explicit collection limit
       and truncation reporting, preserving startup, budgets, and guest
       exception-handler execution.
-- [ ] Decode the first failed access/rejected instruction with CPU, instruction,
+- [x] Decode the first failed access/rejected instruction with CPU, instruction,
       delay-slot, address/route, and exception context; retain available evidence
       on runtime errors and identify incomplete-cycle prefixes.
 - [ ] Complete side-effect-free SIF snapshots for EE DMA5/6 and IOP DMA9/10,

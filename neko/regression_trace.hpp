@@ -47,8 +47,17 @@ enum class NekoTraceEventType : std::uint8_t
   TimerEvent = 17,
   RegisterWrite = 18,
   SignalRequested = 19,
-  DMABeat = 20
+  DMABeat = 20,
+  FaultContext = 21
 };
+
+namespace NekoEETraceFault
+{
+  constexpr std::uint64_t INSTRUCTION_AVAILABLE = UINT64_C(1);
+  constexpr std::uint64_t DELAY_SLOT = UINT64_C(1) << 1;
+  constexpr std::uint64_t HOST_REJECTION = UINT64_C(1) << 2;
+  constexpr std::uint8_t STOP_REASON_SHIFT = 8;
+}
 
 namespace NekoSIFTrace
 {
@@ -400,6 +409,12 @@ struct NekoTraceEvent
   std::uint64_t value2 = 0;
   std::uint64_t value3 = 0;
 };
+
+// EE/FaultContext: originating instruction PC, raw opcode, branch PC (only
+// when DELAY_SLOT), flags plus EEStopReason << 8. Emitted immediately before
+// ExceptionEntered, or alone for a host instruction rejection. Fetch failures
+// have no available opcode. Delay context comes from the transition request,
+// not retained COP0 BD/EPC (which can belong to an earlier nested exception).
 
 // IOP payloads (value0, value1, value2, value3). Producers zero currently
 // unassigned words/bits; consumers ignore them to permit future extensions.

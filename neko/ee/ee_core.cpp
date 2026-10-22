@@ -2239,29 +2239,24 @@ EEIssueMemberOutcome EECore::resolveIssueLatchFailure()
   const std::uint32_t address = issueLatch.address;
   const std::uint32_t instruction =
     issueLatch.instruction.raw;
+  const auto enterFetchException = [&](EEException type)
+  {
+    auto request = makeExceptionTransitionRequest(
+      type, address, address, 0);
+    request.instructionAvailable = false;
+    enterException(request);
+  };
   switch (issueLatch.failure)
   {
     case IssueLatchFailure::AddressError:
-      enterException(makeExceptionTransitionRequest(
-        EEException::AddressErrorLoadOrFetch,
-        address,
-        address,
-        0));
+      enterFetchException(EEException::AddressErrorLoadOrFetch);
       return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::TranslationError:
-      enterException(makeExceptionTransitionRequest(
-        instructionTranslationException(
-          issueLatch.translationOutcome),
-        address,
-        address,
-        0));
+      enterFetchException(instructionTranslationException(
+        issueLatch.translationOutcome));
       return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::BusError:
-      enterException(makeExceptionTransitionRequest(
-        EEException::InstructionBusError,
-        address,
-        address,
-        0));
+      enterFetchException(EEException::InstructionBusError);
       return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::ReservedInstruction:
       enterException(makeExceptionTransitionRequest(
@@ -2275,6 +2270,9 @@ EEIssueMemberOutcome EECore::resolveIssueLatchFailure()
       pc = address;
       state = EEExecutionState::Halted;
       haltReason = EEStopReason::UnsupportedInstruction;
+      recordCycleEvent(FaultContextEvent{
+        address, instruction, branchInstructionAddress, true,
+        branchDelayPending, haltReason});
       clearIssueFrontEnd();
       return EEIssueMemberOutcome::Cancelled;
     case IssueLatchFailure::None:
@@ -7130,6 +7128,9 @@ void EECore::haltUndefinedOperation(
   state = EEExecutionState::Halted;
   haltReason = EEStopReason::UndefinedOperation;
   rejectedInstructionValue = instruction;
+  recordCycleEvent(FaultContextEvent{
+    address, instruction, branchInstructionAddress, true,
+    branchDelayPending, haltReason});
 }
 
 bool EECore::pendingMACContinuationActive() const
@@ -10298,6 +10299,14 @@ void EECore::enterException(
       cop0Status,
       cop0Cause,
       pc});
+  }
+  if (request.type != EEException::Interrupt)
+  {
+    recordCycleEvent(FaultContextEvent{
+      request.instructionAddress, request.instruction, request.branchAddress,
+      request.instructionAvailable,
+      request.restartMode == ExceptionRestartMode::BranchDelaySlot,
+      EEStopReason::None});
   }
   recordCycleEvent(ExceptionEnteredEvent{
     request.type,

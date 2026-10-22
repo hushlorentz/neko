@@ -885,7 +885,7 @@ TEST_CASE("EE regression traces describe issued work")
 
   const std::vector<NekoTraceEvent> events =
     eeTraceWithoutFetches(system);
-  REQUIRE(events.size() == 10);
+  REQUIRE(events.size() == 11);
 
   REQUIRE(events[0].masterCycle == 1);
   REQUIRE(
@@ -987,16 +987,21 @@ TEST_CASE("EE regression traces describe issued work")
     events[7].type ==
     NekoTraceEventType::InstructionIssued);
   REQUIRE(events[7].value0 == 12);
+  REQUIRE(events[8].type == NekoTraceEventType::FaultContext);
+  REQUIRE(events[8].value0 == 12);
+  REQUIRE(events[8].value1 == 0x0000000c);
+  REQUIRE(events[8].value2 == 0);
+  REQUIRE(events[8].value3 == NekoEETraceFault::INSTRUCTION_AVAILABLE);
   REQUIRE(
-    events[8].type ==
+    events[9].type ==
     NekoTraceEventType::ExceptionEntered);
   REQUIRE(
-    events[8].value0 ==
+    events[9].value0 ==
     static_cast<std::uint8_t>(EEException::SystemCall));
-  REQUIRE(events[8].value1 == 12);
-  REQUIRE(events[8].value2 == EEExceptionVector::GENERAL);
-  REQUIRE(events[9].type == NekoTraceEventType::StateSnapshot);
-  REQUIRE(events[9].value0 == core.stateHash());
+  REQUIRE(events[9].value1 == 12);
+  REQUIRE(events[9].value2 == EEExceptionVector::GENERAL);
+  REQUIRE(events[10].type == NekoTraceEventType::StateSnapshot);
+  REQUIRE(events[10].value0 == core.stateHash());
   REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
 }
 
@@ -1158,7 +1163,7 @@ TEST_CASE("EE faulting COP0 traces expose issue and exception entry")
 
   const std::vector<NekoTraceEvent> events =
     eeTraceWithoutFetches(system);
-  REQUIRE(events.size() == 3);
+  REQUIRE(events.size() == 4);
   REQUIRE(
     events[0].type ==
     NekoTraceEventType::InstructionIssued);
@@ -1167,18 +1172,23 @@ TEST_CASE("EE faulting COP0 traces expose issue and exception entry")
     events[0].value2 ==
     static_cast<std::uint8_t>(
       EEOperation::WriteIndexedTLBEntry));
-  REQUIRE(
-    events[1].type ==
-    NekoTraceEventType::ExceptionEntered);
-  REQUIRE(
-    events[1].value0 ==
-    static_cast<std::uint8_t>(
-      EEException::CoprocessorUnusable));
-  REQUIRE(events[1].value1 == 0);
+  REQUIRE(events[1].type == NekoTraceEventType::FaultContext);
+  REQUIRE(events[1].value0 == 0);
+  REQUIRE(events[1].value1 == cop0OperationInstruction(0x02));
+  REQUIRE(events[1].value2 == 0);
+  REQUIRE(events[1].value3 == NekoEETraceFault::INSTRUCTION_AVAILABLE);
   REQUIRE(
     events[2].type ==
+    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(
+    events[2].value0 ==
+    static_cast<std::uint8_t>(
+      EEException::CoprocessorUnusable));
+  REQUIRE(events[2].value1 == 0);
+  REQUIRE(
+    events[3].type ==
     NekoTraceEventType::StateSnapshot);
-  REQUIRE(events[2].value0 == core.stateHash());
+  REQUIRE(events[3].value0 == core.stateHash());
   REQUIRE(core.tlbEntry(4) == EETLBEntry{});
 }
 
@@ -2742,7 +2752,7 @@ TEST_CASE(
       faultCycle.push_back(event);
     }
   }
-  REQUIRE(faultCycle.size() == 4);
+  REQUIRE(faultCycle.size() == 5);
   REQUIRE(
     faultCycle[0].type ==
     NekoTraceEventType::COP1StageTransition);
@@ -2758,11 +2768,15 @@ TEST_CASE(
   REQUIRE(
     faultCycle[1].type ==
     NekoTraceEventType::MemoryAccess);
-  REQUIRE(
-    faultCycle[2].type ==
-    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(faultCycle[2].type == NekoTraceEventType::FaultContext);
+  REQUIRE(faultCycle[2].value0 == 4);
+  REQUIRE(faultCycle[2].value1 == immediateInstruction(0x31, 1, 5, 0));
+  REQUIRE(faultCycle[2].value3 == NekoEETraceFault::INSTRUCTION_AVAILABLE);
   REQUIRE(
     faultCycle[3].type ==
+    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(
+    faultCycle[4].type ==
     NekoTraceEventType::StateSnapshot);
 }
 
@@ -2817,7 +2831,7 @@ TEST_CASE(
       faultCycle.push_back(event);
     }
   }
-  REQUIRE(faultCycle.size() == 5);
+  REQUIRE(faultCycle.size() == 6);
   REQUIRE(
     faultCycle[0].type ==
     NekoTraceEventType::COP1StageTransition);
@@ -2837,11 +2851,15 @@ TEST_CASE(
   REQUIRE(
     faultCycle[2].type ==
     NekoTraceEventType::MemoryAccess);
-  REQUIRE(
-    faultCycle[3].type ==
-    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(faultCycle[3].type == NekoTraceEventType::FaultContext);
+  REQUIRE(faultCycle[3].value0 == 28);
+  REQUIRE(faultCycle[3].value1 == immediateInstruction(0x31, 1, 5, 0));
+  REQUIRE(faultCycle[3].value3 == NekoEETraceFault::INSTRUCTION_AVAILABLE);
   REQUIRE(
     faultCycle[4].type ==
+    NekoTraceEventType::ExceptionEntered);
+  REQUIRE(
+    faultCycle[5].type ==
     NekoTraceEventType::StateSnapshot);
 
   NekoSystem restored;
@@ -3582,6 +3600,19 @@ TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
       ++eventIndex;
       ++issueIndex;
     }
+    if (masterCycle == stateHashes.size())
+    {
+      REQUIRE(eventIndex < events.size());
+      REQUIRE(events[eventIndex].masterCycle == masterCycle);
+      REQUIRE(events[eventIndex].type == NekoTraceEventType::FaultContext);
+      REQUIRE(events[eventIndex].value0 == 12);
+      REQUIRE(events[eventIndex].value1 == 0x40003800);
+      REQUIRE(events[eventIndex].value3 ==
+        (NekoEETraceFault::INSTRUCTION_AVAILABLE | NekoEETraceFault::HOST_REJECTION |
+          (static_cast<std::uint64_t>(EEStopReason::UnsupportedInstruction) <<
+            NekoEETraceFault::STOP_REASON_SHIFT)));
+      ++eventIndex;
+    }
     REQUIRE(eventIndex < events.size());
     REQUIRE(events[eventIndex].masterCycle == masterCycle);
     REQUIRE(
@@ -3645,7 +3676,7 @@ TEST_CASE("EE packed divide traces and hashes are deterministic")
 
   const std::vector<NekoTraceEvent> events =
     eeTraceWithoutFetches(first);
-  REQUIRE(events.size() == stateHashes.size() + 1);
+  REQUIRE(events.size() == stateHashes.size() + 2);
   REQUIRE(events[0].masterCycle == 1);
   REQUIRE(
     events[0].type ==
@@ -3657,7 +3688,20 @@ TEST_CASE("EE packed divide traces and hashes are deterministic")
       EEOperation::ParallelDivideBroadcastWord));
   for (std::size_t cycle = 0; cycle < stateHashes.size(); ++cycle)
   {
-    const NekoTraceEvent &snapshot = events[cycle + 1];
+    const bool finalCycle = cycle + 1 == stateHashes.size();
+    if (finalCycle)
+    {
+      const auto &fault = events[cycle + 1];
+      REQUIRE(fault.masterCycle == cycle + 1);
+      REQUIRE(fault.type == NekoTraceEventType::FaultContext);
+      REQUIRE(fault.value0 == 4);
+      REQUIRE(fault.value1 == 0x40003800);
+      REQUIRE(fault.value3 ==
+        (NekoEETraceFault::INSTRUCTION_AVAILABLE | NekoEETraceFault::HOST_REJECTION |
+          (static_cast<std::uint64_t>(EEStopReason::UnsupportedInstruction) <<
+            NekoEETraceFault::STOP_REASON_SHIFT)));
+    }
+    const NekoTraceEvent &snapshot = events[cycle + 1 + (finalCycle ? 1 : 0)];
     REQUIRE(snapshot.masterCycle == cycle + 1);
     REQUIRE(
       snapshot.type ==

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
+#include <string>
 #include <vector>
 
 #include "neko_system.hpp"
@@ -127,8 +128,53 @@ struct StartupRunSummary
   StartupSummary startup;
 };
 
+enum class StartupExecutionBoundary { CompleteCycle, IncompleteCycle };
+
+struct StartupRuntimeError
+{
+  std::string message;
+  StartupSummary startup;
+};
+
+enum class StartupRunOutcome { Completed, RuntimeError };
+
+struct StartupRunEvidence
+{
+  StartupRunOutcome outcome = StartupRunOutcome::Completed;
+  // Only the member selected by outcome is valid.
+  StartupRunSummary completed;
+  StartupRuntimeError error;
+};
+
+struct StartupInstructionContext
+{
+  bool available = false;
+  std::uint32_t programCounter = 0;
+  bool instructionAvailable = false;
+  std::uint32_t instruction = 0;
+  bool delaySlotAvailable = false;
+  bool delaySlot = false;
+  bool branchAddressAvailable = false;
+  std::uint32_t branchAddress = 0;
+};
+
+enum class StartupFailureKind { MemoryAccess, InstructionRejection, DMARejection };
+
+struct StartupFailure
+{
+  bool found = false;
+  StartupFailureKind kind = StartupFailureKind::MemoryAccess;
+  std::size_t eventIndex = 0;
+  NekoTraceEvent event;
+  StartupInstructionContext instruction;
+  bool exceptionAvailable = false;
+  NekoTraceEvent exception;
+};
+
 // Call between completed master cycles. Uses const owner inspection only;
 // neither CPU/device work nor tracing is advanced, enabled, or consumed.
+// Also safe after synchronous execution has unwound; that snapshot is not
+// a completed-cycle boundary and must be labelled as such by its caller.
 StartupSummary inspectStartup(const NekoSystem &system);
 
 // Opt-in wrappers preserve the existing runner policy and admission errors.
@@ -138,11 +184,23 @@ StartupRunSummary runDualCPUBIOSWithStartupSummary(
   NekoSystem &system, const std::vector<std::uint8_t> &image,
   std::uint64_t maxMasterCycles);
 
+// Admission/reset remains the caller's responsibility. Runtime errors retain
+// available owner state, never a fabricated successful execution result.
+StartupRunEvidence runDualCPUWithStartupEvidence(
+  NekoSystem &system, std::uint64_t maxMasterCycles);
+StartupFailure firstStartupFailure(
+  const std::vector<NekoTraceEvent> &trace);
+
 void writeStartupSummaryJsonLine(
   std::ostream &output, const StartupSummary &summary);
 void writeStartupRunSummaryJsonLine(
   std::ostream &output, const StartupRunSummary &summary);
 void writeStartupTraceJsonLines(
   std::ostream &output, const NekoSystem &system);
+void writeStartupRuntimeErrorJsonLine(
+  std::ostream &output, const StartupRuntimeError &error);
+void writeStartupFirstFailureJsonLine(
+  std::ostream &output, const NekoSystem &system,
+  StartupExecutionBoundary boundary = StartupExecutionBoundary::CompleteCycle);
 
 #endif
