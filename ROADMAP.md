@@ -1670,7 +1670,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Audit the integrated 8:1 master/IOP schedule and pin both directions'
       CPU/device admission, same-cycle transfer visibility, and interrupt
       ordering with focused regressions, without claiming retail bus timing.
-- [ ] Exercise simultaneous directions, unequal producer/consumer progress,
+- [x] Exercise simultaneous directions, unequal producer/consumer progress,
       full/empty transport, receiver-late start, channel disable/restart,
       and independent completion/INTC acknowledgement.
 - [ ] Cover same-cycle CPU/DMA memory overlap, exceptions, interrupts, CPU
