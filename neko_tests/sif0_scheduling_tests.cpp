@@ -153,6 +153,35 @@ namespace
     REQUIRE(system.iopDMAController().interruptStatus(BANK) == 0x0c000000);
     REQUIRE(system.iopInterruptController().status() == 8);
   }
+
+  void bidirectionalExecution(NekoSystem &system, unsigned sif0Words = 64,
+    unsigned sif1Words = 64)
+  {
+    bidirectionalPackets(system, sif0Words, sif1Words);
+    receiver(system);
+    iopReceiver(system);
+    REQUIRE(system.eeBus().writeData32(0x800, 0x0c000204)); // jal 0xa0000810
+    REQUIRE(system.eeBus().writeData32(0x804, 0x37e40000)); // ori r4, r31, 0
+    REQUIRE(system.eeBus().writeData32(0x810, 0x08000204)); // j 0xa0000810
+    writeIOP(system, 0x800, 0x8c032000); // lw r3, 0x2000(r0)
+    writeIOP(system, 0x804, 0x10000002); // beq r0, r0, 0x810
+    writeIOP(system, 0x808, 0x8c042004); // lw r4, 0x2004(r0)
+    writeIOP(system, 0x810, 0x08000204);
+    system.eeCore().startExecution(0xa0000800);
+    system.iopCore().startExecution(0xa0000800);
+  }
+
+  void requireCombinedState(const NekoSystem &actual, const NekoSystem &expected)
+  {
+    IOPTraceTest::requireMachine(actual, expected);
+    REQUIRE(actual.sifStateHash() == expected.sifStateHash());
+    REQUIRE(actual.sif0DMAC().stateHash() == expected.sif0DMAC().stateHash());
+    REQUIRE(actual.sif1DMAC().stateHash() == expected.sif1DMAC().stateHash());
+    REQUIRE(actual.dmacController().sifGrantOrder() ==
+      expected.dmacController().sifGrantOrder());
+    REQUIRE(actual.iopDMAController().sifGrantOrder() ==
+      expected.iopDMAController().sifGrantOrder());
+  }
 }
 
 TEST_CASE("SIF0 scheduled source uses the preincrement IOP phase and receiver follows next cycle",
@@ -1756,4 +1785,224 @@ TEST_CASE("Unsupported guest reset requests reject atomically without resetting 
   REQUIRE(system.iopInterruptController().status() == 0);
   drainBidirectional(system);
   requireBidirectionalPayloads(system, 64, 64);
+}
+
+TEST_CASE("Concurrent SIF runs repeat canonically with observational tracing under either priority",
+  "[sif][cross-channel][persistence][determinism]")
+{
+  for (const auto priority : {0x8800u, 0x8900u, 0x9800u})
+  {
+    CAPTURE(priority);
+    NekoSystem plain;
+    NekoSystem traced;
+    NekoSystem repeated;
+    for (auto *system : {&plain, &traced, &repeated})
+    {
+      bidirectionalExecution(*system, 64, 96);
+      system->iopDMAController().writePriority(BANK, priority);
+    }
+    traced.startTrace();
+    repeated.startTrace();
+    for (const unsigned boundary : {0u, 1u, 2u, 9u, 17u, 25u, 33u,
+      65u, 257u, 513u, 1025u, 2048u})
+    {
+      CAPTURE(boundary);
+      for (auto *system : {&plain, &traced, &repeated})
+        system->runMasterCycles(boundary - system->masterClockScheduler().currentCycle());
+      requireCombinedState(traced, plain);
+      requireCombinedState(repeated, plain);
+    }
+    for (auto *system : {&plain, &traced, &repeated})
+    {
+      requireBidirectionalPayloads(*system, 64, 96);
+      REQUIRE(system->eeCore().executionState() == EEExecutionState::Running);
+      REQUIRE(system->iopCore().executionState() == IOPExecutionState::Running);
+      REQUIRE(system->eeCore().generalRegister(4).low ==
+        system->eeCore().generalRegister(31).low);
+      REQUIRE(system->iopCore().generalRegister(3) == 1);
+      REQUIRE(system->iopCore().generalRegister(4) == 2);
+    }
+    REQUIRE(plain.trace().empty());
+    REQUIRE_FALSE(beats(traced).empty());
+    IOPTraceTest::requireEvents(repeated.trace(), traced.trace());
+  }
+}
+
+TEST_CASE("Concurrent SIF restores byte-identically across grants packing and shared backpressure",
+  "[sif][cross-channel][persistence][restore]")
+{
+  for (const unsigned prefix : {0u, 1u, 2u, 9u, 10u, 17u, 25u,
+    33u, 65u, 257u, 513u, 1025u})
+  {
+    CAPTURE(prefix);
+    NekoSystem original;
+    bidirectionalExecution(original);
+    original.startTrace();
+    original.runMasterCycles(prefix);
+    if (prefix == 1)
+    {
+      REQUIRE(original.iopCore().delayedResultContinuation().source ==
+        IOPDelayedResultSource::Load);
+      REQUIRE(original.sif().wordCount(SIFDirection::SIF0) == 4);
+    }
+    if (prefix == 9) REQUIRE(original.iopCore().branchContinuation().active);
+    if (prefix == 10) REQUIRE(original.sif().freeWordCount() == 0);
+    if (prefix == 17)
+      REQUIRE(original.iopCore().delayedResultContinuation().source ==
+        IOPDelayedResultSource::Load);
+    if (prefix == 25)
+    {
+      REQUIRE(original.sif().sif0PackingCursor() == 1);
+      REQUIRE(original.sif().wordCount(SIFDirection::SIF0) == 1);
+      REQUIRE(original.sif().wordCount(SIFDirection::SIF1) != 0);
+    }
+    const auto saved = original.saveState();
+    NekoSystem restored;
+    bidirectionalExecution(restored, 8, 12);
+    restored.startTrace();
+    restored.runMasterCycles(9);
+    const auto history = restored.trace();
+    restored.loadState(saved);
+    REQUIRE(restored.traceEnabled());
+    IOPTraceTest::requireEvents(restored.trace(), history);
+    REQUIRE(restored.saveState() == saved);
+    requireCombinedState(restored, original);
+    original.startTrace();
+    restored.startTrace();
+    original.clockMasterCycle();
+    restored.clockMasterCycle();
+    requireCombinedState(restored, original);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    original.runMasterCycles(2048 - prefix - 1);
+    restored.runMasterCycles(2048 - prefix - 1);
+    requireCombinedState(restored, original);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    requireBidirectionalPayloads(original, 64, 64);
+    requireBidirectionalPayloads(restored, 64, 64);
+  }
+}
+
+TEST_CASE("Disabled common controllers restore accepted SIF packets without rearming or losing progress",
+  "[sif][cross-channel][persistence][restore]")
+{
+  NekoSystem original;
+  bidirectionalExecution(original);
+  original.runMasterCycles(33);
+  original.dmacController().writeControl(0);
+  original.iopDMAController().writePriority(BANK, 0);
+  const auto transport = original.sifStateHash();
+  const auto sourceWords = original.iopSIF0DMAC().remainingWords();
+  const auto destinationWords = original.iopSIF1DMAC().remainingWords();
+  REQUIRE(sourceWords != 0);
+  REQUIRE(destinationWords != 0);
+  original.runMasterCycles(17);
+  REQUIRE(original.sifStateHash() == transport);
+  REQUIRE(original.iopSIF0DMAC().remainingWords() == sourceWords);
+  REQUIRE(original.iopSIF1DMAC().remainingWords() == destinationWords);
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  requireCombinedState(restored, original);
+  for (auto *system : {&original, &restored})
+  {
+    system->startTrace();
+    system->runMasterCycles(16);
+    REQUIRE(system->sifStateHash() == transport);
+    REQUIRE(system->iopSIF0DMAC().remainingWords() == sourceWords);
+    REQUIRE(system->iopSIF1DMAC().remainingWords() == destinationWords);
+    system->dmacController().writeControl(1);
+    system->iopDMAController().writePriority(BANK, 0x8800);
+    drainBidirectional(*system);
+    requireBidirectionalPayloads(*system, 64, 64);
+  }
+  requireCombinedState(restored, original);
+  IOPTraceTest::requireEvents(restored.trace(), original.trace());
+}
+
+TEST_CASE("Combined SIF canonical state ignores free-slot history and dead transport storage",
+  "[sif][cross-channel][persistence][canonical]")
+{
+  NekoSystem original;
+  NekoSystem recycled;
+  REQUIRE(recycled.sif().pushSIF1Quadword({{0xdead, 0xbeef, 0xaaaa, 0xbbbb}}) ==
+    SIFTransferOutcome::Completed);
+  REQUIRE(recycled.sif().consumeWords(SIFDirection::SIF1, 4) ==
+    SIFTransferOutcome::Completed);
+  requireCombinedState(recycled, original);
+  for (auto *system : {&original, &recycled})
+  {
+    bidirectionalExecution(*system);
+    system->startTrace();
+  }
+  for (const unsigned boundary : {1u, 10u, 25u, 65u, 513u, 2048u})
+  {
+    CAPTURE(boundary);
+    for (auto *system : {&original, &recycled})
+      system->runMasterCycles(boundary - system->masterClockScheduler().currentCycle());
+    requireCombinedState(recycled, original);
+  }
+  requireBidirectionalPayloads(original, 64, 64);
+  requireBidirectionalPayloads(recycled, 64, 64);
+  IOPTraceTest::requireEvents(recycled.trace(), original.trace());
+}
+
+TEST_CASE("Malformed combined SIF ownership rejects without changing a distinct live destination",
+  "[sif][cross-channel][persistence][transactional]")
+{
+  NekoSystem sourceSystem;
+  bidirectionalExecution(sourceSystem);
+  sourceSystem.runMasterCycles(25);
+  REQUIRE(sourceSystem.sif().wordCount(SIFDirection::SIF0) == 1);
+  REQUIRE(sourceSystem.sif().wordCount(SIFDirection::SIF1) == 31);
+  const auto saved = sourceSystem.saveState();
+  NekoSystem destination;
+  bidirectionalExecution(destination, 8, 12);
+  destination.startTrace();
+  destination.runMasterCycles(9);
+  const auto before = destination.saveState();
+  const auto history = destination.trace();
+  NekoSystem expected;
+  expected.loadState(before);
+  struct InvalidField
+  {
+    const char *path;
+    std::uint32_t value;
+    const char *diagnostic;
+  };
+  for (const auto field : {
+    InvalidField{"system.sif.sif1.wordCount", 32, "SIF streams exceed shared word capacity"},
+    InvalidField{"system.sif.packingCursor", 4, "SIF0 packing cursor is invalid"},
+    InvalidField{"system.sif0DMAC.destinationPacketAccepted", 0,
+      "SIF0 DMAC destination packet continuation is invalid"},
+    InvalidField{"system.sif0DMAC.terminateAfterPacket", 0,
+      "SIF0 DMAC destination packet continuation is invalid"},
+    InvalidField{"system.sif1DMAC.terminateAfterPacket", 1,
+      "SIF1 DMAC terminal continuation is invalid"},
+    InvalidField{"system.iop.sif0DMA.channelControl", 0x401,
+      "IOP SIF0 DMA packet continuation is incompatible with channel state"},
+    InvalidField{"system.iop.sif1DMA.channelControl", 0x400,
+      "IOP SIF1 DMA packet continuation is incompatible with channel state"},
+    InvalidField{"system.iop.dmaController.sifNextChannel", 11,
+      "IOP SIF arbitration cursor is invalid"},
+    InvalidField{"system.gifDMAC.sifNextDirection", 2,
+      "EE SIF arbitration cursor is invalid"}})
+  {
+    CAPTURE(field.path);
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(field.path, field.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE_THROWS_WITH(destination.loadState(invalid.bytes()), Catch::Contains(field.diagnostic));
+    REQUIRE(destination.saveState() == before);
+    requireCombinedState(destination, expected);
+    REQUIRE(destination.traceEnabled());
+    IOPTraceTest::requireEvents(destination.trace(), history);
+  }
+  for (auto *system : {&destination, &expected})
+  {
+    system->startTrace();
+    drainBidirectional(*system);
+    requireBidirectionalPayloads(*system, 8, 12);
+  }
+  requireCombinedState(destination, expected);
+  IOPTraceTest::requireEvents(destination.trace(), expected.trace());
 }

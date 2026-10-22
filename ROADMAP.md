@@ -1675,7 +1675,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       and independent completion/INTC acknowledgement.
 - [x] Cover same-cycle CPU/DMA memory overlap, exceptions, interrupts, CPU
       halt/resume, whole-machine reset, and evidenced guest-reset scope.
-- [ ] Prove repeated-run equivalence, observational tracing, canonical combined
+- [x] Prove repeated-run equivalence, observational tracing, canonical combined
       state comparison, and byte-identical restore at active transfer boundaries;
       reject malformed cross-owner continuation without destination mutation.
 - [ ] Complete independent cross-component review and optimized sanitizer checks.
