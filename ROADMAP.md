@@ -1678,7 +1678,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Prove repeated-run equivalence, observational tracing, canonical combined
       state comparison, and byte-identical restore at active transfer boundaries;
       reject malformed cross-owner continuation without destination mutation.
-- [ ] Complete independent cross-component review and optimized sanitizer checks.
+- [x] Complete independent cross-component review and optimized sanitizer checks.
 
 ### Deterministic BIOS Startup Boundary
 
