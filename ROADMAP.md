@@ -1694,7 +1694,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Complete side-effect-free SIF snapshots for EE DMA5/6 and IOP DMA9/10,
       including continuation, common-controller eligibility, and arbitration
       state without inferring readiness or deadlock.
-- [ ] Add BIOS-free diagnostic regressions for attribution, ordering, limits,
+- [x] Add BIOS-free diagnostic regressions for attribution, ordering, limits,
       errors, and observational equivalence; complete independent review and
       the optimized repository check before dependency classification.
 - [ ] Classify discovered pre-handshake dependencies against the approved

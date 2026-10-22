@@ -473,3 +473,60 @@ TEST_CASE("BIOS first failure reports missing context rather than inferring it p
       "\"failure\":null") != std::string::npos);
   }
 }
+
+TEST_CASE("BIOS runtime report failures preserve execution error precedence at every record stage",
+  "[bios-startup-command][startup-failure][diagnostic-conformance]")
+{
+  class FailingRecordBuffer : public std::stringbuf
+  {
+    public:
+      explicit FailingRecordBuffer(const std::string &type)
+        : marker("\"type\":\"" + type + "\"")
+      {
+      }
+
+      bool rejected = false;
+
+    private:
+      std::streamsize xsputn(const char *data, std::streamsize size) override
+      {
+        if (std::string(data, static_cast<std::size_t>(size)).find(marker) !=
+            std::string::npos)
+        {
+          rejected = true;
+          return 0;
+        }
+        return std::stringbuf::xsputn(data, size);
+      }
+
+      std::string marker;
+  };
+  const auto image = rejectedDMAROM();
+  for (const std::string type : {"startup_runtime_error", "startup_trace_summary",
+      "trace_event", "startup_first_failure"})
+  {
+    CAPTURE(type);
+    FailingRecordBuffer buffer(type);
+    std::ostream output(&buffer);
+    std::ostringstream error;
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "100", "--trace-events", "10000"},
+      [&](const std::string &) { return image; }, output, error) == 2);
+    REQUIRE(buffer.rejected);
+    REQUIRE(buffer.str().find("\"type\":\"" + type + "\"") == std::string::npos);
+    const auto executionError = error.str().find("IOP SIF0 DMA rejected");
+    const auto outputError = error.str().find("Cannot write BIOS startup report");
+    REQUIRE(executionError != std::string::npos);
+    REQUIRE(outputError != std::string::npos);
+    REQUIRE(executionError < outputError);
+    REQUIRE(buffer.str().find("\"type\":\"startup_run_summary\"") ==
+      std::string::npos);
+    if (type == "startup_first_failure")
+    {
+      REQUIRE(buffer.str().find("\"type\":\"startup_runtime_error\"") !=
+        std::string::npos);
+      REQUIRE(buffer.str().find("\"type\":\"trace_event\"") !=
+        std::string::npos);
+    }
+  }
+}

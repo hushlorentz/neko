@@ -290,10 +290,6 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
   requireExecution(second, secondResult);
 
   REQUIRE(
-    first.traceHash() ==
-    UINT64_C(0xf4062652d037c75b));
-  REQUIRE(first.traceHash() == second.traceHash());
-  REQUIRE(
     first.eeCore().stateHash() ==
     UINT64_C(0xb8d9a6e29cb820d3));
   REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
@@ -410,9 +406,42 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
           system->eeBus().read32(recordAddress + 20) ==
           exceptions[index].epc);
       }
+
+      std::vector<NekoTraceEvent> previousEvents;
+      std::size_t faultCount = 0;
+      const auto &events = system->trace();
+      for (std::size_t index = 0; index < events.size(); ++index)
+      {
+        const auto &event = events[index];
+        if (event.subsystem != NekoTraceSubsystem::EE ||
+            event.type != NekoTraceEventType::FaultContext)
+        {
+          previousEvents.push_back(event);
+          continue;
+        }
+        CAPTURE(faultCount);
+        REQUIRE(faultCount < 3);
+        const auto &expected = exceptions[faultCount++];
+        REQUIRE(event.value0 == expected.epc);
+        REQUIRE(event.value1 == (expected.cause == EEExceptionCode::TLB_MODIFIED * 4 ?
+          UINT32_C(0xad000800) : UINT32_C(0x8d090800)));
+        REQUIRE(event.value2 == 0);
+        REQUIRE(event.value3 == NekoEETraceFault::INSTRUCTION_AVAILABLE);
+        REQUIRE(index + 1 < events.size());
+        const auto &exception = events[index + 1];
+        REQUIRE(exception.masterCycle == event.masterCycle);
+        REQUIRE(exception.subsystem == NekoTraceSubsystem::EE);
+        REQUIRE(exception.type == NekoTraceEventType::ExceptionEntered);
+        REQUIRE(exception.value1 == expected.badVirtualAddress);
+        REQUIRE(exception.value3 == expected.cause);
+      }
+      REQUIRE(faultCount == 3);
+      REQUIRE(nekoTraceHash(previousEvents) == UINT64_C(0xf4062652d037c75b));
     };
   requireArchitecturalState(&first);
   requireArchitecturalState(&second);
+  REQUIRE(first.traceHash() == UINT64_C(0x3ed386ebb2228853));
+  REQUIRE(first.traceHash() == second.traceHash());
 }
 
 TEST_CASE("PS2DEV scratchpad DMA guest composes CPU and channel visibility")

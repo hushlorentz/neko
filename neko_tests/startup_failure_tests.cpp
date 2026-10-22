@@ -353,3 +353,204 @@ TEST_CASE("Startup failure writers reject invalid boundaries without partial out
     output, system, static_cast<StartupExecutionBoundary>(99)), std::invalid_argument);
   REQUIRE(output.str().empty());
 }
+
+TEST_CASE("Startup attribution respects every prefix of a dual CPU fault timeline",
+  "[startup-failure][diagnostic-conformance]")
+{
+  std::vector<std::uint8_t> image(BootROMImage::SIZE, 0);
+  for (const unsigned address : {0u, 0x180u, 0x380u})
+  {
+    const std::uint32_t instruction =
+      address == 0 ? 0x8c020001 : 0x8c030003;
+    for (unsigned byte = 0; byte < 4; ++byte)
+    {
+      image[address + byte] =
+        static_cast<std::uint8_t>(instruction >> (byte * 8));
+    }
+  }
+  NekoSystem system;
+  system.runDualCPUBIOS(image, 0);
+  system.startTrace();
+  const auto evidence = runDualCPUWithStartupEvidence(system, 33);
+  REQUIRE(evidence.outcome == StartupRunOutcome::Completed);
+  REQUIRE(evidence.completed.execution.masterCycles == 33);
+  REQUIRE(evidence.completed.execution.cycleLimitReached);
+  const auto &events = system.trace();
+  auto memoryIndex = events.size();
+  auto contextIndex = events.size();
+  auto exceptionIndex = events.size();
+  auto peerIndex = events.size();
+  auto handlerIndex = events.size();
+  for (std::size_t index = 0; index < events.size(); ++index)
+  {
+    const auto &event = events[index];
+    if (event.masterCycle == 1)
+    {
+      if (event.subsystem == EE)
+      {
+        if (event.type == MEMORY && event.value0 == 1)
+        {
+          memoryIndex = index;
+        }
+        else if (event.type == FAULT)
+        {
+          contextIndex = index;
+        }
+        else if (event.type == EXCEPTION)
+        {
+          exceptionIndex = index;
+        }
+      }
+      else if (event.subsystem == IOP && event.type == MEMORY && event.value0 == 1)
+      {
+        peerIndex = index;
+      }
+    }
+    else if (event.type == MEMORY && event.value0 == 3)
+    {
+      handlerIndex = index;
+    }
+  }
+  REQUIRE(memoryIndex < contextIndex);
+  REQUIRE(contextIndex < exceptionIndex);
+  REQUIRE(exceptionIndex < peerIndex);
+  REQUIRE(peerIndex < events.size());
+  REQUIRE(handlerIndex < events.size());
+
+  for (std::size_t size = 0; size <= events.size(); ++size)
+  {
+    CAPTURE(size);
+    const auto failure = firstStartupFailure({events.begin(), events.begin() + size});
+    REQUIRE(failure.found == (size > memoryIndex));
+    if (!failure.found)
+    {
+      continue;
+    }
+    REQUIRE(failure.kind == StartupFailureKind::MemoryAccess);
+    REQUIRE(failure.eventIndex == memoryIndex);
+    REQUIRE(failure.event.masterCycle == 1);
+    REQUIRE(failure.event.subsystem == EE);
+    REQUIRE(failure.event.value0 == 1);
+    REQUIRE(failure.instruction.available == (size > contextIndex));
+    REQUIRE(failure.exceptionAvailable == (size > exceptionIndex));
+    if (failure.instruction.available)
+    {
+      REQUIRE(failure.instruction.programCounter == 0xbfc00000);
+      REQUIRE(failure.instruction.instructionAvailable);
+      REQUIRE(failure.instruction.instruction == 0x8c020001);
+      REQUIRE(failure.instruction.delaySlotAvailable);
+      REQUIRE_FALSE(failure.instruction.delaySlot);
+      REQUIRE_FALSE(failure.instruction.branchAddressAvailable);
+    }
+    if (failure.exceptionAvailable)
+    {
+      REQUIRE(failure.exception.value1 == 1);
+      REQUIRE(failure.exception.value2 == 0xbfc00380);
+    }
+  }
+}
+
+TEST_CASE("Startup runtime diagnostics preserve CPU faults before same cycle DMA rejection",
+  "[startup-failure][diagnostic-conformance][persistence]")
+{
+  const auto prepare = [](NekoSystem &system)
+  {
+    system.eeBus().write32(0, 0x8c020001);
+    system.eeCore().startExecution(0xa0000000);
+    system.iopCore().startExecution(0xa0000000);
+    REQUIRE(system.sif().pushSIF1Quadword({{0x80002001, 4, 0, 0}}) ==
+      SIFTransferOutcome::Completed);
+    REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x01000400) ==
+      IOPDMAWriteOutcome::Completed);
+    system.iopDMAController().writePriority(IOPDMABank::Secondary, 0x8000);
+  };
+  NekoSystem reference;
+  prepare(reference);
+  REQUIRE_THROWS_AS(reference.runDualCPU(17), IOPDMATransferError);
+  const auto failedState = reference.saveState();
+  REQUIRE(reference.iopSIF1DMAC().writeChannelControl(0x00000400) ==
+    IOPDMAWriteOutcome::Completed);
+  reference.runDualCPU(17);
+  const auto continuedState = reference.saveState();
+
+  for (const int limit : {-1, 0, 1, 1000})
+  {
+    CAPTURE(limit);
+    NekoSystem system;
+    prepare(system);
+    if (limit >= 0)
+    {
+      system.startTrace(static_cast<std::uint64_t>(limit));
+    }
+    const auto evidence = runDualCPUWithStartupEvidence(system, 17);
+    REQUIRE(evidence.outcome == StartupRunOutcome::RuntimeError);
+    REQUIRE(evidence.error.startup.masterCycle == 1);
+    REQUIRE(evidence.error.startup.ee.cycles == 1);
+    REQUIRE(evidence.error.startup.iop.retiredInstructions == 0);
+    REQUIRE(evidence.error.startup.sif.sif1Words == 4);
+    REQUIRE(evidence.error.startup.iopDMA.sif1.nextBeat.outcome ==
+      IOPDMABeatOutcome::Rejected);
+    const auto historySize = system.trace().size();
+    const auto historyHash = system.traceHash();
+    const auto truncated = system.traceTruncated();
+    const auto eventLimit = system.traceEventLimit();
+    const auto failure = firstStartupFailure(system.trace());
+    REQUIRE(failure.found == (limit == 1000));
+    if (failure.found)
+    {
+      REQUIRE(failure.kind == StartupFailureKind::MemoryAccess);
+      REQUIRE(failure.event.subsystem == EE);
+      REQUIRE(failure.event.masterCycle == 1);
+      REQUIRE(failure.instruction.programCounter == 0xa0000000);
+      REQUIRE(failure.instruction.instruction == 0x8c020001);
+      REQUIRE(failure.exceptionAvailable);
+      auto rejectedIndex = system.trace().size();
+      for (std::size_t index = 0; index < system.trace().size(); ++index)
+      {
+        const auto &event = system.trace()[index];
+        if (event.subsystem == NekoTraceSubsystem::SIF &&
+            event.type == NekoTraceEventType::DMABeat &&
+            ((event.value0 >> NekoSIFDMATrace::OUTCOME_SHIFT) & 255) ==
+              static_cast<unsigned>(NekoSIFDMATrace::Outcome::Rejected))
+        {
+          rejectedIndex = index;
+        }
+      }
+      REQUIRE(failure.eventIndex < rejectedIndex);
+      REQUIRE(rejectedIndex < system.trace().size());
+      REQUIRE(system.trace()[rejectedIndex].masterCycle == 1);
+    }
+    std::string report;
+    for (unsigned repeat = 0; repeat < 2; ++repeat)
+    {
+      std::ostringstream output;
+      writeStartupRuntimeErrorJsonLine(output, evidence.error);
+      writeStartupTraceJsonLines(output, system);
+      writeStartupFirstFailureJsonLine(
+        output, system, StartupExecutionBoundary::IncompleteCycle);
+      if (repeat == 0)
+      {
+        report = output.str();
+      }
+      else
+      {
+        REQUIRE(output.str() == report);
+      }
+    }
+    REQUIRE(report.find("\"run\":null") != std::string::npos);
+    REQUIRE(report.find("\"execution_boundary\":\"incomplete_cycle\"") !=
+      std::string::npos);
+    REQUIRE(system.traceEnabled() == (limit >= 0));
+    REQUIRE(system.traceEventLimit() == eventLimit);
+    REQUIRE(system.traceTruncated() == truncated);
+    REQUIRE(system.trace().size() == historySize);
+    REQUIRE(system.traceHash() == historyHash);
+    const bool unchanged = system.saveState() == failedState;
+    REQUIRE(unchanged);
+    REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x00000400) ==
+      IOPDMAWriteOutcome::Completed);
+    system.runDualCPU(17);
+    const bool sameContinuation = system.saveState() == continuedState;
+    REQUIRE(sameContinuation);
+  }
+}

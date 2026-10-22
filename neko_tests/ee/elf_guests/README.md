@@ -86,7 +86,7 @@ architectural state, plus these deterministic execution values:
 | Guest | Result bytes | Instructions | Master/EE cycles | Trace hash | EE state hash |
 |---|---:|---:|---:|---:|---:|
 | `cop0_tlb_management` | 64 | 179 | 117 | `0x988fadce67f7fbdf` | `0x305c9ae7160ffef7` |
-| `mapped_memory` | 148 | 675 | 468 | `0xf4062652d037c75b` | `0xb8d9a6e29cb820d3` |
+| `mapped_memory` | 148 | 675 | 468 | `0x3ed386ebb2228853` | `0xb8d9a6e29cb820d3` |
 | `scratchpad_dma` | 88 | 349 | 221 | `0x1de1ee8474272cfd` | `0xd0a1a74dd37a0325` |
 | `cache_workflow` | 100 | 349 | 222 | `0xe5570564a4467923` | `0x19e2d2e0c2e86323` |
 
