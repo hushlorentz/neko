@@ -11,7 +11,8 @@ int main(int argumentCount, const char *argumentValues[])
   {
     std::cerr <<
       "Usage: neko save-state <inspect|locate|diff> ...\n"
-      "       neko bios-startup <file> --cycles <count>\n";
+      "       neko bios-startup <file> --cycles <count> "
+      "[--trace-events <count>]\n";
     return 2;
   }
 

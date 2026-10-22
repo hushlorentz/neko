@@ -73,6 +73,16 @@ the master-cycle ceiling was reached, 1 means a CPU host stop, and 2 means
 an argument, file, or runtime error. None establishes a successful BIOS
 handshake or boot. A zero ceiling releases both CPUs without executing.
 
+Add `--trace-events <count>` to export an ordered prefix of the execution trace:
+
+```sh
+./out/check/neko bios-startup path/to/bios.bin --cycles 1000000 --trace-events 10000
+```
+
+The event count is an explicit collection ceiling, not a CPU execution limit.
+Additional JSON lines report capture size/truncation and the retained raw
+events. Tracing is off by default; reaching its ceiling does not stop execution.
+
 ## Tests
 
 Run the complete optimized, assertion-enabled test and repository check:

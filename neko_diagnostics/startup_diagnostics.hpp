@@ -142,5 +142,7 @@ void writeStartupSummaryJsonLine(
   std::ostream &output, const StartupSummary &summary);
 void writeStartupRunSummaryJsonLine(
   std::ostream &output, const StartupRunSummary &summary);
+void writeStartupTraceJsonLines(
+  std::ostream &output, const NekoSystem &system);
 
 #endif

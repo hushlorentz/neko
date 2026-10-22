@@ -111,7 +111,7 @@ snapshot fields are zero and not applicable). No unimplemented channel is
 reported as an idle engine.
 
 Writers preserve the destination stream's formatting and locale, and use
-normal ostream error reporting. Unknown serialized enum values throw
+normal ostream error reporting. Unknown named snapshot enum values throw
 `std::invalid_argument` before any record is emitted. Output formatting
 allocates only when explicitly requested; inspection uses fixed-size values.
 Nothing is automatically printed or attached to core runner results, and
@@ -119,8 +119,9 @@ the existing EE-only `--bios` frontend is unchanged.
 
 ## Headless discovery command
 
-`neko bios-startup <file> --cycles <count>` wraps the cold-start API without
-changing its execution policy. The ceiling is required and accepts an unsigned
+`neko bios-startup <file> --cycles <count> [--trace-events <count>]` wraps the
+cold-start API without changing its execution policy. The master-cycle ceiling
+is required and accepts an unsigned
 64-bit decimal integer, including zero. The image must be exactly 4 MiB.
 Both CPUs start at their reset vectors with the ordinary reset state and
 shared ROM; no guest registers, RAM, readiness flags, or replies are seeded.
@@ -137,10 +138,66 @@ Status 2 reports invalid arguments, file errors, or runtime/output errors
 on stderr. A runtime exception need not produce a summary. Guest exception
 handlers still execute under the existing runner policy: the ending snapshot
 is retained state, not the first rejected-access history or proof of deadlock.
-No tracing or per-cycle inspection is enabled by this command.
+No tracing is enabled unless `--trace-events` is supplied.
 
 The snapshot's DMA inventory remains the subset described above; it does
 not enumerate EE SIF0/SIF1 or IOP SIF0 engines. Use the owners' inspection APIs
 and existing ordered traces when those details are needed. The command does
 not infer an exact guest request/response checkpoint from ending register
 values.
+
+## Bounded trace export
+
+`--trace-events <count>` enables collection after cold reset/release and before
+the first executed cycle. It requires an unsigned 64-bit decimal event ceiling;
+zero retains no events. The original input and run-summary lines are unchanged.
+They are followed by one `startup_trace_summary` line and one `trace_event` line
+per retained event, in the original collection order:
+
+```json
+{"type":"startup_trace_summary","event_limit":1,"captured_events":1,"truncated":true}
+{"type":"trace_event","master_cycle":1,"subsystem":10,"event_type":5,"values":[3217031168,608305153,34,0]}
+```
+
+The event above illustrates the record shape, not a particular BIOS result.
+`subsystem` and `event_type` are the stable numeric identities from
+`regression_trace.hpp`; `values` contains its four raw payload words.
+Numbers are decimal, including 64-bit words: consumers must retain integer
+precision. No instruction decoding or first-failure inference is performed.
+
+The collector retains the earliest events, never a rolling window. Truncation
+means at least one event was omitted, not merely that the collection reached
+its ceiling. An exact-fit run is not truncated; a zero-budget run has an empty,
+non-truncated trace even with a zero event ceiling. A truncated prefix may end
+within a cycle or between related events, and an absent event does not prove
+that its operation never occurred. The master budget, guest exception handlers,
+CPU stop precedence, snapshots, and host exit status remain unchanged.
+
+The limit bounds retained event count at insertion, not just output size.
+It does not preallocate the requested ceiling, shrink previously allocated
+vector capacity, or impose a byte budget. Enabled tracing still incurs normal
+observation costs after the prefix fills. Output is formatted one record at a
+time after execution rather than building another complete trace in memory.
+Runtime-exception evidence capture remains separate work; a runtime exception
+can still return status 2 without exporting the retained prefix.
+
+The same boundary is available to host tools:
+
+```cpp
+NekoSystem system;
+system.runDualCPUBIOS(romBytes, 0); // Reset clears trace controls/history.
+system.startTrace(10000);
+const auto report = runDualCPUWithStartupSummary(system, 1000000);
+writeStartupRunSummaryJsonLine(std::cout, report);
+writeStartupTraceJsonLines(std::cout, system);
+```
+
+`startTrace(limit)` clears history/loss metadata and starts bounded collection;
+the existing `startTrace()` starts unlimited collection.
+`traceEventLimit()` and `traceTruncated()` inspect host-only capture state.
+`clearTrace()` clears events/truncation but keeps the ceiling and enable state.
+`stopTrace()` disables capture while retaining events, the ceiling, and
+truncation. Whole-machine reset clears all of them (disabled, ceiling zero).
+Save states exclude capture controls/history; loading preserves the
+destination's controls, retained events, and truncation. Trace hashes hash
+retained events only, so equal hashes alone do not establish equal coverage.

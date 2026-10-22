@@ -1685,7 +1685,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Pin the supplied BIOS identity, bounded discovery budget, and cold-start
       configuration; record the first CPU stop or budget-boundary state without
       claiming a handshake. Retain ROM bytes outside tracked fixtures.
-- [ ] Add opt-in ordered BIOS trace export with an explicit collection limit
+- [x] Add opt-in ordered BIOS trace export with an explicit collection limit
       and truncation reporting, preserving startup, budgets, and guest
       exception-handler execution.
 - [ ] Decode the first failed access/rejected instruction with CPU, instruction,

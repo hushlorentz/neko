@@ -12,12 +12,11 @@
 namespace
 {
   const char *USAGE =
-    "Usage: neko bios-startup <file> --cycles <count>";
+    "Usage: neko bios-startup <file> --cycles <count> [--trace-events <count>]";
 
-  std::uint64_t parseCycleBudget(const std::string &text)
+  std::uint64_t parseUnsignedInteger(
+    const std::string &text, const char *error)
   {
-    const char *error =
-      "Cycle ceiling must be an unsigned 64-bit decimal integer.";
     if (text.empty())
     {
       throw std::invalid_argument(error);
@@ -76,16 +75,31 @@ int neko_cli::runBIOSStartupCommand(
 {
   try
   {
-    if (arguments.size() != 3 || arguments[0].empty() ||
-        arguments[1] != "--cycles")
+    if ((arguments.size() != 3 && arguments.size() != 5) ||
+        arguments[0].empty() || arguments[1] != "--cycles" ||
+        (arguments.size() == 5 && arguments[3] != "--trace-events"))
     {
       throw std::invalid_argument(USAGE);
     }
-    const auto budget = parseCycleBudget(arguments[2]);
+    const auto budget = parseUnsignedInteger(
+      arguments[2], "Cycle ceiling must be an unsigned 64-bit decimal integer.");
+    const bool traceRequested = arguments.size() == 5;
+    const auto traceLimit = traceRequested ?
+      parseUnsignedInteger(arguments[4],
+        "Trace event ceiling must be an unsigned 64-bit decimal integer.") : 0;
     const auto image = loadFile(arguments[0]);
     NekoSystem system;
-    const auto report =
-      runDualCPUBIOSWithStartupSummary(system, image, budget);
+    StartupRunSummary report;
+    if (traceRequested)
+    {
+      system.runDualCPUBIOS(image, 0);
+      system.startTrace(traceLimit);
+      report = runDualCPUWithStartupSummary(system, budget);
+    }
+    else
+    {
+      report = runDualCPUBIOSWithStartupSummary(system, image, budget);
+    }
 
     std::ostringstream record;
     record.imbue(std::locale::classic());
@@ -98,6 +112,10 @@ int neko_cli::runBIOSStartupCommand(
       ",\"start\":\"cold_dual_reset_vectors\"}\n";
     writeStartupRunSummaryJsonLine(record, report);
     output << record.str();
+    if (traceRequested)
+    {
+      writeStartupTraceJsonLines(output, system);
+    }
     output.flush();
     if (!output)
     {

@@ -1,4 +1,5 @@
 #include <cassert>
+#include <limits>
 #include <new>
 #include <stdexcept>
 
@@ -661,7 +662,14 @@ DualCPUExecutionResult NekoSystem::runDualCPU(
 
 void NekoSystem::startTrace()
 {
+  startTrace(std::numeric_limits<std::uint64_t>::max());
+}
+
+void NekoSystem::startTrace(std::uint64_t eventLimit)
+{
   traceEvents.clear();
+  maximumTraceEvents = eventLimit;
+  truncatedTrace = false;
   eeCoreComponent.cycleEventCount = 0;
   lastTracedEEStateHash = eeCoreComponent.stateHash();
   collectingTrace = true;
@@ -677,6 +685,7 @@ void NekoSystem::stopTrace()
 void NekoSystem::clearTrace()
 {
   traceEvents.clear();
+  truncatedTrace = false;
   eeCoreComponent.cycleEventCount = 0;
   if (collectingTrace)
   {
@@ -687,6 +696,16 @@ void NekoSystem::clearTrace()
 bool NekoSystem::traceEnabled() const
 {
   return collectingTrace;
+}
+
+std::uint64_t NekoSystem::traceEventLimit() const
+{
+  return maximumTraceEvents;
+}
+
+bool NekoSystem::traceTruncated() const
+{
+  return truncatedTrace;
 }
 
 const std::vector<NekoTraceEvent> &NekoSystem::trace() const
@@ -1652,6 +1671,11 @@ void NekoSystem::appendTrace(
   std::uint64_t value2,
   std::uint64_t value3)
 {
+  if (traceEvents.size() >= maximumTraceEvents)
+  {
+    truncatedTrace = true;
+    return;
+  }
   traceEvents.push_back({
     cycle,
     subsystem,

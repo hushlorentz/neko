@@ -228,6 +228,7 @@ add_executable(neko_tests
     neko_tests/elf_runner_tests.cpp
     neko_tests/dual_cpu_bios_tests.cpp
     neko_tests/bios_startup_command_tests.cpp
+    neko_tests/bounded_trace_tests.cpp
     neko_tests/boot_lifecycle_tests.cpp
     neko_tests/boot_conformance_tests.cpp
     neko_tests/iop/iop_dma_tests.cpp

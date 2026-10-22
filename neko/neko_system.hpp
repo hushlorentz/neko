@@ -138,9 +138,12 @@ class NekoSystem
     DualCPUExecutionResult runDualCPU(
       std::uint64_t maxMasterCycles);
     void startTrace();
+    void startTrace(std::uint64_t eventLimit);
     void stopTrace();
     void clearTrace();
     bool traceEnabled() const;
+    std::uint64_t traceEventLimit() const;
+    bool traceTruncated() const;
     const std::vector<NekoTraceEvent> &trace() const;
     std::uint64_t traceHash() const;
     std::uint64_t eeStateHash() const;
@@ -260,6 +263,8 @@ class NekoSystem
     NekoInputState inputState;
     bool collectingTrace = false;
     std::vector<NekoTraceEvent> traceEvents;
+    std::uint64_t maximumTraceEvents = 0;
+    bool truncatedTrace = false;
     std::uint64_t lastTracedEEStateHash = 0;
 
     struct CycleObservationSnapshot

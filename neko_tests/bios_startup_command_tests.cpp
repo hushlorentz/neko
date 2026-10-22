@@ -2,7 +2,9 @@
 #include "catch.hpp"
 #include "startup_diagnostics.hpp"
 
+#include <algorithm>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -216,6 +218,152 @@ TEST_CASE("BIOS startup command flushes buffered reports before selecting status
     output,
     error) == 2);
   REQUIRE_FALSE(buffer.str().empty());
+  REQUIRE(error.str().find("Cannot write BIOS startup report") !=
+    std::string::npos);
+}
+
+TEST_CASE("BIOS startup command exports an exact bounded ordered trace prefix",
+  "[bios-startup-command][bounded-trace]")
+{
+  const auto image = discoveryROM();
+  for (const std::uint64_t budget : {0, 1, 9, 33})
+  {
+    CAPTURE(budget);
+    NekoSystem reference;
+    reference.runDualCPUBIOS(image, 0);
+    reference.startTrace();
+    reference.runDualCPU(budget);
+    const std::uint64_t total = reference.trace().size();
+    if (budget != 0)
+    {
+      REQUIRE(total > 1);
+      REQUIRE(reference.trace().front().masterCycle == 1);
+    }
+    std::ostringstream plain;
+    std::ostringstream error;
+    const auto loader = [&](const std::string &) { return image; };
+    const int plainStatus = neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", std::to_string(budget)},
+      loader, plain, error);
+    REQUIRE(plainStatus == 0);
+    REQUIRE(error.str().empty());
+
+    for (const std::uint64_t limit :
+         {UINT64_C(0), UINT64_C(1), total, total + 1,
+          std::numeric_limits<std::uint64_t>::max()})
+    {
+      CAPTURE(limit);
+      std::ostringstream output;
+      REQUIRE(neko_cli::runBIOSStartupCommand(
+        {"authored.bin", "--cycles", std::to_string(budget),
+         "--trace-events", std::to_string(limit)},
+        loader, output, error) == plainStatus);
+      REQUIRE(error.str().empty());
+      const auto captured = std::min(limit, total);
+      std::ostringstream expected;
+      expected << plain.str() <<
+        "{\"type\":\"startup_trace_summary\",\"event_limit\":" << limit <<
+        ",\"captured_events\":" << captured <<
+        ",\"truncated\":" << (limit < total ? "true" : "false") << "}\n";
+      for (std::size_t index = 0; index < captured; ++index)
+      {
+        const auto &event = reference.trace()[index];
+        expected <<
+          "{\"type\":\"trace_event\",\"master_cycle\":" << event.masterCycle <<
+          ",\"subsystem\":" << static_cast<unsigned>(event.subsystem) <<
+          ",\"event_type\":" << static_cast<unsigned>(event.type) <<
+          ",\"values\":[" << event.value0 << ',' << event.value1 << ',' <<
+          event.value2 << ',' << event.value3 << "]}\n";
+      }
+      REQUIRE(output.str() == expected.str());
+    }
+  }
+}
+
+TEST_CASE("BIOS startup trace options are validated before loading",
+  "[bios-startup-command][bounded-trace]")
+{
+  for (const std::vector<std::string> options : {
+       std::vector<std::string>{"--trace-events"},
+       {"--trace-events", "1", "extra"},
+       {"--trace-events", "1", "--trace-events", "2"},
+       {"--trace", "1"}, {"--trace-events", ""}, {"--trace-events", "-1"},
+       {"--trace-events", "+1"}, {"--trace-events", " 1"},
+       {"--trace-events", "1x"}, {"--trace-events", "18446744073709551616"}})
+  {
+    auto arguments = std::vector<std::string>{"authored.bin", "--cycles", "1"};
+    arguments.insert(arguments.end(), options.begin(), options.end());
+    std::ostringstream output;
+    std::ostringstream error;
+    bool loaded = false;
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      arguments,
+      [&](const std::string &)
+      {
+        loaded = true;
+        return discoveryROM();
+      },
+      output, error) == 2);
+    REQUIRE_FALSE(loaded);
+    REQUIRE(output.str().empty());
+    REQUIRE_FALSE(error.str().empty());
+  }
+}
+
+TEST_CASE("BIOS startup trace limits preserve host stops and guest exception handlers",
+  "[bios-startup-command][bounded-trace]")
+{
+  for (const std::uint32_t instruction : {0x40003800u, 0x0000000cu})
+  {
+    CAPTURE(instruction);
+    const auto image = discoveryROM(instruction);
+    const auto loader = [&](const std::string &) { return image; };
+    std::ostringstream plain;
+    std::ostringstream error;
+    const int plainStatus = neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "17"}, loader, plain, error);
+    REQUIRE(plainStatus == (instruction == 0x40003800u ? 1 : 0));
+    REQUIRE(error.str().empty());
+    for (const std::string limit : {"0", "1", "10000"})
+    {
+      std::ostringstream output;
+      REQUIRE(neko_cli::runBIOSStartupCommand(
+        {"authored.bin", "--cycles", "17", "--trace-events", limit},
+        loader, output, error) == plainStatus);
+      REQUIRE(error.str().empty());
+      REQUIRE(output.str().compare(0, plain.str().size(), plain.str()) == 0);
+      REQUIRE(output.str().find("\"type\":\"startup_trace_summary\"") !=
+        std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("BIOS startup command reports failures while exporting trace records",
+  "[bios-startup-command][bounded-trace]")
+{
+  class FailingTraceBuffer : public std::stringbuf
+  {
+    std::streamsize xsputn(
+      const char *data, std::streamsize size) override
+    {
+      if (std::string(data, static_cast<std::size_t>(size)).find(
+            "\"type\":\"trace_event\"") != std::string::npos)
+      {
+        return 0;
+      }
+      return std::stringbuf::xsputn(data, size);
+    }
+  };
+  FailingTraceBuffer buffer;
+  std::ostream output(&buffer);
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "1", "--trace-events", "1"},
+    [](const std::string &) { return discoveryROM(); },
+    output, error) == 2);
+  REQUIRE(buffer.str().find("\"type\":\"startup_trace_summary\"") !=
+    std::string::npos);
+  REQUIRE(buffer.str().find("\"type\":\"trace_event\"") == std::string::npos);
   REQUIRE(error.str().find("Cannot write BIOS startup report") !=
     std::string::npos);
 }

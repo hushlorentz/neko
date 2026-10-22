@@ -318,3 +318,28 @@ void writeStartupRunSummaryJsonLine(
   json << "}\n";
   emitJson(output, json);
 }
+
+void writeStartupTraceJsonLines(
+  std::ostream &output, const NekoSystem &system)
+{
+  std::ostringstream json;
+  json.imbue(std::locale::classic());
+  json <<
+    "{\"type\":\"startup_trace_summary\",\"event_limit\":" <<
+    system.traceEventLimit() <<
+    ",\"captured_events\":" << system.trace().size() <<
+    ",\"truncated\":" << jsonBoolean(system.traceTruncated()) << "}\n";
+  emitJson(output, json);
+  for (const auto &event : system.trace())
+  {
+    json.str("");
+    json.clear();
+    json <<
+      "{\"type\":\"trace_event\",\"master_cycle\":" << event.masterCycle <<
+      ",\"subsystem\":" << static_cast<unsigned>(event.subsystem) <<
+      ",\"event_type\":" << static_cast<unsigned>(event.type) <<
+      ",\"values\":[" << event.value0 << ',' << event.value1 << ',' <<
+      event.value2 << ',' << event.value3 << "]}\n";
+    emitJson(output, json);
+  }
+}
