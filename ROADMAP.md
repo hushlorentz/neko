@@ -1717,7 +1717,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add the approved exact-word IOP SSBUS configuration profile at
       `0x1f801010`, with bounded access admission, reset/readback, canonical
       hashing, atomic save/load, and authored BIOS-free regressions.
-- [ ] Re-run bounded discovery after the approved repairs; classify the next
+- [x] Re-run bounded discovery after the approved repairs; classify the next
       responsible CPU stops or waits without treating consequential handler
       failures as new hardware requirements.
 - [ ] Reassess the resulting pre-handshake dependencies; obtain approval for
