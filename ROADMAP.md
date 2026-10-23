@@ -1802,12 +1802,18 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       words (15 additions), with retention-only base/delay policies, schema-48
       atomic persistence/hash, authored red/green coverage, focused integration,
       and individual independent review.
-- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+- [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next responsible dependency without extending hardware or
       claiming a handshake from configuration progress alone.
 - [ ] Reconcile provisional policies and the dependency record, complete
       independent block review, and run complete optimized and AddressSanitizer
       checks.
+
+### IOP Platform Initialization: `0x1f802070` Scope
+
+- [ ] Resolve the scope decision for the observed `0x1f802070` initialization
+      store; obtain approval for bounded evidence/repair work or an explicit
+      milestone-scope change before extending hardware.
 
 ### Real BIOS Handshake and Boundary Conformance
 
