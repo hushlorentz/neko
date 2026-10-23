@@ -36,6 +36,7 @@ constexpr std::size_t IOPBus::ROM_SIZE;
 constexpr IOPAddress IOPBus::RAM_BASE;
 constexpr IOPAddress IOPBus::SCRATCHPAD_BASE;
 constexpr IOPAddress IOPBus::ROM_BASE;
+constexpr IOPAddress IOPBus::SSBUS_CONFIG;
 constexpr IOPAddress IOPBus::INTC_STAT;
 constexpr IOPAddress IOPBus::INTC_MASK;
 constexpr IOPAddress IOPBus::INTC_CTRL;
@@ -50,6 +51,7 @@ void IOPBus::reset()
 {
   std::fill(ram.begin(), ram.end(), static_cast<std::uint8_t>(0));
   scratchpad.fill(0);
+  ssbusConfiguration = 0;
 }
 
 void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
@@ -173,6 +175,13 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - SIF_DOORBELL),
       Device::SIFDoorbell};
+  }
+
+  if (first >= SSBUS_CONFIG &&
+      last < static_cast<std::uint64_t>(SSBUS_CONFIG) + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - SSBUS_CONFIG),
+      Device::SSBUSConfiguration};
   }
 
   for (std::size_t index = 0; index < timerBases.size(); ++index)
@@ -385,6 +394,10 @@ IOPBusReadResult IOPBus::readDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SSBUSConfiguration:
+      return width == sizeof(IOPWord) && location.offset == 0
+        ? IOPBusReadResult{IOPBusStatus::Completed, ssbusConfiguration}
+        : IOPBusReadResult{};
     case Device::InterruptController:
       return width == sizeof(IOPWord)
         ? readInterruptRegister(location.offset) : IOPBusReadResult{};
@@ -411,6 +424,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SSBUSConfiguration:
+      if (width == sizeof(IOPWord) && location.offset == 0)
+      {
+        ssbusConfiguration = value;
+        return {IOPBusStatus::Completed};
+      }
+      return {};
     case Device::InterruptController:
       return width == sizeof(IOPWord)
         ? writeInterruptRegister(location.offset, value) : IOPBusWriteResult{};

@@ -58,6 +58,7 @@ class IOPBus final
     static constexpr IOPAddress RAM_BASE = 0x00000000;
     static constexpr IOPAddress SCRATCHPAD_BASE = 0x1f800000;
     static constexpr IOPAddress ROM_BASE = 0x1fc00000;
+    static constexpr IOPAddress SSBUS_CONFIG = 0x1f801010;
     static constexpr IOPAddress INTC_STAT = 0x1f801070;
     static constexpr IOPAddress INTC_MASK = 0x1f801074;
     static constexpr IOPAddress INTC_CTRL = 0x1f801078;
@@ -66,7 +67,7 @@ class IOPBus final
 
     IOPBus();
 
-    // Clears RAM and scratchpad, not attached devices or ROM configuration.
+    // Clears owned storage and SSBUS state, not attached devices or ROM.
     void reset();
     // The caller owns the controller and must keep it alive while attached.
     void attachInterruptController(IOPInterruptController *interrupts);
@@ -122,6 +123,7 @@ class IOPBus final
     enum class Device : std::uint8_t
     {
       None,
+      SSBUSConfiguration,
       InterruptController,
       DMAController,
       SIF1DMA,
@@ -179,6 +181,8 @@ class IOPBus final
 
     std::vector<std::uint8_t> ram;
     std::array<std::uint8_t, SCRATCHPAD_SIZE> scratchpad = {};
+    // Provisional zero-reset retained word; no bus-timing effects.
+    IOPWord ssbusConfiguration = 0;
     std::shared_ptr<const BootROMImage> rom;
     IOPInterruptController *interruptController = nullptr;
     IOPTimers *timers = nullptr;

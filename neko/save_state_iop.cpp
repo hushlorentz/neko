@@ -155,6 +155,7 @@ void NekoSaveStateCodec::writeIOPState(
     writer->writeFieldBool("romPresent", bus.rom != nullptr);
     writer->writeFieldU64(
       "romFingerprint", bus.rom != nullptr ? bus.rom->fingerprint() : 0);
+    writer->writeFieldU32("ssbusConfiguration", bus.ssbusConfiguration);
     writer->writeFieldByteVector("ram", bus.ram);
     writer->writeFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -246,6 +247,7 @@ void NekoSaveStateCodec::readIOP(
     reader->requireField(
       configuration->rom.present || configuration->cacheRomSynchronized,
       "IOP cache has a pending ROM replacement without an external image");
+    bus.ssbusConfiguration = reader->readFieldU32("ssbusConfiguration");
     bus.ram = reader->readFieldByteVector("ram", IOPBus::RAM_SIZE);
     reader->readFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -596,6 +598,8 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional IOP SIF0 DMA commit must not throw.");
   destination->iopBusComponent.ram.swap(source->iopBusComponent.ram);
   destination->iopBusComponent.scratchpad = source->iopBusComponent.scratchpad;
+  destination->iopBusComponent.ssbusConfiguration =
+    source->iopBusComponent.ssbusConfiguration;
   const bool observationsEnabled = destination->iopCoreComponent.observationsEnabled;
   auto *const observationOrder = destination->iopCoreComponent.observationOrder;
   destination->iopCoreComponent = source->iopCoreComponent;

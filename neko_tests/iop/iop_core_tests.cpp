@@ -2640,6 +2640,94 @@ TEST_CASE("IOP core fetches only through virtual translation and the bus")
   REQUIRE(uncached.value == UINT32_C(0x12345678));
 }
 
+TEST_CASE("IOP SSBUS guest executes full-word access with ordinary load delay",
+  "[iop][ssbus]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  const std::uint32_t program[] = {
+    0x3c01bf80, // lui r1, 0xbf80
+    0x34211010, // ori r1, r1, 0x1010
+    0x8c220000, // lw r2, 0(r1): reset value
+    0x24430001, // addiu r3, r2, 1: load-delay slot
+    0x3c05ffff, // lui r5, 0xffff
+    0x34a5ffff, // ori r5, r5, 0xffff
+    0xac250000, // sw r5, 0(r1)
+    0x8c260000, // lw r6, 0(r1)
+    0,          // nop: retire delayed load
+    0x24c70001, // addiu r7, r6, 1
+    0xac060100  // sw r6, 0x100(r0)
+  };
+  IOPAddress address = 0;
+  for (const auto instruction : program)
+  {
+    loadInstruction(&bus, address, instruction);
+    address += 4;
+  }
+  core.startExecution(0x80000000);
+  for (const auto instruction : program)
+  {
+    CAPTURE(instruction);
+    core.stepInstruction();
+    REQUIRE(core.executionState() == IOPExecutionState::Running);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.stopReason() == IOPStopReason::None);
+  }
+  REQUIRE(core.retiredInstructions() == sizeof(program) / sizeof(program[0]));
+  REQUIRE(core.generalRegister(2) == 0);
+  REQUIRE(core.generalRegister(3) == 1);
+  REQUIRE(core.generalRegister(6) == 0xffffffff);
+  REQUIRE(core.generalRegister(7) == 0);
+  REQUIRE(bus.read32(0x100).value == 0xffffffff);
+  for (IOPAddress alias : {0x1f801010u, 0x9f801010u, 0xbf801010u})
+  {
+    const auto read = core.readData32(alias);
+    REQUIRE(read.outcome == IOPAccessOutcome::Completed);
+    REQUIRE(read.physicalAddress == 0x1f801010);
+    REQUIRE(read.value == 0xffffffff);
+  }
+  REQUIRE(bus.write32(0x1f801010, 0x13579bdf).status == IOPBusStatus::Completed);
+  REQUIRE(core.readData32(0x9f801010).value == 0x13579bdf);
+  const auto uncached = core.readData32(0xbf801010);
+  REQUIRE(uncached.cacheRoute == IOPCacheRoute::Uncached);
+  REQUIRE(uncached.value == 0x13579bdf);
+}
+
+TEST_CASE("IOP SSBUS narrow guest accesses retain existing fault policy",
+  "[iop][ssbus]")
+{
+  for (std::uint8_t opcode : {0x20, 0x21, 0x28, 0x29})
+  {
+    CAPTURE(opcode);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(bus.write32(0x1f801010, 0x12345678).status == IOPBusStatus::Completed);
+    loadInstruction(&bus, 0, 0x3c01bf80);
+    loadInstruction(&bus, 4, 0x34211010);
+    loadInstruction(&bus, 8, immediateInstruction(opcode, 1, 2, 0));
+    core.startExecution(0x80000000);
+    for (unsigned step = 0; step < 3; ++step)
+    {
+      core.stepInstruction();
+    }
+    if (opcode < 0x28)
+    {
+      REQUIRE(core.executionState() == IOPExecutionState::Running);
+      REQUIRE(core.exception().kind == IOPException::DataBusError);
+      REQUIRE(core.exceptionProgramCounter() == 0x80000008);
+    }
+    else
+    {
+      REQUIRE(core.executionState() == IOPExecutionState::Halted);
+      REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+    }
+    REQUIRE(bus.read32(0x1f801010).value == 0x12345678);
+  }
+}
+
 TEST_CASE("IOP core reports fetch protection alignment and bus failures")
 {
   IOPBus bus;

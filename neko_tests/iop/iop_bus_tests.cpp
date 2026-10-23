@@ -96,6 +96,101 @@ TEST_CASE("IOP bus RAM is little-endian and mirrored four times", "[iop][bus]")
   REQUIRE(bus.read8(0x7fffff).value == 0xab);
 }
 
+TEST_CASE("IOP SSBUS configuration admits one full-word retained value",
+    "[iop][bus][ssbus]")
+  {
+    IOPBus bus;
+    IOPBus independent;
+    constexpr IOPAddress address = 0x1f801010;
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0);
+    for (IOPWord value : {0xffffffffu, 0x12345678u, 0x80000000u, 1u, 0u})
+    {
+      CAPTURE(value);
+      REQUIRE(bus.write32(address, value).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(address).value == value);
+      REQUIRE(independent.read32(address).value == 0);
+    }
+    REQUIRE(bus.writeMasked32(address, 0xfedcba98, 0xf).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0xfedcba98);
+    bus.reset();
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0);
+  }
+
+  TEST_CASE("IOP SSBUS configuration rejects unsupported accesses atomically",
+    "[iop][bus][ssbus]")
+  {
+    IOPBus bus;
+    constexpr IOPAddress base = 0x1f801010;
+    constexpr IOPWord retained = 0x89abcdef;
+    REQUIRE(bus.write32(base, retained).status == IOPBusStatus::Completed);
+    REQUIRE(bus.regionForRange(base, 4) == IOPBusRegion::Mmio);
+    REQUIRE(bus.regionForRange(base + 3, 1) == IOPBusRegion::Mmio);
+    REQUIRE(bus.regionForRange(base - 1, 2) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.regionForRange(base, 5) == IOPBusRegion::Unmapped);
+    for (IOPAddress offset = 0; offset < 4; ++offset)
+    {
+      CAPTURE(offset);
+      const auto address = base + offset;
+      REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read8(address).value == 0);
+      REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+      const auto halfwordStatus = (offset & 1) == 0
+        ? IOPBusStatus::Unmapped : IOPBusStatus::Misaligned;
+      REQUIRE(bus.read16(address).status == halfwordStatus);
+      REQUIRE(bus.write16(address, 0).status == halfwordStatus);
+      if (offset != 0)
+      {
+        REQUIRE(bus.read32(address).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.writeMasked32(address, 0, 0xf).status ==
+          IOPBusStatus::Misaligned);
+      }
+    }
+    for (std::uint8_t mask = 1; mask < 15; ++mask)
+    {
+      CAPTURE(mask);
+      REQUIRE(bus.writeMasked32(base, 0, mask).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read32(base).value == retained);
+    }
+    for (std::uint8_t mask : {std::uint8_t(0), std::uint8_t(0x10), std::uint8_t(0xff)})
+    {
+      REQUIRE_THROWS_AS(bus.writeMasked32(base, 0, mask), std::invalid_argument);
+    }
+    for (IOPAddress address : {base - 4, base + 4, 0x1f801000u, 0x1f801020u})
+    {
+      CAPTURE(address);
+      REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.read32(base).value == retained);
+  }
+
+  TEST_CASE("IOP SSBUS configuration is excluded from DMA and host byte access",
+    "[iop][bus][ssbus]")
+  {
+    IOPBus bus;
+    constexpr IOPAddress address = 0x1f801010;
+    REQUIRE(bus.write32(address, 0x76543210).status == IOPBusStatus::Completed);
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(address, 0).status == IOPBusStatus::Unmapped);
+    const std::uint8_t bytes[] = {1, 2, 3, 4};
+    std::array<std::uint8_t, 4> output = {{0xaa, 0xaa, 0xaa, 0xaa}};
+    const auto before = output;
+    REQUIRE(bus.loadPhysical(address, bytes, 4) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, output.data(), output.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.loadPhysical(address, bytes, 0) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, output.data(), 0) == IOPBusStatus::Unmapped);
+    REQUIRE(output == before);
+    REQUIRE(bus.read32(address).value == 0x76543210);
+    REQUIRE(bus.read32(0).value == 0);
+    REQUIRE(bus.read32(IOPBus::SCRATCHPAD_BASE).value == 0);
+  }
+
 TEST_CASE("IOP bus does not wrap addresses beyond the RAM mirror", "[iop][bus]")
 {
   IOPBus bus;

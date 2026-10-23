@@ -62,6 +62,116 @@ TEST_CASE("IOP persistence owns attached devices while the CPU remains halted")
   REQUIRE(system.iopTimers().counter(0).target == 37);
 }
 
+TEST_CASE("IOP SSBUS canonical state hashes every bit and resets to zero",
+  "[iop][ssbus][save-state]")
+{
+  NekoSystem system;
+  const auto initial = system.iopStateHash();
+  const auto eeHash = system.eeStateHash();
+  for (unsigned bit = 0; bit < 32; ++bit)
+  {
+    CAPTURE(bit);
+    const auto value = IOPWord(1) << bit;
+    REQUIRE(system.iopBus().write32(0x1f801010, value).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().read32(0x1f801010).value == value);
+    REQUIRE(system.iopStateHash() != initial);
+  }
+  REQUIRE(system.eeStateHash() == eeHash);
+  SaveStateMutation candidate(system.saveState());
+  candidate.writeScalar("system.iop.bus.ssbusConfiguration", 0xffffffff);
+  candidate.refreshChecksum();
+  system.loadState(candidate);
+  REQUIRE(system.iopBus().read32(0x1f801010).value == 0xffffffff);
+  REQUIRE(system.saveState() == candidate.bytes());
+  system.reset();
+  REQUIRE(system.iopBus().read32(0x1f801010).value == 0);
+  REQUIRE(system.iopStateHash() == initial);
+}
+
+TEST_CASE("IOP SSBUS restore continues a guest load against the retained word",
+  "[iop][ssbus][save-state]")
+{
+  NekoSystem original;
+  const IOPWord program[] = {
+    0x3c01bf80, // lui r1, 0xbf80
+    0x34211010, // ori r1, r1, 0x1010
+    0x3c02ffff, // lui r2, 0xffff
+    0x3442ffff, // ori r2, r2, 0xffff
+    0xac220000, // sw r2, 0(r1)
+    0x8c230000, // lw r3, 0(r1)
+    0x24640001, // addiu r4, r3, 1: load-delay slot
+    0xac030100, // sw r3, 0x100(r0)
+    0
+  };
+  IOPAddress address = 0;
+  for (const auto instruction : program)
+  {
+    loadInstruction(&original, address, instruction);
+    address += 4;
+  }
+  original.iopCore().startExecution(0x80000000);
+  for (unsigned step = 0; step < 6; ++step)
+  {
+    original.iopCore().stepInstruction();
+  }
+  REQUIRE(original.iopCore().exception().kind == IOPException::None);
+  REQUIRE(original.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  REQUIRE(original.iopCore().generalRegister(3) == 0);
+  const auto state = original.saveState();
+  REQUIRE_NOTHROW(inspectSaveState(state));
+  NekoSystem restored;
+  REQUIRE(restored.iopBus().write32(0x1f801010, 0x13579bdf).status ==
+    IOPBusStatus::Completed);
+  restored.loadState(state);
+  REQUIRE(restored.iopBus().read32(0x1f801010).value == 0xffffffff);
+  REQUIRE(restored.iopStateHash() == original.iopStateHash());
+  for (unsigned step = 0; step < 3; ++step)
+  {
+    original.iopCore().stepInstruction();
+    restored.iopCore().stepInstruction();
+    REQUIRE(restored.iopStateHash() == original.iopStateHash());
+  }
+  REQUIRE(restored.iopCore().generalRegister(3) == 0xffffffff);
+  REQUIRE(restored.iopCore().generalRegister(4) == 1);
+  REQUIRE(restored.iopBus().read32(0x100).value == 0xffffffff);
+  REQUIRE(restored.saveState() == original.saveState());
+  REQUIRE(restored.iopBus().write32(0x1f801010, 7).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(original.iopBus().read32(0x1f801010).value == 0xffffffff);
+}
+
+TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
+  "[iop][ssbus][save-state]")
+{
+  NekoSystem source;
+  REQUIRE(source.iopBus().write32(0x1f801010, 0xfedcba98).status ==
+    IOPBusStatus::Completed);
+  const auto candidate = source.saveState();
+  NekoSystem destination;
+  REQUIRE(destination.iopBus().write32(0x1f801010, 0x12345678).status ==
+    IOPBusStatus::Completed);
+  loadInstruction(&destination, 0x100, 0xdeadbeef);
+  const auto before = destination.saveState();
+  const auto hash = destination.iopStateHash();
+  for (const auto &mutation :
+       std::vector<std::pair<std::string, std::uint64_t>>{
+         {"system.iop.interruptController.control", 2},
+         {"container.version", 44}})
+  {
+    CAPTURE(mutation.first);
+    SaveStateMutation invalid(candidate);
+    invalid.writeScalar(mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.iopBus().read32(0x1f801010).value == 0x12345678);
+    REQUIRE(destination.iopStateHash() == hash);
+    REQUIRE(destination.saveState() == before);
+  }
+}
+
 TEST_CASE("IOP persistence continues branch and delayed load without copied pointers")
 {
   NekoSystem original;
