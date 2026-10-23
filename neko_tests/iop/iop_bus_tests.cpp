@@ -10,6 +10,7 @@
 #include "iop_bus.hpp"
 #include "iop_interrupt_controller.hpp"
 #include "iop_timers.hpp"
+#include "ssbus_test_utils.hpp"
 
 static_assert(
   std::is_final<IOPBus>::value,
@@ -17,9 +18,7 @@ static_assert(
 
 namespace
 {
-  constexpr std::array<IOPAddress, 3> ssbusAddresses = {{
-    0x1f801010, 0x1f801020, 0x1f80101c
-  }};
+  constexpr auto ssbusAddresses = SSBUSTest::addresses;
 
   const std::array<IOPAddress, 6> timerBases = {{
     0x1f801100, 0x1f801110, 0x1f801120,
@@ -100,7 +99,7 @@ TEST_CASE("IOP bus RAM is little-endian and mirrored four times", "[iop][bus]")
   REQUIRE(bus.read8(0x7fffff).value == 0xab);
 }
 
-TEST_CASE("IOP SSBUS configuration retains three independent full words",
+TEST_CASE("IOP SSBUS configuration retains eighteen independent full words",
   "[iop][bus][ssbus]")
 {
   for (IOPAddress address : ssbusAddresses)
@@ -117,7 +116,8 @@ TEST_CASE("IOP SSBUS configuration retains three independent full words",
     }
     REQUIRE(bus.read32(address).status == IOPBusStatus::Completed);
     REQUIRE(bus.read32(address).value == 0);
-    for (IOPWord value : {0xffffffffu, 0x12345678u, 0x80000000u, 1u, 0u})
+    for (IOPWord value :
+         {0xffffffffu, 0x12345678u, 0x1f802000u, 0x80000000u, 1u, 0u})
     {
       CAPTURE(value);
       REQUIRE(bus.write32(address, value).status == IOPBusStatus::Completed);
@@ -149,6 +149,58 @@ TEST_CASE("IOP SSBUS configuration retains three independent full words",
     for (IOPAddress word : ssbusAddresses)
     {
       REQUIRE(bus.read32(word).value == 0);
+    }
+  }
+}
+
+TEST_CASE("IOP SSBUS grouped words admit exact reads and writes",
+  "[iop][bus][ssbus]")
+{
+  IOPBus bus;
+  for (IOPAddress address : ssbusAddresses)
+  {
+    CAPTURE(address);
+    CHECK(bus.read32(address).status == IOPBusStatus::Completed);
+    CHECK(bus.write32(address, address).status == IOPBusStatus::Completed);
+    CHECK(bus.read32(address).value == address);
+  }
+}
+
+TEST_CASE("IOP SSBUS base retention does not change physical decode",
+  "[iop][bus][ssbus]")
+{
+  IOPBus bus;
+  REQUIRE(bus.installRom(makeRom()));
+  REQUIRE(bus.write32(0x100, 0x89abcdef).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(IOPBus::SCRATCHPAD_BASE, 0x12345678).status ==
+    IOPBusStatus::Completed);
+  for (IOPAddress base :
+       {0x1f801000u, 0x1f801004u, 0x1f801400u, 0x1f801404u,
+        0x1f801408u, 0x1f80140cu, 0x1f801410u})
+  {
+    for (IOPWord value :
+         {0u, 0x1f802000u, 0x100u, 0x1fc00000u, 0x1f800000u, 0xffffffffu})
+    {
+      CAPTURE(base);
+      CAPTURE(value);
+      REQUIRE(bus.write32(base, value).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(base).value == value);
+      for (IOPAddress mirror : {0x100u, 0x200100u, 0x400100u, 0x600100u})
+      {
+        REQUIRE(bus.read32(mirror).value == 0x89abcdef);
+        REQUIRE(bus.readDMAC32(mirror).value == 0x89abcdef);
+      }
+      REQUIRE(bus.read32(IOPBus::SCRATCHPAD_BASE).value == 0x12345678);
+      REQUIRE(bus.read32(IOPBus::ROM_BASE).value == 0x12345678);
+      REQUIRE(bus.write32(IOPBus::ROM_BASE, 0).status == IOPBusStatus::ReadOnly);
+      for (IOPAddress address :
+           {0x800000u, 0x1f000000u, 0x1f802000u, 0x1f900000u, 0x1f801424u})
+      {
+        REQUIRE(bus.regionForRange(address, 4) == IOPBusRegion::Unmapped);
+        REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.write32(address, 1).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
+      }
     }
   }
 }
@@ -207,8 +259,8 @@ TEST_CASE("IOP SSBUS configuration rejects unsupported accesses atomically",
     }
     REQUIRE(bus.writeMasked32(base + 1, 0, 1).status == IOPBusStatus::Misaligned);
     for (IOPAddress address :
-         {0x1f801000u, 0x1f80100cu, 0x1f801014u, 0x1f801018u,
-          0x1f801024u, 0x1f802000u})
+         {0x1f800ffcu, 0x1f801024u, 0x1f801060u, 0x1f8013fcu,
+          0x1f801424u, 0x1f802000u, 0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
     {
       CAPTURE(address);
       REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
@@ -217,7 +269,7 @@ TEST_CASE("IOP SSBUS configuration rejects unsupported accesses atomically",
     REQUIRE(bus.regionForRange(0x1f801010, 0x14) == IOPBusRegion::Unmapped);
     REQUIRE(bus.regionForRange(0x1f80101c, 8) == IOPBusRegion::Unmapped);
     REQUIRE(bus.regionForRange(0x1f80101f, 2) == IOPBusRegion::Unmapped);
-    REQUIRE(bus.regionForRange(0x1f801014, 0) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.regionForRange(0x1f801424, 0) == IOPBusRegion::Unmapped);
     REQUIRE(bus.read32(base).value == retained);
     for (IOPAddress peer : ssbusAddresses)
     {

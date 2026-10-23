@@ -11,6 +11,7 @@
 #include "iop_instruction.hpp"
 #include "iop_interrupt_controller.hpp"
 #include "iop_timers.hpp"
+#include "ssbus_test_utils.hpp"
 
 namespace
 {
@@ -2643,7 +2644,7 @@ TEST_CASE("IOP core fetches only through virtual translation and the bus")
 TEST_CASE("IOP SSBUS guest executes full-word access with ordinary load delay",
   "[iop][ssbus]")
 {
-  for (IOPAddress base : {0x1f801010u, 0x1f801020u, 0x1f80101cu})
+  for (IOPAddress base : SSBUSTest::addresses)
   {
     CAPTURE(base);
     IOPBus bus;
@@ -2717,7 +2718,7 @@ TEST_CASE("IOP SSBUS guest executes full-word access with ordinary load delay",
 TEST_CASE("IOP SSBUS narrow guest accesses retain existing fault policy",
   "[iop][ssbus]")
 {
-  for (IOPAddress base : {0x1f801010u, 0x1f801020u, 0x1f80101cu})
+  for (IOPAddress base : SSBUSTest::addresses)
   {
     CAPTURE(base);
     for (std::uint8_t opcode : {0x20, 0x21, 0x28, 0x29, 0x2a, 0x2e})

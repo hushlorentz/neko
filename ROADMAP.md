@@ -1798,7 +1798,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: Grouped SSBUS Configuration Repair
 
-- [ ] Extend the existing `IOPBus` configuration image to all 18 identified
+- [x] Extend the existing `IOPBus` configuration image to all 18 identified
       words (15 additions), with retention-only base/delay policies, schema-48
       atomic persistence/hash, authored red/green coverage, focused integration,
       and individual independent review.

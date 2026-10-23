@@ -5,6 +5,7 @@
 
 #include "catch.hpp"
 #include "neko_system.hpp"
+#include "ssbus_test_utils.hpp"
 
 struct IOPDeviceObservationTestAccess
 {
@@ -226,6 +227,78 @@ TEST_CASE("IOP three-word SSBUS initialization is trace-observational",
       true, wanted.byteEnable}));
   }
   REQUIRE(access == expected.size());
+}
+
+TEST_CASE("IOP grouped SSBUS initialization has no device or scheduling effects",
+  "[iop][ssbus][trace]")
+{
+  NekoSystem traced;
+  NekoSystem untraced;
+  const auto sifHash = traced.sifStateHash();
+  std::vector<IOPWord> program = {0x3c01bf80, 0x34021225};
+  for (std::size_t index = 0; index < SSBUSTest::addresses.size(); ++index)
+  {
+    const auto offset = SSBUSTest::addresses[index] & 0xffff;
+    program.push_back(0xac220000 | offset); // sw r2, offset(r1)
+    program.push_back(0x8c230000 | offset); // lw r3, offset(r1)
+    program.push_back(0); // load-delay slot
+    program.push_back(0xac030400 | static_cast<IOPWord>(index * 4));
+  }
+  for (NekoSystem *system : {&traced, &untraced})
+  {
+    for (std::size_t index = 0; index < program.size(); ++index)
+    {
+      instruction(*system, static_cast<IOPAddress>(index * 4), program[index]);
+    }
+    system->iopCore().startExecution(0xa0000000);
+  }
+  traced.startTrace();
+  traced.runMasterCycles(program.size() * 8);
+  untraced.runMasterCycles(program.size() * 8);
+  REQUIRE(traced.iopCore().exception().kind == IOPException::None);
+  REQUIRE(traced.iopCore().executionState() == IOPExecutionState::Running);
+  REQUIRE(traced.iopCore().retiredInstructions() == program.size());
+  REQUIRE(traced.iopCore().programCounter() == 0xa0000000 + program.size() * 4);
+  for (std::size_t index = 0; index < SSBUSTest::addresses.size(); ++index)
+  {
+    REQUIRE(traced.iopBus().read32(SSBUSTest::addresses[index]).value == 0x1225);
+    REQUIRE(traced.iopBus().read32(
+      static_cast<IOPAddress>(0x400 + index * 4)).value == 0x1225);
+  }
+  REQUIRE(traced.iopInterruptController().status() == 0);
+  REQUIRE(traced.sifStateHash() == sifHash);
+  REQUIRE(traced.sifStateHash() == untraced.sifStateHash());
+  REQUIRE(traced.iopStateHash() == untraced.iopStateHash());
+  REQUIRE(traced.eeStateHash() == untraced.eeStateHash());
+  REQUIRE(traced.saveState() == untraced.saveState());
+  REQUIRE(untraced.trace().empty());
+  REQUIRE(traced.trace().size() == program.size() * 3 +
+    SSBUSTest::addresses.size() * 3);
+  namespace Memory = NekoIOPTraceMemory;
+  std::size_t accesses = 0;
+  for (const auto &event : traced.trace())
+  {
+    REQUIRE(event.subsystem == Subsystem::IOP);
+    if (event.type != Type::MemoryAccess || event.value0 < 0xbf800000)
+    {
+      continue;
+    }
+    const auto index = accesses / 2;
+    REQUIRE(index < SSBUSTest::addresses.size());
+    const bool store = accesses % 2 == 0;
+    requireIdentity(event, Subsystem::IOP, Type::MemoryAccess,
+      (2 + index * 4 + (store ? 0 : 1)) * 8 + 1);
+    const auto physical = SSBUSTest::addresses[index];
+    REQUIRE(event.value0 == (physical | 0xa0000000));
+    REQUIRE(event.value1 == 0x1225);
+    REQUIRE(event.value2 == 0);
+    REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+      physical, 4, store ? Memory::AccessKind::DataStore : Memory::AccessKind::DataLoad,
+      Memory::Outcome::Completed, Memory::CacheRoute::Uncached,
+      true, static_cast<std::uint8_t>(store ? 0xf : 0)}));
+    ++accesses;
+  }
+  REQUIRE(accesses == SSBUSTest::addresses.size() * 2);
 }
 
 TEST_CASE("IOP trace retains timer assertion and same-cycle mode acknowledgement",

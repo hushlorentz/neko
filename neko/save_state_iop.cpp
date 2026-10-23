@@ -158,6 +158,21 @@ void NekoSaveStateCodec::writeIOPState(
     writer->writeFieldU32("ssbusConfiguration", bus.ssbusConfiguration.romDelay);
     writer->writeFieldU32("ssbusCommonDelay", bus.ssbusConfiguration.commonDelay);
     writer->writeFieldU32("ssbusPioDelay", bus.ssbusConfiguration.pioDelay);
+    writer->writeFieldU32("ssbusSpdAddress", bus.ssbusConfiguration.spdAddress);
+    writer->writeFieldU32("ssbusPioAddress", bus.ssbusConfiguration.pioAddress);
+    writer->writeFieldU32("ssbusSpdDelay", bus.ssbusConfiguration.spdDelay);
+    writer->writeFieldU32("ssbusDev1Delay", bus.ssbusConfiguration.dev1Delay);
+    writer->writeFieldU32("ssbusSpuDelay", bus.ssbusConfiguration.spuDelay);
+    writer->writeFieldU32("ssbusDev5Delay", bus.ssbusConfiguration.dev5Delay);
+    writer->writeFieldU32("ssbusDev1Address", bus.ssbusConfiguration.dev1Address);
+    writer->writeFieldU32("ssbusSpuAddress", bus.ssbusConfiguration.spuAddress);
+    writer->writeFieldU32("ssbusDev5Address", bus.ssbusConfiguration.dev5Address);
+    writer->writeFieldU32("ssbusSpu1Address", bus.ssbusConfiguration.spu1Address);
+    writer->writeFieldU32("ssbusDev9Address3", bus.ssbusConfiguration.dev9Address3);
+    writer->writeFieldU32("ssbusSpu1Delay", bus.ssbusConfiguration.spu1Delay);
+    writer->writeFieldU32("ssbusDev9Delay2", bus.ssbusConfiguration.dev9Delay2);
+    writer->writeFieldU32("ssbusDev9Delay3", bus.ssbusConfiguration.dev9Delay3);
+    writer->writeFieldU32("ssbusDev9Delay1", bus.ssbusConfiguration.dev9Delay1);
     writer->writeFieldByteVector("ram", bus.ram);
     writer->writeFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -252,6 +267,21 @@ void NekoSaveStateCodec::readIOP(
     bus.ssbusConfiguration.romDelay = reader->readFieldU32("ssbusConfiguration");
     bus.ssbusConfiguration.commonDelay = reader->readFieldU32("ssbusCommonDelay");
     bus.ssbusConfiguration.pioDelay = reader->readFieldU32("ssbusPioDelay");
+    bus.ssbusConfiguration.spdAddress = reader->readFieldU32("ssbusSpdAddress");
+    bus.ssbusConfiguration.pioAddress = reader->readFieldU32("ssbusPioAddress");
+    bus.ssbusConfiguration.spdDelay = reader->readFieldU32("ssbusSpdDelay");
+    bus.ssbusConfiguration.dev1Delay = reader->readFieldU32("ssbusDev1Delay");
+    bus.ssbusConfiguration.spuDelay = reader->readFieldU32("ssbusSpuDelay");
+    bus.ssbusConfiguration.dev5Delay = reader->readFieldU32("ssbusDev5Delay");
+    bus.ssbusConfiguration.dev1Address = reader->readFieldU32("ssbusDev1Address");
+    bus.ssbusConfiguration.spuAddress = reader->readFieldU32("ssbusSpuAddress");
+    bus.ssbusConfiguration.dev5Address = reader->readFieldU32("ssbusDev5Address");
+    bus.ssbusConfiguration.spu1Address = reader->readFieldU32("ssbusSpu1Address");
+    bus.ssbusConfiguration.dev9Address3 = reader->readFieldU32("ssbusDev9Address3");
+    bus.ssbusConfiguration.spu1Delay = reader->readFieldU32("ssbusSpu1Delay");
+    bus.ssbusConfiguration.dev9Delay2 = reader->readFieldU32("ssbusDev9Delay2");
+    bus.ssbusConfiguration.dev9Delay3 = reader->readFieldU32("ssbusDev9Delay3");
+    bus.ssbusConfiguration.dev9Delay1 = reader->readFieldU32("ssbusDev9Delay1");
     bus.ram = reader->readFieldByteVector("ram", IOPBus::RAM_SIZE);
     reader->readFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());

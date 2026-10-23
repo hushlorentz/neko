@@ -10,12 +10,11 @@
 #include "iop_timer_timing.hpp"
 #include "neko_system.hpp"
 #include "save_state_mutation.hpp"
+#include "ssbus_test_utils.hpp"
 
 namespace
 {
-  constexpr IOPAddress ssbusAddresses[] = {
-    0x1f801010, 0x1f801020, 0x1f80101c
-  };
+  constexpr auto ssbusAddresses = SSBUSTest::addresses;
 
   void loadInstruction(NekoSystem *system, IOPAddress address, IOPWord word)
   {
@@ -98,9 +97,10 @@ TEST_CASE("IOP SSBUS canonical state hashes every bit and resets to zero",
   }
   REQUIRE(system.eeStateHash() == eeHash);
   SaveStateMutation candidate(system.saveState());
-  candidate.writeScalar("system.iop.bus.ssbusConfiguration", 0xffffffff);
-  candidate.writeScalar("system.iop.bus.ssbusCommonDelay", 0xffffffff);
-  candidate.writeScalar("system.iop.bus.ssbusPioDelay", 0xffffffff);
+  for (const auto &reg : SSBUSTest::registers)
+  {
+    candidate.writeScalar(reg.field, 0xffffffff);
+  }
   candidate.refreshChecksum();
   system.loadState(candidate);
   for (IOPAddress address : ssbusAddresses)
@@ -144,10 +144,52 @@ TEST_CASE("IOP SSBUS PIO bits round trip in combined canonical state",
   }
 }
 
+TEST_CASE("IOP SSBUS grouped canonical fields retain independent full values",
+  "[iop][ssbus][save-state]")
+{
+  NekoSystem source;
+  NekoSystem destination;
+  const auto eeHash = source.eeStateHash();
+  for (const auto &reg : SSBUSTest::registers)
+  {
+    REQUIRE(source.iopBus().write32(reg.address, reg.address ^ 0xfedcba98).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(destination.iopBus().write32(reg.address, ~reg.address).status ==
+      IOPBusStatus::Completed);
+  }
+  const auto state = source.saveState();
+  const auto snapshot = inspectSaveState(state);
+  std::size_t previousOffset = 0;
+  for (const auto &reg : SSBUSTest::registers)
+  {
+    CAPTURE(reg.address);
+    const auto *field = snapshot.find(reg.field);
+    REQUIRE(field != nullptr);
+    REQUIRE(field->kind == SaveStateFieldKind::U32);
+    REQUIRE(field->size == 4);
+    REQUIRE(field->scalarValue == (reg.address ^ 0xfedcba98));
+    if (previousOffset != 0)
+    {
+      REQUIRE(field->containerOffset == previousOffset + 4);
+    }
+    previousOffset = field->containerOffset;
+  }
+  destination.loadState(state);
+  for (const auto &reg : SSBUSTest::registers)
+  {
+    REQUIRE(destination.iopBus().read32(reg.address).value ==
+      (reg.address ^ 0xfedcba98));
+  }
+  REQUIRE(destination.eeStateHash() == eeHash);
+  REQUIRE(destination.iopStateHash() == source.iopStateHash());
+  REQUIRE(destination.saveState() == state);
+}
+
 TEST_CASE("IOP SSBUS restore continues guest load and branch boundaries",
   "[iop][ssbus][save-state]")
 {
-  for (IOPAddress base : ssbusAddresses)
+  for (IOPAddress base :
+       {0x1f801010u, 0x1f801020u, 0x1f80101cu, 0x1f801004u, 0x1f801420u})
   {
     CAPTURE(base);
     NekoSystem original;
@@ -233,6 +275,11 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
   "[iop][ssbus][save-state]")
 {
   NekoSystem source;
+  for (IOPAddress address : ssbusAddresses)
+  {
+    REQUIRE(source.iopBus().write32(address, address ^ 0xfedcba98).status ==
+      IOPBusStatus::Completed);
+  }
   REQUIRE(source.iopBus().write32(0x1f801010, 0xfedcba98).status ==
     IOPBusStatus::Completed);
   REQUIRE(source.iopBus().write32(0x1f801020, 0x1225).status ==
@@ -241,6 +288,11 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
     IOPBusStatus::Completed);
   const auto candidate = source.saveState();
   NekoSystem destination;
+  for (IOPAddress address : ssbusAddresses)
+  {
+    REQUIRE(destination.iopBus().write32(address, address ^ 0x87654321).status ==
+      IOPBusStatus::Completed);
+  }
   REQUIRE(destination.iopBus().write32(0x1f801010, 0x12345678).status ==
     IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write32(0x1f801020, 0x87654321).status ==
@@ -260,6 +312,7 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
   for (const auto &mutation :
        std::vector<std::pair<std::string, std::uint64_t>>{
          {"system.iop.interruptController.control", 2},
+         {"container.version", 47},
          {"container.version", 46},
          {"container.version", 45}})
   {
@@ -282,8 +335,14 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
   auto truncated = candidate;
   truncated.pop_back();
   SaveStateMutation badChecksum(candidate);
-  badChecksum.writeScalar("system.iop.bus.ssbusPioDelay", 0xffffffff);
-  for (const auto &invalid : {truncated, badChecksum.bytes()})
+  badChecksum.writeScalar("system.iop.bus.ssbusDev9Delay1", 0xffffffff);
+  auto truncatedConfiguration = candidate;
+  const auto fields = inspectSaveState(candidate);
+  const auto *lastWord = fields.find("system.iop.bus.ssbusDev9Delay1");
+  REQUIRE(lastWord != nullptr);
+  truncatedConfiguration.resize(lastWord->containerOffset + 2);
+  for (const auto &invalid :
+       {truncated, badChecksum.bytes(), truncatedConfiguration})
   {
     REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
     REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
