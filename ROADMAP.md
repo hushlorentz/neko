@@ -1697,7 +1697,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add BIOS-free diagnostic regressions for attribution, ordering, limits,
       errors, and observational equivalence; complete independent review and
       the optimized repository check before dependency classification.
-- [ ] Run the complete optimized and AddressSanitizer checks to close the
+- [x] Run the complete optimized and AddressSanitizer checks to close the
       diagnostic block independently of reaching the BIOS handshake.
 
 ### BIOS Prerequisite Discovery and Bounded Repairs
