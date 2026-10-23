@@ -1741,7 +1741,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: Two-Word Configuration Repair
 
-- [ ] Implement the approved exact-word `0x1f801020` profile alongside preserved
+- [x] Implement the approved exact-word `0x1f801020` profile alongside preserved
       `0x1f801010` behavior under one named IOPBus state, including reset, hashing,
       versioned atomic persistence, authored red/green regressions, and individual review.
 - [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;

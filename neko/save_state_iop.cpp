@@ -155,7 +155,8 @@ void NekoSaveStateCodec::writeIOPState(
     writer->writeFieldBool("romPresent", bus.rom != nullptr);
     writer->writeFieldU64(
       "romFingerprint", bus.rom != nullptr ? bus.rom->fingerprint() : 0);
-    writer->writeFieldU32("ssbusConfiguration", bus.ssbusConfiguration);
+    writer->writeFieldU32("ssbusConfiguration", bus.ssbusConfiguration.romDelay);
+    writer->writeFieldU32("ssbusCommonDelay", bus.ssbusConfiguration.commonDelay);
     writer->writeFieldByteVector("ram", bus.ram);
     writer->writeFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -247,7 +248,8 @@ void NekoSaveStateCodec::readIOP(
     reader->requireField(
       configuration->rom.present || configuration->cacheRomSynchronized,
       "IOP cache has a pending ROM replacement without an external image");
-    bus.ssbusConfiguration = reader->readFieldU32("ssbusConfiguration");
+    bus.ssbusConfiguration.romDelay = reader->readFieldU32("ssbusConfiguration");
+    bus.ssbusConfiguration.commonDelay = reader->readFieldU32("ssbusCommonDelay");
     bus.ram = reader->readFieldByteVector("ram", IOPBus::RAM_SIZE);
     reader->readFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -588,6 +590,9 @@ void NekoSaveStateCodec::readIOPTimers(
 void NekoSaveStateCodec::commitIOP(
   NekoSystem *destination, NekoSystem *source) noexcept
 {
+  static_assert(
+    std::is_nothrow_copy_assignable<IOPBus::SSBUSConfigurationState>::value,
+    "Transactional IOP SSBUS commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPCore>::value,
     "Transactional IOP core commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPTimers>::value,

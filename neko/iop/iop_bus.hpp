@@ -59,6 +59,7 @@ class IOPBus final
     static constexpr IOPAddress SCRATCHPAD_BASE = 0x1f800000;
     static constexpr IOPAddress ROM_BASE = 0x1fc00000;
     static constexpr IOPAddress SSBUS_CONFIG = 0x1f801010;
+    static constexpr IOPAddress SSBUS_COMMON_DELAY = 0x1f801020;
     static constexpr IOPAddress INTC_STAT = 0x1f801070;
     static constexpr IOPAddress INTC_MASK = 0x1f801074;
     static constexpr IOPAddress INTC_CTRL = 0x1f801078;
@@ -133,11 +134,25 @@ class IOPBus final
       SIFDoorbell
     };
 
+    enum class SSBUSRegister : std::uint8_t
+    {
+      None,
+      RomDelay,
+      CommonDelay
+    };
+
+    struct SSBUSConfigurationState
+    {
+      IOPWord romDelay = 0;
+      IOPWord commonDelay = 0;
+    };
+
     struct Location
     {
       IOPBusRegion region = IOPBusRegion::Unmapped;
       std::size_t offset = 0;
       Device device = Device::None;
+      SSBUSRegister ssbusRegister = SSBUSRegister::None;
       std::size_t deviceIndex = 0;
     };
 
@@ -155,6 +170,13 @@ class IOPBus final
       const Location &location,
       std::size_t width);
     IOPBusWriteResult writeDeviceRegister(
+      const Location &location,
+      std::size_t width,
+      IOPWord value);
+    IOPBusReadResult readSSBUSRegister(
+      const Location &location,
+      std::size_t width) const;
+    IOPBusWriteResult writeSSBUSRegister(
       const Location &location,
       std::size_t width,
       IOPWord value);
@@ -181,8 +203,8 @@ class IOPBus final
 
     std::vector<std::uint8_t> ram;
     std::array<std::uint8_t, SCRATCHPAD_SIZE> scratchpad = {};
-    // Provisional zero-reset retained word; no bus-timing effects.
-    IOPWord ssbusConfiguration = 0;
+    // Provisional zero-reset retained words; no bus-timing effects.
+    SSBUSConfigurationState ssbusConfiguration;
     std::shared_ptr<const BootROMImage> rom;
     IOPInterruptController *interruptController = nullptr;
     IOPTimers *timers = nullptr;

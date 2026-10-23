@@ -68,78 +68,111 @@ TEST_CASE("IOP SSBUS canonical state hashes every bit and resets to zero",
   NekoSystem system;
   const auto initial = system.iopStateHash();
   const auto eeHash = system.eeStateHash();
-  for (unsigned bit = 0; bit < 32; ++bit)
+  for (IOPAddress address : {0x1f801010u, 0x1f801020u})
   {
-    CAPTURE(bit);
-    const auto value = IOPWord(1) << bit;
-    REQUIRE(system.iopBus().write32(0x1f801010, value).status ==
+    CAPTURE(address);
+    const IOPAddress peer = address == 0x1f801010 ? 0x1f801020 : 0x1f801010;
+    for (unsigned bit = 0; bit < 32; ++bit)
+    {
+      CAPTURE(bit);
+      const auto value = IOPWord(1) << bit;
+      REQUIRE(system.iopBus().write32(address, value).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().read32(address).value == value);
+      REQUIRE(system.iopBus().read32(peer).value == 0);
+      REQUIRE(system.iopStateHash() != initial);
+    }
+    REQUIRE(system.eeStateHash() == eeHash);
+    REQUIRE(system.iopBus().write32(address, 0).status ==
       IOPBusStatus::Completed);
-    REQUIRE(system.iopBus().read32(0x1f801010).value == value);
-    REQUIRE(system.iopStateHash() != initial);
+    REQUIRE(system.iopStateHash() == initial);
   }
   REQUIRE(system.eeStateHash() == eeHash);
   SaveStateMutation candidate(system.saveState());
   candidate.writeScalar("system.iop.bus.ssbusConfiguration", 0xffffffff);
+  candidate.writeScalar("system.iop.bus.ssbusCommonDelay", 0xffffffff);
   candidate.refreshChecksum();
   system.loadState(candidate);
   REQUIRE(system.iopBus().read32(0x1f801010).value == 0xffffffff);
+  REQUIRE(system.iopBus().read32(0x1f801020).value == 0xffffffff);
   REQUIRE(system.saveState() == candidate.bytes());
   system.reset();
   REQUIRE(system.iopBus().read32(0x1f801010).value == 0);
+  REQUIRE(system.iopBus().read32(0x1f801020).value == 0);
   REQUIRE(system.iopStateHash() == initial);
 }
 
-TEST_CASE("IOP SSBUS restore continues a guest load against the retained word",
+TEST_CASE("IOP SSBUS restore continues guest load and branch boundaries",
   "[iop][ssbus][save-state]")
 {
-  NekoSystem original;
-  const IOPWord program[] = {
-    0x3c01bf80, // lui r1, 0xbf80
-    0x34211010, // ori r1, r1, 0x1010
-    0x3c02ffff, // lui r2, 0xffff
-    0x3442ffff, // ori r2, r2, 0xffff
-    0xac220000, // sw r2, 0(r1)
-    0x8c230000, // lw r3, 0(r1)
-    0x24640001, // addiu r4, r3, 1: load-delay slot
-    0xac030100, // sw r3, 0x100(r0)
-    0
-  };
-  IOPAddress address = 0;
-  for (const auto instruction : program)
+  for (IOPAddress base : {0x1f801010u, 0x1f801020u})
   {
-    loadInstruction(&original, address, instruction);
-    address += 4;
-  }
-  original.iopCore().startExecution(0x80000000);
-  for (unsigned step = 0; step < 6; ++step)
-  {
-    original.iopCore().stepInstruction();
-  }
-  REQUIRE(original.iopCore().exception().kind == IOPException::None);
-  REQUIRE(original.iopCore().delayedResultContinuation().source ==
-    IOPDelayedResultSource::Load);
-  REQUIRE(original.iopCore().generalRegister(3) == 0);
-  const auto state = original.saveState();
-  REQUIRE_NOTHROW(inspectSaveState(state));
-  NekoSystem restored;
-  REQUIRE(restored.iopBus().write32(0x1f801010, 0x13579bdf).status ==
-    IOPBusStatus::Completed);
-  restored.loadState(state);
-  REQUIRE(restored.iopBus().read32(0x1f801010).value == 0xffffffff);
-  REQUIRE(restored.iopStateHash() == original.iopStateHash());
-  for (unsigned step = 0; step < 3; ++step)
-  {
-    original.iopCore().stepInstruction();
-    restored.iopCore().stepInstruction();
+    CAPTURE(base);
+    const IOPAddress peer = base == 0x1f801010 ? 0x1f801020 : 0x1f801010;
+    NekoSystem original;
+    REQUIRE(original.iopBus().write32(peer, 0x1225).status ==
+      IOPBusStatus::Completed);
+    const IOPWord program[] = {
+      0x3c01bf80, // lui r1, 0xbf80
+      0x34210000 | (base & 0xffff), // ori r1, r1, register offset
+      0x3c02ffff, // lui r2, 0xffff
+      0x3442ffff, // ori r2, r2, 0xffff
+      0xac220000, // sw r2, 0(r1)
+      0x8c230000, // lw r3, 0(r1)
+      0x10600002, // beq r3, r0, +2: sees old r3 in load-delay slot
+      0x24640001, // addiu r4, r3, 1: branch delay sees completed load
+      0xffffffff, // skipped unsupported instruction
+      0xac030100, // sw r3, 0x100(r0)
+      0
+    };
+    IOPAddress address = 0;
+    for (const auto instruction : program)
+    {
+      loadInstruction(&original, address, instruction);
+      address += 4;
+    }
+    original.iopCore().startExecution(0x80000000);
+    for (unsigned step = 0; step < 6; ++step)
+    {
+      original.iopCore().stepInstruction();
+    }
+    REQUIRE(original.iopCore().exception().kind == IOPException::None);
+    REQUIRE(original.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::Load);
+    REQUIRE(original.iopCore().generalRegister(3) == 0);
+    const auto state = original.saveState();
+    REQUIRE_NOTHROW(inspectSaveState(state));
+    NekoSystem restored;
+    REQUIRE(restored.iopBus().write32(base, 0x13579bdf).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(restored.iopBus().write32(peer, 0x87654321).status ==
+      IOPBusStatus::Completed);
+    restored.loadState(state);
+    REQUIRE(restored.iopBus().read32(base).value == 0xffffffff);
+    REQUIRE(restored.iopBus().read32(peer).value == 0x1225);
     REQUIRE(restored.iopStateHash() == original.iopStateHash());
+    for (unsigned step = 0; step < 4; ++step)
+    {
+      original.iopCore().stepInstruction();
+      restored.iopCore().stepInstruction();
+      REQUIRE(restored.iopStateHash() == original.iopStateHash());
+      if (step == 0)
+      {
+        REQUIRE(restored.iopCore().branchContinuation().active);
+        const auto branchState = restored.saveState();
+        restored.loadState(branchState);
+        REQUIRE(restored.saveState() == branchState);
+      }
+    }
+    REQUIRE(restored.iopCore().exception().kind == IOPException::None);
+    REQUIRE(restored.iopCore().generalRegister(3) == 0xffffffff);
+    REQUIRE(restored.iopCore().generalRegister(4) == 0);
+    REQUIRE(restored.iopBus().read32(0x100).value == 0xffffffff);
+    REQUIRE(restored.saveState() == original.saveState());
+    REQUIRE(restored.iopBus().write32(base, 7).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(original.iopBus().read32(base).value == 0xffffffff);
   }
-  REQUIRE(restored.iopCore().generalRegister(3) == 0xffffffff);
-  REQUIRE(restored.iopCore().generalRegister(4) == 1);
-  REQUIRE(restored.iopBus().read32(0x100).value == 0xffffffff);
-  REQUIRE(restored.saveState() == original.saveState());
-  REQUIRE(restored.iopBus().write32(0x1f801010, 7).status ==
-    IOPBusStatus::Completed);
-  REQUIRE(original.iopBus().read32(0x1f801010).value == 0xffffffff);
 }
 
 TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
@@ -148,17 +181,28 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
   NekoSystem source;
   REQUIRE(source.iopBus().write32(0x1f801010, 0xfedcba98).status ==
     IOPBusStatus::Completed);
+  REQUIRE(source.iopBus().write32(0x1f801020, 0x1225).status ==
+    IOPBusStatus::Completed);
   const auto candidate = source.saveState();
   NekoSystem destination;
   REQUIRE(destination.iopBus().write32(0x1f801010, 0x12345678).status ==
     IOPBusStatus::Completed);
+  REQUIRE(destination.iopBus().write32(0x1f801020, 0x87654321).status ==
+    IOPBusStatus::Completed);
   loadInstruction(&destination, 0x100, 0xdeadbeef);
+  destination.iopCore().startExecution(0xa0000000);
+  destination.startTrace();
+  destination.runMasterCycles(8);
+  destination.iopCore().haltExecution();
+  REQUIRE_FALSE(destination.trace().empty());
+  const auto traceHash = destination.traceHash();
+  const auto traceSize = destination.trace().size();
   const auto before = destination.saveState();
   const auto hash = destination.iopStateHash();
   for (const auto &mutation :
        std::vector<std::pair<std::string, std::uint64_t>>{
          {"system.iop.interruptController.control", 2},
-         {"container.version", 44}})
+         {"container.version", 45}})
   {
     CAPTURE(mutation.first);
     SaveStateMutation invalid(candidate);
@@ -167,9 +211,36 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
     REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
     REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
     REQUIRE(destination.iopBus().read32(0x1f801010).value == 0x12345678);
+    REQUIRE(destination.iopBus().read32(0x1f801020).value == 0x87654321);
     REQUIRE(destination.iopStateHash() == hash);
     REQUIRE(destination.saveState() == before);
+    REQUIRE(destination.traceHash() == traceHash);
+    REQUIRE(destination.trace().size() == traceSize);
+    REQUIRE(destination.iopCore().hasAttachedBus());
   }
+  auto truncated = candidate;
+  truncated.pop_back();
+  SaveStateMutation badChecksum(candidate);
+  badChecksum.writeScalar("system.iop.bus.ssbusCommonDelay", 0xffffffff);
+  for (const auto &invalid : {truncated, badChecksum.bytes()})
+  {
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.iopStateHash() == hash);
+    REQUIRE(destination.saveState() == before);
+    REQUIRE(destination.traceHash() == traceHash);
+    REQUIRE(destination.trace().size() == traceSize);
+  }
+  REQUIRE(source.iopBus().installRom(rom(7)));
+  const auto incompatibleROM = source.saveState();
+  REQUIRE_NOTHROW(inspectSaveState(incompatibleROM));
+  REQUIRE_THROWS_AS(destination.loadState(incompatibleROM), std::invalid_argument);
+  REQUIRE(destination.iopBus().read32(0x1f801010).value == 0x12345678);
+  REQUIRE(destination.iopBus().read32(0x1f801020).value == 0x87654321);
+  REQUIRE(destination.iopStateHash() == hash);
+  REQUIRE(destination.saveState() == before);
+  REQUIRE(destination.traceHash() == traceHash);
+  REQUIRE(destination.trace().size() == traceSize);
 }
 
 TEST_CASE("IOP persistence continues branch and delayed load without copied pointers")

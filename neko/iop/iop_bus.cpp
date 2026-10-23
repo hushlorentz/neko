@@ -37,6 +37,7 @@ constexpr IOPAddress IOPBus::RAM_BASE;
 constexpr IOPAddress IOPBus::SCRATCHPAD_BASE;
 constexpr IOPAddress IOPBus::ROM_BASE;
 constexpr IOPAddress IOPBus::SSBUS_CONFIG;
+constexpr IOPAddress IOPBus::SSBUS_COMMON_DELAY;
 constexpr IOPAddress IOPBus::INTC_STAT;
 constexpr IOPAddress IOPBus::INTC_MASK;
 constexpr IOPAddress IOPBus::INTC_CTRL;
@@ -51,7 +52,7 @@ void IOPBus::reset()
 {
   std::fill(ram.begin(), ram.end(), static_cast<std::uint8_t>(0));
   scratchpad.fill(0);
-  ssbusConfiguration = 0;
+  ssbusConfiguration = {};
 }
 
 void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
@@ -181,7 +182,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       last < static_cast<std::uint64_t>(SSBUS_CONFIG) + sizeof(IOPWord))
   {
     return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - SSBUS_CONFIG),
-      Device::SSBUSConfiguration};
+      Device::SSBUSConfiguration, SSBUSRegister::RomDelay};
+  }
+  if (first >= SSBUS_COMMON_DELAY &&
+      last < static_cast<std::uint64_t>(SSBUS_COMMON_DELAY) + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio,
+      static_cast<std::size_t>(first - SSBUS_COMMON_DELAY),
+      Device::SSBUSConfiguration, SSBUSRegister::CommonDelay};
   }
 
   for (std::size_t index = 0; index < timerBases.size(); ++index)
@@ -190,7 +198,8 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < static_cast<std::uint64_t>(timerBases[index]) + 12)
     {
       return {IOPBusRegion::Mmio,
-        static_cast<std::size_t>(first - timerBases[index]), Device::Timer, index};
+        static_cast<std::size_t>(first - timerBases[index]), Device::Timer,
+        SSBUSRegister::None, index};
     }
   }
 
@@ -201,7 +210,7 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     {
       return {IOPBusRegion::Mmio,
         static_cast<std::size_t>(first - dmaBankBases[index]),
-        Device::DMAController, index};
+        Device::DMAController, SSBUSRegister::None, index};
     }
   }
   if (first >= sif0DMABase &&
@@ -395,9 +404,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
   switch (location.device)
   {
     case Device::SSBUSConfiguration:
-      return width == sizeof(IOPWord) && location.offset == 0
-        ? IOPBusReadResult{IOPBusStatus::Completed, ssbusConfiguration}
-        : IOPBusReadResult{};
+      return readSSBUSRegister(location, width);
     case Device::InterruptController:
       return width == sizeof(IOPWord)
         ? readInterruptRegister(location.offset) : IOPBusReadResult{};
@@ -425,12 +432,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
   switch (location.device)
   {
     case Device::SSBUSConfiguration:
-      if (width == sizeof(IOPWord) && location.offset == 0)
-      {
-        ssbusConfiguration = value;
-        return {IOPBusStatus::Completed};
-      }
-      return {};
+      return writeSSBUSRegister(location, width, value);
     case Device::InterruptController:
       return width == sizeof(IOPWord)
         ? writeInterruptRegister(location.offset, value) : IOPBusWriteResult{};
@@ -448,6 +450,49 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return {};
   }
   return {};
+}
+
+IOPBusReadResult IOPBus::readSSBUSRegister(
+  const Location &location,
+  std::size_t width) const
+{
+  if (width != sizeof(IOPWord) || location.offset != 0)
+  {
+    return {};
+  }
+  switch (location.ssbusRegister)
+  {
+    case SSBUSRegister::RomDelay:
+      return {IOPBusStatus::Completed, ssbusConfiguration.romDelay};
+    case SSBUSRegister::CommonDelay:
+      return {IOPBusStatus::Completed, ssbusConfiguration.commonDelay};
+    case SSBUSRegister::None:
+      break;
+  }
+  throw std::logic_error("IOP SSBUS read requires a decoded register.");
+}
+
+IOPBusWriteResult IOPBus::writeSSBUSRegister(
+  const Location &location,
+  std::size_t width,
+  IOPWord value)
+{
+  if (width != sizeof(IOPWord) || location.offset != 0)
+  {
+    return {};
+  }
+  switch (location.ssbusRegister)
+  {
+    case SSBUSRegister::RomDelay:
+      ssbusConfiguration.romDelay = value;
+      return {IOPBusStatus::Completed};
+    case SSBUSRegister::CommonDelay:
+      ssbusConfiguration.commonDelay = value;
+      return {IOPBusStatus::Completed};
+    case SSBUSRegister::None:
+      break;
+  }
+  throw std::logic_error("IOP SSBUS write requires a decoded register.");
 }
 
 IOPBusReadResult IOPBus::readDMARegister(const Location &location)
