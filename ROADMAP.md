@@ -1773,7 +1773,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement the approved exact-word `0x1f80101c` profile under existing named
       `IOPBus` state, preserving both prior words; include schema-47 atomic
       persistence/hash, authored red/green coverage, focused integration, and individual review.
-- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+- [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next responsible stop or wait without extending hardware or
       claiming a handshake from configuration progress alone.
 - [ ] Reconcile provisional policies and the dependency record, complete independent
