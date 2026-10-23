@@ -1752,9 +1752,21 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: Follow-Up Scope
 
-- [ ] Resolve the scope decision for the observed `0x1f80101c` initialization
+- [x] Resolve the scope decision for the observed `0x1f80101c` initialization
       store; obtain approval for bounded evidence/repair work or an explicit
       milestone-scope change before extending hardware.
+
+### IOP Platform Initialization: `0x1f80101c` Evidence
+
+- [x] Identify the observed address and compare manual evidence, approved local
+      references, and public register documentation; distinguish PS2 applicability,
+      supported behavior, disagreements, and gaps.
+- [ ] Propose the smallest defensible access/reset/readback/timing contract and
+      owner boundary; assess persistence, trace, hot-path, and BIOS-free validation
+      effects without implementing hardware.
+- [ ] Propose a finite prerequisite repair block and obtain explicit
+      implementation approval, or revise milestone scope; leave unsupported
+      accesses unchanged until that decision.
 
 ### Real BIOS Handshake and Boundary Conformance
 
