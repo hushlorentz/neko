@@ -1764,9 +1764,20 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Propose the smallest defensible access/reset/readback/timing contract and
       owner boundary; assess persistence, trace, hot-path, and BIOS-free validation
       effects without implementing hardware.
-- [ ] Propose a finite prerequisite repair block and obtain explicit
+- [x] Propose a finite prerequisite repair block and obtain explicit
       implementation approval, or revise milestone scope; leave unsupported
       accesses unchanged until that decision.
+
+### IOP Platform Initialization: PIO-Delay Configuration Repair
+
+- [ ] Implement the approved exact-word `0x1f80101c` profile under existing named
+      `IOPBus` state, preserving both prior words; include schema-47 atomic
+      persistence/hash, authored red/green coverage, focused integration, and individual review.
+- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+      classify the next responsible stop or wait without extending hardware or
+      claiming a handshake from configuration progress alone.
+- [ ] Reconcile provisional policies and the dependency record, complete independent
+      block review, and run complete optimized and AddressSanitizer checks.
 
 ### Real BIOS Handshake and Boundary Conformance
 
