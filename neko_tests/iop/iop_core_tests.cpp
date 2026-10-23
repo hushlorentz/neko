@@ -2643,7 +2643,7 @@ TEST_CASE("IOP core fetches only through virtual translation and the bus")
 TEST_CASE("IOP SSBUS guest executes full-word access with ordinary load delay",
   "[iop][ssbus]")
 {
-  for (IOPAddress base : {0x1f801010u, 0x1f801020u})
+  for (IOPAddress base : {0x1f801010u, 0x1f801020u, 0x1f80101cu})
   {
     CAPTURE(base);
     IOPBus bus;
@@ -2690,6 +2690,15 @@ TEST_CASE("IOP SSBUS guest executes full-word access with ordinary load delay",
       REQUIRE(read.physicalAddress == base);
       REQUIRE(read.value == 0xffffffff);
     }
+    for (IOPAddress alias : {base, base | 0x80000000u, base | 0xa0000000u})
+    {
+      const IOPWord value = alias ^ 0x12345678;
+      const auto write = core.writeData32(alias, value);
+      REQUIRE(write.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(write.physicalAddress == base);
+      REQUIRE(bus.read32(base).value == value);
+      REQUIRE(core.readData32(base | 0x80000000u).value == value);
+    }
     REQUIRE(bus.write32(base, 0x13579bdf).status == IOPBusStatus::Completed);
     REQUIRE(core.readData32(base | 0x80000000u).value == 0x13579bdf);
     const auto uncached = core.readData32(base | 0xa0000000u);
@@ -2708,10 +2717,10 @@ TEST_CASE("IOP SSBUS guest executes full-word access with ordinary load delay",
 TEST_CASE("IOP SSBUS narrow guest accesses retain existing fault policy",
   "[iop][ssbus]")
 {
-  for (IOPAddress base : {0x1f801010u, 0x1f801020u})
+  for (IOPAddress base : {0x1f801010u, 0x1f801020u, 0x1f80101cu})
   {
     CAPTURE(base);
-    for (std::uint8_t opcode : {0x20, 0x21, 0x28, 0x29})
+    for (std::uint8_t opcode : {0x20, 0x21, 0x28, 0x29, 0x2a, 0x2e})
     {
       CAPTURE(opcode);
       IOPBus bus;
@@ -2720,7 +2729,8 @@ TEST_CASE("IOP SSBUS narrow guest accesses retain existing fault policy",
       REQUIRE(bus.write32(base, 0x12345678).status == IOPBusStatus::Completed);
       loadInstruction(&bus, 0, 0x3c01bf80);
       loadInstruction(&bus, 4, 0x34210000 | (base & 0xffff));
-      loadInstruction(&bus, 8, immediateInstruction(opcode, 1, 2, 0));
+      const std::uint16_t offset = opcode == 0x2a || opcode == 0x2e ? 1 : 0;
+      loadInstruction(&bus, 8, immediateInstruction(opcode, 1, 2, offset));
       core.startExecution(0x80000000);
       for (unsigned step = 0; step < 3; ++step)
       {

@@ -1770,7 +1770,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: PIO-Delay Configuration Repair
 
-- [ ] Implement the approved exact-word `0x1f80101c` profile under existing named
+- [x] Implement the approved exact-word `0x1f80101c` profile under existing named
       `IOPBus` state, preserving both prior words; include schema-47 atomic
       persistence/hash, authored red/green coverage, focused integration, and individual review.
 - [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;

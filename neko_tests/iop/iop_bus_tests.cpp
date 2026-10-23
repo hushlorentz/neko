@@ -17,6 +17,10 @@ static_assert(
 
 namespace
 {
+  constexpr std::array<IOPAddress, 3> ssbusAddresses = {{
+    0x1f801010, 0x1f801020, 0x1f80101c
+  }};
+
   const std::array<IOPAddress, 6> timerBases = {{
     0x1f801100, 0x1f801110, 0x1f801120,
     0x1f801480, 0x1f801490, 0x1f8014a0
@@ -96,16 +100,21 @@ TEST_CASE("IOP bus RAM is little-endian and mirrored four times", "[iop][bus]")
   REQUIRE(bus.read8(0x7fffff).value == 0xab);
 }
 
-TEST_CASE("IOP SSBUS configuration retains two independent full words",
+TEST_CASE("IOP SSBUS configuration retains three independent full words",
   "[iop][bus][ssbus]")
 {
-  for (IOPAddress address : {0x1f801010u, 0x1f801020u})
+  for (IOPAddress address : ssbusAddresses)
   {
     CAPTURE(address);
     IOPBus bus;
     IOPBus independent;
-    const IOPAddress peer = address == 0x1f801010 ? 0x1f801020 : 0x1f801010;
-    REQUIRE(bus.write32(peer, 0x0016244f).status == IOPBusStatus::Completed);
+    for (IOPAddress peer : ssbusAddresses)
+    {
+      if (peer != address)
+      {
+        REQUIRE(bus.write32(peer, peer).status == IOPBusStatus::Completed);
+      }
+    }
     REQUIRE(bus.read32(address).status == IOPBusStatus::Completed);
     REQUIRE(bus.read32(address).value == 0);
     for (IOPWord value : {0xffffffffu, 0x12345678u, 0x80000000u, 1u, 0u})
@@ -114,7 +123,13 @@ TEST_CASE("IOP SSBUS configuration retains two independent full words",
       REQUIRE(bus.write32(address, value).status == IOPBusStatus::Completed);
       REQUIRE(bus.read32(address).value == value);
       REQUIRE(independent.read32(address).value == 0);
-      REQUIRE(bus.read32(peer).value == 0x0016244f);
+      for (IOPAddress peer : ssbusAddresses)
+      {
+        if (peer != address)
+        {
+          REQUIRE(bus.read32(peer).value == peer);
+        }
+      }
     }
     REQUIRE(bus.writeMasked32(address, 0xfedcba98, 0xf).status ==
       IOPBusStatus::Completed);
@@ -122,27 +137,38 @@ TEST_CASE("IOP SSBUS configuration retains two independent full words",
     bus.reset();
     REQUIRE(bus.read32(address).status == IOPBusStatus::Completed);
     REQUIRE(bus.read32(address).value == 0);
-    REQUIRE(bus.read32(peer).value == 0);
-    REQUIRE(bus.installRom(makeRom()));
+    for (IOPAddress word : ssbusAddresses)
+    {
+      REQUIRE(bus.read32(word).value == 0);
+    }
     REQUIRE(bus.write32(address, 0x1225).status == IOPBusStatus::Completed);
+    REQUIRE(bus.installRom(makeRom()));
+    REQUIRE(bus.read32(address).value == 0x1225);
     bus.reset();
     REQUIRE(bus.romIdentity() != nullptr);
-    REQUIRE(bus.read32(address).value == 0);
-    REQUIRE(bus.read32(peer).value == 0);
+    for (IOPAddress word : ssbusAddresses)
+    {
+      REQUIRE(bus.read32(word).value == 0);
+    }
   }
 }
 
 TEST_CASE("IOP SSBUS configuration rejects unsupported accesses atomically",
   "[iop][bus][ssbus]")
 {
-  for (IOPAddress base : {0x1f801010u, 0x1f801020u})
+  for (IOPAddress base : ssbusAddresses)
   {
     CAPTURE(base);
     IOPBus bus;
-    const IOPAddress peer = base == 0x1f801010 ? 0x1f801020 : 0x1f801010;
     constexpr IOPWord retained = 0x89abcdef;
     REQUIRE(bus.write32(base, retained).status == IOPBusStatus::Completed);
-    REQUIRE(bus.write32(peer, 0x76543210).status == IOPBusStatus::Completed);
+    for (IOPAddress peer : ssbusAddresses)
+    {
+      if (peer != base)
+      {
+        REQUIRE(bus.write32(peer, peer).status == IOPBusStatus::Completed);
+      }
+    }
     REQUIRE(bus.regionForRange(base, 4) == IOPBusRegion::Mmio);
     REQUIRE(bus.regionForRange(base, 0) == IOPBusRegion::Mmio);
     REQUIRE(bus.regionForRange(base + 3, 1) == IOPBusRegion::Mmio);
@@ -176,24 +202,37 @@ TEST_CASE("IOP SSBUS configuration rejects unsupported accesses atomically",
     for (std::uint8_t mask : {std::uint8_t(0), std::uint8_t(0x10), std::uint8_t(0xff)})
     {
       REQUIRE_THROWS_AS(bus.writeMasked32(base, 0, mask), std::invalid_argument);
+      REQUIRE_THROWS_AS(bus.writeMasked32(base + 1, 0, mask),
+        std::invalid_argument);
     }
-    for (IOPAddress address : {base - 4, base + 4, 0x1f801000u})
+    REQUIRE(bus.writeMasked32(base + 1, 0, 1).status == IOPBusStatus::Misaligned);
+    for (IOPAddress address :
+         {0x1f801000u, 0x1f80100cu, 0x1f801014u, 0x1f801018u,
+          0x1f801024u, 0x1f802000u})
     {
       CAPTURE(address);
       REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
       REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
     }
     REQUIRE(bus.regionForRange(0x1f801010, 0x14) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.regionForRange(0x1f80101c, 8) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.regionForRange(0x1f80101f, 2) == IOPBusRegion::Unmapped);
     REQUIRE(bus.regionForRange(0x1f801014, 0) == IOPBusRegion::Unmapped);
     REQUIRE(bus.read32(base).value == retained);
-    REQUIRE(bus.read32(peer).value == 0x76543210);
+    for (IOPAddress peer : ssbusAddresses)
+    {
+      if (peer != base)
+      {
+        REQUIRE(bus.read32(peer).value == peer);
+      }
+    }
   }
 }
 
 TEST_CASE("IOP SSBUS configuration is excluded from DMA and host byte access",
   "[iop][bus][ssbus]")
 {
-  for (IOPAddress address : {0x1f801010u, 0x1f801020u})
+  for (IOPAddress address : ssbusAddresses)
   {
     CAPTURE(address);
     IOPBus bus;

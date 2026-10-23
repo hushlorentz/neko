@@ -38,6 +38,7 @@ constexpr IOPAddress IOPBus::SCRATCHPAD_BASE;
 constexpr IOPAddress IOPBus::ROM_BASE;
 constexpr IOPAddress IOPBus::SSBUS_CONFIG;
 constexpr IOPAddress IOPBus::SSBUS_COMMON_DELAY;
+constexpr IOPAddress IOPBus::SSBUS_PIO_DELAY;
 constexpr IOPAddress IOPBus::INTC_STAT;
 constexpr IOPAddress IOPBus::INTC_MASK;
 constexpr IOPAddress IOPBus::INTC_CTRL;
@@ -190,6 +191,13 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     return {IOPBusRegion::Mmio,
       static_cast<std::size_t>(first - SSBUS_COMMON_DELAY),
       Device::SSBUSConfiguration, SSBUSRegister::CommonDelay};
+  }
+  if (first >= SSBUS_PIO_DELAY &&
+      last < static_cast<std::uint64_t>(SSBUS_PIO_DELAY) + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio,
+      static_cast<std::size_t>(first - SSBUS_PIO_DELAY),
+      Device::SSBUSConfiguration, SSBUSRegister::PioDelay};
   }
 
   for (std::size_t index = 0; index < timerBases.size(); ++index)
@@ -466,6 +474,8 @@ IOPBusReadResult IOPBus::readSSBUSRegister(
       return {IOPBusStatus::Completed, ssbusConfiguration.romDelay};
     case SSBUSRegister::CommonDelay:
       return {IOPBusStatus::Completed, ssbusConfiguration.commonDelay};
+    case SSBUSRegister::PioDelay:
+      return {IOPBusStatus::Completed, ssbusConfiguration.pioDelay};
     case SSBUSRegister::None:
       break;
   }
@@ -488,6 +498,9 @@ IOPBusWriteResult IOPBus::writeSSBUSRegister(
       return {IOPBusStatus::Completed};
     case SSBUSRegister::CommonDelay:
       ssbusConfiguration.commonDelay = value;
+      return {IOPBusStatus::Completed};
+    case SSBUSRegister::PioDelay:
+      ssbusConfiguration.pioDelay = value;
       return {IOPBusStatus::Completed};
     case SSBUSRegister::None:
       break;

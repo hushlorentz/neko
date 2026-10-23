@@ -129,25 +129,30 @@ TEST_CASE("IOP system publishes fetch issue and retirement only on CPU clocks",
   REQUIRE(events[2].value3 == 1);
 }
 
-TEST_CASE("IOP two-word SSBUS initialization is trace-observational",
+TEST_CASE("IOP three-word SSBUS initialization is trace-observational",
   "[iop][ssbus][trace]")
 {
   NekoSystem traced;
   NekoSystem untraced;
   const auto sifHash = traced.sifStateHash();
-  const std::array<IOPWord, 12> program{{
+  const std::array<IOPWord, 17> program{{
     0x3c01bf80, // lui r1, 0xbf80
     0x3c020016, // lui r2, 0x16
     0x3442244f, // ori r2, r2, 0x244f
     0xac221010, // sw r2, 0x1010(r1)
     0x34031225, // ori r3, r0, 0x1225
     0xac231020, // sw r3, 0x1020(r1)
+    0x340800ff, // ori r8, r0, 0xff
+    0xac28101c, // sw r8, 0x101c(r1)
     0x8c241010, // lw r4, 0x1010(r1)
     0x24850001, // addiu r5, r4, 1: old r4 in load-delay slot
     0x8c261020, // lw r6, 0x1020(r1)
     0x24c70001, // addiu r7, r6, 1: old r6 in load-delay slot
+    0x8c29101c, // lw r9, 0x101c(r1)
+    0x252a0001, // addiu r10, r9, 1: old r9 in load-delay slot
     0xac040100, // sw r4, 0x100(r0)
-    0xac060104  // sw r6, 0x104(r0)
+    0xac060104, // sw r6, 0x104(r0)
+    0xac090108  // sw r9, 0x108(r0)
   }};
   for (NekoSystem *system : {&traced, &untraced})
   {
@@ -162,13 +167,18 @@ TEST_CASE("IOP two-word SSBUS initialization is trace-observational",
   untraced.runMasterCycles(program.size() * 8);
   REQUIRE(traced.iopCore().executionState() == IOPExecutionState::Running);
   REQUIRE(traced.iopCore().exception().kind == IOPException::None);
-  REQUIRE(traced.iopCore().programCounter() == 0xa0000030);
+  REQUIRE(traced.iopCore().programCounter() == 0xa0000044);
+  REQUIRE(traced.iopCore().retiredInstructions() == program.size());
   REQUIRE(traced.iopCore().generalRegister(5) == 1);
   REQUIRE(traced.iopCore().generalRegister(7) == 1);
+  REQUIRE(traced.iopCore().generalRegister(10) == 1);
   REQUIRE(traced.iopBus().read32(0x100).value == 0x0016244f);
   REQUIRE(traced.iopBus().read32(0x104).value == 0x00001225);
+  REQUIRE(traced.iopBus().read32(0x108).value == 0x000000ff);
   REQUIRE(traced.iopBus().read32(0x1f801010).value == 0x0016244f);
   REQUIRE(traced.iopBus().read32(0x1f801020).value == 0x00001225);
+  REQUIRE(traced.iopBus().read32(0x1f80101c).value == 0x000000ff);
+  REQUIRE(traced.iopInterruptController().status() == 0);
   REQUIRE(traced.sifStateHash() == sifHash);
   REQUIRE(traced.sifStateHash() == untraced.sifStateHash());
   REQUIRE(traced.iopStateHash() == untraced.iopStateHash());
@@ -185,19 +195,22 @@ TEST_CASE("IOP two-word SSBUS initialization is trace-observational",
     Memory::AccessKind kind;
     std::uint8_t byteEnable;
   };
-  const std::array<ExpectedAccess, 4> expected{{
+  const std::array<ExpectedAccess, 6> expected{{
     {25, 0xbf801010, 0x0016244f, Memory::AccessKind::DataStore, 0xf},
     {41, 0xbf801020, 0x00001225, Memory::AccessKind::DataStore, 0xf},
-    {49, 0xbf801010, 0x0016244f, Memory::AccessKind::DataLoad, 0},
-    {65, 0xbf801020, 0x00001225, Memory::AccessKind::DataLoad, 0}
+    {57, 0xbf80101c, 0x000000ff, Memory::AccessKind::DataStore, 0xf},
+    {65, 0xbf801010, 0x0016244f, Memory::AccessKind::DataLoad, 0},
+    {81, 0xbf801020, 0x00001225, Memory::AccessKind::DataLoad, 0},
+    {97, 0xbf80101c, 0x000000ff, Memory::AccessKind::DataLoad, 0}
   }};
-  REQUIRE(traced.trace().size() == program.size() * 3 + 6);
+  REQUIRE(traced.trace().size() == program.size() * 3 + 9);
   std::size_t access = 0;
   for (const auto &event : traced.trace())
   {
     REQUIRE(event.subsystem == Subsystem::IOP);
     if (event.type != Type::MemoryAccess ||
-        (event.value0 != 0xbf801010 && event.value0 != 0xbf801020))
+        (event.value0 != 0xbf801010 && event.value0 != 0xbf801020 &&
+         event.value0 != 0xbf80101c))
     {
       continue;
     }

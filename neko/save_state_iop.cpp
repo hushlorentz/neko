@@ -157,6 +157,7 @@ void NekoSaveStateCodec::writeIOPState(
       "romFingerprint", bus.rom != nullptr ? bus.rom->fingerprint() : 0);
     writer->writeFieldU32("ssbusConfiguration", bus.ssbusConfiguration.romDelay);
     writer->writeFieldU32("ssbusCommonDelay", bus.ssbusConfiguration.commonDelay);
+    writer->writeFieldU32("ssbusPioDelay", bus.ssbusConfiguration.pioDelay);
     writer->writeFieldByteVector("ram", bus.ram);
     writer->writeFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -250,6 +251,7 @@ void NekoSaveStateCodec::readIOP(
       "IOP cache has a pending ROM replacement without an external image");
     bus.ssbusConfiguration.romDelay = reader->readFieldU32("ssbusConfiguration");
     bus.ssbusConfiguration.commonDelay = reader->readFieldU32("ssbusCommonDelay");
+    bus.ssbusConfiguration.pioDelay = reader->readFieldU32("ssbusPioDelay");
     bus.ram = reader->readFieldByteVector("ram", IOPBus::RAM_SIZE);
     reader->readFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());

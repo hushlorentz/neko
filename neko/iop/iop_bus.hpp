@@ -60,6 +60,7 @@ class IOPBus final
     static constexpr IOPAddress ROM_BASE = 0x1fc00000;
     static constexpr IOPAddress SSBUS_CONFIG = 0x1f801010;
     static constexpr IOPAddress SSBUS_COMMON_DELAY = 0x1f801020;
+    static constexpr IOPAddress SSBUS_PIO_DELAY = 0x1f80101c;
     static constexpr IOPAddress INTC_STAT = 0x1f801070;
     static constexpr IOPAddress INTC_MASK = 0x1f801074;
     static constexpr IOPAddress INTC_CTRL = 0x1f801078;
@@ -138,13 +139,15 @@ class IOPBus final
     {
       None,
       RomDelay,
-      CommonDelay
+      CommonDelay,
+      PioDelay
     };
 
     struct SSBUSConfigurationState
     {
       IOPWord romDelay = 0;
       IOPWord commonDelay = 0;
+      IOPWord pioDelay = 0;
     };
 
     struct Location
