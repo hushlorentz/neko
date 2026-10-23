@@ -1732,7 +1732,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Compare approved local PCSX2, DobieStation, and Play handling of the
       observed `0x1f801020` access and directly shared ownership with
       `0x1f801010`; distinguish supported facts, disagreements, and evidence gaps.
-- [ ] Propose the smallest defensible access/reset/readback/timing contract
+- [x] Propose the smallest defensible access/reset/readback/timing contract
       and owner boundary; assess persistence, trace, hot-path, and BIOS-free
       validation effects without implementing hardware.
 - [ ] Propose a finite prerequisite repair block and obtain explicit
