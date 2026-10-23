@@ -1781,9 +1781,20 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: `0x1f801004` Scope
 
-- [ ] Resolve the scope decision for the observed `0x1f801004` initialization
-      store; obtain approval for bounded evidence/repair work or an explicit
+- [x] Resolve the scope decision for the observed `0x1f801004` initialization
+      store; obtain approval for grouped configuration-family evidence work or an explicit
       milestone-scope change before extending hardware.
+
+### IOP Platform Initialization: Bus-Configuration Family Evidence
+
+- [x] Inventory the related configuration registers together using manuals and
+      approved secondary sources; distinguish PS2 applicability, shared behavior,
+      outliers, disagreements, and evidence gaps.
+- [x] Propose coherent access/reset/readback and decode/timing groups, existing
+      owner boundaries, persistence/trace effects, and authored regression needs;
+      preserve already implemented policies and unsupported accesses.
+- [ ] Propose finite grouped repair batches and obtain explicit implementation
+      approval, or revise milestone scope, before extending hardware.
 
 ### Real BIOS Handshake and Boundary Conformance
 
