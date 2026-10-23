@@ -220,7 +220,7 @@ TEST_CASE("EE decoded indexed TLB operations address every entry")
   }
 }
 
-TEST_CASE("EE TLB entries select pages using their page mask")
+TEST_CASE("EE ordinary TLB entries select pages using their page mask")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
@@ -233,7 +233,7 @@ TEST_CASE("EE TLB entries select pages using their page mask")
     UINT32_C(0x1234002a));
   core.setCOP0Register(
     EECOP0Register::EntryLo0,
-    UINT32_C(0x80010007));
+    UINT32_C(0x00010007));
   core.setCOP0Register(
     EECOP0Register::EntryLo1,
     UINT32_C(0x00020007));
@@ -249,7 +249,7 @@ TEST_CASE("EE TLB entries select pages using their page mask")
   REQUIRE(
     &entry.pageForAddress(UINT32_C(0x12344000)) ==
     &entry.oddPage);
-  REQUIRE(
+  REQUIRE_FALSE(
     entry.pageForAddress(UINT32_C(0x12340000)).
       scratchpad());
   REQUIRE_FALSE(
@@ -282,6 +282,65 @@ TEST_CASE("EE TLB entries select pages using their page mask")
       &sizedEntry.pageForAddress(pageSize.oddPageBit) ==
       &sizedEntry.oddPage);
   }
+}
+
+TEST_CASE("EE guest zero-mask S entry supports an upper scratchpad stack")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  const std::uint32_t program[] = {
+    cop0TransferInstruction(0x04, 0, EECOP0Register::Index),
+    cop0TransferInstruction(0x04, 0, EECOP0Register::PageMask),
+    immediateInstruction(0x0f, 0, 8, 0x7000),
+    cop0TransferInstruction(0x04, 8, EECOP0Register::EntryHi),
+    immediateInstruction(0x0f, 0, 9, 0x8000),
+    immediateInstruction(0x0d, 9, 9, 7),
+    cop0TransferInstruction(0x04, 9, EECOP0Register::EntryLo0),
+    immediateInstruction(0x09, 0, 10, 7),
+    cop0TransferInstruction(0x04, 10, EECOP0Register::EntryLo1),
+    cop0OperationInstruction(0x02),
+    cop0TransferInstruction(0x04, 0, EECOP0Register::Status),
+    immediateInstruction(0x0f, 0, 29, 0x7000),
+    immediateInstruction(0x0d, 29, 29, 0x3ff0),
+    immediateInstruction(0x0f, 0, 31, 0x1234),
+    immediateInstruction(0x0d, 31, 31, 0x5678),
+    immediateInstruction(0x19, 29, 29, 0xffa0),
+    immediateInstruction(0x3f, 29, 31, 0x50),
+    immediateInstruction(0x37, 29, 11, 0x50),
+    immediateInstruction(0x0d, 8, 8, 0x2000),
+    cop0TransferInstruction(0x04, 8, EECOP0Register::EntryHi),
+    cop0OperationInstruction(0x08),
+    cop0OperationInstruction(0x01)
+  };
+  std::uint32_t address = 0x1000;
+  for (const std::uint32_t instruction : program)
+  {
+    system.eeBus().write32(address, instruction);
+    address += 4;
+  }
+  system.eeBus().write32(address, UINT32_C(0x1000ffff));
+  system.eeBus().write32(address + 4, 0);
+  core.startExecution(UINT32_C(0xa0001000));
+  system.runMasterCycles(64);
+
+  REQUIRE(
+    (core.cop0Register(EECOP0Register::Status) &
+     (EECOP0Status::EXCEPTION_LEVEL | EECOP0Status::ERROR_LEVEL)) == 0);
+  REQUIRE(core.generalRegister(29).low == UINT32_C(0x70003f90));
+  REQUIRE(core.generalRegister(11).low == UINT32_C(0x12345678));
+  std::uint64_t savedReturnAddress = 0;
+  REQUIRE(system.eeMemorySystem().readScratchpad64(0x3fe0, &savedReturnAddress));
+  REQUIRE(savedReturnAddress == UINT32_C(0x12345678));
+  REQUIRE(core.cop0Register(EECOP0Register::Index) == 0);
+  REQUIRE(core.cop0Register(EECOP0Register::PageMask) == 0);
+  REQUIRE(core.cop0Register(EECOP0Register::EntryHi) == UINT32_C(0x70000000));
+  REQUIRE(core.cop0Register(EECOP0Register::EntryLo0) == UINT32_C(0x80000007));
+  REQUIRE(core.cop0Register(EECOP0Register::EntryLo1) == 7);
+  REQUIRE(
+    core.tlbEntry(0) ==
+    EETLBEntry{0, UINT32_C(0x70000000), {UINT32_C(0x80000007)}, {7}});
+  REQUIRE(core.programCounter() >= UINT32_C(0xa0001000) + address - 0x1000);
+  REQUIRE(core.programCounter() <= UINT32_C(0xa0001000) + address - 0x1000 + 4);
 }
 
 TEST_CASE("EE TLB probes honor ASIDs and combined global state")

@@ -1711,7 +1711,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Classify the newly exposed EE startup TLB-store exception by reconstructing
       guest mapping and CPU-state provenance; define any justified repair as a
       separately approved, testable item before changing translation or reset.
-- [ ] Repair EE scratchpad TLB matching/selection for approved PageMask `0` and
+- [x] Repair EE scratchpad TLB matching/selection for approved PageMask `0` and
       16 KiB profiles; preserve ordinary mappings and canonical state, with
       authored guest, boundary, permission, probe/accelerator, and restore tests.
 - [ ] Add the approved exact-word IOP SSBUS configuration profile at

@@ -1969,6 +1969,52 @@ TEST_CASE("Active system save states round trip and continue identically")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("EE zero-mask scratchpad mapping survives canonical restore")
+{
+  NekoSystem original;
+  const EETLBEntry entry = {
+    0, UINT32_C(0x50000000), {UINT32_C(0x80010007)}, {1}
+  };
+  original.eeCore().setTLBEntry(8, entry);
+  REQUIRE(
+    original.eeMemorySystem().writeScratchpad64(
+      0x3fe0, UINT64_C(0x123456789abcdef0)));
+  const auto saved = original.saveState();
+  const auto initialHash = original.eeStateHash();
+  const EEAddressTranslationContext user = {EEPrivilegeMode::User};
+  const auto warm = original.eeMemorySystem().translateDataAddress(
+    UINT32_C(0x50003fe0), EEDataAccessDirection::Store, user);
+  REQUIRE(warm.outcome == EEAddressTranslationOutcome::Translated);
+  REQUIRE(warm.route == EEAddressRoute::Scratchpad);
+  REQUIRE(original.eeStateHash() == initialHash);
+  requireStateBytesEqual(original.saveState(), saved);
+
+  NekoSystem restored;
+  restored.eeCore().setTLBEntry(
+    8,
+    {0, UINT32_C(0x50002000),
+     {UINT32_C(0x0001001f)}, {UINT32_C(0x0001401f)}});
+  REQUIRE(
+    restored.eeMemorySystem().translateDataAddress(
+      UINT32_C(0x50003fe0), EEDataAccessDirection::Store, user).route ==
+    EEAddressRoute::MainBus);
+  restored.loadState(saved);
+  REQUIRE(restored.eeCore().tlbEntry(8) == entry);
+  REQUIRE(restored.eeStateHash() == initialHash);
+  requireStateBytesEqual(restored.saveState(), saved);
+  const auto result = restored.eeMemorySystem().translateDataAddress(
+    UINT32_C(0x50003fe0), EEDataAccessDirection::Store, user);
+  REQUIRE(result.outcome == EEAddressTranslationOutcome::Translated);
+  REQUIRE(result.route == EEAddressRoute::Scratchpad);
+  REQUIRE(result.physicalAddress == UINT32_C(0x3fe0));
+  std::uint64_t value = 0;
+  REQUIRE(
+    restored.eeMemorySystem().readScratchpad64(result.physicalAddress, &value));
+  REQUIRE(value == UINT64_C(0x123456789abcdef0));
+  REQUIRE(restored.eeStateHash() == initialHash);
+  requireStateBytesEqual(restored.saveState(), saved);
+}
+
 TEST_CASE("Accepted EE younger A-stage work survives save states")
 {
   NekoSystem original;

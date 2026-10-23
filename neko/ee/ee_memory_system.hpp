@@ -30,6 +30,7 @@ struct EETLBEntry
   EETLBPage oddPage;
 
   bool global() const;
+  bool supportsScratchpadMapping() const;
   bool matches(
     std::uint32_t virtualAddress,
     std::uint8_t asid) const;

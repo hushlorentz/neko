@@ -4698,31 +4698,268 @@ TEST_CASE("EE instruction translation rejects scratchpad mappings")
   REQUIRE(result.physicalAddress == UINT32_C(0x00003210));
 }
 
-TEST_CASE("EE translation rejects non-16 KiB scratchpad mappings")
+TEST_CASE("EE scratchpad S entries map exactly one full 16 KiB region")
+{
+  for (const std::uint32_t pageMask :
+       {EECOP0PageMask::SIZE_4_KIB, EECOP0PageMask::SIZE_16_KIB})
+  {
+    for (const std::uint32_t base :
+         {UINT32_C(0x50000000), UINT32_C(0x70000000)})
+    {
+      CAPTURE(pageMask);
+      CAPTURE(base);
+      EEMemorySystem memorySystem;
+      memorySystem.setTLBEntry(
+        8,
+        {pageMask, base, {UINT32_C(0x80010007)}, {1}});
+
+      for (const std::uint32_t offset :
+           {UINT32_C(0), UINT32_C(0xfff), UINT32_C(0x1000),
+            UINT32_C(0x1fff), UINT32_C(0x2000), UINT32_C(0x2fff),
+            UINT32_C(0x3000), UINT32_C(0x3ff8), UINT32_C(0x3fff)})
+      {
+        CAPTURE(offset);
+        for (const EEDataAccessDirection direction :
+             {EEDataAccessDirection::Load, EEDataAccessDirection::Store})
+        {
+          const auto result = memorySystem.translateDataAddress(
+            base + offset, direction, context(EEPrivilegeMode::User));
+          REQUIRE(result.outcome == EEAddressTranslationOutcome::Translated);
+          REQUIRE(result.route == EEAddressRoute::Scratchpad);
+          REQUIRE(result.physicalAddress == offset);
+          REQUIRE(result.virtualAddress == base + offset);
+          REQUIRE(result.cacheRoute == EECacheRoute::Uncached);
+          REQUIRE(result.cacheAttribute == 0);
+          REQUIRE(result.tlbIndex == 8);
+        }
+        REQUIRE(
+          memorySystem.translateInstructionAddress(
+            base + offset, context(EEPrivilegeMode::User)).outcome ==
+          EEAddressTranslationOutcome::UnsupportedScratchpadInstruction);
+      }
+      for (const std::uint32_t address :
+           {base - 1, base + UINT32_C(0x4000), base + UINT32_C(0x7fff)})
+      {
+        REQUIRE(
+          memorySystem.translateDataAddress(
+            address, EEDataAccessDirection::Load,
+            context(EEPrivilegeMode::User)).outcome ==
+          EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
+        REQUIRE(
+          memorySystem.translateDataAddress(
+            address, EEDataAccessDirection::Store,
+            context(EEPrivilegeMode::User)).outcome ==
+          EEAddressTranslationOutcome::TLBRefillStore);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE zero-mask scratchpad entries relocate at 16 KiB boundaries")
 {
   EEMemorySystem memorySystem;
   memorySystem.setTLBEntry(
-    9,
-    {
-      EECOP0PageMask::SIZE_4_KIB,
-      UINT32_C(0x51000000),
-      {
-        EECOP0EntryLo::SCRATCHPAD |
-        UINT32_C(0x0001001e)
-      },
-      {UINT32_C(0x0001401e)}
-    });
-
-  const EEAddressTranslationResult result =
-    memorySystem.translateDataAddress(
-      UINT32_C(0x51000210),
-      EEDataAccessDirection::Load,
-      context(EEPrivilegeMode::User));
-  REQUIRE(
-    result.outcome ==
-    EEAddressTranslationOutcome::UnsupportedScratchpadPageSize);
+    8, {0, UINT32_C(0x50004000), {UINT32_C(0x80000007)}, {7}});
+  REQUIRE(memorySystem.tlbEntry(8).entryHi == UINT32_C(0x50004000));
+  const auto result = memorySystem.translateDataAddress(
+    UINT32_C(0x50007fe0), EEDataAccessDirection::Store,
+    context(EEPrivilegeMode::User));
+  REQUIRE(result.outcome == EEAddressTranslationOutcome::Translated);
   REQUIRE(result.route == EEAddressRoute::Scratchpad);
-  REQUIRE(result.physicalAddress == 0);
+  REQUIRE(result.physicalAddress == UINT32_C(0x3fe0));
+}
+
+TEST_CASE("EE scratchpad S entries use EntryLo0 permissions throughout")
+{
+  for (const std::uint32_t pageMask :
+       {EECOP0PageMask::SIZE_4_KIB, EECOP0PageMask::SIZE_16_KIB})
+  {
+    for (const std::uint32_t permissions :
+         {UINT32_C(0), UINT32_C(2), UINT32_C(4), UINT32_C(6)})
+    {
+      CAPTURE(pageMask);
+      CAPTURE(permissions);
+      EEMemorySystem memorySystem;
+      memorySystem.setTLBEntry(
+        8,
+        {pageMask, UINT32_C(0x50000000),
+         {EECOP0EntryLo::SCRATCHPAD | permissions | 1}, {7}});
+      for (const std::uint32_t offset :
+           {UINT32_C(0), UINT32_C(0x1000),
+            UINT32_C(0x2000), UINT32_C(0x3fe0)})
+      {
+        CAPTURE(offset);
+        const bool valid = (permissions & EECOP0EntryLo::VALID) != 0;
+        const bool dirty = (permissions & EECOP0EntryLo::DIRTY) != 0;
+        REQUIRE(
+          memorySystem.translateDataAddress(
+            UINT32_C(0x50000000) + offset, EEDataAccessDirection::Load,
+            context(EEPrivilegeMode::User)).outcome ==
+          (valid ? EEAddressTranslationOutcome::Translated :
+                   EEAddressTranslationOutcome::TLBInvalidLoadOrFetch));
+        REQUIRE(
+          memorySystem.translateDataAddress(
+            UINT32_C(0x50000000) + offset, EEDataAccessDirection::Store,
+            context(EEPrivilegeMode::User)).outcome ==
+          (!valid ? EEAddressTranslationOutcome::TLBInvalidStore :
+           !dirty ? EEAddressTranslationOutcome::TLBModified :
+                    EEAddressTranslationOutcome::Translated));
+      }
+    }
+  }
+}
+
+TEST_CASE("EE scratchpad S entries retain ASID and combined-global matching")
+{
+  for (const std::uint32_t pageMask :
+       {EECOP0PageMask::SIZE_4_KIB, EECOP0PageMask::SIZE_16_KIB})
+  {
+    for (const std::uint32_t global0 : {UINT32_C(0), UINT32_C(1)})
+    {
+      for (const std::uint32_t global1 : {UINT32_C(0), UINT32_C(1)})
+      {
+        CAPTURE(pageMask);
+        CAPTURE(global0);
+        CAPTURE(global1);
+        EEMemorySystem memorySystem;
+        memorySystem.setTLBEntry(
+          8,
+          {pageMask, UINT32_C(0x5000002a),
+           {UINT32_C(0x80000006) | global0}, {global1}});
+        for (const std::uint32_t asid : {UINT32_C(0x2a), UINT32_C(0x2b)})
+        {
+          memorySystem.setCOP0Register(
+            EECOP0Register::EntryHi, UINT32_C(0x50002000) | asid);
+          const auto result = memorySystem.translateDataAddress(
+            UINT32_C(0x50003fe0), EEDataAccessDirection::Store,
+            context(EEPrivilegeMode::User));
+          REQUIRE(
+            result.outcome ==
+            (asid == 0x2a || (global0 && global1) ?
+               EEAddressTranslationOutcome::Translated :
+               EEAddressTranslationOutcome::TLBRefillStore));
+          memorySystem.probeTLB();
+          REQUIRE(
+            memorySystem.cop0Register(EECOP0Register::Index) ==
+            (asid == 0x2a || (global0 && global1) ?
+               UINT32_C(8) : EECOP0Index::PROBE_FAILURE));
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE scratchpad lookup and probe preserve accelerator and index rules")
+{
+  EEMemorySystem memorySystem;
+  const auto user = context(EEPrivilegeMode::User);
+  memorySystem.setTLBEntry(
+    20, {0, UINT32_C(0x50000000), {UINT32_C(0x80000007)}, {1}});
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      UINT32_C(0x50003fe0), EEDataAccessDirection::Store, user).tlbIndex == 20);
+  memorySystem.setTLBEntry(
+    3,
+    {0, UINT32_C(0x50000000),
+     {UINT32_C(0x0001001f)}, {UINT32_C(0x0001401f)}});
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      UINT32_C(0x50003fe0), EEDataAccessDirection::Store, user).tlbIndex == 20);
+  const auto overlap = memorySystem.translateDataAddress(
+    UINT32_C(0x50000100), EEDataAccessDirection::Load, user);
+  REQUIRE(overlap.tlbIndex == 3);
+  REQUIRE(overlap.route == EEAddressRoute::MainBus);
+  REQUIRE(overlap.physicalAddress == UINT32_C(0x00400100));
+  memorySystem.setCOP0Register(
+    EECOP0Register::EntryHi, UINT32_C(0x500020ff));
+  memorySystem.probeTLB();
+  REQUIRE(memorySystem.cop0Register(EECOP0Register::Index) == 20);
+  memorySystem.setCOP0Register(
+    EECOP0Register::EntryHi, UINT32_C(0x500040ff));
+  memorySystem.probeTLB();
+  REQUIRE(
+    memorySystem.cop0Register(EECOP0Register::Index) ==
+    EECOP0Index::PROBE_FAILURE);
+
+  memorySystem.setTLBEntry(
+    20, {0, UINT32_C(0x60000000), {UINT32_C(0x80000007)}, {1}});
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      UINT32_C(0x50003fe0), EEDataAccessDirection::Store, user).outcome ==
+    EEAddressTranslationOutcome::TLBRefillStore);
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      UINT32_C(0x60003fe0), EEDataAccessDirection::Store, user).route ==
+    EEAddressRoute::Scratchpad);
+  REQUIRE(
+    memorySystem.translateInstructionAddress(
+      UINT32_C(0x60003fe0), user).outcome ==
+    EEAddressTranslationOutcome::UnsupportedScratchpadInstruction);
+  memorySystem.setTLBEntry(
+    20,
+    {0, UINT32_C(0x60002000),
+     {UINT32_C(0x0001001f)}, {UINT32_C(0x0001401f)}});
+  const auto replaced = memorySystem.translateDataAddress(
+    UINT32_C(0x60003fe0), EEDataAccessDirection::Store, user);
+  REQUIRE(replaced.outcome == EEAddressTranslationOutcome::Translated);
+  REQUIRE(replaced.route == EEAddressRoute::MainBus);
+  REQUIRE(replaced.physicalAddress == UINT32_C(0x00500fe0));
+  const auto instruction = memorySystem.translateInstructionAddress(
+    UINT32_C(0x60003fe0), user);
+  REQUIRE(instruction.outcome == EEAddressTranslationOutcome::Translated);
+  REQUIRE(instruction.route == EEAddressRoute::MainBus);
+  REQUIRE(instruction.physicalAddress == replaced.physicalAddress);
+}
+
+TEST_CASE("EE translation rejects unsupported scratchpad page-mask profiles")
+{
+  for (const std::uint32_t pageMask :
+       {EECOP0PageMask::SIZE_64_KIB, EECOP0PageMask::SIZE_256_KIB,
+        EECOP0PageMask::SIZE_1_MIB, EECOP0PageMask::SIZE_4_MIB,
+        EECOP0PageMask::SIZE_16_MIB})
+  {
+    CAPTURE(pageMask);
+    EEMemorySystem memorySystem;
+    memorySystem.setTLBEntry(
+      9,
+      {
+        pageMask,
+        UINT32_C(0x50000000),
+        {
+          EECOP0EntryLo::SCRATCHPAD |
+          UINT32_C(0x0001001e)
+        },
+        {UINT32_C(0x0001401e)}
+      });
+
+    const EEAddressTranslationResult result =
+      memorySystem.translateDataAddress(
+        UINT32_C(0x50000210),
+        EEDataAccessDirection::Load,
+        context(EEPrivilegeMode::User));
+    REQUIRE(
+      result.outcome ==
+      EEAddressTranslationOutcome::UnsupportedScratchpadPageSize);
+    REQUIRE(result.route == EEAddressRoute::Scratchpad);
+    REQUIRE(result.physicalAddress == 0);
+  }
+}
+
+TEST_CASE("EE unaligned zero-mask S entries do not gain scratchpad aliases")
+{
+  EEMemorySystem memorySystem;
+  memorySystem.setTLBEntry(
+    9, {0, UINT32_C(0x51002000), {UINT32_C(0x80000007)}, {7}});
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      UINT32_C(0x51002000), EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::UnsupportedScratchpadPageSize);
+  REQUIRE(
+    memorySystem.translateDataAddress(
+      UINT32_C(0x51000000), EEDataAccessDirection::Load,
+      context(EEPrivilegeMode::User)).outcome ==
+    EEAddressTranslationOutcome::TLBRefillLoadOrFetch);
 }
 
 TEST_CASE("EE derived translation accelerators invalidate on TLB changes")

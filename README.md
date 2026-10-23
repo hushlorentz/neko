@@ -83,6 +83,17 @@ The event count is an explicit collection ceiling, not a CPU execution limit.
 Additional JSON lines report capture size/truncation and the retained raw
 events. Tracing is off by default; reaching its ceiling does not stop execution.
 
+Inspect saved reports offline with Python 3 (no BIOS or emulator build needed):
+
+```sh
+python3 -B tools/inspect_startup.py summary run.jsonl
+python3 -B tools/inspect_startup.py events run.jsonl --cpu ee --cycle 41
+python3 -B tools/inspect_startup.py instructions run.jsonl --cpu iop
+python3 -B tools/inspect_startup.py compare run.jsonl repeat.jsonl --mode trace
+```
+
+See the [inspection commands and comparison semantics](neko_diagnostics/startup_diagnostics.md#offline-inspection).
+
 ## Tests
 
 Run the complete optimized, assertion-enabled test and repository check:

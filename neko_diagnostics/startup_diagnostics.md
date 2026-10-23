@@ -258,6 +258,81 @@ Save states exclude capture controls/history; loading preserves the
 destination's controls, retained events, and truncation. Trace hashes hash
 retained events only, so equal hashes alone do not establish equal coverage.
 
+## Offline inspection
+
+`tools/inspect_startup.py` reads saved `neko bios-startup` JSONL reports using
+only the Python 3 standard library. It never opens a BIOS, executes guest code,
+or changes the input files. Commands emit deterministic, readable JSON:
+
+```sh
+python3 -B tools/inspect_startup.py summary run.jsonl
+python3 -B tools/inspect_startup.py events run.jsonl --cpu ee --cycle 41
+python3 -B tools/inspect_startup.py events run.jsonl --event memory --address 0x70003fe0
+python3 -B tools/inspect_startup.py instructions run.jsonl --cpu iop --from-cycle 200 --to-cycle 241
+python3 -B tools/inspect_startup.py compare run.jsonl repeat.jsonl --mode trace
+python3 -B tools/inspect_startup.py compare run.jsonl untraced.jsonl
+```
+
+`summary` shows ROM identity, execution counters, the full ending snapshot,
+capture coverage/counts, and the already decoded `startup_first_failure`.
+Addresses, instruction bits, and selected architectural registers display as
+hexadecimal; integer precision is preserved. The originating first failure
+is not replaced by a later handler failure or ending host stop.
+
+`events` filters the ordered retained events. `--cpu` selects EE or IOP;
+without it, all subsystems are included. `--cycle`, `--from-cycle`, and
+`--to-cycle` are inclusive master-cycle constraints. `--event` accepts a
+numeric ID or `instruction`, `memory`, `exception`, or `fault` (their full
+event names also work). Unknown numeric identities remain raw, not silently
+discarded or interpreted as a known subsystem/event.
+
+`instructions` selects only EE/IOP `InstructionIssued` events and shows PC,
+raw opcode, and raw operation/flag words. It does not disassemble instructions
+or treat issued events as retired instructions. Both event commands support
+`--pc` for issued/fault-context PCs and `--address` for memory-event virtual
+addresses; these filters never guess instruction attribution for memory
+events. Filters are combined with AND. Decimal and `0x` numbers are accepted.
+
+Memory payloads explicitly distinguish virtual address, raw data words, and
+raw packed metadata. Arbitrary memory events are **not** bitfield-decoded in
+Python; authoritative decoded failure access kinds/outcomes come from the
+existing C++ exporter. Failed-read data must not be treated as valid values.
+
+Event output defaults to at most 200 matches; `--limit` changes that display
+bound. `event_index` is always the original zero-based retained-event index.
+`matched_events` and `limited` distinguish no matches from display clipping.
+This bound does not limit file loading: input records are loaded into memory.
+
+Summary and event reports retain the execution outcome, boundary, and any
+runtime-error message. `coverage` independently distinguishes `untraced`,
+`retained_trace`, and `truncated_prefix`. Untruncated capture does not imply
+a completed final cycle, and a null failure/no match never establishes
+fault-free execution, boot, or handshake success.
+
+`compare` defaults to `--mode run`: compare input identity/budget and the
+complete run result/snapshot, deliberately excluding trace-only records.
+This supports traced/untraced equivalence checks. `--mode trace` requires two
+traced files and compares every parsed record, preserving event order and
+capture metadata. Neither mode discards snapshot fields or normalizes away
+execution differences. Reports also include exact `byte_equal` and the path
+of the first parsed difference. JSON whitespace/object-key order do not
+affect parsed equality, but do affect byte equality.
+
+Exit status is 0 for inspection/equality, 1 for a comparison mismatch, and 2
+for an argument, file, or validation error. These statuses describe the
+inspection operation, not the BIOS execution outcome. Missing/duplicate or
+unknown record types, malformed JSON, inconsistent counts/boundaries, and
+out-of-range raw words are errors, not empty successful reports. Additive
+record fields are retained. A missing final record is an incomplete file;
+the producer's explicit trace truncation is valid evidence and is reported
+separately. An input error produces no successful JSON report.
+
+Run the inspector's BIOS-free tests independently of the C++ build:
+
+```sh
+python3 -B -m unittest discover -s tools -p 'test_inspect_startup.py' -v
+```
+
 ## First captured failure
 
 `firstStartupFailure(trace)` performs a read-only, linear scan of the retained

@@ -7,6 +7,9 @@
 
 namespace
 {
+  constexpr std::uint32_t scratchpadOffsetMask =
+    EEMemorySystem::SCRATCHPAD_SIZE - 1;
+
   bool supportedPageMask(std::uint32_t value)
   {
     switch (value)
@@ -277,12 +280,24 @@ bool EETLBEntry::global() const
     (oddPage.value & EECOP0EntryLo::GLOBAL) != 0;
 }
 
+bool EETLBEntry::supportsScratchpadMapping() const
+{
+  return
+    evenPage.scratchpad() &&
+    (pageMask == EECOP0PageMask::SIZE_4_KIB ||
+     pageMask == EECOP0PageMask::SIZE_16_KIB) &&
+    (entryHi & EECOP0EntryHi::VIRTUAL_PAGE_MASK &
+     scratchpadOffsetMask) == 0;
+}
+
 bool EETLBEntry::matches(
   std::uint32_t virtualAddress,
   std::uint8_t asid) const
 {
   const std::uint32_t virtualPageComparisonMask =
-    ~(pageMask | UINT32_C(0x1fff));
+    supportsScratchpadMapping()
+      ? ~scratchpadOffsetMask
+      : ~(pageMask | UINT32_C(0x1fff));
   return
     (virtualAddress & virtualPageComparisonMask) ==
       (entryHi & virtualPageComparisonMask) &&
@@ -293,6 +308,10 @@ bool EETLBEntry::matches(
 const EETLBPage &EETLBEntry::pageForAddress(
   std::uint32_t virtualAddress) const
 {
+  if (supportsScratchpadMapping())
+  {
+    return evenPage;
+  }
   const std::uint32_t oddPageBit =
     (pageMask + UINT32_C(0x2000)) >> 1;
   return (virtualAddress & oddPageBit) == 0
@@ -920,7 +939,7 @@ EEAddressTranslationResult EEMemorySystem::translateMappedAddress(
       (page.value & EECOP0EntryLo::CACHE_MODE_MASK) >> 3);
   if (page.scratchpad())
   {
-    if (entry.pageMask != EECOP0PageMask::SIZE_16_KIB)
+    if (!entry.supportsScratchpadMapping())
     {
       return {
         EEAddressTranslationOutcome::UnsupportedScratchpadPageSize,
@@ -938,7 +957,7 @@ EEAddressTranslationResult EEMemorySystem::translateMappedAddress(
             UnsupportedScratchpadInstruction
         : EEAddressTranslationOutcome::Translated,
       virtualAddress,
-      virtualAddress & UINT32_C(0x00003fff),
+      virtualAddress & scratchpadOffsetMask,
       EECacheRoute::Uncached,
       cacheAttribute,
       EEAddressRoute::Scratchpad,
