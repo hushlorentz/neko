@@ -1723,7 +1723,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Reassess the resulting pre-handshake dependencies; obtain approval for
       additional bounded prerequisite blocks or an explicit milestone-scope
       change before extending hardware beyond this tranche.
-- [ ] Complete individual repair reviews and independent block review, retain
+- [x] Complete individual repair reviews and independent block review, retain
       authored BIOS-free regression coverage, and run the complete optimized
       and AddressSanitizer checks for the bounded prerequisite tranche.
 
