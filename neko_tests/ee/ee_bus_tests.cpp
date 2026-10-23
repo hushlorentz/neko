@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -267,6 +268,34 @@ TEST_CASE("EE Boot ROM is fixed-size and read-only")
   REQUIRE(system.iopBus().romIdentity() == nullptr);
   REQUIRE(system.eeBus().read32(EEMemoryMap::BOOT_ROM_BASE) ==
     UINT32_C(0x12345678));
+}
+
+TEST_CASE("EE cache fill ranges require physical RAM or installed ROM backing",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.isCacheFillRange(0, 64));
+  REQUIRE(bus.isCacheFillRange(EEMemoryMap::MAIN_MEMORY_SIZE - 64, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::MAIN_MEMORY_SIZE - 63, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::BOOT_ROM_BASE, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(0, 0));
+  REQUIRE_FALSE(bus.isCacheFillRange(0, std::numeric_limits<std::size_t>::max()));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::KSEG0_BASE, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(UINT32_C(0x20000000), 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::INTC_STAT, 64));
+  bus.installBootROM(std::vector<std::uint8_t>(EEMemoryMap::BOOT_ROM_SIZE, 0));
+  REQUIRE(bus.isCacheFillRange(EEMemoryMap::BOOT_ROM_BASE, 64));
+  REQUIRE(bus.isCacheFillRange(EEMemoryMap::BOOT_ROM_END - 64, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::BOOT_ROM_BASE - 1, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::BOOT_ROM_END - 63, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::BOOT_ROM_END, 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::BOOT_ROM_BASE,
+    std::numeric_limits<std::size_t>::max()));
+  REQUIRE_FALSE(bus.isCacheFillRange(UINT32_C(0xfffffffc), 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(UINT32_C(0x9fc00000), 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(UINT32_C(0xbfc00000), 64));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::INTC_STAT, 64));
 }
 
 TEST_CASE("EE guest bus accesses require physical addresses")

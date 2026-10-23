@@ -176,6 +176,10 @@ class EEBus
     bool isMainMemoryRange(
       std::uint32_t address,
       std::size_t width) const;
+    // Physical, side-effect-free backing eligible for cache refill.
+    bool isCacheFillRange(
+      std::uint32_t physicalAddress,
+      std::size_t width) const;
 
     bool readInstruction32(
       std::uint32_t address,

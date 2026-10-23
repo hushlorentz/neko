@@ -197,6 +197,16 @@ bool EEBus::isMainMemoryRange(
     &physicalAddress);
 }
 
+bool EEBus::isCacheFillRange(
+  std::uint32_t physicalAddress,
+  std::size_t width) const
+{
+  std::uint32_t offset = 0;
+  return width != 0 &&
+    (mainMemoryAddress(physicalAddress, width, &offset) ||
+     bootROMAddress(physicalAddress, width, &offset));
+}
+
 void EEBus::attachSIF(SIF *sif, SIFSignalReceiver *signals)
 {
   if (sif == nullptr || signals == nullptr)

@@ -1700,7 +1700,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Classify discovered pre-handshake dependencies against the approved
       contract; obtain scope approval and split prerequisite work into testable
       items before extending hardware.
-- [ ] Repair EE cached installed-ROM fills across instruction/data and related
+- [x] Repair EE cached installed-ROM fills across instruction/data and related
       CACHE/PREF paths; retain immutable backing, MMIO rejection, and atomic
       failure behavior with authored BIOS-free regressions.
 - [ ] Add the approved exact-word IOP SSBUS configuration profile at

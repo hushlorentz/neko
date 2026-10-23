@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cstdint>
 #include <type_traits>
+#include <vector>
 
 #include "catch.hpp"
 #include "ee_memory_system.hpp"
@@ -233,6 +235,26 @@ namespace
         static_cast<std::uint8_t>(high >> (index * 8));
     }
     return data;
+  }
+
+  std::vector<std::uint8_t> cacheROMImage()
+  {
+    std::vector<std::uint8_t> image(EEMemoryMap::BOOT_ROM_SIZE);
+    for (std::size_t index = 0; index < image.size(); ++index)
+    {
+      image[index] = static_cast<std::uint8_t>(index ^ (index >> 6) ^ 0xa5);
+    }
+    return image;
+  }
+
+  void requireSameCacheLine(const EECacheLine &actual, const EECacheLine &expected)
+  {
+    REQUIRE(actual.data == expected.data);
+    REQUIRE(actual.physicalTag == expected.physicalTag);
+    REQUIRE(actual.valid == expected.valid);
+    REQUIRE(actual.dirty == expected.dirty);
+    REQUIRE(actual.leastRecentlyFilled == expected.leastRecentlyFilled);
+    REQUIRE(actual.locked == expected.locked);
   }
 }
 
@@ -1954,6 +1976,358 @@ TEST_CASE("EE cache line fill reports physical bus errors atomically")
   {
     REQUIRE(byte == 0);
   }
+}
+
+TEST_CASE("EE cached ROM fills complete boundary lines critical quadword first",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  const auto image = cacheROMImage();
+  system.eeBus().installBootROM(image);
+  const std::uint32_t lineBases[] = {
+    EEMemoryMap::BOOT_ROM_BASE,
+    EEMemoryMap::BOOT_ROM_END - 64
+  };
+  for (const std::uint32_t base : lineBases)
+  {
+    for (std::uint8_t first = 0; first < 4; ++first)
+    {
+      const auto result = EEMemorySystemTestAccess::fillCacheLine(
+        system.eeMemorySystem(), system.eeBus(), base + 16 * first + 12);
+      REQUIRE(result.outcome == EECacheLineTransferOutcome::Completed);
+      REQUIRE(result.lineBaseAddress == base);
+      REQUIRE(result.firstQuadword == first);
+      REQUIRE(result.quadwordsTransferred == 4);
+      REQUIRE(result.line.valid);
+      REQUIRE_FALSE(result.line.dirty);
+      REQUIRE(result.line.physicalTag == (base & EECacheLine::PHYSICAL_TAG_MASK));
+      for (std::size_t offset = 0; offset < 64; ++offset)
+      {
+        REQUIRE(result.line.data[offset] ==
+          image[base - EEMemoryMap::BOOT_ROM_BASE + offset]);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE cached ROM fetches respect cache enable and kernel aliases",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  const auto image = cacheROMImage();
+  system.eeBus().installBootROM(image);
+  auto &memory = system.eeMemorySystem();
+  memory.setCOP0Register(EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE);
+  constexpr std::uint32_t physical = EEMemoryMap::BOOT_ROM_BASE + 0x126c;
+  auto translation = memory.translateInstructionAddress(
+    EEMemoryMap::KSEG0_BASE + physical, {});
+  requireDirectRoute(translation, EEMemoryMap::KSEG0_BASE + physical,
+    physical, EECacheRoute::CachedNoncoherent);
+  std::uint32_t expected = 0;
+  REQUIRE(system.eeBus().readInstruction32(physical, &expected));
+  const auto fill = EEMemorySystemTestAccess::fetchInstruction(
+    &memory, system.eeBus(), translation);
+  REQUIRE(fill.outcome == EEInstructionCacheFetchOutcome::Completed);
+  REQUIRE(fill.source == EEInstructionCacheFetchSource::Refilled);
+  REQUIRE(fill.instruction == expected);
+  REQUIRE(EEMemorySystemTestAccess::fetchInstruction(
+    &memory, system.eeBus(), translation).source == EEInstructionCacheFetchSource::Hit);
+  const auto line = memory.instructionCacheLine(fill.set, fill.way);
+
+  SECTION("uncached alias")
+  {
+    translation = memory.translateInstructionAddress(
+      EEMemoryMap::KSEG1_BASE + physical, {});
+    REQUIRE(translation.cacheRoute == EECacheRoute::Uncached);
+  }
+  SECTION("disabled cache")
+  {
+    memory.setCOP0Register(EECOP0Register::Config, 0);
+  }
+  const auto bypass = EEMemorySystemTestAccess::fetchInstruction(
+    &memory, system.eeBus(), translation);
+  REQUIRE(bypass.outcome == EEInstructionCacheFetchOutcome::Completed);
+  REQUIRE(bypass.source == EEInstructionCacheFetchSource::Bypassed);
+  REQUIRE(bypass.instruction == expected);
+  requireSameCacheLine(memory.instructionCacheLine(fill.set, fill.way), line);
+}
+
+TEST_CASE("EE cached ROM data loads refill and hit at every width",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  const auto image = cacheROMImage();
+  system.eeBus().installBootROM(image);
+  for (const std::size_t width : {1, 2, 4, 8, 16})
+  {
+    EEMemorySystem memory;
+    memory.setCOP0Register(EECOP0Register::Config, EECOP0Config::DATA_CACHE_ENABLE);
+    const auto physical = EEMemoryMap::BOOT_ROM_END - static_cast<std::uint32_t>(width);
+    auto translation = memory.translateDataAddress(
+      EEMemoryMap::KSEG0_BASE + physical, EEDataAccessDirection::Load, {});
+    requireDirectRoute(translation, EEMemoryMap::KSEG0_BASE + physical,
+      physical, EECacheRoute::CachedNoncoherent);
+    const auto fill = EEMemorySystemTestAccess::loadData(
+      &memory, system.eeBus(), translation, width);
+    REQUIRE(fill.outcome == EEDataCacheLoadOutcome::Completed);
+    REQUIRE(fill.source == EEDataCacheLoadSource::Refilled);
+    for (std::size_t offset = 0; offset < width; ++offset)
+    {
+      REQUIRE(fill.data[offset] == image[image.size() - width + offset]);
+    }
+    const auto hit = EEMemorySystemTestAccess::loadData(
+      &memory, system.eeBus(), translation, width);
+    REQUIRE(hit.source == EEDataCacheLoadSource::Hit);
+    REQUIRE(hit.data == fill.data);
+    const auto line = memory.dataCacheLine(fill.set, fill.way);
+    translation.cacheRoute = EECacheRoute::Uncached;
+    const auto bypass = EEMemorySystemTestAccess::loadData(
+      &memory, system.eeBus(), translation, width);
+    REQUIRE(bypass.source == EEDataCacheLoadSource::Bypassed);
+    REQUIRE(bypass.outcome == EEDataCacheLoadOutcome::Completed);
+    REQUIRE(bypass.data == fill.data);
+    translation.cacheRoute = EECacheRoute::CachedNoncoherent;
+    memory.setCOP0Register(EECOP0Register::Config, 0);
+    const auto disabled = EEMemorySystemTestAccess::loadData(
+      &memory, system.eeBus(), translation, width);
+    REQUIRE(disabled.source == EEDataCacheLoadSource::Bypassed);
+    REQUIRE(disabled.data == fill.data);
+    requireSameCacheLine(memory.dataCacheLine(fill.set, fill.way), line);
+  }
+}
+
+TEST_CASE("EE cached ROM CACHE fill and PREF use the shared backing",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  const auto image = cacheROMImage();
+  system.eeBus().installBootROM(image);
+  auto &memory = system.eeMemorySystem();
+  memory.setCOP0Register(EECOP0Register::Config, EECOP0Config::DATA_CACHE_ENABLE);
+  constexpr std::uint32_t address = UINT32_C(0x9fffffec);
+  const auto maintained = EEMemorySystemTestAccess::maintainCache(
+    &memory, &system.eeBus(), {EECacheOperation::InstructionFill, address, {}});
+  REQUIRE(maintained.outcome == EECacheMaintenanceOutcome::Completed);
+  const auto prefetched = EEMemorySystemTestAccess::prefetchData(
+    &memory, &system.eeBus(), {address, 0, {}});
+  REQUIRE(prefetched.outcome == EEPrefetchOutcome::Allocated);
+  const auto &instruction = memory.instructionCacheLine(127, 0);
+  const auto &data = memory.dataCacheLine(prefetched.set, prefetched.way);
+  REQUIRE(instruction.valid);
+  REQUIRE(data.valid);
+  REQUIRE_FALSE(data.dirty);
+  REQUIRE(instruction.data == data.data);
+  for (std::size_t offset = 0; offset < 64; ++offset)
+  {
+    REQUIRE(data.data[offset] == image[image.size() - 64 + offset]);
+  }
+  REQUIRE(EEMemorySystemTestAccess::prefetchData(
+    &memory, &system.eeBus(), {address, 31, {}}).outcome == EEPrefetchOutcome::Hit);
+  REQUIRE(EEMemorySystemTestAccess::prefetchData(
+    &memory, &system.eeBus(), {UINT32_C(0xbfffffec), 0, {}}).outcome ==
+    EEPrefetchOutcome::Ignored);
+}
+
+TEST_CASE("EE cached ROM stores allocate without changing immutable backing",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  const auto image = cacheROMImage();
+  system.eeBus().installBootROM(image);
+  const auto identity = system.eeBus().bootROMIdentity();
+  for (const std::size_t width : {1, 2, 4, 8, 16})
+  {
+    EEMemorySystem memory;
+    memory.setCOP0Register(EECOP0Register::Config, EECOP0Config::DATA_CACHE_ENABLE);
+    constexpr std::uint32_t physical = EEMemoryMap::BOOT_ROM_BASE + 0x120;
+    auto translation = dataTranslation(EEMemoryMap::KSEG0_BASE + physical, physical);
+    const auto bytes = storeBytes(UINT64_C(0x0123456789abcdef), UINT64_C(0xfedcba9876543210));
+    const auto allocated = EEMemorySystemTestAccess::storeData(
+      &memory, &system.eeBus(), translation, bytes, width);
+    REQUIRE(allocated.outcome == EEDataCacheStoreOutcome::Completed);
+    REQUIRE(allocated.source == EEDataCacheStoreSource::Allocated);
+    const auto loaded = EEMemorySystemTestAccess::loadData(
+      &memory, system.eeBus(), translation, width);
+    REQUIRE(loaded.source == EEDataCacheLoadSource::Hit);
+    for (std::size_t offset = 0; offset < width; ++offset)
+    {
+      REQUIRE(loaded.data[offset] == bytes[offset]);
+    }
+    const auto &line = memory.dataCacheLine(allocated.set, allocated.way);
+    REQUIRE(line.valid);
+    REQUIRE(line.dirty);
+    for (std::size_t offset = 0; offset < 64; ++offset)
+    {
+      REQUIRE(line.data[offset] ==
+        (offset >= 32 && offset < 32 + width ? bytes[offset - 32] : image[0x100 + offset]));
+    }
+    const auto secondBytes = storeBytes(0x5a);
+    const auto hit = EEMemorySystemTestAccess::storeData(
+      &memory, &system.eeBus(), translation, secondBytes, width);
+    REQUIRE(hit.outcome == EEDataCacheStoreOutcome::Completed);
+    REQUIRE(hit.source == EEDataCacheStoreSource::Hit);
+    const auto preserved = line;
+    translation.cacheRoute = EECacheRoute::Uncached;
+    const auto rejected = EEMemorySystemTestAccess::storeData(
+      &memory, &system.eeBus(), translation, bytes, width);
+    REQUIRE(rejected.outcome == EEDataCacheStoreOutcome::PhysicalBusError);
+    REQUIRE(rejected.failurePhase == EEMemoryTransferFailurePhase::Direct);
+    const auto uncached = EEMemorySystemTestAccess::loadData(
+      &memory, system.eeBus(), translation, width);
+    REQUIRE(uncached.outcome == EEDataCacheLoadOutcome::Completed);
+    for (std::size_t offset = 0; offset < width; ++offset)
+    {
+      REQUIRE(uncached.data[offset] == image[0x120 + offset]);
+    }
+    translation.cacheRoute = EECacheRoute::CachedNoncoherent;
+    memory.setCOP0Register(EECOP0Register::Config, 0);
+    REQUIRE(EEMemorySystemTestAccess::storeData(
+      &memory, &system.eeBus(), translation, bytes, width).outcome ==
+      EEDataCacheStoreOutcome::PhysicalBusError);
+    requireSameCacheLine(line, preserved);
+  }
+  REQUIRE(system.eeBus().bootROMIdentity() == identity);
+  REQUIRE(std::equal(image.begin(), image.end(), identity->data()));
+}
+
+TEST_CASE("EE cached ROM dirty writeback failure preserves both ways",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  const auto image = cacheROMImage();
+  system.eeBus().installBootROM(image);
+  auto &memory = system.eeMemorySystem();
+  memory.setCOP0Register(EECOP0Register::Config, EECOP0Config::DATA_CACHE_ENABLE);
+  constexpr std::uint32_t physical = EEMemoryMap::BOOT_ROM_BASE + 0x100;
+  const auto cached = dataTranslation(EEMemoryMap::KSEG0_BASE + physical, physical);
+  REQUIRE(EEMemorySystemTestAccess::storeData(
+    &memory, &system.eeBus(), cached, storeBytes(0x12345678), 4).outcome ==
+    EEDataCacheStoreOutcome::Completed);
+  const auto other = dataTranslation(UINT32_C(0x80001100), 0x1100);
+  REQUIRE(EEMemorySystemTestAccess::loadData(
+    &memory, system.eeBus(), other, 4).outcome == EEDataCacheLoadOutcome::Completed);
+  const auto before0 = memory.dataCacheLine(4, 0);
+  const auto before1 = memory.dataCacheLine(4, 1);
+  const auto replacement = dataTranslation(UINT32_C(0x80002100), 0x2100);
+  SECTION("load eviction")
+  {
+    const auto result = EEMemorySystemTestAccess::loadData(
+      &memory, system.eeBus(), replacement, 4);
+    REQUIRE(result.outcome == EEDataCacheLoadOutcome::PhysicalBusError);
+    REQUIRE(result.failurePhase == EEMemoryTransferFailurePhase::Writeback);
+  }
+  SECTION("store eviction")
+  {
+    const auto result = EEMemorySystemTestAccess::storeData(
+      &memory, &system.eeBus(), replacement, storeBytes(0x42), 4);
+    REQUIRE(result.outcome == EEDataCacheStoreOutcome::PhysicalBusError);
+    REQUIRE(result.failurePhase == EEMemoryTransferFailurePhase::Writeback);
+    REQUIRE(result.evictedDirty);
+  }
+  SECTION("PREF eviction")
+  {
+    const auto result = EEMemorySystemTestAccess::prefetchData(
+      &memory, &system.eeBus(), {replacement.virtualAddress, 0, {}});
+    REQUIRE(result.outcome == EEPrefetchOutcome::SuppressedTransferFailure);
+    REQUIRE(result.transferOutcome == EECacheLineTransferOutcome::PhysicalBusError);
+    REQUIRE(result.evictedDirty);
+  }
+  SECTION("CACHE writeback invalidate")
+  {
+    const auto result = EEMemorySystemTestAccess::maintainCache(
+      &memory, &system.eeBus(),
+      {EECacheOperation::DataHitWriteBackInvalidate, cached.virtualAddress, {}});
+    REQUIRE(result.outcome == EECacheMaintenanceOutcome::PhysicalBusError);
+    REQUIRE(result.cacheHit);
+  }
+  requireSameCacheLine(memory.dataCacheLine(4, 0), before0);
+  requireSameCacheLine(memory.dataCacheLine(4, 1), before1);
+  REQUIRE(std::equal(image.begin(), image.end(), system.eeBus().bootROMIdentity()->data()));
+  REQUIRE(system.eeBus().read32(0x2100) == 0);
+}
+
+TEST_CASE("EE cached ROM unavailable backing and MMIO never install partial lines",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  auto &memory = system.eeMemorySystem();
+  memory.setCOP0Register(EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE | EECOP0Config::DATA_CACHE_ENABLE);
+  EECacheLine sentinel;
+  sentinel.valid = true;
+  sentinel.physicalTag = 0x4000;
+  sentinel.leastRecentlyFilled = true;
+  sentinel.data.fill(0x5a);
+  const std::uint32_t addresses[] = {
+    EEMemoryMap::BOOT_ROM_BASE, EEMemoryMap::BOOT_ROM_BASE - 64,
+    EEMemoryMap::INTC_STAT
+  };
+  system.interruptController().setSource(EEInterruptSource::VBLANK_START, true);
+  const auto status = system.eeBus().read32(EEMemoryMap::INTC_STAT);
+  for (const auto physical : addresses)
+  {
+    const auto set = (physical >> 6) & 0x7f;
+    EEMemorySystemTestAccess::setInstructionCacheLine(&memory, set, 0, sentinel);
+    EEMemorySystemTestAccess::setInstructionCacheLine(&memory, set, 1, sentinel);
+    const auto fill = EEMemorySystemTestAccess::fillCacheLine(
+      memory, system.eeBus(), physical);
+    REQUIRE(fill.outcome == EECacheLineTransferOutcome::PhysicalBusError);
+    REQUIRE(fill.quadwordsTransferred == 0);
+    requireSameCacheLine(fill.line, {});
+    const auto fetch = EEMemorySystemTestAccess::fetchInstruction(
+      &memory, system.eeBus(), instructionTranslation(physical, physical));
+    REQUIRE(fetch.outcome == EEInstructionCacheFetchOutcome::PhysicalBusError);
+    REQUIRE(fetch.failurePhase == EEMemoryTransferFailurePhase::Refill);
+    const auto maintained = EEMemorySystemTestAccess::maintainCache(
+      &memory, &system.eeBus(),
+      {EECacheOperation::InstructionFill, EEMemoryMap::KSEG0_BASE | physical, {}});
+    REQUIRE(maintained.outcome != EECacheMaintenanceOutcome::Completed);
+    requireSameCacheLine(memory.instructionCacheLine(set, 0), sentinel);
+    requireSameCacheLine(memory.instructionCacheLine(set, 1), sentinel);
+    REQUIRE(EEMemorySystemTestAccess::prefetchData(
+      &memory, &system.eeBus(), {EEMemoryMap::KSEG0_BASE | physical, 0, {}}).outcome ==
+      EEPrefetchOutcome::Ignored);
+  }
+  REQUIRE(system.eeBus().read32(EEMemoryMap::INTC_STAT) == status);
+}
+
+TEST_CASE("EE cached ROM authored guest executes cold instruction and data fills",
+  "[ee][cache-rom]")
+{
+  NekoSystem system;
+  std::vector<std::uint8_t> image(EEMemoryMap::BOOT_ROM_SIZE, 0);
+  const std::uint32_t program[] = {
+    UINT32_C(0x3c019fc0), // lui r1, 0x9fc0
+    UINT32_C(0x8c220100), // lw r2, 0x100(r1)
+    UINT32_C(0x24430001), // addiu r3, r2, 1
+    UINT32_C(0x1000ffff), // branch to self
+    0
+  };
+  for (std::size_t index = 0; index < 5; ++index)
+  {
+    for (std::size_t byte = 0; byte < 4; ++byte)
+    {
+      image[4 * index + byte] = static_cast<std::uint8_t>(program[index] >> (8 * byte));
+    }
+  }
+  image[0x100] = 0x78;
+  image[0x101] = 0x56;
+  image[0x102] = 0x34;
+  image[0x103] = 0x12;
+  system.eeBus().installBootROM(image);
+  system.eeMemorySystem().setCOP0Register(EECOP0Register::Config,
+    EECOP0Config::INSTRUCTION_CACHE_ENABLE | EECOP0Config::DATA_CACHE_ENABLE);
+  auto &core = system.eeCore();
+  core.startExecution(UINT32_C(0x9fc00000));
+  for (std::size_t cycle = 0; cycle < 8; ++cycle)
+  {
+    core.clock();
+  }
+  REQUIRE(core.stopReason() == EEStopReason::None);
+  REQUIRE(core.generalRegister(3).low == UINT32_C(0x12345679));
+  REQUIRE(system.eeMemorySystem().instructionCacheLine(0, 0).valid);
+  REQUIRE(system.eeMemorySystem().dataCacheLine(4, 0).valid);
 }
 
 TEST_CASE("EE dirty cache line writeback uses its physical tag and set")

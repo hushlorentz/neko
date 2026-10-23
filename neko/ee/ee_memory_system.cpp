@@ -547,7 +547,7 @@ EEDataCacheStoreResult EEMemorySystem::storeData(
   if (translation.cacheRoute !=
         EECacheRoute::CachedNoncoherent ||
       (cop0Config & EECOP0Config::DATA_CACHE_ENABLE) == 0 ||
-      !bus->isMainMemoryRange(
+      !bus->isCacheFillRange(
         lineBaseAddress,
         CACHE_LINE_SIZE))
   {
@@ -1378,7 +1378,7 @@ EECacheLineFillResult EEMemorySystem::fillCacheLine(
     ~static_cast<std::uint32_t>(CACHE_LINE_SIZE - 1);
   result.firstQuadword =
     static_cast<std::uint8_t>((physicalAddress >> 4) & 3);
-  if (!bus.isMainMemoryRange(
+  if (!bus.isCacheFillRange(
         result.lineBaseAddress,
         CACHE_LINE_SIZE))
   {
@@ -1977,7 +1977,7 @@ EEDataCacheLoadResult EEMemorySystem::loadData(
   if (translation.cacheRoute !=
         EECacheRoute::CachedNoncoherent ||
       (cop0Config & EECOP0Config::DATA_CACHE_ENABLE) == 0 ||
-      !bus.isMainMemoryRange(
+      !bus.isCacheFillRange(
         lineBaseAddress,
         CACHE_LINE_SIZE))
   {
@@ -2152,7 +2152,7 @@ EEPrefetchResult EEMemorySystem::prefetchData(
   const std::uint32_t lineBaseAddress =
     result.translation.physicalAddress &
     ~static_cast<std::uint32_t>(CACHE_LINE_SIZE - 1);
-  if (!bus->isMainMemoryRange(
+  if (!bus->isCacheFillRange(
         lineBaseAddress,
         CACHE_LINE_SIZE))
   {
