@@ -1811,9 +1811,20 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: `0x1f802070` Scope
 
-- [ ] Resolve the scope decision for the observed `0x1f802070` initialization
+- [x] Resolve the scope decision for the observed `0x1f802070` initialization
       store; obtain approval for bounded evidence/repair work or an explicit
       milestone-scope change before extending hardware.
+
+### IOP Platform Initialization: `0x1f802070` Family Evidence
+
+- [x] Identify the observed word and evidence-backed related controls using
+      local manuals and approved secondary sources; separate PS2 applicability,
+      shared behavior, distinct owners, disagreements, and evidence gaps.
+- [x] Propose coherent behavior/owner groups and finite repair batches, including
+      access, reset, persistence, trace, and authored regression requirements;
+      leave unsupported accesses and existing policies unchanged.
+- [ ] Obtain explicit implementation approval or revise milestone scope before
+      extending hardware; preserve the pending grouped-SSBUS closure gate.
 
 ### Real BIOS Handshake and Boundary Conformance
 
