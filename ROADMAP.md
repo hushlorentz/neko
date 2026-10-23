@@ -1793,8 +1793,21 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Propose coherent access/reset/readback and decode/timing groups, existing
       owner boundaries, persistence/trace effects, and authored regression needs;
       preserve already implemented policies and unsupported accesses.
-- [ ] Propose finite grouped repair batches and obtain explicit implementation
+- [x] Propose finite grouped repair batches and obtain explicit implementation
       approval, or revise milestone scope, before extending hardware.
+
+### IOP Platform Initialization: Grouped SSBUS Configuration Repair
+
+- [ ] Extend the existing `IOPBus` configuration image to all 18 identified
+      words (15 additions), with retention-only base/delay policies, schema-48
+      atomic persistence/hash, authored red/green coverage, focused integration,
+      and individual independent review.
+- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+      classify the next responsible dependency without extending hardware or
+      claiming a handshake from configuration progress alone.
+- [ ] Reconcile provisional policies and the dependency record, complete
+      independent block review, and run complete optimized and AddressSanitizer
+      checks.
 
 ### Real BIOS Handshake and Boundary Conformance
 
