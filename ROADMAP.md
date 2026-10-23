@@ -1729,7 +1729,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: Bounded Evidence
 
-- [ ] Compare approved local PCSX2, DobieStation, and Play handling of the
+- [x] Compare approved local PCSX2, DobieStation, and Play handling of the
       observed `0x1f801020` access and directly shared ownership with
       `0x1f801010`; distinguish supported facts, disagreements, and evidence gaps.
 - [ ] Propose the smallest defensible access/reset/readback/timing contract
