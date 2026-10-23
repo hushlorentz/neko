@@ -1680,7 +1680,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       reject malformed cross-owner continuation without destination mutation.
 - [x] Complete independent cross-component review and optimized sanitizer checks.
 
-### Deterministic BIOS Startup Boundary
+### BIOS Startup Diagnostics and Attribution
 
 - [x] Pin the supplied BIOS identity, bounded discovery budget, and cold-start
       configuration; record the first CPU stop or budget-boundary state without
@@ -1697,41 +1697,60 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Add BIOS-free diagnostic regressions for attribution, ordering, limits,
       errors, and observational equivalence; complete independent review and
       the optimized repository check before dependency classification.
-- [x] Classify discovered pre-handshake dependencies against the approved
+- [ ] Run the complete optimized and AddressSanitizer checks to close the
+      diagnostic block independently of reaching the BIOS handshake.
+
+### BIOS Prerequisite Discovery and Bounded Repairs
+
+- [x] Classify the initial discovered pre-handshake dependencies against the approved
       contract; obtain scope approval and split prerequisite work into testable
       items before extending hardware.
 - [x] Repair EE cached installed-ROM fills across instruction/data and related
       CACHE/PREF paths; retain immutable backing, MMIO rejection, and atomic
       failure behavior with authored BIOS-free regressions.
+- [ ] Classify the newly exposed EE startup TLB-store exception by reconstructing
+      guest mapping and CPU-state provenance; define any justified repair as a
+      separately approved, testable item before changing translation or reset.
 - [ ] Add the approved exact-word IOP SSBUS configuration profile at
       `0x1f801010`, with bounded access admission, reset/readback, canonical
       hashing, atomic save/load, and authored BIOS-free regressions.
-- [ ] Repeat bounded discovery after each prerequisite; reclassify earlier
-      stops against the approved contract before further hardware extension
-      or any change to the handshake target.
+- [ ] Re-run bounded discovery after the approved repairs; classify the next
+      responsible CPU stops or waits without treating consequential handler
+      failures as new hardware requirements.
+- [ ] Reassess the resulting pre-handshake dependencies; obtain approval for
+      additional bounded prerequisite blocks or an explicit milestone-scope
+      change before extending hardware beyond this tranche.
+- [ ] Complete individual repair reviews and independent block review, retain
+      authored BIOS-free regression coverage, and run the complete optimized
+      and AddressSanitizer checks for the bounded prerequisite tranche.
+
+### Real BIOS Handshake and Boundary Conformance
+
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.
-- [ ] Advance both CPUs through real startup/SIF execution without fabricated
-      readiness, RPC responses, skipped instructions, or generic device stubs.
-- [ ] Demonstrate the selected handshake, then record the first out-of-scope
-      device dependency with CPU/access/wait evidence for Milestone 10 or its
-      owning later milestone.
+- [ ] Demonstrate that checkpoint through both CPUs' real startup/SIF execution,
+      without fabricated readiness, host RPC responses, skipped instructions,
+      or generic device stubs.
+- [ ] Record the first subsequent out-of-scope device dependency with
+      CPU/access/wait evidence for Milestone 10 or its owning later milestone,
+      without implementing that device here.
 - [ ] Reproduce the BIOS checkpoint and boundary across bounded repetitions,
       trace modes, and save/load; retain authored BIOS-free regressions for
       every implemented prerequisite.
-- [ ] Complete independent startup/integration review and sanitizer checks.
 
 ### Milestone Conformance and Closure
 
-- [ ] Complete the authored two-CPU transport/lifecycle matrix and the complete
-      optimized repository check, preserving existing EE/IOP/graphics workflows.
+- [ ] Audit the completed authored two-CPU transport/lifecycle matrix for
+      startup-prerequisite coverage gaps; add only missing cases and run the
+      complete optimized check, preserving existing EE/IOP/graphics workflows.
 - [ ] Complete the bounded architecture and maintainability review of shared
       ownership, DMA transitions, scheduling, reset, diagnostics, and persistence.
 - [ ] Reconcile provisional policies and the BIOS dependency record; expand
       Milestone 10 only from demonstrated boot-service needs.
-- [ ] Complete independent final review, resolve concrete findings, and run
-      optimized AddressSanitizer and native macOS leak checks.
+- [ ] Complete independent final startup/interconnect review, resolve concrete
+      findings, and run optimized AddressSanitizer and native macOS leak checks;
+      this also closes the real-BIOS conformance block.
 
 ## Milestone 10: Boot Services, Media, and Input
 
