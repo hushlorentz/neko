@@ -1881,7 +1881,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Admit correctly decoded zero-valued `MTC0` writes to `$7` without state
       or debug/cache effects; retain privilege checks and unsupported accesses,
       with authored red/green, lifecycle/persistence coverage and individual review.
-- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+- [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next originating dependency without extending hardware or
       claiming the guest handshake from initialization progress.
 - [ ] Reconcile provisional policies and the dependency record, complete
