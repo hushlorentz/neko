@@ -1899,12 +1899,18 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Admit correctly decoded zero-valued `MTC0` writes to `$3/$5/$9/$11`
       without state or debug/cache effects; preserve unsupported reads/nonzero
       writes, with authored red/green, lifecycle coverage and individual review.
-- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+- [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next originating dependency without extending hardware or
       claiming the guest handshake from initialization progress.
-- [ ] Reconcile provisional policies and the dependency record, complete
+- [x] Reconcile provisional policies and the dependency record, complete
       independent block review, and run complete optimized and AddressSanitizer
       checks.
+
+### IOP CP0 Initialization: Selector-6 Scope
+
+- [ ] After debug address/mask repair closure, resolve the observed
+      `MTC0 r0,$6` dependency through an explicitly approved bounded evidence
+      scope or milestone-scope decision before extending the CP0 profile.
 
 ### Real BIOS Handshake and Boundary Conformance
 
