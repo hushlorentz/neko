@@ -1084,6 +1084,10 @@ IOPInstructionEffects IOPCore::cop0TransferEffects(
   IOPCOP0WriteTarget writeTarget = IOPCOP0WriteTarget::None;
   switch (instruction.destinationRegister)
   {
+    case 7:
+      // Only disabled DCIC initialization is modeled, without retained state.
+      return instruction.operation == IOPOperation::MoveToCOP0 && target == 0
+        ? retiredEffects() : reservedInstructionEffects();
     case 8:
       value = cop0.badVirtualAddress;
       break;

@@ -410,6 +410,45 @@ TEST_CASE("IOP diagnostic rejected writes retain failed memory observations",
   }
 }
 
+TEST_CASE("IOP DCIC zero writes publish only fetch issue and retirement",
+  "[iop][cop0][dcic][trace]")
+{
+  NekoSystem traced;
+  NekoSystem untraced;
+  for (auto *system : {&traced, &untraced})
+  {
+    instruction(*system, 0, 0x40803800);
+    system->iopCore().startExecution(0xa0000000);
+  }
+  traced.startTrace();
+  traced.runMasterCycles(8);
+  untraced.runMasterCycles(8);
+  REQUIRE(traced.iopCore().exception().kind == IOPException::None);
+  REQUIRE(traced.iopCore().retiredInstructions() == 1);
+  REQUIRE(traced.iopCore().programCounter() == 0xa0000004);
+  REQUIRE(traced.iopStateHash() == untraced.iopStateHash());
+  REQUIRE(traced.eeStateHash() == untraced.eeStateHash());
+  REQUIRE(traced.sifStateHash() == untraced.sifStateHash());
+  REQUIRE(untraced.trace().empty());
+  const auto &events = traced.trace();
+  REQUIRE(events.size() == 3);
+  requireIdentity(events[0], Subsystem::IOP, Type::MemoryAccess, 1);
+  REQUIRE(events[0].value0 == 0xa0000000);
+  REQUIRE(events[0].value1 == 0x40803800);
+  REQUIRE(events[0].value2 == 0);
+  REQUIRE(events[0].value3 == 0x30204);
+  requireIdentity(events[1], Subsystem::IOP, Type::InstructionIssued, 1);
+  REQUIRE(events[1].value0 == 0xa0000000);
+  REQUIRE(events[1].value1 == 0x40803800);
+  REQUIRE(events[1].value2 == 0);
+  REQUIRE(events[1].value3 == 0);
+  requireIdentity(events[2], Subsystem::IOP, Type::InstructionRetired, 1);
+  REQUIRE(events[2].value0 == 0xa0000000);
+  REQUIRE(events[2].value1 == 0xa0000004);
+  REQUIRE(events[2].value2 == 1);
+  REQUIRE(events[2].value3 == 1);
+}
+
 TEST_CASE("IOP high-address startup writes are trace observational",
   "[iop][high-control][trace]")
 {

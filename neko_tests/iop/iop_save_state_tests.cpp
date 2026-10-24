@@ -513,6 +513,94 @@ TEST_CASE("IOP diagnostic writes continue across lifecycle and branch restore",
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("IOP DCIC zero writes have the same canonical effects as NOP",
+  "[iop][cop0][dcic][save-state]")
+{
+  NekoSystem disabledDCIC;
+  NekoSystem nop;
+  for (auto *system : {&disabledDCIC, &nop})
+  {
+    loadInstruction(system, 0x100, 0x12345678);
+    REQUIRE(system->iopCore().readData32(0x80000100).value == 0x12345678);
+    system->iopCore().startExecution(0x80000200);
+    system->iopCore().stepInstruction();
+    system->iopCore().haltExecution();
+    loadInstruction(system, 0, system == &disabledDCIC ? 0x40803800 : 0);
+    system->iopTimers().writeMode(0, 0x10);
+    system->iopTimers().writeTarget(0, 3);
+    system->iopInterruptController().assertSource(IOPInterruptSource::Timer0);
+    system->iopInterruptController().writeMask(0x10);
+    REQUIRE(system->sif().pushSIF1Quadword({{1, 2, 3, 4}}) ==
+      SIFTransferOutcome::Completed);
+    system->iopCore().startExecution(0xa0000000);
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().exception().kind == IOPException::None);
+    REQUIRE(system->iopCore().programCounter() == 0xa0000004);
+  }
+  loadInstruction(&nop, 0, 0x40803800);
+  REQUIRE(disabledDCIC.iopStateHash() == nop.iopStateHash());
+  REQUIRE(disabledDCIC.saveState() == nop.saveState());
+  for (auto *system : {&disabledDCIC, &nop})
+  {
+    system->reset();
+  }
+  REQUIRE(disabledDCIC.saveState() == nop.saveState());
+}
+
+TEST_CASE("IOP DCIC admission continues across delayed-load and branch restore",
+  "[iop][cop0][dcic][save-state]")
+{
+  NekoSystem original;
+  const IOPWord program[] = {
+    0x8c020100, // lw r2, 0x100(r0)
+    0x40823800, // mtc0 r2, $7: captures zero before the delayed load
+    0x10000002, // beq r0, r0, +2
+    0x40803800, // mtc0 r0, $7: branch delay slot
+    0xffffffff, // skipped
+    0x40823800  // mtc0 r2, $7: nonzero remains unsupported
+  };
+  for (std::size_t index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+  {
+    loadInstruction(&original, static_cast<IOPAddress>(index * 4), program[index]);
+  }
+  loadInstruction(&original, 0x100, 0x12345678);
+  original.iopCore().startExecution(0xa0000000);
+  original.iopCore().stepInstruction();
+  original.iopCore().haltExecution();
+  original.iopCore().resumeExecution();
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  REQUIRE(restored.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  for (auto *system : {&original, &restored})
+  {
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().generalRegister(2) == 0x12345678);
+    REQUIRE(system->iopCore().exception().kind == IOPException::None);
+    REQUIRE(system->iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().branchContinuation().active);
+  }
+  REQUIRE(original.saveState() == restored.saveState());
+  restored.loadState(original.saveState());
+  for (auto *system : {&original, &restored})
+  {
+    system->iopCore().haltExecution();
+    system->iopCore().resumeExecution();
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().programCounter() == 0xa0000014);
+    REQUIRE(system->iopCore().retiredInstructions() == 4);
+    REQUIRE(system->iopCore().exception().kind == IOPException::None);
+    REQUIRE_FALSE(system->iopCore().branchContinuation().active);
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().exception().kind == IOPException::ReservedInstruction);
+    REQUIRE(system->iopCore().exceptionProgramCounter() == 0xa0000014);
+    REQUIRE(system->iopCore().retiredInstructions() == 4);
+  }
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("IOP high-address writes continue across lifecycle and branch restore",
   "[iop][high-control][save-state]")
 {

@@ -406,7 +406,7 @@ TEST_CASE("IOP COP0 transfers require CU0 only in user mode",
   }
 }
 
-TEST_CASE("IOP unsupported COP0 register transfers raise RI even with register zero",
+TEST_CASE("IOP COP0 register-zero transfers admit only the selected profile",
   "[iop][execution][cop0]")
 {
   for (std::uint8_t index = 0; index < 32; ++index)
@@ -423,11 +423,168 @@ TEST_CASE("IOP unsupported COP0 register transfers raise RI even with register z
       loadInstruction(&bus, 0, cop0TransferInstruction(selector, 0, index));
       core.startExecution(0);
       core.stepInstruction();
-      REQUIRE(core.exception().kind == IOPException::ReservedInstruction);
+      const bool disabledDCIC = index == 7 && selector == 4;
+      REQUIRE(core.exception().kind == (disabledDCIC
+        ? IOPException::None : IOPException::ReservedInstruction));
       REQUIRE(core.stopReason() == IOPStopReason::None);
-      REQUIRE(core.programCounter() == 0xbfc00180);
+      REQUIRE(core.programCounter() == (disabledDCIC ? 4 : 0xbfc00180));
+      REQUIRE(core.exceptionProgramCounter() == 0);
+      REQUIRE(core.retiredInstructions() == (disabledDCIC ? 1 : 0));
+    }
+  }
+}
+
+TEST_CASE("IOP DCIC zero writes retire without effects from every GPR",
+  "[iop][execution][cop0][dcic]")
+{
+  REQUIRE(cop0TransferInstruction(4, 0, 7) == 0x40803800);
+  for (std::uint8_t source = 0; source < 32; ++source)
+  {
+    CAPTURE(source);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPWord raw = cop0TransferInstruction(4, source, 7);
+    loadInstruction(&bus, 0, raw);
+    const auto effects = IOPCoreTestAccess::instructionEffects(core, raw);
+    REQUIRE(effects.completion == IOPInstructionCompletion::Retired);
+    REQUIRE(effects.exception.kind == IOPException::None);
+    REQUIRE(effects.cop0Write.target == IOPCOP0WriteTarget::None);
+    REQUIRE(effects.destination.kind == IOPWriteEffect::None);
+    REQUIRE(effects.hi.kind == IOPWriteEffect::None);
+    REQUIRE(effects.lo.kind == IOPWriteEffect::None);
+    REQUIRE(effects.store.operation == IOPStoreOperation::None);
+    REQUIRE(effects.delayedResult.source == IOPDelayedResultSource::None);
+    REQUIRE(core.retiredInstructions() == 0);
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.executionState() == IOPExecutionState::Running);
+    REQUIRE(core.stopReason() == IOPStopReason::None);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.elapsedCycles() == 1);
+    REQUIRE(core.status() == 0x00600000);
+    REQUIRE(core.cause() == 0);
+    REQUIRE(core.exceptionProgramCounter() == 0);
+    REQUIRE(core.generalRegister(source) == 0);
+  }
+}
+
+TEST_CASE("IOP DCIC rejects every nonzero write bit and malformed zero writes",
+  "[iop][execution][cop0][dcic]")
+{
+  for (const bool malformed : {false, true})
+  {
+    for (unsigned bit = 0; bit < (malformed ? 11u : 32u); ++bit)
+    {
+      CAPTURE(malformed);
+      CAPTURE(bit);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      const IOPWord value = malformed ? 0 : IOPWord(1) << bit;
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
+      const IOPWord raw = cop0TransferInstruction(4, 2, 7) |
+        (malformed ? IOPWord(1) << bit : 0);
+      loadInstruction(&bus, 0, raw);
+      core.startExecution(0);
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::ReservedInstruction);
+      REQUIRE(core.cause() == 0x28);
       REQUIRE(core.exceptionProgramCounter() == 0);
       REQUIRE(core.retiredInstructions() == 0);
+      REQUIRE(core.generalRegister(2) == value);
+    }
+  }
+}
+
+TEST_CASE("IOP DCIC zero-write admission preserves CU0 and delay-slot provenance",
+  "[iop][execution][cop0][dcic]")
+{
+  for (const bool user : {false, true})
+  {
+    for (const bool usable : {false, true})
+    {
+      for (const IOPWord value : {0u, 0x12345678u})
+      {
+        CAPTURE(user);
+        CAPTURE(usable);
+        CAPTURE(value);
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        const IOPWord status = 0x00600000 |
+          (user ? 2 : 0) | (usable ? 0x10000000 : 0);
+        IOPCoreTestAccess::setCOP0State(&core, {0, status, 0, 0});
+        IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
+        loadInstruction(&bus, 0, immediateInstruction(4, 0, 0, 3));
+        loadInstruction(&bus, 4, cop0TransferInstruction(4, 2, 7));
+        core.startExecution(0);
+        core.stepInstruction();
+        core.stepInstruction();
+        const IOPException expected = user && !usable
+          ? IOPException::CoprocessorUnusable
+          : value != 0 ? IOPException::ReservedInstruction : IOPException::None;
+        REQUIRE(core.exception().kind == expected);
+        REQUIRE_FALSE(core.branchContinuation().active);
+        REQUIRE(core.generalRegister(2) == value);
+        if (expected == IOPException::None)
+        {
+          REQUIRE(core.programCounter() == 16);
+          REQUIRE(core.retiredInstructions() == 2);
+          REQUIRE(core.status() == status);
+          REQUIRE(core.cause() == 0);
+        }
+        else
+        {
+          REQUIRE(core.programCounter() == 0xbfc00180);
+          REQUIRE(core.retiredInstructions() == 1);
+          REQUIRE(core.exception().inBranchDelaySlot);
+          REQUIRE(core.exceptionProgramCounter() == 0);
+          REQUIRE(core.cause() == (expected == IOPException::CoprocessorUnusable
+            ? 0x8000002c : 0x80000028));
+          REQUIRE(core.status() ==
+            ((status & ~IOPWord(0x3f)) | ((status & 0xf) << 2)));
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP DCIC admission captures the GPR before delayed writeback",
+  "[iop][execution][cop0][dcic]")
+{
+  for (const bool cop0Load : {false, true})
+  {
+    for (const IOPWord previous : {0u, 0x12345678u})
+    {
+      CAPTURE(cop0Load);
+      CAPTURE(previous);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(0x100, previous == 0 ? 0x89abcdef : 0).status ==
+        IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, previous);
+      IOPCoreTestAccess::setCOP0State(&core, {
+        0, 0x00600000, 0, previous == 0 ? 0x89abcdefu : 0u});
+      loadInstruction(&bus, 0, cop0Load
+        ? cop0TransferInstruction(0, 2, 14)
+        : immediateInstruction(0x23, 0, 2, 0x100));
+      loadInstruction(&bus, 4, cop0TransferInstruction(4, 2, 7));
+      core.startExecution(0);
+      core.stepInstruction();
+      core.haltExecution();
+      core.resumeExecution();
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(2) == (previous == 0 ? 0x89abcdef : 0));
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+      REQUIRE(core.exception().kind == (previous == 0
+        ? IOPException::None : IOPException::ReservedInstruction));
+      REQUIRE(core.retiredInstructions() == (previous == 0 ? 2 : 1));
+      REQUIRE(core.programCounter() == (previous == 0 ? 8 : 0xbfc00180));
+      REQUIRE(core.exceptionProgramCounter() == (previous == 0 ? 0x89abcdef : 4));
     }
   }
 }
