@@ -1861,10 +1861,20 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP CP0 Initialization: Register-7 Scope
 
-- [ ] After high-address repair closure, resolve the scope decision for the
+- [x] After high-address repair closure, resolve the scope decision for the
       observed `MTC0 r0,$7` initialization transfer; obtain approval for bounded
       evidence/repair work or an explicit milestone-scope change before extending
       the selected CP0 profile.
+
+### IOP CP0 Initialization: Register-7 Family Evidence
+
+- [x] Establish register-7 identity and directly related debug-register groups
+      using local manuals and approved current secondary sources; distinguish
+      PS2 applicability, disagreements, and evidence gaps.
+- [x] Propose finite behavior/owner and repair groups covering transfer access,
+      reset, exceptions, persistence, trace, and authored validation requirements.
+- [ ] Obtain explicit implementation approval or revise milestone scope before
+      extending CP0; preserve the unchanged guest-handshake target.
 
 ### Real BIOS Handshake and Boundary Conformance
 
