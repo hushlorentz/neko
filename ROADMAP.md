@@ -1884,9 +1884,15 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next originating dependency without extending hardware or
       claiming the guest handshake from initialization progress.
-- [ ] Reconcile provisional policies and the dependency record, complete
+- [x] Reconcile provisional policies and the dependency record, complete
       independent block review, and run complete optimized and AddressSanitizer
       checks.
+
+### IOP CP0 Initialization: Debug Address/Mask Scope
+
+- [ ] Assess the observed `MTC0 r0,$3` and related named debug address/mask
+      group using retained family evidence; obtain an explicit finite repair
+      approval or milestone-scope decision before extending the CP0 profile.
 
 ### Real BIOS Handshake and Boundary Conformance
 
