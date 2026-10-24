@@ -1873,8 +1873,20 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       PS2 applicability, disagreements, and evidence gaps.
 - [x] Propose finite behavior/owner and repair groups covering transfer access,
       reset, exceptions, persistence, trace, and authored validation requirements.
-- [ ] Obtain explicit implementation approval or revise milestone scope before
+- [x] Obtain explicit implementation approval or revise milestone scope before
       extending CP0; preserve the unchanged guest-handshake target.
+
+### IOP CP0 Initialization: Minimal DCIC Initialization Repair
+
+- [ ] Admit correctly decoded zero-valued `MTC0` writes to `$7` without state
+      or debug/cache effects; retain privilege checks and unsupported accesses,
+      with authored red/green, lifecycle/persistence coverage and individual review.
+- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+      classify the next originating dependency without extending hardware or
+      claiming the guest handshake from initialization progress.
+- [ ] Reconcile provisional policies and the dependency record, complete
+      independent block review, and run complete optimized and AddressSanitizer
+      checks.
 
 ### Real BIOS Handshake and Boundary Conformance
 
