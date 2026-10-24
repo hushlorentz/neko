@@ -364,6 +364,143 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
   REQUIRE(destination.trace().size() == traceSize);
 }
 
+TEST_CASE("IOP diagnostic writes leave canonical machine state unchanged",
+  "[iop][post][save-state]")
+{
+  NekoSystem system;
+  for (IOPAddress address : ssbusAddresses)
+  {
+    REQUIRE(system.iopBus().write32(address, address ^ 0x89abcdef).status ==
+      IOPBusStatus::Completed);
+  }
+  loadInstruction(&system, 0x100, 0x12345678);
+  REQUIRE(system.iopBus().write32(IOPBus::SCRATCHPAD_BASE, 0x87654321).status ==
+    IOPBusStatus::Completed);
+  system.iopTimers().writeMode(0, 0x10);
+  system.iopTimers().writeTarget(0, 3);
+  system.iopInterruptController().assertSource(IOPInterruptSource::Timer0);
+  system.iopInterruptController().writeMask(0x10);
+  system.iopInterruptController().writeControl(1);
+  REQUIRE(system.iopBus().write32(0x1f8010f0, 0x76543210).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write32(IOPBus::SIF_BASE + 0x10, 0x12345678).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write32(IOPBus::SIF_BASE + 0x30, 0x40000001).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write32(IOPBus::SIF_DOORBELL, 2).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.sif().pushSIF1Quadword({{1, 2, 3, 4}}) ==
+    SIFTransferOutcome::Completed);
+  const auto state = system.saveState();
+  const auto iopHash = system.iopStateHash();
+  const auto eeHash = system.eeStateHash();
+  const auto sifHash = system.sifStateHash();
+  system.startTrace();
+  for (IOPWord value : {0u, 0xfcu, 0xffffffffu, 0xaaaaaaaau, 0x55555555u})
+  {
+    REQUIRE(system.iopBus().write8(0x1f802070, static_cast<std::uint8_t>(value)).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write32(0x1f802070, value).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().writeMasked32(0x1f802070, value, 0xf).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write8(0x1fa00000, static_cast<std::uint8_t>(value)).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().read8(0x1f802070).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopBus().read8(0x1fa00000).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  REQUIRE(system.saveState() == state);
+  REQUIRE(system.trace().empty());
+}
+
+TEST_CASE("IOP diagnostic writes continue across lifecycle and branch restore",
+  "[iop][post][save-state]")
+{
+  NekoSystem original;
+  const auto image = rom(0x42);
+  REQUIRE(original.iopBus().installRom(image));
+  const IOPWord program[] = {
+    0x3c01bf80, // lui r1, 0xbf80
+    0x3c03bfa0, // lui r3, 0xbfa0
+    0x8c020100, // lw r2, 0x100(r0)
+    0x10000002, // beq r0, r0, +2: load-delay slot
+    0xac222070, // sw r2, 0x2070(r1): branch delay slot
+    0xffffffff, // skipped
+    0xa0620000, // sb r2, 0(r3)
+    0
+  };
+  for (std::size_t index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+  {
+    loadInstruction(&original, static_cast<IOPAddress>(index * 4), program[index]);
+  }
+  loadInstruction(&original, 0x100, 0x123456fc);
+  original.iopCore().startExecution(0xa0000000);
+  for (unsigned step = 0; step < 3; ++step)
+  {
+    original.iopCore().stepInstruction();
+  }
+  REQUIRE(original.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  REQUIRE(original.iopCore().generalRegister(2) == 0);
+  REQUIRE(original.iopBus().write8(0x1f802070, 0xff).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(original.iopBus().write8(0x1fa00000, 0xff).status ==
+    IOPBusStatus::Completed);
+  original.iopCore().haltExecution();
+  original.iopCore().resumeExecution();
+  const auto state = original.saveState();
+  NekoSystem restored;
+  REQUIRE(restored.iopBus().installRom(image));
+  restored.loadState(state);
+  REQUIRE(restored.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  for (auto *system : {&original, &restored})
+  {
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().branchContinuation().active);
+    REQUIRE(system->iopCore().generalRegister(2) == 0x123456fc);
+  }
+  REQUIRE(original.iopStateHash() == restored.iopStateHash());
+  restored.loadState(original.saveState());
+  REQUIRE(restored.iopCore().branchContinuation().active);
+  const auto replacement = rom(0x24);
+  for (auto *system : {&original, &restored})
+  {
+    REQUIRE(system->iopBus().installRom(replacement));
+  }
+  for (unsigned step = 0; step < 3; ++step)
+  {
+    original.iopCore().stepInstruction();
+    restored.iopCore().stepInstruction();
+    REQUIRE(original.iopCore().exception().kind == IOPException::None);
+    REQUIRE(original.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(original.iopStateHash() == restored.iopStateHash());
+  }
+  REQUIRE(original.iopCore().programCounter() == 0xa0000020);
+  REQUIRE(original.iopCore().retiredInstructions() == 7);
+  REQUIRE(original.saveState() == restored.saveState());
+  for (auto *system : {&original, &restored})
+  {
+    system->iopCore().haltExecution();
+    system->iopCore().startExecution(0xa0000000);
+    REQUIRE(system->iopCore().writeData8(0xbf802070, 0).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(system->iopCore().writeData8(0xbfa00000, 0).outcome ==
+      IOPAccessOutcome::Completed);
+    system->reset();
+    REQUIRE(system->iopBus().write32(0x1f802070, 0xfc).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system->iopBus().write8(0x1fa00000, 0xfc).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system->iopBus().read8(0x1f802070).status == IOPBusStatus::Unmapped);
+    REQUIRE(system->iopBus().read8(0x1fa00000).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("IOP persistence continues branch and delayed load without copied pointers")
 {
   NekoSystem original;

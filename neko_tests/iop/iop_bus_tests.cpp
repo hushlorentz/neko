@@ -307,6 +307,83 @@ TEST_CASE("IOP SSBUS configuration is excluded from DMA and host byte access",
   }
 }
 
+TEST_CASE("IOP diagnostic endpoints admit only their approved writes",
+  "[iop][bus][post]")
+{
+  IOPBus bus;
+  for (IOPWord value : {0u, 0xfcu, 0xffffffffu, 0xaaaaaaaau, 0x55555555u})
+  {
+    CAPTURE(value);
+    CHECK(bus.write8(0x1f802070, static_cast<std::uint8_t>(value)).status ==
+      IOPBusStatus::Completed);
+    CHECK(bus.write32(0x1f802070, value).status == IOPBusStatus::Completed);
+    CHECK(bus.writeMasked32(0x1f802070, value, 0xf).status ==
+      IOPBusStatus::Completed);
+    CHECK(bus.write8(0x1fa00000, static_cast<std::uint8_t>(value)).status ==
+      IOPBusStatus::Completed);
+  }
+  REQUIRE(bus.regionForRange(0x1f802070, 4) == IOPBusRegion::Mmio);
+  REQUIRE(bus.regionForRange(0x1f802070, 5) == IOPBusRegion::Unmapped);
+  REQUIRE(bus.regionForRange(0x1fa00000, 1) == IOPBusRegion::Mmio);
+  REQUIRE(bus.regionForRange(0x1fa00000, 2) == IOPBusRegion::Unmapped);
+}
+
+TEST_CASE("IOP diagnostic endpoints reject readback lanes and other owners",
+  "[iop][bus][post]")
+{
+  IOPBus bus;
+  for (IOPAddress base : {0x1f802070u, 0x1fa00000u})
+  {
+    CAPTURE(base);
+    REQUIRE(bus.read8(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base, 0xffff).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(base, 0xffffffff, mask).status ==
+        IOPBusStatus::Unmapped);
+    }
+    for (std::uint8_t mask : {0, 0x10, 0xff})
+    {
+      REQUIRE_THROWS_AS(bus.writeMasked32(base + 1, 0, mask),
+        std::invalid_argument);
+    }
+    for (IOPAddress lane = 1; lane < 4; ++lane)
+    {
+      REQUIRE(bus.write8(base + lane, 0xff).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read8(base + lane).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(base + lane, 0).status == IOPBusStatus::Misaligned);
+      REQUIRE(bus.read32(base + lane).status == IOPBusStatus::Misaligned);
+      REQUIRE(bus.writeMasked32(base + lane, 0, 0xf).status ==
+        IOPBusStatus::Misaligned);
+    }
+    REQUIRE(bus.readDMAC32(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(base) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(base, 0).status == IOPBusStatus::Unmapped);
+    std::uint8_t byte = 0xa5;
+    REQUIRE(bus.loadPhysical(base, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(base, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(byte == 0xa5);
+    for (IOPAddress address :
+         {base - 4, base + 4, base | 0x80000000u, base | 0xa0000000u})
+    {
+      REQUIRE(bus.write8(address, 0xff).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
+    }
+  }
+  REQUIRE(bus.write32(0x1fa00000, 0xffffffff).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.writeMasked32(0x1fa00000, 0xffffffff, 0xf).status ==
+    IOPBusStatus::Unmapped);
+  for (IOPAddress address :
+       {0x1f802000u, 0x1f802020u, 0x1f802030u, 0x1f802040u,
+        0x1f802041u, 0x1f802042u, 0x1f802060u, 0x1f802080u})
+  {
+    REQUIRE(bus.write8(address, 0xff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+  }
+}
+
 TEST_CASE("IOP bus does not wrap addresses beyond the RAM mirror", "[iop][bus]")
 {
   IOPBus bus;

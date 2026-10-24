@@ -66,6 +66,9 @@ class IOPBus final
     static constexpr IOPAddress INTC_CTRL = 0x1f801078;
     static constexpr IOPAddress SIF_BASE = 0x1d000000;
     static constexpr IOPAddress SIF_DOORBELL = 0x1f801450;
+    // Provisional stateless outputs; POST2's hardware identity is uncertain.
+    static constexpr IOPAddress POST2 = 0x1f802070;
+    static constexpr IOPAddress POST3 = 0x1fa00000;
 
     IOPBus();
 
@@ -132,7 +135,9 @@ class IOPBus final
       SIF0DMA,
       Timer,
       SIFRegisters,
-      SIFDoorbell
+      SIFDoorbell,
+      POST2,
+      POST3
     };
 
     struct SSBUSConfigurationState

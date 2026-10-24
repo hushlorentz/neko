@@ -301,6 +301,115 @@ TEST_CASE("IOP grouped SSBUS initialization has no device or scheduling effects"
   REQUIRE(accesses == SSBUSTest::addresses.size() * 2);
 }
 
+TEST_CASE("IOP diagnostic startup writes are trace observational",
+  "[iop][post][trace]")
+{
+  NekoSystem traced;
+  NekoSystem untraced;
+  const auto sifHash = traced.sifStateHash();
+  const std::array<IOPWord, 8> program{{
+    0x3c01bf80, // lui r1, 0xbf80
+    0x340200fc, // ori r2, r0, 0xfc
+    0xac222070, // sw r2, 0x2070(r1)
+    0xa0222070, // sb r2, 0x2070(r1)
+    0x3c03bfa0, // lui r3, 0xbfa0
+    0x10000001, // beq r0, r0, +1
+    0xa0620000, // sb r2, 0(r3): branch delay slot
+    0
+  }};
+  for (auto *system : {&traced, &untraced})
+  {
+    for (std::size_t index = 0; index < program.size(); ++index)
+    {
+      instruction(*system, static_cast<IOPAddress>(index * 4), program[index]);
+    }
+    system->iopCore().startExecution(0xa0000000);
+  }
+  traced.startTrace();
+  traced.runMasterCycles(program.size() * 8);
+  untraced.runMasterCycles(program.size() * 8);
+  REQUIRE(traced.iopCore().executionState() == IOPExecutionState::Running);
+  REQUIRE(traced.iopCore().exception().kind == IOPException::None);
+  REQUIRE(traced.iopCore().retiredInstructions() == program.size());
+  REQUIRE(traced.iopCore().programCounter() == 0xa0000020);
+  REQUIRE(traced.iopInterruptController().status() == 0);
+  REQUIRE(traced.sifStateHash() == sifHash);
+  REQUIRE(traced.sifStateHash() == untraced.sifStateHash());
+  REQUIRE(traced.iopStateHash() == untraced.iopStateHash());
+  REQUIRE(traced.eeStateHash() == untraced.eeStateHash());
+  REQUIRE(traced.saveState() == untraced.saveState());
+  REQUIRE(untraced.trace().empty());
+  REQUIRE(traced.trace().size() == program.size() * 3 + 4);
+  namespace Memory = NekoIOPTraceMemory;
+  const std::array<IOPAddress, 3> addresses{{0xbf802070, 0xbf802070, 0xbfa00000}};
+  const std::array<std::uint64_t, 3> cycles{{17, 25, 49}};
+  std::size_t access = 0;
+  std::size_t branches = 0;
+  for (const auto &event : traced.trace())
+  {
+    REQUIRE(event.subsystem == Subsystem::IOP);
+    if (event.type == Type::BranchScheduled)
+    {
+      requireIdentity(event, Subsystem::IOP, Type::BranchScheduled, 41);
+      REQUIRE(event.value0 == 0xa0000014);
+      REQUIRE(event.value1 == 0xa000001c);
+      REQUIRE(event.value2 == 1);
+      ++branches;
+    }
+    if (event.type != Type::MemoryAccess || event.value0 < 0xbf800000)
+    {
+      continue;
+    }
+    REQUIRE(access < addresses.size());
+    requireIdentity(event, Subsystem::IOP, Type::MemoryAccess, cycles[access]);
+    const std::uint8_t width = access == 0 ? 4 : 1;
+    REQUIRE(event.value0 == addresses[access]);
+    REQUIRE(event.value1 == 0xfc);
+    REQUIRE(event.value2 == 0);
+    REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+      addresses[access] & 0x1fffffff, width, Memory::AccessKind::DataStore,
+      Memory::Outcome::Completed, Memory::CacheRoute::Uncached,
+      true, static_cast<std::uint8_t>(access == 0 ? 0xf : 1)}));
+    ++access;
+  }
+  REQUIRE(access == addresses.size());
+  REQUIRE(branches == 1);
+}
+
+TEST_CASE("IOP diagnostic rejected writes retain failed memory observations",
+  "[iop][post][trace]")
+{
+  namespace Memory = NekoIOPTraceMemory;
+  for (IOPAddress address : {0xbf802070u, 0xbfa00000u})
+  {
+    CAPTURE(address);
+    NekoSystem system;
+    instruction(system, 0, 0x3c010000 | (address >> 16));
+    instruction(system, 4, 0x34210000 | (address & 0xffff));
+    instruction(system, 8, 0xa4200000); // sh r0, 0(r1)
+    system.iopCore().startExecution(0xa0000000);
+    system.runMasterCycles(16);
+    system.startTrace();
+    system.clockMasterCycle();
+    REQUIRE(system.iopCore().stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(system.iopCore().retiredInstructions() == 2);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    const auto &events = system.trace();
+    REQUIRE(events.size() == 4);
+    for (const auto &event : events)
+    {
+      REQUIRE(event.subsystem == Subsystem::IOP);
+    }
+    requireIdentity(events[2], Subsystem::IOP, Type::MemoryAccess, 17);
+    REQUIRE(events[2].value0 == address);
+    REQUIRE(events[2].value1 == 0);
+    REQUIRE(events[2].value3 == nekoPackIOPMemoryTraceMetadata({
+      address & 0x1fffffff, 2, Memory::AccessKind::DataStore,
+      Memory::Outcome::Unmapped, Memory::CacheRoute::Uncached, true, 3}));
+    requireIdentity(events[3], Subsystem::IOP, Type::StateChanged, 17);
+  }
+}
+
 TEST_CASE("IOP trace retains timer assertion and same-cycle mode acknowledgement",
   "[iop][trace]")
 {

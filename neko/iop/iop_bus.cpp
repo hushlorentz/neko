@@ -44,6 +44,8 @@ constexpr IOPAddress IOPBus::INTC_MASK;
 constexpr IOPAddress IOPBus::INTC_CTRL;
 constexpr IOPAddress IOPBus::SIF_BASE;
 constexpr IOPAddress IOPBus::SIF_DOORBELL;
+constexpr IOPAddress IOPBus::POST2;
+constexpr IOPAddress IOPBus::POST3;
 
 IOPBus::IOPBus() : ram(RAM_SIZE, 0)
 {
@@ -177,6 +179,15 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - SIF_DOORBELL),
       Device::SIFDoorbell};
+  }
+  if (first == POST2 &&
+      last < static_cast<std::uint64_t>(POST2) + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, 0, Device::POST2};
+  }
+  if (first == POST3 && last == first)
+  {
+    return {IOPBusRegion::Mmio, 0, Device::POST3};
   }
 
   const auto ssbus = locateSSBUS(address, last);
@@ -457,6 +468,8 @@ IOPBusReadResult IOPBus::readDeviceRegister(
     case Device::SIFRegisters:
     case Device::SIFDoorbell:
       return readSIFRegister(location, width);
+    case Device::POST2:
+    case Device::POST3:
     case Device::None:
       return {};
   }
@@ -485,6 +498,12 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::SIFRegisters:
     case Device::SIFDoorbell:
       return writeSIFRegister(location, width, value);
+    case Device::POST2:
+      return width == 1 || width == sizeof(IOPWord)
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::POST3:
+      return width == 1
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::None:
       return {};
   }
