@@ -33,6 +33,9 @@ The basic `neko` executable is located at:
 - macOS/Linux: `./out/build/neko`
 - Windows with Visual Studio: `.\out\build\Release\neko.exe`
 
+The headless executable requires a subcommand. Invoking it without arguments
+prints usage and exits 2; `--help` and `-h` are not supported.
+
 ## Save-State Diagnostics
 
 Inspect the authoritative versioned schema of a save-state file:
@@ -122,6 +125,12 @@ Run focused tests or collect a complete timing/assertion profile:
 ./out/check/neko_tests "[test-runner]"
 ./out/check/neko_tests --reporter profile --out out/check/test-profile.txt
 ```
+
+Use `./out/check/neko_tests --help` for test-runner options, or
+`./out/check/neko_tests --list-test-names-only "[test-runner]"` to preview a
+selection. Listing returns the number of listed items, not a test result.
+Quote filters and verify that the intended cases run; the bundled matcher
+supports `*` only at pattern edges, not inside a name.
 
 The profile lists every test case and source file, sorted by elapsed time,
 with assertion totals. Profiling runs serially unless `--shard-count <count>`
