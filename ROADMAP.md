@@ -1834,9 +1834,18 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next dependency without extending the approved endpoints or
       mistaking diagnostic output for the guest handshake.
-- [ ] Reconcile provisional policies and the dependency record, complete
+- [x] Reconcile provisional policies and the dependency record, complete
       independent block review, and run complete optimized and AddressSanitizer
       checks.
+
+### IOP Platform Initialization: High-Address Control Evidence
+
+- [ ] Obtain explicit bounded research approval for observed `0xfffe0140`
+      and possible `0xfffe0144` relative; retain current unsupported behavior.
+- [ ] Establish evidence-backed identity and owner groups using local manuals
+      and approved secondary sources; propose finite access/state/validation scope.
+- [ ] Obtain explicit implementation approval or revise milestone scope before
+      extending hardware; preserve the unchanged guest-handshake target.
 
 ### Real BIOS Handshake and Boundary Conformance
 
