@@ -1890,9 +1890,21 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP CP0 Initialization: Debug Address/Mask Scope
 
-- [ ] Assess the observed `MTC0 r0,$3` and related named debug address/mask
+- [x] Assess the observed `MTC0 r0,$3` and related named debug address/mask
       group using retained family evidence; obtain an explicit finite repair
       approval or milestone-scope decision before extending the CP0 profile.
+
+### IOP CP0 Initialization: Debug Address/Mask Initialization Repair
+
+- [ ] Admit correctly decoded zero-valued `MTC0` writes to `$3/$5/$9/$11`
+      without state or debug/cache effects; preserve unsupported reads/nonzero
+      writes, with authored red/green, lifecycle coverage and individual review.
+- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+      classify the next originating dependency without extending hardware or
+      claiming the guest handshake from initialization progress.
+- [ ] Reconcile provisional policies and the dependency record, complete
+      independent block review, and run complete optimized and AddressSanitizer
+      checks.
 
 ### Real BIOS Handshake and Boundary Conformance
 
