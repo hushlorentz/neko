@@ -1896,7 +1896,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP CP0 Initialization: Debug Address/Mask Initialization Repair
 
-- [ ] Admit correctly decoded zero-valued `MTC0` writes to `$3/$5/$9/$11`
+- [x] Admit correctly decoded zero-valued `MTC0` writes to `$3/$5/$9/$11`
       without state or debug/cache effects; preserve unsupported reads/nonzero
       writes, with authored red/green, lifecycle coverage and individual review.
 - [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
