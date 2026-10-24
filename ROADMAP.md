@@ -1831,7 +1831,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] After grouped-SSBUS closure, implement stateless POST2 byte/word and POST3
       byte write-only policies with authored bus/core/trace/lifecycle and
       save-state regression coverage and individual correctness review.
-- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+- [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next dependency without extending the approved endpoints or
       mistaking diagnostic output for the guest handshake.
 - [ ] Reconcile provisional policies and the dependency record, complete
