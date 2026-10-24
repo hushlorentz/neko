@@ -1840,9 +1840,9 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: High-Address Control Evidence
 
-- [ ] Obtain explicit bounded research approval for observed `0xfffe0140`
+- [x] Obtain explicit bounded research approval for observed `0xfffe0140`
       and possible `0xfffe0144` relative; retain current unsupported behavior.
-- [ ] Establish evidence-backed identity and owner groups using local manuals
+- [x] Establish evidence-backed identity and owner groups using local manuals
       and approved secondary sources; propose finite access/state/validation scope.
 - [ ] Obtain explicit implementation approval or revise milestone scope before
       extending hardware; preserve the unchanged guest-handshake target.
