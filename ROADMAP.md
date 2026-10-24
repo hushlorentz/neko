@@ -1844,8 +1844,20 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       and possible `0xfffe0144` relative; retain current unsupported behavior.
 - [x] Establish evidence-backed identity and owner groups using local manuals
       and approved secondary sources; propose finite access/state/validation scope.
-- [ ] Obtain explicit implementation approval or revise milestone scope before
+- [x] Obtain explicit implementation approval or revise milestone scope before
       extending hardware; preserve the unchanged guest-handshake target.
+
+### IOP Platform Initialization: High-Address Control Repair
+
+- [ ] Implement stateless exact-base full-word writes for `0xfffe0140` and
+      `0xfffe0144`, with authored access/state/trace/lifecycle regressions and
+      individual correctness review; retain unsupported reads and mapping effects.
+- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+      classify the next dependency without extending hardware or mistaking
+      initialization progress for the guest handshake.
+- [ ] Reconcile provisional policies and the dependency record, complete
+      independent block review, and run complete optimized and AddressSanitizer
+      checks.
 
 ### Real BIOS Handshake and Boundary Conformance
 
