@@ -260,11 +260,16 @@ TEST_CASE("IOP SSBUS configuration rejects unsupported accesses atomically",
     REQUIRE(bus.writeMasked32(base + 1, 0, 1).status == IOPBusStatus::Misaligned);
     for (IOPAddress address :
          {0x1f800ffcu, 0x1f801024u, 0x1f801060u, 0x1f8013fcu,
-          0x1f801424u, 0x1f802000u, 0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
+          0x1f801424u, 0x1f802000u, 0xfffe0130u, 0xfffe0134u, 0xfffe0148u})
     {
       CAPTURE(address);
       REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
       REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
+    }
+    for (IOPAddress address : {0xfffe0140u, 0xfffe0144u})
+    {
+      REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
     }
     REQUIRE(bus.regionForRange(0x1f801010, 0x14) == IOPBusRegion::Unmapped);
     REQUIRE(bus.regionForRange(0x1f80101c, 8) == IOPBusRegion::Unmapped);
@@ -381,6 +386,79 @@ TEST_CASE("IOP diagnostic endpoints reject readback lanes and other owners",
   {
     REQUIRE(bus.write8(address, 0xff).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+  }
+}
+
+TEST_CASE("IOP high-address controls admit only exact full-word writes",
+  "[iop][bus][high-control]")
+{
+  IOPBus bus;
+  for (IOPAddress base : {0xfffe0140u, 0xfffe0144u})
+  {
+    CAPTURE(base);
+    for (IOPWord value : {0u, 0x1f800400u, 0xffffffffu, 0xaaaaaaaau, 0x55555555u})
+    {
+      CAPTURE(value);
+      CHECK(bus.write32(base, value).status == IOPBusStatus::Completed);
+      CHECK(bus.writeMasked32(base, value, 0xf).status == IOPBusStatus::Completed);
+    }
+    REQUIRE(bus.regionForRange(base, 0) == IOPBusRegion::Mmio);
+    REQUIRE(bus.regionForRange(base, 4) == IOPBusRegion::Mmio);
+    REQUIRE(bus.regionForRange(base, 5) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.regionForRange(base, 8) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.read8(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(base, 0xff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base, 0xffff).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(base, 0xffffffff, mask).status ==
+        IOPBusStatus::Unmapped);
+    }
+    for (std::uint8_t mask : {0, 0x10, 0xff})
+    {
+      REQUIRE_THROWS_AS(bus.writeMasked32(base, 0, mask), std::invalid_argument);
+      REQUIRE_THROWS_AS(bus.writeMasked32(base + 1, 0, mask), std::invalid_argument);
+    }
+    for (IOPAddress lane = 1; lane < 4; ++lane)
+    {
+      CAPTURE(lane);
+      REQUIRE(bus.regionForRange(base + lane, 1) == IOPBusRegion::Unmapped);
+      REQUIRE(bus.write8(base + lane, 0xff).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read8(base + lane).status == IOPBusStatus::Unmapped);
+      const auto halfStatus = (lane & 1) != 0
+        ? IOPBusStatus::Misaligned : IOPBusStatus::Unmapped;
+      REQUIRE(bus.write16(base + lane, 0xffff).status == halfStatus);
+      REQUIRE(bus.read16(base + lane).status == halfStatus);
+      REQUIRE(bus.write32(base + lane, 0).status == IOPBusStatus::Misaligned);
+      REQUIRE(bus.read32(base + lane).status == IOPBusStatus::Misaligned);
+      REQUIRE(bus.writeMasked32(base + lane, 0, 1).status ==
+        IOPBusStatus::Misaligned);
+      REQUIRE(bus.writeMasked32(base + lane, 0, 0xf).status ==
+        IOPBusStatus::Misaligned);
+    }
+    REQUIRE(bus.readDMAC32(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(base) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(base, 0).status == IOPBusStatus::Unmapped);
+    std::uint8_t byte = 0xa5;
+    REQUIRE(bus.loadPhysical(base, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(base, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(byte == 0xa5);
+  }
+  for (IOPAddress address :
+       {0xfffe0130u, 0xfffe0134u, 0xfffe0138u, 0xfffe013cu, 0xfffe0148u,
+        0x1ffe0140u, 0x1ffe0144u, 0x9ffe0140u, 0x9ffe0144u,
+        0xbffe0140u, 0xbffe0144u})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.regionForRange(address, 4) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.write8(address, 0xff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeMasked32(address, 0xffffffff, 0xf).status ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
   }
 }
 

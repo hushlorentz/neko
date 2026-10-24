@@ -2862,6 +2862,160 @@ TEST_CASE("IOP diagnostic reads and fetches retain precise exception provenance"
   }
 }
 
+TEST_CASE("IOP high-address guest stores preserve word and merge admission",
+  "[iop][execution][merge][high-control]")
+{
+  for (IOPAddress base : {0xfffe0140u, 0xfffe0144u})
+  {
+    for (std::uint8_t opcode : {0x28, 0x29, 0x2b, 0x2a, 0x2e})
+    {
+      for (std::uint16_t offset = 0; offset < 4; ++offset)
+      {
+        CAPTURE(base);
+        CAPTURE(opcode);
+        CAPTURE(offset);
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        IOPCoreTestAccess::setGeneralRegister(&core, 1, base);
+        IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+        loadInstruction(&bus, 0, immediateInstruction(opcode, 1, 2, offset));
+        core.startExecution(0xa0000000);
+        core.stepInstruction();
+        const bool misaligned = (opcode == 0x29 && (offset & 1) != 0) ||
+          (opcode == 0x2b && offset != 0);
+        const bool completed = (opcode == 0x2b && offset == 0) ||
+          (opcode == 0x2a && offset == 3) || (opcode == 0x2e && offset == 0);
+        if (completed)
+        {
+          REQUIRE(core.executionState() == IOPExecutionState::Running);
+          REQUIRE(core.exception().kind == IOPException::None);
+          REQUIRE(core.retiredInstructions() == 1);
+          REQUIRE(core.programCounter() == 0xa0000004);
+        }
+        else if (misaligned)
+        {
+          REQUIRE(core.exception().kind == IOPException::AddressErrorStore);
+          REQUIRE(core.badVirtualAddress() == base + offset);
+          REQUIRE(core.exceptionProgramCounter() == 0xa0000000);
+          REQUIRE(core.retiredInstructions() == 0);
+        }
+        else
+        {
+          const auto &failure = core.storeFailure();
+          REQUIRE(core.executionState() == IOPExecutionState::Halted);
+          REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+          REQUIRE(core.exception().kind == IOPException::None);
+          REQUIRE(core.retiredInstructions() == 0);
+          REQUIRE(core.programCounter() == 0xa0000000);
+          REQUIRE(failure.access.outcome == IOPAccessOutcome::Unmapped);
+          REQUIRE(failure.access.virtualAddress == base + offset);
+          REQUIRE(failure.access.physicalAddress == base + offset);
+          REQUIRE(failure.access.cacheRoute == IOPCacheRoute::Uncached);
+          if (opcode == 0x2a || opcode == 0x2e)
+          {
+            REQUIRE(failure.mergeByteEnable ==
+              (opcode == 0x2a ? 0xf >> (3 - offset) : (0xf << offset) & 0xf));
+          }
+        }
+        REQUIRE(bus.read32(base).status == IOPBusStatus::Unmapped);
+      }
+    }
+    for (IOPAddress address :
+         {base & 0x1fffffffu, (base & 0x1fffffff) | 0x80000000u,
+          (base & 0x1fffffff) | 0xa0000000u})
+    {
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      const auto result = core.writeData32(address, 0xffffffff);
+      REQUIRE(result.outcome == IOPAccessOutcome::Unmapped);
+      REQUIRE(result.virtualAddress == address);
+      REQUIRE(result.physicalAddress == (base & 0x1fffffff));
+    }
+  }
+}
+
+TEST_CASE("IOP high-address faults preserve delayed results and branch provenance",
+  "[iop][execution][high-control]")
+{
+  for (IOPAddress base : {0xfffe0140u, 0xfffe0144u})
+  {
+    for (std::uint8_t opcode : {0x20, 0x21, 0x23, 0x24, 0x25, 0x22, 0x26, 0x29})
+    {
+      CAPTURE(base);
+      CAPTURE(opcode);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      loadInstruction(&bus, 0, 0x10000002); // beq r0, r0, +2
+      loadInstruction(&bus, 4, 0x8c030100); // lw r3, 0x100(r0): branch delay slot
+      loadInstruction(&bus, 12, immediateInstruction(opcode, 1, 2, 0));
+      loadInstruction(&bus, 0x100, 0x12345678);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, base);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x89abcdef);
+      core.startExecution(0xa0000000);
+      core.stepInstruction();
+      core.stepInstruction();
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::Load);
+      core.stepInstruction();
+      REQUIRE(core.retiredInstructions() == 2);
+      REQUIRE(core.generalRegister(2) == 0x89abcdef);
+      if (opcode == 0x29)
+      {
+        REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+        REQUIRE(core.exception().kind == IOPException::None);
+        REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::Load);
+        REQUIRE(core.generalRegister(3) == 0);
+      }
+      else
+      {
+        REQUIRE(core.exception().kind == IOPException::DataBusError);
+        REQUIRE(core.exceptionProgramCounter() == 0xa000000c);
+        REQUIRE((core.cause() & IOPCOP0Cause::BRANCH_DELAY) == 0);
+        REQUIRE(core.generalRegister(3) == 0x12345678);
+      }
+
+      core.reset();
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, base);
+      loadInstruction(&bus, 4, immediateInstruction(opcode, 1, 2, 0));
+      core.startExecution(0xa0000000);
+      core.stepInstruction();
+      core.stepInstruction();
+      if (opcode == 0x29)
+      {
+        REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+        REQUIRE(core.exception().kind == IOPException::None);
+        REQUIRE(core.branchContinuation().active);
+        REQUIRE(core.branchContinuation().instructionAddress == 0xa0000000);
+        REQUIRE(core.branchContinuation().targetAddress == 0xa000000c);
+        REQUIRE(core.programCounter() == 0xa0000004);
+        REQUIRE(core.storeFailure().access.virtualAddress == base);
+        REQUIRE(core.storeFailure().access.physicalAddress == base);
+      }
+      else
+      {
+        REQUIRE(core.exception().kind == IOPException::DataBusError);
+        REQUIRE(core.exceptionProgramCounter() == 0xa0000000);
+        REQUIRE((core.cause() & IOPCOP0Cause::BRANCH_DELAY) != 0);
+      }
+      REQUIRE(core.retiredInstructions() == 1);
+    }
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    core.startExecution(base);
+    const auto fetch = core.fetchInstruction();
+    REQUIRE(fetch.outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(fetch.virtualAddress == base);
+    REQUIRE(fetch.physicalAddress == base);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::InstructionBusError);
+    REQUIRE(core.exceptionProgramCounter() == base);
+    REQUIRE(core.retiredInstructions() == 0);
+  }
+}
+
 TEST_CASE("IOP core reports fetch protection alignment and bus failures")
 {
   IOPBus bus;

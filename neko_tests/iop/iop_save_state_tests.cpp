@@ -364,8 +364,8 @@ TEST_CASE("IOP SSBUS rejected restore preserves destination state atomically",
   REQUIRE(destination.trace().size() == traceSize);
 }
 
-TEST_CASE("IOP diagnostic writes leave canonical machine state unchanged",
-  "[iop][post][save-state]")
+TEST_CASE("IOP stateless platform writes leave canonical machine state unchanged",
+  "[iop][post][high-control][save-state]")
 {
   NekoSystem system;
   for (IOPAddress address : ssbusAddresses)
@@ -374,6 +374,10 @@ TEST_CASE("IOP diagnostic writes leave canonical machine state unchanged",
       IOPBusStatus::Completed);
   }
   loadInstruction(&system, 0x100, 0x12345678);
+  REQUIRE(system.iopCore().readData32(0x80000100).value == 0x12345678);
+  system.iopCore().startExecution(0x80000200);
+  system.iopCore().stepInstruction();
+  system.iopCore().haltExecution();
   REQUIRE(system.iopBus().write32(IOPBus::SCRATCHPAD_BASE, 0x87654321).status ==
     IOPBusStatus::Completed);
   system.iopTimers().writeMode(0, 0x10);
@@ -408,6 +412,14 @@ TEST_CASE("IOP diagnostic writes leave canonical machine state unchanged",
       IOPBusStatus::Completed);
     REQUIRE(system.iopBus().read8(0x1f802070).status == IOPBusStatus::Unmapped);
     REQUIRE(system.iopBus().read8(0x1fa00000).status == IOPBusStatus::Unmapped);
+    for (IOPAddress address : {0xfffe0140u, 0xfffe0144u})
+    {
+      REQUIRE(system.iopBus().write32(address, value).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().writeMasked32(address, ~value, 0xf).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().read32(address).status == IOPBusStatus::Unmapped);
+    }
   }
   REQUIRE(system.iopStateHash() == iopHash);
   REQUIRE(system.eeStateHash() == eeHash);
@@ -497,6 +509,85 @@ TEST_CASE("IOP diagnostic writes continue across lifecycle and branch restore",
       IOPBusStatus::Completed);
     REQUIRE(system->iopBus().read8(0x1f802070).status == IOPBusStatus::Unmapped);
     REQUIRE(system->iopBus().read8(0x1fa00000).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
+TEST_CASE("IOP high-address writes continue across lifecycle and branch restore",
+  "[iop][high-control][save-state]")
+{
+  NekoSystem original;
+  const auto image = rom(0x42);
+  REQUIRE(original.iopBus().installRom(image));
+  const IOPWord program[] = {
+    0x3c01fffe, // lui r1, 0xfffe
+    0x8c020100, // lw r2, 0x100(r0)
+    0xac220140, // sw r2, 0x140(r1): captures old r2 in load-delay slot
+    0x10000002, // beq r0, r0, +2
+    0xac220144, // sw r2, 0x144(r1): branch delay slot
+    0xffffffff, // skipped
+    0
+  };
+  for (std::size_t index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+  {
+    loadInstruction(&original, static_cast<IOPAddress>(index * 4), program[index]);
+  }
+  loadInstruction(&original, 0x100, 0x12345678);
+  original.iopCore().startExecution(0xa0000000);
+  original.iopCore().stepInstruction();
+  original.iopCore().stepInstruction();
+  REQUIRE(original.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  REQUIRE(original.iopCore().generalRegister(2) == 0);
+  original.iopCore().haltExecution();
+  original.iopCore().resumeExecution();
+  NekoSystem restored;
+  REQUIRE(restored.iopBus().installRom(image));
+  restored.loadState(original.saveState());
+  REQUIRE(restored.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  for (auto *system : {&original, &restored})
+  {
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().generalRegister(2) == 0x12345678);
+    REQUIRE(system->iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().branchContinuation().active);
+  }
+  REQUIRE(original.saveState() == restored.saveState());
+  restored.loadState(original.saveState());
+  REQUIRE(restored.iopCore().branchContinuation().active);
+  const auto replacement = rom(0x24);
+  for (auto *system : {&original, &restored})
+  {
+    REQUIRE(system->iopBus().installRom(replacement));
+    system->iopCore().haltExecution();
+    system->iopCore().resumeExecution();
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().programCounter() == 0xa0000018);
+    REQUIRE(system->iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system->iopCore().exception().kind == IOPException::None);
+    REQUIRE(system->iopCore().retiredInstructions() == 5);
+  }
+  REQUIRE(original.saveState() == restored.saveState());
+  for (auto *system : {&original, &restored})
+  {
+    system->iopCore().haltExecution();
+    system->iopCore().startExecution(0xa0000000);
+    REQUIRE(system->iopCore().writeData32(0xfffe0140, 0x13579bdf).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(system->iopCore().writeData32(0xfffe0144, 0x2468ace0).outcome ==
+      IOPAccessOutcome::Completed);
+    system->reset();
+    const auto state = system->saveState();
+    for (IOPAddress address : {0xfffe0140u, 0xfffe0144u})
+    {
+      REQUIRE(system->iopBus().write32(address, 0xffffffff).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system->iopBus().read32(address).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(system->saveState() == state);
   }
   REQUIRE(original.saveState() == restored.saveState());
 }

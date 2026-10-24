@@ -1849,7 +1849,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Platform Initialization: High-Address Control Repair
 
-- [ ] Implement stateless exact-base full-word writes for `0xfffe0140` and
+- [x] Implement stateless exact-base full-word writes for `0xfffe0140` and
       `0xfffe0144`, with authored access/state/trace/lifecycle regressions and
       individual correctness review; retain unsupported reads and mapping effects.
 - [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;

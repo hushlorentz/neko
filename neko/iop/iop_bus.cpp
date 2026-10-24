@@ -46,6 +46,8 @@ constexpr IOPAddress IOPBus::SIF_BASE;
 constexpr IOPAddress IOPBus::SIF_DOORBELL;
 constexpr IOPAddress IOPBus::POST2;
 constexpr IOPAddress IOPBus::POST3;
+constexpr IOPAddress IOPBus::HIGH_INIT_CONTROL0;
+constexpr IOPAddress IOPBus::HIGH_INIT_CONTROL1;
 
 IOPBus::IOPBus() : ram(RAM_SIZE, 0)
 {
@@ -188,6 +190,11 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   if (first == POST3 && last == first)
   {
     return {IOPBusRegion::Mmio, 0, Device::POST3};
+  }
+  if ((first == HIGH_INIT_CONTROL0 || first == HIGH_INIT_CONTROL1) &&
+      last < first + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, 0, Device::HighAddressInitializationControl};
   }
 
   const auto ssbus = locateSSBUS(address, last);
@@ -470,6 +477,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return readSIFRegister(location, width);
     case Device::POST2:
     case Device::POST3:
+    case Device::HighAddressInitializationControl:
     case Device::None:
       return {};
   }
@@ -503,6 +511,9 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::POST3:
       return width == 1
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::HighAddressInitializationControl:
+      return width == sizeof(IOPWord)
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::None:
       return {};

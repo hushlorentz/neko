@@ -69,6 +69,9 @@ class IOPBus final
     // Provisional stateless outputs; POST2's hardware identity is uncertain.
     static constexpr IOPAddress POST2 = 0x1f802070;
     static constexpr IOPAddress POST3 = 0x1fa00000;
+    // Provisional stateless initialization writes; no mapping or cache effects.
+    static constexpr IOPAddress HIGH_INIT_CONTROL0 = 0xfffe0140;
+    static constexpr IOPAddress HIGH_INIT_CONTROL1 = 0xfffe0144;
 
     IOPBus();
 
@@ -137,7 +140,8 @@ class IOPBus final
       SIFRegisters,
       SIFDoorbell,
       POST2,
-      POST3
+      POST3,
+      HighAddressInitializationControl
     };
 
     struct SSBUSConfigurationState
