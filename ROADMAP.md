@@ -1852,12 +1852,19 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement stateless exact-base full-word writes for `0xfffe0140` and
       `0xfffe0144`, with authored access/state/trace/lifecycle regressions and
       individual correctness review; retain unsupported reads and mapping effects.
-- [ ] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
+- [x] Re-run bounded BIOS discovery with repeated traced/untraced comparisons;
       classify the next dependency without extending hardware or mistaking
       initialization progress for the guest handshake.
 - [ ] Reconcile provisional policies and the dependency record, complete
       independent block review, and run complete optimized and AddressSanitizer
       checks.
+
+### IOP CP0 Initialization: Register-7 Scope
+
+- [ ] After high-address repair closure, resolve the scope decision for the
+      observed `MTC0 r0,$7` initialization transfer; obtain approval for bounded
+      evidence/repair work or an explicit milestone-scope change before extending
+      the selected CP0 profile.
 
 ### Real BIOS Handshake and Boundary Conformance
 
