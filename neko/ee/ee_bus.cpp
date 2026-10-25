@@ -2,6 +2,7 @@
 
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
+#include "ee_timers.hpp"
 #include "gif_registers.hpp"
 #include "gif_dmac_channel.hpp"
 #include "gif_path3.hpp"
@@ -30,7 +31,8 @@ namespace
 
   bool fullWordOnlyAddress(std::uint32_t address)
   {
-    return sifApertureAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
+    return EETimers::isRegisterAddress(address) ||
+      sifApertureAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
       address == EEMemoryMap::D6_CHCR || address == EEMemoryMap::D6_MADR ||
@@ -220,6 +222,19 @@ void EEBus::attachSIF(SIF *sif, SIFSignalReceiver *signals)
   }
   sifComponent = sif;
   sifSignals = signals;
+}
+
+void EEBus::attachTimers(EETimers *timers)
+{
+  if (timers == nullptr)
+  {
+    throw std::invalid_argument("EE bus requires non-null timers.");
+  }
+  if (timersComponent != nullptr)
+  {
+    throw std::logic_error("EE bus timers are already attached.");
+  }
+  timersComponent = timers;
 }
 
 EEWordMergeStorePolicy EEBus::wordMergeStorePolicy(std::uint32_t address) const
@@ -515,6 +530,12 @@ bool EEBus::readData8(
     throw std::invalid_argument(
       "EE byte load requires an output value.");
   }
+  if (address == EEMemoryMap::IOP_BOOT_PROBE)
+  {
+    // Provisional retail profile; identity and silicon reset value are unknown.
+    *value = 0;
+    return true;
+  }
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 1, &physicalAddress))
   {
@@ -580,6 +601,15 @@ bool EEBus::writeData16(
     address,
     2,
     "EE halfword store must be naturally aligned.");
+  if (address == EEMemoryMap::IOP_DEV9_INIT_1470)
+  {
+    // Observed initialization only; DEV9 field semantics remain unverified.
+    return value == 0;
+  }
+  if (address == EEMemoryMap::IOP_DEV9_INIT_1472)
+  {
+    return value == 0 || value == 1;
+  }
   std::uint32_t physicalAddress = 0;
   if (!mainMemoryAddress(address, 2, &physicalAddress))
   {
@@ -938,6 +968,11 @@ bool EEBus::readMapped32(
   std::uint32_t address,
   std::uint32_t *value) const
 {
+  if (timersComponent != nullptr && EETimers::isRegisterAddress(address))
+  {
+    *value = timersComponent->readRegister(address);
+    return true;
+  }
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 4, &physicalAddress))
   {
@@ -1114,6 +1149,11 @@ bool EEBus::writeMapped32(
   std::uint32_t value,
   bool checkedGuestAccess)
 {
+  if (timersComponent != nullptr && EETimers::isRegisterAddress(address))
+  {
+    timersComponent->writeRegister(address, value);
+    return true;
+  }
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 4, &physicalAddress))
   {
@@ -1569,8 +1609,18 @@ bool EEBus::writeMapped64(
   {
     case EEMemoryMap::GS_PMODE:
       return writeDisplay(GSDisplayPrivilegedRegister::PMODE);
+    case EEMemoryMap::GS_SMODE1:
+      return writeDisplay(GSDisplayPrivilegedRegister::SMODE1);
     case EEMemoryMap::GS_SMODE2:
       return writeDisplay(GSDisplayPrivilegedRegister::SMODE2);
+    case EEMemoryMap::GS_SRFSH:
+      return writeDisplay(GSDisplayPrivilegedRegister::SRFSH);
+    case EEMemoryMap::GS_SYNCH1:
+      return writeDisplay(GSDisplayPrivilegedRegister::SYNCH1);
+    case EEMemoryMap::GS_SYNCH2:
+      return writeDisplay(GSDisplayPrivilegedRegister::SYNCH2);
+    case EEMemoryMap::GS_SYNCV:
+      return writeDisplay(GSDisplayPrivilegedRegister::SYNCV);
     case EEMemoryMap::GS_DISPFB1:
       return writeDisplay(GSDisplayPrivilegedRegister::DISPFB1);
     case EEMemoryMap::GS_DISPLAY1:

@@ -6,6 +6,8 @@
 namespace PS2Clock
 {
   constexpr std::uint64_t MASTER_HZ = 294912000;
+  constexpr std::uint64_t EE_BUS_HZ = MASTER_HZ / 2;
+  constexpr std::uint64_t EE_BUS_CLOCK_PERIOD = MASTER_HZ / EE_BUS_HZ;
   constexpr std::uint64_t IOP_HZ = 36864000;
   constexpr std::uint64_t IOP_CLOCK_PERIOD = MASTER_HZ / IOP_HZ;
   constexpr std::uint64_t IOP_CLOCK_PHASE = 0;

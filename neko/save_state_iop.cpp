@@ -211,6 +211,8 @@ void NekoSaveStateCodec::writeIOPState(
     auto scope = writer->scope("dmaController");
     writer->writeFieldU8("sifNextChannel",
       static_cast<std::uint8_t>(system.iopDMAControllerComponent.sifNextChannel));
+    writer->writeFieldU32("auxiliaryControl",
+      system.iopDMAControllerComponent.auxiliaryControlRegister);
     auto banks = writer->scope("banks");
     for (std::size_t index = 0;
          index < system.iopDMAControllerComponent.banks.size(); ++index)
@@ -320,6 +322,8 @@ void NekoSaveStateCodec::readIOP(
       nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SIF1),
       "IOP SIF arbitration cursor is invalid");
     system->iopDMAControllerComponent.sifNextChannel = static_cast<IOPDMAChannel>(nextChannel);
+    system->iopDMAControllerComponent.auxiliaryControlRegister =
+      reader->readFieldU32("auxiliaryControl");
     auto banks = reader->scope("banks");
     for (std::size_t index = 0;
          index < system->iopDMAControllerComponent.banks.size(); ++index)
@@ -672,6 +676,8 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopTimerTimingComponent = source->iopTimerTimingComponent;
   destination->iopDMAControllerComponent.banks =
     source->iopDMAControllerComponent.banks;
+  destination->iopDMAControllerComponent.auxiliaryControlRegister =
+    source->iopDMAControllerComponent.auxiliaryControlRegister;
   destination->iopDMAControllerComponent.sifNextChannel =
     source->iopDMAControllerComponent.sifNextChannel;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;

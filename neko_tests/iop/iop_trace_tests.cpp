@@ -410,10 +410,10 @@ TEST_CASE("IOP diagnostic rejected writes retain failed memory observations",
   }
 }
 
-TEST_CASE("IOP debug initialization publishes only fetch issue and retirement",
+TEST_CASE("IOP CP0 initialization publishes only fetch issue and retirement",
   "[iop][cop0][dcic][debug-init][trace]")
 {
-  for (const IOPWord index : {3u, 5u, 7u, 9u, 11u})
+  for (const IOPWord index : {3u, 5u, 6u, 7u, 9u, 11u})
   {
     CAPTURE(index);
     const IOPWord raw = 0x40800000 | (index << 11);
@@ -459,10 +459,11 @@ TEST_CASE("IOP high-address startup writes are trace observational",
 {
   NekoSystem traced;
   NekoSystem untraced;
-  const std::array<IOPWord, 8> program{{
+  const std::array<IOPWord, 9> program{{
     0x3c01fffe, // lui r1, 0xfffe
     0x3c0289ab, // lui r2, 0x89ab
     0x3442cdef, // ori r2, r2, 0xcdef
+    0xac220130, // sw r2, 0x130(r1)
     0xac220140, // sw r2, 0x140(r1)
     0x10000002, // beq r0, r0, +2
     0xac220144, // sw r2, 0x144(r1): branch delay slot
@@ -478,19 +479,21 @@ TEST_CASE("IOP high-address startup writes are trace observational",
     system->iopCore().startExecution(0xa0000000);
   }
   traced.startTrace();
-  traced.runMasterCycles(7 * 8);
-  untraced.runMasterCycles(7 * 8);
+  traced.runMasterCycles(8 * 8);
+  untraced.runMasterCycles(8 * 8);
   REQUIRE(traced.iopCore().executionState() == IOPExecutionState::Running);
   REQUIRE(traced.iopCore().exception().kind == IOPException::None);
-  REQUIRE(traced.iopCore().retiredInstructions() == 7);
-  REQUIRE(traced.iopCore().programCounter() == 0xa0000020);
+  REQUIRE(traced.iopCore().retiredInstructions() == 8);
+  REQUIRE(traced.iopCore().programCounter() == 0xa0000024);
   REQUIRE(traced.iopStateHash() == untraced.iopStateHash());
   REQUIRE(traced.eeStateHash() == untraced.eeStateHash());
   REQUIRE(traced.sifStateHash() == untraced.sifStateHash());
   REQUIRE(traced.saveState() == untraced.saveState());
   REQUIRE(untraced.trace().empty());
-  REQUIRE(traced.trace().size() == 7 * 3 + 3);
+  REQUIRE(traced.trace().size() == 8 * 3 + 4);
   namespace Memory = NekoIOPTraceMemory;
+  const std::array<IOPAddress, 3> addresses{{0xfffe0130, 0xfffe0140, 0xfffe0144}};
+  const std::array<std::uint64_t, 3> cycles{{25, 33, 49}};
   std::size_t accesses = 0;
   for (const auto &event : traced.trace())
   {
@@ -499,10 +502,10 @@ TEST_CASE("IOP high-address startup writes are trace observational",
     {
       continue;
     }
-    REQUIRE(accesses < 2);
+    REQUIRE(accesses < addresses.size());
     requireIdentity(event, Subsystem::IOP, Type::MemoryAccess,
-      accesses == 0 ? 25 : 41);
-    const IOPAddress address = accesses == 0 ? 0xfffe0140 : 0xfffe0144;
+      cycles[accesses]);
+    const IOPAddress address = addresses[accesses];
     REQUIRE(event.value0 == address);
     REQUIRE(event.value1 == 0x89abcdef);
     REQUIRE(event.value2 == 0);
@@ -511,14 +514,14 @@ TEST_CASE("IOP high-address startup writes are trace observational",
       Memory::CacheRoute::Uncached, true, 0xf}));
     ++accesses;
   }
-  REQUIRE(accesses == 2);
+  REQUIRE(accesses == addresses.size());
 }
 
 TEST_CASE("IOP high-address rejected stores retain failed trace metadata",
   "[iop][high-control][trace]")
 {
   namespace Memory = NekoIOPTraceMemory;
-  for (IOPAddress address : {0xfffe0140u, 0xfffe0144u})
+  for (IOPAddress address : {0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
   {
     NekoSystem system;
     instruction(system, 0, 0x3c01fffe);

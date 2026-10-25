@@ -146,6 +146,13 @@ void GSDisplay::writePrivilegedRegister(
     case GSDisplayPrivilegedRegister::SMODE2:
       syncModeRegister = value & 0x0f;
       return;
+    case GSDisplayPrivilegedRegister::SMODE1:
+    case GSDisplayPrivilegedRegister::SRFSH:
+    case GSDisplayPrivilegedRegister::SYNCH1:
+    case GSDisplayPrivilegedRegister::SYNCH2:
+    case GSDisplayPrivilegedRegister::SYNCV:
+      // Provisional initialization tolerance; configureTiming owns raster timing.
+      return;
     case GSDisplayPrivilegedRegister::DISPFB1:
       decodeFrame(0, value);
       return;

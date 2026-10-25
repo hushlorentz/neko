@@ -9,6 +9,7 @@
 #include "gif.hpp"
 
 class EEInterruptController;
+class EETimers;
 class DMACController;
 class GIFRegisters;
 class GIFDMACChannel;
@@ -104,10 +105,18 @@ namespace EEMemoryMap
   constexpr std::uint32_t INTC_STAT = 0x1000f000;
   constexpr std::uint32_t INTC_MASK = 0x1000f010;
   constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
+  constexpr std::uint32_t IOP_BOOT_PROBE = 0x1f803204;
+  constexpr std::uint32_t IOP_DEV9_INIT_1470 = 0x1f801470;
+  constexpr std::uint32_t IOP_DEV9_INIT_1472 = 0x1f801472;
 
   constexpr std::uint32_t GS_BUSDIR = 0x12001040;
   constexpr std::uint32_t GS_PMODE = 0x12000000;
+  constexpr std::uint32_t GS_SMODE1 = 0x12000010;
   constexpr std::uint32_t GS_SMODE2 = 0x12000020;
+  constexpr std::uint32_t GS_SRFSH = 0x12000030;
+  constexpr std::uint32_t GS_SYNCH1 = 0x12000040;
+  constexpr std::uint32_t GS_SYNCH2 = 0x12000050;
+  constexpr std::uint32_t GS_SYNCV = 0x12000060;
   constexpr std::uint32_t GS_DISPFB1 = 0x12000070;
   constexpr std::uint32_t GS_DISPLAY1 = 0x12000080;
   constexpr std::uint32_t GS_DISPFB2 = 0x12000090;
@@ -166,6 +175,7 @@ class EEBus
       ScratchpadDMACChannel *toScratchpadDMAC);
     void attachVectorUnits(VPU *vu0, VPU *vu1);
     void attachGSDisplay(GSDisplay *gsDisplay);
+    void attachTimers(EETimers *timers);
     // The caller keeps both the shared owner and signal receiver alive.
     void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     void installBootROM(
@@ -308,6 +318,7 @@ class EEBus
     VPU *vu0Component = nullptr;
     VPU *vu1Component = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;
+    EETimers *timersComponent = nullptr;
     SIF *sifComponent = nullptr;
     SIFSignalReceiver *sifSignals = nullptr;
     std::vector<std::uint8_t> mainMemory;

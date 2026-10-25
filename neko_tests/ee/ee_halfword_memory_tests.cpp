@@ -39,6 +39,35 @@ namespace
   }
 }
 
+TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low halfword",
+  "[ee][dev9-init]")
+{
+  for (std::uint32_t address : {0x9f801470u, 0xbf801470u, 0x9f801472u, 0xbf801472u})
+  {
+    for (std::uint64_t value : {UINT64_C(1), UINT64_C(0x12340001),
+         UINT64_C(0), UINT64_C(0x12340000), UINT64_C(2)})
+    {
+      CAPTURE(address);
+      CAPTURE(value);
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      setRegister(&core, 1, address);
+      setRegister(&core, 2, value);
+      runInstruction(&system, memoryInstruction(0x29, 1, 2, 0));
+      const bool accepted = static_cast<std::uint16_t>(value) <=
+        ((address & 2u) != 0 ? 1 : 0);
+      REQUIRE(core.pendingException() ==
+        (accepted ? EEException::None : EEException::DataBusErrorStore));
+      if (accepted)
+      {
+        REQUIRE(core.programCounter() == 4);
+      }
+      REQUIRE(core.generalRegister(2).low == value);
+      REQUIRE(core.generalRegister(2).high == UINT64_C(0xfeedfacecafebeef));
+    }
+  }
+}
+
 TEST_CASE("EE signed and unsigned halfword loads")
 {
   SECTION("LH sign extends a little-endian halfword")

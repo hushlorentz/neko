@@ -65,6 +65,63 @@ TEST_CASE("IOP persistence owns attached devices while the CPU remains halted")
   REQUIRE(system.iopTimers().counter(0).target == 37);
 }
 
+TEST_CASE("IOP restore retains one observed HI LO half and its read hazard",
+  "[iop][hilo][save-state]")
+{
+  for (const IOPWord readFunction : {0x10u, 0x12u})
+  {
+    CAPTURE(readFunction);
+    NekoSystem original;
+    const IOPWord program[] = {
+      0x2401000d, // addiu r1, r0, 13
+      0x24020007, // addiu r2, r0, 7
+      0x0022001b, // divu r1, r2
+      0x00001800 | readFunction, // mfhi/mflo r3
+      0,
+      0,
+      0x0041001b // divu r2, r1
+    };
+    for (std::size_t index = 0; index < 7; ++index)
+    {
+      loadInstruction(&original, static_cast<IOPAddress>(index * 4),
+        program[index]);
+    }
+    original.iopCore().startExecution(0x80000000);
+    for (unsigned step = 0; step < 4; ++step)
+    {
+      original.iopCore().stepInstruction();
+    }
+    REQUIRE(original.iopCore().generalRegister(3) ==
+      (readFunction == 0x10 ? 6 : 1));
+    const auto state = original.saveState();
+    const auto snapshot = inspectSaveState(state);
+    const auto *unreadHI =
+      snapshot.find("system.iop.core.unreadMultiplyDivideHI");
+    const auto *unreadLO =
+      snapshot.find("system.iop.core.unreadMultiplyDivideLO");
+    REQUIRE(unreadHI != nullptr);
+    REQUIRE(unreadLO != nullptr);
+    REQUIRE(unreadHI->scalarValue == (readFunction == 0x12));
+    REQUIRE(unreadLO->scalarValue == (readFunction == 0x10));
+
+    NekoSystem restored;
+    restored.loadState(state);
+    REQUIRE(restored.iopStateHash() == original.iopStateHash());
+    for (unsigned step = 0; step < 3; ++step)
+    {
+      original.iopCore().stepInstruction();
+      restored.iopCore().stepInstruction();
+      REQUIRE(restored.iopStateHash() == original.iopStateHash());
+    }
+    REQUIRE(restored.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(restored.iopCore().programCounter() == 0x8000001c);
+    REQUIRE(restored.iopCore().retiredInstructions() == 7);
+    REQUIRE(restored.iopCore().hi() == 7);
+    REQUIRE(restored.iopCore().lo() == 0);
+    REQUIRE(restored.saveState() == original.saveState());
+  }
+}
+
 TEST_CASE("IOP SSBUS canonical state hashes every bit and resets to zero",
   "[iop][ssbus][save-state]")
 {
@@ -400,6 +457,8 @@ TEST_CASE("IOP stateless platform writes leave canonical machine state unchanged
   const auto eeHash = system.eeStateHash();
   const auto sifHash = system.sifStateHash();
   system.startTrace();
+  REQUIRE(system.iopBus().write32(0x1f801060, 0x8000283d).status ==
+    IOPBusStatus::Completed);
   for (IOPWord value : {0u, 0xfcu, 0xffffffffu, 0xaaaaaaaau, 0x55555555u})
   {
     REQUIRE(system.iopBus().write8(0x1f802070, static_cast<std::uint8_t>(value)).status ==
@@ -412,7 +471,7 @@ TEST_CASE("IOP stateless platform writes leave canonical machine state unchanged
       IOPBusStatus::Completed);
     REQUIRE(system.iopBus().read8(0x1f802070).status == IOPBusStatus::Unmapped);
     REQUIRE(system.iopBus().read8(0x1fa00000).status == IOPBusStatus::Unmapped);
-    for (IOPAddress address : {0xfffe0140u, 0xfffe0144u})
+    for (IOPAddress address : {0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
     {
       REQUIRE(system.iopBus().write32(address, value).status ==
         IOPBusStatus::Completed);
@@ -513,10 +572,10 @@ TEST_CASE("IOP diagnostic writes continue across lifecycle and branch restore",
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("IOP debug initialization has the same canonical effects as NOP",
+TEST_CASE("IOP CP0 initialization has the same canonical effects as NOP",
   "[iop][cop0][dcic][debug-init][save-state]")
 {
-  for (const IOPWord index : {3u, 5u, 7u, 9u, 11u})
+  for (const IOPWord index : {3u, 5u, 6u, 7u, 9u, 11u})
   {
     CAPTURE(index);
     const IOPWord raw = 0x40800000 | (index << 11);
@@ -552,10 +611,10 @@ TEST_CASE("IOP debug initialization has the same canonical effects as NOP",
   }
 }
 
-TEST_CASE("IOP debug initialization continues across delayed-load and branch restore",
+TEST_CASE("IOP CP0 initialization continues across delayed-load and branch restore",
   "[iop][cop0][dcic][debug-init][save-state]")
 {
-  for (const IOPWord index : {3u, 5u, 7u, 9u, 11u})
+  for (const IOPWord index : {3u, 5u, 6u, 7u, 9u, 11u})
   {
     CAPTURE(index);
     const IOPWord zeroWrite = 0x40800000 | (index << 11);

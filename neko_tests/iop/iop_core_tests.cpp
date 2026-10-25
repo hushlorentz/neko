@@ -423,23 +423,24 @@ TEST_CASE("IOP COP0 register-zero transfers admit only the selected profile",
       loadInstruction(&bus, 0, cop0TransferInstruction(selector, 0, index));
       core.startExecution(0);
       core.stepInstruction();
-      const bool debugInitialization = selector == 4 &&
-        (index == 3 || index == 5 || index == 7 || index == 9 || index == 11);
-      REQUIRE(core.exception().kind == (debugInitialization
+      const bool initialization = selector == 4 &&
+        (index == 3 || index == 5 || index == 6 || index == 7 || index == 9 || index == 11);
+      REQUIRE(core.exception().kind == (initialization
         ? IOPException::None : IOPException::ReservedInstruction));
       REQUIRE(core.stopReason() == IOPStopReason::None);
-      REQUIRE(core.programCounter() == (debugInitialization ? 4 : 0xbfc00180));
+      REQUIRE(core.programCounter() == (initialization ? 4 : 0xbfc00180));
       REQUIRE(core.exceptionProgramCounter() == 0);
-      REQUIRE(core.retiredInstructions() == (debugInitialization ? 1 : 0));
+      REQUIRE(core.retiredInstructions() == (initialization ? 1 : 0));
     }
   }
 }
 
-TEST_CASE("IOP debug initialization zero writes retire without effects from every GPR",
+TEST_CASE("IOP CP0 initialization zero writes retire without effects from every GPR",
   "[iop][execution][cop0][dcic][debug-init]")
 {
   REQUIRE(cop0TransferInstruction(4, 0, 3) == 0x40801800);
-  for (const std::uint8_t index : {3, 5, 7, 9, 11})
+  REQUIRE(cop0TransferInstruction(4, 0, 6) == 0x40803000);
+  for (const std::uint8_t index : {3, 5, 6, 7, 9, 11})
   {
     CAPTURE(index);
     for (std::uint8_t source = 0; source < 32; ++source)
@@ -476,10 +477,10 @@ TEST_CASE("IOP debug initialization zero writes retire without effects from ever
   }
 }
 
-TEST_CASE("IOP debug initialization rejects reads into every GPR",
+TEST_CASE("IOP CP0 initialization rejects reads into every GPR",
   "[iop][execution][cop0][dcic][debug-init]")
 {
-  for (const std::uint8_t index : {3, 5, 7, 9, 11})
+  for (const std::uint8_t index : {3, 5, 6, 7, 9, 11})
   {
     for (std::uint8_t target = 0; target < 32; ++target)
     {
@@ -501,10 +502,10 @@ TEST_CASE("IOP debug initialization rejects reads into every GPR",
   }
 }
 
-TEST_CASE("IOP debug initialization rejects every nonzero write bit and malformed zero writes",
+TEST_CASE("IOP CP0 initialization rejects every nonzero write bit and malformed zero writes",
   "[iop][execution][cop0][dcic][debug-init]")
 {
-  for (const std::uint8_t index : {3, 5, 7, 9, 11})
+  for (const std::uint8_t index : {3, 5, 6, 7, 9, 11})
   {
     CAPTURE(index);
     for (const bool malformed : {false, true})
@@ -533,10 +534,10 @@ TEST_CASE("IOP debug initialization rejects every nonzero write bit and malforme
   }
 }
 
-TEST_CASE("IOP debug initialization preserves CU0 and delay-slot provenance",
+TEST_CASE("IOP CP0 initialization preserves CU0 and delay-slot provenance",
   "[iop][execution][cop0][dcic][debug-init]")
 {
-  for (const std::uint8_t index : {3, 5, 7, 9, 11})
+  for (const std::uint8_t index : {3, 5, 6, 7, 9, 11})
   {
     CAPTURE(index);
     for (const bool user : {false, true})
@@ -590,10 +591,10 @@ TEST_CASE("IOP debug initialization preserves CU0 and delay-slot provenance",
   }
 }
 
-TEST_CASE("IOP debug initialization captures the GPR before delayed writeback",
+TEST_CASE("IOP CP0 initialization captures the GPR before delayed writeback",
   "[iop][execution][cop0][dcic][debug-init]")
 {
-  for (const std::uint8_t index : {3, 5, 7, 9, 11})
+  for (const std::uint8_t index : {3, 5, 6, 7, 9, 11})
   {
     CAPTURE(index);
     for (const bool cop0Load : {false, true})
@@ -3061,10 +3062,85 @@ TEST_CASE("IOP diagnostic reads and fetches retain precise exception provenance"
   }
 }
 
+TEST_CASE("IOP RAM initialization stores translate aliases and retain branch provenance",
+  "[iop][execution][ram-init]")
+{
+  for (IOPAddress address : {0x1f801060u, 0x9f801060u, 0xbf801060u})
+  {
+    for (IOPWord value : {0x8000283du, 0u})
+    {
+      CAPTURE(address);
+      CAPTURE(value);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, address);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
+      loadInstruction(&bus, 0, 0x10000002); // beq r0, r0, +2
+      loadInstruction(&bus, 4, immediateInstruction(0x2b, 1, 2, 0));
+      core.startExecution(0xa0000000);
+      core.stepInstruction();
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.generalRegister(2) == value);
+      if (value == 0x8000283d)
+      {
+        REQUIRE(core.executionState() == IOPExecutionState::Running);
+        REQUIRE(core.programCounter() == 0xa000000c);
+        REQUIRE(core.retiredInstructions() == 2);
+        REQUIRE_FALSE(core.branchContinuation().active);
+      }
+      else
+      {
+        REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+        REQUIRE(core.programCounter() == 0xa0000004);
+        REQUIRE(core.retiredInstructions() == 1);
+        REQUIRE(core.branchContinuation().active);
+        REQUIRE(core.storeFailure().access.virtualAddress == address);
+        REQUIRE(core.storeFailure().access.physicalAddress == 0x1f801060);
+        REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP RAM initialization admits only complete merge-store transactions",
+  "[iop][execution][merge][ram-init]")
+{
+  for (IOPWord value : {0x8000283du, 0u})
+  {
+    for (std::uint8_t opcode : {0x2a, 0x2e})
+    {
+      for (std::uint16_t offset = 0; offset < 4; ++offset)
+      {
+        CAPTURE(value);
+        CAPTURE(opcode);
+        CAPTURE(offset);
+        IOPBus bus;
+        IOPCore core;
+        core.attachBus(&bus);
+        IOPCoreTestAccess::setGeneralRegister(&core, 1, 0xbf801060);
+        IOPCoreTestAccess::setGeneralRegister(&core, 2, value);
+        loadInstruction(&bus, 0, immediateInstruction(opcode, 1, 2, offset));
+        core.startExecution(0xa0000000);
+        core.stepInstruction();
+        const bool complete = value == 0x8000283d &&
+          (opcode == 0x2a ? offset == 3 : offset == 0);
+        REQUIRE(core.exception().kind == IOPException::None);
+        REQUIRE(core.retiredInstructions() == (complete ? 1 : 0));
+        REQUIRE(core.stopReason() ==
+          (complete ? IOPStopReason::None : IOPStopReason::StoreFailure));
+        REQUIRE(core.generalRegister(2) == value);
+        REQUIRE(bus.read32(0x1f801060).status == IOPBusStatus::Unmapped);
+      }
+    }
+  }
+}
+
 TEST_CASE("IOP high-address guest stores preserve word and merge admission",
   "[iop][execution][merge][high-control]")
 {
-  for (IOPAddress base : {0xfffe0140u, 0xfffe0144u})
+  for (IOPAddress base : {0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
   {
     for (std::uint8_t opcode : {0x28, 0x29, 0x2b, 0x2a, 0x2e})
     {
@@ -3138,7 +3214,7 @@ TEST_CASE("IOP high-address guest stores preserve word and merge admission",
 TEST_CASE("IOP high-address faults preserve delayed results and branch provenance",
   "[iop][execution][high-control]")
 {
-  for (IOPAddress base : {0xfffe0140u, 0xfffe0144u})
+  for (IOPAddress base : {0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
   {
     for (std::uint8_t opcode : {0x20, 0x21, 0x23, 0x24, 0x25, 0x22, 0x26, 0x29})
     {
@@ -4290,51 +4366,85 @@ TEST_CASE("IOP rejects overwriting an unread multiply divide result",
   REQUIRE(core.retiredInstructions() == 1);
 }
 
-TEST_CASE("IOP preserves unread multiply divide halves independently",
+TEST_CASE("IOP permits new HI LO writes after observing either result half",
   "[iop][execution][hilo]")
 {
-  struct HalfReadCase
+  struct WriteCase
   {
-    std::uint8_t readFunction;
-    std::uint8_t writeFunction;
+    std::uint8_t function;
+    IOPWord expectedHI;
+    IOPWord expectedLO;
   };
-  const HalfReadCase cases[] = {
-    {0x10, 0x13},
-    {0x12, 0x11}
+  const WriteCase writes[] = {
+    {0x11, 13, 42},
+    {0x13, 0, 13},
+    {0x18, 0, 91},
+    {0x19, 0, 91},
+    {0x1a, 6, 1},
+    {0x1b, 6, 1}
   };
 
-  for (const HalfReadCase &test : cases)
+  for (const std::uint8_t readFunction : {0x10, 0x12})
   {
-    IOPBus bus;
-    IOPCore core;
-    core.attachBus(&bus);
-    IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
-    IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
-    IOPCoreTestAccess::setGeneralRegister(
-      &core,
-      3,
-      UINT32_C(0x12345678));
-    loadInstruction(&bus, 0, registerInstruction(0x18, 1, 2, 0));
-    loadInstruction(
-      &bus,
-      4,
-      registerInstruction(test.readFunction, 0, 0, 4));
-    loadInstruction(
-      &bus,
-      8,
-      registerInstruction(test.writeFunction, 3, 0, 0));
-    core.startExecution(0);
+    for (const std::uint8_t destination : {0, 4})
+    {
+      for (const WriteCase &write : writes)
+      {
+        for (std::uint32_t separation = 0; separation <= 2; ++separation)
+        {
+          CAPTURE(readFunction);
+          CAPTURE(destination);
+          CAPTURE(write.function);
+          CAPTURE(separation);
+          IOPBus bus;
+          IOPCore core;
+          core.attachBus(&bus);
+          IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
+          IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
+          IOPCoreTestAccess::setGeneralRegister(&core, 3, 13);
+          loadInstruction(
+            &bus, 0, registerInstruction(0x18, 1, 2, 0));
+          loadInstruction(
+            &bus, 4, registerInstruction(readFunction, 0, 0, destination));
+          for (std::uint32_t index = 0; index < separation; ++index)
+          {
+            loadInstruction(&bus, 8 + index * 4, 0);
+          }
+          const std::uint32_t writePC = 8 + separation * 4;
+          loadInstruction(
+            &bus,
+            writePC,
+            registerInstruction(
+              write.function, 3, write.function >= 0x18 ? 2 : 0, 0));
+          core.startExecution(0);
+          for (std::uint32_t index = 0; index < 3 + separation; ++index)
+          {
+            core.stepInstruction();
+          }
 
-    core.stepInstruction();
-    core.stepInstruction();
-    core.stepInstruction();
-
-    REQUIRE(core.hi() == 0);
-    REQUIRE(core.lo() == 42);
-    REQUIRE(core.programCounter() == 8);
-    REQUIRE(core.executionState() == IOPExecutionState::Halted);
-    REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
-    REQUIRE(core.retiredInstructions() == 2);
+          const bool readHazard = separation < 2 &&
+            (write.function >= 0x18 ||
+              (readFunction == 0x10 && write.function == 0x11) ||
+              (readFunction == 0x12 && write.function == 0x13));
+          REQUIRE(core.generalRegister(0) == 0);
+          REQUIRE(core.generalRegister(4) ==
+            (destination == 4 && readFunction == 0x12 ? 42 : 0));
+          REQUIRE(core.hi() == (readHazard ? 0 : write.expectedHI));
+          REQUIRE(core.lo() == (readHazard ? 42 : write.expectedLO));
+          REQUIRE(core.programCounter() ==
+            (readHazard ? writePC : writePC + 4));
+          REQUIRE(core.executionState() == (readHazard
+            ? IOPExecutionState::Halted : IOPExecutionState::Running));
+          REQUIRE(core.retiredInstructions() ==
+            2 + separation + (readHazard ? 0 : 1));
+          REQUIRE(core.exception().kind == IOPException::None);
+          if (readHazard)
+          {
+            REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
+          }
+        }
+      }
+    }
   }
 }
 

@@ -73,6 +73,9 @@ class IOPDMAController final
     void writePriority(IOPDMABank bank, IOPWord value);
     IOPWord interruptStatus(IOPDMABank bank) const;
     void writeInterrupt(IOPDMABank bank, IOPWord value);
+    // Provisional retained word; raw bit semantics remain unestablished.
+    IOPWord auxiliaryControl() const;
+    void writeAuxiliaryControl(IOPWord value);
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;
@@ -109,6 +112,7 @@ class IOPDMAController final
 
     IOPInterruptController &interrupts;
     std::array<Bank, 2> banks = {};
+    IOPWord auxiliaryControlRegister = 0;
     IOPDMAChannel sifNextChannel = IOPDMAChannel::SIF0;
 };
 

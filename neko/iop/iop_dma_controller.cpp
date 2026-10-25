@@ -104,6 +104,16 @@ void IOPDMAController::writeInterrupt(IOPDMABank selected, IOPWord value)
   publishInterrupt();
 }
 
+IOPWord IOPDMAController::auxiliaryControl() const
+{
+  return auxiliaryControlRegister;
+}
+
+void IOPDMAController::writeAuxiliaryControl(IOPWord value)
+{
+  auxiliaryControlRegister = value;
+}
+
 bool IOPDMAController::channelEnabled(IOPDMAChannel channel) const
 {
   return (banks[1].priority & (IOPWord{8} << (4 * channelSlot(channel)))) != 0;

@@ -13,6 +13,10 @@ namespace EEInterruptSource
   constexpr std::uint8_t VIF1 = 5;
   constexpr std::uint8_t VU0 = 6;
   constexpr std::uint8_t VU1 = 7;
+  constexpr std::uint8_t TIMER0 = 9;
+  constexpr std::uint8_t TIMER1 = 10;
+  constexpr std::uint8_t TIMER2 = 11;
+  constexpr std::uint8_t TIMER3 = 12;
 
   constexpr std::uint32_t mask(std::uint8_t source)
   {

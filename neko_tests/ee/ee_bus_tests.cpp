@@ -51,6 +51,165 @@ namespace
   }
 }
 
+TEST_CASE("EE retail IOP boot probe is an exact stateless byte read",
+  "[ee][bus][boot-probe][save-state]")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  const auto state = system.saveState();
+  std::uint8_t byte = 0xa5;
+  REQUIRE(bus.readData8(0x1f803204, &byte));
+  REQUIRE(byte == 0);
+  REQUIRE_THROWS_AS(bus.readData8(0x1f803204, nullptr), std::invalid_argument);
+  REQUIRE_FALSE(bus.writeData8(0x1f803204, 0));
+  for (std::uint32_t address : {0x1f803203u, 0x1f803205u, 0x1f803200u,
+       0x1f803208u, 0x9f803204u, 0xbf803204u})
+  {
+    CAPTURE(address);
+    byte = 0xa5;
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE(byte == 0xa5);
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+  }
+  std::uint16_t halfword = 0xa5a5;
+  std::uint32_t word = 0xa5a5a5a5;
+  std::uint64_t doubleword = UINT64_MAX;
+  EEQuadword quadword{};
+  REQUIRE_FALSE(bus.readData16(0x1f803204, &halfword));
+  REQUIRE(halfword == 0xa5a5);
+  REQUIRE_FALSE(bus.readData32(0x1f803204, &word));
+  REQUIRE(word == 0xa5a5a5a5);
+  REQUIRE_FALSE(bus.readData64(0x1f803200, &doubleword));
+  REQUIRE(doubleword == UINT64_MAX);
+  REQUIRE_FALSE(bus.readData128(0x1f803200, &quadword));
+  REQUIRE_FALSE(bus.writeData16(0x1f803204, 0));
+  REQUIRE_FALSE(bus.writeData32(0x1f803204, 0));
+  REQUIRE_FALSE(bus.writeData64(0x1f803200, 0));
+  REQUIRE_FALSE(bus.writeData128(0x1f803200, quadword));
+  REQUIRE_FALSE(bus.readInstruction32(0x1f803204, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(0x1f803204, 1));
+  REQUIRE_FALSE(bus.readDMAC128(0x1f803200, &quadword));
+  REQUIRE(system.saveState() == state);
+}
+
+TEST_CASE("GS PCRTC initialization writes preserve configured display timing",
+  "[ee][gs][pcrtc-init][save-state]")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  GSDisplay &display = system.gsDisplay();
+  display.clock();
+  const auto state = system.saveState();
+  for (std::uint8_t index : {0x01, 0x03, 0x04, 0x05, 0x06})
+  {
+    const std::uint32_t address = 0x12000000 + index * 16;
+    CAPTURE(index);
+    for (std::uint64_t value : {UINT64_C(0), UINT64_C(31147115780), UINT64_MAX})
+    {
+      CAPTURE(value);
+      REQUIRE(bus.writeData64(address, value));
+      REQUIRE_NOTHROW(display.writePrivilegedRegister(index, value));
+    }
+    std::uint8_t byte = 0xa5;
+    std::uint16_t halfword = 0xa5a5;
+    std::uint32_t word = 0xa5a5a5a5;
+    std::uint64_t doubleword = UINT64_MAX;
+    EEQuadword quadword{};
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE_FALSE(bus.readData16(address, &halfword));
+    REQUIRE_FALSE(bus.readData32(address, &word));
+    REQUIRE_FALSE(bus.readData64(address, &doubleword));
+    REQUIRE(doubleword == UINT64_MAX);
+    REQUIRE_FALSE(bus.readData128(address, &quadword));
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+    REQUIRE_FALSE(bus.writeData16(address, 0));
+    REQUIRE_FALSE(bus.writeData32(address, 0));
+    REQUIRE_FALSE(bus.writeData64(address + 8, 0));
+    REQUIRE_FALSE(bus.writeData64(address | 0xa0000000, 0));
+    REQUIRE_FALSE(bus.writeData128(address, quadword));
+    REQUIRE_THROWS_WITH(display.readPrivilegedRegister(index),
+      "GS display privileged register is write-only.");
+  }
+  REQUIRE_FALSE(bus.writeData64(0x120000f0, 0));
+  REQUIRE_THROWS_WITH(display.writePrivilegedRegister(0x0f, 0),
+    "GS display privileged register is not implemented.");
+  REQUIRE(system.saveState() == state);
+}
+
+TEST_CASE("EE SD reaches PCRTC initialization through kernel aliases",
+  "[ee][gs][pcrtc-init]")
+{
+  for (std::uint32_t segment : {0x80000000u, 0xa0000000u})
+  {
+    for (std::uint32_t address : {0x12000010u, 0x12000030u, 0x12000040u,
+         0x12000050u, 0x12000060u})
+    {
+      CAPTURE(segment);
+      CAPTURE(address);
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setGeneralRegister(1, {address | segment, 0});
+      core.setGeneralRegister(2, {UINT64_C(31147115780), 0});
+      system.eeBus().write32(0, immediateInstruction(0x3f, 1, 2));
+      core.startExecution(0);
+      system.clockMasterCycle();
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.generalRegister(2).low == UINT64_C(31147115780));
+    }
+  }
+}
+
+TEST_CASE("EE DEV9 initialization admits only the observed halfword write",
+  "[ee][bus][dev9-init][save-state]")
+{
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  const auto state = system.saveState();
+  REQUIRE(bus.writeData16(0x1f801472, 1));
+  REQUIRE(bus.writeData16(0x1f801472, 1));
+  REQUIRE(bus.writeData16(0x1f801472, 0));
+  REQUIRE_FALSE(bus.writeData16(0x1f801472, 2));
+  REQUIRE(bus.writeData16(0x1f801470, 0));
+  REQUIRE(bus.writeData16(0x1f801470, 0));
+  for (unsigned bit = 0; bit < 16; ++bit)
+  {
+    CAPTURE(bit);
+    if (bit != 0)
+    {
+      REQUIRE_FALSE(bus.writeData16(0x1f801472,
+        static_cast<std::uint16_t>(1u ^ (1u << bit))));
+    }
+    REQUIRE_FALSE(bus.writeData16(0x1f801470,
+      static_cast<std::uint16_t>(1u << bit)));
+  }
+  for (std::uint32_t address : {0x1f801470u, 0x1f801474u,
+       0x9f801472u, 0xbf801472u})
+  {
+    CAPTURE(address);
+    REQUIRE_FALSE(bus.writeData16(address, 1));
+  }
+  std::uint8_t byte = 0xa5;
+  std::uint16_t halfword = 0xa5a5;
+  std::uint32_t word = 0xa5a5a5a5;
+  std::uint64_t doubleword = UINT64_MAX;
+  EEQuadword quadword{};
+  REQUIRE_FALSE(bus.readData8(0x1f801472, &byte));
+  REQUIRE_FALSE(bus.readData16(0x1f801472, &halfword));
+  REQUIRE_FALSE(bus.readData16(0x1f801470, &halfword));
+  REQUIRE(halfword == 0xa5a5);
+  REQUIRE_FALSE(bus.readData32(0x1f801470, &word));
+  REQUIRE_FALSE(bus.readData64(0x1f801470, &doubleword));
+  REQUIRE_FALSE(bus.readData128(0x1f801470, &quadword));
+  REQUIRE_FALSE(bus.writeData8(0x1f801472, 1));
+  REQUIRE_FALSE(bus.writeData32(0x1f801470, 1));
+  REQUIRE_FALSE(bus.writeData64(0x1f801470, 1));
+  REQUIRE_FALSE(bus.writeData128(0x1f801470, quadword));
+  REQUIRE_THROWS_WITH(bus.writeData16(0x1f801473, 1),
+    "EE halfword store must be naturally aligned.");
+  REQUIRE(system.saveState() == state);
+}
+
 TEST_CASE("EE Main Memory Map Tests")
 {
   NekoSystem system;

@@ -5,19 +5,22 @@
 
 class EEInterruptController;
 class IOPInterruptController;
+class EETimers;
 
-// The caller owns both controllers; requests do not clock or enter either CPU.
+// The caller owns the devices; requests do not clock or enter either CPU.
 class SIFInterruptRouter final : public SIFSignalReceiver
 {
   public:
     SIFInterruptRouter(
       EEInterruptController &eeInterrupts,
-      IOPInterruptController &iopInterrupts);
+      IOPInterruptController &iopInterrupts,
+      EETimers &eeTimers);
     void requestSIFSignal(SIFSignal signal) noexcept override;
 
   private:
     EEInterruptController &eeInterrupts;
     IOPInterruptController &iopInterrupts;
+    EETimers &eeTimers;
 };
 
 #endif

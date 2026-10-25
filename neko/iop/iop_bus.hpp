@@ -61,6 +61,7 @@ class IOPBus final
     static constexpr IOPAddress SSBUS_CONFIG = 0x1f801010;
     static constexpr IOPAddress SSBUS_COMMON_DELAY = 0x1f801020;
     static constexpr IOPAddress SSBUS_PIO_DELAY = 0x1f80101c;
+    static constexpr IOPAddress RAM_INIT_CONTROL = 0x1f801060;
     static constexpr IOPAddress INTC_STAT = 0x1f801070;
     static constexpr IOPAddress INTC_MASK = 0x1f801074;
     static constexpr IOPAddress INTC_CTRL = 0x1f801078;
@@ -70,6 +71,7 @@ class IOPBus final
     static constexpr IOPAddress POST2 = 0x1f802070;
     static constexpr IOPAddress POST3 = 0x1fa00000;
     // Provisional stateless initialization writes; no mapping or cache effects.
+    static constexpr IOPAddress CACHE_INIT_CONTROL = 0xfffe0130;
     static constexpr IOPAddress HIGH_INIT_CONTROL0 = 0xfffe0140;
     static constexpr IOPAddress HIGH_INIT_CONTROL1 = 0xfffe0144;
 
@@ -141,7 +143,8 @@ class IOPBus final
       SIFDoorbell,
       POST2,
       POST3,
-      HighAddressInitializationControl
+      HighAddressInitializationControl,
+      RAMInitializationControl
     };
 
     struct SSBUSConfigurationState

@@ -22,7 +22,8 @@ namespace
     NekoSystem system;
     SIF &sif = system.sif();
     SIFInterruptRouter router{
-      system.interruptController(), system.iopInterruptController()};
+      system.interruptController(), system.iopInterruptController(),
+      system.eeTimers()};
 
   };
 

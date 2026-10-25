@@ -38,7 +38,12 @@ namespace GSInterruptMask
 namespace GSDisplayPrivilegedRegister
 {
   constexpr std::uint8_t PMODE = 0x00;
+  constexpr std::uint8_t SMODE1 = 0x01;
   constexpr std::uint8_t SMODE2 = 0x02;
+  constexpr std::uint8_t SRFSH = 0x03;
+  constexpr std::uint8_t SYNCH1 = 0x04;
+  constexpr std::uint8_t SYNCH2 = 0x05;
+  constexpr std::uint8_t SYNCV = 0x06;
   constexpr std::uint8_t DISPFB1 = 0x07;
   constexpr std::uint8_t DISPLAY1 = 0x08;
   constexpr std::uint8_t DISPFB2 = 0x09;

@@ -16,7 +16,7 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 48;
+constexpr std::uint32_t SAVE_STATE_VERSION = 50;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
@@ -1041,6 +1041,8 @@ class NekoSaveStateCodec
       const std::vector<std::uint8_t> &state,
       SaveStateObserver *observer = nullptr);
     static std::uint64_t hashIOP(const NekoSystem &system);
+    static std::uint64_t hashEETimers(
+      const EETimers &timers, std::uint64_t masterCycle);
     static std::uint64_t hashSIF(const NekoSystem &system);
     static std::uint64_t hashSIF1DMAC(const SIF1DMACChannel &channel);
     static std::uint64_t hashSIF0DMAC(const SIF0DMACChannel &channel);
@@ -1067,6 +1069,10 @@ class NekoSaveStateCodec
 
     template<typename Writer>
     static void writeIOPState(Writer *writer, const NekoSystem &system);
+    template<typename Writer>
+    static void writeEETimersState(Writer *writer, const EETimers &timers);
+    static void writeEETimers(SaveStateWriter *writer, const EETimers &timers);
+    static void readEETimers(SaveStateReader *reader, EETimers *timers);
     static void writeIOP(SaveStateWriter *writer, const NekoSystem &system);
     static void readIOP(
       SaveStateReader *reader, NekoSystem *system,

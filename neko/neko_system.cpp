@@ -222,7 +222,8 @@ NekoSystem::NekoSystem() :
   sif0DMACComponent(dmacControllerComponent, sifComponent,
     eeBusComponent, eeCoreComponent.memorySystem),
   sifInterruptRouterComponent(
-    interruptControllerComponent, iopInterruptControllerComponent)
+    interruptControllerComponent, iopInterruptControllerComponent,
+    eeTimersComponent)
 {
   masterClock.registerComponent(eeCoreComponent, 1);
   vif0Component.attachVPU(&vu0Component);
@@ -250,6 +251,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachToScratchpadDMACChannel(
     &toScratchpadDMACComponent);
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
+  eeBusComponent.attachTimers(&eeTimersComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   eeCoreComponent.attachVU0(&vu0Component);
   eeCoreComponent.attachVU1(&vu1Component);
@@ -487,6 +489,7 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashChannel(toScratchpadDMACComponent);
   hashStateValue(&hash, sif1DMACComponent.stateHash());
   hashStateValue(&hash, sif0DMACComponent.stateHash());
+  hashStateValue(&hash, eeTimersComponent.stateHash(masterClock.currentCycle()));
   return hash;
 }
 
@@ -951,6 +954,34 @@ NekoSystem::interruptController() const
   return interruptControllerComponent;
 }
 
+EETimers &NekoSystem::eeTimers()
+{
+  return eeTimersComponent;
+}
+
+const EETimers &NekoSystem::eeTimers() const
+{
+  return eeTimersComponent;
+}
+
+void NekoSystem::advanceEETimers(std::uint64_t masterCycle)
+{
+  const auto requests = eeTimersComponent.advance(masterCycle, {
+    gsDisplayComponent.inHorizontalBlank(),
+    gsDisplayComponent.inVerticalBlank()});
+  constexpr std::uint8_t sources[] = {
+    EEInterruptSource::TIMER0, EEInterruptSource::TIMER1,
+    EEInterruptSource::TIMER2, EEInterruptSource::TIMER3
+  };
+  for (std::size_t index = 0; index < EETimers::TIMER_COUNT; ++index)
+  {
+    if ((requests & (1u << index)) != 0)
+    {
+      interruptControllerComponent.setSource(sources[index], true);
+    }
+  }
+}
+
 void NekoSystem::latchComponentInterrupts()
 {
   if (vif0Component.interruptPending())
@@ -1214,6 +1245,7 @@ void NekoSystem::clockMasterCycle()
   }
   masterClock.clock();
   clockEESIF(observationScope.order, dmaObservations);
+  advanceEETimers(masterClock.currentCycle() - 1);
   latchComponentInterrupts();
   publishEEInterruptLines();
   advanceIOPTimers(iopClockPulse);

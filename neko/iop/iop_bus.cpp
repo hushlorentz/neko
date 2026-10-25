@@ -22,6 +22,7 @@ namespace
   }};
   constexpr IOPAddress sif1DMABase = 0x1f801530;
   constexpr IOPAddress sif0DMABase = 0x1f801520;
+  constexpr IOPAddress dmaAuxiliaryControl = 0x1f801578;
 
   bool isAligned(IOPAddress address, std::size_t width)
   {
@@ -46,6 +47,8 @@ constexpr IOPAddress IOPBus::SIF_BASE;
 constexpr IOPAddress IOPBus::SIF_DOORBELL;
 constexpr IOPAddress IOPBus::POST2;
 constexpr IOPAddress IOPBus::POST3;
+constexpr IOPAddress IOPBus::CACHE_INIT_CONTROL;
+constexpr IOPAddress IOPBus::RAM_INIT_CONTROL;
 constexpr IOPAddress IOPBus::HIGH_INIT_CONTROL0;
 constexpr IOPAddress IOPBus::HIGH_INIT_CONTROL1;
 
@@ -191,10 +194,15 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, 0, Device::POST3};
   }
-  if ((first == HIGH_INIT_CONTROL0 || first == HIGH_INIT_CONTROL1) &&
+  if ((first == CACHE_INIT_CONTROL ||
+       first == HIGH_INIT_CONTROL0 || first == HIGH_INIT_CONTROL1) &&
       last < first + sizeof(IOPWord))
   {
     return {IOPBusRegion::Mmio, 0, Device::HighAddressInitializationControl};
+  }
+  if (first == RAM_INIT_CONTROL && last < first + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, 0, Device::RAMInitializationControl};
   }
 
   const auto ssbus = locateSSBUS(address, last);
@@ -223,6 +231,13 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         static_cast<std::size_t>(first - dmaBankBases[index]),
         Device::DMAController, nullptr, index};
     }
+  }
+  if (first >= dmaAuxiliaryControl &&
+      last < static_cast<std::uint64_t>(dmaAuxiliaryControl) + 4)
+  {
+    return {IOPBusRegion::Mmio,
+      static_cast<std::size_t>(first - dmaBankBases[1]),
+      Device::DMAController, nullptr, 1};
   }
   if (first >= sif0DMABase &&
       last < static_cast<std::uint64_t>(sif0DMABase) + 16)
@@ -478,6 +493,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
     case Device::POST2:
     case Device::POST3:
     case Device::HighAddressInitializationControl:
+    case Device::RAMInitializationControl:
     case Device::None:
       return {};
   }
@@ -514,6 +530,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::HighAddressInitializationControl:
       return width == sizeof(IOPWord)
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::RAMInitializationControl:
+      // Tolerate the observed retail initialization, not general RAM resizing.
+      return width == sizeof(IOPWord) && value == 0x8000283d
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::None:
       return {};
@@ -578,6 +598,12 @@ IOPBusReadResult IOPBus::readDMARegister(const Location &location)
         return {IOPBusStatus::Completed, dmaController->priority(bank)};
       case 4:
         return {IOPBusStatus::Completed, dmaController->interruptStatus(bank)};
+      case 8:
+        if (bank == IOPDMABank::Secondary)
+        {
+          return {IOPBusStatus::Completed, dmaController->auxiliaryControl()};
+        }
+        break;
     }
   }
   if (location.device == Device::SIF1DMA && sif1DMA != nullptr)
@@ -632,6 +658,13 @@ IOPBusWriteResult IOPBus::writeDMARegister(
       case 4:
         dmaController->writeInterrupt(bank, value);
         return {IOPBusStatus::Completed};
+      case 8:
+        if (bank == IOPDMABank::Secondary)
+        {
+          dmaController->writeAuxiliaryControl(value);
+          return {IOPBusStatus::Completed};
+        }
+        break;
     }
   }
   if (location.device == Device::SIF1DMA && sif1DMA != nullptr)

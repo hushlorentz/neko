@@ -39,6 +39,28 @@ namespace
   }
 }
 
+TEST_CASE("EE byte loads reach the retail IOP boot probe through kernel aliases",
+  "[ee][boot-probe]")
+{
+  for (std::uint32_t address : {0x9f803204u, 0xbf803204u})
+  {
+    for (std::uint8_t opcode : {0x20, 0x24})
+    {
+      CAPTURE(address);
+      CAPTURE(opcode);
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      setRegister(&core, 1, address);
+      setRegister(&core, 2, UINT64_MAX);
+      runInstruction(&system, memoryInstruction(opcode, 1, 2, 0));
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.generalRegister(2).low == 0);
+      REQUIRE(core.generalRegister(2).high == UINT64_C(0xfeedfacecafebeef));
+    }
+  }
+}
+
 TEST_CASE("EE signed and unsigned byte loads")
 {
   SECTION("LB sign extends and preserves the upper GPR doubleword")

@@ -504,6 +504,10 @@ void NekoSaveStateCodec::writeSystem(
     auto component = writer->scope("sif0DMAC");
     writeSIF0DMAC(writer, system);
   }
+  {
+    auto component = writer->scope("eeTimers");
+    writeEETimers(writer, system.eeTimersComponent);
+  }
 }
 
 void NekoSaveStateCodec::readSystem(
@@ -616,6 +620,10 @@ void NekoSaveStateCodec::readSystem(
   {
     auto component = reader->scope("sif0DMAC");
     readSIF0DMAC(reader, &system->sif0DMACComponent);
+  }
+  {
+    auto component = reader->scope("eeTimers");
+    readEETimers(reader, &system->eeTimersComponent);
   }
 }
 
@@ -796,6 +804,7 @@ void NekoSaveStateCodec::commitSystem(
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
     source->interruptControllerComponent.maskRegister;
+  destination->eeTimersComponent = source->eeTimersComponent;
   destination->eeBusComponent.mainMemory.swap(
     source->eeBusComponent.mainMemory);
   commitVPU(

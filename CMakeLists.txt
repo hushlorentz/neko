@@ -66,6 +66,7 @@ add_library(neko_core
     neko/ee/ee_elf_loader.cpp
     neko/ee/ee_instruction.cpp
     neko/ee/ee_memory_system.cpp
+    neko/ee/ee_timers.cpp
     neko/ee/gif_dmac_channel.cpp
     neko/ee/interrupt_controller.cpp
     neko/ee/scratchpad_dmac_channel.cpp
@@ -78,6 +79,7 @@ add_library(neko_core
     neko/sif_interrupt_router.cpp
     neko/save_state.cpp
     neko/save_state_ee.cpp
+    neko/save_state_ee_timers.cpp
     neko/save_state_graphics.cpp
     neko/save_state_iop.cpp
     neko/save_state_sif.cpp
@@ -261,6 +263,8 @@ add_executable(neko_tests
     neko_tests/ee/ee_multiply_divide_tests.cpp
     neko_tests/ee/ee_quadword_memory_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp
+    neko_tests/ee/ee_timer_tests.cpp
+    neko_tests/ee/ee_timer_save_state_tests.cpp
     neko_tests/ee/ee_reserved_mmio_tests.cpp
     neko_tests/ee/ee_byte_memory_tests.cpp
     neko_tests/ee/ee_halfword_memory_tests.cpp

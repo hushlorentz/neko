@@ -403,18 +403,17 @@ namespace
     }
   }
 
+  bool multiplyDivideResultIsUnobserved(const IOPHILOState &state)
+  {
+    return state.unreadMultiplyDivideHI &&
+      state.unreadMultiplyDivideLO;
+  }
+
   bool pairWriteIsUndefined(const IOPHILOState &state)
   {
     return state.hiWriteHazardInstructions != 0 ||
       state.loWriteHazardInstructions != 0 ||
-      state.unreadMultiplyDivideHI ||
-      state.unreadMultiplyDivideLO;
-  }
-
-  bool hasUnreadMultiplyDivideResult(const IOPHILOState &state)
-  {
-    return state.unreadMultiplyDivideHI ||
-      state.unreadMultiplyDivideLO;
+      multiplyDivideResultIsUnobserved(state);
   }
 }
 
@@ -759,7 +758,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
         hiRegister);
     case IOPOperation::MoveToHI:
       if (hiLoState.hiWriteHazardInstructions != 0 ||
-          hasUnreadMultiplyDivideResult(hiLoState))
+          multiplyDivideResultIsUnobserved(hiLoState))
       {
         return undefinedOperationEffects();
       }
@@ -774,7 +773,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
         loRegister);
     case IOPOperation::MoveToLO:
       if (hiLoState.loWriteHazardInstructions != 0 ||
-          hasUnreadMultiplyDivideResult(hiLoState))
+          multiplyDivideResultIsUnobserved(hiLoState))
       {
         return undefinedOperationEffects();
       }
@@ -1086,10 +1085,11 @@ IOPInstructionEffects IOPCore::cop0TransferEffects(
   {
     case 3:  // BPC
     case 5:  // BDA
+    case 6:  // Unidentified IOP selector; bounded BIOS initialization policy.
     case 7:  // DCIC
     case 9:  // BDAM
     case 11: // BPCM
-      // Only zero-valued debug initialization is modeled, without retained state.
+      // Only zero-valued initialization is modeled, without retained state.
       return instruction.operation == IOPOperation::MoveToCOP0 && target == 0
         ? retiredEffects() : reservedInstructionEffects();
     case 8:

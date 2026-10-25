@@ -1908,9 +1908,45 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP CP0 Initialization: Selector-6 Scope
 
-- [ ] After debug address/mask repair closure, resolve the observed
+- [x] After debug address/mask repair closure, resolve the observed
       `MTC0 r0,$6` dependency through an explicitly approved bounded evidence
       scope or milestone-scope decision before extending the CP0 profile.
+
+### Bounded BIOS Prerequisite Discovery Loop
+
+- [x] Establish and implement the bounded selector-6 initialization contract,
+      preserving unsupported accesses and authored CPU/lifecycle/trace coverage.
+- [ ] Repeat first-failure discovery, manual-first research, bounded repair and
+      BIOS rediscovery toward the guest handshake; retain explicit provisional
+      policies and stop rather than fabricate readiness or device completion.
+- [ ] Run focused regressions per implementation and complete optimized and
+      AddressSanitizer checks every five implementations; retain immediate
+      broader validation for ownership/lifetime or cross-cutting persistence
+      changes and final handshake conformance.
+
+### EE Timers: BIOS Startup Prerequisite
+
+- [x] Add one fixed-capacity owner for all four EE timers, with documented
+      count/mode/compare/hold registers, strict word admission, reserved-bit
+      handling and authored register/flag regressions.
+- [x] Implement bus-clock divisors, H-BLANK counting, gate modes, compare/
+      overflow requests and SBUS holds, with focused edge/phase/rearm tests.
+- [x] Integrate EE MMIO, display-clock ordering, INTC, reset, canonical
+      hashing and versioned save/load; validate nonzero-phase continuation,
+      atomic rejection and the complete optimized/AddressSanitizer checks.
+- [x] Complete independent timer correctness review and bounded real-BIOS
+      rediscovery; retain the actual next dependency without claiming handshake
+      success from timer initialization.
+
+### IOP Auxiliary DMA Control: BIOS Startup Prerequisite
+
+- [ ] Admit the observed auxiliary DMA word at `0x1f801578` through the
+      common IOP DMA owner, with isolated provisional retention and strict
+      word access; do not infer global enables or unrelated register behavior.
+- [ ] Preserve its reset value, canonical identity and transactional save/load,
+      with focused CPU/bus and persistence regressions and complete checks.
+- [ ] Complete independent review and bounded BIOS rediscovery, retaining
+      the earliest originating dependency rather than later exception fallout.
 
 ### Real BIOS Handshake and Boundary Conformance
 

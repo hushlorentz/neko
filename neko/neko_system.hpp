@@ -13,6 +13,7 @@
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
 #include "ee_elf_loader.hpp"
+#include "ee_timers.hpp"
 #include "gif.hpp"
 #include "gif_dmac_channel.hpp"
 #include "gif_path1.hpp"
@@ -215,6 +216,8 @@ class NekoSystem
     const EEMemorySystem &eeMemorySystem() const;
     EEInterruptController &interruptController();
     const EEInterruptController &interruptController() const;
+    EETimers &eeTimers();
+    const EETimers &eeTimers() const;
     void clockMasterCycle();
     std::uint64_t runMasterCycles(std::uint64_t cycles);
     EEExecutionResult stepEEInstruction(
@@ -240,6 +243,7 @@ class NekoSystem
     GIFPath3Transfer gifPath3Component;
     GIFRegisters gifRegisterFile;
     EEInterruptController interruptControllerComponent;
+    EETimers eeTimersComponent;
     MasterClockScheduler masterClock;
     EEBus eeBusComponent;
     DMACController dmacControllerComponent;
@@ -302,6 +306,7 @@ class NekoSystem
     void latchComponentInterrupts();
     void publishEEInterruptLines();
     void advanceIOPTimers(bool systemClockPulse);
+    void advanceEETimers(std::uint64_t masterCycle);
     CycleObservationSnapshot
       captureCycleObservation() const;
     EEExecutionResult makeEEExecutionResult(
