@@ -333,6 +333,49 @@ Run the inspector's BIOS-free tests independently of the C++ build:
 python3 -B -m unittest discover -s tools -p 'test_inspect_startup.py' -v
 ```
 
+## Repeatable discovery batch
+
+From the repository root, run:
+
+```sh
+python3 -B tools/run_bios_discovery.py out/bios-discovery/after-ier
+```
+
+The default input is `local_integration/bios/SCPH-70012.bin`; use
+`--bios "<path>"` for a different input. The helper configures `out/check`
+if needed, builds only the optimized assertion-enabled `neko` target,
+then runs two traced and two genuinely untraced cold starts. Every run
+uses 1,000,000 master cycles; traced runs retain at most 3,000,000 events.
+The helper does not raise these limits or run tests.
+
+The artifact directory must not already exist, even if empty. Build and
+inspection stdout/stderr, four raw JSONL reports and separate run stderr
+are retained. `manifest.json` records exact commands and exit statuses,
+including a pending command if interrupted. Errors retain partial evidence;
+use a new directory for the next attempt.
+
+The existing inspector produces `summary.json`, `compare-traces.json`,
+`compare-traced-plain.json` and `compare-plain.json`, including parsed and
+byte-equality verdicts. If the exported first failure is non-null, its CPU
+and cycle select `first-failure-instructions.json` and
+`first-failure-events.json`: inclusive +/-16-cycle windows, capped at 200
+displayed matches each. DMA failures without CPU attribution remain
+unfiltered by CPU. No memory metadata is decoded again in the helper.
+
+BIOS exit 1 is an expected CPU host stop and does not skip repetitions or
+inspection. Any other nonzero BIOS exit aborts with its output preserved.
+The helper itself exits 0 for matching comparisons, 1 for a parsed comparison
+mismatch, 2 for build/run/inspection errors, or 130 for interruption. It
+continues all three comparisons after a mismatch. Matching runs, a reached
+cycle ceiling, or a null first failure do **not** establish boot or handshake
+success; inspect the reported trace coverage and originating failure.
+
+Run the BIOS-free workflow and inspector tests with:
+
+```sh
+python3 -B -m unittest discover -s tools -p 'test_*.py' -v
+```
+
 ## First captured failure
 
 `firstStartupFailure(trace)` performs a read-only, linear scan of the retained

@@ -14,7 +14,7 @@ namespace
     std::uint32_t value;
   };
   constexpr SerialInitialization SERIAL_INITIALIZATIONS[] = {
-    {0x1000f100, 0x20}, {0x1000f120, 0}
+    {0x1000f100, 0x20}, {0x1000f120, 0}, {0x1000f140, 7}
   };
 
   void seed(NekoSystem &system)
@@ -98,6 +98,7 @@ TEST_CASE("EE serial initialization admits only the stateless observed word",
 {
   REQUIRE(EEMemoryMap::SIO_LCR == 0x1000f100);
   REQUIRE(EEMemoryMap::SIO_IER == 0x1000f120);
+  REQUIRE(EEMemoryMap::SIO_FCR == 0x1000f140);
   for (const auto initialization : SERIAL_INITIALIZATIONS)
   {
     CAPTURE(initialization.address);
@@ -141,7 +142,8 @@ TEST_CASE("EE serial initialization excludes readback values widths and neighbor
     const auto uncached = initialization.address | 0xa0000000;
     REQUIRE(bus.writeData32(initialization.address, initialization.value));
     const auto eeHash = system.eeStateHash();
-    for (std::uint32_t value : {0u, 1u, 0x20u, 0x21u, 0x3du, 0x10020u, UINT32_MAX})
+    for (std::uint32_t value : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u,
+           0x20u, 0x21u, 0x3du, 0x10007u, 0x10020u, UINT32_MAX})
     {
       if (value == initialization.value)
       {
@@ -195,7 +197,8 @@ TEST_CASE("EE serial initialization excludes readback values widths and neighbor
     }
     for (const auto address : {0x1000f0fcu, 0x1000f100u, 0x1000f104u,
            0x1000f110u, 0x1000f11cu, 0x1000f120u, 0x1000f124u,
-           0x1000f130u, 0x1000f140u, 0x1000f150u, 0x1000f180u, 0x1000f1c0u})
+           0x1000f130u, 0x1000f13cu, 0x1000f140u, 0x1000f144u,
+           0x1000f150u, 0x1000f180u, 0x1000f1c0u})
     {
       if (address == initialization.address)
       {
@@ -221,7 +224,7 @@ TEST_CASE("EE serial initialization guest stores and merges preserve admission",
     const auto uncached = initialization.address | 0xa0000000;
     for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
     {
-      for (const std::uint32_t value : {0x20u, 0u, 0x21u})
+      for (const std::uint32_t value : {0x20u, 0u, 7u, 0x21u})
       {
         for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
         {

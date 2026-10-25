@@ -2003,9 +2003,23 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### EE Serial-Port FIFO Initialization: Scope
 
-- [ ] Resolve the observed word store of `0x7` to `0x1000f140` against
+- [x] Resolve the observed word store of `0x7` to `0x1000f140` against
       local manuals and approved secondary evidence; define FIFO/reset
       effects and ownership before extending serial behavior.
+
+### EE Serial-Port FIFO Initialization: Bounded FCR Repair
+
+- [x] Admit only exact full-word writes of `0x7` without retained state
+      or FIFO effects; extend shared serial access, guest, merge and trace
+      regressions while retaining rejection of zero and other values.
+- [x] Validate and independently review the bounded repair, then repeat
+      unchanged-budget BIOS rediscovery and retain the next dependency.
+
+### EE Serial-Port FIFO Reset Release: Scope
+
+- [ ] Resolve the subsequent observed zero word store to `0x1000f140`
+      against the established reset-sequence evidence; define bounded
+      access and effects before extending the exact-`0x7` policy.
 
 ### Real BIOS Handshake and Boundary Conformance
 

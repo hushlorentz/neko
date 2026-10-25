@@ -106,6 +106,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t INTC_MASK = 0x1000f010;
   constexpr std::uint32_t SIO_LCR = 0x1000f100;
   constexpr std::uint32_t SIO_IER = 0x1000f120;
+  constexpr std::uint32_t SIO_FCR = 0x1000f140;
   constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
   constexpr std::uint32_t IOP_BOOT_PROBE = 0x1f803204;
   constexpr std::uint32_t IOP_DEV9_INIT_1470 = 0x1f801470;
