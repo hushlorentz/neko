@@ -1989,8 +1989,22 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### EE Serial-Port Interrupt Initialization: Scope
 
-- [ ] Resolve the observed zero word store to `0x1000f120` against
+- [x] Resolve the observed zero word store to `0x1000f120` against
       local manuals and approved secondary evidence; define bounded access,
+      effects and ownership before extending serial behavior.
+
+### EE Serial-Port Interrupt Initialization: Bounded IER Repair
+
+- [x] Admit only exact full-word zero writes without retained state or
+      UART effects; share the LCR access, guest, merge and trace regression
+      matrix while preserving endpoint-specific values and rejection.
+- [x] Validate and independently review the bounded repair, then repeat
+      unchanged-budget BIOS rediscovery and retain the next dependency.
+
+### EE Serial-Port FIFO Initialization: Scope
+
+- [ ] Resolve the observed word store of `0x7` to `0x1000f140` against
+      local manuals and approved secondary evidence; define FIFO/reset
       effects and ownership before extending serial behavior.
 
 ### Real BIOS Handshake and Boundary Conformance
