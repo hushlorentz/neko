@@ -517,6 +517,52 @@ TEST_CASE("IOP high-address startup writes are trace observational",
   REQUIRE(accesses == addresses.size());
 }
 
+TEST_CASE("IOP cache control readback is trace observational",
+  "[iop][high-control][cache-control][trace]")
+{
+  NekoSystem traced;
+  NekoSystem untraced;
+  const std::array<IOPWord, 7> program{{
+    0x3c01fffe, 0x24020cc4, 0xac220130, 0x8c230130,
+    0x00602021, 0x00602821, 0
+  }};
+  for (auto *system : {&traced, &untraced})
+  {
+    for (std::size_t index = 0; index < program.size(); ++index)
+    {
+      instruction(*system, static_cast<IOPAddress>(index * 4), program[index]);
+    }
+    system->iopCore().startExecution(0xa0000000);
+  }
+  traced.startTrace();
+  traced.runMasterCycles(7 * 8);
+  untraced.runMasterCycles(7 * 8);
+  REQUIRE(traced.iopCore().retiredInstructions() == 7);
+  REQUIRE(traced.iopCore().generalRegister(3) == 0xcc4);
+  REQUIRE(traced.iopCore().generalRegister(4) == 0);
+  REQUIRE(traced.iopCore().generalRegister(5) == 0xcc4);
+  REQUIRE(traced.iopStateHash() == untraced.iopStateHash());
+  REQUIRE(traced.saveState() == untraced.saveState());
+  namespace Memory = NekoIOPTraceMemory;
+  std::size_t reads = 0;
+  for (const auto &event : traced.trace())
+  {
+    if (event.type != Type::MemoryAccess || event.value0 != IOPBus::CACHE_INIT_CONTROL ||
+        event.masterCycle != 25)
+    {
+      continue;
+    }
+    requireIdentity(event, Subsystem::IOP, Type::MemoryAccess, 25);
+    REQUIRE(event.value1 == 0xcc4);
+    REQUIRE(event.value2 == 0);
+    REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+      IOPBus::CACHE_INIT_CONTROL, 4, Memory::AccessKind::DataLoad,
+      Memory::Outcome::Completed, Memory::CacheRoute::Uncached, true, 0}));
+    ++reads;
+  }
+  REQUIRE(reads == 1);
+}
+
 TEST_CASE("IOP high-address rejected stores retain failed trace metadata",
   "[iop][high-control][trace]")
 {

@@ -3193,7 +3193,15 @@ TEST_CASE("IOP high-address guest stores preserve word and merge admission",
               (opcode == 0x2a ? 0xf >> (3 - offset) : (0xf << offset) & 0xf));
           }
         }
-        REQUIRE(bus.read32(base).status == IOPBusStatus::Unmapped);
+        if (base == IOPBus::CACHE_INIT_CONTROL)
+        {
+          REQUIRE(bus.read32(base).status == IOPBusStatus::Completed);
+          REQUIRE(bus.read32(base).value == (completed ? 0x89abcdefu : 0u));
+        }
+        else
+        {
+          REQUIRE(bus.read32(base).status == IOPBusStatus::Unmapped);
+        }
       }
     }
     for (IOPAddress address :
@@ -3218,6 +3226,11 @@ TEST_CASE("IOP high-address faults preserve delayed results and branch provenanc
   {
     for (std::uint8_t opcode : {0x20, 0x21, 0x23, 0x24, 0x25, 0x22, 0x26, 0x29})
     {
+      if (base == IOPBus::CACHE_INIT_CONTROL &&
+          (opcode == 0x23 || opcode == 0x22 || opcode == 0x26))
+      {
+        continue;
+      }
       CAPTURE(base);
       CAPTURE(opcode);
       IOPBus bus;
@@ -3281,6 +3294,15 @@ TEST_CASE("IOP high-address faults preserve delayed results and branch provenanc
     core.attachBus(&bus);
     core.startExecution(base);
     const auto fetch = core.fetchInstruction();
+    if (base == IOPBus::CACHE_INIT_CONTROL)
+    {
+      REQUIRE(fetch.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(fetch.value == 0);
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.retiredInstructions() == 1);
+      continue;
+    }
     REQUIRE(fetch.outcome == IOPAccessOutcome::Unmapped);
     REQUIRE(fetch.virtualAddress == base);
     REQUIRE(fetch.physicalAddress == base);
@@ -3289,6 +3311,73 @@ TEST_CASE("IOP high-address faults preserve delayed results and branch provenanc
     REQUIRE(core.exceptionProgramCounter() == base);
     REQUIRE(core.retiredInstructions() == 0);
   }
+}
+
+TEST_CASE("IOP cache control word loads preserve branch and load delay slots",
+  "[iop][execution][high-control][cache-control]")
+{
+  for (std::uint8_t opcode : {0x23, 0x22, 0x26})
+  {
+    for (std::uint16_t offset = 0; offset < 4; ++offset)
+    {
+      if (opcode == 0x23 && offset != 0)
+      {
+        continue;
+      }
+      CAPTURE(opcode);
+      CAPTURE(offset);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, 0x89abcdef).status ==
+        IOPBusStatus::Completed);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, IOPBus::CACHE_INIT_CONTROL);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 0x12345678);
+      loadInstruction(&bus, 0, 0x10000002);
+      loadInstruction(&bus, 4, immediateInstruction(opcode, 1, 2, offset));
+      loadInstruction(&bus, 12, 0x00401821); // addu r3, r2, r0: load-delay slot
+      loadInstruction(&bus, 16, 0);
+      core.startExecution(0xa0000000);
+      core.stepInstruction();
+      core.stepInstruction();
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.programCounter() == 0xa000000c);
+      REQUIRE(core.generalRegister(2) == 0x12345678);
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::Load);
+      const auto expected = opcode == 0x23 ? 0x89abcdefu :
+        opcode == 0x22
+          ? (0x12345678u & (0x00ffffffu >> (offset * 8))) |
+              (0x89abcdefu << ((3 - offset) * 8))
+          : (offset == 0 ? 0x89abcdefu :
+              (0x12345678u & (0xffffff00u << ((3 - offset) * 8))) |
+                (0x89abcdefu >> (offset * 8)));
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(3) == 0x12345678);
+      REQUIRE(core.generalRegister(2) == expected);
+      REQUIRE(core.retiredInstructions() == 3);
+      REQUIRE(bus.read32(IOPBus::CACHE_INIT_CONTROL).value == 0x89abcdef);
+    }
+  }
+}
+
+TEST_CASE("IOP cache control readback preserves protection and alignment checks",
+  "[iop][execution][high-control][cache-control]")
+{
+  IOPBus bus;
+  IOPCore core;
+  core.attachBus(&bus);
+  REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, 0xcc4).status ==
+    IOPBusStatus::Completed);
+  for (IOPAddress offset : {1u, 2u, 3u})
+  {
+    REQUIRE(core.readData32(IOPBus::CACHE_INIT_CONTROL + offset).outcome ==
+      IOPAccessOutcome::Misaligned);
+  }
+  IOPCoreTestAccess::setUserMode(&core, true);
+  const auto read = core.readData32(IOPBus::CACHE_INIT_CONTROL);
+  REQUIRE(read.outcome == IOPAccessOutcome::ProtectionFailure);
+  REQUIRE(read.exception == IOPException::AddressErrorLoadOrFetch);
+  REQUIRE(bus.read32(IOPBus::CACHE_INIT_CONTROL).value == 0xcc4);
 }
 
 TEST_CASE("IOP core reports fetch protection alignment and bus failures")

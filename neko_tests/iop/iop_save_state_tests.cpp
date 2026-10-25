@@ -471,7 +471,7 @@ TEST_CASE("IOP stateless platform writes leave canonical machine state unchanged
       IOPBusStatus::Completed);
     REQUIRE(system.iopBus().read8(0x1f802070).status == IOPBusStatus::Unmapped);
     REQUIRE(system.iopBus().read8(0x1fa00000).status == IOPBusStatus::Unmapped);
-    for (IOPAddress address : {0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
+    for (IOPAddress address : {0xfffe0140u, 0xfffe0144u})
     {
       REQUIRE(system.iopBus().write32(address, value).status ==
         IOPBusStatus::Completed);
@@ -750,6 +750,88 @@ TEST_CASE("IOP high-address writes continue across lifecycle and branch restore"
     REQUIRE(system->saveState() == state);
   }
   REQUIRE(original.saveState() == restored.saveState());
+}
+
+TEST_CASE("IOP cache control readback has isolated canonical state and atomic restore",
+  "[iop][high-control][cache-control][save-state]")
+{
+  constexpr IOPAddress address = IOPBus::CACHE_INIT_CONTROL;
+  NekoSystem original;
+  const auto initialState = original.saveState();
+  const auto initialHash = original.iopStateHash();
+  const auto eeHash = original.eeStateHash();
+  const auto sifHash = original.sifStateHash();
+  REQUIRE(original.iopBus().write32(address, 0xffffffff).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(original.iopStateHash() != initialHash);
+  REQUIRE(original.eeStateHash() == eeHash);
+  REQUIRE(original.sifStateHash() == sifHash);
+  const auto state = original.saveState();
+  SaveStateMutation onlyControl(state);
+  onlyControl.writeScalar("system.iop.bus.cacheInitializationControl", 0);
+  onlyControl.refreshChecksum();
+  REQUIRE(onlyControl.bytes() == initialState);
+  const auto snapshot = inspectSaveState(state);
+  const auto *field = snapshot.find("system.iop.bus.cacheInitializationControl");
+  REQUIRE(field != nullptr);
+  REQUIRE(field->kind == SaveStateFieldKind::U32);
+  REQUIRE(field->scalarValue == 0xffffffff);
+  REQUIRE(original.iopBus().read32(address).value == 0xffffffff);
+  REQUIRE(original.saveState() == state);
+  NekoSystem restored;
+  restored.loadState(state);
+  REQUIRE(restored.saveState() == state);
+  REQUIRE(restored.iopStateHash() == original.iopStateHash());
+  REQUIRE(restored.iopBus().write32(address, 0xcc4).status == IOPBusStatus::Completed);
+  REQUIRE(original.iopBus().read32(address).value == 0xffffffff);
+  const auto before = restored.saveState();
+  SaveStateMutation invalid(state);
+  invalid.writeScalar("system.iop.timers.counters[0].count", 0x10000);
+  invalid.refreshChecksum();
+  REQUIRE_THROWS_AS(restored.loadState(invalid), std::invalid_argument);
+  REQUIRE(restored.saveState() == before);
+  REQUIRE(restored.iopBus().read32(address).value == 0xcc4);
+  SaveStateMutation oldVersion(state);
+  oldVersion.writeScalar("container.version", 50);
+  oldVersion.refreshChecksum();
+  REQUIRE_THROWS_AS(restored.loadState(oldVersion), std::invalid_argument);
+  REQUIRE(restored.saveState() == before);
+  restored.loadState(state);
+  REQUIRE(restored.iopBus().read32(address).value == 0xffffffff);
+  restored.reset();
+  NekoSystem fresh;
+  REQUIRE(restored.iopBus().read32(address).value == 0);
+  REQUIRE(restored.saveState() == fresh.saveState());
+}
+
+TEST_CASE("IOP cache control load continuation survives restore and CPU lifecycle",
+  "[iop][high-control][cache-control][save-state]")
+{
+  NekoSystem original;
+  loadInstruction(&original, 0, 0x3c01fffe);
+  loadInstruction(&original, 4, 0x8c220130);
+  loadInstruction(&original, 8, 0x00401821);
+  loadInstruction(&original, 12, 0);
+  REQUIRE(original.iopBus().write32(IOPBus::CACHE_INIT_CONTROL, 0xcc4).status ==
+    IOPBusStatus::Completed);
+  original.iopCore().startExecution(0xa0000000);
+  original.iopCore().stepInstruction();
+  original.iopCore().stepInstruction();
+  REQUIRE(original.iopCore().delayedResultContinuation().source ==
+    IOPDelayedResultSource::Load);
+  NekoSystem restored;
+  restored.loadState(original.saveState());
+  for (auto *system : {&original, &restored})
+  {
+    system->iopCore().haltExecution();
+    system->iopCore().resumeExecution();
+    system->iopCore().stepInstruction();
+    REQUIRE(system->iopCore().generalRegister(3) == 0);
+    REQUIRE(system->iopCore().generalRegister(2) == 0xcc4);
+    system->iopCore().reset();
+    REQUIRE(system->iopBus().read32(IOPBus::CACHE_INIT_CONTROL).value == 0xcc4);
+  }
+  REQUIRE(restored.saveState() == original.saveState());
 }
 
 TEST_CASE("IOP persistence continues branch and delayed load without copied pointers")

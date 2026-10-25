@@ -70,14 +70,15 @@ class IOPBus final
     // Provisional stateless outputs; POST2's hardware identity is uncertain.
     static constexpr IOPAddress POST2 = 0x1f802070;
     static constexpr IOPAddress POST3 = 0x1fa00000;
-    // Provisional stateless initialization writes; no mapping or cache effects.
+    // Provisional retained initialization word; no mapping or cache effects.
     static constexpr IOPAddress CACHE_INIT_CONTROL = 0xfffe0130;
+    // Provisional stateless initialization writes.
     static constexpr IOPAddress HIGH_INIT_CONTROL0 = 0xfffe0140;
     static constexpr IOPAddress HIGH_INIT_CONTROL1 = 0xfffe0144;
 
     IOPBus();
 
-    // Clears owned storage and SSBUS state, not attached devices or ROM.
+    // Clears owned storage and control words, not attached devices or ROM.
     void reset();
     // The caller owns the controller and must keep it alive while attached.
     void attachInterruptController(IOPInterruptController *interrupts);
@@ -143,6 +144,7 @@ class IOPBus final
       SIFDoorbell,
       POST2,
       POST3,
+      CacheInitializationControl,
       HighAddressInitializationControl,
       RAMInitializationControl
     };
@@ -230,6 +232,7 @@ class IOPBus final
     std::array<std::uint8_t, SCRATCHPAD_SIZE> scratchpad = {};
     // Provisional zero-reset retained base/delay words; no mapping or timing effects.
     SSBUSConfigurationState ssbusConfiguration;
+    IOPWord cacheInitializationControl = 0;
     std::shared_ptr<const BootROMImage> rom;
     IOPInterruptController *interruptController = nullptr;
     IOPTimers *timers = nullptr;

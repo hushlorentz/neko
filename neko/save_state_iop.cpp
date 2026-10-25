@@ -173,6 +173,7 @@ void NekoSaveStateCodec::writeIOPState(
     writer->writeFieldU32("ssbusDev9Delay2", bus.ssbusConfiguration.dev9Delay2);
     writer->writeFieldU32("ssbusDev9Delay3", bus.ssbusConfiguration.dev9Delay3);
     writer->writeFieldU32("ssbusDev9Delay1", bus.ssbusConfiguration.dev9Delay1);
+    writer->writeFieldU32("cacheInitializationControl", bus.cacheInitializationControl);
     writer->writeFieldByteVector("ram", bus.ram);
     writer->writeFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -284,6 +285,7 @@ void NekoSaveStateCodec::readIOP(
     bus.ssbusConfiguration.dev9Delay2 = reader->readFieldU32("ssbusDev9Delay2");
     bus.ssbusConfiguration.dev9Delay3 = reader->readFieldU32("ssbusDev9Delay3");
     bus.ssbusConfiguration.dev9Delay1 = reader->readFieldU32("ssbusDev9Delay1");
+    bus.cacheInitializationControl = reader->readFieldU32("cacheInitializationControl");
     bus.ram = reader->readFieldByteVector("ram", IOPBus::RAM_SIZE);
     reader->readFieldBytes(
       "scratchpad", bus.scratchpad.data(), bus.scratchpad.size());
@@ -641,6 +643,8 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.scratchpad = source->iopBusComponent.scratchpad;
   destination->iopBusComponent.ssbusConfiguration =
     source->iopBusComponent.ssbusConfiguration;
+  destination->iopBusComponent.cacheInitializationControl =
+    source->iopBusComponent.cacheInitializationControl;
   const bool observationsEnabled = destination->iopCoreComponent.observationsEnabled;
   auto *const observationOrder = destination->iopCoreComponent.observationOrder;
   destination->iopCoreComponent = source->iopCoreComponent;

@@ -269,7 +269,8 @@ TEST_CASE("IOP SSBUS configuration rejects unsupported accesses atomically",
     for (IOPAddress address : {0xfffe0130u, 0xfffe0140u, 0xfffe0144u})
     {
       REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Completed);
-      REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read32(address).status == (address == IOPBus::CACHE_INIT_CONTROL
+        ? IOPBusStatus::Completed : IOPBusStatus::Unmapped));
     }
     REQUIRE(bus.regionForRange(0x1f801010, 0x14) == IOPBusRegion::Unmapped);
     REQUIRE(bus.regionForRange(0x1f80101c, 8) == IOPBusRegion::Unmapped);
@@ -389,7 +390,35 @@ TEST_CASE("IOP diagnostic endpoints reject readback lanes and other owners",
   }
 }
 
-TEST_CASE("IOP high-address controls admit only exact full-word writes",
+TEST_CASE("IOP cache initialization control retains exact word writes and resets",
+  "[iop][bus][high-control][cache-control]")
+{
+  IOPBus bus;
+  constexpr IOPAddress base = IOPBus::CACHE_INIT_CONTROL;
+  REQUIRE(bus.read32(base).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(base).value == 0);
+  for (IOPWord value : {0u, 0xcc4u, 0xffffffffu, 0xaaaaaaaau, 0x55555555u})
+  {
+    REQUIRE(bus.write32(base, value).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(base).value == value);
+    REQUIRE(bus.writeMasked32(base, ~value, 0xf).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(base).value == ~value);
+    REQUIRE(bus.write8(base, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(base, 0).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(base, 0, mask).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read32(base).value == ~value);
+    }
+    REQUIRE(bus.writeDMAC32(base, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(base).value == ~value);
+  }
+  bus.reset();
+  REQUIRE(bus.read32(base).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(base).value == 0);
+}
+
+TEST_CASE("IOP high-address controls preserve strict full-word admission",
   "[iop][bus][high-control]")
 {
   IOPBus bus;
@@ -408,7 +437,8 @@ TEST_CASE("IOP high-address controls admit only exact full-word writes",
     REQUIRE(bus.regionForRange(base, 8) == IOPBusRegion::Unmapped);
     REQUIRE(bus.read8(base).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read16(base).status == IOPBusStatus::Unmapped);
-    REQUIRE(bus.read32(base).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(base).status == (base == IOPBus::CACHE_INIT_CONTROL
+      ? IOPBusStatus::Completed : IOPBusStatus::Unmapped));
     REQUIRE(bus.write8(base, 0xff).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write16(base, 0xffff).status == IOPBusStatus::Unmapped);
     for (std::uint8_t mask = 1; mask < 0xf; ++mask)

@@ -1940,13 +1940,30 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Auxiliary DMA Control: BIOS Startup Prerequisite
 
-- [ ] Admit the observed auxiliary DMA word at `0x1f801578` through the
+- [x] Admit the observed auxiliary DMA word at `0x1f801578` through the
       common IOP DMA owner, with isolated provisional retention and strict
       word access; do not infer global enables or unrelated register behavior.
-- [ ] Preserve its reset value, canonical identity and transactional save/load,
+- [x] Preserve its reset value, canonical identity and transactional save/load,
       with focused CPU/bus and persistence regressions and complete checks.
-- [ ] Complete independent review and bounded BIOS rediscovery, retaining
+- [x] Complete independent review and bounded BIOS rediscovery, retaining
       the earliest originating dependency rather than later exception fallout.
+
+### IOP Cache/BIU Control: Readback Scope
+
+- [x] Resolve the observed full-word read of `0xfffe0130` against the existing
+      write-only policy; select a bounded state/readback and owner contract
+      before implementing cache effects or extending persistence.
+
+### IOP Cache/BIU Control: Bounded Readback Repair
+
+- [ ] Retain exact full-word initialization writes and expose word readback
+      with zero reset at the existing bus owner; preserve access rejection,
+      CPU protection and cache behavior with authored red/green regressions.
+- [ ] Include canonical hashing and versioned transactional persistence;
+      validate lifecycle, load-delay continuation and observational traces,
+      and run complete optimized and AddressSanitizer checks.
+- [ ] Complete independent correctness review and bounded BIOS rediscovery;
+      record the earliest originating dependency without claiming a handshake.
 
 ### Real BIOS Handshake and Boundary Conformance
 

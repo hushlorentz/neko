@@ -61,6 +61,7 @@ void IOPBus::reset()
   std::fill(ram.begin(), ram.end(), static_cast<std::uint8_t>(0));
   scratchpad.fill(0);
   ssbusConfiguration = {};
+  cacheInitializationControl = 0;
 }
 
 void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
@@ -194,8 +195,11 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, 0, Device::POST3};
   }
-  if ((first == CACHE_INIT_CONTROL ||
-       first == HIGH_INIT_CONTROL0 || first == HIGH_INIT_CONTROL1) &&
+  if (first == CACHE_INIT_CONTROL && last < first + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, 0, Device::CacheInitializationControl};
+  }
+  if ((first == HIGH_INIT_CONTROL0 || first == HIGH_INIT_CONTROL1) &&
       last < first + sizeof(IOPWord))
   {
     return {IOPBusRegion::Mmio, 0, Device::HighAddressInitializationControl};
@@ -490,6 +494,10 @@ IOPBusReadResult IOPBus::readDeviceRegister(
     case Device::SIFRegisters:
     case Device::SIFDoorbell:
       return readSIFRegister(location, width);
+    case Device::CacheInitializationControl:
+      return width == sizeof(IOPWord)
+        ? IOPBusReadResult{IOPBusStatus::Completed, cacheInitializationControl}
+        : IOPBusReadResult{};
     case Device::POST2:
     case Device::POST3:
     case Device::HighAddressInitializationControl:
@@ -531,6 +539,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::HighAddressInitializationControl:
       return width == sizeof(IOPWord)
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::CacheInitializationControl:
+      if (width != sizeof(IOPWord))
+      {
+        return {};
+      }
+      cacheInitializationControl = value;
+      return {IOPBusStatus::Completed};
     case Device::RAMInitializationControl:
       // Tolerate the observed retail initialization, not general RAM resizing.
       return width == sizeof(IOPWord) && value == 0x8000283d
