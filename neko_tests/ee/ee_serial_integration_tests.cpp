@@ -403,3 +403,207 @@ TEST_CASE("EE serial malformed state rejects atomically",
     REQUIRE(system.saveState() == original);
   }
 }
+
+TEST_CASE("EE serial guest polling resumes identically from an in-flight frame",
+  "[ee][serial-integration][serial-conformance][guest][trace][save-state]")
+{
+  NekoSystem system;
+  constexpr std::uint32_t program[] = {
+    0xa0220080, // sb r2,0x80(r1)
+    0x8c230030, // lw r3,0x30(r1)
+    0x3063f000, // andi r3,r3,0xf000
+    0x1064fffd, // beq r3,r4,poll
+    0x24a50001, // addiu r5,r5,1 (delay slot)
+    0xa0260080, // sb r6,0x80(r1)
+    0x1000ffff, // beq zero,zero,done
+    0
+  };
+  for (unsigned index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+  {
+    system.eeBus().write32(index * 4, program[index]);
+  }
+  system.eeCore().setGeneralRegister(1, {0xb000f100, 0});
+  system.eeCore().setGeneralRegister(2, {0x23, 0});
+  system.eeCore().setGeneralRegister(4, {0x8000, 0});
+  system.eeCore().setGeneralRegister(6, {0x0a, 0});
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  system.eeCore().startExecution(0xa0000000);
+  system.startTrace(1000);
+  system.runMasterCycles(31);
+  REQUIRE(system.eeCore().pendingException() == EEException::None);
+  REQUIRE(system.eeCore().generalRegister(5).low > 1);
+  REQUIRE(system.eeBus().read32(EEMemoryMap::SIO_ISR) == 0x8000);
+  REQUIRE(completions(system).empty());
+  std::uint64_t acceptedCycle = 0;
+  for (const auto &event : system.trace())
+  {
+    if (event.type == NekoTraceEventType::MemoryAccess &&
+        event.subsystem == NekoTraceSubsystem::EE && event.value0 == 0xb000f180)
+    {
+      REQUIRE(event.value1 == 0x23);
+      REQUIRE(acceptedCycle == 0);
+      acceptedCycle = event.masterCycle;
+    }
+  }
+  REQUIRE(acceptedCycle != 0);
+  REQUIRE_FALSE(system.traceTruncated());
+  const auto saved = system.saveState();
+  NekoSystem restored;
+  NekoSystem plain;
+  restored.loadState(saved);
+  plain.loadState(saved);
+  for (auto *machine : {&system, &restored})
+  {
+    machine->startTrace(50000);
+  }
+  for (auto *machine : {&system, &restored, &plain})
+  {
+    machine->runMasterCycles(5300);
+    REQUIRE(machine->eeCore().pendingException() == EEException::None);
+    REQUIRE(machine->eeCore().programCounter() == 0xa0000018);
+    REQUIRE(machine->eeCore().generalRegister(3).low == 0);
+    REQUIRE(machine->eeBus().read32(EEMemoryMap::SIO_ISR) == 0);
+    REQUIRE(machine->interruptController().status() == 0);
+    REQUIRE(machine->iopInterruptController().status() == 0);
+  }
+  REQUIRE(system.saveState() == restored.saveState());
+  REQUIRE(system.saveState() == plain.saveState());
+  REQUIRE(system.traceHash() == restored.traceHash());
+  REQUIRE_FALSE(plain.traceEnabled());
+  REQUIRE_FALSE(system.traceTruncated());
+  REQUIRE_FALSE(restored.traceTruncated());
+  const auto events = completions(system);
+  REQUIRE(events.size() == 2);
+  REQUIRE(events[0].value0 == 0x23);
+  REQUIRE(events[0].masterCycle == acceptedCycle + 2560);
+  REQUIRE(events[1].value0 == 0x0a);
+  std::uint64_t secondStoreCycle = 0;
+  std::size_t busyReads = 0;
+  std::size_t idleReads = 0;
+  for (const auto &event : system.trace())
+  {
+    if (event.type != NekoTraceEventType::MemoryAccess ||
+        event.subsystem != NekoTraceSubsystem::EE)
+    {
+      continue;
+    }
+    if (event.value0 == 0xb000f130)
+    {
+      REQUIRE(event.value1 ==
+        (event.masterCycle < events[0].masterCycle ? 0x8000 : 0));
+      if (event.value1 != 0)
+      {
+        ++busyReads;
+      }
+      else
+      {
+        ++idleReads;
+      }
+    }
+    if (event.value0 == 0xb000f180)
+    {
+      REQUIRE(secondStoreCycle == 0);
+      REQUIRE(event.value1 == 0x0a);
+      REQUIRE(event.masterCycle >= events[0].masterCycle);
+      secondStoreCycle = event.masterCycle;
+    }
+  }
+  REQUIRE(busyReads > 1);
+  REQUIRE(idleReads == 1);
+  REQUIRE(secondStoreCycle != 0);
+  REQUIRE(secondStoreCycle < events[0].masterCycle + 16);
+  REQUIRE(events[1].masterCycle == secondStoreCycle + 2560);
+}
+
+TEST_CASE("EE serial delay-slot transmit preserves acceptance and fault provenance",
+  "[ee][serial-integration][serial-conformance][guest][trace]")
+{
+  for (unsigned scenario = 0; scenario < 3; ++scenario)
+  {
+    CAPTURE(scenario);
+    NekoSystem system;
+    if (scenario == 1)
+    {
+      REQUIRE(system.eeBus().writeData8(TX, 0x23));
+    }
+    if (scenario == 2)
+    {
+      REQUIRE(system.eeBus().writeData32(EEMemoryMap::SIO_FCR, 7));
+    }
+    startStore(system, 0xb000f180, 0xff, 0x28);
+    system.eeBus().write32(0, 0x10000003);
+    system.eeBus().write32(4, 0xa0220000);
+    system.startTrace(100);
+    for (unsigned cycle = 0; cycle < 2 &&
+         system.eeCore().programCounter() != 0xa0000010 &&
+         system.eeCore().pendingException() == EEException::None; ++cycle)
+    {
+      system.clockMasterCycle();
+    }
+    REQUIRE(system.eeCore().pendingException() ==
+      (scenario == 0 ? EEException::None : EEException::DataBusErrorStore));
+    if (scenario == 0)
+    {
+      REQUIRE(system.eeCore().programCounter() == 0xa0000010);
+    }
+    else
+    {
+      REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+      REQUIRE((system.eeCore().cop0Register(EECOP0Register::Cause) &
+        0x80000000u) != 0);
+    }
+    std::uint64_t storeCycle = 0;
+    for (const auto &event : system.trace())
+    {
+      if (event.type == NekoTraceEventType::MemoryAccess &&
+          event.subsystem == NekoTraceSubsystem::EE && event.value0 == 0xb000f180)
+      {
+        REQUIRE(storeCycle == 0);
+        REQUIRE(event.value1 == 0xff);
+        storeCycle = event.masterCycle;
+      }
+    }
+    REQUIRE(storeCycle != 0);
+    system.eeCore().haltExecution();
+    system.runMasterCycles(2562);
+    const auto events = completions(system);
+    REQUIRE(events.size() == (scenario == 2 ? 0 : 1));
+    if (scenario != 2)
+    {
+      REQUIRE(events[0].value0 == (scenario == 0 ? 0xff : 0x23));
+      REQUIRE(events[0].masterCycle == (scenario == 0 ? storeCycle + 2560 : 2560));
+    }
+    REQUIRE_FALSE(system.traceTruncated());
+  }
+}
+
+TEST_CASE("EE serial guest transmit rejects non-byte and neighboring accesses",
+  "[ee][serial-integration][serial-conformance][guest]")
+{
+  for (const std::uint8_t opcode : {0x20, 0x24, 0x21, 0x25, 0x23, 0x27,
+         0x22, 0x26, 0x37, 0x1e, 0x29, 0x2b, 0x2a, 0x2e, 0x3f, 0x1f,
+         0x2c, 0x2d, 0x28})
+  {
+    const bool load = opcode == 0x20 || opcode == 0x24 || opcode == 0x21 ||
+      opcode == 0x25 || opcode == 0x23 || opcode == 0x27 || opcode == 0x22 ||
+      opcode == 0x26 || opcode == 0x37 || opcode == 0x1e;
+    const bool lanes = opcode == 0x22 || opcode == 0x26 ||
+      opcode == 0x2a || opcode == 0x2e || opcode == 0x2c || opcode == 0x2d ||
+      opcode == 0x28;
+    for (unsigned lane = opcode == 0x28 ? 1 : 0; lane < (lanes ? 4u : 1u); ++lane)
+    {
+      CAPTURE(opcode);
+      CAPTURE(lane);
+      NekoSystem system;
+      startStore(system, 0xb000f180 + lane, 0x12345678, opcode);
+      const auto result = system.stepEEInstruction(16);
+      REQUIRE(result.pendingException ==
+        (load ? EEException::DataBusErrorLoad : EEException::DataBusErrorStore));
+      REQUIRE_FALSE(result.cycleLimitReached);
+      REQUIRE(result.exceptionAddress == 0xb000f180 + lane);
+      REQUIRE(system.eeCore().generalRegister(2).low == 0x12345678);
+      REQUIRE(system.eeBus().read32(EEMemoryMap::SIO_ISR) == 0);
+      REQUIRE(system.eeBus().writeData8(TX, 0x41));
+    }
+  }
+}

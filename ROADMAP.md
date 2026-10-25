@@ -2075,7 +2075,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       completion observations, and include pending transmission/reset state
       in canonical hashing, transactional save/load and system reset;
       independently review and run immediate optimized/ASan gates.
-- [ ] Validate guest polling, access boundaries, completion traces and restored
+- [x] Validate guest polling, access boundaries, completion traces and restored
       continuations; independently review the completed block and repeat
       unchanged-budget BIOS rediscovery, rerunning broader gates after repairs.
 
