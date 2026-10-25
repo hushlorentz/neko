@@ -37,6 +37,7 @@ namespace
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
       address == EEMemoryMap::SIO_ISR ||
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
+      address == EEMemoryMap::STARTUP_INIT_F410 ||
       address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
@@ -1233,6 +1234,9 @@ bool EEBus::writeMapped32(
       return attachedSerial().writeFIFOControl(value);
     case EEMemoryMap::SIO_BGR:
       return attachedSerial().writeBaudRate(value);
+    case EEMemoryMap::STARTUP_INIT_F410:
+      // Provisional zero-write admission; endpoint identity and effects are unknown.
+      return value == 0;
     case EEMemoryMap::RESERVED_F500:
       // Provisional exact-word no-op, not a DMA hold or peer-reset register.
       return true;

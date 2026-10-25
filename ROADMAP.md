@@ -2089,6 +2089,17 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Independently review, run ownership-related optimized/ASan gates and
       repeat unchanged-budget discovery to attribute the next dependency.
 
+### EE Startup Store at Physical 0x1000f410
+
+- [x] Investigate the endpoint identity and select a bounded access contract from the
+      originating zero-valued word store; select ownership and research scope
+      before admitting new behavior.
+- [x] Implement the selected contract through its existing owner with
+      red/green access-boundary and guest-fault coverage; preserve unsupported
+      behavior outside the approved scope.
+- [ ] Independently review and repeat unchanged-budget BIOS discovery,
+      applying persistence and broader validation gates when required.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including

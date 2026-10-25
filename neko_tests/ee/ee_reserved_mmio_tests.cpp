@@ -106,6 +106,214 @@ namespace
   }
 }
 
+TEST_CASE("EE f410 zero initialization is exact and stateless",
+  "[ee][bus][f410-init]")
+{
+  NekoSystem system;
+  seed(system);
+  auto &bus = system.eeBus();
+  const auto eeHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  system.startTrace();
+  for (unsigned repeat = 0; repeat < 3; ++repeat)
+  {
+    REQUIRE(bus.writeData32(0x1000f410, 0));
+    for (const auto alias : {0u, 0x80000000u, 0xa0000000u})
+    {
+      REQUIRE_NOTHROW(bus.write32(0x1000f410 | alias, 0));
+      for (const auto value : {1u, 0x100u, 0x80000000u, UINT32_MAX})
+      {
+        REQUIRE_THROWS_AS(bus.write32(0x1000f410 | alias, value),
+          std::out_of_range);
+      }
+    }
+  }
+  for (const auto value : {1u, 0x100u, 0x80000000u, UINT32_MAX})
+  {
+    REQUIRE_FALSE(bus.writeData32(0x1000f410, value));
+  }
+  for (const auto address : {0x1000f400u, 0x1000f40cu, 0x1000f414u,
+         0x1000f41cu, 0x1000f420u, 0x9000f410u, 0xb000f410u})
+  {
+    CAPTURE(address);
+    REQUIRE_FALSE(bus.writeData32(address, 0));
+  }
+  REQUIRE_THROWS_AS(bus.writeData32(0x1000f411, 0), std::invalid_argument);
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  REQUIRE(system.trace().empty());
+  system.reset();
+  REQUIRE(bus.writeData32(0x1000f410, 0));
+}
+
+TEST_CASE("EE f410 initialization excludes readback and non-word accesses",
+  "[ee][bus][f410-init]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  std::uint8_t byte = 0x12;
+  std::uint16_t half = 0x1234;
+  std::uint32_t word = 0x12345678;
+  std::uint64_t wide = UINT64_C(0x123456789abcdef0);
+  EEQuadword quad = {wide, wide};
+  const auto eeHash = system.eeStateHash();
+  for (std::uint32_t lane = 0; lane < 4; ++lane)
+  {
+    REQUIRE_FALSE(bus.readData8(0x1000f410 + lane, &byte));
+    REQUIRE_FALSE(bus.writeData8(0x1000f410 + lane, 0));
+  }
+  for (const auto lane : {0u, 2u})
+  {
+    REQUIRE_FALSE(bus.readData16(0x1000f410 + lane, &half));
+    REQUIRE_FALSE(bus.writeData16(0x1000f410 + lane, 0));
+  }
+  REQUIRE_FALSE(bus.readData32(0x1000f410, &word));
+  REQUIRE_FALSE(bus.readInstruction32(0x1000f410, &word));
+  REQUIRE_FALSE(bus.readData64(0x1000f410, &wide));
+  REQUIRE_FALSE(bus.writeData64(0x1000f410, 0));
+  REQUIRE_FALSE(bus.readData128(0x1000f410, &quad));
+  REQUIRE_FALSE(bus.writeData128(0x1000f410, {0, 0}));
+  REQUIRE_FALSE(bus.readDMAC128(0x1000f410, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(0x1000f410, {0, 0}));
+  REQUIRE_FALSE(bus.isCacheFillRange(0x1000f410, 4));
+  REQUIRE(bus.wordMergeStorePolicy(0x1000f410) == EEWordMergeStorePolicy::FullWordOnly);
+  for (const auto alias : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto address = 0x1000f410 | alias;
+    REQUIRE_THROWS_AS(bus.read32(address), std::out_of_range);
+    REQUIRE_THROWS_AS(bus.write8(address, 0), std::out_of_range);
+    REQUIRE_THROWS_WITH(bus.write64(address, 0),
+      "EE bus address supports full 32-bit accesses only.");
+    REQUIRE_THROWS_AS(bus.writeQuadword(address, {{0, 0, 0, 0}}),
+      std::out_of_range);
+  }
+  REQUIRE(system.iopBus().read32(0x1000f410).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write32(0x1000f410, 0).status == IOPBusStatus::Unmapped);
+  REQUIRE(byte == 0x12);
+  REQUIRE(half == 0x1234);
+  REQUIRE(word == 0x12345678);
+  REQUIRE(wide == UINT64_C(0x123456789abcdef0));
+  REQUIRE(quad.low == wide);
+  REQUIRE(quad.high == wide);
+  REQUIRE(system.eeStateHash() == eeHash);
+}
+
+TEST_CASE("EE f410 guest zero stores require full-word masks",
+  "[ee][bus][f410-init][guest]")
+{
+  for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+  {
+    for (const auto value : {0u, 1u, 0x100u, UINT32_MAX})
+    {
+      for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+      {
+        CAPTURE(opcode);
+        CAPTURE(value);
+        CAPTURE(lane);
+        NekoSystem system;
+        const auto sifHash = system.sifStateHash();
+        const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+        const bool admitted = full && value == 0;
+        const auto result = execute(system, opcode, value, lane, 0xb000f410);
+        REQUIRE(result.pendingException ==
+          (admitted ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE_FALSE(result.cycleLimitReached);
+        if (admitted)
+        {
+          REQUIRE(result.instructions != 0);
+        }
+        else
+        {
+          REQUIRE(result.exceptionAddress == 0xb000f410 + lane);
+          REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+        }
+        REQUIRE(system.eeCore().generalRegister(2).low == value);
+        REQUIRE(system.eeCore().generalRegister(2).high == 0xfeedface);
+        REQUIRE(system.sifStateHash() == sifHash);
+        REQUIRE(system.interruptController().status() == 0);
+        REQUIRE(system.iopInterruptController().status() == 0);
+        requireWordStoreObservation(system, value, admitted, 0xb000f410);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE f410 guest reads and non-word stores still fault",
+  "[ee][bus][f410-init][guest]")
+{
+  for (const std::uint8_t opcode : {0x20, 0x24, 0x21, 0x25, 0x23, 0x27,
+         0x37, 0x1e, 0x22, 0x26, 0x28, 0x29, 0x3f, 0x1f, 0x2c, 0x2d})
+  {
+    CAPTURE(opcode);
+    NekoSystem system;
+    const bool store = opcode == 0x28 || opcode == 0x29 || opcode == 0x3f ||
+      opcode == 0x1f || opcode == 0x2c || opcode == 0x2d;
+    const auto result = execute(system, opcode, 0, 0, 0xb000f410);
+    REQUIRE(result.pendingException ==
+      (store ? EEException::DataBusErrorStore : EEException::DataBusErrorLoad));
+    REQUIRE_FALSE(result.cycleLimitReached);
+    REQUIRE(result.exceptionAddress == 0xb000f410);
+    REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+    REQUIRE(system.eeCore().generalRegister(2).low == 0);
+    REQUIRE(system.eeCore().generalRegister(2).high == 0xfeedface);
+  }
+  NekoSystem fetch;
+  fetch.eeCore().startExecution(0xb000f410);
+  const auto result = fetch.stepEEInstruction(16);
+  REQUIRE(result.pendingException == EEException::InstructionBusError);
+  REQUIRE(result.instructions == 0);
+}
+
+TEST_CASE("EE f410 delay-slot stores preserve precise faults and trace equivalence",
+  "[ee][bus][f410-init][guest]")
+{
+  for (const auto value : {0u, 1u})
+  {
+    CAPTURE(value);
+    NekoSystem traced;
+    NekoSystem plain;
+    for (auto *system : {&traced, &plain})
+    {
+      system->eeBus().write32(0, 0x10000003);
+      system->eeBus().write32(4, 0xac220000);
+      system->eeCore().setGeneralRegister(1, {0xb000f410, 0});
+      system->eeCore().setGeneralRegister(2, {value, 0});
+      system->eeCore().setCOP0Register(EECOP0Register::Status, 0);
+      system->eeCore().startExecution(0xa0000000);
+    }
+    traced.startTrace(64);
+    for (auto *system : {&traced, &plain})
+    {
+      for (unsigned cycle = 0; cycle < 2 &&
+           system->eeCore().programCounter() != 0xa0000010 &&
+           system->eeCore().pendingException() == EEException::None; ++cycle)
+      {
+        system->clockMasterCycle();
+      }
+    }
+    REQUIRE(traced.eeStateHash() == plain.eeStateHash());
+    REQUIRE(traced.iopStateHash() == plain.iopStateHash());
+    REQUIRE(traced.sifStateHash() == plain.sifStateHash());
+    REQUIRE_FALSE(traced.traceTruncated());
+    requireWordStoreObservation(traced, value, value == 0, 0xb000f410);
+    if (value == 0)
+    {
+      REQUIRE(traced.eeCore().programCounter() == 0xa0000010);
+      REQUIRE(traced.eeCore().pendingException() == EEException::None);
+    }
+    else
+    {
+      REQUIRE(traced.eeCore().pendingException() == EEException::DataBusErrorStore);
+      REQUIRE(traced.eeCore().exceptionAddress() == 0xb000f410);
+      REQUIRE(traced.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+      REQUIRE((traced.eeCore().cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) != 0);
+    }
+  }
+}
+
 TEST_CASE("EE serial idle configuration and reset release are stateless",
   "[ee][bus][serial-init]")
 {
