@@ -34,6 +34,7 @@ namespace
     return EETimers::isRegisterAddress(address) ||
       sifApertureAddress(address) ||
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
+      address == EEMemoryMap::SIO_ISR ||
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
@@ -1016,6 +1017,10 @@ bool EEBus::readMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::SIO_ISR:
+      // Provisional quiescent status; all serial traffic remains unsupported.
+      *value = 0;
+      return true;
     case EEMemoryMap::VIF0_STAT:
       *value = vifStatus(*vif0Component);
       return true;

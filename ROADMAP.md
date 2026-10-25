@@ -2046,9 +2046,24 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### EE Serial-Port Status: Scope
 
-- [ ] Resolve the observed word read at `0x1000f130` against local
+- [x] Resolve the observed word read at `0x1000f130` against local
       manuals and approved evidence; define status/readiness ownership
       and reset/traffic semantics without fabricated ready responses.
+
+### EE Serial-Port Status: Quiescent-Only Read
+
+- [x] Admit only aligned word reads of `0x1000f130` as provisional
+      quiescent zero status through EEBus; preserve rejection of ISR writes,
+      other widths and all serial traffic, without new state or timing.
+- [x] Cover host aliases, guest loads and merge paths, rejection boundaries,
+      reset and observational traces; independently review and repeat
+      unchanged-budget BIOS rediscovery to retain the next dependency.
+
+### EE Serial-Port Transmit: Scope
+
+- [ ] Resolve the observed byte store to `0x1000f180` against local
+      manuals and approved evidence; reopen quiescent-only status ownership
+      and define transmit acceptance, timing and reset before admitting traffic.
 
 ### Real BIOS Handshake and Boundary Conformance
 
