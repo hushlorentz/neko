@@ -2061,9 +2061,23 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### EE Serial-Port Transmit: Scope
 
-- [ ] Resolve the observed byte store to `0x1000f180` against local
+- [x] Resolve the observed byte store to `0x1000f180` against local
       manuals and approved evidence; reopen quiescent-only status ownership
       and define transmit acceptance, timing and reset before admitting traffic.
+
+### EE Serial-Port Transmit: Single-Slot Provisional Model
+
+- [x] Implement one serial owner with byte acceptance, occupancy-derived
+      status, fixed-profile timed completion and active FCR reset; pin exact
+      timing, rejection and cancellation boundaries with authored tests
+      and independently review the state machine.
+- [ ] Route existing serial MMIO through that owner, integrate master-clock
+      completion observations, and include pending transmission/reset state
+      in canonical hashing, transactional save/load and system reset;
+      independently review and run immediate optimized/ASan gates.
+- [ ] Validate guest polling, access boundaries, completion traces and restored
+      continuations; independently review the completed block and repeat
+      unchanged-budget BIOS rediscovery, rerunning broader gates after repairs.
 
 ### Real BIOS Handshake and Boundary Conformance
 
