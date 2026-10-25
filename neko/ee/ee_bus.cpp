@@ -32,7 +32,8 @@ namespace
   bool fullWordOnlyAddress(std::uint32_t address)
   {
     return EETimers::isRegisterAddress(address) ||
-      sifApertureAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
+      sifApertureAddress(address) || address == EEMemoryMap::SIO_LCR ||
+      address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
       address == EEMemoryMap::D6_CHCR || address == EEMemoryMap::D6_MADR ||
@@ -1191,6 +1192,9 @@ bool EEBus::writeMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::SIO_LCR:
+      // Provisional stateless initialization, not active UART configuration.
+      return value == 0x20;
     case EEMemoryMap::RESERVED_F500:
       // Provisional exact-word no-op, not a DMA hold or peer-reset register.
       return true;

@@ -8,6 +8,8 @@ namespace
 {
   constexpr std::uint32_t RESERVED = 0x1000f500;
   constexpr std::uint32_t UNCACHED = 0xb000f500;
+  constexpr std::uint32_t SERIAL_LCR = 0x1000f100;
+  constexpr std::uint32_t SERIAL_UNCACHED = 0xb000f100;
 
   void seed(NekoSystem &system)
   {
@@ -39,12 +41,12 @@ namespace
 
   EEExecutionResult execute(
     NekoSystem &system, std::uint8_t opcode, std::uint32_t value,
-    std::uint16_t lane = 0)
+    std::uint16_t lane = 0, std::uint32_t address = UNCACHED)
   {
     const std::uint32_t instruction =
       (std::uint32_t(opcode) << 26) | (1u << 21) | (2u << 16) | lane;
     system.eeBus().write32(0, instruction);
-    system.eeCore().setGeneralRegister(1, {UNCACHED, 0});
+    system.eeCore().setGeneralRegister(1, {address, 0});
     system.eeCore().setGeneralRegister(2, {value, 0xfeedface});
     system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
     system.eeCore().startExecution(0xa0000000);
@@ -53,7 +55,8 @@ namespace
   }
 
   void requireWordStoreObservation(
-    const NekoSystem &system, std::uint32_t value, bool completed)
+    const NekoSystem &system, std::uint32_t value, bool completed,
+    std::uint32_t address = UNCACHED)
   {
     std::size_t stores = 0;
     for (const auto &event : system.trace())
@@ -61,7 +64,7 @@ namespace
       REQUIRE(event.subsystem != NekoTraceSubsystem::SIF);
       if (event.subsystem != NekoTraceSubsystem::EE ||
           event.type != NekoTraceEventType::MemoryAccess ||
-          event.value0 != UNCACHED)
+          event.value0 != address)
       {
         continue;
       }
@@ -69,7 +72,7 @@ namespace
       REQUIRE(event.value1 == value);
       REQUIRE(event.value2 == 0);
       REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
-        RESERVED, 4,
+        address & 0x1fffffff, 4,
         NekoEETraceMemory::AccessKind::DataStore,
         NekoEETraceMemory::TranslationOutcome::Translated,
         NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
@@ -81,6 +84,212 @@ namespace
       }));
     }
     REQUIRE(stores == 1);
+  }
+}
+
+TEST_CASE("EE serial initialization admits only the stateless observed word",
+  "[ee][bus][serial-init]")
+{
+  NekoSystem system;
+  seed(system);
+  REQUIRE(EEMemoryMap::SIO_LCR == SERIAL_LCR);
+  const auto before = system.saveState();
+  const auto eeHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  system.startTrace();
+  for (unsigned repeat = 0; repeat < 3; ++repeat)
+  {
+    REQUIRE(system.eeBus().writeData32(SERIAL_LCR, 0x20));
+    REQUIRE_NOTHROW(system.eeBus().write32(SERIAL_LCR, 0x20));
+    REQUIRE_NOTHROW(system.eeBus().write32(SERIAL_UNCACHED, 0x20));
+  }
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  const bool unchanged = system.saveState() == before;
+  REQUIRE(unchanged);
+  REQUIRE(system.trace().empty());
+  system.reset();
+  REQUIRE(system.eeBus().writeData32(SERIAL_LCR, 0x20));
+}
+
+TEST_CASE("EE serial initialization excludes readback values widths and neighbors",
+  "[ee][bus][serial-init]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData32(SERIAL_LCR, 0x20));
+  const auto eeHash = system.eeStateHash();
+  for (std::uint32_t value : {0u, 1u, 0x21u, 0x3du, 0x10020u, UINT32_MAX})
+  {
+    CAPTURE(value);
+    REQUIRE_FALSE(bus.writeData32(SERIAL_LCR, value));
+    REQUIRE_THROWS_AS(bus.write32(SERIAL_LCR, value), std::out_of_range);
+  }
+  std::uint8_t byte = 0x12;
+  std::uint16_t half = 0x1234;
+  std::uint32_t word = 0x12345678;
+  std::uint64_t wide = UINT64_C(0x123456789abcdef0);
+  EEQuadword quad = {wide, wide};
+  for (std::uint32_t lane = 0; lane < 4; ++lane)
+  {
+    REQUIRE_FALSE(bus.readData8(SERIAL_LCR + lane, &byte));
+    REQUIRE_FALSE(bus.writeData8(SERIAL_LCR + lane, 0x20));
+    REQUIRE_THROWS_AS(bus.write8(SERIAL_LCR + lane, 0x20), std::out_of_range);
+  }
+  for (std::uint32_t lane : {0u, 2u})
+  {
+    REQUIRE_FALSE(bus.readData16(SERIAL_LCR + lane, &half));
+    REQUIRE_FALSE(bus.writeData16(SERIAL_LCR + lane, 0x20));
+  }
+  REQUIRE_FALSE(bus.readData32(SERIAL_LCR, &word));
+  REQUIRE_FALSE(bus.readInstruction32(SERIAL_LCR, &word));
+  REQUIRE_FALSE(bus.readData64(SERIAL_LCR, &wide));
+  REQUIRE_FALSE(bus.writeData64(SERIAL_LCR, 0x20));
+  REQUIRE_FALSE(bus.readData128(SERIAL_LCR, &quad));
+  REQUIRE_FALSE(bus.writeData128(SERIAL_LCR, {0x20, 0}));
+  REQUIRE_FALSE(bus.readDMAC128(SERIAL_LCR, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(SERIAL_LCR, {0x20, 0}));
+  REQUIRE(byte == 0x12);
+  REQUIRE(half == 0x1234);
+  REQUIRE(word == 0x12345678);
+  REQUIRE(wide == UINT64_C(0x123456789abcdef0));
+  REQUIRE(quad.low == wide);
+  REQUIRE(quad.high == wide);
+  for (const auto address : {SERIAL_LCR, SERIAL_UNCACHED})
+  {
+    REQUIRE_THROWS_AS(bus.read32(address), std::out_of_range);
+    REQUIRE_THROWS_WITH(bus.write64(address, 0x20),
+      "EE bus address supports full 32-bit accesses only.");
+    REQUIRE_THROWS_AS(bus.writeQuadword(address, {{0x20, 0, 0, 0}}),
+      std::out_of_range);
+    REQUIRE(system.iopBus().read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopBus().write32(address, 0x20).status == IOPBusStatus::Unmapped);
+  }
+  for (const auto address : {0x1000f0fcu, 0x1000f104u, 0x1000f110u,
+         0x1000f120u, 0x1000f130u, 0x1000f140u, 0x1000f150u,
+         0x1000f180u, 0x1000f1c0u})
+  {
+    CAPTURE(address);
+    REQUIRE_FALSE(bus.readData32(address, &word));
+    REQUIRE_FALSE(bus.writeData32(address, 0x20));
+  }
+  REQUIRE_THROWS_AS(bus.writeData32(SERIAL_LCR + 1, 0x20), std::invalid_argument);
+  REQUIRE_FALSE(bus.writeData32(SERIAL_UNCACHED, 0x20));
+  REQUIRE(system.eeStateHash() == eeHash);
+}
+
+TEST_CASE("EE serial initialization guest stores and merges preserve admission",
+  "[ee][bus][serial-init][guest]")
+{
+  for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+  {
+    for (const std::uint32_t value : {0x20u, 0u, 0x21u})
+    {
+      for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+      {
+        CAPTURE(opcode);
+        CAPTURE(value);
+        CAPTURE(lane);
+        NekoSystem system;
+        const auto sifHash = system.sifStateHash();
+        const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+        const bool admitted = full && value == 0x20;
+        const auto result = execute(system, opcode, value, lane, SERIAL_UNCACHED);
+        REQUIRE(result.pendingException ==
+          (admitted ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE_FALSE(result.cycleLimitReached);
+        if (admitted)
+        {
+          REQUIRE(result.instructions != 0);
+        }
+        else
+        {
+          REQUIRE(result.exceptionAddress == SERIAL_UNCACHED + lane);
+          REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+        }
+        REQUIRE(system.eeCore().generalRegister(2).low == value);
+        REQUIRE(system.eeCore().generalRegister(2).high == 0xfeedface);
+        REQUIRE(system.sifStateHash() == sifHash);
+        REQUIRE(system.interruptController().status() == 0);
+        REQUIRE(system.iopInterruptController().status() == 0);
+        requireWordStoreObservation(system, value, admitted, SERIAL_UNCACHED);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE serial initialization retains guest read and non-word store faults",
+  "[ee][bus][serial-init][guest]")
+{
+  for (const std::uint8_t opcode : {0x20, 0x21, 0x23, 0x37, 0x1e, 0x22, 0x26,
+         0x28, 0x29, 0x3f, 0x1f, 0x2c, 0x2d})
+  {
+    CAPTURE(opcode);
+    NekoSystem system;
+    const bool store = opcode == 0x28 || opcode == 0x29 || opcode == 0x3f ||
+      opcode == 0x1f || opcode == 0x2c || opcode == 0x2d;
+    const auto result = execute(system, opcode, 0x20, 0, SERIAL_UNCACHED);
+    REQUIRE(result.pendingException ==
+      (store ? EEException::DataBusErrorStore : EEException::DataBusErrorLoad));
+    REQUIRE_FALSE(result.cycleLimitReached);
+    REQUIRE(result.exceptionAddress == SERIAL_UNCACHED);
+    REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+    REQUIRE(system.eeCore().generalRegister(2).low == 0x20);
+    REQUIRE(system.eeCore().generalRegister(2).high == 0xfeedface);
+  }
+  NekoSystem fetch;
+  fetch.eeCore().startExecution(SERIAL_UNCACHED);
+  const auto result = fetch.stepEEInstruction(16);
+  REQUIRE(result.pendingException == EEException::InstructionBusError);
+  REQUIRE(result.instructions == 0);
+}
+
+TEST_CASE("EE serial initialization is observational in branch delay slots",
+  "[ee][bus][serial-init][guest]")
+{
+  for (const std::uint32_t value : {0x20u, 0x21u})
+  {
+    CAPTURE(value);
+    NekoSystem traced;
+    NekoSystem plain;
+    for (auto *system : {&traced, &plain})
+    {
+      system->eeBus().write32(0, 0x10000003);
+      system->eeBus().write32(4, 0xac220000);
+      system->eeCore().setGeneralRegister(1, {SERIAL_UNCACHED, 0});
+      system->eeCore().setGeneralRegister(2, {value, 0});
+      system->eeCore().setCOP0Register(EECOP0Register::Status, 0);
+      system->eeCore().startExecution(0xa0000000);
+    }
+    traced.startTrace(64);
+    for (auto *system : {&traced, &plain})
+    {
+      for (unsigned cycle = 0; cycle < 2 &&
+           system->eeCore().programCounter() != 0xa0000010 &&
+           system->eeCore().pendingException() == EEException::None; ++cycle)
+      {
+        system->clockMasterCycle();
+      }
+    }
+    REQUIRE(traced.eeStateHash() == plain.eeStateHash());
+    REQUIRE(traced.iopStateHash() == plain.iopStateHash());
+    REQUIRE(traced.sifStateHash() == plain.sifStateHash());
+    REQUIRE_FALSE(traced.traceTruncated());
+    requireWordStoreObservation(traced, value, value == 0x20, SERIAL_UNCACHED);
+    if (value == 0x20)
+    {
+      REQUIRE(traced.eeCore().programCounter() == 0xa0000010);
+      REQUIRE(traced.eeCore().pendingException() == EEException::None);
+    }
+    else
+    {
+      REQUIRE(traced.eeCore().pendingException() == EEException::DataBusErrorStore);
+      REQUIRE(traced.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+      REQUIRE((traced.eeCore().cop0Register(EECOP0Register::Cause) &
+        EECOP0Cause::BRANCH_DELAY) != 0);
+    }
   }
 }
 

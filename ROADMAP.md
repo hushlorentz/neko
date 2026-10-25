@@ -1973,11 +1973,25 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement and independently review the evidenced repair, then repeat
       bounded BIOS rediscovery and retain the next originating dependency.
 
-### EE System Bus Initialization: Scope
+### EE Serial-Port Initialization: Scope
 
-- [ ] Resolve the observed word store of `0x20` to `0x1000f100` against
-      local manuals and existing register ownership; define the evidenced
-      access, effects and lifecycle contract before implementing a repair.
+- [x] Resolve the observed word store of `0x20` to `0x1000f100` against
+      local manuals and approved secondary evidence; choose bounded access,
+      effects and lifecycle ownership before implementing serial behavior.
+
+### EE Serial-Port Initialization: Bounded LCR Repair
+
+- [x] Admit only exact full-word writes of `0x20` without retained state
+      or UART effects; preserve all other access rejection with authored
+      CPU, merge-store, lifecycle and observational trace regressions.
+- [x] Validate and independently review the bounded repair, then repeat
+      unchanged-budget BIOS rediscovery and retain the next dependency.
+
+### EE Serial-Port Interrupt Initialization: Scope
+
+- [ ] Resolve the observed zero word store to `0x1000f120` against
+      local manuals and approved secondary evidence; define bounded access,
+      effects and ownership before extending serial behavior.
 
 ### Real BIOS Handshake and Boundary Conformance
 
