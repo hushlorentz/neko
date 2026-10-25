@@ -2,6 +2,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <utility>
 
 #include "neko_system.hpp"
 
@@ -670,18 +671,21 @@ void NekoSystem::startTrace()
   startTrace(std::numeric_limits<std::uint64_t>::max());
 }
 
-void NekoSystem::startTrace(std::uint64_t eventLimit)
+void NekoSystem::startTrace(std::uint64_t eventLimit,
+  std::shared_ptr<NekoTraceObserver> observer)
 {
   traceEvents.clear();
   maximumTraceEvents = eventLimit;
   truncatedTrace = false;
   eeCoreComponent.cycleEventCount = 0;
   lastTracedEEStateHash = eeCoreComponent.stateHash();
+  traceObserver = std::move(observer);
   collectingTrace = true;
 }
 
 void NekoSystem::stopTrace()
 {
+  traceObserver.reset();
   eeCoreComponent.cycleEventCount = 0;
   lastTracedEEStateHash = 0;
   collectingTrace = false;
@@ -1730,20 +1734,19 @@ void NekoSystem::appendTrace(
   std::uint64_t value2,
   std::uint64_t value3)
 {
+  const NekoTraceEvent event = {
+    cycle, subsystem, type, value0, value1, value2, value3
+  };
+  if (traceObserver)
+  {
+    traceObserver->observe(event);
+  }
   if (traceEvents.size() >= maximumTraceEvents)
   {
     truncatedTrace = true;
     return;
   }
-  traceEvents.push_back({
-    cycle,
-    subsystem,
-    type,
-    value0,
-    value1,
-    value2,
-    value3
-  });
+  traceEvents.push_back(event);
 }
 
 MasterClockScheduler &NekoSystem::masterClockScheduler()

@@ -172,7 +172,7 @@ the existing EE-only `--bios` frontend is unchanged.
 
 ## Headless discovery command
 
-`neko bios-startup <file> --cycles <count> [--trace-events <count>]` wraps the
+`neko bios-startup <file> --cycles <count> [--trace-events <count> [--failure-context]]` wraps the
 cold-start API without changing its execution policy. The master-cycle ceiling
 is required and accepts an unsigned
 64-bit decimal integer, including zero. The image must be exactly 4 MiB.
@@ -264,6 +264,45 @@ Save states exclude capture controls/history; loading preserves the
 destination's controls, retained events, and truncation. Trace hashes hash
 retained events only, so equal hashes alone do not establish equal coverage.
 
+### Opt-in first-failure flight recorder
+
+Add `--failure-context` after `--trace-events <count>` to retain failure
+context independently of prefix truncation, including with a zero prefix
+ceiling. This does not increase the cycle budget or prefix event limit.
+Ordinary traced and untraced commands remain unchanged.
+
+The diagnostics-owned recorder keeps at most 4,096 raw events in a fixed
+ring. It uses the same C++ failure predicates as ordinary first-failure
+attribution, then freezes after the first failure's master cycle. It retains
+preceding events and same-cycle fault/exception context in collection order.
+The bound is **events**, not a guaranteed number of cycles. If the failure
+cycle alone exceeds capacity, the trigger is preserved, later events are
+discarded and `failure_cycle_truncated` is set. Incomplete runtime-error
+boundaries remain explicit; capture never suppresses guest handlers or stops
+the run at the failure.
+
+An additional `startup_failure_capture` JSON line appears after prefix events
+and before `startup_first_failure`. It contains `capacity`, `observed_events`,
+`first_event_index`, `failure_cycle_truncated` and an ordered `events` array
+with the usual raw event fields. `observed_events` counts the whole observed
+stream, including events after freezing; `first_event_index` identifies the
+window's first event in that stream. The final failure record adds
+`event_source: "failure_capture"`; its `failure.event_index` indexes the
+window, **not** the prefix. C++ remains the sole failure/packed-memory decoder.
+A null failure does not establish boot or handshake success.
+
+Host code can pass a shared `StartupFailureCapture` to
+`startTrace(limit, capture)`, then call `writeStartupFailureCaptureJsonLine`
+and pass `capture.get()` as the final argument of
+`writeStartupFirstFailureJsonLine`. The system owns the passive, nonthrowing
+observer attachment until stop, replacement or reset; it receives events
+before prefix limiting. `clearTrace()` clears only the prefix, not the
+observer's session. Capture state/attachments are not serialized or hashed;
+load preserves destination diagnostics as with existing tracing. Use a fresh
+recorder/session after rewinding machine state. There is no per-event
+allocation, hardware-state mutation or text formatting during capture.
+Only explicitly enabled diagnostic runs incur recorder storage and dispatch.
+
 ## Offline inspection
 
 `tools/inspect_startup.py` reads saved `neko bios-startup` JSONL reports using
@@ -285,7 +324,10 @@ Addresses, instruction bits, and selected architectural registers display as
 hexadecimal; integer precision is preserved. The originating first failure
 is not replaced by a later handler failure or ending host stop.
 
-`events` filters the ordered retained events. `--cpu` selects EE or IOP;
+`events` filters the ordered retained events. Both event commands default to
+`--source prefix`; use `--source failure_capture` to select the bounded window.
+Requesting an absent window is an error, never a fallback to the prefix.
+`--cpu` selects EE or IOP;
 without it, all subsystems are included. `--cycle`, `--from-cycle`, and
 `--to-cycle` are inclusive master-cycle constraints. `--event` accepts a
 numeric ID, `instruction`, `memory`, `exception`, `fault`, or
@@ -307,13 +349,16 @@ Python; authoritative decoded failure access kinds/outcomes come from the
 existing C++ exporter. Failed-read data must not be treated as valid values.
 
 Event output defaults to at most 200 matches; `--limit` changes that display
-bound. `event_index` is always the original zero-based retained-event index.
+bound. `event_index` is the zero-based index within the selected source.
+Window rows also include `global_event_index` in the observed stream.
 `matched_events` and `limited` distinguish no matches from display clipping.
 This bound does not limit file loading: input records are loaded into memory.
 
 Summary and event reports retain the execution outcome, boundary, and any
 runtime-error message. `coverage` independently distinguishes `untraced`,
-`retained_trace`, and `truncated_prefix`. Untruncated capture does not imply
+`retained_trace`, and `truncated_prefix`; selected failure-window views use
+`bounded_failure_capture`. Summary reports include `failure_event_source`
+and capture metadata separately from prefix coverage. Untruncated capture does not imply
 a completed final cycle, and a null failure/no match never establishes
 fault-free execution, boot, or handshake success.
 
@@ -355,6 +400,10 @@ if needed, builds only the optimized assertion-enabled `neko` target,
 then runs two traced and two genuinely untraced cold starts. Every run
 uses 1,000,000 master cycles; traced runs retain at most 3,000,000 events.
 The helper does not raise these limits or run tests.
+Its optional `--failure-context` flag enables the bounded recorder only on
+the two traced runs; both untraced runs remain genuinely untraced. The
+manifest records this choice and automatic first-failure windows select the
+exporter's indicated event source.
 
 The artifact directory must not already exist, even if empty. Build and
 inspection stdout/stderr, four raw JSONL reports and separate run stderr

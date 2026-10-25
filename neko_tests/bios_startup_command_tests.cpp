@@ -102,6 +102,58 @@ TEST_CASE("BIOS startup command reports host stops without claiming BIOS success
     std::string::npos);
 }
 
+TEST_CASE("BIOS startup failure context survives an exhausted prefix",
+  "[bios-startup-command][failure-capture]")
+{
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "9", "--trace-events", "0", "--failure-context"},
+    [](const std::string &) { return discoveryROM(0x40003800); },
+    output, error) == 1);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().find("\"captured_events\":0,\"truncated\":true") !=
+    std::string::npos);
+  REQUIRE(output.str().find("\"type\":\"startup_failure_capture\"") !=
+    std::string::npos);
+  REQUIRE(output.str().find("\"event_source\":\"failure_capture\"") !=
+    std::string::npos);
+  REQUIRE(output.str().find("\"kind\":\"instruction_rejection\",\"cpu\":\"ee\"") !=
+    std::string::npos);
+  REQUIRE(output.str().find("\"pc\":3217031168,\"bits\":1073756160") !=
+    std::string::npos);
+}
+
+TEST_CASE("BIOS startup failure capture keeps empty and incomplete outcomes explicit",
+  "[bios-startup-command][failure-capture]")
+{
+  SECTION("Empty capture at zero budget")
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "0", "--trace-events", "0", "--failure-context"},
+      [](const std::string &) { return discoveryROM(); }, output, error) == 0);
+    REQUIRE(error.str().empty());
+    REQUIRE(output.str().find("\"observed_events\":0,\"first_event_index\":0,"
+      "\"failure_cycle_truncated\":false,\"events\":[]") != std::string::npos);
+    REQUIRE(output.str().find("\"failure\":null") != std::string::npos);
+  }
+  SECTION("Runtime error after an earlier first failure")
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "100", "--trace-events", "0", "--failure-context"},
+      [](const std::string &) { return rejectedDMAROM(); }, output, error) == 2);
+    REQUIRE(error.str().find("IOP SIF0 DMA rejected") != std::string::npos);
+    REQUIRE(output.str().find("\"type\":\"startup_runtime_error\"") != std::string::npos);
+    REQUIRE(output.str().find("\"execution_boundary\":\"incomplete_cycle\","
+      "\"event_source\":\"failure_capture\",\"failure\":{\"kind\":\"memory_access\"") !=
+      std::string::npos);
+  }
+}
+
 TEST_CASE("BIOS startup command validates arguments before file loading",
   "[bios-startup-command]")
 {
@@ -109,7 +161,11 @@ TEST_CASE("BIOS startup command validates arguments before file loading",
     {}, {"authored.bin"}, {"authored.bin", "--cycles"},
     {"", "--cycles", "1"}, {"authored.bin", "--unknown", "1"},
     {"authored.bin", "--cycles", "1", "extra"},
-    {"authored.bin", "--cycles", "1", "--cycles", "2"}
+    {"authored.bin", "--cycles", "1", "--cycles", "2"},
+    {"authored.bin", "--cycles", "1", "--failure-context"},
+    {"authored.bin", "--cycles", "1", "--trace-events", "0", "--unknown"},
+    {"authored.bin", "--cycles", "1", "--trace-events", "0",
+      "--failure-context", "--failure-context"}
   };
   for (const auto &arguments : invalid)
   {

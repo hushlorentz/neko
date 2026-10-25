@@ -412,6 +412,14 @@ struct NekoTraceEvent
   std::uint64_t value3 = 0;
 };
 
+// Passive diagnostic sink. Must not reenter or mutate the emitting system.
+class NekoTraceObserver
+{
+  public:
+    virtual ~NekoTraceObserver() = default;
+    virtual void observe(const NekoTraceEvent &event) noexcept = 0;
+};
+
 // EE/FaultContext: originating instruction PC, raw opcode, branch PC (only
 // when DELAY_SLOT), flags plus EEStopReason << 8. Emitted immediately before
 // ExceptionEntered, or alone for a host instruction rejection. Fetch failures

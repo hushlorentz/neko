@@ -56,6 +56,24 @@ def records(traced=True):
     return result
 
 
+def capture_records():
+    rows = records(False)
+    original = records()
+    context = [{key: value for key, value in row.items() if key != "type"}
+               for row in original[3:-1]]
+    failure = original[-1]
+    failure.update(trace_truncated=True, event_source="failure_capture")
+    return rows + [
+        dict(type="startup_trace_summary", event_limit=1,
+             captured_events=1, truncated=True),
+        event(1, 10, 5, [0xBFC00000, 0, 0, 0]),
+        dict(type="startup_failure_capture", capacity=4096,
+             observed_events=100, first_event_index=90,
+             failure_cycle_truncated=False, events=context),
+        failure,
+    ]
+
+
 class InspectorTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -91,6 +109,83 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(report["snapshot"]["iop"]["stop_reason"], "store_failure")
         self.assertEqual(report["snapshot"]["ee"]["pc"], "0x80001004")
         self.assertEqual(report["coverage"], "retained_trace")
+
+    def test_late_failure_uses_capture_indices_not_the_truncated_prefix(self):
+        self.write(self.path, capture_records())
+        report = self.report("summary", self.path)
+        self.assertEqual(report["coverage"], "truncated_prefix")
+        self.assertEqual(report["failure_event_source"], "failure_capture")
+        self.assertEqual(report["first_failure"]["event_index"], 2)
+        self.assertEqual(report["first_failure"]["master_cycle"], 49)
+        self.assertEqual(report["failure_capture"]["first_event_index"], 90)
+        self.assertNotIn("events", report["failure_capture"])
+        prefix = self.report("events", self.path)
+        self.assertEqual(prefix["matched_events"], 1)
+        window = self.report("events", self.path, "--source", "failure_capture",
+                             "--cpu", "iop", "--cycle", "49")
+        self.assertEqual(window["coverage"], "bounded_failure_capture")
+        row, = window["events"]
+        self.assertEqual(row["event_index"], 2)
+        self.assertEqual(row["global_event_index"], 92)
+        self.assertEqual(row["master_cycle"], 49)
+        issued = self.report("instructions", self.path,
+                             "--source", "failure_capture")
+        self.assertEqual(issued["matched_events"], 1)
+
+    def test_capture_source_and_bounds_are_validated(self):
+        for scenario, message in (
+                ("missing", "requires startup_failure_capture"),
+                ("source", "event_source"),
+                ("capacity", "capacity"),
+                ("count", "observed_events"),
+                ("index", "outside the retained"),
+                ("order", "cycle order"),
+                ("values", "four raw words")):
+            with self.subTest(scenario=scenario):
+                rows = capture_records()
+                capture = rows[-2]
+                if scenario == "missing":
+                    rows.pop(-2)
+                elif scenario == "source":
+                    rows[-1].pop("event_source")
+                elif scenario == "capacity":
+                    capture["capacity"] = 0
+                elif scenario == "count":
+                    capture["observed_events"] = 1
+                elif scenario == "index":
+                    rows[-1]["failure"]["event_index"] = 4
+                elif scenario == "order":
+                    capture["events"][1]["master_cycle"] = 1
+                else:
+                    capture["events"][0]["values"] = []
+                self.reject(rows, message)
+
+    def test_absent_capture_is_not_silently_replaced_by_prefix(self):
+        result = self.invoke("events", self.path, "--source", "failure_capture",
+                             status=2)
+        self.assertIn("no failure capture", result.stderr)
+
+    def test_capture_without_failure_and_runtime_partial_cycle_are_explicit(self):
+        rows = capture_records()
+        rows[-1]["failure"] = None
+        rows[-2].update(first_event_index=0, observed_events=4)
+        self.write(self.path, rows)
+        report = self.report("summary", self.path)
+        self.assertIsNone(report["first_failure"])
+        self.assertIn("fault-free", report["note"])
+        rows[-1]["failure"] = records()[-1]["failure"]
+        rows[-2]["failure_cycle_truncated"] = True
+        rows[1] = dict(type="startup_runtime_error", run=None,
+                       execution_boundary="incomplete_cycle", message="authored",
+                       snapshot=rows[1]["snapshot"])
+        rows[-1]["execution_boundary"] = "incomplete_cycle"
+        # An oversized failure cycle retains exactly the bounded capacity.
+        rows[-2]["events"] += [rows[-2]["events"][-1]] * (4096 - 4)
+        rows[-2].update(observed_events=5000, first_event_index=90)
+        self.write(self.path, rows)
+        report = self.report("summary", self.path)
+        self.assertTrue(report["failure_capture"]["failure_cycle_truncated"])
+        self.assertEqual(report["execution_boundary"], "incomplete_cycle")
 
     def test_memory_data_is_not_opcode(self):
         report = self.report("events", self.path, "--cpu", "ee",

@@ -203,6 +203,30 @@ struct StartupFailure
   NekoTraceEvent exception;
 };
 
+// Single recording session. Fixed raw-event history, frozen after the first
+// failure cycle; no allocation or guest-state inspection during observation.
+class StartupFailureCapture final : public NekoTraceObserver
+{
+  public:
+    static constexpr std::size_t CAPACITY = 4096;
+    void observe(const NekoTraceEvent &event) noexcept override;
+    std::vector<NekoTraceEvent> events() const;
+    std::uint64_t observedEvents() const noexcept;
+    std::uint64_t firstEventIndex() const noexcept;
+    bool failureCycleTruncated() const noexcept;
+
+  private:
+    std::array<NekoTraceEvent, CAPACITY> history = {};
+    std::size_t cursor = 0;
+    std::size_t count = 0;
+    std::size_t failureCycleEvents = 0;
+    std::uint64_t observed = 0;
+    std::uint64_t firstIndex = 0;
+    std::uint64_t failureCycle = 0;
+    bool triggered = false;
+    bool truncatedCycle = false;
+};
+
 // Call between completed master cycles. Uses const owner inspection only;
 // neither CPU/device work nor tracing is advanced, enabled, or consumed.
 // Also safe after synchronous execution has unwound; that snapshot is not
@@ -233,6 +257,9 @@ void writeStartupRuntimeErrorJsonLine(
   std::ostream &output, const StartupRuntimeError &error);
 void writeStartupFirstFailureJsonLine(
   std::ostream &output, const NekoSystem &system,
-  StartupExecutionBoundary boundary = StartupExecutionBoundary::CompleteCycle);
+  StartupExecutionBoundary boundary = StartupExecutionBoundary::CompleteCycle,
+  const StartupFailureCapture *capture = nullptr);
+void writeStartupFailureCaptureJsonLine(
+  std::ostream &output, const StartupFailureCapture &capture);
 
 #endif

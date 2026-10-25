@@ -75,6 +75,177 @@ TEST_CASE("First startup failure retains the original EE fault rather than handl
   }
 }
 
+TEST_CASE("Startup flight recorder freezes late failure context independently of its prefix",
+  "[startup-failure][failure-capture]")
+{
+  StartupFailureCapture capture;
+  for (std::size_t index = 0; index < StartupFailureCapture::CAPACITY + 37; ++index)
+  {
+    capture.observe({index + 1, EE, ISSUE, index * 4, 0, 0, 0});
+  }
+  const auto cycle = StartupFailureCapture::CAPACITY + 38;
+  capture.observe({cycle, EE, MEMORY, 1, 0, 0, failedEELoad()});
+  capture.observe({cycle, EE, FAULT, 0x1000, 0x8c020001, 0xffc,
+    NekoEETraceFault::INSTRUCTION_AVAILABLE | NekoEETraceFault::DELAY_SLOT});
+  capture.observe({cycle, EE, EXCEPTION,
+    static_cast<unsigned>(EEException::AddressErrorLoadOrFetch),
+    1, 0x80000180, UINT64_C(1) << 31 | 16});
+  capture.observe({cycle, IOP, ISSUE, 0x2000, 0, 0, 0});
+  const auto frozen = capture.events();
+  const auto firstIndex = capture.firstEventIndex();
+  for (std::uint64_t later = cycle + 1; later < cycle + 5000; ++later)
+  {
+    capture.observe({later, EE, MEMORY, 3, 0, 0, failedEELoad()});
+  }
+  REQUIRE(capture.events().size() == StartupFailureCapture::CAPACITY);
+  REQUIRE(nekoTraceHash(capture.events()) == nekoTraceHash(frozen));
+  REQUIRE(capture.firstEventIndex() == firstIndex);
+  REQUIRE(firstIndex == 41);
+  REQUIRE(capture.observedEvents() == StartupFailureCapture::CAPACITY + 5040);
+  REQUIRE_FALSE(capture.failureCycleTruncated());
+  const auto failure = firstStartupFailure(capture.events());
+  REQUIRE(failure.found);
+  REQUIRE(failure.eventIndex == StartupFailureCapture::CAPACITY - 4);
+  REQUIRE(failure.event.masterCycle == cycle);
+  REQUIRE(failure.instruction.programCounter == 0x1000);
+  REQUIRE(failure.instruction.branchAddress == 0xffc);
+  REQUIRE(failure.exceptionAvailable);
+}
+
+TEST_CASE("Startup flight recorder bounds oversized failure cycles without losing the trigger",
+  "[startup-failure][failure-capture]")
+{
+  StartupFailureCapture capture;
+  capture.observe({1, EE, MEMORY, 1, 0, 0, failedEELoad()});
+  for (std::size_t index = 0; index < StartupFailureCapture::CAPACITY * 2; ++index)
+  {
+    capture.observe({1, EE, ISSUE, index * 4, 0, 0, 0});
+  }
+  REQUIRE(capture.events().size() == StartupFailureCapture::CAPACITY);
+  REQUIRE(capture.failureCycleTruncated());
+  REQUIRE(capture.firstEventIndex() == 0);
+  REQUIRE(capture.observedEvents() == StartupFailureCapture::CAPACITY * 2 + 1);
+  const auto failure = firstStartupFailure(capture.events());
+  REQUIRE(failure.found);
+  REQUIRE(failure.eventIndex == 0);
+  REQUIRE(failure.event.value0 == 1);
+}
+
+TEST_CASE("Startup flight recorder reports lost pre-trigger failure-cycle context",
+  "[startup-failure][failure-capture]")
+{
+  for (const std::size_t preceding : {StartupFailureCapture::CAPACITY - 1,
+      StartupFailureCapture::CAPACITY + 1})
+  {
+    CAPTURE(preceding);
+    StartupFailureCapture capture;
+    for (std::size_t index = 0; index < preceding; ++index)
+    {
+      capture.observe({1, EE, ISSUE, index * 4, 0, 0, 0});
+    }
+    capture.observe({1, EE, MEMORY, 1, 0, 0, failedEELoad()});
+    REQUIRE(capture.failureCycleTruncated() ==
+      (preceding >= StartupFailureCapture::CAPACITY));
+    capture.observe({1, EE, ISSUE, 0x1000, 0, 0, 0});
+    REQUIRE(capture.failureCycleTruncated());
+    REQUIRE(capture.events().size() == StartupFailureCapture::CAPACITY);
+    REQUIRE(capture.firstEventIndex() ==
+      preceding + 2 - StartupFailureCapture::CAPACITY);
+    const auto failure = firstStartupFailure(capture.events());
+    REQUIRE(failure.found);
+    REQUIRE(failure.eventIndex == StartupFailureCapture::CAPACITY - 2);
+    REQUIRE(failure.event.value0 == 1);
+  }
+}
+
+TEST_CASE("Startup flight recorder shares all failure classes and ignores ordinary events",
+  "[startup-failure][failure-capture]")
+{
+  const NekoTraceEvent failures[] = {
+    {2, EE, MEMORY, 1, 0, 0, failedEELoad()},
+    {2, IOP, MEMORY, 1, 0, 0, failedIOPLoad()},
+    {2, EE, FAULT, 0x1000, 0x40003800, 0,
+      NekoEETraceFault::HOST_REJECTION | NekoEETraceFault::INSTRUCTION_AVAILABLE |
+        (static_cast<std::uint64_t>(EEStopReason::UnsupportedInstruction) <<
+          NekoEETraceFault::STOP_REASON_SHIFT)},
+    {2, IOP, EXCEPTION, 10, 0x1000, 0x80000080, 40},
+    {2, NekoTraceSubsystem::SIF, NekoTraceEventType::DMABeat,
+      static_cast<std::uint64_t>(NekoSIFDMATrace::Outcome::Rejected) <<
+        NekoSIFDMATrace::OUTCOME_SHIFT, 0, 0, 0}
+  };
+  for (const auto &event : failures)
+  {
+    StartupFailureCapture capture;
+    capture.observe({1, EE, ISSUE, 0x1000, 0, 0, 0});
+    capture.observe(event);
+    capture.observe({3, EE, ISSUE, 0x2000, 0, 0, 0});
+    REQUIRE(capture.events().size() == 2);
+    const auto failure = firstStartupFailure(capture.events());
+    REQUIRE(failure.found);
+    REQUIRE(failure.eventIndex == 1);
+    REQUIRE(failure.event.masterCycle == 2);
+  }
+  StartupFailureCapture quiet;
+  NekoEETraceMemory::Metadata metadata;
+  metadata.transferOutcome = NekoEETraceMemory::TransferOutcome::DeviceNotReady;
+  for (std::size_t index = 0; index < StartupFailureCapture::CAPACITY + 1; ++index)
+  {
+    quiet.observe({index + 1, EE, MEMORY, 0, 0, 0,
+      nekoPackEEMemoryTraceMetadata(metadata)});
+  }
+  REQUIRE(quiet.events().size() == StartupFailureCapture::CAPACITY);
+  REQUIRE(quiet.firstEventIndex() == 1);
+  REQUIRE_FALSE(firstStartupFailure(quiet.events()).found);
+  REQUIRE_FALSE(quiet.failureCycleTruncated());
+}
+
+TEST_CASE("Startup flight recorder is observational and trace lifecycle owns its attachment",
+  "[startup-failure][failure-capture][save-state]")
+{
+  NekoSystem captured;
+  NekoSystem prefix;
+  NekoSystem plain;
+  for (auto *system : {&captured, &prefix, &plain})
+  {
+    system->eeBus().write32(0x80, 0x8c020001);
+    system->eeCore().setCOP0Register(EECOP0Register::Status, 0);
+    system->eeCore().startExecution(0xa0000000);
+  }
+  auto capture = std::make_shared<StartupFailureCapture>();
+  captured.startTrace(1, capture);
+  prefix.startTrace(1);
+  for (auto *system : {&captured, &prefix, &plain})
+  {
+    system->runMasterCycles(80);
+  }
+  REQUIRE_FALSE(firstStartupFailure(captured.trace()).found);
+  REQUIRE(captured.traceTruncated());
+  REQUIRE(captured.traceHash() == prefix.traceHash());
+  REQUIRE(captured.saveState() == prefix.saveState());
+  REQUIRE(captured.saveState() == plain.saveState());
+  const auto failure = firstStartupFailure(capture->events());
+  REQUIRE(failure.found);
+  REQUIRE(failure.instruction.programCounter == 0xa0000080);
+  REQUIRE(failure.instruction.instruction == 0x8c020001);
+  REQUIRE(failure.exceptionAvailable);
+  const auto count = capture->observedEvents();
+  captured.stopTrace();
+  captured.runMasterCycles(2);
+  REQUIRE(capture->observedEvents() == count);
+  std::weak_ptr<StartupFailureCapture> lifetime = capture;
+  captured.startTrace(0, capture);
+  capture.reset();
+  REQUIRE_FALSE(lifetime.expired());
+  captured.startTrace(0);
+  REQUIRE(lifetime.expired());
+  capture = std::make_shared<StartupFailureCapture>();
+  lifetime = capture;
+  captured.startTrace(0, capture);
+  capture.reset();
+  captured.reset();
+  REQUIRE(lifetime.expired());
+}
+
 TEST_CASE("Startup attribution does not confuse waits or speculative fetches with a causal instruction",
   "[startup-failure]")
 {

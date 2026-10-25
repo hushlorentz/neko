@@ -2079,6 +2079,16 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       continuations; independently review the completed block and repeat
       unchanged-budget BIOS rediscovery, rerunning broader gates after repairs.
 
+### Late-Failure Startup Diagnostics
+
+- [x] Define an opt-in bounded first-failure recorder independent of prefix
+      truncation, preserving hardware behavior and the existing BIOS limits.
+- [x] Add bounded preceding/failure-cycle context with shared C++ attribution,
+      CLI export and maintained inspector support; cover late failures,
+      capture limits, lifecycle and trace-mode equivalence with authored tests.
+- [x] Independently review, run ownership-related optimized/ASan gates and
+      repeat unchanged-budget discovery to attribute the next dependency.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including

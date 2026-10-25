@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import run_bios_discovery as discovery
-from test_inspect_startup import records
+from test_inspect_startup import capture_records, records
 
 
 REAL_RUN = subprocess.run
@@ -53,7 +53,8 @@ class DiscoveryTests(unittest.TestCase):
             self.run_count += 1
             if self.run_error is not None:
                 raise self.run_error
-            rows = records("--trace-events" in command)
+            rows = (capture_records() if "--failure-context" in command else
+                    records("--trace-events" in command))
             rows[0]["max_master_cycles"] = 1000000
             if self.run_statuses[index] == 0:
                 rows[1]["run"].update(master_cycles=1000000,
@@ -73,12 +74,15 @@ class DiscoveryTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, self.run_statuses[index])
         return REAL_RUN(command, **kwargs)
 
-    def invoke(self, status=0):
+    def invoke(self, status=0, *, failure_context=False):
         output = io.StringIO()
         errors = io.StringIO()
         with patch.object(discovery.subprocess, "run", side_effect=self.execute):
             with redirect_stdout(output), redirect_stderr(errors):
-                result = discovery.main([str(self.output), "--bios", str(self.bios)])
+                arguments = [str(self.output), "--bios", str(self.bios)]
+                if failure_context:
+                    arguments.append("--failure-context")
+                result = discovery.main(arguments)
         self.assertEqual(result, status, errors.getvalue())
         return output.getvalue(), errors.getvalue()
 
@@ -128,6 +132,22 @@ class DiscoveryTests(unittest.TestCase):
                           if entry["name"].startswith(("traced", "plain"))],
                          [1, 1, 1, 1])
         self.assertEqual(self.read("summary.json")["run"]["master_cycles"], 50)
+
+    def test_opt_in_capture_keeps_untraced_runs_plain_and_selects_failure_context(self):
+        self.invoke(failure_context=True)
+        runs = [command for command in self.calls if command[0] == str(self.binary)]
+        self.assertEqual([command[-1] for command in runs[:2]],
+                         ["--failure-context", "--failure-context"])
+        for command in runs[2:]:
+            self.assertNotIn("--failure-context", command)
+            self.assertNotIn("--trace-events", command)
+        context = self.read("first-failure-events.json")
+        self.assertEqual(context["event_source"], "failure_capture")
+        self.assertEqual(context["events"][0]["master_cycle"], 49)
+        self.assertEqual(context["events"][0]["global_event_index"], 92)
+        self.assertTrue(self.read("compare-traces.json")["equal"])
+        self.assertTrue(self.read("compare-traced-plain.json")["equal"])
+        self.assertTrue(self.read("manifest.json")["failure_context"])
 
     def test_unexpected_run_error_is_recorded_and_aborts(self):
         self.run_statuses[0] = 2

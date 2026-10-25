@@ -7,7 +7,7 @@
 
 namespace
 {
-  bool failedMemoryAccess(const NekoTraceEvent &event)
+  bool failedMemoryAccess(const NekoTraceEvent &event) noexcept
   {
     if (event.type != NekoTraceEventType::MemoryAccess)
     {
@@ -137,7 +137,7 @@ namespace
     }
   }
 
-  bool rejectedInstruction(const NekoTraceEvent &event)
+  bool rejectedInstruction(const NekoTraceEvent &event) noexcept
   {
     if (event.subsystem == NekoTraceSubsystem::EE)
     {
@@ -157,6 +157,14 @@ namespace
           (event.value0 == 10 || event.value0 == 11));
     }
     return false;
+  }
+
+  bool rejectedDMA(const NekoTraceEvent &event) noexcept
+  {
+    return event.subsystem == NekoTraceSubsystem::SIF &&
+      event.type == NekoTraceEventType::DMABeat &&
+      ((event.value0 >> NekoSIFDMATrace::OUTCOME_SHIFT) & 255) ==
+        static_cast<unsigned>(NekoSIFDMATrace::Outcome::Rejected);
   }
 
   template<std::size_t N>
@@ -277,6 +285,104 @@ namespace
   }
 }
 
+constexpr std::size_t StartupFailureCapture::CAPACITY;
+
+void StartupFailureCapture::observe(const NekoTraceEvent &event) noexcept
+{
+  ++observed;
+  if (triggered)
+  {
+    if (event.masterCycle != failureCycle)
+    {
+      return;
+    }
+    if (failureCycleEvents == CAPACITY - 1)
+    {
+      truncatedCycle = true;
+      return;
+    }
+    ++failureCycleEvents;
+  }
+  else if (failedMemoryAccess(event) || rejectedInstruction(event) ||
+      rejectedDMA(event))
+  {
+    triggered = true;
+    failureCycle = event.masterCycle;
+  }
+  if (triggered && count == CAPACITY &&
+      history[cursor].masterCycle == failureCycle)
+  {
+    truncatedCycle = true;
+  }
+  history[cursor] = event;
+  cursor = (cursor + 1) % CAPACITY;
+  if (count == CAPACITY)
+  {
+    ++firstIndex;
+  }
+  else
+  {
+    ++count;
+  }
+}
+
+std::vector<NekoTraceEvent> StartupFailureCapture::events() const
+{
+  std::vector<NekoTraceEvent> result;
+  result.reserve(count);
+  const auto first = (cursor + CAPACITY - count) % CAPACITY;
+  for (std::size_t index = 0; index < count; ++index)
+  {
+    result.push_back(history[(first + index) % CAPACITY]);
+  }
+  return result;
+}
+
+std::uint64_t StartupFailureCapture::observedEvents() const noexcept
+{
+  return observed;
+}
+
+std::uint64_t StartupFailureCapture::firstEventIndex() const noexcept
+{
+  return firstIndex;
+}
+
+bool StartupFailureCapture::failureCycleTruncated() const noexcept
+{
+  return truncatedCycle;
+}
+
+void writeStartupFailureCaptureJsonLine(
+  std::ostream &output, const StartupFailureCapture &capture)
+{
+  std::ostringstream json;
+  json.imbue(std::locale::classic());
+  json << "{\"type\":\"startup_failure_capture\",\"capacity\":"
+    << StartupFailureCapture::CAPACITY
+    << ",\"observed_events\":" << capture.observedEvents()
+    << ",\"first_event_index\":" << capture.firstEventIndex()
+    << ",\"failure_cycle_truncated\":"
+    << (capture.failureCycleTruncated() ? "true" : "false") << ",\"events\":[";
+  bool first = true;
+  for (const auto &event : capture.events())
+  {
+    if (!first)
+    {
+      json << ',';
+    }
+    first = false;
+    json << "{\"master_cycle\":" << event.masterCycle
+      << ",\"subsystem\":" << static_cast<unsigned>(event.subsystem)
+      << ",\"event_type\":" << static_cast<unsigned>(event.type)
+      << ",\"values\":[" << event.value0 << ',' << event.value1 << ','
+      << event.value2 << ',' << event.value3 << "]}";
+  }
+  json << "]}\n";
+  const auto line = json.str();
+  output.write(line.data(), static_cast<std::streamsize>(line.size()));
+}
+
 StartupFailure firstStartupFailure(
   const std::vector<NekoTraceEvent> &trace)
 {
@@ -353,10 +459,7 @@ StartupFailure firstStartupFailure(
       }
       return failure;
     }
-    if (event.subsystem == NekoTraceSubsystem::SIF &&
-        event.type == NekoTraceEventType::DMABeat &&
-        ((event.value0 >> NekoSIFDMATrace::OUTCOME_SHIFT) & 255) ==
-          static_cast<unsigned>(NekoSIFDMATrace::Outcome::Rejected))
+    if (rejectedDMA(event))
     {
       failure.kind = StartupFailureKind::DMARejection;
       return failure;
@@ -366,7 +469,8 @@ StartupFailure firstStartupFailure(
 }
 
 void writeStartupFirstFailureJsonLine(
-  std::ostream &output, const NekoSystem &system, StartupExecutionBoundary boundary)
+  std::ostream &output, const NekoSystem &system, StartupExecutionBoundary boundary,
+  const StartupFailureCapture *capture)
 {
   std::ostringstream json;
   json.imbue(std::locale::classic());
@@ -374,8 +478,14 @@ void writeStartupFirstFailureJsonLine(
     << (system.traceTruncated() ? "true" : "false")
     << ",\"execution_boundary\":\"";
   const char *const boundaries[] = {"complete_cycle", "incomplete_cycle"};
-  json << name(static_cast<unsigned>(boundary), boundaries) << "\",\"failure\":";
-  const auto failure = firstStartupFailure(system.trace());
+  json << name(static_cast<unsigned>(boundary), boundaries) << "\"";
+  if (capture != nullptr)
+  {
+    json << ",\"event_source\":\"failure_capture\"";
+  }
+  json << ",\"failure\":";
+  const auto failure = capture != nullptr ?
+    firstStartupFailure(capture->events()) : firstStartupFailure(system.trace());
   if (!failure.found)
   {
     json << "null";

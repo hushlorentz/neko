@@ -21,6 +21,7 @@ EVENT_FILTERS.update(instruction=5, memory=7, exception=8, fault=21)
 RECORD_TYPES = {
     "bios_startup_input", "startup_run_summary", "startup_runtime_error",
     "startup_trace_summary", "trace_event", "startup_first_failure",
+    "startup_failure_capture",
 }
 HEX_FIELDS = {
     "pc", "epc", "bad_vaddr", "status", "cause", "bits", "branch_pc",
@@ -42,6 +43,7 @@ class StartupLog:
     trace: Optional[dict]
     failure_record: Optional[dict]
     events: list
+    capture: Optional[dict]
 
     @property
     def coverage(self):
@@ -73,6 +75,17 @@ def unique_object(pairs):
 
 def reject_constant(value):
     raise ValueError(f"non-finite JSON number: {value}")
+
+
+def validate_event(record):
+    uint(record.get("master_cycle"), "master_cycle")
+    uint(record.get("subsystem"), "subsystem", 8)
+    uint(record.get("event_type"), "event_type", 8)
+    values = require(record, "values", list)
+    if len(values) != 4:
+        raise ValueError("values must contain four raw words")
+    for value in values:
+        uint(value, "values")
 
 
 def validate_record(record):
@@ -107,20 +120,32 @@ def validate_record(record):
         uint(record.get("captured_events"), "captured_events")
         require(record, "truncated", bool)
     elif kind == "trace_event":
-        uint(record.get("master_cycle"), "master_cycle")
-        uint(record.get("subsystem"), "subsystem", 8)
-        uint(record.get("event_type"), "event_type", 8)
-        values = require(record, "values", list)
-        if len(values) != 4:
-            raise ValueError("values must contain four raw words")
-        for value in values:
-            uint(value, "values")
+        validate_event(record)
+    elif kind == "startup_failure_capture":
+        if record.get("capacity") != 4096:
+            raise ValueError("failure capture capacity must be 4096")
+        uint(record.get("observed_events"), "observed_events")
+        uint(record.get("first_event_index"), "first_event_index")
+        require(record, "failure_cycle_truncated", bool)
+        events = require(record, "events", list)
+        if len(events) > record["capacity"]:
+            raise ValueError("failure capture exceeds capacity")
+        previous = 0
+        for event in events:
+            if type(event) is not dict:
+                raise ValueError("failure capture events must be objects")
+            validate_event(event)
+            if event["master_cycle"] < previous:
+                raise ValueError("failure capture cycle order is not monotonic")
+            previous = event["master_cycle"]
     else:
         require(record, "trace_truncated", bool)
         if record.get("execution_boundary") not in ("complete_cycle", "incomplete_cycle"):
             raise ValueError("invalid execution_boundary")
         if "failure" not in record:
             raise ValueError("missing failure")
+        if record.get("event_source", "prefix") not in ("prefix", "failure_capture"):
+            raise ValueError("invalid event_source")
         if record["failure"] is not None:
             failure = require(record, "failure", dict)
             uint(failure.get("event_index"), "failure.event_index")
@@ -161,15 +186,17 @@ def load_log(path):
     result = results[0]
     trace = single.get("startup_trace_summary")
     failure = single.get("startup_first_failure")
+    capture = single.get("startup_failure_capture")
     if records[:2] != [input_record, result]:
         invalid("expected input followed by run result")
     if trace is None:
-        if events or failure is not None:
+        if events or failure is not None or capture is not None:
             invalid("trace records require startup_trace_summary")
     else:
         if failure is None:
             invalid("missing startup_first_failure; file is incomplete")
-        if records[2:] != [trace, *events, failure]:
+        suffix = [capture, failure] if capture is not None else [failure]
+        if records[2:] != [trace, *events, *suffix]:
             invalid("expected trace summary, ordered events, then startup_first_failure")
         count = trace["captured_events"]
         if count != len(events) or count > trace["event_limit"]:
@@ -182,14 +209,41 @@ def load_log(path):
                     else "complete_cycle")
         if failure["execution_boundary"] != expected:
             invalid("execution_boundary disagrees with run result")
+        source = failure.get("event_source", "prefix")
+        if source == "failure_capture" and capture is None:
+            invalid("failure_capture source requires startup_failure_capture")
+        if capture is not None:
+            if source != "failure_capture":
+                invalid("failure capture requires matching event_source")
+            observed = capture["observed_events"]
+            retained = len(capture["events"])
+            first = capture["first_event_index"]
+            if observed < len(events) or first + retained > observed:
+                invalid("failure capture observed_events disagrees with retained bounds")
+            if capture["events"] and capture["events"][-1]["master_cycle"] > \
+                    result["snapshot"]["master_cycle"]:
+                invalid("failure capture extends beyond the ending snapshot")
+            if not trace["truncated"] and observed != len(events):
+                invalid("complete prefix disagrees with failure capture observed_events")
         selected = failure["failure"]
+        selected_events = capture["events"] if capture is not None else events
         if selected is not None:
             index = selected["event_index"]
-            if index >= len(events):
+            if index >= len(selected_events):
                 invalid("failure.event_index is outside the retained trace")
-            if selected["master_cycle"] != events[index]["master_cycle"]:
+            if selected["master_cycle"] != selected_events[index]["master_cycle"]:
                 invalid("failure.master_cycle disagrees with selected event")
-    return StartupLog(raw, records, input_record, result, trace, failure, events)
+        if capture is not None:
+            if selected is None and capture["first_event_index"] + \
+                    len(selected_events) != capture["observed_events"]:
+                invalid("capture without a failure must retain the latest events")
+            if selected is None and len(selected_events) != \
+                    min(capture["observed_events"], capture["capacity"]):
+                invalid("capture without a failure must fill its bounded history")
+            if capture["failure_cycle_truncated"] and (
+                    selected is None or len(selected_events) != capture["capacity"]):
+                invalid("truncated failure cycle requires a full capture and failure")
+    return StartupLog(raw, records, input_record, result, trace, failure, events, capture)
 
 
 def readable(value):
@@ -218,6 +272,10 @@ def summary(log):
         trace=log.trace,
         first_failure=(readable(log.failure_record["failure"])
                        if log.failure_record is not None else None),
+        failure_event_source=(log.failure_record.get("event_source", "prefix")
+                              if log.failure_record is not None else None),
+        failure_capture=({key: value for key, value in log.capture.items()
+                          if key != "events"} if log.capture is not None else None),
         event_counts=dict(Counter(
             f"{CPUS.get(event['subsystem'], event['subsystem'])}:"
             f"{EVENTS.get(event['event_type'], event['event_type'])}"
@@ -255,8 +313,12 @@ def select_events(log, arguments):
         raise ValueError("no trace was exported in this file")
     if arguments.from_cycle > arguments.to_cycle:
         raise ValueError("--from-cycle must not exceed --to-cycle")
+    captured = arguments.source == "failure_capture"
+    if captured and log.capture is None:
+        raise ValueError("no failure capture was exported in this file")
+    events = log.capture["events"] if captured else log.events
     selected = []
-    for index, event in enumerate(log.events):
+    for index, event in enumerate(events):
         cpu, kind, values = event["subsystem"], event["event_type"], event["values"]
         cycle = event["master_cycle"]
         if not arguments.from_cycle <= cycle <= arguments.to_cycle:
@@ -276,11 +338,17 @@ def select_events(log, arguments):
                 cpu in CPUS and kind == 7 and values[0] == arguments.address):
             continue
         selected.append((index, event))
-    return dict(**execution_context(log), coverage=log.coverage,
+    rows = [describe_event(index, event)
+            for index, event in selected[:arguments.limit]]
+    if captured:
+        for row in rows:
+            row["global_event_index"] = log.capture["first_event_index"] + row["event_index"]
+    return dict(**execution_context(log),
+                coverage="bounded_failure_capture" if captured else log.coverage,
+                event_source=arguments.source,
                 trace=log.trace, matched_events=len(selected),
                 limited=len(selected) > arguments.limit,
-                events=[describe_event(index, event)
-                        for index, event in selected[:arguments.limit]],
+                events=rows,
                 note=EVIDENCE_NOTE)
 
 
@@ -343,6 +411,9 @@ def parse_arguments(argv):
             sub.add_argument("other", type=Path)
             sub.add_argument("--mode", choices=("run", "trace"), default="run")
         elif command != "summary":
+            sub.add_argument("--source", choices=("prefix", "failure_capture"),
+                             default="prefix",
+                             help="Retained event source (default: prefix).")
             sub.add_argument("--cpu", type=str.lower, choices=("ee", "iop"))
             sub.add_argument("--cycle", type=number)
             sub.add_argument("--from-cycle", type=number, default=0)

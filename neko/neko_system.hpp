@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "clock_scheduler.hpp"
@@ -140,7 +141,9 @@ class NekoSystem
     DualCPUExecutionResult runDualCPU(
       std::uint64_t maxMasterCycles);
     void startTrace();
-    void startTrace(std::uint64_t eventLimit);
+    // Observer receives all events before prefix limiting; stop/reset detach it.
+    void startTrace(std::uint64_t eventLimit,
+      std::shared_ptr<NekoTraceObserver> observer = {});
     void stopTrace();
     void clearTrace();
     bool traceEnabled() const;
@@ -269,6 +272,7 @@ class NekoSystem
     NekoInputState inputState;
     bool collectingTrace = false;
     std::vector<NekoTraceEvent> traceEvents;
+    std::shared_ptr<NekoTraceObserver> traceObserver;
     std::uint64_t maximumTraceEvents = 0;
     bool truncatedTrace = false;
     std::uint64_t lastTracedEEStateHash = 0;

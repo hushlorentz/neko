@@ -12,7 +12,8 @@
 namespace
 {
   const char *USAGE =
-    "Usage: neko bios-startup <file> --cycles <count> [--trace-events <count>]";
+    "Usage: neko bios-startup <file> --cycles <count> "
+    "[--trace-events <count> [--failure-context]]";
 
   std::uint64_t parseUnsignedInteger(
     const std::string &text, const char *error)
@@ -75,24 +76,27 @@ int neko_cli::runBIOSStartupCommand(
 {
   try
   {
-    if ((arguments.size() != 3 && arguments.size() != 5) ||
+    if ((arguments.size() != 3 && arguments.size() != 5 && arguments.size() != 6) ||
         arguments[0].empty() || arguments[1] != "--cycles" ||
-        (arguments.size() == 5 && arguments[3] != "--trace-events"))
+        (arguments.size() >= 5 && arguments[3] != "--trace-events") ||
+        (arguments.size() == 6 && arguments[5] != "--failure-context"))
     {
       throw std::invalid_argument(USAGE);
     }
     const auto budget = parseUnsignedInteger(
       arguments[2], "Cycle ceiling must be an unsigned 64-bit decimal integer.");
-    const bool traceRequested = arguments.size() == 5;
+    const bool traceRequested = arguments.size() >= 5;
     const auto traceLimit = traceRequested ?
       parseUnsignedInteger(arguments[4],
         "Trace event ceiling must be an unsigned 64-bit decimal integer.") : 0;
     const auto image = loadFile(arguments[0]);
     NekoSystem system;
     system.runDualCPUBIOS(image, 0);
+    const auto capture = arguments.size() == 6 ?
+      std::make_shared<StartupFailureCapture>() : nullptr;
     if (traceRequested)
     {
-      system.startTrace(traceLimit);
+      system.startTrace(traceLimit, capture);
     }
     const auto evidence = runDualCPUWithStartupEvidence(system, budget);
     const auto *runtimeError = evidence.outcome == StartupRunOutcome::RuntimeError ?
@@ -123,9 +127,13 @@ int neko_cli::runBIOSStartupCommand(
     if (traceRequested)
     {
       writeStartupTraceJsonLines(output, system);
+      if (capture)
+      {
+        writeStartupFailureCaptureJsonLine(output, *capture);
+      }
       writeStartupFirstFailureJsonLine(output, system,
         runtimeError != nullptr ? StartupExecutionBoundary::IncompleteCycle :
-          StartupExecutionBoundary::CompleteCycle);
+          StartupExecutionBoundary::CompleteCycle, capture.get());
     }
     output.flush();
     if (!output)

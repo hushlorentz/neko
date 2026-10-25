@@ -85,6 +85,8 @@ def inspect_batch(directory, manifest):
         if cpu not in ("ee", "iop", None):
             raise ValueError(f"unsupported first failure CPU: {cpu}")
         filters = [] if cpu is None else ["--cpu", cpu]
+        if summary.get("failure_event_source") == "failure_capture":
+            filters += ["--source", "failure_capture"]
         filters += ["--from-cycle", str(max(0, cycle - 16)),
                     "--to-cycle", str(min((1 << 64) - 1, cycle + 16)),
                     "--limit", "200"]
@@ -94,13 +96,15 @@ def inspect_batch(directory, manifest):
     return equal, failure
 
 
-def run_batch(directory, bios):
+def run_batch(directory, bios, *, failure_context=False):
     if not bios.is_file():
         raise ValueError(f"BIOS input does not exist: {bios}")
     directory.mkdir(parents=True, exist_ok=False)
     manifest = dict(status="running", bios=str(bios),
                     max_master_cycles=MASTER_CYCLES, trace_events=TRACE_EVENTS,
                     commands=[], note=EVIDENCE_NOTE)
+    if failure_context:
+        manifest["failure_context"] = True
     try:
         binary = build_neko(directory, manifest)
         exits = {}
@@ -109,6 +113,8 @@ def run_batch(directory, bios):
                        "--cycles", str(MASTER_CYCLES)]
             if name.startswith("traced"):
                 command += ["--trace-events", str(TRACE_EVENTS)]
+                if failure_context:
+                    command += ["--failure-context"]
             exits[name] = capture(directory, manifest, name, command,
                                   extension="jsonl", accepted=(0, 1))
         equal, failure = inspect_batch(directory, manifest)
@@ -132,9 +138,12 @@ def main(argv=None):
     parser.add_argument("--bios", type=Path,
                         default=ROOT / "local_integration/bios/SCPH-70012.bin",
                         help="BIOS input (default: local_integration/bios/SCPH-70012.bin).")
+    parser.add_argument("--failure-context", action="store_true",
+                        help="Retain bounded first-failure context in traced runs.")
     arguments = parser.parse_args(argv)
     try:
-        report = run_batch(arguments.directory.resolve(), arguments.bios.resolve())
+        report = run_batch(arguments.directory.resolve(), arguments.bios.resolve(),
+                           failure_context=arguments.failure_context)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return 0 if report["comparisons_equal"] else 1
     except (OSError, ValueError) as error:
