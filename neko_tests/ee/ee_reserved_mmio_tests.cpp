@@ -15,7 +15,7 @@ namespace
   };
   constexpr SerialInitialization SERIAL_INITIALIZATIONS[] = {
     {0x1000f100, 0x20}, {0x1000f120, 0},
-    {0x1000f140, 7}, {0x1000f140, 0}
+    {0x1000f140, 7}, {0x1000f140, 0}, {0x1000f150, 0}
   };
 
   bool serialInitializationAdmitted(std::uint32_t address, std::uint32_t value)
@@ -112,6 +112,7 @@ TEST_CASE("EE serial initialization admits only the stateless observed word",
   REQUIRE(EEMemoryMap::SIO_LCR == 0x1000f100);
   REQUIRE(EEMemoryMap::SIO_IER == 0x1000f120);
   REQUIRE(EEMemoryMap::SIO_FCR == 0x1000f140);
+  REQUIRE(EEMemoryMap::SIO_BGR == 0x1000f150);
   for (const auto initialization : SERIAL_INITIALIZATIONS)
   {
     CAPTURE(initialization.address);
@@ -211,7 +212,7 @@ TEST_CASE("EE serial initialization excludes readback values widths and neighbor
     for (const auto address : {0x1000f0fcu, 0x1000f100u, 0x1000f104u,
            0x1000f110u, 0x1000f11cu, 0x1000f120u, 0x1000f124u,
            0x1000f130u, 0x1000f13cu, 0x1000f140u, 0x1000f144u,
-           0x1000f150u, 0x1000f180u, 0x1000f1c0u})
+           0x1000f14cu, 0x1000f150u, 0x1000f154u, 0x1000f180u, 0x1000f1c0u})
     {
       if (address == initialization.address)
       {

@@ -2032,9 +2032,23 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### EE Serial-Port Baud-Rate Initialization: Scope
 
-- [ ] Resolve the observed zero word store to `0x1000f150` against
+- [x] Resolve the observed zero word store to `0x1000f150` against
       local manuals and approved secondary evidence; define bounded
       clock/divisor effects and ownership before extending serial admission.
+
+### EE Serial-Port Baud-Rate Initialization: Bounded BGR Repair
+
+- [x] Admit only exact full-word zero writes without retained state
+      or baud/traffic effects; extend shared serial access, guest, merge
+      and branch-delay trace regressions while retaining other rejection.
+- [x] Validate and independently review the bounded repair, then repeat
+      unchanged-budget BIOS rediscovery and retain the next dependency.
+
+### EE Serial-Port Status: Scope
+
+- [ ] Resolve the observed word read at `0x1000f130` against local
+      manuals and approved evidence; define status/readiness ownership
+      and reset/traffic semantics without fabricated ready responses.
 
 ### Real BIOS Handshake and Boundary Conformance
 

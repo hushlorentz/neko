@@ -34,7 +34,7 @@ namespace
     return EETimers::isRegisterAddress(address) ||
       sifApertureAddress(address) ||
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
-      address == EEMemoryMap::SIO_FCR ||
+      address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
@@ -1203,6 +1203,9 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::SIO_FCR:
       // Provisional reset initialization, not an active FIFO model.
       return value == 0 || value == 7;
+    case EEMemoryMap::SIO_BGR:
+      // Provisional baud initialization, not an active clock model.
+      return value == 0;
     case EEMemoryMap::RESERVED_F500:
       // Provisional exact-word no-op, not a DMA hold or peer-reset register.
       return true;
