@@ -29,8 +29,13 @@ class EESerial
     // One elapsed master tick; completion is returned once, not retained.
     EESerialCompletion advance() noexcept;
     void reset() noexcept;
+    std::uint64_t stateHash() const;
 
   private:
+    friend class NekoSaveStateCodec;
+
+    // Emulator policy: encoded BGR zero selects one 256-tick bit period.
+    static constexpr std::uint16_t TRANSMIT_FRAME_CYCLES = 2560;
     std::uint16_t remainingCycles = 0;
     std::uint8_t pendingByte = 0;
     bool resetHeld = false;

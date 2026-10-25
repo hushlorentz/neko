@@ -13,6 +13,7 @@
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
 #include "ee_elf_loader.hpp"
+#include "ee_serial.hpp"
 #include "ee_timers.hpp"
 #include "gif.hpp"
 #include "gif_dmac_channel.hpp"
@@ -244,6 +245,7 @@ class NekoSystem
     GIFRegisters gifRegisterFile;
     EEInterruptController interruptControllerComponent;
     EETimers eeTimersComponent;
+    EESerial eeSerialComponent;
     MasterClockScheduler masterClock;
     EEBus eeBusComponent;
     DMACController dmacControllerComponent;
@@ -317,7 +319,8 @@ class NekoSystem
     void publishCycleTrace(
       std::uint64_t cycle,
       const CycleObservationSnapshot &beforeCycle,
-      const SIFDMAObservations &dma);
+      const SIFDMAObservations &dma,
+      const EESerialCompletion &serial);
     void publishIOPAndSIFTrace(
       std::uint64_t cycle, const SIFDMAObservations &dma);
     void publishSIFTrace(std::uint64_t cycle, const SIF::Observation &event);

@@ -2,6 +2,7 @@
 
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
+#include "ee_serial.hpp"
 #include "ee_timers.hpp"
 #include "gif_registers.hpp"
 #include "gif_dmac_channel.hpp"
@@ -239,6 +240,28 @@ void EEBus::attachTimers(EETimers *timers)
     throw std::logic_error("EE bus timers are already attached.");
   }
   timersComponent = timers;
+}
+
+void EEBus::attachSerial(EESerial *serial)
+{
+  if (serial == nullptr)
+  {
+    throw std::invalid_argument("EE bus requires non-null serial.");
+  }
+  if (serialComponent != nullptr)
+  {
+    throw std::logic_error("EE bus serial is already attached.");
+  }
+  serialComponent = serial;
+}
+
+EESerial &EEBus::attachedSerial() const
+{
+  if (serialComponent == nullptr)
+  {
+    throw std::logic_error("EE bus serial is not attached.");
+  }
+  return *serialComponent;
 }
 
 EEWordMergeStorePolicy EEBus::wordMergeStorePolicy(std::uint32_t address) const
@@ -558,6 +581,10 @@ bool EEBus::writeData8(
   std::uint32_t address,
   std::uint8_t value)
 {
+  if (address == EEMemoryMap::SIO_TXFIFO)
+  {
+    return attachedSerial().transmitByte(value) == EESerialTransmitResult::Accepted;
+  }
   std::uint32_t physicalAddress = 0;
   if (!mainMemoryAddress(address, 1, &physicalAddress))
   {
@@ -1018,8 +1045,7 @@ bool EEBus::readMapped32(
   switch (address)
   {
     case EEMemoryMap::SIO_ISR:
-      // Provisional quiescent status; all serial traffic remains unsupported.
-      *value = 0;
+      *value = attachedSerial().readStatus();
       return true;
     case EEMemoryMap::VIF0_STAT:
       *value = vifStatus(*vif0Component);
@@ -1200,17 +1226,13 @@ bool EEBus::writeMapped32(
   switch (address)
   {
     case EEMemoryMap::SIO_LCR:
-      // Provisional stateless initialization, not active UART configuration.
-      return value == 0x20;
+      return attachedSerial().writeLineControl(value);
     case EEMemoryMap::SIO_IER:
-      // Provisional interrupt-disable initialization, not an interrupt model.
-      return value == 0;
+      return attachedSerial().writeInterruptEnable(value);
     case EEMemoryMap::SIO_FCR:
-      // Provisional reset initialization, not an active FIFO model.
-      return value == 0 || value == 7;
+      return attachedSerial().writeFIFOControl(value);
     case EEMemoryMap::SIO_BGR:
-      // Provisional baud initialization, not an active clock model.
-      return value == 0;
+      return attachedSerial().writeBaudRate(value);
     case EEMemoryMap::RESERVED_F500:
       // Provisional exact-word no-op, not a DMA hold or peer-reset register.
       return true;

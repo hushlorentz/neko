@@ -14,7 +14,8 @@ from typing import Optional
 # Stable public identities from neko/regression_trace.hpp, not memory bitfields.
 CPUS = {10: "ee", 11: "iop"}
 EVENTS = {5: "instruction_issued", 7: "memory_access",
-          8: "exception_entered", 21: "fault_context"}
+          8: "exception_entered", 21: "fault_context",
+          22: "serial_transmit_completed"}
 EVENT_FILTERS = {name: number for number, name in EVENTS.items()}
 EVENT_FILTERS.update(instruction=5, memory=7, exception=8, fault=21)
 RECORD_TYPES = {
@@ -243,6 +244,9 @@ def describe_event(index, event):
                               data_low_raw=f"0x{values[1]:016x}",
                               data_high_raw=f"0x{values[2]:016x}",
                               metadata_raw=f"0x{values[3]:016x}")
+    elif cpu == "ee" and event["event_type"] == 22:
+        row["payload"] = dict(byte=values[0],
+                              physical_address=f"0x{values[1]:08x}")
     return row
 
 

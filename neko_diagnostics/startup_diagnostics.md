@@ -215,6 +215,12 @@ per retained event, in the original collection order:
 The event above illustrates the record shape, not a particular BIOS result.
 `subsystem` and `event_type` are the stable numeric identities from
 `regression_trace.hpp`; `values` contains its four raw payload words.
+EE event 22 (`SerialTransmitCompleted`) records the raw byte in `values[0]`
+and physical TXFIFO address in `values[1]`; the other words are zero. It
+precedes EE execution observations on the completion tick, independently of
+the earlier accepted store. The provisional fixed serial profile completes
+after 2,560 master ticks; reset cancellation emits no completion. Trace
+capacity and enablement do not affect serial progress or retain output.
 Numbers are decimal, including 64-bit words: consumers must retain integer
 precision. A decoded `startup_first_failure` record follows the raw events.
 
@@ -282,8 +288,10 @@ is not replaced by a later handler failure or ending host stop.
 `events` filters the ordered retained events. `--cpu` selects EE or IOP;
 without it, all subsystems are included. `--cycle`, `--from-cycle`, and
 `--to-cycle` are inclusive master-cycle constraints. `--event` accepts a
-numeric ID or `instruction`, `memory`, `exception`, or `fault` (their full
-event names also work). Unknown numeric identities remain raw, not silently
+numeric ID, `instruction`, `memory`, `exception`, `fault`, or
+`serial_transmit_completed` (the other full event names also work).
+Serial completion payloads expose the unconverted byte and physical endpoint.
+Unknown numeric identities remain raw, not silently
 discarded or interpreted as a known subsystem/event.
 
 `instructions` selects only EE/IOP `InstructionIssued` events and shows PC,

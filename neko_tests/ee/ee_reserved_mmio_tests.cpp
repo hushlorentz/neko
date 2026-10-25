@@ -106,7 +106,7 @@ namespace
   }
 }
 
-TEST_CASE("EE serial initialization admits only the stateless observed word",
+TEST_CASE("EE serial idle configuration and reset release are stateless",
   "[ee][bus][serial-init]")
 {
   REQUIRE(EEMemoryMap::SIO_LCR == 0x1000f100);
@@ -115,6 +115,10 @@ TEST_CASE("EE serial initialization admits only the stateless observed word",
   REQUIRE(EEMemoryMap::SIO_BGR == 0x1000f150);
   for (const auto initialization : SERIAL_INITIALIZATIONS)
   {
+    if (initialization.address == EEMemoryMap::SIO_FCR && initialization.value == 7)
+    {
+      continue;
+    }
     CAPTURE(initialization.address);
     NekoSystem system;
     seed(system);
@@ -406,7 +410,7 @@ TEST_CASE("EE serial status is a quiescent observational word",
   REQUIRE(bus.read32(0x1000f130) == 0);
 }
 
-TEST_CASE("EE serial status preserves access and traffic rejection",
+TEST_CASE("EE serial status preserves access and receive rejection",
   "[ee][bus][serial-status]")
 {
   NekoSystem system;
@@ -418,7 +422,7 @@ TEST_CASE("EE serial status preserves access and traffic rejection",
   std::uint64_t wide = UINT64_C(0x123456789abcdef0);
   EEQuadword quad = {wide, wide};
   REQUIRE(bus.wordMergeStorePolicy(0x1000f130) == EEWordMergeStorePolicy::FullWordOnly);
-  for (const auto address : {0x1000f130u, 0x1000f180u, 0x1000f1c0u})
+  for (const auto address : {0x1000f130u, 0x1000f1c0u})
   {
     CAPTURE(address);
     for (std::uint32_t lane = 0; lane < 4; ++lane)

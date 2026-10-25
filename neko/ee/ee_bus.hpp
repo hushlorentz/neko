@@ -10,6 +10,7 @@
 
 class EEInterruptController;
 class EETimers;
+class EESerial;
 class DMACController;
 class GIFRegisters;
 class GIFDMACChannel;
@@ -109,6 +110,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t SIO_ISR = 0x1000f130;
   constexpr std::uint32_t SIO_FCR = 0x1000f140;
   constexpr std::uint32_t SIO_BGR = 0x1000f150;
+  constexpr std::uint32_t SIO_TXFIFO = 0x1000f180;
   constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
   constexpr std::uint32_t IOP_BOOT_PROBE = 0x1f803204;
   constexpr std::uint32_t IOP_DEV9_INIT_1470 = 0x1f801470;
@@ -181,6 +183,7 @@ class EEBus
     void attachVectorUnits(VPU *vu0, VPU *vu1);
     void attachGSDisplay(GSDisplay *gsDisplay);
     void attachTimers(EETimers *timers);
+    void attachSerial(EESerial *serial);
     // The caller keeps both the shared owner and signal receiver alive.
     void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     void installBootROM(
@@ -306,6 +309,7 @@ class EEBus
       VPU **vpu,
       std::size_t *quadwordIndex) const;
     GSDisplay &attachedGSDisplay() const;
+    EESerial &attachedSerial() const;
 
     VIF *vif0Component;
     VIF *vif1Component;
@@ -324,6 +328,7 @@ class EEBus
     VPU *vu1Component = nullptr;
     GSDisplay *gsDisplayCircuit = nullptr;
     EETimers *timersComponent = nullptr;
+    EESerial *serialComponent = nullptr;
     SIF *sifComponent = nullptr;
     SIFSignalReceiver *sifSignals = nullptr;
     std::vector<std::uint8_t> mainMemory;

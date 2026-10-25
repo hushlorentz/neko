@@ -252,6 +252,7 @@ NekoSystem::NekoSystem() :
     &toScratchpadDMACComponent);
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
   eeBusComponent.attachTimers(&eeTimersComponent);
+  eeBusComponent.attachSerial(&eeSerialComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   eeCoreComponent.attachVU0(&vu0Component);
   eeCoreComponent.attachVU1(&vu1Component);
@@ -490,6 +491,7 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(&hash, sif1DMACComponent.stateHash());
   hashStateValue(&hash, sif0DMACComponent.stateHash());
   hashStateValue(&hash, eeTimersComponent.stateHash(masterClock.currentCycle()));
+  hashStateValue(&hash, eeSerialComponent.stateHash());
   return hash;
 }
 
@@ -1238,6 +1240,7 @@ void NekoSystem::clockMasterCycle()
   latchComponentInterrupts();
   publishEEInterruptLines();
   eeBusComponent.advanceGuestFIFOs();
+  const auto serialCompletion = eeSerialComponent.advance();
   CycleObservationSnapshot beforeCycle;
   if (collectingTrace)
   {
@@ -1256,7 +1259,8 @@ void NekoSystem::clockMasterCycle()
     {
       if (collectingTrace)
       {
-        publishCycleTrace(masterClock.currentCycle(), beforeCycle, dmaObservations);
+        publishCycleTrace(masterClock.currentCycle(), beforeCycle,
+          dmaObservations, serialCompletion);
       }
       eeCoreComponent.cycleEventCount = 0;
       throw IOPDMATransferError(transfer);
@@ -1271,7 +1275,7 @@ void NekoSystem::clockMasterCycle()
   {
     publishCycleTrace(
       masterClock.currentCycle(),
-      beforeCycle, dmaObservations);
+      beforeCycle, dmaObservations, serialCompletion);
   }
   eeCoreComponent.cycleEventCount = 0;
 }
@@ -1370,8 +1374,15 @@ EEExecutionResult NekoSystem::makeEEExecutionResult(
 void NekoSystem::publishCycleTrace(
   std::uint64_t cycle,
   const CycleObservationSnapshot &beforeCycle,
-  const SIFDMAObservations &dma)
+  const SIFDMAObservations &dma,
+  const EESerialCompletion &serial)
 {
+  if (serial.completed)
+  {
+    appendTrace(cycle, NekoTraceSubsystem::EE,
+      NekoTraceEventType::SerialTransmitCompleted,
+      serial.byte, EEMemoryMap::SIO_TXFIFO);
+  }
   for (std::size_t index = 0;
        index < eeCoreComponent.cycleEventCount;
        ++index)

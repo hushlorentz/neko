@@ -508,6 +508,10 @@ void NekoSaveStateCodec::writeSystem(
     auto component = writer->scope("eeTimers");
     writeEETimers(writer, system.eeTimersComponent);
   }
+  {
+    auto component = writer->scope("eeSerial");
+    writeEESerial(writer, system.eeSerialComponent);
+  }
 }
 
 void NekoSaveStateCodec::readSystem(
@@ -624,6 +628,10 @@ void NekoSaveStateCodec::readSystem(
   {
     auto component = reader->scope("eeTimers");
     readEETimers(reader, &system->eeTimersComponent);
+  }
+  {
+    auto component = reader->scope("eeSerial");
+    readEESerial(reader, &system->eeSerialComponent);
   }
 }
 
@@ -805,6 +813,7 @@ void NekoSaveStateCodec::commitSystem(
   destination->interruptControllerComponent.maskRegister =
     source->interruptControllerComponent.maskRegister;
   destination->eeTimersComponent = source->eeTimersComponent;
+  destination->eeSerialComponent = source->eeSerialComponent;
   destination->eeBusComponent.mainMemory.swap(
     source->eeBusComponent.mainMemory);
   commitVPU(

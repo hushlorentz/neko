@@ -48,7 +48,9 @@ enum class NekoTraceEventType : std::uint8_t
   RegisterWrite = 18,
   SignalRequested = 19,
   DMABeat = 20,
-  FaultContext = 21
+  FaultContext = 21,
+  // EE: raw byte, physical TXFIFO address, zero, zero; precedes EE observations.
+  SerialTransmitCompleted = 22
 };
 
 namespace NekoEETraceFault

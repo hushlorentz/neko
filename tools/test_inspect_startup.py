@@ -117,6 +117,20 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(row["master_cycle"], 49)
         self.assertEqual(row["payload"]["metadata_raw"], "0x1f80101000021804")
 
+    def test_serial_completion_preserves_raw_byte_and_endpoint(self):
+        rows = records()
+        rows[-2] = event(50, 10, 22, [0xff, 0x1000f180, 0, 0])
+        self.write(self.path, rows)
+        report = self.report("events", self.path, "--cpu", "ee",
+                             "--event", "serial_transmit_completed")
+        self.assertEqual(len(report["events"]), 1)
+        row = report["events"][0]
+        self.assertEqual(row["event"], "serial_transmit_completed")
+        self.assertEqual(row["master_cycle"], 50)
+        self.assertEqual(row["payload"],
+                         dict(byte=255, physical_address="0x1000f180"))
+        self.assertEqual(row["values_raw"][0], "0x00000000000000ff")
+
     def test_unknown_event_ids_remain_raw(self):
         rows = records()
         rows[3] = event(41, 99, 250, [1, 2, 3, 2**64 - 1])

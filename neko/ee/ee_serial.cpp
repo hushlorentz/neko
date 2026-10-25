@@ -2,8 +2,6 @@
 
 namespace
 {
-  // Emulator policy: encoded BGR zero selects one 256-tick bit period.
-  constexpr std::uint16_t TRANSMIT_FRAME_CYCLES = 2560;
   constexpr std::uint32_t TRANSMIT_FULL_STATUS = 0x8000;
 }
 

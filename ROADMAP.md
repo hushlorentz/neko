@@ -2071,7 +2071,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       status, fixed-profile timed completion and active FCR reset; pin exact
       timing, rejection and cancellation boundaries with authored tests
       and independently review the state machine.
-- [ ] Route existing serial MMIO through that owner, integrate master-clock
+- [x] Route existing serial MMIO through that owner, integrate master-clock
       completion observations, and include pending transmission/reset state
       in canonical hashing, transactional save/load and system reset;
       independently review and run immediate optimized/ASan gates.
