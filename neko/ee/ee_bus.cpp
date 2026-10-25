@@ -1202,7 +1202,7 @@ bool EEBus::writeMapped32(
       return value == 0;
     case EEMemoryMap::SIO_FCR:
       // Provisional reset initialization, not an active FIFO model.
-      return value == 7;
+      return value == 0 || value == 7;
     case EEMemoryMap::RESERVED_F500:
       // Provisional exact-word no-op, not a DMA hold or peer-reset register.
       return true;

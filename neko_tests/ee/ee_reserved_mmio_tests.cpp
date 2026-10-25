@@ -14,8 +14,21 @@ namespace
     std::uint32_t value;
   };
   constexpr SerialInitialization SERIAL_INITIALIZATIONS[] = {
-    {0x1000f100, 0x20}, {0x1000f120, 0}, {0x1000f140, 7}
+    {0x1000f100, 0x20}, {0x1000f120, 0},
+    {0x1000f140, 7}, {0x1000f140, 0}
   };
+
+  bool serialInitializationAdmitted(std::uint32_t address, std::uint32_t value)
+  {
+    for (const auto initialization : SERIAL_INITIALIZATIONS)
+    {
+      if (initialization.address == address && initialization.value == value)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
 
   void seed(NekoSystem &system)
   {
@@ -145,7 +158,7 @@ TEST_CASE("EE serial initialization excludes readback values widths and neighbor
     for (std::uint32_t value : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u,
            0x20u, 0x21u, 0x3du, 0x10007u, 0x10020u, UINT32_MAX})
     {
-      if (value == initialization.value)
+      if (serialInitializationAdmitted(initialization.address, value))
       {
         continue;
       }
@@ -206,7 +219,8 @@ TEST_CASE("EE serial initialization excludes readback values widths and neighbor
       }
       CAPTURE(address);
       REQUIRE_FALSE(bus.readData32(address, &word));
-      REQUIRE_FALSE(bus.writeData32(address, initialization.value));
+      REQUIRE(bus.writeData32(address, initialization.value) ==
+        serialInitializationAdmitted(address, initialization.value));
     }
     REQUIRE_THROWS_AS(bus.writeData32(initialization.address + 1, initialization.value),
       std::invalid_argument);
@@ -234,7 +248,8 @@ TEST_CASE("EE serial initialization guest stores and merges preserve admission",
           NekoSystem system;
           const auto sifHash = system.sifStateHash();
           const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
-          const bool admitted = full && value == initialization.value;
+          const bool admitted = full &&
+            serialInitializationAdmitted(initialization.address, value);
           const auto result = execute(system, opcode, value, lane, uncached);
           REQUIRE(result.pendingException ==
             (admitted ? EEException::None : EEException::DataBusErrorStore));
