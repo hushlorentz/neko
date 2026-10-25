@@ -263,6 +263,8 @@ enum class EEOperation : std::uint16_t
   ProbeTLB,
   CacheMaintenance,
   Prefetch,
+  MoveIfZero,
+  MoveIfNotZero,
   Count
 };
 
@@ -425,7 +427,8 @@ enum class EEExecutionFamily : std::uint8_t
   PackedMultiply,
   PackedDivide,
   Multiply,
-  Divide
+  Divide,
+  ConditionalMove
 };
 
 enum class EEExecutionDispatch : std::uint8_t

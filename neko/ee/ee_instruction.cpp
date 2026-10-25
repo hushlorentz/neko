@@ -348,6 +348,8 @@ namespace
         break;
       case EEOperation::SetLessThan:
       case EEOperation::SetLessThanUnsigned:
+      case EEOperation::MoveIfZero:
+      case EEOperation::MoveIfNotZero:
       case EEOperation::AddDoubleword:
       case EEOperation::AddUnsignedDoubleword:
       case EEOperation::SubtractDoubleword:
@@ -941,6 +943,8 @@ namespace
       EEOperation::JumpAndLinkRegister,
       REGISTER_TARGET_MASK |
         REGISTER_SHIFT_MASK);
+    direct(&table, 0x0a, EEOperation::MoveIfZero, REGISTER_SHIFT_MASK);
+    direct(&table, 0x0b, EEOperation::MoveIfNotZero, REGISTER_SHIFT_MASK);
     direct(&table, 0x0c, EEOperation::SystemCall);
     direct(&table, 0x0d, EEOperation::Breakpoint);
     direct(
@@ -2592,6 +2596,8 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::Or:
     case EEOperation::Xor:
     case EEOperation::Nor:
+    case EEOperation::MoveIfZero:
+    case EEOperation::MoveIfNotZero:
     case EEOperation::SetLessThan:
     case EEOperation::SetLessThanUnsigned:
     case EEOperation::AddDoubleword:
@@ -2824,6 +2830,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::SubtractDoubleword:
     case EEOperation::SubtractUnsignedDoubleword:
       return EEExecutionFamily::DoublewordArithmetic;
+    case EEOperation::MoveIfZero:
+    case EEOperation::MoveIfNotZero:
+      return EEExecutionFamily::ConditionalMove;
     case EEOperation::And:
     case EEOperation::Or:
     case EEOperation::Xor:

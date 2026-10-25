@@ -1394,6 +1394,8 @@ class EECore final : public ClockedComponent
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeRegisterLogical(
       const EEInstruction &instruction);
+    EEInstructionExecutionOutcome executeConditionalMove(
+      const EEInstruction &instruction);
     EEInstructionExecutionOutcome executePackedLogical(
       const EEInstruction &instruction);
     EEInstructionExecutionOutcome executePackedArithmetic(

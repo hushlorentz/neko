@@ -854,6 +854,62 @@ TEST_CASE("Save States Continue Identical Regression Traces")
   REQUIRE(original.trace().empty());
 }
 
+TEST_CASE("EE conditional move traces preserve operation identities and execution",
+  "[ee][conditional-move]")
+{
+  for (const std::uint8_t function : {UINT8_C(0x0a), UINT8_C(0x0b)})
+  {
+    for (const std::uint64_t condition : {UINT64_C(0), UINT64_C(0x100000000)})
+    {
+      INFO("Function " << unsigned(function) << " condition " << condition);
+      const std::uint32_t raw = registerInstruction(function, 1, 2, 3);
+      const auto prepare = [raw, condition](NekoSystem *system)
+      {
+        system->eeCore().setGeneralRegister(
+          1, {UINT64_C(0x123456789abcdef0), 11});
+        system->eeCore().setGeneralRegister(2, {condition, UINT64_MAX});
+        system->eeCore().setGeneralRegister(3, {7, 33});
+        system->eeBus().write32(0, raw);
+        system->eeCore().startExecution(0);
+      };
+      NekoSystem first;
+      NekoSystem second;
+      NekoSystem plain;
+      prepare(&first);
+      prepare(&second);
+      prepare(&plain);
+      first.startTrace(64);
+      second.startTrace(64);
+      first.clockMasterCycle();
+      second.clockMasterCycle();
+      plain.clockMasterCycle();
+
+      REQUIRE(first.eeCore().clockActive());
+      REQUIRE_FALSE(first.traceTruncated());
+      REQUIRE(first.traceHash() == second.traceHash());
+      REQUIRE(first.eeStateHash() == second.eeStateHash());
+      REQUIRE(first.eeStateHash() == plain.eeStateHash());
+      REQUIRE(first.iopStateHash() == plain.iopStateHash());
+      REQUIRE(first.sifStateHash() == plain.sifStateHash());
+      unsigned issued = 0;
+      for (const NekoTraceEvent &event : eeTraceWithoutFetches(first))
+      {
+        if (event.type == NekoTraceEventType::InstructionIssued && event.value0 == 0)
+        {
+          ++issued;
+          REQUIRE(event.masterCycle == 1);
+          REQUIRE(event.value1 == raw);
+          REQUIRE(event.value2 == static_cast<std::uint16_t>(
+            function == 0x0a ? EEOperation::MoveIfZero : EEOperation::MoveIfNotZero));
+          REQUIRE(event.value3 == 0);
+        }
+        REQUIRE(event.type != NekoTraceEventType::ExceptionEntered);
+      }
+      REQUIRE(issued == 1);
+    }
+  }
+}
+
 TEST_CASE("EE regression traces describe issued work")
 {
   NekoSystem system;

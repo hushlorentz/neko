@@ -60,6 +60,57 @@ namespace
   }
 }
 
+TEST_CASE("EE conditional move decoding and issue dependencies", "[ee][conditional-move]")
+{
+  for (const std::uint8_t function : {UINT8_C(0x0a), UINT8_C(0x0b)})
+  {
+    INFO("Function " << unsigned(function));
+    const EEInstruction instruction =
+      decodeEEInstruction(registerInstruction(function, 1, 2, 3));
+    REQUIRE(instruction.operation ==
+      (function == 0x0a ? EEOperation::MoveIfZero : EEOperation::MoveIfNotZero));
+    REQUIRE(instruction.sourceRegister == 1);
+    REQUIRE(instruction.targetRegister == 2);
+    REQUIRE(instruction.destinationRegister == 3);
+    const EEOperationMetadata metadata =
+      eeOperationMetadata(instruction.operation);
+    REQUIRE(metadata.routing.category == EEInstructionCategory::ALU);
+    REQUIRE(metadata.executionDispatch == EEExecutionDispatch::Immediate);
+    const EEInstructionDependencies dependencies =
+      eeInstructionDependencies(instruction);
+    REQUIRE(dependencies.gprReads == ((UINT32_C(1) << 1) | (UINT32_C(1) << 2)));
+    REQUIRE(dependencies.gprWrites == (UINT32_C(1) << 3));
+    REQUIRE(dependencies.specialReads == 0);
+    REQUIRE(dependencies.specialWrites == 0);
+
+    const EEInstruction independent =
+      decodeEEInstruction(immediateInstruction(0x09, 0, 4, 1));
+    REQUIRE(selectEEIssuePair(instruction, independent).instructionCount == 2);
+    REQUIRE(selectEEIssuePair(independent, instruction).instructionCount == 2);
+    for (const std::uint8_t reg : {UINT8_C(1), UINT8_C(2), UINT8_C(3)})
+    {
+      const EEInstruction producer =
+        decodeEEInstruction(immediateInstruction(0x09, 0, reg, 1));
+      REQUIRE(selectEEIssuePair(producer, instruction).instructionCount == 1);
+    }
+    const EEInstruction consumer =
+      decodeEEInstruction(immediateInstruction(0x09, 3, 4, 1));
+    REQUIRE(selectEEIssuePair(instruction, consumer).instructionCount == 1);
+
+    const EEInstructionDependencies zeroDependencies =
+      eeInstructionDependencies(
+        decodeEEInstruction(registerInstruction(function, 0, 0, 0)));
+    REQUIRE(zeroDependencies.gprReads == 0);
+    REQUIRE(zeroDependencies.gprWrites == 0);
+    for (std::uint8_t shift = 1; shift < 32; ++shift)
+    {
+      REQUIRE_THROWS_WITH(
+        decodeEEInstruction(registerInstruction(function, 1, 2, 3, shift)),
+        "Reserved EE instruction encoding.");
+    }
+  }
+}
+
 TEST_CASE("EE instruction field decoding")
 {
   SECTION("The canonical zero instruction decodes as NOP")
@@ -553,6 +604,12 @@ TEST_CASE("Every EE operation has complete shared metadata")
         case EEOperation::SubtractUnsignedDoubleword:
           return ExpectedExecutionClassification{
             EEExecutionFamily::DoublewordArithmetic,
+            EEExecutionDispatch::Immediate
+          };
+        case EEOperation::MoveIfZero:
+        case EEOperation::MoveIfNotZero:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::ConditionalMove,
             EEExecutionDispatch::Immediate
           };
         case EEOperation::And:

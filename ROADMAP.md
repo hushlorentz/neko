@@ -1956,14 +1956,28 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP Cache/BIU Control: Bounded Readback Repair
 
-- [ ] Retain exact full-word initialization writes and expose word readback
+- [x] Retain exact full-word initialization writes and expose word readback
       with zero reset at the existing bus owner; preserve access rejection,
       CPU protection and cache behavior with authored red/green regressions.
-- [ ] Include canonical hashing and versioned transactional persistence;
+- [x] Include canonical hashing and versioned transactional persistence;
       validate lifecycle, load-delay continuation and observational traces,
       and run complete optimized and AddressSanitizer checks.
-- [ ] Complete independent correctness review and bounded BIOS rediscovery;
+- [x] Complete independent correctness review and bounded BIOS rediscovery;
       record the earliest originating dependency without claiming a handshake.
+
+### EE Conditional Move: BIOS Startup Prerequisite
+
+- [x] Audit the observed `MOVN` encoding and documented conditional-move
+      semantics against existing EE decode, effects and issue ownership;
+      define a bounded repair with authored CPU and integration regressions.
+- [x] Implement and independently review the evidenced repair, then repeat
+      bounded BIOS rediscovery and retain the next originating dependency.
+
+### EE System Bus Initialization: Scope
+
+- [ ] Resolve the observed word store of `0x20` to `0x1000f100` against
+      local manuals and existing register ownership; define the evidenced
+      access, effects and lifecycle contract before implementing a repair.
 
 ### Real BIOS Handshake and Boundary Conformance
 

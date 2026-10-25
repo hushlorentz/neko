@@ -73,6 +73,137 @@ namespace
   }
 }
 
+TEST_CASE("EE conditional moves preserve scalar register contracts", "[ee][conditional-move]")
+{
+  const std::array<std::array<std::uint8_t, 3>, 9> registers = {{
+    {{1, 2, 3}}, {{1, 2, 1}}, {{1, 2, 2}},
+    {{1, 1, 3}}, {{1, 1, 1}}, {{0, 2, 3}},
+    {{1, 0, 3}}, {{1, 2, 0}}, {{0, 0, 0}}
+  }};
+  for (const std::uint8_t function : {UINT8_C(0x0a), UINT8_C(0x0b)})
+  {
+    for (const std::uint64_t condition : {
+           UINT64_C(0), UINT64_C(1), UINT64_C(0x100000000),
+           UINT64_C(0x8000000000000000), UINT64_MAX})
+    {
+      for (const auto &operands : registers)
+      {
+        const std::uint8_t rs = operands[0];
+        const std::uint8_t rt = operands[1];
+        const std::uint8_t rd = operands[2];
+        INFO("Function " << unsigned(function) << " condition " << condition);
+        INFO("rs " << unsigned(rs) << " rt " << unsigned(rt) << " rd " << unsigned(rd));
+        NekoSystem system;
+        EECore &core = system.eeCore();
+        setRegister(&core, 1, UINT64_C(0x123456789abcdef0));
+        setRegister(&core, 2, UINT64_C(0x8765432101234567));
+        setRegister(&core, 3, UINT64_C(0xfedcba9876543210));
+        setRegister(&core, rt, condition, UINT64_MAX);
+        const EERegister128 source = core.generalRegister(rs);
+        const EERegister128 target = core.generalRegister(rt);
+        const EERegister128 destination = core.generalRegister(rd);
+        const bool moves = function == 0x0a ? target.low == 0 : target.low != 0;
+
+        runInstruction(&system, registerInstruction(function, rs, rt, rd));
+
+        REQUIRE(core.clockActive());
+        REQUIRE(core.generalRegister(rd).low ==
+          ((moves && rd != 0) ? source.low : destination.low));
+        REQUIRE(core.generalRegister(rd).high == destination.high);
+        REQUIRE(core.generalRegister(0).low == 0);
+        REQUIRE(core.generalRegister(0).high == 0);
+        REQUIRE(core.generalRegister(rs).low == source.low);
+        REQUIRE(core.generalRegister(rs).high == source.high);
+        if (rt != rd)
+        {
+          REQUIRE(core.generalRegister(rt).low == target.low);
+          REQUIRE(core.generalRegister(rt).high == target.high);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE conditional moves obey scheduled dependencies", "[ee][conditional-move]")
+{
+  for (const std::uint8_t function : {UINT8_C(0x0a), UINT8_C(0x0b)})
+  {
+    INFO("Function " << unsigned(function));
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setRegister(&core, 1, 42);
+    setRegister(&core, 2, function == 0x0a ? 0 : 1);
+    setRegister(&core, 3, 7);
+
+    SECTION("Independent ALU partners issue in either order")
+    {
+      for (const bool moveFirst : {true, false})
+      {
+        system.eeBus().write32(moveFirst ? 0 : 4,
+          registerInstruction(function, 1, 2, 3));
+        system.eeBus().write32(moveFirst ? 4 : 0,
+          immediateInstruction(0x09, 0, 4, 9));
+        core.startExecution(0);
+        system.clockMasterCycle();
+        REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+        REQUIRE(core.lastIssueSelection().pairing == EEIssuePairing::Concurrent);
+        REQUIRE(core.programCounter() == 8);
+        REQUIRE(core.generalRegister(3).low == 42);
+        REQUIRE(core.generalRegister(4).low == 9);
+      }
+    }
+
+    SECTION("Both source and condition wait for older GPR producers")
+    {
+      for (const std::uint8_t producer : {UINT8_C(1), UINT8_C(2)})
+      {
+        setRegister(&core, 1, 42);
+        setRegister(&core, 2, function == 0x0a ? 0 : 1);
+        setRegister(&core, 3, 7);
+        system.eeBus().write32(0, immediateInstruction(0x09, 0, producer, 9));
+        system.eeBus().write32(4, registerInstruction(function, 1, 2, 3));
+        core.startExecution(0);
+        system.clockMasterCycle();
+        REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+        REQUIRE(core.programCounter() == 4);
+        REQUIRE(core.generalRegister(3).low == 7);
+        system.clockMasterCycle();
+        REQUIRE(core.generalRegister(3).low ==
+          (producer == 1 ? 9 : (function == 0x0a ? 7 : 42)));
+      }
+    }
+
+    SECTION("Potential writes exclude dependent partners even when false")
+    {
+      setRegister(&core, 2, function == 0x0a ? 1 : 0);
+      system.eeBus().write32(0, registerInstruction(function, 1, 2, 3));
+      system.eeBus().write32(4, immediateInstruction(0x09, 3, 4, 1));
+      core.startExecution(0);
+      system.clockMasterCycle();
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.generalRegister(3).low == 7);
+      system.clockMasterCycle();
+      REQUIRE(core.generalRegister(4).low == 8);
+    }
+
+    SECTION("A taken branch executes the conditional move delay slot")
+    {
+      system.eeBus().write32(0, immediateInstruction(0x04, 0, 0, 3));
+      system.eeBus().write32(4, registerInstruction(function, 1, 2, 3));
+      system.eeBus().write32(8, immediateInstruction(0x09, 0, 3, 99));
+      core.startExecution(0);
+      for (unsigned cycle = 0; cycle < 2 && core.programCounter() != 16; ++cycle)
+      {
+        system.clockMasterCycle();
+      }
+      REQUIRE(core.clockActive());
+      REQUIRE(core.programCounter() == 16);
+      REQUIRE(core.generalRegister(3).low == 42);
+    }
+  }
+}
+
 TEST_CASE("EE immediate integer execution")
 {
   NekoSystem system;

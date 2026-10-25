@@ -3305,6 +3305,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::SubtractDoubleword:
     case EEOperation::SubtractUnsignedDoubleword:
       return executeDoublewordArithmetic(instruction, address);
+    case EEOperation::MoveIfZero:
+    case EEOperation::MoveIfNotZero:
+      return executeConditionalMove(instruction);
     case EEOperation::And:
     case EEOperation::Or:
     case EEOperation::Xor:
@@ -3645,6 +3648,34 @@ EEInstructionExecutionOutcome EECore::executeDoublewordShift(
         "incompatible operation.");
   }
   writeLowDoubleword(instruction.destinationRegister, result);
+  return EEInstructionExecutionOutcome::Completed;
+}
+
+EEInstructionExecutionOutcome EECore::executeConditionalMove(
+  const EEInstruction &instruction)
+{
+  const std::uint64_t source =
+    generalRegisters[instruction.sourceRegister].low;
+  const std::uint64_t condition =
+    generalRegisters[instruction.targetRegister].low;
+  bool moves = false;
+  switch (instruction.operation)
+  {
+    case EEOperation::MoveIfZero:
+      moves = condition == 0;
+      break;
+    case EEOperation::MoveIfNotZero:
+      moves = condition != 0;
+      break;
+    default:
+      throw std::logic_error(
+        "EE conditional-move handler received an "
+        "incompatible operation.");
+  }
+  if (moves)
+  {
+    writeLowDoubleword(instruction.destinationRegister, source);
+  }
   return EEInstructionExecutionOutcome::Completed;
 }
 

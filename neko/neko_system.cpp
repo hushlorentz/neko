@@ -1393,7 +1393,7 @@ void NekoSystem::publishCycleTrace(
         type = NekoTraceEventType::InstructionIssued;
         value0 = issued.address;
         value1 = issued.instruction;
-        value2 = static_cast<std::uint8_t>(issued.operation);
+        value2 = static_cast<std::uint16_t>(issued.operation);
         value3 =
           issued.mode == EEAcceptanceMode::DelaySlot;
         break;
