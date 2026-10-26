@@ -27,7 +27,12 @@ def records(traced=True):
                       iop_retired_instructions=4),
              snapshot=dict(master_cycle=50, ee=dict(pc=0x80001004),
                            iop=dict(pc=0xBFC00188, stop_reason="store_failure"),
-                           sif=dict(sif0_words=0, sif1_words=0))),
+                           sif=dict(sif0_words=0, sif1_words=0),
+                           dmac=dict(control=0, hold_control=0x1201, status=0,
+                                     interleave_size=0, interrupt_pending=False,
+                                     priority_control=0, stall_address=0,
+                                     sif_grant_order=["sif0", "sif1"],
+                                     channels=[]))),
     ]
     if traced:
         events = [
@@ -109,6 +114,78 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(report["snapshot"]["iop"]["stop_reason"], "store_failure")
         self.assertEqual(report["snapshot"]["ee"]["pc"], "0x80001004")
         self.assertEqual(report["coverage"], "retained_trace")
+
+    def test_dma_hold_summary_preserves_raw_unsigned_words(self):
+        for value in (0, 0x1201, 0x80001201, 0x80011201, 2**32 - 1):
+            for runtime_error in (False, True):
+                with self.subTest(value=value, runtime_error=runtime_error):
+                    rows = records(False)
+                    rows[1]["snapshot"]["dmac"]["hold_control"] = value
+                    if runtime_error:
+                        rows[1] = dict(
+                            type="startup_runtime_error", run=None,
+                            execution_boundary="incomplete_cycle",
+                            message="authored", snapshot=rows[1]["snapshot"])
+                    self.write(self.path, rows)
+                    report = self.report("summary", self.path)
+                    self.assertEqual(report["snapshot"]["dmac"]["hold_control"],
+                                     value)
+
+    def test_dma_hold_requires_an_exact_key_and_unsigned_32_bit_word(self):
+        for runtime_error in (False, True):
+            for scenario in ("missing_dmac", "missing", "camel_case", "extra",
+                             "unknown", None, False, True, -1, 2**32, 1.5,
+                             "4609", []):
+                with self.subTest(scenario=scenario, runtime_error=runtime_error):
+                    rows = records(False)
+                    dmac = rows[1]["snapshot"]["dmac"]
+                    if scenario == "missing_dmac":
+                        del rows[1]["snapshot"]["dmac"]
+                    elif scenario == "missing":
+                        del dmac["hold_control"]
+                    elif scenario == "camel_case":
+                        dmac["holdControl"] = dmac.pop("hold_control")
+                    elif scenario == "extra":
+                        dmac["holdControl"] = dmac["hold_control"]
+                    elif scenario == "unknown":
+                        dmac["future_field"] = 0
+                    else:
+                        dmac["hold_control"] = scenario
+                    if runtime_error:
+                        rows[1] = dict(
+                            type="startup_runtime_error", run=None,
+                            execution_boundary="incomplete_cycle",
+                            message="authored", snapshot=rows[1]["snapshot"])
+                    self.reject(rows, "dmac")
+
+    def test_dma_hold_comparison_detects_reserved_bits_in_both_modes(self):
+        other = self.path.with_name("other.jsonl")
+        for mode in ("run", "trace"):
+            with self.subTest(mode=mode):
+                changed = records()
+                changed[1]["snapshot"]["dmac"]["hold_control"] |= 0x80000000
+                self.write(other, changed)
+                report = self.report("compare", self.path, other,
+                                     "--mode", mode, status=1)
+                self.assertFalse(report["equal"])
+                expected = ("$.result.snapshot.dmac.hold_control" if mode == "run"
+                            else "$[1].snapshot.dmac.hold_control")
+                self.assertEqual(report["first_difference"], expected)
+
+    def test_dma_hold_comparison_rejects_a_missing_field_on_either_side(self):
+        other = self.path.with_name("other.jsonl")
+        for missing_left in (False, True):
+            for mode in ("run", "trace"):
+                with self.subTest(missing_left=missing_left, mode=mode):
+                    complete = records()
+                    missing = records()
+                    del missing[1]["snapshot"]["dmac"]["hold_control"]
+                    self.write(self.path, missing if missing_left else complete)
+                    self.write(other, complete if missing_left else missing)
+                    process = self.invoke("compare", self.path, other,
+                                          "--mode", mode, status=2)
+                    self.assertIn("dmac", process.stderr)
+                    self.assertEqual(process.stdout, "")
 
     def test_late_failure_uses_capture_indices_not_the_truncated_prefix(self):
         self.write(self.path, capture_records())

@@ -1203,6 +1203,7 @@ void NekoSaveStateCodec::writeDMAC(
   writer->writeFieldU32(
     "controllerControlRegister",
     controller.controlRegister);
+  writer->writeFieldU32("controllerHoldControlRegister", controller.holdControlRegister);
   writer->writeFieldU32(
     "controllerStatusRegister",
     controller.statusRegister);
@@ -1259,6 +1260,7 @@ void NekoSaveStateCodec::readDMAC(
   }
   controller->controlRegister =
     reader->readFieldU32("controllerControlRegister");
+  controller->holdControlRegister = reader->readFieldU32("controllerHoldControlRegister");
   controller->statusRegister =
     reader->readFieldU32("controllerStatusRegister");
   controller->statusMaskRegister =

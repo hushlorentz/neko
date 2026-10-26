@@ -50,8 +50,8 @@ The snapshot contains:
   exception entry event and retained rejected physical-store details.
 - Canonical SIF mailboxes, flags, raw CTRL, IOP doorbell, directional word
   counts, shared free-word count, and SIF0 packing cursor/latch.
-- EE DMAC control/status/interleave size, priority control, stall address,
-  interrupt output, and SIF grant order, plus implemented channels 1 (VIF1),
+- EE DMAC control/status/interleave size, raw hold control, priority control,
+  stall address, interrupt output, and SIF grant order, plus implemented channels 1 (VIF1),
   2 (GIF), 5 (SIF0), 6 (SIF1), 8 (fromSPR), and 9 (toSPR).
 - EE/IOP INTC latches, masks, request outputs, and IOP control enable.
   DMAC and EE INTC request outputs remain separate; these are not claims that
@@ -68,7 +68,8 @@ counts are **absolute**, not per-call deltas.
 `clockEligible` reports a DMA owner's clock eligibility (`clockActive()` for
 the existing non-SIF engines, `transferEnabled()` for EE SIF), not guaranteed
 progress or sink readiness. An asserted channel START with DMA disabled is
-controller-gated. EE SIF additionally distinguishes active START from the
+controller-gated, as is an asserted START while DMAC hold is set.
+EE SIF additionally distinguishes active START from the
 common controller's channel enable, including D_PCR gating.
 `lastTransferStalled` is the retained last-attempt flag for
 VIF1/GIF; it may remain set after the controller is disabled or the sink changes.
@@ -162,6 +163,14 @@ in lane order. These are additive JSON fields and endpoints; the record types
 and existing field meanings remain unchanged. In C++, the former flat IOP
 channel-10 fields now live under `StartupIOPDMASummary::sif1`; `sif0` has the
 same focused channel-summary type.
+
+`StartupDMACSummary::holdControl` is the controller's retained 32-bit word,
+serialized as decimal `dmac.hold_control`, including reserved bits. Bit 16
+is the hold state; the remaining bits are not decoded as additional behavior.
+An inspected reset controller reports `0x1201` (decimal 4609). Inspection reads
+the const controller accessor, not either guest MMIO alias, and does not
+advance or complete a transfer. The raw word is current retained evidence,
+not a history of hold transitions or a claim about sink readiness.
 
 Writers preserve the destination stream's formatting and locale, and use
 normal ostream error reporting. Unknown named snapshot enum values throw
@@ -379,6 +388,16 @@ out-of-range raw words are errors, not empty successful reports. Additive
 record fields are retained. A missing final record is an incomplete file;
 the producer's explicit trace truncation is valid evidence and is reported
 separately. An input error produces no successful JSON report.
+
+Both successful and runtime-error snapshots require a `dmac` object with
+exactly `control`, `hold_control`, `status`, `interleave_size`,
+`interrupt_pending`, `priority_control`, `stall_address`, `sif_grant_order`,
+and `channels`. `hold_control` must be an integer from 0 through 4294967295;
+booleans, missing fields, and alternate spellings are rejected, not defaulted.
+Older reports missing the field must be regenerated. Both comparison modes
+validate both inputs before comparing and preserve all hold-control bits,
+including reserved bits. This adds a snapshot field without changing the
+existing record types or unrelated format versions.
 
 Run the inspector's BIOS-free tests independently of the C++ build:
 

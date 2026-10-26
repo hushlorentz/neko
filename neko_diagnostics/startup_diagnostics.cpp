@@ -222,6 +222,7 @@ namespace
       << "," << sif.packingLatch[1] << "," << sif.packingLatch[2]
       << "," << sif.packingLatch[3] << "]}"
       << ",\"dmac\":{\"control\":" << dma.control
+      << ",\"hold_control\":" << dma.holdControl
       << ",\"status\":" << dma.status
       << ",\"interleave_size\":" << dma.interleaveSize
       << ",\"interrupt_pending\":" << jsonBoolean(dma.interruptPending)
@@ -330,6 +331,7 @@ StartupSummary inspectStartup(const NekoSystem &system)
   };
   const auto &dma = system.dmacController();
   summary.dmac.control = dma.control();
+  summary.dmac.holdControl = dma.holdControl();
   summary.dmac.status = dma.status();
   summary.dmac.interleaveSize = dma.interleaveSize();
   summary.dmac.interruptPending = dma.interruptPending();

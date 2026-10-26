@@ -896,7 +896,8 @@ TEST_CASE("EE reserved startup admission does not map neighboring words or IOP v
   seed(system);
   const auto before = system.saveState();
   for (std::uint32_t address : {0x1000f4fcu, 0x1000f504u, 0x1000f510u,
-         0x1000f520u, 0x1000f590u, 0x1000f5fcu, 0x1000f600u})
+         0x1000f51cu, 0x1000f524u, 0x1000f58cu, 0x1000f594u,
+         0x1000f5fcu, 0x1000f600u})
   {
     CAPTURE(address);
     std::uint32_t word = 0x12345678;
@@ -906,7 +907,15 @@ TEST_CASE("EE reserved startup admission does not map neighboring words or IOP v
     REQUIRE_THROWS_AS(system.eeBus().write32(address, 0xffffffff), std::out_of_range);
     REQUIRE(word == 0x12345678);
   }
-  for (auto address : {RESERVED, UNCACHED})
+  std::uint32_t word = 0;
+  REQUIRE(system.eeBus().readData32(EEMemoryMap::D_ENABLER, &word));
+  REQUIRE(word == DMACHold::RESET_VALUE);
+  REQUIRE_FALSE(system.eeBus().writeData32(EEMemoryMap::D_ENABLER, UINT32_MAX));
+  REQUIRE_FALSE(system.eeBus().readData32(EEMemoryMap::D_ENABLEW, &word));
+  REQUIRE_THROWS_AS(system.eeBus().write32(EEMemoryMap::D_ENABLER, UINT32_MAX),
+    std::out_of_range);
+  REQUIRE_THROWS_AS(system.eeBus().read32(EEMemoryMap::D_ENABLEW), std::out_of_range);
+  for (auto address : {RESERVED, UNCACHED, EEMemoryMap::D_ENABLER, EEMemoryMap::D_ENABLEW})
   {
     REQUIRE(system.iopBus().read32(address).status == IOPBusStatus::Unmapped);
     REQUIRE(system.iopBus().write32(address, 0xffffffff).status ==

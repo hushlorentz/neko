@@ -85,6 +85,7 @@ struct StartupDMACChannelSummary
 struct StartupDMACSummary
 {
   std::uint32_t control = 0;
+  std::uint32_t holdControl = 0;
   std::uint32_t status = 0;
   std::uint32_t interleaveSize = 0;
   bool interruptPending = false;

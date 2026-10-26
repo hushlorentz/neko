@@ -23,6 +23,10 @@ RECORD_TYPES = {
     "startup_trace_summary", "trace_event", "startup_first_failure",
     "startup_failure_capture",
 }
+DMAC_FIELDS = {
+    "control", "hold_control", "status", "interleave_size", "interrupt_pending",
+    "priority_control", "stall_address", "sif_grant_order", "channels",
+}
 HEX_FIELDS = {
     "pc", "epc", "bad_vaddr", "status", "cause", "bits", "branch_pc",
     "vector", "fault_address", "virtual_address", "physical_address",
@@ -103,6 +107,11 @@ def validate_record(record):
         for cpu in ("ee", "iop"):
             state = require(snapshot, cpu, dict)
             uint(state.get("pc"), f"snapshot.{cpu}.pc", 32)
+        dmac = require(snapshot, "dmac", dict)
+        if dmac.keys() != DMAC_FIELDS:
+            raise ValueError("snapshot.dmac must contain exactly: " +
+                             ", ".join(sorted(DMAC_FIELDS)))
+        uint(dmac.get("hold_control"), "snapshot.dmac.hold_control", 32)
         if kind == "startup_run_summary":
             run = require(record, "run", dict)
             require(run, "cycle_limit_reached", bool)

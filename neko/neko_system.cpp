@@ -438,6 +438,7 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(
     &hash,
     dmacControllerComponent.controlRegister);
+  hashStateValue(&hash, dmacControllerComponent.holdControlRegister);
   hashStateValue(
     &hash,
     dmacControllerComponent.priorityControlRegister);

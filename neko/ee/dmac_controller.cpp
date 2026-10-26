@@ -185,13 +185,28 @@ bool DMACController::enabled() const
     (controlRegister & DMACControl::DMA_ENABLE) != 0;
 }
 
+std::uint32_t DMACController::holdControl() const
+{
+  return holdControlRegister;
+}
+
+void DMACController::writeHoldControl(std::uint32_t value)
+{
+  holdControlRegister = value;
+}
+
+bool DMACController::held() const
+{
+  return (holdControlRegister & DMACHold::CPND) != 0;
+}
+
 bool DMACController::channelEnabled(std::uint32_t channel) const
 {
   if (!validChannel(channel))
   {
     throw std::invalid_argument("Invalid DMAC priority channel.");
   }
-  return enabled() &&
+  return enabled() && !held() &&
     ((priorityControlRegister & DMACPriority::ENABLE) == 0 ||
      (priorityControlRegister & (channel << 16)) != 0);
 }

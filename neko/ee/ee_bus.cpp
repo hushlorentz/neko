@@ -39,6 +39,7 @@ namespace
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       address == EEMemoryMap::STARTUP_INIT_F410 ||
       address == EEMemoryMap::RESERVED_F500 ||
+      address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
       address == EEMemoryMap::D6_CHCR || address == EEMemoryMap::D6_MADR ||
@@ -1168,6 +1169,9 @@ bool EEBus::readMapped32(
     case EEMemoryMap::D_STADR:
       *value = attachedDMACController().stallAddress();
       return true;
+    case EEMemoryMap::D_ENABLER:
+      *value = attachedDMACController().holdControl();
+      return true;
     case EEMemoryMap::INTC_STAT:
       *value = interruptController->status();
       return true;
@@ -1501,6 +1505,9 @@ bool EEBus::writeMapped32(
         checkedGuestAccess,
         [&]() { dmac.writeStallAddress(value); });
     }
+    case EEMemoryMap::D_ENABLEW:
+      attachedDMACController().writeHoldControl(value);
+      return true;
     case EEMemoryMap::INTC_STAT:
       interruptController->acknowledge(value);
       return true;

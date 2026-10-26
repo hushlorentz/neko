@@ -915,6 +915,8 @@ void NekoSaveStateCodec::commitSystem(
 
   destination->dmacControllerComponent.controlRegister =
     source->dmacControllerComponent.controlRegister;
+  destination->dmacControllerComponent.holdControlRegister =
+    source->dmacControllerComponent.holdControlRegister;
   destination->dmacControllerComponent.statusRegister =
     source->dmacControllerComponent.statusRegister;
   destination->dmacControllerComponent.statusMaskRegister =

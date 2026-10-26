@@ -194,6 +194,85 @@ TEST_CASE("Startup DMA summary separates controller gating from last transfer st
   }
 }
 
+TEST_CASE("Startup DMA hold summary preserves raw reset and written words without mutation",
+  "[startup-diagnostics][dma-hold]")
+{
+  NekoSystem system;
+  std::uint32_t expected = 0x1201;
+  SECTION("Reset word") {}
+  SECTION("Cleared word")
+  {
+    expected = 0;
+    system.eeBus().write32(0x1000f590, expected);
+  }
+  SECTION("Reserved bits without hold")
+  {
+    expected = 0x80001201;
+    system.eeBus().write32(0x1000f590, expected);
+  }
+  SECTION("Reserved bits with hold")
+  {
+    expected = 0x80011201;
+    system.eeBus().write32(0x1000f590, expected);
+  }
+  SECTION("Maximum raw word")
+  {
+    expected = UINT32_MAX;
+    system.eeBus().write32(0x1000f590, expected);
+  }
+
+  system.startTrace();
+  const auto before = system.saveState();
+  const auto traceSize = system.trace().size();
+  const auto traceHash = system.traceHash();
+  const NekoSystem &readOnly = system;
+  for (int repeat = 0; repeat < 2; ++repeat)
+  {
+    const auto snapshot = inspectStartup(readOnly);
+    REQUIRE(snapshot.dmac.holdControl == expected);
+    std::ostringstream output;
+    writeStartupSummaryJsonLine(output, snapshot);
+    const auto json = output.str();
+    const auto field = "\"hold_control\":" + std::to_string(expected) + ",";
+    const auto position = json.find(field);
+    REQUIRE(position != std::string::npos);
+    REQUIRE(json.find("\"hold_control\":", position + field.size()) ==
+      std::string::npos);
+    const bool unchanged = system.saveState() == before;
+    REQUIRE(unchanged);
+    REQUIRE(system.traceEnabled());
+    REQUIRE(system.trace().size() == traceSize);
+    REQUIRE(system.traceHash() == traceHash);
+  }
+}
+
+TEST_CASE("Startup DMA hold summary reports controller gating without inventing stalls",
+  "[startup-diagnostics][dma-hold]")
+{
+  NekoSystem system;
+  system.fromScratchpadDMAC().writeQuadwordCount(2);
+  system.fromScratchpadDMAC().writeChannelControl(DMACChannelControl::START);
+  system.toScratchpadDMAC().writeQuadwordCount(3);
+  system.toScratchpadDMAC().writeChannelControl(DMACChannelControl::START);
+  system.dmacController().writeControl(DMACControl::DMA_ENABLE);
+  REQUIRE(inspectStartup(system).dmac.channels[2].clockEligible);
+  REQUIRE(inspectStartup(system).dmac.channels[3].clockEligible);
+
+  system.eeBus().write32(0x1000f590, 0x00011201);
+  const auto held = inspectStartup(system);
+  REQUIRE_FALSE(held.dmac.channels[2].clockEligible);
+  REQUIRE_FALSE(held.dmac.channels[3].clockEligible);
+  REQUIRE_FALSE(held.dmac.channels[2].lastTransferStalled);
+  REQUIRE_FALSE(held.dmac.channels[3].lastTransferStalled);
+  REQUIRE(held.dmac.channels[2].quadwordCount == 2);
+  REQUIRE(held.dmac.channels[3].quadwordCount == 3);
+
+  system.eeBus().write32(0x1000f590, 0x00001201);
+  const auto resumed = inspectStartup(system);
+  REQUIRE(resumed.dmac.channels[2].clockEligible);
+  REQUIRE(resumed.dmac.channels[3].clockEligible);
+}
+
 TEST_CASE("Startup run wrappers preserve exact budgets state and tracing",
   "[startup-diagnostics]")
 {
@@ -371,7 +450,7 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"("status":0,"cause":0,"epc":0,"bad_vaddr":0},"sif":{"mscom":0,"smcom":0,)"
     R"("msflag":0,"smflag":0,"control":0,"iop_doorbell":0,"sif0_words":0,)"
     R"("sif1_words":0,"free_words":0,"packing_cursor":0,"packing_latch":[0,0,0,0]},)"
-    R"("dmac":{"control":0,)"
+    R"("dmac":{"control":0,"hold_control":0,)"
     R"("status":0,"interleave_size":0,"interrupt_pending":false,)"
     R"("priority_control":0,"stall_address":0,"sif_grant_order":["sif0","sif1"],"channels":[)"
     R"({"channel":1,"control":0,"madr":0,"qwc":0,"tadr":0,"sadr":null,)"

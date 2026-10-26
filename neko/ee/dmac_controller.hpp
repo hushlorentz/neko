@@ -19,6 +19,13 @@ namespace DMACControl
     DMA_ENABLE | STALL_SOURCE_MASK | STALL_DRAIN_MASK;
 }
 
+namespace DMACHold
+{
+  constexpr std::uint32_t CPND = 1u << 16;
+  // Provisional reserved-bit reset/readback; only CPND has functional effects.
+  constexpr std::uint32_t RESET_VALUE = 0x1201;
+}
+
 namespace DMACStatus
 {
   constexpr std::uint32_t CHANNEL_1 = 1u << 1;
@@ -81,6 +88,9 @@ class DMACController
     std::uint8_t interleaveSkipQWC() const;
     std::uint8_t interleaveTransferQWC() const;
     bool enabled() const;
+    std::uint32_t holdControl() const;
+    void writeHoldControl(std::uint32_t value);
+    bool held() const;
     bool channelEnabled(std::uint32_t channel) const;
     std::array<SIFDirection, 2> sifGrantOrder() const;
     SIF1DMABeatOutcome clockSIF(SIF1DMACChannel &sif1);
@@ -95,6 +105,7 @@ class DMACController
     friend class NekoSystem;
 
     std::uint32_t controlRegister = 0;
+    std::uint32_t holdControlRegister = DMACHold::RESET_VALUE;
     std::uint32_t statusRegister = 0;
     std::uint32_t statusMaskRegister = 0;
     std::uint32_t priorityControlRegister = 0;

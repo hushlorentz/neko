@@ -2097,8 +2097,23 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement the selected contract through its existing owner with
       red/green access-boundary and guest-fault coverage; preserve unsupported
       behavior outside the approved scope.
-- [ ] Independently review and repeat unchanged-budget BIOS discovery,
+- [x] Independently review and repeat unchanged-budget BIOS discovery,
       applying persistence and broader validation gates when required.
+
+### EE DMA Hold Controls
+
+- [x] Investigate the originating word load and establish its raw access
+      contract, evidence limits and state owner before selecting a bounded
+      implementation scope.
+- [x] Implement paired hold-state/control MMIO through the common EE DMAC
+      owner and all implemented channel gates, with reset, canonical
+      persistence and startup-summary coverage; independently review and run
+      immediate optimized/ASan persistence gates.
+- [ ] Validate guest hold/readback/resume and abort boundaries, pending
+      channel/stream continuations, restored execution and trace-mode
+      equivalence; independently review the completed hardware capability.
+- [ ] Repeat unchanged-budget BIOS discovery to verify the originating
+      load and attribute the next dependency without fabricating a handshake.
 
 ### Real BIOS Handshake and Boundary Conformance
 

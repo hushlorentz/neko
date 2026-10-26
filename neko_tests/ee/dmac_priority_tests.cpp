@@ -363,3 +363,199 @@ TEST_CASE("DMAC malformed priority state rejects transactionally",
     REQUIRE(unchanged);
   }
 }
+
+TEST_CASE("DMAC hold word retains all bits with exact directed word access",
+  "[ee][dma][hold]")
+{
+  constexpr std::uint32_t readAddress = 0x1000f520;
+  constexpr std::uint32_t writeAddress = 0x1000f590;
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto initialHash = system.eeStateHash();
+  std::uint32_t word = 0;
+  REQUIRE(bus.readData32(readAddress, &word));
+  REQUIRE(word == 0x1201);
+  for (const auto value : {0u, 0x10000u, UINT32_MAX, 0xfffeffffu, 0x1201u})
+  {
+    CAPTURE(value);
+    const auto beforeWrite = system.eeStateHash();
+    REQUIRE(bus.writeData32(writeAddress, value));
+    REQUIRE(bus.read32(readAddress) == value);
+    REQUIRE(system.eeStateHash() != beforeWrite);
+  }
+  REQUIRE(system.eeStateHash() == initialHash);
+  bus.write32(0xb000f590, 0x81234567);
+  REQUIRE(bus.read32(0xb000f520) == 0x81234567);
+  const auto retainedHash = system.eeStateHash();
+  std::uint8_t byte = 0;
+  std::uint16_t half = 0;
+  std::uint64_t wide = 0;
+  EEQuadword quadword{};
+  for (const auto address : {readAddress, writeAddress})
+  {
+    CAPTURE(address);
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE_FALSE(bus.readData64(address, &wide));
+    REQUIRE_FALSE(bus.readData128(address, &quadword));
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+    REQUIRE_FALSE(bus.writeData16(address, 0));
+    REQUIRE_FALSE(bus.writeData64(address, 0));
+    REQUIRE_FALSE(bus.writeData128(address, {}));
+    REQUIRE_FALSE(bus.readInstruction32(address, &word));
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 16));
+    REQUIRE_FALSE(bus.readDMAC128(address, &quadword));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {}));
+    REQUIRE_THROWS_AS(bus.write64(address, 0), std::out_of_range);
+    REQUIRE_THROWS_AS(bus.writeQuadword(address, {}), std::out_of_range);
+    REQUIRE(bus.wordMergeStorePolicy(address) == EEWordMergeStorePolicy::FullWordOnly);
+  }
+  REQUIRE_FALSE(bus.writeData32(readAddress, 0));
+  REQUIRE_FALSE(bus.readData32(writeAddress, &word));
+  for (const auto address : {readAddress - 4, readAddress + 4,
+                            writeAddress - 4, writeAddress + 4})
+  {
+    REQUIRE_FALSE(bus.readData32(address, &word));
+    REQUIRE_FALSE(bus.writeData32(address, 0));
+  }
+  REQUIRE_THROWS_AS(bus.readData32(readAddress + 1, &word), std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.writeData32(writeAddress + 1, 0), std::invalid_argument);
+  REQUIRE(system.eeStateHash() == retainedHash);
+  system.reset();
+  REQUIRE(bus.read32(readAddress) == 0x1201);
+  REQUIRE(system.eeStateHash() == initialHash);
+}
+
+TEST_CASE("DMAC hold gates all six channels without clearing work or interrupts",
+  "[ee][dma][hold]")
+{
+  for (const auto endpoint : ENDPOINTS)
+  {
+    CAPTURE(endpoint.id);
+    NekoSystem system;
+    auto &controller = system.dmacController();
+    auto &bus = system.eeBus();
+    REQUIRE(system.sif().pushSIF0Prologue({{1, 2, 3, 4}}) ==
+      SIFTransferOutcome::Completed);
+    armNormal(system, endpoint, 1);
+    controller.writeControl(DMACControl::DMA_ENABLE);
+    controller.signalChannelCompletion(DMACStatus::CHANNEL_2);
+    controller.writeStatus(DMACStatus::CHANNEL_2_MASK);
+    REQUIRE(bus.writeData32(0x1000f590, 0xffffffff));
+    REQUIRE(controller.enabled());
+    REQUIRE_FALSE(controller.channelEnabled(1u << endpoint.id));
+    REQUIRE(controller.interruptPending());
+    const auto hash = system.eeStateHash();
+    const auto sifHash = system.sifStateHash();
+    const auto order = controller.sifGrantOrder();
+    for (unsigned attempt = 0; attempt < 3; ++attempt) grant(system, endpoint.id);
+    REQUIRE(system.eeStateHash() == hash);
+    REQUIRE(system.sifStateHash() == sifHash);
+    REQUIRE(controller.sifGrantOrder() == order);
+    REQUIRE(controller.interruptPending());
+    REQUIRE(bus.read32(endpoint.chcr + 0x10) == 0x1000);
+    REQUIRE(bus.read32(endpoint.chcr + 0x20) == 1);
+
+    REQUIRE(bus.writeData32(0x1000f590, 0xfffeffff));
+    REQUIRE(controller.channelEnabled(1u << endpoint.id));
+    grant(system, endpoint.id);
+    REQUIRE(bus.read32(endpoint.chcr + 0x20) == 0);
+    REQUIRE((bus.read32(endpoint.chcr) & DMACChannelControl::START) == 0);
+    REQUIRE(controller.status() == (DMACStatus::CHANNEL_2 |
+      DMACStatus::CHANNEL_2_MASK | (1u << endpoint.id)));
+  }
+}
+
+TEST_CASE("DMAC hold suppresses zero count completion and preserves enable interlocks",
+  "[ee][dma][hold]")
+{
+  for (const auto endpoint : ENDPOINTS)
+  {
+    CAPTURE(endpoint.id);
+    NekoSystem system;
+    auto &bus = system.eeBus();
+    armNormal(system, endpoint, 0);
+    system.dmacController().writeControl(1);
+    REQUIRE(bus.writeData32(0x1000f590, 0x11201));
+    grant(system, endpoint.id);
+    REQUIRE(system.dmacController().status() == 0);
+    REQUIRE((bus.read32(endpoint.chcr) & DMACChannelControl::START) != 0);
+    system.dmacController().writeControl(0);
+    REQUIRE(bus.writeData32(0x1000f590, 0x1201));
+    grant(system, endpoint.id);
+    REQUIRE(system.dmacController().status() == 0);
+    bus.write32(PCR, PCE);
+    system.dmacController().writeControl(1);
+    grant(system, endpoint.id);
+    REQUIRE(system.dmacController().status() == 0);
+    bus.write32(PCR, PCE | (1u << (16 + endpoint.id)));
+    grant(system, endpoint.id);
+    REQUIRE(system.dmacController().status() == (1u << endpoint.id));
+  }
+}
+
+TEST_CASE("DMAC hold prevents source tag acceptance and priority side effects",
+  "[ee][dma][hold]")
+{
+  for (const auto endpoint : {ENDPOINTS[0], ENDPOINTS[1], ENDPOINTS[3]})
+  {
+    CAPTURE(endpoint.id);
+    NekoSystem system;
+    REQUIRE(system.eeBus().writeQuadword(0x1000, {{0x1c000000, 0, 0, 0}}));
+    armChain(system, endpoint);
+    REQUIRE(system.eeBus().writeData32(0x1000f590, 0x11201));
+    grant(system, endpoint.id);
+    REQUIRE(system.eeBus().read32(endpoint.chcr + 0x30) == 0x1000);
+    REQUIRE(system.dmacController().priorityControl() == 0);
+    REQUIRE(system.dmacController().status() == 0);
+    REQUIRE(system.eeBus().writeData32(0x1000f590, 0x1201));
+    grant(system, endpoint.id);
+    REQUIRE(system.eeBus().read32(endpoint.chcr + 0x30) == 0x1010);
+    REQUIRE(system.dmacController().priorityControl() == PCE);
+  }
+}
+
+TEST_CASE("DMAC held progress and raw reserved bits persist transactionally",
+  "[ee][dma][hold][save-state]")
+{
+  NekoSystem original;
+  armNormal(original, ENDPOINTS[3], 2);
+  original.dmacController().writeControl(1);
+  grant(original, 6);
+  REQUIRE(original.sif1DMAC().quadwordCount() == 1);
+  REQUIRE(original.eeBus().writeData32(0x1000f590, 0x81234567));
+  const auto hash = original.eeStateHash();
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  REQUIRE(restored.eeBus().writeData32(0x1000f590, 0xdeadbeef));
+  restored.loadState(saved);
+  REQUIRE(restored.eeBus().read32(0x1000f520) == 0x81234567);
+  REQUIRE(restored.eeStateHash() == hash);
+  grant(restored, 6);
+  const bool unchanged = restored.saveState() == saved;
+  REQUIRE(unchanged);
+
+  SaveStateMutation invalid(saved);
+  invalid.writeScalar("system.gifDMAC.controllerPriorityControlRegister", 1u << 30);
+  invalid.refreshChecksum();
+  REQUIRE_THROWS_AS(restored.loadState(invalid.bytes()), std::invalid_argument);
+  const bool stillUnchanged = restored.saveState() == saved;
+  REQUIRE(stillUnchanged);
+  SaveStateMutation oldVersion(saved);
+  oldVersion.writeScalar("container.version", 52);
+  oldVersion.refreshChecksum();
+  REQUIRE_THROWS_AS(restored.loadState(oldVersion.bytes()), std::invalid_argument);
+  const bool oldVersionUnchanged = restored.saveState() == saved;
+  REQUIRE(oldVersionUnchanged);
+  for (auto *system : {&original, &restored})
+  {
+    REQUIRE(system->eeBus().writeData32(0x1000f590, 0x81224567));
+    grant(*system, 6);
+    REQUIRE_FALSE(system->sif1DMAC().active());
+    REQUIRE(system->sif1DMAC().memoryAddress() == 0x1020);
+    REQUIRE(system->sif().wordCount(SIFDirection::SIF1) == 8);
+    REQUIRE(system->dmacController().status() == DMACStatus::CHANNEL_6);
+  }
+  const bool matchingContinuations = original.saveState() == restored.saveState();
+  REQUIRE(matchingContinuations);
+}
