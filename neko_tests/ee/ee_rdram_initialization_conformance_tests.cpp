@@ -14,6 +14,7 @@ namespace
   constexpr std::uint32_t ENTRY = 0xa0000000;
   constexpr std::uint32_t ENUMERATE = 0x80210000;
   constexpr std::uint32_t REINITIALIZE = 0x80210060;
+  constexpr std::uint32_t SA4D = 0x804d0060;
   constexpr auto LOAD = NekoEETraceMemory::AccessKind::DataLoad;
   constexpr auto STORE = NekoEETraceMemory::AccessKind::DataStore;
 
@@ -26,18 +27,31 @@ namespace
     0x8c230000, // lw r3,0(r1)
     0x0460fffe, // bltz r3,poll_after
     0x254a0001, // addiu r10,r10,1
+    0xac360000, // sw r22,0(r1): SA4d before enumeration
+    0x8c230000, // lw r3,0(r1)
+    0xac290010, // sw r9,16(r1): passive input after SA4d
+    0x8c230000, // lw r3,0(r1)
+    0xac200010, // sw zero,16(r1): prepare repeat submission
+    0xac360000, // sw r22,0(r1)
     0xac240000, // sw r4,0(r1): enumerate
     0x8c2b0010, // lw r11,16(r1): first device
+    0xac360000, // sw r22,0(r1): preserve partial enumeration
+    0x8c230000, // lw r3,0(r1)
+    0xac290010, // sw r9,16(r1)
     0xac260000, // sw r6,0(r1): config A
     0x8c2c0010, // lw r12,16(r1)
     0xac270000, // sw r7,0(r1): config B
     0x8c2d0010, // lw r13,16(r1)
     0xac280000, // sw r8,0(r1): device ID
     0x8c2e0010, // lw r14,16(r1)
+    0xac200010, // sw zero,16(r1)
+    0xac360000, // sw r22,0(r1): preserve cursor after configuration reads
     0xac240000, // sw r4,0(r1): resume enumeration
     0x8c2f0010, // lw r15,16(r1): second device
     0x8c300010, // lw r16,16(r1): exhausted
+    0xac360000, // sw r22,0(r1): preserve exhausted enumeration
     0xac290010, // sw r9,16(r1): input bit7 set
+    0x8c230000, // lw r3,0(r1)
     0xac250000, // sw r5,0(r1): preserve enumeration
     0xac200010, // sw zero,16(r1): passive input, not a replay
     0xac240000, // sw r4,0(r1)
@@ -51,12 +65,13 @@ namespace
     0x8c340010, // lw r20,16(r1): exhausted again
     0xac200010, // sw zero,16(r1)
     0xac220000, // sw r2,0(r1): initialization preserves enumeration
+    0xac360000, // sw r22,0(r1)
     0xac240000, // sw r4,0(r1)
     0x8c350010, // lw r21,16(r1): still exhausted
     0x1000ffff, // beq zero,zero,done
     0
   };
-  constexpr std::uint32_t DONE = ENTRY + 35 * 4;
+  constexpr std::uint32_t DONE = ENTRY + 49 * 4;
 
   void startEE(NekoSystem &system)
   {
@@ -79,6 +94,7 @@ namespace
     core.setGeneralRegister(7, {0x80240000, 0});
     core.setGeneralRegister(8, {0x8040001b, 0});
     core.setGeneralRegister(9, {0x80, 0});
+    core.setGeneralRegister(22, {SA4D, 0});
     for (unsigned index = 11; index <= 21; ++index)
     {
       core.setGeneralRegister(index, {UINT64_MAX, 0});
@@ -139,13 +155,14 @@ namespace
     REQUIRE(system.eeBus().writeData32(DATA, 0x80));
   }
 
-  void requirePreservedContinuation(NekoSystem &system)
+  void requirePreservedContinuation(
+    NekoSystem &system, std::uint32_t reinitializedResponse)
   {
     REQUIRE(system.eeBus().read32(DATA) == 0x1f);
     REQUIRE(system.eeBus().read32(DATA) == 0);
     REQUIRE(system.eeBus().writeData32(COMMAND, REINITIALIZE));
     REQUIRE(system.eeBus().writeData32(COMMAND, ENUMERATE));
-    REQUIRE(system.eeBus().read32(DATA) == 0);
+    REQUIRE(system.eeBus().read32(DATA) == reinitializedResponse);
   }
 
   void requireFault(
@@ -180,16 +197,23 @@ TEST_CASE("EE RDRAM guest polling and command ordering exercise the bounded reta
   };
   constexpr Access expected[] = {
     {COMMAND, 0, LOAD}, {DATA, 0, STORE}, {COMMAND, 0x800003a0, STORE},
-    {COMMAND, 0, LOAD}, {COMMAND, ENUMERATE, STORE}, {DATA, 0x1f, LOAD},
+    {COMMAND, 0, LOAD}, {COMMAND, SA4D, STORE}, {COMMAND, 0, LOAD},
+    {DATA, 0x80, STORE}, {COMMAND, 0, LOAD},
+    {DATA, 0, STORE}, {COMMAND, SA4D, STORE},
+    {COMMAND, ENUMERATE, STORE}, {DATA, 0x1f, LOAD},
+    {COMMAND, SA4D, STORE}, {COMMAND, 0, LOAD}, {DATA, 0x80, STORE},
     {COMMAND, 0x80230000, STORE}, {DATA, 0x0d0d, LOAD},
     {COMMAND, 0x80240000, STORE}, {DATA, 0x0090, LOAD},
     {COMMAND, 0x8040001b, STORE}, {DATA, 0x1b, LOAD},
+    {DATA, 0, STORE}, {COMMAND, SA4D, STORE},
     {COMMAND, ENUMERATE, STORE}, {DATA, 0x1f, LOAD}, {DATA, 0, LOAD},
-    {DATA, 0x80, STORE}, {COMMAND, REINITIALIZE, STORE}, {DATA, 0, STORE},
+    {COMMAND, SA4D, STORE}, {DATA, 0x80, STORE}, {COMMAND, 0, LOAD},
+    {COMMAND, REINITIALIZE, STORE}, {DATA, 0, STORE},
     {COMMAND, ENUMERATE, STORE}, {DATA, 0, LOAD}, {COMMAND, REINITIALIZE, STORE},
     {COMMAND, 0, LOAD}, {DATA, 0x80, STORE}, {COMMAND, ENUMERATE, STORE},
     {DATA, 0x1f, LOAD}, {DATA, 0x1f, LOAD}, {DATA, 0, LOAD},
     {DATA, 0, STORE}, {COMMAND, 0x800003a0, STORE},
+    {COMMAND, SA4D, STORE},
     {COMMAND, ENUMERATE, STORE}, {DATA, 0, LOAD}
   };
   const auto actual = accesses(system);
@@ -228,11 +252,17 @@ TEST_CASE("EE RDRAM guest continuations restore identically across trace modes",
   for (const auto point : {
          Checkpoint{0, 0, 0, 0},
          Checkpoint{5, 0x3a0, 0, 0},
-         Checkpoint{10, 0x00210000, 0, 1},
-         Checkpoint{20, 0x00210000, 0x80, 2},
-         Checkpoint{22, 0x00210060, 0, 2},
-         Checkpoint{27, 0x00210060, 0x80, 0},
-         Checkpoint{33, 0x3a0, 0, 2}})
+         Checkpoint{9, 0x004d0060, 0, 0},
+         Checkpoint{11, 0x004d0060, 0x80, 0},
+         Checkpoint{16, 0x00210000, 0, 1},
+         Checkpoint{17, 0x004d0060, 0, 1},
+         Checkpoint{19, 0x004d0060, 0x80, 1},
+         Checkpoint{31, 0x004d0060, 0, 2},
+         Checkpoint{33, 0x004d0060, 0x80, 2},
+         Checkpoint{34, 0x00210060, 0x80, 2},
+         Checkpoint{35, 0x00210060, 0, 2},
+         Checkpoint{40, 0x00210060, 0x80, 0},
+         Checkpoint{46, 0x3a0, 0, 2}})
   {
     CAPTURE(point.instruction);
     NekoSystem original;
@@ -274,6 +304,20 @@ TEST_CASE("EE RDRAM guest continuations restore identically across trace modes",
       REQUIRE(machine->sifStateHash() == original.sifStateHash());
     }
     REQUIRE(original.traceHash() == restored.traceHash());
+    REQUIRE(original.trace().size() == restored.trace().size());
+    for (unsigned index = 0; index < original.trace().size(); ++index)
+    {
+      CAPTURE(index);
+      const auto &actual = restored.trace()[index];
+      const auto &expected = original.trace()[index];
+      REQUIRE(actual.masterCycle == expected.masterCycle);
+      REQUIRE(actual.subsystem == expected.subsystem);
+      REQUIRE(actual.type == expected.type);
+      REQUIRE(actual.value0 == expected.value0);
+      REQUIRE(actual.value1 == expected.value1);
+      REQUIRE(actual.value2 == expected.value2);
+      REQUIRE(actual.value3 == expected.value3);
+    }
     REQUIRE_FALSE(original.traceTruncated());
     REQUIRE_FALSE(restored.traceTruncated());
     REQUIRE_FALSE(plain.traceEnabled());
@@ -337,7 +381,7 @@ TEST_CASE("EE RDRAM guest non-word accesses fault without consuming protocol sta
             NekoEETraceMemory::TransferOutcome::PhysicalBusError,
             NekoEETraceMemory::FailurePhase::Direct
           }));
-          requirePreservedContinuation(system);
+          requirePreservedContinuation(system, 0);
         }
       }
     }
@@ -347,26 +391,43 @@ TEST_CASE("EE RDRAM guest non-word accesses fault without consuming protocol sta
 TEST_CASE("EE RDRAM guest rejected commands preserve enumeration and delay-slot provenance",
   "[ee][guest][trace][rdram-init-conformance]")
 {
-  for (const auto value : {0u, 0x00210000u, 0x800003a0u, 0x80210020u,
-         0x80220000u, 0x80210080u, 0x80210400u, 0x90210000u, UINT32_MAX})
+  struct Submission
+  {
+    std::uint32_t value;
+    std::uint32_t input;
+  };
+  for (const auto submission : {
+         Submission{0, 0x80}, Submission{0x00210000, 0x80},
+         Submission{0x800003a0, 0x80}, Submission{0x80210020, 0x80},
+         Submission{0x80220000, 0x80}, Submission{0x80210080, 0x80},
+         Submission{0x80210400, 0x80}, Submission{0x90210000, 0x80},
+         Submission{UINT32_MAX, 0x80}, Submission{SA4D, 0x80},
+         Submission{SA4D, UINT32_MAX}, Submission{0x004d0060, 0},
+         Submission{0x804d0061, 0}, Submission{0x804d0040, 0},
+         Submission{0x804d0020, 0}, Submission{0x804d0460, 0},
+         Submission{0x904d0060, 0}})
   {
     for (const auto offset : {0u, 4u})
     {
-      CAPTURE(value);
+      CAPTURE(submission.value);
+      CAPTURE(submission.input);
       CAPTURE(offset);
       NekoSystem system;
       seedContinuation(system);
+      REQUIRE(system.eeBus().writeData32(DATA, submission.input));
       system.eeBus().write32(0, offset == 0 ? 0xac220000 : 0x10000003);
       system.eeBus().write32(4, offset == 0 ? 0 : 0xac220000);
       system.eeCore().setGeneralRegister(1, {GUEST_COMMAND, 0});
-      system.eeCore().setGeneralRegister(2, {value, 0});
+      system.eeCore().setGeneralRegister(2, {submission.value, 0});
       startEE(system);
       system.startTrace(100);
       const auto result = system.runEE(16);
       requireFault(system, result, GUEST_COMMAND, offset, EEException::DataBusErrorStore);
+      REQUIRE(system.eeCore().generalRegister(2).low == submission.value);
+      REQUIRE(system.eeCore().generalRegister(2).high == 0);
       const auto memory = accesses(system);
       REQUIRE(memory.size() == 1);
-      REQUIRE(memory[0].value1 == value);
+      REQUIRE(memory[0].value1 == submission.value);
       REQUIRE(memory[0].value3 == nekoPackEEMemoryTraceMetadata({
         COMMAND, 4, STORE, NekoEETraceMemory::TranslationOutcome::Translated,
         NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
@@ -374,7 +435,8 @@ TEST_CASE("EE RDRAM guest rejected commands preserve enumeration and delay-slot 
         NekoEETraceMemory::TransferOutcome::PhysicalBusError,
         NekoEETraceMemory::FailurePhase::Direct
       }));
-      requirePreservedContinuation(system);
+      requirePreservedContinuation(system,
+        (submission.input & 0x80) == 0 ? 0x1f : 0);
     }
   }
 }
@@ -382,21 +444,32 @@ TEST_CASE("EE RDRAM guest rejected commands preserve enumeration and delay-slot 
 TEST_CASE("EE RDRAM guest data reads without a response fault before register writeback",
   "[ee][guest][trace][rdram-init-conformance]")
 {
-  for (const auto command : {0u, 0x800003a0u, REINITIALIZE})
+  struct Selection
+  {
+    std::uint32_t command;
+    std::uint32_t input;
+  };
+  for (const auto selection : {
+         Selection{0, 0}, Selection{0x800003a0, 0},
+         Selection{REINITIALIZE, 0x80},
+         Selection{SA4D, 0}, Selection{SA4D, 0x80},
+         Selection{SA4D, UINT32_MAX}})
   {
     for (const auto offset : {0u, 4u})
     {
-      CAPTURE(command);
+      CAPTURE(selection.command);
+      CAPTURE(selection.input);
       CAPTURE(offset);
       NekoSystem system;
-      if (command != 0)
+      if (selection.command != 0)
       {
         seedContinuation(system);
-        if (command == 0x800003a0)
+        if (selection.command != REINITIALIZE)
         {
           REQUIRE(system.eeBus().writeData32(DATA, 0));
         }
-        REQUIRE(system.eeBus().writeData32(COMMAND, command));
+        REQUIRE(system.eeBus().writeData32(COMMAND, selection.command));
+        REQUIRE(system.eeBus().writeData32(DATA, selection.input));
       }
       system.eeBus().write32(0, offset == 0 ? 0x8c220000 : 0x10000003);
       system.eeBus().write32(4, offset == 0 ? 0 : 0x8c220000);
@@ -420,7 +493,12 @@ TEST_CASE("EE RDRAM guest data reads without a response fault before register wr
       }));
       REQUIRE(system.eeBus().writeData32(COMMAND, ENUMERATE));
       REQUIRE(system.eeBus().read32(DATA) == 0x1f);
-      REQUIRE(system.eeBus().read32(DATA) == (command == 0 ? 0x1fu : 0u));
+      REQUIRE(system.eeBus().read32(DATA) ==
+        (selection.command == 0 ? 0x1fu : 0u));
+      REQUIRE(system.eeBus().writeData32(COMMAND, REINITIALIZE));
+      REQUIRE(system.eeBus().writeData32(COMMAND, ENUMERATE));
+      REQUIRE(system.eeBus().read32(DATA) ==
+        ((selection.input & 0x80) == 0 ? 0x1fu : 0u));
     }
   }
 }
@@ -439,6 +517,7 @@ TEST_CASE("EE RDRAM guest delay-slot word transfers complete once without replay
   };
   for (const auto access : {
          Access{GUEST_COMMAND, STORE, ENUMERATE, ENUMERATE, 1, 0},
+         Access{GUEST_COMMAND, STORE, SA4D, SA4D, 1, 0x1f},
          Access{GUEST_DATA, STORE, 0, 0, 1, 0x1f},
          Access{GUEST_DATA, LOAD, 0x12345678, 0x1f, 0, 0}})
   {
@@ -449,6 +528,10 @@ TEST_CASE("EE RDRAM guest delay-slot word transfers complete once without replay
     if (access.kind == STORE)
     {
       REQUIRE(system.eeBus().writeData32(COMMAND, REINITIALIZE));
+    }
+    if (access.source == SA4D)
+    {
+      REQUIRE(system.eeBus().writeData32(DATA, 0));
     }
     const auto opcode = access.kind == STORE ? 0x2bu : 0x23u;
     system.eeBus().write32(0, 0x10000003);
