@@ -250,6 +250,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_conformance_tests.cpp
     neko_tests/ee/ee_cop0_tests.cpp
     neko_tests/ee/ee_cop0_timer_tests.cpp
+    neko_tests/ee/ee_cop0_timer_conformance_tests.cpp
     neko_tests/ee/ee_cop1_tests.cpp
     neko_tests/ee/ee_cop2_tests.cpp
     neko_tests/ee/ee_vu_macro_tests.cpp

@@ -2171,7 +2171,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement active-clock Count advancement and Compare timer interrupt
       semantics through `EECore`; validate clock/write ordering, interrupt
       integration and persistence with focused red/green and required broader gates.
-- [ ] Validate authored timer/calibration guests and restored/trace-mode
+- [x] Validate authored timer/calibration guests and restored/trace-mode
       continuations; independently review the completed capability.
 - [ ] Repeat unchanged-budget BIOS discovery to verify the originating
       path and attribute the next dependency without bypassing the guest guard.
