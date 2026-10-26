@@ -1260,6 +1260,7 @@ class EECore final : public ClockedComponent
       EEException type,
       bool alreadyExceptionLevel) const;
     void setInterruptLines(bool intc, bool dmac);
+    void advanceCOP0Timer();
     bool interruptDeliverable() const;
     EEAddressTranslationContext addressTranslationContext() const;
     EEAddressTranslationResult translateInstructionAddress(

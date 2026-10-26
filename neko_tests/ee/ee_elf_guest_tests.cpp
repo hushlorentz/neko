@@ -175,13 +175,15 @@ TEST_CASE("PS2DEV COP0 TLB guest exposes decoded management results")
   requireExecution(firstResult);
   requireExecution(secondResult);
 
+  REQUIRE(first.eeCore().cop0Register(EECOP0Register::Count) == 117);
+  REQUIRE(second.eeCore().cop0Register(EECOP0Register::Count) == 117);
   REQUIRE(
     first.traceHash() ==
-    UINT64_C(0x988fadce67f7fbdf));
+    UINT64_C(0x768d40a587c9eceb));
   REQUIRE(first.traceHash() == second.traceHash());
   REQUIRE(
     first.eeCore().stateHash() ==
-    UINT64_C(0x305c9ae7160ffef7));
+    UINT64_C(0x389a8b890ef8b87e));
   REQUIRE(
     first.eeCore().stateHash() ==
     second.eeCore().stateHash());
@@ -289,9 +291,11 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
   requireExecution(first, firstResult);
   requireExecution(second, secondResult);
 
+  REQUIRE(first.eeCore().cop0Register(EECOP0Register::Count) == 468);
+  REQUIRE(second.eeCore().cop0Register(EECOP0Register::Count) == 468);
   REQUIRE(
     first.eeCore().stateHash() ==
-    UINT64_C(0xb8d9a6e29cb820d3));
+    UINT64_C(0x43e25958c8108cf8));
   REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
 
   const auto requireArchitecturalState =
@@ -436,11 +440,11 @@ TEST_CASE("PS2DEV mapped-memory guest handles TLB exceptions")
         REQUIRE(exception.value3 == expected.cause);
       }
       REQUIRE(faultCount == 3);
-      REQUIRE(nekoTraceHash(previousEvents) == UINT64_C(0xf4062652d037c75b));
+      REQUIRE(nekoTraceHash(previousEvents) == UINT64_C(0xb633c4612bdff8ab));
     };
   requireArchitecturalState(&first);
   requireArchitecturalState(&second);
-  REQUIRE(first.traceHash() == UINT64_C(0x3ed386ebb2228853));
+  REQUIRE(first.traceHash() == UINT64_C(0xadaec2cc737b35cb));
   REQUIRE(first.traceHash() == second.traceHash());
 }
 
@@ -485,13 +489,15 @@ TEST_CASE("PS2DEV scratchpad DMA guest composes CPU and channel visibility")
   requireExecution(firstResult);
   requireExecution(secondResult);
 
+  REQUIRE(first.eeCore().cop0Register(EECOP0Register::Count) == 221);
+  REQUIRE(second.eeCore().cop0Register(EECOP0Register::Count) == 221);
   REQUIRE(
     first.traceHash() ==
-    UINT64_C(0x1de1ee8474272cfd));
+    UINT64_C(0x238de92d81b874f3));
   REQUIRE(first.traceHash() == second.traceHash());
   REQUIRE(
     first.eeCore().stateHash() ==
-    UINT64_C(0xd0a1a74dd37a0325));
+    UINT64_C(0x155699601951ac3c));
   REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
 
   const auto requireQuadword =
@@ -691,13 +697,15 @@ TEST_CASE("PS2DEV cache guest composes maintenance and coherence workflows")
   requireExecution(firstResult);
   requireExecution(secondResult);
 
+  REQUIRE(first.eeCore().cop0Register(EECOP0Register::Count) == 222);
+  REQUIRE(second.eeCore().cop0Register(EECOP0Register::Count) == 222);
   REQUIRE(
     first.traceHash() ==
-    UINT64_C(0xe5570564a4467923));
+    UINT64_C(0xd455c7712e4842d8));
   REQUIRE(first.traceHash() == second.traceHash());
   REQUIRE(
     first.eeCore().stateHash() ==
-    UINT64_C(0x19e2d2e0c2e86323));
+    UINT64_C(0xfcb9f64344f85f65));
   REQUIRE(first.eeCore().stateHash() == second.eeCore().stateHash());
 
   const auto requireArchitecturalState =

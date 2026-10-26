@@ -2160,8 +2160,21 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       owner; validate rejection nonmutation and persistence implications.
 - [x] Validate guest ordering, restored continuation and trace equivalence;
       independently review the extension and apply required broader gates.
-- [ ] Repeat unchanged-budget BIOS discovery to verify the command and
+- [x] Repeat unchanged-budget BIOS discovery to verify the command and
       attribute the next dependency without fabricating a handshake.
+
+### EE CP0 Count/Compare: Startup Calibration Dependency
+
+- [x] Trace the zero-valued parameter tested before the originating guest
+      breakpoint; distinguish CPU/data derivation from missing hardware behavior
+      and establish the responsible owner and evidence before selecting a repair.
+- [x] Implement active-clock Count advancement and Compare timer interrupt
+      semantics through `EECore`; validate clock/write ordering, interrupt
+      integration and persistence with focused red/green and required broader gates.
+- [ ] Validate authored timer/calibration guests and restored/trace-mode
+      continuations; independently review the completed capability.
+- [ ] Repeat unchanged-budget BIOS discovery to verify the originating
+      path and attribute the next dependency without bypassing the guest guard.
 
 ### Real BIOS Handshake and Boundary Conformance
 

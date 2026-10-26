@@ -2778,6 +2778,15 @@ bool EECore::clockActive() const
   return state == EEExecutionState::Running;
 }
 
+void EECore::advanceCOP0Timer()
+{
+  ++cop0Count;
+  if (cop0Count == cop0Compare)
+  {
+    cop0Cause |= EECOP0Cause::TIMER_PENDING;
+  }
+}
+
 void EECore::clock()
 {
   acceptanceRecords.clear();
@@ -2790,6 +2799,7 @@ void EECore::clock()
   }
 
   ++cycles;
+  advanceCOP0Timer();
   std::uint32_t completedCOP1LoadRegisters = 0;
   advancePendingCOP1(&completedCOP1LoadRegisters);
   if (exceptionEnteredThisCycle)
@@ -7134,6 +7144,7 @@ bool EECore::writeGuestCOP0Register(
       return true;
     case EECOP0Register::Compare:
       cop0Compare = value;
+      cop0Cause &= ~EECOP0Cause::TIMER_PENDING;
       return true;
     case EECOP0Register::Status:
       cop0Status =
@@ -10488,7 +10499,8 @@ bool EECore::interruptDeliverable() const
 {
   constexpr std::uint32_t interruptLines =
     EECOP0Cause::INTC_PENDING |
-    EECOP0Cause::DMAC_PENDING;
+    EECOP0Cause::DMAC_PENDING |
+    EECOP0Cause::TIMER_PENDING;
   constexpr std::uint32_t blockedLevels =
     EECOP0Status::EXCEPTION_LEVEL |
     EECOP0Status::ERROR_LEVEL;

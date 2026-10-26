@@ -107,6 +107,7 @@ namespace EECOP0Status
   constexpr std::uint32_t USER_MODE = UINT32_C(2) << 3;
   constexpr std::uint32_t INTC_MASK = UINT32_C(1) << 10;
   constexpr std::uint32_t DMAC_MASK = UINT32_C(1) << 11;
+  constexpr std::uint32_t TIMER_MASK = UINT32_C(1) << 15;
   constexpr std::uint32_t MASTER_INTERRUPT_ENABLE =
     UINT32_C(1) << 16;
   constexpr std::uint32_t CACHE_HIT = UINT32_C(1) << 18;
@@ -122,6 +123,7 @@ namespace EECOP0Cause
     UINT32_C(0x1f) << 2;
   constexpr std::uint32_t INTC_PENDING = UINT32_C(1) << 10;
   constexpr std::uint32_t DMAC_PENDING = UINT32_C(1) << 11;
+  constexpr std::uint32_t TIMER_PENDING = UINT32_C(1) << 15;
   constexpr std::uint32_t BRANCH_DELAY = UINT32_C(1) << 31;
   constexpr std::uint32_t COPROCESSOR_ERROR_MASK =
     UINT32_C(0x3) << 28;
