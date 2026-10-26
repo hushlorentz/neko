@@ -277,6 +277,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_branch_tests.cpp
     neko_tests/ee/dmac_channel_state_tests.cpp
     neko_tests/ee/dmac_priority_tests.cpp
+    neko_tests/ee/dmac_hold_guest_tests.cpp
     neko_tests/ee/dmac_stall_tests.cpp
     neko_tests/ee/gif_dmac_channel_tests.cpp
     neko_tests/ee/scratchpad_dmac_channel_tests.cpp

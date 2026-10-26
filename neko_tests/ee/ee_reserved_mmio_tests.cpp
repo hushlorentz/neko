@@ -106,6 +106,39 @@ namespace
   }
 }
 
+TEST_CASE("EE hold guest merge stores require a complete word without read modify write",
+  "[ee][bus][hold][guest]")
+{
+  constexpr std::uint32_t value = 0x81234567;
+  for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+  {
+    for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+    {
+      CAPTURE(opcode);
+      CAPTURE(lane);
+      NekoSystem system;
+      const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+      const auto result = execute(system, opcode, value, lane, 0xb000f590);
+      REQUIRE(result.pendingException ==
+        (full ? EEException::None : EEException::DataBusErrorStore));
+      REQUIRE_FALSE(result.cycleLimitReached);
+      REQUIRE(system.dmacController().holdControl() ==
+        (full ? value : DMACHold::RESET_VALUE));
+      REQUIRE(system.dmacController().status() == 0);
+      if (full)
+      {
+        REQUIRE(result.instructions != 0);
+      }
+      else
+      {
+        REQUIRE(result.exceptionAddress == 0xb000f590 + lane);
+        REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+      }
+      requireWordStoreObservation(system, value, full, 0xb000f590);
+    }
+  }
+}
+
 TEST_CASE("EE f410 zero initialization is exact and stateless",
   "[ee][bus][f410-init]")
 {

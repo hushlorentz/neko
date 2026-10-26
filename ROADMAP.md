@@ -2109,7 +2109,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       owner and all implemented channel gates, with reset, canonical
       persistence and startup-summary coverage; independently review and run
       immediate optimized/ASan persistence gates.
-- [ ] Validate guest hold/readback/resume and abort boundaries, pending
+- [x] Validate guest hold/readback/resume and abort boundaries, pending
       channel/stream continuations, restored execution and trace-mode
       equivalence; independently review the completed hardware capability.
 - [ ] Repeat unchanged-budget BIOS discovery to verify the originating
