@@ -254,6 +254,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachGSDisplay(&gsDisplayComponent);
   eeBusComponent.attachTimers(&eeTimersComponent);
   eeBusComponent.attachSerial(&eeSerialComponent);
+  eeBusComponent.attachRDRAMInitialization(&eeRDRAMInitializationComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   eeCoreComponent.attachVU0(&vu0Component);
   eeCoreComponent.attachVU1(&vu1Component);
@@ -494,6 +495,7 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(&hash, sif0DMACComponent.stateHash());
   hashStateValue(&hash, eeTimersComponent.stateHash(masterClock.currentCycle()));
   hashStateValue(&hash, eeSerialComponent.stateHash());
+  hashStateValue(&hash, eeRDRAMInitializationComponent.stateHash());
   return hash;
 }
 

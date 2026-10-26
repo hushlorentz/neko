@@ -14,6 +14,7 @@
 #include "ee_bus.hpp"
 #include "ee_core.hpp"
 #include "ee_elf_loader.hpp"
+#include "ee_rdram_initialization.hpp"
 #include "ee_serial.hpp"
 #include "ee_timers.hpp"
 #include "gif.hpp"
@@ -249,6 +250,7 @@ class NekoSystem
     EEInterruptController interruptControllerComponent;
     EETimers eeTimersComponent;
     EESerial eeSerialComponent;
+    EERDRAMInitialization eeRDRAMInitializationComponent;
     MasterClockScheduler masterClock;
     EEBus eeBusComponent;
     DMACController dmacControllerComponent;

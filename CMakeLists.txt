@@ -83,6 +83,7 @@ add_library(neko_core
     neko/save_state_ee.cpp
     neko/save_state_ee_timers.cpp
     neko/save_state_ee_serial.cpp
+    neko/save_state_ee_rdram_initialization.cpp
     neko/save_state_graphics.cpp
     neko/save_state_iop.cpp
     neko/save_state_sif.cpp
@@ -267,6 +268,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_quadword_memory_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp
     neko_tests/ee/ee_rdram_initialization_tests.cpp
+    neko_tests/ee/ee_rdram_initialization_integration_tests.cpp
     neko_tests/ee/ee_serial_tests.cpp
     neko_tests/ee/ee_serial_integration_tests.cpp
     neko_tests/ee/ee_timer_tests.cpp

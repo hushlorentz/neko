@@ -127,3 +127,19 @@ EERDRAMInitializationState EERDRAMInitialization::state() const noexcept
 {
   return registers;
 }
+
+bool EERDRAMInitialization::validState(
+  const EERDRAMInitializationState &state) noexcept
+{
+  if ((state.command & COMMAND_START) != 0 ||
+      state.enumeratedDevices > RETAIL_DEVICE_COUNT)
+  {
+    return false;
+  }
+  if (state.command == 0)
+  {
+    return state.enumeratedDevices == 0;
+  }
+  // Input may have changed since acceptance; do not replay its old preconditions.
+  return decodeCommand(state.command | COMMAND_START) != Command::Unsupported;
+}

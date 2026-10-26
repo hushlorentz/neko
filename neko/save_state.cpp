@@ -512,6 +512,10 @@ void NekoSaveStateCodec::writeSystem(
     auto component = writer->scope("eeSerial");
     writeEESerial(writer, system.eeSerialComponent);
   }
+  {
+    auto component = writer->scope("eeRDRAMInitialization");
+    writeEERDRAMInitialization(writer, system.eeRDRAMInitializationComponent);
+  }
 }
 
 void NekoSaveStateCodec::readSystem(
@@ -632,6 +636,10 @@ void NekoSaveStateCodec::readSystem(
   {
     auto component = reader->scope("eeSerial");
     readEESerial(reader, &system->eeSerialComponent);
+  }
+  {
+    auto component = reader->scope("eeRDRAMInitialization");
+    readEERDRAMInitialization(reader, &system->eeRDRAMInitializationComponent);
   }
 }
 
@@ -814,6 +822,8 @@ void NekoSaveStateCodec::commitSystem(
     source->interruptControllerComponent.maskRegister;
   destination->eeTimersComponent = source->eeTimersComponent;
   destination->eeSerialComponent = source->eeSerialComponent;
+  destination->eeRDRAMInitializationComponent =
+    source->eeRDRAMInitializationComponent;
   destination->eeBusComponent.mainMemory.swap(
     source->eeBusComponent.mainMemory);
   commitVPU(

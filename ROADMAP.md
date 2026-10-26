@@ -2143,7 +2143,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement a provisional paired command/data owner with deterministic
       reset, synchronous completion, explicit supported operations and
       bounded retail responses; test rejected-operation nonmutation.
-- [ ] Integrate exact-word MMIO and full-mask merge stores, reset and
+- [x] Integrate exact-word MMIO and full-mask merge stores, reset and
       canonical transactional persistence; independently review and run
       immediate complete optimized/ASan lifecycle gates.
 - [ ] Validate guest polling, command/data ordering, enumeration/reinitialization,

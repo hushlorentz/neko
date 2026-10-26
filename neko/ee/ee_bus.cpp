@@ -2,6 +2,7 @@
 
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
+#include "ee_rdram_initialization.hpp"
 #include "ee_serial.hpp"
 #include "ee_timers.hpp"
 #include "gif_registers.hpp"
@@ -38,6 +39,7 @@ namespace
       address == EEMemoryMap::SIO_ISR ||
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       address == EEMemoryMap::STARTUP_INIT_F410 ||
+      address == EEMemoryMap::MCH_RICM || address == EEMemoryMap::MCH_DRD ||
       address == EEMemoryMap::STARTUP_INIT_F480 ||
       address == EEMemoryMap::STARTUP_INIT_F490 ||
       address == EEMemoryMap::RESERVED_F500 ||
@@ -266,6 +268,29 @@ EESerial &EEBus::attachedSerial() const
     throw std::logic_error("EE bus serial is not attached.");
   }
   return *serialComponent;
+}
+
+void EEBus::attachRDRAMInitialization(EERDRAMInitialization *initialization)
+{
+  if (initialization == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE bus requires non-null RDRAM initialization.");
+  }
+  if (rdramInitializationComponent != nullptr)
+  {
+    throw std::logic_error("EE bus RDRAM initialization is already attached.");
+  }
+  rdramInitializationComponent = initialization;
+}
+
+EERDRAMInitialization &EEBus::attachedRDRAMInitialization() const
+{
+  if (rdramInitializationComponent == nullptr)
+  {
+    throw std::logic_error("EE bus RDRAM initialization is not attached.");
+  }
+  return *rdramInitializationComponent;
 }
 
 EEWordMergeStorePolicy EEBus::wordMergeStorePolicy(std::uint32_t address) const
@@ -1051,6 +1076,11 @@ bool EEBus::readMapped32(
     case EEMemoryMap::SIO_ISR:
       *value = attachedSerial().readStatus();
       return true;
+    case EEMemoryMap::MCH_RICM:
+      *value = attachedRDRAMInitialization().readStatus();
+      return true;
+    case EEMemoryMap::MCH_DRD:
+      return attachedRDRAMInitialization().readData(value);
     case EEMemoryMap::VIF0_STAT:
       *value = vifStatus(*vif0Component);
       return true;
@@ -1240,6 +1270,11 @@ bool EEBus::writeMapped32(
       return attachedSerial().writeFIFOControl(value);
     case EEMemoryMap::SIO_BGR:
       return attachedSerial().writeBaudRate(value);
+    case EEMemoryMap::MCH_RICM:
+      return attachedRDRAMInitialization().writeCommand(value);
+    case EEMemoryMap::MCH_DRD:
+      attachedRDRAMInitialization().writeData(value);
+      return true;
     case EEMemoryMap::STARTUP_INIT_F410:
       // Provisional zero-write admission; endpoint identity and effects are unknown.
       return value == 0;

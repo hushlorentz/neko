@@ -21,8 +21,11 @@ class EERDRAMInitialization
     void reset() noexcept;
     // Diagnostic state, not command/data MMIO readback.
     EERDRAMInitializationState state() const noexcept;
+    std::uint64_t stateHash() const;
 
   private:
+    friend class NekoSaveStateCodec;
+    static bool validState(const EERDRAMInitializationState &state) noexcept;
     EERDRAMInitializationState registers;
 };
 

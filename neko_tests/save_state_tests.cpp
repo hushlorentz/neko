@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_53_PREPARED_STATE_SIZE = 39952127;
+    VERSION_54_PREPARED_STATE_SIZE = 39952136;
   constexpr std::uint64_t
-    VERSION_53_PREPARED_STATE_HASH =
-      UINT64_C(0x1d19bf7b29ee1197);
+    VERSION_54_PREPARED_STATE_HASH =
+      UINT64_C(0x7473c21be46974f7);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 53 save-state layout is byte-stable")
+TEST_CASE("Version 54 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,14 @@ TEST_CASE("Version 53 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 53);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 54);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_53_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_54_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_53_PREPARED_STATE_HASH);
+    VERSION_54_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *dmaControl = snapshot.find("system.gifDMAC.controllerControlRegister");
   const auto *dmaHold = snapshot.find("system.gifDMAC.controllerHoldControlRegister");
@@ -693,7 +693,23 @@ TEST_CASE("Version 53 save-state layout is byte-stable")
   REQUIRE(serialReset->kind == SaveStateFieldKind::Boolean);
   REQUIRE(serialByte->containerOffset == serialTime->containerOffset + 2);
   REQUIRE(serialReset->containerOffset == serialByte->containerOffset + 1);
-  REQUIRE(serialReset->containerOffset + 1 == state.size());
+  const auto *rdramCommand = snapshot.find("system.eeRDRAMInitialization.command");
+  const auto *rdramInput = snapshot.find("system.eeRDRAMInitialization.inputData");
+  const auto *rdramCursor =
+    snapshot.find("system.eeRDRAMInitialization.enumeratedDevices");
+  REQUIRE(rdramCommand != nullptr);
+  REQUIRE(rdramInput != nullptr);
+  REQUIRE(rdramCursor != nullptr);
+  REQUIRE(rdramCommand->kind == SaveStateFieldKind::U32);
+  REQUIRE(rdramInput->kind == SaveStateFieldKind::U32);
+  REQUIRE(rdramCursor->kind == SaveStateFieldKind::U8);
+  REQUIRE(rdramCommand->scalarValue == 0);
+  REQUIRE(rdramInput->scalarValue == 0);
+  REQUIRE(rdramCursor->scalarValue == 0);
+  REQUIRE(rdramCommand->containerOffset == serialReset->containerOffset + 1);
+  REQUIRE(rdramInput->containerOffset == rdramCommand->containerOffset + 4);
+  REQUIRE(rdramCursor->containerOffset == rdramInput->containerOffset + 4);
+  REQUIRE(rdramCursor->containerOffset + 1 == state.size());
 }
 
 TEST_CASE("Save-state ROM compatibility preserves independent bus configurations",
