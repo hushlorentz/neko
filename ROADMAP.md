@@ -2122,6 +2122,16 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       milestone before implementation.
 - [x] Implement the selected exact-word stateless admission through EEBus
       with red/green access-mask, guest-fault and trace-mode coverage.
+- [x] Independently review and repeat unchanged-budget BIOS discovery,
+      applying persistence and broader validation gates when required.
+
+### EE Startup Store at Physical 0x1000f490
+
+- [x] Investigate the originating word store and related register-family
+      hypothesis; document evidence limits and select the bounded access
+      contract, owner and milestone before implementation.
+- [x] Implement the selected exact-word stateless admission through EEBus
+      with red/green access-mask, guest-fault and trace-mode coverage.
 - [ ] Independently review and repeat unchanged-budget BIOS discovery,
       applying persistence and broader validation gates when required.
 

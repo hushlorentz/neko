@@ -39,6 +39,7 @@ namespace
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       address == EEMemoryMap::STARTUP_INIT_F410 ||
       address == EEMemoryMap::STARTUP_INIT_F480 ||
+      address == EEMemoryMap::STARTUP_INIT_F490 ||
       address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
@@ -1245,6 +1246,9 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::STARTUP_INIT_F480:
       // Provisional startup admission; endpoint identity and effects are unknown.
       return value == 0x00007c30;
+    case EEMemoryMap::STARTUP_INIT_F490:
+      // Provisional startup admission; endpoint identity and effects are unknown.
+      return value == 0x00882222;
     case EEMemoryMap::RESERVED_F500:
       // Provisional exact-word no-op, not a DMA hold or peer-reset register.
       return true;
