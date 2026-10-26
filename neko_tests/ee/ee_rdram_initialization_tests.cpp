@@ -128,6 +128,80 @@ TEST_CASE("EE RDRAM initialization owner selects explicit retail read responses"
   }
 }
 
+TEST_CASE("EE RDRAM SA4d exact command preserves every enumeration continuation",
+  "[ee][rdram-init-owner][rdram-sa4d]")
+{
+  for (std::uint8_t cursor = 0; cursor <= 2; ++cursor)
+  {
+    CAPTURE(cursor);
+    EERDRAMInitialization owner;
+    REQUIRE(owner.writeCommand(0x80210000));
+    for (unsigned read = 0; read < cursor; ++read)
+    {
+      requireData(owner, 0x1f);
+    }
+    for (unsigned repeat = 0; repeat < 3; ++repeat)
+    {
+      REQUIRE(owner.writeCommand(0x804d0060));
+      requireState(owner, {0x004d0060, 0, cursor});
+      requireUnreadable(owner);
+    }
+    for (unsigned bit = 0; bit < 32; ++bit)
+    {
+      const auto input = UINT32_C(1) << bit;
+      owner.writeData(input);
+      requireState(owner, {0x004d0060, input, cursor});
+      requireUnreadable(owner);
+      requireRejectedCommand(owner, 0x804d0060);
+    }
+    owner.writeData(UINT32_MAX);
+    requireRejectedCommand(owner, 0x804d0060);
+    owner.writeData(0);
+    REQUIRE(owner.writeCommand(0x804d0060));
+    REQUIRE(owner.writeCommand(0x80210000));
+    requireData(owner, cursor < 2 ? 0x1f : 0);
+    owner.writeData(0);
+    REQUIRE(owner.writeCommand(0x80210040));
+    REQUIRE(owner.writeCommand(0x80210000));
+    requireData(owner, 0x1f);
+    REQUIRE(owner.writeCommand(0x804d0060));
+    owner.writeData(UINT32_MAX);
+    owner.reset();
+    requireState(owner, {});
+    requireUnreadable(owner);
+  }
+}
+
+TEST_CASE("EE RDRAM SA4d rejects alternate encodings without changing selection",
+  "[ee][rdram-init-owner][rdram-sa4d]")
+{
+  auto owner = partiallyEnumerated();
+  owner.writeData(0);
+  for (unsigned bit = 0; bit < 32; ++bit)
+  {
+    requireRejectedCommand(owner, 0x804d0060u ^ (UINT32_C(1) << bit));
+  }
+  for (std::uint32_t operation = 0; operation < 16; ++operation)
+  {
+    for (std::uint32_t selectors = 0; selectors < 64; ++selectors)
+    {
+      const auto command = 0x804d0000u | (operation << 6) | selectors;
+      if (command != 0x804d0060)
+      {
+        requireRejectedCommand(owner, command);
+      }
+    }
+  }
+  requireData(owner, 0x1f);
+  REQUIRE(owner.writeCommand(0x804d0060));
+  for (unsigned bit = 0; bit < 32; ++bit)
+  {
+    requireRejectedCommand(owner, 0x804d0060u ^ (UINT32_C(1) << bit));
+  }
+  requireState(owner, {0x004d0060, 0, 2});
+  requireUnreadable(owner);
+}
+
 TEST_CASE("EE RDRAM initialization owner enumerates two devices without wrapping",
   "[ee][rdram-init-owner]")
 {

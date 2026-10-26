@@ -11,6 +11,7 @@ namespace
   constexpr std::uint32_t DATA = 0x1000f440;
   constexpr std::uint32_t ENUMERATE = 0x80210000;
   constexpr std::uint32_t REINITIALIZE = 0x80210040;
+  constexpr std::uint32_t SA4D = 0x804d0060;
 
   EEExecutionResult mergeStore(
     NekoSystem &system, std::uint32_t address, std::uint8_t opcode,
@@ -130,10 +131,18 @@ TEST_CASE("EE RDRAM initialization rejects non-word and backing accesses without
 }
 
 TEST_CASE("EE RDRAM initialization full-mask guest merge stores never read the endpoint",
-  "[ee][bus][guest][trace][rdram-init-integration]")
+  "[ee][bus][guest][trace][rdram-init-integration][rdram-sa4d]")
 {
-  for (const auto address : {COMMAND, DATA})
+  struct StoreCase
   {
+    std::uint32_t address;
+    std::uint32_t value;
+  };
+  for (const auto test : {StoreCase{COMMAND, ENUMERATE},
+         StoreCase{DATA, ENUMERATE}, StoreCase{COMMAND, SA4D},
+         StoreCase{DATA, SA4D}})
+  {
+    const auto address = test.address;
     for (const std::uint8_t opcode : {0x2a, 0x2e})
     {
       for (std::uint16_t lane = 0; lane < 4; ++lane)
@@ -144,7 +153,7 @@ TEST_CASE("EE RDRAM initialization full-mask guest merge stores never read the e
         NekoSystem system;
         REQUIRE(system.eeBus().writeData32(COMMAND, ENUMERATE));
         const bool full = lane == (opcode == 0x2a ? 3 : 0);
-        const auto result = mergeStore(system, address, opcode, lane, ENUMERATE);
+        const auto result = mergeStore(system, address, opcode, lane, test.value);
         REQUIRE(result.pendingException ==
           (full ? EEException::None : EEException::DataBusErrorStore));
         REQUIRE_FALSE(result.cycleLimitReached);
@@ -161,7 +170,7 @@ TEST_CASE("EE RDRAM initialization full-mask guest merge stores never read the e
               event.value0 == (address | 0xa0000000))
           {
             ++accesses;
-            REQUIRE(event.value1 == ENUMERATE);
+            REQUIRE(event.value1 == test.value);
             REQUIRE(event.value2 == 0);
             REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
               address, 4, NekoEETraceMemory::AccessKind::DataStore,
@@ -177,10 +186,96 @@ TEST_CASE("EE RDRAM initialization full-mask guest merge stores never read the e
         }
         REQUIRE(accesses == 1);
         REQUIRE_FALSE(system.traceTruncated());
+        if (full && address == COMMAND && test.value == SA4D)
+        {
+          REQUIRE_THROWS_AS(system.eeBus().read32(DATA), std::out_of_range);
+        }
+        REQUIRE(system.eeBus().writeData32(COMMAND, ENUMERATE));
         REQUIRE(system.eeBus().read32(DATA) == 0x1f);
         REQUIRE(system.eeBus().read32(DATA) == 0x1f);
         REQUIRE(system.eeBus().read32(DATA) == 0);
       }
+    }
+  }
+}
+
+TEST_CASE("EE RDRAM SA4d bus admission preserves hashes on rejected submissions",
+  "[ee][bus][rdram-init-integration][rdram-sa4d]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData32(COMMAND, ENUMERATE));
+  REQUIRE(bus.read32(DATA) == 0x1f);
+  const auto iop = system.iopStateHash();
+  const auto sif = system.sifStateHash();
+  REQUIRE(bus.writeData32(COMMAND, SA4D));
+  REQUIRE(bus.read32(COMMAND) == 0);
+  const auto selected = system.eeStateHash();
+  std::uint32_t value = 0x12345678;
+  REQUIRE_FALSE(bus.readData32(DATA, &value));
+  REQUIRE(value == 0x12345678);
+  REQUIRE(system.eeStateHash() == selected);
+  REQUIRE(bus.writeData32(DATA, 0x80));
+  const auto passive = system.eeStateHash();
+  REQUIRE(passive != selected);
+  REQUIRE_FALSE(bus.writeData32(COMMAND, SA4D));
+  REQUIRE_THROWS_AS(bus.write32(COMMAND, SA4D), std::out_of_range);
+  REQUIRE(system.eeStateHash() == passive);
+  REQUIRE(bus.writeData32(DATA, 0));
+  REQUIRE(system.eeStateHash() == selected);
+  REQUIRE(bus.writeData32(COMMAND, SA4D));
+  REQUIRE(system.eeStateHash() == selected);
+  REQUIRE(system.iopStateHash() == iop);
+  REQUIRE(system.sifStateHash() == sif);
+  REQUIRE(system.masterClockScheduler().currentCycle() == 0);
+  REQUIRE(bus.writeData32(COMMAND, ENUMERATE));
+  REQUIRE(bus.read32(DATA) == 0x1f);
+  REQUIRE(bus.read32(DATA) == 0);
+}
+
+TEST_CASE("EE RDRAM SA4d restores reachable selections without replay",
+  "[ee][rdram-init-integration][rdram-sa4d][save-state]")
+{
+  for (unsigned cursor = 0; cursor <= 2; ++cursor)
+  {
+    for (const auto input : {0u, 0x80u, UINT32_MAX})
+    {
+      CAPTURE(cursor);
+      CAPTURE(input);
+      NekoSystem original;
+      REQUIRE(original.eeBus().writeData32(COMMAND, ENUMERATE));
+      for (unsigned read = 0; read < cursor; ++read)
+      {
+        REQUIRE(original.eeBus().read32(DATA) == 0x1f);
+      }
+      REQUIRE(original.eeBus().writeData32(DATA, input));
+      SaveStateMutation saved(original.saveState());
+      saved.writeScalar("system.eeRDRAMInitialization.command", 0x004d0060);
+      saved.refreshChecksum();
+      NekoSystem restored;
+      REQUIRE_NOTHROW(restored.loadState(saved));
+      REQUIRE(restored.saveState() == saved.bytes());
+      REQUIRE(original.eeBus().writeData32(DATA, 0));
+      REQUIRE(original.eeBus().writeData32(COMMAND, SA4D));
+      REQUIRE(original.eeBus().writeData32(DATA, input));
+      REQUIRE(original.saveState() == saved.bytes());
+      REQUIRE(restored.eeStateHash() == original.eeStateHash());
+      REQUIRE(restored.iopStateHash() == original.iopStateHash());
+      REQUIRE(restored.sifStateHash() == original.sifStateHash());
+      for (auto *machine : {&original, &restored})
+      {
+        const auto hash = machine->eeStateHash();
+        std::uint32_t value = 0x12345678;
+        REQUIRE_FALSE(machine->eeBus().readData32(DATA, &value));
+        REQUIRE(value == 0x12345678);
+        REQUIRE(machine->eeBus().writeData32(COMMAND, SA4D) == (input == 0));
+        REQUIRE(machine->eeStateHash() == hash);
+        REQUIRE(machine->eeBus().writeData32(COMMAND, ENUMERATE));
+        REQUIRE(machine->eeBus().read32(DATA) == (cursor < 2 ? 0x1fu : 0u));
+        REQUIRE(machine->eeBus().read32(DATA) == (cursor == 0 ? 0x1fu : 0u));
+        REQUIRE(machine->eeBus().read32(DATA) == 0);
+      }
+      REQUIRE(restored.saveState() == original.saveState());
     }
   }
 }
@@ -215,6 +310,46 @@ TEST_CASE("EE RDRAM initialization hashes every mutable field without peer effec
   REQUIRE(system.iopStateHash() == iop);
   REQUIRE(system.sifStateHash() == sif);
   REQUIRE(system.masterClockScheduler().currentCycle() == 0);
+}
+
+TEST_CASE("EE RDRAM SA4d malformed retained selections reject transactionally",
+  "[ee][rdram-init-integration][rdram-sa4d][save-state]")
+{
+  NekoSystem destination;
+  REQUIRE(destination.eeBus().writeData32(COMMAND, ENUMERATE));
+  REQUIRE(destination.eeBus().read32(DATA) == 0x1f);
+  REQUIRE(destination.eeBus().writeData32(COMMAND, SA4D));
+  REQUIRE(destination.eeBus().writeData32(DATA, UINT32_MAX));
+  const auto original = destination.saveState();
+  const auto hash = destination.eeStateHash();
+  struct Corruption
+  {
+    const char *path;
+    std::uint32_t value;
+  };
+  for (const auto mutation : {
+         Corruption{"system.eeRDRAMInitialization.command", 0},
+         Corruption{"system.eeRDRAMInitialization.command", SA4D},
+         Corruption{"system.eeRDRAMInitialization.command", 0x004d0061},
+         Corruption{"system.eeRDRAMInitialization.command", 0x004d0040},
+         Corruption{"system.eeRDRAMInitialization.command", 0x004d0020},
+         Corruption{"system.eeRDRAMInitialization.command", 0x004d0460},
+         Corruption{"system.eeRDRAMInitialization.command", 0x104d0060},
+         Corruption{"system.eeRDRAMInitialization.enumeratedDevices", 3},
+         Corruption{"system.eeRDRAMInitialization.enumeratedDevices", 0xff}})
+  {
+    CAPTURE(mutation.path);
+    CAPTURE(mutation.value);
+    SaveStateMutation invalid(original);
+    invalid.writeScalar(mutation.path, mutation.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.eeStateHash() == hash);
+    REQUIRE(destination.saveState() == original);
+  }
+  REQUIRE(destination.eeBus().writeData32(COMMAND, ENUMERATE));
+  REQUIRE(destination.eeBus().read32(DATA) == 0x1f);
+  REQUIRE(destination.eeBus().read32(DATA) == 0);
 }
 
 TEST_CASE("EE RDRAM initialization restores passive input and every enumeration continuation",

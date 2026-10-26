@@ -8,12 +8,14 @@ namespace
   constexpr std::uint32_t COMMAND_FIELDS = UINT32_C(0x8fff03ff);
   constexpr std::uint32_t BROADCAST = 0x20;
   constexpr std::uint32_t RETAIL_INITIALIZATION = UINT32_C(0x800003a0);
+  constexpr std::uint32_t SA4D_WRITE = UINT32_C(0x804d0060);
   constexpr std::uint8_t RETAIL_DEVICE_COUNT = 2;
 
   enum class Command
   {
     Unsupported,
     Initialize,
+    WriteSA4D,
     WriteInitialization,
     Enumerate,
     ReadConfigA,
@@ -30,6 +32,10 @@ namespace
     if (value == RETAIL_INITIALIZATION)
     {
       return Command::Initialize;
+    }
+    if (value == SA4D_WRITE)
+    {
+      return Command::WriteSA4D;
     }
     const auto operation = (value >> 6) & 0xf;
     const auto subaddress = (value >> 16) & 0xfff;
@@ -66,7 +72,8 @@ bool EERDRAMInitialization::writeCommand(std::uint32_t value) noexcept
 {
   const auto command = decodeCommand(value);
   if (command == Command::Unsupported ||
-      (command == Command::Initialize && registers.inputData != 0))
+      ((command == Command::Initialize || command == Command::WriteSA4D) &&
+       registers.inputData != 0))
   {
     return false;
   }

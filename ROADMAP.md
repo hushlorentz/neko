@@ -2149,8 +2149,19 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Validate guest polling, command/data ordering, enumeration/reinitialization,
       restored continuation and trace-mode equivalence; independently review
       the completed capability.
-- [ ] Repeat unchanged-budget BIOS discovery to verify the originating
+- [x] Repeat unchanged-budget BIOS discovery to verify the originating
       read and attribute the next dependency without fabricating a handshake.
+
+### EE RDRAM Initialization: SA0x4d Write Dependency
+
+- [x] Investigate the observed `0x804d0060` command with zero input; establish
+      evidence limits and the admission/effect contract before extending policy.
+- [x] Implement the selected bounded contract through the existing paired
+      owner; validate rejection nonmutation and persistence implications.
+- [ ] Validate guest ordering, restored continuation and trace equivalence;
+      independently review the extension and apply required broader gates.
+- [ ] Repeat unchanged-budget BIOS discovery to verify the command and
+      attribute the next dependency without fabricating a handshake.
 
 ### Real BIOS Handshake and Boundary Conformance
 
