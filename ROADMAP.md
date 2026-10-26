@@ -2112,8 +2112,18 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Validate guest hold/readback/resume and abort boundaries, pending
       channel/stream continuations, restored execution and trace-mode
       equivalence; independently review the completed hardware capability.
-- [ ] Repeat unchanged-budget BIOS discovery to verify the originating
+- [x] Repeat unchanged-budget BIOS discovery to verify the originating
       load and attribute the next dependency without fabricating a handshake.
+
+### EE Startup Store at Physical 0x1000f480
+
+- [x] Investigate the originating word store and document identity/evidence
+      limits; select the bounded access contract, state owner and owning
+      milestone before implementation.
+- [x] Implement the selected exact-word stateless admission through EEBus
+      with red/green access-mask, guest-fault and trace-mode coverage.
+- [ ] Independently review and repeat unchanged-budget BIOS discovery,
+      applying persistence and broader validation gates when required.
 
 ### Real BIOS Handshake and Boundary Conformance
 
