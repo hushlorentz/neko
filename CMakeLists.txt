@@ -269,6 +269,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_bus_tests.cpp
     neko_tests/ee/ee_rdram_initialization_tests.cpp
     neko_tests/ee/ee_rdram_initialization_integration_tests.cpp
+    neko_tests/ee/ee_rdram_initialization_conformance_tests.cpp
     neko_tests/ee/ee_serial_tests.cpp
     neko_tests/ee/ee_serial_integration_tests.cpp
     neko_tests/ee/ee_timer_tests.cpp

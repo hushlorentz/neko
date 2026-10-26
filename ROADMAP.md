@@ -2146,7 +2146,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Integrate exact-word MMIO and full-mask merge stores, reset and
       canonical transactional persistence; independently review and run
       immediate complete optimized/ASan lifecycle gates.
-- [ ] Validate guest polling, command/data ordering, enumeration/reinitialization,
+- [x] Validate guest polling, command/data ordering, enumeration/reinitialization,
       restored continuation and trace-mode equivalence; independently review
       the completed capability.
 - [ ] Repeat unchanged-budget BIOS discovery to verify the originating
