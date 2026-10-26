@@ -2132,8 +2132,25 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       contract, owner and milestone before implementation.
 - [x] Implement the selected exact-word stateless admission through EEBus
       with red/green access-mask, guest-fault and trace-mode coverage.
-- [ ] Independently review and repeat unchanged-budget BIOS discovery,
+- [x] Independently review and repeat unchanged-budget BIOS discovery,
       applying persistence and broader validation gates when required.
+
+### EE RDRAM Initialization Control: Bounded Protocol
+
+- [x] Investigate the originating word read and related control protocol;
+      establish evidence limits, read/reset/effect contract, owner and
+      milestone before selecting a bounded implementation policy.
+- [x] Implement a provisional paired command/data owner with deterministic
+      reset, synchronous completion, explicit supported operations and
+      bounded retail responses; test rejected-operation nonmutation.
+- [ ] Integrate exact-word MMIO and full-mask merge stores, reset and
+      canonical transactional persistence; independently review and run
+      immediate complete optimized/ASan lifecycle gates.
+- [ ] Validate guest polling, command/data ordering, enumeration/reinitialization,
+      restored continuation and trace-mode equivalence; independently review
+      the completed capability.
+- [ ] Repeat unchanged-budget BIOS discovery to verify the originating
+      read and attribute the next dependency without fabricating a handshake.
 
 ### Real BIOS Handshake and Boundary Conformance
 

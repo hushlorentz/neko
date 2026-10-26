@@ -66,6 +66,7 @@ add_library(neko_core
     neko/ee/ee_elf_loader.cpp
     neko/ee/ee_instruction.cpp
     neko/ee/ee_memory_system.cpp
+    neko/ee/ee_rdram_initialization.cpp
     neko/ee/ee_serial.cpp
     neko/ee/ee_timers.cpp
     neko/ee/gif_dmac_channel.cpp
@@ -265,6 +266,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_multiply_divide_tests.cpp
     neko_tests/ee/ee_quadword_memory_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp
+    neko_tests/ee/ee_rdram_initialization_tests.cpp
     neko_tests/ee/ee_serial_tests.cpp
     neko_tests/ee/ee_serial_integration_tests.cpp
     neko_tests/ee/ee_timer_tests.cpp
