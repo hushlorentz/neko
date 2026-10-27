@@ -12,7 +12,8 @@ int main(int argumentCount, const char *argumentValues[])
     std::cerr <<
       "Usage: neko save-state <inspect|locate|diff> ...\n"
       "       neko bios-startup <file> --cycles <count> "
-      "[--trace-events <count> [--failure-context]]\n";
+      "[--trace-events <count> [--failure-context] [--trace-from-cycle <count>]] "
+      "[--resume-checkpoint <file>] [--save-checkpoint <file>]\n";
     return 2;
   }
 

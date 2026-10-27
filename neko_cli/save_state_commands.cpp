@@ -118,26 +118,26 @@ namespace
     }
     return 1;
   }
+}
 
-  std::vector<std::uint8_t> loadSaveStateFile(
-    const std::string &path)
+std::vector<std::uint8_t> neko_cli::loadSaveStateFile(
+  const std::string &path)
+{
+  std::ifstream file(path, std::ios::binary);
+  if (!file)
   {
-    std::ifstream file(path, std::ios::binary);
-    if (!file)
-    {
-      throw std::runtime_error(
-        "Cannot read save state: " + path);
-    }
-    std::vector<std::uint8_t> bytes{
-      std::istreambuf_iterator<char>(file),
-      std::istreambuf_iterator<char>()};
-    if (file.bad())
-    {
-      throw std::runtime_error(
-        "Cannot read save state: " + path);
-    }
-    return bytes;
+    throw std::runtime_error(
+      "Cannot read save state: " + path);
   }
+  std::vector<std::uint8_t> bytes{
+    std::istreambuf_iterator<char>(file),
+    std::istreambuf_iterator<char>()};
+  if (file.bad())
+  {
+    throw std::runtime_error(
+      "Cannot read save state: " + path);
+  }
+  return bytes;
 }
 
 int neko_cli::runSaveStateCommand(

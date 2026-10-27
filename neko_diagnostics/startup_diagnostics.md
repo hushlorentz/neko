@@ -181,7 +181,7 @@ the existing EE-only `--bios` frontend is unchanged.
 
 ## Headless discovery command
 
-`neko bios-startup <file> --cycles <count> [--trace-events <count> [--failure-context]]` wraps the
+`neko bios-startup <file> --cycles <count> [--trace-events <count> [--failure-context] [--trace-from-cycle <count>]] [--resume-checkpoint <file>] [--save-checkpoint <file>]` wraps the
 cold-start API without changing its execution policy. The master-cycle ceiling
 is required and accepts an unsigned
 64-bit decimal integer, including zero. The image must be exactly 4 MiB.
@@ -204,14 +204,38 @@ handlers still execute under the existing runner policy: the ending snapshot
 is retained state, not the first rejected-access history or proof of deadlock.
 No tracing is enabled unless `--trace-events` is supplied.
 
+`--save-checkpoint <file>` writes the existing canonical whole-machine state
+after a complete-cycle run, including a CPU host stop. It never overwrites an
+existing destination; write/close failures return2 with stderr, even if the
+JSON run report has already been emitted. Incomplete-cycle runtime failures
+never produce a checkpoint. Treat a partial file from an I/O failure as unusable.
+
+`--resume-checkpoint <file>` installs the supplied external BIOS, restores the
+state through the ordinary transactional codec, and continues without reset or
+CPU reseeding. The codec verifies format/checksum and external ROM identities.
+`--cycles` remains an **absolute master-cycle ceiling**: resuming at1000000
+under a10000000 ceiling permits9000000 additional cycles. A ceiling before
+the restored clock is rejected; equality permits a zero-cycle observation.
+Input records use `start: "checkpoint"` and `start_master_cycle`; run counters
+remain per-call progress, while snapshot clocks are absolute. Trace history
+is not restored; tracing starts afresh at the restored boundary.
+
+`--trace-from-cycle` delays tracing, not execution, until that completed
+absolute cycle. It requires `--trace-events` and a start between the run's
+initial clock and ceiling. The input adds `trace_start_cycle`; without that
+field the trace origin is `start_master_cycle`, or zero for a cold start.
+The untraced prefix still uses the normal runner and contributes to per-call
+counters. Stops/errors before trace start remain explicit, but their event
+history is unavailable: an empty failure window is not a fault-free verdict.
+
 The snapshot includes all four implemented SIF DMA endpoints and their common
 controller evidence. It does not infer an exact guest request/response
 checkpoint from ending register values.
 
 ## Bounded trace export
 
-`--trace-events <count>` enables collection after cold reset/release and before
-the first executed cycle. It requires an unsigned 64-bit decimal event ceiling;
+`--trace-events <count>` enables collection before the first executed cycle
+unless a later `--trace-from-cycle` is selected. It requires an unsigned 64-bit decimal event ceiling;
 zero retains no events. The original input and run-summary lines are unchanged.
 They are followed by one `startup_trace_summary` line and one `trace_event` line
 per retained event, in the original collection order:
@@ -382,6 +406,19 @@ execution differences. Reports also include exact `byte_equal` and the path
 of the first parsed difference. JSON whitespace/object-key order do not
 affect parsed equality, but do affect byte equality.
 
+`--mode continuation` compares BIOS identity, absolute ceiling, complete
+ending snapshot and cycle-limit outcome, excluding per-call progress counters
+and cold/restored origin metadata. `--mode continuation-trace` additionally
+requires the same absolute trace origin and compares retained trace events,
+limits and failure-window records. These modes do not by themselves prove
+canonical RAM/cache/device equality; checkpoint validation also compares
+complete canonical save-state bytes.
+
+All commands accept both `.jsonl` and gzip-compressed `.jsonl.gz` inputs.
+`byte_equal` compares decompressed JSONL bytes, independent of gzip headers.
+Corrupt/truncated gzip is an input error, not partial successful evidence.
+Decompression does not change the in-memory loading bound described above.
+
 Exit status is 0 for inspection/equality, 1 for a comparison mismatch, and 2
 for an argument, file, or validation error. These statuses describe the
 inspection operation, not the BIOS execution outcome. Missing/duplicate or
@@ -430,8 +467,11 @@ manifest records this choice and automatic first-failure windows select the
 exporter's indicated event source.
 
 The artifact directory must not already exist, even if empty. Build and
-inspection stdout/stderr, four raw JSONL reports and separate run stderr
-are retained. `manifest.json` records exact commands and exit statuses,
+inspection stdout/stderr, two `traced*.jsonl.gz` reports, two uncompressed
+`plain*.jsonl` reports and separate run stderr are retained. Traced reports
+stream directly into gzip with bounded copy buffers; no full uncompressed
+temporary trace is written. `manifest.json` records exact commands, exit
+statuses, stored output sizes and uncompressed trace byte counts,
 including a pending command if interrupted. Errors retain partial evidence;
 use a new directory for the next attempt.
 
@@ -456,6 +496,51 @@ Run the BIOS-free workflow and inspector tests with:
 ```sh
 python3 -B -m unittest discover -s tools -p 'test_*.py' -v
 ```
+
+### Validated checkpoint workflow
+
+Select the checkpoint cycle and absolute ending ceiling explicitly:
+
+```sh
+python3 -B tools/run_bios_discovery.py out/bios-discovery/checkpoint-1m-2m --checkpoint-at 1000000 --cycles 2000000
+```
+
+This mode performs exactly four BIOS runs: one untraced cold start creating
+`checkpoint.state`, one cold traced continuation with tracing delayed to the
+checkpoint cycle, one restored traced continuation, and one genuinely
+untraced restored continuation. The last three stop at the same absolute
+ceiling or earlier CPU host stop. Both traced runs always use the bounded
+failure recorder and the existing 3,000,000-event cap.
+
+It compares the cold/restored ending snapshots and retained trace suffix,
+restored traced/untraced snapshots, and all three complete canonical ending
+states byte-for-byte. Successful validation retains `cold-final.state`;
+only the two newly generated byte-identical duplicate ending states are
+pruned, with hashes/sizes and removal recorded in the manifest. Mismatches
+retain all three states and produce no reusable checkpoint receipt.
+Checkpoint creation must reach its selected cycle with exit 0; an earlier
+stop is not published as usable. Runtime/I/O errors preserve partial evidence.
+
+`checkpoint.state.json` records successful validation, absolute cycle and
+SHA-256/size identities for the BIOS, checkpoint bytes and executable.
+Reuse that checkpoint in the ordinary two-traced/two-untraced matrix:
+
+```sh
+python3 -B tools/run_bios_discovery.py out/bios-discovery/from-checkpoint --checkpoint out/bios-discovery/checkpoint-1m-2m/checkpoint.state --cycles 2000000 --failure-context
+```
+
+Reuse requires an unchanged BIOS, checkpoint and executable. Any executable
+change conservatively invalidates the checkpoint, even if a developer believes
+it affects only later execution: regenerate and revalidate with
+`--checkpoint-at`. This avoids treating codec compatibility as proof that an
+old state reflects current early-startup behavior. Low-level CLI restore does
+not enforce this helper provenance policy.
+
+Cold starts remain the authoritative regression baseline; restored runs are
+an iteration accelerator, not proof that reset/early startup still works.
+Each invocation still needs its own approved input/budget. Compression is not
+a disk quota: keep the event cap and inspect/prune genuinely obsolete evidence
+at handoffs. Existing batches are not automatically deleted or rewritten.
 
 ## First captured failure
 

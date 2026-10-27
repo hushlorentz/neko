@@ -2206,6 +2206,15 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       review, then repeat discovery under an explicitly selected budget to
       verify this path and attribute the next prerequisite.
 
+### BIOS Discovery Checkpoints and Compact Evidence
+
+- [x] Add whole-machine checkpoint/resume with absolute cycle ceilings and
+      identity-checked reuse; stream capped trace reports directly to gzip
+      while retaining bounded failure evidence and cold-start workflows.
+- [x] Prove cold/restored canonical-state and traced/untraced equivalence;
+      independently review, run required checks, and document checkpoint
+      invalidation and evidence retention.
+
 ### IOP DMA Channel-0 Startup Initialization
 
 - [ ] Investigate the normal-path zero word store to `0x1f801080`; establish

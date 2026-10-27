@@ -5,10 +5,12 @@
 import argparse
 from collections import Counter
 from dataclasses import dataclass
+import gzip
 import json
 from pathlib import Path
 import sys
 from typing import Optional
+import zlib
 
 
 # Stable public identities from neko/regression_trace.hpp, not memory bitfields.
@@ -101,6 +103,14 @@ def validate_record(record):
         uint(record.get("max_master_cycles"), "max_master_cycles")
         require(record, "rom_fnv1a64", str)
         require(record, "start", str)
+        start = (uint(record.get("start_master_cycle"), "start_master_cycle")
+                 if record["start"] == "checkpoint" else 0)
+        if start > record["max_master_cycles"]:
+            raise ValueError("checkpoint exceeds the absolute cycle ceiling")
+        if "trace_start_cycle" in record:
+            trace_start = uint(record["trace_start_cycle"], "trace_start_cycle")
+            if not start <= trace_start <= record["max_master_cycles"]:
+                raise ValueError("trace start is outside the run interval")
     elif kind in ("startup_run_summary", "startup_runtime_error"):
         snapshot = require(record, "snapshot", dict)
         uint(snapshot.get("master_cycle"), "snapshot.master_cycle")
@@ -162,7 +172,11 @@ def validate_record(record):
 
 
 def load_log(path):
-    raw = path.read_bytes()
+    if path.suffix == ".gz":
+        with gzip.open(path, "rb") as stream:
+            raw = stream.read()
+    else:
+        raw = path.read_bytes()
     records = []
     single = {}
     events = []
@@ -384,11 +398,31 @@ def first_difference(left, right, path="$"):
     return None
 
 
+def continuation_view(log, traced):
+    input_record = dict(log.input)
+    start = input_record.pop("start_master_cycle", 0)
+    input_record.pop("start")
+    trace_start = input_record.pop("trace_start_cycle", start)
+    result = dict(log.result)
+    if result["run"] is not None:
+        result["run"] = dict(cycle_limit_reached=result["run"]["cycle_limit_reached"])
+    view = dict(input=input_record, result=result)
+    if traced:
+        view.update(trace_start_cycle=trace_start, trace=log.trace,
+                    events=log.events, capture=log.capture,
+                    first_failure=log.failure_record)
+    return view
+
+
 def compare(left, right, mode):
-    if mode == "trace":
+    if mode in ("trace", "continuation-trace"):
         if left.trace is None or right.trace is None:
             raise ValueError("trace comparison requires two traced files")
+    if mode == "trace":
         a, b = left.records, right.records
+    elif mode in ("continuation", "continuation-trace"):
+        a, b = (continuation_view(log, mode == "continuation-trace")
+                for log in (left, right))
     else:
         a, b = (dict(input=log.input, result=log.result) for log in (left, right))
     difference = first_difference(a, b)
@@ -418,7 +452,8 @@ def parse_arguments(argv):
         sub.add_argument("file", type=Path)
         if command == "compare":
             sub.add_argument("other", type=Path)
-            sub.add_argument("--mode", choices=("run", "trace"), default="run")
+            sub.add_argument("--mode", choices=(
+                "run", "trace", "continuation", "continuation-trace"), default="run")
         elif command != "summary":
             sub.add_argument("--source", choices=("prefix", "failure_capture"),
                              default="prefix",
@@ -453,7 +488,7 @@ def main(argv=None):
             report = select_events(log, arguments)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return 1 if arguments.command == "compare" and not report["equal"] else 0
-    except (OSError, UnicodeError, ValueError) as error:
+    except (OSError, EOFError, UnicodeError, ValueError, zlib.error) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 

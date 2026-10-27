@@ -102,6 +102,172 @@ TEST_CASE("BIOS startup command reports host stops without claiming BIOS success
     std::string::npos);
 }
 
+TEST_CASE("BIOS startup trace can begin at a completed absolute cycle without changing execution",
+  "[bios-startup-command][checkpoint]")
+{
+  const auto image = discoveryROM();
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "17", "--trace-events", "100",
+      "--trace-from-cycle", "8", "--failure-context"},
+    [&](const std::string &) { return image; }, output, error) == 0);
+  REQUIRE(error.str().empty());
+  NekoSystem expected;
+  expected.runDualCPUBIOS(image, 8);
+  expected.startTrace(100, std::make_shared<StartupFailureCapture>());
+  const auto report = runDualCPUWithStartupSummary(expected, 9);
+  std::ostringstream snapshot;
+  writeStartupSummaryJsonLine(snapshot, report.startup);
+  const auto state = snapshot.str();
+  const auto first = state.find("\"snapshot\":");
+  REQUIRE(output.str().find(state.substr(first, state.size() - first - 1)) !=
+    std::string::npos);
+  std::ostringstream trace;
+  writeStartupTraceJsonLines(trace, expected);
+  REQUIRE(output.str().find(trace.str()) != std::string::npos);
+  REQUIRE(output.str().find("\"master_cycles\":17") != std::string::npos);
+  REQUIRE(output.str().find("\"trace_start_cycle\":8") != std::string::npos);
+}
+
+TEST_CASE("BIOS startup checkpoints preserve canonical state and absolute continuation ceilings",
+  "[bios-startup-command][checkpoint]")
+{
+  const auto image = discoveryROM();
+  std::vector<std::uint8_t> checkpoint;
+  const auto loader = [&](const std::string &) { return image; };
+  std::ostringstream creation;
+  std::ostringstream errors;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "8", "--save-checkpoint", "prefix.state"},
+    loader, {}, [&](const std::string &path, const std::vector<std::uint8_t> &state)
+    {
+      REQUIRE(path == "prefix.state");
+      checkpoint = state;
+    }, creation, errors) == 0);
+  NekoSystem expected;
+  expected.runDualCPUBIOS(image, 8);
+  REQUIRE(checkpoint == expected.saveState());
+
+  for (const std::uint64_t ceiling : {8u, 17u})
+  {
+    CAPTURE(ceiling);
+    std::vector<std::uint8_t> coldState;
+    std::vector<std::uint8_t> resumedState;
+    std::ostringstream cold;
+    std::ostringstream resumed;
+    const std::vector<std::string> arguments = {
+      "authored.bin", "--cycles", std::to_string(ceiling),
+      "--trace-events", "100", "--failure-context",
+      "--trace-from-cycle", "8", "--save-checkpoint", "final.state"
+    };
+    REQUIRE(neko_cli::runBIOSStartupCommand(arguments, loader, {},
+      [&](const std::string &, const std::vector<std::uint8_t> &state)
+      { coldState = state; }, cold, errors) == 0);
+    auto resumeArguments = arguments;
+    resumeArguments.insert(resumeArguments.end(),
+      {"--resume-checkpoint", "prefix.state"});
+    REQUIRE(neko_cli::runBIOSStartupCommand(resumeArguments, loader,
+      [&](const std::string &path)
+      {
+        REQUIRE(path == "prefix.state");
+        return checkpoint;
+      }, [&](const std::string &, const std::vector<std::uint8_t> &state)
+      { resumedState = state; }, resumed, errors) == 0);
+    REQUIRE(errors.str().empty());
+    REQUIRE(coldState == resumedState);
+    const auto suffix = cold.str().find("{\"type\":\"startup_trace_summary\"");
+    const auto resumedSuffix =
+      resumed.str().find("{\"type\":\"startup_trace_summary\"");
+    REQUIRE(suffix != std::string::npos);
+    REQUIRE(resumedSuffix != std::string::npos);
+    REQUIRE(cold.str().substr(suffix) == resumed.str().substr(resumedSuffix));
+    REQUIRE(resumed.str().find("\"start\":\"checkpoint\",\"start_master_cycle\":8") !=
+      std::string::npos);
+    REQUIRE(resumed.str().find("\"master_cycles\":" +
+      std::to_string(ceiling - 8)) != std::string::npos);
+  }
+}
+
+TEST_CASE("BIOS startup rejects incompatible checkpoints and invalid resume bounds",
+  "[bios-startup-command][checkpoint]")
+{
+  auto image = discoveryROM();
+  NekoSystem source;
+  source.runDualCPUBIOS(image, 8);
+  auto state = source.saveState();
+  std::vector<std::string> arguments = {
+    "authored.bin", "--cycles", "17", "--resume-checkpoint", "prefix.state"
+  };
+  SECTION("Ceiling precedes checkpoint") { arguments[2] = "7"; }
+  SECTION("Trace start precedes checkpoint")
+  {
+    arguments.insert(arguments.end(),
+      {"--trace-events", "100", "--trace-from-cycle", "7"});
+  }
+  SECTION("Corrupt state") { state[0] ^= 1; }
+  SECTION("Different ROM") { image.back() ^= 1; }
+  std::ostringstream output;
+  std::ostringstream errors;
+  REQUIRE(neko_cli::runBIOSStartupCommand(arguments,
+    [&](const std::string &) { return image; },
+    [&](const std::string &) { return state; }, {}, output, errors) == 2);
+  REQUIRE(output.str().empty());
+  REQUIRE_FALSE(errors.str().empty());
+}
+
+TEST_CASE("BIOS startup delayed tracing preserves early host stops and incomplete boundaries",
+  "[bios-startup-command][checkpoint]")
+{
+  for (const bool runtimeFailure : {false, true})
+  {
+    CAPTURE(runtimeFailure);
+    std::ostringstream output;
+    std::ostringstream errors;
+    bool saved = false;
+    const auto image = runtimeFailure ? rejectedDMAROM() : discoveryROM(0x40003800);
+    const int result = neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "200", "--trace-events", "100",
+        "--trace-from-cycle", "100", "--failure-context",
+        "--save-checkpoint", "final.state"},
+      [&](const std::string &) { return image; }, {},
+      [&](const std::string &, const std::vector<std::uint8_t> &) { saved = true; },
+      output, errors);
+    REQUIRE(result == (runtimeFailure ? 2 : 1));
+    REQUIRE(saved == !runtimeFailure);
+    REQUIRE(output.str().find("\"captured_events\":0,\"truncated\":false") !=
+      std::string::npos);
+    REQUIRE(output.str().find(runtimeFailure ?
+      "\"execution_boundary\":\"incomplete_cycle\"" : "\"master_cycles\":1") !=
+      std::string::npos);
+  }
+}
+
+TEST_CASE("BIOS startup checkpoint output failures are explicit and existing files are preserved",
+  "[bios-startup-command][checkpoint]")
+{
+  std::ostringstream output;
+  std::ostringstream errors;
+  SECTION("Existing destination")
+  {
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "0", "--save-checkpoint", __FILE__},
+      [](const std::string &) { return discoveryROM(); }, output, errors) == 2);
+    REQUIRE(errors.str().find("destination must not exist") != std::string::npos);
+  }
+  SECTION("Writer failure")
+  {
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "0", "--save-checkpoint", "prefix.state"},
+      [](const std::string &) { return discoveryROM(); }, {},
+      [](const std::string &, const std::vector<std::uint8_t> &)
+      { throw std::runtime_error("Authored checkpoint write failure."); },
+      output, errors) == 2);
+    REQUIRE(errors.str().find("Authored checkpoint write failure") != std::string::npos);
+  }
+  REQUIRE_FALSE(output.str().empty());
+}
+
 TEST_CASE("BIOS startup failure context survives an exhausted prefix",
   "[bios-startup-command][failure-capture]")
 {
@@ -165,7 +331,13 @@ TEST_CASE("BIOS startup command validates arguments before file loading",
     {"authored.bin", "--cycles", "1", "--failure-context"},
     {"authored.bin", "--cycles", "1", "--trace-events", "0", "--unknown"},
     {"authored.bin", "--cycles", "1", "--trace-events", "0",
-      "--failure-context", "--failure-context"}
+      "--failure-context", "--failure-context"},
+    {"authored.bin", "--cycles", "1", "--resume-checkpoint", ""},
+    {"authored.bin", "--cycles", "1", "--trace-from-cycle", "0"},
+    {"authored.bin", "--cycles", "1", "--trace-events", "0",
+      "--trace-from-cycle", "2"},
+    {"authored.bin", "--cycles", "1", "--save-checkpoint", "a",
+      "--save-checkpoint", "b"}
   };
   for (const auto &arguments : invalid)
   {

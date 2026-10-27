@@ -11,6 +11,8 @@ namespace neko_cli
   using SaveStateFileLoader = std::function<
     std::vector<std::uint8_t>(const std::string &)>;
 
+  std::vector<std::uint8_t> loadSaveStateFile(const std::string &path);
+
   int runSaveStateCommand(
     const std::vector<std::string> &arguments,
     const SaveStateFileLoader &loadFile,

@@ -1,5 +1,6 @@
 """BIOS-free command-line tests for the offline startup inspector."""
 
+import gzip
 import json
 from pathlib import Path
 import subprocess
@@ -105,6 +106,65 @@ class InspectorTests(unittest.TestCase):
         process = self.invoke("summary", self.path, status=2)
         self.assertIn(message, process.stderr)
         self.assertEqual(process.stdout, "")
+
+    def test_gzip_reports_compare_as_their_original_jsonl_bytes(self):
+        compressed = self.path.with_suffix(".jsonl.gz")
+        with gzip.open(compressed, "wb") as stream:
+            stream.write(self.path.read_bytes())
+        report = self.report("compare", self.path, compressed, "--mode", "trace")
+        self.assertTrue(report["equal"])
+        self.assertTrue(report["byte_equal"])
+        self.assertEqual(self.report("summary", compressed),
+                         self.report("summary", self.path))
+
+    def test_truncated_gzip_is_an_error_not_partial_evidence(self):
+        compressed = self.path.with_suffix(".jsonl.gz")
+        compressed.write_bytes(gzip.compress(self.path.read_bytes())[:-8])
+        result = self.invoke("summary", compressed, status=2)
+        self.assertEqual(result.stdout, "")
+        self.assertTrue(result.stderr)
+
+    def test_invalid_deflate_is_an_input_error_not_a_comparison_mismatch(self):
+        compressed = self.path.with_suffix(".jsonl.gz")
+        header = gzip.compress(self.path.read_bytes())[:10]
+        compressed.write_bytes(header + b"\x07" + b"\x00" * 8)
+        for arguments in (("summary", compressed),
+                          ("compare", self.path, compressed)):
+            with self.subTest(command=arguments[0]):
+                result = self.invoke(*arguments, status=2)
+                self.assertEqual(result.stdout, "")
+                self.assertTrue(result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_continuation_comparison_checks_snapshot_and_common_trace_origin(self):
+        other = self.path.with_name("resumed.jsonl")
+        cold = records()
+        cold[0]["trace_start_cycle"] = 40
+        resumed = json.loads(json.dumps(cold))
+        resumed[0].update(start="checkpoint", start_master_cycle=40)
+        resumed[1]["run"].update(master_cycles=10, ee_cycles=10,
+                                 ee_accepted_instructions=3,
+                                 iop_cycles=2, iop_retired_instructions=1)
+        self.write(self.path, cold)
+        self.write(other, resumed)
+        self.assertTrue(self.report("compare", self.path, other,
+                                    "--mode", "continuation-trace")["equal"])
+        self.assertTrue(self.report("compare", self.path, other,
+                                    "--mode", "continuation")["equal"])
+        resumed[3]["values"][1] ^= 1
+        self.write(other, resumed)
+        self.assertFalse(self.report("compare", self.path, other,
+                                     "--mode", "continuation-trace", status=1)["equal"])
+        resumed = json.loads(json.dumps(cold))
+        resumed[1]["snapshot"]["ee"]["pc"] += 4
+        self.write(other, resumed)
+        self.assertFalse(self.report("compare", self.path, other,
+                                     "--mode", "continuation", status=1)["equal"])
+        resumed = json.loads(json.dumps(cold))
+        resumed[0]["trace_start_cycle"] = 39
+        self.write(other, resumed)
+        self.assertFalse(self.report("compare", self.path, other,
+                                     "--mode", "continuation-trace", status=1)["equal"])
 
     def test_summary_uses_exported_first_failure_not_ending_host_stop(self):
         report = self.report("summary", self.path)
