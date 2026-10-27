@@ -172,3 +172,75 @@ TEST_CASE("EE serial owner reset restores an empty released transmitter",
   idle.reset();
   REQUIRE(idle.transmitByte(0) == EESerialTransmitResult::Accepted);
 }
+
+TEST_CASE("EE serial baud changes preserve the active deadline",
+  "[ee][serial-owner][serial-baud]")
+{
+  for (const auto encoding : {0u, 0x1du})
+  {
+    CAPTURE(encoding);
+    EESerial serial;
+    const unsigned frame = encoding == 0 ? 2560 : 74240;
+    const auto nextEncoding = encoding == 0 ? 0x1du : 0u;
+    const unsigned nextFrame = encoding == 0 ? 74240 : 2560;
+    REQUIRE(serial.writeBaudRate(encoding));
+    const auto selected = serial.stateHash();
+    REQUIRE(serial.writeBaudRate(encoding));
+    REQUIRE(serial.stateHash() == selected);
+    REQUIRE(serial.transmitByte(0xa5) == EESerialTransmitResult::Accepted);
+    requireQuietTicks(serial, 1279, 0x8000);
+    REQUIRE(serial.writeBaudRate(nextEncoding));
+    const auto reconfigured = serial.stateHash();
+    REQUIRE(serial.writeBaudRate(nextEncoding));
+    REQUIRE(serial.stateHash() == reconfigured);
+    for (const auto rejected : {1u, 0x1cu, 0x1eu, 0xffu, 0x100u,
+           0x11du, 0x1001du, UINT32_MAX})
+    {
+      CAPTURE(rejected);
+      REQUIRE_FALSE(serial.writeBaudRate(rejected));
+      REQUIRE(serial.stateHash() == reconfigured);
+    }
+    REQUIRE(serial.transmitByte(0xff) == EESerialTransmitResult::Full);
+    REQUIRE(serial.stateHash() == reconfigured);
+    requireQuietTicks(serial, frame - 1280, 0x8000);
+    requireCompletion(serial, 0xa5);
+    REQUIRE(serial.transmitByte(0x5a) == EESerialTransmitResult::Accepted);
+    requireQuietTicks(serial, nextFrame - 1, 0x8000);
+    requireCompletion(serial, 0x5a);
+  }
+}
+
+TEST_CASE("EE serial FIFO reset preserves baud while cold reset restores zero",
+  "[ee][serial-owner][serial-baud]")
+{
+  for (const bool held : {false, true})
+  {
+    CAPTURE(held);
+    EESerial serial;
+    REQUIRE(serial.writeBaudRate(0x1d));
+    REQUIRE(serial.transmitByte(0x41) == EESerialTransmitResult::Accepted);
+    requireQuietTicks(serial, 65536, 0x8000);
+    REQUIRE(serial.writeFIFOControl(7));
+    const auto canceled = serial.stateHash();
+    REQUIRE(serial.writeFIFOControl(7));
+    REQUIRE(serial.stateHash() == canceled);
+    requireQuietTicks(serial, 74240, 0);
+    REQUIRE(serial.transmitByte(0x42) == EESerialTransmitResult::ResetHeld);
+    REQUIRE(serial.writeBaudRate(0));
+    REQUIRE(serial.writeBaudRate(0x1d));
+    REQUIRE(serial.writeFIFOControl(0));
+    REQUIRE(serial.transmitByte(0x43) == EESerialTransmitResult::Accepted);
+    requireQuietTicks(serial, 74239, 0x8000);
+    requireCompletion(serial, 0x43);
+    REQUIRE(serial.transmitByte(0x44) == EESerialTransmitResult::Accepted);
+    if (held)
+    {
+      REQUIRE(serial.writeFIFOControl(7));
+    }
+    serial.reset();
+    requireQuietTicks(serial, 74240, 0);
+    REQUIRE(serial.transmitByte(0x45) == EESerialTransmitResult::Accepted);
+    requireQuietTicks(serial, 2559, 0x8000);
+    requireCompletion(serial, 0x45);
+  }
+}

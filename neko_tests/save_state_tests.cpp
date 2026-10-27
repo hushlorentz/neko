@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_54_PREPARED_STATE_SIZE = 39952136;
+    VERSION_55_PREPARED_STATE_SIZE = 39952139;
   constexpr std::uint64_t
-    VERSION_54_PREPARED_STATE_HASH =
-      UINT64_C(0x7473c21be46974f7);
+    VERSION_55_PREPARED_STATE_HASH =
+      UINT64_C(0x3870cc253abff9c3);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 54 save-state layout is byte-stable")
+TEST_CASE("Version 55 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,14 @@ TEST_CASE("Version 54 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 54);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 55);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_54_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_55_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_54_PREPARED_STATE_HASH);
+    VERSION_55_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *dmaControl = snapshot.find("system.gifDMAC.controllerControlRegister");
   const auto *dmaHold = snapshot.find("system.gifDMAC.controllerHoldControlRegister");
@@ -685,14 +685,19 @@ TEST_CASE("Version 54 save-state layout is byte-stable")
   const auto *serialTime = snapshot.find("system.eeSerial.remainingCycles");
   const auto *serialByte = snapshot.find("system.eeSerial.pendingByte");
   const auto *serialReset = snapshot.find("system.eeSerial.resetHeld");
+  const auto *serialBaud = snapshot.find("system.eeSerial.baudEncoding");
   REQUIRE(serialTime != nullptr);
   REQUIRE(serialByte != nullptr);
   REQUIRE(serialReset != nullptr);
-  REQUIRE(serialTime->kind == SaveStateFieldKind::U16);
+  REQUIRE(serialBaud != nullptr);
+  REQUIRE(serialTime->kind == SaveStateFieldKind::U32);
   REQUIRE(serialByte->kind == SaveStateFieldKind::U8);
   REQUIRE(serialReset->kind == SaveStateFieldKind::Boolean);
-  REQUIRE(serialByte->containerOffset == serialTime->containerOffset + 2);
+  REQUIRE(serialBaud->kind == SaveStateFieldKind::U8);
+  REQUIRE(serialBaud->scalarValue == 0);
+  REQUIRE(serialByte->containerOffset == serialTime->containerOffset + 4);
   REQUIRE(serialReset->containerOffset == serialByte->containerOffset + 1);
+  REQUIRE(serialBaud->containerOffset == serialReset->containerOffset + 1);
   const auto *rdramCommand = snapshot.find("system.eeRDRAMInitialization.command");
   const auto *rdramInput = snapshot.find("system.eeRDRAMInitialization.inputData");
   const auto *rdramCursor =
@@ -706,7 +711,7 @@ TEST_CASE("Version 54 save-state layout is byte-stable")
   REQUIRE(rdramCommand->scalarValue == 0);
   REQUIRE(rdramInput->scalarValue == 0);
   REQUIRE(rdramCursor->scalarValue == 0);
-  REQUIRE(rdramCommand->containerOffset == serialReset->containerOffset + 1);
+  REQUIRE(rdramCommand->containerOffset == serialBaud->containerOffset + 1);
   REQUIRE(rdramInput->containerOffset == rdramCommand->containerOffset + 4);
   REQUIRE(rdramCursor->containerOffset == rdramInput->containerOffset + 4);
   REQUIRE(rdramCursor->containerOffset + 1 == state.size());
@@ -805,7 +810,8 @@ TEST_CASE("Save-state ROM metadata rejects malformed and previous-schema states"
     {"system.eeBus.romFingerprint", 1},
     {"system.iop.bus.romPresent", 2},
     {"system.iop.bus.romFingerprint", 1},
-    {"container.version", 33}
+    {"container.version", 33},
+    {"container.version", 54}
   };
   for (const auto &mutation : mutations)
   {

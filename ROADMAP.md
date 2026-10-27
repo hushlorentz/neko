@@ -2173,8 +2173,20 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       integration and persistence with focused red/green and required broader gates.
 - [x] Validate authored timer/calibration guests and restored/trace-mode
       continuations; independently review the completed capability.
-- [ ] Repeat unchanged-budget BIOS discovery to verify the originating
+- [x] Repeat unchanged-budget BIOS discovery to verify the originating
       path and attribute the next dependency without bypassing the guest guard.
+
+### EE Serial-Port Nonzero Baud Rate: Calibration Dependency
+
+- [x] Investigate the calibration-derived BGR word write of `0x1d`; establish
+      manual evidence, encoding/clock effects, owner and persistence contract
+      before selecting a bounded extension to the existing serial profile.
+- [x] Implement exact BGR `0`/`0x1d` profiles through the serial owner, preserving
+      active-frame deadlines and baud selection across FIFO reset; validate
+      access rejection, timing and canonical persistence with required gates.
+- [ ] Validate authored calibration/transmit and restored/trace continuations;
+      independently review the capability, then repeat unchanged-budget
+      discovery to revisit the former calibration guard and next dependency.
 
 ### Real BIOS Handshake and Boundary Conformance
 

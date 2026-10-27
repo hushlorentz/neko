@@ -15,7 +15,7 @@ namespace
   };
   constexpr SerialInitialization SERIAL_INITIALIZATIONS[] = {
     {0x1000f100, 0x20}, {0x1000f120, 0},
-    {0x1000f140, 7}, {0x1000f140, 0}, {0x1000f150, 0}
+    {0x1000f140, 7}, {0x1000f140, 0}, {0x1000f150, 0}, {0x1000f150, 0x1d}
   };
 
   bool serialInitializationAdmitted(std::uint32_t address, std::uint32_t value)
@@ -797,7 +797,7 @@ TEST_CASE("EE f490 delay-slot stores preserve precise faults and trace equivalen
   }
 }
 
-TEST_CASE("EE serial idle configuration and reset release are stateless",
+TEST_CASE("EE serial default idle configuration and reset release are stateless",
   "[ee][bus][serial-init]")
 {
   REQUIRE(EEMemoryMap::SIO_LCR == 0x1000f100);
@@ -806,7 +806,8 @@ TEST_CASE("EE serial idle configuration and reset release are stateless",
   REQUIRE(EEMemoryMap::SIO_BGR == 0x1000f150);
   for (const auto initialization : SERIAL_INITIALIZATIONS)
   {
-    if (initialization.address == EEMemoryMap::SIO_FCR && initialization.value == 7)
+    if ((initialization.address == EEMemoryMap::SIO_FCR && initialization.value == 7) ||
+        (initialization.address == EEMemoryMap::SIO_BGR && initialization.value == 0x1d))
     {
       continue;
     }
@@ -852,7 +853,8 @@ TEST_CASE("EE serial initialization excludes readback values widths and neighbor
     REQUIRE(bus.writeData32(initialization.address, initialization.value));
     const auto eeHash = system.eeStateHash();
     for (std::uint32_t value : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u,
-           0x20u, 0x21u, 0x3du, 0x10007u, 0x10020u, UINT32_MAX})
+           0x1cu, 0x1du, 0x1eu, 0x20u, 0x21u, 0x3du, 0x11du,
+           0x10007u, 0x10020u, UINT32_MAX})
     {
       if (serialInitializationAdmitted(initialization.address, value))
       {
@@ -942,7 +944,7 @@ TEST_CASE("EE serial initialization guest stores and merges preserve admission",
     const auto uncached = initialization.address | 0xa0000000;
     for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
     {
-      for (const std::uint32_t value : {0x20u, 0u, 7u, 0x21u})
+      for (const std::uint32_t value : {0x20u, 0u, 7u, 0x1du, 0x21u})
       {
         for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
         {
@@ -1087,9 +1089,12 @@ TEST_CASE("EE serial status is a quiescent observational word",
     for (const auto initialization : SERIAL_INITIALIZATIONS)
     {
       REQUIRE(bus.writeData32(initialization.address, initialization.value));
+      const auto configured = system.eeStateHash();
       REQUIRE(bus.readData32(0x1000f130, &word));
       REQUIRE(word == 0);
+      REQUIRE(system.eeStateHash() == configured);
     }
+    REQUIRE(bus.writeData32(EEMemoryMap::SIO_BGR, 0));
   }
   REQUIRE(system.eeStateHash() == eeHash);
   REQUIRE(system.iopStateHash() == iopHash);

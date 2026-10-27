@@ -154,11 +154,16 @@ TEST_CASE("EE serial completion occurs once at the exact master tick",
 TEST_CASE("EE serial completion precedes same-tick guest transmit or reset",
   "[ee][serial-integration][trace]")
 {
-  for (const bool reset : {false, true})
+  for (unsigned scenario = 0; scenario < 4; ++scenario)
   {
+    CAPTURE(scenario);
+    const bool reset = (scenario & 1) != 0;
+    const auto encoding = scenario < 2 ? 0u : 0x1du;
+    const auto frame = scenario < 2 ? 2560u : 74240u;
     NekoSystem system;
+    REQUIRE(system.eeBus().writeData32(EEMemoryMap::SIO_BGR, encoding));
     REQUIRE(system.eeBus().writeData8(TX, 0x23));
-    system.runMasterCycles(2559);
+    system.runMasterCycles(frame - 1);
     startStore(system, reset ? 0xb000f140 : 0xb000f180,
       reset ? 7 : 0x41, reset ? 0x2b : 0x28);
     system.startTrace(100);
@@ -167,7 +172,7 @@ TEST_CASE("EE serial completion precedes same-tick guest transmit or reset",
     REQUIRE(system.eeBus().read32(EEMemoryMap::SIO_ISR) == (reset ? 0 : 0x8000));
     const auto events = completions(system);
     REQUIRE(events.size() == 1);
-    REQUIRE(events[0].masterCycle == 2560);
+    REQUIRE(events[0].masterCycle == frame);
     REQUIRE(events[0].value0 == 0x23);
     bool completed = false;
     std::size_t stores = 0;
@@ -182,19 +187,19 @@ TEST_CASE("EE serial completion precedes same-tick guest transmit or reset",
           event.value0 == (reset ? 0xb000f140u : 0xb000f180u))
       {
         REQUIRE(completed);
-        REQUIRE(event.masterCycle == 2560);
+        REQUIRE(event.masterCycle == frame);
         ++stores;
       }
     }
     REQUIRE(stores == 1);
     system.eeCore().haltExecution();
-    system.runMasterCycles(2559);
+    system.runMasterCycles(frame - 1);
     REQUIRE(completions(system).size() == 1);
     system.clockMasterCycle();
     REQUIRE(completions(system).size() == (reset ? 1 : 2));
     if (!reset)
     {
-      REQUIRE(completions(system)[1].masterCycle == 5120);
+      REQUIRE(completions(system)[1].masterCycle == frame * 2);
       REQUIRE(completions(system)[1].value0 == 0x41);
     }
     REQUIRE_FALSE(system.traceTruncated());
@@ -220,6 +225,97 @@ TEST_CASE("EE serial canonical hash covers each continuation field",
   REQUIRE(serial.stateHash() != idle);
   serial.reset();
   REQUIRE(serial.stateHash() == idle);
+}
+
+TEST_CASE("EE serial baud MMIO selects a retained next-byte profile",
+  "[ee][serial-integration][serial-baud]")
+{
+  for (const auto alias : {0u, 0x80000000u, 0xa0000000u})
+  {
+    CAPTURE(alias);
+    NekoSystem system;
+    auto &bus = system.eeBus();
+    const auto initial = system.eeStateHash();
+    bus.write32(EEMemoryMap::SIO_BGR | alias, 0x1d);
+    const auto selected = system.eeStateHash();
+    REQUIRE(selected != initial);
+    REQUIRE(bus.writeData32(EEMemoryMap::SIO_BGR, 0x1d));
+    REQUIRE(system.eeStateHash() == selected);
+    REQUIRE_FALSE(bus.writeData32(EEMemoryMap::SIO_BGR, 0x11d));
+    REQUIRE(system.eeStateHash() == selected);
+    REQUIRE(bus.writeData32(EEMemoryMap::SIO_BGR, 0));
+    REQUIRE(system.eeStateHash() == initial);
+  }
+}
+
+TEST_CASE("EE serial baud selections restore while idle held or reconfigured",
+  "[ee][serial-integration][serial-baud][save-state]")
+{
+  for (unsigned scenario = 0; scenario < 4; ++scenario)
+  {
+    CAPTURE(scenario);
+    NekoSystem system;
+    REQUIRE(system.eeBus().writeData32(EEMemoryMap::SIO_BGR, 0x1d));
+    if (scenario == 1)
+    {
+      REQUIRE(system.eeBus().writeData32(EEMemoryMap::SIO_FCR, 7));
+    }
+    if (scenario >= 2)
+    {
+      REQUIRE(system.eeBus().writeData8(TX, 0xa5));
+    }
+    if (scenario == 2)
+    {
+      system.runMasterCycles(17);
+      REQUIRE(system.eeBus().writeData32(EEMemoryMap::SIO_BGR, 0));
+    }
+    const auto saved = system.saveState();
+    const auto hash = system.eeStateHash();
+    NekoSystem restored;
+    REQUIRE(restored.eeBus().writeData8(TX, 0xff));
+    restored.loadState(saved);
+    REQUIRE(restored.saveState() == saved);
+    REQUIRE(restored.eeStateHash() == hash);
+    for (auto *machine : {&system, &restored})
+    {
+      machine->startTrace(1000);
+      if (scenario == 1)
+      {
+        REQUIRE_FALSE(machine->eeBus().writeData8(TX, 0xff));
+        REQUIRE(machine->eeBus().writeData32(EEMemoryMap::SIO_FCR, 0));
+      }
+      if (scenario < 2)
+      {
+        REQUIRE(machine->eeBus().writeData8(TX, 0xa5));
+      }
+      const auto remaining = scenario == 2 ? 74223 : 74240;
+      machine->runMasterCycles(remaining - 1);
+      REQUIRE(machine->eeBus().read32(EEMemoryMap::SIO_ISR) == 0x8000);
+      REQUIRE(completions(*machine).empty());
+      machine->clockMasterCycle();
+      const auto events = completions(*machine);
+      REQUIRE(events.size() == 1);
+      REQUIRE(events[0].masterCycle == 74240);
+      REQUIRE(events[0].value0 == 0xa5);
+      REQUIRE(machine->eeBus().read32(EEMemoryMap::SIO_ISR) == 0);
+      if (scenario == 2)
+      {
+        REQUIRE(machine->eeBus().writeData8(TX, 0x5a));
+        machine->runMasterCycles(2559);
+        REQUIRE(completions(*machine).size() == 1);
+        machine->clockMasterCycle();
+        REQUIRE(completions(*machine).size() == 2);
+        REQUIRE(completions(*machine)[1].masterCycle == 76800);
+        REQUIRE(completions(*machine)[1].value0 == 0x5a);
+      }
+      REQUIRE_FALSE(machine->traceTruncated());
+    }
+    REQUIRE(restored.traceHash() == system.traceHash());
+    REQUIRE(restored.saveState() == system.saveState());
+    restored.reset();
+    NekoSystem fresh;
+    REQUIRE(restored.saveState() == fresh.saveState());
+  }
 }
 
 TEST_CASE("EE serial canceled output and trace capacity do not alter progress",
@@ -372,13 +468,13 @@ TEST_CASE("EE serial malformed state rejects atomically",
   system.runMasterCycles(17);
   const auto original = system.saveState();
   const auto hash = system.eeStateHash();
-  for (unsigned scenario = 0; scenario < 5; ++scenario)
+  for (unsigned scenario = 0; scenario < 8; ++scenario)
   {
     CAPTURE(scenario);
     SaveStateMutation invalid(original);
     if (scenario == 0)
     {
-      invalid.writeScalar("system.eeSerial.remainingCycles", 2561);
+      invalid.writeScalar("system.eeSerial.remainingCycles", 74241);
     }
     else if (scenario == 1)
     {
@@ -392,10 +488,18 @@ TEST_CASE("EE serial malformed state rejects atomically",
     {
       invalid.writeScalar("system.eeSerial.resetHeld", 2);
     }
-    else
+    else if (scenario == 4)
     {
       invalid.writeScalar("system.eeSerial.remainingCycles", 0);
       invalid.writeScalar("system.eeSerial.resetHeld", 1);
+    }
+    else if (scenario == 5)
+    {
+      invalid.writeScalar("system.eeSerial.remainingCycles", UINT32_MAX);
+    }
+    else
+    {
+      invalid.writeScalar("system.eeSerial.baudEncoding", scenario == 6 ? 1 : 0xff);
     }
     invalid.refreshChecksum();
     REQUIRE_THROWS_AS(system.loadState(invalid), std::invalid_argument);

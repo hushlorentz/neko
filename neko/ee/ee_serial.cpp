@@ -15,9 +15,25 @@ bool EESerial::writeInterruptEnable(std::uint32_t value) const noexcept
   return value == 0;
 }
 
-bool EESerial::writeBaudRate(std::uint32_t value) const noexcept
+bool EESerial::isSupportedBaudRate(std::uint32_t value) noexcept
 {
-  return value == 0;
+  return value == 0 || value == 0x1d;
+}
+
+bool EESerial::writeBaudRate(std::uint32_t value) noexcept
+{
+  if (!isSupportedBaudRate(value))
+  {
+    return false;
+  }
+  baudEncoding = static_cast<std::uint8_t>(value);
+  return true;
+}
+
+std::uint32_t EESerial::selectedFrameCycles() const noexcept
+{
+  return baudEncoding == 0 ?
+    DEFAULT_TRANSMIT_FRAME_CYCLES : MAX_TRANSMIT_FRAME_CYCLES;
 }
 
 bool EESerial::writeFIFOControl(std::uint32_t value) noexcept
@@ -29,7 +45,7 @@ bool EESerial::writeFIFOControl(std::uint32_t value) noexcept
   }
   if (value == 7)
   {
-    reset();
+    cancelFrame();
     resetHeld = true;
     return true;
   }
@@ -52,7 +68,7 @@ EESerialTransmitResult EESerial::transmitByte(std::uint8_t byte) noexcept
     return EESerialTransmitResult::Full;
   }
   pendingByte = byte;
-  remainingCycles = TRANSMIT_FRAME_CYCLES;
+  remainingCycles = selectedFrameCycles();
   return EESerialTransmitResult::Accepted;
 }
 
@@ -72,9 +88,15 @@ EESerialCompletion EESerial::advance() noexcept
   return result;
 }
 
-void EESerial::reset() noexcept
+void EESerial::cancelFrame() noexcept
 {
   remainingCycles = 0;
   pendingByte = 0;
+}
+
+void EESerial::reset() noexcept
+{
+  cancelFrame();
   resetHeld = false;
+  baudEncoding = 0;
 }
