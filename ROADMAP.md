@@ -2184,9 +2184,9 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement exact BGR `0`/`0x1d` profiles through the serial owner, preserving
       active-frame deadlines and baud selection across FIFO reset; validate
       access rejection, timing and canonical persistence with required gates.
-- [ ] Validate authored calibration/transmit and restored/trace continuations;
-      independently review the capability, then repeat unchanged-budget
-      discovery to revisit the former calibration guard and next dependency.
+- [x] Validate authored calibration/transmit and restored/trace continuations;
+      independently review, then repeat unchanged-budget discovery to verify
+      baud progress and bound remaining guard/dependency evidence.
 
 ### Real BIOS Handshake and Boundary Conformance
 

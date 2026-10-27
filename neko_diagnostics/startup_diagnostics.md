@@ -227,8 +227,10 @@ The event above illustrates the record shape, not a particular BIOS result.
 EE event 22 (`SerialTransmitCompleted`) records the raw byte in `values[0]`
 and physical TXFIFO address in `values[1]`; the other words are zero. It
 precedes EE execution observations on the completion tick, independently of
-the earlier accepted store. The provisional fixed serial profile completes
-after 2,560 master ticks; reset cancellation emits no completion. Trace
+the earlier accepted store. The provisional BGR `0`/`0x1d` serial profiles
+complete after 2,560/74,240 master ticks respectively, using the rate captured
+when the byte was accepted. FIFO reset cancels without a completion and
+preserves the next-byte baud selection; cold reset selects BGR zero. Trace
 capacity and enablement do not affect serial progress or retain output.
 Numbers are decimal, including 64-bit words: consumers must retain integer
 precision. A decoded `startup_first_failure` record follows the raw events.

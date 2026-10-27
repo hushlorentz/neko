@@ -508,6 +508,220 @@ TEST_CASE("EE serial malformed state rejects atomically",
   }
 }
 
+TEST_CASE("EE serial calibrated baud guest preserves reset and restored continuations",
+  "[ee][serial-integration][serial-conformance][serial-baud-conformance][guest][trace][save-state]")
+{
+  constexpr std::uint32_t entry = 0xa0001000;
+  constexpr std::uint32_t done = entry + 41 * 4;
+  constexpr std::uint32_t program[] = {
+    0x3c01b000, // lui r1,0xb000
+    0x3421f100, // ori r1,r1,0xf100
+    0x3c0aa000, // lui r10,0xa000
+    0x354a2000, // ori r10,r10,0x2000
+    0x40024800, // mfc0 r2,Count
+    0xad420000, // sw r2,0(r10)
+    0x24030008, // addiu r3,zero,8
+    0x40044800, // mfc0 r4,Count
+    0x2463ffff, // addiu r3,r3,-1
+    0x1460fffd, // bne r3,zero,sample
+    0,
+    0x8d450000, // lw r5,0(r10)
+    0x00853023, // subu r6,r4,r5
+    0x2407001d, // addiu r7,zero,29
+    0x00c70018, // mult r6,r7
+    0x00004012, // mflo r8
+    0x0106001b, // divu r8,r6
+    0x00004812, // mflo r9: normalize a positive Count delta to divisor29
+    0x240b0020, // addiu r11,zero,0x20
+    0xac2b0000, // sw r11,0(r1): LCR
+    0xac200020, // sw zero,0x20(r1): IER
+    0x240b0007, // addiu r11,zero,7
+    0xac2b0040, // sw r11,0x40(r1): hold FIFO reset
+    0x0c00042b, // jal configure
+    0,
+    0xac2b0040, // sw r11,0x40(r1): reset again without losing baud
+    0xac200040, // sw zero,0x40(r1): release
+    0x340c00a5, // ori r12,zero,0xa5
+    0xa02c0080, // sb r12,0x80(r1): long frame
+    0xac200050, // sw zero,0x50(r1): next-byte rate only
+    0x8c2d0030, // lw r13,0x30(r1)
+    0x31adf000, // andi r13,r13,0xf000
+    0x15a0fffd, // bne r13,zero,poll_long
+    0x25ce0001, // addiu r14,r14,1
+    0x340f005a, // ori r15,zero,0x5a
+    0xa02f0080, // sb r15,0x80(r1): default frame
+    0x8c2d0030, // lw r13,0x30(r1)
+    0x31adf000, // andi r13,r13,0xf000
+    0x15a0fffd, // bne r13,zero,poll_default
+    0x26100001, // addiu r16,r16,1
+    0x3417600d, // ori r23,zero,0x600d
+    0x1000ffff, // beq zero,zero,done
+    0,
+    0x03e00008, // configure: jr r31
+    0xac290050  // sw r9,0x50(r1): BGR in the return delay slot
+  };
+  for (const auto checkpoint : {entry + 43 * 4, entry + 25 * 4, entry + 30 * 4})
+  {
+    CAPTURE(checkpoint);
+    NekoSystem system;
+    for (unsigned index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+    {
+      system.eeBus().write32(0x1000 + index * 4, program[index]);
+    }
+    system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+    system.eeCore().startExecution(entry);
+    system.startTrace(8192);
+    for (unsigned tick = 0; tick < 256 &&
+         system.eeCore().programCounter() != checkpoint &&
+         system.eeCore().executionState() == EEExecutionState::Running; ++tick)
+    {
+      system.clockMasterCycle();
+    }
+    REQUIRE(system.eeCore().pendingException() == EEException::None);
+    REQUIRE(system.eeCore().programCounter() == checkpoint);
+    const auto sample = system.eeCore().generalRegister(2).low;
+    const auto delta = system.eeCore().generalRegister(6).low;
+    REQUIRE(sample > 0);
+    REQUIRE(delta > 0);
+    REQUIRE(system.eeCore().generalRegister(5).low == sample);
+    REQUIRE(system.eeCore().generalRegister(4).low == sample + delta);
+    REQUIRE(system.eeCore().generalRegister(8).low == delta * 29);
+    REQUIRE(system.eeCore().generalRegister(9).low == 0x1d);
+    REQUIRE_FALSE(system.traceTruncated());
+    const auto prefix = system.trace();
+    const auto saved = system.saveState();
+    const auto snapshot = inspectSaveState(saved);
+    const auto *rate = snapshot.find("system.eeSerial.baudEncoding");
+    const auto *remaining = snapshot.find("system.eeSerial.remainingCycles");
+    const auto *held = snapshot.find("system.eeSerial.resetHeld");
+    REQUIRE(rate != nullptr);
+    REQUIRE(remaining != nullptr);
+    REQUIRE(held != nullptr);
+    REQUIRE(rate->scalarValue == (checkpoint == entry + 25 * 4 ? 0x1d : 0));
+    REQUIRE(held->scalarValue == (checkpoint == entry + 30 * 4 ? 0 : 1));
+    if (checkpoint == entry + 30 * 4)
+    {
+      REQUIRE(remaining->scalarValue > UINT16_MAX);
+      REQUIRE(remaining->scalarValue <= 74240);
+    }
+    else
+    {
+      REQUIRE(remaining->scalarValue == 0);
+    }
+    NekoSystem restored;
+    NekoSystem plain;
+    NekoSystem capped;
+    for (auto *machine : {&restored, &plain, &capped})
+    {
+      machine->loadState(saved);
+      REQUIRE(machine->saveState() == saved);
+    }
+    system.startTrace(1000000);
+    restored.startTrace(1000000);
+    capped.startTrace(0);
+    for (auto *machine : {&system, &restored, &plain, &capped})
+    {
+      machine->runMasterCycles(78000);
+      REQUIRE(machine->eeCore().pendingException() == EEException::None);
+      REQUIRE(machine->eeCore().executionState() == EEExecutionState::Running);
+      REQUIRE(machine->eeCore().programCounter() == done);
+      REQUIRE(machine->eeCore().generalRegister(23).low == 0x600d);
+      REQUIRE(machine->eeCore().generalRegister(14).low > 1);
+      REQUIRE(machine->eeCore().generalRegister(16).low > 1);
+      REQUIRE(machine->eeBus().read32(EEMemoryMap::SIO_ISR) == 0);
+      REQUIRE(machine->interruptController().status() == 0);
+      REQUIRE(machine->iopInterruptController().status() == 0);
+    }
+    const auto ending = system.saveState();
+    for (const auto *machine : {&restored, &plain, &capped})
+    {
+      REQUIRE(machine->saveState() == ending);
+    }
+    REQUIRE(system.traceHash() == restored.traceHash());
+    REQUIRE(system.trace().size() == restored.trace().size());
+    REQUIRE_FALSE(system.traceTruncated());
+    REQUIRE_FALSE(restored.traceTruncated());
+    REQUIRE_FALSE(plain.traceEnabled());
+    REQUIRE(plain.trace().empty());
+    REQUIRE(capped.traceEnabled());
+    REQUIRE(capped.trace().empty());
+    REQUIRE(capped.traceTruncated());
+    const auto events = completions(system);
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].value0 == 0xa5);
+    REQUIRE(events[1].value0 == 0x5a);
+    std::uint64_t configuredCycle = 0;
+    std::uint64_t reconfiguredCycle = 0;
+    std::uint64_t firstStoreCycle = 0;
+    std::uint64_t secondStoreCycle = 0;
+    unsigned busyReads = 0;
+    unsigned idleReads = 0;
+    for (const auto *trace : {&prefix, &system.trace()})
+    {
+      for (const auto &event : *trace)
+      {
+        if (event.subsystem != NekoTraceSubsystem::EE ||
+            event.type != NekoTraceEventType::MemoryAccess)
+        {
+          continue;
+        }
+        if (event.value0 == 0xb000f150)
+        {
+          if (event.value1 == 0x1d)
+          {
+            REQUIRE(configuredCycle == 0);
+            configuredCycle = event.masterCycle;
+          }
+          else
+          {
+            REQUIRE(event.value1 == 0);
+            REQUIRE(reconfiguredCycle == 0);
+            reconfiguredCycle = event.masterCycle;
+          }
+        }
+        if (event.value0 == 0xb000f180)
+        {
+          if (event.value1 == 0xa5)
+          {
+            REQUIRE(firstStoreCycle == 0);
+            firstStoreCycle = event.masterCycle;
+          }
+          else
+          {
+            REQUIRE(event.value1 == 0x5a);
+            REQUIRE(secondStoreCycle == 0);
+            secondStoreCycle = event.masterCycle;
+          }
+        }
+        if (event.value0 == 0xb000f130)
+        {
+          const auto deadline = secondStoreCycle == 0 ?
+            events[0].masterCycle : events[1].masterCycle;
+          REQUIRE(event.value1 == (event.masterCycle < deadline ? 0x8000 : 0));
+          if (event.value1 == 0)
+          {
+            ++idleReads;
+          }
+          else
+          {
+            ++busyReads;
+          }
+        }
+      }
+    }
+    REQUIRE(configuredCycle != 0);
+    REQUIRE(firstStoreCycle > configuredCycle);
+    REQUIRE(reconfiguredCycle > firstStoreCycle);
+    REQUIRE(reconfiguredCycle < events[0].masterCycle);
+    REQUIRE(secondStoreCycle >= events[0].masterCycle);
+    REQUIRE(secondStoreCycle < events[0].masterCycle + 16);
+    REQUIRE(events[0].masterCycle == firstStoreCycle + 74240);
+    REQUIRE(events[1].masterCycle == secondStoreCycle + 2560);
+    REQUIRE(busyReads > 1);
+    REQUIRE(idleReads == 2);
+  }
+}
+
 TEST_CASE("EE serial guest polling resumes identically from an in-flight frame",
   "[ee][serial-integration][serial-conformance][guest][trace][save-state]")
 {
