@@ -24,9 +24,10 @@ namespace
   constexpr IOPAddress sif0DMABase = 0x1f801520;
   constexpr IOPAddress dmaAuxiliaryControl = 0x1f801578;
   constexpr IOPAddress dmaDPCR3Initialization = 0x1f8015f0;
-  constexpr std::array<IOPAddress, 6> dmaChannelInitializationRegisters = {{
+  constexpr std::array<IOPAddress, 9> dmaChannelInitializationRegisters = {{
     0x1f801080, 0x1f801084, 0x1f801088,
-    0x1f801090, 0x1f801094, 0x1f801098
+    0x1f801090, 0x1f801094, 0x1f801098,
+    0x1f8010a0, 0x1f8010a4, 0x1f8010a8
   }};
 
   bool isAligned(IOPAddress address, std::size_t width)

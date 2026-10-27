@@ -2239,12 +2239,12 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       review, then repeat discovery under an explicitly selected budget to
       verify this path and attribute the next prerequisite.
 
-### IOP `0x1f8010a0` Startup Initialization
+### IOP DMA Channel-2 Startup Initialization
 
-- [ ] Investigate the normal-path zero word store to `0x1f8010a0`; establish
-      manual evidence, register identity/effects and the responsible owner
-      before selecting a bounded contract.
-- [ ] Implement the selected contract with focused red/green access and state
+- [x] Investigate the zero word store to `0x1f8010a0`; establish evidence
+      and select a bounded channel-2 MADR/BCR/CHCR zero-initialization
+      contract through the existing IOP DMA owner.
+- [x] Implement the selected contract with focused red/green access and state
       coverage; preserve existing DMA, interrupt and lifecycle boundaries
       except for explicitly scoped changes.
 - [ ] Validate guest and affected restored/trace continuations; independently
