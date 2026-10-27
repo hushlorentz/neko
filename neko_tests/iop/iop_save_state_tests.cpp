@@ -755,11 +755,12 @@ TEST_CASE("IOP high-address writes continue across lifecycle and branch restore"
 }
 
 TEST_CASE("IOP DMA initialization guest continuation restores pending load branch and completed store",
-  "[iop][dma][dpcr3][channel0-init][channel1-init][conformance][save-state]")
+  "[iop][dma][dpcr3][channel0-init][channel1-init][channel2-init][conformance][save-state]")
 {
   for (const IOPAddress physical : {0x1f8015f0u,
     0x1f801080u, 0x1f801084u, 0x1f801088u,
-    0x1f801090u, 0x1f801094u, 0x1f801098u})
+    0x1f801090u, 0x1f801094u, 0x1f801098u,
+    0x1f8010a0u, 0x1f8010a4u, 0x1f8010a8u})
   for (const unsigned prefix : {32u, 40u, 48u})
   {
     CAPTURE(physical);

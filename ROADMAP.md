@@ -2247,6 +2247,17 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement the selected contract with focused red/green access and state
       coverage; preserve existing DMA, interrupt and lifecycle boundaries
       except for explicitly scoped changes.
+- [x] Validate guest and affected restored/trace continuations; independently
+      review, then repeat discovery under an explicitly selected budget to
+      verify this path and attribute the next prerequisite.
+
+### IOP 0x1f8010b0 Startup Prerequisite
+
+- [ ] Investigate the zero word store to `0x1f8010b0`; establish its identity,
+      evidence and bounded contract through the appropriate existing owner.
+- [ ] Implement the selected contract with focused red/green access and state
+      coverage; preserve existing DMA, interrupt and lifecycle boundaries
+      except for explicitly scoped changes.
 - [ ] Validate guest and affected restored/trace continuations; independently
       review, then repeat discovery under an explicitly selected budget to
       verify this path and attribute the next prerequisite.
