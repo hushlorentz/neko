@@ -518,26 +518,28 @@ TEST_CASE("IOP high-address startup writes are trace observational",
   REQUIRE(accesses == addresses.size());
 }
 
-TEST_CASE("IOP DPCR3 guest stores are trace observational with exact admission outcomes",
-  "[iop][dma][dpcr3][conformance][trace]")
+TEST_CASE("IOP DMA initialization guest stores are trace observational with exact admission outcomes",
+  "[iop][dma][dpcr3][channel0-init][conformance][trace]")
 {
   namespace Memory = NekoIOPTraceMemory;
-  for (const IOPAddress target : {0x1f8015f0u, 0x9f8015f0u, 0xbf8015f0u})
+  for (const IOPAddress physical : {0x1f8015f0u, 0x1f801080u, 0x1f801084u, 0x1f801088u})
+  for (const IOPAddress target : {physical, physical | 0x80000000u, physical | 0xa0000000u})
   {
     CAPTURE(target);
+    const IOPWord value = physical == 0x1f8015f0 ? 0x777 : 0;
     NekoSystem traced;
     NekoSystem untraced;
     const auto sifHash = traced.sifStateHash();
     const std::array<IOPWord, 10> program{{
       0x3c010000 | (target >> 16),
-      0x342115f0,
-      0x24020777, // addiu r2, r0, 0x777
+      0x34210000 | (target & 0xffff),
+      0x24020000 | value,
       0xac220000, // sw r2, 0(r1)
       0x10000002, // beq r0, r0, +2
       0xa8220003, // swl r2, 3(r1): branch delay slot, full mask
       0xffffffff, // skipped
       0xb8220000, // swr r2, 0(r1): full mask
-      0x24020776, // addiu r2, r0, 0x776
+      0x24020000 | (value + 1),
       0xac220000  // sw r2, 0(r1): unsupported value
     }};
     for (auto *system : {&traced, &untraced})
@@ -560,7 +562,7 @@ TEST_CASE("IOP DPCR3 guest stores are trace observational with exact admission o
     REQUIRE(untraced.trace().empty());
     REQUIRE(traced.trace().size() == 32);
     const std::array<std::uint64_t, 4> cycles{{25, 41, 49, 65}};
-    const auto route = target == 0xbf8015f0 ? Memory::CacheRoute::Uncached :
+    const auto route = target == (physical | 0xa0000000u) ? Memory::CacheRoute::Uncached :
       Memory::CacheRoute::Cached;
     std::size_t stores = 0;
     for (const auto &event : traced.trace())
@@ -575,10 +577,10 @@ TEST_CASE("IOP DPCR3 guest stores are trace observational with exact admission o
       requireIdentity(event, Subsystem::IOP, Type::MemoryAccess, cycles[stores]);
       // Merge-store observations describe the aligned bus transaction.
       REQUIRE(event.value0 == target);
-      REQUIRE(event.value1 == (stores == 3 ? 0x776 : 0x777));
+      REQUIRE(event.value1 == (stores == 3 ? value + 1 : value));
       REQUIRE(event.value2 == 0);
       REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
-        0x1f8015f0, 4, Memory::AccessKind::DataStore,
+        physical, 4, Memory::AccessKind::DataStore,
         stores == 3 ? Memory::Outcome::Unmapped : Memory::Outcome::Completed,
         route, true, 0xf}));
       ++stores;

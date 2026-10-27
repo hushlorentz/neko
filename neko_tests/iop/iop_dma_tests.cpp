@@ -434,22 +434,28 @@ TEST_CASE("IOP channel0 guest initialization requires zero words and complete me
   }
 }
 
-TEST_CASE("IOP DPCR3 initialization remains stateless after cold reset and restore",
-  "[iop][dma][dpcr3][save-state]")
+TEST_CASE("IOP DMA initialization remains stateless after cold reset and restore",
+  "[iop][dma][dpcr3][channel0-init][conformance][save-state]")
 {
-  NekoSystem system;
-  const auto cold = system.saveState();
-  REQUIRE(system.iopBus().write32(DPCR3, 0x777).status == IOPBusStatus::Completed);
-  requireState(system, cold);
-  system.reset();
-  REQUIRE(system.iopBus().write32(DPCR3, 0x777).status == IOPBusStatus::Completed);
-  requireState(system, cold);
-  system.iopDMAController().writePriority(SECONDARY, 0xffffffff);
-  system.loadState(cold);
-  REQUIRE(system.iopBus().writeMasked32(DPCR3, 0x777, 0xf).status ==
-    IOPBusStatus::Completed);
-  REQUIRE(system.iopBus().read32(DPCR3).status == IOPBusStatus::Unmapped);
-  requireState(system, cold);
+  for (IOPAddress address : {DPCR3, CHANNEL0_REGISTERS[0],
+    CHANNEL0_REGISTERS[1], CHANNEL0_REGISTERS[2]})
+  {
+    CAPTURE(address);
+    const IOPWord value = address == DPCR3 ? 0x777 : 0;
+    NekoSystem system;
+    const auto cold = system.saveState();
+    REQUIRE(system.iopBus().write32(address, value).status == IOPBusStatus::Completed);
+    requireState(system, cold);
+    system.reset();
+    REQUIRE(system.iopBus().write32(address, value).status == IOPBusStatus::Completed);
+    requireState(system, cold);
+    system.iopDMAController().writePriority(SECONDARY, 0xffffffff);
+    system.loadState(cold);
+    REQUIRE(system.iopBus().writeMasked32(address, value, 0xf).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().read32(address).status == IOPBusStatus::Unmapped);
+    requireState(system, cold);
+  }
 }
 
 TEST_CASE("IOP DPCR3 guest stores translate aliases and require complete merge masks",

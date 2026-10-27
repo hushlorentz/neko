@@ -754,16 +754,20 @@ TEST_CASE("IOP high-address writes continue across lifecycle and branch restore"
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("IOP DPCR3 guest continuation restores pending load branch and completed store",
-  "[iop][dma][dpcr3][conformance][save-state]")
+TEST_CASE("IOP DMA initialization guest continuation restores pending load branch and completed store",
+  "[iop][dma][dpcr3][channel0-init][conformance][save-state]")
 {
-  for (const unsigned prefix : {24u, 32u, 40u})
+  for (const IOPAddress physical : {0x1f8015f0u, 0x1f801080u, 0x1f801084u, 0x1f801088u})
+  for (const unsigned prefix : {32u, 40u, 48u})
   {
+    CAPTURE(physical);
     CAPTURE(prefix);
+    const IOPWord value = physical == 0x1f8015f0 ? 0x777 : 0;
     NekoSystem original;
     const IOPWord program[] = {
       0x3c01bf80, // lui r1, 0xbf80
-      0x342115f0, // ori r1, r1, 0x15f0
+      0x34210000 | (physical & 0xffff),
+      0x24020055, // addiu r2, r0, 0x55: distinct pre-load value
       0x8c020100, // lw r2, 0x100(r0)
       0x10000002, // beq r0, r0, +2: load-delay slot
       0xac220000, // sw r2, 0(r1): branch delay slot
@@ -778,7 +782,7 @@ TEST_CASE("IOP DPCR3 guest continuation restores pending load branch and complet
     {
       loadInstruction(&original, static_cast<IOPAddress>(index * 4), program[index]);
     }
-    loadInstruction(&original, 0x100, 0x777);
+    loadInstruction(&original, 0x100, value);
     auto &dma = original.iopDMAController();
     dma.writePriority(IOPDMABank::Primary, 0x76543210);
     dma.writePriority(IOPDMABank::Secondary, 0x77777777);
@@ -790,8 +794,9 @@ TEST_CASE("IOP DPCR3 guest continuation restores pending load branch and complet
     original.runMasterCycles(prefix);
     REQUIRE(original.iopCore().retiredInstructions() == prefix / 8);
     REQUIRE(original.iopCore().delayedResultContinuation().source ==
-      (prefix == 24 ? IOPDelayedResultSource::Load : IOPDelayedResultSource::None));
-    REQUIRE(original.iopCore().branchContinuation().active == (prefix == 32));
+      (prefix == 32 ? IOPDelayedResultSource::Load : IOPDelayedResultSource::None));
+    REQUIRE(original.iopCore().generalRegister(2) == (prefix == 32 ? 0x55 : value));
+    REQUIRE(original.iopCore().branchContinuation().active == (prefix == 40));
     original.iopCore().haltExecution();
     original.iopCore().resumeExecution();
 
@@ -800,19 +805,19 @@ TEST_CASE("IOP DPCR3 guest continuation restores pending load branch and complet
     restored.loadState(original.saveState());
     original.startTrace();
     restored.startTrace();
-    original.runMasterCycles(80 - prefix);
-    restored.runMasterCycles(80 - prefix);
+    original.runMasterCycles(88 - prefix);
+    restored.runMasterCycles(88 - prefix);
     IOPTraceTest::requireMachine(restored, original);
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
     for (const auto *system : {&original, &restored})
     {
-      REQUIRE(system->iopCore().retiredInstructions() == 9);
-      REQUIRE(system->iopCore().programCounter() == 0xa0000028);
+      REQUIRE(system->iopCore().retiredInstructions() == 10);
+      REQUIRE(system->iopCore().programCounter() == 0xa000002c);
       REQUIRE(system->iopCore().exception().kind == IOPException::None);
       REQUIRE(system->iopCore().stopReason() == IOPStopReason::StoreFailure);
-      REQUIRE(system->iopCore().generalRegister(2) == 0x777);
-      REQUIRE(system->iopCore().generalRegister(3) == 0x778);
-      REQUIRE(system->iopCore().storeFailure().access.physicalAddress == 0x1f8015f0);
+      REQUIRE(system->iopCore().generalRegister(2) == value);
+      REQUIRE(system->iopCore().generalRegister(3) == value + 1);
+      REQUIRE(system->iopCore().storeFailure().access.physicalAddress == physical);
       REQUIRE(system->iopCore().storeFailure().access.outcome ==
         IOPAccessOutcome::Unmapped);
       REQUIRE(system->iopDMAController().priority(IOPDMABank::Primary) == 0x76543210);
@@ -823,8 +828,8 @@ TEST_CASE("IOP DPCR3 guest continuation restores pending load branch and complet
       REQUIRE(system->iopInterruptController().status() == 0);
       REQUIRE(system->sifStateHash() == sifHash);
     }
-    REQUIRE(restored.iopBus().read32(0x104).value == 0x777);
-    REQUIRE(restored.iopBus().read32(0x1f8015f0).status == IOPBusStatus::Unmapped);
+    REQUIRE(restored.iopBus().read32(0x104).value == value);
+    REQUIRE(restored.iopBus().read32(physical).status == IOPBusStatus::Unmapped);
   }
 }
 

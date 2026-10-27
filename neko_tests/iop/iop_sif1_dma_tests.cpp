@@ -75,6 +75,45 @@ TEST_CASE("IOP SIF1 receiver accepts headers and single words only on phase zero
   REQUIRE(system.sif().control() == 0);
 }
 
+TEST_CASE("IOP channel0 initialization preserves live SIF1 grants and completion",
+  "[iop][sif1][dma][channel0-init][conformance][trace]")
+{
+  for (const unsigned prefix : {0u, 9u, 25u})
+  {
+    CAPTURE(prefix);
+    NekoSystem baseline;
+    NekoSystem initialized;
+    for (auto *system : {&baseline, &initialized})
+    {
+      push(*system, {{0x80001000, 4, 0xdead, 0xbeef}});
+      push(*system, {{1, 2, 3, 4}});
+      start(*system);
+      system->runMasterCycles(prefix);
+      system->startTrace();
+    }
+    for (IOPAddress address : {0x1f801080u, 0x1f801084u, 0x1f801088u})
+    {
+      REQUIRE(initialized.iopBus().write32(address, 0).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(initialized.iopBus().writeMasked32(address, 0, 0xf).status ==
+        IOPBusStatus::Completed);
+    }
+    baseline.runMasterCycles(40 - prefix);
+    initialized.runMasterCycles(40 - prefix);
+    IOPTraceTest::requireMachine(initialized, baseline);
+    IOPTraceTest::requireEvents(initialized.trace(), baseline.trace());
+    REQUIRE_FALSE(initialized.iopSIF1DMAC().active());
+    REQUIRE(initialized.iopSIF1DMAC().memoryAddress() == 0x1010);
+    REQUIRE(initialized.iopDMAController().interruptStatus(BANK) == FLAG);
+    REQUIRE(initialized.iopInterruptController().status() == 8);
+    REQUIRE(initialized.sif().wordCount(SIFDirection::SIF1) == 0);
+    for (IOPAddress index = 0; index < 4; ++index)
+    {
+      REQUIRE(ramWord(initialized, 0x1000 + index * 4) == index + 1);
+    }
+  }
+}
+
 TEST_CASE("IOP SIF1 incomplete headers and empty payloads preserve state atomically",
   "[iop][sif1][dma][receiver][save-state]")
 {

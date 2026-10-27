@@ -2223,6 +2223,18 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement the selected channel-register contract with focused red/green
       access and state coverage; preserve existing SIF, interrupt, scheduling
       and persistence contracts except for explicitly scoped changes.
+- [x] Validate guest and affected restored/trace continuations; independently
+      review, then repeat discovery under an explicitly selected budget to
+      verify this path and attribute the next prerequisite.
+
+### IOP `0x1f801090` Startup Initialization
+
+- [ ] Investigate the normal-path zero word store to `0x1f801090`; establish
+      manual evidence, register identity/effects and the responsible owner
+      before selecting a bounded contract.
+- [ ] Implement the selected contract with focused red/green access and state
+      coverage; preserve existing DMA, interrupt and lifecycle boundaries
+      except for explicitly scoped changes.
 - [ ] Validate guest and affected restored/trace continuations; independently
       review, then repeat discovery under an explicitly selected budget to
       verify this path and attribute the next prerequisite.
