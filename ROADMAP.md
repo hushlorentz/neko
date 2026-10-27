@@ -2188,6 +2188,24 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       independently review, then repeat unchanged-budget discovery to verify
       baud progress and bound remaining guard/dependency evidence.
 
+### Bounded Post-Baud BIOS Observation
+
+- [x] Establish bounded observation beyond calibrated serial polling; revisit
+      the former guard and attribute the next normal-path failure or wait,
+      keeping budget/trace limits distinct from handshake evidence.
+
+### IOP Physical 0x1f8015f0 Startup Write
+
+- [ ] Investigate the normal-path word store of `0x777` to `0x1f8015f0`;
+      establish manual evidence, identity/effects and the responsible owner
+      before selecting a bounded hardware contract.
+- [ ] Implement the selected contract through its responsible owner; validate
+      exact access admission/rejection, ordering and any lifecycle/persistence
+      effects with focused red/green coverage and required gates.
+- [ ] Validate guest and affected restored/trace continuations; independently
+      review, then repeat discovery under an explicitly selected budget to
+      verify this path and attribute the next prerequisite.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including

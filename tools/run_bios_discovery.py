@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Build neko and capture the fixed two-traced/two-untraced BIOS discovery batch."""
+"""Build neko and capture a two-traced/two-untraced BIOS discovery batch."""
 
 import argparse
 import json
@@ -96,12 +96,13 @@ def inspect_batch(directory, manifest):
     return equal, failure
 
 
-def run_batch(directory, bios, *, failure_context=False):
+def run_batch(directory, bios, *, master_cycles=MASTER_CYCLES, failure_context=False):
+    master_cycles = uint(master_cycles, "Cycle ceiling")
     if not bios.is_file():
         raise ValueError(f"BIOS input does not exist: {bios}")
     directory.mkdir(parents=True, exist_ok=False)
     manifest = dict(status="running", bios=str(bios),
-                    max_master_cycles=MASTER_CYCLES, trace_events=TRACE_EVENTS,
+                    max_master_cycles=master_cycles, trace_events=TRACE_EVENTS,
                     commands=[], note=EVIDENCE_NOTE)
     if failure_context:
         manifest["failure_context"] = True
@@ -110,7 +111,7 @@ def run_batch(directory, bios, *, failure_context=False):
         exits = {}
         for name in RUN_NAMES:
             command = [str(binary), "bios-startup", str(bios),
-                       "--cycles", str(MASTER_CYCLES)]
+                       "--cycles", str(master_cycles)]
             if name.startswith("traced"):
                 command += ["--trace-events", str(TRACE_EVENTS)]
                 if failure_context:
@@ -138,11 +139,14 @@ def main(argv=None):
     parser.add_argument("--bios", type=Path,
                         default=ROOT / "local_integration/bios/SCPH-70012.bin",
                         help="BIOS input (default: local_integration/bios/SCPH-70012.bin).")
+    parser.add_argument("--cycles", type=int, default=MASTER_CYCLES,
+                        help="Unsigned 64-bit master-cycle ceiling (default: 1000000).")
     parser.add_argument("--failure-context", action="store_true",
                         help="Retain bounded first-failure context in traced runs.")
     arguments = parser.parse_args(argv)
     try:
         report = run_batch(arguments.directory.resolve(), arguments.bios.resolve(),
+                           master_cycles=arguments.cycles,
                            failure_context=arguments.failure_context)
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return 0 if report["comparisons_equal"] else 1

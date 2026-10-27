@@ -419,8 +419,11 @@ The default input is `local_integration/bios/SCPH-70012.bin`; use
 `--bios "<path>"` for a different input. The helper configures `out/check`
 if needed, builds only the optimized assertion-enabled `neko` target,
 then runs two traced and two genuinely untraced cold starts. Every run
-uses 1,000,000 master cycles; traced runs retain at most 3,000,000 events.
-The helper does not raise these limits or run tests.
+defaults to 1,000,000 master cycles; traced runs retain at most 3,000,000 events.
+Use `--cycles <count>` to select an explicit unsigned 64-bit cycle ceiling
+for all four starts, including zero. The selected ceiling is recorded in
+the manifest and each exact run command. The helper never increases it
+automatically, changes the trace cap, or runs tests.
 Its optional `--failure-context` flag enables the bounded recorder only on
 the two traced runs; both untraced runs remain genuinely untraced. The
 manifest records this choice and automatic first-failure windows select the

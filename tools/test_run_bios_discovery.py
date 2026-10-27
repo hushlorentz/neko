@@ -55,11 +55,12 @@ class DiscoveryTests(unittest.TestCase):
                 raise self.run_error
             rows = (capture_records() if "--failure-context" in command else
                     records("--trace-events" in command))
-            rows[0]["max_master_cycles"] = 1000000
+            budget = int(command[command.index("--cycles") + 1])
+            rows[0]["max_master_cycles"] = budget
             if self.run_statuses[index] == 0:
-                rows[1]["run"].update(master_cycles=1000000,
+                rows[1]["run"].update(master_cycles=budget,
                                       cycle_limit_reached=True)
-                rows[1]["snapshot"]["master_cycle"] = 1000000
+                rows[1]["snapshot"]["master_cycle"] = budget
             if self.change_plain and index == 2:
                 rows[1]["snapshot"]["ee"]["pc"] += 4
             if "--trace-events" in command:
@@ -74,7 +75,7 @@ class DiscoveryTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, self.run_statuses[index])
         return REAL_RUN(command, **kwargs)
 
-    def invoke(self, status=0, *, failure_context=False):
+    def invoke(self, status=0, *, failure_context=False, cycles=None):
         output = io.StringIO()
         errors = io.StringIO()
         with patch.object(discovery.subprocess, "run", side_effect=self.execute):
@@ -82,6 +83,8 @@ class DiscoveryTests(unittest.TestCase):
                 arguments = [str(self.output), "--bios", str(self.bios)]
                 if failure_context:
                     arguments.append("--failure-context")
+                if cycles is not None:
+                    arguments += ["--cycles", str(cycles)]
                 result = discovery.main(arguments)
         self.assertEqual(result, status, errors.getvalue())
         return output.getvalue(), errors.getvalue()
@@ -132,6 +135,41 @@ class DiscoveryTests(unittest.TestCase):
                           if entry["name"].startswith(("traced", "plain"))],
                          [1, 1, 1, 1])
         self.assertEqual(self.read("summary.json")["run"]["master_cycles"], 50)
+
+    def test_explicit_budget_reaches_every_run_and_manifest_with_capture(self):
+        self.invoke(cycles=10000000, failure_context=True)
+        runs = [command for command in self.calls if command[0] == str(self.binary)]
+        base = [str(self.binary), "bios-startup", str(self.bios),
+                "--cycles", "10000000"]
+        traced = base + ["--trace-events", "3000000", "--failure-context"]
+        self.assertEqual(runs, [traced, traced, base, base])
+        self.assertEqual(self.read("manifest.json")["max_master_cycles"], 10000000)
+        self.assertEqual(self.read("summary.json")["input"]["max_master_cycles"],
+                         10000000)
+        self.assertTrue(self.read("compare-traces.json")["equal"])
+        self.assertTrue(self.read("compare-traced-plain.json")["equal"])
+        self.assertEqual(self.read("first-failure-events.json")["event_source"],
+                         "failure_capture")
+
+    def test_explicit_budget_accepts_cli_unsigned_boundaries(self):
+        for cycles in (0, (1 << 64) - 1):
+            with self.subTest(cycles=cycles):
+                self.output = self.root / str(cycles)
+                self.run_count = 0
+                self.invoke(cycles=cycles)
+                self.assertEqual(self.run_count, 4)
+                self.assertEqual(self.read("manifest.json")["max_master_cycles"],
+                                 cycles)
+                self.assertEqual(self.read("summary.json")["input"]["max_master_cycles"],
+                                 cycles)
+
+    def test_out_of_range_budget_fails_before_build_or_artifact_creation(self):
+        for cycles in (-1, 1 << 64):
+            with self.subTest(cycles=cycles):
+                _, errors = self.invoke(status=2, cycles=cycles)
+                self.assertIn("unsigned 64-bit", errors)
+                self.assertEqual(self.calls, [])
+                self.assertFalse(self.output.exists())
 
     def test_opt_in_capture_keeps_untraced_runs_plain_and_selects_failure_context(self):
         self.invoke(failure_context=True)
