@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "catch.hpp"
+#include "iop_trace_test_utils.hpp"
 #include "neko_system.hpp"
 #include "ssbus_test_utils.hpp"
 
@@ -515,6 +516,76 @@ TEST_CASE("IOP high-address startup writes are trace observational",
     ++accesses;
   }
   REQUIRE(accesses == addresses.size());
+}
+
+TEST_CASE("IOP DPCR3 guest stores are trace observational with exact admission outcomes",
+  "[iop][dma][dpcr3][conformance][trace]")
+{
+  namespace Memory = NekoIOPTraceMemory;
+  for (const IOPAddress target : {0x1f8015f0u, 0x9f8015f0u, 0xbf8015f0u})
+  {
+    CAPTURE(target);
+    NekoSystem traced;
+    NekoSystem untraced;
+    const auto sifHash = traced.sifStateHash();
+    const std::array<IOPWord, 10> program{{
+      0x3c010000 | (target >> 16),
+      0x342115f0,
+      0x24020777, // addiu r2, r0, 0x777
+      0xac220000, // sw r2, 0(r1)
+      0x10000002, // beq r0, r0, +2
+      0xa8220003, // swl r2, 3(r1): branch delay slot, full mask
+      0xffffffff, // skipped
+      0xb8220000, // swr r2, 0(r1): full mask
+      0x24020776, // addiu r2, r0, 0x776
+      0xac220000  // sw r2, 0(r1): unsupported value
+    }};
+    for (auto *system : {&traced, &untraced})
+    {
+      for (std::size_t index = 0; index < program.size(); ++index)
+      {
+        instruction(*system, static_cast<IOPAddress>(index * 4), program[index]);
+      }
+      system->iopCore().startExecution(0xa0000000);
+    }
+    traced.startTrace();
+    traced.runMasterCycles(72);
+    untraced.runMasterCycles(72);
+    IOPTraceTest::requireMachine(traced, untraced);
+    REQUIRE(traced.sifStateHash() == sifHash);
+    REQUIRE(traced.iopCore().stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(traced.iopCore().exception().kind == IOPException::None);
+    REQUIRE(traced.iopCore().retiredInstructions() == 8);
+    REQUIRE(traced.iopCore().programCounter() == 0xa0000024);
+    REQUIRE(untraced.trace().empty());
+    REQUIRE(traced.trace().size() == 32);
+    const std::array<std::uint64_t, 4> cycles{{25, 41, 49, 65}};
+    const auto route = target == 0xbf8015f0 ? Memory::CacheRoute::Uncached :
+      Memory::CacheRoute::Cached;
+    std::size_t stores = 0;
+    for (const auto &event : traced.trace())
+    {
+      REQUIRE(event.subsystem == Subsystem::IOP);
+      if (event.type != Type::MemoryAccess ||
+          event.value0 < target || event.value0 > target + 3)
+      {
+        continue;
+      }
+      REQUIRE(stores < cycles.size());
+      requireIdentity(event, Subsystem::IOP, Type::MemoryAccess, cycles[stores]);
+      // Merge-store observations describe the aligned bus transaction.
+      REQUIRE(event.value0 == target);
+      REQUIRE(event.value1 == (stores == 3 ? 0x776 : 0x777));
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        0x1f8015f0, 4, Memory::AccessKind::DataStore,
+        stores == 3 ? Memory::Outcome::Unmapped : Memory::Outcome::Completed,
+        route, true, 0xf}));
+      ++stores;
+    }
+    REQUIRE(stores == cycles.size());
+    requireIdentity(traced.trace().back(), Subsystem::IOP, Type::StateChanged, 65);
+  }
 }
 
 TEST_CASE("IOP cache control readback is trace observational",

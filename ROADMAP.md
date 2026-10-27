@@ -2202,6 +2202,18 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement exact-word `0x777` initialization through the common IOP DMA
       owner; validate access rejection and unchanged DMA/lifecycle state with
       focused red/green coverage and required gates.
+- [x] Validate guest and affected restored/trace continuations; independently
+      review, then repeat discovery under an explicitly selected budget to
+      verify this path and attribute the next prerequisite.
+
+### IOP DMA Channel-0 Startup Initialization
+
+- [ ] Investigate the normal-path zero word store to `0x1f801080`; establish
+      manual evidence, register/channel identity and initialization effects,
+      then select a bounded contract through the existing IOP DMA owner.
+- [ ] Implement the selected channel-register contract with focused red/green
+      access and state coverage; preserve existing SIF, interrupt, scheduling
+      and persistence contracts except for explicitly scoped changes.
 - [ ] Validate guest and affected restored/trace continuations; independently
       review, then repeat discovery under an explicitly selected budget to
       verify this path and attribute the next prerequisite.
