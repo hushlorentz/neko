@@ -16,6 +16,9 @@ namespace
   constexpr IOPAddress DICR2 = 0x1f801574;
   constexpr IOPAddress AUXILIARY = 0x1f801578;
   constexpr IOPAddress DPCR3 = 0x1f8015f0;
+  constexpr IOPAddress CHANNEL0_REGISTERS[] = {
+    0x1f801080, 0x1f801084, 0x1f801088
+  };
   constexpr IOPAddress MADR = 0x1f801530;
   constexpr IOPAddress BCR = 0x1f801534;
   constexpr IOPAddress CHCR = 0x1f801538;
@@ -31,6 +34,58 @@ namespace
   {
     const bool unchanged = system.saveState() == state;
     REQUIRE(unchanged);
+  }
+
+  void requireInitializationStore(
+    IOPAddress physical,
+    IOPAddress target,
+    IOPWord value,
+    IOPWord store,
+    IOPStopReason expectedStop)
+  {
+    CAPTURE(target);
+    CAPTURE(value);
+    CAPTURE(store);
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel channel;
+    IOPBus bus;
+    bus.attachDMA(&dma, &channel);
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPWord program[] = {
+      0x3c010000 | (target >> 16),
+      0x34210000 | (target & 0xffff),
+      0x24020000 | value,
+      0x10000002, // beq r0, r0, +2
+      store
+    };
+    IOPAddress address = 0;
+    for (IOPWord word : program)
+    {
+      REQUIRE(bus.write32(address, word).status == IOPBusStatus::Completed);
+      address += 4;
+    }
+    core.startExecution(0xa0000000);
+    for (unsigned step = 0; step < 5; ++step)
+    {
+      core.stepInstruction();
+    }
+    const bool completed = expectedStop == IOPStopReason::None;
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.generalRegister(2) == value);
+    REQUIRE(core.retiredInstructions() == (completed ? 5 : 4));
+    REQUIRE(core.programCounter() == (completed ? 0xa0000018 : 0xa0000010));
+    REQUIRE(core.branchContinuation().active == !completed);
+    REQUIRE(core.stopReason() == expectedStop);
+    if (!completed)
+    {
+      REQUIRE(core.storeFailure().access.virtualAddress == target + (store & 3));
+      REQUIRE(core.storeFailure().access.physicalAddress == physical + (store & 3));
+      REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+    }
+    core.startExecution(target);
+    REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
   }
 }
 
@@ -241,6 +296,144 @@ TEST_CASE("IOP DPCR3 rejects other values widths masks and neighboring addresses
   requireState(system, before);
 }
 
+TEST_CASE("IOP channel0 initialization requires the DMA owner and changes no state",
+  "[iop][dma][channel0-init]")
+{
+  IOPBus detached;
+  for (IOPAddress address : CHANNEL0_REGISTERS)
+  {
+    REQUIRE(detached.write32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(detached.writeMasked32(address, 0, 0xf).status == IOPBusStatus::Unmapped);
+  }
+
+  NekoSystem system;
+  auto &dma = system.iopDMAController();
+  dma.writePriority(PRIMARY, 0x89abcdef);
+  dma.writePriority(SECONDARY, 0x8800);
+  dma.writeAuxiliaryControl(0x12345678);
+  dma.writeInterrupt(SECONDARY, 0x00800000);
+  dma.signalChannelCompletion(IOPDMAChannel::SIF1);
+  system.iopInterruptController().writeStatus(~DMAC_CAUSE);
+  REQUIRE(dma.interruptPending());
+  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(system.iopSIF1DMAC().writeMemoryAddress(0x200) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF1DMAC().writeChannelControl(START) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.sif().pushSIF1Quadword({{1, 2, 3, 4}}) ==
+    SIFTransferOutcome::Completed);
+  const auto before = system.saveState();
+  system.startTrace();
+  for (IOPAddress address : CHANNEL0_REGISTERS)
+  {
+    CAPTURE(address);
+    for (unsigned repeat = 0; repeat < 2; ++repeat)
+    {
+      REQUIRE(system.iopBus().write32(address, 0).status == IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().writeMasked32(address, 0, 0xf).status ==
+        IOPBusStatus::Completed);
+    }
+  }
+  requireState(system, before);
+  REQUIRE(system.trace().empty());
+}
+
+TEST_CASE("IOP channel0 initialization rejects other accesses without effects",
+  "[iop][dma][channel0-init][bus]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  const auto before = system.saveState();
+  for (IOPAddress address : CHANNEL0_REGISTERS)
+  {
+    CAPTURE(address);
+    for (unsigned bit = 0; bit < 32; ++bit)
+    {
+      const IOPWord value = IOPWord{1} << bit;
+      REQUIRE(bus.write32(address, value).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.writeMasked32(address, value, 0xf).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.write32(address, 0xffffffff).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+    }
+    for (IOPAddress lane = 0; lane < 4; ++lane)
+    {
+      CAPTURE(lane);
+      REQUIRE(bus.read8(address + lane).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write8(address + lane, 0).status == IOPBusStatus::Unmapped);
+      const auto wordStatus = lane == 0 ? IOPBusStatus::Unmapped :
+        IOPBusStatus::Misaligned;
+      REQUIRE(bus.read32(address + lane).status == wordStatus);
+      if (lane != 0)
+      {
+        REQUIRE(bus.write32(address + lane, 0).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.writeMasked32(address + lane, 0, 0xf).status ==
+          IOPBusStatus::Misaligned);
+      }
+      const auto halfStatus = (lane & 1) == 0 ? IOPBusStatus::Unmapped :
+        IOPBusStatus::Misaligned;
+      REQUIRE(bus.read16(address + lane).status == halfStatus);
+      REQUIRE(bus.write16(address + lane, 0).status == halfStatus);
+    }
+    for (std::uint8_t mask : {0u, 0x10u, 0xffu})
+    {
+      REQUIRE_THROWS_AS(bus.writeMasked32(address + 1, 0, mask),
+        std::invalid_argument);
+    }
+    for (IOPAddress alias : {address | 0x80000000u, address | 0xa0000000u})
+    {
+      REQUIRE(bus.write32(alias, 0).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read32(alias).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.regionForRange(address, 4) == IOPBusRegion::Mmio);
+    REQUIRE(bus.regionForRange(address, 5) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
+    std::uint8_t byte = 0xa5;
+    REQUIRE(bus.loadPhysical(address, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(byte == 0xa5);
+  }
+  for (IOPAddress address : {
+    0x1f80107cu, 0x1f80108cu, 0x1f801090u, 0x1f801094u,
+    0x1f801098u, 0x1f8010a0u})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.regionForRange(address, 1) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeMasked32(address, 0, 0xf).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+  }
+  requireState(system, before);
+}
+
+TEST_CASE("IOP channel0 guest initialization requires zero words and complete merge masks",
+  "[iop][dma][channel0-init][execution][merge]")
+{
+  for (IOPAddress physical : CHANNEL0_REGISTERS)
+  {
+    for (IOPAddress target : {physical, physical | 0x80000000u, physical | 0xa0000000u})
+    {
+      for (IOPWord value : {0u, 1u})
+      {
+        for (IOPWord store : {
+          0xac220000u,
+          0xa8220000u, 0xa8220001u, 0xa8220002u, 0xa8220003u,
+          0xb8220000u, 0xb8220001u, 0xb8220002u, 0xb8220003u})
+        {
+          const bool completed = value == 0 &&
+            (store == 0xac220000 || store == 0xa8220003 || store == 0xb8220000);
+          requireInitializationStore(physical, target, value, store,
+            completed ? IOPStopReason::None : IOPStopReason::StoreFailure);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("IOP DPCR3 initialization remains stateless after cold reset and restore",
   "[iop][dma][dpcr3][save-state]")
 {
@@ -271,51 +464,10 @@ TEST_CASE("IOP DPCR3 guest stores translate aliases and require complete merge m
         0xa8220000u, 0xa8220001u, 0xa8220002u, 0xa8220003u,
         0xb8220000u, 0xb8220001u, 0xb8220002u, 0xb8220003u})
       {
-        CAPTURE(target);
-        CAPTURE(value);
-        CAPTURE(store);
-        IOPInterruptController interrupts;
-        IOPDMAController dma(interrupts);
-        IOPSIF1DMAChannel channel;
-        IOPBus bus;
-        bus.attachDMA(&dma, &channel);
-        IOPCore core;
-        core.attachBus(&bus);
-        const IOPWord program[] = {
-          0x3c010000 | (target >> 16),
-          0x34210000 | (target & 0xffff),
-          0x24020000 | value,
-          0x10000002, // beq r0, r0, +2
-          store
-        };
-        IOPAddress address = 0;
-        for (IOPWord word : program)
-        {
-          REQUIRE(bus.write32(address, word).status == IOPBusStatus::Completed);
-          address += 4;
-        }
-        core.startExecution(0xa0000000);
-        for (unsigned step = 0; step < 5; ++step)
-        {
-          core.stepInstruction();
-        }
         const bool completed = value == 0x777 &&
           (store == 0xac220000 || store == 0xa8220003 || store == 0xb8220000);
-        REQUIRE(core.exception().kind == IOPException::None);
-        REQUIRE(core.generalRegister(2) == value);
-        REQUIRE(core.retiredInstructions() == (completed ? 5 : 4));
-        REQUIRE(core.programCounter() == (completed ? 0xa0000018 : 0xa0000010));
-        REQUIRE(core.branchContinuation().active == !completed);
-        REQUIRE(core.stopReason() ==
-          (completed ? IOPStopReason::None : IOPStopReason::StoreFailure));
-        if (!completed)
-        {
-          REQUIRE(core.storeFailure().access.virtualAddress == target + (store & 3));
-          REQUIRE(core.storeFailure().access.physicalAddress == DPCR3 + (store & 3));
-          REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
-        }
-        core.startExecution(target);
-        REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
+        requireInitializationStore(DPCR3, target, value, store,
+          completed ? IOPStopReason::None : IOPStopReason::StoreFailure);
       }
     }
   }

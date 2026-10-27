@@ -79,6 +79,8 @@ class IOPDMAController final
     void writeAuxiliaryControl(IOPWord value);
     // Provisional disabled-FDMA initialization only; no retained state or effects.
     IOPDMAWriteOutcome writeDPCR3Initialization(IOPWord value) const;
+    // Provisional channel-0 zero initialization; no retained state or effects.
+    IOPDMAWriteOutcome writeChannel0Initialization(IOPWord value) const;
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;

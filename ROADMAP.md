@@ -2217,10 +2217,10 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### IOP DMA Channel-0 Startup Initialization
 
-- [ ] Investigate the normal-path zero word store to `0x1f801080`; establish
-      manual evidence, register/channel identity and initialization effects,
-      then select a bounded contract through the existing IOP DMA owner.
-- [ ] Implement the selected channel-register contract with focused red/green
+- [x] Investigate the zero word store to `0x1f801080`; establish evidence
+      and select a bounded channel-0 MADR/BCR/CHCR initialization contract
+      through the existing IOP DMA owner.
+- [x] Implement the selected channel-register contract with focused red/green
       access and state coverage; preserve existing SIF, interrupt, scheduling
       and persistence contracts except for explicitly scoped changes.
 - [ ] Validate guest and affected restored/trace continuations; independently

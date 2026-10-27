@@ -24,6 +24,9 @@ namespace
   constexpr IOPAddress sif0DMABase = 0x1f801520;
   constexpr IOPAddress dmaAuxiliaryControl = 0x1f801578;
   constexpr IOPAddress dmaDPCR3Initialization = 0x1f8015f0;
+  constexpr std::array<IOPAddress, 3> dmaChannel0InitializationRegisters = {{
+    0x1f801080, 0x1f801084, 0x1f801088
+  }};
 
   bool isAligned(IOPAddress address, std::size_t width)
   {
@@ -247,6 +250,13 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   if (first == dmaDPCR3Initialization && last < first + sizeof(IOPWord))
   {
     return {IOPBusRegion::Mmio, 0, Device::DPCR3Initialization};
+  }
+  for (IOPAddress target : dmaChannel0InitializationRegisters)
+  {
+    if (first == target && last < first + sizeof(IOPWord))
+    {
+      return {IOPBusRegion::Mmio, 0, Device::Channel0Initialization};
+    }
   }
   if (first >= sif0DMABase &&
       last < static_cast<std::uint64_t>(sif0DMABase) + 16)
@@ -506,6 +516,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
     case Device::POST2:
     case Device::POST3:
     case Device::DPCR3Initialization:
+    case Device::Channel0Initialization:
     case Device::HighAddressInitializationControl:
     case Device::RAMInitializationControl:
     case Device::None:
@@ -534,6 +545,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::DPCR3Initialization:
       return width == sizeof(IOPWord) && dmaController != nullptr &&
         dmaController->writeDPCR3Initialization(value) == IOPDMAWriteOutcome::Completed
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::Channel0Initialization:
+      return width == sizeof(IOPWord) && dmaController != nullptr &&
+        dmaController->writeChannel0Initialization(value) == IOPDMAWriteOutcome::Completed
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::Timer:
       return writeTimerRegister(location, width, value);

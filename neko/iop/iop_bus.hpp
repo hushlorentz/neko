@@ -138,6 +138,7 @@ class IOPBus final
       InterruptController,
       DMAController,
       DPCR3Initialization,
+      Channel0Initialization,
       SIF1DMA,
       SIF0DMA,
       Timer,
