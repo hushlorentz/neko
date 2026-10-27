@@ -2259,9 +2259,18 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement the selected contract with focused red/green access and state
       coverage; preserve existing DMA, interrupt and lifecycle boundaries
       except for explicitly scoped changes.
-- [ ] Validate guest and affected restored/trace continuations; independently
+- [x] Validate guest and affected restored/trace continuations; independently
       review, then repeat discovery under an explicitly selected budget to
       verify this path and attribute the next prerequisite.
+
+### Bounded IOP DMA Initialization Planning
+
+- [ ] Inventory the finite remaining startup-initialization family from local
+      manuals and retained approved evidence; distinguish shared contracts,
+      existing owners, unsupported effects and evidence/approval gaps.
+- [ ] Group justified capabilities into independently testable work items;
+      define regression and BIOS-discovery checkpoints, stop boundaries and
+      their relationship to the exact guest-produced EE-IOP handshake target.
 
 ### Real BIOS Handshake and Boundary Conformance
 
