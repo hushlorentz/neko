@@ -2292,11 +2292,19 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement the four selected zero-only endpoints with focused red/green,
       guest, no-effects and affected lifecycle coverage; preserve existing
       channel-9 TADR and shared DMA controls.
-- [ ] Independently review and validate the selected capability, then use
+- [x] Independently review and validate the selected capability, then use
       separately authorized discovery to attribute the next dependency;
       reopen scope for readback, nonzero controls or active effects.
 
+### IOP CD/DVD Startup Device Boundary Scope
+
+- [x] Identify the `0x1f402005` readiness load and related command family;
+      route functional CD/DVD behavior to Milestone 10 before implementation.
+
 ### Real BIOS Handshake and Boundary Conformance
+
+Blocked on the Milestone 10 CD/DVD startup prerequisite; the handshake target
+remains incomplete.
 
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
@@ -2331,12 +2339,26 @@ including optical-media commands and data flow, SIO2-facing input, controller
 and memory-card behavior, and any required ROM or module-loading support.
 Preserve deterministic emulated device time independently of host I/O speed.
 
-- [ ] Use the Milestone 9 BIOS dependency record and local SCEI manuals to
-      expand this milestone into independently reviewable blocks and items
-      before implementation. Identify the exact CD/DVD, SIO2, controller,
-      memory-card, ROM/module, DMA, interrupt, timing, persistence, and
-      diagnostic behavior required by the selected boot path; defer unrelated
-      peripheral breadth.
+Develop the CD/DVD startup prerequisite before resuming Milestone 9's blocked
+real-handshake conformance; Milestone 9 remains incomplete.
+
+### CD/DVD Startup Dependency Planning
+
+- [ ] Select the exact startup register/command batch from the demonstrated
+      CD/DVD boundary, manuals and approved research; resolve access, reset,
+      media, clock/configuration and timing policies before implementation.
+- [ ] Define controller ownership, N/S transport, buffers, errors/interrupts,
+      persistence and diagnostics; split the selected behavior into reviewable
+      blocks, separating command transport from required DMA/media services.
+
+### Remaining Boot-Service Scope
+
+- [ ] Expand the remaining media, SIO2, controller, memory-card and ROM/module
+      needs into reviewable blocks from demonstrated boot-path dependencies;
+      identify DMA, interrupt, timing, persistence and diagnostic requirements.
+
+### Boot-Service Implementation and Conformance
+
 - [ ] Implement the required CD/DVD command, interrupt, DMA, sector, seek, and
       transfer-continuation behavior with deterministic emulated timing.
 - [ ] Implement the required SIO2, controller, and memory-card protocols with
