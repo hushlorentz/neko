@@ -15,6 +15,7 @@ namespace
   constexpr IOPAddress DPCR2 = 0x1f801570;
   constexpr IOPAddress DICR2 = 0x1f801574;
   constexpr IOPAddress AUXILIARY = 0x1f801578;
+  constexpr IOPAddress DPCR3 = 0x1f8015f0;
   constexpr IOPAddress MADR = 0x1f801530;
   constexpr IOPAddress BCR = 0x1f801534;
   constexpr IOPAddress CHCR = 0x1f801538;
@@ -135,6 +136,189 @@ TEST_CASE("IOP DMA auxiliary word supports ordinary guest LW and SW",
   REQUIRE(system.iopCore().retiredInstructions() == 6);
   REQUIRE(system.iopCore().generalRegister(3) == 0x1234);
   REQUIRE(system.iopBus().read32(AUXILIARY).value == 0x1234);
+}
+
+TEST_CASE("IOP DPCR3 initialization requires the common DMA owner and changes no state",
+  "[iop][dma][dpcr3]")
+{
+  IOPBus detached;
+  REQUIRE(detached.write32(DPCR3, 0x777).status == IOPBusStatus::Unmapped);
+  REQUIRE(detached.writeMasked32(DPCR3, 0x777, 0xf).status ==
+    IOPBusStatus::Unmapped);
+
+  NekoSystem system;
+  auto &dma = system.iopDMAController();
+  dma.writePriority(PRIMARY, 0x12345678);
+  dma.writePriority(SECONDARY, 0x8800);
+  dma.writeAuxiliaryControl(0x89abcdef);
+  dma.writeInterrupt(SECONDARY, 0x00800000);
+  dma.signalChannelCompletion(IOPDMAChannel::SIF1);
+  system.iopInterruptController().writeStatus(~DMAC_CAUSE);
+  REQUIRE(dma.interruptPending());
+  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(system.iopSIF1DMAC().writeMemoryAddress(0x200) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.iopSIF1DMAC().writeChannelControl(START) ==
+    IOPDMAWriteOutcome::Completed);
+  REQUIRE(system.sif().pushSIF1Quadword({{1, 2, 3, 4}}) ==
+    SIFTransferOutcome::Completed);
+  const auto before = system.saveState();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  system.startTrace();
+  REQUIRE(dma.writeDPCR3Initialization(0x777) == IOPDMAWriteOutcome::Completed);
+  REQUIRE(dma.writeDPCR3Initialization(0) == IOPDMAWriteOutcome::UnsupportedControl);
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    REQUIRE(system.iopBus().write32(DPCR3, 0x777).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().writeMasked32(DPCR3, 0x777, 0xf).status ==
+      IOPBusStatus::Completed);
+  }
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  requireState(system, before);
+  REQUIRE(system.trace().empty());
+}
+
+TEST_CASE("IOP DPCR3 rejects other values widths masks and neighboring addresses",
+  "[iop][dma][dpcr3][bus]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  const auto before = system.saveState();
+  for (unsigned bit = 0; bit < 32; ++bit)
+  {
+    CAPTURE(bit);
+    REQUIRE(bus.write32(DPCR3, 0x777 ^ (IOPWord{1} << bit)).status ==
+      IOPBusStatus::Unmapped);
+  }
+  for (IOPWord value : {0u, 0xffffffffu, 0x77777777u})
+  {
+    REQUIRE(bus.writeMasked32(DPCR3, value, 0xf).status ==
+      IOPBusStatus::Unmapped);
+  }
+  for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+  {
+    REQUIRE(bus.writeMasked32(DPCR3, 0x777, mask).status == IOPBusStatus::Unmapped);
+  }
+  for (IOPAddress lane = 0; lane < 4; ++lane)
+  {
+    CAPTURE(lane);
+    REQUIRE(bus.read8(DPCR3 + lane).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(DPCR3 + lane, 0x77).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(DPCR3 + lane).status ==
+      (lane == 0 ? IOPBusStatus::Unmapped : IOPBusStatus::Misaligned));
+    const auto status = lane == 0 ? IOPBusStatus::Completed : IOPBusStatus::Misaligned;
+    REQUIRE(bus.write32(DPCR3 + lane, 0x777).status == status);
+    REQUIRE(bus.writeMasked32(DPCR3 + lane, 0x777, 0xf).status == status);
+    REQUIRE(bus.read16(DPCR3 + lane).status ==
+      ((lane & 1) != 0 ? IOPBusStatus::Misaligned : IOPBusStatus::Unmapped));
+    REQUIRE(bus.write16(DPCR3 + lane, 0x777).status ==
+      ((lane & 1) != 0 ? IOPBusStatus::Misaligned : IOPBusStatus::Unmapped));
+  }
+  for (IOPAddress address : {DPCR3 - 4, DPCR3 + 4, 0x9f8015f0u, 0xbf8015f0u})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.regionForRange(address, 1) == IOPBusRegion::Unmapped);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 0x777).status == IOPBusStatus::Unmapped);
+  }
+  for (std::uint8_t mask : {0u, 0x10u, 0xffu})
+  {
+    REQUIRE_THROWS_AS(bus.writeMasked32(DPCR3 + 1, 0x777, mask),
+      std::invalid_argument);
+  }
+  REQUIRE(bus.regionForRange(DPCR3, 4) == IOPBusRegion::Mmio);
+  REQUIRE(bus.regionForRange(DPCR3, 5) == IOPBusRegion::Unmapped);
+  REQUIRE(bus.readDMAC32(DPCR3).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.writeDMAC32(DPCR3, 0x777).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.dmaWriteStatus(DPCR3) == IOPBusStatus::Unmapped);
+  std::uint8_t byte = 0xa5;
+  REQUIRE(bus.loadPhysical(DPCR3, &byte, 1) == IOPBusStatus::Unmapped);
+  REQUIRE(bus.inspectPhysical(DPCR3, &byte, 1) == IOPBusStatus::Unmapped);
+  REQUIRE(byte == 0xa5);
+  requireState(system, before);
+}
+
+TEST_CASE("IOP DPCR3 initialization remains stateless after cold reset and restore",
+  "[iop][dma][dpcr3][save-state]")
+{
+  NekoSystem system;
+  const auto cold = system.saveState();
+  REQUIRE(system.iopBus().write32(DPCR3, 0x777).status == IOPBusStatus::Completed);
+  requireState(system, cold);
+  system.reset();
+  REQUIRE(system.iopBus().write32(DPCR3, 0x777).status == IOPBusStatus::Completed);
+  requireState(system, cold);
+  system.iopDMAController().writePriority(SECONDARY, 0xffffffff);
+  system.loadState(cold);
+  REQUIRE(system.iopBus().writeMasked32(DPCR3, 0x777, 0xf).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().read32(DPCR3).status == IOPBusStatus::Unmapped);
+  requireState(system, cold);
+}
+
+TEST_CASE("IOP DPCR3 guest stores translate aliases and require complete merge masks",
+  "[iop][dma][dpcr3][execution][merge]")
+{
+  for (IOPAddress target : {DPCR3, 0x9f8015f0u, 0xbf8015f0u})
+  {
+    for (IOPWord value : {0x777u, 0x776u})
+    {
+      for (IOPWord store : {
+        0xac220000u,
+        0xa8220000u, 0xa8220001u, 0xa8220002u, 0xa8220003u,
+        0xb8220000u, 0xb8220001u, 0xb8220002u, 0xb8220003u})
+      {
+        CAPTURE(target);
+        CAPTURE(value);
+        CAPTURE(store);
+        IOPInterruptController interrupts;
+        IOPDMAController dma(interrupts);
+        IOPSIF1DMAChannel channel;
+        IOPBus bus;
+        bus.attachDMA(&dma, &channel);
+        IOPCore core;
+        core.attachBus(&bus);
+        const IOPWord program[] = {
+          0x3c010000 | (target >> 16),
+          0x34210000 | (target & 0xffff),
+          0x24020000 | value,
+          0x10000002, // beq r0, r0, +2
+          store
+        };
+        IOPAddress address = 0;
+        for (IOPWord word : program)
+        {
+          REQUIRE(bus.write32(address, word).status == IOPBusStatus::Completed);
+          address += 4;
+        }
+        core.startExecution(0xa0000000);
+        for (unsigned step = 0; step < 5; ++step)
+        {
+          core.stepInstruction();
+        }
+        const bool completed = value == 0x777 &&
+          (store == 0xac220000 || store == 0xa8220003 || store == 0xb8220000);
+        REQUIRE(core.exception().kind == IOPException::None);
+        REQUIRE(core.generalRegister(2) == value);
+        REQUIRE(core.retiredInstructions() == (completed ? 5 : 4));
+        REQUIRE(core.programCounter() == (completed ? 0xa0000018 : 0xa0000010));
+        REQUIRE(core.branchContinuation().active == !completed);
+        REQUIRE(core.stopReason() ==
+          (completed ? IOPStopReason::None : IOPStopReason::StoreFailure));
+        if (!completed)
+        {
+          REQUIRE(core.storeFailure().access.virtualAddress == target + (store & 3));
+          REQUIRE(core.storeFailure().access.physicalAddress == DPCR3 + (store & 3));
+          REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+        }
+        core.startExecution(target);
+        REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
+      }
+    }
+  }
 }
 
 TEST_CASE("IOP DMA auxiliary word follows existing IOP MMIO fetch routing",

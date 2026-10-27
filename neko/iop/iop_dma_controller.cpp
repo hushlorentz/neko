@@ -114,6 +114,12 @@ void IOPDMAController::writeAuxiliaryControl(IOPWord value)
   auxiliaryControlRegister = value;
 }
 
+IOPDMAWriteOutcome IOPDMAController::writeDPCR3Initialization(IOPWord value) const
+{
+  return value == 0x777 ? IOPDMAWriteOutcome::Completed :
+    IOPDMAWriteOutcome::UnsupportedControl;
+}
+
 bool IOPDMAController::channelEnabled(IOPDMAChannel channel) const
 {
   return (banks[1].priority & (IOPWord{8} << (4 * channelSlot(channel)))) != 0;

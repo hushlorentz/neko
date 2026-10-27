@@ -7,6 +7,7 @@
 #include <stdexcept>
 
 #include "iop_bus.hpp"
+#include "iop_dma_channel_state.hpp"
 #include "iop_interrupt_controller.hpp"
 
 class IOPSIF1DMAChannel;
@@ -76,6 +77,8 @@ class IOPDMAController final
     // Provisional retained word; raw bit semantics remain unestablished.
     IOPWord auxiliaryControl() const;
     void writeAuxiliaryControl(IOPWord value);
+    // Provisional disabled-FDMA initialization only; no retained state or effects.
+    IOPDMAWriteOutcome writeDPCR3Initialization(IOPWord value) const;
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;

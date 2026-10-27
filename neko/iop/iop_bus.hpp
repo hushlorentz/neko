@@ -137,6 +137,7 @@ class IOPBus final
       SSBUSConfiguration,
       InterruptController,
       DMAController,
+      DPCR3Initialization,
       SIF1DMA,
       SIF0DMA,
       Timer,
