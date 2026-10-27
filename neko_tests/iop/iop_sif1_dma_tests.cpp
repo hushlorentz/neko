@@ -75,8 +75,8 @@ TEST_CASE("IOP SIF1 receiver accepts headers and single words only on phase zero
   REQUIRE(system.sif().control() == 0);
 }
 
-TEST_CASE("IOP channel0-3 initialization preserves live SIF1 grants and completion",
-  "[iop][sif1][dma][channel0-init][channel1-init][channel2-init][channel3-init][conformance][trace]")
+TEST_CASE("IOP channel initialization preserves live SIF grants and completion",
+  "[iop][sif0][sif1][dma][channel-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][trace]")
 {
   for (const unsigned prefix : {0u, 9u, 25u})
   {
@@ -88,6 +88,22 @@ TEST_CASE("IOP channel0-3 initialization preserves live SIF1 grants and completi
       push(*system, {{0x80001000, 4, 0xdead, 0xbeef}});
       push(*system, {{1, 2, 3, 4}});
       start(*system);
+      const IOPWord descriptor[] = {0xc0002000, 4, 0xdead, 0xbeef, 0xf00d, 0xcafe};
+      for (std::size_t index = 0; index < sizeof(descriptor) / sizeof(descriptor[0]); ++index)
+      {
+        REQUIRE(system->iopBus().write32(0x3000 + static_cast<IOPAddress>(index * 4),
+          descriptor[index]).status == IOPBusStatus::Completed);
+      }
+      for (IOPAddress index = 0; index < 4; ++index)
+      {
+        REQUIRE(system->iopBus().write32(0x2000 + index * 4, index + 5).status ==
+          IOPBusStatus::Completed);
+      }
+      REQUIRE(system->iopSIF0DMAC().writeTagAddress(0x3000) ==
+        IOPDMAWriteOutcome::Completed);
+      REQUIRE(system->iopSIF0DMAC().writeChannelControl(0x01000401) ==
+        IOPDMAWriteOutcome::Completed);
+      system->iopDMAController().writePriority(BANK, 0x8800);
       system->runMasterCycles(prefix);
       system->startTrace();
     }
@@ -95,22 +111,33 @@ TEST_CASE("IOP channel0-3 initialization preserves live SIF1 grants and completi
       0x1f801080u, 0x1f801084u, 0x1f801088u,
       0x1f801090u, 0x1f801094u, 0x1f801098u,
       0x1f8010a0u, 0x1f8010a4u, 0x1f8010a8u,
-      0x1f8010b0u, 0x1f8010b4u, 0x1f8010b8u})
+      0x1f8010b0u, 0x1f8010b4u, 0x1f8010b8u,
+      0x1f8010c0u, 0x1f8010c4u, 0x1f8010c8u,
+      0x1f8010d0u, 0x1f8010d4u, 0x1f8010d8u,
+      0x1f8010e0u, 0x1f8010e4u, 0x1f8010e8u,
+      0x1f801500u, 0x1f801504u, 0x1f801508u,
+      0x1f801510u, 0x1f801514u, 0x1f801518u,
+      0x1f801540u, 0x1f801544u, 0x1f801548u,
+      0x1f801550u, 0x1f801554u, 0x1f801558u})
     {
       REQUIRE(initialized.iopBus().write32(address, 0).status ==
         IOPBusStatus::Completed);
       REQUIRE(initialized.iopBus().writeMasked32(address, 0, 0xf).status ==
         IOPBusStatus::Completed);
     }
-    baseline.runMasterCycles(40 - prefix);
-    initialized.runMasterCycles(40 - prefix);
+    baseline.runMasterCycles(88 - prefix);
+    initialized.runMasterCycles(88 - prefix);
     IOPTraceTest::requireMachine(initialized, baseline);
     IOPTraceTest::requireEvents(initialized.trace(), baseline.trace());
     REQUIRE_FALSE(initialized.iopSIF1DMAC().active());
+    REQUIRE_FALSE(initialized.iopSIF0DMAC().active());
     REQUIRE(initialized.iopSIF1DMAC().memoryAddress() == 0x1010);
-    REQUIRE(initialized.iopDMAController().interruptStatus(BANK) == FLAG);
+    REQUIRE(initialized.iopSIF0DMAC().memoryAddress() == 0x2010);
+    REQUIRE(initialized.iopSIF0DMAC().tagAddress() == 0x3010);
+    REQUIRE(initialized.iopDMAController().interruptStatus(BANK) == (FLAG | 0x04000000));
     REQUIRE(initialized.iopInterruptController().status() == 8);
     REQUIRE(initialized.sif().wordCount(SIFDirection::SIF1) == 0);
+    REQUIRE(initialized.sif().wordCount(SIFDirection::SIF0) == 8);
     for (IOPAddress index = 0; index < 4; ++index)
     {
       REQUIRE(ramWord(initialized, 0x1000 + index * 4) == index + 1);

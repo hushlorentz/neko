@@ -2265,12 +2265,36 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### Bounded IOP DMA Initialization Planning
 
-- [ ] Inventory the finite remaining startup-initialization family from local
+- [x] Inventory the finite remaining startup-initialization family from local
       manuals and retained approved evidence; distinguish shared contracts,
       existing owners, unsupported effects and evidence/approval gaps.
-- [ ] Group justified capabilities into independently testable work items;
+- [x] Group justified capabilities into independently testable work items;
       define regression and BIOS-discovery checkpoints, stop boundaries and
       their relationship to the exact guest-produced EE-IOP handshake target.
+
+### Remaining IOP DMA Channel-Register Initialization
+
+- [x] Select the bounded contract for the 21 SDK-initialized MADR/BCR/CHCR
+      words of channels 4-8 and 11-12; distinguish prospective coverage from
+      BIOS-observed writes and preserve active SIF ownership.
+- [x] Implement the selected exact-word profile through the common DMA owner
+      with focused red/green access, guest-store and no-effects coverage;
+      keep readback, active transfers and supplemental words out of scope.
+- [ ] Validate restored/trace and live-SIF continuations; independently review
+      the capability, run the due complete checks, then use separately
+      authorized discovery to verify observed writes and the next boundary.
+
+### Supplemental IOP DMA Initialization Scope
+
+- [ ] If reached by normal BIOS execution, separately select contracts for
+      channel-4 TADR and the three SDK supplemental words; do not infer
+      shared behavior or state ownership from their initialization values.
+- [ ] Implement only justified, selected endpoints with focused red/green,
+      guest, no-effects and affected lifecycle coverage; preserve existing
+      channel-9 TADR and shared DMA controls.
+- [ ] Independently review and validate the selected capability, then use
+      separately authorized discovery to attribute the next dependency;
+      reopen scope for readback, nonzero controls or active effects.
 
 ### Real BIOS Handshake and Boundary Conformance
 

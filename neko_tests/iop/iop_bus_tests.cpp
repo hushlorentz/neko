@@ -887,9 +887,10 @@ TEST_CASE("IOP bus INTC decode stays physical and host helpers stay storage-only
   REQUIRE(inspection.regionForRange(0x1f801078, 4) == IOPBusRegion::Mmio);
   REQUIRE(inspection.regionForRange(0x1f801078, 5) == IOPBusRegion::Unmapped);
 
-  for (IOPAddress address : {0x1f80106cu, 0x1f80107cu, 0x1f801080u,
+  for (IOPAddress address : {0x1f80106cu, 0x1f80107cu, 0x1f80108cu,
        0x9f801070u, 0xbf801070u})
   {
+    CAPTURE(address);
     REQUIRE(inspection.regionForRange(address, 4) == IOPBusRegion::Unmapped);
     REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
