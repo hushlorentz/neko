@@ -75,8 +75,8 @@ TEST_CASE("IOP SIF1 receiver accepts headers and single words only on phase zero
   REQUIRE(system.sif().control() == 0);
 }
 
-TEST_CASE("IOP channel initialization preserves live SIF grants and completion",
-  "[iop][sif0][sif1][dma][channel-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][trace]")
+TEST_CASE("IOP DMA register initialization preserves live SIF grants and completion",
+  "[iop][sif0][sif1][dma][channel-init][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][trace]")
 {
   for (const unsigned prefix : {0u, 9u, 25u})
   {
@@ -118,7 +118,8 @@ TEST_CASE("IOP channel initialization preserves live SIF grants and completion",
       0x1f801500u, 0x1f801504u, 0x1f801508u,
       0x1f801510u, 0x1f801514u, 0x1f801518u,
       0x1f801540u, 0x1f801544u, 0x1f801548u,
-      0x1f801550u, 0x1f801554u, 0x1f801558u})
+      0x1f801550u, 0x1f801554u, 0x1f801558u,
+      0x1f8010ccu, 0x1f801560u, 0x1f801564u, 0x1f801568u})
     {
       REQUIRE(initialized.iopBus().write32(address, 0).status ==
         IOPBusStatus::Completed);

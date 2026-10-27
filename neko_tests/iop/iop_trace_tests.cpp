@@ -519,7 +519,7 @@ TEST_CASE("IOP high-address startup writes are trace observational",
 }
 
 TEST_CASE("IOP DMA initialization guest stores are trace observational with exact admission outcomes",
-  "[iop][dma][dpcr3][channel-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][trace]")
+  "[iop][dma][dpcr3][channel-init][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][trace]")
 {
   namespace Memory = NekoIOPTraceMemory;
   for (const IOPAddress physical : {0x1f8015f0u,
@@ -533,7 +533,8 @@ TEST_CASE("IOP DMA initialization guest stores are trace observational with exac
     0x1f801500u, 0x1f801504u, 0x1f801508u,
     0x1f801510u, 0x1f801514u, 0x1f801518u,
     0x1f801540u, 0x1f801544u, 0x1f801548u,
-    0x1f801550u, 0x1f801554u, 0x1f801558u})
+    0x1f801550u, 0x1f801554u, 0x1f801558u,
+    0x1f8010ccu, 0x1f801560u, 0x1f801564u, 0x1f801568u})
   for (const IOPAddress target : {physical, physical | 0x80000000u, physical | 0xa0000000u})
   {
     CAPTURE(target);

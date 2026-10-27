@@ -2280,16 +2280,16 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Implement the selected exact-word profile through the common DMA owner
       with focused red/green access, guest-store and no-effects coverage;
       keep readback, active transfers and supplemental words out of scope.
-- [ ] Validate restored/trace and live-SIF continuations; independently review
+- [x] Validate restored/trace and live-SIF continuations; independently review
       the capability, run the due complete checks, then use separately
       authorized discovery to verify observed writes and the next boundary.
 
 ### Supplemental IOP DMA Initialization Scope
 
-- [ ] If reached by normal BIOS execution, separately select contracts for
-      channel-4 TADR and the three SDK supplemental words; do not infer
-      shared behavior or state ownership from their initialization values.
-- [ ] Implement only justified, selected endpoints with focused red/green,
+- [x] Assess channel-4 TADR and the three SDK supplemental words as one
+      candidate batch; select justified per-endpoint contracts, distinguishing
+      BIOS-observed demand from prospective coverage and preserving SIF ownership.
+- [x] Implement the four selected zero-only endpoints with focused red/green,
       guest, no-effects and affected lifecycle coverage; preserve existing
       channel-9 TADR and shared DMA controls.
 - [ ] Independently review and validate the selected capability, then use

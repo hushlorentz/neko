@@ -81,6 +81,8 @@ class IOPDMAController final
     IOPDMAWriteOutcome writeDPCR3Initialization(IOPWord value) const;
     // Provisional channel-0..8/11/12 zero initialization; no retained state or effects.
     IOPDMAWriteOutcome writeChannelRegisterInitialization(IOPWord value) const;
+    // Provisional exact supplemental zero initialization; no retained state or effects.
+    IOPDMAWriteOutcome writeSupplementalInitialization(IOPWord value) const;
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;

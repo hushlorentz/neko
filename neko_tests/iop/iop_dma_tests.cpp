@@ -16,7 +16,7 @@ namespace
   constexpr IOPAddress DICR2 = 0x1f801574;
   constexpr IOPAddress AUXILIARY = 0x1f801578;
   constexpr IOPAddress DPCR3 = 0x1f8015f0;
-  constexpr IOPAddress CHANNEL_INITIALIZATION_REGISTERS[] = {
+  constexpr IOPAddress INITIALIZATION_REGISTERS[] = {
     0x1f801080, 0x1f801084, 0x1f801088,
     0x1f801090, 0x1f801094, 0x1f801098,
     0x1f8010a0, 0x1f8010a4, 0x1f8010a8,
@@ -27,7 +27,8 @@ namespace
     0x1f801500, 0x1f801504, 0x1f801508,
     0x1f801510, 0x1f801514, 0x1f801518,
     0x1f801540, 0x1f801544, 0x1f801548,
-    0x1f801550, 0x1f801554, 0x1f801558
+    0x1f801550, 0x1f801554, 0x1f801558,
+    0x1f8010cc, 0x1f801560, 0x1f801564, 0x1f801568
   };
   constexpr IOPAddress MADR = 0x1f801530;
   constexpr IOPAddress BCR = 0x1f801534;
@@ -306,11 +307,11 @@ TEST_CASE("IOP DPCR3 rejects other values widths masks and neighboring addresses
   requireState(system, before);
 }
 
-TEST_CASE("IOP channel initialization requires the DMA owner and changes no state",
-  "[iop][dma][channel-init][channel0-init][channel1-init][channel2-init][channel3-init]")
+TEST_CASE("IOP DMA register initialization requires the owner and changes no state",
+  "[iop][dma][channel-init][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init]")
 {
   IOPBus detached;
-  for (IOPAddress address : CHANNEL_INITIALIZATION_REGISTERS)
+  for (IOPAddress address : INITIALIZATION_REGISTERS)
   {
     REQUIRE(detached.write32(address, 0).status == IOPBusStatus::Unmapped);
     REQUIRE(detached.writeMasked32(address, 0, 0xf).status == IOPBusStatus::Unmapped);
@@ -348,7 +349,8 @@ TEST_CASE("IOP channel initialization requires the DMA owner and changes no stat
   const auto before = system.saveState();
   system.startTrace();
   REQUIRE(dma.writeChannelRegisterInitialization(0) == IOPDMAWriteOutcome::Completed);
-  for (IOPAddress address : CHANNEL_INITIALIZATION_REGISTERS)
+  REQUIRE(dma.writeSupplementalInitialization(0) == IOPDMAWriteOutcome::Completed);
+  for (IOPAddress address : INITIALIZATION_REGISTERS)
   {
     CAPTURE(address);
     for (unsigned repeat = 0; repeat < 2; ++repeat)
@@ -362,8 +364,8 @@ TEST_CASE("IOP channel initialization requires the DMA owner and changes no stat
   REQUIRE(system.trace().empty());
 }
 
-TEST_CASE("IOP channel initialization rejects other accesses without effects",
-  "[iop][dma][channel-init][channel0-init][channel1-init][channel2-init][channel3-init][bus]")
+TEST_CASE("IOP DMA register initialization rejects other accesses without effects",
+  "[iop][dma][channel-init][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init][bus]")
 {
   NekoSystem system;
   auto &bus = system.iopBus();
@@ -372,8 +374,10 @@ TEST_CASE("IOP channel initialization rejects other accesses without effects",
   {
     REQUIRE(system.iopDMAController().writeChannelRegisterInitialization(
       IOPWord{1} << bit) == IOPDMAWriteOutcome::UnsupportedControl);
+    REQUIRE(system.iopDMAController().writeSupplementalInitialization(
+      IOPWord{1} << bit) == IOPDMAWriteOutcome::UnsupportedControl);
   }
-  for (IOPAddress address : CHANNEL_INITIALIZATION_REGISTERS)
+  for (IOPAddress address : INITIALIZATION_REGISTERS)
   {
     CAPTURE(address);
     for (unsigned bit = 0; bit < 32; ++bit)
@@ -428,9 +432,9 @@ TEST_CASE("IOP channel initialization rejects other accesses without effects",
   }
   for (IOPAddress address : {
     0x1f80107cu, 0x1f80108cu, 0x1f80109cu, 0x1f8010acu, 0x1f8010bcu,
-    0x1f8010ccu, 0x1f8010dcu, 0x1f8010ecu,
+    0x1f8010dcu, 0x1f8010ecu,
     0x1f80150cu, 0x1f80151cu, 0x1f80153cu, 0x1f80154cu, 0x1f80155cu,
-    0x1f801560u, 0x1f801564u, 0x1f801568u, 0x1f80157cu, 0x1f801580u})
+    0x1f80156cu, 0x1f80157cu, 0x1f801580u})
   {
     CAPTURE(address);
     REQUIRE(bus.regionForRange(address, 1) == IOPBusRegion::Unmapped);
@@ -441,10 +445,10 @@ TEST_CASE("IOP channel initialization rejects other accesses without effects",
   requireState(system, before);
 }
 
-TEST_CASE("IOP channel guest initialization requires zero words and complete merge masks",
-  "[iop][dma][channel-init][channel0-init][channel1-init][channel2-init][channel3-init][execution][merge]")
+TEST_CASE("IOP DMA register guest initialization requires zero words and complete merge masks",
+  "[iop][dma][channel-init][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init][execution][merge]")
 {
-  for (IOPAddress physical : CHANNEL_INITIALIZATION_REGISTERS)
+  for (IOPAddress physical : INITIALIZATION_REGISTERS)
   {
     for (IOPAddress target : {physical, physical | 0x80000000u, physical | 0xa0000000u})
     {
@@ -466,7 +470,7 @@ TEST_CASE("IOP channel guest initialization requires zero words and complete mer
 }
 
 TEST_CASE("IOP DMA initialization remains stateless after cold reset and restore",
-  "[iop][dma][dpcr3][channel-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][save-state]")
+  "[iop][dma][dpcr3][channel-init][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][save-state]")
 {
   NekoSystem system;
   const auto initialize = [&system]()
@@ -475,7 +479,7 @@ TEST_CASE("IOP DMA initialization remains stateless after cold reset and restore
     REQUIRE(system.iopBus().writeMasked32(DPCR3, 0x777, 0xf).status ==
       IOPBusStatus::Completed);
     REQUIRE(system.iopBus().read32(DPCR3).status == IOPBusStatus::Unmapped);
-    for (IOPAddress address : CHANNEL_INITIALIZATION_REGISTERS)
+    for (IOPAddress address : INITIALIZATION_REGISTERS)
     {
       CAPTURE(address);
       REQUIRE(system.iopBus().write32(address, 0).status == IOPBusStatus::Completed);
