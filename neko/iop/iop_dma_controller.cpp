@@ -120,7 +120,8 @@ IOPDMAWriteOutcome IOPDMAController::writeDPCR3Initialization(IOPWord value) con
     IOPDMAWriteOutcome::UnsupportedControl;
 }
 
-IOPDMAWriteOutcome IOPDMAController::writeChannel0Initialization(IOPWord value) const
+IOPDMAWriteOutcome IOPDMAController::writeChannelRegisterInitialization(
+  IOPWord value) const
 {
   return value == 0 ? IOPDMAWriteOutcome::Completed :
     IOPDMAWriteOutcome::UnsupportedControl;
