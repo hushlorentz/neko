@@ -333,7 +333,60 @@ TEST_CASE("EE RDRAM initialization owner rejects unknown operations and subaddre
   REQUIRE(owner.state().enumeratedDevices == 2);
 }
 
-TEST_CASE("EE RDRAM initialization owner rejects reserved fields and missing start",
+TEST_CASE("EE RDRAM supported selections retain unrelated command bits",
+  "[ee][rdram-init-owner][rdram-selectors]")
+{
+  struct Selection
+  {
+    std::uint32_t command;
+    std::uint32_t response;
+    bool readable;
+  };
+  for (const auto selection : {
+         Selection{0x8021001fu, 0x1f, true},
+         Selection{0x8023001fu, 0x0d0d, true},
+         Selection{0x8024001fu, 0x0090, true},
+         Selection{0x8040001fu, 0x1f, true},
+         Selection{0x8021005fu, 0, false}})
+  {
+    for (const auto extra : {0x20u, 0x400u, 0x800u, 0x1000u, 0x2000u,
+           0x4000u, 0x8000u, 0x10000000u, 0x20000000u, 0x40000000u,
+           0x7000fc20u})
+    {
+      CAPTURE(selection.command);
+      CAPTURE(extra);
+      EERDRAMInitialization owner;
+      owner.writeData(0x80);
+      const auto command = selection.command | extra;
+      REQUIRE(owner.writeCommand(command));
+      requireState(owner, {command & 0x7fffffffu, 0x80, 0});
+      if (selection.readable)
+      {
+        requireData(owner, selection.response);
+      }
+      else
+      {
+        requireUnreadable(owner);
+      }
+    }
+  }
+  auto owner = partiallyEnumerated();
+  owner.writeData(0x80);
+  REQUIRE(owner.writeCommand(0xf021fc7f));
+  requireState(owner, {0x7021fc7f, 0x80, 1});
+  requireUnreadable(owner);
+  owner.writeData(0);
+  REQUIRE(owner.writeCommand(0xf021fc7f));
+  requireState(owner, {0x7021fc7f, 0, 0});
+  requireUnreadable(owner);
+  REQUIRE(owner.writeCommand(0xb021f01f));
+  requireState(owner, {0x3021f01f, 0, 0});
+  requireData(owner, 0x1f);
+  requireData(owner, 0x1f);
+  requireData(owner, 0);
+}
+
+TEST_CASE("EE RDRAM initialization owner rejects missing start",
   "[ee][rdram-init-owner]")
 {
   auto owner = partiallyEnumerated();
@@ -342,14 +395,6 @@ TEST_CASE("EE RDRAM initialization owner rejects reserved fields and missing sta
     0x80210040u, 0x8021007fu})
   {
     requireRejectedCommand(owner, command & 0x7fffffffu);
-    for (const auto bit : {10u, 11u, 12u, 13u, 14u, 15u, 28u, 29u, 30u})
-    {
-      requireRejectedCommand(owner, command | (UINT32_C(1) << bit));
-    }
-    if ((command & 0x3c0) == 0)
-    {
-      requireRejectedCommand(owner, command | 0x20);
-    }
   }
   requireData(owner, 0x1f);
 }

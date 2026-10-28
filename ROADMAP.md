@@ -2389,11 +2389,24 @@ real-handshake conformance; Milestone 9 remains incomplete.
 - [x] Independently review and validate the extension; separately authorize
       BIOS verification before attributing the next dependency.
 
+### EE RDRAM Command Construction Startup Dependency
+
+- [x] Investigate the observed `0xb021f01f` command store and its upstream
+      construction; distinguish CPU or state errors from a hardware-contract
+      gap, and assess the complete supported command family before selecting
+      implementation scope.
+- [x] Extend supported read and reinitialization selections consistently,
+      retaining unrelated command bits and preserving bounded responses.
+- [x] Validate guest, trace and transactional persistence continuations and
+      rejection boundaries; independently review the extension.
+- [ ] With separate BIOS-run authorization, verify the expanded selector
+      behavior and attribute the next startup dependency.
+
 ### CD/DVD NREADY Startup Wait Scope
 
 - [ ] Resolve the observed NREADY bit-3 wait/countdown against local manuals;
       select any bounded readiness-policy revision or further observation,
-      after addressing the earlier EE RDRAM dependency; expand required
+      after addressing earlier EE RDRAM dependencies; expand required
       implementation and conformance before changing behavior.
 
 ### Remaining Boot-Service Scope

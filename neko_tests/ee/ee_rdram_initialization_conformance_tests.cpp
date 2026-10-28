@@ -398,9 +398,9 @@ TEST_CASE("EE RDRAM guest rejected commands preserve enumeration and delay-slot 
   };
   for (const auto submission : {
          Submission{0, 0x80}, Submission{0x00210000, 0x80},
-         Submission{0x800003a0, 0x80}, Submission{0x80210020, 0x80},
+         Submission{0x800003a0, 0x80},
          Submission{0x80220000, 0x80}, Submission{0x80210080, 0x80},
-         Submission{0x80210400, 0x80}, Submission{0x90210000, 0x80},
+         Submission{0x80220400, 0x80}, Submission{0x90220000, 0x80},
          Submission{UINT32_MAX, 0x80}, Submission{SA4D, 0x80},
          Submission{SA4D, UINT32_MAX}, Submission{0x004d0060, 0},
          Submission{0x804d0061, 0}, Submission{0x804d0040, 0},

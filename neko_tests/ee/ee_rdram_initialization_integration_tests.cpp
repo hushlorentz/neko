@@ -68,7 +68,7 @@ TEST_CASE("EE RDRAM initialization maps only physical word endpoints and host al
     REQUIRE_FALSE(bus.writeData32(address, ENUMERATE));
   }
   REQUIRE_FALSE(bus.writeData32(COMMAND, 0));
-  REQUIRE_FALSE(bus.writeData32(COMMAND, 0x80210400));
+  REQUIRE_FALSE(bus.writeData32(COMMAND, 0x80220400));
   REQUIRE_THROWS_AS(bus.write32(COMMAND, 0), std::out_of_range);
   REQUIRE(system.eeStateHash() == hash);
 }
@@ -346,6 +346,88 @@ TEST_CASE("EE RDRAM SA4c malformed retained selections reject transactionally",
   }
 }
 
+TEST_CASE("EE RDRAM expanded selectors execute and restore without replay",
+  "[ee][bus][guest][trace][rdram-init-integration][rdram-selectors][save-state]")
+{
+  struct Selection
+  {
+    std::uint32_t command;
+    std::uint32_t response;
+    bool readable;
+    bool resets;
+  };
+  for (const auto selection : {
+         Selection{0xb021f01f, 0x1f, true, false},
+         Selection{0xf023fc3f, 0x0d0d, true, false},
+         Selection{0xf024fc3f, 0x0090, true, false},
+         Selection{0xf040fc3b, 0x1b, true, false},
+         Selection{0xf021fc7f, 0, false, true}})
+  {
+    for (unsigned cursor = 0; cursor <= 2; ++cursor)
+    {
+      CAPTURE(selection.command);
+      CAPTURE(cursor);
+      NekoSystem original;
+      auto &bus = original.eeBus();
+      REQUIRE(bus.writeData32(COMMAND, ENUMERATE));
+      for (unsigned read = 0; read < cursor; ++read)
+      {
+        REQUIRE(bus.read32(DATA) == 0x1f);
+      }
+      REQUIRE(bus.writeData32(DATA, 0));
+      const auto result = mergeStore(original, COMMAND, 0x2e, 0, selection.command);
+      REQUIRE(result.pendingException == EEException::None);
+      REQUIRE_FALSE(result.cycleLimitReached);
+      std::size_t stores = 0;
+      for (const auto &event : original.trace())
+      {
+        if (event.subsystem == NekoTraceSubsystem::EE &&
+            event.type == NekoTraceEventType::MemoryAccess &&
+            event.value0 == (COMMAND | 0xa0000000))
+        {
+          ++stores;
+          REQUIRE(event.value1 == selection.command);
+          REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+            COMMAND, 4, NekoEETraceMemory::AccessKind::DataStore,
+            NekoEETraceMemory::TranslationOutcome::Translated,
+            NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
+            NekoEETraceMemory::CacheAccess::Bypassed,
+            NekoEETraceMemory::TransferOutcome::Completed,
+            NekoEETraceMemory::FailurePhase::None
+          }));
+        }
+      }
+      REQUIRE(stores == 1);
+      REQUIRE_FALSE(original.traceTruncated());
+      REQUIRE(bus.writeData32(DATA, 0x80));
+      const auto saved = original.saveState();
+      SaveStateMutation expectedState(saved);
+      expectedState.writeScalar("system.eeRDRAMInitialization.command",
+        selection.command & 0x7fffffffu);
+      expectedState.refreshChecksum();
+      REQUIRE(expectedState.bytes() == saved);
+      NekoSystem restored;
+      REQUIRE_NOTHROW(restored.loadState(saved));
+      REQUIRE(restored.saveState() == saved);
+      REQUIRE(restored.eeStateHash() == original.eeStateHash());
+      for (auto *machine : {&original, &restored})
+      {
+        std::uint32_t value = 0x12345678;
+        REQUIRE(machine->eeBus().readData32(DATA, &value) == selection.readable);
+        const auto expected = selection.command == 0xb021f01f && cursor == 2
+          ? 0u : selection.response;
+        REQUIRE(value == (selection.readable ? expected : 0x12345678u));
+        REQUIRE(machine->eeBus().writeData32(COMMAND, ENUMERATE));
+        const unsigned continued = selection.resets ? 0
+          : selection.command == 0xb021f01f && cursor < 2 ? cursor + 1
+          : cursor;
+        REQUIRE(machine->eeBus().read32(DATA) == (continued < 2 ? 0x1fu : 0u));
+      }
+      REQUIRE(restored.saveState() == original.saveState());
+    }
+  }
+}
+
 TEST_CASE("EE RDRAM initialization hashes every mutable field without peer effects",
   "[ee][rdram-init-integration][save-state]")
 {
@@ -498,10 +580,6 @@ TEST_CASE("EE RDRAM initialization malformed continuations reject transactionall
   for (const auto mutation : {
          Corruption{"system.eeRDRAMInitialization.command", 0},
          Corruption{"system.eeRDRAMInitialization.command", ENUMERATE},
-         Corruption{"system.eeRDRAMInitialization.command", 0x00210400},
-         Corruption{"system.eeRDRAMInitialization.command", 0x00218000},
-         Corruption{"system.eeRDRAMInitialization.command", 0x10210000},
-         Corruption{"system.eeRDRAMInitialization.command", 0x00210020},
          Corruption{"system.eeRDRAMInitialization.command", 0x00220000},
          Corruption{"system.eeRDRAMInitialization.command", 0x00210080},
          Corruption{"system.eeRDRAMInitialization.command", 0x000003a1},

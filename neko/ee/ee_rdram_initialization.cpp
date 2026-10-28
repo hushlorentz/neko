@@ -5,8 +5,6 @@
 namespace
 {
   constexpr std::uint32_t COMMAND_START = UINT32_C(0x80000000);
-  constexpr std::uint32_t COMMAND_FIELDS = UINT32_C(0x8fff03ff);
-  constexpr std::uint32_t BROADCAST = 0x20;
   constexpr std::uint32_t RETAIL_INITIALIZATION = UINT32_C(0x800003a0);
   constexpr std::uint32_t SA4C_WRITE = UINT32_C(0x804c0060);
   constexpr std::uint32_t SA4D_WRITE = UINT32_C(0x804d0060);
@@ -27,7 +25,7 @@ namespace
 
   Command decodeCommand(std::uint32_t value) noexcept
   {
-    if ((value & COMMAND_START) == 0 || (value & ~COMMAND_FIELDS) != 0)
+    if ((value & COMMAND_START) == 0)
     {
       return Command::Unsupported;
     }
@@ -49,7 +47,7 @@ namespace
     {
       return Command::WriteInitialization;
     }
-    if (operation != 0 || (value & BROADCAST) != 0)
+    if (operation != 0)
     {
       return Command::Unsupported;
     }
