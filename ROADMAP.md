@@ -2301,11 +2301,28 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Identify the `0x1f402005` readiness load and related command family;
       route functional CD/DVD behavior to Milestone 10 before implementation.
 
+### EE-Side IOP RAM Aperture
+
+- [x] Establish the normal-path `0x1c0003f0` load and select a bounded
+      provisional aperture after manual-first and approved-secondary research.
+- [x] Route 8/16/32/64/128-bit CPU data accesses over `0x1c000000–0x1c1fffff`
+      to the existing IOP RAM owner; exclude mirrors, fetches, cache fills
+      and EE DMA without new storage or fabricated peer responses.
+- [x] Validate guest accesses, partial stores, two-way visibility, reset and
+      canonical restore; independently review integration, run full gates,
+      and verify bounded BIOS progress.
+
 ### Real BIOS Handshake and Boundary Conformance
 
-Blocked on the Milestone 10 CD/DVD startup prerequisite; the handshake target
-remains incomplete.
+Discovery resumed after the selected Milestone 10 CD/DVD startup prerequisite
+and EE MCH-window implementation; the handshake target remains incomplete.
 
+- [x] Restore and independently review the existing exact f500 stateless
+      word-write contract removed by MCH expansion; verify BIOS progress and
+      attribute the next originating dependency in the bounded matrix.
+- [ ] Investigate the observed f410 bit31 polling dependency and select any
+      justified special-register contract; distinguish hardware effects from
+      provisional backing before continuing bounded handshake discovery.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.
@@ -2339,8 +2356,8 @@ including optical-media commands and data flow, SIO2-facing input, controller
 and memory-card behavior, and any required ROM or module-loading support.
 Preserve deterministic emulated device time independently of host I/O speed.
 
-Develop the CD/DVD startup prerequisite before resuming Milestone 9's blocked
-real-handshake conformance; Milestone 9 remains incomplete.
+The selected CD/DVD startup prerequisite is implemented. Milestone 9's
+real-handshake discovery has resumed; Milestone 9 remains incomplete.
 
 ### CD/DVD Startup Dependency Planning
 
@@ -2454,18 +2471,18 @@ real-handshake conformance; Milestone 9 remains incomplete.
       next startup dependency: a full-word store to the same f400 address.
 - [x] Replace the exact startup exceptions with a word-backed
       `0x1000f400–0x1000f4ff` MCH window, preserving the RICM/DRD protocol
-      handlers and superseding the f410/f480/f490 exact-value filters and
-      former exact f500 reserved-write exception.
+      handlers and superseding the f410/f480/f490 exact-value filters;
+      preserve the separate exact f500 reserved-write exception.
 - [x] Persist and test the window through reset, host/guest access, trace,
       save/restore, access boundaries and the existing MCH protocol owner;
       independently review and pass optimized/ASan gates.
 
 ### CD/DVD NREADY Startup Wait Scope
 
-- [ ] Resolve the observed NREADY bit-3 wait/countdown against local manuals;
-      select any bounded readiness-policy revision or further observation,
-      after addressing earlier EE RDRAM dependencies; expand required
-      implementation and conformance before changing behavior.
+- [x] Compare the observed NREADY bit-3 wait/countdown with local manuals;
+      retain the selected no-media `0x40` profile because the manuals specify
+      library-level drive readiness, not raw NREADY semantics. The timeout
+      remains unobserved; further BIOS observation requires authorization.
 
 ### Remaining Boot-Service Scope
 

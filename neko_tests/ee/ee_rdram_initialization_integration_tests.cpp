@@ -127,7 +127,7 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
     CAPTURE(address);
     std::uint32_t value = 0xa5a5a5a5;
     REQUIRE_FALSE(bus.readData32(address, &value));
-    REQUIRE_FALSE(bus.writeData32(address, UINT32_MAX));
+    REQUIRE(bus.writeData32(address, UINT32_MAX) == (address == END));
     REQUIRE(value == 0xa5a5a5a5);
   }
   std::uint32_t misaligned = 0;

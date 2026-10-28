@@ -255,6 +255,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachTimers(&eeTimersComponent);
   eeBusComponent.attachSerial(&eeSerialComponent);
   eeBusComponent.attachRDRAMInitialization(&eeRDRAMInitializationComponent);
+  eeBusComponent.attachIOPRAM(&iopBusComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   eeCoreComponent.attachVU0(&vu0Component);
   eeCoreComponent.attachVU1(&vu1Component);

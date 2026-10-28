@@ -635,7 +635,7 @@ TEST_CASE("EE serial status delay-slot loads are observational across trace mode
   REQUIRE_FALSE(traced.traceTruncated());
 }
 
-TEST_CASE("EE MCH window end remains unmapped",
+TEST_CASE("EE reserved startup word preserves stateless writes outside the MCH window",
   "[ee][bus][reserved]")
 {
   NekoSystem system;
@@ -649,9 +649,9 @@ TEST_CASE("EE MCH window end remains unmapped",
   for (const auto value : {0u, 0xffffffffu, 0xaaaaaaaau, 0x55555555u, 0xffffffffu})
   {
     CAPTURE(value);
-    REQUIRE_FALSE(system.eeBus().writeData32(RESERVED, value));
-    REQUIRE_THROWS_AS(system.eeBus().write32(RESERVED, value), std::out_of_range);
-    REQUIRE_THROWS_AS(system.eeBus().write32(UNCACHED, value), std::out_of_range);
+    REQUIRE(system.eeBus().writeData32(RESERVED, value));
+    REQUIRE_NOTHROW(system.eeBus().write32(RESERVED, value));
+    REQUIRE_NOTHROW(system.eeBus().write32(UNCACHED, value));
   }
   REQUIRE(system.eeStateHash() == eeHash);
   REQUIRE(system.iopStateHash() == iopHash);
@@ -668,7 +668,7 @@ TEST_CASE("EE reserved startup word has no readback or wider access",
   seed(system);
   auto &bus = system.eeBus();
   const auto before = system.saveState();
-  REQUIRE_FALSE(bus.writeData32(RESERVED, 0xffffffff));
+  REQUIRE(bus.writeData32(RESERVED, 0xffffffff));
   std::uint8_t byte = 0x12;
   std::uint16_t half = 0x1234;
   std::uint32_t word = 0x12345678;
@@ -759,7 +759,7 @@ TEST_CASE("EE reserved startup admission does not map neighboring words or IOP v
   REQUIRE(unchanged);
 }
 
-TEST_CASE("EE MCH window guest word stores retire with existing memory observations",
+TEST_CASE("EE reserved startup word stores retire with existing memory observations",
   "[ee][bus][reserved][guest]")
 {
   for (const auto value : {0u, 0xffffffffu, 0xaaaaaaaau, 0x55555555u})
@@ -768,7 +768,7 @@ TEST_CASE("EE MCH window guest word stores retire with existing memory observati
     NekoSystem system;
     seed(system);
     const auto sifHash = system.sifStateHash();
-    const auto result = execute(system, 0x2b, value, 0, 0xb000f4fc);
+    const auto result = execute(system, 0x2b, value);
     REQUIRE(result.instructions != 0);
     REQUIRE_FALSE(result.cycleLimitReached);
     REQUIRE(result.masterCycles != 0);
@@ -785,10 +785,10 @@ TEST_CASE("EE MCH window guest word stores retire with existing memory observati
     REQUIRE(system.gifDMAC().memoryAddress() == 0x2000);
     REQUIRE(system.gifDMAC().quadwordCount() == 2);
     REQUIRE(system.eeBus().read32(0x2000) == 0xabcdef01);
-    REQUIRE(system.eeBus().read32(0x1000f4fc) == value);
+    REQUIRE_THROWS_AS(system.eeBus().read32(RESERVED), std::out_of_range);
     REQUIRE(system.interruptController().status() == 2);
     REQUIRE(system.iopInterruptController().status() == 2);
-    requireWordStoreObservation(system, value, true, 0xb000f4fc);
+    requireWordStoreObservation(system, value, true);
   }
 }
 
@@ -804,8 +804,7 @@ TEST_CASE("EE reserved startup guest merge stores admit only full-word lanes",
       NekoSystem system;
       const auto sifHash = system.sifStateHash();
       const bool full = lane == (opcode == 0x2a ? 3 : 0);
-      const auto result = execute(
-        system, opcode, 0x89abcdef, lane, 0xb000f4fc);
+      const auto result = execute(system, opcode, 0x89abcdef, lane);
       REQUIRE(result.pendingException ==
         (full ? EEException::None : EEException::DataBusErrorStore));
       REQUIRE_FALSE(result.cycleLimitReached);
@@ -815,13 +814,13 @@ TEST_CASE("EE reserved startup guest merge stores admit only full-word lanes",
       }
       else
       {
-        REQUIRE(result.exceptionAddress == 0xb000f4fc + lane);
+        REQUIRE(result.exceptionAddress == UNCACHED + lane);
         REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
       }
       REQUIRE(system.sifStateHash() == sifHash);
       REQUIRE(system.interruptController().status() == 0);
       REQUIRE(system.iopInterruptController().status() == 0);
-      requireWordStoreObservation(system, 0x89abcdef, full, 0xb000f4fc);
+      requireWordStoreObservation(system, 0x89abcdef, full);
     }
   }
 }

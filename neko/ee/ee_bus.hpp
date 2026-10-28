@@ -24,6 +24,7 @@ class ScratchpadDMACChannel;
 class SIF;
 class SIFSignalReceiver;
 class NekoSystem;
+class IOPBus;
 class VIF;
 class VIF1DMACChannel;
 class VPU;
@@ -116,10 +117,12 @@ namespace EEMemoryMap
   constexpr std::uint32_t MCH_WINDOW_END = 0x1000f500;
   constexpr std::uint32_t MCH_RICM = 0x1000f430;
   constexpr std::uint32_t MCH_DRD = 0x1000f440;
-  constexpr std::uint32_t RESERVED_F500 = MCH_WINDOW_END;
+  constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
   constexpr std::uint32_t D_ENABLER = 0x1000f520;
   constexpr std::uint32_t D_ENABLEW = 0x1000f590;
   constexpr std::uint32_t IOP_BOOT_PROBE = 0x1f803204;
+  constexpr std::uint32_t IOP_RAM_BASE = 0x1c000000;
+  constexpr std::uint32_t IOP_RAM_END = 0x1c200000;
   constexpr std::uint32_t IOP_DEV9_INIT_1470 = 0x1f801470;
   constexpr std::uint32_t IOP_DEV9_INIT_1472 = 0x1f801472;
 
@@ -192,6 +195,8 @@ class EEBus
     void attachTimers(EETimers *timers);
     void attachSerial(EESerial *serial);
     void attachRDRAMInitialization(EERDRAMInitialization *initialization);
+    // The caller keeps the sole IOP RAM owner alive while attached.
+    void attachIOPRAM(IOPBus *bus);
     // The caller keeps both the shared owner and signal receiver alive.
     void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     void installBootROM(
@@ -286,6 +291,12 @@ class EEBus
       std::uint32_t address,
       std::size_t width,
       std::uint32_t *physicalAddress) const;
+    bool iopRAMAddress(std::uint32_t address, std::size_t width) const;
+    bool readIOPRAM(std::uint32_t address, std::size_t width,
+      EEQuadword *value) const;
+    bool writeIOPRAM(std::uint32_t address, std::size_t width,
+      const EEQuadword &value);
+    bool readBacking128(std::uint32_t address, EEQuadword *value) const;
     bool bootROMAddress(
       std::uint32_t address,
       std::size_t width,
@@ -341,6 +352,7 @@ class EEBus
     EERDRAMInitialization *rdramInitializationComponent = nullptr;
     SIF *sifComponent = nullptr;
     SIFSignalReceiver *sifSignals = nullptr;
+    IOPBus *iopRAMBus = nullptr;
     std::vector<std::uint8_t> mainMemory;
     std::shared_ptr<const BootROMImage> bootROM;
 };

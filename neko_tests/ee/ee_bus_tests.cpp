@@ -135,7 +135,7 @@ TEST_CASE("EE MCH window endpoint supports word-backed access and guest loads",
   REQUIRE(word == 0);
   word = UINT32_C(0x12345678);
   REQUIRE_FALSE(bus.readData32(END, &word));
-  REQUIRE_FALSE(bus.writeData32(END, WRITTEN));
+  REQUIRE(bus.writeData32(END, WRITTEN));
   REQUIRE(word == UINT32_C(0x12345678));
 
   const auto result = guestLoad(system, ADDRESS);

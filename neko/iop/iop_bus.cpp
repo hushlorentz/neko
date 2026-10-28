@@ -1013,6 +1013,30 @@ IOPBusWriteResult IOPBus::writeDMAC32(IOPAddress address, IOPWord value)
   return {IOPBusStatus::Completed};
 }
 
+IOPBusStatus IOPBus::readRAMBytes(
+  std::uint32_t offset, std::uint8_t *bytes, std::size_t count) const
+{
+  assert(bytes != nullptr);
+  if (offset >= RAM_SIZE || count == 0 || count > RAM_SIZE - offset)
+  {
+    return IOPBusStatus::Unmapped;
+  }
+  std::copy_n(ram.data() + offset, count, bytes);
+  return IOPBusStatus::Completed;
+}
+
+IOPBusStatus IOPBus::writeRAMBytes(
+  std::uint32_t offset, const std::uint8_t *bytes, std::size_t count)
+{
+  assert(bytes != nullptr);
+  if (offset >= RAM_SIZE || count == 0 || count > RAM_SIZE - offset)
+  {
+    return IOPBusStatus::Unmapped;
+  }
+  std::copy_n(bytes, count, ram.data() + offset);
+  return IOPBusStatus::Completed;
+}
+
 IOPBusStatus IOPBus::loadPhysical(
   IOPAddress address,
   const std::uint8_t *bytes,

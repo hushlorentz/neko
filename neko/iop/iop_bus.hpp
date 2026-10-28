@@ -119,6 +119,12 @@ class IOPBus final
     IOPBusStatus dmaWriteStatus(IOPAddress address) const;
     IOPBusWriteResult writeDMAC32(IOPAddress address, IOPWord value);
 
+    // RAM-only byte transport for shared bus apertures; no mirrors or MMIO.
+    IOPBusStatus readRAMBytes(std::uint32_t offset,
+      std::uint8_t *bytes, std::size_t count) const;
+    IOPBusStatus writeRAMBytes(std::uint32_t offset,
+      const std::uint8_t *bytes, std::size_t count);
+
     // Host-only physical access. A range must lie wholly inside one RAM
     // alias, the scratchpad, or (inspection only) the installed ROM.
     IOPBusStatus loadPhysical(

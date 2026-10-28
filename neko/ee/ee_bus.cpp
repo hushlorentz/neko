@@ -1,3 +1,4 @@
+#include <array>
 #include <stdexcept>
 
 #include "dmac_controller.hpp"
@@ -11,6 +12,7 @@
 #include "gs.hpp"
 #include "gs_display.hpp"
 #include "interrupt_controller.hpp"
+#include "iop_bus.hpp"
 #include "scratchpad_dmac_channel.hpp"
 #include "sif.hpp"
 #include "sif1_dmac_channel.hpp"
@@ -44,7 +46,7 @@ namespace
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
       address == EEMemoryMap::SIO_ISR ||
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
-      mchWindowAddress(address) ||
+      mchWindowAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
@@ -173,6 +175,67 @@ bool EEBus::bootROMAddress(
   }
   *offset = candidate;
   return true;
+}
+
+void EEBus::attachIOPRAM(IOPBus *bus)
+{
+  if (bus == nullptr)
+  {
+    throw std::invalid_argument("EE bus requires a non-null IOP RAM owner.");
+  }
+  if (iopRAMBus != nullptr)
+  {
+    throw std::logic_error("EE bus IOP RAM is already attached.");
+  }
+  iopRAMBus = bus;
+}
+
+bool EEBus::iopRAMAddress(std::uint32_t address, std::size_t width) const
+{
+  return iopRAMBus != nullptr && width != 0 && width <= sizeof(EEQuadword) &&
+    address >= EEMemoryMap::IOP_RAM_BASE &&
+    address < EEMemoryMap::IOP_RAM_END &&
+    width <= EEMemoryMap::IOP_RAM_END - address;
+}
+
+bool EEBus::readIOPRAM(std::uint32_t address, std::size_t width,
+  EEQuadword *value) const
+{
+  if (!iopRAMAddress(address, width))
+  {
+    return false;
+  }
+  std::array<std::uint8_t, 16> bytes{};
+  if (iopRAMBus->readRAMBytes(address - EEMemoryMap::IOP_RAM_BASE,
+        bytes.data(), width) != IOPBusStatus::Completed)
+  {
+    return false;
+  }
+  EEQuadword result{};
+  for (std::size_t index = 0; index < width; ++index)
+  {
+    auto &half = index < 8 ? result.low : result.high;
+    half |= std::uint64_t(bytes[index]) << ((index % 8) * 8);
+  }
+  *value = result;
+  return true;
+}
+
+bool EEBus::writeIOPRAM(std::uint32_t address, std::size_t width,
+  const EEQuadword &value)
+{
+  if (!iopRAMAddress(address, width))
+  {
+    return false;
+  }
+  std::array<std::uint8_t, 16> bytes{};
+  for (std::size_t index = 0; index < width; ++index)
+  {
+    const auto half = index < 8 ? value.low : value.high;
+    bytes[index] = static_cast<std::uint8_t>(half >> ((index % 8) * 8));
+  }
+  return iopRAMBus->writeRAMBytes(address - EEMemoryMap::IOP_RAM_BASE,
+    bytes.data(), width) == IOPBusStatus::Completed;
 }
 
 void EEBus::installBootROM(
@@ -600,6 +663,12 @@ bool EEBus::readData8(
     *value = mainMemory[physicalAddress];
     return true;
   }
+  EEQuadword ramValue{};
+  if (readIOPRAM(address, 1, &ramValue))
+  {
+    *value = static_cast<std::uint8_t>(ramValue.low);
+    return true;
+  }
   if (!bootROMAddress(address, 1, &physicalAddress))
   {
     return false;
@@ -619,7 +688,7 @@ bool EEBus::writeData8(
   std::uint32_t physicalAddress = 0;
   if (!mainMemoryAddress(address, 1, &physicalAddress))
   {
-    return false;
+    return writeIOPRAM(address, 1, {value, 0});
   }
   mainMemory[physicalAddress] = value;
   return true;
@@ -642,6 +711,12 @@ bool EEBus::readData16(
   const std::uint8_t *storage = mainMemory.data();
   if (!mainMemoryAddress(address, 2, &physicalAddress))
   {
+    EEQuadword ramValue{};
+    if (readIOPRAM(address, 2, &ramValue))
+    {
+      *value = static_cast<std::uint16_t>(ramValue.low);
+      return true;
+    }
     if (!bootROMAddress(address, 2, &physicalAddress))
     {
       return false;
@@ -675,7 +750,7 @@ bool EEBus::writeData16(
   std::uint32_t physicalAddress = 0;
   if (!mainMemoryAddress(address, 2, &physicalAddress))
   {
-    return false;
+    return writeIOPRAM(address, 2, {value, 0});
   }
   mainMemory[physicalAddress] =
     static_cast<std::uint8_t>(value);
@@ -742,7 +817,7 @@ bool EEBus::writeData64(
   return writeMapped64(address, value, true);
 }
 
-bool EEBus::readData128(
+bool EEBus::readBacking128(
   std::uint32_t address,
   EEQuadword *value) const
 {
@@ -790,11 +865,19 @@ bool EEBus::writeData128(
     EEDataWriteResult::Completed;
 }
 
+bool EEBus::readData128(
+  std::uint32_t address,
+  EEQuadword *value) const
+{
+  return readBacking128(address, value) ||
+    readIOPRAM(address, 16, value);
+}
+
 bool EEBus::readDMAC128(
   std::uint32_t physicalAddress,
   EEQuadword *value) const
 {
-  return readData128(physicalAddress, value);
+  return readBacking128(physicalAddress, value);
 }
 
 bool EEBus::writeDMAC128(
@@ -983,7 +1066,8 @@ EEDataWriteResult EEBus::writeGuestData128(
   std::uint32_t physicalAddress = 0;
   if (!mainMemoryAddress(address, 16, &physicalAddress))
   {
-    return EEDataWriteResult::Failed;
+    return writeIOPRAM(address, 16, value) ?
+      EEDataWriteResult::Completed : EEDataWriteResult::Failed;
   }
   for (std::size_t index = 0; index < 8; ++index)
   {
@@ -1046,6 +1130,12 @@ bool EEBus::readMapped32(
         mainMemory[physicalAddress + 2]) << 16) |
       (static_cast<std::uint32_t>(
         mainMemory[physicalAddress + 3]) << 24);
+    return true;
+  }
+  EEQuadword ramValue{};
+  if (readIOPRAM(address, 4, &ramValue))
+  {
+    *value = static_cast<std::uint32_t>(ramValue.low);
     return true;
   }
   if (bootROMAddress(address, 4, &physicalAddress))
@@ -1249,6 +1339,11 @@ bool EEBus::writeMapped32(
     return true;
   }
 
+  if (writeIOPRAM(address, 4, {value, 0}))
+  {
+    return true;
+  }
+
   if (mchWindowAddress(address))
   {
     if (address == EEMemoryMap::MCH_RICM)
@@ -1291,6 +1386,8 @@ bool EEBus::writeMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::RESERVED_F500:
+      return true;
     case EEMemoryMap::SIO_LCR:
       return attachedSerial().writeLineControl(value);
     case EEMemoryMap::SIO_IER:
@@ -1649,6 +1746,12 @@ bool EEBus::readMapped64(
     }
     return true;
   }
+  EEQuadword ramValue{};
+  if (readIOPRAM(address, 8, &ramValue))
+  {
+    *value = ramValue.low;
+    return true;
+  }
   if (bootROMAddress(address, 8, &physicalAddress))
   {
     *value = 0;
@@ -1689,6 +1792,10 @@ bool EEBus::writeMapped64(
       mainMemory[physicalAddress + index] =
         static_cast<std::uint8_t>(value >> (index * 8));
     }
+    return true;
+  }
+  if (writeIOPRAM(address, 8, {value, 0}))
+  {
     return true;
   }
   if (address == EEMemoryMap::GS_BUSDIR)

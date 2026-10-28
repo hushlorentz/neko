@@ -271,6 +271,7 @@ add_executable(neko_tests
     neko_tests/ee/ee_multiply_divide_tests.cpp
     neko_tests/ee/ee_quadword_memory_tests.cpp
     neko_tests/ee/ee_bus_tests.cpp
+    neko_tests/ee/ee_iop_ram_tests.cpp
     neko_tests/ee/ee_rdram_initialization_tests.cpp
     neko_tests/ee/ee_rdram_initialization_integration_tests.cpp
     neko_tests/ee/ee_rdram_initialization_conformance_tests.cpp
