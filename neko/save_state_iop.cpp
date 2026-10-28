@@ -39,6 +39,7 @@ void NekoSaveStateCodec::writeIOPState(
   if (core.bus != &bus ||
       bus.interruptController != &system.iopInterruptControllerComponent ||
       bus.timers != &system.iopTimersComponent ||
+      bus.cdvd != &system.cdvdControllerComponent ||
       bus.dmaController != &system.iopDMAControllerComponent ||
       bus.sif1DMA != &system.iopSIF1DMAComponent ||
       bus.sif0DMA != &system.iopSIF0DMAComponent ||
@@ -205,6 +206,10 @@ void NekoSaveStateCodec::writeIOPState(
     }
   }
   {
+    auto scope = writer->scope("cdvd");
+    writeCDVDState(writer, system.cdvdControllerComponent);
+  }
+  {
     auto scope = writer->scope("timing");
     writer->writeFieldU16("pixelPhase", system.iopTimerTimingComponent.phase);
   }
@@ -308,6 +313,10 @@ void NekoSaveStateCodec::readIOP(
   {
     auto scope = reader->scope("timers");
     readIOPTimers(reader, &system->iopTimersComponent);
+  }
+  {
+    auto scope = reader->scope("cdvd");
+    readCDVD(reader, &system->cdvdControllerComponent);
   }
   {
     auto scope = reader->scope("timing");
@@ -635,6 +644,8 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional IOP core commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPTimers>::value,
     "Transactional IOP timer commit must not throw.");
+  static_assert(std::is_nothrow_copy_assignable<CDVDController>::value,
+    "Transactional CD/DVD commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF1DMAChannel>::value,
     "Transactional IOP SIF1 DMA commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF0DMAChannel>::value,
@@ -655,6 +666,8 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.interruptController =
     &destination->iopInterruptControllerComponent;
   destination->iopBusComponent.timers = &destination->iopTimersComponent;
+  destination->iopBusComponent.cdvd = &destination->cdvdControllerComponent;
+  destination->cdvdControllerComponent = source->cdvdControllerComponent;
   destination->iopBusComponent.dmaController =
     &destination->iopDMAControllerComponent;
   destination->iopBusComponent.sif1DMA = &destination->iopSIF1DMAComponent;

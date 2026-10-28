@@ -4,6 +4,7 @@
 #include "iop_sif1_dma_channel.hpp"
 #include "iop_sif0_dma_channel.hpp"
 #include "iop_timers.hpp"
+#include "cdvd_controller.hpp"
 #include "sif.hpp"
 
 #include <algorithm>
@@ -13,6 +14,10 @@
 
 namespace
 {
+  constexpr std::array<IOPAddress, 9> cdvdRegisters = {{
+    0x1f402004, 0x1f402005, 0x1f402006, 0x1f402008, 0x1f40200a,
+    0x1f40200f, 0x1f402016, 0x1f402017, 0x1f402018
+  }};
   constexpr std::array<IOPAddress, IOPTimers::COUNTER_COUNT> timerBases = {{
     0x1f801100, 0x1f801110, 0x1f801120,
     0x1f801480, 0x1f801490, 0x1f8014a0
@@ -89,6 +94,11 @@ void IOPBus::attachInterruptController(IOPInterruptController *interrupts)
 void IOPBus::attachTimers(IOPTimers *attachedTimers)
 {
   timers = attachedTimers;
+}
+
+void IOPBus::attachCDVD(CDVDController *controller)
+{
+  cdvd = controller;
 }
 
 void IOPBus::attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1,
@@ -189,6 +199,13 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - INTC_STAT),
       Device::InterruptController};
+  }
+
+  if (first == last &&
+      std::find(cdvdRegisters.begin(), cdvdRegisters.end(), address) !=
+        cdvdRegisters.end())
+  {
+    return {IOPBusRegion::Mmio, address, Device::CDVD};
   }
 
   if (first >= SIF_BASE &&
@@ -514,6 +531,17 @@ IOPBusReadResult IOPBus::readDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::CDVD:
+    {
+      if (width != 1 || cdvd == nullptr)
+      {
+        return {};
+      }
+      const auto result = cdvd->readByte(static_cast<IOPAddress>(location.offset));
+      return result.status == CDVDAccessStatus::Accepted
+        ? IOPBusReadResult{IOPBusStatus::Completed, result.value}
+        : IOPBusReadResult{};
+    }
     case Device::SSBUSConfiguration:
       return readSSBUSRegister(location, width);
     case Device::InterruptController:
@@ -553,6 +581,11 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::CDVD:
+      return width == 1 && cdvd != nullptr &&
+        cdvd->writeByte(static_cast<IOPAddress>(location.offset),
+          static_cast<std::uint8_t>(value)) == CDVDAccessStatus::Accepted
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SSBUSConfiguration:
       return writeSSBUSRegister(location, width, value);
     case Device::InterruptController:

@@ -70,9 +70,9 @@ class IOPInterruptController final
       std::size_t sequence = 0;
     };
 
-    // Six timers, an EE SBUS request, one DMA completion, and one IOP INTC transition.
+    // Six timers, EE SBUS, CDVD, one DMA completion, and one IOP INTC transition.
     // A side-effecting INTC_CTRL fetch cannot decode to a memory instruction.
-    static constexpr std::size_t OBSERVATION_CAPACITY = 9;
+    static constexpr std::size_t OBSERVATION_CAPACITY = 10;
     std::array<Observation, OBSERVATION_CAPACITY> observations = {};
     std::size_t observationCount = 0;
     bool observationsEnabled = false;

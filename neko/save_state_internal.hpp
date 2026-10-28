@@ -16,7 +16,7 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 55;
+constexpr std::uint32_t SAVE_STATE_VERSION = 56;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
@@ -1044,6 +1044,7 @@ class NekoSaveStateCodec
     static std::uint64_t hashEETimers(
       const EETimers &timers, std::uint64_t masterCycle);
     static std::uint64_t hashEESerial(const EESerial &serial);
+    static std::uint64_t hashCDVD(const CDVDController &controller);
     static std::uint64_t hashEERDRAMInitialization(
       const EERDRAMInitialization &initialization);
     static std::uint64_t hashSIF(const NekoSystem &system);
@@ -1072,6 +1073,9 @@ class NekoSaveStateCodec
 
     template<typename Writer>
     static void writeIOPState(Writer *writer, const NekoSystem &system);
+    template<typename Writer>
+    static void writeCDVDState(Writer *writer, const CDVDController &controller);
+    static void readCDVD(SaveStateReader *reader, CDVDController *controller);
     template<typename Writer>
     static void writeEETimersState(Writer *writer, const EETimers &timers);
     static void writeEETimers(SaveStateWriter *writer, const EETimers &timers);

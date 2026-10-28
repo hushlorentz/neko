@@ -20,6 +20,17 @@ namespace
   {
     return static_cast<std::uint8_t>((value / 10) * 16 + value % 10);
   }
+
+  unsigned fromBCD(std::uint8_t value) noexcept
+  {
+    return (value >> 4) * 10 + (value & 15);
+  }
+
+  bool isBCDInRange(std::uint8_t value, unsigned minimum, unsigned maximum) noexcept
+  {
+    return (value & 15) <= 9 && (value >> 4) <= 9 &&
+      fromBCD(value) >= minimum && fromBCD(value) <= maximum;
+  }
 }
 
 CDVDReadResult CDVDController::readByte(std::uint32_t address) noexcept
@@ -169,6 +180,20 @@ void CDVDController::clearResult() noexcept
 {
   result = {};
   resultCursor = 0;
+}
+
+bool CDVDController::isValidClockResult(
+  const std::array<std::uint8_t, 8> &snapshot) noexcept
+{
+  return snapshot[0] == 0 && snapshot[4] == 0 &&
+    isBCDInRange(snapshot[1], 0, 59) &&
+    isBCDInRange(snapshot[2], 0, 59) &&
+    isBCDInRange(snapshot[3], 0, 23) &&
+    isBCDInRange(snapshot[5], 1, 31) &&
+    isBCDInRange(snapshot[6], 1, 12) &&
+    isBCDInRange(snapshot[7], 0, 99) &&
+    fromBCD(snapshot[5]) <=
+      daysInMonth(2000 + fromBCD(snapshot[7]), fromBCD(snapshot[6]));
 }
 
 void CDVDController::reset() noexcept

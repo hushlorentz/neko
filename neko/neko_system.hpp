@@ -8,6 +8,7 @@
 
 #include "clock_scheduler.hpp"
 #include "clock_rates.hpp"
+#include "cdvd_controller.hpp"
 #include "dmac_controller.hpp"
 #include "sif1_dmac_channel.hpp"
 #include "sif0_dmac_channel.hpp"
@@ -174,6 +175,8 @@ class NekoSystem
     const IOPSIF0DMAChannel &iopSIF0DMAC() const;
     IOPTimers &iopTimers();
     const IOPTimers &iopTimers() const;
+    CDVDController &cdvdController();
+    const CDVDController &cdvdController() const;
     IOPTimerTiming &iopTimerTiming();
     const IOPTimerTiming &iopTimerTiming() const;
 
@@ -259,6 +262,7 @@ class NekoSystem
     ScratchpadDMACChannel fromScratchpadDMACComponent;
     ScratchpadDMACChannel toScratchpadDMACComponent;
     GSDisplay gsDisplayComponent;
+    CDVDController cdvdControllerComponent;
     IOPBus iopBusComponent;
     IOPCore iopCoreComponent;
     IOPInterruptController iopInterruptControllerComponent;

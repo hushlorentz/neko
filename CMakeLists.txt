@@ -83,6 +83,7 @@ add_library(neko_core
     neko/save_state_ee.cpp
     neko/save_state_ee_timers.cpp
     neko/save_state_ee_serial.cpp
+    neko/save_state_cdvd.cpp
     neko/save_state_ee_rdram_initialization.cpp
     neko/save_state_graphics.cpp
     neko/save_state_iop.cpp
@@ -332,6 +333,7 @@ add_executable(neko_tests
     neko_tests/gs/gs_vif_vu1_integration_tests.cpp
     neko_tests/math/floating_point_tests.cpp
     neko_tests/iop/cdvd_controller_tests.cpp
+    neko_tests/iop/cdvd_integration_tests.cpp
     neko_tests/iop/iop_bus_tests.cpp
     neko_tests/iop/iop_cache_tests.cpp
     neko_tests/iop/iop_core_tests.cpp

@@ -2356,12 +2356,12 @@ real-handshake conformance; Milestone 9 remains incomplete.
 - [x] Implement the standalone controller for selected byte registers,
       N-NOP and S-ReadClock, with deterministic RTC, bounded results,
       next-pulse completion and atomic unsupported admission; use red/green tests.
-- [ ] Independently review command/RTC state transitions and boundary coverage,
+- [x] Independently review command/RTC state transitions and boundary coverage,
       then run complete optimized and AddressSanitizer checks before integration.
 
 ### CD/DVD Startup System Integration and Persistence
 
-- [ ] Compose the controller through exact IOP byte dispatch and existing clock/
+- [x] Compose the controller through exact IOP byte dispatch and existing clock/
       INTC boundaries; add transactional persistence and hashing in the same
       change, preserving SIF, channel-3 initialization and independent IRQ latches.
 - [ ] Validate guest access, completion ordering, reset, pending/result restore

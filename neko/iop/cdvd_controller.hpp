@@ -36,6 +36,7 @@ class CDVDController final
     CDVDNormalCompletion completeNormalCommand() noexcept;
     bool completeSubcommand() noexcept;
     void reset() noexcept;
+    std::uint64_t stateHash() const;
 
   private:
     friend class NekoSaveStateCodec;
@@ -58,6 +59,8 @@ class CDVDController final
     CDVDAccessStatus acceptSubcommand(std::uint8_t opcode) noexcept;
     std::uint8_t consumeResult() noexcept;
     std::array<std::uint8_t, 8> clockResult() const noexcept;
+    static bool isValidClockResult(
+      const std::array<std::uint8_t, 8> &snapshot) noexcept;
     void clearResult() noexcept;
 
     std::uint64_t rtcTicks = 0;

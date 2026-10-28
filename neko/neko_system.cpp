@@ -265,6 +265,7 @@ NekoSystem::NekoSystem() :
   masterClock.registerComponent(toScratchpadDMACComponent, 1);
   iopBusComponent.attachInterruptController(&iopInterruptControllerComponent);
   iopBusComponent.attachTimers(&iopTimersComponent);
+  iopBusComponent.attachCDVD(&cdvdControllerComponent);
   iopBusComponent.attachDMA(
     &iopDMAControllerComponent, &iopSIF1DMAComponent, &iopSIF0DMAComponent);
   iopCoreComponent.attachBus(&iopBusComponent);
@@ -375,6 +376,16 @@ IOPTimers &NekoSystem::iopTimers()
 const IOPTimers &NekoSystem::iopTimers() const
 {
   return iopTimersComponent;
+}
+
+CDVDController &NekoSystem::cdvdController()
+{
+  return cdvdControllerComponent;
+}
+
+const CDVDController &NekoSystem::cdvdController() const
+{
+  return cdvdControllerComponent;
 }
 
 IOPTimerTiming &NekoSystem::iopTimerTiming()
@@ -1248,6 +1259,7 @@ void NekoSystem::clockMasterCycle()
   publishEEInterruptLines();
   eeBusComponent.advanceGuestFIFOs();
   const auto serialCompletion = eeSerialComponent.advance();
+  cdvdControllerComponent.advanceMasterTick();
   CycleObservationSnapshot beforeCycle;
   if (collectingTrace)
   {
@@ -1261,6 +1273,12 @@ void NekoSystem::clockMasterCycle()
   advanceIOPTimers(iopClockPulse);
   if (iopClockPulse)
   {
+    const auto normalCompletion = cdvdControllerComponent.completeNormalCommand();
+    if (normalCompletion.newCauses != 0)
+    {
+      iopInterruptControllerComponent.assertSource(IOPInterruptSource::CDVD);
+    }
+    cdvdControllerComponent.completeSubcommand();
     const auto transfer = clockIOPSIF(observationScope.order, dmaObservations);
     if (transfer.outcome == IOPDMABeatOutcome::Rejected)
     {
