@@ -2344,12 +2344,41 @@ real-handshake conformance; Milestone 9 remains incomplete.
 
 ### CD/DVD Startup Dependency Planning
 
-- [ ] Select the exact startup register/command batch from the demonstrated
+- [x] Select the exact startup register/command batch from the demonstrated
       CD/DVD boundary, manuals and approved research; resolve access, reset,
       media, clock/configuration and timing policies before implementation.
-- [ ] Define controller ownership, N/S transport, buffers, errors/interrupts,
+- [x] Define controller ownership, N/S transport, buffers, errors/interrupts,
       persistence and diagnostics; split the selected behavior into reviewable
       blocks, separating command transport from required DMA/media services.
+
+### CD/DVD Startup Controller and Deterministic RTC
+
+- [x] Implement the standalone controller for selected byte registers,
+      N-NOP and S-ReadClock, with deterministic RTC, bounded results,
+      next-pulse completion and atomic unsupported admission; use red/green tests.
+- [ ] Independently review command/RTC state transitions and boundary coverage,
+      then run complete optimized and AddressSanitizer checks before integration.
+
+### CD/DVD Startup System Integration and Persistence
+
+- [ ] Compose the controller through exact IOP byte dispatch and existing clock/
+      INTC boundaries; add transactional persistence and hashing in the same
+      change, preserving SIF, channel-3 initialization and independent IRQ latches.
+- [ ] Validate guest access, completion ordering, reset, pending/result restore
+      and malformed-state atomicity; independently review integration and run
+      immediate complete optimized and AddressSanitizer checks.
+
+### CD/DVD Startup Diagnostics and Authored Conformance
+
+- [ ] Add trace-enabled command acceptance/completion observations and maintained
+      exporter/inspector support; validate ordering, capacity, disabled tracing
+      and prefix/streaming behavior without per-tick or per-byte trace noise.
+- [ ] Complete authored startup/IRQ/RTC continuation and trace-mode conformance,
+      bounded maintainability and independent correctness review; run complete
+      optimized and AddressSanitizer checks before BIOS verification.
+- [ ] With separate BIOS-run authorization, verify the selected readiness
+      boundary and attribute the next dependency; reopen device scope rather
+      than inventing additional command, configuration or media responses.
 
 ### Remaining Boot-Service Scope
 
@@ -2359,8 +2388,9 @@ real-handshake conformance; Milestone 9 remains incomplete.
 
 ### Boot-Service Implementation and Conformance
 
-- [ ] Implement the required CD/DVD command, interrupt, DMA, sector, seek, and
-      transfer-continuation behavior with deterministic emulated timing.
+- [ ] Expand and implement additional CD/DVD command, interrupt, DMA, sector,
+      seek and transfer services from demonstrated dependencies, separately
+      from the selected startup command transport.
 - [ ] Implement the required SIO2, controller, and memory-card protocols with
       deterministic input and persistent-media boundaries.
 - [ ] Complete the selected BIOS boot-service flows with reproducible traces,
