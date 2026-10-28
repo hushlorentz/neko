@@ -2439,8 +2439,26 @@ real-handshake conformance; Milestone 9 remains incomplete.
       initialization input gate, SA21 reset behavior, and operation-0 reads.
 - [x] Validate guest, trace and persistence continuation and independently
       review the extension.
-- [ ] With separate BIOS-run authorization, verify the selected operation
+- [x] With separate BIOS-run authorization, verify the selected operation
       family and attribute the next startup dependency.
+
+### EE MCH Register Window
+
+- [x] Search local manuals and compare the approved refreshed emulator/SDK
+      sources; record the missing register contract and the limits of the
+      provisional MCH-window policy.
+- [x] Implement and independently review the initial exact f400 zero-read
+      admission, then verify it in the bounded BIOS run and attribute the
+      following same-address store.
+- [x] With separate BIOS-run authorization, verify the read and attribute the
+      next startup dependency: a full-word store to the same f400 address.
+- [x] Replace the exact startup exceptions with a word-backed
+      `0x1000f400–0x1000f4ff` MCH window, preserving the RICM/DRD protocol
+      handlers and superseding the f410/f480/f490 exact-value filters and
+      former exact f500 reserved-write exception.
+- [x] Persist and test the window through reset, host/guest access, trace,
+      save/restore, access boundaries and the existing MCH protocol owner;
+      independently review and pass optimized/ASan gates.
 
 ### CD/DVD NREADY Startup Wait Scope
 

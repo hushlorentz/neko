@@ -49,6 +49,19 @@ namespace
       0
     }};
   }
+
+  EEExecutionResult guestLoad(
+    NekoSystem &system, std::uint32_t address)
+  {
+    system.eeBus().write32(0, UINT32_C(0x8c220000));
+    EECore &core = system.eeCore();
+    core.setGeneralRegister(1, {address | EEMemoryMap::KSEG1_BASE, 0});
+    core.setGeneralRegister(2, {UINT32_MAX, UINT32_MAX});
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.startExecution(EEMemoryMap::KSEG1_BASE);
+    system.startTrace(100);
+    return system.stepEEInstruction(16);
+  }
 }
 
 TEST_CASE("EE retail IOP boot probe is an exact stateless byte read",
@@ -90,6 +103,69 @@ TEST_CASE("EE retail IOP boot probe is an exact stateless byte read",
   REQUIRE_FALSE(bus.isCacheFillRange(0x1f803204, 1));
   REQUIRE_FALSE(bus.readDMAC128(0x1f803200, &quadword));
   REQUIRE(system.saveState() == state);
+}
+
+TEST_CASE("EE MCH window endpoint supports word-backed access and guest loads",
+  "[ee][bus][guest][trace][save-state][mch-window]")
+{
+  constexpr std::uint32_t ADDRESS = 0x1000f400;
+  constexpr std::uint32_t END = 0x1000f500;
+  constexpr std::uint32_t WRITTEN = 0x87654321;
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  const auto before = system.saveState();
+
+  std::uint32_t word = UINT32_MAX;
+  REQUIRE(bus.readData32(ADDRESS, &word));
+  REQUIRE(word == 0);
+  REQUIRE(bus.writeData32(ADDRESS, WRITTEN));
+  REQUIRE(bus.readData32(ADDRESS, &word));
+  REQUIRE(word == WRITTEN);
+  REQUIRE(system.saveState() != before);
+
+  std::uint8_t byte = 0xa5;
+  std::uint16_t halfword = 0xa5a5;
+  std::uint64_t doubleword = UINT64_MAX;
+  EEQuadword quadword{};
+  REQUIRE_FALSE(bus.readData8(ADDRESS, &byte));
+  REQUIRE_FALSE(bus.readData16(ADDRESS, &halfword));
+  REQUIRE_FALSE(bus.readData64(ADDRESS, &doubleword));
+  REQUIRE_FALSE(bus.readData128(ADDRESS, &quadword));
+  REQUIRE(bus.readData32(ADDRESS + 4, &word));
+  REQUIRE(word == 0);
+  word = UINT32_C(0x12345678);
+  REQUIRE_FALSE(bus.readData32(END, &word));
+  REQUIRE_FALSE(bus.writeData32(END, WRITTEN));
+  REQUIRE(word == UINT32_C(0x12345678));
+
+  const auto result = guestLoad(system, ADDRESS);
+  REQUIRE(result.pendingException == EEException::None);
+  REQUIRE_FALSE(result.cycleLimitReached);
+  REQUIRE(
+    system.eeCore().generalRegister(2).low == UINT64_C(0xffffffff87654321));
+  REQUIRE(system.eeCore().generalRegister(2).high == UINT32_MAX);
+
+  std::size_t accesses = 0;
+  for (const auto &event : system.trace())
+  {
+    if (event.subsystem == NekoTraceSubsystem::EE &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 == (ADDRESS | EEMemoryMap::KSEG1_BASE))
+    {
+      ++accesses;
+      REQUIRE(event.value1 == WRITTEN);
+      REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+        ADDRESS, 4, NekoEETraceMemory::AccessKind::DataLoad,
+        NekoEETraceMemory::TranslationOutcome::Translated,
+        NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
+        NekoEETraceMemory::CacheAccess::Bypassed,
+        NekoEETraceMemory::TransferOutcome::Completed,
+        NekoEETraceMemory::FailurePhase::None
+      }));
+    }
+  }
+  REQUIRE(accesses == 1);
+  REQUIRE_FALSE(system.traceTruncated());
 }
 
 TEST_CASE("GS PCRTC initialization writes preserve configured display timing",

@@ -1,3 +1,4 @@
+#include <array>
 #include <cstdint>
 #include <stdexcept>
 
@@ -28,7 +29,7 @@ namespace
   }
 }
 
-TEST_CASE("EE RDRAM initialization maps only physical word endpoints and host aliases",
+TEST_CASE("EE RDRAM initialization protocol endpoints preserve physical-only aliases",
   "[ee][bus][rdram-init-integration]")
 {
   NekoSystem system;
@@ -57,9 +58,7 @@ TEST_CASE("EE RDRAM initialization maps only physical word endpoints and host al
   REQUIRE(value == 0x1b);
   const auto hash = system.eeStateHash();
   for (const auto address : {COMMAND | 0x80000000u, COMMAND | 0xa0000000u,
-         DATA | 0x80000000u, DATA | 0xa0000000u,
-         COMMAND - 4, COMMAND + 4, COMMAND + 8, COMMAND + 12,
-         DATA + 4, DATA + 8, DATA + 12})
+         DATA | 0x80000000u, DATA | 0xa0000000u})
   {
     CAPTURE(address);
     value = 0x12345678;
@@ -71,6 +70,113 @@ TEST_CASE("EE RDRAM initialization maps only physical word endpoints and host al
   REQUIRE_FALSE(bus.writeData32(COMMAND, 0x00220400));
   REQUIRE_THROWS_AS(bus.write32(COMMAND, 0), std::out_of_range);
   REQUIRE(system.eeStateHash() == hash);
+}
+
+TEST_CASE("EE MCH window backs generic words through guest traces and save states",
+  "[ee][bus][guest][trace][save-state][mch-window]")
+{
+  constexpr std::uint32_t BASE = 0x1000f400;
+  constexpr std::uint32_t END = 0x1000f500;
+  const std::array<std::uint32_t, 8> addresses = {{
+    BASE, BASE + 4, BASE + 0x2c, BASE + 0x34,
+    BASE + 0x7c, BASE + 0x80, BASE + 0x90, END - 4
+  }};
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  for (std::size_t index = 0; index < addresses.size(); ++index)
+  {
+    const auto address = addresses[index];
+    CAPTURE(address);
+    std::uint32_t value = UINT32_MAX;
+    REQUIRE(bus.readData32(address, &value));
+    REQUIRE(value == 0);
+    const auto written = 0x12340000u + static_cast<std::uint32_t>(index);
+    REQUIRE(bus.writeData32(address, written));
+    REQUIRE(bus.readData32(address, &value));
+    REQUIRE(value == written);
+    REQUIRE(bus.wordMergeStorePolicy(address) ==
+      EEWordMergeStorePolicy::FullWordOnly);
+    std::uint8_t byte = 0xa5;
+    std::uint16_t half = 0xa5a5;
+    std::uint64_t wide = UINT64_C(0xa5a5a5a5a5a5a5a5);
+    EEQuadword quad = {wide, wide};
+    const auto aligned64 = address & ~std::uint32_t{7};
+    const auto aligned128 = address & ~std::uint32_t{15};
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE_FALSE(bus.writeData8(address, 0xff));
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE_FALSE(bus.writeData16(address, 0xffff));
+    REQUIRE_FALSE(bus.readData64(aligned64, &wide));
+    REQUIRE_FALSE(bus.writeData64(aligned64, UINT64_MAX));
+    REQUIRE_FALSE(bus.readData128(aligned128, &quad));
+    REQUIRE_FALSE(bus.writeData128(aligned128, {UINT64_MAX, UINT64_MAX}));
+    REQUIRE_FALSE(bus.readInstruction32(address, &value));
+    REQUIRE_FALSE(bus.readDMAC128(aligned128, &quad));
+    REQUIRE_FALSE(bus.writeDMAC128(aligned128, {UINT64_MAX, UINT64_MAX}));
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 4));
+    REQUIRE_THROWS_WITH(bus.write64(aligned64, UINT64_MAX),
+      "EE bus address supports full 32-bit accesses only.");
+    REQUIRE(byte == 0xa5);
+    REQUIRE(half == 0xa5a5);
+    REQUIRE(wide == UINT64_C(0xa5a5a5a5a5a5a5a5));
+    REQUIRE(quad.low == UINT64_C(0xa5a5a5a5a5a5a5a5));
+    REQUIRE(quad.high == UINT64_C(0xa5a5a5a5a5a5a5a5));
+  }
+  for (const auto address : {BASE - 4, END})
+  {
+    CAPTURE(address);
+    std::uint32_t value = 0xa5a5a5a5;
+    REQUIRE_FALSE(bus.readData32(address, &value));
+    REQUIRE_FALSE(bus.writeData32(address, UINT32_MAX));
+    REQUIRE(value == 0xa5a5a5a5);
+  }
+  std::uint32_t misaligned = 0;
+  REQUIRE_THROWS_AS(bus.readData32(BASE + 1, &misaligned),
+    std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.writeData32(BASE + 1, 0), std::invalid_argument);
+
+  const auto saved = original.saveState();
+  const auto hash = original.eeStateHash();
+  NekoSystem restored;
+  REQUIRE_NOTHROW(restored.loadState(saved));
+  REQUIRE(restored.saveState() == saved);
+  REQUIRE(restored.eeStateHash() == hash);
+  for (std::size_t index = 0; index < addresses.size(); ++index)
+  {
+    REQUIRE(restored.eeBus().read32(addresses[index]) ==
+      0x12340000u + static_cast<std::uint32_t>(index));
+  }
+  original.reset();
+  for (const auto address : addresses)
+  {
+    REQUIRE(original.eeBus().read32(address) == 0);
+  }
+
+  NekoSystem guest;
+  const auto result = guestStore(guest, END - 4, 0x2b, 0, 0x87654321);
+  REQUIRE(result.pendingException == EEException::None);
+  REQUIRE_FALSE(result.cycleLimitReached);
+  REQUIRE(guest.eeBus().read32(END - 4) == 0x87654321);
+  std::size_t stores = 0;
+  for (const auto &event : guest.trace())
+  {
+    if (event.subsystem == NekoTraceSubsystem::EE &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 == ((END - 4) | EEMemoryMap::KSEG1_BASE))
+    {
+      ++stores;
+      REQUIRE(event.value1 == 0x87654321);
+      REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+        END - 4, 4, NekoEETraceMemory::AccessKind::DataStore,
+        NekoEETraceMemory::TranslationOutcome::Translated,
+        NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
+        NekoEETraceMemory::CacheAccess::Bypassed,
+        NekoEETraceMemory::TransferOutcome::Completed,
+        NekoEETraceMemory::FailurePhase::None}));
+    }
+  }
+  REQUIRE(stores == 1);
+  REQUIRE_FALSE(guest.traceTruncated());
 }
 
 TEST_CASE("EE RDRAM initialization rejects non-word and backing accesses without consuming data",

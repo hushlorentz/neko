@@ -112,12 +112,11 @@ namespace EEMemoryMap
   constexpr std::uint32_t SIO_FCR = 0x1000f140;
   constexpr std::uint32_t SIO_BGR = 0x1000f150;
   constexpr std::uint32_t SIO_TXFIFO = 0x1000f180;
-  constexpr std::uint32_t STARTUP_INIT_F410 = 0x1000f410;
+  constexpr std::uint32_t MCH_WINDOW_BASE = 0x1000f400;
+  constexpr std::uint32_t MCH_WINDOW_END = 0x1000f500;
   constexpr std::uint32_t MCH_RICM = 0x1000f430;
   constexpr std::uint32_t MCH_DRD = 0x1000f440;
-  constexpr std::uint32_t STARTUP_INIT_F480 = 0x1000f480;
-  constexpr std::uint32_t STARTUP_INIT_F490 = 0x1000f490;
-  constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
+  constexpr std::uint32_t RESERVED_F500 = MCH_WINDOW_END;
   constexpr std::uint32_t D_ENABLER = 0x1000f520;
   constexpr std::uint32_t D_ENABLEW = 0x1000f590;
   constexpr std::uint32_t IOP_BOOT_PROBE = 0x1f803204;

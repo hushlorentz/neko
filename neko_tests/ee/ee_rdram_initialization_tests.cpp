@@ -14,6 +14,7 @@ namespace
     REQUIRE(actual.command == expected.command);
     REQUIRE(actual.inputData == expected.inputData);
     REQUIRE(actual.enumeratedDevices == expected.enumeratedDevices);
+    REQUIRE(actual.mchWindowWords == expected.mchWindowWords);
     REQUIRE(owner.readStatus() == 0);
   }
 
@@ -60,6 +61,35 @@ TEST_CASE("EE RDRAM initialization owner starts idle without a data response",
   requireState(owner, {});
   requireUnreadable(owner);
   REQUIRE_THROWS_AS(owner.readData(nullptr), std::invalid_argument);
+  requireState(owner, {});
+}
+
+TEST_CASE("EE MCH window backing words retain state and reset",
+  "[ee][rdram-init-owner][mch-window]")
+{
+  EERDRAMInitialization owner;
+  for (std::size_t index = 0;
+       index < EERDRAMInitializationState::MCH_WINDOW_WORD_COUNT;
+       ++index)
+  {
+    std::uint32_t value = UINT32_MAX;
+    REQUIRE(owner.readMCHWindowWord(index, &value));
+    REQUIRE(value == 0);
+    const auto written = 0x12340000u + static_cast<std::uint32_t>(index);
+    REQUIRE(owner.writeMCHWindowWord(index, written));
+    REQUIRE(owner.readMCHWindowWord(index, &value));
+    REQUIRE(value == written);
+  }
+  const auto beforeInvalidAccess = owner.state();
+  std::uint32_t unchanged = 0xa5a5a5a5;
+  REQUIRE_FALSE(owner.readMCHWindowWord(
+    EERDRAMInitializationState::MCH_WINDOW_WORD_COUNT, &unchanged));
+  REQUIRE(unchanged == 0xa5a5a5a5);
+  REQUIRE_FALSE(owner.writeMCHWindowWord(
+    EERDRAMInitializationState::MCH_WINDOW_WORD_COUNT, 0));
+  requireState(owner, beforeInvalidAccess);
+
+  owner.reset();
   requireState(owner, {});
 }
 

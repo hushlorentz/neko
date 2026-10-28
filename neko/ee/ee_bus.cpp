@@ -31,6 +31,12 @@ namespace
       address < EEMemoryMap::SIF_BASE + SIFRegisterMap::APERTURE_SIZE;
   }
 
+  bool mchWindowAddress(std::uint32_t address)
+  {
+    return address >= EEMemoryMap::MCH_WINDOW_BASE &&
+      address < EEMemoryMap::MCH_WINDOW_END;
+  }
+
   bool fullWordOnlyAddress(std::uint32_t address)
   {
     return EETimers::isRegisterAddress(address) ||
@@ -38,11 +44,7 @@ namespace
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
       address == EEMemoryMap::SIO_ISR ||
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
-      address == EEMemoryMap::STARTUP_INIT_F410 ||
-      address == EEMemoryMap::MCH_RICM || address == EEMemoryMap::MCH_DRD ||
-      address == EEMemoryMap::STARTUP_INIT_F480 ||
-      address == EEMemoryMap::STARTUP_INIT_F490 ||
-      address == EEMemoryMap::RESERVED_F500 ||
+      mchWindowAddress(address) ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
@@ -1059,6 +1061,22 @@ bool EEBus::readMapped32(
     return true;
   }
 
+  if (mchWindowAddress(address))
+  {
+    if (address == EEMemoryMap::MCH_RICM)
+    {
+      *value = attachedRDRAMInitialization().readStatus();
+      return true;
+    }
+    if (address == EEMemoryMap::MCH_DRD)
+    {
+      return attachedRDRAMInitialization().readData(value);
+    }
+    return attachedRDRAMInitialization().readMCHWindowWord(
+      (address - EEMemoryMap::MCH_WINDOW_BASE) / sizeof(std::uint32_t),
+      value);
+  }
+
   if (sifApertureAddress(address))
   {
     SIFRegister reg;
@@ -1076,11 +1094,6 @@ bool EEBus::readMapped32(
     case EEMemoryMap::SIO_ISR:
       *value = attachedSerial().readStatus();
       return true;
-    case EEMemoryMap::MCH_RICM:
-      *value = attachedRDRAMInitialization().readStatus();
-      return true;
-    case EEMemoryMap::MCH_DRD:
-      return attachedRDRAMInitialization().readData(value);
     case EEMemoryMap::VIF0_STAT:
       *value = vifStatus(*vif0Component);
       return true;
@@ -1236,6 +1249,22 @@ bool EEBus::writeMapped32(
     return true;
   }
 
+  if (mchWindowAddress(address))
+  {
+    if (address == EEMemoryMap::MCH_RICM)
+    {
+      return attachedRDRAMInitialization().writeCommand(value);
+    }
+    if (address == EEMemoryMap::MCH_DRD)
+    {
+      attachedRDRAMInitialization().writeData(value);
+      return true;
+    }
+    return attachedRDRAMInitialization().writeMCHWindowWord(
+      (address - EEMemoryMap::MCH_WINDOW_BASE) / sizeof(std::uint32_t),
+      value);
+  }
+
   if (sifApertureAddress(address))
   {
     SIFRegister reg;
@@ -1270,23 +1299,6 @@ bool EEBus::writeMapped32(
       return attachedSerial().writeFIFOControl(value);
     case EEMemoryMap::SIO_BGR:
       return attachedSerial().writeBaudRate(value);
-    case EEMemoryMap::MCH_RICM:
-      return attachedRDRAMInitialization().writeCommand(value);
-    case EEMemoryMap::MCH_DRD:
-      attachedRDRAMInitialization().writeData(value);
-      return true;
-    case EEMemoryMap::STARTUP_INIT_F410:
-      // Provisional zero-write admission; endpoint identity and effects are unknown.
-      return value == 0;
-    case EEMemoryMap::STARTUP_INIT_F480:
-      // Provisional startup admission; endpoint identity and effects are unknown.
-      return value == 0x00007c30;
-    case EEMemoryMap::STARTUP_INIT_F490:
-      // Provisional startup admission; endpoint identity and effects are unknown.
-      return value == 0x00882222;
-    case EEMemoryMap::RESERVED_F500:
-      // Provisional exact-word no-op, not a DMA hold or peer-reset register.
-      return true;
     case EEMemoryMap::VIF0_FBRST:
       if ((value & ~VIF_STALL_CANCEL) != 0)
       {

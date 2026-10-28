@@ -135,6 +135,33 @@ bool EERDRAMInitialization::readData(std::uint32_t *value)
   }
 }
 
+bool EERDRAMInitialization::readMCHWindowWord(
+  std::size_t wordIndex, std::uint32_t *value) const
+{
+  if (value == nullptr)
+  {
+    throw std::invalid_argument(
+      "EE MCH window read requires an output value.");
+  }
+  if (wordIndex >= registers.mchWindowWords.size())
+  {
+    return false;
+  }
+  *value = registers.mchWindowWords[wordIndex];
+  return true;
+}
+
+bool EERDRAMInitialization::writeMCHWindowWord(
+  std::size_t wordIndex, std::uint32_t value) noexcept
+{
+  if (wordIndex >= registers.mchWindowWords.size())
+  {
+    return false;
+  }
+  registers.mchWindowWords[wordIndex] = value;
+  return true;
+}
+
 void EERDRAMInitialization::reset() noexcept
 {
   registers = {};
