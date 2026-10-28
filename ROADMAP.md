@@ -2364,7 +2364,7 @@ real-handshake conformance; Milestone 9 remains incomplete.
 - [x] Compose the controller through exact IOP byte dispatch and existing clock/
       INTC boundaries; add transactional persistence and hashing in the same
       change, preserving SIF, channel-3 initialization and independent IRQ latches.
-- [ ] Validate guest access, completion ordering, reset, pending/result restore
+- [x] Validate guest access, completion ordering, reset, pending/result restore
       and malformed-state atomicity; independently review integration and run
       immediate complete optimized and AddressSanitizer checks.
 
