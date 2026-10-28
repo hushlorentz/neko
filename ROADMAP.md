@@ -2376,9 +2376,25 @@ real-handshake conformance; Milestone 9 remains incomplete.
 - [x] Complete authored startup/IRQ/RTC continuation and trace-mode conformance,
       bounded maintainability and independent correctness review; run complete
       optimized and AddressSanitizer checks before BIOS verification.
-- [ ] With separate BIOS-run authorization, verify the selected readiness
+- [x] With separate BIOS-run authorization, verify the selected readiness
       boundary and attribute the next dependency; reopen device scope rather
       than inventing additional command, configuration or media responses.
+
+### EE RDRAM SA0x4c Startup Dependency
+
+- [x] Resolve the observed `0x804c0060` command and `0x27` input against
+      available evidence; assess whether a wider command batch is justified.
+- [x] Implement the selected exact command through the existing owner, with
+      atomic rejection, persistence and guest integration coverage.
+- [x] Independently review and validate the extension; separately authorize
+      BIOS verification before attributing the next dependency.
+
+### CD/DVD NREADY Startup Wait Scope
+
+- [ ] Resolve the observed NREADY bit-3 wait/countdown against local manuals;
+      select any bounded readiness-policy revision or further observation,
+      after addressing the earlier EE RDRAM dependency; expand required
+      implementation and conformance before changing behavior.
 
 ### Remaining Boot-Service Scope
 

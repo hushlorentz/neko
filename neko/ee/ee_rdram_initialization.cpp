@@ -8,6 +8,7 @@ namespace
   constexpr std::uint32_t COMMAND_FIELDS = UINT32_C(0x8fff03ff);
   constexpr std::uint32_t BROADCAST = 0x20;
   constexpr std::uint32_t RETAIL_INITIALIZATION = UINT32_C(0x800003a0);
+  constexpr std::uint32_t SA4C_WRITE = UINT32_C(0x804c0060);
   constexpr std::uint32_t SA4D_WRITE = UINT32_C(0x804d0060);
   constexpr std::uint8_t RETAIL_DEVICE_COUNT = 2;
 
@@ -15,6 +16,7 @@ namespace
   {
     Unsupported,
     Initialize,
+    WriteSA4C,
     WriteSA4D,
     WriteInitialization,
     Enumerate,
@@ -36,6 +38,10 @@ namespace
     if (value == SA4D_WRITE)
     {
       return Command::WriteSA4D;
+    }
+    if (value == SA4C_WRITE)
+    {
+      return Command::WriteSA4C;
     }
     const auto operation = (value >> 6) & 0xf;
     const auto subaddress = (value >> 16) & 0xfff;
@@ -73,7 +79,8 @@ bool EERDRAMInitialization::writeCommand(std::uint32_t value) noexcept
   const auto command = decodeCommand(value);
   if (command == Command::Unsupported ||
       ((command == Command::Initialize || command == Command::WriteSA4D) &&
-       registers.inputData != 0))
+       registers.inputData != 0) ||
+      (command == Command::WriteSA4C && registers.inputData != 0x27))
   {
     return false;
   }

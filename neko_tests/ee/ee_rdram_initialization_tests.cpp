@@ -172,6 +172,39 @@ TEST_CASE("EE RDRAM SA4d exact command preserves every enumeration continuation"
   }
 }
 
+TEST_CASE("EE RDRAM SA4c admits only the observed command and input",
+  "[ee][rdram-init-owner][rdram-sa4c]")
+{
+  for (std::uint8_t cursor = 0; cursor <= 2; ++cursor)
+  {
+    CAPTURE(cursor);
+    EERDRAMInitialization owner;
+    REQUIRE(owner.writeCommand(0x80210000));
+    for (unsigned read = 0; read < cursor; ++read)
+    {
+      requireData(owner, 0x1f);
+    }
+    owner.writeData(0x27);
+    for (unsigned repeat = 0; repeat < 2; ++repeat)
+    {
+      REQUIRE(owner.writeCommand(0x804c0060));
+      requireState(owner, {0x004c0060, 0x27, cursor});
+      requireUnreadable(owner);
+    }
+    for (unsigned bit = 0; bit < 32; ++bit)
+    {
+      requireRejectedCommand(owner, 0x804c0060u ^ (UINT32_C(1) << bit));
+      owner.writeData(0x27u ^ (UINT32_C(1) << bit));
+      requireRejectedCommand(owner, 0x804c0060);
+      owner.writeData(0x27);
+    }
+    REQUIRE(owner.writeCommand(0x80210000));
+    requireData(owner, cursor < 2 ? 0x1f : 0);
+    owner.reset();
+    requireState(owner, {});
+  }
+}
+
 TEST_CASE("EE RDRAM SA4d rejects alternate encodings without changing selection",
   "[ee][rdram-init-owner][rdram-sa4d]")
 {
