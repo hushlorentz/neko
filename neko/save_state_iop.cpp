@@ -667,7 +667,15 @@ void NekoSaveStateCodec::commitIOP(
     &destination->iopInterruptControllerComponent;
   destination->iopBusComponent.timers = &destination->iopTimersComponent;
   destination->iopBusComponent.cdvd = &destination->cdvdControllerComponent;
+  const bool cdvdObservationsEnabled =
+    destination->cdvdControllerComponent.observationsEnabled;
+  auto *const cdvdObservationOrder =
+    destination->cdvdControllerComponent.observationOrder;
   destination->cdvdControllerComponent = source->cdvdControllerComponent;
+  destination->cdvdControllerComponent.observationsEnabled =
+    cdvdObservationsEnabled;
+  destination->cdvdControllerComponent.observationOrder = cdvdObservationOrder;
+  destination->cdvdControllerComponent.clearObservations();
   destination->iopBusComponent.dmaController =
     &destination->iopDMAControllerComponent;
   destination->iopBusComponent.sif1DMA = &destination->iopSIF1DMAComponent;

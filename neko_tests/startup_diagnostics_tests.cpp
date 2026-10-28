@@ -126,6 +126,55 @@ TEST_CASE("Startup inspection preserves live state including side-effecting regi
   }
 }
 
+TEST_CASE("Startup trace fields decode only CDVD command identities",
+  "[startup-diagnostics][cdvd]")
+{
+  const NekoTraceEvent command = {7, NekoTraceSubsystem::CDVD,
+    NekoTraceEventType::CommandCompleted, UINT64_C(0x800002010801),
+    UINT64_MAX, UINT64_C(0x070605048001ff00), 0};
+  std::ostringstream output;
+  writeStartupTraceEventFields(output, command);
+  REQUIRE(output.str() ==
+    "\"master_cycle\":7,\"subsystem\":15,\"event_type\":24,\"values\":[" +
+    std::to_string(command.value0) + ",18446744073709551615," +
+    std::to_string(command.value2) + ",0],"
+    "\"cdvd\":{\"transport\":\"s\",\"opcode\":8,\"phase_before\":\"pending\","
+    "\"phase_after\":\"result\",\"cause_before\":0,\"cause_after\":128,"
+    "\"rtc_ticks\":18446744073709551615,\"result\":[0,255,1,128,4,5,6,7]}");
+
+  for (const NekoTraceEvent other : {
+      NekoTraceEvent{8, NekoTraceSubsystem::EE, NekoTraceEventType::CommandCompleted,
+        255, 1, 2, 3},
+      NekoTraceEvent{8, NekoTraceSubsystem::CDVD, NekoTraceEventType::Progress,
+        255, 1, 2, 3}})
+  {
+    std::ostringstream raw;
+    writeStartupTraceEventFields(raw, other);
+    REQUIRE(raw.str() ==
+      "\"master_cycle\":8,\"subsystem\":" +
+      std::to_string(static_cast<unsigned>(other.subsystem)) +
+      ",\"event_type\":" + std::to_string(static_cast<unsigned>(other.type)) +
+      ",\"values\":[255,1,2,3]");
+  }
+}
+
+TEST_CASE("Startup CDVD trace export rejects unknown transport and phase values",
+  "[startup-diagnostics][cdvd]")
+{
+  for (const std::uint64_t metadata : {
+      UINT64_C(255), UINT64_C(255) << 16, UINT64_C(255) << 24})
+  {
+    CAPTURE(metadata);
+    StartupFailureCapture capture;
+    capture.observe({1, NekoTraceSubsystem::CDVD,
+      NekoTraceEventType::CommandAccepted, metadata, 0, 0, 0});
+    std::ostringstream output;
+    REQUIRE_THROWS_AS(writeStartupFailureCaptureJsonLine(output, capture),
+      std::invalid_argument);
+    REQUIRE(output.str().empty());
+  }
+}
+
 TEST_CASE("Startup DMA summary separates controller gating from last transfer stalls",
   "[startup-diagnostics]")
 {

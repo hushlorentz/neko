@@ -334,6 +334,7 @@ add_executable(neko_tests
     neko_tests/math/floating_point_tests.cpp
     neko_tests/iop/cdvd_controller_tests.cpp
     neko_tests/iop/cdvd_integration_tests.cpp
+    neko_tests/iop/cdvd_trace_tests.cpp
     neko_tests/iop/iop_bus_tests.cpp
     neko_tests/iop/iop_cache_tests.cpp
     neko_tests/iop/iop_core_tests.cpp

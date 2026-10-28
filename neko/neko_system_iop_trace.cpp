@@ -73,11 +73,13 @@ void NekoSystem::publishIOPAndSIFTrace(
   std::size_t interruptIndex = 0;
   std::size_t sifIndex = 0;
   std::size_t dmaIndex = 0;
+  std::size_t cdvdIndex = 0;
   while (cpuIndex < iopCoreComponent.stepEventCount ||
          timerIndex < iopTimersComponent.observationCount ||
          interruptIndex < iopInterruptControllerComponent.observationCount ||
          sifIndex < sifComponent.observationCount ||
-         dmaIndex < dma.count)
+         dmaIndex < dma.count ||
+         cdvdIndex < cdvdControllerComponent.observationCount)
   {
     constexpr auto absent = std::numeric_limits<std::size_t>::max();
     const auto cpuSequence = cpuIndex < iopCoreComponent.stepEventCount
@@ -92,7 +94,15 @@ void NekoSystem::publishIOPAndSIFTrace(
       ? sifComponent.observations[sifIndex].sequence : absent;
     const auto dmaSequence = dmaIndex < dma.count
       ? dma.entries[dmaIndex].sequence : absent;
-    if (dmaSequence < cpuSequence && dmaSequence < timerSequence &&
+    const auto cdvdSequence = cdvdIndex < cdvdControllerComponent.observationCount
+      ? cdvdControllerComponent.observations[cdvdIndex].sequence : absent;
+    if (cdvdSequence < cpuSequence && cdvdSequence < timerSequence &&
+        cdvdSequence < interruptSequence && cdvdSequence < sifSequence &&
+        cdvdSequence < dmaSequence)
+    {
+      publishCDVDTrace(cycle, cdvdControllerComponent.observations[cdvdIndex++]);
+    }
+    else if (dmaSequence < cpuSequence && dmaSequence < timerSequence &&
         dmaSequence < interruptSequence && dmaSequence < sifSequence)
     {
       const auto &event = dma.entries[dmaIndex++].event;
@@ -118,6 +128,36 @@ void NekoSystem::publishIOPAndSIFTrace(
         cycle, iopInterruptControllerComponent.observations[interruptIndex++]);
     }
   }
+}
+
+void NekoSystem::publishCDVDTrace(
+  std::uint64_t cycle, const CDVDController::Observation &event)
+{
+  using Phase = NekoCDVDTrace::Phase;
+  const auto phase = [](CDVDController::SubcommandPhase value)
+  {
+    switch (value)
+    {
+      case CDVDController::SubcommandPhase::Idle: return Phase::Idle;
+      case CDVDController::SubcommandPhase::Pending: return Phase::Pending;
+      case CDVDController::SubcommandPhase::Result: return Phase::Result;
+    }
+    throw std::logic_error("Unknown CD/DVD trace phase.");
+  };
+  NekoCDVDTrace::Command command;
+  command.transport = event.transport == CDVDController::Transport::Normal
+    ? NekoCDVDTrace::Transport::Normal : NekoCDVDTrace::Transport::Subcommand;
+  command.opcode = event.opcode;
+  command.beforePhase = phase(event.beforePhase);
+  command.afterPhase = phase(event.afterPhase);
+  command.beforeCause = event.beforeCause;
+  command.afterCause = event.afterCause;
+  command.rtcTicks = event.rtcTicks;
+  appendTrace(cycle, NekoTraceSubsystem::CDVD,
+    event.kind == CDVDController::ObservationKind::Accepted
+      ? NekoTraceEventType::CommandAccepted : NekoTraceEventType::CommandCompleted,
+    nekoPackCDVDTraceMetadata(command), command.rtcTicks,
+    nekoPackCDVDTraceResult(event.result));
 }
 
 void NekoSystem::publishSIFTrace(

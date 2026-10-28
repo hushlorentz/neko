@@ -372,11 +372,9 @@ void writeStartupFailureCaptureJsonLine(
       json << ',';
     }
     first = false;
-    json << "{\"master_cycle\":" << event.masterCycle
-      << ",\"subsystem\":" << static_cast<unsigned>(event.subsystem)
-      << ",\"event_type\":" << static_cast<unsigned>(event.type)
-      << ",\"values\":[" << event.value0 << ',' << event.value1 << ','
-      << event.value2 << ',' << event.value3 << "]}";
+    json << '{';
+    writeStartupTraceEventFields(json, event);
+    json << '}';
   }
   json << "]}\n";
   const auto line = json.str();

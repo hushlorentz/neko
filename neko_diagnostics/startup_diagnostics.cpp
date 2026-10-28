@@ -486,6 +486,51 @@ void writeStartupRunSummaryJsonLine(
   emitJson(output, json);
 }
 
+void writeStartupTraceEventFields(
+  std::ostream &output, const NekoTraceEvent &event)
+{
+  const bool cdvdCommand = event.subsystem == NekoTraceSubsystem::CDVD &&
+    (event.type == NekoTraceEventType::CommandAccepted ||
+     event.type == NekoTraceEventType::CommandCompleted);
+  NekoCDVDTrace::Command command;
+  const char *transport = nullptr;
+  const char *before = nullptr;
+  const char *after = nullptr;
+  if (cdvdCommand)
+  {
+    command = nekoDecodeCDVDTrace(event);
+    const char *const transports[] = {"n", "s"};
+    const char *const phases[] = {"idle", "pending", "result"};
+    transport = enumName(command.transport, transports);
+    before = enumName(command.beforePhase, phases);
+    after = enumName(command.afterPhase, phases);
+  }
+  output << "\"master_cycle\":" << event.masterCycle
+    << ",\"subsystem\":" << static_cast<unsigned>(event.subsystem)
+    << ",\"event_type\":" << static_cast<unsigned>(event.type)
+    << ",\"values\":[" << event.value0 << ',' << event.value1 << ','
+    << event.value2 << ',' << event.value3 << ']';
+  if (cdvdCommand)
+  {
+    output << ",\"cdvd\":{\"transport\":\"" << transport
+      << "\",\"opcode\":" << static_cast<unsigned>(command.opcode)
+      << ",\"phase_before\":\"" << before
+      << "\",\"phase_after\":\"" << after
+      << "\",\"cause_before\":" << static_cast<unsigned>(command.beforeCause)
+      << ",\"cause_after\":" << static_cast<unsigned>(command.afterCause)
+      << ",\"rtc_ticks\":" << command.rtcTicks << ",\"result\":[";
+    for (std::size_t index = 0; index < command.result.size(); ++index)
+    {
+      if (index != 0)
+      {
+        output << ',';
+      }
+      output << static_cast<unsigned>(command.result[index]);
+    }
+    output << "]}";
+  }
+}
+
 void writeStartupTraceJsonLines(
   std::ostream &output, const NekoSystem &system)
 {
@@ -501,12 +546,9 @@ void writeStartupTraceJsonLines(
   {
     json.str("");
     json.clear();
-    json <<
-      "{\"type\":\"trace_event\",\"master_cycle\":" << event.masterCycle <<
-      ",\"subsystem\":" << static_cast<unsigned>(event.subsystem) <<
-      ",\"event_type\":" << static_cast<unsigned>(event.type) <<
-      ",\"values\":[" << event.value0 << ',' << event.value1 << ',' <<
-      event.value2 << ',' << event.value3 << "]}\n";
+    json << "{\"type\":\"trace_event\",";
+    writeStartupTraceEventFields(json, event);
+    json << "}\n";
     emitJson(output, json);
   }
 }

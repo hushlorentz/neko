@@ -2370,7 +2370,7 @@ real-handshake conformance; Milestone 9 remains incomplete.
 
 ### CD/DVD Startup Diagnostics and Authored Conformance
 
-- [ ] Add trace-enabled command acceptance/completion observations and maintained
+- [x] Add trace-enabled command acceptance/completion observations and maintained
       exporter/inspector support; validate ordering, capacity, disabled tracing
       and prefix/streaming behavior without per-tick or per-byte trace noise.
 - [ ] Complete authored startup/IRQ/RTC continuation and trace-mode conformance,

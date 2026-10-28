@@ -1,5 +1,7 @@
 #include "regression_trace.hpp"
 
+#include <stdexcept>
+
 namespace
 {
   constexpr std::uint64_t FNV_OFFSET_BASIS =
@@ -117,4 +119,52 @@ std::uint64_t nekoTraceHash(
     hashU64(&hash, event.value3);
   }
   return hash;
+}
+
+std::uint64_t nekoPackCDVDTraceMetadata(
+  const NekoCDVDTrace::Command &command) noexcept
+{
+  return static_cast<std::uint64_t>(command.transport) |
+    (static_cast<std::uint64_t>(command.opcode) << 8) |
+    (static_cast<std::uint64_t>(command.beforePhase) << 16) |
+    (static_cast<std::uint64_t>(command.afterPhase) << 24) |
+    (static_cast<std::uint64_t>(command.beforeCause) << 32) |
+    (static_cast<std::uint64_t>(command.afterCause) << 40);
+}
+
+std::uint64_t nekoPackCDVDTraceResult(
+  const std::array<std::uint8_t, 8> &result) noexcept
+{
+  std::uint64_t packed = 0;
+  for (std::size_t index = 0; index < result.size(); ++index)
+  {
+    packed |= static_cast<std::uint64_t>(result[index]) << (index * 8);
+  }
+  return packed;
+}
+
+NekoCDVDTrace::Command nekoDecodeCDVDTrace(const NekoTraceEvent &event)
+{
+  if (event.subsystem != NekoTraceSubsystem::CDVD ||
+      (event.type != NekoTraceEventType::CommandAccepted &&
+       event.type != NekoTraceEventType::CommandCompleted))
+  {
+    throw std::invalid_argument("Not a CD/DVD command trace event.");
+  }
+  NekoCDVDTrace::Command command;
+  command.transport =
+    static_cast<NekoCDVDTrace::Transport>(event.value0 & 0xff);
+  command.opcode = static_cast<std::uint8_t>(event.value0 >> 8);
+  command.beforePhase =
+    static_cast<NekoCDVDTrace::Phase>((event.value0 >> 16) & 0xff);
+  command.afterPhase =
+    static_cast<NekoCDVDTrace::Phase>((event.value0 >> 24) & 0xff);
+  command.beforeCause = static_cast<std::uint8_t>(event.value0 >> 32);
+  command.afterCause = static_cast<std::uint8_t>(event.value0 >> 40);
+  command.rtcTicks = event.value1;
+  for (std::size_t index = 0; index < command.result.size(); ++index)
+  {
+    command.result[index] = static_cast<std::uint8_t>(event.value2 >> (index * 8));
+  }
+  return command;
 }

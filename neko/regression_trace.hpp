@@ -1,6 +1,7 @@
 #ifndef REGRESSION_TRACE_HPP
 #define REGRESSION_TRACE_HPP
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -22,7 +23,8 @@ enum class NekoTraceSubsystem : std::uint8_t
   IOP = 11,
   IOPTimers = 12,
   IOPInterruptController = 13,
-  SIF = 14
+  SIF = 14,
+  CDVD = 15
 };
 
 enum class NekoTraceEventType : std::uint8_t
@@ -50,8 +52,28 @@ enum class NekoTraceEventType : std::uint8_t
   DMABeat = 20,
   FaultContext = 21,
   // EE: raw byte, physical TXFIFO address, zero, zero; precedes EE observations.
-  SerialTransmitCompleted = 22
+  SerialTransmitCompleted = 22,
+  CommandAccepted = 23,
+  CommandCompleted = 24
 };
+
+namespace NekoCDVDTrace
+{
+  enum class Transport : std::uint8_t { Normal = 0, Subcommand = 1 };
+  enum class Phase : std::uint8_t { Idle = 0, Pending = 1, Result = 2 };
+
+  struct Command
+  {
+    Transport transport = Transport::Normal;
+    std::uint8_t opcode = 0;
+    Phase beforePhase = Phase::Idle;
+    Phase afterPhase = Phase::Idle;
+    std::uint8_t beforeCause = 0;
+    std::uint8_t afterCause = 0;
+    std::uint64_t rtcTicks = 0;
+    std::array<std::uint8_t, 8> result = {};
+  };
+}
 
 namespace NekoEETraceFault
 {
@@ -469,6 +491,17 @@ class NekoTraceObserver
 //   Rejected IOP grants publish the executed cycle prefix before throwing,
 //   without admitting the IOP instruction. Records precede completion-produced
 //   IOP INTC changes and same-pulse IOP instruction/interrupt observations.
+//
+// CDVD/CommandAccepted and CommandCompleted:
+//   value0 bytes 0..5: transport (N=0/S=1), opcode, before/after phase
+//   (Idle=0/Pending=1/Result=2), before/after device cause; bits 63:48 zero.
+//   value1: current RTC master ticks in the selected 100-year cycle.
+//   value2: eight result bytes, byte i at bits 8*i, only for S completion;
+//   zero for N commands and acceptance. value3 is reserved and zero.
+//   Normal commands use Idle/Pending phases independently of the S channel.
+//   Acceptance is ordered inside the successful byte write, before its CPU
+//   memory record. Completion precedes its resulting INTC/CPU records.
+//   No events for rejected commands, polling, result bytes or acknowledgements.
 
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(
@@ -479,5 +512,10 @@ std::uint64_t nekoPackIOPMemoryTraceMetadata(
   const NekoIOPTraceMemory::Metadata &metadata);
 std::uint64_t nekoPackIOPTimerTraceSnapshot(
   const NekoIOPTraceTimer::CounterSnapshot &snapshot);
+std::uint64_t nekoPackCDVDTraceMetadata(
+  const NekoCDVDTrace::Command &command) noexcept;
+std::uint64_t nekoPackCDVDTraceResult(
+  const std::array<std::uint8_t, 8> &result) noexcept;
+NekoCDVDTrace::Command nekoDecodeCDVDTrace(const NekoTraceEvent &event);
 
 #endif

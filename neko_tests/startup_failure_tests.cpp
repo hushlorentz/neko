@@ -75,6 +75,35 @@ TEST_CASE("First startup failure retains the original EE fault rather than handl
   }
 }
 
+TEST_CASE("Startup failure capture exports decoded CDVD commands and unchanged raw events",
+  "[startup-failure][failure-capture][cdvd]")
+{
+  StartupFailureCapture capture;
+  capture.observe({1, NekoTraceSubsystem::CDVD, NekoTraceEventType::CommandAccepted,
+    UINT64_C(0x01000800), 42, 0, 0});
+  capture.observe({2, NekoTraceSubsystem::CDVD, NekoTraceEventType::CommandCompleted,
+    UINT64_C(0x800002010801), 43, UINT64_C(0x070605048001ff00), 0});
+  capture.observe({2, EE, ISSUE, 4096, 0, 0, 0});
+  std::ostringstream output;
+  writeStartupFailureCaptureJsonLine(output, capture);
+  const auto json = output.str();
+  REQUIRE(json.find(
+    "\"cdvd\":{\"transport\":\"n\",\"opcode\":8,\"phase_before\":\"idle\","
+    "\"phase_after\":\"pending\",\"cause_before\":0,\"cause_after\":0,"
+    "\"rtc_ticks\":42,\"result\":[0,0,0,0,0,0,0,0]}") != std::string::npos);
+  REQUIRE(json.find(
+    "\"cdvd\":{\"transport\":\"s\",\"opcode\":8,\"phase_before\":\"pending\","
+    "\"phase_after\":\"result\",\"cause_before\":0,\"cause_after\":128,"
+    "\"rtc_ticks\":43,\"result\":[0,255,1,128,4,5,6,7]}") != std::string::npos);
+  REQUIRE(json.find("\"values\":[" + std::to_string(UINT64_C(0x800002010801)) +
+    ",43," + std::to_string(UINT64_C(0x070605048001ff00)) + ",0]") !=
+    std::string::npos);
+  REQUIRE(json.find(
+    "{\"master_cycle\":2,\"subsystem\":10,\"event_type\":5,"
+    "\"values\":[4096,0,0,0]}") != std::string::npos);
+  REQUIRE_FALSE(firstStartupFailure(capture.events()).found);
+}
+
 TEST_CASE("Startup flight recorder freezes late failure context independently of its prefix",
   "[startup-failure][failure-capture]")
 {

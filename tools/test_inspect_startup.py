@@ -82,7 +82,7 @@ def capture_records():
 
 class InspectorTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory()
+        self.directory = tempfile.TemporaryDirectory(dir=SCRIPT.parent)
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / "run.jsonl"
         self.write(self.path, records())
@@ -362,6 +362,88 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(row["payload"],
                          dict(byte=255, physical_address="0x1000f180"))
         self.assertEqual(row["values_raw"][0], "0x00000000000000ff")
+
+    def test_cdvd_command_filters_preserve_decoded_fields_in_both_sources(self):
+        decoded = dict(transport="s", opcode=8, phase_before="pending",
+                       phase_after="result", cause_before=0, cause_after=128,
+                       rtc_ticks=2**64 - 1, result=[0, 255, 1, 128, 4, 5, 6, 7])
+        for source in ("prefix", "failure_capture"):
+            for kind, name in ((23, "command_accepted"), (24, "command_completed")):
+                with self.subTest(source=source, name=name):
+                    rows = records() if source == "prefix" else capture_records()
+                    # Deliberately unrelated raw words: Python must only use
+                    # the decoded object, never reconstruct packed fields.
+                    command = event(41, 15, kind, [0, 0, 0, 0])
+                    command["cdvd"] = decoded
+                    if source == "prefix":
+                        rows[3] = command
+                    else:
+                        command.pop("type")
+                        rows[-2]["events"][0] = command
+                    self.write(self.path, rows)
+                    report = self.report("events", self.path, "--source", source,
+                                         "--event", name)
+                    row, = report["events"]
+                    self.assertEqual(row["event"], name)
+                    self.assertEqual(row["subsystem"], 15)
+                    self.assertEqual(row["subsystem_name"], "cdvd")
+                    self.assertEqual(row["cdvd"], decoded)
+                    self.assertEqual(row["values_raw"], ["0x0000000000000000"] * 4)
+                    self.assertNotIn("cpu", row)
+                    if source == "prefix":
+                        counts = self.report("summary", self.path)["event_counts"]
+                        self.assertEqual(counts[f"cdvd:{name}"], 1)
+                    else:
+                        self.assertEqual(row["global_event_index"], 90)
+                    for cpu in ("ee", "iop"):
+                        filtered = self.report("events", self.path, "--source", source,
+                                               "--event", name, "--cpu", cpu)
+                        self.assertEqual(filtered["matched_events"], 0)
+                    instructions = self.report("instructions", self.path,
+                                               "--source", source)
+                    self.assertEqual(instructions["matched_events"], 0)
+
+    def test_cdvd_decoded_schema_is_validated_without_calendar_policy(self):
+        decoded = dict(transport="n", opcode=255, phase_before="idle",
+                       phase_after="pending", cause_before=255, cause_after=0,
+                       rtc_ticks=0, result=[255] * 8)
+        invalid = (
+            ("transport", "normal"), ("transport", 0),
+            ("phase_before", "unknown"), ("phase_after", 2),
+            ("opcode", 256), ("opcode", True),
+            ("cause_before", -1), ("cause_after", 256),
+            ("rtc_ticks", 2**64), ("rtc_ticks", False),
+            ("result", [0] * 7), ("result", [0] * 9),
+            ("result", [0] * 7 + [256]), ("result", [False] * 8),
+            ("result", "00000000"),
+        )
+        for source in ("prefix", "failure_capture"):
+            for scenario in ("valid", "missing", "extra", "wrong_identity", *invalid):
+                with self.subTest(source=source, scenario=scenario):
+                    rows = records() if source == "prefix" else capture_records()
+                    command = event(41, 15, 23, [0, 0, 0, 0])
+                    command["cdvd"] = dict(decoded)
+                    if scenario == "missing":
+                        command.pop("cdvd")
+                    elif scenario == "extra":
+                        command["cdvd"]["future"] = 0
+                    elif scenario == "wrong_identity":
+                        command["event_type"] = 7
+                    elif isinstance(scenario, tuple):
+                        key, value = scenario
+                        command["cdvd"][key] = value
+                    if source == "prefix":
+                        rows[3] = command
+                    else:
+                        command.pop("type")
+                        rows[-2]["events"][0] = command
+                    if scenario == "valid":
+                        self.write(self.path, rows)
+                        report = self.report("events", self.path, "--source", source,
+                                             "--event", "23")
+                        self.assertEqual(report["events"][0]["cdvd"], decoded)
+                    else:
+                        self.reject(rows, "cdvd")
 
     def test_unknown_event_ids_remain_raw(self):
         rows = records()

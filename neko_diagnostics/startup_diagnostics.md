@@ -259,6 +259,25 @@ capacity and enablement do not affect serial progress or retain output.
 Numbers are decimal, including 64-bit words: consumers must retain integer
 precision. A decoded `startup_first_failure` record follows the raw events.
 
+CDVD subsystem 15 events 23 (`CommandAccepted`) and 24 (`CommandCompleted`)
+add a `cdvd` object alongside the unchanged four raw `values` words:
+
+```json
+{"transport":"s","opcode":8,"phase_before":"pending","phase_after":"result","cause_before":0,"cause_after":128,"rtc_ticks":43,"result":[0,255,1,128,4,5,6,7]}
+```
+
+This illustrates the decoded field shape, not a calendar or BIOS result.
+`transport` is `n` or `s`; phases are `idle`, `pending`, or `result`.
+Opcode and cause fields are unsigned byte integers, `rtc_ticks` is the
+unsigned 64-bit RTC tick value, and `result` contains eight byte integers in
+result order. Only S completion carries result bytes; acceptance and N events
+carry eight zeros. No BCD/calendar conversion or readiness inference is made.
+The exporter uses `nekoDecodeCDVDTrace`, not a second packed-field decoder.
+Unknown transport or phase enum values throw `std::invalid_argument` before
+the affected record is emitted rather than being labelled as a known state.
+Other event identities retain their existing JSON bytes without a `cdvd`
+object. The same shared event-field writer serves prefix and failure capture.
+
 The collector retains the earliest events, never a rolling window. Truncation
 means at least one event was omitted, not merely that the collection reached
 its ceiling. An exact-fit run is not truncated; a zero-budget run has an empty,
@@ -319,7 +338,8 @@ the run at the failure.
 An additional `startup_failure_capture` JSON line appears after prefix events
 and before `startup_first_failure`. It contains `capacity`, `observed_events`,
 `first_event_index`, `failure_cycle_truncated` and an ordered `events` array
-with the usual raw event fields. `observed_events` counts the whole observed
+with the usual raw event fields and decoded `cdvd` object for command events.
+`observed_events` counts the whole observed
 stream, including events after freezing; `first_event_index` identifies the
 window's first event in that stream. The final failure record adds
 `event_source: "failure_capture"`; its `failure.event_index` indexes the
@@ -348,6 +368,8 @@ or changes the input files. Commands emit deterministic, readable JSON:
 python3 -B tools/inspect_startup.py summary run.jsonl
 python3 -B tools/inspect_startup.py events run.jsonl --cpu ee --cycle 41
 python3 -B tools/inspect_startup.py events run.jsonl --event memory --address 0x70003fe0
+python3 -B tools/inspect_startup.py events run.jsonl --event command_accepted
+python3 -B tools/inspect_startup.py events run.jsonl --source failure_capture --event command_completed
 python3 -B tools/inspect_startup.py instructions run.jsonl --cpu iop --from-cycle 200 --to-cycle 241
 python3 -B tools/inspect_startup.py compare run.jsonl repeat.jsonl --mode trace
 python3 -B tools/inspect_startup.py compare run.jsonl untraced.jsonl
@@ -366,8 +388,17 @@ Requesting an absent window is an error, never a fallback to the prefix.
 without it, all subsystems are included. `--cycle`, `--from-cycle`, and
 `--to-cycle` are inclusive master-cycle constraints. `--event` accepts a
 numeric ID, `instruction`, `memory`, `exception`, `fault`, or
-`serial_transmit_completed` (the other full event names also work).
+`serial_transmit_completed`, `command_accepted`, or `command_completed`
+(the other full event names also work).
 Serial completion payloads expose the unconverted byte and physical endpoint.
+CDVD command rows retain numeric `subsystem: 15`, add `subsystem_name: "cdvd"`,
+and expose the exported nested `cdvd` object unchanged, with the original
+`values_raw` alongside it. Summary counts use the `cdvd` subsystem label.
+This works for both event sources; `--cpu ee` and `--cpu iop` still exclude
+device events. Python validates the decoded object's fields, enum labels,
+integer ranges and eight-byte result shape, but never decodes raw CDVD words
+or derives BCD/calendar policy. Missing or invalid decoded command objects
+are input errors; existing non-CDVD logs need no new fields.
 Unknown numeric identities remain raw, not silently
 discarded or interpreted as a known subsystem/event.
 

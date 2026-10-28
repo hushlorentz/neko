@@ -252,6 +252,10 @@ void writeStartupSummaryJsonLine(
   std::ostream &output, const StartupSummary &summary);
 void writeStartupRunSummaryJsonLine(
   std::ostream &output, const StartupRunSummary &summary);
+// Shared event members without braces/type/newline. The enclosing JSON writer
+// supplies a decimal, classic-locale stream and buffers before emitting.
+void writeStartupTraceEventFields(
+  std::ostream &output, const NekoTraceEvent &event);
 void writeStartupTraceJsonLines(
   std::ostream &output, const NekoSystem &system);
 void writeStartupRuntimeErrorJsonLine(

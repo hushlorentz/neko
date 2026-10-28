@@ -15,9 +15,11 @@ import zlib
 
 # Stable public identities from neko/regression_trace.hpp, not memory bitfields.
 CPUS = {10: "ee", 11: "iop"}
+SUBSYSTEMS = {**CPUS, 15: "cdvd"}
 EVENTS = {5: "instruction_issued", 7: "memory_access",
           8: "exception_entered", 21: "fault_context",
-          22: "serial_transmit_completed"}
+          22: "serial_transmit_completed",
+          23: "command_accepted", 24: "command_completed"}
 EVENT_FILTERS = {name: number for number, name in EVENTS.items()}
 EVENT_FILTERS.update(instruction=5, memory=7, exception=8, fault=21)
 RECORD_TYPES = {
@@ -92,6 +94,31 @@ def validate_event(record):
         raise ValueError("values must contain four raw words")
     for value in values:
         uint(value, "values")
+    cdvd_command = record["subsystem"] == 15 and record["event_type"] in (23, 24)
+    if not cdvd_command:
+        if "cdvd" in record:
+            raise ValueError("cdvd requires a CDVD command event")
+        return
+    cdvd = require(record, "cdvd", dict)
+    fields = {"transport", "opcode", "phase_before", "phase_after",
+              "cause_before", "cause_after", "rtc_ticks", "result"}
+    if cdvd.keys() != fields:
+        raise ValueError("cdvd must contain exactly: " + ", ".join(sorted(fields)))
+    if cdvd["transport"] not in ("n", "s"):
+        raise ValueError("cdvd.transport must be n or s")
+    for field in ("phase_before", "phase_after"):
+        if cdvd[field] not in ("idle", "pending", "result"):
+            raise ValueError(f"cdvd.{field} must be idle, pending or result")
+    for field in ("opcode", "cause_before", "cause_after"):
+        uint(cdvd[field], f"cdvd.{field}", 8)
+    uint(cdvd["rtc_ticks"], "cdvd.rtc_ticks")
+    result = cdvd["result"]
+    if type(result) is not list:
+        raise ValueError("cdvd.result must be list")
+    if len(result) != 8:
+        raise ValueError("cdvd.result must contain eight bytes")
+    for value in result:
+        uint(value, "cdvd.result", 8)
 
 
 def validate_record(record):
@@ -300,7 +327,7 @@ def summary(log):
         failure_capture=({key: value for key, value in log.capture.items()
                           if key != "events"} if log.capture is not None else None),
         event_counts=dict(Counter(
-            f"{CPUS.get(event['subsystem'], event['subsystem'])}:"
+            f"{SUBSYSTEMS.get(event['subsystem'], event['subsystem'])}:"
             f"{EVENTS.get(event['event_type'], event['event_type'])}"
             for event in log.events)),
         note=EVIDENCE_NOTE,
@@ -315,6 +342,10 @@ def describe_event(index, event):
     if cpu is not None:
         row["cpu"] = cpu
     row["event"] = EVENTS.get(event["event_type"], "unknown")
+    if event["subsystem"] == 15:
+        row["subsystem_name"] = "cdvd"
+        if event["event_type"] in (23, 24):
+            row["cdvd"] = event["cdvd"]
     values = event["values"]
     if cpu is not None and event["event_type"] == 5:
         row["payload"] = dict(pc=f"0x{values[0]:08x}", opcode=f"0x{values[1]:08x}",
@@ -470,7 +501,9 @@ def parse_arguments(argv):
                              help="Maximum displayed events (default: 200).")
             if command == "events":
                 sub.add_argument("--event", type=event_number,
-                                 help="Numeric ID or instruction/memory/exception/fault.")
+                                 help="Numeric ID or instruction/memory/exception/fault/"
+                                      "serial_transmit_completed/command_accepted/"
+                                      "command_completed.")
             else:
                 sub.set_defaults(event=None)
     return parser.parse_args(argv)

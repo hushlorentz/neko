@@ -333,6 +333,8 @@ class NekoSystem
       const EESerialCompletion &serial);
     void publishIOPAndSIFTrace(
       std::uint64_t cycle, const SIFDMAObservations &dma);
+    void publishCDVDTrace(
+      std::uint64_t cycle, const CDVDController::Observation &event);
     void publishSIFTrace(std::uint64_t cycle, const SIF::Observation &event);
     void publishIOPCPUTrace(std::uint64_t cycle, const IOPCore::StepEvent &event);
     void publishIOPTimerTrace(

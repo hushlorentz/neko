@@ -1,5 +1,7 @@
 #include "cdvd_controller.hpp"
 
+#include <stdexcept>
+
 constexpr std::uint64_t CDVDController::RTC_PERIOD_SECONDS;
 constexpr std::uint64_t CDVDController::RTC_PERIOD_TICKS;
 
@@ -61,7 +63,7 @@ CDVDReadResult CDVDController::readByte(std::uint32_t address) noexcept
 }
 
 CDVDAccessStatus CDVDController::writeByte(
-  std::uint32_t address, std::uint8_t value) noexcept
+  std::uint32_t address, std::uint8_t value)
 {
   switch (address)
   {
@@ -78,17 +80,19 @@ CDVDAccessStatus CDVDController::writeByte(
 }
 
 CDVDAccessStatus CDVDController::acceptNormalCommand(
-  std::uint8_t opcode) noexcept
+  std::uint8_t opcode)
 {
   if (opcode != 0 || normalPending)
   {
     return CDVDAccessStatus::Unsupported;
   }
   normalPending = true;
+  recordCommand(ObservationKind::Accepted, Transport::Normal,
+    SubcommandPhase::Idle, deviceCause);
   return CDVDAccessStatus::Accepted;
 }
 
-CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode) noexcept
+CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode)
 {
   if (opcode != 8 || subcommandPhase != SubcommandPhase::Idle)
   {
@@ -96,6 +100,8 @@ CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode) noexcept
   }
   lastSubcommand = opcode;
   subcommandPhase = SubcommandPhase::Pending;
+  recordCommand(ObservationKind::Accepted, Transport::Subcommand,
+    SubcommandPhase::Idle, deviceCause);
   return CDVDAccessStatus::Accepted;
 }
 
@@ -108,19 +114,22 @@ void CDVDController::advanceMasterTick() noexcept
   }
 }
 
-CDVDNormalCompletion CDVDController::completeNormalCommand() noexcept
+CDVDNormalCompletion CDVDController::completeNormalCommand()
 {
   if (!normalPending)
   {
     return {};
   }
   normalPending = false;
+  const auto beforeCause = deviceCause;
   const auto newCauses = static_cast<std::uint8_t>(1 & ~deviceCause);
   deviceCause |= 1;
+  recordCommand(ObservationKind::Completed, Transport::Normal,
+    SubcommandPhase::Pending, beforeCause);
   return {true, newCauses};
 }
 
-bool CDVDController::completeSubcommand() noexcept
+bool CDVDController::completeSubcommand()
 {
   if (subcommandPhase != SubcommandPhase::Pending)
   {
@@ -128,6 +137,8 @@ bool CDVDController::completeSubcommand() noexcept
   }
   result = clockResult();
   subcommandPhase = SubcommandPhase::Result;
+  recordCommand(ObservationKind::Completed, Transport::Subcommand,
+    SubcommandPhase::Pending, deviceCause);
   return true;
 }
 
@@ -198,10 +209,62 @@ bool CDVDController::isValidClockResult(
 
 void CDVDController::reset() noexcept
 {
+  clearObservations();
   rtcTicks = 0;
   normalPending = false;
   deviceCause = 0;
   lastSubcommand = 0;
   subcommandPhase = SubcommandPhase::Idle;
   clearResult();
+}
+
+void CDVDController::enableObservations(NekoObservationOrder *order) noexcept
+{
+  clearObservations();
+  observationOrder = order;
+  observationsEnabled = true;
+}
+
+void CDVDController::disableObservations() noexcept
+{
+  clearObservations();
+  observationsEnabled = false;
+  observationOrder = nullptr;
+}
+
+void CDVDController::clearObservations() noexcept
+{
+  observationCount = 0;
+}
+
+void CDVDController::recordCommand(ObservationKind kind, Transport transport,
+  SubcommandPhase beforePhase, std::uint8_t beforeCause)
+{
+  if (!observationsEnabled)
+  {
+    return;
+  }
+  if (observationCount >= observations.size())
+  {
+    throw std::logic_error("CD/DVD observation capacity exceeded.");
+  }
+  auto &event = observations[observationCount];
+  event = {};
+  event.kind = kind;
+  event.transport = transport;
+  event.opcode = transport == Transport::Normal ? 0 : lastSubcommand;
+  event.beforePhase = beforePhase;
+  event.afterPhase = transport == Transport::Normal
+    ? (normalPending ? SubcommandPhase::Pending : SubcommandPhase::Idle)
+    : subcommandPhase;
+  event.beforeCause = beforeCause;
+  event.afterCause = deviceCause;
+  event.rtcTicks = rtcTicks;
+  if (kind == ObservationKind::Completed && transport == Transport::Subcommand)
+  {
+    event.result = result;
+  }
+  event.sequence =
+    observationOrder != nullptr ? observationOrder->next++ : observationCount;
+  ++observationCount;
 }

@@ -1234,6 +1234,7 @@ void NekoSystem::clockMasterCycle()
     IOPTimers &timers;
     IOPInterruptController &interrupts;
     SIF &sif;
+    CDVDController &cdvd;
     NekoObservationOrder order;
     ~ObservationScope()
     {
@@ -1241,9 +1242,10 @@ void NekoSystem::clockMasterCycle()
       timers.disableObservations();
       interrupts.disableObservations();
       sif.disableObservations();
+      cdvd.disableObservations();
     }
   } observationScope{iopCoreComponent, iopTimersComponent,
-      iopInterruptControllerComponent, sifComponent};
+      iopInterruptControllerComponent, sifComponent, cdvdControllerComponent};
   SIFDMAObservations dmaObservations;
   if (collectingTrace)
   {
@@ -1251,6 +1253,7 @@ void NekoSystem::clockMasterCycle()
     iopTimersComponent.enableObservations(&observationScope.order);
     iopInterruptControllerComponent.enableObservations(&observationScope.order);
     sifComponent.enableObservations(&observationScope.order);
+    cdvdControllerComponent.enableObservations(&observationScope.order);
   }
   const bool iopClockPulse =
     masterClock.currentCycle() % PS2Clock::IOP_CLOCK_PERIOD ==
