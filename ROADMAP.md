@@ -2373,7 +2373,7 @@ real-handshake conformance; Milestone 9 remains incomplete.
 - [x] Add trace-enabled command acceptance/completion observations and maintained
       exporter/inspector support; validate ordering, capacity, disabled tracing
       and prefix/streaming behavior without per-tick or per-byte trace noise.
-- [ ] Complete authored startup/IRQ/RTC continuation and trace-mode conformance,
+- [x] Complete authored startup/IRQ/RTC continuation and trace-mode conformance,
       bounded maintainability and independent correctness review; run complete
       optimized and AddressSanitizer checks before BIOS verification.
 - [ ] With separate BIOS-run authorization, verify the selected readiness

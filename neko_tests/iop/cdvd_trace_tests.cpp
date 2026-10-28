@@ -88,10 +88,88 @@ namespace
         }
       }
 
-      std::array<NekoTraceEvent, 256> events = {};
+      std::array<NekoTraceEvent, 2048> events = {};
       std::size_t count = 0;
       bool overflow = false;
   };
+
+  template<std::size_t Size>
+  void installProgram(NekoSystem &system, IOPAddress address,
+    const std::array<IOPWord, Size> &words)
+  {
+    for (const auto word : words)
+    {
+      REQUIRE(system.iopBus().write32(address, word).status ==
+        IOPBusStatus::Completed);
+      address += 4;
+    }
+  }
+
+  enum class TraceMode { Disabled, Retained, Prefix, Stream };
+
+  void requireContinuationModes(const NekoSystem &reference, NekoSystem &source)
+  {
+    const auto cut = source.masterClockScheduler().currentCycle();
+    const auto remaining = reference.masterClockScheduler().currentCycle() - cut;
+    const auto checkpoint = source.saveState();
+    std::vector<NekoTraceEvent> suffix;
+    for (const auto &event : reference.trace())
+    {
+      if (event.masterCycle > cut)
+      {
+        suffix.push_back(event);
+      }
+    }
+    REQUIRE(suffix.size() > 3);
+    for (const auto mode : {TraceMode::Disabled, TraceMode::Retained,
+         TraceMode::Prefix, TraceMode::Stream})
+    {
+      CAPTURE(mode);
+      NekoSystem restored;
+      restored.loadState(checkpoint);
+      const auto observer = std::make_shared<Observer>();
+      switch (mode)
+      {
+        case TraceMode::Disabled:
+          break;
+        case TraceMode::Retained:
+          restored.startTrace();
+          break;
+        case TraceMode::Prefix:
+          restored.startTrace(3, observer);
+          break;
+        case TraceMode::Stream:
+          restored.startTrace(0, observer);
+          break;
+      }
+      restored.runMasterCycles(remaining);
+      IOPTraceTest::requireMachine(restored, reference);
+      REQUIRE(CDVDObservationTestAccess::detached(restored.cdvdController()));
+      if (mode == TraceMode::Retained)
+      {
+        IOPTraceTest::requireEvents(restored.trace(), suffix);
+        REQUIRE_FALSE(restored.traceTruncated());
+      }
+      else if (mode == TraceMode::Prefix || mode == TraceMode::Stream)
+      {
+        REQUIRE_FALSE(observer->overflow);
+        const std::vector<NekoTraceEvent> observed(
+          observer->events.begin(), observer->events.begin() + observer->count);
+        IOPTraceTest::requireEvents(observed, suffix);
+        const auto retained = mode == TraceMode::Prefix ? 3u : 0u;
+        IOPTraceTest::requireEvents(restored.trace(),
+          {suffix.begin(), suffix.begin() + retained});
+        REQUIRE(restored.traceTruncated());
+      }
+      else
+      {
+        REQUIRE(restored.trace().empty());
+        REQUIRE_FALSE(restored.traceEnabled());
+      }
+    }
+    source.runMasterCycles(remaining);
+    IOPTraceTest::requireMachine(source, reference);
+  }
 }
 
 TEST_CASE("CDVD trace observes both completions and guest acceptance in mutation order",
@@ -373,4 +451,176 @@ TEST_CASE("CDVD trace codec round trips all result bytes and ignores reserved wo
   event.subsystem = CDVD;
   event.type = NekoTraceEventType::Progress;
   REQUIRE_THROWS_AS(nekoDecodeCDVDTrace(event), std::invalid_argument);
+}
+
+TEST_CASE("CDVD authored RTC draining and IRQ rearming continue across every trace mode",
+  "[iop][cdvd-trace][cdvd-authored][save-state]")
+{
+  NekoSystem reference;
+  std::array<IOPWord, 40> words = {{
+    0x3c01bf40, // lui r1, CDVD upper
+    0x34212000, // ori r1, r1, CDVD lower
+    0x34020008, // ori r2, r0, ReadClock
+    0xa0220016, // sb r2, SCMD
+    0xa0200004, // sb r0, NCMD
+    0x90230017, // lbu r3, SREADY
+    0          // load delay
+  }};
+  for (IOPWord index = 0; index < 8; ++index)
+  {
+    words[7 + index * 2] = 0x90200018 | ((8 + index) << 16);
+  }
+  words[23] = 0x90300017; // lbu r16, SREADY
+  words[25] = 0x90310008; // lbu r17, device cause
+  words[27] = 0x34040001; // ori r4, r0, bit0
+  words[28] = 0xa0240008; // sb r4, device cause W1C
+  words[29] = 0x3c05bf80; // lui r5, INTC upper
+  words[30] = 0x34a51070; // ori r5, r5, INTC lower
+  words[31] = 0x2406fffb; // addiu r6, r0, ~source2
+  words[32] = 0xaca60000; // sw r6, I_STAT W0C
+  words[33] = 0xa0200004; // sb r0, NCMD again
+  words[35] = 0x90320008; // lbu r18, device cause
+  words[37] = 0x90330005; // lbu r19, NREADY
+  words[39] = 0x34140001; // ori r20, r0, done
+  installProgram(reference, 0x1000, words);
+  SaveStateMutation seeded(reference.saveState());
+  seeded.writeScalar("system.iop.cdvd.rtcTicks", PS2Clock::MASTER_HZ - 30);
+  seeded.refreshChecksum();
+  reference.loadState(seeded);
+  reference.iopCore().startExecution(0xa0001000);
+  const auto initial = reference.saveState();
+  reference.startTrace();
+  reference.runMasterCycles(313);
+  REQUIRE(reference.iopCore().retiredInstructions() == 40);
+  REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+  const std::array<std::uint8_t, 8> expected = {{0, 1, 0, 0, 0, 1, 1, 0}};
+  for (std::size_t index = 0; index < expected.size(); ++index)
+  {
+    REQUIRE(reference.iopCore().generalRegister(8 + index) == expected[index]);
+  }
+  REQUIRE(reference.iopCore().generalRegister(3) == 0);
+  REQUIRE(reference.iopCore().generalRegister(16) == 0x40);
+  REQUIRE(reference.iopCore().generalRegister(17) == 1);
+  REQUIRE(reference.iopCore().generalRegister(18) == 1);
+  REQUIRE(reference.iopCore().generalRegister(19) == 0x40);
+  REQUIRE(reference.iopCore().generalRegister(20) == 1);
+  REQUIRE(reference.iopInterruptController().status() == 4);
+  const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+  REQUIRE(commands.size() == 6);
+  const std::array<std::uint64_t, 6> cycles = {{25, 33, 33, 41, 265, 273}};
+  for (std::size_t index = 0; index < commands.size(); ++index)
+  {
+    REQUIRE(commands[index].masterCycle == cycles[index]);
+  }
+  REQUIRE(commands[1].type == COMPLETED);
+  REQUIRE(commands[1].value2 == (EPOCH | 0x100));
+  REQUIRE(commands[2].type == ACCEPTED);
+  for (const std::uint64_t cut : {25, 32, 33, 57, 73, 185, 225, 257, 265})
+  {
+    CAPTURE(cut);
+    NekoSystem source;
+    source.loadState(initial);
+    source.runMasterCycles(cut);
+    if (cut == 57 || cut == 73 || cut == 185)
+    {
+      REQUIRE(source.iopCore().delayedResultContinuation().source ==
+        IOPDelayedResultSource::Load);
+    }
+    if (cut == 225)
+    {
+      REQUIRE(source.iopBus().read8(BASE + 8).value == 0);
+      REQUIRE(source.iopInterruptController().status() == 4);
+    }
+    if (cut == 257)
+    {
+      REQUIRE(source.iopInterruptController().status() == 0);
+    }
+    requireContinuationModes(reference, source);
+  }
+}
+
+TEST_CASE("CDVD authored IRQ handlers acknowledge both latches return and service again",
+  "[iop][cdvd-trace][cdvd-authored][save-state]")
+{
+  for (const auto firstAck : {0xa0270008u, 0xacb50000u})
+  {
+    CAPTURE(firstAck);
+    NekoSystem reference;
+    const std::array<IOPWord, 14> words = {{
+      0x3c01bf40, // lui r1, CDVD upper
+      0x34212000, // ori r1, r1, CDVD lower
+      0x3c05bf80, // lui r5, INTC upper
+      0x34a51070, // ori r5, r5, INTC lower
+      0x34060004, // ori r6, r0, source2
+      0xaca60004, // sw r6, I_MASK
+      0x34070001, // ori r7, r0, enabled
+      0xaca70008, // sw r7, I_CTRL
+      0x34060401, // ori r6, r0, IEc | IM2
+      0x40866000, // mtc0 r6, Status
+      0xa0200004, // sb r0, NCMD
+      0x34080001, // ori r8, r0, first return
+      0xa0200004, // sb r0, NCMD again
+      0x34090001  // ori r9, r0, second return
+    }};
+    const std::array<IOPWord, 8> handler = {{
+      0x26940001, // addiu r20, r20, service count
+      0x2415fffb, // addiu r21, r0, ~source2
+      firstAck,
+      firstAck == 0xa0270008u ? 0xacb50000u : 0xa0270008u,
+      0x401a7000, // mfc0 r26, EPC
+      0,          // load delay
+      0x03400008, // jr r26
+      0x42000010  // rfe in branch delay slot
+    }};
+    installProgram(reference, 0x1000, words);
+    installProgram(reference, 0x80, handler);
+    reference.iopCore().startExecution(0xa0001000);
+    const auto initial = reference.saveState();
+    reference.startTrace();
+    reference.runMasterCycles(249);
+    REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(reference.iopCore().retiredInstructions() == 30);
+    REQUIRE(reference.iopCore().programCounter() == 0xa0001038);
+    REQUIRE(reference.iopCore().generalRegister(8) == 1);
+    REQUIRE(reference.iopCore().generalRegister(9) == 1);
+    REQUIRE(reference.iopCore().generalRegister(20) == 2);
+    REQUIRE(reference.iopCore().generalRegister(26) == 0xa0001034);
+    REQUIRE((reference.iopCore().status() & 1) == 1);
+    REQUIRE(reference.iopBus().read8(BASE + 8).value == 0);
+    REQUIRE(reference.iopInterruptController().status() == 0);
+    const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+    REQUIRE(commands.size() == 4);
+    const std::array<std::uint64_t, 4> cycles = {{81, 89, 169, 177}};
+    for (std::size_t index = 0; index < commands.size(); ++index)
+    {
+      REQUIRE(commands[index].masterCycle == cycles[index]);
+      REQUIRE(commands[index].type == (index % 2 == 0 ? ACCEPTED : COMPLETED));
+    }
+    unsigned delivered = 0;
+    for (const auto &event : reference.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::InterruptDelivered)
+      {
+        ++delivered;
+        REQUIRE(event.masterCycle == (delivered == 1 ? 89 : 177));
+      }
+    }
+    REQUIRE(delivered == 2);
+    for (const std::uint64_t cut : {81, 89, 113, 129, 145, 153, 169, 177})
+    {
+      CAPTURE(cut);
+      NekoSystem source;
+      source.loadState(initial);
+      source.runMasterCycles(cut);
+      if (cut == 113)
+      {
+        REQUIRE(source.iopBus().read8(BASE + 8).value ==
+          (firstAck == 0xa0270008u ? 0 : 1));
+        REQUIRE(source.iopInterruptController().status() ==
+          (firstAck == 0xa0270008u ? 4 : 0));
+      }
+      requireContinuationModes(reference, source);
+    }
+  }
 }
