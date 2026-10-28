@@ -304,6 +304,38 @@ TEST_CASE("EE RDRAM initialization owner retains input without replaying command
   requireState(owner, {0x00210000, UINT32_MAX, 2});
 }
 
+TEST_CASE("EE RDRAM SA40 write preserves input and enumeration continuation",
+  "[ee][rdram-init-owner][rdram-sa40-write]")
+{
+  for (const auto input : {0u, 0x80u, UINT32_MAX})
+  {
+    for (const auto extra : {0u, 0x20u, 0x400u, 0x8000u, 0x10000000u,
+           0x20000000u, 0x40000000u, 0x7000fc3fu})
+    {
+      for (unsigned cursor = 0; cursor <= 2; ++cursor)
+      {
+        CAPTURE(input);
+        CAPTURE(extra);
+        CAPTURE(cursor);
+        EERDRAMInitialization owner;
+        REQUIRE(owner.writeCommand(0x80210000));
+        for (unsigned read = 0; read < cursor; ++read)
+        {
+          requireData(owner, 0x1f);
+        }
+        owner.writeData(input);
+        const auto command = 0x80400040u | extra;
+        REQUIRE(owner.writeCommand(command));
+        requireState(owner, {command & 0x7fffffffu, input,
+          static_cast<std::uint8_t>(cursor)});
+        requireUnreadable(owner);
+        REQUIRE(owner.writeCommand(0x80210000));
+        requireData(owner, cursor < 2 ? 0x1f : 0);
+      }
+    }
+  }
+}
+
 TEST_CASE("EE RDRAM initialization owner rejects unknown operations and subaddresses",
   "[ee][rdram-init-owner]")
 {
@@ -315,7 +347,7 @@ TEST_CASE("EE RDRAM initialization owner rejects unknown operations and subaddre
     {
       requireRejectedCommand(owner, 0x80000000u | (subaddress << 16));
     }
-    if (subaddress != 0x21)
+    if (subaddress != 0x21 && subaddress != 0x40)
     {
       requireRejectedCommand(owner, 0x80000040u | (subaddress << 16));
     }
@@ -392,7 +424,7 @@ TEST_CASE("EE RDRAM initialization owner rejects missing start",
   auto owner = partiallyEnumerated();
   for (const auto command : {
     0x80210000u, 0x80230000u, 0x80240000u, 0x80400000u,
-    0x80210040u, 0x8021007fu})
+    0x80210040u, 0x8021007fu, 0x80400040u, 0xf040fc7fu})
   {
     requireRejectedCommand(owner, command & 0x7fffffffu);
   }

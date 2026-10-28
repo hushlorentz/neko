@@ -361,7 +361,9 @@ TEST_CASE("EE RDRAM expanded selectors execute and restore without replay",
          Selection{0xf023fc3f, 0x0d0d, true, false},
          Selection{0xf024fc3f, 0x0090, true, false},
          Selection{0xf040fc3b, 0x1b, true, false},
-         Selection{0xf021fc7f, 0, false, true}})
+         Selection{0xf021fc7f, 0, false, true},
+         Selection{0x80400040, 0, false, false},
+         Selection{0xf040fc7f, 0, false, false}})
   {
     for (unsigned cursor = 0; cursor <= 2; ++cursor)
     {

@@ -2399,8 +2399,20 @@ real-handshake conformance; Milestone 9 remains incomplete.
       retaining unrelated command bits and preserving bounded responses.
 - [x] Validate guest, trace and transactional persistence continuations and
       rejection boundaries; independently review the extension.
-- [ ] With separate BIOS-run authorization, verify the expanded selector
+- [x] With separate BIOS-run authorization, verify the expanded selector
       behavior and attribute the next startup dependency.
+
+### EE RDRAM SA0x40 Write Startup Dependency
+
+- [x] Investigate the observed `0x80400040` command and input against
+      available evidence; select a coherent write-command scope before
+      changing the RDRAM owner.
+- [x] Implement the selected command behavior through the existing owner,
+      with focused rejection and continuation coverage.
+- [x] Validate guest, trace and persistence integration and independently
+      review the extension.
+- [ ] With separate BIOS-run authorization, verify the selected write and
+      attribute the next startup dependency.
 
 ### CD/DVD NREADY Startup Wait Scope
 
