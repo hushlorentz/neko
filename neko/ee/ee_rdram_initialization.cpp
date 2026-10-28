@@ -17,7 +17,7 @@ namespace
     WriteSA4C,
     WriteSA4D,
     WriteInitialization,
-    WriteDeviceID,
+    WriteOther,
     Enumerate,
     ReadConfigA,
     ReadConfigB,
@@ -48,9 +48,9 @@ namespace
     {
       return Command::WriteInitialization;
     }
-    if (operation == 1 && subaddress == 0x40)
+    if (operation == 1 && subaddress != 0x4c && subaddress != 0x4d)
     {
-      return Command::WriteDeviceID;
+      return Command::WriteOther;
     }
     if (operation != 0)
     {

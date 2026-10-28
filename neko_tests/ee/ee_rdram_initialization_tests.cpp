@@ -193,7 +193,10 @@ TEST_CASE("EE RDRAM SA4c admits only the observed command and input",
     }
     for (unsigned bit = 0; bit < 32; ++bit)
     {
-      requireRejectedCommand(owner, 0x804c0060u ^ (UINT32_C(1) << bit));
+      if (bit < 16 || bit >= 28)
+      {
+        requireRejectedCommand(owner, 0x804c0060u ^ (UINT32_C(1) << bit));
+      }
       owner.writeData(0x27u ^ (UINT32_C(1) << bit));
       requireRejectedCommand(owner, 0x804c0060);
       owner.writeData(0x27);
@@ -212,7 +215,10 @@ TEST_CASE("EE RDRAM SA4d rejects alternate encodings without changing selection"
   owner.writeData(0);
   for (unsigned bit = 0; bit < 32; ++bit)
   {
-    requireRejectedCommand(owner, 0x804d0060u ^ (UINT32_C(1) << bit));
+    if (bit < 16 || bit >= 28)
+    {
+      requireRejectedCommand(owner, 0x804d0060u ^ (UINT32_C(1) << bit));
+    }
   }
   for (std::uint32_t operation = 0; operation < 16; ++operation)
   {
@@ -229,7 +235,10 @@ TEST_CASE("EE RDRAM SA4d rejects alternate encodings without changing selection"
   REQUIRE(owner.writeCommand(0x804d0060));
   for (unsigned bit = 0; bit < 32; ++bit)
   {
-    requireRejectedCommand(owner, 0x804d0060u ^ (UINT32_C(1) << bit));
+    if (bit < 16 || bit >= 28)
+    {
+      requireRejectedCommand(owner, 0x804d0060u ^ (UINT32_C(1) << bit));
+    }
   }
   requireState(owner, {0x004d0060, 0, 2});
   requireUnreadable(owner);
@@ -336,6 +345,27 @@ TEST_CASE("EE RDRAM SA40 write preserves input and enumeration continuation",
   }
 }
 
+TEST_CASE("EE RDRAM operation one writes retain selection without effects",
+  "[ee][rdram-init-owner][rdram-write-family]")
+{
+  for (std::uint32_t subaddress = 0; subaddress < 0x1000; ++subaddress)
+  {
+    if (subaddress == 0x21 || subaddress == 0x4c || subaddress == 0x4d)
+    {
+      continue;
+    }
+    CAPTURE(subaddress);
+    auto owner = partiallyEnumerated();
+    const auto command = 0x80000040u | (subaddress << 16) | 0x7000fc3fu;
+    owner.writeData(UINT32_MAX);
+    REQUIRE(owner.writeCommand(command));
+    requireState(owner, {command & 0x7fffffffu, UINT32_MAX, 1});
+    requireUnreadable(owner);
+    REQUIRE(owner.writeCommand(0x80210000));
+    requireData(owner, 0x1f);
+  }
+}
+
 TEST_CASE("EE RDRAM initialization owner rejects unknown operations and subaddresses",
   "[ee][rdram-init-owner]")
 {
@@ -347,7 +377,7 @@ TEST_CASE("EE RDRAM initialization owner rejects unknown operations and subaddre
     {
       requireRejectedCommand(owner, 0x80000000u | (subaddress << 16));
     }
-    if (subaddress != 0x21 && subaddress != 0x40)
+    if (subaddress == 0x4c || subaddress == 0x4d)
     {
       requireRejectedCommand(owner, 0x80000040u | (subaddress << 16));
     }

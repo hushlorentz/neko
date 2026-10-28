@@ -13,7 +13,7 @@ namespace
   constexpr std::uint32_t REINITIALIZE = 0x80210040;
   constexpr std::uint32_t SA4D = 0x804d0060;
 
-  EEExecutionResult mergeStore(
+  EEExecutionResult guestStore(
     NekoSystem &system, std::uint32_t address, std::uint8_t opcode,
     std::uint16_t lane, std::uint32_t value)
   {
@@ -153,7 +153,7 @@ TEST_CASE("EE RDRAM initialization full-mask guest merge stores never read the e
         NekoSystem system;
         REQUIRE(system.eeBus().writeData32(COMMAND, ENUMERATE));
         const bool full = lane == (opcode == 0x2a ? 3 : 0);
-        const auto result = mergeStore(system, address, opcode, lane, test.value);
+        const auto result = guestStore(system, address, opcode, lane, test.value);
         REQUIRE(result.pendingException ==
           (full ? EEException::None : EEException::DataBusErrorStore));
         REQUIRE_FALSE(result.cycleLimitReached);
@@ -297,7 +297,7 @@ TEST_CASE("EE RDRAM SA4c guest admission and restored passive input",
         REQUIRE(bus.read32(DATA) == 0x1f);
       }
       REQUIRE(bus.writeData32(DATA, 0x27));
-      const auto result = mergeStore(original, COMMAND, 0x2e, 0, 0x804c0060);
+      const auto result = guestStore(original, COMMAND, 0x2e, 0, 0x804c0060);
       REQUIRE(result.pendingException == EEException::None);
       REQUIRE_FALSE(result.cycleLimitReached);
       REQUIRE(bus.read32(COMMAND) == 0);
@@ -355,6 +355,8 @@ TEST_CASE("EE RDRAM expanded selectors execute and restore without replay",
     std::uint32_t response;
     bool readable;
     bool resets;
+    std::uint32_t input = 0;
+    std::uint8_t opcode = 0x2e;
   };
   for (const auto selection : {
          Selection{0xb021f01f, 0x1f, true, false},
@@ -363,7 +365,9 @@ TEST_CASE("EE RDRAM expanded selectors execute and restore without replay",
          Selection{0xf040fc3b, 0x1b, true, false},
          Selection{0xf021fc7f, 0, false, true},
          Selection{0x80400040, 0, false, false},
-         Selection{0xf040fc7f, 0, false, false}})
+         Selection{0xf040fc7f, 0, false, false},
+         Selection{0x80460060, 0, false, false, 1, 0x2b},
+         Selection{0xf046fc7f, 0, false, false, UINT32_MAX}})
   {
     for (unsigned cursor = 0; cursor <= 2; ++cursor)
     {
@@ -376,8 +380,9 @@ TEST_CASE("EE RDRAM expanded selectors execute and restore without replay",
       {
         REQUIRE(bus.read32(DATA) == 0x1f);
       }
-      REQUIRE(bus.writeData32(DATA, 0));
-      const auto result = mergeStore(original, COMMAND, 0x2e, 0, selection.command);
+      REQUIRE(bus.writeData32(DATA, selection.input));
+      const auto result =
+        guestStore(original, COMMAND, selection.opcode, 0, selection.command);
       REQUIRE(result.pendingException == EEException::None);
       REQUIRE_FALSE(result.cycleLimitReached);
       std::size_t stores = 0;

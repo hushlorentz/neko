@@ -2411,8 +2411,20 @@ real-handshake conformance; Milestone 9 remains incomplete.
       with focused rejection and continuation coverage.
 - [x] Validate guest, trace and persistence integration and independently
       review the extension.
-- [ ] With separate BIOS-run authorization, verify the selected write and
+- [x] With separate BIOS-run authorization, verify the selected write and
       attribute the next startup dependency.
+
+### EE RDRAM Write-Command Startup Scope
+
+- [x] Investigate the observed `0x80460060` command with input `1` against
+      available evidence and the broader write-command family; select a
+      coherent policy before changing the RDRAM owner.
+- [x] Implement the selected policy through the existing owner with focused
+      admission, effect and rejection coverage.
+- [x] Validate guest, trace and persistence continuation and independently
+      review the extension.
+- [ ] With separate BIOS-run authorization, verify the selected write family
+      and attribute the next startup dependency.
 
 ### CD/DVD NREADY Startup Wait Scope
 
