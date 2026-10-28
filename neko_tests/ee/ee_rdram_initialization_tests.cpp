@@ -80,7 +80,17 @@ TEST_CASE("EE RDRAM initialization owner admits the exact first BIOS command",
   for (unsigned bit = 0; bit < 32; ++bit)
   {
     CAPTURE(bit);
-    requireRejectedCommand(owner, 0x800003a0u ^ (UINT32_C(1) << bit));
+    const auto command = 0x800003a0u ^ (UINT32_C(1) << bit);
+    if (bit == 31)
+    {
+      requireRejectedCommand(owner, command);
+    }
+    else
+    {
+      REQUIRE(owner.writeCommand(command));
+      requireState(owner, {command & 0x7fffffffu, 0, 1});
+      requireUnreadable(owner);
+    }
     owner.writeData(UINT32_C(1) << bit);
     requireRejectedCommand(owner, 0x800003a0);
     owner.writeData(0);
@@ -366,31 +376,33 @@ TEST_CASE("EE RDRAM operation one writes retain selection without effects",
   }
 }
 
-TEST_CASE("EE RDRAM initialization owner rejects unknown operations and subaddresses",
+TEST_CASE("EE RDRAM all operation values retain generic write selections",
+  "[ee][rdram-init-owner][rdram-operation-family]")
+{
+  for (const auto subaddress : {0u, 0x22u, 0x45u, 0x46u, 0xfffu})
+  {
+    for (std::uint32_t operation = 0; operation < 16; ++operation)
+    {
+      CAPTURE(subaddress);
+      CAPTURE(operation);
+      auto owner = partiallyEnumerated();
+      const auto command =
+        0x80000000u | (subaddress << 16) | (operation << 6) | 0x7000fc3fu;
+      owner.writeData(UINT32_MAX);
+      REQUIRE(owner.writeCommand(command));
+      requireState(owner, {command & 0x7fffffffu, UINT32_MAX, 1});
+      requireUnreadable(owner);
+      REQUIRE(owner.writeCommand(0x80210000));
+      requireData(owner, 0x1f);
+    }
+  }
+}
+
+TEST_CASE("EE RDRAM initialization owner rejects commands without start",
   "[ee][rdram-init-owner]")
 {
   auto owner = partiallyEnumerated();
-  for (std::uint32_t subaddress = 0; subaddress < 0x1000; ++subaddress)
-  {
-    if (subaddress != 0x21 && subaddress != 0x23 &&
-        subaddress != 0x24 && subaddress != 0x40)
-    {
-      requireRejectedCommand(owner, 0x80000000u | (subaddress << 16));
-    }
-    if (subaddress == 0x4c || subaddress == 0x4d)
-    {
-      requireRejectedCommand(owner, 0x80000040u | (subaddress << 16));
-    }
-  }
-  for (std::uint32_t operation = 2; operation < 16; ++operation)
-  {
-    for (const auto subaddress : {0u, 0x21u, 0x23u, 0x24u, 0x40u})
-    {
-      requireRejectedCommand(owner,
-        0x80000000u | (subaddress << 16) | (operation << 6));
-    }
-  }
-  requireRejectedCommand(owner, UINT32_MAX);
+  requireRejectedCommand(owner, 0x7fffffffu);
   requireData(owner, 0x1f);
   REQUIRE(owner.state().enumeratedDevices == 2);
 }

@@ -48,13 +48,13 @@ namespace
     {
       return Command::WriteInitialization;
     }
-    if (operation == 1 && subaddress != 0x4c && subaddress != 0x4d)
+    if (subaddress == 0x4c || subaddress == 0x4d)
     {
-      return Command::WriteOther;
+      return Command::Unsupported;
     }
     if (operation != 0)
     {
-      return Command::Unsupported;
+      return Command::WriteOther;
     }
     switch (subaddress)
     {
@@ -67,7 +67,7 @@ namespace
       case 0x40:
         return Command::ReadDeviceID;
       default:
-        return Command::Unsupported;
+        return Command::WriteOther;
     }
   }
 }
@@ -152,10 +152,6 @@ bool EERDRAMInitialization::validState(
       state.enumeratedDevices > RETAIL_DEVICE_COUNT)
   {
     return false;
-  }
-  if (state.command == 0)
-  {
-    return state.enumeratedDevices == 0;
   }
   // Input may have changed since acceptance; do not replay its old preconditions.
   return decodeCommand(state.command | COMMAND_START) != Command::Unsupported;

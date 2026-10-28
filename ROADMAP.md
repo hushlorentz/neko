@@ -2423,8 +2423,24 @@ real-handshake conformance; Milestone 9 remains incomplete.
       admission, effect and rejection coverage.
 - [x] Validate guest, trace and persistence continuation and independently
       review the extension.
-- [ ] With separate BIOS-run authorization, verify the selected write family
+- [x] With separate BIOS-run authorization, verify the selected write family
       and attribute the next startup dependency.
+
+### EE RDRAM Operation-Field Startup Scope
+
+- [x] Search local manuals and retained startup evidence for the observed
+      `0x800000a0` write and other operation-field values.
+- [x] Compare the operation-2 command with approved refreshed emulator
+      behavior and installed SDK evidence; identify the limits of the
+      resulting compatibility evidence.
+- [x] Select and implement a provisional operation-field write boundary
+      through the existing owner: admit all started commands and retain them
+      with the start bit cleared, while keeping SA4c/SA4d exact-only, the exact
+      initialization input gate, SA21 reset behavior, and operation-0 reads.
+- [x] Validate guest, trace and persistence continuation and independently
+      review the extension.
+- [ ] With separate BIOS-run authorization, verify the selected operation
+      family and attribute the next startup dependency.
 
 ### CD/DVD NREADY Startup Wait Scope
 
