@@ -10,7 +10,7 @@ int main(int argumentCount, const char *argumentValues[])
   if (argumentCount < 2)
   {
     std::cerr <<
-      "Usage: neko save-state <inspect|locate|diff> ...\n"
+      "Usage: neko save-state <inspect|locate|diff|iop-memory> ...\n"
       "       neko bios-startup <file> --cycles <count> "
       "[--trace-events <count> [--failure-context] [--trace-from-cycle <count>]] "
       "[--resume-checkpoint <file>] [--save-checkpoint <file>]\n";

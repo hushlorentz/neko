@@ -51,6 +51,16 @@ Locate one exact schema path or compare two states semantically:
 ./out/build/neko save-state diff before.neko after.neko
 ```
 
+Compare backing IOP RAM with the saved instruction/data cache words and tags:
+
+```sh
+./out/build/neko save-state iop-memory state.neko 0x17f00 --words 32
+```
+
+This offline view accepts 1-256 aligned words inside physical IOP RAM; it
+does not execute instructions or require a BIOS. `match` means the saved
+cache line is valid with the requested physical tag, not that it matches RAM.
+
 Byte ranges show their size and FNV-1a hash by default. Add
 `--bytes <path>` to `inspect` or `diff`, or `--bytes` to `locate`, to include
 the selected range's bytes. Invalid files and arguments return status 2;

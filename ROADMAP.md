@@ -2312,7 +2312,7 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
       canonical restore; independently review integration, run full gates,
       and verify bounded BIOS progress.
 
-### Real BIOS Handshake and Boundary Conformance
+### Real BIOS Handshake Prerequisites
 
 Discovery resumed after the selected Milestone 10 CD/DVD startup prerequisite
 and EE MCH-window implementation; the handshake target remains incomplete.
@@ -2326,9 +2326,25 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Resolve the IOP unread multiply/divide pair-overwrite admission exposed
       by BIOS execution; preserve documented HI/LO read hazards and validate
       the complete pair-writer family before resuming handshake observation.
-- [ ] Investigate the observed IOP SIF `+0x60` load and select its exact
+- [x] Investigate the observed IOP SIF `+0x60` load and select its exact
       access/reset/side-effect contract through the existing shared owner
       before continuing real-handshake discovery.
+
+### IOP Cache-Control and Code Replacement
+
+- [x] Attribute the post-SIF stale-instruction failure and identify the
+      instruction/data flush sequences using offline RAM/cache evidence.
+- [ ] Select the coherent IOP cache-control contract: bank selection, tag
+      granularity, isolation/swap interaction, enable behavior and supported
+      access shapes; distinguish PS2 evidence from provisional policy.
+- [ ] Implement the selected instruction/data control family through existing
+      owners, with red/green code-replacement and indexed-invalidation coverage.
+- [ ] Validate reset, restore, unaffected cache paths and guest flush sequences;
+      independently review, run required full gates, and verify progress with
+      separately authorized BIOS discovery.
+
+### Real BIOS Handshake and Boundary Conformance
+
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.

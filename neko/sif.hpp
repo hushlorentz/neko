@@ -87,6 +87,7 @@ class SIF final
 
     std::uint32_t readEE(SIFRegister reg) const;
     std::uint32_t readIOP(SIFRegister reg) const;
+    std::uint32_t readIOPRegister60() const;
     SIFWriteResult writeEE(SIFRegister reg, std::uint32_t value);
     SIFWriteResult writeIOP(SIFRegister reg, std::uint32_t value);
     std::uint32_t iopDoorbell() const;

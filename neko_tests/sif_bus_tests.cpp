@@ -249,6 +249,106 @@ TEST_CASE("SIF bus trigger effects are delivered once after mutation", "[sif][bu
   REQUIRE(system.masterClockScheduler().currentCycle() == 0);
 }
 
+TEST_CASE("SIF bus IOP register60 word reads return zero without effects",
+  "[sif][bus][register60]")
+{
+  Fixture fixture;
+  for (bool seeded : {false, true})
+  {
+    if (seeded)
+    {
+      seed(fixture.sif);
+    }
+    const SIF before = fixture.sif;
+    const auto hash = fixture.system.sifStateHash();
+    for (unsigned int repeat = 0; repeat < 3; ++repeat)
+    {
+      const auto result = fixture.system.iopBus().read32(IOP_BASE + 0x60);
+      REQUIRE(result.status == IOPBusStatus::Completed);
+      REQUIRE(result.value == 0);
+    }
+    requireUnchanged(fixture.sif, before);
+    REQUIRE(fixture.system.sifStateHash() == hash);
+  }
+  auto &iop = fixture.system.iopBus();
+  for (std::uint32_t lane : {1u, 2u, 3u})
+  {
+    REQUIRE(iop.read32(IOP_BASE + 0x60 + lane).status == IOPBusStatus::Misaligned);
+  }
+  REQUIRE(iop.read32(0xbd000060).status == IOPBusStatus::Unmapped);
+  IOPBus detached;
+  REQUIRE(detached.read32(IOP_BASE + 0x60).status == IOPBusStatus::Unmapped);
+  std::array<std::uint8_t, 4> bytes = {{1, 2, 3, 4}};
+  REQUIRE(iop.inspectPhysical(IOP_BASE + 0x60, bytes.data(), bytes.size()) ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(bytes == std::array<std::uint8_t, 4>{{1, 2, 3, 4}});
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
+  REQUIRE(fixture.system.masterClockScheduler().currentCycle() == 0);
+}
+
+TEST_CASE("SIF bus IOP register60 guest load respects delay and trace contracts",
+  "[sif][bus][guest][register60]")
+{
+  std::uint64_t untracedIOPHash = 0;
+  for (bool traced : {false, true})
+  {
+    Fixture fixture;
+    seed(fixture.sif);
+    const SIF before = fixture.sif;
+    const auto hash = fixture.system.sifStateHash();
+    prepareIOP(fixture, 0x23, 0xbd000060, 0x87654321);
+    if (traced)
+    {
+      fixture.system.startTrace();
+    }
+    auto &core = fixture.system.iopCore();
+    fixture.system.runMasterCycles(1);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.stopReason() == IOPStopReason::None);
+    REQUIRE(core.retiredInstructions() == 5);
+    REQUIRE(core.generalRegister(2) == 0x87654321);
+    fixture.system.runMasterCycles(8);
+    REQUIRE(core.retiredInstructions() == 6);
+    REQUIRE(core.generalRegister(2) == 0);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.stopReason() == IOPStopReason::None);
+    REQUIRE(core.programCounter() == 0xa0000018);
+    requireUnchanged(fixture.sif, before);
+    REQUIRE(fixture.system.sifStateHash() == hash);
+    REQUIRE(fixture.system.interruptController().status() == 0);
+    REQUIRE(fixture.system.iopInterruptController().status() == 0);
+    if (!traced)
+    {
+      untracedIOPHash = fixture.system.iopStateHash();
+      REQUIRE(fixture.system.trace().empty());
+      continue;
+    }
+    fixture.system.stopTrace();
+    REQUIRE(fixture.system.iopStateHash() == untracedIOPHash);
+    std::size_t reads = 0;
+    namespace Memory = NekoIOPTraceMemory;
+    for (const auto &event : fixture.system.trace())
+    {
+      REQUIRE(event.subsystem != NekoTraceSubsystem::SIF);
+      if (event.subsystem != NekoTraceSubsystem::IOP ||
+          event.type != NekoTraceEventType::MemoryAccess ||
+          event.value0 != 0xbd000060)
+      {
+        continue;
+      }
+      ++reads;
+      REQUIRE(event.masterCycle == 1);
+      REQUIRE(event.value1 == 0);
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        IOP_BASE + 0x60, 4, Memory::AccessKind::DataLoad,
+        Memory::Outcome::Completed, Memory::CacheRoute::Uncached, true, 0}));
+    }
+    REQUIRE(reads == 1);
+  }
+}
+
 TEST_CASE("SIF bus decode rejects padding auxiliary words and shadow aliases",
   "[sif][bus]")
 {
@@ -266,8 +366,11 @@ TEST_CASE("SIF bus decode rejects padding auxiliary words and shadow aliases",
     REQUIRE_FALSE(fixture.system.eeBus().readData32(EE_BASE + offset, &output));
     REQUIRE(output == 0x76543210);
     REQUIRE_FALSE(fixture.system.eeBus().writeData32(EE_BASE + offset, 0xffffffff));
-    REQUIRE(fixture.system.iopBus().read32(IOP_BASE + offset).status ==
-      IOPBusStatus::Unmapped);
+    if (offset != 0x60)
+    {
+      REQUIRE(fixture.system.iopBus().read32(IOP_BASE + offset).status ==
+        IOPBusStatus::Unmapped);
+    }
     REQUIRE(fixture.system.iopBus().write32(IOP_BASE + offset, 0xffffffff).status ==
       IOPBusStatus::Unmapped);
   }
@@ -293,7 +396,7 @@ TEST_CASE("SIF bus narrow and EE wide accesses reject without effects", "[sif][b
   const SIF before = fixture.sif;
   auto &ee = fixture.system.eeBus();
   auto &iop = fixture.system.iopBus();
-  for (std::uint32_t offset : {0u, 0x10u, 0x20u, 0x30u, 0x40u})
+  for (std::uint32_t offset : {0u, 0x10u, 0x20u, 0x30u, 0x40u, 0x60u})
   {
     for (std::uint32_t lane = 0; lane < 4; ++lane)
     {
@@ -365,7 +468,7 @@ TEST_CASE("SIF bus partial IOP byte enables reject before register commands", "[
   const SIF before = fixture.sif;
   for (std::uint32_t address :
       {IOP_BASE, IOP_BASE + 0x10, IOP_BASE + 0x20,
-       IOP_BASE + 0x30, IOP_BASE + 0x40, IOP_DOORBELL})
+       IOP_BASE + 0x30, IOP_BASE + 0x40, IOP_BASE + 0x60, IOP_DOORBELL})
   {
     for (std::uint8_t mask = 1; mask < 0xf; ++mask)
     {

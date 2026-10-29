@@ -108,6 +108,94 @@ TEST_CASE("Save-state commands read binary files")
     std::string::npos);
 }
 
+TEST_CASE("Save-state IOP memory inspection distinguishes RAM from cached words",
+  "[checkpoint-memory]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write32(0x100, 0x24020001).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x104, 0x24030002).status == IOPBusStatus::Completed);
+  auto &core = system.iopCore();
+  core.startExecution(0x100);
+  core.stepInstruction();
+  REQUIRE(bus.write32(0x100, 0x24020009).status == IOPBusStatus::Completed);
+  const auto state = system.saveState();
+  std::ostringstream output;
+  std::ostringstream error;
+  const int result = neko_cli::runSaveStateCommand(
+    {"iop-memory", "left.state", "0x100", "--words", "2"},
+    loaderFor(state), output, error);
+  INFO(error.str());
+  REQUIRE(result == 0);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().find(
+    "0x00000100 ram=0x24020009 instruction={index=16 tag=0x00000000 "
+    "valid=true match=true word=0x24020001}") != std::string::npos);
+  REQUIRE(output.str().find(
+    "data={index=64 tag=0x00000000 valid=false match=false word=0x00000000}") !=
+    std::string::npos);
+  REQUIRE(output.str().find("0x00000104 ram=0x24030002") != std::string::npos);
+  REQUIRE(system.saveState() == state);
+
+  std::ostringstream aliasOutput;
+  std::ostringstream aliasError;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"iop-memory", "left.state", "4352", "--words", "1"},
+    loaderFor(state), aliasOutput, aliasError) == 0);
+  REQUIRE(aliasError.str().empty());
+  REQUIRE(aliasOutput.str().find(
+    "instruction={index=16 tag=0x00000000 valid=true match=false "
+    "word=0x24020001}") != std::string::npos);
+
+  REQUIRE(bus.write32(0x1ffffc, 0x87654321).status == IOPBusStatus::Completed);
+  std::ostringstream endOutput;
+  std::ostringstream endError;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"iop-memory", "left.state", "0x1ffffc", "--words", "1"},
+    loaderFor(system.saveState()), endOutput, endError) == 0);
+  REQUIRE(endError.str().empty());
+  REQUIRE(endOutput.str().find("0x001ffffc ram=0x87654321") == 0);
+}
+
+TEST_CASE("Save-state IOP memory inspection bounds input before loading",
+  "[checkpoint-memory]")
+{
+  unsigned int loads = 0;
+  const neko_cli::SaveStateFileLoader loader =
+    [&](const std::string &) -> std::vector<std::uint8_t>
+    {
+      ++loads;
+      throw std::runtime_error("unexpected load");
+    };
+  for (const auto &arguments : std::vector<std::vector<std::string>>{
+      {"iop-memory", "left.state", "0x101", "--words", "1"},
+      {"iop-memory", "left.state", "0x200000", "--words", "1"},
+      {"iop-memory", "left.state", "0x1ffffc", "--words", "2"},
+      {"iop-memory", "left.state", "0", "--words", "0"},
+      {"iop-memory", "left.state", "0", "--words", "257"},
+      {"iop-memory", "left.state", "-4", "--words", "1"},
+      {"iop-memory", "left.state", "0x", "--words", "1"},
+      {"iop-memory", "left.state", "4294967296", "--words", "1"},
+      {"iop-memory", "left.state", "0", "--words", "18446744073709551616"},
+      {"iop-memory", "left.state", "0", "--words", "1", "extra"}})
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runSaveStateCommand(arguments, loader, output, error) == 2);
+    REQUIRE(output.str().empty());
+    REQUIRE_FALSE(error.str().empty());
+  }
+  REQUIRE(loads == 0);
+
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"iop-memory", "left.state", "0", "--words", "1"},
+    loaderFor({1, 2, 3}), output, error) == 2);
+  REQUIRE(output.str().empty());
+  REQUIRE_FALSE(error.str().empty());
+}
+
 TEST_CASE("Save-state locate commands use exact schema paths")
 {
   NekoSystem system;

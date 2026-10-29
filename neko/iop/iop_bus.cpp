@@ -804,6 +804,10 @@ IOPBusReadResult IOPBus::readSIFRegister(
   {
     return {IOPBusStatus::Completed, sifComponent->iopDoorbell()};
   }
+  if (location.offset == 0x60)
+  {
+    return {IOPBusStatus::Completed, sifComponent->readIOPRegister60()};
+  }
   SIFRegister reg;
   if (!SIFRegisterMap::decodeOffset(
         static_cast<std::uint32_t>(location.offset), reg))

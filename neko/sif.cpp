@@ -71,6 +71,12 @@ std::uint32_t SIF::readIOP(SIFRegister reg) const
   return reg == SIFRegister::CTRL ? value | UINT32_C(0xf0000002) : value;
 }
 
+std::uint32_t SIF::readIOPRegister60() const
+{
+  // Provisional IOP word-read policy; the register's hardware role is unknown.
+  return 0;
+}
+
 SIFWriteResult SIF::writeEE(SIFRegister reg, std::uint32_t value)
 {
   if (observationOrder == nullptr)
