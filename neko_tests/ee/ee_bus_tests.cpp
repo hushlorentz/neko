@@ -128,7 +128,8 @@ TEST_CASE("EE MCH window endpoint supports word-backed access and guest loads",
   std::uint64_t doubleword = UINT64_MAX;
   EEQuadword quadword{};
   REQUIRE_FALSE(bus.readData8(ADDRESS, &byte));
-  REQUIRE_FALSE(bus.readData16(ADDRESS, &halfword));
+  REQUIRE(bus.readData16(ADDRESS, &halfword));
+  REQUIRE(halfword == 0x4321);
   REQUIRE_FALSE(bus.readData64(ADDRESS, &doubleword));
   REQUIRE_FALSE(bus.readData128(ADDRESS, &quadword));
   REQUIRE(bus.readData32(ADDRESS + 4, &word));
@@ -166,6 +167,70 @@ TEST_CASE("EE MCH window endpoint supports word-backed access and guest loads",
   }
   REQUIRE(accesses == 1);
   REQUIRE_FALSE(system.traceTruncated());
+}
+
+TEST_CASE("EE MCH halfword reads select backing lanes without protocol effects",
+  "[ee][bus][mch-window][mch-halfword]")
+{
+  constexpr std::uint32_t BASE = EEMemoryMap::MCH_WINDOW_BASE;
+  constexpr std::uint32_t END = EEMemoryMap::MCH_WINDOW_END;
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData32(EEMemoryMap::MCH_RICM, 0x80210000));
+  for (auto address = BASE; address < END; address += 4)
+  {
+    if (address == EEMemoryMap::MCH_RICM ||
+        address == EEMemoryMap::MCH_DRD)
+    {
+      continue;
+    }
+    CAPTURE(address);
+    for (const auto lane : {0u, 2u})
+    {
+      std::uint16_t value = 0xa5a5;
+      REQUIRE(bus.readData16(address + lane, &value));
+      REQUIRE(value == 0);
+    }
+    REQUIRE(bus.writeData32(address, 0xa135c46du ^ (address - BASE)));
+  }
+  const auto hash = system.eeStateHash();
+  for (auto address = BASE; address < END; address += 4)
+  {
+    for (const auto lane : {0u, 2u})
+    {
+      CAPTURE(address);
+      CAPTURE(lane);
+      std::uint16_t value = 0xa5a5;
+      const bool protocol = address == EEMemoryMap::MCH_RICM ||
+        address == EEMemoryMap::MCH_DRD;
+      REQUIRE(bus.readData16(address + lane, &value) == !protocol);
+      const auto word = address == BASE + 0x10 ? 0u :
+        0xa135c46du ^ (address - BASE);
+      REQUIRE(value == (protocol ? 0xa5a5 :
+        static_cast<std::uint16_t>(word >> (lane * 8))));
+      REQUIRE_FALSE(bus.writeData16(address + lane, 0xffff));
+    }
+  }
+  for (const auto address : {BASE - 2, END, END + 2,
+         0x9000f480u, 0xb000f480u})
+  {
+    CAPTURE(address);
+    std::uint16_t value = 0xa5a5;
+    REQUIRE_FALSE(bus.readData16(address, &value));
+    REQUIRE(value == 0xa5a5);
+  }
+  for (const auto address : {BASE + 1, BASE + 0x81, END - 1})
+  {
+    CAPTURE(address);
+    std::uint16_t value = 0xa5a5;
+    REQUIRE_THROWS_AS(bus.readData16(address, &value), std::invalid_argument);
+    REQUIRE(value == 0xa5a5);
+  }
+  REQUIRE_THROWS_AS(bus.readData16(BASE, nullptr), std::invalid_argument);
+  REQUIRE(system.eeStateHash() == hash);
+  REQUIRE(bus.read32(EEMemoryMap::MCH_DRD) == 0x1f);
+  REQUIRE(bus.read32(EEMemoryMap::MCH_DRD) == 0x1f);
+  REQUIRE(bus.read32(EEMemoryMap::MCH_DRD) == 0);
 }
 
 TEST_CASE("GS PCRTC initialization writes preserve configured display timing",

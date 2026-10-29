@@ -2346,10 +2346,20 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       independently review, run required full gates, and verify progress with
       separately authorized BIOS discovery.
 
+### EE MCH Halfword Reads
+
+- [x] Research and select the window-wide halfword-read contract, including
+      lane selection, f410 readback and RICM/DRD access exclusions; distinguish
+      documented behavior from provisional policy.
+- [x] Extend generic MCH backing reads through the existing owner without
+      admitting other widths, partial writes or protocol side effects.
+- [x] Validate alignment, boundaries, guest signed/unsigned loads, trace and
+      restored continuation; independently review the extension.
+
 ### Real BIOS Handshake and Boundary Conformance
 
-- [ ] Resolve the observed EE halfword-read dependency at `0x1000f480`
-      through the existing MCH owner before continuing handshake observation.
+- [ ] With separate BIOS-run authorization, verify the MCH halfword-read
+      extension and attribute the next originating startup dependency.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.

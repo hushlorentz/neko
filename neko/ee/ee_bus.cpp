@@ -707,6 +707,24 @@ bool EEBus::readData16(
     address,
     2,
     "EE halfword load must be naturally aligned.");
+  if (mchWindowAddress(address))
+  {
+    const auto wordAddress = address & ~std::uint32_t{3};
+    if (wordAddress == EEMemoryMap::MCH_RICM ||
+        wordAddress == EEMemoryMap::MCH_DRD)
+    {
+      return false;
+    }
+    std::uint32_t word = 0;
+    if (!attachedRDRAMInitialization().readMCHWindowWord(
+          (wordAddress - EEMemoryMap::MCH_WINDOW_BASE) / sizeof(std::uint32_t),
+          &word))
+    {
+      return false;
+    }
+    *value = static_cast<std::uint16_t>(word >> ((address & 2u) * 8));
+    return true;
+  }
   std::uint32_t physicalAddress = 0;
   const std::uint8_t *storage = mainMemory.data();
   if (!mainMemoryAddress(address, 2, &physicalAddress))

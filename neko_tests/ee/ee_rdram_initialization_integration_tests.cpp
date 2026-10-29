@@ -104,7 +104,7 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
     const auto aligned128 = address & ~std::uint32_t{15};
     REQUIRE_FALSE(bus.readData8(address, &byte));
     REQUIRE_FALSE(bus.writeData8(address, 0xff));
-    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE(bus.readData16(address, &half));
     REQUIRE_FALSE(bus.writeData16(address, 0xffff));
     REQUIRE_FALSE(bus.readData64(aligned64, &wide));
     REQUIRE_FALSE(bus.writeData64(aligned64, UINT64_MAX));
@@ -117,7 +117,8 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
     REQUIRE_THROWS_WITH(bus.write64(aligned64, UINT64_MAX),
       "EE bus address supports full 32-bit accesses only.");
     REQUIRE(byte == 0xa5);
-    REQUIRE(half == 0xa5a5);
+    REQUIRE(half == (address == BASE + 0x10 ? 0u :
+      static_cast<std::uint16_t>(written)));
     REQUIRE(wide == UINT64_C(0xa5a5a5a5a5a5a5a5));
     REQUIRE(quad.low == UINT64_C(0xa5a5a5a5a5a5a5a5));
     REQUIRE(quad.high == UINT64_C(0xa5a5a5a5a5a5a5a5));
@@ -178,6 +179,97 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
   }
   REQUIRE(stores == 1);
   REQUIRE_FALSE(guest.traceTruncated());
+}
+
+TEST_CASE("EE MCH halfword guest loads preserve traces and restored continuation",
+  "[ee][bus][guest][trace][save-state][mch-window][mch-halfword]")
+{
+  struct LoadCase
+  {
+    std::uint8_t opcode;
+    std::uint16_t offset;
+    std::uint16_t value;
+    std::uint64_t expected;
+  };
+  const std::array<LoadCase, 8> loads = {{
+    {0x21, 0x80, 0xfedc, UINT64_C(0xfffffffffffffedc)},
+    {0x25, 0x80, 0xfedc, 0xfedc},
+    {0x21, 0x82, 0x8765, UINT64_C(0xffffffffffff8765)},
+    {0x25, 0x82, 0x8765, 0x8765},
+    {0x25, 0x10, 0, 0},
+    {0x21, 0x12, 0, 0},
+    {0x25, 0xfe, 0x1234, 0x1234},
+    {0x21, 0x00, 0x5678, 0x5678}
+  }};
+  constexpr std::uint32_t BASE = EEMemoryMap::MCH_WINDOW_BASE;
+  constexpr std::uint64_t UPPER_GPR = UINT64_C(0x1122334455667788);
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  REQUIRE(bus.writeData32(BASE, 0xabcd5678));
+  REQUIRE(bus.writeData32(BASE + 0x10, UINT32_MAX));
+  REQUIRE(bus.writeData32(BASE + 0x80, 0x8765fedc));
+  REQUIRE(bus.writeData32(EEMemoryMap::MCH_WINDOW_END - 4, 0x1234abcd));
+  for (std::size_t index = 0; index < loads.size(); ++index)
+  {
+    bus.write32(static_cast<std::uint32_t>(index) * 4,
+      (std::uint32_t(loads[index].opcode) << 26) |
+      (1u << 21) | (2u << 16) | loads[index].offset);
+  }
+  original.eeCore().setGeneralRegister(1, {BASE | EEMemoryMap::KSEG1_BASE, 0});
+  original.eeCore().setGeneralRegister(2, {UINT64_MAX, UPPER_GPR});
+  original.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  original.eeCore().startExecution(EEMemoryMap::KSEG1_BASE);
+  for (std::size_t index = 0; index < 2; ++index)
+  {
+    const auto result = original.stepEEInstruction(16);
+    REQUIRE(result.pendingException == EEException::None);
+    REQUIRE_FALSE(result.cycleLimitReached);
+    REQUIRE(original.eeCore().generalRegister(2).low == loads[index].expected);
+    REQUIRE(original.eeCore().generalRegister(2).high == UPPER_GPR);
+  }
+
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  restored.loadState(saved);
+  original.startTrace(200);
+  for (auto *machine : {&original, &restored})
+  {
+    for (std::size_t index = 2; index < loads.size(); ++index)
+    {
+      CAPTURE(index);
+      const auto result = machine->stepEEInstruction(16);
+      REQUIRE(result.pendingException == EEException::None);
+      REQUIRE_FALSE(result.cycleLimitReached);
+      REQUIRE(machine->eeCore().generalRegister(2).low == loads[index].expected);
+      REQUIRE(machine->eeCore().generalRegister(2).high == UPPER_GPR);
+    }
+  }
+  std::size_t nextLoad = 2;
+  for (const auto &event : original.trace())
+  {
+    if (event.subsystem == NekoTraceSubsystem::EE &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 >= (BASE | EEMemoryMap::KSEG1_BASE) &&
+        event.value0 < (EEMemoryMap::MCH_WINDOW_END | EEMemoryMap::KSEG1_BASE))
+    {
+      REQUIRE(nextLoad < loads.size());
+      const auto &load = loads[nextLoad++];
+      REQUIRE(event.value0 == ((BASE + load.offset) | EEMemoryMap::KSEG1_BASE));
+      REQUIRE(event.value1 == load.value);
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+        BASE + load.offset, 2, NekoEETraceMemory::AccessKind::DataLoad,
+        NekoEETraceMemory::TranslationOutcome::Translated,
+        NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
+        NekoEETraceMemory::CacheAccess::Bypassed,
+        NekoEETraceMemory::TransferOutcome::Completed,
+        NekoEETraceMemory::FailurePhase::None}));
+    }
+  }
+  REQUIRE(nextLoad == loads.size());
+  REQUIRE_FALSE(original.traceTruncated());
+  REQUIRE(restored.trace().empty());
+  REQUIRE(original.saveState() == restored.saveState());
 }
 
 TEST_CASE("EE f410 zero readback releases guest sign polling without changing backing",
