@@ -409,11 +409,10 @@ namespace
       state.unreadMultiplyDivideLO;
   }
 
-  bool pairWriteIsUndefined(const IOPHILOState &state)
+  bool pairWriteHasReadHazard(const IOPHILOState &state)
   {
     return state.hiWriteHazardInstructions != 0 ||
-      state.loWriteHazardInstructions != 0 ||
-      multiplyDivideResultIsUnobserved(state);
+      state.loWriteHazardInstructions != 0;
   }
 }
 
@@ -784,7 +783,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
     case IOPOperation::Multiply:
     case IOPOperation::MultiplyUnsigned:
     {
-      if (pairWriteIsUndefined(hiLoState))
+      if (pairWriteHasReadHazard(hiLoState))
       {
         return undefinedOperationEffects();
       }
@@ -800,7 +799,7 @@ IOPInstructionEffects IOPCore::instructionEffects(
     case IOPOperation::Divide:
     case IOPOperation::DivideUnsigned:
     {
-      if (pairWriteIsUndefined(hiLoState))
+      if (pairWriteHasReadHazard(hiLoState))
       {
         return undefinedOperationEffects();
       }

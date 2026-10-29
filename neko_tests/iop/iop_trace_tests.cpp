@@ -998,7 +998,7 @@ TEST_CASE("IOP trace packs guest halts without synthesizing host transitions",
 {
   NekoSystem system;
   instruction(system, 0, 0x18); // mult r0, r0
-  instruction(system, 4, 0x18); // undefined unread-result overwrite
+  instruction(system, 4, 0x11); // mthi r0 over an unread result
   system.iopCore().startExecution(0xa0000000);
   system.runMasterCycles(8);
   system.startTrace();

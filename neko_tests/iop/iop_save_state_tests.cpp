@@ -124,6 +124,55 @@ TEST_CASE("IOP restore retains one observed HI LO half and its read hazard",
   }
 }
 
+TEST_CASE("IOP restore replaces an unread branch delay product with matching traces",
+  "[iop][hilo][save-state][trace]")
+{
+  NekoSystem original;
+  const IOPWord program[] = {
+    0x24010006, // addiu r1, r0, 6
+    0x24020007, // addiu r2, r0, 7
+    0x2403000d, // addiu r3, r0, 13
+    0x10000002, // beq r0, r0, 0x18
+    0x00220018, // mult r1, r2
+    0x00002012, // mflo r4 (skipped)
+    0x00620018, // mult r3, r2
+    0x00002810, // mfhi r5
+    0x00003012  // mflo r6
+  };
+  for (std::size_t index = 0; index < 9; ++index)
+  {
+    loadInstruction(&original, static_cast<IOPAddress>(index * 4),
+      program[index]);
+  }
+  original.iopCore().startExecution(0x80000000);
+  original.runMasterCycles(33);
+  REQUIRE(original.iopCore().programCounter() == 0x80000018);
+  REQUIRE(original.iopCore().hi() == 0);
+  REQUIRE(original.iopCore().lo() == 42);
+  const auto state = original.saveState();
+  NekoSystem restored;
+  restored.loadState(state);
+  original.startTrace();
+  restored.startTrace();
+  original.runMasterCycles(24);
+  restored.runMasterCycles(24);
+
+  REQUIRE(original.iopCore().executionState() == IOPExecutionState::Running);
+  REQUIRE(original.iopCore().programCounter() == 0x80000024);
+  REQUIRE(original.iopCore().retiredInstructions() == 8);
+  REQUIRE(original.iopCore().generalRegister(4) == 0);
+  REQUIRE(original.iopCore().generalRegister(5) == 0);
+  REQUIRE(original.iopCore().generalRegister(6) == 91);
+  REQUIRE(original.iopCore().hi() == 0);
+  REQUIRE(original.iopCore().lo() == 91);
+  const auto events = IOPTraceTest::subsystemEvents(
+    original, NekoTraceSubsystem::IOP);
+  REQUIRE_FALSE(events.empty());
+  IOPTraceTest::requireEvents(IOPTraceTest::subsystemEvents(
+    restored, NekoTraceSubsystem::IOP), events);
+  IOPTraceTest::requireMachine(restored, original);
+}
+
 TEST_CASE("IOP SSBUS canonical state hashes every bit and resets to zero",
   "[iop][ssbus][save-state]")
 {

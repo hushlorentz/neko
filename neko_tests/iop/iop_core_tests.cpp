@@ -4425,34 +4425,94 @@ TEST_CASE("IOP HI and LO read hazards permit cross-register writes",
   REQUIRE(core.retiredInstructions() == 4);
 }
 
-TEST_CASE("IOP rejects overwriting an unread multiply divide result",
+TEST_CASE("IOP replaces an unread multiply divide pair with any pair writer",
   "[iop][execution][hilo]")
 {
-  IOPBus bus;
-  IOPCore core;
-  core.attachBus(&bus);
-  IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
-  IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
-  IOPCoreTestAccess::setGeneralRegister(
-    &core,
-    3,
-    UINT32_C(0x12345678));
-  loadInstruction(&bus, 0, registerInstruction(0x18, 1, 2, 0));
-  loadInstruction(&bus, 4, registerInstruction(0x11, 3, 0, 0));
-  core.startExecution(0);
+  struct WriteCase
+  {
+    std::uint8_t function;
+    IOPWord source;
+    IOPWord target;
+    IOPWord expectedHI;
+    IOPWord expectedLO;
+  };
+  const WriteCase writes[] = {
+    {0x18, 0xfffffff3, 7, 0xffffffff, 0xffffffa5},
+    {0x19, 0xffffffff, 2, 1, 0xfffffffe},
+    {0x1a, 0xfffffff3, 7, 0xfffffffa, 0xffffffff},
+    {0x1b, 13, 7, 6, 1}
+  };
+  for (const std::uint8_t producer : {0x18, 0x19, 0x1a, 0x1b})
+  {
+    for (const WriteCase &write : writes)
+    {
+      CAPTURE(producer);
+      CAPTURE(write.function);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
+      IOPCoreTestAccess::setGeneralRegister(&core, 3, write.source);
+      IOPCoreTestAccess::setGeneralRegister(&core, 4, write.target);
+      loadInstruction(&bus, 0, registerInstruction(producer, 1, 2, 0));
+      loadInstruction(&bus, 4, registerInstruction(write.function, 3, 4, 0));
+      loadInstruction(&bus, 8, registerInstruction(0x10, 0, 0, 5));
+      loadInstruction(&bus, 12, registerInstruction(0x12, 0, 0, 6));
+      core.startExecution(0);
 
-  core.stepInstruction();
-  REQUIRE(core.hi() == 0);
-  REQUIRE(core.lo() == 42);
+      core.stepInstruction();
+      core.stepInstruction();
+      REQUIRE(core.executionState() == IOPExecutionState::Running);
+      REQUIRE(core.hi() == write.expectedHI);
+      REQUIRE(core.lo() == write.expectedLO);
+      core.stepInstruction();
+      core.stepInstruction();
+      REQUIRE(core.generalRegister(5) == write.expectedHI);
+      REQUIRE(core.generalRegister(6) == write.expectedLO);
+      REQUIRE(core.programCounter() == 16);
+      REQUIRE(core.retiredInstructions() == 4);
+      REQUIRE(core.exception().kind == IOPException::None);
+    }
+  }
+}
 
-  core.stepInstruction();
+TEST_CASE("IOP rejects partial writes over an unread multiply divide result",
+  "[iop][execution][hilo]")
+{
+  for (const std::uint8_t producer : {0x18, 0x19, 0x1a, 0x1b})
+  {
+    for (const std::uint8_t writer : {0x11, 0x13})
+    {
+      CAPTURE(producer);
+      CAPTURE(writer);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCoreTestAccess::setGeneralRegister(&core, 1, 6);
+      IOPCoreTestAccess::setGeneralRegister(&core, 2, 7);
+      IOPCoreTestAccess::setGeneralRegister(
+        &core, 3, UINT32_C(0x12345678));
+      loadInstruction(&bus, 0, registerInstruction(producer, 1, 2, 0));
+      loadInstruction(&bus, 4, registerInstruction(writer, 3, 0, 0));
+      core.startExecution(0);
 
-  REQUIRE(core.hi() == 0);
-  REQUIRE(core.lo() == 42);
-  REQUIRE(core.programCounter() == 4);
-  REQUIRE(core.executionState() == IOPExecutionState::Halted);
-  REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
-  REQUIRE(core.retiredInstructions() == 1);
+      core.stepInstruction();
+      const auto expectedHI = producer < 0x1a ? 0u : 6u;
+      const auto expectedLO = producer < 0x1a ? 42u : 0u;
+      REQUIRE(core.hi() == expectedHI);
+      REQUIRE(core.lo() == expectedLO);
+
+      core.stepInstruction();
+
+      REQUIRE(core.hi() == expectedHI);
+      REQUIRE(core.lo() == expectedLO);
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.executionState() == IOPExecutionState::Halted);
+      REQUIRE(core.stopReason() == IOPStopReason::UndefinedOperation);
+      REQUIRE(core.retiredInstructions() == 1);
+    }
+  }
 }
 
 TEST_CASE("IOP permits new HI LO writes after observing either result half",

@@ -2323,6 +2323,12 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Investigate the observed f410 bit31 polling dependency and select any
       justified special-register contract; distinguish hardware effects from
       provisional backing before continuing bounded handshake discovery.
+- [x] Resolve the IOP unread multiply/divide pair-overwrite admission exposed
+      by BIOS execution; preserve documented HI/LO read hazards and validate
+      the complete pair-writer family before resuming handshake observation.
+- [ ] Investigate the observed IOP SIF `+0x60` load and select its exact
+      access/reset/side-effect contract through the existing shared owner
+      before continuing real-handshake discovery.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.
