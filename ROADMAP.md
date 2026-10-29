@@ -2358,8 +2358,10 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### Real BIOS Handshake and Boundary Conformance
 
-- [ ] With separate BIOS-run authorization, verify the MCH halfword-read
-      extension and attribute the next originating startup dependency.
+- [x] With separate BIOS-run authorization, verify the MCH halfword-read
+      extension and classify the resulting failure or cycle-ceiling activity.
+- [ ] With separate cycle-budget authorization, observe beyond the current
+      21M ceiling without bypassing real serial-transmit polling.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.
