@@ -102,6 +102,73 @@ TEST_CASE("BIOS startup command reports host stops without claiming BIOS success
     std::string::npos);
 }
 
+TEST_CASE("BIOS scout stops at the originating fault with compact same-cycle evidence",
+  "[bios-startup-command][bios-scout]")
+{
+  // Both CPUs execute a rejected halfword store in their second instruction.
+  auto image = discoveryROM(0x3c02ba00);
+  image[4] = 8; image[5] = 0; image[6] = 0x44; image[7] = 0xa4;
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "100", "--scout"},
+    [&](const std::string &) { return image; }, output, error) == 1);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().find("\"observation\":\"failure_probe\"") != std::string::npos);
+  REQUIRE(output.str().find("\"cycle_limit_reached\":false") != std::string::npos);
+  REQUIRE(output.str().find("\"physical_address\":436207624") != std::string::npos);
+  NekoSystem expected;
+  expected.runDualCPUBIOS(image, 0);
+  expected.startTrace(1000);
+  std::uint64_t cycle = 0;
+  while (!firstStartupFailure(expected.trace()).found && cycle < 100)
+  {
+    expected.runDualCPU(1);
+    ++cycle;
+  }
+  REQUIRE(cycle < 100);
+  REQUIRE(output.str().find("\"master_cycles\":" + std::to_string(cycle) + ",") !=
+    std::string::npos);
+}
+
+TEST_CASE("BIOS scout does not stop on ordinary syscall exceptions",
+  "[bios-startup-command][bios-scout]")
+{
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runBIOSStartupCommand(
+    {"authored.bin", "--cycles", "8", "--scout"},
+    [&](const std::string &) { return discoveryROM(0x0000000c); },
+    output, error) == 0);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().find("\"failure\":null") != std::string::npos);
+  REQUIRE(output.str().find("\"captured_events\":0") != std::string::npos);
+}
+
+TEST_CASE("BIOS scout rejects full tracing and traced replay can stop on first failure",
+  "[bios-startup-command][bios-scout]")
+{
+  const auto image = discoveryROM(0x8c020001);
+  std::ostringstream output;
+  std::ostringstream error;
+  SECTION("Incompatible observation modes")
+  {
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "100", "--scout", "--trace-events", "100"},
+      [&](const std::string &) { return image; }, output, error) == 2);
+    REQUIRE_FALSE(error.str().empty());
+  }
+  SECTION("Traced replay stops after the failure cycle")
+  {
+    REQUIRE(neko_cli::runBIOSStartupCommand(
+      {"authored.bin", "--cycles", "100", "--trace-events", "100",
+        "--stop-on-first-failure"},
+      [&](const std::string &) { return image; }, output, error) == 1);
+    REQUIRE(error.str().empty());
+    REQUIRE(output.str().find("\"master_cycles\":1,") != std::string::npos);
+  }
+}
+
 TEST_CASE("BIOS startup trace can begin at a completed absolute cycle without changing execution",
   "[bios-startup-command][checkpoint]")
 {

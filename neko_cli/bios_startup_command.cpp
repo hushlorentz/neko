@@ -18,7 +18,8 @@ namespace
   const char *USAGE =
     "Usage: neko bios-startup <file> --cycles <count> "
     "[--trace-events <count> [--failure-context] [--trace-from-cycle <count>]] "
-    "[--resume-checkpoint <file>] [--save-checkpoint <file>]";
+    "[--resume-checkpoint <file>] [--save-checkpoint <file>] "
+    "[--scout | --stop-on-first-failure]";
 
   struct Options
   {
@@ -28,6 +29,8 @@ namespace
     bool traced = false;
     bool failureContext = false;
     bool traceStartSpecified = false;
+    bool scout = false;
+    bool stopOnFirstFailure = false;
     std::string resumePath;
     std::string savePath;
   };
@@ -69,6 +72,16 @@ namespace
     for (std::size_t index = 3; index < arguments.size(); ++index)
     {
       const auto &name = arguments[index];
+      if (name == "--scout" && !options.scout)
+      {
+        options.scout = true;
+        continue;
+      }
+      if (name == "--stop-on-first-failure" && !options.stopOnFirstFailure)
+      {
+        options.stopOnFirstFailure = true;
+        continue;
+      }
       if (name == "--failure-context" && !options.failureContext)
       {
         options.failureContext = true;
@@ -104,7 +117,10 @@ namespace
         throw std::invalid_argument(USAGE);
       }
     }
-    if ((!options.traced && (options.failureContext || options.traceStartSpecified)) ||
+    if ((options.scout && (options.traced || options.failureContext ||
+          options.traceStartSpecified || options.stopOnFirstFailure)) ||
+        (options.stopOnFirstFailure && !options.traced) ||
+        (!options.traced && (options.failureContext || options.traceStartSpecified)) ||
         (options.traceStartSpecified && options.traceStart > options.ceiling))
     {
       throw std::invalid_argument(USAGE);
@@ -138,16 +154,23 @@ namespace
   {
     const auto start = system.masterClockScheduler().currentCycle();
     const auto traceStart = std::max(start, options.traceStart);
+    const auto stopPolicy = options.stopOnFirstFailure ?
+      NekoTraceStopPolicy::FirstFailure : NekoTraceStopPolicy::Continue;
+    if (options.scout)
+    {
+      system.startFailureProbe();
+      return runDualCPUWithStartupEvidence(system, options.ceiling - start);
+    }
     if (!options.traced || traceStart == start)
     {
       if (options.traced)
       {
-        system.startTrace(options.traceLimit, capture);
+        system.startTrace(options.traceLimit, capture, stopPolicy);
       }
       return runDualCPUWithStartupEvidence(system, options.ceiling - start);
     }
     auto prefix = runDualCPUWithStartupEvidence(system, traceStart - start);
-    system.startTrace(options.traceLimit, capture);
+    system.startTrace(options.traceLimit, capture, stopPolicy);
     if (prefix.outcome == StartupRunOutcome::RuntimeError ||
         !prefix.completed.execution.cycleLimitReached)
     {
@@ -252,6 +275,10 @@ int neko_cli::runBIOSStartupCommand(
     {
       record << ",\"trace_start_cycle\":" << std::max(start, options.traceStart);
     }
+    if (options.scout)
+    {
+      record << ",\"observation\":\"failure_probe\"";
+    }
     record << "}\n";
     if (runtimeError != nullptr)
     {
@@ -262,7 +289,7 @@ int neko_cli::runBIOSStartupCommand(
       writeStartupRunSummaryJsonLine(record, evidence.completed);
     }
     output << record.str();
-    if (options.traced)
+    if (options.traced || options.scout)
     {
       writeStartupTraceJsonLines(output, system);
       if (capture)

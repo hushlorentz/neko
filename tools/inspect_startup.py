@@ -55,6 +55,8 @@ class StartupLog:
 
     @property
     def coverage(self):
+        if self.input.get("observation") == "failure_probe":
+            return "failure_probe"
         if self.trace is None:
             return "untraced"
         return "truncated_prefix" if self.trace["truncated"] else "retained_trace"

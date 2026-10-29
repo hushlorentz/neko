@@ -1700,6 +1700,15 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 - [x] Run the complete optimized and AddressSanitizer checks to close the
       diagnostic block independently of reaching the BIOS handshake.
 
+### Staged BIOS Discovery
+
+- [x] Add failure-only scouting and opt-in complete-cycle early stopping,
+      preserving existing failure attribution and guest exception behavior.
+- [x] Add periodic same-build scout checkpoints, targeted replay, local
+      trace/plain verification, and stage timing/progress; retain conformance mode.
+- [x] Validate the staged workflow with BIOS-free regression and integration
+      tests, independent review, and complete optimized/AddressSanitizer checks.
+
 ### BIOS Prerequisite Discovery and Bounded Repairs
 
 - [x] Classify the initial discovered pre-handshake dependencies against the approved

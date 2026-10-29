@@ -1,4 +1,5 @@
 #include "regression_trace.hpp"
+#include "ee/ee_core.hpp"
 
 #include <stdexcept>
 
@@ -17,6 +18,60 @@ namespace
       *hash *= FNV_PRIME;
     }
   }
+}
+
+NekoTraceFailureKind nekoTraceFailureKind(const NekoTraceEvent &event) noexcept
+{
+  using Kind = NekoTraceFailureKind;
+  if (event.type == NekoTraceEventType::MemoryAccess)
+  {
+    if (event.subsystem == NekoTraceSubsystem::IOP &&
+        (event.value3 & NekoIOPTraceMemory::OUTCOME_MASK) != 0)
+    {
+      return Kind::MemoryAccess;
+    }
+    if (event.subsystem == NekoTraceSubsystem::EE)
+    {
+      const auto translation = (event.value3 &
+        NekoEETraceMemory::TRANSLATION_OUTCOME_MASK) >>
+          NekoEETraceMemory::TRANSLATION_OUTCOME_SHIFT;
+      const auto transfer = (event.value3 &
+        NekoEETraceMemory::TRANSFER_OUTCOME_MASK) >>
+          NekoEETraceMemory::TRANSFER_OUTCOME_SHIFT;
+      if (translation >= static_cast<unsigned>(
+            NekoEETraceMemory::TranslationOutcome::AddressErrorLoadOrFetch) ||
+          transfer == static_cast<unsigned>(
+            NekoEETraceMemory::TransferOutcome::PhysicalBusError))
+      {
+        return Kind::MemoryAccess;
+      }
+    }
+  }
+  if (event.subsystem == NekoTraceSubsystem::EE &&
+      ((event.type == NekoTraceEventType::FaultContext &&
+        (event.value3 & NekoEETraceFault::HOST_REJECTION) != 0) ||
+       (event.type == NekoTraceEventType::ExceptionEntered &&
+        (event.value0 == static_cast<unsigned>(EEException::ReservedInstruction) ||
+         event.value0 == static_cast<unsigned>(EEException::CoprocessorUnusable)))))
+  {
+    return Kind::InstructionRejection;
+  }
+  if (event.subsystem == NekoTraceSubsystem::IOP &&
+      ((event.type == NekoTraceEventType::StateChanged &&
+        event.value2 == static_cast<unsigned>(NekoIOPTraceState::StopReason::UndefinedOperation)) ||
+       (event.type == NekoTraceEventType::ExceptionEntered &&
+        (event.value0 == 10 || event.value0 == 11))))
+  {
+    return Kind::InstructionRejection;
+  }
+  if (event.subsystem == NekoTraceSubsystem::SIF &&
+      event.type == NekoTraceEventType::DMABeat &&
+      ((event.value0 >> NekoSIFDMATrace::OUTCOME_SHIFT) & 255) ==
+        static_cast<unsigned>(NekoSIFDMATrace::Outcome::Rejected))
+  {
+    return Kind::DMARejection;
+  }
+  return Kind::None;
 }
 
 std::uint64_t nekoFrameHash(

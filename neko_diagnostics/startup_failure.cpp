@@ -9,28 +9,7 @@ namespace
 {
   bool failedMemoryAccess(const NekoTraceEvent &event) noexcept
   {
-    if (event.type != NekoTraceEventType::MemoryAccess)
-    {
-      return false;
-    }
-    if (event.subsystem == NekoTraceSubsystem::IOP)
-    {
-      return (event.value3 & NekoIOPTraceMemory::OUTCOME_MASK) != 0;
-    }
-    if (event.subsystem != NekoTraceSubsystem::EE)
-    {
-      return false;
-    }
-    const auto translation = (event.value3 &
-      NekoEETraceMemory::TRANSLATION_OUTCOME_MASK) >>
-        NekoEETraceMemory::TRANSLATION_OUTCOME_SHIFT;
-    const auto transfer = (event.value3 &
-      NekoEETraceMemory::TRANSFER_OUTCOME_MASK) >>
-        NekoEETraceMemory::TRANSFER_OUTCOME_SHIFT;
-    return translation >= static_cast<unsigned>(
-        NekoEETraceMemory::TranslationOutcome::AddressErrorLoadOrFetch) ||
-      transfer == static_cast<unsigned>(
-        NekoEETraceMemory::TransferOutcome::PhysicalBusError);
+    return nekoTraceFailureKind(event) == NekoTraceFailureKind::MemoryAccess;
   }
 
   StartupInstructionContext faultInstruction(const NekoTraceEvent &event)
@@ -139,32 +118,12 @@ namespace
 
   bool rejectedInstruction(const NekoTraceEvent &event) noexcept
   {
-    if (event.subsystem == NekoTraceSubsystem::EE)
-    {
-      if (event.type == NekoTraceEventType::FaultContext)
-      {
-        return (event.value3 & NekoEETraceFault::HOST_REJECTION) != 0;
-      }
-      return event.type == NekoTraceEventType::ExceptionEntered &&
-        (event.value0 == static_cast<unsigned>(EEException::ReservedInstruction) ||
-         event.value0 == static_cast<unsigned>(EEException::CoprocessorUnusable));
-    }
-    if (event.subsystem == NekoTraceSubsystem::IOP)
-    {
-      return (event.type == NekoTraceEventType::StateChanged &&
-          event.value2 == static_cast<unsigned>(NekoIOPTraceState::StopReason::UndefinedOperation)) ||
-        (event.type == NekoTraceEventType::ExceptionEntered &&
-          (event.value0 == 10 || event.value0 == 11));
-    }
-    return false;
+    return nekoTraceFailureKind(event) == NekoTraceFailureKind::InstructionRejection;
   }
 
   bool rejectedDMA(const NekoTraceEvent &event) noexcept
   {
-    return event.subsystem == NekoTraceSubsystem::SIF &&
-      event.type == NekoTraceEventType::DMABeat &&
-      ((event.value0 >> NekoSIFDMATrace::OUTCOME_SHIFT) & 255) ==
-        static_cast<unsigned>(NekoSIFDMATrace::Outcome::Rejected);
+    return nekoTraceFailureKind(event) == NekoTraceFailureKind::DMARejection;
   }
 
   template<std::size_t N>

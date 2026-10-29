@@ -145,7 +145,10 @@ class NekoSystem
     void startTrace();
     // Observer receives all events before prefix limiting; stop/reset detach it.
     void startTrace(std::uint64_t eventLimit,
-      std::shared_ptr<NekoTraceObserver> observer = {});
+      std::shared_ptr<NekoTraceObserver> observer = {},
+      NekoTraceStopPolicy stopPolicy = NekoTraceStopPolicy::Continue);
+    // Failure-only observation, without full trace publication or state hashes.
+    void startFailureProbe();
     void stopTrace();
     void clearTrace();
     bool traceEnabled() const;
@@ -277,6 +280,12 @@ class NekoSystem
     SIFInterruptRouter sifInterruptRouterComponent;
     NekoInputState inputState;
     bool collectingTrace = false;
+    bool probingFailures = false;
+    bool observedFailure = false;
+    NekoTraceStopPolicy traceStopPolicy = NekoTraceStopPolicy::Continue;
+    NekoTraceEvent lastEEInstruction;
+    NekoTraceEvent lastIOPInstruction;
+    NekoTraceEvent lastEEFaultContext;
     std::vector<NekoTraceEvent> traceEvents;
     std::shared_ptr<NekoTraceObserver> traceObserver;
     std::uint64_t maximumTraceEvents = 0;
@@ -331,6 +340,11 @@ class NekoSystem
       const CycleObservationSnapshot &beforeCycle,
       const SIFDMAObservations &dma,
       const EESerialCompletion &serial);
+    void publishEECPUTrace(std::uint64_t cycle);
+    void publishComponentTrace(
+      std::uint64_t cycle, const CycleObservationSnapshot &beforeCycle,
+      const SIFDMAObservations &dma);
+    void publishFailureProbe(std::uint64_t cycle, const SIFDMAObservations &dma);
     void publishIOPAndSIFTrace(
       std::uint64_t cycle, const SIFDMAObservations &dma);
     void publishCDVDTrace(

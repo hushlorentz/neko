@@ -434,6 +434,10 @@ struct NekoTraceEvent
   std::uint64_t value3 = 0;
 };
 
+enum class NekoTraceFailureKind { None, MemoryAccess, InstructionRejection, DMARejection };
+NekoTraceFailureKind nekoTraceFailureKind(const NekoTraceEvent &event) noexcept;
+enum class NekoTraceStopPolicy { Continue, FirstFailure };
+
 // Passive diagnostic sink. Must not reenter or mutate the emitting system.
 class NekoTraceObserver
 {

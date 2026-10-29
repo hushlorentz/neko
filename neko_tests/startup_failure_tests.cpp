@@ -75,6 +75,87 @@ TEST_CASE("First startup failure retains the original EE fault rather than handl
   }
 }
 
+TEST_CASE("Failure probes retain architectural EE rejection context before exception entry",
+  "[startup-failure][bios-scout]")
+{
+  NekoSystem system;
+  system.eeBus().write32(0, 0x4c000000);
+  system.eeCore().startExecution(0xa0000000);
+  system.iopCore().startExecution(0xa0000000);
+  system.startFailureProbe();
+  system.runDualCPU(100);
+  const auto failure = firstStartupFailure(system.trace());
+  REQUIRE(failure.found);
+  REQUIRE(failure.kind == StartupFailureKind::InstructionRejection);
+  REQUIRE(failure.instruction.available);
+  REQUIRE(failure.instruction.instruction == 0x4c000000);
+  REQUIRE(failure.instruction.programCounter == 0xa0000000);
+  REQUIRE(failure.exceptionAvailable);
+}
+
+TEST_CASE("Failure probes match full tracing and plain canonical state at complete cycles",
+  "[startup-failure][bios-scout][persistence]")
+{
+  for (const bool iopFailure : {false, true})
+  {
+    CAPTURE(iopFailure);
+    const auto prepare = [&](NekoSystem &system)
+    {
+      if (iopFailure)
+      {
+        REQUIRE(system.iopBus().write32(0, 0x10000001).status == IOPBusStatus::Completed);
+        REQUIRE(system.iopBus().write32(4, 0x44000000).status == IOPBusStatus::Completed);
+      }
+      else
+      {
+        system.eeBus().write32(0, 0x8c020001);
+      }
+      system.eeCore().startExecution(0xa0000000);
+      system.iopCore().startExecution(0xa0000000);
+    };
+    NekoSystem scout;
+    prepare(scout);
+    scout.startFailureProbe();
+    const auto result = scout.runDualCPU(100);
+    REQUIRE_FALSE(result.cycleLimitReached);
+    REQUIRE_FALSE(scout.traceEnabled());
+    const auto failure = firstStartupFailure(scout.trace());
+    REQUIRE(failure.found);
+    REQUIRE(failure.event.subsystem == (iopFailure ? IOP : EE));
+    REQUIRE(failure.event.masterCycle == result.masterCycles);
+    REQUIRE(failure.instruction.available);
+    REQUIRE(failure.exceptionAvailable);
+    if (iopFailure)
+    {
+      REQUIRE(failure.instruction.delaySlot);
+      REQUIRE(failure.instruction.branchAddress == 0xa0000000);
+    }
+    for (const auto &event : scout.trace())
+    {
+      REQUIRE(event.type != NekoTraceEventType::StateSnapshot);
+    }
+    NekoSystem traced;
+    prepare(traced);
+    traced.startTrace(1000, {}, NekoTraceStopPolicy::FirstFailure);
+    REQUIRE(traced.runDualCPU(100).masterCycles == result.masterCycles);
+    const auto tracedFailure = firstStartupFailure(traced.trace());
+    REQUIRE(tracedFailure.event.value0 == failure.event.value0);
+    REQUIRE(tracedFailure.instruction.programCounter == failure.instruction.programCounter);
+    NekoSystem plain;
+    prepare(plain);
+    plain.runDualCPU(result.masterCycles);
+    REQUIRE(scout.saveState() == plain.saveState());
+    REQUIRE(traced.saveState() == plain.saveState());
+    // Diagnostic stop state must not survive checkpoint restoration.
+    NekoSystem restored;
+    restored.loadState(scout.saveState());
+    REQUIRE(restored.runDualCPU(1).masterCycles == 1);
+    scout.stopTrace();
+    REQUIRE(scout.runDualCPU(1).masterCycles == 1);
+    REQUIRE(scout.saveState() == restored.saveState());
+  }
+}
+
 TEST_CASE("Startup failure capture exports decoded CDVD commands and unchanged raw events",
   "[startup-failure][failure-capture][cdvd]")
 {

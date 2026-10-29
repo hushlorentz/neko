@@ -653,7 +653,8 @@ DualCPUExecutionResult NekoSystem::runDualCPU(
   std::uint64_t instructions = 0;
   while (eeCoreComponent.clockActive() &&
          iopCoreComponent.executionState() == IOPExecutionState::Running &&
-         masterCycles < maxMasterCycles)
+         masterCycles < maxMasterCycles &&
+         !(traceStopPolicy == NekoTraceStopPolicy::FirstFailure && observedFailure))
   {
     clockMasterCycle();
     ++masterCycles;
@@ -687,15 +688,27 @@ void NekoSystem::startTrace()
 }
 
 void NekoSystem::startTrace(std::uint64_t eventLimit,
-  std::shared_ptr<NekoTraceObserver> observer)
+  std::shared_ptr<NekoTraceObserver> observer, NekoTraceStopPolicy stopPolicy)
 {
+  stopTrace();
   traceEvents.clear();
   maximumTraceEvents = eventLimit;
   truncatedTrace = false;
   eeCoreComponent.cycleEventCount = 0;
   lastTracedEEStateHash = eeCoreComponent.stateHash();
   traceObserver = std::move(observer);
+  traceStopPolicy = stopPolicy;
   collectingTrace = true;
+}
+
+void NekoSystem::startFailureProbe()
+{
+  stopTrace();
+  traceEvents.clear();
+  maximumTraceEvents = 4096;
+  truncatedTrace = false;
+  probingFailures = true;
+  traceStopPolicy = NekoTraceStopPolicy::FirstFailure;
 }
 
 void NekoSystem::stopTrace()
@@ -704,6 +717,12 @@ void NekoSystem::stopTrace()
   eeCoreComponent.cycleEventCount = 0;
   lastTracedEEStateHash = 0;
   collectingTrace = false;
+  probingFailures = false;
+  observedFailure = false;
+  traceStopPolicy = NekoTraceStopPolicy::Continue;
+  lastEEInstruction = {};
+  lastIOPInstruction = {};
+  lastEEFaultContext = {};
 }
 
 void NekoSystem::clearTrace()
@@ -1102,7 +1121,7 @@ EESIFDMABeatOutcome NekoSystem::clockEESIFChannel(SIFDirection direction,
   };
   const bool enabled = receiver ?
     sif0DMACComponent.transferEnabled() : sif1DMACComponent.transferEnabled();
-  if (!collectingTrace || !enabled)
+  if ((!collectingTrace && !probingFailures) || !enabled)
   {
     return grant();
   }
@@ -1179,7 +1198,8 @@ IOPDMABeatResult NekoSystem::clockIOPSIFChannel(IOPDMAChannel channel,
     return source ? iopSIF0DMAComponent.remainingWords() : iopSIF1DMAComponent.remainingWords();
   };
   const bool active = source ? iopSIF0DMAComponent.active() : iopSIF1DMAComponent.active();
-  if (!collectingTrace || !active || !iopDMAControllerComponent.channelEnabled(channel))
+  if ((!collectingTrace && !probingFailures) || !active ||
+      !iopDMAControllerComponent.channelEnabled(channel))
   {
     return grant();
   }
@@ -1256,6 +1276,10 @@ void NekoSystem::clockMasterCycle()
     sifComponent.enableObservations(&observationScope.order);
     cdvdControllerComponent.enableObservations(&observationScope.order);
   }
+  else if (probingFailures)
+  {
+    iopCoreComponent.enableObservations(&observationScope.order);
+  }
   const bool iopClockPulse =
     masterClock.currentCycle() % PS2Clock::IOP_CLOCK_PERIOD ==
       PS2Clock::IOP_CLOCK_PHASE;
@@ -1291,6 +1315,10 @@ void NekoSystem::clockMasterCycle()
         publishCycleTrace(masterClock.currentCycle(), beforeCycle,
           dmaObservations, serialCompletion);
       }
+      else if (probingFailures)
+      {
+        publishFailureProbe(masterClock.currentCycle(), dmaObservations);
+      }
       eeCoreComponent.cycleEventCount = 0;
       throw IOPDMATransferError(transfer);
     }
@@ -1305,6 +1333,10 @@ void NekoSystem::clockMasterCycle()
     publishCycleTrace(
       masterClock.currentCycle(),
       beforeCycle, dmaObservations, serialCompletion);
+  }
+  else if (probingFailures)
+  {
+    publishFailureProbe(masterClock.currentCycle(), dmaObservations);
   }
   eeCoreComponent.cycleEventCount = 0;
 }
@@ -1412,6 +1444,12 @@ void NekoSystem::publishCycleTrace(
       NekoTraceEventType::SerialTransmitCompleted,
       serial.byte, EEMemoryMap::SIO_TXFIFO);
   }
+  publishEECPUTrace(cycle);
+  publishComponentTrace(cycle, beforeCycle, dma);
+}
+
+void NekoSystem::publishEECPUTrace(std::uint64_t cycle)
+{
   for (std::size_t index = 0;
        index < eeCoreComponent.cycleEventCount;
        ++index)
@@ -1625,6 +1663,12 @@ void NekoSystem::publishCycleTrace(
       value2,
       value3);
   }
+}
+
+void NekoSystem::publishComponentTrace(
+  std::uint64_t cycle, const CycleObservationSnapshot &beforeCycle,
+  const SIFDMAObservations &dma)
+{
   const std::uint64_t currentEEStateHash =
     eeCoreComponent.stateHash();
   if (currentEEStateHash != lastTracedEEStateHash)
@@ -1762,6 +1806,42 @@ void NekoSystem::appendTrace(
   const NekoTraceEvent event = {
     cycle, subsystem, type, value0, value1, value2, value3
   };
+  const bool failed = nekoTraceFailureKind(event) != NekoTraceFailureKind::None;
+  if (probingFailures)
+  {
+    if (subsystem == NekoTraceSubsystem::EE &&
+        type == NekoTraceEventType::FaultContext)
+    {
+      lastEEFaultContext = event;
+    }
+    if (type == NekoTraceEventType::InstructionIssued)
+    {
+      (subsystem == NekoTraceSubsystem::EE ? lastEEInstruction : lastIOPInstruction) = event;
+      return;
+    }
+    if (!observedFailure && !failed)
+    {
+      return;
+    }
+    if (!observedFailure)
+    {
+      const auto &instruction =
+        subsystem == NekoTraceSubsystem::EE ? lastEEInstruction : lastIOPInstruction;
+      if (subsystem != NekoTraceSubsystem::SIF &&
+          instruction.type == NekoTraceEventType::InstructionIssued)
+      {
+        traceEvents.push_back(instruction);
+      }
+      if (subsystem == NekoTraceSubsystem::EE &&
+          type == NekoTraceEventType::ExceptionEntered &&
+          lastEEFaultContext.type == NekoTraceEventType::FaultContext &&
+          lastEEFaultContext.masterCycle == cycle)
+      {
+        traceEvents.push_back(lastEEFaultContext);
+      }
+    }
+  }
+  observedFailure = observedFailure || failed;
   if (traceObserver)
   {
     traceObserver->observe(event);

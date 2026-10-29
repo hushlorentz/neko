@@ -117,6 +117,13 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(self.report("summary", compressed),
                          self.report("summary", self.path))
 
+    def test_failure_probe_is_not_reported_as_a_complete_instruction_trace(self):
+        rows = records()
+        rows[0]["observation"] = "failure_probe"
+        self.write(self.path, rows)
+        self.assertEqual(self.report("summary", self.path)["coverage"],
+                         "failure_probe")
+
     def test_truncated_gzip_is_an_error_not_partial_evidence(self):
         compressed = self.path.with_suffix(".jsonl.gz")
         compressed.write_bytes(gzip.compress(self.path.read_bytes())[:-8])

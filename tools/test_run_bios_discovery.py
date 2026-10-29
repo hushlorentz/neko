@@ -19,6 +19,158 @@ REAL_RUN = subprocess.run
 REAL_POPEN = subprocess.Popen
 
 
+class StagedDiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.output = self.root / "staged"
+        self.bios = self.root / "authored.bin"
+        self.bios.write_bytes(b"authored fixture identity")
+        self.binary = self.root / "authored"
+        self.binary.write_bytes(b"authored executable identity")
+        self.commands = []
+        self.failure_cycle = 25
+        self.replay_mismatch = False
+        self.capture = discovery.capture
+
+    def fake_capture(self, directory, manifest, name, command, **kwargs):
+        if command[0] != str(self.binary):
+            return self.capture(directory, manifest, name, command, **kwargs)
+        self.commands.append(command)
+        ceiling = int(command[command.index("--cycles") + 1])
+        start = 0
+        if "--resume-checkpoint" in command:
+            path = Path(command[command.index("--resume-checkpoint") + 1])
+            start = json.loads(path.read_text())["master_cycle"]
+        failed = (self.failure_cycle is not None and
+                  start < self.failure_cycle <= ceiling)
+        cycle = self.failure_cycle if failed else ceiling
+        traced = "--trace-events" in command or "--scout" in command
+        rows = records(traced)
+        rows[0].update(max_master_cycles=ceiling)
+        if start:
+            rows[0].update(start="checkpoint", start_master_cycle=start)
+        if "--scout" in command:
+            rows[0]["observation"] = "failure_probe"
+        if "--trace-from-cycle" in command:
+            rows[0]["trace_start_cycle"] = int(command[command.index("--trace-from-cycle") + 1])
+        rows[1]["run"].update(master_cycles=cycle - start,
+                              cycle_limit_reached=cycle == ceiling,
+                              ee_cycles=cycle - start)
+        rows[1]["snapshot"]["master_cycle"] = cycle
+        if traced:
+            if failed:
+                for row in rows:
+                    if row["type"] == "trace_event":
+                        row["master_cycle"] = cycle
+                rows[-1]["failure"]["master_cycle"] = cycle
+                if self.replay_mismatch and "--trace-events" in command:
+                    rows[-1]["failure"]["access"]["virtual_address"] += 4
+            else:
+                rows = rows[:2] + [
+                    dict(type="startup_trace_summary", event_limit=16,
+                         captured_events=0, truncated=False),
+                    dict(type="startup_first_failure", trace_truncated=False,
+                         execution_boundary="complete_cycle", failure=None),
+                ]
+        if "--save-checkpoint" in command:
+            path = Path(command[command.index("--save-checkpoint") + 1])
+            path.write_text(json.dumps(rows[1]["snapshot"], sort_keys=True))
+        extension = kwargs.get("extension", "stdout")
+        path = directory / f"{name}.{extension}"
+        raw = "".join(json.dumps(row) + "\n" for row in rows).encode()
+        if kwargs.get("compressed"):
+            path = Path(str(path) + ".gz")
+            raw = gzip.compress(raw)
+        path.write_bytes(raw)
+        (directory / f"{name}.stderr").touch()
+        status = 1 if failed and "--stop-on-first-failure" in command or (
+            failed and "--scout" in command and cycle < ceiling) else 0
+        manifest["commands"].append(dict(name=name, command=command,
+                                         returncode=status, elapsed_seconds=0.1))
+        discovery.write_json(directory / "manifest.json", manifest)
+        return status
+
+    def invoke(self, expected=0, *, ceiling=30):
+        with patch.object(discovery, "build_neko", return_value=self.binary), \
+             patch.object(discovery, "capture", side_effect=self.fake_capture), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            status = discovery.main([
+                str(self.output), "--bios", str(self.bios),
+                "--mode", "scout", "--cycles", str(ceiling),
+                "--checkpoint-every", "10", "--replay-window", "3"])
+        self.assertEqual(status, expected)
+        return json.loads((self.output / "manifest.json").read_text())
+
+    def test_scout_replays_only_the_nearest_preceding_checkpoint_and_verifies(self):
+        manifest = self.invoke()
+        self.assertEqual(manifest["status"], "equal")
+        self.assertEqual(len(self.commands), 5)  # three scout chunks, replay, plain
+        replay, plain = self.commands[-2:]
+        self.assertIn("--stop-on-first-failure", replay)
+        self.assertNotIn("--trace-events", plain)
+        self.assertEqual(replay[replay.index("--cycles") + 1], "25")
+        self.assertEqual(replay[replay.index("--trace-from-cycle") + 1], "22")
+        checkpoint = Path(replay[replay.index("--resume-checkpoint") + 1])
+        self.assertEqual(json.loads(checkpoint.read_text())["master_cycle"], 20)
+        self.assertTrue(manifest["failure_reproduced"])
+        self.assertTrue(manifest["final_states"]["plain"]["equal"])
+        self.assertFalse(manifest["checkpoint_receipts"][-1]["validated"])
+        self.assertEqual(manifest["checkpoint_receipts"][-1]["binary"],
+                         discovery.file_identity(self.binary))
+        self.assertFalse((self.output / "scout-10.state").exists())
+
+    def test_scout_at_ceiling_does_not_invent_a_failure_or_run_replays(self):
+        self.failure_cycle = None
+        manifest = self.invoke()
+        self.assertEqual(manifest["status"], "ceiling_reached")
+        self.assertEqual(len(self.commands), 3)
+        self.assertNotIn("failure_reproduced", manifest)
+
+    def test_scout_replay_disagreement_is_preserved_as_a_mismatch(self):
+        self.replay_mismatch = True
+        manifest = self.invoke(expected=1)
+        self.assertEqual(manifest["status"], "mismatch")
+        self.assertFalse(manifest["failure_reproduced"])
+        self.assertTrue((self.output / "scout-10.state").is_file())
+
+    def test_scout_failure_on_checkpoint_boundary_replays_from_before_the_fault(self):
+        self.failure_cycle = 20
+        manifest = self.invoke()
+        self.assertTrue(manifest["failure_reproduced"])
+        replay = self.commands[-2]
+        checkpoint = Path(replay[replay.index("--resume-checkpoint") + 1])
+        self.assertEqual(json.loads(checkpoint.read_text())["master_cycle"], 10)
+
+    def test_first_chunk_failure_replays_cold_without_a_postfailure_checkpoint(self):
+        self.failure_cycle = 5
+        manifest = self.invoke()
+        self.assertTrue(manifest["failure_reproduced"])
+        self.assertNotIn("--resume-checkpoint", self.commands[-2])
+
+    def test_zero_budget_only_records_a_cold_reset_snapshot(self):
+        self.failure_cycle = None
+        manifest = self.invoke(ceiling=0)
+        self.assertEqual(manifest["status"], "ceiling_reached")
+        self.assertEqual(len(self.commands), 1)
+
+    def test_scout_checkpoint_identity_guard_checks_executable_bios_and_state(self):
+        for field in ("binary", "bios", "state"):
+            with self.subTest(field=field):
+                path = self.root / f"{field}.identity"
+                path.write_bytes(b"before")
+                receipt = dict(binary=discovery.file_identity(self.binary),
+                               bios=discovery.file_identity(self.bios),
+                               state=discovery.file_identity(path), path=str(path))
+                changed = dict(binary=self.binary, bios=self.bios, state=path)[field]
+                original = changed.read_bytes()
+                changed.write_bytes(original + b"changed")
+                with self.assertRaisesRegex(ValueError, "identity changed"):
+                    discovery.verify_scout_checkpoint(receipt, self.binary, self.bios)
+                changed.write_bytes(original)
+
+
 class DiscoveryTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

@@ -65,6 +65,29 @@ namespace
   }
 }
 
+void NekoSystem::publishFailureProbe(
+  std::uint64_t cycle, const SIFDMAObservations &dma)
+{
+  publishEECPUTrace(cycle);
+  std::size_t cpu = 0;
+  std::size_t transfer = 0;
+  while (cpu < iopCoreComponent.stepEventCount || transfer < dma.count)
+  {
+    if (cpu < iopCoreComponent.stepEventCount &&
+        (transfer == dma.count ||
+         iopCoreComponent.stepEvents[cpu].sequence < dma.entries[transfer].sequence))
+    {
+      publishIOPCPUTrace(cycle, iopCoreComponent.stepEvents[cpu++]);
+    }
+    else
+    {
+      const auto &event = dma.entries[transfer++].event;
+      appendTrace(cycle, event.subsystem, event.type,
+        event.value0, event.value1, event.value2, event.value3);
+    }
+  }
+}
+
 void NekoSystem::publishIOPAndSIFTrace(
   std::uint64_t cycle, const SIFDMAObservations &dma)
 {
