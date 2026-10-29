@@ -1549,6 +1549,7 @@ IOPMemoryWriteResult IOPCore::writeMaskedStore(
     IOPCacheAccess::DataStore, aligned, sizeof(IOPWord));
   if (plan.disposition == IOPCacheAccessDisposition::Isolated ||
       plan.disposition == IOPCacheAccessDisposition::InvalidateTags ||
+      plan.disposition == IOPCacheAccessDisposition::InvalidateBothTags ||
       plan.disposition == IOPCacheAccessDisposition::Unsupported)
   {
     result.outcome = commitIsolatedStore(
@@ -1616,12 +1617,22 @@ IOPAccessOutcome IOPCore::commitIsolatedStore(
     case IOPCacheAccessDisposition::Unsupported:
       return IOPAccessOutcome::Unmapped;
     case IOPCacheAccessDisposition::InvalidateTags:
-      if (byteEnable != 0xf || value != 0)
+    case IOPCacheAccessDisposition::InvalidateBothTags:
+      if (byteEnable == 0 || (byteEnable & 0xf0) != 0 ||
+          (byteEnable == 0xf && value != 0))
       {
         return IOPAccessOutcome::Unmapped;
       }
       synchronizeCacheConfiguration(attachedBus());
-      caches.invalidateIndexedGroup(plan.bank, physicalWord);
+      if (plan.disposition == IOPCacheAccessDisposition::InvalidateBothTags)
+      {
+        caches.invalidateIndexedGroup(IOPCacheBank::Instruction, physicalWord);
+        caches.invalidateIndexedGroup(IOPCacheBank::Data, physicalWord);
+      }
+      else
+      {
+        caches.invalidateIndexedGroup(plan.bank, physicalWord);
+      }
       return IOPAccessOutcome::Completed;
     case IOPCacheAccessDisposition::Isolated:
       synchronizeCacheConfiguration(attachedBus());
@@ -1761,6 +1772,7 @@ IOPMemoryWriteResult IOPCore::writeMemory(
   const IOPAddress physicalWord = classification.physicalAddress & ~IOPAddress(3);
   if (plan.disposition == IOPCacheAccessDisposition::Isolated ||
       plan.disposition == IOPCacheAccessDisposition::InvalidateTags ||
+      plan.disposition == IOPCacheAccessDisposition::InvalidateBothTags ||
       plan.disposition == IOPCacheAccessDisposition::Unsupported)
   {
     result.outcome = commitIsolatedStore(

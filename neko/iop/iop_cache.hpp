@@ -34,6 +34,7 @@ enum class IOPCacheAccessDisposition : std::uint8_t
   Cache,
   Isolated,
   InvalidateTags,
+  InvalidateBothTags,
   Unsupported
 };
 
@@ -41,6 +42,7 @@ struct IOPCacheAccessPlan
 {
   IOPCacheAccessDisposition disposition =
     IOPCacheAccessDisposition::Bypass;
+  // Used only by single-bank operations.
   IOPCacheBank bank = IOPCacheBank::Data;
 };
 
@@ -114,7 +116,7 @@ class IOPCache final
       IOPAddress physicalAddress,
       IOPWord value,
       std::uint8_t byteEnable);
-    // Provisional zero-tag maintenance groups are 16 bytes in either bank.
+    // Provisional tag maintenance groups are 16 bytes in either bank.
     void invalidateIndexedGroup(
       IOPCacheBank bank,
       IOPAddress physicalAddress);

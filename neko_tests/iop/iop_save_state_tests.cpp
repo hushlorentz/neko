@@ -898,7 +898,7 @@ TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally"
   "[iop][cache][tag-control][save-state][trace]")
 {
   namespace Memory = NekoIOPTraceMemory;
-  for (const IOPWord profile : {0xc04u, 0xc4u})
+  for (const IOPWord profile : {0xc04u, 0xc4u, 0xcc4u})
   {
     CAPTURE(profile);
     NekoSystem original;
@@ -925,7 +925,7 @@ TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally"
       loadInstruction(&original, address, 0x24080002);
     }
     const auto cacheBefore = original.iopCore().cache();
-    const unsigned groups = profile == 0xc04 ? 256 : 64;
+    const unsigned groups = profile == 0xc4 ? 64 : 256;
     std::vector<IOPWord> program = {
       0x40066000, 0, 0x3c01fffe, 0x8c270130, 0x3c048000,
       0x24030000 | profile, 0xac230130, 0x3c020001, 0x40826000
@@ -934,7 +934,8 @@ TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally"
     {
       program.push_back(0xac800000 | (group * 16));
     }
-    program.insert(program.end(), {0x40866000, 0xac270130, 0});
+    program.insert(program.end(), {
+      0x3c05bf80, 0x24090003, 0xa0a92070, 0, 0x40866000, 0xac270130, 0});
     for (std::size_t index = 0; index < program.size(); ++index)
     {
       loadInstruction(&original, programBase + static_cast<IOPAddress>(index * 4),
@@ -962,11 +963,24 @@ TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally"
     REQUIRE(original.iopCore().status() == priorStatus);
     REQUIRE(original.iopBus().cacheControl() == priorControl);
     std::size_t stores = 0;
+    std::size_t postStores = 0;
     for (const auto &event : original.trace())
     {
       if (event.subsystem != NekoTraceSubsystem::IOP ||
-          event.type != NekoTraceEventType::MemoryAccess ||
-          event.value0 < 0x80000000 || event.value0 >= 0x80001000)
+          event.type != NekoTraceEventType::MemoryAccess)
+      {
+        continue;
+      }
+      if (event.value0 == 0xbf802070)
+      {
+        REQUIRE(event.value1 == 3);
+        REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+          0x1f802070, 1, Memory::AccessKind::DataStore, Memory::Outcome::Completed,
+          Memory::CacheRoute::Uncached, true, 1}));
+        ++postStores;
+        continue;
+      }
+      if (event.value0 < 0x80000000 || event.value0 >= 0x80001000)
       {
         continue;
       }
@@ -980,14 +994,15 @@ TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally"
       ++stores;
     }
     REQUIRE(stores == groups / 2);
+    REQUIRE(postStores == 1);
     for (std::size_t line = 0; line < IOPCache::INSTRUCTION_LINE_COUNT; ++line)
     {
       const auto &instruction = restored.iopCore().cache().instructionLine(line);
       const auto &data = restored.iopCore().cache().dataLine(line);
-      REQUIRE(instruction.valid == (profile != 0xc04));
+      REQUIRE(instruction.valid == (profile == 0xc4));
       REQUIRE(instruction.physicalTag == cacheBefore.instructionLine(line).physicalTag);
       REQUIRE(instruction.words == cacheBefore.instructionLine(line).words);
-      REQUIRE(data.valid == (profile != 0xc4));
+      REQUIRE(data.valid == (profile == 0xc04));
       REQUIRE(data.physicalTag == cacheBefore.dataLine(line).physicalTag);
       REQUIRE(data.words == cacheBefore.dataLine(line).words);
     }
@@ -997,9 +1012,9 @@ TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally"
     }
     restored.iopCore().startExecution(0x80004000);
     restored.iopCore().stepInstruction();
-    REQUIRE(restored.iopCore().generalRegister(8) == (profile == 0xc04 ? 2 : 1));
+    REQUIRE(restored.iopCore().generalRegister(8) == (profile == 0xc4 ? 1 : 2));
     REQUIRE(restored.iopCore().readData32(0x4000).value ==
-      (profile == 0xc4 ? 0x24080002u : 0x24080001u));
+      (profile == 0xc04 ? 0x24080001u : 0x24080002u));
     restored.reset();
     NekoSystem fresh;
     REQUIRE(restored.saveState() == fresh.saveState());

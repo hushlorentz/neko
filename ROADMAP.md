@@ -2339,12 +2339,17 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       access shapes; distinguish PS2 evidence from provisional policy.
 - [x] Implement the selected instruction/data control family through existing
       owners, with red/green code-replacement and indexed-invalidation coverage.
-- [ ] Validate reset, restore, unaffected cache paths and guest flush sequences;
+- [x] Resolve the early-reset combined BCC `0x0cc4` maintenance sequence; select
+      its bank effects and partial-store admission before implementing cold-start
+      compatibility through the existing cache owners.
+- [x] Validate reset, restore, unaffected cache paths and guest flush sequences;
       independently review, run required full gates, and verify progress with
       separately authorized BIOS discovery.
 
 ### Real BIOS Handshake and Boundary Conformance
 
+- [ ] Resolve the observed EE halfword-read dependency at `0x1000f480`
+      through the existing MCH owner before continuing handshake observation.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.

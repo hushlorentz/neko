@@ -21,6 +21,7 @@ namespace
   constexpr IOPWord TAG_MODE = IOPWord(1) << 2;
   constexpr IOPWord INSTRUCTION_TAG_FLUSH = 0xc04;
   constexpr IOPWord DATA_TAG_FLUSH = 0xc4;
+  constexpr IOPWord COMBINED_TAG_FLUSH = 0xcc4;
 
   void validateStore(IOPAddress physicalAddress, std::uint8_t byteEnable)
   {
@@ -305,6 +306,8 @@ IOPCacheAccessPlan IOPCache::planAccess(
             IOPCacheBank::Instruction};
         case DATA_TAG_FLUSH:
           return {IOPCacheAccessDisposition::InvalidateTags, IOPCacheBank::Data};
+        case COMBINED_TAG_FLUSH:
+          return {IOPCacheAccessDisposition::InvalidateBothTags, bank};
         default:
           return {IOPCacheAccessDisposition::Unsupported, bank};
       }

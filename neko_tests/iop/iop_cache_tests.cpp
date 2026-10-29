@@ -141,15 +141,15 @@ namespace
   void requireInvalidatedGroup(
     const IOPCache &cache,
     const IOPCache &before,
-    IOPCacheBank bank,
+    IOPWord profile,
     std::size_t groupOffset)
   {
     for (std::size_t index = 0; index < IOPCache::INSTRUCTION_LINE_COUNT; ++index)
     {
       const auto &line = cache.instructionLine(index);
       const auto &old = before.instructionLine(index);
-      REQUIRE(line.valid == (bank == IOPCacheBank::Instruction &&
-        index == groupOffset / 16 ? false : old.valid));
+      REQUIRE(line.valid == ((profile == 0xc04 || profile == 0xcc4) &&
+        index == (groupOffset & 0xfff) / 16 ? false : old.valid));
       REQUIRE(line.physicalTag == old.physicalTag);
       REQUIRE(line.words == old.words);
     }
@@ -157,8 +157,9 @@ namespace
     {
       const auto &line = cache.dataLine(index);
       const auto &old = before.dataLine(index);
-      REQUIRE(line.valid == (bank == IOPCacheBank::Data &&
-        index >= groupOffset / 4 && index < groupOffset / 4 + 4
+      REQUIRE(line.valid == ((profile == 0xc4 || profile == 0xcc4) &&
+        index >= (groupOffset & 0x3ff) / 4 &&
+        index < (groupOffset & 0x3ff) / 4 + 4
           ? false : old.valid));
       REQUIRE(line.physicalTag == old.physicalTag);
       REQUIRE(line.words == old.words);
@@ -1964,6 +1965,12 @@ TEST_CASE("IOP tag planning gates exact profiles on isolation without affecting 
                 REQUIRE(plan.bank == (bcc == 0xc04
                   ? IOPCacheBank::Instruction : IOPCacheBank::Data));
               }
+              else if (!swapped && access == IOPCacheAccess::DataStore &&
+                  bcc == 0xcc4)
+              {
+                REQUIRE(plan.disposition ==
+                  IOPCacheAccessDisposition::InvalidateBothTags);
+              }
               else
               {
                 REQUIRE(plan.disposition == IOPCacheAccessDisposition::Unsupported);
@@ -1979,13 +1986,15 @@ TEST_CASE("IOP tag planning gates exact profiles on isolation without affecting 
 TEST_CASE("IOP zero-tag groups use every word position and index without tag matching",
   "[iop][cache][tag-control]")
 {
-  for (const auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
+  for (const IOPWord profile : {0xc04u, 0xc4u, 0xcc4u})
   {
-    const IOPAddress capacity = bank == IOPCacheBank::Instruction ? 4096 : 1024;
+    CAPTURE(profile);
+    const IOPAddress capacity = profile == 0xc4 ? 1024 : 4096;
     for (const IOPAddress base : {0u, 0x80000000u, 0xa0200000u, 0x1f800000u,
          0x9fc00000u, 0x00800000u, 0xfffff000u})
     {
-      for (const IOPAddress group : {0u, 0x100u, capacity - 16})
+      for (const IOPAddress group : {0u, 0x100u, capacity - 16,
+           capacity, capacity + 0x110})
       {
         for (IOPAddress word = 0; word < 16; word += 4)
         {
@@ -2000,8 +2009,7 @@ TEST_CASE("IOP zero-tag groups use every word position and index without tag mat
               IOPBusStatus::Completed);
             REQUIRE(bus.write32(IOPBus::SCRATCHPAD_BASE + (group + word) % 1024,
               0x89abcdef).status == IOPBusStatus::Completed);
-            REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL,
-              bank == IOPCacheBank::Instruction ? 0xc04 : 0xc4).status ==
+            REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, profile).status ==
               IOPBusStatus::Completed);
             IOPCacheTestAccess::setStatus(&core,
               IOPCOP0Status::CACHE_ISOLATED | IOPCOP0Status::CACHE_PROBE_RESULT);
@@ -2011,7 +2019,7 @@ TEST_CASE("IOP zero-tag groups use every word position and index without tag mat
               : core.writeData32(address, 0);
             REQUIRE(write.outcome == IOPAccessOutcome::Completed);
             REQUIRE(write.exception == IOPException::None);
-            requireInvalidatedGroup(core.cache(), before, bank, group);
+            requireInvalidatedGroup(core.cache(), before, profile, group);
             REQUIRE(core.status() ==
               (IOPCOP0Status::CACHE_ISOLATED | IOPCOP0Status::CACHE_PROBE_RESULT));
             REQUIRE(bus.read32(group + word).value == 0x12345678);
@@ -2028,12 +2036,14 @@ TEST_CASE("IOP unsupported tag accesses preserve caches CM devices and pending R
   "[iop][cache][tag-control]")
 {
   for (const IOPWord bcc : {4u, 0xc04u, 0xc4u, 0xcc4u, 0xc05u, 0xc06u,
-       0x80000c04u, 0xffffffffu})
+       0xcc5u, 0xcc6u, 0x80000c04u, 0x80000cc4u, 0xffffffffu})
   {
     for (const bool swapped : {false, true})
     {
       CAPTURE(bcc);
       CAPTURE(swapped);
+      const bool supported = !swapped &&
+        (bcc == 0xc04 || bcc == 0xc4 || bcc == 0xcc4);
       IOPBus bus;
       IOPCore core;
       IOPInterruptController interrupts;
@@ -2070,6 +2080,10 @@ TEST_CASE("IOP unsupported tag accesses preserve caches CM devices and pending R
              IOPStoreOperation::Halfword, IOPStoreOperation::Word,
              IOPStoreOperation::MaskedWord})
         {
+          if (supported && operation != IOPStoreOperation::Word)
+          {
+            continue;
+          }
           const auto write = IOPCacheTestAccess::writeStore(&core,
             {operation, address, operation == IOPStoreOperation::Word ? 1u : 0u, 3});
           REQUIRE(write.outcome == IOPAccessOutcome::Unmapped);
@@ -2078,12 +2092,22 @@ TEST_CASE("IOP unsupported tag accesses preserve caches CM devices and pending R
       }
       for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
       {
+        if (supported && mask != 0xf)
+        {
+          continue;
+        }
         const auto write = IOPCacheTestAccess::writeStore(&core,
           {IOPStoreOperation::MaskedWord, 0x103, mask == 0xf ? 1u : 0u, mask});
         REQUIRE(write.outcome == IOPAccessOutcome::Unmapped);
         REQUIRE(write.exception == IOPException::None);
       }
-      if (swapped || (bcc != 0xc04 && bcc != 0xc4))
+      for (const std::uint8_t mask : {0u, 0x10u, 0x1fu, 0xffu})
+      {
+        REQUIRE(IOPCacheTestAccess::writeStore(&core,
+          {IOPStoreOperation::MaskedWord, 0x103, 0, mask}).outcome ==
+          IOPAccessOutcome::Unmapped);
+      }
+      if (!supported)
       {
         REQUIRE(core.writeData32(0x100, 0).outcome == IOPAccessOutcome::Unmapped);
         REQUIRE(IOPCacheTestAccess::writeStore(&core,
@@ -2107,7 +2131,7 @@ TEST_CASE("IOP unsupported tag accesses preserve caches CM devices and pending R
 TEST_CASE("IOP accepted tag stores do not write control words or consume MMIO",
   "[iop][cache][tag-control]")
 {
-  for (const IOPWord profile : {0xc04u, 0xc4u})
+  for (const IOPWord profile : {0xc04u, 0xc4u, 0xcc4u})
   {
     IOPBus bus;
     IOPCore core;
@@ -2123,8 +2147,7 @@ TEST_CASE("IOP accepted tag stores do not write control words or consume MMIO",
     {
       const auto before = core.cache();
       REQUIRE(core.writeData32(address, 0).outcome == IOPAccessOutcome::Completed);
-      requireInvalidatedGroup(core.cache(), before, profile == 0xc04
-        ? IOPCacheBank::Instruction : IOPCacheBank::Data,
+      requireInvalidatedGroup(core.cache(), before, profile,
         address == IOPBus::INTC_CTRL ? 0x70 : 0x130);
       REQUIRE(bus.cacheControl() == profile);
       REQUIRE(interrupts.control() == 1);
@@ -2132,10 +2155,74 @@ TEST_CASE("IOP accepted tag stores do not write control words or consume MMIO",
   }
 }
 
-TEST_CASE("IOP guest merge stores admit only complete zero-tag transfers",
+TEST_CASE("IOP tag partial stores invalidate groups without writing payload or devices",
   "[iop][cache][tag-control]")
 {
-  for (const IOPWord profile : {0xc04u, 0xc4u})
+  for (const IOPWord profile : {0xc04u, 0xc4u, 0xcc4u})
+  {
+    for (const IOPAddress address : {0x110u, 0xa0000110u, 0xbf802070u,
+         IOPBus::CACHE_INIT_CONTROL, IOPBus::INTC_CTRL,
+         0x80000ff0u, 0x80001010u})
+    {
+      for (const IOPWord value : {0u, 0x89abcdefu})
+      {
+        std::vector<IOPStoreRequest> requests;
+        for (IOPAddress offset = 0; offset < 4; ++offset)
+        {
+          requests.push_back({IOPStoreOperation::Byte, address + offset, value, 0});
+        }
+        for (IOPAddress offset = 0; offset < 4; offset += 2)
+        {
+          requests.push_back({IOPStoreOperation::Halfword, address + offset, value, 0});
+        }
+        for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+        {
+          requests.push_back({IOPStoreOperation::MaskedWord, address + 3, value, mask});
+        }
+        for (const auto &request : requests)
+        {
+          CAPTURE(profile);
+          CAPTURE(request.virtualAddress);
+          CAPTURE(request.byteEnable);
+          CAPTURE(value);
+          IOPBus bus;
+          IOPCore core;
+          IOPInterruptController interrupts;
+          bus.attachInterruptController(&interrupts);
+          interrupts.writeControl(1);
+          core.attachBus(&bus);
+          IOPCacheTestAccess::seed(&core);
+          const auto before = core.cache();
+          for (const IOPAddress physical : {0x110u, 0xff0u, 0x1010u})
+          {
+            REQUIRE(bus.write32(physical, 0x12345678).status == IOPBusStatus::Completed);
+          }
+          REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, profile).status ==
+            IOPBusStatus::Completed);
+          const auto status =
+            IOPCOP0Status::CACHE_ISOLATED | IOPCOP0Status::CACHE_PROBE_RESULT;
+          IOPCacheTestAccess::setStatus(&core, status);
+          const auto write = IOPCacheTestAccess::writeStore(&core, request);
+          REQUIRE(write.outcome == IOPAccessOutcome::Completed);
+          REQUIRE(write.exception == IOPException::None);
+          requireInvalidatedGroup(core.cache(), before, profile, address & ~IOPAddress(15));
+          REQUIRE(core.status() == status);
+          REQUIRE(bus.cacheControl() == profile);
+          REQUIRE(interrupts.control() == 1);
+          for (const IOPAddress physical : {0x110u, 0xff0u, 0x1010u})
+          {
+            REQUIRE(bus.read32(physical).value == 0x12345678);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP guest merge stores invalidate tag groups for zero words or partial transfers",
+  "[iop][cache][tag-control]")
+{
+  for (const IOPWord profile : {0xc04u, 0xc4u, 0xcc4u})
   {
     for (const bool left : {false, true})
     {
@@ -2145,7 +2232,7 @@ TEST_CASE("IOP guest merge stores admit only complete zero-tag transfers",
         IOPCore core;
         core.attachBus(&bus);
         const IOPWord offset = complete ? (left ? 3 : 0) : 1;
-        REQUIRE(bus.write32(0x200, (left ? 0xa8200000 : 0xb8200000) | offset).status ==
+        REQUIRE(bus.write32(0x200, (left ? 0xa8220000 : 0xb8220000) | offset).status ==
           IOPBusStatus::Completed);
         REQUIRE(bus.write32(0x100, 0x12345678).status == IOPBusStatus::Completed);
         REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, profile).status ==
@@ -2153,23 +2240,14 @@ TEST_CASE("IOP guest merge stores admit only complete zero-tag transfers",
         core.startExecution(0xa0000200);
         IOPCacheTestAccess::seed(&core);
         IOPCacheTestAccess::setGeneralRegister(&core, 1, 0x80000100);
+        IOPCacheTestAccess::setGeneralRegister(&core, 2, complete ? 0 : 0x89abcdef);
         IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CACHE_ISOLATED);
         const auto before = core.cache();
         core.stepInstruction();
         REQUIRE(core.exception().kind == IOPException::None);
-        REQUIRE(core.retiredInstructions() == (complete ? 1 : 0));
-        if (complete)
-        {
-          REQUIRE(core.stopReason() == IOPStopReason::None);
-          requireInvalidatedGroup(core.cache(), before, profile == 0xc04
-            ? IOPCacheBank::Instruction : IOPCacheBank::Data, 0x100);
-        }
-        else
-        {
-          REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
-          REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
-          requireUnchangedCache(core.cache(), before);
-        }
+        REQUIRE(core.retiredInstructions() == 1);
+        REQUIRE(core.stopReason() == IOPStopReason::None);
+        requireInvalidatedGroup(core.cache(), before, profile, 0x100);
         REQUIRE(bus.read32(0x100).value == 0x12345678);
       }
     }
