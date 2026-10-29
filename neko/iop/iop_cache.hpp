@@ -25,13 +25,16 @@ struct IOPCacheControl
 {
   bool isolated = false;
   bool swapped = false;
+  IOPWord busControl = 0;
 };
 
 enum class IOPCacheAccessDisposition : std::uint8_t
 {
   Bypass,
   Cache,
-  Isolated
+  Isolated,
+  InvalidateTags,
+  Unsupported
 };
 
 struct IOPCacheAccessPlan
@@ -81,6 +84,7 @@ class IOPCache final
     static constexpr std::size_t DATA_SIZE = 1024;
     static constexpr std::size_t INSTRUCTION_LINE_WORDS = 4;
     static constexpr std::size_t DATA_LINE_WORDS = 1;
+    static constexpr std::size_t MAINTENANCE_GROUP_SIZE = 16;
     static constexpr std::size_t INSTRUCTION_LINE_COUNT =
       INSTRUCTION_SIZE / (INSTRUCTION_LINE_WORDS * sizeof(IOPWord));
     static constexpr std::size_t DATA_LINE_COUNT =
@@ -110,6 +114,10 @@ class IOPCache final
       IOPAddress physicalAddress,
       IOPWord value,
       std::uint8_t byteEnable);
+    // Provisional zero-tag maintenance groups are 16 bytes in either bank.
+    void invalidateIndexedGroup(
+      IOPCacheBank bank,
+      IOPAddress physicalAddress);
 
     static IOPCacheLocation location(
       IOPCacheBank bank,

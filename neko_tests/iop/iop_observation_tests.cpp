@@ -503,7 +503,7 @@ TEST_CASE("IOP exception observations distinguish reserved deferred and undefine
   {
     Fixture fixture;
     install(fixture.bus, 0, 0x18);
-    install(fixture.bus, 4, 0x18);
+    install(fixture.bus, 4, 0x11);
     fixture.core.stepInstruction();
     fixture.core.stepInstruction();
     requireKinds(fixture.core,

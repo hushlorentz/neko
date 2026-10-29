@@ -381,6 +381,11 @@ class IOPCore final
       const IOPAddressClassification &classification,
       std::size_t width) const;
     void synchronizeCacheConfiguration(IOPBus &physicalBus);
+    IOPAccessOutcome commitIsolatedStore(
+      const IOPCacheAccessPlan &plan,
+      IOPAddress physicalWord,
+      IOPWord value,
+      std::uint8_t byteEnable);
     IOPMemoryReadResult readMemory(
       IOPAddress virtualAddress,
       std::size_t width,

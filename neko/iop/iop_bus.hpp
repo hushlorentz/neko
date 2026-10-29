@@ -71,7 +71,7 @@ class IOPBus final
     // Provisional stateless outputs; POST2's hardware identity is uncertain.
     static constexpr IOPAddress POST2 = 0x1f802070;
     static constexpr IOPAddress POST3 = 0x1fa00000;
-    // Provisional retained initialization word; no mapping or cache effects.
+    // Retained BCC word; the core applies the provisional tag-flush policy.
     static constexpr IOPAddress CACHE_INIT_CONTROL = 0xfffe0130;
     // Provisional stateless initialization writes.
     static constexpr IOPAddress HIGH_INIT_CONTROL0 = 0xfffe0140;
@@ -93,6 +93,7 @@ class IOPBus final
     void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     // Side-effect-free aggregate level; an absent controller drives no level.
     bool interruptControllerPending() const;
+    IOPWord cacheControl() const;
 
     // The shared image owns an immutable copy of its source bytes.
     bool installRom(

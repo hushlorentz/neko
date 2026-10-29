@@ -6,6 +6,7 @@ constexpr std::size_t IOPCache::INSTRUCTION_SIZE;
 constexpr std::size_t IOPCache::DATA_SIZE;
 constexpr std::size_t IOPCache::INSTRUCTION_LINE_WORDS;
 constexpr std::size_t IOPCache::DATA_LINE_WORDS;
+constexpr std::size_t IOPCache::MAINTENANCE_GROUP_SIZE;
 constexpr std::size_t IOPCache::INSTRUCTION_LINE_COUNT;
 constexpr std::size_t IOPCache::DATA_LINE_COUNT;
 
@@ -17,6 +18,10 @@ static_assert((IOPCache::DATA_SIZE & (IOPCache::DATA_SIZE - 1)) == 0,
 
 namespace
 {
+  constexpr IOPWord TAG_MODE = IOPWord(1) << 2;
+  constexpr IOPWord INSTRUCTION_TAG_FLUSH = 0xc04;
+  constexpr IOPWord DATA_TAG_FLUSH = 0xc4;
+
   void validateStore(IOPAddress physicalAddress, std::uint8_t byteEnable)
   {
     if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0 ||
@@ -191,6 +196,28 @@ void IOPCache::commitStore(
   line.words[0] = (line.words[0] & ~mask) | (value & mask);
 }
 
+void IOPCache::invalidateIndexedGroup(
+  IOPCacheBank bank,
+  IOPAddress physicalAddress)
+{
+  validateStore(physicalAddress, 0xf);
+  const auto group = location(bank, physicalAddress &
+    ~IOPAddress(MAINTENANCE_GROUP_SIZE - 1));
+  if (bank == IOPCacheBank::Instruction)
+  {
+    instructionLines[group.lineIndex].valid = false;
+  }
+  else
+  {
+    for (std::size_t offset = 0;
+         offset < MAINTENANCE_GROUP_SIZE / (DATA_LINE_WORDS * sizeof(IOPWord));
+         ++offset)
+    {
+      dataLines[group.lineIndex + offset].valid = false;
+    }
+  }
+}
+
 IOPCacheLocation IOPCache::location(
   IOPCacheBank bank,
   IOPAddress physicalAddress)
@@ -265,6 +292,23 @@ IOPCacheAccessPlan IOPCache::planAccess(
     (region == IOPBusRegion::Ram || region == IOPBusRegion::Rom);
   if (!fetch && control.isolated)
   {
+    if ((control.busControl & TAG_MODE) != 0)
+    {
+      if (access != IOPCacheAccess::DataStore || control.swapped)
+      {
+        return {IOPCacheAccessDisposition::Unsupported, bank};
+      }
+      switch (control.busControl)
+      {
+        case INSTRUCTION_TAG_FLUSH:
+          return {IOPCacheAccessDisposition::InvalidateTags,
+            IOPCacheBank::Instruction};
+        case DATA_TAG_FLUSH:
+          return {IOPCacheAccessDisposition::InvalidateTags, IOPCacheBank::Data};
+        default:
+          return {IOPCacheAccessDisposition::Unsupported, bank};
+      }
+    }
     return {IOPCacheAccessDisposition::Isolated, bank};
   }
   return {

@@ -122,6 +122,11 @@ bool IOPBus::interruptControllerPending() const
   return interruptController != nullptr && interruptController->interruptPending();
 }
 
+IOPWord IOPBus::cacheControl() const
+{
+  return cacheInitializationControl;
+}
+
 void IOPBus::attachSIF(SIF *sif, SIFSignalReceiver *signals)
 {
   if (sif == nullptr || signals == nullptr)

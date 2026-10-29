@@ -2334,10 +2334,10 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 - [x] Attribute the post-SIF stale-instruction failure and identify the
       instruction/data flush sequences using offline RAM/cache evidence.
-- [ ] Select the coherent IOP cache-control contract: bank selection, tag
+- [x] Select the coherent IOP cache-control contract: bank selection, tag
       granularity, isolation/swap interaction, enable behavior and supported
       access shapes; distinguish PS2 evidence from provisional policy.
-- [ ] Implement the selected instruction/data control family through existing
+- [x] Implement the selected instruction/data control family through existing
       owners, with red/green code-replacement and indexed-invalidation coverage.
 - [ ] Validate reset, restore, unaffected cache paths and guest flush sequences;
       independently review, run required full gates, and verify progress with

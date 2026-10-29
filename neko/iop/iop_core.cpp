@@ -1547,12 +1547,12 @@ IOPMemoryWriteResult IOPCore::writeMaskedStore(
   aligned.physicalAddress &= ~IOPAddress(3);
   const auto plan = planCacheAccess(
     IOPCacheAccess::DataStore, aligned, sizeof(IOPWord));
-  if (plan.disposition == IOPCacheAccessDisposition::Isolated)
+  if (plan.disposition == IOPCacheAccessDisposition::Isolated ||
+      plan.disposition == IOPCacheAccessDisposition::InvalidateTags ||
+      plan.disposition == IOPCacheAccessDisposition::Unsupported)
   {
-    synchronizeCacheConfiguration(physicalBus);
-    caches.commitIndexedStore(
-      plan.bank, aligned.physicalAddress, request.value, request.byteEnable);
-    result.outcome = IOPAccessOutcome::Completed;
+    result.outcome = commitIsolatedStore(
+      plan, aligned.physicalAddress, request.value, request.byteEnable);
     return result;
   }
   const IOPBusWriteResult write = physicalBus.writeMasked32(
@@ -1588,7 +1588,8 @@ IOPCacheAccessPlan IOPCore::planCacheAccess(
 {
   const IOPCacheControl control = {
     (cop0.status & IOPCOP0Status::CACHE_ISOLATED) != 0,
-    (cop0.status & IOPCOP0Status::CACHES_SWAPPED) != 0
+    (cop0.status & IOPCOP0Status::CACHES_SWAPPED) != 0,
+    attachedBus().cacheControl()
   };
   return IOPCache::planAccess(
     access, control, classification.cacheRoute,
@@ -1601,6 +1602,33 @@ void IOPCore::synchronizeCacheConfiguration(IOPBus &physicalBus)
   {
     caches.reset();
     cacheRomIdentity = physicalBus.romIdentity();
+  }
+}
+
+IOPAccessOutcome IOPCore::commitIsolatedStore(
+  const IOPCacheAccessPlan &plan,
+  IOPAddress physicalWord,
+  IOPWord value,
+  std::uint8_t byteEnable)
+{
+  switch (plan.disposition)
+  {
+    case IOPCacheAccessDisposition::Unsupported:
+      return IOPAccessOutcome::Unmapped;
+    case IOPCacheAccessDisposition::InvalidateTags:
+      if (byteEnable != 0xf || value != 0)
+      {
+        return IOPAccessOutcome::Unmapped;
+      }
+      synchronizeCacheConfiguration(attachedBus());
+      caches.invalidateIndexedGroup(plan.bank, physicalWord);
+      return IOPAccessOutcome::Completed;
+    case IOPCacheAccessDisposition::Isolated:
+      synchronizeCacheConfiguration(attachedBus());
+      caches.commitIndexedStore(plan.bank, physicalWord, value, byteEnable);
+      return IOPAccessOutcome::Completed;
+    default:
+      throw std::logic_error("IOP isolated store requires a cache-only plan.");
   }
 }
 
@@ -1636,6 +1664,12 @@ IOPMemoryReadResult IOPCore::readMemory(
   }
 
   const auto plan = planCacheAccess(access, classification, width);
+  if (plan.disposition == IOPCacheAccessDisposition::Unsupported)
+  {
+    result.outcome = IOPAccessOutcome::Unmapped;
+    result.exception = IOPException::DataBusError;
+    return result;
+  }
   synchronizeCacheConfiguration(physicalBus);
   IOPBusReadResult busResult;
   if (plan.disposition == IOPCacheAccessDisposition::Isolated)
@@ -1725,12 +1759,12 @@ IOPMemoryWriteResult IOPCore::writeMemory(
   const auto byteEnable =
     static_cast<std::uint8_t>(((1u << width) - 1) << offset);
   const IOPAddress physicalWord = classification.physicalAddress & ~IOPAddress(3);
-  if (plan.disposition == IOPCacheAccessDisposition::Isolated)
+  if (plan.disposition == IOPCacheAccessDisposition::Isolated ||
+      plan.disposition == IOPCacheAccessDisposition::InvalidateTags ||
+      plan.disposition == IOPCacheAccessDisposition::Unsupported)
   {
-    synchronizeCacheConfiguration(physicalBus);
-    caches.commitIndexedStore(
-      plan.bank, physicalWord, value << (8 * offset), byteEnable);
-    result.outcome = IOPAccessOutcome::Completed;
+    result.outcome = commitIsolatedStore(
+      plan, physicalWord, value << (8 * offset), byteEnable);
     return result;
   }
   IOPBusWriteResult busResult;

@@ -894,6 +894,184 @@ TEST_CASE("IOP DMA initialization guest continuation restores pending load branc
   }
 }
 
+TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally",
+  "[iop][cache][tag-control][save-state][trace]")
+{
+  namespace Memory = NekoIOPTraceMemory;
+  for (const IOPWord profile : {0xc04u, 0xc4u})
+  {
+    CAPTURE(profile);
+    NekoSystem original;
+    constexpr IOPAddress programBase = 0x10000;
+    const IOPWord priorStatus = original.iopCore().status();
+    constexpr IOPWord priorControl = 3;
+    REQUIRE(original.iopBus().write32(IOPBus::CACHE_INIT_CONTROL, priorControl).status ==
+      IOPBusStatus::Completed);
+    for (IOPAddress address = 0x4000; address < 0x5000; address += 4)
+    {
+      loadInstruction(&original, address, 0x24080001);
+    }
+    for (IOPAddress address = 0x4000; address < 0x5000; address += 16)
+    {
+      original.iopCore().startExecution(0x80000000 | address);
+      REQUIRE(original.iopCore().fetchInstruction().value == 0x24080001);
+    }
+    for (IOPAddress address = 0x4000; address < 0x4400; address += 4)
+    {
+      REQUIRE(original.iopCore().readData32(address).value == 0x24080001);
+    }
+    for (IOPAddress address = 0x4000; address < 0x5000; address += 4)
+    {
+      loadInstruction(&original, address, 0x24080002);
+    }
+    const auto cacheBefore = original.iopCore().cache();
+    const unsigned groups = profile == 0xc04 ? 256 : 64;
+    std::vector<IOPWord> program = {
+      0x40066000, 0, 0x3c01fffe, 0x8c270130, 0x3c048000,
+      0x24030000 | profile, 0xac230130, 0x3c020001, 0x40826000
+    };
+    for (unsigned group = 0; group < groups; ++group)
+    {
+      program.push_back(0xac800000 | (group * 16));
+    }
+    program.insert(program.end(), {0x40866000, 0xac270130, 0});
+    for (std::size_t index = 0; index < program.size(); ++index)
+    {
+      loadInstruction(&original, programBase + static_cast<IOPAddress>(index * 4),
+        program[index]);
+    }
+    original.iopCore().startExecution(0xa0000000 | programBase);
+    const auto split = 9 + groups / 2;
+    original.runMasterCycles(split * 8);
+    REQUIRE(original.iopCore().retiredInstructions() == split);
+    REQUIRE(original.iopCore().status() ==
+      (IOPCOP0Status::CACHE_ISOLATED | IOPCOP0Status::TLB_SHUTDOWN));
+    REQUIRE(original.iopBus().cacheControl() == profile);
+    const auto midpoint = original.saveState();
+    NekoSystem restored;
+    restored.loadState(midpoint);
+    REQUIRE(restored.saveState() == midpoint);
+    REQUIRE(restored.iopStateHash() == original.iopStateHash());
+    original.startTrace();
+    original.runMasterCycles((program.size() - split) * 8);
+    restored.runMasterCycles((program.size() - split) * 8);
+    IOPTraceTest::requireMachine(original, restored);
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(restored.trace().empty());
+    REQUIRE(original.iopCore().retiredInstructions() == program.size());
+    REQUIRE(original.iopCore().status() == priorStatus);
+    REQUIRE(original.iopBus().cacheControl() == priorControl);
+    std::size_t stores = 0;
+    for (const auto &event : original.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::IOP ||
+          event.type != NekoTraceEventType::MemoryAccess ||
+          event.value0 < 0x80000000 || event.value0 >= 0x80001000)
+      {
+        continue;
+      }
+      const auto physical = static_cast<IOPAddress>((groups / 2 + stores) * 16);
+      REQUIRE(event.value0 == (0x80000000 | physical));
+      REQUIRE(event.value1 == 0);
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        physical, 4, Memory::AccessKind::DataStore, Memory::Outcome::Completed,
+        Memory::CacheRoute::Cached, true, 0xf}));
+      ++stores;
+    }
+    REQUIRE(stores == groups / 2);
+    for (std::size_t line = 0; line < IOPCache::INSTRUCTION_LINE_COUNT; ++line)
+    {
+      const auto &instruction = restored.iopCore().cache().instructionLine(line);
+      const auto &data = restored.iopCore().cache().dataLine(line);
+      REQUIRE(instruction.valid == (profile != 0xc04));
+      REQUIRE(instruction.physicalTag == cacheBefore.instructionLine(line).physicalTag);
+      REQUIRE(instruction.words == cacheBefore.instructionLine(line).words);
+      REQUIRE(data.valid == (profile != 0xc4));
+      REQUIRE(data.physicalTag == cacheBefore.dataLine(line).physicalTag);
+      REQUIRE(data.words == cacheBefore.dataLine(line).words);
+    }
+    for (IOPAddress address = 0x4000; address < 0x5000; address += 4)
+    {
+      REQUIRE(restored.iopBus().read32(address).value == 0x24080002);
+    }
+    restored.iopCore().startExecution(0x80004000);
+    restored.iopCore().stepInstruction();
+    REQUIRE(restored.iopCore().generalRegister(8) == (profile == 0xc04 ? 2 : 1));
+    REQUIRE(restored.iopCore().readData32(0x4000).value ==
+      (profile == 0xc4 ? 0x24080002u : 0x24080001u));
+    restored.reset();
+    NekoSystem fresh;
+    REQUIRE(restored.saveState() == fresh.saveState());
+  }
+}
+
+TEST_CASE("IOP rejected tag accesses retain exception stop trace and canonical state",
+  "[iop][cache][tag-control][save-state][trace]")
+{
+  namespace Memory = NekoIOPTraceMemory;
+  for (const bool load : {false, true})
+  {
+    NekoSystem original;
+    NekoSystem untraced;
+    for (auto *system : {&original, &untraced})
+    {
+      loadInstruction(system, 0x10000, 0x3c010001);
+      loadInstruction(system, 0x10004, 0x40816000);
+      loadInstruction(system, 0x10008, load ? 0x8c020100 : 0xac010100);
+      loadInstruction(system, 0x100, 0x12345678);
+      REQUIRE(system->iopCore().readData32(0x100).value == 0x12345678);
+      REQUIRE(system->iopBus().write32(IOPBus::CACHE_INIT_CONTROL, 0xc04).status ==
+        IOPBusStatus::Completed);
+      system->iopCore().startExecution(0xa0010000);
+      system->runMasterCycles(16);
+    }
+    const auto before = original.iopCore().cache();
+    original.startTrace();
+    original.clockMasterCycle();
+    untraced.clockMasterCycle();
+    IOPTraceTest::requireMachine(original, untraced);
+    REQUIRE(original.saveState() == untraced.saveState());
+    REQUIRE(original.iopBus().read32(0x100).value == 0x12345678);
+    REQUIRE(original.iopCore().retiredInstructions() == 2);
+    REQUIRE(original.iopCore().cache().dataLine(0x100 / 4).words ==
+      before.dataLine(0x100 / 4).words);
+    REQUIRE(original.iopCore().cache().dataLine(0x100 / 4).valid);
+    REQUIRE(original.trace().size() == 4);
+    const auto &access = original.trace()[2];
+    REQUIRE(access.type == NekoTraceEventType::MemoryAccess);
+    REQUIRE(access.masterCycle == 17);
+    REQUIRE(access.value0 == 0x100);
+    REQUIRE(access.value1 == (load ? 0u : 0x10000u));
+    REQUIRE(access.value3 == nekoPackIOPMemoryTraceMetadata({
+      0x100, 4, load ? Memory::AccessKind::DataLoad : Memory::AccessKind::DataStore,
+      Memory::Outcome::Unmapped, Memory::CacheRoute::Cached, true,
+      static_cast<std::uint8_t>(load ? 0 : 0xf)}));
+    NekoSystem restored;
+    const auto state = original.saveState();
+    restored.loadState(state);
+    REQUIRE(restored.saveState() == state);
+    REQUIRE(restored.iopStateHash() == original.iopStateHash());
+    if (load)
+    {
+      REQUIRE(original.iopCore().exception().kind == IOPException::DataBusError);
+      REQUIRE(original.iopCore().exceptionProgramCounter() == 0xa0010008);
+      REQUIRE(original.trace().back().type == NekoTraceEventType::ExceptionEntered);
+    }
+    else
+    {
+      REQUIRE(original.iopCore().stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(original.iopCore().exception().kind == IOPException::None);
+      REQUIRE(original.iopCore().storeFailure().access.outcome ==
+        IOPAccessOutcome::Unmapped);
+      REQUIRE(restored.iopCore().storeFailure().width == IOPStoreWidth::Word);
+      REQUIRE(restored.iopCore().storeFailure().access.virtualAddress == 0x100);
+      REQUIRE(original.trace().back().type == NekoTraceEventType::StateChanged);
+      REQUIRE_THROWS_AS(restored.iopCore().resumeExecution(), std::logic_error);
+    }
+  }
+}
+
 TEST_CASE("IOP cache control readback has isolated canonical state and atomic restore",
   "[iop][high-control][cache-control][save-state]")
 {
