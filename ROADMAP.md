@@ -2365,12 +2365,27 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate alignment, boundaries, guest signed/unsigned loads, trace and
       restored continuation; independently review the extension.
 
+### EE `0x1a000008` Startup Boundary
+
+- [x] Attribute the halfword store to its guest construction and physical-bus
+      rejection; search local manuals for the endpoint and access contract.
+- [x] Compare separately approved secondary evidence and its identity/semantic
+      gaps; select a bounded provisional contract and owner before defining
+      implementation and validation work.
+- [x] Implement the selected exact halfword-backed endpoint through EEBus;
+      preserve unsupported widths, aliases, neighbors and device effects.
+- [x] Validate guest trace, reset/hash and versioned atomic persistence;
+      independently review and pass complete optimized/AddressSanitizer checks.
+- [ ] With separate BIOS-run authorization, verify the originating store
+      using a fresh cold scout and attribute the next dependency.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read
       extension and classify the resulting failure or cycle-ceiling activity.
-- [ ] With separate cycle-budget authorization, observe beyond the current
-      21M ceiling without bypassing real serial-transmit polling.
+- [x] With separate cycle-budget authorization, observe beyond the former
+      21M ceiling without bypassing real serial-transmit polling; attribute
+      the first normal-path failure in the authorized 50M observation.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.

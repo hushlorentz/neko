@@ -508,6 +508,7 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(&hash, eeTimersComponent.stateHash(masterClock.currentCycle()));
   hashStateValue(&hash, eeSerialComponent.stateHash());
   hashStateValue(&hash, eeRDRAMInitializationComponent.stateHash());
+  hashStateValue(&hash, eeBusComponent.ba0Register08);
   return hash;
 }
 

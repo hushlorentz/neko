@@ -432,6 +432,7 @@ void NekoSaveStateCodec::writeSystem(
     writer->writeFieldBool("romPresent", rom != nullptr);
     writer->writeFieldU64(
       "romFingerprint", rom != nullptr ? rom->fingerprint() : 0);
+    writer->writeFieldU16("ba0Register08", system.eeBusComponent.ba0Register08);
   }
   {
     auto component = writer->scope("vu0");
@@ -557,6 +558,7 @@ void NekoSaveStateCodec::readSystem(
         "mainMemory",
         EEMemoryMap::MAIN_MEMORY_SIZE);
     topology->eeROMConfiguration = readROMConfiguration(reader);
+    system->eeBusComponent.ba0Register08 = reader->readFieldU16("ba0Register08");
   }
   {
     auto component = reader->scope("vu0");
@@ -826,6 +828,7 @@ void NekoSaveStateCodec::commitSystem(
     source->eeRDRAMInitializationComponent;
   destination->eeBusComponent.mainMemory.swap(
     source->eeBusComponent.mainMemory);
+  destination->eeBusComponent.ba0Register08 = source->eeBusComponent.ba0Register08;
   commitVPU(
     &destination->vu0Component,
     &source->vu0Component,

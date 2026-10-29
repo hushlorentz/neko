@@ -120,6 +120,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
   constexpr std::uint32_t D_ENABLER = 0x1000f520;
   constexpr std::uint32_t D_ENABLEW = 0x1000f590;
+  constexpr std::uint32_t BA0_REGISTER_08 = 0x1a000008;
   constexpr std::uint32_t IOP_BOOT_PROBE = 0x1f803204;
   constexpr std::uint32_t IOP_RAM_BASE = 0x1c000000;
   constexpr std::uint32_t IOP_RAM_END = 0x1c200000;
@@ -355,6 +356,8 @@ class EEBus
     IOPBus *iopRAMBus = nullptr;
     std::vector<std::uint8_t> mainMemory;
     std::shared_ptr<const BootROMImage> bootROM;
+    // Provisional retained halfword; BA0 protocol and bit meanings are unknown.
+    std::uint16_t ba0Register08 = 0;
 };
 
 #endif

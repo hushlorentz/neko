@@ -707,6 +707,11 @@ bool EEBus::readData16(
     address,
     2,
     "EE halfword load must be naturally aligned.");
+  if (address == EEMemoryMap::BA0_REGISTER_08)
+  {
+    *value = ba0Register08;
+    return true;
+  }
   if (mchWindowAddress(address))
   {
     const auto wordAddress = address & ~std::uint32_t{3};
@@ -756,6 +761,11 @@ bool EEBus::writeData16(
     address,
     2,
     "EE halfword store must be naturally aligned.");
+  if (address == EEMemoryMap::BA0_REGISTER_08)
+  {
+    ba0Register08 = value;
+    return true;
+  }
   if (address == EEMemoryMap::IOP_DEV9_INIT_1470)
   {
     // Observed initialization only; DEV9 field semantics remain unverified.
