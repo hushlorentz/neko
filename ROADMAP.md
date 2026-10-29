@@ -2320,7 +2320,7 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Restore and independently review the existing exact f500 stateless
       word-write contract removed by MCH expansion; verify BIOS progress and
       attribute the next originating dependency in the bounded matrix.
-- [ ] Investigate the observed f410 bit31 polling dependency and select any
+- [x] Investigate the observed f410 bit31 polling dependency and select any
       justified special-register contract; distinguish hardware effects from
       provisional backing before continuing bounded handshake discovery.
 - [ ] Pin the exact guest-produced request/peer-response checkpoint, including

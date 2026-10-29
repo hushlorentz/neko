@@ -77,8 +77,8 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
 {
   constexpr std::uint32_t BASE = 0x1000f400;
   constexpr std::uint32_t END = 0x1000f500;
-  const std::array<std::uint32_t, 8> addresses = {{
-    BASE, BASE + 4, BASE + 0x2c, BASE + 0x34,
+  const std::array<std::uint32_t, 9> addresses = {{
+    BASE, BASE + 4, BASE + 0x10, BASE + 0x2c, BASE + 0x34,
     BASE + 0x7c, BASE + 0x80, BASE + 0x90, END - 4
   }};
   NekoSystem original;
@@ -93,7 +93,7 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
     const auto written = 0x12340000u + static_cast<std::uint32_t>(index);
     REQUIRE(bus.writeData32(address, written));
     REQUIRE(bus.readData32(address, &value));
-    REQUIRE(value == written);
+    REQUIRE(value == (address == BASE + 0x10 ? 0u : written));
     REQUIRE(bus.wordMergeStorePolicy(address) ==
       EEWordMergeStorePolicy::FullWordOnly);
     std::uint8_t byte = 0xa5;
@@ -144,7 +144,8 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
   for (std::size_t index = 0; index < addresses.size(); ++index)
   {
     REQUIRE(restored.eeBus().read32(addresses[index]) ==
-      0x12340000u + static_cast<std::uint32_t>(index));
+      (addresses[index] == BASE + 0x10 ? 0u :
+        0x12340000u + static_cast<std::uint32_t>(index)));
   }
   original.reset();
   for (const auto address : addresses)
@@ -177,6 +178,72 @@ TEST_CASE("EE MCH window backs generic words through guest traces and save state
   }
   REQUIRE(stores == 1);
   REQUIRE_FALSE(guest.traceTruncated());
+}
+
+TEST_CASE("EE f410 zero readback releases guest sign polling without changing backing",
+  "[ee][bus][guest][trace][mch-window][f410]")
+{
+  constexpr std::uint32_t ADDRESS = 0x1000f410;
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  for (const auto written : {0u, 0x80000000u, UINT32_MAX})
+  {
+    REQUIRE(bus.writeData32(ADDRESS, written));
+    const auto hash = system.eeStateHash();
+    for (const auto alias : {0u, 0x80000000u, 0xa0000000u})
+    {
+      REQUIRE(bus.read32(ADDRESS | alias) == 0);
+    }
+    REQUIRE(system.eeStateHash() == hash);
+  }
+  for (const auto neighbor : {ADDRESS - 4, ADDRESS + 4, 0x1000f450u, 0x1000f460u})
+  {
+    REQUIRE(bus.writeData32(neighbor, 0x80000007));
+    REQUIRE(bus.read32(neighbor) == 0x80000007);
+  }
+  REQUIRE(bus.writeData32(ADDRESS, 0x80000000));
+  bus.write32(0, 0x8c220000); // lw v0,0(at)
+  bus.write32(4, 0x0440fffe); // bltz v0,0
+  bus.write32(8, 0);
+  bus.write32(12, 0x24030001);
+  system.eeCore().setGeneralRegister(1, {0xb000f410, 0});
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  system.eeCore().startExecution(0xa0000000);
+  const auto saved = system.saveState();
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  for (auto *machine : {&system, &restored})
+  {
+    machine->startTrace(100);
+    for (unsigned instruction = 0; instruction < 4; ++instruction)
+    {
+      REQUIRE(machine->stepEEInstruction(16).pendingException == EEException::None);
+    }
+    REQUIRE(machine->eeCore().generalRegister(2).low == 0);
+    REQUIRE(machine->eeCore().generalRegister(3).low == 1);
+    std::size_t loads = 0;
+    for (const auto &event : machine->trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::EE &&
+          event.type == NekoTraceEventType::MemoryAccess &&
+          event.value0 == 0xb000f410)
+      {
+        ++loads;
+        REQUIRE(event.value1 == 0);
+        REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+          ADDRESS, 4, NekoEETraceMemory::AccessKind::DataLoad,
+          NekoEETraceMemory::TranslationOutcome::Translated,
+          NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
+          NekoEETraceMemory::CacheAccess::Bypassed,
+          NekoEETraceMemory::TransferOutcome::Completed,
+          NekoEETraceMemory::FailurePhase::None}));
+      }
+    }
+    REQUIRE(loads == 1);
+    REQUIRE_FALSE(machine->traceTruncated());
+  }
+  REQUIRE(system.saveState() == restored.saveState());
 }
 
 TEST_CASE("EE RDRAM initialization rejects non-word and backing accesses without consuming data",

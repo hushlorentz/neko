@@ -78,7 +78,8 @@ TEST_CASE("EE MCH window backing words retain state and reset",
     const auto written = 0x12340000u + static_cast<std::uint32_t>(index);
     REQUIRE(owner.writeMCHWindowWord(index, written));
     REQUIRE(owner.readMCHWindowWord(index, &value));
-    REQUIRE(value == written);
+    REQUIRE(value == (index == 4 ? 0u : written));
+    REQUIRE(owner.state().mchWindowWords[index] == written);
   }
   const auto beforeInvalidAccess = owner.state();
   std::uint32_t unchanged = 0xa5a5a5a5;

@@ -9,6 +9,7 @@ namespace
   constexpr std::uint32_t SA4C_WRITE = UINT32_C(0x804c0060);
   constexpr std::uint32_t SA4D_WRITE = UINT32_C(0x804d0060);
   constexpr std::uint8_t RETAIL_DEVICE_COUNT = 2;
+  constexpr std::size_t F410_WORD_INDEX = 0x10 / sizeof(std::uint32_t);
 
   enum class Command
   {
@@ -147,7 +148,8 @@ bool EERDRAMInitialization::readMCHWindowWord(
   {
     return false;
   }
-  *value = registers.mchWindowWords[wordIndex];
+  // Provisional f410 readback, not a modeled operation-completion timer.
+  *value = wordIndex == F410_WORD_INDEX ? 0 : registers.mchWindowWords[wordIndex];
   return true;
 }
 
