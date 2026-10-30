@@ -46,6 +46,7 @@ DMACChannelState::DMACChannelState(
       "DMAC channel state requires a name.");
   }
   if (profile != DMACChannelProfile::VIFGIF &&
+      profile != DMACChannelProfile::IPU &&
       profile != DMACChannelProfile::SIF1 &&
       profile != DMACChannelProfile::SIF0)
   {
@@ -109,6 +110,7 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
       " DMAC CHCR contains unsupported bits.");
   }
   if (direction == DMACChannelDirectionPolicy::FromMemory &&
+      (value & DMACChannelControl::START) != 0 &&
       (value & DMACChannelControl::FROM_MEMORY) == 0)
   {
     throw std::invalid_argument(

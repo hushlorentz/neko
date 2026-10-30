@@ -61,6 +61,7 @@ namespace DMACChannelControl
 enum class DMACChannelProfile : std::uint8_t
 {
   VIFGIF,
+  IPU,
   SIF1,
   SIF0
 };

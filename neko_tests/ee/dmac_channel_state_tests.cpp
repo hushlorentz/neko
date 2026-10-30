@@ -1,3 +1,5 @@
+#include <stdexcept>
+
 #include "catch.hpp"
 #include "dmac_channel_state.hpp"
 
@@ -105,6 +107,26 @@ TEST_CASE("DMAC channel state enforces register policy")
   DMACChannelState vif1(
     "VIF1",
     DMACChannelDirectionPolicy::FromMemory);
+  for (const auto control : {0u, 0x123400e4u, 1u, 0u})
+  {
+    REQUIRE(vif1.writeChannelControl(control) ==
+      DMACControlWriteEffect::ResetContinuation);
+    REQUIRE(vif1.channelControl() == control);
+    REQUIRE_FALSE(vif1.active());
+    REQUIRE_THROWS_WITH(
+      vif1.writeChannelControl(DMACChannelControl::START),
+      "VIF1 DMAC supports only transfers from memory.");
+    REQUIRE(vif1.channelControl() == control);
+  }
+  vif1.writeChannelControl(
+    DMACChannelControl::FROM_MEMORY | DMACChannelControl::START);
+  REQUIRE_THROWS_AS(vif1.writeChannelControl(0), std::logic_error);
+  REQUIRE(vif1.channelControl() ==
+    (DMACChannelControl::FROM_MEMORY | DMACChannelControl::START));
+  REQUIRE(vif1.writeChannelControl(DMACChannelControl::FROM_MEMORY) ==
+    DMACControlWriteEffect::ResetContinuation);
+  REQUIRE(vif1.writeChannelControl(0) ==
+    DMACControlWriteEffect::ResetContinuation);
   REQUIRE_THROWS_WITH(
     vif1.writeChannelControl(DMACChannelControl::START),
     "VIF1 DMAC supports only transfers from memory.");

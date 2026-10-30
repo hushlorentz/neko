@@ -2569,6 +2569,24 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate state and guest continuation, pass complete optimized/ASan
       checks and independent review, then run a fresh authorized cold scout.
 
+### EE VIF1 DMA Stopped-Direction Programming
+
+- [x] Align stopped CHCR direction programming with the manual and existing
+      restore contract while preserving rejection of unsupported DMA starts.
+- [x] Validate shared-state and VIF1 guest/restored behavior, retain active
+      transfer guards, and obtain independent correctness review.
+- [x] Verify the original clear and next dependency through a fresh authorized
+      cold scout without adding reverse DMA execution.
+
+### EE IPU DMA Stopped-Channel Registers
+
+- [x] Establish both channels' real-register inventory and shared stopped-state
+      policy without admitting IPU DMA execution.
+- [x] Add exact word access, reset/hash and versioned transactional persistence
+      for channel3 CHCR/MADR/QWC and channel4 CHCR/MADR/QWC/TADR.
+- [x] Validate access and restored guest behavior, pass complete optimized/ASan
+      checks and independent review, then verify progress with a fresh cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

@@ -206,6 +206,8 @@ NekoSystem::NekoSystem() :
   vif1DMACComponent(
     &eeBusComponent,
     &dmacControllerComponent),
+  fromIPUDMACComponent(IPUDMACChannelKind::FromIPU),
+  toIPUDMACComponent(IPUDMACChannelKind::ToIPU),
   fromScratchpadDMACComponent(
     ScratchpadDMACChannelKind::FromScratchpad,
     &dmacControllerComponent,
@@ -245,6 +247,7 @@ NekoSystem::NekoSystem() :
     &dmacControllerComponent);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
   eeBusComponent.attachVIF0DMACChannel(&vif0DMACComponent);
+  eeBusComponent.attachIPUDMACChannels(&fromIPUDMACComponent, &toIPUDMACComponent);
   eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
   eeBusComponent.attachSIF1DMACChannel(&sif1DMACComponent);
   eeBusComponent.attachSIF0DMACChannel(&sif0DMACComponent);
@@ -485,6 +488,13 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(&hash, vif0DMACComponent.tagAddress());
   hashStateValue(&hash, vif0DMACComponent.addressStack(0));
   hashStateValue(&hash, vif0DMACComponent.addressStack(1));
+  hashStateValue(&hash, fromIPUDMACComponent.channelControl());
+  hashStateValue(&hash, fromIPUDMACComponent.memoryAddress());
+  hashStateValue(&hash, fromIPUDMACComponent.quadwordCount());
+  hashStateValue(&hash, toIPUDMACComponent.channelControl());
+  hashStateValue(&hash, toIPUDMACComponent.memoryAddress());
+  hashStateValue(&hash, toIPUDMACComponent.quadwordCount());
+  hashStateValue(&hash, toIPUDMACComponent.tagAddress());
 
   const auto hashChannel =
     [&hash](const ScratchpadDMACChannel &channel)
@@ -919,6 +929,26 @@ GIFDMACChannel &NekoSystem::gifDMAC()
 const GIFDMACChannel &NekoSystem::gifDMAC() const
 {
   return gifDMACComponent;
+}
+
+IPUDMACChannel &NekoSystem::fromIPUDMAC()
+{
+  return fromIPUDMACComponent;
+}
+
+const IPUDMACChannel &NekoSystem::fromIPUDMAC() const
+{
+  return fromIPUDMACComponent;
+}
+
+IPUDMACChannel &NekoSystem::toIPUDMAC()
+{
+  return toIPUDMACComponent;
+}
+
+const IPUDMACChannel &NekoSystem::toIPUDMAC() const
+{
+  return toIPUDMACComponent;
 }
 
 VIF0DMACChannel &NekoSystem::vif0DMAC()

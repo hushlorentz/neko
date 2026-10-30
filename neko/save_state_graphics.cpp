@@ -1407,6 +1407,48 @@ void NekoSaveStateCodec::readVIF0DMAC(
   *dmac = prepared;
 }
 
+void NekoSaveStateCodec::writeIPUDMAC(
+  SaveStateWriter *writer, const IPUDMACChannel &dmac)
+{
+  writer->writeFieldU32("channelControlRegister", dmac.channelControl());
+  writer->writeFieldU32("memoryAddressRegister", dmac.memoryAddress());
+  writer->writeFieldU32("quadwordCountRegister", dmac.quadwordCount());
+  if (dmac.kind() == IPUDMACChannelKind::ToIPU)
+  {
+    writer->writeFieldU32("tagAddressRegister", dmac.tagAddress());
+  }
+}
+
+void NekoSaveStateCodec::readIPUDMAC(
+  SaveStateReader *reader, IPUDMACChannel *dmac)
+{
+  const auto control = reader->readFieldU32("channelControlRegister");
+  const auto memory = reader->readFieldU32("memoryAddressRegister");
+  const auto count = reader->readFieldU32("quadwordCountRegister");
+  const auto tag = dmac->kind() == IPUDMACChannelKind::ToIPU
+    ? reader->readFieldU32("tagAddressRegister") : 0;
+  IPUDMACChannel prepared(dmac->kind());
+  try
+  {
+    prepared.writeChannelControl(control);
+    prepared.writeMemoryAddress(memory);
+    prepared.writeQuadwordCount(count);
+    if (prepared.kind() == IPUDMACChannelKind::ToIPU)
+    {
+      prepared.writeTagAddress(tag);
+    }
+  }
+  catch (const std::invalid_argument &error)
+  {
+    reader->requireField(false, error.what());
+  }
+  reader->requireField(prepared.channelControl() == control &&
+    prepared.memoryAddress() == memory && prepared.quadwordCount() == count &&
+    (prepared.kind() != IPUDMACChannelKind::ToIPU || prepared.tagAddress() == tag),
+    "IPU DMAC register state is not canonical");
+  *dmac = prepared;
+}
+
 void NekoSaveStateCodec::writeVIF1DMAC(
   SaveStateWriter *writer,
   const VIF1DMACChannel &dmac)

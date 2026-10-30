@@ -495,6 +495,14 @@ void NekoSaveStateCodec::writeSystem(
       system.dmacControllerComponent);
   }
   {
+    auto component = writer->scope("fromIPUDMAC");
+    writeIPUDMAC(writer, system.fromIPUDMACComponent);
+  }
+  {
+    auto component = writer->scope("toIPUDMAC");
+    writeIPUDMAC(writer, system.toIPUDMACComponent);
+  }
+  {
     auto component = writer->scope("vif0DMAC");
     writeVIF0DMAC(writer, system.vif0DMACComponent);
   }
@@ -644,6 +652,14 @@ void NekoSaveStateCodec::readSystem(
       reader,
       &system->gifDMACComponent,
       &system->dmacControllerComponent);
+  }
+  {
+    auto component = reader->scope("fromIPUDMAC");
+    readIPUDMAC(reader, &system->fromIPUDMACComponent);
+  }
+  {
+    auto component = reader->scope("toIPUDMAC");
+    readIPUDMAC(reader, &system->toIPUDMACComponent);
   }
   {
     auto component = reader->scope("vif0DMAC");
@@ -1015,6 +1031,8 @@ void NekoSaveStateCodec::commitSystem(
     source->toScratchpadDMACComponent);
 
   destination->vif0DMACComponent = source->vif0DMACComponent;
+  destination->fromIPUDMACComponent = source->fromIPUDMACComponent;
+  destination->toIPUDMACComponent = source->toIPUDMACComponent;
   VIF1DMACChannel &vif1DMAC =
     destination->vif1DMACComponent;
   const VIF1DMACChannel &sourceVIF1DMAC =

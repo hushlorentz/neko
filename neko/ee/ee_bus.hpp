@@ -28,6 +28,7 @@ class NekoSystem;
 class IOPBus;
 class VIF;
 class VIF0DMACChannel;
+class IPUDMACChannel;
 class VIF1DMACChannel;
 class VPU;
 
@@ -87,6 +88,13 @@ namespace EEMemoryMap
   constexpr std::uint32_t D1_ASR0 = 0x10009040;
   constexpr std::uint32_t D1_ASR1 = 0x10009050;
   constexpr std::uint32_t D2_CHCR = 0x1000a000;
+  constexpr std::uint32_t D3_CHCR = 0x1000b000;
+  constexpr std::uint32_t D3_MADR = 0x1000b010;
+  constexpr std::uint32_t D3_QWC = 0x1000b020;
+  constexpr std::uint32_t D4_CHCR = 0x1000b400;
+  constexpr std::uint32_t D4_MADR = 0x1000b410;
+  constexpr std::uint32_t D4_QWC = 0x1000b420;
+  constexpr std::uint32_t D4_TADR = 0x1000b430;
   constexpr std::uint32_t D6_CHCR = 0x1000c400;
   constexpr std::uint32_t D5_CHCR = 0x1000c000;
   constexpr std::uint32_t D5_MADR = 0x1000c010;
@@ -204,6 +212,7 @@ class EEBus
     void attachDMACController(DMACController *dmac);
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
     void attachVIF0DMACChannel(VIF0DMACChannel *vif0DMAC);
+    void attachIPUDMACChannels(IPUDMACChannel *fromIPU, IPUDMACChannel *toIPU);
     void attachVIF1DMACChannel(VIF1DMACChannel *vif1DMAC);
     void attachSIF1DMACChannel(SIF1DMACChannel *sif1DMAC);
     void attachSIF0DMACChannel(SIF0DMACChannel *sif0DMAC);
@@ -340,6 +349,8 @@ class EEBus
     DMACController &attachedDMACController() const;
     GIFDMACChannel &attachedGIFDMAC() const;
     VIF0DMACChannel &attachedVIF0DMAC() const;
+    IPUDMACChannel &attachedFromIPUDMAC() const;
+    IPUDMACChannel &attachedToIPUDMAC() const;
     VIF1DMACChannel &attachedVIF1DMAC() const;
     SIF1DMACChannel &attachedSIF1DMAC() const;
     SIF0DMACChannel &attachedSIF0DMAC() const;
@@ -362,6 +373,8 @@ class EEBus
     DMACController *dmacController = nullptr;
     GIFDMACChannel *gifDMACChannel = nullptr;
     VIF0DMACChannel *vif0DMACChannel = nullptr;
+    IPUDMACChannel *fromIPUDMACChannel = nullptr;
+    IPUDMACChannel *toIPUDMACChannel = nullptr;
     VIF1DMACChannel *vif1DMACChannel = nullptr;
     SIF1DMACChannel *sif1DMACChannel = nullptr;
     SIF0DMACChannel *sif0DMACChannel = nullptr;

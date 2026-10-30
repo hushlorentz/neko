@@ -224,7 +224,7 @@ TEST_CASE("EE SIF1 uses shared source transitions without acquiring address stac
   REQUIRE_THROWS_AS(state.addressStack(0), std::out_of_range);
   REQUIRE_THROWS_AS(
     DMACChannelState("bad", DMACChannelDirectionPolicy::Unrestricted,
-      static_cast<DMACChannelProfile>(3)), std::invalid_argument);
+      static_cast<DMACChannelProfile>(UINT8_MAX)), std::invalid_argument);
 }
 
 TEST_CASE("EE SIF1 source transitions retain tag fields and honor zero counts and TIE",

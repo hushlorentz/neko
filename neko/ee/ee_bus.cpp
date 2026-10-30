@@ -19,6 +19,7 @@
 #include "sif0_dmac_channel.hpp"
 #include "vif.hpp"
 #include "vif0_dmac_channel.hpp"
+#include "ipu_dmac_channel.hpp"
 #include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
 
@@ -55,6 +56,7 @@ namespace
   {
     return EETimers::isRegisterAddress(address) ||
       VIF0DMACChannel::isRegisterAddress(address) ||
+      IPUDMACChannel::isRegisterAddress(address) ||
       DMACController::isAbsentChannelRegisterAddress(address) ||
       sifApertureAddress(address) ||
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
@@ -426,6 +428,22 @@ void EEBus::attachGIFDMACChannel(GIFDMACChannel *gifDMAC)
   gifDMACChannel = gifDMAC;
 }
 
+void EEBus::attachIPUDMACChannels(IPUDMACChannel *fromIPU, IPUDMACChannel *toIPU)
+{
+  if (fromIPU == nullptr || toIPU == nullptr ||
+      fromIPU->kind() != IPUDMACChannelKind::FromIPU ||
+      toIPU->kind() != IPUDMACChannelKind::ToIPU)
+  {
+    throw std::invalid_argument("EE bus requires matching IPU DMAC channels.");
+  }
+  if (fromIPUDMACChannel != nullptr || toIPUDMACChannel != nullptr)
+  {
+    throw std::logic_error("EE bus IPU DMAC channels are already attached.");
+  }
+  fromIPUDMACChannel = fromIPU;
+  toIPUDMACChannel = toIPU;
+}
+
 void EEBus::attachVIF0DMACChannel(VIF0DMACChannel *vif0DMAC)
 {
   if (vif0DMAC == nullptr)
@@ -572,6 +590,24 @@ GIFDMACChannel &EEBus::attachedGIFDMAC() const
       "EE bus GIF DMAC channel is not attached.");
   }
   return *gifDMACChannel;
+}
+
+IPUDMACChannel &EEBus::attachedFromIPUDMAC() const
+{
+  if (fromIPUDMACChannel == nullptr)
+  {
+    throw std::logic_error("EE bus fromIPU DMAC channel is not attached.");
+  }
+  return *fromIPUDMACChannel;
+}
+
+IPUDMACChannel &EEBus::attachedToIPUDMAC() const
+{
+  if (toIPUDMACChannel == nullptr)
+  {
+    throw std::logic_error("EE bus toIPU DMAC channel is not attached.");
+  }
+  return *toIPUDMACChannel;
 }
 
 VIF0DMACChannel &EEBus::attachedVIF0DMAC() const
@@ -1274,6 +1310,27 @@ bool EEBus::readMapped32(
     case EEMemoryMap::GIF_P3TAG:
       *value = gifRegisterFile->readPath3Tag();
       return true;
+    case EEMemoryMap::D3_CHCR:
+      *value = attachedFromIPUDMAC().channelControl();
+      return true;
+    case EEMemoryMap::D3_MADR:
+      *value = attachedFromIPUDMAC().memoryAddress();
+      return true;
+    case EEMemoryMap::D3_QWC:
+      *value = attachedFromIPUDMAC().quadwordCount();
+      return true;
+    case EEMemoryMap::D4_CHCR:
+      *value = attachedToIPUDMAC().channelControl();
+      return true;
+    case EEMemoryMap::D4_MADR:
+      *value = attachedToIPUDMAC().memoryAddress();
+      return true;
+    case EEMemoryMap::D4_QWC:
+      *value = attachedToIPUDMAC().quadwordCount();
+      return true;
+    case EEMemoryMap::D4_TADR:
+      *value = attachedToIPUDMAC().tagAddress();
+      return true;
     case EEMemoryMap::D0_CHCR:
       *value = attachedVIF0DMAC().channelControl();
       return true;
@@ -1526,6 +1583,48 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::GIF_MODE:
       gifRegisterFile->writeMode(value);
       return true;
+    case EEMemoryMap::D3_CHCR:
+    {
+      auto &dmac = attachedFromIPUDMAC();
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { dmac.writeChannelControl(value); });
+    }
+    case EEMemoryMap::D3_MADR:
+    {
+      auto &dmac = attachedFromIPUDMAC();
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { dmac.writeMemoryAddress(value); });
+    }
+    case EEMemoryMap::D3_QWC:
+    {
+      auto &dmac = attachedFromIPUDMAC();
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { dmac.writeQuadwordCount(value); });
+    }
+    case EEMemoryMap::D4_CHCR:
+    {
+      auto &dmac = attachedToIPUDMAC();
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { dmac.writeChannelControl(value); });
+    }
+    case EEMemoryMap::D4_MADR:
+    {
+      auto &dmac = attachedToIPUDMAC();
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { dmac.writeMemoryAddress(value); });
+    }
+    case EEMemoryMap::D4_QWC:
+    {
+      auto &dmac = attachedToIPUDMAC();
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { dmac.writeQuadwordCount(value); });
+    }
+    case EEMemoryMap::D4_TADR:
+    {
+      auto &dmac = attachedToIPUDMAC();
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { dmac.writeTagAddress(value); });
+    }
     case EEMemoryMap::D0_CHCR:
       return performDeviceWrite(checkedGuestAccess,
         [&]() { attachedVIF0DMAC().writeChannelControl(value); });

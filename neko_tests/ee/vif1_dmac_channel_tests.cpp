@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <stdexcept>
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
@@ -54,6 +55,48 @@ namespace
       options |
       GIFDMACChannelControl::START);
   }
+}
+
+TEST_CASE("VIF1 DMAC stopped direction programming does not admit reverse transfers",
+  "[ee][vif1-stopped]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+  bus.write32(EEMemoryMap::D1_MADR, 0x1000);
+  bus.write32(EEMemoryMap::D1_QWC, 1);
+  const auto status = system.dmacController().status();
+  for (const auto control : {0u, 0x123400e4u, 1u, 0u})
+  {
+    CAPTURE(control);
+    REQUIRE(bus.writeData32(EEMemoryMap::D1_CHCR, control));
+    REQUIRE(bus.read32(EEMemoryMap::D1_CHCR) == control);
+    const auto hash = system.eeStateHash();
+    for (const auto start : {0x100u, 0x104u, 0x123401e4u})
+    {
+      REQUIRE_FALSE(bus.writeData32(EEMemoryMap::D1_CHCR, start));
+      REQUIRE_THROWS_AS(bus.write32(EEMemoryMap::D1_CHCR, start),
+        std::invalid_argument);
+      REQUIRE(system.eeStateHash() == hash);
+    }
+    system.runMasterCycles(2);
+    REQUIRE(bus.read32(EEMemoryMap::D1_CHCR) == control);
+    REQUIRE(bus.read32(EEMemoryMap::D1_MADR) == 0x1000);
+    REQUIRE(bus.read32(EEMemoryMap::D1_QWC) == 1);
+    REQUIRE(system.vif1().fifoQuadwordCount() == 0);
+    REQUIRE(system.vif1DMAC().transferredQuadwordCount() == 0);
+    REQUIRE(system.dmacController().status() == status);
+  }
+  REQUIRE(bus.writeQuadword(0x1000, {}));
+  REQUIRE(bus.writeData32(EEMemoryMap::D1_CHCR, 0x101));
+  const auto activeHash = system.eeStateHash();
+  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::D1_CHCR, 0));
+  REQUIRE(system.eeStateHash() == activeHash);
+  system.clockMasterCycle();
+  REQUIRE(system.vif1DMAC().transferredQuadwordCount() == 1);
+  REQUIRE(bus.read32(EEMemoryMap::D1_CHCR) == 1);
+  REQUIRE(bus.writeData32(EEMemoryMap::D1_CHCR, 0));
+  REQUIRE(bus.read32(EEMemoryMap::D1_CHCR) == 0);
 }
 
 TEST_CASE("VIF1 DMAC normal transfers feed the VIF1 FIFO")

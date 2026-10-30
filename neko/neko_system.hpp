@@ -38,6 +38,7 @@
 #include "system_interfaces.hpp"
 #include "vif.hpp"
 #include "vif0_dmac_channel.hpp"
+#include "ipu_dmac_channel.hpp"
 #include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
 
@@ -212,6 +213,10 @@ class NekoSystem
     const GIFDMACChannel &gifDMAC() const;
     VIF0DMACChannel &vif0DMAC();
     const VIF0DMACChannel &vif0DMAC() const;
+    IPUDMACChannel &fromIPUDMAC();
+    const IPUDMACChannel &fromIPUDMAC() const;
+    IPUDMACChannel &toIPUDMAC();
+    const IPUDMACChannel &toIPUDMAC() const;
     VIF1DMACChannel &vif1DMAC();
     const VIF1DMACChannel &vif1DMAC() const;
     SIF1DMACChannel &sif1DMAC();
@@ -266,6 +271,8 @@ class NekoSystem
     GIFDMACChannel gifDMACComponent;
     VIF0DMACChannel vif0DMACComponent;
     VIF1DMACChannel vif1DMACComponent;
+    IPUDMACChannel fromIPUDMACComponent;
+    IPUDMACChannel toIPUDMACComponent;
     ScratchpadDMACChannel fromScratchpadDMACComponent;
     ScratchpadDMACChannel toScratchpadDMACComponent;
     GSDisplay gsDisplayComponent;
