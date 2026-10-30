@@ -9,6 +9,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -16,7 +17,8 @@ namespace
     "Usage: neko save-state inspect <file> [--bytes <path>]...\n"
     "       neko save-state locate <file> <path> [--bytes]\n"
     "       neko save-state diff <left> <right> [--bytes <path>]...\n"
-    "       neko save-state iop-memory <file> <physical-address> --words <1-256>";
+    "       neko save-state iop-memory <file> <physical-address> --words <1-256>\n"
+    "       neko save-state ee-memory <file> <physical-address> --words <1-256>";
 
   std::uint32_t parseMemoryInteger(const std::string &text)
   {
@@ -60,6 +62,43 @@ namespace
       value = value * base + number;
     }
     return value;
+  }
+
+  struct MemoryWindow
+  {
+    std::uint32_t address;
+    std::uint32_t count;
+  };
+
+  MemoryWindow parseMemoryWindow(const std::vector<std::string> &arguments,
+    std::uint32_t ramSize, const char *cpu)
+  {
+    if (arguments.size() != 5 || arguments[1].empty() ||
+        arguments[3] != "--words")
+    {
+      throw std::invalid_argument(USAGE);
+    }
+    const auto address = parseMemoryInteger(arguments[2]);
+    const auto count = parseMemoryInteger(arguments[4]);
+    if ((address & 3) != 0 || count == 0 || count > 256 ||
+        address >= ramSize ||
+        count > (ramSize - address) / sizeof(std::uint32_t))
+    {
+      throw std::invalid_argument(std::string(cpu) +
+        " memory range must contain 1-256 aligned words inside physical RAM.");
+    }
+    return {address, count};
+  }
+
+  std::uint32_t readRAMWord(
+    const std::vector<std::uint8_t> &bytes, std::uint32_t address)
+  {
+    std::uint32_t word = 0;
+    for (unsigned int lane = 0; lane < 4; ++lane)
+    {
+      word |= std::uint32_t(bytes[address + lane]) << (8 * lane);
+    }
+    return word;
   }
 
   const SaveStateDiagnosticField &requiredField(
@@ -107,20 +146,7 @@ namespace
   int inspectIOPMemory(const std::vector<std::string> &arguments,
     const neko_cli::SaveStateFileLoader &loadFile, std::ostream &output)
   {
-    if (arguments.size() != 5 || arguments[1].empty() ||
-        arguments[3] != "--words")
-    {
-      throw std::invalid_argument(USAGE);
-    }
-    const auto address = parseMemoryInteger(arguments[2]);
-    const auto count = parseMemoryInteger(arguments[4]);
-    if ((address & 3) != 0 || count == 0 || count > 256 ||
-        address >= IOPBus::RAM_SIZE ||
-        count > (IOPBus::RAM_SIZE - address) / sizeof(IOPWord))
-    {
-      throw std::invalid_argument(
-        "IOP memory range must contain 1-256 aligned words inside physical RAM.");
-    }
+    const auto window = parseMemoryWindow(arguments, IOPBus::RAM_SIZE, "IOP");
     SaveStateDiagnosticOptions options;
     options.retainedBytePaths.push_back("system.iop.bus.ram.bytes");
     const auto snapshot = inspectSaveState(loadFile(arguments[1]), options);
@@ -134,14 +160,10 @@ namespace
     }
     // Buffer the bounded report so invalid snapshots never emit partial evidence.
     std::ostringstream report;
-    for (std::uint32_t index = 0; index < count; ++index)
+    for (std::uint32_t index = 0; index < window.count; ++index)
     {
-      const auto current = address + index * 4;
-      IOPWord word = 0;
-      for (unsigned int lane = 0; lane < 4; ++lane)
-      {
-        word |= IOPWord((*ram.bytes)[current + lane]) << (8 * lane);
-      }
+      const auto current = window.address + index * 4;
+      const auto word = readRAMWord(*ram.bytes, current);
       writeHexWord(report, current);
       report << " ram=";
       writeHexWord(report, word);
@@ -149,6 +171,45 @@ namespace
       writeCacheWord(report, snapshot, IOPCacheBank::Instruction, current);
       report << " data=";
       writeCacheWord(report, snapshot, IOPCacheBank::Data, current);
+      report << '\n';
+    }
+    output << report.str();
+    return 0;
+  }
+
+  int inspectEEMemory(const std::vector<std::string> &arguments,
+    const neko_cli::SaveStateFileLoader &loadFile, std::ostream &output)
+  {
+    const auto window =
+      parseMemoryWindow(arguments, EEMemoryMap::MAIN_MEMORY_SIZE, "EE");
+    SaveStateDiagnosticOptions options;
+    options.retainedBytePaths.push_back("system.eeBus.mainMemory.bytes");
+    const auto snapshot = inspectSaveState(loadFile(arguments[1]), options);
+    const auto &ram = requiredField(
+      snapshot, "system.eeBus.mainMemory.bytes", SaveStateFieldKind::Bytes);
+    if (!ram.bytes || ram.bytes->size() != EEMemoryMap::MAIN_MEMORY_SIZE)
+    {
+      throw std::runtime_error("Unsupported EE RAM snapshot size.");
+    }
+    std::ostringstream report;
+    report <<
+      "EE physical RAM backing only; not an instruction-cache or fetch view.\n";
+    for (const auto &field : {
+        std::make_pair("container.version", SaveStateFieldKind::U32),
+        std::make_pair("container.checksum", SaveStateFieldKind::U64),
+        std::make_pair("system.masterClock.masterCycle", SaveStateFieldKind::U64),
+        std::make_pair("system.eeBus.romPresent", SaveStateFieldKind::Boolean),
+        std::make_pair("system.eeBus.romFingerprint", SaveStateFieldKind::U64)})
+    {
+      writeSaveStateField(report, requiredField(snapshot, field.first, field.second));
+      report << '\n';
+    }
+    for (std::uint32_t index = 0; index < window.count; ++index)
+    {
+      const auto current = window.address + index * 4;
+      writeHexWord(report, current);
+      report << " ram=";
+      writeHexWord(report, readRAMWord(*ram.bytes, current));
       report << '\n';
     }
     output << report.str();
@@ -301,6 +362,10 @@ int neko_cli::runSaveStateCommand(
     if (arguments[0] == "iop-memory")
     {
       return inspectIOPMemory(arguments, loadFile, output);
+    }
+    if (arguments[0] == "ee-memory")
+    {
+      return inspectEEMemory(arguments, loadFile, output);
     }
     if (arguments[0] == "locate")
     {

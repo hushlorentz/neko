@@ -2458,10 +2458,29 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### EE BA0 Command Execution Boundary
 
-- [ ] Attribute the command00 write of `0x81` and its control/staging/status
+- [x] Attribute the command00 write of `0x81` and its control/staging/status
       dependencies; establish the bounded active-protocol evidence.
-- [ ] Select the command/result/completion contract before implementation,
-      extending the existing BA0 owner without fabricated readiness or replies.
+- [x] Add bounded offline EE RAM inspection with provenance and input validation;
+      inspect the retained guest routine without executing or restoring it.
+- [x] Select a bounded selector-write contract with provisional synchronous
+      completion; defer device-read transactions without fabricated replies.
+
+### EE BA0 Selector-Write Transactions
+
+- [ ] Implement exact command81/control42 byte-selector writes and status06
+      acknowledgement/readback in the existing BA0 owner; preserve read-command
+      rejection and passive staging behavior.
+- [ ] Integrate reset, canonical hashing and versioned transactional persistence;
+      validate admission, atomic rejection, pure polling and guest continuation.
+- [ ] Pass complete optimized/ASan checks and independent review, then use a
+      fresh authorized cold scout to verify the selector-write boundary and
+      attribute the next unsupported access.
+
+### EE BA0 Device-Read Contract
+
+- [ ] Select an evidence-backed device-register response profile and read-transfer
+      contract before enabling control43 or supplying result bytes; retain
+      unsupported-access rejection until separately approved.
 
 ### Real BIOS Handshake and Boundary Conformance
 

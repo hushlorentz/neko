@@ -61,6 +61,16 @@ This offline view accepts 1-256 aligned words inside physical IOP RAM; it
 does not execute instructions or require a BIOS. `match` means the saved
 cache line is valid with the requested physical tag, not that it matches RAM.
 
+Inspect bounded EE RAM backing words with saved schema, checksum, cycle and
+ROM-fingerprint provenance:
+
+```sh
+./out/build/neko save-state ee-memory state.neko 0x7c9c --words 64
+```
+
+This read-only view accepts 1-256 aligned physical EE RAM words. It neither
+executes instructions nor models the saved instruction-cache/fetch view.
+
 Byte ranges show their size and FNV-1a hash by default. Add
 `--bytes <path>` to `inspect` or `diff`, or `--bytes` to `locate`, to include
 the selected range's bytes. Invalid files and arguments return status 2;

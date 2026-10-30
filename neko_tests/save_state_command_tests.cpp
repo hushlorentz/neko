@@ -196,6 +196,117 @@ TEST_CASE("Save-state IOP memory inspection bounds input before loading",
   REQUIRE_FALSE(error.str().empty());
 }
 
+TEST_CASE("Save-state EE memory inspection reports bounded backing words and provenance",
+  "[checkpoint-memory][ee-memory]")
+{
+  NekoSystem system;
+  REQUIRE(system.eeBus().writeData32(0x100, 0x24020081));
+  REQUIRE(system.eeBus().writeData32(0x104, 0xa4620000));
+  REQUIRE(system.eeBus().writeData32(0x1fffffc, 0x87654321));
+  const auto state = system.saveState();
+  const auto loader = loaderFor(state);
+  std::ostringstream output;
+  std::ostringstream error;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"ee-memory", "left.state", "0x100", "--words", "2"},
+    loader, output, error) == 0);
+  REQUIRE(error.str().empty());
+  REQUIRE(output.str().find(
+    "EE physical RAM backing only; not an instruction-cache or fetch view.\n") == 0);
+  REQUIRE(output.str().find("container.version u32 0x") !=
+    std::string::npos);
+  REQUIRE(output.str().find("container.checksum u64 0x") != std::string::npos);
+  REQUIRE(output.str().find(
+    "system.masterClock.masterCycle u64 0x0000000000000000 container=") !=
+    std::string::npos);
+  REQUIRE(output.str().find("system.eeBus.romPresent bool false container=") !=
+    std::string::npos);
+  REQUIRE(output.str().find(
+    "system.eeBus.romFingerprint u64 0x0000000000000000 container=") !=
+    std::string::npos);
+  REQUIRE(output.str().find(
+    "0x00000100 ram=0x24020081\n0x00000104 ram=0xa4620000\n") !=
+    std::string::npos);
+  REQUIRE(system.saveState() == state);
+
+  std::ostringstream endOutput;
+  std::ostringstream endError;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"ee-memory", "left.state", "0x1fffffc", "--words", "1"},
+    loader, endOutput, endError) == 0);
+  REQUIRE(endError.str().empty());
+  REQUIRE(endOutput.str().find("0x01fffffc ram=0x87654321\n") !=
+    std::string::npos);
+
+  std::ostringstream maximumOutput;
+  std::ostringstream maximumError;
+  REQUIRE(neko_cli::runSaveStateCommand(
+    {"ee-memory", "left.state", "256", "--words", "256"},
+    loader, maximumOutput, maximumError) == 0);
+  REQUIRE(maximumError.str().empty());
+  REQUIRE(maximumOutput.str().find("0x000004fc ram=0x00000000\n") !=
+    std::string::npos);
+  REQUIRE(maximumOutput.str().find("0x00000500 ram=") == std::string::npos);
+}
+
+TEST_CASE("Save-state EE memory inspection rejects invalid ranges before loading",
+  "[checkpoint-memory][ee-memory]")
+{
+  unsigned int loads = 0;
+  const neko_cli::SaveStateFileLoader loader =
+    [&](const std::string &) -> std::vector<std::uint8_t>
+    {
+      ++loads;
+      throw std::runtime_error("unexpected load");
+    };
+  for (const auto &arguments : std::vector<std::vector<std::string>>{
+      {"ee-memory", "left.state", "0x101", "--words", "1"},
+      {"ee-memory", "left.state", "0x2000000", "--words", "1"},
+      {"ee-memory", "left.state", "0x1fffffc", "--words", "2"},
+      {"ee-memory", "left.state", "0x80000100", "--words", "1"},
+      {"ee-memory", "left.state", "0xa0000100", "--words", "1"},
+      {"ee-memory", "left.state", "0x20000100", "--words", "1"},
+      {"ee-memory", "left.state", "0x1a000000", "--words", "1"},
+      {"ee-memory", "left.state", "0", "--words", "0"},
+      {"ee-memory", "left.state", "0", "--words", "257"},
+      {"ee-memory", "left.state", "-4", "--words", "1"},
+      {"ee-memory", "left.state", "0x", "--words", "1"},
+      {"ee-memory", "left.state", "4294967296", "--words", "1"},
+      {"ee-memory", "left.state", "0", "--words", "18446744073709551616"},
+      {"ee-memory", "left.state", "0", "--words", "1", "extra"},
+      {"ee-memory", "", "0", "--words", "1"},
+      {"ee-memory", "left.state", "0", "--bytes", "1"},
+      {"ee-memory", "left.state", "0"}})
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runSaveStateCommand(arguments, loader, output, error) == 2);
+    REQUIRE(output.str().empty());
+    REQUIRE_FALSE(error.str().empty());
+  }
+  REQUIRE(loads == 0);
+}
+
+TEST_CASE("Save-state EE memory inspection emits no evidence for invalid files",
+  "[checkpoint-memory][ee-memory]")
+{
+  NekoSystem system;
+  auto corruptState = system.saveState();
+  corruptState.back() ^= 0x80;
+  for (const auto &loader : {
+      loaderFor({1, 2, 3}), loaderFor(corruptState), loaderFor({})})
+  {
+    std::ostringstream output;
+    std::ostringstream error;
+    REQUIRE(neko_cli::runSaveStateCommand(
+      {"ee-memory", "left.state", "0", "--words", "1"},
+      loader, output, error) == 2);
+    REQUIRE(output.str().empty());
+    REQUIRE_FALSE(error.str().empty());
+    REQUIRE(error.str().find("Usage:") == std::string::npos);
+  }
+}
+
 TEST_CASE("Save-state locate commands use exact schema paths")
 {
   NekoSystem system;
