@@ -16,10 +16,15 @@ namespace
   bool legacyDeviceReadValue(
     std::uint8_t selector, std::uint8_t &value) noexcept
   {
-    // Selected compatibility identity, not a measured console profile.
+    // Selected compatibility responses, not a measured console profile.
     if (selector == 0x7e)
     {
       value = 0x1c;
+      return true;
+    }
+    if (selector == 0x7f)
+    {
+      value = 0;
       return true;
     }
     return false;

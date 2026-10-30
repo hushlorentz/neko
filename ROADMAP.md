@@ -2491,9 +2491,24 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### EE BA0 Additional Device-Response Contract
 
-- [ ] Select an evidence-backed or explicitly approved provisional0x7f response
+- [x] Select an evidence-backed or explicitly approved provisional0x7f response
       and transfer effects; keep unsupported reads rejected until contract
       selection is complete.
+
+### EE BA0 Additional Device Response
+
+- [x] Extend the immutable BA0 profile with selected0x7f=0x00, preserving
+      latched selection, result lifetime, atomic rejection and complete
+      reset/hash/transactional restore behavior.
+- [x] Validate both profile entries and unknown selectors through owner/access
+      and guest trace/restore tests; obtain independent review and use a fresh
+      authorized cold scout to attribute the next dependency.
+
+### EE BA0 Command-82 Contract
+
+- [ ] Select an evidence-backed or explicitly approved bounded command82/
+      control42 contract for the observed staging, device effects and
+      completion lifecycle; retain rejection until contract selection.
 
 ### Real BIOS Handshake and Boundary Conformance
 

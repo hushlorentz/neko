@@ -418,9 +418,13 @@ TEST_CASE("EE BA0 selector phases have canonical transactional persistence",
   REQUIRE(target.eeStateHash() != zeroSelectorHash);
 }
 
-TEST_CASE("EE BA0 device reads use only the latched supported selector",
-  "[ee][bus][ba0-read]")
+TEST_CASE("EE BA0 device reads use only latched supported selectors",
+  "[ee][bus][ba0-read][ba0-read7f]")
 {
+  std::uint16_t selector = 0x7e;
+  SECTION("nonzero compatibility response") {}
+  SECTION("zero compatibility response") { selector = 0x7f; }
+  const std::uint16_t response = selector == 0x7e ? 0x1c : 0;
   NekoSystem system;
   auto &bus = system.eeBus();
   const auto resetHash = system.eeStateHash();
@@ -434,7 +438,7 @@ TEST_CASE("EE BA0 device reads use only the latched supported selector",
       static_cast<std::uint16_t>(0x8000 + index)));
   }
   REQUIRE(bus.writeData16(0x1a000002, 0x43));
-  REQUIRE(bus.writeData16(0x1a000010, 0x7e));
+  REQUIRE(bus.writeData16(0x1a000010, selector));
   const auto unselectedHash = system.eeStateHash();
   REQUIRE_FALSE(bus.writeData16(0x1a000000, 0x81));
   REQUIRE(system.eeStateHash() == unselectedHash);
@@ -459,7 +463,7 @@ TEST_CASE("EE BA0 device reads use only the latched supported selector",
       REQUIRE(bus.readData16(0x1a000006, &value));
       REQUIRE(value == 2);
       REQUIRE(bus.readData16(0x1a000010, &value));
-      REQUIRE(value == 0x001c);
+      REQUIRE(value == response);
       REQUIRE(system.eeStateHash() == completedHash);
     }
     REQUIRE(bus.writeData16(0x1a000000, 0x81));
@@ -475,14 +479,14 @@ TEST_CASE("EE BA0 device reads use only the latched supported selector",
     REQUIRE(bus.readData16(0x1a000006, &value));
     REQUIRE(value == 0);
     REQUIRE(bus.readData16(0x1a000010, &value));
-    REQUIRE(value == 0x001c);
+    REQUIRE(value == response);
     REQUIRE(bus.writeData16(0x1a000002, 0x42));
     REQUIRE(bus.writeData16(0x1a000002, 0x43));
     REQUIRE(bus.readData16(0x1a000006, &value));
     REQUIRE(value == 0);
     REQUIRE(bus.readData16(0x1a000010, &value));
-    REQUIRE(value == 0x001c);
-    REQUIRE(bus.writeData16(0x1a000010, 0x7f));
+    REQUIRE(value == response);
+    REQUIRE(bus.writeData16(0x1a000010, selector == 0x7e ? 0x7f : 0x7e));
   }
   for (std::uint32_t index = 1; index < 8; ++index)
   {
@@ -504,7 +508,7 @@ TEST_CASE("EE BA0 unsupported device reads preserve pending completion and stagi
 {
   NekoSystem system;
   auto &bus = system.eeBus();
-  for (const std::uint16_t selector : {0u, 0x7du, 0x7fu, 0xffu})
+  for (const std::uint16_t selector : {0u, 0x7du, 0x80u, 0xffu})
   {
     CAPTURE(selector);
     REQUIRE(bus.writeData16(0x1a000002, 0x42));
@@ -528,17 +532,24 @@ TEST_CASE("EE BA0 unsupported device reads preserve pending completion and stagi
 }
 
 TEST_CASE("EE BA0 read phases retain canonical transactional state",
-  "[ee][bus][save-state][ba0-read]")
+  "[ee][bus][save-state][ba0-read][ba0-read7f]")
 {
+  std::uint16_t selector = 0x7e;
   unsigned phase = 0;
   SECTION("unselected read mode") {}
   SECTION("selected before read command") { phase = 1; }
   SECTION("completed read command") { phase = 2; }
   SECTION("acknowledged read command") { phase = 3; }
   SECTION("overwritten completed result") { phase = 4; }
+  SECTION("unselected zero read mode") { selector = 0x7f; }
+  SECTION("selected before zero read") { selector = 0x7f; phase = 1; }
+  SECTION("completed zero read") { selector = 0x7f; phase = 2; }
+  SECTION("acknowledged zero read") { selector = 0x7f; phase = 3; }
+  SECTION("overwritten completed zero result") { selector = 0x7f; phase = 4; }
+  const std::uint16_t response = selector == 0x7e ? 0x1c : 0;
   NekoSystem original;
   REQUIRE(original.eeBus().writeData16(0x1a000002, 0x42));
-  REQUIRE(original.eeBus().writeData16(0x1a000010, 0x7e));
+  REQUIRE(original.eeBus().writeData16(0x1a000010, selector));
   if (phase != 0)
   {
     REQUIRE(original.eeBus().writeData16(0x1a000000, 0x81));
@@ -550,7 +561,8 @@ TEST_CASE("EE BA0 read phases retain canonical transactional state",
   if (phase >= 2)
   {
     REQUIRE(original.eeBus().writeData16(0x1a000000, 0x81));
-    expected.writeByte("system.eeBus.ba0TransferStaging", 0, 0x1c);
+    expected.writeByte("system.eeBus.ba0TransferStaging", 0,
+      static_cast<std::uint8_t>(response));
     expected.writeByte("system.eeBus.ba0TransferStaging", 1, 0);
     expected.writeScalar("system.eeBus.ba0Status06", 2);
   }
@@ -576,7 +588,7 @@ TEST_CASE("EE BA0 read phases retain canonical transactional state",
   REQUIRE(restored.eeBus().writeData16(0x1a000000, 0x81) == (phase != 0));
   std::uint16_t value = 0;
   REQUIRE(restored.eeBus().readData16(0x1a000010, &value));
-  REQUIRE(value == (phase == 0 ? 0xffff : 0x001c));
+  REQUIRE(value == (phase == 0 ? 0xffff : response));
   REQUIRE(restored.eeBus().readData16(0x1a000006, &value));
   REQUIRE(value == (phase == 0 ? 0 : 2));
   if (phase == 0 || phase == 2)
@@ -616,7 +628,7 @@ TEST_CASE("EE BA0 read phases retain canonical transactional state",
   }
   SaveStateMutation unknown(saved);
   unknown.writeScalar("system.eeBus.ba0SelectorValid", 1);
-  unknown.writeScalar("system.eeBus.ba0Selector", 0x7f);
+  unknown.writeScalar("system.eeBus.ba0Selector", 0x80);
   unknown.writeScalar("system.eeBus.ba0Status06", 2);
   unknown.refreshChecksum();
   restored.loadState(unknown.bytes());
@@ -627,8 +639,9 @@ TEST_CASE("EE BA0 read phases retain canonical transactional state",
 }
 
 TEST_CASE("EE BA0 guest selector and device reads preserve restored traced continuation",
-  "[ee][bus][guest][trace][save-state][ba0-command][ba0-read]")
+  "[ee][bus][guest][trace][save-state][ba0-command][ba0-read][ba0-read7f]")
 {
+  std::uint16_t selector = 0x7e;
   unsigned checkpoint = 0;
   SECTION("before command") {}
   SECTION("after command") { checkpoint = 1; }
@@ -636,6 +649,13 @@ TEST_CASE("EE BA0 guest selector and device reads preserve restored traced conti
   SECTION("before device read command") { checkpoint = 6; }
   SECTION("after device read command") { checkpoint = 7; }
   SECTION("after device read acknowledgement") { checkpoint = 9; }
+  SECTION("before zero selector command") { selector = 0x7f; }
+  SECTION("after zero selector command") { selector = 0x7f; checkpoint = 1; }
+  SECTION("after zero selector acknowledgement") { selector = 0x7f; checkpoint = 3; }
+  SECTION("before zero read command") { selector = 0x7f; checkpoint = 6; }
+  SECTION("after zero read command") { selector = 0x7f; checkpoint = 7; }
+  SECTION("after zero read acknowledgement") { selector = 0x7f; checkpoint = 9; }
+  const std::uint16_t response = selector == 0x7e ? 0x1c : 0;
   NekoSystem original;
   const std::array<std::uint32_t, 12> program = {
     0xa4620000, // SH r2, 0(r3)
@@ -652,14 +672,14 @@ TEST_CASE("EE BA0 guest selector and device reads preserve restored traced conti
     0xa46c0000  // SH r12, 0(r3), unsupported command82
   };
   const std::array<std::uint16_t, 12> values = {
-    0x81, 2, 3, 0, 0x7e, 0x43, 0x81, 2, 3, 0x1c, 0, 0x82
+    0x81, 2, 3, 0, selector, 0x43, 0x81, 2, 3, response, 0, 0x82
   };
   for (std::size_t index = 0; index < program.size(); ++index)
   {
     original.eeBus().write32(static_cast<std::uint32_t>(index * 4), program[index]);
   }
   REQUIRE(original.eeBus().writeData16(0x1a000002, 0x42));
-  REQUIRE(original.eeBus().writeData16(0x1a000010, 0x7e));
+  REQUIRE(original.eeBus().writeData16(0x1a000010, selector));
   auto &core = original.eeCore();
   core.setCOP0Register(EECOP0Register::Status, 0);
   core.setGeneralRegister(2, {0x81, 0});
@@ -690,9 +710,9 @@ TEST_CASE("EE BA0 guest selector and device reads preserve restored traced conti
     }
     REQUIRE(machine->eeCore().generalRegister(4).low == 2);
     REQUIRE(machine->eeCore().generalRegister(6).low == 0);
-    REQUIRE(machine->eeCore().generalRegister(7).low == 0x7e);
+    REQUIRE(machine->eeCore().generalRegister(7).low == selector);
     REQUIRE(machine->eeCore().generalRegister(9).low == 2);
-    REQUIRE(machine->eeCore().generalRegister(10).low == 0x1c);
+    REQUIRE(machine->eeCore().generalRegister(10).low == response);
     REQUIRE(machine->eeCore().generalRegister(11).low == 0);
     REQUIRE(machine->eeCore().cop0Register(EECOP0Register::EPC) ==
       EEMemoryMap::KSEG1_BASE + 44);

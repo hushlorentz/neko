@@ -69,12 +69,13 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
 }
 
 TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
-  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command][ba0-read]")
+  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command][ba0-read][ba0-read7f]")
 {
   std::uint32_t physical = 0x1a000006;
   std::uint16_t selected = 3;
   std::uint8_t base = 2;
   std::uint16_t control = 0x42;
+  std::uint16_t selector = 0x7e;
   bool staging = false;
   SECTION("status acknowledgement") {}
   SECTION("selector command")
@@ -99,6 +100,13 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
     physical = 0x1a000000;
     selected = 0x81;
     control = 0x43;
+  }
+  SECTION("zero device read command")
+  {
+    physical = 0x1a000000;
+    selected = 0x81;
+    control = 0x43;
+    selector = 0x7f;
   }
   SECTION("first staging halfword")
   {
@@ -131,7 +139,7 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
         if (physical == EEMemoryMap::BA0_COMMAND_00)
         {
           REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_CONTROL_02, 0x42));
-          REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_TRANSFER_BEGIN, 0x7e));
+          REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_TRANSFER_BEGIN, selector));
           if (control == 0x43)
           {
             REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_COMMAND_00, 0x81));
@@ -166,7 +174,8 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
           {
             std::uint16_t result = 0;
             REQUIRE(system->eeBus().readData16(EEMemoryMap::BA0_TRANSFER_BEGIN, &result));
-            REQUIRE(result == (accepted ? 0x1c : 0x7e));
+            const std::uint16_t response = selector == 0x7e ? 0x1c : 0;
+            REQUIRE(result == (accepted ? response : selector));
           }
         }
         if (staging)
