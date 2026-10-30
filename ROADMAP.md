@@ -2551,6 +2551,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       complete optimized/ASan checks and independent review, then verify the
       original write and next dependency through a fresh authorized cold scout.
 
+### EE DMAC Absent Optional Register Slots
+
+- [x] Establish a bounded access policy for absent TADR, ASR and SADR slots
+      using the channel-specific manual inventory and local secondary evidence.
+- [x] Implement the selected exact-slot policy through shared DMAC decoding,
+      preserving real-register behavior and rejection of unrelated accesses.
+- [x] Validate access boundaries and unchanged DMA state, obtain independent
+      review, then verify progress through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

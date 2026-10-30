@@ -8,6 +8,16 @@ namespace
 {
   constexpr std::uint32_t RESERVED = 0x1000f500;
   constexpr std::uint32_t UNCACHED = 0xb000f500;
+  constexpr std::uint32_t ABSENT_DMAC_SLOTS[] = {
+    0x10008080, 0x10009080, 0x1000a080,
+    0x1000b030, 0x1000b040, 0x1000b050, 0x1000b080,
+    0x1000b440, 0x1000b450, 0x1000b480,
+    0x1000c030, 0x1000c040, 0x1000c050, 0x1000c080,
+    0x1000c440, 0x1000c450, 0x1000c480,
+    0x1000c830, 0x1000c840, 0x1000c850, 0x1000c880,
+    0x1000d030, 0x1000d040, 0x1000d050,
+    0x1000d440, 0x1000d450
+  };
   struct SerialInitialization
   {
     std::uint32_t address;
@@ -856,4 +866,171 @@ TEST_CASE("EE reserved startup word cannot become an instruction source",
   REQUIRE(result.exceptionAddress == UNCACHED);
   REQUIRE(result.instructions == 0);
   REQUIRE_FALSE(result.cycleLimitReached);
+}
+
+TEST_CASE("EE absent DMAC slots discard exact word writes without changing state",
+  "[ee][bus][dmac-absent]")
+{
+  NekoSystem system;
+  seed(system);
+  system.eeBus().write32(EEMemoryMap::D2_CHCR, 0x101);
+  const auto eeHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  system.startTrace();
+  for (const auto address : ABSENT_DMAC_SLOTS)
+  {
+    CAPTURE(address);
+    for (const auto value : {0u, 0xffffffffu, 0xaaaaaaaau, 0x55555555u})
+    {
+      CAPTURE(value);
+      REQUIRE(system.eeBus().writeData32(address, value));
+      REQUIRE_NOTHROW(system.eeBus().write32(address, value));
+      REQUIRE_NOTHROW(system.eeBus().write32(address | 0x80000000u, value));
+      REQUIRE_NOTHROW(system.eeBus().write32(address | 0xa0000000u, value));
+    }
+  }
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  REQUIRE(system.trace().empty());
+}
+
+TEST_CASE("EE absent DMAC slots retain exact width and address boundaries",
+  "[ee][bus][dmac-absent]")
+{
+  NekoSystem system;
+  seed(system);
+  auto &bus = system.eeBus();
+  const auto eeHash = system.eeStateHash();
+  for (const auto address : ABSENT_DMAC_SLOTS)
+  {
+    CAPTURE(address);
+    REQUIRE(bus.writeData32(address, 0xffffffff));
+    for (const auto lane : {0u, 1u, 2u, 3u})
+    {
+      std::uint8_t byte = 0xa5;
+      REQUIRE_FALSE(bus.readData8(address + lane, &byte));
+      REQUIRE(byte == 0xa5);
+      REQUIRE_FALSE(bus.writeData8(address + lane, 0));
+    }
+    for (const auto lane : {0u, 2u})
+    {
+      std::uint16_t half = 0xa5a5;
+      REQUIRE_FALSE(bus.readData16(address + lane, &half));
+      REQUIRE(half == 0xa5a5);
+      REQUIRE_FALSE(bus.writeData16(address + lane, 0));
+    }
+    std::uint32_t word = 0xa5a5a5a5;
+    std::uint64_t wide = UINT64_MAX;
+    EEQuadword quad = {UINT64_MAX, UINT64_MAX};
+    REQUIRE_FALSE(bus.readData32(address, &word));
+    REQUIRE_FALSE(bus.readInstruction32(address, &word));
+    REQUIRE(word == 0xa5a5a5a5);
+    REQUIRE_FALSE(bus.readData64(address, &wide));
+    REQUIRE(wide == UINT64_MAX);
+    REQUIRE_FALSE(bus.writeData64(address, 0));
+    REQUIRE_FALSE(bus.readData128(address, &quad));
+    REQUIRE_FALSE(bus.writeData128(address, {0, 0}));
+    REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {0, 0}));
+    REQUIRE(quad.low == UINT64_MAX);
+    REQUIRE(quad.high == UINT64_MAX);
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 4));
+    REQUIRE_THROWS_AS(bus.read32(address), std::out_of_range);
+    REQUIRE_THROWS_AS(bus.write64(address, UINT64_MAX), std::out_of_range);
+    REQUIRE_THROWS_AS(bus.writeQuadword(address, {{0, 0, 0, 0}}),
+      std::out_of_range);
+    REQUIRE_THROWS_AS(bus.writeData32(address + 1, 0), std::invalid_argument);
+    for (const auto other : {address - 4, address + 4, address + 8,
+           address + 12, address + 0x100, address + 0x10000,
+           address | 0x80000000u, address | 0xa0000000u})
+    {
+      CAPTURE(other);
+      REQUIRE_FALSE(bus.writeData32(other, 0));
+    }
+    REQUIRE(system.iopBus().write32(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  for (const auto realUnimplemented : {0x10008000u, 0x10008010u, 0x10008020u,
+         0x10008030u, 0x10008040u, 0x10008050u, 0x1000b000u, 0x1000b430u,
+         0x1000c800u})
+  {
+    CAPTURE(realUnimplemented);
+    REQUIRE_FALSE(bus.writeData32(realUnimplemented, 0));
+  }
+  for (const auto realImplemented : {EEMemoryMap::D1_TADR,
+         EEMemoryMap::D1_ASR0, EEMemoryMap::D1_ASR1, EEMemoryMap::D2_TADR,
+         EEMemoryMap::D2_ASR0, EEMemoryMap::D2_ASR1, EEMemoryMap::D6_TADR,
+         EEMemoryMap::D8_SADR, EEMemoryMap::D9_TADR, EEMemoryMap::D9_SADR})
+  {
+    CAPTURE(realImplemented);
+    REQUIRE(bus.writeData32(realImplemented, 0x1000));
+    REQUIRE(bus.read32(realImplemented) == 0x1000);
+    REQUIRE(bus.writeData32(realImplemented, 0));
+  }
+  REQUIRE(system.eeStateHash() == eeHash);
+}
+
+TEST_CASE("EE absent DMAC guest merge stores admit only full-word lanes",
+  "[ee][bus][dmac-absent][guest]")
+{
+  constexpr std::uint32_t ADDRESS = 0xb0008080;
+  for (const std::uint8_t opcode : {0x2a, 0x2e})
+  {
+    for (std::uint16_t lane = 0; lane < 4; ++lane)
+    {
+      CAPTURE(opcode);
+      CAPTURE(lane);
+      NekoSystem system;
+      const bool full = lane == (opcode == 0x2a ? 3 : 0);
+      const auto result = execute(system, opcode, 0x89abcdef, lane, ADDRESS);
+      REQUIRE(result.pendingException ==
+        (full ? EEException::None : EEException::DataBusErrorStore));
+      REQUIRE_FALSE(result.cycleLimitReached);
+      if (full)
+      {
+        REQUIRE(result.instructions != 0);
+      }
+      else
+      {
+        REQUIRE(result.exceptionAddress == ADDRESS + lane);
+        REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+      }
+      requireWordStoreObservation(system, 0x89abcdef, full, ADDRESS);
+    }
+  }
+}
+
+TEST_CASE("EE absent DMAC word stores retire identically with and without tracing",
+  "[ee][bus][dmac-absent][guest]")
+{
+  NekoSystem plain;
+  NekoSystem traced;
+  constexpr std::uint32_t ADDRESS = 0xb0008080;
+  for (auto *system : {&plain, &traced})
+  {
+    seed(*system);
+    system->eeBus().write32(0, 0xac220000);
+    system->eeCore().setGeneralRegister(1, {ADDRESS, 0});
+    system->eeCore().setGeneralRegister(2, {0x89abcdef, 0xfeedface});
+    system->eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  }
+  traced.startTrace();
+  const auto plainResult = plain.stepEEInstruction(16);
+  const auto tracedResult = traced.stepEEInstruction(16);
+  REQUIRE(plainResult.pendingException == EEException::None);
+  REQUIRE(tracedResult.pendingException == EEException::None);
+  REQUIRE(plainResult.instructions != 0);
+  REQUIRE(plainResult.instructions == tracedResult.instructions);
+  REQUIRE(plainResult.masterCycles == tracedResult.masterCycles);
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.iopStateHash() == traced.iopStateHash());
+  REQUIRE(plain.sifStateHash() == traced.sifStateHash());
+  REQUIRE(plain.trace().empty());
+  REQUIRE(traced.dmacController().control() == 1);
+  REQUIRE(traced.dmacController().status() ==
+    (DMACStatus::CHANNEL_2 | DMACStatus::CHANNEL_2_MASK));
+  REQUIRE(traced.gifDMAC().memoryAddress() == 0x2000);
+  REQUIRE(traced.gifDMAC().quadwordCount() == 2);
+  requireWordStoreObservation(traced, 0x89abcdef, true, ADDRESS);
 }

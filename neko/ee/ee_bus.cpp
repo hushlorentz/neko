@@ -53,6 +53,7 @@ namespace
   bool fullWordOnlyAddress(std::uint32_t address)
   {
     return EETimers::isRegisterAddress(address) ||
+      DMACController::isAbsentChannelRegisterAddress(address) ||
       sifApertureAddress(address) ||
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
       address == EEMemoryMap::SIO_ISR ||
@@ -1385,6 +1386,12 @@ bool EEBus::writeMapped32(
 
   if (writeIOPRAM(address, 4, {value, 0}))
   {
+    return true;
+  }
+
+  if (DMACController::isAbsentChannelRegisterAddress(address))
+  {
+    // Provisional write-discard policy; absent slots have no readback or state.
     return true;
   }
 

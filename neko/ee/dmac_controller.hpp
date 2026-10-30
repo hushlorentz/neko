@@ -80,6 +80,7 @@ class DMACController
     void writeStallAddress(std::uint32_t value);
     void publishStallAddress(std::uint32_t channel, std::uint32_t address);
     bool admitDrainSlice(std::uint32_t channel, const DMACChannelState &state);
+    static bool isAbsentChannelRegisterAddress(std::uint32_t address);
     static bool validControl(std::uint32_t value);
     static DMACTagPriority decodeTagPriority(std::uint32_t tag);
     void applyTagPriority(DMACTagPriority priority);

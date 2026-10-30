@@ -46,6 +46,43 @@ void DMACController::writeControl(std::uint32_t value)
   controlRegister = value;
 }
 
+bool DMACController::isAbsentChannelRegisterAddress(std::uint32_t address)
+{
+  // EE User's Manual 3.1 p59: optional TADR, ASR0/1 and SADR inventory.
+  switch (address)
+  {
+    case 0x10008080:
+    case 0x10009080:
+    case 0x1000a080:
+    case 0x1000b030:
+    case 0x1000b040:
+    case 0x1000b050:
+    case 0x1000b080:
+    case 0x1000b440:
+    case 0x1000b450:
+    case 0x1000b480:
+    case 0x1000c030:
+    case 0x1000c040:
+    case 0x1000c050:
+    case 0x1000c080:
+    case 0x1000c440:
+    case 0x1000c450:
+    case 0x1000c480:
+    case 0x1000c830:
+    case 0x1000c840:
+    case 0x1000c850:
+    case 0x1000c880:
+    case 0x1000d030:
+    case 0x1000d040:
+    case 0x1000d050:
+    case 0x1000d440:
+    case 0x1000d450:
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool DMACController::validControl(std::uint32_t value)
 {
   return (value & ~DMACControl::WRITABLE_MASK) == 0 &&
