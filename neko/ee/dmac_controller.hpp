@@ -51,6 +51,11 @@ namespace DMACInterleave
   constexpr std::uint32_t TRANSFER_MASK = 0xffu << 16;
 }
 
+namespace DMACRingBuffer
+{
+  constexpr std::uint32_t FIELD_MASK = 0x7ffffff0;
+}
+
 namespace DMACPriority
 {
   constexpr std::uint32_t COP_CONTROL_MASK = 0x3ff;
@@ -78,6 +83,10 @@ class DMACController
     void writePriorityControl(std::uint32_t value);
     std::uint32_t stallAddress() const;
     void writeStallAddress(std::uint32_t value);
+    std::uint32_t ringBufferSizeMask() const;
+    void writeRingBufferSizeMask(std::uint32_t value);
+    std::uint32_t ringBufferBaseAddress() const;
+    void writeRingBufferBaseAddress(std::uint32_t value);
     void publishStallAddress(std::uint32_t channel, std::uint32_t address);
     bool admitDrainSlice(std::uint32_t channel, const DMACChannelState &state);
     static bool isAbsentChannelRegisterAddress(std::uint32_t address);
@@ -111,6 +120,8 @@ class DMACController
     std::uint32_t statusMaskRegister = 0;
     std::uint32_t priorityControlRegister = 0;
     std::uint32_t stallAddressRegister = 0;
+    std::uint32_t ringBufferSizeMaskRegister = 0;
+    std::uint32_t ringBufferBaseAddressRegister = 0;
     std::uint32_t interleaveSizeRegister = 0;
     SIFDirection sifNextDirection = SIFDirection::SIF0;
 };

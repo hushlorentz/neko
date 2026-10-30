@@ -1001,6 +1001,10 @@ void NekoSaveStateCodec::commitSystem(
     source->dmacControllerComponent.priorityControlRegister;
   destination->dmacControllerComponent.stallAddressRegister =
     source->dmacControllerComponent.stallAddressRegister;
+  destination->dmacControllerComponent.ringBufferSizeMaskRegister =
+    source->dmacControllerComponent.ringBufferSizeMaskRegister;
+  destination->dmacControllerComponent.ringBufferBaseAddressRegister =
+    source->dmacControllerComponent.ringBufferBaseAddressRegister;
   destination->dmacControllerComponent.interleaveSizeRegister =
     source->dmacControllerComponent.interleaveSizeRegister;
   destination->dmacControllerComponent.sifNextDirection =

@@ -1214,6 +1214,10 @@ void NekoSaveStateCodec::writeDMAC(
     "controllerPriorityControlRegister",
     controller.priorityControlRegister);
   writer->writeFieldU32("controllerStallAddressRegister", controller.stallAddressRegister);
+  writer->writeFieldU32("controllerRingBufferSizeMaskRegister",
+    controller.ringBufferSizeMask());
+  writer->writeFieldU32("controllerRingBufferBaseAddressRegister",
+    controller.ringBufferBaseAddress());
   writer->writeFieldU8("sifNextDirection", static_cast<std::uint8_t>(controller.sifNextDirection));
   writer->writeFieldU8("sliceQuadwordsRemaining", state.sliceQuadwordsRemaining);
   writer->writeFieldBool(
@@ -1274,6 +1278,13 @@ void NekoSaveStateCodec::readDMAC(
     reader->readFieldU32("controllerStallAddressRegister");
   reader->requireField((controller->stallAddressRegister & ~UINT32_C(0x7ffffff0)) == 0,
     "DMAC stall address is invalid");
+  const auto ringSizeMask = reader->readFieldU32("controllerRingBufferSizeMaskRegister");
+  const auto ringBaseAddress = reader->readFieldU32("controllerRingBufferBaseAddressRegister");
+  reader->requireField(
+    ((ringSizeMask | ringBaseAddress) & ~DMACRingBuffer::FIELD_MASK) == 0,
+    "DMAC ring buffer fields are not canonical");
+  controller->writeRingBufferSizeMask(ringSizeMask);
+  controller->writeRingBufferBaseAddress(ringBaseAddress);
   const auto nextDirection = reader->readFieldU8("sifNextDirection");
   reader->requireField(nextDirection <= static_cast<std::uint8_t>(SIFDirection::SIF1),
     "EE SIF arbitration cursor is invalid");

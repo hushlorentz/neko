@@ -472,6 +472,163 @@ TEST_CASE("EE IPU DMA restored guest clears preserve traced continuation",
   REQUIRE_FALSE(traced.trace().empty());
 }
 
+TEST_CASE("EE inactive DMAC ring registers retain independent masked fields",
+  "[ee][bus][dmac-ring]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto resetHash = system.eeStateHash();
+  for (const auto address : {0x1000e040u, 0x1000e050u})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.read32(address) == 0);
+    const auto previousHash = system.eeStateHash();
+    for (const auto value : {0x8000000fu, 0x1234567fu, UINT32_MAX})
+    {
+      REQUIRE(bus.writeData32(address, value));
+      REQUIRE(bus.read32(address) == (value & 0x7ffffff0u));
+    }
+    REQUIRE(system.eeStateHash() != previousHash);
+  }
+  // Inactive programming may temporarily violate MFIFO activation constraints.
+  bus.write32(0x1000e040, 0x250);
+  bus.write32(0x1000e050, 0x150);
+  system.runMasterCycles(64);
+  REQUIRE(bus.read32(0x1000e040) == 0x250);
+  REQUIRE(bus.read32(0x1000e050) == 0x150);
+  REQUIRE(system.dmacController().control() == 0);
+  REQUIRE(system.dmacController().status() == 0);
+  REQUIRE(system.gifDMAC().transferredQuadwordCount() == 0);
+  for (const auto selection : {4u, 8u, 12u})
+  {
+    const auto hash = system.eeStateHash();
+    REQUIRE_FALSE(bus.writeData32(EEMemoryMap::D_CTRL, selection | 1));
+    REQUIRE(system.eeStateHash() == hash);
+  }
+  system.reset();
+  REQUIRE(system.eeStateHash() == resetHash);
+}
+
+TEST_CASE("EE DMAC ring registers reject split and non-CPU access atomically",
+  "[ee][bus][dmac-ring]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  for (const auto address : {0x1000e040u, 0x1000e050u})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.writeData32(address, 0x12345670));
+    const auto hash = system.eeStateHash();
+    std::uint8_t byte = 0xa5;
+    std::uint16_t half = 0xa5a5;
+    std::uint32_t word = 0xa5a5a5a5;
+    std::uint64_t wide = UINT64_MAX;
+    EEQuadword quad = {UINT64_MAX, UINT64_MAX};
+    for (std::uint32_t lane = 0; lane < 4; ++lane)
+    {
+      REQUIRE_FALSE(bus.readData8(address + lane, &byte));
+      REQUIRE_FALSE(bus.writeData8(address + lane, 0));
+    }
+    for (const auto lane : {0u, 2u})
+    {
+      REQUIRE_FALSE(bus.readData16(address + lane, &half));
+      REQUIRE_FALSE(bus.writeData16(address + lane, 0));
+    }
+    REQUIRE_FALSE(bus.readData64(address, &wide));
+    REQUIRE_FALSE(bus.writeData64(address, 0));
+    REQUIRE_FALSE(bus.readData128(address, &quad));
+    REQUIRE_FALSE(bus.writeData128(address, {0, 0}));
+    REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {0, 0}));
+    REQUIRE_FALSE(bus.readInstruction32(address, &word));
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 4));
+    for (const auto offset : {1u, 2u, 3u})
+    {
+      REQUIRE_THROWS_AS(bus.readData32(address + offset, &word), std::invalid_argument);
+      REQUIRE_THROWS_AS(bus.writeData32(address + offset, 0), std::invalid_argument);
+    }
+    for (const auto offset : {4u, 8u, 12u})
+    {
+      REQUIRE_FALSE(bus.readData32(address + offset, &word));
+      REQUIRE_FALSE(bus.writeData32(address + offset, 0));
+    }
+    REQUIRE_FALSE(bus.readData32(address | 0xa0000000u, &word));
+    REQUIRE_FALSE(bus.writeData32(address | 0xa0000000u, 0));
+    REQUIRE(byte == 0xa5);
+    REQUIRE(half == 0xa5a5);
+    REQUIRE(word == 0xa5a5a5a5);
+    REQUIRE(wide == UINT64_MAX);
+    REQUIRE(quad.low == UINT64_MAX);
+    REQUIRE(quad.high == UINT64_MAX);
+    REQUIRE(system.eeStateHash() == hash);
+  }
+}
+
+TEST_CASE("EE inactive DMAC ring registers restore transactionally",
+  "[ee][bus][dmac-ring][save-state]")
+{
+  NekoSystem original;
+  original.eeBus().write32(0x1000e040, 0x250);
+  original.eeBus().write32(0x1000e050, 0x150);
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  struct Corruption { const char *path; std::uint32_t value; };
+  for (const auto corruption : {
+         Corruption{"container.version", 67},
+         Corruption{"system.gifDMAC.controllerRingBufferSizeMaskRegister", 1},
+         Corruption{"system.gifDMAC.controllerRingBufferSizeMaskRegister", 0x80000000},
+         Corruption{"system.gifDMAC.controllerRingBufferBaseAddressRegister", 1},
+         Corruption{"system.gifDMAC.controllerRingBufferBaseAddressRegister", 0x80000000},
+         Corruption{"system.gifDMAC.controllerControlRegister", 9}})
+  {
+    CAPTURE(corruption.path);
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(corruption.path, corruption.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(restored.saveState() == saved);
+  }
+}
+
+TEST_CASE("EE DMAC ring restored guest programming preserves traced continuation",
+  "[ee][bus][dmac-ring][guest][save-state]")
+{
+  NekoSystem original;
+  original.eeBus().write32(0, immediateInstruction(0x2b, 1, 2));
+  original.eeBus().write32(4, immediateInstruction(0x2b, 1, 3, 0x10));
+  original.eeBus().write32(8, immediateInstruction(0x23, 1, 4));
+  original.eeBus().write32(12, immediateInstruction(0x23, 1, 5, 0x10));
+  original.eeCore().setGeneralRegister(1, {0xb000e040, 0});
+  original.eeCore().setGeneralRegister(2, {0x8000025f, 0});
+  original.eeCore().setGeneralRegister(3, {0x8000015f, 0});
+  original.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  original.eeCore().startExecution(0xa0000000);
+  REQUIRE(original.stepEEInstruction(16).pendingException == EEException::None);
+  const auto saved = original.saveState();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  traced.startTrace();
+  for (int step = 0; step < 3; ++step)
+  {
+    const auto p = plain.stepEEInstruction(16);
+    const auto t = traced.stepEEInstruction(16);
+    REQUIRE(p.pendingException == EEException::None);
+    REQUIRE(t.pendingException == EEException::None);
+    REQUIRE(p.instructions != 0);
+    REQUIRE(p.instructions == t.instructions);
+    REQUIRE(p.masterCycles == t.masterCycles);
+  }
+  REQUIRE(plain.eeCore().generalRegister(4).low == 0x250);
+  REQUIRE(plain.eeCore().generalRegister(5).low == 0x150);
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
 TEST_CASE("EE BA0 retained registers admit only exact physical halfword accesses",
   "[ee][bus][ba0]")
 {

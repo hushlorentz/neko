@@ -2587,6 +2587,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate access and restored guest behavior, pass complete optimized/ASan
       checks and independent review, then verify progress with a fresh cold scout.
 
+### EE DMAC Inactive Ring-Buffer Registers
+
+- [x] Establish the RBSR/RBOR pair's fields and inactive programming policy
+      within the existing global DMAC owner; keep MFIFO selection unsupported.
+- [x] Add exact word access, reset/hash and versioned transactional persistence
+      for the independent size-mask and base-address fields.
+- [x] Validate access and restored guest behavior, pass complete optimized/ASan
+      checks and independent review, then verify progress with a fresh cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

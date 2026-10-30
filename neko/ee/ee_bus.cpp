@@ -64,6 +64,7 @@ namespace
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       mchWindowAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::GIF_CTRL ||
+      address == EEMemoryMap::D_RBSR || address == EEMemoryMap::D_RBOR ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
@@ -1445,6 +1446,12 @@ bool EEBus::readMapped32(
     case EEMemoryMap::D_SQWC:
       *value = attachedDMACController().interleaveSize();
       return true;
+    case EEMemoryMap::D_RBSR:
+      *value = attachedDMACController().ringBufferSizeMask();
+      return true;
+    case EEMemoryMap::D_RBOR:
+      *value = attachedDMACController().ringBufferBaseAddress();
+      return true;
     case EEMemoryMap::D_STADR:
       *value = attachedDMACController().stallAddress();
       return true;
@@ -1864,6 +1871,12 @@ bool EEBus::writeMapped32(
         checkedGuestAccess,
         [&]() { dmac.writeInterleaveSize(value); });
     }
+    case EEMemoryMap::D_RBSR:
+      attachedDMACController().writeRingBufferSizeMask(value);
+      return true;
+    case EEMemoryMap::D_RBOR:
+      attachedDMACController().writeRingBufferBaseAddress(value);
+      return true;
     case EEMemoryMap::D_STADR:
     {
       DMACController &dmac = attachedDMACController();

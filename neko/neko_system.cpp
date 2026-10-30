@@ -460,6 +460,8 @@ std::uint64_t NekoSystem::eeStateHash() const
     &hash,
     dmacControllerComponent.priorityControlRegister);
   hashStateValue(&hash, dmacControllerComponent.stallAddressRegister);
+  hashStateValue(&hash, dmacControllerComponent.ringBufferSizeMask());
+  hashStateValue(&hash, dmacControllerComponent.ringBufferBaseAddress());
   hashStateValue(&hash, static_cast<std::uint8_t>(dmacControllerComponent.sifNextDirection));
   hashStateValue(
     &hash,

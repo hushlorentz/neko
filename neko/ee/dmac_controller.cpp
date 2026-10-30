@@ -100,6 +100,26 @@ void DMACController::writeStallAddress(std::uint32_t value)
   stallAddressRegister = value & 0x7ffffff0;
 }
 
+std::uint32_t DMACController::ringBufferSizeMask() const
+{
+  return ringBufferSizeMaskRegister;
+}
+
+void DMACController::writeRingBufferSizeMask(std::uint32_t value)
+{
+  ringBufferSizeMaskRegister = value & DMACRingBuffer::FIELD_MASK;
+}
+
+std::uint32_t DMACController::ringBufferBaseAddress() const
+{
+  return ringBufferBaseAddressRegister;
+}
+
+void DMACController::writeRingBufferBaseAddress(std::uint32_t value)
+{
+  ringBufferBaseAddressRegister = value & DMACRingBuffer::FIELD_MASK;
+}
+
 void DMACController::publishStallAddress(
   std::uint32_t channel, std::uint32_t address)
 {

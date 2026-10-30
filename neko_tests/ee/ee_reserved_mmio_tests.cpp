@@ -1035,6 +1035,36 @@ TEST_CASE("EE VIF0 DMA guest merges and starts preserve precise admission",
   requireWordStoreObservation(system, 0x101, false, ADDRESS);
 }
 
+TEST_CASE("EE DMAC ring guest stores require a complete word without read modify write",
+  "[ee][bus][dmac-ring][guest]")
+{
+  for (const auto address : {0xb000e040u, 0xb000e050u})
+  {
+    CAPTURE(address);
+    for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+    {
+      for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+      {
+        CAPTURE(opcode);
+        CAPTURE(lane);
+        NekoSystem system;
+        const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+        const auto result = execute(system, opcode, 0x8123456f, lane, address);
+        REQUIRE(result.pendingException ==
+          (full ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE(system.eeBus().read32(address & 0x1fffffff) ==
+          (full ? 0x01234560 : 0));
+        if (!full)
+        {
+          REQUIRE(result.exceptionAddress == address + lane);
+          REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+        }
+        requireWordStoreObservation(system, 0x8123456f, full, address);
+      }
+    }
+  }
+}
+
 TEST_CASE("EE IPU DMA guest merges and starts preserve precise admission",
   "[ee][bus][ipu-dmac][guest]")
 {

@@ -120,6 +120,8 @@ namespace EEMemoryMap
   constexpr std::uint32_t D_STAT = 0x1000e010;
   constexpr std::uint32_t D_PCR = 0x1000e020;
   constexpr std::uint32_t D_SQWC = 0x1000e030;
+  constexpr std::uint32_t D_RBSR = 0x1000e040;
+  constexpr std::uint32_t D_RBOR = 0x1000e050;
   constexpr std::uint32_t D_STADR = 0x1000e060;
 
   constexpr std::uint32_t INTC_STAT = 0x1000f000;
