@@ -2412,8 +2412,21 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       absent-DEV9 profile; preserve other access and device rejections.
 - [x] Validate bus boundaries, guest loads and trace-mode agreement;
       independently review the bounded extension.
-- [ ] With separate BIOS-run authorization, verify the originating byte read
+- [x] With separate BIOS-run authorization, verify the originating byte read
       using a fresh cold scout and attribute the next dependency.
+
+### EE `0x1a000006` Startup Boundary
+
+- [x] Attribute the guest halfword store and existing owner boundary; search
+      local manuals for its identity, access and effect contract.
+- [x] Compare approved secondary evidence if needed; select the bounded
+      contract and ownership before defining implementation and validation work.
+- [x] Admit only the observed exact halfword write of 3, stateless and
+      write-only; preserve neighboring BA0 and unsupported-access behavior.
+- [x] Validate bus boundaries, guest stores and trace-mode agreement;
+      independently review the bounded extension.
+- [ ] With separate BIOS-run authorization, verify the originating halfword
+      store using a fresh cold scout and attribute the next dependency.
 
 ### Real BIOS Handshake and Boundary Conformance
 

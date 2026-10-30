@@ -68,6 +68,73 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
   }
 }
 
+TEST_CASE("EE SH translates BA0 initialization aliases and captures the low halfword",
+  "[ee][guest][trace][ba0-init]")
+{
+  for (const std::uint32_t address : {0x9a000006u, 0xba000006u})
+  {
+    for (const std::uint64_t value : {UINT64_C(3), UINT64_C(0x12340003),
+         UINT64_C(2)})
+    {
+      CAPTURE(address);
+      CAPTURE(value);
+      NekoSystem traced;
+      NekoSystem plain;
+      const auto half = static_cast<std::uint16_t>(value);
+      const bool accepted = half == 3;
+      for (auto *system : {&traced, &plain})
+      {
+        auto &core = system->eeCore();
+        system->eeBus().write32(0, memoryInstruction(0x29, 2, 4, 0));
+        setRegister(&core, 2, address);
+        setRegister(&core, 4, value);
+        core.setCOP0Register(EECOP0Register::Status, 0);
+        core.startExecution(EEMemoryMap::KSEG1_BASE);
+        if (system == &traced)
+        {
+          system->startTrace(100);
+        }
+        const auto result = system->stepEEInstruction(16);
+        REQUIRE(result.pendingException ==
+          (accepted ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE_FALSE(result.cycleLimitReached);
+        REQUIRE(core.programCounter() ==
+          (accepted ? EEMemoryMap::KSEG1_BASE + 4
+                    : EEExceptionVector::GENERAL));
+        REQUIRE(core.generalRegister(4).low == value);
+        REQUIRE(core.generalRegister(4).high == UINT64_C(0xfeedfacecafebeef));
+      }
+      std::size_t stores = 0;
+      for (const auto &event : traced.trace())
+      {
+        if (event.subsystem == NekoTraceSubsystem::EE &&
+            event.type == NekoTraceEventType::MemoryAccess &&
+            event.value0 == address)
+        {
+          ++stores;
+          REQUIRE(event.value1 == half);
+          REQUIRE(event.value2 == 0);
+          const bool cached = address == 0x9a000006;
+          REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+            0x1a000006, 2, NekoEETraceMemory::AccessKind::DataStore,
+            NekoEETraceMemory::TranslationOutcome::Translated,
+            cached ? NekoEETraceMemory::CacheRoute::CachedNoncoherent
+                   : NekoEETraceMemory::CacheRoute::Uncached,
+            static_cast<std::uint8_t>(cached ? 3 : 2), false, true,
+            NekoEETraceMemory::CacheAccess::Bypassed,
+            accepted ? NekoEETraceMemory::TransferOutcome::Completed
+                     : NekoEETraceMemory::TransferOutcome::PhysicalBusError,
+            accepted ? NekoEETraceMemory::FailurePhase::None
+                     : NekoEETraceMemory::FailurePhase::Direct}));
+        }
+      }
+      REQUIRE(stores == 1);
+      REQUIRE_FALSE(traced.traceTruncated());
+      REQUIRE(traced.eeStateHash() == plain.eeStateHash());
+    }
+  }
+}
+
 TEST_CASE("EE signed and unsigned halfword loads")
 {
   SECTION("LH sign extends a little-endian halfword")

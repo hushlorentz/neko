@@ -778,6 +778,11 @@ bool EEBus::writeData16(
     ba0Register04 = value;
     return true;
   }
+  if (address == EEMemoryMap::BA0_INIT_06)
+  {
+    // Provisional initialization only; no command/status protocol is modeled.
+    return value == 3;
+  }
   if (address == EEMemoryMap::BA0_REGISTER_08)
   {
     ba0Register08 = value;

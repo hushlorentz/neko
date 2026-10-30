@@ -103,7 +103,8 @@ TEST_CASE("EE BA0 retained registers admit only exact physical halfword accesses
     half = 0xa5a5;
     REQUIRE_FALSE(bus.readData16(unsupported, &half));
     REQUIRE(half == 0xa5a5);
-    REQUIRE_FALSE(bus.writeData16(unsupported, 3));
+    REQUIRE_FALSE(bus.writeData16(unsupported,
+      unsupported == 0x1a000006 ? 2 : 3));
   }
   for (const auto byteAddress : {address, address + 1})
   {
@@ -144,6 +145,74 @@ TEST_CASE("EE BA0 retained registers admit only exact physical halfword accesses
   REQUIRE(system.eeBus().readData16(otherAddress, &half));
   REQUIRE(half == 0);
   REQUIRE(system.eeStateHash() == resetHash);
+}
+
+TEST_CASE("EE BA0 initialization admits only the observed stateless halfword write",
+  "[ee][bus][ba0-init]")
+{
+  constexpr std::uint32_t ADDRESS = 0x1a000006;
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData16(0x1a000004, 0x1234));
+  REQUIRE(bus.writeData16(0x1a000008, 0xabcd));
+  const auto eeHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  REQUIRE(bus.writeData16(ADDRESS, 3));
+  REQUIRE(bus.writeData16(ADDRESS, 3));
+  for (const std::uint16_t value : {0u, 1u, 2u, 4u, 0x8003u, 0xffffu})
+  {
+    CAPTURE(value);
+    REQUIRE_FALSE(bus.writeData16(ADDRESS, value));
+  }
+  std::uint16_t half = 0xa5a5;
+  for (const auto address : {ADDRESS, 0x1a000000u, 0x1a000002u,
+         0x1a00000au, 0x1a00000cu, 0x1a000106u, 0x9a000006u, 0xba000006u})
+  {
+    CAPTURE(address);
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE(half == 0xa5a5);
+    if (address != ADDRESS)
+    {
+      REQUIRE_FALSE(bus.writeData16(address, 3));
+    }
+  }
+  for (const auto address : {ADDRESS, ADDRESS + 1})
+  {
+    std::uint8_t byte = 0xa5;
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE(byte == 0xa5);
+    REQUIRE_FALSE(bus.writeData8(address, 3));
+  }
+  std::uint32_t word = 0xa5a5a5a5;
+  std::uint64_t wide = UINT64_MAX;
+  EEQuadword quad{UINT64_MAX, UINT64_MAX};
+  REQUIRE_FALSE(bus.readData32(0x1a000004, &word));
+  REQUIRE(word == 0xa5a5a5a5);
+  REQUIRE_FALSE(bus.writeData32(0x1a000004, 0x00030000));
+  REQUIRE_FALSE(bus.readData64(0x1a000000, &wide));
+  REQUIRE(wide == UINT64_MAX);
+  REQUIRE_FALSE(bus.writeData64(0x1a000000, UINT64_C(3) << 48));
+  REQUIRE_FALSE(bus.readData128(0x1a000000, &quad));
+  REQUIRE(quad.low == UINT64_MAX);
+  REQUIRE(quad.high == UINT64_MAX);
+  REQUIRE_FALSE(bus.writeData128(0x1a000000, {UINT64_C(3) << 48, 0}));
+  REQUIRE_FALSE(bus.readInstruction32(0x1a000004, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(ADDRESS, 2));
+  REQUIRE_FALSE(bus.readDMAC128(0x1a000000, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(0x1a000000, {UINT64_C(3) << 48, 0}));
+  REQUIRE_THROWS_AS(bus.readData16(ADDRESS, nullptr), std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.readData16(ADDRESS + 1, &half), std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.writeData16(ADDRESS + 1, 3), std::invalid_argument);
+  REQUIRE(system.iopBus().read16(ADDRESS).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write16(ADDRESS, 3).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.readData16(0x1a000004, &half));
+  REQUIRE(half == 0x1234);
+  REQUIRE(bus.readData16(0x1a000008, &half));
+  REQUIRE(half == 0xabcd);
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
 }
 
 TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
