@@ -16,7 +16,7 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 65;
+constexpr std::uint32_t SAVE_STATE_VERSION = 66;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
@@ -1298,6 +1298,12 @@ class NekoSaveStateCodec
       SaveStateReader *reader,
       GIFDMACChannel *channel,
       DMACController *controller);
+    static void writeVIF0DMAC(
+      SaveStateWriter *writer,
+      const VIF0DMACChannel &dmac);
+    static void readVIF0DMAC(
+      SaveStateReader *reader,
+      VIF0DMACChannel *dmac);
     static void writeVIF1DMAC(
       SaveStateWriter *writer,
       const VIF1DMACChannel &dmac);

@@ -261,7 +261,7 @@ TEST_CASE("EE SIF1 source transitions retain tag fields and honor zero counts an
   }
 }
 
-TEST_CASE("EE SIF1 exact MMIO mapping excludes nonexistent registers and wider stores",
+TEST_CASE("EE SIF1 exact MMIO mapping excludes nonexistent register reads and wider stores",
   "[ee][sif1][dma][bus]")
 {
   NekoSystem system;
@@ -296,11 +296,14 @@ TEST_CASE("EE SIF1 exact MMIO mapping excludes nonexistent registers and wider s
   REQUIRE(system.sif1DMAC().memoryAddress() == 0);
   REQUIRE(system.sif1DMAC().quadwordCount() == 0);
   REQUIRE(system.sif1DMAC().tagAddress() == 0);
+  const auto beforeAbsentWrites = system.eeStateHash();
   for (const auto address : {0x1000c440u, 0x1000c450u, 0x1000c480u, 0x1000c030u})
   {
     REQUIRE_FALSE(bus.readData32(address, &word));
-    REQUIRE_FALSE(bus.writeData32(address, 0xffffffff));
+    REQUIRE(bus.writeData32(address, 0xffffffff));
+    REQUIRE_FALSE(bus.readData32(address, &word));
   }
+  REQUIRE(system.eeStateHash() == beforeAbsentWrites);
   REQUIRE(bus.writeData32(MADR, 0x8000123f));
   REQUIRE(bus.read32(MADR) == 0x80001230);
   REQUIRE(bus.writeData32(TADR, 0x8000234f));

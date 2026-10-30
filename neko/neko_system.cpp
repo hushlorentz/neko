@@ -244,6 +244,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachDMACController(
     &dmacControllerComponent);
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
+  eeBusComponent.attachVIF0DMACChannel(&vif0DMACComponent);
   eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
   eeBusComponent.attachSIF1DMACChannel(&sif1DMACComponent);
   eeBusComponent.attachSIF0DMACChannel(&sif0DMACComponent);
@@ -478,6 +479,12 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(
     &hash,
     dmacControllerComponent.interleaveSizeRegister);
+  hashStateValue(&hash, vif0DMACComponent.channelControl());
+  hashStateValue(&hash, vif0DMACComponent.memoryAddress());
+  hashStateValue(&hash, vif0DMACComponent.quadwordCount());
+  hashStateValue(&hash, vif0DMACComponent.tagAddress());
+  hashStateValue(&hash, vif0DMACComponent.addressStack(0));
+  hashStateValue(&hash, vif0DMACComponent.addressStack(1));
 
   const auto hashChannel =
     [&hash](const ScratchpadDMACChannel &channel)
@@ -912,6 +919,16 @@ GIFDMACChannel &NekoSystem::gifDMAC()
 const GIFDMACChannel &NekoSystem::gifDMAC() const
 {
   return gifDMACComponent;
+}
+
+VIF0DMACChannel &NekoSystem::vif0DMAC()
+{
+  return vif0DMACComponent;
+}
+
+const VIF0DMACChannel &NekoSystem::vif0DMAC() const
+{
+  return vif0DMACComponent;
 }
 
 VIF1DMACChannel &NekoSystem::vif1DMAC()

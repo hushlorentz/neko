@@ -18,6 +18,7 @@
 #include "sif1_dmac_channel.hpp"
 #include "sif0_dmac_channel.hpp"
 #include "vif.hpp"
+#include "vif0_dmac_channel.hpp"
 #include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
 
@@ -53,6 +54,7 @@ namespace
   bool fullWordOnlyAddress(std::uint32_t address)
   {
     return EETimers::isRegisterAddress(address) ||
+      VIF0DMACChannel::isRegisterAddress(address) ||
       DMACController::isAbsentChannelRegisterAddress(address) ||
       sifApertureAddress(address) ||
       address == EEMemoryMap::SIO_LCR || address == EEMemoryMap::SIO_IER ||
@@ -424,6 +426,19 @@ void EEBus::attachGIFDMACChannel(GIFDMACChannel *gifDMAC)
   gifDMACChannel = gifDMAC;
 }
 
+void EEBus::attachVIF0DMACChannel(VIF0DMACChannel *vif0DMAC)
+{
+  if (vif0DMAC == nullptr)
+  {
+    throw std::invalid_argument("EE bus requires a non-null VIF0 DMAC channel.");
+  }
+  if (vif0DMACChannel != nullptr)
+  {
+    throw std::logic_error("EE bus VIF0 DMAC channel is already attached.");
+  }
+  vif0DMACChannel = vif0DMAC;
+}
+
 void EEBus::attachVIF1DMACChannel(
   VIF1DMACChannel *vif1DMAC)
 {
@@ -557,6 +572,15 @@ GIFDMACChannel &EEBus::attachedGIFDMAC() const
       "EE bus GIF DMAC channel is not attached.");
   }
   return *gifDMACChannel;
+}
+
+VIF0DMACChannel &EEBus::attachedVIF0DMAC() const
+{
+  if (vif0DMACChannel == nullptr)
+  {
+    throw std::logic_error("EE bus VIF0 DMAC channel is not attached.");
+  }
+  return *vif0DMACChannel;
 }
 
 VIF1DMACChannel &EEBus::attachedVIF1DMAC() const
@@ -1250,6 +1274,24 @@ bool EEBus::readMapped32(
     case EEMemoryMap::GIF_P3TAG:
       *value = gifRegisterFile->readPath3Tag();
       return true;
+    case EEMemoryMap::D0_CHCR:
+      *value = attachedVIF0DMAC().channelControl();
+      return true;
+    case EEMemoryMap::D0_MADR:
+      *value = attachedVIF0DMAC().memoryAddress();
+      return true;
+    case EEMemoryMap::D0_QWC:
+      *value = attachedVIF0DMAC().quadwordCount();
+      return true;
+    case EEMemoryMap::D0_TADR:
+      *value = attachedVIF0DMAC().tagAddress();
+      return true;
+    case EEMemoryMap::D0_ASR0:
+      *value = attachedVIF0DMAC().addressStack(0);
+      return true;
+    case EEMemoryMap::D0_ASR1:
+      *value = attachedVIF0DMAC().addressStack(1);
+      return true;
     case EEMemoryMap::D1_CHCR:
       *value = attachedVIF1DMAC().channelControl();
       return true;
@@ -1484,6 +1526,24 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::GIF_MODE:
       gifRegisterFile->writeMode(value);
       return true;
+    case EEMemoryMap::D0_CHCR:
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { attachedVIF0DMAC().writeChannelControl(value); });
+    case EEMemoryMap::D0_MADR:
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { attachedVIF0DMAC().writeMemoryAddress(value); });
+    case EEMemoryMap::D0_QWC:
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { attachedVIF0DMAC().writeQuadwordCount(value); });
+    case EEMemoryMap::D0_TADR:
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { attachedVIF0DMAC().writeTagAddress(value); });
+    case EEMemoryMap::D0_ASR0:
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { attachedVIF0DMAC().writeAddressStack(0, value); });
+    case EEMemoryMap::D0_ASR1:
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { attachedVIF0DMAC().writeAddressStack(1, value); });
     case EEMemoryMap::D1_CHCR:
     {
       VIF1DMACChannel &dmac = attachedVIF1DMAC();

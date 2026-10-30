@@ -27,6 +27,7 @@ class SIFSignalReceiver;
 class NekoSystem;
 class IOPBus;
 class VIF;
+class VIF0DMACChannel;
 class VIF1DMACChannel;
 class VPU;
 
@@ -73,6 +74,12 @@ namespace EEMemoryMap
   constexpr std::uint32_t VIF1_FIFO = 0x10005000;
   constexpr std::uint32_t GIF_FIFO = 0x10006000;
 
+  constexpr std::uint32_t D0_CHCR = 0x10008000;
+  constexpr std::uint32_t D0_MADR = 0x10008010;
+  constexpr std::uint32_t D0_QWC = 0x10008020;
+  constexpr std::uint32_t D0_TADR = 0x10008030;
+  constexpr std::uint32_t D0_ASR0 = 0x10008040;
+  constexpr std::uint32_t D0_ASR1 = 0x10008050;
   constexpr std::uint32_t D1_CHCR = 0x10009000;
   constexpr std::uint32_t D1_MADR = 0x10009010;
   constexpr std::uint32_t D1_QWC = 0x10009020;
@@ -196,6 +203,7 @@ class EEBus
       EEInterruptController *interrupts);
     void attachDMACController(DMACController *dmac);
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
+    void attachVIF0DMACChannel(VIF0DMACChannel *vif0DMAC);
     void attachVIF1DMACChannel(VIF1DMACChannel *vif1DMAC);
     void attachSIF1DMACChannel(SIF1DMACChannel *sif1DMAC);
     void attachSIF0DMACChannel(SIF0DMACChannel *sif0DMAC);
@@ -331,6 +339,7 @@ class EEBus
     std::uint32_t vifStatus(const VIF &vif) const;
     DMACController &attachedDMACController() const;
     GIFDMACChannel &attachedGIFDMAC() const;
+    VIF0DMACChannel &attachedVIF0DMAC() const;
     VIF1DMACChannel &attachedVIF1DMAC() const;
     SIF1DMACChannel &attachedSIF1DMAC() const;
     SIF0DMACChannel &attachedSIF0DMAC() const;
@@ -352,6 +361,7 @@ class EEBus
     EEInterruptController *interruptController;
     DMACController *dmacController = nullptr;
     GIFDMACChannel *gifDMACChannel = nullptr;
+    VIF0DMACChannel *vif0DMACChannel = nullptr;
     VIF1DMACChannel *vif1DMACChannel = nullptr;
     SIF1DMACChannel *sif1DMACChannel = nullptr;
     SIF0DMACChannel *sif0DMACChannel = nullptr;

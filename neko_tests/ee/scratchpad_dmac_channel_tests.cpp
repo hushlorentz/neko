@@ -53,10 +53,14 @@ TEST_CASE("Scratchpad DMAC registers are guest-visible")
   REQUIRE(bus.read32(EEMemoryMap::D8_SADR) == 0x3ff0);
 
   std::uint32_t value = 0;
+  const auto beforeAbsentWrite = system.eeStateHash();
   REQUIRE_FALSE(
     bus.readData32(UINT32_C(0x1000d030), &value));
-  REQUIRE_FALSE(
+  REQUIRE(
     bus.writeData32(UINT32_C(0x1000d030), 0x1000));
+  REQUIRE_FALSE(
+    bus.readData32(UINT32_C(0x1000d030), &value));
+  REQUIRE(system.eeStateHash() == beforeAbsentWrite);
 
   bus.write32(
     EEMemoryMap::D9_CHCR,

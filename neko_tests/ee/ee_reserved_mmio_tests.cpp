@@ -951,14 +951,14 @@ TEST_CASE("EE absent DMAC slots retain exact width and address boundaries",
     }
     REQUIRE(system.iopBus().write32(address, 0).status == IOPBusStatus::Unmapped);
   }
-  for (const auto realUnimplemented : {0x10008000u, 0x10008010u, 0x10008020u,
-         0x10008030u, 0x10008040u, 0x10008050u, 0x1000b000u, 0x1000b430u,
+  for (const auto realUnimplemented : {0x1000b000u, 0x1000b430u,
          0x1000c800u})
   {
     CAPTURE(realUnimplemented);
     REQUIRE_FALSE(bus.writeData32(realUnimplemented, 0));
   }
-  for (const auto realImplemented : {EEMemoryMap::D1_TADR,
+  for (const auto realImplemented : {EEMemoryMap::D0_TADR, EEMemoryMap::D0_ASR0,
+         EEMemoryMap::D0_ASR1, EEMemoryMap::D1_TADR,
          EEMemoryMap::D1_ASR0, EEMemoryMap::D1_ASR1, EEMemoryMap::D2_TADR,
          EEMemoryMap::D2_ASR0, EEMemoryMap::D2_ASR1, EEMemoryMap::D6_TADR,
          EEMemoryMap::D8_SADR, EEMemoryMap::D9_TADR, EEMemoryMap::D9_SADR})
@@ -999,6 +999,39 @@ TEST_CASE("EE absent DMAC guest merge stores admit only full-word lanes",
       requireWordStoreObservation(system, 0x89abcdef, full, ADDRESS);
     }
   }
+}
+
+TEST_CASE("EE VIF0 DMA guest merges and starts preserve precise admission",
+  "[ee][bus][vif0-dmac][guest]")
+{
+  constexpr std::uint32_t ADDRESS = 0xb0008000;
+  for (const std::uint8_t opcode : {0x2a, 0x2e})
+  {
+    for (std::uint16_t lane = 0; lane < 4; ++lane)
+    {
+      CAPTURE(opcode);
+      CAPTURE(lane);
+      NekoSystem system;
+      const bool full = lane == (opcode == 0x2a ? 3 : 0);
+      const auto result = execute(system, opcode, 0x12340025, lane, ADDRESS);
+      REQUIRE(result.pendingException ==
+        (full ? EEException::None : EEException::DataBusErrorStore));
+      REQUIRE(system.eeBus().read32(0x10008000) == (full ? 0x12340025 : 0));
+      if (!full)
+      {
+        REQUIRE(result.exceptionAddress == ADDRESS + lane);
+        REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+      }
+      requireWordStoreObservation(system, 0x12340025, full, ADDRESS);
+    }
+  }
+  NekoSystem system;
+  const auto result = execute(system, 0x2b, 0x101, 0, ADDRESS);
+  REQUIRE(result.pendingException == EEException::DataBusErrorStore);
+  REQUIRE(result.exceptionAddress == ADDRESS);
+  REQUIRE(system.eeBus().read32(0x10008000) == 0);
+  REQUIRE(system.dmacController().status() == 0);
+  requireWordStoreObservation(system, 0x101, false, ADDRESS);
 }
 
 TEST_CASE("EE absent DMAC word stores retire identically with and without tracing",

@@ -93,7 +93,7 @@ TEST_CASE("SIF0 IOP source registers admit exact words and bounded starts",
   REQUIRE(system.iopInterruptController().status() == 0);
 }
 
-TEST_CASE("SIF0 EE destination registers have no source tag or address stack mapping",
+TEST_CASE("SIF0 EE destination registers have no source tag or address stack readback",
   "[sif0][dma][foundation]")
 {
   NekoSystem system;
@@ -120,11 +120,14 @@ TEST_CASE("SIF0 EE destination registers have no source tag or address stack map
     REQUIRE_FALSE(bus.writeData32(address + 4, 1));
     requireUnchanged(system, before);
   }
+  const auto beforeAbsentWrites = system.eeStateHash();
   for (const auto address : {0x1000c030u, 0x1000c040u, 0x1000c050u, 0x1000c080u})
   {
     REQUIRE_FALSE(bus.readData32(address, &word));
-    REQUIRE_FALSE(bus.writeData32(address, 0));
+    REQUIRE(bus.writeData32(address, 0));
+    REQUIRE_FALSE(bus.readData32(address, &word));
   }
+  REQUIRE(system.eeStateHash() == beforeAbsentWrites);
   REQUIRE(bus.writeData32(EE_MADR, 0x8000123f));
   REQUIRE(bus.read32(EE_MADR) == 0x80001230);
   REQUIRE(bus.writeData32(EE_QWC, 0xabcd1234));

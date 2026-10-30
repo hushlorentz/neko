@@ -1350,6 +1350,63 @@ void NekoSaveStateCodec::readDMAC(
     "GIF DMAC address-stack state is invalid");
 }
 
+void NekoSaveStateCodec::writeVIF0DMAC(
+  SaveStateWriter *writer,
+  const VIF0DMACChannel &dmac)
+{
+  writer->writeFieldU32("channelControlRegister", dmac.channelControl());
+  writer->writeFieldU32("memoryAddressRegister", dmac.memoryAddress());
+  writer->writeFieldU32("quadwordCountRegister", dmac.quadwordCount());
+  writer->writeFieldU32("tagAddressRegister", dmac.tagAddress());
+  auto addresses = writer->scope("addressStackRegisters");
+  for (std::size_t index = 0; index < 2; ++index)
+  {
+    auto element = writer->element(index);
+    writer->writeFieldU32("value", dmac.addressStack(index));
+  }
+}
+
+void NekoSaveStateCodec::readVIF0DMAC(
+  SaveStateReader *reader,
+  VIF0DMACChannel *dmac)
+{
+  const auto control = reader->readFieldU32("channelControlRegister");
+  const auto memory = reader->readFieldU32("memoryAddressRegister");
+  const auto count = reader->readFieldU32("quadwordCountRegister");
+  const auto tag = reader->readFieldU32("tagAddressRegister");
+  std::array<std::uint32_t, 2> stack{};
+  {
+    auto addresses = reader->scope("addressStackRegisters");
+    for (std::size_t index = 0; index < stack.size(); ++index)
+    {
+      auto element = reader->element(index);
+      stack[index] = reader->readFieldU32("value");
+    }
+  }
+  VIF0DMACChannel prepared;
+  try
+  {
+    prepared.writeChannelControl(control);
+    prepared.writeMemoryAddress(memory);
+    prepared.writeQuadwordCount(count);
+    prepared.writeTagAddress(tag);
+    for (std::size_t index = 0; index < stack.size(); ++index)
+    {
+      prepared.writeAddressStack(index, stack[index]);
+    }
+  }
+  catch (const std::invalid_argument &error)
+  {
+    reader->requireField(false, error.what());
+  }
+  reader->requireField(prepared.channelControl() == control &&
+    prepared.memoryAddress() == memory && prepared.quadwordCount() == count &&
+    prepared.tagAddress() == tag &&
+    prepared.addressStack(0) == stack[0] && prepared.addressStack(1) == stack[1],
+    "VIF0 DMAC register state is not canonical");
+  *dmac = prepared;
+}
+
 void NekoSaveStateCodec::writeVIF1DMAC(
   SaveStateWriter *writer,
   const VIF1DMACChannel &dmac)

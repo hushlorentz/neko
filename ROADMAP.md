@@ -2560,6 +2560,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate access boundaries and unchanged DMA state, obtain independent
       review, then verify progress through a fresh authorized cold scout.
 
+### EE VIF0 DMA Stopped-Channel Registers
+
+- [x] Establish the six-register stopped initialization contract and reuse the
+      shared channel-state owner without admitting DMA execution.
+- [x] Add exact word access, reset/hash and versioned transactional persistence;
+      reject starts and unsupported access/field combinations before mutation.
+- [x] Validate state and guest continuation, pass complete optimized/ASan
+      checks and independent review, then run a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read
