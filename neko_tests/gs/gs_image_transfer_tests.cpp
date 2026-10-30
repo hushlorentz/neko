@@ -453,6 +453,105 @@ TEST_CASE("GS PSMCT32 Local-to-Host Transfer Tests")
   }
 }
 
+TEST_CASE("GS empty PSMCT32 transfers remain inactive")
+{
+  for (const std::uint64_t direction : {0, 1})
+  {
+    for (const std::uint8_t bufferWidth : {0, 1})
+    {
+      for (const auto dimensions : {
+             transferRegion(0, 3),
+             transferRegion(3, 0),
+             transferRegion(0, 0)})
+      {
+        CAPTURE(direction);
+        CAPTURE(bufferWidth);
+        CAPTURE(dimensions);
+        GS gs;
+        gs.writeRegister(
+          GSRegisterAddress::BITBLTBUF,
+          transferBuffer(0, 1, GSPixelStorageMode::PSMCT32) |
+          sourceTransferBuffer(0, 1, GSPixelStorageMode::PSMCT32));
+        gs.writeRegister(GSRegisterAddress::TRXREG, transferRegion(4, 1));
+        gs.writeRegister(GSRegisterAddress::TRXDIR, direction);
+        if (direction == 0)
+        {
+          gs.writeRegister(
+            GSRegisterAddress::HWREG,
+            UINT64_C(0x2222222211111111));
+        }
+        else
+        {
+          gs.writePrivilegedRegister(GSPrivilegedRegisterAddress::BUSDIR, 1);
+          gs.readHostInterface();
+          gs.writePrivilegedRegister(GSPrivilegedRegisterAddress::BUSDIR, 0);
+        }
+        REQUIRE(gs.imageTransfer().active);
+        REQUIRE(gs.imageTransfer().transferredPixels == 2);
+
+        const auto firstPixel = gs.localMemoryWord(0);
+        const auto secondPixel = gs.localMemoryWord(1);
+        const auto buffer =
+          transferBuffer(0, bufferWidth, GSPixelStorageMode::PSMCT32) |
+          sourceTransferBuffer(0, bufferWidth, GSPixelStorageMode::PSMCT32);
+        gs.writeRegister(GSRegisterAddress::BITBLTBUF, buffer);
+        gs.writeRegister(GSRegisterAddress::TRXREG, dimensions);
+        REQUIRE_NOTHROW(gs.writeRegister(GSRegisterAddress::TRXDIR, direction));
+        REQUIRE(!gs.imageTransfer().active);
+        REQUIRE(gs.imageTransfer().transferredPixels == 0);
+        REQUIRE(
+          gs.imageTransfer().direction ==
+          static_cast<GSImageTransferDirection>(direction));
+        REQUIRE(gs.registerValue(GSRegisterAddress::BITBLTBUF) == buffer);
+        REQUIRE(gs.registerValue(GSRegisterAddress::TRXREG) == dimensions);
+        REQUIRE(gs.registerValue(GSRegisterAddress::TRXDIR) == direction);
+
+        gs.writeRegister(GSRegisterAddress::HWREG, UINT64_C(0xdeadbeefdeadbeef));
+        REQUIRE(gs.localMemoryWord(0) == firstPixel);
+        REQUIRE(gs.localMemoryWord(1) == secondPixel);
+        REQUIRE(gs.localMemoryWord(4) == 0);
+        REQUIRE_THROWS_WITH(
+          gs.readHostInterface(),
+          "GS host-interface reads require BUSDIR local-to-host.");
+        gs.writePrivilegedRegister(GSPrivilegedRegisterAddress::BUSDIR, 1);
+        REQUIRE_THROWS_WITH(
+          gs.readHostInterface(),
+          "GS local-to-host transfer is not active.");
+        REQUIRE(gs.imageTransfer().transferredPixels == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("GS empty transfers preserve format and direction rejection")
+{
+  for (const auto dimensions : {
+         transferRegion(0, 3),
+         transferRegion(3, 0),
+         transferRegion(0, 0)})
+  {
+    CAPTURE(dimensions);
+    GS gs;
+    gs.writeRegister(GSRegisterAddress::TRXREG, dimensions);
+    gs.writeRegister(
+      GSRegisterAddress::BITBLTBUF,
+      transferBuffer(0, 0, 1) | sourceTransferBuffer(0, 0, 1));
+    REQUIRE_THROWS_WITH(
+      gs.writeRegister(GSRegisterAddress::TRXDIR, 0),
+      "GS host-to-local transfer requires PSMCT32.");
+    REQUIRE_THROWS_WITH(
+      gs.writeRegister(GSRegisterAddress::TRXDIR, 1),
+      "GS local-to-host transfer requires PSMCT32.");
+    gs.writeRegister(GSRegisterAddress::BITBLTBUF, 0);
+    REQUIRE_THROWS_WITH(
+      gs.writeRegister(GSRegisterAddress::TRXDIR, 2),
+      "GS image transfer direction is not implemented.");
+    REQUIRE_NOTHROW(gs.writeRegister(GSRegisterAddress::TRXDIR, 3));
+    REQUIRE(!gs.imageTransfer().active);
+    REQUIRE(gs.imageTransfer().transferredPixels == 0);
+  }
+}
+
 TEST_CASE("PATH3 IMAGE to GS Transfer Integration Tests")
 {
   SECTION("PATH3 configures and uploads a PSMCT32 rectangle")
@@ -461,6 +560,21 @@ TEST_CASE("PATH3 IMAGE to GS Transfer Integration Tests")
     GIFDecoder decoder;
     decoder.attachRegisterWriteHandler(&gs);
     GIFPath3Transfer path3(&decoder);
+    const std::vector<GIFQuadword> emptyPacket = {
+      gifTag(4, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
+      adWrite(GSRegisterAddress::BITBLTBUF, 0),
+      adWrite(GSRegisterAddress::TRXPOS, 0),
+      adWrite(GSRegisterAddress::TRXREG, 0),
+      adWrite(GSRegisterAddress::TRXDIR, 0)
+    };
+    const auto emptyResult =
+      path3.submitQuadwords(emptyPacket.data(), emptyPacket.size());
+    REQUIRE(emptyResult.transferredQuadwords == emptyPacket.size());
+    REQUIRE(emptyResult.packetComplete);
+    REQUIRE(path3.completedPacketCount() == 1);
+    REQUIRE(!decoder.packetInProgress());
+    REQUIRE(!gs.imageTransfer().active);
+    REQUIRE(gs.imageTransfer().transferredPixels == 0);
     const std::vector<GIFQuadword> packet = {
       gifTag(4, GIFDataFormat::Packed, GIFRegisterDescriptor::AD),
       adWrite(

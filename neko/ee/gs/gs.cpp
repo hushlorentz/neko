@@ -1987,6 +1987,10 @@ void GS::startImageTransfer(std::uint64_t data)
       throw std::runtime_error(
         "GS host-to-local transfer requires PSMCT32.");
     }
+    if (transfer.width == 0 || transfer.height == 0)
+    {
+      return;
+    }
     if (transfer.destinationBufferWidth == 0)
     {
       throw std::runtime_error(
@@ -2002,6 +2006,10 @@ void GS::startImageTransfer(std::uint64_t data)
       throw std::runtime_error(
         "GS local-to-host transfer requires PSMCT32.");
     }
+    if (transfer.width == 0 || transfer.height == 0)
+    {
+      return;
+    }
     if (transfer.sourceBufferWidth == 0)
     {
       throw std::runtime_error(
@@ -2014,10 +2022,6 @@ void GS::startImageTransfer(std::uint64_t data)
       "GS image transfer direction is not implemented.");
   }
 
-  if (transfer.width == 0 || transfer.height == 0)
-  {
-    return;
-  }
   transfer.active = true;
 }
 

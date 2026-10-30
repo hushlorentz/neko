@@ -2521,9 +2521,18 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### GS Startup Transfer Boundary Contract
 
-- [ ] Identify the guest GS transaction behind the startup destination-width
+- [x] Identify the guest GS transaction behind the startup destination-width
       runtime error and select an evidence-backed bounded contract through
       the existing GS/GIF owners; do not infer valid transfer setup.
+
+### GS Bounded Empty Image Transfers
+
+- [x] Keep zero-width or zero-height PSMCT32 host-to-local/local-to-host
+      requests inactive through the existing GS owner; reset progress without
+      validating unused buffer width or relaxing other transfer rejection.
+- [x] Validate restart, inactive data access and packed A+D PATH3 completion
+      with BIOS-free regressions and independent review, then use a fresh
+      authorized cold scout to verify progress and attribute the next dependency.
 
 ### Real BIOS Handshake and Boundary Conformance
 
