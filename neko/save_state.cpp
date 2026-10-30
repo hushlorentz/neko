@@ -659,8 +659,9 @@ void NekoSaveStateCodec::validateSystem(
     system.vif0Component.type == VIFType::VIF0 &&
     system.vif1Component.type == VIFType::VIF1,
     "VIF identities do not match the system wiring");
+  // Compare decoded wire fields, not VIF's attached live-mask view.
   reader->requireField(
-    system.vif1Component.path3Mask ==
+    system.vif1Component.unattachedPath3Mask ==
       system.gifPathArbiterComponent.vifPath3Mask,
     "VIF1 and GIF PATH3 mask state disagree");
   if (system.gifPathArbiterComponent.interruptedPath3)

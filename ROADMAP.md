@@ -2387,7 +2387,19 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       access routes or introducing command, status or cross-register effects.
 - [x] Validate offset04/08 independence, guest trace, reset/hash and versioned
       atomic persistence; independently review and pass optimized/ASan gates.
-- [ ] With separate BIOS-run authorization, verify the originating store
+- [x] With separate BIOS-run authorization, verify the originating store
+      using a fresh cold scout and attribute the next dependency.
+
+### GIF Control Reset Startup Boundary
+
+- [x] Define GIF reset's documented core and provisional in-flight policy;
+      preserve external VIF/VU/DMAC and GS state, and keep pause unsupported.
+- [x] Route exact word reset/no-op controls through GIFRegisters; reset packet
+      and arbiter state without stale VIF masks or producer cancellation.
+- [x] Validate active/interrupted packets, FIFO discard, access rejection,
+      observer preservation and restored continuation; independently review
+      and pass complete optimized/AddressSanitizer checks.
+- [ ] With separate BIOS-run authorization, verify the originating reset write
       using a fresh cold scout and attribute the next dependency.
 
 ### Real BIOS Handshake and Boundary Conformance

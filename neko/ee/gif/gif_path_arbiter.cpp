@@ -12,6 +12,23 @@ GIFPathArbiter::GIFPathArbiter(GIFDecoder *decoder) :
   }
 }
 
+void GIFPathArbiter::reset()
+{
+  gifDecoder->resetPacketState();
+  currentPath = GIFPath::Idle;
+  queuedPaths = {};
+  vifPath3Mask = false;
+  modePath3Mask = false;
+  intermittentPath3 = false;
+  interruptedPath3 = false;
+  queuedPath2Interruption = GIFPath3InterruptionPolicy::Defer;
+  path3ImageSliceQuadwords = 0;
+  path3Count = 0;
+  path3Tag = 0;
+  remainingIdleCycles = 0;
+  suspendedPath3State = {};
+}
+
 bool GIFPathArbiter::requestPath(
   GIFPath path,
   GIFPath3InterruptionPolicy path3Interruption)

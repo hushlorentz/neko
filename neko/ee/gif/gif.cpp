@@ -104,6 +104,18 @@ GIFTag decodeGIFTag(const GIFQuadword &quadword)
   return tag;
 }
 
+void GIFDecoder::resetPacketState()
+{
+  tag = GIFTag();
+  waitingForTag = true;
+  activePacket = false;
+  remainingQuadwords = 0;
+  remainingRegisterValues = 0;
+  currentLoop = 0;
+  currentRegister = 0;
+  qValue = 0;
+}
+
 GIFDecodeResult GIFDecoder::ingestQuadword(
   const GIFQuadword &quadword)
 {
@@ -445,14 +457,7 @@ GIFDecoderState GIFDecoder::suspendPacket()
   state.currentRegister = currentRegister;
   state.qValue = qValue;
 
-  tag = GIFTag();
-  waitingForTag = true;
-  activePacket = false;
-  remainingQuadwords = 0;
-  remainingRegisterValues = 0;
-  currentLoop = 0;
-  currentRegister = 0;
-  qValue = 0;
+  resetPacketState();
   return state;
 }
 

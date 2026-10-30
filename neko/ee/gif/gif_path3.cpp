@@ -83,6 +83,11 @@ void GIFPath3Transfer::advanceGuestFIFO()
   }
 }
 
+void GIFPath3Transfer::discardGuestFIFO()
+{
+  guestFIFO.clear();
+}
+
 std::size_t GIFPath3Transfer::guestFIFOQuadwordCount() const
 {
   return guestFIFO.size();

@@ -112,10 +112,11 @@ void VIF::attachGIFDecoder(GIFDecoder *attachedGIFDecoder)
       "Cannot replace GIF routing during a transfer.");
   }
 
+  const bool mask = path3Masked();
   ownedGIFPathArbiter.reset(
     new GIFPathArbiter(attachedGIFDecoder));
   gifPathArbiter = ownedGIFPathArbiter.get();
-  gifPathArbiter->setPath3MaskedByVIF(path3Mask);
+  gifPathArbiter->setPath3MaskedByVIF(mask);
 }
 
 void VIF::attachGIFPathArbiter(
@@ -143,9 +144,10 @@ void VIF::attachGIFPathArbiter(
       "Cannot replace GIF routing during a transfer.");
   }
 
+  const bool mask = path3Masked();
   ownedGIFPathArbiter.reset();
   gifPathArbiter = attachedArbiter;
-  gifPathArbiter->setPath3MaskedByVIF(path3Mask);
+  gifPathArbiter->setPath3MaskedByVIF(mask);
 }
 
 VIFCommand VIF::processCode(std::uint32_t code)
@@ -195,13 +197,19 @@ VIFCommand VIF::processCode(std::uint32_t code)
       modeRegister = command.immediate & VIF_STMOD_MASK;
       break;
     case VIFCommandKind::MSKPATH3:
-      path3Mask =
+    {
+      const bool mask =
         (command.immediate & VIFImmediateEncoding::MSKPATH3Mask) != 0;
       if (gifPathArbiter != nullptr)
       {
-        gifPathArbiter->setPath3MaskedByVIF(path3Mask);
+        gifPathArbiter->setPath3MaskedByVIF(mask);
+      }
+      else
+      {
+        unattachedPath3Mask = mask;
       }
       break;
+    }
     case VIFCommandKind::MARK:
       markRegister = command.immediate;
       markFlag = true;
@@ -906,7 +914,9 @@ bool VIF::doubleBufferFlag() const
 
 bool VIF::path3Masked() const
 {
-  return path3Mask;
+  return gifPathArbiter == nullptr
+    ? unattachedPath3Mask
+    : gifPathArbiter->path3MaskedByVIF();
 }
 
 bool VIF::markDetected() const

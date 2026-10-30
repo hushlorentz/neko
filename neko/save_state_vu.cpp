@@ -1002,7 +1002,7 @@ void NekoSaveStateCodec::writeVIF(
   writer->writeFieldU16("topsRegister", vif.topsRegister);
   writer->writeFieldU16("markRegister", vif.markRegister);
   writer->writeFieldBool("dbf", vif.dbf);
-  writer->writeFieldBool("path3Mask", vif.path3Mask);
+  writer->writeFieldBool("path3Mask", vif.path3Masked());
   writer->writeFieldBool("markFlag", vif.markFlag);
   writer->writeFieldBool("interruptFlag", vif.interruptFlag);
   writer->writeFieldU32("codeRegister", vif.codeRegister);
@@ -1101,7 +1101,7 @@ void NekoSaveStateCodec::readVIF(
   vif->topsRegister = reader->readFieldU16("topsRegister");
   vif->markRegister = reader->readFieldU16("markRegister");
   vif->dbf = reader->readFieldBool("dbf");
-  vif->path3Mask = reader->readFieldBool("path3Mask");
+  vif->unattachedPath3Mask = reader->readFieldBool("path3Mask");
   vif->markFlag = reader->readFieldBool("markFlag");
   vif->interruptFlag = reader->readFieldBool("interruptFlag");
   vif->codeRegister = reader->readFieldU32("codeRegister");
@@ -1187,7 +1187,7 @@ void NekoSaveStateCodec::commitVIF(
   destination->topsRegister = source->topsRegister;
   destination->markRegister = source->markRegister;
   destination->dbf = source->dbf;
-  destination->path3Mask = source->path3Mask;
+  destination->unattachedPath3Mask = source->unattachedPath3Mask;
   destination->markFlag = source->markFlag;
   destination->interruptFlag = source->interruptFlag;
   destination->codeRegister = source->codeRegister;

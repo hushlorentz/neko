@@ -104,6 +104,32 @@ TEST_CASE("VIF PATH2 Attachment Tests")
   }
 }
 
+TEST_CASE("VIF live PATH3 mask follows its arbiter across routing changes",
+  "[gif][reset][vif]")
+{
+  GIFDecoder first;
+  GIFDecoder second;
+  GIFPathArbiter shared(&first);
+  GIFPathArbiter replacement(&second);
+  VIF vif(VIFType::VIF1);
+  vif.processCode(vifCode(VIFCommandEncoding::MSKPATH3, 0x8000));
+  REQUIRE(vif.path3Masked());
+  vif.attachGIFPathArbiter(&shared);
+  REQUIRE(shared.path3MaskedByVIF());
+  shared.setPath3MaskedByVIF(false);
+  REQUIRE(!vif.path3Masked());
+  vif.attachGIFDecoder(&second);
+  REQUIRE(!vif.path3Masked());
+  vif.processCode(vifCode(VIFCommandEncoding::MSKPATH3, 0x8000));
+  REQUIRE(vif.path3Masked());
+  vif.attachGIFPathArbiter(&shared);
+  REQUIRE(shared.path3MaskedByVIF());
+  shared.setPath3MaskedByVIF(false);
+  vif.attachGIFPathArbiter(&replacement);
+  REQUIRE(!replacement.path3MaskedByVIF());
+  REQUIRE(!vif.path3Masked());
+}
+
 TEST_CASE("VIF PATH2 DIRECT Tests")
 {
   SECTION("Fragmented DIRECT words decode a complete GIF packet")

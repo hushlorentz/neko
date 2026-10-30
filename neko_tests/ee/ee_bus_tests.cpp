@@ -1203,6 +1203,128 @@ TEST_CASE("EE guest instructions reject invalid device access directions")
   }
 }
 
+TEST_CASE("EE GIF reset admits only complete word controls atomically",
+  "[gif][reset][ee][bus]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  bus.write32(EEMemoryMap::GIF_MODE, GIFMode::M3R | GIFMode::IMT);
+  system.vif1().processCode(UINT32_C(0x06008000));
+  REQUIRE(system.gifPath3().submitGuestQuadword(gifTag()));
+  const auto hash = system.eeStateHash();
+  REQUIRE(bus.writeData32(EEMemoryMap::GIF_BASE, 0));
+  REQUIRE(system.eeStateHash() == hash);
+  for (const auto value : {2u, 8u, 9u, 0x10u, UINT32_MAX})
+  {
+    CAPTURE(value);
+    REQUIRE_FALSE(bus.writeData32(EEMemoryMap::GIF_BASE, value));
+    REQUIRE_THROWS_AS(bus.write32(EEMemoryMap::GIF_BASE, value),
+      std::invalid_argument);
+    REQUIRE(system.eeStateHash() == hash);
+  }
+  for (unsigned offset = 0; offset < 4; ++offset)
+  {
+    REQUIRE_FALSE(bus.writeData8(EEMemoryMap::GIF_BASE + offset, 1));
+  }
+  REQUIRE_FALSE(bus.writeData16(EEMemoryMap::GIF_BASE, 1));
+  REQUIRE_FALSE(bus.writeData16(EEMemoryMap::GIF_BASE + 2, 1));
+  REQUIRE_FALSE(bus.writeData64(EEMemoryMap::GIF_BASE, 1));
+  REQUIRE_FALSE(bus.writeData128(EEMemoryMap::GIF_BASE, {1, 0}));
+  REQUIRE_FALSE(bus.writeDMAC128(EEMemoryMap::GIF_BASE, {1, 0}));
+  for (const auto offset : {4u, 8u, 12u})
+  {
+    REQUIRE_FALSE(bus.writeData32(EEMemoryMap::GIF_BASE + offset, 1));
+  }
+  std::uint32_t word = 0xa5a5a5a5;
+  REQUIRE_FALSE(bus.readData32(EEMemoryMap::GIF_BASE, &word));
+  REQUIRE(word == 0xa5a5a5a5);
+  REQUIRE_FALSE(bus.readInstruction32(EEMemoryMap::GIF_BASE, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(EEMemoryMap::GIF_BASE, 4));
+  EEQuadword quad = {UINT64_MAX, UINT64_MAX};
+  REQUIRE_FALSE(bus.readDMAC128(EEMemoryMap::GIF_BASE, &quad));
+  REQUIRE(system.eeStateHash() == hash);
+  REQUIRE(bus.writeData32(EEMemoryMap::GIF_BASE, 1));
+  REQUIRE(bus.read32(EEMemoryMap::GIF_STAT) == 0);
+}
+
+TEST_CASE("EE GIF reset guest stores preserve traced and restored continuation",
+  "[gif][reset][ee][bus][save-state]")
+{
+  std::uint32_t opcode = UINT32_C(0xac440000);
+  SECTION("SW") {}
+  SECTION("full SWL") { opcode = UINT32_C(0xa8440003); }
+  SECTION("full SWR") { opcode = UINT32_C(0xb8440000); }
+  NekoSystem original;
+  original.eeBus().write32(0, opcode);
+  original.eeBus().write32(EEMemoryMap::GIF_MODE, GIFMode::M3R | GIFMode::IMT);
+  original.vif1().processCode(UINT32_C(0x06008000));
+  REQUIRE(original.gifPath3().submitGuestQuadword(gifTag()));
+  original.eeCore().setCOP0Register(EECOP0Register::Status, 1u << 2);
+  original.eeCore().setGeneralRegister(2, {EEMemoryMap::GIF_BASE, 0});
+  original.eeCore().setGeneralRegister(4, {1, 0});
+  original.eeCore().startExecution(EEMemoryMap::KSEG1_BASE);
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  NekoSystem plain;
+  restored.loadState(saved);
+  plain.loadState(saved);
+  original.startTrace(100);
+  restored.startTrace(100);
+  for (auto *machine : {&original, &restored, &plain})
+  {
+    const auto result = machine->stepEEInstruction(16);
+    REQUIRE(result.pendingException == EEException::None);
+    REQUIRE_FALSE(result.cycleLimitReached);
+    REQUIRE(machine->gifRegisters().readStatus() == 0);
+    REQUIRE(!machine->vif1().path3Masked());
+  }
+  std::size_t stores = 0;
+  for (const auto &event : original.trace())
+  {
+    if (event.subsystem == NekoTraceSubsystem::EE &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 == EEMemoryMap::GIF_BASE)
+    {
+      ++stores;
+      REQUIRE(event.value1 == 1);
+      REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+        EEMemoryMap::GIF_BASE, 4, NekoEETraceMemory::AccessKind::DataStore,
+        NekoEETraceMemory::TranslationOutcome::Translated,
+        NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
+        NekoEETraceMemory::CacheAccess::Bypassed,
+        NekoEETraceMemory::TransferOutcome::Completed,
+        NekoEETraceMemory::FailurePhase::None}));
+    }
+  }
+  REQUIRE(stores == 1);
+  REQUIRE(original.traceHash() == restored.traceHash());
+  const auto ending = original.saveState();
+  REQUIRE(restored.saveState() == ending);
+  REQUIRE(plain.saveState() == ending);
+  restored.loadState(ending);
+  REQUIRE(restored.saveState() == ending);
+}
+
+TEST_CASE("EE GIF reset rejects partial and unsupported guest stores",
+  "[gif][reset][ee][bus]")
+{
+  std::uint32_t opcode = UINT32_C(0xa8440001);
+  std::uint32_t value = 1;
+  SECTION("partial SWL") {}
+  SECTION("partial SWR") { opcode = UINT32_C(0xb8440001); }
+  SECTION("PSE") { opcode = UINT32_C(0xac440000); value = 9; }
+  NekoSystem system;
+  system.eeBus().write32(0, opcode);
+  system.eeBus().write32(EEMemoryMap::GIF_MODE, GIFMode::M3R | GIFMode::IMT);
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 1u << 2);
+  system.eeCore().setGeneralRegister(2, {EEMemoryMap::GIF_BASE, 0});
+  system.eeCore().setGeneralRegister(4, {value, 0});
+  system.eeCore().startExecution(EEMemoryMap::KSEG1_BASE);
+  const auto result = system.stepEEInstruction(16);
+  REQUIRE(result.pendingException == EEException::DataBusErrorStore);
+  REQUIRE(system.gifRegisters().readStatus() == (GIFStatus::M3R | GIFStatus::IMT));
+}
+
 TEST_CASE("EE GIF Memory Map Tests")
 {
   NekoSystem system;

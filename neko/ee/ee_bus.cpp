@@ -47,6 +47,7 @@ namespace
       address == EEMemoryMap::SIO_ISR ||
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       mchWindowAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
+      address == EEMemoryMap::GIF_CTRL ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
@@ -1464,6 +1465,10 @@ bool EEBus::writeMapped32(
         vif1Component->clearInterrupt();
       }
       return true;
+    case EEMemoryMap::GIF_CTRL:
+      return performDeviceWrite(
+        checkedGuestAccess,
+        [&]() { gifRegisterFile->writeControl(value); });
     case EEMemoryMap::GIF_MODE:
       gifRegisterFile->writeMode(value);
       return true;

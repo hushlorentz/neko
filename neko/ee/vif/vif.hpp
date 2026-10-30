@@ -110,7 +110,7 @@ class VIF : public VUVIFRegisterSource
     std::uint16_t topsRegister = 0;
     std::uint16_t markRegister = 0;
     bool dbf = false;
-    bool path3Mask = false;
+    bool unattachedPath3Mask = false;
     bool markFlag = false;
     bool interruptFlag = false;
     std::uint32_t codeRegister = 0;

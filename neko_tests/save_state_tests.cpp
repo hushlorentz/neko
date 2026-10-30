@@ -2306,6 +2306,34 @@ TEST_CASE("Stalled GIF DMA state resumes identically after load")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
+TEST_CASE("GIF reset keeps canonical mask mirrors consistent and rejects mismatches",
+  "[gif][reset][save-state]")
+{
+  NekoSystem original;
+  original.vif1().processCode(UINT32_C(0x06008000));
+  REQUIRE(original.vif1().path3Masked());
+  original.eeBus().write32(EEMemoryMap::GIF_BASE, 1);
+  const auto saved = original.saveState();
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(!restored.vif1().path3Masked());
+  REQUIRE(restored.saveState() == saved);
+  restored.eeBus().write32(0x3000, 0x12345678);
+  const auto before = restored.saveState();
+  const auto hash = restored.eeStateHash();
+  for (const auto *field : {
+      "system.vif1.path3Mask", "system.gifArbiter.vifPath3Mask"})
+  {
+    CAPTURE(field);
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(field, 1);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(restored.saveState() == before);
+    REQUIRE(restored.eeStateHash() == hash);
+  }
+}
+
 TEST_CASE("Queued guest FIFO data survives save states")
 {
   NekoSystem original;

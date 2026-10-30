@@ -64,6 +64,7 @@ class GIFPathArbiter : public ClockedComponent
   public:
     explicit GIFPathArbiter(GIFDecoder *decoder);
 
+    void reset();
     bool requestPath(
       GIFPath path,
       GIFPath3InterruptionPolicy path3Interruption =

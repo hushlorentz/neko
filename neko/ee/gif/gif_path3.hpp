@@ -29,6 +29,7 @@ class GIFPath3Transfer
       std::size_t count);
     bool submitGuestQuadword(const GIFQuadword &quadword);
     void advanceGuestFIFO();
+    void discardGuestFIFO();
     std::size_t guestFIFOQuadwordCount() const;
 
     std::uint64_t submissionAttemptCount() const;

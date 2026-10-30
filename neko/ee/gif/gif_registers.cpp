@@ -17,6 +17,19 @@ GIFRegisters::GIFRegisters(
   }
 }
 
+void GIFRegisters::writeControl(std::uint32_t value)
+{
+  if ((value & ~GIFControl::RST) != 0)
+  {
+    throw std::invalid_argument("Unsupported GIF_CTRL operation.");
+  }
+  if ((value & GIFControl::RST) != 0)
+  {
+    gifPathArbiter->reset();
+    gifPath3Transfer->discardGuestFIFO();
+  }
+}
+
 void GIFRegisters::writeMode(std::uint32_t value)
 {
   gifPathArbiter->setPath3MaskedByMode(

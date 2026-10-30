@@ -7,6 +7,11 @@
 
 class GIFPath3Transfer;
 
+namespace GIFControl
+{
+  constexpr std::uint32_t RST = 1u << 0;
+}
+
 namespace GIFMode
 {
   constexpr std::uint32_t M3R = 1u << 0;
@@ -36,6 +41,7 @@ class GIFRegisters
       GIFPathArbiter *arbiter,
       GIFPath3Transfer *path3);
 
+    void writeControl(std::uint32_t value);
     void writeMode(std::uint32_t value);
     std::uint32_t readStatus() const;
     std::uint32_t readPath3Count() const;

@@ -102,6 +102,7 @@ GIFTag decodeGIFTag(const GIFQuadword &quadword);
 class GIFDecoder
 {
   public:
+    void resetPacketState();
     GIFDecodeResult ingestQuadword(const GIFQuadword &quadword);
     void attachRegisterWriteHandler(
       GIFRegisterWriteHandler *attachedHandler);
