@@ -658,6 +658,12 @@ bool EEBus::readData8(
     *value = 0;
     return true;
   }
+  if (address == EEMemoryMap::IOP_DEV9_REVISION)
+  {
+    // Provisional absent-DEV9 profile, not a measured controller revision.
+    *value = 0;
+    return true;
+  }
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 1, &physicalAddress))
   {

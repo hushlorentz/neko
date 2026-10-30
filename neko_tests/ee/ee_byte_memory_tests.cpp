@@ -61,6 +61,67 @@ TEST_CASE("EE byte loads reach the retail IOP boot probe through kernel aliases"
   }
 }
 
+TEST_CASE("EE byte loads reach the absent DEV9 revision without device effects",
+  "[ee][guest][trace][dev9-revision]")
+{
+  for (std::uint32_t address : {0x9f80146eu, 0xbf80146eu})
+  {
+    const bool cachedAlias = address == 0x9f80146e;
+    for (std::uint8_t opcode : {0x20, 0x24})
+    {
+      CAPTURE(address);
+      CAPTURE(opcode);
+      std::uint64_t plainHash = 0;
+      for (bool traced : {false, true})
+      {
+        CAPTURE(traced);
+        NekoSystem system;
+        EECore &core = system.eeCore();
+        setRegister(&core, 1, address);
+        setRegister(&core, 2, UINT64_MAX);
+        if (traced)
+        {
+          system.startTrace(100);
+        }
+        runInstruction(&system, memoryInstruction(opcode, 1, 2, 0));
+        REQUIRE(core.pendingException() == EEException::None);
+        REQUIRE(core.programCounter() == 4);
+        REQUIRE(core.generalRegister(2).low == 0);
+        REQUIRE(core.generalRegister(2).high == UINT64_C(0xfeedfacecafebeef));
+        if (!traced)
+        {
+          plainHash = system.eeStateHash();
+          continue;
+        }
+        REQUIRE(system.eeStateHash() == plainHash);
+        std::size_t reads = 0;
+        for (const auto &event : system.trace())
+        {
+          if (event.subsystem == NekoTraceSubsystem::EE &&
+              event.type == NekoTraceEventType::MemoryAccess &&
+              event.value0 == address)
+          {
+            ++reads;
+            REQUIRE(event.value1 == 0);
+            REQUIRE(event.value2 == 0);
+            REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+              0x1f80146e, 1, NekoEETraceMemory::AccessKind::DataLoad,
+              NekoEETraceMemory::TranslationOutcome::Translated,
+              cachedAlias ? NekoEETraceMemory::CacheRoute::CachedNoncoherent
+                          : NekoEETraceMemory::CacheRoute::Uncached,
+              static_cast<std::uint8_t>(cachedAlias ? 3 : 2), false, true,
+              NekoEETraceMemory::CacheAccess::Bypassed,
+              NekoEETraceMemory::TransferOutcome::Completed,
+              NekoEETraceMemory::FailurePhase::None}));
+          }
+        }
+        REQUIRE(reads == 1);
+        REQUIRE_FALSE(system.traceTruncated());
+      }
+    }
+  }
+}
+
 TEST_CASE("EE signed and unsigned byte loads")
 {
   SECTION("LB sign extends and preserves the upper GPR doubleword")

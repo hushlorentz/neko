@@ -340,6 +340,65 @@ TEST_CASE("EE retail IOP boot probe is an exact stateless byte read",
   REQUIRE(system.saveState() == state);
 }
 
+TEST_CASE("EE absent DEV9 revision is an exact stateless byte read",
+  "[ee][bus][dev9-revision]")
+{
+  constexpr std::uint32_t ADDRESS = 0x1f80146e;
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  const auto eeHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    std::uint8_t byte = 0xa5;
+    REQUIRE(bus.readData8(ADDRESS, &byte));
+    REQUIRE(byte == 0);
+  }
+  REQUIRE_THROWS_AS(bus.readData8(ADDRESS, nullptr), std::invalid_argument);
+  for (std::uint32_t address : {ADDRESS, 0x1f80146du, 0x1f80146fu,
+       0x1f801470u, 0x9f80146eu, 0xbf80146eu})
+  {
+    CAPTURE(address);
+    if (address != ADDRESS)
+    {
+      std::uint8_t byte = 0xa5;
+      REQUIRE_FALSE(bus.readData8(address, &byte));
+      REQUIRE(byte == 0xa5);
+    }
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+    REQUIRE_FALSE(bus.writeData8(address, 0x32));
+  }
+  std::uint16_t halfword = 0xa5a5;
+  std::uint32_t word = 0xa5a5a5a5;
+  std::uint64_t doubleword = UINT64_MAX;
+  EEQuadword quadword{UINT64_MAX, UINT64_MAX};
+  REQUIRE_FALSE(bus.readData16(ADDRESS, &halfword));
+  REQUIRE(halfword == 0xa5a5);
+  REQUIRE_FALSE(bus.readData32(0x1f80146c, &word));
+  REQUIRE(word == 0xa5a5a5a5);
+  REQUIRE_FALSE(bus.readData64(0x1f801468, &doubleword));
+  REQUIRE(doubleword == UINT64_MAX);
+  REQUIRE_FALSE(bus.readData128(0x1f801460, &quadword));
+  REQUIRE(quadword.low == UINT64_MAX);
+  REQUIRE(quadword.high == UINT64_MAX);
+  REQUIRE_FALSE(bus.writeData16(ADDRESS, 0));
+  REQUIRE_FALSE(bus.writeData32(0x1f80146c, 0));
+  REQUIRE_FALSE(bus.writeData64(0x1f801468, 0));
+  REQUIRE_FALSE(bus.writeData128(0x1f801460, quadword));
+  REQUIRE_FALSE(bus.readInstruction32(0x1f80146c, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(ADDRESS, 1));
+  REQUIRE_FALSE(bus.readDMAC128(0x1f801460, &quadword));
+  REQUIRE_FALSE(bus.writeDMAC128(0x1f801460, quadword));
+  REQUIRE(system.iopBus().read8(ADDRESS).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().read16(ADDRESS).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write8(ADDRESS, 0).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().readDMAC32(0x1f80146c).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+}
+
 TEST_CASE("EE MCH window endpoint supports word-backed access and guest loads",
   "[ee][bus][guest][trace][save-state][mch-window]")
 {

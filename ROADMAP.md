@@ -2399,7 +2399,20 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate active/interrupted packets, FIFO discard, access rejection,
       observer preservation and restored continuation; independently review
       and pass complete optimized/AddressSanitizer checks.
-- [ ] With separate BIOS-run authorization, verify the originating reset write
+- [x] With separate BIOS-run authorization, verify the originating reset write
+      using a fresh cold scout and attribute the next dependency.
+
+### EE Byte Read at Physical `0x1f80146e`
+
+- [x] Attribute the guest byte read and existing owner boundary; search local
+      manuals for its identity, access shape and readback/effect contract.
+- [x] Compare separately approved secondary evidence if needed; select a bounded
+      contract and owner before defining implementation and validation work.
+- [x] Implement exact stateless EE byte readback of zero for the selected
+      absent-DEV9 profile; preserve other access and device rejections.
+- [x] Validate bus boundaries, guest loads and trace-mode agreement;
+      independently review the bounded extension.
+- [ ] With separate BIOS-run authorization, verify the originating byte read
       using a fresh cold scout and attribute the next dependency.
 
 ### Real BIOS Handshake and Boundary Conformance
