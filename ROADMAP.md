@@ -2376,6 +2376,17 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       preserve unsupported widths, aliases, neighbors and device effects.
 - [x] Validate guest trace, reset/hash and versioned atomic persistence;
       independently review and pass complete optimized/AddressSanitizer checks.
+- [x] With separate BIOS-run authorization, verify the originating store
+      using a fresh cold scout and attribute the next dependency.
+
+### EE `0x1a000004` Startup Boundary
+
+- [x] Attribute the guest halfword store, research its raw contract and select
+      bounded independent backing through the existing EEBus owner.
+- [x] Implement exact halfword read/write backing without widening other
+      access routes or introducing command, status or cross-register effects.
+- [x] Validate offset04/08 independence, guest trace, reset/hash and versioned
+      atomic persistence; independently review and pass optimized/ASan gates.
 - [ ] With separate BIOS-run authorization, verify the originating store
       using a fresh cold scout and attribute the next dependency.
 

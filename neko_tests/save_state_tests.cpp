@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_58_PREPARED_STATE_SIZE = 39952418;
+    VERSION_59_PREPARED_STATE_SIZE = 39952420;
   constexpr std::uint64_t
-    VERSION_58_PREPARED_STATE_HASH =
-      UINT64_C(0xec4785a04d7a3246);
+    VERSION_59_PREPARED_STATE_HASH =
+      UINT64_C(0xe4937c215436d7b2);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 58 save-state layout is byte-stable")
+TEST_CASE("Version 59 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,14 @@ TEST_CASE("Version 58 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 58);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 59);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_58_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_59_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_58_PREPARED_STATE_HASH);
+    VERSION_59_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *dmaControl = snapshot.find("system.gifDMAC.controllerControlRegister");
   const auto *dmaHold = snapshot.find("system.gifDMAC.controllerHoldControlRegister");

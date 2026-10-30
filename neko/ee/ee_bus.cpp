@@ -707,6 +707,11 @@ bool EEBus::readData16(
     address,
     2,
     "EE halfword load must be naturally aligned.");
+  if (address == EEMemoryMap::BA0_REGISTER_04)
+  {
+    *value = ba0Register04;
+    return true;
+  }
   if (address == EEMemoryMap::BA0_REGISTER_08)
   {
     *value = ba0Register08;
@@ -761,6 +766,11 @@ bool EEBus::writeData16(
     address,
     2,
     "EE halfword store must be naturally aligned.");
+  if (address == EEMemoryMap::BA0_REGISTER_04)
+  {
+    ba0Register04 = value;
+    return true;
+  }
   if (address == EEMemoryMap::BA0_REGISTER_08)
   {
     ba0Register08 = value;

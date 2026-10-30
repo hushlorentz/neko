@@ -65,71 +65,83 @@ namespace
   }
 }
 
-TEST_CASE("EE BA0 offset08 retains only exact physical halfword accesses",
+TEST_CASE("EE BA0 retained registers admit only exact physical halfword accesses",
   "[ee][bus][ba0]")
 {
-  constexpr std::uint32_t ADDRESS = 0x1a000008;
+  std::uint32_t address = 0;
+  SECTION("offset04") { address = 0x1a000004; }
+  SECTION("offset08") { address = 0x1a000008; }
+  const std::uint32_t otherAddress =
+    address == 0x1a000004 ? 0x1a000008 : 0x1a000004;
   NekoSystem system;
   auto &bus = system.eeBus();
   std::uint16_t half = 0xa5a5;
-  REQUIRE(bus.readData16(ADDRESS, &half));
+  REQUIRE(bus.readData16(address, &half));
   REQUIRE(half == 0);
   const auto resetHash = system.eeStateHash();
-  for (const std::uint16_t written : {0u, 3u, 0x7fffu, 0x8000u, 0xffffu})
+  for (const std::uint16_t written : {0u, 1u, 3u, 0x7fffu, 0x8000u, 0xffffu})
   {
     CAPTURE(written);
-    REQUIRE(bus.writeData16(ADDRESS, written));
-    REQUIRE(bus.readData16(ADDRESS, &half));
+    REQUIRE(bus.writeData16(address, written));
+    REQUIRE(bus.readData16(address, &half));
     REQUIRE(half == written);
     const auto hash = system.eeStateHash();
     REQUIRE((hash == resetHash) == (written == 0));
-    REQUIRE(bus.writeData16(ADDRESS, written));
+    REQUIRE(bus.writeData16(address, written));
     REQUIRE(system.eeStateHash() == hash);
+    REQUIRE(bus.readData16(otherAddress, &half));
+    REQUIRE(half == 0);
   }
+  REQUIRE(bus.writeData16(otherAddress, 0x1234));
   const auto hash = system.eeStateHash();
-  for (const auto address : {ADDRESS - 8, ADDRESS - 6, ADDRESS - 4,
-         ADDRESS - 2, ADDRESS + 2, ADDRESS + 8, ADDRESS + 0x20,
-         ADDRESS + 0x100, ADDRESS + 0x10000,
-         ADDRESS | 0x80000000u, ADDRESS | 0xa0000000u})
+  for (const auto unsupported : {0x1a000000u, 0x1a000002u, 0x1a000006u,
+         0x1a00000au, 0x1a00000cu, 0x1a00000eu, 0x1a000010u,
+         address + 0x20, address + 0x100, address + 0x10000,
+         address | 0x80000000u, address | 0xa0000000u})
   {
-    CAPTURE(address);
+    CAPTURE(unsupported);
     half = 0xa5a5;
-    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE_FALSE(bus.readData16(unsupported, &half));
     REQUIRE(half == 0xa5a5);
-    REQUIRE_FALSE(bus.writeData16(address, 3));
+    REQUIRE_FALSE(bus.writeData16(unsupported, 3));
   }
-  for (const auto address : {ADDRESS, ADDRESS + 1})
+  for (const auto byteAddress : {address, address + 1})
   {
     std::uint8_t byte = 0xa5;
-    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE_FALSE(bus.readData8(byteAddress, &byte));
     REQUIRE(byte == 0xa5);
-    REQUIRE_FALSE(bus.writeData8(address, 0));
+    REQUIRE_FALSE(bus.writeData8(byteAddress, 0));
   }
   std::uint32_t word = 0xa5a5a5a5;
   std::uint64_t wide = UINT64_MAX;
   EEQuadword quad = {UINT64_MAX, UINT64_MAX};
-  REQUIRE_FALSE(bus.readData32(ADDRESS, &word));
+  REQUIRE_FALSE(bus.readData32(address, &word));
   REQUIRE(word == 0xa5a5a5a5);
-  REQUIRE_FALSE(bus.writeData32(ADDRESS, 0));
-  REQUIRE_FALSE(bus.readData64(ADDRESS, &wide));
+  REQUIRE_FALSE(bus.writeData32(address, 0));
+  const auto wideAddress = address & ~std::uint32_t{7};
+  REQUIRE_FALSE(bus.readData64(wideAddress, &wide));
   REQUIRE(wide == UINT64_MAX);
-  REQUIRE_FALSE(bus.writeData64(ADDRESS, 0));
-  REQUIRE_FALSE(bus.readData128(ADDRESS - 8, &quad));
+  REQUIRE_FALSE(bus.writeData64(wideAddress, 0));
+  REQUIRE_FALSE(bus.readData128(0x1a000000, &quad));
   REQUIRE(quad.low == UINT64_MAX);
   REQUIRE(quad.high == UINT64_MAX);
-  REQUIRE_FALSE(bus.writeData128(ADDRESS - 8, {0, 0}));
-  REQUIRE_FALSE(bus.readInstruction32(ADDRESS, &word));
-  REQUIRE_FALSE(bus.isCacheFillRange(ADDRESS, 2));
-  REQUIRE_FALSE(bus.readDMAC128(ADDRESS - 8, &quad));
-  REQUIRE_FALSE(bus.writeDMAC128(ADDRESS - 8, {0, 0}));
-  REQUIRE_THROWS_AS(bus.readData16(ADDRESS, nullptr), std::invalid_argument);
-  REQUIRE_THROWS_AS(bus.readData16(ADDRESS + 1, &half), std::invalid_argument);
-  REQUIRE_THROWS_AS(bus.writeData16(ADDRESS + 1, 0), std::invalid_argument);
+  REQUIRE_FALSE(bus.writeData128(0x1a000000, {0, 0}));
+  REQUIRE_FALSE(bus.readInstruction32(address, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(address, 2));
+  REQUIRE_FALSE(bus.readDMAC128(0x1a000000, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(0x1a000000, {0, 0}));
+  REQUIRE_THROWS_AS(bus.readData16(address, nullptr), std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.readData16(address + 1, &half), std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.writeData16(address + 1, 0), std::invalid_argument);
   REQUIRE(system.eeStateHash() == hash);
-  REQUIRE(bus.readData16(ADDRESS, &half));
+  REQUIRE(bus.readData16(address, &half));
   REQUIRE(half == 0xffff);
+  REQUIRE(bus.readData16(otherAddress, &half));
+  REQUIRE(half == 0x1234);
   system.reset();
-  REQUIRE(system.eeBus().readData16(ADDRESS, &half));
+  REQUIRE(system.eeBus().readData16(address, &half));
+  REQUIRE(half == 0);
+  REQUIRE(system.eeBus().readData16(otherAddress, &half));
   REQUIRE(half == 0);
   REQUIRE(system.eeStateHash() == resetHash);
 }
@@ -137,12 +149,24 @@ TEST_CASE("EE BA0 offset08 retains only exact physical halfword accesses",
 TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
   "[ee][bus][guest][trace][save-state][ba0]")
 {
-  constexpr std::uint32_t ADDRESS = 0x1a000008;
+  std::uint32_t address = 0x1a000008;
+  std::uint16_t written = 3;
+  SECTION("offset08") {}
+  SECTION("offset04")
+  {
+    address = 0x1a000004;
+    written = 1;
+  }
+  SECTION("offset04 signed load")
+  {
+    address = 0x1a000004;
+    written = 0x8001;
+  }
   NekoSystem original;
   const std::uint32_t program[] = {
-    0xa4440000, // SH r4, 0(r2)
-    0x94430000, // LHU r3, 0(r2)
-    0x84450000  // LH r5, 0(r2)
+    0xa4620000, // SH r2, 0(r3)
+    0x94640000, // LHU r4, 0(r3)
+    0x84650000  // LH r5, 0(r3)
   };
   for (std::size_t index = 0; index < 3; ++index)
   {
@@ -150,8 +174,9 @@ TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
       program[index]);
   }
   original.eeCore().setCOP0Register(EECOP0Register::Status, 0);
-  original.eeCore().setGeneralRegister(2, {0xba000008, 0});
-  original.eeCore().setGeneralRegister(4, {3, 0});
+  original.eeCore().setGeneralRegister(3,
+    {address | EEMemoryMap::KSEG1_BASE, 0});
+  original.eeCore().setGeneralRegister(2, {written, 0});
   original.eeCore().startExecution(EEMemoryMap::KSEG1_BASE);
   const auto saved = original.saveState();
   NekoSystem restored;
@@ -168,11 +193,13 @@ TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
       REQUIRE(result.pendingException == EEException::None);
       REQUIRE_FALSE(result.cycleLimitReached);
     }
-    REQUIRE(machine->eeCore().generalRegister(3).low == 3);
-    REQUIRE(machine->eeCore().generalRegister(5).low == 3);
+    REQUIRE(machine->eeCore().generalRegister(4).low == written);
+    const std::uint64_t signedValue = written == 0x8001
+      ? UINT64_C(0xffffffffffff8001) : written;
+    REQUIRE(machine->eeCore().generalRegister(5).low == signedValue);
     std::uint16_t value = 0;
-    REQUIRE(machine->eeBus().readData16(ADDRESS, &value));
-    REQUIRE(value == 3);
+    REQUIRE(machine->eeBus().readData16(address, &value));
+    REQUIRE(value == written);
   }
   REQUIRE(original.traceHash() == restored.traceHash());
   REQUIRE(original.trace().size() == restored.trace().size());
@@ -181,13 +208,13 @@ TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
   {
     if (event.subsystem == NekoTraceSubsystem::EE &&
         event.type == NekoTraceEventType::MemoryAccess &&
-        event.value0 == 0xba000008)
+        event.value0 == (address | EEMemoryMap::KSEG1_BASE))
     {
       const bool store = accesses++ == 0;
-      REQUIRE(event.value1 == 3);
+      REQUIRE(event.value1 == written);
       REQUIRE(event.value2 == 0);
       REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
-        ADDRESS, 2, store ? NekoEETraceMemory::AccessKind::DataStore
+        address, 2, store ? NekoEETraceMemory::AccessKind::DataStore
                           : NekoEETraceMemory::AccessKind::DataLoad,
         NekoEETraceMemory::TranslationOutcome::Translated,
         NekoEETraceMemory::CacheRoute::Uncached, 2, false, true,
@@ -205,28 +232,48 @@ TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
   REQUIRE(plain.saveState() == ending);
 }
 
-TEST_CASE("EE BA0 retained halfword participates in atomic canonical persistence",
+TEST_CASE("EE BA0 retained halfwords participate in atomic canonical persistence",
   "[ee][bus][save-state][ba0]")
 {
-  constexpr std::uint32_t ADDRESS = 0x1a000008;
+  std::uint32_t address = 0;
+  const char *field = nullptr;
+  SECTION("offset04")
+  {
+    address = 0x1a000004;
+    field = "system.eeBus.ba0Register04";
+  }
+  SECTION("offset08")
+  {
+    address = 0x1a000008;
+    field = "system.eeBus.ba0Register08";
+  }
+  const std::uint32_t otherAddress =
+    address == 0x1a000004 ? 0x1a000008 : 0x1a000004;
+  const char *otherField = address == 0x1a000004
+    ? "system.eeBus.ba0Register08" : "system.eeBus.ba0Register04";
   NekoSystem original;
   SaveStateMutation expected(original.saveState());
-  REQUIRE(original.eeBus().writeData16(ADDRESS, 0xcafe));
-  expected.writeScalar("system.eeBus.ba0Register08", 0xcafe);
+  REQUIRE(original.eeBus().writeData16(address, 0xcafe));
+  REQUIRE(original.eeBus().writeData16(otherAddress, 0x1357));
+  expected.writeScalar(field, 0xcafe);
+  expected.writeScalar(otherField, 0x1357);
   expected.refreshChecksum();
   const auto saved = original.saveState();
   REQUIRE(saved == expected.bytes());
   const auto hash = original.eeStateHash();
   NekoSystem restored;
-  REQUIRE(restored.eeBus().writeData16(ADDRESS, 3));
+  REQUIRE(restored.eeBus().writeData16(address, 3));
   restored.loadState(saved);
   REQUIRE(restored.saveState() == saved);
   REQUIRE(restored.eeStateHash() == hash);
   std::uint16_t half = 0;
-  REQUIRE(restored.eeBus().readData16(ADDRESS, &half));
+  REQUIRE(restored.eeBus().readData16(address, &half));
   REQUIRE(half == 0xcafe);
+  REQUIRE(restored.eeBus().readData16(otherAddress, &half));
+  REQUIRE(half == 0x1357);
 
-  REQUIRE(restored.eeBus().writeData16(ADDRESS, 0x1234));
+  REQUIRE(restored.eeBus().writeData16(address, 0x1234));
+  REQUIRE(restored.eeBus().writeData16(otherAddress, 0x2468));
   const auto before = restored.saveState();
   const auto beforeHash = restored.eeStateHash();
   struct Corruption
@@ -235,7 +282,7 @@ TEST_CASE("EE BA0 retained halfword participates in atomic canonical persistence
     std::uint32_t value;
   };
   for (const auto mutation : {
-         Corruption{"container.version", 57},
+         Corruption{"container.version", 58},
          Corruption{"system.eeRDRAMInitialization.enumeratedDevices", 3}})
   {
     CAPTURE(mutation.path);
@@ -245,8 +292,10 @@ TEST_CASE("EE BA0 retained halfword participates in atomic canonical persistence
     REQUIRE_THROWS_AS(restored.loadState(invalid.bytes()), std::invalid_argument);
     REQUIRE(restored.saveState() == before);
     REQUIRE(restored.eeStateHash() == beforeHash);
-    REQUIRE(restored.eeBus().readData16(ADDRESS, &half));
+    REQUIRE(restored.eeBus().readData16(address, &half));
     REQUIRE(half == 0x1234);
+    REQUIRE(restored.eeBus().readData16(otherAddress, &half));
+    REQUIRE(half == 0x2468);
   }
 }
 
