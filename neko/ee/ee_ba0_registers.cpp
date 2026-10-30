@@ -91,6 +91,10 @@ bool EEBA0Registers::writeHalfword(
 
 bool EEBA0Registers::submitCommand(std::uint16_t command) noexcept
 {
+  if (command == 0x82 && registers.control02 == 0x42)
+  {
+    return submitDeviceWrite();
+  }
   if (command != 0x81)
   {
     return false;
@@ -145,6 +149,21 @@ bool EEBA0Registers::acknowledgeStatus(std::uint16_t value) noexcept
   return true;
 }
 
+bool EEBA0Registers::submitDeviceWrite() noexcept
+{
+  const auto target = registers.transferStaging[0];
+  const auto value = registers.transferStaging[1];
+  if (target != 0xb1 || value > 0xff)
+  {
+    return false;
+  }
+  registers.deviceRegisterB1 = static_cast<std::uint8_t>(value);
+  registers.selector = 0xb1;
+  registers.selectorValid = true;
+  registers.status06 = 2;
+  return true;
+}
+
 EEBA0RegistersState EEBA0Registers::state() const noexcept
 {
   return registers;
@@ -158,7 +177,8 @@ bool EEBA0Registers::validState(const EEBA0RegistersState &state) noexcept
   }
   if (!state.selectorValid)
   {
-    return state.selector == 0 && state.status06 == 0;
+    return state.selector == 0 && state.status06 == 0 &&
+      state.deviceRegisterB1 == 0;
   }
   return state.control02 != 0 &&
     (state.status06 == 0 || state.status06 == 2);

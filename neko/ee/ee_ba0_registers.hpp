@@ -23,6 +23,7 @@ struct EEBA0RegistersState
   bool selectorValid = false;
   std::uint8_t selector = 0;
   std::uint16_t status06 = 0;
+  std::uint8_t deviceRegisterB1 = 0;
 };
 
 // Provisional bounded byte-transfer transport; no hardware timing model.
@@ -39,6 +40,7 @@ class EEBA0Registers
     bool submitCommand(std::uint16_t command) noexcept;
     bool submitSelectorWrite() noexcept;
     bool submitDeviceRead() noexcept;
+    bool submitDeviceWrite() noexcept;
     bool acknowledgeStatus(std::uint16_t value) noexcept;
     EEBA0RegistersState registers;
 };

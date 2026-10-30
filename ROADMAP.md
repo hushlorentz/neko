@@ -2506,9 +2506,24 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### EE BA0 Command-82 Contract
 
-- [ ] Select an evidence-backed or explicitly approved bounded command82/
+- [x] Select an evidence-backed or explicitly approved bounded command82/
       control42 contract for the observed staging, device effects and
       completion lifecycle; retain rejection until contract selection.
+
+### EE BA0 Bounded Device Writes
+
+- [x] Implement bounded command82/control42 register-b1 byte writes in the
+      existing owner, including reset, selector/status, canonical hashing
+      and versioned transactional persistence; reject other writes atomically.
+- [x] Validate access/rejection boundaries and guest trace/restore; pass
+      complete optimized/ASan checks and independent review, then use a fresh
+      authorized cold scout to verify the write and attribute the next dependency.
+
+### GS Startup Transfer Boundary Contract
+
+- [ ] Identify the guest GS transaction behind the startup destination-width
+      runtime error and select an evidence-backed bounded contract through
+      the existing GS/GIF owners; do not infer valid transfer setup.
 
 ### Real BIOS Handshake and Boundary Conformance
 

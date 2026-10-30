@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_63_PREPARED_STATE_SIZE = 39952442;
+    VERSION_64_PREPARED_STATE_SIZE = 39952443;
   constexpr std::uint64_t
-    VERSION_63_PREPARED_STATE_HASH =
-      UINT64_C(0x12231b1c8c66ebe1);
+    VERSION_64_PREPARED_STATE_HASH =
+      UINT64_C(0xc88a883b08fb424c);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 63 save-state layout is byte-stable")
+TEST_CASE("Version 64 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,14 @@ TEST_CASE("Version 63 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 63);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 64);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_63_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_64_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_63_PREPARED_STATE_HASH);
+    VERSION_64_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *ba0Control = snapshot.find("system.eeBus.ba0Control02");
   const auto *ba0Register08 = snapshot.find("system.eeBus.ba0Register08");
@@ -679,6 +679,12 @@ TEST_CASE("Version 63 save-state layout is byte-stable")
   REQUIRE(ba0Status->size == 2);
   REQUIRE(ba0Status->scalarValue == 0);
   REQUIRE(ba0Status->containerOffset == ba0Selector->containerOffset + 1);
+  const auto *ba0DeviceB1 = snapshot.find("system.eeBus.ba0DeviceRegisterB1");
+  REQUIRE(ba0DeviceB1 != nullptr);
+  REQUIRE(ba0DeviceB1->kind == SaveStateFieldKind::U8);
+  REQUIRE(ba0DeviceB1->size == 1);
+  REQUIRE(ba0DeviceB1->scalarValue == 0);
+  REQUIRE(ba0DeviceB1->containerOffset == ba0Status->containerOffset + 2);
   const auto *dmaControl = snapshot.find("system.gifDMAC.controllerControlRegister");
   const auto *dmaHold = snapshot.find("system.gifDMAC.controllerHoldControlRegister");
   const auto *dmaStatus = snapshot.find("system.gifDMAC.controllerStatusRegister");

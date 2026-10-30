@@ -69,7 +69,7 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
 }
 
 TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
-  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command][ba0-read][ba0-read7f]")
+  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command][ba0-read][ba0-read7f][ba0-write]")
 {
   std::uint32_t physical = 0x1a000006;
   std::uint16_t selected = 3;
@@ -108,6 +108,12 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
     control = 0x43;
     selector = 0x7f;
   }
+  SECTION("device B1 write command")
+  {
+    physical = 0x1a000000;
+    selected = 0x82;
+    selector = 0xb1;
+  }
   SECTION("first staging halfword")
   {
     physical = 0x1a000010;
@@ -140,6 +146,10 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
         {
           REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_CONTROL_02, 0x42));
           REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_TRANSFER_BEGIN, selector));
+          if (selected == 0x82)
+          {
+            REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_TRANSFER_BEGIN + 2, 0xff));
+          }
           if (control == 0x43)
           {
             REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_COMMAND_00, 0x81));
