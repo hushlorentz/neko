@@ -20,9 +20,12 @@ struct EEBA0RegistersState
   std::uint16_t register08 = 0;
   std::array<std::uint16_t, EEBA0RegisterMap::TRANSFER_HALFWORD_COUNT>
     transferStaging{};
+  bool selectorValid = false;
+  std::uint8_t selector = 0;
+  std::uint16_t status06 = 0;
 };
 
-// Provisional startup registers, not a command/status or DVE protocol.
+// Provisional selector-write transport; no encoder result or timing model.
 class EEBA0Registers
 {
   public:
@@ -33,6 +36,8 @@ class EEBA0Registers
   private:
     friend class NekoSaveStateCodec;
     static bool validState(const EEBA0RegistersState &state) noexcept;
+    bool submitSelectorWrite(std::uint16_t command) noexcept;
+    bool acknowledgeStatus(std::uint16_t value) noexcept;
     EEBA0RegistersState registers;
 };
 

@@ -2467,12 +2467,11 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### EE BA0 Selector-Write Transactions
 
-- [ ] Implement exact command81/control42 byte-selector writes and status06
-      acknowledgement/readback in the existing BA0 owner; preserve read-command
-      rejection and passive staging behavior.
-- [ ] Integrate reset, canonical hashing and versioned transactional persistence;
-      validate admission, atomic rejection, pure polling and guest continuation.
-- [ ] Pass complete optimized/ASan checks and independent review, then use a
+- [x] Implement exact command81/control42 byte-selector writes and status06
+      acknowledgement/readback in the existing BA0 owner, including reset,
+      canonical hashing and versioned transactional persistence; preserve
+      read-command rejection and validate atomic rejection and pure polling.
+- [x] Pass complete optimized/ASan checks and independent review, then use a
       fresh authorized cold scout to verify the selector-write boundary and
       attribute the next unsupported access.
 

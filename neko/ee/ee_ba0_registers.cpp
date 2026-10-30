@@ -23,6 +23,9 @@ bool EEBA0Registers::readHalfword(
     case 0x04:
       value = registers.register04;
       return true;
+    case 0x06:
+      value = registers.status06;
+      return true;
     case 0x08:
       value = registers.register08;
       return true;
@@ -42,6 +45,8 @@ bool EEBA0Registers::writeHalfword(
   }
   switch (offset)
   {
+    case 0x00:
+      return submitSelectorWrite(value);
     case 0x02:
       if (value != 0x42)
       {
@@ -53,13 +58,36 @@ bool EEBA0Registers::writeHalfword(
       registers.register04 = value;
       return true;
     case 0x06:
-      return value == 3;
+      return acknowledgeStatus(value);
     case 0x08:
       registers.register08 = value;
       return true;
     default:
       return false;
   }
+}
+
+bool EEBA0Registers::submitSelectorWrite(std::uint16_t command) noexcept
+{
+  const auto selector = registers.transferStaging[0];
+  if (command != 0x81 || registers.control02 != 0x42 || selector > 0xff)
+  {
+    return false;
+  }
+  registers.selector = static_cast<std::uint8_t>(selector);
+  registers.selectorValid = true;
+  registers.status06 = 2;
+  return true;
+}
+
+bool EEBA0Registers::acknowledgeStatus(std::uint16_t value) noexcept
+{
+  if (value != 3)
+  {
+    return false;
+  }
+  registers.status06 = 0;
+  return true;
 }
 
 EEBA0RegistersState EEBA0Registers::state() const noexcept
@@ -69,5 +97,14 @@ EEBA0RegistersState EEBA0Registers::state() const noexcept
 
 bool EEBA0Registers::validState(const EEBA0RegistersState &state) noexcept
 {
-  return state.control02 == 0 || state.control02 == 0x42;
+  if (state.control02 != 0 && state.control02 != 0x42)
+  {
+    return false;
+  }
+  if (!state.selectorValid)
+  {
+    return state.selector == 0 && state.status06 == 0;
+  }
+  return state.control02 == 0x42 &&
+    (state.status06 == 0 || state.status06 == 2);
 }

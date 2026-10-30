@@ -41,9 +41,10 @@ namespace
 
   bool ba0HalfwordAddress(std::uint32_t address)
   {
-    return address == EEMemoryMap::BA0_CONTROL_02 ||
+    return address == EEMemoryMap::BA0_COMMAND_00 ||
+      address == EEMemoryMap::BA0_CONTROL_02 ||
       address == EEMemoryMap::BA0_REGISTER_04 ||
-      address == EEMemoryMap::BA0_INIT_06 ||
+      address == EEMemoryMap::BA0_STATUS_06 ||
       address == EEMemoryMap::BA0_REGISTER_08 ||
       (address >= EEMemoryMap::BA0_TRANSFER_BEGIN &&
        address < EEMemoryMap::BA0_TRANSFER_END);

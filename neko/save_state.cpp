@@ -445,6 +445,9 @@ void NekoSaveStateCodec::writeSystem(
           writer->writeU16(value);
         }
       });
+    writer->writeFieldBool("ba0SelectorValid", ba0State.selectorValid);
+    writer->writeFieldU8("ba0Selector", ba0State.selector);
+    writer->writeFieldU16("ba0Status06", ba0State.status06);
   }
   {
     auto component = writer->scope("vu0");
@@ -574,9 +577,6 @@ void NekoSaveStateCodec::readSystem(
     ba0State.register04 = reader->readFieldU16("ba0Register04");
     ba0State.register08 = reader->readFieldU16("ba0Register08");
     ba0State.control02 = reader->readFieldU16("ba0Control02");
-    reader->requireField(
-      EEBA0Registers::validState(ba0State),
-      "EE BA0 retained control selection is unsupported");
     reader->readFieldRange(
       "ba0TransferStaging",
       ba0State.transferStaging.size() * sizeof(std::uint16_t),
@@ -587,6 +587,12 @@ void NekoSaveStateCodec::readSystem(
           value = reader->readU16();
         }
       });
+    ba0State.selectorValid = reader->readFieldBool("ba0SelectorValid");
+    ba0State.selector = reader->readFieldU8("ba0Selector");
+    ba0State.status06 = reader->readFieldU16("ba0Status06");
+    reader->requireField(
+      EEBA0Registers::validState(ba0State),
+      "EE BA0 selector/status state is unsupported");
   }
   {
     auto component = reader->scope("vu0");

@@ -516,6 +516,9 @@ std::uint64_t NekoSystem::eeStateHash() const
   {
     hashStateValue(&hash, value);
   }
+  hashStateValue(&hash, ba0State.selectorValid);
+  hashStateValue(&hash, ba0State.selector);
+  hashStateValue(&hash, ba0State.status06);
   return hash;
 }
 

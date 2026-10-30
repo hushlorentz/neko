@@ -68,14 +68,19 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
   }
 }
 
-TEST_CASE("EE SH translates BA0 initialization aliases and captures the low halfword",
-  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging]")
+TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
+  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command]")
 {
   std::uint32_t physical = 0x1a000006;
   std::uint16_t selected = 3;
   std::uint8_t base = 2;
   bool staging = false;
-  SECTION("status initialization") {}
+  SECTION("status acknowledgement") {}
+  SECTION("selector command")
+  {
+    physical = 0x1a000000;
+    selected = 0x81;
+  }
   SECTION("control selection")
   {
     physical = 0x1a000002;
@@ -110,6 +115,11 @@ TEST_CASE("EE SH translates BA0 initialization aliases and captures the low half
       for (auto *system : {&traced, &plain})
       {
         auto &core = system->eeCore();
+        if (physical == EEMemoryMap::BA0_COMMAND_00)
+        {
+          REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_CONTROL_02, 0x42));
+          REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_TRANSFER_BEGIN, 0x7e));
+        }
         system->eeBus().write32(0, memoryInstruction(0x29, base, 4, 0));
         setRegister(&core, base, address);
         setRegister(&core, 4, value);
@@ -128,6 +138,12 @@ TEST_CASE("EE SH translates BA0 initialization aliases and captures the low half
                     : EEExceptionVector::GENERAL));
         REQUIRE(core.generalRegister(4).low == value);
         REQUIRE(core.generalRegister(4).high == UINT64_C(0xfeedfacecafebeef));
+        if (physical == EEMemoryMap::BA0_COMMAND_00)
+        {
+          std::uint16_t status = 0xffff;
+          REQUIRE(system->eeBus().readData16(EEMemoryMap::BA0_STATUS_06, &status));
+          REQUIRE(status == (accepted ? 2 : 0));
+        }
         if (staging)
         {
           std::uint16_t retained = 0;
