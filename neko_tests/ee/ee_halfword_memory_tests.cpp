@@ -69,11 +69,12 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
 }
 
 TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
-  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command]")
+  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging][ba0-command][ba0-read]")
 {
   std::uint32_t physical = 0x1a000006;
   std::uint16_t selected = 3;
   std::uint8_t base = 2;
+  std::uint16_t control = 0x42;
   bool staging = false;
   SECTION("status acknowledgement") {}
   SECTION("selector command")
@@ -86,6 +87,18 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
     physical = 0x1a000002;
     selected = 0x42;
     base = 3;
+  }
+  SECTION("read control selection")
+  {
+    physical = 0x1a000002;
+    selected = 0x43;
+    base = 3;
+  }
+  SECTION("device read command")
+  {
+    physical = 0x1a000000;
+    selected = 0x81;
+    control = 0x43;
   }
   SECTION("first staging halfword")
   {
@@ -119,6 +132,12 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
         {
           REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_CONTROL_02, 0x42));
           REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_TRANSFER_BEGIN, 0x7e));
+          if (control == 0x43)
+          {
+            REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_COMMAND_00, 0x81));
+            REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_STATUS_06, 3));
+            REQUIRE(system->eeBus().writeData16(EEMemoryMap::BA0_CONTROL_02, control));
+          }
         }
         system->eeBus().write32(0, memoryInstruction(0x29, base, 4, 0));
         setRegister(&core, base, address);
@@ -143,6 +162,12 @@ TEST_CASE("EE SH translates BA0 halfword aliases and captures the low halfword",
           std::uint16_t status = 0xffff;
           REQUIRE(system->eeBus().readData16(EEMemoryMap::BA0_STATUS_06, &status));
           REQUIRE(status == (accepted ? 2 : 0));
+          if (control == 0x43)
+          {
+            std::uint16_t result = 0;
+            REQUIRE(system->eeBus().readData16(EEMemoryMap::BA0_TRANSFER_BEGIN, &result));
+            REQUIRE(result == (accepted ? 0x1c : 0x7e));
+          }
         }
         if (staging)
         {

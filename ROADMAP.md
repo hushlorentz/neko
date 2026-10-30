@@ -2477,9 +2477,23 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### EE BA0 Device-Read Contract
 
-- [ ] Select an evidence-backed device-register response profile and read-transfer
-      contract before enabling control43 or supplying result bytes; retain
-      unsupported-access rejection until separately approved.
+- [x] Select an explicit provisional0x7e-only response profile and bounded
+      read-transfer contract; retain rejection of all other device reads.
+
+### EE BA0 Bounded Device Reads
+
+- [x] Implement selected control43/command81 reads of latched0x7e as0x1c
+      in the existing BA0 owner, including result lifetime, reset/hash and
+      versioned transactional restore; reject unknown selectors atomically.
+- [x] Validate access boundaries, pure polling, repeat reads and guest
+      trace/restore; obtain independent review and use a fresh authorized cold
+      scout to verify the result transfer and attribute the next dependency.
+
+### EE BA0 Additional Device-Response Contract
+
+- [ ] Select an evidence-backed or explicitly approved provisional0x7f response
+      and transfer effects; keep unsupported reads rejected until contract
+      selection is complete.
 
 ### Real BIOS Handshake and Boundary Conformance
 
