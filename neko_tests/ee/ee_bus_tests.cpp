@@ -215,6 +215,133 @@ TEST_CASE("EE BA0 initialization admits only the observed stateless halfword wri
   REQUIRE(system.sifStateHash() == sifHash);
 }
 
+TEST_CASE("EE BA0 control selection retains only the observed halfword",
+  "[ee][bus][ba0-control]")
+{
+  constexpr std::uint32_t ADDRESS = 0x1a000002;
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto resetHash = system.eeStateHash();
+  REQUIRE(bus.writeData16(0x1a000004, 0x1234));
+  REQUIRE(bus.writeData16(0x1a000008, 0xabcd));
+  const auto unselectedHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  REQUIRE(bus.writeData16(ADDRESS, 0x42));
+  const auto selectedHash = system.eeStateHash();
+  REQUIRE(selectedHash != unselectedHash);
+  REQUIRE(bus.writeData16(ADDRESS, 0x42));
+  REQUIRE(bus.writeData16(0x1a000006, 3));
+  for (unsigned bit = 0; bit < 16; ++bit)
+  {
+    CAPTURE(bit);
+    REQUIRE_FALSE(bus.writeData16(ADDRESS,
+      static_cast<std::uint16_t>(0x42u ^ (1u << bit))));
+  }
+  REQUIRE_FALSE(bus.writeData16(ADDRESS, 0));
+  std::uint16_t half = 0xa5a5;
+  for (const auto address : {ADDRESS, 0x1a000000u, 0x1a00000au,
+         0x1a000102u, 0x9a000002u, 0xba000002u})
+  {
+    CAPTURE(address);
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE(half == 0xa5a5);
+    if (address != ADDRESS)
+    {
+      REQUIRE_FALSE(bus.writeData16(address, 0x42));
+    }
+  }
+  REQUIRE_FALSE(bus.writeData16(0x1a000000, 0x80));
+  for (const auto address : {ADDRESS, ADDRESS + 1})
+  {
+    std::uint8_t byte = 0xa5;
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE(byte == 0xa5);
+    REQUIRE_FALSE(bus.writeData8(address, 0x42));
+  }
+  std::uint32_t word = 0xa5a5a5a5;
+  std::uint64_t wide = UINT64_MAX;
+  EEQuadword quad{UINT64_MAX, UINT64_MAX};
+  REQUIRE_FALSE(bus.readData32(0x1a000000, &word));
+  REQUIRE(word == 0xa5a5a5a5);
+  REQUIRE_FALSE(bus.writeData32(0x1a000000, 0x00420000));
+  REQUIRE_FALSE(bus.readData64(0x1a000000, &wide));
+  REQUIRE(wide == UINT64_MAX);
+  REQUIRE_FALSE(bus.writeData64(0x1a000000, UINT64_C(0x42) << 16));
+  REQUIRE_FALSE(bus.readData128(0x1a000000, &quad));
+  REQUIRE(quad.low == UINT64_MAX);
+  REQUIRE(quad.high == UINT64_MAX);
+  REQUIRE_FALSE(bus.writeData128(0x1a000000, {UINT64_C(0x42) << 16, 0}));
+  REQUIRE_FALSE(bus.readInstruction32(0x1a000000, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(ADDRESS, 2));
+  REQUIRE_FALSE(bus.readDMAC128(0x1a000000, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(0x1a000000, {UINT64_C(0x42) << 16, 0}));
+  REQUIRE_THROWS_AS(bus.readData16(ADDRESS, nullptr), std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.writeData16(ADDRESS + 1, 0x42), std::invalid_argument);
+  REQUIRE(system.iopBus().read16(ADDRESS).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write16(ADDRESS, 0x42).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.readData16(0x1a000004, &half));
+  REQUIRE(half == 0x1234);
+  REQUIRE(bus.readData16(0x1a000008, &half));
+  REQUIRE(half == 0xabcd);
+  REQUIRE(system.eeStateHash() == selectedHash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  system.reset();
+  REQUIRE(system.eeStateHash() == resetHash);
+}
+
+TEST_CASE("EE BA0 control selection participates in atomic canonical persistence",
+  "[ee][bus][save-state][ba0-control]")
+{
+  constexpr const char *CONTROL = "system.eeBus.ba0Control02";
+  NekoSystem original;
+  SaveStateMutation expected(original.saveState());
+  REQUIRE(original.eeBus().writeData16(0x1a000002, 0x42));
+  REQUIRE(original.eeBus().writeData16(0x1a000004, 0xcafe));
+  REQUIRE(original.eeBus().writeData16(0x1a000008, 0x1357));
+  expected.writeScalar(CONTROL, 0x42);
+  expected.writeScalar("system.eeBus.ba0Register04", 0xcafe);
+  expected.writeScalar("system.eeBus.ba0Register08", 0x1357);
+  expected.refreshChecksum();
+  const auto saved = original.saveState();
+  REQUIRE(saved == expected.bytes());
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  REQUIRE(restored.eeBus().writeData16(0x1a000006, 3));
+  REQUIRE(restored.eeBus().writeData16(0x1a000002, 0x42));
+  REQUIRE(restored.saveState() == saved);
+
+  NekoSystem target;
+  REQUIRE(target.eeBus().writeData16(0x1a000004, 0x1234));
+  REQUIRE(target.eeBus().writeData16(0x1a000008, 0x2468));
+  const auto before = target.saveState();
+  const auto hash = target.eeStateHash();
+  struct Corruption
+  {
+    const char *path;
+    std::uint16_t value;
+  };
+  for (const auto mutation : {
+         Corruption{CONTROL, 1}, Corruption{CONTROL, 0x40},
+         Corruption{CONTROL, 0x43}, Corruption{CONTROL, 0xffff},
+         Corruption{"container.version", 59},
+         Corruption{"system.eeRDRAMInitialization.enumeratedDevices", 3}})
+  {
+    CAPTURE(mutation.path);
+    CAPTURE(mutation.value);
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(mutation.path, mutation.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(target.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(target.saveState() == before);
+    REQUIRE(target.eeStateHash() == hash);
+  }
+  target.loadState(before);
+  REQUIRE(target.saveState() == before);
+}
+
 TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
   "[ee][bus][guest][trace][save-state][ba0]")
 {
@@ -247,6 +374,7 @@ TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
     {address | EEMemoryMap::KSEG1_BASE, 0});
   original.eeCore().setGeneralRegister(2, {written, 0});
   original.eeCore().startExecution(EEMemoryMap::KSEG1_BASE);
+  REQUIRE(original.eeBus().writeData16(EEMemoryMap::BA0_CONTROL_02, 0x42));
   const auto saved = original.saveState();
   NekoSystem restored;
   NekoSystem plain;
@@ -351,7 +479,7 @@ TEST_CASE("EE BA0 retained halfwords participate in atomic canonical persistence
     std::uint32_t value;
   };
   for (const auto mutation : {
-         Corruption{"container.version", 58},
+         Corruption{"container.version", 59},
          Corruption{"system.eeRDRAMInitialization.enumeratedDevices", 3}})
   {
     CAPTURE(mutation.path);

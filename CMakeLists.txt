@@ -67,6 +67,7 @@ add_library(neko_core
     neko/ee/ee_instruction.cpp
     neko/ee/ee_memory_system.cpp
     neko/ee/ee_rdram_initialization.cpp
+    neko/ee/ee_ba0_registers.cpp
     neko/ee/ee_serial.cpp
     neko/ee/ee_timers.cpp
     neko/ee/gif_dmac_channel.cpp

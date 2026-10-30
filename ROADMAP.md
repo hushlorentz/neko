@@ -2425,6 +2425,19 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       write-only; preserve neighboring BA0 and unsupported-access behavior.
 - [x] Validate bus boundaries, guest stores and trace-mode agreement;
       independently review the bounded extension.
+- [x] With separate BIOS-run authorization, verify the originating halfword
+      store using a fresh cold scout and attribute the next dependency.
+
+### EE `0x1a000002` Startup Boundary
+
+- [x] Attribute the guest halfword store and existing owner boundary; search
+      local manuals for its identity, access and effect contract.
+- [x] Compare approved coupled-family evidence if needed; select the bounded
+      contract and any shared BA0 ownership before defining implementation work.
+- [x] Consolidate BA0 startup state and admissions in one owner; retain only
+      the observed offset02 write of `0x42`, without readback or commands.
+- [x] Validate reset, hashing, atomic persistence and guest access boundaries;
+      pass complete optimized/ASan checks and independent correctness review.
 - [ ] With separate BIOS-run authorization, verify the originating halfword
       store using a fresh cold scout and attribute the next dependency.
 

@@ -432,8 +432,10 @@ void NekoSaveStateCodec::writeSystem(
     writer->writeFieldBool("romPresent", rom != nullptr);
     writer->writeFieldU64(
       "romFingerprint", rom != nullptr ? rom->fingerprint() : 0);
-    writer->writeFieldU16("ba0Register04", system.eeBusComponent.ba0Register04);
-    writer->writeFieldU16("ba0Register08", system.eeBusComponent.ba0Register08);
+    const auto ba0State = system.eeBusComponent.ba0Registers.state();
+    writer->writeFieldU16("ba0Register04", ba0State.register04);
+    writer->writeFieldU16("ba0Register08", ba0State.register08);
+    writer->writeFieldU16("ba0Control02", ba0State.control02);
   }
   {
     auto component = writer->scope("vu0");
@@ -559,8 +561,13 @@ void NekoSaveStateCodec::readSystem(
         "mainMemory",
         EEMemoryMap::MAIN_MEMORY_SIZE);
     topology->eeROMConfiguration = readROMConfiguration(reader);
-    system->eeBusComponent.ba0Register04 = reader->readFieldU16("ba0Register04");
-    system->eeBusComponent.ba0Register08 = reader->readFieldU16("ba0Register08");
+    auto &ba0State = system->eeBusComponent.ba0Registers.registers;
+    ba0State.register04 = reader->readFieldU16("ba0Register04");
+    ba0State.register08 = reader->readFieldU16("ba0Register08");
+    ba0State.control02 = reader->readFieldU16("ba0Control02");
+    reader->requireField(
+      EEBA0Registers::validState(ba0State),
+      "EE BA0 retained control selection is unsupported");
   }
   {
     auto component = reader->scope("vu0");
@@ -831,8 +838,7 @@ void NekoSaveStateCodec::commitSystem(
     source->eeRDRAMInitializationComponent;
   destination->eeBusComponent.mainMemory.swap(
     source->eeBusComponent.mainMemory);
-  destination->eeBusComponent.ba0Register04 = source->eeBusComponent.ba0Register04;
-  destination->eeBusComponent.ba0Register08 = source->eeBusComponent.ba0Register08;
+  destination->eeBusComponent.ba0Registers = source->eeBusComponent.ba0Registers;
   commitVPU(
     &destination->vu0Component,
     &source->vu0Component,

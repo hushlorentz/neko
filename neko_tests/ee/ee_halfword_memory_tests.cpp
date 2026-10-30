@@ -69,11 +69,23 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
 }
 
 TEST_CASE("EE SH translates BA0 initialization aliases and captures the low halfword",
-  "[ee][guest][trace][ba0-init]")
+  "[ee][guest][trace][ba0-init][ba0-control]")
 {
-  for (const std::uint32_t address : {0x9a000006u, 0xba000006u})
+  std::uint32_t physical = 0x1a000006;
+  std::uint16_t selected = 3;
+  std::uint8_t base = 2;
+  SECTION("status initialization") {}
+  SECTION("control selection")
   {
-    for (const std::uint64_t value : {UINT64_C(3), UINT64_C(0x12340003),
+    physical = 0x1a000002;
+    selected = 0x42;
+    base = 3;
+  }
+  for (const std::uint32_t address :
+       {physical | EEMemoryMap::KSEG0_BASE, physical | EEMemoryMap::KSEG1_BASE})
+  {
+    for (const std::uint64_t value :
+         {std::uint64_t(selected), UINT64_C(0x12340000) | selected,
          UINT64_C(2)})
     {
       CAPTURE(address);
@@ -81,12 +93,12 @@ TEST_CASE("EE SH translates BA0 initialization aliases and captures the low half
       NekoSystem traced;
       NekoSystem plain;
       const auto half = static_cast<std::uint16_t>(value);
-      const bool accepted = half == 3;
+      const bool accepted = half == selected;
       for (auto *system : {&traced, &plain})
       {
         auto &core = system->eeCore();
-        system->eeBus().write32(0, memoryInstruction(0x29, 2, 4, 0));
-        setRegister(&core, 2, address);
+        system->eeBus().write32(0, memoryInstruction(0x29, base, 4, 0));
+        setRegister(&core, base, address);
         setRegister(&core, 4, value);
         core.setCOP0Register(EECOP0Register::Status, 0);
         core.startExecution(EEMemoryMap::KSEG1_BASE);
@@ -114,9 +126,9 @@ TEST_CASE("EE SH translates BA0 initialization aliases and captures the low half
           ++stores;
           REQUIRE(event.value1 == half);
           REQUIRE(event.value2 == 0);
-          const bool cached = address == 0x9a000006;
+          const bool cached = address < EEMemoryMap::KSEG1_BASE;
           REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
-            0x1a000006, 2, NekoEETraceMemory::AccessKind::DataStore,
+            physical, 2, NekoEETraceMemory::AccessKind::DataStore,
             NekoEETraceMemory::TranslationOutcome::Translated,
             cached ? NekoEETraceMemory::CacheRoute::CachedNoncoherent
                    : NekoEETraceMemory::CacheRoute::Uncached,
