@@ -24,6 +24,7 @@ struct EEBA0RegistersState
   std::uint8_t selector = 0;
   std::uint16_t status06 = 0;
   std::uint8_t deviceRegisterB1 = 0;
+  std::uint8_t deviceRegister33 = 0;
 };
 
 // Provisional bounded byte-transfer transport; no hardware timing model.

@@ -2534,6 +2534,23 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       with BIOS-free regressions and independent review, then use a fresh
       authorized cold scout to verify progress and attribute the next dependency.
 
+### EE BA0 Register-33 Write Contract
+
+- [x] Attribute the new command82 request and inspect the containing encoder
+      register family through local manuals, client evidence and refreshed
+      reference emulators; retain the existing shared BA0 owner.
+- [x] Select the bounded register-33 write/effect and lifecycle contract before
+      implementing another device-write target; preserve rejection meanwhile.
+
+### EE BA0 Bounded Register-33 Writes
+
+- [x] Extend the existing bounded device-write owner with independent
+      register-33 byte backing, reset/hash and versioned transactional
+      persistence, preserving B1 and unsupported-target/readback rejection.
+- [x] Validate access and restored traced/plain guest continuation, pass
+      complete optimized/ASan checks and independent review, then verify the
+      original write and next dependency through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

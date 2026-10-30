@@ -520,6 +520,7 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(&hash, ba0State.selector);
   hashStateValue(&hash, ba0State.status06);
   hashStateValue(&hash, ba0State.deviceRegisterB1);
+  hashStateValue(&hash, ba0State.deviceRegister33);
   return hash;
 }
 

@@ -153,12 +153,22 @@ bool EEBA0Registers::submitDeviceWrite() noexcept
 {
   const auto target = registers.transferStaging[0];
   const auto value = registers.transferStaging[1];
-  if (target != 0xb1 || value > 0xff)
+  if (value > 0xff)
   {
     return false;
   }
-  registers.deviceRegisterB1 = static_cast<std::uint8_t>(value);
-  registers.selector = 0xb1;
+  switch (target)
+  {
+    case 0x33:
+      registers.deviceRegister33 = static_cast<std::uint8_t>(value);
+      break;
+    case 0xb1:
+      registers.deviceRegisterB1 = static_cast<std::uint8_t>(value);
+      break;
+    default:
+      return false;
+  }
+  registers.selector = static_cast<std::uint8_t>(target);
   registers.selectorValid = true;
   registers.status06 = 2;
   return true;
@@ -178,7 +188,7 @@ bool EEBA0Registers::validState(const EEBA0RegistersState &state) noexcept
   if (!state.selectorValid)
   {
     return state.selector == 0 && state.status06 == 0 &&
-      state.deviceRegisterB1 == 0;
+      state.deviceRegisterB1 == 0 && state.deviceRegister33 == 0;
   }
   return state.control02 != 0 &&
     (state.status06 == 0 || state.status06 == 2);
