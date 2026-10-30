@@ -436,6 +436,15 @@ void NekoSaveStateCodec::writeSystem(
     writer->writeFieldU16("ba0Register04", ba0State.register04);
     writer->writeFieldU16("ba0Register08", ba0State.register08);
     writer->writeFieldU16("ba0Control02", ba0State.control02);
+    writer->writeFieldRange(
+      "ba0TransferStaging",
+      [&]()
+      {
+        for (const auto value : ba0State.transferStaging)
+        {
+          writer->writeU16(value);
+        }
+      });
   }
   {
     auto component = writer->scope("vu0");
@@ -568,6 +577,16 @@ void NekoSaveStateCodec::readSystem(
     reader->requireField(
       EEBA0Registers::validState(ba0State),
       "EE BA0 retained control selection is unsupported");
+    reader->readFieldRange(
+      "ba0TransferStaging",
+      ba0State.transferStaging.size() * sizeof(std::uint16_t),
+      [&]()
+      {
+        for (auto &value : ba0State.transferStaging)
+        {
+          value = reader->readU16();
+        }
+      });
   }
   {
     auto component = reader->scope("vu0");

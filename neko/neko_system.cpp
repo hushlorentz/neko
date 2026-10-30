@@ -512,6 +512,10 @@ std::uint64_t NekoSystem::eeStateHash() const
   hashStateValue(&hash, ba0State.register04);
   hashStateValue(&hash, ba0State.register08);
   hashStateValue(&hash, ba0State.control02);
+  for (const auto value : ba0State.transferStaging)
+  {
+    hashStateValue(&hash, value);
+  }
   return hash;
 }
 

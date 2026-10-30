@@ -2438,8 +2438,30 @@ and EE MCH-window implementation; the handshake target remains incomplete.
       the observed offset02 write of `0x42`, without readback or commands.
 - [x] Validate reset, hashing, atomic persistence and guest access boundaries;
       pass complete optimized/ASan checks and independent correctness review.
-- [ ] With separate BIOS-run authorization, verify the originating halfword
+- [x] Under the active BIOS-run authorization, verify the originating halfword
       store using a fresh cold scout and attribute the next dependency.
+
+### EE BA0 Transfer/Control Boundary
+
+- [x] Attribute the offset10 store and inspect the related BA0 register family
+      in local manuals, then approved secondary evidence; distinguish passive
+      backing from command/status/data-transfer behavior.
+- [x] Select the coherent family contract and existing-owner extension;
+      pause before active protocol behavior rather than admitting data writes
+      through an isolated latch or generic MMIO fallback.
+- [x] Retain/read back the eight aligned transfer-staging halfwords at
+      offsets10-1e in the existing BA0 owner; preserve active-register rejection.
+- [x] Validate access boundaries, reset, guest trace/restore and transactional
+      persistence; pass complete optimized/ASan checks and independent review.
+- [x] Use a fresh authorized cold scout to verify the originating staging write
+      and identify the next dependency without inventing command/status effects.
+
+### EE BA0 Command Execution Boundary
+
+- [ ] Attribute the command00 write of `0x81` and its control/staging/status
+      dependencies; establish the bounded active-protocol evidence.
+- [ ] Select the command/result/completion contract before implementation,
+      extending the existing BA0 owner without fabricated readiness or replies.
 
 ### Real BIOS Handshake and Boundary Conformance
 

@@ -1,8 +1,23 @@
 #include "ee_ba0_registers.hpp"
 
+namespace
+{
+  bool transferHalfwordOffset(std::uint32_t offset) noexcept
+  {
+    return offset >= EEBA0RegisterMap::TRANSFER_BEGIN &&
+      offset < EEBA0RegisterMap::TRANSFER_END && offset % 2 == 0;
+  }
+}
+
 bool EEBA0Registers::readHalfword(
   std::uint32_t offset, std::uint16_t &value) const noexcept
 {
+  if (transferHalfwordOffset(offset))
+  {
+    value = registers.transferStaging[
+      (offset - EEBA0RegisterMap::TRANSFER_BEGIN) / sizeof(std::uint16_t)];
+    return true;
+  }
   switch (offset)
   {
     case 0x04:
@@ -19,6 +34,12 @@ bool EEBA0Registers::readHalfword(
 bool EEBA0Registers::writeHalfword(
   std::uint32_t offset, std::uint16_t value) noexcept
 {
+  if (transferHalfwordOffset(offset))
+  {
+    registers.transferStaging[
+      (offset - EEBA0RegisterMap::TRANSFER_BEGIN) / sizeof(std::uint16_t)] = value;
+    return true;
+  }
   switch (offset)
   {
     case 0x02:

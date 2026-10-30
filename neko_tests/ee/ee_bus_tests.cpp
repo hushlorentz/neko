@@ -2,6 +2,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
@@ -95,7 +96,7 @@ TEST_CASE("EE BA0 retained registers admit only exact physical halfword accesses
   REQUIRE(bus.writeData16(otherAddress, 0x1234));
   const auto hash = system.eeStateHash();
   for (const auto unsupported : {0x1a000000u, 0x1a000002u, 0x1a000006u,
-         0x1a00000au, 0x1a00000cu, 0x1a00000eu, 0x1a000010u,
+         0x1a00000au, 0x1a00000cu, 0x1a00000eu, 0x1a000020u,
          address + 0x20, address + 0x100, address + 0x10000,
          address | 0x80000000u, address | 0xa0000000u})
   {
@@ -343,7 +344,7 @@ TEST_CASE("EE BA0 control selection participates in atomic canonical persistence
 }
 
 TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
-  "[ee][bus][guest][trace][save-state][ba0]")
+  "[ee][bus][guest][trace][save-state][ba0][ba0-staging]")
 {
   std::uint32_t address = 0x1a000008;
   std::uint16_t written = 3;
@@ -356,6 +357,16 @@ TEST_CASE("EE BA0 halfword guest stores and loads preserve traced continuation",
   SECTION("offset04 signed load")
   {
     address = 0x1a000004;
+    written = 0x8001;
+  }
+  SECTION("first staging halfword")
+  {
+    address = 0x1a000010;
+    written = 0x7e;
+  }
+  SECTION("last staging halfword")
+  {
+    address = 0x1a00001e;
     written = 0x8001;
   }
   NekoSystem original;
@@ -493,6 +504,135 @@ TEST_CASE("EE BA0 retained halfwords participate in atomic canonical persistence
     REQUIRE(half == 0x1234);
     REQUIRE(restored.eeBus().readData16(otherAddress, &half));
     REQUIRE(half == 0x2468);
+  }
+}
+
+TEST_CASE("EE BA0 staging halfwords retain independent values without active effects",
+  "[ee][bus][ba0-staging]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto resetHash = system.eeStateHash();
+  REQUIRE(bus.writeData16(0x1a000002, 0x42));
+  REQUIRE(bus.writeData16(0x1a000004, 0xcafe));
+  REQUIRE(bus.writeData16(0x1a000008, 0x1357));
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  std::uint16_t half = 0xa5a5;
+  for (std::uint32_t index = 0; index < 8; ++index)
+  {
+    const auto address = 0x1a000010 + index * 2;
+    CAPTURE(address);
+    REQUIRE(bus.readData16(address, &half));
+    REQUIRE(half == 0);
+    const auto before = system.eeStateHash();
+    for (const std::uint16_t value : {0u, 0x7eu, 0x8001u, 0xffffu})
+    {
+      REQUIRE(bus.writeData16(address, value));
+      REQUIRE(bus.readData16(address, &half));
+      REQUIRE(half == value);
+    }
+    REQUIRE(bus.writeData16(address, static_cast<std::uint16_t>(0xa500 + index)));
+    REQUIRE(system.eeStateHash() != before);
+    std::uint8_t byte = 0xa5;
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE(byte == 0xa5);
+    REQUIRE_FALSE(bus.writeData8(address, 0x7e));
+    REQUIRE_FALSE(bus.writeData8(address + 1, 0));
+    REQUIRE_THROWS_AS(bus.writeData16(address + 1, 0x7e), std::invalid_argument);
+  }
+  const auto hash = system.eeStateHash();
+  REQUIRE(bus.writeData16(0x1a000006, 3));
+  REQUIRE(bus.writeData16(0x1a000002, 0x42));
+  for (const auto address : {0x1a000000u, 0x1a00000au, 0x1a00000cu,
+         0x1a00000eu, 0x1a000020u, 0x1a000022u, 0x1a000110u,
+         0x9a000010u, 0xba000010u})
+  {
+    CAPTURE(address);
+    half = 0xa5a5;
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE(half == 0xa5a5);
+    REQUIRE_FALSE(bus.writeData16(address, 0x7e));
+  }
+  std::uint32_t word = UINT32_MAX;
+  std::uint64_t wide = UINT64_MAX;
+  EEQuadword quad{UINT64_MAX, UINT64_MAX};
+  REQUIRE_FALSE(bus.readData32(0x1a000010, &word));
+  REQUIRE(word == UINT32_MAX);
+  REQUIRE_FALSE(bus.writeData32(0x1a000010, 0x1234007e));
+  REQUIRE_FALSE(bus.readData64(0x1a000010, &wide));
+  REQUIRE(wide == UINT64_MAX);
+  REQUIRE_FALSE(bus.writeData64(0x1a000010, UINT64_MAX));
+  REQUIRE_FALSE(bus.readData128(0x1a000010, &quad));
+  REQUIRE(quad.low == UINT64_MAX);
+  REQUIRE(quad.high == UINT64_MAX);
+  REQUIRE_FALSE(bus.writeData128(0x1a000010, quad));
+  REQUIRE_FALSE(bus.readInstruction32(0x1a000010, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(0x1a000010, 16));
+  REQUIRE_FALSE(bus.readDMAC128(0x1a000010, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(0x1a000010, quad));
+  REQUIRE(system.iopBus().read16(0x1a000010).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write16(0x1a000010, 0x7e).status == IOPBusStatus::Unmapped);
+  for (std::uint32_t index = 0; index < 8; ++index)
+  {
+    REQUIRE(bus.readData16(0x1a000010 + index * 2, &half));
+    REQUIRE(half == 0xa500 + index);
+  }
+  REQUIRE(bus.readData16(0x1a000004, &half));
+  REQUIRE(half == 0xcafe);
+  REQUIRE(bus.readData16(0x1a000008, &half));
+  REQUIRE(half == 0x1357);
+  REQUIRE(system.eeStateHash() == hash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  system.reset();
+  REQUIRE(system.eeStateHash() == resetHash);
+  for (std::uint32_t index = 0; index < 8; ++index)
+  {
+    REQUIRE(system.eeBus().readData16(0x1a000010 + index * 2, &half));
+    REQUIRE(half == 0);
+  }
+}
+
+TEST_CASE("EE BA0 staging has canonical little-endian transactional persistence",
+  "[ee][bus][save-state][ba0-staging]")
+{
+  constexpr const char *FIELD = "system.eeBus.ba0TransferStaging";
+  NekoSystem original;
+  SaveStateMutation expected(original.saveState());
+  for (std::uint32_t index = 0; index < 8; ++index)
+  {
+    const auto value = static_cast<std::uint16_t>(0x807e + index * 0x101);
+    REQUIRE(original.eeBus().writeData16(0x1a000010 + index * 2, value));
+    expected.writeByte(FIELD, index * 2, static_cast<std::uint8_t>(value));
+    expected.writeByte(FIELD, index * 2 + 1, static_cast<std::uint8_t>(value >> 8));
+  }
+  expected.refreshChecksum();
+  const auto saved = original.saveState();
+  REQUIRE(saved == expected.bytes());
+  NekoSystem restored;
+  restored.loadState(saved);
+  REQUIRE(restored.saveState() == saved);
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  for (std::uint32_t index = 0; index < 8; ++index)
+  {
+    std::uint16_t value = 0;
+    REQUIRE(restored.eeBus().readData16(0x1a000010 + index * 2, &value));
+    REQUIRE(value == 0x807e + index * 0x101);
+    REQUIRE(restored.eeBus().writeData16(0x1a000010 + index * 2, 0x1234));
+  }
+  const auto before = restored.saveState();
+  const auto hash = restored.eeStateHash();
+  for (const char *path : {"container.version", "system.eeBus.ba0Control02",
+         "system.eeRDRAMInitialization.enumeratedDevices"})
+  {
+    CAPTURE(path);
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(path, std::string(path) == "container.version" ? 60 : 3);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(restored.saveState() == before);
+    REQUIRE(restored.eeStateHash() == hash);
   }
 }
 

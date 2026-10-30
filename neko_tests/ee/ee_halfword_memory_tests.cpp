@@ -69,17 +69,30 @@ TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low hal
 }
 
 TEST_CASE("EE SH translates BA0 initialization aliases and captures the low halfword",
-  "[ee][guest][trace][ba0-init][ba0-control]")
+  "[ee][guest][trace][ba0-init][ba0-control][ba0-staging]")
 {
   std::uint32_t physical = 0x1a000006;
   std::uint16_t selected = 3;
   std::uint8_t base = 2;
+  bool staging = false;
   SECTION("status initialization") {}
   SECTION("control selection")
   {
     physical = 0x1a000002;
     selected = 0x42;
     base = 3;
+  }
+  SECTION("first staging halfword")
+  {
+    physical = 0x1a000010;
+    selected = 0x7e;
+    staging = true;
+  }
+  SECTION("last staging halfword")
+  {
+    physical = 0x1a00001e;
+    selected = 0x7e;
+    staging = true;
   }
   for (const std::uint32_t address :
        {physical | EEMemoryMap::KSEG0_BASE, physical | EEMemoryMap::KSEG1_BASE})
@@ -93,7 +106,7 @@ TEST_CASE("EE SH translates BA0 initialization aliases and captures the low half
       NekoSystem traced;
       NekoSystem plain;
       const auto half = static_cast<std::uint16_t>(value);
-      const bool accepted = half == selected;
+      const bool accepted = staging || half == selected;
       for (auto *system : {&traced, &plain})
       {
         auto &core = system->eeCore();
@@ -115,6 +128,12 @@ TEST_CASE("EE SH translates BA0 initialization aliases and captures the low half
                     : EEExceptionVector::GENERAL));
         REQUIRE(core.generalRegister(4).low == value);
         REQUIRE(core.generalRegister(4).high == UINT64_C(0xfeedfacecafebeef));
+        if (staging)
+        {
+          std::uint16_t retained = 0;
+          REQUIRE(system->eeBus().readData16(physical, &retained));
+          REQUIRE(retained == half);
+        }
       }
       std::size_t stores = 0;
       for (const auto &event : traced.trace())

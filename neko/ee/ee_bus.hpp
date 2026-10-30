@@ -127,6 +127,10 @@ namespace EEMemoryMap
   constexpr std::uint32_t BA0_REGISTER_04 = 0x1a000004;
   constexpr std::uint32_t BA0_INIT_06 = 0x1a000006;
   constexpr std::uint32_t BA0_REGISTER_08 = 0x1a000008;
+  constexpr std::uint32_t BA0_TRANSFER_BEGIN =
+    BA0_BASE + EEBA0RegisterMap::TRANSFER_BEGIN;
+  constexpr std::uint32_t BA0_TRANSFER_END =
+    BA0_BASE + EEBA0RegisterMap::TRANSFER_END;
   constexpr std::uint32_t IOP_BOOT_PROBE = 0x1f803204;
   constexpr std::uint32_t IOP_RAM_BASE = 0x1c000000;
   constexpr std::uint32_t IOP_RAM_END = 0x1c200000;

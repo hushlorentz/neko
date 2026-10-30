@@ -44,7 +44,9 @@ namespace
     return address == EEMemoryMap::BA0_CONTROL_02 ||
       address == EEMemoryMap::BA0_REGISTER_04 ||
       address == EEMemoryMap::BA0_INIT_06 ||
-      address == EEMemoryMap::BA0_REGISTER_08;
+      address == EEMemoryMap::BA0_REGISTER_08 ||
+      (address >= EEMemoryMap::BA0_TRANSFER_BEGIN &&
+       address < EEMemoryMap::BA0_TRANSFER_END);
   }
 
   bool fullWordOnlyAddress(std::uint32_t address)
