@@ -926,6 +926,17 @@ bool EEBus::readData64(
     address,
     8,
     "EE doubleword load must be naturally aligned.");
+  VPU *vpu = nullptr;
+  std::size_t instructionIndex = 0;
+  if (vuMicroMemoryAddress(address, &vpu, &instructionIndex))
+  {
+    if (!cpuVUMemoryAccessible(*vpu))
+    {
+      return false;
+    }
+    *value = vpu->readMicroInstruction(instructionIndex);
+    return true;
+  }
   if (readMapped64(address, value))
   {
     return true;
@@ -941,6 +952,20 @@ bool EEBus::writeData64(
     address,
     8,
     "EE doubleword store must be naturally aligned.");
+  VPU *vpu = nullptr;
+  std::size_t instructionIndex = 0;
+  if (vuMicroMemoryAddress(address, &vpu, &instructionIndex))
+  {
+    if (!cpuVUMemoryAccessible(*vpu))
+    {
+      return false;
+    }
+    vpu->writeMicroInstruction(
+      instructionIndex,
+      static_cast<std::uint32_t>(value),
+      static_cast<std::uint32_t>(value >> 32));
+    return true;
+  }
   return writeMapped64(address, value, true);
 }
 
@@ -1003,7 +1028,7 @@ bool EEBus::readData128(
   VPU *vpu = nullptr;
   std::size_t quadwordIndex = 0;
   if (!vuDataMemoryAddress(address, &vpu, &quadwordIndex) ||
-      !cpuVUDataMemoryAccessible(*vpu))
+      !cpuVUMemoryAccessible(*vpu))
   {
     return false;
   }
@@ -1084,7 +1109,37 @@ bool EEBus::vuDataMemoryAddress(
   return false;
 }
 
-bool EEBus::cpuVUDataMemoryAccessible(const VPU &vpu) const
+bool EEBus::vuMicroMemoryAddress(
+  std::uint32_t address,
+  VPU **vpu,
+  std::size_t *instructionIndex) const
+{
+  if (address >= EEMemoryMap::VU0_MICRO_MEMORY_BASE &&
+      address < EEMemoryMap::VU0_MICRO_MEMORY_END)
+  {
+    if (vu0Component == nullptr)
+    {
+      throw std::logic_error("EE bus VU0 is not attached.");
+    }
+    *vpu = vu0Component;
+    *instructionIndex = (address - EEMemoryMap::VU0_MICRO_MEMORY_BASE) / 8;
+    return true;
+  }
+  if (address >= EEMemoryMap::VU1_MICRO_MEMORY_BASE &&
+      address < EEMemoryMap::VU1_MICRO_MEMORY_END)
+  {
+    if (vu1Component == nullptr)
+    {
+      throw std::logic_error("EE bus VU1 is not attached.");
+    }
+    *vpu = vu1Component;
+    *instructionIndex = (address - EEMemoryMap::VU1_MICRO_MEMORY_BASE) / 8;
+    return true;
+  }
+  return false;
+}
+
+bool EEBus::cpuVUMemoryAccessible(const VPU &vpu) const
 {
   const bool vu0 = vpu.unitType() == VPUType::VU0;
   const VIF &vif = vu0 ? *vif0Component : *vif1Component;
@@ -1205,7 +1260,7 @@ EEDataWriteResult EEBus::writeGuestData128(
   std::size_t quadwordIndex = 0;
   if (vuDataMemoryAddress(address, &vpu, &quadwordIndex))
   {
-    if (!cpuVUDataMemoryAccessible(*vpu))
+    if (!cpuVUMemoryAccessible(*vpu))
     {
       return EEDataWriteResult::Failed;
     }

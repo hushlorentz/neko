@@ -10,6 +10,7 @@
 #include "gif_registers.hpp"
 #include "neko_system.hpp"
 #include "save_state_mutation.hpp"
+#include "vpu_opcodes.hpp"
 
 namespace
 {
@@ -65,6 +66,200 @@ namespace
     system.startTrace(100);
     return system.stepEEInstruction(16);
   }
+}
+
+TEST_CASE("EE CPU VU micro doublewords share exact instruction memories",
+  "[ee][bus][vu-micro-memory]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  constexpr std::uint64_t value = UINT64_C(0xaabbccdd11223344);
+  for (const auto base : {0x11000000u, 0x11008000u})
+  {
+    auto &vpu = base == 0x11000000 ? system.vu0() : system.vu1();
+    const std::size_t lastIndex = vpu.microMemorySize() / 8 - 1;
+    for (const std::size_t index : {std::size_t{0}, lastIndex})
+    {
+      const auto address = base + static_cast<std::uint32_t>(index * 8);
+      REQUIRE(bus.writeData64(address, value));
+      REQUIRE(vpu.readMicroInstruction(index) == value);
+      std::uint64_t loaded = 0;
+      REQUIRE(bus.readData64(address, &loaded));
+      REQUIRE(loaded == value);
+      vpu.writeMicroInstruction(index, 0x55667788, 0x12345678);
+      REQUIRE(bus.readData64(address, &loaded));
+      REQUIRE(loaded == UINT64_C(0x1234567855667788));
+    }
+    REQUIRE(vpu.programCounter() == 0);
+    REQUIRE_FALSE(vpu.clockActive());
+  }
+}
+
+TEST_CASE("EE CPU VU micro doublewords reject unsupported widths and routes",
+  "[ee][bus][vu-micro-memory]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  for (const auto address : {0x11000000u, 0x11008000u})
+  {
+    REQUIRE(bus.writeData64(address, UINT64_C(0xaabbccdd11223344)));
+    const auto hash = system.eeStateHash();
+    std::uint8_t byte = 0;
+    std::uint16_t half = 0;
+    std::uint32_t word = 0;
+    std::uint64_t wide = 0;
+    EEQuadword quad{3, 4};
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE_FALSE(bus.readData32(address, &word));
+    REQUIRE_FALSE(bus.readData128(address, &quad));
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+    REQUIRE_FALSE(bus.writeData16(address, 0));
+    REQUIRE_FALSE(bus.writeData32(address, 0));
+    REQUIRE_FALSE(bus.writeData128(address, {}));
+    REQUIRE_FALSE(bus.readInstruction32(address, &word));
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 64));
+    REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {}));
+    REQUIRE_FALSE(bus.readScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, &quad));
+    REQUIRE_FALSE(bus.writeScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, {}));
+    REQUIRE_THROWS_AS(bus.readData64(address, nullptr), std::invalid_argument);
+    REQUIRE_THROWS_AS(bus.readData64(address + 4, &wide), std::invalid_argument);
+    REQUIRE_THROWS_AS(bus.writeData64(address + 4, 0), std::invalid_argument);
+    REQUIRE(system.eeStateHash() == hash);
+  }
+  for (const auto address : {0x10fffff8u, 0x11001000u, 0x11002000u,
+      0x11003000u, 0x11004000u, 0x11007ff8u, 0x1100c000u, 0x11010000u,
+      0x91008000u, 0xb1008000u, 0x31008000u})
+  {
+    std::uint64_t untouched = UINT64_C(0x123456789abcdef0);
+    REQUIRE_FALSE(bus.readData64(address, &untouched));
+    REQUIRE_FALSE(bus.writeData64(address, 0));
+    REQUIRE(untouched == UINT64_C(0x123456789abcdef0));
+  }
+}
+
+TEST_CASE("EE CPU VU micro doublewords require stopped relevant units",
+  "[ee][bus][vu-micro-memory]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData64(0x11000000, 1));
+  REQUIRE(bus.writeData64(0x11008000, 2));
+  std::uint32_t blockedAddress = 0x11008000;
+  std::uint32_t availableAddress = 0x11000000;
+  SECTION("VU0 running")
+  {
+    system.vu0().startMicroMode(0);
+    blockedAddress = 0x11000000;
+    availableAddress = 0x11008000;
+  }
+  SECTION("VU1 running")
+  {
+    system.vu1().startMicroMode(0);
+  }
+  SECTION("VIF0 queued")
+  {
+    REQUIRE(system.vif0().submitQuadword({}));
+    blockedAddress = 0x11000000;
+    availableAddress = 0x11008000;
+  }
+  SECTION("VIF1 queued")
+  {
+    REQUIRE(system.vif1().submitQuadword({}));
+  }
+  SECTION("VIF0 partial MPG instruction")
+  {
+    system.vif0().ingestWord(0);
+    system.vif0().ingestWord(0x4a010000);
+    system.vif0().ingestWord(0x11223344);
+    blockedAddress = 0x11000000;
+    availableAddress = 0x11008000;
+  }
+  SECTION("VIF1 partial MPG instruction")
+  {
+    system.vif1().ingestWord(0);
+    system.vif1().ingestWord(0x4a010000);
+    system.vif1().ingestWord(0x11223344);
+  }
+  SECTION("GIF queued")
+  {
+    REQUIRE(bus.writeData128(EEMemoryMap::GIF_FIFO, {1, 0}));
+  }
+  SECTION("GIF active packet")
+  {
+    REQUIRE(bus.writeQuadword(EEMemoryMap::GIF_FIFO, gifTag()));
+    bus.advanceGuestFIFOs();
+  }
+  const auto hash = system.eeStateHash();
+  std::uint64_t untouched = 5;
+  REQUIRE_FALSE(bus.readData64(blockedAddress, &untouched));
+  REQUIRE_FALSE(bus.writeData64(blockedAddress, 0));
+  REQUIRE(untouched == 5);
+  REQUIRE(system.eeStateHash() == hash);
+  REQUIRE(bus.readData64(availableAddress, &untouched));
+}
+
+TEST_CASE("EE CPU VU micro doublewords preserve MPG and restored guest execution",
+  "[ee][bus][vu-micro-memory][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  const std::uint64_t first =
+    (static_cast<std::uint64_t>(VPU_E_BIT | VPU_NOP) << 32) | VPU_LOWER_NOP;
+  const std::uint64_t delay =
+    (static_cast<std::uint64_t>(VPU_NOP) << 32) | VPU_LOWER_NOP;
+  original.vif1().ingestWord(0);
+  original.vif1().ingestWord(0x4a010000);
+  original.vif1().ingestWord(static_cast<std::uint32_t>(first));
+  original.vif1().ingestWord(static_cast<std::uint32_t>(first >> 32));
+  std::uint64_t loaded = 0;
+  REQUIRE(bus.readData64(0x11008000, &loaded));
+  REQUIRE(loaded == first);
+  bus.write32(0, immediateInstruction(0x3f, 1, 2, 8));
+  bus.write32(4, immediateInstruction(0x37, 1, 3));
+  bus.write32(8, immediateInstruction(0x3f, 4, 3));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(1, {0xb1008000, 0});
+  core.setGeneralRegister(2, {delay, 0});
+  core.setGeneralRegister(4, {0x91000ff8, 0});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  const auto firstResult = original.stepEEInstruction(16);
+  REQUIRE(firstResult.pendingException == EEException::None);
+  REQUIRE(firstResult.instructions == 1);
+  REQUIRE(original.vu1().readMicroInstruction(1) == delay);
+  const auto saved = original.saveState();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  traced.startTrace();
+  for (int step = 0; step < 2; ++step)
+  {
+    const auto plainResult = plain.stepEEInstruction(16);
+    const auto tracedResult = traced.stepEEInstruction(16);
+    REQUIRE(plainResult.pendingException == EEException::None);
+    REQUIRE(tracedResult.pendingException == EEException::None);
+    REQUIRE(plainResult.instructions == 1);
+    REQUIRE(plainResult.instructions == tracedResult.instructions);
+    REQUIRE(plainResult.masterCycles == tracedResult.masterCycles);
+  }
+  REQUIRE(plain.eeCore().generalRegister(3).low == first);
+  REQUIRE(plain.vu0().readMicroInstruction(511) == first);
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE_FALSE(traced.trace().empty());
+  plain.vif1().ingestWord(0x14000000);
+  traced.vif1().ingestWord(0x14000000);
+  plain.vu1().run(32);
+  traced.vu1().run(32);
+  REQUIRE_FALSE(plain.vu1().clockActive());
+  REQUIRE(plain.vu1().terminationPosition() == 2);
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
 }
 
 TEST_CASE("EE CPU VU quadwords share both data memories and documented mirrors",

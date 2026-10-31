@@ -2605,6 +2605,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate guest and restored continuation, obtain independent review,
       then verify progress through a fresh authorized cold scout.
 
+### EE CPU VU Micro-Memory Doubleword Access
+
+- [x] Establish both CPU micro-memory mappings, 64-bit access and stopped-unit
+      requirements through the existing VPU instruction-memory owner.
+- [x] Add bounded CPU doubleword reads/writes with VIF MPG coherence,
+      preserving rejection of unsupported widths, aliases and routes.
+- [x] Validate guest and restored continuation, obtain independent review,
+      then verify progress through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

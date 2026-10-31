@@ -42,6 +42,14 @@ namespace EEMemoryMap
     4 * 1024 * 1024;
   constexpr std::uint32_t BOOT_ROM_END =
     BOOT_ROM_BASE + BOOT_ROM_SIZE;
+  constexpr std::uint32_t VU0_MICRO_MEMORY_BASE =
+    UINT32_C(0x11000000);
+  constexpr std::uint32_t VU0_MICRO_MEMORY_END =
+    UINT32_C(0x11001000);
+  constexpr std::uint32_t VU1_MICRO_MEMORY_BASE =
+    UINT32_C(0x11008000);
+  constexpr std::uint32_t VU1_MICRO_MEMORY_END =
+    UINT32_C(0x1100c000);
   constexpr std::uint32_t VU0_DATA_MEMORY_BASE =
     UINT32_C(0x11004000);
   constexpr std::uint32_t VU0_DATA_MEMORY_END =
@@ -362,7 +370,11 @@ class EEBus
       std::uint32_t address,
       VPU **vpu,
       std::size_t *quadwordIndex) const;
-    bool cpuVUDataMemoryAccessible(const VPU &vpu) const;
+    bool vuMicroMemoryAddress(
+      std::uint32_t address,
+      VPU **vpu,
+      std::size_t *instructionIndex) const;
+    bool cpuVUMemoryAccessible(const VPU &vpu) const;
     GSDisplay &attachedGSDisplay() const;
     EESerial &attachedSerial() const;
     EERDRAMInitialization &attachedRDRAMInitialization() const;
