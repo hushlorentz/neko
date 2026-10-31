@@ -29,6 +29,27 @@ namespace
     0x1fffffff;
   constexpr std::uint32_t VIF_STALL_CANCEL = 1u << 3;
 
+  EEQuadword readVUQuadword(const VPU &vpu, std::size_t index)
+  {
+    const auto words = vpu.readDataQuadword(index);
+    return {
+      static_cast<std::uint64_t>(words[0]) |
+        (static_cast<std::uint64_t>(words[1]) << 32),
+      static_cast<std::uint64_t>(words[2]) |
+        (static_cast<std::uint64_t>(words[3]) << 32)
+    };
+  }
+
+  void writeVUQuadword(VPU &vpu, std::size_t index, const EEQuadword &value)
+  {
+    vpu.writeDataQuadword(index, {
+      static_cast<std::uint32_t>(value.low),
+      static_cast<std::uint32_t>(value.low >> 32),
+      static_cast<std::uint32_t>(value.high),
+      static_cast<std::uint32_t>(value.high >> 32)
+    });
+  }
+
   bool sifApertureAddress(std::uint32_t address)
   {
     return address >= EEMemoryMap::SIF_BASE &&
@@ -975,8 +996,19 @@ bool EEBus::readData128(
   std::uint32_t address,
   EEQuadword *value) const
 {
-  return readBacking128(address, value) ||
-    readIOPRAM(address, 16, value);
+  if (readBacking128(address, value) || readIOPRAM(address, 16, value))
+  {
+    return true;
+  }
+  VPU *vpu = nullptr;
+  std::size_t quadwordIndex = 0;
+  if (!vuDataMemoryAddress(address, &vpu, &quadwordIndex) ||
+      !cpuVUDataMemoryAccessible(*vpu))
+  {
+    return false;
+  }
+  *value = readVUQuadword(*vpu, quadwordIndex);
+  return true;
 }
 
 bool EEBus::readDMAC128(
@@ -1052,6 +1084,20 @@ bool EEBus::vuDataMemoryAddress(
   return false;
 }
 
+bool EEBus::cpuVUDataMemoryAccessible(const VPU &vpu) const
+{
+  const bool vu0 = vpu.unitType() == VPUType::VU0;
+  const VIF &vif = vu0 ? *vif0Component : *vif1Component;
+  if (vpu.clockActive() || vif.awaitingPayload() || vif.fifoQuadwordCount() != 0)
+  {
+    return false;
+  }
+  constexpr std::uint32_t gifActivity =
+    GIFStatus::IP3 | GIFStatus::P3Q | GIFStatus::P2Q | GIFStatus::P1Q |
+    GIFStatus::OPH | GIFStatus::APATH_MASK | GIFStatus::FQC_MASK;
+  return vu0 || (gifRegisterFile->readStatus() & gifActivity) == 0;
+}
+
 bool EEBus::readScratchpadDMAC128(
   std::uint32_t physicalAddress,
   EEScratchpadDMACMode mode,
@@ -1085,14 +1131,7 @@ bool EEBus::readScratchpadDMAC128(
     throw std::invalid_argument(
       "SPR DMAC VU memory endpoints require normal mode.");
   }
-  const std::array<std::uint32_t, 4> words =
-    vpu->readDataQuadword(quadwordIndex);
-  value->low =
-    static_cast<std::uint64_t>(words[0]) |
-    (static_cast<std::uint64_t>(words[1]) << 32);
-  value->high =
-    static_cast<std::uint64_t>(words[2]) |
-    (static_cast<std::uint64_t>(words[3]) << 32);
+  *value = readVUQuadword(*vpu, quadwordIndex);
   return true;
 }
 
@@ -1124,14 +1163,7 @@ bool EEBus::writeScratchpadDMAC128(
     throw std::invalid_argument(
       "SPR DMAC VU memory endpoints require normal mode.");
   }
-  vpu->writeDataQuadword(
-    quadwordIndex,
-    {
-      static_cast<std::uint32_t>(value.low),
-      static_cast<std::uint32_t>(value.low >> 32),
-      static_cast<std::uint32_t>(value.high),
-      static_cast<std::uint32_t>(value.high >> 32)
-    });
+  writeVUQuadword(*vpu, quadwordIndex, value);
   return true;
 }
 
@@ -1167,6 +1199,18 @@ EEDataWriteResult EEBus::writeGuestData128(
     return gifPath3Transfer->submitGuestQuadword(quadword)
       ? EEDataWriteResult::Completed
       : EEDataWriteResult::Stalled;
+  }
+
+  VPU *vpu = nullptr;
+  std::size_t quadwordIndex = 0;
+  if (vuDataMemoryAddress(address, &vpu, &quadwordIndex))
+  {
+    if (!cpuVUDataMemoryAccessible(*vpu))
+    {
+      return EEDataWriteResult::Failed;
+    }
+    writeVUQuadword(*vpu, quadwordIndex, value);
+    return EEDataWriteResult::Completed;
   }
 
   std::uint32_t physicalAddress = 0;

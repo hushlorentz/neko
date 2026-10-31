@@ -2596,6 +2596,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate access and restored guest behavior, pass complete optimized/ASan
       checks and independent review, then verify progress with a fresh cold scout.
 
+### EE CPU VU Data-Memory Quadword Access
+
+- [x] Establish the documented CPU quadword access and mapping contract for
+      both VU data memories through the existing EEBus/VPU owners.
+- [x] Add bounded CPU quadword reads/writes without parallel backing,
+      preserving VIF/VU coherence and unsupported access-route rejection.
+- [x] Validate guest and restored continuation, obtain independent review,
+      then verify progress through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

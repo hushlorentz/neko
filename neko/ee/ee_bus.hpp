@@ -362,6 +362,7 @@ class EEBus
       std::uint32_t address,
       VPU **vpu,
       std::size_t *quadwordIndex) const;
+    bool cpuVUDataMemoryAccessible(const VPU &vpu) const;
     GSDisplay &attachedGSDisplay() const;
     EESerial &attachedSerial() const;
     EERDRAMInitialization &attachedRDRAMInitialization() const;
