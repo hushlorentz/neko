@@ -145,6 +145,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t MCH_RICM = 0x1000f430;
   constexpr std::uint32_t MCH_DRD = 0x1000f440;
   constexpr std::uint32_t RESERVED_F500 = 0x1000f500;
+  constexpr std::uint32_t STARTUP_F510 = 0x1000f510;
   constexpr std::uint32_t D_ENABLER = 0x1000f520;
   constexpr std::uint32_t D_ENABLEW = 0x1000f590;
   constexpr std::uint32_t BA0_BASE = 0x1a000000;

@@ -2637,6 +2637,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate register and guest integration, obtain independent review,
       then verify progress through a fresh authorized cold scout.
 
+### Bounded EE f510 Startup Writes
+
+- [x] Establish the observed f510 store contract and distinguish it from
+      the neighboring DMAC hold registers through manual-first research.
+- [x] Admit exact word writes without inventing readback or DMA effects,
+      preserving the existing f500 contract and rejecting other routes.
+- [x] Validate state preservation and guest continuation, obtain independent
+      review, then verify progress through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

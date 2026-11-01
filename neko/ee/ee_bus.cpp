@@ -85,6 +85,7 @@ namespace
       address == EEMemoryMap::SIO_ISR ||
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       mchWindowAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
+      address == EEMemoryMap::STARTUP_F510 ||
       address == EEMemoryMap::GIF_CTRL ||
       address == EEMemoryMap::VIF1_STAT ||
       address == EEMemoryMap::D_RBSR || address == EEMemoryMap::D_RBOR ||
@@ -1672,6 +1673,8 @@ bool EEBus::writeMapped32(
   switch (address)
   {
     case EEMemoryMap::RESERVED_F500:
+    case EEMemoryMap::STARTUP_F510:
+      // Provisional exact startup write-discard policy, not DMA control.
       return true;
     case EEMemoryMap::SIO_LCR:
       return attachedSerial().writeLineControl(value);

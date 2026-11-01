@@ -734,7 +734,7 @@ TEST_CASE("EE reserved startup admission does not map neighboring words or IOP v
   NekoSystem system;
   seed(system);
   const auto before = system.saveState();
-  for (std::uint32_t address : {0x1000f3fcu, 0x1000f504u, 0x1000f510u,
+  for (std::uint32_t address : {0x1000f3fcu, 0x1000f504u, 0x1000f508u,
          0x1000f51cu, 0x1000f524u, 0x1000f58cu, 0x1000f594u,
          0x1000f5fcu, 0x1000f600u})
   {
@@ -866,6 +866,135 @@ TEST_CASE("EE reserved startup word cannot become an instruction source",
   REQUIRE(result.exceptionAddress == UNCACHED);
   REQUIRE(result.instructions == 0);
   REQUIRE_FALSE(result.cycleLimitReached);
+}
+
+TEST_CASE("EE f510 startup word writes preserve DMA hold and shared state",
+  "[ee][bus][startup-f510]")
+{
+  constexpr std::uint32_t address = 0x1000f510;
+  NekoSystem system;
+  seed(system);
+  system.eeBus().write32(EEMemoryMap::D2_CHCR, 0x101);
+  std::uint32_t hold = DMACHold::RESET_VALUE;
+  SECTION("DMA enabled") {}
+  SECTION("DMA held") { hold |= DMACHold::CPND; }
+  system.eeBus().write32(EEMemoryMap::D_ENABLEW, hold);
+  const auto eeHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  system.startTrace();
+  for (const auto value : {0u, UINT32_MAX, 0xaaaaaaaau, 0x55555555u})
+  {
+    CAPTURE(value);
+    REQUIRE(system.eeBus().writeData32(address, value));
+    REQUIRE_NOTHROW(system.eeBus().write32(address, value));
+    REQUIRE_NOTHROW(system.eeBus().write32(address | EEMemoryMap::KSEG1_BASE, value));
+    REQUIRE(system.eeBus().read32(EEMemoryMap::D_ENABLER) == hold);
+    REQUIRE(system.eeStateHash() == eeHash);
+    REQUIRE(system.iopStateHash() == iopHash);
+    REQUIRE(system.sifStateHash() == sifHash);
+  }
+  REQUIRE(system.trace().empty());
+}
+
+TEST_CASE("EE f510 startup word excludes readback widths neighbors and peers",
+  "[ee][bus][startup-f510]")
+{
+  constexpr std::uint32_t address = 0x1000f510;
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto hash = system.eeStateHash();
+  REQUIRE(bus.wordMergeStorePolicy(address) == EEWordMergeStorePolicy::FullWordOnly);
+  REQUIRE(bus.writeData32(address, UINT32_MAX));
+  std::uint32_t word = 0x12345678;
+  REQUIRE_FALSE(bus.readData32(address, &word));
+  REQUIRE_FALSE(bus.readInstruction32(address, &word));
+  REQUIRE(word == 0x12345678);
+  REQUIRE_THROWS_AS(bus.read32(address), std::out_of_range);
+  REQUIRE_FALSE(bus.isCacheFillRange(address, 16));
+  REQUIRE_FALSE(bus.writeData8(address, 0));
+  REQUIRE_FALSE(bus.writeData16(address, 0));
+  REQUIRE_FALSE(bus.writeData64(address, 0));
+  REQUIRE_FALSE(bus.writeData128(address, {}));
+  REQUIRE_FALSE(bus.writeDMAC128(address, {}));
+  REQUIRE_THROWS_AS(bus.write64(address, 0), std::out_of_range);
+  REQUIRE_THROWS_AS(bus.writeQuadword(address, {}), std::out_of_range);
+  REQUIRE_FALSE(bus.writeData32(address | EEMemoryMap::KSEG1_BASE, 0));
+  REQUIRE_THROWS_AS(bus.writeData32(address + 1, 0), std::invalid_argument);
+  for (const auto neighbor : {address - 4, address + 4, address + 8, address + 12})
+  {
+    REQUIRE_FALSE(bus.writeData32(neighbor, 0));
+    REQUIRE_FALSE(bus.readData32(neighbor, &word));
+  }
+  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::D_ENABLER, 0));
+  REQUIRE_FALSE(bus.readData32(EEMemoryMap::D_ENABLEW, &word));
+  REQUIRE(system.iopBus().read32(address).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write32(address, 0).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().writeMasked32(address, 0, 0xf).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.eeStateHash() == hash);
+}
+
+TEST_CASE("EE f510 startup guest merges admit only full-word lanes",
+  "[ee][bus][startup-f510][guest]")
+{
+  constexpr std::uint32_t address = 0xb000f510;
+  for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+  {
+    for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+    {
+      CAPTURE(opcode);
+      CAPTURE(lane);
+      NekoSystem system;
+      const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+      const auto result = execute(system, opcode, 0x89abcdef, lane, address);
+      REQUIRE(result.pendingException ==
+        (full ? EEException::None : EEException::DataBusErrorStore));
+      REQUIRE(system.dmacController().holdControl() == DMACHold::RESET_VALUE);
+      if (full)
+      {
+        REQUIRE(result.instructions != 0);
+      }
+      else
+      {
+        REQUIRE(result.exceptionAddress == address + lane);
+        REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+      }
+      requireWordStoreObservation(system, 0x89abcdef, full, address);
+    }
+  }
+}
+
+TEST_CASE("EE f510 startup delay-slot store retires identically across trace modes",
+  "[ee][bus][startup-f510][guest]")
+{
+  NekoSystem plain;
+  NekoSystem traced;
+  for (auto *system : {&plain, &traced})
+  {
+    system->eeBus().write32(0, 0x03e00008); // JR ra
+    system->eeBus().write32(4, 0xac400000); // SW zero,0(v0)
+    system->eeCore().setGeneralRegister(2, {0xb000f510, 0});
+    system->eeCore().setGeneralRegister(31, {0xa0000010, 0});
+    system->eeCore().setCOP0Register(EECOP0Register::Status, 0);
+    system->eeCore().startExecution(0xa0000000);
+  }
+  traced.startTrace();
+  for (auto *system : {&plain, &traced})
+  {
+    for (unsigned cycle = 0; cycle < 2 &&
+         system->eeCore().programCounter() != 0xa0000010 &&
+         system->eeCore().pendingException() == EEException::None; ++cycle)
+    {
+      system->clockMasterCycle();
+    }
+    REQUIRE(system->eeCore().pendingException() == EEException::None);
+    REQUIRE(system->eeCore().programCounter() == 0xa0000010);
+    REQUIRE(system->eeBus().read32(EEMemoryMap::D_ENABLER) == DMACHold::RESET_VALUE);
+  }
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.iopStateHash() == traced.iopStateHash());
+  REQUIRE(plain.sifStateHash() == traced.sifStateHash());
+  requireWordStoreObservation(traced, 0, true, 0xb000f510);
 }
 
 TEST_CASE("EE absent DMAC slots discard exact word writes without changing state",
