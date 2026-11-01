@@ -799,6 +799,143 @@ TEST_CASE("EE VIF reset preserves restored traced guest continuation",
   }
 }
 
+TEST_CASE("EE VIF1 status writes preserve live forward state",
+  "[ee][bus][vif-stat]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  auto &vif = system.vif1();
+  bus.write32(EEMemoryMap::D1_MADR, 0x1230);
+  bus.write32(EEMemoryMap::D1_QWC, 3);
+  vif.processCode(0x06008000);
+  SECTION("Idle") {}
+  SECTION("Interrupt and queued FIFO")
+  {
+    vif.processCode(0x87001234);
+    REQUIRE(vif.submitQuadword({0x05000002, 0, 0, 0}));
+  }
+  SECTION("Incomplete payload")
+  {
+    vif.ingestWord(0x01000101);
+    vif.ingestWord(0x6c010000);
+    vif.ingestWord(99);
+    REQUIRE(vif.awaitingPayload());
+  }
+  SECTION("Started DMA with global DMA disabled")
+  {
+    bus.write32(EEMemoryMap::D1_CHCR, 0x101);
+    REQUIRE_FALSE(system.vif1DMAC().clockActive());
+  }
+  SECTION("Active graphics PATH2")
+  {
+    REQUIRE(system.gifPathArbiter().transferQuadword(
+      GIFPath::Path2, gifTag()).accepted);
+  }
+  const auto status = bus.read32(EEMemoryMap::VIF1_STAT);
+  const auto before = system.eeStateHash();
+  for (const auto value : {0u, 0x00003fffu, 0xff7fffffu})
+  {
+    REQUIRE(bus.writeData32(EEMemoryMap::VIF1_STAT, value));
+    bus.write32(EEMemoryMap::VIF1_STAT, value);
+    REQUIRE(bus.read32(EEMemoryMap::VIF1_STAT) == status);
+    REQUIRE(system.eeStateHash() == before);
+  }
+  for (const auto value : {0x00800000u, 0xffffffffu})
+  {
+    REQUIRE_FALSE(bus.writeData32(EEMemoryMap::VIF1_STAT, value));
+    REQUIRE_THROWS_AS(bus.write32(EEMemoryMap::VIF1_STAT, value),
+      std::invalid_argument);
+    REQUIRE(system.eeStateHash() == before);
+  }
+}
+
+TEST_CASE("EE VIF status programming excludes unsupported access routes",
+  "[ee][bus][vif-stat]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto before = system.eeStateHash();
+  REQUIRE(bus.wordMergeStorePolicy(EEMemoryMap::VIF1_STAT) ==
+    EEWordMergeStorePolicy::FullWordOnly);
+  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::VIF0_STAT, 0));
+  REQUIRE_THROWS_AS(bus.write32(EEMemoryMap::VIF0_STAT, 0), std::out_of_range);
+  REQUIRE_FALSE(bus.writeData8(EEMemoryMap::VIF1_STAT, 0));
+  REQUIRE_FALSE(bus.writeData16(EEMemoryMap::VIF1_STAT, 0));
+  REQUIRE_FALSE(bus.writeData64(EEMemoryMap::VIF1_STAT, 0));
+  REQUIRE_THROWS_AS(bus.write64(EEMemoryMap::VIF1_STAT, 0), std::out_of_range);
+  REQUIRE(bus.writeGuestData128(EEMemoryMap::VIF1_STAT, {0, 0}) ==
+    EEDataWriteResult::Failed);
+  REQUIRE_FALSE(bus.writeDMAC128(EEMemoryMap::VIF1_STAT, {0, 0}));
+  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::VIF1_STAT + 4, 0));
+  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::VIF1_STAT + EEMemoryMap::KSEG1_BASE, 0));
+  REQUIRE(system.eeStateHash() == before);
+}
+
+TEST_CASE("EE guest VIF1 status stores retain forward command continuation",
+  "[ee][bus][vif-stat][guest]")
+{
+  std::uint32_t opcode = immediateInstruction(0x2b, 1, 2);
+  SECTION("SW") {}
+  SECTION("Full SWL") { opcode = immediateInstruction(0x2a, 1, 2, 3); }
+  SECTION("Full SWR") { opcode = immediateInstruction(0x2e, 1, 2); }
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  bus.write32(0, opcode);
+  bus.write32(4, immediateInstruction(0x23, 1, 3));
+  system.eeCore().setGeneralRegister(1,
+    {EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF1_STAT, 0});
+  system.eeCore().setGeneralRegister(2, {0, 0});
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  system.eeCore().startExecution(EEMemoryMap::KSEG1_BASE);
+  system.startTrace(100);
+  for (int step = 0; step < 2; ++step)
+  {
+    const auto result = system.stepEEInstruction(16);
+    REQUIRE(result.pendingException == EEException::None);
+    REQUIRE(result.instructions == 1);
+  }
+  REQUIRE(system.eeCore().generalRegister(3).low == 0);
+  REQUIRE_FALSE(system.trace().empty());
+  REQUIRE(bus.writeGuestData128(EEMemoryMap::VIF1_FIFO,
+    {UINT64_C(0x0500000101000101), UINT64_C(0x0000000007001234)}) ==
+    EEDataWriteResult::Completed);
+  system.vif1().advanceFIFO();
+  REQUIRE(system.vif1().cycle() == 0x0101);
+  REQUIRE(system.vif1().mode() == 1);
+  REQUIRE(system.vif1().mark() == 0x1234);
+}
+
+TEST_CASE("EE guest VIF1 status stores reject reverse and partial requests",
+  "[ee][bus][vif-stat][guest]")
+{
+  std::uint32_t opcode = immediateInstruction(0x2b, 1, 2);
+  std::uint32_t value = 0x00800000;
+  SECTION("Reverse direction") {}
+  SECTION("Partial SWL")
+  {
+    opcode = immediateInstruction(0x2a, 1, 2, 1);
+    value = 0;
+  }
+  SECTION("Partial SWR")
+  {
+    opcode = immediateInstruction(0x2e, 1, 2, 1);
+    value = 0;
+  }
+  NekoSystem system;
+  system.vif1().processCode(0x87001234);
+  system.eeBus().write32(0, opcode);
+  system.eeCore().setGeneralRegister(1,
+    {EEMemoryMap::KSEG1_BASE + EEMemoryMap::VIF1_STAT, 0});
+  system.eeCore().setGeneralRegister(2, {value, 0});
+  system.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  system.eeCore().startExecution(EEMemoryMap::KSEG1_BASE);
+  const auto status = system.eeBus().read32(EEMemoryMap::VIF1_STAT);
+  const auto result = system.stepEEInstruction(16);
+  REQUIRE(result.pendingException == EEException::DataBusErrorStore);
+  REQUIRE(system.eeBus().read32(EEMemoryMap::VIF1_STAT) == status);
+  REQUIRE(system.vif1().mark() == 0x1234);
+}
+
 TEST_CASE("EE VIF0 DMA stopped registers retain independent masked values",
   "[ee][bus][vif0-dmac]")
 {

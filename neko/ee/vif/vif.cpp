@@ -33,6 +33,7 @@ namespace
   constexpr std::uint8_t VIF_MODE_DIFFERENCE = 2;
   constexpr std::uint64_t VIF_MPG_ALIGNMENT_WORDS = 2;
   constexpr std::uint64_t VIF_DIRECT_ALIGNMENT_WORDS = 4;
+  constexpr std::uint32_t VIF_FIFO_REVERSE_DIRECTION = 1u << 23;
 
   bool ownsPayload(VIFCommandKind kind)
   {
@@ -59,6 +60,19 @@ VIF::VIF(VIFType type) : type(type)
 VIFType VIF::unitType() const
 {
   return type;
+}
+
+void VIF::writeStatus(std::uint32_t value)
+{
+  if (type != VIFType::VIF1)
+  {
+    throw std::invalid_argument("VIF0 STAT is read-only.");
+  }
+  if ((value & VIF_FIFO_REVERSE_DIRECTION) != 0)
+  {
+    throw std::invalid_argument("VIF1 reverse FIFO direction is unsupported.");
+  }
+  // Only FDR is writable; forward direction is the sole supported state.
 }
 
 void VIF::reset()

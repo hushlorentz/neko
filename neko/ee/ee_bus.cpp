@@ -86,6 +86,7 @@ namespace
       address == EEMemoryMap::SIO_FCR || address == EEMemoryMap::SIO_BGR ||
       mchWindowAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::GIF_CTRL ||
+      address == EEMemoryMap::VIF1_STAT ||
       address == EEMemoryMap::D_RBSR || address == EEMemoryMap::D_RBOR ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
@@ -1683,6 +1684,9 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::VIF0_FBRST:
       return performDeviceWrite(checkedGuestAccess,
         [&]() { writeVIFControl(*vif0Component, value); });
+    case EEMemoryMap::VIF1_STAT:
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { vif1Component->writeStatus(value); });
     case EEMemoryMap::VIF1_FBRST:
       return performDeviceWrite(checkedGuestAccess,
         [&]() { writeVIFControl(*vif1Component, value); });

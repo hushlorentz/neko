@@ -2628,6 +2628,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate access, payload/FIFO lifecycle and restored guest continuation,
       obtain independent review, then verify progress with a fresh cold scout.
 
+### Bounded VIF Status Programming
+
+- [x] Establish writable status fields and direction boundaries from local
+      manuals, distinguishing VIF0 from VIF1 and excluding reverse transfers.
+- [x] Admit supported status writes through the existing VIF owner without
+      clearing live flags or enabling DMA/graphics readback.
+- [x] Validate register and guest integration, obtain independent review,
+      then verify progress through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read
