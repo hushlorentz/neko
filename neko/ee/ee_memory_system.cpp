@@ -1488,6 +1488,14 @@ EECacheMaintenanceResult EEMemorySystem::maintainCache(
 {
   switch (request.operation)
   {
+    case EECacheOperation::BranchTargetCacheFlush:
+    {
+      // The functional core has no cached branch targets to invalidate.
+      EECacheMaintenanceResult result;
+      result.outcome = EECacheMaintenanceOutcome::Completed;
+      result.translation.virtualAddress = request.virtualAddress;
+      return result;
+    }
     case EECacheOperation::InstructionIndexLoadTag:
     case EECacheOperation::InstructionIndexLoadData:
     case EECacheOperation::InstructionIndexStoreTag:

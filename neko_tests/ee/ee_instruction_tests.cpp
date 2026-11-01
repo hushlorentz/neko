@@ -161,7 +161,7 @@ TEST_CASE("EE instruction field decoding")
            UINT8_C(0x00), UINT8_C(0x01),
            UINT8_C(0x04), UINT8_C(0x05),
            UINT8_C(0x07), UINT8_C(0x0b),
-           UINT8_C(0x0e), UINT8_C(0x10),
+           UINT8_C(0x0c), UINT8_C(0x0e), UINT8_C(0x10),
            UINT8_C(0x11), UINT8_C(0x12),
            UINT8_C(0x13), UINT8_C(0x14),
            UINT8_C(0x16), UINT8_C(0x18),
@@ -1816,7 +1816,7 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
   {
     for (const std::uint8_t operation :
          {UINT8_C(0x02), UINT8_C(0x06),
-          UINT8_C(0x0a), UINT8_C(0x0c)})
+          UINT8_C(0x0a)})
     {
       REQUIRE_THROWS_WITH(
         decodeEEInstruction(

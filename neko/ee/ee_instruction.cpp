@@ -3849,6 +3849,7 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
       case 0x05:
       case 0x07:
       case 0x0b:
+      case 0x0c:
       case 0x0e:
       case 0x10:
       case 0x11:
@@ -3865,7 +3866,6 @@ EEInstruction decodeEEInstruction(std::uint32_t raw)
       case 0x02:
       case 0x06:
       case 0x0a:
-      case 0x0c:
         reject(DecodeKind::Unsupported);
       default:
         reject(DecodeKind::Reserved);

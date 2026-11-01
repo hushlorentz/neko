@@ -2757,6 +2757,19 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate exact admission, threshold retention, reset/IRQ and persistence;
       pass required full gates/review and verify progress with a fresh scout.
 
+### EE BFH Startup Contract
+
+- [x] Identify the observed BTAC-flush opcode through local manuals and
+      refreshed secondary evidence; select bounded empty-predictor behavior
+      through existing CACHE ownership without enabling other BTAC operations.
+
+### Bounded EE BFH Maintenance
+
+- [x] Admit BFH through ordinary CACHE usability, issue and retirement, without
+      address translation, I/D-cache mutation or invented predictor effects.
+- [x] Validate decoder, cache and guest exception boundaries; independently
+      review, pass optimized/ASan gates and verify with fresh bounded BIOS evidence.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

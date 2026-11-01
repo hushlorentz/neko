@@ -549,6 +549,56 @@ TEST_CASE("EE unimplemented cache maintenance remains explicitly unsupported")
     request.virtualAddress);
 }
 
+TEST_CASE("EE BFH preserves caches and tags without translation or bus work")
+{
+  EEMemorySystem memorySystem;
+  EECacheLine retained;
+  retained.physicalTag = UINT32_C(0x12345000);
+  retained.valid = true;
+  retained.dirty = true;
+  retained.leastRecentlyFilled = true;
+  retained.locked = true;
+  retained.data.fill(0xa5);
+  EEMemorySystemTestAccess::setInstructionCacheLine(
+    &memorySystem, 0, 0, retained);
+  EEMemorySystemTestAccess::setDataCacheLine(
+    &memorySystem, 0, 0, retained);
+  memorySystem.setCOP0Register(
+    EECOP0Register::TagLo, UINT32_C(0xabcdef01));
+  memorySystem.setCOP0Register(
+    EECOP0Register::TagHi, UINT32_C(0x12345678));
+
+  for (const std::uint32_t address : {
+         UINT32_C(0), UINT32_C(0x12345677),
+         UINT32_C(0x80000003), UINT32_C(0xb000f130),
+         UINT32_C(0xffffffff)})
+  {
+    const auto result = EEMemorySystemTestAccess::maintainCache(
+      &memorySystem, nullptr,
+      {EECacheOperation::BranchTargetCacheFlush, address,
+       {EEPrivilegeMode::User, false, false}});
+
+    REQUIRE(result.outcome == EECacheMaintenanceOutcome::Completed);
+    REQUIRE_FALSE(result.cacheHitStatusValid);
+    REQUIRE(result.translation.virtualAddress == address);
+    for (const auto *line : {
+           &memorySystem.instructionCacheLine(0, 0),
+           &memorySystem.dataCacheLine(0, 0)})
+    {
+      REQUIRE(line->physicalTag == retained.physicalTag);
+      REQUIRE(line->valid == retained.valid);
+      REQUIRE(line->dirty == retained.dirty);
+      REQUIRE(line->leastRecentlyFilled == retained.leastRecentlyFilled);
+      REQUIRE(line->locked == retained.locked);
+      REQUIRE(line->data == retained.data);
+    }
+    REQUIRE(memorySystem.cop0Register(EECOP0Register::TagLo) ==
+            UINT32_C(0xabcdef01));
+    REQUIRE(memorySystem.cop0Register(EECOP0Register::TagHi) ==
+            UINT32_C(0x12345678));
+  }
+}
+
 TEST_CASE("EE data-cache index invalidate clears only the selected line")
 {
   EEMemorySystem memorySystem;

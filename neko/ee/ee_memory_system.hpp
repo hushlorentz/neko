@@ -307,6 +307,7 @@ enum class EECacheOperation : std::uint8_t
   InstructionIndexStoreData = 0x05,
   InstructionIndexInvalidate = 0x07,
   InstructionHitInvalidate = 0x0b,
+  BranchTargetCacheFlush = 0x0c,
   InstructionFill = 0x0e,
   DataIndexLoadTag = 0x10,
   DataIndexLoadData = 0x11,

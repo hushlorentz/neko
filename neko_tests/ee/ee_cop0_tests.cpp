@@ -547,6 +547,67 @@ TEST_CASE("EE CACHE requires COP0 usability before dispatch")
       EECOP0Status::CACHE_HIT) != 0);
 }
 
+TEST_CASE("EE BFH retires with unused addresses and preserves COP0 state")
+{
+  for (const bool user : {false, true})
+  {
+    for (const bool cacheHit : {false, true})
+    {
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        (user ? EECOP0Status::USER_MODE | EECOP0Status::COP0_USABLE :
+                UINT32_C(0)) |
+          (cacheHit ? EECOP0Status::CACHE_HIT : 0));
+      mapLowKusegForTest(&core);
+      core.setCOP0Register(
+        EECOP0Register::TagLo, UINT32_C(0xabcdef01));
+      core.setCOP0Register(
+        EECOP0Register::TagHi, UINT32_C(0x12345678));
+      for (const std::uint32_t address : {
+             UINT32_C(0), UINT32_C(0x12345677),
+             UINT32_C(0xb000f130)})
+      {
+        core.setGeneralRegister(2, {address, 0});
+        runInstruction(&system, cacheInstruction(2, 0x0c, 0));
+
+        REQUIRE(core.stopReason() == EEStopReason::None);
+        REQUIRE_FALSE(core.exceptionPending());
+        REQUIRE(core.programCounter() == 4);
+        REQUIRE(core.lastInstruction().operation ==
+                EEOperation::CacheMaintenance);
+        REQUIRE(((core.cop0Register(EECOP0Register::Status) &
+                  EECOP0Status::CACHE_HIT) != 0) == cacheHit);
+        REQUIRE(core.cop0Register(EECOP0Register::TagLo) ==
+                UINT32_C(0xabcdef01));
+        REQUIRE(core.cop0Register(EECOP0Register::TagHi) ==
+                UINT32_C(0x12345678));
+        REQUIRE(core.generalRegister(2).low == address);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE BFH requires COP0 usability before ignoring its address")
+{
+  NekoSystem system;
+  EECore &core = system.eeCore();
+  core.setCOP0Register(
+    EECOP0Register::Status,
+    EECOP0Status::USER_MODE | EECOP0Status::CACHE_HIT);
+  mapLowKusegForTest(&core);
+  core.setGeneralRegister(2, {UINT32_C(0xb000f130), 0});
+
+  runInstruction(&system, cacheInstruction(2, 0x0c, 0));
+
+  REQUIRE(core.pendingException() == EEException::CoprocessorUnusable);
+  REQUIRE(core.stopReason() == EEStopReason::None);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE((core.cop0Register(EECOP0Register::Status) &
+           EECOP0Status::CACHE_HIT) != 0);
+}
+
 TEST_CASE("EE CACHE index operations preserve Status CH")
 {
   NekoSystem system;
