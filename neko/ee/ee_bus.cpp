@@ -89,6 +89,7 @@ namespace
       address == EEMemoryMap::STARTUP_F510 ||
       address == EEMemoryMap::GIF_CTRL ||
       address == EEMemoryMap::IPU_CTRL ||
+      address == EEMemoryMap::IPU_CMD || address == EEMemoryMap::IPU_BP ||
       address == EEMemoryMap::VIF1_STAT ||
       address == EEMemoryMap::VIF0_ERR || address == EEMemoryMap::VIF1_ERR ||
       address == EEMemoryMap::VIF0_MARK || address == EEMemoryMap::VIF1_MARK ||
@@ -1473,6 +1474,9 @@ bool EEBus::readMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::IPU_BP:
+      *value = attachedIPU().bitPosition();
+      return true;
     case EEMemoryMap::IPU_CTRL:
       *value = attachedIPU().control();
       return true;
@@ -1742,6 +1746,13 @@ bool EEBus::writeMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::IPU_CMD:
+      if ((attachedToIPUDMAC().channelControl() &
+           DMACChannelControl::START) != 0)
+      {
+        return false;
+      }
+      return attachedIPU().writeCommand(value);
     case EEMemoryMap::IPU_CTRL:
       return attachedIPU().writeControl(value);
     case EEMemoryMap::RESERVED_F500:

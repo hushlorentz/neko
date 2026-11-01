@@ -2687,6 +2687,27 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate reset lifecycle and guest/persistence boundaries, obtain
       independent review and required full gates, then run a fresh cold scout.
 
+### IPU BCLR Command Contract
+
+- [x] Establish BCLR bit-position, input-FIFO and completion/IRQ semantics
+      through local manuals and secondary evidence, retaining stopped-DMA scope.
+- [x] Select bounded command admission, timing and sole-owner state/persistence
+      before implementation; keep decoding and FIFO/DMA transport separate.
+
+### Bounded IPU BCLR Command
+
+- [x] Implement the selected command and observable bit-position state through
+      the existing IPU owner with exact CPU access and transactional persistence.
+- [x] Validate command/reset/IRQ lifecycle and guest boundaries, pass required
+      full gates and independent review, then verify progress with a fresh scout.
+
+### IPU CPU Input-FIFO Contract
+
+- [ ] Establish CPU quadword input admission, FIFO capacity/status and BP
+      interaction through local manuals and secondary evidence.
+- [ ] Select FIFO ownership, command/DMA boundaries, timing and persistence
+      before implementation; keep decoding and active DMA separately scoped.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

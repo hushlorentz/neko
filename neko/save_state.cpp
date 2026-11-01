@@ -424,6 +424,11 @@ void NekoSaveStateCodec::writeSystem(
       system.interruptControllerComponent.maskRegister);
   }
   {
+    auto component = writer->scope("ipu");
+    writer->writeFieldU8(
+      "bitPositionRegister", system.ipuComponent.bitPositionRegister);
+  }
+  {
     auto component = writer->scope("eeBus");
     writer->writeFieldByteVector(
       "mainMemory",
@@ -579,6 +584,15 @@ void NekoSaveStateCodec::readSystem(
       reader->readFieldU32("statusRegister");
     system->interruptControllerComponent.maskRegister =
       reader->readFieldU32("maskRegister");
+  }
+  {
+    auto component = reader->scope("ipu");
+    const auto position = reader->readFieldU8("bitPositionRegister");
+    if (position > 0x7f)
+    {
+      throw std::invalid_argument("Invalid IPU bit position in save-state.");
+    }
+    system->ipuComponent.bitPositionRegister = position;
   }
   {
     auto component = reader->scope("eeBus");
@@ -885,6 +899,8 @@ void NekoSaveStateCodec::commitSystem(
     source->interruptControllerComponent.statusRegister;
   destination->interruptControllerComponent.maskRegister =
     source->interruptControllerComponent.maskRegister;
+  destination->ipuComponent.bitPositionRegister =
+    source->ipuComponent.bitPositionRegister;
   destination->eeTimersComponent = source->eeTimersComponent;
   destination->eeSerialComponent = source->eeSerialComponent;
   destination->eeRDRAMInitializationComponent =

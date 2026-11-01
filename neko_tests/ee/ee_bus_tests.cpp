@@ -1654,7 +1654,7 @@ TEST_CASE("EE IPU control rejects unselected fields widths and routes atomically
   REQUIRE_FALSE(bus.writeScratchpadDMAC128(
     address, EEScratchpadDMACMode::Normal, {0x40000000, 0}));
   for (const auto excluded : {0x10002000u, 0x10002004u, 0x1000200cu,
-      0x10002014u, 0x1000201cu, 0x10002020u, 0x10002030u,
+      0x10002014u, 0x1000201cu, 0x10002030u,
       0x10007000u, 0x10007010u, 0x90002010u, 0xb0002010u})
   {
     REQUIRE_FALSE(bus.readData32(excluded, &word));
@@ -1766,6 +1766,219 @@ TEST_CASE("EE IPU reset restored guest continuation preserves interrupt delivery
     REQUIRE(system->eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000010);
     REQUIRE(system->eeCore().programCounter() == EEExceptionVector::INTERRUPT);
   }
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
+TEST_CASE("EE IPU BCLR retains every bit position and completes without peer effects",
+  "[ee][bus][ipu-bclr][save-state]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  constexpr auto ipuIRQ = EEInterruptSource::mask(EEInterruptSource::IPU);
+  system.interruptController().setSource(EEInterruptSource::VIF0, true);
+  bus.write32(EEMemoryMap::D4_CHCR, 0x45);
+  bus.write32(EEMemoryMap::D4_MADR, 0x12340);
+  bus.write32(EEMemoryMap::D4_QWC, 7);
+  bus.write32(EEMemoryMap::D4_TADR, 0x56780);
+  const auto initial = system.saveState();
+  const auto initialHash = system.eeStateHash();
+  REQUIRE(bus.read32(0x10002020) == 0);
+  for (std::uint32_t bp = 0; bp < 128; ++bp)
+  {
+    CAPTURE(bp);
+    REQUIRE(bus.writeData32(0x10002000, bp));
+    REQUIRE(bus.read32(0x10002020) == bp);
+    REQUIRE(bus.read32(0x10002010) == 0);
+    REQUIRE(system.interruptController().status() == (ipuIRQ | (1u << 4)));
+    REQUIRE_FALSE(system.interruptController().interruptPending());
+    const auto hash = system.eeStateHash();
+    REQUIRE(bus.writeData32(0x10002000, bp));
+    REQUIRE(system.eeStateHash() == hash);
+    system.interruptController().acknowledge(ipuIRQ);
+  }
+  REQUIRE(system.eeStateHash() != initialHash);
+  REQUIRE(bus.writeData32(0x10002010, 0));
+  REQUIRE(bus.read32(0x10002020) == 127);
+  REQUIRE(system.interruptController().status() == (1u << 4));
+  REQUIRE(bus.writeData32(0x10002010, 0x40000000));
+  REQUIRE(bus.read32(0x10002020) == 0);
+  system.interruptController().acknowledge(ipuIRQ);
+  REQUIRE(system.saveState() == initial);
+  REQUIRE(system.eeStateHash() == initialHash);
+  system.interruptController().toggleMask(ipuIRQ);
+  bus.write32(0x90002000, 63);
+  REQUIRE(bus.read32(0xb0002020) == 63);
+  REQUIRE(system.interruptController().interruptPending());
+  system.reset();
+  REQUIRE(system.eeBus().read32(0x10002020) == 0);
+  REQUIRE(system.interruptController().status() == 0);
+}
+
+TEST_CASE("EE IPU BCLR rejects unselected commands and split routes atomically",
+  "[ee][bus][ipu-bclr]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData32(0x10002000, 53));
+  system.interruptController().acknowledge(1u << 8);
+  const auto hash = system.eeStateHash();
+  for (std::uint32_t bit = 7; bit < 32; ++bit)
+  {
+    CAPTURE(bit);
+    REQUIRE_FALSE(bus.writeData32(0x10002000, (1u << bit) | 53));
+    REQUIRE(bus.read32(0x10002020) == 53);
+    REQUIRE(system.interruptController().status() == 0);
+  }
+  std::uint32_t word = 0xabcdef01;
+  REQUIRE_FALSE(bus.readData32(0x10002000, &word));
+  REQUIRE_FALSE(bus.writeData32(0x10002020, 0));
+  REQUIRE_FALSE(bus.writeData32(0x10002010, 0x40010000));
+  for (const auto address : {0x10002000u, 0x10002020u})
+  {
+    REQUIRE(bus.wordMergeStorePolicy(address) == EEWordMergeStorePolicy::FullWordOnly);
+    std::uint8_t byte = 0x12;
+    std::uint16_t half = 0x3456;
+    std::uint64_t wide = 0x12345678;
+    EEQuadword quad{3, 4};
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+    REQUIRE_FALSE(bus.writeData16(address, 0));
+    REQUIRE_FALSE(bus.readData64(address, &wide));
+    REQUIRE_FALSE(bus.writeData64(address, 0));
+    REQUIRE_THROWS_AS(bus.write64(address, 0), std::out_of_range);
+    REQUIRE_FALSE(bus.readData128(address, &quad));
+    REQUIRE_FALSE(bus.writeData128(address, {}));
+    REQUIRE_FALSE(bus.readInstruction32(address, &word));
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 64));
+    REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {}));
+    REQUIRE_FALSE(bus.readScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, &quad));
+    REQUIRE_FALSE(bus.writeScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, {}));
+    for (const auto excluded : {address + 4, address + 0xc,
+        address + EEMemoryMap::KSEG0_BASE, address + EEMemoryMap::KSEG1_BASE})
+    {
+      REQUIRE_FALSE(bus.readData32(excluded, &word));
+      REQUIRE_FALSE(bus.writeData32(excluded, 0));
+    }
+    REQUIRE(byte == 0x12);
+    REQUIRE(half == 0x3456);
+    REQUIRE(wide == 0x12345678);
+    REQUIRE(quad.low == 3);
+    REQUIRE(quad.high == 4);
+  }
+  REQUIRE(word == 0xabcdef01);
+  REQUIRE(system.interruptController().status() == 0);
+  REQUIRE(system.eeStateHash() == hash);
+}
+
+TEST_CASE("EE guest IPU BCLR admits only complete selected command words",
+  "[ee][bus][ipu-bclr][guest]")
+{
+  for (const auto value : {0u, 127u, 128u})
+  {
+    for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+    {
+      for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+      {
+        CAPTURE(value);
+        CAPTURE(opcode);
+        CAPTURE(lane);
+        NekoSystem system;
+        system.eeBus().write32(0, immediateInstruction(opcode, 1, 2, lane));
+        auto &core = system.eeCore();
+        core.setGeneralRegister(1, {0xb0002000, 0});
+        core.setGeneralRegister(2, {value, 0});
+        core.setCOP0Register(EECOP0Register::Status, 0);
+        core.startExecution(0xa0000000);
+        const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+        const bool admitted = full && value < 128;
+        const auto result = system.stepEEInstruction(16);
+        REQUIRE(result.pendingException ==
+          (admitted ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE(system.interruptController().status() == (admitted ? 1u << 8 : 0));
+        REQUIRE(system.eeBus().read32(0x10002020) == (admitted ? value : 0));
+        if (admitted)
+        {
+          REQUIRE(result.instructions == 1);
+          REQUIRE(core.programCounter() == 0xa0000004);
+        }
+        else
+        {
+          REQUIRE(result.exceptionAddress == 0xb0002000 + lane);
+          REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0xa0000000);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE IPU BCLR state restores transactionally with destination IRQ ownership",
+  "[ee][bus][ipu-bclr][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  REQUIRE(bus.writeData32(0x10002000, 127));
+  bus.write32(0, immediateInstruction(0x23, 1, 3));
+  bus.write32(4, immediateInstruction(0x2b, 4, 2));
+  bus.write32(8, immediateInstruction(0x2b, 5, 6));
+  bus.write32(12, immediateInstruction(0x2b, 7, 8));
+  bus.write32(16, immediateInstruction(0x23, 1, 9));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(1, {0xb0002020, 0});
+  core.setGeneralRegister(2, {1u << 8, 0});
+  core.setGeneralRegister(4, {0xb000f000, 0});
+  core.setGeneralRegister(5, {0xb0002000, 0});
+  core.setGeneralRegister(6, {37, 0});
+  core.setGeneralRegister(7, {0xb0002010, 0});
+  core.setGeneralRegister(8, {0x40000000, 0});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  const auto saved = original.saveState();
+  original.interruptController().acknowledge(1u << 8);
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  REQUIRE(plain.saveState() == saved);
+  REQUIRE(plain.eeBus().read32(0x10002020) == 127);
+  for (const auto value : {128u, 255u})
+  {
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar("system.ipu.bitPositionRegister", value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(plain.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(plain.saveState() == saved);
+  }
+  SaveStateMutation oldVersion(saved);
+  oldVersion.writeScalar("container.version", 68);
+  oldVersion.refreshChecksum();
+  REQUIRE_THROWS_AS(plain.loadState(oldVersion.bytes()), std::invalid_argument);
+  REQUIRE(plain.saveState() == saved);
+  traced.startTrace();
+  constexpr std::uint32_t positions[] = {127, 127, 37, 0, 0};
+  for (int step = 0; step < 5; ++step)
+  {
+    const auto plainResult = plain.stepEEInstruction(16);
+    const auto tracedResult = traced.stepEEInstruction(16);
+    REQUIRE(plainResult.pendingException == EEException::None);
+    REQUIRE(tracedResult.pendingException == EEException::None);
+    REQUIRE(plainResult.instructions == 1);
+    REQUIRE(tracedResult.instructions == 1);
+    REQUIRE(plainResult.masterCycles == tracedResult.masterCycles);
+    REQUIRE(plain.eeBus().read32(0x10002020) == positions[step]);
+    REQUIRE(traced.eeBus().read32(0x10002020) == positions[step]);
+    REQUIRE(plain.interruptController().status() == (step == 1 ? 0 : 1u << 8));
+    REQUIRE(plain.interruptController().status() == traced.interruptController().status());
+  }
+  REQUIRE(original.eeBus().read32(0x10002020) == 127);
+  REQUIRE(original.interruptController().status() == 0);
+  REQUIRE(plain.eeCore().generalRegister(3).low == 127);
+  REQUIRE(plain.eeCore().generalRegister(9).low == 0);
   REQUIRE(plain.eeStateHash() == traced.eeStateHash());
   REQUIRE(plain.saveState() == traced.saveState());
   REQUIRE_FALSE(traced.trace().empty());
