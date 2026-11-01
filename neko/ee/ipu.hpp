@@ -28,9 +28,17 @@ class IPU
     {
       Idle,
       SetIQIntra,
-      SetIQNonIntra
+      SetIQNonIntra,
+      SetVQ
     };
 
+    struct CommandTable
+    {
+      std::uint8_t *bytes;
+      std::size_t size;
+    };
+
+    CommandTable commandTable();
     void clearInput();
     void clearCommand();
     bool bufferStreamBits(std::uint8_t bits);
@@ -50,6 +58,7 @@ class IPU
     std::uint8_t tableBytesLoaded = 0;
     std::array<std::uint8_t, 64> intraIQ{};
     std::array<std::uint8_t, 64> nonIntraIQ{};
+    std::array<std::uint8_t, 32> vqCLUT{};
 };
 
 #endif

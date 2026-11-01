@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_71_PREPARED_STATE_SIZE = 39952798;
+    VERSION_72_PREPARED_STATE_SIZE = 39952830;
   constexpr std::uint64_t
-    VERSION_71_PREPARED_STATE_HASH =
-      UINT64_C(8743933469329669808);
+    VERSION_72_PREPARED_STATE_HASH =
+      UINT64_C(1746741689221386947);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 71 save-state layout is byte-stable")
+TEST_CASE("Version 72 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,14 @@ TEST_CASE("Version 71 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 71);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 72);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_71_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_72_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_71_PREPARED_STATE_HASH);
+    VERSION_72_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *ipuPosition = snapshot.find("system.ipu.bitPositionRegister");
   REQUIRE(ipuPosition != nullptr);
@@ -690,6 +690,11 @@ TEST_CASE("Version 71 save-state layout is byte-stable")
     REQUIRE(table->containerOffset == ipuOffset);
     ipuOffset += 64;
   }
+  const auto *ipuCLUT = snapshot.find("system.ipu.vqCLUT");
+  REQUIRE(ipuCLUT != nullptr);
+  REQUIRE(ipuCLUT->kind == SaveStateFieldKind::Bytes);
+  REQUIRE(ipuCLUT->size == 32);
+  REQUIRE(ipuCLUT->containerOffset == ipuOffset);
   const auto *ba0Control = snapshot.find("system.eeBus.ba0Control02");
   const auto *ba0Register08 = snapshot.find("system.eeBus.ba0Register08");
   REQUIRE(ba0Control != nullptr);

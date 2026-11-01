@@ -114,6 +114,23 @@ bool IPU::readStreamByte(std::uint8_t &value)
   return true;
 }
 
+IPU::CommandTable IPU::commandTable()
+{
+  switch (pendingCommand)
+  {
+    case Command::SetIQIntra:
+      return {intraIQ.data(), intraIQ.size()};
+    case Command::SetIQNonIntra:
+      return {nonIntraIQ.data(), nonIntraIQ.size()};
+    case Command::SetVQ:
+      return {vqCLUT.data(), vqCLUT.size()};
+    case Command::Idle:
+      return {nullptr, 0};
+  }
+  assert(false && "Invalid IPU command");
+  return {nullptr, 0};
+}
+
 void IPU::progressCommand()
 {
   if (pendingCommand == Command::Idle)
@@ -129,15 +146,15 @@ void IPU::progressCommand()
     advanceStream(forwardBits);
     forwardBits = 0;
   }
-  auto &table = pendingCommand == Command::SetIQIntra ? intraIQ : nonIntraIQ;
-  while (tableBytesLoaded < table.size())
+  const auto table = commandTable();
+  while (tableBytesLoaded < table.size)
   {
     std::uint8_t value = 0;
     if (!readStreamByte(value))
     {
       return;
     }
-    table[tableBytesLoaded++] = value;
+    table.bytes[tableBytesLoaded++] = value;
   }
   clearCommand();
   // Provisional synchronous available-work completion, not physical latency.
@@ -176,13 +193,20 @@ bool IPU::writeCommand(std::uint32_t value)
     return true;
   }
   constexpr std::uint32_t SETIQ_FIELDS = (1u << 27) | 0x3f;
-  if ((value & ~SETIQ_FIELDS) != 0x50000000 || (value & 0x3f) > 32)
+  if (value == 0x60000000)
+  {
+    pendingCommand = Command::SetVQ;
+  }
+  else if ((value & ~SETIQ_FIELDS) == 0x50000000 && (value & 0x3f) <= 32)
+  {
+    pendingCommand = value & (1u << 27) ?
+      Command::SetIQNonIntra : Command::SetIQIntra;
+    forwardBits = static_cast<std::uint8_t>(value & 0x3f);
+  }
+  else
   {
     return false;
   }
-  pendingCommand = value & (1u << 27) ?
-    Command::SetIQNonIntra : Command::SetIQIntra;
-  forwardBits = static_cast<std::uint8_t>(value & 0x3f);
   progressCommand();
   return true;
 }

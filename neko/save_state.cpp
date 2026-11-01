@@ -421,6 +421,7 @@ void NekoSaveStateCodec::writeIPUState(Writer *writer, const IPU &ipu)
   writer->writeFieldBytes("intraIQ", ipu.intraIQ.data(), ipu.intraIQ.size());
   writer->writeFieldBytes("nonIntraIQ",
     ipu.nonIntraIQ.data(), ipu.nonIntraIQ.size());
+  writer->writeFieldBytes("vqCLUT", ipu.vqCLUT.data(), ipu.vqCLUT.size());
 }
 
 std::uint64_t IPU::stateHash() const
@@ -676,16 +677,16 @@ void NekoSaveStateCodec::readSystem(
     }
     const auto command = reader->readFieldU8("pendingCommand");
     reader->requireField(command <=
-      static_cast<std::uint8_t>(IPU::Command::SetIQNonIntra),
+      static_cast<std::uint8_t>(IPU::Command::SetVQ),
       "IPU pending command is invalid");
     ipu.pendingCommand = static_cast<IPU::Command>(command);
     ipu.forwardBits = reader->readFieldU8("forwardBits");
     ipu.tableBytesLoaded = reader->readFieldU8("tableBytesLoaded");
     reader->requireField(ipu.forwardBits <= 32 &&
-      ipu.tableBytesLoaded < ipu.intraIQ.size(),
-      "IPU SETIQ progress is out of range");
+      (ipu.pendingCommand != IPU::Command::SetVQ || ipu.forwardBits == 0),
+      "IPU table forward skip is out of range");
     reader->requireField(ipu.forwardBits == 0 || ipu.tableBytesLoaded == 0,
-      "IPU SETIQ forward skip follows table loading");
+      "IPU table forward skip follows table loading");
     if (ipu.pendingCommand == IPU::Command::Idle)
     {
       reader->requireField(ipu.forwardBits == 0 && ipu.tableBytesLoaded == 0,
@@ -695,14 +696,17 @@ void NekoSaveStateCodec::readSystem(
     }
     else
     {
+      reader->requireField(ipu.tableBytesLoaded < ipu.commandTable().size,
+        "IPU table progress exceeds pending command capacity");
       const auto neededBits = ipu.forwardBits == 0 ? 8 : ipu.forwardBits;
       reader->requireField(ipu.inputFIFOCount == 0 &&
         ipu.streamBufferCount * 128 < position + neededBits,
-        "Pending IPU SETIQ is not waiting for input");
+        "Pending IPU table command is not waiting for input");
     }
     reader->readFieldBytes("intraIQ", ipu.intraIQ.data(), ipu.intraIQ.size());
     reader->readFieldBytes("nonIntraIQ",
       ipu.nonIntraIQ.data(), ipu.nonIntraIQ.size());
+    reader->readFieldBytes("vqCLUT", ipu.vqCLUT.data(), ipu.vqCLUT.size());
   }
   {
     auto component = reader->scope("eeBus");
@@ -1029,6 +1033,8 @@ void NekoSaveStateCodec::commitSystem(
     source->ipuComponent.intraIQ;
   destination->ipuComponent.nonIntraIQ =
     source->ipuComponent.nonIntraIQ;
+  destination->ipuComponent.vqCLUT =
+    source->ipuComponent.vqCLUT;
   destination->eeTimersComponent = source->eeTimersComponent;
   destination->eeSerialComponent = source->eeSerialComponent;
   destination->eeRDRAMInitializationComponent =

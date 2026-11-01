@@ -2398,7 +2398,7 @@ TEST_CASE("EE guest SETIQ admits exact command fields without split or peer effe
   auto &bus = system.eeBus();
   const auto initial = system.saveState();
   for (const auto command : {0x50000021u, 0x5800003fu, 0x50000040u,
-      0x51000000u, 0x60000000u})
+      0x51000000u, 0x60000001u})
   {
     REQUIRE_FALSE(bus.writeData32(0x10002000, command));
   }
@@ -2459,7 +2459,7 @@ TEST_CASE("EE SETIQ partial commands restore transactionally and complete on des
   REQUIRE(plain.saveState() == saved);
   REQUIRE(plain.eeStateHash() == savedHash);
   const std::pair<const char *, std::uint64_t> invalidFields[] = {
-    {"system.ipu.pendingCommand", 3},
+    {"system.ipu.pendingCommand", 4},
     {"system.ipu.pendingCommand", 0},
     {"system.ipu.forwardBits", 33},
     {"system.ipu.forwardBits", 1},
@@ -2508,6 +2508,257 @@ TEST_CASE("EE SETIQ partial commands restore transactionally and complete on des
     {
       REQUIRE(completed.readByte("system.ipu.nonIntraIQ", byte) ==
         ipuExpectedStreamByte(159 + byte * 8));
+    }
+  }
+  REQUIRE(original.saveState() == saved);
+  REQUIRE(original.interruptController().status() == 0);
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
+TEST_CASE("EE IPU SETVQ retains RGB16 bytes at current BP without disturbing IQ tables",
+  "[ee][bus][ipu-setvq]")
+{
+  for (const auto position : {0u, 1u, 7u, 8u, 127u})
+  {
+    CAPTURE(position);
+    NekoSystem system;
+    auto &bus = system.eeBus();
+    for (std::size_t index = 0; index < 8; ++index)
+    {
+      REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(index)));
+    }
+    bus.write32(0x10002000, 0x50000000);
+    bus.write32(0x10002000, 0x58000000);
+    bus.write32(0x10002000, position);
+    system.interruptController().acknowledge(1u << 8);
+    for (std::size_t index = 0; index < 8; ++index)
+    {
+      REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(index)));
+    }
+    REQUIRE(bus.writeData32(0x10002000, 0x60000000));
+    const auto buffered = position == 0 ? 0u : 1u;
+    const auto queued = 6 - buffered;
+    REQUIRE(bus.read32(0x10002010) == queued);
+    REQUIRE(bus.read32(0x10002020) ==
+      (position | (queued << 8) | (buffered << 16)));
+    REQUIRE(system.interruptController().status() == (1u << 8));
+    SaveStateMutation state(system.saveState());
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(state.readByte("system.ipu.vqCLUT", byte) ==
+        ipuExpectedStreamByte(position + byte * 8));
+    }
+    for (std::size_t byte = 0; byte < 64; ++byte)
+    {
+      REQUIRE(state.readByte("system.ipu.intraIQ", byte) == ipuStreamByte(byte));
+      REQUIRE(state.readByte("system.ipu.nonIntraIQ", byte) ==
+        ipuStreamByte(64 + byte));
+    }
+    for (std::size_t byte = 0; byte < queued * 16; ++byte)
+    {
+      REQUIRE(state.readByte("system.ipu.inputFIFO", byte) ==
+        ipuStreamByte((2 + buffered) * 16 + byte));
+    }
+    system.interruptController().acknowledge(1u << 8);
+    REQUIRE(bus.writeData32(0x10002000, 0x60000000));
+    REQUIRE(bus.read32(0x10002010) == queued - 2);
+    SaveStateMutation second(system.saveState());
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(second.readByte("system.ipu.vqCLUT", byte) ==
+        ipuExpectedStreamByte(position + 256 + byte * 8));
+    }
+  }
+}
+
+TEST_CASE("EE IPU SETVQ waits for input and preserves partial CLUT on cancellation",
+  "[ee][bus][ipu-setvq]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  bus.write32(0x10002000, 127);
+  system.interruptController().acknowledge(1u << 8);
+  system.interruptController().setSource(EEInterruptSource::VIF0, true);
+  REQUIRE(bus.writeData32(0x10002000, 0x60000000));
+  REQUIRE(bus.read32(0x10002010) == 0x80000000);
+  const auto waitingHash = system.eeStateHash();
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0x50000000));
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0x60000000));
+  bus.write32(0x10002010, 0);
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.eeStateHash() == waitingHash);
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(0)));
+  REQUIRE(bus.read32(0x10002020) == 0x1007f);
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(1)));
+  REQUIRE(bus.read32(0x10002020) == 0x1007f);
+  REQUIRE(system.interruptController().status() == (1u << 4));
+  SaveStateMutation partial(system.saveState());
+  REQUIRE(partial.readByte("system.ipu.tableBytesLoaded", 0) == 16);
+  for (std::size_t byte = 0; byte < 32; ++byte)
+  {
+    REQUIRE(partial.readByte("system.ipu.vqCLUT", byte) ==
+      (byte < 16 ? ipuExpectedStreamByte(127 + byte * 8) : 0));
+  }
+  SECTION("real refill completes exactly once")
+  {
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(2)));
+    REQUIRE(bus.read32(0x10002010) == 0);
+    REQUIRE(bus.read32(0x10002020) == 0x1007f);
+    REQUIRE(system.interruptController().status() == ((1u << 4) | (1u << 8)));
+    SaveStateMutation completed(system.saveState());
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(completed.readByte("system.ipu.vqCLUT", byte) ==
+        ipuExpectedStreamByte(127 + byte * 8));
+    }
+    system.interruptController().acknowledge(1u << 8);
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(3)));
+    bus.advanceGuestFIFOs();
+    REQUIRE(system.interruptController().status() == (1u << 4));
+    bus.write32(0x10002000, 53);
+    REQUIRE(bus.read32(0x10002020) == 53);
+    SaveStateMutation cleared(system.saveState());
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(cleared.readByte("system.ipu.vqCLUT", byte) ==
+        completed.readByte("system.ipu.vqCLUT", byte));
+    }
+  }
+  SECTION("RST cancels without erasing published bytes")
+  {
+    bus.write32(0x10002010, 0x40000000);
+    REQUIRE(bus.read32(0x10002010) == 0);
+    REQUIRE(bus.read32(0x10002020) == 0);
+    REQUIRE(system.interruptController().status() == ((1u << 4) | (1u << 8)));
+    SaveStateMutation reset(system.saveState());
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(reset.readByte("system.ipu.vqCLUT", byte) ==
+        partial.readByte("system.ipu.vqCLUT", byte));
+    }
+    system.interruptController().acknowledge(1u << 8);
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(2)));
+    REQUIRE(bus.read32(0x10002010) == 1);
+    REQUIRE(system.interruptController().status() == (1u << 4));
+    bus.write32(0x10002000, 0);
+    SaveStateMutation cleared(system.saveState());
+    REQUIRE(cleared.readByte("system.ipu.vqCLUT", 0) ==
+      partial.readByte("system.ipu.vqCLUT", 0));
+    system.reset();
+    SaveStateMutation cold(system.saveState());
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(cold.readByte("system.ipu.vqCLUT", byte) == 0);
+    }
+    REQUIRE(system.interruptController().status() == 0);
+  }
+}
+
+TEST_CASE("EE guest SETVQ rejects reserved fields and non CPU word routes atomically",
+  "[ee][bus][ipu-setvq][guest]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto initial = system.saveState();
+  for (const auto command : {0x60000001u, 0x60000020u, 0x60000040u,
+      0x68000000u, 0x6fffffffu, 0x70000000u})
+  {
+    REQUIRE_FALSE(bus.writeData32(0x10002000, command));
+  }
+  REQUIRE_FALSE(bus.writeData8(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData16(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData64(0x10002000, 0x60000000));
+  REQUIRE_FALSE(bus.writeData128(0x10002000, {0x60000000, 0}));
+  REQUIRE_FALSE(bus.writeDMAC128(0x10002000, {0x60000000, 0}));
+  REQUIRE(system.saveState() == initial);
+  bus.write32(0, immediateInstruction(0x2b, 1, 2));
+  bus.write32(4, immediateInstruction(0x1f, 3, 4));
+  auto &core = system.eeCore();
+  core.setGeneralRegister(1, {0xb0002000, 0});
+  core.setGeneralRegister(2, {0x60000000, 0});
+  core.setGeneralRegister(3, {0xb0007010, 0});
+  const auto input = ipuStreamQuadword(0);
+  core.setGeneralRegister(4, {input.low, input.high});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  REQUIRE(system.stepEEInstruction(16).pendingException == EEException::None);
+  REQUIRE(core.programCounter() == 0xa0000004);
+  REQUIRE(system.stepEEInstruction(16).pendingException == EEException::None);
+  REQUIRE(core.programCounter() == 0xa0000008);
+  REQUIRE(bus.read32(0x10002010) == 0x80000000);
+  REQUIRE(system.interruptController().status() == 0);
+  SaveStateMutation state(system.saveState());
+  for (std::size_t byte = 0; byte < 16; ++byte)
+  {
+    REQUIRE(state.readByte("system.ipu.vqCLUT", byte) == ipuStreamByte(byte));
+  }
+}
+
+TEST_CASE("EE SETVQ partial commands restore transactionally with destination IRQ ownership",
+  "[ee][bus][ipu-setvq][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  bus.write32(0x10002000, 127);
+  original.interruptController().acknowledge(1u << 8);
+  REQUIRE(bus.writeData32(0x10002000, 0x60000000));
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(0)));
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(1)));
+  bus.write32(0, immediateInstruction(0x1f, 1, 2));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(1, {0xb0007010, 0});
+  const auto input = ipuStreamQuadword(2);
+  core.setGeneralRegister(2, {input.low, input.high});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  const auto saved = original.saveState();
+  const auto savedHash = original.eeStateHash();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  REQUIRE(plain.saveState() == saved);
+  REQUIRE(plain.eeStateHash() == savedHash);
+  const std::pair<const char *, std::uint64_t> invalidFields[] = {
+    {"system.ipu.pendingCommand", 4},
+    {"system.ipu.pendingCommand", 0},
+    {"system.ipu.forwardBits", 1},
+    {"system.ipu.tableBytesLoaded", 32},
+    {"system.ipu.tableBytesLoaded", 63},
+    {"system.ipu.streamBufferCount", 0},
+    {"system.ipu.streamBufferCount", 2},
+    {"container.version", 71}
+  };
+  for (const auto &field : invalidFields)
+  {
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(field.first, field.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(plain.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(plain.saveState() == saved);
+  }
+  SaveStateMutation changed(saved);
+  changed.xorByte("system.ipu.vqCLUT", 0, 1);
+  changed.refreshChecksum();
+  plain.loadState(changed.bytes());
+  REQUIRE(plain.eeStateHash() != savedHash);
+  plain.loadState(saved);
+  traced.startTrace();
+  for (auto *system : {&plain, &traced})
+  {
+    REQUIRE(system->stepEEInstruction(16).pendingException == EEException::None);
+    REQUIRE(system->eeCore().programCounter() == 0xa0000004);
+    REQUIRE(system->eeBus().read32(0x10002010) == 0);
+    REQUIRE(system->eeBus().read32(0x10002020) == 0x1007f);
+    REQUIRE(system->interruptController().status() == (1u << 8));
+    SaveStateMutation completed(system->saveState());
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(completed.readByte("system.ipu.vqCLUT", byte) ==
+        ipuExpectedStreamByte(127 + byte * 8));
     }
   }
   REQUIRE(original.saveState() == saved);

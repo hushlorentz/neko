@@ -2729,6 +2729,20 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate consumption, status, reset/IRQ and queued-data persistence;
       pass required full gates/review and verify progress with a fresh scout.
 
+### IPU SETVQ Command Contract
+
+- [x] Establish CLUT layout, stream-position/consumption and completion behavior
+      through local manuals and secondary evidence.
+- [x] Select bounded table/reset/timing policy and shared consumer/persistence
+      ownership before implementation; keep quantization and DMA separate.
+
+### Bounded IPU SETVQ Command
+
+- [x] Load the selected CLUT from real CPU input through the existing IPU
+      stream/command owner with bounded admission and lifecycle behavior.
+- [x] Validate table order, consumption, starvation/reset/IRQ and persistence;
+      pass required full gates/review and verify progress with a fresh scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read
