@@ -1056,6 +1056,19 @@ bool EEBus::readData128(
     return true;
   }
   VPU *vpu = nullptr;
+  std::size_t instructionIndex = 0;
+  if (vuMicroMemoryAddress(address, &vpu, &instructionIndex))
+  {
+    if (!cpuVUMemoryAccessible(*vpu))
+    {
+      return false;
+    }
+    *value = {
+      vpu->readMicroInstruction(instructionIndex),
+      vpu->readMicroInstruction(instructionIndex + 1)
+    };
+    return true;
+  }
   std::size_t quadwordIndex = 0;
   if (!vuDataMemoryAddress(address, &vpu, &quadwordIndex) ||
       !cpuVUMemoryAccessible(*vpu))
@@ -1295,6 +1308,24 @@ EEDataWriteResult EEBus::writeGuestData128(
       return EEDataWriteResult::Failed;
     }
     writeVUQuadword(*vpu, quadwordIndex, value);
+    return EEDataWriteResult::Completed;
+  }
+
+  std::size_t instructionIndex = 0;
+  if (vuMicroMemoryAddress(address, &vpu, &instructionIndex))
+  {
+    if (!cpuVUMemoryAccessible(*vpu))
+    {
+      return EEDataWriteResult::Failed;
+    }
+    vpu->writeMicroInstruction(
+      instructionIndex,
+      static_cast<std::uint32_t>(value.low),
+      static_cast<std::uint32_t>(value.low >> 32));
+    vpu->writeMicroInstruction(
+      instructionIndex + 1,
+      static_cast<std::uint32_t>(value.high),
+      static_cast<std::uint32_t>(value.high >> 32));
     return EEDataWriteResult::Completed;
   }
 

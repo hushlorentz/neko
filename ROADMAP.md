@@ -2646,6 +2646,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate state preservation and guest continuation, obtain independent
       review, then verify progress through a fresh authorized cold scout.
 
+### EE CPU VU Micro-Memory Quadword Access
+
+- [x] Establish CPU quadword access and instruction ordering for both exact
+      micro-memory windows, retaining stopped-unit admission boundaries.
+- [x] Extend the existing CPU/VPU memory path without parallel backing,
+      preserving doubleword/MPG coherence and unsupported-route rejection.
+- [x] Validate guest and restored continuation, obtain independent review,
+      then verify progress through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

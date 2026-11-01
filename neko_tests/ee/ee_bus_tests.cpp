@@ -112,11 +112,9 @@ TEST_CASE("EE CPU VU micro doublewords reject unsupported widths and routes",
     REQUIRE_FALSE(bus.readData8(address, &byte));
     REQUIRE_FALSE(bus.readData16(address, &half));
     REQUIRE_FALSE(bus.readData32(address, &word));
-    REQUIRE_FALSE(bus.readData128(address, &quad));
     REQUIRE_FALSE(bus.writeData8(address, 0));
     REQUIRE_FALSE(bus.writeData16(address, 0));
     REQUIRE_FALSE(bus.writeData32(address, 0));
-    REQUIRE_FALSE(bus.writeData128(address, {}));
     REQUIRE_FALSE(bus.readInstruction32(address, &word));
     REQUIRE_FALSE(bus.isCacheFillRange(address, 64));
     REQUIRE_FALSE(bus.readDMAC128(address, &quad));
@@ -142,7 +140,7 @@ TEST_CASE("EE CPU VU micro doublewords reject unsupported widths and routes",
 }
 
 TEST_CASE("EE CPU VU micro doublewords require stopped relevant units",
-  "[ee][bus][vu-micro-memory]")
+  "[ee][bus][vu-micro-memory][vu-micro-quadword]")
 {
   NekoSystem system;
   auto &bus = system.eeBus();
@@ -198,8 +196,172 @@ TEST_CASE("EE CPU VU micro doublewords require stopped relevant units",
   REQUIRE_FALSE(bus.readData64(blockedAddress, &untouched));
   REQUIRE_FALSE(bus.writeData64(blockedAddress, 0));
   REQUIRE(untouched == 5);
+  EEQuadword quad{5, 6};
+  REQUIRE_FALSE(bus.readData128(blockedAddress, &quad));
+  REQUIRE(bus.writeGuestData128(blockedAddress, {7, 8}) ==
+    EEDataWriteResult::Failed);
+  REQUIRE(quad.low == 5);
+  REQUIRE(quad.high == 6);
   REQUIRE(system.eeStateHash() == hash);
   REQUIRE(bus.readData64(availableAddress, &untouched));
+  REQUIRE(bus.readData128(availableAddress, &quad));
+}
+
+TEST_CASE("EE CPU VU micro quadwords share adjacent instruction pairs",
+  "[ee][bus][vu-micro-memory][vu-micro-quadword]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const EEQuadword value{
+    UINT64_C(0x7766554433221100), UINT64_C(0xffeeddccbbaa9988)
+  };
+  for (const auto base : {0x11000000u, 0x11008000u})
+  {
+    auto &vpu = base == 0x11000000 ? system.vu0() : system.vu1();
+    const std::size_t lastIndex = vpu.microMemorySize() / 8 - 2;
+    for (const std::size_t index : {std::size_t{0}, lastIndex})
+    {
+      const auto address = base + static_cast<std::uint32_t>(index * 8);
+      const auto neighbor = index == 0 ? 2 : index - 1;
+      vpu.writeMicroInstruction(neighbor, 0xabcdef01, 0x23456789);
+      REQUIRE(bus.writeData128(address, value));
+      REQUIRE(vpu.readMicroInstruction(index) == value.low);
+      REQUIRE(vpu.readMicroInstruction(index + 1) == value.high);
+      REQUIRE(vpu.readMicroInstruction(neighbor) == UINT64_C(0x23456789abcdef01));
+      std::uint64_t word = 0;
+      REQUIRE(bus.readData64(address, &word));
+      REQUIRE(word == value.low);
+      REQUIRE(bus.readData64(address + 8, &word));
+      REQUIRE(word == value.high);
+      EEQuadword loaded{};
+      REQUIRE(bus.readData128(address, &loaded));
+      REQUIRE(loaded.low == value.low);
+      REQUIRE(loaded.high == value.high);
+      REQUIRE(bus.writeData64(address, UINT64_C(0x1234567855667788)));
+      vpu.writeMicroInstruction(index + 1, 0xaabbccdd, 0x99887766);
+      REQUIRE(bus.readData128(address, &loaded));
+      REQUIRE(loaded.low == UINT64_C(0x1234567855667788));
+      REQUIRE(loaded.high == UINT64_C(0x99887766aabbccdd));
+    }
+    REQUIRE(vpu.programCounter() == 0);
+    REQUIRE_FALSE(vpu.clockActive());
+  }
+}
+
+TEST_CASE("EE CPU VU micro quadwords retain exact boundaries and routes",
+  "[ee][bus][vu-micro-memory][vu-micro-quadword]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  for (const auto address : {0x11000000u, 0x11008000u})
+  {
+    REQUIRE(bus.writeData128(address, {1, 2}));
+    const auto hash = system.eeStateHash();
+    EEQuadword untouched{3, 4};
+    REQUIRE_THROWS_AS(bus.readData128(address, nullptr), std::invalid_argument);
+    for (const auto offset : {1u, 4u, 8u})
+    {
+      REQUIRE_THROWS_AS(bus.readData128(address + offset, &untouched),
+        std::invalid_argument);
+      REQUIRE_THROWS_AS(bus.writeData128(address + offset, {5, 6}),
+        std::invalid_argument);
+    }
+    REQUIRE_FALSE(bus.readDMAC128(address, &untouched));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {5, 6}));
+    REQUIRE_FALSE(bus.readScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, &untouched));
+    REQUIRE_FALSE(bus.writeScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, {5, 6}));
+    REQUIRE(untouched.low == 3);
+    REQUIRE(untouched.high == 4);
+    REQUIRE(system.eeStateHash() == hash);
+  }
+  const auto hash = system.eeStateHash();
+  for (const auto address : {0x10fffff0u, 0x11001000u, 0x11002000u,
+      0x11003000u, 0x11003ff0u, 0x11010000u, 0x91008000u,
+      0xb1008000u, 0x31008000u})
+  {
+    EEQuadword untouched{3, 4};
+    REQUIRE_FALSE(bus.readData128(address, &untouched));
+    REQUIRE_FALSE(bus.writeData128(address, {5, 6}));
+    REQUIRE(untouched.low == 3);
+    REQUIRE(untouched.high == 4);
+  }
+  for (const auto address : {0x11000ff8u, 0x1100bff8u})
+  {
+    EEQuadword untouched{3, 4};
+    REQUIRE_THROWS_AS(bus.readData128(address, &untouched), std::invalid_argument);
+    REQUIRE_THROWS_AS(bus.writeData128(address, {5, 6}), std::invalid_argument);
+    REQUIRE(untouched.low == 3);
+    REQUIRE(untouched.high == 4);
+  }
+  REQUIRE(system.eeStateHash() == hash);
+}
+
+TEST_CASE("EE CPU VU micro quadwords preserve MPG and restored guest execution",
+  "[ee][bus][vu-micro-memory][vu-micro-quadword][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  const EEQuadword program{
+    (static_cast<std::uint64_t>(VPU_E_BIT | VPU_NOP) << 32) | VPU_LOWER_NOP,
+    (static_cast<std::uint64_t>(VPU_NOP) << 32) | VPU_LOWER_NOP
+  };
+  original.vif0().ingestWord(0);
+  original.vif0().ingestWord(0x4a0201fe);
+  for (const auto word : {1u, 2u, 3u, 4u})
+  {
+    original.vif0().ingestWord(word);
+  }
+  EEQuadword loaded{};
+  REQUIRE(bus.readData128(0x11000ff0, &loaded));
+  REQUIRE(loaded.low == (UINT64_C(2) << 32 | 1));
+  REQUIRE(loaded.high == (UINT64_C(4) << 32 | 3));
+  bus.write32(0, immediateInstruction(0x1f, 4, 5));
+  bus.write32(4, immediateInstruction(0x1e, 4, 6));
+  bus.write32(8, immediateInstruction(0x1f, 7, 6));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(4, {0xb1000ff0, 0});
+  core.setGeneralRegister(5, {program.low, program.high});
+  core.setGeneralRegister(7, {0x91008000, 0});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  const auto first = original.stepEEInstruction(16);
+  REQUIRE(first.pendingException == EEException::None);
+  REQUIRE(first.instructions == 1);
+  REQUIRE(original.vu0().readMicroInstruction(510) == program.low);
+  REQUIRE(original.vu0().readMicroInstruction(511) == program.high);
+  const auto saved = original.saveState();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  traced.startTrace();
+  for (int step = 0; step < 2; ++step)
+  {
+    const auto plainResult = plain.stepEEInstruction(16);
+    const auto tracedResult = traced.stepEEInstruction(16);
+    REQUIRE(plainResult.pendingException == EEException::None);
+    REQUIRE(tracedResult.pendingException == EEException::None);
+    REQUIRE(plainResult.instructions == 1);
+    REQUIRE(plainResult.instructions == tracedResult.instructions);
+    REQUIRE(plainResult.masterCycles == tracedResult.masterCycles);
+  }
+  REQUIRE(plain.eeCore().generalRegister(6).low == program.low);
+  REQUIRE(plain.eeCore().generalRegister(6).high == program.high);
+  REQUIRE(plain.vu1().readMicroInstruction(0) == program.low);
+  REQUIRE(plain.vu1().readMicroInstruction(1) == program.high);
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE_FALSE(traced.trace().empty());
+  plain.vif1().ingestWord(0x14000000);
+  traced.vif1().ingestWord(0x14000000);
+  plain.vu1().run(32);
+  traced.vu1().run(32);
+  REQUIRE_FALSE(plain.vu1().clockActive());
+  REQUIRE(plain.vu1().terminationPosition() == 2);
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
 }
 
 TEST_CASE("EE CPU VU micro doublewords preserve MPG and restored guest execution",
@@ -336,8 +498,8 @@ TEST_CASE("EE CPU VU quadwords reject unsupported widths and routes",
     REQUIRE_THROWS_AS(bus.writeData128(address + 8, {}), std::invalid_argument);
     REQUIRE(system.eeStateHash() == hash);
   }
-  for (const auto address : {0x11000000u, 0x11003ff0u, 0x11008000u,
-      0x1100bff0u, 0x11010000u, 0x9100c000u, 0xb100c000u, 0x3100c000u})
+  for (const auto address : {0x11003ff0u, 0x11010000u, 0x9100c000u,
+      0xb100c000u, 0x3100c000u})
   {
     EEQuadword untouched{3, 4};
     REQUIRE_FALSE(bus.readData128(address, &untouched));
