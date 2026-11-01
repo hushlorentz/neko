@@ -39,6 +39,7 @@ class VIF : public VUVIFRegisterSource
     explicit VIF(VIFType type);
 
     VIFType unitType() const;
+    void reset();
     void attachVPU(VPU *attachedVPU);
     void attachGIFDecoder(GIFDecoder *attachedGIFDecoder);
     void attachGIFPathArbiter(GIFPathArbiter *attachedArbiter);

@@ -28,6 +28,7 @@ namespace
   constexpr std::uint32_t EE_PHYSICAL_ADDRESS_MASK =
     0x1fffffff;
   constexpr std::uint32_t VIF_STALL_CANCEL = 1u << 3;
+  constexpr std::uint32_t VIF_RESET = 1u << 0;
 
   EEQuadword readVUQuadword(const VPU &vpu, std::size_t index)
   {
@@ -592,6 +593,33 @@ std::uint32_t EEBus::vifStatus(const VIF &vif) const
       EEVIFStatus::INTERRUPT;
   }
   return status;
+}
+
+void EEBus::writeVIFControl(VIF &vif, std::uint32_t value)
+{
+  switch (value)
+  {
+    case 0:
+      return;
+    case VIF_RESET:
+    {
+      const auto channelControl = vif.unitType() == VIFType::VIF0 ?
+        attachedVIF0DMAC().channelControl() :
+        attachedVIF1DMAC().channelControl();
+      if ((channelControl & DMACChannelControl::START) != 0)
+      {
+        throw std::invalid_argument(
+          "VIF reset during a DMA transfer is unsupported.");
+      }
+      vif.reset();
+      return;
+    }
+    case VIF_STALL_CANCEL:
+      vif.clearInterrupt();
+      return;
+    default:
+      throw std::invalid_argument("Unsupported VIF FBRST operation.");
+  }
 }
 
 DMACController &EEBus::attachedDMACController() const
@@ -1653,35 +1681,11 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::SIO_BGR:
       return attachedSerial().writeBaudRate(value);
     case EEMemoryMap::VIF0_FBRST:
-      if ((value & ~VIF_STALL_CANCEL) != 0)
-      {
-        if (checkedGuestAccess)
-        {
-          return false;
-        }
-        throw std::invalid_argument(
-          "Unsupported VIF0 FBRST operation.");
-      }
-      if ((value & VIF_STALL_CANCEL) != 0)
-      {
-        vif0Component->clearInterrupt();
-      }
-      return true;
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { writeVIFControl(*vif0Component, value); });
     case EEMemoryMap::VIF1_FBRST:
-      if ((value & ~VIF_STALL_CANCEL) != 0)
-      {
-        if (checkedGuestAccess)
-        {
-          return false;
-        }
-        throw std::invalid_argument(
-          "Unsupported VIF1 FBRST operation.");
-      }
-      if ((value & VIF_STALL_CANCEL) != 0)
-      {
-        vif1Component->clearInterrupt();
-      }
-      return true;
+      return performDeviceWrite(checkedGuestAccess,
+        [&]() { writeVIFControl(*vif1Component, value); });
     case EEMemoryMap::GIF_CTRL:
       return performDeviceWrite(
         checkedGuestAccess,

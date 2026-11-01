@@ -61,6 +61,35 @@ VIFType VIF::unitType() const
   return type;
 }
 
+void VIF::reset()
+{
+  if (gifPathArbiter != nullptr &&
+      gifPathArbiter->pathPending(GIFPath::Path2))
+  {
+    throw std::invalid_argument(
+      "VIF reset during a GIF PATH2 transfer is unsupported.");
+  }
+
+  // Runtime reset preserves programming registers and committed VU writes.
+  dbf = false;
+  markFlag = false;
+  interruptFlag = false;
+  streamCommand = {};
+  streamPayloadWordCount = 0;
+  streamPayloadWordsRemaining = 0;
+  streamWordsIngested = 0;
+  mpgLowerInstruction = 0;
+  mpgLowerInstructionPending = false;
+  directQuadword = {};
+  unpackPayload.clear();
+  fifoWords.clear();
+  unattachedPath3Mask = false;
+  if (gifPathArbiter != nullptr)
+  {
+    gifPathArbiter->setPath3MaskedByVIF(false);
+  }
+}
+
 void VIF::attachVPU(VPU *attachedVPU)
 {
   if (awaitingPayload())

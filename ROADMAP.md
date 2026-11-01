@@ -2614,6 +2614,20 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate guest and restored continuation, obtain independent review,
       then verify progress through a fresh authorized cold scout.
 
+### VIF FBRST Reset Contract
+
+- [x] Establish both VIF units' reset scope and shared-owner boundaries from
+      local manuals and secondary evidence.
+- [x] Select the bounded active-reset contract before implementation,
+      separately from force-break, stop and stall-cancel.
+
+### Bounded VIF FBRST Reset
+
+- [x] Implement the selected reset through the existing VIF and GIF owners,
+      preserving unrelated VU, DMA, interrupt-controller and graphics state.
+- [x] Validate access, payload/FIFO lifecycle and restored guest continuation,
+      obtain independent review, then verify progress with a fresh cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

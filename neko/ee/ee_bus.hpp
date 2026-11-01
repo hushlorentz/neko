@@ -356,6 +356,7 @@ class EEBus
       std::uint64_t value,
       bool checkedGuestAccess);
     std::uint32_t vifStatus(const VIF &vif) const;
+    void writeVIFControl(VIF &vif, std::uint32_t value);
     DMACController &attachedDMACController() const;
     GIFDMACChannel &attachedGIFDMAC() const;
     VIF0DMACChannel &attachedVIF0DMAC() const;
