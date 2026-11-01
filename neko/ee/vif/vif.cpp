@@ -34,6 +34,7 @@ namespace
   constexpr std::uint64_t VIF_MPG_ALIGNMENT_WORDS = 2;
   constexpr std::uint64_t VIF_DIRECT_ALIGNMENT_WORDS = 4;
   constexpr std::uint32_t VIF_FIFO_REVERSE_DIRECTION = 1u << 23;
+  constexpr std::uint32_t VIF_ERROR_MASK_FIELDS = 0x7;
 
   bool ownsPayload(VIFCommandKind kind)
   {
@@ -73,6 +74,17 @@ void VIF::writeStatus(std::uint32_t value)
     throw std::invalid_argument("VIF1 reverse FIFO direction is unsupported.");
   }
   // Only FDR is writable; forward direction is the sole supported state.
+}
+
+std::uint32_t VIF::errorRegister() const
+{
+  return 0;
+}
+
+bool VIF::writeErrorRegister(std::uint32_t value)
+{
+  // Masked interrupt/error execution is unsupported; only unmasked is admitted.
+  return (value & VIF_ERROR_MASK_FIELDS) == 0;
 }
 
 void VIF::reset()

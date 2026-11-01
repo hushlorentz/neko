@@ -41,6 +41,8 @@ class VIF : public VUVIFRegisterSource
     VIFType unitType() const;
     void reset();
     void writeStatus(std::uint32_t value);
+    std::uint32_t errorRegister() const;
+    bool writeErrorRegister(std::uint32_t value);
     void attachVPU(VPU *attachedVPU);
     void attachGIFDecoder(GIFDecoder *attachedGIFDecoder);
     void attachGIFPathArbiter(GIFPathArbiter *attachedArbiter);

@@ -88,6 +88,7 @@ namespace
       address == EEMemoryMap::STARTUP_F510 ||
       address == EEMemoryMap::GIF_CTRL ||
       address == EEMemoryMap::VIF1_STAT ||
+      address == EEMemoryMap::VIF0_ERR || address == EEMemoryMap::VIF1_ERR ||
       address == EEMemoryMap::VIF0_MARK || address == EEMemoryMap::VIF1_MARK ||
       address == EEMemoryMap::D_RBSR || address == EEMemoryMap::D_RBOR ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
@@ -1459,6 +1460,9 @@ bool EEBus::readMapped32(
       return true;
     case EEMemoryMap::VIF0_MARK:
       return vif0Component->readMarkRegister(*value);
+    case EEMemoryMap::VIF0_ERR:
+      *value = vif0Component->errorRegister();
+      return true;
     case EEMemoryMap::VIF1_STAT:
       *value = vifStatus(*vif1Component);
       return true;
@@ -1467,6 +1471,9 @@ bool EEBus::readMapped32(
       return true;
     case EEMemoryMap::VIF1_MARK:
       return vif1Component->readMarkRegister(*value);
+    case EEMemoryMap::VIF1_ERR:
+      *value = vif1Component->errorRegister();
+      return true;
     case EEMemoryMap::GIF_STAT:
       *value = gifRegisterFile->readStatus();
       return true;
@@ -1725,6 +1732,8 @@ bool EEBus::writeMapped32(
         [&]() { writeVIFControl(*vif0Component, value); });
     case EEMemoryMap::VIF0_MARK:
       return vif0Component->writeMarkRegister(value);
+    case EEMemoryMap::VIF0_ERR:
+      return vif0Component->writeErrorRegister(value);
     case EEMemoryMap::VIF1_STAT:
       return performDeviceWrite(checkedGuestAccess,
         [&]() { vif1Component->writeStatus(value); });
@@ -1733,6 +1742,8 @@ bool EEBus::writeMapped32(
         [&]() { writeVIFControl(*vif1Component, value); });
     case EEMemoryMap::VIF1_MARK:
       return vif1Component->writeMarkRegister(value);
+    case EEMemoryMap::VIF1_ERR:
+      return vif1Component->writeErrorRegister(value);
     case EEMemoryMap::GIF_CTRL:
       return performDeviceWrite(
         checkedGuestAccess,

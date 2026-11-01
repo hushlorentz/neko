@@ -2664,6 +2664,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate guest and restored continuation, obtain independent review,
       then verify progress through a fresh authorized cold scout.
 
+### VIF ERR All-Unmasked Programming
+
+- [x] Establish both units' ERR fields, access and reset semantics from local
+      manuals, separating mask programming from active error handling.
+- [x] Add bounded exact CPU word programming through the existing VIF owner,
+      with explicit unsupported-field, width and route boundaries.
+- [x] Validate guest and persistence integration, complete required full gates
+      and independent review, then verify progress with a fresh cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read
