@@ -2770,6 +2770,19 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate decoder, cache and guest exception boundaries; independently
       review, pass optimized/ASan gates and verify with fresh bounded BIOS evidence.
 
+### EE Startup Halfword-Read Contract at 0x1f803800
+
+- [x] Research the observed EE halfword load and containing access family;
+      select an evidence-backed exact read policy before implementation,
+      without generic IOP-register backing.
+
+### Bounded EE Startup Halfword-Read Admission
+
+- [x] Admit only an exact EE halfword zero-read through the existing bus, with
+      atomic rejection and focused host/guest access-boundary coverage.
+- [x] Review and validate the selected capability, then verify progress with
+      fresh authorized BIOS evidence before resuming handshake discovery.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

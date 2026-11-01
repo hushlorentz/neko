@@ -39,6 +39,98 @@ namespace
   }
 }
 
+TEST_CASE("EE halfword loads reach startup 3800 through kernel aliases",
+  "[ee][guest][trace][startup-3800]")
+{
+  for (std::uint32_t address : {0x9f803800u, 0xbf803800u})
+  {
+    const bool cachedAlias = address == 0x9f803800;
+    for (std::uint8_t opcode : {0x21, 0x25})
+    {
+      CAPTURE(address);
+      CAPTURE(opcode);
+      std::uint64_t plainHash = 0;
+      for (bool traced : {false, true})
+      {
+        CAPTURE(traced);
+        NekoSystem system;
+        EECore &core = system.eeCore();
+        setRegister(&core, 1, address);
+        setRegister(&core, 2, UINT64_MAX);
+        if (traced)
+        {
+          system.startTrace(100);
+        }
+        runInstruction(&system, memoryInstruction(opcode, 1, 2, 0));
+        REQUIRE(core.pendingException() == EEException::None);
+        REQUIRE(core.programCounter() == 4);
+        REQUIRE(core.generalRegister(2).low == 0);
+        REQUIRE(core.generalRegister(2).high == UINT64_C(0xfeedfacecafebeef));
+        if (!traced)
+        {
+          plainHash = system.eeStateHash();
+          continue;
+        }
+        REQUIRE(system.eeStateHash() == plainHash);
+        std::size_t reads = 0;
+        for (const auto &event : system.trace())
+        {
+          if (event.subsystem == NekoTraceSubsystem::EE &&
+              event.type == NekoTraceEventType::MemoryAccess &&
+              event.value0 == address)
+          {
+            ++reads;
+            REQUIRE(event.value1 == 0);
+            REQUIRE(event.value2 == 0);
+            REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+              0x1f803800, 2, NekoEETraceMemory::AccessKind::DataLoad,
+              NekoEETraceMemory::TranslationOutcome::Translated,
+              cachedAlias ? NekoEETraceMemory::CacheRoute::CachedNoncoherent
+                          : NekoEETraceMemory::CacheRoute::Uncached,
+              static_cast<std::uint8_t>(cachedAlias ? 3 : 2), false, true,
+              NekoEETraceMemory::CacheAccess::Bypassed,
+              NekoEETraceMemory::TransferOutcome::Completed,
+              NekoEETraceMemory::FailurePhase::None}));
+          }
+        }
+        REQUIRE(reads == 1);
+        REQUIRE_FALSE(system.traceTruncated());
+      }
+    }
+  }
+}
+
+TEST_CASE("EE startup 3800 rejects other widths and halfword stores precisely",
+  "[ee][guest][startup-3800]")
+{
+  struct Access
+  {
+    std::uint8_t opcode;
+    std::uint32_t address;
+    EEException exception;
+  };
+  for (const Access access : {
+       Access{0x24, 0xbf803800, EEException::DataBusErrorLoad},
+       Access{0x23, 0xbf803800, EEException::DataBusErrorLoad},
+       Access{0x37, 0xbf803800, EEException::DataBusErrorLoad},
+       Access{0x1e, 0xbf803800, EEException::DataBusErrorLoad},
+       Access{0x25, 0xbf803802, EEException::DataBusErrorLoad},
+       Access{0x25, 0xbf803801, EEException::AddressErrorLoadOrFetch},
+       Access{0x29, 0xbf803800, EEException::DataBusErrorStore}})
+  {
+    CAPTURE(access.opcode);
+    CAPTURE(access.address);
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    setRegister(&core, 1, access.address);
+    setRegister(&core, 2, 0);
+    runInstruction(&system, memoryInstruction(access.opcode, 1, 2, 0));
+    REQUIRE(core.pendingException() == access.exception);
+    REQUIRE(core.generalRegister(2).low == 0);
+    REQUIRE(core.generalRegister(2).high == UINT64_C(0xfeedfacecafebeef));
+  }
+}
+
 TEST_CASE("EE SH translates DEV9 initialization aliases and captures the low halfword",
   "[ee][dev9-init]")
 {

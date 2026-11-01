@@ -5153,6 +5153,66 @@ TEST_CASE("EE retail IOP boot probe is an exact stateless byte read",
   REQUIRE(system.saveState() == state);
 }
 
+TEST_CASE("EE startup 3800 probe is an exact stateless halfword read",
+  "[ee][bus][startup-3800]")
+{
+  constexpr std::uint32_t ADDRESS = 0x1f803800;
+  NekoSystem system;
+  EEBus &bus = system.eeBus();
+  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  {
+    std::uint16_t halfword = 0xa5a5;
+    REQUIRE(bus.readData16(ADDRESS, &halfword));
+    REQUIRE(halfword == 0);
+    system.reset();
+  }
+  std::uint16_t halfword = 0xa5a5;
+  REQUIRE_THROWS_AS(bus.readData16(ADDRESS, nullptr), std::invalid_argument);
+  REQUIRE_THROWS_AS(bus.readData16(ADDRESS + 1, &halfword), std::invalid_argument);
+  REQUIRE(halfword == 0xa5a5);
+  for (std::uint32_t address : {ADDRESS - 2, ADDRESS + 2, 0x1f803804u,
+       0x1f803000u, 0x9f803800u, 0xbf803800u})
+  {
+    CAPTURE(address);
+    REQUIRE_FALSE(bus.readData16(address, &halfword));
+    REQUIRE(halfword == 0xa5a5);
+    REQUIRE_FALSE(bus.writeData16(address, 0));
+  }
+  std::uint8_t byte = 0xa5;
+  std::uint32_t word = 0xa5a5a5a5;
+  std::uint64_t doubleword = UINT64_MAX;
+  EEQuadword quadword{UINT64_MAX, UINT64_MAX};
+  for (std::uint32_t address : {ADDRESS, ADDRESS + 1})
+  {
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE(byte == 0xa5);
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+  }
+  REQUIRE_FALSE(bus.readData32(ADDRESS, &word));
+  REQUIRE(word == 0xa5a5a5a5);
+  REQUIRE_FALSE(bus.readData64(ADDRESS, &doubleword));
+  REQUIRE(doubleword == UINT64_MAX);
+  REQUIRE_FALSE(bus.readData128(ADDRESS, &quadword));
+  REQUIRE(quadword.low == UINT64_MAX);
+  REQUIRE(quadword.high == UINT64_MAX);
+  for (std::uint16_t value : {0, 0xffff})
+  {
+    REQUIRE_FALSE(bus.writeData16(ADDRESS, value));
+  }
+  REQUIRE_FALSE(bus.writeData32(ADDRESS, 0));
+  REQUIRE_FALSE(bus.writeData64(ADDRESS, 0));
+  REQUIRE_FALSE(bus.writeData128(ADDRESS, quadword));
+  REQUIRE_FALSE(bus.readInstruction32(ADDRESS, &word));
+  REQUIRE(word == 0xa5a5a5a5);
+  REQUIRE_FALSE(bus.isCacheFillRange(ADDRESS, 1));
+  REQUIRE_FALSE(bus.readDMAC128(ADDRESS, &quadword));
+  REQUIRE_FALSE(bus.writeDMAC128(ADDRESS, quadword));
+  REQUIRE(quadword.low == UINT64_MAX);
+  REQUIRE(quadword.high == UINT64_MAX);
+  REQUIRE(system.iopBus().read16(ADDRESS).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write16(ADDRESS, 0).status == IOPBusStatus::Unmapped);
+}
+
 TEST_CASE("EE absent DEV9 revision is an exact stateless byte read",
   "[ee][bus][dev9-revision]")
 {

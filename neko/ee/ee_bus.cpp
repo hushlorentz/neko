@@ -872,6 +872,12 @@ bool EEBus::readData16(
     address,
     2,
     "EE halfword load must be naturally aligned.");
+  if (address == EEMemoryMap::IOP_STARTUP_3800)
+  {
+    // Provisional retail read policy; register identity and silicon value are unknown.
+    *value = 0;
+    return true;
+  }
   if (ba0HalfwordAddress(address))
   {
     return ba0Registers.readHalfword(address - EEMemoryMap::BA0_BASE, *value);
