@@ -1984,6 +1984,229 @@ TEST_CASE("EE IPU BCLR state restores transactionally with destination IRQ owner
   REQUIRE_FALSE(traced.trace().empty());
 }
 
+TEST_CASE("EE IPU input FIFO retains eight complete quadwords and clears through BCLR and RST",
+  "[ee][bus][ipu-input][save-state]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  system.interruptController().setSource(EEInterruptSource::VIF0, true);
+  bus.write32(EEMemoryMap::D4_CHCR, 0x45);
+  bus.write32(EEMemoryMap::D4_MADR, 0x12340);
+  bus.write32(EEMemoryMap::D4_QWC, 7);
+  const auto initial = system.saveState();
+  const auto initialHash = system.eeStateHash();
+  bus.write32(0x10002000, 53);
+  system.interruptController().acknowledge(1u << 8);
+  for (std::uint64_t index = 0; index < 8; ++index)
+  {
+    REQUIRE(bus.guestData128WriteReady(0x10007010));
+    REQUIRE(bus.writeGuestData128(0x10007010,
+      {UINT64_C(0x0807060504030201) + index,
+       UINT64_C(0x1817161514131211) + index}) ==
+      EEDataWriteResult::Completed);
+    REQUIRE(bus.read32(0x10002010) == index + 1);
+    REQUIRE(bus.read32(0x10002020) == (53 | ((index + 1) << 8)));
+    REQUIRE(system.interruptController().status() == (1u << 4));
+  }
+  SaveStateMutation queued(system.saveState());
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    const std::uint64_t words[] = {
+      UINT64_C(0x0807060504030201) + index,
+      UINT64_C(0x1817161514131211) + index
+    };
+    for (std::size_t lane = 0; lane < 2; ++lane)
+    {
+      for (std::size_t byte = 0; byte < 8; ++byte)
+      {
+        REQUIRE(queued.readByte("system.ipu.inputFIFO",
+          index * 16 + lane * 8 + byte) ==
+          static_cast<std::uint8_t>(words[lane] >> (byte * 8)));
+      }
+    }
+  }
+  const auto fullHash = system.eeStateHash();
+  REQUIRE_FALSE(bus.guestData128WriteReady(0x10007010));
+  REQUIRE(bus.writeGuestData128(0x10007010, {123, 456}) ==
+    EEDataWriteResult::Stalled);
+  REQUIRE_FALSE(bus.writeData128(0x10007010, {123, 456}));
+  REQUIRE_FALSE(bus.writeQuadword(0xb0007010, {{1, 2, 3, 4}}));
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0x50000000));
+  bus.write32(0x10002010, 0);
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.eeStateHash() == fullHash);
+  REQUIRE(system.saveState() == queued.bytes());
+  bus.write32(0x10002000, 127);
+  REQUIRE(bus.read32(0x10002010) == 0);
+  REQUIRE(bus.read32(0x10002020) == 127);
+  REQUIRE(system.interruptController().status() == ((1u << 8) | (1u << 4)));
+  REQUIRE(bus.writeQuadword(0x90007010, {{1, 2, 3, 4}}));
+  REQUIRE(bus.read32(0x10002020) == 0x17f);
+  bus.write32(0x10002010, 0x40000000);
+  system.interruptController().acknowledge(1u << 8);
+  REQUIRE(system.saveState() == initial);
+  REQUIRE(system.eeStateHash() == initialHash);
+  REQUIRE(bus.writeData128(0x10007010, {123, 456}));
+  system.reset();
+  REQUIRE(system.eeBus().read32(0x10002010) == 0);
+  REQUIRE(system.eeBus().read32(0x10002020) == 0);
+  REQUIRE(system.interruptController().status() == 0);
+}
+
+TEST_CASE("EE IPU input FIFO rejects split reads neighbors and nonCPU routes atomically",
+  "[ee][bus][ipu-input]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData128(0x10007010, {123, 456}));
+  const auto hash = system.eeStateHash();
+  std::uint8_t byte = 0x12;
+  std::uint16_t half = 0x3456;
+  std::uint32_t word = 0x789abcde;
+  std::uint64_t wide = UINT64_C(0x123456789abcdef0);
+  EEQuadword quad{321, 654};
+  REQUIRE_FALSE(bus.readData8(0x10007010, &byte));
+  REQUIRE_FALSE(bus.readData16(0x10007010, &half));
+  REQUIRE_FALSE(bus.readData32(0x10007010, &word));
+  REQUIRE_FALSE(bus.readData64(0x10007010, &wide));
+  REQUIRE_FALSE(bus.readData128(0x10007010, &quad));
+  REQUIRE_FALSE(bus.writeData8(0x10007010, 0));
+  REQUIRE_FALSE(bus.writeData16(0x10007010, 0));
+  REQUIRE_FALSE(bus.writeData32(0x10007010, 0));
+  REQUIRE_FALSE(bus.writeData64(0x10007010, 0));
+  REQUIRE_THROWS_AS(bus.write64(0x10007010, 0), std::out_of_range);
+  REQUIRE_FALSE(bus.readInstruction32(0x10007010, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(0x10007010, 64));
+  REQUIRE_FALSE(bus.readDMAC128(0x10007010, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(0x10007010, {}));
+  REQUIRE_FALSE(bus.readScratchpadDMAC128(
+    0x10007010, EEScratchpadDMACMode::Normal, &quad));
+  REQUIRE_FALSE(bus.writeScratchpadDMAC128(
+    0x10007010, EEScratchpadDMACMode::Normal, {}));
+  for (const auto address : {0x10007000u, 0x10007020u, 0x10007110u,
+      0x90007010u, 0xb0007010u})
+  {
+    REQUIRE_FALSE(bus.writeData128(address, {}));
+    REQUIRE_FALSE(bus.readData128(address, &quad));
+  }
+  REQUIRE(byte == 0x12);
+  REQUIRE(half == 0x3456);
+  REQUIRE(word == 0x789abcde);
+  REQUIRE(wide == UINT64_C(0x123456789abcdef0));
+  REQUIRE(quad.low == 321);
+  REQUIRE(quad.high == 654);
+  REQUIRE(system.eeStateHash() == hash);
+}
+
+TEST_CASE("EE IPU SQ retries a translated full input FIFO after BCLR or RST",
+  "[ee][bus][ipu-input][guest]")
+{
+  for (const auto clearAddress : {0x10002000u, 0x10002010u})
+  {
+    CAPTURE(clearAddress);
+    NekoSystem system;
+    auto &bus = system.eeBus();
+    auto &core = system.eeCore();
+    for (int index = 0; index < 8; ++index)
+    {
+      REQUIRE(bus.writeData128(0x10007010, {1, 2}));
+    }
+    constexpr std::uint32_t virtualFIFO = 0x00400010;
+    core.setGeneralRegister(1, {virtualFIFO, 0});
+    core.setGeneralRegister(2, {123, 456});
+    bus.write32(0, immediateInstruction(0x1f, 1, 2));
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.setTLBEntry(0, {
+      EECOP0PageMask::SIZE_4_KIB, virtualFIFO & ~0xfffu,
+      {(0x10007000 >> 6) | 0x1fu}, {0x1fu}
+    });
+    core.startExecution(0xa0000000);
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 0xa0000000);
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+    REQUIRE(bus.read32(0x10002010) == 8);
+    bus.write32(clearAddress, clearAddress == 0x10002000 ? 127 : 0x40000000);
+    system.clockMasterCycle();
+    REQUIRE(core.programCounter() == 0xa0000004);
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(bus.read32(0x10002010) == 1);
+    REQUIRE(bus.read32(0x10002020) ==
+      (clearAddress == 0x10002000 ? 0x17f : 0x100));
+  }
+}
+
+TEST_CASE("EE IPU queued input restores transactionally and preserves destination ownership",
+  "[ee][bus][ipu-input][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  bus.write32(0x10002000, 127);
+  for (std::uint64_t index = 0; index < 7; ++index)
+  {
+    REQUIRE(bus.writeData128(0x10007010, {index + 1, index + 11}));
+  }
+  bus.write32(0, immediateInstruction(0x1f, 1, 2));
+  bus.write32(4, immediateInstruction(0x1f, 1, 2));
+  original.eeCore().setGeneralRegister(1, {0xb0007010, 0});
+  original.eeCore().setGeneralRegister(2, {123, 456});
+  original.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+  original.eeCore().startExecution(0xa0000000);
+  const auto saved = original.saveState();
+  const auto savedHash = original.eeStateHash();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  REQUIRE(plain.saveState() == saved);
+  REQUIRE(plain.eeStateHash() == savedHash);
+  for (const auto count : {6u, 9u, 255u})
+  {
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar("system.ipu.inputFIFOCount", count);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(plain.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(plain.saveState() == saved);
+  }
+  SaveStateMutation invalidTail(saved);
+  invalidTail.writeByte("system.ipu.inputFIFO", 127, 1);
+  invalidTail.refreshChecksum();
+  REQUIRE_THROWS_AS(plain.loadState(invalidTail.bytes()), std::invalid_argument);
+  REQUIRE(plain.saveState() == saved);
+  SaveStateMutation oldVersion(saved);
+  oldVersion.writeScalar("container.version", 69);
+  oldVersion.refreshChecksum();
+  REQUIRE_THROWS_AS(plain.loadState(oldVersion.bytes()), std::invalid_argument);
+  REQUIRE(plain.saveState() == saved);
+  SaveStateMutation changed(saved);
+  changed.xorByte("system.ipu.inputFIFO", 6 * 16 + 15, 1);
+  changed.refreshChecksum();
+  plain.loadState(changed.bytes());
+  REQUIRE(plain.eeStateHash() != savedHash);
+  plain.loadState(saved);
+  original.interruptController().acknowledge(1u << 8);
+  traced.startTrace();
+  for (auto *system : {&plain, &traced})
+  {
+    system->clockMasterCycle();
+    REQUIRE(system->eeCore().programCounter() == 0xa0000004);
+    REQUIRE(system->eeBus().read32(0x10002010) == 8);
+    system->clockMasterCycle();
+    REQUIRE(system->eeCore().programCounter() == 0xa0000004);
+    REQUIRE(system->eeCore().pendingException() == EEException::None);
+    system->eeBus().write32(0x10002010, 0x40000000);
+    system->clockMasterCycle();
+    REQUIRE(system->eeCore().programCounter() == 0xa0000008);
+    REQUIRE(system->eeBus().read32(0x10002020) == 0x100);
+    REQUIRE(system->interruptController().status() == (1u << 8));
+  }
+  REQUIRE(original.eeBus().read32(0x10002020) == 0x77f);
+  REQUIRE(original.interruptController().status() == 0);
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
 TEST_CASE("EE VIF0 DMA stopped registers retain independent masked values",
   "[ee][bus][vif0-dmac]")
 {

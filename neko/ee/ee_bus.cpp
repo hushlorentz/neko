@@ -90,6 +90,7 @@ namespace
       address == EEMemoryMap::GIF_CTRL ||
       address == EEMemoryMap::IPU_CTRL ||
       address == EEMemoryMap::IPU_CMD || address == EEMemoryMap::IPU_BP ||
+      address == EEMemoryMap::IPU_IN_FIFO ||
       address == EEMemoryMap::VIF1_STAT ||
       address == EEMemoryMap::VIF0_ERR || address == EEMemoryMap::VIF1_ERR ||
       address == EEMemoryMap::VIF0_MARK || address == EEMemoryMap::VIF1_MARK ||
@@ -678,6 +679,12 @@ IPU &EEBus::attachedIPU() const
     throw std::logic_error("EE bus IPU is not attached.");
   }
   return *ipuComponent;
+}
+
+bool EEBus::toIPUDMACStopped() const
+{
+  return (attachedToIPUDMAC().channelControl() &
+    DMACChannelControl::START) == 0;
 }
 
 IPUDMACChannel &EEBus::attachedToIPUDMAC() const
@@ -1301,6 +1308,17 @@ EEDataWriteResult EEBus::writeGuestData128(
     16,
     "EE quadword store must be naturally aligned.");
 
+  if (address == EEMemoryMap::IPU_IN_FIFO)
+  {
+    if (!toIPUDMACStopped())
+    {
+      return EEDataWriteResult::Failed;
+    }
+    return attachedIPU().submitInput(value)
+      ? EEDataWriteResult::Completed
+      : EEDataWriteResult::Stalled;
+  }
+
   const GIFQuadword quadword = {{
     static_cast<std::uint32_t>(value.low),
     static_cast<std::uint32_t>(value.low >> 32),
@@ -1375,6 +1393,11 @@ EEDataWriteResult EEBus::writeGuestData128(
 bool EEBus::guestData128WriteReady(
   std::uint32_t address) const
 {
+  if (address == EEMemoryMap::IPU_IN_FIFO)
+  {
+    // Unsupported concurrent DMA must fault, not become a capacity stall.
+    return !toIPUDMACStopped() || attachedIPU().inputWriteReady();
+  }
   if (address == EEMemoryMap::VIF0_FIFO)
   {
     return
@@ -1475,7 +1498,7 @@ bool EEBus::readMapped32(
   switch (address)
   {
     case EEMemoryMap::IPU_BP:
-      *value = attachedIPU().bitPosition();
+      *value = attachedIPU().bitPositionStatus();
       return true;
     case EEMemoryMap::IPU_CTRL:
       *value = attachedIPU().control();
@@ -1747,8 +1770,7 @@ bool EEBus::writeMapped32(
   switch (address)
   {
     case EEMemoryMap::IPU_CMD:
-      if ((attachedToIPUDMAC().channelControl() &
-           DMACChannelControl::START) != 0)
+      if (!toIPUDMACStopped())
       {
         return false;
       }
@@ -2349,6 +2371,13 @@ bool EEBus::writeQuadword(
     16,
     "EE bus quadword access must be naturally aligned.");
   address = hostPhysicalAddress(address);
+  if (address == EEMemoryMap::IPU_IN_FIFO)
+  {
+    return toIPUDMACStopped() && attachedIPU().submitInput({
+      value[0] | (static_cast<std::uint64_t>(value[1]) << 32),
+      value[2] | (static_cast<std::uint64_t>(value[3]) << 32)
+    });
+  }
   if (address == EEMemoryMap::VIF0_FIFO ||
       address == EEMemoryMap::VIF1_FIFO)
   {

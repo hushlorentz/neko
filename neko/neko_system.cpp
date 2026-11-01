@@ -454,7 +454,7 @@ std::uint64_t NekoSystem::eeStateHash() const
 {
   std::uint64_t hash = STATE_FNV_OFFSET_BASIS;
   hashStateValue(&hash, eeCoreComponent.stateHash());
-  hashStateValue(&hash, ipuComponent.bitPosition());
+  hashStateValue(&hash, ipuComponent.stateHash());
   hashStateValue(
     &hash,
     dmacControllerComponent.controlRegister);

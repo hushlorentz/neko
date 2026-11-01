@@ -2703,10 +2703,17 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 
 ### IPU CPU Input-FIFO Contract
 
-- [ ] Establish CPU quadword input admission, FIFO capacity/status and BP
+- [x] Establish CPU quadword input admission, FIFO capacity/status and BP
       interaction through local manuals and secondary evidence.
-- [ ] Select FIFO ownership, command/DMA boundaries, timing and persistence
+- [x] Select FIFO ownership, command/DMA boundaries, timing and persistence
       before implementation; keep decoding and active DMA separately scoped.
+
+### Bounded IPU CPU Input FIFO
+
+- [x] Retain exact CPU quadwords through the existing IPU owner with selected
+      capacity/status, full-write behavior and BCLR/reset clearing.
+- [x] Validate access, backpressure, queued-data persistence and IRQ/peer
+      preservation; pass full gates/review and verify with a fresh cold scout.
 
 ### Real BIOS Handshake and Boundary Conformance
 

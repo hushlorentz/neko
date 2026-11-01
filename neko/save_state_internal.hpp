@@ -16,7 +16,7 @@
 constexpr std::uint8_t SAVE_STATE_MAGIC[] = {
   'N', 'E', 'K', 'O', 'S', 'T', 'A', 'T'
 };
-constexpr std::uint32_t SAVE_STATE_VERSION = 69;
+constexpr std::uint32_t SAVE_STATE_VERSION = 70;
 constexpr std::size_t SAVE_STATE_HEADER_SIZE = 28;
 constexpr std::uint64_t SAVE_STATE_FNV_OFFSET_BASIS =
   UINT64_C(14695981039346656037);
@@ -37,8 +37,15 @@ class SaveStateHashWriter
     void writeFieldU16(const char *, std::uint16_t value) { scalar(value, 2); }
     void writeFieldU32(const char *, std::uint32_t value) { scalar(value, 4); }
     void writeFieldU64(const char *, std::uint64_t value) { scalar(value, 8); }
+    void writeU64(std::uint64_t value) { scalar(value, 8); }
     void writeFieldBool(const char *, bool value) { scalar(value ? 1 : 0, 1); }
     void writeFieldSize(const char *, std::size_t value) { scalar(value, 4); }
+
+    template<typename Function>
+    void writeFieldRange(const char *, Function writeRange)
+    {
+      writeRange();
+    }
 
     void writeFieldBytes(
       const char *, const std::uint8_t *bytes, std::size_t count)
@@ -1044,6 +1051,7 @@ class NekoSaveStateCodec
     static std::uint64_t hashEETimers(
       const EETimers &timers, std::uint64_t masterCycle);
     static std::uint64_t hashEESerial(const EESerial &serial);
+    static std::uint64_t hashIPU(const IPU &ipu);
     static std::uint64_t hashCDVD(const CDVDController &controller);
     static std::uint64_t hashEERDRAMInitialization(
       const EERDRAMInitialization &initialization);
@@ -1084,6 +1092,8 @@ class NekoSaveStateCodec
     static void writeEESerialState(Writer *writer, const EESerial &serial);
     static void writeEESerial(SaveStateWriter *writer, const EESerial &serial);
     static void readEESerial(SaveStateReader *reader, EESerial *serial);
+    template<typename Writer>
+    static void writeIPUState(Writer *writer, const IPU &ipu);
     template<typename Writer>
     static void writeEERDRAMInitializationState(
       Writer *writer, const EERDRAMInitialization &initialization);

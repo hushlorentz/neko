@@ -66,6 +66,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t IPU_CMD = 0x10002000;
   constexpr std::uint32_t IPU_CTRL = 0x10002010;
   constexpr std::uint32_t IPU_BP = 0x10002020;
+  constexpr std::uint32_t IPU_IN_FIFO = 0x10007010;
   constexpr std::uint32_t GIF_BASE = 0x10003000;
   constexpr std::uint32_t GIF_CTRL = GIF_BASE;
   constexpr std::uint32_t SIF_BASE = 0x1000f200;
@@ -373,6 +374,7 @@ class EEBus
     IPUDMACChannel &attachedFromIPUDMAC() const;
     IPUDMACChannel &attachedToIPUDMAC() const;
     IPU &attachedIPU() const;
+    bool toIPUDMACStopped() const;
     VIF1DMACChannel &attachedVIF1DMAC() const;
     SIF1DMACChannel &attachedSIF1DMAC() const;
     SIF0DMACChannel &attachedSIF0DMAC() const;

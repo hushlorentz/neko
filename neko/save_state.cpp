@@ -392,6 +392,33 @@ void NekoSaveStateCodec::inspect(
     transaction.parsed, transaction.decodedTopology, &transaction.parsed);
 }
 
+template<typename Writer>
+void NekoSaveStateCodec::writeIPUState(Writer *writer, const IPU &ipu)
+{
+  writer->writeFieldU8("bitPositionRegister", ipu.bitPositionRegister);
+  writer->writeFieldU8("inputFIFOCount", ipu.inputFIFOCount);
+  writer->writeFieldRange("inputFIFO", [&]()
+  {
+    for (const auto &value : ipu.inputFIFO)
+    {
+      writer->writeU64(value.low);
+      writer->writeU64(value.high);
+    }
+  });
+}
+
+std::uint64_t IPU::stateHash() const
+{
+  return NekoSaveStateCodec::hashIPU(*this);
+}
+
+std::uint64_t NekoSaveStateCodec::hashIPU(const IPU &ipu)
+{
+  SaveStateHashWriter writer;
+  writeIPUState(&writer, ipu);
+  return writer.value();
+}
+
 void NekoSaveStateCodec::writeSystem(
   SaveStateWriter *writer,
   const NekoSystem &system)
@@ -425,8 +452,7 @@ void NekoSaveStateCodec::writeSystem(
   }
   {
     auto component = writer->scope("ipu");
-    writer->writeFieldU8(
-      "bitPositionRegister", system.ipuComponent.bitPositionRegister);
+    writeIPUState(writer, system.ipuComponent);
   }
   {
     auto component = writer->scope("eeBus");
@@ -593,6 +619,26 @@ void NekoSaveStateCodec::readSystem(
       throw std::invalid_argument("Invalid IPU bit position in save-state.");
     }
     system->ipuComponent.bitPositionRegister = position;
+    auto &ipu = system->ipuComponent;
+    ipu.inputFIFOCount = reader->readFieldU8("inputFIFOCount");
+    reader->requireField(
+      ipu.inputFIFOCount <= ipu.inputFIFO.size(),
+      "IPU input FIFO count exceeds capacity");
+    reader->readFieldRange("inputFIFO", ipu.inputFIFO.size() * 16, [&]()
+    {
+      for (auto &value : ipu.inputFIFO)
+      {
+        value.low = reader->readU64();
+        value.high = reader->readU64();
+      }
+    });
+    for (std::size_t index = ipu.inputFIFOCount;
+         index < ipu.inputFIFO.size(); ++index)
+    {
+      reader->requireField(
+        ipu.inputFIFO[index].low == 0 && ipu.inputFIFO[index].high == 0,
+        "IPU unused input FIFO entries contain data");
+    }
   }
   {
     auto component = reader->scope("eeBus");
@@ -901,6 +947,10 @@ void NekoSaveStateCodec::commitSystem(
     source->interruptControllerComponent.maskRegister;
   destination->ipuComponent.bitPositionRegister =
     source->ipuComponent.bitPositionRegister;
+  destination->ipuComponent.inputFIFOCount =
+    source->ipuComponent.inputFIFOCount;
+  destination->ipuComponent.inputFIFO =
+    source->ipuComponent.inputFIFO;
   destination->eeTimersComponent = source->eeTimersComponent;
   destination->eeSerialComponent = source->eeSerialComponent;
   destination->eeRDRAMInitializationComponent =
