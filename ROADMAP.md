@@ -2715,6 +2715,20 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate access, backpressure, queued-data persistence and IRQ/peer
       preservation; pass full gates/review and verify with a fresh cold scout.
 
+### IPU SETIQ Command Contract
+
+- [x] Establish table selection, bitstream consumption, FIFO/BP status and
+      completion behavior through local manuals and secondary evidence.
+- [x] Select bounded command/consumer ownership, starvation/reset policy,
+      timing and persistence before implementation; keep decoding/DMA separate.
+
+### Bounded IPU SETIQ Command
+
+- [x] Load the selected IQ table from retained CPU input through the existing
+      IPU owner with selected bitstream and command-lifecycle behavior.
+- [x] Validate consumption, status, reset/IRQ and queued-data persistence;
+      pass required full gates/review and verify progress with a fresh scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

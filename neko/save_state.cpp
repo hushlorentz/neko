@@ -405,6 +405,22 @@ void NekoSaveStateCodec::writeIPUState(Writer *writer, const IPU &ipu)
       writer->writeU64(value.high);
     }
   });
+  writer->writeFieldU8("streamBufferCount", ipu.streamBufferCount);
+  writer->writeFieldRange("streamBuffer", [&]()
+  {
+    for (const auto &value : ipu.streamBuffer)
+    {
+      writer->writeU64(value.low);
+      writer->writeU64(value.high);
+    }
+  });
+  writer->writeFieldU8("pendingCommand",
+    static_cast<std::uint8_t>(ipu.pendingCommand));
+  writer->writeFieldU8("forwardBits", ipu.forwardBits);
+  writer->writeFieldU8("tableBytesLoaded", ipu.tableBytesLoaded);
+  writer->writeFieldBytes("intraIQ", ipu.intraIQ.data(), ipu.intraIQ.size());
+  writer->writeFieldBytes("nonIntraIQ",
+    ipu.nonIntraIQ.data(), ipu.nonIntraIQ.size());
 }
 
 std::uint64_t IPU::stateHash() const
@@ -639,6 +655,54 @@ void NekoSaveStateCodec::readSystem(
         ipu.inputFIFO[index].low == 0 && ipu.inputFIFO[index].high == 0,
         "IPU unused input FIFO entries contain data");
     }
+    ipu.streamBufferCount = reader->readFieldU8("streamBufferCount");
+    // A second buffered qword is consumed immediately at a bit crossing.
+    reader->requireField(ipu.streamBufferCount <= 1,
+      "IPU retained stream buffer count is unreachable");
+    reader->readFieldRange("streamBuffer", ipu.streamBuffer.size() * 16, [&]()
+    {
+      for (auto &value : ipu.streamBuffer)
+      {
+        value.low = reader->readU64();
+        value.high = reader->readU64();
+      }
+    });
+    for (std::size_t index = ipu.streamBufferCount;
+         index < ipu.streamBuffer.size(); ++index)
+    {
+      reader->requireField(
+        ipu.streamBuffer[index].low == 0 && ipu.streamBuffer[index].high == 0,
+        "IPU unused stream buffer entries contain data");
+    }
+    const auto command = reader->readFieldU8("pendingCommand");
+    reader->requireField(command <=
+      static_cast<std::uint8_t>(IPU::Command::SetIQNonIntra),
+      "IPU pending command is invalid");
+    ipu.pendingCommand = static_cast<IPU::Command>(command);
+    ipu.forwardBits = reader->readFieldU8("forwardBits");
+    ipu.tableBytesLoaded = reader->readFieldU8("tableBytesLoaded");
+    reader->requireField(ipu.forwardBits <= 32 &&
+      ipu.tableBytesLoaded < ipu.intraIQ.size(),
+      "IPU SETIQ progress is out of range");
+    reader->requireField(ipu.forwardBits == 0 || ipu.tableBytesLoaded == 0,
+      "IPU SETIQ forward skip follows table loading");
+    if (ipu.pendingCommand == IPU::Command::Idle)
+    {
+      reader->requireField(ipu.forwardBits == 0 && ipu.tableBytesLoaded == 0,
+        "Idle IPU retains command progress");
+      reader->requireField(ipu.streamBufferCount == 0 || position != 0,
+        "Idle IPU retains an unprocessed stream buffer");
+    }
+    else
+    {
+      const auto neededBits = ipu.forwardBits == 0 ? 8 : ipu.forwardBits;
+      reader->requireField(ipu.inputFIFOCount == 0 &&
+        ipu.streamBufferCount * 128 < position + neededBits,
+        "Pending IPU SETIQ is not waiting for input");
+    }
+    reader->readFieldBytes("intraIQ", ipu.intraIQ.data(), ipu.intraIQ.size());
+    reader->readFieldBytes("nonIntraIQ",
+      ipu.nonIntraIQ.data(), ipu.nonIntraIQ.size());
   }
   {
     auto component = reader->scope("eeBus");
@@ -951,6 +1015,20 @@ void NekoSaveStateCodec::commitSystem(
     source->ipuComponent.inputFIFOCount;
   destination->ipuComponent.inputFIFO =
     source->ipuComponent.inputFIFO;
+  destination->ipuComponent.streamBufferCount =
+    source->ipuComponent.streamBufferCount;
+  destination->ipuComponent.streamBuffer =
+    source->ipuComponent.streamBuffer;
+  destination->ipuComponent.pendingCommand =
+    source->ipuComponent.pendingCommand;
+  destination->ipuComponent.forwardBits =
+    source->ipuComponent.forwardBits;
+  destination->ipuComponent.tableBytesLoaded =
+    source->ipuComponent.tableBytesLoaded;
+  destination->ipuComponent.intraIQ =
+    source->ipuComponent.intraIQ;
+  destination->ipuComponent.nonIntraIQ =
+    source->ipuComponent.nonIntraIQ;
   destination->eeTimersComponent = source->eeTimersComponent;
   destination->eeSerialComponent = source->eeSerialComponent;
   destination->eeRDRAMInitializationComponent =

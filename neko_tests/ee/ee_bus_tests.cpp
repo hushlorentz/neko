@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "catch.hpp"
 #include "ee_bus.hpp"
@@ -65,6 +66,34 @@ namespace
     core.startExecution(EEMemoryMap::KSEG1_BASE);
     system.startTrace(100);
     return system.stepEEInstruction(16);
+  }
+
+  std::uint8_t ipuStreamByte(std::size_t index)
+  {
+    return static_cast<std::uint8_t>(index * 37 + 11);
+  }
+
+  EEQuadword ipuStreamQuadword(std::size_t index)
+  {
+    EEQuadword value{};
+    for (std::size_t byte = 0; byte < 16; ++byte)
+    {
+      auto &half = byte < 8 ? value.low : value.high;
+      half |= static_cast<std::uint64_t>(ipuStreamByte(index * 16 + byte))
+        << ((byte % 8) * 8);
+    }
+    return value;
+  }
+
+  std::uint8_t ipuExpectedStreamByte(std::size_t bitPosition)
+  {
+    std::uint8_t value = 0;
+    for (std::size_t bit = bitPosition; bit < bitPosition + 8; ++bit)
+    {
+      value = static_cast<std::uint8_t>((value << 1) |
+        ((ipuStreamByte(bit / 8) >> (7 - bit % 8)) & 1));
+    }
+    return value;
   }
 }
 
@@ -2031,7 +2060,7 @@ TEST_CASE("EE IPU input FIFO retains eight complete quadwords and clears through
     EEDataWriteResult::Stalled);
   REQUIRE_FALSE(bus.writeData128(0x10007010, {123, 456}));
   REQUIRE_FALSE(bus.writeQuadword(0xb0007010, {{1, 2, 3, 4}}));
-  REQUIRE_FALSE(bus.writeData32(0x10002000, 0x50000000));
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0x50000040));
   bus.write32(0x10002010, 0);
   bus.advanceGuestFIFOs();
   REQUIRE(system.eeStateHash() == fullHash);
@@ -2201,6 +2230,287 @@ TEST_CASE("EE IPU queued input restores transactionally and preserves destinatio
     REQUIRE(system->interruptController().status() == (1u << 8));
   }
   REQUIRE(original.eeBus().read32(0x10002020) == 0x77f);
+  REQUIRE(original.interruptController().status() == 0);
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
+TEST_CASE("EE IPU SETIQ loads both tables with bit accurate consumption and remaining input",
+  "[ee][bus][ipu-setiq]")
+{
+  for (const auto selector : {0u, 1u})
+  {
+    for (const auto position : {0u, 1u, 127u})
+    {
+      for (const auto forward : {0u, 1u, 32u})
+      {
+        CAPTURE(selector);
+        CAPTURE(position);
+        CAPTURE(forward);
+        NekoSystem system;
+        auto &bus = system.eeBus();
+        bus.write32(0x10002000, position);
+        system.interruptController().acknowledge(1u << 8);
+        for (std::size_t index = 0; index < 8; ++index)
+        {
+          REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(index)));
+        }
+        REQUIRE(bus.writeData32(0x10002000,
+          0x50000000 | (selector << 27) | forward));
+        const auto end = position + forward + 512;
+        const auto buffered = end % 128 == 0 ? 0u : 1u;
+        const auto queued = 8 - end / 128 - buffered;
+        REQUIRE(bus.read32(0x10002010) == queued);
+        REQUIRE(bus.read32(0x10002020) ==
+          ((end % 128) | (queued << 8) | (buffered << 16)));
+        REQUIRE(system.interruptController().status() == (1u << 8));
+        SaveStateMutation state(system.saveState());
+        const char *table = selector == 0 ?
+          "system.ipu.intraIQ" : "system.ipu.nonIntraIQ";
+        const char *other = selector == 0 ?
+          "system.ipu.nonIntraIQ" : "system.ipu.intraIQ";
+        for (std::size_t byte = 0; byte < 64; ++byte)
+        {
+          REQUIRE(state.readByte(table, byte) ==
+            ipuExpectedStreamByte(position + forward + byte * 8));
+          REQUIRE(state.readByte(other, byte) == 0);
+        }
+        const auto firstQueued = end / 128 + buffered;
+        for (std::size_t byte = 0; byte < queued * 16; ++byte)
+        {
+          REQUIRE(state.readByte("system.ipu.inputFIFO", byte) ==
+            ipuStreamByte(firstQueued * 16 + byte));
+        }
+        if (position == 0 && forward == 0)
+        {
+          system.interruptController().acknowledge(1u << 8);
+          REQUIRE(bus.writeData32(0x10002000,
+            0x50000000 | ((1u - selector) << 27)));
+          REQUIRE(bus.read32(0x10002010) == 0);
+          REQUIRE(bus.read32(0x10002020) == 0);
+          REQUIRE(system.interruptController().status() == (1u << 8));
+          SaveStateMutation second(system.saveState());
+          for (std::size_t byte = 0; byte < 64; ++byte)
+          {
+            REQUIRE(second.readByte(other, byte) == ipuStreamByte(64 + byte));
+            REQUIRE(second.readByte(table, byte) == ipuStreamByte(byte));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE IPU SETIQ waits for real input and reset retains partial table bytes",
+  "[ee][bus][ipu-setiq]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  bus.write32(0x10002000, 127);
+  system.interruptController().acknowledge(1u << 8);
+  system.interruptController().setSource(EEInterruptSource::VIF0, true);
+  bus.write32(EEMemoryMap::D4_CHCR, 0x45);
+  bus.write32(EEMemoryMap::D4_MADR, 0x12340);
+  bus.write32(EEMemoryMap::D4_QWC, 7);
+  REQUIRE(bus.writeData32(0x10002000, 0x50000020));
+  REQUIRE(bus.read32(0x10002010) == 0x80000000);
+  REQUIRE(bus.read32(0x10002020) == 127);
+  const auto waitingHash = system.eeStateHash();
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0x58000000));
+  bus.write32(0x10002010, 0);
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.eeStateHash() == waitingHash);
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(0)));
+  REQUIRE(bus.read32(0x10002020) == 0x1007f);
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(1)));
+  REQUIRE(bus.read32(0x10002010) == 0x80000000);
+  REQUIRE(bus.read32(0x10002020) == 0x1007f);
+  REQUIRE(system.interruptController().status() == (1u << 4));
+  SaveStateMutation partial(system.saveState());
+  for (std::size_t byte = 0; byte < 64; ++byte)
+  {
+    REQUIRE(partial.readByte("system.ipu.intraIQ", byte) ==
+      (byte < 12 ? ipuExpectedStreamByte(159 + byte * 8) : 0));
+  }
+  SECTION("refill finishes once and leaves the real stream tail")
+  {
+    for (std::size_t index = 2; index < 6; ++index)
+    {
+      REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(index)));
+      REQUIRE(system.interruptController().status() ==
+        ((1u << 4) | (index == 5 ? 1u << 8 : 0)));
+    }
+    REQUIRE(bus.read32(0x10002010) == 0);
+    REQUIRE(bus.read32(0x10002020) == 0x1001f);
+    SaveStateMutation completed(system.saveState());
+    for (std::size_t byte = 0; byte < 64; ++byte)
+    {
+      REQUIRE(completed.readByte("system.ipu.intraIQ", byte) ==
+        ipuExpectedStreamByte(159 + byte * 8));
+    }
+    system.interruptController().acknowledge(1u << 8);
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(6)));
+    REQUIRE(bus.read32(0x10002020) == 0x1011f);
+    REQUIRE(system.interruptController().status() == (1u << 4));
+    REQUIRE(bus.read32(EEMemoryMap::D4_CHCR) == 0x45);
+    REQUIRE(bus.read32(EEMemoryMap::D4_MADR) == 0x12340);
+    REQUIRE(bus.read32(EEMemoryMap::D4_QWC) == 7);
+  }
+  SECTION("reset cancels progress without clearing loaded table bytes")
+  {
+    bus.write32(0x10002010, 0x40000000);
+    REQUIRE(bus.read32(0x10002010) == 0);
+    REQUIRE(bus.read32(0x10002020) == 0);
+    SaveStateMutation reset(system.saveState());
+    for (std::size_t byte = 0; byte < 64; ++byte)
+    {
+      REQUIRE(reset.readByte("system.ipu.intraIQ", byte) ==
+        partial.readByte("system.ipu.intraIQ", byte));
+    }
+    system.interruptController().acknowledge(1u << 8);
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(2)));
+    REQUIRE(bus.read32(0x10002010) == 1);
+    REQUIRE(system.interruptController().status() == (1u << 4));
+    bus.write32(0x10002000, 53);
+    REQUIRE(bus.read32(0x10002020) == 53);
+    SaveStateMutation cleared(system.saveState());
+    REQUIRE(cleared.readByte("system.ipu.intraIQ", 0) ==
+      partial.readByte("system.ipu.intraIQ", 0));
+    REQUIRE(bus.read32(EEMemoryMap::D4_CHCR) == 0x45);
+    REQUIRE(bus.read32(EEMemoryMap::D4_MADR) == 0x12340);
+    REQUIRE(bus.read32(EEMemoryMap::D4_QWC) == 7);
+    system.reset();
+    SaveStateMutation cold(system.saveState());
+    for (std::size_t byte = 0; byte < 64; ++byte)
+    {
+      REQUIRE(cold.readByte("system.ipu.intraIQ", byte) == 0);
+    }
+    REQUIRE(system.interruptController().status() == 0);
+  }
+}
+
+TEST_CASE("EE guest SETIQ admits exact command fields without split or peer effects",
+  "[ee][bus][ipu-setiq][guest]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto initial = system.saveState();
+  for (const auto command : {0x50000021u, 0x5800003fu, 0x50000040u,
+      0x51000000u, 0x60000000u})
+  {
+    REQUIRE_FALSE(bus.writeData32(0x10002000, command));
+  }
+  REQUIRE_FALSE(bus.writeData8(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData16(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData64(0x10002000, 0x50000000));
+  REQUIRE_FALSE(bus.writeData128(0x10002000, {0x50000000, 0}));
+  REQUIRE_FALSE(bus.writeDMAC128(0x10002000, {0x50000000, 0}));
+  REQUIRE(system.saveState() == initial);
+  bus.write32(0, immediateInstruction(0x2b, 1, 2));
+  bus.write32(4, immediateInstruction(0x1f, 3, 4));
+  auto &core = system.eeCore();
+  core.setGeneralRegister(1, {0xb0002000, 0});
+  core.setGeneralRegister(2, {0x58000000, 0});
+  core.setGeneralRegister(3, {0xb0007010, 0});
+  const auto firstInput = ipuStreamQuadword(0);
+  core.setGeneralRegister(4, {firstInput.low, firstInput.high});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  REQUIRE(system.stepEEInstruction(16).pendingException == EEException::None);
+  REQUIRE(core.programCounter() == 0xa0000004);
+  REQUIRE(bus.read32(0x10002010) == 0x80000000);
+  REQUIRE(system.stepEEInstruction(16).pendingException == EEException::None);
+  REQUIRE(core.programCounter() == 0xa0000008);
+  REQUIRE(bus.read32(0x10002010) == 0x80000000);
+  REQUIRE(bus.read32(0x10002020) == 0);
+  REQUIRE(system.interruptController().status() == 0);
+  SaveStateMutation state(system.saveState());
+  for (std::size_t byte = 0; byte < 16; ++byte)
+  {
+    REQUIRE(state.readByte("system.ipu.nonIntraIQ", byte) == ipuStreamByte(byte));
+  }
+}
+
+TEST_CASE("EE SETIQ partial commands restore transactionally and complete on destination input",
+  "[ee][bus][ipu-setiq][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  bus.write32(0x10002000, 127);
+  original.interruptController().acknowledge(1u << 8);
+  bus.write32(0x10002000, 0x58000020);
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(0)));
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(1)));
+  bus.write32(0, immediateInstruction(0x1f, 1, 2));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(1, {0xb0007010, 0});
+  const auto finalInput = ipuStreamQuadword(5);
+  core.setGeneralRegister(2, {finalInput.low, finalInput.high});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  const auto saved = original.saveState();
+  const auto savedHash = original.eeStateHash();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  REQUIRE(plain.saveState() == saved);
+  REQUIRE(plain.eeStateHash() == savedHash);
+  const std::pair<const char *, std::uint64_t> invalidFields[] = {
+    {"system.ipu.pendingCommand", 3},
+    {"system.ipu.pendingCommand", 0},
+    {"system.ipu.forwardBits", 33},
+    {"system.ipu.forwardBits", 1},
+    {"system.ipu.tableBytesLoaded", 64},
+    {"system.ipu.streamBufferCount", 0},
+    {"system.ipu.streamBufferCount", 2},
+    {"container.version", 70}
+  };
+  for (const auto &field : invalidFields)
+  {
+    SaveStateMutation invalid(saved);
+    invalid.writeScalar(field.first, field.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(plain.loadState(invalid.bytes()), std::invalid_argument);
+    REQUIRE(plain.saveState() == saved);
+  }
+  SaveStateMutation invalidTail(saved);
+  invalidTail.writeByte("system.ipu.streamBuffer", 31, 1);
+  invalidTail.refreshChecksum();
+  REQUIRE_THROWS_AS(plain.loadState(invalidTail.bytes()), std::invalid_argument);
+  REQUIRE(plain.saveState() == saved);
+  for (const char *table : {"system.ipu.intraIQ", "system.ipu.nonIntraIQ"})
+  {
+    SaveStateMutation changed(saved);
+    changed.xorByte(table, 0, 1);
+    changed.refreshChecksum();
+    plain.loadState(changed.bytes());
+    REQUIRE(plain.eeStateHash() != savedHash);
+  }
+  plain.loadState(saved);
+  traced.startTrace();
+  for (auto *system : {&plain, &traced})
+  {
+    for (std::size_t index = 2; index < 5; ++index)
+    {
+      REQUIRE(system->eeBus().writeData128(0x10007010, ipuStreamQuadword(index)));
+      REQUIRE(system->interruptController().status() == 0);
+    }
+    REQUIRE(system->stepEEInstruction(16).pendingException == EEException::None);
+    REQUIRE(system->eeCore().programCounter() == 0xa0000004);
+    REQUIRE(system->eeBus().read32(0x10002010) == 0);
+    REQUIRE(system->eeBus().read32(0x10002020) == 0x1001f);
+    REQUIRE(system->interruptController().status() == (1u << 8));
+    SaveStateMutation completed(system->saveState());
+    for (std::size_t byte = 0; byte < 64; ++byte)
+    {
+      REQUIRE(completed.readByte("system.ipu.nonIntraIQ", byte) ==
+        ipuExpectedStreamByte(159 + byte * 8));
+    }
+  }
+  REQUIRE(original.saveState() == saved);
   REQUIRE(original.interruptController().status() == 0);
   REQUIRE(plain.eeStateHash() == traced.eeStateHash());
   REQUIRE(plain.saveState() == traced.saveState());
