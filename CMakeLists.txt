@@ -72,6 +72,7 @@ add_library(neko_core
     neko/ee/ee_timers.cpp
     neko/ee/gif_dmac_channel.cpp
     neko/ee/interrupt_controller.cpp
+    neko/ee/ipu.cpp
     neko/ee/scratchpad_dmac_channel.cpp
     neko/ee/vif0_dmac_channel.cpp
     neko/ee/ipu_dmac_channel.cpp

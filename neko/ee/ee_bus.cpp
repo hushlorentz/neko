@@ -20,6 +20,7 @@
 #include "vif.hpp"
 #include "vif0_dmac_channel.hpp"
 #include "ipu_dmac_channel.hpp"
+#include "ipu.hpp"
 #include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
 
@@ -87,6 +88,7 @@ namespace
       mchWindowAddress(address) || address == EEMemoryMap::RESERVED_F500 ||
       address == EEMemoryMap::STARTUP_F510 ||
       address == EEMemoryMap::GIF_CTRL ||
+      address == EEMemoryMap::IPU_CTRL ||
       address == EEMemoryMap::VIF1_STAT ||
       address == EEMemoryMap::VIF0_ERR || address == EEMemoryMap::VIF1_ERR ||
       address == EEMemoryMap::VIF0_MARK || address == EEMemoryMap::VIF1_MARK ||
@@ -484,6 +486,19 @@ void EEBus::attachVIF0DMACChannel(VIF0DMACChannel *vif0DMAC)
   vif0DMACChannel = vif0DMAC;
 }
 
+void EEBus::attachIPU(IPU *ipu)
+{
+  if (ipu == nullptr)
+  {
+    throw std::invalid_argument("EE bus requires a non-null IPU.");
+  }
+  if (ipuComponent != nullptr)
+  {
+    throw std::logic_error("EE bus IPU is already attached.");
+  }
+  ipuComponent = ipu;
+}
+
 void EEBus::attachVIF1DMACChannel(
   VIF1DMACChannel *vif1DMAC)
 {
@@ -653,6 +668,15 @@ IPUDMACChannel &EEBus::attachedFromIPUDMAC() const
     throw std::logic_error("EE bus fromIPU DMAC channel is not attached.");
   }
   return *fromIPUDMACChannel;
+}
+
+IPU &EEBus::attachedIPU() const
+{
+  if (ipuComponent == nullptr)
+  {
+    throw std::logic_error("EE bus IPU is not attached.");
+  }
+  return *ipuComponent;
 }
 
 IPUDMACChannel &EEBus::attachedToIPUDMAC() const
@@ -1449,6 +1473,9 @@ bool EEBus::readMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::IPU_CTRL:
+      *value = attachedIPU().control();
+      return true;
     case EEMemoryMap::SIO_ISR:
       *value = attachedSerial().readStatus();
       return true;
@@ -1715,6 +1742,8 @@ bool EEBus::writeMapped32(
 
   switch (address)
   {
+    case EEMemoryMap::IPU_CTRL:
+      return attachedIPU().writeControl(value);
     case EEMemoryMap::RESERVED_F500:
     case EEMemoryMap::STARTUP_F510:
       // Provisional exact startup write-discard policy, not DMA control.

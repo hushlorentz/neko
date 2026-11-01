@@ -2673,6 +2673,20 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate guest and persistence integration, complete required full gates
       and independent review, then verify progress with a fresh cold scout.
 
+### IPU Control/Reset Contract
+
+- [x] Establish IPU_CTRL fields, reset scope and adjacent register boundaries
+      from local manuals and secondary evidence, separating reset from commands.
+- [x] Select the bounded reset contract and device-state ownership before
+      implementation, including DMA, persistence and unsupported-access guards.
+
+### Bounded IPU Control Reset
+
+- [x] Implement the selected exact CPU control/reset contract through one IPU
+      owner without enabling command decoding, DMA execution or invented status.
+- [x] Validate reset lifecycle and guest/persistence boundaries, obtain
+      independent review and required full gates, then run a fresh cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

@@ -39,6 +39,7 @@
 #include "vif.hpp"
 #include "vif0_dmac_channel.hpp"
 #include "ipu_dmac_channel.hpp"
+#include "ipu.hpp"
 #include "vif1_dmac_channel.hpp"
 #include "vpu.hpp"
 
@@ -262,6 +263,7 @@ class NekoSystem
     GIFPath3Transfer gifPath3Component;
     GIFRegisters gifRegisterFile;
     EEInterruptController interruptControllerComponent;
+    IPU ipuComponent;
     EETimers eeTimersComponent;
     EESerial eeSerialComponent;
     EERDRAMInitialization eeRDRAMInitializationComponent;

@@ -193,6 +193,7 @@ NekoSystem::NekoSystem() :
   gifRegisterFile(
     &gifPathArbiterComponent,
     &gifPath3Component),
+  ipuComponent(interruptControllerComponent),
   eeBusComponent(
     &vif0Component,
     &vif1Component,
@@ -248,6 +249,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachGIFDMACChannel(&gifDMACComponent);
   eeBusComponent.attachVIF0DMACChannel(&vif0DMACComponent);
   eeBusComponent.attachIPUDMACChannels(&fromIPUDMACComponent, &toIPUDMACComponent);
+  eeBusComponent.attachIPU(&ipuComponent);
   eeBusComponent.attachVIF1DMACChannel(&vif1DMACComponent);
   eeBusComponent.attachSIF1DMACChannel(&sif1DMACComponent);
   eeBusComponent.attachSIF0DMACChannel(&sif0DMACComponent);

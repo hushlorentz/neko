@@ -1563,6 +1563,214 @@ TEST_CASE("EE VIF ERR restored guest programming preserves interrupt continuatio
   REQUIRE_FALSE(traced.trace().empty());
 }
 
+TEST_CASE("EE IPU reset latches only its interrupt and preserves programmed peers",
+  "[ee][bus][ipu-control][save-state]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  constexpr std::uint32_t ipuIRQ = 1u << 8;
+  constexpr std::uint32_t peerIRQ = 1u << EEInterruptSource::VIF0;
+  bus.write32(EEMemoryMap::D3_CHCR, 0x44);
+  bus.write32(EEMemoryMap::D3_MADR, 0x12340);
+  bus.write32(EEMemoryMap::D3_QWC, 7);
+  bus.write32(EEMemoryMap::D4_CHCR, 0x45);
+  bus.write32(EEMemoryMap::D4_MADR, 0x56780);
+  bus.write32(EEMemoryMap::D4_QWC, 9);
+  bus.write32(EEMemoryMap::D4_TADR, 0x9abc0);
+  system.vif0().ingestWord(0);
+  system.vif0().ingestWord(0x4a010000);
+  system.vif0().ingestWord(0x11223344);
+  system.vu1().writeDataQuadword(0, {1, 2, 3, 4});
+  system.interruptController().setSource(EEInterruptSource::VIF0, true);
+  const auto before = system.saveState();
+
+  REQUIRE(bus.read32(0x10002010) == 0);
+  REQUIRE(bus.writeData32(0x10002010, 0));
+  REQUIRE(system.interruptController().status() == peerIRQ);
+  REQUIRE(bus.writeData32(0x10002010, 0x40000000));
+  REQUIRE(system.interruptController().status() == (peerIRQ | ipuIRQ));
+  REQUIRE(bus.read32(0x10002010) == 0);
+  REQUIRE_FALSE(system.interruptController().interruptPending());
+  REQUIRE(bus.writeData32(0x10002010, 0));
+  REQUIRE(bus.writeData32(0x10002010, 0x40000000));
+  REQUIRE(system.interruptController().status() == (peerIRQ | ipuIRQ));
+  system.interruptController().acknowledge(ipuIRQ);
+  REQUIRE(system.saveState() == before);
+
+  system.interruptController().toggleMask(ipuIRQ);
+  bus.write32(0xb0002010, 0x40000000);
+  REQUIRE(system.interruptController().interruptPending());
+  system.reset();
+  REQUIRE(system.eeBus().read32(0x10002010) == 0);
+  REQUIRE(system.interruptController().status() == 0);
+  REQUIRE(system.interruptController().mask() == 0);
+  system.eeBus().write32(0x90002010, 0x40000000);
+  REQUIRE(system.interruptController().status() == ipuIRQ);
+}
+
+TEST_CASE("EE IPU control rejects unselected fields widths and routes atomically",
+  "[ee][bus][ipu-control]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  const auto hash = system.eeStateHash();
+  constexpr std::uint32_t address = 0x10002010;
+  REQUIRE(bus.wordMergeStorePolicy(address) == EEWordMergeStorePolicy::FullWordOnly);
+  for (std::uint32_t bit = 0; bit < 32; ++bit)
+  {
+    if (bit == 30)
+    {
+      continue;
+    }
+    const auto value = 1u << bit;
+    CAPTURE(bit);
+    REQUIRE_FALSE(bus.writeData32(address, value));
+    REQUIRE_FALSE(bus.writeData32(address, value | 0x40000000));
+    REQUIRE(system.interruptController().status() == 0);
+  }
+  REQUIRE_THROWS_AS(bus.write32(address, UINT32_MAX), std::out_of_range);
+  std::uint8_t byte = 0x12;
+  std::uint16_t half = 0x3456;
+  std::uint32_t word = 0xabcdef01;
+  std::uint64_t wide = 0x12345678;
+  EEQuadword quad{3, 4};
+  REQUIRE_FALSE(bus.readData8(address, &byte));
+  REQUIRE_FALSE(bus.readData16(address, &half));
+  REQUIRE_FALSE(bus.writeData8(address, 0));
+  REQUIRE_FALSE(bus.writeData16(address, 0));
+  REQUIRE_THROWS_AS(bus.write8(address, 0), std::out_of_range);
+  REQUIRE_FALSE(bus.readData64(address, &wide));
+  REQUIRE_FALSE(bus.writeData64(address, 0x40000000));
+  REQUIRE_THROWS_AS(bus.read64(address), std::out_of_range);
+  REQUIRE_THROWS_AS(bus.write64(address, 0x40000000), std::out_of_range);
+  REQUIRE_FALSE(bus.readData128(address, &quad));
+  REQUIRE_FALSE(bus.writeData128(address, {0x40000000, 0}));
+  REQUIRE_FALSE(bus.readInstruction32(address, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(address, 64));
+  REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(address, {0x40000000, 0}));
+  REQUIRE_FALSE(bus.readScratchpadDMAC128(
+    address, EEScratchpadDMACMode::Normal, &quad));
+  REQUIRE_FALSE(bus.writeScratchpadDMAC128(
+    address, EEScratchpadDMACMode::Normal, {0x40000000, 0}));
+  for (const auto excluded : {0x10002000u, 0x10002004u, 0x1000200cu,
+      0x10002014u, 0x1000201cu, 0x10002020u, 0x10002030u,
+      0x10007000u, 0x10007010u, 0x90002010u, 0xb0002010u})
+  {
+    REQUIRE_FALSE(bus.readData32(excluded, &word));
+    REQUIRE_FALSE(bus.writeData32(excluded, 0x40000000));
+  }
+  REQUIRE(byte == 0x12);
+  REQUIRE(half == 0x3456);
+  REQUIRE(word == 0xabcdef01);
+  REQUIRE(wide == 0x12345678);
+  REQUIRE(quad.low == 3);
+  REQUIRE(quad.high == 4);
+  REQUIRE(system.interruptController().status() == 0);
+  REQUIRE(system.eeStateHash() == hash);
+}
+
+TEST_CASE("EE guest IPU reset admits only complete selected word stores",
+  "[ee][bus][ipu-control][guest]")
+{
+  for (const auto value : {0u, 0x40000000u, 0x40010000u})
+  {
+    for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+    {
+      for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+      {
+        CAPTURE(value);
+        CAPTURE(opcode);
+        CAPTURE(lane);
+        NekoSystem system;
+        system.eeBus().write32(0, immediateInstruction(opcode, 1, 2, lane));
+        auto &core = system.eeCore();
+        core.setGeneralRegister(1, {0xb0002010, 0});
+        core.setGeneralRegister(2, {value, 0});
+        core.setCOP0Register(EECOP0Register::Status, 0);
+        core.startExecution(0xa0000000);
+        const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+        const bool admitted = full && value != 0x40010000;
+        const auto result = system.stepEEInstruction(16);
+        REQUIRE(result.pendingException ==
+          (admitted ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE(system.interruptController().status() ==
+          (admitted && value == 0x40000000 ? 1u << 8 : 0));
+        if (admitted)
+        {
+          REQUIRE(result.instructions == 1);
+          REQUIRE(core.programCounter() == 0xa0000004);
+        }
+        else
+        {
+          REQUIRE(result.exceptionAddress == 0xb0002010 + lane);
+          REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0xa0000000);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE IPU reset restored guest continuation preserves interrupt delivery",
+  "[ee][bus][ipu-control][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  bus.write32(0, immediateInstruction(0x2b, 1, 2));
+  bus.write32(4, immediateInstruction(0x23, 1, 3));
+  bus.write32(8, immediateInstruction(0x2b, 4, 2));
+  bus.write32(12, immediateInstruction(0x2b, 1, 2));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(1, {0xb0002010, 0});
+  core.setGeneralRegister(2, {0x40000000, 0});
+  core.setGeneralRegister(3, {UINT32_MAX, UINT32_MAX});
+  core.setGeneralRegister(4, {0xb000f000, 0});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  REQUIRE(original.stepEEInstruction(16).pendingException == EEException::None);
+  REQUIRE(original.interruptController().status() == (1u << 8));
+  core.setGeneralRegister(2, {1u << 8, 0});
+  const auto saved = original.saveState();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  traced.startTrace();
+  for (int step = 0; step < 3; ++step)
+  {
+    if (step == 2)
+    {
+      plain.eeCore().setGeneralRegister(2, {0x40000000, 0});
+      traced.eeCore().setGeneralRegister(2, {0x40000000, 0});
+    }
+    const auto plainResult = plain.stepEEInstruction(16);
+    const auto tracedResult = traced.stepEEInstruction(16);
+    REQUIRE(plainResult.pendingException == EEException::None);
+    REQUIRE(tracedResult.pendingException == EEException::None);
+    REQUIRE(plainResult.instructions == 1);
+    REQUIRE(tracedResult.instructions == 1);
+    REQUIRE(plainResult.masterCycles == tracedResult.masterCycles);
+    REQUIRE(plain.interruptController().status() == (step == 1 ? 0 : 1u << 8));
+    REQUIRE(plain.interruptController().status() == traced.interruptController().status());
+  }
+  for (auto *system : {&plain, &traced})
+  {
+    REQUIRE(system->eeCore().generalRegister(3).low == 0);
+    system->interruptController().toggleMask(1u << 8);
+    system->eeCore().setCOP0Register(EECOP0Register::Status,
+      EECOP0Status::INTERRUPT_ENABLE |
+      EECOP0Status::MASTER_INTERRUPT_ENABLE | EECOP0Status::INTC_MASK);
+    const auto interrupt = system->stepEEInstruction(1);
+    REQUIRE(interrupt.instructions == 0);
+    REQUIRE(interrupt.pendingException == EEException::Interrupt);
+    REQUIRE(system->eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000010);
+    REQUIRE(system->eeCore().programCounter() == EEExceptionVector::INTERRUPT);
+  }
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
 TEST_CASE("EE VIF0 DMA stopped registers retain independent masked values",
   "[ee][bus][vif0-dmac]")
 {

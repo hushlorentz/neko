@@ -29,6 +29,7 @@ class IOPBus;
 class VIF;
 class VIF0DMACChannel;
 class IPUDMACChannel;
+class IPU;
 class VIF1DMACChannel;
 class VPU;
 
@@ -62,6 +63,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t KSEG1_BASE = UINT32_C(0xa0000000);
   constexpr std::uint32_t KSEG2_BASE = UINT32_C(0xc0000000);
 
+  constexpr std::uint32_t IPU_CTRL = 0x10002010;
   constexpr std::uint32_t GIF_BASE = 0x10003000;
   constexpr std::uint32_t GIF_CTRL = GIF_BASE;
   constexpr std::uint32_t SIF_BASE = 0x1000f200;
@@ -228,6 +230,7 @@ class EEBus
     void attachGIFDMACChannel(GIFDMACChannel *gifDMAC);
     void attachVIF0DMACChannel(VIF0DMACChannel *vif0DMAC);
     void attachIPUDMACChannels(IPUDMACChannel *fromIPU, IPUDMACChannel *toIPU);
+    void attachIPU(IPU *ipu);
     void attachVIF1DMACChannel(VIF1DMACChannel *vif1DMAC);
     void attachSIF1DMACChannel(SIF1DMACChannel *sif1DMAC);
     void attachSIF0DMACChannel(SIF0DMACChannel *sif0DMAC);
@@ -367,6 +370,7 @@ class EEBus
     VIF0DMACChannel &attachedVIF0DMAC() const;
     IPUDMACChannel &attachedFromIPUDMAC() const;
     IPUDMACChannel &attachedToIPUDMAC() const;
+    IPU &attachedIPU() const;
     VIF1DMACChannel &attachedVIF1DMAC() const;
     SIF1DMACChannel &attachedSIF1DMAC() const;
     SIF0DMACChannel &attachedSIF0DMAC() const;
@@ -396,6 +400,7 @@ class EEBus
     VIF0DMACChannel *vif0DMACChannel = nullptr;
     IPUDMACChannel *fromIPUDMACChannel = nullptr;
     IPUDMACChannel *toIPUDMACChannel = nullptr;
+    IPU *ipuComponent = nullptr;
     VIF1DMACChannel *vif1DMACChannel = nullptr;
     SIF1DMACChannel *sif1DMACChannel = nullptr;
     SIF0DMACChannel *sif0DMACChannel = nullptr;
