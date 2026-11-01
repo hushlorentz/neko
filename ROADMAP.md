@@ -2743,6 +2743,20 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate table order, consumption, starvation/reset/IRQ and persistence;
       pass required full gates/review and verify progress with a fresh scout.
 
+### IPU SETTH Command Contract
+
+- [x] Establish threshold fields, input independence, reset and completion
+      behavior through local manuals and secondary evidence.
+- [x] Select bounded threshold/timing policy and existing IPU state ownership
+      before implementation; keep color conversion and decoding separate.
+
+### Bounded IPU SETTH Command
+
+- [x] Retain the selected threshold fields through the existing IPU command
+      owner without consuming input or enabling conversion.
+- [x] Validate exact admission, threshold retention, reset/IRQ and persistence;
+      pass required full gates/review and verify progress with a fresh scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

@@ -173,6 +173,8 @@ bool IPU::writeControl(std::uint32_t value)
     clearInput();
     clearCommand();
     bitPositionRegister = 0;
+    transparentThreshold = 0;
+    translucentThreshold = 0;
     // Provisional reset-completion IRQ, including an already idle IPU.
     interruptController.setSource(EEInterruptSource::IPU, true);
   }
@@ -189,6 +191,15 @@ bool IPU::writeCommand(std::uint32_t value)
   {
     clearInput();
     bitPositionRegister = static_cast<std::uint8_t>(value);
+    interruptController.setSource(EEInterruptSource::IPU, true);
+    return true;
+  }
+  constexpr std::uint32_t SETTH_FIELDS = 0x01ff01ff;
+  if ((value & ~SETTH_FIELDS) == 0x90000000)
+  {
+    transparentThreshold = static_cast<std::uint16_t>(value & 0x1ff);
+    translucentThreshold = static_cast<std::uint16_t>((value >> 16) & 0x1ff);
+    // Provisional inline configuration completion, without stream consumption.
     interruptController.setSource(EEInterruptSource::IPU, true);
     return true;
   }

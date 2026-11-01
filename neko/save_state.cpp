@@ -422,6 +422,8 @@ void NekoSaveStateCodec::writeIPUState(Writer *writer, const IPU &ipu)
   writer->writeFieldBytes("nonIntraIQ",
     ipu.nonIntraIQ.data(), ipu.nonIntraIQ.size());
   writer->writeFieldBytes("vqCLUT", ipu.vqCLUT.data(), ipu.vqCLUT.size());
+  writer->writeFieldU16("transparentThreshold", ipu.transparentThreshold);
+  writer->writeFieldU16("translucentThreshold", ipu.translucentThreshold);
 }
 
 std::uint64_t IPU::stateHash() const
@@ -707,6 +709,12 @@ void NekoSaveStateCodec::readSystem(
     reader->readFieldBytes("nonIntraIQ",
       ipu.nonIntraIQ.data(), ipu.nonIntraIQ.size());
     reader->readFieldBytes("vqCLUT", ipu.vqCLUT.data(), ipu.vqCLUT.size());
+    ipu.transparentThreshold = reader->readFieldU16("transparentThreshold");
+    reader->requireField(ipu.transparentThreshold <= 0x1ff,
+      "IPU transparent threshold exceeds nine bits");
+    ipu.translucentThreshold = reader->readFieldU16("translucentThreshold");
+    reader->requireField(ipu.translucentThreshold <= 0x1ff,
+      "IPU translucent threshold exceeds nine bits");
   }
   {
     auto component = reader->scope("eeBus");
@@ -1035,6 +1043,10 @@ void NekoSaveStateCodec::commitSystem(
     source->ipuComponent.nonIntraIQ;
   destination->ipuComponent.vqCLUT =
     source->ipuComponent.vqCLUT;
+  destination->ipuComponent.transparentThreshold =
+    source->ipuComponent.transparentThreshold;
+  destination->ipuComponent.translucentThreshold =
+    source->ipuComponent.translucentThreshold;
   destination->eeTimersComponent = source->eeTimersComponent;
   destination->eeSerialComponent = source->eeSerialComponent;
   destination->eeRDRAMInitializationComponent =

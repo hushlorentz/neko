@@ -59,6 +59,8 @@ class IPU
     std::array<std::uint8_t, 64> intraIQ{};
     std::array<std::uint8_t, 64> nonIntraIQ{};
     std::array<std::uint8_t, 32> vqCLUT{};
+    std::uint16_t transparentThreshold = 0;
+    std::uint16_t translucentThreshold = 0;
 };
 
 #endif

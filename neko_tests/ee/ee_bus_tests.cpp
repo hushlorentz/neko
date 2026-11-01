@@ -2768,6 +2768,239 @@ TEST_CASE("EE SETVQ partial commands restore transactionally with destination IR
   REQUIRE_FALSE(traced.trace().empty());
 }
 
+TEST_CASE("EE IPU SETTH retains independent nine bit thresholds without consuming stream or tables",
+  "[ee][bus][ipu-setth]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  for (std::size_t index = 0; index < 8; ++index)
+  {
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(index)));
+  }
+  bus.write32(0x10002000, 0x50000000);
+  bus.write32(0x10002000, 0x58000000);
+  bus.write32(0x10002000, 1);
+  for (std::size_t index = 0; index < 5; ++index)
+  {
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(index)));
+  }
+  bus.write32(0x10002000, 0x60000000);
+  const auto beforeHash = system.eeStateHash();
+  SaveStateMutation before(system.saveState());
+  const std::pair<std::uint32_t, std::uint32_t> thresholds[] = {
+    {0, 511}, {511, 0}, {255, 256}, {256, 255},
+    {1, 1}, {511, 511}, {0, 0}
+  };
+  for (const auto &values : thresholds)
+  {
+    CAPTURE(values.first);
+    CAPTURE(values.second);
+    system.interruptController().acknowledge(1u << 8);
+    REQUIRE(bus.writeData32(0x10002000,
+      0x90000000 | values.first | (values.second << 16)));
+    REQUIRE(bus.read32(0x10002010) == 2);
+    REQUIRE(bus.read32(0x10002020) == 0x10201);
+    REQUIRE(system.interruptController().status() == (1u << 8));
+    SaveStateMutation state(system.saveState());
+    REQUIRE(state.readByte("system.ipu.transparentThreshold", 0) ==
+      (values.first & 0xff));
+    REQUIRE(state.readByte("system.ipu.transparentThreshold", 1) ==
+      (values.first >> 8));
+    REQUIRE(state.readByte("system.ipu.translucentThreshold", 0) ==
+      (values.second & 0xff));
+    REQUIRE(state.readByte("system.ipu.translucentThreshold", 1) ==
+      (values.second >> 8));
+    const std::pair<const char *, std::size_t> retained[] = {
+      {"system.ipu.inputFIFO", 128}, {"system.ipu.streamBuffer", 32},
+      {"system.ipu.intraIQ", 64}, {"system.ipu.nonIntraIQ", 64},
+      {"system.ipu.vqCLUT", 32}
+    };
+    for (const auto &field : retained)
+    {
+      for (std::size_t byte = 0; byte < field.second; ++byte)
+      {
+        REQUIRE(state.readByte(field.first, byte) ==
+          before.readByte(field.first, byte));
+      }
+    }
+    if (values.first == 0 && values.second == 0)
+    {
+      REQUIRE(system.eeStateHash() == beforeHash);
+    }
+  }
+}
+
+TEST_CASE("EE IPU SETTH completes without input and distinguishes BCLR from RST and cold reset",
+  "[ee][bus][ipu-setth]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  system.interruptController().setSource(EEInterruptSource::VIF0, true);
+  REQUIRE(bus.writeData32(0x10002000, 0x91ff0123));
+  REQUIRE(bus.read32(0x10002010) == 0);
+  REQUIRE(bus.read32(0x10002020) == 0);
+  REQUIRE(system.interruptController().status() == ((1u << 4) | (1u << 8)));
+  system.interruptController().acknowledge(1u << 8);
+  bus.write32(0x10002010, 0);
+  bus.advanceGuestFIFOs();
+  REQUIRE(system.interruptController().status() == (1u << 4));
+  SECTION("BCLR preserves thresholds and SETTH can signal again with the same values")
+  {
+    bus.write32(0x10002000, 127);
+    bus.write32(0x10002010, 0);
+    SaveStateMutation cleared(system.saveState());
+    REQUIRE(cleared.readByte("system.ipu.transparentThreshold", 0) == 0x23);
+    REQUIRE(cleared.readByte("system.ipu.transparentThreshold", 1) == 1);
+    REQUIRE(cleared.readByte("system.ipu.translucentThreshold", 0) == 0xff);
+    REQUIRE(cleared.readByte("system.ipu.translucentThreshold", 1) == 1);
+    system.interruptController().acknowledge(1u << 8);
+    REQUIRE(bus.writeData32(0x10002000, 0x91ff0123));
+    REQUIRE(bus.read32(0x10002020) == 127);
+    REQUIRE(system.interruptController().status() == ((1u << 4) | (1u << 8)));
+  }
+  SECTION("RST clears thresholds while preserving partial CLUT and cancelling real work")
+  {
+    bus.write32(0x10002000, 0x60000000);
+    REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(0)));
+    REQUIRE(bus.read32(0x10002010) == 0x80000000);
+    bus.write32(0x10002010, 0x40000000);
+    REQUIRE(bus.read32(0x10002010) == 0);
+    REQUIRE(bus.read32(0x10002020) == 0);
+    REQUIRE(system.interruptController().status() == ((1u << 4) | (1u << 8)));
+    SaveStateMutation reset(system.saveState());
+    for (const auto *field : {"system.ipu.transparentThreshold",
+        "system.ipu.translucentThreshold"})
+    {
+      REQUIRE(reset.readByte(field, 0) == 0);
+      REQUIRE(reset.readByte(field, 1) == 0);
+    }
+    for (std::size_t byte = 0; byte < 32; ++byte)
+    {
+      REQUIRE(reset.readByte("system.ipu.vqCLUT", byte) ==
+        (byte < 16 ? ipuStreamByte(byte) : 0));
+    }
+  }
+  SECTION("cold reset clears thresholds without a reset completion IRQ")
+  {
+    system.reset();
+    REQUIRE(system.interruptController().status() == 0);
+    SaveStateMutation cold(system.saveState());
+    REQUIRE(cold.readByte("system.ipu.transparentThreshold", 0) == 0);
+    REQUIRE(cold.readByte("system.ipu.transparentThreshold", 1) == 0);
+    REQUIRE(cold.readByte("system.ipu.translucentThreshold", 0) == 0);
+    REQUIRE(cold.readByte("system.ipu.translucentThreshold", 1) == 0);
+  }
+}
+
+TEST_CASE("EE guest SETTH rejects reserved command fields widths and BUSY without mutation",
+  "[ee][bus][ipu-setth][guest]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  REQUIRE(bus.writeData32(0x10002000, 0x910001ff));
+  const auto initial = system.saveState();
+  for (const auto command : {0x90000200u, 0x90008000u, 0x92000000u,
+      0x98000000u, 0xa0000000u})
+  {
+    REQUIRE_FALSE(bus.writeData32(0x10002000, command));
+  }
+  REQUIRE_FALSE(bus.writeData8(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData16(0x10002000, 0));
+  REQUIRE_FALSE(bus.writeData64(0x10002000, 0x90000000));
+  REQUIRE_FALSE(bus.writeData128(0x10002000, {0x90000000, 0}));
+  REQUIRE_FALSE(bus.writeDMAC128(0x10002000, {0x90000000, 0}));
+  REQUIRE((system.saveState() == initial));
+  bus.write32(0x10002000, 0x50000000);
+  const auto waiting = system.saveState();
+  REQUIRE_FALSE(bus.writeData32(0x10002000, 0x90000000));
+  REQUIRE((system.saveState() == waiting));
+  bus.write32(0x10002010, 0x40000000);
+  system.interruptController().acknowledge(1u << 8);
+  bus.write32(0, immediateInstruction(0x2b, 1, 2));
+  auto &core = system.eeCore();
+  core.setGeneralRegister(1, {0xb0002000, 0});
+  core.setGeneralRegister(2, {0x90010100, 0});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  REQUIRE(system.stepEEInstruction(16).pendingException == EEException::None);
+  REQUIRE(core.programCounter() == 0xa0000004);
+  REQUIRE(bus.read32(0x10002010) == 0);
+  REQUIRE(system.interruptController().status() == (1u << 8));
+  SaveStateMutation state(system.saveState());
+  REQUIRE(state.readByte("system.ipu.transparentThreshold", 0) == 0);
+  REQUIRE(state.readByte("system.ipu.transparentThreshold", 1) == 1);
+  REQUIRE(state.readByte("system.ipu.translucentThreshold", 0) == 1);
+  REQUIRE(state.readByte("system.ipu.translucentThreshold", 1) == 0);
+}
+
+TEST_CASE("EE SETTH fields restore transactionally and complete through destination IRQ ownership",
+  "[ee][bus][ipu-setth][guest][save-state]")
+{
+  NekoSystem original;
+  auto &bus = original.eeBus();
+  bus.write32(0x10002000, 11);
+  REQUIRE(bus.writeData32(0x10002000, 0x91ff0100));
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(0)));
+  REQUIRE(bus.writeData128(0x10007010, ipuStreamQuadword(1)));
+  original.interruptController().acknowledge(1u << 8);
+  bus.write32(0, immediateInstruction(0x2b, 1, 2));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(1, {0xb0002000, 0});
+  core.setGeneralRegister(2, {0x900101ff, 0});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  const auto saved = original.saveState();
+  const auto savedHash = original.eeStateHash();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  REQUIRE((plain.saveState() == saved));
+  REQUIRE(plain.eeStateHash() == savedHash);
+  for (const auto *field : {"system.ipu.transparentThreshold",
+      "system.ipu.translucentThreshold"})
+  {
+    for (const auto invalidValue : {512u, 0xffffu})
+    {
+      SaveStateMutation invalid(saved);
+      invalid.writeScalar(field, invalidValue);
+      invalid.refreshChecksum();
+      REQUIRE_THROWS_AS(plain.loadState(invalid.bytes()), std::invalid_argument);
+      REQUIRE((plain.saveState() == saved));
+    }
+    SaveStateMutation changed(saved);
+    changed.xorByte(field, 0, 1);
+    changed.refreshChecksum();
+    plain.loadState(changed.bytes());
+    REQUIRE(plain.eeStateHash() != savedHash);
+    plain.loadState(saved);
+  }
+  SaveStateMutation oldVersion(saved);
+  oldVersion.writeScalar("container.version", 72);
+  oldVersion.refreshChecksum();
+  REQUIRE_THROWS_AS(plain.loadState(oldVersion.bytes()), std::invalid_argument);
+  plain.loadState(saved);
+  traced.startTrace();
+  for (auto *system : {&plain, &traced})
+  {
+    REQUIRE(system->stepEEInstruction(16).pendingException == EEException::None);
+    REQUIRE(system->eeCore().programCounter() == 0xa0000004);
+    REQUIRE(system->eeBus().read32(0x10002010) == 2);
+    REQUIRE(system->eeBus().read32(0x10002020) == 0x20b);
+    REQUIRE(system->interruptController().status() == (1u << 8));
+    SaveStateMutation completed(system->saveState());
+    REQUIRE(completed.readByte("system.ipu.transparentThreshold", 0) == 0xff);
+    REQUIRE(completed.readByte("system.ipu.transparentThreshold", 1) == 1);
+    REQUIRE(completed.readByte("system.ipu.translucentThreshold", 0) == 1);
+    REQUIRE(completed.readByte("system.ipu.translucentThreshold", 1) == 0);
+  }
+  REQUIRE((original.saveState() == saved));
+  REQUIRE(original.interruptController().status() == 0);
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE((plain.saveState() == traced.saveState()));
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
 TEST_CASE("EE VIF0 DMA stopped registers retain independent masked values",
   "[ee][bus][vif0-dmac]")
 {
