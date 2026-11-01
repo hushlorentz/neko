@@ -1098,6 +1098,245 @@ TEST_CASE("EE guest VIF1 status stores reject reverse and partial requests",
   REQUIRE(system.vif1().mark() == 0x1234);
 }
 
+TEST_CASE("EE VIF MARK word programming shares command state and clears only detection",
+  "[ee][bus][vif-mark]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  system.vu0().startMicroMode(0);
+  system.vu1().startMicroMode(0);
+  REQUIRE(system.gifPathArbiter().transferQuadword(
+    GIFPath::Path2, gifTag()).accepted);
+  const auto gifStatus = bus.read32(EEMemoryMap::GIF_STAT);
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  for (const auto address : {0x10003830u, 0x10003c30u})
+  {
+    auto &vif = address == 0x10003830 ? system.vif0() : system.vif1();
+    auto &peer = address == 0x10003830 ? system.vif1() : system.vif0();
+    vif.processCode(0x01000804);
+    peer.processCode(0x07005678);
+    const auto peerCode = peer.lastCode();
+    const auto peerInterrupt = peer.interruptPending();
+    for (const auto value : {0u, 0xffffffffu, 0xabcd1234u})
+    {
+      vif.processCode(0x8700beef);
+      const auto status = bus.read32(address - 0x30);
+      std::uint32_t loaded = 0;
+      REQUIRE(bus.readData32(address, &loaded));
+      REQUIRE(loaded == 0xbeef);
+      REQUIRE(vif.markDetected());
+      REQUIRE(bus.writeData32(address, value));
+      REQUIRE(vif.mark() == (value & 0xffff));
+      REQUIRE_FALSE(vif.markDetected());
+      REQUIRE(bus.read32(address) == (value & 0xffff));
+      REQUIRE(bus.read32(address - 0x30) == (status & ~EEVIFStatus::MARK));
+      REQUIRE(vif.interruptPending());
+      REQUIRE(vif.lastCode() == 0x8700beef);
+      REQUIRE(vif.cycle() == 0x0804);
+      bus.write32(address, value);
+      REQUIRE(bus.read32(address) == (value & 0xffff));
+      REQUIRE(peer.mark() == 0x5678);
+      REQUIRE(peer.markDetected());
+      REQUIRE(peer.lastCode() == peerCode);
+      REQUIRE(peer.interruptPending() == peerInterrupt);
+      REQUIRE(system.vu0().clockActive());
+      REQUIRE(system.vu1().clockActive());
+      REQUIRE(bus.read32(EEMemoryMap::GIF_STAT) == gifStatus);
+    }
+  }
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+}
+
+TEST_CASE("EE VIF MARK access rejects queued and incomplete local work",
+  "[ee][bus][vif-mark]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  system.vif0().processCode(0x07001234);
+  system.vif1().processCode(0x07005678);
+  std::uint32_t blocked = 0x10003830;
+  SECTION("VIF0 queued") { REQUIRE(system.vif0().submitQuadword({})); }
+  SECTION("VIF1 queued")
+  {
+    REQUIRE(system.vif1().submitQuadword({}));
+    blocked = 0x10003c30;
+  }
+  SECTION("VIF0 partial MPG instruction")
+  {
+    system.vif0().ingestWord(0);
+    system.vif0().ingestWord(0x4a010000);
+    system.vif0().ingestWord(0x11223344);
+  }
+  SECTION("VIF1 partial MPG instruction")
+  {
+    system.vif1().ingestWord(0);
+    system.vif1().ingestWord(0x4a010000);
+    system.vif1().ingestWord(0x11223344);
+    blocked = 0x10003c30;
+  }
+  const auto hash = system.eeStateHash();
+  std::uint32_t untouched = 0xabcdef01;
+  REQUIRE_FALSE(bus.readData32(blocked, &untouched));
+  REQUIRE_FALSE(bus.writeData32(blocked, 0));
+  REQUIRE(untouched == 0xabcdef01);
+  REQUIRE_THROWS_AS(bus.read32(blocked), std::out_of_range);
+  REQUIRE_THROWS_AS(bus.write32(blocked, 0), std::out_of_range);
+  REQUIRE(system.eeStateHash() == hash);
+  REQUIRE(bus.readData32(blocked == 0x10003830 ? 0x10003c30 : 0x10003830,
+    &untouched));
+}
+
+TEST_CASE("EE VIF MARK registers exclude split accesses and non CPU routes",
+  "[ee][bus][vif-mark]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  system.vif0().processCode(0x07001234);
+  system.vif1().processCode(0x07005678);
+  const auto hash = system.eeStateHash();
+  for (const auto address : {0x10003830u, 0x10003c30u})
+  {
+    REQUIRE(bus.wordMergeStorePolicy(address) == EEWordMergeStorePolicy::FullWordOnly);
+    std::uint8_t byte = 0;
+    std::uint16_t half = 0;
+    std::uint32_t word = 0;
+    std::uint64_t wide = 0;
+    EEQuadword quad{3, 4};
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE_FALSE(bus.readData16(address, &half));
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+    REQUIRE_FALSE(bus.writeData16(address, 0));
+    REQUIRE_FALSE(bus.readData64(address, &wide));
+    REQUIRE_FALSE(bus.writeData64(address, 0));
+    REQUIRE_THROWS_AS(bus.read64(address), std::out_of_range);
+    REQUIRE_THROWS_AS(bus.write64(address, 0), std::out_of_range);
+    REQUIRE_FALSE(bus.readData128(address, &quad));
+    REQUIRE_FALSE(bus.writeData128(address, {}));
+    REQUIRE_FALSE(bus.readInstruction32(address, &word));
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 64));
+    REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {}));
+    REQUIRE_FALSE(bus.readScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, &quad));
+    REQUIRE_FALSE(bus.writeScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, {}));
+    for (const auto excluded : {address + 4, address - 0x10,
+        address + EEMemoryMap::KSEG0_BASE, address + EEMemoryMap::KSEG1_BASE})
+    {
+      REQUIRE_FALSE(bus.readData32(excluded, &word));
+      REQUIRE_FALSE(bus.writeData32(excluded, 0));
+    }
+  }
+  REQUIRE(system.eeStateHash() == hash);
+}
+
+TEST_CASE("EE guest VIF MARK merges admit only full word acknowledgements",
+  "[ee][bus][vif-mark][guest]")
+{
+  for (const auto address : {0x10003830u, 0x10003c30u})
+  {
+    for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+    {
+      for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+      {
+        CAPTURE(address);
+        CAPTURE(opcode);
+        CAPTURE(lane);
+        NekoSystem system;
+        auto &vif = address == 0x10003830 ? system.vif0() : system.vif1();
+        vif.processCode(0x87001234);
+        system.eeBus().write32(0, immediateInstruction(opcode, 1, 2, lane));
+        system.eeBus().write32(4, immediateInstruction(0x23, 1, 3));
+        auto &core = system.eeCore();
+        core.setGeneralRegister(1, {address + EEMemoryMap::KSEG1_BASE, 0});
+        core.setGeneralRegister(2, {0x89abcdef, 0});
+        core.setCOP0Register(EECOP0Register::Status, 0);
+        core.startExecution(EEMemoryMap::KSEG1_BASE);
+        const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+        const auto result = system.stepEEInstruction(16);
+        REQUIRE(result.pendingException ==
+          (full ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE(vif.interruptPending());
+        REQUIRE(vif.lastCode() == 0x87001234);
+        REQUIRE(vif.markDetected() == !full);
+        REQUIRE(vif.mark() == (full ? 0xcdef : 0x1234));
+        if (full)
+        {
+          REQUIRE(result.instructions == 1);
+          REQUIRE(system.stepEEInstruction(16).pendingException == EEException::None);
+          REQUIRE(core.generalRegister(3).low == 0xcdef);
+        }
+        else
+        {
+          REQUIRE(result.exceptionAddress == address + EEMemoryMap::KSEG1_BASE + lane);
+          REQUIRE(core.cop0Register(EECOP0Register::EPC) == EEMemoryMap::KSEG1_BASE);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE VIF MARK restored guest acknowledgements preserve command continuation",
+  "[ee][bus][vif-mark][guest][save-state]")
+{
+  NekoSystem original;
+  original.vif0().processCode(0x8700beef);
+  original.vif1().processCode(0x8700cafe);
+  auto &bus = original.eeBus();
+  REQUIRE(bus.writeData32(0x10003830, 0x1234));
+  bus.write32(0, immediateInstruction(0x2b, 1, 2));
+  bus.write32(4, immediateInstruction(0x23, 1, 3));
+  bus.write32(8, immediateInstruction(0x2b, 4, 3));
+  auto &core = original.eeCore();
+  core.setGeneralRegister(1, {0xb0003c30, 0});
+  core.setGeneralRegister(2, {0xffffabcd, 0});
+  core.setGeneralRegister(4, {0x90003830, 0});
+  core.setCOP0Register(EECOP0Register::Status, 0);
+  core.startExecution(0xa0000000);
+  const auto saved = original.saveState();
+  NekoSystem plain;
+  NekoSystem traced;
+  plain.loadState(saved);
+  traced.loadState(saved);
+  REQUIRE(plain.vif0().mark() == 0x1234);
+  REQUIRE_FALSE(plain.vif0().markDetected());
+  REQUIRE(plain.vif1().mark() == 0xcafe);
+  REQUIRE(plain.vif1().markDetected());
+  traced.startTrace();
+  for (int step = 0; step < 3; ++step)
+  {
+    const auto plainResult = plain.stepEEInstruction(16);
+    const auto tracedResult = traced.stepEEInstruction(16);
+    REQUIRE(plainResult.pendingException == EEException::None);
+    REQUIRE(tracedResult.pendingException == EEException::None);
+    REQUIRE(plainResult.instructions == 1);
+    REQUIRE(plainResult.instructions == tracedResult.instructions);
+    REQUIRE(plainResult.masterCycles == tracedResult.masterCycles);
+  }
+  for (auto *system : {&plain, &traced})
+  {
+    REQUIRE(system->eeCore().generalRegister(3).low == 0xabcd);
+    REQUIRE(system->vif0().mark() == 0xabcd);
+    REQUIRE(system->vif1().mark() == 0xabcd);
+    REQUIRE_FALSE(system->vif0().markDetected());
+    REQUIRE_FALSE(system->vif1().markDetected());
+    REQUIRE(system->vif0().interruptPending());
+    REQUIRE(system->vif1().interruptPending());
+    REQUIRE(system->vif1().submitQuadword({0x05000002, 0x07004321, 0, 0}));
+    REQUIRE(system->eeBus().writeData32(EEMemoryMap::VIF1_FBRST, 8));
+    system->vif1().advanceFIFO();
+    REQUIRE(system->vif1().mode() == 2);
+    REQUIRE(system->vif1().mark() == 0x4321);
+    REQUIRE(system->vif1().markDetected());
+    REQUIRE_FALSE(system->vif1().interruptPending());
+  }
+  REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+  REQUIRE(plain.saveState() == traced.saveState());
+  REQUIRE_FALSE(traced.trace().empty());
+}
+
 TEST_CASE("EE VIF0 DMA stopped registers retain independent masked values",
   "[ee][bus][vif0-dmac]")
 {

@@ -65,6 +65,9 @@ class VIF : public VUVIFRegisterSource
     std::uint16_t offset() const;
     std::uint16_t tops() const;
     std::uint16_t mark() const;
+    bool readMarkRegister(std::uint32_t &value) const;
+    bool writeMarkRegister(std::uint32_t value);
+    bool hasPendingStreamWork() const;
     bool doubleBufferFlag() const;
     bool path3Masked() const;
     bool markDetected() const;

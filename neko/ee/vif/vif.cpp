@@ -950,6 +950,32 @@ std::uint16_t VIF::mark() const
   return markRegister;
 }
 
+bool VIF::readMarkRegister(std::uint32_t &value) const
+{
+  if (hasPendingStreamWork())
+  {
+    return false;
+  }
+  value = markRegister;
+  return true;
+}
+
+bool VIF::writeMarkRegister(std::uint32_t value)
+{
+  if (hasPendingStreamWork())
+  {
+    return false;
+  }
+  markRegister = static_cast<std::uint16_t>(value);
+  markFlag = false;
+  return true;
+}
+
+bool VIF::hasPendingStreamWork() const
+{
+  return awaitingPayload() || !fifoWords.empty();
+}
+
 bool VIF::doubleBufferFlag() const
 {
   return dbf;

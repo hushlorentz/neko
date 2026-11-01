@@ -74,9 +74,11 @@ namespace EEMemoryMap
   constexpr std::uint32_t VIF1_BASE = 0x10003c00;
   constexpr std::uint32_t VIF0_STAT = VIF0_BASE;
   constexpr std::uint32_t VIF0_FBRST = VIF0_BASE + 0x10;
+  constexpr std::uint32_t VIF0_MARK = VIF0_BASE + 0x30;
   constexpr std::uint32_t VIF0_CODE = VIF0_BASE + 0x80;
   constexpr std::uint32_t VIF1_STAT = VIF1_BASE;
   constexpr std::uint32_t VIF1_FBRST = VIF1_BASE + 0x10;
+  constexpr std::uint32_t VIF1_MARK = VIF1_BASE + 0x30;
   constexpr std::uint32_t VIF1_CODE = VIF1_BASE + 0x80;
 
   constexpr std::uint32_t VIF0_FIFO = 0x10004000;

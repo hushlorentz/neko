@@ -88,6 +88,7 @@ namespace
       address == EEMemoryMap::STARTUP_F510 ||
       address == EEMemoryMap::GIF_CTRL ||
       address == EEMemoryMap::VIF1_STAT ||
+      address == EEMemoryMap::VIF0_MARK || address == EEMemoryMap::VIF1_MARK ||
       address == EEMemoryMap::D_RBSR || address == EEMemoryMap::D_RBOR ||
       address == EEMemoryMap::D_ENABLER || address == EEMemoryMap::D_ENABLEW ||
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
@@ -1186,7 +1187,7 @@ bool EEBus::cpuVUMemoryAccessible(const VPU &vpu) const
 {
   const bool vu0 = vpu.unitType() == VPUType::VU0;
   const VIF &vif = vu0 ? *vif0Component : *vif1Component;
-  if (vpu.clockActive() || vif.awaitingPayload() || vif.fifoQuadwordCount() != 0)
+  if (vpu.clockActive() || vif.hasPendingStreamWork())
   {
     return false;
   }
@@ -1456,12 +1457,16 @@ bool EEBus::readMapped32(
     case EEMemoryMap::VIF0_CODE:
       *value = vif0Component->lastCode();
       return true;
+    case EEMemoryMap::VIF0_MARK:
+      return vif0Component->readMarkRegister(*value);
     case EEMemoryMap::VIF1_STAT:
       *value = vifStatus(*vif1Component);
       return true;
     case EEMemoryMap::VIF1_CODE:
       *value = vif1Component->lastCode();
       return true;
+    case EEMemoryMap::VIF1_MARK:
+      return vif1Component->readMarkRegister(*value);
     case EEMemoryMap::GIF_STAT:
       *value = gifRegisterFile->readStatus();
       return true;
@@ -1718,12 +1723,16 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::VIF0_FBRST:
       return performDeviceWrite(checkedGuestAccess,
         [&]() { writeVIFControl(*vif0Component, value); });
+    case EEMemoryMap::VIF0_MARK:
+      return vif0Component->writeMarkRegister(value);
     case EEMemoryMap::VIF1_STAT:
       return performDeviceWrite(checkedGuestAccess,
         [&]() { vif1Component->writeStatus(value); });
     case EEMemoryMap::VIF1_FBRST:
       return performDeviceWrite(checkedGuestAccess,
         [&]() { writeVIFControl(*vif1Component, value); });
+    case EEMemoryMap::VIF1_MARK:
+      return vif1Component->writeMarkRegister(value);
     case EEMemoryMap::GIF_CTRL:
       return performDeviceWrite(
         checkedGuestAccess,

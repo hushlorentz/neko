@@ -2655,6 +2655,15 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate guest and restored continuation, obtain independent review,
       then verify progress through a fresh authorized cold scout.
 
+### VIF MARK Register Programming
+
+- [x] Establish both units' MARK read/write fields and detection-flag
+      semantics through manual-first research and the existing VIF owner.
+- [x] Add exact CPU word access without parallel state, preserving MARK
+      command coherence and rejecting unsupported widths and routes.
+- [x] Validate guest and restored continuation, obtain independent review,
+      then verify progress through a fresh authorized cold scout.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read
