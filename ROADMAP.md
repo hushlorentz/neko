@@ -3031,7 +3031,7 @@ commands or media services. Later blocks remain dependency-gated.
       system-owned CDVDController, without parallel backing or new ready state.
 - [x] Use red/green guest and cross-CPU tests for shared state, exact admission
       and atomic rejection; cover reset, trace and save/load where affected.
-- [ ] Independently review access and lifecycle integration; pass the required
+- [x] Independently review access and lifecycle integration; pass the required
       validation gates without expanding the selected device behavior.
 
 ### CD/DVD Boundary Verification
