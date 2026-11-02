@@ -913,6 +913,85 @@ TEST_CASE("IOP cached data reads fill one word and extract every little endian l
   }
 }
 
+TEST_CASE("IOP scratchpad mode bypasses stale normal data without changing cache contents",
+  "[iop][cache][scratchpad-mode]")
+{
+  for (const IOPWord control : {0x88u, 0x1edd8u})
+  {
+    for (const IOPAddress alias : {0u, 0x80000000u})
+    {
+      CAPTURE(control);
+      CAPTURE(alias);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      REQUIRE(bus.installRom(makeRom(0x12)));
+      REQUIRE(bus.write32(0x120, 0x89abcdef).status == IOPBusStatus::Completed);
+      REQUIRE(core.readData32(alias | 0x120).value == 0x89abcdef);
+      REQUIRE(core.readData8(0x9fc00000).value == 0x12);
+      core.startExecution(0x80000120);
+      REQUIRE(core.fetchInstruction().value == 0x89abcdef);
+      const auto before = core.cache();
+      REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, control).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(bus.writeDMAC32(0x120, 0x12345678).status == IOPBusStatus::Completed);
+      for (const unsigned width : {1u, 2u, 4u})
+      {
+        for (IOPAddress offset = 0; offset < 4; offset += width)
+        {
+          const auto read = width == 1 ? core.readData8(alias | (0x120 + offset))
+            : width == 2 ? core.readData16(alias | (0x120 + offset))
+                         : core.readData32(alias | 0x120);
+          const IOPWord mask = width == 1 ? 0xff : width == 2 ? 0xffff : UINT32_MAX;
+          REQUIRE(read.outcome == IOPAccessOutcome::Completed);
+          REQUIRE(read.value == ((0x12345678u >> (8 * offset)) & mask));
+        }
+      }
+      REQUIRE(core.readData8(0x9fc00004).value == 0);
+      REQUIRE(core.writeData32(0x1f800120, 0x76543210).outcome ==
+        IOPAccessOutcome::Completed);
+      REQUIRE(core.readData32(0x1f800120).value == 0x76543210);
+      REQUIRE(core.fetchInstruction().value == 0x89abcdef);
+      requireUnchangedCache(core.cache(), before);
+      REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, 0).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(core.readData32(alias | 0x120).value == 0x89abcdef);
+      requireUnchangedCache(core.cache(), before);
+    }
+  }
+}
+
+TEST_CASE("IOP scratchpad mode leaves isolated and swapped bank policy intact",
+  "[iop][cache][scratchpad-mode]")
+{
+  for (const IOPWord control : {0u, 8u, 0x80u, 0x88u, 0x1edd8u})
+  {
+    for (const bool isolated : {false, true})
+    {
+      for (const bool swapped : {false, true})
+      {
+        for (const auto access : {IOPCacheAccess::InstructionFetch,
+             IOPCacheAccess::DataLoad, IOPCacheAccess::DataStore})
+        {
+          CAPTURE(control);
+          CAPTURE(isolated);
+          CAPTURE(swapped);
+          CAPTURE(access);
+          const auto plan = IOPCache::planAccess(access,
+            {isolated, swapped, control}, IOPCacheRoute::Cached, IOPBusRegion::Ram);
+          const auto prior = IOPCache::planAccess(access,
+            {isolated, swapped, 0}, IOPCacheRoute::Cached, IOPBusRegion::Ram);
+          const bool bypass = (control & 0x88) == 0x88 && !isolated && !swapped &&
+            access != IOPCacheAccess::InstructionFetch;
+          REQUIRE(plan.disposition == (bypass
+            ? IOPCacheAccessDisposition::Bypass : prior.disposition));
+          REQUIRE(plan.bank == prior.bank);
+        }
+      }
+    }
+  }
+}
+
 TEST_CASE("IOP data aliases share physical tags without folding RAM mirror storage",
   "[iop][cache][data-load]")
 {
@@ -1199,12 +1278,14 @@ TEST_CASE("IOP bypass stores leave both cache banks untouched at every width and
   "[iop][cache][data-store]")
 {
   for (const IOPAddress address :
-       {0xa0000200u, 0x1f800200u, 0x9f800200u, 0xbf800200u})
+       {0x200u, 0x80000200u, 0xa0000200u, 0x1f800200u, 0x9f800200u, 0xbf800200u})
   {
     IOPBus bus;
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::seed(&core);
+    REQUIRE(bus.write32(IOPBus::CACHE_INIT_CONTROL, 0x1edd8).status ==
+      IOPBusStatus::Completed);
     const auto before = core.cache();
     for (const unsigned width : {1u, 2u, 4u})
     {
@@ -1952,7 +2033,13 @@ TEST_CASE("IOP tag planning gates exact profiles on isolation without affecting 
                 access, {isolated, swapped}, route, region);
               const auto plan = IOPCache::planAccess(
                 access, {isolated, swapped, bcc}, route, region);
-              if (!isolated || (bcc & 4) == 0 ||
+              if (!isolated && !swapped && (bcc & 0x88) == 0x88 &&
+                  access != IOPCacheAccess::InstructionFetch)
+              {
+                REQUIRE(plan.disposition == IOPCacheAccessDisposition::Bypass);
+                REQUIRE(plan.bank == ordinary.bank);
+              }
+              else if (!isolated || (bcc & 4) == 0 ||
                   access == IOPCacheAccess::InstructionFetch)
               {
                 REQUIRE(plan.disposition == ordinary.disposition);

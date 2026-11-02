@@ -19,6 +19,7 @@ static_assert((IOPCache::DATA_SIZE & (IOPCache::DATA_SIZE - 1)) == 0,
 namespace
 {
   constexpr IOPWord TAG_MODE = IOPWord(1) << 2;
+  constexpr IOPWord DATA_SCRATCHPAD_MODE = (IOPWord(1) << 3) | (IOPWord(1) << 7);
   constexpr IOPWord INSTRUCTION_TAG_FLUSH = 0xc04;
   constexpr IOPWord DATA_TAG_FLUSH = 0xc4;
   constexpr IOPWord COMBINED_TAG_FLUSH = 0xcc4;
@@ -314,9 +315,11 @@ IOPCacheAccessPlan IOPCache::planAccess(
     }
     return {IOPCacheAccessDisposition::Isolated, bank};
   }
+  const bool scratchpadData = !fetch && !control.swapped &&
+    (control.busControl & DATA_SCRATCHPAD_MODE) == DATA_SCRATCHPAD_MODE;
   return {
-    eligible ? IOPCacheAccessDisposition::Cache
-             : IOPCacheAccessDisposition::Bypass,
+    eligible && !scratchpadData ? IOPCacheAccessDisposition::Cache
+                               : IOPCacheAccessDisposition::Bypass,
     bank
   };
 }

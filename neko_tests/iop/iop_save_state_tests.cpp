@@ -1087,6 +1087,60 @@ TEST_CASE("IOP rejected tag accesses retain exception stop trace and canonical s
   }
 }
 
+TEST_CASE("IOP scratchpad mode restores DMA buffer reuse without stale length dispatch",
+  "[iop][cache][scratchpad-mode][save-state][trace]")
+{
+  NekoSystem original;
+  constexpr IOPAddress buffer = 0x19600;
+  REQUIRE(original.iopBus().write32(buffer, 0x14).status == IOPBusStatus::Completed);
+  REQUIRE(original.iopCore().readData32(buffer).value == 0x14);
+  const IOPWord program[] = {
+    0x3c01fffe, // lui r1, 0xfffe
+    0x3c020001,
+    0x3442edd8, // ori r2, r2, 0xedd8
+    0xac220130, // select DS+RAM through the retained control owner
+    0x3c030001,
+    0x34639600,
+    0xa0600000, // clear the previous packet length
+    0x90640000, // read the next packet length
+    0,
+    0x8c650008, // read its command
+    0x8c66000c, // read its option
+    0
+  };
+  for (std::size_t index = 0; index < 12; ++index)
+  {
+    loadInstruction(&original, 0x10000 + static_cast<IOPAddress>(index * 4),
+      program[index]);
+  }
+  original.iopCore().startExecution(0xa0010000);
+  original.runMasterCycles(7 * 8);
+  REQUIRE(original.iopCore().retiredInstructions() == 7);
+  REQUIRE(original.iopBus().cacheControl() == 0x1edd8);
+  REQUIRE(original.iopBus().read32(buffer).value == 0);
+  REQUIRE(original.iopBus().writeDMAC32(buffer, 0x10).status == IOPBusStatus::Completed);
+  REQUIRE(original.iopBus().writeDMAC32(buffer + 8, 0x80000002).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(original.iopBus().writeDMAC32(buffer + 12, 1).status == IOPBusStatus::Completed);
+  const auto midpoint = original.saveState();
+  NekoSystem restored;
+  restored.loadState(midpoint);
+  REQUIRE(restored.saveState() == midpoint);
+  original.startTrace();
+  original.runMasterCycles(5 * 8);
+  restored.runMasterCycles(5 * 8);
+  REQUIRE(original.iopCore().retiredInstructions() == 12);
+  REQUIRE(original.iopCore().generalRegister(4) == 0x10);
+  REQUIRE(original.iopCore().generalRegister(5) == 0x80000002);
+  REQUIRE(original.iopCore().generalRegister(6) == 1);
+  REQUIRE(original.iopCore().cache().dataLine(
+    IOPCache::location(IOPCacheBank::Data, buffer).lineIndex).words[0] == 0x14);
+  REQUIRE_FALSE(original.trace().empty());
+  REQUIRE(restored.trace().empty());
+  IOPTraceTest::requireMachine(original, restored);
+  REQUIRE(original.saveState() == restored.saveState());
+}
+
 TEST_CASE("IOP cache control readback has isolated canonical state and atomic restore",
   "[iop][high-control][cache-control][save-state]")
 {

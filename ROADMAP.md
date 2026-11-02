@@ -3036,12 +3036,30 @@ commands or media services. Later blocks remain dependency-gated.
 
 ### CD/DVD Boundary Verification
 
-- [ ] With separate BIOS-run authorization, verify progress beyond the EE
+- [x] With separate BIOS-run authorization, verify progress beyond the EE
       access and attribute the next originating access, command or wait.
-- [ ] Compare bounded traced/plain and canonical continuations; preserve the
+- [x] Compare bounded traced/plain and canonical continuations; preserve the
       demonstrated handshake and distinguish compatibility from completed boot.
-- [ ] Regroup the next block around that evidence before implementing commands,
+- [x] Regroup the next block around that evidence before implementing commands,
       configuration, transfers or other boot devices.
+
+### SIF RPC Service Availability
+
+- [x] Attribute the empty IOP lookup for RPC request `0x80000006`: identify
+      the expected server, registration path and startup/module prerequisites.
+- [x] Separate guest initialization from DMA/cache/interrupt delivery errors;
+      select a bounded next capability and its trace/continuation acceptance
+      before implementing new device behavior.
+
+### IOP Scratchpad-Mode Data Routing
+
+- [x] Honor the approved DS+RAM mode for ordinary unswapped data accesses
+      through the existing cache owner; preserve fetch, isolation, tag
+      maintenance and physical DMA semantics.
+- [x] Verify stale DMA-buffer reuse and restored traced/plain execution;
+      independently review the cache boundary and pass broader checks.
+- [x] Verify a fresh cold BIOS continuation through RPC-ready dispatch and
+      LOADFILE registration, or attribute the next dependency without faking it.
 
 ### Additional CD/DVD Command and Configuration Scope
 

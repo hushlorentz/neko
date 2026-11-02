@@ -71,7 +71,7 @@ class IOPBus final
     // Provisional stateless outputs; POST2's hardware identity is uncertain.
     static constexpr IOPAddress POST2 = 0x1f802070;
     static constexpr IOPAddress POST3 = 0x1fa00000;
-    // Retained BCC word; the core applies the provisional tag-flush policy.
+    // Retained BCC word; the core owns provisional tag and scratchpad-mode routing.
     static constexpr IOPAddress CACHE_INIT_CONTROL = 0xfffe0130;
     // Provisional stateless initialization writes.
     static constexpr IOPAddress HIGH_INIT_CONTROL0 = 0xfffe0140;
