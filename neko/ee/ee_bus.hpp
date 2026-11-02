@@ -26,6 +26,7 @@ class SIF;
 class SIFSignalReceiver;
 class NekoSystem;
 class IOPBus;
+class CDVDController;
 class VIF;
 class VIF0DMACChannel;
 class IPUDMACChannel;
@@ -250,6 +251,8 @@ class EEBus
     void attachRDRAMInitialization(EERDRAMInitialization *initialization);
     // The caller keeps the sole IOP RAM owner alive while attached.
     void attachIOPRAM(IOPBus *bus);
+    // The caller keeps the shared controller alive while attached.
+    void attachCDVD(const CDVDController *controller);
     // The caller keeps both the shared owner and signal receiver alive.
     void attachSIF(SIF *sif, SIFSignalReceiver *signals);
     void installBootROM(
@@ -437,6 +440,7 @@ class EEBus
     SIF *sifComponent = nullptr;
     SIFSignalReceiver *sifSignals = nullptr;
     IOPBus *iopRAMBus = nullptr;
+    const CDVDController *cdvdController = nullptr;
     std::vector<std::uint8_t> mainMemory;
     std::shared_ptr<const BootROMImage> bootROM;
     EEBA0Registers ba0Registers;

@@ -262,6 +262,7 @@ NekoSystem::NekoSystem() :
   eeBusComponent.attachSerial(&eeSerialComponent);
   eeBusComponent.attachRDRAMInitialization(&eeRDRAMInitializationComponent);
   eeBusComponent.attachIOPRAM(&iopBusComponent);
+  eeBusComponent.attachCDVD(&cdvdControllerComponent);
   eeCoreComponent.attachBus(&eeBusComponent);
   eeCoreComponent.attachVU0(&vu0Component);
   eeCoreComponent.attachVU1(&vu1Component);

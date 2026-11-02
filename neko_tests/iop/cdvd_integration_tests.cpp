@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdint>
 #include <stdexcept>
+#include <vector>
 
 #include "catch.hpp"
 #include "neko_system.hpp"
@@ -25,6 +26,13 @@ namespace
     const auto value = system.iopBus().read8(BASE + offset);
     REQUIRE(value.status == IOPBusStatus::Completed);
     return static_cast<std::uint8_t>(value.value);
+  }
+
+  std::uint8_t readEE(NekoSystem &system, unsigned offset)
+  {
+    std::uint8_t value = 0xa5;
+    REQUIRE(system.eeBus().readData8(BASE + offset, &value));
+    return value;
   }
 
   void requireSame(NekoSystem &original, NekoSystem &restored)
@@ -53,6 +61,215 @@ namespace
       REQUIRE(read(system, 0x18) == byte);
     }
     REQUIRE(read(system, 0x17) == 0x40);
+  }
+}
+
+TEST_CASE("EE CDVD passive bytes share the live IOP controller",
+  "[ee][cdvd-integration][ee-cdvd]")
+{
+  NekoSystem system;
+  for (const auto offset : {4u, 5u, 6u, 8u, 10u, 15u, 22u, 23u})
+  {
+    REQUIRE(readEE(system, offset) == (offset == 5 || offset == 23 ? 0x40 : 0));
+  }
+  write(system, 4, 0);
+  write(system, 0x16, 8);
+  const auto pending = system.cdvdController().stateHash();
+  REQUIRE(readEE(system, 5) == 0x80);
+  REQUIRE(readEE(system, 0x16) == 8);
+  REQUIRE(readEE(system, 0x17) == 0xc0);
+  REQUIRE(system.cdvdController().stateHash() == pending);
+  system.clockMasterCycle();
+  const auto completed = system.cdvdController().stateHash();
+  REQUIRE(readEE(system, 5) == 0x40);
+  REQUIRE(readEE(system, 8) == 1);
+  REQUIRE(readEE(system, 0x17) == 0);
+  REQUIRE(system.cdvdController().stateHash() == completed);
+  REQUIRE(read(system, 0x18) == EPOCH[0]);
+  write(system, 8, 1);
+  REQUIRE(readEE(system, 8) == 0);
+  REQUIRE((system.iopInterruptController().status() & IRQ) != 0);
+  for (std::size_t index = 1; index < EPOCH.size(); ++index)
+  {
+    REQUIRE(read(system, 0x18) == EPOCH[index]);
+  }
+  REQUIRE(readEE(system, 0x17) == 0x40);
+}
+
+TEST_CASE("EE CDVD rejects active wider aliased and non CPU accesses atomically",
+  "[ee][cdvd-integration][ee-cdvd]")
+{
+  NekoSystem system;
+  write(system, 0x16, 8);
+  system.clockMasterCycle();
+  REQUIRE(read(system, 0x18) == EPOCH[0]);
+  const auto before = system.cdvdController().stateHash();
+  auto &bus = system.eeBus();
+  REQUIRE_THROWS_AS(bus.readData8(BASE + 5, nullptr), std::invalid_argument);
+  for (unsigned offset = 0; offset < 0x100; ++offset)
+  {
+    CAPTURE(offset);
+    const bool selected = offset == 4 || offset == 5 || offset == 6 ||
+      offset == 8 || offset == 10 || offset == 15 || offset == 22 || offset == 23;
+    std::uint8_t byte = 0xa5;
+    REQUIRE(bus.readData8(BASE + offset, &byte) == selected);
+    if (!selected)
+    {
+      REQUIRE(byte == 0xa5);
+    }
+    REQUIRE_FALSE(bus.writeData8(BASE + offset, 0));
+    REQUIRE_FALSE(bus.writeData8(BASE + offset, 8));
+  }
+  for (const auto address : {BASE - 1, BASE + 0x105, BASE + 0x1005,
+         0x9f402005u, 0xbf402005u})
+  {
+    CAPTURE(address);
+    std::uint8_t byte = 0xa5;
+    REQUIRE_FALSE(bus.readData8(address, &byte));
+    REQUIRE(byte == 0xa5);
+    REQUIRE_FALSE(bus.writeData8(address, 0));
+  }
+  for (const auto address : {BASE, BASE + 0x10})
+  {
+    CAPTURE(address);
+    std::uint16_t half = 0xa5a5;
+    std::uint32_t word = 0xa5a5a5a5;
+    std::uint64_t wide = UINT64_MAX;
+    EEQuadword quad{UINT64_MAX, UINT64_MAX};
+    REQUIRE_FALSE(bus.readData16(address + 4, &half));
+    REQUIRE_FALSE(bus.readData32(address + 4, &word));
+    REQUIRE_FALSE(bus.readData64(address, &wide));
+    REQUIRE_FALSE(bus.readData128(address, &quad));
+    REQUIRE_FALSE(bus.readInstruction32(address + 4, &word));
+    REQUIRE_FALSE(bus.isCacheFillRange(address, 64));
+    REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+    REQUIRE_FALSE(bus.readScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, &quad));
+    REQUIRE(half == 0xa5a5);
+    REQUIRE(word == 0xa5a5a5a5);
+    REQUIRE(wide == UINT64_MAX);
+    REQUIRE(quad.low == UINT64_MAX);
+    REQUIRE(quad.high == UINT64_MAX);
+    REQUIRE_FALSE(bus.writeData16(address + 4, 0));
+    REQUIRE_FALSE(bus.writeData32(address + 4, 0));
+    REQUIRE_FALSE(bus.writeData64(address, 0));
+    REQUIRE_FALSE(bus.writeData128(address, {}));
+    REQUIRE_FALSE(bus.writeDMAC128(address, {}));
+    REQUIRE_FALSE(bus.writeScratchpadDMAC128(
+      address, EEScratchpadDMACMode::Normal, {}));
+  }
+  const CDVDController &controller = system.cdvdController();
+  REQUIRE(controller.readPassiveByte(BASE + 0x18).status ==
+    CDVDAccessStatus::Unsupported);
+  REQUIRE(system.cdvdController().stateHash() == before);
+  for (std::size_t index = 1; index < EPOCH.size(); ++index)
+  {
+    REQUIRE(read(system, 0x18) == EPOCH[index]);
+  }
+}
+
+TEST_CASE("EE CDVD attachment rejects missing null and duplicate owners",
+  "[ee][cdvd-integration][ee-cdvd]")
+{
+  NekoSystem system;
+  EEBus bus(&system.vif0(), &system.vif1(), &system.gifRegisters(),
+    &system.gifPath3(), &system.gs(), &system.interruptController());
+  std::uint8_t byte = 0xa5;
+  REQUIRE_FALSE(bus.readData8(BASE + 5, &byte));
+  REQUIRE(byte == 0xa5);
+  REQUIRE_THROWS_AS(bus.attachCDVD(nullptr), std::invalid_argument);
+  CDVDController controller;
+  bus.attachCDVD(&controller);
+  REQUIRE(controller.writeByte(BASE + 4, 0) == CDVDAccessStatus::Accepted);
+  REQUIRE(bus.readData8(BASE + 5, &byte));
+  REQUIRE(byte == 0x80);
+  REQUIRE_THROWS_AS(bus.attachCDVD(&system.cdvdController()), std::logic_error);
+  REQUIRE(bus.readData8(BASE + 5, &byte));
+  REQUIRE(byte == 0x80);
+}
+
+TEST_CASE("EE CDVD guest bytes use normal translation and bus exceptions",
+  "[ee][cdvd-integration][ee-cdvd][guest]")
+{
+  for (const auto instruction : {0x80220000u, 0x90220000u,
+         0x90220013u, 0xa022ffffu})
+  {
+    CAPTURE(instruction);
+    NekoSystem system;
+    system.eeBus().write32(0, instruction);
+    auto &core = system.eeCore();
+    core.setGeneralRegister(1, {0xbf402005, 0});
+    core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+    core.setCOP0Register(EECOP0Register::Status, 0);
+    core.startExecution(EEMemoryMap::KSEG1_BASE);
+    const auto result = system.stepEEInstruction(16);
+    if (instruction == 0x80220000 || instruction == 0x90220000)
+    {
+      REQUIRE(result.pendingException == EEException::None);
+      REQUIRE(core.generalRegister(2).low == 0x40);
+    }
+    else
+    {
+      REQUIRE(result.pendingException == (instruction == 0x90220013 ?
+        EEException::DataBusErrorLoad : EEException::DataBusErrorStore));
+    }
+    REQUIRE(readEE(system, 5) == 0x40);
+    REQUIRE(readEE(system, 8) == 0);
+  }
+}
+
+TEST_CASE("EE CDVD reset and restore retain destination owned passive views",
+  "[ee][cdvd-integration][ee-cdvd][save-state]")
+{
+  for (const bool partialResult : {false, true})
+  {
+    CAPTURE(partialResult);
+    std::vector<std::uint8_t> checkpoint;
+    {
+      NekoSystem source;
+      write(source, 4, 0);
+      write(source, 0x16, 8);
+      if (partialResult)
+      {
+        source.clockMasterCycle();
+        REQUIRE(read(source, 0x18) == EPOCH[0]);
+      }
+      checkpoint = source.saveState();
+    }
+    NekoSystem restored;
+    restored.loadState(checkpoint);
+    REQUIRE(restored.saveState() == checkpoint);
+    REQUIRE(readEE(restored, 5) == (partialResult ? 0x40 : 0x80));
+    REQUIRE(readEE(restored, 0x17) == (partialResult ? 0 : 0xc0));
+    NekoSystem independent;
+    independent.loadState(checkpoint);
+    if (!partialResult)
+    {
+      restored.clockMasterCycle();
+      REQUIRE(readEE(independent, 5) == 0x80);
+    }
+    REQUIRE(readEE(restored, 8) == 1);
+    write(restored, 8, 1);
+    REQUIRE(readEE(restored, 8) == 0);
+    REQUIRE(readEE(independent, 8) == (partialResult ? 1 : 0));
+    const auto before = restored.saveState();
+    SaveStateMutation bad(checkpoint);
+    bad.writeScalar("system.iop.cdvd.rtcTicks", RTC_PERIOD_TICKS);
+    bad.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(bad), std::invalid_argument);
+    REQUIRE(restored.saveState() == before);
+    REQUIRE(readEE(restored, 0x17) == 0);
+    for (std::size_t index = partialResult ? 1 : 0; index < EPOCH.size(); ++index)
+    {
+      REQUIRE(read(restored, 0x18) == EPOCH[index]);
+    }
+    REQUIRE(readEE(restored, 0x17) == 0x40);
+    restored.reset();
+    REQUIRE(readEE(restored, 5) == 0x40);
+    REQUIRE(readEE(restored, 8) == 0);
+    REQUIRE(readEE(restored, 0x16) == 0);
+    REQUIRE(readEE(restored, 0x17) == 0x40);
+    REQUIRE(readEE(independent, 0x17) == (partialResult ? 0 : 0xc0));
   }
 }
 

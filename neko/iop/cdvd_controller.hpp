@@ -30,6 +30,7 @@ struct CDVDNormalCompletion
 class CDVDController final
 {
   public:
+    CDVDReadResult readPassiveByte(std::uint32_t address) const noexcept;
     CDVDReadResult readByte(std::uint32_t address) noexcept;
     CDVDAccessStatus writeByte(
       std::uint32_t address, std::uint8_t value);

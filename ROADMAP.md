@@ -2886,8 +2886,9 @@ Preserve deterministic emulated device time independently of host I/O speed.
 
 The selected IOP CD/DVD startup prerequisite is implemented. Milestone 9 is
 complete, including real BIOS SIF flag exchange and repeated trace/save-load
-conformance. Regroup around the demonstrated EE-side CD/DVD access boundary
-before selecting further implementation scope.
+conformance. Start the remaining work at the demonstrated EE byte read from
+`0x1f402005`; establish access to the existing device owner before expanding
+commands or media services. Later blocks remain dependency-gated.
 
 ### CD/DVD Startup Dependency Planning
 
@@ -3014,21 +3015,75 @@ before selecting further implementation scope.
       library-level drive readiness, not raw NREADY semantics. The timeout
       remains unobserved; further BIOS observation requires authorization.
 
-### Remaining Boot-Service Scope
+### EE-Side CD/DVD Access Contract
 
-- [ ] Expand the remaining media, SIO2, controller, memory-card and ROM/module
-      needs into reviewable blocks from demonstrated boot-path dependencies;
-      identify DMA, interrupt, timing, persistence and diagnostic requirements.
+- [x] Resolve the observed EE byte read at `0x1f402005` using local manuals,
+      then authorized secondary evidence; distinguish access routing from
+      readiness values, command execution and media presence.
+- [x] Assess the related register family and select a coherent CPU-data
+      direction/width/endpoint policy without assuming a generic IOP MMIO bridge.
+- [x] Define shared controller wiring, access effects, completion/IRQ ordering,
+      persistence and trace requirements; select the bounded implementation.
 
-### Boot-Service Implementation and Conformance
+### EE-Side CD/DVD Integration
 
-- [ ] Expand and implement additional CD/DVD command, interrupt, DMA, sector,
-      seek and transfer services from demonstrated dependencies, separately
-      from the selected startup command transport.
-- [ ] Implement the required SIO2, controller, and memory-card protocols with
-      deterministic input and persistent-media boundaries.
-- [ ] Complete the selected BIOS boot-service flows with reproducible traces,
-      hashes, save states, failure diagnostics, and independent review.
+- [x] Implement the selected access policy through EEBus and the existing
+      system-owned CDVDController, without parallel backing or new ready state.
+- [ ] Use red/green guest and cross-CPU tests for shared state, exact admission
+      and atomic rejection; cover reset, trace and save/load where affected.
+- [ ] Independently review access and lifecycle integration; pass the required
+      validation gates without expanding the selected device behavior.
+
+### CD/DVD Boundary Verification
+
+- [ ] With separate BIOS-run authorization, verify progress beyond the EE
+      access and attribute the next originating access, command or wait.
+- [ ] Compare bounded traced/plain and canonical continuations; preserve the
+      demonstrated handshake and distinguish compatibility from completed boot.
+- [ ] Regroup the next block around that evidence before implementing commands,
+      configuration, transfers or other boot devices.
+
+### Additional CD/DVD Command and Configuration Scope
+
+- [ ] Expand demonstrated command dependencies into independent transport and
+      command-family blocks; select parameters, results, busy/error behavior,
+      IRQs, cancellation and timing before implementation.
+- [ ] Select explicit deterministic inputs for any required identity, NVM,
+      region, configuration or RTC programming; do not substitute zero-success
+      responses or fabricate authentication and media readiness.
+
+### Optical Media and DMA Scope
+
+- [ ] When required, define media-image inputs, supported sector formats and
+      no-media/error behavior, keeping host file I/O outside the device core.
+- [ ] Plan buffered sector production and channel-3 DMA through their existing
+      owners, including backpressure, transfer counts, completion, cancellation,
+      emulated deadlines and deterministic restored continuation.
+- [ ] Split the selected seek/read/transfer lifecycle into reviewable blocks
+      with authored fixtures before implementing a media boot path.
+
+### SIO2, Input and Memory-Card Scope
+
+- [ ] Expand demonstrated SIO2 register, command, DMA and IRQ dependencies into
+      reviewable blocks before implementing controller or memory-card protocols.
+- [ ] Define deterministic controller-input sampling and separate memory-card
+      protocol state from host persistence; select absent-device/error behavior.
+
+### ROM and Module-Loading Scope
+
+- [ ] Classify demonstrated ROM/module-loading failures as missing hardware,
+      image mapping or guest software before selecting support; preserve real
+      guest SIF execution rather than introducing host RPC/module shortcuts.
+
+### Boot-Service Conformance and Closure
+
+- [ ] Define the selected observable BIOS boot-service checkpoint and supported
+      media/input profile; do not equate one repaired boundary with complete boot.
+- [ ] Validate the selected flows with authored regressions and separately
+      authorized BIOS trace/hash/save-load conformance.
+- [ ] Complete bounded maintainability and independent correctness review,
+      reconcile provisional policies, and pass optimized, ASan and native leak
+      closure gates.
 
 ## Milestone 11: SPU2 and Deterministic Audio
 

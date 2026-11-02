@@ -1,6 +1,7 @@
 #include <array>
 #include <stdexcept>
 
+#include "cdvd_controller.hpp"
 #include "dmac_controller.hpp"
 #include "ee_bus.hpp"
 #include "ee_rdram_initialization.hpp"
@@ -30,6 +31,8 @@ namespace
     0x1fffffff;
   constexpr std::uint32_t VIF_STALL_CANCEL = 1u << 3;
   constexpr std::uint32_t VIF_RESET = 1u << 0;
+  constexpr std::uint32_t CDVD_PASSIVE_BASE = 0x1f402000;
+  constexpr std::uint32_t CDVD_PASSIVE_END = 0x1f402018;
 
   EEQuadword readVUQuadword(const VPU &vpu, std::size_t index)
   {
@@ -232,6 +235,19 @@ void EEBus::attachIOPRAM(IOPBus *bus)
     throw std::logic_error("EE bus IOP RAM is already attached.");
   }
   iopRAMBus = bus;
+}
+
+void EEBus::attachCDVD(const CDVDController *controller)
+{
+  if (controller == nullptr)
+  {
+    throw std::invalid_argument("EE bus requires a non-null CD/DVD controller.");
+  }
+  if (cdvdController != nullptr)
+  {
+    throw std::logic_error("EE bus CD/DVD is already attached.");
+  }
+  cdvdController = controller;
 }
 
 bool EEBus::iopRAMAddress(std::uint32_t address, std::size_t width) const
@@ -805,6 +821,20 @@ bool EEBus::readData8(
   {
     throw std::invalid_argument(
       "EE byte load requires an output value.");
+  }
+  if (address >= CDVD_PASSIVE_BASE && address < CDVD_PASSIVE_END)
+  {
+    if (cdvdController == nullptr)
+    {
+      return false;
+    }
+    const auto result = cdvdController->readPassiveByte(address);
+    if (result.status != CDVDAccessStatus::Accepted)
+    {
+      return false;
+    }
+    *value = result.value;
+    return true;
   }
   if (address == EEMemoryMap::IOP_BOOT_PROBE)
   {

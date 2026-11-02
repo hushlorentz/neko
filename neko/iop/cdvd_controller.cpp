@@ -35,7 +35,8 @@ namespace
   }
 }
 
-CDVDReadResult CDVDController::readByte(std::uint32_t address) noexcept
+CDVDReadResult CDVDController::readPassiveByte(
+  std::uint32_t address) const noexcept
 {
   switch (address)
   {
@@ -55,11 +56,23 @@ CDVDReadResult CDVDController::readByte(std::uint32_t address) noexcept
       return {CDVDAccessStatus::Accepted,
         static_cast<std::uint8_t>(subcommandPhase == SubcommandPhase::Pending ?
           0xc0 : (subcommandPhase == SubcommandPhase::Result ? 0 : 0x40))};
-    case 0x1f402018:
-      return {CDVDAccessStatus::Accepted, consumeResult()};
     default:
       return {};
   }
+}
+
+CDVDReadResult CDVDController::readByte(std::uint32_t address) noexcept
+{
+  const auto result = readPassiveByte(address);
+  if (result.status == CDVDAccessStatus::Accepted)
+  {
+    return result;
+  }
+  if (address == 0x1f402018)
+  {
+    return {CDVDAccessStatus::Accepted, consumeResult()};
+  }
+  return {};
 }
 
 CDVDAccessStatus CDVDController::writeByte(
