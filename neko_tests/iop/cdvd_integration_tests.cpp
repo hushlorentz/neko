@@ -218,6 +218,112 @@ TEST_CASE("EE CDVD guest bytes use normal translation and bus exceptions",
   }
 }
 
+TEST_CASE("EE CDVD guest bytes sample pending state before every IOP completion phase",
+  "[ee][cdvd-integration][ee-cdvd][guest]")
+{
+  for (const auto instruction : {0x80220000u, 0x90220000u})
+  {
+    for (unsigned phase = 0; phase < 8; ++phase)
+    {
+      CAPTURE(instruction);
+      CAPTURE(phase);
+      NekoSystem system;
+      system.runMasterCycles(phase);
+      write(system, 4, 0);
+      write(system, 0x16, 8);
+      system.eeBus().write32(0, instruction);
+      auto &core = system.eeCore();
+      core.setGeneralRegister(1, {0xbf402005, 0});
+      core.setGeneralRegister(2, {0x1234, 0x5678});
+      core.setCOP0Register(EECOP0Register::Status, 0);
+      core.startExecution(EEMemoryMap::KSEG1_BASE);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.generalRegister(2).low ==
+        (instruction == 0x80220000 ? UINT64_C(0xffffffffffffff80) : 0x80));
+      REQUIRE(core.generalRegister(2).high == 0x5678);
+      if (phase != 0)
+      {
+        system.runMasterCycles(7 - phase);
+        REQUIRE(readEE(system, 5) == 0x80);
+        REQUIRE(readEE(system, 0x17) == 0xc0);
+        REQUIRE(readEE(system, 8) == 0);
+        REQUIRE(system.iopInterruptController().status() == 0);
+        system.clockMasterCycle();
+      }
+      REQUIRE(readEE(system, 5) == 0x40);
+      REQUIRE(readEE(system, 0x17) == 0);
+      REQUIRE(readEE(system, 8) == 1);
+      REQUIRE(system.iopInterruptController().status() == IRQ);
+    }
+  }
+}
+
+TEST_CASE("EE CDVD guest merge accesses reject every lane without consuming results",
+  "[ee][cdvd-integration][ee-cdvd][guest]")
+{
+  struct Merge
+  {
+    std::uint32_t opcode;
+    unsigned width;
+    EEException exception;
+  };
+  const std::array<Merge, 8> merges = {{
+    {0x22, 4, EEException::DataBusErrorLoad},  // LWL
+    {0x26, 4, EEException::DataBusErrorLoad},  // LWR
+    {0x2a, 4, EEException::DataBusErrorStore}, // SWL
+    {0x2e, 4, EEException::DataBusErrorStore}, // SWR
+    {0x1a, 8, EEException::DataBusErrorLoad},  // LDL
+    {0x1b, 8, EEException::DataBusErrorLoad},  // LDR
+    {0x2c, 8, EEException::DataBusErrorStore}, // SDL
+    {0x2d, 8, EEException::DataBusErrorStore}  // SDR
+  }};
+  for (const auto &merge : merges)
+  {
+    for (const auto offset : {4u, 0x16u, 0x18u})
+    {
+      for (unsigned lane = 0; lane < merge.width; ++lane)
+      {
+        CAPTURE(merge.opcode);
+        CAPTURE(offset);
+        CAPTURE(lane);
+        NekoSystem system;
+        write(system, 4, 0);
+        write(system, 0x16, 8);
+        system.clockMasterCycle();
+        REQUIRE(read(system, 0x18) == EPOCH[0]);
+        const auto address =
+          ((0xbf402000u + offset) & ~(merge.width - 1)) + lane;
+        system.eeBus().write32(0, (merge.opcode << 26) | 0x00220000);
+        auto &core = system.eeCore();
+        core.setGeneralRegister(1, {address, 0});
+        core.setGeneralRegister(2, {UINT64_MAX, UINT64_MAX});
+        core.setCOP0Register(EECOP0Register::Status, 0);
+        core.startExecution(EEMemoryMap::KSEG1_BASE);
+
+        const auto result = system.stepEEInstruction(16);
+
+        REQUIRE(result.pendingException == merge.exception);
+        REQUIRE(core.generalRegister(2).low == UINT64_MAX);
+        REQUIRE(core.generalRegister(2).high == UINT64_MAX);
+        REQUIRE(readEE(system, 4) == 0);
+        REQUIRE(readEE(system, 5) == 0x40);
+        REQUIRE(readEE(system, 8) == 1);
+        REQUIRE(readEE(system, 0x16) == 8);
+        REQUIRE(readEE(system, 0x17) == 0);
+        REQUIRE(system.iopInterruptController().status() == IRQ);
+        for (std::size_t index = 1; index < EPOCH.size(); ++index)
+        {
+          REQUIRE(read(system, 0x18) == EPOCH[index]);
+        }
+        REQUIRE(readEE(system, 0x17) == 0x40);
+      }
+    }
+  }
+}
+
 TEST_CASE("EE CDVD reset and restore retain destination owned passive views",
   "[ee][cdvd-integration][ee-cdvd][save-state]")
 {

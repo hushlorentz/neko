@@ -214,6 +214,131 @@ TEST_CASE("CDVD trace observes both completions and guest acceptance in mutation
   REQUIRE(storeSeen);
 }
 
+TEST_CASE("EE CDVD passive guest traces precede completion and restore across IOP draining",
+  "[ee][iop][cdvd-trace][ee-cdvd][cdvd-authored][save-state]")
+{
+  NekoSystem reference;
+  const std::array<std::uint32_t, 9> eeWords = {{
+    0x80220005, // lb r2, NREADY
+    0x90230005, // lbu r3, NREADY
+    0x90240017, // lbu r4, SREADY
+    0x90250008, // lbu r5, device cause
+    0x90260016, // lbu r6, SCMD
+    0x9027000f, // lbu r7, no-disc type
+    0x9028000a, // lbu r8, stopped status
+    0x90290004, // lbu r9, NCMD
+    0x902a0006  // lbu r10, error
+  }};
+  for (std::size_t index = 0; index < eeWords.size(); ++index)
+  {
+    reference.eeBus().write32(static_cast<std::uint32_t>(index * 4),
+      eeWords[index]);
+  }
+  std::array<IOPWord, 10> iopWords = {{0x3c01bf40, 0x34212000}};
+  for (IOPWord index = 0; index < 8; ++index)
+  {
+    iopWords[index + 2] = 0x90200018 | ((8 + index) << 16);
+  }
+  installProgram(reference, 0x1000, iopWords);
+  auto &ee = reference.eeCore();
+  ee.setGeneralRegister(1, {0xbf402000, 0});
+  ee.setCOP0Register(EECOP0Register::Status, 0);
+  ee.startExecution(EEMemoryMap::KSEG1_BASE);
+  reference.iopCore().startExecution(0xa0001000);
+  write(reference, 4, 0);
+  write(reference, 0x16, 8);
+  const auto initial = reference.saveState();
+  reference.startTrace();
+
+  reference.runMasterCycles(81);
+
+  REQUIRE(ee.pendingException() == EEException::None);
+  REQUIRE(ee.generalRegister(2).low == UINT64_C(0xffffffffffffff80));
+  const std::array<std::uint8_t, 9> bytes = {{0x80, 0x40, 0, 1, 8, 0, 0, 0, 0}};
+  const std::array<std::uint32_t, 9> offsets = {{5, 5, 0x17, 8, 0x16, 15, 10, 4, 6}};
+  for (std::size_t index = 1; index < bytes.size(); ++index)
+  {
+    REQUIRE(ee.generalRegister(2 + index).low == bytes[index]);
+  }
+  const std::array<std::uint8_t, 8> rtc = {{0, 0, 0, 0, 0, 1, 1, 0}};
+  for (std::size_t index = 0; index < rtc.size(); ++index)
+  {
+    REQUIRE(reference.iopCore().generalRegister(8 + index) == rtc[index]);
+  }
+  REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+  REQUIRE(reference.iopBus().read8(BASE + 0x17).value == 0x40);
+  REQUIRE(reference.iopBus().read8(BASE + 8).value == 1);
+  REQUIRE(reference.iopInterruptController().status() == 4);
+
+  std::vector<std::size_t> loads;
+  std::vector<std::size_t> completions;
+  const auto &events = reference.trace();
+  for (std::size_t index = 0; index < events.size(); ++index)
+  {
+    const auto &event = events[index];
+    if (event.subsystem == NekoTraceSubsystem::EE &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 >= 0xbf402000 && event.value0 < 0xbf402020)
+    {
+      loads.push_back(index);
+    }
+    if (event.subsystem == CDVD)
+    {
+      REQUIRE(event.type == COMPLETED);
+      REQUIRE(event.masterCycle == 1);
+      completions.push_back(index);
+    }
+  }
+  REQUIRE(loads.size() == bytes.size());
+  REQUIRE(completions.size() == 2);
+  REQUIRE(loads[0] < completions[0]);
+  REQUIRE(completions[0] < completions[1]);
+  REQUIRE(completions[1] < loads[1]);
+  IOPTraceTest::requireEvents(IOPTraceTest::subsystemEvents(reference, CDVD), {
+    {1, CDVD, COMPLETED, UINT64_C(0x010000010000), 1, 0, 0},
+    {1, CDVD, COMPLETED, UINT64_C(0x010102010801), 1, EPOCH, 0}
+  });
+  for (std::size_t index = 0; index < loads.size(); ++index)
+  {
+    CAPTURE(index);
+    const auto &event = events[loads[index]];
+    using namespace NekoEETraceMemory;
+    REQUIRE(event.value0 == 0xbf402000 + offsets[index]);
+    REQUIRE(event.value1 == bytes[index]);
+    REQUIRE(event.value2 == 0);
+    REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+      BASE + offsets[index], 1, AccessKind::DataLoad,
+      TranslationOutcome::Translated, CacheRoute::Uncached, 2, false, true,
+      CacheAccess::Bypassed, TransferOutcome::Completed, FailurePhase::None}));
+    bool issued = false;
+    for (std::size_t earlier = 0; earlier < loads[index]; ++earlier)
+    {
+      const auto &instruction = events[earlier];
+      if (instruction.masterCycle == event.masterCycle &&
+          instruction.subsystem == NekoTraceSubsystem::EE &&
+          instruction.type == NekoTraceEventType::InstructionIssued)
+      {
+        REQUIRE(instruction.value0 == EEMemoryMap::KSEG1_BASE + index * 4);
+        REQUIRE(instruction.value1 == eeWords[index]);
+        issued = true;
+      }
+    }
+    REQUIRE(issued);
+  }
+  REQUIRE(events[loads[0]].masterCycle == 1);
+  for (const std::uint64_t cut : {0, 17, 49, 73})
+  {
+    CAPTURE(cut);
+    NekoSystem source;
+    source.loadState(initial);
+    source.runMasterCycles(cut);
+    REQUIRE(source.iopBus().read8(BASE + 5).value == (cut == 0 ? 0x80 : 0x40));
+    REQUIRE(source.iopBus().read8(BASE + 0x17).value ==
+      (cut == 0 ? 0xc0 : cut == 73 ? 0x40 : 0));
+    requireContinuationModes(reference, source);
+  }
+}
+
 TEST_CASE("CDVD trace snapshots RTC on completion rather than command acceptance",
   "[iop][cdvd-trace]")
 {
