@@ -1751,9 +1751,17 @@ bool EEBus::writeMapped32(
 
   if (sifApertureAddress(address))
   {
+    if (sifComponent == nullptr)
+    {
+      return false;
+    }
+    const auto offset = address - EEMemoryMap::SIF_BASE;
+    if (offset == SIFRegisterMap::REGISTER60_OFFSET)
+    {
+      return sifComponent->writeEERegister60Initialization(value);
+    }
     SIFRegister reg;
-    if (sifComponent == nullptr ||
-        !SIFRegisterMap::decodeOffset(address - EEMemoryMap::SIF_BASE, reg))
+    if (!SIFRegisterMap::decodeOffset(offset, reg))
     {
       return false;
     }

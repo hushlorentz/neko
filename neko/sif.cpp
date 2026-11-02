@@ -77,6 +77,12 @@ std::uint32_t SIF::readIOPRegister60() const
   return 0;
 }
 
+bool SIF::writeEERegister60Initialization(std::uint32_t value) const
+{
+  // Observed initialization only; retention and hardware effects are unverified.
+  return value == 0xff;
+}
+
 SIFWriteResult SIF::writeEE(SIFRegister reg, std::uint32_t value)
 {
   if (observationOrder == nullptr)

@@ -809,7 +809,7 @@ IOPBusReadResult IOPBus::readSIFRegister(
   {
     return {IOPBusStatus::Completed, sifComponent->iopDoorbell()};
   }
-  if (location.offset == 0x60)
+  if (location.offset == SIFRegisterMap::REGISTER60_OFFSET)
   {
     return {IOPBusStatus::Completed, sifComponent->readIOPRegister60()};
   }

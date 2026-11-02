@@ -21,6 +21,7 @@ enum class SIFRegister : std::uint8_t
 namespace SIFRegisterMap
 {
   constexpr std::uint32_t APERTURE_SIZE = 0x80;
+  constexpr std::uint32_t REGISTER60_OFFSET = 0x60;
   bool decodeOffset(std::uint32_t offset, SIFRegister &reg);
 }
 
@@ -88,6 +89,7 @@ class SIF final
     std::uint32_t readEE(SIFRegister reg) const;
     std::uint32_t readIOP(SIFRegister reg) const;
     std::uint32_t readIOPRegister60() const;
+    bool writeEERegister60Initialization(std::uint32_t value) const;
     SIFWriteResult writeEE(SIFRegister reg, std::uint32_t value);
     SIFWriteResult writeIOP(SIFRegister reg, std::uint32_t value);
     std::uint32_t iopDoorbell() const;

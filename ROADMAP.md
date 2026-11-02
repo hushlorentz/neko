@@ -2783,6 +2783,19 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Review and validate the selected capability, then verify progress with
       fresh authorized BIOS evidence before resuming handshake discovery.
 
+### EE SIF Register60 Initialization Contract
+
+- [x] Compare the observed EE word store with local manuals and secondary
+      evidence; select its scope through the existing shared SIF owner,
+      without inferring a handshake or generic register-bank semantics.
+
+### Bounded EE SIF Register60 Initialization
+
+- [x] Implement the selected initialization write with exact access/value
+      admission, preserving the existing IOP read and other SIF behavior.
+- [x] Validate host/guest and state/trace boundaries, independently review,
+      and verify progress with fresh authorized BIOS evidence.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

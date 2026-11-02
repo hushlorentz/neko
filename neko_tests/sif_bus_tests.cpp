@@ -287,6 +287,161 @@ TEST_CASE("SIF bus IOP register60 word reads return zero without effects",
   REQUIRE(fixture.system.masterClockScheduler().currentCycle() == 0);
 }
 
+TEST_CASE("SIF register60 EE initialization admits only the observed word",
+  "[sif][bus][register60][register60-init]")
+{
+  Fixture fixture;
+  seed(fixture.sif);
+  const SIF before = fixture.sif;
+  const auto hash = fixture.system.sifStateHash();
+  auto &ee = fixture.system.eeBus();
+  auto &iop = fixture.system.iopBus();
+  constexpr std::uint32_t ADDRESS = EE_BASE + 0x60;
+  for (unsigned repeat = 0; repeat < 3; ++repeat)
+  {
+    REQUIRE(ee.writeData32(ADDRESS, 0xff));
+    REQUIRE(iop.read32(IOP_BASE + 0x60).value == 0);
+  }
+  for (std::uint32_t value : {0u, 0xfeu, 0x100u, 0x1ffu, 0xffffffffu})
+  {
+    CAPTURE(value);
+    REQUIRE_FALSE(ee.writeData32(ADDRESS, value));
+    REQUIRE_THROWS_AS(ee.write32(ADDRESS, value), std::out_of_range);
+  }
+  for (std::uint32_t address : {ADDRESS - 4, ADDRESS + 4, 0x9000f260u, 0xb000f260u})
+  {
+    REQUIRE_FALSE(ee.writeData32(address, 0xff));
+  }
+  REQUIRE_THROWS_AS(ee.writeData32(ADDRESS + 1, 0xff), std::invalid_argument);
+  std::uint32_t word = 0x76543210;
+  REQUIRE_FALSE(ee.readData32(ADDRESS, &word));
+  REQUIRE(word == 0x76543210);
+  REQUIRE_FALSE(ee.writeData8(ADDRESS, 0xff));
+  REQUIRE_FALSE(ee.writeData16(ADDRESS, 0xff));
+  REQUIRE_FALSE(ee.writeData64(ADDRESS, 0xff));
+  REQUIRE_FALSE(ee.writeData128(ADDRESS, {0xff, 0}));
+  REQUIRE_THROWS_AS(ee.write64(ADDRESS, 0xff), std::out_of_range);
+  REQUIRE_THROWS_AS(ee.writeQuadword(ADDRESS, {{0xff, 0, 0, 0}}), std::out_of_range);
+  REQUIRE_FALSE(ee.readInstruction32(ADDRESS, &word));
+  REQUIRE_FALSE(ee.isCacheFillRange(ADDRESS, 4));
+  REQUIRE_FALSE(ee.writeDMAC128(ADDRESS, {0xff, 0}));
+  REQUIRE(iop.write32(IOP_BASE + 0x60, 0xff).status == IOPBusStatus::Unmapped);
+  requireUnchanged(fixture.sif, before);
+  REQUIRE(fixture.system.sifStateHash() == hash);
+  REQUIRE(fixture.system.interruptController().status() == 0);
+  REQUIRE(fixture.system.iopInterruptController().status() == 0);
+
+  SignalRecorder signals(fixture.sif);
+  EEBus detached(&fixture.system.vif0(), &fixture.system.vif1(),
+    &fixture.system.gifRegisters(), &fixture.system.gifPath3(),
+    &fixture.system.gs(), &fixture.system.interruptController());
+  REQUIRE_FALSE(detached.writeData32(ADDRESS, 0xff));
+  detached.attachSIF(&fixture.sif, &signals);
+  REQUIRE(detached.writeData32(ADDRESS, 0xff));
+  REQUIRE(signals.eeRequests == 0);
+  REQUIRE(signals.iopRequests == 0);
+  REQUIRE(signals.emptyRequests == 0);
+  requireUnchanged(fixture.sif, before);
+  fixture.system.reset();
+  REQUIRE(ee.writeData32(ADDRESS, 0xff));
+  REQUIRE(iop.read32(IOP_BASE + 0x60).value == 0);
+}
+
+TEST_CASE("SIF register60 EE guest initialization has successful store metadata",
+  "[sif][bus][guest][register60][register60-init]")
+{
+  for (std::uint32_t address : {0x9000f260u, 0xb000f260u})
+  {
+    CAPTURE(address);
+    std::uint64_t plainHash = 0;
+    for (bool traced : {false, true})
+    {
+      Fixture fixture;
+      seed(fixture.sif);
+      const SIF before = fixture.sif;
+      if (traced)
+      {
+        fixture.system.startTrace();
+      }
+      executeEE(fixture, 0x2b, address, 0xff);
+      REQUIRE(fixture.system.eeCore().pendingException() == EEException::None);
+      REQUIRE(fixture.system.eeCore().programCounter() == 0xa0000004);
+      REQUIRE(fixture.system.eeCore().generalRegister(2).low == 0xff);
+      requireUnchanged(fixture.sif, before);
+      REQUIRE(fixture.system.interruptController().status() == 0);
+      REQUIRE(fixture.system.iopInterruptController().status() == 0);
+      if (!traced)
+      {
+        plainHash = fixture.system.eeStateHash();
+        continue;
+      }
+      REQUIRE(fixture.system.eeStateHash() == plainHash);
+      std::size_t stores = 0;
+      for (const auto &event : fixture.system.trace())
+      {
+        REQUIRE(event.subsystem != NekoTraceSubsystem::SIF);
+        if (event.subsystem != NekoTraceSubsystem::EE ||
+            event.type != NekoTraceEventType::MemoryAccess ||
+            event.value0 != address)
+        {
+          continue;
+        }
+        ++stores;
+        REQUIRE(event.value1 == 0xff);
+        REQUIRE(event.value2 == 0);
+        const bool cachedAlias = address == 0x9000f260;
+        REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+          EE_BASE + 0x60, 4, NekoEETraceMemory::AccessKind::DataStore,
+          NekoEETraceMemory::TranslationOutcome::Translated,
+          cachedAlias ? NekoEETraceMemory::CacheRoute::CachedNoncoherent
+                      : NekoEETraceMemory::CacheRoute::Uncached,
+          static_cast<std::uint8_t>(cachedAlias ? 3 : 2), false, true,
+          NekoEETraceMemory::CacheAccess::Bypassed,
+          NekoEETraceMemory::TransferOutcome::Completed,
+          NekoEETraceMemory::FailurePhase::None}));
+      }
+      REQUIRE(stores == 1);
+      REQUIRE_FALSE(fixture.system.traceTruncated());
+    }
+  }
+}
+
+TEST_CASE("SIF register60 guest stores preserve full-word and precise fault boundaries",
+  "[sif][bus][guest][register60][register60-init]")
+{
+  for (std::uint8_t opcode : {0x2a, 0x2e})
+  {
+    for (std::uint16_t lane = 0; lane < 4; ++lane)
+    {
+      CAPTURE(opcode);
+      CAPTURE(lane);
+      Fixture fixture;
+      seed(fixture.sif);
+      const SIF before = fixture.sif;
+      executeEE(fixture, opcode, 0xb000f260, 0xff, lane);
+      const bool fullWord = lane == (opcode == 0x2a ? 3 : 0);
+      REQUIRE(fixture.system.eeCore().pendingException() ==
+        (fullWord ? EEException::None : EEException::DataBusErrorStore));
+      if (!fullWord)
+      {
+        REQUIRE(fixture.system.eeCore().exceptionAddress() == 0xb000f260 + lane);
+      }
+      requireUnchanged(fixture.sif, before);
+    }
+  }
+  for (std::uint8_t opcode : {0x28, 0x29, 0x3f, 0x1f})
+  {
+    CAPTURE(opcode);
+    Fixture fixture;
+    seed(fixture.sif);
+    const SIF before = fixture.sif;
+    executeEE(fixture, opcode, 0xb000f260, 0xff);
+    REQUIRE(fixture.system.eeCore().pendingException() == EEException::DataBusErrorStore);
+    REQUIRE(fixture.system.eeCore().exceptionAddress() == 0xb000f260);
+    requireUnchanged(fixture.sif, before);
+  }
+}
+
 TEST_CASE("SIF bus IOP register60 guest load respects delay and trace contracts",
   "[sif][bus][guest][register60]")
 {
