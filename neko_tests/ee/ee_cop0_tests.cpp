@@ -1,10 +1,12 @@
 #include <cstdint>
+#include <string>
 
 #include "catch.hpp"
 #include "ee_core.hpp"
 #include "ee_test_utils.hpp"
 #include "ee_instruction.hpp"
 #include "neko_system.hpp"
+#include "save_state_mutation.hpp"
 
 namespace
 {
@@ -74,6 +76,391 @@ namespace
     system->eeCore().startExecution(0);
     system->clockMasterCycle();
   }
+}
+
+TEST_CASE("EE EI DI decode canonical controls and reject nonzero fixed fields",
+  "[ei-di]")
+{
+  for (const std::uint32_t raw : {0x42000038u, 0x42000039u})
+  {
+    const auto instruction = decodeEEInstruction(raw);
+    REQUIRE(eeInstructionRouting(instruction.operation).category ==
+      EEInstructionCategory::COP0);
+    for (unsigned bit = 6; bit < 21; ++bit)
+    {
+      REQUIRE_THROWS_WITH(decodeEEInstruction(raw | (1u << bit)),
+        "Reserved EE instruction encoding.");
+    }
+  }
+  REQUIRE(decodeEEInstruction(0x42000038).operation !=
+    decodeEEInstruction(0x42000039).operation);
+}
+
+TEST_CASE("EE EI DI preserves the following Status read before disabling",
+  "[ei-di]")
+{
+  NekoSystem system;
+  auto &core = system.eeCore();
+  const auto status = EECOP0Status::COP0_USABLE |
+    EECOP0Status::MASTER_INTERRUPT_ENABLE | EECOP0Status::INTERRUPT_ENABLE;
+  core.setCOP0Register(EECOP0Register::Status, status);
+  mapLowKusegForTest(&core);
+  system.eeBus().write32(0, 0x42000039);
+  system.eeBus().write32(4, cop0TransferInstruction(0, 1, EECOP0Register::Status));
+  system.eeBus().write32(8, immediateInstruction(0x0d, 1, 1, 0x13));
+  system.eeBus().write32(12, cop0TransferInstruction(4, 1, EECOP0Register::Status));
+  core.startExecution(0);
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 4);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) == status);
+  system.clockMasterCycle();
+  REQUIRE(core.generalRegister(1).low == status);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) ==
+    (status & ~EECOP0Status::MASTER_INTERRUPT_ENABLE));
+  system.runMasterCycles(2);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) == (status | 0x13));
+  REQUIRE(core.pendingException() == EEException::None);
+}
+
+TEST_CASE("EE EI DI gates effects by effective kernel or EDI without CU0 faults",
+  "[ei-di]")
+{
+  for (const std::uint32_t mode : {0u, 8u, 16u, 24u})
+  {
+    for (const std::uint32_t permission : {0u, 2u, 4u, 0x20000u, 0x10000000u})
+    {
+      for (const bool enable : {false, true})
+      {
+        CAPTURE(mode);
+        CAPTURE(permission);
+        CAPTURE(enable);
+        NekoSystem system;
+        auto &core = system.eeCore();
+        mapLowKusegForTest(&core);
+        const auto initial = mode | permission | EECOP0Status::INTERRUPT_ENABLE |
+          (enable ? 0u : EECOP0Status::MASTER_INTERRUPT_ENABLE);
+        core.setCOP0Register(EECOP0Register::Status, initial);
+        const std::uint32_t raw = enable ? 0x42000038 : 0x42000039;
+        system.eeBus().write32(0, raw);
+        system.eeBus().write32(4, raw);
+        system.eeBus().write32(8, raw);
+        core.startExecution(0);
+        system.runMasterCycles(enable ? 1 : 2);
+        REQUIRE(core.pendingException() == EEException::None);
+        REQUIRE(core.stopReason() == EEStopReason::None);
+        const bool permitted = mode == 0 || (permission & 0x20006) != 0;
+        const auto expected = !permitted ? initial :
+          enable ? initial | EECOP0Status::MASTER_INTERRUPT_ENABLE :
+            initial & ~EECOP0Status::MASTER_INTERRUPT_ENABLE;
+        REQUIRE(core.cop0Register(EECOP0Register::Status) == expected);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE EI DI applies delay slot disabling before the branch target",
+  "[ei-di]")
+{
+  NekoSystem system;
+  auto &core = system.eeCore();
+  mapLowKusegForTest(&core);
+  core.setCOP0Register(EECOP0Register::Status,
+    EECOP0Status::COP0_USABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE);
+  system.eeBus().write32(0, 0x10000003);
+  system.eeBus().write32(4, 0x42000039);
+  system.eeBus().write32(16, cop0TransferInstruction(0, 1, EECOP0Register::Status));
+  core.startExecution(0);
+  system.runMasterCycles(2);
+  REQUIRE(core.pendingException() == EEException::None);
+  REQUIRE(core.generalRegister(1).low == EECOP0Status::COP0_USABLE);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) == EECOP0Status::COP0_USABLE);
+}
+
+TEST_CASE("EE EI DI orders deferred disabling after subsequent control writes",
+  "[ei-di]")
+{
+  for (const std::uint32_t following : {
+    0x42000038u, 0x42000039u, cop0TransferInstruction(4, 1, EECOP0Register::Status)})
+  {
+    CAPTURE(following);
+    NekoSystem system;
+    auto &core = system.eeCore();
+    mapLowKusegForTest(&core);
+    const auto status = EECOP0Status::COP0_USABLE |
+      EECOP0Status::MASTER_INTERRUPT_ENABLE | EECOP0Status::INTERRUPT_ENABLE;
+    core.setCOP0Register(EECOP0Register::Status, status);
+    core.setGeneralRegister(1, {status, 0});
+    system.eeBus().write32(0, 0x42000039);
+    system.eeBus().write32(4, following);
+    system.eeBus().write32(8, cop0TransferInstruction(0, 2, EECOP0Register::Status));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+    REQUIRE(core.cop0Register(EECOP0Register::Status) ==
+      (status & ~EECOP0Status::MASTER_INTERRUPT_ENABLE));
+    system.clockMasterCycle();
+    REQUIRE(core.generalRegister(2).low ==
+      (status & ~EECOP0Status::MASTER_INTERRUPT_ENABLE));
+    REQUIRE(core.pendingException() == EEException::None);
+  }
+}
+
+TEST_CASE("EE EI DI pending effects survive pause restore and reject malformed state",
+  "[ei-di][save-state]")
+{
+  NekoSystem original;
+  auto &core = original.eeCore();
+  mapLowKusegForTest(&core);
+  core.setCOP0Register(EECOP0Register::Status,
+    EECOP0Status::COP0_USABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE);
+  original.eeBus().write32(0, 0x42000039);
+  original.eeBus().write32(4, cop0TransferInstruction(0, 1, EECOP0Register::Status));
+  core.startExecution(0);
+  original.clockMasterCycle();
+  REQUIRE(core.stopReason() == EEStopReason::None);
+  core.haltExecution();
+  const auto paused = original.saveState();
+  SaveStateMutation mutation(paused);
+  REQUIRE(mutation.readByte("system.eeCore.deferredDisableProgramOrder") == 1);
+  NekoSystem restored;
+  restored.loadState(paused);
+  REQUIRE(restored.saveState() == paused);
+  REQUIRE(restored.eeStateHash() == original.eeStateHash());
+  {
+    SaveStateMutation withoutPending(paused);
+    withoutPending.writeScalar("system.eeCore.deferredDisableProgramOrder", 0);
+    withoutPending.refreshChecksum();
+    NekoSystem cleared;
+    cleared.loadState(withoutPending.bytes());
+    REQUIRE(cleared.eeStateHash() != original.eeStateHash());
+  }
+  for (const std::uint64_t invalid : {UINT64_C(2), UINT64_MAX})
+  {
+    mutation.writeScalar("system.eeCore.deferredDisableProgramOrder", invalid);
+    mutation.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(mutation.bytes()), std::invalid_argument);
+    REQUIRE(restored.saveState() == paused);
+  }
+  for (const auto *field : {
+    "system.eeCore.lastInstruction", "system.eeCore.nextProgramOrder"})
+  {
+    SaveStateMutation inconsistent(paused);
+    inconsistent.writeScalar(field,
+      std::string(field) == "system.eeCore.nextProgramOrder" ? 3 : 0);
+    inconsistent.refreshChecksum();
+    REQUIRE_THROWS_AS(restored.loadState(inconsistent.bytes()), std::invalid_argument);
+    REQUIRE(restored.saveState() == paused);
+  }
+  for (auto *system : {&original, &restored})
+  {
+    system->eeCore().startExecution(4);
+    system->clockMasterCycle();
+    REQUIRE(system->eeCore().generalRegister(1).low ==
+      (EECOP0Status::COP0_USABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE));
+    REQUIRE(system->eeCore().cop0Register(EECOP0Register::Status) ==
+      EECOP0Status::COP0_USABLE);
+  }
+  REQUIRE(restored.saveState() == original.saveState());
+  restored.loadState(paused);
+  restored.eeBus().write32(8, 0x42000038);
+  restored.eeBus().write32(12, 0x42000038);
+  restored.eeCore().startExecution(8);
+  NekoSystem restarted;
+  REQUIRE_NOTHROW(restarted.loadState(restored.saveState()));
+  restored.runMasterCycles(2);
+  REQUIRE((restored.eeCore().cop0Register(EECOP0Register::Status) &
+    EECOP0Status::MASTER_INTERRUPT_ENABLE) != 0);
+  restored.reset();
+  NekoSystem fresh;
+  REQUIRE(restored.saveState() == fresh.saveState());
+}
+
+TEST_CASE("EE EI DI exposes pending interrupts only at existing boundaries",
+  "[ei-di]")
+{
+  for (const bool enable : {false, true})
+  {
+    CAPTURE(enable);
+    NekoSystem system;
+    auto &core = system.eeCore();
+    mapLowKusegForTest(&core);
+    const auto status = EECOP0Status::INTERRUPT_ENABLE |
+      EECOP0Status::INTC_MASK |
+      (enable ? 0u : EECOP0Status::MASTER_INTERRUPT_ENABLE);
+    core.setCOP0Register(EECOP0Register::Status, status);
+    system.eeBus().write32(0, enable ? 0x42000038 : 0x42000039);
+    system.eeBus().write32(4, cop0TransferInstruction(0, 1, EECOP0Register::Status));
+    core.startExecution(0);
+    system.clockMasterCycle();
+    system.interruptController().setSource(EEInterruptSource::VIF0, true);
+    system.interruptController().toggleMask(
+      EEInterruptSource::mask(EEInterruptSource::VIF0));
+    system.clockMasterCycle();
+    REQUIRE(core.pendingException() == EEException::Interrupt);
+    REQUIRE(core.cop0Register(EECOP0Register::EPC) == 4);
+    REQUIRE((core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::MASTER_INTERRUPT_ENABLE) ==
+      (enable ? EECOP0Status::MASTER_INTERRUPT_ENABLE : 0u));
+  }
+}
+
+TEST_CASE("EE EI DI completes older effects before younger faults and host rejections",
+  "[ei-di]")
+{
+  for (const std::uint32_t following : {0x0000000cu, 0x42000019u, 0x41000000u})
+  {
+    CAPTURE(following);
+    NekoSystem system;
+    auto &core = system.eeCore();
+    mapLowKusegForTest(&core);
+    core.setCOP0Register(EECOP0Register::Status,
+      EECOP0Status::MASTER_INTERRUPT_ENABLE);
+    system.eeBus().write32(0, 0x42000039);
+    system.eeBus().write32(4, following);
+    core.startExecution(0);
+    system.runMasterCycles(2);
+    REQUIRE((core.cop0Register(EECOP0Register::Status) &
+      EECOP0Status::MASTER_INTERRUPT_ENABLE) == 0);
+    REQUIRE(core.pendingException() ==
+      (following == 0xc ? EEException::SystemCall :
+       following == 0x42000019 ? EEException::ReservedInstruction : EEException::None));
+    if (following == 0x41000000)
+    {
+      REQUIRE(core.stopReason() == EEStopReason::UnsupportedInstruction);
+    }
+    SaveStateMutation saved(system.saveState());
+    REQUIRE(saved.readByte("system.eeCore.deferredDisableProgramOrder") == 0);
+  }
+}
+
+TEST_CASE("EE EI DI evaluates deferred permission against the resulting Status",
+  "[ei-di]")
+{
+  for (const bool initiallyKernel : {false, true})
+  {
+    NekoSystem system;
+    auto &core = system.eeCore();
+    mapLowKusegForTest(&core);
+    const auto enabled = EECOP0Status::COP0_USABLE |
+      EECOP0Status::MASTER_INTERRUPT_ENABLE;
+    core.setCOP0Register(EECOP0Register::Status,
+      enabled | (initiallyKernel ? 0u : EECOP0Status::USER_MODE));
+    const auto followingStatus =
+      enabled | (initiallyKernel ? EECOP0Status::USER_MODE : 0u);
+    core.setGeneralRegister(1, {followingStatus, 0});
+    system.eeBus().write32(0, 0x42000039);
+    system.eeBus().write32(4,
+      cop0TransferInstruction(4, 1, EECOP0Register::Status));
+    core.startExecution(0);
+    system.runMasterCycles(2);
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.cop0Register(EECOP0Register::Status) ==
+      (initiallyKernel ? followingStatus :
+        followingStatus & ~EECOP0Status::MASTER_INTERRUPT_ENABLE));
+  }
+}
+
+TEST_CASE("EE EI DI retains its pending effect while the following instruction stalls",
+  "[ei-di]")
+{
+  NekoSystem system;
+  auto &core = system.eeCore();
+  mapLowKusegForTest(&core);
+  core.setCOP0Register(EECOP0Register::Status,
+    EECOP0Status::MASTER_INTERRUPT_ENABLE);
+  core.setGeneralRegister(1, {84, 0});
+  core.setGeneralRegister(2, {7, 0});
+  system.eeBus().write32(0, 0x0022001b);
+  system.eeBus().write32(4, 0x42000039);
+  system.eeBus().write32(8, 0x00001812);
+  core.startExecution(0);
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 8);
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 8);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) ==
+    EECOP0Status::MASTER_INTERRUPT_ENABLE);
+  system.runMasterCycles(40);
+  REQUIRE(core.generalRegister(3).low == 12);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) == 0);
+  REQUIRE(core.pendingException() == EEException::None);
+}
+
+TEST_CASE("EE EI DI does not escape an older COP1 access fault",
+  "[ei-di]")
+{
+  NekoSystem system;
+  auto &core = system.eeCore();
+  mapLowKusegForTest(&core);
+  const auto status = EECOP0Status::COP1_USABLE |
+    EECOP0Status::MASTER_INTERRUPT_ENABLE;
+  core.setCOP0Register(EECOP0Register::Status, status);
+  core.setGeneralRegister(1, {0x00400000, 0});
+  system.eeBus().write32(0, immediateInstruction(0x31, 1, 3, 0));
+  system.eeBus().write32(4, 0x42000039);
+  core.startExecution(0);
+  system.clockMasterCycle();
+  REQUIRE(core.programCounter() == 4);
+  SaveStateMutation pending(system.saveState());
+  REQUIRE(pending.readByte("system.eeCore.deferredDisableProgramOrder") == 0);
+  system.runMasterCycles(2);
+  REQUIRE(core.pendingException() == EEException::TLBRefillLoadOrFetch);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) ==
+    (status | EECOP0Status::EXCEPTION_LEVEL));
+  SaveStateMutation faulted(system.saveState());
+  REQUIRE(faulted.readByte("system.eeCore.deferredDisableProgramOrder") == 0);
+}
+
+TEST_CASE("EE EI DI completes before a following COP1 access fault",
+  "[ei-di]")
+{
+  NekoSystem system;
+  auto &core = system.eeCore();
+  mapLowKusegForTest(&core);
+  core.setCOP0Register(EECOP0Register::Status,
+    EECOP0Status::COP1_USABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE);
+  core.setGeneralRegister(1, {0x00400000, 0});
+  system.eeBus().write32(0, 0x42000039);
+  system.eeBus().write32(4, immediateInstruction(0x31, 1, 3, 0));
+  core.startExecution(0);
+  system.runMasterCycles(4);
+  REQUIRE(core.pendingException() == EEException::TLBRefillLoadOrFetch);
+  REQUIRE(core.cop0Register(EECOP0Register::EPC) == 4);
+  REQUIRE(core.cop0Register(EECOP0Register::Status) ==
+    (EECOP0Status::COP1_USABLE | EECOP0Status::EXCEPTION_LEVEL));
+}
+
+TEST_CASE("EE EI DI tracing does not change control effects or canonical state",
+  "[ei-di][trace]")
+{
+  NekoSystem traced;
+  NekoSystem plain;
+  for (auto *system : {&traced, &plain})
+  {
+    auto &core = system->eeCore();
+    mapLowKusegForTest(&core);
+    core.setCOP0Register(EECOP0Register::Status,
+      EECOP0Status::COP0_USABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE);
+    system->eeBus().write32(0, 0x42000039);
+    system->eeBus().write32(4,
+      cop0TransferInstruction(0, 1, EECOP0Register::Status));
+    system->eeBus().write32(8, 0x42000038);
+    system->eeBus().write32(12,
+      cop0TransferInstruction(0, 2, EECOP0Register::Status));
+    core.startExecution(0);
+  }
+  traced.startTrace();
+  traced.runMasterCycles(4);
+  plain.runMasterCycles(4);
+  REQUIRE(traced.eeCore().generalRegister(1).low ==
+    (EECOP0Status::COP0_USABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE));
+  REQUIRE(traced.eeCore().generalRegister(2).low ==
+    (EECOP0Status::COP0_USABLE | EECOP0Status::MASTER_INTERRUPT_ENABLE));
+  REQUIRE(traced.eeCore().pendingException() == EEException::None);
+  REQUIRE_FALSE(traced.trace().empty());
+  REQUIRE(plain.trace().empty());
+  REQUIRE(traced.eeStateHash() == plain.eeStateHash());
+  REQUIRE(traced.saveState() == plain.saveState());
 }
 
 TEST_CASE("EE TLB management operations decode canonically")

@@ -265,6 +265,8 @@ enum class EEOperation : std::uint16_t
   Prefetch,
   MoveIfZero,
   MoveIfNotZero,
+  EnableInterrupts,
+  DisableInterrupts,
   Count
 };
 
@@ -428,7 +430,8 @@ enum class EEExecutionFamily : std::uint8_t
   PackedDivide,
   Multiply,
   Divide,
-  ConditionalMove
+  ConditionalMove,
+  COP0InterruptControl
 };
 
 enum class EEExecutionDispatch : std::uint8_t

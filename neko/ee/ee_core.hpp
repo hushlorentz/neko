@@ -1185,6 +1185,7 @@ class EECore final : public ClockedComponent
       InFlightCOP1Operation,
       COP1_IN_FLIGHT_CAPACITY> inFlightCOP1Operations = {};
     std::uint64_t nextEEProgramOrder = 1;
+    std::uint64_t deferredDisableProgramOrder = 0;
     std::uint64_t executingProgramOrder = 0;
     PendingMultiplyDivide pendingMac0;
     PendingMultiplyDivide pendingMac1;
@@ -1336,6 +1337,9 @@ class EECore final : public ClockedComponent
     ExecutionStartMode executionStartMode(
       std::uint32_t startAddress) const;
     void resetExecutionContinuation();
+    bool interruptControlPermitted() const;
+    void completeDeferredDisable(std::uint64_t followingProgramOrder);
+    void applyInterruptDisable();
     bool frontEndContinuationActive() const;
     EEIssueMemberOutcome resolveIssueLatchFailure();
     EEIssueGroupExecutionResult executeIssueGroup(
@@ -1473,6 +1477,8 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeCOP1RegisterMove(
       const EEInstruction &instruction,
       std::uint32_t address);
+    EEInstructionExecutionOutcome executeCOP0InterruptControl(
+      const EEInstruction &instruction);
     EEInstructionExecutionOutcome executeCOP0RegisterMove(
       const EEInstruction &instruction,
       std::uint32_t address);

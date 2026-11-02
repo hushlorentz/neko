@@ -199,6 +199,8 @@ void NekoSaveStateCodec::writeEECore(
     "issueLatchInstruction",
     core.issueLatch.instruction.raw);
   writer->writeFieldU64("nextProgramOrder", core.nextEEProgramOrder);
+  writer->writeFieldU64(
+    "deferredDisableProgramOrder", core.deferredDisableProgramOrder);
   {
     auto operations = writer->scope("inFlightCOP1Operations");
     for (std::size_t index = 0;
@@ -679,8 +681,11 @@ void NekoSaveStateCodec::readEECore(
     reader->readFieldU32("issueLatchInstruction");
   core->nextEEProgramOrder =
     reader->readFieldU64("nextProgramOrder");
+  core->deferredDisableProgramOrder =
+    reader->readFieldU64("deferredDisableProgramOrder");
   require(
-    core->nextEEProgramOrder != 0,
+    core->nextEEProgramOrder != 0 &&
+      core->deferredDisableProgramOrder < core->nextEEProgramOrder,
     "EE program-order counter is invalid");
   core->executingProgramOrder = 0;
   {
@@ -1825,6 +1830,19 @@ void NekoSaveStateCodec::readEECore(
     core->lastInstructionValid ||
       (core->lastAddress == 0 && lastInstruction == 0),
     "EE invalid last instruction contains state");
+  require(
+    core->deferredDisableProgramOrder == 0 ||
+      (!core->branchDelayPending &&
+       (core->state == EEExecutionState::Running ||
+        (core->state == EEExecutionState::Halted &&
+         core->haltReason == EEStopReason::HostHalt)) &&
+       (core->youngerAStageContinuation.active
+         ? core->youngerAStageContinuation.programOrder ==
+             core->deferredDisableProgramOrder + 1
+         : core->deferredDisableProgramOrder == core->nextEEProgramOrder - 1 &&
+           core->lastInstructionValid &&
+           core->lastDecodedInstruction.operation == EEOperation::DisableInterrupts)),
+    "EE deferred interrupt disable is inconsistent");
   require(
     !core->issueLatch.valid ||
       (core->pc == core->issueLatch.address &&

@@ -2832,6 +2832,16 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate focused integration and the required full gates, independently
       review, and verify progress with fresh authorized BIOS evidence.
 
+### EE COP0 Interrupt Control
+
+- [x] Establish the observed opcode and companion interrupt-control contract,
+      including privilege, status fields and instruction-ordering boundaries.
+- [x] Implement the selected controls through existing EE decode/COP0 ownership,
+      with explicit deferred-effect lifecycle where selected, preserving precise
+      exceptions, retirement, persistence and pending-interrupt delivery.
+- [x] Validate focused decode/system/state integration, independently review,
+      and verify progress with fresh authorized BIOS evidence.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

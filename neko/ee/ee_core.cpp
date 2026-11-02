@@ -1253,6 +1253,7 @@ void EECore::reset()
   youngerAStageContinuation = {};
   cancelInFlightCOP1(COP1CancellationScope::All);
   nextEEProgramOrder = 1;
+  deferredDisableProgramOrder = 0;
   executingProgramOrder = 0;
   pendingMac0 = {};
   pendingMac1 = {};
@@ -2216,6 +2217,7 @@ void EECore::resetExecutionContinuation()
   issueSelection = {};
   cancelInFlightCOP1(COP1CancellationScope::All);
   nextEEProgramOrder = 1;
+  deferredDisableProgramOrder = 0;
 }
 
 bool EECore::frontEndContinuationActive() const
@@ -2266,6 +2268,7 @@ EEIssueMemberOutcome EECore::resolveIssueLatchFailure()
         instruction));
       return EEIssueMemberOutcome::Faulted;
     case IssueLatchFailure::UnsupportedInstruction:
+      completeDeferredDisable(nextEEProgramOrder);
       rejectedInstructionValue = instruction;
       pc = address;
       state = EEExecutionState::Halted;
@@ -2924,6 +2927,7 @@ void EECore::executeYoungerAStageContinuation()
   switch (execution)
   {
     case EEInstructionExecutionOutcome::Completed:
+      completeDeferredDisable(continuation.programOrder);
       memorySystem.retireInstruction();
       return;
     case EEInstructionExecutionOutcome::Faulted:
@@ -3064,6 +3068,7 @@ EEIssueMemberOutcome EECore::executeIssueMember(
   switch (execution)
   {
     case EEInstructionExecutionOutcome::Completed:
+      completeDeferredDisable(instructionProgramOrder);
       memorySystem.retireInstruction();
       break;
     case EEInstructionExecutionOutcome::Delayed:
@@ -3072,6 +3077,7 @@ EEIssueMemberOutcome EECore::executeIssueMember(
       return EEIssueMemberOutcome::Faulted;
     case EEInstructionExecutionOutcome::Halted:
     case EEInstructionExecutionOutcome::Rejected:
+      completeDeferredDisable(instructionProgramOrder);
       clearIssueFrontEnd();
       return EEIssueMemberOutcome::Cancelled;
   }
@@ -3243,6 +3249,9 @@ EEInstructionExecutionOutcome EECore::executeInstruction(
     case EEOperation::MoveWordFromCOP0:
     case EEOperation::MoveWordToCOP0:
       return executeCOP0RegisterMove(instruction, address);
+    case EEOperation::EnableInterrupts:
+    case EEOperation::DisableInterrupts:
+      return executeCOP0InterruptControl(instruction);
     case EEOperation::ReadIndexedTLBEntry:
     case EEOperation::WriteIndexedTLBEntry:
     case EEOperation::WriteRandomTLBEntry:
@@ -5915,6 +5924,57 @@ EEInstructionExecutionOutcome EECore::executeSoftwareException(
     address,
     instruction.raw));
   return EEInstructionExecutionOutcome::Faulted;
+}
+
+bool EECore::interruptControlPermitted() const
+{
+  return
+    (cop0Status & (EECOP0Status::INTERRUPT_CONTROL_ENABLE |
+      EECOP0Status::EXCEPTION_LEVEL | EECOP0Status::ERROR_LEVEL)) != 0 ||
+    (cop0Status & EECOP0Status::PRIVILEGE_MASK) == 0;
+}
+
+void EECore::applyInterruptDisable()
+{
+  if (interruptControlPermitted())
+  {
+    cop0Status &= ~EECOP0Status::MASTER_INTERRUPT_ENABLE;
+  }
+}
+
+void EECore::completeDeferredDisable(std::uint64_t followingProgramOrder)
+{
+  if (deferredDisableProgramOrder != 0 &&
+      deferredDisableProgramOrder < followingProgramOrder)
+  {
+    deferredDisableProgramOrder = 0;
+    applyInterruptDisable();
+  }
+}
+
+EEInstructionExecutionOutcome EECore::executeCOP0InterruptControl(
+  const EEInstruction &instruction)
+{
+  if (instruction.operation == EEOperation::EnableInterrupts)
+  {
+    if (interruptControlPermitted())
+    {
+      cop0Status |= EECOP0Status::MASTER_INTERRUPT_ENABLE;
+    }
+  }
+  else
+  {
+    completeDeferredDisable(executingProgramOrder);
+    if (branchDelayPending)
+    {
+      applyInterruptDisable();
+    }
+    else
+    {
+      deferredDisableProgramOrder = executingProgramOrder;
+    }
+  }
+  return EEInstructionExecutionOutcome::Completed;
 }
 
 EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
@@ -10284,6 +10344,8 @@ EECore::makeExceptionTransitionRequest(
 void EECore::enterException(
   const ExceptionTransitionRequest &request)
 {
+  completeDeferredDisable(request.programOrder);
+  deferredDisableProgramOrder = 0;
   cancelInFlightCOP1(
     COP1CancellationScope::AtOrAfter,
     request.programOrder);
@@ -10551,6 +10613,7 @@ std::uint64_t EECore::stateHash() const
   hashEEStateValue(&hash, cop0Count);
   hashEEStateValue(&hash, cop0Compare);
   hashEEStateValue(&hash, cop0Status);
+  hashEEStateValue(&hash, deferredDisableProgramOrder);
   hashEEStateValue(&hash, cop0Cause);
   hashEEStateValue(&hash, cop0EPC);
   hashEEStateValue(&hash, cop0ErrorEPC);

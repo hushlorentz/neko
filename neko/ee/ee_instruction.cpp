@@ -159,6 +159,8 @@ namespace
       case EEOperation::WriteIndexedTLBEntry:
       case EEOperation::WriteRandomTLBEntry:
       case EEOperation::ProbeTLB:
+      case EEOperation::EnableInterrupts:
+      case EEOperation::DisableInterrupts:
       case EEOperation::Jump:
         break;
       case EEOperation::CacheMaintenance:
@@ -2003,14 +2005,14 @@ namespace
       case 0x08:
         instruction->operation = EEOperation::ProbeTLB;
         return;
+      case 0x38:
+        instruction->operation = EEOperation::EnableInterrupts;
+        return;
+      case 0x39:
+        instruction->operation = EEOperation::DisableInterrupts;
+        return;
     }
-    const bool deferredOperation =
-      instruction->function == 0x38 ||
-      instruction->function == 0x39;
-    reject(
-      deferredOperation
-        ? DecodeKind::Unsupported
-        : DecodeKind::Reserved);
+    reject(DecodeKind::Reserved);
   }
 
   void applyCop2(EEInstruction *instruction)
@@ -2429,6 +2431,8 @@ EEInstructionRouting buildOperationRouting(EEOperation operation)
     case EEOperation::WriteIndexedTLBEntry:
     case EEOperation::WriteRandomTLBEntry:
     case EEOperation::ProbeTLB:
+    case EEOperation::EnableInterrupts:
+    case EEOperation::DisableInterrupts:
       return {
         EEInstructionCategory::COP0,
         PIPE_1,
@@ -2758,6 +2762,9 @@ EEExecutionFamily executionFamilyFor(EEOperation operation)
     case EEOperation::MoveWordFromCOP0:
     case EEOperation::MoveWordToCOP0:
       return EEExecutionFamily::COP0RegisterMove;
+    case EEOperation::EnableInterrupts:
+    case EEOperation::DisableInterrupts:
+      return EEExecutionFamily::COP0InterruptControl;
     case EEOperation::ReadIndexedTLBEntry:
     case EEOperation::WriteIndexedTLBEntry:
     case EEOperation::WriteRandomTLBEntry:

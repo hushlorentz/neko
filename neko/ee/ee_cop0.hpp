@@ -110,6 +110,8 @@ namespace EECOP0Status
   constexpr std::uint32_t TIMER_MASK = UINT32_C(1) << 15;
   constexpr std::uint32_t MASTER_INTERRUPT_ENABLE =
     UINT32_C(1) << 16;
+  constexpr std::uint32_t INTERRUPT_CONTROL_ENABLE =
+    UINT32_C(1) << 17;
   constexpr std::uint32_t CACHE_HIT = UINT32_C(1) << 18;
   constexpr std::uint32_t BOOTSTRAP_EXCEPTION_VECTOR =
     UINT32_C(1) << 22;

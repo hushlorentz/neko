@@ -501,6 +501,12 @@ TEST_CASE("Every EE operation has complete shared metadata")
             EEExecutionFamily::COP0RegisterMove,
             EEExecutionDispatch::Immediate
           };
+        case EEOperation::EnableInterrupts:
+        case EEOperation::DisableInterrupts:
+          return ExpectedExecutionClassification{
+            EEExecutionFamily::COP0InterruptControl,
+            EEExecutionDispatch::Immediate
+          };
         case EEOperation::ReadIndexedTLBEntry:
         case EEOperation::WriteIndexedTLBEntry:
         case EEOperation::WriteRandomTLBEntry:
@@ -1910,9 +1916,7 @@ TEST_CASE("EE ERET instruction decoding")
   REQUIRE_THROWS_WITH(
     decodeEEInstruction(UINT32_C(0x42000058)),
     "Reserved EE instruction encoding.");
-  REQUIRE_THROWS_WITH(
-    decodeEEInstruction(UINT32_C(0x42000038)),
-    "Unsupported EE instruction encoding.");
+  REQUIRE_NOTHROW(decodeEEInstruction(UINT32_C(0x42000038)));
   REQUIRE_THROWS_WITH(
     decodeEEInstruction(UINT32_C(0x40000001)),
     "Reserved EE instruction encoding.");
@@ -2061,7 +2065,7 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
           break;
         case 0x38:
         case 0x39:
-          requireUnsupported(raw);
+          REQUIRE_NOTHROW(decodeEEInstruction(raw));
           break;
         default:
           requireReserved(raw);

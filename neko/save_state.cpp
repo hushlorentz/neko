@@ -941,6 +941,8 @@ void NekoSaveStateCodec::commitSystem(
     source->eeCoreComponent.cop0Compare;
   destination->eeCoreComponent.cop0Status =
     source->eeCoreComponent.cop0Status;
+  destination->eeCoreComponent.deferredDisableProgramOrder =
+    source->eeCoreComponent.deferredDisableProgramOrder;
   destination->eeCoreComponent.cop0Cause =
     source->eeCoreComponent.cop0Cause;
   destination->eeCoreComponent.cop0EPC =
