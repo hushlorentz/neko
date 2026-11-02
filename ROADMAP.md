@@ -1925,10 +1925,10 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 - [x] Establish and implement the bounded selector-6 initialization contract,
       preserving unsupported accesses and authored CPU/lifecycle/trace coverage.
-- [ ] Repeat first-failure discovery, manual-first research, bounded repair and
+- [x] Repeat first-failure discovery, manual-first research, bounded repair and
       BIOS rediscovery toward the guest handshake; retain explicit provisional
       policies and stop rather than fabricate readiness or device completion.
-- [ ] Run focused regressions per implementation and complete optimized and
+- [x] Run focused regressions per implementation and complete optimized and
       AddressSanitizer checks every five implementations; retain immediate
       broader validation for ownership/lifetime or cross-cutting persistence
       changes and final handshake conformance.
@@ -2323,8 +2323,9 @@ An earlier unsupported dependency is a scope checkpoint, not completion.
 
 ### Real BIOS Handshake Prerequisites
 
-Discovery resumed after the selected Milestone 10 CD/DVD startup prerequisite
-and EE MCH-window implementation; the handshake target remains incomplete.
+These prerequisite blocks continued discovery after the selected Milestone 10
+CD/DVD startup prerequisite and EE MCH-window implementation, leading to the
+real BIOS handshake conformance block below.
 
 - [x] Restore and independently review the existing exact f500 stateless
       word-write contract removed by MCH expansion; verify BIOS progress and
@@ -2849,31 +2850,32 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] With separate cycle-budget authorization, observe beyond the former
       21M ceiling without bypassing real serial-transmit polling; attribute
       the first normal-path failure in the authorized 50M observation.
-- [ ] Pin the exact guest-produced request/peer-response checkpoint, including
+- [x] Pin the exact guest-produced request/peer-response checkpoint, including
       flags or packets and CPU PCs; keep the handshake target incomplete until
       its guest behavior is identified.
-- [ ] Demonstrate that checkpoint through both CPUs' real startup/SIF execution,
+- [x] Demonstrate that checkpoint through both CPUs' real startup/SIF execution,
       without fabricated readiness, host RPC responses, skipped instructions,
       or generic device stubs.
-- [ ] Record the first subsequent out-of-scope device dependency with
+- [x] Record the first subsequent out-of-scope device dependency with
       CPU/access/wait evidence for Milestone 10 or its owning later milestone,
       without implementing that device here.
-- [ ] Reproduce the BIOS checkpoint and boundary across bounded repetitions,
-      trace modes, and save/load; retain authored BIOS-free regressions for
-      every implemented prerequisite.
+- [x] Reproduce the BIOS checkpoint and boundary across bounded repetitions,
+      trace modes, and a fresh cold-validated pre-handshake save/load point;
+      retain authored BIOS-free regressions for every implemented prerequisite.
 
 ### Milestone Conformance and Closure
 
-- [ ] Audit the completed authored two-CPU transport/lifecycle matrix for
+- [x] Audit the completed authored two-CPU transport/lifecycle matrix for
       startup-prerequisite coverage gaps; add only missing cases and run the
       complete optimized check, preserving existing EE/IOP/graphics workflows.
-- [ ] Complete the bounded architecture and maintainability review of shared
+- [x] Complete the bounded architecture and maintainability review of shared
       ownership, DMA transitions, scheduling, reset, diagnostics, and persistence.
-- [ ] Reconcile provisional policies and the BIOS dependency record; expand
-      Milestone 10 only from demonstrated boot-service needs.
-- [ ] Complete independent final startup/interconnect review, resolve concrete
-      findings, and run optimized AddressSanitizer and native macOS leak checks;
-      this also closes the real-BIOS conformance block.
+- [x] Reconcile provisional policies and the BIOS dependency record; retain the
+      demonstrated device boundary for Milestone 10 regrouping.
+- [x] Complete independent final startup/interconnect review, resolve concrete
+      findings, and revalidate any accepted repairs.
+- [x] Pass the final complete optimized, AddressSanitizer and native macOS
+      leak checks; close the real-BIOS conformance block and milestone.
 
 ## Milestone 10: Boot Services, Media, and Input
 
@@ -2882,8 +2884,10 @@ including optical-media commands and data flow, SIO2-facing input, controller
 and memory-card behavior, and any required ROM or module-loading support.
 Preserve deterministic emulated device time independently of host I/O speed.
 
-The selected CD/DVD startup prerequisite is implemented. Milestone 9's
-real-handshake discovery has resumed; Milestone 9 remains incomplete.
+The selected IOP CD/DVD startup prerequisite is implemented. Milestone 9 is
+complete, including real BIOS SIF flag exchange and repeated trace/save-load
+conformance. Regroup around the demonstrated EE-side CD/DVD access boundary
+before selecting further implementation scope.
 
 ### CD/DVD Startup Dependency Planning
 
