@@ -149,6 +149,195 @@ TEST_CASE("EE hold guest merge stores require a complete word without read modif
   }
 }
 
+TEST_CASE("EE SIF2 DMA initialization admits only an exact zero word",
+  "[ee][bus][sif2-init]")
+{
+  constexpr std::uint32_t address = 0x1000c800;
+  NekoSystem system;
+  seed(system);
+  auto &bus = system.eeBus();
+  const auto eeHash = system.eeStateHash();
+  const auto iopHash = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  system.startTrace();
+  for (unsigned repeat = 0; repeat < 3; ++repeat)
+  {
+    REQUIRE(bus.writeData32(address, 0));
+    for (const auto alias : {0u, 0x80000000u, 0xa0000000u})
+    {
+      REQUIRE_NOTHROW(bus.write32(address | alias, 0));
+    }
+  }
+  for (const auto value : {1u, 4u, 0x80u, 0x100u, 0x101u, 0xffff0000u,
+         UINT32_MAX})
+  {
+    CAPTURE(value);
+    REQUIRE_FALSE(bus.writeData32(address, value));
+    REQUIRE_THROWS_AS(bus.write32(address, value), std::out_of_range);
+  }
+  std::uint8_t byte = 0x12;
+  std::uint16_t half = 0x1234;
+  std::uint32_t word = 0x12345678;
+  std::uint64_t wide = UINT64_MAX;
+  EEQuadword quad = {UINT64_MAX, UINT64_MAX};
+  for (unsigned lane = 0; lane < 4; ++lane)
+  {
+    REQUIRE_FALSE(bus.readData8(address + lane, &byte));
+    REQUIRE_FALSE(bus.writeData8(address + lane, 0));
+  }
+  for (const auto lane : {0u, 2u})
+  {
+    REQUIRE_FALSE(bus.readData16(address + lane, &half));
+    REQUIRE_FALSE(bus.writeData16(address + lane, 0));
+  }
+  REQUIRE_FALSE(bus.readData32(address, &word));
+  REQUIRE_FALSE(bus.readData64(address, &wide));
+  REQUIRE_FALSE(bus.writeData64(address, 0));
+  REQUIRE_FALSE(bus.readData128(address, &quad));
+  REQUIRE_FALSE(bus.writeData128(address, {0, 0}));
+  REQUIRE_FALSE(bus.readDMAC128(address, &quad));
+  REQUIRE_FALSE(bus.writeDMAC128(address, {0, 0}));
+  REQUIRE_FALSE(bus.readInstruction32(address, &word));
+  REQUIRE_FALSE(bus.isCacheFillRange(address, 4));
+  REQUIRE(byte == 0x12);
+  REQUIRE(half == 0x1234);
+  REQUIRE(word == 0x12345678);
+  REQUIRE(wide == UINT64_MAX);
+  REQUIRE(quad.low == UINT64_MAX);
+  REQUIRE(quad.high == UINT64_MAX);
+  for (const auto alias : {0u, 0x80000000u, 0xa0000000u})
+  {
+    REQUIRE_THROWS_AS(bus.read32(address | alias), std::out_of_range);
+    REQUIRE_THROWS_WITH(bus.write64(address | alias, 0),
+      "EE bus address supports full 32-bit accesses only.");
+    REQUIRE_THROWS_AS(bus.writeQuadword(address | alias, {{0, 0, 0, 0}}),
+      std::out_of_range);
+  }
+  for (const auto offset : {4u, 8u, 12u, 0x10u, 0x20u})
+  {
+    REQUIRE_FALSE(bus.writeData32(address + offset, 0));
+    REQUIRE_FALSE(bus.readData32(address + offset, &word));
+  }
+  REQUIRE_THROWS_AS(bus.writeData32(address + 1, 0), std::invalid_argument);
+  REQUIRE_FALSE(bus.writeData32(address | 0x80000000u, 0));
+  REQUIRE_FALSE(bus.writeData32(address | 0xa0000000u, 0));
+  REQUIRE(system.iopBus().write32(address, 0).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.iopStateHash() == iopHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  REQUIRE(system.trace().empty());
+  EEBus unattached(&system.vif0(), &system.vif1(), &system.gifRegisters(),
+    &system.gifPath3(), &system.gs(), &system.interruptController());
+  REQUIRE_FALSE(unattached.writeData32(address, 0));
+  system.reset();
+  REQUIRE(bus.writeData32(address, 0));
+}
+
+TEST_CASE("EE SIF2 DMA guest initialization preserves word and fault boundaries",
+  "[ee][bus][sif2-init][guest]")
+{
+  constexpr std::uint32_t address = 0xb000c800;
+  for (const std::uint8_t opcode : {0x2b, 0x2a, 0x2e})
+  {
+    for (const auto value : {0u, 0x100u})
+    {
+      for (std::uint16_t lane = 0; lane < (opcode == 0x2b ? 1 : 4); ++lane)
+      {
+        CAPTURE(opcode);
+        CAPTURE(value);
+        CAPTURE(lane);
+        NekoSystem system;
+        const auto sifHash = system.sifStateHash();
+        const bool full = opcode == 0x2b || lane == (opcode == 0x2a ? 3 : 0);
+        const bool admitted = full && value == 0;
+        const auto result = execute(system, opcode, value, lane, address);
+        REQUIRE(result.pendingException ==
+          (admitted ? EEException::None : EEException::DataBusErrorStore));
+        REQUIRE_FALSE(result.cycleLimitReached);
+        if (admitted)
+        {
+          REQUIRE(result.instructions != 0);
+        }
+        else
+        {
+          REQUIRE(result.exceptionAddress == address + lane);
+          REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+        }
+        REQUIRE(system.eeCore().generalRegister(2).low == value);
+        REQUIRE(system.eeCore().generalRegister(2).high == 0xfeedface);
+        REQUIRE(system.sifStateHash() == sifHash);
+        REQUIRE(system.dmacController().status() == 0);
+        REQUIRE_FALSE(system.dmacController().interruptPending());
+        requireWordStoreObservation(system, value, admitted, address);
+      }
+    }
+  }
+  for (const std::uint8_t opcode : {0x20, 0x21, 0x23, 0x37, 0x1e,
+         0x28, 0x29, 0x3f, 0x1f})
+  {
+    CAPTURE(opcode);
+    NekoSystem system;
+    const bool store = opcode == 0x28 || opcode == 0x29 ||
+      opcode == 0x3f || opcode == 0x1f;
+    const auto result = execute(system, opcode, 0, 0, address);
+    REQUIRE(result.pendingException ==
+      (store ? EEException::DataBusErrorStore : EEException::DataBusErrorLoad));
+    REQUIRE(result.exceptionAddress == address);
+    REQUIRE(system.eeCore().cop0Register(EECOP0Register::EPC) == 0xa0000000);
+    REQUIRE(system.dmacController().status() == 0);
+  }
+}
+
+TEST_CASE("EE SIF2 DMA zero stores retire through both kernel aliases",
+  "[ee][bus][sif2-init][guest]")
+{
+  for (const auto address : {0x9000c800u, 0xb000c800u})
+  {
+    CAPTURE(address);
+    NekoSystem traced;
+    const auto result = execute(traced, 0x2b, 0, 0, address);
+    REQUIRE(result.pendingException == EEException::None);
+    REQUIRE(result.instructions != 0);
+    REQUIRE(traced.eeCore().programCounter() == 0xa0000004);
+    std::size_t stores = 0;
+    for (const auto &event : traced.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::EE ||
+          event.type != NekoTraceEventType::MemoryAccess ||
+          event.value0 != address)
+      {
+        continue;
+      }
+      ++stores;
+      REQUIRE(event.value1 == 0);
+      REQUIRE(event.value2 == 0);
+      const bool cached = address == 0x9000c800;
+      REQUIRE(event.value3 == nekoPackEEMemoryTraceMetadata({
+        0x1000c800, 4, NekoEETraceMemory::AccessKind::DataStore,
+        NekoEETraceMemory::TranslationOutcome::Translated,
+        cached ? NekoEETraceMemory::CacheRoute::CachedNoncoherent
+               : NekoEETraceMemory::CacheRoute::Uncached,
+        static_cast<std::uint8_t>(cached ? 3 : 2), false, true,
+        NekoEETraceMemory::CacheAccess::Bypassed,
+        NekoEETraceMemory::TransferOutcome::Completed,
+        NekoEETraceMemory::FailurePhase::None}));
+    }
+    REQUIRE(stores == 1);
+    REQUIRE_FALSE(traced.traceTruncated());
+    NekoSystem plain;
+    plain.eeBus().write32(0, 0xac220000);
+    plain.eeCore().setGeneralRegister(1, {address, 0});
+    plain.eeCore().setGeneralRegister(2, {0, 0xfeedface});
+    plain.eeCore().setCOP0Register(EECOP0Register::Status, 0);
+    plain.eeCore().startExecution(0xa0000000);
+    const auto plainResult = plain.stepEEInstruction(16);
+    REQUIRE(plainResult.pendingException == EEException::None);
+    REQUIRE(plain.eeStateHash() == traced.eeStateHash());
+    REQUIRE(plain.sifStateHash() == traced.sifStateHash());
+    REQUIRE(plain.trace().empty());
+  }
+}
+
 TEST_CASE("EE serial default idle configuration and reset release are stateless",
   "[ee][bus][serial-init]")
 {
@@ -1080,11 +1269,10 @@ TEST_CASE("EE absent DMAC slots retain exact width and address boundaries",
     }
     REQUIRE(system.iopBus().write32(address, 0).status == IOPBusStatus::Unmapped);
   }
-  for (const auto realUnimplemented : {0x1000c800u})
-  {
-    CAPTURE(realUnimplemented);
-    REQUIRE_FALSE(bus.writeData32(realUnimplemented, 0));
-  }
+  REQUIRE_FALSE(DMACController::isAbsentChannelRegisterAddress(
+    EEMemoryMap::D7_CHCR));
+  REQUIRE(bus.writeData32(EEMemoryMap::D7_CHCR, 0));
+  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::D7_CHCR, 1));
   for (const auto realImplemented : {EEMemoryMap::D0_TADR, EEMemoryMap::D0_ASR0,
          EEMemoryMap::D0_ASR1, EEMemoryMap::D1_TADR,
          EEMemoryMap::D1_ASR0, EEMemoryMap::D1_ASR1, EEMemoryMap::D2_TADR,

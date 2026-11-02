@@ -46,6 +46,12 @@ void DMACController::writeControl(std::uint32_t value)
   controlRegister = value;
 }
 
+bool DMACController::writeSIF2Initialization(std::uint32_t value) const
+{
+  // Only inactive zero initialization; SIF2 programming and transfers are absent.
+  return value == 0;
+}
+
 bool DMACController::isAbsentChannelRegisterAddress(std::uint32_t address)
 {
   // EE User's Manual 3.1 p59: optional TADR, ASR0/1 and SADR inventory.

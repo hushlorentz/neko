@@ -119,6 +119,7 @@ namespace EEMemoryMap
   constexpr std::uint32_t D6_MADR = 0x1000c410;
   constexpr std::uint32_t D6_QWC = 0x1000c420;
   constexpr std::uint32_t D6_TADR = 0x1000c430;
+  constexpr std::uint32_t D7_CHCR = 0x1000c800;
   constexpr std::uint32_t D2_MADR = 0x1000a010;
   constexpr std::uint32_t D2_QWC = 0x1000a020;
   constexpr std::uint32_t D2_TADR = 0x1000a030;

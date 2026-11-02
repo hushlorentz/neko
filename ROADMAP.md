@@ -2796,6 +2796,18 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate host/guest and state/trace boundaries, independently review,
       and verify progress with fresh authorized BIOS evidence.
 
+### EE SIF2 DMAC Initialization Contract
+
+- [x] Research channel-7 CHCR initialization and its containing register family;
+      select an inactive initialization boundary without enabling SIF2 transfers.
+
+### Bounded EE SIF2 DMAC Initialization
+
+- [x] Implement the selected initialization access through the existing DMAC
+      owner, with exact value/width admission and no fabricated DMA activity.
+- [x] Validate host/guest and state/trace boundaries, independently review,
+      and verify progress with fresh authorized BIOS evidence.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

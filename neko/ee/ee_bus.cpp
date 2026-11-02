@@ -99,7 +99,8 @@ namespace
       address == EEMemoryMap::D5_CHCR || address == EEMemoryMap::D5_MADR ||
       address == EEMemoryMap::D5_QWC ||
       address == EEMemoryMap::D6_CHCR || address == EEMemoryMap::D6_MADR ||
-      address == EEMemoryMap::D6_QWC || address == EEMemoryMap::D6_TADR;
+      address == EEMemoryMap::D6_QWC || address == EEMemoryMap::D6_TADR ||
+      address == EEMemoryMap::D7_CHCR;
   }
 
   void requireSplitWordAccess(std::uint32_t address)
@@ -2008,6 +2009,9 @@ bool EEBus::writeMapped32(
         checkedGuestAccess,
         [&]() { dmac.writeTagAddress(value); });
     }
+    case EEMemoryMap::D7_CHCR:
+      return dmacController != nullptr &&
+        dmacController->writeSIF2Initialization(value);
     case EEMemoryMap::D8_CHCR:
     {
       ScratchpadDMACChannel &dmac =
