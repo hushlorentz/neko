@@ -340,6 +340,15 @@ class EEBus
     friend class NekoSaveStateCodec;
     friend class NekoSystem;
 
+    enum class DeviceWritePolicy
+    {
+      HostException,
+      GuestRejection
+    };
+
+    template<typename Write>
+    static bool performDeviceWrite(DeviceWritePolicy policy, Write write);
+
     bool mainMemoryAddress(
       std::uint32_t address,
       std::size_t width,
@@ -360,14 +369,21 @@ class EEBus
     bool writeMapped32(
       std::uint32_t address,
       std::uint32_t value,
-      bool checkedGuestAccess);
+      DeviceWritePolicy policy);
+    bool readDMARegister32(
+      std::uint32_t address,
+      std::uint32_t *value) const;
+    bool writeDMARegister32(
+      std::uint32_t address,
+      std::uint32_t value,
+      DeviceWritePolicy policy);
     bool readMapped64(
       std::uint32_t address,
       std::uint64_t *value) const;
     bool writeMapped64(
       std::uint32_t address,
       std::uint64_t value,
-      bool checkedGuestAccess);
+      DeviceWritePolicy policy);
     std::uint32_t vifStatus(const VIF &vif) const;
     void writeVIFControl(VIF &vif, std::uint32_t value);
     DMACController &attachedDMACController() const;

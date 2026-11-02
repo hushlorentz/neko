@@ -64,15 +64,10 @@ namespace
       address < EEMemoryMap::MCH_WINDOW_END;
   }
 
-  bool ba0HalfwordAddress(std::uint32_t address)
+  bool ba0WindowAddress(std::uint32_t address)
   {
-    return address == EEMemoryMap::BA0_COMMAND_00 ||
-      address == EEMemoryMap::BA0_CONTROL_02 ||
-      address == EEMemoryMap::BA0_REGISTER_04 ||
-      address == EEMemoryMap::BA0_STATUS_06 ||
-      address == EEMemoryMap::BA0_REGISTER_08 ||
-      (address >= EEMemoryMap::BA0_TRANSFER_BEGIN &&
-       address < EEMemoryMap::BA0_TRANSFER_END);
+    return address >= EEMemoryMap::BA0_BASE &&
+      address < EEMemoryMap::BA0_TRANSFER_END;
   }
 
   bool fullWordOnlyAddress(std::uint32_t address)
@@ -137,30 +132,30 @@ namespace
       throw std::invalid_argument(message);
     }
   }
+}
 
-  template<typename Write>
-  bool performDeviceWrite(
-    bool checkedGuestAccess,
-    Write write)
+template<typename Write>
+bool EEBus::performDeviceWrite(
+  DeviceWritePolicy policy,
+  Write write)
+{
+  if (policy == DeviceWritePolicy::HostException)
   {
-    if (!checkedGuestAccess)
-    {
-      write();
-      return true;
-    }
-    try
-    {
-      write();
-      return true;
-    }
-    catch (const std::invalid_argument &)
-    {
-      return false;
-    }
-    catch (const std::logic_error &)
-    {
-      return false;
-    }
+    write();
+    return true;
+  }
+  try
+  {
+    write();
+    return true;
+  }
+  catch (const std::invalid_argument &)
+  {
+    return false;
+  }
+  catch (const std::logic_error &)
+  {
+    return false;
   }
 }
 
@@ -879,7 +874,7 @@ bool EEBus::readData16(
     *value = 0;
     return true;
   }
-  if (ba0HalfwordAddress(address))
+  if (ba0WindowAddress(address))
   {
     return ba0Registers.readHalfword(address - EEMemoryMap::BA0_BASE, *value);
   }
@@ -932,7 +927,7 @@ bool EEBus::writeData16(
     address,
     2,
     "EE halfword store must be naturally aligned.");
-  if (ba0HalfwordAddress(address))
+  if (ba0WindowAddress(address))
   {
     return ba0Registers.writeHalfword(address - EEMemoryMap::BA0_BASE, value);
   }
@@ -981,7 +976,7 @@ bool EEBus::writeData32(
     address,
     4,
     "EE word store must be naturally aligned.");
-  return writeMapped32(address, value, true);
+  return writeMapped32(address, value, DeviceWritePolicy::GuestRejection);
 }
 
 bool EEBus::readData64(
@@ -1037,7 +1032,7 @@ bool EEBus::writeData64(
       static_cast<std::uint32_t>(value >> 32));
     return true;
   }
-  return writeMapped64(address, value, true);
+  return writeMapped64(address, value, DeviceWritePolicy::GuestRejection);
 }
 
 bool EEBus::readBacking128(
@@ -1544,6 +1539,23 @@ bool EEBus::readMapped32(
     case EEMemoryMap::GIF_P3TAG:
       *value = gifRegisterFile->readPath3Tag();
       return true;
+    case EEMemoryMap::INTC_STAT:
+      *value = interruptController->status();
+      return true;
+    case EEMemoryMap::INTC_MASK:
+      *value = interruptController->mask();
+      return true;
+    default:
+      return readDMARegister32(address, value);
+  }
+}
+
+bool EEBus::readDMARegister32(
+  std::uint32_t address,
+  std::uint32_t *value) const
+{
+  switch (address)
+  {
     case EEMemoryMap::D3_CHCR:
       *value = attachedFromIPUDMAC().channelControl();
       return true;
@@ -1691,12 +1703,6 @@ bool EEBus::readMapped32(
     case EEMemoryMap::D_ENABLER:
       *value = attachedDMACController().holdControl();
       return true;
-    case EEMemoryMap::INTC_STAT:
-      *value = interruptController->status();
-      return true;
-    case EEMemoryMap::INTC_MASK:
-      *value = interruptController->mask();
-      return true;
     default:
       return false;
   }
@@ -1705,7 +1711,7 @@ bool EEBus::readMapped32(
 bool EEBus::writeMapped32(
   std::uint32_t address,
   std::uint32_t value,
-  bool checkedGuestAccess)
+  DeviceWritePolicy policy)
 {
   if (timersComponent != nullptr && EETimers::isRegisterAddress(address))
   {
@@ -1725,12 +1731,6 @@ bool EEBus::writeMapped32(
 
   if (writeIOPRAM(address, 4, {value, 0}))
   {
-    return true;
-  }
-
-  if (DMACController::isAbsentChannelRegisterAddress(address))
-  {
-    // Provisional write-discard policy; absent slots have no readback or state.
     return true;
   }
 
@@ -1769,7 +1769,7 @@ bool EEBus::writeMapped32(
     const SIFWriteResult result = sifComponent->writeEE(reg, value);
     if (result.outcome != SIFWriteOutcome::Completed)
     {
-      if (checkedGuestAccess)
+      if (policy == DeviceWritePolicy::GuestRejection)
       {
         return false;
       }
@@ -1805,17 +1805,17 @@ bool EEBus::writeMapped32(
     case EEMemoryMap::SIO_BGR:
       return attachedSerial().writeBaudRate(value);
     case EEMemoryMap::VIF0_FBRST:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { writeVIFControl(*vif0Component, value); });
     case EEMemoryMap::VIF0_MARK:
       return vif0Component->writeMarkRegister(value);
     case EEMemoryMap::VIF0_ERR:
       return vif0Component->writeErrorRegister(value);
     case EEMemoryMap::VIF1_STAT:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { vif1Component->writeStatus(value); });
     case EEMemoryMap::VIF1_FBRST:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { writeVIFControl(*vif1Component, value); });
     case EEMemoryMap::VIF1_MARK:
       return vif1Component->writeMarkRegister(value);
@@ -1823,190 +1823,214 @@ bool EEBus::writeMapped32(
       return vif1Component->writeErrorRegister(value);
     case EEMemoryMap::GIF_CTRL:
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { gifRegisterFile->writeControl(value); });
     case EEMemoryMap::GIF_MODE:
       gifRegisterFile->writeMode(value);
       return true;
+    case EEMemoryMap::INTC_STAT:
+      interruptController->acknowledge(value);
+      return true;
+    case EEMemoryMap::INTC_MASK:
+      interruptController->toggleMask(value);
+      return true;
+    default:
+      return writeDMARegister32(address, value, policy);
+  }
+}
+
+bool EEBus::writeDMARegister32(
+  std::uint32_t address,
+  std::uint32_t value,
+  DeviceWritePolicy policy)
+{
+  if (DMACController::isAbsentChannelRegisterAddress(address))
+  {
+    // Provisional write-discard policy; absent slots have no readback or state.
+    return true;
+  }
+
+  switch (address)
+  {
     case EEMemoryMap::D3_CHCR:
     {
       auto &dmac = attachedFromIPUDMAC();
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { dmac.writeChannelControl(value); });
     }
     case EEMemoryMap::D3_MADR:
     {
       auto &dmac = attachedFromIPUDMAC();
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { dmac.writeMemoryAddress(value); });
     }
     case EEMemoryMap::D3_QWC:
     {
       auto &dmac = attachedFromIPUDMAC();
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { dmac.writeQuadwordCount(value); });
     }
     case EEMemoryMap::D4_CHCR:
     {
       auto &dmac = attachedToIPUDMAC();
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { dmac.writeChannelControl(value); });
     }
     case EEMemoryMap::D4_MADR:
     {
       auto &dmac = attachedToIPUDMAC();
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { dmac.writeMemoryAddress(value); });
     }
     case EEMemoryMap::D4_QWC:
     {
       auto &dmac = attachedToIPUDMAC();
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { dmac.writeQuadwordCount(value); });
     }
     case EEMemoryMap::D4_TADR:
     {
       auto &dmac = attachedToIPUDMAC();
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { dmac.writeTagAddress(value); });
     }
     case EEMemoryMap::D0_CHCR:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedVIF0DMAC().writeChannelControl(value); });
     case EEMemoryMap::D0_MADR:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedVIF0DMAC().writeMemoryAddress(value); });
     case EEMemoryMap::D0_QWC:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedVIF0DMAC().writeQuadwordCount(value); });
     case EEMemoryMap::D0_TADR:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedVIF0DMAC().writeTagAddress(value); });
     case EEMemoryMap::D0_ASR0:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedVIF0DMAC().writeAddressStack(0, value); });
     case EEMemoryMap::D0_ASR1:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedVIF0DMAC().writeAddressStack(1, value); });
     case EEMemoryMap::D1_CHCR:
     {
       VIF1DMACChannel &dmac = attachedVIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeChannelControl(value); });
     }
     case EEMemoryMap::D1_MADR:
     {
       VIF1DMACChannel &dmac = attachedVIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeMemoryAddress(value); });
     }
     case EEMemoryMap::D1_QWC:
     {
       VIF1DMACChannel &dmac = attachedVIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeQuadwordCount(value); });
     }
     case EEMemoryMap::D1_TADR:
     {
       VIF1DMACChannel &dmac = attachedVIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeTagAddress(value); });
     }
     case EEMemoryMap::D1_ASR0:
     {
       VIF1DMACChannel &dmac = attachedVIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeAddressStack(0, value); });
     }
     case EEMemoryMap::D1_ASR1:
     {
       VIF1DMACChannel &dmac = attachedVIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeAddressStack(1, value); });
     }
     case EEMemoryMap::D2_CHCR:
     {
       GIFDMACChannel &dmac = attachedGIFDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeChannelControl(value); });
     }
     case EEMemoryMap::D2_MADR:
     {
       GIFDMACChannel &dmac = attachedGIFDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeMemoryAddress(value); });
     }
     case EEMemoryMap::D2_QWC:
     {
       GIFDMACChannel &dmac = attachedGIFDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeQuadwordCount(value); });
     }
     case EEMemoryMap::D2_TADR:
     {
       GIFDMACChannel &dmac = attachedGIFDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeTagAddress(value); });
     }
     case EEMemoryMap::D2_ASR0:
     {
       GIFDMACChannel &dmac = attachedGIFDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeAddressStack(0, value); });
     }
     case EEMemoryMap::D2_ASR1:
     {
       GIFDMACChannel &dmac = attachedGIFDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeAddressStack(1, value); });
     }
     case EEMemoryMap::D5_CHCR:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedSIF0DMAC().writeChannelControl(value); });
     case EEMemoryMap::D5_MADR:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedSIF0DMAC().writeMemoryAddress(value); });
     case EEMemoryMap::D5_QWC:
-      return performDeviceWrite(checkedGuestAccess,
+      return performDeviceWrite(policy,
         [&]() { attachedSIF0DMAC().writeQuadwordCount(value); });
     case EEMemoryMap::D6_CHCR:
     {
       SIF1DMACChannel &dmac = attachedSIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeChannelControl(value); });
     }
     case EEMemoryMap::D6_MADR:
     {
       SIF1DMACChannel &dmac = attachedSIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeMemoryAddress(value); });
     }
     case EEMemoryMap::D6_QWC:
     {
       SIF1DMACChannel &dmac = attachedSIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeQuadwordCount(value); });
     }
     case EEMemoryMap::D6_TADR:
     {
       SIF1DMACChannel &dmac = attachedSIF1DMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeTagAddress(value); });
     }
     case EEMemoryMap::D7_CHCR:
@@ -2017,7 +2041,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedFromScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeChannelControl(value); });
     }
     case EEMemoryMap::D8_MADR:
@@ -2025,7 +2049,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedFromScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeMemoryAddress(value); });
     }
     case EEMemoryMap::D8_QWC:
@@ -2033,7 +2057,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedFromScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeQuadwordCount(value); });
     }
     case EEMemoryMap::D8_SADR:
@@ -2041,7 +2065,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedFromScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeScratchpadAddress(value); });
     }
     case EEMemoryMap::D9_CHCR:
@@ -2049,7 +2073,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedToScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeChannelControl(value); });
     }
     case EEMemoryMap::D9_MADR:
@@ -2057,7 +2081,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedToScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeMemoryAddress(value); });
     }
     case EEMemoryMap::D9_QWC:
@@ -2065,7 +2089,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedToScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeQuadwordCount(value); });
     }
     case EEMemoryMap::D9_TADR:
@@ -2073,7 +2097,7 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedToScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeTagAddress(value); });
     }
     case EEMemoryMap::D9_SADR:
@@ -2081,35 +2105,35 @@ bool EEBus::writeMapped32(
       ScratchpadDMACChannel &dmac =
         attachedToScratchpadDMAC();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeScratchpadAddress(value); });
     }
     case EEMemoryMap::D_CTRL:
     {
       DMACController &dmac = attachedDMACController();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeControl(value); });
     }
     case EEMemoryMap::D_STAT:
     {
       DMACController &dmac = attachedDMACController();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeStatus(value); });
     }
     case EEMemoryMap::D_PCR:
     {
       DMACController &dmac = attachedDMACController();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writePriorityControl(value); });
     }
     case EEMemoryMap::D_SQWC:
     {
       DMACController &dmac = attachedDMACController();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeInterleaveSize(value); });
     }
     case EEMemoryMap::D_RBSR:
@@ -2122,17 +2146,11 @@ bool EEBus::writeMapped32(
     {
       DMACController &dmac = attachedDMACController();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() { dmac.writeStallAddress(value); });
     }
     case EEMemoryMap::D_ENABLEW:
       attachedDMACController().writeHoldControl(value);
-      return true;
-    case EEMemoryMap::INTC_STAT:
-      interruptController->acknowledge(value);
-      return true;
-    case EEMemoryMap::INTC_MASK:
-      interruptController->toggleMask(value);
       return true;
     default:
       return false;
@@ -2183,7 +2201,7 @@ void EEBus::write32(
     4,
     "EE bus 32-bit access must be naturally aligned.");
   address = hostPhysicalAddress(address);
-  if (writeMapped32(address, value, false))
+  if (writeMapped32(address, value, DeviceWritePolicy::HostException))
   {
     return;
   }
@@ -2250,7 +2268,7 @@ bool EEBus::readMapped64(
 bool EEBus::writeMapped64(
   std::uint32_t address,
   std::uint64_t value,
-  bool checkedGuestAccess)
+  DeviceWritePolicy policy)
 {
   std::uint32_t physicalAddress = 0;
   if (mainMemoryAddress(address, 8, &physicalAddress))
@@ -2269,7 +2287,7 @@ bool EEBus::writeMapped64(
   if (address == EEMemoryMap::GS_BUSDIR)
   {
     return performDeviceWrite(
-      checkedGuestAccess,
+      policy,
       [&]() {
         gsComponent->writePrivilegedRegister(
           GSPrivilegedRegisterAddress::BUSDIR,
@@ -2281,7 +2299,7 @@ bool EEBus::writeMapped64(
     {
       GSDisplay &display = attachedGSDisplay();
       return performDeviceWrite(
-        checkedGuestAccess,
+        policy,
         [&]() {
           display.writePrivilegedRegister(
             displayRegister,
@@ -2355,7 +2373,7 @@ void EEBus::write64(
     "EE bus 64-bit access must be naturally aligned.");
   address = hostPhysicalAddress(address);
   requireSplitWordAccess(address);
-  if (writeMapped64(address, value, false))
+  if (writeMapped64(address, value, DeviceWritePolicy::HostException))
   {
     return;
   }
