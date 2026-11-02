@@ -599,6 +599,11 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::DMAController:
     case Device::SIF1DMA:
     case Device::SIF0DMA:
+      if (width == 2)
+      {
+        return writeDMABlockControlHalfword(
+          location, static_cast<std::uint16_t>(value));
+      }
       return width == sizeof(IOPWord) ? writeDMARegister(location, value)
         : IOPBusWriteResult{};
     case Device::DPCR3Initialization:
@@ -724,6 +729,27 @@ IOPBusReadResult IOPBus::readDMARegister(const Location &location)
     }
   }
   return {};
+}
+
+IOPBusWriteResult IOPBus::writeDMABlockControlHalfword(
+  const Location &location, std::uint16_t value)
+{
+  if ((location.device != Device::SIF0DMA && location.device != Device::SIF1DMA) ||
+      (location.offset != 4 && location.offset != 6))
+  {
+    return {};
+  }
+  Location word = location;
+  word.offset = 4;
+  const auto current = readDMARegister(word);
+  if (current.status != IOPBusStatus::Completed)
+  {
+    return {};
+  }
+  const auto shift = static_cast<unsigned>((location.offset - 4) * 8);
+  const IOPWord mask = IOPWord{0xffff} << shift;
+  return writeDMARegister(word,
+    (current.value & ~mask) | (IOPWord{value} << shift));
 }
 
 IOPBusWriteResult IOPBus::writeDMARegister(

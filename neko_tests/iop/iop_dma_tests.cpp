@@ -697,7 +697,245 @@ TEST_CASE("IOP DMA channel 10 validates starts active writes and local abort",
   REQUIRE(system.iopDMAController().interruptStatus(SECONDARY) == FLAG);
 }
 
-TEST_CASE("IOP DMA MMIO admits exact words and rejects unsupported boundaries atomically",
+TEST_CASE("IOP SIF DMA BCR halfword writes preserve the other lane through both owners",
+  "[iop][dma][bus][bcr-halfword]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  const auto initial = system.iopStateHash();
+  const auto eeHash = system.eeStateHash();
+  const auto sifHash = system.sifStateHash();
+  for (const IOPAddress address : {0x1f801524u, BCR})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.write32(address, 0xabcd1234).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(address, 0x20).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0xabcd0020);
+    REQUIRE(bus.write16(address + 2, 0xfedc).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0xfedc0020);
+    for (IOPWord value : {0u, 0xffffu, 0x8001u})
+    {
+      REQUIRE(bus.write16(address, static_cast<std::uint16_t>(value)).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(bus.read32(address).value == (0xfedc0000 | value));
+      REQUIRE(bus.write16(address + 2, static_cast<std::uint16_t>(value)).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(bus.read32(address).value == ((value << 16) | value));
+      REQUIRE(bus.write16(address + 2, 0xfedc).status == IOPBusStatus::Completed);
+    }
+    const auto retained = address == BCR ? system.iopSIF1DMAC().blockControl() :
+      system.iopSIF0DMAC().blockControl();
+    REQUIRE(retained == 0xfedc8001);
+    REQUIRE(system.iopStateHash() != initial);
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(address + 2, 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0);
+    REQUIRE(system.iopStateHash() == initial);
+  }
+  REQUIRE(system.eeStateHash() == eeHash);
+  REQUIRE(system.sifStateHash() == sifHash);
+  REQUIRE(system.iopDMAController().interruptStatus(SECONDARY) == 0);
+  REQUIRE(system.iopInterruptController().status() == 0);
+}
+
+TEST_CASE("IOP SIF DMA BCR halfword writes preserve attachment width and active boundaries",
+  "[iop][dma][bus][bcr-halfword]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  IOPBus detached;
+  IOPBus receiverOnly;
+  receiverOnly.attachDMA(&system.iopDMAController(), &system.iopSIF1DMAC());
+  for (const IOPAddress address : {0x1f801524u, BCR})
+  {
+    REQUIRE(bus.write32(address, 0xabcd1234).status == IOPBusStatus::Completed);
+    const auto before = system.iopStateHash();
+    for (IOPAddress lane : {0u, 2u})
+    {
+      REQUIRE(detached.write16(address + lane, 0).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read16(address + lane).status == IOPBusStatus::Unmapped);
+    }
+    for (IOPAddress lane = 0; lane < 4; ++lane)
+    {
+      REQUIRE(bus.read8(address + lane).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write8(address + lane, 0).status == IOPBusStatus::Unmapped);
+    }
+    for (IOPAddress lane : {1u, 3u})
+    {
+      REQUIRE(bus.write16(address + lane, 0).status == IOPBusStatus::Misaligned);
+    }
+    for (std::uint8_t mask = 1; mask < 15; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.writeDMAC32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
+  }
+  for (const IOPAddress address : {0x1f801524u, 0x1f801526u})
+  {
+    REQUIRE(receiverOnly.write16(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  for (const IOPAddress address : {
+    DPCR, DICR, DPCR2, DICR2, AUXILIARY,
+    0x1f801520u, 0x1f801522u, 0x1f801528u, 0x1f80152au,
+    0x1f80152cu, 0x1f80152eu, MADR, MADR + 2, CHCR, CHCR + 2})
+  {
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(receiverOnly.write16(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE(receiverOnly.write16(BCR, 0x20).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(BCR).value == 0xabcd0020);
+  REQUIRE(bus.write32(0x1f801528, 0x01000401).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(CHCR, START).status == IOPBusStatus::Completed);
+  REQUIRE(system.sif().pushSIF1Quadword({{0x80001000, 4, 1, 2}}) ==
+    SIFTransferOutcome::Completed);
+  system.iopDMAController().writePriority(SECONDARY, 0x8000);
+  system.runMasterCycles(1);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+  const auto active = system.iopStateHash();
+  const auto sifHash = system.sifStateHash();
+  for (const IOPAddress address : {0x1f801524u, 0x1f801526u, BCR, BCR + 2})
+  {
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE(system.iopStateHash() == active);
+  REQUIRE(system.sifStateHash() == sifHash);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+  REQUIRE(system.iopSIF1DMAC().terminalPacket());
+  REQUIRE(system.iopSIF0DMAC().active());
+  REQUIRE(system.iopSIF1DMAC().active());
+}
+
+TEST_CASE("IOP SIF DMA guest BCR halfword stores retire with precise lane metadata",
+  "[iop][dma][bus][trace][bcr-halfword]")
+{
+  for (IOPAddress target : {0x9f801524u, 0xbf801524u, 0x9f801534u, 0xbf801534u})
+  {
+    CAPTURE(target);
+    NekoSystem traced;
+    NekoSystem plain;
+    const auto physical = target & 0x1fffffff;
+    const IOPWord program[] = {
+      0x3c010000 | (target >> 16),
+      0x34210000 | (target & 0xffff),
+      0x24020020, // addiu r2, r0, 0x20
+      0x10000001, // beq r0, r0, +1
+      0xa4220000, // sh r2, 0(r1), in the delay slot
+      0x3402ffff, // ori r2, r0, 0xffff
+      0xa4220002, // sh r2, 2(r1)
+      0x8c230000, // lw r3, 0(r1)
+      0
+    };
+    for (auto *system : {&traced, &plain})
+    {
+      REQUIRE(system->iopBus().write32(physical, 0xabcd1234).status ==
+        IOPBusStatus::Completed);
+      IOPAddress pc = 0;
+      for (IOPWord word : program)
+      {
+        REQUIRE(system->iopBus().write32(pc, word).status ==
+          IOPBusStatus::Completed);
+        pc += 4;
+      }
+      system->iopCore().startExecution(0xa0000000);
+    }
+    traced.startTrace();
+    traced.runMasterCycles(9 * 8);
+    plain.runMasterCycles(9 * 8);
+    REQUIRE(traced.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(traced.iopCore().exception().kind == IOPException::None);
+    REQUIRE(traced.iopCore().retiredInstructions() == 9);
+    REQUIRE(traced.iopCore().programCounter() == 0xa0000024);
+    REQUIRE(traced.iopCore().generalRegister(3) == 0xffff0020);
+    REQUIRE(traced.iopBus().read32(physical).value == 0xffff0020);
+    REQUIRE(traced.iopStateHash() == plain.iopStateHash());
+    REQUIRE(traced.eeStateHash() == plain.eeStateHash());
+    REQUIRE(traced.sifStateHash() == plain.sifStateHash());
+    REQUIRE(plain.trace().empty());
+    namespace Memory = NekoIOPTraceMemory;
+    unsigned stores = 0;
+    for (const auto &event : traced.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::IOP ||
+          event.type != NekoTraceEventType::MemoryAccess ||
+          (event.value0 != target && event.value0 != target + 2) ||
+          event.value1 == 0xffff0020)
+      {
+        continue;
+      }
+      REQUIRE(stores < 2);
+      const auto lane = stores * 2;
+      REQUIRE(event.masterCycle == 33 + stores * 16);
+      REQUIRE(event.value0 == target + lane);
+      REQUIRE(event.value1 == (stores == 0 ? 0x20 : 0xffff));
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        physical + lane, 2, Memory::AccessKind::DataStore,
+        Memory::Outcome::Completed,
+        target < 0xa0000000 ? Memory::CacheRoute::Cached :
+          Memory::CacheRoute::Uncached,
+        true, static_cast<std::uint8_t>(3 << lane)}));
+      ++stores;
+    }
+    REQUIRE(stores == 2);
+  }
+}
+
+TEST_CASE("IOP SIF DMA guest BCR stores retain precise unsupported access failures",
+  "[iop][dma][bus][bcr-halfword]")
+{
+  for (const IOPWord store : {
+    0xa0220000u, // sb r2, 0(r1)
+    0xa8220001u, // swl r2, 1(r1), partial low halfword mask
+    0xb8220002u, // swr r2, 2(r1), partial high halfword mask
+    0xa4220000u  // sh r2, 0(r1), while active
+  })
+  {
+    CAPTURE(store);
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel channel;
+    IOPBus bus;
+    bus.attachDMA(&dma, &channel);
+    IOPCore core;
+    core.attachBus(&bus);
+    REQUIRE(channel.writeBlockControl(0xabcd1234) == IOPDMAWriteOutcome::Completed);
+    if (store == 0xa4220000)
+    {
+      REQUIRE(channel.writeChannelControl(START) == IOPDMAWriteOutcome::Completed);
+    }
+    const IOPWord program[] = {
+      0x3c01bf80, 0x34211534, 0x24020020, 0x10000002, store
+    };
+    IOPAddress pc = 0;
+    for (IOPWord word : program)
+    {
+      REQUIRE(bus.write32(pc, word).status == IOPBusStatus::Completed);
+      pc += 4;
+    }
+    core.startExecution(0xa0000000);
+    for (unsigned step = 0; step < 5; ++step)
+    {
+      core.stepInstruction();
+    }
+    REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.retiredInstructions() == 4);
+    REQUIRE(core.programCounter() == 0xa0000010);
+    REQUIRE(core.branchContinuation().active);
+    REQUIRE(core.storeFailure().access.virtualAddress == 0xbf801534 + (store & 3));
+    REQUIRE(core.storeFailure().access.physicalAddress == BCR + (store & 3));
+    REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(channel.blockControl() == 0xabcd1234);
+    REQUIRE(channel.active() == (store == 0xa4220000));
+    REQUIRE(channel.remainingWords() == 0);
+    REQUIRE(dma.interruptStatus(SECONDARY) == 0);
+    REQUIRE(interrupts.status() == 0);
+  }
+}
+
+TEST_CASE("IOP DMA MMIO admits selected widths and rejects unsupported boundaries atomically",
   "[iop][dma][bus]")
 {
   NekoSystem system;
@@ -718,7 +956,10 @@ TEST_CASE("IOP DMA MMIO admits exact words and rejects unsupported boundaries at
     for (IOPAddress lane : {0u, 2u})
     {
       REQUIRE(bus.read16(address + lane).status == IOPBusStatus::Unmapped);
-      REQUIRE(bus.write16(address + lane, 0xffff).status == IOPBusStatus::Unmapped);
+      if (address != BCR)
+      {
+        REQUIRE(bus.write16(address + lane, 0xffff).status == IOPBusStatus::Unmapped);
+      }
     }
     for (std::uint8_t lanes = 1; lanes < 15; ++lanes)
     {

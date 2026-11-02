@@ -2808,6 +2808,18 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate host/guest and state/trace boundaries, independently review,
       and verify progress with fresh authorized BIOS evidence.
 
+### IOP SIF DMA BCR Halfword Contract
+
+- [x] Research the observed channel-10 BCR store and equivalent implemented
+      SIF DMA lanes; select widths and lane semantics through existing owners.
+
+### IOP SIF DMA BCR Halfword Access
+
+- [x] Implement the selected lane accesses without parallel register state,
+      preserving active-transfer rejection and all other DMA MMIO boundaries.
+- [x] Validate guest stores and transport/state integration, independently
+      review, and verify progress with fresh authorized BIOS evidence.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

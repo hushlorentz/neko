@@ -228,6 +228,8 @@ class IOPBus final
       std::size_t width,
       IOPWord value);
     IOPBusReadResult readDMARegister(const Location &location);
+    IOPBusWriteResult writeDMABlockControlHalfword(
+      const Location &location, std::uint16_t value);
     IOPBusWriteResult writeDMARegister(const Location &location, IOPWord value);
     IOPBusReadResult readSIFRegister(
       const Location &location,

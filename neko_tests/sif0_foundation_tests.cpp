@@ -24,7 +24,7 @@ namespace
   }
 }
 
-TEST_CASE("SIF0 IOP source registers admit exact words and bounded starts",
+TEST_CASE("SIF0 IOP source registers admit selected widths and bounded starts",
   "[sif0][dma][foundation]")
 {
   NekoSystem system;
@@ -43,7 +43,10 @@ TEST_CASE("SIF0 IOP source registers admit exact words and bounded starts",
     for (const IOPAddress lane : {0u, 2u})
     {
       REQUIRE(bus.read16(address + lane).status == IOPBusStatus::Unmapped);
-      REQUIRE(bus.write16(address + lane, 0xffff).status == IOPBusStatus::Unmapped);
+      if (address != IOP_BCR)
+      {
+        REQUIRE(bus.write16(address + lane, 0xffff).status == IOPBusStatus::Unmapped);
+      }
     }
     for (std::uint8_t mask = 1; mask < 15; ++mask)
     {
