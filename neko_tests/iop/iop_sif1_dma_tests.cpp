@@ -39,6 +39,145 @@ namespace
   }
 }
 
+TEST_CASE("IOP SIF1 startup controls retain selected fields without widening SIF0",
+  "[iop][sif1][dma][chcr-startup]")
+{
+  for (const IOPWord control : {
+    0x01000200u, 0x01000300u, 0x41000200u, 0x41000300u,
+    0x01000400u, 0x01000500u, 0x41000400u, 0x41000500u})
+  {
+    CAPTURE(control);
+    NekoSystem system;
+    auto &channel = system.iopSIF1DMAC();
+    const auto stopped = control & ~IOPWord{0x01000000};
+    REQUIRE(system.iopBus().write32(0x1f801538, stopped).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().read32(0x1f801538).value == stopped);
+    const auto stoppedHash = system.iopStateHash();
+    REQUIRE(system.iopBus().write32(0x1f801538, control).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopStateHash() != stoppedHash);
+    REQUIRE(channel.active());
+    REQUIRE(system.iopBus().read32(0x1f801538).value == control);
+    const auto activeHash = system.iopStateHash();
+    REQUIRE(channel.writeChannelControl(control) == IOPDMAWriteOutcome::Completed);
+    for (const IOPWord changed : {
+      control ^ 0x40000000u, control ^ 0x100u,
+      control ^ 0x600u, stopped ^ 0x100u})
+    {
+      REQUIRE(channel.writeChannelControl(changed) ==
+        IOPDMAWriteOutcome::ActiveTransfer);
+      REQUIRE(system.iopStateHash() == activeHash);
+    }
+    REQUIRE(channel.writeChannelControl(stopped) == IOPDMAWriteOutcome::Completed);
+    REQUIRE_FALSE(channel.active());
+    REQUIRE(system.iopStateHash() == stoppedHash);
+    REQUIRE(system.iopSIF0DMAC().writeChannelControl(control | 1) ==
+      ((control & 0x40000200) != 0 ? IOPDMAWriteOutcome::UnsupportedControl :
+        IOPDMAWriteOutcome::Completed));
+  }
+
+  NekoSystem system;
+  for (const IOPWord invalid : {
+    0x41000000u, 0x41000600u, 0x41000201u, 0x41000401u,
+    0x81000200u, 0x61000200u, 0x41000202u})
+  {
+    CAPTURE(invalid);
+    const auto before = system.iopStateHash();
+    REQUIRE(system.iopBus().write32(0x1f801538, invalid).status ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
+  }
+}
+
+TEST_CASE("IOP SIF1 startup profiles preserve packet completion abort and restored continuation",
+  "[iop][sif1][dma][chcr-startup][save-state]")
+{
+  for (const IOPWord control : {0x01000200u, 0x41000300u})
+  {
+    for (const unsigned prefix : {0u, 1u, 9u, 33u})
+    {
+      CAPTURE(control);
+      CAPTURE(prefix);
+      NekoSystem original;
+      auto &channel = original.iopSIF1DMAC();
+      REQUIRE(channel.writeMemoryAddress(0x2000) == IOPDMAWriteOutcome::Completed);
+      REQUIRE(channel.writeBlockControl(0xabcd0020) == IOPDMAWriteOutcome::Completed);
+      REQUIRE(channel.writeChannelControl(control) == IOPDMAWriteOutcome::Completed);
+      original.iopDMAController().writePriority(BANK, 0x8000);
+      original.runMasterCycles(16);
+      REQUIRE(channel.channelControl() == control);
+      REQUIRE(channel.memoryAddress() == 0x2000);
+      REQUIRE(channel.remainingWords() == 0);
+      REQUIRE(original.iopDMAController().interruptStatus(BANK) == 0);
+      REQUIRE(original.iopInterruptController().status() == 0);
+      push(original, {{0x80001000, 4, 0xdeadbeef, 0xabcdef01}});
+      push(original, {{1, 2, 3, 4}});
+      original.runMasterCycles(prefix);
+      if (prefix == 9)
+      {
+        REQUIRE(channel.remainingWords() == 3);
+        REQUIRE(channel.terminalPacket());
+        REQUIRE(channel.writeChannelControl(control) ==
+          IOPDMAWriteOutcome::Completed);
+        REQUIRE(channel.writeChannelControl(control ^ 0x40000000) ==
+          IOPDMAWriteOutcome::ActiveTransfer);
+        REQUIRE(channel.remainingWords() == 3);
+      }
+      const auto saved = original.saveState();
+      NekoSystem restored;
+      restored.loadState(saved);
+      requireState(restored, saved);
+      IOPTraceTest::requireMachine(restored, original);
+      if (prefix == 9)
+      {
+        for (const IOPWord invalid : {
+          control | 0x80000000u, control | 0x600u, control | 1u})
+        {
+          SaveStateMutation corrupt(saved);
+          corrupt.writeScalar("system.iop.sif1DMA.channelControl", invalid);
+          corrupt.refreshChecksum();
+          REQUIRE_THROWS_AS(restored.loadState(corrupt.bytes()), std::invalid_argument);
+          requireState(restored, saved);
+        }
+        REQUIRE(restored.iopSIF1DMAC().writeChannelControl(
+          control & ~IOPWord{0x01000000}) == IOPDMAWriteOutcome::Completed);
+        REQUIRE(restored.iopSIF1DMAC().remainingWords() == 0);
+        REQUIRE_FALSE(restored.iopSIF1DMAC().terminalPacket());
+        const auto sifHash = restored.sifStateHash();
+        restored.runMasterCycles(40);
+        REQUIRE(restored.sifStateHash() == sifHash);
+        REQUIRE(restored.iopSIF1DMAC().memoryAddress() == 0x1004);
+        REQUIRE(restored.iopDMAController().interruptStatus(BANK) == 0);
+        REQUIRE(restored.iopInterruptController().status() == 0);
+        restored.loadState(saved);
+      }
+      original.startTrace();
+      restored.startTrace();
+      original.runMasterCycles(65 - prefix);
+      restored.runMasterCycles(65 - prefix);
+      IOPTraceTest::requireMachine(restored, original);
+      IOPTraceTest::requireEvents(restored.trace(), original.trace());
+      REQUIRE(channel.channelControl() == (control & ~IOPWord{0x01000000}));
+      REQUIRE(channel.memoryAddress() == 0x1010);
+      REQUIRE(channel.blockControl() == 0xabcd0020);
+      REQUIRE(channel.remainingWords() == 0);
+      REQUIRE_FALSE(channel.terminalPacket());
+      REQUIRE(original.sif().wordCount(SIFDirection::SIF1) == 0);
+      REQUIRE(original.iopDMAController().interruptStatus(BANK) == FLAG);
+      REQUIRE(original.iopInterruptController().status() == 8);
+      for (IOPAddress index = 0; index < 4; ++index)
+      {
+        REQUIRE(ramWord(original, 0x1000 + index * 4) == index + 1);
+      }
+      original.iopInterruptController().writeStatus(~IOPWord{8});
+      original.runMasterCycles(16);
+      REQUIRE(original.iopInterruptController().status() == 0);
+      REQUIRE(channel.channelControl() == (control & ~IOPWord{0x01000000}));
+    }
+  }
+}
+
 TEST_CASE("IOP SIF1 receiver accepts headers and single words only on phase zero",
   "[iop][sif1][dma][receiver]")
 {

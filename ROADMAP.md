@@ -2820,6 +2820,18 @@ and EE MCH-window implementation; the handshake target remains incomplete.
 - [x] Validate guest stores and transport/state integration, independently
       review, and verify progress with fresh authorized BIOS evidence.
 
+### IOP SIF1 CHCR Startup Contract
+
+- [x] Resolve the observed channel-10 control fields and receive mode through
+      existing IOP DMA ownership; select any required execution scope.
+
+### IOP SIF1 CHCR Startup Support
+
+- [x] Implement the selected control/mode contract with atomic rejection and
+      coherent receiver continuation, persistence and completion behavior.
+- [x] Validate focused integration and the required full gates, independently
+      review, and verify progress with fresh authorized BIOS evidence.
+
 ### Real BIOS Handshake and Boundary Conformance
 
 - [x] With separate BIOS-run authorization, verify the MCH halfword-read

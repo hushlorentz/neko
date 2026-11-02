@@ -656,7 +656,7 @@ TEST_CASE("IOP DMA channel 10 validates starts active writes and local abort",
   REQUIRE(channel.writeBlockControl(0xabcd1234) == IOPDMAWriteOutcome::Completed);
   REQUIRE(channel.writeChannelControl(0x701) == IOPDMAWriteOutcome::Completed);
   for (const IOPWord control : {
-    0x01000000u, 0x01000401u, 0x01000600u, 0x41000400u, 0x81000400u})
+    0x01000000u, 0x01000401u, 0x01000600u, 0x21000400u, 0x81000400u})
   {
     CAPTURE(control);
     const auto before = system.saveState();
@@ -695,6 +695,67 @@ TEST_CASE("IOP DMA channel 10 validates starts active writes and local abort",
   REQUIRE(system.iopDMAController().interruptStatus(SECONDARY) == FLAG);
   REQUIRE(channel.writeChannelControl(START) == IOPDMAWriteOutcome::Completed);
   REQUIRE(system.iopDMAController().interruptStatus(SECONDARY) == FLAG);
+}
+
+TEST_CASE("IOP SIF1 guest startup control stores retire with precise word metadata",
+  "[iop][dma][bus][trace][chcr-startup]")
+{
+  for (const IOPAddress target : {0x9f801538u, 0xbf801538u})
+  {
+    CAPTURE(target);
+    NekoSystem traced;
+    NekoSystem plain;
+    const IOPWord program[] = {
+      0x3c010000 | (target >> 16),
+      0x34210000 | (target & 0xffff),
+      0x3c024100, 0x34420300,
+      0x10000001, 0xac220000,
+      0x8c230000, 0
+    };
+    for (auto *system : {&traced, &plain})
+    {
+      IOPAddress pc = 0;
+      for (const IOPWord word : program)
+      {
+        REQUIRE(system->iopBus().write32(pc, word).status ==
+          IOPBusStatus::Completed);
+        pc += 4;
+      }
+      system->iopCore().startExecution(0xa0000000);
+    }
+    traced.startTrace();
+    traced.runMasterCycles(64);
+    plain.runMasterCycles(64);
+    REQUIRE(traced.iopCore().stopReason() == IOPStopReason::None);
+    REQUIRE(traced.iopCore().exception().kind == IOPException::None);
+    REQUIRE(traced.iopCore().retiredInstructions() == 8);
+    REQUIRE(traced.iopCore().programCounter() == 0xa0000020);
+    REQUIRE(traced.iopCore().generalRegister(3) == 0x41000300);
+    REQUIRE(traced.iopSIF1DMAC().channelControl() == 0x41000300);
+    REQUIRE(traced.iopStateHash() == plain.iopStateHash());
+    REQUIRE(traced.eeStateHash() == plain.eeStateHash());
+    REQUIRE(traced.sifStateHash() == plain.sifStateHash());
+    REQUIRE(plain.trace().empty());
+    namespace Memory = NekoIOPTraceMemory;
+    unsigned stores = 0;
+    for (const auto &event : traced.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::IOP ||
+          event.type != NekoTraceEventType::MemoryAccess ||
+          event.value0 != target || event.masterCycle != 41)
+      {
+        continue;
+      }
+      REQUIRE(event.value1 == 0x41000300);
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        CHCR, 4, Memory::AccessKind::DataStore, Memory::Outcome::Completed,
+        target < 0xa0000000 ? Memory::CacheRoute::Cached :
+          Memory::CacheRoute::Uncached, true, 0xf}));
+      ++stores;
+    }
+    REQUIRE(stores == 1);
+  }
 }
 
 TEST_CASE("IOP SIF DMA BCR halfword writes preserve the other lane through both owners",
@@ -1114,7 +1175,7 @@ TEST_CASE("IOP DMA malformed persistence rejects before destination mutation",
     InvalidField{"system.iop.sif1DMA.memoryAddress", 0x01000000},
     InvalidField{"system.iop.sif1DMA.memoryAddress", 1},
     InvalidField{"system.iop.sif1DMA.channelControl", 0x01000000},
-    InvalidField{"system.iop.sif1DMA.channelControl", 0x40000000}})
+    InvalidField{"system.iop.sif1DMA.channelControl", 0x20000000}})
   {
     CAPTURE(field.path);
     CAPTURE(field.value);

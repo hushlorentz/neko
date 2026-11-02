@@ -10,22 +10,22 @@ bool IOPDMAChannelState::validMemoryAddress(IOPWord value)
 bool IOPDMAChannelState::validChannelControl(
   IOPWord value, IOPDMAChannelProfile profile)
 {
-  IOPWord required = 0;
+  IOPWord allowed = 0x01000701;
+  bool supportedStart = false;
   switch (profile)
   {
     case IOPDMAChannelProfile::SIF0Source:
-      required = 0x401;
+      supportedStart = (value & 0x401) == 0x401;
       break;
     case IOPDMAChannelProfile::SIF1Receiver:
-      required = 0x400;
+      allowed |= 0x40000000;
+      supportedStart = (value & 0x601) == 0x200 || (value & 0x601) == 0x400;
       break;
     default:
       throw std::invalid_argument("Unsupported IOP DMA channel profile.");
   }
-  const IOPWord modeMask =
-    profile == IOPDMAChannelProfile::SIF0Source ? 0x401 : 0x601;
-  return (value & ~IOPWord{0x01000701}) == 0 &&
-    ((value & TRANSFER_REQUEST) == 0 || (value & modeMask) == required);
+  return (value & ~allowed) == 0 &&
+    ((value & TRANSFER_REQUEST) == 0 || supportedStart);
 }
 
 bool IOPDMAChannelState::active() const
