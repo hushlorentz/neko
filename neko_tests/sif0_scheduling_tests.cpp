@@ -1145,7 +1145,7 @@ TEST_CASE("Common and per-channel SIF eligibility pauses preserve accepted conti
 }
 
 TEST_CASE("SIF endpoint abort and restart retain shared words without remote completion",
-  "[sif][scheduling][cross-channel][progress]")
+  "[sif][scheduling][cross-channel][progress][iop-active-stop]")
 {
   for (unsigned endpoint = 0; endpoint < 4; ++endpoint)
   {
@@ -1176,11 +1176,9 @@ TEST_CASE("SIF endpoint abort and restart retain shared words without remote com
     else if (endpoint == 1)
       system.sif1DMAC().writeChannelControl(0);
     else if (endpoint == 2)
-      REQUIRE(system.iopSIF0DMAC().writeChannelControl(0x401) ==
-        IOPDMAWriteOutcome::Completed);
+      REQUIRE(system.iopBus().write32(0x1f801528, 0).status == IOPBusStatus::Completed);
     else
-      REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x400) ==
-        IOPDMAWriteOutcome::Completed);
+      REQUIRE(system.iopBus().write32(0x1f801538, 0).status == IOPBusStatus::Completed);
     for (const auto direction : {SIFDirection::SIF0, SIFDirection::SIF1})
     {
       REQUIRE(system.sif().wordCount(direction) == transport.wordCount(direction));

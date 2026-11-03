@@ -3082,13 +3082,24 @@ commands or media services. Later blocks remain dependency-gated.
 
 ### IOP SIF DMA Active-Stop Boundary
 
-- [ ] Resolve the demonstrated IOP SIF1 zero-CHCR stop against local manuals
-      and the existing shared SIF DMA owner; select field retention,
-      cancellation and peer/transport boundaries before implementation.
-- [ ] Implement the selected bounded policy with atomic rejection and
-      stopped/restarted continuation coverage through the actual bus route.
-- [ ] Independently review the lifecycle and verify fresh BIOS progress with
+- [x] Resolve the demonstrated IOP SIF1 zero-CHCR stop against local manuals
+      and the existing shared SIF DMA owner; select whole-word stops for both
+      implemented IOP SIF channels, with explicit cancellation and framing bounds.
+- [x] Implement the selected bounded policy with atomic rejection and
+      stopped/restored continuation through the bus; distinguish externally
+      realigned restart from residual queued data without adding recovery.
+- [x] Independently review the lifecycle and verify fresh BIOS progress with
       cold/restored traced/plain and canonical comparisons.
+
+### Post-SIF-Stop Dependency Attribution
+
+- [ ] Resolve the demonstrated IOP DMA channel-0 CHCR read through local
+      manuals and existing initialization policy; select bounded register-family
+      read semantics without inventing a transfer engine or device readiness.
+- [ ] Implement the selected read scope through the existing register owner
+      and bus, with atomic access rejection and guest trace/alias coverage.
+- [ ] Independently review the boundary and verify fresh BIOS continuation
+      with traced/plain and canonical comparisons.
 
 ### Additional CD/DVD Command and Configuration Scope
 

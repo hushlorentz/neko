@@ -65,8 +65,8 @@ IOPDMAWriteOutcome IOPDMAChannelState::writeChannelControl(
   {
     return IOPDMAWriteOutcome::UnsupportedControl;
   }
-  if (active() && value != channelControlRegister &&
-      value != (channelControlRegister & ~TRANSFER_REQUEST))
+  if (active() && (value & TRANSFER_REQUEST) != 0 &&
+      value != channelControlRegister)
   {
     return IOPDMAWriteOutcome::ActiveTransfer;
   }

@@ -672,7 +672,7 @@ TEST_CASE("IOP DMA channel 10 validates starts active writes and local abort",
   REQUIRE(channel.writeChannelControl(START | 0x100) ==
     IOPDMAWriteOutcome::Completed);
   REQUIRE(channel.writeChannelControl(START) == IOPDMAWriteOutcome::ActiveTransfer);
-  REQUIRE(channel.writeChannelControl(0x400) == IOPDMAWriteOutcome::ActiveTransfer);
+  REQUIRE(channel.writeChannelControl(0x01000200) == IOPDMAWriteOutcome::ActiveTransfer);
   REQUIRE(channel.writeMemoryAddress(0x4000) == IOPDMAWriteOutcome::ActiveTransfer);
   REQUIRE(channel.writeBlockControl(0) == IOPDMAWriteOutcome::ActiveTransfer);
   requireState(system, active);
@@ -755,6 +755,130 @@ TEST_CASE("IOP SIF1 guest startup control stores retire with precise word metada
       ++stores;
     }
     REQUIRE(stores == 1);
+  }
+}
+
+TEST_CASE("IOP SIF whole-word stops validate atomically and retain other owners",
+  "[iop][dma][bus][iop-active-stop]")
+{
+  for (const IOPAddress physical : {0x1f801528u, CHCR})
+  {
+    const IOPWord control = physical == CHCR ? 0x41000300 : 0x01000501;
+    for (const IOPWord stopped : {
+      0u, 0x701u, physical == CHCR ? 0x40000100u : 0x100u})
+    {
+      CAPTURE(physical);
+      CAPTURE(stopped);
+      NekoSystem system;
+      auto &bus = system.iopBus();
+      REQUIRE(bus.write32(physical - 8, 0x123450).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(physical - 4, 0xabcd0020).status == IOPBusStatus::Completed);
+      if (physical != CHCR)
+        REQUIRE(bus.write32(physical + 4, 0x1800).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(physical, control).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(DICR2, FORCE).status == IOPBusStatus::Completed);
+      system.iopDMAController().signalChannelCompletion(IOPDMAChannel::SIF0);
+      system.iopDMAController().signalChannelCompletion(IOPDMAChannel::SIF1);
+      const auto iopHash = system.iopStateHash();
+      const auto eeHash = system.eeStateHash();
+      const auto sifHash = system.sifStateHash();
+      const auto status = system.iopDMAController().interruptStatus(SECONDARY);
+      const auto interrupts = system.iopInterruptController().status();
+      REQUIRE(interrupts == DMAC_CAUSE);
+      REQUIRE(bus.write32(physical, control).status == IOPBusStatus::Completed);
+      REQUIRE(system.iopStateHash() == iopHash);
+      for (const IOPWord invalid : {
+        2u, 0x80000000u, control ^ 0x100u,
+        physical == CHCR ? 0x20000000u : 0x40000000u})
+      {
+        CAPTURE(invalid);
+        REQUIRE(bus.write32(physical, invalid).status == IOPBusStatus::Unmapped);
+        REQUIRE(system.iopStateHash() == iopHash);
+        REQUIRE(system.eeStateHash() == eeHash);
+        REQUIRE(system.sifStateHash() == sifHash);
+      }
+      REQUIRE(bus.write32(physical, stopped).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(physical).value == stopped);
+      REQUIRE(bus.read32(physical - 8).value == 0x123450);
+      REQUIRE(bus.read32(physical - 4).value == 0xabcd0020);
+      if (physical != CHCR)
+        REQUIRE(bus.read32(physical + 4).value == 0x1800);
+      REQUIRE_FALSE(system.iopSIF0DMAC().active());
+      REQUIRE_FALSE(system.iopSIF1DMAC().active());
+      REQUIRE(system.eeStateHash() == eeHash);
+      REQUIRE(system.sifStateHash() == sifHash);
+      REQUIRE(system.iopDMAController().interruptStatus(SECONDARY) == status);
+      REQUIRE(system.iopInterruptController().status() == interrupts);
+      REQUIRE(bus.write32(physical, 0x101).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(physical).value == 0x101);
+      REQUIRE(bus.write32(physical, control).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(physical).value == control);
+    }
+  }
+}
+
+TEST_CASE("IOP SIF guest zero stops retire through aliases with exact store metadata",
+  "[iop][dma][bus][trace][iop-active-stop]")
+{
+  for (const IOPAddress physical : {0x1f801528u, CHCR})
+  {
+    for (const IOPAddress segment : {0x80000000u, 0xa0000000u})
+    {
+      const auto target = physical | segment;
+      CAPTURE(target);
+      NekoSystem traced;
+      NekoSystem plain;
+      const IOPWord program[] = {
+        0x3c010000 | (target >> 16),
+        0x34210000 | (target & 0xffff),
+        0x24030055,
+        0x10000001, 0xac200000,
+        0x8c230000, 0
+      };
+      for (auto *system : {&traced, &plain})
+      {
+        REQUIRE(system->iopBus().write32(physical,
+          physical == CHCR ? 0x41000300 : 0x01000401).status ==
+          IOPBusStatus::Completed);
+        IOPAddress pc = 0;
+        for (const IOPWord word : program)
+        {
+          REQUIRE(system->iopBus().write32(pc, word).status ==
+            IOPBusStatus::Completed);
+          pc += 4;
+        }
+        system->iopCore().startExecution(0xa0000000);
+      }
+      traced.startTrace();
+      traced.runMasterCycles(56);
+      plain.runMasterCycles(56);
+      REQUIRE(traced.iopCore().stopReason() == IOPStopReason::None);
+      REQUIRE(traced.iopCore().exception().kind == IOPException::None);
+      REQUIRE(traced.iopCore().retiredInstructions() == 7);
+      REQUIRE(traced.iopCore().programCounter() == 0xa000001c);
+      REQUIRE_FALSE(traced.iopCore().branchContinuation().active);
+      REQUIRE(traced.iopCore().generalRegister(3) == 0);
+      REQUIRE(traced.iopBus().read32(physical).value == 0);
+      IOPTraceTest::requireMachine(traced, plain);
+      REQUIRE(plain.trace().empty());
+      namespace Memory = NekoIOPTraceMemory;
+      unsigned stores = 0;
+      for (const auto &event : traced.trace())
+      {
+        if (event.subsystem != NekoTraceSubsystem::IOP ||
+            event.type != NekoTraceEventType::MemoryAccess ||
+            event.value0 != target || event.masterCycle != 33)
+          continue;
+        REQUIRE(event.value1 == 0);
+        REQUIRE(event.value2 == 0);
+        REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+          physical, 4, Memory::AccessKind::DataStore, Memory::Outcome::Completed,
+          segment == 0x80000000 ? Memory::CacheRoute::Cached :
+            Memory::CacheRoute::Uncached, true, 0xf}));
+        ++stores;
+      }
+      REQUIRE(stores == 1);
+    }
   }
 }
 

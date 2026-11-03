@@ -257,7 +257,7 @@ TEST_CASE("SIF0 source nonterminal zero packets advance one descriptor per grant
 }
 
 TEST_CASE("SIF0 source pause abort and restore preserve admitted packing history",
-  "[sif0][dma][engine][save-state]")
+  "[sif0][dma][engine][save-state][iop-active-stop]")
 {
   NekoSystem system;
   descriptor(system, DATA, 5);
@@ -285,13 +285,21 @@ TEST_CASE("SIF0 source pause abort and restore preserve admitted packing history
   REQUIRE(sourceBeat(partial).outcome == IOPDMABeatOutcome::Wait);
   requireState(partial, paused);
   const auto transport = partial.sifStateHash();
-  REQUIRE(partial.iopSIF0DMAC().writeChannelControl(START & ~0x01000000u) ==
-    IOPDMAWriteOutcome::Completed);
+  REQUIRE(partial.iopBus().write32(0x1f801528, 0).status == IOPBusStatus::Completed);
+  REQUIRE(partial.iopSIF0DMAC().channelControl() == 0);
   REQUIRE(partial.iopSIF0DMAC().remainingWords() == 0);
   REQUIRE_FALSE(partial.iopSIF0DMAC().terminalPacket());
   REQUIRE(partial.sifStateHash() == transport);
   REQUIRE(partial.iopDMAController().interruptStatus(BANK) == 0);
   REQUIRE(partial.iopSIF0DMAC().tagAddress() == TAG + 16);
+  const auto stopped = partial.saveState();
+  NekoSystem restored;
+  restored.loadState(stopped);
+  IOPTraceTest::requireMachine(restored, partial);
+  restored.iopDMAController().writePriority(BANK, 0x800);
+  REQUIRE(sourceBeat(restored).outcome == IOPDMABeatOutcome::Wait);
+  REQUIRE(restored.sifStateHash() == transport);
+  REQUIRE(restored.iopSIF0DMAC().tagAddress() == TAG + 16);
 }
 
 TEST_CASE("SIF0 EE zero stop preserves a partially packed live IOP source",

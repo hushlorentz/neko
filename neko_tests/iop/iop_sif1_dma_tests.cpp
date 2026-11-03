@@ -63,7 +63,7 @@ TEST_CASE("IOP SIF1 startup controls retain selected fields without widening SIF
     REQUIRE(channel.writeChannelControl(control) == IOPDMAWriteOutcome::Completed);
     for (const IOPWord changed : {
       control ^ 0x40000000u, control ^ 0x100u,
-      control ^ 0x600u, stopped ^ 0x100u})
+      control ^ 0x600u})
     {
       REQUIRE(channel.writeChannelControl(changed) ==
         IOPDMAWriteOutcome::ActiveTransfer);
@@ -445,31 +445,68 @@ TEST_CASE("IOP SIF1 receiver uses physical RAM mirrors without snooping CPU cach
   REQUIRE(system.iopSIF1DMAC().memoryAddress() == 0x601010);
 }
 
-TEST_CASE("IOP SIF1 abort discards only private continuation and the next start awaits a header",
-  "[iop][sif1][dma][receiver][save-state]")
+TEST_CASE("IOP SIF1 whole-word stop restores realigned and residual restart without recovery",
+  "[iop][sif1][dma][receiver][save-state][iop-active-stop]")
 {
-  NekoSystem system;
-  push(system, {{0x80001000, 4, 0, 0}});
-  push(system, {{1, 2, 3, 4}});
-  start(system);
-  system.runMasterCycles(9);
-  REQUIRE(ramWord(system, 0x1000) == 1);
-  const auto sifHash = system.sifStateHash();
-  REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x400) ==
-    IOPDMAWriteOutcome::Completed);
-  REQUIRE(system.iopSIF1DMAC().memoryAddress() == 0x1004);
-  REQUIRE(system.sifStateHash() == sifHash);
-  REQUIRE(system.iopDMAController().interruptStatus(BANK) == 0);
-  NekoSystem restored;
-  restored.loadState(system.saveState());
-  REQUIRE(restored.sif().consumeWords(SIFDirection::SIF1, 3) ==
-    SIFTransferOutcome::Completed);
-  push(restored, {{0x80002000, 0, 0, 0}});
-  start(restored);
-  restored.runMasterCycles(8);
-  REQUIRE_FALSE(restored.iopSIF1DMAC().active());
-  REQUIRE(restored.iopSIF1DMAC().memoryAddress() == 0x2000);
-  REQUIRE(ramWord(restored, 0x1004) == 0);
+  for (const bool realigned : {false, true})
+  {
+    CAPTURE(realigned);
+    NekoSystem system;
+    push(system, {{0x80001000, 8, 0, 0}});
+    push(system, {{1, 0x80003000, 0, 0xaaaa}});
+    push(system, {{0xbbbb, 6, 7, 8}});
+    REQUIRE(system.iopSIF1DMAC().writeBlockControl(0xabcd0020) ==
+      IOPDMAWriteOutcome::Completed);
+    REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x41000300) ==
+      IOPDMAWriteOutcome::Completed);
+    system.iopDMAController().writePriority(BANK, 0x8000);
+    system.runMasterCycles(9);
+    REQUIRE(ramWord(system, 0x1000) == 1);
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == 7);
+    REQUIRE(system.iopSIF1DMAC().terminalPacket());
+    const auto sifHash = system.sifStateHash();
+    REQUIRE(system.iopBus().write32(0x1f801538, 0).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopSIF1DMAC().channelControl() == 0);
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
+    REQUIRE_FALSE(system.iopSIF1DMAC().terminalPacket());
+    REQUIRE(system.iopSIF1DMAC().memoryAddress() == 0x1004);
+    REQUIRE(system.iopSIF1DMAC().blockControl() == 0xabcd0020);
+    REQUIRE(system.sifStateHash() == sifHash);
+    REQUIRE(system.iopDMAController().interruptStatus(BANK) == 0);
+    const auto stopped = system.saveState();
+    NekoSystem restored;
+    restored.loadState(stopped);
+    requireState(restored, stopped);
+    for (auto *machine : {&system, &restored})
+    {
+      machine->runMasterCycles(8);
+      REQUIRE(machine->sifStateHash() == sifHash);
+      REQUIRE(machine->iopSIF1DMAC().memoryAddress() == 0x1004);
+      REQUIRE(machine->iopDMAController().interruptStatus(BANK) == 0);
+      if (realigned)
+      {
+        REQUIRE(machine->sif().consumeWords(SIFDirection::SIF1, 4) ==
+          SIFTransferOutcome::Completed);
+        REQUIRE(machine->sif().consumeWords(SIFDirection::SIF1, 3) ==
+          SIFTransferOutcome::Completed);
+        push(*machine, {{0x80002000, 0, 0, 0}});
+      }
+      REQUIRE(machine->iopBus().write32(0x1f801538, 0x41000300).status ==
+        IOPBusStatus::Completed);
+    }
+    system.startTrace();
+    system.runMasterCycles(8);
+    restored.runMasterCycles(8);
+    IOPTraceTest::requireMachine(restored, system);
+    REQUIRE(restored.trace().empty());
+    REQUIRE_FALSE(system.iopSIF1DMAC().active());
+    REQUIRE(system.iopSIF1DMAC().channelControl() == 0x40000300);
+    REQUIRE(system.iopSIF1DMAC().memoryAddress() == (realigned ? 0x2000 : 0x3000));
+    REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == (realigned ? 0 : 3));
+    REQUIRE(system.iopDMAController().interruptStatus(BANK) == FLAG);
+    REQUIRE(ramWord(system, 0x1004) == 0);
+  }
 }
 
 TEST_CASE("IOP SIF1 header and partial payload restore identically at every master phase",
