@@ -908,6 +908,104 @@ TEST_CASE("IOP DMA initialization guest continuation restores pending load branc
   }
 }
 
+TEST_CASE("IOP absent ROM1 merge continuation restores with identical traced and plain state",
+  "[iop][rom1][merge][save-state][trace]")
+{
+  for (const IOPAddress base : {0x1e000000u, 0x9e000000u, 0xbe000000u,
+       0x1e3ffff8u, 0x9e3ffff8u, 0xbe3ffff8u})
+  for (const bool leftFirst : {false, true})
+  for (const unsigned prefix : {32u, 40u, 48u, 56u})
+  {
+    CAPTURE(base);
+    CAPTURE(leftFirst);
+    CAPTURE(prefix);
+    NekoSystem original;
+    const IOPWord program[] = {
+      0x3c010000 | (base >> 16),
+      0x34210000 | (base & 0xffff),
+      0x3c02aabb,
+      0x3442ccdd,
+      leftFirst ? 0x88220004u : 0x98220001u,
+      0x10000002, // beq r0, r0, +2
+      leftFirst ? 0x98220001u : 0x88220004u,
+      0xffffffff, // skipped
+      0xac020100, // previous partial result in the second load's delay slot
+      0xac020104,
+      0x24430001
+    };
+    for (std::size_t index = 0; index < sizeof(program) / sizeof(program[0]); ++index)
+    {
+      loadInstruction(&original, static_cast<IOPAddress>(index * 4), program[index]);
+    }
+    original.iopCore().startExecution(0xa0000000);
+    original.runMasterCycles(prefix);
+    const IOPWord partial = leftFirst ? 0x00bbccdd : 0xaa000000;
+    REQUIRE(original.iopCore().retiredInstructions() == prefix / 8);
+    REQUIRE(original.iopCore().generalRegister(2) ==
+      (prefix <= 40 ? 0xaabbccdd : partial));
+    REQUIRE(original.iopCore().branchContinuation().active == (prefix == 48));
+    const auto &pending = original.iopCore().delayedResultContinuation();
+    REQUIRE(pending.source == ((prefix == 40 || prefix == 56)
+      ? IOPDelayedResultSource::Load : IOPDelayedResultSource::None));
+    if (pending.source == IOPDelayedResultSource::Load)
+    {
+      REQUIRE(pending.destination == 2);
+      REQUIRE(pending.value == (prefix == 40 ? partial : 0));
+    }
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(restored.saveState() == checkpoint);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(80 - prefix);
+    restored.runMasterCycles(80 - prefix);
+    plain.runMasterCycles(80 - prefix);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    REQUIRE_FALSE(original.trace().empty());
+    REQUIRE(plain.trace().empty());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    REQUIRE(original.iopCore().retiredInstructions() == 10);
+    REQUIRE(original.iopCore().programCounter() == 0xa000002c);
+    REQUIRE(original.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(original.iopCore().exception().kind == IOPException::None);
+    REQUIRE(original.iopCore().generalRegister(2) == 0);
+    REQUIRE(original.iopCore().generalRegister(3) == 1);
+    REQUIRE(original.iopBus().read32(0x100).value == partial);
+    REQUIRE(original.iopBus().read32(0x104).value == 0);
+
+    namespace Memory = NekoIOPTraceMemory;
+    std::size_t loads = 0;
+    for (const auto &event : original.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::IOP ||
+          event.type != NekoTraceEventType::MemoryAccess ||
+          (event.value0 != base && event.value0 != base + 4))
+      {
+        continue;
+      }
+      const bool first = event.masterCycle == 33;
+      REQUIRE((first || event.masterCycle == 49));
+      REQUIRE(event.masterCycle > prefix);
+      const IOPAddress address = base + ((first == leftFirst) ? 4 : 0);
+      REQUIRE(event.value0 == address);
+      REQUIRE(event.value1 == 0);
+      REQUIRE(event.value2 == 0);
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        address & 0x1fffffff, 4, Memory::AccessKind::DataLoad,
+        Memory::Outcome::Completed, base < 0xa0000000
+          ? Memory::CacheRoute::Cached : Memory::CacheRoute::Uncached,
+        true, 0}));
+      ++loads;
+    }
+    REQUIRE(loads == (prefix < 40 ? 2 : (prefix < 56 ? 1 : 0)));
+  }
+}
+
 TEST_CASE("IOP guest zero-tag flushes restore midway and resume observationally",
   "[iop][cache][tag-control][save-state][trace]")
 {

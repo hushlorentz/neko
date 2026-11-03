@@ -3143,7 +3143,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Admit aligned IOP CPU byte, halfword and word data reads as zero within
       the selected 4 MiB ROM1 window; retain rejection of fetch, writes, DMA,
       host loading/inspection and adjacent ranges without backing or readiness.
-- [ ] Cover aliases, load-delay and merge-load behavior, cache/isolation
+- [x] Cover aliases, load-delay and merge-load behavior, cache/isolation
       boundaries, reset and restored traced/plain execution; independently
       review the memory-access boundary and run affected validation gates.
 - [ ] Verify fresh unchanged-input BIOS progress with bounded discovery and

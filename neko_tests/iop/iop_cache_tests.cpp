@@ -302,6 +302,11 @@ TEST_CASE("IOP absent ROM1 data bypasses caches without admitting instruction fe
       core.startExecution(address);
       REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
       requireUnchangedCache(core.cache(), before);
+      core.reset();
+      const auto resetRead = core.readData32(address);
+      REQUIRE(resetRead.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(resetRead.value == 0);
+      requireClear(core.cache());
     }
   }
 }
@@ -387,6 +392,194 @@ TEST_CASE("IOP absent ROM1 guest loads retire with the existing load delay",
       REQUIRE(core.generalRegister(2) == 0);
       REQUIRE(bus.read32(0x100).value == 0x1234);
       REQUIRE(bus.read32(0x104).value == 0);
+    }
+  }
+}
+
+TEST_CASE("IOP absent ROM1 merge loads preserve lanes and delayed operands",
+  "[iop][cache][rom1][merge][execution]")
+{
+  const IOPWord left[] = {0x00bbccdd, 0x0000ccdd, 0x000000dd, 0};
+  const IOPWord right[] = {0, 0xaa000000, 0xaabb0000, 0xaabbcc00};
+  for (const bool swapped : {false, true})
+  for (IOPAddress base : {0x1e000000u, 0x9e000000u, 0xbe000000u,
+       0x1e3ffffcu, 0x9e3ffffcu, 0xbe3ffffcu})
+  for (const bool loadLeft : {false, true})
+  for (IOPWord lane = 0; lane < 4; ++lane)
+  {
+    CAPTURE(swapped);
+    CAPTURE(base);
+    CAPTURE(loadLeft);
+    CAPTURE(lane);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setStatus(&core,
+      swapped ? IOPCOP0Status::CACHES_SWAPPED : 0);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, base);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+    REQUIRE(bus.write32(0, (loadLeft ? 0x88220000 : 0x98220000) | lane).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, 0xac020100).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(8, 0xac020104).status == IOPBusStatus::Completed);
+    core.startExecution(0xa0000000);
+    core.stepInstruction();
+    const IOPWord expected = loadLeft ? left[lane] : right[lane];
+    REQUIRE(core.generalRegister(2) == 0xaabbccdd);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::Load);
+    REQUIRE(core.delayedResultContinuation().destination == 2);
+    REQUIRE(core.delayedResultContinuation().value == expected);
+    requireClear(core.cache());
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 3);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.generalRegister(2) == expected);
+    REQUIRE(bus.read32(0x100).value == 0xaabbccdd);
+    REQUIRE(bus.read32(0x104).value == expected);
+  }
+}
+
+TEST_CASE("IOP absent ROM1 merge pairs stop precisely at either aperture edge",
+  "[iop][cache][rom1][merge][execution]")
+{
+  for (IOPAddress alias : {0u, 0x80000000u, 0xa0000000u})
+  for (const bool upperEdge : {false, true})
+  for (const bool leftFirst : {false, true})
+  {
+    CAPTURE(alias);
+    CAPTURE(upperEdge);
+    CAPTURE(leftFirst);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPAddress base = (upperEdge ? 0x1e3ffffe : 0x1dfffffe) | alias;
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, base);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+    REQUIRE(bus.write32(0, leftFirst ? 0x88220003 : 0x98220000).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, leftFirst ? 0x98220000 : 0x88220003).status ==
+      IOPBusStatus::Completed);
+    core.startExecution(0xa0000000);
+    core.stepInstruction();
+    const bool firstSucceeds = leftFirst != upperEdge;
+    if (firstSucceeds)
+    {
+      REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::Load);
+      REQUIRE(core.generalRegister(2) == 0xaabbccdd);
+      core.stepInstruction();
+    }
+    REQUIRE(core.retiredInstructions() == (firstSucceeds ? 1 : 0));
+    REQUIRE(core.exception().kind == IOPException::DataBusError);
+    REQUIRE(core.exception().badVirtualAddress == base + (upperEdge ? 3 : 0));
+    REQUIRE_FALSE(core.exception().inBranchDelaySlot);
+    REQUIRE(core.exceptionProgramCounter() ==
+      (firstSucceeds ? 0xa0000004 : 0xa0000000));
+    REQUIRE(core.generalRegister(2) == (firstSucceeds
+      ? (leftFirst ? 0x0000ccdd : 0xaabb0000) : 0xaabbccdd));
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    requireClear(core.cache());
+  }
+}
+
+TEST_CASE("IOP absent ROM1 data faults retain branch and protection ownership",
+  "[iop][cache][rom1][merge][execution]")
+{
+  struct Fault
+  {
+    IOPAddress address;
+    IOPWord instruction;
+    bool user;
+    IOPException exception;
+  };
+  const Fault faults[] = {
+    {0x1e000001, 0x8c220000, false, IOPException::AddressErrorLoadOrFetch},
+    {0x1e3fffff, 0x84220000, false, IOPException::AddressErrorLoadOrFetch},
+    {0x1dffffff, 0x88220000, false, IOPException::DataBusError},
+    {0x1e400001, 0x98220000, false, IOPException::DataBusError},
+    {0x9e000003, 0x88220000, true, IOPException::AddressErrorLoadOrFetch},
+    {0xbe3fffff, 0x98220000, true, IOPException::AddressErrorLoadOrFetch}
+  };
+  for (const auto &fault : faults)
+  {
+    CAPTURE(fault.address);
+    CAPTURE(fault.instruction);
+    CAPTURE(fault.user);
+    IOPBus bus;
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, fault.address);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+    if (fault.user)
+    {
+      IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CURRENT_USER_MODE);
+    }
+    REQUIRE(bus.write32(0, 0x10000003).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, fault.instruction).status == IOPBusStatus::Completed);
+    core.startExecution(0);
+    core.stepInstruction();
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == fault.exception);
+    REQUIRE(core.exception().badVirtualAddress == fault.address);
+    REQUIRE(core.exception().inBranchDelaySlot);
+    REQUIRE(core.exceptionProgramCounter() == 0);
+    REQUIRE((core.cause() & IOPCOP0Cause::BRANCH_DELAY) != 0);
+    REQUIRE(core.generalRegister(2) == 0xaabbccdd);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
+  }
+}
+
+TEST_CASE("IOP absent ROM1 fetch and merge stores cannot acquire zero data behavior",
+  "[iop][cache][rom1][merge][execution]")
+{
+  for (IOPAddress base : {0x1e000000u, 0x9e000000u, 0xbe000000u,
+       0x1e3ffffcu, 0x9e3ffffcu, 0xbe3ffffcu})
+  {
+    CAPTURE(base);
+    IOPBus bus;
+    IOPCore fetch;
+    fetch.attachBus(&bus);
+    fetch.startExecution(base);
+    fetch.stepInstruction();
+    REQUIRE(fetch.retiredInstructions() == 0);
+    REQUIRE(fetch.exception().kind == IOPException::InstructionBusError);
+    REQUIRE(fetch.exception().badVirtualAddress == base);
+    REQUIRE(fetch.exceptionProgramCounter() == base);
+    requireClear(fetch.cache());
+    for (const bool storeLeft : {false, true})
+    for (IOPWord lane = 0; lane < 4; ++lane)
+    {
+      CAPTURE(storeLeft);
+      CAPTURE(lane);
+      IOPCore core;
+      core.attachBus(&bus);
+      IOPCacheTestAccess::setGeneralRegister(&core, 1, base);
+      IOPCacheTestAccess::setGeneralRegister(&core, 2, 0xaabbccdd);
+      REQUIRE(bus.write32(0, 0x10000003).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(4, (storeLeft ? 0xa8220000 : 0xb8220000) | lane).status ==
+        IOPBusStatus::Completed);
+      core.startExecution(0xa0000000);
+      core.stepInstruction();
+      core.stepInstruction();
+      REQUIRE(core.retiredInstructions() == 1);
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(core.programCounter() == 0xa0000004);
+      REQUIRE(core.branchContinuation().active);
+      const auto &failure = core.storeFailure();
+      REQUIRE(failure.width == IOPStoreWidth::Word);
+      REQUIRE(failure.access.outcome == IOPAccessOutcome::Unmapped);
+      REQUIRE(failure.access.virtualAddress == base + lane);
+      REQUIRE(failure.access.physicalAddress == (base & 0x1fffffff) + lane);
+      REQUIRE(failure.mergeByteEnable ==
+        (storeLeft ? 0xf >> (3 - lane) : (0xf << lane) & 0xf));
+      REQUIRE(failure.value == (storeLeft
+        ? 0xaabbccddu >> (8 * (3 - lane)) : 0xaabbccddu << (8 * lane)));
+      REQUIRE(bus.read32(base & 0x1fffffff).value == 0);
+      requireClear(core.cache());
     }
   }
 }
