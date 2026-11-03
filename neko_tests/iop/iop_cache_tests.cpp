@@ -268,6 +268,129 @@ namespace
   }
 }
 
+TEST_CASE("IOP absent ROM1 data bypasses caches without admitting instruction fetch",
+  "[iop][cache][rom1]")
+{
+  for (const bool swapped : {false, true})
+  {
+    for (IOPAddress address : {0x1e000000u, 0x9e000000u, 0xbe000000u,
+         0x1e3ffffcu, 0x9e3ffffcu, 0xbe3ffffcu})
+    {
+      CAPTURE(address);
+      CAPTURE(swapped);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+      IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+      REQUIRE(core.writeData32(address, 0x12345678).outcome ==
+        IOPAccessOutcome::Completed);
+      REQUIRE(core.readData32(address).value == 0x12345678);
+      const IOPCache before = core.cache();
+      IOPCacheTestAccess::setStatus(&core, swap);
+      const auto byte = core.readData8(address + 3);
+      REQUIRE(byte.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(byte.value == 0);
+      const auto half = core.readData16(address + 2);
+      REQUIRE(half.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(half.value == 0);
+      const auto word = core.readData32(address);
+      REQUIRE(word.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(word.value == 0);
+      REQUIRE(word.physicalAddress == (address & 0x1fffffff));
+      REQUIRE(core.writeData32(address, 0).outcome == IOPAccessOutcome::Unmapped);
+      core.startExecution(address);
+      REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
+      requireUnchangedCache(core.cache(), before);
+    }
+  }
+}
+
+TEST_CASE("IOP absent ROM1 rejects direct cache fills and seeded cache hits",
+  "[iop][cache][rom1][cache-transport]")
+{
+  for (const auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
+  {
+    for (IOPAddress address : {0x1e000000u, 0x1e3ffffcu})
+    {
+      for (const bool seeded : {false, true})
+      {
+        CAPTURE(bank);
+        CAPTURE(address);
+        CAPTURE(seeded);
+        IOPBus bus;
+        IOPCache cache;
+        if (seeded)
+        {
+          cache.commitIndexedStore(bank, address, 0x12345678, 0xf);
+        }
+        const auto location = IOPCache::location(bank, address);
+        const IOPCache before = cache;
+        REQUIRE(cache.readWord(bank, bus, address).status == IOPBusStatus::Unmapped);
+        if (bank == IOPCacheBank::Instruction)
+        {
+          const auto &line = cache.instructionLine(location.lineIndex);
+          const auto &old = before.instructionLine(location.lineIndex);
+          REQUIRE_FALSE(line.valid);
+          REQUIRE(line.physicalTag == old.physicalTag);
+          REQUIRE(line.words == old.words);
+          requireUnchangedCache(cache, before, IOPCache::DATA_LINE_COUNT,
+            location.lineIndex);
+        }
+        else
+        {
+          const auto &line = cache.dataLine(location.lineIndex);
+          const auto &old = before.dataLine(location.lineIndex);
+          REQUIRE_FALSE(line.valid);
+          REQUIRE(line.physicalTag == old.physicalTag);
+          REQUIRE(line.words == old.words);
+          requireUnchangedCache(cache, before, location.lineIndex);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("IOP absent ROM1 guest loads retire with the existing load delay",
+  "[iop][cache][rom1][execution]")
+{
+  for (IOPAddress base : {0x1e000000u, 0x9e000000u, 0xbe000000u})
+  {
+    for (IOPWord load : {0x80220000u, 0x90220000u, 0x84220000u,
+         0x94220000u, 0x8c220000u})
+    {
+      CAPTURE(base);
+      CAPTURE(load);
+      IOPBus bus;
+      IOPCore core;
+      core.attachBus(&bus);
+      const IOPWord program[] = {
+        0x3c010000 | (base >> 16),
+        0x24021234,
+        load,
+        0xac020100,
+        0xac020104
+      };
+      IOPAddress pc = 0;
+      for (IOPWord word : program)
+      {
+        REQUIRE(bus.write32(pc, word).status == IOPBusStatus::Completed);
+        pc += 4;
+      }
+      core.startExecution(0xa0000000);
+      for (unsigned step = 0; step < 5; ++step)
+      {
+        core.stepInstruction();
+      }
+      REQUIRE(core.retiredInstructions() == 5);
+      REQUIRE(core.exception().kind == IOPException::None);
+      REQUIRE(core.generalRegister(2) == 0);
+      REQUIRE(bus.read32(0x100).value == 0x1234);
+      REQUIRE(bus.read32(0x104).value == 0);
+    }
+  }
+}
+
 TEST_CASE("IOP timer MMIO bypass stays live across aliases and cache bank swapping",
   "[iop][cache][timer]")
 {

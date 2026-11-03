@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -97,6 +98,89 @@ TEST_CASE("IOP bus RAM is little-endian and mirrored four times", "[iop][bus]")
   bus.write8(0x7fffff, 0xab);
   REQUIRE(bus.read8(0x1fffff).value == 0xab);
   REQUIRE(bus.read8(0x7fffff).value == 0xab);
+}
+
+TEST_CASE("IOP absent ROM1 admits only bounded zero data reads",
+  "[iop][bus][rom1]")
+{
+  IOPBus bus;
+  REQUIRE(bus.installRom(makeRom()));
+  REQUIRE(bus.write32(0x100, 0x89abcdef).status == IOPBusStatus::Completed);
+  for (IOPAddress address : {0x1e000000u, 0x1e007ffcu, 0x1e200000u, 0x1e3ffffcu})
+  {
+    CAPTURE(address);
+    for (unsigned lane = 0; lane < 4; ++lane)
+    {
+      const auto byte = bus.read8(address + lane);
+      REQUIRE(byte.status == IOPBusStatus::Completed);
+      REQUIRE(byte.value == 0);
+    }
+    for (unsigned lane : {0u, 2u})
+    {
+      const auto half = bus.read16(address + lane);
+      REQUIRE(half.status == IOPBusStatus::Completed);
+      REQUIRE(half.value == 0);
+    }
+    const auto word = bus.read32(address);
+    REQUIRE(word.status == IOPBusStatus::Completed);
+    REQUIRE(word.value == 0);
+    REQUIRE(bus.readInstruction32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+    }
+    std::array<std::uint8_t, 4> bytes = {{1, 2, 3, 4}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE((bytes == std::array<std::uint8_t, 4>{{1, 2, 3, 4}}));
+  }
+  REQUIRE(bus.read32(0x100).value == 0x89abcdef);
+  REQUIRE(bus.read32(IOPBus::ROM_BASE).value == 0x12345678);
+  bus.reset();
+  REQUIRE(bus.read32(0x1e000000).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(0x1e000000).value == 0);
+  REQUIRE(bus.read32(IOPBus::ROM_BASE).value == 0x12345678);
+}
+
+TEST_CASE("IOP absent ROM1 rejects aliases crossing ranges and misalignment at the bus",
+  "[iop][bus][rom1]")
+{
+  IOPBus bus;
+  for (IOPAddress address :
+       {0x1dfffffcu, 0x1e400000u, 0x1e7ffffcu, 0x9e000000u, 0xbe000000u})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+  }
+  for (IOPAddress address : {0x1e000001u, 0x1e3fffffu})
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.readInstruction32(address).status == IOPBusStatus::Misaligned);
+  }
+  REQUIRE(bus.regionForRange(0x1e3fffff, 2) == IOPBusRegion::Unmapped);
+  REQUIRE(bus.regionForRange(0x1dffffff, 2) == IOPBusRegion::Unmapped);
+  REQUIRE(bus.regionForRange(0x1e000000,
+    std::numeric_limits<std::size_t>::max()) == IOPBusRegion::Unmapped);
+  std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+  for (std::size_t count : {std::size_t(0), std::size_t(1), std::size_t(2)})
+  {
+    REQUIRE(bus.inspectPhysical(0x1e3fffff, bytes.data(), count) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.loadPhysical(0x1e3fffff, bytes.data(), count) ==
+      IOPBusStatus::Unmapped);
+  }
+  REQUIRE((bytes == std::array<std::uint8_t, 2>{{0x12, 0x34}}));
 }
 
 TEST_CASE("IOP SSBUS configuration retains eighteen independent full words",

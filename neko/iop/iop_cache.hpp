@@ -96,11 +96,12 @@ class IOPCache final
     const IOPInstructionCacheLine &instructionLine(std::size_t index) const;
     const IOPDataCacheLine &dataLine(std::size_t index) const;
 
-    // The core admits aligned physical words before these boundaries.
+    // Normal reads admit only aligned RAM/ROM lines, including existing hits.
     IOPBusReadResult readWord(
       IOPCacheBank bank,
       IOPBus &bus,
       IOPAddress physicalAddress);
+    // Isolation probes indexed cache storage without physical-bus admission.
     IOPCacheProbeResult readIsolatedWord(
       IOPCacheBank bank,
       IOPAddress physicalAddress) const;

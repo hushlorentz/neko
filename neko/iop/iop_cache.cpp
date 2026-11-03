@@ -24,6 +24,11 @@ namespace
   constexpr IOPWord DATA_TAG_FLUSH = 0xc4;
   constexpr IOPWord COMBINED_TAG_FLUSH = 0xcc4;
 
+  bool isCacheableRegion(IOPBusRegion region)
+  {
+    return region == IOPBusRegion::Ram || region == IOPBusRegion::Rom;
+  }
+
   void validateStore(IOPAddress physicalAddress, std::uint8_t byteEnable)
   {
     if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0 ||
@@ -73,6 +78,12 @@ namespace
     if ((physicalAddress & (sizeof(IOPWord) - 1)) != 0)
     {
       return {IOPBusStatus::Misaligned, 0};
+    }
+    if (!isCacheableRegion(bus.regionForRange(
+          address.lineBaseAddress, WordCount * sizeof(IOPWord))))
+    {
+      line.valid = false;
+      return {};
     }
     if (line.valid && line.physicalTag == address.physicalTag)
     {
@@ -290,8 +301,7 @@ IOPCacheAccessPlan IOPCache::planAccess(
   const bool fetch = access == IOPCacheAccess::InstructionFetch;
   const IOPCacheBank bank = (fetch != control.swapped)
     ? IOPCacheBank::Instruction : IOPCacheBank::Data;
-  const bool eligible = route == IOPCacheRoute::Cached &&
-    (region == IOPBusRegion::Ram || region == IOPBusRegion::Rom);
+  const bool eligible = route == IOPCacheRoute::Cached && isCacheableRegion(region);
   if (!fetch && control.isolated)
   {
     if ((control.busControl & TAG_MODE) != 0)

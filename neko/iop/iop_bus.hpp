@@ -106,7 +106,7 @@ class IOPBus final
     IOPBusReadResult read8(IOPAddress address);
     IOPBusReadResult read16(IOPAddress address);
     IOPBusReadResult read32(IOPAddress address);
-    // Data-readable initialization-only channel words remain non-executable.
+    // Data-only channel initialization and absent-ROM1 responses stay non-executable.
     IOPBusReadResult readInstruction32(IOPAddress address);
     IOPBusWriteResult write8(IOPAddress address, std::uint8_t value);
     IOPBusWriteResult write16(IOPAddress address, std::uint16_t value);
@@ -161,7 +161,8 @@ class IOPBus final
       POST3,
       CacheInitializationControl,
       HighAddressInitializationControl,
-      RAMInitializationControl
+      RAMInitializationControl,
+      AbsentROM1
     };
 
     struct SSBUSConfigurationState

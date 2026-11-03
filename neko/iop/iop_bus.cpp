@@ -14,6 +14,8 @@
 
 namespace
 {
+  constexpr IOPAddress absentROM1Base = 0x1e000000;
+  constexpr std::size_t absentROM1Size = 4 * 1024 * 1024;
   constexpr std::array<IOPAddress, 9> cdvdRegisters = {{
     0x1f402004, 0x1f402005, 0x1f402006, 0x1f402008, 0x1f40200a,
     0x1f40200f, 0x1f402016, 0x1f402017, 0x1f402018
@@ -191,6 +193,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Scratchpad,
       static_cast<std::size_t>(first - SCRATCHPAD_BASE)};
+  }
+
+  if (first >= absentROM1Base &&
+      last < static_cast<std::uint64_t>(absentROM1Base) + absentROM1Size)
+  {
+    // The selected missing-image response has no cache-fill or host byte backing.
+    return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - absentROM1Base),
+      Device::AbsentROM1};
   }
 
   if (rom != nullptr && first >= ROM_BASE &&
@@ -485,7 +495,8 @@ IOPBusReadResult IOPBus::readInstruction32(IOPAddress address)
     return {IOPBusStatus::Misaligned};
   }
   const Location location = locate(address, sizeof(IOPWord));
-  if (location.device == Device::ChannelRegisterInitialization)
+  if (location.device == Device::ChannelRegisterInitialization ||
+      location.device == Device::AbsentROM1)
   {
     return {};
   }
@@ -589,6 +600,9 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             dmaController->channelRegisterInitialization()}
         : IOPBusReadResult{};
+    case Device::AbsentROM1:
+      return width == 1 || width == 2 || width == sizeof(IOPWord)
+        ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
     case Device::POST3:
     case Device::DPCR3Initialization:
@@ -667,6 +681,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       // Tolerate the observed retail initialization, not general RAM resizing.
       return width == sizeof(IOPWord) && value == 0x8000283d
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::AbsentROM1:
     case Device::None:
       return {};
   }

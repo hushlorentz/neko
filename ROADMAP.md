@@ -3104,9 +3104,21 @@ commands or media services. Later blocks remain dependency-gated.
 
 ### Post-Readback Dependency Attribution
 
-- [ ] Attribute the IOP word load at physical address 0x1e000000 through local
-      manuals and required image/device inputs; select the contract and owner
-      before expanding implementation and verification items.
+- [x] Attribute the IOP word load at physical address 0x1e000000 through local
+      manuals and required image/device inputs; select bounded absent-ROM1
+      data reads through the IOP bus before expanding implementation.
+
+### IOP Absent-ROM1 Data Profile
+
+- [x] Admit aligned IOP CPU byte, halfword and word data reads as zero within
+      the selected 4 MiB ROM1 window; retain rejection of fetch, writes, DMA,
+      host loading/inspection and adjacent ranges without backing or readiness.
+- [ ] Cover aliases, load-delay and merge-load behavior, cache/isolation
+      boundaries, reset and restored traced/plain execution; independently
+      review the memory-access boundary and run affected validation gates.
+- [ ] Verify fresh unchanged-input BIOS progress with bounded discovery and
+      cold/restored traced/plain and canonical comparisons; attribute the next
+      originating dependency without claiming ROM1 content or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 
