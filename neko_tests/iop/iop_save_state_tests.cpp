@@ -47,7 +47,7 @@ namespace
   }
 }
 
-TEST_CASE("SIO2 canonical state replaces both retained control images",
+TEST_CASE("SIO2 canonical state replaces all retained control images",
   "[iop][sio2][save-state]")
 {
   NekoSystem source;
@@ -56,6 +56,7 @@ TEST_CASE("SIO2 canonical state replaces both retained control images",
   REQUIRE(source.iopBus().write32(0x1f808268, 0x3bc).status ==
     IOPBusStatus::Completed);
   REQUIRE(source.iopStateHash() != coldHash);
+  const auto programmedHash = source.iopStateHash();
   const auto programmed = source.saveState();
   REQUIRE(programmed != cold);
   const auto fields = inspectSaveState(programmed);
@@ -65,20 +66,41 @@ TEST_CASE("SIO2 canonical state replaces both retained control images",
   REQUIRE(control->size == 4);
   REQUIRE(control->scalarValue == 0x3bc);
 
+  REQUIRE(source.iopBus().write32(0x1f808268, 0xc).status ==
+    IOPBusStatus::Completed);
+  const auto followOnHash = source.iopStateHash();
+  REQUIRE(followOnHash != coldHash);
+  REQUIRE(followOnHash != programmedHash);
+  const auto followOn = source.saveState();
+  REQUIRE(followOn != cold);
+  REQUIRE(followOn != programmed);
+  const auto followOnFields = inspectSaveState(followOn);
+  const auto *followOnControl = followOnFields.find("system.iop.sio2.control");
+  REQUIRE(followOnControl != nullptr);
+  REQUIRE(followOnControl->scalarValue == 0xc);
+
   NekoSystem destination;
+  REQUIRE(destination.iopBus().write32(0x1f808268, 0x3bc).status ==
+    IOPBusStatus::Completed);
+  destination.loadState(followOn);
+  REQUIRE(destination.iopStateHash() == followOnHash);
+  REQUIRE(destination.saveState() == followOn);
+  REQUIRE(destination.iopBus().read32(0x1f808268).value == 0xc);
   destination.loadState(programmed);
-  REQUIRE(destination.iopStateHash() == source.iopStateHash());
+  REQUIRE(destination.iopStateHash() == programmedHash);
   REQUIRE(destination.saveState() == programmed);
   REQUIRE(destination.sio2Controller().readControl() == 0x3bc);
+  destination.loadState(followOn);
+  REQUIRE(destination.sio2Controller().readControl() == 0xc);
   destination.loadState(cold);
   REQUIRE(destination.saveState() == cold);
   REQUIRE(destination.sio2Controller().readControl() == 0);
   REQUIRE(destination.iopBus().read32(0x1f808268).value == 0);
   source.sio2Controller().reset();
-  REQUIRE(destination.iopBus().write32(0x1f808268, 0x3bc).status ==
+  REQUIRE(destination.iopBus().write32(0x1f808268, 0xc).status ==
     IOPBusStatus::Completed);
   REQUIRE(source.iopBus().read32(0x1f808268).value == 0);
-  REQUIRE(destination.iopBus().read32(0x1f808268).value == 0x3bc);
+  REQUIRE(destination.iopBus().read32(0x1f808268).value == 0xc);
 }
 
 TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
@@ -96,10 +118,11 @@ TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
   for (const auto &mutation :
        std::vector<std::pair<std::string, std::uint64_t>>{
          {"system.iop.sio2.control", 1},
-         {"system.iop.sio2.control", 0xc},
+         {"system.iop.sio2.control", 0xd},
          {"system.iop.sio2.control", 0x3bd},
          {"system.iop.sio2.control", 0xffffffff},
-         {"container.version", 74}})
+         {"container.version", 74},
+         {"container.version", 75}})
   {
     CAPTURE(mutation.first);
     CAPTURE(mutation.second);
@@ -127,6 +150,14 @@ TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
   REQUIRE(foreign.readControl() == 0x3bc);
   destination.iopBus().attachSIO2(&destination.sio2Controller());
   REQUIRE(destination.saveState() == before);
+
+  destination.iopBus().attachSIO2(&foreign);
+  destination.loadState(candidate);
+  REQUIRE(destination.iopBus().read32(0x1f808268).value == 0);
+  REQUIRE(destination.iopBus().write32(0x1f808268, 0xc).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.sio2Controller().readControl() == 0xc);
+  REQUIRE(foreign.readControl() == 0x3bc);
 }
 
 TEST_CASE("IOP persistence owns attached devices while the CPU remains halted")

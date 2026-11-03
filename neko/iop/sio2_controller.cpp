@@ -10,10 +10,14 @@ std::uint32_t SIO2Controller::readControl() const noexcept
   return control;
 }
 
-SIO2AccessStatus SIO2Controller::writeStartupControl(
-  std::uint32_t value) noexcept
+bool SIO2Controller::supportsControl(std::uint32_t value) noexcept
 {
-  if (value != 0x3bc)
+  return value == 0xc || value == 0x3bc;
+}
+
+SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
+{
+  if (!supportsControl(value))
   {
     return SIO2AccessStatus::Unsupported;
   }

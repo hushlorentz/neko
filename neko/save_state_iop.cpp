@@ -324,8 +324,9 @@ void NekoSaveStateCodec::readIOP(
     auto scope = reader->scope("sio2");
     auto &sio2 = system->sio2ControllerComponent;
     sio2.control = reader->readFieldU32("control");
-    reader->requireField(sio2.control == 0 || sio2.control == 0x3bc,
-      "SIO2 control is outside the initialization-only profile");
+    reader->requireField(sio2.control == 0 ||
+      SIO2Controller::supportsControl(sio2.control),
+      "SIO2 control is outside the passive programming profile");
   }
   {
     auto scope = reader->scope("cdvd");

@@ -640,7 +640,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
   {
     case Device::SIO2Control:
       return width == sizeof(IOPWord) && sio2 != nullptr &&
-        sio2->writeStartupControl(value) == SIO2AccessStatus::Accepted
+        sio2->writeControl(value) == SIO2AccessStatus::Accepted
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::CDVD:
       return width == 1 && cdvd != nullptr &&

@@ -3167,9 +3167,31 @@ not requirements for exhaustive subsystem coverage.
 - [x] Cover guest aliases, protection, load delay, merge masks and cache
       boundaries; compare restored traced/plain execution around initialization
       and readback without enabling neighboring registers or active effects.
-- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; attribute the next originating
       dependency without claiming SIO2 transfers, readiness or completed boot.
+
+### SIO2 Follow-On Control Scope
+
+- [x] Resolve the observed CTRL `0x0c` write using local manuals and the
+      existing startup-family evidence; distinguish retained configuration,
+      reset and active effects without inferring semantics from the value.
+- [x] Select a bounded follow-on contract through the existing SIO2 owner,
+      including lifecycle, readback and persistence; split implementation and
+      conformance work after selection and obtain any required active-policy
+      approval.
+
+### SIO2 Passive Control Programming Profile
+
+- [x] Admit selected CTRL `0x0c` programming through the existing owner, with
+      exact access admission and versioned transactional persistence;
+      independently review the boundary and run required persistence gates.
+- [ ] Cover guest control transitions, load delay, merge/cache boundaries and
+      restored traced/plain execution without enabling neighboring registers
+      or active effects.
+- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; attribute the next originating
+      dependency without claiming active reset, transfers or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

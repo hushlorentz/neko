@@ -329,7 +329,7 @@ TEST_CASE("SIO2 control cannot supply direct cache fills or seeded hits",
     IOPBus bus;
     SIO2Controller sio2;
     bus.attachSIO2(&sio2);
-    REQUIRE(sio2.writeStartupControl(0x3bc) == SIO2AccessStatus::Accepted);
+    REQUIRE(sio2.writeControl(0x3bc) == SIO2AccessStatus::Accepted);
     IOPCache cache;
     cache.commitIndexedStore(bank, 0x1f808268, 0x12345678, 0xf);
     const auto location = IOPCache::location(bank, 0x1f808268);
@@ -409,7 +409,7 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     IOPBus bus;
     SIO2Controller sio2;
     bus.attachSIO2(&sio2);
-    REQUIRE(sio2.writeStartupControl(0x3bc) == SIO2AccessStatus::Accepted);
+    REQUIRE(sio2.writeControl(0x3bc) == SIO2AccessStatus::Accepted);
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, fault.address);
@@ -522,7 +522,7 @@ TEST_CASE("SIO2 guest merge loads use the aligned control word and delayed write
     IOPBus bus;
     SIO2Controller sio2;
     bus.attachSIO2(&sio2);
-    REQUIRE(sio2.writeStartupControl(0x3bc) == SIO2AccessStatus::Accepted);
+    REQUIRE(sio2.writeControl(0x3bc) == SIO2AccessStatus::Accepted);
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, address);

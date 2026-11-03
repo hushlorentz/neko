@@ -12,6 +12,7 @@ namespace
 {
   constexpr IOPAddress controlAddress = 0x1f808268;
   constexpr IOPWord startupControl = 0x3bc;
+  constexpr IOPWord passiveControl = 0xc;
 
   template<std::size_t Size>
   void installProgram(NekoSystem &system, const std::array<IOPWord, Size> &words)
@@ -101,38 +102,48 @@ namespace
   }
 }
 
-TEST_CASE("SIO2 retains only the selected startup control word", "[iop][sio2]")
+TEST_CASE("SIO2 retains only the selected passive control words", "[iop][sio2]")
 {
   NekoSystem system;
   auto &bus = system.iopBus();
   REQUIRE(bus.read32(controlAddress).status == IOPBusStatus::Completed);
   REQUIRE(bus.read32(controlAddress).value == 0);
-  for (unsigned repeat = 0; repeat < 2; ++repeat)
+  for (IOPWord programmed : {passiveControl, passiveControl, startupControl,
+         startupControl, passiveControl, startupControl})
   {
-    REQUIRE(bus.write32(controlAddress, startupControl).status ==
+    CAPTURE(programmed);
+    REQUIRE(bus.write32(controlAddress, programmed).status ==
       IOPBusStatus::Completed);
-    REQUIRE(bus.read32(controlAddress).value == startupControl);
-  }
-  for (IOPWord value : {0u, 0xcu, 1u, 0x3bdu, 0xffffffffu})
-  {
-    CAPTURE(value);
-    REQUIRE(bus.write32(controlAddress, value).status == IOPBusStatus::Unmapped);
-    REQUIRE(bus.read32(controlAddress).value == startupControl);
+    REQUIRE(bus.read32(controlAddress).value == programmed);
+    for (IOPWord value : {0u, 1u, 0xdu, 0x3bdu, 0x8000000cu, 0xffffffffu})
+    {
+      CAPTURE(value);
+      REQUIRE(bus.write32(controlAddress, value).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.read32(controlAddress).value == programmed);
+    }
   }
 }
 
 TEST_CASE("SIO2 bus admission excludes partial and nondata routes", "[iop][sio2]")
 {
+  IOPWord programmedControl = startupControl;
+  SECTION("Startup programming")
+  {
+  }
+  SECTION("Follow-on programming")
+  {
+    programmedControl = passiveControl;
+  }
   NekoSystem system;
   auto &bus = system.iopBus();
-  REQUIRE(bus.writeMasked32(controlAddress, startupControl, 0xf).status ==
+  REQUIRE(bus.writeMasked32(controlAddress, programmedControl, 0xf).status ==
     IOPBusStatus::Completed);
   REQUIRE(bus.writeMasked32(controlAddress, 0, 0xf).status ==
     IOPBusStatus::Unmapped);
   for (std::uint8_t mask = 1; mask < 0xf; ++mask)
   {
     CAPTURE(mask);
-    REQUIRE(bus.writeMasked32(controlAddress, startupControl, mask).status ==
+    REQUIRE(bus.writeMasked32(controlAddress, programmedControl, mask).status ==
       IOPBusStatus::Unmapped);
   }
   for (IOPAddress address = 0x1f808200; address < 0x1f808300; address += 4)
@@ -141,11 +152,11 @@ TEST_CASE("SIO2 bus admission excludes partial and nondata routes", "[iop][sio2]
     REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write8(address, 0xbc).status == IOPBusStatus::Unmapped);
-    REQUIRE(bus.write16(address, startupControl).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, programmedControl).status == IOPBusStatus::Unmapped);
     if (address != controlAddress)
     {
       REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
-      REQUIRE(bus.write32(address, startupControl).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(address, programmedControl).status == IOPBusStatus::Unmapped);
     }
   }
   for (IOPAddress offset : {1u, 2u, 3u})
@@ -154,18 +165,18 @@ TEST_CASE("SIO2 bus admission excludes partial and nondata routes", "[iop][sio2]
     REQUIRE(bus.read8(controlAddress + offset).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write8(controlAddress + offset, 0xbc).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read32(controlAddress + offset).status == IOPBusStatus::Misaligned);
-    REQUIRE(bus.write32(controlAddress + offset, startupControl).status ==
+    REQUIRE(bus.write32(controlAddress + offset, programmedControl).status ==
       IOPBusStatus::Misaligned);
     REQUIRE(bus.readInstruction32(controlAddress + offset).status ==
       IOPBusStatus::Misaligned);
   }
   REQUIRE(bus.read16(controlAddress + 2).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.write16(controlAddress + 2, startupControl).status ==
+  REQUIRE(bus.write16(controlAddress + 2, programmedControl).status ==
     IOPBusStatus::Unmapped);
   REQUIRE(bus.readInstruction32(controlAddress).status == IOPBusStatus::Unmapped);
   REQUIRE(bus.readDMAC32(controlAddress).status == IOPBusStatus::Unmapped);
   REQUIRE(bus.dmaWriteStatus(controlAddress) == IOPBusStatus::Unmapped);
-  REQUIRE(bus.writeDMAC32(controlAddress, startupControl).status ==
+  REQUIRE(bus.writeDMAC32(controlAddress, programmedControl).status ==
     IOPBusStatus::Unmapped);
   std::uint8_t byte = 0x5a;
   REQUIRE(bus.loadPhysical(controlAddress, &byte, 1) == IOPBusStatus::Unmapped);
@@ -174,48 +185,57 @@ TEST_CASE("SIO2 bus admission excludes partial and nondata routes", "[iop][sio2]
   for (IOPAddress alias : {0x9f808268u, 0xbf808268u})
   {
     REQUIRE(bus.read32(alias).status == IOPBusStatus::Unmapped);
-    REQUIRE(bus.write32(alias, startupControl).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(alias, programmedControl).status == IOPBusStatus::Unmapped);
   }
   REQUIRE_THROWS_AS(system.eeBus().read32(controlAddress), std::out_of_range);
-  REQUIRE(bus.read32(controlAddress).value == startupControl);
+  REQUIRE(bus.read32(controlAddress).value == programmedControl);
 
   IOPBus unattached;
   REQUIRE(unattached.read32(controlAddress).status == IOPBusStatus::Unmapped);
-  REQUIRE(unattached.write32(controlAddress, startupControl).status ==
+  REQUIRE(unattached.write32(controlAddress, programmedControl).status ==
     IOPBusStatus::Unmapped);
 }
 
 TEST_CASE("SIO2 control has an explicit device and machine reset lifetime",
   "[iop][sio2]")
 {
+  IOPWord programmedControl = startupControl;
+  SECTION("Startup programming")
+  {
+  }
+  SECTION("Follow-on programming")
+  {
+    programmedControl = passiveControl;
+  }
   SIO2Controller controller;
   REQUIRE(controller.readControl() == 0);
-  REQUIRE(controller.writeStartupControl(0x3bc) == SIO2AccessStatus::Accepted);
-  REQUIRE(controller.writeStartupControl(0) == SIO2AccessStatus::Unsupported);
-  REQUIRE(controller.readControl() == 0x3bc);
+  REQUIRE(controller.writeControl(programmedControl) ==
+    SIO2AccessStatus::Accepted);
+  REQUIRE(controller.writeControl(0) == SIO2AccessStatus::Unsupported);
+  REQUIRE(controller.readControl() == programmedControl);
   controller.reset();
   REQUIRE(controller.readControl() == 0);
 
   NekoSystem system;
-  REQUIRE(system.iopBus().write32(controlAddress, startupControl).status ==
+  REQUIRE(system.iopBus().write32(controlAddress, programmedControl).status ==
     IOPBusStatus::Completed);
   system.iopBus().reset();
-  REQUIRE(system.iopBus().read32(controlAddress).value == startupControl);
+  REQUIRE(system.iopBus().read32(controlAddress).value == programmedControl);
   system.iopCore().reset();
-  REQUIRE(system.iopBus().read32(controlAddress).value == startupControl);
+  REQUIRE(system.iopBus().read32(controlAddress).value == programmedControl);
   system.runMasterCycles(80);
   REQUIRE(system.iopCore().elapsedCycles() == 0);
-  REQUIRE(system.iopBus().read32(controlAddress).value == startupControl);
+  REQUIRE(system.iopBus().read32(controlAddress).value == programmedControl);
   system.sio2Controller().reset();
   REQUIRE(system.iopBus().read32(controlAddress).value == 0);
-  REQUIRE(system.iopBus().write32(controlAddress, startupControl).status ==
+  REQUIRE(system.iopBus().write32(controlAddress, programmedControl).status ==
     IOPBusStatus::Completed);
   system.reset();
   REQUIRE(system.iopBus().read32(controlAddress).status == IOPBusStatus::Completed);
   REQUIRE(system.iopBus().read32(controlAddress).value == 0);
-  REQUIRE(system.iopBus().write32(controlAddress, startupControl).status ==
+  REQUIRE(system.iopBus().write32(controlAddress, programmedControl).status ==
     IOPBusStatus::Completed);
-  REQUIRE(system.sio2Controller().readControl() == startupControl);
+  REQUIRE(system.sio2Controller().readControl() == programmedControl);
 }
 
 TEST_CASE("SIO2 programming preserves existing IRQ DMA and frontend input",
@@ -239,6 +259,7 @@ TEST_CASE("SIO2 programming preserves existing IRQ DMA and frontend input",
   dma.signalChannelCompletion(IOPDMAChannel::SIF1);
   const auto primary = dma.interruptStatus(IOPDMABank::Primary);
   const auto secondary = dma.interruptStatus(IOPDMABank::Secondary);
+  IOPWord retained = 0;
   for (bool pending : {false, true})
   {
     CAPTURE(pending);
@@ -247,12 +268,18 @@ TEST_CASE("SIO2 programming preserves existing IRQ DMA and frontend input",
       interrupts.assertSource(IOPInterruptSource::SIO2);
     }
     const auto status = interrupts.status();
-    for (IOPWord value : {startupControl, 0u, 1u, 0xcu, 0x3bdu, startupControl})
+    for (IOPWord value : {passiveControl, passiveControl, startupControl,
+           0u, 1u, passiveControl, 0xdu, 0x3bdu, startupControl})
     {
       CAPTURE(value);
+      const bool accepted = value == startupControl || value == passiveControl;
       REQUIRE(system.iopBus().write32(controlAddress, value).status ==
-        (value == startupControl ? IOPBusStatus::Completed : IOPBusStatus::Unmapped));
-      REQUIRE(system.iopBus().read32(controlAddress).value == startupControl);
+        (accepted ? IOPBusStatus::Completed : IOPBusStatus::Unmapped));
+      if (accepted)
+      {
+        retained = value;
+      }
+      REQUIRE(system.iopBus().read32(controlAddress).value == retained);
       REQUIRE(interrupts.status() == status);
       REQUIRE(interrupts.mask() == (1u << 17));
       REQUIRE(interrupts.control() == 1);
@@ -383,7 +410,7 @@ TEST_CASE("SIO2 initialization and readback restore with traced and plain contin
     NekoSystem plain;
     if (cut == 56)
     {
-      REQUIRE(restored.sio2Controller().writeStartupControl(startupControl) ==
+      REQUIRE(restored.sio2Controller().writeControl(startupControl) ==
         SIO2AccessStatus::Accepted);
     }
     restored.loadState(checkpoint);
