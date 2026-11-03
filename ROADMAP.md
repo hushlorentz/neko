@@ -3099,8 +3099,14 @@ commands or media services. Later blocks remain dependency-gated.
 - [x] Implement the selected reads through the common DMA owner and exact
       channel-word map; preserve fetch/supplemental/SIF boundaries and other
       access rejection, with guest trace/alias and reset/restored coverage.
-- [ ] Independently review the boundary and verify fresh BIOS continuation
+- [x] Independently review the boundary and verify fresh BIOS continuation
       with cold/restored traced/plain and canonical comparisons.
+
+### Post-Readback Dependency Attribution
+
+- [ ] Attribute the IOP word load at physical address 0x1e000000 through local
+      manuals and required image/device inputs; select the contract and owner
+      before expanding implementation and verification items.
 
 ### Additional CD/DVD Command and Configuration Scope
 

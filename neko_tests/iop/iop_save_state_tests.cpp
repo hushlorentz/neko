@@ -804,7 +804,7 @@ TEST_CASE("IOP high-address writes continue across lifecycle and branch restore"
 }
 
 TEST_CASE("IOP DMA initialization guest continuation restores pending load branch and completed store",
-  "[iop][dma][dpcr3][channel-init][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][save-state]")
+  "[iop][dma][dpcr3][channel-init][channel-read][supplemental-init][channel0-init][channel1-init][channel2-init][channel3-init][conformance][save-state]")
 {
   for (const IOPAddress physical : {0x1f8015f0u,
     0x1f801080u, 0x1f801084u, 0x1f801088u,
@@ -824,6 +824,9 @@ TEST_CASE("IOP DMA initialization guest continuation restores pending load branc
     CAPTURE(physical);
     CAPTURE(prefix);
     const IOPWord value = physical == 0x1f8015f0 ? 0x777 : 0;
+    const bool readableChannelWord = physical != 0x1f8015f0 &&
+      physical != 0x1f8010cc && physical != 0x1f801560 &&
+      physical != 0x1f801564 && physical != 0x1f801568;
     NekoSystem original;
     const IOPWord program[] = {
       0x3c01bf80, // lui r1, 0xbf80
@@ -890,7 +893,18 @@ TEST_CASE("IOP DMA initialization guest continuation restores pending load branc
       REQUIRE(system->sifStateHash() == sifHash);
     }
     REQUIRE(restored.iopBus().read32(0x104).value == value);
-    REQUIRE(restored.iopBus().read32(physical).status == IOPBusStatus::Unmapped);
+    const auto read = restored.iopBus().read32(physical);
+    if (readableChannelWord)
+    {
+      REQUIRE(read.status == IOPBusStatus::Completed);
+      REQUIRE(read.value == 0);
+    }
+    else
+    {
+      REQUIRE(read.status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(restored.iopBus().readInstruction32(physical).status ==
+      IOPBusStatus::Unmapped);
   }
 }
 
