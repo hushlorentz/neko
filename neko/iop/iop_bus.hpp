@@ -106,6 +106,8 @@ class IOPBus final
     IOPBusReadResult read8(IOPAddress address);
     IOPBusReadResult read16(IOPAddress address);
     IOPBusReadResult read32(IOPAddress address);
+    // Data-readable initialization-only channel words remain non-executable.
+    IOPBusReadResult readInstruction32(IOPAddress address);
     IOPBusWriteResult write8(IOPAddress address, std::uint8_t value);
     IOPBusWriteResult write16(IOPAddress address, std::uint16_t value);
     IOPBusWriteResult write32(IOPAddress address, IOPWord value);
@@ -201,6 +203,9 @@ class IOPBus final
     std::uint8_t *writableBytes(const Location &location);
     IOPBusReadResult readScalar(
       IOPAddress address,
+      std::size_t width);
+    IOPBusReadResult readLocatedScalar(
+      const Location &location,
       std::size_t width);
     IOPBusWriteResult writeScalar(
       IOPAddress address,

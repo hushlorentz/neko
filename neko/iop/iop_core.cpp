@@ -1713,7 +1713,9 @@ IOPMemoryReadResult IOPCore::readMemory(
         busResult = physicalBus.read16(classification.physicalAddress);
         break;
       case sizeof(IOPWord):
-        busResult = physicalBus.read32(classification.physicalAddress);
+        busResult = access == IOPCacheAccess::InstructionFetch
+          ? physicalBus.readInstruction32(classification.physicalAddress)
+          : physicalBus.read32(classification.physicalAddress);
         break;
       default:
         throw std::logic_error("Unsupported IOP memory read width.");

@@ -397,14 +397,18 @@ std::uint8_t *IOPBus::writableBytes(const Location &location)
 
 IOPBusReadResult IOPBus::readScalar(IOPAddress address, std::size_t width)
 {
-  IOPBusReadResult result;
   if (!isAligned(address, width))
   {
-    result.status = IOPBusStatus::Misaligned;
-    return result;
+    return {IOPBusStatus::Misaligned};
   }
+  return readLocatedScalar(locate(address, width), width);
+}
 
-  const Location location = locate(address, width);
+IOPBusReadResult IOPBus::readLocatedScalar(
+  const Location &location,
+  std::size_t width)
+{
+  IOPBusReadResult result;
   if (location.region == IOPBusRegion::Unmapped)
   {
     return result;
@@ -472,6 +476,20 @@ IOPBusReadResult IOPBus::read16(IOPAddress address)
 IOPBusReadResult IOPBus::read32(IOPAddress address)
 {
   return readScalar(address, 4);
+}
+
+IOPBusReadResult IOPBus::readInstruction32(IOPAddress address)
+{
+  if (!isAligned(address, sizeof(IOPWord)))
+  {
+    return {IOPBusStatus::Misaligned};
+  }
+  const Location location = locate(address, sizeof(IOPWord));
+  if (location.device == Device::ChannelRegisterInitialization)
+  {
+    return {};
+  }
+  return readLocatedScalar(location, sizeof(IOPWord));
 }
 
 IOPBusWriteResult IOPBus::write8(IOPAddress address, std::uint8_t value)
@@ -566,10 +584,14 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == sizeof(IOPWord)
         ? IOPBusReadResult{IOPBusStatus::Completed, cacheInitializationControl}
         : IOPBusReadResult{};
+    case Device::ChannelRegisterInitialization:
+      return width == sizeof(IOPWord) && dmaController != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            dmaController->channelRegisterInitialization()}
+        : IOPBusReadResult{};
     case Device::POST2:
     case Device::POST3:
     case Device::DPCR3Initialization:
-    case Device::ChannelRegisterInitialization:
     case Device::SupplementalDMAInitialization:
     case Device::HighAddressInitializationControl:
     case Device::RAMInitializationControl:

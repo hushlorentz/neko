@@ -3093,13 +3093,14 @@ commands or media services. Later blocks remain dependency-gated.
 
 ### Post-SIF-Stop Dependency Attribution
 
-- [ ] Resolve the demonstrated IOP DMA channel-0 CHCR read through local
-      manuals and existing initialization policy; select bounded register-family
-      read semantics without inventing a transfer engine or device readiness.
-- [ ] Implement the selected read scope through the existing register owner
-      and bus, with atomic access rejection and guest trace/alias coverage.
+- [x] Resolve the channel-0 CHCR read through local manuals and existing
+      initialization policy; select zero word readback for the 33 existing
+      zero-only channel words, without transfer or readiness behavior.
+- [x] Implement the selected reads through the common DMA owner and exact
+      channel-word map; preserve fetch/supplemental/SIF boundaries and other
+      access rejection, with guest trace/alias and reset/restored coverage.
 - [ ] Independently review the boundary and verify fresh BIOS continuation
-      with traced/plain and canonical comparisons.
+      with cold/restored traced/plain and canonical comparisons.
 
 ### Additional CD/DVD Command and Configuration Scope
 
