@@ -29,6 +29,7 @@ namespace neko_desktop
     std::uint64_t elfCycleLimit = DEFAULT_ELF_CYCLE_LIMIT;
     std::string biosPath;
     std::uint64_t biosCycleLimit = DEFAULT_BIOS_CYCLE_LIMIT;
+    std::string screenshotPath;
   };
 
   DesktopOptions parseDesktopOptions(

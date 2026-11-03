@@ -215,17 +215,26 @@ The default execution budget is 1,000,000 EE master cycles. Override it with
 instruction counts, and final program counter; only a completed guest returns a
 successful host exit status.
 
-Run a legally dumped 4 MiB PlayStation 2 BIOS as a bounded startup diagnostic:
+Run a legally dumped 4 MiB PlayStation 2 BIOS in the desktop window:
 
 ```sh
-./out/desktop/neko_desktop --bios path/to/bios.bin --cycles 1000000
+./out/desktop/neko_desktop --bios path/to/bios.bin --cycles 165000000
 ```
 
-The BIOS image remains external and is never embedded in Neko. The command
-installs the image for both processors but starts only the EE; the IOP remains
-halted while its timers advance. It prints the first execution stop, including
-the final PC, rejected instruction, and pending exception. This is an
-architecture-development diagnostic, not a complete BIOS boot path.
+The image remains external and is never embedded in Neko. Both CPUs execute
+in bounded slices while SDL presents the core's GS output. The default budget
+is 1,000,000 master cycles; `--cycles` sets the total, not a per-frame budget.
+The title reports progress and whether GS output is available. The final view
+stays open at a CPU stop or budget boundary until you close it; a CPU stop
+returns a failing exit status after closure.
+
+Add `--screenshot out/bios.bmp` to save a BMP of the rendered view at the
+execution boundary or early window closure. Disabled GS output produces a
+black view, explicitly identified in the console report; a screenshot is not
+proof of a completed BIOS boot. `--frames <count>` bounds desktop presentation
+iterations for automated smoke runs, not emulated video frames. The BIOS
+window is a development diagnostic; complete boot and controller input are
+not yet supported.
 
 Generate tiny synthetic guests for CLI diagnostics:
 

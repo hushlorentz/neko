@@ -95,7 +95,38 @@ TEST_CASE("Desktop ELF options reject ambiguous execution modes")
   REQUIRE_THROWS_WITH(
     neko_desktop::parseDesktopOptions(
       {"--bios", "bios.bin", "--scene", "primitives"}),
-    "BIOS execution cannot be combined with a scene or frame limit.");
+    "BIOS execution cannot be combined with a scene.");
+}
+
+TEST_CASE("Desktop BIOS options support bounded window capture")
+{
+  REQUIRE_NOTHROW(
+    neko_desktop::parseDesktopOptions(
+      {"--bios", "bios.bin", "--cycles", "17", "--frames", "2"}));
+  REQUIRE_NOTHROW(
+    neko_desktop::parseDesktopOptions(
+      {"--bios", "bios.bin", "--screenshot", "frame.bmp"}));
+  const auto options = neko_desktop::parseDesktopOptions(
+    {"--bios", "bios.bin", "--frames", "2",
+     "--screenshot", "frame.bmp"});
+  REQUIRE(options.frameLimit == 2);
+  REQUIRE(options.screenshotPath == "frame.bmp");
+}
+
+TEST_CASE("Desktop screenshots require an unambiguous BIOS destination")
+{
+  REQUIRE_THROWS_WITH(
+    neko_desktop::parseDesktopOptions({"--screenshot", "frame.bmp"}),
+    "--screenshot requires --bios.");
+  REQUIRE_THROWS_WITH(
+    neko_desktop::parseDesktopOptions(
+      {"--bios", "bios.bin", "--screenshot", ""}),
+    "Screenshot path must not be empty.");
+  REQUIRE_THROWS_WITH(
+    neko_desktop::parseDesktopOptions(
+      {"--bios", "bios.bin", "--screenshot", "a.bmp",
+       "--screenshot", "b.bmp"}),
+    "Only one screenshot path may be specified.");
 }
 
 TEST_CASE("Desktop ELF cycle budgets must be positive integers")

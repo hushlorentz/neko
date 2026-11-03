@@ -2877,18 +2877,48 @@ real BIOS handshake conformance block below.
 - [x] Pass the final complete optimized, AddressSanitizer and native macOS
       leak checks; close the real-BIOS conformance block and milestone.
 
-## Milestone 10: Boot Services, Media, and Input
+## Milestone 10: Reach a Responsive BIOS Shell
 
-Implement the concrete boot-service hardware exposed by BIOS progress,
-including optical-media commands and data flow, SIO2-facing input, controller
-and memory-card behavior, and any required ROM or module-loading support.
-Preserve deterministic emulated device time independently of host I/O speed.
+Boot the selected BIOS through real guest execution to an identified,
+responsive browser/menu or equivalent shell checkpoint under an explicit
+hardware/input profile. A repeated loop, absence of faults, or one repaired
+device boundary is not completion: demonstrate ongoing system activity and
+an expected guest response to deterministic controller input.
 
-The selected IOP CD/DVD startup prerequisite is implemented. Milestone 9 is
-complete, including real BIOS SIF flag exchange and repeated trace/save-load
-conformance. Start the remaining work at the demonstrated EE byte read from
-`0x1f402005`; establish access to the existing device owner before expanding
-commands or media services. Later blocks remain dependency-gated.
+Use BIOS discovery to select the next coherent, evidence-backed hardware
+capability. Implement only the boot services, media, input, ROM and module
+support required by the selected checkpoint, preserving deterministic device
+time independently of host I/O speed. Defer unused hardware breadth, not the
+fault handling, reset, persistence, determinism or regression coverage of
+implemented behavior; do not manufacture readiness or replace guest services.
+
+Milestone 9 is complete, including real BIOS SIF flag exchange and repeated
+trace/save-load conformance. The completed dependency blocks below retain
+their status; unfinished device scopes remain conditional on the shell target,
+not requirements for exhaustive subsystem coverage.
+
+### Desktop BIOS Presentation
+
+- [x] Run both CPUs incrementally in the SDL window under one finite cycle
+      budget; present core GS output without frontend hardware policy and keep
+      the final view visible on a CPU stop or budget boundary.
+- [x] Report execution and disabled/active video status, support a bounded
+      window smoke run and optional screenshot, and preserve demo/ELF modes.
+- [x] Validate sliced execution and precise stops, desktop presentation and
+      fresh unchanged-input BIOS output; independently review and pass the
+      optimized/ASan gates without claiming a visible shell from a blank view.
+
+### BIOS Shell Target and Acceptance Profile
+
+- [ ] Define the selected shell checkpoint and explicit media, memory-card,
+      controller and deterministic configuration inputs; retain SCPH-70012 as
+      the discovery baseline unless a deliberate input change is selected.
+- [ ] Select visible-menu or headless guest-state evidence and its acceptance
+      signals; distinguish an identified shell from a deadlock or device poll
+      without requiring frontend packaging to establish core boot progress.
+- [ ] Define a bounded observation window and deterministic controller-input
+      sequence proving shell response while required timers, interrupts and
+      device activity continue normally.
 
 ### CD/DVD Startup Dependency Planning
 
@@ -3122,17 +3152,18 @@ commands or media services. Later blocks remain dependency-gated.
 
 ### Additional CD/DVD Command and Configuration Scope
 
-- [ ] Expand demonstrated command dependencies into independent transport and
-      command-family blocks; select parameters, results, busy/error behavior,
-      IRQs, cancellation and timing before implementation.
+- [ ] Expand command dependencies required by the selected shell profile into
+      independent transport and command-family blocks; select parameters,
+      results, busy/error behavior, IRQs, cancellation and timing.
 - [ ] Select explicit deterministic inputs for any required identity, NVM,
       region, configuration or RTC programming; do not substitute zero-success
       responses or fabricate authentication and media readiness.
 
 ### Optical Media and DMA Scope
 
-- [ ] When required, define media-image inputs, supported sector formats and
-      no-media/error behavior, keeping host file I/O outside the device core.
+- [ ] If required by the selected shell profile, define media-image inputs,
+      supported sector formats and no-media/error behavior, keeping host file
+      I/O outside the device core; otherwise defer media transfer breadth.
 - [ ] Plan buffered sector production and channel-3 DMA through their existing
       owners, including backpressure, transfer counts, completion, cancellation,
       emulated deadlines and deterministic restored continuation.
@@ -3142,7 +3173,8 @@ commands or media services. Later blocks remain dependency-gated.
 ### SIO2, Input and Memory-Card Scope
 
 - [ ] Expand demonstrated SIO2 register, command, DMA and IRQ dependencies into
-      reviewable blocks before implementing controller or memory-card protocols.
+      reviewable blocks; implement controller or memory-card protocols only as
+      required by the selected shell profile and responsiveness demonstration.
 - [ ] Define deterministic controller-input sampling and separate memory-card
       protocol state from host persistence; select absent-device/error behavior.
 
@@ -3154,13 +3186,37 @@ commands or media services. Later blocks remain dependency-gated.
 
 ### Boot-Service Conformance and Closure
 
-- [ ] Define the selected observable BIOS boot-service checkpoint and supported
-      media/input profile; do not equate one repaired boundary with complete boot.
-- [ ] Validate the selected flows with authored regressions and separately
-      authorized BIOS trace/hash/save-load conformance.
+- [ ] Demonstrate the selected shell checkpoint, ongoing system activity and
+      expected response to the defined controller-input sequence; a fault-free
+      loop or unsupported-device wait does not satisfy acceptance.
+- [ ] Validate the selected flows with authored regressions and bounded BIOS
+      repeated cold-boot, traced/plain and canonical/save-load continuation
+      comparisons under the same recorded inputs.
 - [ ] Complete bounded maintainability and independent correctness review,
       reconcile provisional policies, and pass optimized, ASan and native leak
       closure gates.
+- [ ] Move unused conditional device scopes into post-BIOS completion blocks
+      and inventory partial contracts/provisional policies; distinguish
+      boot-supported behavior from broader subsystem coverage.
+
+## Post-BIOS Hardware Completion
+
+After Milestone 10, revisit partial subsystems in separately scoped completion
+blocks rather than extending BIOS discovery into an unbounded manual audit.
+Prioritize shared architectural gaps, unresolved provisional policies and
+likely game requirements; BIOS success is integration evidence, not proof of
+complete hardware behavior.
+
+- [ ] Audit partial DMA, cache/memory, CD/DVD, SIO2/input and ROM/platform
+      contracts against local manuals and recorded evidence; distinguish
+      correctness defects, unsupported breadth and provisional policy gaps.
+- [ ] Select and expand prioritized completion work into reviewable subsystem
+      blocks with explicit behavioral acceptance and owner/extension boundaries;
+      route audio and title-specific dependencies to their existing milestones.
+- [ ] Implement and validate the selected completion blocks with authored
+      conformance, reset/restored determinism and risk-appropriate review/gates;
+      retain the responsive BIOS shell as an integration regression, not the
+      sole correctness oracle.
 
 ## Milestone 11: SPU2 and Deterministic Audio
 

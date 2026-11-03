@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -30,6 +31,7 @@ namespace
   constexpr int RGBA_COMPONENT_COUNT = 4;
   constexpr std::uint32_t FRAME_DELAY_MILLISECONDS = 16;
   constexpr std::uint32_t FRAMES_PER_ROTATION_PHASE = 2;
+  constexpr std::uint64_t BIOS_SLICE_CYCLES = 100000;
 
   std::vector<std::string> commandLineArguments(
     int argc,
@@ -84,6 +86,62 @@ namespace
       }
   };
 
+  using Texture =
+    std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
+
+  Texture createTexture(SDL_Renderer *renderer, int width, int height)
+  {
+    Texture texture(
+      SDL_CreateTexture(
+        renderer, SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STREAMING, width, height),
+      SDL_DestroyTexture);
+    if (texture == nullptr)
+    {
+      throw std::runtime_error(
+        std::string("SDL texture creation failed: ") + SDL_GetError());
+    }
+    requireSDL(
+      SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_NEAREST),
+      "SDL texture scale-mode selection failed");
+    requireSDL(
+      SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_NONE),
+      "SDL texture blend-mode selection failed");
+    return texture;
+  }
+
+  void saveScreenshot(SDL_Renderer *renderer, const std::string &path)
+  {
+    std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> surface(
+      SDL_RenderReadPixels(renderer, nullptr), SDL_DestroySurface);
+    if (surface == nullptr)
+    {
+      throw std::runtime_error(
+        std::string("SDL screenshot readback failed: ") + SDL_GetError());
+    }
+    requireSDL(SDL_SaveBMP(surface.get(), path.c_str()),
+      "SDL screenshot save failed");
+    std::cout << "screenshot: " << path << '\n';
+  }
+
+  void reportBIOSVideo(const GSPresentation &video)
+  {
+    std::size_t nonblackPixels = 0;
+    for (std::size_t index = 0; index < video.rgba.size(); index += 4)
+    {
+      if (video.rgba[index] != 0 ||
+          video.rgba[index + 1] != 0 ||
+          video.rgba[index + 2] != 0)
+      {
+        ++nonblackPixels;
+      }
+    }
+    std::cout << "bios_video: output="
+      << (video.rgba.empty() ? "disabled" : "active")
+      << " width=" << video.width << " height=" << video.height
+      << " nonblack_pixels=" << nonblackPixels << '\n';
+  }
+
   int runDesktop(int argc, char **argv)
   {
     using neko_desktop::DesktopOptions;
@@ -100,17 +158,15 @@ namespace
       std::cout << report.diagnostic << '\n';
       return report.hostExitCode;
     }
+    std::unique_ptr<neko_frontend::BIOSSession> bios;
     if (!options.biosPath.empty())
     {
-      const neko_frontend::BIOSRunReport report =
-        neko_frontend::runBIOSFile(
-          options.biosPath,
-          options.biosCycleLimit);
-      std::cout << report.diagnostic << '\n';
-      return report.hostExitCode;
+      bios.reset(new neko_frontend::BIOSSession(
+        readBinaryFile(options.biosPath, "BIOS image"),
+        options.biosCycleLimit));
     }
     const std::vector<std::uint8_t> microprogram =
-      options.scene == DesktopScene::Rotation
+      bios == nullptr && options.scene == DesktopScene::Rotation
         ? readBinaryFile(
             NEKO_ROTATION_VU1_BINARY,
             "assembled rotation VU1 program")
@@ -122,7 +178,9 @@ namespace
     SDL_Renderer *rawRenderer = nullptr;
     const bool windowCreated =
       SDL_CreateWindowAndRenderer(
-        options.scene == DesktopScene::Rotation
+        bios != nullptr
+          ? "Neko - BIOS startup"
+          : options.scene == DesktopScene::Rotation
           ? "Neko - rotation_vu1.asm"
           : options.scene == DesktopScene::PointsAndSprites
             ? "Neko - POINT and SPRITE"
@@ -145,32 +203,12 @@ namespace
         SDL_GetError());
     }
 
-    std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>
-      texture(
-        SDL_CreateTexture(
-          renderer.get(),
-          SDL_PIXELFORMAT_RGBA32,
-          SDL_TEXTUREACCESS_STREAMING,
-          WINDOW_WIDTH,
-          WINDOW_HEIGHT),
-        SDL_DestroyTexture);
-    if (texture == nullptr)
-    {
-      throw std::runtime_error(
-        std::string("SDL texture creation failed: ") +
-        SDL_GetError());
-    }
-
-    requireSDL(
-      SDL_SetTextureScaleMode(
-        texture.get(),
-        SDL_SCALEMODE_NEAREST),
-      "SDL texture scale-mode selection failed");
-    requireSDL(
-      SDL_SetTextureBlendMode(
-        texture.get(),
-        SDL_BLENDMODE_NONE),
-      "SDL texture blend-mode selection failed");
+    Texture texture(nullptr, SDL_DestroyTexture);
+    int textureWidth = 0;
+    int textureHeight = 0;
+    GSPresentation biosVideo;
+    bool biosReported = false;
+    bool screenshotSaved = false;
     bool running = true;
     int renderedFrames = 0;
     std::uint64_t firstFramebufferHash = 0;
@@ -188,7 +226,38 @@ namespace
 
       std::vector<std::uint8_t> rgbaPixels;
       std::uint64_t framebufferHash = 0;
-      if (options.scene == DesktopScene::Rotation)
+      int videoWidth = WINDOW_WIDTH;
+      int videoHeight = WINDOW_HEIGHT;
+      if (bios != nullptr)
+      {
+        if (running && !bios->finished())
+        {
+          bios->advance(BIOS_SLICE_CYCLES);
+          biosVideo = bios->videoOutput();
+        }
+        videoWidth = biosVideo.width;
+        videoHeight = biosVideo.height;
+        std::ostringstream title;
+        title << "Neko | " << bios->diagnostic() << " | GS ";
+        if (biosVideo.rgba.empty())
+        {
+          title << "disabled";
+        }
+        else
+        {
+          title << videoWidth << 'x' << videoHeight;
+        }
+        requireSDL(SDL_SetWindowTitle(window.get(), title.str().c_str()),
+          "SDL window title update failed");
+        if (bios->finished() && !biosReported)
+        {
+          std::cout << bios->diagnostic() << '\n';
+          reportBIOSVideo(biosVideo);
+          std::cout.flush();
+          biosReported = true;
+        }
+      }
+      else if (options.scene == DesktopScene::Rotation)
       {
         const std::uint32_t rotationPhase =
           (static_cast<std::uint32_t>(renderedFrames) /
@@ -245,14 +314,6 @@ namespace
       }
       lastFramebufferHash = framebufferHash;
       requireSDL(
-        SDL_UpdateTexture(
-          texture.get(),
-          nullptr,
-          rgbaPixels.data(),
-          WINDOW_WIDTH * RGBA_COMPONENT_COUNT),
-        "SDL texture upload failed");
-
-      requireSDL(
         SDL_SetRenderDrawColor(
           renderer.get(),
           0,
@@ -263,24 +324,60 @@ namespace
       requireSDL(
         SDL_RenderClear(renderer.get()),
         "SDL renderer clear failed");
-      requireSDL(
-        SDL_RenderTexture(
-          renderer.get(),
-          texture.get(),
-          nullptr,
-          nullptr),
-        "SDL texture rendering failed");
+      const auto &pixels = bios != nullptr ? biosVideo.rgba : rgbaPixels;
+      if (!pixels.empty())
+      {
+        if (textureWidth != videoWidth || textureHeight != videoHeight)
+        {
+          texture = createTexture(renderer.get(), videoWidth, videoHeight);
+          textureWidth = videoWidth;
+          textureHeight = videoHeight;
+          if (bios != nullptr)
+          {
+            requireSDL(SDL_SetRenderLogicalPresentation(
+              renderer.get(), videoWidth, videoHeight,
+              SDL_LOGICAL_PRESENTATION_LETTERBOX),
+              "SDL logical presentation failed");
+          }
+        }
+        requireSDL(SDL_UpdateTexture(
+          texture.get(), nullptr, pixels.data(),
+          videoWidth * RGBA_COMPONENT_COUNT),
+          "SDL texture upload failed");
+        requireSDL(SDL_RenderTexture(
+          renderer.get(), texture.get(), nullptr, nullptr),
+          "SDL texture rendering failed");
+      }
+      const bool frameLimitReached = options.frameLimit != 0 &&
+        renderedFrames + 1 >= options.frameLimit;
+      if (!options.screenshotPath.empty() && !screenshotSaved &&
+          (bios->finished() || !running || frameLimitReached))
+      {
+        saveScreenshot(renderer.get(), options.screenshotPath);
+        screenshotSaved = true;
+      }
       requireSDL(
         SDL_RenderPresent(renderer.get()),
         "SDL presentation failed");
 
       ++renderedFrames;
-      if (options.frameLimit != 0 &&
-          renderedFrames >= options.frameLimit)
+      if (frameLimitReached)
       {
         running = false;
       }
       SDL_Delay(FRAME_DELAY_MILLISECONDS);
+    }
+    if (bios != nullptr)
+    {
+      if (!biosReported)
+      {
+        std::cout << bios->diagnostic() << '\n';
+        reportBIOSVideo(biosVideo);
+      }
+      std::cout << "bios_window: closed frames=" << renderedFrames << '\n';
+      return bios->execution().ee.state == EEExecutionState::Halted ||
+        bios->execution().iop.state == IOPExecutionState::Halted
+          ? EXIT_FAILURE : EXIT_SUCCESS;
     }
     if (options.frameLimit != 0)
     {

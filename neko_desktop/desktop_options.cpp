@@ -7,7 +7,8 @@ namespace
   const char *USAGE =
     "Usage: neko_desktop [--scene <name>] [--frames <count>] "
     "| --elf <path> [--cycles <count>] "
-    "| --bios <path> [--cycles <count>]";
+    "| --bios <path> [--cycles <count>] [--frames <count>] "
+    "[--screenshot <path.bmp>]";
 
   std::uint64_t parsePositiveInteger(
     const std::string &text,
@@ -150,6 +151,21 @@ neko_desktop::parseDesktopOptions(
           "BIOS path must not be empty.");
       }
     }
+    else if (argument == "--screenshot" &&
+             index + 1 < arguments.size())
+    {
+      if (!options.screenshotPath.empty())
+      {
+        throw std::invalid_argument(
+          "Only one screenshot path may be specified.");
+      }
+      options.screenshotPath = arguments[++index];
+      if (options.screenshotPath.empty())
+      {
+        throw std::invalid_argument(
+          "Screenshot path must not be empty.");
+      }
+    }
     else
     {
       throw std::invalid_argument(USAGE);
@@ -175,11 +191,14 @@ neko_desktop::parseDesktopOptions(
     throw std::invalid_argument(
       "ELF and BIOS execution modes are mutually exclusive.");
   }
-  if (!options.biosPath.empty() &&
-      (sceneSpecified || options.frameLimit != 0))
+  if (!options.biosPath.empty() && sceneSpecified)
   {
     throw std::invalid_argument(
-      "BIOS execution cannot be combined with a scene or frame limit.");
+      "BIOS execution cannot be combined with a scene.");
+  }
+  if (!options.screenshotPath.empty() && options.biosPath.empty())
+  {
+    throw std::invalid_argument("--screenshot requires --bios.");
   }
   return options;
 }

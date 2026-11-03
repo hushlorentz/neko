@@ -1,5 +1,6 @@
 #include "bios_runner.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -10,6 +11,24 @@
 
 namespace
 {
+  const char *stopReasonName(IOPStopReason reason)
+  {
+    switch (reason)
+    {
+      case IOPStopReason::None:
+        return "none";
+      case IOPStopReason::HostHalt:
+        return "host_halt";
+      case IOPStopReason::UndefinedOperation:
+        return "undefined_operation";
+      case IOPStopReason::ExecutionException:
+        return "execution_exception";
+      case IOPStopReason::StoreFailure:
+        return "store_failure";
+    }
+    throw std::logic_error("Unknown IOP stop reason.");
+  }
+
   const char *executionStateName(EEExecutionState state)
   {
     switch (state)
@@ -133,4 +152,80 @@ neko_frontend::BIOSRunReport neko_frontend::runBIOSFile(
   report.diagnostic = formatBIOSRun(report);
   report.hostExitCode = EXIT_SUCCESS;
   return report;
+}
+
+neko_frontend::BIOSSession::BIOSSession(
+  const std::vector<std::uint8_t> &image,
+  std::uint64_t maxMasterCycles) :
+  cycleLimit(maxMasterCycles)
+{
+  if (cycleLimit == 0)
+  {
+    throw std::invalid_argument("BIOS cycle limit must be positive.");
+  }
+  lastExecution = system.runDualCPUBIOS(image, 0);
+}
+
+void neko_frontend::BIOSSession::advance(
+  std::uint64_t maxSliceCycles)
+{
+  if (maxSliceCycles == 0)
+  {
+    throw std::invalid_argument("BIOS slice budget must be positive.");
+  }
+  if (finished())
+  {
+    return;
+  }
+  lastExecution = system.runDualCPU(
+    std::min(maxSliceCycles, cycleLimit - elapsed));
+  elapsed += lastExecution.masterCycles;
+}
+
+bool neko_frontend::BIOSSession::finished() const
+{
+  return elapsed == cycleLimit ||
+    lastExecution.ee.state == EEExecutionState::Halted ||
+    lastExecution.iop.state == IOPExecutionState::Halted;
+}
+
+std::uint64_t neko_frontend::BIOSSession::masterCycles() const
+{
+  return elapsed;
+}
+
+const DualCPUExecutionResult &
+neko_frontend::BIOSSession::execution() const
+{
+  return lastExecution;
+}
+
+GSPresentation neko_frontend::BIOSSession::videoOutput() const
+{
+  return system.videoOutput();
+}
+
+std::string neko_frontend::BIOSSession::diagnostic() const
+{
+  std::ostringstream output;
+  output
+    << "bios: master_cycles=" << elapsed
+    << " outcome="
+    << (lastExecution.ee.state == EEExecutionState::Halted ||
+        lastExecution.iop.state == IOPExecutionState::Halted
+          ? "cpu_stopped"
+          : elapsed == cycleLimit ? "cycle_limit" : "running")
+    << " ee_stop=" << stopReasonName(lastExecution.ee.stopReason)
+    << " ee_pc=0x" << std::hex
+    << lastExecution.ee.programCounter
+    << " iop_stop=" << stopReasonName(lastExecution.iop.stopReason)
+    << " iop_pc=0x" << lastExecution.iop.programCounter;
+  if (lastExecution.iop.stopReason == IOPStopReason::StoreFailure)
+  {
+    output << " iop_store_pa=0x"
+      << lastExecution.iop.storeFailure.access.physicalAddress
+      << " iop_store_value=0x"
+      << lastExecution.iop.storeFailure.value;
+  }
+  return output.str();
 }

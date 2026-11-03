@@ -1,9 +1,28 @@
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "catch.hpp"
 #include "bios_runner.hpp"
 #include "elf_runner.hpp"
+
+namespace
+{
+  std::vector<std::uint8_t> frontendBIOS(
+    const std::vector<std::uint32_t> &instructions)
+  {
+    std::vector<std::uint8_t> image(BootROMImage::SIZE, 0);
+    for (std::size_t index = 0; index < instructions.size(); ++index)
+    {
+      for (std::size_t byte = 0; byte < 4; ++byte)
+      {
+        image[index * 4 + byte] = static_cast<std::uint8_t>(
+          instructions[index] >> (byte * 8));
+      }
+    }
+    return image;
+  }
+}
 
 TEST_CASE("ELF frontend reports deterministic execution details")
 {
@@ -81,4 +100,84 @@ TEST_CASE("BIOS frontend reports file-open failures")
       "missing-neko-test-bios.bin",
       1),
     "Could not open BIOS image at missing-neko-test-bios.bin.");
+}
+
+TEST_CASE("BIOS window session shares one exact dual CPU budget",
+  "[frontend][bios][desktop]")
+{
+  neko_frontend::BIOSSession session(frontendBIOS({}), 17);
+  REQUIRE_FALSE(session.finished());
+  for (const std::uint64_t elapsed : {7, 14, 17})
+  {
+    session.advance(7);
+    REQUIRE(session.masterCycles() == elapsed);
+    REQUIRE(session.execution().ee.programCounter ==
+      EEReset::VECTOR + elapsed * 4);
+    REQUIRE(session.execution().iop.programCounter ==
+      IOPReset::VECTOR + ((elapsed + 7) / 8) * 4);
+  }
+  REQUIRE(session.finished());
+  REQUIRE(session.diagnostic().find("outcome=cycle_limit") !=
+    std::string::npos);
+  session.advance(UINT64_MAX);
+  REQUIRE(session.masterCycles() == 17);
+  REQUIRE(session.execution().iop.programCounter == IOPReset::VECTOR + 12);
+  REQUIRE_THROWS_WITH(session.advance(0),
+    "BIOS slice budget must be positive.");
+  REQUIRE_THROWS_WITH(
+    neko_frontend::BIOSSession(frontendBIOS({}), 0),
+    "BIOS cycle limit must be positive.");
+}
+
+TEST_CASE("BIOS window session retains precise CPU stops",
+  "[frontend][bios][desktop]")
+{
+  SECTION("EE stop freezes the session before its budget")
+  {
+    neko_frontend::BIOSSession session(
+      frontendBIOS({0x40003800}), 100);
+    session.advance(100);
+    REQUIRE(session.finished());
+    REQUIRE(session.masterCycles() == 1);
+    REQUIRE(session.execution().ee.stopReason ==
+      EEStopReason::UnsupportedInstruction);
+    REQUIRE(session.execution().iop.state == IOPExecutionState::Running);
+    REQUIRE(session.diagnostic().find("ee_stop=unsupported_instruction") !=
+      std::string::npos);
+    session.advance(100);
+    REQUIRE(session.masterCycles() == 1);
+  }
+  SECTION("IOP stop freezes the session even at the budget boundary")
+  {
+    neko_frontend::BIOSSession session(
+      frontendBIOS({0x3c011000, 0xac200000}), 9);
+    session.advance(8);
+    REQUIRE_FALSE(session.finished());
+    session.advance(8);
+    REQUIRE(session.finished());
+    REQUIRE(session.masterCycles() == 9);
+    REQUIRE(session.execution().ee.state == EEExecutionState::Running);
+    REQUIRE(session.execution().iop.stopReason == IOPStopReason::StoreFailure);
+    REQUIRE(session.execution().iop.storeFailure.access.physicalAddress ==
+      0x10000000);
+    REQUIRE(session.diagnostic().find("outcome=cpu_stopped") !=
+      std::string::npos);
+    REQUIRE(session.diagnostic().find("iop_store_pa=0x10000000") !=
+      std::string::npos);
+    session.advance(100);
+    REQUIRE(session.masterCycles() == 9);
+  }
+}
+
+TEST_CASE("BIOS window session exposes guest configured GS output",
+  "[frontend][bios][desktop]")
+{
+  neko_frontend::BIOSSession session(
+    frontendBIOS({0x3c011200, 0x24020001, 0xfc220000}), 17);
+  REQUIRE(session.videoOutput().rgba.empty());
+  session.advance(17);
+  const auto video = session.videoOutput();
+  REQUIRE(video.width == 1);
+  REQUIRE(video.height == 1);
+  REQUIRE(video.rgba.size() == 4);
 }

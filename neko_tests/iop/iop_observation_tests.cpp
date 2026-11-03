@@ -355,6 +355,7 @@ TEST_CASE("IOP failed fetch observations precede exception entry without issue",
 TEST_CASE("IOP data faults observe failure without retiring the instruction",
   "[iop][observation]")
 {
+  constexpr IOPAddress unmappedData = 0xbe400000;
   struct FaultCase
   {
     std::uint8_t opcode;
@@ -366,16 +367,16 @@ TEST_CASE("IOP data faults observe failure without retiring the instruction",
     bool user;
   };
   for (const auto test : {
-       FaultCase{0x20, 0xbe000000, 0, 1, IOPAccessOutcome::Unmapped, 7, false},
-       FaultCase{0x21, 0xbe000000, 0, 2, IOPAccessOutcome::Unmapped, 7, false},
-       FaultCase{0x23, 0xbe000000, 0, 4, IOPAccessOutcome::Unmapped, 7, false},
+       FaultCase{0x20, unmappedData, 0, 1, IOPAccessOutcome::Unmapped, 7, false},
+       FaultCase{0x21, unmappedData, 0, 2, IOPAccessOutcome::Unmapped, 7, false},
+       FaultCase{0x23, unmappedData, 0, 4, IOPAccessOutcome::Unmapped, 7, false},
        FaultCase{0x21, CODE, 1, 2, IOPAccessOutcome::Misaligned, 4, false},
        FaultCase{0x23, CODE, 2, 4, IOPAccessOutcome::Misaligned, 4, false},
        FaultCase{0x29, CODE, 1, 2, IOPAccessOutcome::Misaligned, 5, false},
        FaultCase{0x2b, CODE, 2, 4, IOPAccessOutcome::Misaligned, 5, false},
        FaultCase{0x23, CODE, 0, 4, IOPAccessOutcome::ProtectionFailure, 4, true},
        FaultCase{0x2b, CODE, 0, 4, IOPAccessOutcome::ProtectionFailure, 5, true},
-       FaultCase{0x22, 0xbe000000, 3, 4, IOPAccessOutcome::Unmapped, 7, false}})
+       FaultCase{0x22, unmappedData, 3, 4, IOPAccessOutcome::Unmapped, 7, false}})
   {
     Fixture fixture;
     install(fixture.bus, 0, immediate(test.opcode, 1, 2, test.offset));
