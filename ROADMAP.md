@@ -2910,9 +2910,9 @@ not requirements for exhaustive subsystem coverage.
 
 ### BIOS Shell Target and Acceptance Profile
 
-- [ ] Define the selected shell checkpoint and explicit media, memory-card,
-      controller and deterministic configuration inputs; retain SCPH-70012 as
-      the discovery baseline unless a deliberate input change is selected.
+- [x] Select SCPH-70012's Browser/System Configuration main menu: no disc/cards,
+      one port-1 DualShock 2; port 2/expansion devices absent. Retain the ROM1/RTC
+      profile; complete required setup in the guest, never bypass it.
 - [ ] Select visible-menu or headless guest-state evidence and its acceptance
       signals; distinguish an identified shell from a deadlock or device poll
       without requiring frontend packaging to establish core boot progress.
