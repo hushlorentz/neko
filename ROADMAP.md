@@ -3186,7 +3186,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Admit selected CTRL `0x0c` programming through the existing owner, with
       exact access admission and versioned transactional persistence;
       independently review the boundary and run required persistence gates.
-- [ ] Cover guest control transitions, load delay, merge/cache boundaries and
+- [x] Cover guest control transitions, load delay, merge/cache boundaries and
       restored traced/plain execution without enabling neighboring registers
       or active effects.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored

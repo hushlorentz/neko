@@ -14,6 +14,19 @@ namespace
   constexpr IOPWord startupControl = 0x3bc;
   constexpr IOPWord passiveControl = 0xc;
 
+  struct ControlTransition
+  {
+    IOPWord initial;
+    IOPWord programmed;
+  };
+
+  constexpr ControlTransition controlTransitions[] = {
+    {0, startupControl},
+    {0, passiveControl},
+    {startupControl, passiveControl},
+    {passiveControl, startupControl}
+  };
+
   template<std::size_t Size>
   void installProgram(NekoSystem &system, const std::array<IOPWord, Size> &words)
   {
@@ -25,21 +38,21 @@ namespace
     system.iopCore().startExecution(0xa0000000);
   }
 
-  std::array<IOPWord, 15> startupProgram(IOPAddress address)
+  std::array<IOPWord, 15> controlProgram(IOPAddress address, IOPWord programmed)
   {
     return {{
       0x3c010000 | (address >> 16),
       0x34210000 | (address & 0xffff),
-      0x240203bc, // addiu r2, r0, startup control
+      0x24020000 | programmed, // addiu r2, r0, selected control
       0x24031234,
-      0x8c230000, // lw r3, CTRL (cold)
+      0x8c230000, // lw r3, CTRL (old value)
       0xac030100, // preceding r3 in the load delay slot
       0xac030104,
       0xac220000, // sw r2, CTRL
       0x8c230000, // lw r3, CTRL (programmed)
       0xac030108, // preceding r3 in the load delay slot
       0x10620002, // beq r3, r2, +2
-      0xac220000, // repeat initialization in the taken branch delay slot
+      0xac220000, // repeat programming in the taken branch delay slot
       0xffffffff, // skipped
       0xac03010c,
       0x24640001
@@ -61,7 +74,8 @@ namespace
     return events;
   }
 
-  IOPTraceTest::Events expectedStartupEvents(IOPAddress address)
+  IOPTraceTest::Events expectedControlEvents(
+    IOPAddress address, ControlTransition transition)
   {
     namespace Memory = NekoIOPTraceMemory;
     const auto route = address < 0xa0000000
@@ -73,32 +87,33 @@ namespace
       controlAddress, 4, Memory::AccessKind::DataStore,
       Memory::Outcome::Completed, route, true, 0xf});
     return {
-      {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess, address, 0, 0, load},
+      {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, transition.initial, 0, load},
       {57, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
-        address, startupControl, 0, store},
+        address, transition.programmed, 0, store},
       {65, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
-        address, startupControl, 0, load},
+        address, transition.programmed, 0, load},
       {89, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
-        address, startupControl, 0, store}
+        address, transition.programmed, 0, store}
     };
   }
 
-  void requireStartupResult(const NekoSystem &system)
+  void requireControlResult(const NekoSystem &system, ControlTransition transition)
   {
     REQUIRE(system.iopCore().retiredInstructions() == 14);
     REQUIRE(system.iopCore().programCounter() == 0xa000003c);
     REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
     REQUIRE(system.iopCore().exception().kind == IOPException::None);
-    REQUIRE(system.iopCore().generalRegister(3) == startupControl);
-    REQUIRE(system.iopCore().generalRegister(4) == startupControl + 1);
+    REQUIRE(system.iopCore().generalRegister(3) == transition.programmed);
+    REQUIRE(system.iopCore().generalRegister(4) == transition.programmed + 1);
     REQUIRE_FALSE(system.iopCore().branchContinuation().active);
     REQUIRE(system.iopCore().delayedResultContinuation().source ==
       IOPDelayedResultSource::None);
-    REQUIRE(system.sio2Controller().readControl() == startupControl);
+    REQUIRE(system.sio2Controller().readControl() == transition.programmed);
     REQUIRE(system.iopBus().readDMAC32(0x100).value == 0x1234);
-    REQUIRE(system.iopBus().readDMAC32(0x104).value == 0);
-    REQUIRE(system.iopBus().readDMAC32(0x108).value == 0);
-    REQUIRE(system.iopBus().readDMAC32(0x10c).value == startupControl);
+    REQUIRE(system.iopBus().readDMAC32(0x104).value == transition.initial);
+    REQUIRE(system.iopBus().readDMAC32(0x108).value == transition.initial);
+    REQUIRE(system.iopBus().readDMAC32(0x10c).value == transition.programmed);
   }
 }
 
@@ -301,16 +316,24 @@ TEST_CASE("SIO2 programming preserves existing IRQ DMA and frontend input",
 TEST_CASE("SIO2 guest aliases preserve delayed operands and exact control traces",
   "[iop][sio2][sio2-conformance][trace]")
 {
+  for (const auto &transition : controlTransitions)
   for (IOPAddress address : {controlAddress, 0x9f808268u, 0xbf808268u})
   {
+    CAPTURE(transition.initial);
+    CAPTURE(transition.programmed);
     CAPTURE(address);
     NekoSystem system;
-    installProgram(system, startupProgram(address));
+    if (transition.initial != 0)
+    {
+      REQUIRE(system.sio2Controller().writeControl(transition.initial) ==
+        SIO2AccessStatus::Accepted);
+    }
+    installProgram(system, controlProgram(address, transition.programmed));
     system.startTrace();
     system.runMasterCycles(112);
-    requireStartupResult(system);
+    requireControlResult(system, transition);
     IOPTraceTest::requireEvents(controlEvents(system, address),
-      expectedStartupEvents(address));
+      expectedControlEvents(address, transition));
     unsigned branchDelayStores = 0;
     for (const auto &event : system.trace())
     {
@@ -332,11 +355,13 @@ TEST_CASE("SIO2 guest store failure retains the preceding readback load",
   "[iop][sio2][sio2-conformance][trace]")
 {
   namespace Memory = NekoIOPTraceMemory;
+  for (IOPWord programmed : {startupControl, passiveControl})
   for (IOPAddress address : {controlAddress, 0x9f808268u, 0xbf808268u})
   {
+    CAPTURE(programmed);
     CAPTURE(address);
     NekoSystem system;
-    REQUIRE(system.iopBus().write32(controlAddress, startupControl).status ==
+    REQUIRE(system.iopBus().write32(controlAddress, programmed).status ==
       IOPBusStatus::Completed);
     installProgram(system, std::array<IOPWord, 4>{{
       0x3c010000 | (address >> 16),
@@ -354,19 +379,19 @@ TEST_CASE("SIO2 guest store failure retains the preceding readback load",
     REQUIRE(core.generalRegister(2) == 0);
     REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::Load);
     REQUIRE(core.delayedResultContinuation().destination == 2);
-    REQUIRE(core.delayedResultContinuation().value == startupControl);
+    REQUIRE(core.delayedResultContinuation().value == programmed);
     REQUIRE(core.storeFailure().width == IOPStoreWidth::Word);
     REQUIRE(core.storeFailure().value == 0);
     REQUIRE(core.storeFailure().mergeByteEnable == 0);
     REQUIRE(core.storeFailure().access.virtualAddress == address);
     REQUIRE(core.storeFailure().access.physicalAddress == controlAddress);
     REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
-    REQUIRE(system.sio2Controller().readControl() == startupControl);
+    REQUIRE(system.sio2Controller().readControl() == programmed);
     const auto route = address < 0xa0000000
       ? Memory::CacheRoute::Cached : Memory::CacheRoute::Uncached;
     IOPTraceTest::requireEvents(controlEvents(system, address), {
       {17, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
-        address, startupControl, 0, nekoPackIOPMemoryTraceMetadata({
+        address, programmed, 0, nekoPackIOPMemoryTraceMetadata({
           controlAddress, 4, Memory::AccessKind::DataLoad,
           Memory::Outcome::Completed, route, true, 0})},
       {25, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
@@ -377,28 +402,38 @@ TEST_CASE("SIO2 guest store failure retains the preceding readback load",
   }
 }
 
-TEST_CASE("SIO2 initialization and readback restore with traced and plain continuations",
+TEST_CASE("SIO2 control transitions and readback restore with traced and plain continuations",
   "[iop][sio2][sio2-conformance][save-state][trace]")
 {
   constexpr IOPAddress address = 0xbf808268;
+  for (const auto &transition : controlTransitions)
   for (unsigned cut : {56u, 64u, 72u, 88u})
   {
+    CAPTURE(transition.initial);
+    CAPTURE(transition.programmed);
     CAPTURE(cut);
     NekoSystem original;
-    installProgram(original, startupProgram(address));
+    if (transition.initial != 0)
+    {
+      REQUIRE(original.sio2Controller().writeControl(transition.initial) ==
+        SIO2AccessStatus::Accepted);
+    }
+    installProgram(original, controlProgram(address, transition.programmed));
     original.runMasterCycles(cut);
     const auto &core = original.iopCore();
     REQUIRE(core.retiredInstructions() == cut / 8);
-    REQUIRE(original.sio2Controller().readControl() == (cut == 56 ? 0 : startupControl));
+    const IOPWord retained = cut == 56 ? transition.initial : transition.programmed;
+    REQUIRE(original.sio2Controller().readControl() == retained);
     REQUIRE(core.programCounter() == 0xa0000000 + cut / 2);
-    REQUIRE(core.generalRegister(3) == (cut < 88 ? 0 : startupControl));
+    REQUIRE(core.generalRegister(3) ==
+      (cut < 88 ? transition.initial : transition.programmed));
     REQUIRE(core.branchContinuation().active == (cut == 88));
     REQUIRE(core.delayedResultContinuation().source == (cut == 72
       ? IOPDelayedResultSource::Load : IOPDelayedResultSource::None));
     if (cut == 72)
     {
       REQUIRE(core.delayedResultContinuation().destination == 3);
-      REQUIRE(core.delayedResultContinuation().value == startupControl);
+      REQUIRE(core.delayedResultContinuation().value == transition.programmed);
     }
     if (cut == 88)
     {
@@ -408,11 +443,12 @@ TEST_CASE("SIO2 initialization and readback restore with traced and plain contin
     const auto checkpoint = original.saveState();
     NekoSystem restored;
     NekoSystem plain;
-    if (cut == 56)
-    {
-      REQUIRE(restored.sio2Controller().writeControl(startupControl) ==
-        SIO2AccessStatus::Accepted);
-    }
+    const IOPWord destinationControl = retained == startupControl
+      ? passiveControl : startupControl;
+    REQUIRE(restored.sio2Controller().writeControl(destinationControl) ==
+      SIO2AccessStatus::Accepted);
+    REQUIRE(plain.sio2Controller().writeControl(destinationControl) ==
+      SIO2AccessStatus::Accepted);
     restored.loadState(checkpoint);
     plain.loadState(checkpoint);
     REQUIRE(restored.saveState() == checkpoint);
@@ -422,14 +458,16 @@ TEST_CASE("SIO2 initialization and readback restore with traced and plain contin
     original.runMasterCycles(112 - cut);
     restored.runMasterCycles(112 - cut);
     plain.runMasterCycles(112 - cut);
-    requireStartupResult(original);
+    requireControlResult(original, transition);
+    requireControlResult(restored, transition);
+    requireControlResult(plain, transition);
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
     REQUIRE_FALSE(original.trace().empty());
     REQUIRE(plain.trace().empty());
     REQUIRE_FALSE(plain.traceEnabled());
     IOPTraceTest::requireMachine(restored, original);
     IOPTraceTest::requireMachine(plain, original);
-    auto expected = expectedStartupEvents(address);
+    auto expected = expectedControlEvents(address, transition);
     IOPTraceTest::Events suffix;
     for (const auto &event : expected)
     {
