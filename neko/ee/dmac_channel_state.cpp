@@ -127,29 +127,6 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
       " DMAC supports only normal and chain modes.");
   }
 
-  if (active())
-  {
-    const std::uint32_t changedFields =
-      (channelControlRegister ^ value) &
-      ~DMACChannelControl::START;
-    if (changedFields != 0)
-    {
-      throw std::logic_error(
-        std::string(name) +
-        " DMAC control fields cannot change while active.");
-    }
-    if ((value & DMACChannelControl::START) != 0)
-    {
-      return DMACControlWriteEffect::None;
-    }
-    channelControlRegister &=
-      ~DMACChannelControl::START;
-    terminateAfterPacket = false;
-    destinationPacketAccepted = false;
-    sliceQuadwordsRemaining = 0;
-    return DMACControlWriteEffect::ResetContinuation;
-  }
-
   const std::uint8_t requestedStackDepth =
     profile != DMACChannelProfile::VIFGIF ? 0 : static_cast<std::uint8_t>(
       (value &
@@ -160,6 +137,26 @@ DMACChannelState::writeChannelControl(std::uint32_t value)
       std::string(name) +
       " DMAC address-stack pointer is invalid.");
   }
+  if (active())
+  {
+    if ((value & DMACChannelControl::START) != 0)
+    {
+      if (value != channelControlRegister)
+      {
+        throw std::logic_error(
+          std::string(name) +
+          " DMAC control fields cannot change while active.");
+      }
+      return DMACControlWriteEffect::None;
+    }
+    channelControlRegister &=
+      ~DMACChannelControl::START;
+    terminateAfterPacket = false;
+    destinationPacketAccepted = false;
+    sliceQuadwordsRemaining = 0;
+    return DMACControlWriteEffect::ResetContinuation;
+  }
+
   channelControlRegister = value;
   addressStackDepth = requestedStackDepth;
   terminateAfterPacket = false;

@@ -294,6 +294,61 @@ TEST_CASE("SIF0 source pause abort and restore preserve admitted packing history
   REQUIRE(partial.iopSIF0DMAC().tagAddress() == TAG + 16);
 }
 
+TEST_CASE("SIF0 EE zero stop preserves a partially packed live IOP source",
+  "[sif0][dma][engine][active-stop][save-state]")
+{
+  NekoSystem system;
+  descriptor(system, DATA, 5);
+  for (unsigned index = 0; index < 5; ++index)
+    writeWord(system, DATA + index * 4, 0x100 + index);
+  startSource(system);
+  REQUIRE(sourceBeat(system).outcome == IOPDMABeatOutcome::Accepted);
+  REQUIRE(sourceBeat(system).outcome == IOPDMABeatOutcome::Accepted);
+  system.sif0DMAC().writeChannelControl(0x184);
+  system.dmacController().writeControl(1);
+  REQUIRE(destinationBeat(system) == SIF0DMABeatOutcome::Completed);
+  REQUIRE(system.sif0DMAC().quadwordCount() == 2);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 1);
+  REQUIRE(system.sif().pushSIF1Quadword({{11, 12, 13, 14}}) ==
+    SIFTransferOutcome::Completed);
+  system.sif1DMAC().writeQuadwordCount(1);
+  system.sif1DMAC().writeChannelControl(0x184);
+  const auto iop = system.iopStateHash();
+  const auto peer = system.sif1DMAC().stateHash();
+  const auto latch = system.sif().sif0PackingLatch();
+  const auto control = system.sif0DMAC().channelControl();
+  REQUIRE(system.eeBus().writeData32(EEMemoryMap::D5_CHCR, 0));
+  REQUIRE(system.sif0DMAC().channelControl() == (control & ~0x100u));
+  REQUIRE(system.sif0DMAC().memoryAddress() == 0x3000);
+  REQUIRE(system.sif0DMAC().quadwordCount() == 2);
+  REQUIRE(system.iopStateHash() == iop);
+  REQUIRE(system.sif1DMAC().stateHash() == peer);
+  REQUIRE(system.sif().sif0PackingLatch() == latch);
+  REQUIRE(system.sif().control() == 0x4000);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 1);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 4);
+  REQUIRE(system.dmacController().status() == 0);
+  NekoSystem restored;
+  restored.loadState(system.saveState());
+  for (unsigned index = 0; index < 4; ++index)
+  {
+    REQUIRE(sourceBeat(system).outcome == sourceBeat(restored).outcome);
+    IOPTraceTest::requireMachine(restored, system);
+  }
+  REQUIRE_FALSE(system.sif0DMAC().active());
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 8);
+  for (auto *machine : {&system, &restored})
+  {
+    machine->sif0DMAC().writeChannelControl(control);
+    REQUIRE(destinationBeat(*machine) == SIF0DMABeatOutcome::Completed);
+    REQUIRE(destinationBeat(*machine) == SIF0DMABeatOutcome::Completed);
+    REQUIRE(machine->sif0DMAC().active());
+    REQUIRE(machine->sif0DMAC().quadwordCount() == 0);
+    REQUIRE(machine->dmacController().status() == 0);
+  }
+  IOPTraceTest::requireMachine(restored, system);
+}
+
 TEST_CASE("SIF0 source retains the full twenty bit packet count",
   "[sif0][dma][engine][save-state]")
 {

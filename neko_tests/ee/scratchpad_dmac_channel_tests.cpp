@@ -155,6 +155,63 @@ TEST_CASE("Scratchpad DMAC active registers only accept STR changes")
   REQUIRE(bus.writeData32(EEMemoryMap::D9_CHCR, 0));
 }
 
+TEST_CASE("Scratchpad active stops preserve programming and reset interleave continuation",
+  "[ee][dma][active-stop][save-state]")
+{
+  for (const auto base : {EEMemoryMap::D8_CHCR, EEMemoryMap::D9_CHCR})
+    for (const auto mode : {0u, DMACChannelControl::INTERLEAVE_MODE})
+    {
+      CAPTURE(base);
+      CAPTURE(mode);
+      NekoSystem system;
+      auto &bus = system.eeBus();
+      auto &channel = base == EEMemoryMap::D8_CHCR ?
+        system.fromScratchpadDMAC() : system.toScratchpadDMAC();
+      const auto retained = 0x123400f1u | mode;
+      bus.write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
+      bus.write32(EEMemoryMap::D_SQWC, (2u << 16) | 2u);
+      bus.write32(base + 0x10, 0x1000);
+      bus.write32(base + 0x20, 4);
+      bus.write32(base + 0x80, 0x200);
+      if (base == EEMemoryMap::D9_CHCR)
+        bus.write32(base + 0x30, 0x5000);
+      bus.write32(base, retained | DMACChannelControl::START);
+      channel.clock();
+      const auto active = system.eeStateHash();
+      for (const auto rejected : {2u, 4u, 12u,
+        DMACChannelControl::START})
+      {
+        REQUIRE_FALSE(bus.writeData32(base, rejected));
+        REQUIRE(system.eeStateHash() == active);
+      }
+      REQUIRE(bus.writeData32(base, retained | DMACChannelControl::START));
+      REQUIRE(system.eeStateHash() == active);
+      REQUIRE(bus.writeData32(base, 0));
+      REQUIRE(bus.read32(base) == retained);
+      REQUIRE(bus.read32(base + 0x10) == 0x1010);
+      REQUIRE(bus.read32(base + 0x20) == 3);
+      REQUIRE(bus.read32(base + 0x80) == 0x210);
+      if (base == EEMemoryMap::D9_CHCR)
+        REQUIRE(bus.read32(base + 0x30) == 0x5000);
+      REQUIRE(system.dmacController().status() == 0);
+      NekoSystem restored;
+      restored.loadState(system.saveState());
+      const bool equal = restored.saveState() == system.saveState();
+      REQUIRE(equal);
+      channel.clock();
+      REQUIRE(bus.read32(base + 0x20) == 3);
+      bus.write32(base, retained | DMACChannelControl::START);
+      channel.clock();
+      REQUIRE(bus.read32(base + 0x10) == 0x1020);
+      REQUIRE(bus.read32(base + 0x20) == 2);
+      REQUIRE(system.dmacController().status() == 0);
+      REQUIRE(bus.writeData32(base, 0x567800e8));
+      REQUIRE(bus.read32(base) == retained);
+      bus.write32(base, 0x567800e8);
+      REQUIRE(bus.read32(base) == 0x567800e8);
+    }
+}
+
 TEST_CASE("Scratchpad DMAC interleave clocks are D_CTRL gated")
 {
   NekoSystem system;

@@ -805,7 +805,7 @@ TEST_CASE("EE SIF1 accepted terminal packet survives pause restore and source bu
 }
 
 TEST_CASE("EE SIF1 stalled terminal continuation restores and abort preserves queued data",
-  "[ee][sif1][dma][sender][save-state]")
+  "[ee][sif1][dma][sender][save-state][active-stop]")
 {
   NekoSystem original;
   for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
@@ -836,12 +836,17 @@ TEST_CASE("EE SIF1 stalled terminal continuation restores and abort preserves qu
   original.dmacController().writeStatus(CHANNEL_6);
   original.sif1DMAC().writeMemoryAddress(0x1010);
   original.sif1DMAC().writeQuadwordCount(1);
-  original.sif1DMAC().writeChannelControl(0x100);
+  original.sif1DMAC().writeChannelControl(0x184);
   original.runMasterCycles(1);
+  const auto iop = original.iopStateHash();
+  const auto peer = original.sif0DMAC().stateHash();
   original.sif1DMAC().writeChannelControl(0);
+  REQUIRE(original.sif1DMAC().channelControl() == 0x84);
   REQUIRE(original.sif1DMAC().quadwordCount() == 1);
   REQUIRE(original.sif().wordCount(SIFDirection::SIF1) == 32);
   REQUIRE(original.dmacController().status() == 0);
+  REQUIRE(original.iopStateHash() == iop);
+  REQUIRE(original.sif0DMAC().stateHash() == peer);
   restored.loadState(original.saveState());
   original.reset();
   restored.reset();

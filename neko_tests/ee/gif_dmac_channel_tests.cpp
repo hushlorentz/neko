@@ -70,12 +70,13 @@ namespace
   void startNormalTransfer(
     EEBus *bus,
     std::uint32_t address,
-    std::uint16_t qwc)
+    std::uint16_t qwc,
+    std::uint32_t options = 0)
   {
     bus->write32(EEMemoryMap::D_CTRL, DMACControl::DMA_ENABLE);
     bus->write32(EEMemoryMap::D2_MADR, address);
     bus->write32(EEMemoryMap::D2_QWC, qwc);
-    bus->write32(EEMemoryMap::D2_CHCR, GIFDMACChannelControl::START);
+    bus->write32(EEMemoryMap::D2_CHCR, GIFDMACChannelControl::START | options);
   }
 }
 
@@ -116,12 +117,12 @@ TEST_CASE("GIF DMAC Normal Transfer Tests")
   REQUIRE_FALSE(system.interruptPending());
 }
 
-TEST_CASE("GIF DMAC PATH3 Backpressure Tests")
+TEST_CASE("GIF DMAC PATH3 Backpressure Tests", "[ee][dma][active-stop]")
 {
   NekoSystem system;
   EEBus &bus = system.eeBus();
   writePacket(&bus, 0x1000, GSPrimitiveType::Triangle);
-  startNormalTransfer(&bus, 0x1000, 2);
+  startNormalTransfer(&bus, 0x1000, 2, DMACChannelControl::TAG_INTERRUPT_ENABLE);
   bus.write32(EEMemoryMap::GIF_MODE, GIFMode::M3R);
 
   system.runMasterCycles(3);
@@ -129,6 +130,14 @@ TEST_CASE("GIF DMAC PATH3 Backpressure Tests")
   REQUIRE(bus.read32(EEMemoryMap::D2_MADR) == 0x1000);
   REQUIRE(bus.read32(EEMemoryMap::D2_QWC) == 2);
   REQUIRE(system.gifDMAC().stalledByPATH3());
+
+  REQUIRE(bus.writeData32(EEMemoryMap::D2_CHCR, 0));
+  REQUIRE(bus.read32(EEMemoryMap::D2_CHCR) == 0x80);
+  REQUIRE_FALSE(system.gifDMAC().stalledByPATH3());
+  REQUIRE((system.gifRegisters().readStatus() & GIFStatus::M3R) != 0);
+  REQUIRE(bus.read32(EEMemoryMap::D2_QWC) == 2);
+  REQUIRE(system.dmacController().status() == 0);
+  bus.write32(EEMemoryMap::D2_CHCR, 0x180);
 
   bus.write32(EEMemoryMap::GIF_MODE, 0);
   system.runMasterCycles(2);

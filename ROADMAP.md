@@ -3061,6 +3061,35 @@ commands or media services. Later blocks remain dependency-gated.
 - [x] Verify a fresh cold BIOS continuation through RPC-ready dispatch and
       LOADFILE registration, or attribute the next dependency without faking it.
 
+### Post-LOADFILE Dependency Attribution
+
+- [x] Inspect the validated 105M endpoint and bounded subsequent execution;
+      attribute the next originating command, access or wait without assuming
+      a CD/DVD dependency.
+- [x] Verify the selected boundary with traced/plain and canonical continuation
+      comparisons, then regroup the next capability around the evidence.
+
+### EE DMA Active-Stop Boundary
+
+- [x] Resolve the demonstrated `SifStopDma` zero-CHCR write against manual
+      suspension rules and the existing active-channel policy; select bounded
+      family-wide stop/reprogramming semantics before implementation.
+- [x] Implement the selected policy through shared channel state, scratchpad
+      DMA and existing device adapters; cover atomic rejection, continuation,
+      transport and peer-state boundaries.
+- [x] Independently review and validate the selected lifecycle, then verify
+      fresh BIOS progress with traced/plain and canonical comparisons.
+
+### IOP SIF DMA Active-Stop Boundary
+
+- [ ] Resolve the demonstrated IOP SIF1 zero-CHCR stop against local manuals
+      and the existing shared SIF DMA owner; select field retention,
+      cancellation and peer/transport boundaries before implementation.
+- [ ] Implement the selected bounded policy with atomic rejection and
+      stopped/restarted continuation coverage through the actual bus route.
+- [ ] Independently review the lifecycle and verify fresh BIOS progress with
+      cold/restored traced/plain and canonical comparisons.
+
 ### Additional CD/DVD Command and Configuration Scope
 
 - [ ] Expand demonstrated command dependencies into independent transport and

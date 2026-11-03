@@ -120,7 +120,9 @@ TEST_CASE("DMAC channel state enforces register policy")
   }
   vif1.writeChannelControl(
     DMACChannelControl::FROM_MEMORY | DMACChannelControl::START);
-  REQUIRE_THROWS_AS(vif1.writeChannelControl(0), std::logic_error);
+  REQUIRE_THROWS_AS(vif1.writeChannelControl(
+    DMACChannelControl::FROM_MEMORY | DMACChannelControl::START |
+      DMACChannelControl::TAG_INTERRUPT_ENABLE), std::logic_error);
   REQUIRE(vif1.channelControl() ==
     (DMACChannelControl::FROM_MEMORY | DMACChannelControl::START));
   REQUIRE(vif1.writeChannelControl(DMACChannelControl::FROM_MEMORY) ==
@@ -145,4 +147,75 @@ TEST_CASE("DMAC channel state enforces register policy")
     gif.writeChannelControl(0) ==
     DMACControlWriteEffect::ResetContinuation);
   REQUIRE_FALSE(gif.active());
+}
+
+TEST_CASE("DMAC active stops retain programming and discard continuation",
+  "[ee][dma][active-stop]")
+{
+  for (const auto profile : {DMACChannelProfile::VIFGIF,
+    DMACChannelProfile::IPU, DMACChannelProfile::SIF0, DMACChannelProfile::SIF1})
+    for (const auto stop : {0u, 0x123400e4u})
+    {
+      CAPTURE(profile);
+      CAPTURE(stop);
+      DMACChannelState state("Test",
+        DMACChannelDirectionPolicy::FromMemory, profile);
+      state.writeMemoryAddress(0x4000);
+      state.writeQuadwordCount(profile == DMACChannelProfile::SIF0 ? 0 : 3);
+      if (profile != DMACChannelProfile::SIF0)
+        state.writeTagAddress(0x1000);
+      if (profile == DMACChannelProfile::VIFGIF)
+        state.writeAddressStack(1, 0x6000);
+      state.writeChannelControl(profile == DMACChannelProfile::IPU ?
+        0x181 : 0x185);
+      if (profile == DMACChannelProfile::SIF0)
+        REQUIRE(state.acceptDestinationChainTag(0xf0000003, 0x4000) ==
+          DMACChannelTransition::Continue);
+      else if (profile != DMACChannelProfile::IPU)
+        REQUIRE(state.acceptSourceChainTag(
+          profile == DMACChannelProfile::VIFGIF ? 0xd0000003 : 0xf0000003,
+          0x2000) == DMACChannelTransition::Continue);
+      REQUIRE(state.acceptQuadword() == DMACChannelTransition::Continue);
+      const auto retained = state.channelControl() & ~DMACChannelControl::START;
+      const auto address = state.memoryAddress();
+      const auto tag = state.tagAddress();
+      REQUIRE(state.writeChannelControl(stop) ==
+        DMACControlWriteEffect::ResetContinuation);
+      REQUIRE(state.channelControl() == retained);
+      REQUIRE(state.memoryAddress() == address);
+      REQUIRE(state.quadwordCount() == 2);
+      REQUIRE(state.tagAddress() == tag);
+      REQUIRE_FALSE(state.continuation().terminateAfterPacket);
+      REQUIRE_FALSE(state.continuation().destinationPacketAccepted);
+      REQUIRE(state.continuation().sliceQuadwordsRemaining == 0);
+      if (profile == DMACChannelProfile::VIFGIF)
+      {
+        REQUIRE(state.addressStack(0) == 0x1040);
+        REQUIRE(state.addressStack(1) == 0x6000);
+        REQUIRE((state.channelControl() &
+          DMACChannelControl::ADDRESS_STACK_MASK) == 0x10);
+      }
+    }
+}
+
+TEST_CASE("DMAC malformed active stops reject before continuation mutation",
+  "[ee][dma][active-stop]")
+{
+  DMACChannelState state("VIF1", DMACChannelDirectionPolicy::FromMemory);
+  state.writeMemoryAddress(0x4000);
+  state.writeQuadwordCount(3);
+  state.writeChannelControl(0x195);
+  REQUIRE(state.acceptQuadword() == DMACChannelTransition::Continue);
+  for (const auto stop : {2u, 8u, 12u, 0x30u})
+  {
+    CAPTURE(stop);
+    REQUIRE_THROWS_AS(state.writeChannelControl(stop), std::invalid_argument);
+    REQUIRE(state.channelControl() == 0x195);
+    REQUIRE(state.memoryAddress() == 0x4010);
+    REQUIRE(state.quadwordCount() == 2);
+    REQUIRE(state.continuation().sliceQuadwordsRemaining == 2);
+  }
+  REQUIRE_THROWS_AS(state.writeChannelControl(0x101), std::logic_error);
+  REQUIRE(state.writeChannelControl(0x195) == DMACControlWriteEffect::None);
+  REQUIRE(state.continuation().sliceQuadwordsRemaining == 2);
 }

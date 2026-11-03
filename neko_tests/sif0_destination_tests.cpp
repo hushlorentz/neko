@@ -459,7 +459,7 @@ TEST_CASE("SIF0 destination continuations restore terminal and CNTS payloads exa
 }
 
 TEST_CASE("SIF0 abort and rearm discard destination continuation without flushing payload",
-  "[sif0][dma][destination][save-state]")
+  "[sif0][dma][destination][save-state][active-stop]")
 {
   NekoSystem system;
   push(system, {{IRQ | 2, 0x3000, 0, 0}});
@@ -470,12 +470,14 @@ TEST_CASE("SIF0 abort and rearm discard destination continuation without flushin
   REQUIRE(grant(system) == SIF0DMABeatOutcome::Completed);
   REQUIRE(grant(system) == SIF0DMABeatOutcome::Completed);
   const auto control = system.sif0DMAC().channelControl();
-  system.sif0DMAC().writeChannelControl(control & ~START);
+  REQUIRE(system.eeBus().writeData32(EEMemoryMap::D5_CHCR, 0));
+  REQUIRE(system.sif0DMAC().channelControl() == (control & ~START));
   REQUIRE(system.dmacController().status() == 0);
   REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 4);
-  system.sif0DMAC().writeChannelControl(control);
   NekoSystem restored;
   restored.loadState(system.saveState());
+  system.sif0DMAC().writeChannelControl(control);
+  restored.sif0DMAC().writeChannelControl(control);
   REQUIRE(grant(system) == SIF0DMABeatOutcome::Completed);
   REQUIRE(grant(restored) == SIF0DMABeatOutcome::Completed);
   IOPTraceTest::requireMachine(restored, system);

@@ -157,6 +157,31 @@ TEST_CASE("SIF0 EE destination registers have no source tag or address stack rea
   REQUIRE(system.dmacController().status() == 0);
 }
 
+TEST_CASE("SIF0 zero CHCR stops an armed empty receiver without completing it",
+  "[sif0][dma][foundation][active-stop]")
+{
+  NekoSystem system;
+  auto &bus = system.eeBus();
+  system.dmacController().signalChannelCompletion(DMACStatus::CHANNEL_6);
+  REQUIRE(bus.writeData32(EE_MADR, 0x93600));
+  REQUIRE(bus.writeData32(EE_CHCR, 0x184));
+  const auto iop = system.iopStateHash();
+  const auto peer = system.sif1DMAC().stateHash();
+  REQUIRE(bus.writeData32(EE_CHCR, 0));
+  REQUIRE(bus.read32(EE_CHCR) == 0x84);
+  REQUIRE(bus.read32(EE_MADR) == 0x93600);
+  REQUIRE(bus.read32(EE_QWC) == 0);
+  REQUIRE(system.dmacController().status() == DMACStatus::CHANNEL_6);
+  REQUIRE(system.sif().control() == 0);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF0) == 0);
+  REQUIRE(system.sif().wordCount(SIFDirection::SIF1) == 0);
+  REQUIRE(system.iopStateHash() == iop);
+  REQUIRE(system.sif1DMAC().stateHash() == peer);
+  REQUIRE(bus.writeData32(EE_QWC, 0));
+  REQUIRE(bus.writeData32(EE_CHCR, 0));
+  REQUIRE(bus.read32(EE_CHCR) == 0);
+}
+
 TEST_CASE("SIF0 canonical fields and common completion slots remain independent",
   "[sif0][dma][foundation][save-state]")
 {
@@ -180,6 +205,7 @@ TEST_CASE("SIF0 canonical fields and common completion slots remain independent"
     REQUIRE(system.eeBus().writeData32(address, 0));
     REQUIRE(system.eeStateHash() == eeHash);
   }
+
   for (const auto address : {IOP_MADR, IOP_BCR, IOP_CHCR, IOP_TADR})
   {
     REQUIRE(system.iopBus().write32(address, address == IOP_CHCR ? 0x701 : 0x1234).

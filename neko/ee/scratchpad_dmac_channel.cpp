@@ -111,21 +111,25 @@ void ScratchpadDMACChannel::writeChannelControl(
       std::string(name()) +
       " DMAC supports only normal and interleave modes.");
   }
-  const bool wasActive = active();
   if (active())
   {
-    const std::uint32_t changedFields =
-      (channelControlRegister ^ value) &
-      ~DMACChannelControl::START;
-    if (changedFields != 0)
+    if ((value & DMACChannelControl::START) != 0)
     {
-      throw std::logic_error(
-        std::string(name()) +
-        " DMAC control fields cannot change while active.");
+      if (value != channelControlRegister)
+      {
+        throw std::logic_error(
+          std::string(name()) +
+          " DMAC control fields cannot change while active.");
+      }
+      return;
     }
+    channelControlRegister &= ~DMACChannelControl::START;
+    interleaveQuadwordsRemaining = 0;
+    assert(stateValid());
+    return;
   }
   channelControlRegister = value;
-  if (!wasActive && active() &&
+  if (active() &&
       mode == DMACChannelControl::INTERLEAVE_MODE &&
       dmacController->interleaveTransferQWC() != 0 &&
       dmacController->interleaveSkipQWC() != 0)

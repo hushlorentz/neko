@@ -90,7 +90,7 @@ TEST_CASE("VIF1 DMAC stopped direction programming does not admit reverse transf
   REQUIRE(bus.writeQuadword(0x1000, {}));
   REQUIRE(bus.writeData32(EEMemoryMap::D1_CHCR, 0x101));
   const auto activeHash = system.eeStateHash();
-  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::D1_CHCR, 0));
+  REQUIRE_FALSE(bus.writeData32(EEMemoryMap::D1_CHCR, 0x181));
   REQUIRE(system.eeStateHash() == activeHash);
   system.clockMasterCycle();
   REQUIRE(system.vif1DMAC().transferredQuadwordCount() == 1);
@@ -135,7 +135,8 @@ TEST_CASE("VIF1 DMAC normal transfers feed the VIF1 FIFO")
   REQUIRE_FALSE(system.interruptPending());
 }
 
-TEST_CASE("VIF1 DMAC preserves progress while its FIFO is full")
+TEST_CASE("VIF1 DMAC preserves progress while its FIFO is full",
+  "[ee][dma][active-stop]")
 {
   NekoSystem system;
   EEBus &bus = system.eeBus();
@@ -164,6 +165,13 @@ TEST_CASE("VIF1 DMAC preserves progress while its FIFO is full")
   REQUIRE(system.vif1DMAC().stalledByVIF1());
   REQUIRE(bus.read32(EEMemoryMap::D1_MADR) == 0x1000);
   REQUIRE(bus.read32(EEMemoryMap::D1_QWC) == 1);
+
+  REQUIRE(bus.writeData32(EEMemoryMap::D1_CHCR, 0));
+  REQUIRE(bus.read32(EEMemoryMap::D1_CHCR) == 1);
+  REQUIRE_FALSE(system.vif1DMAC().stalledByVIF1());
+  REQUIRE(system.vif1().fifoQuadwordCount() == 16);
+  REQUIRE(system.dmacController().status() == 0);
+  bus.write32(EEMemoryMap::D1_CHCR, 0x101);
 
   bus.write32(EEMemoryMap::VIF1_FBRST, 1u << 3);
   system.clockMasterCycle();

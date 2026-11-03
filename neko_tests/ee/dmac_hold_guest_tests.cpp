@@ -11,7 +11,7 @@ namespace
   constexpr std::uint32_t HELD = 0x81234567;
   constexpr std::uint32_t RELEASED = HELD & ~DMACHold::CPND;
   constexpr std::uint64_t BUDGET = 256;
-  enum class Finish { Resume, Abort };
+  enum class Finish { Resume, Abort, ZeroStop };
   enum class Source { Normal, Chain };
   struct Endpoint
   {
@@ -35,7 +35,7 @@ namespace
     const auto direction = endpoint.id == 5 ? 0u : 1u;
     const auto mode = source == Source::Chain ? 4u : 0u;
     // Original uncached guest: arm while held, allow one (or two) atomic
-    // grants, re-hold, then resume or clear only STR in the observed CHCR.
+    // grants, re-hold, then resume or stop with a retained-field or zero word.
     std::vector<std::uint32_t> guest = {
       0x3c01b000, 0x3421f500, // r1: hold register neighborhood
       0x3c02a000, 0x34423000, // r2: result markers
@@ -70,6 +70,10 @@ namespace
         0x8c6b0000, 0,
         0x016d5824, 0xac6b0000 // CHCR &= ~STR while held
       });
+    }
+    else if (finish == Finish::ZeroStop)
+    {
+      guest.push_back(0xac600000); // SW zero, CHCR
     }
     guest.push_back(0xac250090);
     guest.insert(guest.end(), 8, 0);
@@ -129,7 +133,7 @@ namespace
   void requireFinished(NekoSystem &system, const Endpoint &endpoint,
     Finish finish)
   {
-    const auto aborted = finish == Finish::Abort;
+    const auto aborted = finish != Finish::Resume;
     REQUIRE(system.eeBus().read32(RESULTS) == 3);
     REQUIRE(system.dmacController().holdControl() == RELEASED);
     REQUIRE((system.eeBus().read32(RESULTS + 0x10) &
@@ -203,14 +207,14 @@ namespace
 }
 
 TEST_CASE("EE guest hold stores bracket one grant on every implemented DMA channel",
-  "[ee][dma][hold][guest]")
+  "[ee][dma][hold][guest][active-stop]")
 {
   for (const auto endpoint : ENDPOINTS)
   {
-    for (const auto finish : {Finish::Resume, Finish::Abort})
+    for (const auto finish : {Finish::Resume, Finish::Abort, Finish::ZeroStop})
     {
       CAPTURE(endpoint.id);
-      CAPTURE(finish == Finish::Abort);
+      CAPTURE(finish);
       NekoSystem system;
       prepare(system, endpoint, finish);
       system.startTrace();
@@ -223,6 +227,8 @@ TEST_CASE("EE guest hold stores bracket one grant on every implemented DMA chann
       REQUIRE(system.eeBus().read32(RESULTS + 12) == 0x4010);
       reach(system, 3);
       requireFinished(system, endpoint, finish);
+      REQUIRE(system.eeBus().read32(endpoint.chcr) ==
+        (endpoint.id == 5 ? 0u : 1u));
       finishRun(system);
       requireFinished(system, endpoint, finish);
       requireHoldObservations(system);
@@ -231,15 +237,15 @@ TEST_CASE("EE guest hold stores bracket one grant on every implemented DMA chann
 }
 
 TEST_CASE("EE guest held tags and payloads restore resume abort and trace modes",
-  "[ee][dma][hold][guest][save-state][trace]")
+  "[ee][dma][hold][guest][save-state][trace][active-stop]")
 {
   const auto endpoint = ENDPOINTS[3];
   for (const auto source : {Source::Normal, Source::Chain})
   {
-    for (const auto finish : {Finish::Resume, Finish::Abort})
+    for (const auto finish : {Finish::Resume, Finish::Abort, Finish::ZeroStop})
     {
       CAPTURE(source == Source::Chain);
-      CAPTURE(finish == Finish::Abort);
+      CAPTURE(finish);
       NekoSystem original;
       prepare(original, endpoint, finish, source);
       const auto data = source == Source::Chain ? 0x4010u : 0x4000u;
@@ -260,7 +266,7 @@ TEST_CASE("EE guest held tags and payloads restore resume abort and trace modes"
       {
         finishRun(*system);
         REQUIRE_FALSE(system->sif1DMAC().active());
-        const auto aborted = finish == Finish::Abort;
+        const auto aborted = finish != Finish::Resume;
         REQUIRE(system->sif1DMAC().quadwordCount() ==
           (aborted ? (source == Source::Chain ? 3 : 2) : 0));
         REQUIRE(system->sif1DMAC().memoryAddress() ==
