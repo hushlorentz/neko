@@ -13,6 +13,7 @@
 #include "iop_core.hpp"
 #include "iop_interrupt_controller.hpp"
 #include "iop_timers.hpp"
+#include "sio2_controller.hpp"
 
 struct IOPCacheTestAccess
 {
@@ -265,6 +266,288 @@ namespace
     std::vector<std::uint8_t> bytes(IOPBus::ROM_SIZE, 0);
     bytes[0] = firstByte;
     return BootROMImage::create(bytes);
+  }
+}
+
+TEST_CASE("SIO2 guest data bypasses cached payloads but preserves isolation ownership",
+  "[iop][sio2][sio2-conformance][cache]")
+{
+  for (bool swapped : {false, true})
+  for (IOPAddress address : {0x1f808268u, 0x9f808268u, 0xbf808268u})
+  {
+    CAPTURE(swapped);
+    CAPTURE(address);
+    IOPBus bus;
+    SIO2Controller sio2;
+    bus.attachSIO2(&sio2);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
+    const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address, 0x12345678).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(sio2.readControl() == 0);
+    REQUIRE(core.readData32(address).value == 0x12345678);
+    REQUIRE(bus.write32(0, 0x8c220000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, 0).status == IOPBusStatus::Completed);
+    core.startExecution(0xa0000000);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0);
+    REQUIRE(core.delayedResultContinuation().value == 0x12345678);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0x12345678);
+    REQUIRE(sio2.readControl() == 0);
+    const IOPCache before = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.readData32(address).value == 0);
+    REQUIRE(core.writeData32(address, 0x3bc).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0x3bc);
+    core.startExecution(0xa0000000);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0x12345678);
+    REQUIRE(core.delayedResultContinuation().value == 0x3bc);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(2) == 0x3bc);
+    REQUIRE(core.retiredInstructions() == 4);
+    requireUnchangedCache(core.cache(), before);
+    core.startExecution(address);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::InstructionBusError);
+    REQUIRE(core.exceptionProgramCounter() == address);
+    REQUIRE(sio2.readControl() == 0x3bc);
+    requireUnchangedCache(core.cache(), before);
+  }
+}
+
+TEST_CASE("SIO2 control cannot supply direct cache fills or seeded hits",
+  "[iop][sio2][sio2-conformance][cache-transport]")
+{
+  for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
+  {
+    CAPTURE(bank);
+    IOPBus bus;
+    SIO2Controller sio2;
+    bus.attachSIO2(&sio2);
+    REQUIRE(sio2.writeStartupControl(0x3bc) == SIO2AccessStatus::Accepted);
+    IOPCache cache;
+    cache.commitIndexedStore(bank, 0x1f808268, 0x12345678, 0xf);
+    const auto location = IOPCache::location(bank, 0x1f808268);
+    const IOPCache before = cache;
+    REQUIRE(cache.readWord(bank, bus, 0x1f808268).status == IOPBusStatus::Unmapped);
+    if (bank == IOPCacheBank::Instruction)
+    {
+      REQUIRE_FALSE(cache.instructionLine(location.lineIndex).valid);
+      REQUIRE(cache.instructionLine(location.lineIndex).physicalTag ==
+        before.instructionLine(location.lineIndex).physicalTag);
+      REQUIRE(cache.instructionLine(location.lineIndex).words ==
+        before.instructionLine(location.lineIndex).words);
+      requireUnchangedCache(cache, before, IOPCache::DATA_LINE_COUNT, location.lineIndex);
+    }
+    else
+    {
+      REQUIRE_FALSE(cache.dataLine(location.lineIndex).valid);
+      REQUIRE(cache.dataLine(location.lineIndex).physicalTag ==
+        before.dataLine(location.lineIndex).physicalTag);
+      REQUIRE(cache.dataLine(location.lineIndex).words ==
+        before.dataLine(location.lineIndex).words);
+      requireUnchangedCache(cache, before, location.lineIndex);
+    }
+    const IOPCache invalidated = cache;
+    REQUIRE(cache.readWord(bank, bus, 0x1f808268).status == IOPBusStatus::Unmapped);
+    requireUnchangedCache(cache, invalidated);
+    REQUIRE(bus.read32(0x1f808268).value == 0x3bc);
+  }
+}
+
+TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay ownership",
+  "[iop][sio2][sio2-conformance][execution]")
+{
+  struct Fault
+  {
+    IOPAddress address;
+    IOPWord instruction;
+    bool user;
+    IOPException exception;
+    IOPStoreWidth rejectedWidth;
+    IOPWord rejectedValue;
+  };
+  const Fault faults[] = {
+    {0x1f808269, 0x8c220000, false, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None, 0},
+    {0x1f80826a, 0xac220000, false, IOPException::AddressErrorStore,
+      IOPStoreWidth::None, 0},
+    {0x9f808268, 0x8c220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None, 0},
+    {0x9f808268, 0xac220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None, 0},
+    {0xbf808268, 0x8c220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None, 0},
+    {0xbf808268, 0xac220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None, 0},
+    {0x1f808268, 0x80220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None, 0},
+    {0x1f80826a, 0x84220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None, 0},
+    {0x1f808264, 0x8c220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None, 0},
+    {0x1f80826c, 0x8c220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None, 0},
+    {0x1f808268, 0xa0220000, false, IOPException::None,
+      IOPStoreWidth::Byte, 0xbc},
+    {0x1f808268, 0xa4220000, false, IOPException::None,
+      IOPStoreWidth::Halfword, 0x3bc},
+    {0x1f808268, 0xac200000, false, IOPException::None,
+      IOPStoreWidth::Word, 0},
+    {0x1f80826c, 0xac220000, false, IOPException::None,
+      IOPStoreWidth::Word, 0x3bc}
+  };
+  for (const auto &fault : faults)
+  {
+    CAPTURE(fault.address);
+    CAPTURE(fault.instruction);
+    IOPBus bus;
+    SIO2Controller sio2;
+    bus.attachSIO2(&sio2);
+    REQUIRE(sio2.writeStartupControl(0x3bc) == SIO2AccessStatus::Accepted);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, fault.address);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0x3bc);
+    if (fault.user)
+    {
+      IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CURRENT_USER_MODE);
+    }
+    REQUIRE(bus.write32(0, 0x10000003).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, fault.instruction).status == IOPBusStatus::Completed);
+    core.startExecution(0);
+    core.stepInstruction();
+    const IOPCache beforeFault = core.cache();
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == fault.exception);
+    REQUIRE(core.generalRegister(2) == 0x3bc);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    REQUIRE(core.storeFailure().width == fault.rejectedWidth);
+    if (fault.rejectedWidth == IOPStoreWidth::None)
+    {
+      REQUIRE(core.exception().badVirtualAddress == fault.address);
+      REQUIRE(core.exception().inBranchDelaySlot);
+      REQUIRE(core.exceptionProgramCounter() == 0);
+      REQUIRE((core.cause() & IOPCOP0Cause::BRANCH_DELAY) != 0);
+      REQUIRE_FALSE(core.branchContinuation().active);
+    }
+    else
+    {
+      REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.branchContinuation().active);
+      REQUIRE(core.storeFailure().value == fault.rejectedValue);
+      REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+      REQUIRE(core.storeFailure().access.virtualAddress == fault.address);
+      REQUIRE(core.storeFailure().access.physicalAddress == fault.address);
+    }
+    REQUIRE(sio2.readControl() == 0x3bc);
+    requireUnchangedCache(core.cache(), beforeFault);
+  }
+}
+
+TEST_CASE("SIO2 guest merge stores admit only a full startup word",
+  "[iop][sio2][sio2-conformance][merge]")
+{
+  for (IOPAddress address : {0x1f808268u, 0x9f808268u, 0xbf808268u})
+  for (bool storeLeft : {false, true})
+  for (IOPWord lane = 0; lane < 4; ++lane)
+  {
+    CAPTURE(address);
+    CAPTURE(storeLeft);
+    CAPTURE(lane);
+    IOPBus bus;
+    SIO2Controller sio2;
+    bus.attachSIO2(&sio2);
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPWord source = storeLeft
+      ? 0x3bcu << (8 * (3 - lane)) : 0x3bc;
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, source);
+    REQUIRE(bus.write32(0, 0x10000003).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, (storeLeft ? 0xa8220000 : 0xb8220000) | lane).status ==
+      IOPBusStatus::Completed);
+    core.startExecution(0xa0000000);
+    core.stepInstruction();
+    core.stepInstruction();
+    const auto mask = storeLeft ? 0xf >> (3 - lane) : (0xf << lane) & 0xf;
+    const IOPWord transferred = storeLeft
+      ? source >> (8 * (3 - lane)) : source << (8 * lane);
+    const bool fullWord = mask == 0xf;
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.generalRegister(2) == source);
+    REQUIRE(core.retiredInstructions() == (fullWord ? 2 : 1));
+    REQUIRE(core.programCounter() == (fullWord ? 0xa0000010 : 0xa0000004));
+    REQUIRE(core.branchContinuation().active == !fullWord);
+    REQUIRE(sio2.readControl() == (fullWord ? 0x3bc : 0));
+    if (fullWord)
+    {
+      REQUIRE(core.stopReason() == IOPStopReason::None);
+      REQUIRE(core.storeFailure().width == IOPStoreWidth::None);
+    }
+    else
+    {
+      REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+      REQUIRE(core.storeFailure().width == IOPStoreWidth::Word);
+      REQUIRE(core.storeFailure().value == transferred);
+      REQUIRE(core.storeFailure().mergeByteEnable == mask);
+      REQUIRE(core.storeFailure().access.virtualAddress == address + lane);
+      REQUIRE(core.storeFailure().access.physicalAddress == 0x1f808268 + lane);
+      REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+    }
+    requireClear(core.cache());
+  }
+}
+
+TEST_CASE("SIO2 guest merge loads use the aligned control word and delayed writeback",
+  "[iop][sio2][sio2-conformance][merge]")
+{
+  constexpr IOPWord oldValue = 0xaabbccdd;
+  const IOPWord left[] = {0xbcbbccdd, 0x03bcccdd, 0x0003bcdd, 0x000003bc};
+  const IOPWord right[] = {0x000003bc, 0xaa000003, 0xaabb0000, 0xaabbcc00};
+  for (IOPAddress address : {0x1f808268u, 0x9f808268u, 0xbf808268u})
+  for (bool loadLeft : {false, true})
+  for (IOPWord lane = 0; lane < 4; ++lane)
+  {
+    CAPTURE(address);
+    CAPTURE(loadLeft);
+    CAPTURE(lane);
+    IOPBus bus;
+    SIO2Controller sio2;
+    bus.attachSIO2(&sio2);
+    REQUIRE(sio2.writeStartupControl(0x3bc) == SIO2AccessStatus::Accepted);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, oldValue);
+    REQUIRE(bus.write32(0, (loadLeft ? 0x88220000 : 0x98220000) | lane).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, 0xac020100).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(8, 0xac020104).status == IOPBusStatus::Completed);
+    core.startExecution(0xa0000000);
+    core.stepInstruction();
+    const IOPWord expected = loadLeft ? left[lane] : right[lane];
+    REQUIRE(core.generalRegister(2) == oldValue);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::Load);
+    REQUIRE(core.delayedResultContinuation().destination == 2);
+    REQUIRE(core.delayedResultContinuation().value == expected);
+    requireClear(core.cache());
+    core.stepInstruction();
+    REQUIRE(bus.read32(0x100).value == oldValue);
+    REQUIRE(core.generalRegister(2) == expected);
+    core.stepInstruction();
+    REQUIRE(bus.read32(0x104).value == expected);
+    REQUIRE(core.retiredInstructions() == 3);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.stopReason() == IOPStopReason::None);
+    REQUIRE(sio2.readControl() == 0x3bc);
   }
 }
 

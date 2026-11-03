@@ -3164,7 +3164,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement selected CTRL initialization/readback through a dedicated owner,
       with exact bus admission, cold reset and canonical transactional restore;
       validate integration and independently review the new state boundary.
-- [ ] Cover guest aliases, protection, load delay, merge masks and cache
+- [x] Cover guest aliases, protection, load delay, merge masks and cache
       boundaries; compare restored traced/plain execution around initialization
       and readback without enabling neighboring registers or active effects.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
