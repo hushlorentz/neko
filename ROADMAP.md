@@ -2913,12 +2913,12 @@ not requirements for exhaustive subsystem coverage.
 - [x] Select SCPH-70012's Browser/System Configuration main menu: no disc/cards,
       one port-1 DualShock 2; port 2/expansion devices absent. Retain the ROM1/RTC
       profile; complete required setup in the guest, never bypass it.
-- [ ] Select visible-menu or headless guest-state evidence and its acceptance
-      signals; distinguish an identified shell from a deadlock or device poll
-      without requiring frontend packaging to establish core boot progress.
-- [ ] Define a bounded observation window and deterministic controller-input
-      sequence proving shell response while required timers, interrupts and
-      device activity continue normally.
+- [x] Select recognizable core-rendered menu evidence plus an expected response
+      to deterministic controller input; corroborate with core activity and
+      replay evidence, without requiring an interactive frontend.
+- [x] Define a six-emulated-second window: two seconds neutral, two one-second
+      navigation slots (100 ms press/900 ms release), then two seconds neutral;
+      require change-and-return, a neutral control and normal core activity.
 
 ### CD/DVD Startup Dependency Planning
 
