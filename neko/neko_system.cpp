@@ -274,6 +274,7 @@ NekoSystem::NekoSystem() :
   iopBusComponent.attachInterruptController(&iopInterruptControllerComponent);
   iopBusComponent.attachTimers(&iopTimersComponent);
   iopBusComponent.attachCDVD(&cdvdControllerComponent);
+  iopBusComponent.attachSIO2(&sio2ControllerComponent);
   iopBusComponent.attachDMA(
     &iopDMAControllerComponent, &iopSIF1DMAComponent, &iopSIF0DMAComponent);
   iopCoreComponent.attachBus(&iopBusComponent);
@@ -394,6 +395,16 @@ CDVDController &NekoSystem::cdvdController()
 const CDVDController &NekoSystem::cdvdController() const
 {
   return cdvdControllerComponent;
+}
+
+SIO2Controller &NekoSystem::sio2Controller()
+{
+  return sio2ControllerComponent;
+}
+
+const SIO2Controller &NekoSystem::sio2Controller() const
+{
+  return sio2ControllerComponent;
 }
 
 IOPTimerTiming &NekoSystem::iopTimerTiming()

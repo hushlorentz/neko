@@ -16,6 +16,7 @@ class IOPSIF1DMAChannel;
 class IOPSIF0DMAChannel;
 class IOPTimers;
 class CDVDController;
+class SIO2Controller;
 class SIF;
 class SIFSignalReceiver;
 
@@ -86,6 +87,7 @@ class IOPBus final
     // The caller owns the timers and must keep them alive while attached.
     void attachTimers(IOPTimers *timers);
     void attachCDVD(CDVDController *controller);
+    void attachSIO2(SIO2Controller *controller);
     // The caller keeps the attached DMA owners alive.
     void attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1,
       IOPSIF0DMAChannel *sif0 = nullptr);
@@ -106,7 +108,7 @@ class IOPBus final
     IOPBusReadResult read8(IOPAddress address);
     IOPBusReadResult read16(IOPAddress address);
     IOPBusReadResult read32(IOPAddress address);
-    // Data-only channel initialization and absent-ROM1 responses stay non-executable.
+    // Data-only initialization registers and absent-ROM1 responses stay non-executable.
     IOPBusReadResult readInstruction32(IOPAddress address);
     IOPBusWriteResult write8(IOPAddress address, std::uint8_t value);
     IOPBusWriteResult write16(IOPAddress address, std::uint16_t value);
@@ -145,6 +147,7 @@ class IOPBus final
     enum class Device : std::uint8_t
     {
       CDVD,
+      SIO2Control,
       None,
       SSBUSConfiguration,
       InterruptController,
@@ -258,6 +261,7 @@ class IOPBus final
     IOPInterruptController *interruptController = nullptr;
     IOPTimers *timers = nullptr;
     CDVDController *cdvd = nullptr;
+    SIO2Controller *sio2 = nullptr;
     IOPDMAController *dmaController = nullptr;
     IOPSIF1DMAChannel *sif1DMA = nullptr;
     IOPSIF0DMAChannel *sif0DMA = nullptr;

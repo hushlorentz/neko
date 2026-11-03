@@ -3146,9 +3146,30 @@ not requirements for exhaustive subsystem coverage.
 - [x] Cover aliases, load-delay and merge-load behavior, cache/isolation
       boundaries, reset and restored traced/plain execution; independently
       review the memory-access boundary and run affected validation gates.
-- [ ] Verify fresh unchanged-input BIOS progress with bounded discovery and
+- [x] Verify fresh unchanged-input BIOS progress with bounded discovery and
       cold/restored traced/plain and canonical comparisons; attribute the next
       originating dependency without claiming ROM1 content or completed boot.
+
+### SIO2 Control Startup Scope
+
+- [x] Resolve the observed `0x1f808268` control write and directly related
+      register family through local manuals and authorized secondary evidence;
+      distinguish initialization/readback from transfer, status and IRQ effects.
+- [x] Select a bounded contract and owner boundary with reset, persistence,
+      trace and authored validation requirements; obtain explicit approval
+      before implementing command execution, progression, IRQs, DMA or timing.
+
+### SIO2 Initialization-Only Control Profile
+
+- [x] Implement selected CTRL initialization/readback through a dedicated owner,
+      with exact bus admission, cold reset and canonical transactional restore;
+      validate integration and independently review the new state boundary.
+- [ ] Cover guest aliases, protection, load delay, merge masks and cache
+      boundaries; compare restored traced/plain execution around initialization
+      and readback without enabling neighboring registers or active effects.
+- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; attribute the next originating
+      dependency without claiming SIO2 transfers, readiness or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

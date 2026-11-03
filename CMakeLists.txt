@@ -108,6 +108,7 @@ add_library(neko_core
     neko/ee/vpu/pipelines/vpu_pipeline.cpp
     neko/ee/vpu/pipelines/vpu_pipeline_orchestrator.cpp
     neko/iop/cdvd_controller.cpp
+    neko/iop/sio2_controller.cpp
     neko/iop/iop_bus.cpp
     neko/iop/iop_cache.cpp
     neko/iop/iop_core.cpp
@@ -341,6 +342,7 @@ add_executable(neko_tests
     neko_tests/iop/cdvd_integration_tests.cpp
     neko_tests/iop/cdvd_trace_tests.cpp
     neko_tests/iop/iop_bus_tests.cpp
+    neko_tests/iop/sio2_controller_tests.cpp
     neko_tests/iop/iop_cache_tests.cpp
     neko_tests/iop/iop_core_tests.cpp
     neko_tests/iop/iop_instruction_tests.cpp

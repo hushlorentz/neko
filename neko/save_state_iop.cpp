@@ -40,6 +40,7 @@ void NekoSaveStateCodec::writeIOPState(
       bus.interruptController != &system.iopInterruptControllerComponent ||
       bus.timers != &system.iopTimersComponent ||
       bus.cdvd != &system.cdvdControllerComponent ||
+      bus.sio2 != &system.sio2ControllerComponent ||
       system.eeBusComponent.cdvdController != &system.cdvdControllerComponent ||
       bus.dmaController != &system.iopDMAControllerComponent ||
       bus.sif1DMA != &system.iopSIF1DMAComponent ||
@@ -207,6 +208,10 @@ void NekoSaveStateCodec::writeIOPState(
     }
   }
   {
+    auto scope = writer->scope("sio2");
+    writer->writeFieldU32("control", system.sio2ControllerComponent.control);
+  }
+  {
     auto scope = writer->scope("cdvd");
     writeCDVDState(writer, system.cdvdControllerComponent);
   }
@@ -314,6 +319,13 @@ void NekoSaveStateCodec::readIOP(
   {
     auto scope = reader->scope("timers");
     readIOPTimers(reader, &system->iopTimersComponent);
+  }
+  {
+    auto scope = reader->scope("sio2");
+    auto &sio2 = system->sio2ControllerComponent;
+    sio2.control = reader->readFieldU32("control");
+    reader->requireField(sio2.control == 0 || sio2.control == 0x3bc,
+      "SIO2 control is outside the initialization-only profile");
   }
   {
     auto scope = reader->scope("cdvd");
@@ -647,6 +659,8 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional IOP timer commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<CDVDController>::value,
     "Transactional CD/DVD commit must not throw.");
+  static_assert(std::is_nothrow_copy_assignable<SIO2Controller>::value,
+    "Transactional SIO2 commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF1DMAChannel>::value,
     "Transactional IOP SIF1 DMA commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF0DMAChannel>::value,
@@ -668,6 +682,8 @@ void NekoSaveStateCodec::commitIOP(
     &destination->iopInterruptControllerComponent;
   destination->iopBusComponent.timers = &destination->iopTimersComponent;
   destination->iopBusComponent.cdvd = &destination->cdvdControllerComponent;
+  destination->sio2ControllerComponent = source->sio2ControllerComponent;
+  destination->iopBusComponent.sio2 = &destination->sio2ControllerComponent;
   destination->eeBusComponent.cdvdController = &destination->cdvdControllerComponent;
   const bool cdvdObservationsEnabled =
     destination->cdvdControllerComponent.observationsEnabled;

@@ -47,6 +47,88 @@ namespace
   }
 }
 
+TEST_CASE("SIO2 canonical state replaces both retained control images",
+  "[iop][sio2][save-state]")
+{
+  NekoSystem source;
+  const auto coldHash = source.iopStateHash();
+  const auto cold = source.saveState();
+  REQUIRE(source.iopBus().write32(0x1f808268, 0x3bc).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(source.iopStateHash() != coldHash);
+  const auto programmed = source.saveState();
+  REQUIRE(programmed != cold);
+  const auto fields = inspectSaveState(programmed);
+  const auto *control = fields.find("system.iop.sio2.control");
+  REQUIRE(control != nullptr);
+  REQUIRE(control->kind == SaveStateFieldKind::U32);
+  REQUIRE(control->size == 4);
+  REQUIRE(control->scalarValue == 0x3bc);
+
+  NekoSystem destination;
+  destination.loadState(programmed);
+  REQUIRE(destination.iopStateHash() == source.iopStateHash());
+  REQUIRE(destination.saveState() == programmed);
+  REQUIRE(destination.sio2Controller().readControl() == 0x3bc);
+  destination.loadState(cold);
+  REQUIRE(destination.saveState() == cold);
+  REQUIRE(destination.sio2Controller().readControl() == 0);
+  REQUIRE(destination.iopBus().read32(0x1f808268).value == 0);
+  source.sio2Controller().reset();
+  REQUIRE(destination.iopBus().write32(0x1f808268, 0x3bc).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(source.iopBus().read32(0x1f808268).value == 0);
+  REQUIRE(destination.iopBus().read32(0x1f808268).value == 0x3bc);
+}
+
+TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
+  "[iop][sio2][save-state]")
+{
+  NekoSystem source;
+  const auto candidate = source.saveState();
+  NekoSystem destination;
+  REQUIRE(destination.iopBus().write32(0x1f808268, 0x3bc).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.iopBus().write32(0x100, 0x12345678).status ==
+    IOPBusStatus::Completed);
+  const auto before = destination.saveState();
+  const auto hash = destination.iopStateHash();
+  for (const auto &mutation :
+       std::vector<std::pair<std::string, std::uint64_t>>{
+         {"system.iop.sio2.control", 1},
+         {"system.iop.sio2.control", 0xc},
+         {"system.iop.sio2.control", 0x3bd},
+         {"system.iop.sio2.control", 0xffffffff},
+         {"container.version", 74}})
+  {
+    CAPTURE(mutation.first);
+    CAPTURE(mutation.second);
+    SaveStateMutation invalid(candidate);
+    invalid.writeScalar(mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.iopStateHash() == hash);
+    REQUIRE(destination.saveState() == before);
+    REQUIRE(destination.iopBus().read32(0x1f808268).value == 0x3bc);
+  }
+  SaveStateMutation badChecksum(candidate);
+  badChecksum.writeScalar("system.iop.sio2.control", 0x3bc);
+  REQUIRE_THROWS_AS(destination.loadState(badChecksum), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+
+  SIO2Controller foreign;
+  destination.iopBus().attachSIO2(&foreign);
+  REQUIRE_THROWS_AS(destination.saveState(), std::logic_error);
+  REQUIRE_THROWS_AS(destination.iopStateHash(), std::logic_error);
+  REQUIRE_THROWS_AS(destination.loadState(badChecksum), std::invalid_argument);
+  REQUIRE(destination.iopBus().write32(0x1f808268, 0x3bc).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(foreign.readControl() == 0x3bc);
+  destination.iopBus().attachSIO2(&destination.sio2Controller());
+  REQUIRE(destination.saveState() == before);
+}
+
 TEST_CASE("IOP persistence owns attached devices while the CPU remains halted")
 {
   NekoSystem system;
