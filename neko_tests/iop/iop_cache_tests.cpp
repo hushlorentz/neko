@@ -405,6 +405,71 @@ TEST_CASE("SIO2 transmit bytes respect cache isolation without supplying cache t
   }
 }
 
+TEST_CASE("SIO2 active transfers and receive bytes remain outside isolated cache state",
+  "[iop][sio2][sio2-active][cache]")
+{
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    CAPTURE(swapped);
+    CAPTURE(segment);
+    IOPBus bus;
+    SIO2Controller sio2;
+    IOPInterruptController interrupts;
+    bus.attachSIO2(&sio2);
+    bus.attachInterruptController(&interrupts);
+    IOPCore core;
+    core.attachBus(&bus);
+    sio2.writeCommandDescriptor(0, 0x001c0740);
+    for (auto byte : {0x61, 0x06, 0x03, 0, 0, 0, 0})
+    {
+      REQUIRE(sio2.writeTransmitByte(static_cast<std::uint8_t>(byte)) ==
+        SIO2AccessStatus::Accepted);
+    }
+    const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(0x1f808268 | segment, 0xb1).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.writeData32(0x1f808264 | segment, 0x12345678).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.readData8(0x1f808264 | segment).value == 0x78);
+    REQUIRE(sio2.readControl() == 0);
+    REQUIRE(sio2.transmitInputSize() == 7);
+    REQUIRE(interrupts.status() == 0);
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.writeData32(0x1f808268 | segment, 0xb1).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(0x1f80826c | segment).value == 0x1d100);
+    REQUIRE(interrupts.status() == (1u << 17));
+    for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
+    for (auto physical : {0x1f808264u, 0x1f80826cu, 0x1f808270u, 0x1f808274u,
+           0x1f808280u})
+    {
+      IOPCache cache;
+      cache.commitIndexedStore(bank, physical, 0x12345678, 0xf);
+      REQUIRE(cache.readWord(bank, bus, physical).status == IOPBusStatus::Unmapped);
+      REQUIRE(cache.readWord(bank, bus, physical).status == IOPBusStatus::Unmapped);
+    }
+    requireUnchangedCache(core.cache(), isolated);
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.readData8(0x1f808264 | segment).value == 0x78);
+    REQUIRE(core.writeData32(0x1f808280 | segment, 1).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(sio2.readInterruptStatus() == 1);
+    const auto acknowledgedCache = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    for (unsigned index = 0; index < 7; ++index)
+    {
+      const auto reply = core.readData8(0x1f808264 | segment);
+      REQUIRE(reply.outcome == IOPAccessOutcome::Completed);
+      REQUIRE(reply.value == 0xff);
+    }
+    REQUIRE(core.readData8(0x1f808264 | segment).outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), acknowledgedCache);
+  }
+}
+
 TEST_CASE("SIO2 programming cannot supply direct cache fills or seeded hits",
   "[iop][sio2][sio2-conformance][cache-transport]")
 {

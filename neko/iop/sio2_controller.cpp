@@ -8,6 +8,9 @@ void SIO2Controller::reset() noexcept
   portControls.fill(0);
   commandDescriptors.fill(0);
   clearTransmitInput();
+  transferCompleted = false;
+  receiveRemaining = 0;
+  interruptCause = false;
 }
 
 std::uint32_t SIO2Controller::readControl() const noexcept
@@ -28,6 +31,74 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
   }
   control = value;
   return SIO2AccessStatus::Accepted;
+}
+
+SIO2AccessStatus SIO2Controller::startTransfer(
+  std::uint32_t controlValue) noexcept
+{
+  if (controlValue != 0xb1 || receiveRemaining != 0 || interruptCause ||
+      commandDescriptors[0] != 0x001c0740 || commandDescriptors[1] != 0 ||
+      transmitInputCount != 7 || transmitInput[0] != 0x61)
+  {
+    return SIO2AccessStatus::Unsupported;
+  }
+  control = controlValue;
+  clearTransmitInput();
+  transferCompleted = true;
+  receiveRemaining = 7;
+  interruptCause = true;
+  return SIO2AccessStatus::Accepted;
+}
+
+SIO2ReadResult SIO2Controller::readReceiveByte() noexcept
+{
+  if (receiveRemaining == 0)
+  {
+    return {};
+  }
+  --receiveRemaining;
+  return {SIO2AccessStatus::Accepted, 0xff};
+}
+
+SIO2ReadResult SIO2Controller::readTransferStatus(std::size_t index) const
+{
+  static constexpr std::array<std::uint32_t, 3> status = {{0x1d100, 0xf, 0}};
+  const auto value = status.at(index);
+  return transferCompleted ? SIO2ReadResult{SIO2AccessStatus::Accepted, value}
+    : SIO2ReadResult{};
+}
+
+std::uint32_t SIO2Controller::readInterruptStatus() const noexcept
+{
+  return interruptCause ? 1 : 0;
+}
+
+SIO2AccessStatus SIO2Controller::acknowledgeInterrupt(
+  std::uint32_t value) noexcept
+{
+  if (value > 1)
+  {
+    return SIO2AccessStatus::Unsupported;
+  }
+  if (value == 1)
+  {
+    interruptCause = false;
+  }
+  return SIO2AccessStatus::Accepted;
+}
+
+bool SIO2Controller::hasValidTransferState() const noexcept
+{
+  if (receiveRemaining > 7)
+  {
+    return false;
+  }
+  if (!transferCompleted)
+  {
+    return receiveRemaining == 0 && !interruptCause &&
+      (control == 0 || supportsControl(control));
+  }
+  return supportsControl(control) || control == 0xb1;
 }
 
 std::uint32_t SIO2Controller::readPortControl(std::size_t index) const

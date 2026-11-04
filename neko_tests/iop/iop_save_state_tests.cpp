@@ -125,7 +125,8 @@ TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
          {"container.version", 75},
          {"container.version", 76},
          {"container.version", 77},
-         {"container.version", 78}})
+         {"container.version", 78},
+         {"container.version", 79}})
   {
     CAPTURE(mutation.first);
     CAPTURE(mutation.second);
@@ -313,6 +314,102 @@ TEST_CASE("SIO2 staged transmit images round-trip replace and rewire the owner",
   REQUIRE(foreign.transmitInputByte(0) == 0x55);
   source.sio2Controller().reset();
   REQUIRE(destination.sio2Controller().transmitInputSize() == 4);
+}
+
+TEST_CASE("SIO2 completed infrared state hashes validates and adopts destination wiring",
+  "[iop][sio2][sio2-active][save-state]")
+{
+  NekoSystem source;
+  const auto cold = source.saveState();
+  REQUIRE(source.iopBus().write32(0x1f808200, 0x001c0740).status ==
+    IOPBusStatus::Completed);
+  for (auto byte : {0x61, 0x06, 0x03, 0, 0, 0, 0})
+  {
+    REQUIRE(source.iopBus().write8(0x1f808260,
+      static_cast<std::uint8_t>(byte)).status == IOPBusStatus::Completed);
+  }
+  const auto staged = source.saveState();
+  REQUIRE(source.iopBus().write32(0x1f808268, 0xb1).status ==
+    IOPBusStatus::Completed);
+  const auto completed = source.saveState();
+  const auto completedHash = source.iopStateHash();
+  const auto fields = inspectSaveState(completed);
+  for (const auto &expected :
+       std::vector<std::pair<std::string, std::uint64_t>>{
+         {"transferCompleted", 1}, {"receiveRemaining", 7}, {"interruptCause", 1}})
+  {
+    const auto *field = fields.find("system.iop.sio2." + expected.first);
+    REQUIRE(field != nullptr);
+    REQUIRE(field->scalarValue == expected.second);
+    REQUIRE(field->size == 1);
+  }
+  NekoSystem destination;
+  destination.loadState(completed);
+  REQUIRE(destination.saveState() == completed);
+  REQUIRE(destination.iopStateHash() == completedHash);
+  for (const auto &mutation :
+       std::vector<std::pair<std::string, std::uint64_t>>{
+         {"system.iop.sio2.receiveRemaining", 3},
+         {"system.iop.sio2.interruptCause", 0},
+         {"system.iop.sio2.control", 0xc}})
+  {
+    SaveStateMutation changed(completed);
+    changed.writeScalar(mutation.first, mutation.second);
+    changed.refreshChecksum();
+    destination.loadState(changed);
+    REQUIRE(destination.saveState() == changed.bytes());
+    REQUIRE(destination.iopStateHash() != completedHash);
+  }
+  SIO2Controller foreign;
+  destination.iopBus().attachSIO2(&foreign);
+  destination.loadState(staged);
+  REQUIRE(destination.iopBus().write32(0x1f808268, 0xb1).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.saveState() == completed);
+  REQUIRE(foreign.readControl() == 0);
+  source.sio2Controller().reset();
+  REQUIRE(destination.iopBus().read8(0x1f808264).value == 0xff);
+  destination.loadState(cold);
+  REQUIRE(destination.saveState() == cold);
+  REQUIRE(destination.iopBus().read8(0x1f808264).status == IOPBusStatus::Unmapped);
+  REQUIRE(destination.iopBus().read32(0x1f808280).value == 0);
+
+  destination.loadState(completed);
+  const auto before = destination.saveState();
+  for (const auto &mutation :
+       std::vector<std::pair<std::string, std::uint64_t>>{
+         {"system.iop.sio2.transferCompleted", 0},
+         {"system.iop.sio2.transferCompleted", 2},
+         {"system.iop.sio2.receiveRemaining", 8},
+         {"system.iop.sio2.receiveRemaining", 255},
+         {"system.iop.sio2.interruptCause", 2},
+         {"system.iop.sio2.control", 0},
+         {"system.iop.sio2.control", 0xb0},
+         {"system.iop.timing.pixelPhase", 0xffff}})
+  {
+    CAPTURE(mutation.first);
+    CAPTURE(mutation.second);
+    SaveStateMutation invalid(completed);
+    invalid.writeScalar(mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+    REQUIRE(destination.iopStateHash() == completedHash);
+  }
+  for (const auto &mutation :
+       std::vector<std::pair<std::string, std::uint64_t>>{
+         {"system.iop.sio2.receiveRemaining", 1},
+         {"system.iop.sio2.interruptCause", 1},
+         {"system.iop.sio2.control", 0xb1}})
+  {
+    SaveStateMutation invalid(cold);
+    invalid.writeScalar(mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
 }
 
 TEST_CASE("SIO2 invalid transmit count and unused bytes reject before adoption",

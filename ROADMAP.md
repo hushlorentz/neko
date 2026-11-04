@@ -3222,7 +3222,7 @@ not requirements for exhaustive subsystem coverage.
 
 ### SIO2 Active-Control Dependency
 
-- [ ] Research the SIO2 CTRL `0xb1` write at `0x1f808268`; obtain explicit
+- [x] Research the SIO2 CTRL `0xb1` write at `0x1f808268`; obtain explicit
       approval for a bounded active-control/transfer contract before implementing
       it with guest/restored coverage, gates and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored

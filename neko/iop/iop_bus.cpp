@@ -20,6 +20,9 @@ namespace
   constexpr IOPAddress sio2PortControlBase = 0x1f808240;
   constexpr IOPAddress sio2CommandDescriptorBase = 0x1f808200;
   constexpr IOPAddress sio2TransmitInput = 0x1f808260;
+  constexpr IOPAddress sio2ReceiveOutput = 0x1f808264;
+  constexpr IOPAddress sio2TransferStatusBase = 0x1f80826c;
+  constexpr IOPAddress sio2InterruptStatus = 0x1f808280;
   constexpr std::size_t absentROM1Size = 4 * 1024 * 1024;
   constexpr std::array<IOPAddress, 9> cdvdRegisters = {{
     0x1f402004, 0x1f402005, 0x1f402006, 0x1f402008, 0x1f40200a,
@@ -270,6 +273,21 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   if (first == sio2TransmitInput && last == first)
   {
     return {IOPBusRegion::Mmio, 0, Device::SIO2TransmitInput};
+  }
+  if (first == sio2ReceiveOutput && last == first)
+  {
+    return {IOPBusRegion::Mmio, 0, Device::SIO2ReceiveOutput};
+  }
+  if (first >= sio2TransferStatusBase && first < sio2TransferStatusBase + 12 &&
+      first % sizeof(IOPWord) == 0 && last < first + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio,
+      static_cast<std::size_t>((first - sio2TransferStatusBase) / sizeof(IOPWord)),
+      Device::SIO2TransferStatus};
+  }
+  if (first == sio2InterruptStatus && last < first + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio, 0, Device::SIO2InterruptStatus};
   }
   if (first == sio2Control && last < first + sizeof(IOPWord))
   {
@@ -536,6 +554,8 @@ IOPBusReadResult IOPBus::readInstruction32(IOPAddress address)
       location.device == Device::SIO2Control ||
       location.device == Device::SIO2PortControl ||
       location.device == Device::SIO2CommandDescriptor ||
+      location.device == Device::SIO2TransferStatus ||
+      location.device == Device::SIO2InterruptStatus ||
       location.device == Device::AbsentROM1)
   {
     return {};
@@ -605,6 +625,25 @@ IOPBusReadResult IOPBus::readDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SIO2ReceiveOutput:
+    case Device::SIO2TransferStatus:
+    {
+      const auto expectedWidth = location.device == Device::SIO2ReceiveOutput
+        ? 1u : sizeof(IOPWord);
+      if (width != expectedWidth || sio2 == nullptr)
+      {
+        return {};
+      }
+      const auto result = location.device == Device::SIO2ReceiveOutput
+        ? sio2->readReceiveByte() : sio2->readTransferStatus(location.offset);
+      return result.status == SIO2AccessStatus::Accepted
+        ? IOPBusReadResult{IOPBusStatus::Completed, result.value}
+        : IOPBusReadResult{};
+    }
+    case Device::SIO2InterruptStatus:
+      return width == sizeof(IOPWord) && sio2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed, sio2->readInterruptStatus()}
+        : IOPBusReadResult{};
     case Device::SIO2Control:
       return width == sizeof(IOPWord) && sio2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed, sio2->readControl()}
@@ -683,9 +722,28 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
           SIO2AccessStatus::Accepted
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SIO2Control:
+      if (width != sizeof(IOPWord) || sio2 == nullptr)
+      {
+        return {};
+      }
+      if (sio2->writeControl(value) == SIO2AccessStatus::Accepted)
+      {
+        return {IOPBusStatus::Completed};
+      }
+      if (interruptController == nullptr ||
+          sio2->startTransfer(value) != SIO2AccessStatus::Accepted)
+      {
+        return {};
+      }
+      interruptController->assertSource(IOPInterruptSource::SIO2);
+      return {IOPBusStatus::Completed};
+    case Device::SIO2InterruptStatus:
       return width == sizeof(IOPWord) && sio2 != nullptr &&
-        sio2->writeControl(value) == SIO2AccessStatus::Accepted
+        sio2->acknowledgeInterrupt(value) == SIO2AccessStatus::Accepted
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SIO2ReceiveOutput:
+    case Device::SIO2TransferStatus:
+      return {};
     case Device::SIO2PortControl:
       if (width != sizeof(IOPWord) || sio2 == nullptr)
       {

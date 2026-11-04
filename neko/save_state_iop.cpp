@@ -239,6 +239,12 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU8("value", sio2.transmitInput[index]);
       }
     }
+    writer->writeFieldBool("transferCompleted",
+      system.sio2ControllerComponent.transferCompleted);
+    writer->writeFieldU8("receiveRemaining",
+      system.sio2ControllerComponent.receiveRemaining);
+    writer->writeFieldBool("interruptCause",
+      system.sio2ControllerComponent.interruptCause);
   }
   {
     auto scope = writer->scope("cdvd");
@@ -353,9 +359,6 @@ void NekoSaveStateCodec::readIOP(
     auto scope = reader->scope("sio2");
     auto &sio2 = system->sio2ControllerComponent;
     sio2.control = reader->readFieldU32("control");
-    reader->requireField(sio2.control == 0 ||
-      SIO2Controller::supportsControl(sio2.control),
-      "SIO2 control is outside the passive programming profile");
     {
       auto ports = reader->scope("portControls");
       for (std::size_t index = 0; index < sio2.portControls.size(); ++index)
@@ -387,6 +390,11 @@ void NekoSaveStateCodec::readIOP(
           "SIO2 unstaged transmit bytes must be zero");
       }
     }
+    sio2.transferCompleted = reader->readFieldBool("transferCompleted");
+    sio2.receiveRemaining = reader->readFieldU8("receiveRemaining");
+    sio2.interruptCause = reader->readFieldBool("interruptCause");
+    reader->requireField(sio2.hasValidTransferState(),
+      "SIO2 transfer state is outside the bounded absent-infrared profile");
   }
   {
     auto scope = reader->scope("cdvd");
