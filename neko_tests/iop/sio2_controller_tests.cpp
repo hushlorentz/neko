@@ -72,9 +72,9 @@ namespace
     system.iopCore().startExecution(0xa0000000);
   }
 
-  void stageInfraredTransfer(NekoSystem &system)
+  void stageInfraredTransfer(NekoSystem &system, IOPWord descriptor = 0x001c0740)
   {
-    REQUIRE(system.iopBus().write32(descriptorBase, 0x001c0740).status ==
+    REQUIRE(system.iopBus().write32(descriptorBase, descriptor).status ==
       IOPBusStatus::Completed);
     REQUIRE(system.iopBus().write32(descriptorBase + 4, 0).status ==
       IOPBusStatus::Completed);
@@ -139,6 +139,59 @@ namespace
     REQUIRE(system.iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
     REQUIRE(system.sio2Controller().transmitInputSize() == 0);
     REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+  }
+
+  void installSuccessiveInfraredProgram(NekoSystem &system, IOPAddress address)
+  {
+    stageInfraredTransfer(system);
+    REQUIRE(system.iopBus().write32(controlAddress, transferControl).status ==
+      IOPBusStatus::Completed);
+    for (std::size_t index = 0; index < infraredPacket.size(); ++index)
+    {
+      REQUIRE(system.iopBus().read8(receiveAddress).value == 0xff);
+    }
+    system.iopInterruptController().writeStatus(~sio2IRQ);
+    installProgram(system, std::array<IOPWord, 33>{{
+      0x3c010000 | (address >> 16),
+      0x34210000 | (address & 0xffff),
+      0x2402000c, 0xac220068,
+      0x3c02001c, 0x34420741,
+      0xac220000, 0xac200004,
+      0x24020061, 0xa0220060,
+      0x24020006, 0xa0220060,
+      0x24020003, 0xa0220060,
+      0xa0200060, 0xa0200060, 0xa0200060, 0xa0200060,
+      0x240200b1,
+      0x10000002,
+      0xac220068, // Successive START in the taken branch delay slot
+      0xffffffff,
+      0x8c230080, 0x8c24006c,
+      0x90250064, 0x90260064, 0x90270064, 0x90280064,
+      0x90290064, 0x902a0064, 0x902b0064,
+      0, 0x240c1234
+    }});
+  }
+
+  void requireSuccessiveInfraredGuestResult(NekoSystem &system)
+  {
+    REQUIRE(system.iopCore().retiredInstructions() == 32);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000084);
+    REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE_FALSE(system.iopCore().branchContinuation().active);
+    REQUIRE(system.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    REQUIRE(system.iopCore().generalRegister(3) == 1);
+    REQUIRE(system.iopCore().generalRegister(4) == 0x1d100);
+    for (std::size_t reg = 5; reg <= 11; ++reg)
+    {
+      REQUIRE(system.iopCore().generalRegister(reg) == 0xff);
+    }
+    REQUIRE(system.iopCore().generalRegister(12) == 0x1234);
+    REQUIRE(system.iopBus().read8(receiveAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.sio2Controller().transmitInputSize() == 0);
+    REQUIRE(system.iopBus().read32(interruptAddress).value == 1);
+    REQUIRE(system.iopInterruptController().status() == 0);
   }
 
   std::array<IOPWord, 15> controlProgram(IOPAddress address, IOPWord programmed)
@@ -370,6 +423,10 @@ TEST_CASE("SIO2 absent infrared transfer publishes bounded replies and completio
   SECTION("Observed infrared probe")
   {
   }
+  SECTION("Second port uses the same absent endpoint")
+  {
+    stageInfraredTransfer(system, 0x001c0741);
+  }
   SECTION("Non-selector bytes are opaque to the absent endpoint")
   {
     REQUIRE(bus.write32(descriptorBase, 0x001c0740).status ==
@@ -432,11 +489,14 @@ TEST_CASE("SIO2 active starts reject unsupported or incomplete profiles atomical
   }
   SECTION("Different descriptor")
   {
-    REQUIRE(bus.write32(descriptorBase, 0x001c0700).status ==
-      IOPBusStatus::Completed);
-    for (auto byte : infraredPacket)
+    for (auto descriptor : {0x001c0700u, 0x001c0742u, 0x001c0743u,
+           0x001c0744u, 0x801c0741u})
     {
-      REQUIRE(bus.write8(transmitAddress, byte).status == IOPBusStatus::Completed);
+      stageInfraredTransfer(system, descriptor);
+      const auto before = system.iopStateHash();
+      REQUIRE(bus.write32(controlAddress, transferControl).status ==
+        IOPBusStatus::Unmapped);
+      REQUIRE(system.iopStateHash() == before);
     }
   }
   SECTION("Multiple descriptors")
@@ -461,15 +521,11 @@ TEST_CASE("SIO2 active starts reject unsupported or incomplete profiles atomical
     REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
     stageInfraredTransfer(system);
   }
-  SECTION("Unacknowledged cause")
+  SECTION("Unread replies with pending cause")
   {
     REQUIRE(bus.write32(controlAddress, transferControl).status ==
       IOPBusStatus::Completed);
-    for (std::size_t index = 0; index < infraredPacket.size(); ++index)
-    {
-      REQUIRE(bus.read8(receiveAddress).status == IOPBusStatus::Completed);
-    }
-    stageInfraredTransfer(system);
+    stageInfraredTransfer(system, 0x001c0741);
   }
   const auto before = system.iopStateHash();
   const auto irqBefore = system.iopInterruptController().status();
@@ -477,6 +533,114 @@ TEST_CASE("SIO2 active starts reject unsupported or incomplete profiles atomical
     IOPBusStatus::Unmapped);
   REQUIRE(system.iopStateHash() == before);
   REQUIRE(system.iopInterruptController().status() == irqBefore);
+}
+
+TEST_CASE("SIO2 successive infrared transfers separate completion from new interrupt cause",
+  "[iop][sio2][sio2-active][sio2-successive]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  for (auto descriptor : {0x001c0740u, 0x001c0741u, 0x001c0741u, 0x001c0740u})
+  {
+    CAPTURE(descriptor);
+    REQUIRE(bus.write32(controlAddress, passiveControl).status ==
+      IOPBusStatus::Completed);
+    stageInfraredTransfer(system, descriptor);
+    REQUIRE(bus.write32(controlAddress, transferControl).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.read32(interruptAddress).value == 1);
+    REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+    for (std::size_t index = 0; index < infraredPacket.size(); ++index)
+    {
+      const auto reply = bus.read8(receiveAddress);
+      REQUIRE(reply.status == IOPBusStatus::Completed);
+      REQUIRE(reply.value == 0xff);
+    }
+    REQUIRE(bus.read8(receiveAddress).status == IOPBusStatus::Unmapped);
+  }
+
+  system.iopInterruptController().writeStatus(~sio2IRQ);
+  REQUIRE(bus.write32(controlAddress, startupControl).status ==
+    IOPBusStatus::Completed);
+  stageInfraredTransfer(system, 0x001c0741);
+  REQUIRE(bus.write32(controlAddress, transferControl).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(bus.read32(interruptAddress).value == 1);
+  REQUIRE(system.iopInterruptController().status() == 0);
+
+  REQUIRE(bus.write32(interruptAddress, 1).status == IOPBusStatus::Completed);
+  stageInfraredTransfer(system);
+  const auto unread = system.iopStateHash();
+  REQUIRE(bus.write32(controlAddress, transferControl).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(system.iopStateHash() == unread);
+  for (std::size_t index = 0; index < infraredPacket.size(); ++index)
+  {
+    REQUIRE(bus.read8(receiveAddress).status == IOPBusStatus::Completed);
+  }
+  REQUIRE(bus.write32(controlAddress, transferControl).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(bus.read32(interruptAddress).value == 1);
+  REQUIRE(system.iopInterruptController().status() == sio2IRQ);
+}
+
+TEST_CASE("SIO2 successive infrared guests complete without reasserting an acknowledged INTC",
+  "[iop][sio2][sio2-active][sio2-successive]")
+{
+  for (auto address : {0x1f808200u, 0x9f808200u, 0xbf808200u})
+  {
+    CAPTURE(address);
+    NekoSystem system;
+    installSuccessiveInfraredProgram(system, address);
+    system.startTrace();
+    system.runMasterCycles(256);
+    requireSuccessiveInfraredGuestResult(system);
+    namespace Memory = NekoIOPTraceMemory;
+    const auto route = address < 0xa0000000
+      ? Memory::CacheRoute::Cached : Memory::CacheRoute::Uncached;
+    IOPTraceTest::requireEvents(controlEvents(system, address + 0x68), {
+      {25, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address + 0x68, passiveControl, 0, nekoPackIOPMemoryTraceMetadata({
+          controlAddress, 4, Memory::AccessKind::DataStore,
+          Memory::Outcome::Completed, route, true, 0xf})},
+      {161, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address + 0x68, transferControl, 0, nekoPackIOPMemoryTraceMetadata({
+          controlAddress, 4, Memory::AccessKind::DataStore,
+          Memory::Outcome::Completed, route, true, 0xf})}
+    });
+    REQUIRE(IOPTraceTest::subsystemEvents(
+      system, NekoTraceSubsystem::IOPInterruptController).empty());
+  }
+}
+
+TEST_CASE("SIO2 successive infrared guests restore pending cause before and after START",
+  "[iop][sio2][sio2-active][sio2-successive][save-state]")
+{
+  for (auto checkpointCycle : {160u, 200u})
+  {
+    CAPTURE(checkpointCycle);
+    NekoSystem original;
+    installSuccessiveInfraredProgram(original, 0xbf808200);
+    original.runMasterCycles(checkpointCycle);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(restored.saveState() == checkpoint);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    for (auto *system : {&original, &restored, &plain})
+    {
+      system->runMasterCycles(256 - checkpointCycle);
+      requireSuccessiveInfraredGuestResult(*system);
+    }
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    REQUIRE(plain.trace().empty());
+  }
 }
 
 TEST_CASE("SIO2 active access rejects wrong widths purposes and missing IRQ wiring",

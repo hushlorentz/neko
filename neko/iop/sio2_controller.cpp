@@ -33,21 +33,24 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
   return SIO2AccessStatus::Accepted;
 }
 
-SIO2AccessStatus SIO2Controller::startTransfer(
+SIO2TransferResult SIO2Controller::startTransfer(
   std::uint32_t controlValue) noexcept
 {
-  if (controlValue != 0xb1 || receiveRemaining != 0 || interruptCause ||
-      commandDescriptors[0] != 0x001c0740 || commandDescriptors[1] != 0 ||
+  if (controlValue != 0xb1 || receiveRemaining != 0 ||
+      (commandDescriptors[0] != 0x001c0740 && commandDescriptors[0] != 0x001c0741) ||
+      commandDescriptors[1] != 0 ||
       transmitInputCount != 7 || transmitInput[0] != 0x61)
   {
-    return SIO2AccessStatus::Unsupported;
+    return SIO2TransferResult::Unsupported;
   }
+  const auto result = interruptCause ? SIO2TransferResult::Completed
+    : SIO2TransferResult::CompletedWithInterrupt;
   control = controlValue;
   clearTransmitInput();
   transferCompleted = true;
   receiveRemaining = 7;
   interruptCause = true;
-  return SIO2AccessStatus::Accepted;
+  return result;
 }
 
 SIO2ReadResult SIO2Controller::readReceiveByte() noexcept

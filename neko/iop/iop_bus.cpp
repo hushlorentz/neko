@@ -722,6 +722,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
           SIO2AccessStatus::Accepted
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SIO2Control:
+    {
       if (width != sizeof(IOPWord) || sio2 == nullptr)
       {
         return {};
@@ -730,13 +731,21 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       {
         return {IOPBusStatus::Completed};
       }
-      if (interruptController == nullptr ||
-          sio2->startTransfer(value) != SIO2AccessStatus::Accepted)
+      if (interruptController == nullptr)
       {
         return {};
       }
-      interruptController->assertSource(IOPInterruptSource::SIO2);
+      const auto transfer = sio2->startTransfer(value);
+      if (transfer == SIO2TransferResult::Unsupported)
+      {
+        return {};
+      }
+      if (transfer == SIO2TransferResult::CompletedWithInterrupt)
+      {
+        interruptController->assertSource(IOPInterruptSource::SIO2);
+      }
       return {IOPBusStatus::Completed};
+    }
     case Device::SIO2InterruptStatus:
       return width == sizeof(IOPWord) && sio2 != nullptr &&
         sio2->acknowledgeInterrupt(value) == SIO2AccessStatus::Accepted

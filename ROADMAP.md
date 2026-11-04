@@ -3225,8 +3225,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research the SIO2 CTRL `0xb1` write at `0x1f808268`; obtain explicit
       approval for a bounded active-control/transfer contract before implementing
       it with guest/restored coverage, gates and independent review.
-- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; attribute the next originating
+      dependency without claiming completed boot.
+
+### SIO2 Successive Infrared Transfers
+
+- [x] Research descriptor `0x001c0741` and successive START without device-cause
+      acknowledgement; select an evidence-backed descriptor/lifecycle contract
+      before implementation with guest/restored coverage and independent review.
+- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope

@@ -11,6 +11,13 @@ enum class SIO2AccessStatus : std::uint8_t
   Unsupported
 };
 
+enum class SIO2TransferResult : std::uint8_t
+{
+  Unsupported,
+  Completed,
+  CompletedWithInterrupt
+};
+
 struct SIO2ReadResult
 {
   SIO2AccessStatus status = SIO2AccessStatus::Unsupported;
@@ -27,8 +34,8 @@ class SIO2Controller final
     void reset() noexcept;
     std::uint32_t readControl() const noexcept;
     SIO2AccessStatus writeControl(std::uint32_t value) noexcept;
-    // An accepted transfer completes synchronously; the caller routes its IRQ.
-    SIO2AccessStatus startTransfer(std::uint32_t controlValue) noexcept;
+    // Completion requests an IRQ only when the device cause was clear.
+    SIO2TransferResult startTransfer(std::uint32_t controlValue) noexcept;
     SIO2ReadResult readReceiveByte() noexcept;
     SIO2ReadResult readTransferStatus(std::size_t index) const;
     std::uint32_t readInterruptStatus() const noexcept;
