@@ -3252,6 +3252,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research the halfword write of `0x0008` at `0x1f9007ca` and its containing
       family; distinguish passive configuration from active effects before
       selecting a bounded extension with guest/restored coverage and review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Fixed Master-Volume Controls
+
+- [x] Research and implement fixed-mode master-volume control halfwords for both
+      cores/channels through the SPU2 owner; reject sweeps, preserve distinct
+      gain/current-volume boundaries, and add guest/restored coverage and review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

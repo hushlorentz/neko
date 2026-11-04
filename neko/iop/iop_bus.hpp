@@ -157,6 +157,7 @@ class IOPBus final
       SIO2TransferStatus,
       SIO2InterruptStatus,
       SPU2SPDIFConfiguration,
+      SPU2MasterVolumeControl,
       None,
       SSBUSConfiguration,
       InterruptController,

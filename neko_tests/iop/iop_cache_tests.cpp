@@ -287,7 +287,8 @@ TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownersh
   "[iop][spu2][cache]")
 {
   for (IOPAddress physical : {
-      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau})
+      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
+      0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   {
@@ -310,9 +311,9 @@ TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownersh
     const auto isolated = core.cache();
     IOPCacheTestAccess::setStatus(&core, swap);
     REQUIRE(core.readData16(address).value == 0);
-    REQUIRE(core.writeData16(address, 0x8900).outcome == IOPAccessOutcome::Completed);
-    REQUIRE(core.readData16(address).value == 0x8900);
-    REQUIRE(bus.read16(physical).value == 0x8900);
+    REQUIRE(core.writeData16(address, 0x4900).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0x4900);
+    REQUIRE(bus.read16(physical).value == 0x4900);
     requireUnchangedCache(core.cache(), isolated);
   }
 }
@@ -321,13 +322,14 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
   "[iop][spu2][cache]")
 {
   for (IOPAddress physical : {
-      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau})
+      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
+      0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au})
   for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
   {
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
-    REQUIRE(bus.write16(physical, 0x8900).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(physical, 0x4900).status == IOPBusStatus::Completed);
     const auto wordAddress = physical & ~IOPAddress(3);
     IOPCache cache;
     cache.commitIndexedStore(bank, wordAddress, 0x12345678, 0xf);
@@ -352,7 +354,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     const auto invalidated = cache;
     REQUIRE(cache.readWord(bank, bus, wordAddress).status == IOPBusStatus::Unmapped);
     requireUnchangedCache(cache, invalidated);
-    REQUIRE(bus.read16(physical).value == 0x8900);
+    REQUIRE(bus.read16(physical).value == 0x4900);
   }
 }
 
@@ -360,7 +362,8 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
   "[iop][spu2][execution]")
 {
   for (IOPAddress physical : {
-      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau})
+      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
+      0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au})
   for (bool user : {false, true})
   for (bool store : {false, true})
   {
@@ -368,7 +371,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
-    REQUIRE(bus.write16(physical, 0x8900).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(physical, 0x4900).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
@@ -393,7 +396,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     REQUIRE_FALSE(core.branchContinuation().active);
     REQUIRE(core.generalRegister(2) == 0xffff);
     REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
-    REQUIRE(bus.read16(physical).value == 0x8900);
+    REQUIRE(bus.read16(physical).value == 0x4900);
     requireUnchangedCache(core.cache(), before);
   }
 }

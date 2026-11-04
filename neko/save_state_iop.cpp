@@ -249,12 +249,23 @@ void NekoSaveStateCodec::writeIOPState(
   }
   {
     auto scope = writer->scope("spu2");
-    auto configuration = writer->scope("spdifConfiguration");
-    const auto &words = system.spu2ControllerComponent.spdifConfiguration;
-    for (std::size_t index = 0; index < words.size(); ++index)
     {
-      auto word = writer->element(index);
-      writer->writeFieldU16("value", words[index]);
+      auto configuration = writer->scope("spdifConfiguration");
+      const auto &words = system.spu2ControllerComponent.spdifConfiguration;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
+    }
+    {
+      auto controls = writer->scope("masterVolumeControls");
+      const auto &words = system.spu2ControllerComponent.masterVolumeControls;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
     }
   }
   {
@@ -409,12 +420,25 @@ void NekoSaveStateCodec::readIOP(
   }
   {
     auto scope = reader->scope("spu2");
-    auto configuration = reader->scope("spdifConfiguration");
-    auto &words = system->spu2ControllerComponent.spdifConfiguration;
-    for (std::size_t index = 0; index < words.size(); ++index)
     {
-      auto word = reader->element(index);
-      words[index] = reader->readFieldU16("value");
+      auto configuration = reader->scope("spdifConfiguration");
+      auto &words = system->spu2ControllerComponent.spdifConfiguration;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto controls = reader->scope("masterVolumeControls");
+      auto &words = system->spu2ControllerComponent.masterVolumeControls;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
+        reader->requireField(SPU2Controller::isFixedMasterVolumeControl(words[index]),
+          "SPU2 master-volume sweep modes are unsupported");
+      }
     }
   }
   {

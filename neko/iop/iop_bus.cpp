@@ -28,6 +28,10 @@ namespace
     spdifConfigurationAddresses = {{
       0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca
     }};
+  constexpr std::array<IOPAddress, SPU2Controller::MASTER_VOLUME_COUNT>
+    masterVolumeAddresses = {{
+      0x1f900760, 0x1f900762, 0x1f900788, 0x1f90078a
+    }};
   constexpr std::size_t absentROM1Size = 4 * 1024 * 1024;
   constexpr std::array<IOPAddress, 9> cdvdRegisters = {{
     0x1f402004, 0x1f402005, 0x1f402006, 0x1f402008, 0x1f40200a,
@@ -329,6 +333,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, index, Device::SPU2SPDIFConfiguration};
+    }
+  }
+  for (std::size_t index = 0; index < masterVolumeAddresses.size(); ++index)
+  {
+    if (first == masterVolumeAddresses[index] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, index, Device::SPU2MasterVolumeControl};
     }
   }
 
@@ -649,6 +661,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readSPDIFConfiguration(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2MasterVolumeControl:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readMasterVolumeControl(location.offset)}
+        : IOPBusReadResult{};
     case Device::SIO2ReceiveOutput:
     case Device::SIO2TransferStatus:
     {
@@ -747,6 +764,14 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       }
       spu2->writeSPDIFConfiguration(
         location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
+    case Device::SPU2MasterVolumeControl:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr ||
+          !spu2->writeMasterVolumeControl(
+            location.offset, static_cast<std::uint16_t>(value)))
+      {
+        return {};
+      }
       return {IOPBusStatus::Completed};
     case Device::SIO2TransmitInput:
       return width == 1 && sio2 != nullptr &&
