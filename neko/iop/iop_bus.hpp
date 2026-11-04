@@ -150,6 +150,7 @@ class IOPBus final
       SIO2Control,
       SIO2PortControl,
       SIO2CommandDescriptor,
+      SIO2TransmitInput,
       None,
       SSBUSConfiguration,
       InterruptController,

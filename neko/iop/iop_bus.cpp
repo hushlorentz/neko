@@ -19,6 +19,7 @@ namespace
   constexpr IOPAddress sio2Control = 0x1f808268;
   constexpr IOPAddress sio2PortControlBase = 0x1f808240;
   constexpr IOPAddress sio2CommandDescriptorBase = 0x1f808200;
+  constexpr IOPAddress sio2TransmitInput = 0x1f808260;
   constexpr std::size_t absentROM1Size = 4 * 1024 * 1024;
   constexpr std::array<IOPAddress, 9> cdvdRegisters = {{
     0x1f402004, 0x1f402005, 0x1f402006, 0x1f402008, 0x1f40200a,
@@ -265,6 +266,10 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   if (first == RAM_INIT_CONTROL && last < first + sizeof(IOPWord))
   {
     return {IOPBusRegion::Mmio, 0, Device::RAMInitializationControl};
+  }
+  if (first == sio2TransmitInput && last == first)
+  {
+    return {IOPBusRegion::Mmio, 0, Device::SIO2TransmitInput};
   }
   if (first == sio2Control && last < first + sizeof(IOPWord))
   {
@@ -653,6 +658,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == 1 || width == 2 || width == sizeof(IOPWord)
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
+    case Device::SIO2TransmitInput:
     case Device::POST3:
     case Device::DPCR3Initialization:
     case Device::SupplementalDMAInitialization:
@@ -671,6 +677,11 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SIO2TransmitInput:
+      return width == 1 && sio2 != nullptr &&
+        sio2->writeTransmitByte(static_cast<std::uint8_t>(value)) ==
+          SIO2AccessStatus::Accepted
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SIO2Control:
       return width == sizeof(IOPWord) && sio2 != nullptr &&
         sio2->writeControl(value) == SIO2AccessStatus::Accepted

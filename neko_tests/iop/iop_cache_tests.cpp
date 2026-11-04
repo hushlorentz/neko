@@ -344,6 +344,67 @@ TEST_CASE("SIO2 guest data bypasses cached payloads but preserves isolation owne
   }
 }
 
+TEST_CASE("SIO2 transmit bytes respect cache isolation without supplying cache transport",
+  "[iop][sio2][sio2-tx][cache]")
+{
+  constexpr IOPAddress physical = 0x1f808260;
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const IOPAddress address = physical | segment;
+    CAPTURE(swapped);
+    CAPTURE(address);
+    IOPBus bus;
+    SIO2Controller sio2;
+    bus.attachSIO2(&sio2);
+    IOPCore core;
+    core.attachBus(&bus);
+    const IOPWord swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address, 0x12345678).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0x12345678);
+    REQUIRE(core.writeData8(address, 0x61).outcome == IOPAccessOutcome::Completed);
+    // Isolated narrow stores invalidate the cached line, not its payload.
+    REQUIRE(core.readData8(address).value == 0x78);
+    REQUIRE((core.status() & IOPCOP0Status::CACHE_PROBE_RESULT) != 0);
+    const auto location = IOPCache::location(swapped
+      ? IOPCacheBank::Instruction : IOPCacheBank::Data, physical);
+    if (swapped)
+    {
+      REQUIRE_FALSE(core.cache().instructionLine(location.lineIndex).valid);
+      REQUIRE(core.cache().instructionLine(location.lineIndex).words[
+        location.wordIndex] == 0x12345678);
+    }
+    else
+    {
+      REQUIRE_FALSE(core.cache().dataLine(location.lineIndex).valid);
+      REQUIRE(core.cache().dataLine(location.lineIndex).words[0] == 0x12345678);
+    }
+    REQUIRE(sio2.transmitInputSize() == 0);
+    const IOPCache isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.writeData8(address, 0xff).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(sio2.transmitInputSize() == 1);
+    REQUIRE(sio2.transmitInputByte(0) == 0xff);
+    REQUIRE(core.readData8(address).outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
+    core.startExecution(address);
+    core.stepInstruction();
+    REQUIRE(core.exception().kind == IOPException::InstructionBusError);
+    REQUIRE(sio2.transmitInputSize() == 1);
+    for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
+    {
+      IOPCache cache;
+      cache.commitIndexedStore(bank, physical, 0x12345678, 0xf);
+      REQUIRE(cache.readWord(bank, bus, physical).status == IOPBusStatus::Unmapped);
+      REQUIRE(cache.readWord(bank, bus, physical).status == IOPBusStatus::Unmapped);
+      REQUIRE(sio2.transmitInputSize() == 1);
+      REQUIRE(sio2.transmitInputByte(0) == 0xff);
+    }
+  }
+}
+
 TEST_CASE("SIO2 programming cannot supply direct cache fills or seeded hits",
   "[iop][sio2][sio2-conformance][cache-transport]")
 {
@@ -400,6 +461,20 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     IOPStoreWidth rejectedWidth;
   };
   const Fault faults[] = {
+    {0x9f808260, 0xa0220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0xbf808260, 0xa0220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0x9f808260, 0x80220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0xbf808260, 0x80220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0x1f808260, 0x80220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None},
+    {0x1f808260, 0xa4220000, false, IOPException::None,
+      IOPStoreWidth::Halfword},
+    {0x1f808260, 0xac220000, false, IOPException::None,
+      IOPStoreWidth::Word},
     {0x1f808269, 0x8c220000, false, IOPException::AddressErrorLoadOrFetch,
       IOPStoreWidth::None},
     {0x1f80826a, 0xac220000, false, IOPException::AddressErrorStore,
@@ -487,6 +562,7 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     {
       sio2.writeCommandDescriptor(index, 0x55667700 + static_cast<IOPWord>(index));
     }
+    REQUIRE(sio2.writeTransmitByte(0x81) == SIO2AccessStatus::Accepted);
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, fault.address);
@@ -526,6 +602,8 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
       REQUIRE(core.storeFailure().access.virtualAddress == fault.address);
       REQUIRE(core.storeFailure().access.physicalAddress == fault.address);
     }
+    REQUIRE(sio2.transmitInputSize() == 1);
+    REQUIRE(sio2.transmitInputByte(0) == 0x81);
     REQUIRE(sio2.readControl() == programmed);
     for (std::size_t index = 0; index < SIO2Controller::PORT_CONTROL_COUNT; ++index)
     {

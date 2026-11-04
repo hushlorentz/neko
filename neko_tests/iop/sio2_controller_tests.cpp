@@ -2,11 +2,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "catch.hpp"
 #include "iop_trace_test_utils.hpp"
 #include "neko_system.hpp"
+#include "save_state_diagnostics.hpp"
 
 namespace
 {
@@ -18,6 +20,7 @@ namespace
     0x89abcdef, 0x01060014, 0xffffffff, 0, 0x80000000, 1, 0x12345678, 0xa5a55a5a
   }};
   constexpr IOPAddress descriptorBase = 0x1f808200;
+  constexpr IOPAddress transmitAddress = 0x1f808260;
   constexpr std::array<IOPWord, 16> descriptorValues = {{
     0x001c0740, 0, 0xffffffff, 0x80000000,
     1, 0x12345678, 0xa5a55a5a, 0x01060014,
@@ -81,6 +84,63 @@ namespace
       0xac03010c,
       0x24640001
     }};
+  }
+
+  void installTransmitProgram(NekoSystem &system, IOPAddress address)
+  {
+    installProgram(system, std::array<IOPWord, 13>{{
+      0x3c010000 | (address >> 16),
+      0x34210000 | (address & 0xffff),
+      0x24020061,
+      0xa0220000,
+      0x240200ff,
+      0xa0220000,
+      0x10000002,
+      0xa0200000, // a byte in the taken branch delay slot
+      0xffffffff,
+      0x2402007f,
+      0xa0220000,
+      0xa0220000,
+      0x24031234
+    }});
+  }
+
+  IOPTraceTest::Events expectedTransmitEvents(IOPAddress address)
+  {
+    namespace Memory = NekoIOPTraceMemory;
+    const auto route = address < 0xa0000000
+      ? Memory::CacheRoute::Cached : Memory::CacheRoute::Uncached;
+    const auto store = nekoPackIOPMemoryTraceMetadata({
+      transmitAddress, 1, Memory::AccessKind::DataStore,
+      Memory::Outcome::Completed, route, true, 1});
+    return {
+      {25, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0x61, 0, store},
+      {41, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0xff, 0, store},
+      {57, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0, 0, store},
+      {73, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0x7f, 0, store},
+      {81, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0x7f, 0, store}
+    };
+  }
+
+  void requireTransmitResult(const NekoSystem &system)
+  {
+    REQUIRE(system.iopCore().retiredInstructions() == 12);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000034);
+    REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().generalRegister(3) == 0x1234);
+    REQUIRE_FALSE(system.iopCore().branchContinuation().active);
+    const std::uint8_t expected[] = {0x61, 0xff, 0, 0x7f, 0x7f};
+    REQUIRE(system.sio2Controller().transmitInputSize() == 5);
+    for (std::size_t index = 0; index < 5; ++index)
+    {
+      REQUIRE(system.sio2Controller().transmitInputByte(index) == expected[index]);
+    }
   }
 
   IOPTraceTest::Events controlEvents(const NekoSystem &system, IOPAddress address)
@@ -220,6 +280,245 @@ namespace
   }
 }
 
+TEST_CASE("SIO2 transmit staging retains bytes and rejects overflow without mutation",
+  "[iop][sio2][sio2-tx]")
+{
+  NekoSystem system;
+  const auto coldHash = system.iopStateHash();
+  for (std::size_t index = 0; index < 1023; ++index)
+  {
+    CAPTURE(index);
+    REQUIRE(system.iopBus().write8(transmitAddress,
+      static_cast<std::uint8_t>(index)).status == IOPBusStatus::Completed);
+  }
+  REQUIRE(system.iopStateHash() != coldHash);
+  const auto full = system.saveState();
+  const auto hash = system.iopStateHash();
+  REQUIRE(system.iopBus().write8(transmitAddress, 0x61).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(system.iopStateHash() == hash);
+  REQUIRE(system.saveState() == full);
+  const auto fields = inspectSaveState(full);
+  const auto *count = fields.find("system.iop.sio2.transmitInput.count");
+  REQUIRE(count != nullptr);
+  REQUIRE(count->kind == SaveStateFieldKind::U16);
+  REQUIRE(count->scalarValue == 1023);
+  for (std::size_t index = 0; index < 1023; ++index)
+  {
+    const auto *byte = fields.find("system.iop.sio2.transmitInput.bytes[" +
+      std::to_string(index) + "].value");
+    REQUIRE(byte != nullptr);
+    REQUIRE(byte->scalarValue == static_cast<std::uint8_t>(index));
+  }
+  system.sio2Controller().reset();
+  REQUIRE(system.iopStateHash() == coldHash);
+  REQUIRE_THROWS_AS(system.sio2Controller().transmitInputByte(0), std::out_of_range);
+}
+
+TEST_CASE("SIO2 transmit staging admits only the exact CPU byte write",
+  "[iop][sio2][sio2-tx]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write8(transmitAddress, 0x61).status == IOPBusStatus::Completed);
+  const auto before = system.iopStateHash();
+  for (IOPAddress address = transmitAddress; address < transmitAddress + 8; ++address)
+  {
+    CAPTURE(address);
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    if (address != transmitAddress)
+    {
+      REQUIRE(bus.write8(address, 0xff).status == IOPBusStatus::Unmapped);
+    }
+  }
+  REQUIRE(bus.read16(transmitAddress).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.write16(transmitAddress, 0x61).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.read32(transmitAddress).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.write32(transmitAddress, 0x61).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.readInstruction32(transmitAddress).status == IOPBusStatus::Unmapped);
+  for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+  {
+    REQUIRE(bus.writeMasked32(transmitAddress, 0x61, mask).status ==
+      IOPBusStatus::Unmapped);
+  }
+  REQUIRE(bus.readDMAC32(transmitAddress).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.dmaWriteStatus(transmitAddress) == IOPBusStatus::Unmapped);
+  REQUIRE(bus.writeDMAC32(transmitAddress, 0x61).status == IOPBusStatus::Unmapped);
+  std::uint8_t byte = 0x55;
+  REQUIRE(bus.loadPhysical(transmitAddress, &byte, 1) == IOPBusStatus::Unmapped);
+  REQUIRE(bus.inspectPhysical(transmitAddress, &byte, 1) == IOPBusStatus::Unmapped);
+  REQUIRE(byte == 0x55);
+  for (IOPAddress alias : {0x9f808260u, 0xbf808260u})
+  {
+    REQUIRE(bus.write8(alias, 0x61).status == IOPBusStatus::Unmapped);
+  }
+  REQUIRE_THROWS_AS(system.eeBus().read32(transmitAddress), std::out_of_range);
+  IOPBus unattached;
+  REQUIRE(unattached.write8(transmitAddress, 0x61).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.iopStateHash() == before);
+}
+
+TEST_CASE("SIO2 staged bytes survive passive programming time and local resets",
+  "[iop][sio2][sio2-tx]")
+{
+  NekoSystem system;
+  auto &controller = system.sio2Controller();
+  REQUIRE(controller.transmitInputSize() == 0);
+  REQUIRE_THROWS_AS(controller.transmitInputByte(0), std::out_of_range);
+  REQUIRE(system.iopBus().write8(transmitAddress, 0x61).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write8(transmitAddress, 0).status ==
+    IOPBusStatus::Completed);
+  for (IOPWord control : {passiveControl, startupControl, passiveControl})
+  {
+    REQUIRE(controller.writeControl(control) == SIO2AccessStatus::Accepted);
+  }
+  controller.writePortControl(0, 0x01060014);
+  controller.writePortControl(7, 0xffffffff);
+  controller.writeCommandDescriptor(1, 0);
+  controller.writeCommandDescriptor(15, 0x001c0740);
+  REQUIRE_THROWS_AS(controller.writeCommandDescriptor(16, 0), std::out_of_range);
+  REQUIRE(system.iopBus().writeMasked32(descriptorBase, 0, 1).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write16(descriptorBase, 0).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(controller.writeControl(1) == SIO2AccessStatus::Unsupported);
+  system.runMasterCycles(80);
+  system.iopBus().reset();
+  system.iopCore().reset();
+  REQUIRE(controller.transmitInputSize() == 2);
+  REQUIRE(controller.transmitInputByte(0) == 0x61);
+  REQUIRE(controller.transmitInputByte(1) == 0);
+  REQUIRE_THROWS_AS(controller.transmitInputByte(2), std::out_of_range);
+  REQUIRE_THROWS_AS(controller.transmitInputByte(static_cast<std::size_t>(-1)),
+    std::out_of_range);
+  system.reset();
+  REQUIRE(controller.transmitInputSize() == 0);
+  REQUIRE(system.iopBus().write8(transmitAddress, 0xff).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(controller.transmitInputByte(0) == 0xff);
+}
+
+TEST_CASE("SIO2 transmit guests retain repeats delay-slot bytes and exact alias traces",
+  "[iop][sio2][sio2-tx][trace]")
+{
+  for (IOPAddress address : {transmitAddress, 0x9f808260u, 0xbf808260u})
+  {
+    CAPTURE(address);
+    NekoSystem system;
+    installTransmitProgram(system, address);
+    system.startTrace();
+    system.runMasterCycles(96);
+    requireTransmitResult(system);
+    IOPTraceTest::requireEvents(controlEvents(system, address),
+      expectedTransmitEvents(address));
+    unsigned delayStores = 0;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::InstructionIssued &&
+          event.value0 == 0xa000001c)
+      {
+        REQUIRE(event.masterCycle == 57);
+        REQUIRE(event.value1 == 0xa0200000);
+        REQUIRE(event.value3 == NekoIOPTraceInstruction::DELAY_SLOT);
+        ++delayStores;
+      }
+    }
+    REQUIRE(delayStores == 1);
+  }
+}
+
+TEST_CASE("SIO2 staged transmit guests restore traced and plain pending writes",
+  "[iop][sio2][sio2-tx][save-state][trace]")
+{
+  constexpr IOPAddress address = 0xbf808260;
+  for (unsigned cut : {24u, 32u, 56u, 80u})
+  {
+    CAPTURE(cut);
+    NekoSystem original;
+    installTransmitProgram(original, address);
+    original.runMasterCycles(cut);
+    REQUIRE(original.iopCore().branchContinuation().active == (cut == 56));
+    REQUIRE(original.sio2Controller().transmitInputSize() ==
+      (cut == 24 ? 0 : cut == 32 ? 1 : cut == 56 ? 2 : 4));
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    REQUIRE(restored.iopBus().write8(transmitAddress, 0x55).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(plain.iopBus().write8(transmitAddress, 0xaa).status ==
+      IOPBusStatus::Completed);
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(restored.saveState() == checkpoint);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(96 - cut);
+    restored.runMasterCycles(96 - cut);
+    plain.runMasterCycles(96 - cut);
+    requireTransmitResult(original);
+    requireTransmitResult(restored);
+    requireTransmitResult(plain);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    REQUIRE_FALSE(original.trace().empty());
+    REQUIRE(plain.trace().empty());
+    REQUIRE_FALSE(plain.traceEnabled());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    IOPTraceTest::Events suffix;
+    for (const auto &event : expectedTransmitEvents(address))
+    {
+      if (event.masterCycle > cut)
+      {
+        suffix.push_back(event);
+      }
+    }
+    IOPTraceTest::requireEvents(controlEvents(original, address), suffix);
+  }
+}
+
+TEST_CASE("SIO2 transmit overflow preserves the rejected guest delay-slot store",
+  "[iop][sio2][sio2-tx][trace]")
+{
+  NekoSystem system;
+  for (std::size_t index = 0; index < 1023; ++index)
+  {
+    REQUIRE(system.sio2Controller().writeTransmitByte(
+      static_cast<std::uint8_t>(index)) == SIO2AccessStatus::Accepted);
+  }
+  installProgram(system, std::array<IOPWord, 5>{{
+    0x3c01bf80, 0x34218260, 0x24020061, 0x10000002, 0xa0220000
+  }});
+  system.startTrace();
+  system.runMasterCycles(40);
+  const auto &core = system.iopCore();
+  REQUIRE(core.retiredInstructions() == 4);
+  REQUIRE(core.programCounter() == 0xa0000010);
+  REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+  REQUIRE(core.exception().kind == IOPException::None);
+  REQUIRE(core.branchContinuation().active);
+  REQUIRE(core.storeFailure().width == IOPStoreWidth::Byte);
+  REQUIRE(core.storeFailure().value == 0x61);
+  REQUIRE(core.storeFailure().access.virtualAddress == 0xbf808260);
+  REQUIRE(core.storeFailure().access.physicalAddress == transmitAddress);
+  REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+  REQUIRE(system.sio2Controller().transmitInputSize() == 1023);
+  for (std::size_t index = 0; index < 1023; ++index)
+  {
+    REQUIRE(system.sio2Controller().transmitInputByte(index) ==
+      static_cast<std::uint8_t>(index));
+  }
+  namespace Memory = NekoIOPTraceMemory;
+  IOPTraceTest::requireEvents(controlEvents(system, 0xbf808260), {
+    {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+      0xbf808260, 0x61, 0, nekoPackIOPMemoryTraceMetadata({
+        transmitAddress, 1, Memory::AccessKind::DataStore,
+        Memory::Outcome::Unmapped, Memory::CacheRoute::Uncached, true, 1})}
+  });
+}
+
 TEST_CASE("SIO2 retains only the selected passive control words", "[iop][sio2]")
 {
   NekoSystem system;
@@ -269,7 +568,10 @@ TEST_CASE("SIO2 bus admission excludes partial and nondata routes", "[iop][sio2]
     CAPTURE(address);
     REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
-    REQUIRE(bus.write8(address, 0xbc).status == IOPBusStatus::Unmapped);
+    if (address != transmitAddress)
+    {
+      REQUIRE(bus.write8(address, 0xbc).status == IOPBusStatus::Unmapped);
+    }
     REQUIRE(bus.write16(address, programmedControl).status == IOPBusStatus::Unmapped);
     if (address != controlAddress &&
         (address < descriptorBase || address >= portControlBase + 32))
@@ -484,8 +786,13 @@ TEST_CASE("SIO2 entry-zero programming preserves other passive images",
   }
   for (IOPWord value : {0u, 0x001c0740u, 0xffffffffu})
   {
+    REQUIRE(system.iopBus().write8(transmitAddress, 0x61).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(controller.transmitInputSize() == 1);
     REQUIRE(system.iopBus().write32(descriptorBase, value).status ==
       IOPBusStatus::Completed);
+    REQUIRE(controller.transmitInputSize() == 0);
+    REQUIRE_THROWS_AS(controller.transmitInputByte(0), std::out_of_range);
     REQUIRE(controller.readCommandDescriptor(0) == value);
     REQUIRE(controller.readControl() == startupControl);
     for (std::size_t index = 0; index < portValues.size(); ++index)
@@ -708,6 +1015,10 @@ TEST_CASE("SIO2 programming preserves existing IRQ DMA and frontend input",
         REQUIRE(system.iopBus().read32(address).value == descriptorValues[index]);
       }
       REQUIRE(system.iopBus().read32(controlAddress).value == retained);
+      REQUIRE(system.iopBus().write8(transmitAddress, 0x61).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write8(transmitAddress, 0).status ==
+        IOPBusStatus::Completed);
       REQUIRE(interrupts.status() == status);
       REQUIRE(interrupts.mask() == (1u << 17));
       REQUIRE(interrupts.control() == 1);

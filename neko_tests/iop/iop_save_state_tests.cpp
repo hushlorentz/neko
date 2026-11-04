@@ -124,7 +124,8 @@ TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
          {"container.version", 74},
          {"container.version", 75},
          {"container.version", 76},
-         {"container.version", 77}})
+         {"container.version", 77},
+         {"container.version", 78}})
   {
     CAPTURE(mutation.first);
     CAPTURE(mutation.second);
@@ -249,6 +250,110 @@ TEST_CASE("SIO2 programming images hash serialize and adopt every independent wo
     destination.iopBus().attachSIO2(&foreign);
     REQUIRE(destination.iopBus().read32(base).value == 0);
   }
+}
+
+TEST_CASE("SIO2 staged transmit images round-trip replace and rewire the owner",
+  "[iop][sio2][sio2-tx][save-state]")
+{
+  constexpr IOPAddress address = 0x1f808260;
+  NekoSystem source;
+  const auto cold = source.saveState();
+  const auto coldHash = source.iopStateHash();
+  for (std::uint8_t byte : {0x61, 0, 0xff})
+  {
+    REQUIRE(source.iopBus().write8(address, byte).status == IOPBusStatus::Completed);
+  }
+  const auto partial = source.saveState();
+  const auto partialHash = source.iopStateHash();
+  REQUIRE(partialHash != coldHash);
+  NekoSystem destination;
+  destination.loadState(partial);
+  REQUIRE(destination.saveState() == partial);
+  REQUIRE(destination.iopStateHash() == partialHash);
+  REQUIRE(destination.sio2Controller().transmitInputSize() == 3);
+  REQUIRE(destination.sio2Controller().transmitInputByte(0) == 0x61);
+  REQUIRE(destination.sio2Controller().transmitInputByte(1) == 0);
+  REQUIRE(destination.sio2Controller().transmitInputByte(2) == 0xff);
+  for (const char *field : {
+         "system.iop.sio2.transmitInput.bytes[0].value",
+         "system.iop.sio2.transmitInput.bytes[2].value"})
+  {
+    SaveStateMutation changed(partial);
+    changed.writeScalar(field, 0x7f);
+    changed.refreshChecksum();
+    destination.loadState(changed);
+    REQUIRE(destination.iopStateHash() != partialHash);
+    REQUIRE(destination.saveState() == changed.bytes());
+  }
+  for (std::size_t index = 3; index < 1023; ++index)
+  {
+    REQUIRE(source.iopBus().write8(address, static_cast<std::uint8_t>(index)).status ==
+      IOPBusStatus::Completed);
+  }
+  const auto full = source.saveState();
+  destination.loadState(full);
+  REQUIRE(destination.saveState() == full);
+  REQUIRE(destination.iopStateHash() == source.iopStateHash());
+  REQUIRE(destination.sio2Controller().transmitInputSize() == 1023);
+  REQUIRE(destination.sio2Controller().transmitInputByte(1022) == 0xfe);
+  REQUIRE(destination.iopBus().write8(address, 1).status == IOPBusStatus::Unmapped);
+  REQUIRE(destination.saveState() == full);
+  destination.loadState(cold);
+  REQUIRE(destination.saveState() == cold);
+  REQUIRE(destination.iopStateHash() == coldHash);
+  REQUIRE(destination.sio2Controller().transmitInputSize() == 0);
+  SIO2Controller foreign;
+  REQUIRE(foreign.writeTransmitByte(0x55) == SIO2AccessStatus::Accepted);
+  destination.iopBus().attachSIO2(&foreign);
+  destination.loadState(partial);
+  REQUIRE(destination.iopBus().write8(address, 0x7f).status == IOPBusStatus::Completed);
+  REQUIRE(destination.sio2Controller().transmitInputSize() == 4);
+  REQUIRE(destination.sio2Controller().transmitInputByte(3) == 0x7f);
+  REQUIRE(foreign.transmitInputSize() == 1);
+  REQUIRE(foreign.transmitInputByte(0) == 0x55);
+  source.sio2Controller().reset();
+  REQUIRE(destination.sio2Controller().transmitInputSize() == 4);
+}
+
+TEST_CASE("SIO2 invalid transmit count and unused bytes reject before adoption",
+  "[iop][sio2][sio2-tx][save-state]")
+{
+  NekoSystem source;
+  REQUIRE(source.iopBus().write8(0x1f808260, 0x61).status == IOPBusStatus::Completed);
+  const auto candidate = source.saveState();
+  NekoSystem destination;
+  REQUIRE(destination.iopBus().write8(0x1f808260, 0xaa).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.iopBus().write32(0x1f808200, 0x001c0740).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.iopBus().write8(0x1f808260, 0xff).status ==
+    IOPBusStatus::Completed);
+  const auto before = destination.saveState();
+  const auto hash = destination.iopStateHash();
+  for (const auto &mutation :
+       std::vector<std::pair<std::string, std::uint64_t>>{
+         {"system.iop.sio2.transmitInput.count", 0},
+         {"system.iop.sio2.transmitInput.count", 1024},
+         {"system.iop.sio2.transmitInput.count", 65535},
+         {"system.iop.sio2.transmitInput.bytes[1].value", 1},
+         {"system.iop.sio2.transmitInput.bytes[1022].value", 0xff},
+         {"system.iop.timing.pixelPhase", 0xffff}})
+  {
+    CAPTURE(mutation.first);
+    CAPTURE(mutation.second);
+    SaveStateMutation invalid(candidate);
+    invalid.writeScalar(mutation.first, mutation.second);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.iopStateHash() == hash);
+    REQUIRE(destination.saveState() == before);
+  }
+  REQUIRE(destination.iopBus().write8(0x1f808260, 0x7f).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.sio2Controller().transmitInputSize() == 2);
+  REQUIRE(destination.sio2Controller().transmitInputByte(0) == 0xff);
+  REQUIRE(destination.sio2Controller().transmitInputByte(1) == 0x7f);
 }
 
 TEST_CASE("IOP persistence owns attached devices while the CPU remains halted")

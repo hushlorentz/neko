@@ -3207,6 +3207,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research the observed `0x1f808200` write and its descriptor family;
       select and implement a bounded programming/lifecycle contract with guest/
       restored coverage, required persistence gates and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; attribute the next originating
+      dependency without claiming active transfers, readiness or completed boot.
+
+### SIO2 Byte-Write Dependency
+
+- [x] Research the byte write at `0x1f808260` and its containing family;
+      obtain any required active-policy approval before implementing a bounded
+      contract with guest/restored coverage, gates and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; attribute the next originating
       dependency without claiming active transfers, readiness or completed boot.

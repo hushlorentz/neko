@@ -228,6 +228,17 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU32("value", words[index]);
       }
     }
+    {
+      auto input = writer->scope("transmitInput");
+      const auto &sio2 = system.sio2ControllerComponent;
+      writer->writeFieldU16("count", sio2.transmitInputCount);
+      auto bytes = writer->scope("bytes");
+      for (std::size_t index = 0; index < sio2.transmitInput.size(); ++index)
+      {
+        auto byte = writer->element(index);
+        writer->writeFieldU8("value", sio2.transmitInput[index]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -359,6 +370,21 @@ void NekoSaveStateCodec::readIOP(
       {
         auto word = reader->element(index);
         sio2.commandDescriptors[index] = reader->readFieldU32("value");
+      }
+    }
+    {
+      auto input = reader->scope("transmitInput");
+      sio2.transmitInputCount = reader->readFieldU16("count");
+      reader->requireField(sio2.transmitInputCount <= sio2.transmitInput.size(),
+        "SIO2 staged transmit count exceeds the bounded capacity");
+      auto bytes = reader->scope("bytes");
+      for (std::size_t index = 0; index < sio2.transmitInput.size(); ++index)
+      {
+        auto byte = reader->element(index);
+        sio2.transmitInput[index] = reader->readFieldU8("value");
+        reader->requireField(index < sio2.transmitInputCount ||
+          sio2.transmitInput[index] == 0,
+          "SIO2 unstaged transmit bytes must be zero");
       }
     }
   }
