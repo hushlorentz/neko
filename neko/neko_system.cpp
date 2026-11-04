@@ -275,6 +275,7 @@ NekoSystem::NekoSystem() :
   iopBusComponent.attachTimers(&iopTimersComponent);
   iopBusComponent.attachCDVD(&cdvdControllerComponent);
   iopBusComponent.attachSIO2(&sio2ControllerComponent);
+  iopBusComponent.attachSPU2(&spu2ControllerComponent);
   iopBusComponent.attachDMA(
     &iopDMAControllerComponent, &iopSIF1DMAComponent, &iopSIF0DMAComponent);
   iopCoreComponent.attachBus(&iopBusComponent);
@@ -405,6 +406,16 @@ SIO2Controller &NekoSystem::sio2Controller()
 const SIO2Controller &NekoSystem::sio2Controller() const
 {
   return sio2ControllerComponent;
+}
+
+SPU2Controller &NekoSystem::spu2Controller()
+{
+  return spu2ControllerComponent;
+}
+
+const SPU2Controller &NekoSystem::spu2Controller() const
+{
+  return spu2ControllerComponent;
 }
 
 IOPTimerTiming &NekoSystem::iopTimerTiming()

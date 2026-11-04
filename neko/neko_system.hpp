@@ -10,6 +10,7 @@
 #include "clock_rates.hpp"
 #include "cdvd_controller.hpp"
 #include "sio2_controller.hpp"
+#include "spu2_controller.hpp"
 #include "dmac_controller.hpp"
 #include "sif1_dmac_channel.hpp"
 #include "sif0_dmac_channel.hpp"
@@ -186,6 +187,8 @@ class NekoSystem
     const CDVDController &cdvdController() const;
     SIO2Controller &sio2Controller();
     const SIO2Controller &sio2Controller() const;
+    SPU2Controller &spu2Controller();
+    const SPU2Controller &spu2Controller() const;
     IOPTimerTiming &iopTimerTiming();
     const IOPTimerTiming &iopTimerTiming() const;
 
@@ -283,6 +286,7 @@ class NekoSystem
     GSDisplay gsDisplayComponent;
     CDVDController cdvdControllerComponent;
     SIO2Controller sio2ControllerComponent;
+    SPU2Controller spu2ControllerComponent;
     IOPBus iopBusComponent;
     IOPCore iopCoreComponent;
     IOPInterruptController iopInterruptControllerComponent;

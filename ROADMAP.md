@@ -3234,6 +3234,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research descriptor `0x001c0741` and successive START without device-cause
       acknowledgement; select an evidence-backed descriptor/lifecycle contract
       before implementation with guest/restored coverage and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 S/PDIF Configuration Initialization
+
+- [x] Research the halfword write of `0x0900` at `0x1f9007c6` and its containing
+      register family; select a bounded contract and coherent owner before
+      implementation with guest/restored coverage, gates and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

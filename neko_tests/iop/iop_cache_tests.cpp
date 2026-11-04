@@ -15,6 +15,7 @@
 #include "iop_interrupt_controller.hpp"
 #include "iop_timers.hpp"
 #include "sio2_controller.hpp"
+#include "spu2_controller.hpp"
 
 struct IOPCacheTestAccess
 {
@@ -279,6 +280,118 @@ namespace
     std::vector<std::uint8_t> bytes(IOPBus::ROM_SIZE, 0);
     bytes[0] = firstByte;
     return BootROMImage::create(bytes);
+  }
+}
+
+TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownership",
+  "[iop][spu2][cache]")
+{
+  for (IOPAddress physical : {0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu})
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(swapped);
+    IOPBus bus;
+    SPU2Controller spu2;
+    bus.attachSPU2(&spu2);
+    IOPCore core;
+    core.attachBus(&bus);
+    const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address & ~IOPAddress(3), 0x12341234).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0x1234);
+    REQUIRE((core.status() & IOPCOP0Status::CACHE_PROBE_RESULT) != 0);
+    REQUIRE(bus.read16(physical).value == 0);
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.readData16(address).value == 0);
+    REQUIRE(core.writeData16(address, 0x8900).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0x8900);
+    REQUIRE(bus.read16(physical).value == 0x8900);
+    requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
+TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
+  "[iop][spu2][cache]")
+{
+  for (IOPAddress physical : {0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu})
+  for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
+  {
+    IOPBus bus;
+    SPU2Controller spu2;
+    bus.attachSPU2(&spu2);
+    REQUIRE(bus.write16(physical, 0x8900).status == IOPBusStatus::Completed);
+    const auto wordAddress = physical & ~IOPAddress(3);
+    IOPCache cache;
+    cache.commitIndexedStore(bank, wordAddress, 0x12345678, 0xf);
+    const auto location = IOPCache::location(bank, wordAddress);
+    const auto before = cache;
+    REQUIRE(cache.readWord(bank, bus, wordAddress).status == IOPBusStatus::Unmapped);
+    if (bank == IOPCacheBank::Instruction)
+    {
+      REQUIRE_FALSE(cache.instructionLine(location.lineIndex).valid);
+      REQUIRE(cache.instructionLine(location.lineIndex).words ==
+        before.instructionLine(location.lineIndex).words);
+      requireUnchangedCache(cache, before, IOPCache::DATA_LINE_COUNT,
+        location.lineIndex);
+    }
+    else
+    {
+      REQUIRE_FALSE(cache.dataLine(location.lineIndex).valid);
+      REQUIRE(cache.dataLine(location.lineIndex).words ==
+        before.dataLine(location.lineIndex).words);
+      requireUnchangedCache(cache, before, location.lineIndex);
+    }
+    const auto invalidated = cache;
+    REQUIRE(cache.readWord(bank, bus, wordAddress).status == IOPBusStatus::Unmapped);
+    requireUnchangedCache(cache, invalidated);
+    REQUIRE(bus.read16(physical).value == 0x8900);
+  }
+}
+
+TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception ownership",
+  "[iop][spu2][execution]")
+{
+  for (IOPAddress physical : {0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu})
+  for (bool user : {false, true})
+  for (bool store : {false, true})
+  {
+    const auto address = user ? physical | 0xa0000000u : physical + 1;
+    IOPBus bus;
+    SPU2Controller spu2;
+    bus.attachSPU2(&spu2);
+    REQUIRE(bus.write16(physical, 0x8900).status == IOPBusStatus::Completed);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0xffff);
+    if (user)
+    {
+      IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CURRENT_USER_MODE);
+    }
+    REQUIRE(bus.write32(0, 0x10000003).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, store ? 0xa4220000 : 0x84220000).status ==
+      IOPBusStatus::Completed);
+    core.startExecution(0);
+    core.stepInstruction();
+    const auto before = core.cache();
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == (store ? IOPException::AddressErrorStore
+      : IOPException::AddressErrorLoadOrFetch));
+    REQUIRE(core.exception().badVirtualAddress == address);
+    REQUIRE(core.exception().inBranchDelaySlot);
+    REQUIRE(core.exceptionProgramCounter() == 0);
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.generalRegister(2) == 0xffff);
+    REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
+    REQUIRE(bus.read16(physical).value == 0x8900);
+    requireUnchangedCache(core.cache(), before);
   }
 }
 

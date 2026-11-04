@@ -6,6 +6,7 @@
 #include "iop_timers.hpp"
 #include "cdvd_controller.hpp"
 #include "sio2_controller.hpp"
+#include "spu2_controller.hpp"
 #include "sif.hpp"
 
 #include <algorithm>
@@ -23,6 +24,8 @@ namespace
   constexpr IOPAddress sio2ReceiveOutput = 0x1f808264;
   constexpr IOPAddress sio2TransferStatusBase = 0x1f80826c;
   constexpr IOPAddress sio2InterruptStatus = 0x1f808280;
+  constexpr std::array<IOPAddress, SPU2Controller::SPDIF_CONFIGURATION_COUNT>
+    spdifConfigurationAddresses = {{0x1f9007c6, 0x1f9007c8, 0x1f9007cc}};
   constexpr std::size_t absentROM1Size = 4 * 1024 * 1024;
   constexpr std::array<IOPAddress, 9> cdvdRegisters = {{
     0x1f402004, 0x1f402005, 0x1f402006, 0x1f402008, 0x1f40200a,
@@ -114,6 +117,11 @@ void IOPBus::attachCDVD(CDVDController *controller)
 void IOPBus::attachSIO2(SIO2Controller *controller)
 {
   sio2 = controller;
+}
+
+void IOPBus::attachSPU2(SPU2Controller *controller)
+{
+  spu2 = controller;
 }
 
 void IOPBus::attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1,
@@ -311,6 +319,15 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     return {IOPBusRegion::Mmio,
       static_cast<std::size_t>((first - sio2CommandDescriptorBase) / sizeof(IOPWord)),
       Device::SIO2CommandDescriptor};
+  }
+
+  for (std::size_t index = 0; index < spdifConfigurationAddresses.size(); ++index)
+  {
+    if (first == spdifConfigurationAddresses[index] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, index, Device::SPU2SPDIFConfiguration};
+    }
   }
 
   const auto ssbus = locateSSBUS(address, last);
@@ -625,6 +642,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SPU2SPDIFConfiguration:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readSPDIFConfiguration(location.offset)}
+        : IOPBusReadResult{};
     case Device::SIO2ReceiveOutput:
     case Device::SIO2TransferStatus:
     {
@@ -716,6 +738,14 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SPU2SPDIFConfiguration:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeSPDIFConfiguration(
+        location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
     case Device::SIO2TransmitInput:
       return width == 1 && sio2 != nullptr &&
         sio2->writeTransmitByte(static_cast<std::uint8_t>(value)) ==

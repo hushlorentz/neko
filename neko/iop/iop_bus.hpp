@@ -17,6 +17,7 @@ class IOPSIF0DMAChannel;
 class IOPTimers;
 class CDVDController;
 class SIO2Controller;
+class SPU2Controller;
 class SIF;
 class SIFSignalReceiver;
 
@@ -88,6 +89,7 @@ class IOPBus final
     void attachTimers(IOPTimers *timers);
     void attachCDVD(CDVDController *controller);
     void attachSIO2(SIO2Controller *controller);
+    void attachSPU2(SPU2Controller *controller);
     // The caller keeps the attached DMA owners alive.
     void attachDMA(IOPDMAController *controller, IOPSIF1DMAChannel *sif1,
       IOPSIF0DMAChannel *sif0 = nullptr);
@@ -154,6 +156,7 @@ class IOPBus final
       SIO2ReceiveOutput,
       SIO2TransferStatus,
       SIO2InterruptStatus,
+      SPU2SPDIFConfiguration,
       None,
       SSBUSConfiguration,
       InterruptController,
@@ -268,6 +271,7 @@ class IOPBus final
     IOPTimers *timers = nullptr;
     CDVDController *cdvd = nullptr;
     SIO2Controller *sio2 = nullptr;
+    SPU2Controller *spu2 = nullptr;
     IOPDMAController *dmaController = nullptr;
     IOPSIF1DMAChannel *sif1DMA = nullptr;
     IOPSIF0DMAChannel *sif0DMA = nullptr;

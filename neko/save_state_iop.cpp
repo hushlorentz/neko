@@ -41,6 +41,7 @@ void NekoSaveStateCodec::writeIOPState(
       bus.timers != &system.iopTimersComponent ||
       bus.cdvd != &system.cdvdControllerComponent ||
       bus.sio2 != &system.sio2ControllerComponent ||
+      bus.spu2 != &system.spu2ControllerComponent ||
       system.eeBusComponent.cdvdController != &system.cdvdControllerComponent ||
       bus.dmaController != &system.iopDMAControllerComponent ||
       bus.sif1DMA != &system.iopSIF1DMAComponent ||
@@ -247,6 +248,16 @@ void NekoSaveStateCodec::writeIOPState(
       system.sio2ControllerComponent.interruptCause);
   }
   {
+    auto scope = writer->scope("spu2");
+    auto configuration = writer->scope("spdifConfiguration");
+    const auto &words = system.spu2ControllerComponent.spdifConfiguration;
+    for (std::size_t index = 0; index < words.size(); ++index)
+    {
+      auto word = writer->element(index);
+      writer->writeFieldU16("value", words[index]);
+    }
+  }
+  {
     auto scope = writer->scope("cdvd");
     writeCDVDState(writer, system.cdvdControllerComponent);
   }
@@ -395,6 +406,16 @@ void NekoSaveStateCodec::readIOP(
     sio2.interruptCause = reader->readFieldBool("interruptCause");
     reader->requireField(sio2.hasValidTransferState(),
       "SIO2 transfer state is outside the bounded absent-infrared profile");
+  }
+  {
+    auto scope = reader->scope("spu2");
+    auto configuration = reader->scope("spdifConfiguration");
+    auto &words = system->spu2ControllerComponent.spdifConfiguration;
+    for (std::size_t index = 0; index < words.size(); ++index)
+    {
+      auto word = reader->element(index);
+      words[index] = reader->readFieldU16("value");
+    }
   }
   {
     auto scope = reader->scope("cdvd");
@@ -730,6 +751,8 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional CD/DVD commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<SIO2Controller>::value,
     "Transactional SIO2 commit must not throw.");
+  static_assert(std::is_nothrow_copy_assignable<SPU2Controller>::value,
+    "Transactional SPU2 commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF1DMAChannel>::value,
     "Transactional IOP SIF1 DMA commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF0DMAChannel>::value,
@@ -753,6 +776,8 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.cdvd = &destination->cdvdControllerComponent;
   destination->sio2ControllerComponent = source->sio2ControllerComponent;
   destination->iopBusComponent.sio2 = &destination->sio2ControllerComponent;
+  destination->spu2ControllerComponent = source->spu2ControllerComponent;
+  destination->iopBusComponent.spu2 = &destination->spu2ControllerComponent;
   destination->eeBusComponent.cdvdController = &destination->cdvdControllerComponent;
   const bool cdvdObservationsEnabled =
     destination->cdvdControllerComponent.observationsEnabled;
