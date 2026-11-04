@@ -23,7 +23,9 @@ namespace
   constexpr std::array<std::uint16_t, 4> masterVolumeValues = {{
     0x1234, 0x3fff, 0x4000, 0x7fff
   }};
-  constexpr IOPAddress unknownInitializationAddress = 0x1f900b60;
+  constexpr std::array<IOPAddress, 2> unknownInitializationAddresses = {{
+    0x1f900b60, 0x1f900b62
+  }};
   struct HalfwordProgramming
   {
     std::array<IOPAddress, 4> addresses;
@@ -119,102 +121,106 @@ namespace
 }
 
 TEST_CASE("SPU2 unknown initialization admits only exact zero halfword stores",
-  "[iop][spu2][spu2-b60]")
+  "[iop][spu2][spu2-initialization]")
 {
-  NekoSystem system;
-  programConfiguration(system);
-  programMasterVolumes(system);
-  auto &bus = system.iopBus();
-  const auto before = system.iopStateHash();
-  REQUIRE(bus.write16(unknownInitializationAddress, 0).status ==
-    IOPBusStatus::Completed);
-  REQUIRE(bus.write16(unknownInitializationAddress, 0).status ==
-    IOPBusStatus::Completed);
-  for (std::uint32_t value = 1; value <= 0xffff; ++value)
+  for (const auto address : unknownInitializationAddresses)
   {
-    const auto result = bus.write16(
-      unknownInitializationAddress, static_cast<std::uint16_t>(value));
-    if (result.status != IOPBusStatus::Unmapped)
+    CAPTURE(address);
+    NekoSystem system;
+    programConfiguration(system);
+    programMasterVolumes(system);
+    auto &bus = system.iopBus();
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
+    for (std::uint32_t value = 1; value <= 0xffff; ++value)
     {
-      FAIL("Nonzero initialization admitted: " << value);
+      const auto result = bus.write16(address, static_cast<std::uint16_t>(value));
+      if (result.status != IOPBusStatus::Unmapped)
+      {
+        FAIL("Nonzero initialization admitted: " << value);
+      }
     }
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(system.iopInterruptController().status() == 0);
+    for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
+    {
+      REQUIRE(bus.read16(configurationAddresses[index]).value ==
+        configurationValues[index]);
+      REQUIRE(bus.read16(masterVolumeAddresses[index]).value ==
+        masterVolumeValues[index]);
+    }
+    system.runMasterCycles(80);
+    bus.reset();
+    system.iopCore().reset();
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
+    system.spu2Controller().reset();
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
+    system.reset();
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
   }
-  REQUIRE(system.iopStateHash() == before);
-  REQUIRE(system.iopInterruptController().status() == 0);
-  for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
-  {
-    REQUIRE(bus.read16(configurationAddresses[index]).value ==
-      configurationValues[index]);
-    REQUIRE(bus.read16(masterVolumeAddresses[index]).value ==
-      masterVolumeValues[index]);
-  }
-  system.runMasterCycles(80);
-  bus.reset();
-  system.iopCore().reset();
-  REQUIRE(bus.write16(unknownInitializationAddress, 0).status ==
-    IOPBusStatus::Completed);
-  system.spu2Controller().reset();
-  REQUIRE(bus.write16(unknownInitializationAddress, 0).status ==
-    IOPBusStatus::Completed);
-  system.reset();
-  REQUIRE(bus.write16(unknownInitializationAddress, 0).status ==
-    IOPBusStatus::Completed);
 }
 
 TEST_CASE("SPU2 unknown initialization rejects reads neighbors and other transports",
-  "[iop][spu2][spu2-b60]")
+  "[iop][spu2][spu2-initialization]")
 {
-  NekoSystem system;
-  auto &bus = system.iopBus();
-  const auto before = system.iopStateHash();
-  const auto address = unknownInitializationAddress;
-  REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.write8(address + 1, 0).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
-  REQUIRE(bus.write16(address + 1, 0).status == IOPBusStatus::Misaligned);
-  REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.readInstruction32(address).status == IOPBusStatus::Unmapped);
-  for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+  for (const auto address : unknownInitializationAddresses)
   {
-    REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+    CAPTURE(address);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address + 1, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write16(address + 1, 0).status == IOPBusStatus::Misaligned);
+    const auto wordStatus = address % 4 == 0
+      ? IOPBusStatus::Unmapped : IOPBusStatus::Misaligned;
+    REQUIRE(bus.read32(address).status == wordStatus);
+    REQUIRE(bus.write32(address, 0).status == wordStatus);
+    REQUIRE(bus.readInstruction32(address).status == wordStatus);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == wordStatus);
+    }
+    REQUIRE(bus.readDMAC32(address).status == wordStatus);
+    REQUIRE(bus.writeDMAC32(address, 0).status == wordStatus);
+    REQUIRE(bus.dmaWriteStatus(address) == wordStatus);
+    std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
+    for (IOPAddress other : {0x1f900b5eu, 0x1f900b64u,
+        0x1f900360u, 0x1f900362u, 0x1f900f60u, 0x1f900f62u,
+        address | 0x80000000u, address | 0xa0000000u})
+    {
+      CAPTURE(other);
+      REQUIRE(bus.read16(other).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(other, 0).status == IOPBusStatus::Unmapped);
+    }
+    std::uint16_t eeValue = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &eeValue));
+    REQUIRE(eeValue == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
+    IOPBus unattached;
+    REQUIRE(unattached.write16(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
   }
-  REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.writeDMAC32(address, 0).status == IOPBusStatus::Unmapped);
-  REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
-  std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
-  REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) ==
-    IOPBusStatus::Unmapped);
-  REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
-    IOPBusStatus::Unmapped);
-  REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
-  for (IOPAddress other : {0x1f900b5eu, 0x1f900b62u, 0x1f900b64u,
-      0x1f900360u, 0x1f900362u, 0x1f900f60u,
-      address | 0x80000000u, address | 0xa0000000u})
-  {
-    CAPTURE(other);
-    REQUIRE(bus.read16(other).status == IOPBusStatus::Unmapped);
-    REQUIRE(bus.write16(other, 0).status == IOPBusStatus::Unmapped);
-  }
-  std::uint16_t eeValue = 0x4321;
-  REQUIRE_FALSE(system.eeBus().readData16(address, &eeValue));
-  REQUIRE(eeValue == 0x4321);
-  REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
-  IOPBus unattached;
-  REQUIRE(unattached.write16(address, 0).status == IOPBusStatus::Unmapped);
-  REQUIRE(system.iopStateHash() == before);
 }
 
 TEST_CASE("SPU2 unknown initialization guests preserve aliases and delay-slot outcomes",
-  "[iop][spu2][spu2-b60][trace]")
+  "[iop][spu2][spu2-initialization][trace]")
 {
+  for (const auto physical : unknownInitializationAddresses)
   for (auto segment : {0u, 0x80000000u, 0xa0000000u})
   for (std::uint16_t value : {0, 1, 0x8000, 0xffff})
   {
-    const auto address = unknownInitializationAddress | segment;
+    const auto address = physical | segment;
     CAPTURE(address);
     CAPTURE(value);
     NekoSystem system;
@@ -268,9 +274,9 @@ TEST_CASE("SPU2 unknown initialization guests preserve aliases and delay-slot ou
     const auto route = segment == 0xa0000000
       ? Memory::CacheRoute::Uncached : Memory::CacheRoute::Cached;
     const auto metadata = nekoPackIOPMemoryTraceMetadata({
-      unknownInitializationAddress, 2, Memory::AccessKind::DataStore,
+      physical, 2, Memory::AccessKind::DataStore,
       value == 0 ? Memory::Outcome::Completed : Memory::Outcome::Unmapped,
-      route, true, 3});
+      route, true, static_cast<std::uint8_t>(3u << (physical & 3))});
     IOPTraceTest::requireEvents(actual, {
       {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
         address, value, 0, metadata}
@@ -287,16 +293,18 @@ TEST_CASE("SPU2 unknown initialization guests preserve aliases and delay-slot ou
 }
 
 TEST_CASE("SPU2 unknown initialization resumes pending stores without new state",
-  "[iop][spu2][spu2-b60][save-state][trace]")
+  "[iop][spu2][spu2-initialization][save-state][trace]")
 {
+  for (const auto address : unknownInitializationAddresses)
   for (unsigned cut : {32u, 40u})
   {
+    CAPTURE(address);
     CAPTURE(cut);
     NekoSystem original;
     programConfiguration(original);
     programMasterVolumes(original);
     installUnknownInitializationProgram(original,
-      unknownInitializationAddress | 0xa0000000u, 0);
+      address | 0xa0000000u, 0);
     original.runMasterCycles(cut);
     REQUIRE(original.iopCore().branchContinuation().active == (cut == 32));
     const auto checkpoint = original.saveState();
@@ -305,7 +313,7 @@ TEST_CASE("SPU2 unknown initialization resumes pending stores without new state"
     restored.loadState(checkpoint);
     plain.loadState(checkpoint);
     const auto before = plain.iopStateHash();
-    REQUIRE(plain.iopBus().write16(unknownInitializationAddress, 0).status ==
+    REQUIRE(plain.iopBus().write16(address, 0).status ==
       IOPBusStatus::Completed);
     REQUIRE(plain.iopStateHash() == before);
     REQUIRE(plain.saveState() == checkpoint);

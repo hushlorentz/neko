@@ -3270,6 +3270,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research the zero halfword write at `0x1f900b60` and its containing
       family; distinguish unknown initialization from master controls and add
       bounded owner admission with guest/restored coverage and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 `0x1f900b62` Initialization Dependency
+
+- [x] Research the zero halfword write at `0x1f900b62` and reassess the shared
+      unknown-initialization boundary before a bounded implementation with
+      guest/restored coverage and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

@@ -324,13 +324,15 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
   for (IOPAddress physical : {
       0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
-      0x1f900b60u})
+      0x1f900b60u, 0x1f900b62u})
   for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
   {
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
-    const std::uint16_t value = physical == 0x1f900b60 ? 0 : 0x4900;
+    const bool unknownInitialization =
+      physical == 0x1f900b60 || physical == 0x1f900b62;
+    const std::uint16_t value = unknownInitialization ? 0 : 0x4900;
     REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
     const auto wordAddress = physical & ~IOPAddress(3);
     IOPCache cache;
@@ -357,7 +359,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     REQUIRE(cache.readWord(bank, bus, wordAddress).status == IOPBusStatus::Unmapped);
     requireUnchangedCache(cache, invalidated);
     const auto read = bus.read16(physical);
-    REQUIRE(read.status == (physical == 0x1f900b60
+    REQUIRE(read.status == (unknownInitialization
       ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
     if (read.status == IOPBusStatus::Completed)
     {
@@ -372,7 +374,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
   for (IOPAddress physical : {
       0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
-      0x1f900b60u})
+      0x1f900b60u, 0x1f900b62u})
   for (bool user : {false, true})
   for (bool store : {false, true})
   {
@@ -380,7 +382,9 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
-    const std::uint16_t value = physical == 0x1f900b60 ? 0 : 0x4900;
+    const bool unknownInitialization =
+      physical == 0x1f900b60 || physical == 0x1f900b62;
+    const std::uint16_t value = unknownInitialization ? 0 : 0x4900;
     REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);
@@ -407,7 +411,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     REQUIRE(core.generalRegister(2) == 0xffff);
     REQUIRE(core.delayedResultContinuation().source == IOPDelayedResultSource::None);
     const auto read = bus.read16(physical);
-    REQUIRE(read.status == (physical == 0x1f900b60
+    REQUIRE(read.status == (unknownInitialization
       ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
     if (read.status == IOPBusStatus::Completed)
     {
@@ -418,12 +422,13 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
 }
 
 TEST_CASE("SPU2 unknown initialization bypasses cached payloads but not isolation",
-  "[iop][spu2][spu2-b60][cache]")
+  "[iop][spu2][spu2-initialization][cache]")
 {
+  for (IOPAddress physical : {0x1f900b60u, 0x1f900b62u})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   {
-    const auto address = 0x1f900b60u | segment;
+    const auto address = physical | segment;
     CAPTURE(address);
     CAPTURE(swapped);
     IOPBus bus;
@@ -433,7 +438,7 @@ TEST_CASE("SPU2 unknown initialization bypasses cached payloads but not isolatio
     core.attachBus(&bus);
     const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
     IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
-    REQUIRE(core.writeData32(address, 0x12341234).outcome ==
+    REQUIRE(core.writeData32(address & ~IOPAddress(3), 0x12341234).outcome ==
       IOPAccessOutcome::Completed);
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Completed);
     REQUIRE(core.readData16(address).value == 0x1234);
