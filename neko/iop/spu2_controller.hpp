@@ -17,6 +17,8 @@ class SPU2Controller final
     static bool isFixedMasterVolumeControl(std::uint16_t value) noexcept;
     std::uint16_t readMasterVolumeControl(std::size_t index) const;
     bool writeMasterVolumeControl(std::size_t index, std::uint16_t value);
+    // Provisional unprogrammed ATTR image for either core; writes unsupported.
+    std::uint16_t readUnprogrammedCoreAttribute() const noexcept;
     // Provisional 0x1f900b60/0x1f900b62 zero initialization; no state or effects.
     bool writeUnknownInitialization(std::uint16_t value) const noexcept;
 

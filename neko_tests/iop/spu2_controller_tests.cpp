@@ -26,6 +26,9 @@ namespace
   constexpr std::array<IOPAddress, 2> unknownInitializationAddresses = {{
     0x1f900b60, 0x1f900b62
   }};
+  constexpr std::array<IOPAddress, 2> coreAttributeAddresses = {{
+    0x1f90019a, 0x1f90059a
+  }};
   struct HalfwordProgramming
   {
     std::array<IOPAddress, 4> addresses;
@@ -117,6 +120,246 @@ namespace
         words[index]).status == IOPBusStatus::Completed);
     }
     system.iopCore().startExecution(0xa0000000);
+  }
+
+  void installCoreAttributeReadProgram(
+    NekoSystem &system, IOPAddress address, IOPWord load)
+  {
+    const std::array<IOPWord, 9> words = {{
+      0x3c010000 | (address >> 16), 0x34210000 | (address & 0xffff),
+      0x2402ffff, 0x10000002, load, 0xffffffff,
+      0x00401821, 0x00402021, 0x24051234
+    }};
+    for (std::size_t index = 0; index < words.size(); ++index)
+    {
+      REQUIRE(system.iopBus().write32(static_cast<IOPAddress>(index * 4),
+        words[index]).status == IOPBusStatus::Completed);
+    }
+    system.iopCore().startExecution(0xa0000000);
+  }
+}
+
+TEST_CASE("SPU2 unprogrammed core attributes read zero without writable state",
+  "[iop][spu2][spu2-attr]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  for (const auto address : coreAttributeAddresses)
+  {
+    CAPTURE(address);
+    const auto cold = bus.read16(address);
+    REQUIRE(cold.status == IOPBusStatus::Completed);
+    REQUIRE(cold.value == 0);
+  }
+  programConfiguration(system);
+  programMasterVolumes(system);
+  const auto before = system.iopStateHash();
+  for (const auto address : coreAttributeAddresses)
+  {
+    CAPTURE(address);
+    for (std::uint32_t value = 0; value <= 0xffff; ++value)
+    {
+      if (bus.write16(address, static_cast<std::uint16_t>(value)).status !=
+          IOPBusStatus::Unmapped)
+      {
+        FAIL("Core ATTR write admitted: " << value);
+      }
+    }
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0);
+    REQUIRE(bus.read16(address).value == 0);
+  }
+  REQUIRE(system.iopStateHash() == before);
+  for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
+  {
+    REQUIRE(bus.read16(configurationAddresses[index]).value ==
+      configurationValues[index]);
+    REQUIRE(bus.read16(masterVolumeAddresses[index]).value ==
+      masterVolumeValues[index]);
+  }
+  system.runMasterCycles(80);
+  for (const auto address : coreAttributeAddresses)
+  {
+    REQUIRE(bus.read16(address).value == 0);
+  }
+  REQUIRE(system.iopInterruptController().status() == 0);
+  bus.reset();
+  system.iopCore().reset();
+  system.spu2Controller().reset();
+  for (const auto address : coreAttributeAddresses)
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0);
+  }
+  system.reset();
+  for (const auto address : coreAttributeAddresses)
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0);
+  }
+}
+
+TEST_CASE("SPU2 core attribute reads reject neighbors and other transports",
+  "[iop][spu2][spu2-attr]")
+{
+  for (const auto address : coreAttributeAddresses)
+  {
+    CAPTURE(address);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address + 1, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write16(address + 1, 0).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Misaligned);
+    const auto wordAddress = address & ~IOPAddress(3);
+    REQUIRE(bus.read32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(wordAddress, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readInstruction32(wordAddress).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(wordAddress, 0, mask).status ==
+        IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.readDMAC32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(wordAddress, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(wordAddress) == IOPBusStatus::Unmapped);
+    std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
+    for (IOPAddress other : {address - 2, address + 2, address + 0x800,
+        address | 0x80000000u, address | 0xa0000000u})
+    {
+      CAPTURE(other);
+      REQUIRE(bus.read16(other).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(other, 0).status == IOPBusStatus::Unmapped);
+    }
+    std::uint16_t eeValue = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &eeValue));
+    REQUIRE(eeValue == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
+    IOPBus unattached;
+    REQUIRE(unattached.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(unattached.write16(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
+  }
+}
+
+TEST_CASE("SPU2 core attribute guest loads preserve aliases and branch load delays",
+  "[iop][spu2][spu2-attr][trace]")
+{
+  for (const auto physical : coreAttributeAddresses)
+  for (auto segment : {0u, 0x80000000u, 0xa0000000u})
+  for (IOPWord load : {0x84220000u, 0x94220000u})
+  {
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(load);
+    NekoSystem system;
+    programConfiguration(system);
+    programMasterVolumes(system);
+    installCoreAttributeReadProgram(system, address, load);
+    system.startTrace();
+    system.runMasterCycles(64);
+    REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().retiredInstructions() == 8);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000024);
+    REQUIRE(system.iopCore().generalRegister(2) == 0);
+    REQUIRE(system.iopCore().generalRegister(3) == 0xffffffff);
+    REQUIRE(system.iopCore().generalRegister(4) == 0);
+    REQUIRE(system.iopCore().generalRegister(5) == 0x1234);
+    REQUIRE_FALSE(system.iopCore().branchContinuation().active);
+    REQUIRE(system.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    IOPTraceTest::Events actual;
+    unsigned delayLoads = 0;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::IOP)
+      {
+        continue;
+      }
+      if (event.type == NekoTraceEventType::MemoryAccess &&
+          event.value0 == address)
+      {
+        actual.push_back(event);
+      }
+      if (event.type == NekoTraceEventType::InstructionIssued &&
+          event.value0 == 0xa0000010)
+      {
+        REQUIRE(event.masterCycle == 33);
+        REQUIRE(event.value1 == load);
+        REQUIRE(event.value3 == NekoIOPTraceInstruction::DELAY_SLOT);
+        ++delayLoads;
+      }
+    }
+    REQUIRE(delayLoads == 1);
+    namespace Memory = NekoIOPTraceMemory;
+    const auto route = segment == 0xa0000000
+      ? Memory::CacheRoute::Uncached : Memory::CacheRoute::Cached;
+    const auto metadata = nekoPackIOPMemoryTraceMetadata({
+      physical, 2, Memory::AccessKind::DataLoad,
+      Memory::Outcome::Completed, route, true, 0});
+    IOPTraceTest::requireEvents(actual, {
+      {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0, 0, metadata}
+    });
+    for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
+    {
+      REQUIRE(system.iopBus().read16(configurationAddresses[index]).value ==
+        configurationValues[index]);
+      REQUIRE(system.iopBus().read16(masterVolumeAddresses[index]).value ==
+        masterVolumeValues[index]);
+    }
+    REQUIRE(system.iopInterruptController().status() == 0);
+  }
+}
+
+TEST_CASE("SPU2 core attribute loads restore before and after the delayed result",
+  "[iop][spu2][spu2-attr][save-state][trace]")
+{
+  for (const auto address : coreAttributeAddresses)
+  for (unsigned cut : {32u, 40u, 48u})
+  {
+    CAPTURE(address);
+    CAPTURE(cut);
+    NekoSystem original;
+    programConfiguration(original);
+    programMasterVolumes(original);
+    installCoreAttributeReadProgram(original,
+      address | 0xa0000000u, 0x94220000);
+    original.runMasterCycles(cut);
+    REQUIRE(original.iopCore().branchContinuation().active == (cut == 32));
+    REQUIRE((original.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::Load) == (cut == 40));
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(plain.iopBus().read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(plain.iopBus().read16(address).value == 0);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(64 - cut);
+    restored.runMasterCycles(64 - cut);
+    plain.runMasterCycles(64 - cut);
+    REQUIRE(original.iopCore().retiredInstructions() == 8);
+    REQUIRE(original.iopCore().generalRegister(3) == 0xffffffff);
+    REQUIRE(original.iopCore().generalRegister(4) == 0);
+    REQUIRE(original.iopCore().generalRegister(5) == 0x1234);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
   }
 }
 

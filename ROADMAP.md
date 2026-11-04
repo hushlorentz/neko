@@ -3279,6 +3279,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research the zero halfword write at `0x1f900b62` and reassess the shared
       unknown-initialization boundary before a bounded implementation with
       guest/restored coverage and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 `0x1f90019a` Read Dependency
+
+- [x] Research and implement unprogrammed core ATTR halfword readback for both
+      cores through the SPU2 owner; reject writes and active effects, with
+      guest/restored coverage and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

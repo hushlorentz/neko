@@ -39,6 +39,11 @@ bool SPU2Controller::writeMasterVolumeControl(
   return true;
 }
 
+std::uint16_t SPU2Controller::readUnprogrammedCoreAttribute() const noexcept
+{
+  return 0;
+}
+
 bool SPU2Controller::writeUnknownInitialization(
   std::uint16_t value) const noexcept
 {
