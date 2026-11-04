@@ -11,11 +11,11 @@
 
 namespace
 {
-  constexpr std::array<IOPAddress, 3> configurationAddresses = {{
-    0x1f9007c6, 0x1f9007c8, 0x1f9007cc
+  constexpr std::array<IOPAddress, 4> configurationAddresses = {{
+    0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca
   }};
-  constexpr std::array<std::uint16_t, 3> configurationValues = {{
-    0x0900, 0xa55a, 0x8001
+  constexpr std::array<std::uint16_t, 4> configurationValues = {{
+    0x0900, 0xa55a, 0x8001, 0x0008
   }};
 
   void programConfiguration(NekoSystem &system)
@@ -26,7 +26,6 @@ namespace
         configurationAddresses[index], configurationValues[index]).status ==
         IOPBusStatus::Completed);
     }
-
   }
 
   void installConfigurationProgram(NekoSystem &system, IOPAddress address)
@@ -70,19 +69,20 @@ namespace
   }
 }
 
-TEST_CASE("SPU2 S/PDIF configuration retains three independent halfwords",
+TEST_CASE("SPU2 S/PDIF configuration retains independent halfwords",
   "[iop][spu2]")
 {
   NekoSystem system;
   for (auto address : configurationAddresses)
   {
+    CAPTURE(address);
     REQUIRE(system.iopBus().read16(address).status == IOPBusStatus::Completed);
     REQUIRE(system.iopBus().read16(address).value == 0);
   }
   programConfiguration(system);
   for (std::size_t selected = 0; selected < configurationAddresses.size(); ++selected)
   {
-    for (auto value : {0xffff, 0, 0x0900, 0x55aa, 0x8001})
+    for (auto value : {0xffff, 0, 0x0008, 0x0900, 0x55aa, 0x8001})
     {
       REQUIRE(system.iopBus().write16(configurationAddresses[selected],
         static_cast<std::uint16_t>(value)).status == IOPBusStatus::Completed);
@@ -145,7 +145,7 @@ TEST_CASE("SPU2 configuration excludes neighbors widths and non-CPU transports",
     REQUIRE(unattached.write16(address, 0).status == IOPBusStatus::Unmapped);
   }
   for (IOPAddress address : {0x1f9007c0u, 0x1f9007c2u, 0x1f9007c4u,
-      0x1f9007cau, 0x1f9007ceu, 0x1f9007d0u, 0x1f9003c6u})
+      0x1f9007ceu, 0x1f9007d0u, 0x1f9003c6u})
   {
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Unmapped);
@@ -243,12 +243,15 @@ TEST_CASE("SPU2 halfword guests preserve aliases delay slots and signed load del
 TEST_CASE("SPU2 pending stores and loads restore traced and plain canonically",
   "[iop][spu2][save-state][trace]")
 {
+  for (std::size_t selected : {0u, 3u})
   for (unsigned cut : {32u, 48u, 72u})
   {
+    CAPTURE(selected);
     CAPTURE(cut);
     NekoSystem original;
     programConfiguration(original);
-    installConfigurationProgram(original, 0xbf9007c6);
+    installConfigurationProgram(original,
+      configurationAddresses[selected] | 0xa0000000u);
     original.runMasterCycles(cut);
     REQUIRE(original.iopCore().branchContinuation().active == (cut == 32));
     REQUIRE((original.iopCore().delayedResultContinuation().source ==
@@ -263,9 +266,9 @@ TEST_CASE("SPU2 pending stores and loads restore traced and plain canonically",
     original.runMasterCycles(96 - cut);
     restored.runMasterCycles(96 - cut);
     plain.runMasterCycles(96 - cut);
-    requireConfigurationResult(original, 0);
-    requireConfigurationResult(restored, 0);
-    requireConfigurationResult(plain, 0);
+    requireConfigurationResult(original, selected);
+    requireConfigurationResult(restored, selected);
+    requireConfigurationResult(plain, selected);
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
     IOPTraceTest::requireMachine(restored, original);
     IOPTraceTest::requireMachine(plain, original);
@@ -335,7 +338,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
     IOPBusStatus::Completed);
   const auto before = destination.saveState();
   SaveStateMutation badChecksum(candidate);
-  badChecksum.writeScalar("system.iop.spu2.spdifConfiguration[2].value", 0x1234);
+  badChecksum.writeScalar("system.iop.spu2.spdifConfiguration[3].value", 0x1234);
   REQUIRE_THROWS_AS(destination.loadState(badChecksum), std::invalid_argument);
   REQUIRE(destination.saveState() == before);
   SaveStateMutation lateInvalid(candidate);
@@ -344,7 +347,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   REQUIRE_THROWS_AS(destination.loadState(lateInvalid), std::invalid_argument);
   REQUIRE(destination.saveState() == before);
   SaveStateMutation previousVersion(candidate);
-  previousVersion.writeScalar("container.version", 80);
+  previousVersion.writeScalar("container.version", 81);
   previousVersion.refreshChecksum();
   REQUIRE_THROWS_AS(destination.loadState(previousVersion), std::invalid_argument);
   REQUIRE(destination.saveState() == before);
