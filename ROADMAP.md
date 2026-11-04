@@ -3189,9 +3189,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Cover guest control transitions, load delay, merge/cache boundaries and
       restored traced/plain execution without enabling neighboring registers
       or active effects.
-- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; attribute the next originating
       dependency without claiming active reset, transfers or completed boot.
+
+### SIO2 Port-Control Programming Dependency
+
+- [x] Research the observed `0x1f808240` write and its port-control family;
+      select and implement a bounded contract with guest/restored coverage,
+      required persistence gates and independent review before the commit.
+- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; attribute the next originating
+      dependency without claiming active transfers, readiness or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

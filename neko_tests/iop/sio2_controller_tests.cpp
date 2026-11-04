@@ -13,6 +13,10 @@ namespace
   constexpr IOPAddress controlAddress = 0x1f808268;
   constexpr IOPWord startupControl = 0x3bc;
   constexpr IOPWord passiveControl = 0xc;
+  constexpr IOPAddress portControlBase = 0x1f808240;
+  constexpr std::array<IOPWord, 8> portValues = {{
+    0x89abcdef, 0x01060014, 0xffffffff, 0, 0x80000000, 1, 0x12345678, 0xa5a55a5a
+  }};
 
   struct ControlTransition
   {
@@ -115,6 +119,81 @@ namespace
     REQUIRE(system.iopBus().readDMAC32(0x108).value == transition.initial);
     REQUIRE(system.iopBus().readDMAC32(0x10c).value == transition.programmed);
   }
+
+  void installPortProgram(NekoSystem &system, IOPAddress address)
+  {
+    for (std::size_t index = 0; index < portValues.size(); ++index)
+    {
+      REQUIRE(system.iopBus().write32(portControlBase +
+        static_cast<IOPAddress>(index * 4), portValues[index]).status ==
+        IOPBusStatus::Completed);
+    }
+    installProgram(system, std::array<IOPWord, 16>{{
+      0x3c010000 | (address >> 16),
+      0x34210000 | (address & 0xffff),
+      0x3c02c0c0,
+      0x3442050f,
+      0x24031234,
+      0x8c230000,
+      0xac030100, // preceding r3 in the load delay slot
+      0xac030104,
+      0xac220000,
+      0x8c230000,
+      0xac030108, // preceding r3 in the load delay slot
+      0x10620002,
+      0xac220000, // repeat programming in the taken branch delay slot
+      0xffffffff,
+      0xac03010c,
+      0x24640001
+    }});
+  }
+
+  IOPTraceTest::Events expectedPortEvents(IOPAddress address, std::size_t index)
+  {
+    namespace Memory = NekoIOPTraceMemory;
+    const auto physical = portControlBase + static_cast<IOPAddress>(index * 4);
+    const auto route = address < 0xa0000000
+      ? Memory::CacheRoute::Cached : Memory::CacheRoute::Uncached;
+    const auto load = nekoPackIOPMemoryTraceMetadata({
+      physical, 4, Memory::AccessKind::DataLoad,
+      Memory::Outcome::Completed, route, true, 0});
+    const auto store = nekoPackIOPMemoryTraceMetadata({
+      physical, 4, Memory::AccessKind::DataStore,
+      Memory::Outcome::Completed, route, true, 0xf});
+    return {
+      {41, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, portValues[index], 0, load},
+      {65, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0xc0c0050f, 0, store},
+      {73, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0xc0c0050f, 0, load},
+      {97, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0xc0c0050f, 0, store}
+    };
+  }
+
+  void requirePortResult(const NekoSystem &system, std::size_t selected)
+  {
+    REQUIRE(system.iopCore().retiredInstructions() == 15);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000040);
+    REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().generalRegister(3) == 0xc0c0050f);
+    REQUIRE(system.iopCore().generalRegister(4) == 0xc0c00510);
+    REQUIRE_FALSE(system.iopCore().branchContinuation().active);
+    REQUIRE(system.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    REQUIRE(system.sio2Controller().readControl() == 0);
+    REQUIRE(system.iopBus().readDMAC32(0x100).value == 0x1234);
+    for (std::size_t index = 0; index < portValues.size(); ++index)
+    {
+      REQUIRE(system.sio2Controller().readPortControl(index) ==
+        (index == selected ? 0xc0c0050f : portValues[index]));
+    }
+    REQUIRE(system.iopBus().readDMAC32(0x104).value == portValues[selected]);
+    REQUIRE(system.iopBus().readDMAC32(0x108).value == portValues[selected]);
+    REQUIRE(system.iopBus().readDMAC32(0x10c).value == 0xc0c0050f);
+  }
 }
 
 TEST_CASE("SIO2 retains only the selected passive control words", "[iop][sio2]")
@@ -168,7 +247,8 @@ TEST_CASE("SIO2 bus admission excludes partial and nondata routes", "[iop][sio2]
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write8(address, 0xbc).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write16(address, programmedControl).status == IOPBusStatus::Unmapped);
-    if (address != controlAddress)
+    if (address != controlAddress &&
+        (address < portControlBase || address >= portControlBase + 32))
     {
       REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
       REQUIRE(bus.write32(address, programmedControl).status == IOPBusStatus::Unmapped);
@@ -209,6 +289,248 @@ TEST_CASE("SIO2 bus admission excludes partial and nondata routes", "[iop][sio2]
   REQUIRE(unattached.read32(controlAddress).status == IOPBusStatus::Unmapped);
   REQUIRE(unattached.write32(controlAddress, programmedControl).status ==
     IOPBusStatus::Unmapped);
+}
+
+TEST_CASE("SIO2 port words retain independent full-width programming",
+  "[iop][sio2][sio2-port]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  for (std::size_t index = 0; index < portValues.size(); ++index)
+  {
+    const auto address = portControlBase + static_cast<IOPAddress>(index * 4);
+    CAPTURE(index);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0);
+    REQUIRE(bus.write32(address, portValues[index]).status == IOPBusStatus::Completed);
+    for (std::size_t other = 0; other < portValues.size(); ++other)
+    {
+      REQUIRE(bus.read32(portControlBase + static_cast<IOPAddress>(other * 4)).value ==
+        (other <= index ? portValues[other] : 0));
+    }
+  }
+  for (std::size_t index = 0; index < portValues.size(); ++index)
+  {
+    const auto address = portControlBase + static_cast<IOPAddress>(index * 4);
+    CAPTURE(index);
+    for (IOPWord value : {0xc0c0050fu, 0x01060014u, 0xffffffffu, 0u})
+    {
+      CAPTURE(value);
+      REQUIRE(bus.writeMasked32(address, value, 0xf).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(address).value == value);
+      REQUIRE(bus.write32(address, value).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read32(address).value == value);
+    }
+  }
+  REQUIRE(bus.read32(controlAddress).value == 0);
+}
+
+TEST_CASE("SIO2 port admission excludes partial narrow and nondata access",
+  "[iop][sio2][sio2-port]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  IOPBus unattached;
+  for (std::size_t index = 0; index < portValues.size(); ++index)
+  {
+    const auto address = portControlBase + static_cast<IOPAddress>(index * 4);
+    CAPTURE(index);
+    REQUIRE(bus.write32(address, portValues[index]).status == IOPBusStatus::Completed);
+    for (std::uint8_t mask = 1; mask < 0xf; ++mask)
+    {
+      CAPTURE(mask);
+      REQUIRE(bus.writeMasked32(address, ~portValues[index], mask).status ==
+        IOPBusStatus::Unmapped);
+    }
+    for (IOPAddress offset = 0; offset < 4; ++offset)
+    {
+      CAPTURE(offset);
+      REQUIRE(bus.read8(address + offset).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write8(address + offset, 0xbc).status == IOPBusStatus::Unmapped);
+      if (offset % 2 == 0)
+      {
+        REQUIRE(bus.read16(address + offset).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.write16(address + offset, 0x050f).status == IOPBusStatus::Unmapped);
+      }
+      if (offset != 0)
+      {
+        REQUIRE(bus.read32(address + offset).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.write32(address + offset, 1).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.writeMasked32(address + offset, 1, 0xf).status ==
+          IOPBusStatus::Misaligned);
+      }
+    }
+    REQUIRE(bus.readInstruction32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(address, 1).status == IOPBusStatus::Unmapped);
+    std::uint8_t byte = 0x5a;
+    REQUIRE(bus.loadPhysical(address, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(byte == 0x5a);
+    for (IOPAddress alias : {address | 0x80000000u, address | 0xa0000000u})
+    {
+      REQUIRE(bus.read32(alias).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(alias, 1).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE_THROWS_AS(system.eeBus().read32(address), std::out_of_range);
+    REQUIRE(unattached.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(unattached.write32(address, 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read32(address).value == portValues[index]);
+  }
+  for (IOPAddress address : {portControlBase - 4, portControlBase + 32,
+         portControlBase + 36})
+  {
+    CAPTURE(address);
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 1).status == IOPBusStatus::Unmapped);
+  }
+}
+
+TEST_CASE("SIO2 port lifetime distinguishes passive control from owner reset",
+  "[iop][sio2][sio2-port]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  REQUIRE_THROWS_AS(system.sio2Controller().readPortControl(8), std::out_of_range);
+  REQUIRE_THROWS_AS(system.sio2Controller().writePortControl(8, 1), std::out_of_range);
+  for (std::size_t index = 0; index < portValues.size(); ++index)
+  {
+    REQUIRE(bus.write32(portControlBase + static_cast<IOPAddress>(index * 4),
+      portValues[index]).status == IOPBusStatus::Completed);
+  }
+  for (IOPWord control : {passiveControl, startupControl, passiveControl, 0u, 1u})
+  {
+    REQUIRE(bus.write32(controlAddress, control).status ==
+      (control == 0 || control == 1 ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
+    bus.reset();
+    system.iopCore().reset();
+    system.runMasterCycles(80);
+    for (std::size_t index = 0; index < portValues.size(); ++index)
+    {
+      REQUIRE(bus.read32(portControlBase + static_cast<IOPAddress>(index * 4)).value ==
+        portValues[index]);
+    }
+  }
+  system.sio2Controller().reset();
+  REQUIRE(bus.read32(controlAddress).value == 0);
+  for (std::size_t index = 0; index < portValues.size(); ++index)
+  {
+    const auto address = portControlBase + static_cast<IOPAddress>(index * 4);
+    REQUIRE(bus.read32(address).value == 0);
+    REQUIRE(bus.write32(address, portValues[index]).status == IOPBusStatus::Completed);
+  }
+  system.reset();
+  for (std::size_t index = 0; index < portValues.size(); ++index)
+  {
+    REQUIRE(system.iopBus().read32(portControlBase +
+      static_cast<IOPAddress>(index * 4)).value == 0);
+  }
+}
+
+TEST_CASE("SIO2 port guests preserve read delays and exact alias traces",
+  "[iop][sio2][sio2-port][trace]")
+{
+  for (std::size_t index = 0; index < portValues.size(); ++index)
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto address = segment | (portControlBase + static_cast<IOPAddress>(index * 4));
+    CAPTURE(index);
+    CAPTURE(address);
+    NekoSystem system;
+    installPortProgram(system, address);
+    system.startTrace();
+    system.runMasterCycles(120);
+    requirePortResult(system, index);
+    IOPTraceTest::requireEvents(controlEvents(system, address),
+      expectedPortEvents(address, index));
+    unsigned branchDelayStores = 0;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::InstructionIssued &&
+          event.value0 == 0xa0000030)
+      {
+        REQUIRE(event.masterCycle == 97);
+        REQUIRE(event.value1 == 0xac220000);
+        REQUIRE(event.value3 == NekoIOPTraceInstruction::DELAY_SLOT);
+        ++branchDelayStores;
+      }
+    }
+    REQUIRE(branchDelayStores == 1);
+  }
+}
+
+TEST_CASE("SIO2 port guests restore before writes loads and branch-delay repeats",
+  "[iop][sio2][sio2-port][save-state][trace]")
+{
+  for (std::size_t index : {std::size_t{0}, std::size_t{7}})
+  for (unsigned cut : {64u, 72u, 80u, 96u})
+  {
+    const auto address = 0xa0000000u | (portControlBase +
+      static_cast<IOPAddress>(index * 4));
+    CAPTURE(index);
+    CAPTURE(cut);
+    NekoSystem original;
+    installPortProgram(original, address);
+    original.runMasterCycles(cut);
+    const auto &core = original.iopCore();
+    REQUIRE(core.retiredInstructions() == cut / 8);
+    REQUIRE(core.programCounter() == 0xa0000000 + cut / 2);
+    REQUIRE(original.sio2Controller().readPortControl(index) ==
+      (cut == 64 ? portValues[index] : 0xc0c0050f));
+    REQUIRE(core.generalRegister(3) == (cut < 96 ? portValues[index] : 0xc0c0050f));
+    REQUIRE(core.branchContinuation().active == (cut == 96));
+    REQUIRE(core.delayedResultContinuation().source == (cut == 80
+      ? IOPDelayedResultSource::Load : IOPDelayedResultSource::None));
+    if (cut == 80)
+    {
+      REQUIRE(core.delayedResultContinuation().destination == 3);
+      REQUIRE(core.delayedResultContinuation().value == 0xc0c0050f);
+    }
+    if (cut == 96)
+    {
+      REQUIRE(core.branchContinuation().instructionAddress == 0xa000002c);
+      REQUIRE(core.branchContinuation().targetAddress == 0xa0000038);
+    }
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    for (NekoSystem *destination : {&restored, &plain})
+    {
+      REQUIRE(destination->sio2Controller().writeControl(startupControl) ==
+        SIO2AccessStatus::Accepted);
+      for (std::size_t port = 0; port < portValues.size(); ++port)
+      {
+        destination->sio2Controller().writePortControl(port, ~portValues[port]);
+      }
+      destination->loadState(checkpoint);
+      REQUIRE(destination->saveState() == checkpoint);
+    }
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(120 - cut);
+    restored.runMasterCycles(120 - cut);
+    plain.runMasterCycles(120 - cut);
+    requirePortResult(original, index);
+    requirePortResult(restored, index);
+    requirePortResult(plain, index);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    REQUIRE_FALSE(original.trace().empty());
+    REQUIRE(plain.trace().empty());
+    REQUIRE_FALSE(plain.traceEnabled());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    IOPTraceTest::Events expected;
+    for (const auto &event : expectedPortEvents(address, index))
+    {
+      if (event.masterCycle > cut)
+      {
+        expected.push_back(event);
+      }
+    }
+    IOPTraceTest::requireEvents(controlEvents(restored, address), expected);
+  }
 }
 
 TEST_CASE("SIO2 control has an explicit device and machine reset lifetime",
@@ -293,6 +615,13 @@ TEST_CASE("SIO2 programming preserves existing IRQ DMA and frontend input",
       if (accepted)
       {
         retained = value;
+      }
+      for (std::size_t index = 0; index < portValues.size(); ++index)
+      {
+        const auto address = portControlBase + static_cast<IOPAddress>(index * 4);
+        REQUIRE(system.iopBus().write32(address, portValues[index]).status ==
+          IOPBusStatus::Completed);
+        REQUIRE(system.iopBus().read32(address).value == portValues[index]);
       }
       REQUIRE(system.iopBus().read32(controlAddress).value == retained);
       REQUIRE(interrupts.status() == status);

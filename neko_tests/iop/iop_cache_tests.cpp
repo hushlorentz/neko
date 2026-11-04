@@ -89,6 +89,17 @@ static_assert(std::is_same<
 
 namespace
 {
+  struct SIO2Programming
+  {
+    IOPAddress physical;
+    IOPWord value;
+  };
+
+  constexpr SIO2Programming sio2Programming[] = {
+    {0x1f808268, 0x3bc}, {0x1f808268, 0xc},
+    {0x1f808240, 0xc0c0050f}, {0x1f80825c, 0x01060014}
+  };
+
   void requireUnchangedCache(
     const IOPCache &cache,
     const IOPCache &before,
@@ -273,10 +284,12 @@ namespace
 TEST_CASE("SIO2 guest data bypasses cached payloads but preserves isolation ownership",
   "[iop][sio2][sio2-conformance][cache]")
 {
-  for (IOPWord programmed : {0x3bcu, 0xcu})
+  for (const auto &programming : sio2Programming)
   for (bool swapped : {false, true})
-  for (IOPAddress address : {0x1f808268u, 0x9f808268u, 0xbf808268u})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   {
+    const IOPWord programmed = programming.value;
+    const IOPAddress address = programming.physical | segment;
     CAPTURE(programmed);
     CAPTURE(swapped);
     CAPTURE(address);
@@ -290,7 +303,7 @@ TEST_CASE("SIO2 guest data bypasses cached payloads but preserves isolation owne
     IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
     REQUIRE(core.writeData32(address, 0x12345678).outcome ==
       IOPAccessOutcome::Completed);
-    REQUIRE(sio2.readControl() == 0);
+    REQUIRE(bus.read32(programming.physical).value == 0);
     REQUIRE(core.readData32(address).value == 0x12345678);
     REQUIRE(bus.write32(0, 0x8c220000).status == IOPBusStatus::Completed);
     REQUIRE(bus.write32(4, 0).status == IOPBusStatus::Completed);
@@ -300,11 +313,11 @@ TEST_CASE("SIO2 guest data bypasses cached payloads but preserves isolation owne
     REQUIRE(core.delayedResultContinuation().value == 0x12345678);
     core.stepInstruction();
     REQUIRE(core.generalRegister(2) == 0x12345678);
-    REQUIRE(sio2.readControl() == 0);
+    REQUIRE(bus.read32(programming.physical).value == 0);
     REQUIRE(core.writeData32(address, programmed).outcome ==
       IOPAccessOutcome::Completed);
     REQUIRE(core.readData32(address).value == programmed);
-    REQUIRE(sio2.readControl() == 0);
+    REQUIRE(bus.read32(programming.physical).value == 0);
     REQUIRE(core.writeData32(address, 0x12345678).outcome ==
       IOPAccessOutcome::Completed);
     REQUIRE(core.readData32(address).value == 0x12345678);
@@ -325,28 +338,30 @@ TEST_CASE("SIO2 guest data bypasses cached payloads but preserves isolation owne
     core.stepInstruction();
     REQUIRE(core.exception().kind == IOPException::InstructionBusError);
     REQUIRE(core.exceptionProgramCounter() == address);
-    REQUIRE(sio2.readControl() == programmed);
+    REQUIRE(bus.read32(programming.physical).value == programmed);
     requireUnchangedCache(core.cache(), before);
   }
 }
 
-TEST_CASE("SIO2 control cannot supply direct cache fills or seeded hits",
+TEST_CASE("SIO2 programming cannot supply direct cache fills or seeded hits",
   "[iop][sio2][sio2-conformance][cache-transport]")
 {
-  for (IOPWord programmed : {0x3bcu, 0xcu})
+  for (const auto &programming : sio2Programming)
   for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
   {
+    const IOPAddress address = programming.physical;
+    const IOPWord programmed = programming.value;
     CAPTURE(programmed);
     CAPTURE(bank);
     IOPBus bus;
     SIO2Controller sio2;
     bus.attachSIO2(&sio2);
-    REQUIRE(sio2.writeControl(programmed) == SIO2AccessStatus::Accepted);
+    REQUIRE(bus.write32(address, programmed).status == IOPBusStatus::Completed);
     IOPCache cache;
-    cache.commitIndexedStore(bank, 0x1f808268, 0x12345678, 0xf);
-    const auto location = IOPCache::location(bank, 0x1f808268);
+    cache.commitIndexedStore(bank, address, 0x12345678, 0xf);
+    const auto location = IOPCache::location(bank, address);
     const IOPCache before = cache;
-    REQUIRE(cache.readWord(bank, bus, 0x1f808268).status == IOPBusStatus::Unmapped);
+    REQUIRE(cache.readWord(bank, bus, address).status == IOPBusStatus::Unmapped);
     if (bank == IOPCacheBank::Instruction)
     {
       REQUIRE_FALSE(cache.instructionLine(location.lineIndex).valid);
@@ -366,9 +381,9 @@ TEST_CASE("SIO2 control cannot supply direct cache fills or seeded hits",
       requireUnchangedCache(cache, before, location.lineIndex);
     }
     const IOPCache invalidated = cache;
-    REQUIRE(cache.readWord(bank, bus, 0x1f808268).status == IOPBusStatus::Unmapped);
+    REQUIRE(cache.readWord(bank, bus, address).status == IOPBusStatus::Unmapped);
     requireUnchangedCache(cache, invalidated);
-    REQUIRE(bus.read32(0x1f808268).value == programmed);
+    REQUIRE(bus.read32(address).value == programmed);
   }
 }
 
@@ -411,7 +426,27 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     {0x1f808268, 0xac200000, false, IOPException::None,
       IOPStoreWidth::Word},
     {0x1f80826c, 0xac220000, false, IOPException::None,
-      IOPStoreWidth::Word}
+      IOPStoreWidth::Word},
+    {0x1f808241, 0x8c220000, false, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0x1f80825e, 0xac220000, false, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0x9f808240, 0x8c220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0x9f80825c, 0xac220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0xbf808240, 0x8c220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0xbf80825c, 0xac220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0x1f808240, 0x80220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None},
+    {0x1f80825e, 0x84220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None},
+    {0x1f808240, 0xa0220000, false, IOPException::None,
+      IOPStoreWidth::Byte},
+    {0x1f80825c, 0xa4220000, false, IOPException::None,
+      IOPStoreWidth::Halfword}
   };
   for (IOPWord programmed : {0x3bcu, 0xcu})
   for (const auto &fault : faults)
@@ -423,6 +458,10 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     SIO2Controller sio2;
     bus.attachSIO2(&sio2);
     REQUIRE(sio2.writeControl(programmed) == SIO2AccessStatus::Accepted);
+    for (std::size_t index = 0; index < SIO2Controller::PORT_CONTROL_COUNT; ++index)
+    {
+      sio2.writePortControl(index, 0x10203040 + static_cast<IOPWord>(index));
+    }
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, fault.address);
@@ -463,19 +502,25 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
       REQUIRE(core.storeFailure().access.physicalAddress == fault.address);
     }
     REQUIRE(sio2.readControl() == programmed);
+    for (std::size_t index = 0; index < SIO2Controller::PORT_CONTROL_COUNT; ++index)
+    {
+      REQUIRE(sio2.readPortControl(index) == 0x10203040 + index);
+    }
     requireUnchangedCache(core.cache(), beforeFault);
   }
 }
 
-TEST_CASE("SIO2 guest merge stores admit only full passive control words",
+TEST_CASE("SIO2 guest merge stores admit only full passive programming words",
   "[iop][sio2][sio2-conformance][merge]")
 {
-  for (IOPWord programmed : {0x3bcu, 0xcu})
-  for (IOPWord initial : {0u, programmed == 0x3bc ? 0xcu : 0x3bcu})
-  for (IOPAddress address : {0x1f808268u, 0x9f808268u, 0xbf808268u})
+  for (const auto &programming : sio2Programming)
+  for (IOPWord initial : {0u, programming.value == 0x3bc ? 0xcu : 0x3bcu})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   for (bool storeLeft : {false, true})
   for (IOPWord lane = 0; lane < 4; ++lane)
   {
+    const IOPWord programmed = programming.value;
+    const IOPAddress address = programming.physical | segment;
     CAPTURE(programmed);
     CAPTURE(initial);
     CAPTURE(address);
@@ -486,7 +531,8 @@ TEST_CASE("SIO2 guest merge stores admit only full passive control words",
     bus.attachSIO2(&sio2);
     if (initial != 0)
     {
-      REQUIRE(sio2.writeControl(initial) == SIO2AccessStatus::Accepted);
+      REQUIRE(bus.write32(programming.physical, initial).status ==
+        IOPBusStatus::Completed);
     }
     IOPCore core;
     core.attachBus(&bus);
@@ -509,7 +555,7 @@ TEST_CASE("SIO2 guest merge stores admit only full passive control words",
     REQUIRE(core.retiredInstructions() == (fullWord ? 2 : 1));
     REQUIRE(core.programCounter() == (fullWord ? 0xa0000010 : 0xa0000004));
     REQUIRE(core.branchContinuation().active == !fullWord);
-    REQUIRE(sio2.readControl() == (fullWord ? programmed : initial));
+    REQUIRE(bus.read32(programming.physical).value == (fullWord ? programmed : initial));
     if (fullWord)
     {
       REQUIRE(core.stopReason() == IOPStopReason::None);
@@ -522,34 +568,40 @@ TEST_CASE("SIO2 guest merge stores admit only full passive control words",
       REQUIRE(core.storeFailure().value == transferred);
       REQUIRE(core.storeFailure().mergeByteEnable == mask);
       REQUIRE(core.storeFailure().access.virtualAddress == address + lane);
-      REQUIRE(core.storeFailure().access.physicalAddress == 0x1f808268 + lane);
+      REQUIRE(core.storeFailure().access.physicalAddress == programming.physical + lane);
       REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
     }
     requireClear(core.cache());
   }
 }
 
-TEST_CASE("SIO2 guest merge loads use the aligned control word and delayed writeback",
+TEST_CASE("SIO2 guest merge loads use the aligned programming word and delayed writeback",
   "[iop][sio2][sio2-conformance][merge]")
 {
   constexpr IOPWord oldValue = 0xaabbccdd;
   struct MergeResults
   {
+    IOPAddress physical;
     IOPWord control;
     std::array<IOPWord, 4> left;
     std::array<IOPWord, 4> right;
   };
   const MergeResults results[] = {
-    {0x3bc, {{0xbcbbccdd, 0x03bcccdd, 0x0003bcdd, 0x000003bc}},
+    {0x1f808268, 0x3bc, {{0xbcbbccdd, 0x03bcccdd, 0x0003bcdd, 0x000003bc}},
       {{0x000003bc, 0xaa000003, 0xaabb0000, 0xaabbcc00}}},
-    {0xc, {{0x0cbbccdd, 0x000cccdd, 0x00000cdd, 0x0000000c}},
-      {{0x0000000c, 0xaa000000, 0xaabb0000, 0xaabbcc00}}}
+    {0x1f808268, 0xc, {{0x0cbbccdd, 0x000cccdd, 0x00000cdd, 0x0000000c}},
+      {{0x0000000c, 0xaa000000, 0xaabb0000, 0xaabbcc00}}},
+    {0x1f808240, 0xc0c0050f, {{0x0fbbccdd, 0x050fccdd, 0xc0050fdd, 0xc0c0050f}},
+      {{0xc0c0050f, 0xaac0c005, 0xaabbc0c0, 0xaabbccc0}}},
+    {0x1f80825c, 0xc0c0050f, {{0x0fbbccdd, 0x050fccdd, 0xc0050fdd, 0xc0c0050f}},
+      {{0xc0c0050f, 0xaac0c005, 0xaabbc0c0, 0xaabbccc0}}}
   };
   for (const auto &result : results)
-  for (IOPAddress address : {0x1f808268u, 0x9f808268u, 0xbf808268u})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   for (bool loadLeft : {false, true})
   for (IOPWord lane = 0; lane < 4; ++lane)
   {
+    const IOPAddress address = result.physical | segment;
     CAPTURE(result.control);
     CAPTURE(address);
     CAPTURE(loadLeft);
@@ -557,7 +609,7 @@ TEST_CASE("SIO2 guest merge loads use the aligned control word and delayed write
     IOPBus bus;
     SIO2Controller sio2;
     bus.attachSIO2(&sio2);
-    REQUIRE(sio2.writeControl(result.control) == SIO2AccessStatus::Accepted);
+    REQUIRE(bus.write32(result.physical, result.control).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
@@ -582,7 +634,7 @@ TEST_CASE("SIO2 guest merge loads use the aligned control word and delayed write
     REQUIRE(core.retiredInstructions() == 3);
     REQUIRE(core.exception().kind == IOPException::None);
     REQUIRE(core.stopReason() == IOPStopReason::None);
-    REQUIRE(sio2.readControl() == result.control);
+    REQUIRE(bus.read32(result.physical).value == result.control);
   }
 }
 

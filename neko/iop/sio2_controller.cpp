@@ -3,6 +3,7 @@
 void SIO2Controller::reset() noexcept
 {
   control = 0;
+  portControls.fill(0);
 }
 
 std::uint32_t SIO2Controller::readControl() const noexcept
@@ -23,4 +24,14 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
   }
   control = value;
   return SIO2AccessStatus::Accepted;
+}
+
+std::uint32_t SIO2Controller::readPortControl(std::size_t index) const
+{
+  return portControls.at(index);
+}
+
+void SIO2Controller::writePortControl(std::size_t index, std::uint32_t value)
+{
+  portControls.at(index) = value;
 }

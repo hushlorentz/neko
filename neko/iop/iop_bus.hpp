@@ -148,6 +148,7 @@ class IOPBus final
     {
       CDVD,
       SIO2Control,
+      SIO2PortControl,
       None,
       SSBUSConfiguration,
       InterruptController,

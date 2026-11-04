@@ -17,6 +17,7 @@ namespace
 {
   constexpr IOPAddress absentROM1Base = 0x1e000000;
   constexpr IOPAddress sio2Control = 0x1f808268;
+  constexpr IOPAddress sio2PortControlBase = 0x1f808240;
   constexpr std::size_t absentROM1Size = 4 * 1024 * 1024;
   constexpr std::array<IOPAddress, 9> cdvdRegisters = {{
     0x1f402004, 0x1f402005, 0x1f402006, 0x1f402008, 0x1f40200a,
@@ -268,6 +269,15 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, 0, Device::SIO2Control};
   }
+  if (first >= sio2PortControlBase &&
+      first < sio2PortControlBase +
+        SIO2Controller::PORT_CONTROL_COUNT * sizeof(IOPWord) &&
+      first % sizeof(IOPWord) == 0 && last < first + sizeof(IOPWord))
+  {
+    return {IOPBusRegion::Mmio,
+      static_cast<std::size_t>((first - sio2PortControlBase) / sizeof(IOPWord)),
+      Device::SIO2PortControl};
+  }
 
   const auto ssbus = locateSSBUS(address, last);
   if (ssbus.device != Device::None)
@@ -508,6 +518,7 @@ IOPBusReadResult IOPBus::readInstruction32(IOPAddress address)
   const Location location = locate(address, sizeof(IOPWord));
   if (location.device == Device::ChannelRegisterInitialization ||
       location.device == Device::SIO2Control ||
+      location.device == Device::SIO2PortControl ||
       location.device == Device::AbsentROM1)
   {
     return {};
@@ -581,6 +592,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == sizeof(IOPWord) && sio2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed, sio2->readControl()}
         : IOPBusReadResult{};
+    case Device::SIO2PortControl:
+      return width == sizeof(IOPWord) && sio2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            sio2->readPortControl(location.offset)}
+        : IOPBusReadResult{};
     case Device::CDVD:
     {
       if (width != 1 || cdvd == nullptr)
@@ -642,6 +658,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return width == sizeof(IOPWord) && sio2 != nullptr &&
         sio2->writeControl(value) == SIO2AccessStatus::Accepted
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SIO2PortControl:
+      if (width != sizeof(IOPWord) || sio2 == nullptr)
+      {
+        return {};
+      }
+      sio2->writePortControl(location.offset, value);
+      return {IOPBusStatus::Completed};
     case Device::CDVD:
       return width == 1 && cdvd != nullptr &&
         cdvd->writeByte(static_cast<IOPAddress>(location.offset),
