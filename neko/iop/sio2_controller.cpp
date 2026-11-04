@@ -4,6 +4,7 @@ void SIO2Controller::reset() noexcept
 {
   control = 0;
   portControls.fill(0);
+  commandDescriptors.fill(0);
 }
 
 std::uint32_t SIO2Controller::readControl() const noexcept
@@ -34,4 +35,14 @@ std::uint32_t SIO2Controller::readPortControl(std::size_t index) const
 void SIO2Controller::writePortControl(std::size_t index, std::uint32_t value)
 {
   portControls.at(index) = value;
+}
+
+std::uint32_t SIO2Controller::readCommandDescriptor(std::size_t index) const
+{
+  return commandDescriptors.at(index);
+}
+
+void SIO2Controller::writeCommandDescriptor(std::size_t index, std::uint32_t value)
+{
+  commandDescriptors.at(index) = value;
 }

@@ -210,12 +210,23 @@ void NekoSaveStateCodec::writeIOPState(
   {
     auto scope = writer->scope("sio2");
     writer->writeFieldU32("control", system.sio2ControllerComponent.control);
-    auto ports = writer->scope("portControls");
-    const auto &words = system.sio2ControllerComponent.portControls;
-    for (std::size_t index = 0; index < words.size(); ++index)
     {
-      auto word = writer->element(index);
-      writer->writeFieldU32("value", words[index]);
+      auto ports = writer->scope("portControls");
+      const auto &words = system.sio2ControllerComponent.portControls;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU32("value", words[index]);
+      }
+    }
+    {
+      auto descriptors = writer->scope("commandDescriptors");
+      const auto &words = system.sio2ControllerComponent.commandDescriptors;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU32("value", words[index]);
+      }
     }
   }
   {
@@ -334,11 +345,21 @@ void NekoSaveStateCodec::readIOP(
     reader->requireField(sio2.control == 0 ||
       SIO2Controller::supportsControl(sio2.control),
       "SIO2 control is outside the passive programming profile");
-    auto ports = reader->scope("portControls");
-    for (std::size_t index = 0; index < sio2.portControls.size(); ++index)
     {
-      auto word = reader->element(index);
-      sio2.portControls[index] = reader->readFieldU32("value");
+      auto ports = reader->scope("portControls");
+      for (std::size_t index = 0; index < sio2.portControls.size(); ++index)
+      {
+        auto word = reader->element(index);
+        sio2.portControls[index] = reader->readFieldU32("value");
+      }
+    }
+    {
+      auto descriptors = reader->scope("commandDescriptors");
+      for (std::size_t index = 0; index < sio2.commandDescriptors.size(); ++index)
+      {
+        auto word = reader->element(index);
+        sio2.commandDescriptors[index] = reader->readFieldU32("value");
+      }
     }
   }
   {

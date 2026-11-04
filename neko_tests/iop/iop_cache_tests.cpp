@@ -97,7 +97,8 @@ namespace
 
   constexpr SIO2Programming sio2Programming[] = {
     {0x1f808268, 0x3bc}, {0x1f808268, 0xc},
-    {0x1f808240, 0xc0c0050f}, {0x1f80825c, 0x01060014}
+    {0x1f808240, 0xc0c0050f}, {0x1f80825c, 0x01060014},
+    {0x1f808200, 0x001c0740}, {0x1f80823c, 0xffffffff}
   };
 
   void requireUnchangedCache(
@@ -446,6 +447,26 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     {0x1f808240, 0xa0220000, false, IOPException::None,
       IOPStoreWidth::Byte},
     {0x1f80825c, 0xa4220000, false, IOPException::None,
+      IOPStoreWidth::Halfword},
+    {0x1f808201, 0x8c220000, false, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0x1f80823e, 0xac220000, false, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0x9f808200, 0x8c220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0x9f80823c, 0xac220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0xbf808200, 0x8c220000, true, IOPException::AddressErrorLoadOrFetch,
+      IOPStoreWidth::None},
+    {0xbf80823c, 0xac220000, true, IOPException::AddressErrorStore,
+      IOPStoreWidth::None},
+    {0x1f808200, 0x80220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None},
+    {0x1f80823e, 0x84220000, false, IOPException::DataBusError,
+      IOPStoreWidth::None},
+    {0x1f808200, 0xa0220000, false, IOPException::None,
+      IOPStoreWidth::Byte},
+    {0x1f80823c, 0xa4220000, false, IOPException::None,
       IOPStoreWidth::Halfword}
   };
   for (IOPWord programmed : {0x3bcu, 0xcu})
@@ -461,6 +482,10 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     for (std::size_t index = 0; index < SIO2Controller::PORT_CONTROL_COUNT; ++index)
     {
       sio2.writePortControl(index, 0x10203040 + static_cast<IOPWord>(index));
+    }
+    for (std::size_t index = 0; index < SIO2Controller::COMMAND_DESCRIPTOR_COUNT; ++index)
+    {
+      sio2.writeCommandDescriptor(index, 0x55667700 + static_cast<IOPWord>(index));
     }
     IOPCore core;
     core.attachBus(&bus);
@@ -505,6 +530,10 @@ TEST_CASE("SIO2 guest faults preserve protection alignment and branch-delay owne
     for (std::size_t index = 0; index < SIO2Controller::PORT_CONTROL_COUNT; ++index)
     {
       REQUIRE(sio2.readPortControl(index) == 0x10203040 + index);
+    }
+    for (std::size_t index = 0; index < SIO2Controller::COMMAND_DESCRIPTOR_COUNT; ++index)
+    {
+      REQUIRE(sio2.readCommandDescriptor(index) == 0x55667700 + index);
     }
     requireUnchangedCache(core.cache(), beforeFault);
   }
@@ -594,6 +623,10 @@ TEST_CASE("SIO2 guest merge loads use the aligned programming word and delayed w
     {0x1f808240, 0xc0c0050f, {{0x0fbbccdd, 0x050fccdd, 0xc0050fdd, 0xc0c0050f}},
       {{0xc0c0050f, 0xaac0c005, 0xaabbc0c0, 0xaabbccc0}}},
     {0x1f80825c, 0xc0c0050f, {{0x0fbbccdd, 0x050fccdd, 0xc0050fdd, 0xc0c0050f}},
+      {{0xc0c0050f, 0xaac0c005, 0xaabbc0c0, 0xaabbccc0}}},
+    {0x1f808200, 0x001c0740, {{0x40bbccdd, 0x0740ccdd, 0x1c0740dd, 0x001c0740}},
+      {{0x001c0740, 0xaa001c07, 0xaabb001c, 0xaabbcc00}}},
+    {0x1f80823c, 0xc0c0050f, {{0x0fbbccdd, 0x050fccdd, 0xc0050fdd, 0xc0c0050f}},
       {{0xc0c0050f, 0xaac0c005, 0xaabbc0c0, 0xaabbccc0}}}
   };
   for (const auto &result : results)

@@ -123,7 +123,8 @@ TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
          {"system.iop.sio2.control", 0xffffffff},
          {"container.version", 74},
          {"container.version", 75},
-         {"container.version", 76}})
+         {"container.version", 76},
+         {"container.version", 77}})
   {
     CAPTURE(mutation.first);
     CAPTURE(mutation.second);
@@ -161,76 +162,93 @@ TEST_CASE("SIO2 invalid images reject transactionally with intact wiring",
   REQUIRE(foreign.readControl() == 0x3bc);
 }
 
-TEST_CASE("SIO2 port images hash serialize and adopt every independent word",
-  "[iop][sio2][sio2-port][save-state]")
+TEST_CASE("SIO2 programming images hash serialize and adopt every independent word",
+  "[iop][sio2][sio2-port][sio2-descriptor][save-state]")
 {
-  constexpr IOPAddress base = 0x1f808240;
-  const IOPWord values[] = {
-    0xc0c0050f, 0x01060014, 0xffffffff, 0, 0x80000000, 1, 0x12345678, 0xa5a55a5a
+  struct Bank
+  {
+    IOPAddress base;
+    std::size_t count;
+    const char *field;
   };
-  NekoSystem source;
-  const auto cold = source.saveState();
-  for (std::size_t index = 0; index < 8; ++index)
+  const Bank banks[] = {
+    {0x1f808240, 8, "portControls"},
+    {0x1f808200, 16, "commandDescriptors"}
+  };
+  const IOPWord values[] = {
+    0x001c0740, 0x01060014, 0xffffffff, 0, 0x80000000, 1, 0x12345678, 0xa5a55a5a,
+    0x89abcdef, 2, 0x55aa55aa, 0xc0c0050f, 0x100, 0x40000, 0x7fffffff, 0x76543210
+  };
+  for (const auto &bank : banks)
   {
-    const auto address = base + static_cast<IOPAddress>(index * 4);
-    CAPTURE(index);
-    const auto hash = source.iopStateHash();
-    REQUIRE(source.iopBus().write32(address, 0x55aa55aa).status ==
+    const auto base = bank.base;
+    CAPTURE(base);
+    NekoSystem source;
+    const auto cold = source.saveState();
+    for (std::size_t index = 0; index < bank.count; ++index)
+    {
+      const auto address = base + static_cast<IOPAddress>(index * 4);
+      CAPTURE(index);
+      const auto hash = source.iopStateHash();
+      REQUIRE(source.iopBus().write32(address, 0x55aa55aa).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(source.iopStateHash() != hash);
+      REQUIRE(source.iopBus().write32(address, values[index]).status ==
+        IOPBusStatus::Completed);
+      REQUIRE((source.iopStateHash() == hash) == (values[index] == 0));
+    }
+    const auto programmed = source.saveState();
+    const auto fields = inspectSaveState(programmed);
+    NekoSystem destination;
+    REQUIRE(destination.iopBus().write32(0x1f808268, 0xc).status ==
       IOPBusStatus::Completed);
-    REQUIRE(source.iopStateHash() != hash);
-    REQUIRE(source.iopBus().write32(address, values[index]).status ==
+    for (std::size_t index = 0; index < bank.count; ++index)
+    {
+      const auto *field = fields.find(
+        std::string("system.iop.sio2.") + bank.field + "[" +
+          std::to_string(index) + "].value");
+      REQUIRE(field != nullptr);
+      REQUIRE(field->kind == SaveStateFieldKind::U32);
+      REQUIRE(field->size == 4);
+      REQUIRE(field->scalarValue == values[index]);
+      REQUIRE(destination.iopBus().write32(base + static_cast<IOPAddress>(index * 4),
+        ~values[index]).status == IOPBusStatus::Completed);
+    }
+    const auto before = destination.saveState();
+    const auto beforeHash = destination.iopStateHash();
+    SaveStateMutation invalid(programmed);
+    invalid.writeScalar("system.iop.timing.pixelPhase", 0xffff);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+    REQUIRE(destination.iopStateHash() == beforeHash);
+    destination.loadState(programmed);
+    REQUIRE(destination.saveState() == programmed);
+    REQUIRE(destination.iopStateHash() == source.iopStateHash());
+    for (std::size_t index = 0; index < bank.count; ++index)
+    {
+      REQUIRE(destination.iopBus().read32(base +
+        static_cast<IOPAddress>(index * 4)).value == values[index]);
+    }
+    destination.loadState(cold);
+    REQUIRE(destination.saveState() == cold);
+    for (std::size_t index = 0; index < bank.count; ++index)
+    {
+      REQUIRE(destination.iopBus().read32(base +
+        static_cast<IOPAddress>(index * 4)).value == 0);
+    }
+    SIO2Controller foreign;
+    destination.iopBus().attachSIO2(&foreign);
+    destination.loadState(programmed);
+    REQUIRE(destination.iopBus().write32(base, 0x55667788).status ==
       IOPBusStatus::Completed);
-    REQUIRE((source.iopStateHash() == hash) == (values[index] == 0));
+    REQUIRE(source.iopBus().read32(base).value == values[0]);
+    source.sio2Controller().reset();
+    REQUIRE(destination.iopBus().read32(base).value == 0x55667788);
+    destination.iopBus().attachSIO2(&foreign);
+    REQUIRE(destination.iopBus().read32(base).value == 0);
   }
-  const auto programmed = source.saveState();
-  const auto fields = inspectSaveState(programmed);
-  NekoSystem destination;
-  REQUIRE(destination.iopBus().write32(0x1f808268, 0xc).status == IOPBusStatus::Completed);
-  for (std::size_t index = 0; index < 8; ++index)
-  {
-    const auto *field = fields.find(
-      "system.iop.sio2.portControls[" + std::to_string(index) + "].value");
-    REQUIRE(field != nullptr);
-    REQUIRE(field->kind == SaveStateFieldKind::U32);
-    REQUIRE(field->size == 4);
-    REQUIRE(field->scalarValue == values[index]);
-    REQUIRE(destination.iopBus().write32(base + static_cast<IOPAddress>(index * 4),
-      ~values[index]).status == IOPBusStatus::Completed);
-  }
-  const auto before = destination.saveState();
-  const auto beforeHash = destination.iopStateHash();
-  SaveStateMutation invalid(programmed);
-  invalid.writeScalar("system.iop.timing.pixelPhase", 0xffff);
-  invalid.refreshChecksum();
-  REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
-  REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
-  REQUIRE(destination.saveState() == before);
-  REQUIRE(destination.iopStateHash() == beforeHash);
-  destination.loadState(programmed);
-  REQUIRE(destination.saveState() == programmed);
-  REQUIRE(destination.iopStateHash() == source.iopStateHash());
-  for (std::size_t index = 0; index < 8; ++index)
-  {
-    REQUIRE(destination.iopBus().read32(base +
-      static_cast<IOPAddress>(index * 4)).value == values[index]);
-  }
-  destination.loadState(cold);
-  REQUIRE(destination.saveState() == cold);
-  for (std::size_t index = 0; index < 8; ++index)
-  {
-    REQUIRE(destination.iopBus().read32(base +
-      static_cast<IOPAddress>(index * 4)).value == 0);
-  }
-  SIO2Controller foreign;
-  destination.iopBus().attachSIO2(&foreign);
-  destination.loadState(programmed);
-  REQUIRE(destination.iopBus().write32(base, 0x55667788).status ==
-    IOPBusStatus::Completed);
-  REQUIRE(source.iopBus().read32(base).value == values[0]);
-  source.sio2Controller().reset();
-  REQUIRE(destination.iopBus().read32(base).value == 0x55667788);
-  destination.iopBus().attachSIO2(&foreign);
-  REQUIRE(destination.iopBus().read32(base).value == 0);
 }
 
 TEST_CASE("IOP persistence owns attached devices while the CPU remains halted")

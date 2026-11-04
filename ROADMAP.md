@@ -3198,6 +3198,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research the observed `0x1f808240` write and its port-control family;
       select and implement a bounded contract with guest/restored coverage,
       required persistence gates and independent review before the commit.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; attribute the next originating
+      dependency without claiming active transfers, readiness or completed boot.
+
+### SIO2 Command-Descriptor Programming Dependency
+
+- [x] Research the observed `0x1f808200` write and its descriptor family;
+      select and implement a bounded programming/lifecycle contract with guest/
+      restored coverage, required persistence gates and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; attribute the next originating
       dependency without claiming active transfers, readiness or completed boot.
