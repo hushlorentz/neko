@@ -3216,9 +3216,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research the byte write at `0x1f808260` and its containing family;
       obtain any required active-policy approval before implementing a bounded
       contract with guest/restored coverage, gates and independent review.
-- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; attribute the next originating
       dependency without claiming active transfers, readiness or completed boot.
+
+### SIO2 Active-Control Dependency
+
+- [ ] Research the SIO2 CTRL `0xb1` write at `0x1f808268`; obtain explicit
+      approval for a bounded active-control/transfer contract before implementing
+      it with guest/restored coverage, gates and independent review.
+- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; attribute the next originating
+      dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 
