@@ -38,3 +38,9 @@ bool SPU2Controller::writeMasterVolumeControl(
   control = value;
   return true;
 }
+
+bool SPU2Controller::writeUnknownB60Initialization(
+  std::uint16_t value) const noexcept
+{
+  return value == 0;
+}

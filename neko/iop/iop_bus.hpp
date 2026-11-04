@@ -158,6 +158,7 @@ class IOPBus final
       SIO2InterruptStatus,
       SPU2SPDIFConfiguration,
       SPU2MasterVolumeControl,
+      SPU2UnknownB60Initialization,
       None,
       SSBUSConfiguration,
       InterruptController,

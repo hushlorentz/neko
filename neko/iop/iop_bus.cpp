@@ -24,6 +24,7 @@ namespace
   constexpr IOPAddress sio2ReceiveOutput = 0x1f808264;
   constexpr IOPAddress sio2TransferStatusBase = 0x1f80826c;
   constexpr IOPAddress sio2InterruptStatus = 0x1f808280;
+  constexpr IOPAddress spu2UnknownB60Initialization = 0x1f900b60;
   constexpr std::array<IOPAddress, SPU2Controller::SPDIF_CONFIGURATION_COUNT>
     spdifConfigurationAddresses = {{
       0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca
@@ -342,6 +343,11 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
     {
       return {IOPBusRegion::Mmio, index, Device::SPU2MasterVolumeControl};
     }
+  }
+  if (first == spu2UnknownB60Initialization &&
+      last < first + sizeof(std::uint16_t))
+  {
+    return {IOPBusRegion::Mmio, 0, Device::SPU2UnknownB60Initialization};
   }
 
   const auto ssbus = locateSSBUS(address, last);
@@ -738,6 +744,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == 1 || width == 2 || width == sizeof(IOPWord)
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
+    case Device::SPU2UnknownB60Initialization:
     case Device::SIO2TransmitInput:
     case Device::POST3:
     case Device::DPCR3Initialization:
@@ -773,6 +780,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       }
       return {IOPBusStatus::Completed};
+    case Device::SPU2UnknownB60Initialization:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeUnknownB60Initialization(static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SIO2TransmitInput:
       return width == 1 && sio2 != nullptr &&
         sio2->writeTransmitByte(static_cast<std::uint8_t>(value)) ==

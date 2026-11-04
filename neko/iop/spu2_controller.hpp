@@ -17,6 +17,8 @@ class SPU2Controller final
     static bool isFixedMasterVolumeControl(std::uint16_t value) noexcept;
     std::uint16_t readMasterVolumeControl(std::size_t index) const;
     bool writeMasterVolumeControl(std::size_t index, std::uint16_t value);
+    // Provisional exact 0x1f900b60 zero initialization; no retained state or effects.
+    bool writeUnknownB60Initialization(std::uint16_t value) const noexcept;
 
   private:
     friend class NekoSaveStateCodec;
