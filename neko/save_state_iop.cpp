@@ -276,6 +276,15 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU16("value", words[index]);
       }
     }
+    {
+      auto routing = writer->scope("voiceMix");
+      const auto &words = system.spu2ControllerComponent.voiceMix;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -458,6 +467,15 @@ void NekoSaveStateCodec::readIOP(
         words[index] = reader->readFieldU16("value");
         reader->requireField(SPU2Controller::isSupportedCoreAttribute(words[index]),
           "SPU2 core attribute bits1-13 are unsupported");
+      }
+    }
+    {
+      auto routing = reader->scope("voiceMix");
+      auto &words = system->spu2ControllerComponent.voiceMix;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
       }
     }
   }

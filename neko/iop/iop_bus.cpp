@@ -30,6 +30,13 @@ namespace
   constexpr std::array<IOPAddress, 2> spu2CoreAttributeAddresses = {{
     0x1f90019a, 0x1f90059a
   }};
+  constexpr std::array<IOPAddress, SPU2Controller::VOICE_MIX_HALFWORD_COUNT>
+    spu2VoiceMixAddresses = {{
+      0x1f900188, 0x1f90018a, 0x1f90018c, 0x1f90018e,
+      0x1f900190, 0x1f900192, 0x1f900194, 0x1f900196,
+      0x1f900588, 0x1f90058a, 0x1f90058c, 0x1f90058e,
+      0x1f900590, 0x1f900592, 0x1f900594, 0x1f900596
+    }};
   constexpr std::array<IOPAddress, 2> spu2AutoDMAAddresses = {{
     0x1f9001b0, 0x1f9005b0
   }};
@@ -365,6 +372,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, core, Device::SPU2CoreAttribute};
+    }
+  }
+  for (std::size_t index = 0; index < spu2VoiceMixAddresses.size(); ++index)
+  {
+    if (first == spu2VoiceMixAddresses[index] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, index, Device::SPU2VoiceMix};
     }
   }
   for (const auto statusAddress : spu2CoreStatusAddresses)
@@ -727,6 +742,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readCoreAttribute(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2VoiceMix:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readVoiceMix(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2UnprogrammedCoreStatus:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -826,6 +846,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SPU2VoiceMix:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeVoiceMix(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
     case Device::SPU2SPDIFConfiguration:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {

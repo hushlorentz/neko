@@ -3384,6 +3384,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected policy through the existing owner with focused
       red/green, guest/restored and excluded-access coverage, plus independent
       review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Passive Voice-Mix Routing Masks
+
+- [x] Research the originating `0xffff` halfword store and the paired-core
+      VMIXL/VMIXEL/VMIXR/VMIXER family; select passive halfword retention
+      without activating voices, mixing, effects or signals.
+- [x] Implement all sixteen independent halfword images through the existing
+      owner with red/green, guest, excluded-access and canonical persistence
+      coverage; independently review and run required optimized/ASan gates.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

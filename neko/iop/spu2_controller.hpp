@@ -12,6 +12,7 @@ class SPU2Controller final
     static constexpr std::size_t SPDIF_CONFIGURATION_COUNT = 5;
     static constexpr std::size_t MASTER_VOLUME_COUNT = 4;
     static constexpr std::size_t CORE_COUNT = 2;
+    static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
     void reset() noexcept;
     std::uint16_t readSPDIFConfiguration(std::size_t index) const;
     void writeSPDIFConfiguration(std::size_t index, std::uint16_t value);
@@ -22,6 +23,8 @@ class SPU2Controller final
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
     bool writeCoreAttribute(std::size_t core, std::uint16_t value);
+    std::uint16_t readVoiceMix(std::size_t index) const;
+    void writeVoiceMix(std::size_t index, std::uint16_t value);
     // Provisional quiescent STATX projection; replace when transfers are modeled.
     std::uint16_t readUnprogrammedCoreStatus() const noexcept;
     // Provisional KOFF effect; replace before voice programming or key-on.
@@ -38,6 +41,9 @@ class SPU2Controller final
     // Core 0 left/right, core 1 left/right; programmed controls, not current gain.
     std::array<std::uint16_t, MASTER_VOLUME_COUNT> masterVolumeControls{};
     std::array<std::uint16_t, CORE_COUNT> coreAttributes{};
+    // Per core: VMIXL, VMIXEL, VMIXR, VMIXER; voices 0-15 then 16-23.
+    // Passive raw halfwords, including unused upper bits; no live voice gates.
+    std::array<std::uint16_t, VOICE_MIX_HALFWORD_COUNT> voiceMix{};
 };
 
 #endif

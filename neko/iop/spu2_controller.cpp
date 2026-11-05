@@ -5,6 +5,7 @@ void SPU2Controller::reset() noexcept
   spdifConfiguration.fill(0);
   masterVolumeControls.fill(0);
   coreAttributes.fill(0);
+  voiceMix.fill(0);
 }
 
 std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
@@ -60,6 +61,16 @@ bool SPU2Controller::writeCoreAttribute(
   }
   attribute = value;
   return true;
+}
+
+std::uint16_t SPU2Controller::readVoiceMix(std::size_t index) const
+{
+  return voiceMix.at(index);
+}
+
+void SPU2Controller::writeVoiceMix(std::size_t index, std::uint16_t value)
+{
+  voiceMix.at(index) = value;
 }
 
 std::uint16_t SPU2Controller::readUnprogrammedCoreStatus() const noexcept
