@@ -3396,6 +3396,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement all sixteen independent halfword images through the existing
       owner with red/green, guest, excluded-access and canonical persistence
       coverage; independently review and run required optimized/ASan gates.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Passive Main-Mix Routing Controls
+
+- [x] Research the originating `0x0ff0` halfword store and paired-core MMIX
+      family; select passive halfword retention without activating source
+      routing, mixing, effects or output.
+- [x] Implement both independent MMIX halfword images through the existing
+      owner with red/green, guest, excluded-access and canonical persistence
+      coverage; independently review and run required optimized/ASan gates.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

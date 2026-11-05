@@ -30,6 +30,10 @@ namespace
   constexpr std::array<IOPAddress, 2> spu2CoreAttributeAddresses = {{
     0x1f90019a, 0x1f90059a
   }};
+  constexpr std::array<IOPAddress, SPU2Controller::CORE_COUNT>
+    spu2MainMixAddresses = {{
+      0x1f900198, 0x1f900598
+    }};
   constexpr std::array<IOPAddress, SPU2Controller::VOICE_MIX_HALFWORD_COUNT>
     spu2VoiceMixAddresses = {{
       0x1f900188, 0x1f90018a, 0x1f90018c, 0x1f90018e,
@@ -380,6 +384,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, index, Device::SPU2VoiceMix};
+    }
+  }
+  for (std::size_t core = 0; core < spu2MainMixAddresses.size(); ++core)
+  {
+    if (first == spu2MainMixAddresses[core] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, core, Device::SPU2MainMix};
     }
   }
   for (const auto statusAddress : spu2CoreStatusAddresses)
@@ -747,6 +759,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readVoiceMix(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2MainMix:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readMainMix(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2UnprogrammedCoreStatus:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -846,6 +863,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SPU2MainMix:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeMainMix(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
     case Device::SPU2VoiceMix:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {

@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_88_PREPARED_STATE_SIZE = 39954024;
+    VERSION_89_PREPARED_STATE_SIZE = 39954028;
   constexpr std::uint64_t
-    VERSION_88_PREPARED_STATE_HASH =
-      UINT64_C(11574610495403033186);
+    VERSION_89_PREPARED_STATE_HASH =
+      UINT64_C(1498428695589896323);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 88 save-state layout is byte-stable")
+TEST_CASE("Version 89 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,14 +639,14 @@ TEST_CASE("Version 88 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 88);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 89);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_88_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_89_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_88_PREPARED_STATE_HASH);
+    VERSION_89_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -686,16 +686,27 @@ TEST_CASE("Version 88 save-state layout is byte-stable")
     REQUIRE(routing->containerOffset == routingOffset + 2 * index);
     REQUIRE(routing->scalarValue == 0);
   }
+  const auto mainMixOffset = routingOffset + 32;
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    const auto *mainMix = snapshot.find(
+      "system.iop.spu2.mainMix[" + std::to_string(core) + "].value");
+    REQUIRE(mainMix != nullptr);
+    REQUIRE(mainMix->kind == SaveStateFieldKind::U16);
+    REQUIRE(mainMix->size == 2);
+    REQUIRE(mainMix->containerOffset == mainMixOffset + 2 * core);
+    REQUIRE(mainMix->scalarValue == 0);
+  }
   auto previousVersion = state;
-  previousVersion.erase(previousVersion.begin() + routingOffset,
-    previousVersion.begin() + routingOffset + 32);
-  previousVersion[SAVE_STATE_VERSION_OFFSET] = 87;
+  previousVersion.erase(previousVersion.begin() + mainMixOffset,
+    previousVersion.begin() + mainMixOffset + 4);
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 88;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 12,
     hashBytes(previousVersion, TEST_SAVE_STATE_HEADER_SIZE));
-  REQUIRE(previousVersion.size() == 39953992);
-  REQUIRE(hashBytes(previousVersion) == UINT64_C(9495706237301983902));
+  REQUIRE(previousVersion.size() == 39954024);
+  REQUIRE(hashBytes(previousVersion) == UINT64_C(11574610495403033186));
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);

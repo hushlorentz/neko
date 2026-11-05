@@ -285,6 +285,15 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU16("value", words[index]);
       }
     }
+    {
+      auto routing = writer->scope("mainMix");
+      const auto &words = system.spu2ControllerComponent.mainMix;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto word = writer->element(core);
+        writer->writeFieldU16("value", words[core]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -476,6 +485,15 @@ void NekoSaveStateCodec::readIOP(
       {
         auto word = reader->element(index);
         words[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto routing = reader->scope("mainMix");
+      auto &words = system->spu2ControllerComponent.mainMix;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto word = reader->element(core);
+        words[core] = reader->readFieldU16("value");
       }
     }
   }
