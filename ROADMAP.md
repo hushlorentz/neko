@@ -3372,6 +3372,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded policy through the existing owner with
       focused red/green, guest/restored and excluded-access coverage, plus
       independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Core Attribute `0xc001` Programming
+
+- [x] Research the originating core1 `0xc001` halfword store and ATTR bit0;
+      select passive bit0 retention alongside bits14-15, with bits1-13
+      rejected and no active effects.
+- [x] Implement the selected policy through the existing owner with focused
+      red/green, guest/restored and excluded-access coverage, plus independent
+      review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

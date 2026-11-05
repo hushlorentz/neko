@@ -340,7 +340,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
-      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc000 : 0x4900;
+      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc001 : 0x4900;
     if (!coreStatus)
     {
       REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
@@ -403,7 +403,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
-      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc000 : 0x4900;
+      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc001 : 0x4900;
     if (!coreStatus)
     {
       REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
@@ -548,7 +548,8 @@ TEST_CASE("SPU2 core attributes bypass cached payloads but preserve isolation",
   for (IOPAddress physical : {0x1f90019au, 0x1f90059au})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
-  for (std::uint16_t value : {0x4000, 0x8000, 0xc000})
+  for (std::uint16_t value : {
+      0, 1, 0x4000, 0x4001, 0x8000, 0x8001, 0xc000, 0xc001})
   {
     const auto address = physical | segment;
     CAPTURE(address);

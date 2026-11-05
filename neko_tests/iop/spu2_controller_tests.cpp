@@ -29,8 +29,8 @@ namespace
   constexpr std::array<IOPAddress, 2> coreAttributeAddresses = {{
     0x1f90019a, 0x1f90059a
   }};
-  constexpr std::array<std::uint16_t, 4> coreAttributeValues = {{
-    0, 0x4000, 0x8000, 0xc000
+  constexpr std::array<std::uint16_t, 8> coreAttributeValues = {{
+    0, 1, 0x4000, 0x4001, 0x8000, 0x8001, 0xc000, 0xc001
   }};
   constexpr std::array<IOPAddress, 2> autoDMAAddresses = {{
     0x1f9001b0, 0x1f9005b0
@@ -489,7 +489,7 @@ TEST_CASE("SPU2 quiescent status loads restore across branch and load continuati
   }
 }
 
-TEST_CASE("SPU2 core attributes retain independent bits14-15 images",
+TEST_CASE("SPU2 core attributes retain independent bit0 and bits14-15 images",
   "[iop][spu2][spu2-attr]")
 {
   NekoSystem system;
@@ -529,25 +529,26 @@ TEST_CASE("SPU2 core attributes retain independent bits14-15 images",
         REQUIRE(bus.read16(peerAddress).value == peer);
       }
     }
-    REQUIRE(bus.write16(peerAddress, 0x4000).status == IOPBusStatus::Completed);
-    REQUIRE(bus.write16(address, 0xc000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(peerAddress, 0x4001).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(address, 0xc001).status == IOPBusStatus::Completed);
     const auto programmed = system.iopStateHash();
     REQUIRE(programmed != before);
-    REQUIRE(bus.write16(address, 0xc000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(address, 0xc001).status == IOPBusStatus::Completed);
     REQUIRE(system.iopStateHash() == programmed);
     for (std::uint32_t value = 1; value <= 0xffff; ++value)
     {
-      if ((value & 0x3fff) != 0 &&
-          bus.write16(address, static_cast<std::uint16_t>(value)).status !=
-          IOPBusStatus::Unmapped)
+      if ((value & 0x3ffe) != 0 &&
+          (bus.write16(address, static_cast<std::uint16_t>(value)).status !=
+            IOPBusStatus::Unmapped ||
+           system.spu2Controller().readCoreAttribute(selected) != 0xc001))
       {
         FAIL("Unsupported core ATTR write admitted: " << value);
       }
     }
     REQUIRE(system.iopStateHash() == programmed);
     REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
-    REQUIRE(bus.read16(address).value == 0xc000);
-    REQUIRE(bus.read16(peerAddress).value == 0x4000);
+    REQUIRE(bus.read16(address).value == 0xc001);
+    REQUIRE(bus.read16(peerAddress).value == 0x4001);
     REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
     REQUIRE(bus.write16(peerAddress, 0).status == IOPBusStatus::Completed);
     REQUIRE(bus.read16(address).value == 0);
@@ -590,7 +591,7 @@ TEST_CASE("SPU2 core attributes retain independent bits14-15 images",
   }
   for (const auto address : coreAttributeAddresses)
   {
-    REQUIRE(bus.write16(address, 0xc000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(address, 0xc001).status == IOPBusStatus::Completed);
   }
   system.reset();
   for (const auto address : coreAttributeAddresses)
@@ -608,7 +609,7 @@ TEST_CASE("SPU2 core attributes reject neighbors and other transports",
     CAPTURE(address);
     NekoSystem system;
     auto &bus = system.iopBus();
-    REQUIRE(bus.write16(address, 0xc000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(address, 0xc001).status == IOPBusStatus::Completed);
     const auto before = system.iopStateHash();
     REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
@@ -891,14 +892,17 @@ TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot ou
       keyOffLowAddresses, keyOffHighAddresses})
   for (const auto physical : addresses)
   for (auto segment : {0u, 0x80000000u, 0xa0000000u})
-  for (std::uint16_t value : {0, 1, 0x4000, 0x8000, 0xc000, 0xc040, 0xffff})
+  for (std::uint16_t value : {
+      0, 1, 2, 0x4000, 0x4001, 0x8000, 0x8001, 0xc000, 0xc001, 0xc041, 0xffff})
   {
     const auto address = physical | segment;
     CAPTURE(address);
     CAPTURE(value);
     const bool accepted = value == 0 ||
       (addresses == coreAttributeAddresses &&
-        (value == 0x4000 || value == 0x8000 || value == 0xc000)) ||
+        (value == 1 || value == 0x4000 || value == 0x4001 ||
+          value == 0x8000 || value == 0x8001 ||
+          value == 0xc000 || value == 0xc001)) ||
       addresses == keyOffLowAddresses || addresses == keyOffHighAddresses;
     NekoSystem system;
     programConfiguration(system);
@@ -987,14 +991,17 @@ TEST_CASE("SPU2 bounded initialization resumes pending stores canonically",
       unknownInitializationAddresses, coreAttributeAddresses, autoDMAAddresses,
       keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
-  for (std::uint16_t value : {0, 0x4000, 0x8000, 0xc000, 0xffff})
+  for (std::uint16_t value : {
+      0, 1, 0x4000, 0x4001, 0x8000, 0x8001, 0xc000, 0xc001, 0xffff})
   for (unsigned cut : {32u, 40u})
   {
     const bool keyOff = addresses == keyOffLowAddresses ||
       addresses == keyOffHighAddresses;
     if (value != 0 && !keyOff &&
         (addresses != coreAttributeAddresses ||
-          (value != 0x4000 && value != 0x8000 && value != 0xc000)))
+          (value != 1 && value != 0x4000 && value != 0x4001 &&
+            value != 0x8000 && value != 0x8001 &&
+            value != 0xc000 && value != 0xc001)))
     {
       continue;
     }
@@ -1414,7 +1421,8 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
     previousHash = source.iopStateHash();
   }
   for (const auto address : coreAttributeAddresses)
-  for (std::uint16_t value : {0x4000, 0x8000, 0xc000})
+  for (std::uint16_t value : {
+      1, 0x4000, 0x4001, 0x8000, 0x8001, 0xc000, 0xc001})
   {
     REQUIRE(source.iopBus().write16(address, value).status ==
       IOPBusStatus::Completed);
@@ -1456,7 +1464,7 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
     REQUIRE(attribute != nullptr);
     REQUIRE(attribute->kind == SaveStateFieldKind::U16);
     REQUIRE(attribute->size == 2);
-    REQUIRE(attribute->scalarValue == 0xc000);
+    REQUIRE(attribute->scalarValue == 0xc001);
   }
   destination.loadState(programmed);
   REQUIRE(destination.iopStateHash() == previousHash);
@@ -1465,8 +1473,8 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
   for (std::size_t core = 0; core < coreAttributeAddresses.size(); ++core)
   {
     REQUIRE(destination.iopBus().read16(coreAttributeAddresses[core]).value ==
-      0xc000);
-    REQUIRE(destination.spu2Controller().readCoreAttribute(core) == 0xc000);
+      0xc001);
+    REQUIRE(destination.spu2Controller().readCoreAttribute(core) == 0xc001);
     REQUIRE(destination.iopBus().write16(coreAttributeAddresses[core], 0).status ==
       IOPBusStatus::Completed);
     REQUIRE(source.iopBus().read16(coreAttributeAddresses[core]).value == 0);
@@ -1509,7 +1517,7 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
   REQUIRE(destination.iopBus().write16(coreAttributeAddresses[1], 0).status ==
     IOPBusStatus::Completed);
   REQUIRE(destination.spu2Controller().readCoreAttribute(1) == 0);
-  REQUIRE(destination.spu2Controller().readCoreAttribute(0) == 0xc000);
+  REQUIRE(destination.spu2Controller().readCoreAttribute(0) == 0xc001);
   REQUIRE(foreign.readCoreAttribute(0) == 0);
   REQUIRE(foreign.readCoreAttribute(1) == 0);
 }
@@ -1520,7 +1528,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   NekoSystem source;
   programConfiguration(source);
   programMasterVolumes(source);
-  REQUIRE(source.iopBus().write16(coreAttributeAddresses[0], 0xc000).status ==
+  REQUIRE(source.iopBus().write16(coreAttributeAddresses[0], 0xc001).status ==
     IOPBusStatus::Completed);
   const auto candidate = source.saveState();
   NekoSystem destination;
@@ -1528,7 +1536,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
     IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(masterVolumeAddresses[0], 0x4567).status ==
     IOPBusStatus::Completed);
-  REQUIRE(destination.iopBus().write16(coreAttributeAddresses[1], 0x4000).status ==
+  REQUIRE(destination.iopBus().write16(coreAttributeAddresses[1], 0x4001).status ==
     IOPBusStatus::Completed);
   const auto before = destination.saveState();
   SaveStateMutation badChecksum(candidate);
@@ -1551,7 +1559,8 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
     REQUIRE(destination.saveState() == before);
   }
   for (std::size_t core = 0; core < coreAttributeAddresses.size(); ++core)
-  for (std::uint16_t value : {1, 0x40, 0x4001, 0x8001, 0xc001, 0xffff})
+  for (std::uint16_t value : {
+      2, 3, 0x40, 0x4003, 0x8003, 0xc003, 0xffff})
   {
     CAPTURE(core);
     CAPTURE(value);
@@ -1570,7 +1579,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   REQUIRE_THROWS_AS(destination.loadState(lateInvalid), std::invalid_argument);
   REQUIRE(destination.saveState() == before);
   SaveStateMutation previousVersion(candidate);
-  previousVersion.writeScalar("container.version", 85);
+  previousVersion.writeScalar("container.version", 86);
   previousVersion.refreshChecksum();
   REQUIRE_THROWS_AS(destination.loadState(previousVersion), std::invalid_argument);
   REQUIRE(destination.saveState() == before);
