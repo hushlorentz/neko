@@ -44,6 +44,12 @@ std::uint16_t SPU2Controller::readUnprogrammedCoreAttribute() const noexcept
   return 0;
 }
 
+bool SPU2Controller::writeUnprogrammedCoreAttribute(
+  std::uint16_t value) const noexcept
+{
+  return value == 0;
+}
+
 bool SPU2Controller::writeUnknownInitialization(
   std::uint16_t value) const noexcept
 {

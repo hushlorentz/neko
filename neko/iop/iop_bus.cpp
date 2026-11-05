@@ -801,6 +801,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         return {};
       }
       return {IOPBusStatus::Completed};
+    case Device::SPU2CoreAttribute:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeUnprogrammedCoreAttribute(static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2UnknownInitialization:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
         spu2->writeUnknownInitialization(static_cast<std::uint16_t>(value))
@@ -915,7 +919,6 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       // Tolerate the observed retail initialization, not general RAM resizing.
       return width == sizeof(IOPWord) && value == 0x8000283d
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
-    case Device::SPU2CoreAttribute:
     case Device::AbsentROM1:
     case Device::None:
       return {};

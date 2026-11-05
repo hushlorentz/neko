@@ -3288,6 +3288,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research and implement unprogrammed core ATTR halfword readback for both
       cores through the SPU2 owner; reject writes and active effects, with
       guest/restored coverage and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Core ATTR Programming Dependency
+
+- [x] Research the observed zero halfword write and shared core ATTR family;
+      select zero-only halfword initialization for both unprogrammed cores,
+      with no active effects.
+- [x] Implement the approved zero-only ATTR policy through the existing owner;
+      reject nonzero writes and other transports, with focused guest/restored
+      integration coverage and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

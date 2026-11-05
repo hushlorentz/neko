@@ -335,10 +335,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const std::uint16_t value =
       unknownInitialization || coreAttribute ? 0 : 0x4900;
-    if (!coreAttribute)
-    {
-      REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
-    }
+    REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
     const auto wordAddress = physical & ~IOPAddress(3);
     IOPCache cache;
     cache.commitIndexedStore(bank, wordAddress, 0x12345678, 0xf);
@@ -392,10 +389,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const std::uint16_t value =
       unknownInitialization || coreAttribute ? 0 : 0x4900;
-    if (!coreAttribute)
-    {
-      REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
-    }
+    REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
@@ -462,7 +456,7 @@ TEST_CASE("SPU2 unknown initialization bypasses cached payloads but not isolatio
   }
 }
 
-TEST_CASE("SPU2 core attribute reads bypass cached payloads but preserve isolation",
+TEST_CASE("SPU2 core attributes bypass cached payloads but preserve isolation",
   "[iop][spu2][spu2-attr][cache]")
 {
   for (IOPAddress physical : {0x1f90019au, 0x1f90059au})
@@ -489,7 +483,7 @@ TEST_CASE("SPU2 core attribute reads bypass cached payloads but preserve isolati
     const auto read = core.readData16(address);
     REQUIRE(read.outcome == IOPAccessOutcome::Completed);
     REQUIRE(read.value == 0);
-    REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Unmapped);
     REQUIRE(bus.read16(physical).value == 0);
     requireUnchangedCache(core.cache(), isolated);
