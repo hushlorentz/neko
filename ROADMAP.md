@@ -3360,6 +3360,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement passive S/PDIF output-control retention through the existing
       owner, with focused red/green, persistence/guest and excluded-access
       coverage, plus independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Core Attribute `0xc000` Programming
+
+- [x] Research the originating `0xc000` halfword store and the existing ATTR
+      family; select passive bits14-15 retention with lower bits rejected and
+      no active effects.
+- [x] Implement the selected bounded policy through the existing owner with
+      focused red/green, guest/restored and excluded-access coverage, plus
+      independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

@@ -340,7 +340,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
-      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0x8000 : 0x4900;
+      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc000 : 0x4900;
     if (!coreStatus)
     {
       REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
@@ -403,7 +403,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
-      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0x8000 : 0x4900;
+      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc000 : 0x4900;
     if (!coreStatus)
     {
       REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
@@ -548,6 +548,7 @@ TEST_CASE("SPU2 core attributes bypass cached payloads but preserve isolation",
   for (IOPAddress physical : {0x1f90019au, 0x1f90059au})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  for (std::uint16_t value : {0x4000, 0x8000, 0xc000})
   {
     const auto address = physical | segment;
     CAPTURE(address);
@@ -555,7 +556,7 @@ TEST_CASE("SPU2 core attributes bypass cached payloads but preserve isolation",
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
-    REQUIRE(bus.write16(physical, 0x8000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);
     const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
@@ -569,15 +570,16 @@ TEST_CASE("SPU2 core attributes bypass cached payloads but preserve isolation",
     IOPCacheTestAccess::setStatus(&core, swap);
     const auto read = core.readData16(address);
     REQUIRE(read.outcome == IOPAccessOutcome::Completed);
-    REQUIRE(read.value == 0x8000);
+    REQUIRE(read.value == value);
     REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Unmapped);
     REQUIRE(bus.read16(physical).value == 0);
-    REQUIRE(core.writeData16(address, 0x8000).outcome ==
+    REQUIRE(core.writeData16(address, value).outcome ==
       IOPAccessOutcome::Completed);
-    REQUIRE(core.readData16(address).value == 0x8000);
-    REQUIRE(core.writeData16(address, 0x8040).outcome == IOPAccessOutcome::Unmapped);
-    REQUIRE(bus.read16(physical).value == 0x8000);
+    REQUIRE(core.readData16(address).value == value);
+    REQUIRE(core.writeData16(address, value | 0x40).outcome ==
+      IOPAccessOutcome::Unmapped);
+    REQUIRE(bus.read16(physical).value == value);
     requireUnchangedCache(core.cache(), isolated);
   }
 }

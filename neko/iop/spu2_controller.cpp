@@ -42,7 +42,7 @@ bool SPU2Controller::writeMasterVolumeControl(
 
 bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept
 {
-  return value == 0 || value == 0x8000;
+  return (value & 0x3fff) == 0;
 }
 
 std::uint16_t SPU2Controller::readCoreAttribute(std::size_t core) const

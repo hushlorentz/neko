@@ -18,7 +18,7 @@ class SPU2Controller final
     static bool isFixedMasterVolumeControl(std::uint16_t value) noexcept;
     std::uint16_t readMasterVolumeControl(std::size_t index) const;
     bool writeMasterVolumeControl(std::size_t index, std::uint16_t value);
-    // Provisional retained bit15-only ATTR images; no engine/reset effects.
+    // Provisional retained bits14-15 ATTR images; no mute/engine/reset effects.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
     bool writeCoreAttribute(std::size_t core, std::uint16_t value);
