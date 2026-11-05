@@ -4,6 +4,7 @@ void SPU2Controller::reset() noexcept
 {
   spdifConfiguration.fill(0);
   masterVolumeControls.fill(0);
+  coreAttributes.fill(0);
 }
 
 std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
@@ -39,15 +40,26 @@ bool SPU2Controller::writeMasterVolumeControl(
   return true;
 }
 
-std::uint16_t SPU2Controller::readUnprogrammedCoreAttribute() const noexcept
+bool SPU2Controller::isSupportedCoreAttribute(std::uint16_t value) noexcept
 {
-  return 0;
+  return value == 0 || value == 0x8000;
 }
 
-bool SPU2Controller::writeUnprogrammedCoreAttribute(
-  std::uint16_t value) const noexcept
+std::uint16_t SPU2Controller::readCoreAttribute(std::size_t core) const
 {
-  return value == 0;
+  return coreAttributes.at(core);
+}
+
+bool SPU2Controller::writeCoreAttribute(
+  std::size_t core, std::uint16_t value)
+{
+  auto &attribute = coreAttributes.at(core);
+  if (!isSupportedCoreAttribute(value))
+  {
+    return false;
+  }
+  attribute = value;
+  return true;
 }
 
 bool SPU2Controller::writeUnprogrammedAutoDMAControl(

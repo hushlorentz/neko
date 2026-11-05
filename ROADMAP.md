@@ -3312,6 +3312,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected zero-only Auto DMA policy through the existing
       owner; reject reads, nonzero writes and other transports, with focused
       guest/restored integration coverage and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Nonzero Core ATTR Programming Dependency
+
+- [x] Research the observed ATTR `0x8000` write and shared-core effects;
+      select retained per-core `0`/`0x8000` images with matching readback,
+      without active hardware effects.
+- [x] Implement the selected policy through the existing SPU2 owner, with
+      focused guest/restored integration coverage, excluded-access and
+      side-effect checks, and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

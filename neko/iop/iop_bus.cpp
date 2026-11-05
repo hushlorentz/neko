@@ -352,12 +352,13 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       return {IOPBusRegion::Mmio, index, Device::SPU2MasterVolumeControl};
     }
   }
-  for (const auto attributeAddress : spu2CoreAttributeAddresses)
+  for (std::size_t core = 0; core < spu2CoreAttributeAddresses.size(); ++core)
   {
+    const auto attributeAddress = spu2CoreAttributeAddresses[core];
     if (first == attributeAddress &&
         last < first + sizeof(std::uint16_t))
     {
-      return {IOPBusRegion::Mmio, 0, Device::SPU2CoreAttribute};
+      return {IOPBusRegion::Mmio, core, Device::SPU2CoreAttribute};
     }
   }
   for (const auto autoDMAAddress : spu2AutoDMAAddresses)
@@ -702,7 +703,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
-            spu2->readUnprogrammedCoreAttribute()}
+            spu2->readCoreAttribute(location.offset)}
         : IOPBusReadResult{};
     case Device::SIO2ReceiveOutput:
     case Device::SIO2TransferStatus:
@@ -815,7 +816,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return {IOPBusStatus::Completed};
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
-        spu2->writeUnprogrammedCoreAttribute(static_cast<std::uint16_t>(value))
+        spu2->writeCoreAttribute(location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2AutoDMAInitialization:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
