@@ -325,7 +325,8 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
       0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
       0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
-      0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u})
+      0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,
+      0x1f9001a4u, 0x1f9001a6u, 0x1f9005a4u, 0x1f9005a6u})
   for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
   {
     IOPBus bus;
@@ -333,7 +334,9 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     bus.attachSPU2(&spu2);
     const bool writeOnlyInitialization =
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
-      physical == 0x1f9001b0 || physical == 0x1f9005b0;
+      physical == 0x1f9001b0 || physical == 0x1f9005b0 ||
+      physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
+      physical == 0x1f9005a4 || physical == 0x1f9005a6;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
@@ -383,7 +386,8 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
       0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
       0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
-      0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u})
+      0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,
+      0x1f9001a4u, 0x1f9001a6u, 0x1f9005a4u, 0x1f9005a6u})
   for (bool user : {false, true})
   for (bool store : {false, true})
   {
@@ -393,7 +397,9 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     bus.attachSPU2(&spu2);
     const bool writeOnlyInitialization =
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
-      physical == 0x1f9001b0 || physical == 0x1f9005b0;
+      physical == 0x1f9001b0 || physical == 0x1f9005b0 ||
+      physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
+      physical == 0x1f9005a4 || physical == 0x1f9005a6;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
@@ -499,6 +505,39 @@ TEST_CASE("SPU2 write-only initialization bypasses cached payloads but not isola
     REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Unmapped);
     REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
+TEST_CASE("SPU2 inactive key-off bypasses cached payloads but preserves isolation",
+  "[iop][spu2][spu2-koff][cache]")
+{
+  for (IOPAddress physical : {
+      0x1f9001a4u, 0x1f9001a6u, 0x1f9005a4u, 0x1f9005a6u})
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(swapped);
+    IOPBus bus;
+    SPU2Controller spu2;
+    bus.attachSPU2(&spu2);
+    IOPCore core;
+    core.attachBus(&bus);
+    const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address & ~IOPAddress(3), 0x12341234).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.writeData16(address, 0xffff).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.readData16(address).value == 0x1234);
+    REQUIRE((core.status() & IOPCOP0Status::CACHE_PROBE_RESULT) != 0);
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Completed);
     requireUnchangedCache(core.cache(), isolated);
   }
 }

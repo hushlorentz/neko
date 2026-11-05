@@ -67,6 +67,11 @@ std::uint16_t SPU2Controller::readUnprogrammedCoreStatus() const noexcept
   return 0;
 }
 
+void SPU2Controller::keyOffUnprogrammedVoices() const noexcept
+{
+  // Every selected voice is unprogrammed; no release or pending command exists.
+}
+
 bool SPU2Controller::writeUnprogrammedAutoDMAControl(
   std::uint16_t value) const noexcept
 {

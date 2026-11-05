@@ -36,6 +36,9 @@ namespace
   constexpr std::array<IOPAddress, 2> spu2CoreStatusAddresses = {{
     0x1f900344, 0x1f900744
   }};
+  constexpr std::array<IOPAddress, 4> spu2KeyOffAddresses = {{
+    0x1f9001a4, 0x1f9001a6, 0x1f9005a4, 0x1f9005a6
+  }};
   constexpr std::array<IOPAddress, SPU2Controller::SPDIF_CONFIGURATION_COUNT>
     spdifConfigurationAddresses = {{
       0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca
@@ -370,6 +373,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, 0, Device::SPU2UnprogrammedCoreStatus};
+    }
+  }
+  for (const auto keyOffAddress : spu2KeyOffAddresses)
+  {
+    if (first == keyOffAddress &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, 0, Device::SPU2UnprogrammedKeyOff};
     }
   }
   for (const auto autoDMAAddress : spu2AutoDMAAddresses)
@@ -793,6 +804,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == 1 || width == 2 || width == sizeof(IOPWord)
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
+    case Device::SPU2UnprogrammedKeyOff:
     case Device::SPU2AutoDMAInitialization:
     case Device::SPU2UnknownInitialization:
     case Device::SIO2TransmitInput:
@@ -834,6 +846,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
         spu2->writeCoreAttribute(location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SPU2UnprogrammedKeyOff:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->keyOffUnprogrammedVoices();
+      return {IOPBusStatus::Completed};
     case Device::SPU2AutoDMAInitialization:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
         spu2->writeUnprogrammedAutoDMAControl(static_cast<std::uint16_t>(value))

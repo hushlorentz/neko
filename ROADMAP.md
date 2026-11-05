@@ -3336,6 +3336,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded policy through the existing owner with
       focused red/green, guest/restored and excluded-access coverage, plus
       independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 `0x1f9001a4` Store Dependency
+
+- [x] Research the originating `0xffff` halfword store and its containing
+      register family; select an evidence-backed owner policy and identify
+      any active-effect approval boundary.
+- [x] Implement the selected bounded policy through the existing owner with
+      focused red/green, guest/restored and excluded-access coverage, plus
+      independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

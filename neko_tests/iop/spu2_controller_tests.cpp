@@ -35,6 +35,12 @@ namespace
   constexpr std::array<IOPAddress, 2> coreStatusAddresses = {{
     0x1f900344, 0x1f900744
   }};
+  constexpr std::array<IOPAddress, 2> keyOffLowAddresses = {{
+    0x1f9001a4, 0x1f9005a4
+  }};
+  constexpr std::array<IOPAddress, 2> keyOffHighAddresses = {{
+    0x1f9001a6, 0x1f9005a6
+  }};
   struct HalfwordProgramming
   {
     std::array<IOPAddress, 4> addresses;
@@ -142,6 +148,128 @@ namespace
         words[index]).status == IOPBusStatus::Completed);
     }
     system.iopCore().startExecution(0xa0000000);
+  }
+}
+
+TEST_CASE("SPU2 inactive key-off accepts all masks without programming or signals",
+  "[iop][spu2][spu2-koff]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  programConfiguration(system);
+  programMasterVolumes(system);
+  system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+  system.iopDMAController().writeAuxiliaryControl(0x12345678);
+  for (std::uint16_t first : {0, 0x8000})
+  for (std::uint16_t second : {0, 0x8000})
+  {
+    REQUIRE(bus.write16(coreAttributeAddresses[0], first).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write16(coreAttributeAddresses[1], second).status ==
+      IOPBusStatus::Completed);
+    const auto before = system.iopStateHash();
+    for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
+    for (const auto address : addresses)
+    {
+      CAPTURE(address);
+      REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+      for (std::uint32_t value = 0; value <= 0xffff; ++value)
+      {
+        if (bus.write16(address, static_cast<std::uint16_t>(value)).status !=
+            IOPBusStatus::Completed)
+        {
+          FAIL("Inactive key-off mask rejected: " << value);
+        }
+      }
+      REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+      REQUIRE(system.iopStateHash() == before);
+    }
+    for (const auto address : coreStatusAddresses)
+    {
+      REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+      REQUIRE(bus.read16(address).value == 0);
+    }
+  }
+  system.runMasterCycles(80);
+  bus.reset();
+  system.iopCore().reset();
+  for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
+  for (const auto address : addresses)
+  {
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+  }
+  REQUIRE(system.iopInterruptController().status() == (1u << 9));
+  REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+  system.spu2Controller().reset();
+  system.reset();
+  for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
+  for (const auto address : addresses)
+  {
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+  }
+}
+
+TEST_CASE("SPU2 inactive key-off rejects readback neighbors and other transports",
+  "[iop][spu2][spu2-koff]")
+{
+  for (const auto &addresses : {keyOffLowAddresses, keyOffHighAddresses})
+  for (const auto address : addresses)
+  {
+    CAPTURE(address);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    programConfiguration(system);
+    programMasterVolumes(system);
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    for (const auto byteAddress : {address, address + 1})
+    {
+      REQUIRE(bus.read8(byteAddress).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write8(byteAddress, 0xff).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write16(address + 1, 0).status == IOPBusStatus::Misaligned);
+    const auto wordAddress = address & ~IOPAddress(3);
+    REQUIRE(bus.read32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(wordAddress, 0xffffffff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readInstruction32(wordAddress).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(wordAddress, 0xffffffff, mask).status ==
+        IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.readDMAC32(wordAddress).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(wordAddress, 0xffffffff).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(wordAddress) == IOPBusStatus::Unmapped);
+    std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
+    const auto coreBase = address & ~IOPAddress(0x3ff);
+    for (IOPAddress offset : {0u, 2u, 0x198u, 0x19cu, 0x19eu,
+        0x1a0u, 0x1a2u, 0x1a8u, 0x1aau, 0x1acu, 0x340u, 0x342u})
+    {
+      REQUIRE(bus.read16(coreBase + offset).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(coreBase + offset, 0xffff).status == IOPBusStatus::Unmapped);
+    }
+    for (IOPAddress other : {address + 0x800,
+        address | 0x80000000u, address | 0xa0000000u})
+    {
+      REQUIRE(bus.read16(other).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(other, 0xffff).status == IOPBusStatus::Unmapped);
+    }
+    std::uint16_t eeValue = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &eeValue));
+    REQUIRE(eeValue == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0xffff));
+    IOPBus unattached;
+    REQUIRE(unattached.write16(address, 0xffff).status == IOPBusStatus::Unmapped);
+    REQUIRE(system.iopStateHash() == before);
   }
 }
 
@@ -707,10 +835,11 @@ TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other tran
 }
 
 TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot outcomes",
-  "[iop][spu2][spu2-initialization][spu2-attr][spu2-autodma][trace]")
+  "[iop][spu2][spu2-initialization][spu2-attr][spu2-autodma][spu2-koff][trace]")
 {
   for (const auto &addresses : {
-      unknownInitializationAddresses, coreAttributeAddresses, autoDMAAddresses})
+      unknownInitializationAddresses, coreAttributeAddresses, autoDMAAddresses,
+      keyOffLowAddresses, keyOffHighAddresses})
   for (const auto physical : addresses)
   for (auto segment : {0u, 0x80000000u, 0xa0000000u})
   for (std::uint16_t value : {0, 1, 0x8000, 0xffff})
@@ -719,7 +848,8 @@ TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot ou
     CAPTURE(address);
     CAPTURE(value);
     const bool accepted = value == 0 ||
-      (addresses == coreAttributeAddresses && value == 0x8000);
+      (addresses == coreAttributeAddresses && value == 0x8000) ||
+      addresses == keyOffLowAddresses || addresses == keyOffHighAddresses;
     NekoSystem system;
     programConfiguration(system);
     programMasterVolumes(system);
@@ -798,15 +928,19 @@ TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot ou
 }
 
 TEST_CASE("SPU2 bounded initialization resumes pending stores canonically",
-  "[iop][spu2][spu2-initialization][spu2-attr][spu2-autodma][save-state][trace]")
+  "[iop][spu2][spu2-initialization][spu2-attr][spu2-autodma][spu2-koff][save-state][trace]")
 {
   for (const auto &addresses : {
-      unknownInitializationAddresses, coreAttributeAddresses, autoDMAAddresses})
+      unknownInitializationAddresses, coreAttributeAddresses, autoDMAAddresses,
+      keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
-  for (std::uint16_t value : {0, 0x8000})
+  for (std::uint16_t value : {0, 0x8000, 0xffff})
   for (unsigned cut : {32u, 40u})
   {
-    if (value != 0 && addresses != coreAttributeAddresses)
+    const bool keyOff = addresses == keyOffLowAddresses ||
+      addresses == keyOffHighAddresses;
+    if (value != 0 && !keyOff &&
+        (addresses != coreAttributeAddresses || value != 0x8000))
     {
       continue;
     }
