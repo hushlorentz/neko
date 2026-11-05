@@ -41,7 +41,7 @@ namespace
   }};
   constexpr std::array<IOPAddress, SPU2Controller::SPDIF_CONFIGURATION_COUNT>
     spdifConfigurationAddresses = {{
-      0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca
+      0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca, 0x1f9007c0
     }};
   constexpr std::array<IOPAddress, SPU2Controller::MASTER_VOLUME_COUNT>
     masterVolumeAddresses = {{

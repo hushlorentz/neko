@@ -287,7 +287,7 @@ TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownersh
   "[iop][spu2][cache]")
 {
   for (IOPAddress physical : {
-      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
+      0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
@@ -322,7 +322,7 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
   "[iop][spu2][cache]")
 {
   for (IOPAddress physical : {
-      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
+      0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
       0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
       0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,
@@ -383,7 +383,7 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
   "[iop][spu2][execution]")
 {
   for (IOPAddress physical : {
-      0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
+      0x1f9007c0u, 0x1f9007c6u, 0x1f9007c8u, 0x1f9007ccu, 0x1f9007cau,
       0x1f900760u, 0x1f900762u, 0x1f900788u, 0x1f90078au,
       0x1f900b60u, 0x1f900b62u, 0x1f90019au, 0x1f90059au,
       0x1f9001b0u, 0x1f9005b0u, 0x1f900344u, 0x1f900744u,

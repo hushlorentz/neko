@@ -3348,6 +3348,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected bounded policy through the existing owner with
       focused red/green, guest/restored and excluded-access coverage, plus
       independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 S/PDIF Output Control (`0x1f9007c0`)
+
+- [x] Research the originating `0xc032` halfword store and its containing
+      register family; select passive output-control retention without
+      activating audio, transfers or interrupts.
+- [x] Implement passive S/PDIF output-control retention through the existing
+      owner, with focused red/green, persistence/guest and excluded-access
+      coverage, plus independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

@@ -9,7 +9,7 @@
 class SPU2Controller final
 {
   public:
-    static constexpr std::size_t SPDIF_CONFIGURATION_COUNT = 4;
+    static constexpr std::size_t SPDIF_CONFIGURATION_COUNT = 5;
     static constexpr std::size_t MASTER_VOLUME_COUNT = 4;
     static constexpr std::size_t CORE_COUNT = 2;
     void reset() noexcept;
@@ -33,7 +33,7 @@ class SPU2Controller final
 
   private:
     friend class NekoSaveStateCodec;
-    // MODE, MEDIA, COPY PROTECTION, unknown 0x7ca; not a full register bank.
+    // MODE, MEDIA, COPY PROTECTION, unknown 0x7ca, OUTPUT; passive images only.
     std::array<std::uint16_t, SPDIF_CONFIGURATION_COUNT> spdifConfiguration{};
     // Core 0 left/right, core 1 left/right; programmed controls, not current gain.
     std::array<std::uint16_t, MASTER_VOLUME_COUNT> masterVolumeControls{};

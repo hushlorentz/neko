@@ -21,10 +21,10 @@ namespace
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
   constexpr std::size_t
-    VERSION_84_PREPARED_STATE_SIZE = 39953990;
+    VERSION_85_PREPARED_STATE_SIZE = 39953992;
   constexpr std::uint64_t
-    VERSION_84_PREPARED_STATE_HASH =
-      UINT64_C(14380027621352330450);
+    VERSION_85_PREPARED_STATE_HASH =
+      UINT64_C(10537249603925302164);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -624,7 +624,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 84 save-state layout is byte-stable")
+TEST_CASE("Version 85 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -639,19 +639,33 @@ TEST_CASE("Version 84 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 84);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 85);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_84_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_85_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_84_PREPARED_STATE_HASH);
+    VERSION_85_PREPARED_STATE_HASH);
   auto previousVersion = state;
-  previousVersion[SAVE_STATE_VERSION_OFFSET] = 83;
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 84;
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   const auto snapshot = inspectSaveState(state);
+  const auto *priorConfiguration = snapshot.find(
+    "system.iop.spu2.spdifConfiguration[3].value");
+  const auto *outputControl = snapshot.find(
+    "system.iop.spu2.spdifConfiguration[4].value");
+  const auto *firstMaster = snapshot.find(
+    "system.iop.spu2.masterVolumeControls[0].value");
+  REQUIRE(priorConfiguration != nullptr);
+  REQUIRE(outputControl != nullptr);
+  REQUIRE(firstMaster != nullptr);
+  REQUIRE(outputControl->kind == SaveStateFieldKind::U16);
+  REQUIRE(outputControl->size == 2);
+  REQUIRE(outputControl->scalarValue == 0);
+  REQUIRE(outputControl->containerOffset == priorConfiguration->containerOffset + 2);
+  REQUIRE(firstMaster->containerOffset == outputControl->containerOffset + 2);
   const auto *lastMaster = snapshot.find(
     "system.iop.spu2.masterVolumeControls[3].value");
   const auto *core0 = snapshot.find("system.iop.spu2.coreAttributes[0].value");
@@ -700,7 +714,7 @@ TEST_CASE("Version 84 save-state layout is byte-stable")
   REQUIRE(receiveRemaining->scalarValue == 0);
   REQUIRE(interruptCause->scalarValue == 0);
   std::size_t spdifOffset = interruptCause->containerOffset + 1;
-  for (std::size_t index = 0; index < 4; ++index)
+  for (std::size_t index = 0; index < 5; ++index)
   {
     const auto *configuration = snapshot.find(
       "system.iop.spu2.spdifConfiguration[" + std::to_string(index) + "].value");
