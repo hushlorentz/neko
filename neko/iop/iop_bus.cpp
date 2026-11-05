@@ -33,6 +33,9 @@ namespace
   constexpr std::array<IOPAddress, 2> spu2AutoDMAAddresses = {{
     0x1f9001b0, 0x1f9005b0
   }};
+  constexpr std::array<IOPAddress, 2> spu2CoreStatusAddresses = {{
+    0x1f900344, 0x1f900744
+  }};
   constexpr std::array<IOPAddress, SPU2Controller::SPDIF_CONFIGURATION_COUNT>
     spdifConfigurationAddresses = {{
       0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca
@@ -359,6 +362,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, core, Device::SPU2CoreAttribute};
+    }
+  }
+  for (const auto statusAddress : spu2CoreStatusAddresses)
+  {
+    if (first == statusAddress &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, 0, Device::SPU2UnprogrammedCoreStatus};
     }
   }
   for (const auto autoDMAAddress : spu2AutoDMAAddresses)
@@ -705,6 +716,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readCoreAttribute(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2UnprogrammedCoreStatus:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readUnprogrammedCoreStatus()}
+        : IOPBusReadResult{};
     case Device::SIO2ReceiveOutput:
     case Device::SIO2TransferStatus:
     {
@@ -936,6 +952,7 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       // Tolerate the observed retail initialization, not general RAM resizing.
       return width == sizeof(IOPWord) && value == 0x8000283d
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SPU2UnprogrammedCoreStatus:
     case Device::AbsentROM1:
     case Device::None:
       return {};

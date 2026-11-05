@@ -159,6 +159,7 @@ class IOPBus final
       SPU2SPDIFConfiguration,
       SPU2MasterVolumeControl,
       SPU2CoreAttribute,
+      SPU2UnprogrammedCoreStatus,
       SPU2AutoDMAInitialization,
       SPU2UnknownInitialization,
       None,

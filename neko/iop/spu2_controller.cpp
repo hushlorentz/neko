@@ -62,6 +62,11 @@ bool SPU2Controller::writeCoreAttribute(
   return true;
 }
 
+std::uint16_t SPU2Controller::readUnprogrammedCoreStatus() const noexcept
+{
+  return 0;
+}
+
 bool SPU2Controller::writeUnprogrammedAutoDMAControl(
   std::uint16_t value) const noexcept
 {

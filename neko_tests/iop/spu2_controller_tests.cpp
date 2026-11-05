@@ -32,6 +32,9 @@ namespace
   constexpr std::array<IOPAddress, 2> autoDMAAddresses = {{
     0x1f9001b0, 0x1f9005b0
   }};
+  constexpr std::array<IOPAddress, 2> coreStatusAddresses = {{
+    0x1f900344, 0x1f900744
+  }};
   struct HalfwordProgramming
   {
     std::array<IOPAddress, 4> addresses;
@@ -125,7 +128,7 @@ namespace
     system.iopCore().startExecution(0xa0000000);
   }
 
-  void installCoreAttributeReadProgram(
+  void installHalfwordReadProgram(
     NekoSystem &system, IOPAddress address, IOPWord load)
   {
     const std::array<IOPWord, 9> words = {{
@@ -139,6 +142,209 @@ namespace
         words[index]).status == IOPBusStatus::Completed);
     }
     system.iopCore().startExecution(0xa0000000);
+  }
+}
+
+TEST_CASE("SPU2 quiescent status reads preserve programming and pending signals",
+  "[iop][spu2][spu2-statx]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  for (const auto address : coreStatusAddresses)
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0);
+  }
+  programConfiguration(system);
+  programMasterVolumes(system);
+  system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+  system.iopDMAController().writeAuxiliaryControl(0x12345678);
+  for (std::uint16_t first : {0, 0x8000})
+  for (std::uint16_t second : {0, 0x8000})
+  {
+    REQUIRE(bus.write16(coreAttributeAddresses[0], first).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(bus.write16(coreAttributeAddresses[1], second).status ==
+      IOPBusStatus::Completed);
+    const auto before = system.iopStateHash();
+    for (unsigned repeat = 0; repeat < 3; ++repeat)
+    for (const auto address : coreStatusAddresses)
+    {
+      const auto read = bus.read16(address);
+      REQUIRE(read.status == IOPBusStatus::Completed);
+      REQUIRE(read.value == 0);
+    }
+    REQUIRE(system.iopStateHash() == before);
+  }
+  system.runMasterCycles(80);
+  bus.reset();
+  system.iopCore().reset();
+  for (const auto address : coreStatusAddresses)
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0);
+  }
+  REQUIRE(system.iopInterruptController().status() == (1u << 9));
+  REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+  system.spu2Controller().reset();
+  system.reset();
+  for (const auto address : coreStatusAddresses)
+  {
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0);
+  }
+}
+
+TEST_CASE("SPU2 quiescent status excludes writes neighbors and non-CPU transports",
+  "[iop][spu2][spu2-statx]")
+{
+  for (const auto address : coreStatusAddresses)
+  {
+    CAPTURE(address);
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    programConfiguration(system);
+    programMasterVolumes(system);
+    const auto before = system.iopStateHash();
+    REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write8(address + 1, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 1).status == IOPBusStatus::Misaligned);
+    REQUIRE(bus.write16(address + 1, 0).status == IOPBusStatus::Misaligned);
+    for (std::uint16_t value : {0, 0x80, 0x400, 0xffff})
+    {
+      REQUIRE(bus.write16(address, value).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readInstruction32(address).status == IOPBusStatus::Unmapped);
+    for (std::uint8_t mask = 1; mask <= 0xf; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.dmaWriteStatus(address) == IOPBusStatus::Unmapped);
+    std::array<std::uint8_t, 2> bytes = {{0x12, 0x34}};
+    REQUIRE(bus.loadPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bus.inspectPhysical(address, bytes.data(), bytes.size()) ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
+    for (IOPAddress other : {address - 0x10, address - 4, address - 2,
+        address + 2, address + 0x800,
+        address | 0x80000000u, address | 0xa0000000u})
+    {
+      REQUIRE(bus.read16(other).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write16(other, 0).status == IOPBusStatus::Unmapped);
+    }
+    std::uint16_t eeValue = 0x4321;
+    REQUIRE_FALSE(system.eeBus().readData16(address, &eeValue));
+    REQUIRE(eeValue == 0x4321);
+    REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
+    bus.attachSPU2(nullptr);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+    bus.attachSPU2(&system.spu2Controller());
+    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(bus.read16(address).status == IOPBusStatus::Completed);
+  }
+}
+
+TEST_CASE("SPU2 quiescent status guests preserve aliases and branch load delays",
+  "[iop][spu2][spu2-statx][trace]")
+{
+  for (const auto physical : coreStatusAddresses)
+  for (auto segment : {0u, 0x80000000u, 0xa0000000u})
+  for (IOPWord load : {0x84220000u, 0x94220000u})
+  {
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(load);
+    NekoSystem system;
+    REQUIRE(system.iopBus().write16(coreAttributeAddresses[0], 0x8000).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write16(coreAttributeAddresses[1], 0x8000).status ==
+      IOPBusStatus::Completed);
+    installHalfwordReadProgram(system, address, load);
+    system.startTrace();
+    system.runMasterCycles(64);
+    REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
+    REQUIRE(system.iopCore().exception().kind == IOPException::None);
+    REQUIRE(system.iopCore().retiredInstructions() == 8);
+    REQUIRE(system.iopCore().programCounter() == 0xa0000024);
+    REQUIRE(system.iopCore().generalRegister(2) == 0);
+    REQUIRE(system.iopCore().generalRegister(3) == 0xffffffff);
+    REQUIRE(system.iopCore().generalRegister(4) == 0);
+    REQUIRE(system.iopCore().generalRegister(5) == 0x1234);
+    REQUIRE_FALSE(system.iopCore().branchContinuation().active);
+    REQUIRE(system.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::None);
+    IOPTraceTest::Events actual;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::MemoryAccess &&
+          event.value0 == address)
+      {
+        actual.push_back(event);
+      }
+    }
+    namespace Memory = NekoIOPTraceMemory;
+    const auto route = segment == 0xa0000000
+      ? Memory::CacheRoute::Uncached : Memory::CacheRoute::Cached;
+    const auto metadata = nekoPackIOPMemoryTraceMetadata({
+      physical, 2, Memory::AccessKind::DataLoad,
+      Memory::Outcome::Completed, route, true, 0});
+    IOPTraceTest::requireEvents(actual, {
+      {33, NekoTraceSubsystem::IOP, NekoTraceEventType::MemoryAccess,
+        address, 0, 0, metadata}
+    });
+  }
+}
+
+TEST_CASE("SPU2 quiescent status loads restore across branch and load continuations",
+  "[iop][spu2][spu2-statx][save-state][trace]")
+{
+  for (const auto address : coreStatusAddresses)
+  for (unsigned cut : {32u, 40u, 48u})
+  {
+    CAPTURE(address);
+    CAPTURE(cut);
+    NekoSystem original;
+    programConfiguration(original);
+    programMasterVolumes(original);
+    REQUIRE(original.iopBus().write16(coreAttributeAddresses[0], 0x8000).status ==
+      IOPBusStatus::Completed);
+    original.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    original.iopDMAController().writeAuxiliaryControl(0x12345678);
+    installHalfwordReadProgram(original, address | 0xa0000000u, 0x94220000);
+    original.runMasterCycles(cut);
+    REQUIRE(original.iopCore().branchContinuation().active == (cut == 32));
+    REQUIRE((original.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::Load) == (cut == 40));
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(plain.iopBus().read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(plain.iopBus().read16(address).value == 0);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(64 - cut);
+    restored.runMasterCycles(64 - cut);
+    plain.runMasterCycles(64 - cut);
+    REQUIRE(original.iopCore().exception().kind == IOPException::None);
+    REQUIRE(original.iopCore().retiredInstructions() == 8);
+    REQUIRE(original.iopCore().generalRegister(3) == 0xffffffff);
+    REQUIRE(original.iopCore().generalRegister(4) == 0);
+    REQUIRE(original.iopCore().generalRegister(5) == 0x1234);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
   }
 }
 
@@ -298,7 +504,7 @@ TEST_CASE("SPU2 core attribute guest loads preserve aliases and branch load dela
       IOPBusStatus::Completed);
     const IOPWord expected = value == 0x8000 && load == 0x84220000
       ? 0xffff8000 : value;
-    installCoreAttributeReadProgram(system, address, load);
+    installHalfwordReadProgram(system, address, load);
     system.startTrace();
     system.runMasterCycles(64);
     REQUIRE(system.iopCore().executionState() == IOPExecutionState::Running);
@@ -371,7 +577,7 @@ TEST_CASE("SPU2 core attribute loads restore before and after the delayed result
     REQUIRE(original.iopBus().write16(address, 0x8000).status ==
       IOPBusStatus::Completed);
     const IOPWord expected = load == 0x84220000 ? 0xffff8000 : 0x8000;
-    installCoreAttributeReadProgram(original,
+    installHalfwordReadProgram(original,
       address | 0xa0000000u, load);
     original.runMasterCycles(cut);
     REQUIRE(original.iopCore().branchContinuation().active == (cut == 32));

@@ -3324,6 +3324,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected policy through the existing SPU2 owner, with
       focused guest/restored integration coverage, excluded-access and
       side-effect checks, and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 `0x1f900344` Read Dependency
+
+- [x] Research the originating halfword read and its containing register
+      family; select paired quiescent-only STATX halfword reads, without
+      active status, transfer, IRQ or timing behavior.
+- [x] Implement the selected bounded policy through the existing owner with
+      focused red/green, guest/restored and excluded-access coverage, plus
+      independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

@@ -22,6 +22,8 @@ class SPU2Controller final
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
     bool writeCoreAttribute(std::size_t core, std::uint16_t value);
+    // Provisional quiescent STATX projection; replace when transfers are modeled.
+    std::uint16_t readUnprogrammedCoreStatus() const noexcept;
     // Provisional disabled Auto DMA initialization; no transfer effects.
     bool writeUnprogrammedAutoDMAControl(std::uint16_t value) const noexcept;
     // Provisional 0x1f900b60/0x1f900b62 zero initialization; no state or effects.
