@@ -29,6 +29,9 @@ namespace
   constexpr std::array<IOPAddress, 2> coreAttributeAddresses = {{
     0x1f90019a, 0x1f90059a
   }};
+  constexpr std::array<IOPAddress, 2> autoDMAAddresses = {{
+    0x1f9001b0, 0x1f9005b0
+  }};
   struct HalfwordProgramming
   {
     std::array<IOPAddress, 4> addresses;
@@ -370,15 +373,18 @@ TEST_CASE("SPU2 core attribute loads restore before and after the delayed result
   }
 }
 
-TEST_CASE("SPU2 unknown initialization admits only exact zero halfword stores",
-  "[iop][spu2][spu2-initialization]")
+TEST_CASE("SPU2 write-only initialization admits only exact zero halfword stores",
+  "[iop][spu2][spu2-initialization][spu2-autodma]")
 {
-  for (const auto address : unknownInitializationAddresses)
+  for (const auto &addresses : {unknownInitializationAddresses, autoDMAAddresses})
+  for (const auto address : addresses)
   {
     CAPTURE(address);
     NekoSystem system;
     programConfiguration(system);
     programMasterVolumes(system);
+    system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    system.iopDMAController().writeAuxiliaryControl(0x12345678);
     auto &bus = system.iopBus();
     const auto before = system.iopStateHash();
     REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Completed);
@@ -392,7 +398,8 @@ TEST_CASE("SPU2 unknown initialization admits only exact zero halfword stores",
       }
     }
     REQUIRE(system.iopStateHash() == before);
-    REQUIRE(system.iopInterruptController().status() == 0);
+    REQUIRE(system.iopInterruptController().status() == (1u << 9));
+    REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
     for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
     {
       REQUIRE(bus.read16(configurationAddresses[index]).value ==
@@ -411,10 +418,11 @@ TEST_CASE("SPU2 unknown initialization admits only exact zero halfword stores",
   }
 }
 
-TEST_CASE("SPU2 unknown initialization rejects reads neighbors and other transports",
-  "[iop][spu2][spu2-initialization]")
+TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other transports",
+  "[iop][spu2][spu2-initialization][spu2-autodma]")
 {
-  for (const auto address : unknownInitializationAddresses)
+  for (const auto &addresses : {unknownInitializationAddresses, autoDMAAddresses})
+  for (const auto address : addresses)
   {
     CAPTURE(address);
     NekoSystem system;
@@ -447,6 +455,8 @@ TEST_CASE("SPU2 unknown initialization rejects reads neighbors and other transpo
     REQUIRE(bytes == (std::array<std::uint8_t, 2>{{0x12, 0x34}}));
     for (IOPAddress other : {0x1f900b5eu, 0x1f900b64u,
         0x1f900360u, 0x1f900362u, 0x1f900f60u, 0x1f900f62u,
+        0x1f9001aeu, 0x1f9001b2u, 0x1f9005aeu, 0x1f9005b2u,
+        0x1f9009b0u, 0x1f900db0u,
         address | 0x80000000u, address | 0xa0000000u})
     {
       CAPTURE(other);
@@ -464,10 +474,10 @@ TEST_CASE("SPU2 unknown initialization rejects reads neighbors and other transpo
 }
 
 TEST_CASE("SPU2 zero initialization guests preserve aliases and delay-slot outcomes",
-  "[iop][spu2][spu2-initialization][spu2-attr][trace]")
+  "[iop][spu2][spu2-initialization][spu2-attr][spu2-autodma][trace]")
 {
   for (const auto &addresses : {
-      unknownInitializationAddresses, coreAttributeAddresses})
+      unknownInitializationAddresses, coreAttributeAddresses, autoDMAAddresses})
   for (const auto physical : addresses)
   for (auto segment : {0u, 0x80000000u, 0xa0000000u})
   for (std::uint16_t value : {0, 1, 0x8000, 0xffff})
@@ -478,6 +488,8 @@ TEST_CASE("SPU2 zero initialization guests preserve aliases and delay-slot outco
     NekoSystem system;
     programConfiguration(system);
     programMasterVolumes(system);
+    system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    system.iopDMAController().writeAuxiliaryControl(0x12345678);
     installInitializationStoreProgram(system, address, value);
     system.startTrace();
     system.runMasterCycles(48);
@@ -545,15 +557,16 @@ TEST_CASE("SPU2 zero initialization guests preserve aliases and delay-slot outco
       REQUIRE(system.iopBus().read16(masterVolumeAddresses[index]).value ==
         masterVolumeValues[index]);
     }
-    REQUIRE(system.iopInterruptController().status() == 0);
+    REQUIRE(system.iopInterruptController().status() == (1u << 9));
+    REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
   }
 }
 
 TEST_CASE("SPU2 zero initialization resumes pending stores without new state",
-  "[iop][spu2][spu2-initialization][spu2-attr][save-state][trace]")
+  "[iop][spu2][spu2-initialization][spu2-attr][spu2-autodma][save-state][trace]")
 {
   for (const auto &addresses : {
-      unknownInitializationAddresses, coreAttributeAddresses})
+      unknownInitializationAddresses, coreAttributeAddresses, autoDMAAddresses})
   for (const auto address : addresses)
   for (unsigned cut : {32u, 40u})
   {
@@ -562,6 +575,8 @@ TEST_CASE("SPU2 zero initialization resumes pending stores without new state",
     NekoSystem original;
     programConfiguration(original);
     programMasterVolumes(original);
+    original.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+    original.iopDMAController().writeAuxiliaryControl(0x12345678);
     installInitializationStoreProgram(original,
       address | 0xa0000000u, 0);
     original.runMasterCycles(cut);
@@ -589,6 +604,8 @@ TEST_CASE("SPU2 zero initialization resumes pending stores without new state",
     REQUIRE(original.iopCore().executionState() == IOPExecutionState::Running);
     REQUIRE(original.iopCore().retiredInstructions() == 6);
     REQUIRE(original.iopCore().generalRegister(3) == 0x1234);
+    REQUIRE(original.iopInterruptController().status() == (1u << 9));
+    REQUIRE(original.iopDMAController().auxiliaryControl() == 0x12345678);
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
     IOPTraceTest::requireMachine(restored, original);
     IOPTraceTest::requireMachine(plain, original);

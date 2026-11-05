@@ -20,6 +20,8 @@ class SPU2Controller final
     // Provisional unprogrammed ATTR image and zero-only initialization; no effects.
     std::uint16_t readUnprogrammedCoreAttribute() const noexcept;
     bool writeUnprogrammedCoreAttribute(std::uint16_t value) const noexcept;
+    // Provisional disabled Auto DMA initialization; no transfer effects.
+    bool writeUnprogrammedAutoDMAControl(std::uint16_t value) const noexcept;
     // Provisional 0x1f900b60/0x1f900b62 zero initialization; no state or effects.
     bool writeUnknownInitialization(std::uint16_t value) const noexcept;
 

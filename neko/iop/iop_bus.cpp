@@ -30,6 +30,9 @@ namespace
   constexpr std::array<IOPAddress, 2> spu2CoreAttributeAddresses = {{
     0x1f90019a, 0x1f90059a
   }};
+  constexpr std::array<IOPAddress, 2> spu2AutoDMAAddresses = {{
+    0x1f9001b0, 0x1f9005b0
+  }};
   constexpr std::array<IOPAddress, SPU2Controller::SPDIF_CONFIGURATION_COUNT>
     spdifConfigurationAddresses = {{
       0x1f9007c6, 0x1f9007c8, 0x1f9007cc, 0x1f9007ca
@@ -355,6 +358,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, 0, Device::SPU2CoreAttribute};
+    }
+  }
+  for (const auto autoDMAAddress : spu2AutoDMAAddresses)
+  {
+    if (first == autoDMAAddress &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, 0, Device::SPU2AutoDMAInitialization};
     }
   }
   for (const auto initializationAddress : spu2UnknownInitializationAddresses)
@@ -765,6 +776,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == 1 || width == 2 || width == sizeof(IOPWord)
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
+    case Device::SPU2AutoDMAInitialization:
     case Device::SPU2UnknownInitialization:
     case Device::SIO2TransmitInput:
     case Device::POST3:
@@ -804,6 +816,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::SPU2CoreAttribute:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
         spu2->writeUnprogrammedCoreAttribute(static_cast<std::uint16_t>(value))
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SPU2AutoDMAInitialization:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->writeUnprogrammedAutoDMAControl(static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2UnknownInitialization:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&

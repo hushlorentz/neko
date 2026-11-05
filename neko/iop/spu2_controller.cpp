@@ -50,6 +50,12 @@ bool SPU2Controller::writeUnprogrammedCoreAttribute(
   return value == 0;
 }
 
+bool SPU2Controller::writeUnprogrammedAutoDMAControl(
+  std::uint16_t value) const noexcept
+{
+  return value == 0;
+}
+
 bool SPU2Controller::writeUnknownInitialization(
   std::uint16_t value) const noexcept
 {

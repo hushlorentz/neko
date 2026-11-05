@@ -3300,6 +3300,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved zero-only ATTR policy through the existing owner;
       reject nonzero writes and other transports, with focused guest/restored
       integration coverage and independent review.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Auto DMA Zero-Initialization Dependency
+
+- [x] Research the observed zero halfword write and shared Auto DMA family;
+      select zero-only halfword initialization for both unprogrammed cores,
+      with no active effects.
+- [x] Implement the selected zero-only Auto DMA policy through the existing
+      owner; reject reads, nonzero writes and other transports, with focused
+      guest/restored integration coverage and independent review.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.
