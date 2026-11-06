@@ -297,7 +297,8 @@ TEST_CASE("SPU2 halfwords bypass cached payloads while isolation retains ownersh
       0x1f900764u, 0x1f900766u, 0x1f900768u, 0x1f90076au,
       0x1f90076cu, 0x1f90076eu, 0x1f90078cu, 0x1f90078eu,
       0x1f900790u, 0x1f900792u, 0x1f900794u, 0x1f900796u,
-      0x1f90033cu, 0x1f90073cu})
+      0x1f90033cu, 0x1f90073cu,
+      0x1f9001a8u, 0x1f9001aau, 0x1f9005a8u, 0x1f9005aau})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   {
@@ -344,7 +345,8 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
       0x1f900764u, 0x1f900766u, 0x1f900768u, 0x1f90076au,
       0x1f90076cu, 0x1f90076eu, 0x1f90078cu, 0x1f90078eu,
       0x1f900790u, 0x1f900792u, 0x1f900794u, 0x1f900796u,
-      0x1f90033cu, 0x1f90073cu})
+      0x1f90033cu, 0x1f90073cu,
+      0x1f9001a8u, 0x1f9001aau, 0x1f9005a8u, 0x1f9005aau})
   for (auto bank : {IOPCacheBank::Instruction, IOPCacheBank::Data})
   {
     IOPBus bus;
@@ -414,7 +416,8 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
       0x1f900764u, 0x1f900766u, 0x1f900768u, 0x1f90076au,
       0x1f90076cu, 0x1f90076eu, 0x1f90078cu, 0x1f90078eu,
       0x1f900790u, 0x1f900792u, 0x1f900794u, 0x1f900796u,
-      0x1f90033cu, 0x1f90073cu})
+      0x1f90033cu, 0x1f90073cu,
+      0x1f9001a8u, 0x1f9001aau, 0x1f9005a8u, 0x1f9005aau})
   for (bool user : {false, true})
   for (bool store : {false, true})
   {

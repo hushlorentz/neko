@@ -3432,6 +3432,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement both independent EEA high-halfword images through the existing
       owner with red/green, guest, excluded-access and canonical persistence
       coverage; independently review and run required optimized/ASan gates.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Passive Transfer-Start Address Programming
+
+- [x] Research the originating zero halfword store at `0x1f9001a8` and
+      paired-core TSA high/low family; select passive programmed-halfword
+      retention without sound-memory access, transfer, IRQ or readiness effects.
+- [x] Implement all four independent TSA halfword images through the existing owner with
+      red/green, guest, excluded-access and required persistence coverage;
+      independently review and run required validation gates.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

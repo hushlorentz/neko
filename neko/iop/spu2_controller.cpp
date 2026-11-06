@@ -9,6 +9,7 @@ void SPU2Controller::reset() noexcept
   mainMix.fill(0);
   effectInputVolumes.fill(0);
   effectEndAddressHigh.fill(0);
+  transferStartAddress.fill(0);
 }
 
 std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
@@ -106,6 +107,17 @@ void SPU2Controller::writeEffectEndAddressHigh(
   std::size_t core, std::uint16_t value)
 {
   effectEndAddressHigh.at(core) = value;
+}
+
+std::uint16_t SPU2Controller::readTransferStartAddress(std::size_t index) const
+{
+  return transferStartAddress.at(index);
+}
+
+void SPU2Controller::writeTransferStartAddress(
+  std::size_t index, std::uint16_t value)
+{
+  transferStartAddress.at(index) = value;
 }
 
 std::uint16_t SPU2Controller::readUnprogrammedCoreStatus() const noexcept

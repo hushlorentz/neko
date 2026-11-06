@@ -14,6 +14,7 @@ class SPU2Controller final
     static constexpr std::size_t CORE_COUNT = 2;
     static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
     static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
+    static constexpr std::size_t TRANSFER_START_HALFWORD_COUNT = 4;
     void reset() noexcept;
     std::uint16_t readSPDIFConfiguration(std::size_t index) const;
     void writeSPDIFConfiguration(std::size_t index, std::uint16_t value);
@@ -32,6 +33,8 @@ class SPU2Controller final
     void writeEffectInputVolume(std::size_t index, std::uint16_t value);
     std::uint16_t readEffectEndAddressHigh(std::size_t core) const;
     void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
+    std::uint16_t readTransferStartAddress(std::size_t index) const;
+    void writeTransferStartAddress(std::size_t index, std::uint16_t value);
     // Provisional quiescent STATX projection; replace when transfers are modeled.
     std::uint16_t readUnprogrammedCoreStatus() const noexcept;
     // Provisional KOFF effect; replace before voice programming or key-on.
@@ -57,6 +60,8 @@ class SPU2Controller final
     std::array<std::uint16_t, EFFECT_INPUT_VOLUME_COUNT> effectInputVolumes{};
     // Passive raw EEA high images; no decoded address or effect work area.
     std::array<std::uint16_t, CORE_COUNT> effectEndAddressHigh{};
+    // Per core: raw TSA high/low images; no decoded address or active cursor.
+    std::array<std::uint16_t, TRANSFER_START_HALFWORD_COUNT> transferStartAddress{};
 };
 
 #endif

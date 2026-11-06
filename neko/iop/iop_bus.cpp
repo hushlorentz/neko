@@ -43,6 +43,10 @@ namespace
     spu2EffectEndAddressHighAddresses = {{
       0x1f90033c, 0x1f90073c
     }};
+  constexpr std::array<IOPAddress, SPU2Controller::TRANSFER_START_HALFWORD_COUNT>
+    spu2TransferStartAddressAddresses = {{
+      0x1f9001a8, 0x1f9001aa, 0x1f9005a8, 0x1f9005aa
+    }};
   constexpr std::array<IOPAddress, SPU2Controller::VOICE_MIX_HALFWORD_COUNT>
     spu2VoiceMixAddresses = {{
       0x1f900188, 0x1f90018a, 0x1f90018c, 0x1f90018e,
@@ -417,6 +421,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, core, Device::SPU2EffectEndAddressHigh};
+    }
+  }
+  for (std::size_t index = 0; index < spu2TransferStartAddressAddresses.size(); ++index)
+  {
+    if (first == spu2TransferStartAddressAddresses[index] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, index, Device::SPU2TransferStartAddress};
     }
   }
   for (const auto statusAddress : spu2CoreStatusAddresses)
@@ -794,6 +806,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readEffectEndAddressHigh(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2TransferStartAddress:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readTransferStartAddress(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2MainMix:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -898,6 +915,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SPU2TransferStartAddress:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeTransferStartAddress(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
     case Device::SPU2EffectEndAddressHigh:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {
