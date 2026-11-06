@@ -166,7 +166,7 @@ class IOPBus final
       SPU2TransferStartAddress,
       SPU2UnprogrammedCoreStatus,
       SPU2UnprogrammedKeyOff,
-      SPU2AutoDMAInitialization,
+      SPU2AutoDMAWriteSelection,
       SPU2UnknownInitialization,
       None,
       SSBUSConfiguration,

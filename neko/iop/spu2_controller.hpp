@@ -39,8 +39,11 @@ class SPU2Controller final
     std::uint16_t readUnprogrammedCoreStatus() const noexcept;
     // Provisional KOFF effect; replace before voice programming or key-on.
     void keyOffUnprogrammedVoices() const noexcept;
-    // Provisional disabled Auto DMA initialization; no transfer effects.
-    bool writeUnprogrammedAutoDMAControl(std::uint16_t value) const noexcept;
+    // Passive own-core selection, not live ADMAS status or a DMA request.
+    static bool isSupportedAutoDMAWriteSelection(
+      std::size_t core, std::uint16_t value) noexcept;
+    std::uint16_t readAutoDMAWriteSelection(std::size_t core) const;
+    bool writeAutoDMAWriteSelection(std::size_t core, std::uint16_t value);
     // Provisional 0x1f900b60/0x1f900b62 zero initialization; no state or effects.
     bool writeUnknownInitialization(std::uint16_t value) const noexcept;
 
@@ -62,6 +65,7 @@ class SPU2Controller final
     std::array<std::uint16_t, CORE_COUNT> effectEndAddressHigh{};
     // Per core: raw TSA high/low images; no decoded address or active cursor.
     std::array<std::uint16_t, TRANSFER_START_HALFWORD_COUNT> transferStartAddress{};
+    std::array<std::uint16_t, CORE_COUNT> autoDMAWriteSelection{};
 };
 
 #endif

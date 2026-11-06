@@ -71,6 +71,9 @@ namespace
   constexpr std::array<IOPAddress, 2> autoDMAAddresses = {{
     0x1f9001b0, 0x1f9005b0
   }};
+  constexpr std::array<std::uint16_t, 2> autoDMAWriteSelections = {{
+    1, 2
+  }};
   constexpr std::array<IOPAddress, 2> coreStatusAddresses = {{
     0x1f900344, 0x1f900744
   }};
@@ -311,6 +314,103 @@ namespace
         words[index]).status == IOPBusStatus::Completed);
     }
     system.iopCore().startExecution(0xa0000000);
+  }
+}
+
+TEST_CASE("SPU2 Auto DMA write selection admits only each core bit without transfers",
+  "[iop][spu2][spu2-autodma]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  programConfiguration(system);
+  programMasterVolumes(system);
+  programTransferStartAddresses(system);
+  system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
+  system.iopDMAController().writeAuxiliaryControl(0x12345678);
+  const auto before = system.iopStateHash();
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    CAPTURE(core);
+    REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) == 0);
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) ==
+      autoDMAWriteSelections[core]);
+    REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(1 - core) == 0);
+    const auto enabled = system.iopStateHash();
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopStateHash() == enabled);
+    for (std::uint32_t value = 1; value <= 0xffff; ++value)
+    {
+      if (value == autoDMAWriteSelections[core])
+      {
+        continue;
+      }
+      const auto image = static_cast<std::uint16_t>(value);
+      if (system.spu2Controller().writeAutoDMAWriteSelection(core, image) ||
+          bus.write16(autoDMAAddresses[core], image).status != IOPBusStatus::Unmapped ||
+          system.spu2Controller().readAutoDMAWriteSelection(core) !=
+            autoDMAWriteSelections[core] ||
+          system.spu2Controller().readAutoDMAWriteSelection(1 - core) != 0)
+      {
+        FAIL("Unsupported Auto DMA selection changed programming: " << value);
+      }
+    }
+    REQUIRE(system.iopStateHash() == enabled);
+    REQUIRE(bus.read16(autoDMAAddresses[core]).status == IOPBusStatus::Unmapped);
+    for (IOPAddress address : {
+        0x1f9001acu, 0x1f9005acu, 0x1f8010c0u, 0x1f8010c4u, 0x1f8010c8u,
+        0x1f801500u, 0x1f801504u, 0x1f801508u})
+    {
+      REQUIRE(bus.write16(address, 1).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(address, 0x01000001).status == IOPBusStatus::Unmapped);
+    }
+    for (std::size_t index = 0; index < transferStartAddressAddresses.size(); ++index)
+    {
+      REQUIRE(bus.read16(transferStartAddressAddresses[index]).value ==
+        transferStartAddressValues[index]);
+    }
+    for (const auto address : coreStatusAddresses)
+    {
+      REQUIRE(bus.read16(address).value == 0);
+    }
+    REQUIRE(system.iopInterruptController().status() == (1u << 9));
+    REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+    REQUIRE(bus.write16(autoDMAAddresses[core], 0).status == IOPBusStatus::Completed);
+    REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) == 0);
+    REQUIRE(system.iopStateHash() == before);
+  }
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+  }
+  REQUIRE(bus.write16(autoDMAAddresses[0], 0).status == IOPBusStatus::Completed);
+  REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(0) == 0);
+  REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(1) == 2);
+  REQUIRE(bus.write16(autoDMAAddresses[0], 1).status == IOPBusStatus::Completed);
+  system.runMasterCycles(80);
+  bus.reset();
+  system.iopCore().reset();
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) ==
+      autoDMAWriteSelections[core]);
+  }
+  REQUIRE(system.iopInterruptController().status() == (1u << 9));
+  REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
+  system.spu2Controller().reset();
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) == 0);
+    REQUIRE(bus.write16(autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+  }
+  system.reset();
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) == 0);
   }
 }
 
@@ -1421,10 +1521,9 @@ TEST_CASE("SPU2 core attribute loads restore before and after the delayed result
 }
 
 TEST_CASE("SPU2 write-only initialization admits only exact zero halfword stores",
-  "[iop][spu2][spu2-initialization][spu2-autodma]")
+  "[iop][spu2][spu2-initialization]")
 {
-  for (const auto &addresses : {unknownInitializationAddresses, autoDMAAddresses})
-  for (const auto address : addresses)
+  for (const auto address : unknownInitializationAddresses)
   {
     CAPTURE(address);
     NekoSystem system;
@@ -1477,6 +1576,9 @@ TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other tran
     CAPTURE(address);
     NekoSystem system;
     auto &bus = system.iopBus();
+    const std::uint16_t selection = addresses == autoDMAAddresses
+      ? (address == autoDMAAddresses[0] ? 1 : 2) : 0;
+    REQUIRE(bus.write16(address, selection).status == IOPBusStatus::Completed);
     const auto before = system.iopStateHash();
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
@@ -1516,9 +1618,9 @@ TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other tran
     std::uint16_t eeValue = 0x4321;
     REQUIRE_FALSE(system.eeBus().readData16(address, &eeValue));
     REQUIRE(eeValue == 0x4321);
-    REQUIRE_FALSE(system.eeBus().writeData16(address, 0));
+    REQUIRE_FALSE(system.eeBus().writeData16(address, selection));
     IOPBus unattached;
-    REQUIRE(unattached.write16(address, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(unattached.write16(address, selection).status == IOPBusStatus::Unmapped);
     REQUIRE(system.iopStateHash() == before);
   }
 }
@@ -1538,6 +1640,8 @@ TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot ou
     CAPTURE(address);
     CAPTURE(value);
     const bool accepted = value == 0 ||
+      (addresses == autoDMAAddresses &&
+        value == (physical == autoDMAAddresses[0] ? 1 : 2)) ||
       (addresses == coreAttributeAddresses &&
         (value == 1 || value == 0x4000 || value == 0x4001 ||
           value == 0x8000 || value == 0x8001 ||
@@ -1608,6 +1712,13 @@ TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot ou
       REQUIRE(system.iopBus().read16(physical).status == IOPBusStatus::Completed);
       REQUIRE(system.iopBus().read16(physical).value == (accepted ? value : 0));
     }
+    if (addresses == autoDMAAddresses)
+    {
+      const std::size_t core = physical == autoDMAAddresses[0] ? 0 : 1;
+      REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) ==
+        (accepted ? value : 0));
+      REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(1 - core) == 0);
+    }
     for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
     {
       REQUIRE(system.iopBus().read16(configurationAddresses[index]).value ==
@@ -1631,12 +1742,14 @@ TEST_CASE("SPU2 bounded initialization resumes pending stores canonically",
       keyOffLowAddresses, keyOffHighAddresses})
   for (const auto address : addresses)
   for (std::uint16_t value : {
-      0, 1, 0x4000, 0x4001, 0x8000, 0x8001, 0xc000, 0xc001, 0xffff})
+      0, 1, 2, 0x4000, 0x4001, 0x8000, 0x8001, 0xc000, 0xc001, 0xffff})
   for (unsigned cut : {32u, 40u})
   {
     const bool keyOff = addresses == keyOffLowAddresses ||
       addresses == keyOffHighAddresses;
-    if (value != 0 && !keyOff &&
+    const bool autoDMA = addresses == autoDMAAddresses &&
+      value == (address == autoDMAAddresses[0] ? 1 : 2);
+    if (value != 0 && !keyOff && !autoDMA &&
         (addresses != coreAttributeAddresses ||
           (value != 1 && value != 0x4000 && value != 0x4001 &&
             value != 0x8000 && value != 0x8001 &&
@@ -1662,6 +1775,11 @@ TEST_CASE("SPU2 bounded initialization resumes pending stores canonically",
     plain.loadState(checkpoint);
     const auto before = plain.iopStateHash();
     const std::uint16_t retained = cut == 32 ? 0 : value;
+    if (addresses == autoDMAAddresses)
+    {
+      REQUIRE(plain.spu2Controller().readAutoDMAWriteSelection(
+        address == autoDMAAddresses[0] ? 0 : 1) == retained);
+    }
     REQUIRE(plain.iopBus().write16(address, retained).status ==
       IOPBusStatus::Completed);
     REQUIRE(plain.iopStateHash() == before);
@@ -1684,6 +1802,11 @@ TEST_CASE("SPU2 bounded initialization resumes pending stores canonically",
     if (addresses == coreAttributeAddresses)
     {
       REQUIRE(original.iopBus().read16(address).value == value);
+    }
+    if (addresses == autoDMAAddresses)
+    {
+      REQUIRE(original.spu2Controller().readAutoDMAWriteSelection(
+        address == autoDMAAddresses[0] ? 0 : 1) == value);
     }
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
     IOPTraceTest::requireMachine(restored, original);
@@ -2141,6 +2264,14 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
     REQUIRE(source.iopStateHash() != previousHash);
     previousHash = source.iopStateHash();
   }
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    REQUIRE(source.iopBus().write16(
+      autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(source.iopStateHash() != previousHash);
+    previousHash = source.iopStateHash();
+  }
   const auto programmed = source.saveState();
   const auto fields = inspectSaveState(programmed);
   for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
@@ -2175,6 +2306,22 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
   REQUIRE(destination.iopStateHash() == previousHash);
   REQUIRE(destination.saveState() == programmed);
   source.spu2Controller().reset();
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    const auto *field = fields.find(
+      "system.iop.spu2.autoDMAWriteSelection[" + std::to_string(core) + "].value");
+    REQUIRE(field != nullptr);
+    REQUIRE(field->kind == SaveStateFieldKind::U16);
+    REQUIRE(field->size == 2);
+    REQUIRE(field->scalarValue == autoDMAWriteSelections[core]);
+    REQUIRE(destination.spu2Controller().readAutoDMAWriteSelection(core) ==
+      autoDMAWriteSelections[core]);
+    REQUIRE(destination.iopBus().read16(autoDMAAddresses[core]).status ==
+      IOPBusStatus::Unmapped);
+    REQUIRE(destination.iopBus().write16(autoDMAAddresses[core], 0).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(source.spu2Controller().readAutoDMAWriteSelection(core) == 0);
+  }
   for (std::size_t index = 0; index < transferStartAddressAddresses.size(); ++index)
   {
     const auto *field = fields.find(
@@ -2290,6 +2437,11 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
   REQUIRE_THROWS_AS(destination.saveState(), std::logic_error);
   REQUIRE_THROWS_AS(destination.iopStateHash(), std::logic_error);
   destination.loadState(programmed);
+  REQUIRE(destination.iopBus().write16(autoDMAAddresses[1], 0).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.spu2Controller().readAutoDMAWriteSelection(1) == 0);
+  REQUIRE(destination.spu2Controller().readAutoDMAWriteSelection(0) == 1);
+  REQUIRE(foreign.readAutoDMAWriteSelection(1) == 0);
   REQUIRE(destination.iopBus().write16(transferStartAddressAddresses[3], 0xffff).status ==
     IOPBusStatus::Completed);
   REQUIRE(destination.spu2Controller().readTransferStartAddress(3) == 0xffff);
@@ -2343,10 +2495,18 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   programEffectInputVolumes(source);
   programEffectEndAddresses(source);
   programTransferStartAddresses(source);
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    REQUIRE(source.iopBus().write16(
+      autoDMAAddresses[core], autoDMAWriteSelections[core]).status ==
+      IOPBusStatus::Completed);
+  }
   REQUIRE(source.iopBus().write16(coreAttributeAddresses[0], 0xc001).status ==
     IOPBusStatus::Completed);
   const auto candidate = source.saveState();
   NekoSystem destination;
+  REQUIRE(destination.iopBus().write16(autoDMAAddresses[1], 2).status ==
+    IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(transferStartAddressAddresses[3], 0xabcd).status ==
     IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(effectEndAddressHighAddresses[1], 0x1234).status ==
@@ -2364,6 +2524,30 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   REQUIRE(destination.iopBus().write16(coreAttributeAddresses[1], 0x4001).status ==
     IOPBusStatus::Completed);
   const auto before = destination.saveState();
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  {
+    const auto path =
+      "system.iop.spu2.autoDMAWriteSelection[" + std::to_string(core) + "].value";
+    SaveStateMutation badSelectionChecksum(candidate);
+    badSelectionChecksum.writeScalar(path, 0);
+    REQUIRE_THROWS_AS(destination.loadState(badSelectionChecksum),
+      std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+    for (const auto value : {
+        autoDMAWriteSelections[1 - core], std::uint16_t{3}, std::uint16_t{4},
+        std::uint16_t{0x4000}, std::uint16_t{0x7fff},
+        std::uint16_t{0x8000}, std::uint16_t{0xffff}})
+    {
+      CAPTURE(core);
+      CAPTURE(value);
+      SaveStateMutation unsupportedSelection(candidate);
+      unsupportedSelection.writeScalar(path, value);
+      unsupportedSelection.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(unsupportedSelection),
+        std::invalid_argument);
+      REQUIRE(destination.saveState() == before);
+    }
+  }
   for (std::size_t index = 0; index < transferStartAddressAddresses.size(); ++index)
   {
     SaveStateMutation badAddressChecksum(candidate);

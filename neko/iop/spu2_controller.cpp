@@ -10,6 +10,7 @@ void SPU2Controller::reset() noexcept
   effectInputVolumes.fill(0);
   effectEndAddressHigh.fill(0);
   transferStartAddress.fill(0);
+  autoDMAWriteSelection.fill(0);
 }
 
 std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
@@ -130,10 +131,27 @@ void SPU2Controller::keyOffUnprogrammedVoices() const noexcept
   // Every selected voice is unprogrammed; no release or pending command exists.
 }
 
-bool SPU2Controller::writeUnprogrammedAutoDMAControl(
-  std::uint16_t value) const noexcept
+bool SPU2Controller::isSupportedAutoDMAWriteSelection(
+  std::size_t core, std::uint16_t value) noexcept
 {
-  return value == 0;
+  return core < CORE_COUNT && (value == 0 || value == (1u << core));
+}
+
+std::uint16_t SPU2Controller::readAutoDMAWriteSelection(std::size_t core) const
+{
+  return autoDMAWriteSelection.at(core);
+}
+
+bool SPU2Controller::writeAutoDMAWriteSelection(
+  std::size_t core, std::uint16_t value)
+{
+  auto &selection = autoDMAWriteSelection.at(core);
+  if (!isSupportedAutoDMAWriteSelection(core, value))
+  {
+    return false;
+  }
+  selection = value;
+  return true;
 }
 
 bool SPU2Controller::writeUnknownInitialization(

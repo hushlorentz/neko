@@ -359,7 +359,9 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
       physical == 0x1f9005a4 || physical == 0x1f9005a6;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
+    const bool autoDMA = physical == 0x1f9001b0 || physical == 0x1f9005b0;
     const std::uint16_t value =
+      autoDMA ? (physical == 0x1f9001b0 ? 1 : 2) :
       writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc001 : 0x4900;
     if (!coreStatus)
     {
@@ -395,6 +397,11 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     if (read.status == IOPBusStatus::Completed)
     {
       REQUIRE(read.value == value);
+    }
+    if (autoDMA)
+    {
+      REQUIRE(spu2.readAutoDMAWriteSelection(physical == 0x1f9001b0 ? 0 : 1) ==
+        value);
     }
   }
 }
@@ -521,6 +528,9 @@ TEST_CASE("SPU2 write-only initialization bypasses cached payloads but not isola
     IOPBus bus;
     SPU2Controller spu2;
     bus.attachSPU2(&spu2);
+    const std::uint16_t selection =
+      physical == 0x1f9001b0 ? 1 : physical == 0x1f9005b0 ? 2 : 0;
+    REQUIRE(bus.write16(physical, selection).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);
     const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
@@ -530,10 +540,23 @@ TEST_CASE("SPU2 write-only initialization bypasses cached payloads but not isola
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Completed);
     REQUIRE(core.readData16(address).value == 0x1234);
     REQUIRE((core.status() & IOPCOP0Status::CACHE_PROBE_RESULT) != 0);
+    if (selection != 0)
+    {
+      REQUIRE(spu2.readAutoDMAWriteSelection(selection == 1 ? 0 : 1) == selection);
+    }
     const auto isolated = core.cache();
     IOPCacheTestAccess::setStatus(&core, swap);
     REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Unmapped);
     REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
+    if (selection != 0)
+    {
+      const std::size_t selectedCore = selection == 1 ? 0 : 1;
+      REQUIRE(spu2.readAutoDMAWriteSelection(selectedCore) == 0);
+      REQUIRE(core.writeData16(address, selection).outcome ==
+        IOPAccessOutcome::Completed);
+      REQUIRE(spu2.readAutoDMAWriteSelection(selectedCore) == selection);
+      REQUIRE(spu2.readAutoDMAWriteSelection(1 - selectedCore) == 0);
+    }
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Unmapped);
     requireUnchangedCache(core.cache(), isolated);
   }

@@ -3444,6 +3444,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement all four independent TSA halfword images through the existing owner with
       red/green, guest, excluded-access and required persistence coverage;
       independently review and run required validation gates.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### SPU2 Passive Auto DMA Write-Selection Programming
+
+- [x] Research the originating `0x0001` halfword write to `0x1f9001b0` and
+      paired-core family; select approved passive write-selection while
+      keeping ADMAS reads and active transfer/status effects unsupported.
+- [x] Implement the approved paired write-selection through the existing SPU2 owner
+      with red/green, excluded-access and required lifecycle/persistence coverage;
+      independently review and run required validation gates.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

@@ -321,6 +321,15 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU16("value", words[index]);
       }
     }
+    {
+      auto selections = writer->scope("autoDMAWriteSelection");
+      const auto &words = system.spu2ControllerComponent.autoDMAWriteSelection;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto word = writer->element(core);
+        writer->writeFieldU16("value", words[core]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -548,6 +557,18 @@ void NekoSaveStateCodec::readIOP(
       {
         auto word = reader->element(index);
         words[index] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto selections = reader->scope("autoDMAWriteSelection");
+      auto &words = system->spu2ControllerComponent.autoDMAWriteSelection;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto word = reader->element(core);
+        words[core] = reader->readFieldU16("value");
+        reader->requireField(
+          SPU2Controller::isSupportedAutoDMAWriteSelection(core, words[core]),
+          "SPU2 Auto DMA write selection is outside the passive own-core profile");
       }
     }
   }

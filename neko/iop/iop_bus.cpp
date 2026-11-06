@@ -447,12 +447,12 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       return {IOPBusRegion::Mmio, 0, Device::SPU2UnprogrammedKeyOff};
     }
   }
-  for (const auto autoDMAAddress : spu2AutoDMAAddresses)
+  for (std::size_t core = 0; core < spu2AutoDMAAddresses.size(); ++core)
   {
-    if (first == autoDMAAddress &&
+    if (first == spu2AutoDMAAddresses[core] &&
         last < first + sizeof(std::uint16_t))
     {
-      return {IOPBusRegion::Mmio, 0, Device::SPU2AutoDMAInitialization};
+      return {IOPBusRegion::Mmio, core, Device::SPU2AutoDMAWriteSelection};
     }
   }
   for (const auto initializationAddress : spu2UnknownInitializationAddresses)
@@ -894,7 +894,7 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
     case Device::SPU2UnprogrammedKeyOff:
-    case Device::SPU2AutoDMAInitialization:
+    case Device::SPU2AutoDMAWriteSelection:
     case Device::SPU2UnknownInitialization:
     case Device::SIO2TransmitInput:
     case Device::POST3:
@@ -977,9 +977,10 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       }
       spu2->keyOffUnprogrammedVoices();
       return {IOPBusStatus::Completed};
-    case Device::SPU2AutoDMAInitialization:
+    case Device::SPU2AutoDMAWriteSelection:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
-        spu2->writeUnprogrammedAutoDMAControl(static_cast<std::uint16_t>(value))
+        spu2->writeAutoDMAWriteSelection(
+          location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SPU2UnknownInitialization:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
