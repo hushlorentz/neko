@@ -294,6 +294,15 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU16("value", words[core]);
       }
     }
+    {
+      auto volumes = writer->scope("effectInputVolumes");
+      const auto &words = system.spu2ControllerComponent.effectInputVolumes;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = writer->element(index);
+        writer->writeFieldU16("value", words[index]);
+      }
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -494,6 +503,15 @@ void NekoSaveStateCodec::readIOP(
       {
         auto word = reader->element(core);
         words[core] = reader->readFieldU16("value");
+      }
+    }
+    {
+      auto volumes = reader->scope("effectInputVolumes");
+      auto &words = system->spu2ControllerComponent.effectInputVolumes;
+      for (std::size_t index = 0; index < words.size(); ++index)
+      {
+        auto word = reader->element(index);
+        words[index] = reader->readFieldU16("value");
       }
     }
   }

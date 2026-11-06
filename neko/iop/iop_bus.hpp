@@ -161,6 +161,7 @@ class IOPBus final
       SPU2CoreAttribute,
       SPU2VoiceMix,
       SPU2MainMix,
+      SPU2EffectInputVolume,
       SPU2UnprogrammedCoreStatus,
       SPU2UnprogrammedKeyOff,
       SPU2AutoDMAInitialization,

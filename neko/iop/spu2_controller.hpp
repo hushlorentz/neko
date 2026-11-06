@@ -13,6 +13,7 @@ class SPU2Controller final
     static constexpr std::size_t MASTER_VOLUME_COUNT = 4;
     static constexpr std::size_t CORE_COUNT = 2;
     static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
+    static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
     void reset() noexcept;
     std::uint16_t readSPDIFConfiguration(std::size_t index) const;
     void writeSPDIFConfiguration(std::size_t index, std::uint16_t value);
@@ -27,6 +28,8 @@ class SPU2Controller final
     void writeVoiceMix(std::size_t index, std::uint16_t value);
     std::uint16_t readMainMix(std::size_t core) const;
     void writeMainMix(std::size_t core, std::uint16_t value);
+    std::uint16_t readEffectInputVolume(std::size_t index) const;
+    void writeEffectInputVolume(std::size_t index, std::uint16_t value);
     // Provisional quiescent STATX projection; replace when transfers are modeled.
     std::uint16_t readUnprogrammedCoreStatus() const noexcept;
     // Provisional KOFF effect; replace before voice programming or key-on.
@@ -48,6 +51,8 @@ class SPU2Controller final
     std::array<std::uint16_t, VOICE_MIX_HALFWORD_COUNT> voiceMix{};
     // Passive raw MMIX images, including unused bits; no live source gates.
     std::array<std::uint16_t, CORE_COUNT> mainMix{};
+    // Per core: EVOLL/R, AVOLL/R, BVOLL/R; core0 AVOL has no input function.
+    std::array<std::uint16_t, EFFECT_INPUT_VOLUME_COUNT> effectInputVolumes{};
 };
 
 #endif
