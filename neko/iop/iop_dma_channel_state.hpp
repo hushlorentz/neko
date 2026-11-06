@@ -22,6 +22,7 @@ struct IOPDMAChannelState
   static constexpr IOPWord TRANSFER_REQUEST = 0x01000000;
 
   static bool validMemoryAddress(IOPWord value);
+  static IOPDMAWriteOutcome programMemoryAddress(IOPWord &address, IOPWord value);
   static bool validChannelControl(IOPWord value, IOPDMAChannelProfile profile);
   bool active() const;
   IOPDMAWriteOutcome writeAddress(IOPWord &address, IOPWord value);

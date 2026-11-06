@@ -39,6 +39,12 @@ IOPDMAWriteOutcome IOPDMAChannelState::writeAddress(IOPWord &address, IOPWord va
   {
     return IOPDMAWriteOutcome::ActiveTransfer;
   }
+  return programMemoryAddress(address, value);
+}
+
+IOPDMAWriteOutcome IOPDMAChannelState::programMemoryAddress(
+  IOPWord &address, IOPWord value)
+{
   const auto masked = value & 0x00ffffff;
   if (!validMemoryAddress(masked))
   {

@@ -345,6 +345,15 @@ void NekoSaveStateCodec::writeIOPState(
       static_cast<std::uint8_t>(system.iopDMAControllerComponent.sifNextChannel));
     writer->writeFieldU32("auxiliaryControl",
       system.iopDMAControllerComponent.auxiliaryControlRegister);
+    {
+      auto addresses = writer->scope("spuMemoryAddress");
+      const auto &words = system.iopDMAControllerComponent.spuMemoryAddresses;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto address = writer->element(core);
+        writer->writeFieldU32("value", words[core]);
+      }
+    }
     auto banks = writer->scope("banks");
     for (std::size_t index = 0;
          index < system.iopDMAControllerComponent.banks.size(); ++index)
@@ -593,6 +602,17 @@ void NekoSaveStateCodec::readIOP(
     system->iopDMAControllerComponent.sifNextChannel = static_cast<IOPDMAChannel>(nextChannel);
     system->iopDMAControllerComponent.auxiliaryControlRegister =
       reader->readFieldU32("auxiliaryControl");
+    {
+      auto addresses = reader->scope("spuMemoryAddress");
+      auto &words = system->iopDMAControllerComponent.spuMemoryAddresses;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto address = reader->element(core);
+        words[core] = reader->readFieldU32("value");
+        reader->requireField(IOPDMAChannelState::validMemoryAddress(words[core]),
+          "IOP SPU DMA address is unaligned or exceeds 24 bits");
+      }
+    }
     auto banks = reader->scope("banks");
     for (std::size_t index = 0;
          index < system->iopDMAControllerComponent.banks.size(); ++index)
@@ -970,6 +990,8 @@ void NekoSaveStateCodec::commitIOP(
     source->iopDMAControllerComponent.banks;
   destination->iopDMAControllerComponent.auxiliaryControlRegister =
     source->iopDMAControllerComponent.auxiliaryControlRegister;
+  destination->iopDMAControllerComponent.spuMemoryAddresses =
+    source->iopDMAControllerComponent.spuMemoryAddresses;
   destination->iopDMAControllerComponent.sifNextChannel =
     source->iopDMAControllerComponent.sifNextChannel;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;

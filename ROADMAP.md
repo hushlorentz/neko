@@ -3456,6 +3456,19 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved paired write-selection through the existing SPU2 owner
       with red/green, excluded-access and required lifecycle/persistence coverage;
       independently review and run required validation gates.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### IOP SPU DMA Nonzero Address Programming Dependency
+
+- [x] Research the originating word write to channel 4 MADR and paired
+      channel 4/7 programming family; select the existing-owner boundary,
+      keeping active transfer/start behavior separately gated.
+- [x] Implement paired passive MADR programming through the existing DMA owner;
+      preserve zero-only BCR/CHCR and excluded transports, with red/green
+      and required lifecycle/persistence coverage;
+      independently review and run required validation gates.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

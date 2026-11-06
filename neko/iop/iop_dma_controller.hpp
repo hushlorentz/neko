@@ -77,9 +77,12 @@ class IOPDMAController final
     // Provisional retained word; raw bit semantics remain unestablished.
     IOPWord auxiliaryControl() const;
     void writeAuxiliaryControl(IOPWord value);
+    // Provisional passive channel-4/7 addresses; no transfer requests or progression.
+    IOPWord spuMemoryAddress(std::size_t core) const;
+    IOPDMAWriteOutcome writeSPUMemoryAddress(std::size_t core, IOPWord value);
     // Provisional disabled-FDMA initialization only; no retained state or effects.
     IOPDMAWriteOutcome writeDPCR3Initialization(IOPWord value) const;
-    // Provisional channel-0..8/11/12 zero-only profile; no retained state or effects.
+    // Provisional remaining channel-register zero-only profile; no state or effects.
     IOPWord channelRegisterInitialization() const;
     IOPDMAWriteOutcome writeChannelRegisterInitialization(IOPWord value) const;
     // Provisional exact supplemental zero initialization; no retained state or effects.
@@ -121,6 +124,7 @@ class IOPDMAController final
     IOPInterruptController &interrupts;
     std::array<Bank, 2> banks = {};
     IOPWord auxiliaryControlRegister = 0;
+    std::array<IOPWord, 2> spuMemoryAddresses = {};
     IOPDMAChannel sifNextChannel = IOPDMAChannel::SIF0;
 };
 

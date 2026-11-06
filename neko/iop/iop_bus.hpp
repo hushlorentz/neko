@@ -172,6 +172,7 @@ class IOPBus final
       SSBUSConfiguration,
       InterruptController,
       DMAController,
+      SPUDMAMemoryAddress,
       DPCR3Initialization,
       ChannelRegisterInitialization,
       SupplementalDMAInitialization,

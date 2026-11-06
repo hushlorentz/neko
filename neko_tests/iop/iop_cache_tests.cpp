@@ -12,6 +12,8 @@
 #include "iop_bus.hpp"
 #include "iop_cache.hpp"
 #include "iop_core.hpp"
+#include "iop_dma_controller.hpp"
+#include "iop_sif1_dma_channel.hpp"
 #include "iop_interrupt_controller.hpp"
 #include "iop_timers.hpp"
 #include "sio2_controller.hpp"
@@ -511,6 +513,85 @@ TEST_CASE("SPU2 quiescent status bypasses cached payloads but preserves isolatio
     REQUIRE(read.value == 0);
     REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Unmapped);
     requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
+TEST_CASE("IOP SPU DMA addresses bypass cached payloads but preserve isolation",
+  "[iop][dma][spu-madr][cache]")
+{
+  for (IOPAddress physical : {0x1f8010c0u, 0x1f801500u})
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(swapped);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel sif1;
+    bus.attachDMA(&dma, &sif1);
+    REQUIRE(bus.write32(physical, 0x4fa00).status == IOPBusStatus::Completed);
+    IOPCore core;
+    core.attachBus(&bus);
+    const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address, 0x12341234).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0x12341234);
+    REQUIRE(dma.spuMemoryAddress(physical == 0x1f8010c0 ? 0 : 1) == 0x4fa00);
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    const auto read = core.readData32(address);
+    REQUIRE(read.outcome == IOPAccessOutcome::Completed);
+    REQUIRE(read.value == 0x4fa00);
+    REQUIRE(core.writeData32(address, 0xabfffffc).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0x00fffffc);
+    REQUIRE(core.writeData32(address, 3).outcome == IOPAccessOutcome::Unmapped);
+    core.startExecution(address);
+    REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
+TEST_CASE("IOP SPU DMA protected and misaligned words retain delay-slot exceptions",
+  "[iop][dma][spu-madr][execution]")
+{
+  for (IOPAddress physical : {0x1f8010c0u, 0x1f801500u})
+  for (bool user : {false, true})
+  for (bool store : {false, true})
+  {
+    const auto address = user ? physical | 0xa0000000u : physical + 1;
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel sif1;
+    bus.attachDMA(&dma, &sif1);
+    REQUIRE(bus.write32(physical, 0x4fa00).status == IOPBusStatus::Completed);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0x12345678);
+    if (user)
+    {
+      IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CURRENT_USER_MODE);
+    }
+    REQUIRE(bus.write32(0, 0x10000003).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, store ? 0xac220000 : 0x8c220000).status ==
+      IOPBusStatus::Completed);
+    core.startExecution(0);
+    core.stepInstruction();
+    const auto before = core.cache();
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == (store ? IOPException::AddressErrorStore
+      : IOPException::AddressErrorLoadOrFetch));
+    REQUIRE(core.exception().badVirtualAddress == address);
+    REQUIRE(core.exception().inBranchDelaySlot);
+    REQUIRE(core.exceptionProgramCounter() == 0);
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.generalRegister(2) == 0x12345678);
+    REQUIRE(bus.read32(physical).value == 0x4fa00);
+    requireUnchangedCache(core.cache(), before);
   }
 }
 

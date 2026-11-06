@@ -114,6 +114,17 @@ void IOPDMAController::writeAuxiliaryControl(IOPWord value)
   auxiliaryControlRegister = value;
 }
 
+IOPWord IOPDMAController::spuMemoryAddress(std::size_t core) const
+{
+  return spuMemoryAddresses.at(core);
+}
+
+IOPDMAWriteOutcome IOPDMAController::writeSPUMemoryAddress(
+  std::size_t core, IOPWord value)
+{
+  return IOPDMAChannelState::programMemoryAddress(spuMemoryAddresses.at(core), value);
+}
+
 IOPDMAWriteOutcome IOPDMAController::writeDPCR3Initialization(IOPWord value) const
 {
   return value == 0x777 ? IOPDMAWriteOutcome::Completed :

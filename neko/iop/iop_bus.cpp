@@ -87,15 +87,18 @@ namespace
   constexpr IOPAddress sif0DMABase = 0x1f801520;
   constexpr IOPAddress dmaAuxiliaryControl = 0x1f801578;
   constexpr IOPAddress dmaDPCR3Initialization = 0x1f8015f0;
-  constexpr std::array<IOPAddress, 33> dmaChannelInitializationRegisters = {{
+  constexpr std::array<IOPAddress, 2> spuDMAMemoryAddresses = {{
+    0x1f8010c0, 0x1f801500
+  }};
+  constexpr std::array<IOPAddress, 31> dmaChannelInitializationRegisters = {{
     0x1f801080, 0x1f801084, 0x1f801088,
     0x1f801090, 0x1f801094, 0x1f801098,
     0x1f8010a0, 0x1f8010a4, 0x1f8010a8,
     0x1f8010b0, 0x1f8010b4, 0x1f8010b8,
-    0x1f8010c0, 0x1f8010c4, 0x1f8010c8,
+    0x1f8010c4, 0x1f8010c8,
     0x1f8010d0, 0x1f8010d4, 0x1f8010d8,
     0x1f8010e0, 0x1f8010e4, 0x1f8010e8,
-    0x1f801500, 0x1f801504, 0x1f801508,
+    0x1f801504, 0x1f801508,
     0x1f801510, 0x1f801514, 0x1f801518,
     0x1f801540, 0x1f801544, 0x1f801548,
     0x1f801550, 0x1f801554, 0x1f801558
@@ -502,6 +505,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
   {
     return {IOPBusRegion::Mmio, 0, Device::DPCR3Initialization};
   }
+  for (std::size_t core = 0; core < spuDMAMemoryAddresses.size(); ++core)
+  {
+    const auto target = spuDMAMemoryAddresses[core];
+    if (first == target && last < first + sizeof(IOPWord))
+    {
+      return {IOPBusRegion::Mmio, core, Device::SPUDMAMemoryAddress};
+    }
+  }
   for (IOPAddress target : dmaChannelInitializationRegisters)
   {
     if (first == target && last < first + sizeof(IOPWord))
@@ -702,6 +713,7 @@ IOPBusReadResult IOPBus::readInstruction32(IOPAddress address)
   }
   const Location location = locate(address, sizeof(IOPWord));
   if (location.device == Device::ChannelRegisterInitialization ||
+      location.device == Device::SPUDMAMemoryAddress ||
       location.device == Device::SIO2Control ||
       location.device == Device::SIO2PortControl ||
       location.device == Device::SIO2CommandDescriptor ||
@@ -884,6 +896,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
       return width == sizeof(IOPWord)
         ? IOPBusReadResult{IOPBusStatus::Completed, cacheInitializationControl}
         : IOPBusReadResult{};
+    case Device::SPUDMAMemoryAddress:
+      return width == sizeof(IOPWord) && dmaController != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            dmaController->spuMemoryAddress(location.offset)}
+        : IOPBusReadResult{};
     case Device::ChannelRegisterInitialization:
       return width == sizeof(IOPWord) && dmaController != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1060,6 +1077,11 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
     case Device::DPCR3Initialization:
       return width == sizeof(IOPWord) && dmaController != nullptr &&
         dmaController->writeDPCR3Initialization(value) == IOPDMAWriteOutcome::Completed
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SPUDMAMemoryAddress:
+      return width == sizeof(IOPWord) && dmaController != nullptr &&
+        dmaController->writeSPUMemoryAddress(location.offset, value) ==
+          IOPDMAWriteOutcome::Completed
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::ChannelRegisterInitialization:
       return width == sizeof(IOPWord) && dmaController != nullptr &&
