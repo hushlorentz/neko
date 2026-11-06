@@ -553,6 +553,47 @@ TEST_CASE("IOP SPU DMA addresses bypass cached payloads but preserve isolation",
   }
 }
 
+TEST_CASE("IOP SPU DMA block control halfwords respect cache isolation",
+  "[iop][dma][spu-bcr][cache]")
+{
+  for (IOPAddress physical : {0x1f8010c4u, 0x1f801504u})
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(swapped);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel sif1;
+    bus.attachDMA(&dma, &sif1);
+    REQUIRE(bus.write32(physical, 0x89abcdef).status == IOPBusStatus::Completed);
+    IOPCore core;
+    core.attachBus(&bus);
+    const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address, 0x12341234).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.writeData16(address + 2, 0x5678).outcome ==
+      IOPAccessOutcome::Completed);
+    // Isolated narrow stores invalidate without replacing the cached payload.
+    REQUIRE(core.readData16(address + 2).value == 0x1234);
+    REQUIRE(bus.read32(physical).value == 0x89abcdef);
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.readData16(address).value == 0xcdef);
+    REQUIRE(core.readData16(address + 2).value == 0x89ab);
+    REQUIRE(core.writeData16(address, 0x0010).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.writeData16(address + 2, 0xffff).outcome ==
+      IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0xffff0010);
+    core.startExecution(address);
+    REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
 TEST_CASE("IOP SPU DMA protected and misaligned words retain delay-slot exceptions",
   "[iop][dma][spu-madr][execution]")
 {
@@ -591,6 +632,49 @@ TEST_CASE("IOP SPU DMA protected and misaligned words retain delay-slot exceptio
     REQUIRE_FALSE(core.branchContinuation().active);
     REQUIRE(core.generalRegister(2) == 0x12345678);
     REQUIRE(bus.read32(physical).value == 0x4fa00);
+    requireUnchangedCache(core.cache(), before);
+  }
+}
+
+TEST_CASE("IOP SPU DMA protected and misaligned halfwords retain delay-slot exceptions",
+  "[iop][dma][spu-bcr][execution]")
+{
+  for (IOPAddress physical : {0x1f8010c4u, 0x1f8010c6u, 0x1f801504u, 0x1f801506u})
+  for (bool user : {false, true})
+  for (bool store : {false, true})
+  {
+    const auto address = user ? physical | 0xa0000000u : physical + 1;
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel sif1;
+    bus.attachDMA(&dma, &sif1);
+    REQUIRE(bus.write32(physical & ~IOPAddress{3}, 0x89abcdef).status ==
+      IOPBusStatus::Completed);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0x12345678);
+    if (user)
+    {
+      IOPCacheTestAccess::setStatus(&core, IOPCOP0Status::CURRENT_USER_MODE);
+    }
+    REQUIRE(bus.write32(0, 0x10000003).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, store ? 0xa4220000 : 0x94220000).status ==
+      IOPBusStatus::Completed);
+    core.startExecution(0);
+    core.stepInstruction();
+    const auto before = core.cache();
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == (store ? IOPException::AddressErrorStore
+      : IOPException::AddressErrorLoadOrFetch));
+    REQUIRE(core.exception().badVirtualAddress == address);
+    REQUIRE(core.exception().inBranchDelaySlot);
+    REQUIRE(core.exceptionProgramCounter() == 0);
+    REQUIRE_FALSE(core.branchContinuation().active);
+    REQUIRE(core.generalRegister(2) == 0x12345678);
+    REQUIRE(bus.read32(physical & ~IOPAddress{3}).value == 0x89abcdef);
     requireUnchangedCache(core.cache(), before);
   }
 }

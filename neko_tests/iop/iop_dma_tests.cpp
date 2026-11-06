@@ -18,15 +18,16 @@ namespace
   constexpr IOPAddress AUXILIARY = 0x1f801578;
   constexpr IOPAddress DPCR3 = 0x1f8015f0;
   constexpr IOPAddress SPU_MADR[] = {0x1f8010c0, 0x1f801500};
+  constexpr IOPAddress SPU_BCR[] = {0x1f8010c4, 0x1f801504};
   constexpr IOPAddress CHANNEL_INITIALIZATION_REGISTERS[] = {
     0x1f801080, 0x1f801084, 0x1f801088,
     0x1f801090, 0x1f801094, 0x1f801098,
     0x1f8010a0, 0x1f8010a4, 0x1f8010a8,
     0x1f8010b0, 0x1f8010b4, 0x1f8010b8,
-    0x1f8010c4, 0x1f8010c8,
+    0x1f8010c8,
     0x1f8010d0, 0x1f8010d4, 0x1f8010d8,
     0x1f8010e0, 0x1f8010e4, 0x1f8010e8,
-    0x1f801504, 0x1f801508,
+    0x1f801508,
     0x1f801510, 0x1f801514, 0x1f801518,
     0x1f801540, 0x1f801544, 0x1f801548,
     0x1f801550, 0x1f801554, 0x1f801558
@@ -113,6 +114,34 @@ namespace
   }
 }
 
+TEST_CASE("IOP SPU DMA block control retains independent words and halfword lanes",
+  "[iop][dma][spu-bcr]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write16(0x1f8010c4, 0x0010).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(0x1f8010c4).value == 0x0010);
+  for (const IOPAddress address : {0x1f8010c4u, 0x1f801504u})
+  {
+    REQUIRE(bus.write32(address, 0x89abcdef).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(address).value == 0xcdef);
+    REQUIRE(bus.read16(address + 2).value == 0x89ab);
+    REQUIRE(bus.write16(address, 0x0010).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0x89ab0010);
+    REQUIRE(bus.write16(address + 2, 0xffff).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0xffff0010);
+    REQUIRE(bus.write16(address, 0xffff).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0xffffffff);
+    REQUIRE(bus.write16(address + 2, 0).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read32(address).value == 0xffff);
+    REQUIRE(bus.writeMasked32(address, 0x12345678, 15).status ==
+      IOPBusStatus::Completed);
+  }
+  REQUIRE(bus.write16(0x1f8010c4, 0).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read32(0x1f8010c4).value == 0x12340000);
+  REQUIRE(bus.read32(0x1f801504).value == 0x12345678);
+}
+
 TEST_CASE("IOP SPU DMA addresses retain normalized independent programming",
   "[iop][dma][spu-madr]")
 {
@@ -172,7 +201,7 @@ TEST_CASE("IOP SPU DMA programming preserves inactive engines and other owners",
     }
     expected.writeScalar("system.iop.dmaController.spuMemoryAddress[" +
       std::to_string(core) + "].value", dma.spuMemoryAddress(core));
-    for (IOPAddress offset : {4u, 8u})
+    for (IOPAddress offset : {8u})
     {
       REQUIRE(bus.write32(SPU_MADR[core] + offset, 0).status == IOPBusStatus::Completed);
       REQUIRE(bus.write32(SPU_MADR[core] + offset, 1).status == IOPBusStatus::Unmapped);
@@ -291,6 +320,205 @@ TEST_CASE("IOP SPU DMA pending word stores and loads restore canonically",
     REQUIRE(original.iopBus().read32(physical).value == 0x4fa00);
     REQUIRE(restored.iopBus().write32(physical, 0xab04fa00).status ==
       IOPBusStatus::Completed);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+  }
+}
+
+TEST_CASE("IOP SPU DMA block control preserves inactive engines and lifecycle boundaries",
+  "[iop][dma][spu-bcr]")
+{
+  NekoSystem system;
+  auto &dma = system.iopDMAController();
+  auto &bus = system.iopBus();
+  dma.writePriority(PRIMARY, 0xffffffff);
+  dma.writePriority(SECONDARY, 0xffffffff);
+  dma.writeAuxiliaryControl(0x89abcdef);
+  dma.writeInterrupt(PRIMARY, FORCE);
+  dma.signalChannelCompletion(IOPDMAChannel::SIF1);
+  REQUIRE(bus.write16(0x1f9001b0, 1).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write16(0x1f9005b0, 2).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write16(0x1f9001a8, 0x1234).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x100, 0x76543210).status == IOPBusStatus::Completed);
+  SaveStateMutation expected(system.saveState());
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(dma.spuBlockControl(core) == 0);
+    dma.writeSPUBlockControl(core, 0xffffffff);
+    dma.writeSPUBlockSize(core, 0x0010);
+    dma.writeSPUBlockCount(core, 0x8000);
+    REQUIRE(dma.spuBlockSize(core) == 0x0010);
+    REQUIRE(dma.spuBlockCount(core) == 0x8000);
+    REQUIRE(bus.read32(SPU_BCR[core]).value == 0x80000010);
+    expected.writeScalar("system.iop.dmaController.spuBlockControl[" +
+      std::to_string(core) + "].value", 0x80000010);
+    REQUIRE(bus.write32(SPU_MADR[core] + 8, 0x01000000).status ==
+      IOPBusStatus::Unmapped);
+  }
+  expected.refreshChecksum();
+  requireState(system, expected.bytes());
+  REQUIRE_THROWS_AS(dma.spuBlockControl(2), std::out_of_range);
+  REQUIRE_THROWS_AS(dma.writeSPUBlockControl(2, 0), std::out_of_range);
+  REQUIRE_THROWS_AS(dma.spuBlockSize(2), std::out_of_range);
+  REQUIRE_THROWS_AS(dma.writeSPUBlockSize(2, 0), std::out_of_range);
+  REQUIRE_THROWS_AS(dma.spuBlockCount(2), std::out_of_range);
+  REQUIRE_THROWS_AS(dma.writeSPUBlockCount(2, 0), std::out_of_range);
+  system.runMasterCycles(80);
+  REQUIRE(bus.read32(0x100).value == 0x76543210);
+  bus.reset();
+  system.iopCore().reset();
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(dma.spuBlockControl(core) == 0x80000010);
+    REQUIRE(dma.spuMemoryAddress(core) == 0);
+  }
+  REQUIRE(bus.read16(0x1f9001a8).value == 0x1234);
+  REQUIRE(bus.read16(0x1f900344).value == 0);
+  REQUIRE(bus.read16(0x1f900744).value == 0);
+  REQUIRE(dma.interruptStatus(PRIMARY) == (FORCE | SUMMARY));
+  REQUIRE(dma.interruptStatus(SECONDARY) == FLAG);
+  REQUIRE_FALSE(system.iopSIF1DMAC().active());
+  REQUIRE_FALSE(system.iopSIF0DMAC().active());
+  system.reset();
+  for (const auto address : SPU_BCR)
+  {
+    REQUIRE(system.iopBus().read32(address).value == 0);
+  }
+}
+
+TEST_CASE("IOP SPU DMA block control rejects excluded transports without mutation",
+  "[iop][dma][spu-bcr][bus]")
+{
+  IOPBus detached;
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  for (const auto address : SPU_BCR)
+  {
+    REQUIRE(bus.write32(address, 0x89abcdef).status == IOPBusStatus::Completed);
+  }
+  const auto before = system.saveState();
+  for (const auto address : SPU_BCR)
+  {
+    REQUIRE(detached.read32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(detached.write32(address, 0).status == IOPBusStatus::Unmapped);
+    for (IOPAddress lane = 0; lane < 4; ++lane)
+    {
+      REQUIRE(bus.read8(address + lane).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write8(address + lane, 0).status == IOPBusStatus::Unmapped);
+      if (lane % 2 != 0)
+      {
+        REQUIRE(bus.read16(address + lane).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.write16(address + lane, 0).status == IOPBusStatus::Misaligned);
+      }
+      else
+      {
+        REQUIRE(detached.read16(address + lane).status == IOPBusStatus::Unmapped);
+        REQUIRE(detached.write16(address + lane, 0).status == IOPBusStatus::Unmapped);
+      }
+      if (lane != 0)
+      {
+        REQUIRE(bus.read32(address + lane).status == IOPBusStatus::Misaligned);
+        REQUIRE(bus.write32(address + lane, 0).status == IOPBusStatus::Misaligned);
+      }
+    }
+    for (std::uint8_t mask = 1; mask < 15; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(bus.readInstruction32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.readDMAC32(address).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.writeDMAC32(address, 0).status == IOPBusStatus::Unmapped);
+    std::uint8_t byte = 0;
+    REQUIRE(bus.inspectPhysical(address, &byte, 1) == IOPBusStatus::Unmapped);
+    REQUIRE(bus.loadPhysical(address, &byte, 1) == IOPBusStatus::Unmapped);
+    std::uint32_t eeValue = 0;
+    REQUIRE_FALSE(system.eeBus().readData32(address, &eeValue));
+    REQUIRE_FALSE(system.eeBus().writeData32(address, 0));
+    REQUIRE(bus.write32(address + 0x100000, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(address + 4).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write16(address + 4, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(address + 4, 1).status == IOPBusStatus::Unmapped);
+  }
+  requireState(system, before);
+}
+
+TEST_CASE("IOP SPU DMA block control guest halfwords restore pending branches and loads",
+  "[iop][dma][spu-bcr][save-state][trace]")
+{
+  namespace Memory = NekoIOPTraceMemory;
+  for (const auto physical : SPU_BCR)
+  for (const IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  for (const std::uint64_t cut : {32u, 48u, 64u})
+  {
+    const auto target = physical | segment;
+    CAPTURE(target);
+    CAPTURE(cut);
+    NekoSystem original;
+    REQUIRE(original.iopBus().write32(physical, 0x89abcdef).status ==
+      IOPBusStatus::Completed);
+    const auto other = physical == SPU_BCR[0] ? SPU_BCR[1] : SPU_BCR[0];
+    REQUIRE(original.iopBus().write32(other, 0xffffffff).status ==
+      IOPBusStatus::Completed);
+    const IOPWord program[] = {
+      0x3c010000 | (target >> 16), 0x34210000 | (target & 0xffff),
+      0x24020010, 0x10000002, 0xa4220000, // SH in branch delay slot
+      0xffffffff, 0x94230000, 0x94240002, 0x8c250000, 0,
+      0xa8220001 // partial-mask SWL is not a native halfword
+    };
+    IOPAddress address = 0;
+    for (const auto word : program)
+    {
+      REQUIRE(original.iopBus().write32(address, word).status ==
+        IOPBusStatus::Completed);
+      address += 4;
+    }
+    original.iopCore().startExecution(0xa0000000);
+    original.runMasterCycles(cut);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(80 - cut);
+    restored.runMasterCycles(80 - cut);
+    plain.runMasterCycles(80 - cut);
+    const auto &core = original.iopCore();
+    REQUIRE(core.stopReason() == IOPStopReason::StoreFailure);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.retiredInstructions() == 9);
+    REQUIRE(core.programCounter() == 0xa0000028);
+    REQUIRE(core.generalRegister(3) == 0x0010);
+    REQUIRE(core.generalRegister(4) == 0x89ab);
+    REQUIRE(core.generalRegister(5) == 0x89ab0010);
+    REQUIRE(core.storeFailure().access.physicalAddress == physical + 1);
+    REQUIRE(core.storeFailure().access.virtualAddress == target + 1);
+    REQUIRE(core.storeFailure().access.outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(core.storeFailure().mergeByteEnable == 3);
+    REQUIRE(original.iopBus().read32(physical).value == 0x89ab0010);
+    REQUIRE(restored.iopBus().read32(other).value == 0xffffffff);
+    const auto route = segment == 0xa0000000 ? Memory::CacheRoute::Uncached :
+      Memory::CacheRoute::Cached;
+    std::size_t stores = 0;
+    for (const auto &event : original.trace())
+    {
+      if (event.type != NekoTraceEventType::MemoryAccess || event.value0 != target ||
+          (event.masterCycle != 33 && event.masterCycle != 73))
+      {
+        continue;
+      }
+      const bool halfword = event.masterCycle == 33;
+      REQUIRE(event.value1 == (halfword ? 0x0010 : 0));
+      REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+        physical, static_cast<std::uint8_t>(halfword ? 2 : 4),
+        Memory::AccessKind::DataStore,
+        halfword ? Memory::Outcome::Completed : Memory::Outcome::Unmapped,
+        route, true, 3}));
+      ++stores;
+    }
+    REQUIRE(stores == (cut == 32 ? 2 : 1));
     IOPTraceTest::requireEvents(restored.trace(), original.trace());
     IOPTraceTest::requireMachine(restored, original);
     IOPTraceTest::requireMachine(plain, original);
@@ -1638,6 +1866,14 @@ TEST_CASE("IOP DMA malformed persistence rejects before destination mutation",
     IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write32(SPU_MADR[1], 0x200).status ==
     IOPBusStatus::Completed);
+  REQUIRE(source.iopBus().write32(SPU_BCR[0], 0xffffffff).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(source.iopBus().write32(SPU_BCR[1], 0x80000010).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.iopBus().write32(SPU_BCR[0], 0x12345678).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(destination.iopBus().write32(SPU_BCR[1], 0x89abcdef).status ==
+    IOPBusStatus::Completed);
   destination.iopDMAController().writeInterrupt(PRIMARY, FORCE);
   destination.runMasterCycles(9);
   destination.startTrace();
@@ -1668,7 +1904,7 @@ TEST_CASE("IOP DMA malformed persistence rejects before destination mutation",
     REQUIRE(destination.traceHash() == traceHash);
   }
   SaveStateMutation checksum(sourceState);
-  checksum.writeScalar("system.iop.dmaController.spuMemoryAddress[0].value", 0x100);
+  checksum.writeScalar("system.iop.dmaController.spuBlockControl[0].value", 0);
   REQUIRE_THROWS_AS(destination.loadState(checksum.bytes()), std::invalid_argument);
   requireState(destination, before);
 }
@@ -1680,6 +1916,13 @@ TEST_CASE("IOP DMA canonical registers independently contribute to IOP hashes",
   const auto hash = system.iopStateHash();
   for (std::size_t core = 0; core < 2; ++core)
   {
+    for (IOPWord bit : {1u, 0x8000u, 0x10000u, 0x80000000u})
+    {
+      system.iopDMAController().writeSPUBlockControl(core, bit);
+      REQUIRE(system.iopStateHash() != hash);
+      system.iopDMAController().writeSPUBlockControl(core, 0);
+      REQUIRE(system.iopStateHash() == hash);
+    }
     REQUIRE(system.iopDMAController().writeSPUMemoryAddress(core, 4) ==
       IOPDMAWriteOutcome::Completed);
     REQUIRE(system.iopStateHash() != hash);

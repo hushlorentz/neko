@@ -3469,6 +3469,18 @@ not requirements for exhaustive subsystem coverage.
       preserve zero-only BCR/CHCR and excluded transports, with red/green
       and required lifecycle/persistence coverage;
       independently review and run required validation gates.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### IOP SPU DMA Passive Block-Count Programming Dependency
+
+- [x] Research the originating `0x0010` halfword store to channel 4 BCR
+      and paired channel 4/7 count family; select passive ownership,
+      access widths and lane/readback policy, keeping active starts gated.
+- [x] Implement paired passive BCR words and lane-preserving halfwords through
+      the existing DMA owner; preserve zero-only CHCR and excluded transports,
+      with red/green, lifecycle/persistence coverage, independent review and validation.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

@@ -360,8 +360,8 @@ TEST_CASE("SPU2 Auto DMA write selection admits only each core bit without trans
     REQUIRE(system.iopStateHash() == enabled);
     REQUIRE(bus.read16(autoDMAAddresses[core]).status == IOPBusStatus::Unmapped);
     for (IOPAddress address : {
-        0x1f9001acu, 0x1f9005acu, 0x1f8010c0u, 0x1f8010c4u, 0x1f8010c8u,
-        0x1f801500u, 0x1f801504u, 0x1f801508u})
+        0x1f9001acu, 0x1f9005acu, 0x1f8010c0u, 0x1f8010c8u,
+        0x1f801500u, 0x1f801508u})
     {
       REQUIRE(bus.write16(address, 1).status == IOPBusStatus::Unmapped);
       REQUIRE(bus.write32(address, 0x01000001).status == IOPBusStatus::Unmapped);

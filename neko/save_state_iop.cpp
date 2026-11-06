@@ -354,6 +354,15 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU32("value", words[core]);
       }
     }
+    {
+      auto controls = writer->scope("spuBlockControl");
+      const auto &words = system.iopDMAControllerComponent.spuBlockControls;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto control = writer->element(core);
+        writer->writeFieldU32("value", words[core]);
+      }
+    }
     auto banks = writer->scope("banks");
     for (std::size_t index = 0;
          index < system.iopDMAControllerComponent.banks.size(); ++index)
@@ -611,6 +620,15 @@ void NekoSaveStateCodec::readIOP(
         words[core] = reader->readFieldU32("value");
         reader->requireField(IOPDMAChannelState::validMemoryAddress(words[core]),
           "IOP SPU DMA address is unaligned or exceeds 24 bits");
+      }
+    }
+    {
+      auto controls = reader->scope("spuBlockControl");
+      auto &words = system->iopDMAControllerComponent.spuBlockControls;
+      for (std::size_t core = 0; core < words.size(); ++core)
+      {
+        auto control = reader->element(core);
+        words[core] = reader->readFieldU32("value");
       }
     }
     auto banks = reader->scope("banks");
@@ -992,6 +1010,8 @@ void NekoSaveStateCodec::commitIOP(
     source->iopDMAControllerComponent.auxiliaryControlRegister;
   destination->iopDMAControllerComponent.spuMemoryAddresses =
     source->iopDMAControllerComponent.spuMemoryAddresses;
+  destination->iopDMAControllerComponent.spuBlockControls =
+    source->iopDMAControllerComponent.spuBlockControls;
   destination->iopDMAControllerComponent.sifNextChannel =
     source->iopDMAControllerComponent.sifNextChannel;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;

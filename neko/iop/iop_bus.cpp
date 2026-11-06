@@ -90,15 +90,18 @@ namespace
   constexpr std::array<IOPAddress, 2> spuDMAMemoryAddresses = {{
     0x1f8010c0, 0x1f801500
   }};
-  constexpr std::array<IOPAddress, 31> dmaChannelInitializationRegisters = {{
+  constexpr std::array<IOPAddress, 2> spuDMABlockControls = {{
+    0x1f8010c4, 0x1f801504
+  }};
+  constexpr std::array<IOPAddress, 29> dmaChannelInitializationRegisters = {{
     0x1f801080, 0x1f801084, 0x1f801088,
     0x1f801090, 0x1f801094, 0x1f801098,
     0x1f8010a0, 0x1f8010a4, 0x1f8010a8,
     0x1f8010b0, 0x1f8010b4, 0x1f8010b8,
-    0x1f8010c4, 0x1f8010c8,
+    0x1f8010c8,
     0x1f8010d0, 0x1f8010d4, 0x1f8010d8,
     0x1f8010e0, 0x1f8010e4, 0x1f8010e8,
-    0x1f801504, 0x1f801508,
+    0x1f801508,
     0x1f801510, 0x1f801514, 0x1f801518,
     0x1f801540, 0x1f801544, 0x1f801548,
     0x1f801550, 0x1f801554, 0x1f801558
@@ -513,6 +516,15 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       return {IOPBusRegion::Mmio, core, Device::SPUDMAMemoryAddress};
     }
   }
+  for (std::size_t core = 0; core < spuDMABlockControls.size(); ++core)
+  {
+    const auto target = spuDMABlockControls[core];
+    if (first >= target && last < static_cast<std::uint64_t>(target) + sizeof(IOPWord))
+    {
+      return {IOPBusRegion::Mmio, static_cast<std::size_t>(first - target),
+        Device::SPUDMABlockControl, nullptr, core};
+    }
+  }
   for (IOPAddress target : dmaChannelInitializationRegisters)
   {
     if (first == target && last < first + sizeof(IOPWord))
@@ -714,6 +726,7 @@ IOPBusReadResult IOPBus::readInstruction32(IOPAddress address)
   const Location location = locate(address, sizeof(IOPWord));
   if (location.device == Device::ChannelRegisterInitialization ||
       location.device == Device::SPUDMAMemoryAddress ||
+      location.device == Device::SPUDMABlockControl ||
       location.device == Device::SIO2Control ||
       location.device == Device::SIO2PortControl ||
       location.device == Device::SIO2CommandDescriptor ||
@@ -901,6 +914,27 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             dmaController->spuMemoryAddress(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPUDMABlockControl:
+      if (dmaController == nullptr)
+      {
+        return {};
+      }
+      if (width == sizeof(IOPWord) && location.offset == 0)
+      {
+        return {IOPBusStatus::Completed,
+          dmaController->spuBlockControl(location.deviceIndex)};
+      }
+      if (width == 2 && location.offset == 0)
+      {
+        return {IOPBusStatus::Completed,
+          dmaController->spuBlockSize(location.deviceIndex)};
+      }
+      if (width == 2 && location.offset == 2)
+      {
+        return {IOPBusStatus::Completed,
+          dmaController->spuBlockCount(location.deviceIndex)};
+      }
+      return {};
     case Device::ChannelRegisterInitialization:
       return width == sizeof(IOPWord) && dmaController != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -1083,6 +1117,30 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         dmaController->writeSPUMemoryAddress(location.offset, value) ==
           IOPDMAWriteOutcome::Completed
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    case Device::SPUDMABlockControl:
+      if (dmaController == nullptr)
+      {
+        return {};
+      }
+      if (width == sizeof(IOPWord) && location.offset == 0)
+      {
+        dmaController->writeSPUBlockControl(location.deviceIndex, value);
+      }
+      else if (width == 2 && location.offset == 0)
+      {
+        dmaController->writeSPUBlockSize(
+          location.deviceIndex, static_cast<std::uint16_t>(value));
+      }
+      else if (width == 2 && location.offset == 2)
+      {
+        dmaController->writeSPUBlockCount(
+          location.deviceIndex, static_cast<std::uint16_t>(value));
+      }
+      else
+      {
+        return {};
+      }
+      return {IOPBusStatus::Completed};
     case Device::ChannelRegisterInitialization:
       return width == sizeof(IOPWord) && dmaController != nullptr &&
         dmaController->writeChannelRegisterInitialization(value) ==

@@ -125,6 +125,38 @@ IOPDMAWriteOutcome IOPDMAController::writeSPUMemoryAddress(
   return IOPDMAChannelState::programMemoryAddress(spuMemoryAddresses.at(core), value);
 }
 
+IOPWord IOPDMAController::spuBlockControl(std::size_t core) const
+{
+  return spuBlockControls.at(core);
+}
+
+void IOPDMAController::writeSPUBlockControl(std::size_t core, IOPWord value)
+{
+  spuBlockControls.at(core) = value;
+}
+
+std::uint16_t IOPDMAController::spuBlockSize(std::size_t core) const
+{
+  return static_cast<std::uint16_t>(spuBlockControl(core));
+}
+
+void IOPDMAController::writeSPUBlockSize(std::size_t core, std::uint16_t value)
+{
+  auto &word = spuBlockControls.at(core);
+  word = (word & 0xffff0000) | value;
+}
+
+std::uint16_t IOPDMAController::spuBlockCount(std::size_t core) const
+{
+  return static_cast<std::uint16_t>(spuBlockControl(core) >> 16);
+}
+
+void IOPDMAController::writeSPUBlockCount(std::size_t core, std::uint16_t value)
+{
+  auto &word = spuBlockControls.at(core);
+  word = (word & 0xffff) | (IOPWord{value} << 16);
+}
+
 IOPDMAWriteOutcome IOPDMAController::writeDPCR3Initialization(IOPWord value) const
 {
   return value == 0x777 ? IOPDMAWriteOutcome::Completed :

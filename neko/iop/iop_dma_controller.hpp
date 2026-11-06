@@ -80,6 +80,12 @@ class IOPDMAController final
     // Provisional passive channel-4/7 addresses; no transfer requests or progression.
     IOPWord spuMemoryAddress(std::size_t core) const;
     IOPDMAWriteOutcome writeSPUMemoryAddress(std::size_t core, IOPWord value);
+    IOPWord spuBlockControl(std::size_t core) const;
+    void writeSPUBlockControl(std::size_t core, IOPWord value);
+    std::uint16_t spuBlockSize(std::size_t core) const;
+    void writeSPUBlockSize(std::size_t core, std::uint16_t value);
+    std::uint16_t spuBlockCount(std::size_t core) const;
+    void writeSPUBlockCount(std::size_t core, std::uint16_t value);
     // Provisional disabled-FDMA initialization only; no retained state or effects.
     IOPDMAWriteOutcome writeDPCR3Initialization(IOPWord value) const;
     // Provisional remaining channel-register zero-only profile; no state or effects.
@@ -125,6 +131,7 @@ class IOPDMAController final
     std::array<Bank, 2> banks = {};
     IOPWord auxiliaryControlRegister = 0;
     std::array<IOPWord, 2> spuMemoryAddresses = {};
+    std::array<IOPWord, 2> spuBlockControls = {};
     IOPDMAChannel sifNextChannel = IOPDMAChannel::SIF0;
 };
 
