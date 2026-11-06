@@ -39,6 +39,10 @@ namespace
       0x1f900764, 0x1f900766, 0x1f900768, 0x1f90076a, 0x1f90076c, 0x1f90076e,
       0x1f90078c, 0x1f90078e, 0x1f900790, 0x1f900792, 0x1f900794, 0x1f900796
     }};
+  constexpr std::array<IOPAddress, SPU2Controller::CORE_COUNT>
+    spu2EffectEndAddressHighAddresses = {{
+      0x1f90033c, 0x1f90073c
+    }};
   constexpr std::array<IOPAddress, SPU2Controller::VOICE_MIX_HALFWORD_COUNT>
     spu2VoiceMixAddresses = {{
       0x1f900188, 0x1f90018a, 0x1f90018c, 0x1f90018e,
@@ -405,6 +409,14 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
         last < first + sizeof(std::uint16_t))
     {
       return {IOPBusRegion::Mmio, index, Device::SPU2EffectInputVolume};
+    }
+  }
+  for (std::size_t core = 0; core < spu2EffectEndAddressHighAddresses.size(); ++core)
+  {
+    if (first == spu2EffectEndAddressHighAddresses[core] &&
+        last < first + sizeof(std::uint16_t))
+    {
+      return {IOPBusRegion::Mmio, core, Device::SPU2EffectEndAddressHigh};
     }
   }
   for (const auto statusAddress : spu2CoreStatusAddresses)
@@ -777,6 +789,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readEffectInputVolume(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2EffectEndAddressHigh:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readEffectEndAddressHigh(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2MainMix:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -881,6 +898,13 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
 {
   switch (location.device)
   {
+    case Device::SPU2EffectEndAddressHigh:
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      {
+        return {};
+      }
+      spu2->writeEffectEndAddressHigh(location.offset, static_cast<std::uint16_t>(value));
+      return {IOPBusStatus::Completed};
     case Device::SPU2EffectInputVolume:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr)
       {

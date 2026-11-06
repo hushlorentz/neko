@@ -30,6 +30,8 @@ class SPU2Controller final
     void writeMainMix(std::size_t core, std::uint16_t value);
     std::uint16_t readEffectInputVolume(std::size_t index) const;
     void writeEffectInputVolume(std::size_t index, std::uint16_t value);
+    std::uint16_t readEffectEndAddressHigh(std::size_t core) const;
+    void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
     // Provisional quiescent STATX projection; replace when transfers are modeled.
     std::uint16_t readUnprogrammedCoreStatus() const noexcept;
     // Provisional KOFF effect; replace before voice programming or key-on.
@@ -53,6 +55,8 @@ class SPU2Controller final
     std::array<std::uint16_t, CORE_COUNT> mainMix{};
     // Per core: EVOLL/R, AVOLL/R, BVOLL/R; core0 AVOL has no input function.
     std::array<std::uint16_t, EFFECT_INPUT_VOLUME_COUNT> effectInputVolumes{};
+    // Passive raw EEA high images; no decoded address or effect work area.
+    std::array<std::uint16_t, CORE_COUNT> effectEndAddressHigh{};
 };
 
 #endif

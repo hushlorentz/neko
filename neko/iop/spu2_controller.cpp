@@ -8,6 +8,7 @@ void SPU2Controller::reset() noexcept
   voiceMix.fill(0);
   mainMix.fill(0);
   effectInputVolumes.fill(0);
+  effectEndAddressHigh.fill(0);
 }
 
 std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
@@ -94,6 +95,17 @@ void SPU2Controller::writeEffectInputVolume(
   std::size_t index, std::uint16_t value)
 {
   effectInputVolumes.at(index) = value;
+}
+
+std::uint16_t SPU2Controller::readEffectEndAddressHigh(std::size_t core) const
+{
+  return effectEndAddressHigh.at(core);
+}
+
+void SPU2Controller::writeEffectEndAddressHigh(
+  std::size_t core, std::uint16_t value)
+{
+  effectEndAddressHigh.at(core) = value;
 }
 
 std::uint16_t SPU2Controller::readUnprogrammedCoreStatus() const noexcept
