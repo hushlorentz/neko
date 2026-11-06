@@ -3481,6 +3481,44 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement paired passive BCR words and lane-preserving halfwords through
       the existing DMA owner; preserve zero-only CHCR and excluded transports,
       with red/green, lifecycle/persistence coverage, independent review and validation.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### IOP SPU DMA Active-Start Contract Dependency
+
+- [x] Research the originating channel-4 CHCR `0x01000201` store and paired
+      channel-4/7 DMA/SPU2 boundary; distinguish buffered Auto DMA input from
+      normal TSA transfers and split independently testable prerequisites.
+- [x] Obtain consequential-policy approval for bounded PCM input, requests,
+      shared DMA grants, cancellation, completion/IRQs and timing before implementation.
+
+### SPU2 Shared Sound Memory and Buffered Input Dependency
+
+- [x] Add shared 2 MiB sound memory through the existing SPU2 owner, with
+      explicit address units, reset, canonical persistence and transactional adoption;
+      keep voice, effect and normal TSA transfer execution unsupported.
+- [ ] Implement paired bounded PCM input buffers, real capacity/backpressure
+      and deterministic 48 kHz consumption through that owner; cover startup,
+      starvation, partial fills, cancellation and restored phase.
+
+### IOP SPU DMA Granted Transfer Dependency
+
+- [ ] Extend the existing DMA owner with paired channel-4/7 programmed/current
+      state, physical RAM source beats and bank-correct masked completion;
+      cover count/address progress, rejected beats and active-write guards.
+- [ ] Integrate SPU and SIF endpoints into one priority-ordered IOP DMA grant
+      budget, preserving SIF-only behavior and deterministic ties, clock ordering
+      and restored continuation under contention.
+
+### IOP SPU DMA CHCR Lifecycle and Conformance Dependency
+
+- [ ] Admit the approved bounded CHCR profile through exact CPU access routes;
+      integrate start, backpressure, abort and final-beat completion without
+      fabricated live status or unsupported-mode success.
+- [ ] Add authored CPU-driven lifecycle and cold/restored traced/plain
+      conformance covering both cores, buffer boundaries, contention and faults;
+      independently review and run required validation gates.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

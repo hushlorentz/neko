@@ -4,18 +4,24 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 // Bounded SPU2 programming; no audio engine or volume sweeps.
 class SPU2Controller final
 {
   public:
+    static constexpr std::size_t SOUND_RAM_SIZE = 2 * 1024 * 1024;
+    static constexpr std::size_t SOUND_RAM_HALFWORD_COUNT = SOUND_RAM_SIZE / 2;
     static constexpr std::size_t SPDIF_CONFIGURATION_COUNT = 5;
     static constexpr std::size_t MASTER_VOLUME_COUNT = 4;
     static constexpr std::size_t CORE_COUNT = 2;
     static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
     static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
     static constexpr std::size_t TRANSFER_START_HALFWORD_COUNT = 4;
+    SPU2Controller();
     void reset() noexcept;
+    std::uint16_t readSoundRAMHalfword(std::uint32_t halfwordAddress) const;
+    void writeSoundRAMHalfword(std::uint32_t halfwordAddress, std::uint16_t value);
     std::uint16_t readSPDIFConfiguration(std::size_t index) const;
     void writeSPDIFConfiguration(std::size_t index, std::uint16_t value);
     static bool isFixedMasterVolumeControl(std::uint16_t value) noexcept;
@@ -49,6 +55,7 @@ class SPU2Controller final
 
   private:
     friend class NekoSaveStateCodec;
+    std::vector<std::uint8_t> soundRAM;
     // MODE, MEDIA, COPY PROTECTION, unknown 0x7ca, OUTPUT; passive images only.
     std::array<std::uint16_t, SPDIF_CONFIGURATION_COUNT> spdifConfiguration{};
     // Core 0 left/right, core 1 left/right; programmed controls, not current gain.

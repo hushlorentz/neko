@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -315,6 +316,122 @@ namespace
     }
     system.iopCore().startExecution(0xa0000000);
   }
+}
+
+TEST_CASE("SPU2 sound RAM has a fixed canonical byte region",
+  "[iop][spu2][sound-ram][save-state]")
+{
+  NekoSystem system;
+  const auto state = system.saveState();
+  const auto snapshot = inspectSaveState(state);
+  const auto *memory = snapshot.find("system.iop.spu2.soundRAM");
+  REQUIRE(memory != nullptr);
+  REQUIRE(memory->kind == SaveStateFieldKind::Bytes);
+  REQUIRE(memory->size == 2 * 1024 * 1024);
+  REQUIRE(memory->containerOffset + memory->size <= state.size());
+  const auto begin = state.begin() + memory->containerOffset;
+  REQUIRE(std::all_of(begin, begin + memory->size,
+    [](std::uint8_t value) { return value == 0; }));
+}
+
+TEST_CASE("SPU2 sound RAM uses checked halfword addresses without wrapping",
+  "[iop][spu2][sound-ram]")
+{
+  SPU2Controller spu2;
+  for (const std::uint32_t address : {0u, 0x2000u, 0x2200u, 0x2400u, 0xfffffu})
+  {
+    REQUIRE(spu2.readSoundRAMHalfword(address) == 0);
+    spu2.writeSoundRAMHalfword(address, 0x8123);
+    REQUIRE(spu2.readSoundRAMHalfword(address) == 0x8123);
+  }
+  spu2.writeSoundRAMHalfword(0x2001, 0x4567);
+  REQUIRE(spu2.readSoundRAMHalfword(0x2000) == 0x8123);
+  REQUIRE(spu2.readSoundRAMHalfword(0x2001) == 0x4567);
+  REQUIRE(spu2.readSoundRAMHalfword(0x2002) == 0);
+  for (const std::uint32_t address : {0x100000u, 0xffffffffu})
+  {
+    REQUIRE_THROWS_AS(spu2.readSoundRAMHalfword(address), std::out_of_range);
+    REQUIRE_THROWS_AS(spu2.writeSoundRAMHalfword(address, 0xffff),
+      std::out_of_range);
+  }
+  REQUIRE(spu2.readSoundRAMHalfword(0) == 0x8123);
+  REQUIRE(spu2.readSoundRAMHalfword(0xfffff) == 0x8123);
+}
+
+TEST_CASE("SPU2 sound RAM survives local resets and clears on owner or machine reset",
+  "[iop][spu2][sound-ram]")
+{
+  NekoSystem system;
+  auto &spu2 = system.spu2Controller();
+  for (const std::uint32_t address : {0u, 0x2000u, 0x2400u, 0xfffffu})
+  {
+    spu2.writeSoundRAMHalfword(address, 0xabcd);
+  }
+  system.runMasterCycles(80);
+  system.iopBus().reset();
+  system.iopCore().reset();
+  for (const std::uint32_t address : {0u, 0x2000u, 0x2400u, 0xfffffu})
+  {
+    REQUIRE(spu2.readSoundRAMHalfword(address) == 0xabcd);
+  }
+  spu2.reset();
+  for (const std::uint32_t address : {0u, 0x2000u, 0x2400u, 0xfffffu})
+  {
+    REQUIRE(spu2.readSoundRAMHalfword(address) == 0);
+    spu2.writeSoundRAMHalfword(address, 0x1234);
+  }
+  system.reset();
+  for (const std::uint32_t address : {0u, 0x2000u, 0x2400u, 0xfffffu})
+  {
+    REQUIRE(spu2.readSoundRAMHalfword(address) == 0);
+  }
+}
+
+TEST_CASE("SPU2 sound RAM restores little endian bytes without aliasing or trace effects",
+  "[iop][spu2][sound-ram][save-state]")
+{
+  NekoSystem source;
+  auto previousHash = source.iopStateHash();
+  const std::array<std::uint32_t, 4> addresses = {{0, 0x2000, 0x2400, 0xfffff}};
+  for (std::size_t index = 0; index < addresses.size(); ++index)
+  {
+    source.spu2Controller().writeSoundRAMHalfword(addresses[index],
+      static_cast<std::uint16_t>(0x8123 + index));
+    REQUIRE(source.iopStateHash() != previousHash);
+    previousHash = source.iopStateHash();
+  }
+  const auto state = source.saveState();
+  const auto snapshot = inspectSaveState(state);
+  const auto *memory = snapshot.find("system.iop.spu2.soundRAM");
+  REQUIRE(memory != nullptr);
+  REQUIRE(memory->size == SPU2Controller::SOUND_RAM_SIZE);
+  for (std::size_t index = 0; index < addresses.size(); ++index)
+  {
+    const auto offset = memory->containerOffset + addresses[index] * 2;
+    REQUIRE(state[offset] == 0x23 + index);
+    REQUIRE(state[offset + 1] == 0x81);
+  }
+  NekoSystem restored;
+  restored.spu2Controller().writeSoundRAMHalfword(1, 0xffff);
+  restored.loadState(state);
+  REQUIRE(restored.iopStateHash() == previousHash);
+  REQUIRE(restored.spu2Controller().readSoundRAMHalfword(1) == 0);
+  REQUIRE(restored.saveState() == state);
+  NekoSystem plain;
+  plain.loadState(state);
+  source.startTrace();
+  restored.startTrace();
+  source.runMasterCycles(32);
+  restored.runMasterCycles(32);
+  plain.runMasterCycles(32);
+  IOPTraceTest::requireEvents(restored.trace(), source.trace());
+  IOPTraceTest::requireMachine(restored, source);
+  IOPTraceTest::requireMachine(plain, source);
+  source.spu2Controller().reset();
+  restored.spu2Controller().writeSoundRAMHalfword(0x2000, 0x4567);
+  REQUIRE(source.spu2Controller().readSoundRAMHalfword(0x2000) == 0);
+  REQUIRE(restored.spu2Controller().readSoundRAMHalfword(0x2000) == 0x4567);
+  REQUIRE(plain.spu2Controller().readSoundRAMHalfword(0x2000) == 0x8124);
 }
 
 TEST_CASE("SPU2 Auto DMA write selection admits only each core bit without transfers",
@@ -2485,9 +2602,11 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
 }
 
 TEST_CASE("SPU2 changed images and late invalid state reject without partial adoption",
-  "[iop][spu2][save-state]")
+  "[iop][spu2][sound-ram][save-state]")
 {
   NekoSystem source;
+  source.spu2Controller().writeSoundRAMHalfword(0, 0x1234);
+  source.spu2Controller().writeSoundRAMHalfword(0xfffff, 0x5678);
   programConfiguration(source);
   programMasterVolumes(source);
   programVoiceMix(source);
@@ -2505,6 +2624,8 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
     IOPBusStatus::Completed);
   const auto candidate = source.saveState();
   NekoSystem destination;
+  destination.spu2Controller().writeSoundRAMHalfword(0, 0xabcd);
+  destination.spu2Controller().writeSoundRAMHalfword(0xfffff, 0xef01);
   REQUIRE(destination.iopBus().write16(autoDMAAddresses[1], 2).status ==
     IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(transferStartAddressAddresses[3], 0xabcd).status ==
@@ -2523,6 +2644,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
     IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(coreAttributeAddresses[1], 0x4001).status ==
     IOPBusStatus::Completed);
+  destination.startTrace();
   const auto before = destination.saveState();
   for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
   {
@@ -2631,6 +2753,12 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   lateInvalid.refreshChecksum();
   REQUIRE_THROWS_AS(destination.loadState(lateInvalid), std::invalid_argument);
   REQUIRE(destination.saveState() == before);
+  SaveStateMutation badRAMChecksum(candidate);
+  badRAMChecksum.writeByte("system.iop.spu2.soundRAM",
+    SPU2Controller::SOUND_RAM_SIZE - 1, 0xff);
+  REQUIRE_THROWS_AS(destination.loadState(badRAMChecksum), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+  REQUIRE(destination.traceEnabled());
   SaveStateMutation previousVersion(candidate);
   previousVersion.writeScalar("container.version", 87);
   previousVersion.refreshChecksum();

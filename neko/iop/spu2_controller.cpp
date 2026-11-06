@@ -1,7 +1,30 @@
 #include "spu2_controller.hpp"
 
+#include <algorithm>
+#include <stdexcept>
+
+namespace
+{
+  std::size_t soundRAMByteOffset(std::uint32_t halfwordAddress)
+  {
+    if (halfwordAddress >= SPU2Controller::SOUND_RAM_HALFWORD_COUNT)
+    {
+      throw std::out_of_range("SPU2 sound RAM halfword address is outside memory.");
+    }
+    return static_cast<std::size_t>(halfwordAddress) * 2;
+  }
+}
+
+constexpr std::size_t SPU2Controller::SOUND_RAM_SIZE;
+constexpr std::size_t SPU2Controller::SOUND_RAM_HALFWORD_COUNT;
+
+SPU2Controller::SPU2Controller() : soundRAM(SOUND_RAM_SIZE)
+{
+}
+
 void SPU2Controller::reset() noexcept
 {
+  std::fill(soundRAM.begin(), soundRAM.end(), 0);
   spdifConfiguration.fill(0);
   masterVolumeControls.fill(0);
   coreAttributes.fill(0);
@@ -11,6 +34,22 @@ void SPU2Controller::reset() noexcept
   effectEndAddressHigh.fill(0);
   transferStartAddress.fill(0);
   autoDMAWriteSelection.fill(0);
+}
+
+std::uint16_t SPU2Controller::readSoundRAMHalfword(
+  std::uint32_t halfwordAddress) const
+{
+  const auto offset = soundRAMByteOffset(halfwordAddress);
+  return static_cast<std::uint16_t>(soundRAM[offset] |
+    (std::uint16_t{soundRAM[offset + 1]} << 8));
+}
+
+void SPU2Controller::writeSoundRAMHalfword(
+  std::uint32_t halfwordAddress, std::uint16_t value)
+{
+  const auto offset = soundRAMByteOffset(halfwordAddress);
+  soundRAM[offset] = static_cast<std::uint8_t>(value);
+  soundRAM[offset + 1] = static_cast<std::uint8_t>(value >> 8);
 }
 
 std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const

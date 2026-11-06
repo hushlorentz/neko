@@ -1,6 +1,7 @@
 #include "save_state_internal.hpp"
 
 #include <type_traits>
+#include <utility>
 
 namespace
 {
@@ -330,6 +331,8 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU16("value", words[core]);
       }
     }
+    const auto &memory = system.spu2ControllerComponent.soundRAM;
+    writer->writeFieldBytes("soundRAM", memory.data(), memory.size());
   }
   {
     auto scope = writer->scope("cdvd");
@@ -589,6 +592,8 @@ void NekoSaveStateCodec::readIOP(
           "SPU2 Auto DMA write selection is outside the passive own-core profile");
       }
     }
+    auto &memory = system->spu2ControllerComponent.soundRAM;
+    reader->readFieldBytes("soundRAM", memory.data(), memory.size());
   }
   {
     auto scope = reader->scope("cdvd");
@@ -944,8 +949,9 @@ void NekoSaveStateCodec::commitIOP(
     "Transactional CD/DVD commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<SIO2Controller>::value,
     "Transactional SIO2 commit must not throw.");
-  static_assert(std::is_nothrow_copy_assignable<SPU2Controller>::value,
-    "Transactional SPU2 commit must not throw.");
+  static_assert(noexcept(std::swap(std::declval<SPU2Controller &>(),
+    std::declval<SPU2Controller &>())),
+    "Transactional SPU2 swap must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF1DMAChannel>::value,
     "Transactional IOP SIF1 DMA commit must not throw.");
   static_assert(std::is_nothrow_copy_assignable<IOPSIF0DMAChannel>::value,
@@ -969,7 +975,7 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.cdvd = &destination->cdvdControllerComponent;
   destination->sio2ControllerComponent = source->sio2ControllerComponent;
   destination->iopBusComponent.sio2 = &destination->sio2ControllerComponent;
-  destination->spu2ControllerComponent = source->spu2ControllerComponent;
+  std::swap(destination->spu2ControllerComponent, source->spu2ControllerComponent);
   destination->iopBusComponent.spu2 = &destination->spu2ControllerComponent;
   destination->eeBusComponent.cdvdController = &destination->cdvdControllerComponent;
   const bool cdvdObservationsEnabled =
