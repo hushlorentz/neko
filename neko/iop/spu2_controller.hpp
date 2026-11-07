@@ -76,6 +76,7 @@ class SPU2Controller final
 
   private:
     friend class NekoSaveStateCodec;
+    friend class IOPDMAController;
     struct InputState
     {
       bool everSelected = false;

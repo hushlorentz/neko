@@ -13,6 +13,7 @@
 class IOPSIF1DMAChannel;
 class IOPSIF0DMAChannel;
 class SIF;
+class SPU2Controller;
 
 enum class IOPDMABank : std::uint8_t
 {
@@ -22,6 +23,8 @@ enum class IOPDMABank : std::uint8_t
 
 enum class IOPDMAChannel : std::uint8_t
 {
+  SPU0 = 4,
+  SPU1 = 7,
   SIF0 = 9,
   SIF1 = 10
 };
@@ -77,15 +80,26 @@ class IOPDMAController final
     // Provisional retained word; raw bit semantics remain unestablished.
     IOPWord auxiliaryControl() const;
     void writeAuxiliaryControl(IOPWord value);
-    // Provisional passive channel-4/7 addresses; no transfer requests or progression.
+    // Register readback follows accepted source progress while active.
     IOPWord spuMemoryAddress(std::size_t core) const;
     IOPDMAWriteOutcome writeSPUMemoryAddress(std::size_t core, IOPWord value);
     IOPWord spuBlockControl(std::size_t core) const;
-    void writeSPUBlockControl(std::size_t core, IOPWord value);
+    IOPDMAWriteOutcome writeSPUBlockControl(std::size_t core, IOPWord value);
     std::uint16_t spuBlockSize(std::size_t core) const;
-    void writeSPUBlockSize(std::size_t core, std::uint16_t value);
+    IOPDMAWriteOutcome writeSPUBlockSize(std::size_t core, std::uint16_t value);
     std::uint16_t spuBlockCount(std::size_t core) const;
-    void writeSPUBlockCount(std::size_t core, std::uint16_t value);
+    IOPDMAWriteOutcome writeSPUBlockCount(std::size_t core, std::uint16_t value);
+    IOPWord spuChannelControl(std::size_t core) const;
+    IOPWord spuRemainingWords(std::size_t core) const;
+    bool spuActive(std::size_t core) const;
+    // Host-only bounded transport setup; CPU CHCR admission remains gated.
+    IOPDMAWriteOutcome startSPUTransfer(
+      std::size_t core, const IOPBus &bus, SPU2Controller &spu);
+    void stopSPUTransfer(std::size_t core, const IOPBus &bus, SPU2Controller &spu);
+    IOPDMABeatResult inspectSPU(
+      std::size_t core, const IOPBus &bus, const SPU2Controller &spu) const;
+    // One explicitly requested endpoint grant; no scheduling or peer stepping.
+    IOPDMABeatResult clockSPU(std::size_t core, const IOPBus &bus, SPU2Controller &spu);
     // Provisional disabled-FDMA initialization only; no retained state or effects.
     IOPDMAWriteOutcome writeDPCR3Initialization(IOPWord value) const;
     // Provisional remaining channel-register zero-only profile; no state or effects.
@@ -117,9 +131,18 @@ class IOPDMAController final
       IOPWord control = 0;
       std::uint8_t flags = 0;
     };
+    struct SPUChannel
+    {
+      IOPDMAChannelState registers;
+      std::uint8_t blockWordsTransferred = 0;
+    };
 
     static std::size_t bankIndex(IOPDMABank bank);
+    static IOPDMABank channelBank(IOPDMAChannel channel);
     static std::uint8_t channelSlot(IOPDMAChannel channel);
+    static IOPDMAChannel spuChannel(std::size_t core);
+    bool validSPUContinuation(std::size_t core, const SPU2Controller &spu) const;
+    void validateSPUWiring(const IOPBus &bus, const SPU2Controller &spu) const;
     std::uint8_t activeFlags(std::size_t index) const;
     void validateSIFWiring(
       const IOPSIF1DMAChannel &channel, const IOPBus &bus, const SIF &sif) const;
@@ -130,8 +153,7 @@ class IOPDMAController final
     IOPInterruptController &interrupts;
     std::array<Bank, 2> banks = {};
     IOPWord auxiliaryControlRegister = 0;
-    std::array<IOPWord, 2> spuMemoryAddresses = {};
-    std::array<IOPWord, 2> spuBlockControls = {};
+    std::array<SPUChannel, 2> spuChannels = {};
     IOPDMAChannel sifNextChannel = IOPDMAChannel::SIF0;
 };
 

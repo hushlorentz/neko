@@ -3504,7 +3504,7 @@ not requirements for exhaustive subsystem coverage.
 
 ### IOP SPU DMA Granted Transfer Dependency
 
-- [ ] Extend the existing DMA owner with paired channel-4/7 programmed/current
+- [x] Extend the existing DMA owner with paired channel-4/7 programmed/current
       state, physical RAM source beats and bank-correct masked completion;
       cover count/address progress, rejected beats and active-write guards.
 - [ ] Integrate SPU and SIF endpoints into one priority-ordered IOP DMA grant

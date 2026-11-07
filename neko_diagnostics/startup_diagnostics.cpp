@@ -64,6 +64,8 @@ namespace
   {
     switch (channel)
     {
+      case IOPDMAChannel::SPU0: return 4;
+      case IOPDMAChannel::SPU1: return 7;
       case IOPDMAChannel::SIF0: return 9;
       case IOPDMAChannel::SIF1: return 10;
     }

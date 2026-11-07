@@ -363,20 +363,30 @@ void NekoSaveStateCodec::writeIOPState(
       system.iopDMAControllerComponent.auxiliaryControlRegister);
     {
       auto addresses = writer->scope("spuMemoryAddress");
-      const auto &words = system.iopDMAControllerComponent.spuMemoryAddresses;
-      for (std::size_t core = 0; core < words.size(); ++core)
+      const auto &channels = system.iopDMAControllerComponent.spuChannels;
+      for (std::size_t core = 0; core < channels.size(); ++core)
       {
         auto address = writer->element(core);
-        writer->writeFieldU32("value", words[core]);
+        writer->writeFieldU32("value", channels[core].registers.memoryAddressRegister);
       }
     }
     {
       auto controls = writer->scope("spuBlockControl");
-      const auto &words = system.iopDMAControllerComponent.spuBlockControls;
-      for (std::size_t core = 0; core < words.size(); ++core)
+      const auto &channels = system.iopDMAControllerComponent.spuChannels;
+      for (std::size_t core = 0; core < channels.size(); ++core)
       {
         auto control = writer->element(core);
-        writer->writeFieldU32("value", words[core]);
+        writer->writeFieldU32("value", channels[core].registers.blockControlRegister);
+      }
+    }
+    {
+      auto transfers = writer->scope("spuTransfers");
+      const auto &channels = system.iopDMAControllerComponent.spuChannels;
+      for (std::size_t core = 0; core < channels.size(); ++core)
+      {
+        auto transfer = writer->element(core);
+        writer->writeFieldU32("channelControl", channels[core].registers.channelControlRegister);
+        writer->writeFieldU8("blockWordsTransferred", channels[core].blockWordsTransferred);
       }
     }
     auto banks = writer->scope("banks");
@@ -648,22 +658,36 @@ void NekoSaveStateCodec::readIOP(
       reader->readFieldU32("auxiliaryControl");
     {
       auto addresses = reader->scope("spuMemoryAddress");
-      auto &words = system->iopDMAControllerComponent.spuMemoryAddresses;
-      for (std::size_t core = 0; core < words.size(); ++core)
+      auto &channels = system->iopDMAControllerComponent.spuChannels;
+      for (std::size_t core = 0; core < channels.size(); ++core)
       {
         auto address = reader->element(core);
-        words[core] = reader->readFieldU32("value");
-        reader->requireField(IOPDMAChannelState::validMemoryAddress(words[core]),
+        auto &word = channels[core].registers.memoryAddressRegister;
+        word = reader->readFieldU32("value");
+        reader->requireField(IOPDMAChannelState::validMemoryAddress(word),
           "IOP SPU DMA address is unaligned or exceeds 24 bits");
       }
     }
     {
       auto controls = reader->scope("spuBlockControl");
-      auto &words = system->iopDMAControllerComponent.spuBlockControls;
-      for (std::size_t core = 0; core < words.size(); ++core)
+      auto &channels = system->iopDMAControllerComponent.spuChannels;
+      for (std::size_t core = 0; core < channels.size(); ++core)
       {
         auto control = reader->element(core);
-        words[core] = reader->readFieldU32("value");
+        channels[core].registers.blockControlRegister = reader->readFieldU32("value");
+      }
+    }
+    {
+      auto transfers = reader->scope("spuTransfers");
+      auto &dma = system->iopDMAControllerComponent;
+      for (std::size_t core = 0; core < dma.spuChannels.size(); ++core)
+      {
+        auto transfer = reader->element(core);
+        auto &channel = dma.spuChannels[core];
+        channel.registers.channelControlRegister = reader->readFieldU32("channelControl");
+        channel.blockWordsTransferred = reader->readFieldU8("blockWordsTransferred");
+        reader->requireField(dma.validSPUContinuation(core, system->spu2ControllerComponent),
+          "IOP SPU DMA continuation is incompatible with channel or PCM input state");
       }
     }
     auto banks = reader->scope("banks");
@@ -679,8 +703,10 @@ void NekoSaveStateCodec::readIOP(
         "IOP DMA interrupt control contains non-control bits");
       state.flags = reader->readFieldU8("flags");
       const auto implemented = index == 1
-        ? (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF0)) |
-          (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF1)) : 0;
+        ? (1 << IOPDMAController::channelSlot(IOPDMAChannel::SPU1)) |
+          (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF0)) |
+          (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF1))
+        : (1 << IOPDMAController::channelSlot(IOPDMAChannel::SPU0));
       reader->requireField(
         (state.flags & ~implemented) == 0,
         "IOP DMA completion flags contain unimplemented channels");
@@ -1044,10 +1070,8 @@ void NekoSaveStateCodec::commitIOP(
     source->iopDMAControllerComponent.banks;
   destination->iopDMAControllerComponent.auxiliaryControlRegister =
     source->iopDMAControllerComponent.auxiliaryControlRegister;
-  destination->iopDMAControllerComponent.spuMemoryAddresses =
-    source->iopDMAControllerComponent.spuMemoryAddresses;
-  destination->iopDMAControllerComponent.spuBlockControls =
-    source->iopDMAControllerComponent.spuBlockControls;
+  destination->iopDMAControllerComponent.spuChannels =
+    source->iopDMAControllerComponent.spuChannels;
   destination->iopDMAControllerComponent.sifNextChannel =
     source->iopDMAControllerComponent.sifNextChannel;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;

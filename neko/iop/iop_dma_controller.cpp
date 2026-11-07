@@ -1,13 +1,31 @@
 #include "iop_dma_controller.hpp"
 
+#include <cassert>
 #include <stdexcept>
 #include <string>
 
 #include "iop_sif1_dma_channel.hpp"
 #include "iop_sif0_dma_channel.hpp"
+#include "spu2_controller.hpp"
 
 namespace
 {
+  constexpr IOPWord SPU_START = 0x01000201;
+  constexpr IOPWord SPU_STOP = 0x201;
+  constexpr IOPWord SPU_BLOCK_SIZE = 16;
+
+  const char *channelDescription(IOPDMAChannel channel)
+  {
+    switch (channel)
+    {
+      case IOPDMAChannel::SPU0: return "SPU0";
+      case IOPDMAChannel::SPU1: return "SPU1";
+      case IOPDMAChannel::SIF0: return "SIF0";
+      case IOPDMAChannel::SIF1: return "SIF1";
+    }
+    throw std::out_of_range("Unsupported IOP DMA channel.");
+  }
+
   const char *failureDescription(IOPDMAFailure failure)
   {
     switch (failure)
@@ -24,7 +42,7 @@ namespace
 
 IOPDMATransferError::IOPDMATransferError(const IOPDMABeatResult &result) :
   std::runtime_error(std::string("IOP ") +
-    (result.channel == IOPDMAChannel::SIF0 ? "SIF0" : "SIF1") + " DMA rejected " +
+    channelDescription(result.channel) + " DMA rejected " +
     failureDescription(result.failure) +
     " at address " + std::to_string(result.address) +
     " with value " + std::to_string(result.value) +
@@ -55,10 +73,26 @@ std::size_t IOPDMAController::bankIndex(IOPDMABank bank)
   throw std::out_of_range("Unsupported IOP DMA bank.");
 }
 
+IOPDMABank IOPDMAController::channelBank(IOPDMAChannel channel)
+{
+  switch (channel)
+  {
+    case IOPDMAChannel::SPU0: return IOPDMABank::Primary;
+    case IOPDMAChannel::SPU1:
+    case IOPDMAChannel::SIF0:
+    case IOPDMAChannel::SIF1: return IOPDMABank::Secondary;
+  }
+  throw std::out_of_range("Unsupported IOP DMA channel.");
+}
+
 std::uint8_t IOPDMAController::channelSlot(IOPDMAChannel channel)
 {
   switch (channel)
   {
+    case IOPDMAChannel::SPU0:
+      return 4;
+    case IOPDMAChannel::SPU1:
+      return 0;
     case IOPDMAChannel::SIF0:
       return 2;
     case IOPDMAChannel::SIF1:
@@ -116,23 +150,24 @@ void IOPDMAController::writeAuxiliaryControl(IOPWord value)
 
 IOPWord IOPDMAController::spuMemoryAddress(std::size_t core) const
 {
-  return spuMemoryAddresses.at(core);
+  return spuChannels.at(core).registers.memoryAddressRegister;
 }
 
 IOPDMAWriteOutcome IOPDMAController::writeSPUMemoryAddress(
   std::size_t core, IOPWord value)
 {
-  return IOPDMAChannelState::programMemoryAddress(spuMemoryAddresses.at(core), value);
+  auto &registers = spuChannels.at(core).registers;
+  return registers.writeAddress(registers.memoryAddressRegister, value);
 }
 
 IOPWord IOPDMAController::spuBlockControl(std::size_t core) const
 {
-  return spuBlockControls.at(core);
+  return spuChannels.at(core).registers.blockControlRegister;
 }
 
-void IOPDMAController::writeSPUBlockControl(std::size_t core, IOPWord value)
+IOPDMAWriteOutcome IOPDMAController::writeSPUBlockControl(std::size_t core, IOPWord value)
 {
-  spuBlockControls.at(core) = value;
+  return spuChannels.at(core).registers.writeBlockControl(value);
 }
 
 std::uint16_t IOPDMAController::spuBlockSize(std::size_t core) const
@@ -140,10 +175,9 @@ std::uint16_t IOPDMAController::spuBlockSize(std::size_t core) const
   return static_cast<std::uint16_t>(spuBlockControl(core));
 }
 
-void IOPDMAController::writeSPUBlockSize(std::size_t core, std::uint16_t value)
+IOPDMAWriteOutcome IOPDMAController::writeSPUBlockSize(std::size_t core, std::uint16_t value)
 {
-  auto &word = spuBlockControls.at(core);
-  word = (word & 0xffff0000) | value;
+  return writeSPUBlockControl(core, (spuBlockControl(core) & 0xffff0000) | value);
 }
 
 std::uint16_t IOPDMAController::spuBlockCount(std::size_t core) const
@@ -151,10 +185,157 @@ std::uint16_t IOPDMAController::spuBlockCount(std::size_t core) const
   return static_cast<std::uint16_t>(spuBlockControl(core) >> 16);
 }
 
-void IOPDMAController::writeSPUBlockCount(std::size_t core, std::uint16_t value)
+IOPDMAWriteOutcome IOPDMAController::writeSPUBlockCount(std::size_t core, std::uint16_t value)
 {
-  auto &word = spuBlockControls.at(core);
-  word = (word & 0xffff) | (IOPWord{value} << 16);
+  return writeSPUBlockControl(core, (spuBlockControl(core) & 0xffff) | (IOPWord{value} << 16));
+}
+
+IOPDMAChannel IOPDMAController::spuChannel(std::size_t core)
+{
+  switch (core)
+  {
+    case 0: return IOPDMAChannel::SPU0;
+    case 1: return IOPDMAChannel::SPU1;
+  }
+  throw std::out_of_range("Unsupported IOP SPU DMA core.");
+}
+
+IOPWord IOPDMAController::spuChannelControl(std::size_t core) const
+{
+  return spuChannels.at(core).registers.channelControlRegister;
+}
+
+bool IOPDMAController::spuActive(std::size_t core) const
+{
+  return spuChannels.at(core).registers.active();
+}
+
+IOPWord IOPDMAController::spuRemainingWords(std::size_t core) const
+{
+  return spuActive(core) ?
+    spuBlockCount(core) * SPU_BLOCK_SIZE - spuChannels[core].blockWordsTransferred : 0;
+}
+
+bool IOPDMAController::validSPUContinuation(
+  std::size_t core, const SPU2Controller &spu) const
+{
+  const auto &channel = spuChannels.at(core);
+  const auto control = spuChannelControl(core);
+  if (!IOPDMAChannelState::validMemoryAddress(spuMemoryAddress(core)) ||
+      channel.blockWordsTransferred >= SPU_BLOCK_SIZE)
+  {
+    return false;
+  }
+  if (!spuActive(core))
+  {
+    return (control == 0 || control == SPU_STOP) && channel.blockWordsTransferred == 0;
+  }
+  const auto &input = spu.inputStates[core];
+  return control == SPU_START && spuBlockSize(core) == SPU_BLOCK_SIZE &&
+    spuBlockCount(core) != 0 && input.writeOpen &&
+    spu.hasValidInputState() &&
+    (spuRemainingWords(core) + input.fillWords) % SPU2Controller::INPUT_HALF_WORD_COUNT == 0;
+}
+
+void IOPDMAController::validateSPUWiring(
+  const IOPBus &bus, const SPU2Controller &spu) const
+{
+  if (bus.dmaController != this || bus.spu2 != &spu)
+  {
+    throw std::invalid_argument("IOP SPU DMA grant requires the attached owners.");
+  }
+}
+
+IOPDMAWriteOutcome IOPDMAController::startSPUTransfer(
+  std::size_t core, const IOPBus &bus, SPU2Controller &spu)
+{
+  validateSPUWiring(bus, spu);
+  auto &channel = spuChannels.at(core);
+  if (channel.registers.active())
+  {
+    return IOPDMAWriteOutcome::Completed;
+  }
+  if (spuBlockSize(core) != SPU_BLOCK_SIZE || spuBlockCount(core) == 0 ||
+      spuBlockCount(core) % 16 != 0 || spu.readAutoDMAWriteSelection(core) == 0)
+  {
+    return IOPDMAWriteOutcome::UnsupportedControl;
+  }
+  const bool opened = spu.beginInputWrite(core);
+  assert(opened);
+  (void)opened;
+  channel.blockWordsTransferred = 0;
+  channel.registers.channelControlRegister = SPU_START;
+  return IOPDMAWriteOutcome::Completed;
+}
+
+void IOPDMAController::stopSPUTransfer(
+  std::size_t core, const IOPBus &bus, SPU2Controller &spu)
+{
+  validateSPUWiring(bus, spu);
+  auto &channel = spuChannels.at(core);
+  channel.registers.channelControlRegister = SPU_STOP;
+  channel.blockWordsTransferred = 0;
+  spu.cancelInputWrite(core);
+}
+
+IOPDMABeatResult IOPDMAController::inspectSPU(
+  std::size_t core, const IOPBus &bus, const SPU2Controller &spu) const
+{
+  validateSPUWiring(bus, spu);
+  IOPDMABeatResult result;
+  result.channel = spuChannel(core);
+  if (!validSPUContinuation(core, spu))
+  {
+    throw std::logic_error("IOP SPU DMA continuation is outside the bounded profile.");
+  }
+  if (!channelEnabled(result.channel) || !spuActive(core) ||
+      !spu.inputWriteRequested(core))
+  {
+    return result;
+  }
+  result.address = spuMemoryAddress(core);
+  const auto read = bus.readDMAC32(result.address);
+  result.value = read.value;
+  result.status = read.status;
+  if (read.status != IOPBusStatus::Completed)
+  {
+    result.outcome = IOPDMABeatOutcome::Rejected;
+    result.failure = IOPDMAFailure::SourceRead;
+  }
+  else
+  {
+    result.outcome = spuRemainingWords(core) == 1 ?
+      IOPDMABeatOutcome::Completed : IOPDMABeatOutcome::Accepted;
+  }
+  return result;
+}
+
+IOPDMABeatResult IOPDMAController::clockSPU(
+  std::size_t core, const IOPBus &bus, SPU2Controller &spu)
+{
+  const auto result = inspectSPU(core, bus, spu);
+  if (result.outcome == IOPDMABeatOutcome::Wait ||
+      result.outcome == IOPDMABeatOutcome::Rejected)
+  {
+    return result;
+  }
+  const bool accepted = spu.writeInputWord(core, result.value);
+  assert(accepted);
+  (void)accepted;
+  auto &channel = spuChannels[core];
+  auto &registers = channel.registers;
+  registers.memoryAddressRegister = (registers.memoryAddressRegister + 4) & 0x00ffffff;
+  if (++channel.blockWordsTransferred == SPU_BLOCK_SIZE)
+  {
+    channel.blockWordsTransferred = 0;
+    registers.blockControlRegister -= IOPWord{1} << 16;
+  }
+  if (result.outcome == IOPDMABeatOutcome::Completed)
+  {
+    stopSPUTransfer(core, bus, spu);
+    signalChannelCompletion(result.channel);
+  }
+  return result;
 }
 
 IOPDMAWriteOutcome IOPDMAController::writeDPCR3Initialization(IOPWord value) const
@@ -184,13 +365,13 @@ IOPDMAWriteOutcome IOPDMAController::writeSupplementalInitialization(
 
 bool IOPDMAController::channelEnabled(IOPDMAChannel channel) const
 {
-  return (banks[1].priority & (IOPWord{8} << (4 * channelSlot(channel)))) != 0;
+  return (priority(channelBank(channel)) & (IOPWord{8} << (4 * channelSlot(channel)))) != 0;
 }
 
 std::uint8_t IOPDMAController::channelPriority(IOPDMAChannel channel) const
 {
   return static_cast<std::uint8_t>(
-    (banks[1].priority >> (4 * channelSlot(channel))) & 7);
+    (priority(channelBank(channel)) >> (4 * channelSlot(channel))) & 7);
 }
 
 std::array<IOPDMAChannel, 2> IOPDMAController::sifGrantOrder() const
@@ -253,7 +434,14 @@ IOPDMABeatResult IOPDMAController::clockSIF(
 
 void IOPDMAController::signalChannelCompletion(IOPDMAChannel channel)
 {
-  banks[1].flags |= static_cast<std::uint8_t>(1 << channelSlot(channel));
+  auto &bank = banks[bankIndex(channelBank(channel))];
+  const auto flag = static_cast<std::uint8_t>(1 << channelSlot(channel));
+  if ((channel == IOPDMAChannel::SPU0 || channel == IOPDMAChannel::SPU1) &&
+      (bank.control & (IOPWord{flag} << 16)) == 0)
+  {
+    return;
+  }
+  bank.flags |= flag;
   publishInterrupt();
 }
 

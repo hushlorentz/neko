@@ -1031,6 +1031,8 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       return {IOPBusStatus::Completed};
     case Device::SPU2AutoDMAWriteSelection:
       return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        !(value == 0 && dmaController != nullptr &&
+          dmaController->spuActive(location.offset)) &&
         spu2->writeAutoDMAWriteSelection(
           location.offset, static_cast<std::uint16_t>(value))
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
@@ -1125,23 +1127,28 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       }
       if (width == sizeof(IOPWord) && location.offset == 0)
       {
-        dmaController->writeSPUBlockControl(location.deviceIndex, value);
+        return dmaController->writeSPUBlockControl(location.deviceIndex, value) ==
+          IOPDMAWriteOutcome::Completed
+          ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
       }
       else if (width == 2 && location.offset == 0)
       {
-        dmaController->writeSPUBlockSize(
-          location.deviceIndex, static_cast<std::uint16_t>(value));
+        return dmaController->writeSPUBlockSize(
+          location.deviceIndex, static_cast<std::uint16_t>(value)) ==
+          IOPDMAWriteOutcome::Completed
+          ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
       }
       else if (width == 2 && location.offset == 2)
       {
-        dmaController->writeSPUBlockCount(
-          location.deviceIndex, static_cast<std::uint16_t>(value));
+        return dmaController->writeSPUBlockCount(
+          location.deviceIndex, static_cast<std::uint16_t>(value)) ==
+          IOPDMAWriteOutcome::Completed
+          ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
       }
       else
       {
         return {};
       }
-      return {IOPBusStatus::Completed};
     case Device::ChannelRegisterInitialization:
       return width == sizeof(IOPWord) && dmaController != nullptr &&
         dmaController->writeChannelRegisterInitialization(value) ==
