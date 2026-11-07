@@ -5,6 +5,7 @@
 #include "catch.hpp"
 #include "iop/iop_trace_test_utils.hpp"
 #include "save_state_mutation.hpp"
+#include "iop/spu2_input_test_utils.hpp"
 
 namespace
 {
@@ -63,6 +64,21 @@ namespace
   {
     REQUIRE(system.iopSIF1DMAC().writeChannelControl(0x01000400) ==
       IOPDMAWriteOutcome::Completed);
+  }
+
+  void spuSource(NekoSystem &system, std::size_t core, IOPWord count = 16)
+  {
+    auto &spu = system.spu2Controller();
+    auto &dma = system.iopDMAController();
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(spu.writeAutoDMAWriteSelection(core, static_cast<std::uint16_t>(1u << core)));
+    const auto address = static_cast<IOPAddress>(0x7000 + core * 0x1000);
+    for (IOPWord word = 0; word < count * 16; ++word)
+      writeIOP(system, address + word * 4, 0xabcd0000 | word);
+    REQUIRE(dma.writeSPUMemoryAddress(core, address) == IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.writeSPUBlockControl(core, (count << 16) | 16) ==
+      IOPDMAWriteOutcome::Completed);
+    REQUIRE(dma.startSPUTransfer(core, system.iopBus(), spu) == IOPDMAWriteOutcome::Completed);
   }
 
   void requireData(NekoSystem &system)
@@ -181,6 +197,249 @@ namespace
       expected.dmacController().sifGrantOrder());
     REQUIRE(actual.iopDMAController().sifGrantOrder() ==
       expected.iopDMAController().sifGrantOrder());
+  }
+}
+
+TEST_CASE("SPU and SIF share one IOP grant with physical channel cyclic ties",
+  "[spu-grants][sif0][scheduling][arbitration]")
+{
+  NekoSystem system;
+  source(system);
+  spuSource(system, 0);
+  spuSource(system, 1);
+  iopReceiver(system);
+  REQUIRE(system.sif().pushSIF1Quadword({{0x80006000, 4, 0, 0}}) ==
+    SIFTransferOutcome::Completed);
+  REQUIRE(system.sif().pushSIF1Quadword(DATA) == SIFTransferOutcome::Completed);
+  auto &dma = system.iopDMAController();
+  dma.writePriority(IOPDMABank::Primary, 0x80000);
+  dma.writePriority(BANK, 0x8808);
+  system.clockMasterCycle();
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  REQUIRE(dma.spuRemainingWords(0) == 256);
+  REQUIRE(dma.spuRemainingWords(1) == 256);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIF1);
+  system.runMasterCycles(8);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+  REQUIRE(dma.spuRemainingWords(0) == 256);
+  REQUIRE(dma.spuRemainingWords(1) == 256);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SPU0);
+  REQUIRE(dma.sifTieBreakChannel() == IOPDMAChannel::SIF0);
+  system.runMasterCycles(8);
+  REQUIRE(dma.spuRemainingWords(0) == 255);
+  REQUIRE(dma.spuRemainingWords(1) == 256);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SPU1);
+  system.runMasterCycles(8);
+  REQUIRE(dma.spuRemainingWords(0) == 255);
+  REQUIRE(dma.spuRemainingWords(1) == 255);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIF0);
+  system.runMasterCycles(8);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 3);
+  REQUIRE(dma.spuRemainingWords(0) == 255);
+  REQUIRE(dma.spuRemainingWords(1) == 255);
+}
+
+TEST_CASE("Shared IOP grants honor both banks before cyclic ties",
+  "[spu-grants][sif0][scheduling][arbitration]")
+{
+  for (const auto winner : {
+    IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0, IOPDMAChannel::SIF1})
+  {
+    CAPTURE(winner);
+    NekoSystem system;
+    source(system);
+    iopReceiver(system);
+    spuSource(system, 0);
+    spuSource(system, 1);
+    REQUIRE(system.sif().pushSIF1Quadword({{0x80006000, 4, 0, 0}}) ==
+      SIFTransferOutcome::Completed);
+    REQUIRE(system.sif().pushSIF1Quadword(DATA) == SIFTransferOutcome::Completed);
+    auto &dma = system.iopDMAController();
+    dma.writePriority(IOPDMABank::Primary,
+      winner == IOPDMAChannel::SPU0 ? 0x80000 : 0x90000);
+    dma.writePriority(BANK, winner == IOPDMAChannel::SPU1 ? 0x9908 :
+      winner == IOPDMAChannel::SIF0 ? 0x9809 :
+      winner == IOPDMAChannel::SIF1 ? 0x8909 : 0x9909);
+    REQUIRE(dma.grantOrder()[0] == winner);
+    REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIF0);
+    system.clockMasterCycle();
+    REQUIRE(dma.spuRemainingWords(0) == (winner == IOPDMAChannel::SPU0 ? 255 : 256));
+    REQUIRE(dma.spuRemainingWords(1) == (winner == IOPDMAChannel::SPU1 ? 255 : 256));
+    REQUIRE(system.iopSIF0DMAC().remainingWords() == (winner == IOPDMAChannel::SIF0 ? 4 : 0));
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == (winner == IOPDMAChannel::SIF1 ? 4 : 0));
+    const auto cursor = dma.tieBreakChannel();
+    dma.writePriority(IOPDMABank::Primary, 0x80000);
+    dma.writePriority(BANK, 0x8808);
+    REQUIRE(dma.tieBreakChannel() == cursor);
+    REQUIRE(dma.grantOrder()[0] == cursor);
+  }
+}
+
+TEST_CASE("Shared IOP grants bypass full SPU and SIF inputs without consuming waits",
+  "[spu-grants][sif0][scheduling][arbitration]")
+{
+  NekoSystem system;
+  source(system);
+  spuSource(system, 0, 32);
+  spuSource(system, 1);
+  auto &dma = system.iopDMAController();
+  dma.writePriority(IOPDMABank::Primary, 0x80000);
+  for (unsigned word = 0; word < 256; ++word)
+    REQUIRE(dma.clockSPU(0, system.iopBus(), system.spu2Controller()).outcome ==
+      IOPDMABeatOutcome::Accepted);
+  for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
+    push(system, DATA);
+  dma.writePriority(BANK, 0x809);
+  const auto stream = system.sifStateHash();
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SPU1);
+  REQUIRE(dma.grantOrder()[0] == IOPDMAChannel::SIF0);
+  system.clockMasterCycle();
+  REQUIRE(dma.spuRemainingWords(0) == 256);
+  REQUIRE(dma.spuRemainingWords(1) == 255);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 0);
+  REQUIRE(system.sifStateHash() == stream);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIF0);
+  dma.writePriority(BANK, 0x800);
+  system.runMasterCycles(8);
+  REQUIRE(dma.spuRemainingWords(0) == 256);
+  REQUIRE(dma.spuRemainingWords(1) == 255);
+  REQUIRE(system.sifStateHash() == stream);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIF0);
+}
+
+TEST_CASE("SPU sample half release precedes the same pulse DMA grant",
+  "[spu-grants][spu2][scheduling][arbitration]")
+{
+  NekoSystem system;
+  spuSource(system, 0, 32);
+  auto &dma = system.iopDMAController();
+  auto &spu = system.spu2Controller();
+  dma.writePriority(IOPDMABank::Primary, 0x80000);
+  for (unsigned word = 0; word < 256; ++word)
+    REQUIRE(dma.clockSPU(0, system.iopBus(), spu).outcome == IOPDMABeatOutcome::Accepted);
+  SPU2InputTest::advanceSamples(spu, 255);
+  for (unsigned pulse = 0; pulse < SPU2Controller::INPUT_CLOCK_PERIOD - 1; ++pulse)
+    REQUIRE_FALSE(spu.advanceInputClock().sampleTick);
+  REQUIRE_FALSE(spu.inputWriteRequested(0));
+  REQUIRE(dma.inspectSPU(0, system.iopBus(), spu).outcome == IOPDMABeatOutcome::Wait);
+  system.clockMasterCycle();
+  REQUIRE(dma.spuRemainingWords(0) == 255);
+  REQUIRE(spu.readSoundRAMHalfword(0x2000) == 256);
+  REQUIRE(spu.readSoundRAMHalfword(0x2001) == 0xabcd);
+}
+
+TEST_CASE("Rejected SPU grants preserve continuation and stop before a ready SIF peer or CPU",
+  "[spu-grants][sif0][scheduling][arbitration]")
+{
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    CAPTURE(core);
+    NekoSystem system;
+    source(system);
+    spuSource(system, core);
+    auto &dma = system.iopDMAController();
+    auto &spu = system.spu2Controller();
+    dma.stopSPUTransfer(core, system.iopBus(), spu);
+    REQUIRE(dma.writeSPUMemoryAddress(core, 0x7ffffc) == IOPDMAWriteOutcome::Completed);
+    writeIOP(system, 0x7ffffc, 0x12345678);
+    REQUIRE(dma.startSPUTransfer(core, system.iopBus(), spu) == IOPDMAWriteOutcome::Completed);
+    dma.writePriority(IOPDMABank::Primary, 0x80000);
+    dma.writePriority(BANK, 0x908);
+    REQUIRE(dma.clockSPU(core, system.iopBus(), spu).outcome == IOPDMABeatOutcome::Accepted);
+    const auto cursor = dma.tieBreakChannel();
+    const auto state = system.iopStateHash();
+    REQUIRE(dma.inspectSPU(core, system.iopBus(), spu).outcome == IOPDMABeatOutcome::Rejected);
+    REQUIRE(system.iopStateHash() == state);
+    system.iopCore().startExecution(0xa0000000);
+    const auto dmaBefore = dma.spuBlockControl(core);
+    try
+    {
+      system.clockMasterCycle();
+      FAIL("A rejected physical SPU source must surface before the ready peer.");
+    }
+    catch (const IOPDMATransferError &error)
+    {
+      REQUIRE(error.result().channel == (core == 0 ? IOPDMAChannel::SPU0 : IOPDMAChannel::SPU1));
+      REQUIRE(error.result().address == 0x800000);
+      REQUIRE(error.result().failure == IOPDMAFailure::SourceRead);
+      REQUIRE(error.result().status == IOPBusStatus::Unmapped);
+    }
+    REQUIRE(system.iopCore().retiredInstructions() == 0);
+    REQUIRE(system.iopSIF0DMAC().remainingWords() == 0);
+    REQUIRE(dma.spuMemoryAddress(core) == 0x800000);
+    REQUIRE(dma.spuRemainingWords(core) == 255);
+    REQUIRE(dma.spuBlockControl(core) == dmaBefore);
+    REQUIRE(dma.tieBreakChannel() == cursor);
+    REQUIRE(spu.readSoundRAMHalfword(static_cast<std::uint32_t>(0x2100 + core * 0x400)) == 0x5678);
+    REQUIRE(dma.interruptStatus(IOPDMABank::Primary) == 0);
+    REQUIRE(dma.interruptStatus(BANK) == 0);
+  }
+}
+
+TEST_CASE("Mixed SPU and SIF contention restores every cursor and IOP phase with tracing invariant",
+  "[spu-grants][sif0][scheduling][arbitration][save-state][observations]")
+{
+  for (unsigned residue = 0; residue < 8; ++residue)
+  {
+    CAPTURE(residue);
+    NekoSystem original;
+    source(original);
+    receiver(original);
+    eeSender(original);
+    iopReceiver(original);
+    spuSource(original, 0);
+    spuSource(original, 1);
+    original.iopDMAController().writePriority(IOPDMABank::Primary, 0x80000);
+    original.iopDMAController().writePriority(BANK, 0x8808);
+    original.iopDMAController().writeInterrupt(IOPDMABank::Primary, 0x100000);
+    original.iopDMAController().writeInterrupt(BANK, 0x10000);
+    original.runMasterCycles(1 + residue * 9);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    for (auto *system : {&original, &restored, &plain})
+      system->runMasterCycles(4200);
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    REQUIRE_FALSE(restored.iopDMAController().spuActive(0));
+    REQUIRE_FALSE(restored.iopDMAController().spuActive(1));
+    REQUIRE((restored.iopDMAController().interruptStatus(IOPDMABank::Primary) & 0x10000000) != 0);
+    REQUIRE((restored.iopDMAController().interruptStatus(BANK) & 0x01000000) != 0);
+    REQUIRE_FALSE(restored.iopSIF0DMAC().active());
+    REQUIRE_FALSE(restored.iopSIF1DMAC().active());
+    requireData(restored);
+  }
+}
+
+TEST_CASE("Shared IOP cursor preserves every physical channel in canonical state",
+  "[spu-grants][scheduling][save-state]")
+{
+  NekoSystem original;
+  const auto checkpoint = original.saveState();
+  for (const auto channel : {
+    IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0, IOPDMAChannel::SIF1})
+  {
+    SaveStateMutation state(checkpoint);
+    state.writeScalar("system.iop.dmaController.nextChannel", static_cast<std::uint8_t>(channel));
+    state.refreshChecksum();
+    NekoSystem restored;
+    restored.loadState(state.bytes());
+    REQUIRE(restored.iopDMAController().tieBreakChannel() == channel);
+    REQUIRE(restored.iopDMAController().grantOrder()[0] == channel);
+    REQUIRE(restored.saveState() == state.bytes());
+    REQUIRE((restored.iopStateHash() == original.iopStateHash()) ==
+      (channel == IOPDMAChannel::SIF0));
+    REQUIRE(restored.eeStateHash() == original.eeStateHash());
+    REQUIRE(restored.sifStateHash() == original.sifStateHash());
   }
 }
 
@@ -593,7 +852,7 @@ TEST_CASE("SIF cursors and SIF0 completion state affect their owning canonical h
     switch (field)
     {
       case 0: state.writeScalar("system.gifDMAC.sifNextDirection", 1); break;
-      case 1: state.writeScalar("system.iop.dmaController.sifNextChannel", 10); break;
+      case 1: state.writeScalar("system.iop.dmaController.nextChannel", 10); break;
       case 2: state.writeScalar("system.gifDMAC.controllerStatusRegister",
         DMACStatus::CHANNEL_5); break;
       case 3: state.writeScalar("system.gifDMAC.controllerStatusMaskRegister",
@@ -622,7 +881,7 @@ TEST_CASE("SIF cursors reject invalid domains transactionally",
     {
       SaveStateMutation state(original.saveState());
       state.writeScalar(ee ? "system.gifDMAC.sifNextDirection" :
-        "system.iop.dmaController.sifNextChannel", value);
+        "system.iop.dmaController.nextChannel", value);
       state.refreshChecksum();
       REQUIRE_THROWS_AS(destination.loadState(state.bytes()), std::invalid_argument);
       REQUIRE(destination.saveState() == before);
@@ -1979,8 +2238,8 @@ TEST_CASE("Malformed combined SIF ownership rejects without changing a distinct 
       "IOP SIF0 DMA packet continuation is incompatible with channel state"},
     InvalidField{"system.iop.sif1DMA.channelControl", 0x400,
       "IOP SIF1 DMA packet continuation is incompatible with channel state"},
-    InvalidField{"system.iop.dmaController.sifNextChannel", 11,
-      "IOP SIF arbitration cursor is invalid"},
+    InvalidField{"system.iop.dmaController.nextChannel", 11,
+      "IOP DMA arbitration cursor is invalid"},
     InvalidField{"system.gifDMAC.sifNextDirection", 2,
       "EE SIF arbitration cursor is invalid"}})
   {

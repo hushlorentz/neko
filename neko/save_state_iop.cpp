@@ -357,8 +357,8 @@ void NekoSaveStateCodec::writeIOPState(
   }
   {
     auto scope = writer->scope("dmaController");
-    writer->writeFieldU8("sifNextChannel",
-      static_cast<std::uint8_t>(system.iopDMAControllerComponent.sifNextChannel));
+    writer->writeFieldU8("nextChannel",
+      static_cast<std::uint8_t>(system.iopDMAControllerComponent.nextChannel));
     writer->writeFieldU32("auxiliaryControl",
       system.iopDMAControllerComponent.auxiliaryControlRegister);
     {
@@ -648,12 +648,14 @@ void NekoSaveStateCodec::readIOP(
   }
   {
     auto scope = reader->scope("dmaController");
-    const auto nextChannel = reader->readFieldU8("sifNextChannel");
+    const auto nextChannel = reader->readFieldU8("nextChannel");
     reader->requireField(
+      nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SPU0) ||
+      nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SPU1) ||
       nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SIF0) ||
       nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SIF1),
-      "IOP SIF arbitration cursor is invalid");
-    system->iopDMAControllerComponent.sifNextChannel = static_cast<IOPDMAChannel>(nextChannel);
+      "IOP DMA arbitration cursor is invalid");
+    system->iopDMAControllerComponent.nextChannel = static_cast<IOPDMAChannel>(nextChannel);
     system->iopDMAControllerComponent.auxiliaryControlRegister =
       reader->readFieldU32("auxiliaryControl");
     {
@@ -1072,8 +1074,8 @@ void NekoSaveStateCodec::commitIOP(
     source->iopDMAControllerComponent.auxiliaryControlRegister;
   destination->iopDMAControllerComponent.spuChannels =
     source->iopDMAControllerComponent.spuChannels;
-  destination->iopDMAControllerComponent.sifNextChannel =
-    source->iopDMAControllerComponent.sifNextChannel;
+  destination->iopDMAControllerComponent.nextChannel =
+    source->iopDMAControllerComponent.nextChannel;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;
   destination->iopSIF0DMAComponent = source->iopSIF0DMAComponent;
 }

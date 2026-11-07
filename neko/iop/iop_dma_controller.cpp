@@ -13,6 +13,9 @@ namespace
   constexpr IOPWord SPU_START = 0x01000201;
   constexpr IOPWord SPU_STOP = 0x201;
   constexpr IOPWord SPU_BLOCK_SIZE = 16;
+  constexpr std::array<IOPDMAChannel, 4> GRANT_CHANNELS = {{
+    IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0, IOPDMAChannel::SIF1
+  }};
 
   const char *channelDescription(IOPDMAChannel channel)
   {
@@ -335,6 +338,7 @@ IOPDMABeatResult IOPDMAController::clockSPU(
     stopSPUTransfer(core, bus, spu);
     signalChannelCompletion(result.channel);
   }
+  advanceGrantCursor(result.channel);
   return result;
 }
 
@@ -374,20 +378,69 @@ std::uint8_t IOPDMAController::channelPriority(IOPDMAChannel channel) const
     (priority(channelBank(channel)) >> (4 * channelSlot(channel))) & 7);
 }
 
+std::size_t IOPDMAController::grantChannelIndex(IOPDMAChannel channel)
+{
+  switch (channel)
+  {
+    case IOPDMAChannel::SPU0: return 0;
+    case IOPDMAChannel::SPU1: return 1;
+    case IOPDMAChannel::SIF0: return 2;
+    case IOPDMAChannel::SIF1: return 3;
+  }
+  throw std::out_of_range("Unsupported IOP DMA grant channel.");
+}
+
+void IOPDMAController::advanceGrantCursor(IOPDMAChannel channel)
+{
+  nextChannel = GRANT_CHANNELS[(grantChannelIndex(channel) + 1) % GRANT_CHANNELS.size()];
+}
+
+std::array<IOPDMAChannel, 4> IOPDMAController::grantOrder() const
+{
+  std::array<IOPDMAChannel, 4> order;
+  const auto start = grantChannelIndex(nextChannel);
+  for (std::size_t index = 0; index < order.size(); ++index)
+  {
+    order[index] = GRANT_CHANNELS[(start + index) % order.size()];
+  }
+  // Stable insertion sort keeps cyclic tie order without allocating on a grant.
+  for (std::size_t index = 1; index < order.size(); ++index)
+  {
+    const auto channel = order[index];
+    const auto priority = channelPriority(channel);
+    auto destination = index;
+    while (destination != 0 && channelPriority(order[destination - 1]) > priority)
+    {
+      order[destination] = order[destination - 1];
+      --destination;
+    }
+    order[destination] = channel;
+  }
+  return order;
+}
+
+IOPDMAChannel IOPDMAController::tieBreakChannel() const
+{
+  return nextChannel;
+}
+
 std::array<IOPDMAChannel, 2> IOPDMAController::sifGrantOrder() const
 {
-  const auto sourcePriority = channelPriority(IOPDMAChannel::SIF0);
-  const auto receiverPriority = channelPriority(IOPDMAChannel::SIF1);
-  const bool sourceFirst = sourcePriority < receiverPriority ||
-    (sourcePriority == receiverPriority && sifNextChannel == IOPDMAChannel::SIF0);
-  return sourceFirst ?
-    std::array<IOPDMAChannel, 2>{{IOPDMAChannel::SIF0, IOPDMAChannel::SIF1}} :
-    std::array<IOPDMAChannel, 2>{{IOPDMAChannel::SIF1, IOPDMAChannel::SIF0}};
+  std::array<IOPDMAChannel, 2> order;
+  std::size_t index = 0;
+  for (const auto channel : grantOrder())
+  {
+    if (channel == IOPDMAChannel::SIF0 || channel == IOPDMAChannel::SIF1)
+    {
+      order[index++] = channel;
+    }
+  }
+  return order;
 }
 
 IOPDMAChannel IOPDMAController::sifTieBreakChannel() const
 {
-  return sifNextChannel;
+  return nextChannel == IOPDMAChannel::SIF1 ? IOPDMAChannel::SIF1 : IOPDMAChannel::SIF0;
 }
 
 void IOPDMAController::validateSIFWiring(
@@ -423,7 +476,7 @@ IOPDMABeatResult IOPDMAController::clockSIF(
   if (result.outcome == IOPDMABeatOutcome::Accepted ||
       result.outcome == IOPDMABeatOutcome::Completed)
   {
-    sifNextChannel = IOPDMAChannel::SIF0;
+    advanceGrantCursor(result.channel);
   }
   if (result.outcome == IOPDMABeatOutcome::Completed)
   {
@@ -482,7 +535,7 @@ IOPDMABeatResult IOPDMAController::clockSIF(
   if (result.outcome == IOPDMABeatOutcome::Accepted ||
       result.outcome == IOPDMABeatOutcome::Completed)
   {
-    sifNextChannel = IOPDMAChannel::SIF1;
+    advanceGrantCursor(result.channel);
   }
   if (result.outcome == IOPDMABeatOutcome::Completed)
   {

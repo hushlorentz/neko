@@ -342,7 +342,7 @@ class NekoSystem
     void clockEESIF(NekoObservationOrder &order, SIFDMAObservations &events);
     EESIFDMABeatOutcome clockEESIFChannel(SIFDirection direction,
       NekoObservationOrder &order, SIFDMAObservations &events);
-    IOPDMABeatResult clockIOPSIF(NekoObservationOrder &order, SIFDMAObservations &events);
+    IOPDMABeatResult clockIOPDMA(NekoObservationOrder &order, SIFDMAObservations &events);
     IOPDMABeatResult clockIOPSIFChannel(IOPDMAChannel channel,
       NekoObservationOrder &order, SIFDMAObservations &events);
     void latchComponentInterrupts();

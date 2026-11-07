@@ -109,6 +109,9 @@ class IOPDMAController final
     IOPDMAWriteOutcome writeSupplementalInitialization(IOPWord value) const;
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
+    std::array<IOPDMAChannel, 4> grantOrder() const;
+    IOPDMAChannel tieBreakChannel() const;
+    // Compatibility projections of the shared grant policy onto SIF endpoints.
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;
     IOPDMAChannel sifTieBreakChannel() const;
     IOPDMABeatResult inspectSIF(
@@ -140,6 +143,8 @@ class IOPDMAController final
     static std::size_t bankIndex(IOPDMABank bank);
     static IOPDMABank channelBank(IOPDMAChannel channel);
     static std::uint8_t channelSlot(IOPDMAChannel channel);
+    static std::size_t grantChannelIndex(IOPDMAChannel channel);
+    void advanceGrantCursor(IOPDMAChannel channel);
     static IOPDMAChannel spuChannel(std::size_t core);
     bool validSPUContinuation(std::size_t core, const SPU2Controller &spu) const;
     void validateSPUWiring(const IOPBus &bus, const SPU2Controller &spu) const;
@@ -154,7 +159,7 @@ class IOPDMAController final
     std::array<Bank, 2> banks = {};
     IOPWord auxiliaryControlRegister = 0;
     std::array<SPUChannel, 2> spuChannels = {};
-    IOPDMAChannel sifNextChannel = IOPDMAChannel::SIF0;
+    IOPDMAChannel nextChannel = IOPDMAChannel::SIF0;
 };
 
 #endif

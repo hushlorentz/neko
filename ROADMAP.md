@@ -3507,7 +3507,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Extend the existing DMA owner with paired channel-4/7 programmed/current
       state, physical RAM source beats and bank-correct masked completion;
       cover count/address progress, rejected beats and active-write guards.
-- [ ] Integrate SPU and SIF endpoints into one priority-ordered IOP DMA grant
+- [x] Integrate SPU and SIF endpoints into one priority-ordered IOP DMA grant
       budget, preserving SIF-only behavior and deterministic ties, clock ordering
       and restored continuation under contention.
 

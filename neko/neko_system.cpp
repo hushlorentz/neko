@@ -1256,13 +1256,26 @@ EESIFDMABeatOutcome NekoSystem::clockEESIFChannel(SIFDirection direction,
   return result;
 }
 
-IOPDMABeatResult NekoSystem::clockIOPSIF(
+IOPDMABeatResult NekoSystem::clockIOPDMA(
   NekoObservationOrder &order, SIFDMAObservations &events)
 {
   IOPDMABeatResult result;
-  for (const auto channel : iopDMAControllerComponent.sifGrantOrder())
+  for (const auto channel : iopDMAControllerComponent.grantOrder())
   {
-    result = clockIOPSIFChannel(channel, order, events);
+    switch (channel)
+    {
+      case IOPDMAChannel::SPU0:
+      case IOPDMAChannel::SPU1:
+        result = iopDMAControllerComponent.clockSPU(
+          channel == IOPDMAChannel::SPU0 ? 0 : 1,
+          iopBusComponent, spu2ControllerComponent);
+        break;
+      case IOPDMAChannel::SIF0:
+      case IOPDMAChannel::SIF1:
+        result = clockIOPSIFChannel(channel, order, events);
+        break;
+      default: throw std::logic_error("Unknown IOP DMA grant channel.");
+    }
     if (result.outcome != IOPDMABeatOutcome::Wait)
     {
       break;
@@ -1396,7 +1409,7 @@ void NekoSystem::clockMasterCycle()
     }
     cdvdControllerComponent.completeSubcommand();
     spu2ControllerComponent.advanceInputClock();
-    const auto transfer = clockIOPSIF(observationScope.order, dmaObservations);
+    const auto transfer = clockIOPDMA(observationScope.order, dmaObservations);
     if (transfer.outcome == IOPDMABeatOutcome::Rejected)
     {
       if (collectingTrace)
