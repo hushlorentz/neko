@@ -3519,7 +3519,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Export approved bounded SPU beat and request/buffer transitions through
       typed trace/failure-probe observations and maintained inspectors;
       preserve ordering, fixed capacity and tracing-independent execution.
-- [ ] Add authored CPU-driven lifecycle and cold/restored traced/plain
+- [x] Add authored CPU-driven lifecycle and cold/restored traced/plain
       conformance covering both cores, buffer boundaries, contention and faults;
       independently review and run required validation gates.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
