@@ -6,6 +6,19 @@
 #include <cstdint>
 #include <vector>
 
+struct SPU2InputSample
+{
+  bool consumed = false;
+  std::uint16_t left = 0;
+  std::uint16_t right = 0;
+};
+
+struct SPU2InputTick
+{
+  bool sampleTick = false;
+  std::array<SPU2InputSample, 2> samples{};
+};
+
 // Bounded SPU2 programming; no audio engine or volume sweeps.
 class SPU2Controller final
 {
@@ -18,16 +31,24 @@ class SPU2Controller final
     static constexpr std::size_t VOICE_MIX_HALFWORD_COUNT = 16;
     static constexpr std::size_t EFFECT_INPUT_VOLUME_COUNT = 12;
     static constexpr std::size_t TRANSFER_START_HALFWORD_COUNT = 4;
+    static constexpr std::uint16_t INPUT_CLOCK_PERIOD = 768;
+    static constexpr std::uint16_t INPUT_SAMPLE_COUNT = 512;
+    static constexpr std::uint16_t INPUT_HALF_WORD_COUNT = 256;
     SPU2Controller();
     void reset() noexcept;
     std::uint16_t readSoundRAMHalfword(std::uint32_t halfwordAddress) const;
     void writeSoundRAMHalfword(std::uint32_t halfwordAddress, std::uint16_t value);
+    SPU2InputTick advanceInputClock() noexcept;
+    bool inputWriteRequested(std::size_t core) const;
+    bool beginInputWrite(std::size_t core);
+    void cancelInputWrite(std::size_t core);
+    bool writeInputWord(std::size_t core, std::uint32_t value);
     std::uint16_t readSPDIFConfiguration(std::size_t index) const;
-    void writeSPDIFConfiguration(std::size_t index, std::uint16_t value);
+    bool writeSPDIFConfiguration(std::size_t index, std::uint16_t value);
     static bool isFixedMasterVolumeControl(std::uint16_t value) noexcept;
     std::uint16_t readMasterVolumeControl(std::size_t index) const;
     bool writeMasterVolumeControl(std::size_t index, std::uint16_t value);
-    // Provisional retained bit0/bits14-15 ATTR; no input/mute/engine/reset effects.
+    // Retained bit0/bits14-15 ATTR; changes reject while this input is selected.
     static bool isSupportedCoreAttribute(std::uint16_t value) noexcept;
     std::uint16_t readCoreAttribute(std::size_t core) const;
     bool writeCoreAttribute(std::size_t core, std::uint16_t value);
@@ -41,11 +62,11 @@ class SPU2Controller final
     void writeEffectEndAddressHigh(std::size_t core, std::uint16_t value);
     std::uint16_t readTransferStartAddress(std::size_t index) const;
     void writeTransferStartAddress(std::size_t index, std::uint16_t value);
-    // Provisional quiescent STATX projection; replace when transfers are modeled.
-    std::uint16_t readUnprogrammedCoreStatus() const noexcept;
+    // STATX zero is supported only before the core's first input selection.
+    bool hasQuiescentCoreStatus(std::size_t core) const;
     // Provisional KOFF effect; replace before voice programming or key-on.
     void keyOffUnprogrammedVoices() const noexcept;
-    // Passive own-core selection, not live ADMAS status or a DMA request.
+    // Own-core PCM input selection; ADMAS readback remains unsupported.
     static bool isSupportedAutoDMAWriteSelection(
       std::size_t core, std::uint16_t value) noexcept;
     std::uint16_t readAutoDMAWriteSelection(std::size_t core) const;
@@ -55,8 +76,20 @@ class SPU2Controller final
 
   private:
     friend class NekoSaveStateCodec;
+    struct InputState
+    {
+      bool everSelected = false;
+      bool writeOpen = false;
+      std::uint8_t fillHalf = 0;
+      std::uint16_t fillWords = 0;
+    };
+    bool hasSupportedInputProfile(std::size_t core) const noexcept;
+    bool hasValidInputState() const noexcept;
     std::vector<std::uint8_t> soundRAM;
-    // MODE, MEDIA, COPY PROTECTION, unknown 0x7ca, OUTPUT; passive images only.
+    std::uint16_t inputClockPhase = 0;
+    std::uint16_t inputReadPosition = 0;
+    std::array<InputState, CORE_COUNT> inputStates{};
+    // MODE, MEDIA, COPY PROTECTION, unknown 0x7ca, OUTPUT.
     std::array<std::uint16_t, SPDIF_CONFIGURATION_COUNT> spdifConfiguration{};
     // Core 0 left/right, core 1 left/right; programmed controls, not current gain.
     std::array<std::uint16_t, MASTER_VOLUME_COUNT> masterVolumeControls{};

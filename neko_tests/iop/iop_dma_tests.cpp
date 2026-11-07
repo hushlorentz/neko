@@ -8,6 +8,7 @@
 #include "iop_sif1_dma_channel.hpp"
 #include "iop_trace_test_utils.hpp"
 #include "save_state_mutation.hpp"
+#include "spu2_input_test_utils.hpp"
 
 namespace
 {
@@ -173,7 +174,7 @@ TEST_CASE("IOP SPU DMA addresses retain normalized independent programming",
 }
 
 TEST_CASE("IOP SPU DMA programming preserves inactive engines and other owners",
-  "[iop][dma][spu-madr]")
+  "[iop][dma][spu-madr][spu2]")
 {
   NekoSystem system;
   auto &dma = system.iopDMAController();
@@ -183,6 +184,7 @@ TEST_CASE("IOP SPU DMA programming preserves inactive engines and other owners",
   dma.writeAuxiliaryControl(0x89abcdef);
   dma.writeInterrupt(PRIMARY, FORCE);
   dma.signalChannelCompletion(IOPDMAChannel::SIF1);
+  SPU2InputTest::programProfile(system.spu2Controller());
   REQUIRE(bus.write16(0x1f9001b0, 1).status == IOPBusStatus::Completed);
   REQUIRE(bus.write16(0x1f9005b0, 2).status == IOPBusStatus::Completed);
   REQUIRE(bus.write16(0x1f9001a8, 0x1234).status == IOPBusStatus::Completed);
@@ -221,8 +223,8 @@ TEST_CASE("IOP SPU DMA programming preserves inactive engines and other owners",
   REQUIRE(dma.spuMemoryAddress(0) == 0x4fa00);
   REQUIRE(dma.spuMemoryAddress(1) == 0x4fa04);
   REQUIRE(bus.read16(0x1f9001a8).value == 0x1234);
-  REQUIRE(bus.read16(0x1f900344).value == 0);
-  REQUIRE(bus.read16(0x1f900744).value == 0);
+  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.read16(0x1f900744).status == IOPBusStatus::Unmapped);
   REQUIRE(dma.interruptStatus(PRIMARY) == (FORCE | SUMMARY));
   REQUIRE(dma.interruptStatus(SECONDARY) == FLAG);
   system.reset();
@@ -327,7 +329,7 @@ TEST_CASE("IOP SPU DMA pending word stores and loads restore canonically",
 }
 
 TEST_CASE("IOP SPU DMA block control preserves inactive engines and lifecycle boundaries",
-  "[iop][dma][spu-bcr]")
+  "[iop][dma][spu-bcr][spu2]")
 {
   NekoSystem system;
   auto &dma = system.iopDMAController();
@@ -337,6 +339,7 @@ TEST_CASE("IOP SPU DMA block control preserves inactive engines and lifecycle bo
   dma.writeAuxiliaryControl(0x89abcdef);
   dma.writeInterrupt(PRIMARY, FORCE);
   dma.signalChannelCompletion(IOPDMAChannel::SIF1);
+  SPU2InputTest::programProfile(system.spu2Controller());
   REQUIRE(bus.write16(0x1f9001b0, 1).status == IOPBusStatus::Completed);
   REQUIRE(bus.write16(0x1f9005b0, 2).status == IOPBusStatus::Completed);
   REQUIRE(bus.write16(0x1f9001a8, 0x1234).status == IOPBusStatus::Completed);
@@ -374,8 +377,8 @@ TEST_CASE("IOP SPU DMA block control preserves inactive engines and lifecycle bo
     REQUIRE(dma.spuMemoryAddress(core) == 0);
   }
   REQUIRE(bus.read16(0x1f9001a8).value == 0x1234);
-  REQUIRE(bus.read16(0x1f900344).value == 0);
-  REQUIRE(bus.read16(0x1f900744).value == 0);
+  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.read16(0x1f900744).status == IOPBusStatus::Unmapped);
   REQUIRE(dma.interruptStatus(PRIMARY) == (FORCE | SUMMARY));
   REQUIRE(dma.interruptStatus(SECONDARY) == FLAG);
   REQUIRE_FALSE(system.iopSIF1DMAC().active());

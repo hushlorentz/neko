@@ -3498,7 +3498,7 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add shared 2 MiB sound memory through the existing SPU2 owner, with
       explicit address units, reset, canonical persistence and transactional adoption;
       keep voice, effect and normal TSA transfer execution unsupported.
-- [ ] Implement paired bounded PCM input buffers, real capacity/backpressure
+- [x] Implement paired bounded PCM input buffers, real capacity/backpressure
       and deterministic 48 kHz consumption through that owner; cover startup,
       starvation, partial fills, cancellation and restored phase.
 

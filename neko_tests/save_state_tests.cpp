@@ -20,12 +20,12 @@ namespace
 {
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
+  constexpr std::size_t VERSION_97_PREPARED_STATE_SIZE = 42051250;
+  constexpr std::uint64_t VERSION_97_PREPARED_STATE_HASH =
+    UINT64_C(0xb71f5667eb644e15);
   constexpr std::size_t VERSION_96_PREPARED_STATE_SIZE = 42051236;
   constexpr std::uint64_t VERSION_96_PREPARED_STATE_HASH =
     UINT64_C(0x1ff32884e01e5448);
-  constexpr std::size_t VERSION_95_PREPARED_STATE_SIZE = 39954084;
-  constexpr std::uint64_t VERSION_95_PREPARED_STATE_HASH =
-    UINT64_C(0xab32bfb8f01536e5);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -625,7 +625,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 96 save-state layout is byte-stable")
+TEST_CASE("Version 97 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -640,14 +640,14 @@ TEST_CASE("Version 96 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 96);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 97);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_96_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_97_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_96_PREPARED_STATE_HASH);
+    VERSION_97_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -748,6 +748,14 @@ TEST_CASE("Version 96 save-state layout is byte-stable")
   REQUIRE(soundRAM->kind == SaveStateFieldKind::Bytes);
   REQUIRE(soundRAM->size == 2 * 1024 * 1024);
   REQUIRE(soundRAM->containerOffset == selectionOffset + 4);
+  const auto *inputPhase = snapshot.find("system.iop.spu2.inputClockPhase");
+  const auto *inputPosition = snapshot.find("system.iop.spu2.inputReadPosition");
+  REQUIRE(inputPhase != nullptr);
+  REQUIRE(inputPosition != nullptr);
+  REQUIRE(inputPhase->containerOffset == soundRAM->containerOffset + soundRAM->size);
+  REQUIRE(inputPhase->scalarValue == 1);
+  REQUIRE(inputPosition->containerOffset == inputPhase->containerOffset + 2);
+  REQUIRE(inputPosition->scalarValue == 0);
   REQUIRE(auxiliary != nullptr);
   const auto spuAddressOffset = auxiliary->containerOffset + 4;
   for (std::size_t core = 0; core < 2; ++core)
@@ -772,15 +780,15 @@ TEST_CASE("Version 96 save-state layout is byte-stable")
     REQUIRE(control->scalarValue == 0);
   }
   auto previousVersion = state;
-  previousVersion.erase(previousVersion.begin() + soundRAM->containerOffset,
-    previousVersion.begin() + soundRAM->containerOffset + soundRAM->size);
-  previousVersion[SAVE_STATE_VERSION_OFFSET] = 95;
+  previousVersion.erase(previousVersion.begin() + inputPhase->containerOffset,
+    previousVersion.begin() + inputPhase->containerOffset + 14);
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 96;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 12,
     hashBytes(previousVersion, TEST_SAVE_STATE_HEADER_SIZE));
-  REQUIRE(previousVersion.size() == VERSION_95_PREPARED_STATE_SIZE);
-  REQUIRE(hashBytes(previousVersion) == VERSION_95_PREPARED_STATE_HASH);
+  REQUIRE(previousVersion.size() == VERSION_96_PREPARED_STATE_SIZE);
+  REQUIRE(hashBytes(previousVersion) == VERSION_96_PREPARED_STATE_HASH);
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);

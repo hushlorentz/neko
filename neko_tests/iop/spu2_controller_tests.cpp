@@ -9,6 +9,7 @@
 #include "iop_trace_test_utils.hpp"
 #include "neko_system.hpp"
 #include "save_state_mutation.hpp"
+#include "spu2_input_test_utils.hpp"
 
 namespace
 {
@@ -318,6 +319,269 @@ namespace
   }
 }
 
+TEST_CASE("SPU2 PCM input rejects unsupported selection and stale quiescent status",
+  "[iop][spu2][spu2-input]")
+{
+  NekoSystem system;
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write16(0x1f9001b0, 1).status == IOPBusStatus::Unmapped);
+  for (const auto programming : {
+      HalfwordProgramming{0x1f9007c6, 0x0900, 0},
+      HalfwordProgramming{0x1f9007c8, 0x0200, 0},
+      HalfwordProgramming{0x1f9007cc, 0x0000, 0},
+      HalfwordProgramming{0x1f9007ca, 0x0008, 0},
+      HalfwordProgramming{0x1f9007c0, 0xc032, 0},
+      HalfwordProgramming{0x1f90019a, 0xc000, 0}})
+  {
+    REQUIRE(bus.write16(programming.address, programming.value).status ==
+      IOPBusStatus::Completed);
+  }
+  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write16(0x1f9001b0, 1).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.read16(0x1f900744).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write16(0x1f9001b0, 0).status == IOPBusStatus::Completed);
+  REQUIRE(bus.read16(0x1f900344).status == IOPBusStatus::Unmapped);
+}
+
+TEST_CASE("SPU2 PCM input clock starts on the 768th IOP pulse",
+  "[iop][spu2][spu2-input]")
+{
+  NekoSystem system;
+  system.runMasterCycles(6136);
+  auto fields = inspectSaveState(system.saveState());
+  const auto *phase = fields.find("system.iop.spu2.inputClockPhase");
+  const auto *position = fields.find("system.iop.spu2.inputReadPosition");
+  REQUIRE(phase != nullptr);
+  REQUIRE(position != nullptr);
+  REQUIRE(phase->scalarValue == 767);
+  REQUIRE(position->scalarValue == 0);
+  system.runMasterCycles(1);
+  fields = inspectSaveState(system.saveState());
+  REQUIRE(fields.find("system.iop.spu2.inputClockPhase")->scalarValue == 0);
+  REQUIRE(fields.find("system.iop.spu2.inputReadPosition")->scalarValue == 1);
+  system.runMasterCycles(6143);
+  fields = inspectSaveState(system.saveState());
+  REQUIRE(fields.find("system.iop.spu2.inputReadPosition")->scalarValue == 1);
+  system.runMasterCycles(1);
+  fields = inspectSaveState(system.saveState());
+  REQUIRE(fields.find("system.iop.spu2.inputReadPosition")->scalarValue == 2);
+}
+
+TEST_CASE("SPU2 PCM input halves use planar words and real shared capacity",
+  "[iop][spu2][spu2-input]")
+{
+  SPU2Controller spu;
+  SPU2InputTest::programProfile(spu);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE_FALSE(spu.beginInputWrite(core));
+    REQUIRE_FALSE(spu.writeInputWord(core, 0xffffffff));
+    REQUIRE(spu.writeAutoDMAWriteSelection(core, 1u << core));
+    for (std::uint32_t word = 0; word < 256; ++word)
+    {
+      REQUIRE(spu.inputWriteRequested(core));
+      REQUIRE(spu.writeInputWord(core, 0x80010000u + word));
+      const auto address = static_cast<std::uint32_t>(0x2100 + core * 0x400 +
+        (word / 128) * 0x200 + (word % 128) * 2);
+      REQUIRE(spu.readSoundRAMHalfword(address) == word);
+      REQUIRE(spu.readSoundRAMHalfword(address + 1) == 0x8001);
+    }
+    REQUIRE_FALSE(spu.inputWriteRequested(core));
+    REQUIRE_FALSE(spu.writeInputWord(core, 0xffffffff));
+  }
+  auto tick = SPU2InputTest::advanceSamples(spu, 255);
+  REQUIRE(tick.sampleTick);
+  REQUIRE(tick.samples[0].consumed);
+  REQUIRE(tick.samples[0].left == 0);
+  REQUIRE_FALSE(spu.inputWriteRequested(0));
+  tick = SPU2InputTest::advanceSamples(spu, 1);
+  REQUIRE(spu.inputWriteRequested(0));
+  REQUIRE(spu.inputWriteRequested(1));
+  tick = SPU2InputTest::advanceSamples(spu, 1);
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(tick.samples[core].consumed);
+    REQUIRE(tick.samples[core].left == 0);
+    REQUIRE(tick.samples[core].right == 128);
+    REQUIRE(spu.writeInputWord(core, 0xfedcba98));
+    REQUIRE(spu.readSoundRAMHalfword(0x2000 + core * 0x400) == 0xba98);
+    REQUIRE(spu.readSoundRAMHalfword(0x2001 + core * 0x400) == 0xfedc);
+  }
+}
+
+TEST_CASE("SPU2 PCM starvation preserves partial targets and cancellation preserves phase",
+  "[iop][spu2][spu2-input]")
+{
+  SPU2Controller spu;
+  SPU2InputTest::programProfile(spu);
+  SPU2InputTest::advanceSamples(spu, 255);
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+  REQUIRE(spu.writeInputWord(0, 0x24681357));
+  SPU2InputTest::advanceSamples(spu, 1);
+  REQUIRE_FALSE(spu.inputWriteRequested(0));
+  REQUIRE_FALSE(spu.writeInputWord(0, 0xffffffff));
+  const auto tick = SPU2InputTest::advanceSamples(spu, 1);
+  REQUIRE(tick.samples[0].left == 0x1357);
+  REQUIRE(tick.samples[0].right == 0);
+  REQUIRE(tick.samples[1].consumed == false);
+  SPU2InputTest::advanceSamples(spu, 255);
+  REQUIRE(spu.inputWriteRequested(0));
+  REQUIRE(spu.writeInputWord(0, 0x89abcdef));
+  REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0x1357);
+  REQUIRE(spu.readSoundRAMHalfword(0x2102) == 0xcdef);
+  spu.cancelInputWrite(0);
+  REQUIRE_FALSE(spu.inputWriteRequested(0));
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+  REQUIRE_FALSE(spu.inputWriteRequested(0));
+  SPU2InputTest::advanceSamples(spu, 256);
+  REQUIRE(spu.beginInputWrite(0));
+  REQUIRE(spu.writeInputWord(0, 0x12345678));
+  REQUIRE(spu.readSoundRAMHalfword(0x2000) == 0x5678);
+  REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0x1357);
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 0));
+  REQUIRE_FALSE(spu.inputWriteRequested(0));
+  REQUIRE_FALSE(spu.hasQuiescentCoreStatus(0));
+  SPU2InputTest::advanceSamples(spu, 256);
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+  REQUIRE(spu.writeInputWord(0, 0x76543210));
+  REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0x3210);
+  spu.reset();
+  REQUIRE(spu.hasQuiescentCoreStatus(0));
+  REQUIRE_FALSE(spu.inputWriteRequested(0));
+  REQUIRE(spu.readSoundRAMHalfword(0x2100) == 0);
+}
+
+TEST_CASE("SPU2 selected PCM input guards only its live profile",
+  "[iop][spu2][spu2-input]")
+{
+  NekoSystem system;
+  auto &spu = system.spu2Controller();
+  SPU2InputTest::programProfile(spu);
+  REQUIRE(system.iopBus().write16(autoDMAAddresses[1], 2).status ==
+    IOPBusStatus::Completed);
+  const auto before = system.saveState();
+  for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
+  {
+    const auto value = SPU2InputTest::configuration[index];
+    REQUIRE(system.iopBus().write16(configurationAddresses[index], value).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write16(configurationAddresses[index], value ^ 1).status ==
+      IOPBusStatus::Unmapped);
+  }
+  REQUIRE(system.iopBus().write16(coreAttributeAddresses[1], 0xc001).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write16(coreAttributeAddresses[1], 0xc000).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(system.saveState() == before);
+  REQUIRE(system.iopBus().write16(coreAttributeAddresses[0], 0).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().read16(coreStatusAddresses[0]).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().read16(coreStatusAddresses[1]).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write16(autoDMAAddresses[1], 0).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().write16(configurationAddresses[0], 0).status ==
+    IOPBusStatus::Completed);
+  REQUIRE(system.iopBus().read16(coreStatusAddresses[1]).status ==
+    IOPBusStatus::Unmapped);
+  REQUIRE(system.iopBus().write32(0x1f801508, 0x01000201).status ==
+    IOPBusStatus::Unmapped);
+}
+
+TEST_CASE("SPU2 PCM partial and full buffers restore across sample boundaries",
+  "[iop][spu2][spu2-input][save-state][trace]")
+{
+  for (const auto cycles : {0u, 1572856u, 1572857u})
+  {
+    CAPTURE(cycles);
+    NekoSystem source;
+    auto &spu = source.spu2Controller();
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+    REQUIRE(spu.writeAutoDMAWriteSelection(1, 2));
+    REQUIRE(spu.writeInputWord(0, 0x12345678));
+    for (unsigned word = 0; word < 256; ++word)
+    {
+      REQUIRE(spu.writeInputWord(1, 0x80000000u + word));
+    }
+    source.runMasterCycles(cycles);
+    const auto checkpoint = source.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    source.startTrace();
+    restored.startTrace();
+    source.runMasterCycles(17);
+    restored.runMasterCycles(17);
+    plain.runMasterCycles(17);
+    REQUIRE(source.saveState() == restored.saveState());
+    REQUIRE(source.saveState() == plain.saveState());
+    IOPTraceTest::requireEvents(source.trace(), restored.trace());
+    REQUIRE(spu.inputWriteRequested(0) == (cycles == 0));
+    REQUIRE(spu.inputWriteRequested(1) == (cycles != 0));
+    for (auto *system : {&source, &restored, &plain})
+    {
+      auto &owner = system->spu2Controller();
+      owner.cancelInputWrite(0);
+      REQUIRE_FALSE(owner.inputWriteRequested(0));
+      REQUIRE(owner.beginInputWrite(0));
+      REQUIRE(owner.writeInputWord(0, 0x89abcdef));
+    }
+    REQUIRE(source.saveState() == restored.saveState());
+    REQUIRE(source.saveState() == plain.saveState());
+  }
+}
+
+TEST_CASE("SPU2 PCM invalid progress rejects transactionally",
+  "[iop][spu2][spu2-input][save-state]")
+{
+  NekoSystem source;
+  auto &spu = source.spu2Controller();
+  SPU2InputTest::programProfile(spu);
+  REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+  REQUIRE(spu.writeInputWord(0, 0x12345678));
+  const auto checkpoint = source.saveState();
+  NekoSystem destination;
+  destination.runMasterCycles(9);
+  destination.startTrace();
+  const auto before = destination.saveState();
+  const auto traceHash = destination.traceHash();
+  struct InvalidField
+  {
+    const char *path;
+    std::uint64_t value;
+  };
+  for (const auto field : {
+      InvalidField{"system.iop.spu2.inputClockPhase", 768},
+      InvalidField{"system.iop.spu2.inputReadPosition", 512},
+      InvalidField{"system.iop.spu2.inputStates[0].everSelected", 0},
+      InvalidField{"system.iop.spu2.inputStates[0].writeOpen", 0},
+      InvalidField{"system.iop.spu2.inputStates[0].fillHalf", 2},
+      InvalidField{"system.iop.spu2.inputStates[0].fillWords", 257},
+      InvalidField{"system.iop.spu2.inputStates[1].writeOpen", 1},
+      InvalidField{"system.iop.spu2.spdifConfiguration[4].value", 0},
+      InvalidField{"system.iop.spu2.coreAttributes[0].value", 0}})
+  {
+    CAPTURE(field.path);
+    SaveStateMutation invalid(checkpoint);
+    invalid.writeScalar(field.path, field.value);
+    invalid.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(invalid), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+    REQUIRE(destination.traceEnabled());
+    REQUIRE(destination.traceHash() == traceHash);
+  }
+  SaveStateMutation invalidFull(checkpoint);
+  invalidFull.writeScalar("system.iop.spu2.inputStates[0].fillWords", 256);
+  invalidFull.writeScalar("system.iop.spu2.inputStates[0].fillHalf", 0);
+  invalidFull.refreshChecksum();
+  REQUIRE_THROWS_AS(destination.loadState(invalidFull), std::invalid_argument);
+  REQUIRE(destination.saveState() == before);
+}
+
 TEST_CASE("SPU2 sound RAM has a fixed canonical byte region",
   "[iop][spu2][sound-ram][save-state]")
 {
@@ -434,7 +698,7 @@ TEST_CASE("SPU2 sound RAM restores little endian bytes without aliasing or trace
   REQUIRE(plain.spu2Controller().readSoundRAMHalfword(0x2000) == 0x8124);
 }
 
-TEST_CASE("SPU2 Auto DMA write selection admits only each core bit without transfers",
+TEST_CASE("SPU2 Auto DMA write selection admits each core bit without starting DMA",
   "[iop][spu2][spu2-autodma]")
 {
   NekoSystem system;
@@ -442,6 +706,7 @@ TEST_CASE("SPU2 Auto DMA write selection admits only each core bit without trans
   programConfiguration(system);
   programMasterVolumes(system);
   programTransferStartAddresses(system);
+  SPU2InputTest::programProfile(system.spu2Controller());
   system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
   system.iopDMAController().writeAuxiliaryControl(0x12345678);
   const auto before = system.iopStateHash();
@@ -488,15 +753,16 @@ TEST_CASE("SPU2 Auto DMA write selection admits only each core bit without trans
       REQUIRE(bus.read16(transferStartAddressAddresses[index]).value ==
         transferStartAddressValues[index]);
     }
-    for (const auto address : coreStatusAddresses)
+    for (std::size_t statusCore = 0; statusCore < 2; ++statusCore)
     {
-      REQUIRE(bus.read16(address).value == 0);
+      REQUIRE(bus.read16(coreStatusAddresses[statusCore]).status ==
+        (statusCore <= core ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
     }
     REQUIRE(system.iopInterruptController().status() == (1u << 9));
     REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
     REQUIRE(bus.write16(autoDMAAddresses[core], 0).status == IOPBusStatus::Completed);
     REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) == 0);
-    REQUIRE(system.iopStateHash() == before);
+    REQUIRE(system.iopStateHash() != before);
   }
   for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
   {
@@ -518,6 +784,7 @@ TEST_CASE("SPU2 Auto DMA write selection admits only each core bit without trans
   REQUIRE(system.iopInterruptController().status() == (1u << 9));
   REQUIRE(system.iopDMAController().auxiliaryControl() == 0x12345678);
   system.spu2Controller().reset();
+  SPU2InputTest::programProfile(system.spu2Controller());
   for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
   {
     REQUIRE(system.spu2Controller().readAutoDMAWriteSelection(core) == 0);
@@ -1695,6 +1962,7 @@ TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other tran
     auto &bus = system.iopBus();
     const std::uint16_t selection = addresses == autoDMAAddresses
       ? (address == autoDMAAddresses[0] ? 1 : 2) : 0;
+    SPU2InputTest::programProfile(system.spu2Controller());
     REQUIRE(bus.write16(address, selection).status == IOPBusStatus::Completed);
     const auto before = system.iopStateHash();
     REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
@@ -1767,6 +2035,10 @@ TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot ou
     NekoSystem system;
     programConfiguration(system);
     programMasterVolumes(system);
+    if (addresses == autoDMAAddresses)
+    {
+      SPU2InputTest::programProfile(system.spu2Controller());
+    }
     system.iopInterruptController().assertSource(IOPInterruptSource::SPU);
     system.iopDMAController().writeAuxiliaryControl(0x12345678);
     installInitializationStoreProgram(system, address, value);
@@ -1839,7 +2111,8 @@ TEST_CASE("SPU2 bounded initialization guests preserve aliases and delay-slot ou
     for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
     {
       REQUIRE(system.iopBus().read16(configurationAddresses[index]).value ==
-        configurationValues[index]);
+        (addresses == autoDMAAddresses
+          ? SPU2InputTest::configuration[index] : configurationValues[index]));
     }
     for (std::size_t index = 0; index < masterVolumeAddresses.size(); ++index)
     {
@@ -1879,6 +2152,10 @@ TEST_CASE("SPU2 bounded initialization resumes pending stores canonically",
     NekoSystem original;
     programConfiguration(original);
     programMasterVolumes(original);
+    if (addresses == autoDMAAddresses)
+    {
+      SPU2InputTest::programProfile(original.spu2Controller());
+    }
     original.iopInterruptController().assertSource(IOPInterruptSource::SPU);
     original.iopDMAController().writeAuxiliaryControl(0x12345678);
     installInitializationStoreProgram(original,
@@ -2381,6 +2658,8 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
     REQUIRE(source.iopStateHash() != previousHash);
     previousHash = source.iopStateHash();
   }
+  SPU2InputTest::programProfile(source.spu2Controller());
+  previousHash = source.iopStateHash();
   for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
   {
     REQUIRE(source.iopBus().write16(
@@ -2398,7 +2677,7 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
     REQUIRE(field != nullptr);
     REQUIRE(field->kind == SaveStateFieldKind::U16);
     REQUIRE(field->size == 2);
-    REQUIRE(field->scalarValue == configurationValues[index]);
+    REQUIRE(field->scalarValue == SPU2InputTest::configuration[index]);
   }
   for (std::size_t index = 0; index < masterVolumeAddresses.size(); ++index)
   {
@@ -2530,9 +2809,9 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
   for (std::size_t index = 0; index < configurationAddresses.size(); ++index)
   {
     REQUIRE(destination.iopBus().read16(configurationAddresses[index]).value ==
-      configurationValues[index]);
+      SPU2InputTest::configuration[index]);
     REQUIRE(destination.spu2Controller().readSPDIFConfiguration(index) ==
-      configurationValues[index]);
+      SPU2InputTest::configuration[index]);
     REQUIRE(destination.iopBus().write16(configurationAddresses[index], 0xffff).status ==
       IOPBusStatus::Completed);
     REQUIRE(source.iopBus().read16(configurationAddresses[index]).value == 0);
@@ -2559,6 +2838,8 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
   REQUIRE(destination.spu2Controller().readAutoDMAWriteSelection(1) == 0);
   REQUIRE(destination.spu2Controller().readAutoDMAWriteSelection(0) == 1);
   REQUIRE(foreign.readAutoDMAWriteSelection(1) == 0);
+  REQUIRE(destination.iopBus().write16(autoDMAAddresses[0], 0).status ==
+    IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(transferStartAddressAddresses[3], 0xffff).status ==
     IOPBusStatus::Completed);
   REQUIRE(destination.spu2Controller().readTransferStartAddress(3) == 0xffff);
@@ -2614,6 +2895,7 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   programEffectInputVolumes(source);
   programEffectEndAddresses(source);
   programTransferStartAddresses(source);
+  SPU2InputTest::programProfile(source.spu2Controller());
   for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
   {
     REQUIRE(source.iopBus().write16(
@@ -2626,8 +2908,6 @@ TEST_CASE("SPU2 changed images and late invalid state reject without partial ado
   NekoSystem destination;
   destination.spu2Controller().writeSoundRAMHalfword(0, 0xabcd);
   destination.spu2Controller().writeSoundRAMHalfword(0xfffff, 0xef01);
-  REQUIRE(destination.iopBus().write16(autoDMAAddresses[1], 2).status ==
-    IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(transferStartAddressAddresses[3], 0xabcd).status ==
     IOPBusStatus::Completed);
   REQUIRE(destination.iopBus().write16(effectEndAddressHighAddresses[1], 0x1234).status ==

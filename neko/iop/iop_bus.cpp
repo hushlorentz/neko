@@ -437,12 +437,13 @@ IOPBus::Location IOPBus::locate(IOPAddress address, std::size_t count) const
       return {IOPBusRegion::Mmio, index, Device::SPU2TransferStartAddress};
     }
   }
-  for (const auto statusAddress : spu2CoreStatusAddresses)
+  for (std::size_t core = 0; core < spu2CoreStatusAddresses.size(); ++core)
   {
+    const auto statusAddress = spu2CoreStatusAddresses[core];
     if (first == statusAddress &&
         last < first + sizeof(std::uint16_t))
     {
-      return {IOPBusRegion::Mmio, 0, Device::SPU2UnprogrammedCoreStatus};
+      return {IOPBusRegion::Mmio, core, Device::SPU2UnprogrammedCoreStatus};
     }
   }
   for (const auto keyOffAddress : spu2KeyOffAddresses)
@@ -842,9 +843,9 @@ IOPBusReadResult IOPBus::readDeviceRegister(
             spu2->readMainMix(location.offset)}
         : IOPBusReadResult{};
     case Device::SPU2UnprogrammedCoreStatus:
-      return width == sizeof(std::uint16_t) && spu2 != nullptr
-        ? IOPBusReadResult{IOPBusStatus::Completed,
-            spu2->readUnprogrammedCoreStatus()}
+      return width == sizeof(std::uint16_t) && spu2 != nullptr &&
+        spu2->hasQuiescentCoreStatus(location.offset)
+        ? IOPBusReadResult{IOPBusStatus::Completed, 0}
         : IOPBusReadResult{};
     case Device::SIO2ReceiveOutput:
     case Device::SIO2TransferStatus:
@@ -1002,12 +1003,12 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       spu2->writeVoiceMix(location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2SPDIFConfiguration:
-      if (width != sizeof(std::uint16_t) || spu2 == nullptr)
+      if (width != sizeof(std::uint16_t) || spu2 == nullptr ||
+          !spu2->writeSPDIFConfiguration(
+            location.offset, static_cast<std::uint16_t>(value)))
       {
         return {};
       }
-      spu2->writeSPDIFConfiguration(
-        location.offset, static_cast<std::uint16_t>(value));
       return {IOPBusStatus::Completed};
     case Device::SPU2MasterVolumeControl:
       if (width != sizeof(std::uint16_t) || spu2 == nullptr ||

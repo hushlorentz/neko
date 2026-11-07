@@ -17,6 +17,9 @@ namespace
 
 constexpr std::size_t SPU2Controller::SOUND_RAM_SIZE;
 constexpr std::size_t SPU2Controller::SOUND_RAM_HALFWORD_COUNT;
+constexpr std::uint16_t SPU2Controller::INPUT_CLOCK_PERIOD;
+constexpr std::uint16_t SPU2Controller::INPUT_SAMPLE_COUNT;
+constexpr std::uint16_t SPU2Controller::INPUT_HALF_WORD_COUNT;
 
 SPU2Controller::SPU2Controller() : soundRAM(SOUND_RAM_SIZE)
 {
@@ -25,6 +28,9 @@ SPU2Controller::SPU2Controller() : soundRAM(SOUND_RAM_SIZE)
 void SPU2Controller::reset() noexcept
 {
   std::fill(soundRAM.begin(), soundRAM.end(), 0);
+  inputClockPhase = 0;
+  inputReadPosition = 0;
+  inputStates = {};
   spdifConfiguration.fill(0);
   masterVolumeControls.fill(0);
   coreAttributes.fill(0);
@@ -57,10 +63,127 @@ std::uint16_t SPU2Controller::readSPDIFConfiguration(std::size_t index) const
   return spdifConfiguration.at(index);
 }
 
-void SPU2Controller::writeSPDIFConfiguration(
+SPU2InputTick SPU2Controller::advanceInputClock() noexcept
+{
+  SPU2InputTick result;
+  if (++inputClockPhase != INPUT_CLOCK_PERIOD)
+  {
+    return result;
+  }
+  inputClockPhase = 0;
+  result.sampleTick = true;
+  for (std::size_t core = 0; core < CORE_COUNT; ++core)
+  {
+    if (autoDMAWriteSelection[core] != 0)
+    {
+      auto &sample = result.samples[core];
+      sample.consumed = true;
+      const auto address = static_cast<std::uint32_t>(
+        0x2000 + core * 0x400 + inputReadPosition);
+      sample.left = readSoundRAMHalfword(address);
+      sample.right = readSoundRAMHalfword(address + 0x200);
+    }
+  }
+  inputReadPosition = (inputReadPosition + 1) % INPUT_SAMPLE_COUNT;
+  for (auto &state : inputStates)
+  {
+    if (state.writeOpen && state.fillWords == INPUT_HALF_WORD_COUNT &&
+        state.fillHalf == inputReadPosition / 256)
+    {
+      state.fillHalf ^= 1;
+      state.fillWords = 0;
+    }
+  }
+  return result;
+}
+
+bool SPU2Controller::inputWriteRequested(std::size_t core) const
+{
+  const auto &state = inputStates.at(core);
+  return state.writeOpen && state.fillWords < INPUT_HALF_WORD_COUNT &&
+    state.fillHalf != inputReadPosition / 256;
+}
+
+bool SPU2Controller::beginInputWrite(std::size_t core)
+{
+  auto &state = inputStates.at(core);
+  if (autoDMAWriteSelection[core] == 0)
+  {
+    return false;
+  }
+  state.writeOpen = true;
+  state.fillHalf = static_cast<std::uint8_t>((inputReadPosition / 256) ^ 1);
+  state.fillWords = 0;
+  return true;
+}
+
+void SPU2Controller::cancelInputWrite(std::size_t core)
+{
+  auto &state = inputStates.at(core);
+  state.writeOpen = false;
+  state.fillHalf = 0;
+  state.fillWords = 0;
+}
+
+bool SPU2Controller::writeInputWord(std::size_t core, std::uint32_t value)
+{
+  if (!inputWriteRequested(core))
+  {
+    return false;
+  }
+  auto &state = inputStates[core];
+  // One stereo half is planar: 128 left words followed by 128 right words.
+  const auto address = static_cast<std::uint32_t>(0x2000 + core * 0x400 +
+    state.fillHalf * 0x100 + (state.fillWords / 128) * 0x200 +
+    (state.fillWords % 128) * 2);
+  writeSoundRAMHalfword(address, static_cast<std::uint16_t>(value));
+  writeSoundRAMHalfword(address + 1, static_cast<std::uint16_t>(value >> 16));
+  ++state.fillWords;
+  return true;
+}
+
+bool SPU2Controller::hasSupportedInputProfile(std::size_t core) const noexcept
+{
+  return spdifConfiguration == std::array<std::uint16_t, 5>{{
+      0x0900, 0x0200, 0, 0x0008, 0xc032}} &&
+    (coreAttributes[core] == 0xc000 || coreAttributes[core] == 0xc001);
+}
+
+bool SPU2Controller::hasValidInputState() const noexcept
+{
+  if (inputClockPhase >= INPUT_CLOCK_PERIOD ||
+      inputReadPosition >= INPUT_SAMPLE_COUNT)
+  {
+    return false;
+  }
+  for (std::size_t core = 0; core < CORE_COUNT; ++core)
+  {
+    const auto &state = inputStates[core];
+    const bool selected = autoDMAWriteSelection[core] != 0;
+    if (state.fillHalf > 1 || state.fillWords > INPUT_HALF_WORD_COUNT ||
+        (selected && (!state.everSelected || !hasSupportedInputProfile(core))) ||
+        (state.writeOpen && !selected) ||
+        (!state.writeOpen && (state.fillHalf != 0 || state.fillWords != 0)) ||
+        (state.writeOpen && state.fillWords == INPUT_HALF_WORD_COUNT &&
+          state.fillHalf == inputReadPosition / 256))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool SPU2Controller::writeSPDIFConfiguration(
   std::size_t index, std::uint16_t value)
 {
-  spdifConfiguration.at(index) = value;
+  auto &configuration = spdifConfiguration.at(index);
+  if (configuration != value &&
+      (autoDMAWriteSelection[0] != 0 || autoDMAWriteSelection[1] != 0))
+  {
+    return false;
+  }
+  configuration = value;
+  return true;
 }
 
 bool SPU2Controller::isFixedMasterVolumeControl(std::uint16_t value) noexcept
@@ -99,7 +222,8 @@ bool SPU2Controller::writeCoreAttribute(
   std::size_t core, std::uint16_t value)
 {
   auto &attribute = coreAttributes.at(core);
-  if (!isSupportedCoreAttribute(value))
+  if (!isSupportedCoreAttribute(value) ||
+      (autoDMAWriteSelection[core] != 0 && attribute != value))
   {
     return false;
   }
@@ -160,9 +284,9 @@ void SPU2Controller::writeTransferStartAddress(
   transferStartAddress.at(index) = value;
 }
 
-std::uint16_t SPU2Controller::readUnprogrammedCoreStatus() const noexcept
+bool SPU2Controller::hasQuiescentCoreStatus(std::size_t core) const
 {
-  return 0;
+  return !inputStates.at(core).everSelected;
 }
 
 void SPU2Controller::keyOffUnprogrammedVoices() const noexcept
@@ -189,7 +313,24 @@ bool SPU2Controller::writeAutoDMAWriteSelection(
   {
     return false;
   }
+  if (selection == value)
+  {
+    return true;
+  }
+  if (value != 0 && !hasSupportedInputProfile(core))
+  {
+    return false;
+  }
   selection = value;
+  if (value == 0)
+  {
+    cancelInputWrite(core);
+  }
+  else
+  {
+    inputStates[core].everSelected = true;
+    beginInputWrite(core);
+  }
   return true;
 }
 

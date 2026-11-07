@@ -18,6 +18,7 @@
 #include "iop_timers.hpp"
 #include "sio2_controller.hpp"
 #include "spu2_controller.hpp"
+#include "spu2_input_test_utils.hpp"
 
 struct IOPCacheTestAccess
 {
@@ -367,6 +368,10 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
       writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc001 : 0x4900;
     if (!coreStatus)
     {
+      if (autoDMA)
+      {
+        SPU2InputTest::programProfile(spu2);
+      }
       REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
     }
     const auto wordAddress = physical & ~IOPAddress(3);
@@ -695,6 +700,10 @@ TEST_CASE("SPU2 write-only initialization bypasses cached payloads but not isola
     bus.attachSPU2(&spu2);
     const std::uint16_t selection =
       physical == 0x1f9001b0 ? 1 : physical == 0x1f9005b0 ? 2 : 0;
+    if (selection != 0)
+    {
+      SPU2InputTest::programProfile(spu2);
+    }
     REQUIRE(bus.write16(physical, selection).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);

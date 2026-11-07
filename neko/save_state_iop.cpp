@@ -333,6 +333,19 @@ void NekoSaveStateCodec::writeIOPState(
     }
     const auto &memory = system.spu2ControllerComponent.soundRAM;
     writer->writeFieldBytes("soundRAM", memory.data(), memory.size());
+    const auto &spu = system.spu2ControllerComponent;
+    writer->writeFieldU16("inputClockPhase", spu.inputClockPhase);
+    writer->writeFieldU16("inputReadPosition", spu.inputReadPosition);
+    auto inputs = writer->scope("inputStates");
+    for (std::size_t core = 0; core < spu.inputStates.size(); ++core)
+    {
+      auto input = writer->element(core);
+      const auto &state = spu.inputStates[core];
+      writer->writeFieldBool("everSelected", state.everSelected);
+      writer->writeFieldBool("writeOpen", state.writeOpen);
+      writer->writeFieldU8("fillHalf", state.fillHalf);
+      writer->writeFieldU16("fillWords", state.fillWords);
+    }
   }
   {
     auto scope = writer->scope("cdvd");
@@ -589,11 +602,28 @@ void NekoSaveStateCodec::readIOP(
         words[core] = reader->readFieldU16("value");
         reader->requireField(
           SPU2Controller::isSupportedAutoDMAWriteSelection(core, words[core]),
-          "SPU2 Auto DMA write selection is outside the passive own-core profile");
+          "SPU2 Auto DMA write selection is outside the own-core profile");
       }
     }
     auto &memory = system->spu2ControllerComponent.soundRAM;
     reader->readFieldBytes("soundRAM", memory.data(), memory.size());
+    auto &spu = system->spu2ControllerComponent;
+    spu.inputClockPhase = reader->readFieldU16("inputClockPhase");
+    spu.inputReadPosition = reader->readFieldU16("inputReadPosition");
+    {
+      auto inputs = reader->scope("inputStates");
+      for (std::size_t core = 0; core < spu.inputStates.size(); ++core)
+      {
+        auto input = reader->element(core);
+        auto &state = spu.inputStates[core];
+        state.everSelected = reader->readFieldBool("everSelected");
+        state.writeOpen = reader->readFieldBool("writeOpen");
+        state.fillHalf = reader->readFieldU8("fillHalf");
+        state.fillWords = reader->readFieldU16("fillWords");
+      }
+    }
+    reader->requireField(spu.hasValidInputState(),
+      "SPU2 PCM input state is outside the bounded profile");
   }
   {
     auto scope = reader->scope("cdvd");
