@@ -90,9 +90,11 @@ class IOPDMAController final
     std::uint16_t spuBlockCount(std::size_t core) const;
     IOPDMAWriteOutcome writeSPUBlockCount(std::size_t core, std::uint16_t value);
     IOPWord spuChannelControl(std::size_t core) const;
+    IOPDMAWriteOutcome writeSPUChannelControl(
+      std::size_t core, IOPWord value, const IOPBus &bus, SPU2Controller &spu);
     IOPWord spuRemainingWords(std::size_t core) const;
     bool spuActive(std::size_t core) const;
-    // Host-only bounded transport setup; CPU CHCR admission remains gated.
+    // Bounded transport setup shared by CPU controls and explicit host grants.
     IOPDMAWriteOutcome startSPUTransfer(
       std::size_t core, const IOPBus &bus, SPU2Controller &spu);
     void stopSPUTransfer(std::size_t core, const IOPBus &bus, SPU2Controller &spu);

@@ -3513,9 +3513,12 @@ not requirements for exhaustive subsystem coverage.
 
 ### IOP SPU DMA CHCR Lifecycle and Conformance Dependency
 
-- [ ] Admit the approved bounded CHCR profile through exact CPU access routes;
+- [x] Admit the approved bounded CHCR profile through exact CPU access routes;
       integrate start, backpressure, abort and final-beat completion without
       fabricated live status or unsupported-mode success.
+- [ ] Export approved bounded SPU beat and request/buffer transitions through
+      typed trace/failure-probe observations and maintained inspectors;
+      preserve ordering, fixed capacity and tracing-independent execution.
 - [ ] Add authored CPU-driven lifecycle and cold/restored traced/plain
       conformance covering both cores, buffer boundaries, contention and faults;
       independently review and run required validation gates.

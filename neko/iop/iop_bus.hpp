@@ -174,6 +174,7 @@ class IOPBus final
       DMAController,
       SPUDMAMemoryAddress,
       SPUDMABlockControl,
+      SPUDMAChannelControl,
       DPCR3Initialization,
       ChannelRegisterInitialization,
       SupplementalDMAInitialization,

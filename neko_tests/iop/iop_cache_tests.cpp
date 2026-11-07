@@ -599,10 +599,54 @@ TEST_CASE("IOP SPU DMA block control halfwords respect cache isolation",
   }
 }
 
-TEST_CASE("IOP SPU DMA protected and misaligned words retain delay-slot exceptions",
-  "[iop][dma][spu-madr][execution]")
+TEST_CASE("IOP SPU CHCR bypasses cached payloads while isolation keeps starts local",
+  "[iop][dma][spu-chcr][cache]")
 {
-  for (IOPAddress physical : {0x1f8010c0u, 0x1f801500u})
+  for (std::size_t coreIndex = 0; coreIndex < 2; ++coreIndex)
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto physical = coreIndex == 0 ? 0x1f8010c8u : 0x1f801508u;
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(swapped);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel sif1;
+    SPU2Controller spu;
+    bus.attachDMA(&dma, &sif1);
+    bus.attachSPU2(&spu);
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(spu.writeAutoDMAWriteSelection(coreIndex,
+      static_cast<std::uint16_t>(1u << coreIndex)));
+    REQUIRE(dma.writeSPUBlockControl(coreIndex, 0x00100010) == IOPDMAWriteOutcome::Completed);
+    IOPCore core;
+    core.attachBus(&bus);
+    const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address, 0x01000201).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0x01000201);
+    REQUIRE_FALSE(dma.spuActive(coreIndex));
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.readData32(address).value == 0);
+    REQUIRE(core.writeData32(address, 0x01000201).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(dma.spuActive(coreIndex));
+    REQUIRE(core.readData32(address).value == 0x01000201);
+    REQUIRE(core.writeData32(address, 0).outcome == IOPAccessOutcome::Completed);
+    REQUIRE_FALSE(dma.spuActive(coreIndex));
+    REQUIRE(core.readData32(address).value == 0);
+    core.startExecution(address);
+    REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
+TEST_CASE("IOP SPU DMA protected and misaligned words retain delay-slot exceptions",
+  "[iop][dma][spu-madr][spu-chcr][execution]")
+{
+  for (IOPAddress physical : {0x1f8010c0u, 0x1f801500u, 0x1f8010c8u, 0x1f801508u})
   for (bool user : {false, true})
   for (bool store : {false, true})
   {
@@ -612,7 +656,10 @@ TEST_CASE("IOP SPU DMA protected and misaligned words retain delay-slot exceptio
     IOPDMAController dma(interrupts);
     IOPSIF1DMAChannel sif1;
     bus.attachDMA(&dma, &sif1);
-    REQUIRE(bus.write32(physical, 0x4fa00).status == IOPBusStatus::Completed);
+    SPU2Controller spu;
+    bus.attachSPU2(&spu);
+    const IOPWord value = (physical & 8) != 0 ? 0x201 : 0x4fa00;
+    REQUIRE(bus.write32(physical, value).status == IOPBusStatus::Completed);
     IOPCore core;
     core.attachBus(&bus);
     IOPCacheTestAccess::setGeneralRegister(&core, 1, address);
@@ -636,7 +683,7 @@ TEST_CASE("IOP SPU DMA protected and misaligned words retain delay-slot exceptio
     REQUIRE(core.exceptionProgramCounter() == 0);
     REQUIRE_FALSE(core.branchContinuation().active);
     REQUIRE(core.generalRegister(2) == 0x12345678);
-    REQUIRE(bus.read32(physical).value == 0x4fa00);
+    REQUIRE(bus.read32(physical).value == value);
     requireUnchangedCache(core.cache(), before);
   }
 }

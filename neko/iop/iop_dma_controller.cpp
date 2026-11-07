@@ -208,6 +208,24 @@ IOPWord IOPDMAController::spuChannelControl(std::size_t core) const
   return spuChannels.at(core).registers.channelControlRegister;
 }
 
+IOPDMAWriteOutcome IOPDMAController::writeSPUChannelControl(
+  std::size_t core, IOPWord value, const IOPBus &bus, SPU2Controller &spu)
+{
+  validateSPUWiring(bus, spu);
+  auto &registers = spuChannels.at(core).registers;
+  if (value == SPU_START)
+  {
+    return startSPUTransfer(core, bus, spu);
+  }
+  if (value != 0 && value != SPU_STOP)
+  {
+    return IOPDMAWriteOutcome::UnsupportedControl;
+  }
+  stopSPUTransfer(core, bus, spu);
+  registers.channelControlRegister = value;
+  return IOPDMAWriteOutcome::Completed;
+}
+
 bool IOPDMAController::spuActive(std::size_t core) const
 {
   return spuChannels.at(core).registers.active();
