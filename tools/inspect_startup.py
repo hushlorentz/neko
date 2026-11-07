@@ -15,9 +15,10 @@ import zlib
 
 # Stable public identities from neko/regression_trace.hpp, not memory bitfields.
 CPUS = {10: "ee", 11: "iop"}
-SUBSYSTEMS = {**CPUS, 15: "cdvd"}
-EVENTS = {5: "instruction_issued", 7: "memory_access",
+SUBSYSTEMS = {**CPUS, 14: "sif", 15: "cdvd", 16: "spu2"}
+EVENTS = {1: "state_changed", 5: "instruction_issued", 7: "memory_access",
           8: "exception_entered", 21: "fault_context",
+          20: "dma_beat",
           22: "serial_transmit_completed",
           23: "command_accepted", 24: "command_completed"}
 EVENT_FILTERS = {name: number for number, name in EVENTS.items()}
@@ -87,6 +88,55 @@ def reject_constant(value):
     raise ValueError(f"non-finite JSON number: {value}")
 
 
+def validate_spu_event(record):
+    beat_event = record["subsystem"] == 16 and record["event_type"] == 20
+    input_event = record["subsystem"] == 16 and record["event_type"] == 1
+    for key, expected in (("spu_dma", beat_event), ("spu_input", input_event)):
+        if not expected:
+            if key in record:
+                raise ValueError(f"{key} requires its SPU2 event identity")
+            continue
+        decoded = require(record, key, dict)
+        core = uint(decoded.get("core"), f"{key}.core", 8)
+        channel = uint(decoded.get("channel"), f"{key}.channel", 8)
+        if core > 1 or channel != (4 if core == 0 else 7):
+            raise ValueError(f"{key} has invalid channel/core identity")
+        if key == "spu_dma":
+            fields = {"endpoint", "channel", "core", "kind", "outcome", "failure",
+                      "bus_status", "attempted_address", "remaining_before",
+                      "remaining_after", "target_half", "target_word"}
+            if decoded.keys() != fields:
+                raise ValueError("spu_dma has invalid fields")
+            if decoded["endpoint"] != f"iop_spu{core}" or decoded["kind"] != "payload":
+                raise ValueError("spu_dma has invalid endpoint or kind")
+            if decoded["outcome"] not in ("accepted", "wait", "completed", "rejected"):
+                raise ValueError("spu_dma has invalid outcome")
+            rejected = decoded["outcome"] == "rejected"
+            statuses = ("misaligned", "read_only", "unmapped") if rejected else ("none",)
+            if (decoded["bus_status"] not in statuses or
+                    decoded["failure"] != ("source_read" if rejected else "none")):
+                raise ValueError("spu_dma has invalid failure/bus_status")
+            for field in ("attempted_address", "remaining_before", "remaining_after"):
+                uint(decoded[field], f"spu_dma.{field}", 32)
+            if (uint(decoded["target_half"], "spu_dma.target_half", 8) > 1 or
+                    uint(decoded["target_word"], "spu_dma.target_word", 16) > 256):
+                raise ValueError("spu_dma has invalid target position")
+        else:
+            if decoded.keys() != {"channel", "core", "before", "after"}:
+                raise ValueError("spu_input has invalid fields")
+            for side in ("before", "after"):
+                state = require(decoded, side, dict)
+                if state.keys() != {"selected", "write_open", "requested",
+                                   "fill_half", "read_half", "fill_words"}:
+                    raise ValueError(f"spu_input.{side} has invalid fields")
+                for field in ("selected", "write_open", "requested"):
+                    require(state, field, bool)
+                if (uint(state["fill_half"], "spu_input.fill_half", 8) > 1 or
+                        uint(state["read_half"], "spu_input.read_half", 8) > 1 or
+                        uint(state["fill_words"], "spu_input.fill_words", 16) > 256):
+                    raise ValueError(f"spu_input.{side} has invalid buffer position")
+
+
 def validate_event(record):
     uint(record.get("master_cycle"), "master_cycle")
     uint(record.get("subsystem"), "subsystem", 8)
@@ -96,6 +146,7 @@ def validate_event(record):
         raise ValueError("values must contain four raw words")
     for value in values:
         uint(value, "values")
+    validate_spu_event(record)
     cdvd_command = record["subsystem"] == 15 and record["event_type"] in (23, 24)
     if not cdvd_command:
         if "cdvd" in record:
@@ -348,6 +399,12 @@ def describe_event(index, event):
         row["subsystem_name"] = "cdvd"
         if event["event_type"] in (23, 24):
             row["cdvd"] = event["cdvd"]
+    if event["subsystem"] == 16:
+        row["subsystem_name"] = "spu2"
+        if event["event_type"] == 20:
+            row["spu_dma"] = readable(event["spu_dma"])
+        elif event["event_type"] == 1:
+            row["spu_input"] = event["spu_input"]
     values = event["values"]
     if cpu is not None and event["event_type"] == 5:
         row["payload"] = dict(pc=f"0x{values[0]:08x}", opcode=f"0x{values[1]:08x}",
@@ -382,6 +439,8 @@ def select_events(log, arguments):
         if arguments.cycle is not None and cycle != arguments.cycle:
             continue
         if arguments.cpu is not None and CPUS.get(cpu) != arguments.cpu:
+            continue
+        if arguments.subsystem is not None and SUBSYSTEMS.get(cpu) != arguments.subsystem:
             continue
         if arguments.event is not None and kind != arguments.event:
             continue
@@ -492,6 +551,7 @@ def parse_arguments(argv):
                              default="prefix",
                              help="Retained event source (default: prefix).")
             sub.add_argument("--cpu", type=str.lower, choices=("ee", "iop"))
+            sub.add_argument("--subsystem", type=str.lower, choices=tuple(SUBSYSTEMS.values()))
             sub.add_argument("--cycle", type=number)
             sub.add_argument("--from-cycle", type=number, default=0)
             sub.add_argument("--to-cycle", type=number, default=(1 << 64) - 1)
@@ -505,7 +565,7 @@ def parse_arguments(argv):
                 sub.add_argument("--event", type=event_number,
                                  help="Numeric ID or instruction/memory/exception/fault/"
                                       "serial_transmit_completed/command_accepted/"
-                                      "command_completed.")
+                                      "command_completed/dma_beat/state_changed.")
             else:
                 sub.set_defaults(event=None)
     return parser.parse_args(argv)

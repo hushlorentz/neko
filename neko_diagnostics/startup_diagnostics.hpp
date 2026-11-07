@@ -256,6 +256,8 @@ void writeStartupRunSummaryJsonLine(
 // supplies a decimal, classic-locale stream and buffers before emitting.
 void writeStartupTraceEventFields(
   std::ostream &output, const NekoTraceEvent &event);
+void writeStartupSPUDMABeatJson(
+  std::ostream &output, const NekoSPUTrace::Beat &beat);
 void writeStartupTraceJsonLines(
   std::ostream &output, const NekoSystem &system);
 void writeStartupRuntimeErrorJsonLine(

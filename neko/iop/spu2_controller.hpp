@@ -6,6 +6,18 @@
 #include <cstdint>
 #include <vector>
 
+#include "observation_order.hpp"
+
+struct SPU2InputWriteState
+{
+  bool selected = false;
+  bool writeOpen = false;
+  bool requested = false;
+  std::uint8_t fillHalf = 0;
+  std::uint8_t readHalf = 0;
+  std::uint16_t fillWords = 0;
+};
+
 struct SPU2InputSample
 {
   bool consumed = false;
@@ -40,6 +52,7 @@ class SPU2Controller final
     void writeSoundRAMHalfword(std::uint32_t halfwordAddress, std::uint16_t value);
     SPU2InputTick advanceInputClock() noexcept;
     bool inputWriteRequested(std::size_t core) const;
+    SPU2InputWriteState inputWriteState(std::size_t core) const;
     bool beginInputWrite(std::size_t core);
     void cancelInputWrite(std::size_t core);
     bool writeInputWord(std::size_t core, std::uint32_t value);
@@ -77,6 +90,24 @@ class SPU2Controller final
   private:
     friend class NekoSaveStateCodec;
     friend class IOPDMAController;
+    friend class NekoSystem;
+    friend struct SPU2ObservationTestAccess;
+    struct Observation
+    {
+      std::uint8_t core = 0;
+      SPU2InputWriteState before;
+      SPU2InputWriteState after;
+      std::size_t sequence = 0;
+    };
+    // Two sample switches, full-half + completion, and one CPU selection/open.
+    std::array<Observation, 8> observations{};
+    std::size_t observationCount = 0;
+    bool observationsEnabled = false;
+    NekoObservationOrder *observationOrder = nullptr;
+    void enableObservations(NekoObservationOrder *order) noexcept;
+    void disableObservations() noexcept;
+    void clearObservations() noexcept;
+    void recordInputState(std::size_t core, const SPU2InputWriteState &before) noexcept;
     struct InputState
     {
       bool everSelected = false;

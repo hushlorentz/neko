@@ -327,24 +327,28 @@ class NekoSystem
       std::uint64_t presentationBoundary;
     };
 
-    struct SIFDMAObservation
+    struct DMAObservation
     {
       NekoTraceEvent event;
       std::size_t sequence = 0;
     };
 
-    struct SIFDMAObservations
+    struct DMAObservations
     {
-      std::array<SIFDMAObservation, 4> entries = {};
+      std::array<DMAObservation, 6> entries = {};
       std::size_t count = 0;
     };
+    std::array<NekoTraceEvent, 2> lastSPUWait{};
+    std::array<bool, 2> observedSPUWait{};
 
-    void clockEESIF(NekoObservationOrder &order, SIFDMAObservations &events);
+    void clockEESIF(NekoObservationOrder &order, DMAObservations &events);
     EESIFDMABeatOutcome clockEESIFChannel(SIFDirection direction,
-      NekoObservationOrder &order, SIFDMAObservations &events);
-    IOPDMABeatResult clockIOPDMA(NekoObservationOrder &order, SIFDMAObservations &events);
+      NekoObservationOrder &order, DMAObservations &events);
+    IOPDMABeatResult clockIOPDMA(NekoObservationOrder &order, DMAObservations &events);
+    IOPDMABeatResult clockIOPSPUChannel(std::size_t core,
+      NekoObservationOrder &order, DMAObservations &events);
     IOPDMABeatResult clockIOPSIFChannel(IOPDMAChannel channel,
-      NekoObservationOrder &order, SIFDMAObservations &events);
+      NekoObservationOrder &order, DMAObservations &events);
     void latchComponentInterrupts();
     void publishEEInterruptLines();
     void advanceIOPTimers(bool systemClockPulse);
@@ -359,15 +363,17 @@ class NekoSystem
     void publishCycleTrace(
       std::uint64_t cycle,
       const CycleObservationSnapshot &beforeCycle,
-      const SIFDMAObservations &dma,
+      const DMAObservations &dma,
       const EESerialCompletion &serial);
     void publishEECPUTrace(std::uint64_t cycle);
     void publishComponentTrace(
       std::uint64_t cycle, const CycleObservationSnapshot &beforeCycle,
-      const SIFDMAObservations &dma);
-    void publishFailureProbe(std::uint64_t cycle, const SIFDMAObservations &dma);
-    void publishIOPAndSIFTrace(
-      std::uint64_t cycle, const SIFDMAObservations &dma);
+      const DMAObservations &dma);
+    void publishFailureProbe(std::uint64_t cycle, const DMAObservations &dma);
+    void publishIOPDeviceTrace(
+      std::uint64_t cycle, const DMAObservations &dma);
+    void publishSPUInputTrace(
+      std::uint64_t cycle, const SPU2Controller::Observation &event);
     void publishCDVDTrace(
       std::uint64_t cycle, const CDVDController::Observation &event);
     void publishSIFTrace(std::uint64_t cycle, const SIF::Observation &event);

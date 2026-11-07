@@ -231,6 +231,11 @@ namespace
 
   void writeDMA(std::ostream &output, const NekoTraceEvent &event)
   {
+    if (event.subsystem == NekoTraceSubsystem::SPU2)
+    {
+      writeStartupSPUDMABeatJson(output, nekoDecodeSPUDMABeat(event));
+      return;
+    }
     const char *const endpoints[] = {"ee_sif1", "iop_sif1", "ee_sif0", "iop_sif0"};
     const char *const kinds[] = {
       "source_tag", "header", "payload", "completion", "destination_tag"};
@@ -453,7 +458,8 @@ void writeStartupFirstFailureJsonLine(
     const char *const kinds[] = {"memory_access", "instruction_rejection", "dma_rejection"};
     json << "{\"kind\":\"" << name(static_cast<unsigned>(failure.kind), kinds)
       << "\",\"cpu\":";
-    if (event.subsystem == NekoTraceSubsystem::SIF)
+    if (event.subsystem == NekoTraceSubsystem::SIF ||
+        event.subsystem == NekoTraceSubsystem::SPU2)
     {
       json << "null";
     }

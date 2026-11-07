@@ -795,6 +795,44 @@ TEST_CASE("Common SIF trace journal holds four attempts and orders completion be
   REQUIRE_FALSE(system.sif1DMAC().active());
 }
 
+TEST_CASE("Common DMA trace journal holds six mixed attempts without changing SIF observations",
+  "[spu-diagnostics][sif0][scheduling][observations]")
+{
+  NekoSystem system;
+  spuSource(system, 0, 32);
+  spuSource(system, 1, 32);
+  system.iopDMAController().writePriority(IOPDMABank::Primary, 0x80000);
+  system.iopDMAController().writePriority(BANK, 8);
+  for (std::size_t core : {0u, 1u})
+    for (unsigned word = 0; word < 256; ++word)
+      REQUIRE(system.iopDMAController().clockSPU(
+        core, system.iopBus(), system.spu2Controller()).outcome ==
+        IOPDMABeatOutcome::Accepted);
+  receiver(system);
+  eeSender(system, 1);
+  source(system);
+  iopReceiver(system);
+  system.iopDMAController().writePriority(BANK, 0x9908);
+  for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
+    REQUIRE(system.sif().pushSIF1Quadword({{0x80006000, 0, 0, 0}}) ==
+      SIFTransferOutcome::Completed);
+  system.startTrace();
+  system.clockMasterCycle();
+  IOPTraceTest::requireEvents(beats(system), {
+    beat(1, 2 | (4 << 8) | (1 << 16), 0x3000, 0, 0, 0, 0),
+    beat(1, (2 << 8) | (1 << 16), 0x5000, 1, 1,
+      SIF::WORD_CAPACITY, SIF::WORD_CAPACITY),
+    beat(1, 3 | (1 << 16), 0x1000, 0, 0, 0, 0),
+    beat(1, 1 | (1 << 8) | (2 << 16), 0x6000, 0, 0,
+      SIF::WORD_CAPACITY, SIF::WORD_CAPACITY - 4)});
+  const auto spu = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+  REQUIRE(spu.size() == 2);
+  REQUIRE(nekoDecodeSPUDMABeat(spu[0]).core == 0);
+  REQUIRE(nekoDecodeSPUDMABeat(spu[1]).core == 1);
+  REQUIRE(nekoDecodeSPUDMABeat(spu[0]).outcome == NekoSPUTrace::Outcome::Wait);
+  REQUIRE(nekoDecodeSPUDMABeat(spu[1]).outcome == NekoSPUTrace::Outcome::Wait);
+}
+
 TEST_CASE("SIF0 scheduled trace failure codes distinguish descriptor source and destination",
   "[sif0][scheduling][observations]")
 {

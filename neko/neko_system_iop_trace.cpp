@@ -66,16 +66,27 @@ namespace
 }
 
 void NekoSystem::publishFailureProbe(
-  std::uint64_t cycle, const SIFDMAObservations &dma)
+  std::uint64_t cycle, const DMAObservations &dma)
 {
   publishEECPUTrace(cycle);
   std::size_t cpu = 0;
   std::size_t transfer = 0;
-  while (cpu < iopCoreComponent.stepEventCount || transfer < dma.count)
+  std::size_t spu = 0;
+  while (cpu < iopCoreComponent.stepEventCount || transfer < dma.count ||
+         spu < spu2ControllerComponent.observationCount)
   {
-    if (cpu < iopCoreComponent.stepEventCount &&
-        (transfer == dma.count ||
-         iopCoreComponent.stepEvents[cpu].sequence < dma.entries[transfer].sequence))
+    constexpr auto absent = std::numeric_limits<std::size_t>::max();
+    const auto cpuSequence = cpu < iopCoreComponent.stepEventCount
+      ? iopCoreComponent.stepEvents[cpu].sequence : absent;
+    const auto transferSequence = transfer < dma.count
+      ? dma.entries[transfer].sequence : absent;
+    const auto spuSequence = spu < spu2ControllerComponent.observationCount
+      ? spu2ControllerComponent.observations[spu].sequence : absent;
+    if (spuSequence < cpuSequence && spuSequence < transferSequence)
+    {
+      publishSPUInputTrace(cycle, spu2ControllerComponent.observations[spu++]);
+    }
+    else if (cpuSequence < transferSequence)
     {
       publishIOPCPUTrace(cycle, iopCoreComponent.stepEvents[cpu++]);
     }
@@ -88,8 +99,8 @@ void NekoSystem::publishFailureProbe(
   }
 }
 
-void NekoSystem::publishIOPAndSIFTrace(
-  std::uint64_t cycle, const SIFDMAObservations &dma)
+void NekoSystem::publishIOPDeviceTrace(
+  std::uint64_t cycle, const DMAObservations &dma)
 {
   std::size_t cpuIndex = 0;
   std::size_t timerIndex = 0;
@@ -97,12 +108,14 @@ void NekoSystem::publishIOPAndSIFTrace(
   std::size_t sifIndex = 0;
   std::size_t dmaIndex = 0;
   std::size_t cdvdIndex = 0;
+  std::size_t spuIndex = 0;
   while (cpuIndex < iopCoreComponent.stepEventCount ||
          timerIndex < iopTimersComponent.observationCount ||
          interruptIndex < iopInterruptControllerComponent.observationCount ||
          sifIndex < sifComponent.observationCount ||
          dmaIndex < dma.count ||
-         cdvdIndex < cdvdControllerComponent.observationCount)
+         cdvdIndex < cdvdControllerComponent.observationCount ||
+         spuIndex < spu2ControllerComponent.observationCount)
   {
     constexpr auto absent = std::numeric_limits<std::size_t>::max();
     const auto cpuSequence = cpuIndex < iopCoreComponent.stepEventCount
@@ -119,7 +132,15 @@ void NekoSystem::publishIOPAndSIFTrace(
       ? dma.entries[dmaIndex].sequence : absent;
     const auto cdvdSequence = cdvdIndex < cdvdControllerComponent.observationCount
       ? cdvdControllerComponent.observations[cdvdIndex].sequence : absent;
-    if (cdvdSequence < cpuSequence && cdvdSequence < timerSequence &&
+    const auto spuSequence = spuIndex < spu2ControllerComponent.observationCount
+      ? spu2ControllerComponent.observations[spuIndex].sequence : absent;
+    if (spuSequence < cpuSequence && spuSequence < timerSequence &&
+        spuSequence < interruptSequence && spuSequence < sifSequence &&
+        spuSequence < dmaSequence && spuSequence < cdvdSequence)
+    {
+      publishSPUInputTrace(cycle, spu2ControllerComponent.observations[spuIndex++]);
+    }
+    else if (cdvdSequence < cpuSequence && cdvdSequence < timerSequence &&
         cdvdSequence < interruptSequence && cdvdSequence < sifSequence &&
         cdvdSequence < dmaSequence)
     {
@@ -151,6 +172,24 @@ void NekoSystem::publishIOPAndSIFTrace(
         cycle, iopInterruptControllerComponent.observations[interruptIndex++]);
     }
   }
+}
+
+void NekoSystem::publishSPUInputTrace(
+  std::uint64_t cycle, const SPU2Controller::Observation &observation)
+{
+  const auto state = [](const SPU2InputWriteState &value)
+  {
+    return NekoSPUTrace::InputState{value.selected, value.writeOpen, value.requested,
+      value.fillHalf, value.readHalf, value.fillWords};
+  };
+  NekoSPUTrace::InputTransition transition;
+  transition.core = observation.core;
+  transition.channel = observation.core == 0 ? 4 : 7;
+  transition.before = state(observation.before);
+  transition.after = state(observation.after);
+  const auto event = nekoSPUInputEvent(transition);
+  appendTrace(cycle, event.subsystem, event.type,
+    event.value0, event.value1, event.value2, event.value3);
 }
 
 void NekoSystem::publishCDVDTrace(

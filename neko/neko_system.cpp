@@ -781,6 +781,8 @@ void NekoSystem::stopTrace()
   lastEEInstruction = {};
   lastIOPInstruction = {};
   lastEEFaultContext = {};
+  observedSPUWait = {};
+  lastSPUWait = {};
 }
 
 void NekoSystem::clearTrace()
@@ -1183,7 +1185,7 @@ NekoSystem::captureCycleObservation() const
 }
 
 void NekoSystem::clockEESIF(
-  NekoObservationOrder &order, SIFDMAObservations &events)
+  NekoObservationOrder &order, DMAObservations &events)
 {
   for (const auto direction : dmacControllerComponent.sifGrantOrder())
   {
@@ -1195,7 +1197,7 @@ void NekoSystem::clockEESIF(
 }
 
 EESIFDMABeatOutcome NekoSystem::clockEESIFChannel(SIFDirection direction,
-  NekoObservationOrder &order, SIFDMAObservations &events)
+  NekoObservationOrder &order, DMAObservations &events)
 {
   const bool receiver = direction == SIFDirection::SIF0;
   const auto grant = [&]()
@@ -1257,8 +1259,16 @@ EESIFDMABeatOutcome NekoSystem::clockEESIFChannel(SIFDirection direction,
 }
 
 IOPDMABeatResult NekoSystem::clockIOPDMA(
-  NekoObservationOrder &order, SIFDMAObservations &events)
+  NekoObservationOrder &order, DMAObservations &events)
 {
+  if (collectingTrace || probingFailures)
+  {
+    for (std::size_t core = 0; core < SPU2Controller::CORE_COUNT; ++core)
+    {
+      if (spu2ControllerComponent.inputWriteRequested(core))
+        observedSPUWait[core] = false;
+    }
+  }
   IOPDMABeatResult result;
   for (const auto channel : iopDMAControllerComponent.grantOrder())
   {
@@ -1266,9 +1276,9 @@ IOPDMABeatResult NekoSystem::clockIOPDMA(
     {
       case IOPDMAChannel::SPU0:
       case IOPDMAChannel::SPU1:
-        result = iopDMAControllerComponent.clockSPU(
+        result = clockIOPSPUChannel(
           channel == IOPDMAChannel::SPU0 ? 0 : 1,
-          iopBusComponent, spu2ControllerComponent);
+          order, events);
         break;
       case IOPDMAChannel::SIF0:
       case IOPDMAChannel::SIF1:
@@ -1284,8 +1294,70 @@ IOPDMABeatResult NekoSystem::clockIOPDMA(
   return result;
 }
 
+IOPDMABeatResult NekoSystem::clockIOPSPUChannel(
+  std::size_t core, NekoObservationOrder &order, DMAObservations &events)
+{
+  auto &dma = iopDMAControllerComponent;
+  auto &spu = spu2ControllerComponent;
+  const auto grant = [&]() { return dma.clockSPU(core, iopBusComponent, spu); };
+  const auto channel = core == 0 ? IOPDMAChannel::SPU0 : IOPDMAChannel::SPU1;
+  if ((!collectingTrace && !probingFailures) || !dma.spuActive(core) ||
+      !dma.channelEnabled(channel))
+  {
+    observedSPUWait[core] = false;
+    return grant();
+  }
+  const auto target = spu.inputWriteState(core);
+  NekoSPUTrace::Beat beat;
+  beat.channel = static_cast<std::uint8_t>(channel);
+  beat.core = static_cast<std::uint8_t>(core);
+  beat.sourceAddress = dma.spuMemoryAddress(core);
+  beat.remainingBefore = dma.spuRemainingWords(core);
+  beat.targetHalf = target.fillHalf;
+  beat.targetWord = target.fillWords;
+  // Reserve before source acceptance can close a buffer or publish INTC.
+  const auto sequence = order.next++;
+  const auto result = grant();
+  switch (result.outcome)
+  {
+    case IOPDMABeatOutcome::Accepted: beat.outcome = NekoSPUTrace::Outcome::Accepted; break;
+    case IOPDMABeatOutcome::Wait: beat.outcome = NekoSPUTrace::Outcome::Wait; break;
+    case IOPDMABeatOutcome::Completed: beat.outcome = NekoSPUTrace::Outcome::Completed; break;
+    case IOPDMABeatOutcome::Rejected: beat.outcome = NekoSPUTrace::Outcome::Rejected; break;
+    default: throw std::logic_error("Unknown SPU DMA trace outcome.");
+  }
+  if (result.outcome == IOPDMABeatOutcome::Rejected)
+  {
+    switch (result.status)
+    {
+      case IOPBusStatus::Misaligned: beat.busStatus = NekoSPUTrace::BusStatus::Misaligned; break;
+      case IOPBusStatus::ReadOnly: beat.busStatus = NekoSPUTrace::BusStatus::ReadOnly; break;
+      case IOPBusStatus::Unmapped: beat.busStatus = NekoSPUTrace::BusStatus::Unmapped; break;
+      default: throw std::logic_error("Unknown SPU DMA source rejection.");
+    }
+  }
+  beat.remainingAfter = dma.spuRemainingWords(core);
+  const auto event = nekoSPUDMABeatEvent(beat);
+  const auto &previous = lastSPUWait[core];
+  const bool waiting = result.outcome == IOPDMABeatOutcome::Wait;
+  const bool repeated = waiting && observedSPUWait[core] &&
+    previous.value0 == event.value0 && previous.value1 == event.value1 &&
+    previous.value2 == event.value2 && previous.value3 == event.value3;
+  observedSPUWait[core] = waiting;
+  if (waiting)
+  {
+    lastSPUWait[core] = event;
+  }
+  if (!repeated)
+  {
+    assert(events.count < events.entries.size());
+    events.entries[events.count++] = {event, sequence};
+  }
+  return result;
+}
+
 IOPDMABeatResult NekoSystem::clockIOPSIFChannel(IOPDMAChannel channel,
-  NekoObservationOrder &order, SIFDMAObservations &events)
+  NekoObservationOrder &order, DMAObservations &events)
 {
   const bool source = channel == IOPDMAChannel::SIF0;
   const auto grant = [&]()
@@ -1357,6 +1429,7 @@ void NekoSystem::clockMasterCycle()
     IOPInterruptController &interrupts;
     SIF &sif;
     CDVDController &cdvd;
+    SPU2Controller &spu;
     NekoObservationOrder order;
     ~ObservationScope()
     {
@@ -1365,10 +1438,12 @@ void NekoSystem::clockMasterCycle()
       interrupts.disableObservations();
       sif.disableObservations();
       cdvd.disableObservations();
+      spu.disableObservations();
     }
   } observationScope{iopCoreComponent, iopTimersComponent,
-      iopInterruptControllerComponent, sifComponent, cdvdControllerComponent};
-  SIFDMAObservations dmaObservations;
+      iopInterruptControllerComponent, sifComponent, cdvdControllerComponent,
+      spu2ControllerComponent};
+  DMAObservations dmaObservations;
   if (collectingTrace)
   {
     iopCoreComponent.enableObservations(&observationScope.order);
@@ -1376,10 +1451,12 @@ void NekoSystem::clockMasterCycle()
     iopInterruptControllerComponent.enableObservations(&observationScope.order);
     sifComponent.enableObservations(&observationScope.order);
     cdvdControllerComponent.enableObservations(&observationScope.order);
+    spu2ControllerComponent.enableObservations(&observationScope.order);
   }
   else if (probingFailures)
   {
     iopCoreComponent.enableObservations(&observationScope.order);
+    spu2ControllerComponent.enableObservations(&observationScope.order);
   }
   const bool iopClockPulse =
     masterClock.currentCycle() % PS2Clock::IOP_CLOCK_PERIOD ==
@@ -1537,7 +1614,7 @@ EEExecutionResult NekoSystem::makeEEExecutionResult(
 void NekoSystem::publishCycleTrace(
   std::uint64_t cycle,
   const CycleObservationSnapshot &beforeCycle,
-  const SIFDMAObservations &dma,
+  const DMAObservations &dma,
   const EESerialCompletion &serial)
 {
   if (serial.completed)
@@ -1769,7 +1846,7 @@ void NekoSystem::publishEECPUTrace(std::uint64_t cycle)
 
 void NekoSystem::publishComponentTrace(
   std::uint64_t cycle, const CycleObservationSnapshot &beforeCycle,
-  const SIFDMAObservations &dma)
+  const DMAObservations &dma)
 {
   const std::uint64_t currentEEStateHash =
     eeCoreComponent.stateHash();
@@ -1883,7 +1960,7 @@ void NekoSystem::publishComponentTrace(
       interruptControllerComponent.status(),
       interruptControllerComponent.mask());
   }
-  publishIOPAndSIFTrace(cycle, dma);
+  publishIOPDeviceTrace(cycle, dma);
   if (gsDisplayComponent.presentationBoundaryCount() !=
       beforeCycle.presentationBoundary)
   {
@@ -1929,7 +2006,7 @@ void NekoSystem::appendTrace(
     {
       const auto &instruction =
         subsystem == NekoTraceSubsystem::EE ? lastEEInstruction : lastIOPInstruction;
-      if (subsystem != NekoTraceSubsystem::SIF &&
+      if ((subsystem == NekoTraceSubsystem::EE || subsystem == NekoTraceSubsystem::IOP) &&
           instruction.type == NekoTraceEventType::InstructionIssued)
       {
         traceEvents.push_back(instruction);

@@ -1033,7 +1033,12 @@ void NekoSaveStateCodec::commitIOP(
   destination->iopBusComponent.cdvd = &destination->cdvdControllerComponent;
   destination->sio2ControllerComponent = source->sio2ControllerComponent;
   destination->iopBusComponent.sio2 = &destination->sio2ControllerComponent;
+  const bool spuObservationsEnabled = destination->spu2ControllerComponent.observationsEnabled;
+  auto *const spuObservationOrder = destination->spu2ControllerComponent.observationOrder;
   std::swap(destination->spu2ControllerComponent, source->spu2ControllerComponent);
+  destination->spu2ControllerComponent.observationsEnabled = spuObservationsEnabled;
+  destination->spu2ControllerComponent.observationOrder = spuObservationOrder;
+  destination->spu2ControllerComponent.clearObservations();
   destination->iopBusComponent.spu2 = &destination->spu2ControllerComponent;
   destination->eeBusComponent.cdvdController = &destination->cdvdControllerComponent;
   const bool cdvdObservationsEnabled =

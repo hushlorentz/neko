@@ -1,5 +1,7 @@
 #include <cstdint>
 #include <iterator>
+#include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -9,6 +11,36 @@
 #include "iop_trace_test_utils.hpp"
 #include "save_state_mutation.hpp"
 #include "spu2_input_test_utils.hpp"
+#include "startup_diagnostics.hpp"
+
+struct SPU2ObservationTestAccess
+{
+  static bool detached(const SPU2Controller &spu)
+  {
+    return !spu.observationsEnabled && spu.observationOrder == nullptr &&
+      spu.observationCount == 0;
+  }
+
+  static void enable(SPU2Controller &spu, NekoObservationOrder *order)
+  {
+    spu.enableObservations(order);
+  }
+
+  static bool attached(const SPU2Controller &spu, NekoObservationOrder *order)
+  {
+    return spu.observationsEnabled && spu.observationOrder == order;
+  }
+
+  static std::size_t count(const SPU2Controller &spu)
+  {
+    return spu.observationCount;
+  }
+
+  static void disable(SPU2Controller &spu)
+  {
+    spu.disableObservations();
+  }
+};
 
 namespace
 {
@@ -59,6 +91,305 @@ namespace
   {
     const bool unchanged = system.saveState() == state;
     REQUIRE(unchanged);
+  }
+
+  TEST_CASE("IOP SPU diagnostic beats identify both source channels and target positions",
+    "[spu-diagnostics][iop][trace]")
+  {
+    for (std::size_t core : {0u, 1u})
+    {
+      CAPTURE(core);
+      NekoSystem system;
+      SPU2InputTest::programProfile(system.spu2Controller());
+      REQUIRE(system.spu2Controller().writeAutoDMAWriteSelection(core, 1u << core));
+      REQUIRE(system.iopBus().write32(SPU_BCR[core], 0x00100010).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write32(SPU_MADR[core], 0x1000).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write32(0x1000, 0x12345678).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write32(SPU_CHCR[core], 0x01000201).status ==
+        IOPBusStatus::Completed);
+      system.iopDMAController().writePriority(core == 0 ? PRIMARY : SECONDARY,
+        core == 0 ? 0x80000 : 8);
+      system.startTrace();
+      system.clockMasterCycle();
+      const auto events = IOPTraceTest::subsystemEvents(
+        system, static_cast<NekoTraceSubsystem>(16));
+      REQUIRE(events.size() == 1);
+      REQUIRE(events[0].type == NekoTraceEventType::DMABeat);
+      REQUIRE(events[0].masterCycle == 1);
+      REQUIRE(events[0].value0 == (core == 0 ? 4u : 7u) + (core << 8));
+      REQUIRE(events[0].value1 == 0x1000);
+      REQUIRE(events[0].value2 == (UINT64_C(255) << 32 | 256));
+      REQUIRE(events[0].value3 == 1); // Captured free half, first word.
+    }
+  }
+
+  TEST_CASE("IOP SPU failure probes retain source rejection without CPU attribution",
+    "[spu-diagnostics][iop][startup-failure]")
+  {
+    for (std::size_t core : {0u, 1u})
+    {
+      CAPTURE(core);
+      NekoSystem system;
+      SPU2InputTest::programProfile(system.spu2Controller());
+      REQUIRE(system.spu2Controller().writeAutoDMAWriteSelection(core, 1u << core));
+      REQUIRE(system.iopBus().write32(SPU_BCR[core], 0x00100010).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write32(SPU_MADR[core], 0x00900000).status ==
+        IOPBusStatus::Completed);
+      REQUIRE(system.iopBus().write32(SPU_CHCR[core], 0x01000201).status ==
+        IOPBusStatus::Completed);
+      system.iopCore().startExecution(0xa0000000);
+      system.startFailureProbe();
+      system.runMasterCycles(8);
+      REQUIRE(system.iopCore().retiredInstructions() == 1);
+      system.iopDMAController().writePriority(core == 0 ? PRIMARY : SECONDARY,
+        core == 0 ? 0x80000 : 8);
+      const auto checkpoint = system.saveState();
+      REQUIRE_THROWS_AS(system.clockMasterCycle(), IOPDMATransferError);
+      REQUIRE(system.iopCore().retiredInstructions() == 1);
+      for (const auto &event : system.trace())
+        REQUIRE_FALSE((event.subsystem == NekoTraceSubsystem::IOP &&
+          event.type == NekoTraceEventType::InstructionIssued));
+      const auto failure = firstStartupFailure(system.trace());
+      REQUIRE(failure.found);
+      REQUIRE(failure.kind == StartupFailureKind::DMARejection);
+      REQUIRE(failure.event.subsystem == static_cast<NekoTraceSubsystem>(16));
+      REQUIRE(failure.event.value1 == 0x00900000);
+      REQUIRE(failure.event.value2 == (UINT64_C(256) << 32 | 256));
+      REQUIRE_FALSE(failure.instruction.available);
+      REQUIRE(SPU2ObservationTestAccess::detached(system.spu2Controller()));
+      std::ostringstream output;
+      writeStartupFirstFailureJsonLine(
+        output, system, StartupExecutionBoundary::IncompleteCycle);
+      REQUIRE(output.str().find("\"cpu\":null") != std::string::npos);
+      REQUIRE(output.str().find("\"endpoint\":\"iop_spu" + std::to_string(core) +
+        "\"") != std::string::npos);
+      REQUIRE(output.str().find("\"failure\":\"source_read\"") != std::string::npos);
+      REQUIRE(output.str().find("\"bus_status\":\"unmapped\"") != std::string::npos);
+      const auto ending = system.saveState();
+      for (const bool traced : {false, true})
+      {
+        CAPTURE(traced);
+        NekoSystem restored;
+        restored.loadState(checkpoint);
+        const auto capture = std::make_shared<StartupFailureCapture>();
+        if (traced)
+          restored.startTrace(0, capture, NekoTraceStopPolicy::FirstFailure);
+        REQUIRE_THROWS_AS(restored.clockMasterCycle(), IOPDMATransferError);
+        REQUIRE(restored.saveState() == ending);
+        REQUIRE(SPU2ObservationTestAccess::detached(restored.spu2Controller()));
+        if (traced)
+        {
+          const auto streamedFailure = firstStartupFailure(capture->events());
+          REQUIRE(streamedFailure.found);
+          REQUIRE(streamedFailure.event.value0 == failure.event.value0);
+          REQUIRE(streamedFailure.event.value1 == failure.event.value1);
+          REQUIRE(streamedFailure.event.masterCycle == failure.event.masterCycle);
+          REQUIRE_FALSE(streamedFailure.instruction.available);
+          REQUIRE(restored.trace().empty());
+          REQUIRE(restored.traceTruncated());
+        }
+      }
+    }
+  }
+
+  TEST_CASE("IOP SPU diagnostics bound waits and order buffer release and terminal IRQ",
+    "[spu-diagnostics][iop][trace]")
+  {
+    for (std::size_t core : {0u, 1u})
+    {
+      CAPTURE(core);
+      NekoSystem system;
+      auto &spu = system.spu2Controller();
+      auto &dma = system.iopDMAController();
+      SPU2InputTest::programProfile(spu);
+      REQUIRE(spu.writeAutoDMAWriteSelection(core, 1u << core));
+      REQUIRE(dma.writeSPUBlockControl(core, 0x00200010) == IOPDMAWriteOutcome::Completed);
+      REQUIRE(dma.writeSPUMemoryAddress(core, 0x1000) == IOPDMAWriteOutcome::Completed);
+      REQUIRE(dma.startSPUTransfer(core, system.iopBus(), spu) == IOPDMAWriteOutcome::Completed);
+      dma.writePriority(core == 0 ? PRIMARY : SECONDARY, core == 0 ? 0x80000 : 8);
+      REQUIRE(system.iopBus().write32(core == 0 ? DICR : DICR2,
+        (1u << 23) | (1u << (16 + (core == 0 ? 4 : 0)))).status ==
+        IOPBusStatus::Completed);
+      for (unsigned word = 0; word < 255; ++word)
+        REQUIRE(dma.clockSPU(core, system.iopBus(), spu).outcome ==
+          IOPDMABeatOutcome::Accepted);
+      system.startTrace();
+      system.clockMasterCycle();
+      system.runMasterCycles(80);
+      const auto initial = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+      REQUIRE(initial.size() == 3);
+      REQUIRE(initial[0].type == NekoTraceEventType::DMABeat);
+      REQUIRE(nekoDecodeSPUDMABeat(initial[0]).targetWord == 255);
+      REQUIRE(initial[1].type == NekoTraceEventType::StateChanged);
+      const auto full = nekoDecodeSPUInput(initial[1]);
+      REQUIRE(full.before.requested);
+      REQUIRE_FALSE(full.after.requested);
+      REQUIRE(full.after.fillWords == 256);
+      REQUIRE(nekoDecodeSPUDMABeat(initial[2]).outcome == NekoSPUTrace::Outcome::Wait);
+      REQUIRE(nekoDecodeSPUDMABeat(initial[2]).targetWord == 256);
+      REQUIRE((system.iopInterruptController().status() & DMAC_CAUSE) == 0);
+
+      SPU2InputTest::advanceSamples(spu, 254);
+      while (!spu.advanceInputClock().sampleTick) {}
+      system.runMasterCycles(6144);
+      const auto released = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+      REQUIRE(released.size() == 5);
+      const auto switched = nekoDecodeSPUInput(released[3]);
+      REQUIRE(switched.before.fillHalf == 1);
+      REQUIRE(switched.after.fillHalf == 0);
+      REQUIRE(switched.after.requested);
+      REQUIRE(switched.after.fillWords == 0);
+      REQUIRE(released[3].masterCycle == released[4].masterCycle);
+      REQUIRE(nekoDecodeSPUDMABeat(released[4]).targetHalf == 0);
+      REQUIRE(nekoDecodeSPUDMABeat(released[4]).targetWord == 0);
+      system.runMasterCycles(2040);
+      REQUIRE_FALSE(dma.spuActive(core));
+      REQUIRE((system.iopInterruptController().status() & DMAC_CAUSE) != 0);
+      REQUIRE((system.iopInterruptController().status() & (1u << 9)) == 0);
+      const auto &events = system.trace();
+      std::size_t completion = events.size();
+      std::size_t close = events.size();
+      std::size_t interrupt = events.size();
+      for (std::size_t index = 0; index < events.size(); ++index)
+      {
+        const auto &event = events[index];
+        if (event.subsystem == NekoTraceSubsystem::SPU2)
+        {
+          if (event.type == NekoTraceEventType::DMABeat &&
+              nekoDecodeSPUDMABeat(event).outcome == NekoSPUTrace::Outcome::Completed)
+          {
+            completion = index;
+            REQUIRE(nekoDecodeSPUDMABeat(event).remainingBefore == 1);
+            REQUIRE(nekoDecodeSPUDMABeat(event).remainingAfter == 0);
+          }
+          if (event.type == NekoTraceEventType::StateChanged &&
+              !nekoDecodeSPUInput(event).after.writeOpen)
+            close = index;
+        }
+        if (event.subsystem == NekoTraceSubsystem::IOPInterruptController)
+          interrupt = index;
+      }
+      REQUIRE(completion < close);
+      REQUIRE(close < interrupt);
+      REQUIRE(interrupt < events.size());
+      REQUIRE(SPU2ObservationTestAccess::detached(spu));
+    }
+  }
+
+  TEST_CASE("IOP SPU observation links and restored bounded streams remain diagnostic only",
+    "[spu-diagnostics][iop][trace][persistence]")
+  {
+    NekoSystem source;
+    auto &spu = source.spu2Controller();
+    SPU2InputTest::programProfile(spu);
+    REQUIRE(spu.writeAutoDMAWriteSelection(0, 1));
+    REQUIRE(source.iopBus().write32(SPU_BCR[0], 0x00100010).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(source.iopBus().write32(SPU_CHCR[0], 0x01000201).status ==
+      IOPBusStatus::Completed);
+    source.iopDMAController().writePriority(PRIMARY, 0x80000);
+    source.runMasterCycles(17);
+    const auto checkpoint = source.saveState();
+    NekoObservationOrder order;
+    SPU2ObservationTestAccess::enable(spu, &order);
+    REQUIRE(spu.writeAutoDMAWriteSelection(1, 2));
+    const auto count = SPU2ObservationTestAccess::count(spu);
+    REQUIRE(count == 2);
+    REQUIRE_THROWS(source.loadState({}));
+    REQUIRE(SPU2ObservationTestAccess::attached(spu, &order));
+    REQUIRE(SPU2ObservationTestAccess::count(spu) == count);
+    source.loadState(checkpoint);
+    REQUIRE(SPU2ObservationTestAccess::attached(spu, &order));
+    REQUIRE(SPU2ObservationTestAccess::count(spu) == 0);
+    REQUIRE(source.saveState() == checkpoint);
+    SPU2ObservationTestAccess::disable(spu);
+    source.startTrace();
+    source.runMasterCycles(40);
+    const auto reference = source.trace();
+    REQUIRE_FALSE(reference.empty());
+    const auto ending = source.saveState();
+    for (const unsigned mode : {0u, 1u, 2u, 3u})
+    {
+      CAPTURE(mode);
+      NekoSystem restored;
+      restored.loadState(checkpoint);
+      const auto capture = std::make_shared<StartupFailureCapture>();
+      if (mode == 1)
+        restored.startTrace();
+      else if (mode >= 2)
+        restored.startTrace(mode == 2 ? 1 : 0, capture);
+      restored.runMasterCycles(40);
+      REQUIRE(restored.saveState() == ending);
+      REQUIRE(SPU2ObservationTestAccess::detached(restored.spu2Controller()));
+      if (mode == 1)
+        IOPTraceTest::requireEvents(restored.trace(), reference);
+      else if (mode >= 2)
+      {
+        IOPTraceTest::requireEvents(capture->events(), reference);
+        REQUIRE(restored.trace().size() == (mode == 2 ? 1 : 0));
+        REQUIRE(restored.traceTruncated());
+      }
+      else
+        REQUIRE(restored.trace().empty());
+    }
+  }
+
+  TEST_CASE("IOP SPU guest input transitions precede their CPU stores without polling noise",
+    "[spu-diagnostics][iop][trace]")
+  {
+    for (std::size_t core : {0u, 1u})
+    {
+      CAPTURE(core);
+      NekoSystem system;
+      SPU2InputTest::programProfile(system.spu2Controller());
+      REQUIRE(system.iopBus().write32(SPU_BCR[core], 0x00100010).status ==
+        IOPBusStatus::Completed);
+      const auto admas = static_cast<IOPWord>(0x1b0 + core * 0x400);
+      const IOPWord program[] = {
+        0x3c01bf90, 0x34210000 | admas, 0x24020000 | (1u << core), 0xa4220000,
+        0x3c01bf80, 0x34210000 | (SPU_CHCR[core] & 0xffff),
+        0x3c020100, 0x34420201, 0xac220000, 0xac200000,
+        0x3c01bf90, 0x34210000 | admas, 0xa4200000
+      };
+      for (std::size_t word = 0; word < sizeof(program) / sizeof(program[0]); ++word)
+        REQUIRE(system.iopBus().write32(static_cast<IOPAddress>(word * 4),
+          program[word]).status == IOPBusStatus::Completed);
+      system.iopCore().startExecution(0xa0000000);
+      system.startTrace();
+      system.runMasterCycles(97);
+      REQUIRE(system.iopCore().retiredInstructions() == 13);
+      REQUIRE(system.iopCore().stopReason() == IOPStopReason::None);
+      const auto changes = IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2);
+      REQUIRE(changes.size() == 4);
+      REQUIRE(nekoDecodeSPUInput(changes[0]).after.selected);
+      REQUIRE(nekoDecodeSPUInput(changes[1]).after.requested);
+      REQUIRE_FALSE(nekoDecodeSPUInput(changes[2]).after.writeOpen);
+      REQUIRE_FALSE(nekoDecodeSPUInput(changes[3]).after.selected);
+      for (std::size_t index = 0; index < system.trace().size(); ++index)
+      {
+        const auto &event = system.trace()[index];
+        if (event.subsystem != NekoTraceSubsystem::SPU2)
+          continue;
+        bool storeAfter = false;
+        for (std::size_t after = index + 1; after < system.trace().size(); ++after)
+        {
+          const auto &next = system.trace()[after];
+          if (next.masterCycle != event.masterCycle)
+            break;
+          if (next.subsystem == NekoTraceSubsystem::IOP &&
+              next.type == NekoTraceEventType::MemoryAccess)
+            storeAfter = true;
+        }
+        REQUIRE(storeAfter);
+      }
+      system.iopBus().read32(SPU_CHCR[core]);
+      REQUIRE(system.trace().size() > changes.size());
+      REQUIRE(IOPTraceTest::subsystemEvents(system, NekoTraceSubsystem::SPU2).size() == 4);
+    }
   }
 
   void requireInitializationStore(

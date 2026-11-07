@@ -81,6 +81,71 @@ def capture_records():
 
 
 class InspectorTests(unittest.TestCase):
+    def test_spu_diagnostics_filters_preserve_decoded_records_in_both_sources(self):
+        beat = dict(endpoint="iop_spu1", channel=7, core=1, kind="payload",
+                    outcome="wait", failure="none", bus_status="none",
+                    attempted_address=4096, remaining_before=256,
+                    remaining_after=256, target_half=1, target_word=256)
+        before = dict(selected=True, write_open=True, requested=True,
+                      fill_half=1, read_half=0, fill_words=255)
+        after = dict(before, requested=False, fill_words=256)
+        transition = dict(channel=7, core=1, before=before, after=after)
+        for source in ("prefix", "failure_capture"):
+            rows = records() if source == "prefix" else capture_records()
+            if source == "prefix":
+                payload = rows[3]
+                payload.update(subsystem=16, event_type=20, spu_dma=beat)
+                rows[4].update(subsystem=16, event_type=1, spu_input=transition)
+            else:
+                payload = rows[-2]["events"][0]
+                payload.update(subsystem=16, event_type=20, spu_dma=beat)
+                rows[-2]["events"][1].update(
+                    subsystem=16, event_type=1, spu_input=transition)
+            for kind, key, expected in (("dma_beat", "spu_dma", beat),
+                                        ("state_changed", "spu_input", transition)):
+                self.write(self.path, rows)
+                report = self.report("events", self.path, "--source", source,
+                                     "--subsystem", "spu2", "--event", kind)
+                self.assertEqual(report["matched_events"], 1)
+                row = report["events"][0]
+                self.assertEqual(row["subsystem_name"], "spu2")
+                self.assertNotIn("cpu", row)
+                self.assertEqual(row[key], expected)
+
+    def test_spu_decoded_schema_rejects_malformed_identity_and_metadata(self):
+        beat = dict(endpoint="iop_spu0", channel=4, core=0, kind="payload",
+                    outcome="rejected", failure="source_read", bus_status="unmapped",
+                    attempted_address=0x900000, remaining_before=256,
+                    remaining_after=256, target_half=1, target_word=0)
+        for field, value in (("endpoint", "iop_sif0"), ("channel", 7), ("core", 2),
+                             ("outcome", "ready"), ("bus_status", "unknown"),
+                             ("failure", "none"), ("target_half", 2),
+                             ("target_word", 257), ("remaining_before", -1)):
+            rows = records()
+            rows[3].update(subsystem=16, event_type=20, spu_dma=dict(beat))
+            rows[3]["spu_dma"][field] = value
+            self.reject(rows, "spu")
+        rows = records()
+        rows[3].update(subsystem=16, event_type=20)
+        self.reject(rows, "spu_dma")
+        rows[3]["spu_dma"] = beat
+        rows[3]["subsystem"] = 11
+        self.reject(rows, "spu_dma")
+        state = dict(selected=True, write_open=True, requested=True,
+                     fill_half=1, read_half=0, fill_words=255)
+        for field, value, message in (
+                ("selected", 1, "selected must be bool"),
+                ("fill_half", 2, "invalid buffer position"),
+                ("fill_words", 257, "invalid buffer position")):
+            rows = records()
+            transition = dict(channel=4, core=0, before=dict(state), after=state)
+            transition["before"][field] = value
+            rows[3].update(subsystem=16, event_type=1, spu_input=transition)
+            self.reject(rows, message)
+        rows = records()
+        rows[3].update(subsystem=16, event_type=1)
+        self.reject(rows, "spu_input")
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(dir=SCRIPT.parent)
         self.addCleanup(self.directory.cleanup)

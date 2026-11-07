@@ -1,6 +1,7 @@
 #include "spu2_controller.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <stdexcept>
 
 namespace
@@ -27,6 +28,7 @@ SPU2Controller::SPU2Controller() : soundRAM(SOUND_RAM_SIZE)
 
 void SPU2Controller::reset() noexcept
 {
+  clearObservations();
   std::fill(soundRAM.begin(), soundRAM.end(), 0);
   inputClockPhase = 0;
   inputReadPosition = 0;
@@ -71,6 +73,12 @@ SPU2InputTick SPU2Controller::advanceInputClock() noexcept
     return result;
   }
   inputClockPhase = 0;
+  std::array<SPU2InputWriteState, CORE_COUNT> before{};
+  if (observationsEnabled)
+  {
+    for (std::size_t core = 0; core < CORE_COUNT; ++core)
+      before[core] = inputWriteState(core);
+  }
   result.sampleTick = true;
   for (std::size_t core = 0; core < CORE_COUNT; ++core)
   {
@@ -94,7 +102,61 @@ SPU2InputTick SPU2Controller::advanceInputClock() noexcept
       state.fillWords = 0;
     }
   }
+  if (observationsEnabled && inputReadPosition % 256 == 0)
+  {
+    for (std::size_t core = 0; core < CORE_COUNT; ++core)
+      recordInputState(core, before[core]);
+  }
   return result;
+}
+
+SPU2InputWriteState SPU2Controller::inputWriteState(std::size_t core) const
+{
+  const auto &state = inputStates.at(core);
+  return {autoDMAWriteSelection[core] != 0, state.writeOpen,
+    inputWriteRequested(core), state.fillHalf,
+    static_cast<std::uint8_t>(inputReadPosition / 256), state.fillWords};
+}
+
+void SPU2Controller::enableObservations(NekoObservationOrder *order) noexcept
+{
+  clearObservations();
+  observationOrder = order;
+  observationsEnabled = true;
+}
+
+void SPU2Controller::disableObservations() noexcept
+{
+  clearObservations();
+  observationsEnabled = false;
+  observationOrder = nullptr;
+}
+
+void SPU2Controller::clearObservations() noexcept
+{
+  observationCount = 0;
+}
+
+void SPU2Controller::recordInputState(
+  std::size_t core, const SPU2InputWriteState &before) noexcept
+{
+  if (!observationsEnabled)
+  {
+    return;
+  }
+  const auto after = inputWriteState(core);
+  if ((!before.selected && !after.selected) ||
+      (before.selected == after.selected && before.writeOpen == after.writeOpen &&
+       before.requested == after.requested && before.fillHalf == after.fillHalf &&
+       before.readHalf == after.readHalf && before.fillWords == after.fillWords))
+  {
+    return;
+  }
+  assert(observationCount < observations.size());
+  auto &event = observations[observationCount];
+  event = {static_cast<std::uint8_t>(core), before, after,
+    observationOrder != nullptr ? observationOrder->next++ : observationCount};
+  ++observationCount;
 }
 
 bool SPU2Controller::inputWriteRequested(std::size_t core) const
@@ -106,6 +168,7 @@ bool SPU2Controller::inputWriteRequested(std::size_t core) const
 
 bool SPU2Controller::beginInputWrite(std::size_t core)
 {
+  const auto before = observationsEnabled ? inputWriteState(core) : SPU2InputWriteState{};
   auto &state = inputStates.at(core);
   if (autoDMAWriteSelection[core] == 0)
   {
@@ -114,15 +177,18 @@ bool SPU2Controller::beginInputWrite(std::size_t core)
   state.writeOpen = true;
   state.fillHalf = static_cast<std::uint8_t>((inputReadPosition / 256) ^ 1);
   state.fillWords = 0;
+  recordInputState(core, before);
   return true;
 }
 
 void SPU2Controller::cancelInputWrite(std::size_t core)
 {
+  const auto before = observationsEnabled ? inputWriteState(core) : SPU2InputWriteState{};
   auto &state = inputStates.at(core);
   state.writeOpen = false;
   state.fillHalf = 0;
   state.fillWords = 0;
+  recordInputState(core, before);
 }
 
 bool SPU2Controller::writeInputWord(std::size_t core, std::uint32_t value)
@@ -132,6 +198,7 @@ bool SPU2Controller::writeInputWord(std::size_t core, std::uint32_t value)
     return false;
   }
   auto &state = inputStates[core];
+  const auto before = observationsEnabled ? inputWriteState(core) : SPU2InputWriteState{};
   // One stereo half is planar: 128 left words followed by 128 right words.
   const auto address = static_cast<std::uint32_t>(0x2000 + core * 0x400 +
     state.fillHalf * 0x100 + (state.fillWords / 128) * 0x200 +
@@ -139,6 +206,10 @@ bool SPU2Controller::writeInputWord(std::size_t core, std::uint32_t value)
   writeSoundRAMHalfword(address, static_cast<std::uint16_t>(value));
   writeSoundRAMHalfword(address + 1, static_cast<std::uint16_t>(value >> 16));
   ++state.fillWords;
+  if (state.fillWords == INPUT_HALF_WORD_COUNT)
+  {
+    recordInputState(core, before);
+  }
   return true;
 }
 
@@ -321,12 +392,14 @@ bool SPU2Controller::writeAutoDMAWriteSelection(
   {
     return false;
   }
-  selection = value;
   if (value == 0)
   {
     cancelInputWrite(core);
   }
-  else
+  const auto before = observationsEnabled ? inputWriteState(core) : SPU2InputWriteState{};
+  selection = value;
+  recordInputState(core, before);
+  if (value != 0)
   {
     inputStates[core].everSelected = true;
     beginInputWrite(core);

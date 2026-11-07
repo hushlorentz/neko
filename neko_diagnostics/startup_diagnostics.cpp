@@ -488,12 +488,43 @@ void writeStartupRunSummaryJsonLine(
   emitJson(output, json);
 }
 
+void writeStartupSPUDMABeatJson(
+  std::ostream &output, const NekoSPUTrace::Beat &beat)
+{
+  const char *const outcomes[] = {"accepted", "wait", "completed", "rejected"};
+  const char *const statuses[] = {"none", "misaligned", "read_only", "unmapped"};
+  const auto outcome = enumName(beat.outcome, outcomes);
+  const auto status = enumName(beat.busStatus, statuses);
+  output << "{\"endpoint\":\"iop_spu" << static_cast<unsigned>(beat.core)
+    << "\",\"channel\":" << static_cast<unsigned>(beat.channel)
+    << ",\"core\":" << static_cast<unsigned>(beat.core)
+    << ",\"kind\":\"payload\",\"outcome\":\"" << outcome
+    << "\",\"failure\":\"" << (beat.outcome == NekoSPUTrace::Outcome::Rejected
+      ? "source_read" : "none")
+    << "\",\"bus_status\":\"" << status
+    << "\",\"attempted_address\":" << beat.sourceAddress
+    << ",\"remaining_before\":" << beat.remainingBefore
+    << ",\"remaining_after\":" << beat.remainingAfter
+    << ",\"target_half\":" << static_cast<unsigned>(beat.targetHalf)
+    << ",\"target_word\":" << beat.targetWord << '}';
+}
+
 void writeStartupTraceEventFields(
   std::ostream &output, const NekoTraceEvent &event)
 {
   const bool cdvdCommand = event.subsystem == NekoTraceSubsystem::CDVD &&
     (event.type == NekoTraceEventType::CommandAccepted ||
      event.type == NekoTraceEventType::CommandCompleted);
+  const bool spuBeat = event.subsystem == NekoTraceSubsystem::SPU2 &&
+    event.type == NekoTraceEventType::DMABeat;
+  const bool spuInput = event.subsystem == NekoTraceSubsystem::SPU2 &&
+    event.type == NekoTraceEventType::StateChanged;
+  NekoSPUTrace::Beat beat;
+  NekoSPUTrace::InputTransition transition;
+  if (spuBeat)
+    beat = nekoDecodeSPUDMABeat(event);
+  if (spuInput)
+    transition = nekoDecodeSPUInput(event);
   NekoCDVDTrace::Command command;
   const char *transport = nullptr;
   const char *before = nullptr;
@@ -530,6 +561,29 @@ void writeStartupTraceEventFields(
       output << static_cast<unsigned>(command.result[index]);
     }
     output << "]}";
+  }
+  if (spuBeat)
+  {
+    output << ",\"spu_dma\":";
+    writeStartupSPUDMABeatJson(output, beat);
+  }
+  if (spuInput)
+  {
+    const auto state = [&](const NekoSPUTrace::InputState &value)
+    {
+      output << "{\"selected\":" << jsonBoolean(value.selected)
+        << ",\"write_open\":" << jsonBoolean(value.writeOpen)
+        << ",\"requested\":" << jsonBoolean(value.requested)
+        << ",\"fill_half\":" << static_cast<unsigned>(value.fillHalf)
+        << ",\"read_half\":" << static_cast<unsigned>(value.readHalf)
+        << ",\"fill_words\":" << value.fillWords << '}';
+    };
+    output << ",\"spu_input\":{\"channel\":" << static_cast<unsigned>(transition.channel)
+      << ",\"core\":" << static_cast<unsigned>(transition.core) << ",\"before\":";
+    state(transition.before);
+    output << ",\"after\":";
+    state(transition.after);
+    output << '}';
   }
 }
 

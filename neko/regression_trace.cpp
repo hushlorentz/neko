@@ -71,7 +71,113 @@ NekoTraceFailureKind nekoTraceFailureKind(const NekoTraceEvent &event) noexcept
   {
     return Kind::DMARejection;
   }
+  if (event.subsystem == NekoTraceSubsystem::SPU2 &&
+      event.type == NekoTraceEventType::DMABeat &&
+      ((event.value0 >> NekoSPUTrace::OUTCOME_SHIFT) & 255) ==
+        static_cast<unsigned>(NekoSPUTrace::Outcome::Rejected))
+  {
+    return Kind::DMARejection;
+  }
   return Kind::None;
+}
+
+namespace
+{
+  void validateSPUIdentity(std::uint8_t channel, std::uint8_t core)
+  {
+    if (core > 1 || channel != (core == 0 ? 4 : 7))
+    {
+      throw std::invalid_argument("Unknown SPU trace channel/core identity.");
+    }
+  }
+
+  std::uint64_t packSPUInput(const NekoSPUTrace::InputState &state) noexcept
+  {
+    return (state.writeOpen ? 1u : 0u) | (state.selected ? 2u : 0u) |
+      (state.requested ? 4u : 0u) | (std::uint64_t{state.fillHalf} << 8) |
+      (std::uint64_t{state.readHalf} << 16) |
+      (std::uint64_t{state.fillWords} << 32);
+  }
+
+  NekoSPUTrace::InputState decodeSPUInput(std::uint64_t value)
+  {
+    NekoSPUTrace::InputState state;
+    state.writeOpen = (value & 1) != 0;
+    state.selected = (value & 2) != 0;
+    state.requested = (value & 4) != 0;
+    state.fillHalf = static_cast<std::uint8_t>(value >> 8);
+    state.readHalf = static_cast<std::uint8_t>(value >> 16);
+    state.fillWords = static_cast<std::uint16_t>(value >> 32);
+    if (state.fillHalf > 1 || state.readHalf > 1 || state.fillWords > 256)
+    {
+      throw std::invalid_argument("Unknown SPU input trace buffer position.");
+    }
+    return state;
+  }
+}
+
+NekoTraceEvent nekoSPUDMABeatEvent(const NekoSPUTrace::Beat &beat) noexcept
+{
+  return {0, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat,
+    beat.channel | (std::uint64_t{beat.core} << 8) |
+      (static_cast<std::uint64_t>(beat.outcome) << 16) |
+      (static_cast<std::uint64_t>(beat.busStatus) << 24),
+    beat.sourceAddress,
+    beat.remainingBefore | (std::uint64_t{beat.remainingAfter} << 32),
+    beat.targetHalf | (std::uint64_t{beat.targetWord} << 8)};
+}
+
+NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event)
+{
+  if (event.subsystem != NekoTraceSubsystem::SPU2 ||
+      event.type != NekoTraceEventType::DMABeat)
+  {
+    throw std::invalid_argument("Not a SPU DMA beat trace event.");
+  }
+  NekoSPUTrace::Beat beat;
+  beat.channel = static_cast<std::uint8_t>(event.value0);
+  beat.core = static_cast<std::uint8_t>(event.value0 >> 8);
+  validateSPUIdentity(beat.channel, beat.core);
+  beat.outcome = static_cast<NekoSPUTrace::Outcome>((event.value0 >> 16) & 255);
+  beat.busStatus = static_cast<NekoSPUTrace::BusStatus>((event.value0 >> 24) & 255);
+  beat.sourceAddress = static_cast<std::uint32_t>(event.value1);
+  beat.remainingBefore = static_cast<std::uint32_t>(event.value2);
+  beat.remainingAfter = static_cast<std::uint32_t>(event.value2 >> 32);
+  beat.targetHalf = static_cast<std::uint8_t>(event.value3);
+  beat.targetWord = static_cast<std::uint16_t>(event.value3 >> 8);
+  if (static_cast<unsigned>(beat.outcome) > 3 ||
+      static_cast<unsigned>(beat.busStatus) > 3 || beat.targetHalf > 1 ||
+      beat.targetWord > 256 ||
+      ((beat.outcome == NekoSPUTrace::Outcome::Rejected) ==
+        (beat.busStatus == NekoSPUTrace::BusStatus::None)))
+  {
+    throw std::invalid_argument("Unknown SPU DMA beat trace metadata.");
+  }
+  return beat;
+}
+
+NekoTraceEvent nekoSPUInputEvent(
+  const NekoSPUTrace::InputTransition &transition) noexcept
+{
+  return {0, NekoTraceSubsystem::SPU2, NekoTraceEventType::StateChanged,
+    transition.channel | (std::uint64_t{transition.core} << 8),
+    packSPUInput(transition.before), packSPUInput(transition.after), 0};
+}
+
+NekoSPUTrace::InputTransition nekoDecodeSPUInput(const NekoTraceEvent &event)
+{
+  if (event.subsystem != NekoTraceSubsystem::SPU2 ||
+      event.type != NekoTraceEventType::StateChanged)
+  {
+    throw std::invalid_argument("Not a SPU input transition trace event.");
+  }
+  NekoSPUTrace::InputTransition transition;
+  transition.channel = static_cast<std::uint8_t>(event.value0);
+  transition.core = static_cast<std::uint8_t>(event.value0 >> 8);
+  validateSPUIdentity(transition.channel, transition.core);
+  transition.before = decodeSPUInput(event.value1);
+  transition.after = decodeSPUInput(event.value2);
+  return transition;
 }
 
 std::uint64_t nekoFrameHash(

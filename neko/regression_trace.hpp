@@ -24,7 +24,8 @@ enum class NekoTraceSubsystem : std::uint8_t
   IOPTimers = 12,
   IOPInterruptController = 13,
   SIF = 14,
-  CDVD = 15
+  CDVD = 15,
+  SPU2 = 16
 };
 
 enum class NekoTraceEventType : std::uint8_t
@@ -115,6 +116,47 @@ namespace NekoSIFDMATrace
   constexpr std::uint8_t KIND_SHIFT = 8;
   constexpr std::uint8_t OUTCOME_SHIFT = 16;
   constexpr std::uint8_t FAILURE_SHIFT = 24;
+}
+
+namespace NekoSPUTrace
+{
+  enum class Outcome : std::uint8_t
+  {
+    Accepted = 0, Wait = 1, Completed = 2, Rejected = 3
+  };
+  enum class BusStatus : std::uint8_t
+  {
+    None = 0, Misaligned = 1, ReadOnly = 2, Unmapped = 3
+  };
+  struct Beat
+  {
+    std::uint8_t channel = 4;
+    std::uint8_t core = 0;
+    Outcome outcome = Outcome::Accepted;
+    BusStatus busStatus = BusStatus::None;
+    std::uint32_t sourceAddress = 0;
+    std::uint32_t remainingBefore = 0;
+    std::uint32_t remainingAfter = 0;
+    std::uint8_t targetHalf = 0;
+    std::uint16_t targetWord = 0;
+  };
+  struct InputState
+  {
+    bool selected = false;
+    bool writeOpen = false;
+    bool requested = false;
+    std::uint8_t fillHalf = 0;
+    std::uint8_t readHalf = 0;
+    std::uint16_t fillWords = 0;
+  };
+  struct InputTransition
+  {
+    std::uint8_t channel = 4;
+    std::uint8_t core = 0;
+    InputState before;
+    InputState after;
+  };
+  constexpr std::uint8_t OUTCOME_SHIFT = 16;
 }
 
 namespace NekoIOPTraceInstruction
@@ -506,6 +548,21 @@ class NekoTraceObserver
 //   Acceptance is ordered inside the successful byte write, before its CPU
 //   memory record. Completion precedes its resulting INTC/CPU records.
 //   No events for rejected commands, polling, result bytes or acknowledgements.
+//
+// SPU2/DMABeat: channel | core << 8 | outcome << 16 | source bus status << 24,
+//   physical source address, remaining words (before low32/after high32),
+//   captured target half | word offset << 8. Outcome: accepted/wait/completed/
+//   rejected = 0/1/2/3; bus status: none/misaligned/read-only/unmapped = 0/1/2/3.
+//   Only active enabled candidates are observed. Identical waits are suppressed
+//   within an observation session; a new session may report an already-blocked
+//   candidate once. Inspection/host setup emits nothing.
+// SPU2/StateChanged: channel | core << 8, before/after input snapshots, zero.
+//   Snapshot: writeOpen bit0, selected bit1, requested bit2, fillHalf << 8,
+//   readHalf << 16, fillWords << 32. Only selection/open/request/buffer changes
+//   emit, not individual samples or ordinary partial-fill words. Input changes
+//   share the IOP mutation sequence; beat reservations precede their resulting
+//   buffer/completion changes, and both precede resulting INTC/CPU records.
+//   Observation journals and wait suppression are not saved hardware state.
 
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(
@@ -521,5 +578,10 @@ std::uint64_t nekoPackCDVDTraceMetadata(
 std::uint64_t nekoPackCDVDTraceResult(
   const std::array<std::uint8_t, 8> &result) noexcept;
 NekoCDVDTrace::Command nekoDecodeCDVDTrace(const NekoTraceEvent &event);
+NekoTraceEvent nekoSPUDMABeatEvent(const NekoSPUTrace::Beat &beat) noexcept;
+NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event);
+NekoTraceEvent nekoSPUInputEvent(
+  const NekoSPUTrace::InputTransition &transition) noexcept;
+NekoSPUTrace::InputTransition nekoDecodeSPUInput(const NekoTraceEvent &event);
 
 #endif

@@ -126,6 +126,52 @@ TEST_CASE("Startup inspection preserves live state including side-effecting regi
   }
 }
 
+TEST_CASE("Startup SPU trace and capture exports retain typed positions and raw payloads",
+  "[startup-diagnostics][spu-diagnostics]")
+{
+  const NekoTraceEvent beat = {7, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat,
+    7 | (1 << 8) | (1 << 16), 4096, UINT64_C(256) << 32 | 256,
+    1 | (256 << 8)};
+  const NekoTraceEvent transition = {7, NekoTraceSubsystem::SPU2,
+    NekoTraceEventType::StateChanged, 7 | (1 << 8),
+    UINT64_C(255) << 32 | 0x107, UINT64_C(256) << 32 | 0x103, 0};
+  StartupFailureCapture capture;
+  capture.observe(beat);
+  capture.observe(transition);
+  std::ostringstream output;
+  writeStartupFailureCaptureJsonLine(output, capture);
+  const auto json = output.str();
+  REQUIRE(json.find(
+    "\"spu_dma\":{\"endpoint\":\"iop_spu1\",\"channel\":7,\"core\":1,"
+    "\"kind\":\"payload\",\"outcome\":\"wait\",\"failure\":\"none\","
+    "\"bus_status\":\"none\",\"attempted_address\":4096,"
+    "\"remaining_before\":256,\"remaining_after\":256,"
+    "\"target_half\":1,\"target_word\":256}") != std::string::npos);
+  REQUIRE(json.find(
+    "\"spu_input\":{\"channel\":7,\"core\":1,\"before\":"
+    "{\"selected\":true,\"write_open\":true,\"requested\":true,\"fill_half\":1,"
+    "\"read_half\":0,\"fill_words\":255},\"after\":"
+    "{\"selected\":true,\"write_open\":true,\"requested\":false,\"fill_half\":1,"
+    "\"read_half\":0,\"fill_words\":256}}") != std::string::npos);
+  REQUIRE(json.find("\"values\":[" + std::to_string(beat.value0) + ",4096," +
+    std::to_string(beat.value2) + ',' + std::to_string(beat.value3) + ']') !=
+    std::string::npos);
+  for (const auto bad : {
+       NekoTraceEvent{7, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat,
+         4 | (1 << 8), 0, 0, 0},
+       NekoTraceEvent{7, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat,
+         4 | (4 << 16), 0, 0, 0},
+       NekoTraceEvent{7, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat,
+         4 | (3 << 16), 0, 0, 0},
+       NekoTraceEvent{7, NekoTraceSubsystem::SPU2, NekoTraceEventType::StateChanged,
+         4, 0, UINT64_C(257) << 32, 0}})
+  {
+    std::ostringstream rejected;
+    REQUIRE_THROWS_AS(writeStartupTraceEventFields(rejected, bad), std::invalid_argument);
+    REQUIRE(rejected.str().empty());
+  }
+}
+
 TEST_CASE("Startup trace fields decode only CDVD command identities",
   "[startup-diagnostics][cdvd]")
 {

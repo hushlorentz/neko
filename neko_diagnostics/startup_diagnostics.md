@@ -278,6 +278,66 @@ the affected record is emitted rather than being labelled as a known state.
 Other event identities retain their existing JSON bytes without a `cdvd`
 object. The same shared event-field writer serves prefix and failure capture.
 
+### SPU DMA and input observations
+
+SPU2 subsystem 16 event 20 (`DMABeat`) adds `spu_dma` beside the unchanged
+four raw `values` words:
+
+```json
+{"endpoint":"iop_spu1","channel":7,"core":1,"kind":"payload","outcome":"wait","failure":"none","bus_status":"none","attempted_address":4096,"remaining_before":17,"remaining_after":17,"target_half":1,"target_word":256}
+```
+
+Channels 4/7 pair with cores 0/1. Outcomes are `accepted`, `wait`, `completed`,
+or `rejected`; only rejection carries `failure: "source_read"` and a
+non-`none` bus status (`misaligned`, `read_only`, or `unmapped`). The physical
+source address, remaining word counts, and captured target half/word describe
+the attempted source beat, not a CPU access or a newly inferred request.
+Target halves are 0/1; word positions are 0..256, including a full-half wait
+at 256. Acceptance advances the source count; completion is the final accepted
+word. Waiting and rejection leave it unchanged.
+
+The raw beat encoding is channel/core/outcome/bus status in successive bytes
+of `values[0]`, physical source in `values[1]`, remaining-before/after in the
+low/high 32 bits of `values[2]`, and target half/word in the low byte and bits
+8..23 of `values[3]`. Use `nekoDecodeSPUDMABeat` for the typed C++ view.
+
+SPU2 event 1 (`StateChanged`) adds `spu_input` with `channel`, `core`, and
+`before`/`after` snapshots. Each snapshot contains `selected`, `write_open`,
+`requested`, `fill_half`, `read_half`, and `fill_words`. These observe
+selection, opening/cancellation, full-half request changes and reader-half
+boundaries; ordinary partial-word progress and per-sample consumption do not
+emit input events. `values[0]` packs channel/core in successive bytes,
+`values[1]`/`values[2]` pack the snapshots, and `values[3]` is zero. Snapshot
+bits 0/1/2 are write-open/selected/requested, fill/read half occupy successive
+bytes beginning at bits 8/16, and fill-word count occupies bits 32..47.
+Use `nekoDecodeSPUInput`, not a second packed-field decoder.
+
+The existing shared observation sequence orders a source beat before its
+resulting input transitions, then completion interrupt and CPU observations.
+Transient journals hold at most eight SPU input transitions and six common
+DMA attempts (two EE and four IOP candidates) per scheduled master cycle.
+They are enabled only for trace/failure-probe observation, with no canonical
+state or save-format change. Host setup outside scheduled observation does
+not produce these events.
+
+An identical blocked beat emits only its first wait in an observation
+session. Changed position or a newly available request rearms it; starting
+a fresh trace/probe session can report an already blocked endpoint once.
+`clearTrace()` only clears the retained prefix, not this session history.
+Loading preserves destination diagnostics; use a fresh session after a
+rewind. A newly attached restored suffix can therefore contain a first wait
+that an uninterrupted cold trace would suppress.
+
+Rejected SPU source beats are DMA failures, with no CPU or causal instruction
+attribution. The first-failure `dma` object uses the same decoded fields.
+Failure-only probes do not retain preceding wait/input history; enable the
+full trace stream and optional flight recorder when that context is needed.
+Both prefix and failure-capture writers validate paired identities, enums and
+target/input bounds through the shared C++ decoders before emitting the
+affected record. These diagnostics do not establish silicon timing or boot.
+
+### Trace limits and lifecycle
+
 The collector retains the earliest events, never a rolling window. Truncation
 means at least one event was omitted, not merely that the collection reached
 its ceiling. An exact-fit run is not truncated; a zero-budget run has an empty,
@@ -338,7 +398,8 @@ the run at the failure.
 An additional `startup_failure_capture` JSON line appears after prefix events
 and before `startup_first_failure`. It contains `capacity`, `observed_events`,
 `first_event_index`, `failure_cycle_truncated` and an ordered `events` array
-with the usual raw event fields and decoded `cdvd` object for command events.
+with the usual raw event fields and decoded `cdvd`, `spu_dma`, or `spu_input`
+objects for their respective events.
 `observed_events` counts the whole observed
 stream, including events after freezing; `first_event_index` identifies the
 window's first event in that stream. The final failure record adds
@@ -370,6 +431,8 @@ python3 -B tools/inspect_startup.py events run.jsonl --cpu ee --cycle 41
 python3 -B tools/inspect_startup.py events run.jsonl --event memory --address 0x70003fe0
 python3 -B tools/inspect_startup.py events run.jsonl --event command_accepted
 python3 -B tools/inspect_startup.py events run.jsonl --source failure_capture --event command_completed
+python3 -B tools/inspect_startup.py events run.jsonl --subsystem spu2 --event dma_beat
+python3 -B tools/inspect_startup.py events run.jsonl --source failure_capture --subsystem spu2 --event state_changed
 python3 -B tools/inspect_startup.py instructions run.jsonl --cpu iop --from-cycle 200 --to-cycle 241
 python3 -B tools/inspect_startup.py compare run.jsonl repeat.jsonl --mode trace
 python3 -B tools/inspect_startup.py compare run.jsonl untraced.jsonl
@@ -384,11 +447,13 @@ is not replaced by a later handler failure or ending host stop.
 `events` filters the ordered retained events. Both event commands default to
 `--source prefix`; use `--source failure_capture` to select the bounded window.
 Requesting an absent window is an error, never a fallback to the prefix.
-`--cpu` selects EE or IOP;
-without it, all subsystems are included. `--cycle`, `--from-cycle`, and
+`--cpu` selects actual EE or IOP CPU events;
+without it, all subsystems are included. `--subsystem` selects a numeric ID or
+known subsystem name, including `spu2` and `sif`. `--cycle`, `--from-cycle`, and
 `--to-cycle` are inclusive master-cycle constraints. `--event` accepts a
 numeric ID, `instruction`, `memory`, `exception`, `fault`, or
-`serial_transmit_completed`, `command_accepted`, or `command_completed`
+`serial_transmit_completed`, `command_accepted`, `command_completed`,
+`dma_beat`, or `state_changed`
 (the other full event names also work).
 Serial completion payloads expose the unconverted byte and physical endpoint.
 CDVD command rows retain numeric `subsystem: 15`, add `subsystem_name: "cdvd"`,
@@ -399,6 +464,13 @@ device events. Python validates the decoded object's fields, enum labels,
 integer ranges and eight-byte result shape, but never decodes raw CDVD words
 or derives BCD/calendar policy. Missing or invalid decoded command objects
 are input errors; existing non-CDVD logs need no new fields.
+SPU2 rows similarly expose `subsystem_name: "spu2"` and the exported
+`spu_dma`/`spu_input` object alongside `values_raw`, without CPU attribution.
+Python validates their exact decoded field shapes, paired identities, enums,
+types and bounds; it never decodes the raw SPU words. Missing/malformed decoded
+SPU objects are errors; existing non-SPU reports need no new fields.
+`--address` remains a CPU memory-event virtual-address filter, not a SPU
+physical source-address filter.
 Unknown numeric identities remain raw, not silently
 discarded or interpreted as a known subsystem/event.
 
