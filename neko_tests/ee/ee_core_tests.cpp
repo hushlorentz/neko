@@ -4461,6 +4461,161 @@ TEST_CASE("EE issue candidates are independent of selection policy")
   }
 }
 
+TEST_CASE("EE COP0 and Wide pairs execute without an A-stage stall")
+{
+  for (const std::uint32_t cop0 : {
+         UINT32_C(0x40196800), // MFC0 r25,Cause from the BIOS origin.
+         UINT32_C(0x40997000)}) // MTC0 r25,EPC.
+  {
+    for (const bool cop0Older : {true, false})
+    {
+      CAPTURE(cop0);
+      CAPTURE(cop0Older);
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      constexpr std::uint32_t START = UINT32_C(0x80013fa8);
+      constexpr std::uint32_t WIDE = UINT32_C(0x70621488);
+      system.eeBus().write32(
+        START & UINT32_C(0x1fffffff),
+        cop0Older ? cop0 : WIDE);
+      system.eeBus().write32(
+        (START + 4) & UINT32_C(0x1fffffff),
+        cop0Older ? WIDE : cop0);
+      system.eeBus().write32(
+        (START + 8) & UINT32_C(0x1fffffff),
+        UINT32_C(0x24040001));
+      core.setCOP0Register(EECOP0Register::Status, 0);
+      core.setCOP0Register(EECOP0Register::Cause, UINT32_C(0x80000000));
+      core.setGeneralRegister(25, {UINT64_C(0x12345678), 0});
+      core.setGeneralRegister(2, {UINT64_C(0x1111111100000000), 0});
+      core.setGeneralRegister(3, {UINT64_C(0x3333333322222222), 0});
+      core.startExecution(START);
+
+      system.clockMasterCycle();
+
+      const EEIssueSelection &selection = core.lastIssueSelection();
+      REQUIRE(selection.instructionCount == 2);
+      REQUIRE(selection.pairing == EEIssuePairing::Concurrent);
+      REQUIRE(selection.continuation == EEIssueContinuation::None);
+      REQUIRE(
+        selection.assignment.olderPipe ==
+        (cop0Older ? EELogicalPipe::Pipe1 : EELogicalPipe::Pipe0));
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+      REQUIRE(core.acceptanceRecordsThisCycle()[0].address == START);
+      REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 1);
+      REQUIRE(core.acceptanceRecordsThisCycle()[1].address == START + 4);
+      REQUIRE(core.acceptanceRecordsThisCycle()[1].programOrder == 2);
+      REQUIRE(core.generalRegister(2).low == UINT64_C(0x2222222200000000));
+      REQUIRE(core.generalRegister(2).high == UINT64_C(0x3333333311111111));
+      if (cop0 == UINT32_C(0x40196800))
+      {
+        REQUIRE(core.generalRegister(25).low == UINT64_C(0xffffffff80000000));
+      }
+      else
+      {
+        REQUIRE(core.cop0Register(EECOP0Register::EPC) == UINT32_C(0x12345678));
+      }
+      REQUIRE_FALSE(EECoreTestAccess::youngerAStageContinuationActive(core));
+      REQUIRE(core.programCounter() == START + 8);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.generalRegister(4).low == 1);
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 3);
+    }
+  }
+}
+
+TEST_CASE("EE Wide pairs preserve scalar SYNC and ERET execution")
+{
+  for (const std::uint32_t control : {
+         UINT32_C(0x0000000f),
+         UINT32_C(0x0000040f),
+         UINT32_C(0x42000018)})
+  {
+    for (const bool controlOlder : {true, false})
+    {
+      CAPTURE(control);
+      CAPTURE(controlOlder);
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      constexpr std::uint32_t START = UINT32_C(0x80000100);
+      constexpr std::uint32_t TARGET = UINT32_C(0x80000200);
+      constexpr std::uint32_t WIDE = UINT32_C(0x70621488);
+      system.eeBus().write32(0x100, controlOlder ? control : WIDE);
+      system.eeBus().write32(0x104, controlOlder ? WIDE : control);
+      core.setCOP0Register(
+        EECOP0Register::Status, EECOP0Status::EXCEPTION_LEVEL);
+      core.setCOP0Register(EECOP0Register::EPC, TARGET);
+      core.setGeneralRegister(2, {UINT64_C(0x1111111100000000), 0});
+      core.setGeneralRegister(3, {UINT64_C(0x3333333322222222), 0});
+      core.startExecution(START);
+
+      system.clockMasterCycle();
+
+      const bool olderERET =
+        controlOlder && control == UINT32_C(0x42000018);
+      REQUIRE(
+        core.lastIssueSelection().instructionCount ==
+        (olderERET ? 1 : 2));
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE_FALSE(EECoreTestAccess::youngerAStageContinuationActive(core));
+      REQUIRE(
+        core.generalRegister(2).low ==
+        (controlOlder ? UINT64_C(0x1111111100000000)
+                      : UINT64_C(0x2222222200000000)));
+      REQUIRE(
+        core.generalRegister(2).high ==
+        (controlOlder ? 0 : UINT64_C(0x3333333311111111)));
+      REQUIRE(
+        core.programCounter() ==
+        (olderERET ? TARGET : START + 4));
+      if (!olderERET)
+      {
+        system.clockMasterCycle();
+
+        REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+        REQUIRE(core.generalRegister(2).low == UINT64_C(0x2222222200000000));
+        REQUIRE(core.generalRegister(2).high == UINT64_C(0x3333333311111111));
+        REQUIRE(
+          core.programCounter() ==
+          (control == UINT32_C(0x42000018) ? TARGET : START + 8));
+      }
+    }
+  }
+}
+
+TEST_CASE("EE COP0 and Wide register conflicts remain scalar")
+{
+  for (const bool cop0Older : {true, false})
+  {
+    CAPTURE(cop0Older);
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    constexpr std::uint32_t COP0 = UINT32_C(0x40026800);
+    constexpr std::uint32_t WIDE = UINT32_C(0x70621488);
+    system.eeBus().write32(0, cop0Older ? COP0 : WIDE);
+    system.eeBus().write32(4, cop0Older ? WIDE : COP0);
+    core.startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.lastIssueSelection().instructionCount == 1);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+    REQUIRE(core.acceptanceRecordsThisCycle()[0].address == 0);
+    REQUIRE(core.programCounter() == 4);
+    REQUIRE_FALSE(EECoreTestAccess::youngerAStageContinuationActive(core));
+
+    system.clockMasterCycle();
+
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+    REQUIRE(core.acceptanceRecordsThisCycle()[0].address == 4);
+    REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 2);
+    REQUIRE(core.programCounter() == 8);
+  }
+}
+
 TEST_CASE("EE Wide pairs defer the younger A stage by one cycle")
 {
   NekoSystem system;

@@ -3531,9 +3531,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research and admit bounded halfword ADMAS reads through the existing SPU2
       owner for both cores; distinguish control readback from live request/status,
       and pin CPU-load and restored-continuation behavior.
-- [ ] Verify fresh unchanged-input BIOS progress with cold/restored
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.
+
+### EE COP0/Wide Physical-Pipeline Pairing Regression
+
+- [x] Reproduce and repair COP0/wide-operation concurrent selection under the
+      local-manual routing contract and existing EE issue owner; cover both
+      instruction orders, physical exclusions and staged continuation.
+- [ ] Verify fresh unchanged-input BIOS progress beyond the originating pairing
+      failure with cold/restored traced/plain and canonical comparisons;
+      identify the next dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

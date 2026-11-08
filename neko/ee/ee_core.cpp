@@ -2576,8 +2576,25 @@ bool EECore::issueSelectionUsesCompatiblePhysicalPipelines()
   {
     return false;
   }
+  const EEInstructionCategory pipe0Category =
+    issueSelection.assignment.olderPipe == EELogicalPipe::Pipe0
+      ? olderRouting.category
+      : youngerRouting.category;
+  const EEInstructionCategory pipe1Category =
+    issueSelection.assignment.olderPipe == EELogicalPipe::Pipe1
+      ? olderRouting.category
+      : youngerRouting.category;
+  // COREUM tables 1-1/1-3 permit COP0/Wide I1 overlap without an A-stage stall.
+  const bool nonStallingCOP0WidePair =
+    issueSelection.pairing == EEIssuePairing::Concurrent &&
+    issueSelection.continuation == EEIssueContinuation::None &&
+    sharedPhysicalPipelines ==
+      static_cast<std::uint8_t>(EEPhysicalPipeline::I1) &&
+    pipe0Category == EEInstructionCategory::WideOperate &&
+    pipe1Category == EEInstructionCategory::COP0;
   const bool compatible =
     sharedPhysicalPipelines == 0 ||
+    nonStallingCOP0WidePair ||
     issueSelection.pairing ==
       EEIssuePairing::ConcurrentWithStall;
   assert(compatible);
