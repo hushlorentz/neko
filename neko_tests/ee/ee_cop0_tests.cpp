@@ -1979,8 +1979,8 @@ TEST_CASE("EE debug COP0 inspection rejects invalid selectors without mutation",
   }
 }
 
-TEST_CASE("EE performance COP0 decoder admits only the manual read selectors",
-  "[performance-cop0]")
+TEST_CASE("EE performance COP0 decoder admits bounded manual transfer selectors",
+  "[performance-cop0][performance-control]")
 {
   const auto performance = static_cast<EECOP0Register>(25);
   for (std::uint16_t selector = 0; selector < 2048; ++selector)
@@ -1989,13 +1989,14 @@ TEST_CASE("EE performance COP0 decoder admits only the manual read selectors",
     const bool valid = selector == 0 || selector == 1 || selector == 3;
     for (const std::uint8_t source : {0, 4})
     {
+      CAPTURE(source);
       const auto raw = cop0TransferInstruction(source, 25, performance) | selector;
       if (!valid)
       {
         REQUIRE_THROWS_WITH(
           decodeEEInstruction(raw), "Reserved EE instruction encoding.");
       }
-      else if (source == 4)
+      else if (source == 4 && selector != 0)
       {
         REQUIRE_THROWS_WITH(
           decodeEEInstruction(raw), "Unsupported EE instruction encoding.");
@@ -2005,8 +2006,10 @@ TEST_CASE("EE performance COP0 decoder admits only the manual read selectors",
         for (std::uint8_t target = 0; target < 32; ++target)
         {
           const auto instruction =
-            decodeEEInstruction(cop0TransferInstruction(0, target, performance) | selector);
-          REQUIRE(instruction.operation == EEOperation::MoveWordFromCOP0);
+            decodeEEInstruction(cop0TransferInstruction(source, target, performance) | selector);
+          REQUIRE(
+            instruction.operation ==
+            (source == 0 ? EEOperation::MoveWordFromCOP0 : EEOperation::MoveWordToCOP0));
           REQUIRE(instruction.destinationRegister == 25);
           REQUIRE(instruction.targetRegister == target);
           REQUIRE((instruction.raw & UINT32_C(0x7ff)) == selector);
@@ -2058,8 +2061,11 @@ TEST_CASE("EE performance COP0 reads project the unprogrammed disabled bank",
       NekoSystem system;
       system.eeCore().setGeneralRegister(25, {value, UINT64_MAX});
       runInstruction(&system, cop0TransferInstruction(4, 25, performance) | selector);
-      REQUIRE(system.eeCore().stopReason() == EEStopReason::UnsupportedInstruction);
-      REQUIRE(system.eeCore().acceptanceRecordsThisCycle().size() == 0);
+      REQUIRE(
+        system.eeCore().stopReason() ==
+        (selector != 0 ? EEStopReason::UnsupportedInstruction :
+         value == 0 ? EEStopReason::None : EEStopReason::UndefinedOperation));
+      REQUIRE(system.eeCore().acceptanceRecordsThisCycle().size() == (selector == 0 && value == 0 ? 1 : 0));
       REQUIRE(system.eeCore().pendingException() == EEException::None);
     }
   }
@@ -2083,6 +2089,250 @@ TEST_CASE("EE performance COP0 inspection rejects invalid selectors without muta
       core.cop0PerformanceRegister(static_cast<EECOP0PerformanceRegister>(selector)),
       "EE COP0 performance register is not implemented.");
     REQUIRE(core.stateHash() == before);
+  }
+}
+
+TEST_CASE("EE MTPS accepts only a zero low word from every GPR",
+  "[performance-control]")
+{
+  const auto performance = static_cast<EECOP0Register>(25);
+  for (std::uint8_t source = 0; source < 32; ++source)
+  {
+    CAPTURE(source);
+    for (const auto value : {UINT64_C(0), UINT64_C(0xffffffff00000000)})
+    {
+      NekoSystem system;
+      auto &core = system.eeCore();
+      core.setGeneralRegister(source, {value, UINT64_MAX});
+      const auto before = core.generalRegister(source);
+      const auto write = cop0TransferInstruction(4, source, performance);
+
+      runInstruction(&system, write);
+
+      REQUIRE(core.stopReason() == EEStopReason::None);
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE(core.lastInstruction().raw == write);
+      REQUIRE(core.generalRegister(source) == before);
+      REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::EventSpecifier) == 0);
+      REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::Counter0) == 0);
+      REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::Counter1) == 0);
+    }
+  }
+  for (std::uint32_t bit = 0; bit < 32; ++bit)
+  {
+    CAPTURE(bit);
+    NekoSystem system;
+    auto &core = system.eeCore();
+    const EERegister128 value{UINT64_C(0xffffffff00000000) | (UINT32_C(1) << bit), UINT64_MAX};
+    core.setGeneralRegister(3, value);
+    const auto write = cop0TransferInstruction(4, 3, performance);
+
+    runInstruction(&system, write);
+
+    REQUIRE(core.stopReason() == EEStopReason::UndefinedOperation);
+    REQUIRE(core.rejectedInstruction() == write);
+    REQUIRE(core.pendingException() == EEException::None);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+    REQUIRE(core.generalRegister(3) == value);
+    REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::EventSpecifier) == 0);
+    REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::Counter0) == 0);
+    REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::Counter1) == 0);
+  }
+}
+
+TEST_CASE("EE MTPS checks usability before its operand boundary",
+  "[performance-control]")
+{
+  for (const auto mode :
+       {UINT32_C(0), EECOP0Status::USER_MODE, EECOP0Status::SUPERVISOR_MODE})
+  {
+    for (const bool cu0 : {false, true})
+    {
+      for (const std::uint64_t value : {0, 1})
+      {
+        CAPTURE(mode);
+        CAPTURE(cu0);
+        CAPTURE(value);
+        NekoSystem system;
+        auto &core = system.eeCore();
+        core.setCOP0Register(EECOP0Register::Status, mode | (cu0 ? EECOP0Status::COP0_USABLE : 0));
+        mapLowKusegForTest(&core);
+        core.setGeneralRegister(3, {value, UINT64_MAX});
+        const auto write = UINT32_C(0x4083c800);
+        const bool usable = mode == 0 || cu0;
+
+        runInstruction(&system, write);
+
+        REQUIRE(
+          core.stopReason() ==
+          (usable && value != 0 ? EEStopReason::UndefinedOperation : EEStopReason::None));
+        REQUIRE(
+          core.pendingException() ==
+          (usable ? EEException::None : EEException::CoprocessorUnusable));
+        REQUIRE(core.acceptanceRecordsThisCycle().size() == (usable && value == 0 ? 1 : 0));
+        REQUIRE(core.generalRegister(3) == EERegister128{value, UINT64_MAX});
+        REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::EventSpecifier) == 0);
+        if (!usable)
+        {
+          REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+          REQUIRE((core.cop0Register(EECOP0Register::Cause) & EECOP0Cause::COPROCESSOR_ERROR_MASK) == 0);
+        }
+      }
+    }
+  }
+
+  SECTION("Delay-slot faults preserve the older branch")
+  {
+    for (const bool usable : {false, true})
+    {
+      NekoSystem system;
+      auto &core = system.eeCore();
+      core.setCOP0Register(
+        EECOP0Register::Status,
+        EECOP0Status::USER_MODE | (usable ? EECOP0Status::COP0_USABLE : 0));
+      mapLowKusegForTest(&core);
+      core.setGeneralRegister(3, {1, UINT64_MAX});
+      system.eeBus().write32(0x100, UINT32_C(0x10000007));
+      system.eeBus().write32(0x104, UINT32_C(0x4083c800));
+      core.startExecution(0x100);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE(core.acceptanceRecordsThisCycle()[0].instruction.raw == UINT32_C(0x10000007));
+      REQUIRE(core.stopReason() == (usable ? EEStopReason::UndefinedOperation : EEStopReason::None));
+      REQUIRE(core.pendingException() == (usable ? EEException::None : EEException::CoprocessorUnusable));
+      if (usable)
+      {
+        REQUIRE(core.programCounter() == 0x104);
+        REQUIRE(core.rejectedInstruction() == UINT32_C(0x4083c800));
+      }
+      else
+      {
+        REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0x100);
+        REQUIRE((core.cop0Register(EECOP0Register::Cause) & EECOP0Cause::BRANCH_DELAY) != 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("EE MTPS preserves ordered Wide work and source dependencies",
+  "[performance-control]")
+{
+  SECTION("Independent Wide work survives only when older than a rejection")
+  {
+    for (const bool writeOlder : {false, true})
+    {
+      for (const std::uint64_t value : {0, 1})
+      {
+        CAPTURE(writeOlder);
+        CAPTURE(value);
+        NekoSystem system;
+        auto &core = system.eeCore();
+        constexpr auto WRITE = UINT32_C(0x4083c800);
+        constexpr auto WIDE = UINT32_C(0x70a43488);
+        system.eeBus().write32(0, writeOlder ? WRITE : WIDE);
+        system.eeBus().write32(4, writeOlder ? WIDE : WRITE);
+        core.setGeneralRegister(3, {value, UINT64_MAX});
+        core.setGeneralRegister(4, {UINT64_C(0x1111111100000000), 0});
+        core.setGeneralRegister(5, {UINT64_C(0x3333333322222222), 0});
+        core.startExecution(0);
+
+        system.clockMasterCycle();
+
+        const bool wideRetires = value == 0 || !writeOlder;
+        REQUIRE(core.stopReason() == (value == 0 ? EEStopReason::None : EEStopReason::UndefinedOperation));
+        REQUIRE(core.pendingException() == EEException::None);
+        REQUIRE(core.acceptanceRecordsThisCycle().size() == (value == 0 ? 2 : (writeOlder ? 0 : 1)));
+        REQUIRE(
+          core.generalRegister(6) ==
+          (wideRetires
+             ? EERegister128{UINT64_C(0x2222222200000000), UINT64_C(0x3333333311111111)}
+             : EERegister128{}));
+        REQUIRE(core.generalRegister(3) == EERegister128{value, UINT64_MAX});
+        if (value != 0)
+        {
+          REQUIRE(core.programCounter() == (writeOlder ? 0 : 4));
+          REQUIRE(core.rejectedInstruction() == WRITE);
+        }
+      }
+    }
+  }
+
+  SECTION("The operand comes from the completed older producer")
+  {
+    for (const std::uint64_t value : {0, 1})
+    {
+      NekoSystem system;
+      auto &core = system.eeCore();
+      system.eeBus().write32(0, UINT32_C(0x24030000) | static_cast<std::uint32_t>(value));
+      system.eeBus().write32(4, UINT32_C(0x4083c800));
+      core.setGeneralRegister(3, {value == 0 ? 1U : 0U, UINT64_MAX});
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.lastIssueSelection().instructionCount == 1);
+      REQUIRE(core.programCounter() == 4);
+      REQUIRE(core.generalRegister(3).low == value);
+      REQUIRE(core.stopReason() == EEStopReason::None);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.stopReason() == (value == 0 ? EEStopReason::None : EEStopReason::UndefinedOperation));
+      REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::EventSpecifier) == 0);
+    }
+  }
+}
+
+TEST_CASE("EE MTPS delay-slot completion and rejection restore deterministically",
+  "[performance-control][save-state]")
+{
+  for (const std::uint64_t value : {0, 1})
+  {
+    for (const std::uint64_t checkpointCycle : {0, 1})
+    {
+      CAPTURE(value);
+      CAPTURE(checkpointCycle);
+      NekoSystem original;
+      original.eeBus().write32(0x100, UINT32_C(0x10000007));
+      original.eeBus().write32(0x104, UINT32_C(0x4083c800));
+      original.eeBus().write32(0x120, UINT32_C(0x0000040f));
+      original.eeBus().write32(0x124, UINT32_C(0x4004c800));
+      original.eeCore().setGeneralRegister(3, {value, UINT64_MAX});
+      original.eeCore().setGeneralRegister(4, {UINT64_MAX, UINT64_MAX});
+      original.eeCore().startExecution(UINT32_C(0x80000100));
+      original.runMasterCycles(checkpointCycle);
+      const auto checkpoint = original.saveState();
+      NekoSystem restored;
+      NekoSystem plain;
+      restored.loadState(checkpoint);
+      plain.loadState(checkpoint);
+      REQUIRE(restored.saveState() == checkpoint);
+      REQUIRE(plain.saveState() == checkpoint);
+      original.startTrace();
+      restored.startTrace();
+      for (auto *machine : {&original, &restored, &plain})
+      {
+        machine->runMasterCycles(3 - checkpointCycle);
+        const auto &core = machine->eeCore();
+        REQUIRE(core.stopReason() == (value == 0 ? EEStopReason::None : EEStopReason::UndefinedOperation));
+        REQUIRE(core.pendingException() == EEException::None);
+        REQUIRE(core.generalRegister(3) == EERegister128{value, UINT64_MAX});
+        REQUIRE(
+          core.generalRegister(4) ==
+          EERegister128{value == 0 ? 0 : UINT64_MAX, UINT64_MAX});
+        REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::EventSpecifier) == 0);
+        REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::Counter0) == 0);
+        REQUIRE(core.cop0PerformanceRegister(EECOP0PerformanceRegister::Counter1) == 0);
+      }
+      REQUIRE(original.saveState() == restored.saveState());
+      REQUIRE(original.saveState() == plain.saveState());
+      REQUIRE(original.traceHash() == restored.traceHash());
+      REQUIRE(original.trace().size() == restored.trace().size());
+      REQUIRE(plain.trace().empty());
+    }
   }
 }
 

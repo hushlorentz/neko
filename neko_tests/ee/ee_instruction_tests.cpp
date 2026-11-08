@@ -2005,7 +2005,7 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
     }
   }
 
-  SECTION("Performance reads are admitted while writes remain deferred")
+  SECTION("Performance reads and control writes are admitted while counter writes remain deferred")
   {
     for (std::uint8_t rs : {UINT8_C(0), UINT8_C(4)})
     {
@@ -2017,6 +2017,12 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
           REQUIRE(
             decodeEEInstruction(cop0Instruction(rs, 2, 25, selector)).
               operation == EEOperation::MoveWordFromCOP0);
+        }
+        else if (selector == 0)
+        {
+          REQUIRE(
+            decodeEEInstruction(cop0Instruction(rs, 2, 25, selector)).
+              operation == EEOperation::MoveWordToCOP0);
         }
         else
         {

@@ -6022,11 +6022,16 @@ EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
   const std::uint32_t value =
     static_cast<std::uint32_t>(
       generalRegisters[instruction.targetRegister].low);
-  return writeGuestCOP0Register(
-           registerIndex,
-           value,
-           address,
-           instruction.raw)
+  const bool accepted =
+    instruction.destinationRegister == EECOP0Performance::REGISTER_INDEX
+      ? writeGuestCOP0PerformanceRegister(
+          static_cast<EECOP0PerformanceRegister>(
+            instruction.raw & EECOP0Transfer::SELECTOR_MASK),
+          value,
+          address,
+          instruction.raw)
+      : writeGuestCOP0Register(registerIndex, value, address, instruction.raw);
+  return accepted
     ? EEInstructionExecutionOutcome::Completed
     : EEInstructionExecutionOutcome::Rejected;
 }
@@ -7253,6 +7258,26 @@ bool EECore::writeGuestCOP0Register(
   }
   throw std::logic_error(
     "EE guest COP0 write reached an unimplemented register.");
+}
+
+bool EECore::writeGuestCOP0PerformanceRegister(
+  EECOP0PerformanceRegister registerIndex,
+  std::uint32_t value,
+  std::uint32_t address,
+  std::uint32_t instruction)
+{
+  if (registerIndex != EECOP0PerformanceRegister::EventSpecifier)
+  {
+    throw std::logic_error(
+      "EE guest performance COP0 write reached an unimplemented register.");
+  }
+  if (value != 0)
+  {
+    haltUndefinedOperation(address, instruction);
+    return false;
+  }
+  // Zero is an idempotent write to the provisional disabled bank.
+  return true;
 }
 
 void EECore::haltUndefinedOperation(

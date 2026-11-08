@@ -3567,8 +3567,17 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research and admit bounded performance COP0 reads required by BIOS through
       existing ownership; separate event-specifier readback from counter
       execution, and cover selector validity and restored continuation.
-- [ ] Verify fresh unchanged-input BIOS progress beyond the originating
+- [x] Verify fresh unchanged-input BIOS progress beyond the originating
       performance read with cold/restored traced/plain and canonical comparisons;
+      identify the next dependency without claiming completed boot.
+
+### EE Performance COP0 Zero-Control Write Dependency
+
+- [x] Research and admit bounded MTPS zero-control writes through the existing
+      performance/COP0 owner; exclude nonzero control and counter programming,
+      and cover usability, ordered issue and restored continuation.
+- [ ] Verify fresh unchanged-input BIOS progress beyond the originating
+      zero-control write with cold/restored traced/plain and canonical comparisons;
       identify the next dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
