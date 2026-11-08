@@ -89,7 +89,7 @@ namespace
     const EEInstruction &instruction)
   {
     const std::uint32_t selector =
-      instruction.raw & UINT32_C(0x000007ff);
+      instruction.raw & EECOP0Transfer::SELECTOR_MASK;
     if (instruction.destinationRegister == EECOP0Debug::REGISTER_INDEX)
     {
       if (!EECOP0Debug::validSelector(selector))
@@ -100,15 +100,15 @@ namespace
         ? DecodeKind::Direct
         : DecodeKind::Unsupported;
     }
-    if (instruction.destinationRegister == 25)
+    if (instruction.destinationRegister == EECOP0Performance::REGISTER_INDEX)
     {
-      if (selector == 0 ||
-          selector == 1 ||
-          selector == 3)
+      if (!EECOP0Performance::validSelector(selector))
       {
-        return DecodeKind::Unsupported;
+        return DecodeKind::Reserved;
       }
-      return DecodeKind::Reserved;
+      return instruction.sourceRegister == 0
+        ? DecodeKind::Direct
+        : DecodeKind::Unsupported;
     }
     if (selector != 0)
     {

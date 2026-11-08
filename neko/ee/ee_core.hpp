@@ -383,6 +383,8 @@ class EECore final : public ClockedComponent
       EECOP0Register registerIndex) const;
     std::uint32_t cop0DebugRegister(
       EECOP0DebugRegister registerIndex) const;
+    std::uint32_t cop0PerformanceRegister(
+      EECOP0PerformanceRegister registerIndex) const;
     void setCOP0Register(
       EECOP0Register registerIndex,
       std::uint32_t value);
@@ -1484,6 +1486,8 @@ class EECore final : public ClockedComponent
     EEInstructionExecutionOutcome executeCOP0RegisterMove(
       const EEInstruction &instruction,
       std::uint32_t address);
+    std::uint32_t readCOP0Register(
+      const EEInstruction &instruction) const;
     EEInstructionExecutionOutcome executeCOP0TLBOperation(
       const EEInstruction &instruction,
       std::uint32_t address);

@@ -6015,13 +6015,7 @@ EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
       instruction.destinationRegister);
   if (instruction.operation == EEOperation::MoveWordFromCOP0)
   {
-    const std::uint32_t value =
-      instruction.destinationRegister == EECOP0Debug::REGISTER_INDEX
-        ? cop0DebugRegister(
-            static_cast<EECOP0DebugRegister>(
-              instruction.raw & EECOP0Debug::SELECTOR_MASK))
-        : cop0Register(registerIndex);
-    writeWord(instruction.targetRegister, value);
+    writeWord(instruction.targetRegister, readCOP0Register(instruction));
     return EEInstructionExecutionOutcome::Completed;
   }
 
@@ -6035,6 +6029,24 @@ EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
            instruction.raw)
     ? EEInstructionExecutionOutcome::Completed
     : EEInstructionExecutionOutcome::Rejected;
+}
+
+std::uint32_t EECore::readCOP0Register(
+  const EEInstruction &instruction) const
+{
+  const auto selector =
+    instruction.raw & EECOP0Transfer::SELECTOR_MASK;
+  switch (instruction.destinationRegister)
+  {
+    case EECOP0Debug::REGISTER_INDEX:
+      return cop0DebugRegister(static_cast<EECOP0DebugRegister>(selector));
+    case EECOP0Performance::REGISTER_INDEX:
+      return cop0PerformanceRegister(
+        static_cast<EECOP0PerformanceRegister>(selector));
+    default:
+      return cop0Register(
+        static_cast<EECOP0Register>(instruction.destinationRegister));
+  }
 }
 
 EEInstructionExecutionOutcome EECore::executeCOP0TLBOperation(
@@ -11152,6 +11164,18 @@ std::uint32_t EECore::cop0DebugRegister(
       "EE COP0 debug register is not implemented.");
   }
   // Provisional unprogrammed-bank policy; debug writes remain unsupported.
+  return 0;
+}
+
+std::uint32_t EECore::cop0PerformanceRegister(
+  EECOP0PerformanceRegister registerIndex) const
+{
+  if (!EECOP0Performance::validSelector(static_cast<std::uint16_t>(registerIndex)))
+  {
+    throw std::out_of_range(
+      "EE COP0 performance register is not implemented.");
+  }
+  // Provisional zero-reset disabled-bank policy; programming remains unsupported.
   return 0;
 }
 

@@ -13,7 +13,10 @@ namespace
   constexpr std::uint32_t READ_ONLY_COP0_INSTRUCTIONS[] = {
     UINT32_C(0x4003b800),
     UINT32_C(0x4003c000),
-    UINT32_C(0x4003c007)
+    UINT32_C(0x4003c007),
+    UINT32_C(0x4003c800),
+    UINT32_C(0x4003c801),
+    UINT32_C(0x4003c803)
   };
 
   std::uint32_t cop0TransferInstruction(
@@ -1976,8 +1979,115 @@ TEST_CASE("EE debug COP0 inspection rejects invalid selectors without mutation",
   }
 }
 
+TEST_CASE("EE performance COP0 decoder admits only the manual read selectors",
+  "[performance-cop0]")
+{
+  const auto performance = static_cast<EECOP0Register>(25);
+  for (std::uint16_t selector = 0; selector < 2048; ++selector)
+  {
+    CAPTURE(selector);
+    const bool valid = selector == 0 || selector == 1 || selector == 3;
+    for (const std::uint8_t source : {0, 4})
+    {
+      const auto raw = cop0TransferInstruction(source, 25, performance) | selector;
+      if (!valid)
+      {
+        REQUIRE_THROWS_WITH(
+          decodeEEInstruction(raw), "Reserved EE instruction encoding.");
+      }
+      else if (source == 4)
+      {
+        REQUIRE_THROWS_WITH(
+          decodeEEInstruction(raw), "Unsupported EE instruction encoding.");
+      }
+      else
+      {
+        for (std::uint8_t target = 0; target < 32; ++target)
+        {
+          const auto instruction =
+            decodeEEInstruction(cop0TransferInstruction(0, target, performance) | selector);
+          REQUIRE(instruction.operation == EEOperation::MoveWordFromCOP0);
+          REQUIRE(instruction.destinationRegister == 25);
+          REQUIRE(instruction.targetRegister == target);
+          REQUIRE((instruction.raw & UINT32_C(0x7ff)) == selector);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE performance COP0 reads project the unprogrammed disabled bank",
+  "[performance-cop0]")
+{
+  const auto performance = static_cast<EECOP0Register>(25);
+  for (const std::uint16_t selector : {0, 1, 3})
+  {
+    CAPTURE(selector);
+    for (const std::uint8_t target : {0, 25, 31})
+    {
+      CAPTURE(target);
+      NekoSystem system;
+      auto &core = system.eeCore();
+      core.setGeneralRegister(target, {UINT64_MAX, UINT64_C(0x123456789abcdef0)});
+      const auto read = cop0TransferInstruction(0, target, performance) | selector;
+
+      runInstruction(&system, read);
+
+      REQUIRE(core.stopReason() == EEStopReason::None);
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE(core.lastInstruction().raw == read);
+      const auto expected =
+        target == 0 ? EERegister128{} : EERegister128{0, UINT64_C(0x123456789abcdef0)};
+      REQUIRE(core.generalRegister(target) == expected);
+      const auto count = core.cop0Register(EECOP0Register::Count);
+
+      system.runMasterCycles(4);
+      runInstruction(&system, read);
+
+      REQUIRE(core.cop0Register(EECOP0Register::Count) != count);
+      REQUIRE(core.stopReason() == EEStopReason::None);
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.generalRegister(target) == expected);
+      core.reset();
+      runInstruction(&system, read);
+      REQUIRE(core.generalRegister(target).low == 0);
+    }
+    for (const auto value : {UINT64_C(0), UINT64_MAX, UINT64_C(0x80000000)})
+    {
+      NekoSystem system;
+      system.eeCore().setGeneralRegister(25, {value, UINT64_MAX});
+      runInstruction(&system, cop0TransferInstruction(4, 25, performance) | selector);
+      REQUIRE(system.eeCore().stopReason() == EEStopReason::UnsupportedInstruction);
+      REQUIRE(system.eeCore().acceptanceRecordsThisCycle().size() == 0);
+      REQUIRE(system.eeCore().pendingException() == EEException::None);
+    }
+  }
+}
+
+TEST_CASE("EE performance COP0 inspection rejects invalid selectors without mutation",
+  "[performance-cop0]")
+{
+  NekoSystem system;
+  auto &core = system.eeCore();
+  const auto before = core.stateHash();
+  for (const std::uint16_t selector : {0, 1, 3})
+  {
+    REQUIRE(
+      core.cop0PerformanceRegister(static_cast<EECOP0PerformanceRegister>(selector)) == 0);
+    REQUIRE(core.stateHash() == before);
+  }
+  for (const std::uint16_t selector : {2, 4, 0x40, 0x400, 0x7ff, 0x800, 0xffff})
+  {
+    REQUIRE_THROWS_WITH(
+      core.cop0PerformanceRegister(static_cast<EECOP0PerformanceRegister>(selector)),
+      "EE COP0 performance register is not implemented.");
+    REQUIRE(core.stateHash() == before);
+  }
+}
+
 TEST_CASE("EE read-only COP0 reads preserve usability and ordered issue",
-  "[reserved-cop0][debug-cop0]")
+  "[reserved-cop0][debug-cop0][performance-cop0]")
 {
   SECTION("User and supervisor reads still require CU0")
   {
@@ -2108,7 +2218,7 @@ TEST_CASE("EE read-only COP0 reads preserve usability and ordered issue",
 }
 
 TEST_CASE("EE read-only COP0 delay-slot reads restore deterministic continuation",
-  "[reserved-cop0][debug-cop0][save-state]")
+  "[reserved-cop0][debug-cop0][performance-cop0][save-state]")
 {
   for (const auto read : READ_ONLY_COP0_INSTRUCTIONS)
   {

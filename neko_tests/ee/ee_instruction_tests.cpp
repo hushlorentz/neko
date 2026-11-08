@@ -2005,15 +2005,23 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
     }
   }
 
-  SECTION("Performance register transfers validate counter selectors")
+  SECTION("Performance reads are admitted while writes remain deferred")
   {
     for (std::uint8_t rs : {UINT8_C(0), UINT8_C(4)})
     {
       for (std::uint16_t selector :
            {UINT16_C(0), UINT16_C(1), UINT16_C(3)})
       {
-        requireUnsupported(
-          cop0Instruction(rs, 2, 25, selector));
+        if (rs == 0)
+        {
+          REQUIRE(
+            decodeEEInstruction(cop0Instruction(rs, 2, 25, selector)).
+              operation == EEOperation::MoveWordFromCOP0);
+        }
+        else
+        {
+          requireUnsupported(cop0Instruction(rs, 2, 25, selector));
+        }
       }
       requireReserved(cop0Instruction(rs, 2, 25, 0x02));
       requireReserved(cop0Instruction(rs, 2, 25, 0x05));

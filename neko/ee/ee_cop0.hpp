@@ -26,6 +26,11 @@ enum class EECOP0Register : std::uint8_t
   ErrorEPC = 30
 };
 
+namespace EECOP0Transfer
+{
+  constexpr std::uint32_t SELECTOR_MASK = UINT32_C(0x000007ff);
+}
+
 enum class EECOP0DebugRegister : std::uint16_t
 {
   BreakpointControl = 0,
@@ -40,11 +45,28 @@ enum class EECOP0DebugRegister : std::uint16_t
 namespace EECOP0Debug
 {
   constexpr std::uint8_t REGISTER_INDEX = 24;
-  constexpr std::uint32_t SELECTOR_MASK = UINT32_C(0x000007ff);
+  constexpr std::uint32_t SELECTOR_MASK = EECOP0Transfer::SELECTOR_MASK;
 
   constexpr bool validSelector(std::uint32_t selector)
   {
     return selector <= 7 && selector != 1;
+  }
+}
+
+enum class EECOP0PerformanceRegister : std::uint16_t
+{
+  EventSpecifier = 0,
+  Counter0 = 1,
+  Counter1 = 3
+};
+
+namespace EECOP0Performance
+{
+  constexpr std::uint8_t REGISTER_INDEX = 25;
+
+  constexpr bool validSelector(std::uint32_t selector)
+  {
+    return selector == 0 || selector == 1 || selector == 3;
   }
 }
 
