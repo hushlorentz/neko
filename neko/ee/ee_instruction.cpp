@@ -113,6 +113,11 @@ namespace
     {
       return DecodeKind::Reserved;
     }
+    if (instruction.sourceRegister == 0 &&
+        EECOP0ReservedRead::admits(instruction.destinationRegister))
+    {
+      return DecodeKind::Direct;
+    }
     return implementedCOP0Register(
              instruction.destinationRegister)
       ? DecodeKind::Direct

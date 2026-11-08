@@ -1804,6 +1804,213 @@ TEST_CASE("EE MFC0 sign extends the COP0 low word")
       UINT64_C(0x3333333344444444)});
 }
 
+TEST_CASE("EE reserved COP0 reads require canonical read encodings",
+  "[reserved-cop0]")
+{
+  for (const std::uint8_t index : {
+         7, 17, 18, 19, 20, 21, 22, 23, 26, 27, 31})
+  {
+    CAPTURE(index);
+    const auto reg = static_cast<EECOP0Register>(index);
+    for (std::uint8_t target = 0; target < 32; ++target)
+    {
+      const auto instruction =
+        decodeEEInstruction(cop0TransferInstruction(0, target, reg));
+      REQUIRE(instruction.operation == EEOperation::MoveWordFromCOP0);
+      REQUIRE(instruction.targetRegister == target);
+      REQUIRE(instruction.destinationRegister == index);
+    }
+    REQUIRE_THROWS_WITH(
+      decodeEEInstruction(cop0TransferInstruction(4, 3, reg)),
+      "Unsupported EE instruction encoding.");
+    for (unsigned bit = 0; bit < 11; ++bit)
+    {
+      for (const std::uint8_t source : {0, 4})
+      {
+        REQUIRE_THROWS_WITH(
+          decodeEEInstruction(
+            cop0TransferInstruction(source, 3, reg) | (UINT32_C(1) << bit)),
+          "Reserved EE instruction encoding.");
+      }
+    }
+  }
+  REQUIRE(decodeEEInstruction(UINT32_C(0x4003b800)).destinationRegister == 23);
+}
+
+TEST_CASE("EE reserved COP0 reads return zero without writable state",
+  "[reserved-cop0]")
+{
+  for (const std::uint8_t index : {
+         7, 17, 18, 19, 20, 21, 22, 23, 26, 27, 31})
+  {
+    CAPTURE(index);
+    NekoSystem system;
+    EECore &core = system.eeCore();
+    const auto reg = static_cast<EECOP0Register>(index);
+    const auto before = core.stateHash();
+    REQUIRE(core.cop0Register(reg) == 0);
+    REQUIRE(core.stateHash() == before);
+    for (const auto value : {UINT32_C(0), UINT32_MAX})
+    {
+      REQUIRE_THROWS_WITH(
+        core.setCOP0Register(reg, value),
+        "EE COP0 register is not implemented.");
+    }
+    REQUIRE(core.stateHash() == before);
+    core.setGeneralRegister(3, {UINT64_MAX, UINT64_C(0x123456789abcdef0)});
+
+    runInstruction(&system, cop0TransferInstruction(0, 3, reg));
+
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+    REQUIRE(
+      core.generalRegister(3) ==
+      EERegister128{0, UINT64_C(0x123456789abcdef0)});
+    REQUIRE(core.cop0Register(reg) == 0);
+
+    runInstruction(&system, cop0TransferInstruction(0, 0, reg));
+
+    REQUIRE(core.stopReason() == EEStopReason::None);
+    REQUIRE(core.generalRegister(0) == EERegister128{});
+    core.reset();
+    REQUIRE(core.cop0Register(reg) == 0);
+  }
+}
+
+TEST_CASE("EE reserved COP0 reads preserve usability and ordered issue",
+  "[reserved-cop0]")
+{
+  SECTION("User and supervisor reads still require CU0")
+  {
+    for (const auto mode : {EECOP0Status::USER_MODE, EECOP0Status::SUPERVISOR_MODE})
+    {
+      for (const bool usable : {false, true})
+      {
+        CAPTURE(mode);
+        CAPTURE(usable);
+        NekoSystem system;
+        EECore &core = system.eeCore();
+        core.setCOP0Register(
+          EECOP0Register::Status, mode | (usable ? EECOP0Status::COP0_USABLE : 0));
+        mapLowKusegForTest(&core);
+        core.setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
+
+        runInstruction(&system, UINT32_C(0x4003b800));
+
+        REQUIRE(core.stopReason() == EEStopReason::None);
+        REQUIRE(
+          core.pendingException() ==
+          (usable ? EEException::None : EEException::CoprocessorUnusable));
+        REQUIRE(
+          core.generalRegister(3) ==
+          EERegister128{usable ? 0 : UINT64_MAX, UINT64_MAX});
+        if (!usable)
+        {
+          REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+          REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+          REQUIRE(
+            (core.cop0Register(EECOP0Register::Cause) &
+             EECOP0Cause::COPROCESSOR_ERROR_MASK) == 0);
+        }
+      }
+    }
+  }
+
+  SECTION("Independent Wide work pairs in either order without a stall")
+  {
+    for (const bool readOlder : {true, false})
+    {
+      CAPTURE(readOlder);
+      NekoSystem system;
+      EECore &core = system.eeCore();
+      constexpr std::uint32_t READ = UINT32_C(0x4003b800);
+      constexpr std::uint32_t WIDE = UINT32_C(0x70a43488);
+      system.eeBus().write32(0, readOlder ? READ : WIDE);
+      system.eeBus().write32(4, readOlder ? WIDE : READ);
+      system.eeBus().write32(8, UINT32_C(0x24670001));
+      core.setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
+      core.setGeneralRegister(4, {UINT64_C(0x1111111100000000), 0});
+      core.setGeneralRegister(5, {UINT64_C(0x3333333322222222), 0});
+      core.startExecution(0);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.lastIssueSelection().instructionCount == 2);
+      REQUIRE(core.lastIssueSelection().pairing == EEIssuePairing::Concurrent);
+      REQUIRE(core.lastIssueSelection().continuation == EEIssueContinuation::None);
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+      REQUIRE(core.generalRegister(3) == EERegister128{0, UINT64_MAX});
+      REQUIRE(core.generalRegister(6).low == UINT64_C(0x2222222200000000));
+      REQUIRE(core.generalRegister(6).high == UINT64_C(0x3333333311111111));
+      REQUIRE(core.programCounter() == 8);
+
+      system.clockMasterCycle();
+
+      REQUIRE(core.generalRegister(7).low == 1);
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 3);
+    }
+  }
+
+  SECTION("A dependent successor waits for the reserved read")
+  {
+    NekoSystem system;
+    system.eeBus().write32(0, UINT32_C(0x4003b800));
+    system.eeBus().write32(4, UINT32_C(0x24670001));
+    system.eeCore().setGeneralRegister(3, {UINT64_MAX, 0});
+    system.eeCore().startExecution(0);
+
+    system.clockMasterCycle();
+
+    REQUIRE(system.eeCore().lastIssueSelection().instructionCount == 1);
+    REQUIRE(system.eeCore().generalRegister(7).low == 0);
+    REQUIRE(system.eeCore().programCounter() == 4);
+
+    system.clockMasterCycle();
+
+    REQUIRE(system.eeCore().generalRegister(7).low == 1);
+  }
+}
+
+TEST_CASE("EE reserved COP0 delay-slot reads restore deterministic continuation",
+  "[reserved-cop0][save-state]")
+{
+  for (const std::uint64_t checkpointCycle : {0, 1})
+  {
+    CAPTURE(checkpointCycle);
+    NekoSystem original;
+    original.eeBus().write32(0x100, UINT32_C(0x10000007));
+    original.eeBus().write32(0x104, UINT32_C(0x4003b800));
+    original.eeBus().write32(0x120, UINT32_C(0x24640001));
+    original.eeCore().setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
+    original.eeCore().startExecution(UINT32_C(0x80000100));
+    original.runMasterCycles(checkpointCycle);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(restored.saveState() == checkpoint);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    for (auto *machine : {&original, &restored, &plain})
+    {
+      machine->runMasterCycles(2 - checkpointCycle);
+      REQUIRE(machine->eeCore().stopReason() == EEStopReason::None);
+      REQUIRE(machine->eeCore().generalRegister(3) == EERegister128{0, UINT64_MAX});
+      REQUIRE(machine->eeCore().generalRegister(4).low == 1);
+      REQUIRE(machine->eeCore().programCounter() == UINT32_C(0x80000124));
+    }
+    REQUIRE(original.saveState() == restored.saveState());
+    REQUIRE(original.saveState() == plain.saveState());
+    REQUIRE(original.traceHash() == restored.traceHash());
+    REQUIRE(original.trace().size() == restored.trace().size());
+    REQUIRE_FALSE(original.trace().empty());
+    REQUIRE(plain.trace().empty());
+  }
+}
+
 TEST_CASE("EE MTC0 consumes only the general-register low word")
 {
   NekoSystem system;
@@ -2363,13 +2570,15 @@ TEST_CASE("EE COP0 rejects unimplemented register identifiers")
 {
   NekoSystem system;
   EECore &core = system.eeCore();
-  const EECOP0Register unsupported =
-    static_cast<EECOP0Register>(7);
-
-  REQUIRE_THROWS_WITH(
-    core.cop0Register(unsupported),
-    "EE COP0 register is not implemented.");
-  REQUIRE_THROWS_WITH(
-    core.setCOP0Register(unsupported, 0),
-    "EE COP0 register is not implemented.");
+  for (const std::uint8_t index : {24, 25, 32, 255})
+  {
+    CAPTURE(index);
+    const auto unsupported = static_cast<EECOP0Register>(index);
+    REQUIRE_THROWS_WITH(
+      core.cop0Register(unsupported),
+      "EE COP0 register is not implemented.");
+    REQUIRE_THROWS_WITH(
+      core.setCOP0Register(unsupported, 0),
+      "EE COP0 register is not implemented.");
+  }
 }

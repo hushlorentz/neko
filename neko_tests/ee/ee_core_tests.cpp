@@ -2212,7 +2212,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
     NekoSystem system;
     EECore &core = system.eeCore();
     system.eeBus().write32(0, UINT32_C(0x24020007));
-    system.eeBus().write32(4, UINT32_C(0x40003800));
+    system.eeBus().write32(4, UINT32_C(0x40803800));
     core.startExecution(0);
 
     const EEIssueGroupExecutionResult result =
@@ -2237,7 +2237,7 @@ TEST_CASE("EE Core executes issue groups at precise boundaries")
       core.stopReason() ==
       EEStopReason::UnsupportedInstruction);
     REQUIRE(core.programCounter() == 4);
-    REQUIRE(core.rejectedInstruction() == 0x40003800);
+    REQUIRE(core.rejectedInstruction() == 0x40803800);
     REQUIRE(core.lastInstructionAddress() == 0);
   }
 
@@ -4312,7 +4312,7 @@ TEST_CASE("EE Core scheduled execution")
 
   SECTION("Deferred instruction families stop explicitly")
   {
-    bus.write32(0, UINT32_C(0x40003800));
+    bus.write32(0, UINT32_C(0x40803800));
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -4325,13 +4325,13 @@ TEST_CASE("EE Core scheduled execution")
     REQUIRE(
       core.stopReason() ==
       EEStopReason::UnsupportedInstruction);
-    REQUIRE(core.rejectedInstruction() == 0x40003800);
+    REQUIRE(core.rejectedInstruction() == 0x40803800);
   }
 
   SECTION("A synchronous stop does not replace prior acceptance")
   {
     bus.write32(0, 0);
-    bus.write32(4, UINT32_C(0x40003800));
+    bus.write32(4, UINT32_C(0x40803800));
     core.startExecution(0);
 
     system.clockMasterCycle();
@@ -4350,7 +4350,7 @@ TEST_CASE("EE Core scheduled execution")
       EEStopReason::UnsupportedInstruction);
     REQUIRE(core.lastInstructionAddress() == 0);
     REQUIRE(core.lastInstruction().operation == EEOperation::Nop);
-    REQUIRE(core.rejectedInstruction() == 0x40003800);
+    REQUIRE(core.rejectedInstruction() == 0x40803800);
   }
 
   SECTION("A synchronous exception produces no acceptance")

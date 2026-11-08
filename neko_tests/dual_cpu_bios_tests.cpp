@@ -205,7 +205,7 @@ TEST_CASE("Dual CPU runner finishes the master cycle before reporting an EE host
 {
   NekoSystem system;
   system.runDualCPUBIOS(countingROM(), 0);
-  system.eeBus().write32(0, 0x40003800); // unsupported EE COP0 register
+  system.eeBus().write32(0, 0x40803800); // unsupported reserved EE COP0 write
   system.eeCore().startExecution(0xa0000000);
   const auto result = system.runDualCPU(1);
   REQUIRE(result.masterCycles == 1);

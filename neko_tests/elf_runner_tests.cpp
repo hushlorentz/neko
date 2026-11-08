@@ -135,7 +135,7 @@ TEST_CASE("BIOS window session retains precise CPU stops",
   SECTION("EE stop freezes the session before its budget")
   {
     neko_frontend::BIOSSession session(
-      frontendBIOS({0x40003800}), 100);
+      frontendBIOS({0x40803800}), 100);
     session.advance(100);
     REQUIRE(session.finished());
     REQUIRE(session.masterCycles() == 1);

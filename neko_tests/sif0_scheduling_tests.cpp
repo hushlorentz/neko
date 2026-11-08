@@ -1959,7 +1959,7 @@ TEST_CASE("CPU execution failures do not abort bidirectional SIF or the running 
     bidirectionalPackets(system, 64, 64);
     receiver(system);
     iopReceiver(system);
-    REQUIRE(system.eeBus().writeData32(0x800, failEE ? 0x40003800 : 0));
+    REQUIRE(system.eeBus().writeData32(0x800, failEE ? 0x40803800 : 0));
     writeIOP(system, 0x800, failEE ? 0 : 0x3c011000);
     writeIOP(system, 0x804, failEE ? 0 : 0xac200000);
     system.eeCore().startExecution(0xa0000800);

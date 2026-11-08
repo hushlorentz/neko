@@ -274,7 +274,7 @@ TEST_CASE("Startup flight recorder shares all failure classes and ignores ordina
   const NekoTraceEvent failures[] = {
     {2, EE, MEMORY, 1, 0, 0, failedEELoad()},
     {2, IOP, MEMORY, 1, 0, 0, failedIOPLoad()},
-    {2, EE, FAULT, 0x1000, 0x40003800, 0,
+    {2, EE, FAULT, 0x1000, 0x40803800, 0,
       NekoEETraceFault::HOST_REJECTION | NekoEETraceFault::INSTRUCTION_AVAILABLE |
         (static_cast<std::uint64_t>(EEStopReason::UnsupportedInstruction) <<
           NekoEETraceFault::STOP_REASON_SHIFT)},
@@ -543,7 +543,7 @@ TEST_CASE("EE startup host rejection and failed fetch expose only available inst
   {
     CAPTURE(fetch);
     NekoSystem system;
-    system.eeBus().write32(0, 0x40003800);
+    system.eeBus().write32(0, 0x40803800);
     system.eeCore().startExecution(fetch ? 0xa0000002 : 0xa0000000);
     system.startTrace();
     system.clockMasterCycle();

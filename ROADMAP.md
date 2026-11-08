@@ -3540,9 +3540,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Reproduce and repair COP0/wide-operation concurrent selection under the
       local-manual routing contract and existing EE issue owner; cover both
       instruction orders, physical exclusions and staged continuation.
-- [ ] Verify fresh unchanged-input BIOS progress beyond the originating pairing
+- [x] Verify fresh unchanged-input BIOS progress beyond the originating pairing
       failure with cold/restored traced/plain and canonical comparisons;
       identify the next dependency without claiming completed boot.
+
+### EE Reserved COP0 Read Dependency
+
+- [x] Admit bounded canonical MFC0 reads for the official reserved COP0 family
+      through the existing decode/register owner; pin the zero-read policy,
+      excluded writes/selectors, CPU ordering and restored continuation.
+- [ ] Verify fresh unchanged-input BIOS progress beyond the originating read
+      with cold/restored traced/plain and canonical comparisons; identify the
+      next dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

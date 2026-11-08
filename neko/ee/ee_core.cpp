@@ -11173,6 +11173,10 @@ std::uint32_t EECore::cop0Register(
     case EECOP0Register::ErrorEPC:
       return cop0ErrorEPC;
   }
+  if (EECOP0ReservedRead::admits(static_cast<std::uint8_t>(registerIndex)))
+  {
+    return 0;
+  }
   throw std::out_of_range(
     "EE COP0 register is not implemented.");
 }

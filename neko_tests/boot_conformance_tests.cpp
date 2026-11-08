@@ -125,7 +125,7 @@ namespace
         system.iopCore().haltExecution();
         break;
       case StoppedCore::EEFailure:
-        system.eeBus().write32(0x1000, 0x40003800);
+        system.eeBus().write32(0x1000, 0x40803800);
         REQUIRE_FALSE(system.runDualCPU(1).cycleLimitReached);
         REQUIRE(system.eeCore().stopReason() == EEStopReason::UnsupportedInstruction);
         break;

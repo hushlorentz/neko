@@ -1814,7 +1814,7 @@ TEST_CASE("EE decoder rejects invalid and deferred encodings")
   SECTION("Deferred valid instruction families are rejected explicitly")
   {
     REQUIRE_THROWS_WITH(
-      decodeEEInstruction(UINT32_C(0x40003800)),
+      decodeEEInstruction(UINT32_C(0x40803800)),
       "Unsupported EE instruction encoding.");
   }
 

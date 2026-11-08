@@ -407,14 +407,14 @@ TEST_CASE("Startup run summaries distinguish host failure from budget exhaustion
   system.runDualCPUBIOS(startupROM(), 0);
   SECTION("Unsupported EE instruction")
   {
-    system.eeBus().write32(0, 0x40003800);
+    system.eeBus().write32(0, 0x40803800);
     system.eeCore().startExecution(0xa0000000);
     const auto result = runDualCPUWithStartupSummary(system, 1);
     REQUIRE_FALSE(result.execution.cycleLimitReached);
     REQUIRE(result.startup.masterCycle == 1);
     REQUIRE(result.startup.ee.state == EEExecutionState::Halted);
     REQUIRE(result.startup.ee.stopReason == EEStopReason::UnsupportedInstruction);
-    REQUIRE(result.startup.ee.rejectedInstruction == 0x40003800);
+    REQUIRE(result.startup.ee.rejectedInstruction == 0x40803800);
     REQUIRE(result.startup.ee.pendingException == EEException::None);
     REQUIRE(result.startup.iop.state == IOPExecutionState::Running);
     REQUIRE(result.startup.iop.retiredInstructions == 1);

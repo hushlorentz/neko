@@ -26,6 +26,31 @@ enum class EECOP0Register : std::uint8_t
   ErrorEPC = 30
 };
 
+namespace EECOP0ReservedRead
+{
+  // Provisional read-only policy; reserved writes remain unsupported.
+  constexpr bool admits(std::uint8_t index)
+  {
+    switch (index)
+    {
+      case 7:
+      case 17:
+      case 18:
+      case 19:
+      case 20:
+      case 21:
+      case 22:
+      case 23:
+      case 26:
+      case 27:
+      case 31:
+        return true;
+      default:
+        return false;
+    }
+  }
+}
+
 namespace EECOP0Index
 {
   constexpr std::uint32_t INDEX_MASK = UINT32_C(0x0000003f);

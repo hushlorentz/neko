@@ -87,7 +87,7 @@ TEST_CASE("BIOS startup command reports host stops without claiming BIOS success
 {
   std::ostringstream output;
   std::ostringstream error;
-  const auto image = discoveryROM(0x40003800); // unsupported EE COP0 register
+  const auto image = discoveryROM(0x40803800); // unsupported reserved EE COP0 write
   const int result = neko_cli::runBIOSStartupCommand(
     {"authored.bin", "--cycles", "18446744073709551615"},
     [&](const std::string &) { return image; },
@@ -292,7 +292,7 @@ TEST_CASE("BIOS startup delayed tracing preserves early host stops and incomplet
     std::ostringstream output;
     std::ostringstream errors;
     bool saved = false;
-    const auto image = runtimeFailure ? rejectedDMAROM() : discoveryROM(0x40003800);
+    const auto image = runtimeFailure ? rejectedDMAROM() : discoveryROM(0x40803800);
     const int result = neko_cli::runBIOSStartupCommand(
       {"authored.bin", "--cycles", "200", "--trace-events", "100",
         "--trace-from-cycle", "100", "--failure-context",
@@ -342,7 +342,7 @@ TEST_CASE("BIOS startup failure context survives an exhausted prefix",
   std::ostringstream error;
   REQUIRE(neko_cli::runBIOSStartupCommand(
     {"authored.bin", "--cycles", "9", "--trace-events", "0", "--failure-context"},
-    [](const std::string &) { return discoveryROM(0x40003800); },
+    [](const std::string &) { return discoveryROM(0x40803800); },
     output, error) == 1);
   REQUIRE(error.str().empty());
   REQUIRE(output.str().find("\"captured_events\":0,\"truncated\":true") !=
@@ -353,7 +353,7 @@ TEST_CASE("BIOS startup failure context survives an exhausted prefix",
     std::string::npos);
   REQUIRE(output.str().find("\"kind\":\"instruction_rejection\",\"cpu\":\"ee\"") !=
     std::string::npos);
-  REQUIRE(output.str().find("\"pc\":3217031168,\"bits\":1073756160") !=
+  REQUIRE(output.str().find("\"pc\":3217031168,\"bits\":1082144768") !=
     std::string::npos);
 }
 
@@ -631,7 +631,7 @@ TEST_CASE("BIOS startup trace options are validated before loading",
 TEST_CASE("BIOS startup trace limits preserve host stops and guest exception handlers",
   "[bios-startup-command][bounded-trace]")
 {
-  for (const std::uint32_t instruction : {0x40003800u, 0x0000000cu})
+  for (const std::uint32_t instruction : {0x40803800u, 0x0000000cu})
   {
     CAPTURE(instruction);
     const auto image = discoveryROM(instruction);
@@ -640,7 +640,7 @@ TEST_CASE("BIOS startup trace limits preserve host stops and guest exception han
     std::ostringstream error;
     const int plainStatus = neko_cli::runBIOSStartupCommand(
       {"authored.bin", "--cycles", "17"}, loader, plain, error);
-    REQUIRE(plainStatus == (instruction == 0x40003800u ? 1 : 0));
+    REQUIRE(plainStatus == (instruction == 0x40803800u ? 1 : 0));
     REQUIRE(error.str().empty());
     for (const std::string limit : {"0", "1", "10000"})
     {

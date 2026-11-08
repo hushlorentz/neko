@@ -3590,7 +3590,7 @@ TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
       system->eeBus().write32(
         8,
         nestedMmiInstruction(0x09, 0x0c, 7, 8, 9));
-      system->eeBus().write32(12, UINT32_C(0x40003800));
+      system->eeBus().write32(12, UINT32_C(0x40803800));
       core.startExecution(0);
       system->startTrace();
     };
@@ -3662,7 +3662,7 @@ TEST_CASE("EE packed MAC traces preserve initiation and retirement order")
       REQUIRE(events[eventIndex].masterCycle == masterCycle);
       REQUIRE(events[eventIndex].type == NekoTraceEventType::FaultContext);
       REQUIRE(events[eventIndex].value0 == 12);
-      REQUIRE(events[eventIndex].value1 == 0x40003800);
+      REQUIRE(events[eventIndex].value1 == 0x40803800);
       REQUIRE(events[eventIndex].value3 ==
         (NekoEETraceFault::INSTRUCTION_AVAILABLE | NekoEETraceFault::HOST_REJECTION |
           (static_cast<std::uint64_t>(EEStopReason::UnsupportedInstruction) <<
@@ -3698,7 +3698,7 @@ TEST_CASE("EE packed divide traces and hashes are deterministic")
       system->eeBus().write32(
         0,
         nestedMmiInstruction(0x09, 0x1d, 1, 2, 0));
-      system->eeBus().write32(4, UINT32_C(0x40003800));
+      system->eeBus().write32(4, UINT32_C(0x40803800));
       core.startExecution(0);
       system->startTrace();
     };
@@ -3751,7 +3751,7 @@ TEST_CASE("EE packed divide traces and hashes are deterministic")
       REQUIRE(fault.masterCycle == cycle + 1);
       REQUIRE(fault.type == NekoTraceEventType::FaultContext);
       REQUIRE(fault.value0 == 4);
-      REQUIRE(fault.value1 == 0x40003800);
+      REQUIRE(fault.value1 == 0x40803800);
       REQUIRE(fault.value3 ==
         (NekoEETraceFault::INSTRUCTION_AVAILABLE | NekoEETraceFault::HOST_REJECTION |
           (static_cast<std::uint64_t>(EEStopReason::UnsupportedInstruction) <<
@@ -3786,7 +3786,7 @@ TEST_CASE("EE packed halfword MAC overlap traces and hashes are deterministic")
       system->eeBus().write32(
         4,
         nestedMmiInstruction(0x09, 0x10, 1, 2, 4));
-      system->eeBus().write32(8, UINT32_C(0x40003800));
+      system->eeBus().write32(8, UINT32_C(0x40803800));
       core.startExecution(0);
       system->startTrace();
     };
