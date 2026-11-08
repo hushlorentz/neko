@@ -847,6 +847,11 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed,
             spu2->readTransferStartAddress(location.offset)}
         : IOPBusReadResult{};
+    case Device::SPU2AutoDMAWriteSelection:
+      return width == sizeof(std::uint16_t) && spu2 != nullptr
+        ? IOPBusReadResult{IOPBusStatus::Completed,
+            spu2->readAutoDMAWriteSelection(location.offset)}
+        : IOPBusReadResult{};
     case Device::SPU2MainMix:
       return width == sizeof(std::uint16_t) && spu2 != nullptr
         ? IOPBusReadResult{IOPBusStatus::Completed,
@@ -961,7 +966,6 @@ IOPBusReadResult IOPBus::readDeviceRegister(
         ? IOPBusReadResult{IOPBusStatus::Completed, 0} : IOPBusReadResult{};
     case Device::POST2:
     case Device::SPU2UnprogrammedKeyOff:
-    case Device::SPU2AutoDMAWriteSelection:
     case Device::SPU2UnknownInitialization:
     case Device::SIO2TransmitInput:
     case Device::POST3:

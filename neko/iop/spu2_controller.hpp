@@ -79,7 +79,7 @@ class SPU2Controller final
     bool hasQuiescentCoreStatus(std::size_t core) const;
     // Provisional KOFF effect; replace before voice programming or key-on.
     void keyOffUnprogrammedVoices() const noexcept;
-    // Own-core PCM input selection; ADMAS readback remains unsupported.
+    // Retained own-core PCM selection image, not live DMA status.
     static bool isSupportedAutoDMAWriteSelection(
       std::size_t core, std::uint16_t value) noexcept;
     std::uint16_t readAutoDMAWriteSelection(std::size_t core) const;

@@ -369,9 +369,11 @@ TEST_CASE("SPU2 PCM input clock starts on the 768th IOP pulse",
 }
 
 TEST_CASE("SPU2 PCM input halves use planar words and real shared capacity",
-  "[iop][spu2][spu2-input]")
+  "[iop][spu2][spu2-input][spu2-admas-read]")
 {
   SPU2Controller spu;
+  IOPBus bus;
+  bus.attachSPU2(&spu);
   SPU2InputTest::programProfile(spu);
   for (std::size_t core = 0; core < 2; ++core)
   {
@@ -389,6 +391,10 @@ TEST_CASE("SPU2 PCM input halves use planar words and real shared capacity",
     }
     REQUIRE_FALSE(spu.inputWriteRequested(core));
     REQUIRE_FALSE(spu.writeInputWord(core, 0xffffffff));
+    const auto read = bus.read16(autoDMAAddresses[core]);
+    REQUIRE(read.status == IOPBusStatus::Completed);
+    REQUIRE(read.value == autoDMAWriteSelections[core]);
+    REQUIRE_FALSE(spu.inputWriteRequested(core));
   }
   auto tick = SPU2InputTest::advanceSamples(spu, 255);
   REQUIRE(tick.sampleTick);
@@ -398,6 +404,11 @@ TEST_CASE("SPU2 PCM input halves use planar words and real shared capacity",
   tick = SPU2InputTest::advanceSamples(spu, 1);
   REQUIRE(spu.inputWriteRequested(0));
   REQUIRE(spu.inputWriteRequested(1));
+  for (std::size_t core = 0; core < 2; ++core)
+  {
+    REQUIRE(bus.read16(autoDMAAddresses[core]).value == autoDMAWriteSelections[core]);
+    REQUIRE(spu.inputWriteRequested(core));
+  }
   tick = SPU2InputTest::advanceSamples(spu, 1);
   for (std::size_t core = 0; core < 2; ++core)
   {
@@ -740,7 +751,8 @@ TEST_CASE("SPU2 Auto DMA write selection admits each core bit without starting D
       }
     }
     REQUIRE(system.iopStateHash() == enabled);
-    REQUIRE(bus.read16(autoDMAAddresses[core]).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.read16(autoDMAAddresses[core]).status == IOPBusStatus::Completed);
+    REQUIRE(bus.read16(autoDMAAddresses[core]).value == autoDMAWriteSelections[core]);
     for (IOPAddress address : {
         0x1f9001acu, 0x1f9005acu, 0x1f8010c0u, 0x1f8010c8u,
         0x1f801500u, 0x1f801508u})
@@ -1904,6 +1916,49 @@ TEST_CASE("SPU2 core attribute loads restore before and after the delayed result
   }
 }
 
+TEST_CASE("SPU2 ADMAS loads restore before and after the delayed result",
+  "[iop][spu2][spu2-admas-read][save-state][trace]")
+{
+  for (std::size_t core = 0; core < autoDMAAddresses.size(); ++core)
+  for (unsigned cut : {32u, 40u})
+  {
+    CAPTURE(core);
+    CAPTURE(cut);
+    NekoSystem original;
+    SPU2InputTest::programProfile(original.spu2Controller());
+    const auto address = autoDMAAddresses[core];
+    const auto selection = autoDMAWriteSelections[core];
+    REQUIRE(original.iopBus().write16(address, selection).status ==
+      IOPBusStatus::Completed);
+    installHalfwordReadProgram(original, address | 0xa0000000u, 0x94220000);
+    original.runMasterCycles(cut);
+    REQUIRE(original.iopCore().branchContinuation().active == (cut == 32));
+    REQUIRE((original.iopCore().delayedResultContinuation().source ==
+      IOPDelayedResultSource::Load) == (cut == 40));
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    NekoSystem plain;
+    restored.loadState(checkpoint);
+    plain.loadState(checkpoint);
+    REQUIRE(plain.iopBus().read16(address).status == IOPBusStatus::Completed);
+    REQUIRE(plain.iopBus().read16(address).value == selection);
+    REQUIRE(plain.saveState() == checkpoint);
+    original.startTrace();
+    restored.startTrace();
+    original.runMasterCycles(64 - cut);
+    restored.runMasterCycles(64 - cut);
+    plain.runMasterCycles(64 - cut);
+    REQUIRE(original.iopCore().retiredInstructions() == 8);
+    REQUIRE(original.iopCore().exception().kind == IOPException::None);
+    REQUIRE(original.iopCore().generalRegister(3) == 0xffffffff);
+    REQUIRE(original.iopCore().generalRegister(4) == selection);
+    REQUIRE(original.iopCore().generalRegister(5) == 0x1234);
+    IOPTraceTest::requireEvents(restored.trace(), original.trace());
+    IOPTraceTest::requireMachine(restored, original);
+    IOPTraceTest::requireMachine(plain, original);
+  }
+}
+
 TEST_CASE("SPU2 write-only initialization admits only exact zero halfword stores",
   "[iop][spu2][spu2-initialization]")
 {
@@ -1951,7 +2006,7 @@ TEST_CASE("SPU2 write-only initialization admits only exact zero halfword stores
   }
 }
 
-TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other transports",
+TEST_CASE("SPU2 initialization and Auto DMA controls reject unsupported reads and transports",
   "[iop][spu2][spu2-initialization][spu2-autodma]")
 {
   for (const auto &addresses : {unknownInitializationAddresses, autoDMAAddresses})
@@ -1965,7 +2020,13 @@ TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other tran
     SPU2InputTest::programProfile(system.spu2Controller());
     REQUIRE(bus.write16(address, selection).status == IOPBusStatus::Completed);
     const auto before = system.iopStateHash();
-    REQUIRE(bus.read16(address).status == IOPBusStatus::Unmapped);
+    const auto read = bus.read16(address);
+    REQUIRE(read.status == (selection == 0
+      ? IOPBusStatus::Unmapped : IOPBusStatus::Completed));
+    if (selection != 0)
+    {
+      REQUIRE(read.value == selection);
+    }
     REQUIRE(bus.read8(address).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.read8(address + 1).status == IOPBusStatus::Unmapped);
     REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
@@ -2005,6 +2066,7 @@ TEST_CASE("SPU2 write-only initialization rejects reads neighbors and other tran
     REQUIRE(eeValue == 0x4321);
     REQUIRE_FALSE(system.eeBus().writeData16(address, selection));
     IOPBus unattached;
+    REQUIRE(unattached.read16(address).status == IOPBusStatus::Unmapped);
     REQUIRE(unattached.write16(address, selection).status == IOPBusStatus::Unmapped);
     REQUIRE(system.iopStateHash() == before);
   }
@@ -2713,7 +2775,9 @@ TEST_CASE("SPU2 canonical state hashes every configuration word and restores loc
     REQUIRE(destination.spu2Controller().readAutoDMAWriteSelection(core) ==
       autoDMAWriteSelections[core]);
     REQUIRE(destination.iopBus().read16(autoDMAAddresses[core]).status ==
-      IOPBusStatus::Unmapped);
+      IOPBusStatus::Completed);
+    REQUIRE(destination.iopBus().read16(autoDMAAddresses[core]).value ==
+      autoDMAWriteSelections[core]);
     REQUIRE(destination.iopBus().write16(autoDMAAddresses[core], 0).status ==
       IOPBusStatus::Completed);
     REQUIRE(source.spu2Controller().readAutoDMAWriteSelection(core) == 0);

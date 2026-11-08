@@ -3522,6 +3522,15 @@ not requirements for exhaustive subsystem coverage.
 - [x] Add authored CPU-driven lifecycle and cold/restored traced/plain
       conformance covering both cores, buffer boundaries, contention and faults;
       independently review and run required validation gates.
+- [x] Verify fresh unchanged-input BIOS progress with cold/restored
+      traced/plain and canonical comparisons; identify the next originating
+      dependency without claiming completed boot.
+
+### IOP SPU Auto DMA ADMAS Readback Dependency
+
+- [x] Research and admit bounded halfword ADMAS reads through the existing SPU2
+      owner for both cores; distinguish control readback from live request/status,
+      and pin CPU-load and restored-continuation behavior.
 - [ ] Verify fresh unchanged-input BIOS progress with cold/restored
       traced/plain and canonical comparisons; identify the next originating
       dependency without claiming completed boot.

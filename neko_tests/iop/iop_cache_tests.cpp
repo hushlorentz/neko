@@ -357,7 +357,6 @@ TEST_CASE("SPU2 configuration cannot supply cache fills or seeded cache hits",
     bus.attachSPU2(&spu2);
     const bool writeOnlyInitialization =
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
-      physical == 0x1f9001b0 || physical == 0x1f9005b0 ||
       physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
       physical == 0x1f9005a4 || physical == 0x1f9005a6;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
@@ -441,13 +440,14 @@ TEST_CASE("SPU2 misaligned and protected halfwords preserve delay-slot exception
     bus.attachSPU2(&spu2);
     const bool writeOnlyInitialization =
       physical == 0x1f900b60 || physical == 0x1f900b62 ||
-      physical == 0x1f9001b0 || physical == 0x1f9005b0 ||
       physical == 0x1f9001a4 || physical == 0x1f9001a6 ||
       physical == 0x1f9005a4 || physical == 0x1f9005a6;
     const bool coreAttribute = physical == 0x1f90019a || physical == 0x1f90059a;
     const bool coreStatus = physical == 0x1f900344 || physical == 0x1f900744;
     const std::uint16_t value =
-      writeOnlyInitialization || coreStatus ? 0 : coreAttribute ? 0xc001 : 0x4900;
+      writeOnlyInitialization || coreStatus ||
+      physical == 0x1f9001b0 || physical == 0x1f9005b0
+      ? 0 : coreAttribute ? 0xc001 : 0x4900;
     if (!coreStatus)
     {
       REQUIRE(bus.write16(physical, value).status == IOPBusStatus::Completed);
@@ -731,7 +731,7 @@ TEST_CASE("IOP SPU DMA protected and misaligned halfwords retain delay-slot exce
   }
 }
 
-TEST_CASE("SPU2 write-only initialization bypasses cached payloads but not isolation",
+TEST_CASE("SPU2 initialization and Auto DMA controls bypass cached payloads but not isolation",
   "[iop][spu2][spu2-initialization][spu2-autodma][cache]")
 {
   for (IOPAddress physical : {
@@ -767,7 +767,13 @@ TEST_CASE("SPU2 write-only initialization bypasses cached payloads but not isola
     }
     const auto isolated = core.cache();
     IOPCacheTestAccess::setStatus(&core, swap);
-    REQUIRE(core.readData16(address).outcome == IOPAccessOutcome::Unmapped);
+    const auto read = core.readData16(address);
+    REQUIRE(read.outcome == (selection == 0
+      ? IOPAccessOutcome::Unmapped : IOPAccessOutcome::Completed));
+    if (selection != 0)
+    {
+      REQUIRE(read.value == selection);
+    }
     REQUIRE(core.writeData16(address, 0).outcome == IOPAccessOutcome::Completed);
     if (selection != 0)
     {
@@ -778,8 +784,53 @@ TEST_CASE("SPU2 write-only initialization bypasses cached payloads but not isola
       REQUIRE(spu2.readAutoDMAWriteSelection(selectedCore) == selection);
       REQUIRE(spu2.readAutoDMAWriteSelection(1 - selectedCore) == 0);
     }
+
     REQUIRE(core.writeData16(address, 0xffff).outcome == IOPAccessOutcome::Unmapped);
     requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
+TEST_CASE("SPU2 ADMAS CPU halfword loads retain control and the load delay",
+  "[iop][spu2][spu2-admas-read][execution]")
+{
+  for (std::size_t selectedCore = 0; selectedCore < 2; ++selectedCore)
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  for (bool selected : {false, true})
+  {
+    IOPBus bus;
+    SPU2Controller spu2;
+    bus.attachSPU2(&spu2);
+    SPU2InputTest::programProfile(spu2);
+    const auto physical = selectedCore == 0 ? 0x1f9001b0u : 0x1f9005b0u;
+    const std::uint16_t selection = selected
+      ? static_cast<std::uint16_t>(1u << selectedCore) : 0;
+    REQUIRE(bus.write16(physical, selection).status == IOPBusStatus::Completed);
+    const auto input = spu2.inputWriteState(selectedCore);
+    IOPCore core;
+    core.attachBus(&bus);
+    IOPCacheTestAccess::setGeneralRegister(&core, 3, physical | segment);
+    IOPCacheTestAccess::setGeneralRegister(&core, 2, 0xdeadbeef);
+    REQUIRE(bus.write32(0, 0x94620000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(4, 0x00402021).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(8, 0x00402821).status == IOPBusStatus::Completed);
+    core.startExecution(0);
+    core.stepInstruction();
+    REQUIRE(core.retiredInstructions() == 1);
+    REQUIRE(core.exception().kind == IOPException::None);
+    REQUIRE(core.generalRegister(2) == 0xdeadbeef);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(4) == 0xdeadbeef);
+    REQUIRE(core.generalRegister(2) == selection);
+    core.stepInstruction();
+    REQUIRE(core.generalRegister(5) == selection);
+    REQUIRE(core.retiredInstructions() == 3);
+    const auto after = spu2.inputWriteState(selectedCore);
+    REQUIRE(after.selected == input.selected);
+    REQUIRE(after.writeOpen == input.writeOpen);
+    REQUIRE(after.requested == input.requested);
+    REQUIRE(after.fillHalf == input.fillHalf);
+    REQUIRE(after.readHalf == input.readHalf);
+    REQUIRE(after.fillWords == input.fillWords);
   }
 }
 
