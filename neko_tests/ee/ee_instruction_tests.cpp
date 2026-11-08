@@ -1980,7 +1980,7 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
     }
   }
 
-  SECTION("Breakpoint register transfers are valid deferred operations")
+  SECTION("Breakpoint reads are admitted while writes remain deferred")
   {
     const std::uint16_t selectors[] = {
       0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07
@@ -1989,8 +1989,16 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
     {
       for (std::uint16_t selector : selectors)
       {
-        requireUnsupported(
-          cop0Instruction(rs, 2, 24, selector));
+        if (rs == 0)
+        {
+          REQUIRE(
+            decodeEEInstruction(cop0Instruction(rs, 2, 24, selector)).
+              operation == EEOperation::MoveWordFromCOP0);
+        }
+        else
+        {
+          requireUnsupported(cop0Instruction(rs, 2, 24, selector));
+        }
       }
       requireReserved(cop0Instruction(rs, 2, 24, 0x01));
       requireReserved(cop0Instruction(rs, 2, 24, 0x08));

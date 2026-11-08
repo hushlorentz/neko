@@ -26,6 +26,28 @@ enum class EECOP0Register : std::uint8_t
   ErrorEPC = 30
 };
 
+enum class EECOP0DebugRegister : std::uint16_t
+{
+  BreakpointControl = 0,
+  InstructionAddress = 2,
+  InstructionAddressMask = 3,
+  DataAddress = 4,
+  DataAddressMask = 5,
+  DataValue = 6,
+  DataValueMask = 7
+};
+
+namespace EECOP0Debug
+{
+  constexpr std::uint8_t REGISTER_INDEX = 24;
+  constexpr std::uint32_t SELECTOR_MASK = UINT32_C(0x000007ff);
+
+  constexpr bool validSelector(std::uint32_t selector)
+  {
+    return selector <= 7 && selector != 1;
+  }
+}
+
 namespace EECOP0ReservedRead
 {
   // Provisional read-only policy; reserved writes remain unsupported.

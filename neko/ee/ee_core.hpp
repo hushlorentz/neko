@@ -381,6 +381,8 @@ class EECore final : public ClockedComponent
 
     std::uint32_t cop0Register(
       EECOP0Register registerIndex) const;
+    std::uint32_t cop0DebugRegister(
+      EECOP0DebugRegister registerIndex) const;
     void setCOP0Register(
       EECOP0Register registerIndex,
       std::uint32_t value);

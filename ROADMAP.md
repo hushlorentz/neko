@@ -3549,9 +3549,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Admit bounded canonical MFC0 reads for the official reserved COP0 family
       through the existing decode/register owner; pin the zero-read policy,
       excluded writes/selectors, CPU ordering and restored continuation.
-- [ ] Verify fresh unchanged-input BIOS progress beyond the originating read
+- [x] Verify fresh unchanged-input BIOS progress beyond the originating read
       with cold/restored traced/plain and canonical comparisons; identify the
       next dependency without claiming completed boot.
+
+### EE Debug COP0 Read Dependency
+
+- [x] Research and implement the bounded debug COP0 read required by BIOS through
+      existing decode/register ownership; distinguish selector validity and
+      passive readback from active breakpoint behavior.
+- [ ] Verify fresh unchanged-input BIOS progress beyond the originating debug
+      read with cold/restored traced/plain and canonical comparisons; identify
+      the next dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

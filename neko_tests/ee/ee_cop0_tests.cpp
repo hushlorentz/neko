@@ -10,6 +10,12 @@
 
 namespace
 {
+  constexpr std::uint32_t READ_ONLY_COP0_INSTRUCTIONS[] = {
+    UINT32_C(0x4003b800),
+    UINT32_C(0x4003c000),
+    UINT32_C(0x4003c007)
+  };
+
   std::uint32_t cop0TransferInstruction(
     std::uint8_t source,
     std::uint8_t target,
@@ -1877,137 +1883,270 @@ TEST_CASE("EE reserved COP0 reads return zero without writable state",
   }
 }
 
-TEST_CASE("EE reserved COP0 reads preserve usability and ordered issue",
-  "[reserved-cop0]")
+TEST_CASE("EE debug COP0 decoder admits only the manual read selectors",
+  "[debug-cop0]")
+{
+  const auto debug = static_cast<EECOP0Register>(24);
+  for (std::uint16_t selector = 0; selector < 2048; ++selector)
+  {
+    CAPTURE(selector);
+    const bool valid = selector == 0 || (selector >= 2 && selector <= 7);
+    for (const std::uint8_t source : {0, 4})
+    {
+      const auto raw = cop0TransferInstruction(source, 24, debug) | selector;
+      if (!valid)
+      {
+        REQUIRE_THROWS_WITH(
+          decodeEEInstruction(raw), "Reserved EE instruction encoding.");
+      }
+      else if (source == 4)
+      {
+        REQUIRE_THROWS_WITH(
+          decodeEEInstruction(raw), "Unsupported EE instruction encoding.");
+      }
+      else
+      {
+        for (std::uint8_t target = 0; target < 32; ++target)
+        {
+          const auto instruction =
+            decodeEEInstruction(cop0TransferInstruction(0, target, debug) | selector);
+          REQUIRE(instruction.operation == EEOperation::MoveWordFromCOP0);
+          REQUIRE(instruction.destinationRegister == 24);
+          REQUIRE(instruction.targetRegister == target);
+          REQUIRE((instruction.raw & UINT32_C(0x7ff)) == selector);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("EE debug COP0 reads project the unprogrammed bank",
+  "[debug-cop0]")
+{
+  const auto debug = static_cast<EECOP0Register>(24);
+  for (const std::uint16_t selector : {0, 2, 3, 4, 5, 6, 7})
+  {
+    CAPTURE(selector);
+    for (const std::uint8_t target : {0, 24, 31})
+    {
+      CAPTURE(target);
+      NekoSystem system;
+      auto &core = system.eeCore();
+      core.setGeneralRegister(target, {UINT64_MAX, UINT64_C(0x123456789abcdef0)});
+
+      runInstruction(&system, cop0TransferInstruction(0, target, debug) | selector);
+
+      REQUIRE(core.stopReason() == EEStopReason::None);
+      REQUIRE(core.pendingException() == EEException::None);
+      REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+      REQUIRE(core.lastInstruction().raw ==
+        (cop0TransferInstruction(0, target, debug) | selector));
+      REQUIRE(core.generalRegister(target) ==
+        (target == 0 ? EERegister128{} : EERegister128{0, UINT64_C(0x123456789abcdef0)}));
+    }
+    for (const auto value : {UINT64_C(0), UINT64_MAX})
+    {
+      NekoSystem system;
+      system.eeCore().setGeneralRegister(24, {value, UINT64_MAX});
+      runInstruction(&system, cop0TransferInstruction(4, 24, debug) | selector);
+      REQUIRE(system.eeCore().stopReason() == EEStopReason::UnsupportedInstruction);
+      REQUIRE(system.eeCore().acceptanceRecordsThisCycle().size() == 0);
+      REQUIRE(system.eeCore().pendingException() == EEException::None);
+    }
+  }
+}
+
+TEST_CASE("EE debug COP0 inspection rejects invalid selectors without mutation",
+  "[debug-cop0]")
+{
+  NekoSystem system;
+  auto &core = system.eeCore();
+  const auto before = core.stateHash();
+  for (const std::uint16_t selector : {0, 2, 3, 4, 5, 6, 7})
+  {
+    REQUIRE(core.cop0DebugRegister(static_cast<EECOP0DebugRegister>(selector)) == 0);
+    REQUIRE(core.stateHash() == before);
+  }
+  for (const std::uint16_t selector : {1, 8, 0x40, 0x400, 0x7ff, 0x800, 0xffff})
+  {
+    REQUIRE_THROWS_WITH(
+      core.cop0DebugRegister(static_cast<EECOP0DebugRegister>(selector)),
+      "EE COP0 debug register is not implemented.");
+    REQUIRE(core.stateHash() == before);
+  }
+}
+
+TEST_CASE("EE read-only COP0 reads preserve usability and ordered issue",
+  "[reserved-cop0][debug-cop0]")
 {
   SECTION("User and supervisor reads still require CU0")
   {
-    for (const auto mode : {EECOP0Status::USER_MODE, EECOP0Status::SUPERVISOR_MODE})
+    for (const auto read : READ_ONLY_COP0_INSTRUCTIONS)
     {
-      for (const bool usable : {false, true})
+      CAPTURE(read);
+      for (const auto mode : {EECOP0Status::USER_MODE, EECOP0Status::SUPERVISOR_MODE})
       {
-        CAPTURE(mode);
-        CAPTURE(usable);
-        NekoSystem system;
-        EECore &core = system.eeCore();
-        core.setCOP0Register(
-          EECOP0Register::Status, mode | (usable ? EECOP0Status::COP0_USABLE : 0));
-        mapLowKusegForTest(&core);
-        core.setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
-
-        runInstruction(&system, UINT32_C(0x4003b800));
-
-        REQUIRE(core.stopReason() == EEStopReason::None);
-        REQUIRE(
-          core.pendingException() ==
-          (usable ? EEException::None : EEException::CoprocessorUnusable));
-        REQUIRE(
-          core.generalRegister(3) ==
-          EERegister128{usable ? 0 : UINT64_MAX, UINT64_MAX});
-        if (!usable)
+        for (const bool usable : {false, true})
         {
-          REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
-          REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+          CAPTURE(mode);
+          CAPTURE(usable);
+          NekoSystem system;
+          EECore &core = system.eeCore();
+          core.setCOP0Register(
+            EECOP0Register::Status, mode | (usable ? EECOP0Status::COP0_USABLE : 0));
+          mapLowKusegForTest(&core);
+          core.setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
+
+          runInstruction(&system, read);
+
+          REQUIRE(core.stopReason() == EEStopReason::None);
           REQUIRE(
-            (core.cop0Register(EECOP0Register::Cause) &
-             EECOP0Cause::COPROCESSOR_ERROR_MASK) == 0);
+            core.pendingException() ==
+            (usable ? EEException::None : EEException::CoprocessorUnusable));
+          REQUIRE(
+            core.generalRegister(3) ==
+            EERegister128{usable ? 0 : UINT64_MAX, UINT64_MAX});
+          if (!usable)
+          {
+            REQUIRE(core.acceptanceRecordsThisCycle().size() == 0);
+            REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0);
+            REQUIRE(
+              (core.cop0Register(EECOP0Register::Cause) &
+               EECOP0Cause::COPROCESSOR_ERROR_MASK) == 0);
+          }
         }
       }
     }
   }
 
-  SECTION("Independent Wide work pairs in either order without a stall")
+  SECTION("An unusable delay-slot read preserves the older branch")
   {
-    for (const bool readOlder : {true, false})
+    for (const auto read : READ_ONLY_COP0_INSTRUCTIONS)
     {
-      CAPTURE(readOlder);
+      CAPTURE(read);
       NekoSystem system;
-      EECore &core = system.eeCore();
-      constexpr std::uint32_t READ = UINT32_C(0x4003b800);
-      constexpr std::uint32_t WIDE = UINT32_C(0x70a43488);
-      system.eeBus().write32(0, readOlder ? READ : WIDE);
-      system.eeBus().write32(4, readOlder ? WIDE : READ);
-      system.eeBus().write32(8, UINT32_C(0x24670001));
+      auto &core = system.eeCore();
+      core.setCOP0Register(EECOP0Register::Status, EECOP0Status::USER_MODE);
+      mapLowKusegForTest(&core);
       core.setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
-      core.setGeneralRegister(4, {UINT64_C(0x1111111100000000), 0});
-      core.setGeneralRegister(5, {UINT64_C(0x3333333322222222), 0});
-      core.startExecution(0);
+      system.eeBus().write32(0x100, UINT32_C(0x10000007));
+      system.eeBus().write32(0x104, read);
+      core.startExecution(0x100);
 
       system.clockMasterCycle();
 
-      REQUIRE(core.lastIssueSelection().instructionCount == 2);
-      REQUIRE(core.lastIssueSelection().pairing == EEIssuePairing::Concurrent);
-      REQUIRE(core.lastIssueSelection().continuation == EEIssueContinuation::None);
-      REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
-      REQUIRE(core.generalRegister(3) == EERegister128{0, UINT64_MAX});
-      REQUIRE(core.generalRegister(6).low == UINT64_C(0x2222222200000000));
-      REQUIRE(core.generalRegister(6).high == UINT64_C(0x3333333311111111));
-      REQUIRE(core.programCounter() == 8);
-
-      system.clockMasterCycle();
-
-      REQUIRE(core.generalRegister(7).low == 1);
+      REQUIRE(core.stopReason() == EEStopReason::None);
+      REQUIRE(core.pendingException() == EEException::CoprocessorUnusable);
+      REQUIRE(core.cop0Register(EECOP0Register::EPC) == 0x100);
+      REQUIRE((core.cop0Register(EECOP0Register::Cause) & EECOP0Cause::BRANCH_DELAY) != 0);
+      REQUIRE(core.generalRegister(3) == EERegister128{UINT64_MAX, UINT64_MAX});
       REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
-      REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 3);
+      REQUIRE(core.acceptanceRecordsThisCycle()[0].instruction.raw == UINT32_C(0x10000007));
     }
   }
 
-  SECTION("A dependent successor waits for the reserved read")
+  SECTION("Independent Wide work pairs in either order without a stall")
   {
-    NekoSystem system;
-    system.eeBus().write32(0, UINT32_C(0x4003b800));
-    system.eeBus().write32(4, UINT32_C(0x24670001));
-    system.eeCore().setGeneralRegister(3, {UINT64_MAX, 0});
-    system.eeCore().startExecution(0);
+    for (const auto read : READ_ONLY_COP0_INSTRUCTIONS)
+    {
+      CAPTURE(read);
+      for (const bool readOlder : {true, false})
+      {
+        CAPTURE(readOlder);
+        NekoSystem system;
+        EECore &core = system.eeCore();
+        constexpr std::uint32_t WIDE = UINT32_C(0x70a43488);
+        system.eeBus().write32(0, readOlder ? read : WIDE);
+        system.eeBus().write32(4, readOlder ? WIDE : read);
+        system.eeBus().write32(8, UINT32_C(0x24670001));
+        core.setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
+        core.setGeneralRegister(4, {UINT64_C(0x1111111100000000), 0});
+        core.setGeneralRegister(5, {UINT64_C(0x3333333322222222), 0});
+        core.startExecution(0);
 
-    system.clockMasterCycle();
+        system.clockMasterCycle();
 
-    REQUIRE(system.eeCore().lastIssueSelection().instructionCount == 1);
-    REQUIRE(system.eeCore().generalRegister(7).low == 0);
-    REQUIRE(system.eeCore().programCounter() == 4);
+        REQUIRE(core.lastIssueSelection().instructionCount == 2);
+        REQUIRE(core.lastIssueSelection().pairing == EEIssuePairing::Concurrent);
+        REQUIRE(core.lastIssueSelection().continuation == EEIssueContinuation::None);
+        REQUIRE(core.acceptanceRecordsThisCycle().size() == 2);
+        REQUIRE(core.generalRegister(3) == EERegister128{0, UINT64_MAX});
+        REQUIRE(core.generalRegister(6).low == UINT64_C(0x2222222200000000));
+        REQUIRE(core.generalRegister(6).high == UINT64_C(0x3333333311111111));
+        REQUIRE(core.programCounter() == 8);
 
-    system.clockMasterCycle();
+        system.clockMasterCycle();
 
-    REQUIRE(system.eeCore().generalRegister(7).low == 1);
+        REQUIRE(core.generalRegister(7).low == 1);
+        REQUIRE(core.acceptanceRecordsThisCycle().size() == 1);
+        REQUIRE(core.acceptanceRecordsThisCycle()[0].programOrder == 3);
+      }
+    }
+  }
+
+  SECTION("A dependent successor waits for the read")
+  {
+    for (const auto read : READ_ONLY_COP0_INSTRUCTIONS)
+    {
+      NekoSystem system;
+      system.eeBus().write32(0, read);
+      system.eeBus().write32(4, UINT32_C(0x24670001));
+      system.eeCore().setGeneralRegister(3, {UINT64_MAX, 0});
+      system.eeCore().startExecution(0);
+
+      system.clockMasterCycle();
+
+      REQUIRE(system.eeCore().lastIssueSelection().instructionCount == 1);
+      REQUIRE(system.eeCore().generalRegister(7).low == 0);
+      REQUIRE(system.eeCore().programCounter() == 4);
+
+      system.clockMasterCycle();
+
+      REQUIRE(system.eeCore().generalRegister(7).low == 1);
+    }
   }
 }
 
-TEST_CASE("EE reserved COP0 delay-slot reads restore deterministic continuation",
-  "[reserved-cop0][save-state]")
+TEST_CASE("EE read-only COP0 delay-slot reads restore deterministic continuation",
+  "[reserved-cop0][debug-cop0][save-state]")
 {
-  for (const std::uint64_t checkpointCycle : {0, 1})
+  for (const auto read : READ_ONLY_COP0_INSTRUCTIONS)
   {
-    CAPTURE(checkpointCycle);
-    NekoSystem original;
-    original.eeBus().write32(0x100, UINT32_C(0x10000007));
-    original.eeBus().write32(0x104, UINT32_C(0x4003b800));
-    original.eeBus().write32(0x120, UINT32_C(0x24640001));
-    original.eeCore().setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
-    original.eeCore().startExecution(UINT32_C(0x80000100));
-    original.runMasterCycles(checkpointCycle);
-    const auto checkpoint = original.saveState();
-    NekoSystem restored;
-    NekoSystem plain;
-    restored.loadState(checkpoint);
-    plain.loadState(checkpoint);
-    REQUIRE(restored.saveState() == checkpoint);
-    REQUIRE(plain.saveState() == checkpoint);
-    original.startTrace();
-    restored.startTrace();
-    for (auto *machine : {&original, &restored, &plain})
+    CAPTURE(read);
+    for (const std::uint64_t checkpointCycle : {0, 1})
     {
-      machine->runMasterCycles(2 - checkpointCycle);
-      REQUIRE(machine->eeCore().stopReason() == EEStopReason::None);
-      REQUIRE(machine->eeCore().generalRegister(3) == EERegister128{0, UINT64_MAX});
-      REQUIRE(machine->eeCore().generalRegister(4).low == 1);
-      REQUIRE(machine->eeCore().programCounter() == UINT32_C(0x80000124));
+      CAPTURE(checkpointCycle);
+      NekoSystem original;
+      original.eeBus().write32(0x100, UINT32_C(0x10000007));
+      original.eeBus().write32(0x104, read);
+      original.eeBus().write32(0x120, UINT32_C(0x24640001));
+      original.eeCore().setGeneralRegister(3, {UINT64_MAX, UINT64_MAX});
+      original.eeCore().startExecution(UINT32_C(0x80000100));
+      original.runMasterCycles(checkpointCycle);
+      const auto checkpoint = original.saveState();
+      NekoSystem restored;
+      NekoSystem plain;
+      restored.loadState(checkpoint);
+      plain.loadState(checkpoint);
+      REQUIRE(restored.saveState() == checkpoint);
+      REQUIRE(plain.saveState() == checkpoint);
+      original.startTrace();
+      restored.startTrace();
+      for (auto *machine : {&original, &restored, &plain})
+      {
+        machine->runMasterCycles(2 - checkpointCycle);
+        REQUIRE(machine->eeCore().stopReason() == EEStopReason::None);
+        REQUIRE(machine->eeCore().generalRegister(3) == EERegister128{0, UINT64_MAX});
+        REQUIRE(machine->eeCore().generalRegister(4).low == 1);
+        REQUIRE(machine->eeCore().programCounter() == UINT32_C(0x80000124));
+      }
+      REQUIRE(original.saveState() == restored.saveState());
+      REQUIRE(original.saveState() == plain.saveState());
+      REQUIRE(original.traceHash() == restored.traceHash());
+      REQUIRE(original.trace().size() == restored.trace().size());
+      REQUIRE_FALSE(original.trace().empty());
+      REQUIRE(plain.trace().empty());
     }
-    REQUIRE(original.saveState() == restored.saveState());
-    REQUIRE(original.saveState() == plain.saveState());
-    REQUIRE(original.traceHash() == restored.traceHash());
-    REQUIRE(original.trace().size() == restored.trace().size());
-    REQUIRE_FALSE(original.trace().empty());
-    REQUIRE(plain.trace().empty());
   }
 }
 

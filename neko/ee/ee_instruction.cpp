@@ -90,14 +90,15 @@ namespace
   {
     const std::uint32_t selector =
       instruction.raw & UINT32_C(0x000007ff);
-    if (instruction.destinationRegister == 24)
+    if (instruction.destinationRegister == EECOP0Debug::REGISTER_INDEX)
     {
-      if ((selector & ~UINT32_C(0x7)) != 0 ||
-          selector == 1)
+      if (!EECOP0Debug::validSelector(selector))
       {
         return DecodeKind::Reserved;
       }
-      return DecodeKind::Unsupported;
+      return instruction.sourceRegister == 0
+        ? DecodeKind::Direct
+        : DecodeKind::Unsupported;
     }
     if (instruction.destinationRegister == 25)
     {

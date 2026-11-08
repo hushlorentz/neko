@@ -6015,9 +6015,13 @@ EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
       instruction.destinationRegister);
   if (instruction.operation == EEOperation::MoveWordFromCOP0)
   {
-    writeWord(
-      instruction.targetRegister,
-      cop0Register(registerIndex));
+    const std::uint32_t value =
+      instruction.destinationRegister == EECOP0Debug::REGISTER_INDEX
+        ? cop0DebugRegister(
+            static_cast<EECOP0DebugRegister>(
+              instruction.raw & EECOP0Debug::SELECTOR_MASK))
+        : cop0Register(registerIndex);
+    writeWord(instruction.targetRegister, value);
     return EEInstructionExecutionOutcome::Completed;
   }
 
@@ -11137,6 +11141,18 @@ std::uint32_t EECore::shiftAmount() const
 void EECore::setShiftAmount(std::uint32_t value)
 {
   saRegister = value;
+}
+
+std::uint32_t EECore::cop0DebugRegister(
+  EECOP0DebugRegister registerIndex) const
+{
+  if (!EECOP0Debug::validSelector(static_cast<std::uint16_t>(registerIndex)))
+  {
+    throw std::out_of_range(
+      "EE COP0 debug register is not implemented.");
+  }
+  // Provisional unprogrammed-bank policy; debug writes remain unsupported.
+  return 0;
 }
 
 std::uint32_t EECore::cop0Register(
