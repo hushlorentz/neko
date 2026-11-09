@@ -165,7 +165,7 @@ class IOPDMAController final
       IOPDMAChannelState registers;
       std::uint8_t blockWordsTransferred = 0;
     };
-    static bool validSIO2ChannelControl(IOPWord value);
+    static bool validSIO2StoppedControl(IOPSIO2DMAChannel channel, IOPWord value);
     bool validSIO2Continuation(const SIO2Controller &sio2) const;
     void validateSIO2Wiring(const IOPBus &bus, const SIO2Controller &sio2) const;
     static std::size_t bankIndex(IOPDMABank bank);

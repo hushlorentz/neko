@@ -3657,9 +3657,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved single-block input transport and CPU lifecycle
       through existing SIO2 storage and shared DMA grants, with atomic rejection,
       canonical continuation and no synthetic peripheral results or completion.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress beyond the start origin; identify the next dependency without
       claiming broader peripheral support or completed boot.
+
+### IOP SIO2 DMA Output Control Dependency
+
+- [x] Research channel12 CHCR0x40000200 after output MADR/BCR programming;
+      distinguish control configuration from active output transport and select
+      bounded access, ownership and lifecycle policy before implementation.
+- [x] Implement the selected stopped output-control family through the existing
+      DMA owner, retaining bit30 without active effects, with atomic rejection
+      and canonical continuation; keep output transfers and serial results excluded.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress beyond the control origin; identify the next dependency without
+      claiming peripheral replies or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

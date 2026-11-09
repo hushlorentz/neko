@@ -58,6 +58,9 @@ namespace
   constexpr IOPAddress SIO2_MADR[] = {0x1f801540, 0x1f801550};
   constexpr IOPAddress SIO2_BCR[] = {0x1f801544, 0x1f801554};
   constexpr IOPAddress SIO2_CHCR[] = {0x1f801548, 0x1f801558};
+  constexpr IOPWord SIO2_OUTPUT_STOPPED_CONTROLS[] = {
+    0, 0x200, 0x201, 0x40000000, 0x40000200, 0x40000201
+  };
   constexpr IOPAddress CHANNEL_INITIALIZATION_REGISTERS[] = {
     0x1f801080, 0x1f801084, 0x1f801088,
     0x1f801090, 0x1f801094, 0x1f801098,
@@ -473,8 +476,10 @@ namespace
       const auto other = physical == SIO2_CHCR[0] ? SIO2_CHCR[1] : SIO2_CHCR[0];
       REQUIRE(system.iopBus().write32(other, 0x200).status == IOPBusStatus::Completed);
       for (const IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
-      for (const IOPWord value : {0x201u, 0x200u, 0x201u, 0u})
+      for (const IOPWord value : SIO2_OUTPUT_STOPPED_CONTROLS)
       {
+        if (physical == SIO2_CHCR[0] && (value & 0x40000000))
+          continue;
         CAPTURE(physical);
         CAPTURE(segment);
         CAPTURE(value);
@@ -488,8 +493,54 @@ namespace
       }
       REQUIRE(system.iopBus().write32(other, 0).status == IOPBusStatus::Completed);
     }
+    IOPBus dmaOnly;
+    dmaOnly.attachDMA(&system.iopDMAController(), &system.iopSIF1DMAC());
+    for (const auto value : SIO2_OUTPUT_STOPPED_CONTROLS)
+    {
+      REQUIRE(dmaOnly.write32(SIO2_CHCR[1], value).status == IOPBusStatus::Completed);
+      REQUIRE(dmaOnly.read32(SIO2_CHCR[1]).value == value);
+    }
     REQUIRE(system.sio2Controller().transmitInputSize() == 0);
     REQUIRE(system.iopDMAController().interruptStatus(SECONDARY) == 0);
+  }
+
+  TEST_CASE("IOP SIO2 output stopped flags preserve open and sealed input transport",
+    "[iop][dma][sio2-dma][sio2-chcr]")
+  {
+    for (const IOPWord words : {1u, 36u})
+    {
+      NekoSystem system;
+      auto &bus = system.iopBus();
+      auto &dma = system.iopDMAController();
+      dma.writePriority(SECONDARY, 0x00080000);
+      programSIO2Input(system);
+      REQUIRE(bus.write32(SIO2_MADR[1], 0x60dc0).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(SIO2_BCR[1], 0x10024).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x60dc0, 0x91827364).status == IOPBusStatus::Completed);
+      startSIO2Input(system);
+      for (IOPWord word = 0; word < words; ++word)
+        dma.clockSIO2Input(bus, system.sio2Controller());
+      REQUIRE(system.sio2Controller().transmitInputSize() == words * 4);
+      SaveStateMutation expected(system.saveState());
+      for (const auto value : SIO2_OUTPUT_STOPPED_CONTROLS)
+      {
+        CAPTURE(words);
+        CAPTURE(value);
+        expected.writeScalar("system.iop.dmaController.sio2Programming[1].channelControl",
+          value);
+        expected.refreshChecksum();
+        REQUIRE(bus.write32(SIO2_CHCR[1], value).status == IOPBusStatus::Completed);
+        REQUIRE(bus.write32(SIO2_CHCR[1], value).status == IOPBusStatus::Completed);
+        REQUIRE(bus.read32(SIO2_CHCR[1]).value == value);
+        if (value & 0x40000000)
+        {
+          REQUIRE(bus.write32(SIO2_CHCR[0], value).status == IOPBusStatus::Unmapped);
+          REQUIRE(bus.write32(SIO2_CHCR[1], value | 0x01000000).status ==
+            IOPBusStatus::Unmapped);
+        }
+        requireState(system, expected.bytes());
+      }
+    }
   }
 
   TEST_CASE("IOP SIO2 DMA MADR retains the originating BIOS address",
@@ -570,12 +621,13 @@ namespace
         std::to_string(channel) + "].";
       expected.writeScalar(path + "memoryAddress", 0x60790 + channel * 4);
       expected.writeScalar(path + "blockControl", 0xffffffff - channel);
-      REQUIRE(bus.write32(SIO2_CHCR[channel], 0x201 - channel).status ==
+      const auto control = channel == 0 ? 0x201u : 0x40000200u;
+      REQUIRE(bus.write32(SIO2_CHCR[channel], control).status ==
         IOPBusStatus::Completed);
-      expected.writeScalar(path + "channelControl", 0x201 - channel);
+      expected.writeScalar(path + "channelControl", control);
       for (IOPWord control : {1u, 0x100u, 0x202u, 0x400u, 0x600u,
         0x01000201u, 0x01000200u, 0x41000200u, 0x10000000u, 0x10000201u,
-        0x20000201u, 0x40000200u, 0xffffffffu})
+        0x20000201u, 0x40000202u, 0xffffffffu})
       {
         REQUIRE(bus.write32(SIO2_CHCR[channel], control).status ==
           IOPBusStatus::Unmapped);
@@ -590,7 +642,8 @@ namespace
     {
       REQUIRE(bus.read32(SIO2_MADR[channel]).value == 0x60790 + channel * 4);
       REQUIRE(bus.read32(SIO2_BCR[channel]).value == 0xffffffff - channel);
-      REQUIRE(bus.read32(SIO2_CHCR[channel]).value == 0x201 - channel);
+      REQUIRE(bus.read32(SIO2_CHCR[channel]).value ==
+        (channel == 0 ? 0x201u : 0x40000200u));
     }
     REQUIRE(system.sio2Controller().transmitInputSize() == 1);
     REQUIRE(system.sio2Controller().transmitInputByte(0) == 0x61);
@@ -612,8 +665,8 @@ namespace
     for (const auto address : {SIO2_MADR[0], SIO2_MADR[1], SIO2_BCR[0], SIO2_BCR[1],
       SIO2_CHCR[0], SIO2_CHCR[1]})
     {
-      const auto value = address == SIO2_CHCR[0] || address == SIO2_CHCR[1]
-        ? 0x201u : 0x60790u;
+      const auto value = address == SIO2_CHCR[1] ? 0x40000200u :
+        address == SIO2_CHCR[0] ? 0x201u : 0x60790u;
       REQUIRE(bus.write32(address, value).status == IOPBusStatus::Completed);
     }
     const auto before = system.saveState();
@@ -711,11 +764,13 @@ namespace
     NekoSystem source;
     NekoSystem destination;
     constexpr IOPWord controls[] = {0, 0x200, 0x201};
-    for (std::size_t index = 0; index < 3; ++index)
+    for (std::size_t index = 0; index < 6; ++index)
     {
-      REQUIRE(source.iopBus().write32(SIO2_CHCR[0], controls[index]).status ==
+      const auto inputControl = controls[index % 3];
+      const auto outputControl = SIO2_OUTPUT_STOPPED_CONTROLS[index];
+      REQUIRE(source.iopBus().write32(SIO2_CHCR[0], inputControl).status ==
         IOPBusStatus::Completed);
-      REQUIRE(source.iopBus().write32(SIO2_CHCR[1], controls[(index + 2) % 3]).status ==
+      REQUIRE(source.iopBus().write32(SIO2_CHCR[1], outputControl).status ==
         IOPBusStatus::Completed);
       REQUIRE(destination.iopBus().write32(SIO2_CHCR[0], 0x200).status ==
         IOPBusStatus::Completed);
@@ -725,18 +780,27 @@ namespace
       destination.loadState(saved);
       requireState(destination, saved);
       REQUIRE(destination.iopStateHash() == source.iopStateHash());
-      REQUIRE(destination.iopBus().read32(SIO2_CHCR[0]).value == controls[index]);
-      REQUIRE(destination.iopBus().read32(SIO2_CHCR[1]).value == controls[(index + 2) % 3]);
+      REQUIRE(destination.iopBus().read32(SIO2_CHCR[0]).value == inputControl);
+      REQUIRE(destination.iopBus().read32(SIO2_CHCR[1]).value == outputControl);
     }
     const auto saved = source.saveState();
     REQUIRE(destination.iopBus().write32(SIO2_CHCR[0], 0).status == IOPBusStatus::Completed);
     const auto before = destination.saveState();
     for (std::size_t channel = 0; channel < 2; ++channel)
-    for (IOPWord invalid : {1u, 0x01000201u, 0x10000201u, 0x40000200u})
+    for (IOPWord invalid : {1u, 0x01000201u, 0x10000201u, 0x41000200u, 0x40000202u})
     {
       SaveStateMutation malformed(saved);
       malformed.writeScalar("system.iop.dmaController.sio2Programming[" +
         std::to_string(channel) + "].channelControl", invalid);
+      malformed.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(malformed.bytes()), std::invalid_argument);
+      requireState(destination, before);
+    }
+    for (const auto invalid : {0x40000000u, 0x40000200u, 0x40000201u})
+    {
+      SaveStateMutation malformed(saved);
+      malformed.writeScalar("system.iop.dmaController.sio2Programming[0].channelControl",
+        invalid);
       malformed.refreshChecksum();
       REQUIRE_THROWS_AS(destination.loadState(malformed.bytes()), std::invalid_argument);
       requireState(destination, before);
@@ -754,13 +818,14 @@ namespace
       const auto target = physical | segment;
       CAPTURE(target);
       CAPTURE(cut);
+      const IOPWord flags = physical == SIO2_CHCR[1] ? 0x40000000 : 0;
       NekoSystem original;
       const IOPWord program[] = {
         0x3c010000 | (target >> 16), 0x34210000 | (target & 0xffff),
-        0x24020201, 0,
+        0x3c020000 | (flags >> 16), 0x34420201,
         0x10000002, 0xac220000,
         0xffffffff, 0x8c230000,
-        0x24040200, 0xac240000, 0x8c250000, 0,
+        0x2444ffff, 0xac240000, 0x8c250000, 0,
         0x24060001, 0xac260000
       };
       IOPAddress address = 0;
@@ -790,11 +855,11 @@ namespace
       REQUIRE(core.exception().kind == IOPException::None);
       REQUIRE(core.retiredInstructions() == 12);
       REQUIRE(core.programCounter() == 0xa0000034);
-      REQUIRE(core.generalRegister(3) == 0x201);
-      REQUIRE(core.generalRegister(5) == 0x200);
+      REQUIRE(core.generalRegister(3) == (flags | 0x201));
+      REQUIRE(core.generalRegister(5) == (flags | 0x200));
       REQUIRE(core.storeFailure().access.virtualAddress == target);
       REQUIRE(core.storeFailure().access.physicalAddress == physical);
-      REQUIRE(original.iopBus().read32(physical).value == 0x200);
+      REQUIRE(original.iopBus().read32(physical).value == (flags | 0x200));
       const auto other = physical == SIO2_CHCR[0] ? SIO2_CHCR[1] : SIO2_CHCR[0];
       REQUIRE(original.iopBus().read32(other).value == 0);
       if (cut == 40)
@@ -806,7 +871,7 @@ namespace
               event.value0 == target && event.masterCycle == 41;
           });
         REQUIRE(firstStore != original.trace().end());
-        REQUIRE(firstStore->value1 == 0x201);
+        REQUIRE(firstStore->value1 == (flags | 0x201));
         REQUIRE(firstStore->value3 == nekoPackIOPMemoryTraceMetadata({
           physical, 4, Memory::AccessKind::DataStore, Memory::Outcome::Completed,
           segment == 0xa0000000 ? Memory::CacheRoute::Uncached : Memory::CacheRoute::Cached,

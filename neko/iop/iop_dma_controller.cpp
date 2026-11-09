@@ -206,8 +206,10 @@ IOPDMAWriteOutcome IOPDMAController::writeSIO2BlockCount(
     (sio2BlockControl(channel) & 0xffff) | (IOPWord{value} << 16));
 }
 
-bool IOPDMAController::validSIO2ChannelControl(IOPWord value)
+bool IOPDMAController::validSIO2StoppedControl(IOPSIO2DMAChannel channel, IOPWord value)
 {
+  if (channel == IOPSIO2DMAChannel::Output)
+    value &= ~IOPWord{0x40000000};
   return value == 0 || value == 0x200 || value == 0x201;
 }
 
@@ -220,7 +222,7 @@ IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
   IOPSIO2DMAChannel channel, IOPWord value)
 {
   auto &registers = sio2Channels.at(static_cast<std::size_t>(channel));
-  if (!validSIO2ChannelControl(value))
+  if (!validSIO2StoppedControl(channel, value))
     return IOPDMAWriteOutcome::UnsupportedControl;
   if (registers.active())
     return IOPDMAWriteOutcome::ActiveTransfer;
@@ -243,7 +245,7 @@ IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
     programming.channelControlRegister = value;
     return IOPDMAWriteOutcome::Completed;
   }
-  if (!validSIO2ChannelControl(value))
+  if (!validSIO2StoppedControl(channel, value))
   {
     return IOPDMAWriteOutcome::UnsupportedControl;
   }
@@ -271,11 +273,13 @@ bool IOPDMAController::validSIO2Continuation(const SIO2Controller &sio2) const
   for (const auto &channel : sio2Channels)
     if (!IOPDMAChannelState::validMemoryAddress(channel.memoryAddressRegister))
       return false;
-  if (!validSIO2ChannelControl(sio2Channels[1].channelControlRegister) ||
+  if (!validSIO2StoppedControl(IOPSIO2DMAChannel::Output,
+        sio2Channels[1].channelControlRegister) ||
       !sio2.hasValidTransferState())
     return false;
   if (!sio2InputActive())
-    return validSIO2ChannelControl(sio2Channels[0].channelControlRegister) &&
+    return validSIO2StoppedControl(IOPSIO2DMAChannel::Input,
+        sio2Channels[0].channelControlRegister) &&
       sio2InputWordsTransferred == 0 && sio2.ingressPhase != SIO2IngressPhase::DMAOpen;
   return sio2Channels[0].channelControlRegister == SIO2_INPUT_START &&
     sio2Channels[0].blockControlRegister == SIO2_INPUT_BCR &&
