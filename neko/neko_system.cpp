@@ -783,6 +783,8 @@ void NekoSystem::stopTrace()
   lastEEFaultContext = {};
   observedSPUWait = {};
   lastSPUWait = {};
+  observedSIO2Wait = false;
+  lastSIO2Wait = {};
 }
 
 void NekoSystem::clearTrace()
@@ -1284,12 +1286,69 @@ IOPDMABeatResult NekoSystem::clockIOPDMA(
       case IOPDMAChannel::SIF1:
         result = clockIOPSIFChannel(channel, order, events);
         break;
+      case IOPDMAChannel::SIO2Input:
+        result = clockIOPSIO2Input(order, events);
+        break;
       default: throw std::logic_error("Unknown IOP DMA grant channel.");
     }
     if (result.outcome != IOPDMABeatOutcome::Wait)
     {
       break;
     }
+  }
+  return result;
+}
+
+IOPDMABeatResult NekoSystem::clockIOPSIO2Input(
+  NekoObservationOrder &order, DMAObservations &events)
+{
+  auto &dma = iopDMAControllerComponent;
+  auto &sio2 = sio2ControllerComponent;
+  if ((!collectingTrace && !probingFailures) || !dma.sio2InputActive())
+  {
+    observedSIO2Wait = false;
+    return dma.clockSIO2Input(iopBusComponent, sio2);
+  }
+  NekoSIO2Trace::Beat beat;
+  beat.sourceAddress = dma.sio2MemoryAddress(IOPSIO2DMAChannel::Input);
+  beat.remainingBefore = static_cast<std::uint8_t>(dma.sio2InputRemainingWords());
+  beat.stagedBefore = static_cast<std::uint16_t>(sio2.transmitInputSize());
+  // Reserve before completion can publish the independently latched DMA interrupt.
+  const auto sequence = order.next++;
+  const auto result = dma.clockSIO2Input(iopBusComponent, sio2);
+  beat.sourceValue = result.value;
+  switch (result.outcome)
+  {
+    case IOPDMABeatOutcome::Accepted: beat.outcome = NekoSPUTrace::Outcome::Accepted; break;
+    case IOPDMABeatOutcome::Wait: beat.outcome = NekoSPUTrace::Outcome::Wait; break;
+    case IOPDMABeatOutcome::Completed: beat.outcome = NekoSPUTrace::Outcome::Completed; break;
+    case IOPDMABeatOutcome::Rejected: beat.outcome = NekoSPUTrace::Outcome::Rejected; break;
+    default: throw std::logic_error("Unknown SIO2 DMA trace outcome.");
+  }
+  if (result.outcome == IOPDMABeatOutcome::Rejected)
+  {
+    switch (result.status)
+    {
+      case IOPBusStatus::Misaligned: beat.busStatus = NekoSPUTrace::BusStatus::Misaligned; break;
+      case IOPBusStatus::ReadOnly: beat.busStatus = NekoSPUTrace::BusStatus::ReadOnly; break;
+      case IOPBusStatus::Unmapped: beat.busStatus = NekoSPUTrace::BusStatus::Unmapped; break;
+      default: throw std::logic_error("Unknown SIO2 DMA source rejection.");
+    }
+  }
+  beat.remainingAfter = static_cast<std::uint8_t>(dma.sio2InputRemainingWords());
+  beat.stagedAfter = static_cast<std::uint16_t>(sio2.transmitInputSize());
+  const auto event = nekoSIO2DMABeatEvent(beat);
+  const bool waiting = result.outcome == IOPDMABeatOutcome::Wait;
+  const bool repeated = waiting && observedSIO2Wait &&
+    lastSIO2Wait.value0 == event.value0 && lastSIO2Wait.value1 == event.value1 &&
+    lastSIO2Wait.value2 == event.value2 && lastSIO2Wait.value3 == event.value3;
+  observedSIO2Wait = waiting;
+  if (waiting)
+    lastSIO2Wait = event;
+  if (!repeated)
+  {
+    assert(events.count < events.entries.size());
+    events.entries[events.count++] = {event, sequence};
   }
   return result;
 }

@@ -81,6 +81,84 @@ def capture_records():
 
 
 class InspectorTests(unittest.TestCase):
+    def test_sio2_dma_filters_preserve_word_progress_in_both_sources(self):
+        beat = dict(endpoint="iop_sio2_input", channel=11, kind="payload",
+                    outcome="accepted", failure="none", bus_status="none",
+                    attempted_address=4096, source_value=0x80001181,
+                    remaining_before=36, remaining_after=35,
+                    staged_before=0, staged_after=4)
+        for source in ("prefix", "failure_capture"):
+            rows = records() if source == "prefix" else capture_records()
+            payload = rows[3] if source == "prefix" else rows[-2]["events"][0]
+            payload.update(subsystem=17, event_type=20, sio2_dma=beat,
+                           values=[11, (0x80001181 << 32) | 4096,
+                                   36 | (35 << 8), 4 << 16])
+            self.write(self.path, rows)
+            report = self.report("events", self.path, "--source", source,
+                                 "--subsystem", "sio2", "--event", "dma_beat")
+            self.assertEqual(report["matched_events"], 1)
+            row = report["events"][0]
+            self.assertEqual(row["subsystem_name"], "sio2")
+            self.assertEqual(row["cpu"], "iop")
+            self.assertEqual(row["sio2_dma"], beat)
+            by_cpu = self.report("events", self.path, "--source", source,
+                                 "--cpu", "iop", "--subsystem", "sio2")
+            self.assertEqual(by_cpu["events"], report["events"])
+            self.assertEqual(self.report("instructions", self.path,
+                                        "--source", source, "--cpu", "iop",
+                                        "--subsystem", "sio2")["matched_events"], 0)
+
+    def test_sio2_dma_schema_rejects_malformed_identity_and_metadata(self):
+        beat = dict(endpoint="iop_sio2_input", channel=11, kind="payload",
+                    outcome="rejected", failure="source_read", bus_status="unmapped",
+                    attempted_address=0x900000, source_value=0,
+                    remaining_before=36, remaining_after=36,
+                    staged_before=0, staged_after=0)
+        for field, value in (("endpoint", "iop_spu0"), ("channel", 12),
+                             ("kind", "completion"), ("outcome", "ready"),
+                             ("bus_status", "unknown"), ("failure", "none"),
+                             ("source_value", 1 << 32), ("remaining_before", 37),
+                             ("remaining_after", -1), ("staged_before", 145),
+                             ("staged_after", 1 << 16)):
+            rows = records()
+            rows[3].update(subsystem=17, event_type=20, sio2_dma=dict(beat))
+            rows[3]["sio2_dma"][field] = value
+            self.reject(rows, "sio2_dma")
+        rows = records()
+        rows[3].update(subsystem=17, event_type=20)
+        self.reject(rows, "sio2_dma")
+        rows[3].update(subsystem=11, sio2_dma=beat)
+        self.reject(rows, "sio2_dma")
+
+    def test_sio2_snapshot_is_optional_for_legacy_logs_and_validated_when_present(self):
+        self.assertNotIn("sio2", self.report("summary", self.path)["snapshot"])
+        rows = records()
+        snapshot = rows[1]["snapshot"]
+        snapshot["sio2"] = dict(input_phase="dma_open", input_bytes=4)
+        snapshot["iop_dma"] = dict(sio2_input=dict(
+            channel=11, control=0x01000201, madr=4100, bcr=0x10024,
+            remaining_words=35, active=True, enabled=False))
+        self.write(self.path, rows)
+        rendered = self.report("summary", self.path)["snapshot"]
+        self.assertEqual(rendered["sio2"], snapshot["sio2"])
+        self.assertEqual(rendered["iop_dma"]["sio2_input"]["remaining_words"], 35)
+        for phase in ("empty", "cpu", "dma_open", "dma_sealed"):
+            snapshot["sio2"]["input_phase"] = phase
+            self.write(self.path, rows)
+            self.assertEqual(self.report("summary", self.path)["snapshot"]["sio2"]
+                             ["input_phase"], phase)
+        snapshot["sio2"]["input_phase"] = "ready"
+        self.reject(rows, "input_phase")
+        snapshot["sio2"]["input_phase"] = "cpu"
+        snapshot["sio2"]["input_bytes"] = 1024
+        self.reject(rows, "input_bytes")
+        snapshot["sio2"]["input_bytes"] = 144
+        snapshot["iop_dma"]["sio2_input"]["remaining_words"] = 37
+        self.reject(rows, "remaining_words")
+        snapshot["iop_dma"]["sio2_input"]["remaining_words"] = 0
+        snapshot["iop_dma"]["sio2_input"]["active"] = 1
+        self.reject(rows, "active must be bool")
+
     def test_spu_diagnostics_filters_preserve_decoded_records_in_both_sources(self):
         beat = dict(endpoint="iop_spu1", channel=7, core=1, kind="payload",
                     outcome="wait", failure="none", bus_status="none",

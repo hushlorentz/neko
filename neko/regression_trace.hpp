@@ -25,7 +25,8 @@ enum class NekoTraceSubsystem : std::uint8_t
   IOPInterruptController = 13,
   SIF = 14,
   CDVD = 15,
-  SPU2 = 16
+  SPU2 = 16,
+  SIO2 = 17
 };
 
 enum class NekoTraceEventType : std::uint8_t
@@ -157,6 +158,24 @@ namespace NekoSPUTrace
     InputState after;
   };
   constexpr std::uint8_t OUTCOME_SHIFT = 16;
+}
+
+namespace NekoSIO2Trace
+{
+  struct Beat
+  {
+    std::uint8_t channel = 11;
+    NekoSPUTrace::Outcome outcome = NekoSPUTrace::Outcome::Accepted;
+    NekoSPUTrace::BusStatus busStatus = NekoSPUTrace::BusStatus::None;
+    std::uint32_t sourceAddress = 0;
+    std::uint32_t sourceValue = 0;
+    std::uint8_t remainingBefore = 0;
+    std::uint8_t remainingAfter = 0;
+    std::uint16_t stagedBefore = 0;
+    std::uint16_t stagedAfter = 0;
+  };
+  constexpr std::uint8_t OUTCOME_SHIFT = 8;
+  constexpr std::uint8_t BUS_STATUS_SHIFT = 16;
 }
 
 namespace NekoIOPTraceInstruction
@@ -563,6 +582,16 @@ class NekoTraceObserver
 //   share the IOP mutation sequence; beat reservations precede their resulting
 //   buffer/completion changes, and both precede resulting INTC/CPU records.
 //   Observation journals and wait suppression are not saved hardware state.
+//
+// SIO2/DMABeat: channel (11) | outcome << 8 | source bus status << 16,
+//   physical source address low32 | actual source word high32,
+//   remaining words before low8/after next8 (0..36),
+//   staged bytes before low16/after next16 (0..144).
+//   Outcome and bus status reuse the SPU2 DMA encodings above. Failed reads and
+//   unattempted waits carry zero source data, not a fabricated packet or reply.
+//   Active candidates are observed even when disabled (wait). Identical waits
+//   are suppressed within an observation session. Beats precede resulting
+//   INTC/CPU records; completion means staging acceptance, not serial execution.
 
 std::uint64_t nekoFrameHash(const GSPresentation &presentation);
 std::uint64_t nekoTraceHash(
@@ -583,5 +612,7 @@ NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event);
 NekoTraceEvent nekoSPUInputEvent(
   const NekoSPUTrace::InputTransition &transition) noexcept;
 NekoSPUTrace::InputTransition nekoDecodeSPUInput(const NekoTraceEvent &event);
+NekoTraceEvent nekoSIO2DMABeatEvent(const NekoSIO2Trace::Beat &beat) noexcept;
+NekoSIO2Trace::Beat nekoDecodeSIO2DMABeat(const NekoTraceEvent &event);
 
 #endif

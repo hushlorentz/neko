@@ -78,6 +78,13 @@ NekoTraceFailureKind nekoTraceFailureKind(const NekoTraceEvent &event) noexcept
   {
     return Kind::DMARejection;
   }
+  if (event.subsystem == NekoTraceSubsystem::SIO2 &&
+      event.type == NekoTraceEventType::DMABeat &&
+      ((event.value0 >> NekoSIO2Trace::OUTCOME_SHIFT) & 255) ==
+        static_cast<unsigned>(NekoSPUTrace::Outcome::Rejected))
+  {
+    return Kind::DMARejection;
+  }
   return Kind::None;
 }
 
@@ -154,6 +161,50 @@ NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event)
     throw std::invalid_argument("Unknown SPU DMA beat trace metadata.");
   }
   return beat;
+}
+
+NekoTraceEvent nekoSIO2DMABeatEvent(const NekoSIO2Trace::Beat &beat) noexcept
+{
+  return {0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+    beat.channel |
+      (static_cast<std::uint64_t>(beat.outcome) << NekoSIO2Trace::OUTCOME_SHIFT) |
+      (static_cast<std::uint64_t>(beat.busStatus) << NekoSIO2Trace::BUS_STATUS_SHIFT),
+    beat.sourceAddress | (std::uint64_t{beat.sourceValue} << 32),
+    beat.remainingBefore | (std::uint64_t{beat.remainingAfter} << 8),
+    beat.stagedBefore | (std::uint64_t{beat.stagedAfter} << 16)};
+}
+
+NekoSIO2Trace::Beat nekoDecodeSIO2DMABeat(const NekoTraceEvent &event)
+{
+  if (event.subsystem != NekoTraceSubsystem::SIO2 ||
+      event.type != NekoTraceEventType::DMABeat)
+  {
+    throw std::invalid_argument("Not a SIO2 DMA beat trace event.");
+  }
+  const auto channel = event.value0 & 255;
+  const auto outcome = (event.value0 >> NekoSIO2Trace::OUTCOME_SHIFT) & 255;
+  const auto status = (event.value0 >> NekoSIO2Trace::BUS_STATUS_SHIFT) & 255;
+  const auto remainingBefore = event.value2 & 255;
+  const auto remainingAfter = (event.value2 >> 8) & 255;
+  const auto stagedBefore = event.value3 & 65535;
+  const auto stagedAfter = (event.value3 >> 16) & 65535;
+  if (channel != 11 || outcome > 3 || status > 3 ||
+      remainingBefore > 36 || remainingAfter > 36 ||
+      stagedBefore > 144 || stagedAfter > 144 ||
+      ((outcome == static_cast<unsigned>(NekoSPUTrace::Outcome::Rejected)) ==
+        (status == static_cast<unsigned>(NekoSPUTrace::BusStatus::None))))
+  {
+    throw std::invalid_argument("Unknown SIO2 DMA beat trace metadata.");
+  }
+  return {static_cast<std::uint8_t>(channel),
+    static_cast<NekoSPUTrace::Outcome>(outcome),
+    static_cast<NekoSPUTrace::BusStatus>(status),
+    static_cast<std::uint32_t>(event.value1),
+    static_cast<std::uint32_t>(event.value1 >> 32),
+    static_cast<std::uint8_t>(remainingBefore),
+    static_cast<std::uint8_t>(remainingAfter),
+    static_cast<std::uint16_t>(stagedBefore),
+    static_cast<std::uint16_t>(stagedAfter)};
 }
 
 NekoTraceEvent nekoSPUInputEvent(

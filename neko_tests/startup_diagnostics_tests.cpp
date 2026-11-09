@@ -126,6 +126,177 @@ TEST_CASE("Startup inspection preserves live state including side-effecting regi
   }
 }
 
+TEST_CASE("Startup SIO2 DMA codec preserves word data and rejects invalid metadata",
+  "[startup-diagnostics][sio2-diagnostics]")
+{
+  NekoSIO2Trace::Beat beat;
+  beat.outcome = NekoSPUTrace::Outcome::Completed;
+  beat.sourceAddress = 0x60790;
+  beat.sourceValue = 0x80001181;
+  beat.remainingBefore = 1;
+  beat.remainingAfter = 0;
+  beat.stagedBefore = 140;
+  beat.stagedAfter = 144;
+  const auto event = nekoSIO2DMABeatEvent(beat);
+  REQUIRE(event.value0 == (11 | (2 << 8)));
+  REQUIRE(event.value1 == (UINT64_C(0x80001181) << 32 | 0x60790));
+  REQUIRE(event.value2 == 1);
+  REQUIRE(event.value3 == (140 | (144 << 16)));
+  const auto decoded = nekoDecodeSIO2DMABeat(event);
+  REQUIRE(decoded.channel == 11);
+  REQUIRE(decoded.outcome == beat.outcome);
+  REQUIRE(decoded.busStatus == beat.busStatus);
+  REQUIRE(decoded.sourceAddress == beat.sourceAddress);
+  REQUIRE(decoded.sourceValue == beat.sourceValue);
+  REQUIRE(decoded.remainingBefore == 1);
+  REQUIRE(decoded.remainingAfter == 0);
+  REQUIRE(decoded.stagedBefore == 140);
+  REQUIRE(decoded.stagedAfter == 144);
+
+  for (const auto invalid : {
+      NekoTraceEvent{0, NekoTraceSubsystem::SPU2, NekoTraceEventType::DMABeat},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::StateChanged},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat, 12},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11 | (4 << 8)},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11 | (4 << 16)},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11 | (3 << 8)},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11 | (1 << 16)},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11, 0, 37, 0},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11, 0, UINT64_C(37) << 8, 0},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11, 0, 0, 145},
+      NekoTraceEvent{0, NekoTraceSubsystem::SIO2, NekoTraceEventType::DMABeat,
+        11, 0, 0, UINT64_C(145) << 16}})
+  {
+    REQUIRE_THROWS_AS(nekoDecodeSIO2DMABeat(invalid), std::invalid_argument);
+  }
+  auto extended = event;
+  extended.value0 |= UINT64_C(1) << 63;
+  extended.value2 |= UINT64_C(1) << 63;
+  extended.value3 |= UINT64_C(1) << 63;
+  REQUIRE(nekoDecodeSIO2DMABeat(extended).sourceValue == beat.sourceValue);
+}
+
+TEST_CASE("Startup SIO2 DMA trace capture and failures retain typed word progress",
+  "[startup-diagnostics][sio2-diagnostics]")
+{
+  NekoSIO2Trace::Beat beat;
+  beat.outcome = NekoSPUTrace::Outcome::Wait;
+  beat.sourceAddress = 4096;
+  beat.remainingBefore = beat.remainingAfter = 36;
+  auto event = nekoSIO2DMABeatEvent(beat);
+  event.masterCycle = 7;
+  StartupFailureCapture capture;
+  capture.observe(event);
+  std::ostringstream output;
+  writeStartupFailureCaptureJsonLine(output, capture);
+  REQUIRE(output.str().find(
+    "\"sio2_dma\":{\"endpoint\":\"iop_sio2_input\",\"channel\":11,"
+    "\"kind\":\"payload\",\"outcome\":\"wait\",\"failure\":\"none\","
+    "\"bus_status\":\"none\",\"attempted_address\":4096,\"source_value\":0,"
+    "\"remaining_before\":36,\"remaining_after\":36,"
+    "\"staged_before\":0,\"staged_after\":0}") != std::string::npos);
+  REQUIRE(output.str().find("\"values\":[267,4096,9252,0]") != std::string::npos);
+  REQUIRE_FALSE(firstStartupFailure(capture.events()).found);
+
+  beat.outcome = NekoSPUTrace::Outcome::Accepted;
+  beat.sourceValue = 0x80001181;
+  beat.remainingAfter = 35;
+  beat.stagedAfter = 4;
+  std::ostringstream accepted;
+  writeStartupTraceEventFields(accepted, nekoSIO2DMABeatEvent(beat));
+  REQUIRE(accepted.str().find("\"source_value\":" + std::to_string(beat.sourceValue) +
+    ",\"remaining_before\":36,\"remaining_after\":35,"
+    "\"staged_before\":0,\"staged_after\":4") != std::string::npos);
+  beat.outcome = NekoSPUTrace::Outcome::Rejected;
+  beat.busStatus = NekoSPUTrace::BusStatus::Unmapped;
+  beat.sourceValue = 0;
+  beat.remainingAfter = 36;
+  beat.stagedAfter = 0;
+  event = nekoSIO2DMABeatEvent(beat);
+  event.masterCycle = 8;
+  capture.observe(event);
+  const auto failure = firstStartupFailure(capture.events());
+  REQUIRE(failure.found);
+  REQUIRE(failure.kind == StartupFailureKind::DMARejection);
+  REQUIRE_FALSE(failure.instruction.available);
+  NekoSystem system;
+  std::ostringstream rejected;
+  writeStartupFirstFailureJsonLine(rejected, system,
+    StartupExecutionBoundary::IncompleteCycle, &capture);
+  REQUIRE(rejected.str().find("\"kind\":\"dma_rejection\",\"cpu\":\"iop\"") !=
+    std::string::npos);
+  REQUIRE(rejected.str().find(
+    "\"dma\":{\"endpoint\":\"iop_sio2_input\",\"channel\":11,") !=
+    std::string::npos);
+  event.value0 = 11 | (4 << 8);
+  std::ostringstream invalid;
+  REQUIRE_THROWS_AS(writeStartupTraceEventFields(invalid, event), std::invalid_argument);
+  REQUIRE(invalid.str().empty());
+}
+
+TEST_CASE("Startup SIO2 snapshot separates ingress ownership from DMA gating",
+  "[startup-diagnostics][sio2-diagnostics]")
+{
+  NekoSystem system;
+  const auto empty = inspectStartup(system);
+  REQUIRE(empty.sio2.inputPhase == SIO2IngressPhase::Empty);
+  REQUIRE(empty.sio2.inputBytes == 0);
+  REQUIRE_FALSE(empty.iopDMA.sio2Input.active);
+  auto &bus = system.iopBus();
+  REQUIRE(bus.write32(0x1f801540, 0x1000).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f801544, 0x10024).status == IOPBusStatus::Completed);
+  REQUIRE(bus.write32(0x1f801548, 0x01000201).status == IOPBusStatus::Completed);
+  for (int repeat = 0; repeat < 2; ++repeat)
+  {
+    const auto snapshot = inspectStartup(system);
+    REQUIRE(snapshot.sio2.inputPhase == SIO2IngressPhase::DMAOpen);
+    REQUIRE(snapshot.sio2.inputBytes == 0);
+    REQUIRE(snapshot.iopDMA.sio2Input.active);
+    REQUIRE_FALSE(snapshot.iopDMA.sio2Input.enabled);
+    REQUIRE(snapshot.iopDMA.sio2Input.remainingWords == 36);
+    REQUIRE(snapshot.iopDMA.sio2Input.memoryAddress == 0x1000);
+    REQUIRE(snapshot.iopDMA.sio2Input.blockControl == 0x10024);
+    REQUIRE(snapshot.iopDMA.sio2Input.control == 0x01000201);
+    std::ostringstream output;
+    writeStartupSummaryJsonLine(output, snapshot);
+    REQUIRE(output.str().find("\"sio2\":{\"input_phase\":\"dma_open\",\"input_bytes\":0}") !=
+      std::string::npos);
+    REQUIRE(output.str().find(
+      "\"sio2_input\":{\"channel\":11,\"control\":16777729,\"madr\":4096,"
+      "\"bcr\":65572,\"remaining_words\":36,\"active\":true,\"enabled\":false}") !=
+      std::string::npos);
+  }
+  auto &dma = system.iopDMAController();
+  dma.writePriority(IOPDMABank::Secondary, 1u << 19);
+  REQUIRE(dma.clockSIO2Input(bus, system.sio2Controller()).outcome ==
+    IOPDMABeatOutcome::Accepted);
+  const auto partial = inspectStartup(system);
+  REQUIRE(partial.sio2.inputPhase == SIO2IngressPhase::DMAOpen);
+  REQUIRE(partial.sio2.inputBytes == 4);
+  REQUIRE(partial.iopDMA.sio2Input.active);
+  REQUIRE(partial.iopDMA.sio2Input.enabled);
+  REQUIRE(partial.iopDMA.sio2Input.remainingWords == 35);
+  REQUIRE(partial.iopDMA.sio2Input.memoryAddress == 0x1004);
+  StartupSummary snapshot;
+  snapshot.sio2.inputPhase = SIO2IngressPhase::DMASealed;
+  snapshot.sio2.inputBytes = 144;
+  std::ostringstream sealed;
+  writeStartupSummaryJsonLine(sealed, snapshot);
+  REQUIRE(sealed.str().find("\"sio2\":{\"input_phase\":\"dma_sealed\",\"input_bytes\":144}") !=
+    std::string::npos);
+  snapshot.sio2.inputPhase = static_cast<SIO2IngressPhase>(255);
+  std::ostringstream invalid;
+  REQUIRE_THROWS_AS(writeStartupSummaryJsonLine(invalid, snapshot), std::invalid_argument);
+  REQUIRE(invalid.str().empty());
+}
+
 TEST_CASE("Startup SPU trace and capture exports retain typed positions and raw payloads",
   "[startup-diagnostics][spu-diagnostics]")
 {
@@ -560,6 +731,7 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"("status":0,"cause":0,"epc":0,"bad_vaddr":0},"sif":{"mscom":0,"smcom":0,)"
     R"("msflag":0,"smflag":0,"control":0,"iop_doorbell":0,"sif0_words":0,)"
     R"("sif1_words":0,"free_words":0,"packing_cursor":0,"packing_latch":[0,0,0,0]},)"
+    R"("sio2":{"input_phase":"empty","input_bytes":0},)"
     R"("dmac":{"control":0,"hold_control":0,)"
     R"("status":0,"interleave_size":0,"interrupt_pending":false,)"
     R"("priority_control":0,"stall_address":0,"sif_grant_order":["sif0","sif1"],"channels":[)"
@@ -589,7 +761,9 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"("bcr":0,"tadr":null,"remaining_words":0,"terminal":false,"active":false,)"
     R"("enabled":false,"priority":0,)"
     R"("next_beat":{"outcome":"wait","failure":"none","address":0,)"
-    R"("value":0,"bus_status":"completed"}}},)"
+    R"("value":0,"bus_status":"completed"}},)"
+    R"("sio2_input":{"channel":11,"control":0,"madr":0,"bcr":0,)"
+    R"("remaining_words":0,"active":false,"enabled":false}},)"
     R"("ee_interrupts":{"status":0,"mask":0,"pending":false},)"
     R"("iop_interrupts":{"status":0,"mask":0,"control":0,"pending":false}})";
   REQUIRE(output.str() ==

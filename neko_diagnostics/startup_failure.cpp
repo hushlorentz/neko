@@ -231,6 +231,11 @@ namespace
 
   void writeDMA(std::ostream &output, const NekoTraceEvent &event)
   {
+    if (event.subsystem == NekoTraceSubsystem::SIO2)
+    {
+      writeStartupSIO2DMABeatJson(output, nekoDecodeSIO2DMABeat(event));
+      return;
+    }
     if (event.subsystem == NekoTraceSubsystem::SPU2)
     {
       writeStartupSPUDMABeatJson(output, nekoDecodeSPUDMABeat(event));

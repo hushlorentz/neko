@@ -15,7 +15,8 @@ import zlib
 
 # Stable public identities from neko/regression_trace.hpp, not memory bitfields.
 CPUS = {10: "ee", 11: "iop"}
-SUBSYSTEMS = {**CPUS, 14: "sif", 15: "cdvd", 16: "spu2"}
+EVENT_CPUS = {**CPUS, 17: "iop"}
+SUBSYSTEMS = {**CPUS, 14: "sif", 15: "cdvd", 16: "spu2", 17: "sio2"}
 EVENTS = {1: "state_changed", 5: "instruction_issued", 7: "memory_access",
           8: "exception_entered", 21: "fault_context",
           20: "dma_beat",
@@ -137,6 +138,66 @@ def validate_spu_event(record):
                     raise ValueError(f"spu_input.{side} has invalid buffer position")
 
 
+def validate_sio2_event(record):
+    if record["subsystem"] != 17 or record["event_type"] != 20:
+        if "sio2_dma" in record:
+            raise ValueError("sio2_dma requires its SIO2 DMA event identity")
+        return
+    decoded = require(record, "sio2_dma", dict)
+    fields = {"endpoint", "channel", "kind", "outcome", "failure", "bus_status",
+              "attempted_address", "source_value", "remaining_before",
+              "remaining_after", "staged_before", "staged_after"}
+    if decoded.keys() != fields:
+        raise ValueError("sio2_dma has invalid fields")
+    if (uint(decoded["channel"], "sio2_dma.channel", 8) != 11 or
+            decoded["endpoint"] != "iop_sio2_input" or decoded["kind"] != "payload"):
+        raise ValueError("sio2_dma has invalid endpoint, channel or kind")
+    if decoded["outcome"] not in ("accepted", "wait", "completed", "rejected"):
+        raise ValueError("sio2_dma has invalid outcome")
+    rejected = decoded["outcome"] == "rejected"
+    statuses = ("misaligned", "read_only", "unmapped") if rejected else ("none",)
+    if (decoded["bus_status"] not in statuses or
+            decoded["failure"] != ("source_read" if rejected else "none")):
+        raise ValueError("sio2_dma has invalid failure/bus_status")
+    for field in ("attempted_address", "source_value"):
+        uint(decoded[field], f"sio2_dma.{field}", 32)
+    for field in ("remaining_before", "remaining_after"):
+        if uint(decoded[field], f"sio2_dma.{field}", 8) > 36:
+            raise ValueError(f"sio2_dma.{field} exceeds 36 words")
+    for field in ("staged_before", "staged_after"):
+        if uint(decoded[field], f"sio2_dma.{field}", 16) > 144:
+            raise ValueError(f"sio2_dma.{field} exceeds 144 bytes")
+
+
+def validate_sio2_snapshot(snapshot):
+    # Older reports predate ingress diagnostics and have neither member.
+    if "sio2" in snapshot:
+        sio2 = require(snapshot, "sio2", dict)
+        if sio2.keys() != {"input_phase", "input_bytes"}:
+            raise ValueError("snapshot.sio2 has invalid fields")
+        if sio2["input_phase"] not in ("empty", "cpu", "dma_open", "dma_sealed"):
+            raise ValueError("snapshot.sio2.input_phase is invalid")
+        if uint(sio2["input_bytes"], "snapshot.sio2.input_bytes", 16) > 1023:
+            raise ValueError("snapshot.sio2.input_bytes exceeds staging capacity")
+    if "iop_dma" in snapshot:
+        dma = require(snapshot, "iop_dma", dict)
+        if "sio2_input" not in dma:
+            return
+        channel = require(dma, "sio2_input", dict)
+        if channel.keys() != {"channel", "control", "madr", "bcr",
+                              "remaining_words", "active", "enabled"}:
+            raise ValueError("snapshot.iop_dma.sio2_input has invalid fields")
+        if uint(channel["channel"], "snapshot.iop_dma.sio2_input.channel", 8) != 11:
+            raise ValueError("snapshot.iop_dma.sio2_input.channel must be 11")
+        for field in ("control", "madr", "bcr"):
+            uint(channel[field], f"snapshot.iop_dma.sio2_input.{field}", 32)
+        if uint(channel["remaining_words"],
+                "snapshot.iop_dma.sio2_input.remaining_words", 8) > 36:
+            raise ValueError("snapshot.iop_dma.sio2_input.remaining_words exceeds 36")
+        for field in ("active", "enabled"):
+            require(channel, field, bool)
+
+
 def validate_event(record):
     uint(record.get("master_cycle"), "master_cycle")
     uint(record.get("subsystem"), "subsystem", 8)
@@ -147,6 +208,7 @@ def validate_event(record):
     for value in values:
         uint(value, "values")
     validate_spu_event(record)
+    validate_sio2_event(record)
     cdvd_command = record["subsystem"] == 15 and record["event_type"] in (23, 24)
     if not cdvd_command:
         if "cdvd" in record:
@@ -202,6 +264,7 @@ def validate_record(record):
             raise ValueError("snapshot.dmac must contain exactly: " +
                              ", ".join(sorted(DMAC_FIELDS)))
         uint(dmac.get("hold_control"), "snapshot.dmac.hold_control", 32)
+        validate_sio2_snapshot(snapshot)
         if kind == "startup_run_summary":
             run = require(record, "run", dict)
             require(run, "cycle_limit_reached", bool)
@@ -391,7 +454,7 @@ def describe_event(index, event):
     row = dict(event_index=index, master_cycle=event["master_cycle"],
                subsystem=event["subsystem"], event_type=event["event_type"],
                values_raw=[f"0x{word:016x}" for word in event["values"]])
-    cpu = CPUS.get(event["subsystem"])
+    cpu = EVENT_CPUS.get(event["subsystem"])
     if cpu is not None:
         row["cpu"] = cpu
     row["event"] = EVENTS.get(event["event_type"], "unknown")
@@ -405,12 +468,16 @@ def describe_event(index, event):
             row["spu_dma"] = readable(event["spu_dma"])
         elif event["event_type"] == 1:
             row["spu_input"] = event["spu_input"]
+    if event["subsystem"] == 17:
+        row["subsystem_name"] = "sio2"
+        if event["event_type"] == 20:
+            row["sio2_dma"] = readable(event["sio2_dma"])
     values = event["values"]
-    if cpu is not None and event["event_type"] == 5:
+    if event["subsystem"] in CPUS and event["event_type"] == 5:
         row["payload"] = dict(pc=f"0x{values[0]:08x}", opcode=f"0x{values[1]:08x}",
                               operation_raw=f"0x{values[2]:016x}",
                               flags_raw=f"0x{values[3]:016x}")
-    elif cpu is not None and event["event_type"] == 7:
+    elif event["subsystem"] in CPUS and event["event_type"] == 7:
         row["payload"] = dict(virtual_address=f"0x{values[0]:08x}",
                               data_low_raw=f"0x{values[1]:016x}",
                               data_high_raw=f"0x{values[2]:016x}",
@@ -438,7 +505,7 @@ def select_events(log, arguments):
             continue
         if arguments.cycle is not None and cycle != arguments.cycle:
             continue
-        if arguments.cpu is not None and CPUS.get(cpu) != arguments.cpu:
+        if arguments.cpu is not None and EVENT_CPUS.get(cpu) != arguments.cpu:
             continue
         if arguments.subsystem is not None and SUBSYSTEMS.get(cpu) != arguments.subsystem:
             continue

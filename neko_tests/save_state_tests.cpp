@@ -20,6 +20,9 @@ namespace
 {
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
+  constexpr std::size_t VERSION_105_PREPARED_STATE_SIZE = 42051311;
+  constexpr std::uint64_t VERSION_105_PREPARED_STATE_HASH =
+    UINT64_C(0x202dca9a64c1365e);
   constexpr std::size_t VERSION_104_PREPARED_STATE_SIZE = 42051309;
   constexpr std::uint64_t VERSION_104_PREPARED_STATE_HASH =
     UINT64_C(0x93ac53493550ce51);
@@ -637,7 +640,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 104 save-state layout is byte-stable")
+TEST_CASE("Version 105 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -652,14 +655,14 @@ TEST_CASE("Version 104 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 104);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 105);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_104_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_105_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_104_PREPARED_STATE_HASH);
+    VERSION_105_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -795,12 +798,12 @@ TEST_CASE("Version 104 save-state layout is byte-stable")
     "system.iop.dmaController.spuTransfers[0].channelControl");
   REQUIRE(firstTransfer != nullptr);
   REQUIRE(firstTransfer->containerOffset == spuBlockOffset + 8);
-  const auto sio2ProgrammingOffset = firstTransfer->containerOffset + 10;
+  const auto currentSio2ProgrammingOffset = firstTransfer->containerOffset + 10;
   for (std::size_t channel = 0; channel < 2; ++channel)
   {
     const auto path = "system.iop.dmaController.sio2Programming[" +
       std::to_string(channel) + "].";
-    std::size_t fieldOffset = sio2ProgrammingOffset + channel * 12;
+    std::size_t fieldOffset = currentSio2ProgrammingOffset + channel * 12;
     for (const auto &name : {"memoryAddress", "blockControl", "channelControl"})
     {
       const auto *field = snapshot.find(path + name);
@@ -814,12 +817,27 @@ TEST_CASE("Version 104 save-state layout is byte-stable")
   }
   const auto *firstBank = snapshot.find("system.iop.dmaController.banks[0].priority");
   REQUIRE(firstBank != nullptr);
-  REQUIRE(firstBank->containerOffset == sio2ProgrammingOffset + 24);
+  REQUIRE(firstBank->containerOffset == currentSio2ProgrammingOffset + 25);
   const auto *cdvdResult = snapshot.find("system.iop.cdvd.result");
   REQUIRE(cdvdResult != nullptr);
   REQUIRE(cdvdResult->kind == SaveStateFieldKind::Bytes);
   REQUIRE(cdvdResult->size == 16);
   auto previousVersion = state;
+  const auto *ingressPhase = snapshot.find("system.iop.sio2.transmitInput.phase");
+  REQUIRE(ingressPhase != nullptr);
+  previousVersion.erase(previousVersion.begin() + currentSio2ProgrammingOffset + 24);
+  previousVersion.erase(previousVersion.begin() + ingressPhase->containerOffset);
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 104;
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
+    previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 12,
+    hashBytes(previousVersion, TEST_SAVE_STATE_HEADER_SIZE));
+  REQUIRE(previousVersion.size() == VERSION_104_PREPARED_STATE_SIZE);
+  REQUIRE(hashBytes(previousVersion) == VERSION_104_PREPARED_STATE_HASH);
+  REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
+  REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
+  REQUIRE(system.saveState() == state);
+  const auto sio2ProgrammingOffset = currentSio2ProgrammingOffset - 1;
   previousVersion.erase(previousVersion.begin() + sio2ProgrammingOffset + 20,
     previousVersion.begin() + sio2ProgrammingOffset + 24);
   previousVersion.erase(previousVersion.begin() + sio2ProgrammingOffset + 8,
@@ -846,8 +864,8 @@ TEST_CASE("Version 104 save-state layout is byte-stable")
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);
-  previousVersion.erase(previousVersion.begin() + cdvdResult->containerOffset + 8,
-    previousVersion.begin() + cdvdResult->containerOffset + cdvdResult->size);
+  previousVersion.erase(previousVersion.begin() + cdvdResult->containerOffset + 7,
+    previousVersion.begin() + cdvdResult->containerOffset + cdvdResult->size - 1);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 101;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -880,8 +898,8 @@ TEST_CASE("Version 104 save-state layout is byte-stable")
   REQUIRE(parameters->size == 16);
   REQUIRE(parameterCount->containerOffset == resultCursor->containerOffset + 1);
   REQUIRE(parameters->containerOffset == parameterCount->containerOffset + 1);
-  previousVersion.erase(previousVersion.begin() + parameterCount->containerOffset - 8,
-    previousVersion.begin() + parameters->containerOffset + parameters->size - 8);
+  previousVersion.erase(previousVersion.begin() + parameterCount->containerOffset - 9,
+    previousVersion.begin() + parameters->containerOffset + parameters->size - 9);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 99;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
@@ -904,7 +922,8 @@ TEST_CASE("Version 104 save-state layout is byte-stable")
   REQUIRE(firstTransmit != nullptr);
   REQUIRE(lastTransmit != nullptr);
   REQUIRE(transmitCount->kind == SaveStateFieldKind::U16);
-  REQUIRE(transmitCount->containerOffset == lastDescriptor->containerOffset + 4);
+  REQUIRE(ingressPhase->containerOffset == lastDescriptor->containerOffset + 4);
+  REQUIRE(transmitCount->containerOffset == ingressPhase->containerOffset + 1);
   REQUIRE(transmitCount->scalarValue == 0);
   REQUIRE(firstTransmit->kind == SaveStateFieldKind::U8);
   REQUIRE(firstTransmit->containerOffset == transmitCount->containerOffset + 2);

@@ -96,6 +96,373 @@ namespace
     REQUIRE(unchanged);
   }
 
+  void programSIO2Input(NekoSystem &system, IOPAddress address = 0x1000)
+  {
+    REQUIRE(system.iopBus().write32(SIO2_MADR[0], address).status ==
+      IOPBusStatus::Completed);
+    REQUIRE(system.iopBus().write32(SIO2_BCR[0], 0x10024).status ==
+      IOPBusStatus::Completed);
+  }
+
+  void startSIO2Input(NekoSystem &system)
+  {
+    REQUIRE(system.iopBus().write32(SIO2_CHCR[0], 0x01000201).status ==
+      IOPBusStatus::Completed);
+  }
+
+  TEST_CASE("IOP SIO2 input DMA stages one opaque block through real grants",
+    "[iop][dma][sio2-input-dma]")
+  {
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    for (IOPWord word = 0; word < 36; ++word)
+      REQUIRE(bus.write32(0x1000 + word * 4, 0x91827300 + word).status ==
+        IOPBusStatus::Completed);
+    REQUIRE(bus.write32(SIO2_MADR[0], 0x1000).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(SIO2_BCR[0], 0x10024).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(SIO2_CHCR[0], 0x01000201).status == IOPBusStatus::Completed);
+    REQUIRE(system.sio2Controller().transmitInputSize() == 0);
+    system.runMasterCycles(16);
+    REQUIRE(system.sio2Controller().transmitInputSize() == 0);
+    REQUIRE(bus.write32(DPCR2, 8 << 16).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(DICR2, 1 << 20).status == IOPBusStatus::Completed);
+    system.runMasterCycles(35 * 8);
+    REQUIRE(system.sio2Controller().transmitInputSize() == 140);
+    REQUIRE(bus.write32(0x108c, 0x11223344).status == IOPBusStatus::Completed);
+    system.runMasterCycles(8);
+    REQUIRE(bus.read32(SIO2_MADR[0]).value == 0x1090);
+    REQUIRE(bus.read32(SIO2_BCR[0]).value == 0x24);
+    REQUIRE(bus.read32(SIO2_CHCR[0]).value == 0x201);
+    REQUIRE(system.sio2Controller().transmitInputSize() == 144);
+    for (std::size_t byte = 0; byte < 144; ++byte)
+      REQUIRE(system.sio2Controller().transmitInputByte(byte) ==
+        static_cast<std::uint8_t>((byte / 4 == 35 ? 0x11223344 :
+          0x91827300 + byte / 4) >> (8 * (byte % 4))));
+    REQUIRE((system.iopDMAController().interruptStatus(SECONDARY) & 0x10000000) != 0);
+    REQUIRE((system.iopInterruptController().status() & DMAC_CAUSE) != 0);
+    REQUIRE(bus.write32(DICR2, 0x10100000).status == IOPBusStatus::Completed);
+    REQUIRE(!system.iopDMAController().interruptPending());
+    REQUIRE((system.iopInterruptController().status() & DMAC_CAUSE) != 0);
+    system.iopInterruptController().writeStatus(~DMAC_CAUSE);
+    REQUIRE((system.iopInterruptController().status() & DMAC_CAUSE) == 0);
+    REQUIRE(system.sio2Controller().readInterruptStatus() == 0);
+    REQUIRE(system.sio2Controller().readControl() == 0);
+    REQUIRE(system.sio2Controller().readTransferStatus(0).status ==
+      SIO2AccessStatus::Unsupported);
+    REQUIRE(system.sio2Controller().readReceiveByte().status ==
+      SIO2AccessStatus::Unsupported);
+  }
+
+  TEST_CASE("IOP SIO2 input DMA excludes competing ingress and cancels partial blocks",
+    "[iop][dma][sio2-input-dma]")
+  {
+    for (const IOPWord stop : {0u, 0x200u, 0x201u})
+    {
+      NekoSystem system;
+      auto &bus = system.iopBus();
+      auto &sio2 = system.sio2Controller();
+      auto &dma = system.iopDMAController();
+      programSIO2Input(system);
+      startSIO2Input(system);
+      const auto initialHash = system.iopStateHash();
+      startSIO2Input(system);
+      REQUIRE(system.iopStateHash() == initialHash);
+      REQUIRE(sio2.transmitInputPhase() == SIO2IngressPhase::DMAOpen);
+      REQUIRE(bus.write8(0x1f808260, 0x61).status == IOPBusStatus::Unmapped);
+      REQUIRE(bus.write32(0x1f808200, 0x1234).status == IOPBusStatus::Unmapped);
+      REQUIRE(sio2.readCommandDescriptor(0) == 0);
+      REQUIRE(bus.write32(0x1f808268, 0xb1).status == IOPBusStatus::Unmapped);
+      REQUIRE_THROWS_AS(sio2.reset(), std::logic_error);
+      REQUIRE(system.iopStateHash() == initialHash);
+      dma.writePriority(SECONDARY, 8 << 16);
+      for (unsigned word = 0; word < 3; ++word)
+        REQUIRE(dma.clockSIO2Input(bus, sio2).outcome == IOPDMABeatOutcome::Accepted);
+      REQUIRE(bus.read32(SIO2_MADR[0]).value == 0x100c);
+      REQUIRE(bus.read32(SIO2_BCR[0]).value == 0x10024);
+      const auto partial = system.saveState();
+      for (const auto address : {SIO2_MADR[0], SIO2_BCR[0]})
+      {
+        REQUIRE(bus.write32(address, 0).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.writeMasked32(address, 0, 15).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.write16(address, 0).status == IOPBusStatus::Unmapped);
+        REQUIRE(bus.write16(address + 2, 0).status == IOPBusStatus::Unmapped);
+      }
+      startSIO2Input(system);
+      REQUIRE_THROWS_AS(sio2.reset(), std::logic_error);
+      requireState(system, partial);
+      REQUIRE(bus.write32(0x1f808204, 0x12345678).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x1f808240, 0xff020405).status == IOPBusStatus::Completed);
+      REQUIRE(bus.write32(0x1f808268, 0x3bc).status == IOPBusStatus::Completed);
+      REQUIRE(sio2.transmitInputSize() == 12);
+      REQUIRE(bus.write32(SIO2_CHCR[0], stop).status == IOPBusStatus::Completed);
+      REQUIRE(!dma.sio2InputActive());
+      REQUIRE(dma.sio2InputRemainingWords() == 0);
+      REQUIRE(sio2.transmitInputPhase() == SIO2IngressPhase::Empty);
+      REQUIRE(sio2.transmitInputSize() == 0);
+      REQUIRE(bus.read32(SIO2_MADR[0]).value == 0x100c);
+      REQUIRE(bus.read32(SIO2_BCR[0]).value == 0x10024);
+      REQUIRE(bus.read32(SIO2_CHCR[0]).value == stop);
+      REQUIRE(dma.interruptStatus(SECONDARY) == 0);
+      REQUIRE(sio2.readControl() == 0x3bc);
+      startSIO2Input(system);
+      REQUIRE(sio2.transmitInputSize() == 0);
+      bus.reset();
+      system.iopCore().reset();
+      REQUIRE(dma.sio2InputActive());
+      system.reset();
+      REQUIRE(!system.iopDMAController().sio2InputActive());
+      REQUIRE(system.sio2Controller().transmitInputPhase() == SIO2IngressPhase::Empty);
+    }
+  }
+
+  TEST_CASE("IOP SIO2 input DMA sealed frames require an explicit clear boundary",
+    "[iop][dma][sio2-input-dma]")
+  {
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &sio2 = system.sio2Controller();
+    auto &dma = system.iopDMAController();
+    // Keep an acknowledged serial transaction's status and cause across DMA transport.
+    REQUIRE(bus.write32(0x1f808200, 0x001c0740).status == IOPBusStatus::Completed);
+    for (const auto byte : {0x61, 0, 0, 0, 0, 0, 0})
+      REQUIRE(bus.write8(0x1f808260, byte).status == IOPBusStatus::Completed);
+    REQUIRE(bus.write32(0x1f808268, 0xb1).status == IOPBusStatus::Completed);
+    programSIO2Input(system);
+    REQUIRE(bus.write32(SIO2_CHCR[0], 0x01000201).status == IOPBusStatus::Unmapped);
+    for (unsigned byte = 0; byte < 7; ++byte)
+      REQUIRE(bus.read8(0x1f808264).value == 0xff);
+    startSIO2Input(system);
+    dma.writePriority(SECONDARY, 8 << 16);
+    const auto irqBefore = system.iopInterruptController().status();
+    for (unsigned word = 0; word < 36; ++word)
+    {
+      REQUIRE(dma.clockSIO2Input(bus, sio2).outcome ==
+        (word == 35 ? IOPDMABeatOutcome::Completed : IOPDMABeatOutcome::Accepted));
+      REQUIRE(bus.read32(SIO2_MADR[0]).value == 0x1000 + (word + 1) * 4);
+      REQUIRE(bus.read32(SIO2_BCR[0]).value == (word == 35 ? 0x24 : 0x10024));
+    }
+    REQUIRE(sio2.transmitInputPhase() == SIO2IngressPhase::DMASealed);
+    REQUIRE(dma.interruptStatus(SECONDARY) == 0); // Completion was not masked in.
+    REQUIRE(system.iopInterruptController().status() == irqBefore);
+    REQUIRE(sio2.readControl() == 0xb1);
+    REQUIRE(sio2.readInterruptStatus() == 1);
+    REQUIRE(sio2.readTransferStatus(0).value == 0x1d100);
+    REQUIRE(sio2.readReceiveByte().status == SIO2AccessStatus::Unsupported);
+    REQUIRE(bus.write8(0x1f808260, 0).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(0x1f808268, 0xb1).status == IOPBusStatus::Unmapped);
+    for (IOPWord stop : {0u, 0x200u, 0x201u})
+    {
+      REQUIRE(bus.write32(SIO2_CHCR[0], stop).status == IOPBusStatus::Completed);
+      REQUIRE(sio2.transmitInputSize() == 144);
+    }
+    programSIO2Input(system, 0x2000);
+    REQUIRE(bus.write32(SIO2_CHCR[0], 0x01000201).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(SIO2_CHCR[1], 0x01000201).status == IOPBusStatus::Unmapped);
+    REQUIRE(bus.write32(0x1f808200, 0xdeadbeef).status == IOPBusStatus::Completed);
+    REQUIRE(sio2.transmitInputPhase() == SIO2IngressPhase::Empty);
+    startSIO2Input(system);
+  }
+
+  TEST_CASE("IOP SIO2 input DMA rejects invalid profiles and reads only granted RAM words",
+    "[iop][dma][sio2-input-dma]")
+  {
+    NekoSystem system;
+    auto &bus = system.iopBus();
+    auto &dma = system.iopDMAController();
+    auto &sio2 = system.sio2Controller();
+    for (IOPWord bcr : {0u, 0x24u, 0x10023u, 0x20024u, 0x10025u, 0xffffffffu})
+    {
+      REQUIRE(bus.write32(SIO2_BCR[0], bcr).status == IOPBusStatus::Completed);
+      const auto hash = system.iopStateHash();
+      REQUIRE(bus.write32(SIO2_CHCR[0], 0x01000201).status == IOPBusStatus::Unmapped);
+      REQUIRE(system.iopStateHash() == hash);
+    }
+    programSIO2Input(system);
+    REQUIRE(sio2.writeTransmitByte(0) == SIO2AccessStatus::Accepted);
+    REQUIRE(bus.write32(SIO2_CHCR[0], 0x01000201).status == IOPBusStatus::Unmapped);
+    REQUIRE(sio2.writeCommandDescriptor(0, 0) == SIO2AccessStatus::Accepted);
+    SIO2Controller foreign;
+    REQUIRE_THROWS_AS(dma.writeSIO2ChannelControl(
+      IOPSIO2DMAChannel::Input, 0x01000201, bus, foreign), std::invalid_argument);
+    // The first word is readable; the next address is outside the existing RAM aperture.
+    programSIO2Input(system, 0x7ffffc);
+    REQUIRE(bus.write32(0x1ffffc, 0x78563412).status == IOPBusStatus::Completed);
+    startSIO2Input(system);
+    dma.writePriority(SECONDARY, 8 << 16);
+    REQUIRE(dma.clockSIO2Input(bus, sio2).outcome == IOPDMABeatOutcome::Accepted);
+    REQUIRE(sio2.transmitInputByte(0) == 0x12);
+    REQUIRE(sio2.transmitInputByte(3) == 0x78);
+    REQUIRE(dma.sio2MemoryAddress(IOPSIO2DMAChannel::Input) == 0x800000);
+    const auto accepted = system.saveState();
+    const auto cursor = dma.tieBreakChannel();
+    const auto rejected = dma.clockSIO2Input(bus, sio2);
+    REQUIRE(rejected.outcome == IOPDMABeatOutcome::Rejected);
+    REQUIRE(rejected.channel == IOPDMAChannel::SIO2Input);
+    REQUIRE(rejected.failure == IOPDMAFailure::SourceRead);
+    REQUIRE(rejected.address == 0x800000);
+    REQUIRE(rejected.status == IOPBusStatus::Unmapped);
+    REQUIRE(dma.tieBreakChannel() == cursor);
+    requireState(system, accepted);
+    REQUIRE_THROWS_AS(system.clockMasterCycle(), IOPDMATransferError);
+    REQUIRE(sio2.transmitInputSize() == 4);
+    REQUIRE(dma.sio2InputRemainingWords() == 35);
+  }
+
+  TEST_CASE("IOP SIO2 input DMA restores every ingress origin and rejects cross-owner damage",
+    "[iop][dma][sio2-input-dma][save-state]")
+  {
+    NekoSystem original;
+    programSIO2Input(original);
+    startSIO2Input(original);
+    original.iopDMAController().writePriority(SECONDARY, 8 << 16);
+    original.runMasterCycles(13 * 8);
+    const auto checkpoint = original.saveState();
+    const auto hash = original.iopStateHash();
+    NekoSystem restored;
+    restored.loadState(checkpoint);
+    REQUIRE(restored.iopStateHash() == hash);
+    REQUIRE(restored.sio2Controller().transmitInputPhase() == SIO2IngressPhase::DMAOpen);
+    REQUIRE(restored.sio2Controller().transmitInputSize() == 52);
+    original.runMasterCycles(23 * 8);
+    restored.runMasterCycles(23 * 8);
+    REQUIRE(original.saveState() == restored.saveState());
+    const auto sealed = original.saveState();
+    restored.loadState(checkpoint);
+    restored.loadState(sealed);
+    REQUIRE(restored.saveState() == sealed);
+    REQUIRE(restored.sio2Controller().transmitInputPhase() == SIO2IngressPhase::DMASealed);
+    for (const auto &mutation : std::vector<std::pair<std::string, std::uint64_t>>{
+      {"system.iop.sio2.transmitInput.phase", 0},
+      {"system.iop.sio2.transmitInput.phase", 1},
+      {"system.iop.sio2.transmitInput.phase", 3},
+      {"system.iop.sio2.transmitInput.phase", 4},
+      {"system.iop.sio2.transmitInput.count", 56},
+      {"system.iop.sio2.transmitInput.bytes[52].value", 1},
+      {"system.iop.dmaController.sio2InputWordsTransferred", 12},
+      {"system.iop.dmaController.sio2InputWordsTransferred", 36},
+      {"system.iop.dmaController.sio2Programming[0].channelControl", 0x201},
+      {"system.iop.dmaController.sio2Programming[0].blockControl", 0x20024},
+      {"system.iop.dmaController.sio2Programming[1].channelControl", 0x01000201},
+      {"system.iop.dmaController.nextChannel", 12},
+      {"container.version", 104}})
+    {
+      CAPTURE(mutation.first);
+      SaveStateMutation invalid(checkpoint);
+      invalid.writeScalar(mutation.first, mutation.second);
+      invalid.refreshChecksum();
+      REQUIRE_THROWS_AS(inspectSaveState(invalid), std::invalid_argument);
+      REQUIRE_THROWS_AS(restored.loadState(invalid), std::invalid_argument);
+      requireState(restored, sealed);
+    }
+    // An identically sized CPU packet must not become a sealed DMA frame on adoption.
+    NekoSystem cpu;
+    for (unsigned byte = 0; byte < 144; ++byte)
+      REQUIRE(cpu.sio2Controller().writeTransmitByte(static_cast<std::uint8_t>(byte)) ==
+        SIO2AccessStatus::Accepted);
+    const auto cpuState = cpu.saveState();
+    restored.loadState(cpuState);
+    REQUIRE(restored.sio2Controller().transmitInputPhase() == SIO2IngressPhase::CPU);
+    REQUIRE(restored.sio2Controller().writeTransmitByte(0xaa) == SIO2AccessStatus::Accepted);
+    REQUIRE(restored.sio2Controller().transmitInputSize() == 145);
+    restored.loadState(sealed);
+    restored.sio2Controller().reset();
+    REQUIRE(restored.sio2Controller().transmitInputSize() == 0);
+    REQUIRE(restored.iopDMAController().sio2MemoryAddress(IOPSIO2DMAChannel::Input) == 0x1090);
+  }
+
+  TEST_CASE("IOP SIO2 input DMA guest start restores branch load and traced continuations",
+    "[iop][dma][sio2-input-dma][save-state][trace]")
+  {
+    for (const unsigned cut : {40u, 56u})
+    {
+      NekoSystem original;
+      programSIO2Input(original);
+      original.iopDMAController().writePriority(SECONDARY, 8 << 16);
+      const std::array<IOPWord, 13> program = {{
+        0x3c01bf80, 0x34211548, 0x3c020100, 0x34420201,
+        0x10000002, 0xac220000, 0xffffffff, 0x8c230000, 0,
+        0x8c240000, 0, 0x1000fffd, 0
+      }};
+      for (std::size_t index = 0; index < program.size(); ++index)
+        REQUIRE(original.iopBus().write32(static_cast<IOPAddress>(index * 4),
+          program[index]).status == IOPBusStatus::Completed);
+      original.iopCore().startExecution(0xa0000000);
+      original.runMasterCycles(cut);
+      REQUIRE(original.iopCore().branchContinuation().active == (cut == 40));
+      REQUIRE(original.iopCore().delayedResultContinuation().source ==
+        (cut == 56 ? IOPDelayedResultSource::Load : IOPDelayedResultSource::None));
+      const auto checkpoint = original.saveState();
+      NekoSystem restored;
+      NekoSystem plain;
+      restored.loadState(checkpoint);
+      plain.loadState(checkpoint);
+      original.startTrace();
+      restored.startTrace();
+      original.runMasterCycles(400 - cut);
+      restored.runMasterCycles(400 - cut);
+      plain.runMasterCycles(400 - cut);
+      REQUIRE(original.iopCore().executionState() == IOPExecutionState::Running);
+      REQUIRE(original.iopCore().generalRegister(3) == 0x01000201);
+      REQUIRE(original.iopCore().generalRegister(4) == 0x201);
+      REQUIRE(original.sio2Controller().transmitInputPhase() == SIO2IngressPhase::DMASealed);
+      REQUIRE(original.sio2Controller().transmitInputSize() == 144);
+      IOPTraceTest::requireEvents(original.trace(), restored.trace());
+      REQUIRE(original.saveState() == restored.saveState());
+      REQUIRE(original.saveState() == plain.saveState());
+      REQUIRE(plain.trace().empty());
+      const auto firstBeat = std::find_if(original.trace().begin(), original.trace().end(),
+        [](const NekoTraceEvent &event) { return event.subsystem == NekoTraceSubsystem::SIO2; });
+      REQUIRE(firstBeat != original.trace().end());
+      REQUIRE(firstBeat->masterCycle == (cut == 40 ? 49 : 57));
+    }
+  }
+
+  TEST_CASE("IOP SIO2 input DMA observations suppress waits without changing machine state",
+    "[iop][dma][sio2-input-dma][trace]")
+  {
+    NekoSystem system;
+    programSIO2Input(system);
+    startSIO2Input(system);
+    NekoSystem plain;
+    plain.loadState(system.saveState());
+    system.startTrace();
+    system.runMasterCycles(80);
+    plain.runMasterCycles(80);
+    const auto countBeats = [&]()
+    {
+      return std::count_if(system.trace().begin(), system.trace().end(),
+        [](const NekoTraceEvent &event) { return event.subsystem == NekoTraceSubsystem::SIO2; });
+    };
+    REQUIRE(countBeats() == 1);
+    REQUIRE(system.saveState() == plain.saveState());
+    system.startTrace();
+    system.runMasterCycles(80);
+    plain.runMasterCycles(80);
+    REQUIRE(countBeats() == 1);
+    system.iopDMAController().writePriority(SECONDARY, 8 << 16);
+    plain.iopDMAController().writePriority(SECONDARY, 8 << 16);
+    system.runMasterCycles(36 * 8);
+    plain.runMasterCycles(36 * 8);
+    REQUIRE(countBeats() == 37);
+    REQUIRE(system.saveState() == plain.saveState());
+    unsigned word = 0;
+    for (const auto &event : system.trace())
+    {
+      if (event.subsystem != NekoTraceSubsystem::SIO2) continue;
+      const auto beat = nekoDecodeSIO2DMABeat(event);
+      if (beat.outcome == NekoSPUTrace::Outcome::Wait) continue;
+      REQUIRE(beat.sourceAddress == 0x1000 + word * 4);
+      REQUIRE(beat.remainingBefore == 36 - word);
+      REQUIRE(beat.remainingAfter == 35 - word);
+      REQUIRE(beat.stagedBefore == word * 4);
+      REQUIRE(beat.stagedAfter == (word + 1) * 4);
+      REQUIRE(beat.outcome == (word == 35 ? NekoSPUTrace::Outcome::Completed :
+        NekoSPUTrace::Outcome::Accepted));
+      ++word;
+    }
+    REQUIRE(word == 36);
+  }
+
   TEST_CASE("IOP SIO2 DMA CHCR retains stopped configuration without starting",
     "[iop][dma][sio2-dma][sio2-chcr]")
   {

@@ -3645,9 +3645,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement only the approved stopped-control contract with atomic
       rejection and canonical restored-continuation coverage; keep active
       DMA, peripheral effects, IRQs and timing outside this dependency.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress beyond the CHCR origin; identify the next dependency without
       claiming active SIO2 DMA or completed boot.
+
+### IOP SIO2 DMA Input Start Dependency
+
+- [x] Research the demonstrated channel11 start and its SIO2 transport dependency;
+      separate padded input staging from serial execution, then obtain approval
+      for ownership, progress, completion, cancellation, IRQ and timing policy.
+- [x] Implement the approved single-block input transport and CPU lifecycle
+      through existing SIO2 storage and shared DMA grants, with atomic rejection,
+      canonical continuation and no synthetic peripheral results or completion.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress beyond the start origin; identify the next dependency without
+      claiming broader peripheral support or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

@@ -233,6 +233,7 @@ void NekoSaveStateCodec::writeIOPState(
     {
       auto input = writer->scope("transmitInput");
       const auto &sio2 = system.sio2ControllerComponent;
+      writer->writeFieldU8("phase", static_cast<std::uint8_t>(sio2.ingressPhase));
       writer->writeFieldU16("count", sio2.transmitInputCount);
       auto bytes = writer->scope("bytes");
       for (std::size_t index = 0; index < sio2.transmitInput.size(); ++index)
@@ -395,11 +396,13 @@ void NekoSaveStateCodec::writeIOPState(
       for (std::size_t index = 0; index < channels.size(); ++index)
       {
         auto channel = writer->element(index);
-        writer->writeFieldU32("memoryAddress", channels[index].memoryAddress);
-        writer->writeFieldU32("blockControl", channels[index].blockControl);
-        writer->writeFieldU32("channelControl", channels[index].channelControl);
+        writer->writeFieldU32("memoryAddress", channels[index].memoryAddressRegister);
+        writer->writeFieldU32("blockControl", channels[index].blockControlRegister);
+        writer->writeFieldU32("channelControl", channels[index].channelControlRegister);
       }
     }
+    writer->writeFieldU8("sio2InputWordsTransferred",
+      system.iopDMAControllerComponent.sio2InputWordsTransferred);
     auto banks = writer->scope("banks");
     for (std::size_t index = 0;
          index < system.iopDMAControllerComponent.banks.size(); ++index)
@@ -517,6 +520,10 @@ void NekoSaveStateCodec::readIOP(
     }
     {
       auto input = reader->scope("transmitInput");
+      const auto phase = reader->readFieldU8("phase");
+      reader->requireField(phase <= static_cast<std::uint8_t>(SIO2IngressPhase::DMASealed),
+        "SIO2 ingress phase is invalid");
+      sio2.ingressPhase = static_cast<SIO2IngressPhase>(phase);
       sio2.transmitInputCount = reader->readFieldU16("count");
       reader->requireField(sio2.transmitInputCount <= sio2.transmitInput.size(),
         "SIO2 staged transmit count exceeds the bounded capacity");
@@ -664,7 +671,8 @@ void NekoSaveStateCodec::readIOP(
       nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SPU0) ||
       nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SPU1) ||
       nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SIF0) ||
-      nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SIF1),
+      nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SIF1) ||
+      nextChannel == static_cast<std::uint8_t>(IOPDMAChannel::SIO2Input),
       "IOP DMA arbitration cursor is invalid");
     system->iopDMAControllerComponent.nextChannel = static_cast<IOPDMAChannel>(nextChannel);
     system->iopDMAControllerComponent.auxiliaryControlRegister =
@@ -709,17 +717,18 @@ void NekoSaveStateCodec::readIOP(
       for (std::size_t index = 0; index < channels.size(); ++index)
       {
         auto channel = reader->element(index);
-        channels[index].memoryAddress = reader->readFieldU32("memoryAddress");
+        channels[index].memoryAddressRegister = reader->readFieldU32("memoryAddress");
         reader->requireField(
-          IOPDMAChannelState::validMemoryAddress(channels[index].memoryAddress),
+          IOPDMAChannelState::validMemoryAddress(channels[index].memoryAddressRegister),
           "IOP SIO2 DMA address is unaligned or exceeds 24 bits");
-        channels[index].blockControl = reader->readFieldU32("blockControl");
-        channels[index].channelControl = reader->readFieldU32("channelControl");
-        reader->requireField(
-          IOPDMAController::validSIO2ChannelControl(channels[index].channelControl),
-          "IOP SIO2 DMA channel control is outside the stopped profile");
+        channels[index].blockControlRegister = reader->readFieldU32("blockControl");
+        channels[index].channelControlRegister = reader->readFieldU32("channelControl");
       }
     }
+    auto &dma = system->iopDMAControllerComponent;
+    dma.sio2InputWordsTransferred = reader->readFieldU8("sio2InputWordsTransferred");
+    reader->requireField(dma.validSIO2Continuation(system->sio2ControllerComponent),
+      "IOP SIO2 DMA continuation is incompatible with input staging");
     auto banks = reader->scope("banks");
     for (std::size_t index = 0;
          index < system->iopDMAControllerComponent.banks.size(); ++index)
@@ -735,7 +744,8 @@ void NekoSaveStateCodec::readIOP(
       const auto implemented = index == 1
         ? (1 << IOPDMAController::channelSlot(IOPDMAChannel::SPU1)) |
           (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF0)) |
-          (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF1))
+          (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIF1)) |
+          (1 << IOPDMAController::channelSlot(IOPDMAChannel::SIO2Input))
         : (1 << IOPDMAController::channelSlot(IOPDMAChannel::SPU0));
       reader->requireField(
         (state.flags & ~implemented) == 0,
@@ -1109,6 +1119,8 @@ void NekoSaveStateCodec::commitIOP(
     source->iopDMAControllerComponent.spuChannels;
   destination->iopDMAControllerComponent.sio2Channels =
     source->iopDMAControllerComponent.sio2Channels;
+  destination->iopDMAControllerComponent.sio2InputWordsTransferred =
+    source->iopDMAControllerComponent.sio2InputWordsTransferred;
   destination->iopDMAControllerComponent.nextChannel =
     source->iopDMAControllerComponent.nextChannel;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;

@@ -1,9 +1,12 @@
 #include "sio2_controller.hpp"
 
+#include <cassert>
 #include <stdexcept>
 
-void SIO2Controller::reset() noexcept
+void SIO2Controller::reset()
 {
+  if (ingressPhase == SIO2IngressPhase::DMAOpen)
+    throw std::logic_error("SIO2 reset requires coordinated cancellation of open DMA input");
   control = 0;
   portControls.fill(0);
   commandDescriptors.fill(0);
@@ -36,7 +39,8 @@ SIO2AccessStatus SIO2Controller::writeControl(std::uint32_t value) noexcept
 SIO2TransferResult SIO2Controller::startTransfer(
   std::uint32_t controlValue) noexcept
 {
-  if (controlValue != 0xb1 || receiveRemaining != 0 ||
+  if (ingressPhase != SIO2IngressPhase::CPU ||
+      controlValue != 0xb1 || receiveRemaining != 0 ||
       (commandDescriptors[0] != 0x001c0740 && commandDescriptors[0] != 0x001c0741) ||
       commandDescriptors[1] != 0 ||
       transmitInputCount != 7 || transmitInput[0] != 0x61)
@@ -92,6 +96,23 @@ SIO2AccessStatus SIO2Controller::acknowledgeInterrupt(
 
 bool SIO2Controller::hasValidTransferState() const noexcept
 {
+  switch (ingressPhase)
+  {
+    case SIO2IngressPhase::Empty:
+      if (transmitInputCount != 0) return false;
+      break;
+    case SIO2IngressPhase::CPU:
+      if (transmitInputCount == 0 || transmitInputCount > transmitInput.size()) return false;
+      break;
+    case SIO2IngressPhase::DMAOpen:
+      if (transmitInputCount >= DMA_INPUT_BYTES || transmitInputCount % 4 != 0 ||
+          receiveRemaining != 0) return false;
+      break;
+    case SIO2IngressPhase::DMASealed:
+      if (transmitInputCount != DMA_INPUT_BYTES || receiveRemaining != 0) return false;
+      break;
+    default: return false;
+  }
   if (receiveRemaining > 7)
   {
     return false;
@@ -119,29 +140,76 @@ std::uint32_t SIO2Controller::readCommandDescriptor(std::size_t index) const
   return commandDescriptors.at(index);
 }
 
-void SIO2Controller::writeCommandDescriptor(std::size_t index, std::uint32_t value)
+SIO2AccessStatus SIO2Controller::writeCommandDescriptor(
+  std::size_t index, std::uint32_t value)
 {
+  if (index == 0 && ingressPhase == SIO2IngressPhase::DMAOpen)
+    return SIO2AccessStatus::Unsupported;
   commandDescriptors.at(index) = value;
   if (index == 0)
   {
     clearTransmitInput();
   }
+  return SIO2AccessStatus::Accepted;
 }
 
 void SIO2Controller::clearTransmitInput() noexcept
 {
   transmitInput.fill(0);
   transmitInputCount = 0;
+  ingressPhase = SIO2IngressPhase::Empty;
 }
 
 SIO2AccessStatus SIO2Controller::writeTransmitByte(std::uint8_t value) noexcept
 {
-  if (transmitInputCount >= transmitInput.size())
+  if (ingressPhase == SIO2IngressPhase::DMAOpen ||
+      ingressPhase == SIO2IngressPhase::DMASealed ||
+      transmitInputCount >= transmitInput.size())
   {
     return SIO2AccessStatus::Unsupported;
   }
   transmitInput[transmitInputCount++] = value;
+  ingressPhase = SIO2IngressPhase::CPU;
   return SIO2AccessStatus::Accepted;
+}
+
+bool SIO2Controller::beginDMAInput() noexcept
+{
+  if (ingressPhase != SIO2IngressPhase::Empty || receiveRemaining != 0)
+    return false;
+  ingressPhase = SIO2IngressPhase::DMAOpen;
+  return true;
+}
+
+bool SIO2Controller::canAcceptDMAWord() const noexcept
+{
+  return ingressPhase == SIO2IngressPhase::DMAOpen &&
+    transmitInputCount <= DMA_INPUT_BYTES - 4;
+}
+
+void SIO2Controller::acceptDMAWord(std::uint32_t value) noexcept
+{
+  assert(canAcceptDMAWord());
+  for (std::size_t lane = 0; lane < 4; ++lane)
+    transmitInput[transmitInputCount++] = static_cast<std::uint8_t>(value >> (8 * lane));
+}
+
+void SIO2Controller::finishDMAInput() noexcept
+{
+  assert(ingressPhase == SIO2IngressPhase::DMAOpen &&
+    transmitInputCount == DMA_INPUT_BYTES);
+  ingressPhase = SIO2IngressPhase::DMASealed;
+}
+
+void SIO2Controller::cancelDMAInput() noexcept
+{
+  assert(ingressPhase == SIO2IngressPhase::DMAOpen);
+  clearTransmitInput();
+}
+
+SIO2IngressPhase SIO2Controller::transmitInputPhase() const noexcept
+{
+  return ingressPhase;
 }
 
 std::size_t SIO2Controller::transmitInputSize() const noexcept

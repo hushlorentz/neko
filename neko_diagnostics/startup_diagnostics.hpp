@@ -124,6 +124,22 @@ struct StartupIOPDMAChannelSummary
   IOPDMABeatResult nextBeat;
 };
 
+struct StartupSIO2Summary
+{
+  SIO2IngressPhase inputPhase = SIO2IngressPhase::Empty;
+  std::size_t inputBytes = 0;
+};
+
+struct StartupSIO2DMASummary
+{
+  IOPWord control = 0;
+  IOPWord memoryAddress = 0;
+  IOPWord blockControl = 0;
+  IOPWord remainingWords = 0;
+  bool active = false;
+  bool enabled = false;
+};
+
 struct StartupIOPDMASummary
 {
   std::array<IOPWord, 2> priority = {};
@@ -133,6 +149,7 @@ struct StartupIOPDMASummary
   IOPDMAChannel sifTieBreakChannel = IOPDMAChannel::SIF0;
   StartupIOPDMAChannelSummary sif0{IOPDMAChannel::SIF0};
   StartupIOPDMAChannelSummary sif1{IOPDMAChannel::SIF1};
+  StartupSIO2DMASummary sio2Input;
 };
 
 struct StartupIOPInterruptSummary
@@ -149,6 +166,7 @@ struct StartupSummary
   StartupEESummary ee;
   StartupIOPSummary iop;
   StartupSIFSummary sif;
+  StartupSIO2Summary sio2;
   StartupDMACSummary dmac;
   StartupIOPDMASummary iopDMA;
   StartupEEInterruptSummary eeInterrupts;
@@ -258,6 +276,8 @@ void writeStartupTraceEventFields(
   std::ostream &output, const NekoTraceEvent &event);
 void writeStartupSPUDMABeatJson(
   std::ostream &output, const NekoSPUTrace::Beat &beat);
+void writeStartupSIO2DMABeatJson(
+  std::ostream &output, const NekoSIO2Trace::Beat &beat);
 void writeStartupTraceJsonLines(
   std::ostream &output, const NekoSystem &system);
 void writeStartupRuntimeErrorJsonLine(

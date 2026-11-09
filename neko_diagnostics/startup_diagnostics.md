@@ -60,6 +60,8 @@ The snapshot contains:
   SIF grant order and retained tie-break channel, plus channels 9 (SIF0) and
   10 (SIF1): control, MADR, BCR, applicable TADR, packet remainder, terminal bit,
   active/enable state, priority, and side-effect-free next-beat inspection.
+- SIO2 ingress phase/count (`sio2.input_phase`/`input_bytes`) and input channel
+  11 programming, active/enable state and remaining words (`iop_dma.sio2_input`).
 
 Run progress is **per call**: EE instruction counts are accepted instructions,
 IOP instruction counts are retired instructions. Snapshot cycle/retirement
@@ -318,8 +320,8 @@ Use `nekoDecodeSPUInput`, not a second packed-field decoder.
 
 The existing shared observation sequence orders a source beat before its
 resulting input transitions, then completion interrupt and CPU observations.
-Transient journals hold at most eight SPU input transitions and six common
-DMA attempts (two EE and four IOP candidates) per scheduled master cycle.
+Transient journals hold at most eight SPU input transitions and seven common
+DMA attempts (two EE and five IOP candidates) per scheduled master cycle.
 They are enabled only for trace/failure-probe observation, with no canonical
 state or save-format change. Host setup outside scheduled observation does
 not produce these events.
@@ -339,6 +341,34 @@ full trace stream and optional flight recorder when that context is needed.
 Both prefix and failure-capture writers validate paired identities, enums and
 target/input bounds through the shared C++ decoders before emitting the
 affected record. These diagnostics do not establish silicon timing or boot.
+
+### SIO2 input DMA observations
+
+SIO2 subsystem 17 event 20 (`DMABeat`) adds `sio2_dma` beside the raw words:
+
+```json
+{"endpoint":"iop_sio2_input","channel":11,"kind":"payload","outcome":"accepted","failure":"none","bus_status":"none","attempted_address":4096,"source_value":287454020,"remaining_before":36,"remaining_after":35,"staged_before":0,"staged_after":4}
+```
+
+Outcomes and source rejection statuses match SPU DMA. Counts describe the
+bounded 36-word/144-byte transport, not serial execution or a peer reply.
+An active disabled channel can emit a wait; identical waits are suppressed
+within the observation session. Each granted word records its physical source
+address/value and before/after remaining words and staged bytes. Completion is
+the final accepted word, ordered before its DMA interrupt and CPU observations.
+No per-byte or serial-completion events are generated.
+
+The low three bytes of `values[0]` are channel/outcome/bus status.
+`values[1]` packs address/value in its low/high 32 bits; `values[2]` packs
+remaining-before/after in its low two bytes; `values[3]` packs staged-before/after
+in its low two halfwords. Use `nekoDecodeSIO2DMABeat` for the validated C++ view.
+Rejections enter the existing typed DMA first-failure path without a causal
+CPU instruction. Trace and failure-probe gating, session lifecycle and
+destination-owned diagnostics follow the shared DMA rules above.
+
+The inspector supports `--subsystem sio2` and `--cpu iop` for these peripheral
+rows and preserves `sio2_dma` alongside `values_raw`. Older reports need not
+contain the new event or snapshot fields.
 
 ### Trace limits and lifecycle
 

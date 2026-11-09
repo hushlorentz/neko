@@ -1176,8 +1176,8 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       {
         return {};
       }
-      sio2->writeCommandDescriptor(location.offset, value);
-      return {IOPBusStatus::Completed};
+      return sio2->writeCommandDescriptor(location.offset, value) == SIO2AccessStatus::Accepted
+        ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::CDVD:
       return width == 1 && cdvd != nullptr &&
         cdvd->writeByte(static_cast<IOPAddress>(location.offset),
@@ -1203,11 +1203,16 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
         dmaController->writeDPCR3Initialization(value) == IOPDMAWriteOutcome::Completed
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
     case Device::SIO2DMAChannelControl:
-      return width == sizeof(IOPWord) && dmaController != nullptr &&
-        dmaController->writeSIO2ChannelControl(
-          static_cast<IOPSIO2DMAChannel>(location.offset), value) ==
-          IOPDMAWriteOutcome::Completed
+    {
+      if (width != sizeof(IOPWord) || dmaController == nullptr)
+        return {};
+      const auto channel = static_cast<IOPSIO2DMAChannel>(location.offset);
+      const auto outcome = sio2 != nullptr ?
+        dmaController->writeSIO2ChannelControl(channel, value, *this, *sio2) :
+        dmaController->writeSIO2ChannelControl(channel, value);
+      return outcome == IOPDMAWriteOutcome::Completed
         ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
+    }
     case Device::SIO2DMAMemoryAddress:
       return width == sizeof(IOPWord) && dmaController != nullptr &&
         dmaController->writeSIO2MemoryAddress(
@@ -1223,21 +1228,26 @@ IOPBusWriteResult IOPBus::writeDeviceRegister(
       const auto channel = static_cast<IOPSIO2DMAChannel>(location.deviceIndex);
       if (width == sizeof(IOPWord) && location.offset == 0)
       {
-        dmaController->writeSIO2BlockControl(channel, value);
+        return dmaController->writeSIO2BlockControl(channel, value) ==
+          IOPDMAWriteOutcome::Completed
+          ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
       }
       else if (width == 2 && location.offset == 0)
       {
-        dmaController->writeSIO2BlockSize(channel, static_cast<std::uint16_t>(value));
+        return dmaController->writeSIO2BlockSize(channel, static_cast<std::uint16_t>(value)) ==
+          IOPDMAWriteOutcome::Completed
+          ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
       }
       else if (width == 2 && location.offset == 2)
       {
-        dmaController->writeSIO2BlockCount(channel, static_cast<std::uint16_t>(value));
+        return dmaController->writeSIO2BlockCount(channel, static_cast<std::uint16_t>(value)) ==
+          IOPDMAWriteOutcome::Completed
+          ? IOPBusWriteResult{IOPBusStatus::Completed} : IOPBusWriteResult{};
       }
       else
       {
         return {};
       }
-      return {IOPBusStatus::Completed};
     }
     case Device::SPUDMAMemoryAddress:
       return width == sizeof(IOPWord) && dmaController != nullptr &&

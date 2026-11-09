@@ -335,11 +335,13 @@ class NekoSystem
 
     struct DMAObservations
     {
-      std::array<DMAObservation, 6> entries = {};
+      std::array<DMAObservation, 7> entries = {};
       std::size_t count = 0;
     };
     std::array<NekoTraceEvent, 2> lastSPUWait{};
     std::array<bool, 2> observedSPUWait{};
+    NekoTraceEvent lastSIO2Wait{};
+    bool observedSIO2Wait = false;
 
     void clockEESIF(NekoObservationOrder &order, DMAObservations &events);
     EESIFDMABeatOutcome clockEESIFChannel(SIFDirection direction,
@@ -347,6 +349,7 @@ class NekoSystem
     IOPDMABeatResult clockIOPDMA(NekoObservationOrder &order, DMAObservations &events);
     IOPDMABeatResult clockIOPSPUChannel(std::size_t core,
       NekoObservationOrder &order, DMAObservations &events);
+    IOPDMABeatResult clockIOPSIO2Input(NekoObservationOrder &order, DMAObservations &events);
     IOPDMABeatResult clockIOPSIFChannel(IOPDMAChannel channel,
       NekoObservationOrder &order, DMAObservations &events);
     void latchComponentInterrupts();

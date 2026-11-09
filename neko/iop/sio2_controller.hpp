@@ -24,6 +24,14 @@ struct SIO2ReadResult
   std::uint32_t value = 0;
 };
 
+enum class SIO2IngressPhase : std::uint8_t
+{
+  Empty,
+  CPU,
+  DMAOpen,
+  DMASealed
+};
+
 // Provisional programming and a bounded single-packet absent-infrared profile.
 class SIO2Controller final
 {
@@ -31,7 +39,8 @@ class SIO2Controller final
     static constexpr std::size_t PORT_CONTROL_COUNT = 8;
     static constexpr std::size_t COMMAND_DESCRIPTOR_COUNT = 16;
     static constexpr std::size_t TRANSMIT_INPUT_CAPACITY = 1023;
-    void reset() noexcept;
+    static constexpr std::size_t DMA_INPUT_BYTES = 144;
+    void reset();
     std::uint32_t readControl() const noexcept;
     SIO2AccessStatus writeControl(std::uint32_t value) noexcept;
     // Completion requests an IRQ only when the device cause was clear.
@@ -43,21 +52,29 @@ class SIO2Controller final
     std::uint32_t readPortControl(std::size_t index) const;
     void writePortControl(std::size_t index, std::uint32_t value);
     std::uint32_t readCommandDescriptor(std::size_t index) const;
-    void writeCommandDescriptor(std::size_t index, std::uint32_t value);
+    SIO2AccessStatus writeCommandDescriptor(std::size_t index, std::uint32_t value);
     SIO2AccessStatus writeTransmitByte(std::uint8_t value) noexcept;
     std::size_t transmitInputSize() const noexcept;
+    SIO2IngressPhase transmitInputPhase() const noexcept;
     std::uint8_t transmitInputByte(std::size_t index) const;
 
   private:
     friend class NekoSaveStateCodec;
+    friend class IOPDMAController;
     static bool supportsControl(std::uint32_t value) noexcept;
     bool hasValidTransferState() const noexcept;
     void clearTransmitInput() noexcept;
+    bool beginDMAInput() noexcept;
+    bool canAcceptDMAWord() const noexcept;
+    void acceptDMAWord(std::uint32_t value) noexcept;
+    void finishDMAInput() noexcept;
+    void cancelDMAInput() noexcept;
     std::uint32_t control = 0;
     std::array<std::uint32_t, PORT_CONTROL_COUNT> portControls{};
     std::array<std::uint32_t, COMMAND_DESCRIPTOR_COUNT> commandDescriptors{};
     std::array<std::uint8_t, TRANSMIT_INPUT_CAPACITY> transmitInput{};
     std::uint16_t transmitInputCount = 0;
+    SIO2IngressPhase ingressPhase = SIO2IngressPhase::Empty;
     bool transferCompleted = false;
     std::uint8_t receiveRemaining = 0;
     bool interruptCause = false;

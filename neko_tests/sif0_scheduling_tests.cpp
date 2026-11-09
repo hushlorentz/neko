@@ -224,7 +224,7 @@ TEST_CASE("SPU and SIF share one IOP grant with physical channel cyclic ties",
   REQUIRE(dma.spuRemainingWords(0) == 256);
   REQUIRE(dma.spuRemainingWords(1) == 256);
   REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
-  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SPU0);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIO2Input);
   REQUIRE(dma.sifTieBreakChannel() == IOPDMAChannel::SIF0);
   system.runMasterCycles(8);
   REQUIRE(dma.spuRemainingWords(0) == 255);
@@ -261,9 +261,9 @@ TEST_CASE("Shared IOP grants honor both banks before cyclic ties",
     auto &dma = system.iopDMAController();
     dma.writePriority(IOPDMABank::Primary,
       winner == IOPDMAChannel::SPU0 ? 0x80000 : 0x90000);
-    dma.writePriority(BANK, winner == IOPDMAChannel::SPU1 ? 0x9908 :
+    dma.writePriority(BANK, (winner == IOPDMAChannel::SPU1 ? 0x9908 :
       winner == IOPDMAChannel::SIF0 ? 0x9809 :
-      winner == IOPDMAChannel::SIF1 ? 0x8909 : 0x9909);
+      winner == IOPDMAChannel::SIF1 ? 0x8909 : 0x9909) | 0x70000);
     REQUIRE(dma.grantOrder()[0] == winner);
     REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SIF0);
     system.clockMasterCycle();
@@ -277,6 +277,92 @@ TEST_CASE("Shared IOP grants honor both banks before cyclic ties",
     REQUIRE(dma.tieBreakChannel() == cursor);
     REQUIRE(dma.grantOrder()[0] == cursor);
   }
+}
+
+TEST_CASE("SIO2 input participates in five-channel cyclic and priority grants",
+  "[sio2-input-dma][scheduling][arbitration]")
+{
+  const auto prepare = [](NekoSystem &system)
+  {
+    source(system);
+    spuSource(system, 0);
+    spuSource(system, 1);
+    iopReceiver(system);
+    REQUIRE(system.sif().pushSIF1Quadword({{0x80006000, 4, 0, 0}}) ==
+      SIFTransferOutcome::Completed);
+    REQUIRE(system.sif().pushSIF1Quadword(DATA) == SIFTransferOutcome::Completed);
+    writeIOP(system, 0x1f801540, 0x9000);
+    writeIOP(system, 0x1f801544, 0x10024);
+    writeIOP(system, 0x1f801548, 0x01000201);
+  };
+  SECTION("Equal priorities share one word or header per IOP pulse")
+  {
+    NekoSystem system;
+    prepare(system);
+    auto &dma = system.iopDMAController();
+    dma.writePriority(IOPDMABank::Primary, 0x80000);
+    dma.writePriority(BANK, 0x88808);
+    for (const auto next : {IOPDMAChannel::SIF1, IOPDMAChannel::SIO2Input,
+      IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0})
+    {
+      system.runMasterCycles(8);
+      REQUIRE(dma.tieBreakChannel() == next);
+    }
+    REQUIRE(system.iopSIF0DMAC().remainingWords() == 4);
+    REQUIRE(system.iopSIF1DMAC().remainingWords() == 4);
+    REQUIRE(dma.spuRemainingWords(0) == 255);
+    REQUIRE(dma.spuRemainingWords(1) == 255);
+    REQUIRE(dma.sio2InputRemainingWords() == 35);
+  }
+  SECTION("Each physical channel can win by priority across banks")
+  {
+    for (const auto winner : {IOPDMAChannel::SPU0, IOPDMAChannel::SPU1,
+      IOPDMAChannel::SIF0, IOPDMAChannel::SIF1, IOPDMAChannel::SIO2Input})
+    {
+      NekoSystem system;
+      prepare(system);
+      auto &dma = system.iopDMAController();
+      dma.writePriority(IOPDMABank::Primary, winner == IOPDMAChannel::SPU0 ? 0x80000 : 0x90000);
+      const auto shift = winner == IOPDMAChannel::SPU1 ? 0 :
+        winner == IOPDMAChannel::SIF0 ? 8 : winner == IOPDMAChannel::SIF1 ? 12 : 16;
+      dma.writePriority(BANK, winner == IOPDMAChannel::SPU0 ?
+        0x99909 : 0x99909 & ~(IOPWord{7} << shift));
+      REQUIRE(dma.grantOrder()[0] == winner);
+      system.runMasterCycles(8);
+      REQUIRE(dma.spuRemainingWords(0) == (winner == IOPDMAChannel::SPU0 ? 255 : 256));
+      REQUIRE(dma.spuRemainingWords(1) == (winner == IOPDMAChannel::SPU1 ? 255 : 256));
+      REQUIRE(system.iopSIF0DMAC().remainingWords() == (winner == IOPDMAChannel::SIF0 ? 4 : 0));
+      REQUIRE(system.iopSIF1DMAC().remainingWords() == (winner == IOPDMAChannel::SIF1 ? 4 : 0));
+      REQUIRE(dma.sio2InputRemainingWords() == (winner == IOPDMAChannel::SIO2Input ? 35 : 36));
+    }
+  }
+}
+
+TEST_CASE("SIO2 input bypasses waiting SPU and SIF endpoints without extra grants",
+  "[sio2-input-dma][scheduling][arbitration]")
+{
+  NekoSystem system;
+  source(system);
+  spuSource(system, 0, 32);
+  iopReceiver(system);
+  auto &dma = system.iopDMAController();
+  dma.writePriority(IOPDMABank::Primary, 0x80000);
+  for (unsigned word = 0; word < 256; ++word)
+    REQUIRE(dma.clockSPU(0, system.iopBus(), system.spu2Controller()).outcome ==
+      IOPDMABeatOutcome::Accepted);
+  for (unsigned index = 0; index < SIF::WORD_CAPACITY / 4; ++index)
+    push(system, DATA);
+  writeIOP(system, 0x1f801540, 0x9000);
+  writeIOP(system, 0x1f801544, 0x10024);
+  writeIOP(system, 0x1f801548, 0x01000201);
+  dma.writePriority(BANK, 0xf8800);
+  system.startTrace();
+  system.runMasterCycles(8);
+  REQUIRE(dma.spuRemainingWords(0) == 256);
+  REQUIRE(system.iopSIF0DMAC().remainingWords() == 0);
+  REQUIRE(system.iopSIF1DMAC().remainingWords() == 0);
+  REQUIRE(dma.sio2InputRemainingWords() == 35);
+  REQUIRE(dma.tieBreakChannel() == IOPDMAChannel::SPU0);
 }
 
 TEST_CASE("Shared IOP grants bypass full SPU and SIF inputs without consuming waits",
@@ -915,7 +1001,7 @@ TEST_CASE("SIF cursors reject invalid domains transactionally",
   const auto before = destination.saveState();
   const auto traceHash = destination.traceHash();
   for (const bool ee : {false, true})
-    for (const auto value : {2, 8, 11, 255})
+    for (const auto value : {2, 8, 12, 255})
     {
       SaveStateMutation state(original.saveState());
       state.writeScalar(ee ? "system.gifDMAC.sifNextDirection" :
@@ -2276,7 +2362,7 @@ TEST_CASE("Malformed combined SIF ownership rejects without changing a distinct 
       "IOP SIF0 DMA packet continuation is incompatible with channel state"},
     InvalidField{"system.iop.sif1DMA.channelControl", 0x400,
       "IOP SIF1 DMA packet continuation is incompatible with channel state"},
-    InvalidField{"system.iop.dmaController.nextChannel", 11,
+    InvalidField{"system.iop.dmaController.nextChannel", 12,
       "IOP DMA arbitration cursor is invalid"},
     InvalidField{"system.gifDMAC.sifNextDirection", 2,
       "EE SIF arbitration cursor is invalid"}})

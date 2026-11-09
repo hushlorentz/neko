@@ -43,6 +43,7 @@ namespace
   const char *const eeBeatKinds[] = {
     "source_tag", "payload", "completion", "destination_tag"
   };
+  const char *const sio2IngressPhases[] = {"empty", "cpu", "dma_open", "dma_sealed"};
 
   template<typename Enum, std::size_t N>
   const char *enumName(Enum value, const char *const (&names)[N])
@@ -68,6 +69,7 @@ namespace
       case IOPDMAChannel::SPU1: return 7;
       case IOPDMAChannel::SIF0: return 9;
       case IOPDMAChannel::SIF1: return 10;
+      case IOPDMAChannel::SIO2Input: return 11;
     }
     throw std::invalid_argument("Unknown startup diagnostic IOP DMA channel.");
   }
@@ -223,6 +225,9 @@ namespace
       << ",\"packing_latch\":[" << sif.packingLatch[0]
       << "," << sif.packingLatch[1] << "," << sif.packingLatch[2]
       << "," << sif.packingLatch[3] << "]}"
+      << ",\"sio2\":{\"input_phase\":\""
+      << enumName(summary.sio2.inputPhase, sio2IngressPhases)
+      << "\",\"input_bytes\":" << summary.sio2.inputBytes << "}"
       << ",\"dmac\":{\"control\":" << dma.control
       << ",\"hold_control\":" << dma.holdControl
       << ",\"status\":" << dma.status
@@ -290,6 +295,13 @@ namespace
     writeIOPSIF(output, iopDMA.sif0, IOPDMAChannel::SIF0);
     output << ",\"sif1\":";
     writeIOPSIF(output, iopDMA.sif1, IOPDMAChannel::SIF1);
+    const auto &sio2Input = iopDMA.sio2Input;
+    output << ",\"sio2_input\":{\"channel\":11,\"control\":" << sio2Input.control
+      << ",\"madr\":" << sio2Input.memoryAddress
+      << ",\"bcr\":" << sio2Input.blockControl
+      << ",\"remaining_words\":" << sio2Input.remainingWords
+      << ",\"active\":" << jsonBoolean(sio2Input.active)
+      << ",\"enabled\":" << jsonBoolean(sio2Input.enabled) << "}";
     output << "},\"ee_interrupts\":{\"status\":" << summary.eeInterrupts.status
       << ",\"mask\":" << summary.eeInterrupts.mask
       << ",\"pending\":" << jsonBoolean(summary.eeInterrupts.pending)
@@ -386,6 +398,15 @@ StartupSummary inspectStartup(const NekoSystem &system)
   summary.iopDMA.sif0 = inspectIOPSIF(system, system.iopSIF0DMAC(), IOPDMAChannel::SIF0);
   summary.iopDMA.sif0.tagAddress = system.iopSIF0DMAC().tagAddress();
   summary.iopDMA.sif1 = inspectIOPSIF(system, system.iopSIF1DMAC(), IOPDMAChannel::SIF1);
+  const auto &sio2 = system.sio2Controller();
+  summary.sio2 = {sio2.transmitInputPhase(), sio2.transmitInputSize()};
+  summary.iopDMA.sio2Input = {
+    iopDMA.sio2ChannelControl(IOPSIO2DMAChannel::Input),
+    iopDMA.sio2MemoryAddress(IOPSIO2DMAChannel::Input),
+    iopDMA.sio2BlockControl(IOPSIO2DMAChannel::Input),
+    iopDMA.sio2InputRemainingWords(), iopDMA.sio2InputActive(),
+    iopDMA.channelEnabled(IOPDMAChannel::SIO2Input)
+  };
   const auto &eeInterrupts = system.interruptController();
   summary.eeInterrupts = {
     eeInterrupts.status(), eeInterrupts.mask(), eeInterrupts.interruptPending()
@@ -509,6 +530,27 @@ void writeStartupSPUDMABeatJson(
     << ",\"target_word\":" << beat.targetWord << '}';
 }
 
+void writeStartupSIO2DMABeatJson(
+  std::ostream &output, const NekoSIO2Trace::Beat &beat)
+{
+  const char *const outcomes[] = {"accepted", "wait", "completed", "rejected"};
+  const char *const statuses[] = {"none", "misaligned", "read_only", "unmapped"};
+  const auto outcome = enumName(beat.outcome, outcomes);
+  const auto status = enumName(beat.busStatus, statuses);
+  output << "{\"endpoint\":\"iop_sio2_input\",\"channel\":"
+    << static_cast<unsigned>(beat.channel)
+    << ",\"kind\":\"payload\",\"outcome\":\"" << outcome
+    << "\",\"failure\":\"" << (beat.outcome == NekoSPUTrace::Outcome::Rejected
+      ? "source_read" : "none")
+    << "\",\"bus_status\":\"" << status
+    << "\",\"attempted_address\":" << beat.sourceAddress
+    << ",\"source_value\":" << beat.sourceValue
+    << ",\"remaining_before\":" << static_cast<unsigned>(beat.remainingBefore)
+    << ",\"remaining_after\":" << static_cast<unsigned>(beat.remainingAfter)
+    << ",\"staged_before\":" << beat.stagedBefore
+    << ",\"staged_after\":" << beat.stagedAfter << '}';
+}
+
 void writeStartupTraceEventFields(
   std::ostream &output, const NekoTraceEvent &event)
 {
@@ -519,6 +561,11 @@ void writeStartupTraceEventFields(
     event.type == NekoTraceEventType::DMABeat;
   const bool spuInput = event.subsystem == NekoTraceSubsystem::SPU2 &&
     event.type == NekoTraceEventType::StateChanged;
+  const bool sio2Beat = event.subsystem == NekoTraceSubsystem::SIO2 &&
+    event.type == NekoTraceEventType::DMABeat;
+  NekoSIO2Trace::Beat sio2;
+  if (sio2Beat)
+    sio2 = nekoDecodeSIO2DMABeat(event);
   NekoSPUTrace::Beat beat;
   NekoSPUTrace::InputTransition transition;
   if (spuBeat)
@@ -566,6 +613,11 @@ void writeStartupTraceEventFields(
   {
     output << ",\"spu_dma\":";
     writeStartupSPUDMABeatJson(output, beat);
+  }
+  if (sio2Beat)
+  {
+    output << ",\"sio2_dma\":";
+    writeStartupSIO2DMABeatJson(output, sio2);
   }
   if (spuInput)
   {

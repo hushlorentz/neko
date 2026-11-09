@@ -14,6 +14,7 @@ class IOPSIF1DMAChannel;
 class IOPSIF0DMAChannel;
 class SIF;
 class SPU2Controller;
+class SIO2Controller;
 
 enum class IOPDMABank : std::uint8_t
 {
@@ -26,7 +27,8 @@ enum class IOPDMAChannel : std::uint8_t
   SPU0 = 4,
   SPU1 = 7,
   SIF0 = 9,
-  SIF1 = 10
+  SIF1 = 10,
+  SIO2Input = 11
 };
 
 enum class IOPSIO2DMAChannel : std::uint8_t
@@ -89,13 +91,19 @@ class IOPDMAController final
     IOPWord sio2MemoryAddress(IOPSIO2DMAChannel channel) const;
     IOPDMAWriteOutcome writeSIO2MemoryAddress(IOPSIO2DMAChannel channel, IOPWord value);
     IOPWord sio2BlockControl(IOPSIO2DMAChannel channel) const;
-    void writeSIO2BlockControl(IOPSIO2DMAChannel channel, IOPWord value);
+    IOPDMAWriteOutcome writeSIO2BlockControl(IOPSIO2DMAChannel channel, IOPWord value);
     std::uint16_t sio2BlockSize(IOPSIO2DMAChannel channel) const;
-    void writeSIO2BlockSize(IOPSIO2DMAChannel channel, std::uint16_t value);
+    IOPDMAWriteOutcome writeSIO2BlockSize(IOPSIO2DMAChannel channel, std::uint16_t value);
     std::uint16_t sio2BlockCount(IOPSIO2DMAChannel channel) const;
-    void writeSIO2BlockCount(IOPSIO2DMAChannel channel, std::uint16_t value);
+    IOPDMAWriteOutcome writeSIO2BlockCount(IOPSIO2DMAChannel channel, std::uint16_t value);
     IOPWord sio2ChannelControl(IOPSIO2DMAChannel channel) const;
     IOPDMAWriteOutcome writeSIO2ChannelControl(IOPSIO2DMAChannel channel, IOPWord value);
+    IOPDMAWriteOutcome writeSIO2ChannelControl(IOPSIO2DMAChannel channel, IOPWord value,
+      const IOPBus &bus, SIO2Controller &sio2);
+    bool sio2InputActive() const;
+    IOPWord sio2InputRemainingWords() const;
+    IOPDMABeatResult inspectSIO2Input(const IOPBus &bus, const SIO2Controller &sio2) const;
+    IOPDMABeatResult clockSIO2Input(const IOPBus &bus, SIO2Controller &sio2);
     // Register readback follows accepted source progress while active.
     IOPWord spuMemoryAddress(std::size_t core) const;
     IOPDMAWriteOutcome writeSPUMemoryAddress(std::size_t core, IOPWord value);
@@ -127,7 +135,7 @@ class IOPDMAController final
     IOPDMAWriteOutcome writeSupplementalInitialization(IOPWord value) const;
     bool channelEnabled(IOPDMAChannel channel) const;
     std::uint8_t channelPriority(IOPDMAChannel channel) const;
-    std::array<IOPDMAChannel, 4> grantOrder() const;
+    std::array<IOPDMAChannel, 5> grantOrder() const;
     IOPDMAChannel tieBreakChannel() const;
     // Compatibility projections of the shared grant policy onto SIF endpoints.
     std::array<IOPDMAChannel, 2> sifGrantOrder() const;
@@ -157,14 +165,9 @@ class IOPDMAController final
       IOPDMAChannelState registers;
       std::uint8_t blockWordsTransferred = 0;
     };
-    struct SIO2Programming
-    {
-      IOPWord memoryAddress = 0;
-      IOPWord blockControl = 0;
-      IOPWord channelControl = 0;
-    };
-
     static bool validSIO2ChannelControl(IOPWord value);
+    bool validSIO2Continuation(const SIO2Controller &sio2) const;
+    void validateSIO2Wiring(const IOPBus &bus, const SIO2Controller &sio2) const;
     static std::size_t bankIndex(IOPDMABank bank);
     static IOPDMABank channelBank(IOPDMAChannel channel);
     static std::uint8_t channelSlot(IOPDMAChannel channel);
@@ -184,7 +187,8 @@ class IOPDMAController final
     std::array<Bank, 2> banks = {};
     IOPWord auxiliaryControlRegister = 0;
     std::array<SPUChannel, 2> spuChannels = {};
-    std::array<SIO2Programming, 2> sio2Channels = {};
+    std::array<IOPDMAChannelState, 2> sio2Channels = {};
+    std::uint8_t sio2InputWordsTransferred = 0;
     IOPDMAChannel nextChannel = IOPDMAChannel::SIF0;
 };
 

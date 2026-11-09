@@ -7,14 +7,19 @@
 #include "iop_sif1_dma_channel.hpp"
 #include "iop_sif0_dma_channel.hpp"
 #include "spu2_controller.hpp"
+#include "sio2_controller.hpp"
 
 namespace
 {
   constexpr IOPWord SPU_START = 0x01000201;
   constexpr IOPWord SPU_STOP = 0x201;
   constexpr IOPWord SPU_BLOCK_SIZE = 16;
-  constexpr std::array<IOPDMAChannel, 4> GRANT_CHANNELS = {{
-    IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0, IOPDMAChannel::SIF1
+  constexpr IOPWord SIO2_INPUT_START = 0x01000201;
+  constexpr IOPWord SIO2_INPUT_BCR = 0x10024;
+  constexpr IOPWord SIO2_INPUT_WORDS = SIO2Controller::DMA_INPUT_BYTES / 4;
+  constexpr std::array<IOPDMAChannel, 5> GRANT_CHANNELS = {{
+    IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0,
+    IOPDMAChannel::SIF1, IOPDMAChannel::SIO2Input
   }};
 
   const char *channelDescription(IOPDMAChannel channel)
@@ -25,6 +30,7 @@ namespace
       case IOPDMAChannel::SPU1: return "SPU1";
       case IOPDMAChannel::SIF0: return "SIF0";
       case IOPDMAChannel::SIF1: return "SIF1";
+      case IOPDMAChannel::SIO2Input: return "SIO2 input";
     }
     throw std::out_of_range("Unsupported IOP DMA channel.");
   }
@@ -83,7 +89,8 @@ IOPDMABank IOPDMAController::channelBank(IOPDMAChannel channel)
     case IOPDMAChannel::SPU0: return IOPDMABank::Primary;
     case IOPDMAChannel::SPU1:
     case IOPDMAChannel::SIF0:
-    case IOPDMAChannel::SIF1: return IOPDMABank::Secondary;
+    case IOPDMAChannel::SIF1:
+    case IOPDMAChannel::SIO2Input: return IOPDMABank::Secondary;
   }
   throw std::out_of_range("Unsupported IOP DMA channel.");
 }
@@ -100,6 +107,8 @@ std::uint8_t IOPDMAController::channelSlot(IOPDMAChannel channel)
       return 2;
     case IOPDMAChannel::SIF1:
       return 3;
+    case IOPDMAChannel::SIO2Input:
+      return 4;
   }
   throw std::out_of_range("Unsupported IOP DMA channel.");
 }
@@ -153,24 +162,25 @@ void IOPDMAController::writeAuxiliaryControl(IOPWord value)
 
 IOPWord IOPDMAController::sio2MemoryAddress(IOPSIO2DMAChannel channel) const
 {
-  return sio2Channels.at(static_cast<std::size_t>(channel)).memoryAddress;
+  return sio2Channels.at(static_cast<std::size_t>(channel)).memoryAddressRegister;
 }
 
 IOPDMAWriteOutcome IOPDMAController::writeSIO2MemoryAddress(
   IOPSIO2DMAChannel channel, IOPWord value)
 {
-  return IOPDMAChannelState::programMemoryAddress(
-    sio2Channels.at(static_cast<std::size_t>(channel)).memoryAddress, value);
+  auto &registers = sio2Channels.at(static_cast<std::size_t>(channel));
+  return registers.writeAddress(registers.memoryAddressRegister, value);
 }
 
 IOPWord IOPDMAController::sio2BlockControl(IOPSIO2DMAChannel channel) const
 {
-  return sio2Channels.at(static_cast<std::size_t>(channel)).blockControl;
+  return sio2Channels.at(static_cast<std::size_t>(channel)).blockControlRegister;
 }
 
-void IOPDMAController::writeSIO2BlockControl(IOPSIO2DMAChannel channel, IOPWord value)
+IOPDMAWriteOutcome IOPDMAController::writeSIO2BlockControl(
+  IOPSIO2DMAChannel channel, IOPWord value)
 {
-  sio2Channels.at(static_cast<std::size_t>(channel)).blockControl = value;
+  return sio2Channels.at(static_cast<std::size_t>(channel)).writeBlockControl(value);
 }
 
 std::uint16_t IOPDMAController::sio2BlockSize(IOPSIO2DMAChannel channel) const
@@ -178,10 +188,10 @@ std::uint16_t IOPDMAController::sio2BlockSize(IOPSIO2DMAChannel channel) const
   return static_cast<std::uint16_t>(sio2BlockControl(channel));
 }
 
-void IOPDMAController::writeSIO2BlockSize(
+IOPDMAWriteOutcome IOPDMAController::writeSIO2BlockSize(
   IOPSIO2DMAChannel channel, std::uint16_t value)
 {
-  writeSIO2BlockControl(channel, (sio2BlockControl(channel) & 0xffff0000) | value);
+  return writeSIO2BlockControl(channel, (sio2BlockControl(channel) & 0xffff0000) | value);
 }
 
 std::uint16_t IOPDMAController::sio2BlockCount(IOPSIO2DMAChannel channel) const
@@ -189,10 +199,10 @@ std::uint16_t IOPDMAController::sio2BlockCount(IOPSIO2DMAChannel channel) const
   return static_cast<std::uint16_t>(sio2BlockControl(channel) >> 16);
 }
 
-void IOPDMAController::writeSIO2BlockCount(
+IOPDMAWriteOutcome IOPDMAController::writeSIO2BlockCount(
   IOPSIO2DMAChannel channel, std::uint16_t value)
 {
-  writeSIO2BlockControl(channel,
+  return writeSIO2BlockControl(channel,
     (sio2BlockControl(channel) & 0xffff) | (IOPWord{value} << 16));
 }
 
@@ -203,19 +213,130 @@ bool IOPDMAController::validSIO2ChannelControl(IOPWord value)
 
 IOPWord IOPDMAController::sio2ChannelControl(IOPSIO2DMAChannel channel) const
 {
-  return sio2Channels.at(static_cast<std::size_t>(channel)).channelControl;
+  return sio2Channels.at(static_cast<std::size_t>(channel)).channelControlRegister;
 }
 
 IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
   IOPSIO2DMAChannel channel, IOPWord value)
 {
+  auto &registers = sio2Channels.at(static_cast<std::size_t>(channel));
+  if (!validSIO2ChannelControl(value))
+    return IOPDMAWriteOutcome::UnsupportedControl;
+  if (registers.active())
+    return IOPDMAWriteOutcome::ActiveTransfer;
+  registers.channelControlRegister = value;
+  return IOPDMAWriteOutcome::Completed;
+}
+
+IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
+  IOPSIO2DMAChannel channel, IOPWord value, const IOPBus &bus, SIO2Controller &sio2)
+{
+  validateSIO2Wiring(bus, sio2);
   auto &programming = sio2Channels.at(static_cast<std::size_t>(channel));
+  if (channel == IOPSIO2DMAChannel::Input && value == SIO2_INPUT_START)
+  {
+    if (programming.active())
+      return IOPDMAWriteOutcome::Completed;
+    if (programming.blockControlRegister != SIO2_INPUT_BCR || !sio2.beginDMAInput())
+      return IOPDMAWriteOutcome::UnsupportedControl;
+    sio2InputWordsTransferred = 0;
+    programming.channelControlRegister = value;
+    return IOPDMAWriteOutcome::Completed;
+  }
   if (!validSIO2ChannelControl(value))
   {
     return IOPDMAWriteOutcome::UnsupportedControl;
   }
-  programming.channelControl = value;
+  if (programming.active())
+  {
+    sio2.cancelDMAInput();
+    sio2InputWordsTransferred = 0;
+  }
+  programming.channelControlRegister = value;
   return IOPDMAWriteOutcome::Completed;
+}
+
+bool IOPDMAController::sio2InputActive() const
+{
+  return sio2Channels[0].active();
+}
+
+IOPWord IOPDMAController::sio2InputRemainingWords() const
+{
+  return sio2InputActive() ? SIO2_INPUT_WORDS - sio2InputWordsTransferred : 0;
+}
+
+bool IOPDMAController::validSIO2Continuation(const SIO2Controller &sio2) const
+{
+  for (const auto &channel : sio2Channels)
+    if (!IOPDMAChannelState::validMemoryAddress(channel.memoryAddressRegister))
+      return false;
+  if (!validSIO2ChannelControl(sio2Channels[1].channelControlRegister) ||
+      !sio2.hasValidTransferState())
+    return false;
+  if (!sio2InputActive())
+    return validSIO2ChannelControl(sio2Channels[0].channelControlRegister) &&
+      sio2InputWordsTransferred == 0 && sio2.ingressPhase != SIO2IngressPhase::DMAOpen;
+  return sio2Channels[0].channelControlRegister == SIO2_INPUT_START &&
+    sio2Channels[0].blockControlRegister == SIO2_INPUT_BCR &&
+    sio2InputWordsTransferred < SIO2_INPUT_WORDS &&
+    sio2.ingressPhase == SIO2IngressPhase::DMAOpen &&
+    sio2.transmitInputCount == sio2InputWordsTransferred * 4;
+}
+
+void IOPDMAController::validateSIO2Wiring(
+  const IOPBus &bus, const SIO2Controller &sio2) const
+{
+  if (bus.dmaController != this || bus.sio2 != &sio2)
+    throw std::invalid_argument("IOP SIO2 DMA grant requires the attached owners.");
+}
+
+IOPDMABeatResult IOPDMAController::inspectSIO2Input(
+  const IOPBus &bus, const SIO2Controller &sio2) const
+{
+  validateSIO2Wiring(bus, sio2);
+  if (!validSIO2Continuation(sio2))
+    throw std::logic_error("IOP SIO2 DMA continuation is outside the bounded input profile.");
+  IOPDMABeatResult result;
+  result.channel = IOPDMAChannel::SIO2Input;
+  result.address = sio2MemoryAddress(IOPSIO2DMAChannel::Input);
+  if (!sio2InputActive() || !channelEnabled(result.channel) || !sio2.canAcceptDMAWord())
+    return result;
+  const auto read = bus.readDMAC32(result.address);
+  result.value = read.value;
+  result.status = read.status;
+  if (read.status != IOPBusStatus::Completed)
+  {
+    result.outcome = IOPDMABeatOutcome::Rejected;
+    result.failure = IOPDMAFailure::SourceRead;
+  }
+  else
+    result.outcome = sio2InputRemainingWords() == 1 ?
+      IOPDMABeatOutcome::Completed : IOPDMABeatOutcome::Accepted;
+  return result;
+}
+
+IOPDMABeatResult IOPDMAController::clockSIO2Input(
+  const IOPBus &bus, SIO2Controller &sio2)
+{
+  const auto result = inspectSIO2Input(bus, sio2);
+  if (result.outcome == IOPDMABeatOutcome::Wait ||
+      result.outcome == IOPDMABeatOutcome::Rejected)
+    return result;
+  sio2.acceptDMAWord(result.value);
+  auto &channel = sio2Channels[0];
+  channel.memoryAddressRegister = (channel.memoryAddressRegister + 4) & 0x00ffffff;
+  ++sio2InputWordsTransferred;
+  if (result.outcome == IOPDMABeatOutcome::Completed)
+  {
+    sio2.finishDMAInput();
+    channel.blockControlRegister -= IOPWord{1} << 16;
+    channel.channelControlRegister = 0x201;
+    sio2InputWordsTransferred = 0;
+    signalChannelCompletion(result.channel);
+  }
+  advanceGrantCursor(result.channel);
+  return result;
 }
 
 IOPWord IOPDMAController::spuMemoryAddress(std::size_t core) const
@@ -471,6 +592,7 @@ std::size_t IOPDMAController::grantChannelIndex(IOPDMAChannel channel)
     case IOPDMAChannel::SPU1: return 1;
     case IOPDMAChannel::SIF0: return 2;
     case IOPDMAChannel::SIF1: return 3;
+    case IOPDMAChannel::SIO2Input: return 4;
   }
   throw std::out_of_range("Unsupported IOP DMA grant channel.");
 }
@@ -480,9 +602,9 @@ void IOPDMAController::advanceGrantCursor(IOPDMAChannel channel)
   nextChannel = GRANT_CHANNELS[(grantChannelIndex(channel) + 1) % GRANT_CHANNELS.size()];
 }
 
-std::array<IOPDMAChannel, 4> IOPDMAController::grantOrder() const
+std::array<IOPDMAChannel, 5> IOPDMAController::grantOrder() const
 {
-  std::array<IOPDMAChannel, 4> order;
+  std::array<IOPDMAChannel, 5> order;
   const auto start = grantChannelIndex(nextChannel);
   for (std::size_t index = 0; index < order.size(); ++index)
   {
@@ -574,7 +696,8 @@ void IOPDMAController::signalChannelCompletion(IOPDMAChannel channel)
 {
   auto &bank = banks[bankIndex(channelBank(channel))];
   const auto flag = static_cast<std::uint8_t>(1 << channelSlot(channel));
-  if ((channel == IOPDMAChannel::SPU0 || channel == IOPDMAChannel::SPU1) &&
+  if ((channel == IOPDMAChannel::SPU0 || channel == IOPDMAChannel::SPU1 ||
+       channel == IOPDMAChannel::SIO2Input) &&
       (bank.control & (IOPWord{flag} << 16)) == 0)
   {
     return;
