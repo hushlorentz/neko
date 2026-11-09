@@ -26,6 +26,10 @@ void NekoSaveStateCodec::writeCDVDState(
     "subcommandPhase", static_cast<std::uint8_t>(controller.subcommandPhase));
   writer->writeFieldBytes("result", controller.result.data(), controller.result.size());
   writer->writeFieldU8("resultCursor", controller.resultCursor);
+  writer->writeFieldU8(
+    "subcommandParameterCount", controller.subcommandParameterCount);
+  writer->writeFieldBytes("subcommandParameters",
+    controller.subcommandParameters.data(), controller.subcommandParameters.size());
 }
 
 template void NekoSaveStateCodec::writeCDVDState(
@@ -72,4 +76,19 @@ void NekoSaveStateCodec::readCDVD(
         [](std::uint8_t byte) { return byte == 0; }),
       "CD/DVD inactive result storage is not empty");
   }
+  controller->subcommandParameterCount =
+    reader->readFieldU8("subcommandParameterCount");
+  reader->requireField(
+    controller->subcommandParameterCount <= controller->subcommandParameters.size(),
+    "CD/DVD subcommand parameter count exceeds capacity");
+  reader->readFieldBytes("subcommandParameters",
+    controller->subcommandParameters.data(), controller->subcommandParameters.size());
+  reader->requireField(std::all_of(
+    controller->subcommandParameters.begin() + controller->subcommandParameterCount,
+    controller->subcommandParameters.end(),
+    [](std::uint8_t byte) { return byte == 0; }),
+    "CD/DVD unused subcommand parameter storage is not empty");
+  reader->requireField(controller->subcommandPhase == Phase::Idle ||
+    controller->subcommandParameterCount == 0,
+    "CD/DVD active subcommand has staged parameters");
 }

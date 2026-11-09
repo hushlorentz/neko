@@ -384,6 +384,7 @@ TEST_CASE("CDVD integration admits only exact physical bytes without side effect
 {
   IOPBus unattached;
   REQUIRE(unattached.read8(BASE + 5).status == IOPBusStatus::Unmapped);
+  REQUIRE(unattached.write8(BASE + 0x17, 0).status == IOPBusStatus::Unmapped);
   NekoSystem system;
   for (const auto offset : {4u, 5u, 6u, 8u, 10u, 15u, 22u, 23u, 24u})
   {
@@ -424,6 +425,136 @@ TEST_CASE("CDVD integration admits only exact physical bytes without side effect
   {
     REQUIRE(read(system, 0x18) == byte);
   }
+}
+
+TEST_CASE("CDVD guest parameter stores retain low bytes without widening access",
+  "[iop][cdvd-integration][cdvd-parameters]")
+{
+  NekoSystem system;
+  startProgram(system, std::array<IOPWord, 8>{{
+    0x3c01bf40, 0x34212000, 0x3c021234, 0x344256a5,
+    0xa0220017, 0xa0200017, 0x90230017, 0
+  }});
+  system.runMasterCycles(57);
+  REQUIRE(system.iopCore().retiredInstructions() == 8);
+  REQUIRE(system.iopCore().generalRegister(3) == 0x40);
+  REQUIRE(system.iopInterruptController().status() == 0);
+  REQUIRE(readEE(system, 0x17) == 0x40);
+  const auto before = system.saveState();
+  const SaveStateMutation fields(before);
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") == 2);
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameters", 0) == 0xa5);
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameters", 1) == 0);
+  auto &bus = system.iopBus();
+  for (const auto address : {BASE + 0x14, BASE + 0x16, BASE + 0x17})
+  {
+    CAPTURE(address);
+    const auto halfwordStatus =
+      address % 2 == 0 ? IOPBusStatus::Unmapped : IOPBusStatus::Misaligned;
+    const auto wordStatus =
+      address % 4 == 0 ? IOPBusStatus::Unmapped : IOPBusStatus::Misaligned;
+    REQUIRE(bus.write16(address, 0).status == halfwordStatus);
+    REQUIRE(bus.write32(address, 0).status == wordStatus);
+    for (unsigned mask = 1; mask < 16; ++mask)
+    {
+      REQUIRE(bus.writeMasked32(address, 0, mask).status == wordStatus);
+    }
+    REQUIRE(bus.writeDMAC32(address, 0).status == wordStatus);
+  }
+  for (const auto address : {BASE + 0x18, BASE + 0x117, 0xbf402017u, 0x9f402017u})
+  {
+    REQUIRE(bus.write8(address, 0).status == IOPBusStatus::Unmapped);
+  }
+  const std::uint8_t byte = 0x7f;
+  REQUIRE(bus.loadPhysical(BASE + 0x17, &byte, 1) == IOPBusStatus::Unmapped);
+  REQUIRE_FALSE(system.eeBus().writeData8(BASE + 0x17, 0));
+  REQUIRE(bus.write8(BASE + 0x16, 3).status == IOPBusStatus::Unmapped);
+  REQUIRE(bus.write8(BASE + 0x16, 8).status == IOPBusStatus::Unmapped);
+  REQUIRE(system.saveState() == before);
+}
+
+TEST_CASE("CDVD staged parameter restore retains capacity and destination ownership",
+  "[iop][cdvd-integration][cdvd-parameters][save-state]")
+{
+  for (const unsigned count : {1u, 15u, 16u})
+  {
+    CAPTURE(count);
+    NekoSystem original;
+    for (unsigned index = 0; index < count; ++index)
+    {
+      write(original, 0x17, static_cast<std::uint8_t>(index));
+    }
+    write(original, 4, 0);
+    const auto checkpoint = original.saveState();
+    NekoSystem restored;
+    write(restored, 0x16, 8);
+    restored.loadState(checkpoint);
+    requireSame(original, restored);
+    original.runMasterCycles(1);
+    restored.runMasterCycles(1);
+    requireSame(original, restored);
+    REQUIRE(read(restored, 8) == 1);
+    REQUIRE(readEE(restored, 0x17) == 0x40);
+    const auto result = count < 16 ? IOPBusStatus::Completed : IOPBusStatus::Unmapped;
+    REQUIRE(original.iopBus().write8(BASE + 0x17, 0x5a).status == result);
+    REQUIRE(restored.iopBus().write8(BASE + 0x17, 0x5a).status == result);
+    requireSame(original, restored);
+    const auto retained = restored.saveState();
+    original.reset();
+    REQUIRE(restored.saveState() == retained);
+    REQUIRE(restored.iopBus().write8(BASE + 0x16, 8).status == IOPBusStatus::Unmapped);
+    REQUIRE(restored.saveState() == retained);
+    restored.reset();
+    write(restored, 0x16, 8);
+    restored.clockMasterCycle();
+    requireClockResult(restored, EPOCH);
+  }
+}
+
+TEST_CASE("CDVD malformed parameter storage is rejected transactionally",
+  "[iop][cdvd-integration][cdvd-parameters][save-state]")
+{
+  NekoSystem source;
+  write(source, 0x17, 0);
+  const auto staged = source.saveState();
+  NekoSystem destination;
+  write(destination, 0x17, 0xa5);
+  const auto before = destination.saveState();
+  for (const auto count : {0u, 1u, 16u, 17u, 255u})
+  {
+    CAPTURE(count);
+    SaveStateMutation bad(staged);
+    bad.writeScalar("system.iop.cdvd.subcommandParameterCount", count);
+    if (count <= 16)
+    {
+      bad.writeByte("system.iop.cdvd.subcommandParameters", 15, 0xff);
+      if (count == 16)
+      {
+        bad.writeScalar("system.iop.cdvd.subcommandPhase", 1);
+        bad.writeScalar("system.iop.cdvd.lastSubcommand", 8);
+      }
+    }
+    bad.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
+  source.reset();
+  write(source, 0x16, 8);
+  for (unsigned phase = 0; phase < 2; ++phase)
+  {
+    SaveStateMutation bad(source.saveState());
+    bad.writeScalar("system.iop.cdvd.subcommandParameterCount", 1);
+    bad.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+    REQUIRE(source.cdvdController().completeSubcommand() == (phase == 0));
+  }
+  write(destination, 0x17, 0);
+  REQUIRE(read(destination, 0x17) == 0x40);
+  destination.reset();
+  write(destination, 0x16, 8);
+  destination.clockMasterCycle();
+  requireClockResult(destination, EPOCH);
 }
 
 TEST_CASE("CDVD guest NOP completes before the next IOP instruction not its store",

@@ -1980,7 +1980,7 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
     }
   }
 
-  SECTION("Breakpoint reads are admitted while writes remain deferred")
+  SECTION("Breakpoint reads and control writes are admitted while other writes remain deferred")
   {
     const std::uint16_t selectors[] = {
       0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07
@@ -1994,6 +1994,12 @@ TEST_CASE("EE COP0 decoder classifies every manual-listed encoding")
           REQUIRE(
             decodeEEInstruction(cop0Instruction(rs, 2, 24, selector)).
               operation == EEOperation::MoveWordFromCOP0);
+        }
+        else if (selector == 0)
+        {
+          REQUIRE(
+            decodeEEInstruction(cop0Instruction(rs, 2, 24, selector)).
+              operation == EEOperation::MoveWordToCOP0);
         }
         else
         {

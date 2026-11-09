@@ -473,6 +473,61 @@ TEST_CASE("CDVD polling result reads acknowledgements and rejection add no comma
   }
 }
 
+TEST_CASE("CDVD parameter guest continuation is canonical across trace modes",
+  "[iop][cdvd-trace][cdvd-parameters][save-state]")
+{
+  const std::array<IOPWord, 8> program = {{
+    0x3c01bf40, 0x34212000, 0x240200a5, 0xa0220017,
+    0xa0200017, 0x90230017, 0x24020003, 0xa0220016
+  }};
+  NekoSystem reference;
+  NekoSystem source;
+  installProgram(reference, 0, program);
+  installProgram(source, 0, program);
+  reference.iopCore().startExecution(0xa0000000);
+  source.iopCore().startExecution(0xa0000000);
+  reference.startTrace();
+  reference.runMasterCycles(57);
+  source.runMasterCycles(25);
+  REQUIRE(source.iopCore().retiredInstructions() == 4);
+  REQUIRE(reference.iopCore().retiredInstructions() == 7);
+  REQUIRE(reference.iopCore().stopReason() == IOPStopReason::StoreFailure);
+  REQUIRE(IOPTraceTest::subsystemEvents(reference, CDVD).empty());
+  REQUIRE(reference.iopCore().generalRegister(3) == 0x40);
+  REQUIRE(reference.iopInterruptController().status() == 0);
+  const SaveStateMutation fields(reference.saveState());
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") == 2);
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameters", 0) == 0xa5);
+  REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameters", 1) == 0);
+  namespace Memory = NekoIOPTraceMemory;
+  const std::array<std::uint64_t, 4> cycles = {{25, 33, 41, 57}};
+  const std::array<std::uint8_t, 4> values = {{0xa5, 0, 0x40, 3}};
+  std::size_t access = 0;
+  for (const auto &event : reference.trace())
+  {
+    if (event.subsystem != NekoTraceSubsystem::IOP ||
+        event.type != NekoTraceEventType::MemoryAccess ||
+        (event.value0 != 0xbf402017 && event.value0 != 0xbf402016))
+    {
+      continue;
+    }
+    REQUIRE(access < cycles.size());
+    REQUIRE(event.masterCycle == cycles[access]);
+    REQUIRE(event.value0 == (access == 3 ? 0xbf402016u : 0xbf402017u));
+    REQUIRE(event.value1 == values[access]);
+    REQUIRE(event.value2 == 0);
+    REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+      access == 3 ? BASE + 0x16 : BASE + 0x17, 1,
+      access == 2 ? Memory::AccessKind::DataLoad : Memory::AccessKind::DataStore,
+      access == 3 ? Memory::Outcome::Unmapped : Memory::Outcome::Completed,
+      Memory::CacheRoute::Uncached, true,
+      static_cast<std::uint8_t>(access == 3 ? 4 : 8)}));
+    ++access;
+  }
+  REQUIRE(access == cycles.size());
+  requireContinuationModes(reference, source);
+}
+
 TEST_CASE("CDVD command observations disarm after a later DMA exception",
   "[iop][cdvd-trace][save-state]")
 {

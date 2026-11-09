@@ -87,6 +87,8 @@ CDVDAccessStatus CDVDController::writeByte(
       return CDVDAccessStatus::Accepted;
     case 0x1f402016:
       return acceptSubcommand(value);
+    case 0x1f402017:
+      return appendSubcommandParameter(value);
     default:
       return CDVDAccessStatus::Unsupported;
   }
@@ -107,15 +109,35 @@ CDVDAccessStatus CDVDController::acceptNormalCommand(
 
 CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode)
 {
-  if (opcode != 8 || subcommandPhase != SubcommandPhase::Idle)
+  if (opcode != 8 || subcommandPhase != SubcommandPhase::Idle ||
+      subcommandParameterCount != 0)
   {
     return CDVDAccessStatus::Unsupported;
   }
   lastSubcommand = opcode;
+  clearSubcommandParameters();
   subcommandPhase = SubcommandPhase::Pending;
   recordCommand(ObservationKind::Accepted, Transport::Subcommand,
     SubcommandPhase::Idle, deviceCause);
   return CDVDAccessStatus::Accepted;
+}
+
+CDVDAccessStatus CDVDController::appendSubcommandParameter(
+  std::uint8_t value) noexcept
+{
+  if (subcommandPhase != SubcommandPhase::Idle ||
+      subcommandParameterCount >= subcommandParameters.size())
+  {
+    return CDVDAccessStatus::Unsupported;
+  }
+  subcommandParameters[subcommandParameterCount++] = value;
+  return CDVDAccessStatus::Accepted;
+}
+
+void CDVDController::clearSubcommandParameters() noexcept
+{
+  subcommandParameters.fill(0);
+  subcommandParameterCount = 0;
 }
 
 void CDVDController::advanceMasterTick() noexcept
@@ -229,6 +251,7 @@ void CDVDController::reset() noexcept
   lastSubcommand = 0;
   subcommandPhase = SubcommandPhase::Idle;
   clearResult();
+  clearSubcommandParameters();
 }
 
 void CDVDController::enableObservations(NekoObservationOrder *order) noexcept

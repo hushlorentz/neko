@@ -91,6 +91,8 @@ class CDVDController final
 
     CDVDAccessStatus acceptNormalCommand(std::uint8_t opcode);
     CDVDAccessStatus acceptSubcommand(std::uint8_t opcode);
+    CDVDAccessStatus appendSubcommandParameter(std::uint8_t value) noexcept;
+    void clearSubcommandParameters() noexcept;
     std::uint8_t consumeResult() noexcept;
     std::array<std::uint8_t, 8> clockResult() const noexcept;
     static bool isValidClockResult(
@@ -104,6 +106,8 @@ class CDVDController final
     SubcommandPhase subcommandPhase = SubcommandPhase::Idle;
     std::array<std::uint8_t, 8> result = {};
     std::uint8_t resultCursor = 0;
+    std::array<std::uint8_t, 16> subcommandParameters = {};
+    std::uint8_t subcommandParameterCount = 0;
 };
 
 #endif

@@ -20,12 +20,12 @@ namespace
 {
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
+  constexpr std::size_t VERSION_100_PREPARED_STATE_SIZE = 42051277;
+  constexpr std::uint64_t VERSION_100_PREPARED_STATE_HASH =
+    UINT64_C(0x560f77d0d6eba39e);
   constexpr std::size_t VERSION_99_PREPARED_STATE_SIZE = 42051260;
   constexpr std::uint64_t VERSION_99_PREPARED_STATE_HASH =
     UINT64_C(0x832c7397f498a463);
-  constexpr std::size_t VERSION_98_PREPARED_STATE_SIZE = 42051260;
-  constexpr std::uint64_t VERSION_98_PREPARED_STATE_HASH =
-    UINT64_C(0x90bcafc9b16410be);
   constexpr std::uint8_t COP1_STAGE_X = 2;
   constexpr std::uint8_t COP1_STAGE_T = 1;
   constexpr std::uint8_t COP1_STAGE_Y = 3;
@@ -625,7 +625,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 99 save-state layout is byte-stable")
+TEST_CASE("Version 100 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -640,14 +640,14 @@ TEST_CASE("Version 99 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 99);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 100);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_99_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_100_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_99_PREPARED_STATE_HASH);
+    VERSION_100_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -784,13 +784,29 @@ TEST_CASE("Version 99 save-state layout is byte-stable")
   REQUIRE(firstTransfer != nullptr);
   REQUIRE(firstTransfer->containerOffset == spuBlockOffset + 8);
   auto previousVersion = state;
-  previousVersion[SAVE_STATE_VERSION_OFFSET] = 98;
+  const auto *parameterCount = snapshot.find(
+    "system.iop.cdvd.subcommandParameterCount");
+  const auto *parameters = snapshot.find("system.iop.cdvd.subcommandParameters");
+  const auto *resultCursor = snapshot.find("system.iop.cdvd.resultCursor");
+  REQUIRE(parameterCount != nullptr);
+  REQUIRE(parameters != nullptr);
+  REQUIRE(resultCursor != nullptr);
+  REQUIRE(parameterCount->kind == SaveStateFieldKind::U8);
+  REQUIRE(parameterCount->scalarValue == 0);
+  REQUIRE(parameterCount->size == 1);
+  REQUIRE(parameters->kind == SaveStateFieldKind::Bytes);
+  REQUIRE(parameters->size == 16);
+  REQUIRE(parameterCount->containerOffset == resultCursor->containerOffset + 1);
+  REQUIRE(parameters->containerOffset == parameterCount->containerOffset + 1);
+  previousVersion.erase(previousVersion.begin() + parameterCount->containerOffset,
+    previousVersion.begin() + parameters->containerOffset + parameters->size);
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 99;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 12,
     hashBytes(previousVersion, TEST_SAVE_STATE_HEADER_SIZE));
-  REQUIRE(previousVersion.size() == VERSION_98_PREPARED_STATE_SIZE);
-  REQUIRE(hashBytes(previousVersion) == VERSION_98_PREPARED_STATE_HASH);
+  REQUIRE(previousVersion.size() == VERSION_99_PREPARED_STATE_SIZE);
+  REQUIRE(hashBytes(previousVersion) == VERSION_99_PREPARED_STATE_HASH);
   REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
   REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
   REQUIRE(system.saveState() == state);

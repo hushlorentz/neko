@@ -3585,9 +3585,33 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research and admit bounded MTBPC zero-control writes through existing
       debug/COP0 ownership; exclude other debug programming and cover
       usability, ordered issue and restored continuation.
-- [ ] Verify fresh unchanged-input BIOS progress beyond the originating
+- [x] Verify fresh unchanged-input BIOS progress beyond the originating
       breakpoint-control write with cold/restored traced/plain and canonical
       comparisons; identify the next dependency without claiming completed boot.
+
+### CD/DVD Subcommand Parameter Transport Dependency
+
+- [x] Research the observed byte-zero subcommand-parameter write and its
+      containing command sequence; define bounded staging, capacity, phase,
+      reset and persistence contracts through the existing CDVD owner.
+- [x] Implement the approved bounded parameter transport with focused CPU/bus,
+      command-boundary and restored-continuation coverage; keep unsupported
+      commands and identity/NVM/media policies explicit.
+- [ ] Verify fresh unchanged-input BIOS progress beyond the originating
+      parameter write with cold/restored traced/plain and canonical comparisons;
+      identify the next dependency without claiming completed boot.
+
+### CD/DVD MECHACON Version Query Dependency
+
+- [ ] Research the staged SCMD03/00 four-byte version query and select an
+      explicit deterministic identity, exact request/result shape, command
+      lifecycle and replacement evidence before implementing a response.
+- [ ] Implement the approved version query through the existing CDVD owner
+      with malformed-request rejection, clocked completion, result draining
+      and canonical restored-continuation coverage.
+- [ ] Verify the demonstrated query with fresh unchanged-input cold/restored
+      traced/plain and canonical comparisons; identify the next dependency
+      without claiming completed boot or measured console identity.
 
 ### Additional CD/DVD Command and Configuration Scope
 

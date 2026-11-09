@@ -26,7 +26,9 @@ struct CDVDControllerTestAccess
       actual.lastSubcommand == expected.lastSubcommand &&
       actual.subcommandPhase == expected.subcommandPhase &&
       actual.result == expected.result &&
-      actual.resultCursor == expected.resultCursor;
+      actual.resultCursor == expected.resultCursor &&
+      actual.subcommandParameters == expected.subcommandParameters &&
+      actual.subcommandParameterCount == expected.subcommandParameterCount;
   }
 
   static void requireEmptyStorage(const CDVDController &controller)
@@ -34,6 +36,13 @@ struct CDVDControllerTestAccess
     const std::array<std::uint8_t, 8> empty = {};
     REQUIRE(controller.result == empty);
     REQUIRE(controller.resultCursor == 0);
+  }
+
+  static void requireParameters(const CDVDController &controller,
+    const std::array<std::uint8_t, 16> &bytes, std::uint8_t count)
+  {
+    REQUIRE(controller.subcommandParameters == bytes);
+    REQUIRE(controller.subcommandParameterCount == count);
   }
 };
 
@@ -96,6 +105,31 @@ namespace
   }
 }
 
+TEST_CASE("CDVD owner stages zero parameters without command effects",
+  "[iop][cdvd-owner][cdvd-parameters]")
+{
+  CDVDController controller;
+  const auto empty = controller.stateHash();
+  accept(controller, 0x17, 0);
+  REQUIRE(controller.stateHash() != empty);
+  REQUIRE(read(controller, 0x17) == 0x40);
+  REQUIRE(read(controller, 0x16) == 0);
+  REQUIRE(read(controller, 0x18) == 0);
+  REQUIRE_FALSE(controller.completeSubcommand());
+  const auto staged = controller.stateHash();
+  for (const auto opcode : {3u, 8u})
+  {
+    REQUIRE(controller.writeByte(BASE + 0x16,
+      static_cast<std::uint8_t>(opcode)) == CDVDAccessStatus::Unsupported);
+    REQUIRE(controller.stateHash() == staged);
+  }
+  controller.reset();
+  REQUIRE(controller.stateHash() == empty);
+  accept(controller, 0x16, 8);
+  REQUIRE(controller.completeSubcommand());
+  REQUIRE(drain(controller) == EPOCH);
+}
+
 TEST_CASE("CDVD owner resets to the exact no-media byte profile",
   "[iop][cdvd-owner]")
 {
@@ -115,6 +149,86 @@ TEST_CASE("CDVD owner resets to the exact no-media byte profile",
   REQUIRE(read(controller, 0x16) == 8);
   REQUIRE_FALSE(controller.completeSubcommand());
   REQUIRE(read(controller, 0x08) == 0);
+}
+
+TEST_CASE("CDVD parameters retain all byte values in order and reject overflow",
+  "[iop][cdvd-owner][cdvd-parameters]")
+{
+  for (unsigned first = 0; first < 256; first += 16)
+  {
+    CAPTURE(first);
+    CDVDController controller;
+    std::array<std::uint8_t, 16> expected = {};
+    for (unsigned index = 0; index < expected.size(); ++index)
+    {
+      expected[index] = static_cast<std::uint8_t>(first + index);
+      accept(controller, 0x17, expected[index]);
+      CDVDControllerTestAccess::requireParameters(controller, expected,
+        static_cast<std::uint8_t>(index + 1));
+      REQUIRE(read(controller, 0x17) == 0x40);
+    }
+    const auto full = controller;
+    for (unsigned value = 0; value < 256; ++value)
+    {
+      REQUIRE(controller.writeByte(BASE + 0x17,
+        static_cast<std::uint8_t>(value)) == CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, full));
+    }
+    controller.reset();
+    CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+  }
+}
+
+TEST_CASE("CDVD staged parameters survive rejected commands and normal transport",
+  "[iop][cdvd-owner][cdvd-parameters]")
+{
+  CDVDController controller;
+  accept(controller, 0x17, 0x5a);
+  const auto staged = controller;
+  for (unsigned opcode = 0; opcode < 256; ++opcode)
+  {
+    REQUIRE(controller.writeByte(BASE + 0x16,
+      static_cast<std::uint8_t>(opcode)) == CDVDAccessStatus::Unsupported);
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, staged));
+  }
+  accept(controller, 4, 0);
+  controller.advanceMasterTick();
+  REQUIRE(controller.completeNormalCommand().newCauses == 1);
+  accept(controller, 8, 1);
+  REQUIRE_FALSE(controller.completeSubcommand());
+  REQUIRE(read(controller, 0x18) == 0);
+  CDVDControllerTestAccess::requireParameters(controller, {{0x5a}}, 1);
+  REQUIRE(read(controller, 0x17) == 0x40);
+}
+
+TEST_CASE("CDVD parameter writes cannot alter pending or unread clock results",
+  "[iop][cdvd-owner][cdvd-parameters]")
+{
+  CDVDController controller;
+  accept(controller, 0x16, 8);
+  for (unsigned consumed = 0; consumed <= EPOCH.size(); ++consumed)
+  {
+    CAPTURE(consumed);
+    const auto before = controller;
+    for (unsigned value = 0; value < 256; ++value)
+    {
+      REQUIRE(controller.writeByte(BASE + 0x17,
+        static_cast<std::uint8_t>(value)) == CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+    }
+    CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+    if (consumed == 0)
+    {
+      REQUIRE(controller.completeSubcommand());
+    }
+    else
+    {
+      REQUIRE(read(controller, 0x18) == EPOCH[consumed - 1]);
+    }
+  }
+  REQUIRE(read(controller, 0x17) == 0x40);
+  accept(controller, 0x17, 0x7f);
+  CDVDControllerTestAccess::requireParameters(controller, {{0x7f}}, 1);
 }
 
 TEST_CASE("CDVD owner rejects unselected addresses and directions atomically",
@@ -150,7 +264,8 @@ TEST_CASE("CDVD owner rejects unselected addresses and directions atomically",
         REQUIRE(rejected.status == CDVDAccessStatus::Unsupported);
         REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
       }
-      if (offset != 0x04 && offset != 0x08 && offset != 0x16)
+      if (offset != 0x04 && offset != 0x08 && offset != 0x16 &&
+          (offset != 0x17 || stage != 0))
       {
         for (unsigned value = 0; value < 256; ++value)
         {
