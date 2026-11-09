@@ -763,7 +763,9 @@ TEST_CASE("Startup summary JSON has a stable shape independent of caller formatt
     R"("next_beat":{"outcome":"wait","failure":"none","address":0,)"
     R"("value":0,"bus_status":"completed"}},)"
     R"("sio2_input":{"channel":11,"control":0,"madr":0,"bcr":0,)"
-    R"("remaining_words":0,"active":false,"enabled":false}},)"
+    R"("remaining_words":0,"active":false,"enabled":false},)"
+    R"("sio2_output":{"channel":12,"control":0,"madr":0,"bcr":0,)"
+    R"("remaining_words":0,"active":false,"state":"inactive","enabled":false}},)"
     R"("ee_interrupts":{"status":0,"mask":0,"pending":false},)"
     R"("iop_interrupts":{"status":0,"mask":0,"control":0,"pending":false}})";
   REQUIRE(output.str() ==

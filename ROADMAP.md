@@ -3669,9 +3669,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the selected stopped output-control family through the existing
       DMA owner, retaining bit30 without active effects, with atomic rejection
       and canonical continuation; keep output transfers and serial results excluded.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress beyond the control origin; identify the next dependency without
       claiming peripheral replies or completed boot.
+
+### IOP SIO2 DMA Output Start Arming Dependency
+
+- [x] Research the demonstrated channel12 CHCR0x41000200 start and its SIO2
+      dependency; distinguish output DMA requests from serial execution, then
+      obtain approval for bounded arming, waiting, cancellation and reset.
+- [x] Implement the approved pending output request through the existing DMA
+      owner, with atomic rejection, canonical continuation and diagnostics;
+      no result consumption, RAM transfer, completion or fabricated replies.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress beyond the start origin; identify the next dependency without
+      claiming card success or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 
@@ -3700,6 +3712,9 @@ not requirements for exhaustive subsystem coverage.
       required by the selected shell profile and responsiveness demonstration.
 - [ ] Define deterministic controller-input sampling and separate memory-card
       protocol state from host persistence; select absent-device/error behavior.
+- [ ] With a supported serial result producer, integrate output DMA into shared
+      grants with real FIFO backpressure, packing, progress and masked completion;
+      keep DMA completion distinct from serial completion and peer success.
 
 ### ROM and Module-Loading Scope
 

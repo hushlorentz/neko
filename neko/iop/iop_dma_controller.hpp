@@ -102,6 +102,9 @@ class IOPDMAController final
       const IOPBus &bus, SIO2Controller &sio2);
     bool sio2InputActive() const;
     IOPWord sio2InputRemainingWords() const;
+    bool sio2OutputActive() const;
+    bool sio2OutputEnabled() const;
+    IOPWord sio2OutputRemainingWords() const;
     IOPDMABeatResult inspectSIO2Input(const IOPBus &bus, const SIO2Controller &sio2) const;
     IOPDMABeatResult clockSIO2Input(const IOPBus &bus, SIO2Controller &sio2);
     // Register readback follows accepted source progress while active.

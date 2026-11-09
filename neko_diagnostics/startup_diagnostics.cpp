@@ -302,6 +302,14 @@ namespace
       << ",\"remaining_words\":" << sio2Input.remainingWords
       << ",\"active\":" << jsonBoolean(sio2Input.active)
       << ",\"enabled\":" << jsonBoolean(sio2Input.enabled) << "}";
+    const auto &sio2Output = iopDMA.sio2Output;
+    output << ",\"sio2_output\":{\"channel\":12,\"control\":" << sio2Output.control
+      << ",\"madr\":" << sio2Output.memoryAddress
+      << ",\"bcr\":" << sio2Output.blockControl
+      << ",\"remaining_words\":" << sio2Output.remainingWords
+      << ",\"active\":" << jsonBoolean(sio2Output.active)
+      << ",\"state\":\"" << (sio2Output.active ? "armed_waiting_results" : "inactive")
+      << "\",\"enabled\":" << jsonBoolean(sio2Output.enabled) << "}";
     output << "},\"ee_interrupts\":{\"status\":" << summary.eeInterrupts.status
       << ",\"mask\":" << summary.eeInterrupts.mask
       << ",\"pending\":" << jsonBoolean(summary.eeInterrupts.pending)
@@ -406,6 +414,13 @@ StartupSummary inspectStartup(const NekoSystem &system)
     iopDMA.sio2BlockControl(IOPSIO2DMAChannel::Input),
     iopDMA.sio2InputRemainingWords(), iopDMA.sio2InputActive(),
     iopDMA.channelEnabled(IOPDMAChannel::SIO2Input)
+  };
+  summary.iopDMA.sio2Output = {
+    iopDMA.sio2ChannelControl(IOPSIO2DMAChannel::Output),
+    iopDMA.sio2MemoryAddress(IOPSIO2DMAChannel::Output),
+    iopDMA.sio2BlockControl(IOPSIO2DMAChannel::Output),
+    iopDMA.sio2OutputRemainingWords(), iopDMA.sio2OutputActive(),
+    iopDMA.sio2OutputEnabled()
   };
   const auto &eeInterrupts = system.interruptController();
   summary.eeInterrupts = {

@@ -17,6 +17,8 @@ namespace
   constexpr IOPWord SIO2_INPUT_START = 0x01000201;
   constexpr IOPWord SIO2_INPUT_BCR = 0x10024;
   constexpr IOPWord SIO2_INPUT_WORDS = SIO2Controller::DMA_INPUT_BYTES / 4;
+  constexpr IOPWord SIO2_OUTPUT_START = 0x41000200;
+  constexpr IOPWord SIO2_OUTPUT_BCR = 0x10024;
   constexpr std::array<IOPDMAChannel, 5> GRANT_CHANNELS = {{
     IOPDMAChannel::SPU0, IOPDMAChannel::SPU1, IOPDMAChannel::SIF0,
     IOPDMAChannel::SIF1, IOPDMAChannel::SIO2Input
@@ -235,6 +237,14 @@ IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
 {
   validateSIO2Wiring(bus, sio2);
   auto &programming = sio2Channels.at(static_cast<std::size_t>(channel));
+  if (channel == IOPSIO2DMAChannel::Output && value == SIO2_OUTPUT_START)
+  {
+    if (programming.blockControlRegister != SIO2_OUTPUT_BCR)
+      return IOPDMAWriteOutcome::UnsupportedControl;
+    // No DMA-readable SIO2 result source exists yet; retain the pending request.
+    programming.channelControlRegister = value;
+    return IOPDMAWriteOutcome::Completed;
+  }
   if (channel == IOPSIO2DMAChannel::Input && value == SIO2_INPUT_START)
   {
     if (programming.active())
@@ -249,7 +259,7 @@ IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
   {
     return IOPDMAWriteOutcome::UnsupportedControl;
   }
-  if (programming.active())
+  if (channel == IOPSIO2DMAChannel::Input && programming.active())
   {
     sio2.cancelDMAInput();
     sio2InputWordsTransferred = 0;
@@ -268,14 +278,33 @@ IOPWord IOPDMAController::sio2InputRemainingWords() const
   return sio2InputActive() ? SIO2_INPUT_WORDS - sio2InputWordsTransferred : 0;
 }
 
+bool IOPDMAController::sio2OutputActive() const
+{
+  return sio2Channels[1].active();
+}
+
+bool IOPDMAController::sio2OutputEnabled() const
+{
+  return (priority(IOPDMABank::Secondary) & 0x800000) != 0;
+}
+
+IOPWord IOPDMAController::sio2OutputRemainingWords() const
+{
+  return sio2OutputActive() ? (SIO2_OUTPUT_BCR & 0xffff) : 0;
+}
+
 bool IOPDMAController::validSIO2Continuation(const SIO2Controller &sio2) const
 {
   for (const auto &channel : sio2Channels)
     if (!IOPDMAChannelState::validMemoryAddress(channel.memoryAddressRegister))
       return false;
-  if (!validSIO2StoppedControl(IOPSIO2DMAChannel::Output,
-        sio2Channels[1].channelControlRegister) ||
-      !sio2.hasValidTransferState())
+  const auto &output = sio2Channels[1];
+  if (sio2OutputActive() ?
+      (output.channelControlRegister != SIO2_OUTPUT_START ||
+        output.blockControlRegister != SIO2_OUTPUT_BCR) :
+      !validSIO2StoppedControl(IOPSIO2DMAChannel::Output, output.channelControlRegister))
+    return false;
+  if (!sio2.hasValidTransferState())
     return false;
   if (!sio2InputActive())
     return validSIO2StoppedControl(IOPSIO2DMAChannel::Input,

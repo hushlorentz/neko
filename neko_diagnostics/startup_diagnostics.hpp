@@ -150,6 +150,7 @@ struct StartupIOPDMASummary
   StartupIOPDMAChannelSummary sif0{IOPDMAChannel::SIF0};
   StartupIOPDMAChannelSummary sif1{IOPDMAChannel::SIF1};
   StartupSIO2DMASummary sio2Input;
+  StartupSIO2DMASummary sio2Output;
 };
 
 struct StartupIOPInterruptSummary
