@@ -179,6 +179,7 @@ class IOPBus final
       ChannelRegisterInitialization,
       SIO2DMAMemoryAddress,
       SIO2DMABlockControl,
+      SIO2DMAChannelControl,
       SupplementalDMAInitialization,
       SIF1DMA,
       SIF0DMA,

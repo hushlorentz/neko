@@ -20,6 +20,9 @@ namespace
 {
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
+  constexpr std::size_t VERSION_104_PREPARED_STATE_SIZE = 42051309;
+  constexpr std::uint64_t VERSION_104_PREPARED_STATE_HASH =
+    UINT64_C(0x93ac53493550ce51);
   constexpr std::size_t VERSION_103_PREPARED_STATE_SIZE = 42051301;
   constexpr std::uint64_t VERSION_103_PREPARED_STATE_HASH =
     UINT64_C(0x6d0f8c516d96b4a1);
@@ -634,7 +637,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 103 save-state layout is byte-stable")
+TEST_CASE("Version 104 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -649,14 +652,14 @@ TEST_CASE("Version 103 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 103);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 104);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_103_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_104_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_103_PREPARED_STATE_HASH);
+    VERSION_104_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -797,25 +800,40 @@ TEST_CASE("Version 103 save-state layout is byte-stable")
   {
     const auto path = "system.iop.dmaController.sio2Programming[" +
       std::to_string(channel) + "].";
-    for (const auto &name : {std::string{"memoryAddress"}, std::string{"blockControl"}})
+    std::size_t fieldOffset = sio2ProgrammingOffset + channel * 12;
+    for (const auto &name : {"memoryAddress", "blockControl", "channelControl"})
     {
       const auto *field = snapshot.find(path + name);
       REQUIRE(field != nullptr);
       REQUIRE(field->kind == SaveStateFieldKind::U32);
       REQUIRE(field->size == 4);
       REQUIRE(field->scalarValue == 0);
-      REQUIRE(field->containerOffset ==
-        sio2ProgrammingOffset + channel * 8 + (name == "memoryAddress" ? 0 : 4));
+      REQUIRE(field->containerOffset == fieldOffset);
+      fieldOffset += 4;
     }
   }
   const auto *firstBank = snapshot.find("system.iop.dmaController.banks[0].priority");
   REQUIRE(firstBank != nullptr);
-  REQUIRE(firstBank->containerOffset == sio2ProgrammingOffset + 16);
+  REQUIRE(firstBank->containerOffset == sio2ProgrammingOffset + 24);
   const auto *cdvdResult = snapshot.find("system.iop.cdvd.result");
   REQUIRE(cdvdResult != nullptr);
   REQUIRE(cdvdResult->kind == SaveStateFieldKind::Bytes);
   REQUIRE(cdvdResult->size == 16);
   auto previousVersion = state;
+  previousVersion.erase(previousVersion.begin() + sio2ProgrammingOffset + 20,
+    previousVersion.begin() + sio2ProgrammingOffset + 24);
+  previousVersion.erase(previousVersion.begin() + sio2ProgrammingOffset + 8,
+    previousVersion.begin() + sio2ProgrammingOffset + 12);
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 103;
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
+    previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 12,
+    hashBytes(previousVersion, TEST_SAVE_STATE_HEADER_SIZE));
+  REQUIRE(previousVersion.size() == VERSION_103_PREPARED_STATE_SIZE);
+  REQUIRE(hashBytes(previousVersion) == VERSION_103_PREPARED_STATE_HASH);
+  REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
+  REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
+  REQUIRE(system.saveState() == state);
   previousVersion.erase(previousVersion.begin() + sio2ProgrammingOffset,
     previousVersion.begin() + sio2ProgrammingOffset + 16);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 102;

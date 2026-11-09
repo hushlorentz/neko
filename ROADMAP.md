@@ -3633,9 +3633,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement paired MADR/BCR programming with exact CPU access widths,
       atomic rejected accesses and canonical restored-continuation coverage;
       preserve unrelated zero-only registers and existing SIO2 behavior.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress beyond the originating write; identify the next dependency
       without claiming active SIO2 DMA, peripheral support or completed boot.
+
+### IOP SIO2 DMA Stopped Channel Control Dependency
+
+- [x] Research channel11/12 CHCR and the demonstrated0x201 write; distinguish
+      stopped configuration from active lifecycle, and select bounded
+      ownership, access, retention and reset policy before implementation.
+- [x] Implement only the approved stopped-control contract with atomic
+      rejection and canonical restored-continuation coverage; keep active
+      DMA, peripheral effects, IRQs and timing outside this dependency.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress beyond the CHCR origin; identify the next dependency without
+      claiming active SIO2 DMA or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

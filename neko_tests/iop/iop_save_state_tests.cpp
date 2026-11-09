@@ -1222,7 +1222,6 @@ TEST_CASE("IOP DMA initialization guest continuation restores pending load branc
     0x1f8010e0u, 0x1f8010e4u, 0x1f8010e8u,
     0x1f801500u, 0x1f801508u,
     0x1f801510u, 0x1f801514u, 0x1f801518u,
-    0x1f801548u, 0x1f801558u,
     0x1f8010ccu, 0x1f801560u, 0x1f801564u, 0x1f801568u})
   for (const unsigned prefix : {32u, 40u, 48u})
   {

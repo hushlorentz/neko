@@ -94,6 +94,8 @@ class IOPDMAController final
     void writeSIO2BlockSize(IOPSIO2DMAChannel channel, std::uint16_t value);
     std::uint16_t sio2BlockCount(IOPSIO2DMAChannel channel) const;
     void writeSIO2BlockCount(IOPSIO2DMAChannel channel, std::uint16_t value);
+    IOPWord sio2ChannelControl(IOPSIO2DMAChannel channel) const;
+    IOPDMAWriteOutcome writeSIO2ChannelControl(IOPSIO2DMAChannel channel, IOPWord value);
     // Register readback follows accepted source progress while active.
     IOPWord spuMemoryAddress(std::size_t core) const;
     IOPDMAWriteOutcome writeSPUMemoryAddress(std::size_t core, IOPWord value);
@@ -159,8 +161,10 @@ class IOPDMAController final
     {
       IOPWord memoryAddress = 0;
       IOPWord blockControl = 0;
+      IOPWord channelControl = 0;
     };
 
+    static bool validSIO2ChannelControl(IOPWord value);
     static std::size_t bankIndex(IOPDMABank bank);
     static IOPDMABank channelBank(IOPDMAChannel channel);
     static std::uint8_t channelSlot(IOPDMAChannel channel);

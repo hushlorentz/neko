@@ -196,6 +196,28 @@ void IOPDMAController::writeSIO2BlockCount(
     (sio2BlockControl(channel) & 0xffff) | (IOPWord{value} << 16));
 }
 
+bool IOPDMAController::validSIO2ChannelControl(IOPWord value)
+{
+  return value == 0 || value == 0x200 || value == 0x201;
+}
+
+IOPWord IOPDMAController::sio2ChannelControl(IOPSIO2DMAChannel channel) const
+{
+  return sio2Channels.at(static_cast<std::size_t>(channel)).channelControl;
+}
+
+IOPDMAWriteOutcome IOPDMAController::writeSIO2ChannelControl(
+  IOPSIO2DMAChannel channel, IOPWord value)
+{
+  auto &programming = sio2Channels.at(static_cast<std::size_t>(channel));
+  if (!validSIO2ChannelControl(value))
+  {
+    return IOPDMAWriteOutcome::UnsupportedControl;
+  }
+  programming.channelControl = value;
+  return IOPDMAWriteOutcome::Completed;
+}
+
 IOPWord IOPDMAController::spuMemoryAddress(std::size_t core) const
 {
   return spuChannels.at(core).registers.memoryAddressRegister;

@@ -397,6 +397,7 @@ void NekoSaveStateCodec::writeIOPState(
         auto channel = writer->element(index);
         writer->writeFieldU32("memoryAddress", channels[index].memoryAddress);
         writer->writeFieldU32("blockControl", channels[index].blockControl);
+        writer->writeFieldU32("channelControl", channels[index].channelControl);
       }
     }
     auto banks = writer->scope("banks");
@@ -713,6 +714,10 @@ void NekoSaveStateCodec::readIOP(
           IOPDMAChannelState::validMemoryAddress(channels[index].memoryAddress),
           "IOP SIO2 DMA address is unaligned or exceeds 24 bits");
         channels[index].blockControl = reader->readFieldU32("blockControl");
+        channels[index].channelControl = reader->readFieldU32("channelControl");
+        reader->requireField(
+          IOPDMAController::validSIO2ChannelControl(channels[index].channelControl),
+          "IOP SIO2 DMA channel control is outside the stopped profile");
       }
     }
     auto banks = reader->scope("banks");

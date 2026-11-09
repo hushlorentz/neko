@@ -599,6 +599,42 @@ TEST_CASE("IOP DMA programming block control halfwords respect cache isolation",
   }
 }
 
+TEST_CASE("IOP SIO2 DMA stopped controls preserve cache isolation ownership",
+  "[iop][dma][sio2-dma][sio2-chcr][cache]")
+{
+  for (IOPAddress physical : {0x1f801548u, 0x1f801558u})
+  for (bool swapped : {false, true})
+  for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
+  {
+    const auto address = physical | segment;
+    CAPTURE(address);
+    CAPTURE(swapped);
+    IOPBus bus;
+    IOPInterruptController interrupts;
+    IOPDMAController dma(interrupts);
+    IOPSIF1DMAChannel sif1;
+    bus.attachDMA(&dma, &sif1);
+    REQUIRE(bus.write32(physical, 0x200).status == IOPBusStatus::Completed);
+    IOPCore core;
+    core.attachBus(&bus);
+    const auto swap = swapped ? IOPCOP0Status::CACHES_SWAPPED : 0;
+    IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
+    REQUIRE(core.writeData32(address, 0x01000201).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0x01000201);
+    REQUIRE(bus.read32(physical).value == 0x200);
+    const auto isolated = core.cache();
+    IOPCacheTestAccess::setStatus(&core, swap);
+    REQUIRE(core.readData32(address).value == 0x200);
+    REQUIRE(core.writeData32(address, 0x201).outcome == IOPAccessOutcome::Completed);
+    REQUIRE(core.readData32(address).value == 0x201);
+    REQUIRE(core.writeData32(address, 0x01000201).outcome == IOPAccessOutcome::Unmapped);
+    REQUIRE(core.readData32(address).value == 0x201);
+    core.startExecution(address);
+    REQUIRE(core.fetchInstruction().outcome == IOPAccessOutcome::Unmapped);
+    requireUnchangedCache(core.cache(), isolated);
+  }
+}
+
 TEST_CASE("IOP SPU CHCR bypasses cached payloads while isolation keeps starts local",
   "[iop][dma][spu-chcr][cache]")
 {
