@@ -29,6 +29,12 @@ enum class IOPDMAChannel : std::uint8_t
   SIF1 = 10
 };
 
+enum class IOPSIO2DMAChannel : std::uint8_t
+{
+  Input,
+  Output
+};
+
 enum class IOPDMABeatOutcome : std::uint8_t
 {
   Accepted,
@@ -80,6 +86,14 @@ class IOPDMAController final
     // Provisional retained word; raw bit semantics remain unestablished.
     IOPWord auxiliaryControl() const;
     void writeAuxiliaryControl(IOPWord value);
+    IOPWord sio2MemoryAddress(IOPSIO2DMAChannel channel) const;
+    IOPDMAWriteOutcome writeSIO2MemoryAddress(IOPSIO2DMAChannel channel, IOPWord value);
+    IOPWord sio2BlockControl(IOPSIO2DMAChannel channel) const;
+    void writeSIO2BlockControl(IOPSIO2DMAChannel channel, IOPWord value);
+    std::uint16_t sio2BlockSize(IOPSIO2DMAChannel channel) const;
+    void writeSIO2BlockSize(IOPSIO2DMAChannel channel, std::uint16_t value);
+    std::uint16_t sio2BlockCount(IOPSIO2DMAChannel channel) const;
+    void writeSIO2BlockCount(IOPSIO2DMAChannel channel, std::uint16_t value);
     // Register readback follows accepted source progress while active.
     IOPWord spuMemoryAddress(std::size_t core) const;
     IOPDMAWriteOutcome writeSPUMemoryAddress(std::size_t core, IOPWord value);
@@ -141,6 +155,11 @@ class IOPDMAController final
       IOPDMAChannelState registers;
       std::uint8_t blockWordsTransferred = 0;
     };
+    struct SIO2Programming
+    {
+      IOPWord memoryAddress = 0;
+      IOPWord blockControl = 0;
+    };
 
     static std::size_t bankIndex(IOPDMABank bank);
     static IOPDMABank channelBank(IOPDMAChannel channel);
@@ -161,6 +180,7 @@ class IOPDMAController final
     std::array<Bank, 2> banks = {};
     IOPWord auxiliaryControlRegister = 0;
     std::array<SPUChannel, 2> spuChannels = {};
+    std::array<SIO2Programming, 2> sio2Channels = {};
     IOPDMAChannel nextChannel = IOPDMAChannel::SIF0;
 };
 

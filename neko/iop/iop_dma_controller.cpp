@@ -151,6 +151,51 @@ void IOPDMAController::writeAuxiliaryControl(IOPWord value)
   auxiliaryControlRegister = value;
 }
 
+IOPWord IOPDMAController::sio2MemoryAddress(IOPSIO2DMAChannel channel) const
+{
+  return sio2Channels.at(static_cast<std::size_t>(channel)).memoryAddress;
+}
+
+IOPDMAWriteOutcome IOPDMAController::writeSIO2MemoryAddress(
+  IOPSIO2DMAChannel channel, IOPWord value)
+{
+  return IOPDMAChannelState::programMemoryAddress(
+    sio2Channels.at(static_cast<std::size_t>(channel)).memoryAddress, value);
+}
+
+IOPWord IOPDMAController::sio2BlockControl(IOPSIO2DMAChannel channel) const
+{
+  return sio2Channels.at(static_cast<std::size_t>(channel)).blockControl;
+}
+
+void IOPDMAController::writeSIO2BlockControl(IOPSIO2DMAChannel channel, IOPWord value)
+{
+  sio2Channels.at(static_cast<std::size_t>(channel)).blockControl = value;
+}
+
+std::uint16_t IOPDMAController::sio2BlockSize(IOPSIO2DMAChannel channel) const
+{
+  return static_cast<std::uint16_t>(sio2BlockControl(channel));
+}
+
+void IOPDMAController::writeSIO2BlockSize(
+  IOPSIO2DMAChannel channel, std::uint16_t value)
+{
+  writeSIO2BlockControl(channel, (sio2BlockControl(channel) & 0xffff0000) | value);
+}
+
+std::uint16_t IOPDMAController::sio2BlockCount(IOPSIO2DMAChannel channel) const
+{
+  return static_cast<std::uint16_t>(sio2BlockControl(channel) >> 16);
+}
+
+void IOPDMAController::writeSIO2BlockCount(
+  IOPSIO2DMAChannel channel, std::uint16_t value)
+{
+  writeSIO2BlockControl(channel,
+    (sio2BlockControl(channel) & 0xffff) | (IOPWord{value} << 16));
+}
+
 IOPWord IOPDMAController::spuMemoryAddress(std::size_t core) const
 {
   return spuChannels.at(core).registers.memoryAddressRegister;

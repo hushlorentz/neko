@@ -3621,9 +3621,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved bounded command through the existing CDVD owner,
       with exact response draining, malformed-request rejection, trace and
       canonical restored-continuation coverage.
-- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+- [x] Verify fresh unchanged-input cold/restored traced/plain and canonical
       progress beyond SCMD36; identify the next originating dependency without
       claiming measured configuration fidelity or completed boot.
+
+### IOP SIO2 DMA Passive Programming Dependency
+
+- [x] Research channel11/12 MADR and BCR mapping; select passive access,
+      retention and reset semantics through the existing DMA owner, keeping
+      CHCR zero-only and active transfers outside this block.
+- [x] Implement paired MADR/BCR programming with exact CPU access widths,
+      atomic rejected accesses and canonical restored-continuation coverage;
+      preserve unrelated zero-only registers and existing SIO2 behavior.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress beyond the originating write; identify the next dependency
+      without claiming active SIO2 DMA, peripheral support or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

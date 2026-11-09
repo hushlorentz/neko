@@ -521,10 +521,10 @@ TEST_CASE("SPU2 quiescent status bypasses cached payloads but preserves isolatio
   }
 }
 
-TEST_CASE("IOP SPU DMA addresses bypass cached payloads but preserve isolation",
-  "[iop][dma][spu-madr][cache]")
+TEST_CASE("IOP DMA programming addresses bypass cached payloads but preserve isolation",
+  "[iop][dma][spu-madr][sio2-dma][cache]")
 {
-  for (IOPAddress physical : {0x1f8010c0u, 0x1f801500u})
+  for (IOPAddress physical : {0x1f8010c0u, 0x1f801500u, 0x1f801540u, 0x1f801550u})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   {
@@ -543,7 +543,7 @@ TEST_CASE("IOP SPU DMA addresses bypass cached payloads but preserve isolation",
     IOPCacheTestAccess::setStatus(&core, swap | IOPCOP0Status::CACHE_ISOLATED);
     REQUIRE(core.writeData32(address, 0x12341234).outcome == IOPAccessOutcome::Completed);
     REQUIRE(core.readData32(address).value == 0x12341234);
-    REQUIRE(dma.spuMemoryAddress(physical == 0x1f8010c0 ? 0 : 1) == 0x4fa00);
+    REQUIRE(bus.read32(physical).value == 0x4fa00);
     const auto isolated = core.cache();
     IOPCacheTestAccess::setStatus(&core, swap);
     const auto read = core.readData32(address);
@@ -558,10 +558,10 @@ TEST_CASE("IOP SPU DMA addresses bypass cached payloads but preserve isolation",
   }
 }
 
-TEST_CASE("IOP SPU DMA block control halfwords respect cache isolation",
-  "[iop][dma][spu-bcr][cache]")
+TEST_CASE("IOP DMA programming block control halfwords respect cache isolation",
+  "[iop][dma][spu-bcr][sio2-dma][cache]")
 {
-  for (IOPAddress physical : {0x1f8010c4u, 0x1f801504u})
+  for (IOPAddress physical : {0x1f8010c4u, 0x1f801504u, 0x1f801544u, 0x1f801554u})
   for (bool swapped : {false, true})
   for (IOPAddress segment : {0u, 0x80000000u, 0xa0000000u})
   {

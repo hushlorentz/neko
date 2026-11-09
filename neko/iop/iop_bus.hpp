@@ -177,6 +177,8 @@ class IOPBus final
       SPUDMAChannelControl,
       DPCR3Initialization,
       ChannelRegisterInitialization,
+      SIO2DMAMemoryAddress,
+      SIO2DMABlockControl,
       SupplementalDMAInitialization,
       SIF1DMA,
       SIF0DMA,

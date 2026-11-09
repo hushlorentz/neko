@@ -389,6 +389,16 @@ void NekoSaveStateCodec::writeIOPState(
         writer->writeFieldU8("blockWordsTransferred", channels[core].blockWordsTransferred);
       }
     }
+    {
+      auto programming = writer->scope("sio2Programming");
+      const auto &channels = system.iopDMAControllerComponent.sio2Channels;
+      for (std::size_t index = 0; index < channels.size(); ++index)
+      {
+        auto channel = writer->element(index);
+        writer->writeFieldU32("memoryAddress", channels[index].memoryAddress);
+        writer->writeFieldU32("blockControl", channels[index].blockControl);
+      }
+    }
     auto banks = writer->scope("banks");
     for (std::size_t index = 0;
          index < system.iopDMAControllerComponent.banks.size(); ++index)
@@ -690,6 +700,19 @@ void NekoSaveStateCodec::readIOP(
         channel.blockWordsTransferred = reader->readFieldU8("blockWordsTransferred");
         reader->requireField(dma.validSPUContinuation(core, system->spu2ControllerComponent),
           "IOP SPU DMA continuation is incompatible with channel or PCM input state");
+      }
+    }
+    {
+      auto programming = reader->scope("sio2Programming");
+      auto &channels = system->iopDMAControllerComponent.sio2Channels;
+      for (std::size_t index = 0; index < channels.size(); ++index)
+      {
+        auto channel = reader->element(index);
+        channels[index].memoryAddress = reader->readFieldU32("memoryAddress");
+        reader->requireField(
+          IOPDMAChannelState::validMemoryAddress(channels[index].memoryAddress),
+          "IOP SIO2 DMA address is unaligned or exceeds 24 bits");
+        channels[index].blockControl = reader->readFieldU32("blockControl");
       }
     }
     auto banks = reader->scope("banks");
@@ -1079,6 +1102,8 @@ void NekoSaveStateCodec::commitIOP(
     source->iopDMAControllerComponent.auxiliaryControlRegister;
   destination->iopDMAControllerComponent.spuChannels =
     source->iopDMAControllerComponent.spuChannels;
+  destination->iopDMAControllerComponent.sio2Channels =
+    source->iopDMAControllerComponent.sio2Channels;
   destination->iopDMAControllerComponent.nextChannel =
     source->iopDMAControllerComponent.nextChannel;
   destination->iopSIF1DMAComponent = source->iopSIF1DMAComponent;
