@@ -215,11 +215,12 @@ void NekoSystem::publishCDVDTrace(
   command.beforeCause = event.beforeCause;
   command.afterCause = event.afterCause;
   command.rtcTicks = event.rtcTicks;
+  const auto result = nekoPackCDVDTraceResult(event.result);
   appendTrace(cycle, NekoTraceSubsystem::CDVD,
     event.kind == CDVDController::ObservationKind::Accepted
       ? NekoTraceEventType::CommandAccepted : NekoTraceEventType::CommandCompleted,
     nekoPackCDVDTraceMetadata(command), command.rtcTicks,
-    nekoPackCDVDTraceResult(event.result));
+    result[0], result[1]);
 }
 
 void NekoSystem::publishSIFTrace(

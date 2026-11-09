@@ -572,8 +572,8 @@ TEST_CASE("CDVD version guest completes before polling and continues across trac
     REQUIRE(decoded.beforeCause == 0);
     REQUIRE(decoded.afterCause == 0);
     REQUIRE(decoded.rtcTicks == commands[index].masterCycle);
-    const std::array<std::uint8_t, 8> expected = index == 0 ?
-      std::array<std::uint8_t, 8>{} : std::array<std::uint8_t, 8>{{3, 6, 2, 0}};
+    const std::array<std::uint8_t, 16> expected = index == 0 ?
+      std::array<std::uint8_t, 16>{} : std::array<std::uint8_t, 16>{{3, 6, 2, 0}};
     REQUIRE(decoded.result == expected);
   }
   namespace Memory = NekoIOPTraceMemory;
@@ -625,6 +625,95 @@ TEST_CASE("CDVD version guest completes before polling and continues across trac
       REQUIRE(source.iopCore().delayedResultContinuation().source ==
         IOPDelayedResultSource::Load);
     }
+    requireContinuationModes(reference, source);
+  }
+}
+
+TEST_CASE("CDVD region guest drains fifteen bytes and continues across trace modes",
+  "[iop][cdvd-trace][cdvd-region][save-state]")
+{
+  std::array<IOPWord, 43> program = {{
+    0x3c01bf40, 0x34212000, 0x34020036, 0xa0220016, 0x90230017, 0
+  }};
+  for (unsigned index = 0; index < 15; ++index)
+  {
+    program[6 + index * 2] = 0x90200018 | ((8 + index) << 16);
+  }
+  program[36] = 0x90370017;
+  program[38] = 0x90380018;
+  program[40] = 0x90390008;
+  program[42] = 0x341a0001;
+  NekoSystem reference;
+  installProgram(reference, 0, program);
+  reference.iopCore().startExecution(0xa0000000);
+  const auto initial = reference.saveState();
+  reference.startTrace();
+  reference.runMasterCycles(337);
+  REQUIRE(reference.iopCore().retiredInstructions() == program.size());
+  REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+  const std::array<std::uint8_t, 16> expected = {{
+    0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0
+  }};
+  for (unsigned index = 0; index < 15; ++index)
+  {
+    REQUIRE(reference.iopCore().generalRegister(8 + index) == expected[index]);
+  }
+  REQUIRE(reference.iopCore().generalRegister(3) == 0);
+  REQUIRE(reference.iopCore().generalRegister(23) == 0x40);
+  REQUIRE(reference.iopCore().generalRegister(24) == 0);
+  REQUIRE(reference.iopCore().generalRegister(25) == 0);
+  REQUIRE(reference.iopCore().generalRegister(26) == 1);
+  REQUIRE(reference.iopInterruptController().status() == 0);
+  const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+  REQUIRE(commands.size() == 2);
+  for (unsigned index = 0; index < commands.size(); ++index)
+  {
+    REQUIRE(commands[index].type == (index == 0 ? ACCEPTED : COMPLETED));
+    REQUIRE(commands[index].masterCycle == (index == 0 ? 25 : 33));
+    const auto decoded = nekoDecodeCDVDTrace(commands[index]);
+    REQUIRE(decoded.transport == NekoCDVDTrace::Transport::Subcommand);
+    REQUIRE(decoded.opcode == 0x36);
+    REQUIRE(decoded.beforePhase == (index == 0 ?
+      NekoCDVDTrace::Phase::Idle : NekoCDVDTrace::Phase::Pending));
+    REQUIRE(decoded.afterPhase == (index == 0 ?
+      NekoCDVDTrace::Phase::Pending : NekoCDVDTrace::Phase::Result));
+    REQUIRE(decoded.beforeCause == 0);
+    REQUIRE(decoded.afterCause == 0);
+    REQUIRE(decoded.rtcTicks == commands[index].masterCycle);
+    REQUIRE(decoded.result == (index == 0 ? std::array<std::uint8_t, 16>{} : expected));
+    REQUIRE(commands[index].value3 == (index == 0 ? 0 : 0x5541));
+  }
+  bool completed = false;
+  unsigned drained = 0;
+  for (const auto &event : reference.trace())
+  {
+    if (event.subsystem == CDVD && event.type == COMPLETED)
+    {
+      completed = true;
+    }
+    if (event.subsystem == NekoTraceSubsystem::IOP &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 == 0xbf402017 && event.masterCycle == 33)
+    {
+      REQUIRE(completed);
+      REQUIRE(event.value1 == 0);
+    }
+    if (event.subsystem == NekoTraceSubsystem::IOP &&
+        event.type == NekoTraceEventType::MemoryAccess &&
+        event.value0 == 0xbf402018)
+    {
+      REQUIRE(completed);
+      REQUIRE(drained < expected.size());
+      REQUIRE(event.value1 == expected[drained++]);
+    }
+  }
+  REQUIRE(drained == 16);
+  for (const std::uint64_t cut : {25, 32, 33, 49, 161, 177, 273, 289})
+  {
+    CAPTURE(cut);
+    NekoSystem source;
+    source.loadState(initial);
+    source.runMasterCycles(cut);
     requireContinuationModes(reference, source);
   }
 }
@@ -697,7 +786,7 @@ TEST_CASE("CDVD transient journal is bounded and excluded from persistence",
   REQUIRE(CDVDObservationTestAccess::detached(system.cdvdController()));
 }
 
-TEST_CASE("CDVD trace codec round trips all result bytes and ignores reserved words",
+TEST_CASE("CDVD trace codec round trips sixteen result bytes and ignores reserved metadata",
   "[cdvd-trace][trace]")
 {
   using namespace NekoCDVDTrace;
@@ -709,14 +798,18 @@ TEST_CASE("CDVD trace codec round trips all result bytes and ignores reserved wo
   command.beforeCause = 1;
   command.afterCause = 1;
   command.rtcTicks = UINT64_MAX;
-  command.result = {{0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0}};
+  command.result = {{
+    0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+    0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88
+  }};
   const auto metadata = nekoPackCDVDTraceMetadata(command);
   const auto result = nekoPackCDVDTraceResult(command.result);
   REQUIRE(metadata == UINT64_C(0x010102010801));
-  REQUIRE(result == UINT64_C(0xf0debc9a78563412));
+  REQUIRE(result[0] == UINT64_C(0xf0debc9a78563412));
+  REQUIRE(result[1] == UINT64_C(0x8899aabbccddeeff));
   NekoTraceEvent event = {
     1, CDVD, COMPLETED, metadata | UINT64_C(0xffff000000000000),
-    command.rtcTicks, result, UINT64_MAX
+    command.rtcTicks, result[0], result[1]
   };
   const auto decoded = nekoDecodeCDVDTrace(event);
   REQUIRE(decoded.transport == command.transport);

@@ -3609,9 +3609,21 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved version query through the existing CDVD owner
       with malformed-request rejection, clocked completion, result draining
       and canonical restored-continuation coverage.
-- [ ] Verify the demonstrated query with fresh unchanged-input cold/restored
+- [x] Verify the demonstrated query with fresh unchanged-input cold/restored
       traced/plain and canonical comparisons; identify the next dependency
       without claiming completed boot or measured console identity.
+
+### CD/DVD SCMD36 Command Dependency
+
+- [x] Research the observed parameterless SCMD36 request and its containing
+      family; select explicit response inputs, request/result shape, lifecycle
+      and replacement evidence before implementing a response.
+- [x] Implement the approved bounded command through the existing CDVD owner,
+      with exact response draining, malformed-request rejection, trace and
+      canonical restored-continuation coverage.
+- [ ] Verify fresh unchanged-input cold/restored traced/plain and canonical
+      progress beyond SCMD36; identify the next originating dependency without
+      claiming measured configuration fidelity or completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

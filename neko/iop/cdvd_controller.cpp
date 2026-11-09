@@ -1,5 +1,6 @@
 #include "cdvd_controller.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 constexpr std::uint64_t CDVDController::RTC_PERIOD_SECONDS;
@@ -129,6 +130,7 @@ bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcep
     case 3:
       return subcommandParameterCount == 1 && subcommandParameters[0] == 0;
     case 8:
+    case 0x36:
       return subcommandParameterCount == 0;
     default:
       return false;
@@ -143,17 +145,25 @@ std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
       return 4;
     case 8:
       return 8;
+    case 0x36:
+      return 15;
     default:
       return 0;
   }
 }
 
-std::array<std::uint8_t, 8> CDVDController::versionResult() noexcept
+CDVDController::SubcommandResult CDVDController::versionResult() noexcept
 {
   return {{3, 6, 2, 0}};
 }
 
-std::array<std::uint8_t, 8> CDVDController::subcommandResult() const
+CDVDController::SubcommandResult CDVDController::regionResult() noexcept
+{
+  // Approved compatibility profile, not measured SCPH-70012 NVM contents.
+  return {{0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0}};
+}
+
+CDVDController::SubcommandResult CDVDController::subcommandResult() const
 {
   switch (lastSubcommand)
   {
@@ -161,13 +171,15 @@ std::array<std::uint8_t, 8> CDVDController::subcommandResult() const
       return versionResult();
     case 8:
       return clockResult();
+    case 0x36:
+      return regionResult();
     default:
       throw std::logic_error("CD/DVD pending subcommand is unsupported.");
   }
 }
 
 bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
-  const std::array<std::uint8_t, 8> &snapshot) noexcept
+  const SubcommandResult &snapshot) noexcept
 {
   switch (opcode)
   {
@@ -175,6 +187,8 @@ bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
       return snapshot == versionResult();
     case 8:
       return isValidClockResult(snapshot);
+    case 0x36:
+      return snapshot == regionResult();
     default:
       return false;
   }
@@ -250,7 +264,7 @@ std::uint8_t CDVDController::consumeResult() noexcept
   return byte;
 }
 
-std::array<std::uint8_t, 8> CDVDController::clockResult() const noexcept
+CDVDController::SubcommandResult CDVDController::clockResult() const noexcept
 {
   auto seconds = rtcTicks / PS2Clock::MASTER_HZ;
   const auto second = static_cast<unsigned>(seconds % 60);
@@ -287,7 +301,7 @@ void CDVDController::clearResult() noexcept
 }
 
 bool CDVDController::isValidClockResult(
-  const std::array<std::uint8_t, 8> &snapshot) noexcept
+  const SubcommandResult &snapshot) noexcept
 {
   return snapshot[0] == 0 && snapshot[4] == 0 &&
     isBCDInRange(snapshot[1], 0, 59) &&
@@ -297,7 +311,9 @@ bool CDVDController::isValidClockResult(
     isBCDInRange(snapshot[6], 1, 12) &&
     isBCDInRange(snapshot[7], 0, 99) &&
     fromBCD(snapshot[5]) <=
-      daysInMonth(2000 + fromBCD(snapshot[7]), fromBCD(snapshot[6]));
+      daysInMonth(2000 + fromBCD(snapshot[7]), fromBCD(snapshot[6])) &&
+    std::all_of(snapshot.begin() + 8, snapshot.end(),
+      [](std::uint8_t byte) { return byte == 0; });
 }
 
 void CDVDController::reset() noexcept

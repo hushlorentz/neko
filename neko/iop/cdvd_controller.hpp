@@ -26,7 +26,7 @@ struct CDVDNormalCompletion
   std::uint8_t newCauses = 0;
 };
 
-// Provisional no-media N-NOP, ReadClock and version-query profile.
+// Provisional no-media N-NOP, ReadClock, version and region-query profile.
 class CDVDController final
 {
   public:
@@ -56,6 +56,7 @@ class CDVDController final
 
     enum class ObservationKind : std::uint8_t { Accepted, Completed };
     enum class Transport : std::uint8_t { Normal, Subcommand };
+    using SubcommandResult = std::array<std::uint8_t, 16>;
     struct Observation
     {
       ObservationKind kind = ObservationKind::Accepted;
@@ -66,7 +67,7 @@ class CDVDController final
       std::uint8_t beforeCause = 0;
       std::uint8_t afterCause = 0;
       std::uint64_t rtcTicks = 0;
-      std::array<std::uint8_t, 8> result = {};
+      SubcommandResult result = {};
       std::size_t sequence = 0;
     };
 
@@ -93,16 +94,17 @@ class CDVDController final
     CDVDAccessStatus acceptSubcommand(std::uint8_t opcode);
     bool isValidSubcommandRequest(std::uint8_t opcode) const noexcept;
     static std::size_t subcommandResultSize(std::uint8_t opcode) noexcept;
-    std::array<std::uint8_t, 8> subcommandResult() const;
-    static std::array<std::uint8_t, 8> versionResult() noexcept;
+    SubcommandResult subcommandResult() const;
+    static SubcommandResult versionResult() noexcept;
+    static SubcommandResult regionResult() noexcept;
     static bool isValidSubcommandResult(std::uint8_t opcode,
-      const std::array<std::uint8_t, 8> &snapshot) noexcept;
+      const SubcommandResult &snapshot) noexcept;
     CDVDAccessStatus appendSubcommandParameter(std::uint8_t value) noexcept;
     void clearSubcommandParameters() noexcept;
     std::uint8_t consumeResult() noexcept;
-    std::array<std::uint8_t, 8> clockResult() const noexcept;
+    SubcommandResult clockResult() const noexcept;
     static bool isValidClockResult(
-      const std::array<std::uint8_t, 8> &snapshot) noexcept;
+      const SubcommandResult &snapshot) noexcept;
     void clearResult() noexcept;
 
     std::uint64_t rtcTicks = 0;
@@ -110,7 +112,7 @@ class CDVDController final
     std::uint8_t deviceCause = 0;
     std::uint8_t lastSubcommand = 0;
     SubcommandPhase subcommandPhase = SubcommandPhase::Idle;
-    std::array<std::uint8_t, 8> result = {};
+    SubcommandResult result = {};
     std::uint8_t resultCursor = 0;
     std::array<std::uint8_t, 16> subcommandParameters = {};
     std::uint8_t subcommandParameterCount = 0;

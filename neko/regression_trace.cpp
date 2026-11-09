@@ -293,13 +293,13 @@ std::uint64_t nekoPackCDVDTraceMetadata(
     (static_cast<std::uint64_t>(command.afterCause) << 40);
 }
 
-std::uint64_t nekoPackCDVDTraceResult(
-  const std::array<std::uint8_t, 8> &result) noexcept
+std::array<std::uint64_t, 2> nekoPackCDVDTraceResult(
+  const std::array<std::uint8_t, 16> &result) noexcept
 {
-  std::uint64_t packed = 0;
+  std::array<std::uint64_t, 2> packed = {};
   for (std::size_t index = 0; index < result.size(); ++index)
   {
-    packed |= static_cast<std::uint64_t>(result[index]) << (index * 8);
+    packed[index / 8] |= static_cast<std::uint64_t>(result[index]) << ((index % 8) * 8);
   }
   return packed;
 }
@@ -323,9 +323,11 @@ NekoCDVDTrace::Command nekoDecodeCDVDTrace(const NekoTraceEvent &event)
   command.beforeCause = static_cast<std::uint8_t>(event.value0 >> 32);
   command.afterCause = static_cast<std::uint8_t>(event.value0 >> 40);
   command.rtcTicks = event.value1;
+  const std::array<std::uint64_t, 2> result = {{event.value2, event.value3}};
   for (std::size_t index = 0; index < command.result.size(); ++index)
   {
-    command.result[index] = static_cast<std::uint8_t>(event.value2 >> (index * 8));
+    command.result[index] =
+      static_cast<std::uint8_t>(result[index / 8] >> ((index % 8) * 8));
   }
   return command;
 }

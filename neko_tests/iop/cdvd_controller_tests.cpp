@@ -33,7 +33,7 @@ struct CDVDControllerTestAccess
 
   static void requireEmptyStorage(const CDVDController &controller)
   {
-    const std::array<std::uint8_t, 8> empty = {};
+    const std::array<std::uint8_t, 16> empty = {};
     REQUIRE(controller.result == empty);
     REQUIRE(controller.resultCursor == 0);
   }
@@ -186,6 +186,47 @@ TEST_CASE("CDVD version query publishes exactly four bytes on the next IOP pulse
   REQUIRE(drain(controller) == oneSecond);
 }
 
+TEST_CASE("CDVD region query publishes exactly fifteen bytes on the next IOP pulse",
+  "[iop][cdvd-owner][cdvd-region]")
+{
+  CDVDController controller;
+  REQUIRE_FALSE(masterStep(controller, 0).completed);
+  accept(controller, 0x16, 0x36);
+  REQUIRE(read(controller, 0x16) == 0x36);
+  for (unsigned cycle = 1; cycle < 8; ++cycle)
+  {
+    REQUIRE_FALSE(masterStep(controller, cycle).completed);
+    REQUIRE(read(controller, 0x17) == 0xc0);
+    REQUIRE(read(controller, 0x18) == 0);
+    CDVDControllerTestAccess::requireEmptyStorage(controller);
+  }
+  REQUIRE_FALSE(masterStep(controller, 8).completed);
+  const std::array<std::uint8_t, 15> expected = {{
+    0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0
+  }};
+  for (const auto byte : expected)
+  {
+    REQUIRE(read(controller, 0x17) == 0);
+    REQUIRE(read(controller, 0x18) == byte);
+    controller.advanceMasterTick();
+  }
+  REQUIRE(read(controller, 0x17) == 0x40);
+  REQUIRE(read(controller, 0x18) == 0);
+  REQUIRE(read(controller, 0x08) == 0);
+  REQUIRE_FALSE(controller.completeSubcommand());
+  CDVDControllerTestAccess::requireEmptyStorage(controller);
+  accept(controller, 0x17, 0);
+  accept(controller, 0x16, 3);
+  REQUIRE(controller.completeSubcommand());
+  for (const auto byte : {3, 6, 2, 0})
+  {
+    REQUIRE(read(controller, 0x18) == byte);
+  }
+  accept(controller, 0x16, 8);
+  REQUIRE(controller.completeSubcommand());
+  REQUIRE(drain(controller) == EPOCH);
+}
+
 TEST_CASE("CDVD parameters retain all byte values in order and reject overflow",
   "[iop][cdvd-owner][cdvd-parameters]")
 {
@@ -211,6 +252,60 @@ TEST_CASE("CDVD parameters retain all byte values in order and reject overflow",
     }
     controller.reset();
     CDVDControllerTestAccess::requireParameters(controller, {}, 0);
+  }
+}
+
+TEST_CASE("CDVD region query rejects staging and busy writes without changing either transport",
+  "[iop][cdvd-owner][cdvd-region]")
+{
+  for (unsigned count = 1; count <= 16; ++count)
+  {
+    for (unsigned value = 0; value < 256; ++value)
+    {
+      CDVDController controller;
+      controller.advanceMasterTick();
+      accept(controller, 4, 0);
+      for (unsigned index = 0; index < count; ++index)
+      {
+        accept(controller, 0x17, static_cast<std::uint8_t>(value));
+      }
+      const auto before = controller;
+      REQUIRE(controller.writeByte(BASE + 0x16, 0x36) == CDVDAccessStatus::Unsupported);
+      REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+    }
+  }
+  for (unsigned stage = 0; stage <= 16; ++stage)
+  {
+    CAPTURE(stage);
+    CDVDController controller;
+    accept(controller, 0x16, 0x36);
+    accept(controller, 4, 0);
+    REQUIRE(controller.completeNormalCommand().newCauses == 1);
+    if (stage != 0)
+    {
+      REQUIRE(controller.completeSubcommand());
+      for (unsigned index = 0; index < stage - 1; ++index)
+      {
+        read(controller, 0x18);
+      }
+    }
+    if (stage != 16)
+    {
+      const auto before = controller;
+      for (unsigned value = 0; value < 256; ++value)
+      {
+        REQUIRE(controller.writeByte(BASE + 0x17,
+          static_cast<std::uint8_t>(value)) == CDVDAccessStatus::Unsupported);
+        REQUIRE(controller.writeByte(BASE + 0x16,
+          static_cast<std::uint8_t>(value)) == CDVDAccessStatus::Unsupported);
+        REQUIRE(CDVDControllerTestAccess::sameState(controller, before));
+      }
+    }
+    REQUIRE(read(controller, 8) == 1);
+    accept(controller, 8, 1);
+    REQUIRE(read(controller, 8) == 0);
+    controller.reset();
+    REQUIRE(CDVDControllerTestAccess::sameState(controller, CDVDController{}));
   }
 }
 
@@ -403,7 +498,7 @@ TEST_CASE("CDVD owner rejects unselected addresses and directions atomically",
   }
 }
 
-TEST_CASE("CDVD owner admits only N-NOP and ReadClock in their available phases",
+TEST_CASE("CDVD owner admits only selected parameterless commands in their available phases",
   "[iop][cdvd-owner]")
 {
   for (unsigned stage = 0; stage < 10; ++stage)
@@ -432,7 +527,8 @@ TEST_CASE("CDVD owner admits only N-NOP and ReadClock in their available phases"
         CAPTURE(opcode);
         auto probe = controller;
         const bool available = offset == 0x04 ? stage != 1 : stage == 0;
-        const bool supported = opcode == (offset == 0x04 ? 0u : 8u);
+        const bool supported = offset == 0x04 ? opcode == 0 :
+          (opcode == 8 || opcode == 0x36);
         const auto status = probe.writeByte(BASE + offset,
           static_cast<std::uint8_t>(opcode));
         if (available && supported)

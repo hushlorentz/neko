@@ -72,7 +72,7 @@ namespace NekoCDVDTrace
     std::uint8_t beforeCause = 0;
     std::uint8_t afterCause = 0;
     std::uint64_t rtcTicks = 0;
-    std::array<std::uint8_t, 8> result = {};
+    std::array<std::uint8_t, 16> result = {};
   };
 }
 
@@ -542,8 +542,8 @@ class NekoTraceObserver
 //   value0 bytes 0..5: transport (N=0/S=1), opcode, before/after phase
 //   (Idle=0/Pending=1/Result=2), before/after device cause; bits 63:48 zero.
 //   value1: current RTC master ticks in the selected 100-year cycle.
-//   value2: eight result bytes, byte i at bits 8*i, only for S completion;
-//   zero for N commands and acceptance. value3 is reserved and zero.
+//   value2/value3: result bytes 0..7/8..15, byte i at bits 8*(i%8), only
+//   for S completion; zero for N commands and acceptance. Unused tail is zero.
 //   Normal commands use Idle/Pending phases independently of the S channel.
 //   Acceptance is ordered inside the successful byte write, before its CPU
 //   memory record. Completion precedes its resulting INTC/CPU records.
@@ -575,8 +575,8 @@ std::uint64_t nekoPackIOPTimerTraceSnapshot(
   const NekoIOPTraceTimer::CounterSnapshot &snapshot);
 std::uint64_t nekoPackCDVDTraceMetadata(
   const NekoCDVDTrace::Command &command) noexcept;
-std::uint64_t nekoPackCDVDTraceResult(
-  const std::array<std::uint8_t, 8> &result) noexcept;
+std::array<std::uint64_t, 2> nekoPackCDVDTraceResult(
+  const std::array<std::uint8_t, 16> &result) noexcept;
 NekoCDVDTrace::Command nekoDecodeCDVDTrace(const NekoTraceEvent &event);
 NekoTraceEvent nekoSPUDMABeatEvent(const NekoSPUTrace::Beat &beat) noexcept;
 NekoSPUTrace::Beat nekoDecodeSPUDMABeat(const NekoTraceEvent &event);

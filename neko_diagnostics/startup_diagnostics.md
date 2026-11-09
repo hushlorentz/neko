@@ -263,15 +263,19 @@ CDVD subsystem 15 events 23 (`CommandAccepted`) and 24 (`CommandCompleted`)
 add a `cdvd` object alongside the unchanged four raw `values` words:
 
 ```json
-{"transport":"s","opcode":8,"phase_before":"pending","phase_after":"result","cause_before":0,"cause_after":128,"rtc_ticks":43,"result":[0,255,1,128,4,5,6,7]}
+{"transport":"s","opcode":54,"phase_before":"pending","phase_after":"result","cause_before":0,"cause_after":0,"rtc_ticks":43,"result":[0,8,0,65,65,101,110,103,65,85,0,0,0,0,0,0]}
 ```
 
-This illustrates the decoded field shape, not a calendar or BIOS result.
+This illustrates the approved provisional SCMD36 compatibility profile, not
+measured console configuration.
 `transport` is `n` or `s`; phases are `idle`, `pending`, or `result`.
 Opcode and cause fields are unsigned byte integers, `rtc_ticks` is the
-unsigned 64-bit RTC tick value, and `result` contains eight byte integers in
-result order. Only S completion carries result bytes; acceptance and N events
-carry eight zeros. No BCD/calendar conversion or readiness inference is made.
+unsigned 64-bit RTC tick value, and `result` contains sixteen byte integers in
+result order. Raw `values[2]` carries bytes0..7 and `values[3]` bytes8..15,
+least-significant byte first in each word. Only S completion carries result
+bytes; acceptance and N events carry sixteen zeros. Unused result bytes are
+zero: version03 has four bytes, ReadClock08 eight, and SCMD36 fifteen.
+No BCD/calendar conversion or readiness inference is made.
 The exporter uses `nekoDecodeCDVDTrace`, not a second packed-field decoder.
 Unknown transport or phase enum values throw `std::invalid_argument` before
 the affected record is emitted rather than being labelled as a known state.
@@ -461,7 +465,8 @@ and expose the exported nested `cdvd` object unchanged, with the original
 `values_raw` alongside it. Summary counts use the `cdvd` subsystem label.
 This works for both event sources; `--cpu ee` and `--cpu iop` still exclude
 device events. Python validates the decoded object's fields, enum labels,
-integer ranges and eight-byte result shape, but never decodes raw CDVD words
+integer ranges and sixteen-byte result shape (or eight for historical reports),
+but never decodes raw CDVD words
 or derives BCD/calendar policy. Missing or invalid decoded command objects
 are input errors; existing non-CDVD logs need no new fields.
 SPU2 rows similarly expose `subsystem_name: "spu2"` and the exported

@@ -72,7 +72,7 @@ void NekoSaveStateCodec::readCDVD(
       controller->lastSubcommand, controller->result),
       controller->lastSubcommand == 8 ?
         "CD/DVD clock result is not a valid Gregorian BCD snapshot" :
-        "CD/DVD version result does not match the selected identity");
+        "CD/DVD result does not match the selected immutable response");
   }
   else
   {

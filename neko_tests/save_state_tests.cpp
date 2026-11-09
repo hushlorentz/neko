@@ -20,6 +20,9 @@ namespace
 {
   constexpr std::size_t TEST_SAVE_STATE_HEADER_SIZE = 28;
   constexpr std::size_t SAVE_STATE_VERSION_OFFSET = 8;
+  constexpr std::size_t VERSION_102_PREPARED_STATE_SIZE = 42051285;
+  constexpr std::uint64_t VERSION_102_PREPARED_STATE_HASH =
+    UINT64_C(0xb1bbacc9d36ce5af);
   constexpr std::size_t VERSION_101_PREPARED_STATE_SIZE = 42051277;
   constexpr std::uint64_t VERSION_101_PREPARED_STATE_HASH =
     UINT64_C(0xcb3a75cf3c2defa1);
@@ -628,7 +631,7 @@ TEST_CASE("Partial GS primitive assembly resumes after save-state restore")
   REQUIRE(original.saveState() == restored.saveState());
 }
 
-TEST_CASE("Version 101 save-state layout is byte-stable")
+TEST_CASE("Version 102 save-state layout is byte-stable")
 {
   NekoSystem system;
   prepareInFlightSystem(&system);
@@ -643,14 +646,14 @@ TEST_CASE("Version 101 save-state layout is byte-stable")
   {
     REQUIRE(state[index] == magic[index]);
   }
-  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 101);
+  REQUIRE(state[SAVE_STATE_VERSION_OFFSET] == 102);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 1] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 2] == 0);
   REQUIRE(state[SAVE_STATE_VERSION_OFFSET + 3] == 0);
-  CHECK(state.size() == VERSION_101_PREPARED_STATE_SIZE);
+  CHECK(state.size() == VERSION_102_PREPARED_STATE_SIZE);
   CHECK(
     hashBytes(state) ==
-    VERSION_101_PREPARED_STATE_HASH);
+    VERSION_102_PREPARED_STATE_HASH);
   const auto snapshot = inspectSaveState(state);
   const auto *priorConfiguration = snapshot.find(
     "system.iop.spu2.spdifConfiguration[3].value");
@@ -786,7 +789,23 @@ TEST_CASE("Version 101 save-state layout is byte-stable")
     "system.iop.dmaController.spuTransfers[0].channelControl");
   REQUIRE(firstTransfer != nullptr);
   REQUIRE(firstTransfer->containerOffset == spuBlockOffset + 8);
+  const auto *cdvdResult = snapshot.find("system.iop.cdvd.result");
+  REQUIRE(cdvdResult != nullptr);
+  REQUIRE(cdvdResult->kind == SaveStateFieldKind::Bytes);
+  REQUIRE(cdvdResult->size == 16);
   auto previousVersion = state;
+  previousVersion.erase(previousVersion.begin() + cdvdResult->containerOffset + 8,
+    previousVersion.begin() + cdvdResult->containerOffset + cdvdResult->size);
+  previousVersion[SAVE_STATE_VERSION_OFFSET] = 101;
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
+    previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);
+  writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 12,
+    hashBytes(previousVersion, TEST_SAVE_STATE_HEADER_SIZE));
+  REQUIRE(previousVersion.size() == VERSION_101_PREPARED_STATE_SIZE);
+  REQUIRE(hashBytes(previousVersion) == VERSION_101_PREPARED_STATE_HASH);
+  REQUIRE_THROWS_AS(inspectSaveState(previousVersion), std::invalid_argument);
+  REQUIRE_THROWS_AS(system.loadState(previousVersion), std::invalid_argument);
+  REQUIRE(system.saveState() == state);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 100;
   REQUIRE(previousVersion.size() == VERSION_100_PREPARED_STATE_SIZE);
   REQUIRE(hashBytes(previousVersion) == VERSION_100_PREPARED_STATE_HASH);
@@ -800,6 +819,8 @@ TEST_CASE("Version 101 save-state layout is byte-stable")
   REQUIRE(parameterCount != nullptr);
   REQUIRE(parameters != nullptr);
   REQUIRE(resultCursor != nullptr);
+  REQUIRE(resultCursor->containerOffset ==
+    cdvdResult->containerOffset + cdvdResult->size);
   REQUIRE(parameterCount->kind == SaveStateFieldKind::U8);
   REQUIRE(parameterCount->scalarValue == 0);
   REQUIRE(parameterCount->size == 1);
@@ -807,8 +828,8 @@ TEST_CASE("Version 101 save-state layout is byte-stable")
   REQUIRE(parameters->size == 16);
   REQUIRE(parameterCount->containerOffset == resultCursor->containerOffset + 1);
   REQUIRE(parameters->containerOffset == parameterCount->containerOffset + 1);
-  previousVersion.erase(previousVersion.begin() + parameterCount->containerOffset,
-    previousVersion.begin() + parameters->containerOffset + parameters->size);
+  previousVersion.erase(previousVersion.begin() + parameterCount->containerOffset - 8,
+    previousVersion.begin() + parameters->containerOffset + parameters->size - 8);
   previousVersion[SAVE_STATE_VERSION_OFFSET] = 99;
   writeU64(&previousVersion, SAVE_STATE_VERSION_OFFSET + 4,
     previousVersion.size() - TEST_SAVE_STATE_HEADER_SIZE);

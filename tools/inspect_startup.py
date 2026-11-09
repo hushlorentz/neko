@@ -168,8 +168,8 @@ def validate_event(record):
     result = cdvd["result"]
     if type(result) is not list:
         raise ValueError("cdvd.result must be list")
-    if len(result) != 8:
-        raise ValueError("cdvd.result must contain eight bytes")
+    if len(result) not in (8, 16):
+        raise ValueError("cdvd.result must contain eight historical or sixteen bytes")
     for value in result:
         uint(value, "cdvd.result", 8)
 

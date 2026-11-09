@@ -475,6 +475,29 @@ class InspectorTests(unittest.TestCase):
                                                "--source", source)
                     self.assertEqual(instructions["matched_events"], 0)
 
+    def test_cdvd_sixteen_byte_results_preserve_both_payload_halves(self):
+        decoded = dict(transport="s", opcode=54, phase_before="pending",
+                       phase_after="result", cause_before=0, cause_after=0,
+                       rtc_ticks=33,
+                       result=[0, 8, 0, 65, 65, 101, 110, 103,
+                               65, 85, 0, 0, 0, 0, 0, 0])
+        for source in ("prefix", "failure_capture"):
+            with self.subTest(source=source):
+                rows = records() if source == "prefix" else capture_records()
+                command = event(33, 15, 24, [0, 0, 0, 0])
+                command["cdvd"] = decoded
+                if source == "prefix":
+                    rows[3] = command
+                else:
+                    command.pop("type")
+                    rows[-2]["events"][0] = command
+                self.write(self.path, rows)
+                report = self.report("events", self.path, "--source", source,
+                                     "--event", "command_completed")
+                row, = report["events"]
+                self.assertEqual(row["cdvd"], decoded)
+                self.assertEqual(row["values_raw"], ["0x0000000000000000"] * 4)
+
     def test_cdvd_decoded_schema_is_validated_without_calendar_policy(self):
         decoded = dict(transport="n", opcode=255, phase_before="idle",
                        phase_after="pending", cause_before=255, cause_after=0,
@@ -486,7 +509,9 @@ class InspectorTests(unittest.TestCase):
             ("cause_before", -1), ("cause_after", 256),
             ("rtc_ticks", 2**64), ("rtc_ticks", False),
             ("result", [0] * 7), ("result", [0] * 9),
+            ("result", [0] * 15), ("result", [0] * 17),
             ("result", [0] * 7 + [256]), ("result", [False] * 8),
+            ("result", [0] * 15 + [256]), ("result", [False] * 16),
             ("result", "00000000"),
         )
         for source in ("prefix", "failure_capture"):

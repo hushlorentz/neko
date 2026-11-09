@@ -617,7 +617,7 @@ TEST_CASE("CDVD device cause and INTC acknowledge independently without reassert
 TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
   "[iop][cdvd-integration][save-state]")
 {
-  for (const auto opcode : {3u, 8u})
+  for (const auto opcode : {3u, 8u, 0x36u})
   {
     CAPTURE(opcode);
     for (unsigned phase = 0; phase < 8; ++phase)
@@ -648,58 +648,70 @@ TEST_CASE("CDVD pending restore preserves every master phase and next pulse",
   }
 }
 
-TEST_CASE("CDVD version restore retains pending and every four-byte cursor",
-  "[iop][cdvd-integration][cdvd-version][save-state]")
+TEST_CASE("CDVD immutable queries restore pending and every result cursor",
+  "[iop][cdvd-integration][cdvd-version][cdvd-region][save-state]")
 {
-  const std::array<std::uint8_t, 4> version = {{3, 6, 2, 0}};
-  for (unsigned stage = 0; stage < 6; ++stage)
+  for (const auto opcode : {3u, 0x36u})
   {
-    CAPTURE(stage);
-    NekoSystem original;
-    original.clockMasterCycle();
-    write(original, 0x17, 0);
-    write(original, 0x16, 3);
-    const unsigned consumed = stage == 0 ? 0 : stage - 1;
-    if (stage != 0)
+    CAPTURE(opcode);
+    const unsigned size = opcode == 3 ? 4 : 15;
+    const std::array<std::uint8_t, 16> expected = opcode == 3 ?
+      std::array<std::uint8_t, 16>{{3, 6, 2, 0}} :
+      std::array<std::uint8_t, 16>{{
+        0, 8, 0, 0x41, 0x41, 0x65, 0x6e, 0x67, 0x41, 0x55, 0, 0, 0, 0, 0}};
+    for (unsigned stage = 0; stage < size + 2; ++stage)
     {
-      original.runMasterCycles(8);
-      for (unsigned index = 0; index < consumed; ++index)
+      CAPTURE(stage);
+      NekoSystem original;
+      original.clockMasterCycle();
+      if (opcode == 3)
       {
-        REQUIRE(read(original, 0x18) == version[index]);
+        write(original, 0x17, 0);
       }
+      write(original, 0x16, static_cast<std::uint8_t>(opcode));
+      const unsigned consumed = stage == 0 ? 0 : stage - 1;
+      if (stage != 0)
+      {
+        original.runMasterCycles(8);
+        for (unsigned index = 0; index < consumed; ++index)
+        {
+          REQUIRE(read(original, 0x18) == expected[index]);
+        }
+      }
+      NekoSystem restored;
+      write(restored, 0x16, 8);
+      restored.loadState(original.saveState());
+      requireSame(original, restored);
+      REQUIRE(readEE(restored, 0x16) == opcode);
+      REQUIRE(readEE(restored, 0x17) ==
+        (stage == 0 ? 0xc0 : (consumed == size ? 0x40 : 0)));
+      original.runMasterCycles(8);
+      restored.runMasterCycles(8);
+      for (unsigned index = consumed; index < size; ++index)
+      {
+        REQUIRE(read(original, 0x18) == expected[index]);
+        REQUIRE(read(restored, 0x18) == expected[index]);
+      }
+      REQUIRE(read(restored, 0x17) == 0x40);
+      REQUIRE(read(restored, 0x18) == 0);
+      REQUIRE(read(restored, 8) == 0);
+      REQUIRE(restored.iopInterruptController().status() == 0);
+      requireSame(original, restored);
+      const SaveStateMutation fields(restored.saveState());
+      REQUIRE(fields.readByte("system.iop.cdvd.resultCursor") == 0);
+      REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") == 0);
+      for (unsigned index = 0; index < expected.size(); ++index)
+      {
+        REQUIRE(fields.readByte("system.iop.cdvd.result", index) == 0);
+      }
+      const auto retained = restored.saveState();
+      original.reset();
+      REQUIRE(restored.saveState() == retained);
+      restored.reset();
+      write(restored, 0x16, 8);
+      restored.clockMasterCycle();
+      requireClockResult(restored, EPOCH);
     }
-    NekoSystem restored;
-    write(restored, 0x16, 8);
-    restored.loadState(original.saveState());
-    requireSame(original, restored);
-    REQUIRE(readEE(restored, 0x16) == 3);
-    REQUIRE(readEE(restored, 0x17) == (stage == 0 ? 0xc0 : (stage == 5 ? 0x40 : 0)));
-    original.runMasterCycles(8);
-    restored.runMasterCycles(8);
-    for (unsigned index = consumed; index < version.size(); ++index)
-    {
-      REQUIRE(read(original, 0x18) == version[index]);
-      REQUIRE(read(restored, 0x18) == version[index]);
-    }
-    REQUIRE(read(restored, 0x17) == 0x40);
-    REQUIRE(read(restored, 0x18) == 0);
-    REQUIRE(read(restored, 8) == 0);
-    REQUIRE(restored.iopInterruptController().status() == 0);
-    requireSame(original, restored);
-    const SaveStateMutation fields(restored.saveState());
-    REQUIRE(fields.readByte("system.iop.cdvd.resultCursor") == 0);
-    REQUIRE(fields.readByte("system.iop.cdvd.subcommandParameterCount") == 0);
-    for (unsigned index = 0; index < 8; ++index)
-    {
-      REQUIRE(fields.readByte("system.iop.cdvd.result", index) == 0);
-    }
-    const auto retained = restored.saveState();
-    original.reset();
-    REQUIRE(restored.saveState() == retained);
-    restored.reset();
-    write(restored, 0x16, 8);
-    restored.clockMasterCycle();
-    requireClockResult(restored, EPOCH);
   }
 }
 
@@ -716,7 +728,7 @@ TEST_CASE("CDVD malformed version snapshots fail without destination mutation",
   destination.clockMasterCycle();
   REQUIRE(read(destination, 0x18) == 0);
   const auto before = destination.saveState();
-  for (unsigned index = 0; index < 8; ++index)
+  for (unsigned index = 0; index < 16; ++index)
   {
     CAPTURE(index);
     SaveStateMutation bad(valid);
@@ -746,6 +758,53 @@ TEST_CASE("CDVD malformed version snapshots fail without destination mutation",
     bad.refreshChecksum();
     REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
     REQUIRE(destination.saveState() == before);
+  }
+}
+
+TEST_CASE("CDVD malformed region snapshots fail without destination mutation",
+  "[iop][cdvd-integration][cdvd-region][save-state]")
+{
+  NekoSystem source;
+  write(source, 0x16, 0x36);
+  NekoSystem destination;
+  write(destination, 0x16, 8);
+  destination.clockMasterCycle();
+  REQUIRE(read(destination, 0x18) == 0);
+  const auto before = destination.saveState();
+  for (unsigned stage = 0; stage < 2; ++stage)
+  {
+    CAPTURE(stage);
+    if (stage == 1)
+    {
+      source.clockMasterCycle();
+    }
+    const auto valid = source.saveState();
+    for (unsigned index = 0; index < 16; ++index)
+    {
+      CAPTURE(index);
+      SaveStateMutation bad(valid);
+      bad.writeByte("system.iop.cdvd.result", index,
+        static_cast<std::uint8_t>(bad.readByte("system.iop.cdvd.result", index) ^ 1));
+      bad.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+      REQUIRE(destination.saveState() == before);
+    }
+    for (const auto cursor : {15u, 16u, 255u})
+    {
+      SaveStateMutation bad(valid);
+      bad.writeScalar("system.iop.cdvd.resultCursor", cursor);
+      bad.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+      REQUIRE(destination.saveState() == before);
+    }
+    for (const auto field : {"lastSubcommand", "subcommandParameterCount", "subcommandPhase"})
+    {
+      SaveStateMutation bad(valid);
+      bad.writeScalar(std::string("system.iop.cdvd.") + field, 255);
+      bad.refreshChecksum();
+      REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+      REQUIRE(destination.saveState() == before);
+    }
   }
 }
 
@@ -854,6 +913,15 @@ TEST_CASE("CDVD malformed persisted state fails without destination mutation",
     bad.writeByte("system.iop.cdvd.result", 5, date[2]);
     bad.writeByte("system.iop.cdvd.result", 6, date[1]);
     bad.writeByte("system.iop.cdvd.result", 7, date[0]);
+    bad.refreshChecksum();
+    REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
+    REQUIRE(destination.saveState() == before);
+  }
+  for (unsigned index = 8; index < 16; ++index)
+  {
+    CAPTURE(index);
+    SaveStateMutation bad(valid);
+    bad.writeByte("system.iop.cdvd.result", index, 1);
     bad.refreshChecksum();
     REQUIRE_THROWS_AS(destination.loadState(bad), std::invalid_argument);
     REQUIRE(destination.saveState() == before);
@@ -1224,6 +1292,14 @@ TEST_CASE("CDVD inactive persisted results require zero storage and cursor",
       CAPTURE(field);
       SaveStateMutation bad(valid);
       bad.writeByte(std::string("system.iop.cdvd.") + field, 0, 1);
+      bad.refreshChecksum();
+      REQUIRE_THROWS_AS(system.loadState(bad), std::invalid_argument);
+      REQUIRE(system.saveState() == valid);
+    }
+    for (const auto index : {8u, 15u})
+    {
+      SaveStateMutation bad(valid);
+      bad.writeByte("system.iop.cdvd.result", index, 1);
       bad.refreshChecksum();
       REQUIRE_THROWS_AS(system.loadState(bad), std::invalid_argument);
       REQUIRE(system.saveState() == valid);

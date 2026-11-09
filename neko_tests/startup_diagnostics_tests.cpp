@@ -186,7 +186,22 @@ TEST_CASE("Startup trace fields decode only CDVD command identities",
     std::to_string(command.value2) + ",0],"
     "\"cdvd\":{\"transport\":\"s\",\"opcode\":8,\"phase_before\":\"pending\","
     "\"phase_after\":\"result\",\"cause_before\":0,\"cause_after\":128,"
-    "\"rtc_ticks\":18446744073709551615,\"result\":[0,255,1,128,4,5,6,7]}");
+    "\"rtc_ticks\":18446744073709551615,\"result\":[0,255,1,128,4,5,6,7,0,0,0,0,0,0,0,0]}");
+
+  auto region = command;
+  region.value0 = UINT64_C(0x000002013601);
+  region.value2 = UINT64_C(0x676e654141000800);
+  region.value3 = UINT64_C(0x5541);
+  std::ostringstream regionOutput;
+  writeStartupTraceEventFields(regionOutput, region);
+  REQUIRE(regionOutput.str().find(
+    "\"cdvd\":{\"transport\":\"s\",\"opcode\":54,\"phase_before\":\"pending\","
+    "\"phase_after\":\"result\",\"cause_before\":0,\"cause_after\":0,"
+    "\"rtc_ticks\":18446744073709551615,"
+    "\"result\":[0,8,0,65,65,101,110,103,65,85,0,0,0,0,0,0]}") !=
+    std::string::npos);
+  REQUIRE(regionOutput.str().find(
+    std::to_string(region.value2) + ",21825]") != std::string::npos);
 
   for (const NekoTraceEvent other : {
       NekoTraceEvent{8, NekoTraceSubsystem::EE, NekoTraceEventType::CommandCompleted,

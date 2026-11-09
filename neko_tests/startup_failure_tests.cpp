@@ -171,11 +171,11 @@ TEST_CASE("Startup failure capture exports decoded CDVD commands and unchanged r
   REQUIRE(json.find(
     "\"cdvd\":{\"transport\":\"n\",\"opcode\":8,\"phase_before\":\"idle\","
     "\"phase_after\":\"pending\",\"cause_before\":0,\"cause_after\":0,"
-    "\"rtc_ticks\":42,\"result\":[0,0,0,0,0,0,0,0]}") != std::string::npos);
+    "\"rtc_ticks\":42,\"result\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}") != std::string::npos);
   REQUIRE(json.find(
     "\"cdvd\":{\"transport\":\"s\",\"opcode\":8,\"phase_before\":\"pending\","
     "\"phase_after\":\"result\",\"cause_before\":0,\"cause_after\":128,"
-    "\"rtc_ticks\":43,\"result\":[0,255,1,128,4,5,6,7]}") != std::string::npos);
+    "\"rtc_ticks\":43,\"result\":[0,255,1,128,4,5,6,7,0,0,0,0,0,0,0,0]}") != std::string::npos);
   REQUIRE(json.find("\"values\":[" + std::to_string(UINT64_C(0x800002010801)) +
     ",43," + std::to_string(UINT64_C(0x070605048001ff00)) + ",0]") !=
     std::string::npos);
