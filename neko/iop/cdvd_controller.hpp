@@ -26,7 +26,7 @@ struct CDVDNormalCompletion
   std::uint8_t newCauses = 0;
 };
 
-// Provisional no-media N-NOP/ReadClock profile, not a general CD/DVD drive.
+// Provisional no-media N-NOP, ReadClock and version-query profile.
 class CDVDController final
 {
   public:
@@ -91,6 +91,12 @@ class CDVDController final
 
     CDVDAccessStatus acceptNormalCommand(std::uint8_t opcode);
     CDVDAccessStatus acceptSubcommand(std::uint8_t opcode);
+    bool isValidSubcommandRequest(std::uint8_t opcode) const noexcept;
+    static std::size_t subcommandResultSize(std::uint8_t opcode) noexcept;
+    std::array<std::uint8_t, 8> subcommandResult() const;
+    static std::array<std::uint8_t, 8> versionResult() noexcept;
+    static bool isValidSubcommandResult(std::uint8_t opcode,
+      const std::array<std::uint8_t, 8> &snapshot) noexcept;
     CDVDAccessStatus appendSubcommandParameter(std::uint8_t value) noexcept;
     void clearSubcommandParameters() noexcept;
     std::uint8_t consumeResult() noexcept;

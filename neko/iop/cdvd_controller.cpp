@@ -109,8 +109,8 @@ CDVDAccessStatus CDVDController::acceptNormalCommand(
 
 CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode)
 {
-  if (opcode != 8 || subcommandPhase != SubcommandPhase::Idle ||
-      subcommandParameterCount != 0)
+  if (subcommandPhase != SubcommandPhase::Idle ||
+      !isValidSubcommandRequest(opcode))
   {
     return CDVDAccessStatus::Unsupported;
   }
@@ -120,6 +120,64 @@ CDVDAccessStatus CDVDController::acceptSubcommand(std::uint8_t opcode)
   recordCommand(ObservationKind::Accepted, Transport::Subcommand,
     SubcommandPhase::Idle, deviceCause);
   return CDVDAccessStatus::Accepted;
+}
+
+bool CDVDController::isValidSubcommandRequest(std::uint8_t opcode) const noexcept
+{
+  switch (opcode)
+  {
+    case 3:
+      return subcommandParameterCount == 1 && subcommandParameters[0] == 0;
+    case 8:
+      return subcommandParameterCount == 0;
+    default:
+      return false;
+  }
+}
+
+std::size_t CDVDController::subcommandResultSize(std::uint8_t opcode) noexcept
+{
+  switch (opcode)
+  {
+    case 3:
+      return 4;
+    case 8:
+      return 8;
+    default:
+      return 0;
+  }
+}
+
+std::array<std::uint8_t, 8> CDVDController::versionResult() noexcept
+{
+  return {{3, 6, 2, 0}};
+}
+
+std::array<std::uint8_t, 8> CDVDController::subcommandResult() const
+{
+  switch (lastSubcommand)
+  {
+    case 3:
+      return versionResult();
+    case 8:
+      return clockResult();
+    default:
+      throw std::logic_error("CD/DVD pending subcommand is unsupported.");
+  }
+}
+
+bool CDVDController::isValidSubcommandResult(std::uint8_t opcode,
+  const std::array<std::uint8_t, 8> &snapshot) noexcept
+{
+  switch (opcode)
+  {
+    case 3:
+      return snapshot == versionResult();
+    case 8:
+      return isValidClockResult(snapshot);
+    default:
+      return false;
+  }
 }
 
 CDVDAccessStatus CDVDController::appendSubcommandParameter(
@@ -170,7 +228,7 @@ bool CDVDController::completeSubcommand()
   {
     return false;
   }
-  result = clockResult();
+  result = subcommandResult();
   subcommandPhase = SubcommandPhase::Result;
   recordCommand(ObservationKind::Completed, Transport::Subcommand,
     SubcommandPhase::Pending, deviceCause);
@@ -184,7 +242,7 @@ std::uint8_t CDVDController::consumeResult() noexcept
     return 0;
   }
   const auto byte = result[resultCursor++];
-  if (resultCursor == result.size())
+  if (resultCursor == subcommandResultSize(lastSubcommand))
   {
     clearResult();
     subcommandPhase = SubcommandPhase::Idle;

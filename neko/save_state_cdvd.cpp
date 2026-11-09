@@ -48,8 +48,10 @@ void NekoSaveStateCodec::readCDVD(
   reader->requireField(controller->deviceCause <= 1,
     "CD/DVD device cause contains unsupported bits");
   controller->lastSubcommand = reader->readFieldU8("lastSubcommand");
+  const auto resultSize =
+    CDVDController::subcommandResultSize(controller->lastSubcommand);
   reader->requireField(
-    controller->lastSubcommand == 0 || controller->lastSubcommand == 8,
+    controller->lastSubcommand == 0 || resultSize != 0,
     "CD/DVD last subcommand is unsupported");
   const auto phase = reader->readFieldU8("subcommandPhase");
   using Phase = CDVDController::SubcommandPhase;
@@ -57,17 +59,20 @@ void NekoSaveStateCodec::readCDVD(
     "CD/DVD subcommand phase is invalid");
   controller->subcommandPhase = static_cast<Phase>(phase);
   reader->requireField(
-    controller->subcommandPhase == Phase::Idle || controller->lastSubcommand == 8,
-    "CD/DVD active subcommand has no ReadClock command");
+    controller->subcommandPhase == Phase::Idle || resultSize != 0,
+    "CD/DVD active subcommand has no supported command");
   reader->readFieldBytes(
     "result", controller->result.data(), controller->result.size());
   controller->resultCursor = reader->readFieldU8("resultCursor");
   if (controller->subcommandPhase == Phase::Result)
   {
-    reader->requireField(controller->resultCursor < controller->result.size(),
+    reader->requireField(controller->resultCursor < resultSize,
       "CD/DVD result cursor is outside the snapshot");
-    reader->requireField(CDVDController::isValidClockResult(controller->result),
-      "CD/DVD clock result is not a valid Gregorian BCD snapshot");
+    reader->requireField(CDVDController::isValidSubcommandResult(
+      controller->lastSubcommand, controller->result),
+      controller->lastSubcommand == 8 ?
+        "CD/DVD clock result is not a valid Gregorian BCD snapshot" :
+        "CD/DVD version result does not match the selected identity");
   }
   else
   {

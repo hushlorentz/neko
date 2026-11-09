@@ -3597,16 +3597,16 @@ not requirements for exhaustive subsystem coverage.
 - [x] Implement the approved bounded parameter transport with focused CPU/bus,
       command-boundary and restored-continuation coverage; keep unsupported
       commands and identity/NVM/media policies explicit.
-- [ ] Verify fresh unchanged-input BIOS progress beyond the originating
+- [x] Verify fresh unchanged-input BIOS progress beyond the originating
       parameter write with cold/restored traced/plain and canonical comparisons;
       identify the next dependency without claiming completed boot.
 
 ### CD/DVD MECHACON Version Query Dependency
 
-- [ ] Research the staged SCMD03/00 four-byte version query and select an
+- [x] Research the staged SCMD03/00 four-byte version query and select an
       explicit deterministic identity, exact request/result shape, command
       lifecycle and replacement evidence before implementing a response.
-- [ ] Implement the approved version query through the existing CDVD owner
+- [x] Implement the approved version query through the existing CDVD owner
       with malformed-request rejection, clocked completion, result draining
       and canonical restored-continuation coverage.
 - [ ] Verify the demonstrated query with fresh unchanged-input cold/restored

@@ -528,6 +528,107 @@ TEST_CASE("CDVD parameter guest continuation is canonical across trace modes",
   requireContinuationModes(reference, source);
 }
 
+TEST_CASE("CDVD version guest completes before polling and continues across trace modes",
+  "[iop][cdvd-trace][cdvd-version][save-state]")
+{
+  const std::array<IOPWord, 22> program = {{
+    0x3c01bf40, 0x34212000, 0xa0200017, 0x24020003, 0xa0220016,
+    0x90230017, 0, 0x90280018, 0, 0x90290018, 0, 0x902a0018, 0,
+    0x902b0018, 0, 0x90300017, 0, 0x90310018, 0, 0x90320008, 0,
+    0x34140001
+  }};
+  NekoSystem reference;
+  installProgram(reference, 0, program);
+  reference.iopCore().startExecution(0xa0000000);
+  const auto initial = reference.saveState();
+  reference.startTrace();
+  reference.runMasterCycles(169);
+  REQUIRE(reference.iopCore().retiredInstructions() == program.size());
+  REQUIRE(reference.iopCore().stopReason() == IOPStopReason::None);
+  const std::array<std::uint8_t, 4> version = {{3, 6, 2, 0}};
+  for (unsigned index = 0; index < version.size(); ++index)
+  {
+    REQUIRE(reference.iopCore().generalRegister(8 + index) == version[index]);
+  }
+  REQUIRE(reference.iopCore().generalRegister(3) == 0);
+  REQUIRE(reference.iopCore().generalRegister(16) == 0x40);
+  REQUIRE(reference.iopCore().generalRegister(17) == 0);
+  REQUIRE(reference.iopCore().generalRegister(18) == 0);
+  REQUIRE(reference.iopCore().generalRegister(20) == 1);
+  REQUIRE(reference.iopInterruptController().status() == 0);
+  const auto commands = IOPTraceTest::subsystemEvents(reference, CDVD);
+  REQUIRE(commands.size() == 2);
+  for (unsigned index = 0; index < commands.size(); ++index)
+  {
+    REQUIRE(commands[index].type == (index == 0 ? ACCEPTED : COMPLETED));
+    REQUIRE(commands[index].masterCycle == (index == 0 ? 33 : 41));
+    const auto decoded = nekoDecodeCDVDTrace(commands[index]);
+    REQUIRE(decoded.transport == NekoCDVDTrace::Transport::Subcommand);
+    REQUIRE(decoded.opcode == 3);
+    REQUIRE(decoded.beforePhase == (index == 0 ?
+      NekoCDVDTrace::Phase::Idle : NekoCDVDTrace::Phase::Pending));
+    REQUIRE(decoded.afterPhase == (index == 0 ?
+      NekoCDVDTrace::Phase::Pending : NekoCDVDTrace::Phase::Result));
+    REQUIRE(decoded.beforeCause == 0);
+    REQUIRE(decoded.afterCause == 0);
+    REQUIRE(decoded.rtcTicks == commands[index].masterCycle);
+    const std::array<std::uint8_t, 8> expected = index == 0 ?
+      std::array<std::uint8_t, 8>{} : std::array<std::uint8_t, 8>{{3, 6, 2, 0}};
+    REQUIRE(decoded.result == expected);
+  }
+  namespace Memory = NekoIOPTraceMemory;
+  const std::array<std::uint64_t, 9> cycles = {{
+    17, 33, 41, 57, 73, 89, 105, 121, 137
+  }};
+  const std::array<std::uint8_t, 9> values = {{0, 3, 0, 3, 6, 2, 0, 0x40, 0}};
+  const std::array<unsigned, 9> offsets = {{
+    0x17, 0x16, 0x17, 0x18, 0x18, 0x18, 0x18, 0x17, 0x18
+  }};
+  std::size_t access = 0;
+  bool queryCompleted = false;
+  for (const auto &event : reference.trace())
+  {
+    if (event.subsystem == CDVD && event.type == COMPLETED)
+    {
+      queryCompleted = true;
+    }
+    if (event.subsystem != NekoTraceSubsystem::IOP ||
+        event.type != NekoTraceEventType::MemoryAccess ||
+        event.value0 < 0xbf402016 || event.value0 > 0xbf402018)
+    {
+      continue;
+    }
+    REQUIRE(access < cycles.size());
+    REQUIRE(event.masterCycle == cycles[access]);
+    REQUIRE(event.value0 == 0xbf402000u + offsets[access]);
+    REQUIRE(event.value1 == values[access]);
+    REQUIRE(event.value3 == nekoPackIOPMemoryTraceMetadata({
+      BASE + offsets[access], 1,
+      access < 2 ? Memory::AccessKind::DataStore : Memory::AccessKind::DataLoad,
+      Memory::Outcome::Completed, Memory::CacheRoute::Uncached, true,
+      static_cast<std::uint8_t>(1u << (offsets[access] % 4))}));
+    if (event.masterCycle == 41)
+    {
+      REQUIRE(queryCompleted);
+    }
+    ++access;
+  }
+  REQUIRE(access == cycles.size());
+  for (const std::uint64_t cut : {17, 33, 40, 41, 57, 73, 89, 105})
+  {
+    CAPTURE(cut);
+    NekoSystem source;
+    source.loadState(initial);
+    source.runMasterCycles(cut);
+    if (cut == 57 || cut == 73 || cut == 89 || cut == 105)
+    {
+      REQUIRE(source.iopCore().delayedResultContinuation().source ==
+        IOPDelayedResultSource::Load);
+    }
+    requireContinuationModes(reference, source);
+  }
+}
+
 TEST_CASE("CDVD command observations disarm after a later DMA exception",
   "[iop][cdvd-trace][save-state]")
 {
