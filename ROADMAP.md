@@ -3576,9 +3576,18 @@ not requirements for exhaustive subsystem coverage.
 - [x] Research and admit bounded MTPS zero-control writes through the existing
       performance/COP0 owner; exclude nonzero control and counter programming,
       and cover usability, ordered issue and restored continuation.
-- [ ] Verify fresh unchanged-input BIOS progress beyond the originating
+- [x] Verify fresh unchanged-input BIOS progress beyond the originating
       zero-control write with cold/restored traced/plain and canonical comparisons;
       identify the next dependency without claiming completed boot.
+
+### EE Debug COP0 Zero-Control Write Dependency
+
+- [x] Research and admit bounded MTBPC zero-control writes through existing
+      debug/COP0 ownership; exclude other debug programming and cover
+      usability, ordered issue and restored continuation.
+- [ ] Verify fresh unchanged-input BIOS progress beyond the originating
+      breakpoint-control write with cold/restored traced/plain and canonical
+      comparisons; identify the next dependency without claiming completed boot.
 
 ### Additional CD/DVD Command and Configuration Scope
 

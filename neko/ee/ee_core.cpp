@@ -6010,9 +6010,6 @@ EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
     return EEInstructionExecutionOutcome::Faulted;
   }
 
-  const EECOP0Register registerIndex =
-    static_cast<EECOP0Register>(
-      instruction.destinationRegister);
   if (instruction.operation == EEOperation::MoveWordFromCOP0)
   {
     writeWord(instruction.targetRegister, readCOP0Register(instruction));
@@ -6022,15 +6019,25 @@ EEInstructionExecutionOutcome EECore::executeCOP0RegisterMove(
   const std::uint32_t value =
     static_cast<std::uint32_t>(
       generalRegisters[instruction.targetRegister].low);
-  const bool accepted =
-    instruction.destinationRegister == EECOP0Performance::REGISTER_INDEX
-      ? writeGuestCOP0PerformanceRegister(
-          static_cast<EECOP0PerformanceRegister>(
-            instruction.raw & EECOP0Transfer::SELECTOR_MASK),
-          value,
-          address,
-          instruction.raw)
-      : writeGuestCOP0Register(registerIndex, value, address, instruction.raw);
+  const auto selector =
+    instruction.raw & EECOP0Transfer::SELECTOR_MASK;
+  bool accepted;
+  switch (instruction.destinationRegister)
+  {
+    case EECOP0Debug::REGISTER_INDEX:
+      accepted = writeGuestCOP0DebugRegister(
+        static_cast<EECOP0DebugRegister>(selector), value, address, instruction.raw);
+      break;
+    case EECOP0Performance::REGISTER_INDEX:
+      accepted = writeGuestCOP0PerformanceRegister(
+        static_cast<EECOP0PerformanceRegister>(selector), value, address, instruction.raw);
+      break;
+    default:
+      accepted = writeGuestCOP0Register(
+        static_cast<EECOP0Register>(instruction.destinationRegister),
+        value, address, instruction.raw);
+      break;
+  }
   return accepted
     ? EEInstructionExecutionOutcome::Completed
     : EEInstructionExecutionOutcome::Rejected;
@@ -7258,6 +7265,26 @@ bool EECore::writeGuestCOP0Register(
   }
   throw std::logic_error(
     "EE guest COP0 write reached an unimplemented register.");
+}
+
+bool EECore::writeGuestCOP0DebugRegister(
+  EECOP0DebugRegister registerIndex,
+  std::uint32_t value,
+  std::uint32_t address,
+  std::uint32_t instruction)
+{
+  if (registerIndex != EECOP0DebugRegister::BreakpointControl)
+  {
+    throw std::logic_error(
+      "EE guest debug COP0 write reached an unimplemented register.");
+  }
+  if (value != 0)
+  {
+    haltUndefinedOperation(address, instruction);
+    return false;
+  }
+  // Zero is an idempotent write to the provisional unprogrammed bank.
+  return true;
 }
 
 bool EECore::writeGuestCOP0PerformanceRegister(

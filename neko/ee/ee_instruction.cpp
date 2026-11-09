@@ -96,7 +96,8 @@ namespace
       {
         return DecodeKind::Reserved;
       }
-      return instruction.sourceRegister == 0
+      return instruction.sourceRegister == 0 ||
+             (instruction.sourceRegister == 4 && selector == 0)
         ? DecodeKind::Direct
         : DecodeKind::Unsupported;
     }

@@ -1566,6 +1566,11 @@ class EECore final : public ClockedComponent
       std::uint32_t value,
       std::uint32_t address,
       std::uint32_t instruction);
+    bool writeGuestCOP0DebugRegister(
+      EECOP0DebugRegister registerIndex,
+      std::uint32_t value,
+      std::uint32_t address,
+      std::uint32_t instruction);
     bool writeGuestCOP0PerformanceRegister(
       EECOP0PerformanceRegister registerIndex,
       std::uint32_t value,
